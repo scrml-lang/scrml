@@ -58,6 +58,11 @@ Gap: `g-bootstrap-loop-value-form-s469` (MED). Ride-along: #1530 review (grant-s
   `bun scripts/bootstrap-conformance.ts --write` (one bucket move, below); `bun scripts/state.ts --write`
   (master-list recent-sessions already current — untouched).
 
+- commit 3: SPEC — the §34 rows of E-LOOP-005 / E-LOOP-007 / E-SYNTAX-002 and the §49.10 summary rows cite
+  `emitted at compiler/self-host-v2/analyze.scrml:LINE` (s34-census `--check-new` PASS); §49.8's bootstrap note
+  (it said "no loop node yet") states what is built; SPEC-INDEX regenerated. analyze: a refused `lift` no longer
+  reads its markup row (one report, not two).
+
 ## Conformance diff (`docs/bootstrap-conformance.md`)
 
 - **One bucket move:** `control-flow/ctrl-010-else-on-for-without-lift-neg` UNSUPPORTED → FAIL (twin-extra-error:

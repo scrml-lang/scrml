@@ -10761,7 +10761,11 @@ ${
             .NoLift :> false
             .LiftTo(into: i) :> false
         }
-        const r: RX = resolveLifted(env, w, st0)
+        // the operand is resolved either way (its own errors report) — a lifted row
+        // only where it is a row (a refused `lift` reads no markup)
+        const legal: boolean = !inArm && tgt is given && (tier0 || !liftsMarkup(w))
+        let r: RX = plain(not, st0)
+        if (legal || !liftsMarkup(w)) r = resolveLifted(env, w, st0)
         let st: AS = r.st
         if (inArm) return addDiag(st, env.file, s.span, "E-BOOTSTRAP-UNSUPPORTED", "`lift` is in the bootstrap only as the LAST statement of a `match` / `!{}` arm block (§18.5: `.B :> { log(); lift 2 }`) — a `lift` inside an arm block appends to nothing here: inside a bound loop, §49.6 rule 7 would send it to the loop while §18.5 makes it the arm's value (an open reading) — lift after the `match` / `!{}` instead")
         // §10.4 / §49.6.2: "`lift` inside a loop body inside a bare `function` SHALL be a
