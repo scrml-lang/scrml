@@ -36,13 +36,14 @@ import { captureInsideChunkScope } from "../helpers/chunk-scope.js";
 // A `${ for … lift }` reconciled list is the canonical dynamic-list-insert
 // mechanism: it emits `_scrml_reconcile_list` + per-item `_scrml_lift(() => ...)`
 // factories, exactly the runtime path GitHub #19 breaks on insert.
+// S469 (g-keyed-row-control-flow-if-not-reevaluated-s469): a control-flow `if` that decides what a row
+// renders lowers the list as the plain loop the block re-runs, which is not the reconcile path this test
+// guards — so the filter is a lifted `if=` gate on the row's item, which a keyed row re-evaluates.
 const SRC = `<program>
 \${ @items = [1, 2, 3, 4, 5] }
 \${
   for (let item of @items) {
-    if (item % 2 == 0) {
-      lift <li>\${item}</li>
-    }
+    lift <li if=(item % 2 == 0)>\${item}</li>
   }
 }
 </program>

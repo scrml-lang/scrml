@@ -4,7 +4,7 @@ import { liftScopeDeclaredNames } from "./declared-name-marks.ts";
 import { emitExpr, emitExprField, emitExprFromText, emitConditionField, type EmitExprContext } from "./emit-expr.ts";
 import { cStyleInitDeclaration } from "../validators/defer-structure.ts";
 import { emitLogicNode, exprCtxOfLogicOpts, emitSqlQueryShape, emitLogicBody, blockScopedDeclaredNames, planBlockArmLift, _awaitMatchArmServerCalls, _matchArmResultIsBlockBody, _blockTailIsValueExpr, emitPropagateArm, givenGuardCondition } from "./emit-logic.js";
-import { hasFragmentedLiftBody, emitConsolidatedLift, emitLiftExpr, emitIfStmtWithContainer, emitForStmtWithContainer, buildLiftEngineCtxFromExtras, pushLiftReconcileCtx, popLiftReconcileCtx, buildLiftReconcileCtx, pushLiftRequestIds, popLiftRequestIds, forLiftTreeHasImpureLoop, liftNonKeyedActive, pushLiftNonKeyed, popLiftNonKeyed, withLoopBinders, forHeadKeyword, loopBodyDeclaredNames, liftInitialRenderCall } from "./emit-lift.js";
+import { hasFragmentedLiftBody, emitConsolidatedLift, emitLiftExpr, emitIfStmtWithContainer, emitForStmtWithContainer, buildLiftEngineCtxFromExtras, pushLiftReconcileCtx, popLiftReconcileCtx, buildLiftReconcileCtx, pushLiftRequestIds, popLiftRequestIds, forLiftTreeHasImpureLoop, liftNonKeyedActive, pushLiftNonKeyed, popLiftNonKeyed, withLoopBinders, forHeadKeyword, loopBodyDeclaredNames, liftInitialRenderCall, liftNoteRowIfPlainLoop } from "./emit-lift.js";
 import { emitTransitionGuard } from "./emit-machines.ts";
 import { emitStringFromTree, parseExprToNode, splitTopLevelCommas } from "../expression-parser.ts";
 import { armBodyStatementsFromText, leaveInStatements, objectLiteralArmValue } from "../arm-body-statements.ts";
@@ -1246,6 +1246,10 @@ function _emitForStmtInner(
     lines.push(`_scrml_effect_static(${renderFn});`);
     return lines.join("\n");
   }
+
+  // S469 (g-keyed-row-control-flow-if-not-reevaluated-s469) — a list lowered plain because an `if`
+  // decides what its rows render: the render that builds it must re-run (or it is refused).
+  if (_impureTree && iterIsReactive) liftNoteRowIfPlainLoop(node);
 
   // Non-reactive path — plain for loop
   const _plainForCtx: EmitExprContext = { mode: opts?.boundary === "server" ? "server" : "client", ...hostAsyncFacts(opts), serverFnNames: opts?.serverFnNames ?? null, serverFnPeerAliasNames: opts?.serverFnPeerAliasNames ?? null, serverFnPeerDispatchObjs: opts?.serverFnPeerDispatchObjs ?? null, syncPeerCalls: opts?.syncPeerCalls ?? null, localMapVarNames: opts?.localMapVarNames ?? null, localSetVarNames: opts?.localSetVarNames ?? null, localOrderedMapVarNames: opts?.localOrderedMapVarNames ?? null, mapVarNames: opts?.mapVarNames ?? null, setVarNames: opts?.setVarNames ?? null, orderedMapVarNames: opts?.orderedMapVarNames ?? null, logicOpts: opts };
