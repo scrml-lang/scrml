@@ -214,8 +214,9 @@ describe("refusals — each with its §34 code", () => {
     expect(fnCodes(`        let s = 0;\n        for ({ a } of [{ a: 1 }]) { s = s + a; }\n        return s;`)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
     expect(fnCodes(`        let s = 0;\n        for (x of [1]) { defer { s = 0; } }\n        return s;`)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
     expect(codes(prog(`    let <c:int=0/>`, `        <button onclick={ for (let i = 0; i < 2; @c = 1) { } }>b</button>`))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
-    // the value form (§49.6) is not in the bootstrap yet
-    expect(codes(prog(``, `        <p>\${for (x of [1]) { lift x }}</p>`))).toContain("E-BOOTSTRAP-UNSUPPORTED");
+    // the value form (§49.6) is BUILT now (s469-boot-loop-value-form: value-form-s469.test.js);
+    // an operand-position `for` (§49.4.4: "a syntax error") is refused by name
+    expect(fnCodes(`        return 1 + for (x of [1]) { lift x; };`)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
   });
 });
 

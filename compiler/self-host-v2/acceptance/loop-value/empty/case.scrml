@@ -1,0 +1,12 @@
+// §49.6 rule 4: zero lifts at run time give the empty tape.
+<program>
+    <zs:int[]=([3, 4, 5])/>
+    function f(ys: int[]) -> int {
+        const a = for (i of 0..0) { lift i; };
+        const b = for (y of ys) { if (y > 100) { lift y; } };
+        return a.length * 10 + b.length;
+    }
+    <main>
+        <p id="o">${f(@zs)}</p>
+    </main>
+</program>

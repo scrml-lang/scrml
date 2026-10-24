@@ -1,0 +1,11 @@
+// §10.4 / §49.6.2: a `lift` in a statement loop in a bare `function` is E-SYNTAX-002.
+<program>
+    <zs:int[]=([3, 4, 5])/>
+    function f(ys: int[]) -> int {
+        for (y of ys) { lift y; }
+        return 1;
+    }
+    <main>
+        <p id="o">${f(@zs)}</p>
+    </main>
+</program>

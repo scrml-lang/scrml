@@ -13,24 +13,24 @@ Scope: **1812 of 1812 cases attempted** — every attempted case reached the pur
 |---|---:|---:|
 | PASS | 250 | 13.8% |
 | CODES-ONLY | 0 | 0.0% |
-| FAIL | 63 | 3.5% |
+| FAIL | 64 | 3.5% |
 | LEGACY | 0 | 0.0% |
 | NOT-TWINNED | 684 | 37.7% |
-| UNSUPPORTED | 815 | 45.0% |
+| UNSUPPORTED | 814 | 44.9% |
 | CRASH | 0 | 0.0% |
 | INVALID | 0 | 0.0% |
 
-**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 313; of those, 250 hold (79.9%). Runtime half executed on the bootstrap for 99 case(s).
+**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 314; of those, 250 hold (79.6%). Runtime half executed on the bootstrap for 99 case(s).
 
 - **Vacuous** passes: 20 of 250 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **230**.
-- FAILs whose required code appears nowhere in the bootstrap's sources (check not implemented): 31 of 63; the other 32 are implemented checks that answered wrong.
+- FAILs whose required code appears nowhere in the bootstrap's sources (check not implemented): 31 of 64; the other 33 are implemented checks that answered wrong.
 
 LEGACY by marker (a case may carry several): none.
-UNSUPPORTED by reason: bootstrap-unsupported 502 · parse-reject 313.
+UNSUPPORTED by reason: bootstrap-unsupported 499 · parse-reject 315.
 
 ### §66 twins (S449 dialect ruling 1 — generated at test time by the `scrml fix` §66 rules)
 
-Legacy-dialect cases graded on their generated §66 twin: **793** — PASS 150 · FAIL 48 · UNSUPPORTED 595. Twin holds 150 (non-vacuous 134). Every twin verdict above is included in the bucket table.
+Legacy-dialect cases graded on their generated §66 twin: **793** — PASS 150 · FAIL 49 · UNSUPPORTED 594. Twin holds 150 (non-vacuous 134). Every twin verdict above is included in the bucket table.
 - `dialect.s66` overrides: 0 replace a twin's expectations · 11 exclude a case.
 - Superseded-code mappings applied: 2 case(s) (E-ENGINE-VAR-DUPLICATE→E-SCOPE-010). Rows: E-ENGINE-VAR-DUPLICATE→E-SCOPE-010 [applied] · E-ENGINE-STATE-CHILD-INVALID-VARIANT→∅ [owed] · E-ENGINE-RULE-INVALID-VARIANT→∅ [owed] · E-ENGINE-INITIAL-INVALID-VARIANT→∅ [owed] · E-CELL-NO-RENDER-SPEC→∅ [owed] · E-CELL-RENDER-SPEC-NOT-BINDABLE→∅ [owed] · E-DECL-RHS-INTERP-WRAPPED→∅ [owed] · E-COMPONENT-010→∅ [owed].
 
@@ -108,7 +108,7 @@ NOT-TWINNED by reason (684 cases; a case counts once per distinct reason):
 | codegen | 4 | · | · | · | · | 3 | 1 | · | · |
 | components | 68 | · | · | 1 | · | 65 | 2 | · | · |
 | condition | 36 | 18 | · | 5 | · | 8 | 5 | · | · |
-| control-flow | 76 | 15 | · | 2 | · | 21 | 38 | · | · |
+| control-flow | 76 | 15 | · | 3 | · | 21 | 37 | · | · |
 | defer | 51 | 13 | · | 2 | · | 4 | 32 | · | · |
 | derived | 6 | · | · | 1 | · | 5 | · | · | · |
 | each | 25 | · | · | · | · | 25 | · | · | · |
@@ -163,7 +163,7 @@ NOT-TWINNED by reason (684 cases; a case counts once per distinct reason):
 | tenant | 23 | · | · | · | · | · | 23 | · | · |
 | type-state-codes | 32 | 3 | · | 1 | · | 3 | 25 | · | · |
 
-### FAIL (63)
+### FAIL (64)
 
 - `components/post-ce-residual-component-reject` (codes; not in the bootstrap: E-COMPONENT-035)
   - missing E-COMPONENT-035
@@ -185,6 +185,8 @@ NOT-TWINNED by reason (684 cases; a case counts once per distinct reason):
 - `control-flow/ctrl-004-else-on-state-opener-pos` (twin · codes; not in the bootstrap: E-CTRL-004)
   - missing E-CTRL-004
   - severity: E-CTRL-004 did not fire (expected error)
+- `control-flow/ctrl-010-else-on-for-without-lift-neg` (twin · twin-extra-error)
+  - twin emitted unasserted error(s): E-LOOP-007, E-VALUE-WRITES-STATE
 - `control-flow/s437-braceless-else-in-failable-arm` (twin · runtime)
   - runtime: no artifact — the compile reported an error (E-ERROR-012)
 - `defer/deferred-server-call-completes` (twin · codes+runtime)
@@ -593,7 +595,7 @@ none
 - `type-state-codes/e-type-081-partial-match-render-neg` — PASS · TWIN · VACUOUS
 - `type-state-codes/e-type-lifecycle-on-engine-cell-neg` — PASS · TWIN · VACUOUS
 
-### UNSUPPORTED (815)
+### UNSUPPORTED (814)
 
 - `api/api-base-missing-neg` — bootstrap-unsupported: `<api>` is a scrml structural element (§60), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `api/api-clean-pos` — twin · bootstrap-unsupported: `<api>` is a scrml structural element (§60), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
@@ -642,7 +644,7 @@ none
 - `auth/auth-graph-002-pos` — bootstrap-unsupported: `<program title=…>` is not in the bootstrap — it reads no `<program>` attribute, and never ignores one it does not implement
 - `auth/auth-graph-003-neg` — bootstrap-unsupported: `<program title=…>` is not in the bootstrap — it reads no `<program>` attribute, and never ignores one it does not implement
 - `auth/auth-graph-003-pos` — bootstrap-unsupported: `<program title=…>` is not in the bootstrap — it reads no `<program>` attribute, and never ignores one it does not implement
-- `auth/auth-graph-004-neg` — bootstrap-unsupported: `lift` is in the bootstrap only as the LAST statement of a `match` / `!{}` arm block (§18.5: `.B :> { log(); lift 2 }`) — a `lift` anywhere else (a nested block, a markup or `for` value) is not in the
+- `auth/auth-graph-004-neg` — bootstrap-unsupported: `<program title=…>` is not in the bootstrap — it reads no `<program>` attribute, and never ignores one it does not implement
 - `auth/auth-graph-004-pos` — bootstrap-unsupported: `<program title=…>` is not in the bootstrap — it reads no `<program>` attribute, and never ignores one it does not implement
 - `auth/i-auth-redirect-unresolved-pos` — bootstrap-unsupported: `<program auth="required">` is not in the bootstrap — it emits no server and no login gate (§52.13, §40.2), so the program is refused rather than compiled ungated
 - `auth/nested-helper-block-shadowed-import-sort-neg` — twin · bootstrap-unsupported: `.log(…)` is not in the bootstrap — only calls of a named function, `Date.now()`, `.filter(x => …)` / `.map(x => …)` / `.sort(…)` / `.reverse()` / `.join(sep)` on a tape, and the string methods `toUpp
@@ -726,14 +728,13 @@ none
 - `control-flow/ctrl-004-orphan-else-on-state-opener-pos` — parse-reject: E-PARSE-TAG: expected a tag name after `<`
 - `control-flow/ctrl-005-else-and-if-same-element-neg` — parse-reject: E-PARSE-TAG: unexpected `{` in the tag `<session`
 - `control-flow/ctrl-005-else-and-if-same-element-pos` — parse-reject: E-PARSE-TAG: unexpected `{` in the tag `<session`
-- `control-flow/ctrl-010-else-on-for-without-lift-neg` — twin · bootstrap-unsupported: a `for` used as a value (the value form, §49.6) is not in the bootstrap yet — write the loop as a statement in a function and return what it builds
-- `control-flow/ctrl-010-for-lift-in-match-arm-neg` — twin · bootstrap-unsupported: a `for` used as a value (the value form, §49.6) is not in the bootstrap yet — write the loop as a statement in a function and return what it builds
+- `control-flow/ctrl-010-for-lift-in-match-arm-neg` — twin · bootstrap-unsupported: `for … else { … }` (the empty-state block, §17.4a) is not in the bootstrap yet — test `xs.length == 0` before the loop
 - `control-flow/ctrl-012-bare-control-flow-default-logic-root-neg` — bootstrap-unsupported: `<page>` is a scrml structural element (§40), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
-- `control-flow/ctrl-012-bare-control-flow-in-markup-neg` — twin · bootstrap-unsupported: a `for` used as a value (the value form, §49.6) is not in the bootstrap yet — write the loop as a statement in a function and return what it builds
+- `control-flow/ctrl-012-bare-control-flow-in-markup-neg` — twin · parse-reject: E-STMT-MISSING-SEMICOLON: Expected `;` to end the statement — insert `;` after `<li>${x}</>`. A `;` ends every statement that is not block-like, the last one before a `}` included (`{ @n = @n + 1; }`)
 - `control-flow/ctrl-012-default-logic-multiline-prose-neg` — bootstrap-unsupported: `<page>` is a scrml structural element (§40), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `control-flow/ctrl-012-default-logic-non-leading-residual-neg` — bootstrap-unsupported: `<page>` is a scrml structural element (§40), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `control-flow/ctrl-012-default-logic-prose-neg` — bootstrap-unsupported: `<page>` is a scrml structural element (§40), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
-- `control-flow/ctrl-013-braceless-for-of-head-neg` — twin · bootstrap-unsupported: a `for` used as a value (the value form, §49.6) is not in the bootstrap yet — write the loop as a statement in a function and return what it builds
+- `control-flow/ctrl-013-braceless-for-of-head-neg` — twin · parse-reject: E-STMT-MISSING-SEMICOLON: Expected `;` to end the statement — insert `;` after `<li>${x}</>`. A `;` ends every statement that is not block-like, the last one before a `}` included (`{ @n = @n + 1; }`)
 - `control-flow/ctrl-021-value-form-sugar-lift-less-branch-pos` — twin · bootstrap-unsupported: an `if` used as a value (§17.6, the value form §17.6.10) is not in the bootstrap yet — use a `match` on the condition (`match c { true :> a, false :> b }`), or compute the value in a function
 - `control-flow/ctrl-022-value-form-no-else-renders-nothing-pos` — twin · bootstrap-unsupported: an `if` used as a value (§17.6, the value form §17.6.10) is not in the bootstrap yet — use a `match` on the condition (`match c { true :> a, false :> b }`), or compute the value in a function
 - `control-flow/ctrl-023-value-form-sugar-bound-position-pos` — twin · bootstrap-unsupported: an `if` used as a value (§17.6, the value form §17.6.10) is not in the bootstrap yet — use a `match` on the condition (`match c { true :> a, false :> b }`), or compute the value in a function
@@ -902,8 +903,8 @@ none
 - `fn/arrow-body-reject` — twin · bootstrap-unsupported: the argument of `.map(…)` must be an arrow function of one parameter, `x => …` (the bootstrap has no other function value)
 - `fn/async-decl-reject` — twin · parse-reject: E-PARSE-ITEM: unexpected text at program level
 - `fn/dom-mutation-reject` — twin · bootstrap-unsupported: `.createElement(…)` is not in the bootstrap — only calls of a named function, `Date.now()`, `.filter(x => …)` / `.map(x => …)` / `.sort(…)` / `.reverse()` / `.join(sep)` on a tape, and the string meth
-- `fn/lift-local-accumulator-clean` — twin · bootstrap-unsupported: `lift` is in the bootstrap only as the LAST statement of a `match` / `!{}` arm block (§18.5: `.B :> { log(); lift 2 }`) — a `lift` anywhere else (a nested block, a markup or `for` value) is not in the
-- `fn/lift-outer-accumulator-reject` — bootstrap-unsupported: `lift` is in the bootstrap only as the LAST statement of a `match` / `!{}` arm block (§18.5: `.B :> { log(); lift 2 }`) — a `lift` anywhere else (a nested block, a markup or `for` value) is not in the
+- `fn/lift-local-accumulator-clean` — twin · bootstrap-unsupported: `lift` appends to a loop BOUND AS A VALUE (`const xs = for (…) { … lift e; … };`, §49.6) or to a Tier-0 `${ for … }` in markup (§17.4) — this one stands in neither (lifting into a render target or a `
+- `fn/lift-outer-accumulator-reject` — bootstrap-unsupported: `lift` appends to a loop BOUND AS A VALUE (`const xs = for (…) { … lift e; … };`, §49.6) or to a Tier-0 `${ for … }` in markup (§17.4) — this one stands in neither (lifting into a render target or a `
 - `fn/nondeterministic-call-reject` — twin · bootstrap-unsupported: `build()` reads the clock (`Date.now()`, directly or through a function it calls) — here (an initializer, markup, or an attribute value) that is not in the bootstrap; its host-call surface is a `funct
 - `fn/reactive-read-clean` — twin · parse-reject: E-PARSE-ITEM: unexpected text at program level
 - `fn/reactive-write-reject` — twin · bootstrap-unsupported: `@counter = …` — writing a whole instance is not in bootstrap slice M2 (write a field: `@counter.f = …`)
@@ -1007,7 +1008,7 @@ none
 - `markup-handler/s457-unquoted-member-chain-condition` — twin · bootstrap-unsupported: member access `.ok` on a value that is not a struct or an instance is not in bootstrap slice M2
 - `markup-handler/s457-unquoted-operator-non-handler-neg` — twin · parse-reject: E-PARSE-TAG: unexpected `+` in the tag `<p`
 - `match-block/empty-wildcard-clear` — twin · bootstrap-unsupported: `<match>` is a scrml structural element (§18.0.1), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
-- `match-block/inline-markup-match` — twin · bootstrap-unsupported: `lift` is in the bootstrap only as the LAST statement of a `match` / `!{}` arm block (§18.5: `.B :> { log(); lift 2 }`) — a `lift` anywhere else (a nested block, a markup or `for` value) is not in the
+- `match-block/inline-markup-match` — twin · bootstrap-unsupported: lifting MARKUP is in the bootstrap only in a Tier-0 `${ for (…) { … lift <li>…</li>; … } }` in markup (§17.4) — here the nearest bound loop builds a tape of values; markup is not a value in the bootst
 - `match-block/member-access-complete-clean` — twin · parse-reject: E-PARSE-EXPECTED: expected `:`, found `}`
 - `match-block/member-access-nonexhaustive` — twin · parse-reject: E-PARSE-EXPECTED: expected `:`, found `}`
 - `match-block/member-access-subset-dead-arm` — twin · parse-reject: E-PARSE-EXPECTED: expected `:`, found `(`
@@ -1018,7 +1019,7 @@ none
 - `match-codes/e-match-arm-markup-in-value-neg` — twin · parse-reject: E-PARSE-EXPECTED: expected `:`, found `}`
 - `match-codes/e-match-arm-markup-in-value-pos` — twin · parse-reject: E-PARSE-EXPECTED: expected `:`, found `}`
 - `match-codes/e-match-block-in-lift-neg` — twin · bootstrap-unsupported: `<match>` is a scrml structural element (§18.0.1), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
-- `match-codes/e-match-block-in-lift-pos` — twin · bootstrap-unsupported: a `for` used as a value (the value form, §49.6) is not in the bootstrap yet — write the loop as a statement in a function and return what it builds
+- `match-codes/e-match-block-in-lift-pos` — twin · bootstrap-unsupported: `<match>` is a scrml structural element (§18.0.1), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `match-codes/e-match-effect-forbidden-neg` — twin · bootstrap-unsupported: `<match>` at a file's top level, outside any `<program>`, is not in the bootstrap — the SPEC names no rule for what it renders as (§40.8); move it inside the `<program>`
 - `match-codes/e-match-effect-forbidden-pos` — twin · bootstrap-unsupported: `<match>` at a file's top level, outside any `<program>`, is not in the bootstrap — the SPEC names no rule for what it renders as (§40.8); move it inside the `<program>`
 - `match-codes/e-match-on-required-neg` — twin · bootstrap-unsupported: `<match>` at a file's top level, outside any `<program>`, is not in the bootstrap — the SPEC names no rule for what it renders as (§40.8); move it inside the `<program>`
@@ -1325,7 +1326,7 @@ none
 - `server-db/sql-handled-hoisted-loop-nested-read-rt` — twin · bootstrap-unsupported: `<schema>` is a scrml structural element (§39.2), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `server-db/sql-handled-hoisted-loop-rt` — twin · bootstrap-unsupported: `<schema>` is a scrml structural element (§39.2), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `server-db/sql-handled-in-condition-rt` — twin · bootstrap-unsupported: `<schema>` is a scrml structural element (§39.2), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
-- `server-db/sql-handled-lift-rt` — twin · bootstrap-unsupported: `lift` is in the bootstrap only as the LAST statement of a `match` / `!{}` arm block (§18.5: `.B :> { log(); lift 2 }`) — a `lift` anywhere else (a nested block, a markup or `for` value) is not in the
+- `server-db/sql-handled-lift-rt` — twin · bootstrap-unsupported: `<schema>` is a scrml structural element (§39.2), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `server-db/sql-handled-match-scrutinee-rt` — twin · bootstrap-unsupported: `<schema>` is a scrml structural element (§39.2), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `server-db/sql-handled-split-write-rt` — twin · bootstrap-unsupported: `<schema>` is a scrml structural element (§39.2), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `server-db/sql-hoisted-loop-allow-list-rt` — twin · bootstrap-unsupported: `<schema>` is a scrml structural element (§39.2), not an HTML element (§4.15, §24.4) — it is not in the bootstrap

@@ -27868,7 +27868,7 @@ are REFUSED by impl#1, `E-IMPL1-RULED-FORM-UNSUPPORTED` (its row lands with that
 | ~~E-MARKUP-004~~ | §4.4.2 | **Retired 2026-07-16 (S263).** A `</>` inferred closer inside a `${ }` logic context surfaces as **E-CTX-003** (unclosed logic context) on the default pipeline; the SPEC's dedicated E-CTX-002 closer-in-logic code is itself retired S263; this row was a phantom duplicate (no emitter — the `</>` twin of the retired E-MARKUP-003 closer-in-logic row). Consistency follow-through on the S261 E-MARKUP retire (the audit enumerated only E-MARKUP-003). Audit: `scrml-support/docs/audits/emarkup-ctx-reconciliation-2026-07-16.md`. | — |
 | ~~E-STATE-001~~ | §4.2 | **Retired 2026-07-16 (S263).** Duplicate/vestige — under state-as-primary resolution (§4.3), "unrecognized state identifier" and "unknown element" are one failure: a PascalCase name surfaces as **E-COMPONENT-035**, a lowercase-HTML name as **E-MARKUP-001** (a separately-tracked hole). No distinct E-STATE-001 niche remains. Triage: `scrml-support/docs/audits/s34-catalog-vs-impl-2026-07-16.md`. | — |
 | E-SYNTAX-001 | §10.4 | `lift` outside any `${ }` logic context **(Reserved / spec-ahead, S263 — no fire site: `lift` is lexed as a keyword ONLY inside logic contexts; elsewhere it is plain text, so the condition is unreachable-by-construction. The reachable misuse — `lift` in a bare `function` — is owned by the live E-SYNTAX-002. Excluded from the freeze fireable set.)** | Error |
-| E-SYNTAX-002 | §10.4 | `lift` inside a function body | Error |
+| E-SYNTAX-002 | §10.4 | `lift` inside a function body (S469, §49.6.2: a bare `function` body; a `lift` inside a loop BOUND as a value there is that loop's — by the bootstrap emitted at `compiler/self-host-v2/analyze.scrml:10774`) | Error |
 | E-SYNTAX-003 | §4.11.1 | `extract` in `lift` keyword position | Error |
 | E-SYNTAX-010 | §18.6 | `else` default arm is not the last arm | Error |
 | E-SYNTAX-011 | §18.10 | Guard clause syntax (`if` after arm pattern) — not supported in v1 | Error |
@@ -28079,9 +28079,9 @@ are REFUSED by impl#1, `E-IMPL1-RULED-FORM-UNSUPPORTED` (its row lands with that
 | E-LOOP-002 | §49.9 | `continue` outside any loop | Error |
 | E-LOOP-003 | §49.9 | `break label` — label not found or not a loop | Error |
 | E-LOOP-004 | §49.9 | `continue label` — label not found or not a loop | Error |
-| E-LOOP-005 | §49.9 | `break`/`continue` crosses function scope boundary; ALSO (S469) a `break`/`continue` inside a loop bound as a value (§49.6, rule 6) that targets a loop outside it — **Nominal / spec-ahead for that limb, not yet emitted**. Provenance: ruling:user-voice-scrml.md S469 "⭐ RULED — loops: one `for`" F5 *"Yes, specify it (Recommended)"*; the boundary is a PA reading (fails closed). | Error |
+| E-LOOP-005 | §49.9 | `break`/`continue` crosses function scope boundary; ALSO (S469) a `break`/`continue` inside a loop bound as a value (§49.6, rule 6) that targets a loop outside it — that limb, by the bootstrap, emitted at `compiler/self-host-v2/analyze.scrml:11374` (s469-boot-loop-value-form; check.scrml C20 re-checks it over Core); Nominal on impl#1 (frozen, §49.8). Provenance: ruling:user-voice-scrml.md S469 "⭐ RULED — loops: one `for`" F5 *"Yes, specify it (Recommended)"*; the boundary is a PA reading (fails closed). | Error |
 | E-LOOP-006 | §49.9 | Duplicate label identifier within function scope | Error |
-| E-LOOP-007 | §49.9, §49.6 | **Rewritten S469.** A loop bound as a value (`const xs = for (…) { … };`, §49.6) whose body contains no `lift` on any path — its value could only be the empty tape. Binding a loop is otherwise legal from every head. The former meaning (*"`while` bound as a value (`let x = while(...)`); the §49.6.1 statement-`while` + `let result = ~` accumulator is the sole exception"*) retires with `while` and the `~` pattern. **Nominal / spec-ahead — not yet emitted** in the rewritten meaning (impl#1 is frozen, §49.8). Provenance: ruling:user-voice-scrml.md S469 "⭐ RULED — loops: one `for`" F5 *"Yes, specify it (Recommended)"* (*"E-LOOP-007 is rewritten"*). | Error |
+| E-LOOP-007 | §49.9, §49.6 | **Rewritten S469.** A loop bound as a value (`const xs = for (…) { … };`, §49.6) whose body contains no `lift` on any path — its value could only be the empty tape. Binding a loop is otherwise legal from every head. The former meaning (*"`while` bound as a value (`let x = while(...)`); the §49.6.1 statement-`while` + `let result = ~` accumulator is the sole exception"*) retires with `while` and the `~` pattern. In the rewritten meaning, by the bootstrap, emitted at `compiler/self-host-v2/analyze.scrml:10634` (a `for-binding`) and `compiler/self-host-v2/analyze.scrml:10826` (a Tier-0 `${ for … }`, §49.4.4) — s469-boot-loop-value-form; Nominal on impl#1 (frozen, §49.8). Provenance: ruling:user-voice-scrml.md S469 "⭐ RULED — loops: one `for`" F5 *"Yes, specify it (Recommended)"* (*"E-LOOP-007 is rewritten"*). | Error |
 | E-LOOP-WHILE-RETIRED | §49.4.1, §49.9 | A `while (cond) { … }` statement — `while` retired S469; fix-it `for (cond) { … }` (`scrml fix` rewrites it). `while` stays reserved. **Nominal / spec-ahead — not yet emitted** (impl#1 accepts `while` as a carried legacy divergence, §49.8). Provenance: ruling:user-voice-scrml.md S469 "⭐ RULED — loops: one `for`" F1 *"One `for` (Recommended)"*. | Error |
 | E-LOOP-DO-WHILE-RETIRED | §49.4.1, §49.9 | A `do { … } while (cond)` statement — `do...while` retired S469; fix-it the body-first `for { …; if (done) { break; } }`, or `for (let first = true; first \|\| cond; first = false) { … }` when the body uses `continue` (§49.3.6). `do` stays reserved. **Nominal / spec-ahead — not yet emitted** (impl#1 accepts it, §49.8). Provenance: ruling:user-voice-scrml.md S469 "⭐ RULED — loops: one `for`" F1 *"One `for` (Recommended)"*. | Error |
 | E-RANGE-OUTSIDE-LOOP-HEAD | §49.2.5, §49.9 | A range `a..b` / `a..=b` anywhere other than the whole iterable of a `for` iterate head or the bounded-length token of a tape type (§66.12.2) — a range is not a value. **Nominal / spec-ahead — not yet emitted.** Provenance: ruling:user-voice-scrml.md S469 "⭐ RULED — loops: one `for`" F3 *"`..` and `..=` (Recommended)"* (*"loop-head only"*). | Error |
@@ -36441,8 +36441,11 @@ semantics:
 - an index read `xs[i]` is JavaScript's (an out-of-range read gives `undefined`), not §66.12.8's trap;
 - it has an unspecified for-as-value node, not §49.6's value form from every head.
 
-**The bootstrap** has no loop node yet (S469). Its lexer reserves `for`, `while`, `do`, `break`, `continue` and
-`lift`; the loop slices are follow-up work and land grant-checked from their first commit.
+**The bootstrap (impl#2, informative).** It builds §49 through two Core forms: every head as a STATEMENT (a Core
+`Loop`, s469-boot-loops-1), and the value form from every head — a `for-binding` and the Tier-0 `${ for … }` in
+markup (a Core `Gather`; s469-boot-loop-value-form) — each grant-checked like any other write. What it still refuses
+is listed in `docs/known-gaps.md` (`g-bootstrap-loop-head-surface-s469`, `g-bootstrap-loop-wait-and-defer-s469`,
+`g-bootstrap-loop-value-form-residue-s469`).
 
 ---
 
@@ -36651,9 +36654,9 @@ for (i of 0..1.5) { log(i); }     // Error E-RANGE-BOUND-NOT-INT
 | E-LOOP-002 | `continue` appears outside any loop | Error | rule unchanged; for the S469 heads Nominal / spec-ahead |
 | E-LOOP-003 | `break label` — label not found or not a loop | Error | rule unchanged; for the S469 heads Nominal / spec-ahead |
 | E-LOOP-004 | `continue label` — label not found or not a loop | Error | rule unchanged; for the S469 heads Nominal / spec-ahead |
-| E-LOOP-005 | `break`/`continue` crosses a function boundary, or leaves a bound loop for a loop outside it | Error | S469 — Nominal / spec-ahead, not yet emitted |
+| E-LOOP-005 | `break`/`continue` crosses a function boundary, or leaves a bound loop for a loop outside it | Error | S469 — the bound-loop limb, by the bootstrap, emitted at `compiler/self-host-v2/analyze.scrml:11374`; Nominal on impl#1 |
 | E-LOOP-006 | Duplicate label identifier within the same function scope | Error | rule unchanged; for the S469 heads Nominal / spec-ahead |
-| E-LOOP-007 | A loop bound as a value lifts nothing on any path (rewritten S469) | Error | S469 — Nominal / spec-ahead, not yet emitted |
+| E-LOOP-007 | A loop bound as a value lifts nothing on any path (rewritten S469) | Error | S469 — by the bootstrap, emitted at `compiler/self-host-v2/analyze.scrml:10634` (and `:10826`, a Tier-0 loop); Nominal on impl#1 |
 | E-LOOP-WHILE-RETIRED | A `while` statement (retired S469) | Error | S469 — Nominal / spec-ahead, not yet emitted |
 | E-LOOP-DO-WHILE-RETIRED | A `do...while` statement (retired S469) | Error | S469 — Nominal / spec-ahead, not yet emitted |
 | E-RANGE-OUTSIDE-LOOP-HEAD | A range outside a loop head or a tape type's length token | Error | S469 — Nominal / spec-ahead, not yet emitted |

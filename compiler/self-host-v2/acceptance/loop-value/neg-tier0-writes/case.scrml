@@ -1,0 +1,8 @@
+// §6.15: a Tier-0 loop is a render position — a write in it is E-VALUE-WRITES-STATE.
+<program>
+    <xs:int[]=([1, 2, 3])/>
+    let <n:int=0/>
+    <main>
+        <p>${ for (x of @xs) { @n = x; lift x; } }</p>
+    </main>
+</program>

@@ -1,0 +1,16 @@
+{
+  "id": "acceptance-loop-value-tier0-rows",
+  "description": "Rows for 1 and 3 (2 is skipped): `<li>10</li><li>30</li>`.",
+  "language-version": "1.0",
+  "spec": "§17.4 · §49.6.2",
+  "rationale": "§49.6.2: \"Inside a markup interpolation, `${ for (…) { lift <li/>; } }` is the value form whose result the interpolation renders\".",
+  "expect": {
+    "codes": [],
+    "domAnchored": [
+      {
+        "selector": "#u",
+        "text": "1030"
+      }
+    ]
+  }
+}

@@ -1,0 +1,18 @@
+// §49.6 rule 6: the bound loop is a boundary — `break outer` from inside it is E-LOOP-005.
+<program>
+    <zs:int[]=([3, 4, 5])/>
+    function f(ys: int[]) -> int {
+        let t = 0;
+        outer: for (r of ys) {
+            const cells = for (c of ys) {
+                if (c == 4) { break outer; }
+                lift c;
+            };
+            t = t + cells.length;
+        }
+        return t;
+    }
+    <main>
+        <p id="o">${f(@zs)}</p>
+    </main>
+</program>
