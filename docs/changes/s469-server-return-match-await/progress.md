@@ -127,3 +127,24 @@ classified as success. Gap: `g-server-return-match-failable-subject-unawaited-s4
   unused; now the whole error). Other diffs in that window are main's lift / keyed-row `if=` changes
   (12-snippets-slots, 23-trucking-dispatch load-detail pages, gauntlet-r10-odin-filebrowser, gauntlet-r10-rust-orders,
   benchmarks/todomvc).
+
+## Round 6 (review of 716ee804e: FIX)
+
+- HIGH-A + HIGH-B + MED (90966f2ec): `auditWholeErrorBinderText` allow-list (type-system.ts) replaces the
+  round-5 deny-list; binder typed by `_errEnum` (identity); codegen whole-binder scope
+  (`pushWholeErrorBinder`, read by getMatchSubjectVariantFields / emitVariantBindingPrelude /
+  hasPayloadBindingOrTaggedVariant / rewriteMatchExpr); `failableResultUnion` requires the resolver;
+  exhaustiveness / arm-qualifier / boundary / expression-handler checks read `_errEnum` /
+  failableCalleeErrorEnum; canonical field types (`canonicalTypeKey`, `canonicalFieldTypeKey`,
+  enumDeclContext, variantFieldTypeText). Unit: whole-error-binder-allowlist-s469.test.js (36; 28 fail on
+  716ee804e). s8 / l3 "held in a local then passed on" re-pinned PASS-REFUSED.
+- Samples (e4a01d672): blog-cms / api-dashboard catch-alls restored as binder-free `_ ->` (keeps the
+  catch-all; `e.message` is not allowed and these callees have no resolvable enum for `e.variant`).
+- Pack (b34496cc4): s10 / f7 / l5 / t5 (r7-shapes.js), 1258 shapes, pins for 24 families, 10 UNJUDGED
+  cross-file shapes listed with gap ids.
+- SPEC §34 rows (E-TYPE-004 / E-EQ-001 / E-TYPE-028 / E-TYPE-031) cite auditWholeErrorBinderText.
+- Gaps: round-6 note on the main gap; filed g-impl1-whole-error-binder-allowlist-stricter-than-spec-s469
+  (ruling owed, recommendation: ratify the allow-list), g-impl1-enum-declared-twice-codegen-invalid-logic-s469,
+  g-impl1-generic-enum-drops-logic-block-s469, g-impl1-library-match-form-whole-binder-arm-dropped-s469,
+  g-impl1-log-builtin-unlowered-in-client-block-arm-and-library-s469.
+- Corpus differential (round-5 head vs round-6 head, 952 + 1912 sources): no artifact, no diagnostic change.
