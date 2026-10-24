@@ -676,7 +676,12 @@ function pushLiftBind(lines, elVar, flavor, eventName, varJSON) {
     lines.push(`${elVar}.addEventListener(${JSON.stringify(eventName)}, ${writeListener});`);
     return;
   }
-  lines.push(initStmt);
+  // S469 (s469-keyed-row-if-gate) — the initial read is UNTRACKED: the reverse sync below is the
+  // binding's dependency. Read tracked, it subscribed whatever render builds the element — a `${}`
+  // block re-rendering through its effect, a list lowered as the plain loop (a row holding a
+  // row-deciding `if` is) — so every keystroke re-rendered that render and replaced the input being
+  // typed into (focus lost after one character).
+  lines.push(`_scrml_untracked(() => { ${initStmt} });`);
   lines.push(`${elVar}.addEventListener(${JSON.stringify(eventName)}, ${writeListener});`);
   lines.push(`_scrml_reactive_subscribe(${varJSON}, function() { ${elVar}.${flavor} = _scrml_reactive_get(${varJSON}); });`);
 }
@@ -3589,7 +3594,24 @@ export function emitIfStmtWithContainer(ifNode, containerElVar, opts = {}) {
       `${v.nodes} = [...${v.frag}.childNodes];`,
       `${v.anchor}.parentNode.insertBefore(${v.frag}, ${v.anchor});`,
     ];
-    for (const l of maybeWrapLiftPerItemEffect(body)) lines.push(l);
+    // The region re-runs when the row's item CHANGES IDENTITY (a same-key replace), when a field it
+    // reads is written in place, or when a cell it reads changes — not on every reconcile of the list:
+    // a per-item effect that re-resolved the item itself would re-run on each reorder / insert of ANY
+    // row (the list's item-slot trigger) and rebuild the arm's nodes (an input the arm lifts would
+    // lose its typed text and focus). A small effect re-resolves the item by key and publishes it
+    // only when it is a different item; the region tracks that slot.
+    const box = genVar("region_item");
+    lines.push(`const ${box} = { v: null };`);
+    lines.push(`_scrml_effect(() => {`);
+    lines.push(`  const _scrml_it = _scrml_resolve_item(${_rowCtx.wrapperVar}, ${_rowCtx.keyVar});`);
+    lines.push(`  if (_scrml_it !== null && _scrml_it !== ${box}.v) { ${box}.v = _scrml_it; _scrml_trigger(${box}, "v"); }`);
+    lines.push(`});`);
+    lines.push(`_scrml_effect(() => {`);
+    lines.push(`  _scrml_track(${box}, "v");`);
+    lines.push(`  const ${_rowCtx.iterVar} = ${box}.v;`);
+    lines.push(`  if (${_rowCtx.iterVar} === null) return;`);
+    for (const l of body) lines.push('  ' + l);
+    lines.push(`});`);
     return lines.join('\n');
   }
   return _emitIfStmtInline(ifNode, containerElVar, opts);

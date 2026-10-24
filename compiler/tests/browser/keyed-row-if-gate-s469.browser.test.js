@@ -234,3 +234,51 @@ describe("an if inside a row ELEMENT keeps the row keyed", () => {
     expect(document.querySelector("#out li").getAttribute("data-id")).toBe("2");
   });
 });
+
+describe("the region re-runs only when what it reads changes", () => {
+  test("an input the arm lifts keeps its node and typed text across a reorder and another row's in-place write", async () => {
+    const app = compileAndMount(`<xs> = [{ id: 1, ok: true }, { id: 2, ok: true }]
+<div id="out">\${ for (r of @xs) { lift <li data-id=\${r.id}>\${ if (r.ok) { lift <input class="g"/> } }</li> } }</div>
+`);
+    expect(app.errors).toEqual([]);
+    await flush();
+    const inArm = () => document.querySelector('#out li[data-id="1"] input.g');
+    const typed = inArm();
+    typed.value = "typed by the user";
+    globalThis.__kri_set("xs", globalThis.__kri_deep([...globalThis.__kri_get("xs")].reverse())); await flush();
+    expect(inArm()).toBe(typed);
+    globalThis.__kri_get("xs")[0].ok = false; await flush(); // row 2 (now first) revoked in place
+    expect(document.querySelector('#out li[data-id="2"] input.g')).toBeNull();
+    expect(inArm()).toBe(typed);
+    expect(inArm().value).toBe("typed by the user");
+    // Row 1 revoked: the arm's input leaves; re-granted: it is built again.
+    globalThis.__kri_get("xs")[1].ok = false; await flush();
+    expect(inArm()).toBeNull();
+    globalThis.__kri_get("xs")[1].ok = true; await flush();
+    expect(inArm()).not.toBeNull();
+  });
+});
+
+describe("a row lowered plain keeps a bound input while the user types", () => {
+  test("an inline edit row (if (@editingId == c.id) … else …): typing does not rebuild the list", async () => {
+    const app = compileAndMount(`<contacts> = [{ id: 1, name: "a" }, { id: 2, name: "b" }]
+<editingId> = 1
+<editName> = ""
+<div id="out">\${ for (c of @contacts) { if (@editingId == c.id) { lift <div class="ed" data-id=\${c.id}><input class="nm" bind:value=@editName/></div> } else { lift <div class="rd">\${c.name}</div> } } }</div>
+`);
+    expect(app.errors).toEqual([]);
+    await flush();
+    const input = document.querySelector("#out input.nm");
+    for (const v of ["h", "he", "hel"]) {
+      input.value = v;
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+      await flush();
+      expect(document.querySelector("#out input.nm")).toBe(input);
+    }
+    expect(globalThis.__kri_get("editName")).toBe("hel");
+    globalThis.__kri_set("editingId", 2); await flush();
+    expect(document.querySelector("#out .ed").getAttribute("data-id")).toBe("2");
+    expect([...document.querySelectorAll("#out .rd")].map((e) => e.textContent)).toEqual(["a"]);
+    expect(document.querySelector("#out input.nm").value).toBe("hel");
+  });
+});
