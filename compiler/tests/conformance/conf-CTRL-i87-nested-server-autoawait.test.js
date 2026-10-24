@@ -19,19 +19,21 @@
  *            undefined). Proves the emitted `await` actually awaits.
  */
 import { describe, test, expect } from "bun:test";
-import { fileURLToPath } from "node:url";
-import { resolve, dirname } from "path";
-import { writeFileSync, rmSync, existsSync, mkdirSync } from "fs";
+import { resolve, join } from "path";
+import { writeFileSync, rmSync, existsSync, mkdtempSync } from "fs";
+import { tmpdir } from "os";
 import { compileScrml } from "../../src/api.js";
 
-const testDir = dirname(fileURLToPath(new URL(import.meta.url)));
 let _tmp = 0;
 
 function compileClient(source, slug) {
   const name = `${slug}-${++_tmp}`;
-  const tmpDir = resolve(testDir, `_tmp_${name}`);
+  // S469 (s469-hook-flakes): a fresh dir per compile, under the per-process temp root. It used
+  // to be the fixed `<conformanceDir>/_tmp_${name}` — and the sibling CONF-CTRL auto-await files
+  // use the same slugs and counter (`_tmp_codes-1`), so two hook shards running two of them at
+  // once overwrote / deleted each other's input mid-compile.
+  const tmpDir = mkdtempSync(join(tmpdir(), "conf-ctrl-autoawait-"));
   const tmpInput = resolve(tmpDir, `${name}.scrml`);
-  mkdirSync(tmpDir, { recursive: true });
   writeFileSync(tmpInput, source);
   try {
     const result = compileScrml({ inputFiles: [tmpInput], write: false, outputDir: resolve(tmpDir, "out") });

@@ -15,19 +15,21 @@
  */
 
 import { describe, test, expect } from "bun:test";
-import { fileURLToPath } from "node:url";
-import { resolve, dirname } from "path";
-import { writeFileSync, rmSync, existsSync, mkdirSync } from "fs";
+import { resolve, join } from "path";
+import { writeFileSync, rmSync, existsSync, mkdtempSync } from "fs";
+import { tmpdir } from "os";
 import { compileScrml } from "../../src/api.js";
 import { foldChunkNamespacing } from "../helpers/chunk-scope.js";
 
-const testDir = dirname(fileURLToPath(new URL(import.meta.url)));
 let tmpCounter = 0;
 
 function compileWholeScrml(source, testName = `eq005-${++tmpCounter}`) {
-  const tmpDir = resolve(testDir, `_tmp_${testName}`);
+  // S469 (s469-hook-flakes): a fresh dir under the per-process temp root. The fixed
+  // `<unitDir>/_tmp_${testName}` was shared with a sibling file: e-eq-005-is-literal-reject and
+  // e-type-046-optional-member-access both compile `_tmp_sup-isnot` / `_tmp_sup-issome`, so two
+  // hook shards running them at once could overwrite or delete each other's input.
+  const tmpDir = mkdtempSync(join(tmpdir(), `${testName}-`));
   const tmpInput = resolve(tmpDir, `${testName}.scrml`);
-  mkdirSync(tmpDir, { recursive: true });
   writeFileSync(tmpInput, source);
   try {
     const result = compileScrml({

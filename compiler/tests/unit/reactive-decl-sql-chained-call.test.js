@@ -69,24 +69,34 @@
  *       decls (no false-positive).
  */
 
-import { describe, test, expect } from "bun:test";
-import { fileURLToPath } from "node:url";
-import { resolve, dirname } from "path";
-import { writeFileSync, rmSync, existsSync, mkdirSync } from "fs";
+import { describe, test, expect, beforeEach } from "bun:test";
+import { resolve, join } from "path";
+import { writeFileSync, rmSync, existsSync, mkdtempSync } from "fs";
+import { tmpdir } from "os";
 import { splitBlocks } from "../../src/block-splitter.js";
 import { buildAST } from "../../src/ast-builder.js";
 import { emitLogicNode } from "../../src/codegen/emit-logic.ts";
 import { compileScrml } from "../../src/api.js";
 import { foldChunkNamespacing } from "../helpers/chunk-scope.js";
+import { setFileSqlFallback } from "../../src/codegen/sql-handle-name.ts";
 
-const testDir = dirname(fileURLToPath(new URL(import.meta.url)));
+// S469 (s469-hook-flakes): this file calls the codegen emitters (emitLogicNode / rewriteSqlRefs /
+// rewriteServerExpr) DIRECTLY, without the per-file codegen entry, so a `?{}` lowered with no
+// `dbVar` reads the module-level fallback handle (`sql-handle-name.ts` `fallbackSqlHandle()`).
+// That fallback is whatever the LAST compile in this process left: after any test file that
+// compiled a two-database program it is `_scrml_sql_UNRESOLVED`, so these tests failed only when
+// a hook shard happened to run such a file first. Pin the single-database default per test.
+beforeEach(() => setFileSqlFallback(1));
+
 let tmpCounter = 0;
 
 function compileSource(scrmlSource, testName) {
   const tag = testName ?? `rdsql-${++tmpCounter}`;
-  const tmpDir = resolve(testDir, `_tmp_rdsql_${tag}`);
+  // S469 (s469-hook-flakes): a fresh dir per compile under the per-process temp root, not the
+  // fixed `<testsDir>/_tmp_rdsql_<tag>`, which two concurrent runs of this file shared (one
+  // run's `finally` deleted the other's input mid-compile: ENOENT).
+  const tmpDir = mkdtempSync(join(tmpdir(), `rdsql-${tag}-`));
   const tmpInput = resolve(tmpDir, `${tag}.scrml`);
-  mkdirSync(tmpDir, { recursive: true });
   writeFileSync(tmpInput, scrmlSource);
   try {
     const result = compileScrml({
@@ -453,9 +463,11 @@ describe("§8 E2E — combined-007-crud.scrml shape compiles without sql-ref lea
 describe("§9 batch-planner — SQL-init state-decl counted exactly once", () => {
   test("single `@x = ?{}.get()` does not trigger Tier-1 coalescing", async () => {
     const tag = "single-rdsql-batch";
-    const tmpDir = resolve(testDir, `_tmp_rdsql_${tag}`);
+    // S469 (s469-hook-flakes): a fresh dir per compile under the per-process temp root, not the
+    // fixed `<testsDir>/_tmp_rdsql_<tag>`, which two concurrent runs of this file shared (one
+    // run's `finally` deleted the other's input mid-compile: ENOENT).
+    const tmpDir = mkdtempSync(join(tmpdir(), `rdsql-${tag}-`));
     const tmpInput = resolve(tmpDir, `${tag}.scrml`);
-    mkdirSync(tmpDir, { recursive: true });
     writeFileSync(tmpInput, [
       '<program db="test.db">',
       "${ server function one(id) {",
