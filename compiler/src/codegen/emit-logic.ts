@@ -19,6 +19,7 @@ import { markDeclaredImmutable, markDeclaredMutable, tildeDeclIsRebind, clearLif
 import { emitLiftExpr, emitCreateElementFromMarkup, emitMarkupValueExpr, forHeadKeyword, loopBodyDeclaredNames } from "./emit-lift.js";
 import { extractReactiveDeps, extractReactiveDepsFromExprNode, extractReactiveDepsTransitive, isMapTypeAnnotation, type FunctionBodyRegistry } from "./reactive-deps.ts";
 import { emitStringFromTree, parseExprToNode, blankLiteralTextInSource } from "../expression-parser.ts";
+import { templateInterpolationPayloads } from "../interpolation-extent.ts";
 import type { EncodingContext, ResolvedType, StructType } from "./type-encoding.ts";
 import { emitRefinementCheck, refinementOf, emitParamGuardStatement, emitRefineExpr, judgeDescriptorExpr, describeJudgeType } from "./emit-predicates.ts";
 import { emitTransitionGuard } from "./emit-machines.ts";
@@ -1090,6 +1091,49 @@ function _anchorSpansAt(
  * match-arm, and §18.2 has no implicit binder: the synthesized `e` is impl#1's legacy reading of the
  * short form, kept for the programs that use it, and pinned to the payload's one field.)
  */
+/**
+ * S469 r4 (M-1) — does an arm body READ `name`? From the parsed arm (its identifier nodes, and the
+ * `${…}` of every template literal in it, read the same way); a body the expression reader cannot
+ * model falls back to a scan of its text with string literals blanked and each template literal's
+ * interpolations scanned. Blanking every literal (round 3) hid `\`${e}\``, so an arm that read the
+ * implicit `e` was not refused and bound an outer `e` instead.
+ */
+function armTextReadsName(text: string, name: string): boolean {
+  const t = text.trim();
+  if (!t) return false;
+  let node: unknown = null;
+  try { node = parseExprToNode(t, "<arm-body>", 0); } catch { node = null; }
+  const hasEscape = (x: unknown): boolean => {
+    if (!x || typeof x !== "object") return false;
+    if (Array.isArray(x)) return x.some(hasEscape);
+    const r = x as Record<string, unknown>;
+    if (r.kind === "escape-hatch") return true;
+    return Object.keys(r).some((k) => k !== "span" && hasEscape(r[k]));
+  };
+  if (node && !hasEscape(node)) {
+    let found = false;
+    const walk = (x: unknown): void => {
+      if (found || !x || typeof x !== "object") return;
+      if (Array.isArray(x)) { x.forEach(walk); return; }
+      const r = x as Record<string, unknown>;
+      if (r.kind === "ident" && r.name === name) { found = true; return; }
+      if (r.kind === "lit" && r.litType === "template" && typeof r.raw === "string" && (r.raw as string).includes("${")) {
+        const raw = r.raw as string;
+        const inner = raw.startsWith("`") && raw.endsWith("`") ? raw.slice(1, -1) : raw;
+        if (templateInterpolationPayloads(inner).some((pl) => armTextReadsName(pl, name))) { found = true; return; }
+      }
+      for (const k of Object.keys(r)) if (k !== "span") walk(r[k]);
+    };
+    walk(node);
+    return found;
+  }
+  for (const m of t.matchAll(/`(?:[^`\\]|\\.)*`/g)) {
+    if (templateInterpolationPayloads(m[0].slice(1, -1)).some((pl) => armTextReadsName(pl, name))) return true;
+  }
+  const blanked = t.replace(/"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|`(?:[^`\\]|\\.)*`/g, '""');
+  return new RegExp(`(?<![.\\w$])${name}(?![\\w$])`).test(blanked);
+}
+
 function emitShortFormArmBinding(
   arm: { binding?: string; handler?: string },
   variantName: string,
@@ -1102,8 +1146,7 @@ function emitShortFormArmBinding(
     ? (subject.get(variantName) ?? [])
     : getErrorVariantFieldSchema(variantName);
   if (schema && schema.length === 1) return [`    const ${local} = ${resultVar}.data.${schema[0]};`];
-  const body = String(arm.handler ?? "").replace(/"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|`(?:[^`\\]|\\.)*`/g, '""');
-  if (!new RegExp(`(?<![.\\w$])${local}(?![\\w$])`).test(body)) return [];
+  if (!armTextReadsName(String(arm.handler ?? ""), local)) return [];
   const code = schema ? "E-TYPE-021" : "E-TYPE-027";
   const why = schema
     ? `\`${variantName}\` has ${schema.length} payload field${schema.length === 1 ? "" : "s"}, so there is no single field to bind`
@@ -1124,6 +1167,9 @@ function emitGuardedArmBinding(
   const names = binding.split(",").map((s) => s.trim()).filter((s) => s.length > 0 && s !== "_");
   if (names.length === 0) return [];
   // A wildcard arm (`_ e :>`) binds the whole `.data` payload (no variant to project).
+  // PINNED DIVERGENCE (`g-impl1-whole-error-binder-binds-data-s469`): SPEC §18.6.1 says the WHOLE
+  // error value. Aligning it changes the meaning of every `_ e :> … e.<field> …` program (they read
+  // `.data` fields today) — a ruling is owed before it changes (S469 r4).
   if (!variantName) return [`    const ${names[0]} = ${resultVar}.data;`];
   // S469 r2 — the field list is the handled call's DECLARED error enum (TS stamps the guarded
   // node, `__guardErrorVariants`; the `fail` producer keys its payload by the same declaring enum

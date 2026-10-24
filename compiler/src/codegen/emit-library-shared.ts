@@ -130,6 +130,13 @@ function armBodyTextCallees(body: string, out: Set<string>, guard: boolean): voi
     }
     return;
   }
+  // A body the expression reader cannot model (a block, a TAGGED template — `tag\`${isOk(p)}\``):
+  // its bare-name calls, never a member call — and the calls inside every template literal's `${…}`
+  // (blanking the literals for the scan below would drop them: S469 r4, a tagged template's server
+  // call was not seen, so the arm tested a pending Promise).
+  for (const m of text.matchAll(/`(?:[^`\\]|\\.)*`/g)) {
+    for (const payload of templateInterpolationPayloads(m[0].slice(1, -1))) armBodyTextCallees(payload, out, guard);
+  }
   for (const m of _stripStringLiterals(text).matchAll(/(?<![.\w$])([A-Za-z_$][\w$]*)\s*\(/g)) out.add(m[1]);
 }
 

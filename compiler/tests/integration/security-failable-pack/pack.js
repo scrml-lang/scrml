@@ -278,6 +278,9 @@ function loadFailure(e, what) {
   const msg = String(e?.message ?? e);
   const m = /Cannot find module '\.\/([\w.-]+\.server\.js)'/.exec(msg);
   if (m) return { cls: "UNJUDGED", detail: `${what} imports ${m[1]}, never emitted (g-server-js-imports-module-without-server-file-s467)` };
+  // S469 r4 — a library / tool module importing a dependency by its SOURCE path (`./auth.scrml`).
+  const sm = /Cannot find module '([^']+\.scrml)'|Cannot find module "([^"]+\.scrml)"|\.scrml/.exec(msg);
+  if (sm) return { cls: "UNJUDGED", detail: `${what} imports a .scrml source path (g-library-tool-cross-file-import-source-path-s469): ${msg.slice(0, 60)}` };
   return { cls: "PASS-500", detail: `${what} does not load: ${msg.slice(0, 60)}` };
 }
 
@@ -286,7 +289,8 @@ async function runLibraryShape(out) {
   if (!existsSync(lp)) return { cls: "UNJUDGED", detail: "no library module" };
   let mod;
   try { mod = await import(pathToFileURL(lp).href + "?" + Math.random().toString(36).slice(2)); }
-  catch (e) { return { cls: "PASS-500", detail: `module does not load: ${String(e?.message ?? e).slice(0, 60)}` }; }
+  // A module that cannot load never ran the shape: UNJUDGED (with the gap), never a pass.
+  catch (e) { const f = loadFailure(e, "module"); return f.cls === "PASS-500" ? { cls: "UNJUDGED", detail: f.detail } : f; }
   if (typeof mod.login !== "function") return { cls: "UNJUDGED", detail: "no exported login" };
   const call = async (p) => {
     try { const v = await mod.login(p); return { text: typeof v === "string" ? v : JSON.stringify(v), threw: false }; }
@@ -305,12 +309,18 @@ function runToolShape(out) {
   if (!existsSync(tp)) return { cls: "UNJUDGED", detail: "no tool module" };
   const run = (p) => {
     const r = spawnSync("bun", [tp, p], { cwd: out, encoding: "utf8", timeout: 20_000 });
-    return { text: `${r.stdout ?? ""}`.trim().slice(0, 80), code: r.status };
+    return { text: `${r.stdout ?? ""}`.trim().slice(0, 80), err: `${r.stderr ?? ""}`, code: r.status };
   };
   const wrong = run("wrong");
   const right = run("secret");
   const detail = `wrong->${JSON.stringify(wrong.text)} (exit ${wrong.code}) right->${JSON.stringify(right.text)} (exit ${right.code})`;
-  if (wrong.code === 0 && wrong.text.includes("LOGGED IN")) return { cls: "FAIL", detail };
+  // S469 r4 — the verdict first: a run that printed LOGGED IN and THEN exited non-zero still logged in.
+  if (wrong.text.includes("LOGGED IN")) return { cls: "FAIL", detail };
+  // A module that never loaded never ran the shape.
+  if (wrong.code !== 0 && /Cannot find module|Cannot find package/.test(wrong.err)) {
+    const f = loadFailure(new Error(wrong.err), "tool module");
+    return f.cls === "PASS-500" ? { cls: "UNJUDGED", detail: f.detail } : f;
+  }
   if (wrong.code !== 0) return { cls: "PASS-500", detail };
   return { cls: right.text.includes("LOGGED IN") ? "PASS" : "PASS-DENY", detail };
 }

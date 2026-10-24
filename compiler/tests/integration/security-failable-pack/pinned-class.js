@@ -1,5 +1,5 @@
 // PINNED_CLASS — the EXPECTED class of each shape in the families that pin it (S469
-// s469-server-return-match-await rounds 2-3: s4, f1, s5, f2, s6, f3, l1, t1). The floor ("a wrong password never logs in")
+// s469-server-return-match-await rounds 2-4: s4, f1, s5, f2, s6, f3, l1, t1, s7, f4, l2, t2). The floor ("a wrong password never logs in")
 // is asserted for every shape; a pinned shape must ALSO keep its class, so a PASS that degrades to
 // PASS-DENY / PASS-REFUSED / PASS-500 (a fix that silently stopped working, or a newly-refused valid
 // program) turns the suite red, and so does a refused shape that starts compiling (re-measure it, then
@@ -182,4 +182,36 @@ export const PINNED_CLASS = {
   "t1/!{} alias error type": "PASS",
   "t1/!{} bare-! Generic": "PASS",
   "t1/? across two enums, same variant name, different fields": "PASS-REFUSED",
+  "s7/? into an alias of a different-field enum": "PASS-REFUSED",
+  "s7/? alias on both sides, different fields": "PASS-REFUSED",
+  "s7/? cross-file callee into a different-field enum": "PASS-REFUSED",
+  "s7/? cross-file callee alias into a different-field enum": "PASS-REFUSED",
+  "s7/? same field names in another order (accepted)": "PASS",
+  "s7/short form reads e in a template, multi-field variant, outer e": "PASS-REFUSED",
+  "s7/short form reads e in a template, unit variant, outer e": "PASS-REFUSED",
+  "s7/tagged template in a match arm value, return": "PASS-500",
+  "s7/tagged template in a match arm value, reassignment": "PASS-REFUSED",
+  "f4/? into an alias of a different-field enum": "PASS-REFUSED",
+  "f4/? alias on both sides, different fields": "PASS-REFUSED",
+  "f4/? cross-file callee into a different-field enum": "PASS-REFUSED",
+  "f4/? cross-file callee alias into a different-field enum": "PASS-REFUSED",
+  "f4/? same field names in another order (accepted)": "PASS",
+  "f4/short form reads e in a template, multi-field variant, outer e": "PASS-REFUSED",
+  "f4/short form reads e in a template, unit variant, outer e": "PASS-REFUSED",
+  "f4/tagged template in a match arm value, return": "PASS-REFUSED",
+  "f4/tagged template in a match arm value, reassignment": "PASS",
+  "l2/? into an alias of a different-field enum": "PASS-REFUSED",
+  "l2/? alias on both sides, different fields": "PASS-REFUSED",
+  "l2/? cross-file callee into a different-field enum": "PASS-REFUSED",
+  "l2/? cross-file callee alias into a different-field enum": "PASS-REFUSED",
+  "l2/? same field names in another order (accepted)": "PASS",
+  "l2/short form reads e in a template, multi-field variant, outer e": "PASS-REFUSED",
+  "l2/short form reads e in a template, unit variant, outer e": "PASS-REFUSED",
+  "t2/? into an alias of a different-field enum": "PASS-REFUSED",
+  "t2/? alias on both sides, different fields": "PASS-REFUSED",
+  "t2/? cross-file callee into a different-field enum": "PASS-REFUSED",
+  "t2/? cross-file callee alias into a different-field enum": "PASS-REFUSED",
+  "t2/? same field names in another order (accepted)": "PASS",
+  "t2/short form reads e in a template, multi-field variant, outer e": "PASS-REFUSED",
+  "t2/short form reads e in a template, unit variant, outer e": "PASS-REFUSED",
 };

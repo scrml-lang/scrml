@@ -10745,6 +10745,19 @@ function annotateNodes(
       if (Array.isArray(children)) collectStdlibFailableImports(children);
     }
   })(fileTopLevelNodes);
+
+  // S469 r4 — THE error enum of a failable CALLEE, for every check and every reader: a local `!`
+  // function's declared error type with `type A = B` aliases followed (resolveErrorEnumThroughAliases),
+  // or an imported one's enum resolved in its exporting file (importedFnErrorEnums). The `?` payload
+  // check (E-ERROR-010), the `!{}` guard stamp and the failable-match subject stamp all read it, so
+  // none of them can resolve a callee the others do not.
+  const _fileTypeDeclsForErrors: ASTNodeLike[] = ((fileAST.typeDecls as ASTNodeLike[] | undefined)
+    ?? ((fileAST.ast as FileAST | undefined)?.typeDecls as ASTNodeLike[] | undefined) ?? []);
+  const failableCalleeErrorEnum = (callee: string): EnumType | null => {
+    const t = fnErrorTypes.get(callee);
+    if (t) return resolveErrorEnumThroughAliases(t, typeRegistry, _fileTypeDeclsForErrors);
+    return importedFnErrorEnums.get(callee) ?? null;
+  };
   for (const [localName, d] of importedFnDecls ?? []) {
     if (fnAllDeclared.has(localName)) continue; // a local declaration of the name is that binding
     const fnNode = d.fnNode;
@@ -12419,11 +12432,22 @@ function annotateNodes(
                 // reuses E-TYPE-001; that code is already load-bearing for the
                 // §14.3/§18.4 lifecycle double-assignment guard, so per the PA
                 // ruling this mints a dedicated code.
-                const calleeErrTypeName = fnErrorTypes.get(calleeName);
+                // S469 r4 — the callee's enum through the ONE resolver (aliases followed; an IMPORTED
+                // callee's enum from its exporting file), and the enclosing type's through aliases:
+                // with an alias on either side, or a cross-file callee, the check used to be skipped
+                // and `?` re-raised `data.reason` into a type whose readers bind `data.note`.
+                const calleeEnumResolved = failableCalleeErrorEnum(calleeName);
+                const calleeErrTypeName = fnErrorTypes.get(calleeName) ?? calleeEnumResolved?.name ?? null;
                 const enclosingErrTypeName = ((n as Record<string, unknown>).errorType as string) || "Error";
-                if (calleeErrTypeName && calleeErrTypeName !== enclosingErrTypeName) {
+                const enclosingResolved = enclosingErrTypeName === "Error"
+                  ? null
+                  : resolveErrorEnumThroughAliases(enclosingErrTypeName, typeRegistry, _fileTypeDeclsForErrors);
+                const sameErrorEnum = !!calleeEnumResolved && !!enclosingResolved &&
+                  (calleeEnumResolved === enclosingResolved ||
+                    (calleeEnumResolved.name === enclosingResolved.name && sameEnumShape(calleeEnumResolved, enclosingResolved)));
+                if (calleeErrTypeName && calleeEnumResolved && !sameErrorEnum && calleeErrTypeName !== enclosingErrTypeName) {
                   // Resolve the callee's error-variant set.
-                  const calleeEnum = resolveFailableErrorType(calleeErrTypeName, typeRegistry);
+                  const calleeEnum: ResolvedType = calleeEnumResolved;
                   // Resolve the enclosing fn's declared error-variant set (the
                   // built-in `Error` default → its sole `Generic` variant, §19.4.2).
                   let enclosingVariants: Set<string> | null = null;
@@ -12431,7 +12455,7 @@ function annotateNodes(
                   if (enclosingErrTypeName === "Error") {
                     enclosingVariants = new Set(["Generic"]);
                   } else {
-                    const enclosingEnum = resolveFailableErrorType(enclosingErrTypeName, typeRegistry);
+                    const enclosingEnum = enclosingResolved;
                     if (enclosingEnum && enclosingEnum.kind === "enum") {
                       enclosingVariants = new Set((enclosingEnum as EnumType).variants.map((v) => v.name));
                       enclosingEnumForShape = enclosingEnum as EnumType;
@@ -12485,7 +12509,10 @@ function annotateNodes(
                         if (!enclosingVariants!.has(cv.name)) continue;
                         const a = variantFieldNames(calleeEnum as EnumType, cv.name) ?? [];
                         const b = variantFieldNames(enclosingEnumForShape, cv.name) ?? [];
-                        if (a.length !== b.length || a.some((f, i) => f !== b[i])) {
+                        // Payloads are keyed by field NAME (§57.8), so the same names in another
+                        // order are the same payload (a positional binder binds in its own enum's
+                        // declared order, which is what it reads). Compare the name SETS.
+                        if (a.length !== b.length || a.some((f) => !b.includes(f))) {
                           mismatched.push(`'${cv.name}' (${errorTypeDisplayName(calleeErrTypeName)}: ${a.length ? a.join(", ") : "no fields"}; ${enclosingErrTypeName}: ${b.length ? b.join(", ") : "no fields"})`);
                         }
                       }
@@ -14298,9 +14325,10 @@ function annotateNodes(
         {
           const _guardTypeDecls = ((fileAST.typeDecls as ASTNodeLike[] | undefined)
             ?? ((fileAST.ast as FileAST | undefined)?.typeDecls as ASTNodeLike[] | undefined) ?? []);
-          const _errEnum = errorTypeName
-            ? resolveErrorEnumThroughAliases(errorTypeName, typeRegistry, _guardTypeDecls)
-            : (calleeName ? importedFnErrorEnums.get(calleeName) ?? null : null);
+          void _guardTypeDecls;
+          const _errEnum = calleeName && (fnErrorTypes.has(calleeName) || importedFnErrorEnums.has(calleeName))
+            ? failableCalleeErrorEnum(calleeName)
+            : (errorTypeName ? resolveErrorEnumThroughAliases(errorTypeName, typeRegistry, _guardTypeDecls) : null);
           const _vs = _errEnum && _errEnum.kind === "enum"
             ? matchSubjectVariantsOf(_errEnum)
             : (calleeName ? stdlibFnErrorVariants.get(calleeName) ?? null : null);
@@ -16956,7 +16984,7 @@ function annotateNodes(
     registry: Map<string, ResolvedType>,
   ): void {
     if (callees.length === 0) return;
-    const union = failableResultUnion(callees, errTypes, registry);
+    const union = failableResultUnion(callees, errTypes, registry, failableCalleeErrorEnum);
     const variants = union ? matchSubjectVariantsOf(union) : null;
     if (!variants) return;
     (node as { __matchSubjectFailable?: boolean }).__matchSubjectFailable = true;
@@ -22481,14 +22509,16 @@ function failableResultUnion(
   callees: string[],
   fnErrorTypes: Map<string, string>,
   typeRegistry: Map<string, ResolvedType>,
+  // S469 r4 — the one callee resolver (aliases, imported callees), when the caller has it.
+  resolveCallee?: (callee: string) => EnumType | null,
 ): EnumType | null {
   const okVariant: VariantDef = { name: "Ok", payload: null, renders: null };
   const variants: VariantDef[] = [okVariant];
   const names: string[] = [];
   for (const callee of callees) {
-    const errorTypeName = fnErrorTypes.get(callee);
+    const errorTypeName = fnErrorTypes.get(callee) ?? (resolveCallee ? resolveCallee(callee)?.name : undefined);
     if (!errorTypeName) return null;
-    const errEnum = resolveFailableErrorType(errorTypeName, typeRegistry);
+    const errEnum = resolveCallee ? (resolveCallee(callee) ?? resolveFailableErrorType(errorTypeName, typeRegistry)) : resolveFailableErrorType(errorTypeName, typeRegistry);
     if (!errEnum || errEnum.kind !== "enum") return null;
     const display = errorTypeDisplayName(errorTypeName);
     if (!names.includes(display)) names.push(display);
@@ -30590,8 +30620,15 @@ function resolveImportedFnSignatures(
       let errorEnum: EnumType | undefined;
       const errAnnot = d.fnNode.errorType;
       if (d.fnNode.canFail === true && typeof errAnnot === "string" && errAnnot.trim().length > 0) {
+        // S469 r4 (H-B) — through `type A = B` aliases of the EXPORTING file too: a callee declared
+        // `! -> AA` with `type AA = AuthErr` had no enum here, so the `?` payload check and the
+        // readers' stamps skipped it.
         const t = resolveTypeExpr(errAnnot, reg);
         if (t.kind === "enum") errorEnum = t as EnumType;
+        else {
+          const viaAlias = resolveErrorEnumThroughAliases(errAnnot.trim(), reg, (d.depTypeDecls ?? []) as ASTNodeLike[]);
+          if (viaAlias) errorEnum = viaAlias;
+        }
       }
       out.set(localName, { params, returnType: tAsIs(), imported: true, ...(errorEnum ? { errorEnum } : {}) });
     } catch {
