@@ -61,4 +61,7 @@ concurrent copies / under busy-loop CPU load), `pairconc.sh` (two files in two p
 - [x] `--fail-on-fail` CLI exit-code test (bootstrap-conformance-counter)
 - [x] sup-isnot / sup-issome pair
 - [x] known-gaps entries + state.ts --write
-- [ ] CI job commands (checks / unit / integration)
+- [x] CI job commands on cc88d311a (unsharded): checks steps all exit 0 (types-gate after `bun install`;
+  bootstrap-conformance --check skipped, as CI does, with no conformance/cases or self-host-v2 change);
+  unit+conformance 30170 pass / 0 fail, exit 0; integration+lsp+commands 8513 pass / 0 fail, exit 0;
+  root-level 2239 pass, exit 0.
