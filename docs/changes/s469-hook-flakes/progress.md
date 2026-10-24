@@ -35,10 +35,30 @@ concurrent copies / under busy-loop CPU load), `pairconc.sh` (two files in two p
   Two concurrent copies of the three N=20: before 6/20 failed, after 0/20.
 - Under 64 busy loops (32-thread box), all of the above + parser-flag-retired N=20: 0/20.
 
+## 3. `--fail-on-fail` CLI exit-code test (bootstrap-conformance-counter) — genuinely slow work
+- Two full CLI runs one after the other (`spawnSync`), each rebuilding the bootstrap bundle (~13.5 s idle, ~21 s
+  per run). Under 128 busy loops the file took 265-288 s and the test hit its 180 s budget.
+- First try: run the CLI calls concurrently. REJECTED: each bundle build peaks at ~1.2 GB RSS and the shard
+  memory ceiling (3072 MB) counts children; the hook killed the shard at 3504 MB on commit attempt 1 (not a
+  flake; my regression, caught by the hook).
+- Fix: keep them sequential; explicit 600 s budget (under the 1200 s shard bound), commented.
+  128 busy loops: before 1/6 failed (test 180.4 s), after 0/3 (file 251-257 s).
+
+## 4. `sup-isnot` / `sup-issome` shared path
+- inotify census (each of the 187 files that writes a temp dir into the test tree, run alone) found one more
+  cross-file shared path: e-eq-005-is-literal-reject + e-type-046-optional-member-access both use
+  `compiler/tests/unit/_tmp_sup-is{not,some}`. Not observed failing (0/130 concurrent pairs; ms window); fixed
+  with per-compile `mkdtempSync` anyway.
+
+## 5. parser-flag-retired — NOT reproduced, no change
+- 1642 predecessor pairings (load ~70): 0 hits. 2 concurrent copies N=20 at load 138: 0. 16 copies x 5 under 128
+  busy loops: 0/80; slowest test 2.32 s vs 5 s default. Left open as a gap with the capture instructions.
+
 ## Status
 - [x] SQL fallback leak (7 files)
 - [x] s464 temp root, conf-CTRL x3, sql-chained x3 temp dirs
-- [ ] parser-flag-retired
-- [ ] `--fail-on-fail` CLI exit-code test (bootstrap-conformance-counter)
-- [ ] known-gaps entries + state.ts --write
+- [x] parser-flag-retired (not reproduced; gap open)
+- [x] `--fail-on-fail` CLI exit-code test (bootstrap-conformance-counter)
+- [x] sup-isnot / sup-issome pair
+- [x] known-gaps entries + state.ts --write
 - [ ] CI job commands (checks / unit / integration)

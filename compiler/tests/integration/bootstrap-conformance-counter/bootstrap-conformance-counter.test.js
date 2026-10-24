@@ -379,6 +379,13 @@ describe("codes half — the Diag's own §34 severity is graded (s451-boot-diag-
 });
 
 describe("CLI — exit status is separate from the output (pa-base §8)", () => {
+  // S469 (s469-hook-flakes): GENUINELY SLOW WORK, so the budget is explicit and wide. Each full CLI
+  // run builds the bootstrap bundle from scratch (`loadBootstrapModules`: ~13 s of CPU and ~1.2 GB
+  // peak RSS; the whole run ~21 s idle), and this test needs two of them, one after the other
+  // (~45 s idle). Under hook load (12 shards plus other lanes' hooks on the box) that went past the
+  // old 180 s budget (measured: 1 of 3 runs at 128 busy loops). The runs stay SEQUENTIAL on purpose:
+  // the hook's shard memory ceiling (3072 MB) counts child processes, and two concurrent bundle
+  // builds plus this process exceed it. Budget 600 s, under the hook's 1200 s per-shard bound.
   test("a valid run exits 0 even with a FAIL; --fail-on-fail exits 1; zero attempted exits 2", () => {
     const run = (...a) => Bun.spawnSync(["bun", SCRIPT, "--cases", FIXTURES, ...a], { cwd: REPO, stdout: "pipe", stderr: "pipe" });
     const plain = run();
@@ -389,5 +396,5 @@ describe("CLI — exit status is separate from the output (pa-base §8)", () => 
     const none = run("--filter", "no-such-case-anywhere");
     expect(none.exitCode).toBe(2);
     expect(none.stderr.toString()).toContain("zero cases attempted");
-  }, { timeout: 180000 });
+  }, { timeout: 600_000 });
 });
