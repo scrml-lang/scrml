@@ -38,8 +38,17 @@
  *   §15 Tagged template body escaping (backtick / $ in static text)
  */
 
-import { describe, test, expect } from "bun:test";
+import { describe, test, expect, beforeEach } from "bun:test";
 import { rewriteSqlRefs, rewriteExpr } from "../../src/codegen/rewrite.js";
+import { setFileSqlFallback } from "../../src/codegen/sql-handle-name.ts";
+
+// S469 (s469-hook-flakes): this file calls the codegen emitters (emitLogicNode / rewriteSqlRefs /
+// rewriteServerExpr) DIRECTLY, without the per-file codegen entry, so a `?{}` lowered with no
+// `dbVar` reads the module-level fallback handle (`sql-handle-name.ts` `fallbackSqlHandle()`).
+// That fallback is whatever the LAST compile in this process left: after any test file that
+// compiled a two-database program it is `_scrml_sql_UNRESOLVED`, so these tests failed only when
+// a hook shard happened to run such a file first. Pin the single-database default per test.
+beforeEach(() => setFileSqlFallback(1));
 
 // ---------------------------------------------------------------------------
 // §1  Static query — no interpolations
