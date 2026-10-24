@@ -26953,7 +26953,7 @@ separate handler-run steps (revoke, re-grant, same-key replace, in-place write, 
 separate runs, in-place write then reorder, remove + re-add, clear, refill; root vs element; `r.ok` / `@role`,
 if / else, else if, nested, around a nested loop, multi-root, siblings, index keys): main 22 FAIL, branch 0; +7 cases
 (typed input in the row and in the arm, typing in a plain-lowered edit row, re-run contexts, `match`, refusal). Pack
-`n27` (101): main 84 FAIL / 14 PASS (the remove + re-add control) / 3 PASS-DENY (the `match` shapes — main's lifts
+`n28` (101): main 84 FAIL / 14 PASS (the remove + re-add control) / 3 PASS-DENY (the `match` shapes — main's lifts
 escaped `#out`), branch 101 PASS. Corpus (3,753 files, both compilers on the same layout): error sets identical; keyed
 → plain **2 lists in 2 files of 264 keyed call sites** (`gauntlet-r10-go-contacts` — the inline-edit row, which on
 main never switched rows on Edit — and `lift-5-repro`); 0 element-wrapped `if`s in the corpus (0 regions); the

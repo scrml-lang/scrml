@@ -22,10 +22,10 @@ origin/main 27f897748 (includes #1529). Limb: impl#1 `compiler/src` (security: a
 
 ## Log (cont.)
 - 32563932f fix + peter-19 / LIFT-5 / example-js-validity / s427 M1 fixtures moved to the element form (keyed path),
-  root form pinned plain; pack n27 98 shapes (main 84 FAIL, branch 0).
+  root form pinned plain; pack n28 98 shapes (main 84 FAIL, branch 0).
 - caa852a3a if-region item slot (reorder no longer rebuilds the arm); bind init untracked; round-6 arm_in_row
   cell/vi expectations = conditions' truth.
-- 19b0be4e1 lifting match statement pins the row; refusal wording; browser +5; pack n27 +3 (902).
+- 19b0be4e1 lifting match statement pins the row; refusal wording; browser +5; pack n28 +3 (902).
 - corpus: 3,753 files; error sets identical (stdlib diffs were a layout artifact — identical with same-layout copies);
   keyed → plain 2 lists / 2 files of 264 keyed call sites (gauntlet-r10-go-contacts inline-edit row; lift-5-repro);
   0 regions; visible-set differential over perturbed cell steps: only the list wrapper <div> differs.

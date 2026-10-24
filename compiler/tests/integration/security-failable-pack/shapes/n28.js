@@ -1,4 +1,4 @@
-// Probe family `n27` — S469 (g-keyed-row-control-flow-if-not-reevaluated-s469): a control-flow `if`
+// Probe family `n28` — S469 (g-keyed-row-control-flow-if-not-reevaluated-s469): a control-flow `if`
 // STATEMENT that gates content inside a keyed (reconciled) `for … lift` row. Main built the row once per
 // key and read the `if` once: a revoke through a cell (`if (@pw == "secret")`), a same-key replace of the
 // row, or an in-place write of the row's field left the gated content in the page.
