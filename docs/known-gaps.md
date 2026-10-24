@@ -31,7 +31,7 @@
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 262 | 5 |
-| MED | 682 | 8 |
+| MED | 680 | 8 |
 | LOW | 482 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
@@ -786,7 +786,7 @@ Side effects: `scrml promote --engine` on a `<match>` under an `if=`/`else` chai
 hits the refusal) instead of producing an engine that renders nothing; [[g-component-body-each-row-engine-unused-compiles-clean-s469]]
 is closed by the same CE change. Pins: `compiler/tests/browser/engine-in-if-chain-refused-s469.browser.test.js` (24).
 Not covered here, measured in passing: an engine IN a `<match>` arm ([[g-engine-in-match-arm-emits-nothing-s469]]);
-a structural element that IS a chain member (`<engine else>`, see [[g-structural-element-if-chain-and-show-composition-nominal]]).
+a structural element that IS a chain member (`<engine else>`, see [[g-structural-element-if-chain-and-show-composition-nominal]] — refused since S469, E-CTRL-001 / -002).
 
 Original entry:
 
@@ -858,7 +858,7 @@ lowering, not the top level's map/set-aware one, so `in=@m.entries()` threw (`.e
 value-native map) and a bare set `in=@s` iterated the map object instead of its elements; and a lifted `<each>`'s
 `in=items()` / `in=@m.entries()` lost its call (`eachAttrRawText` read a `call-ref`'s callee name only) and iterated the
 function itself. `else` / `else-if=` / `show=` are not honoured on a structural `<each>` at ANY position
-([[g-structural-element-if-chain-and-show-composition-nominal]] — the nested branch matches the top level there);
+([[g-structural-element-if-chain-and-show-composition-nominal]] — the nested branch matches the top level there; refused at every position since S469);
 transitions are not captured on the structural openers at all.
 
 Corpus (`scripts/corpus-emit-differential.ts`, samples / examples / compiler/tests/fixtures / stdlib / conformance,
@@ -14653,9 +14653,22 @@ enough to rebuild from the snippets above in two files.
 
 ---
 
-<!-- @gap id=g-if-on-structural-element-silently-ignored sev=MED status=open -->
+<!-- @gap id=g-if-on-structural-element-silently-ignored sev=HIGH status=resolved resolved-by=s469-structural-else-guard locus=compiler/src/codegen/emit-html.ts(ahead of the IF_GATE_BYPASS_TAGS dispatches + the compound-parent wrapper → refuseGateAttrsOnUngatedHost)+compiler/src/codegen/emit-each.ts(renderEmptyChildToJs)+compiler/src/symbol-table.ts(timerGateAttrDiagnostic)+compiler/src/gate-attr-refusal.ts prov=empirical:S469-s469-structural-else-guard(executed-under-happy-dom-on-b0cffc6a4) -->
 <!-- S335-peter re-verify vs HEAD cdf19c01: the ORIGINAL symptom (if= on <engine>/<match>/<each>) now gates correctly (full _scrml_if_marker controller, reactive to the cell); <page if=> loudly rejects, <outlet if=> warns. RESIDUAL LIVE CASE found: `<empty if=(@show)>` inside an <each> compiles with ZERO diagnostics and the if= is silently dropped (0 _scrml_if_marker, @show never read). Keep OPEN, re-characterized to the <empty if=> position. Fix (mint a diagnostic vs wire it) is a language-surface call → likely bryan's lane. Needs the repro pinned as the canonical body. -->
-### G-IF-ON-STRUCTURAL-ELEMENT-SILENTLY-IGNORED — `if=` on `<engine>` / `<match>` / `<each>` generates ZERO code; on `<engine>` the initial arm is permanently visible — `NEW S302; MED; open`
+### G-IF-ON-STRUCTURAL-ELEMENT-SILENTLY-IGNORED — `if=` on `<engine>` / `<match>` / `<each>` generates ZERO code; on `<engine>` the initial arm is permanently visible — `NEW S302; MED → HIGH (security, S469); RESOLVED S469 (s469-structural-else-guard — E-GATE-UNSUPPORTED-HOST)`
+
+> **RESOLVED S469 (`s469-structural-else-guard`).** Re-measured under happy-dom on `b0cffc6a4`: `if=` on
+> `<engine>` / `<match>` / `<each>` IS honoured at every position that compiles (the S302 symptom stays fixed). The
+> class was NOT closed: `if=` was still silently dropped — content rendered with the condition false, exit 0 — on
+> `<empty>` (an `<each>` fallback; the S335 residual, every position), `<errorBoundary>` and `<render>` (top level,
+> nested, component body — an `<each>` row / lifted markup honours them), and a compound-state namespace wrapper
+> (`<signupForm if=…>`): every emit-html dispatch in `IF_GATE_BYPASS_TAGS` and the compound-parent wrapper returns
+> before the §17.1 mount gate. `show=` was dropped on the same hosts and on all three structural elements. A guard
+> that fails open, so raised to HIGH (security pack `n27`). Now refused — **E-GATE-UNSUPPORTED-HOST** (new §34 row),
+> once, ahead of the bypass dispatches (`emit-html.ts`), in `renderEmptyChildToJs`, on a lifted `<each>` (`show=`)
+> and at TAB for `show=` on a structural opener. `<page>` keeps E-PAGE-INVALID-ATTR. Refusal, not lowering:
+> honouring `if=` on `<errorBoundary>` / `<render>` (rendered subtrees) is the better language answer and is owed
+> to the bootstrap; impl#1 is frozen to bootstrap + security fixes.
 
 S301 recorded this as a stated-not-implied residual inside
 [[g-dispatched-mount-inside-if-never-renders]] — *"appears to be ignored … NOT investigated."* **Now
@@ -14834,8 +14847,45 @@ assumption"** shape with the oracle being a third-party DOM rather than our own 
 assertions need a real-browser check — and prefer the real-Chrome path for any conditional-lowering
 verification. Sibling of [[g-nav-browser-harness-fidelity]].
 
-<!-- @gap id=g-structural-element-if-chain-and-show-composition-nominal sev=MED status=open -->
-### G-STRUCTURAL-ELEMENT-IF-CHAIN-AND-SHOW-COMPOSITION-NOMINAL — `else` / `else-if=` / `show=` do NOT compose with `if=` on `<engine>` / `<match>` / `<each>`; §17.1.2.2 asserts they do — `NEW S302; MED; open`
+<!-- @gap id=g-render-element-in-each-row-or-lift-renders-nothing-s469 sev=MED status=open locus=searched:compiler/src/codegen/emit-each.ts(row element builder — `<render>` reaches the generic createElement path),compiler/src/codegen/emit-lift.js(emitCreateElementFromMarkup — same)—not-traced prov=empirical:S469-s469-structural-else-guard(executed-under-happy-dom-on-b0cffc6a4) -->
+### g-render-element-in-each-row-or-lift-renders-nothing-s469 — `<render of=@v/>` inside an `<each>` row or lifted markup is emitted as a literal `<render>` DOM element and paints nothing, at exit 0 — `NEW S469; MED; open`
+
+Measured in passing by `s469-structural-else-guard` (happy-dom, `b0cffc6a4`): `<each in=@xs as y><div><render of=@badge/></div></each>`
+and `${ for (y of @xs) { lift <div><render of=@badge/></div> } }` compile clean; the row / lift builder emits
+`document.createElement("render")`, so the held value's `renders` markup (§19.15) never appears. With `if=` on the
+`<render>` the same (nothing either way). Fail closed (nothing leaks) but silent — a §19.15 render that renders
+nothing. At top level / nested / in a component body `<render>` works. Fix direction (refuse with a code, or lower
+it in the row / lift builders) not decided; the row and lift element builders are the loci to read.
+
+<!-- @gap id=g-structural-element-if-chain-and-show-composition-nominal sev=HIGH status=resolved resolved-by=s469-structural-else-guard locus=compiler/src/ast-builder.js(captureStructuralChainAttr / captureStructuralShowAttr keep the attribute on the engine-decl / match-block / each-block opener; refuseUnconsumedStructuralChainAttrs after collapseIfChains)+compiler/src/codegen/emit-lift.js(tryEmitNestedLiftEach)+compiler/src/codegen/emit-each.ts(renderEmptyChildToJs)+compiler/src/component-expander.ts(parseComponentDef reports the refusal as itself) prov=empirical:S469-s469-engine-if-chain-refusal(executed-under-happy-dom-on-b447b29eb)+S469-s469-structural-else-guard(executed-under-happy-dom-on-b0cffc6a4;security-pack-n27-41-FAIL) -->
+### G-STRUCTURAL-ELEMENT-IF-CHAIN-AND-SHOW-COMPOSITION-NOMINAL — `else` / `else-if=` / `show=` do NOT compose with `if=` on `<engine>` / `<match>` / `<each>`; §17.1.2.2 asserts they do — `NEW S302; MED → HIGH (security, S469); RESOLVED S469 by refusal (s469-structural-else-guard — E-CTRL-001 / E-CTRL-002 / E-GATE-UNSUPPORTED-HOST; the composition is owed to the bootstrap)`
+
+> **RESOLVED S469 by refusal (`s469-structural-else-guard`, impl#1 security limb).** Severity raised MED → HIGH:
+> the `else` / `else-if=` leg FAILED OPEN — a branch the author gated rendered anyway, so a privileged control in
+> the `else` branch showed on the wrong password (security pack family `n27`: 41 of 43 shapes FAIL on
+> `b0cffc6a4`). Executed position matrix (happy-dom, `b0cffc6a4`), gated content visible when it must not be:
+>
+> | element | `else` / `else-if=` | `show=` |
+> |---|---|---|
+> | `<engine>` | LEAK at top level / nested (row, component body: already E-COMPONENT-ENGINE-SCOPE; lifted: already E-CTRL-001 / -002) | LEAK top / nested |
+> | `<match>` | LEAK top / nested / row / component body (lifted: E-MATCH-BLOCK-IN-LIFT) | LEAK nested / row / component body |
+> | `<each>` | LEAK at every position, lifted included | LEAK at every position |
+> | `<empty>` (an `<each>` fallback) | LEAK at every position (`if=` too) | LEAK at every position |
+>
+> Fix: the structural openers now KEEP `else` / `else-if=` / `show=` (`captureStructuralChainAttr`,
+> `captureStructuralShowAttr` — the name search masks quoted strings and bracketed groups, and an `else` that closes
+> an `if … then … else` in an unparenthesized value such as `derived=if @s == "x" then .A else .B` is not read as the
+> attribute), and ONE check after `collapseIfChains` (`refuseUnconsumedStructuralChainAttrs`) refuses every
+> non-markup node still carrying a chain attribute — by construction never a chain member — with E-CTRL-001 /
+> E-CTRL-002, and a `show=` with E-GATE-UNSUPPORTED-HOST. Codegen backstops: a lifted `<each>` (`emit-lift.js`
+> `tryEmitNestedLiftEach`, which ran before the markup backstop) and `<empty>` (`emit-each.ts` `renderEmptyChildToJs`).
+> In a component body the refusal is reported as itself at its own position (not E-COMPONENT-021). Plain-markup
+> chains and a component use-site / `<errorBoundary>` / `<render>` AS a chain member were already correct and are
+> byte-identical. The SPEC §17.1.2.2 composition stays Nominal (impl#1 divergence note); the bootstrap owes it —
+> probed read-only: it refuses every one of these shapes (`<engine>` / `<match>` / `<errorBoundary>` / `<empty>`
+> are E-BOOTSTRAP-UNSUPPORTED, `<each else=>` / `<each show=>` are named E-BOOTSTRAP-UNSUPPORTED). Pins:
+> `compiler/tests/browser/structural-else-guard-s469.browser.test.js` (94; 73 fail on base),
+> `security-failable-pack/shapes/n27.js` (43).
 
 **Filed against my own SPEC text, hours after writing it.** §17.1.2.2 (S302) states *"`else` / `else-if=`
 compose with all three, under the ordinary chain rules"* and *"`show=` composes."* **Neither holds.**
@@ -14868,8 +14918,17 @@ reader would have taken a SHALL-shaped sentence as shipped behaviour.
 
 ---
 
-<!-- @gap id=g-if-reject-unenforced-on-structural-declaration-elements sev=MED status=open -->
-### G-IF-REJECT-UNENFORCED-ON-STRUCTURAL-DECLARATION-ELEMENTS — §17.1.2's `SHALL REJECT` list is unenforced on four elements, two of them with zero diagnostics — `NEW S302; MED; open`
+<!-- @gap id=g-if-reject-unenforced-on-structural-declaration-elements sev=MED status=resolved resolved-by=s469-structural-else-guard locus=compiler/src/codegen/emit-html.ts(IF_GATE_BYPASS_TAGS — errors, channel)+compiler/src/engine-statechild-parser.ts(timerGateAttr — onTimeout / onIdle)+compiler/src/symbol-table.ts(timerGateAttrDiagnostic) prov=empirical:S469-s469-structural-else-guard(measured-on-b0cffc6a4) -->
+### G-IF-REJECT-UNENFORCED-ON-STRUCTURAL-DECLARATION-ELEMENTS — §17.1.2's `SHALL REJECT` list is unenforced on four elements, two of them with zero diagnostics — `NEW S302; MED; RESOLVED S469 (s469-structural-else-guard — E-GATE-UNSUPPORTED-HOST)`
+
+> **RESOLVED S469 (`s469-structural-else-guard`).** Measured on `b0cffc6a4`: still as below (`<onTimeout if=@f>`
+> compiled clean and the timer armed regardless). Now `<channel if=>` / `<errors if=>` / `<render if=>` (emit-html,
+> ahead of the bypass dispatches) and `<onTimeout if=>` / `<onIdle if=>` (captured by `scanForOnTimeoutEntries` /
+> `scanForOnIdleEntries`, refused in the typer) are **E-GATE-UNSUPPORTED-HOST**; an `else` / `else-if=` on
+> `<onTimeout>` / `<onIdle>` / `<onTransition>` is E-CTRL-001 / E-CTRL-002 (never a chain member). `W-ATTR-001`
+> still fires beside the error on `<channel>` / `<errors>`. SPEC question left open, not decided here: §17.1.2 lists
+> `<onTransition>` as SHALL REJECT `if=`, but §4.15 lists `if=expr` as its slot and §51.0.H uses it as the
+> transition guard (impl#1 honours it) — the reject-list entry looks stale.
 
 §17.1.2 (S302) says every scrml-defined structural element other than the three widened ones SHALL
 reject `if=`. Measured on base AND HEAD:
