@@ -1084,6 +1084,16 @@ function tryEmitNestedLiftEach(eachMarkupNode, scopeVar, fragmentVar, engineCtx)
   // handler (which rejects a genuinely source-less each downstream). Only a
   // non-null, non-string `scopeVar` is bad input.
   if (scopeVar != null && typeof scopeVar !== "string") return null;
+  // §17.1.2.2 (S469, g-structural-element-if-chain-and-show-composition-nominal) — a
+  // lifted `<each>` is routed here BEFORE `emitCreateElementFromMarkup`'s `else` /
+  // `else-if=` backstop is reached, so `<div if=@f>a</div><each else …>` in lifted
+  // markup rendered its rows whatever `@f` said. Refused here (the recorded error fails
+  // the compile); lowering continues so sibling diagnostics still surface.
+  {
+    const _attrs = eachMarkupNode.attributes ?? eachMarkupNode.attrs;
+    const _elseAttr = Array.isArray(_attrs) ? _attrs.find((a) => a && (a.name === "else" || a.name === "else-if")) : null;
+    if (_elseAttr) refuseUnloweredElseChain(_elseAttr.name, "on a lifted `<each>`", _elseAttr.span ? _elseAttr : eachMarkupNode);
+  }
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const each = require("./emit-each.ts");
   if (!each || typeof each.emitNestedEachFromMarkup !== "function") return null;

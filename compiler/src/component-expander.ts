@@ -1417,6 +1417,7 @@ function reparseSynthesizedFile(
         message: e.message,
         span: e.tabSpan,
         severity: e.severity,
+        ...((e as any).structuralChainRefusal === true ? { structuralChainRefusal: true } : {}),
       })),
     };
   }
@@ -1516,6 +1517,7 @@ export function parseComponentBody(
         code: e.code,
         message: e.message,
         span: e.span,
+        ...((e as any).structuralChainRefusal === true ? { structuralChainRefusal: true } : {}),
       })),
       // §15.13.5 / §51.0.K — engines declared inside the re-parsed body (both
       // the structural `engine-decl` form and the `${ <engine/> }` lift form).
@@ -1666,7 +1668,22 @@ function parseComponentDef(
   // S459 L2 — an attribute-level refusal (E-ATTR-001: a single-quoted value, which is not
   // an attribute-string delimiter) is reported under its OWN code, exactly as outside a
   // component; the attribute recovered as `absent`, so the body is not "malformed".
-  const parseErrors = allParseErrors.filter((e) => e.code !== "E-ATTR-001" && e.code !== "E-SCRIPT-001" && e.code !== "E-STYLE-001");
+  // §17.1.2.2 (S469) — an `else` / `else-if=` on a structural element in the body
+  // (ast-builder `refuseUnconsumedStructuralChainAttrs`, E-CTRL-001 / -002) is reported as
+  // itself, at its own position: the body parsed, so it is not "malformed".
+  const isStructuralChainRefusal = (e: any): boolean => e?.structuralChainRefusal === true;
+  for (const e of allParseErrors) {
+    if (!isStructuralChainRefusal(e)) continue;
+    const defSpan = span ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 };
+    const at = bodyDiagnosticSourceSpan(defSpan, normalizedBody, e.span?.start, e.span?.end) as any;
+    const line = typeof at?.line === "number" ? at.line : 0;
+    ceErrors.push(makeCEError(
+      e.code,
+      `${String(e.message).replace(/\(line \d+\)/, `(line ${line})`)} (in component \`${name}\`)`,
+      at,
+    ));
+  }
+  const parseErrors = allParseErrors.filter((e) => e.code !== "E-ATTR-001" && e.code !== "E-SCRIPT-001" && e.code !== "E-STYLE-001" && !isStructuralChainRefusal(e));
   for (const e of allParseErrors) {
     if (e.code !== "E-ATTR-001") continue;
     const defSpan = span ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 };

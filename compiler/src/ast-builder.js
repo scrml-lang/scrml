@@ -4809,6 +4809,73 @@ function structuralHeaderAnchor(block, header) {
 }
 
 /**
+ * §17.1.1 / §17.1.2.2 — capture an `else` / `else-if=` chain-membership attribute
+ * from a scrml-defined STRUCTURAL element opener (`<engine>` / `<match>` / `<each>`).
+ *
+ * WHY (gap g-structural-element-if-chain-and-show-composition-nominal, S469). The
+ * structural builders reconstruct each opener from NAMED attribute regexes, so an
+ * `else` / `else-if=` on one was DISCARDED at parse time — and `collapseIfChains`
+ * only takes `kind:"markup"` nodes as chain members. `<div if=@f>a</div><engine
+ * else …>` therefore rendered BOTH the `if=` branch and the engine, at exit 0: a
+ * branch the author gated rendered anyway. The attribute must survive the opener
+ * parse so the one chain-membership check (`refuseUnconsumedStructuralChainAttrs`)
+ * can see it and refuse it — impl#1 does not lower a structural element as a chain
+ * member.
+ *
+ * The name search runs on a mask that blanks quoted strings and every balanced
+ * `{…}` / `(…)` / `[…]` group (depth-aware, length-preserving), so an `else` inside
+ * an `on=(if (a) b else c)` value or an `effect=${ … else … }` body is never read as
+ * the opener's own attribute.
+ *
+ * @returns {{ name: "else" | "else-if", raw: string, span: Span } | null}
+ */
+function captureStructuralChainAttr(header, absStart, line, col, filePath) {
+  if (typeof header !== "string" || header.length === 0) return null;
+  const chars = header.split("");
+  let depth = 0;
+  let quote = null;
+  for (let j = 0; j < chars.length; j++) {
+    const c = chars[j];
+    if (quote) {
+      if (c === "\\") { chars[j] = " "; if (j + 1 < chars.length) chars[++j] = " "; continue; }
+      if (c === quote) quote = null;
+      else chars[j] = " ";
+      continue;
+    }
+    if (c === '"' || c === "'" || c === "`") { quote = c; continue; }
+    if (c === "{" || c === "(" || c === "[") { depth++; continue; }
+    if (c === "}" || c === ")" || c === "]") { if (depth > 0) depth--; continue; }
+    if (depth > 0 && c !== "\n") chars[j] = " ";
+  }
+  const masked = chars.join("");
+  // `else-if=` first (it also begins with `else`); a bare `else` is a standalone
+  // token not followed by `-`, `=` or an identifier character.
+  let m = masked.match(/(^|\s)(else-if)\s*=/);
+  let name = "else-if";
+  if (!m) {
+    m = masked.match(/(^|\s)(else)(?![-\w=$])/);
+    name = "else";
+  }
+  if (!m) return null;
+  const at = m.index + m[1].length;
+  const before = header.slice(0, at);
+  const nl = (before.match(/\n/g) || []).length;
+  const lastNl = before.lastIndexOf("\n");
+  const len = name === "else" ? 4 : 7;
+  return {
+    name,
+    raw: header.slice(at, at + len),
+    span: {
+      file: filePath,
+      start: absStart + at,
+      end: absStart + at + len,
+      line: line + nl,
+      col: nl > 0 ? (at - lastNl) : col + at,
+    },
+  };
+}
+
+/**
  * Parse the attribute token stream produced by tokenizeAttributes() into
  * AttrNode[].
  *
@@ -22384,6 +22451,11 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
         const _matchIf = captureStructuralIfAttr(
           header, _matchIfAnchor.absStart, _matchIfAnchor.line, _matchIfAnchor.col, filePath, errors,
         );
+        // §17.1.1 — `else` / `else-if=` on this opener, kept for the chain-membership
+        // check (see captureStructuralChainAttr). Absent (not null) when not written.
+        const _matchIfChain = captureStructuralChainAttr(
+          header, _matchIfAnchor.absStart, _matchIfAnchor.line, _matchIfAnchor.col, filePath,
+        );
 
         // `on=expr` capture: takes everything after `on=` up to the next
         // standalone attribute boundary OR end of header. Conservative —
@@ -22708,6 +22780,7 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
           // §17.1.2 — `if=` render gate; ABSENT (not null) when there is no
           // `if=`. See the `<each>` node's stamp for why omission, not null.
           ...(_matchIf ? { ifRaw: _matchIf.raw, ifCond: _matchIf.value } : {}),
+          ...(_matchIfChain ? { chainAttr: _matchIfChain } : {}),
           span,
           openerHadSpaceAfterLt: block.openerHadSpaceAfterLt === true,
         };
@@ -23462,6 +23535,11 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
         const _eachIf = captureStructuralIfAttr(
           header, _eachIfAnchor.absStart, _eachIfAnchor.line, _eachIfAnchor.col, filePath, errors,
         );
+        // §17.1.1 — `else` / `else-if=` on this opener, kept for the chain-membership
+        // check (see captureStructuralChainAttr). Absent (not null) when not written.
+        const _eachIfChain = captureStructuralChainAttr(
+          header, _eachIfAnchor.absStart, _eachIfAnchor.line, _eachIfAnchor.col, filePath,
+        );
 
         // `as name` — whitespace-separated bareword (no `=` between `as`
         // and the variable name) per HU-1 Q6 canonical form
@@ -23712,6 +23790,7 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
           // undefined-when-absent for the same reason. Every consumer tests
           // truthiness, so absent and null are indistinguishable to them.
           ...(_eachIf ? { ifRaw: _eachIf.raw, ifCond: _eachIf.value } : {}),
+          ...(_eachIfChain ? { chainAttr: _eachIfChain } : {}),
           span,
           openerHadSpaceAfterLt: block.openerHadSpaceAfterLt === true,
         };
@@ -24359,6 +24438,11 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
         const _engineIf = captureStructuralIfAttr(
           header, _engineIfAnchor.absStart, _engineIfAnchor.line, _engineIfAnchor.col, filePath, errors,
         );
+        // §17.1.1 — `else` / `else-if=` on this opener, kept for the chain-membership
+        // check (see captureStructuralChainAttr). Absent (not null) when not written.
+        const _engineIfChain = captureStructuralChainAttr(
+          header, _engineIfAnchor.absStart, _engineIfAnchor.line, _engineIfAnchor.col, filePath,
+        );
         // §51.0.H Form 3 (S148, Insight 33 Fork C1) — `effect=${...}` on the
         // ENGINE OPENER (NOT a state-child): the boot-only init effect, the
         // effect of the implicit init→`initial=` transition (Elm init+Cmd).
@@ -24874,6 +24958,7 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
           // ABSENT (not null) when there is no `if=` — see the `<each>` node's
           // stamp for the parser-parity reason.
           ...(_engineIf ? { ifRaw: _engineIf.raw, ifCond: _engineIf.value } : {}),
+          ...(_engineIfChain ? { chainAttr: _engineIfChain } : {}),
           span,
         };
       }
@@ -24940,6 +25025,11 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
         const _matchIfAnchor = structuralHeaderAnchor(block, header);
         const _matchIf = captureStructuralIfAttr(
           header, _matchIfAnchor.absStart, _matchIfAnchor.line, _matchIfAnchor.col, filePath, errors,
+        );
+        // §17.1.1 — `else` / `else-if=` on this opener, kept for the chain-membership
+        // check (see captureStructuralChainAttr). Absent (not null) when not written.
+        const _matchIfChain = captureStructuralChainAttr(
+          header, _matchIfAnchor.absStart, _matchIfAnchor.line, _matchIfAnchor.col, filePath,
         );
 
         // `on=expr` capture: takes everything after `on=` up to the next
@@ -25024,6 +25114,7 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
           // §17.1.2 — `if=` render gate; ABSENT (not null) when there is no
           // `if=`. See the `<each>` node's stamp for why omission, not null.
           ...(_matchIf ? { ifRaw: _matchIf.raw, ifCond: _matchIf.value } : {}),
+          ...(_matchIfChain ? { chainAttr: _matchIfChain } : {}),
           span,
           openerHadSpaceAfterLt: block.openerHadSpaceAfterLt === true,
         };
@@ -25906,6 +25997,72 @@ function collapseIfChains(nodes, errors, filePath) {
   return result;
 }
 
+const STRUCTURAL_CHAIN_TAG = { "engine-decl": "engine", "match-block": "match", "each-block": "each" };
+
+/**
+ * §17.1.1 / §17.1.2.2 — the chain-membership invariant for NON-markup nodes: an
+ * `else` / `else-if=` is meaningful only on a node `collapseIfChains` consumes as a
+ * chain member, and that pass consumes `kind:"markup"` nodes only. So every non-markup
+ * node still carrying one — wherever it sits in the tree (top level, nested markup, an
+ * `<each>` row, a chain branch, an engine state-child, a match arm, a component body,
+ * lifted markup) — is an unconsumed chain attribute and is refused here, once.
+ *
+ * Gap g-structural-element-if-chain-and-show-composition-nominal (S469): the structural
+ * openers (`<engine>` / `<match>` / `<each>`) used to drop the attribute at parse time,
+ * so `<div if=@f>a</div><engine else …>` rendered BOTH branches at exit 0. impl#1 does
+ * not lower a structural element as a chain member (frozen; the bootstrap owes the
+ * composition §17.1.2.2 specifies), so it refuses — the same codes an `else` /
+ * `else-if=` that is not part of a lowered chain gets everywhere else (E-CTRL-001 /
+ * E-CTRL-002, cf. codegen `refuseUnloweredElseChain`).
+ *
+ * Markup nodes are NOT handled here: an orphan on a level `collapseIfChains` walks is
+ * reported there, and the levels it does not walk (an `<each>` row, lifted markup) are
+ * refused by the codegen backstop `refuseUnloweredElseChain`. State openers carry their
+ * own code (E-CTRL-004, `collapseIfChains`).
+ */
+function refuseUnconsumedStructuralChainAttrs(nodes, errors) {
+  const seen = new Set();
+  const visit = (v) => {
+    if (v == null || typeof v !== "object" || seen.has(v)) return;
+    seen.add(v);
+    if (Array.isArray(v)) { for (const x of v) visit(x); return; }
+    const kind = v.kind;
+    if (typeof kind === "string" && kind !== "markup" && kind !== "state" && kind !== "state-constructor-def") {
+      let attr = v.chainAttr && (v.chainAttr.name === "else" || v.chainAttr.name === "else-if") ? v.chainAttr : null;
+      if (!attr && Array.isArray(v.attrs)) {
+        attr = v.attrs.find((a) => a && (a.name === "else" || a.name === "else-if")) ?? null;
+      }
+      if (attr) {
+        const tag = STRUCTURAL_CHAIN_TAG[kind] ?? (typeof v.tag === "string" ? v.tag : kind);
+        const code = attr.name === "else" ? "E-CTRL-001" : "E-CTRL-002";
+        const spelled = attr.name === "else" ? "`else`" : "`else-if=`";
+        const span = attr.span ?? v.span ?? { line: 0, col: 0 };
+        const workaround = tag === "engine"
+          ? `give the \`<engine>\` its own \`if=\` with the negated condition (\`<engine if=COND …>\`; an engine under a chain branch is refused too, E-CG-003)`
+          : `wrap it in the chain member — \`<div ${attr.name === "else" ? "else" : "else-if=COND"}><${tag} …>…</></div>\` — or give it its own \`if=\` with the negated condition`;
+        const err = new TABError(
+          code,
+          `${code}: ${spelled} on \`<${tag}>\` (line ${span.line ?? 0}) is not part of a lowered \`if=\` chain — ` +
+          `impl#1 builds \`if=\` / \`else-if=\` / \`else\` chains from markup elements only and does not lower ` +
+          `a structural element as a chain member, so the \`<${tag}>\` would render whatever the preceding ` +
+          `condition says. It is refused rather than emitted ungated (§17.1.2.2). Instead, ${workaround}.`,
+          span,
+        );
+        // Read by the component expander: in a component body this is reported as itself,
+        // at its own position — not as an E-COMPONENT-021 "malformed body".
+        err.structuralChainRefusal = true;
+        errors.push(err);
+      }
+    }
+    for (const k of Object.keys(v)) {
+      if (k === "span" || k === "parent" || k === "chainAttr") continue;
+      const c = v[k];
+      if (c && typeof c === "object") visit(c);
+    }
+  };
+  visit(nodes);
+}
+
 /**
  * `for` body `lift` detection for E-CTRL-010. Returns true iff the subtree
  * rooted at `root` contains a `lift`.
@@ -26377,6 +26534,8 @@ function _buildASTImpl(bsOutput, tokenizerOverrides) {
 
   // §17.1.1: Collapse if=/else-if=/else sibling chains into IfChainExpr nodes
   nodes = collapseIfChains(nodes, errors, filePath);
+  // §17.1.2.2 — an `else` / `else-if=` on a structural element is never a chain member.
+  refuseUnconsumedStructuralChainAttrs(nodes, errors);
 
   // §67.6 (S462 md phase 2) — static `<md>` heading ids, page-wide: deduped against every
   // author `id=` in the file and every earlier `<md>` heading.
