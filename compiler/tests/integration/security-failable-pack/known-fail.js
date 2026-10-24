@@ -52,6 +52,20 @@ export const UNJUDGED = {
   "f2/producer imports the enum: return match, named": "g-server-js-imports-module-without-server-file-s467",
   "f2/producer imports the enum: !{}, positional": "g-server-js-imports-module-without-server-file-s467",
 
+  // S469 r6 — r7-shapes.js cross-file `match e` shapes whose emitted bundle / module cannot load (the
+  // emission bugs named): judged UNJUDGED (pack.js `loadFailure`), never counted as a pass. The same
+  // shapes run (and PASS) where the bundle loads: s10 / f7 / t5 "B imported enum …".
+  "s10/B imported from a third file enum + local same-name, match e": "g-server-js-imports-module-without-server-file-s467",
+  "s10/B imported from a third file enum, no local enum, match e": "g-server-js-imports-module-without-server-file-s467",
+  "f7/B imported from a third file enum + local same-name, match e": "g-server-js-imports-module-without-server-file-s467",
+  "f7/B imported from a third file enum, no local enum, match e": "g-server-js-imports-module-without-server-file-s467",
+  "l5/B imported enum + local same-name, match e": "g-library-tool-cross-file-import-source-path-s469",
+  "l5/B imported enum, no local enum, match e": "g-library-tool-cross-file-import-source-path-s469",
+  "l5/B imported from a third file enum + local same-name, match e": "g-library-tool-cross-file-import-source-path-s469",
+  "l5/B imported from a third file enum, no local enum, match e": "g-library-tool-cross-file-import-source-path-s469",
+  "t5/B imported from a third file enum + local same-name, match e": "g-library-tool-cross-file-import-source-path-s469",
+  "t5/B imported from a third file enum, no local enum, match e": "g-library-tool-cross-file-import-source-path-s469",
+
   "n6/cli->srv expr direct": "no #wrong button: client -> server call, needs the server half",
   "n6/cli->srv stmt direct": "no #wrong button: client -> server call, needs the server half",
 };

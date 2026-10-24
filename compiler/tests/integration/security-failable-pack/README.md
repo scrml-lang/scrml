@@ -256,6 +256,27 @@ third file) is refused rather than guessed. The short form's "arm reads `e`" wal
 it does not model (an object shorthand, a nested `match` arm). The t3 valid shapes are refused on every
 tree (a tool function's `return match` takes the async IIFE header; `g-impl1-async-match-positions-refused-s469`).
 
+## Measured (S469 s469-server-return-match-await round 6 — s10 / f7 / l5 / t5; 148 shapes)
+
+`r7-shapes.js` (the review of `716ee804e`) on four sides. FAIL counts, base `b35babcc2` → round 5
+`716ee804e` → round 6:
+
+| family | base | round 5 | round 6 |
+|---|---|---|---|
+| s10 (server, 37) | 15 | 23 | 0 |
+| f7 (fullstack, 37) | 14 | 23 | 0 |
+| l5 (library, 37) | 11 | 17 | 0 |
+| t5 (tool, 37) | 15 | 22 | 0 |
+
+The whole-error binder `_ e :>` is checked by an ALLOW-list that fails closed (`match e` over its
+variants, `is`, `e.variant`, a variant constructor / local function typed with the same enum, `log`);
+every payload read, comparison, container, alias and cell write is refused. `match e` binds by the
+handled call's identity-resolved enum (never a same-named local enum) and works with no local enum.
+`?` compares canonical field types. 10 cross-file shapes are UNJUDGED (the bundle / module cannot load:
+`g-server-js-imports-module-without-server-file-s467`, `g-library-tool-cross-file-import-source-path-s469`);
+their single-file-loadable twins PASS. s8 / l3 "held in a local then passed on" is now PASS-REFUSED (a
+local alias is not an allowed use).
+
 ## Running
 
 ```sh
