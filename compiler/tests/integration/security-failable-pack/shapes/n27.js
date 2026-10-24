@@ -20,6 +20,7 @@
 // Round 3 (shapes named `r3 …`): 197 FAIL / 3 PASS / 75 PASS-REFUSED on 412b77b8b, all PASS-REFUSED after.
 // Round 4 (shapes named `r4 …`): 109 FAIL / 1 PASS / 32 PASS-REFUSED on 20fadd7b4; 0 FAIL after (4 legal openers PASS).
 // Round 5 (shapes named `r5 …`): 13 FAIL / 3 PASS-DENY / 2 PASS / 8 PASS-REFUSED on 88d71e8ba; all PASS-REFUSED after.
+// Round 6 (shapes named `r6 …`): whitespace (state) openers — see the round-6 block.
 // Data, not logic: the default export is a list of [name, scrml source]. Side: client (click #wrong /
 // #right, read #out). Do not edit a shape to make it pass.
 
@@ -263,6 +264,21 @@ for (const [en, el] of R3_ELEMENTS) {
 }
 for (const o of [`= if=${PWG}`, `=if=${PWG}`, `id=a =if=${PWG}`]) {
   shapes.push([`r5 <match> arm <A ${o.replace(PWG, "…")}>, in markup`, POSITIONS[0][1](ARM(o))]);
+}
+
+// ---------------------------------------------------------------------------------------------------
+// Round 6 (review of 9be2cecf9): a whitespace opener `< span if=…>` is a STATE opener — the gate was
+// kept but never read, the element not emitted and its children rendered unconditionally (only
+// W-WHITESPACE-001). Pre-existing, same on base. Now E-GATE-UNSUPPORTED-HOST (and the dropped-value /
+// orphan refusals in the state-opener attribute reader).
+// ---------------------------------------------------------------------------------------------------
+for (const o of [
+  `< span if=(@pw == "secret")>`, `< div class="box" if=(@pw == "secret")>`, `< div show=(@pw == "secret")>`,
+  `< div IF=(@pw == "secret")>`, `< div x=-1 if=(@pw == "secret")>`, `< div x=) if=(@pw == "secret")>`,
+]) {
+  const tag = o.match(/^< (\w+)/)[1];
+  shapes.push([`r6 whitespace opener ${o.replace(`(@pw == "secret")`, "…")}, in markup`,
+    POSITIONS[0][1](`${o}<b>LOGGED IN</b></${tag}>`)]);
 }
 
 export default shapes;

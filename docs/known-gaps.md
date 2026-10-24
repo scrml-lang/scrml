@@ -14933,6 +14933,21 @@ escape hatch, and the error surfaces only when the emitted `client.js` fails to 
 _scrml_reactive_get("g") th…`). Fails closed (same on base and both rounds), but the message reads as a compiler defect.
 A TAB diagnostic on an unparseable `derived=` value (naming the ternary / `match` forms) is the fix.
 
+<!-- @gap id=g-whitespace-opener-gate-dropped-s469 sev=HIGH status=resolved resolved-by=s469-structural-else-guard locus=compiler/src/ast-builder.js(collapseIfChains — the state-opener gate refusal beside E-CTRL-004; parseTypedAttributes — dropped-value / orphan / reserved-word refusals) prov=review:S469-s469-structural-else-guard-round-6(review-of-9be2cecf9,executed-under-happy-dom) -->
+### g-whitespace-opener-gate-dropped-s469 — ⚠ SECURITY: `< span if=@n>SECRET</span>` (a space after `<`) is a STATE opener: the gate was kept but never read and the children rendered unconditionally — `NEW S469; HIGH; RESOLVED S469 by refusal (E-GATE-UNSUPPORTED-HOST)`
+
+Repro (pre-existing, same on base): `<n> = false` then `<div id="out">< span if=@n><p>SECRET</p></span></div>` — the
+only diagnostic was W-WHITESPACE-001; `< div class="box" if=@n>`, `show=`, and a whitespace opener as a `<program>`
+child section did the same. The block splitter reads `< name` as a state opener, `parseTypedAttributes` keeps its
+attributes, and nothing gates a state opener's children.
+
+> **RESOLVED S469 round 6 by refusal.** An `if=` / `show=` (or a case variant) on a state opener is
+> E-GATE-UNSUPPORTED-HOST, beside the E-CTRL-004 check in `collapseIfChains`; the message says to remove the space.
+> `parseTypedAttributes` also refuses what would hide a gate: an operator-run value, a dropped value that leaves a
+> gate name as the value (`< div x=-1 if=@n>`), an orphaned `=` / value, and `x= else`. Pinned by pack n27 `r6`
+> shapes and the differential test. A state opener nested in an `<each>` row (its sub-build runs no `collapseIfChains`)
+> is not covered by the gate check — not measured leaking, noted for the next reader.
+
 <!-- @gap id=g-unregistered-upper-tag-if-ssr-first-paint-s469 sev=HIGH status=open locus=searched:compiler/src/codegen/emit-html.ts(an unresolved upper-case / type-named tag carrying if= is emitted with data-scrml-bind-if, its children in the live first-paint tree)—not-traced prov=empirical:S469-s469-structural-else-guard-round-5(review-of-88d71e8ba-M2,executed-under-happy-dom) -->
 ### g-unregistered-upper-tag-if-ssr-first-paint-s469 — ⚠ SECURITY: `<Pt if=@n>` on an upper-case tag that names no component (a type name: `<Phase if=@n>`) ships its content in the SSR / first-paint HTML and hides it only after hydration — `NEW S469; HIGH; open`
 

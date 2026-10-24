@@ -87,3 +87,9 @@ a lifted `<each>`.
 - [x] sigil exemption exact (one `.`/`:`, bare identifier, no `=` after); M5 reserved-word values; M1 registered components only.
 - [x] M2 / M4 filed (security gaps, repros).
 - [x] differential test 1044; pack n27 +26 (1322 → 1348); SPEC note; gaps.
+
+## Round 6 (review of 9be2cecf9 — last round)
+
+- [x] aliased component imports registered by their local name.
+- [x] whitespace (state) openers: gate refused (E-GATE-UNSUPPORTED-HOST); parseTypedAttributes no-skip / dropped-value / reserved-word refusals; gap filed resolved-by-refusal.
+- [x] differential test 1056; pack n27 +6.

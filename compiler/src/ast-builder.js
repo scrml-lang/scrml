@@ -5665,8 +5665,26 @@ function parseTypedAttributes(tokens, filePath, errors) {
           const valSpan = tokenSpan(valTok, filePath);
           if (valTok.kind === "ATTR_STRING") {
             value = { kind: "string-literal", value: valTok.text, span: valSpan };
+          } else if (valTok.kind === "ATTR_IDENT" && (valTok.text === "else" || valTok.text === "if")) {
+            // S469 round 6 — a reserved word read as a value (`x= else`): not a gate.
+            errors.push(new TABError("E-ATTR-001",
+              `E-ATTR-001: \`${valTok.text}\` cannot be the value of \`${name}\` — it is a reserved word (§17.1.1). ` +
+              `Remove the stray \`=\` or quote the value.`, valSpan));
+            value = { kind: "absent" };
           } else if (valTok.kind === "ATTR_IDENT") {
             value = { kind: "variable-ref", name: valTok.text, exprNode: safeParseExprToNodeGlobal(valTok.text, filePath, valSpan?.start ?? 0), span: valSpan };
+          } else if (valTok.kind === "ATTR_OP_REJECT") {
+            // S469 round 6 — the operator run reaches the opener's close: a gate after it is lost.
+            const _d = unquotedRejectDiagnostic(name, valTok.text);
+            errors.push(new TABError(_d.code, _d.message, valSpan));
+            value = { kind: "absent" };
+          } else if (valTok.kind === "ATTR_NAME" && /^(if|else|else-if|show)$/i.test(String(valTok.text))) {
+            // S469 round 6 — a value the tokenizer dropped (`x=-1`, `x=)`) left the next name — a gate —
+            // as the value.
+            errors.push(new TABError("E-ATTR-001",
+              `E-ATTR-001: the value of \`${name}\` could not be read, so the gate attribute \`${valTok.text}\` after it would be ` +
+              `taken as its value and lost. It is refused rather than read ungated. Quote or parenthesize the value.`, valSpan));
+            value = { kind: "absent" };
           } else {
             value = { kind: "absent" };
           }
@@ -5687,7 +5705,14 @@ function parseTypedAttributes(tokens, filePath, errors) {
       continue;
     }
 
-    // Skip TAG_OPEN, TAG_CLOSE_GT, TAG_SELF_CLOSE, EOF
+    // Skip TAG_OPEN, TAG_CLOSE_GT, TAG_SELF_CLOSE, EOF. S469 round 6 — the no-skip rule, as in
+    // `parseAttributes`: an orphaned `=` / value (which may hold a gate) is refused.
+    if (tok.kind !== "TAG_OPEN" && tok.kind !== "TAG_CLOSE_GT" && tok.kind !== "TAG_SELF_CLOSE" && tok.kind !== "EOF") {
+      errors.push(new TABError("E-ATTR-001",
+        `E-ATTR-001: \`${tok.kind === "ATTR_EQ" ? "=" : String(tok.text ?? "").slice(0, 40)}\` in this opener is not part of any ` +
+        `attribute (a stray \`=\`, or a value with no name before it), so it would be silently dropped — with any gate it ` +
+        `holds. It is refused rather than read ungated.`, tokenSpan(tok, filePath)));
+    }
     i++;
   }
 
@@ -26150,6 +26175,24 @@ function collapseIfChains(nodes, errors, filePath) {
     // AND the in-chain case: a state-opener-with-else following an `if=` is never
     // consumed by the chain scan below — it breaks the chain at the non-markup guard
     // and re-enters this loop as its own node here — so E-CTRL-004 fires exactly once.
+    // S469 round 6 — `< span if=@n>` (a space after `<`) is a STATE opener, not an element:
+    // `parseTypedAttributes` keeps the attribute but nothing reads it — the element is not
+    // emitted and its children render unconditionally (only W-WHITESPACE-001 fired). Any
+    // `if=` / `show=` (or a case variant) on a state opener is refused.
+    if (node.kind === "state" || node.kind === "state-constructor-def") {
+      for (const a of (node.attrs ?? [])) {
+        const lower = a && typeof a.name === "string" ? a.name.toLowerCase() : "";
+        if (lower !== "if" && lower !== "show") continue;
+        const stateName = typeof node.stateType === "string" ? node.stateType : (typeof node.name === "string" ? node.name : "state");
+        errors.push(new TABError(
+          GATE_UNSUPPORTED_HOST_CODE,
+          gateUnsupportedHostMessage(lower, stateName,
+            `the state opener \`< ${stateName}>\` (a space after \`<\` makes it a state block, not an element)`,
+            `Remove the space — \`<${stateName} ${a.name}=…>\` is the element, and gates.`),
+          a.span ?? node.span ?? { line: 0, col: 0 },
+        ));
+      }
+    }
     if ((node.kind === "state" || node.kind === "state-constructor-def") &&
         (node.attrs ?? []).some(a => a.name === "else" || a.name === "else-if")) {
       errors.push(new TABError(
@@ -26852,6 +26895,11 @@ function _buildASTImpl(bsOutput, tokenizerOverrides) {
     const componentNames = new Set();
     for (const c of components) if (c && typeof c.name === "string") componentNames.add(c.name);
     for (const im of imports) {
+      // The LOCAL binding is the tag the file writes (`import { ShowCard as SC }` → `<SC>`);
+      // `names` holds the imported name, `specifiers[].local` the alias (S469 round 6).
+      for (const sp of (im && Array.isArray(im.specifiers) ? im.specifiers : [])) {
+        if (sp && typeof sp.local === "string") componentNames.add(sp.local);
+      }
       for (const n of (im && Array.isArray(im.names) ? im.names : [])) {
         const nm = typeof n === "string" ? n : (n && (n.local ?? n.name));
         if (typeof nm === "string") componentNames.add(nm);

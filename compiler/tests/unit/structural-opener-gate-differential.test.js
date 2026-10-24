@@ -383,3 +383,29 @@ describe("round 5 — no attribute token is silently skipped; the sigil exemptio
     expect(compileCodes(`const Card = <div props={ Show: boolean }><p>c</p></div>\n<div id="out"><Card Show=@n/></div>\n`)).not.toContain("E-GATE-ATTR-CASE");
   });
 });
+
+describe("round 6 — an aliased component import is registered; whitespace (state) openers refuse a gate", () => {
+  test("import { ShowCard as SC } — <SC Show=@f/> on a declared Show prop compiles; If too", () => {
+    const dir = mkdtempSync(join(tmpdir(), "scrml-gate-alias-"));
+    try {
+      writeFileSync(join(dir, "comp.scrml"), "export const ShowCard = <div props={ Show: boolean, If: boolean }><p>c</p></div>\n");
+      writeFileSync(join(dir, "app.scrml"), "import { ShowCard as SC } from './comp.scrml'\n<f> = true\n<div id=\"out\"><SC Show=@f If=@f/></div>\n");
+      const r = compileScrml({ inputFiles: [join(dir, "app.scrml")], write: false, outputDir: join(dir, "out"), log: () => {} });
+      const codes = (r.errors ?? []).filter((e) => (e.severity ?? "error") === "error").map((e) => e.code);
+      expect(codes).not.toContain("E-GATE-ATTR-CASE");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+  for (const opener of ["< span if=@n>", "< div class=\"box\" if=@n>", "< div show=@n>", "< div IF=@n>", "< div Show=@n>",
+                        "< div x=-1 if=@n>", "< div x=) if=@n>", "< div x=a= if=@n>", "< div x=.Show>", "< div x= else>"]) {
+    test(`${opener} (a state opener) — refused, never rendered ungated`, () => {
+      const { errors } = tab(`<div id="out">${opener}<p>SECRET</p></div></div>\n`);
+      expect(errors.map((e) => e.code).filter((c) => c.startsWith("E-")).length).toBeGreaterThan(0);
+    });
+  }
+  test("a plain state opener without a gate still compiles (no false refusal)", () => {
+    const { errors } = tab(`< counter>\n</>\n<div id="out">x</div>\n`);
+    expect(errors.map((e) => e.code).filter((c) => c === "E-GATE-UNSUPPORTED-HOST" || c === "E-ATTR-001")).toEqual([]);
+  });
+});
