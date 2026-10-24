@@ -9,7 +9,7 @@
 // sibling elements). Revokes: a cell; a cell, then a reorder in a SEPARATE handler run (a later timer
 // turn — the shape #1529's review found one-run probes miss); a reorder, then the cell revoke; a same-key
 // replace; an in-place field write; an in-place write, then a reorder; a cell revoke, then a remove and
-// a re-add of the row that shows the text. And a `match` statement in the row (on a cell, on the row's field).
+// a re-add of the row that shows the text. And a `match` statement in the row (on a cell, on the row's field), and a closed gate in a nested-loop region of a keyed row (S469 round 2).
 //
 // Only row 2's gated element holds text (`${r.id == 2 ? "LOGGED IN" : ""}`), so a reorder that moves a
 // stale node of row 2 is visible in `#out`. Every page starts GRANTED and `#wrong` revokes.
@@ -89,4 +89,32 @@ shapes.push(["a match statement on the row's field — same-key replace", MATCH_
 shapes.push(["a match statement on the row's field — in-place write", MATCH_PAGE("",
   `match r.ok { true => { lift ${B} } false => { lift <i></i> } }`,
   `@xs[1].ok = grant("wrong")`, `@xs[1].ok = grant("secret")`)]);
+// S469 round 2 (review of b84c3f6de, HIGH-1) — a CLOSED gate inside #1529's nested-loop REGION of a keyed
+// row (the inner loop is a region because a sibling's gate reads its own local). The region removed only
+// the nodes its last run built; the gate swapped its element in afterwards, so after the next run (the
+// inner list changed) and the gate's disposal the element stayed in the page for good — main too. Every
+// page starts DENIED; `#wrong` grants, changes the inner list in a later run, and revokes in a later run
+// still; `#right` grants.
+const REGION_PAGE = (gate, wrongSteps) => `<pw> = "wrong"
+<xs> = [{ id: 1, tags: ["a"] }]
+<button id="wrong" onclick=\${ @pw = "secret"
+ ${wrongSteps.map((st) => `setTimeout(() => { ${st} }, 0)`).join("\n ")} }>go</button>
+<button id="right" onclick=\${ @pw = "secret" }>go</button>
+<div id="out">\${ for (r of @xs) { lift <li>\${ for (t of r.tags) { const lbl = t + r.id
+ lift <i if=\${lbl != ""}></i>
+ lift ${gate} } }</li> } }</div>
+`;
+const REGION_GATES = [
+  ["the region body's root", `<b if=\${@pw == "secret"}>LOGGED IN</b>`],
+  ["nested in an element of the region body", `<span><b if=\${@pw == "secret"}>LOGGED IN</b></span>`],
+];
+const REGION_RUNS = [
+  ["inner list emptied, then revoked", [`@xs[0].tags = []`, `@pw = "wrong"`]],
+  ["inner list replaced, then revoked", [`@xs[0].tags = ["b"]`, `@pw = "wrong"`]],
+  ["row replaced under its key, then revoked", [`@xs = [{ id: 1, tags: ["c"] }]`, `@pw = "wrong"`]],
+  ["inner list emptied, revoked, refilled", [`@xs[0].tags = []`, `@pw = "wrong"`, `@xs[0].tags = ["d"]`]],
+];
+for (const [gn, gate] of REGION_GATES) {
+  for (const [rn, steps] of REGION_RUNS) shapes.push([`closed gate in a loop region (${gn}) — ${rn}`, REGION_PAGE(gate, steps)]);
+}
 export default shapes;
