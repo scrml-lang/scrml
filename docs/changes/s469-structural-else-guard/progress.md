@@ -80,3 +80,10 @@ a lifted `<each>`.
 - [x] HIGH-2: slot loop strictly progresses, no cap.
 - [x] LOW: slot ends at the next top-level `name=`; declared component prop `Show` exempt (CE).
 - [x] differential test 972; pack n27 +142 (1180 → 1322); SPEC note + §34 row; gaps.
+
+## Round 5 (review of 88d71e8ba — FIX on one HIGH)
+
+- [x] HIGH-1 / M3 / L3: no attribute token is silently skipped (parseAttributes, raw-text scanner, arm-opener bail).
+- [x] sigil exemption exact (one `.`/`:`, bare identifier, no `=` after); M5 reserved-word values; M1 registered components only.
+- [x] M2 / M4 filed (security gaps, repros).
+- [x] differential test 1044; pack n27 +26 (1322 → 1348); SPEC note; gaps.

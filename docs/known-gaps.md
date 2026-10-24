@@ -30,7 +30,7 @@
 | Severity | Open (owed by impl#1, the TS compiler) | Carried (owed by the bootstrap; xfail on impl#1) |
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 263 | 5 |
+| HIGH | 265 | 5 |
 | MED | 682 | 8 |
 | LOW | 486 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
@@ -14933,6 +14933,37 @@ escape hatch, and the error surfaces only when the emitted `client.js` fails to 
 _scrml_reactive_get("g") th…`). Fails closed (same on base and both rounds), but the message reads as a compiler defect.
 A TAB diagnostic on an unparseable `derived=` value (naming the ternary / `match` forms) is the fix.
 
+<!-- @gap id=g-unregistered-upper-tag-if-ssr-first-paint-s469 sev=HIGH status=open locus=searched:compiler/src/codegen/emit-html.ts(an unresolved upper-case / type-named tag carrying if= is emitted with data-scrml-bind-if, its children in the live first-paint tree)—not-traced prov=empirical:S469-s469-structural-else-guard-round-5(review-of-88d71e8ba-M2,executed-under-happy-dom) -->
+### g-unregistered-upper-tag-if-ssr-first-paint-s469 — ⚠ SECURITY: `<Pt if=@n>` on an upper-case tag that names no component (a type name: `<Phase if=@n>`) ships its content in the SSR / first-paint HTML and hides it only after hydration — `NEW S469; HIGH; open`
+
+Repro (happy-dom, s469-structural-else-guard round 5 head; same on base):
+```scrml
+type Phase:enum = { Idle, Active }
+<n> = false
+<div id="out"><Phase if=@n><p class="leak">u</p></Phase></div>
+```
+The emitted HTML carries `<Phase data-scrml-bind-if="…"><p class="leak">u</p></Phase>` in the LIVE tree (no
+`<template>`), so the content is visible before hydration (probe: leak 1 at first paint, 0 after mount). The same
+with an enum / struct type name. Fail-open at first paint for anything a gate guards. Fix direction (not decided):
+refuse an upper-case tag that resolves to no component (it is already E-COMPONENT-035 in some positions), or route it
+through the mount gate. Found by the round-5 review (M2); out of this lane's scope.
+
+<!-- @gap id=g-lift-markup-parser-dropped-value-and-case-variant-s469 sev=HIGH status=open locus=searched:compiler/src/codegen/emit-lift.js(the lifted-markup tag parser — _parseLiftAttrValueShared / the lift-tag attribute reader)—not-traced prov=empirical:S469-s469-structural-else-guard-round-5(review-of-88d71e8ba-M4,executed-under-happy-dom) -->
+### g-lift-markup-parser-dropped-value-and-case-variant-s469 — ⚠ SECURITY: lifted markup `lift <p x=-1= if=@n>`, `lift <p x=-1 IF=@n>`, `lift <p x=.Show>` compile clean, render visible with the gate false, and render mangled text — `NEW S469; HIGH; open`
+
+Repro (happy-dom, round 5 head; same on base):
+```scrml
+<xs> = [1]
+<n> = false
+<div id="out">${ for (y of @xs) { lift <p class="leak" x=-1 IF=@n>e</p> } }</div>
+```
+The lifted-markup tag parser is a separate reader from the markup attribute tokenizer: it neither refuses the
+dropped value nor the case-variant gate name, so the `<p>` renders (text `e < / p >` — the closer leaks as text).
+`x=-1= if=@n` and `x=.Show` behave the same, at top level, in a row's lift and under an `if … lift`. The markup and
+structural readers refuse every one of these shapes since S469 rounds 3–5; the lift reader owes the same refusals
+(the one-reader direction: parse lift tags with `tokenizeAttributes` + `parseAttributes`). Found by the round-5
+review (M4); out of this lane's scope.
+
 <!-- @gap id=g-render-element-in-each-row-or-lift-renders-nothing-s469 sev=MED status=open locus=searched:compiler/src/codegen/emit-each.ts(row element builder — `<render>` reaches the generic createElement path),compiler/src/codegen/emit-lift.js(emitCreateElementFromMarkup — same)—not-traced prov=empirical:S469-s469-structural-else-guard(executed-under-happy-dom-on-b0cffc6a4) -->
 ### g-render-element-in-each-row-or-lift-renders-nothing-s469 — `<render of=@v/>` inside an `<each>` row or lifted markup is emitted as a literal `<render>` DOM element and paints nothing, at exit 0 — `NEW S469; MED; open`
 
@@ -15019,6 +15050,17 @@ it in the row / lift builders) not decided; the row and lift element builders ar
 > a slot value ends at the next top-level `name=` (`<each key=x.id + 1 in=@xs as x if=@n>` compiles, slot order
 > free); a component prop declared `Show` is that component's attribute, not E-GATE-ATTR-CASE. Pack n27 +142 (109
 > FAIL on `20fadd7b4`, 0 after); differential test 972.
+>
+> **Round 5 (review of `88d71e8ba`, FIX on one HIGH).** `<engine for=Phase initial=.Active = if=@n>` (and
+> `initial=.Active= if=@n`, `=if=@n`, `= else`, `=else`, `:if=@n`, `accepts=:Phase= if=@n …`) compiled clean and the
+> SSR body shipped the content: the sigil splice left an `=` + value no attribute owned, and the attribute parser
+> SKIPPED such tokens silently. The invariant now: no attribute token is ever silently skipped — an orphan is
+> E-ATTR-001 on every element (markup included, forwarded out of `<each>` rows: `<p x=.A= if=@n>` in a row leaked
+> too), the raw-text scanner walks openers the same way, and an arm opener the arm parser bails on (`<Active =
+> if=@n>`, which rendered the opener as text on every tree) is refused. The sigil exemption is exact (one `.` / `:`,
+> a bare identifier, no `=` after; `initial=-.Active` / `initial=$.Active` no longer start the engine elsewhere). An
+> IDENT value `if` / `else` (`x= else`) is refused. E-GATE-ATTR-CASE skips only registered components (prev refused
+> `<Phase Show=@n>`; round 4 had skipped every upper-case tag). Pack n27 +26; differential test 1044.
 
 **Filed against my own SPEC text, hours after writing it.** §17.1.2.2 (S302) states *"`else` / `else-if=`
 compose with all three, under the ordinary chain rules"* and *"`show=` composes."* **Neither holds.**
