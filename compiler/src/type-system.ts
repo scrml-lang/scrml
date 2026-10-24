@@ -72,6 +72,7 @@
  * Performance budget: <= 20 ms per file.
  */
 
+import { stdlibFailableErrorVariants } from "./stdlib-failable-errors.ts";
 import { armStatements, objectLiteralArmValue } from "./arm-body-statements.ts";
 import { readEngineBody, ENGINE_BODY_FILE, messageArmSource, onTransitionBodySource, guardSource, markBodyWalked, markOwnerReported } from "./engine-body-reader.ts";
 import { readShorthandBody, readBareArmBody, matchArmKey } from "./arm-body-reader.ts";
@@ -10688,6 +10689,30 @@ function annotateNodes(
   // binder binds by THAT enum's field order (the order the producer keys the payload by), so
   // `go(k) !{ .Boom(m) :> … }` reads `data.msg` without this file importing `E`.
   const importedFnErrorEnums = new Map<string, EnumType>();
+  // S469 r2 — and a STANDARD-LIBRARY failable import's declared error enum (stdlib-failable-errors.ts:
+  // an import from `scrml:<module>` reaches no parsed declaration here), by local name.
+  const stdlibFnErrorVariants = new Map<string, Array<{ name: string; fields: string[] }>>();
+  (function collectStdlibFailableImports(nodesArg: ASTNodeLike[]): void {
+    for (const n of nodesArg) {
+      if (!n || typeof n !== "object") continue;
+      if (n.kind === "import-decl" && typeof (n as ASTNodeLike).source === "string") {
+        const source = (n as ASTNodeLike).source as string;
+        const specifiers = (n as ASTNodeLike).specifiers as Array<{ imported?: string; local?: string }> | undefined;
+        const pairs = Array.isArray(specifiers) && specifiers.length > 0
+          ? specifiers.map((sp) => [sp?.imported, sp?.local] as const)
+          : (Array.isArray(n.names) ? (n.names as unknown[]).map((nm) => [nm, nm] as const) : []);
+        for (const [imported, local] of pairs) {
+          if (typeof imported !== "string" || typeof local !== "string") continue;
+          const vs = stdlibFailableErrorVariants(source, imported);
+          if (vs) stdlibFnErrorVariants.set(local, vs);
+        }
+      }
+      const body = n.body as ASTNodeLike[] | undefined;
+      if (Array.isArray(body)) collectStdlibFailableImports(body);
+      const children = n.children as ASTNodeLike[] | undefined;
+      if (Array.isArray(children)) collectStdlibFailableImports(children);
+    }
+  })(fileTopLevelNodes);
   for (const [localName, d] of importedFnDecls ?? []) {
     if (fnAllDeclared.has(localName)) continue; // a local declaration of the name is that binding
     const fnNode = d.fnNode;
@@ -14198,7 +14223,9 @@ function annotateNodes(
           const _errEnum = errorTypeName
             ? resolveFailableErrorType(errorTypeName, typeRegistry)
             : (calleeName ? importedFnErrorEnums.get(calleeName) ?? null : null);
-          const _vs = _errEnum && _errEnum.kind === "enum" ? matchSubjectVariantsOf(_errEnum) : null;
+          const _vs = _errEnum && _errEnum.kind === "enum"
+            ? matchSubjectVariantsOf(_errEnum)
+            : (calleeName ? stdlibFnErrorVariants.get(calleeName) ?? null : null);
           if (_vs) (n as Record<string, unknown>).__guardErrorVariants = _vs;
         }
 
