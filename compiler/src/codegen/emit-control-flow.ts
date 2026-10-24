@@ -4420,6 +4420,8 @@ export function hasPayloadBindingOrTaggedVariant(
   // is safe and under-including is the F16 never-matches miscompile.
   const isPayload = (t: string): boolean =>
     (_variantFields?.has(t) ?? false) || (subject?.get(t) != null);
+  // S469 r6 — a whole-error binder is always an envelope: always dispatch on its tag.
+  if (isWholeErrorBinderSubject(subject)) return true;
   return arms.some(a => {
     if (a.kind !== "variant") return false;
     if (a.binding) return true;
@@ -4518,7 +4520,41 @@ export function emitTypedArmResultCtor(result: string, matchNode: any, ctx: Emit
   return emitExpr(node, ctx);
 }
 
+/**
+ * S469 r6 (HIGH-B) — the whole-error binders `_ e :>` in scope while their arm body is emitted, each
+ * with the handled call's error enum (TS `__guardErrorVariants`, identity-resolved). A `match e`
+ * on such a binder binds by THAT enum's fields: before, the arm text was re-read with no subject
+ * type and the payload binders fell back to the file's by-NAME registry, so a local
+ * `AuthErr { Denied(note) }` read `data.note` off an imported `AuthErr { Denied(reason) }` payload.
+ * (TS refuses any other use of the binder, and any re-declaration of its name inside the arm.)
+ */
+const _wholeBinderScope: Array<{ name: string; fields: SubjectVariantFields }> = [];
+const _wholeBinderSubjects = new WeakSet<SubjectVariantFields>();
+export function pushWholeErrorBinder(name: string, fields: SubjectVariantFields | null): void {
+  const f: SubjectVariantFields = fields ? new Map(fields) : new Map();
+  _wholeBinderSubjects.add(f);
+  _wholeBinderScope.push({ name, fields: f });
+}
+export function popWholeErrorBinder(): void { _wholeBinderScope.pop(); }
+/** The fields of the whole-error binder a match subject names (a bare identifier), or null. */
+export function wholeErrorBinderFields(subject: unknown): SubjectVariantFields | null {
+  let name: string | null = null;
+  if (typeof subject === "string") { const t = subject.trim(); if (/^[A-Za-z_$][\w$]*$/.test(t)) name = t; }
+  else if (subject && typeof subject === "object" && (subject as { kind?: string }).kind === "ident") name = String((subject as { name?: string }).name ?? "");
+  if (!name) return null;
+  for (let i = _wholeBinderScope.length - 1; i >= 0; i--) if (_wholeBinderScope[i].name === name) return _wholeBinderScope[i].fields;
+  return null;
+}
+/** Is this subject map a whole-error binder's (its values are always `{ variant, data }` envelopes)? */
+export function isWholeErrorBinderSubject(subject: SubjectVariantFields | null | undefined): boolean {
+  return !!subject && _wholeBinderSubjects.has(subject);
+}
+
 export function getMatchSubjectVariantFields(node: any): SubjectVariantFields | null {
+  const _wb = node && (node.subject !== undefined || node.headerExpr !== undefined || typeof node.header === "string")
+    ? wholeErrorBinderFields(node.subject ?? node.headerExpr ?? node.header)
+    : null;
+  if (_wb) return _wb;
   const list = node?.__matchSubjectVariants;
   if (!Array.isArray(list) || list.length === 0) return null;
   const out: SubjectVariantFields = new Map();
@@ -4652,12 +4688,16 @@ export function emitVariantBindingPrelude(
   // producer used it; the producer moved, so the reader follows it.) A unit variant is `[]`
   // fields, so a binder on it is an arity error, not an unknown order.
   const fromSubject = subject != null && subject.has(variantName);
+  // S469 r6 — a whole-error binder's subject is its enum and nothing else: no by-name fallback.
+  const wholeBinder = isWholeErrorBinderSubject(subject);
   const fieldSchema = fromSubject
     ? (subject!.get(variantName) ?? [])
-    : errorContext
-      ? getErrorVariantFieldSchema(variantName)
-      : (_variantFields?.get(variantName) ?? null);
-  const ambiguous = fromSubject || errorContext ? false : (_variantFieldCollisions?.has(variantName) ?? false);
+    : wholeBinder
+      ? null
+      : errorContext
+        ? getErrorVariantFieldSchema(variantName)
+        : (_variantFields?.get(variantName) ?? null);
+  const ambiguous = fromSubject || errorContext || wholeBinder ? false : (_variantFieldCollisions?.has(variantName) ?? false);
 
   // S469 — one binder planner for every match lowering (structured here, text-lowered in
   // rewrite.ts). An unresolvable binder is a compile-time refusal, never a comment + an unbound

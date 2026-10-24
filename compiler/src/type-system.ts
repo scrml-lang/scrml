@@ -1651,42 +1651,497 @@ function resolveErrorEnumThroughAliases(
   return null;
 }
 
-/**
- * S469 r5 — does a `_ <binder> :>` arm body misuse its whole-error binder? "member": a property read
- * off it (`e.message`); "compare": `==` / `!=` between it and a primitive literal. Reads the parsed
- * body, and each template literal's `${…}` (parsed the same way). null when neither.
- */
-function wholeErrorBinderMisuse(roots: unknown[], binder: string, filePath: string): "member" | "compare" | null {
-  let found: "member" | "compare" | null = null;
-  const isBinder = (x: unknown): boolean => !!x && typeof x === "object" && (x as { kind?: string; name?: string }).kind === "ident" && (x as { name?: string }).name === binder;
-  const isPrimitive = (x: unknown): boolean => !!x && typeof x === "object" && (x as { kind?: string }).kind === "lit"
-    && ["string", "number", "bool", "template"].includes(String((x as { litType?: string }).litType));
-  const walk = (x: unknown): void => {
-    if (found || !x || typeof x !== "object") return;
-    if (Array.isArray(x)) { x.forEach(walk); return; }
-    const r = x as Record<string, unknown>;
-    if (r.kind === "member" && isBinder(r.object) && r.property !== "variant") { found = "member"; return; }
-    if (r.kind === "binary" && (r.op === "==" || r.op === "!=")
-      && ((isBinder(r.left) && isPrimitive(r.right)) || (isBinder(r.right) && isPrimitive(r.left)))) { found = "compare"; return; }
-    if (r.kind === "lit" && r.litType === "template" && typeof r.raw === "string" && (r.raw as string).includes("${")) {
-      const raw = r.raw as string;
-      const inner = raw.startsWith("`") && raw.endsWith("`") ? raw.slice(1, -1) : raw;
-      for (const payload of templateInterpolationPayloads(inner)) {
-        try { walk(parseExprToNode(payload, filePath, 0)); } catch { /* unreadable: not judged here */ }
-      }
-    }
-    for (const k of Object.keys(r)) if (k !== "span") walk(r[k]);
-  };
-  walk(roots);
-  return found;
+// ---------------------------------------------------------------------------
+// S469 r6 (HIGH-A) — the whole-error binder `_ e :>` is checked by an ALLOW-list.
+// ---------------------------------------------------------------------------
+
+/** What a `_ <binder> :>` audit may use: the binder's enum (identity-resolved) and the file. */
+interface WholeBinderAuditCtx {
+  /** The handled call's error enum, resolved by the ONE callee resolver; null = unknown. */
+  en: EnumType | null;
+  filePath: string;
+  typeRegistry: Map<string, ResolvedType>;
+  typeDecls: ASTNodeLike[];
+  /** This file's function declarations by name; null = declared more than once. */
+  fnDecls: Map<string, ASTNodeLike | null>;
+  sourceText: string | null;
+  /** Functions whose parameter is being audited (recursion guard). */
+  seenFns: Set<string>;
+  /**
+   * Does `log` name the §20.6 builtin here (no binding of that name in scope)? Passing the error
+   * to the builtin `log(…)` is allowed: it renders the value to the console and returns nothing,
+   * so no payload reaches the program's control flow.
+   */
+  logIsBuiltin: boolean;
 }
 
-/** S469 r5 — field name -> displayed type of `Enum.Variant` (empty for a unit / unknown variant). */
-function variantFieldTypes(en: EnumType, variant: string): Map<string, string> {
+interface WholeBinderRefusal { code: "E-TYPE-004" | "E-EQ-001" | "E-TYPE-028" | "E-TYPE-031"; what: string }
+
+/** End index (exclusive) of the template literal opening at `i` (a backquote), nested `${…}` aware. */
+function templateLiteralEnd(text: string, i: number): number {
+  let j = i + 1;
+  while (j < text.length) {
+    const c = text[j];
+    if (c === "\\") { j += 2; continue; }
+    if (c === "`") return j + 1;
+    if (c === "$" && text[j + 1] === "{") {
+      let depth = 1; j += 2;
+      while (j < text.length && depth > 0) {
+        const d = text[j];
+        if (d === "`") { j = templateLiteralEnd(text, j); continue; }
+        if (d === "\"" || d === "'") { const q = d; j++; while (j < text.length && text[j] !== q) { if (text[j] === "\\") j++; j++; } j++; continue; }
+        if (d === "{") depth++;
+        else if (d === "}") depth--;
+        j++;
+      }
+      continue;
+    }
+    j++;
+  }
+  return text.length;
+}
+
+/**
+ * The number of places `name` occurs as a word in `text` — string literal contents, template
+ * literal TEXT and comments blanked (a template's `${…}` payloads are kept), a member property
+ * (`x.e`) and a cell (`@e`) not counted. The audit's coverage check: every occurrence must be
+ * one the tree walk accounted for, or the arm is refused.
+ */
+function countWordUses(text: string, name: string): number {
+  let out = "";
+  let i = 0;
+  while (i < text.length) {
+    const c = text[i];
+    if (c === "\"" || c === "'") {
+      let j = i + 1;
+      while (j < text.length && text[j] !== c) { if (text[j] === "\\") j++; j++; }
+      out += " ";
+      i = j + 1;
+      continue;
+    }
+    if (c === "/" && text[i + 1] === "/") { const j = text.indexOf("\n", i); out += " "; i = j < 0 ? text.length : j; continue; }
+    if (c === "/" && text[i + 1] === "*") { const j = text.indexOf("*/", i + 2); out += " "; i = j < 0 ? text.length : j + 2; continue; }
+    if (c === "`") {
+      const end = templateLiteralEnd(text, i);
+      const inner = text.slice(i + 1, Math.max(i + 1, end - 1));
+      let payloads: string[] = [];
+      try { payloads = templateInterpolationPayloads(inner); } catch { payloads = [inner]; }
+      out += " " + payloads.join(" ; ") + " ";
+      i = end;
+      continue;
+    }
+    out += c;
+    i++;
+  }
+  const esc = name.replace(/[$]/g, "\\$");
+  return (out.match(new RegExp(`(?<![\\w$@])(?<!(?<!\\.)\\.)${esc}(?![\\w$])`, "g")) ?? []).length;
+}
+
+/** The enum a type name denotes (through aliases), or null. */
+function auditEnumOf(name: string, ctx: WholeBinderAuditCtx): EnumType | null {
+  return resolveErrorEnumThroughAliases(name, ctx.typeRegistry, ctx.typeDecls);
+}
+
+/** Is `en` the binder's enum? Canonically (structurally) equal, never by name; unknown = no. */
+function sameAsBinderEnum(en: EnumType | null, ctx: WholeBinderAuditCtx): boolean {
+  if (!en || !ctx.en) return false;
+  if (en === ctx.en) return true;
+  const a = canonicalTypeKey(en), b = canonicalTypeKey(ctx.en);
+  return a !== null && a === b;
+}
+
+/**
+ * A `match <binder>` arm pattern: `else` / `_`, or variant patterns of the binder's enum
+ * (`.V`, `.V(binds)`, `E.V`, `E::V`, `::V`, `|`-alternation). Returns null when valid.
+ */
+function auditBinderMatchPattern(pattern: string, binder: string, ctx: WholeBinderAuditCtx): WholeBinderRefusal | null {
+  const p = pattern.trim();
+  if (p === "else" || p === "_") return null;
+  for (const piece of splitTopLevel(p, ["|"])) {
+    const m = /^(?:([A-Za-z_$][\w$]*)\s*(?:\.|::)\s*|::\s*|\.\s*)([A-Z][\w$]*)\s*(?:\(([\s\S]*)\))?$/.exec(piece.trim());
+    if (!m) {
+      return { code: "E-TYPE-028", what: `the arm \`${piece.trim()}\` of \`match ${binder}\` is not a variant of its error enum` };
+    }
+    if (m[1] && !sameAsBinderEnum(auditEnumOf(m[1], ctx), ctx)) {
+      return { code: "E-TYPE-031", what: `the arm \`${piece.trim()}\` names \`${m[1]}\`, which is not the handled error enum` };
+    }
+    if (!(ctx.en!.variants ?? []).some((v) => v.name === m[2])) {
+      return { code: "E-TYPE-031", what: `\`${m[2]}\` is not a variant of the handled error enum` };
+    }
+    if (m[3] !== undefined && countWordUses(m[3], binder) > 0) {
+      return { code: "E-TYPE-031", what: `the arm \`${piece.trim()}\` re-binds \`${binder}\`` };
+    }
+  }
+  return null;
+}
+
+/** One `match` arm's pattern and body, from its raw text (`<pattern> :> <body>`). */
+function splitRawArm(raw: string): { pattern: string; body: string } | null {
+  const m = /^\s*\|?\s*([\s\S]*?)\s*(?::>|=>|->)\s*([\s\S]*)$/.exec(raw);
+  return m ? { pattern: m[1], body: m[2] } : null;
+}
+
+/** Parse an arm / function body text the way the arm readers do: a block or one expression. */
+function auditParseBody(text: string, filePath: string): unknown[] | null {
+  const t = text.trim();
+  if (!t) return [];
+  if (t.startsWith("{") && t.endsWith("}")) {
+    const r = parseStatementTextDetailed(t.slice(1, -1), filePath, {});
+    if (r.ok) return r.stmts as unknown[];
+  }
+  try { const x = parseExprToNode(t, filePath, 0); if (x) return [x]; } catch { /* fall through */ }
+  const r = parseStatementTextDetailed(t, filePath, {});
+  return r.ok ? (r.stmts as unknown[]) : null;
+}
+
+/**
+ * S469 r6 (HIGH-A) — FAIL CLOSED: is every use of the whole-error binder `binder` in `text` an
+ * ALLOWED one? The binder is the whole error value (§18.6.1), typed as the handled call's error
+ * enum. Allowed: (1) the subject of a `match` whose arms are variant patterns of that enum;
+ * (2) an `is` operand (`e is .Denied`, `e is not`); (3) `e.variant`; (4) a whole argument of a
+ * variant constructor whose field is that enum, or of a local function whose parameter is typed
+ * with that enum and whose own body uses the parameter only in these ways. EVERYTHING else is
+ * refused — a payload read (`e.reason`, `e["reason"]`, destructuring), a comparison, `String(e)`,
+ * a template, a container, a local alias, a cell write, any other call. The use-count of the text
+ * must equal the uses the walk accounted for, so a use the walk cannot see (an escape hatch, a text
+ * body) is refused too. An unknown enum makes every use a refusal.
+ */
+function auditWholeErrorBinderText(text: string, binder: string, ctx: WholeBinderAuditCtx): WholeBinderRefusal | null {
+  const uses = countWordUses(text, binder);
+  if (uses === 0) return null;
+  if (!ctx.en) {
+    return { code: "E-TYPE-031", what: `the handled call's error enum cannot be resolved here, so \`${binder}\` has no known type` };
+  }
+  const roots = auditParseBody(text, ctx.filePath);
+  if (roots === null) return { code: "E-TYPE-031", what: `the arm body could not be read` };
+  // A `log` declared inside the arm is not the builtin.
+  if (ctx.logIsBuiltin && auditDeclaresName(roots, "log")) ctx = { ...ctx, logIsBuiltin: false };
+  const st = { accounted: 0, refusal: null as WholeBinderRefusal | null };
+  auditWholeBinderTree(roots, binder, ctx, st);
+  if (st.refusal) return st.refusal;
+  if (st.accounted !== uses) {
+    return { code: "E-TYPE-031", what: `a use of \`${binder}\` here is not one the compiler can check` };
+  }
+  return null;
+}
+
+function auditWholeBinderTree(
+  x: unknown, binder: string, ctx: WholeBinderAuditCtx,
+  st: { accounted: number; refusal: WholeBinderRefusal | null },
+): void {
+  if (st.refusal || !x || typeof x !== "object") return;
+  if (Array.isArray(x)) { for (const y of x) auditWholeBinderTree(y, binder, ctx, st); return; }
+  const r = x as Record<string, unknown>;
+  const isB = (n: unknown): boolean => !!n && typeof n === "object" && (n as { kind?: string }).kind === "ident" && (n as { name?: string }).name === binder;
+  const refuse = (code: WholeBinderRefusal["code"], what: string): void => { st.refusal = { code, what }; };
+  const sub = (text: string): void => {
+    if (st.refusal) return;
+    const n = countWordUses(text, binder);
+    if (n === 0) return;
+    const roots = auditParseBody(text, ctx.filePath);
+    if (roots === null) { refuse("E-TYPE-031", "a nested body could not be read"); return; }
+    const before = st.accounted;
+    auditWholeBinderTree(roots, binder, ctx, st);
+    if (!st.refusal && st.accounted - before !== n) refuse("E-TYPE-031", `a use of \`${binder}\` here is not one the compiler can check`);
+  };
+  // A re-declaration of the binder's name (a local, a parameter, a destructured name, an arm binder,
+  // an assignment target) — the uses after it would not be the error value.
+  const bindingNames = (v: unknown): string[] => typeof v === "string" ? v.split(",").map((s) => s.trim()) : Array.isArray(v) ? v.filter((s) => typeof s === "string") as string[] : [];
+  if ((typeof r.name === "string" && r.name === binder && r.kind !== "ident" && r.kind !== "shorthand")
+    || r.bindName === binder
+    || bindingNames(r.binding).includes(binder) || bindingNames(r.payloadBindings).includes(binder) || bindingNames(r.boundNames).includes(binder)) {
+    refuse("E-TYPE-031", `\`${binder}\` is re-declared or re-assigned inside the arm`);
+    return;
+  }
+  switch (r.kind) {
+    case "ident":
+      if (r.name === binder) refuse("E-TYPE-031", `\`${binder}\` is used as a plain value`);
+      return;
+    case "shorthand":
+      if (r.name === binder) refuse("E-TYPE-031", `\`${binder}\` is put into an object`);
+      return;
+    case "escape-hatch":
+      if (typeof r.raw === "string" && countWordUses(r.raw, binder) > 0) refuse("E-TYPE-031", `\`${binder}\` is used in an expression the compiler does not model`);
+      return;
+    case "lit":
+      if (r.litType === "template" && typeof r.raw === "string") {
+        const raw = r.raw as string;
+        const inner = raw.startsWith("`") && raw.endsWith("`") ? raw.slice(1, -1) : raw;
+        for (const pl of templateInterpolationPayloads(inner)) sub(pl);
+      }
+      return;
+    case "member":
+      if (isB(r.object)) {
+        if (r.property === "variant" && !r.optional && !r.computed) { st.accounted++; return; }
+        refuse("E-TYPE-004", `\`${binder}.${String(r.property)}\` reads a field off the whole error`);
+        return;
+      }
+      break;
+    case "index":
+      if (isB(r.object)) { refuse("E-TYPE-004", `\`${binder}[…]\` reads a field off the whole error`); return; }
+      break;
+    case "binary": {
+      if ((r.op === "is" || r.op === "is-not" || r.op === "is-some") && isB(r.left)) {
+        if (r.op === "is") {
+          const rt = r.right as { kind?: string; name?: string; object?: { kind?: string; name?: string }; property?: string } | undefined;
+          let vname: string | null = null;
+          if (rt && rt.kind === "ident" && typeof rt.name === "string" && rt.name.startsWith(".")) vname = rt.name.slice(1);
+          else if (rt && rt.kind === "member" && rt.object?.kind === "ident" && typeof rt.object.name === "string" && sameAsBinderEnum(auditEnumOf(rt.object.name, ctx), ctx)) vname = String(rt.property ?? "");
+          if (!vname || !(ctx.en!.variants ?? []).some((v) => v.name === vname)) {
+            refuse("E-TYPE-031", `\`${binder} is …\` must name a variant of the handled error enum`);
+            return;
+          }
+        }
+        st.accounted++;
+        return;
+      }
+      if ((r.op === "==" || r.op === "!=" || r.op === "===" || r.op === "!==") && (isB(r.left) || isB(r.right))) {
+        refuse("E-EQ-001", `\`${binder}\` is compared with \`${r.op}\``);
+        return;
+      }
+      break;
+    }
+    case "call":
+    case "new": {
+      const args = (Array.isArray(r.args) ? r.args : Array.isArray(r.arguments) ? r.arguments : []) as unknown[];
+      const idx = args.map((a, i) => (isB(a) ? i : -1)).filter((i) => i >= 0);
+      if (idx.length > 0 && r.kind === "call") {
+        const why = auditBinderCallArgs(r.callee, idx, ctx);
+        if (why) { st.refusal = why; return; }
+        st.accounted += idx.length;
+        auditWholeBinderTree(r.callee, binder, ctx, st);
+        args.forEach((a, i) => { if (!idx.includes(i)) auditWholeBinderTree(a, binder, ctx, st); });
+        return;
+      }
+      break;
+    }
+    case "match-expr":
+    case "match-stmt": {
+      const subject = r.subject ?? r.headerExpr;
+      if (Array.isArray(r.rawArms)) {
+        // expression-parsed: `{ subject, rawArms: ["<pattern> :> <body>", …] }`
+        const subjB = isB(subject);
+        if (!subjB) auditWholeBinderTree(subject, binder, ctx, st);
+        for (const raw of r.rawArms as unknown[]) {
+          if (st.refusal) return;
+          const arm = typeof raw === "string" ? splitRawArm(raw) : null;
+          if (!arm) { if (countWordUses(String(raw), binder) > 0 || subjB) refuse("E-TYPE-031", "an arm of the match could not be read"); continue; }
+          if (subjB) { const bad = auditBinderMatchPattern(arm.pattern, binder, ctx); if (bad) { st.refusal = bad; return; } }
+          else if (countWordUses(arm.pattern, binder) > 0) { refuse("E-TYPE-031", `\`${binder}\` is used in an arm pattern`); return; }
+          sub(arm.body);
+        }
+        if (subjB && !st.refusal) st.accounted++;
+        return;
+      }
+      if (Array.isArray(r.body) && isB(subject)) {
+        // statement-parsed: `{ headerExpr, body: [match-arm-inline | match-arm-block] }`
+        for (const arm of r.body as Array<Record<string, unknown>>) {
+          if (st.refusal) return;
+          if (arm.kind === "match-arm-inline") {
+            const bad = auditBinderMatchPattern(String(arm.test ?? ""), binder, ctx);
+            if (bad) { st.refusal = bad; return; }
+            auditWholeBinderTree(arm.resultExpr, binder, ctx, st);
+          } else if (arm.kind === "match-arm-block") {
+            if (Array.isArray(arm.literals) && arm.literals.length > 0) { refuse("E-TYPE-028", `a literal arm is used over the error enum in \`match ${binder}\``); return; }
+            if (!arm.isWildcard && !(ctx.en!.variants ?? []).some((v) => v.name === arm.variant)) { refuse("E-TYPE-031", `an arm of \`match ${binder}\` is not a variant of the handled error enum`); return; }
+            if (bindingNames(arm.payloadBindings).includes(binder) || bindingNames(arm.binding).includes(binder)) { refuse("E-TYPE-031", `an arm re-binds \`${binder}\``); return; }
+            auditWholeBinderTree(arm.body, binder, ctx, st);
+          } else {
+            refuse("E-TYPE-031", `an arm of \`match ${binder}\` could not be read`);
+            return;
+          }
+        }
+        if (!st.refusal) st.accounted++;
+        return;
+      }
+      break;
+    }
+  }
+  for (const k of Object.keys(r)) {
+    if (k === "span" || k.startsWith("__")) continue;
+    auditWholeBinderTree(r[k], binder, ctx, st);
+    if (st.refusal) return;
+  }
+}
+
+/** Does any node of the tree declare `name` (a local, a parameter, a destructured name, a function)? */
+function auditDeclaresName(x: unknown, name: string): boolean {
+  if (!x || typeof x !== "object") return false;
+  if (Array.isArray(x)) return x.some((y) => auditDeclaresName(y, name));
+  const r = x as Record<string, unknown>;
+  if (typeof r.name === "string" && r.name === name && r.kind !== "ident" && r.kind !== "shorthand") return true;
+  if (r.bindName === name) return true;
+  for (const k of ["boundNames", "payloadBindings"]) if (Array.isArray(r[k]) && (r[k] as unknown[]).includes(name)) return true;
+  return Object.keys(r).some((k) => k !== "span" && !k.startsWith("__") && auditDeclaresName(r[k], name));
+}
+
+/**
+ * (4) A call taking the binder WHOLE: a variant constructor whose field at that position is the
+ * binder's enum, or a LOCAL function (declared once) whose parameter is typed with that enum and
+ * whose body passes the same audit for that parameter. Anything else is refused.
+ */
+function auditBinderCallArgs(callee: unknown, idx: number[], ctx: WholeBinderAuditCtx): WholeBinderRefusal | null {
+  const c = callee as { kind?: string; name?: string; object?: { kind?: string; name?: string }; property?: string } | null;
+  const ctor = (en: EnumType | null, variant: string): WholeBinderRefusal | null => {
+    const v = en ? (en.variants ?? []).find((x) => x.name === variant) : undefined;
+    const fields = v && v.payload instanceof Map ? [...v.payload.keys()] : [];
+    const want = ctx.en ? canonicalTypeKey(ctx.en) : null;
+    for (const i of idx) {
+      const k = en && fields[i] !== undefined ? canonicalFieldTypeKey(en, variant, fields[i]) : null;
+      if (want === null || k === null || k !== want) {
+        return { code: "E-TYPE-031", what: `the error is passed to the variant \`${variant}\`, whose field there is not the handled error enum` };
+      }
+    }
+    return null;
+  };
+  if (c && c.kind === "ident" && typeof c.name === "string" && /^\.[A-Z]/.test(c.name)) {
+    const variant = c.name.slice(1);
+    const owners = [...ctx.typeRegistry.values()].filter((t) => t && t.kind === "enum" && ((t as EnumType).variants ?? []).some((v) => v.name === variant)) as EnumType[];
+    const uniq = [...new Set(owners)];
+    if (uniq.length !== 1) return { code: "E-TYPE-031", what: `the variant \`.${variant}\` the error is passed to does not name one enum` };
+    return ctor(uniq[0], variant);
+  }
+  if (c && c.kind === "member" && c.object?.kind === "ident" && typeof c.object.name === "string" && typeof c.property === "string" && /^[A-Z]/.test(c.property)) {
+    const en = auditEnumOf(c.object.name, ctx);
+    if (en) return ctor(en, c.property);
+  }
+  if (c && c.kind === "ident" && c.name === "log" && ctx.logIsBuiltin && !ctx.fnDecls.has("log")) return null;
+  if (c && c.kind === "ident" && typeof c.name === "string") {
+    const fn = ctx.fnDecls.get(c.name);
+    if (!fn) return { code: "E-TYPE-031", what: `the error is passed to \`${c.name}\`, which is not a function of this file declared once` };
+    if (ctx.seenFns.has(c.name)) return { code: "E-TYPE-031", what: `the error is passed to \`${c.name}\` recursively` };
+    const params = (Array.isArray(fn.params) ? fn.params : []) as Array<{ name?: string; typeAnnotation?: string }>;
+    const span = fn.span as Span | undefined;
+    const src = ctx.sourceText;
+    for (const i of idx) {
+      const prm = params[i];
+      const ann = prm && typeof prm.typeAnnotation === "string" ? prm.typeAnnotation.trim() : "";
+      if (!prm || !prm.name || !ann || !sameAsBinderEnum(auditEnumOf(ann, ctx), ctx)) {
+        return { code: "E-TYPE-031", what: `the error is passed to \`${c.name}\`, whose parameter there is not typed with the handled error enum` };
+      }
+      if (!src || !span || typeof span.start !== "number" || typeof span.end !== "number") {
+        return { code: "E-TYPE-031", what: `the body of \`${c.name}\` could not be read` };
+      }
+      const fnText = src.slice(span.start, span.end);
+      const open = fnText.indexOf("(");
+      let depth = 0, close = -1;
+      for (let j = open; j >= 0 && j < fnText.length; j++) {
+        if (fnText[j] === "(") depth++;
+        else if (fnText[j] === ")") { depth--; if (depth === 0) { close = j; break; } }
+      }
+      const bodyStart = close >= 0 ? fnText.indexOf("{", close) : -1;
+      if (bodyStart < 0) return { code: "E-TYPE-031", what: `the body of \`${c.name}\` could not be read` };
+      const bodyText = fnText.slice(bodyStart);
+      const n = countWordUses(bodyText, prm.name);
+      const st = { accounted: 0, refusal: null as WholeBinderRefusal | null };
+      ctx.seenFns.add(c.name);
+      try { auditWholeBinderTree(fn.body, prm.name, ctx, st); } finally { ctx.seenFns.delete(c.name); }
+      if (st.refusal) return { code: st.refusal.code, what: `in \`${c.name}\`, ${st.refusal.what}` };
+      if (st.accounted !== n) return { code: "E-TYPE-031", what: `in \`${c.name}\`, a use of \`${prm.name}\` is not one the compiler can check` };
+    }
+    return null;
+  }
+  return { code: "E-TYPE-031", what: `the error is passed to a call the compiler cannot check` };
+}
+
+/** S469 r6 — a payload field's DECLARED type text, per variant (parseEnumBody). */
+const variantFieldTypeText = new WeakMap<VariantDef, Map<string, string>>();
+/** S469 r6 — the registry and alias table of the file an enum was declared in (buildTypeRegistry). */
+const enumDeclContext = new WeakMap<EnumType, { registry: Map<string, ResolvedType>; aliasRhs: Map<string, string> }>();
+
+/**
+ * S469 r6 (MED) — the CANONICAL key of a resolved type, or null when it cannot be known. Two
+ * payload fields carry the same data exactly when their keys are equal: primitives by kind and
+ * name, a struct by its field names and their canonical types, an enum by its variants and their
+ * payloads (in the enum's own declaring file), containers and unions member-wise. `asIs` /
+ * `unknown` (an alias the registry keeps as `asIs`, an unresolved name) is null — a MISMATCH, never
+ * "probably the same". Printed types were compared before: an alias prints `asIs`, so
+ * `Denied(code: Code)` with `Code = number` equalled `Code2 = string`.
+ */
+function canonicalTypeKey(t: ResolvedType | undefined | null, seen: Set<object> = new Set()): string | null {
+  if (!t || typeof t !== "object") return null;
+  const r = t as ResolvedType & Record<string, unknown>;
+  switch (r.kind) {
+    case "primitive": return `p:${(r as PrimitiveType).name}`;
+    case "not": return "not";
+    case "asIs": case "unknown": return null;
+    case "union": {
+      const ks = ((r as UnionType).members ?? []).map((m) => canonicalTypeKey(m, seen));
+      return ks.some((k) => k === null) ? null : `u(${ks.join("|")})`;
+    }
+    case "array": { const k = canonicalTypeKey((r as ArrayType).element, seen); return k === null ? null : `a(${k})`; }
+    case "struct": {
+      if (seen.has(r)) return `s@${(r as StructType).name}`;
+      seen.add(r);
+      const fs = [...((r as StructType).fields ?? new Map()).entries()].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+      const parts: string[] = [];
+      for (const [n, ft] of fs) { const k = canonicalTypeKey(ft, seen); if (k === null) return null; parts.push(`${n}:${k}`); }
+      seen.delete(r);
+      return `s{${parts.join(",")}}`;
+    }
+    case "enum": {
+      const en = r as unknown as EnumType;
+      if (seen.has(en)) return `e@${en.name}`;
+      seen.add(en);
+      const parts: string[] = [];
+      for (const v of en.variants ?? []) {
+        if (!(v.payload instanceof Map)) { parts.push(v.name); continue; }
+        const fs: string[] = [];
+        for (const f of v.payload.keys()) { const k = canonicalFieldTypeKey(en, v.name, f, seen); if (k === null) return null; fs.push(`${f}:${k}`); }
+        parts.push(`${v.name}(${fs.join(",")})`);
+      }
+      seen.delete(en);
+      return `e{${parts.join(",")}}`;
+    }
+    default: {
+      const shown = formatTypeForDiagnostic(t as ResolvedType);
+      return shown && shown !== "asIs" ? `${String(r.kind)}:${shown}` : null;
+    }
+  }
+}
+
+/**
+ * S469 r6 (MED) — the canonical key of `Enum.Variant`'s field `field`: its declared type text,
+ * with the DECLARING file's aliases substituted (`Code` -> `number`), resolved in that file's
+ * registry; else the resolved payload type. null = unknown (a mismatch).
+ */
+function canonicalFieldTypeKey(en: EnumType, variant: string, field: string, seen: Set<object> = new Set()): string | null {
   const v = (en.variants ?? []).find((x) => x.name === variant);
-  const out = new Map<string, string>();
-  if (v && v.payload instanceof Map) for (const [k, t] of v.payload) out.set(k, formatTypeForDiagnostic(t as ResolvedType));
+  if (!v || !(v.payload instanceof Map) || !v.payload.has(field)) return null;
+  const text = variantFieldTypeText.get(v)?.get(field);
+  const ctx = enumDeclContext.get(en);
+  if (text && ctx) {
+    let cur = text.trim();
+    for (let hop = 0; hop < 8; hop++) {
+      let changed = false;
+      cur = cur.replace(/[A-Za-z_$][\w$]*/g, (w) => {
+        const rhs = ctx.aliasRhs.get(w);
+        if (rhs === undefined) return w;
+        changed = true;
+        return `(${rhs})`;
+      });
+      if (!changed) break;
+    }
+    return canonicalTypeKey(resolveTypeExpr(cur, ctx.registry), seen);
+  }
+  return canonicalTypeKey(v.payload.get(field), seen);
+}
+
+/** S469 r6 — field name -> canonical type key (null = unknown) of `Enum.Variant`. */
+function variantFieldTypes(en: EnumType, variant: string): Map<string, string | null> {
+  const v = (en.variants ?? []).find((x) => x.name === variant);
+  const out = new Map<string, string | null>();
+  if (v && v.payload instanceof Map) for (const k of v.payload.keys()) out.set(k, canonicalFieldTypeKey(en, variant, k));
   return out;
+}
+
+/** S469 r6 — the field's type as a diagnostic shows it (its declared text when known). */
+function variantFieldTypeShown(en: EnumType, variant: string, field: string): string {
+  const v = (en.variants ?? []).find((x) => x.name === variant);
+  const text = v ? variantFieldTypeText.get(v)?.get(field) : undefined;
+  if (text) return text;
+  const t = v && v.payload instanceof Map ? v.payload.get(field) : undefined;
+  return t ? formatTypeForDiagnostic(t as ResolvedType) : "?";
 }
 
 /** The declared field names of `Enum.Variant` ([] for a unit variant), or undefined. */
@@ -2788,6 +3243,7 @@ function parseEnumBody(
       const closeParenIdx = trimmed.lastIndexOf(")");
       const payloadStr = trimmed.slice(parenIdx + 1, closeParenIdx).trim();
       const payload = new Map<string, ResolvedType>();
+      const payloadText = new Map<string, string>();
 
       if (payloadStr) {
         // Split payload fields on commas at depth-0. A field part is EITHER
@@ -2810,6 +3266,7 @@ function parseEnumBody(
             const typeExpr = fp.trim();
             if (typeExpr) {
               payload.set(`_${i}`, resolveTypeExpr(typeExpr, typeRegistry));
+              payloadText.set(`_${i}`, typeExpr);
             }
             continue;
           }
@@ -2817,6 +3274,7 @@ function parseEnumBody(
           const typeExpr = fp.slice(colonIdx + 1).trim();
           if (fieldName) {
             payload.set(fieldName, resolveTypeExpr(typeExpr, typeRegistry));
+            payloadText.set(fieldName, typeExpr);
           }
         }
       }
@@ -2829,7 +3287,7 @@ function parseEnumBody(
         if (markup) renders = { markup };
       }
 
-      variants.push({ name, payload, renders });
+      { const _vd: VariantDef = { name, payload, renders }; variantFieldTypeText.set(_vd, payloadText); variants.push(_vd); }
     }
   }
 
@@ -5443,6 +5901,20 @@ function buildTypeRegistry(
       const fields = parseStructBody((decl.raw as string) ?? "", registry);
       registry.set(decl.name as string, tError(decl.name as string, fields));
     }
+  }
+
+  // S469 r6 — each enum remembers WHERE it was declared (this registry and this file's
+  // `type A = <RHS>` aliases), so a payload field's declared type can be resolved to its
+  // canonical type later, in any file (canonicalFieldTypeKey).
+  const aliasRhs = new Map<string, string>();
+  for (const decl of typeDecls) {
+    const k = decl.typeKind;
+    if (!decl.name || !(k === "" || k === undefined || k === null)) continue;
+    const raw = String(decl.raw ?? "").trim();
+    if (raw && !raw.startsWith("{")) aliasRhs.set(String(decl.name), raw);
+  }
+  for (const t of registry.values()) {
+    if (t && t.kind === "enum" && !enumDeclContext.has(t as EnumType)) enumDeclContext.set(t as EnumType, { registry, aliasRhs });
   }
 
   return registry;
@@ -10178,8 +10650,9 @@ function sameEnumShape(a: EnumType, b: EnumType): boolean {
     const fa = va.payload ? [...va.payload.keys()] : [];
     const fb = vb.payload ? [...vb.payload.keys()] : [];
     if (fa.length !== fb.length || fa.some((f, j) => f !== fb[j])) return false;
-    // S469 r5 (MED-1) — and the same field TYPES: `code: string` is not `code: number`.
-    if (fa.some((f) => formatTypeForDiagnostic(va.payload!.get(f) as ResolvedType) !== formatTypeForDiagnostic(vb.payload!.get(f) as ResolvedType))) return false;
+    // S469 r5/r6 (MED-1) — and the same CANONICAL field types (`code: string` is not
+    // `code: number`; an alias resolves in its declaring file; unknown is a mismatch).
+    if (fa.some((f) => { const ka = canonicalFieldTypeKey(a, va.name, f); return ka === null || ka !== canonicalFieldTypeKey(b, vb.name, f); })) return false;
   }
   return true;
 }
@@ -10794,6 +11267,36 @@ function annotateNodes(
   // none of them can resolve a callee the others do not.
   const _fileTypeDeclsForErrors: ASTNodeLike[] = ((fileAST.typeDecls as ASTNodeLike[] | undefined)
     ?? ((fileAST.ast as FileAST | undefined)?.typeDecls as ASTNodeLike[] | undefined) ?? []);
+  // S469 r6 (HIGH-A) — the context of a whole-error binder audit (auditWholeErrorBinderText).
+  let _wholeBinderFnDecls: Map<string, ASTNodeLike | null> | null = null;
+  const wholeBinderAuditCtx = (en: EnumType | null): WholeBinderAuditCtx => {
+    if (!_wholeBinderFnDecls) {
+      _wholeBinderFnDecls = new Map();
+      for (const d of allFnDecls) {
+        const nm = String(d.name ?? "");
+        if (!nm) continue;
+        _wholeBinderFnDecls.set(nm, _wholeBinderFnDecls.has(nm) ? null : d);
+      }
+    }
+    const src = (fileAST as { _sourceText?: unknown })._sourceText ?? ((fileAST as { ast?: { _sourceText?: unknown } }).ast?._sourceText);
+    return {
+      en, filePath, typeRegistry, typeDecls: _fileTypeDeclsForErrors, fnDecls: _wholeBinderFnDecls,
+      sourceText: typeof src === "string" ? src : null, seenFns: new Set(),
+      logIsBuiltin: !_wholeBinderFnDecls.has("log") && !(importedFnDecls?.has("log") ?? false) && !scopeChain.lookup("log"),
+    };
+  };
+  const wholeBinderRefusalError = (why: WholeBinderRefusal, binder: string, en: EnumType | null, span: Span): TSError => {
+    const ty = en ? `\`${en.name}\`` : "the handled call's error enum";
+    const allowed = `As a whole error it may only be \`match\`ed (\`match ${binder} { .Variant(x) :> … }\`), tested with \`is\` (\`${binder} is .Variant\`), ` +
+      `read as \`${binder}.variant\`, or passed whole to a variant constructor or a function whose parameter is typed ${ty}. ` +
+      `To read a payload, name the variant in the arm (\`.Variant(x) :> …\`) (§18.6.1).`;
+    const lead = why.code === "E-TYPE-004"
+      ? `\`${binder}\` in \`_ ${binder} :>\` is the WHOLE error value — an error-enum value, not a struct — so ${why.what}; it reads no field.`
+      : why.code === "E-EQ-001"
+        ? `\`${binder}\` in \`_ ${binder} :>\` is the WHOLE error value (${ty}): ${why.what}, which compares an error-enum value and never tests its payload.`
+        : `\`${binder}\` in \`_ ${binder} :>\` is the WHOLE error value (${ty}): ${why.what}.`;
+    return new TSError(why.code, `${why.code}: ${lead} ${allowed}`, span);
+  };
   const failableCalleeErrorEnum = (callee: string): EnumType | null => {
     // An IMPORTED callee: the enum resolved where it is declared — never the importer's
     // same-named enum (a name match is not a payload match; S469 r5).
@@ -12575,10 +13078,13 @@ function annotateNodes(
                         // declared order, which is what it reads). Compare name -> TYPE maps
                         // (S469 r5, MED-1: `code: string` re-raised as `code: number` compared
                         // `"401" == 401` — false — and a deny-list on it logged in).
+                        // S469 r6 (MED) — CANONICAL types (aliases resolved in each enum's declaring
+                        // file, structs / nested enums structurally); an unknown type is a mismatch.
                         const ta = variantFieldTypes(calleeEnum as EnumType, cv.name);
                         const tb = variantFieldTypes(enclosingEnumForShape, cv.name);
-                        if (a.length !== b.length || a.some((f) => !b.includes(f) || ta.get(f) !== tb.get(f))) {
-                          mismatched.push(`'${cv.name}' (${errorTypeDisplayName(calleeErrTypeName)}: ${a.length ? a.map((f) => `${f}: ${ta.get(f)}`).join(", ") : "no fields"}; ${enclosingErrTypeName}: ${b.length ? b.map((f) => `${f}: ${tb.get(f)}`).join(", ") : "no fields"})`);
+                        if (a.length !== b.length || a.some((f) => !b.includes(f) || ta.get(f) == null || ta.get(f) !== tb.get(f))) {
+                          const show = (en: EnumType, fs: string[]) => fs.length ? fs.map((f) => `${f}: ${variantFieldTypeShown(en, cv.name, f)}`).join(", ") : "no fields";
+                          mismatched.push(`'${cv.name}' (${errorTypeDisplayName(calleeErrTypeName)}: ${show(calleeEnum as EnumType, a)}; ${enclosingErrTypeName}: ${show(enclosingEnumForShape, b)})`);
                         }
                       }
                       if (mismatched.length > 0) {
@@ -14387,13 +14893,11 @@ function annotateNodes(
         // `fail` producer keys the payload by, in whichever file it runs — never by a by-name
         // guess (the whole `.data` for an imported enum, which a keyed producer turned into a
         // logged-in denied input). Same shape as a failable match subject's stamp.
+        // S469 r6 — THE handled call's error enum, from the ONE callee resolver (never a by-name
+        // registry lookup of `errorTypeName`): the binders' field lists, the whole-error binder's
+        // type, the exhaustiveness check and the arm-qualifier check all read this.
+        const _errEnum: EnumType | null = calleeName ? failableCalleeErrorEnum(calleeName) : null;
         {
-          const _guardTypeDecls = ((fileAST.typeDecls as ASTNodeLike[] | undefined)
-            ?? ((fileAST.ast as FileAST | undefined)?.typeDecls as ASTNodeLike[] | undefined) ?? []);
-          void _guardTypeDecls;
-          const _errEnum = calleeName && (fnErrorTypes.has(calleeName) || importedFnErrorEnums.has(calleeName))
-            ? failableCalleeErrorEnum(calleeName)
-            : (errorTypeName ? resolveErrorEnumThroughAliases(errorTypeName, typeRegistry, _guardTypeDecls) : null);
           const _vs = _errEnum && _errEnum.kind === "enum"
             ? matchSubjectVariantsOf(_errEnum)
             : (calleeName ? stdlibFnErrorVariants.get(calleeName) ?? null : null);
@@ -14419,30 +14923,9 @@ function annotateNodes(
           if (pat !== "_" || !binder || binder === "_" || !/^[A-Za-z_$][\w$]*$/.test(binder)) continue;
           const body = String(arm.handler ?? "").trim();
           if (!body) continue;
-          let roots: unknown[] = [];
-          if (body.startsWith("{") && body.endsWith("}")) {
-            const r = parseStatementTextDetailed(body.slice(1, -1), filePath, {});
-            if (r.ok) roots = r.stmts as unknown[];
-          } else {
-            try { const x = parseExprToNode(body, filePath, 0); if (x) roots = [x]; } catch { roots = []; }
-          }
           const armSpan = ((arm.span ?? n.span) as Span);
-          const offense = wholeErrorBinderMisuse(roots, binder, filePath);
-          if (offense === "member") {
-            errors.push(new TSError(
-              "E-TYPE-004",
-              `E-TYPE-004: \`${binder}\` in \`_ ${binder} :>\` is the WHOLE error value (§18.6.1) — an error-enum value, not a struct — so \`${binder}.<field>\` reads no field. ` +
-              `Name the variant to bind its payload (\`.Denied(reason) :> …\`), or \`match ${binder} { .Denied(reason) :> … }\`.`,
-              armSpan,
-            ));
-          } else if (offense === "compare") {
-            errors.push(new TSError(
-              "E-EQ-001",
-              `E-EQ-001: \`${binder}\` in \`_ ${binder} :>\` is the WHOLE error value (§18.6.1) — an error-enum value — and is compared here with a primitive, which it never equals. ` +
-              `Name the variant to bind its payload (\`.Generic(message) :> message == …\`), or test the variant (\`${binder} is .Denied\` / \`match ${binder} { … }\`).`,
-              armSpan,
-            ));
-          }
+          const why = auditWholeErrorBinderText(body, binder, wholeBinderAuditCtx(_errEnum));
+          if (why) errors.push(wholeBinderRefusalError(why, binder, _errEnum, armSpan));
         }
 
         // S452 r3 — a type-qualified arm (`T.V :>` / `T::V :>`, recorded by
@@ -14515,13 +14998,18 @@ function annotateNodes(
             }
             return null;
           };
-          const handledEnum = enumNameOf(errorTypeName);
+          // S469 r6 — the handled enum is the identity-resolved `_errEnum` and a qualifier is the same
+          // type when it resolves to that enum (or a canonically identical one) — never by NAME (an
+          // imported `AuthErr` and a local `AuthErr` share a name, not a payload).
+          const handledEnum = _errEnum ? (_errEnum.name ?? enumNameOf(errorTypeName)) : null;
           const handledShown = errorTypeDisplayName(errorTypeName);
+          const _handledKey = _errEnum ? canonicalTypeKey(_errEnum) : null;
           for (const arm of errorArms as Array<{ typeQualifier?: string; pattern?: string; span?: Span }>) {
             const q = arm.typeQualifier;
-            if (!q || q === errorTypeName || !handledEnum) continue;
-            const qEnum = enumNameOf(q);
-            if (!qEnum || qEnum === handledEnum) continue;
+            if (!q || !handledEnum) continue;
+            const qObj = resolveErrorEnumThroughAliases(q, typeRegistry, _tds);
+            if (!qObj || qObj === _errEnum || (_handledKey !== null && canonicalTypeKey(qObj) === _handledKey)) continue;
+            const qEnum = qObj.name ?? enumNameOf(q) ?? q;
             const v = String(arm.pattern ?? "").replace(/^::/, "").replace(/^\./, "");
             const named = (x: string, e: string) => (x === e ? "`" + x + "`" : "`" + x + "` (= `" + e + "`)");
             // A parseVariant call's failure type is nameable only through the import
@@ -14541,7 +15029,7 @@ function annotateNodes(
 
         // Step 4: if we have a named errorType, look it up in the typeRegistry.
         if (errorTypeName) {
-          const errorEnumType = resolveFailableErrorType(errorTypeName, typeRegistry);
+          const errorEnumType = _errEnum;
           if (errorEnumType && errorEnumType.kind === "enum") {
             const enumType = errorEnumType as EnumType;
             const allVariants = (enumType.variants ?? []).map((v: VariantDef) => v.name);
@@ -14643,11 +15131,14 @@ function annotateNodes(
           // to the prior single-bind behavior (kept working). The SPACE form
           // `::V a b` stays single-binding by design (S184 ruling — paren-only
           // canonical for `!{}` multi-field; the parser captures only `a`).
+          // S469 r6 (HIGH-B) — the whole-error binder `_ e :>` is typed as the handled call's
+          // error enum, resolved by identity (`_errEnum`), never by name.
+          const _isWholeBinderArm = String(arm.pattern ?? "") === "_";
           if (typeof arm.binding === "string" && arm.binding.length > 0) {
             for (const rawName of arm.binding.split(",")) {
               const bindName = rawName.trim();
               if (bindName.length > 0) {
-                scopeChain.bind(bindName, { kind: "variable", resolvedType: tAsIs() });
+                scopeChain.bind(bindName, { kind: "variable", resolvedType: _isWholeBinderArm && _errEnum ? _errEnum : tAsIs() });
               }
             }
           }
@@ -14933,7 +15424,7 @@ function annotateNodes(
       case "match-stmt":
       case "match-expr": {
         checkMatchDiagnostics(n, scopeChain, errors, filePath, fnCanFail, fnErrorTypes, typeRegistry,
-          failableSubjectCallees((n as { headerExpr?: unknown }).headerExpr));
+          failableSubjectCallees((n as { headerExpr?: unknown }).headerExpr), failableCalleeErrorEnum);
         // §2a — E-SCOPE-001 on an undeclared subject ident (e.g.
         // `match undeclaredSubj { ... }`). checkMatchDiagnostics already
         // resolves the subject for type lookup but doesn't emit a scope
@@ -17226,8 +17717,9 @@ function annotateNodes(
     const hasFallback = errorBoundaryFallbackStack.length > 0
       && errorBoundaryFallbackStack[errorBoundaryFallbackStack.length - 1] === true;
     if (hasFallback) return;
-    const errTypeName = fnErrorTypes.get(calleeName);
-    const errType = errTypeName ? resolveFailableErrorType(errTypeName, typeRegistry) : undefined;
+    // S469 r6 — the ONE callee resolver (identity), never a by-name registry lookup.
+    const errType = failableCalleeErrorEnum(calleeName);
+    const errTypeName = fnErrorTypes.get(calleeName) ?? errType?.name;
     if (!(errType && errType.kind === "enum" && Array.isArray(errType.variants))) return;
     for (const v of errType.variants) {
       // A variant with no `renders` clause and no boundary `fallback` is unrenderable inside this boundary.
@@ -18867,7 +19359,8 @@ function annotateNodes(
     if (operand.kind === "call" && operand.callee.kind === "ident") {
       const typeName = fnErrorTypes.get(operand.callee.name);
       if (!typeName) return null;
-      const t = resolveFailableErrorType(typeName, typeRegistry);
+      // S469 r6 — the ONE callee resolver (identity), never a by-name registry lookup.
+      const t = failableCalleeErrorEnum(operand.callee.name);
       if (!t || t.kind !== "enum") return null;
       return { typeName: errorTypeDisplayName(typeName), variants: ((t as EnumType).variants ?? []).map((v: VariantDef) => v.name) };
     }
@@ -22581,7 +23074,8 @@ function resolveFailableCallResultType(
   fnCanFail: Set<string>,
   fnErrorTypes: Map<string, string>,
   typeRegistry: Map<string, ResolvedType>,
-  subjectCallees: string[] | null = null,
+  subjectCallees: string[] | null,
+  resolveCallee: (callee: string) => EnumType | null,
 ): EnumType | null {
   // S468 — the caller resolved the failable calls the subject carries (through the
   // live scope, aliases and operators included: `failableResultCallees`). Without
@@ -22605,7 +23099,7 @@ function resolveFailableCallResultType(
     if (calleeName && fnCanFail.has(calleeName)) callees = [calleeName];
   }
   if (callees.length === 0) return null;
-  return failableResultUnion(callees, fnErrorTypes, typeRegistry);
+  return failableResultUnion(callees, fnErrorTypes, typeRegistry, resolveCallee);
 }
 
 /**
@@ -22619,17 +23113,19 @@ function failableResultUnion(
   callees: string[],
   fnErrorTypes: Map<string, string>,
   typeRegistry: Map<string, ResolvedType>,
-  // S469 r4 — the one callee resolver (aliases, imported callees), when the caller has it.
-  resolveCallee?: (callee: string) => EnumType | null,
+  // S469 r4/r6 — THE callee resolver (aliases, imported callees, identity). REQUIRED: a failable
+  // callee's error enum is never resolved by NAME in the registry (a same-named local enum is not
+  // the callee's enum — the third time such a lookup resurfaced, so there is no fallback).
+  resolveCallee: (callee: string) => EnumType | null,
 ): EnumType | null {
   const okVariant: VariantDef = { name: "Ok", payload: null, renders: null };
   const variants: VariantDef[] = [okVariant];
   const names: string[] = [];
   for (const callee of callees) {
-    const errorTypeName = fnErrorTypes.get(callee) ?? (resolveCallee ? resolveCallee(callee)?.name : undefined);
-    if (!errorTypeName) return null;
-    const errEnum = resolveCallee ? (resolveCallee(callee) ?? resolveFailableErrorType(errorTypeName, typeRegistry)) : resolveFailableErrorType(errorTypeName, typeRegistry);
+    void typeRegistry;
+    const errEnum = resolveCallee(callee);
     if (!errEnum || errEnum.kind !== "enum") return null;
+    const errorTypeName = fnErrorTypes.get(callee) ?? errEnum.name;
     const display = errorTypeDisplayName(errorTypeName);
     if (!names.includes(display)) names.push(display);
     for (const v of (errEnum as EnumType).variants ?? []) {
@@ -22767,7 +23263,9 @@ function checkMatchDiagnostics(
   fnCanFail: Set<string>,
   fnErrorTypes: Map<string, string>,
   typeRegistry: Map<string, ResolvedType>,
-  subjectCallees: string[] | null = null,
+  subjectCallees: string[] | null,
+  // S469 r6 — THE callee resolver (identity); a failable callee's enum is never looked up by name.
+  resolveCallee: (callee: string) => EnumType | null,
 ): void {
   const span = (node.span as Span | undefined) ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 };
   const extracted = extractArmsFromMatchNode(node);
@@ -22939,7 +23437,7 @@ function checkMatchDiagnostics(
   // subject that may also be a plain value is refused there (E-ERROR-002), so it never
   // reaches this stamp (g-match-failable-subject-through-operator-miscompiled-s467).
   if (subjectCallees !== null && subjectCallees.length > 0) {
-    const failableResult = failableResultUnion(subjectCallees, fnErrorTypes, typeRegistry);
+    const failableResult = failableResultUnion(subjectCallees, fnErrorTypes, typeRegistry, resolveCallee);
     if (failableResult) {
       const failableVariants = matchSubjectVariantsOf(failableResult);
       if (failableVariants) {
@@ -22971,6 +23469,8 @@ function checkMatchDiagnostics(
       fnCanFail,
       fnErrorTypes,
       typeRegistry,
+      null,
+      resolveCallee,
     );
     if (failableResult) {
       // §19.7.1 — the failable-call subject IS resolved: to its synthetic

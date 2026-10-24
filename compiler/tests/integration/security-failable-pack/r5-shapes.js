@@ -25,6 +25,9 @@ const CASES = [
   // is refused on every tree, a separate arm-grammar limit.)
   ["whole binder, passed on whole (matched in the callee)", `const v = check(p) !{ _ e :> verdictOf(e) }
         return v == true ? "LOGGED IN" : v`],
+  // Round 6 (review of 716ee804e, HIGH-A): the binder's uses are an ALLOW-list and a local alias is
+  // not on it (`const held = e` hides every later use from the check) — this shape is now REFUSED
+  // (E-TYPE-031), pinned PASS-REFUSED. The shape itself is unchanged.
   ["whole binder, held in a local then passed on", `const v = check(p) !{ _ e :> {
             const held = e
             verdictOf(held)

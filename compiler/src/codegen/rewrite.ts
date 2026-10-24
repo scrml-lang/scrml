@@ -1,5 +1,5 @@
 import { genVar } from "./var-counter.ts";
-import { splitMultiArmString, parseMatchArm, parseBindingList, iifeLinesHaveOwnAwait, planPayloadBinders, compactArmPatternText, type PayloadBinderRefusal } from "./emit-control-flow.ts";
+import { splitMultiArmString, parseMatchArm, parseBindingList, iifeLinesHaveOwnAwait, planPayloadBinders, compactArmPatternText, wholeErrorBinderFields, type PayloadBinderRefusal, type SubjectVariantFields } from "./emit-control-flow.ts";
 import { splitArmSeparatorCommas, armPiecesCover, rawArmHasStrayComma, rawArmHasLeadingPipeArm } from "../arm-list-split.ts";
 import { recordRefusedLowering } from "./refused-lowering-errors.ts";
 import { currentLoweringSpan } from "./sql-one-statement-guard.ts";
@@ -1778,9 +1778,10 @@ function splitInlineArms(armsStr: string): string[] {
  * count that is not the field count (E-TYPE-021), a named binder for a field the variant does not
  * declare (E-TYPE-022) — is returned as a refusal; the caller records it and emits no binding.
  */
-function payloadBindingPrelude(variant: string, binding: string, tmpVar: string): string | PayloadBinderRefusal {
-  const schema = getVariantFieldSchemaFromRewriter(variant);
-  const ambiguous = schema === null && !!_rewriterVariantFieldCollisions?.has(variant);
+function payloadBindingPrelude(variant: string, binding: string, tmpVar: string, subject: SubjectVariantFields | null = null): string | PayloadBinderRefusal {
+  // S469 r6 — a whole-error binder subject (`match e`) binds by its own enum, never by name.
+  const schema = subject ? (subject.has(variant) ? (subject.get(variant) ?? []) : null) : getVariantFieldSchemaFromRewriter(variant);
+  const ambiguous = !subject && schema === null && !!_rewriterVariantFieldCollisions?.has(variant);
   const plan = planPayloadBinders(variant, binding, parseBindingList(binding), schema, ambiguous, false);
   if ("refusal" in plan) return plan.refusal;
   const out = plan.binds.map((b) => `const ${b.local} = ${tmpVar}.data${b.field === null ? "" : "." + b.field};`);
@@ -1877,6 +1878,7 @@ export function rewriteMatchExpr(expr: string): string {
   if (arms.length === 0) return expr;
 
   const tmpVar = genVar("match");
+  const _wbFields = wholeErrorBinderFields(matchTarget);
   // S469 r8 (g-impl1-text-lowered-match-payload-variant-misdispatch-s469) — a PAYLOAD variant
   // value is `{ variant, data }`, not its name: comparing the value with `"Circle"` never matched,
   // so the else arm ran silently (and `.Circle(r)` never bound `r`). When an arm names a payload
@@ -1885,7 +1887,7 @@ export function rewriteMatchExpr(expr: string): string {
   // direct comparison (a unit variant value IS its name) — their output is unchanged.
   const payloadVariant = (n: string | null | undefined) =>
     !!n && (!!_rewriterVariantFields?.has(n) || !!_rewriterVariantFieldCollisions?.has(n));
-  const useTag = arms.some((a) => a.kind === "variant" &&
+  const useTag = !!_wbFields || arms.some((a) => a.kind === "variant" &&
     (!!a.binding || (a.tests && a.tests.length > 1 ? a.tests : [a.test]).some(payloadVariant)));
   const tagVar = useTag ? genVar("tag") : tmpVar;
   const lines: string[] = [];
@@ -1915,7 +1917,7 @@ export function rewriteMatchExpr(expr: string): string {
           condition = `${tagVar} === "${arm.test}"`;
         }
         if (arm.binding) {
-          const bound = payloadBindingPrelude(arm.test ?? "", arm.binding, tmpVar);
+          const bound = payloadBindingPrelude(arm.test ?? "", arm.binding, tmpVar, _wbFields);
           if (typeof bound !== "string") {
             recordRefusedLowering(new CGError(bound.code, bound.message, currentLoweringSpan() as object), null);
             return prefix + `null /* ${bound.code} */`;

@@ -12,7 +12,7 @@ import { REFUSED_SERVER_TEXT } from "./server-text-guard.ts";
 import { bareBlockText, bareBlockSequenceTexts, PROBE_BODY_OFFSET } from "../validators/defer-structure.ts";
 import { armBlockStatementsDetailed } from "../arm-body-statements.ts";
 import { isWholeBraceBlock } from "../brace-pair.ts";
-import { emitIfStmt, emitForStmt, emitWhileStmt, emitDoWhileStmt, emitBreakStmt, emitContinueStmt, emitTryStmt, emitDeferScope, emitDeferRegistration, emitMatchExpr, emitMatchStmt, emitMultiScrutineeMatchInline, emitSwitchStmt, rewriteBlockBody, splitMultiArmString, parseMatchArm, matchArmInlineToMatchArm, emitVariantBindingPrelude, matchSubjectCtx, hasPayloadBindingOrTaggedVariant, getMatchSubjectVariantFields, isMatchSubjectFailable, getErrorVariantFieldSchema, getEnumVariantFieldSchema, CPS_AMBIENT_ERROR_VARIANTS, planPayloadBinders, parseBindingList, emitTypedArmResultCtor, matchArmBlockToMatchArm, collectIfChainCond, isFailableOkMatch, isSqlFailableMatch, matchScrutineeHandlesSql, enterSqlErrorSchema, exitSqlErrorSchema, emitMatchTagDiscriminator, getVariantFieldSchema, armCondition, givenGuardToMatchArm, stampPropagateOperand, leaveStmtFromArmText, nestedMatchFromArmText, propagateOperandOfArmText, structureServerArm, emitArmValue, emitObjectLiteralArm, hostAsyncFacts, type MatchArm, type SubjectVariantFields } from "./emit-control-flow.ts";
+import { emitIfStmt, emitForStmt, emitWhileStmt, emitDoWhileStmt, emitBreakStmt, emitContinueStmt, emitTryStmt, emitDeferScope, emitDeferRegistration, emitMatchExpr, emitMatchStmt, emitMultiScrutineeMatchInline, emitSwitchStmt, rewriteBlockBody, splitMultiArmString, parseMatchArm, matchArmInlineToMatchArm, emitVariantBindingPrelude, matchSubjectCtx, hasPayloadBindingOrTaggedVariant, getMatchSubjectVariantFields, pushWholeErrorBinder, popWholeErrorBinder, isMatchSubjectFailable, getErrorVariantFieldSchema, getEnumVariantFieldSchema, CPS_AMBIENT_ERROR_VARIANTS, planPayloadBinders, parseBindingList, emitTypedArmResultCtor, matchArmBlockToMatchArm, collectIfChainCond, isFailableOkMatch, isSqlFailableMatch, matchScrutineeHandlesSql, enterSqlErrorSchema, exitSqlErrorSchema, emitMatchTagDiscriminator, getVariantFieldSchema, armCondition, givenGuardToMatchArm, stampPropagateOperand, leaveStmtFromArmText, nestedMatchFromArmText, propagateOperandOfArmText, structureServerArm, emitArmValue, emitObjectLiteralArm, hostAsyncFacts, type MatchArm, type SubjectVariantFields } from "./emit-control-flow.ts";
 import { isDestructurePattern, nameOrPatternText } from "./emit-destructure-pattern.ts";
 import type { DefaultLowerer } from "./emit-destructure-pattern.ts";
 import { markDeclaredImmutable, markDeclaredMutable, tildeDeclIsRebind, clearLiftScope } from "./declared-name-marks.ts";
@@ -5300,6 +5300,17 @@ function _emitLogicNode(node: any, opts: EmitLogicOpts): string {
         const hasWildcard = arms.some((a: LogicArm) => a.pattern === "_");
         let isFirst = true;
         for (const arm of arms) {
+          // S469 r6 (HIGH-B) — while a whole-error binder's arm (`_ e :>`) is emitted, `e` is in
+          // scope with the handled call's identity-resolved error enum, so a `match e` in the body
+          // binds by THAT enum (never the file's same-named variant).
+          const _wholeBinder = arm.pattern === "_" && typeof arm.binding === "string" && arm.binding.trim() && arm.binding.trim() !== "_"
+            ? arm.binding.trim() : null;
+          if (_wholeBinder) {
+            pushWholeErrorBinder(_wholeBinder, (node as { __guardErrorUnknown?: boolean }).__guardErrorUnknown
+              ? null
+              : getMatchSubjectVariantFields({ __matchSubjectVariants: (node as { __guardErrorVariants?: unknown }).__guardErrorVariants }));
+          }
+          try {
           // §19.4.3 / §18.5 (S468) — a block arm ending in an expression yields
           // that expression: lowered from its parsed statements, tail into resultVar.
           let blockValueLines = emitBlockArmValueToResult(arm, resultVar, opts);
@@ -5339,6 +5350,9 @@ function _emitLogicNode(node: any, opts: EmitLogicOpts): string {
             }
             for (const l of armLines(armIsExpr)) lines.push(l);
             lines.push(`  }`);
+          }
+          } finally {
+            if (_wholeBinder) popWholeErrorBinder();
           }
           isFirst = false;
         }
