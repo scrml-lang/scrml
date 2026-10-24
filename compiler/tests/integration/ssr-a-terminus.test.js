@@ -612,14 +612,14 @@ describe("ssr-a-terminus (g): the if=-gate BYPASS tags keep their server render"
   });
 
   // S469 (g-if-on-structural-element-silently-ignored) — because these dispatches never reach
-  // the gate, an `if=` on one is now REFUSED (E-IF-UNSUPPORTED-HOST; `<page>` keeps its own
+  // the gate, an `if=` on one is now REFUSED (E-GATE-UNSUPPORTED-HOST; `<page>` keeps its own
   // E-PAGE-INVALID-ATTR at TAB). The SSR assertions below still hold for the lowering the
   // dispatch performs, but no such program ships: the refusal fails the compile.
   for (const [tag, markup] of Object.entries(BYPASS_TAG_SOURCES)) {
     if (tag === "page") continue;
-    test(`<${tag} if=…> is refused — E-IF-UNSUPPORTED-HOST (the dispatch bypasses the gate)`, () => {
+    test(`<${tag} if=…> is refused — E-GATE-UNSUPPORTED-HOST (the dispatch bypasses the gate)`, () => {
       const { errors } = compileBundles(seededProgram(markup));
-      expect(errors.filter((e) => e.code === "E-IF-UNSUPPORTED-HOST").length).toBe(1);
+      expect(errors.filter((e) => e.code === "E-GATE-UNSUPPORTED-HOST").length).toBe(1);
     });
   }
 
@@ -731,10 +731,10 @@ ${opener}<ul><each in=@accounts key=@.id><li : @.name></each></ul></signupForm>
     return { res, outDir };
   };
 
-  test("<signupForm if=…> is refused — E-IF-UNSUPPORTED-HOST (the wrapper never reaches the gate), no artifact", async () => {
+  test("<signupForm if=…> is refused — E-GATE-UNSUPPORTED-HOST (the wrapper never reaches the gate), no artifact", async () => {
     // S469 — the wrapper is transparent: its subtree rendered LIVE whatever `@loaded` said.
     const { res, outDir } = await compileCompound("<signupForm if=@loaded>");
-    expect((res.errors ?? []).map((e) => e.code)).toContain("E-IF-UNSUPPORTED-HOST");
+    expect((res.errors ?? []).map((e) => e.code)).toContain("E-GATE-UNSUPPORTED-HOST");
     expect(existsSync(join(outDir, "app.html"))).toBe(false);
   });
 

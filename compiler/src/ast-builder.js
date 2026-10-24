@@ -105,6 +105,7 @@ function escapeRawHasEffect(raw) {
 import { parseThemeBody } from "./theme-body-parser.ts";
 import { MATCH_ARM_SHORTHAND_AMBIGUOUS, matchArmShorthandAmbiguousMessage, objectLiteralArmValue } from "./arm-body-statements.ts";
 import { collectRefusedElements, refusedElementCode, refusedElementMessage } from "./element-refusal.ts";
+import { GATE_UNSUPPORTED_HOST_CODE, gateUnsupportedHostMessage } from "./gate-attr-refusal.ts";
 import { isRawContentElement } from "./raw-content-encode.ts";
 import { OBJECT_SHORTHAND_CELL, destructureCellMessage } from "./object-shorthand-cell.ts";
 import { markupNotRenderedMessage, refuseUnrenderedStatementMarkup } from "./markup-statement-refusal.ts";
@@ -4808,6 +4809,27 @@ function structuralHeaderAnchor(block, header) {
   };
 }
 
+/** Blank quoted strings and every balanced `{…}` / `(…)` / `[…]` group (length-preserving). */
+function maskStructuralHeader(header) {
+  const chars = header.split("");
+  let depth = 0;
+  let quote = null;
+  for (let j = 0; j < chars.length; j++) {
+    const c = chars[j];
+    if (quote) {
+      if (c === "\\") { chars[j] = " "; if (j + 1 < chars.length) chars[++j] = " "; continue; }
+      if (c === quote) quote = null;
+      else chars[j] = " ";
+      continue;
+    }
+    if (c === '"' || c === "'" || c === "`") { quote = c; continue; }
+    if (c === "{" || c === "(" || c === "[") { depth++; continue; }
+    if (c === "}" || c === ")" || c === "]") { if (depth > 0) depth--; continue; }
+    if (depth > 0 && c !== "\n") chars[j] = " ";
+  }
+  return chars.join("");
+}
+
 /**
  * §17.1.1 / §17.1.2.2 — capture an `else` / `else-if=` chain-membership attribute
  * from a scrml-defined STRUCTURAL element opener (`<engine>` / `<match>` / `<each>`).
@@ -4831,23 +4853,7 @@ function structuralHeaderAnchor(block, header) {
  */
 function captureStructuralChainAttr(header, absStart, line, col, filePath) {
   if (typeof header !== "string" || header.length === 0) return null;
-  const chars = header.split("");
-  let depth = 0;
-  let quote = null;
-  for (let j = 0; j < chars.length; j++) {
-    const c = chars[j];
-    if (quote) {
-      if (c === "\\") { chars[j] = " "; if (j + 1 < chars.length) chars[++j] = " "; continue; }
-      if (c === quote) quote = null;
-      else chars[j] = " ";
-      continue;
-    }
-    if (c === '"' || c === "'" || c === "`") { quote = c; continue; }
-    if (c === "{" || c === "(" || c === "[") { depth++; continue; }
-    if (c === "}" || c === ")" || c === "]") { if (depth > 0) depth--; continue; }
-    if (depth > 0 && c !== "\n") chars[j] = " ";
-  }
-  const masked = chars.join("");
+  const masked = maskStructuralHeader(header);
   // Walk the standalone words. `else-if=` is always the attribute. A bare `else` is the
   // attribute UNLESS it closes an `if … then … else …` expression in an unparenthesized
   // attribute value (`derived=if @s == "x" then .A else .B` — §51.0 derived=): an `else`
@@ -4877,12 +4883,15 @@ function captureStructuralChainAttr(header, absStart, line, col, filePath) {
     }
   }
   if (!found) return null;
-  const name = found.name;
-  const at = found.at;
+  return structuralAttrNameCapture(header, found.at, found.name, absStart, line, col, filePath);
+}
+
+/** `{ name, raw, span }` for the attribute NAME at `header[at]` (file coordinates). */
+function structuralAttrNameCapture(header, at, name, absStart, line, col, filePath) {
   const before = header.slice(0, at);
   const nl = (before.match(/\n/g) || []).length;
   const lastNl = before.lastIndexOf("\n");
-  const len = name === "else" ? 4 : 7;
+  const len = name.length;
   return {
     name,
     raw: header.slice(at, at + len),
@@ -4894,6 +4903,30 @@ function captureStructuralChainAttr(header, absStart, line, col, filePath) {
       col: nl > 0 ? (at - lastNl) : col + at,
     },
   };
+}
+
+/**
+ * §17.2 / §17.1.2.2 — a `show=` on a structural element opener (`<engine>` / `<match>` /
+ * `<each>`). The openers never read it: the element rendered visible whatever the condition
+ * said (measured S469, every position). Captured (same masking as
+ * `captureStructuralChainAttr`) so `refuseUnconsumedStructuralChainAttrs` can refuse it.
+ *
+ * @returns {{ name: "show", raw: string, span: Span } | null}
+ */
+function captureStructuralShowAttr(header, absStart, line, col, filePath) {
+  if (typeof header !== "string" || header.length === 0) return null;
+  const masked = maskStructuralHeader(header);
+  const WORD = /[A-Za-z_$][\w$-]*/g;
+  let wm;
+  while ((wm = WORD.exec(masked)) !== null) {
+    const at0 = wm.index;
+    const prev = at0 > 0 ? masked[at0 - 1] : " ";
+    if (!/\s/.test(prev) && prev !== "=") continue;
+    if (wm[0] !== "show") continue;
+    if (!/^\s*=(?!=)/.test(masked.slice(at0 + 4))) continue;
+    return structuralAttrNameCapture(header, at0, "show", absStart, line, col, filePath);
+  }
+  return null;
 }
 
 /**
@@ -22477,6 +22510,9 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
         const _matchIfChain = captureStructuralChainAttr(
           header, _matchIfAnchor.absStart, _matchIfAnchor.line, _matchIfAnchor.col, filePath,
         );
+        const _matchIfShow = captureStructuralShowAttr(
+          header, _matchIfAnchor.absStart, _matchIfAnchor.line, _matchIfAnchor.col, filePath,
+        );
 
         // `on=expr` capture: takes everything after `on=` up to the next
         // standalone attribute boundary OR end of header. Conservative —
@@ -22802,6 +22838,7 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
           // `if=`. See the `<each>` node's stamp for why omission, not null.
           ...(_matchIf ? { ifRaw: _matchIf.raw, ifCond: _matchIf.value } : {}),
           ...(_matchIfChain ? { chainAttr: _matchIfChain } : {}),
+          ...(_matchIfShow ? { showAttr: _matchIfShow } : {}),
           span,
           openerHadSpaceAfterLt: block.openerHadSpaceAfterLt === true,
         };
@@ -23561,6 +23598,9 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
         const _eachIfChain = captureStructuralChainAttr(
           header, _eachIfAnchor.absStart, _eachIfAnchor.line, _eachIfAnchor.col, filePath,
         );
+        const _eachIfShow = captureStructuralShowAttr(
+          header, _eachIfAnchor.absStart, _eachIfAnchor.line, _eachIfAnchor.col, filePath,
+        );
 
         // `as name` — whitespace-separated bareword (no `=` between `as`
         // and the variable name) per HU-1 Q6 canonical form
@@ -23812,6 +23852,7 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
           // truthiness, so absent and null are indistinguishable to them.
           ...(_eachIf ? { ifRaw: _eachIf.raw, ifCond: _eachIf.value } : {}),
           ...(_eachIfChain ? { chainAttr: _eachIfChain } : {}),
+          ...(_eachIfShow ? { showAttr: _eachIfShow } : {}),
           span,
           openerHadSpaceAfterLt: block.openerHadSpaceAfterLt === true,
         };
@@ -24464,6 +24505,9 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
         const _engineIfChain = captureStructuralChainAttr(
           header, _engineIfAnchor.absStart, _engineIfAnchor.line, _engineIfAnchor.col, filePath,
         );
+        const _engineIfShow = captureStructuralShowAttr(
+          header, _engineIfAnchor.absStart, _engineIfAnchor.line, _engineIfAnchor.col, filePath,
+        );
         // §51.0.H Form 3 (S148, Insight 33 Fork C1) — `effect=${...}` on the
         // ENGINE OPENER (NOT a state-child): the boot-only init effect, the
         // effect of the implicit init→`initial=` transition (Elm init+Cmd).
@@ -24980,6 +25024,7 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
           // stamp for the parser-parity reason.
           ...(_engineIf ? { ifRaw: _engineIf.raw, ifCond: _engineIf.value } : {}),
           ...(_engineIfChain ? { chainAttr: _engineIfChain } : {}),
+          ...(_engineIfShow ? { showAttr: _engineIfShow } : {}),
           span,
         };
       }
@@ -25050,6 +25095,9 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
         // §17.1.1 — `else` / `else-if=` on this opener, kept for the chain-membership
         // check (see captureStructuralChainAttr). Absent (not null) when not written.
         const _matchIfChain = captureStructuralChainAttr(
+          header, _matchIfAnchor.absStart, _matchIfAnchor.line, _matchIfAnchor.col, filePath,
+        );
+        const _matchIfShow = captureStructuralShowAttr(
           header, _matchIfAnchor.absStart, _matchIfAnchor.line, _matchIfAnchor.col, filePath,
         );
 
@@ -25136,6 +25184,7 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
           // `if=`. See the `<each>` node's stamp for why omission, not null.
           ...(_matchIf ? { ifRaw: _matchIf.raw, ifCond: _matchIf.value } : {}),
           ...(_matchIfChain ? { chainAttr: _matchIfChain } : {}),
+          ...(_matchIfShow ? { showAttr: _matchIfShow } : {}),
           span,
           openerHadSpaceAfterLt: block.openerHadSpaceAfterLt === true,
         };
@@ -26074,9 +26123,20 @@ function refuseUnconsumedStructuralChainAttrs(nodes, errors) {
         err.structuralChainRefusal = true;
         errors.push(err);
       }
+      // §17.2 — a `show=` on a structural opener is never read either (E-GATE-UNSUPPORTED-HOST).
+      if (v.showAttr && v.showAttr.name === "show") {
+        const tag = STRUCTURAL_CHAIN_TAG[kind] ?? kind;
+        const err = new TABError(
+          GATE_UNSUPPORTED_HOST_CODE,
+          gateUnsupportedHostMessage("show", tag),
+          v.showAttr.span ?? v.span ?? { line: 0, col: 0 },
+        );
+        err.structuralChainRefusal = true;
+        errors.push(err);
+      }
     }
     for (const k of Object.keys(v)) {
-      if (k === "span" || k === "parent" || k === "chainAttr") continue;
+      if (k === "span" || k === "parent" || k === "chainAttr" || k === "showAttr") continue;
       const c = v[k];
       if (c && typeof c === "object") visit(c);
     }

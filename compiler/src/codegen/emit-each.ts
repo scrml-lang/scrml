@@ -3308,8 +3308,8 @@ function renderEmptyChildToJs(
   engineCtx: EachEngineCtx | null = null,
 ): void {
   if (!emptyChild || typeof emptyChild !== "object") return;
-  // §17.1 / §17.1.1 (S469) — `<empty>` is a structural sub-element, not a chain level or a
-  // gated host: an `if=` / `else` / `else-if=` on it was dropped and the fallback rendered
+  // §17.1 / §17.1.1 / §17.2 (S469) — `<empty>` is a structural sub-element, not a chain level
+  // or a gated host: an `if=` / `show=` / `else` / `else-if=` on it was dropped and the fallback rendered
   // whenever the list was empty, whatever the condition said. Refused (fails the compile);
   // the body is still walked so its own refusals report. Gate the whole list instead
   // (`<each if=COND …>`, §17.1.2) or put the condition inside the `<empty>` body.
@@ -3318,7 +3318,7 @@ function renderEmptyChildToJs(
     if (Array.isArray(_emptyAttrs)) {
       for (const a of _emptyAttrs) {
         if (!a) continue;
-        if (a.name === "if") refuseIfOnUngatedHost("empty", a, emptyChild, "an `<each>`'s `<empty>` fallback");
+        if (a.name === "if" || a.name === "show") refuseIfOnUngatedHost("empty", a, emptyChild, "an `<each>`'s `<empty>` fallback");
         else refuseUnloweredElseChain(a.name, "on an `<each>`'s `<empty>` fallback", (a.span ? a : emptyChild) as { span?: unknown },
           "Gate the whole list (`<each if=COND …>`) or put the condition inside the `<empty>` body.");
       }

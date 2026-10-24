@@ -634,7 +634,7 @@ export interface OnTimeoutEntry {
    *  of the `<onTimeout` opener. */
   rawOffset: number;
   /** S469 — an `if=` / `else-if=` / `else` written on the opener (refused by the
-   *  typer: E-IF-UNSUPPORTED-HOST / E-CTRL-002 / E-CTRL-001). Absent when none. */
+   *  typer: E-GATE-UNSUPPORTED-HOST / E-CTRL-002 / E-CTRL-001). Absent when none. */
   gateAttr?: "if" | "else" | "else-if";
 }
 
@@ -680,14 +680,7 @@ function timerGateAttrDiagnostic(
   gateAttr: "if" | "else" | "else-if",
 ): { code: string; message: string } {
   if (gateAttr === "if") {
-    return {
-      code: "E-IF-UNSUPPORTED-HOST",
-      message:
-        `E-IF-UNSUPPORTED-HOST: \`if=\` on \`<${element}>\` is not honoured — §17.1.2: \`if=\` is honoured on ` +
-        `\`<engine>\` / \`<match>\` / \`<each>\` and on HTML elements and components; every other ` +
-        `scrml-defined element SHALL reject it. The timer would arm whatever the condition says. Remove the ` +
-        `condition, or move the timer into a state that is entered only when the condition holds.`,
-    };
+    return { code: GATE_UNSUPPORTED_HOST_CODE, message: gateUnsupportedHostMessage("if", element) };
   }
   const code = gateAttr === "else" ? "E-CTRL-001" : "E-CTRL-002";
   const spelled = gateAttr === "else" ? "`else`" : "`else-if=`";
@@ -5784,6 +5777,7 @@ function stringLiteralValueOf(arg: any): string | null {
 // `ReferenceError: autoDeriveEngineVarName is not defined` (g-derived-engine-autoderive-crash).
 import { autoDeriveEngineVarName } from "./engine-varname";
 import { ENGINE_IN_ROW_CODE, ENGINE_IN_ROW_REFUSED, engineInEachRowMessage } from "./engine-in-each-row.ts";
+import { GATE_UNSUPPORTED_HOST_CODE, gateUnsupportedHostMessage } from "./gate-attr-refusal.ts";
 export { autoDeriveEngineVarName };
 
 /**

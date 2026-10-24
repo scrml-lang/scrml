@@ -496,7 +496,7 @@ describe("§17.1.2 §6 — the capture is exactly three elements wide", () => {
     expect(markerCount(out.html)).toBe(0);
     // S469 — neither timer reads an `if=` (§17.1.2: SHALL reject); it was silently dropped
     // and the timer armed regardless. Both are refused now.
-    expect(out.errorCodes.filter((c) => c === "E-IF-UNSUPPORTED-HOST").length).toBe(2);
+    expect(out.errorCodes.filter((c) => c === "E-GATE-UNSUPPORTED-HOST").length).toBe(2);
   });
 
   test("a per-item `if=` on an `<each>` ROW is a different surface and stays on its own lowering", () => {

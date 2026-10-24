@@ -12,7 +12,7 @@ import { hasTemplateInterpolation } from "./rewrite.js";
 import { isRcdataElement, isHtmlElement, isStandardHtmlRenderElement } from "../html-elements.js";
 import { isAuthorMainTag } from "../landmark-tag.ts";
 import { CGError } from "./errors.ts";
-import { refuseElementLowering, refuseRawContentLowering, refuseStaticAttrWrite, recordRefusedLowering, refuseIfOnUngatedHost } from "./refused-lowering-errors.ts";
+import { refuseElementLowering, refuseRawContentLowering, refuseStaticAttrWrite, recordRefusedLowering, refuseGateAttrsOnUngatedHost } from "./refused-lowering-errors.ts";
 import {
   collectEnginesUnderIfChainBranch, engineInIfChainMessage, ENGINE_IN_IF_CHAIN_REFUSED, ENGINE_HOST_SPAN,
 } from "../engine-in-each-row.ts";
@@ -2026,14 +2026,15 @@ export function generateHtml(
       const isSelfClosing: boolean = node.selfClosing === true && children.length === 0;
       const isVoid: boolean = VOID_ELEMENTS.has(tag);
 
-      // §17.1 / §17.1.2 (S469) — the dispatches below for `IF_GATE_BYPASS_TAGS` return
-      // before the `if=` mount gate, so an `if=` on one was silently dropped and the
-      // content rendered ungated (`<errorBoundary if=…>` / `<render if=…>` painted with the
-      // condition false). Refused here, once, ahead of every bypass dispatch. A chain
-      // member never reaches this with its `if=`: the if-chain emitter strips it
-      // (`stripChainBranchAttrs`). `<page if=>` is already refused (E-PAGE-INVALID-ATTR).
+      // §17.1 / §17.2 (S469) — the dispatches below for `IF_GATE_BYPASS_TAGS` return
+      // before the `if=` mount gate and the `show=` toggle, so either attribute on one was
+      // silently dropped and the content rendered ungated (`<errorBoundary if=…>` /
+      // `<render if=…>` painted with the condition false). Refused here, once, ahead of
+      // every bypass dispatch (E-GATE-UNSUPPORTED-HOST). A chain member never reaches this
+      // with its `if=`: the if-chain emitter strips it (`stripChainBranchAttrs`).
+      // `<page>` is already refused for any foreign attribute (E-PAGE-INVALID-ATTR).
       if (IF_GATE_BYPASS_TAGS.has(tag) && tag !== "page") {
-        refuseIfOnUngatedHost(tag, attrs.find((a: any) => a && a.name === "if"), node);
+        refuseGateAttrsOnUngatedHost(tag, attrs, node);
       }
 
       // 6nz-F4 — RCDATA content-model carve-out (SPEC §24.3.1 companion,
@@ -2252,8 +2253,8 @@ export function generateHtml(
         const wrapperDecl = lookupStateCell(fileScope, tag);
         const wrapperKind = wrapperDecl ? getCellKind(wrapperDecl.declNode as any) : undefined;
         if (wrapperDecl && wrapperKind === "compound-parent") {
-          // §17.1 (S469) — the transparent wrapper returns before the `if=` gate too.
-          refuseIfOnUngatedHost(tag, attrs.find((a: any) => a && a.name === "if"), node,
+          // §17.1 / §17.2 (S469) — the transparent wrapper returns before the gate too.
+          refuseGateAttrsOnUngatedHost(tag, attrs, node,
             `the compound-state namespace wrapper \`<${tag}>\``);
           enclosingCompoundStack.push(tag);
           // ss15 item-2 (S214) -- the compound-parent wrapper is a markup
