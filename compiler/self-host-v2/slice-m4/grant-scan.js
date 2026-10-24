@@ -27,6 +27,14 @@
 //       argument, or the whole value of a `grants:` key.
 //   R6  a string literal "grants" / "replace" / "edits" used as a bracket key
 //       (`f["grants"]`) is refused.
+//   MED-1 (review of #1530) — the TYPE-derived grants too: R3 also refuses
+//       `.positionsWritable` and `.shrink` reads (`shrink` may be copied whole into
+//       a `shrink:` slot); R4 also refuses naming `SeqGrants`; R5 also covers
+//       SeqGrants-returning calls (`fixedSeq()`, allowed whole inside a `.Seq(…)`
+//       constructor); R7: a variant-pattern binder `.Seq(…, grants: g)` /
+//       `.TSeq(…, grants: gs)` may only be unused in its arm, or passed whole to
+//       a reader — so `g.at`, `g.length`, `gs.indexOf("replace")` are refused
+//       outside the reader without refusing every unrelated `.at`.
 // Reader functions are the `fn`s declared inside the range.
 //
 // What it cannot see (stated, not hidden): a read that never spells `grants`,
@@ -168,12 +176,21 @@ function isReaderArg(toks, m, s, e, readers) {
   return true;
 }
 
-/** Is the expression spanning [s, e] the whole value of a `grants:` key in an object literal? */
-function isGrantsSlotValue(toks, m, s, e) {
+/** Is the expression spanning [s, e] a WHOLE argument of the variant constructor `….Seq(…)` (a SeqGrants slot)? */
+function isSeqCtorArg(toks, m, s, e) {
+  const before = toks[s - 1];
+  const after = toks[e + 1];
+  if (!before || !after || !(before.v === "(" || before.v === ",") || !(after.v === ")" || after.v === ",")) return false;
+  const open = before.v === "(" ? s - 1 : enclosing(toks, m, s);
+  return open >= 2 && toks[open].v === "(" && toks[open - 1].v === "Seq" && toks[open - 2].v === ".";
+}
+
+/** Is the expression spanning [s, e] the whole value of a `grants:` (or `key:`) key in an object literal? */
+function isGrantsSlotValue(toks, m, s, e, slot = "grants") {
   const colon = toks[s - 1];
   const key = toks[s - 2];
   const after = toks[e + 1];
-  if (!colon || colon.v !== ":" || !key || key.t !== "id" || key.v !== "grants") return false;
+  if (!colon || colon.v !== ":" || !key || key.t !== "id" || key.v !== slot) return false;
   if (!after || !(after.t === "p" && (after.v === "," || after.v === "}"))) return false;
   return isLiteralKey(toks, m, s - 2);
 }
@@ -222,11 +239,30 @@ function isImportName(toks, m, i) {
   return open >= 1 && toks[open].v === "{" && toks[open - 1].t === "id" && toks[open - 1].v === "import";
 }
 
-/** The names of the functions that return a GrantSet (`fn name(…) -> GrantSet …`). */
+/** The names of the functions that return a GrantSet or a SeqGrants (`fn name(…) -> GrantSet …`). */
 export function grantSetFns(...sources) {
   const out = new Set();
   for (const s of sources) {
-    for (const m of s.matchAll(/\bfn\s+(\w+)\s*\([^)]*\)\s*->\s*GrantSet\b/g)) out.add(m[1]);
+    for (const m of s.matchAll(/\bfn\s+(\w+)\s*\([^)]*\)\s*->\s*(?:GrantSet|SeqGrants)\b/g)) out.add(m[1]);
+  }
+  return out;
+}
+
+/**
+ * MED-1: the uses of the binder `x` of a variant pattern `.Seq(…, grants: x)` at
+ * token `bi` (the binder), within its ARM — from the pattern's `)` to the next
+ * arm (a `.Variant` that starts a line at the arm's depth) or the match's `}`.
+ */
+function binderUses(src, toks, m, bi, x) {
+  const open = enclosing(toks, m, bi);
+  const out = [];
+  let depth = 0;
+  for (let j = m[open] + 1; j < toks.length; j++) {
+    const k = toks[j];
+    if (k.t === "p" && OPEN[k.v]) depth++;
+    else if (k.t === "p" && CLOSE[k.v]) { depth--; if (depth < 0) break; }
+    else if (depth === 0 && k.v === "." && toks[j + 1]?.t === "id" && src.lastIndexOf("\n", k.at) > toks[j - 1].at) break;
+    if (k.t === "id" && k.v === x && !(toks[j - 1]?.v === ".")) out.push(j);
   }
   return out;
 }
@@ -266,27 +302,44 @@ export function grantReadsOutsideReader(src, libs = []) {
         return;
       }
       if (next && next.t === "p" && next.v === ":") {
-        if (isLiteralKey(toks, m, i) || isVariantBinder(toks, m, i)) return;
+        if (isLiteralKey(toks, m, i)) return;
+        if (isVariantBinder(toks, m, i)) {
+          // R7 (MED-1): the binder holds the TYPE's grants (SeqGrants, or the
+          // written grant words) — it may be unused, or passed whole to a reader
+          const x = toks[i + 2];
+          if (x && x.t === "id") {
+            for (const j of binderUses(src, toks, m, i, x.v)) {
+              if (!isReaderArg(toks, m, j, j, readers)) report(toks[j], "R7 a type's grants (`grants: " + x.v + "`) used outside the reader");
+            }
+          }
+          return;
+        }
         report(k, "R2 `grants` key in a pattern");
         return;
       }
       report(k, "R2 bare `grants`");
       return;
     }
-    if (k.t === "id" && (k.v === "replace" || k.v === "edits") && prev && prev.t === "p" && prev.v === ".") {
+    // R3: a grant's fields — GrantSet `replace` / `edits`; MED-1: SeqGrants
+    // `positionsWritable` / `shrink` (`shrink` may be copied whole into a `shrink:` slot)
+    if (k.t === "id" && (k.v === "replace" || k.v === "edits" || k.v === "positionsWritable" || k.v === "shrink") && prev && prev.t === "p" && prev.v === ".") {
       if (next && next.t === "p" && next.v === "(") return;      // a method call (`s.replace(…)`)
+      if (k.v === "shrink") {
+        const s = chainStart(toks, m, i);
+        if (chainEnd(toks, m, i) === i && isGrantsSlotValue(toks, m, s, i, "shrink")) return;
+      }
       report(k, "R3 member read of `" + k.v + "`");
       return;
     }
-    if (k.t === "id" && k.v === "GrantSet") {
+    if (k.t === "id" && (k.v === "GrantSet" || k.v === "SeqGrants")) {
       if (isStructGrantsField(toks, m, i) || isImportName(toks, m, i)) return;
-      report(k, "R4 `GrantSet` named");
+      report(k, "R4 `" + k.v + "` named");
       return;
     }
     if (k.t === "id" && gsFns.has(k.v) && next && next.t === "p" && next.v === "(" && !(prev && prev.t === "id" && prev.v === "fn")) {
       const e = m[i + 1];
-      if (e >= 0 && (isReaderArg(toks, m, i, e, readers) || isGrantsSlotValue(toks, m, i, e))) return;
-      report(k, "R5 a GrantSet-returning call `" + k.v + "(…)` held or read");
+      if (e >= 0 && (isReaderArg(toks, m, i, e, readers) || isGrantsSlotValue(toks, m, i, e) || isSeqCtorArg(toks, m, i, e))) return;
+      report(k, "R5 a grant-returning call `" + k.v + "(…)` held or read");
       return;
     }
     if (k.t === "id" && gsFns.has(k.v) && prev && prev.t === "id" && prev.v === "fn") {

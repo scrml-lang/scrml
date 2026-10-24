@@ -74,8 +74,9 @@ Gaps: `g-bootstrap-whole-struct-write-bypasses-tape-field-grants-s469` (MED),
 
 ## Final review of #1528 — follow-ups in `s469-boot-tape-grants-2`
 
-F1 (enum payload tapes, HIGH), F2 (structural scan), F3 (Core snapshot keep), F4 (identity overrides) and three new
-owner questions (Q8–Q10: enum payloads and the snapshot keep): `docs/changes/s469-boot-tape-grants-2/progress.md`.
+F1 (enum payload tapes — RULED S469 "Not a tape position": a payload is a value, no refusal), F2 + MED-1 (structural
+scan), F3 (Core snapshot keep), F4 (identity overrides) and the snapshot-keep owner question:
+`docs/changes/s469-boot-tape-grants-2/progress.md`.
 
 ## Owner questions (not invented — refused fail-closed where the SPEC does not settle)
 

@@ -1,12 +1,11 @@
 // tape-grants-r3.test.js — s469-boot-tape-grants-2: the final-review
 // follow-ups of #1528 (SPEC §66.12.6 "No position escapes the grants").
 //
-//   F1  an ENUM PAYLOAD is a tape position: a whole enum value (a write, a
+//   F1  RULED S469 "Not a tape position": an ENUM PAYLOAD is a value — grants
+//       do not apply inside it, so every whole enum write (a write, a
 //       transition, `reset`, `reset-on=`, `persist="local"`'s cross-tab value)
-//       may replace a tape held in a variant payload — directly or inside a
-//       payload struct. A `replace`-less one is refused E-BOOTSTRAP-UNSUPPORTED
-//       (fresh value vs `replace` on a variant switch is an owner question); Core
-//       C3 / C17 refuse the same on a planted Core.
+//       is accepted over a `replace`-less payload tape, while a struct cell's
+//       tape field stays judged (#1528).
 //   F3  `@o = { ...@o, inner: { ys: @o.inner.ys } }` (and the instance form) is
 //       accepted by the analyzer AND by Core: Core reads a read through the
 //       spread's snapshot Local as the place it snapshots.
@@ -43,76 +42,57 @@ const ENUM = (t, extra = "") => `    type E:enum = { Dot, A(xs: ${t}) }\n    let
 const TRANS = (t) => `    type E:enum = { Dot, A(xs: ${t}) }\n    <e:E=.Dot>\n        <Dot rule=.A/>\n        <A rule=.Dot/>\n    </>\n    function mk()! E {\n        fail .A([1]);\n    }\n`;
 const ENUM_IN_STRUCT =(t) => `    type Box:struct = { xs: ${t} }\n    type E:enum = { Dot, A(b: Box) }\n    let <e:E=.Dot/>\n`;
 
-describe("F1 — an enum variant payload is a tape position (§66.12.6 rule 1)", () => {
+// RULED S469 (bryan, on Q8 of this lane): "Not a tape position". An enum payload
+// is a VALUE: grants do not apply inside it, and a whole write of such an enum
+// (a cross-tab sync included) is not judged against a payload tape's grants. A
+// struct INSIDE a payload is a payload value too. A struct-typed CELL or struct
+// field whose tape field lacks `replace` stays judged (#1528) — the regression
+// guards below.
+describe("RULED S469 — an enum payload is a value, not a tape position (§66.12.6)", () => {
   const UNGRANTED = "int[free, append]";
-  const GRANTED = "int[free, append, replace]";
-  // [form, decls(t), body]
+  // [form, decls, body]
   const FORMS = [
-    ["a `fail` payload written whole (`!{ _ x :> @e = x }`)", (t) => ENUM(t), "mk() !{ _ x :> @e = x };"],
-    ["a variant switch to a payload-free variant (`@e = .Dot`)", (t) => ENUM(t), "@e = .Dot;"],
-    ["`reset(@e)`", (t) => ENUM(t), "reset(@e);"],
-    ["a `rule=` transition (the enum is written whole along its graph)", (t) => TRANS(t), "@e = .Dot;"],
-    ["a `rule=` transition to the payload variant", (t) => TRANS(t), "mk() !{ _ x :> @e = x };"],
-    ["a payload STRUCT's tape (`@e = .Dot`)", (t) => ENUM_IN_STRUCT(t), "@e = .Dot;"],
-    ["a struct field holding the enum, written whole", (t) => `    type E:enum = { Dot, A(xs: ${t}) }\n    type W:struct = { title: string, let e: E }\n    let <w:W=({ title: "t", e: .Dot })/>\n`, "@w.e = .Dot;"],
-    ["a genuine replace of a struct whose enum field is not kept", (t) => `    type E:enum = { Dot, A(xs: ${t}) }\n    type W:struct = { title: string, e: E }\n    let <w:W=({ title: "t", e: .Dot })/>\n`, "@w = { title: \"u\", e: .Dot };"],
+    ["a `fail` payload written whole (`!{ _ x :> @e = x }`)", ENUM(UNGRANTED), "mk() !{ _ x :> @e = x };"],
+    ["a variant switch to a payload-free variant (`@e = .Dot`)", ENUM(UNGRANTED), "@e = .Dot;"],
+    ["`reset(@e)`", ENUM(UNGRANTED), "reset(@e);"],
+    ["a `rule=` transition", TRANS(UNGRANTED), "@e = .Dot;"],
+    ["a `rule=` transition to the payload variant", TRANS(UNGRANTED), "mk() !{ _ x :> @e = x };"],
+    ["a payload STRUCT's tape (`@e = .Dot`)", ENUM_IN_STRUCT(UNGRANTED), "@e = .Dot;"],
+    ["a struct field holding the enum, written whole", `    type E:enum = { Dot, A(xs: ${UNGRANTED}) }\n    type W:struct = { title: string, let e: E }\n    let <w:W=({ title: "t", e: .Dot })/>\n`, "@w.e = .Dot;"],
+    ["a genuine replace of a struct whose enum field is rewritten", `    type E:enum = { Dot, A(xs: ${UNGRANTED}) }\n    type W:struct = { title: string, e: E }\n    let <w:W=({ title: "t", e: .Dot })/>\n`, "@w = { title: \"u\", e: .Dot };"],
   ];
   for (const [form, decls, body] of FORMS) {
-    test(`${form} — ungranted: refused E-BOOTSTRAP-UNSUPPORTED`, () => {
-      const cs = codes(P(decls(UNGRANTED), body));
-      expect(cs).toContain("E-BOOTSTRAP-UNSUPPORTED");
-      expect(cs.every((c) => c === "E-BOOTSTRAP-UNSUPPORTED")).toBe(true);
-    });
-    test(`${form} — \`replace\` granted: clean (analyzer and Core)`, () => {
-      clean(P(decls(GRANTED), body));
+    test(`${form} — an ungranted payload tape: clean (analyzer and Core)`, () => {
+      clean(P(decls, body));
     });
   }
-  test("the refusal names the payload tape and the owner question", () => {
-    const m = run(P(ENUM(UNGRANTED), "mk() !{ _ x :> @e = x };")).diags[0].message;
-    expect(m).toContain("`@e.A(xs)`");
-    expect(m).toContain("owner question");
+  test("`persist=\"local\"` (a cross-tab value is a whole enum write): clean, payload tape or payload struct", () => {
+    clean(P(ENUM(UNGRANTED, ` persist="local" key="r3.e"`), ""));
+    clean(P(ENUM_IN_STRUCT(UNGRANTED).replace("let <e:E=.Dot/>", "let <e:E=.Dot persist=\"local\" key=\"r3.s\"/>"), ""));
   });
-  test("a kept enum field is not written (`@w = { title: t, e: @w.e }`)", () => {
-    clean(P(`    type E:enum = { Dot, A(xs: ${UNGRANTED}) }\n    type W:struct = { title: string, e: E }\n    let <w:W=({ title: "t", e: .Dot })/>\n`, "@w = { title: \"u\", e: @w.e };"));
+  test("`reset-on=`: clean", () => {
+    clean(P(`    let <n:int=0/>\n` + ENUM(UNGRANTED, " reset-on=[@n]"), ""));
   });
-  test("`persist=\"local\"`: refused (a cross-tab value is a whole enum write); `session` is not (Q5)", () => {
-    expect(codes(P(ENUM(UNGRANTED, ` persist="local" key="r3.e"`), ""))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
-    expect(codes(P(ENUM_IN_STRUCT(UNGRANTED).replace("let <e:E=.Dot/>", "let <e:E=.Dot persist=\"local\" key=\"r3.s\"/>"), ""))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
-    expect(codes(P(ENUM(UNGRANTED, ` persist="session" key="r3.f"`), ""))).toEqual([]);
+  test("a local enum's rebinding: clean", () => {
+    expect(codes(P(`    type E:enum = { Dot, A(xs: ${UNGRANTED}) }\n`, "let e: E = .Dot;\n        e = .Dot;"))).toEqual([]);
   });
-  test("`reset-on=`: refused", () => {
-    const src = P(`    let <n:int=0/>\n` + ENUM(UNGRANTED, " reset-on=[@n]"), "");
-    expect(codes(src)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+  // regression guards: a struct CELL / struct field with an append-only tape field stays judged (#1528)
+  const BOXC = `    type Box:struct = { title: string, xs: ${UNGRANTED} }\n    let <b:Box=({ title: "t", xs: [1] })/>\n`;
+  test("guard: a struct cell's whole write that replaces its tape field is still E-WRITE-NOT-GRANTED", () => {
+    expect(codes(P(BOXC, "@b = { title: \"u\", xs: [] };"))).toEqual(["E-WRITE-NOT-GRANTED"]);
   });
-  test("a local enum's rebinding: refused", () => {
-    const src = (t) => P(`    type E:enum = { Dot, A(xs: ${t}) }\n`, "let e: E = .Dot;\n        e = .Dot;");
-    expect(codes(src(UNGRANTED))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
-    expect(codes(src(GRANTED))).toEqual([]);
+  test("guard: a struct field holding a struct with a tape is still judged", () => {
+    expect(codes(P(`    type In:struct = { ys: ${UNGRANTED} }\n    type O:struct = { title: string, let inner: In }\n    let <o:O=({ title: "t", inner: { ys: [1] } })/>\n`, "@o.inner = { ys: [] };"))).toEqual(["E-WRITE-NOT-GRANTED"]);
   });
-
-  // Core (check.scrml) refuses the same on a Core that slipped past the analyzer.
-  test("Core C3: a cell Replace of an enum whose payload tape grants no `replace`", () => {
-    const core = clean(P(ENUM(GRANTED), "mk() !{ _ x :> @e = x };"));
-    tapeTypeGrants(core, "xs").replace = false;
-    expect(mods.check.checkCore(core).some((m) => m.startsWith("C3:") && m.includes("`e.A(xs)`") && m.includes("variant payload"))).toBe(true);
+  test("guard: `persist=\"local\"` / `reset` of a struct cell with an append-only tape field stay refused", () => {
+    expect(codes(P(BOXC.replace("/>", " persist=\"local\" key=\"r3.b\"/>"), ""))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+    expect(codes(P(BOXC, "reset(@b);"))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
   });
-  test("Core C3: a Transition write of an enum whose payload tape grants no `replace`", () => {
-    const core = clean(P(TRANS("int[free, append, replace]"), "@e = .Dot;"));
-    expect(find(core.fns, (n) => n.variant === "Write" && (n.data.edit === "Transition" || n.data.edit?.variant === "Transition")).length).toBe(1);
-    tapeTypeGrants(core, "xs").replace = false;
-    expect(mods.check.checkCore(core).some((m) => m.startsWith("C3:") && m.includes("`e.A(xs)`"))).toBe(true);
-  });
-  test("Core C3: a payload struct's tape", () => {
-    const core = clean(P(ENUM_IN_STRUCT(GRANTED), "@e = .Dot;"));
-    tapeTypeGrants(core, "xs").replace = false;
-    const box = find(core.types, (n) => n.sym && n.sym.hint === "xs" && n.grants)[0];
-    box.grants.replace = false;
-    expect(mods.check.checkCore(core).some((m) => m.startsWith("C3:") && m.includes("e.A(b).xs"))).toBe(true);
-  });
-  test("Core C17: `persist` in localStorage of an enum whose payload tape grants no `replace`", () => {
-    const core = clean(P(ENUM(GRANTED, ` persist="local" key="r3.c17"`), ""));
-    tapeTypeGrants(core, "xs").replace = false;
-    expect(mods.check.checkCore(core).some((m) => m.startsWith("C17:") && m.includes("variant payload"))).toBe(true);
+  test("guard: Core C3 still judges a struct cell's tape field", () => {
+    const core = clean(P(BOXC, "@b = { title: \"u\", xs: @b.xs };"));
+    const w = find(core.fns, (n) => n.variant === "Write")[0];
+    w.data.value.data.fields[1] = { variant: "ArrayOf", data: { elems: [] } };
+    expect(mods.check.checkCore(core).some((m) => m.startsWith("C3:") && m.includes("tape field `b.xs`"))).toBe(true);
   });
 });
 

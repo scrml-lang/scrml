@@ -2933,10 +2933,9 @@ ${
     // bound ONCE (one Let, never Assigned) stands for its init, and a read
     // through a snapshot Local (`Let before = Read(@o)`; `before.inner.ys`) is a
     // read of the place it snapshots — the spread-override lowering. s469 F4: a
-    // value that reads the written place itself keeps every tape in it. s469
-    // F1: an ENUM's variant payloads are tape positions — a whole enum value
-    // replaces each payload tape (no payload is "kept"), judged by the tape
-    // TYPE's `replace`; a Transition writes the enum whole too.
+    // value that reads the written place itself keeps every tape in it. An
+    // ENUM is not walked: a variant payload is a value, not a tape position —
+    // grants do not apply inside it (RULED S469, "Not a tape position").
     // The analyzer's twin is analyze.scrml `structTapeWrites`.
     // -------------------------------------------------------------------------
     fn tapeReplaceProblem(p: CoreProgram, d: Sym, idx: int, inst: InstRef, f: Field, edit: EditKind, value: Expr) -> string {
@@ -2945,7 +2944,7 @@ ${
             .Replace :> structTapeKept(p, f.ty, value, d, inst, base, f.sym.hint, [])
             .FieldAt(path: path) :> fieldAtTapeKept(p, f.ty, value, d, inst, base, path, f.sym.hint)
             .ElemAt(index: ix, path: path) :> elemAtTapeKept(p, f, value, path)
-            .Transition :> structTapeKept(p, f.ty, value, d, inst, base, f.sym.hint, [])
+            .Transition :> ""
             .Append :> ""
             .Prepend :> ""
             .Anywhere :> ""
@@ -3009,7 +3008,7 @@ ${
         const td: TypeDef | not = findTypeDef(p, s)
         if (td is not) return ""
         const fs: FieldDef[] | not = structFields(td)
-        if (fs is not) return payloadTapeKept(p, td, label, seen.concat([s.id]))
+        if (fs is not) return ""          // an enum: a payload is a value, not a tape position (RULED S469)
         let vals: Expr[] | not = not
         if (v is given) vals = structOfFields(v)
         let i = 0
@@ -3038,45 +3037,6 @@ ${
 
     fn isTapeType(t: Type) -> boolean {
         return seqElemOf(unMaybeC(t)) is given
-    }
-
-    // s469 F1: every tape a variant payload holds (directly, or in a payload
-    // struct / enum) — a whole enum value may hold any variant, so each is
-    // replaced. A payload FieldDef carries no grants (no `let` on a payload):
-    // the tape TYPE's `replace` judges it.
-    fn payloadTapeKept(p: CoreProgram, td: TypeDef, label: string, seen: int[]) -> string {
-        for (const vd of enumVariantsC(td)) {
-            for (const fd of vd.fields) {
-                const at: string = label + "." + vd.sym.hint + "(" + fd.sym.hint + ")"
-                if (isTapeType(fd.ty)) {
-                    if (!fd.grants.replace && !tapeTypeReplace(fd.ty)) return "the write replaces the tape `" + at + "` held in a variant payload, whose type grants no `replace` — an enum payload is a tape position (§66.12.6 rule 1), and a whole enum value never gets around its grants"
-                } else {
-                    const r: string = structTapeKept(p, fd.ty, not, fd.sym, InstRef.Lexical(0), [], at, seen)
-                    if (r != "") return r
-                }
-            }
-        }
-        return ""
-    }
-
-    fn enumVariantsC(td: TypeDef) -> VariantDef[] {
-        return match td {
-            .EnumDef(sym: s, variants: vs) :> vs
-            .StructDef(sym: s) :> []
-        }
-    }
-
-    fn tapeTypeReplace(t: Type) -> boolean {
-        const u: Type = unMaybeC(t)
-        return match u {
-            .Seq(elem: e, grants: g) :> g.replace
-            .Int :> false
-            .Num :> false
-            .Str :> false
-            .Bool :> false
-            .Named(sym: s) :> false
-            .Maybe(inner: i) :> false
-        }
     }
 
     // s469 F3: the identity a kept value reads — a cell read's place key, or a

@@ -1,0 +1,24 @@
+{
+  "id": "acceptance-grants-enum-payload-ungranted-accepted",
+  "description": "An enum whose payload holds a `replace`-less tape: a whole write, `persist=\"local\"` and `reset` are accepted, and the program runs.",
+  "language-version": "1.0",
+  "spec": "§66.12.6",
+  "rationale": "RULED S469 (\"Not a tape position\"): an enum payload is a value; grants do not apply inside it, and a whole write of such an enum (cross-tab sync included) is not judged against the payload tape's grants.",
+  "expect": {
+    "codes": [],
+    "input": [
+      {
+        "click": "#go"
+      },
+      {
+        "wait": "settle"
+      }
+    ],
+    "domAnchored": [
+      {
+        "selector": "#out",
+        "text": "a"
+      }
+    ]
+  }
+}

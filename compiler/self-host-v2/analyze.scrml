@@ -963,50 +963,6 @@ ${
         }
     }
 
-    // `T[g, …]` (O10 bracket form, ruled S469): the grant words are permission AXES
-    // (§66.12.2). Core's SeqGrants.at holds the GROW places, SeqGrants.shrink
-    // the SHRINK places (s444: Core's RemoveEnd / RemoveFront / RemoveAnywhere
-    // edits; FieldInfo.shrink stays the analyze-side copy the classifier reads).
-    fn resolveSeqType(te: TypeEnv, at: AType, elem: AType, gs: string[], st0: AS) -> RType {
-        const re: RType = resolveType(te, elem, st0)
-        let st: AS = re.st
-        let length: LengthGrant = LengthGrant.Fixed
-        let where: SeqAt[] = []
-        let shrinks: SeqAt[] = []
-        let write = false
-        let rep = false
-        let seen: string[] = []
-        for (const g of gs) {
-            const ax: GrantAxis = grantAxis(g)
-            // r2 N3: a grant named twice is refused (E-GRANT-UNKNOWN: the list
-            // is a SET of axis values; a repeat is not a value of any axis)
-            if (seen.indexOf(g) >= 0) {
-                st = addDiag(st, te.file, at.span, "E-GRANT-UNKNOWN", "`" + g + "` is granted twice — a grant list names each permission once (§66.12.2)")
-            }
-            seen = seen.concat([g])
-            if (ax == GrantAxis.GFree) {
-                length = LengthGrant.Free
-            } else if (ax == GrantAxis.GWrite) {
-                write = true
-            } else if (ax == GrantAxis.GReplace) {
-                // s469-boot-tape-grants: on the TYPE too (§66.12.3), so a local's or a
-                // parameter's tape carries it; a field's GrantSet reads it as well (seqReplace)
-                rep = true
-            } else {
-                const gp: SeqAt | not = growAt(ax)
-                const sp: SeqAt | not = shrinkAt(ax)
-                if (gp is given) {
-                    where = where.concat([gp])
-                } else if (sp is given) {
-                    shrinks = shrinks.concat([sp])
-                } else {
-                    st = addDiag(st, te.file, at.span, "E-GRANT-UNKNOWN", grantUnknownMessage(g, ax))
-                }
-            }
-        }
-        return { t: Type.Seq(re.t, { length: length, at: where, shrink: shrinks, replace: rep, positionsWritable: write }), st: st, unresolved: re.unresolved }
-    }
-
     fn growAt(ax: GrantAxis) -> SeqAt | not {
         return match ax {
             .GGrow(at: a) :> a
@@ -1046,96 +1002,9 @@ ${
         }
     }
 
-    // The SHRINK places a written sequence type grants (`pop` / `shift` / `remove`).
-    fn shrinkOf(aty: AType | not) -> SeqAt[] {
-        if (aty is not) return []
-        return shrinkWords(aty)
-    }
-
-    fn shrinkWords(aty: AType) -> SeqAt[] {
-        const k: ATypeK = aty.k
-        return match k {
-            .TSeq(elem: e, grants: gs) :> shrinkList(gs)
-            .TName(name: n) :> []
-            .TMaybe(inner: i) :> []
-        }
-    }
-
-    fn shrinkList(gs: string[]) -> SeqAt[] {
-        let out: SeqAt[] = []
-        for (const g of gs) {
-            const a: SeqAt | not = shrinkAt(grantAxis(g))
-            if (a is given) out = out.concat([a])
-        }
-        return out
-    }
-
     // (s469-boot-tape-grants: a removal is judged by `grantsAdmit` over the
     // GrantSet's RemoveEnd / RemoveFront / RemoveAnywhere edits — seqEdits puts
     // them there from the shrink grants, `remove` covering end and front.)
-
-    // Does a sequence type expression grant `replace` in its brackets?
-    fn seqReplace(at: AType) -> boolean {
-        const k: ATypeK = at.k
-        return match k {
-            .TSeq(elem: e, grants: gs) :> gs.indexOf("replace") >= 0
-            .TName(name: n) :> false
-            .TMaybe(inner: i) :> seqReplace(i)      // s469-boot-tape-grants: `T[replace] | not` grants `replace` (resolveSeqType puts it on the type the same way)
-        }
-    }
-
-    // The edit grants a (resolved) type carries (§66.12.2 axes → EditKinds).
-    fn typeEdits(t: Type) -> EditKind[] {
-        return match t {
-            .Seq(elem: e, grants: g) :> seqEdits(g)
-            .Int :> []
-            .Num :> []
-            .Str :> []
-            .Bool :> []
-            .Named(sym: s) :> []
-            .Maybe(inner: i) :> []
-        }
-    }
-
-    fn seqEdits(g: SeqGrants) -> EditKind[] {
-        let out: EditKind[] = []
-        for (const a of g.at) { out = out.concat([seqAtEdit(a)]) }
-        // RULED S442: an anywhere-grow (`insert`) grant admits appends and prepends
-        if (hasEditKind(out, EditKind.Anywhere)) {
-            if (!hasEditKind(out, EditKind.Append)) out = out.concat([EditKind.Append])
-            if (!hasEditKind(out, EditKind.Prepend)) out = out.concat([EditKind.Prepend])
-        }
-        if (g.positionsWritable) out = out.concat([EditKind.PositionWrite])
-        // s444: the SHRINK edits; RULED S442 "anywhere COVERS end and front" —
-        // a `remove` grant pops and shifts
-        for (const a of g.shrink) { out = addEditOnce(out, seqShrinkEdit(a)) }
-        if (hasEditKind(out, EditKind.RemoveAnywhere)) {
-            out = addEditOnce(out, EditKind.RemoveEnd)
-            out = addEditOnce(out, EditKind.RemoveFront)
-        }
-        return out
-    }
-
-    fn addEditOnce(es: EditKind[], k: EditKind) -> EditKind[] {
-        if (hasEditKind(es, k)) return es
-        return es.concat([k])
-    }
-
-    fn seqShrinkEdit(a: SeqAt) -> EditKind {
-        return match a {
-            .End :> EditKind.RemoveEnd
-            .Front :> EditKind.RemoveFront
-            .Anywhere :> EditKind.RemoveAnywhere
-        }
-    }
-
-    fn seqAtEdit(a: SeqAt) -> EditKind {
-        return match a {
-            .End :> EditKind.Append
-            .Front :> EditKind.Prepend
-            .Anywhere :> EditKind.Anywhere
-        }
-    }
 
     // A2: the TypeDefs.
     fn typeInfos(stubs: TypeStub[], te: TypeEnv, st0: AS) -> RTypeInfos {
@@ -2085,9 +1954,6 @@ ${
         if (acc is not) return not
         return Type.Seq(acc, fixedSeq())
     }
-
-    // A sequence type with no grant (`T[]`, §66.12.1 — omission is fully constrained).
-    fn fixedSeq() -> SeqGrants { return { length: LengthGrant.Fixed, at: [], shrink: [], positionsWritable: false, replace: false } }
 
     // Two members' shared base type: the same type, or `number` for two numbers.
     fn joinBase(a: Type, b: Type) -> Type | not {
@@ -3431,25 +3297,6 @@ ${
         }
         if (src.substring(i, i + 1) != "}") return -1
         return i
-    }
-
-    // The struct sub-field writes a field of struct type grants (M1 D12: a
-    // field whose writable part is a sub-field lists `FieldAt(path)`): each
-    // sub-field that has its own `let` or `rule=` graph.
-    fn subFieldEdits(g: TypeInfo[], ty: Type) -> EditKind[] {
-        const s: Sym | not = namedOf(ty)
-        if (s is not) return []
-        const ti: TypeInfo | not = typeInfoOf(g, s)
-        if (ti is not) return []
-        const fs: FieldDef[] | not = structFieldDefs(ti.def)
-        if (fs is not) return []
-        let out: EditKind[] = []
-        let i = 0
-        for (const fd of fs) {
-            if (grantsAdmit(fd.grants, EditKind.Replace)) out = out.concat([EditKind.FieldAt([{ owner: s, idx: i }])])
-            i = i + 1
-        }
-        return out
     }
 
     type RGraph:struct = { graph: TransitionGraph | not, st: AS }
@@ -6942,9 +6789,6 @@ ${
         const g: TransitionGraph | not = f.graph
         const cap: Sym | not = f.wcap
         if (g is given && cap is given) {
-            // s469 F1: a transition writes the enum WHOLE — a variant payload's tape too
-            const stp: AS = checkStructTapes(env, f.ty, value, key, writtenLabel(key, f.sym.hint), span, st)
-            if (stp.diags.length > st.diags.length) return { w: not, st: stp }
             const rc: RCheck = transitionCheck(env, g, value, initialVariant(env, g, f.init), st)
             return { w: { cap: cap, inst: p.inst, edit: EditKind.Transition, check: rc.check }, st: rc.st }
         }
@@ -7493,8 +7337,9 @@ ${
         return { replace: replace, edits: edits }
     }
 
-    // A type field's GrantSet (fieldDefsOf): a payload field is a value and
-    // carries none (its tape TYPE's grants judge it — payloadTapeWrites).
+    // A type field's GrantSet (fieldDefsOf). A payload field carries none: an
+    // enum payload is a VALUE, not a tape position (RULED S469 — grants do not
+    // apply inside an enum payload).
     fn fieldDefGrants(payload: boolean, replace: boolean, edits: EditKind[]) -> GrantSet {
         if (payload) return noGrants()
         return { replace: replace, edits: edits }
@@ -7543,9 +7388,7 @@ ${
     // One tape field a whole-struct write replaces: where it is (for the
     // message), its type, and its OWN grants (the FieldDef's — never the
     // owning struct's `replace`).
-    // `payload`: the tape is reached through an ENUM variant's payload (s469
-    // F1) — see `payloadTapeWrites`.
-    type TapeHit:struct = { path: string, ty: Type, grants: GrantSet, payload: boolean }
+    type TapeHit:struct = { path: string, ty: Type, grants: GrantSet }
 
     // §66.12.6 rule 4: the tape fields a whole value `v` of type `ty`, written
     // at the place spelled `key` ("" when it has no spelling), REPLACES. Every
@@ -7555,9 +7398,10 @@ ${
     // object literal (`loadBox()`, a name, …) replaces every tape field; a
     // value that IS the place (`@b`, s469 F4) replaces none. The elements of a
     // tape are not walked: replacing a tape is that tape's own write, judged
-    // where it is written. An ENUM's variant payloads are tape positions too
-    // (rule 1, "wherever the tape is held"; s469 F1): payloadTapeWrites.
-    // `seen` stops a recursive type.
+    // where it is written. An ENUM is not walked: a variant payload is a value,
+    // not a tape position — grants do not apply inside it (RULED S469, "Not a
+    // tape position"), so a whole enum write replaces no tape. `seen` stops a
+    // recursive struct.
     fn structTapeWrites(types: TypeInfo[], ty: Type, v: AExpr | not, key: string, label: string, seen: int[]) -> TapeHit[] {
         const s: Sym | not = namedOf(unMaybe(ty))
         if (s is not) return []
@@ -7568,7 +7412,7 @@ ${
         const ti: TypeInfo | not = typeInfoOf(types, s)
         if (ti is not) return []
         const fs: FieldDef[] | not = structFieldDefs(ti.def)
-        if (fs is not) return payloadTapeWrites(types, ti.def, label, seen.concat([s.id]))
+        if (fs is not) return []
         let props: AProp[] = []
         if (v is given) props = propsOf(v)
         // a spread of the place itself keeps the fields no LATER property names —
@@ -7593,37 +7437,9 @@ ${
             }
             if (!kept) {
                 if (tapeGrants(fd.ty) is given) {
-                    out = out.concat([{ path: at, ty: fd.ty, grants: fd.grants, payload: false }])
+                    out = out.concat([{ path: at, ty: fd.ty, grants: fd.grants }])
                 } else {
                     out = out.concat(structTapeWrites(types, fd.ty, fv, sub, at, seen.concat([s.id])))
-                }
-            }
-        }
-        return out
-    }
-
-    // s469 F1 (g-bootstrap-enum-payload-tape-not-a-tape-position-s469): a whole
-    // value of an ENUM may hold any variant, so writing one may replace every
-    // tape held in a variant payload (directly, or inside a payload struct /
-    // enum). Each is a hit, judged by the TAPE TYPE's own grants (a payload
-    // field has no `let`, so its FieldDef carries none — fieldDefsOf). There is
-    // no "kept" spelling for a payload: `.A(@e…)` does not exist. Whether a
-    // variant SWITCH (`.Dot` → `.A([…])`, or `.A(xs)` → `.Dot`) is a fresh
-    // value or a `replace` of the payload tape the SPEC does not say (§66.12.6
-    // rule 1 lists no enum payload), so a payload hit that lacks `replace` is
-    // refused E-BOOTSTRAP-UNSUPPORTED, not judged (structTapeProblems).
-    fn payloadTapeWrites(types: TypeInfo[], td: TypeDef, label: string, seen: int[]) -> TapeHit[] {
-        let out: TapeHit[] = []
-        for (const vd of enumVariants(td)) {
-            for (const fd of vd.fields) {
-                const at: string = label + "." + vd.sym.hint + "(" + fd.sym.hint + ")"
-                const tg: GrantSet | not = tapeGrants(fd.ty)
-                if (tg is given) {
-                    out = out.concat([{ path: at, ty: fd.ty, grants: tg, payload: true }])
-                } else {
-                    for (const h of structTapeWrites(types, fd.ty, not, "", at, seen)) {
-                        out = out.concat([{ path: h.path, ty: h.ty, grants: h.grants, payload: true }])
-                    }
                 }
             }
         }
@@ -7648,18 +7464,11 @@ ${
     fn structTapeProblems(types: TypeInfo[], ty: Type, v: AExpr | not, key: string, label: string) -> TapeDiag[] {
         let out: TapeDiag[] = []
         for (const h of structTapeWrites(types, ty, v, key, label, [])) {
-            if (!grantsAdmit(h.grants, EditKind.Replace) && h.payload) {
-                out = out.concat([{ code: "E-BOOTSTRAP-UNSUPPORTED", msg: payloadTapeMessage("`" + label + " = …`", h.path, h.ty) }])
-            } else if (!grantsAdmit(h.grants, EditKind.Replace)) {
+            if (!grantsAdmit(h.grants, EditKind.Replace)) {
                 out = out.concat([{ code: "E-WRITE-NOT-GRANTED", msg: "`" + label + " = …` replaces the tape field `" + h.path + "` (`" + tapeTypeName(h.ty) + "`), whose type does not grant `replace` — a whole-struct write that changes a tape field is a `replace` of THAT field, judged by the field's own grants, not the struct's (§66.12.6 rule 4). Keep the field as it was (`" + lastSegment(h.path) + ": " + h.path + "`), or spread the struct (`{ ..." + label + ", f: v }`)" }])
             }
         }
         return out
-    }
-
-    // s469 F1: a write that may replace a tape held in an enum variant's payload.
-    fn payloadTapeMessage(what: string, path: string, ty: Type) -> string {
-        return what + " writes an enum value, and a variant's payload holds the tape `" + path + "` (`" + tapeTypeName(ty) + "`), whose type does not grant `replace` — a payload is a tape position like any other (§66.12.6 rule 1: \"wherever the tape is held\"), but whether writing another variant (or the same one anew) is a fresh value or a `replace` of that tape the SPEC does not say yet (owner question, s469); the bootstrap refuses it rather than guess — grant `replace` on the payload's tape type"
     }
 
     fn checkStructTapes(env: Env, ty: Type, v: AExpr | not, key: string, label: string, span: ASpan, st0: AS) -> AS {
@@ -7867,6 +7676,190 @@ ${
             .ElemAt(index: i) :> "an element-field write"
         }
     }
+    // ---- s469 MED-1: the TYPE-derived grants (a tape type's SeqGrants, its written grant words) are read here too ----
+    // `T[g, …]` (O10 bracket form, ruled S469): the grant words are permission AXES
+    // (§66.12.2). Core's SeqGrants.at holds the GROW places, SeqGrants.shrink
+    // the SHRINK places (s444: Core's RemoveEnd / RemoveFront / RemoveAnywhere
+    // edits; FieldInfo.shrink stays the analyze-side copy the classifier reads).
+    fn resolveSeqType(te: TypeEnv, at: AType, elem: AType, gs: string[], st0: AS) -> RType {
+        const re: RType = resolveType(te, elem, st0)
+        let st: AS = re.st
+        let length: LengthGrant = LengthGrant.Fixed
+        let where: SeqAt[] = []
+        let shrinks: SeqAt[] = []
+        let write = false
+        let rep = false
+        let seen: string[] = []
+        for (const g of gs) {
+            const ax: GrantAxis = grantAxis(g)
+            // r2 N3: a grant named twice is refused (E-GRANT-UNKNOWN: the list
+            // is a SET of axis values; a repeat is not a value of any axis)
+            if (seen.indexOf(g) >= 0) {
+                st = addDiag(st, te.file, at.span, "E-GRANT-UNKNOWN", "`" + g + "` is granted twice — a grant list names each permission once (§66.12.2)")
+            }
+            seen = seen.concat([g])
+            if (ax == GrantAxis.GFree) {
+                length = LengthGrant.Free
+            } else if (ax == GrantAxis.GWrite) {
+                write = true
+            } else if (ax == GrantAxis.GReplace) {
+                // s469-boot-tape-grants: on the TYPE too (§66.12.3), so a local's or a
+                // parameter's tape carries it; a field's GrantSet reads it as well (seqReplace)
+                rep = true
+            } else {
+                const gp: SeqAt | not = growAt(ax)
+                const sp: SeqAt | not = shrinkAt(ax)
+                if (gp is given) {
+                    where = where.concat([gp])
+                } else if (sp is given) {
+                    shrinks = shrinks.concat([sp])
+                } else {
+                    st = addDiag(st, te.file, at.span, "E-GRANT-UNKNOWN", grantUnknownMessage(g, ax))
+                }
+            }
+        }
+        return { t: Type.Seq(re.t, { length: length, at: where, shrink: shrinks, replace: rep, positionsWritable: write }), st: st, unresolved: re.unresolved }
+    }
+
+    // The SHRINK places a written sequence type grants (`pop` / `shift` / `remove`).
+    fn shrinkOf(aty: AType | not) -> SeqAt[] {
+        if (aty is not) return []
+        return shrinkWords(aty)
+    }
+
+    fn shrinkWords(aty: AType) -> SeqAt[] {
+        const k: ATypeK = aty.k
+        return match k {
+            .TSeq(elem: e, grants: gs) :> shrinkList(gs)
+            .TName(name: n) :> []
+            .TMaybe(inner: i) :> []
+        }
+    }
+
+    fn shrinkList(gs: string[]) -> SeqAt[] {
+        let out: SeqAt[] = []
+        for (const g of gs) {
+            const a: SeqAt | not = shrinkAt(grantAxis(g))
+            if (a is given) out = out.concat([a])
+        }
+        return out
+    }
+
+    // Does a sequence type expression grant `replace` in its brackets?
+    fn seqReplace(at: AType) -> boolean {
+        const k: ATypeK = at.k
+        return match k {
+            .TSeq(elem: e, grants: gs) :> gs.indexOf("replace") >= 0
+            .TName(name: n) :> false
+            .TMaybe(inner: i) :> seqReplace(i)      // s469-boot-tape-grants: `T[replace] | not` grants `replace` (resolveSeqType puts it on the type the same way)
+        }
+    }
+
+    // The edit grants a (resolved) type carries (§66.12.2 axes → EditKinds).
+    fn typeEdits(t: Type) -> EditKind[] {
+        return match t {
+            .Seq(elem: e, grants: g) :> seqEdits(g)
+            .Int :> []
+            .Num :> []
+            .Str :> []
+            .Bool :> []
+            .Named(sym: s) :> []
+            .Maybe(inner: i) :> []
+        }
+    }
+
+    fn seqEdits(g: SeqGrants) -> EditKind[] {
+        let out: EditKind[] = []
+        for (const a of g.at) { out = out.concat([seqAtEdit(a)]) }
+        // RULED S442: an anywhere-grow (`insert`) grant admits appends and prepends
+        if (hasEditKind(out, EditKind.Anywhere)) {
+            if (!hasEditKind(out, EditKind.Append)) out = out.concat([EditKind.Append])
+            if (!hasEditKind(out, EditKind.Prepend)) out = out.concat([EditKind.Prepend])
+        }
+        if (g.positionsWritable) out = out.concat([EditKind.PositionWrite])
+        // s444: the SHRINK edits; RULED S442 "anywhere COVERS end and front" —
+        // a `remove` grant pops and shifts
+        for (const a of g.shrink) { out = addEditOnce(out, seqShrinkEdit(a)) }
+        if (hasEditKind(out, EditKind.RemoveAnywhere)) {
+            out = addEditOnce(out, EditKind.RemoveEnd)
+            out = addEditOnce(out, EditKind.RemoveFront)
+        }
+        return out
+    }
+
+    fn addEditOnce(es: EditKind[], k: EditKind) -> EditKind[] {
+        if (hasEditKind(es, k)) return es
+        return es.concat([k])
+    }
+
+    fn seqShrinkEdit(a: SeqAt) -> EditKind {
+        return match a {
+            .End :> EditKind.RemoveEnd
+            .Front :> EditKind.RemoveFront
+            .Anywhere :> EditKind.RemoveAnywhere
+        }
+    }
+
+    fn seqAtEdit(a: SeqAt) -> EditKind {
+        return match a {
+            .End :> EditKind.Append
+            .Front :> EditKind.Prepend
+            .Anywhere :> EditKind.Anywhere
+        }
+    }
+
+    // The struct sub-field writes a field of struct type grants (M1 D12: a
+    // field whose writable part is a sub-field lists `FieldAt(path)`): each
+    // sub-field that has its own `let` or `rule=` graph.
+    fn subFieldEdits(g: TypeInfo[], ty: Type) -> EditKind[] {
+        const s: Sym | not = namedOf(ty)
+        if (s is not) return []
+        const ti: TypeInfo | not = typeInfoOf(g, s)
+        if (ti is not) return []
+        const fs: FieldDef[] | not = structFieldDefs(ti.def)
+        if (fs is not) return []
+        let out: EditKind[] = []
+        let i = 0
+        for (const fd of fs) {
+            if (grantsAdmit(fd.grants, EditKind.Replace)) out = out.concat([EditKind.FieldAt([{ owner: s, idx: i }])])
+            i = i + 1
+        }
+        return out
+    }
+
+    // A sequence type with no grant (`T[]`, §66.12.1 — omission is fully constrained).
+    fn fixedSeq() -> SeqGrants { return { length: LengthGrant.Fixed, at: [], shrink: [], positionsWritable: false, replace: false } }
+
+    fn anySeqGrants() -> SeqGrants { return { length: LengthGrant.Free, at: [], shrink: [], positionsWritable: false, replace: false } }
+
+    // r1 F7: a sequence type whose length axis is FIXED (no `free` / bound,
+    // §66.12.1: omission is fully constrained) cannot grow — provably, so a
+    // growing edit is a compile error (§66.11.2 invariants; dpa-052 Q5).
+    fn growsFixed(t: Type | not) -> boolean {
+        if (t is not) return false
+        return seqFixed(t)
+    }
+
+    fn isFixedLength(l: LengthGrant) -> boolean {
+        return match l {
+            .Fixed :> true
+            .Free :> false
+            .Bounded(min: a, max: b) :> false
+        }
+    }
+
+    fn seqFixed(t: Type) -> boolean {
+        return match t {
+            .Seq(elem: el, grants: g) :> isFixedLength(g.length)
+            .Int :> false
+            .Num :> false
+            .Str :> false
+            .Bool :> false
+            .Named(sym: x) :> false
+            .Maybe(inner: i) :> false
+        }
+    }
+
     // ---- END OF THE TAPE GRANT READER (tape-write-forms.test.js: no grant is read outside it) ----
 
     // =========================================================================
@@ -8156,34 +8149,6 @@ ${
     fn localEditRefused(env: Env, e: AExpr, method: string, args: AExpr[], st0: AS) -> AS {
         const st: AS = resolveExprs(env, args, not, st0)
         return addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "`." + method + "(…)` on a local sequence is not in the bootstrap — Core has no edit of a local (write a new value: `let t = …`)")
-    }
-
-    // r1 F7: a sequence type whose length axis is FIXED (no `free` / bound,
-    // §66.12.1: omission is fully constrained) cannot grow — provably, so a
-    // growing edit is a compile error (§66.11.2 invariants; dpa-052 Q5).
-    fn growsFixed(t: Type | not) -> boolean {
-        if (t is not) return false
-        return seqFixed(t)
-    }
-
-    fn seqFixed(t: Type) -> boolean {
-        return match t {
-            .Seq(elem: el, grants: g) :> isFixedLength(g.length)
-            .Int :> false
-            .Num :> false
-            .Str :> false
-            .Bool :> false
-            .Named(sym: x) :> false
-            .Maybe(inner: i) :> false
-        }
-    }
-
-    fn isFixedLength(l: LengthGrant) -> boolean {
-        return match l {
-            .Fixed :> true
-            .Free :> false
-            .Bounded(min: a, max: b) :> false
-        }
     }
 
     fn fixedShrinkMessage(name: string, what: string) -> string {
@@ -14155,8 +14120,6 @@ ${
     // ---- types as values ------------------------------------------------------
     fn known(ty: Type) -> VType { return VType.Known(ty) }
 
-    fn anySeqGrants() -> SeqGrants { return { length: LengthGrant.Free, at: [], shrink: [], positionsWritable: false, replace: false } }
-
     fn maybeInner(ty: Type) -> Type | not {
         return match ty {
             .Maybe(inner: i) :> i
@@ -18447,11 +18410,9 @@ ${
         } else if (!grantsAdmit(f.grants, EditKind.Replace)) {
             st = addDiag(st, prog.file, a.span, "E-RESET-ON-NOT-WRITABLE", notWritableMessage(d.name, f.mode))
             ok = false
-        }
-        if (ok) {
+        } else {
             // s469-boot-tape-grants: as `reset(@x)` — a reset of a struct with an
-            // ungranted tape field is not judged statically (resetTapeMessage); s469 F1:
-            // along a `rule=` graph too (an enum's payload may hold the tape)
+            // ungranted tape field is not judged statically (resetTapeMessage)
             const tp: string = resetTapeProblem(g.types, f.ty, "@" + d.name)
             if (tp != "") {
                 st = addDiag(st, prog.file, a.span, "E-BOOTSTRAP-UNSUPPORTED", resetTapeMessage("`reset-on=` on `@" + d.name + "`", tp))

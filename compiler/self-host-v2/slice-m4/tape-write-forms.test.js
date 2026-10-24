@@ -198,6 +198,14 @@ describe("no write path reads a grant outside the reader (analyze.scrml source; 
     "a reader's GrantSet result read": "fn plantedRead(f: FieldInfo) -> boolean { return noGrants().replace }",
     "a SeqGrants `replace` read off the type": "fn plantedRead(t: Type) -> boolean {\n        return match t {\n            .Seq(elem: e, grants: g) :> g.replace\n            .Int :> false\n        }\n    }",
     "a GrantSet-returning helper outside the range": "fn myGrants(f: FieldInfo) -> GrantSet { return noGrants() }",
+    // MED-1: the TYPE-derived grants (SeqGrants, the written grant words)
+    "MED-1: a SeqGrants `.at` read through a pattern binder": "fn plantedRead(t: Type) -> boolean {\n        return match t {\n            .Seq(elem: e, grants: g) :> g.at.length > 0\n            .Int :> false\n        }\n    }",
+    "MED-1: a binder passed to a helper outside the range": "fn plantedRead(t: Type) -> boolean {\n        return match t {\n            .Seq(elem: e, grants: g) :> isFixedLengthCopy(g)\n            .Int :> false\n        }\n    }",
+    "MED-1: a written grant word read off the AST": "fn plantedRead(at: AType) -> boolean {\n        const k: ATypeK = at.k\n        return match k {\n            .TSeq(elem: e, grants: gs) :> gs.indexOf(\"append\") >= 0\n            .TName(name: n) :> false\n        }\n    }",
+    "MED-1: `.positionsWritable`": "fn plantedRead(g) -> boolean { return g.positionsWritable }",
+    "MED-1: `.shrink` read": "fn plantedRead(f: FieldInfo) -> boolean { return f.shrink.length > 0 }",
+    "MED-1: a SeqGrants annotation": "fn plantedRead(t: Type) -> boolean {\n        const q: SeqGrants = fixedSeq()\n        return true\n    }",
+    "MED-1: a SeqGrants-returning call held": "fn plantedRead(t: Type) -> boolean {\n        const q = fixedSeq()\n        return true\n    }",
   };
   for (const [name, code] of Object.entries(PLANTS)) {
     test(`must-fail control: ${name}`, () => {
@@ -214,7 +222,7 @@ describe("no write path reads a grant outside the reader (analyze.scrml source; 
     expect(hits.some((h) => h.text.includes("plantedRep(f.grants)"))).toBe(true);
   });
   test("a construction outside the reader is not a read (copy into a `grants:` slot; a reader call's argument)", () => {
-    const ok = plant("fn plantedCopy(f: FieldInfo) -> FieldDef { return { sym: f.sym, ty: f.ty, grants: f.grants } }\n    fn plantedAsk(f: FieldInfo) -> boolean { return grantsAdmit(f.grants, EditKind.Replace) }\n    fn plantedNew(f: FieldInfo) -> FieldDef { return { sym: f.sym, ty: f.ty, grants: noGrants() } }");
+    const ok = plant("fn plantedCopy(f: FieldInfo) -> FieldDef { return { sym: f.sym, ty: f.ty, grants: f.grants } }\n    fn plantedAsk(f: FieldInfo) -> boolean { return grantsAdmit(f.grants, EditKind.Replace) }\n    fn plantedNew(f: FieldInfo) -> FieldDef { return { sym: f.sym, ty: f.ty, grants: noGrants() } }\n    fn plantedSeq(b: Type) -> Type { return Type.Seq(b, fixedSeq()) }\n    fn plantedShrinkCopy(f: FieldInfo) -> FieldInfo { return { ...f, shrink: f.shrink } }\n    fn plantedUnused(t: Type) -> boolean {\n        return match t {\n            .Seq(elem: e, grants: g) :> true\n            .Int :> false\n        }\n    }\n    fn plantedToReader(t: Type) -> EditKind[] {\n        return match t {\n            .Seq(elem: e, grants: g) :> seqEdits(g)\n            .Int :> []\n        }\n    }");
     expect(scan(ok)).toEqual([]);
   });
 });
