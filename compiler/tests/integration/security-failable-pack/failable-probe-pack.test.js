@@ -46,7 +46,7 @@ describe("security-failable-pack: the instrument", () => {
   });
 
   test("every family declares its side", () => {
-    expect(families.filter((f) => !["client", "server", "nav"].includes(f.side)).map((f) => f.family)).toEqual([]);
+    expect(families.filter((f) => !["client", "server", "nav", "fullstack"].includes(f.side)).map((f) => f.family)).toEqual([]);
   });
 });
 

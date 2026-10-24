@@ -492,8 +492,29 @@ function detectHistoryFormFromString(rhs: string): { isHistoryForm: boolean; str
  */
 export function matchSubjectCtx(opts: any, mode: "client" | "server"): EmitExprContext {
   if (!opts) return { mode };
+  // The expression-position bridge (emit-expr.ts `emitMatchExpr`) hands the arms a bare options
+  // object and the enclosing expression context separately.
+  if (opts.enclosingExprCtx) return { ...(opts.enclosingExprCtx as EmitExprContext) };
   if (typeof opts.mode === "string" && opts.boundary === undefined) return { ...(opts as EmitExprContext) };
   return { ...exprCtxOfLogicOpts(opts), mode };
+}
+
+/**
+ * S469 — the async facts a match ARM's expressions are lowered with (the arm context keeps the
+ * match's own mode and engine extras; only these travel): `hostAsyncFacts` plus the server peer
+ * sets and the sync-callback accumulator. Read from the statement options, or — for a match the
+ * expression bridge lowers — from the enclosing expression context.
+ */
+export function matchArmAsyncFacts(opts: any): Partial<EmitExprContext> {
+  const src = opts?.enclosingExprCtx ?? opts;
+  if (!src) return {};
+  return {
+    ...hostAsyncFacts(src),
+    serverFnNames: src.serverFnNames ?? null,
+    serverFnPeerAliasNames: src.serverFnPeerAliasNames ?? null,
+    serverFnPeerDispatchObjs: src.serverFnPeerDispatchObjs ?? null,
+    syncPeerCalls: src.syncPeerCalls ?? null,
+  };
 }
 
 /**
@@ -3351,6 +3372,11 @@ export function emitMatchExpr(node: any, opts?: any): string {
   const _matchMode: "client" | "server" = opts?.boundary === "server" ? "server" : "client";
   const _matchCtx: EmitExprContext = {
     mode: _matchMode,
+    // S469 (g-server-return-match-failable-subject-unawaited-s469) — an arm VALUE that calls an
+    // async function is awaited like any expression of the body (`return match k { "a" :> isOk(p)
+    // ? "LOGGED IN" : "rejected" }` tested a pending Promise — always truthy). The IIFE header
+    // follows the emitted body (`_iifeHasOwnAwait`), so an awaited arm makes it async.
+    ...matchArmAsyncFacts(opts),
     // S462 (§19.9.9.7) — a CPS "cells" server batch records each cell write.
     ...(_matchMode === "server" && (opts as any)?.serverCellWrites ? { serverCellWrites: true } : {}),
     ...(engineCtx?.exprCtxExtras ?? {}),
@@ -3396,6 +3422,20 @@ export function emitMatchExpr(node: any, opts?: any): string {
   const header = _handlesSql ? emitSqlQueryShape(sqlQueryExprShape(node.headerExpr)!, _subjectCtx, true) : headerRaw;
   // The arms' error type is SqlError (released before this function returns).
   if (_handlesSql) enterSqlErrorSchema();
+
+  // S469 (g-server-return-match-failable-subject-unawaited-s469) — an arm VALUE that calls a
+  // server function is awaited, as the declaration lowering's arms are (emit-logic.ts
+  // `_awaitMatchArmServerCalls`, the same pass): a client arm value is lowered from text, so
+  // `return match k { "a" :> isOk(p) ? "LOGGED IN" : "rejected" }` tested the pending Promise
+  // (always truthy) — and the body-level injector does not enter this IIFE. The await is legal:
+  // the pass fires only in an async body, and the IIFE header follows its emitted body.
+  const _armAwaitOpts = opts?.enclosingExprCtx?.logicOpts ?? opts;
+  const _valueArm = (text: string): string => {
+    const v = emitTypedArmResultCtor(text, node, _matchCtx) ?? emitArmValue(text, _matchCtx);
+    return _armAwaitOpts && typeof _armAwaitOpts === "object" && !("mode" in _armAwaitOpts)
+      ? _awaitMatchArmServerCalls(v, _armAwaitOpts)
+      : v;
+  };
 
   const iifeLines: string[] = [];
   // inline-sql-in-branch-cps (2026-06-01): a server-batch match-stmt may emit
@@ -3507,8 +3547,8 @@ export function emitMatchExpr(node: any, opts?: any): string {
       : inlineEngineWrite
         ? `{ ${bindingPrelude}${inlineEngineWrite.guardLines.join("\n")} }`
         : (bindingPrelude
-            ? `{ ${bindingPrelude}return ${(emitTypedArmResultCtor(arm.result, node, _matchCtx) ?? emitArmValue(arm.result, _matchCtx))}; }`
-            : `return ${(emitTypedArmResultCtor(arm.result, node, _matchCtx) ?? emitArmValue(arm.result, _matchCtx))};`);
+            ? `{ ${bindingPrelude}return ${_valueArm(arm.result)}; }`
+            : `return ${_valueArm(arm.result)};`);
 
     if (arm.kind === "wildcard") {
       if (arm.binding) {
@@ -3518,7 +3558,7 @@ export function emitMatchExpr(node: any, opts?: any): string {
           // block-body / errarm-refail re-`fail` cases).
           iifeLines.push(`  else { const ${arm.binding} = ${tmpVar}; ${emitResult} }`);
         } else {
-          iifeLines.push(`  else { const ${arm.binding} = ${tmpVar}; return ${(emitTypedArmResultCtor(arm.result, node, _matchCtx) ?? emitArmValue(arm.result, _matchCtx))}; }`);
+          iifeLines.push(`  else { const ${arm.binding} = ${tmpVar}; return ${_valueArm(arm.result)}; }`);
         }
       } else {
         iifeLines.push(`  else ${emitResult}`);
@@ -3640,13 +3680,10 @@ function emitMatchInline(node: any, opts?: any, multiArmBody?: (resultStr: strin
     // with the header, as on the `if` hop (`_ifExprCtx`): without them a statement `match
     // check(p) { … }` in a server function emitted `const _scrml_match_N = check(p);` with no
     // `await`, so the Promise read as `.Ok` and a wrong password logged in (200 LOGGED IN).
-    // The arm bodies keep these facts; the SUBJECT is lowered in `matchSubjectCtx` (S469,
-    // g-server-return-match-failable-subject-unawaited-s469), the one context every lowering shares.
-    ...hostAsyncFacts(opts),
-    serverFnNames: opts?.serverFnNames ?? null,
-    serverFnPeerAliasNames: opts?.serverFnPeerAliasNames ?? null,
-    serverFnPeerDispatchObjs: opts?.serverFnPeerDispatchObjs ?? null,
-    syncPeerCalls: opts?.syncPeerCalls ?? null,
+    // The arm bodies keep these facts (`matchArmAsyncFacts`, shared with the value IIFE); the
+    // SUBJECT is lowered in `matchSubjectCtx` (S469, g-server-return-match-failable-subject-
+    // unawaited-s469), the one context every lowering shares.
+    ...matchArmAsyncFacts(opts),
     // S462 (§19.9.9.7) — a CPS "cells" server batch records each cell write.
     ...(_matchMode === "server" && (opts as any)?.serverCellWrites ? { serverCellWrites: true } : {}),
     ...(engineCtx?.exprCtxExtras ?? {}),

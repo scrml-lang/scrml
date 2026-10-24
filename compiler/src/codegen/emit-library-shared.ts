@@ -131,6 +131,14 @@ function collectCalleeIdents(node: unknown, out: Set<string>, guardNestedFnValue
         : (typeof (arm as ASTNode).expr === "string" ? ((arm as ASTNode).expr as string) : "");
       if (s) for (const c of extractCalleeNames(_stripStringLiterals(s))) out.add(c);
     }
+    // S469 (g-server-return-match-failable-subject-unawaited-s469) — the EXPRESSION-tree match
+    // (`v = match k { "a" :> isOk(p) ? … }`, an argument, an operand) carries its arms as
+    // `rawArms` strings: harvested the same way, or the enclosing client function was not
+    // coloured async and the arm tested a pending Promise (always truthy).
+    const raw = (n as { rawArms?: unknown }).rawArms;
+    if (Array.isArray(raw)) {
+      for (const r of raw) if (typeof r === "string" && r) for (const c of extractCalleeNames(_stripStringLiterals(r))) out.add(c);
+    }
   }
   for (const key of Object.keys(n)) {
     if (key === "span") continue;

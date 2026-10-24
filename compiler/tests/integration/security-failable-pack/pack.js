@@ -14,6 +14,9 @@
 //   client shape: compile, load app.html + app.client.js under happy-dom, click #wrong then #right
 //                 (each on a fresh document), read #out.
 //   server shape: compile, import app.server.js, POST the `login` route with p="wrong" / p="secret".
+//   fullstack shape (S469): a client shape whose browser code calls SERVER functions — the page runs
+//                 under happy-dom and its `fetch` is answered in-process by the compiled app.server.js
+//                 (`mod.fetch`, with the CSRF double-submit pair the browser would carry).
 //
 // Classes (the security floor is "a wrong password never logs in"):
 //   PASS          wrong -> "rejected" (or anything but LOGGED IN), right -> "LOGGED IN". Correct.
@@ -53,10 +56,29 @@ export async function loadFamilies() {
 
 const settle = async () => { for (let k = 0; k < 8; k++) await new Promise((r) => setTimeout(r, 0)); };
 
+/**
+ * S469 (fullstack side) — a `fetch` answered by the compiled server bundle in-process. The request is
+ * rebuilt as a native Request (the bundle reads its body with `.json()`), with the CSRF double-submit
+ * pair a browser that loaded the page would carry. A path no route serves is a 404.
+ */
+function inProcessFetch(serverMod, NativeRequest, NativeResponse) {
+  return async (input, init = {}) => {
+    const url = typeof input === "string" ? input : input?.url ?? "";
+    const path = url.replace(/^[a-z]+:\/\/[^/]+/i, "");
+    const headers = { ...Object.fromEntries(new Headers(init.headers ?? {}).entries()), Cookie: "scrml_csrf=tok", "X-CSRF-Token": "tok" };
+    const req = new NativeRequest(`http://localhost${path}`, { method: init.method ?? "GET", headers, body: init.body });
+    const res = await serverMod.fetch(req);
+    return res ?? new NativeResponse("not found", { status: 404 });
+  };
+}
+
 /** Load the compiled page on a fresh document, click `#id`, and read `#out`. */
-async function clickAndRead(outDir, id, extraFiles = []) {
+async function clickAndRead(outDir, id, extraFiles = [], serverMod = null) {
   if (GlobalRegistrator.isRegistered) await GlobalRegistrator.unregister();
+  const NativeRequest = globalThis.Request;
+  const NativeResponse = globalThis.Response;
   GlobalRegistrator.register();
+  if (serverMod) globalThis.fetch = inProcessFetch(serverMod, NativeRequest, NativeResponse);
   try {
     const html = readFileSync(resolve(outDir, "app.html"), "utf8");
     // S469 — a multi-file shape (an imported module): its client chunks load before the page's.
@@ -78,6 +100,8 @@ async function clickAndRead(outDir, id, extraFiles = []) {
       if (!b) return { text: null, threw: false };
       b.click();
       await settle();
+      // A round trip to the in-process server resolves over several more turns.
+      if (serverMod) { for (let k = 0; k < 4; k++) { await new Promise((r) => setTimeout(r, 5)); await settle(); } }
     } catch {
       return { text: document.querySelector("#out")?.textContent ?? null, threw: true };
     } finally {
@@ -280,8 +304,15 @@ export async function runShape(shape, side, dir) {
 
   if (!shape.src.includes('id="wrong"')) return { cls: "UNJUDGED", detail: "no #wrong button" };
   const extraNames = Object.keys(shape.extra ?? {});
-  const wrong = await clickAndRead(out, "wrong", extraNames);
-  const right = await clickAndRead(out, "right", extraNames);
+  let serverMod = null;
+  if (side === "fullstack") {
+    const sp = resolve(out, "app.server.js");
+    if (!existsSync(sp)) return { cls: "UNJUDGED", detail: "fullstack shape with no server bundle" };
+    try { serverMod = await import(pathToFileURL(sp).href + "?" + Math.random().toString(36).slice(2)); }
+    catch (e) { return { cls: "PASS-500", detail: `bundle does not load: ${String(e?.message ?? e).slice(0, 60)}` }; }
+  }
+  const wrong = await clickAndRead(out, "wrong", extraNames, serverMod);
+  const right = await clickAndRead(out, "right", extraNames, serverMod);
   const detail = `wrong->${JSON.stringify(wrong.text)}${wrong.threw ? " (threw)" : ""} right->${JSON.stringify(right.text)}${right.threw ? " (threw)" : ""}`;
   if (wrong.text === "LOGGED IN") return { cls: "FAIL", detail };
   return { cls: right.text === "LOGGED IN" ? "PASS" : "PASS-DENY", detail };
