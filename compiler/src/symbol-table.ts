@@ -636,6 +636,8 @@ export interface OnTimeoutEntry {
   /** S469 — an `if=` / `show=` / `else-if=` / `else` written on the opener (refused by the
    *  typer: E-GATE-UNSUPPORTED-HOST / E-CTRL-002 / E-CTRL-001). Absent when none. */
   gateAttr?: "if" | "else" | "else-if" | "show";
+  /** S469 round 3 — the markup attribute reader's refusals on the opener (refused). */
+  gateProblems?: Array<{ code: string; message: string }>;
 }
 
 /**
@@ -667,6 +669,8 @@ export interface OnIdleEntry {
   rawOffset: number;
   /** S469 — an `if=` / `show=` / `else-if=` / `else` written on the opener (refused). */
   gateAttr?: "if" | "else" | "else-if" | "show";
+  /** S469 round 3 — the markup attribute reader's refusals on the opener (refused). */
+  gateProblems?: Array<{ code: string; message: string }>;
 }
 
 /**
@@ -767,6 +771,8 @@ export interface EngineStateChildEntry {
   /** S469 round 2 — `if=` / `show=` / `else` / `else-if=` written on the state-child opener
    *  (read by the markup attribute tokenizer). Refused (`stateChildGateDiagnostic`). */
   gateAttrs?: Array<"if" | "else" | "else-if" | "show">;
+  /** S469 round 3 — the markup attribute reader's refusals on the opener (refused). */
+  gateProblems?: Array<{ code: string; message: string }>;
   /** Parsed form of the `rule=` attribute. */
   rule: EngineRuleForm;
   /** Raw body text between the opener and closer. Today's AST stores
@@ -6367,6 +6373,9 @@ function fireEngineVarDuplicate(
   errors: SYMDiagnostic[],
   filePath: string,
 ): void {
+  // S469 round 3 — an opener refused by E-ENGINE-DERIVED-NOT-LAST had its post-`derived=` text
+  // (a `var=` / `name=`) unread, so its auto-derived name is an artifact: no collision cascade.
+  if (engineDecl && engineDecl._derivedNotLast === true) return;
   const span: SYMDiagnostic["span"] = engineDecl.span ?? {
     file: filePath, start: 0, end: 0, line: 1, col: 1,
   };
@@ -7196,6 +7205,7 @@ export function validateEngineStateChildrenAndRules(
           const d = timerGateAttrDiagnostic("onIdle", entry.gateAttr);
           fireB15Diagnostic(errors, d.code, d.message, engineDecl, filePath, "error");
         }
+        for (const pr of entry.gateProblems ?? []) fireB15Diagnostic(errors, pr.code, `${pr.message} (on an \`<onIdle>\`)`, engineDecl, filePath, "error");
         // Misplacement check (E-IDLE-MISPLACED).
         let misplaced = false;
         for (const [a, b] of stateChildRanges) {
@@ -11410,6 +11420,9 @@ export function validateEngineA5Extensions(
     }
 
     // S469 round 2 — a gate / chain attribute on the state-child opener is never read: refuse it.
+    for (const pr of sc.gateProblems ?? []) {
+      fireA5Diagnostic(errors, pr.code, `${pr.message} (on the engine state-child \`<${sc.tag}>\`)`, engineDecl, filePath, "error");
+    }
     if (Array.isArray(sc.gateAttrs)) {
       for (const g of sc.gateAttrs) {
         const d = rawOpenerGateDiagnostic(g, sc.tag, `the engine state-child \`<${sc.tag}>\``,
@@ -11434,6 +11447,7 @@ export function validateEngineA5Extensions(
           const d = timerGateAttrDiagnostic("onTimeout", ot.gateAttr);
           fireA5Diagnostic(errors, d.code, d.message, engineDecl, filePath, "error");
         }
+        for (const pr of ot.gateProblems ?? []) fireA5Diagnostic(errors, pr.code, `${pr.message} (on an \`<onTimeout>\`)`, engineDecl, filePath, "error");
 
         // Fire-site #5a: E-TIMER-NAME-INVALID (§51.0.M S79). Identifier
         // shape: PascalCase or camelCase, no leading digit, ASCII letters

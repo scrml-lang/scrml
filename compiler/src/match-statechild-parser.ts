@@ -66,7 +66,7 @@
 // only a genuine URL is exempted; a real `// comment` still strips). See the
 // `urlSlashesAt` doc-comment in block-splitter.js for the exemption criteria.
 import { urlSlashesAt } from "./block-splitter.js";
-import { gateAttrNamesInOpener, rawOpenerGateDiagnostic } from "./gate-attr-refusal.ts";
+import { scanOpenerGateAttrs, rawOpenerGateDiagnostic } from "./gate-attr-refusal.ts";
 
 // §24 HTML void elements — self-terminating, admit no children. A void
 // opener (bare `<input>` or self-closed `<input/>`) inside a match-arm body
@@ -683,7 +683,13 @@ export function parseMatchArms(armsRaw: string): MatchParseResult {
     // codegen `buildMatchArms`, see `gateDiagnostics`).
     {
       const regionEnd = openerScan.insideColonAt >= 0 ? openerScan.insideColonAt : openerScan.closeAt;
-      for (const g of gateAttrNamesInOpener(armsRaw.slice(_attrRegionStart, Math.max(_attrRegionStart, regionEnd)))) {
+      const _scan = scanOpenerGateAttrs(armsRaw.slice(_attrRegionStart, Math.max(_attrRegionStart, regionEnd)));
+      // S469 round 3 — the reader's own refusals (an operator value swallowing a later gate, a
+      // case-variant gate name) fail the compile here as they do on markup.
+      for (const pr of _scan.problems) {
+        gateDiagnostics.push({ code: pr.code, message: pr.message, spanStart: armOpenerStart, spanEnd: Math.max(armOpenerStart + 1, regionEnd) });
+      }
+      for (const g of _scan.names) {
         const d = rawOpenerGateDiagnostic(g, variantName, `the \`<match>\` arm \`<${variantName}>\``,
           `An arm is chosen by its variant; express the condition as arm structure (a variant for the gated state), or gate the whole \`<match if=COND>\`.`);
         gateDiagnostics.push({ code: d.code, message: d.message, spanStart: armOpenerStart, spanEnd: Math.max(armOpenerStart + 1, regionEnd) });

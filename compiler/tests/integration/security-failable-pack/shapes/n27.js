@@ -17,6 +17,7 @@
 // from the exact-text judge.) The floor: none may ever show LOGGED IN on the wrong password, e.g. a
 // future chain lowering for structural elements that evaluates the chain once, or drops a branch condition.
 // Round 2 (shapes named `r2 …`): 61 FAIL on the round-1 head 456158a63, all PASS-REFUSED after.
+// Round 3 (shapes named `r3 …`): 197 FAIL / 3 PASS / 75 PASS-REFUSED on 412b77b8b, all PASS-REFUSED after.
 // Data, not logic: the default export is a list of [name, scrml source]. Side: client (click #wrong /
 // #right, read #out). Do not edit a shape to make it pass.
 
@@ -143,5 +144,58 @@ const SLOT = (body) => PAGE(`<Gate><b>LOGGED IN</b></Gate>`, `const Gate = <div>
 shapes.push(["r2 <slot if=> in a component body", SLOT(`<slot if=(@pw == "secret")/>`)]);
 shapes.push(["r2 <slot show=> in a component body", SLOT(`<slot show=(@pw == "secret")/>`)]);
 shapes.push(["r2 <slot else> after a denying if= in a component body", SLOT(`<span if=(@pw != "secret")></span><slot else/>`)]);
+
+// ---------------------------------------------------------------------------------------------------
+// Round 3 (review of 412b77b8b): an unquoted value with a bare operator (`data-z=a/`, `title=a/b`,
+// `1+2`, `a?b:c`, `a&&b`, `a||b`, `a*b`, `a==b`, `a,`, `a;`) is refused by the markup reader as a run
+// that reaches the tag close — so a gate written AFTER it is never read. On a `<p>` that refusal fails
+// the compile; round 2 dropped it on the structural openers and the gate vanished (HIGH). Plus the
+// case-variant gate names (`IF=`, `Else`, …), which no reader treated as gates (now E-GATE-ATTR-CASE).
+// Measured on 412b77b8b: every structural / arm / state-child shape below that compiled showed LOGGED IN
+// on the wrong password; the markup ones were already refused. All PASS-REFUSED after.
+// ---------------------------------------------------------------------------------------------------
+const OPS = ["data-z=a/", "title=a/b", "data-x=1+2", "data-x=a?b:c", "data-x=a&&b", "data-x=a==b", "data-x=a,", "data-x=a;"];
+const R3_GATES = [
+  ["else", (op, el) => `<span if=(@pw != "secret")></span>${el(`${op} else`)}`],
+  ["else-if=", (op, el) => `<span if=(@pw == "nobody")></span>${el(`${op} else-if=(@pw == "secret")`)}`],
+  ["if=", (op, el) => el(`${op} if=(@pw == "secret")`)],
+];
+const R3_ELEMENTS = [
+  ...ELEMENTS,
+  ["<b>", (a) => `<b ${a}>LOGGED IN</b>`],
+];
+for (const op of OPS) {
+  for (const [gn, gate] of R3_GATES) {
+    for (const [en, el] of R3_ELEMENTS) {
+      for (const [pn, pos] of R2_POSITIONS) {
+        if (en === "<engine>" && pn !== "in markup") continue;
+        shapes.push([`r3 ${en.slice(1, -1)} ${op} ${gn}, ${pn}`, pos(gate(op, el))]);
+      }
+    }
+  }
+}
+// the gate BEFORE the operator value (refused on markup too)
+for (const [en, el] of R3_ELEMENTS) {
+  shapes.push([`r3 ${en.slice(1, -1)} if= then data-path=admin/panel, in markup`, POSITIONS[0][1](el(`if=(@pw == "secret") data-path=admin/panel`))]);
+}
+// arm / state-child / timer-free raw-text openers
+for (const op of ["data-x=a/", "data-x=a+b"]) {
+  shapes.push([`r3 <match> arm ${op} if=, in markup`, POSITIONS[0][1](ARM(`${op} if=(@pw == "secret")`))]);
+  shapes.push([`r3 <match> arm ${op} if=, ${POSITIONS[2][0]}`, POSITIONS[2][1](ARM(`${op} if=(@pw == "secret")`))]);
+  shapes.push([`r3 engine state-child ${op} if=, in markup`, POSITIONS[0][1](SC(`${op} if=(@pw == "secret")`))]);
+}
+// case-variant gate names on every kind of element
+for (const [cn, gate] of [
+  ["IF=", (el) => el(`IF=(@pw == "secret")`)],
+  ["If=", (el) => el(`If=(@pw == "secret")`)],
+  ["ELSE", (el) => `<span if=(@pw != "secret")></span>${el("ELSE")}`],
+  ["Else", (el) => `<span if=(@pw != "secret")></span>${el("Else")}`],
+  ["ELSE-IF=", (el) => `<span if=(@pw == "nobody")></span>${el(`ELSE-IF=(@pw == "secret")`)}`],
+]) {
+  for (const [en, el] of R3_ELEMENTS) {
+    shapes.push([`r3 ${en.slice(1, -1)} ${cn} (case variant), in markup`, POSITIONS[0][1](gate(el))]);
+  }
+  shapes.push([`r3 <match> arm ${cn} (case variant), in markup`, POSITIONS[0][1](ARM(cn.endsWith("=") ? `${cn}(@pw == "secret")` : cn))]);
+}
 
 export default shapes;

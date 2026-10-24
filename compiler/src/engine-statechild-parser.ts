@@ -84,7 +84,7 @@ import { urlSlashesAt } from "./block-splitter.js";
 // S469 (SECURITY) — every `${…}` block in an opener is bounded by acorn (`logicBlockClose`),
 // never by a brace counter: the text cut out is what the failable walk reads and codegen emits.
 import { logicBlockClose, braceBlockClose } from "./interpolation-extent.ts";
-import { gateAttrNamesInOpener, type GateAttrName } from "./gate-attr-refusal.ts";
+import { gateAttrNamesInOpener, scanOpenerGateAttrs, type GateAttrName } from "./gate-attr-refusal.ts";
 
 /**
  * S469 — the index one past a BODY `${…}` interpolation at `i` (a closer-finder's skip),
@@ -657,6 +657,10 @@ export function scanForOnTimeoutEntries(
     if (nameVal !== undefined) entry.name = nameVal;
     const gateAttr = timerGateAttr(attrs);
     if (gateAttr !== undefined) entry.gateAttr = gateAttr;
+    // S469 round 3 — the markup reader's own refusals on this opener (an operator value that
+    // swallows the attributes after it, a case-variant gate name). Refused by the typer.
+    const gateProblems = scanOpenerGateAttrs(attrs).problems;
+    if (gateProblems.length > 0) entry.gateProblems = gateProblems;
     out.push(entry);
   }
 
@@ -725,6 +729,8 @@ export function scanForOnIdleEntries(rulesRaw: string): OnIdleEntry[] {
     const idle: OnIdleEntry = { after: afterVal, to: toVal, rawOffset: startIdx };
     const gateAttr = timerGateAttr(attrs);
     if (gateAttr !== undefined) idle.gateAttr = gateAttr;
+    const gateProblems = scanOpenerGateAttrs(attrs).problems;
+    if (gateProblems.length > 0) idle.gateProblems = gateProblems;
     out.push(idle);
   }
 
@@ -2954,7 +2960,9 @@ export function parseEngineStateChildren(rulesRaw: string): EngineStateChildEntr
     // opener, read by the markup attribute tokenizer. A state-child is a dispatched arm, not a
     // gated host: the attribute was dropped and the arm rendered whatever it said. The typer
     // refuses it (symbol-table `stateChildGateDiagnostic`).
-    const gateAttrs = gateAttrNamesInOpener(afterTag);
+    const _gateScan = scanOpenerGateAttrs(afterTag);
+    const gateAttrs = _gateScan.names;
+    const gateProblems = _gateScan.problems;
 
     out.push({
       tag,
@@ -2962,6 +2970,7 @@ export function parseEngineStateChildren(rulesRaw: string): EngineStateChildEntr
       bodyRaw,
       isColonShorthand,
       ...(gateAttrs.length > 0 ? { gateAttrs } : {}),
+      ...(gateProblems.length > 0 ? { gateProblems } : {}),
       // S160 (S154 ruling (b)) — legacy after-`>` placement marker.
       legacyColonPlacement,
       rawOffset: lt,

@@ -22,6 +22,10 @@
 import { describe, test, expect } from "bun:test";
 import { splitBlocks } from "../../src/block-splitter.js";
 import { buildAST } from "../../src/ast-builder.js";
+import { compileScrml } from "../../src/api.js";
+import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 
 const HEAD = `type Phase:enum = { Idle, Active }\n<ph>: Phase = .Active\n<xs> = [1]\n<f> = true\n<g> = true\n<n> = false\n<m>: Phase = .Idle\n<s> = "x"\n`;
 
@@ -174,5 +178,123 @@ describe("<engine derived=…>: derived= is the last attribute (E-ENGINE-DERIVED
       const { errors } = tab(engine(opener));
       expect(errors.map((e) => e.code)).not.toContain("E-ENGINE-DERIVED-NOT-LAST");
     }
+  });
+});
+
+// ---------------------------------------------------------------------------------------------------
+// Round 3 (review of 412b77b8b). The reader's REFUSALS are part of its answer: an unquoted value with a
+// bare operator (`data-x=a/ if=@n`) is an ATTR_OP_REJECT whose refused run reaches the tag close, so
+// the gate after it is never tokenized — on a `<p>` the E-ATTR-UNQUOTED-OPERATOR fails the compile.
+// Round 2 dropped that error on the structural openers and the swallowed gate vanished at exit 0. The
+// same holds for a case-variant gate name (`IF=`, `Else`), refused everywhere (E-GATE-ATTR-CASE).
+// ---------------------------------------------------------------------------------------------------
+
+const READER_REFUSALS = new Set(["E-ATTR-UNQUOTED-OPERATOR", "E-ATTR-MULTI-STATEMENT", "E-GATE-ATTR-CASE"]);
+const refusalCodes = (errors) => [...new Set(errors.map((e) => e.code).filter((c) => READER_REFUSALS.has(c)))].sort();
+
+const OP_VALUES = ["data-z=a/", "title=a/b", "data-x=1+2", "data-x=a?b:c", "data-x=a&&b", "data-x=a||b",
+  "data-x=a*b", "data-x=a==b", "data-x=a,", "data-x=a;", "data-path=admin/panel", "key=x.id+1"];
+const GATE_TAILS = ["else", "else-if=@g", "if=@n", "show=@n"];
+const CASE_VARIANTS = ["ELSE", "Else", "ELSE-IF=@g", "Else-If=@g", "IF=@n", "If=@n", "SHOW=@n", "Show=@n"];
+
+const ROW = (c) => `<div id="out"><each in=@xs as y><div>${c}</div></each></div>\n`;
+const TOP = (c) => `<div id="out">${c}</div>\n`;
+
+describe("round 3 — the reader's refusals are the same on <p> and on every structural opener (TAB)", () => {
+  const openers = [];
+  for (const v of OP_VALUES) for (const g of GATE_TAILS) openers.push(`${v} ${g}`);
+  for (const g of GATE_TAILS) openers.push(`if=@n data-path=admin/panel ${g === "if=@n" ? "" : g}`.trim());
+  for (const c of CASE_VARIANTS) openers.push(c);
+  for (const attrs of openers) {
+    for (const [pn, pos] of [["top level", TOP], ["an <each> row", ROW]]) {
+      const want = refusalCodes(tab(pos(`<p ${attrs}>z</p>`)).errors);
+      for (const el of Object.keys(STRUCTURAL)) {
+        // `<each key=…>` is the each's own expression slot (below), not a markup attribute.
+        if (el === "each" && attrs.startsWith("key=")) continue;
+        test(`<${el} ${attrs}> in ${pn} — refused like <p ${attrs}>`, () => {
+          expect(want.length).toBeGreaterThan(0);
+          expect(refusalCodes(tab(pos(STRUCTURAL[el].src(attrs))).errors)).toEqual(want);
+        });
+      }
+    }
+  }
+});
+
+function compileCodes(src) {
+  const dir = mkdtempSync(join(tmpdir(), "scrml-gate-diff-"));
+  try {
+    const f = join(dir, "app.scrml");
+    writeFileSync(f, HEAD + src);
+    const r = compileScrml({ inputFiles: [f], write: false, outputDir: join(dir, "out"), log: () => {} });
+    return (r.errors ?? []).filter((e) => (e.severity ?? "error") === "error").map((e) => e.code);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+describe("round 3 — the same in a component body, and on the raw-text openers (full compile)", () => {
+  const SAMPLE = ["data-z=a/ else", "data-x=a+b show=@n", "data-x=a/ if=@n", "data-x=a; else", "IF=@n", "Else"];
+  for (const attrs of SAMPLE) {
+    const want = refusalCodes(compileCodes(`const W = <div><p ${attrs}>z</p></div>\n<div id="out"><W/></div>\n`).map((code) => ({ code })));
+    for (const el of ["match", "each"]) {
+      test(`<${el} ${attrs}> in a component body — refused like <p>`, () => {
+        expect(want.length).toBeGreaterThan(0);
+        const got = refusalCodes(compileCodes(`const W = <div>${STRUCTURAL[el].src(attrs)}</div>\n<div id="out"><W/></div>\n`).map((code) => ({ code })));
+        expect(got).toEqual(want);
+      });
+    }
+    const RAW = {
+      "an engine state-child": (a) => `<div id="out"><engine for=Phase initial=.Active><Idle rule=.Active><p>i</p></><Active rule=.Idle ${a}><p>a</p></></></div>\n`,
+      "a <match> arm": (a) => `<div id="out"><match for=Phase on=@ph><Idle><p>i</p></><Active ${a}><p>a</p></></></div>\n`,
+      "a <match> arm in a row": (a) => ROW(`<match for=Phase on=@ph><Idle><p>i</p></><Active ${a}><p>a</p></></>`),
+      "an <onTimeout>": (a) => `<div id="out"><engine for=Phase initial=.Active><Idle rule=.Active><p>i</p></><Active rule=.Idle><onTimeout after=10ms to=.Idle ${a}/><p>a</p></></></div>\n`,
+      "an <onIdle>": (a) => `<div id="out"><engine for=Phase initial=.Active><onIdle after=10ms to=.Idle ${a}/><Idle rule=.Active><p>i</p></><Active rule=.Idle><p>a</p></></></div>\n`,
+    };
+    for (const [rn, mk] of Object.entries(RAW)) {
+      test(`${rn} with ${JSON.stringify(attrs)} — refused like <p>`, () => {
+        const got = refusalCodes(compileCodes(mk(attrs)).map((code) => ({ code })));
+        expect(got).toEqual(want);
+      });
+    }
+  }
+});
+
+describe("round 3 (MED-2) — an if= before derived= is read as the opener's gate, not refused", () => {
+  for (const [label, gate, sep] of [["if=@n", "if=@n", " "], ["if=(@n)", "if=(@n)", " "], ['if="@n"', 'if="@n"', " "], ["if=@n, newline before derived=", "if=@n", "\n  "]]) {
+    test(label, () => {
+      const { ast, errors } = tab(`<div id="out"><engine for=Phase ${gate}${sep}derived=@n ? .Active : .Idle><Idle><p>i</p></><Active><p>a</p></></></div>\n`);
+      const eng = findNode(ast.nodes, (n) => n.kind === "engine-decl");
+      expect(eng.ifCond).toBeDefined();
+      expect(errors.map((e) => e.code)).not.toContain("E-CG-003");
+      expect(errors.map((e) => e.code)).not.toContain("E-ENGINE-DERIVED-NOT-LAST");
+    });
+  }
+  test("a comma sequence in derived= (`derived=@m, show=@n`) is refused", () => {
+    const { errors } = tab(`<div id="out"><engine for=Phase derived=@m, show=@n><Idle><p>i</p></><Active><p>a</p></></></div>\n`);
+    expect(errors.map((e) => e.code)).toContain("E-ENGINE-DERIVED-NOT-LAST");
+  });
+});
+
+describe("round 3 — an <each> expression slot ends where the expression parser says; the gate after it is read", () => {
+  const ROWSRC = (a) => `<div id="out"><each in=@xs as x ${a}><p>r</p></each></div>\n`;
+  test("key=x.id+1 if=@n — the if= is the each's gate", () => {
+    const { ast, errors } = tab(ROWSRC("key=x.id+1 if=@n"));
+    const n = findNode(ast.nodes, (v) => v.kind === "each-block");
+    expect(n.ifCond).toBeDefined();
+    expect(refusalCodes(errors)).toEqual([]);
+  });
+  test("key=x.id+1 else — E-CTRL-001 (read, refused as an unconsumed chain attribute)", () => {
+    const { errors } = tab(`<div id="out"><p if=@f>a</p>${STRUCTURAL.each.src("key=x.id+1 else")}</div>\n`);
+    expect(errors.map((e) => e.code)).toContain("E-CTRL-001");
+  });
+  test("key=x.id+1 show=@n — E-GATE-UNSUPPORTED-HOST", () => {
+    expect(tab(ROWSRC("key=x.id+1 show=@n")).errors.map((e) => e.code)).toContain("E-GATE-UNSUPPORTED-HOST");
+  });
+  test("of=@n + 1 as i if=@n — the if= is read", () => {
+    const { ast } = tab(`<div id="out"><each of=@n + 1 as i if=@n><p>r</p></each></div>\n`);
+    expect(findNode(ast.nodes, (v) => v.kind === "each-block").ifCond).toBeDefined();
+  });
+  test("a NON-slot operator value on <each> stays refused (data-x=a+b if=@n)", () => {
+    expect(refusalCodes(tab(ROWSRC("data-x=a+b if=@n")).errors)).toEqual(["E-ATTR-UNQUOTED-OPERATOR"]);
   });
 });

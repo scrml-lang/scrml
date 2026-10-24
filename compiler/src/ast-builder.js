@@ -105,7 +105,7 @@ function escapeRawHasEffect(raw) {
 import { parseThemeBody } from "./theme-body-parser.ts";
 import { MATCH_ARM_SHORTHAND_AMBIGUOUS, matchArmShorthandAmbiguousMessage, objectLiteralArmValue } from "./arm-body-statements.ts";
 import { collectRefusedElements, refusedElementCode, refusedElementMessage } from "./element-refusal.ts";
-import { GATE_UNSUPPORTED_HOST_CODE, gateUnsupportedHostMessage } from "./gate-attr-refusal.ts";
+import { GATE_UNSUPPORTED_HOST_CODE, gateUnsupportedHostMessage, GATE_ATTR_CASE_CODE, gateAttrCaseVariant, gateAttrCaseMessage } from "./gate-attr-refusal.ts";
 import { isRawContentElement } from "./raw-content-encode.ts";
 import { OBJECT_SHORTHAND_CELL, destructureCellMessage } from "./object-shorthand-cell.ts";
 import { markupNotRenderedMessage, refuseUnrenderedStatementMarkup } from "./markup-statement-refusal.ts";
@@ -4721,15 +4721,25 @@ function structuralHeaderAnchor(block, header) {
  */
 function readStructuralOpenerAttrs(header, anchor, filePath, tagName, opts = {}) {
   const text = typeof header === "string" ? header : "";
-  const tokenizeHeader = (h) => {
-    // `<x ` is 3 characters: rebase so `h[0]` lands on its real file offset / column.
-    const synthetic = `<x ${h}>`;
+  // Line / column of `text[i]` in the file (the tokenizer counts from its own start).
+  const posAt = (i) => {
+    const before = text.slice(0, i);
+    const nl = (before.match(/\n/g) || []).length;
+    const lastNl = before.lastIndexOf("\n");
+    return { line: anchor.line + nl, col: nl > 0 ? i - lastNl : anchor.col + i };
+  };
+  // Tokenize `text[from, to)` as a markup attribute region, positioned in the file.
+  const tokenizeRange = (from, to) => {
+    // `<x ` is 3 characters: rebase so `text[from]` lands on its real file offset / column.
+    const synthetic = `<x ${text.slice(from, to)}>`;
     const before = 3;
-    const toks = tokenizeAttributes(synthetic, anchor.absStart - before, anchor.line, Math.max(1, anchor.col - before), "markup");
+    const at = posAt(from);
+    const base = anchor.absStart + from - before;
+    const toks = tokenizeAttributes(synthetic, base, at.line, Math.max(1, at.col - before), "markup");
     let closeAt = synthetic.length - 1;
     for (const t of toks) {
       if (t && (t.kind === "TAG_CLOSE_GT" || t.kind === "TAG_SELF_CLOSE") && t.span) {
-        closeAt = t.span.start - (anchor.absStart - before);
+        closeAt = t.span.start - base;
         break;
       }
     }
@@ -4737,8 +4747,9 @@ function readStructuralOpenerAttrs(header, anchor, filePath, tagName, opts = {})
     return { toks, unread };
   };
   let derivedAt = -1;
-  let { toks, unread } = tokenizeHeader(text);
+  let end = text.length;
   if (opts.splitDerived) {
+    const { toks } = tokenizeRange(0, text.length);
     for (let i = 0; i < toks.length; i++) {
       const t = toks[i];
       if (t && t.kind === "ATTR_NAME" && t.text === "derived" && toks[i + 1] && toks[i + 1].kind === "ATTR_EQ") {
@@ -4746,7 +4757,35 @@ function readStructuralOpenerAttrs(header, anchor, filePath, tagName, opts = {})
         break;
       }
     }
-    if (derivedAt >= 0) ({ toks, unread } = tokenizeHeader(text.slice(0, derivedAt)));
+    // Trimmed: a trailing space before `derived=` would let the tokenizer read the last
+    // prefix value as an operator run into the closing `>` (`if=@n >` → refused, S469 round 3).
+    if (derivedAt >= 0) end = text.slice(0, derivedAt).replace(/\s+$/, "").length;
+  }
+  // The builder's own EXPRESSION slots (`<each in= of= key=>`, `<match on=>`) admit an unquoted
+  // operator expression (`key=g.id + it.id`, `of=@n + 1`) that the markup reader refuses as a run
+  // to the tag close. Exactly like `derived=`: the slot value's extent is the expression parser's
+  // (`parseExprToNode` reports what it did not consume) and the reader resumes after it. Any OTHER
+  // attribute's operator run stays a refusal (E-ATTR-UNQUOTED-OPERATOR), as on markup — the gate
+  // written after it is never silently lost (S469 round 3, HIGH-1).
+  const slots = new Set(opts.exprSlots ?? []);
+  const toks = [];
+  let unread = "";
+  let segStart = 0;
+  for (let guard = 0; guard < 64; guard++) {
+    const seg = tokenizeRange(segStart, end);
+    let cut = -1;
+    for (let i = 2; i < seg.toks.length; i++) {
+      const t = seg.toks[i];
+      if (t && t.kind === "ATTR_OP_REJECT" && seg.toks[i - 1].kind === "ATTR_EQ" &&
+          seg.toks[i - 2].kind === "ATTR_NAME" && slots.has(seg.toks[i - 2].text)) { cut = i; break; }
+    }
+    const segToks = segStart > 0 ? seg.toks.filter((t) => t && t.kind !== "TAG_OPEN") : seg.toks;
+    if (cut < 0) { toks.push(...segToks); unread = seg.unread; break; }
+    toks.push(...seg.toks.slice(segStart > 0 ? 1 : 0, cut - 2));
+    const valStart = seg.toks[cut].span.start - anchor.absStart;
+    const consumed = expressionSlotExtent(text.slice(valStart, end), filePath, anchor.absStart + valStart);
+    if (consumed < 0) { unread = text.slice(valStart, end); break; }
+    segStart = valStart + consumed;
   }
   const scratchErrors = [];
   const attrs = parseAttributes(toks, filePath, scratchErrors, false, tagName, tagName === "engine");
@@ -4755,9 +4794,32 @@ function readStructuralOpenerAttrs(header, anchor, filePath, tagName, opts = {})
     tokens: toks,
     scratchErrors,
     derivedAt,
-    prefix: derivedAt >= 0 ? text.slice(0, derivedAt) : text,
+    prefix: derivedAt >= 0 ? text.slice(0, end) : text,
     unread: unread.trim(),
   };
+}
+
+/**
+ * The length of the expression at the start of `value` (source characters), as the expression
+ * parser reads it — or -1 when the parser cannot say (the caller refuses the opener: unknown
+ * extent, fail closed). A `${ … }` value is the shared logic-block reader's.
+ */
+function expressionSlotExtent(value, filePath, absStart) {
+  if (value.startsWith("${")) {
+    const close = logicBlockClose(value, 0);
+    return close >= 0 ? close + 1 : -1;
+  }
+  let node = null;
+  try {
+    ({ result: node } = captureTrailingContentWarnings(() => parseExprToNode(value, filePath, absStart)));
+  } catch {
+    return -1;
+  }
+  if (!node || typeof node !== "object" || node.kind === "escape-hatch") return -1;
+  const trailing = typeof node._s441TrailingText === "string" ? node._s441TrailingText.trim() : "";
+  if (!trailing) return value.length;
+  const body = value.replace(/\s+$/, "");
+  return body.endsWith(trailing) ? body.length - trailing.length : -1;
 }
 
 /**
@@ -4777,8 +4839,12 @@ function structuralGateFields(scan, header, anchor, filePath, tagName, errors) {
   const ifAttr = byName("if");
   if (ifAttr) {
     const v = ifAttr.value;
-    const isBare = v === null || v === undefined || (typeof v === "object" && v.kind === "absent");
-    if (isBare) {
+    const isRefused = v && typeof v === "object" && v._refused === true;
+    const isBare = !isRefused && (v === null || v === undefined || (typeof v === "object" && v.kind === "absent"));
+    if (isRefused) {
+      // E-ATTR-UNQUOTED-OPERATOR / E-ATTR-MULTI-STATEMENT — forwarded with every other
+      // reader refusal below; no ifCond (the compile fails).
+    } else if (isBare) {
       errors.push(structuralRefusal(new TABError(
         "E-CG-003",
         `E-CG-003: the \`if\` on this \`<${tagName}>\` names no condition, so the compiler cannot apply it. ` +
@@ -4809,6 +4875,21 @@ function structuralGateFields(scan, header, anchor, filePath, tagName, errors) {
         if (s && typeof s.start === "number" && s.start >= lo && s.start < hi) errors.push(e);
       }
     }
+  }
+  // S469 round 3 (HIGH-1) — EVERY refusal the markup attribute reader issues on this opener is
+  // reported, exactly as on a markup opener. An `ATTR_OP_REJECT` value (`data-x=a/ if=@n`) runs
+  // to the tag close, so the attributes after it — a gate among them — are never tokenized; on a
+  // `<p>` its E-ATTR-UNQUOTED-OPERATOR fails the compile, and it must here too, or the swallowed
+  // gate vanishes at exit 0. (Round 2 forwarded only the errors inside the `if=` value.)
+  {
+    const forwarded = new Set(errors);
+    for (const e of scan.scratchErrors) {
+      if (e && typeof e.baseMessage === "string" && !forwarded.has(e)) errors.push(structuralRefusal(e));
+    }
+  }
+  for (const a of attrs) {
+    const lower = a && gateAttrCaseVariant(a.name);
+    if (lower) errors.push(structuralRefusal(new TABError(GATE_ATTR_CASE_CODE, gateAttrCaseMessage(a.name, lower), a.span ?? anchor)));
   }
   const chain = byName("else-if") ?? byName("else");
   if (chain) out.chainAttr = { name: chain.name, raw: chain.name, span: chain.span };
@@ -4861,8 +4942,13 @@ function refuseDerivedTrailing(value, anchor, derivedAt, valueAt, prefix, filePa
       return;
     }
     trailing = node && typeof node === "object" && typeof node._s441TrailingText === "string" ? node._s441TrailingText.trim() : "";
+    // A top-level comma sequence (`derived=@m, show=@n`) is not one expression: JS reads it as a
+    // sequence assigning a free `show`, so the attribute after the comma would be swallowed.
+    if (!trailing && node && node.kind === "escape-hatch" && node.nativeKind === "SequenceExpression") {
+      trailing = `a comma sequence — \`${value.length > 60 ? value.slice(0, 57) + "…" : value}\``;
+    }
   }
-  if (!trailing) return;
+  if (!trailing) return false;
   // The parser reads a preprocessed copy; show the author's spelling of a bare `.Variant`.
   const shown = trailing.replace(/__scrml_bare_variant_[0-9a-z]+_([A-Za-z_$][\w$]*)__/g, ".$1");
   const before = prefix.slice(0, Math.max(0, derivedAt));
@@ -4883,6 +4969,7 @@ function refuseDerivedTrailing(value, anchor, derivedAt, valueAt, prefix, filePa
       col: nl > 0 ? (derivedAt - lastNl) : anchor.col + derivedAt,
     },
   )));
+  return true;
 }
 
 /**
@@ -21435,7 +21522,10 @@ function isForwardedMdLint(code) {
  */
 function _forwardSubparseErrors(subErrors, errors, deltaOffset, block) {
   for (const err of subErrors) {
-    if (!err || !(SUBPARSE_FORWARDED_CODES.has(err.code) || isForwardedMdLint(err.code) || err.fromHandlerStatementList === true)) continue;
+    // S469 round 3 — a structural-opener refusal (a gate / chain attribute the opener cannot
+    // honour, a reader refusal, a case-variant gate name) raised inside an `<each>` / engine /
+    // `<match>` sub-build is forwarded too: dropping it would let the gate vanish at exit 0.
+    if (!err || !(SUBPARSE_FORWARDED_CODES.has(err.code) || isForwardedMdLint(err.code) || err.fromHandlerStatementList === true || err.structuralChainRefusal === true)) continue;
     if (!deltaOffset || !err.tabSpan) {
       errors.push(err);
       continue;
@@ -21453,6 +21543,7 @@ function _forwardSubparseErrors(subErrors, errors, deltaOffset, block) {
     rebased.baseMessage = err.baseMessage;
     if (err.severity) rebased.severity = err.severity;
     if (err.fromHandlerStatementList === true) rebased.fromHandlerStatementList = true;
+    if (err.structuralChainRefusal === true) rebased.structuralChainRefusal = true;
     errors.push(rebased);
   }
 }
@@ -22483,7 +22574,7 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
         // `<match>` carries no independent state, so render-gating and
         // lifecycle-gating coincide here (§17.1.2.1).
         const _matchIfAnchor = structuralHeaderAnchor(block, header);
-        const _matchIfScan = readStructuralOpenerAttrs(header, _matchIfAnchor, filePath, "match");
+        const _matchIfScan = readStructuralOpenerAttrs(header, _matchIfAnchor, filePath, "match", { exprSlots: ["on"] });
         // §17.1 / §17.1.1 / §17.2 — the gate / chain attributes, read by the markup attribute
         // tokenizer (readStructuralOpenerAttrs): `if=` → ifRaw / ifCond, `else` / `else-if=` →
         // chainAttr, `show=` → showAttr. Absent (not null) when not written.
@@ -23565,7 +23656,7 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
         // attribute pipeline so the condition grammar is §5.2's, identical to
         // `<div if=…>`. `null` when absent.
         const _eachIfAnchor = structuralHeaderAnchor(block, header);
-        const _eachIfScan = readStructuralOpenerAttrs(header, _eachIfAnchor, filePath, "each");
+        const _eachIfScan = readStructuralOpenerAttrs(header, _eachIfAnchor, filePath, "each", { exprSlots: ["in", "of", "key"] });
         // §17.1 / §17.1.1 / §17.2 — the gate / chain attributes, read by the markup attribute
         // tokenizer (readStructuralOpenerAttrs): `if=` → ifRaw / ifCond, `else` / `else-if=` →
         // chainAttr, `show=` → showAttr. Absent (not null) when not written.
@@ -23917,6 +24008,12 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
       if (typeof block.name === "string" && /^m[dD]$/.test(block.name)) {
         // §17.2 (S469 round 2) — the `<md>` lowering never reads `show=` (measured: the
         // markdown stayed visible whatever it said); `if=` IS honoured. Refused.
+        // S469 round 3 — the lowered `<md>` keeps no `attrs`, so the TAB walk never sees a
+        // case-variant gate name on it: refused here.
+        for (const a of attrs) {
+          const lower = a && gateAttrCaseVariant(a.name);
+          if (lower) errors.push(new TABError(GATE_ATTR_CASE_CODE, gateAttrCaseMessage(a.name, lower), a.span ?? span));
+        }
         const _mdShow = attrs.find((a) => a && a.name === "show");
         if (_mdShow) {
           errors.push(new TABError(GATE_UNSUPPORTED_HOST_CODE, gateUnsupportedHostMessage("show", "md"), _mdShow.span ?? span));
@@ -24357,9 +24454,10 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
         let derivedRawValue = derivedValMatch ? derivedValMatch[1].trim() : null;
         // Strip a trailing self-close `/` so `derived=@x/` reads as `@x`.
         if (derivedRawValue) derivedRawValue = derivedRawValue.replace(/\/\s*$/, "").trim();
+        let _engineDerivedNotLast = false;
         if (derivedRawValue) {
           const _dvAt = _engineIfScan.derivedAt + (_engineDerivedExtent.length - _engineDerivedExtent.replace(/^derived\s*=\s*/, "").length);
-          refuseDerivedTrailing(derivedRawValue, _engineIfAnchor, _engineIfScan.derivedAt, _dvAt, header, filePath, errors);
+          _engineDerivedNotLast = refuseDerivedTrailing(derivedRawValue, _engineIfAnchor, _engineIfScan.derivedAt, _dvAt, header, filePath, errors) === true;
         }
         // (a) Legacy §51.9 — a BARE single `@ident`. The value may be FOLLOWED
         //     by another opener attribute (`derived=@upstream initial=.A`),
@@ -25008,6 +25106,9 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
           // ABSENT (not null) when there is no `if=` — see the `<each>` node's
           // stamp for the parser-parity reason.
           ..._engineIfGate,
+          // The opener was refused (E-ENGINE-DERIVED-NOT-LAST): what followed `derived=` (a `var=`,
+          // `name=`, …) was never read, so a variable-name collision is an artifact, not reported.
+          ...(_engineDerivedNotLast ? { _derivedNotLast: true } : {}),
           span,
         };
       }
@@ -25072,7 +25173,7 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
         // branch above; BOTH constructors must carry the field, or the same
         // source compiles differently depending on which one claimed it.
         const _matchIfAnchor = structuralHeaderAnchor(block, header);
-        const _matchIfScan = readStructuralOpenerAttrs(header, _matchIfAnchor, filePath, "match");
+        const _matchIfScan = readStructuralOpenerAttrs(header, _matchIfAnchor, filePath, "match", { exprSlots: ["on"] });
         // §17.1 / §17.1.1 / §17.2 — the gate / chain attributes, read by the markup attribute
         // tokenizer (readStructuralOpenerAttrs): `if=` → ifRaw / ifCond, `else` / `else-if=` →
         // chainAttr, `show=` → showAttr. Absent (not null) when not written.
@@ -26074,6 +26175,14 @@ function refuseUnconsumedStructuralChainAttrs(nodes, errors) {
     seen.add(v);
     if (Array.isArray(v)) { for (const x of v) visit(x); return; }
     const kind = v.kind;
+    // §17.1 (S469 round 3) — a case variant of a gate name (`IF=`, `Else`, `SHOW=`) on ANY element
+    // is not a gate: refused (E-GATE-ATTR-CASE), the one predicate every reader applies.
+    if (typeof kind === "string" && Array.isArray(v.attrs)) {
+      for (const a of v.attrs) {
+        const lower = a && gateAttrCaseVariant(a.name);
+        if (lower) errors.push(structuralRefusal(new TABError(GATE_ATTR_CASE_CODE, gateAttrCaseMessage(a.name, lower), a.span ?? v.span ?? { line: 0, col: 0 })));
+      }
+    }
     if (typeof kind === "string" && kind !== "markup" && kind !== "state" && kind !== "state-constructor-def") {
       let attr = v.chainAttr && (v.chainAttr.name === "else" || v.chainAttr.name === "else-if") ? v.chainAttr : null;
       if (!attr && Array.isArray(v.attrs)) {

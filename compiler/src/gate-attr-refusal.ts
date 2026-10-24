@@ -18,6 +18,7 @@
  */
 
 import { tokenizeAttributes } from "./tokenizer.ts";
+import { unquotedRejectDiagnostic } from "./unquoted-attr-value.ts";
 
 export const GATE_UNSUPPORTED_HOST_CODE = "E-GATE-UNSUPPORTED-HOST";
 
@@ -35,20 +36,63 @@ const GATE_ATTR_NAMES: ReadonlySet<string> = new Set(["if", "else", "else-if", "
  * Order of appearance; each name once.
  */
 export function gateAttrNamesInOpener(attrText: string): GateAttrName[] {
-  if (typeof attrText !== "string" || attrText.trim() === "") return [];
+  return scanOpenerGateAttrs(attrText).names;
+}
+
+/**
+ * S469 round 3 — the whole verdict of the markup attribute reader on a raw-text opener: the gate
+ * names it carries AND the refusals the same reader issues on a markup opener, which are what make
+ * a `<p>` fail closed:
+ *   - an `ATTR_OP_REJECT` value (an unquoted value with a bare operator — `data-x=a/ if=@n`):
+ *     the refused run reaches the tag close, so the attributes after it (a gate among them) are
+ *     never seen. On markup the E-ATTR-UNQUOTED-OPERATOR / E-ATTR-MULTI-STATEMENT error fails the
+ *     compile; here it must too, or the swallowed gate vanishes at exit 0;
+ *   - a case variant of a gate name (`IF=`, `Else`, `SHOW=`) — E-GATE-ATTR-CASE.
+ */
+export function scanOpenerGateAttrs(attrText: string): { names: GateAttrName[]; problems: Array<{ code: string; message: string }> } {
+  const names: GateAttrName[] = [];
+  const problems: Array<{ code: string; message: string }> = [];
+  if (typeof attrText !== "string" || attrText.trim() === "") return { names, problems };
   let toks: Array<{ kind: string; text: string }> = [];
   try {
     toks = tokenizeAttributes(`<x ${attrText.replace(/\/\s*$/, "")}>`, 0, 1, 1, "markup") as Array<{ kind: string; text: string }>;
   } catch {
-    return [];
+    return { names, problems };
   }
-  const out: GateAttrName[] = [];
+  let lastName = "";
   for (const t of toks) {
-    if (t && t.kind === "ATTR_NAME" && GATE_ATTR_NAMES.has(t.text) && !out.includes(t.text as GateAttrName)) {
-      out.push(t.text as GateAttrName);
+    if (!t) continue;
+    if (t.kind === "ATTR_NAME") {
+      lastName = t.text;
+      if (GATE_ATTR_NAMES.has(t.text) && !names.includes(t.text as GateAttrName)) names.push(t.text as GateAttrName);
+      const lower = gateAttrCaseVariant(t.text);
+      if (lower) problems.push({ code: GATE_ATTR_CASE_CODE, message: gateAttrCaseMessage(t.text, lower) });
+    } else if (t.kind === "ATTR_OP_REJECT") {
+      problems.push(unquotedRejectDiagnostic(lastName, t.text));
     }
   }
-  return out;
+  return { names, problems };
+}
+
+/** §17.1 (S469 round 3) — a gate attribute name written in another case. */
+export const GATE_ATTR_CASE_CODE = "E-GATE-ATTR-CASE";
+
+/**
+ * The lower-case gate name `name` spells in another case (`IF` → `if`, `Else-If` → `else-if`), or
+ * null. THE one predicate every reader applies (markup / structural / raw-text openers).
+ */
+export function gateAttrCaseVariant(name: unknown): GateAttrName | null {
+  if (typeof name !== "string") return null;
+  const lower = name.toLowerCase();
+  return GATE_ATTR_NAMES.has(lower) && lower !== name ? (lower as GateAttrName) : null;
+}
+
+export function gateAttrCaseMessage(name: string, lower: string): string {
+  const spelled = lower === "else" ? "`else`" : `\`${lower}=\``;
+  return `${GATE_ATTR_CASE_CODE}: \`${name}\` is not the gate attribute ${spelled} — gate attributes are ` +
+    `lower-case (§17.1 / §17.1.1 / §17.2), so this one would be written to the DOM as an ordinary ` +
+    `attribute and the element would render whatever it says. It is refused rather than emitted ungated. ` +
+    `Write ${spelled}.`;
 }
 
 /**
