@@ -12,3 +12,24 @@
   builtin if the file declares/imports `log` anywhere. r6a 33 -> 10 FAIL (all 10 = escape 3), r6b 7 -> 0.
   Locus hypothesis HELD (auditBinderCallArgs / auditWholeErrorBinderText).
   NEXT: escape 3.
+- 2026-10-24 escape 3 — PREFERRED fix NOT reachable on the proven path: impl#1 has no expression typing for a
+  ctor call (`Box.Wrap(e)`), types `const b = …` from literals only, and binds match payload binders as `asIs`
+  (type-system.ts case "match-arm-block": "variant payload type inference is a separate concern"). So
+  "refuse payload read on ANY enum-typed value, from the value's type" cannot see `b`, `i`, or the ctor result.
+  Took the brief's FALLBACK: refuse a whole `e` into a variant constructor (E-TYPE-031, message labelled impl#1
+  limitation). COST: this newly-rejects SPEC §18.6.1's own example `@state = .Failed(err)`.
+- 2026-10-24 ADJACENT escape found (new, same family): `_ e :> match e { .Wrapped(i) :> i.reason == "bad" }` where a
+  field of the variant holds an enum — i is an enum value read as a struct; logged in on server/tool (r7 probes).
+  Fixed in-audit, fail closed: a `match <binder>` arm binding a payload of a variant with any enum-holding /
+  unresolvable field is refused (E-TYPE-031, impl#1). COST: valid `.Wrapped(i) :> match i {…}` / `i is .Bad` refused.
+  r6a 10 -> 0 FAIL, r7 (new, 28 shapes) 16 -> 0 FAIL.
+  (the nested-binder refusal IS committed: 1145d53cf "refuse an enum-holding payload binder")
+- 2026-10-24 STOP on escape 3 (brief's STOP rule): the ctor-refusal FALLBACK newly-rejects real corpus —
+  examples/09-error-handling.scrml (`_ err :> { @phase = .Failed(err); return }`, lines 113/117; the canonical
+  "hold the error in a state" idiom, and SPEC §18.6.1's own example) — and breaks
+  compiler/tests/integration/s461-runtime-tree-shake.test.js (compiles examples/09). The commit carrying it was
+  blocked by the pre-commit gate; the ctor refusal was REVERTED (never landed). Patch kept in scratch for the report.
+  Escape 3 stays OPEN; its shapes are in the pack as KNOWN_FAIL (18: s11/t6 x6, f8/l6 x3).
+- 2026-10-24 probe pack: + r8-shapes.js (s11 / f8 / l6 / t6, 128 shapes), EXPECTED_SHAPE_COUNT 1920 -> 2048, pins
+  regenerated from a run (not hand-written classes). r8 on base: 54 FAIL; on branch: 18 FAIL (all escape 3, KNOWN_FAIL).
+  NEXT: full gate, types:check, R26 corpus on base vs branch.
