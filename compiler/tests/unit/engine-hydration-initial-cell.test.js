@@ -214,7 +214,7 @@ type HOSStatus:enum = { OffDuty, Driving, OnDuty, Sleeper }
 type HOSStatus:enum = { OffDuty, Driving, OnDuty, Sleeper }
 type Phase:enum = { Idle, Busy }
 <persistedStatus> : string = "Driving"
-<engine for=Phase derived=if @persistedStatus == "Driving" then .Busy else .Idle initial=@persistedStatus>
+<engine for=Phase initial=@persistedStatus derived=if @persistedStatus == "Driving" then .Busy else .Idle>
 </>
 </program>`;
     const sym = runUpToSYM(src);

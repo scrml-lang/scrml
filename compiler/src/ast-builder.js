@@ -4661,125 +4661,6 @@ function contextLabel(ctx) {
 // ---------------------------------------------------------------------------
 
 /**
- * §17.1.2 — capture an `if=` predicate from a scrml-defined STRUCTURAL element
- * opener (`<engine>` / `<match>` / `<each>`).
- *
- * WHY THIS EXISTS. Those three elements are not `kind: "markup"`. The block
- * splitter raw-captures them and `buildBlock` reconstructs each one by regexing
- * NAMED attributes out of the opener header (`for=`, `initial=`, `on=`, `in=`,
- * `key=`, `as`, …). An attribute nobody regexes for is silently DISCARDED — the
- * node has no `attrs` array to hold it. That is exactly what happened to `if=`:
- * it parsed, vanished, and the compile stayed green while the element rendered
- * unconditionally and permanently. §17.1.2 (S302) widens §17.1 to admit `if=` on
- * these three, so the attribute now has to survive the opener parse.
- *
- * WHY IT RE-PARSES A SYNTHETIC OPENER. `if=`'s value grammar is §5.2's, shared
- * with every HTML element: `@var` / `obj.prop` -> `variable-ref`, `fn()` ->
- * `call-ref`, a parenthesized or quoted condition -> `expr` (with `refs` and an
- * `exprNode`). Re-implementing that classification here would be a SECOND `if=`
- * grammar — the precise defect #289 existed to remove. So the raw value is spliced
- * into a synthetic one-attribute opener and pushed through the SAME
- * `tokenizeAttributes` + `parseAttributes` pipeline a markup opener uses. The
- * value object returned is byte-for-byte the shape `<div if=…>` produces, which is
- * what lets codegen route all four hosts through one lowering.
- *
- * Token offsets are rebased so the synthetic `<x ` prefix (3 chars) lands the `if`
- * token on its real absolute offset; a diagnostic raised on the condition therefore
- * points into the real source, not into the synthetic string.
- *
- * @param {string} header — the opener text AFTER the tag keyword, trailing `/`/`>`
- *   already stripped (i.e. exactly what each structural builder computes for its
- *   own attribute regexes). The caller's opener-end finder has already excluded
- *   everything past the opener's closing `>`.
- * @param {number} absStart — absolute byte offset of `header[0]` in the file.
- * @param {number} line — 1-based line of `header[0]`.
- * @param {number} col — 1-based column of `header[0]`.
- * @param {string} filePath
- * @param {TABError[]} errors — real errors from the condition's own parse are
- *   KEPT (an `E-ATTR-UNQUOTED-OPERATOR` on `if=@n >= 3` must still fire).
- * @returns {{ raw: string, value: AttrValue, span: Span } | null}
- */
-function captureStructuralIfAttr(header, absStart, line, col, filePath, errors) {
-  if (typeof header !== "string" || header.length === 0) return null;
-
-  // Mask `${…}` interpolation bodies and quoted strings before the NAME search,
-  // so the word `if` inside an engine opener's `effect=${ if (…) … }` body, or
-  // inside any attribute string, can never be mistaken for the opener's own
-  // `if=`. Mirrors the `serverFlagBare` scan's masking, and preserves length so
-  // every index computed on the mask is valid on the original.
-  const masked = header
-    .replace(/\$\{[\s\S]*?\}/g, (m) => " ".repeat(m.length))
-    .replace(/"[^"]*"/g, (m) => " ".repeat(m.length))
-    .replace(/'[^']*'/g, (m) => " ".repeat(m.length));
-
-  // Standalone-token `if=`. The leading `(^|\s)` is load-bearing: it keeps
-  // `else-if=` (§17.1.1) and any `…if=`-suffixed attribute out.
-  const nm = masked.match(/(^|\s)if\s*=/);
-  if (!nm) return null;
-  const nameStart = nm.index + nm[1].length;
-  let i = nm.index + nm[0].length;
-  while (i < header.length && /\s/.test(header[i])) i++;
-
-  // Depth-aware value capture, stopping at the next standalone attribute
-  // boundary (whitespace + ident + `=`). Same scanner shape as `<each>`'s
-  // `_captureAttrValue`. No `>` case is needed — `header` is already truncated
-  // at the opener's closing `>` by the caller's opener-end finder.
-  let depth = 0, parenDepth = 0, bracketDepth = 0;
-  let inDQ = false, inSQ = false;
-  let end = header.length;
-  for (let j = i; j < header.length; j++) {
-    const c = header[j];
-    if (inDQ) { if (c === '"') inDQ = false; else if (c === "\\") j++; continue; }
-    if (inSQ) { if (c === "'") inSQ = false; else if (c === "\\") j++; continue; }
-    if (c === '"') { inDQ = true; continue; }
-    if (c === "'") { inSQ = true; continue; }
-    if (c === "{") { depth++; continue; }
-    if (c === "}") { if (depth > 0) depth--; continue; }
-    if (c === "(") { parenDepth++; continue; }
-    if (c === ")") { if (parenDepth > 0) parenDepth--; continue; }
-    if (c === "[") { bracketDepth++; continue; }
-    if (c === "]") { if (bracketDepth > 0) bracketDepth--; continue; }
-    if (depth === 0 && parenDepth === 0 && bracketDepth === 0 && /\s/.test(c)) {
-      let k = j;
-      while (k < header.length && /\s/.test(header[k])) k++;
-      if (k < header.length && /[A-Za-z_$]/.test(header[k])) {
-        let l = k;
-        while (l < header.length && /[A-Za-z0-9_$:.-]/.test(header[l])) l++;
-        let m2 = l;
-        while (m2 < header.length && /\s/.test(header[m2])) m2++;
-        if (header[m2] === "=") { end = j; break; }
-      }
-    }
-  }
-  const raw = header.slice(i, end).trim();
-  if (raw === "") return null;
-
-  // Synthetic one-attribute opener. `<x ` is 3 chars, so rebasing the token
-  // stream by (absolute offset of `if`) - 3 puts both the attribute name and its
-  // value on their true file offsets.
-  const synthetic = `<x ${header.slice(nameStart, end)}>`;
-  const synthAbs = absStart + nameStart - 3;
-  // Line/col of `header[nameStart]`. The synthetic has no newlines before the
-  // attribute, so only the column needs the -3 rebase.
-  const before = header.slice(0, nameStart);
-  const nlCount = (before.match(/\n/g) || []).length;
-  const lastNl = before.lastIndexOf("\n");
-  const synthLine = line + nlCount;
-  const synthCol = (nlCount > 0 ? (nameStart - lastNl - 1) + 1 : col + nameStart) - 3;
-
-  let attrs = [];
-  try {
-    const toks = tokenizeAttributes(synthetic, synthAbs, synthLine, Math.max(1, synthCol), "markup");
-    attrs = parseAttributes(toks, filePath, Array.isArray(errors) ? errors : [], false, "x");
-  } catch (_e) {
-    return null;
-  }
-  const ifAttr = attrs.find((a) => a && a.name === "if");
-  if (!ifAttr || !ifAttr.value) return null;
-  return { raw, value: ifAttr.value, span: ifAttr.span };
-}
-
-/**
  * §17.1.2 — locate a structural element's opener `header` slice inside its raw
  * block and return the absolute (offset, line, col) of `header[0]`.
  *
@@ -4809,124 +4690,191 @@ function structuralHeaderAnchor(block, header) {
   };
 }
 
-/** Blank quoted strings and every balanced `{…}` / `(…)` / `[…]` group (length-preserving). */
-function maskStructuralHeader(header) {
-  const chars = header.split("");
-  let depth = 0;
-  let quote = null;
-  for (let j = 0; j < chars.length; j++) {
-    const c = chars[j];
-    if (quote) {
-      if (c === "\\") { chars[j] = " "; if (j + 1 < chars.length) chars[++j] = " "; continue; }
-      if (c === quote) quote = null;
-      else chars[j] = " ";
-      continue;
-    }
-    if (c === '"' || c === "'" || c === "`") { quote = c; continue; }
-    if (c === "{" || c === "(" || c === "[") { depth++; continue; }
-    if (c === "}" || c === ")" || c === "]") { if (depth > 0) depth--; continue; }
-    if (depth > 0 && c !== "\n") chars[j] = " ";
-  }
-  return chars.join("");
-}
-
 /**
- * §17.1.1 / §17.1.2.2 — capture an `else` / `else-if=` chain-membership attribute
- * from a scrml-defined STRUCTURAL element opener (`<engine>` / `<match>` / `<each>`).
+ * §17.1 / §17.1.1 / §17.2 (S469, s469-structural-else-guard round 2) — read a scrml-defined
+ * STRUCTURAL opener's attributes (`<engine>` / `<match>` / `<each>`) with the SAME attribute
+ * tokenizer + parser a markup opener uses (`tokenizeAttributes(…, "markup")` +
+ * `parseAttributes`). "This opener carries `if=` / `else` / `else-if=` / `show=`" is then the
+ * predicate `collapseIfChains` applies to a `<p>`, by construction — not a second reader that
+ * disagrees about what an `else` is (valued `else=""`, `title="x"else`, `${ // it's }`, a bare
+ * `if` word: every one of those was a disagreement in the round-1 word scan).
  *
- * WHY (gap g-structural-element-if-chain-and-show-composition-nominal, S469). The
- * structural builders reconstruct each opener from NAMED attribute regexes, so an
- * `else` / `else-if=` on one was DISCARDED at parse time — and `collapseIfChains`
- * only takes `kind:"markup"` nodes as chain members. `<div if=@f>a</div><engine
- * else …>` therefore rendered BOTH the `if=` branch and the engine, at exit 0: a
- * branch the author gated rendered anyway. The attribute must survive the opener
- * parse so the one chain-membership check (`refuseUnconsumedStructuralChainAttrs`)
- * can see it and refuse it — impl#1 does not lower a structural element as a chain
- * member.
+ * The structural builders still read their OWN slots (`for=`, `in=`, `on=`, `key=`, `as`, …)
+ * with their named readers; this pass decides only the gate / chain attributes.
  *
- * The name search runs on a mask that blanks quoted strings and every balanced
- * `{…}` / `(…)` / `[…]` group (depth-aware, length-preserving), so an `else` inside
- * an `on=(if (a) b else c)` value or an `effect=${ … else … }` body is never read as
- * the opener's own attribute.
+ * `<engine … derived=EXPR>` (§51.0.J): the `derived=` value is NOT a markup attribute value —
+ * its unquoted operators (`>` in a ternary, `=>` in a `match` arm) are its own grammar, and the
+ * markup tokenizer closes the tag at them. With `splitDerived`, the opener is tokenized up to the
+ * `derived` attribute NAME (found by the tokenizer itself, never by a text search) and
+ * everything from there on is the derived extent (`derivedAt` = its offset in `header`). The
+ * derived expression reader then refuses anything it does not consume
+ * (`refuseDerivedTrailing`, E-ENGINE-DERIVED-NOT-LAST): impl#1 requires `derived=` to be the
+ * last attribute.
  *
- * @returns {{ name: "else" | "else-if", raw: string, span: Span } | null}
+ * `header` is the opener text after the tag keyword, the closing `>` / `/` already stripped
+ * (what each builder computes); `anchor` is `structuralHeaderAnchor(block, header)`.
+ *
+ * @returns {{ attrs: AttrNode[], tokens: Token[], scratchErrors: TABError[], derivedAt: number,
+ *             prefix: string, unread: string }}
+ *   `unread` is opener text the tokenizer did not reach (it closed the tag early) — non-empty
+ *   means the attribute set is not known, and the caller refuses the opener.
  */
-function captureStructuralChainAttr(header, absStart, line, col, filePath) {
-  if (typeof header !== "string" || header.length === 0) return null;
-  const masked = maskStructuralHeader(header);
-  // Walk the standalone words. `else-if=` is always the attribute. A bare `else` is the
-  // attribute UNLESS it closes an `if … then … else …` expression in an unparenthesized
-  // attribute value (`derived=if @s == "x" then .A else .B` — §51.0 derived=): an `else`
-  // is consumed by a preceding unmatched `if` word in the same attribute value. Every
-  // `name=` boundary starts a new value. `.Else` / `@else` / `x.else` are not words here.
-  const WORD = /[A-Za-z_$][\w$-]*/g;
-  let found = null;
-  let pendingIf = 0;
-  let wm;
-  while ((wm = WORD.exec(masked)) !== null) {
-    const at0 = wm.index;
-    const prev = at0 > 0 ? masked[at0 - 1] : " ";
-    if (!/\s/.test(prev) && prev !== "=") continue;
-    const word = wm[0];
-    const rest = masked.slice(at0 + word.length);
-    const isAttrName = /^\s*=(?!=)/.test(rest);
-    if (isAttrName) {
-      if (word === "else-if") { found = { at: at0, name: "else-if" }; break; }
-      pendingIf = 0;
-      continue;
+function readStructuralOpenerAttrs(header, anchor, filePath, tagName, opts = {}) {
+  const text = typeof header === "string" ? header : "";
+  const tokenizeHeader = (h) => {
+    // `<x ` is 3 characters: rebase so `h[0]` lands on its real file offset / column.
+    const synthetic = `<x ${h}>`;
+    const before = 3;
+    const toks = tokenizeAttributes(synthetic, anchor.absStart - before, anchor.line, Math.max(1, anchor.col - before), "markup");
+    let closeAt = synthetic.length - 1;
+    for (const t of toks) {
+      if (t && (t.kind === "TAG_CLOSE_GT" || t.kind === "TAG_SELF_CLOSE") && t.span) {
+        closeAt = t.span.start - (anchor.absStart - before);
+        break;
+      }
     }
-    if (word === "if") { pendingIf++; continue; }
-    if (word === "else") {
-      if (pendingIf > 0) { pendingIf--; continue; }
-      found = { at: at0, name: "else" };
-      break;
+    const unread = closeAt < synthetic.length - 1 ? synthetic.slice(closeAt + 1, synthetic.length - 1) : "";
+    return { toks, unread };
+  };
+  let derivedAt = -1;
+  let { toks, unread } = tokenizeHeader(text);
+  if (opts.splitDerived) {
+    for (let i = 0; i < toks.length; i++) {
+      const t = toks[i];
+      if (t && t.kind === "ATTR_NAME" && t.text === "derived" && toks[i + 1] && toks[i + 1].kind === "ATTR_EQ") {
+        derivedAt = t.span.start - anchor.absStart;
+        break;
+      }
     }
+    if (derivedAt >= 0) ({ toks, unread } = tokenizeHeader(text.slice(0, derivedAt)));
   }
-  if (!found) return null;
-  return structuralAttrNameCapture(header, found.at, found.name, absStart, line, col, filePath);
-}
-
-/** `{ name, raw, span }` for the attribute NAME at `header[at]` (file coordinates). */
-function structuralAttrNameCapture(header, at, name, absStart, line, col, filePath) {
-  const before = header.slice(0, at);
-  const nl = (before.match(/\n/g) || []).length;
-  const lastNl = before.lastIndexOf("\n");
-  const len = name.length;
+  const scratchErrors = [];
+  const attrs = parseAttributes(toks, filePath, scratchErrors, false, tagName, tagName === "engine");
   return {
-    name,
-    raw: header.slice(at, at + len),
-    span: {
-      file: filePath,
-      start: absStart + at,
-      end: absStart + at + len,
-      line: line + nl,
-      col: nl > 0 ? (at - lastNl) : col + at,
-    },
+    attrs,
+    tokens: toks,
+    scratchErrors,
+    derivedAt,
+    prefix: derivedAt >= 0 ? text.slice(0, derivedAt) : text,
+    unread: unread.trim(),
   };
 }
 
 /**
- * §17.2 / §17.1.2.2 — a `show=` on a structural element opener (`<engine>` / `<match>` /
- * `<each>`). The openers never read it: the element rendered visible whatever the condition
- * said (measured S469, every position). Captured (same masking as
- * `captureStructuralChainAttr`) so `refuseUnconsumedStructuralChainAttrs` can refuse it.
- *
- * @returns {{ name: "show", raw: string, span: Span } | null}
+ * The gate / chain fields a structural node carries, from `readStructuralOpenerAttrs`.
+ * - `if=` with a condition → `{ ifRaw, ifCond }` (the §5.2 value `<div if=…>` produces; its own
+ *   parse diagnostics — `E-ATTR-UNQUOTED-OPERATOR` on `if=@n >= 3` — are forwarded, they used to
+ *   be by the single-attribute re-parse this replaces);
+ * - a bare `if` (no condition) → E-CG-003, as on markup (§17.1): refused, never rendered ungated;
+ * - `else` / `else-if=` → `chainAttr`, `show=` → `showAttr` (refused by
+ *   `refuseUnconsumedStructuralChainAttrs`);
+ * - `unread` opener text → refused: the gate attributes of that opener are not known.
  */
-function captureStructuralShowAttr(header, absStart, line, col, filePath) {
-  if (typeof header !== "string" || header.length === 0) return null;
-  const masked = maskStructuralHeader(header);
-  const WORD = /[A-Za-z_$][\w$-]*/g;
-  let wm;
-  while ((wm = WORD.exec(masked)) !== null) {
-    const at0 = wm.index;
-    const prev = at0 > 0 ? masked[at0 - 1] : " ";
-    if (!/\s/.test(prev) && prev !== "=") continue;
-    if (wm[0] !== "show") continue;
-    if (!/^\s*=(?!=)/.test(masked.slice(at0 + 4))) continue;
-    return structuralAttrNameCapture(header, at0, "show", absStart, line, col, filePath);
+function structuralGateFields(scan, header, anchor, filePath, tagName, errors) {
+  const out = {};
+  const attrs = scan.attrs;
+  const byName = (n) => attrs.find((a) => a && a.name === n) ?? null;
+  const ifAttr = byName("if");
+  if (ifAttr) {
+    const v = ifAttr.value;
+    const isBare = v === null || v === undefined || (typeof v === "object" && v.kind === "absent");
+    if (isBare) {
+      errors.push(structuralRefusal(new TABError(
+        "E-CG-003",
+        `E-CG-003: the \`if\` on this \`<${tagName}>\` names no condition, so the compiler cannot apply it. ` +
+        `It is refused rather than rendered ungated (§17.1). Write the condition as \`if=@cell\`, ` +
+        `\`if=fn(…)\` or \`if=(expression)\`.`,
+        ifAttr.span ?? anchor,
+      )));
+    } else {
+      // The value's source text: from the token after `if` `=` to the next attribute name.
+      const idx = scan.tokens.findIndex((t) => t && t.kind === "ATTR_NAME" && t.text === "if" && t.span && ifAttr.span && t.span.start === ifAttr.span.start);
+      const valTok = idx >= 0 && scan.tokens[idx + 1] && scan.tokens[idx + 1].kind === "ATTR_EQ" ? scan.tokens[idx + 2] : null;
+      let nextStart = header.length;
+      for (let k = idx + 1; k < scan.tokens.length; k++) {
+        const t = scan.tokens[k];
+        if (t && (t.kind === "ATTR_NAME" || t.kind === "TAG_CLOSE_GT" || t.kind === "TAG_SELF_CLOSE") && t.span) {
+          nextStart = Math.min(nextStart, t.span.start - anchor.absStart);
+          break;
+        }
+      }
+      const valStart = valTok && valTok.span ? valTok.span.start - anchor.absStart : -1;
+      const raw = valStart >= 0 ? header.slice(valStart, Math.max(valStart, nextStart)).trim() : "";
+      out.ifRaw = raw;
+      out.ifCond = v;
+      const lo = ifAttr.span ? ifAttr.span.start : -1;
+      const hi = anchor.absStart + nextStart;
+      for (const e of scan.scratchErrors) {
+        const s = e && (e.tabSpan ?? e.span);
+        if (s && typeof s.start === "number" && s.start >= lo && s.start < hi) errors.push(e);
+      }
+    }
   }
-  return null;
+  const chain = byName("else-if") ?? byName("else");
+  if (chain) out.chainAttr = { name: chain.name, raw: chain.name, span: chain.span };
+  const show = byName("show");
+  if (show) out.showAttr = { name: "show", raw: "show", span: show.span };
+  if (scan.unread) {
+    errors.push(structuralRefusal(new TABError(
+      "E-CG-003",
+      `E-CG-003: the \`<${tagName}>\` opener has text its attribute reader could not read ` +
+      `(\`${scan.unread.length > 40 ? scan.unread.slice(0, 37) + "…" : scan.unread}\`), so whether it carries an ` +
+      `\`if=\` / \`else\` / \`else-if=\` / \`show=\` is not known. It is refused rather than emitted ungated. ` +
+      `Quote or parenthesize the attribute value (\`attr=(…)\`).`,
+      anchor && typeof anchor.absStart === "number"
+        ? { file: filePath, start: anchor.absStart, end: anchor.absStart + header.length, line: anchor.line, col: anchor.col }
+        : { line: 0, col: 0 },
+    )));
+  }
+  return out;
+}
+
+/** Marks a structural-opener refusal so a component body reports it as itself (not E-COMPONENT-021). */
+function structuralRefusal(err) {
+  err.structuralChainRefusal = true;
+  return err;
+}
+
+/**
+ * §51.0.J (S469 round 2) — impl#1 requires `derived=` to be the LAST attribute on an
+ * `<engine>` opener. The derived extent (everything from `derived=` to the opener's end) is
+ * handed to the expression parser the engine's `derived=` value already goes through
+ * (`parseExprToNode`), which reports the text it did NOT consume (`_s441TrailingText`). Any
+ * such text is refused — E-ENGINE-DERIVED-NOT-LAST, naming it — rather than read as part of the
+ * expression, dropped, or guessed at: a trailing ` else` / ` show=@n` / ` if=@n` would be a gate
+ * the engine never applied. No keyword scan: what is left over is decided by the parser.
+ * A value the parser rejects outright (e.g. `derived=if @g then .A else .B`) is not reported
+ * here; it fails as before (E-CODEGEN-INVALID-LOGIC).
+ */
+function refuseDerivedTrailing(value, anchor, derivedAt, valueAt, prefix, filePath, errors) {
+  let node = null;
+  try {
+    ({ result: node } = captureTrailingContentWarnings(() => parseExprToNode(value, filePath, anchor.absStart + valueAt)));
+  } catch {
+    return;
+  }
+  const trailing = node && typeof node === "object" && typeof node._s441TrailingText === "string" ? node._s441TrailingText.trim() : "";
+  if (!trailing) return;
+  // The parser reads a preprocessed copy; show the author's spelling of a bare `.Variant`.
+  const shown = trailing.replace(/__scrml_bare_variant_[0-9a-z]+_([A-Za-z_$][\w$]*)__/g, ".$1");
+  const before = prefix.slice(0, Math.max(0, derivedAt));
+  const nl = (before.match(/\n/g) || []).length;
+  const lastNl = before.lastIndexOf("\n");
+  errors.push(structuralRefusal(new TABError(
+    "E-ENGINE-DERIVED-NOT-LAST",
+    `E-ENGINE-DERIVED-NOT-LAST: \`${shown.length > 60 ? shown.slice(0, 57) + "…" : shown}\` follows the ` +
+    `\`derived=\` expression on this \`<engine>\` opener. impl#1 requires \`derived=\` to be the LAST ` +
+    `attribute on an engine opener: everything after it is read as the derived expression, so an ` +
+    `attribute written there would be dropped (a gate like \`else\` / \`show=\` / \`if=\` would never ` +
+    `apply). Move \`derived=\` to the end of the opener, or parenthesize its value.`,
+    {
+      file: filePath,
+      start: anchor.absStart + derivedAt,
+      end: anchor.absStart + derivedAt + 7,
+      line: anchor.line + nl,
+      col: nl > 0 ? (derivedAt - lastNl) : anchor.col + derivedAt,
+    },
+  )));
 }
 
 /**
@@ -22502,16 +22450,12 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
         // `<match>` carries no independent state, so render-gating and
         // lifecycle-gating coincide here (§17.1.2.1).
         const _matchIfAnchor = structuralHeaderAnchor(block, header);
-        const _matchIf = captureStructuralIfAttr(
-          header, _matchIfAnchor.absStart, _matchIfAnchor.line, _matchIfAnchor.col, filePath, errors,
-        );
-        // §17.1.1 — `else` / `else-if=` on this opener, kept for the chain-membership
-        // check (see captureStructuralChainAttr). Absent (not null) when not written.
-        const _matchIfChain = captureStructuralChainAttr(
-          header, _matchIfAnchor.absStart, _matchIfAnchor.line, _matchIfAnchor.col, filePath,
-        );
-        const _matchIfShow = captureStructuralShowAttr(
-          header, _matchIfAnchor.absStart, _matchIfAnchor.line, _matchIfAnchor.col, filePath,
+        const _matchIfScan = readStructuralOpenerAttrs(header, _matchIfAnchor, filePath, "match");
+        // §17.1 / §17.1.1 / §17.2 — the gate / chain attributes, read by the markup attribute
+        // tokenizer (readStructuralOpenerAttrs): `if=` → ifRaw / ifCond, `else` / `else-if=` →
+        // chainAttr, `show=` → showAttr. Absent (not null) when not written.
+        const _matchIfGate = structuralGateFields(
+          _matchIfScan, header, _matchIfAnchor, filePath, "match", errors,
         );
 
         // `on=expr` capture: takes everything after `on=` up to the next
@@ -22836,9 +22780,7 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
           armBodyChildren, // g-formfor-in-match-arm (S177) — walkable per-arm bodies for the expansion passes (undefined when no bare-body arms)
           // §17.1.2 — `if=` render gate; ABSENT (not null) when there is no
           // `if=`. See the `<each>` node's stamp for why omission, not null.
-          ...(_matchIf ? { ifRaw: _matchIf.raw, ifCond: _matchIf.value } : {}),
-          ...(_matchIfChain ? { chainAttr: _matchIfChain } : {}),
-          ...(_matchIfShow ? { showAttr: _matchIfShow } : {}),
+          ..._matchIfGate,
           span,
           openerHadSpaceAfterLt: block.openerHadSpaceAfterLt === true,
         };
@@ -23590,16 +23532,12 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
         // attribute pipeline so the condition grammar is §5.2's, identical to
         // `<div if=…>`. `null` when absent.
         const _eachIfAnchor = structuralHeaderAnchor(block, header);
-        const _eachIf = captureStructuralIfAttr(
-          header, _eachIfAnchor.absStart, _eachIfAnchor.line, _eachIfAnchor.col, filePath, errors,
-        );
-        // §17.1.1 — `else` / `else-if=` on this opener, kept for the chain-membership
-        // check (see captureStructuralChainAttr). Absent (not null) when not written.
-        const _eachIfChain = captureStructuralChainAttr(
-          header, _eachIfAnchor.absStart, _eachIfAnchor.line, _eachIfAnchor.col, filePath,
-        );
-        const _eachIfShow = captureStructuralShowAttr(
-          header, _eachIfAnchor.absStart, _eachIfAnchor.line, _eachIfAnchor.col, filePath,
+        const _eachIfScan = readStructuralOpenerAttrs(header, _eachIfAnchor, filePath, "each");
+        // §17.1 / §17.1.1 / §17.2 — the gate / chain attributes, read by the markup attribute
+        // tokenizer (readStructuralOpenerAttrs): `if=` → ifRaw / ifCond, `else` / `else-if=` →
+        // chainAttr, `show=` → showAttr. Absent (not null) when not written.
+        const _eachIfGate = structuralGateFields(
+          _eachIfScan, header, _eachIfAnchor, filePath, "each", errors,
         );
 
         // `as name` — whitespace-separated bareword (no `=` between `as`
@@ -23850,9 +23788,7 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
           // on this very node family: engine-decl's own `bodyChildren` is
           // undefined-when-absent for the same reason. Every consumer tests
           // truthiness, so absent and null are indistinguishable to them.
-          ...(_eachIf ? { ifRaw: _eachIf.raw, ifCond: _eachIf.value } : {}),
-          ...(_eachIfChain ? { chainAttr: _eachIfChain } : {}),
-          ...(_eachIfShow ? { showAttr: _eachIfShow } : {}),
+          ..._eachIfGate,
           span,
           openerHadSpaceAfterLt: block.openerHadSpaceAfterLt === true,
         };
@@ -24354,6 +24290,18 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
         // Strip trailing `/` (self-closing) or `>` fragments from the header.
         header = header.replace(/[/>]+\s*$/, "").trim();
 
+        // §17.1 / §51.0.J (S469 round 2) — read the opener's attributes with the markup
+        // attribute tokenizer (readStructuralOpenerAttrs), split at the `derived=` attribute the
+        // tokenizer itself finds. Everything from `derived=` on is the derived expression's
+        // extent; EVERY other opener slot below (`for=`, `name=`, `var=`, `initial=`,
+        // `effect=`, `server=`, `pinned`, …) is read from the text BEFORE it only, so a
+        // `for=` / `initial=` written inside the derived expression is never picked up.
+        // impl#1 requires `derived=` to be the LAST attribute (refuseDerivedTrailing).
+        const _engineIfAnchor = structuralHeaderAnchor(block, header);
+        const _engineIfScan = readStructuralOpenerAttrs(header, _engineIfAnchor, filePath, "engine", { splitDerived: true });
+        const _engineDerivedExtent = _engineIfScan.derivedAt >= 0 ? header.slice(_engineIfScan.derivedAt) : null;
+        if (_engineIfScan.derivedAt >= 0) header = _engineIfScan.prefix.trimEnd();
+
         // Bareword-ident regex — reused across the three attributes.
         const IDENT = /[A-Za-z_$][A-Za-z0-9_$]*/;
         const nameMatch = header.match(new RegExp(`\\bname\\s*=\\s*(${IDENT.source})\\b`));
@@ -24366,10 +24314,14 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
         // regex below greedily matched the `@miles` LEAD of a ternary value
         // (`derived=@miles > 500 ? ...`) and the rest leaked, so a ternary /
         // call form silently mis-routed as a legacy source-var.
-        let derivedValMatch = header.match(/\bderived\s*=\s*([\s\S]*)$/);
+        let derivedValMatch = _engineDerivedExtent ? _engineDerivedExtent.match(/^derived\s*=\s*([\s\S]*)$/) : null;
         let derivedRawValue = derivedValMatch ? derivedValMatch[1].trim() : null;
         // Strip a trailing self-close `/` so `derived=@x/` reads as `@x`.
         if (derivedRawValue) derivedRawValue = derivedRawValue.replace(/\/\s*$/, "").trim();
+        if (derivedRawValue) {
+          const _dvAt = _engineIfScan.derivedAt + (_engineDerivedExtent.length - _engineDerivedExtent.replace(/^derived\s*=\s*/, "").length);
+          refuseDerivedTrailing(derivedRawValue, _engineIfAnchor, _engineIfScan.derivedAt, _dvAt, header, filePath, errors);
+        }
         // (a) Legacy §51.9 — a BARE single `@ident`. The value may be FOLLOWED
         //     by another opener attribute (`derived=@upstream initial=.A`),
         //     so a bare ident is matched as the LEAD of the value followed by
@@ -24496,17 +24448,11 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
         // The condition is captured from the masked header, so an `if (…)`
         // written inside this engine's own `effect=${ … }` body cannot be
         // mistaken for an opener `if=`.
-        const _engineIfAnchor = structuralHeaderAnchor(block, header);
-        const _engineIf = captureStructuralIfAttr(
-          header, _engineIfAnchor.absStart, _engineIfAnchor.line, _engineIfAnchor.col, filePath, errors,
-        );
-        // §17.1.1 — `else` / `else-if=` on this opener, kept for the chain-membership
-        // check (see captureStructuralChainAttr). Absent (not null) when not written.
-        const _engineIfChain = captureStructuralChainAttr(
-          header, _engineIfAnchor.absStart, _engineIfAnchor.line, _engineIfAnchor.col, filePath,
-        );
-        const _engineIfShow = captureStructuralShowAttr(
-          header, _engineIfAnchor.absStart, _engineIfAnchor.line, _engineIfAnchor.col, filePath,
+        // §17.1 / §17.1.1 / §17.2 — the gate / chain attributes, read by the markup attribute
+        // tokenizer (readStructuralOpenerAttrs): `if=` → ifRaw / ifCond, `else` / `else-if=` →
+        // chainAttr, `show=` → showAttr. Absent (not null) when not written.
+        const _engineIfGate = structuralGateFields(
+          _engineIfScan, header, _engineIfAnchor, filePath, "engine", errors,
         );
         // §51.0.H Form 3 (S148, Insight 33 Fork C1) — `effect=${...}` on the
         // ENGINE OPENER (NOT a state-child): the boot-only init effect, the
@@ -25022,9 +24968,7 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
           // structurally rather than by discipline.
           // ABSENT (not null) when there is no `if=` — see the `<each>` node's
           // stamp for the parser-parity reason.
-          ...(_engineIf ? { ifRaw: _engineIf.raw, ifCond: _engineIf.value } : {}),
-          ...(_engineIfChain ? { chainAttr: _engineIfChain } : {}),
-          ...(_engineIfShow ? { showAttr: _engineIfShow } : {}),
+          ..._engineIfGate,
           span,
         };
       }
@@ -25089,16 +25033,12 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
         // branch above; BOTH constructors must carry the field, or the same
         // source compiles differently depending on which one claimed it.
         const _matchIfAnchor = structuralHeaderAnchor(block, header);
-        const _matchIf = captureStructuralIfAttr(
-          header, _matchIfAnchor.absStart, _matchIfAnchor.line, _matchIfAnchor.col, filePath, errors,
-        );
-        // §17.1.1 — `else` / `else-if=` on this opener, kept for the chain-membership
-        // check (see captureStructuralChainAttr). Absent (not null) when not written.
-        const _matchIfChain = captureStructuralChainAttr(
-          header, _matchIfAnchor.absStart, _matchIfAnchor.line, _matchIfAnchor.col, filePath,
-        );
-        const _matchIfShow = captureStructuralShowAttr(
-          header, _matchIfAnchor.absStart, _matchIfAnchor.line, _matchIfAnchor.col, filePath,
+        const _matchIfScan = readStructuralOpenerAttrs(header, _matchIfAnchor, filePath, "match");
+        // §17.1 / §17.1.1 / §17.2 — the gate / chain attributes, read by the markup attribute
+        // tokenizer (readStructuralOpenerAttrs): `if=` → ifRaw / ifCond, `else` / `else-if=` →
+        // chainAttr, `show=` → showAttr. Absent (not null) when not written.
+        const _matchIfGate = structuralGateFields(
+          _matchIfScan, header, _matchIfAnchor, filePath, "match", errors,
         );
 
         // `on=expr` capture: takes everything after `on=` up to the next
@@ -25182,9 +25122,7 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
           armsRaw,       // raw body text — Phase 2's match-statechild-parser produces MatchArmEntry[]
           // §17.1.2 — `if=` render gate; ABSENT (not null) when there is no
           // `if=`. See the `<each>` node's stamp for why omission, not null.
-          ...(_matchIf ? { ifRaw: _matchIf.raw, ifCond: _matchIf.value } : {}),
-          ...(_matchIfChain ? { chainAttr: _matchIfChain } : {}),
-          ...(_matchIfShow ? { showAttr: _matchIfShow } : {}),
+          ..._matchIfGate,
           span,
           openerHadSpaceAfterLt: block.openerHadSpaceAfterLt === true,
         };
