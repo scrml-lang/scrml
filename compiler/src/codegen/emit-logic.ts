@@ -694,7 +694,12 @@ function emitFailExpr(node: FailExprLike, opts: EmitLogicOpts): string {
     // every importer. The by-variant-name ERROR registry (local + ParseError) is the fallback for
     // a name this file cannot resolve (an alias). Before, an importer's `fail` sent the bare value
     // and the declaring file's the keyed object, so one of the two readers was always wrong.
-    const _byEnum = enumType ? getEnumVariantFieldSchema(enumType, variant) : undefined;
+    // S469 r3 — FIRST the TS stamp (`__failVariantFields`, type-system.ts: the variant's fields from
+    // the TS-resolved enum, aliases followed) — the same source every reader's stamp comes from, and
+    // present in every emission mode. The per-file registry is the fallback for a `fail` the checker
+    // did not reach (an arm re-fail).
+    const _stamped = (node as { __failVariantFields?: string[] }).__failVariantFields;
+    const _byEnum = Array.isArray(_stamped) ? _stamped : (enumType ? getEnumVariantFieldSchema(enumType, variant) : undefined);
     const schema = _byEnum !== undefined ? _byEnum : getErrorVariantFieldSchema(variant);
     // §51.3.2 / §19.3.2 — the error envelope's `.data` is a field-keyed object
     // whose keys are the variant's DECLARED payload field names, for BOTH single-
@@ -1074,6 +1079,42 @@ function _anchorSpansAt(
  *   producer side, which likewise emits the bare `.data` value for a single
  *   unknown-schema arg, keeping the reader and writer in step.
  */
+/**
+ * S469 r3 — the §19 SHORT-FORM arm (`Denied :> e == "bad" ? … : …`): the parser synthesizes the
+ * binder `e` (ast-builder `implicitBinding`); the user wrote none. It binds the variant's payload by
+ * its declared field list, exactly as before S469 r2 for a one-field variant: `e` = that field
+ * (`data.reason`). Round 2 bound the whole `.data` (`{ reason: "bad" }`), so `e == "bad"` was false
+ * and a denied input logged in. With no single field to project — a unit or multi-field variant, or
+ * no visible field list — `e` is bound to nothing; an arm body that READS `e` then is refused
+ * (E-TYPE-021 / E-TYPE-027), never handed a guessed value. (§19.4.5 makes every `!{}` arm a §18.2
+ * match-arm, and §18.2 has no implicit binder: the synthesized `e` is impl#1's legacy reading of the
+ * short form, kept for the programs that use it, and pinned to the payload's one field.)
+ */
+function emitShortFormArmBinding(
+  arm: { binding?: string; handler?: string },
+  variantName: string,
+  resultVar: string,
+  subject: SubjectVariantFields | null,
+): string[] {
+  const local = (arm.binding ?? "").trim();
+  if (!local) return [];
+  const schema = subject && subject.has(variantName)
+    ? (subject.get(variantName) ?? [])
+    : getErrorVariantFieldSchema(variantName);
+  if (schema && schema.length === 1) return [`    const ${local} = ${resultVar}.data.${schema[0]};`];
+  const body = String(arm.handler ?? "").replace(/"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|`(?:[^`\\]|\\.)*`/g, '""');
+  if (!new RegExp(`(?<![.\\w$])${local}(?![\\w$])`).test(body)) return [];
+  const code = schema ? "E-TYPE-021" : "E-TYPE-027";
+  const why = schema
+    ? `\`${variantName}\` has ${schema.length} payload field${schema.length === 1 ? "" : "s"}, so there is no single field to bind`
+    : `the compiler cannot tell which enum's \`${variantName}\` the handled call fails with, so it does not know its field order`;
+  recordRefusedLowering(new CGError(code,
+    `${code}: the short-form arm \`${variantName} :> …\` reads \`${local}\`, the payload it binds implicitly, but ${why} (§18.7). ` +
+    `Write the arm with explicit binders — \`.${variantName}(<field>: <local>)\` or \`.${variantName}(a, b)\` — or \`_ ${local} :>\` for the whole error (§18.6.1).`,
+    currentLoweringSpan() as object), null);
+  return [];
+}
+
 function emitGuardedArmBinding(
   binding: string,
   variantName: string,
@@ -5208,11 +5249,10 @@ function _emitLogicNode(node: any, opts: EmitLogicOpts): string {
             const cond = `${resultVar}.variant === ${JSON.stringify(variantName)}`;
             lines.push(`  ${isFirst ? "if" : "else if"} (${cond}) {`);
             if (arm.binding && arm.binding !== "_") {
-              // The §19 short form (`Gone :> …`) names no binder; its synthesized `e` binds the whole
-              // `.data` as it always has — not a positional payload binder.
+              const _subject = getMatchSubjectVariantFields({ __matchSubjectVariants: (node as { __guardErrorVariants?: unknown }).__guardErrorVariants });
               const _armLines = (arm as { implicitBinding?: boolean }).implicitBinding
-                ? emitGuardedArmBinding(arm.binding, "", resultVar)
-                : emitGuardedArmBinding(arm.binding, variantName, resultVar, getMatchSubjectVariantFields({ __matchSubjectVariants: (node as { __guardErrorVariants?: unknown }).__guardErrorVariants }));
+                ? emitShortFormArmBinding(arm, variantName, resultVar, _subject)
+                : emitGuardedArmBinding(arm.binding, variantName, resultVar, _subject);
               for (const l of _armLines) lines.push(l);
             }
             for (const l of armLines(armIsExpr)) lines.push(l);

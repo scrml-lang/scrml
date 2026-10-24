@@ -56,14 +56,29 @@ function compile(src) {
   return { errorCodes, out };
 }
 
-// A failable subject: a plain fn whose body throws (JSON.parse) — the `!{}`
-// catches the host error (the canonical control-015 shape).
-const SUBJECT = `  fn parseJson(src: string) { return JSON.parse(src) }\n`;
+// A failable subject whose error enum declares `SyntaxError(message)`, so the arm's `e` binds the
+// message. (S469 r3: this file used a NON-failable `fn parseJson` — the control-015 shape — which
+// SPEC §19.4.3 (S451 ruling 3) makes E-ERROR-013 — a `!{}` handler on something that cannot fail; impl#1
+// does not emit that code and, since S469, refuses the arm's binder instead (E-TYPE-027: no enum
+// declares `SyntaxError`). That shape is pinned as a divergence in its own test below,
+// `g-impl1-handler-on-non-failable-s451`; the template-lowering cases use a SPEC-valid subject.)
+const SUBJECT = `  type JErr:enum = { SyntaxError(message: string) }\n  function parseJson(src: string)! -> JErr {\n    if (src == "") fail JErr::SyntaxError("empty")\n    return JSON.parse(src)\n  }\n`;
+const NON_FAILABLE_SUBJECT = `  fn parseJson(src: string) { return JSON.parse(src) }\n`;
+
+describe("PINNED DIVERGENCE — a `!{}` on a NON-failable call (g-impl1-handler-on-non-failable-s451)", () => {
+  it("SPEC §19.4.3 says E-ERROR-013; impl#1 emits none and refuses the arm binder with E-TYPE-027", () => {
+    const { errorCodes } = compile(
+      `<program>\n${NON_FAILABLE_SUBJECT}  export fn go(src: string) {\n    return parseJson(src) !{ ::SyntaxError(e) :> \`got \${e} here\` }\n  }\n</program>\n`,
+    );
+    // When E-ERROR-013 is implemented this becomes ["E-ERROR-013"] (and the binder refusal may go).
+    expect(errorCodes).toEqual(["E-TYPE-027"]);
+  });
+});
 
 describe("failable-arm template-literal lowering (g-failable-arm-body-multiline-template-invalid-logic)", () => {
   it("the gap repro: a MULTI-LINE template arm body compiles (no E-CODEGEN-INVALID-LOGIC)", () => {
     const { errorCodes, out } = compile(
-      `<program>\n${SUBJECT}  export fn go(src: string) {\n    return parseJson(src) !{ _ e :> \`line one\nline two\` }\n  }\n</program>\n`,
+      `<program>\n${SUBJECT}  export fn go(src: string) {\n    return parseJson(src) !{ ::SyntaxError(e) :> \`line one\nline two\` }\n  }\n</program>\n`,
     );
     expect(errorCodes).not.toContain("E-CODEGEN-INVALID-LOGIC");
     expect(errorCodes).toEqual([]);
@@ -77,7 +92,7 @@ describe("failable-arm template-literal lowering (g-failable-arm-body-multiline-
 
   it("interpolation SURVIVES in a template arm body (single-line) — not a literal ${…}", () => {
     const { errorCodes, out } = compile(
-      `<program>\n${SUBJECT}  export fn go(src: string) {\n    return parseJson(src) !{ _ e :> \`got \${e} here\` }\n  }\n</program>\n`,
+      `<program>\n${SUBJECT}  export fn go(src: string) {\n    return parseJson(src) !{ ::SyntaxError(e) :> \`got \${e} here\` }\n  }\n</program>\n`,
     );
     expect(errorCodes).toEqual([]);
     // A real template interpolation (backticks + ${e}), NOT the pre-fix
@@ -88,7 +103,7 @@ describe("failable-arm template-literal lowering (g-failable-arm-body-multiline-
 
   it("interpolation SURVIVES in a MULTI-LINE template arm body", () => {
     const { errorCodes, out } = compile(
-      `<program>\n${SUBJECT}  export fn go(src: string) {\n    return parseJson(src) !{ _ e :> \`failed on:\ninput=\${src}\` }\n  }\n</program>\n`,
+      `<program>\n${SUBJECT}  export fn go(src: string) {\n    return parseJson(src) !{ ::SyntaxError(e) :> \`failed on:\ninput=\${src}\` }\n  }\n</program>\n`,
     );
     expect(errorCodes).toEqual([]);
     expect(out).toContain("`failed on:");
@@ -97,7 +112,7 @@ describe("failable-arm template-literal lowering (g-failable-arm-body-multiline-
 
   it("GATE — a plain double-quoted string arm body is UNCHANGED (still double-quoted)", () => {
     const { errorCodes, out } = compile(
-      `<program>\n${SUBJECT}  export fn go(src: string) {\n    return parseJson(src) !{ _ e :> "plain string" }\n  }\n</program>\n`,
+      `<program>\n${SUBJECT}  export fn go(src: string) {\n    return parseJson(src) !{ ::SyntaxError(e) :> "plain string" }\n  }\n</program>\n`,
     );
     expect(errorCodes).toEqual([]);
     expect(out).toContain('"plain string"');
@@ -106,7 +121,7 @@ describe("failable-arm template-literal lowering (g-failable-arm-body-multiline-
 
   it("REGRESSION — a multi-statement BLOCK arm body stays multi-statement (not wrapped as one expression)", () => {
     const { errorCodes, out } = compile(
-      `<program>\n${SUBJECT}  export fn go(src: string) {\n    return parseJson(src) !{ _ e :> {\n      let m = "one"\n      let n = "two"\n    } }\n  }\n</program>\n`,
+      `<program>\n${SUBJECT}  export fn go(src: string) {\n    return parseJson(src) !{ ::SyntaxError(e) :> {\n      let m = "one"\n      let n = "two"\n    } }\n  }\n</program>\n`,
     );
     expect(errorCodes).toEqual([]);
     // Both statements survive as distinct statements — the expression-body

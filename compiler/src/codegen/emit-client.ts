@@ -36,8 +36,8 @@ import { emitEngineSubstrate, emitDerivedEngineSubstrateForFile, emitCrossFileEn
 import { _clientServerFnNames, _clientSseFnNames } from "./scheduling.ts";
 import { asyncFnValuedBindingsOfFile } from "./file-async-fns.ts";
 import { moduleScopeReferences } from "./module-scope-refs.ts";
-import { setVariantFieldsForFile, setShadowedVariantNames } from "./emit-control-flow.ts";
-import { setVariantFieldsForRewriter } from "./rewrite.js";
+import { setVariantFieldsForFile, setShadowedVariantNames, snapshotVariantFieldsForFile, restoreVariantFieldsForFile } from "./emit-control-flow.ts";
+import { setVariantFieldsForRewriter, snapshotRewriterVariantFields, restoreRewriterVariantFields } from "./rewrite.js";
 import { EncodingContext, emitDecodeTable, emitRuntimeReflect } from "./type-encoding.ts";
 // §65.6 (css-wave1 round-4) — the runtime theme-switch reflection. `collectThemeContext`
 // finds every `<theme for=@cell>`; `themeVariantAttr` yields the `data-scrml-theme-<cell>`
@@ -2265,6 +2265,19 @@ export function joinAroundRuntimeSlot(
 }
 
 export function generateClientJs(ctx: CompileContext): string {
+  // S469 r3 — restore the per-file variant registries runCG installed (see emit-control-flow.ts
+  // `snapshotVariantFieldsForFile`), on any exit: the additive tool-dep library emits after this.
+  const _variantSnap = snapshotVariantFieldsForFile();
+  const _rewriterSnap = snapshotRewriterVariantFields();
+  try {
+    return generateClientJsImpl(ctx);
+  } finally {
+    restoreVariantFieldsForFile(_variantSnap);
+    restoreRewriterVariantFields(_rewriterSnap);
+  }
+}
+
+function generateClientJsImpl(ctx: CompileContext): string {
   const { fileAST, protectedFields, errors, encodingCtx, workerNames } = ctx;
   const authMiddlewareEntry = ctx.authMiddleware;
   const csrfEnabled = ctx.csrfEnabled;
@@ -4689,9 +4702,7 @@ export function generateClientJs(ctx: CompileContext): string {
 
   // S22 §1a slice 2: release the per-file variant registry.
   // S95 Bug 2: also release the rewriter's mirror.
-  setVariantFieldsForFile(null, null);
-  setShadowedVariantNames(null);
-  setVariantFieldsForRewriter(null, null);
+  // (S469 r3 — the variant registries are restored by generateClientJs on exit, not cleared here.)
   // g-request-ref-nested-in-lift-misroute (CONVERGENCE) — release the per-file
   // registered-request id set so it cannot leak into the next file's emission.
   setCurrentFileRequestIds(null);

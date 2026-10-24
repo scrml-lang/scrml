@@ -126,6 +126,26 @@ let _shadowedVariantNames: Set<string> | null = null;
  */
 let _importedOnlyVariantNames: Set<string> | null = null;
 
+/**
+ * S469 r3 — the per-file variant registries are installed ONCE per file by runCG (codegen/index.ts,
+ * before any emitter runs: browser client / server, library, tool, test, worker), so every emission
+ * mode keys a `fail` payload and binds an arm by the same field lists. An emitter that installs its own
+ * copy (generateClientJs / generateServerJs) RESTORES what it found on exit instead of clearing it:
+ * a clear stranded the emitters that run after it in the same file (library mode emits after the
+ * server; the additive tool-dep library after the client) with no registry, so a `fail` wrote the bare
+ * value while the reader — keyed by the TS-resolved enum — read `data.<field>`: `undefined`, and a
+ * deny-list on it logged a denied input in.
+ */
+export interface VariantRegistrySnapshot { readonly s: readonly unknown[] }
+export function snapshotVariantFieldsForFile(): VariantRegistrySnapshot {
+  return { s: [_variantFields, _variantFieldCollisions, _importedVariantNames, _localVariantFields, _variantFieldsByEnum, _shadowedVariantNames, _importedOnlyVariantNames] };
+}
+export function restoreVariantFieldsForFile(snap: VariantRegistrySnapshot): void {
+  const [f, c, i, l, b, sh, io] = snap.s as [any, any, any, any, any, any, any];
+  _variantFields = f; _variantFieldCollisions = c; _importedVariantNames = i; _localVariantFields = l;
+  _variantFieldsByEnum = b; _shadowedVariantNames = sh; _importedOnlyVariantNames = io;
+}
+
 export function setShadowedVariantNames(names: Set<string> | null, importedOnly?: Set<string> | null): void {
   _shadowedVariantNames = names && names.size > 0 ? names : null;
   _importedOnlyVariantNames = importedOnly && importedOnly.size > 0 ? importedOnly : null;

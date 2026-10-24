@@ -140,6 +140,15 @@ export interface RewriteContext {
 let _rewriterVariantFields: Map<string, string[]> | null = null;
 let _rewriterVariantFieldCollisions: Set<string> | null = null;
 
+/** S469 r3 — see emit-control-flow.ts `snapshotVariantFieldsForFile`. */
+export function snapshotRewriterVariantFields(): readonly unknown[] {
+  return [_rewriterVariantFields, _rewriterVariantFieldCollisions];
+}
+export function restoreRewriterVariantFields(snap: readonly unknown[]): void {
+  _rewriterVariantFields = snap[0] as Map<string, string[]> | null;
+  _rewriterVariantFieldCollisions = snap[1] as Set<string> | null;
+}
+
 export function setVariantFieldsForRewriter(
   variantFields: Map<string, string[]> | null,
   collisions?: Set<string> | null,

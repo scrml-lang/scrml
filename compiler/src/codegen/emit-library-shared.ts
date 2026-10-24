@@ -19,6 +19,7 @@ import { bodyContains } from "./collect.ts";
 import { extractCalleeNames, buildCalleeImportMap } from "./scheduling.ts";
 import { splitMultiArmString, parseMatchArm } from "./emit-control-flow.ts";
 import { parseExprToNode } from "../expression-parser.ts";
+import { templateInterpolationPayloads } from "../interpolation-extent.ts";
 import { isPromiseReturningImportedCallee } from "../module-resolver.js";
 import { CGError } from "./errors.ts";
 // Phase-2 colorless-async — the clean-family combinator detector, shared with the
@@ -119,8 +120,34 @@ function armBodyTextCallees(body: string, out: Set<string>, guard: boolean): voi
   if (!text) return;
   let node: unknown = null;
   try { node = parseExprToNode(text, "", 0); } catch { node = null; }
-  if (node && !treeHasEscapeHatch(node)) { collectCalleeIdents(node, out, guard); return; }
+  if (node && !treeHasEscapeHatch(node)) {
+    collectCalleeIdents(node, out, guard);
+    // S469 r3 (F2) — a template literal's `${…}` parts are carried as raw text on the `lit`
+    // node, invisible to the tree walk: read each interpolation the same way, so a server call
+    // in `\`${isOk(p)}\`` colours the enclosing function async (it was emitted unawaited).
+    for (const raw of templateTextsOf(node)) {
+      for (const payload of templateInterpolationPayloads(raw)) armBodyTextCallees(payload, out, guard);
+    }
+    return;
+  }
   for (const m of _stripStringLiterals(text).matchAll(/(?<![.\w$])([A-Za-z_$][\w$]*)\s*\(/g)) out.add(m[1]);
+}
+
+/** The inner text (backticks stripped) of every interpolated template literal in an expression tree. */
+function templateTextsOf(node: unknown, out: string[] = []): string[] {
+  if (!node || typeof node !== "object") return out;
+  if (Array.isArray(node)) { for (const c of node) templateTextsOf(c, out); return out; }
+  const n = node as Record<string, unknown>;
+  if (n.kind === "lit" && n.litType === "template" && n.hasInterpolation !== false && typeof n.raw === "string") {
+    const raw = n.raw as string;
+    if (raw.includes("${")) out.push(raw.startsWith("`") && raw.endsWith("`") ? raw.slice(1, -1) : raw);
+  }
+  for (const k of Object.keys(n)) {
+    if (k === "span") continue;
+    const v = n[k];
+    if (v && typeof v === "object") templateTextsOf(v, out);
+  }
+  return out;
 }
 
 function treeHasEscapeHatch(node: unknown): boolean {

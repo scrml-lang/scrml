@@ -12,12 +12,12 @@ import type { AsyncRoot, AsyncEscapeSite } from "./local-async-fns.ts";
 import { getNodes } from "./collect.ts";
 import { collectReactiveVarNames, collectLocalMapSetNames, buildFnReturnMapKinds } from "./reactive-deps.ts";
 import { collectChannelNodes, emitChannelServerJs, emitChannelWsHandlers, emitChannelWatchesServerBoot, collectChannelFunctionMap, collectChannelCellMap, filterChannelImportSpecifiers } from "./emit-channel.ts";
-import { serverRewriteEmitted, setVariantFieldsForRewriter, setProtectContextForRewriter, drainProtectInfosFromRewriter, setTenantContextForRewriter, drainTenantStripsFromRewriter, drainTenantAcrossesFromRewriter, drainTenantViolationsFromRewriter, setBoolColumnsForRewriter } from "./rewrite.js";
+import { serverRewriteEmitted, setVariantFieldsForRewriter, snapshotRewriterVariantFields, restoreRewriterVariantFields, setProtectContextForRewriter, drainProtectInfosFromRewriter, setTenantContextForRewriter, drainTenantStripsFromRewriter, drainTenantAcrossesFromRewriter, drainTenantViolationsFromRewriter, setBoolColumnsForRewriter } from "./rewrite.js";
 import { buildBoolColumnsFromFileAST, SERVER_BOOL_COERCE_HELPER } from "./bool-coerce.ts";
 import { SQL_ATTEMPT_FN, SERVER_SQL_ATTEMPT_HELPER, handledSqlGuardInner } from "./sql-attempt.ts";
 import { planBatchCellReturn, cpsCellsPrologue, cpsCellsEpilogue, cpsCellWriteStatement, cpsCellLocal, multiBatchReturnCell, cpsCarriedLocals, cpsCarriedFunctionIndices } from "./cps-cell-writes.ts";
 import { buildVariantFieldsRegistry, emitEnumVariantObjects, emitEnumLookupTables } from "./emit-client.js";
-import { setShadowedVariantNames, setVariantFieldsForFile } from "./emit-control-flow.ts";
+import { setShadowedVariantNames, setVariantFieldsForFile, snapshotVariantFieldsForFile, restoreVariantFieldsForFile } from "./emit-control-flow.ts";
 import { drainServerAmbientSessionRefusalErrors, setServerSessionContextSpan } from "./server-session-guard.ts";
 import { emitExpr, emitExprField, setServerAsyncClassifier, setServerPromiseTrap, ASSERT_SETTLED_FN, type EmitExprContext } from "./emit-expr.ts";
 import {
@@ -2393,12 +2393,16 @@ function parseArmBindings(raw: string | undefined | null): EndpointArmBinding[] 
  */
 export function generateServerJs(...args: Parameters<typeof generateServerJsImpl>): string {
   const prevTrap = setServerPromiseTrap(null);
+  // S469 r3 — restore the per-file variant registries runCG installed (on any exit), never clear
+  // them: the emitters after this one in the same file (library mode) key by them too.
+  const _variantSnap = snapshotVariantFieldsForFile();
+  const _rewriterSnap = snapshotRewriterVariantFields();
   try {
     return generateServerJsImpl(...args);
   } finally {
     setServerPromiseTrap(prevTrap);
-    // S469 — the per-file variant registry never outlives this file's server pass, on any exit.
-    setVariantFieldsForFile(null, null);
+    restoreVariantFieldsForFile(_variantSnap);
+    restoreRewriterVariantFields(_rewriterSnap);
   }
 }
 
@@ -8324,9 +8328,7 @@ function generateServerJsImpl(
   // generateClientJs (which runs after generateServerJs per codegen/index.ts)
   // will re-populate for its own pass; clearing here keeps state from leaking
   // when only the server emit runs (e.g. dry-run / partial pipelines).
-  setVariantFieldsForRewriter(null, null);
-  setVariantFieldsForFile(null, null);
-  setShadowedVariantNames(null);
+  // (S469 r3 — the variant registries are restored by generateServerJs on exit, not cleared here.)
 
   // g-pure-module-server-emit (S207): server-import tree-shaking — prune pass.
   // Now that the full server body is assembled, decide which deferred local-

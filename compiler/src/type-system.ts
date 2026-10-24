@@ -1625,6 +1625,38 @@ function errorTypeDisplayName(name: string): string {
   return name === PARSE_VARIANT_FAILURE ? PARSE_ERROR_ENUM.name : name;
 }
 
+/**
+ * S469 r3 — the ENUM an error-type name denotes, following `type A = B` aliases (the file's
+ * typeDecls, alias-to-alias, bounded), or null. THE resolution both sides of a payload use: the
+ * `fail` producer's field list (`__failVariantFields`) and every reader's (`__guardErrorVariants`,
+ * the failable-match subject stamp), so they cannot disagree in any emission mode.
+ */
+function resolveErrorEnumThroughAliases(
+  name: string,
+  typeRegistry: Map<string, ResolvedType>,
+  typeDecls: ASTNodeLike[],
+): EnumType | null {
+  let cur = name;
+  for (let hop = 0; hop < 16; hop++) {
+    const t = resolveFailableErrorType(cur, typeRegistry);
+    if (t && t.kind === "enum") return t as EnumType;
+    const d = typeDecls.find((x) => x && x.name === cur && (x.typeKind === "" || x.typeKind === undefined || x.typeKind === null));
+    const rhs = d ? String(d.raw ?? "").trim() : "";
+    if (!rhs || rhs.startsWith("{")) return null;
+    if (/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(rhs)) { cur = rhs; continue; }
+    const r = resolveTypeExpr(rhs, typeRegistry);
+    return r && r.kind === "enum" ? (r as EnumType) : null;
+  }
+  return null;
+}
+
+/** The declared field names of `Enum.Variant` ([] for a unit variant), or undefined. */
+function variantFieldNames(en: EnumType, variant: string): string[] | undefined {
+  const v = (en.variants ?? []).find((x) => x.name === variant);
+  if (!v) return undefined;
+  return v.payload instanceof Map ? Array.from(v.payload.keys()) : [];
+}
+
 // ---------------------------------------------------------------------------
 // §53.6 Named Shape Registry
 // ---------------------------------------------------------------------------
@@ -12237,6 +12269,19 @@ function annotateNodes(
                 failEnum = declaredType;
                 (stmt as Record<string, unknown>).enumType = declaredType;
               }
+              // S469 r3 — THE producer's payload shape: the field list of the variant the `fail`
+              // names, from the TS-resolved enum (aliases followed). Codegen keys `.data` by it in
+              // EVERY emission mode (emit-logic.ts emitFailExpr), the same source the readers'
+              // stamps come from — never a per-file registry an emitter may not have published.
+              {
+                const _failTypeDecls = ((fileAST.typeDecls as ASTNodeLike[] | undefined)
+                  ?? ((fileAST.ast as FileAST | undefined)?.typeDecls as ASTNodeLike[] | undefined) ?? []);
+                const _en = failEnum ? resolveErrorEnumThroughAliases(failEnum, typeRegistry, _failTypeDecls) : null;
+                const _fields = _en
+                  ? variantFieldNames(_en, failVariant)
+                  : (failEnum === "Error" && failVariant === "Generic" ? ["message"] : undefined);
+                if (_fields !== undefined) (stmt as Record<string, unknown>).__failVariantFields = _fields;
+              }
               // Resolve the declared enum's valid variant names. The built-in
               // `Error` default is not in the type registry, so its sole variant
               // (`Generic`, §19.4.2) is supplied directly.
@@ -12382,12 +12427,14 @@ function annotateNodes(
                   // Resolve the enclosing fn's declared error-variant set (the
                   // built-in `Error` default → its sole `Generic` variant, §19.4.2).
                   let enclosingVariants: Set<string> | null = null;
+                  let enclosingEnumForShape: EnumType | null = null;
                   if (enclosingErrTypeName === "Error") {
                     enclosingVariants = new Set(["Generic"]);
                   } else {
                     const enclosingEnum = resolveFailableErrorType(enclosingErrTypeName, typeRegistry);
                     if (enclosingEnum && enclosingEnum.kind === "enum") {
                       enclosingVariants = new Set((enclosingEnum as EnumType).variants.map((v) => v.name));
+                      enclosingEnumForShape = enclosingEnum as EnumType;
                     }
                   }
                   // Only enforce when BOTH types resolved to a variant set —
@@ -12424,6 +12471,35 @@ function annotateNodes(
                         `dropped. ${remedy}`,
                         (stmt.span ?? n.span) as Span,
                       ));
+                    }
+                    // S469 r3 (F1) — a same-NAMED variant is not the same variant when its PAYLOAD
+                    // differs: `?` re-raises the callee's envelope unchanged (its `.data` keyed by the
+                    // callee's fields), so a handler of the enclosing type binding `.Denied(x)` by its
+                    // own field order read `undefined` — `x == "bad"` was false and a denied input
+                    // logged in (`AuthErr.Denied(reason)` propagated as `Other.Denied(note)`). §19.5.3:
+                    // `?` must never silently drop error information; the payload IS that information.
+                    // Refused (E-ERROR-010) — a remap would invent a field correspondence.
+                    if (enclosingEnumForShape) {
+                      const mismatched: string[] = [];
+                      for (const cv of (calleeEnum as EnumType).variants) {
+                        if (!enclosingVariants!.has(cv.name)) continue;
+                        const a = variantFieldNames(calleeEnum as EnumType, cv.name) ?? [];
+                        const b = variantFieldNames(enclosingEnumForShape, cv.name) ?? [];
+                        if (a.length !== b.length || a.some((f, i) => f !== b[i])) {
+                          mismatched.push(`'${cv.name}' (${errorTypeDisplayName(calleeErrTypeName)}: ${a.length ? a.join(", ") : "no fields"}; ${enclosingErrTypeName}: ${b.length ? b.join(", ") : "no fields"})`);
+                        }
+                      }
+                      if (mismatched.length > 0) {
+                        errors.push(new TSError(
+                          "E-ERROR-010",
+                          `E-ERROR-010: '?' in function '${fnName}' propagates error variant(s) ${mismatched.join(", ")} ` +
+                          `from '${calleeName}' into '${enclosingErrTypeName}', whose same-named variant(s) carry DIFFERENT payload fields. ` +
+                          `'?' re-raises the error unchanged, so a handler of '${enclosingErrTypeName}' would bind the wrong fields ` +
+                          `(§19.5.3: '?' never silently drops error information). Give the variants the same fields, or handle ` +
+                          `'${calleeName}' explicitly with 'match' or '!{}' and 'fail' the enclosing variant you mean.`,
+                          (stmt.span ?? n.span) as Span,
+                        ));
+                      }
                     }
                   }
                 }
@@ -14220,8 +14296,10 @@ function annotateNodes(
         // guess (the whole `.data` for an imported enum, which a keyed producer turned into a
         // logged-in denied input). Same shape as a failable match subject's stamp.
         {
+          const _guardTypeDecls = ((fileAST.typeDecls as ASTNodeLike[] | undefined)
+            ?? ((fileAST.ast as FileAST | undefined)?.typeDecls as ASTNodeLike[] | undefined) ?? []);
           const _errEnum = errorTypeName
-            ? resolveFailableErrorType(errorTypeName, typeRegistry)
+            ? resolveErrorEnumThroughAliases(errorTypeName, typeRegistry, _guardTypeDecls)
             : (calleeName ? importedFnErrorEnums.get(calleeName) ?? null : null);
           const _vs = _errEnum && _errEnum.kind === "enum"
             ? matchSubjectVariantsOf(_errEnum)

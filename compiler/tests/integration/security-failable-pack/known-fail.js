@@ -76,6 +76,15 @@ export const KNOWN_FAIL = {
 // Shapes this instrument CANNOT judge: client pages with no #wrong button (a client function calling
 // a SERVER `check`; the decision needs the server half run). Listed so the hole is named.
 export const UNJUDGED = {
+  // S469 r3 — the producer module imports the enum from a types-only module; its server bundle imports
+  // a `types.server.js` the compiler never writes, so the bundle cannot load and the shape never runs.
+  // Judged UNJUDGED (pack.js `loadFailure`), not pinned as PASS-500 — that would pin the emission bug.
+  "s5/producer imports the enum: return match, positional": "g-server-js-imports-module-without-server-file-s467",
+  "s5/producer imports the enum: return match, named": "g-server-js-imports-module-without-server-file-s467",
+  "s5/producer imports the enum: !{}, positional": "g-server-js-imports-module-without-server-file-s467",
+  "f2/producer imports the enum: return match, positional": "g-server-js-imports-module-without-server-file-s467",
+  "f2/producer imports the enum: return match, named": "g-server-js-imports-module-without-server-file-s467",
+  "f2/producer imports the enum: !{}, positional": "g-server-js-imports-module-without-server-file-s467",
   "n6/cli->srv expr direct": "no #wrong button: client -> server call, needs the server half",
   "n6/cli->srv stmt direct": "no #wrong button: client -> server call, needs the server half",
 };
