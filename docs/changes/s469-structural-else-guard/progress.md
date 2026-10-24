@@ -60,3 +60,14 @@ a lifted `<each>`.
 - [x] timers / state-children / match arms (codegen `buildMatchArms`) / component-body `<slot>` / `<md show=>`.
 - [x] differential test (354), pack n27 +61 (862), SPEC (§17.1.2.2, §51.0.J, §34), gaps.
 - [x] merged origin/main (4e1983534); CI blocking commands all 0 (facts WARN 1; bootstrap-conformance regenerated); `bun test compiler/tests/browser` 2055 pass / 8 fail = the 8 browser-baseline names; corpus differential vs main: only the round-1 intended refusal, 170 artifact diffs all the checkout path.
+
+## Round 3 (review of 412b77b8b — FIX on one HIGH regression)
+
+- [x] HIGH-1: every attribute-reader refusal (ATTR_OP_REJECT → E-ATTR-UNQUOTED-OPERATOR / -MULTI-STATEMENT) reported
+      on structural openers, forwarded out of sub-builds, and on raw-text openers (`scanOpenerGateAttrs`); the
+      builder expression slots (`<each in= of= key=>`, `<match on=>`) end at the expression parser's extent.
+- [x] MED-1 (arm openers), MED-2 (trim before `derived=`), LOW (comma sequence; VAR-DUPLICATE cascade).
+- [x] Case variants: E-GATE-ATTR-CASE on any element (one predicate `gateAttrCaseVariant`).
+- [x] SPEC: `<onTransition>` off the §17.1.2 reject list (ruling 69d6636); round-3 note; §34 E-GATE-ATTR-CASE.
+- [x] differential test (849), pack n27 +275 (905 → 1180; main 801 after #1529 merged), gaps.
+- [x] corpus differential vs main 27f897748: 0 new refusals (only the round-1 intended one), 170 path-only diffs.

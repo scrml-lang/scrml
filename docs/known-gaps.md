@@ -31,7 +31,7 @@
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 263 | 5 |
-| MED | 683 | 8 |
+| MED | 682 | 8 |
 | LOW | 485 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
@@ -14857,8 +14857,15 @@ assumption"** shape with the oracle being a third-party DOM rather than our own 
 assertions need a real-browser check — and prefer the real-Chrome path for any conditional-lowering
 verification. Sibling of [[g-nav-browser-harness-fidelity]].
 
-<!-- @gap id=g-gate-attr-case-variant-ignored-s469 sev=MED status=open locus=compiler/src/ast-builder.js(collapseIfChains getAttr is exact-name; parseAttributes keeps the author's case) prov=empirical:S469-s469-structural-else-guard-round-2(executed-under-happy-dom) -->
-### g-gate-attr-case-variant-ignored-s469 — `<p ELSE>`, `<div IF=@n>`, `<p SHOW=@n>` are not gates: the attribute is written to the DOM and the content renders, at exit 0 — `NEW S469; MED; open`
+<!-- @gap id=g-gate-attr-case-variant-ignored-s469 sev=HIGH status=resolved resolved-by=s469-structural-else-guard locus=compiler/src/gate-attr-refusal.ts(gateAttrCaseVariant — the one predicate)+compiler/src/ast-builder.js(refuseUnconsumedStructuralChainAttrs, structuralGateFields, the <md> lowering)+compiler/src/component-expander.ts(parseComponentDef)+raw-text openers(scanOpenerGateAttrs) prov=empirical:S469-s469-structural-else-guard-round-2(executed-under-happy-dom)+review:412b77b8b -->
+### g-gate-attr-case-variant-ignored-s469 — `<p ELSE>`, `<div IF=@n>`, `<p SHOW=@n>` are not gates: the attribute is written to the DOM and the content renders, at exit 0 — `NEW S469; MED → HIGH (a gate that fails open); RESOLVED S469 round 3 (E-GATE-ATTR-CASE)`
+
+> **RESOLVED S469 round 3 (`s469-structural-else-guard`), fail closed.** A case variant of `if` / `else` / `else-if` /
+> `show` as an attribute name, on ANY element — markup, a component use-site, `<engine>` / `<match>` / `<each>`,
+> `<md>`, a `<match>` arm, an engine state-child, a timer — is **E-GATE-ATTR-CASE** (new §34 row), naming the
+> lower-case spelling. One predicate (`gateAttrCaseVariant`) applied by every reader, so markup and structural
+> openers stay identical (differential test). Corpus differential: no program in the corpus uses an upper-case gate
+> name (0 newly refused).
 
 Measured by the round-2 review probes (happy-dom): an upper- or mixed-case `if` / `else` / `else-if` / `show` name is
 an ordinary attribute to impl#1 — `collapseIfChains` and the gate emitters match the exact lower-case name — so the
@@ -14975,6 +14982,20 @@ it in the row / lift builders) not decided; the row and lift element builders ar
 > the review spellings + 60 seeded random openers, and the derived-last set), pack n27 +61 (61 FAIL on `456158a63`,
 > all PASS-REFUSED). Case variants (`ELSE`, `IF=`, `SHOW=`) are ignored on `<p>` too, so on both:
 > [[g-gate-attr-case-variant-ignored-s469]].
+>
+> **Round 3 (review of `412b77b8b`, FIX on one HIGH regression).** Round 2 read the openers with the markup reader
+> but dropped the reader's own REFUSALS: an unquoted value with a bare operator (`data-path=admin/panel`,
+> `title=a/b`, `1+2`, `a?b:c`, `a&&b`, `a==b`, `a,`, `a;`) is an `ATTR_OP_REJECT` run to the tag close that swallows
+> the gate after it; on a `<p>` its E-ATTR-UNQUOTED-OPERATOR fails the compile, but `structuralGateFields` kept only
+> the errors inside the `if=` value, so `<engine data-path=admin/panel if=@isAdmin>` rendered with the gate false —
+> a regression versus base and round 1. Now every reader refusal is reported on every structural opener (and
+> forwarded out of `<each>` / `<match>` sub-builds), and the raw-text openers (`scanOpenerGateAttrs` — arms,
+> state-children, timers) report them too. The builders' own expression slots (`<each in= of= key=>`,
+> `<match on=>`) end where the expression parser stops, like `derived=`, and the reader resumes after them.
+> Also: the text before `derived=` is trimmed (an `if=@n` before it was a false E-CG-003); `derived=@m, show=@n` (a
+> comma sequence) is refused; no E-ENGINE-VAR-DUPLICATE cascade after E-ENGINE-DERIVED-NOT-LAST; case-variant gate
+> names refused everywhere ([[g-gate-attr-case-variant-ignored-s469]]). Pack n27 +275 (197 FAIL on `412b77b8b`, all
+> PASS-REFUSED); differential test +495.
 
 **Filed against my own SPEC text, hours after writing it.** §17.1.2.2 (S302) states *"`else` / `else-if=`
 compose with all three, under the ordinary chain rules"* and *"`show=` composes."* **Neither holds.**
@@ -15015,9 +15036,9 @@ reader would have taken a SHALL-shaped sentence as shipped behaviour.
 > ahead of the bypass dispatches) and `<onTimeout if=>` / `<onIdle if=>` (captured by `scanForOnTimeoutEntries` /
 > `scanForOnIdleEntries`, refused in the typer) are **E-GATE-UNSUPPORTED-HOST**; an `else` / `else-if=` on
 > `<onTimeout>` / `<onIdle>` / `<onTransition>` is E-CTRL-001 / E-CTRL-002 (never a chain member). `W-ATTR-001`
-> still fires beside the error on `<channel>` / `<errors>`. SPEC question left open, not decided here: §17.1.2 lists
-> `<onTransition>` as SHALL REJECT `if=`, but §4.15 lists `if=expr` as its slot and §51.0.H uses it as the
-> transition guard (impl#1 honours it) — the reject-list entry looks stale.
+> still fires beside the error on `<channel>` / `<errors>`. The §17.1.2 reject list also named `<onTransition>`,
+> whose `if=expr` is its §4.15 / §51.0.H transition guard — **RULED S469** (user-voice 69d6636: *"if= is the
+> guard"*): `<onTransition>` is off the reject list; `<onTransition if=>` stays the guard (impl#1 already honours it).
 
 §17.1.2 (S302) says every scrml-defined structural element other than the three widened ones SHALL
 reject `if=`. Measured on base AND HEAD:
