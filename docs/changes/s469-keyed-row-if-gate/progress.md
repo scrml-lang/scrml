@@ -33,3 +33,17 @@ origin/main 27f897748 (includes #1529). Limb: impl#1 `compiler/src` (security: a
   g-keyed-row-control-flow-if-not-reevaluated-s469, filed g-lift-loop-region-rebuilds-on-every-reconcile-s469 (LOW),
   g-match-stmt-lift-in-lifted-element-lands-outside-s469 (MED), narrowed g-lift-group-non-single-if-rerender-loses-
   input-state-s462; state.ts --write.
+
+## Round 2 (review of b84c3f6de: FIX — region deleted; HIGH-1 loop region; MED-1 untracked)
+- runtime: `_scrml_untracked` restores the prior pause state (MED-1); ratchet <each> row shape 8432 B (main 8433, ceiling 8433).
+- the element-wrapped `if` region is deleted (emission, item slot, liftIfRegionSafe): a row-deciding `if` lowers the
+  row plain in every position; refusal backstop kept.
+- #1529 loop region removes by RANGE (start + end anchor) instead of a snapshot (HIGH-1; main too).
+- tests: browser 34 (keying cost pinned for the element form; HIGH-1 ×2 fail on main; MED-1 ×2 fail before the
+  runtime fix); pack n28 +8 (closed gate in a loop region; main 4 FAIL) = 910; LIFT-5 / example-js-validity /
+  s427 M1 / peter-19 fixtures keep the keyed path with an `if=` gate or a nested loop body.
+- probes (~/.cache/scrml/lanes/keyed-row-if/probes, repointed): p4 HIGH-1 fixed; p2 / lr nested shape correct at every
+  step (now loop-in-plain-row), no duplicates; p14 plain path updates (HIGH-3 gone with the region); p16 MED-1 fixed;
+  p1 duplicate keys: `g1` after the flip (no `g2 g2`).
+- docs: SPEC §17.1 note (plain in every position; region range), §34 row; known-gaps resolution rewritten, HIGH-1 filed
+  + resolved, gate-ordering LOW filed, loop-region rebuild LOW reworded.
