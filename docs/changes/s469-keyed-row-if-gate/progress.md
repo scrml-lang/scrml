@@ -10,13 +10,14 @@ origin/main 27f897748 (includes #1529). Limb: impl#1 `compiler/src` (security: a
   input). On origin/main: 22 FAIL (every case shows gated content while its condition is false).
 
 ## Design
-- `if` that decides a keyed row (an arm lifts, or `continue` / `return` / `break`) and a lifting `match` statement:
+- `if` that decides a keyed row (an arm lifts, or `continue` / `return` / `break`):
   - inside an ELEMENT of the row, no early exit, reading only own names / the row item / cells / file-level bindings
     (liftRegionSafe): REGION of the keyed row (emitIfStmtWithContainer) — anchor + child owner scope + tracked effect
     reading the item from a per-row slot republished only on item identity change. Row stays keyed.
   - elsewhere: row lowered plain (liftForTreeIfPins → forLiftTreeHasImpureLoop); liftNoteRowIfPlainLoop counts it like
     an open gate (group forced re-render / arm) or refuses it (function body) — E-IMPL1-LIFT-GATE-UNTRACKED.
   - prediction miss at emission → refused.
+- a `match` statement whose arms lift: always pins the row plain (no region — its lifts go to the ambient target).
 - bind:value/checked initial read untracked (plain lists rebuilt on every keystroke otherwise).
 
 ## Log (cont.)
