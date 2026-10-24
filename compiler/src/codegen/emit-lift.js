@@ -12,7 +12,7 @@ import { iterableHasReactiveRefs, forBodyLiftsMarkup } from "./reactive-deps.ts"
 import { isDestructurePattern, emitDestructurePatternText } from "./emit-destructure-pattern.ts";
 import { liftScopeDeclaredNames, markDeclaredMutable } from "./declared-name-marks.ts";
 import { CGError } from "./errors.ts";
-import { refuseElementLowering, refuseRawContentLowering, refuseStaticAttrWrite, refuseUnloweredElseChain, recordRefusedLowering } from "./refused-lowering-errors.ts";
+import { refuseElementLowering, refuseRawContentLowering, refuseStaticAttrWrite, refuseUnloweredElseChain, recordRefusedLowering, refuseIfOnUngatedHost } from "./refused-lowering-errors.ts";
 import { isRawContentElement, rawContentDomLines, sealRawContentBody, unsealRawContentBody } from "../raw-content-encode.ts";
 import { isExecutableEventHandlerAttrName } from "../attr-injection-sink.ts";
 import { dynamicUrlAttrNeedsGuard, quotedUrlAttrNeedsGuard, refuseExecutableDataWrite, urlGuardTarget, wrapUrlGuard } from "./url-attr-guard.ts";
@@ -1222,6 +1222,20 @@ function tryEmitNestedLiftEach(eachMarkupNode, scopeVar, fragmentVar, engineCtx)
   // handler (which rejects a genuinely source-less each downstream). Only a
   // non-null, non-string `scopeVar` is bad input.
   if (scopeVar != null && typeof scopeVar !== "string") return null;
+  // §17.1.2.2 (S469, g-structural-element-if-chain-and-show-composition-nominal) — a
+  // lifted `<each>` is routed here BEFORE `emitCreateElementFromMarkup`'s `else` /
+  // `else-if=` backstop is reached, so `<div if=@f>a</div><each else …>` in lifted
+  // markup rendered its rows whatever `@f` said. Refused here (the recorded error fails
+  // the compile); lowering continues so sibling diagnostics still surface.
+  {
+    const _attrs = eachMarkupNode.attributes ?? eachMarkupNode.attrs;
+    const _elseAttr = Array.isArray(_attrs) ? _attrs.find((a) => a && (a.name === "else" || a.name === "else-if")) : null;
+    if (_elseAttr) refuseUnloweredElseChain(_elseAttr.name, "on a lifted `<each>`", _elseAttr.span ? _elseAttr : eachMarkupNode);
+    // §17.2 — the shared each lowering honours `if=` (the row-scoped gate) but never reads
+    // `show=`: the rows stayed visible whatever it said. E-GATE-UNSUPPORTED-HOST.
+    const _showAttr = Array.isArray(_attrs) ? _attrs.find((a) => a && a.name === "show") : null;
+    if (_showAttr) refuseIfOnUngatedHost("each", _showAttr, eachMarkupNode, "a lifted `<each>`");
+  }
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const each = require("./emit-each.ts");
   if (!each || typeof each.emitNestedEachFromMarkup !== "function") return null;

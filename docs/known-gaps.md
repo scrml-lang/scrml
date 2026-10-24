@@ -30,9 +30,9 @@
 | Severity | Open (owed by impl#1, the TS compiler) | Carried (owed by the bootstrap; xfail on impl#1) |
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 265 | 5 |
+| HIGH | 267 | 5 |
 | MED | 684 | 8 |
-| LOW | 489 | 0 |
+| LOW | 492 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
 
@@ -925,7 +925,7 @@ Side effects: `scrml promote --engine` on a `<match>` under an `if=`/`else` chai
 hits the refusal) instead of producing an engine that renders nothing; [[g-component-body-each-row-engine-unused-compiles-clean-s469]]
 is closed by the same CE change. Pins: `compiler/tests/browser/engine-in-if-chain-refused-s469.browser.test.js` (24).
 Not covered here, measured in passing: an engine IN a `<match>` arm ([[g-engine-in-match-arm-emits-nothing-s469]]);
-a structural element that IS a chain member (`<engine else>`, see [[g-structural-element-if-chain-and-show-composition-nominal]]).
+a structural element that IS a chain member (`<engine else>`, see [[g-structural-element-if-chain-and-show-composition-nominal]] — refused since S469, E-CTRL-001 / -002).
 
 Original entry:
 
@@ -997,7 +997,7 @@ lowering, not the top level's map/set-aware one, so `in=@m.entries()` threw (`.e
 value-native map) and a bare set `in=@s` iterated the map object instead of its elements; and a lifted `<each>`'s
 `in=items()` / `in=@m.entries()` lost its call (`eachAttrRawText` read a `call-ref`'s callee name only) and iterated the
 function itself. `else` / `else-if=` / `show=` are not honoured on a structural `<each>` at ANY position
-([[g-structural-element-if-chain-and-show-composition-nominal]] — the nested branch matches the top level there);
+([[g-structural-element-if-chain-and-show-composition-nominal]] — the nested branch matches the top level there; refused at every position since S469);
 transitions are not captured on the structural openers at all.
 
 Corpus (`scripts/corpus-emit-differential.ts`, samples / examples / compiler/tests/fixtures / stdlib / conformance,
@@ -14796,9 +14796,22 @@ enough to rebuild from the snippets above in two files.
 
 ---
 
-<!-- @gap id=g-if-on-structural-element-silently-ignored sev=MED status=open -->
+<!-- @gap id=g-if-on-structural-element-silently-ignored sev=HIGH status=resolved resolved-by=s469-structural-else-guard locus=compiler/src/codegen/emit-html.ts(ahead of the IF_GATE_BYPASS_TAGS dispatches + the compound-parent wrapper → refuseGateAttrsOnUngatedHost)+compiler/src/codegen/emit-each.ts(renderEmptyChildToJs)+compiler/src/symbol-table.ts(timerGateAttrDiagnostic)+compiler/src/gate-attr-refusal.ts prov=empirical:S469-s469-structural-else-guard(executed-under-happy-dom-on-b0cffc6a4) -->
 <!-- S335-peter re-verify vs HEAD cdf19c01: the ORIGINAL symptom (if= on <engine>/<match>/<each>) now gates correctly (full _scrml_if_marker controller, reactive to the cell); <page if=> loudly rejects, <outlet if=> warns. RESIDUAL LIVE CASE found: `<empty if=(@show)>` inside an <each> compiles with ZERO diagnostics and the if= is silently dropped (0 _scrml_if_marker, @show never read). Keep OPEN, re-characterized to the <empty if=> position. Fix (mint a diagnostic vs wire it) is a language-surface call → likely bryan's lane. Needs the repro pinned as the canonical body. -->
-### G-IF-ON-STRUCTURAL-ELEMENT-SILENTLY-IGNORED — `if=` on `<engine>` / `<match>` / `<each>` generates ZERO code; on `<engine>` the initial arm is permanently visible — `NEW S302; MED; open`
+### G-IF-ON-STRUCTURAL-ELEMENT-SILENTLY-IGNORED — `if=` on `<engine>` / `<match>` / `<each>` generates ZERO code; on `<engine>` the initial arm is permanently visible — `NEW S302; MED → HIGH (security, S469); RESOLVED S469 (s469-structural-else-guard — E-GATE-UNSUPPORTED-HOST)`
+
+> **RESOLVED S469 (`s469-structural-else-guard`).** Re-measured under happy-dom on `b0cffc6a4`: `if=` on
+> `<engine>` / `<match>` / `<each>` IS honoured at every position that compiles (the S302 symptom stays fixed). The
+> class was NOT closed: `if=` was still silently dropped — content rendered with the condition false, exit 0 — on
+> `<empty>` (an `<each>` fallback; the S335 residual, every position), `<errorBoundary>` and `<render>` (top level,
+> nested, component body — an `<each>` row / lifted markup honours them), and a compound-state namespace wrapper
+> (`<signupForm if=…>`): every emit-html dispatch in `IF_GATE_BYPASS_TAGS` and the compound-parent wrapper returns
+> before the §17.1 mount gate. `show=` was dropped on the same hosts and on all three structural elements. A guard
+> that fails open, so raised to HIGH (security pack `n27`). Now refused — **E-GATE-UNSUPPORTED-HOST** (new §34 row),
+> once, ahead of the bypass dispatches (`emit-html.ts`), in `renderEmptyChildToJs`, on a lifted `<each>` (`show=`)
+> and at TAB for `show=` on a structural opener. `<page>` keeps E-PAGE-INVALID-ATTR. Refusal, not lowering:
+> honouring `if=` on `<errorBoundary>` / `<render>` (rendered subtrees) is the better language answer and is owed
+> to the bootstrap; impl#1 is frozen to bootstrap + security fixes.
 
 S301 recorded this as a stated-not-implied residual inside
 [[g-dispatched-mount-inside-if-never-renders]] — *"appears to be ignored … NOT investigated."* **Now
@@ -14977,8 +14990,217 @@ assumption"** shape with the oracle being a third-party DOM rather than our own 
 assertions need a real-browser check — and prefer the real-Chrome path for any conditional-lowering
 verification. Sibling of [[g-nav-browser-harness-fidelity]].
 
-<!-- @gap id=g-structural-element-if-chain-and-show-composition-nominal sev=MED status=open -->
-### G-STRUCTURAL-ELEMENT-IF-CHAIN-AND-SHOW-COMPOSITION-NOMINAL — `else` / `else-if=` / `show=` do NOT compose with `if=` on `<engine>` / `<match>` / `<each>`; §17.1.2.2 asserts they do — `NEW S302; MED; open`
+<!-- @gap id=g-gate-attr-case-variant-ignored-s469 sev=HIGH status=resolved resolved-by=s469-structural-else-guard locus=compiler/src/gate-attr-refusal.ts(gateAttrCaseVariant — the one predicate)+compiler/src/ast-builder.js(refuseUnconsumedStructuralChainAttrs, structuralGateFields, the <md> lowering)+compiler/src/component-expander.ts(parseComponentDef)+raw-text openers(scanOpenerGateAttrs) prov=empirical:S469-s469-structural-else-guard-round-2(executed-under-happy-dom)+review:412b77b8b -->
+### g-gate-attr-case-variant-ignored-s469 — `<p ELSE>`, `<div IF=@n>`, `<p SHOW=@n>` are not gates: the attribute is written to the DOM and the content renders, at exit 0 — `NEW S469; MED → HIGH (a gate that fails open); RESOLVED S469 round 3 (E-GATE-ATTR-CASE)`
+
+> **RESOLVED S469 round 3 (`s469-structural-else-guard`), fail closed.** A case variant of `if` / `else` / `else-if` /
+> `show` as an attribute name, on ANY element — markup, a component use-site, `<engine>` / `<match>` / `<each>`,
+> `<md>`, a `<match>` arm, an engine state-child, a timer — is **E-GATE-ATTR-CASE** (new §34 row), naming the
+> lower-case spelling. One predicate (`gateAttrCaseVariant`) applied by every reader, so markup and structural
+> openers stay identical (differential test). Corpus differential: no program in the corpus uses an upper-case gate
+> name (0 newly refused).
+> Round 4: a name a component DECLARES as a prop (`props={ Show: boolean }`, `<Card Show=@t/>`) is exempt on that
+> component's use-site (checked by the component expander, which knows the props); everywhere else the rule stands.
+
+Measured by the round-2 review probes (happy-dom): an upper- or mixed-case `if` / `else` / `else-if` / `show` name is
+an ordinary attribute to impl#1 — `collapseIfChains` and the gate emitters match the exact lower-case name — so the
+element is not a chain member / not gated and renders whatever the condition says. HTML attribute names are
+case-insensitive, so an author can reasonably read `IF=@isAdmin` as the gate. Since S469 round 2 the structural
+openers share the markup reader, so `<engine ELSE>` / `<match SHOW=@n>` behave identically (the differential test
+pins the equivalence, not this outcome). Fix direction (not decided): refuse a case-variant gate name with a code
+(fail closed), or fold the case. Not in this lane's brief.
+
+<!-- @gap id=g-lifecycle-opener-in-unmounted-chain-branch-runs-s469 sev=MED status=open locus=searched:compiler/src/codegen/emit-html.ts(if-chain branch <template>s)+compiler/src/codegen(the §6.7 state-opener wiring)—not-traced prov=empirical:S469-s469-structural-else-guard-round-2(executed-under-happy-dom) -->
+### g-lifecycle-opener-in-unmounted-chain-branch-runs-s469 — a `<poll>` in the `else` branch of a chain runs while the branch is not mounted; `<timer running=@n>` ran its body with `@n` false — `NEW S469; MED; open`
+
+Measured by the round-2 review probes (`p4`, happy-dom): `<div if=@f>a</div><poll id="pp" else interval=10>${ @hit = true }</>`
+with `@f` true sets `@hit` (the poll ticks though its branch is an inert `<template>`); `<timer interval=10 running=@n>`
+with `@n` false ran its body too. The same class as the engine-under-a-chain-branch drop (the chain renderer gates
+markup, not lifecycle wiring), in the opposite direction: the lifecycle runs ungated. Not traced; not in this lane's
+brief (the opener IS a chain member — its `else` is consumed — so the chain-attribute invariant does not cover it).
+
+<!-- @gap id=g-sym-match-walk-skips-rows-and-chain-branches-s469 sev=MED status=open locus=compiler/src/symbol-table.ts(walkMatchBlockNodes descends only body / children / defChildren / consequent / alternate / arms[].body) prov=empirical:S469-s469-structural-else-guard-round-2(executed-under-happy-dom) -->
+### g-sym-match-walk-skips-rows-and-chain-branches-s469 — `<match>` validation (exhaustiveness, arm diagnostics) never runs on a `<match>` in an `<each>` row or an `if=` chain branch — `NEW S469; MED; open`
+
+`walkMatchBlockNodes` (symbol-table.ts) visits `body` / `children` / `defChildren` / `consequent` / `alternate` /
+`arms[].body` only, so an `<each>` row (`templateChildren` / `emptyChild`) and an if-chain branch
+(`branches[].element` / `elseBranch`) are never reached. Measured: `<match for=Phase on=@ph><Idle>…</></>` (missing
+`.Active`) is E-MATCH-NOT-EXHAUSTIVE at top level and compiles CLEAN in an `<each>` row (rendering nothing for
+`.Active`). Found while landing the round-2 arm-gate refusal, which therefore runs in codegen `buildMatchArms`
+instead. Widening the walk will surface newly-firing diagnostics in rows (corpus differential owed).
+
+<!-- @gap id=g-form-if-remount-runaway-s469 sev=LOW status=open locus=searched:compiler/src/runtime-template.js(_scrml_if_rewire / _scrml_nav_rewire / _scrml_mount_template)—not-traced prov=empirical:S469-s469-structural-else-guard-round-2(executed-under-happy-dom) -->
+### g-form-if-remount-runaway-s469 — `<form if=@n>` (or a `<form>` chain branch) re-mounts itself thousands of times when the gate opens: ~7,400 copies within 5 ms in happy-dom, then a stack overflow — `NEW S469; LOW; open`
+
+Measured by the round-2 review probes (`p3` / `p4` / `p5`, happy-dom): flipping `@n` true under `<form if=@n><p>…</p></form>`
+leaves ~7,400–7,600 copies of the content in the DOM ~5 ms later and logs `RangeError: Maximum call stack size exceeded`
+from `_scrml_mount_template` → happy-dom's `HTMLFormElement` proxy; `<form else>` in a chain does the same. Looks like
+`_scrml_if_rewire` / `_scrml_nav_rewire` re-mounting on its own mutation (a `<form>` is a nav-rewire target).
+Pre-existing (same on `456158a63`). Not checked in a real browser — happy-dom's form proxy may be part of it
+([[g-happydom-foster-parents-template-in-table-context]] is the precedent for a harness-only artefact). Fix not attempted.
+
+<!-- @gap id=g-if-gate-bypass-ssr-mirror-dead-s469 sev=LOW status=open locus=compiler/src/codegen/emit-ssr-render.ts(IF_GATE_BYPASS_TAGS check ~:529 + the compound-parent mirror)+compiler/tests/integration/ssr-a-terminus.test.js((g)/(i)) prov=dispatch:s469-structural-else-guard-round-2 -->
+### g-if-gate-bypass-ssr-mirror-dead-s469 — the SSR "this `if=` never reaches the gate" mirror (`IF_GATE_BYPASS_TAGS` in emit-ssr-render.ts) is now mostly vacuous: an `if=` on those hosts is refused — `NEW S469; LOW; open`
+
+S433 taught `buildSsrEachRenderers` that an `if=` on `<errorBoundary>` / `<page>` / the state openers / a compound
+wrapper never reaches the mount gate, so their server first paint must not be suppressed. Since S469
+(s469-structural-else-guard) every one of those `if=`s is refused (E-GATE-UNSUPPORTED-HOST; `<page>` E-PAGE-INVALID-ATTR),
+so no shipped program exercises the mirror except through a chain member (whose `if=` the chain emitter strips). The
+mirror code and the ssr-a-terminus (g)/(i) "keeps its server render" assertions now guard a refused shape. Remove the
+dead mirror (keep the exact-set pin of `IF_GATE_BYPASS_TAGS`, which the refusal itself uses) — a deletion, owed a
+review of every reader of `IF_GATE_BYPASS_TAGS` first.
+
+<!-- @gap id=g-derived-if-then-else-reported-as-codegen-defect-s469 sev=LOW status=open locus=compiler/src/ast-builder.js(engine-decl derived expression form — derivedExprText parse failure is not reported at TAB) prov=empirical:S469-s469-structural-else-guard-round-2 -->
+### g-derived-if-then-else-reported-as-codegen-defect-s469 — `derived=if @g then .A else .B` fails as E-CODEGEN-INVALID-LOGIC ("the compiler could not lower this construct") with an artifact byte offset, not a source diagnostic — `NEW S469; LOW; open`
+
+`if … then … else` is not a scrml expression; the derived value falls to the expression form, its parse fails to an
+escape hatch, and the error surfaces only when the emitted `client.js` fails to parse (`const __scrml_derived_v = (if
+_scrml_reactive_get("g") th…`). Fails closed (same on base and both rounds), but the message reads as a compiler defect.
+A TAB diagnostic on an unparseable `derived=` value (naming the ternary / `match` forms) is the fix.
+
+<!-- @gap id=g-whitespace-opener-gate-dropped-s469 sev=HIGH status=resolved resolved-by=s469-structural-else-guard locus=compiler/src/ast-builder.js(collapseIfChains — the state-opener gate refusal beside E-CTRL-004; parseTypedAttributes — dropped-value / orphan / reserved-word refusals) prov=review:S469-s469-structural-else-guard-round-6(review-of-9be2cecf9,executed-under-happy-dom) -->
+### g-whitespace-opener-gate-dropped-s469 — ⚠ SECURITY: `< span if=@n>SECRET</span>` (a space after `<`) is a STATE opener: the gate was kept but never read and the children rendered unconditionally — `NEW S469; HIGH; RESOLVED S469 by refusal (E-GATE-UNSUPPORTED-HOST)`
+
+Repro (pre-existing, same on base): `<n> = false` then `<div id="out">< span if=@n><p>SECRET</p></span></div>` — the
+only diagnostic was W-WHITESPACE-001; `< div class="box" if=@n>`, `show=`, and a whitespace opener as a `<program>`
+child section did the same. The block splitter reads `< name` as a state opener, `parseTypedAttributes` keeps its
+attributes, and nothing gates a state opener's children.
+
+> **RESOLVED S469 round 6 by refusal.** An `if=` / `show=` (or a case variant) on a state opener is
+> E-GATE-UNSUPPORTED-HOST, beside the E-CTRL-004 check in `collapseIfChains`; the message says to remove the space.
+> `parseTypedAttributes` also refuses what would hide a gate: an operator-run value, a dropped value that leaves a
+> gate name as the value (`< div x=-1 if=@n>`), an orphaned `=` / value, and `x= else`. Pinned by pack n27 `r6`
+> shapes and the differential test. A state opener nested in an `<each>` row (its sub-build runs no `collapseIfChains`)
+> is not covered by the gate check — not measured leaking, noted for the next reader.
+
+<!-- @gap id=g-unregistered-upper-tag-if-ssr-first-paint-s469 sev=HIGH status=open locus=searched:compiler/src/codegen/emit-html.ts(an unresolved upper-case / type-named tag carrying if= is emitted with data-scrml-bind-if, its children in the live first-paint tree)—not-traced prov=empirical:S469-s469-structural-else-guard-round-5(review-of-88d71e8ba-M2,executed-under-happy-dom) -->
+### g-unregistered-upper-tag-if-ssr-first-paint-s469 — ⚠ SECURITY: `<Pt if=@n>` on an upper-case tag that names no component (a type name: `<Phase if=@n>`) ships its content in the SSR / first-paint HTML and hides it only after hydration — `NEW S469; HIGH; open`
+
+Repro (happy-dom, s469-structural-else-guard round 5 head; same on base):
+```scrml
+type Phase:enum = { Idle, Active }
+<n> = false
+<div id="out"><Phase if=@n><p class="leak">u</p></Phase></div>
+```
+The emitted HTML carries `<Phase data-scrml-bind-if="…"><p class="leak">u</p></Phase>` in the LIVE tree (no
+`<template>`), so the content is visible before hydration (probe: leak 1 at first paint, 0 after mount). The same
+with an enum / struct type name. Fail-open at first paint for anything a gate guards. Fix direction (not decided):
+refuse an upper-case tag that resolves to no component (it is already E-COMPONENT-035 in some positions), or route it
+through the mount gate. Found by the round-5 review (M2); out of this lane's scope.
+
+<!-- @gap id=g-lift-markup-parser-dropped-value-and-case-variant-s469 sev=HIGH status=open locus=searched:compiler/src/codegen/emit-lift.js(the lifted-markup tag parser — _parseLiftAttrValueShared / the lift-tag attribute reader)—not-traced prov=empirical:S469-s469-structural-else-guard-round-5(review-of-88d71e8ba-M4,executed-under-happy-dom) -->
+### g-lift-markup-parser-dropped-value-and-case-variant-s469 — ⚠ SECURITY: lifted markup `lift <p x=-1= if=@n>`, `lift <p x=-1 IF=@n>`, `lift <p x=.Show>` compile clean, render visible with the gate false, and render mangled text — `NEW S469; HIGH; open`
+
+Repro (happy-dom, round 5 head; same on base):
+```scrml
+<xs> = [1]
+<n> = false
+<div id="out">${ for (y of @xs) { lift <p class="leak" x=-1 IF=@n>e</p> } }</div>
+```
+The lifted-markup tag parser is a separate reader from the markup attribute tokenizer: it neither refuses the
+dropped value nor the case-variant gate name, so the `<p>` renders (text `e < / p >` — the closer leaks as text).
+`x=-1= if=@n` and `x=.Show` behave the same, at top level, in a row's lift and under an `if … lift`. The markup and
+structural readers refuse every one of these shapes since S469 rounds 3–5; the lift reader owes the same refusals
+(the one-reader direction: parse lift tags with `tokenizeAttributes` + `parseAttributes`). Found by the round-5
+review (M4); out of this lane's scope.
+
+<!-- @gap id=g-render-element-in-each-row-or-lift-renders-nothing-s469 sev=MED status=open locus=searched:compiler/src/codegen/emit-each.ts(row element builder — `<render>` reaches the generic createElement path),compiler/src/codegen/emit-lift.js(emitCreateElementFromMarkup — same)—not-traced prov=empirical:S469-s469-structural-else-guard(executed-under-happy-dom-on-b0cffc6a4) -->
+### g-render-element-in-each-row-or-lift-renders-nothing-s469 — `<render of=@v/>` inside an `<each>` row or lifted markup is emitted as a literal `<render>` DOM element and paints nothing, at exit 0 — `NEW S469; MED; open`
+
+Measured in passing by `s469-structural-else-guard` (happy-dom, `b0cffc6a4`): `<each in=@xs as y><div><render of=@badge/></div></each>`
+and `${ for (y of @xs) { lift <div><render of=@badge/></div> } }` compile clean; the row / lift builder emits
+`document.createElement("render")`, so the held value's `renders` markup (§19.15) never appears. With `if=` on the
+`<render>` the same (nothing either way). Fail closed (nothing leaks) but silent — a §19.15 render that renders
+nothing. At top level / nested / in a component body `<render>` works. Fix direction (refuse with a code, or lower
+it in the row / lift builders) not decided; the row and lift element builders are the loci to read.
+
+<!-- @gap id=g-structural-element-if-chain-and-show-composition-nominal sev=HIGH status=resolved resolved-by=s469-structural-else-guard locus=compiler/src/ast-builder.js(captureStructuralChainAttr / captureStructuralShowAttr keep the attribute on the engine-decl / match-block / each-block opener; refuseUnconsumedStructuralChainAttrs after collapseIfChains)+compiler/src/codegen/emit-lift.js(tryEmitNestedLiftEach)+compiler/src/codegen/emit-each.ts(renderEmptyChildToJs)+compiler/src/component-expander.ts(parseComponentDef reports the refusal as itself) prov=empirical:S469-s469-engine-if-chain-refusal(executed-under-happy-dom-on-b447b29eb)+S469-s469-structural-else-guard(executed-under-happy-dom-on-b0cffc6a4;security-pack-n27-41-FAIL) -->
+### G-STRUCTURAL-ELEMENT-IF-CHAIN-AND-SHOW-COMPOSITION-NOMINAL — `else` / `else-if=` / `show=` do NOT compose with `if=` on `<engine>` / `<match>` / `<each>`; §17.1.2.2 asserts they do — `NEW S302; MED → HIGH (security, S469); RESOLVED S469 by refusal (s469-structural-else-guard — E-CTRL-001 / E-CTRL-002 / E-GATE-UNSUPPORTED-HOST; the composition is owed to the bootstrap)`
+
+> **RESOLVED S469 by refusal (`s469-structural-else-guard`, impl#1 security limb).** Severity raised MED → HIGH:
+> the `else` / `else-if=` leg FAILED OPEN — a branch the author gated rendered anyway, so a privileged control in
+> the `else` branch showed on the wrong password (security pack family `n27`: 41 of 43 shapes FAIL on
+> `b0cffc6a4`). Executed position matrix (happy-dom, `b0cffc6a4`), gated content visible when it must not be:
+>
+> | element | `else` / `else-if=` | `show=` |
+> |---|---|---|
+> | `<engine>` | LEAK at top level / nested (row, component body: already E-COMPONENT-ENGINE-SCOPE; lifted: already E-CTRL-001 / -002) | LEAK top / nested |
+> | `<match>` | LEAK top / nested / row / component body (lifted: E-MATCH-BLOCK-IN-LIFT) | LEAK nested / row / component body |
+> | `<each>` | LEAK at every position, lifted included | LEAK at every position |
+> | `<empty>` (an `<each>` fallback) | LEAK at every position (`if=` too) | LEAK at every position |
+>
+> Fix: the structural openers now KEEP `else` / `else-if=` / `show=` (`captureStructuralChainAttr`,
+> `captureStructuralShowAttr` — the name search masks quoted strings and bracketed groups, and an `else` that closes
+> an `if … then … else` in an unparenthesized value such as `derived=if @s == "x" then .A else .B` is not read as the
+> attribute), and ONE check after `collapseIfChains` (`refuseUnconsumedStructuralChainAttrs`) refuses every
+> non-markup node still carrying a chain attribute — by construction never a chain member — with E-CTRL-001 /
+> E-CTRL-002, and a `show=` with E-GATE-UNSUPPORTED-HOST. Codegen backstops: a lifted `<each>` (`emit-lift.js`
+> `tryEmitNestedLiftEach`, which ran before the markup backstop) and `<empty>` (`emit-each.ts` `renderEmptyChildToJs`).
+> In a component body the refusal is reported as itself at its own position (not E-COMPONENT-021). Plain-markup
+> chains and a component use-site / `<errorBoundary>` / `<render>` AS a chain member were already correct and are
+> byte-identical. The SPEC §17.1.2.2 composition stays Nominal (impl#1 divergence note); the bootstrap owes it —
+> probed read-only: it refuses every one of these shapes (`<engine>` / `<match>` / `<errorBoundary>` / `<empty>`
+> are E-BOOTSTRAP-UNSUPPORTED, `<each else=>` / `<each show=>` are named E-BOOTSTRAP-UNSUPPORTED). Pins:
+> `compiler/tests/browser/structural-else-guard-s469.browser.test.js` (94; 73 fail on base),
+> `security-failable-pack/shapes/n27.js` (43).
+>
+> **Round 2 (review of `456158a63`, FIX).** Round 1 read the structural openers with a regex word walk + mask,
+> which disagreed with the markup attribute tokenizer: `else=""` / `else="true"` / `else=${true}` / `else=(true)`, a
+> bare `if` word swallowing a later `else` (`<engine if else>`, `data-x=if else`), no space before `else`
+> (`title="x"else`, `on=(@ph)else`) and a quote inside `${ … }` (`// it's`, `/"/`) each made a `<p>` a chain member
+> but compiled clean on `<engine>` / `<match>` / `<each>` with the gated branch visible. Now every structural opener
+> is read by `tokenizeAttributes(…, "markup")` + `parseAttributes` (`readStructuralOpenerAttrs`), which also decides
+> where a `<match>` / `<each>` opener ends (`tokenizerOpenerEnd` — the builders' quote-tracking scanners cut the
+> opener at the `// it's` apostrophe); the word walk, the mask and the `pendingIf` carve-out are deleted. On
+> `<engine … derived=…>` the tokenizer reads up to `derived=`; the rest is the derived extent, and whatever the
+> expression reader does not consume is **E-ENGINE-DERIVED-NOT-LAST** (impl#1 requires `derived=` last; §34, §51.0.J
+> divergence note). `for=` / `initial=` / `var=` are read from the prefix only. A bare structural `if` is E-CG-003.
+> Same reader on the raw-text openers (`gateAttrNamesInOpener`): `<onTimeout>` / `<onIdle>` (`else=""`,
+> `else=${true}`, `else="x"` were missed), engine state-child and `<match>` arm openers (refused, an arm is
+> dispatched by its variant; the arm check is in codegen `buildMatchArms` because the SYM match walk skips rows —
+> [[g-sym-match-walk-skips-rows-and-chain-branches-s469]]), a gated component-body `<slot>`, `<md show=>`. Pins:
+> `compiler/tests/unit/structural-opener-gate-differential.test.js` (354 — the `<p>`-vs-structural equivalence over
+> the review spellings + 60 seeded random openers, and the derived-last set), pack n27 +61 (61 FAIL on `456158a63`,
+> all PASS-REFUSED). Case variants (`ELSE`, `IF=`, `SHOW=`) are ignored on `<p>` too, so on both:
+> [[g-gate-attr-case-variant-ignored-s469]].
+>
+> **Round 3 (review of `412b77b8b`, FIX on one HIGH regression).** Round 2 read the openers with the markup reader
+> but dropped the reader's own REFUSALS: an unquoted value with a bare operator (`data-path=admin/panel`,
+> `title=a/b`, `1+2`, `a?b:c`, `a&&b`, `a==b`, `a,`, `a;`) is an `ATTR_OP_REJECT` run to the tag close that swallows
+> the gate after it; on a `<p>` its E-ATTR-UNQUOTED-OPERATOR fails the compile, but `structuralGateFields` kept only
+> the errors inside the `if=` value, so `<engine data-path=admin/panel if=@isAdmin>` rendered with the gate false —
+> a regression versus base and round 1. Now every reader refusal is reported on every structural opener (and
+> forwarded out of `<each>` / `<match>` sub-builds), and the raw-text openers (`scanOpenerGateAttrs` — arms,
+> state-children, timers) report them too. The builders' own expression slots (`<each in= of= key=>`,
+> `<match on=>`) end where the expression parser stops, like `derived=`, and the reader resumes after them.
+> Also: the text before `derived=` is trimmed (an `if=@n` before it was a false E-CG-003); `derived=@m, show=@n` (a
+> comma sequence) is refused; no E-ENGINE-VAR-DUPLICATE cascade after E-ENGINE-DERIVED-NOT-LAST; case-variant gate
+> names refused everywhere ([[g-gate-attr-case-variant-ignored-s469]]). Pack n27 +275 (197 FAIL on `412b77b8b`, all
+> PASS-REFUSED); differential test +495.
+>
+> **Round 4 (review of `20fadd7b4`, FIX on two fail-open holes).** (1) A value the tokenizer DROPS (`tabindex=-1`,
+> `x=+1`, `x=.5`, `x=~1`, `x=)`, `x=]`) leaves the next attribute's name as the value, so `<each in=@xs as x
+> tabindex=-1 if=@n>` read `if` as `tabindex`'s value and rendered ungated (the engine form leaked into the SSR HTML
+> too); `<p>` refuses it E-ATTR-001, but round 3 forwarded only the operator-run refusals. Now every scratch error is
+> forwarded (exempt only: the builder's own `.Variant` / `:Type` sigil slots, `initial=` / `accepts=`, and never when
+> the name left behind is a gate name); the raw-text openers report a dropped value; and a markup `<p tabindex=-1
+> if=@n>` in an `<each>` ROW — which also rendered ungated, its sub-build discarding the E-ATTR-001 — is refused too
+> (the swallowed-gate E-ATTR-001 is forwarded). (2) The expression-slot loop had a 64-pass cap that, exhausted,
+> left the rest of the opener unread (a 65th-segment `if=` leaked); it now provably progresses with no cap. Also:
+> a slot value ends at the next top-level `name=` (`<each key=x.id + 1 in=@xs as x if=@n>` compiles, slot order
+> free); a component prop declared `Show` is that component's attribute, not E-GATE-ATTR-CASE. Pack n27 +142 (109
+> FAIL on `20fadd7b4`, 0 after); differential test 972.
+>
+> **Round 5 (review of `88d71e8ba`, FIX on one HIGH).** `<engine for=Phase initial=.Active = if=@n>` (and
+> `initial=.Active= if=@n`, `=if=@n`, `= else`, `=else`, `:if=@n`, `accepts=:Phase= if=@n …`) compiled clean and the
+> SSR body shipped the content: the sigil splice left an `=` + value no attribute owned, and the attribute parser
+> SKIPPED such tokens silently. The invariant now: no attribute token is ever silently skipped — an orphan is
+> E-ATTR-001 on every element (markup included, forwarded out of `<each>` rows: `<p x=.A= if=@n>` in a row leaked
+> too), the raw-text scanner walks openers the same way, and an arm opener the arm parser bails on (`<Active =
+> if=@n>`, which rendered the opener as text on every tree) is refused. The sigil exemption is exact (one `.` / `:`,
+> a bare identifier, no `=` after; `initial=-.Active` / `initial=$.Active` no longer start the engine elsewhere). An
+> IDENT value `if` / `else` (`x= else`) is refused. E-GATE-ATTR-CASE skips only registered components (prev refused
+> `<Phase Show=@n>`; round 4 had skipped every upper-case tag). Pack n27 +26; differential test 1044.
 
 **Filed against my own SPEC text, hours after writing it.** §17.1.2.2 (S302) states *"`else` / `else-if=`
 compose with all three, under the ordinary chain rules"* and *"`show=` composes."* **Neither holds.**
@@ -15011,8 +15233,17 @@ reader would have taken a SHALL-shaped sentence as shipped behaviour.
 
 ---
 
-<!-- @gap id=g-if-reject-unenforced-on-structural-declaration-elements sev=MED status=open -->
-### G-IF-REJECT-UNENFORCED-ON-STRUCTURAL-DECLARATION-ELEMENTS — §17.1.2's `SHALL REJECT` list is unenforced on four elements, two of them with zero diagnostics — `NEW S302; MED; open`
+<!-- @gap id=g-if-reject-unenforced-on-structural-declaration-elements sev=MED status=resolved resolved-by=s469-structural-else-guard locus=compiler/src/codegen/emit-html.ts(IF_GATE_BYPASS_TAGS — errors, channel)+compiler/src/engine-statechild-parser.ts(timerGateAttr — onTimeout / onIdle)+compiler/src/symbol-table.ts(timerGateAttrDiagnostic) prov=empirical:S469-s469-structural-else-guard(measured-on-b0cffc6a4) -->
+### G-IF-REJECT-UNENFORCED-ON-STRUCTURAL-DECLARATION-ELEMENTS — §17.1.2's `SHALL REJECT` list is unenforced on four elements, two of them with zero diagnostics — `NEW S302; MED; RESOLVED S469 (s469-structural-else-guard — E-GATE-UNSUPPORTED-HOST)`
+
+> **RESOLVED S469 (`s469-structural-else-guard`).** Measured on `b0cffc6a4`: still as below (`<onTimeout if=@f>`
+> compiled clean and the timer armed regardless). Now `<channel if=>` / `<errors if=>` / `<render if=>` (emit-html,
+> ahead of the bypass dispatches) and `<onTimeout if=>` / `<onIdle if=>` (captured by `scanForOnTimeoutEntries` /
+> `scanForOnIdleEntries`, refused in the typer) are **E-GATE-UNSUPPORTED-HOST**; an `else` / `else-if=` on
+> `<onTimeout>` / `<onIdle>` / `<onTransition>` is E-CTRL-001 / E-CTRL-002 (never a chain member). `W-ATTR-001`
+> still fires beside the error on `<channel>` / `<errors>`. The §17.1.2 reject list also named `<onTransition>`,
+> whose `if=expr` is its §4.15 / §51.0.H transition guard — **RULED S469** (user-voice 69d6636: *"if= is the
+> guard"*): `<onTransition>` is off the reject list; `<onTransition if=>` stays the guard (impl#1 already honours it).
 
 §17.1.2 (S302) says every scrml-defined structural element other than the three widened ones SHALL
 reject `if=`. Measured on base AND HEAD:

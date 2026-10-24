@@ -84,6 +84,7 @@ import { urlSlashesAt } from "./block-splitter.js";
 // S469 (SECURITY) — every `${…}` block in an opener is bounded by acorn (`logicBlockClose`),
 // never by a brace counter: the text cut out is what the failable walk reads and codegen emits.
 import { logicBlockClose, braceBlockClose } from "./interpolation-extent.ts";
+import { gateAttrNamesInOpener, scanOpenerGateAttrs, type GateAttrName } from "./gate-attr-refusal.ts";
 
 /**
  * S469 — the index one past a BODY `${…}` interpolation at `i` (a closer-finder's skip),
@@ -542,6 +543,18 @@ function afterAttrMatch(attrs: string): [string, string] | null {
 }
 
 /**
+ * §17.1 / §17.1.1 / §17.2 (S469, g-if-reject-unenforced-on-structural-declaration-elements) —
+ * the first `if=` / `else` / `else-if=` / `show=` written on an `<onTimeout>` / `<onIdle>`
+ * opener, read by the markup attribute tokenizer (`gateAttrNamesInOpener`) — the same predicate
+ * a `<p>` gets, so `else=""`, `else=${true}`, `title="x"else` are all seen. Neither timer reads
+ * one (§17.1.2: SHALL reject `if=`): the attribute was dropped and the timer armed whatever the
+ * condition said. Captured so the typer refuses it.
+ */
+function timerGateAttr(attrs: string): GateAttrName | undefined {
+  return gateAttrNamesInOpener(attrs)[0];
+}
+
+/**
  * A5-2 (§51.0.M) — scan a state-child body for `<onTimeout/>` siblings.
  *
  * `<onTimeout>` is a self-closing structural element with required `after`
@@ -642,6 +655,12 @@ export function scanForOnTimeoutEntries(
 
     const entry: OnTimeoutEntry = { after: afterVal, to: toVal, rawOffset: startIdx };
     if (nameVal !== undefined) entry.name = nameVal;
+    const gateAttr = timerGateAttr(attrs);
+    if (gateAttr !== undefined) entry.gateAttr = gateAttr;
+    // S469 round 3 — the markup reader's own refusals on this opener (an operator value that
+    // swallows the attributes after it, a case-variant gate name). Refused by the typer.
+    const gateProblems = scanOpenerGateAttrs(attrs).problems;
+    if (gateProblems.length > 0) entry.gateProblems = gateProblems;
     out.push(entry);
   }
 
@@ -707,7 +726,12 @@ export function scanForOnIdleEntries(rulesRaw: string): OnIdleEntry[] {
       toVal = v;
     }
 
-    out.push({ after: afterVal, to: toVal, rawOffset: startIdx });
+    const idle: OnIdleEntry = { after: afterVal, to: toVal, rawOffset: startIdx };
+    const gateAttr = timerGateAttr(attrs);
+    if (gateAttr !== undefined) idle.gateAttr = gateAttr;
+    const gateProblems = scanOpenerGateAttrs(attrs).problems;
+    if (gateProblems.length > 0) idle.gateProblems = gateProblems;
+    out.push(idle);
   }
 
   return out;
@@ -1040,6 +1064,11 @@ export function scanForOnTransitionEntries(
     // logic-context (`${...}`), and bare expression all retained as-is.
     const ifRaw = valued.get("if");
     const ifExprRaw: string | null = ifRaw !== undefined ? ifRaw.trim() : null;
+    // S469 (§17.1.1) — `else` / `else-if=` on an `<onTransition>` is never a chain member
+    // (the handler is not a rendered sibling); it was dropped and the handler fired
+    // unconditionally. Captured so the typer refuses it (E-CTRL-001 / E-CTRL-002).
+    const chainAttr: "else" | "else-if" | undefined =
+      valued.has("else-if") ? "else-if" : (bare.has("else") || valued.has("else")) ? "else" : undefined;
 
     // Locate body end. Mirrors parseEngineStateChildren body-end logic.
     let bodyStart = openerEnd + 1;
@@ -1073,6 +1102,7 @@ export function scanForOnTransitionEntries(
             bodyRaw: "",
             isColonShorthand: false,
             rawOffset: lt,
+            ...(chainAttr !== undefined ? { chainAttr } : {}),
           });
           i = openerEnd + 1;
           continue;
@@ -1095,6 +1125,7 @@ export function scanForOnTransitionEntries(
       bodyRaw: bodyRaw.slice(bodyStart, bodyEnd),
       isColonShorthand,
       rawOffset: lt,
+      ...(chainAttr !== undefined ? { chainAttr } : {}),
     });
     i = nextI;
   }
@@ -2925,11 +2956,21 @@ export function parseEngineStateChildren(rulesRaw: string): EngineStateChildEntr
       ? []
       : scanForOnTimeoutEntries(bodyRaw, skipRegions);
 
+    // §17.1 / §17.2 (S469 round 2) — `if=` / `show=` / `else` / `else-if=` on a state-child
+    // opener, read by the markup attribute tokenizer. A state-child is a dispatched arm, not a
+    // gated host: the attribute was dropped and the arm rendered whatever it said. The typer
+    // refuses it (symbol-table `stateChildGateDiagnostic`).
+    const _gateScan = scanOpenerGateAttrs(afterTag);
+    const gateAttrs = _gateScan.names;
+    const gateProblems = _gateScan.problems;
+
     out.push({
       tag,
       rule: ruleForm,
       bodyRaw,
       isColonShorthand,
+      ...(gateAttrs.length > 0 ? { gateAttrs } : {}),
+      ...(gateProblems.length > 0 ? { gateProblems } : {}),
       // S160 (S154 ruling (b)) — legacy after-`>` placement marker.
       legacyColonPlacement,
       rawOffset: lt,

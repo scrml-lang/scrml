@@ -742,6 +742,7 @@ function buildMatchArms(
         openerStart: number;
       }>;
       diagnostics: Array<{ code: string; message: string; spanStart: number; spanEnd: number }>;
+      gateDiagnostics?: Array<{ code: string; message: string; spanStart: number; spanEnd: number }>;
     };
   };
 
@@ -752,6 +753,13 @@ function buildMatchArms(
   // failable walk read.
 
   const result = parseMatchArms(matchBlock.armsRaw);
+  // §17.1 / §17.2 (S469 round 2) — an `if=` / `show=` / `else` / `else-if=` on an arm opener is
+  // never read (an arm is dispatched by its variant): refused here, where EVERY `<match>`
+  // lowering passes (top level, `<each>` rows, chain branches, component bodies). The recorded
+  // error fails the compile.
+  for (const d of result.gateDiagnostics ?? []) {
+    recordRefusedLowering(new CGError(d.code, d.message, (matchBlock as any).span ?? { start: 0, end: 0, line: 1, col: 1 }), matchBlock as object);
+  }
   const variantFields = resolveVariantFields(matchBlock.forType, fileAST);
   const arms: import("./emit-variant-guard.ts").VariantArm[] = [];
   // each-in-block-form-match (S153) — each-block nodes lifted out of arm bodies

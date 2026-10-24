@@ -42,6 +42,7 @@
  * Parallelism: per-file — fully parallel across Bun workers.
  */
 
+import { rawOpenerGateDiagnostic, type GateAttrName, GATE_ATTR_CASE_CODE, gateAttrCaseVariant, gateAttrCaseMessage } from "./gate-attr-refusal.ts";
 import { placeholderParam } from "./placeholder-nonce.ts";
 import { readUnquotedAttrValue, unquotedRejectDiagnostic } from "./unquoted-attr-value.ts";
 import { nativeParseFile } from "../native-parser/parse-file.js";
@@ -1417,6 +1418,7 @@ function reparseSynthesizedFile(
         message: e.message,
         span: e.tabSpan,
         severity: e.severity,
+        ...((e as any).structuralChainRefusal === true ? { structuralChainRefusal: true } : {}),
       })),
     };
   }
@@ -1516,6 +1518,7 @@ export function parseComponentBody(
         code: e.code,
         message: e.message,
         span: e.span,
+        ...((e as any).structuralChainRefusal === true ? { structuralChainRefusal: true } : {}),
       })),
       // §15.13.5 / §51.0.K — engines declared inside the re-parsed body (both
       // the structural `engine-decl` form and the `${ <engine/> }` lift form).
@@ -1666,7 +1669,68 @@ function parseComponentDef(
   // S459 L2 — an attribute-level refusal (E-ATTR-001: a single-quoted value, which is not
   // an attribute-string delimiter) is reported under its OWN code, exactly as outside a
   // component; the attribute recovered as `absent`, so the body is not "malformed".
-  const parseErrors = allParseErrors.filter((e) => e.code !== "E-ATTR-001" && e.code !== "E-SCRIPT-001" && e.code !== "E-STYLE-001");
+  // §17.1.2.2 (S469) — an `else` / `else-if=` on a structural element in the body
+  // (ast-builder `refuseUnconsumedStructuralChainAttrs`, E-CTRL-001 / -002) is reported as
+  // itself, at its own position: the body parsed, so it is not "malformed".
+  const isStructuralChainRefusal = (e: any): boolean => e?.structuralChainRefusal === true;
+  const forwardedRefusals = new Set<string>();
+  for (const e of allParseErrors) {
+    if (!isStructuralChainRefusal(e)) continue;
+    const defSpan = span ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 };
+    const at = bodyDiagnosticSourceSpan(defSpan, normalizedBody, e.span?.start, e.span?.end) as any;
+    forwardedRefusals.add(`${e.code}@${at?.start ?? 0}`);
+    const line = typeof at?.line === "number" ? at.line : 0;
+    ceErrors.push(makeCEError(
+      e.code,
+      `${String(e.message).replace(/\(line \d+\)/, `(line ${line})`)} (in component \`${name}\`)`,
+      at,
+    ));
+  }
+  // S469 round 2 — a `<slot>` in a component body carrying `if=` / `show=` / `else` /
+  // `else-if=`. impl#1 does not place use-site children at a `<slot>` (§66.15.2 `<slot/>` is
+  // the bootstrap's): it appends them after the body and emits `<slot>` as a plain element,
+  // so the gate toggled an empty element while the children it was meant to gate rendered
+  // anyway. Refused, wherever the `<slot>` sits (a chain member included).
+  {
+    const defSpan = span ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 };
+    const seenSlot = new Set<unknown>();
+    const visitSlot = (v: unknown): void => {
+      if (!v || typeof v !== "object" || seenSlot.has(v)) return;
+      seenSlot.add(v);
+      if (Array.isArray(v)) { for (const x of v) visitSlot(x); return; }
+      const n = v as Record<string, unknown>;
+      // §17.1 (S469 round 3) — a case-variant gate name on any body element (the native re-parse
+      // runs no TAB pass; a buildAST re-parse's own report was forwarded above — not twice).
+      if (typeof n.kind === "string" && Array.isArray(n.attrs) && !(n.kind === "markup" && typeof n.tag === "string" && /^[A-Z]/.test(n.tag))) {
+        for (const a of n.attrs as Array<{ name?: unknown; span?: { start?: number; end?: number } }>) {
+          const lower = a && gateAttrCaseVariant(a.name);
+          if (!lower) continue;
+          const at = bodyDiagnosticSourceSpan(defSpan, normalizedBody, a.span?.start, a.span?.end) as any;
+          const key = `${GATE_ATTR_CASE_CODE}@${at?.start ?? 0}`;
+          if (forwardedRefusals.has(key)) continue;
+          forwardedRefusals.add(key);
+          ceErrors.push(makeCEError(GATE_ATTR_CASE_CODE, `${gateAttrCaseMessage(String(a.name), lower)} (in component \`${name}\`)`, at));
+        }
+      }
+      if (n.kind === "markup" && n.tag === "slot" && Array.isArray(n.attrs)) {
+        for (const a of n.attrs as Array<{ name?: unknown; span?: { start?: number; end?: number } }>) {
+          if (a && (a.name === "if" || a.name === "show" || a.name === "else" || a.name === "else-if")) {
+            const d = rawOpenerGateDiagnostic(a.name as GateAttrName, "slot", `a component-body \`<slot>\``,
+              `impl#1 appends use-site children after the component body rather than at \`<slot>\`; gate the use site instead (\`<div if=COND><${name}>…</></div>\`).`);
+            ceErrors.push(makeCEError(d.code, `${d.message} (in component \`${name}\`)`,
+              bodyDiagnosticSourceSpan(defSpan, normalizedBody, a.span?.start, a.span?.end)));
+          }
+        }
+      }
+      for (const k of Object.keys(n)) {
+        if (k === "span" || k === "parent") continue;
+        const c = n[k];
+        if (c && typeof c === "object") visitSlot(c);
+      }
+    };
+    visitSlot(nodes);
+  }
+  const parseErrors = allParseErrors.filter((e) => e.code !== "E-ATTR-001" && e.code !== "E-SCRIPT-001" && e.code !== "E-STYLE-001" && !isStructuralChainRefusal(e));
   for (const e of allParseErrors) {
     if (e.code !== "E-ATTR-001") continue;
     const defSpan = span ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 };
@@ -3731,6 +3795,19 @@ function expandComponentNode(
     ));
     // Leave the node as-is to allow downstream error recovery
     return [node];
+  }
+
+  // §17.1 (S469 round 4) — a case-variant gate name on a component USE-SITE is refused
+  // (E-GATE-ATTR-CASE) UNLESS it is a prop this component declares (`props={ Show: boolean }`
+  // then `<Card Show=@t/>`): a declared prop is the component's own attribute, not a gate.
+  {
+    const declared = new Set((def.propsDecl ?? []).map((d) => d.name));
+    for (const a of (node.attrs ?? []) as Array<{ name?: unknown; span?: Span }>) {
+      const lower = a && gateAttrCaseVariant(a.name);
+      if (!lower || declared.has(String(a.name))) continue;
+      ceErrors.push(makeCEError(GATE_ATTR_CASE_CODE, gateAttrCaseMessage(String(a.name), lower),
+        a.span ?? node.span ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 }));
+    }
   }
 
   // ---------------------------------------------------------------------------

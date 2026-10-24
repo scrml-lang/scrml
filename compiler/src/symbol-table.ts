@@ -633,6 +633,11 @@ export interface OnTimeoutEntry {
   /** Substring offset (relative to the enclosing state-child's `bodyRaw`)
    *  of the `<onTimeout` opener. */
   rawOffset: number;
+  /** S469 — an `if=` / `show=` / `else-if=` / `else` written on the opener (refused by the
+   *  typer: E-GATE-UNSUPPORTED-HOST / E-CTRL-002 / E-CTRL-001). Absent when none. */
+  gateAttr?: "if" | "else" | "else-if" | "show";
+  /** S469 round 3 — the markup attribute reader's refusals on the opener (refused). */
+  gateProblems?: Array<{ code: string; message: string }>;
 }
 
 /**
@@ -662,6 +667,34 @@ export interface OnIdleEntry {
   /** Substring offset (relative to the engine's `rulesRaw`) of the
    *  `<onIdle` opener. */
   rawOffset: number;
+  /** S469 — an `if=` / `show=` / `else-if=` / `else` written on the opener (refused). */
+  gateAttr?: "if" | "else" | "else-if" | "show";
+  /** S469 round 3 — the markup attribute reader's refusals on the opener (refused). */
+  gateProblems?: Array<{ code: string; message: string }>;
+}
+
+/**
+ * S469 (g-if-reject-unenforced-on-structural-declaration-elements) — an `if=` / `else-if=` /
+ * `else` on a `<onTimeout>` / `<onIdle>` opener. Neither element reads one, so the timer armed
+ * whatever the condition said, silently. §17.1.2 lists both as SHALL REJECT `if=`; `else` /
+ * `else-if=` there is never a chain member (§17.1.1).
+ */
+function timerGateAttrDiagnostic(
+  element: "onTimeout" | "onIdle",
+  gateAttr: "if" | "else" | "else-if" | "show",
+): { code: string; message: string } {
+  if (gateAttr === "if" || gateAttr === "show") {
+    return { code: GATE_UNSUPPORTED_HOST_CODE, message: gateUnsupportedHostMessage(gateAttr, element) };
+  }
+  const code = gateAttr === "else" ? "E-CTRL-001" : "E-CTRL-002";
+  const spelled = gateAttr === "else" ? "`else`" : "`else-if=`";
+  return {
+    code,
+    message:
+      `${code}: ${spelled} on \`<${element}>\` is not part of a lowered \`if=\` chain — a timer element is ` +
+      `never a chain member, so the attribute would be ignored and the timer would arm unconditionally. ` +
+      `It is refused rather than emitted ungated (§17.1.1).`,
+  };
 }
 
 /**
@@ -712,6 +745,9 @@ export interface OnTransitionEntry {
    *  surrounding parentheses or `${...}` wrapper. `null` when not present.
    *  B17.3 typer normalises (paren-form / logic-context / bare). */
   ifExprRaw: string | null;
+  /** S469 — an `else` / `else-if=` written on the opener (refused by the typer,
+   *  E-CTRL-001 / E-CTRL-002). Absent when none. */
+  chainAttr?: "else" | "else-if";
   /** Body text between opener and closer. Empty string for self-closing
    *  `<onTransition .../>` (degenerate but harmless per SURVEY.md decision 2).
    *
@@ -732,6 +768,11 @@ export interface OnTransitionEntry {
 export interface EngineStateChildEntry {
   /** PascalCase tag name, e.g., `"Small"` for `<Small ...>...</>`. */
   tag: string;
+  /** S469 round 2 — `if=` / `show=` / `else` / `else-if=` written on the state-child opener
+   *  (read by the markup attribute tokenizer). Refused (`stateChildGateDiagnostic`). */
+  gateAttrs?: Array<"if" | "else" | "else-if" | "show">;
+  /** S469 round 3 — the markup attribute reader's refusals on the opener (refused). */
+  gateProblems?: Array<{ code: string; message: string }>;
   /** Parsed form of the `rule=` attribute. */
   rule: EngineRuleForm;
   /** Raw body text between the opener and closer. Today's AST stores
@@ -5745,6 +5786,7 @@ function stringLiteralValueOf(arg: any): string | null {
 // `ReferenceError: autoDeriveEngineVarName is not defined` (g-derived-engine-autoderive-crash).
 import { autoDeriveEngineVarName } from "./engine-varname";
 import { ENGINE_IN_ROW_CODE, ENGINE_IN_ROW_REFUSED, engineInEachRowMessage } from "./engine-in-each-row.ts";
+import { GATE_UNSUPPORTED_HOST_CODE, gateUnsupportedHostMessage, rawOpenerGateDiagnostic } from "./gate-attr-refusal.ts";
 export { autoDeriveEngineVarName };
 
 /**
@@ -6331,6 +6373,9 @@ function fireEngineVarDuplicate(
   errors: SYMDiagnostic[],
   filePath: string,
 ): void {
+  // S469 round 3 — an opener refused by E-ENGINE-DERIVED-NOT-LAST had its post-`derived=` text
+  // (a `var=` / `name=`) unread, so its auto-derived name is an artifact: no collision cascade.
+  if (engineDecl && engineDecl._derivedNotLast === true) return;
   const span: SYMDiagnostic["span"] = engineDecl.span ?? {
     file: filePath, start: 0, end: 0, line: 1, col: 1,
   };
@@ -7155,6 +7200,12 @@ export function validateEngineStateChildrenAndRules(
       let acceptedIdle: OnIdleEntry | null = null;
       let duplicateFired = false;
       for (const entry of idleEntries) {
+        // S469 — an `if=` / `else` / `else-if=` on the opener is never read: refuse it.
+        if (entry.gateAttr !== undefined) {
+          const d = timerGateAttrDiagnostic("onIdle", entry.gateAttr);
+          fireB15Diagnostic(errors, d.code, d.message, engineDecl, filePath, "error");
+        }
+        for (const pr of entry.gateProblems ?? []) fireB15Diagnostic(errors, pr.code, `${pr.message} (on an \`<onIdle>\`)`, engineDecl, filePath, "error");
         // Misplacement check (E-IDLE-MISPLACED).
         let misplaced = false;
         for (const [a, b] of stateChildRanges) {
@@ -11368,6 +11419,18 @@ export function validateEngineA5Extensions(
       }
     }
 
+    // S469 round 2 — a gate / chain attribute on the state-child opener is never read: refuse it.
+    for (const pr of sc.gateProblems ?? []) {
+      fireA5Diagnostic(errors, pr.code, `${pr.message} (on the engine state-child \`<${sc.tag}>\`)`, engineDecl, filePath, "error");
+    }
+    if (Array.isArray(sc.gateAttrs)) {
+      for (const g of sc.gateAttrs) {
+        const d = rawOpenerGateDiagnostic(g, sc.tag, `the engine state-child \`<${sc.tag}>\``,
+          `A state-child is entered by a transition; express the condition as state structure (a variant for the gated state), or gate the whole \`<engine if=COND>\`.`);
+        fireA5Diagnostic(errors, d.code, d.message, engineDecl, filePath, "error");
+      }
+    }
+
     // ----- Fire-sites #3 + #4 + #5: <onTimeout to=> legality + variant
     //       validation (§51.0.M) + name= shape/duplicate (§51.0.M S79) -----
     if (Array.isArray(sc.onTimeoutElements) && sc.onTimeoutElements.length > 0) {
@@ -11378,6 +11441,13 @@ export function validateEngineA5Extensions(
       const seenNames = new Set<string>();
       for (const ot of sc.onTimeoutElements) {
         if (!ot || typeof ot !== "object") continue;
+
+        // S469 — an `if=` / `else` / `else-if=` on the opener is never read: refuse it.
+        if (ot.gateAttr !== undefined) {
+          const d = timerGateAttrDiagnostic("onTimeout", ot.gateAttr);
+          fireA5Diagnostic(errors, d.code, d.message, engineDecl, filePath, "error");
+        }
+        for (const pr of ot.gateProblems ?? []) fireA5Diagnostic(errors, pr.code, `${pr.message} (on an \`<onTimeout>\`)`, engineDecl, filePath, "error");
 
         // Fire-site #5a: E-TIMER-NAME-INVALID (§51.0.M S79). Identifier
         // shape: PascalCase or camelCase, no leading digit, ASCII letters

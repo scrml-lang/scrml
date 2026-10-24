@@ -2,7 +2,7 @@ ${
     type Phase:enum = { Low, High }
     <count> = 0
 }
-<engine for=Phase derived=${ @count > 5 ? .High : .Low } effect=${ log("boot") }>
+<engine for=Phase effect=${ log("boot") } derived=${ @count > 5 ? .High : .Low }>
     <Low></>
     <High></>
 </>

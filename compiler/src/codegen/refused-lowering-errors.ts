@@ -33,6 +33,7 @@
  */
 
 import { CGError } from "./errors.ts";
+import { GATE_UNSUPPORTED_HOST_CODE, gateUnsupportedHostMessage } from "../gate-attr-refusal.ts";
 import { refusedElementCode, refusedElementMessage, scanRawContentForRefusedTags } from "../element-refusal.ts";
 import {
   isQuotedStaticHandler, quotedHandlerMessage, ATTR_QUOTED_HANDLER_CODE, attrSinkKey,
@@ -229,6 +230,7 @@ export function refuseUnloweredElseChain(
   attrName: unknown,
   position: string,
   anchor?: { span?: unknown } | null,
+  fix: string = "Give the element its own `if=` with the negated condition.",
 ): boolean {
   if (attrName !== "else" && attrName !== "else-if") return false;
   const code = attrName === "else" ? "E-CTRL-001" : "E-CTRL-002";
@@ -241,12 +243,57 @@ export function refuseUnloweredElseChain(
       code,
       `${code}: ${spelled} ${position} is not part of a lowered \`if=\` chain — if=/else-if=/else chains are ` +
       `not built at this level, so the element would render whatever the preceding condition says. ` +
-      `It is refused rather than emitted ungated (§17.1.1). Give the element its own \`if=\` with the ` +
-      `negated condition.`,
+      `It is refused rather than emitted ungated (§17.1.1). ${fix}`,
       span,
       "error",
     ),
     anchor ?? null,
   );
   return true;
+}
+
+/**
+ * §17.1 / §17.2 (S469, g-if-on-structural-element-silently-ignored) — refuse an `if=` / `show=` on
+ * an element whose lowering returns BEFORE the §17.1 mount gate / §17.2 display toggle is consulted
+ * (emit-html `IF_GATE_BYPASS_TAGS`, a compound-parent namespace wrapper, an `<each>`'s `<empty>`).
+ * The attribute was dropped there and the content rendered whatever the condition said — at exit
+ * 0, a guard that failed open (`<render if=@isAdmin of=@secret/>` painted the secret). Fails
+ * closed instead (E-GATE-UNSUPPORTED-HOST, see gate-attr-refusal.ts); the caller keeps lowering so
+ * sibling diagnostics still surface.
+ *
+ * Returns true when a refusal was recorded.
+ */
+export function refuseIfOnUngatedHost(
+  tag: unknown,
+  attr: { name?: unknown; span?: unknown } | null | undefined,
+  anchor?: { span?: unknown } | null,
+  hostDescription?: string,
+): boolean {
+  if (!attr || (attr.name !== "if" && attr.name !== "show")) return false;
+  const t = typeof tag === "string" && tag.length > 0 ? tag : "element";
+  const spanSource = (attr.span && typeof attr.span === "object") ? attr : anchor;
+  const span = (spanSource && typeof spanSource === "object" && (spanSource as { span?: unknown }).span
+    && typeof (spanSource as { span?: unknown }).span === "object")
+    ? (spanSource as { span: object }).span
+    : { start: 0, end: 0, line: 1, col: 1 };
+  recordRefusedLowering(
+    new CGError(GATE_UNSUPPORTED_HOST_CODE, gateUnsupportedHostMessage(attr.name, t, hostDescription), span, "error"),
+    anchor && typeof anchor === "object" ? anchor as object : null,
+  );
+  return true;
+}
+
+/** Every `if=` / `show=` in `attrs`, refused on the host (see `refuseIfOnUngatedHost`). */
+export function refuseGateAttrsOnUngatedHost(
+  tag: unknown,
+  attrs: unknown,
+  anchor?: { span?: unknown } | null,
+  hostDescription?: string,
+): boolean {
+  if (!Array.isArray(attrs)) return false;
+  let refused = false;
+  for (const a of attrs) {
+    if (a && (a.name === "if" || a.name === "show")) refused = refuseIfOnUngatedHost(tag, a, anchor, hostDescription) || refused;
+  }
+  return refused;
 }

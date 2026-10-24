@@ -186,7 +186,7 @@ describe("C1 §2 — SYM: E-ENGINE-EFFECT-ON-DERIVED on a derived opener effect"
   <A rule=.B></>
   <B rule=.A></>
 </>
-<engine for=Phase derived=@src effect=\${ @x = 1 }>
+<engine for=Phase effect=\${ @x = 1 } derived=@src>
   <Loading></>
   <Empty></>
 </>
@@ -201,7 +201,7 @@ describe("C1 §2 — SYM: E-ENGINE-EFFECT-ON-DERIVED on a derived opener effect"
   <A rule=.B></>
   <B rule=.A></>
 </>
-<engine for=Phase derived=match @src { .A :> .Loading, .B :> .Empty } effect=\${ @x = 1 }>
+<engine for=Phase effect=\${ @x = 1 } derived=match @src { .A :> .Loading, .B :> .Empty }>
   <Loading></>
   <Empty></>
 </>
@@ -321,7 +321,7 @@ describe("C1 §3 — DEFERRED: opener-effect write checked against .<initial>.ru
   <A rule=.B></>
   <B rule=.A></>
 </>
-<engine for=Phase derived=@src effect=\${ @phase = .Saved }>
+<engine for=Phase effect=\${ @phase = .Saved } derived=@src>
   <Loading rule=.Empty></>
   <Empty rule=.Saved></>
   <Saved></>

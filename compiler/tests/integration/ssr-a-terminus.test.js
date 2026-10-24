@@ -560,6 +560,13 @@ describe("ssr-a-terminus (f): an each under an inert `if=` template", () => {
 // it — its dispatch REWRITES the node to `main`/`div` keeping `if=` and re-enters
 // `emitNode`, so the gate does fire; the outlet case below guards that.
 
+// ⚑ S469 (s469-structural-else-guard) — this mirror guard is now MOSTLY VACUOUS. Every `if=` on
+// an IF_GATE_BYPASS_TAGS host (and on a compound-state wrapper) is refused, E-GATE-UNSUPPORTED-HOST
+// (`<page>`: E-PAGE-INVALID-ATTR), so no shape below compiles to a shipped artifact; the SSR
+// assertions guard a lowering only `compileBundles` (runCG, errors ignored) still reaches. The
+// mirror itself (emit-ssr-render.ts) is dead code for shipped programs — removal tracked as
+// g-if-gate-bypass-ssr-mirror-dead-s469. The exact-set pin of IF_GATE_BYPASS_TAGS stays live:
+// the refusal reads the same set.
 /** Every bypass tag, in a shape that puts the server-authority each UNDER it. */
 const BYPASS_TAG_SOURCES = {
   errorBoundary: `<errorBoundary if=@loaded fallback={<div>bad</>}><ul><each in=@accounts key=@.id><li : @.name></each></ul></errorBoundary>`,
@@ -610,6 +617,18 @@ describe("ssr-a-terminus (g): the if=-gate BYPASS tags keep their server render"
     // outlet is NOT a bypass: it rewrites its tag and re-enters the generic path.
     expect(IF_GATE_BYPASS_TAGS.has("outlet")).toBe(false);
   });
+
+  // S469 (g-if-on-structural-element-silently-ignored) — because these dispatches never reach
+  // the gate, an `if=` on one is now REFUSED (E-GATE-UNSUPPORTED-HOST; `<page>` keeps its own
+  // E-PAGE-INVALID-ATTR at TAB). The SSR assertions below still hold for the lowering the
+  // dispatch performs, but no such program ships: the refusal fails the compile.
+  for (const [tag, markup] of Object.entries(BYPASS_TAG_SOURCES)) {
+    if (tag === "page") continue;
+    test(`<${tag} if=…> is refused — E-GATE-UNSUPPORTED-HOST (the dispatch bypasses the gate)`, () => {
+      const { errors } = compileBundles(seededProgram(markup));
+      expect(errors.filter((e) => e.code === "E-GATE-UNSUPPORTED-HOST").length).toBe(1);
+    });
+  }
 
   for (const [tag, markup] of Object.entries(BYPASS_TAG_SOURCES)) {
     test(`<${tag} if=…> fires NO I-SSR-EACH-CLIENT-RENDERED (its if= never reaches the gate)`, () => {
@@ -685,22 +704,13 @@ describe("ssr-a-terminus (h): an each inside an author-written <template>", () =
 // declaration fact that no tag set can carry. This case needs the REAL pipeline:
 // `fileAST._scope` (the symbol table the test reads) is only populated by the full
 // compile, so the raw buildAST harness above would pass it vacuously.
-describe("ssr-a-terminus (i): a compound-parent wrapper carrying if= keeps its server render", () => {
+describe("ssr-a-terminus (i): a compound-parent wrapper keeps its server render; an if= on it is refused", () => {
   const dirs = [];
   afterAll(() => {
     for (const d of dirs) { try { rmSync(d, { recursive: true, force: true }); } catch { /* best effort */ } }
   });
 
-  test("<signupForm if=…> (a transparent namespace wrapper) still server-renders its each", async () => {
-    const { compileScrml } = await import("../../src/api.js");
-    // mkdtemp, not a fixed path: a shared fixture directory is a cross-run
-    // collision source on this platform.
-    const dir = mkdtempSync(join(tmpdir(), "scrml-s433-compound-"));
-    dirs.push(dir);
-    const inPath = join(dir, "app.scrml");
-    writeFileSync(
-      inPath,
-      `<program db="sqlite:./test.db">
+  const compoundProgram = (opener) => `<program db="sqlite:./test.db">
 \${
   <Account authority="server" table="users">
     id: number
@@ -712,12 +722,31 @@ describe("ssr-a-terminus (i): a compound-parent wrapper carrying if= keeps its s
 <signupForm>
   <userName req length(>=2)> = <input type="text"/>
 </>
-<signupForm if=@loaded><ul><each in=@accounts key=@.id><li : @.name></each></ul></signupForm>
+${opener}<ul><each in=@accounts key=@.id><li : @.name></each></ul></signupForm>
 </program>
-`,
-    );
+`;
+  const compileCompound = async (opener) => {
+    const { compileScrml } = await import("../../src/api.js");
+    // mkdtemp, not a fixed path: a shared fixture directory is a cross-run
+    // collision source on this platform.
+    const dir = mkdtempSync(join(tmpdir(), "scrml-s433-compound-"));
+    dirs.push(dir);
+    const inPath = join(dir, "app.scrml");
+    writeFileSync(inPath, compoundProgram(opener));
     const outDir = join(dir, "dist");
     const res = compileScrml({ inputFiles: [inPath], outputDir: outDir, write: true, log: () => {} });
+    return { res, outDir };
+  };
+
+  test("<signupForm if=…> is refused — E-GATE-UNSUPPORTED-HOST (the wrapper never reaches the gate), no artifact", async () => {
+    // S469 — the wrapper is transparent: its subtree rendered LIVE whatever `@loaded` said.
+    const { res, outDir } = await compileCompound("<signupForm if=@loaded>");
+    expect((res.errors ?? []).map((e) => e.code)).toContain("E-GATE-UNSUPPORTED-HOST");
+    expect(existsSync(join(outDir, "app.html"))).toBe(false);
+  });
+
+  test("<signupForm> (a transparent namespace wrapper) still server-renders its each", async () => {
+    const { res, outDir } = await compileCompound("<signupForm>");
     // Diagnostics span THREE result fields — reading only `.errors` would miss the
     // info-level lint entirely and make this assertion vacuous.
     const codes = [...(res.errors ?? []), ...(res.warnings ?? []), ...(res.lintDiagnostics ?? [])]

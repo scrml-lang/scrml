@@ -78,7 +78,7 @@ NOT-TWINNED by reason (684 cases; a case counts once per distinct reason):
 - 2 — program-move: impl#1 reads the restructured file differently (+E-IMPORT-003) — not restructured, no `…` unwrapped
 - 1 — const-cell: legacy declaration impl#1's front end did not surface as a declaration (left untouched)
 - 1 — engine-simple: `…` impl#1's front end did not surface as an engine declaration (left untouched)
-- 1 — engine-simple: engine surface beyond the simple rule: derived, effect (⚑ O5 surface)
+- 1 — engine-simple: engine surface beyond the simple rule: effect, derived (⚑ O5 surface)
 - 1 — program-move: impl#1 reads the restructured file differently (+E-CONTRACT-002, +E-CTX-001, +W-WHITESPACE-001) — not restructured, no `…` unwrapped
 - 1 — program-move: impl#1 reads the restructured file differently (-E-CONTRACT-001, +E-CONTRACT-002, +E-CTX-001, +W-WHITESPACE-001) — not restructured, no `…` unwrapped
 - 1 — program-move: impl#1 reads the restructured file differently (-E-LIFECYCLE-001) — not restructured, no `…` unwrapped
@@ -1753,7 +1753,7 @@ none
 - `lifecycle/effect-bare-not-interpolated` — not mechanical: engine-simple: declaration at the root of a file with no `<program>` (its §66 opener would be free-text there)
 - `lifecycle/effect-dep-derived-neg` — not mechanical: render-by-tag: markup tag `<p>` shares a cell's name — render-by-tag (→ `<*p/>`, SAME-ARC) or a collision; in §66 it would be an instance of the declaration (CTX — §66.6.6) · const-cell: non-literal initializer needs a type 
 - `lifecycle/effect-dep-derived-pos` — not mechanical: render-by-tag: markup tag `<p>` shares a cell's name — render-by-tag (→ `<*p/>`, SAME-ARC) or a collision; in §66 it would be an instance of the declaration (CTX — §66.6.6) · const-cell: non-literal initializer needs a type 
-- `lifecycle/effect-on-derived-engine` — not mechanical: engine-simple: engine surface beyond the simple rule: derived, effect (⚑ O5 surface)
+- `lifecycle/effect-on-derived-engine` — not mechanical: engine-simple: engine surface beyond the simple rule: effect, derived (⚑ O5 surface)
 - `lifecycle/on-transition-to` — not mechanical: engine-simple: engine surface beyond the simple rule: accepts (⚑ O5 surface)
 - `lifecycle/ontransition-once-if-attrs` — not mechanical: engine-simple: declaration at the root of a file with no `<program>` (its §66 opener would be free-text there)
 - `lifecycle/request-body-client-wrapper-rt` — not mechanical: rhs-decl: type `User | not` has a space at its top level — how it stands in an opener is not ruled (§66.2.4 covers refinement / lifecycle types only)
