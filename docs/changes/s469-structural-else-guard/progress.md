@@ -46,5 +46,5 @@ a lifted `<each>`.
       elements, `<each else=>` / `<each show=>` named); plain markup chain compiles.
 - [x] known-gaps: three entries resolved (structural chain raised to HIGH), new
       g-render-element-in-each-row-or-lift-renders-nothing-s469; state.ts --write.
-- [ ] corpus differential (base b0cffc6a4 vs head) — running.
-- [ ] CI blocking-job commands.
+- [x] corpus differential (scripts/corpus-emit-differential.ts, 2864 sources, base b0cffc6a4 vs head): 1 newly refusing — conformance ssr/i-ssr-each-client-rendered-if-gate-bypass-neg (intended, re-pinned); 170 artifact diffs, ALL the `_scrml_project_root` checkout path (0 after root normalization); 0 syntax regressions.
+- [x] CI blocking-job commands: all exit 0 (facts --check exit 1 = stale FACTS.md, WARN-only by design; not regenerated).
