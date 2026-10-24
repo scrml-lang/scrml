@@ -1702,12 +1702,25 @@ function templateLiteralEnd(text: string, i: number): number {
 }
 
 /**
- * The number of places `name` occurs as a word in `text` — string literal contents, template
- * literal TEXT and comments blanked (a template's `${…}` payloads are kept), a member property
- * (`x.e`) and a cell (`@e`) not counted. The audit's coverage check: every occurrence must be
- * one the tree walk accounted for, or the arm is refused.
+ * The number of places `name` occurs as a word in `text` — string literal contents and template
+ * literal TEXT blanked (a template's `${…}` payloads are kept), a member property (`x.e`) and a cell
+ * (`@e`) not counted. The audit's coverage check: every occurrence must be one the tree walk
+ * accounted for, or the arm is refused. The count must never be LOW (a low count could hide a use
+ * the walk missed): comments are not stripped, and when the text holds a `/` (a regex literal could
+ * hold a quote and make the string scan blank code) any occurrence the blanking removed is counted.
  */
 function countWordUses(text: string, name: string): number {
+  const blanked = countWordUsesBlanked(text, name);
+  if (!text.includes("/")) return blanked;
+  return Math.max(blanked, countWordUsesRaw(text, name));
+}
+
+function countWordUsesRaw(text: string, name: string): number {
+  const esc = name.replace(/[$]/g, "\\$");
+  return (text.match(new RegExp(`(?<![\\w$@])(?<!(?<!\\.)\\.)${esc}(?![\\w$])`, "g")) ?? []).length;
+}
+
+function countWordUsesBlanked(text: string, name: string): number {
   let out = "";
   let i = 0;
   while (i < text.length) {
@@ -1719,8 +1732,6 @@ function countWordUses(text: string, name: string): number {
       i = j + 1;
       continue;
     }
-    if (c === "/" && text[i + 1] === "/") { const j = text.indexOf("\n", i); out += " "; i = j < 0 ? text.length : j; continue; }
-    if (c === "/" && text[i + 1] === "*") { const j = text.indexOf("*/", i + 2); out += " "; i = j < 0 ? text.length : j + 2; continue; }
     if (c === "`") {
       const end = templateLiteralEnd(text, i);
       const inner = text.slice(i + 1, Math.max(i + 1, end - 1));
