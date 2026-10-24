@@ -71,3 +71,12 @@ a lifted `<each>`.
 - [x] SPEC: `<onTransition>` off the §17.1.2 reject list (ruling 69d6636); round-3 note; §34 E-GATE-ATTR-CASE.
 - [x] differential test (849), pack n27 +275 (905 → 1180; main 801 after #1529 merged), gaps.
 - [x] corpus differential vs main 27f897748: 0 new refusals (only the round-1 intended one), 170 path-only diffs.
+
+## Round 4 (review of 20fadd7b4 — FIX on two fail-open holes)
+
+- [x] HIGH-1: every scratch error forwarded (dropped values `-1` `+1` `.5` `~1` `)` `]`); sigil slots
+      (`initial=.V`, `accepts=:T`) exempt unless the left name is a gate; raw-text openers report dropped values;
+      a swallowed-gate E-ATTR-001 forwarded out of `<each>` rows (markup `<p tabindex=-1 if=@n>` in a row leaked too).
+- [x] HIGH-2: slot loop strictly progresses, no cap.
+- [x] LOW: slot ends at the next top-level `name=`; declared component prop `Show` exempt (CE).
+- [x] differential test 972; pack n27 +142 (1180 → 1322); SPEC note + §34 row; gaps.

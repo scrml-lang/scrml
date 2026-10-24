@@ -14874,6 +14874,8 @@ verification. Sibling of [[g-nav-browser-harness-fidelity]].
 > lower-case spelling. One predicate (`gateAttrCaseVariant`) applied by every reader, so markup and structural
 > openers stay identical (differential test). Corpus differential: no program in the corpus uses an upper-case gate
 > name (0 newly refused).
+> Round 4: a name a component DECLARES as a prop (`props={ Show: boolean }`, `<Card Show=@t/>`) is exempt on that
+> component's use-site (checked by the component expander, which knows the props); everywhere else the rule stands.
 
 Measured by the round-2 review probes (happy-dom): an upper- or mixed-case `if` / `else` / `else-if` / `show` name is
 an ordinary attribute to impl#1 — `collapseIfChains` and the gate emitters match the exact lower-case name — so the
@@ -15004,6 +15006,19 @@ it in the row / lift builders) not decided; the row and lift element builders ar
 > comma sequence) is refused; no E-ENGINE-VAR-DUPLICATE cascade after E-ENGINE-DERIVED-NOT-LAST; case-variant gate
 > names refused everywhere ([[g-gate-attr-case-variant-ignored-s469]]). Pack n27 +275 (197 FAIL on `412b77b8b`, all
 > PASS-REFUSED); differential test +495.
+>
+> **Round 4 (review of `20fadd7b4`, FIX on two fail-open holes).** (1) A value the tokenizer DROPS (`tabindex=-1`,
+> `x=+1`, `x=.5`, `x=~1`, `x=)`, `x=]`) leaves the next attribute's name as the value, so `<each in=@xs as x
+> tabindex=-1 if=@n>` read `if` as `tabindex`'s value and rendered ungated (the engine form leaked into the SSR HTML
+> too); `<p>` refuses it E-ATTR-001, but round 3 forwarded only the operator-run refusals. Now every scratch error is
+> forwarded (exempt only: the builder's own `.Variant` / `:Type` sigil slots, `initial=` / `accepts=`, and never when
+> the name left behind is a gate name); the raw-text openers report a dropped value; and a markup `<p tabindex=-1
+> if=@n>` in an `<each>` ROW — which also rendered ungated, its sub-build discarding the E-ATTR-001 — is refused too
+> (the swallowed-gate E-ATTR-001 is forwarded). (2) The expression-slot loop had a 64-pass cap that, exhausted,
+> left the rest of the opener unread (a 65th-segment `if=` leaked); it now provably progresses with no cap. Also:
+> a slot value ends at the next top-level `name=` (`<each key=x.id + 1 in=@xs as x if=@n>` compiles, slot order
+> free); a component prop declared `Show` is that component's attribute, not E-GATE-ATTR-CASE. Pack n27 +142 (109
+> FAIL on `20fadd7b4`, 0 after); differential test 972.
 
 **Filed against my own SPEC text, hours after writing it.** §17.1.2.2 (S302) states *"`else` / `else-if=`
 compose with all three, under the ordinary chain rules"* and *"`show=` composes."* **Neither holds.**
