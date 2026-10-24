@@ -119,6 +119,31 @@ the failure mode `markup-autoawait-all-emitters` recorded. The fix does NOT go e
 - SPEC §34 E-VALUE-SERVER-CALL row: records the impl#1 partial emission (impl#1-provisional) + provenance.
   `s34-census --check-new`: PASS.
 
+## Measurements (final branch)
+
+- security-failable-pack (classify.js, 1920 shapes): base PASS=724 PASS-REFUSED=1156 PASS-500=2 PASS-DENY=15
+  UNJUDGED=18 **FAIL=5** → branch PASS=723 PASS-REFUSED=1162 PASS-500=2 PASS-DENY=15 UNJUDGED=18 **FAIL=0**.
+- security-await-pack (904 shapes): unchanged, FAIL=0 both (PASS=317 PASS-REFUSED=561 PASS-500=18 PASS-DENY=5 UNJUDGED=3).
+- Enumeration probe (scratch, 48 shapes): every FAIL above → PASS-REFUSED E-VALUE-SERVER-CALL; plain cell
+  initializer unchanged (PASS-DENY; not a render position).
+- R26 (32 examples + 881 samples, base 915b6775f vs branch): 5 newly-rejected, 4 already-failing files gain the
+  code, 0 newly-clean. Every one was inspected and is a genuine render-position server call:
+  - NEW examples/17-schema-migrations.scrml — E-VALUE-SERVER-CALL (`${ for (let n of listNotes()) { lift … } }`)
+  - NEW samples/compilation-tests/gauntlet-r10-go-contacts.scrml — `${ initDB() }` in a `< db>` body (rendered: a db body is not a default-logic root)
+  - NEW samples/compilation-tests/gauntlet-r10-vue-datatable.scrml — `${ loadInitialData() }` in a `< db>` body
+  - NEW samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-fn-server-prefix-013.scrml — `<p>${computeKey(1, "x")}</>`
+  - NEW samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-function-with-sql-002.scrml — `<p>${loadUsers().length}</>`
+  - +code samples/admin-panel.scrml (E-TYPE-025 already), gauntlet-r10-bun-admin.scrml, phase1-fn-prohibition-sql-004.scrml, samples/user-profile.scrml
+- CI-only gates:
+  - types:check OK (unchanged). s34-census --check-new PASS. regen-spec-index --check OK. snippet-gate 0 fail.
+    claim-gate 0 fail. root `compiler/tests/*.test.js` 2239 pass. bootstrap-conformance --check: regenerated (--write).
+  - **corpus-compile-floor --check: FAIL — 2 NEW showcase breaks**: examples/17-schema-migrations.scrml (1),
+    benchmarks/per-route-roles/ (7: `for (… of loadX())` loops in admin/customer/dispatch/loads). NOT
+    baselined and NOT rewritten (brief: list, do not migrate). PA decision.
+  - **e2e-render-map: 1 hard fail** — "each multi-file app … emits html": benchmarks/per-route-roles/routes/admin.scrml
+    no entry html (the same benchmark). Delta (warn-only): examples/17-schema-migrations.scrml#empty needs-server → fails-compile.
+- Runtime: no file under compiler/runtime touched; zero runtime bytes.
+
 ## Gap status for the PA to file (do not edit known-gaps.md here)
 
 - `g-markup-gate-tests-server-call-promise` (HIGH) — CLOSED by refusal (E-VALUE-SERVER-CALL at every render position).

@@ -45,6 +45,7 @@ import { isEventHandlerAttrName } from "../multi-statement-scan.ts";
 import { DEFAULT_LOGIC_MODE_TAGS, stmtContainsRenderableLogic, stmtContainsLiftExpr, isValueFormControlFlowStmt } from "./emit-html.ts";
 import { parseMatchArms } from "../match-statechild-parser.ts";
 import { readShorthandBody, readBareArmBody, matchArmKey } from "../arm-body-reader.ts";
+import { soleLogicBlockPayload } from "../interpolation-extent.ts";
 
 type AnyNode = Record<string, unknown>;
 
@@ -228,9 +229,9 @@ class RenderWalk {
   /** Expression TEXT the tree holds unparsed: read with the one expression reader, else read to refuse. */
   private judgeText(raw: unknown, anchor: object, span: unknown, position: string): void {
     if (typeof raw !== "string" || raw.trim() === "") return;
-    // A head written `on=${ … }` / `if=${ … }` is carried with its `${ }`: the expression is inside.
-    const inner = /^\s*\$\{([\s\S]*)\}\s*$/.exec(raw);
-    const text = inner ? inner[1] : raw;
+    // A head written `on=${ … }` / `if=${ … }` is carried with its `${ }`: the expression is inside
+    // (read by the one reader of where a `${ }` ends).
+    const text = soleLogicBlockPayload(raw) ?? raw;
     let node: unknown = null;
     try { node = parseExprToNode(text, this.facts.filePath, 0); } catch { node = null; }
     const parsed = node && typeof node === "object" && !((node as AnyNode).kind === "escape-hatch" && (node as AnyNode).nativeKind === "ParseError");
