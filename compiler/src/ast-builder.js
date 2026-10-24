@@ -4848,16 +4848,37 @@ function captureStructuralChainAttr(header, absStart, line, col, filePath) {
     if (depth > 0 && c !== "\n") chars[j] = " ";
   }
   const masked = chars.join("");
-  // `else-if=` first (it also begins with `else`); a bare `else` is a standalone
-  // token not followed by `-`, `=` or an identifier character.
-  let m = masked.match(/(^|\s)(else-if)\s*=/);
-  let name = "else-if";
-  if (!m) {
-    m = masked.match(/(^|\s)(else)(?![-\w=$])/);
-    name = "else";
+  // Walk the standalone words. `else-if=` is always the attribute. A bare `else` is the
+  // attribute UNLESS it closes an `if … then … else …` expression in an unparenthesized
+  // attribute value (`derived=if @s == "x" then .A else .B` — §51.0 derived=): an `else`
+  // is consumed by a preceding unmatched `if` word in the same attribute value. Every
+  // `name=` boundary starts a new value. `.Else` / `@else` / `x.else` are not words here.
+  const WORD = /[A-Za-z_$][\w$-]*/g;
+  let found = null;
+  let pendingIf = 0;
+  let wm;
+  while ((wm = WORD.exec(masked)) !== null) {
+    const at0 = wm.index;
+    const prev = at0 > 0 ? masked[at0 - 1] : " ";
+    if (!/\s/.test(prev) && prev !== "=") continue;
+    const word = wm[0];
+    const rest = masked.slice(at0 + word.length);
+    const isAttrName = /^\s*=(?!=)/.test(rest);
+    if (isAttrName) {
+      if (word === "else-if") { found = { at: at0, name: "else-if" }; break; }
+      pendingIf = 0;
+      continue;
+    }
+    if (word === "if") { pendingIf++; continue; }
+    if (word === "else") {
+      if (pendingIf > 0) { pendingIf--; continue; }
+      found = { at: at0, name: "else" };
+      break;
+    }
   }
-  if (!m) return null;
-  const at = m.index + m[1].length;
+  if (!found) return null;
+  const name = found.name;
+  const at = found.at;
   const before = header.slice(0, at);
   const nl = (before.match(/\n/g) || []).length;
   const lastNl = before.lastIndexOf("\n");

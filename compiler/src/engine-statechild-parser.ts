@@ -561,6 +561,24 @@ function afterAttrMatch(attrs: string): [string, string] | null {
  * `<onTimeout>...</onTimeout>` is not in spec and is not matched here —
  * if observed, A5-3 typer can flag it.
  */
+/**
+ * §17.1 / §17.1.1 (S469, g-if-reject-unenforced-on-structural-declaration-elements) — the
+ * first `if=` / `else-if=` / `else` written on an `<onTimeout>` / `<onIdle>` opener. Neither
+ * element reads one (§17.1.2 lists both as SHALL REJECT `if=`): the attribute was dropped and
+ * the timer armed whatever the condition said, with no diagnostic. Captured so the typer can
+ * refuse it. Quoted values and `${…}` bodies are masked first so an `if` inside a computed
+ * `after=${…}` is never read as the attribute.
+ */
+function timerGateAttr(attrs: string): "if" | "else" | "else-if" | undefined {
+  const masked = attrs
+    .replace(/\$\{[\s\S]*?\}/g, (m) => " ".repeat(m.length))
+    .replace(/"[^"]*"/g, (m) => " ".repeat(m.length))
+    .replace(/'[^']*'/g, (m) => " ".repeat(m.length));
+  const m = masked.match(/(?:^|\s)(if|else-if)\s*=|(?:^|\s)(else)(?![-\w=$])/);
+  if (!m) return undefined;
+  return (m[1] ?? m[2]) as "if" | "else" | "else-if";
+}
+
 export function scanForOnTimeoutEntries(
   bodyRaw: string,
   skipRegions: ReadonlyArray<readonly [number, number]> = [],
@@ -642,6 +660,8 @@ export function scanForOnTimeoutEntries(
 
     const entry: OnTimeoutEntry = { after: afterVal, to: toVal, rawOffset: startIdx };
     if (nameVal !== undefined) entry.name = nameVal;
+    const gateAttr = timerGateAttr(attrs);
+    if (gateAttr !== undefined) entry.gateAttr = gateAttr;
     out.push(entry);
   }
 
@@ -707,7 +727,10 @@ export function scanForOnIdleEntries(rulesRaw: string): OnIdleEntry[] {
       toVal = v;
     }
 
-    out.push({ after: afterVal, to: toVal, rawOffset: startIdx });
+    const idle: OnIdleEntry = { after: afterVal, to: toVal, rawOffset: startIdx };
+    const gateAttr = timerGateAttr(attrs);
+    if (gateAttr !== undefined) idle.gateAttr = gateAttr;
+    out.push(idle);
   }
 
   return out;
@@ -1040,6 +1063,11 @@ export function scanForOnTransitionEntries(
     // logic-context (`${...}`), and bare expression all retained as-is.
     const ifRaw = valued.get("if");
     const ifExprRaw: string | null = ifRaw !== undefined ? ifRaw.trim() : null;
+    // S469 (§17.1.1) — `else` / `else-if=` on an `<onTransition>` is never a chain member
+    // (the handler is not a rendered sibling); it was dropped and the handler fired
+    // unconditionally. Captured so the typer refuses it (E-CTRL-001 / E-CTRL-002).
+    const chainAttr: "else" | "else-if" | undefined =
+      valued.has("else-if") ? "else-if" : (bare.has("else") || valued.has("else")) ? "else" : undefined;
 
     // Locate body end. Mirrors parseEngineStateChildren body-end logic.
     let bodyStart = openerEnd + 1;
@@ -1073,6 +1101,7 @@ export function scanForOnTransitionEntries(
             bodyRaw: "",
             isColonShorthand: false,
             rawOffset: lt,
+            ...(chainAttr !== undefined ? { chainAttr } : {}),
           });
           i = openerEnd + 1;
           continue;
@@ -1095,6 +1124,7 @@ export function scanForOnTransitionEntries(
       bodyRaw: bodyRaw.slice(bodyStart, bodyEnd),
       isColonShorthand,
       rawOffset: lt,
+      ...(chainAttr !== undefined ? { chainAttr } : {}),
     });
     i = nextI;
   }

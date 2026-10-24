@@ -17747,6 +17747,21 @@ function annotateNodes(
       if (errors.length > before) markOwnerReported(entry); // L1 — one diagnostic, not two
     };
     const onTransitionEntryCheck = (entry: Record<string, unknown>, where: string, span: Span, bindings: string[]): void => {
+      // S469 (§17.1.1) — an `else` / `else-if=` on the opener is never a chain member: the
+      // handler would fire unconditionally. Refused.
+      if (entry.chainAttr === "else" || entry.chainAttr === "else-if") {
+        const code = entry.chainAttr === "else" ? "E-CTRL-001" : "E-CTRL-002";
+        const spelled = entry.chainAttr === "else" ? "`else`" : "`else-if=`";
+        errors.push(new TSError(
+          code,
+          `${code}: ${spelled} on the <onTransition> ${where} is not part of a lowered \`if=\` chain — an ` +
+          `<onTransition> is never a chain member, so the attribute would be ignored and the handler would ` +
+          `run on every matching transition. It is refused rather than emitted ungated (§17.1.1). Give the ` +
+          `handler its own \`if=\` guard with the negated condition (§51.0.H).`,
+          span,
+        ));
+        return;
+      }
       const body = onTransitionBodySource(entry);
       if (body && "unreadable" in body) refuse(`the <onTransition> body ${where}`, span, "is not one readable '${ … }' block.");
       else if (body) statementBody(entry, "body", body.src, ENGINE_BODY_FILE.onTransition, `the <onTransition> body ${where}`, span, bindings);

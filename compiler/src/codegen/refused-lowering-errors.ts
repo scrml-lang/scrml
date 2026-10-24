@@ -229,6 +229,7 @@ export function refuseUnloweredElseChain(
   attrName: unknown,
   position: string,
   anchor?: { span?: unknown } | null,
+  fix: string = "Give the element its own `if=` with the negated condition.",
 ): boolean {
   if (attrName !== "else" && attrName !== "else-if") return false;
   const code = attrName === "else" ? "E-CTRL-001" : "E-CTRL-002";
@@ -241,12 +242,66 @@ export function refuseUnloweredElseChain(
       code,
       `${code}: ${spelled} ${position} is not part of a lowered \`if=\` chain — if=/else-if=/else chains are ` +
       `not built at this level, so the element would render whatever the preceding condition says. ` +
-      `It is refused rather than emitted ungated (§17.1.1). Give the element its own \`if=\` with the ` +
-      `negated condition.`,
+      `It is refused rather than emitted ungated (§17.1.1). ${fix}`,
       span,
       "error",
     ),
     anchor ?? null,
+  );
+  return true;
+}
+
+/** §17.1 / §17.1.2 (S469) — `if=` on an element whose emission never consults the mount gate. */
+export const IF_UNSUPPORTED_HOST_CODE = "E-IF-UNSUPPORTED-HOST";
+
+/**
+ * Tags §17.1.2 names (or covers by "every other scrml-defined structural element") as SHALL
+ * REJECT `if=` — declarations / lifecycle hooks / §4.15 elements with no rendered subtree of
+ * their own. The rest of the refused hosts are rendered subtrees impl#1 cannot gate.
+ */
+const IF_REJECTED_BY_SPEC = new Set([
+  "errors", "channel", "render", "onTimeout", "onIdle",
+]);
+
+/**
+ * §17.1 / §17.1.2 (S469, g-if-on-structural-element-silently-ignored) — refuse an `if=` on an
+ * element whose lowering returns BEFORE the §17.1 mount gate is consulted (emit-html
+ * `IF_GATE_BYPASS_TAGS`, a compound-parent namespace wrapper, an `<each>`'s `<empty>`). The
+ * attribute was dropped there and the content rendered whatever the condition said — at exit
+ * 0, a guard that failed open (`<render if=@isAdmin of=@secret/>` painted the secret). Fails
+ * closed instead; the caller keeps lowering so sibling diagnostics still surface.
+ *
+ * Returns true when the refusal was recorded.
+ */
+export function refuseIfOnUngatedHost(
+  tag: unknown,
+  ifAttr: { name?: unknown; span?: unknown } | null | undefined,
+  anchor?: { span?: unknown } | null,
+  hostDescription?: string,
+): boolean {
+  if (!ifAttr || ifAttr.name !== "if") return false;
+  const t = typeof tag === "string" && tag.length > 0 ? tag : "element";
+  const host = hostDescription ?? `\`<${t}>\``;
+  const spanSource = (ifAttr.span && typeof ifAttr.span === "object") ? ifAttr : anchor;
+  const span = (spanSource && typeof spanSource === "object" && (spanSource as { span?: unknown }).span
+    && typeof (spanSource as { span?: unknown }).span === "object")
+    ? (spanSource as { span: object }).span
+    : { start: 0, end: 0, line: 1, col: 1 };
+  const why = IF_REJECTED_BY_SPEC.has(t)
+    ? `§17.1.2: \`if=\` is honoured on \`<engine>\` / \`<match>\` / \`<each>\` and on HTML elements and ` +
+      `components; every other scrml-defined element SHALL reject it.`
+    : `impl#1 lowers ${host} without the §17.1 mount gate, so the condition would be ignored and the ` +
+      `content would render whatever it says.`;
+  recordRefusedLowering(
+    new CGError(
+      IF_UNSUPPORTED_HOST_CODE,
+      `${IF_UNSUPPORTED_HOST_CODE}: \`if=\` on ${host} is not honoured — ${why} It is refused rather than ` +
+      `emitted ungated. Move the condition to an element that gates: wrap it — ` +
+      `\`<div if=COND><${t} …>…</></div>\`.`,
+      span,
+      "error",
+    ),
+    anchor && typeof anchor === "object" ? anchor as object : null,
   );
   return true;
 }

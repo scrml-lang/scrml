@@ -633,6 +633,9 @@ export interface OnTimeoutEntry {
   /** Substring offset (relative to the enclosing state-child's `bodyRaw`)
    *  of the `<onTimeout` opener. */
   rawOffset: number;
+  /** S469 — an `if=` / `else-if=` / `else` written on the opener (refused by the
+   *  typer: E-IF-UNSUPPORTED-HOST / E-CTRL-002 / E-CTRL-001). Absent when none. */
+  gateAttr?: "if" | "else" | "else-if";
 }
 
 /**
@@ -662,6 +665,39 @@ export interface OnIdleEntry {
   /** Substring offset (relative to the engine's `rulesRaw`) of the
    *  `<onIdle` opener. */
   rawOffset: number;
+  /** S469 — an `if=` / `else-if=` / `else` written on the opener (refused). */
+  gateAttr?: "if" | "else" | "else-if";
+}
+
+/**
+ * S469 (g-if-reject-unenforced-on-structural-declaration-elements) — an `if=` / `else-if=` /
+ * `else` on a `<onTimeout>` / `<onIdle>` opener. Neither element reads one, so the timer armed
+ * whatever the condition said, silently. §17.1.2 lists both as SHALL REJECT `if=`; `else` /
+ * `else-if=` there is never a chain member (§17.1.1).
+ */
+function timerGateAttrDiagnostic(
+  element: "onTimeout" | "onIdle",
+  gateAttr: "if" | "else" | "else-if",
+): { code: string; message: string } {
+  if (gateAttr === "if") {
+    return {
+      code: "E-IF-UNSUPPORTED-HOST",
+      message:
+        `E-IF-UNSUPPORTED-HOST: \`if=\` on \`<${element}>\` is not honoured — §17.1.2: \`if=\` is honoured on ` +
+        `\`<engine>\` / \`<match>\` / \`<each>\` and on HTML elements and components; every other ` +
+        `scrml-defined element SHALL reject it. The timer would arm whatever the condition says. Remove the ` +
+        `condition, or move the timer into a state that is entered only when the condition holds.`,
+    };
+  }
+  const code = gateAttr === "else" ? "E-CTRL-001" : "E-CTRL-002";
+  const spelled = gateAttr === "else" ? "`else`" : "`else-if=`";
+  return {
+    code,
+    message:
+      `${code}: ${spelled} on \`<${element}>\` is not part of a lowered \`if=\` chain — a timer element is ` +
+      `never a chain member, so the attribute would be ignored and the timer would arm unconditionally. ` +
+      `It is refused rather than emitted ungated (§17.1.1).`,
+  };
 }
 
 /**
@@ -712,6 +748,9 @@ export interface OnTransitionEntry {
    *  surrounding parentheses or `${...}` wrapper. `null` when not present.
    *  B17.3 typer normalises (paren-form / logic-context / bare). */
   ifExprRaw: string | null;
+  /** S469 — an `else` / `else-if=` written on the opener (refused by the typer,
+   *  E-CTRL-001 / E-CTRL-002). Absent when none. */
+  chainAttr?: "else" | "else-if";
   /** Body text between opener and closer. Empty string for self-closing
    *  `<onTransition .../>` (degenerate but harmless per SURVEY.md decision 2).
    *
@@ -7155,6 +7194,11 @@ export function validateEngineStateChildrenAndRules(
       let acceptedIdle: OnIdleEntry | null = null;
       let duplicateFired = false;
       for (const entry of idleEntries) {
+        // S469 — an `if=` / `else` / `else-if=` on the opener is never read: refuse it.
+        if (entry.gateAttr !== undefined) {
+          const d = timerGateAttrDiagnostic("onIdle", entry.gateAttr);
+          fireB15Diagnostic(errors, d.code, d.message, engineDecl, filePath, "error");
+        }
         // Misplacement check (E-IDLE-MISPLACED).
         let misplaced = false;
         for (const [a, b] of stateChildRanges) {
@@ -11378,6 +11422,12 @@ export function validateEngineA5Extensions(
       const seenNames = new Set<string>();
       for (const ot of sc.onTimeoutElements) {
         if (!ot || typeof ot !== "object") continue;
+
+        // S469 — an `if=` / `else` / `else-if=` on the opener is never read: refuse it.
+        if (ot.gateAttr !== undefined) {
+          const d = timerGateAttrDiagnostic("onTimeout", ot.gateAttr);
+          fireA5Diagnostic(errors, d.code, d.message, engineDecl, filePath, "error");
+        }
 
         // Fire-site #5a: E-TIMER-NAME-INVALID (§51.0.M S79). Identifier
         // shape: PascalCase or camelCase, no leading digit, ASCII letters
