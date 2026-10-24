@@ -1812,6 +1812,37 @@ function auditBinderMatchPattern(pattern: string, binder: string, ctx: WholeBind
     if (m[3] !== undefined && countWordUses(m[3], binder) > 0) {
       return { code: "E-TYPE-031", what: `the arm \`${piece.trim()}\` re-binds \`${binder}\`` };
     }
+    if (m[3] !== undefined && m[3].split(",").some((b) => { const s = b.trim(); return s !== "" && s !== "_"; })) {
+      const bad = auditEnumPayloadBinderRefusal(m[2], ctx);
+      if (bad) return bad;
+    }
+  }
+  return null;
+}
+
+/**
+ * S470 — FAIL CLOSED: an arm of `match <binder>` that binds a payload of a variant one of whose
+ * fields may hold an enum value (an enum, a struct / array / union containing one, or a type that
+ * cannot be resolved). That binder is itself an enum value (§18.2: a bound variable has its field's
+ * declared type), so reading a field off it or comparing it with a primitive is the same misread
+ * as on the whole error; impl#1 types payload binders as `asIs` and cannot follow it, so the arm is
+ * refused (an impl#1 limitation, not a language rule). Bind the payload with a named `!{}` arm or
+ * `match` the enum value where it is declared.
+ */
+function auditEnumPayloadBinderRefusal(variant: string, ctx: WholeBinderAuditCtx): WholeBinderRefusal | null {
+  const en = ctx.en;
+  const v = en ? (en.variants ?? []).find((x) => x.name === variant) : undefined;
+  if (!en || !v) return null; // not a variant of the enum: the pattern checks refuse it
+  const fields = v.payload instanceof Map ? [...v.payload.keys()] : [];
+  for (const f of fields) {
+    const key = canonicalFieldTypeKey(en, variant, f);
+    // In a canonical key an enum appears as `e{…}` / `e@Name` at a token start; null = unknown.
+    if (key === null || /(?:^|[(:,|{])e[{@]/.test(key)) {
+      return {
+        code: "E-TYPE-031",
+        what: `the arm \`.${variant}(…)\` of \`match\` on it binds a payload whose field \`${f}\` ${key === null ? "has a type the compiler cannot resolve" : "holds an enum value"}; impl#1 cannot check how that binder is used (an impl#1 limitation, not a language rule)`,
+      };
+    }
   }
   return null;
 }
@@ -1988,6 +2019,10 @@ function auditWholeBinderTree(
             if (Array.isArray(arm.literals) && arm.literals.length > 0) { refuse("E-TYPE-028", `a literal arm is used over the error enum in \`match ${binder}\``); return; }
             if (!arm.isWildcard && !(ctx.en!.variants ?? []).some((v) => v.name === arm.variant)) { refuse("E-TYPE-031", `an arm of \`match ${binder}\` is not a variant of the handled error enum`); return; }
             if (bindingNames(arm.payloadBindings).includes(binder) || bindingNames(arm.binding).includes(binder)) { refuse("E-TYPE-031", `an arm re-binds \`${binder}\``); return; }
+            if (!arm.isWildcard && [...bindingNames(arm.payloadBindings), ...bindingNames(arm.binding)].some((s) => s !== "" && s !== "_")) {
+              const bad = auditEnumPayloadBinderRefusal(String(arm.variant ?? ""), ctx);
+              if (bad) { st.refusal = bad; return; }
+            }
             auditWholeBinderTree(arm.body, binder, ctx, st);
           } else {
             refuse("E-TYPE-031", `an arm of \`match ${binder}\` could not be read`);
