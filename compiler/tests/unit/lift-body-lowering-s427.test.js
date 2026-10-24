@@ -368,10 +368,13 @@ ${row}
   for (const [label, row] of [
     ["r5 — a row-local `const name`", `            const name = item.name
             lift <li class="row">\${name}</li>`],
-    ["a `const name` in a nested block of the row", `            if (item.id > 0) {
+    // S469 (g-keyed-row-control-flow-if-not-reevaluated-s469) — the nested block is an `if` inside an
+    // ELEMENT of the row (a region; the row stays keyed): an `if` among the row's roots that lifts
+    // decides what the row renders and lowers the list plain whatever names it reads.
+    ["a `const name` in a nested block of the row", `            lift <li class="row">\${ if (item.id > 0) {
                 const name = item.name
-                lift <li class="row">\${name}</li>
-            }`],
+                lift <b>\${name}</b>
+            } }</li>`],
     ["a lambda parameter `name`", `            lift <li class="row">\${[item.name].map(name => name + "!").join("")}</li>`],
     ["a nested function's parameter `name`", `            function fmt(name) { return "<" + name + ">" }
             lift <li class="row">\${fmt(item.name)}</li>`],

@@ -40,7 +40,7 @@ function isCallableJsExprText(text) {
   }
 }
 import { detectPredicateShapeBind } from "./predicate-bind-detector.js";
-import { liftGateReads, liftForTreeGatePins, liftGateInFunction, liftGateCellsAllNamed, liftGateBlockFnReadsItsBindings, liftRegionSafe } from "./lift-gate-scope.js";
+import { liftGateReads, liftForTreeRowPins, liftForTreeIfPins, liftIfDecidesRow, liftIfRegionSafe, liftLoopInRowElement, liftGateInFunction, liftGateCellsAllNamed, liftGateBlockFnReadsItsBindings, liftRegionSafe } from "./lift-gate-scope.js";
 
 // ---------------------------------------------------------------------------
 // Bug 64 (S159) — Tier-0 per-item content reactivity on reconcile.
@@ -761,11 +761,33 @@ export function setLiftGroupWindow(on) { _liftGroupWindow = !!on; }
  * at chunk scope).
  */
 export function refuseLiftOpenGatesSince(count, why) {
-  for (const g of _liftOpenGates.slice(count)) _refuseLiftGate(g.attrName, g.node, g.reads, why);
+  for (const g of _liftOpenGates.slice(count)) {
+    if (g.rowIf) _refuseLiftIf(g.node, `${why}, and the row it is in was lowered as the plain loop that block re-runs`);
+    else _refuseLiftGate(g.attrName, g.node, g.reads, why);
+  }
 }
 /** True when the block an open gate emitted since `count` is built in declares a function that reads its bindings. */
 export function liftOpenGatesBlockFnHazard(count) {
   return _liftOpenGates.slice(count).some((g) => liftGateBlockFnReadsItsBindings(g.node));
+}
+
+/**
+ * S469 (g-keyed-row-control-flow-if-not-reevaluated-s469) — a reactive `for … lift` loop lowered as the
+ * plain loop because an `if` in its tree decides what a row renders (liftForTreeIfPins), emitted
+ * outside any reconciled row (inside one it is a region of that row, or that row is plain too): only
+ * re-running the render that builds it re-reads the `if`. Counted like an open gate — an `if … lift`
+ * arm re-renders on what it read; a `${}` block is made a re-render effect (its own text may name no
+ * cell: `for (r of visible())`) — and refused where no render re-runs it (markup built in a function
+ * body, or outside a `${}` block).
+ */
+export function liftNoteRowIfPlainLoop(forNode) {
+  if (currentLiftReconcileCtx() || !liftForTreeIfPins(forNode)) return;
+  if (liftGateInFunction(forNode) || (!_liftLiveActive() && !_liftGroupWindow)) {
+    _refuseLiftIf(forNode, "the list is built where no render re-runs it (markup built in a function body, or outside a `${}` block), so a row cannot be rebuilt when the condition changes");
+    return;
+  }
+  _liftOpenGateCount++;
+  _liftOpenGates.push({ attrName: null, node: forNode, reads: null, rowIf: true });
 }
 
 function _refuseLiftGate(attrName, node, reads, why) {
@@ -2900,7 +2922,10 @@ export function forLiftTreeHasImpureLoop(forNode, outerDeclared) {
   // `if=` / `show=` that reads a value of the render other than its own row's binder
   // (liftForTreeGatePins, lift-gate-scope.js): a row built once per key cannot re-read it;
   // the plain loop, re-run whole by the enclosing render, can.
-  return _liftTreeWalk(forNode, outerDeclared).impure || liftForTreeGatePins(forNode);
+  //
+  // S469 (g-keyed-row-control-flow-if-not-reevaluated-s469) — and a tree holding a control-flow
+  // `if` that decides what the row renders, unless it is a region of the row (liftForTreeIfPins).
+  return _liftTreeWalk(forNode, outerDeclared).impure || liftForTreeRowPins(forNode);
 }
 
 /**
@@ -3432,6 +3457,7 @@ export function emitForStmtWithContainer(forNode, containerElVar, opts = {}) {
   const _regionCtx = currentLiftReconcileCtx();
   const _asRegion = !!_regionCtx && !_liftLandsOutsideRow() && _impure && _regionCtx.forNode &&
     !_liftTreeWalk(forNode, outerNames).impure && liftRegionSafe(forNode, _regionCtx.forNode);
+  if (_impure && !_asRegion && (iterIsReactive || _iterRefsOuterItem) && forBodyLiftsMarkup(body)) liftNoteRowIfPlainLoop(forNode);
   let _regionTarget = containerElVar;
   let _regionLines = null;
   let _regionVars = null;
@@ -3523,6 +3549,64 @@ export function emitForStmtWithContainer(forNode, containerElVar, opts = {}) {
  * @returns {string}
  */
 export function emitIfStmtWithContainer(ifNode, containerElVar, opts = {}) {
+  // S469 (g-keyed-row-control-flow-if-not-reevaluated-s469) — an `if` that decides what a keyed row
+  // renders, built in that row (not in a region of it, not in a lift that escaped it): the row is
+  // built once per key, so the `if` is read again only as a REGION of the row — the shape the
+  // nested-loop region uses (emitForStmtWithContainer): a comment anchor inside the row element, and
+  // a live-keyed tracked effect that re-resolves the row's item, destroys the previous run's child
+  // owner scope, removes the nodes it built and re-runs the `if` into a fragment it inserts before
+  // the anchor. The row keeps its keying (its other nodes, their state and listeners). An `if` the
+  // row cannot hold that way was lowered with the row plain (liftForTreeIfPins); one that still
+  // reaches here (the prediction missed) is refused, never left stale.
+  const _rowCtx = currentLiftReconcileCtx();
+  if (_rowCtx && _rowCtx.regionDepth === 0 && !_liftLandsOutsideRow() && liftIfDecidesRow(ifNode)) {
+    if (!_rowCtx.forNode || !liftLoopInRowElement(ifNode, _rowCtx.forNode) || !liftIfRegionSafe(ifNode, _rowCtx.forNode)) {
+      _refuseLiftIf(ifNode, "the reconciled row it is built in is built once per key, and impl#1 could not lower that row so that the `if` is re-run");
+      return "";
+    }
+    const v = { anchor: genVar("region_end"), nodes: genVar("region_nodes"), sid: genVar("region_sid"), frag: genVar("region_frag") };
+    let inner;
+    _rowCtx.regionDepth += 1;
+    try {
+      inner = _emitIfStmtInline(ifNode, v.frag, opts);
+    } finally {
+      _rowCtx.regionDepth -= 1;
+    }
+    const lines = [
+      `const ${v.anchor} = _scrml_g.document.createComment("scrml-region");`,
+      `${containerElVar}.appendChild(${v.anchor});`,
+      `let ${v.nodes} = [];`,
+      `let ${v.sid} = null;`,
+    ];
+    const body = [
+      `if (${v.sid} !== null) _scrml_owner_destroy(${v.sid});`,
+      `for (const _scrml_n of ${v.nodes}) if (_scrml_n.parentNode) _scrml_n.parentNode.removeChild(_scrml_n);`,
+      `const ${v.frag} = _scrml_g.document.createDocumentFragment();`,
+      `${v.sid} = _scrml_scope_open("as", _scrml_mount_owner(${v.anchor}));`,
+      `_scrml_in_scope(${v.sid}, () => {`,
+      ...inner.split('\n').map((l) => '  ' + l),
+      `});`,
+      `${v.nodes} = [...${v.frag}.childNodes];`,
+      `${v.anchor}.parentNode.insertBefore(${v.frag}, ${v.anchor});`,
+    ];
+    for (const l of maybeWrapLiftPerItemEffect(body)) lines.push(l);
+    return lines.join('\n');
+  }
+  return _emitIfStmtInline(ifNode, containerElVar, opts);
+}
+
+function _refuseLiftIf(node, why) {
+  recordRefusedLowering(new CGError(
+    "E-IMPL1-LIFT-GATE-UNTRACKED",
+    `E-IMPL1-LIFT-GATE-UNTRACKED: impl#1 cannot keep this \`if\` fresh: it decides what a reconciled ` +
+      `\`for … lift\` row renders, and ${why}. A guard it cannot re-evaluate is refused rather than left ` +
+      `open after it turns false (§17.1). Read cells, file-level bindings or the row's own item in the ` +
+      `condition, or move the \`if\` inside an element of the row.`,
+    (node && node.span) ?? { start: 0, end: 0 },
+  ), node);
+}
+
+function _emitIfStmtInline(ifNode, containerElVar, opts = {}) {
   const lines = [];
   // Bug 65 (S157) — engine codegen ctx threaded to inner lifted handlers.
   const engineCtx = opts.engineCtx ?? null;

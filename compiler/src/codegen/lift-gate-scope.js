@@ -155,7 +155,8 @@ function _mapMarkup(n, topNames, seen, inFn, blockBody) {
   if (!n || typeof n !== "object" || seen.has(n)) return;
   seen.add(n);
   if (Array.isArray(n)) { for (const c of n) _mapMarkup(c, topNames, seen, inFn, blockBody); return; }
-  if (n.kind === "markup") {
+  // A `for` node too: a list lowered plain (liftNoteRowIfPlainLoop) asks where it is built.
+  if (n.kind === "markup" || n.kind === "for-stmt" || n.kind === "for-expr") {
     if (!_blockOf.has(n)) _blockOf.set(n, blockBody);
     const prev = _blockTop.get(n);
     if (prev && prev !== topNames) _blockTop.set(n, new Set([...prev, ...topNames]));
@@ -595,6 +596,130 @@ function _regionTopOk(nm, loop) {
   return top !== undefined && !top.has(nm);
 }
 
+// ---------------------------------------------------------------------------
+// S469 (g-keyed-row-control-flow-if-not-reevaluated-s469) — a control-flow `if` in a keyed row.
+//
+// A keyed row is built ONCE per key, so an `if` statement in it that decides what the row renders
+// (an arm that lifts, or an arm that leaves the row early with `continue` / `return` / `break`) is
+// read once. Two lowerings re-read it, both the machinery the lifted gates use:
+//   - the `if` sits inside an ELEMENT of the row, its arms read nothing the row's render computes
+//     but the row's own item, and it holds no early exit: it is a REGION of the row (emit-lift.js
+//     emitIfStmtWithContainer) — its own live-keyed tracked effect re-runs it in a child owner
+//     scope, inside that element; the row stays keyed;
+//   - anywhere else (among the row's roots, the row's only root, beside sibling roots, in a function
+//     or lambda in the row, an early exit, an arm reading a row local): the row is lowered as the
+//     plain loop the enclosing render re-runs (forLiftTreeHasImpureLoop).
+// Structural: decided by the row body's shape. Over-pinning is the safe direction.
+// ---------------------------------------------------------------------------
+
+const _FN_KINDS = new Set(["function-decl", "lambda"]);
+const _LOOP_KINDS = new Set(["for-stmt", "for-expr", "while-stmt", "do-while-stmt"]);
+
+/** True when some node under `root` (not inside a function / lambda) satisfies `pred`. */
+function _hasNode(root, pred, stopAt = _FN_KINDS) {
+  let hit = false;
+  const seen = new WeakSet();
+  const visit = (n) => {
+    if (hit || !n || typeof n !== "object" || seen.has(n)) return;
+    seen.add(n);
+    if (Array.isArray(n)) { for (const c of n) visit(c); return; }
+    if (pred(n)) { hit = true; return; }
+    if (stopAt.has(n.kind)) return;
+    for (const k of Object.keys(n)) {
+      if (k === "span") continue;
+      const v = n[k];
+      if (v && typeof v === "object") visit(v);
+    }
+  };
+  visit(root);
+  return hit;
+}
+
+function _ifArms(n) {
+  return [n.consequent ?? n.body, n.alternate].filter((a) => a != null);
+}
+
+function _isLift(m) { return m.kind === "lift-expr"; }
+
+/** True when the `if` statement's arms lift markup (at any depth outside a function body). */
+function _ifLifts(n) {
+  return _ifArms(n).some((a) => _hasNode(a, _isLift));
+}
+
+/** True when the `if` statement's arms leave the row early (outside a nested loop / function). */
+function _ifExitsRow(n) {
+  const stop = new Set([..._FN_KINDS, ..._LOOP_KINDS]);
+  return _ifArms(n).some((a) => _hasNode(a, (m) => m.kind === "continue-stmt" || m.kind === "break-stmt" || m.kind === "return-stmt", stop));
+}
+
+/** True when the `if` statement decides what the row it is built in renders. */
+export function liftIfDecidesRow(n) {
+  return !!n && n.kind === "if-stmt" && (_ifLifts(n) || _ifExitsRow(n));
+}
+
+/** True when the tree under `root` holds an `if` that decides what a row renders. */
+function _treeHasRowIf(root) {
+  return _hasNode(root, (m) => m.kind === "if-stmt" && liftIfDecidesRow(m), new Set());
+}
+
+/**
+ * True when the `if` statement `ifNode`, in the keyed row of `rowLoop`, is lowered as a REGION of the
+ * row: it sits inside an element of the row (never among the row's roots — the reconciler moves and
+ * removes exactly the root nodes the row was built with), it holds no early exit, and everything it
+ * reads is its own, the row's item, or what a re-render of nothing in the row re-initialises
+ * (liftRegionSafe — the test the nested-loop region uses).
+ */
+export function liftIfRegionSafe(ifNode, rowLoop) {
+  if (!liftIfDecidesRow(ifNode) || _ifExitsRow(ifNode)) return false;
+  return liftRegionSafe(ifNode, rowLoop);
+}
+
+/**
+ * True when the tree of the rendering `for … lift` loop `forNode` holds an `if` its keyed row could
+ * not re-read (see the section comment). An `if` inside a loop nested in the row is that loop's: the
+ * nested loop either stays keyed (its iterable names a cell — every emitter keys it, and it judges its
+ * own rows) or is lowered plain, when it must be a region of this row (liftRegionSafe); anything else
+ * pins this row.
+ */
+export function liftForTreeIfPins(forNode) {
+  let pinned = false;
+  const visit = (n, inFn) => {
+    if (pinned || !n || typeof n !== "object") return;
+    if (Array.isArray(n)) { for (const c of n) visit(c, inFn); return; }
+    if (n.kind === "for-stmt" || n.kind === "for-expr") {
+      // A loop that lifts nothing is a data loop: its `if`s decide nothing the row renders.
+      if (!_hasNode(n.body, _isLift) || !_treeHasRowIf(n)) return;
+      if (inFn) { pinned = true; return; }
+      if (liftForTreeRowPins(n)) { if (!liftRegionSafe(n, forNode)) pinned = true; return; }
+      const text = typeof n.iterable === "string" ? n.iterable : "";
+      if (!/@[A-Za-z_$]/.test(text)) pinned = true;
+      return;
+    }
+    if (n.kind === "while-stmt" || n.kind === "do-while-stmt") {
+      if (_hasNode(n, _isLift) && _hasNode(n, (m) => m.kind === "if-stmt" && _ifLifts(m))) pinned = true;
+      return;
+    }
+    if (n.kind === "if-stmt" && liftIfDecidesRow(n)) {
+      if (inFn || !liftLoopInRowElement(n, forNode) || !liftIfRegionSafe(n, forNode)) pinned = true;
+      // A region re-runs everything in it (the `if`s and loops nested in its arms included).
+      return;
+    }
+    const fn = inFn || _FN_KINDS.has(n.kind);
+    for (const k of Object.keys(n)) {
+      if (k === "span") continue;
+      const v = n[k];
+      if (v && typeof v === "object") visit(v, fn);
+    }
+  };
+  visit(Array.isArray(forNode && forNode.body) ? forNode.body : [], false);
+  return pinned;
+}
+
+/** True when the keyed row of `forNode` cannot hold its tree (a lifted gate, or a row-deciding `if`). */
+export function liftForTreeRowPins(forNode) {
+  return liftForTreeGatePins(forNode) || liftForTreeIfPins(forNode);
+}
+
 export function liftForTreeGatePins(forNode) {
   let pinned = false;
   const scopes = []; // { names: Set, loop: for-node | null, fn: boolean }
@@ -614,7 +739,7 @@ export function liftForTreeGatePins(forNode) {
       for (let i = scopes.length - 1; i > 0; i--) if (scopes[i].loop) { li = i; break; }
       if (li > 0 && !scopes.slice(1, li).some((s) => s.loop || s.fn) && !scopes.slice(li).some((s) => s.fn) &&
           [...reads].every((nm) => resolve(nm) >= li) &&
-          liftForTreeGatePins(scopes[li].loop) && liftRegionSafe(scopes[li].loop, forNode)) return;
+          liftForTreeRowPins(scopes[li].loop) && liftRegionSafe(scopes[li].loop, forNode)) return;
     }
     if (reads.size > 1) { pinned = true; return; }
     const [b] = reads;

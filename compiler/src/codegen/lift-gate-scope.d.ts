@@ -26,3 +26,11 @@ export declare function liftGateBlockFnReadsItsBindings(node: unknown): boolean;
 export declare function liftLoopInRowElement(loop: unknown, rowLoop: unknown): boolean;
 /** True when a nested loop of a keyed row can be re-run on its own as a region. */
 export declare function liftRegionSafe(loop: unknown, rowLoop: unknown): boolean;
+/** True when the `if` statement decides what the row it is built in renders (an arm lifts, or leaves the row). */
+export declare function liftIfDecidesRow(node: unknown): boolean;
+/** True when a row-deciding `if` of a keyed row is lowered as a region of the row. */
+export declare function liftIfRegionSafe(ifNode: unknown, rowLoop: unknown): boolean;
+/** True when a rendering for-loop's tree holds a row-deciding `if` its keyed row could not re-read. */
+export declare function liftForTreeIfPins(forNode: unknown): boolean;
+/** liftForTreeGatePins || liftForTreeIfPins. */
+export declare function liftForTreeRowPins(forNode: unknown): boolean;

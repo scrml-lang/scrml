@@ -24,6 +24,13 @@
  *   §5  for { if-else { lift } else { lift }} — both branches use appendChild
  *   §6  for { if { lift }} — outer _scrml_lift_target set/cleared wrapping block
  *   §7  for { for { lift }} nested reactive — inner for-stmt uses appendChild
+ *
+ * S469 (g-keyed-row-control-flow-if-not-reevaluated-s469) — an `if` among a row's ROOTS that lifts (or
+ * leaves the row early) decides what the row renders, and a keyed row is built once per key, so such a
+ * list is now lowered as the plain loop the block re-runs (§1–§6 "root" cases pin that). The factory
+ * path these tests were written for is kept by an `if` inside an ELEMENT of the row (a region of the
+ * row: its own live-keyed effect re-runs it); the "element" cases pin LIFT-5's invariant there — no
+ * ambient `_scrml_lift(() =>` inside a per-item factory.
  */
 
 import { describe, it, expect } from "bun:test";
@@ -58,9 +65,7 @@ describe("LIFT-5 §1 — no ambient _scrml_lift() inside reconciler factory", ()
 \${ @items = [1, 2, 3, 4, 5] }
 \${
   for (let item of @items) {
-    if (item % 2 == 0) {
-      lift <li>\${item}</li>
-    }
+    lift <ul>\${ if (item % 2 == 0) { lift <li>\${item}</li> } }</ul>
   }
 }
 </program>`;
@@ -88,9 +93,7 @@ describe("LIFT-5 §2 — lift inside if appends to DocumentFragment", () => {
 \${ @items = [1, 2, 3, 4, 5] }
 \${
   for (let item of @items) {
-    if (item % 2 == 0) {
-      lift <li class="even">Even: \${item}</li>
-    }
+    lift <ul>\${ if (item % 2 == 0) { lift <li class="even">Even: \${item}</li> } }</ul>
   }
 }
 </program>`;
@@ -116,9 +119,7 @@ describe("LIFT-5 §3 — factory returns DocumentFragment.firstChild", () => {
 \${ @items = [1, 2, 3, 4, 5] }
 \${
   for (let item of @items) {
-    if (item % 2 == 0) {
-      lift <li>\${item}</li>
-    }
+    lift <ul>\${ if (item % 2 == 0) { lift <li>\${item}</li> } }</ul>
   }
 }
 </program>`;
@@ -139,8 +140,8 @@ describe("LIFT-5 §3 — factory returns DocumentFragment.firstChild", () => {
 // §4 — continue inside if-body emits return; not continue;
 // ---------------------------------------------------------------------------
 
-describe("LIFT-5 §4 — continue in if-body emits return; inside createItem fn", () => {
-  it("continue-stmt inside if inside reactive for emits return; not continue;", () => {
+describe("LIFT-5 §4 — continue in a row's if-body: the list is the plain loop", () => {
+  it("continue-stmt inside if inside reactive for: no createItem fn, a real continue", () => {
     const src = `<program>
 \${ @items = [{id: 1, active: true}, {id: 2, active: false}] }
 \${
@@ -153,13 +154,11 @@ describe("LIFT-5 §4 — continue in if-body emits return; inside createItem fn"
     const { errors, clientJs } = compileSource(src);
     expect(errors.filter(e => e.severity !== "warning")).toHaveLength(0);
 
-    const createFnMatch = clientJs.match(/function (_scrml_create_item_\d+)\([^)]*\)\s*\{([\s\S]*?)^\}/m);
-    expect(createFnMatch).not.toBeNull();
-    const createFnBody = createFnMatch[2];
-
-    // continue is illegal inside a function; must be rewritten to return
-    expect(createFnBody).not.toContain("continue;");
-    expect(createFnBody).toContain("return;");
+    // S469 — an early exit decides what the row renders: the list is the plain loop the block re-runs,
+    // and the `continue` is a real one in a real loop (never inside a per-item factory).
+    expect(clientJs).not.toContain("_scrml_create_item_");
+    expect(clientJs).toContain("for (const item of ");
+    expect(clientJs).toContain("continue;");
   });
 });
 
@@ -173,11 +172,7 @@ describe("LIFT-5 §5 — if-else both lift branches use appendChild", () => {
 \${ @items = [1, 2, 3, 4, 5] }
 \${
   for (let item of @items) {
-    if (item % 2 == 0) {
-      lift <li class="even">Even</li>
-    } else {
-      lift <li class="odd">Odd</li>
-    }
+    lift <ul>\${ if (item % 2 == 0) { lift <li class="even">Even</li> } else { lift <li class="odd">Odd</li> } }</ul>
   }
 }
 </program>`;
@@ -209,9 +204,7 @@ describe("LIFT-5 §6 — _scrml_lift_target set and cleared around for block", (
 \${ @items = [1, 2, 3] }
 \${
   for (let item of @items) {
-    if (item > 1) {
-      lift <span>\${item}</span>
-    }
+    lift <div>\${ if (item > 1) { lift <span>\${item}</span> } }</div>
   }
 }
 </program>`;
@@ -266,4 +259,32 @@ describe("LIFT-5 §7 — nested for-stmt inside reactive for also uses appendChi
     // The nested for body uses appendChild not _scrml_lift()
     expect(clientJs).toContain('.appendChild((() => {');
   });
+});
+
+// ---------------------------------------------------------------------------
+// S469 — an `if` among the row's roots: the list is the plain loop the block re-runs
+// ---------------------------------------------------------------------------
+
+describe("S469 — a root-level row-deciding if lowers the list plain (g-keyed-row-control-flow-if-not-reevaluated-s469)", () => {
+  for (const [label, row] of [
+    ["if { lift }", `if (item % 2 == 0) { lift <li>\${item}</li> }`],
+    ["if { lift } else { lift }", `if (item % 2 == 0) { lift <li class="even">Even</li> } else { lift <li class="odd">Odd</li> }`],
+    ["a sibling root, then if { lift }", `lift <i></i>\n    if (item > 1) { lift <span>\${item}</span> }`],
+  ]) {
+    it(label, () => {
+      const { errors, clientJs } = compileSource(`<program>
+\${ @items = [1, 2, 3, 4, 5] }
+\${
+  for (let item of @items) {
+    ${row}
+  }
+}
+</program>`);
+      expect(errors.filter(e => e.severity !== "warning")).toHaveLength(0);
+      expect(clientJs).not.toContain("_scrml_create_item_");
+      expect(clientJs).not.toContain("_scrml_reconcile_list(");
+      // The block re-runs the loop: its render is an effect.
+      expect(clientJs).toMatch(/_scrml_effect\(function\(\) \{\n\s*_scrml_lift_tgt_\d+\.innerHTML = "";/);
+    });
+  }
 });
