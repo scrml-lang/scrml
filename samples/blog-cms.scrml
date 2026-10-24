@@ -395,8 +395,8 @@ ${
                         @saveError = "Save failed: " + e.message
                         return
                     }
-                    | ::ServerError e -> {
-                        @saveError = "Unexpected error: " + e.message
+                    | _ -> {
+                        @saveError = "Unexpected error."
                         return
                     }
                 }
@@ -411,8 +411,8 @@ ${
                         @saveError = "A post with this title already exists."
                         return
                     }
-                    | ::ServerError e -> {
-                        @saveError = "Unexpected error: " + e.message
+                    | _ -> {
+                        @saveError = "Unexpected error."
                         return
                     }
                 }
@@ -433,8 +433,8 @@ ${
                     @saveError = "Delete failed: " + e.message
                     return
                 }
-                | ::ServerError e -> {
-                    @saveError = "Unexpected error: " + e.message
+                | _ -> {
+                    @saveError = "Unexpected error."
                     return
                 }
             }
