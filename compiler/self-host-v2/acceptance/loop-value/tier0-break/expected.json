@@ -1,0 +1,16 @@
+{
+  "id": "acceptance-loop-value-tier0-break",
+  "description": "Rows 1 and 2, then the break.",
+  "language-version": "1.0",
+  "spec": "§17.4 · §49.6 rule 5",
+  "rationale": "§49.6 rule 5: \"A `break` ends the loop; the result is everything lifted before it.\"",
+  "expect": {
+    "codes": [],
+    "domAnchored": [
+      {
+        "selector": "#o",
+        "text": "12"
+      }
+    ]
+  }
+}

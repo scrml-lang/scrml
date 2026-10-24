@@ -1,0 +1,11 @@
+// §49.6 rule 5: `continue` keeps what the iteration already lifted.
+<program>
+    <zs:int[]=([3, 4, 5])/>
+    function f(ys: int[]) -> int {
+        const xs = for (y of ys) { lift y; if (y == 4) { continue; } lift 0; };
+        return xs.length;
+    }
+    <main>
+        <p id="o">${f(@zs)}</p>
+    </main>
+</program>

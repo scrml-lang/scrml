@@ -1,0 +1,7 @@
+// §49.4.4: a Tier-0 loop is the same value form — no `lift` is E-LOOP-007.
+<program>
+    <xs:int[]=([1, 2, 3])/>
+    <main>
+        <p>${ for (x of @xs) { let y = x; } }</p>
+    </main>
+</program>

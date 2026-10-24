@@ -1,0 +1,16 @@
+{
+  "id": "acceptance-loop-value-nested",
+  "description": "The inner binding captures 0..y; the outer loop gets each inner length through a statement loop and an `if`: 3, 4, 5 → 343.",
+  "language-version": "1.0",
+  "spec": "§49.6 rule 7",
+  "rationale": "§49.6 rule 7: \"A `lift` goes to the nearest enclosing bound loop — through any statement loops, `if`s … A nested `for-binding` captures its own lifts\".",
+  "expect": {
+    "codes": [],
+    "domAnchored": [
+      {
+        "selector": "#o",
+        "text": "343"
+      }
+    ]
+  }
+}

@@ -298,7 +298,7 @@ Pick `#{}` for one-off bespoke styling, Tailwind for shared design-system utilit
 
 The next step beyond a counter is a list. Here is a small todo app — keep the data in memory for now (§10 shows a list backed by SQL):
 
-<!-- gate: spec-ahead [E-BOOTSTRAP-UNSUPPORTED, E-PARSE-EXPR] — the bootstrap has no class: binding and no value-form for/lift in markup yet -->
+<!-- gate: spec-ahead [E-BOOTSTRAP-UNSUPPORTED] — the bootstrap has no class: binding yet (its value-form for/lift in markup landed, s469-boot-loop-value-form) -->
 <!-- snippet: docs/tutorial-snippets/03-todos.scrml -->
 ```scrml
 // 03-todos.scrml — in-memory todos: a tape, a component declaration, for/lift, bind:value.

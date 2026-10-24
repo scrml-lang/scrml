@@ -1,0 +1,16 @@
+{
+  "id": "acceptance-loop-value-iterate",
+  "description": "`const xs = for (y of ys) { lift y * 10; };` over [3, 4, 5]: 30 + 40 + 50 + 3 = 123.",
+  "language-version": "1.0",
+  "spec": "§49.6",
+  "rationale": "§49.6 rule 1: \"A `for` with any of the four heads may be bound by a `for-binding`\"; rule 3: \"Elements appear in the order their `lift`s ran\".",
+  "expect": {
+    "codes": [],
+    "domAnchored": [
+      {
+        "selector": "#o",
+        "text": "123"
+      }
+    ]
+  }
+}

@@ -1,0 +1,11 @@
+// §49.6 rule 1: an iterate head bound as a value.
+<program>
+    <zs:int[]=([3, 4, 5])/>
+    function f(ys: int[]) -> int {
+        const xs = for (y of ys) { lift y * 10; };
+        return xs[0] + xs[1] + xs[2] + xs.length;
+    }
+    <main>
+        <p id="o">${f(@zs)}</p>
+    </main>
+</program>

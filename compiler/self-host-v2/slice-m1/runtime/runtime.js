@@ -941,12 +941,28 @@ export function edges(table) { return table; }
  * an all-or-nothing spread edit (RULED S440) checks every edge before any write.
  */
 export function checkEdge(target, table, to) {
-  const from = target.peek();
-  if (from === to) return;
+  // s469 (g-bootstrap-rule-transition-into-payload-variant-s469): the graph is
+  // over VARIANTS — a payload value `{ variant, data }` is judged by its tag
+  // (the edge table's keys and entries are tags), never by object identity.
+  const cur = target.peek();
+  const from = variantTag(cur);
+  const toTag = variantTag(to);
   const allowed = table[from];
-  if (!allowed || !allowed.includes(to)) {
-    throw new Error(`E-ENGINE-INVALID-TRANSITION: .${from} → .${to} is not an edge of this field's rule= graph`);
+  if (from === toTag) {
+    // §51.0.F.1: a self-write is a NO-OP — the value is unchanged. A same-variant write that
+    // CHANGES the payload is not a no-op, so it needs a self-edge in the graph (fail closed).
+    if (cur === to || JSON.stringify(cur) === JSON.stringify(to)) return;
+    if (allowed && allowed.includes(toTag)) return;
+    throw new Error(`E-ENGINE-INVALID-TRANSITION: .${from} → .${toTag} changes the payload of .${from} and .${from} has no self-edge in this field's rule= graph`);
   }
+  if (!allowed || !allowed.includes(toTag)) {
+    throw new Error(`E-ENGINE-INVALID-TRANSITION: .${from} → .${toTag} is not an edge of this field's rule= graph`);
+  }
+}
+
+/** An enum value's variant tag: a unit variant is its tag; a payload variant is `{ variant, data }`. */
+function variantTag(v) {
+  return v !== null && typeof v === "object" && typeof v.variant === "string" ? v.variant : v;
 }
 
 /** A graph write with a runtime edge check (§6.3). A self-write is a no-op (§51.0.F.1). */
@@ -1970,6 +1986,36 @@ export function cond(scope, anchor, arms) {
       }
     });
   });
+}
+
+/**
+ * s469 — a Tier-0 `${ for … lift … }` (SPEC §17.4, §49.6.2). `build` runs the
+ * loop TRACKED and returns its rows — `(scope, anchor) => …` render thunks, in
+ * the order their `lift`s ran. The rows render UNTRACKED, each into the one
+ * child scope of this run, before the marker; their own holes keep their own
+ * effects. When a cell the loop read changes, the old rows are torn down and
+ * the loop re-runs (no key: §17.4b keyed reconciliation is not built).
+ */
+export function gather(scope, anchor, build) {
+  let rowsScope = null;
+  effect(scope, () => {
+    const rows = build();
+    untrack(() => {
+      if (rowsScope) rowsScope.dispose();
+      rowsScope = scope.child();
+      for (const r of rows) r(rowsScope, anchor);
+    });
+  });
+}
+
+/** s469 — a Tier-0 row of text: a primitive value lifted in the loop (§17.4). */
+export function textRow(v) {
+  const text = display(v);
+  return (scope, anchor) => {
+    const t = document.createTextNode(text);
+    anchor.parentNode.insertBefore(t, anchor);
+    scope.own(() => { if (t.parentNode) t.parentNode.removeChild(t); });
+  };
 }
 
 /** Place use-site slot content (§66.15.2), if any. */

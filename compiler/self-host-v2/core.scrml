@@ -481,8 +481,35 @@ ${
         Loop(label: Sym, head: LoopHead, body: Block),
         Break(target: Sym),
         Continue(target: Sym),
+        // s469 — a loop BOUND AS A VALUE (§49.6, `const xs = for (…) { lift e; };`):
+        // `g.bind` is a FRESH tape of the values the body's Lifts appended, in
+        // the order they ran (§49.6 rules 2-5: no grants; zero lifts give `[]`;
+        // a Break keeps the prefix). It is in scope after the Gather, never in
+        // its own body. The loop itself is `g.label` (a Break / Continue names
+        // it as it names a Loop). check.scrml C20: the body is a Break /
+        // Continue boundary — no jump in it names a loop outside it (§49.6 rule
+        // 6, E-LOOP-005); at least one Lift appends to `g.bind` (E-LOOP-007);
+        // C19's loop-body rules apply to it as to a Loop.
+        Gather(g: Gather),
+        // s469 — `lift` (§49.6 rule 7): append to the NEAREST enclosing Gather,
+        // whose `bind` is `into` (check.scrml C20). `LValue(e)`: the value `e`.
+        // `LRow(idx)`: row template `idx` of the enclosing View.Gather (a
+        // Tier-0 `${ for … lift <li/> }`, §17.4) — never in a Stmt.Gather.
+        Lift(into: Sym, what: Lifted),
     }
     export type Block:struct = { stmts: Stmt[] }
+
+    // s469 (§49.6) — the bound loop. `bind` is the tape the loop builds (a
+    // Stmt.Gather's local; a View.Gather's own accumulator, which nothing reads).
+    export type Gather:struct = { label: Sym, bind: Sym, head: LoopHead, body: Block }
+    export type Lifted:enum = {
+        LValue(e: Expr),
+        LRow(idx: int),
+    }
+    // A View.Gather's row template: the markup one `lift <…>` renders. Its
+    // Exprs read the body's locals as they were WHEN the Lift ran (the printer
+    // snapshots them) — never a later value of a rebound local.
+    export type GatherRow:struct = { views: View[] }
 
     // s469 — a loop head (§49.2.4, §49.3):
     //   Forever       `for { … }` / `for (;;)` — until a Break / Return / Fail
@@ -604,6 +631,14 @@ ${
         // The message is the §55.10 Level-3 English default for the
         // ValidationError tag and the field's name.
         Errors(of: ValidityOf, all: boolean),
+        // s469 — a Tier-0 `${ for (…) { … lift <li/>; … } }` (§17.4; §49.6.2:
+        // "the value form whose result the interpolation renders"): run the
+        // loop `g`; each Lift appends a row — `rows[idx]` (LRow) or the text of
+        // a primitive value (LValue) — and the rows render in order. A RENDER
+        // position (§6.15): the loop and its rows re-run when a cell they read
+        // changes, and nothing in it writes a cell (check.scrml C20). No
+        // Return / Fail: there is no enclosing function.
+        Gather(g: Gather, rows: GatherRow[]),
     }
 
     // -------------------------------------------------------------------------

@@ -1,0 +1,14 @@
+// §49.6 rule 7: a `lift` goes to the NEAREST bound loop; a nested binding captures its own.
+<program>
+    <zs:int[]=([3, 4, 5])/>
+    function f(ys: int[]) -> int {
+        const xs = for (y of ys) {
+            const inner = for (i of 0..y) { lift i; };
+            for (j of 0..2) { if (j == 1) { lift inner.length; } }
+        };
+        return xs[0] * 100 + xs[1] * 10 + xs.length;
+    }
+    <main>
+        <p id="o">${f(@zs)}</p>
+    </main>
+</program>

@@ -1,0 +1,12 @@
+// §49.4.4: a bound loop that lifts nothing is E-LOOP-007.
+<program>
+    <zs:int[]=([3, 4, 5])/>
+    function f(ys: int[]) -> int {
+        let t = 0;
+        const xs = for (y of ys) { t = t + y; };
+        return t;
+    }
+    <main>
+        <p id="o">${f(@zs)}</p>
+    </main>
+</program>

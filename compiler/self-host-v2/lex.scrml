@@ -1546,6 +1546,71 @@ ${
         }
     }
 
+    // s469 — a Tier-0 `${ for … }` region in markup (§17.4): lexed as a
+    // Balanced region, except that the run PAUSES before a markup element
+    // written as a `lift` operand (`lift <li>…`) — markup is text, not tokens,
+    // so the parser reads that element itself (parseMarkupNode) and resumes the
+    // run after it with the braces that were open (`depth`, every frame a
+    // brace: the pause happens only at statement level, never inside a `(` or
+    // `[`, a template slot or a string). `end` is where the element starts
+    // (the `<`, past trivia), `line` its line; when the run did not pause,
+    // `end` is where the region ended.
+    export type LexPause:struct = { tokens: Token[], end: int, line: int, paused: boolean, depth: int }
+
+    export fn lexTier0(src: string, pos: int, depth: int) -> LexPause {
+        let stack: BracketKind[] = []
+        let i: int = 0
+        while (i < depth) {
+            stack = stack.concat([BracketKind.Brace])
+            i = i + 1
+        }
+        let st: LexState = mkState(cursorAt(src, pos), LexMode.InCode, [], stack, [], false)
+        let done = false
+        let paused = false
+        while (!done && !isEof(st.cur)) {
+            if (liftMarkupAhead(st)) {
+                paused = true
+                done = true
+            } else {
+                st = step(st)
+                if (stopAfter(st, LexStop.Balanced)) done = true
+            }
+        }
+        const at: Cursor = skipTriviaAhead(st.cur)
+        if (paused) return { tokens: st.tokens.concat([makeEof(st.cur)]), end: at.pos, line: at.line, paused: true, depth: st.bracketStack.length }
+        return { tokens: st.tokens.concat([makeEof(st.cur)]), end: st.cur.pos, line: st.cur.line, paused: false, depth: 0 }
+    }
+
+    // The last token is the keyword `lift`, at statement level (only braces
+    // open, no slot, in code), and an element opener `<name` follows it.
+    fn liftMarkupAhead(st: LexState) -> boolean {
+        if (st.tokens.length == 0) return false
+        if (st.interps.length != 0) return false
+        if (st.mode != LexMode.InCode) return false
+        for (const b of st.bracketStack) {
+            if (!isBraceKind(b)) return false
+        }
+        if (!lastIsLift(st.tokens[st.tokens.length - 1])) return false
+        const c: Cursor = skipTriviaAhead(st.cur)
+        const c0: int = peekCode(c, 0)
+        const c1: int = peekCode(c, 1)
+        return c0 == 60 && ((c1 >= 65 && c1 <= 90) || (c1 >= 97 && c1 <= 122))
+    }
+
+    fn isBraceKind(b: BracketKind) -> boolean {
+        return match b {
+            .Brace :> true
+            .Paren :> false
+            .Bracket :> false
+        }
+    }
+
+    fn lastIsLift(t: Token) -> boolean {
+        const k: TokenKind = t.kind
+        if (k is .Keyword) return t.text == "lift"
+        return false
+    }
+
     export fn lexFrom(src: string, pos: int, stop: LexStop) -> LexRun {
         return lexFromMode(src, pos, stop, isCodeDefault(stop))
     }

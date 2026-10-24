@@ -206,6 +206,12 @@ describe("no write path reads a grant outside the reader (analyze.scrml source; 
     "MED-1: `.shrink` read": "fn plantedRead(f: FieldInfo) -> boolean { return f.shrink.length > 0 }",
     "MED-1: a SeqGrants annotation": "fn plantedRead(t: Type) -> boolean {\n        const q: SeqGrants = fixedSeq()\n        return true\n    }",
     "MED-1: a SeqGrants-returning call held": "fn plantedRead(t: Type) -> boolean {\n        const q = fixedSeq()\n        return true\n    }",
+    // #1530 review (s469-boot-loop-value-form): the POSITIONAL grants binder, and an arm
+    // whose method chain continues on the next line (round 1 ended the arm at a line-leading `.`)
+    "#1530: a positional `.Seq(e, g)` binder read": "fn plantedRead(t: Type) -> boolean {\n        return match t {\n            .Seq(e, g) :> g.at.length > 0\n            .Int :> false\n        }\n    }",
+    "#1530: a positional `.TSeq(e, gs)` binder read": "fn plantedRead(at: AType) -> boolean {\n        const k: ATypeK = at.k\n        return match k {\n            .TSeq(e, gs) :> gs.indexOf(\"append\") >= 0\n            .TName(name: n) :> false\n        }\n    }",
+    "#1530: a binder's method chain continued on the next line": "fn plantedRead(t: Type) -> boolean {\n        return match t {\n            .Seq(elem: e, grants: g) :> g\n                .at.length > 0\n            .Int :> false\n        }\n    }",
+    "#1530: a positional binder's chain continued on the next line": "fn plantedRead(t: Type) -> boolean {\n        return match t {\n            .Seq(e, g) :> g\n                .shrink.length > 0\n            .Int :> false\n        }\n    }",
   };
   for (const [name, code] of Object.entries(PLANTS)) {
     test(`must-fail control: ${name}`, () => {
@@ -222,7 +228,7 @@ describe("no write path reads a grant outside the reader (analyze.scrml source; 
     expect(hits.some((h) => h.text.includes("plantedRep(f.grants)"))).toBe(true);
   });
   test("a construction outside the reader is not a read (copy into a `grants:` slot; a reader call's argument)", () => {
-    const ok = plant("fn plantedCopy(f: FieldInfo) -> FieldDef { return { sym: f.sym, ty: f.ty, grants: f.grants } }\n    fn plantedAsk(f: FieldInfo) -> boolean { return grantsAdmit(f.grants, EditKind.Replace) }\n    fn plantedNew(f: FieldInfo) -> FieldDef { return { sym: f.sym, ty: f.ty, grants: noGrants() } }\n    fn plantedSeq(b: Type) -> Type { return Type.Seq(b, fixedSeq()) }\n    fn plantedShrinkCopy(f: FieldInfo) -> FieldInfo { return { ...f, shrink: f.shrink } }\n    fn plantedUnused(t: Type) -> boolean {\n        return match t {\n            .Seq(elem: e, grants: g) :> true\n            .Int :> false\n        }\n    }\n    fn plantedToReader(t: Type) -> EditKind[] {\n        return match t {\n            .Seq(elem: e, grants: g) :> seqEdits(g)\n            .Int :> []\n        }\n    }");
+    const ok = plant("fn plantedCopy(f: FieldInfo) -> FieldDef { return { sym: f.sym, ty: f.ty, grants: f.grants } }\n    fn plantedAsk(f: FieldInfo) -> boolean { return grantsAdmit(f.grants, EditKind.Replace) }\n    fn plantedNew(f: FieldInfo) -> FieldDef { return { sym: f.sym, ty: f.ty, grants: noGrants() } }\n    fn plantedSeq(b: Type) -> Type { return Type.Seq(b, fixedSeq()) }\n    fn plantedShrinkCopy(f: FieldInfo) -> FieldInfo { return { ...f, shrink: f.shrink } }\n    fn plantedUnused(t: Type) -> boolean {\n        return match t {\n            .Seq(elem: e, grants: g) :> true\n            .Int :> false\n        }\n    }\n    fn plantedToReader(t: Type) -> EditKind[] {\n        return match t {\n            .Seq(elem: e, grants: g) :> seqEdits(g)\n            .Int :> []\n        }\n    }\n    fn plantedPosUnused(t: Type) -> boolean {\n        return match t {\n            .Seq(e, g) :> true\n            .Int :> false\n        }\n    }\n    fn plantedPosToReader(t: Type) -> EditKind[] {\n        return match t {\n            .Seq(e, g) :> seqEdits(g)\n            .Int :> []\n        }\n    }\n    fn plantedNextArmUses(t: Type, g: int) -> int {\n        return match t {\n            .Seq(elem: e, grants: q) :> 0\n            .Int :> g\n        }\n    }");
     expect(scan(ok)).toEqual([]);
   });
 });

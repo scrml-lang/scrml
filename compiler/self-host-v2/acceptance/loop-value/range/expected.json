@@ -1,0 +1,16 @@
+{
+  "id": "acceptance-loop-value-range",
+  "description": "`0..4` lifts 0,1,4,9; `1..=3` lifts 1,2,3: 9*100 + 4*10 + 3 = 943.",
+  "language-version": "1.0",
+  "spec": "§49.6 · §49.2.5",
+  "rationale": "§49.6 rule 1: \"A `for` with any of the four heads may be bound\".",
+  "expect": {
+    "codes": [],
+    "domAnchored": [
+      {
+        "selector": "#o",
+        "text": "943"
+      }
+    ]
+  }
+}

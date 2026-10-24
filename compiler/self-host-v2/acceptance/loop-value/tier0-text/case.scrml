@@ -1,0 +1,8 @@
+// §17.4: a Tier-0 loop over a range, lifting values (text).
+<program>
+    <xs:int[]=([1, 2, 3])/>
+    <main>
+        <p id="t">${ for (i of 0..3) { lift i; } }</p>
+        <p id="c">${ for (let i = 0; i < 3; i = i + 1) { lift i * 2; } }</p>
+    </main>
+</program>

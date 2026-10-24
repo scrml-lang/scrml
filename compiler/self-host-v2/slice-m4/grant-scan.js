@@ -35,6 +35,11 @@
 //       `.TSeq(…, grants: gs)` may only be unused in its arm, or passed whole to
 //       a reader — so `g.at`, `g.length`, `gs.indexOf("replace")` are refused
 //       outside the reader without refusing every unrelated `.at`.
+//   #1530 review (s469-boot-loop-value-form): R7 also covers the POSITIONAL
+//       binder — the second binder of `.Seq(e, g)` / `.TSeq(e, gs)` — and an
+//       arm runs to the next arm's PATTERN (an alternative followed by `:>`),
+//       not to the next line-leading `.`, so a method chain continued on the
+//       next line (`g⏎.at.length`) is inside it.
 // Reader functions are the `fn`s declared inside the range.
 //
 // What it cannot see (stated, not hidden): a read that never spells `grants`,
@@ -249,9 +254,58 @@ export function grantSetFns(...sources) {
 }
 
 /**
- * MED-1: the uses of the binder `x` of a variant pattern `.Seq(…, grants: x)` at
- * token `bi` (the binder), within its ARM — from the pattern's `)` to the next
- * arm (a `.Variant` that starts a line at the arm's depth) or the match's `}`.
+ * One pattern alternative starting at token `j` — `.V`, `.V(…)`, `E.V(…)` (the
+ * `.` on the name's line), `name`, a literal, `-n` — and the index after it,
+ * or -1 when none starts there.
+ */
+function altEnd(src, toks, m, j) {
+  const k = toks[j];
+  if (!k) return -1;
+  const sameLine = (a, b) => src.slice(toks[a].at, toks[b].at).indexOf("\n") < 0;
+  let e = -1;
+  if (k.t === "p" && k.v === ".") {
+    if (toks[j + 1]?.t !== "id") return -1;
+    e = j + 2;
+  } else if (k.t === "id") {
+    e = j + 1;
+    if (toks[e]?.t === "p" && toks[e].v === "." && toks[e + 1]?.t === "id" && sameLine(j, e)) e = e + 2;
+  } else if (k.t === "num" || k.t === "str") {
+    return j + 1;
+  } else if (k.t === "p" && k.v === "-" && toks[j + 1]?.t === "num") {
+    return j + 2;
+  } else {
+    return -1;
+  }
+  if (toks[e]?.t === "p" && toks[e].v === "(" && m[e] >= 0) e = m[e] + 1;
+  return e;
+}
+
+/**
+ * s469 (#1530 review): does an ARM'S PATTERN start at token `j` — alternatives
+ * joined by `|` (a leading `|` allowed), or the wildcard with a whole-error
+ * binder (`_ err`, `else err`), followed by `:>`? A method chain continued on
+ * the next line (`g⏎.at.length`) is not one: `.at` is followed by `.`.
+ */
+function patternAt(src, toks, m, j) {
+  let i = j;
+  if (toks[i]?.t === "p" && toks[i].v === "|") i++;
+  for (;;) {
+    const e = altEnd(src, toks, m, i);
+    if (e < 0) return false;
+    const nx = toks[e];
+    if (nx?.t === "p" && nx.v === ":>") return true;
+    if (nx?.t === "p" && nx.v === "|") { i = e + 1; continue; }
+    const wild = toks[i]?.t === "id" && (toks[i].v === "_" || toks[i].v === "else") && e === i + 1;
+    return wild && nx?.t === "id" && toks[e + 1]?.t === "p" && toks[e + 1].v === ":>";
+  }
+}
+
+/**
+ * MED-1: the uses of the binder `x` of a variant pattern `.Seq(…, grants: x)`
+ * (or the positional `.Seq(e, x)`) at token `bi` (the binder), within its ARM —
+ * from the pattern's `)` to the NEXT ARM'S PATTERN at the arm's depth (an
+ * alternative followed by `:>`, patternAt) or the match's `}`. (Round 1 ended
+ * the arm at any line-leading `.`, so `g⏎.at.length` evaded it — #1530 review.)
  */
 function binderUses(src, toks, m, bi, x) {
   const open = enclosing(toks, m, bi);
@@ -261,10 +315,32 @@ function binderUses(src, toks, m, bi, x) {
     const k = toks[j];
     if (k.t === "p" && OPEN[k.v]) depth++;
     else if (k.t === "p" && CLOSE[k.v]) { depth--; if (depth < 0) break; }
-    else if (depth === 0 && k.v === "." && toks[j + 1]?.t === "id" && src.lastIndexOf("\n", k.at) > toks[j - 1].at) break;
+    else if (depth === 0 && j > m[open] + 1 && patternAt(src, toks, m, j)) break;
     if (k.t === "id" && k.v === x && !(toks[j - 1]?.v === ".")) out.push(j);
   }
   return out;
+}
+
+/**
+ * s469 (#1530 review): token `i` (`Seq` / `TSeq`, after `.`) opens a PATTERN
+ * with positional binders — `.Seq(e, g) :>` / `.TSeq(e, gs) | … :>` — whose
+ * SECOND binder holds the type's grants. Returns that binder's token index, or
+ * -1 (a constructor `Type.Seq(el, fixedSeq())` is no pattern: no `:>` / `|`
+ * follows its `)`).
+ */
+function positionalGrantsBinder(toks, m, i) {
+  const k = toks[i];
+  if (!k || k.t !== "id" || (k.v !== "Seq" && k.v !== "TSeq")) return -1;
+  if (toks[i - 1]?.v !== "." || toks[i + 1]?.v !== "(") return -1;
+  const close = m[i + 1];
+  if (close < 0) return -1;
+  const after = toks[close + 1];
+  if (!after || after.t !== "p" || (after.v !== ":>" && after.v !== "|")) return -1;
+  // exactly `( id , id )` — named binders (`grants: g`) are R7's other path
+  const a = toks[i + 2], comma = toks[i + 3], b = toks[i + 4];
+  if (close !== i + 5 || a?.t !== "id" || comma?.v !== "," || b?.t !== "id") return -1;
+  if (b.v === "_") return -1;
+  return i + 4;
 }
 
 /**
@@ -293,6 +369,14 @@ export function grantReadsOutsideReader(src, libs = []) {
     if (inside(k)) return;
     const prev = toks[i - 1];
     const next = toks[i + 1];
+    // R7 (#1530 review): the SECOND positional binder of `.Seq(` / `.TSeq(` is the grants binder
+    const pb = positionalGrantsBinder(toks, m, i);
+    if (pb >= 0) {
+      for (const j of binderUses(src, toks, m, pb, toks[pb].v)) {
+        if (!isReaderArg(toks, m, j, j, readers)) report(toks[j], "R7 a type's grants (positional `" + toks[pb].v + "`) used outside the reader");
+      }
+      return;
+    }
     if (k.t === "id" && k.v === "grants") {
       if (prev && prev.t === "p" && prev.v === ".") {
         const s = chainStart(toks, m, i);

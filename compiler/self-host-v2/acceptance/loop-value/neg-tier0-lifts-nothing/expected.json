@@ -1,0 +1,15 @@
+{
+  "id": "acceptance-loop-value-neg-tier0-lifts-nothing",
+  "description": "E-LOOP-007: the Tier-0 loop lifts nothing.",
+  "language-version": "1.0",
+  "spec": "§49.4.4 · §17.4",
+  "rationale": "§49.4.4: \"A `for` that is the sole content of a markup `${ }` interpolation is the same value form\".",
+  "expect": {
+    "codes": [
+      "E-LOOP-007"
+    ],
+    "codeCounts": {
+      "E-LOOP-007": 1
+    }
+  }
+}

@@ -252,6 +252,8 @@ ${
             .Loop(label: x) :> not
             .Break(target: x) :> not
             .Continue(target: x) :> not
+            .Gather(g: x) :> not
+            .Lift(into: x) :> not
         }
     }
 

@@ -1,0 +1,15 @@
+{
+  "id": "acceptance-loop-value-neg-tier0-writes",
+  "description": "E-VALUE-WRITES-STATE: the loop writes `@n`.",
+  "language-version": "1.0",
+  "spec": "§6.15 · §17.4",
+  "rationale": "§6.15: \"a render expression … including … a Tier-0 `${ for … lift … }` block (§17.4)\"; \"Evaluating a value position SHALL NOT write any reactive cell\".",
+  "expect": {
+    "codes": [
+      "E-VALUE-WRITES-STATE"
+    ],
+    "codeCounts": {
+      "E-VALUE-WRITES-STATE": 1
+    }
+  }
+}

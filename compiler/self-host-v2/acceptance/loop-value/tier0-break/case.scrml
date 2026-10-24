@@ -1,0 +1,7 @@
+// §17.4 + §49.6 rule 5: `break` in a Tier-0 loop keeps the rows before it.
+<program>
+    <xs:int[]=([1, 2, 3])/>
+    <main>
+        <ol id="o">${ for (x of @xs) { if (x == 3) { break; } lift <li>${x}</li>; } }</ol>
+    </main>
+</program>

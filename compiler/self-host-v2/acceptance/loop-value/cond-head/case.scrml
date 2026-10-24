@@ -1,0 +1,12 @@
+// §49.6 rule 1: a condition head bound as a value.
+<program>
+    <zs:int[]=([3, 4, 5])/>
+    function f(ys: int[]) -> int {
+        let c = 0;
+        const xs = for (c < 4) { c = c + 1; lift c; };
+        return xs.length * 10 + xs[3];
+    }
+    <main>
+        <p id="o">${f(@zs)}</p>
+    </main>
+</program>

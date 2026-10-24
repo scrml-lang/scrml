@@ -1,0 +1,15 @@
+{
+  "id": "acceptance-loop-value-neg-break-outer",
+  "description": "E-LOOP-005: `break outer` leaves the loop bound to `cells`.",
+  "language-version": "1.0",
+  "spec": "§49.6 rule 6 · §49.4.3 · §49.9",
+  "rationale": "§49.4.3: \"A loop bound as a value (§49.6) is a boundary in the same way: a `break` or `continue` inside its body SHALL NOT target a loop outside it (E-LOOP-005; §49.6, rule 6).\"",
+  "expect": {
+    "codes": [
+      "E-LOOP-005"
+    ],
+    "codeCounts": {
+      "E-LOOP-005": 1
+    }
+  }
+}

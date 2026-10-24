@@ -81,6 +81,13 @@
 //       `step` Assigns only; a Loop body holds no Suspend / Join / Jump / Defer;
 //       every Break / Continue names a Loop that encloses it in the same owner,
 //       never across a Suspend's `then`, a Join body or a Defer body — see checkLoop.
+//   C20 (s469) the bound loop (§49.6) and the Tier-0 loop (§17.4): a Gather is a
+//       Break / Continue boundary (no jump in its body names a loop outside it —
+//       E-LOOP-005); every Lift appends to its NEAREST enclosing Gather in the
+//       same owner, a row Lift only in a View.Gather and naming one of its rows;
+//       every Gather has at least one Lift (E-LOOP-007); a View.Gather's loop
+//       holds no Return / Fail and writes no reactive state (§6.15) — see
+//       checkGathers.
 //   (C3 covers the s444 edits: the removals by the field's grants; ElemAt by
 //   the ELEMENT field's own contract, dpa-052 Q3.)
 // A diagnostic is a message string (§4 permits strings as text).
@@ -89,7 +96,7 @@ ${
     import { Sym, Type, TypeDef, FieldDef, VariantDef, FieldRef, InstRef, Place, Literal, Expr, SeqFn, PrimOp, Attr, Block, LoopHead,
              EditKind, Check, Stmt, View, EffectDep, Field, Decl, Fn, CoreProgram, CapOwner, TransitionGraph,
              DeclKind, SurfaceProp, ValidityOf, Persist, PersistStore, ServerFn, SqlQuery, Db,
-             Pattern, Failable, OkArm, ErrArm, HostCall,
+             Pattern, Failable, OkArm, ErrArm, HostCall, Gather, Lifted, GatherRow,
              capOwner, grantsAnyWrite, findDecl, findTypeDef, findFn, findServerFn, findDb } from "./core.scrml"
     import { Node, allNodes } from "./walk.scrml"
     import { UrlAttr, StaticSink, classifyStatic, staticExecMessage, isEventHandlerName } from "./url.scrml"
@@ -117,7 +124,7 @@ ${
         for (const s of p.server) {
             for (const n of allNodes(Node.NServerFn(s))) { out = out.concat(checkNode(p, [], n)) }
         }
-        return out.concat(checkSuspends(p)).concat(checkServer(p)).concat(checkFailures(p)).concat(checkClientCalls(p)).concat(checkJumps(p))
+        return out.concat(checkSuspends(p)).concat(checkServer(p)).concat(checkFailures(p)).concat(checkClientCalls(p)).concat(checkJumps(p)).concat(checkGathers(p))
     }
 
     // =========================================================================
@@ -246,6 +253,8 @@ ${
             .Loop(label: x) :> not
             .Break(target: x) :> not
             .Continue(target: x) :> not
+            .Gather(g: x) :> not
+            .Lift(into: x) :> not
             .Attempt(result: x) :> not
             .Let(sym: x) :> not
             .Assign(local: x) :> not
@@ -370,6 +379,8 @@ ${
             .Loop(label: l, head: h, body: lb) :> loopNeverEnds(l, h, lb)
             .Break(target: x) :> false
             .Continue(target: x) :> false
+            .Gather(g: g) :> loopNeverEnds(g.label, g.head, g.body)
+            .Lift(into: x) :> false
             .If(thenB: t, elseB: el) :> ifDiverges(t, el)
             .Attempt(result: x) :> false
             .Let(sym: x) :> false
@@ -577,6 +588,8 @@ ${
             .Loop(label: x) :> ""
             .Break(target: x) :> ""
             .Continue(target: x) :> ""
+            .Gather(g: x) :> ""
+            .Lift(into: x) :> ""
             .Let(sym: x) :> ""
             .Assign(local: x) :> ""
             .If(cond: x) :> ""
@@ -672,6 +685,8 @@ ${
             .Loop(label: x) :> not
             .Break(target: x) :> not
             .Continue(target: x) :> not
+            .Gather(g: x) :> not
+            .Lift(into: x) :> not
         }
     }
 
@@ -803,6 +818,8 @@ ${
             .Loop(label: x) :> ["C8: a bind's write is not a Write"]
             .Break(target: x) :> ["C8: a bind's write is not a Write"]
             .Continue(target: x) :> ["C8: a bind's write is not a Write"]
+            .Gather(g: x) :> ["C8: a bind's write is not a Write"]
+            .Lift(into: x) :> ["C8: a bind's write is not a Write"]
         }
     }
 
@@ -913,6 +930,7 @@ ${
             .Effect(deps: ds, body: b) :> checkEffect(p, encl, ds, b)
             .ResetOn(triggers: ds, reset: b) :> checkResetOn(p, encl, ds, b)
             .Errors(of: x) :> checkSurface(p, encl, x)
+            .Gather(g: g, rows: rows) :> checkLoop(g.head, g.body).concat(checkViewGather(p, g, rows))
             .El(tag: t, attrs: attrs) :> checkGates(t, attrs).concat(checkStaticSinks(t, attrs))
             .Text(text: x) :> []
             .RawText(text: x) :> []
@@ -1140,6 +1158,8 @@ ${
             .Loop(label: x) :> false
             .Break(target: x) :> false
             .Continue(target: x) :> false
+            .Gather(g: x) :> false
+            .Lift(into: x) :> false
             .Write(cap: x) :> false
             .Let(sym: x) :> false
             .Assign(local: x) :> false
@@ -1162,6 +1182,8 @@ ${
             .Loop(label: x) :> false
             .Break(target: x) :> false
             .Continue(target: x) :> false
+            .Gather(g: x) :> false
+            .Lift(into: x) :> false
             .ResetSurface(of: v) :> false
             .Write(cap: x) :> false
             .Let(sym: x) :> false
@@ -1248,6 +1270,8 @@ ${
             .Loop(label: x) :> ""
             .Break(target: x) :> ""
             .Continue(target: x) :> ""
+            .Gather(g: x) :> ""
+            .Lift(into: x) :> ""
             .ResetSurface(of: v) :> ""
             .Write(cap: x) :> ""
             .Let(sym: x) :> ""
@@ -1289,6 +1313,8 @@ ${
             .Loop(label: x) :> not
             .Break(target: x) :> not
             .Continue(target: x) :> not
+            .Gather(g: x) :> not
+            .Lift(into: x) :> not
         }
     }
 
@@ -1443,6 +1469,7 @@ ${
             .Effect(deps: x) :> not
             .ResetOn(triggers: x) :> not
             .Errors(of: x) :> not
+            .Gather(g: x) :> not
         }
     }
 
@@ -1466,6 +1493,8 @@ ${
             .Loop(label: x) :> ""
             .Break(target: x) :> ""
             .Continue(target: x) :> ""
+            .Gather(g: x) :> ""
+            .Lift(into: x) :> ""
         }
     }
 
@@ -1569,6 +1598,7 @@ ${
             .Effect(body: b) :> tailBlock(b, true, [], "an effect body")
             .ResetOn(reset: b) :> tailBlock(b, false, [], "a reset-on reset")
             .Errors(of: x) :> []
+            .Gather(g: g) :> tailBlock(g.body, false, [], "a Tier-0 loop")
             .El(tag: x) :> []
             .Text(text: x) :> []
             .RawText(text: x) :> []
@@ -1614,6 +1644,8 @@ ${
             .Loop(label: x, body: lb) :> tailBlock(lb, false, [], where)
             .Break(target: x) :> []
             .Continue(target: x) :> []
+            .Gather(g: g) :> tailBlock(g.body, false, [], where)
+            .Lift(into: x) :> []
             .If(thenB: t, elseB: el) :> ifTails(b, i, t, el, tail, last, joins, where)
             .Attempt(ok: ok, arms: arms) :> attemptTails(ok, arms, where)
             .Defer(body: d) :> tailBlock(d, false, [], where)
@@ -1677,6 +1709,8 @@ ${
             .Loop(label: x) :> false
             .Break(target: x) :> false
             .Continue(target: x) :> false
+            .Gather(g: x) :> false
+            .Lift(into: x) :> false
             .Attempt(result: x) :> false
             .Defer(body: x) :> false
             .Commit(writes: x) :> false
@@ -1700,6 +1734,8 @@ ${
             .Loop(label: x) :> not
             .Break(target: x) :> not
             .Continue(target: x) :> not
+            .Gather(g: x) :> not
+            .Lift(into: x) :> not
             .Attempt(result: x) :> not
             .Defer(body: x) :> not
             .Commit(writes: x) :> not
@@ -2015,6 +2051,8 @@ ${
             .Loop(label: x) :> not
             .Break(target: x) :> not
             .Continue(target: x) :> not
+            .Gather(g: x) :> not
+            .Lift(into: x) :> not
             .Attempt(result: x) :> not
             .Defer(body: x) :> not
             .Commit(writes: x) :> not
@@ -2039,6 +2077,8 @@ ${
             .Loop(label: x) :> not
             .Break(target: x) :> not
             .Continue(target: x) :> not
+            .Gather(g: x) :> not
+            .Lift(into: x) :> not
             .Defer(body: x) :> not
             .Commit(writes: x) :> not
             .Let(sym: x) :> not
@@ -2224,6 +2264,8 @@ ${
             .Loop(label: l, head: h, body: lb) :> checkLoop(h, lb)
             .Break(target: x) :> []
             .Continue(target: x) :> []
+            .Gather(g: g) :> checkLoop(g.head, g.body)
+            .Lift(into: x) :> []
         }
     }
 
@@ -2299,6 +2341,8 @@ ${
             .Loop(label: x) :> 0
             .Break(target: x) :> 0
             .Continue(target: x) :> 0
+            .Gather(g: x) :> 0
+            .Lift(into: x) :> 0
         }
     }
 
@@ -2341,6 +2385,8 @@ ${
             .Loop(label: x) :> ""
             .Break(target: x) :> ""
             .Continue(target: x) :> ""
+            .Gather(g: x) :> ""
+            .Lift(into: x) :> ""
         }
     }
 
@@ -2385,6 +2431,8 @@ ${
         return match s {
             .Break(target: t) :> t.id
             .Continue(target: x) :> -1
+            .Gather(g: x) :> -1
+            .Lift(into: x) :> -1
             .Loop(label: x) :> -1
             .Let(sym: x) :> -1
             .Assign(local: x) :> -1
@@ -2452,6 +2500,7 @@ ${
             .Effect(body: b) :> jumpBlock(b, [])
             .ResetOn(reset: b) :> jumpBlock(b, [])
             .Errors(of: x) :> []
+            .Gather(g: g) :> jumpBlock(g.body, [g.label.id])
             .El(tag: x) :> []
             .Text(text: x) :> []
             .RawText(text: x) :> []
@@ -2486,6 +2535,8 @@ ${
             .Loop(label: l, body: lb) :> jumpBlock(lb, loops.concat([l.id]))
             .Break(target: t) :> jumpTo(t, loops, "Break")
             .Continue(target: t) :> jumpTo(t, loops, "Continue")
+            .Gather(g: g) :> jumpBlock(g.body, [g.label.id])   // s469: a bound loop is a jump boundary (§49.6 rule 6, C20)
+            .Lift(into: x) :> []
             .If(thenB: t, elseB: el) :> jumpBlock(t, loops).concat(jumpMaybe(el, loops))
             .Attempt(ok: ok, arms: arms) :> jumpAttempt(ok.body, arms, loops)
             .Suspend(then: t) :> jumpBlock(t, [])
@@ -2512,7 +2563,248 @@ ${
 
     fn jumpTo(t: Sym, loops: int[], what: string) -> string[] {
         if (loops.indexOf(t.id) >= 0) return []
-        return ["C19: a " + what + " names loop `" + t.hint + "`, which does not enclose it in this owner (§49.4.3)"]
+        return ["C19: a " + what + " names loop `" + t.hint + "`, which does not enclose it in this owner, or lies outside the bound loop it stands in (§49.4.3, §49.6 rule 6)"]
+    }
+
+    // -------------------------------------------------------------------------
+    // C20 (s469) — THE BOUND LOOP (SPEC §49.6) and the Tier-0 loop (§17.4).
+    // Owner by owner (C19's owners), every Lift against the Gathers that
+    // enclose it: it names the NEAREST one's `bind` (§49.6 rule 7: "A `lift`
+    // goes to the nearest enclosing bound loop … A nested `for-binding`
+    // captures its own lifts"); a row Lift (`LRow`) stands only in a
+    // View.Gather and names one of its rows. A Suspend's `then`, a Join body
+    // and a Defer body print as functions of their own, so a Lift there has no
+    // Gather (C19 refuses them inside a loop body anyway). Every Gather has a
+    // Lift that names it (E-LOOP-007: "a `for` bound … SHALL contain a `lift`").
+    // The jump boundary (§49.6 rule 6, E-LOOP-005) is checkJumps' — a Gather's
+    // body starts with only its own label in scope.
+    // -------------------------------------------------------------------------
+    fn checkGathers(p: CoreProgram) -> string[] {
+        let out: string[] = []
+        for (const f of p.fns) { out = out.concat(liftBlock(f.body, -1, -1)) }
+        for (const s of p.server) { out = out.concat(liftBlock(s.body, -1, -1)) }
+        for (const d of p.decls) {
+            for (const n of allNodes(Node.NDecl(d))) { out = out.concat(liftOwner(n)) }
+        }
+        return out
+    }
+
+    fn liftOwner(n: Node) -> string[] {
+        return match n {
+            .NAttr(a: a) :> liftAttr(a)
+            .NView(v: v) :> liftView(v)
+            .NProgram(p: q) :> []
+            .NDecl(d: d) :> []
+            .NField(f: f) :> []
+            .NFn(f: f) :> []
+            .NServerFn(f: f) :> []
+            .NBlock(b: b) :> []
+            .NStmt(s: s) :> []
+            .NExpr(e: e) :> []
+            .NPlace(pl: pl) :> []
+            .NInst(i: i) :> []
+            .NPattern(pat: pat) :> []
+            .NEdit(k: k) :> []
+        }
+    }
+
+    fn liftAttr(a: Attr) -> string[] {
+        return match a {
+            .On(event: ev, body: b) :> liftBlock(b, -1, -1)
+            .Bind(kind: k, write: w) :> liftBlock(w, -1, -1)
+            .Static(name: x) :> []
+            .Bound(name: x) :> []
+            .Show(test: x) :> []
+            .Gate(values: x) :> []
+        }
+    }
+
+    fn liftView(v: View) -> string[] {
+        return match v {
+            .Gather(g: g, rows: rows) :> gatherProblems(g, rows.length)
+            .Effect(body: b) :> liftBlock(b, -1, -1)
+            .ResetOn(reset: b) :> liftBlock(b, -1, -1)
+            .Errors(of: x) :> []
+            .El(tag: x) :> []
+            .Text(text: x) :> []
+            .RawText(text: x) :> []
+            .Dyn(e: x) :> []
+            .Cond(arms: x) :> []
+            .Each(src: x) :> []
+            .Instance(decl: x) :> []
+            .Slot :> []
+            .Star(decl: x) :> []
+        }
+    }
+
+    // `into`: the nearest enclosing Gather's bind id (-1: none); `rows`: its row
+    // count when it is a View.Gather (-1: a Stmt.Gather, or none).
+    fn liftBlock(b: Block, into: int, rows: int) -> string[] {
+        let out: string[] = []
+        for (const s of b.stmts) { out = out.concat(liftStmt(s, into, rows)) }
+        return out
+    }
+
+    fn liftMaybe(b: Block | not, into: int, rows: int) -> string[] {
+        if (b is not) return []
+        return liftBlock(b, into, rows)
+    }
+
+    fn liftStmt(s: Stmt, into: int, rows: int) -> string[] {
+        return match s {
+            .Lift(into: i, what: w) :> liftTarget(i, w, into, rows)
+            .Gather(g: g) :> gatherProblems(g, -1)
+            .Loop(body: lb) :> liftBlock(lb, into, rows)
+            .If(thenB: t, elseB: el) :> liftBlock(t, into, rows).concat(liftMaybe(el, into, rows))
+            .Attempt(ok: ok, arms: arms) :> liftAttempt(ok.body, arms, into, rows)
+            .Suspend(then: t) :> liftBlock(t, -1, -1)
+            .Join(k: x, body: jb) :> liftBlock(jb, -1, -1)
+            .Defer(body: d) :> liftBlock(d, -1, -1)
+            .Commit(writes: ws) :> []
+            .Let(sym: x) :> []
+            .Assign(local: x) :> []
+            .Write(cap: x) :> []
+            .Return(e: x) :> []
+            .Eval(e: x) :> []
+            .ResetSurface(of: x) :> []
+            .Unpersist(decl: x) :> []
+            .Fail(err: x) :> []
+            .Jump(k: x) :> []
+            .Break(target: x) :> []
+            .Continue(target: x) :> []
+        }
+    }
+
+    fn liftAttempt(okBody: Block, arms: ErrArm[], into: int, rows: int) -> string[] {
+        let out: string[] = liftBlock(okBody, into, rows)
+        for (const a of arms) { out = out.concat(liftBlock(a.body, into, rows)) }
+        return out
+    }
+
+    fn liftTarget(i: Sym, w: Lifted, into: int, rows: int) -> string[] {
+        if (into < 0) return ["C20: a Lift into `" + i.hint + "` stands in no Gather (§49.6.2: `lift` belongs to a bound loop)"]
+        if (i.id != into) return ["C20: a Lift into `" + i.hint + "` is not into its nearest enclosing Gather (§49.6 rule 7)"]
+        return match w {
+            .LValue(e: x) :> []
+            .LRow(idx: k) :> rowLiftProblems(k, rows)
+        }
+    }
+
+    fn rowLiftProblems(k: int, rows: int) -> string[] {
+        if (rows < 0) return ["C20: a row Lift in a Stmt.Gather — a row renders only in a View.Gather (§17.4)"]
+        if (k < 0 || k >= rows) return ["C20: a row Lift names row " + k + " of a View.Gather that has " + rows]
+        return []
+    }
+
+    // A Gather: its body against its own bind; at least one Lift names it.
+    fn gatherProblems(g: Gather, rows: int) -> string[] {
+        let out: string[] = liftBlock(g.body, g.bind.id, rows)
+        if (liftsInto(g.body, g.bind.id) == 0) out = out.concat(["C20: the Gather `" + g.bind.hint + "` holds no Lift into it — its value could only be the empty tape (§49.6, E-LOOP-007)"])
+        return out
+    }
+
+    // The Lifts into `into` under `b`, not inside a nested Gather (which
+    // captures its own, §49.6 rule 7).
+    fn liftsInto(b: Block, into: int) -> int {
+        let n: int = 0
+        for (const s of b.stmts) { n = n + liftsIntoStmt(s, into) }
+        return n
+    }
+
+    fn liftsIntoMaybe(b: Block | not, into: int) -> int {
+        if (b is not) return 0
+        return liftsInto(b, into)
+    }
+
+    fn liftsIntoStmt(s: Stmt, into: int) -> int {
+        return match s {
+            .Lift(into: i) :> liftIs(i, into)
+            .Loop(body: lb) :> liftsInto(lb, into)
+            .If(thenB: t, elseB: el) :> liftsInto(t, into) + liftsIntoMaybe(el, into)
+            .Attempt(ok: ok) :> liftsInto(ok.body, into)
+            .Gather(g: x) :> 0
+            .Suspend(then: t) :> 0
+            .Join(k: x) :> 0
+            .Defer(body: d) :> 0
+            .Commit(writes: ws) :> 0
+            .Let(sym: x) :> 0
+            .Assign(local: x) :> 0
+            .Write(cap: x) :> 0
+            .Return(e: x) :> 0
+            .Eval(e: x) :> 0
+            .ResetSurface(of: x) :> 0
+            .Unpersist(decl: x) :> 0
+            .Fail(err: x) :> 0
+            .Jump(k: x) :> 0
+            .Break(target: x) :> 0
+            .Continue(target: x) :> 0
+        }
+    }
+
+    fn liftIs(i: Sym, into: int) -> int {
+        if (i.id == into) return 1
+        return 0
+    }
+
+    // A View.Gather is a RENDER position (§6.15): no Return / Fail (there is
+    // no enclosing function — §49.6 rule 6's exits leave a function), and
+    // nothing in its loop writes reactive state, directly or through a called
+    // function (C11's witness, over the head and body; the rows' handlers are
+    // action positions and are not part of the loop).
+    fn checkViewGather(p: CoreProgram, g: Gather, rows: GatherRow[]) -> string[] {
+        let out: string[] = []
+        for (const n of allNodes(Node.NBlock(g.body))) {
+            const what: string = viewGatherExit(n)
+            if (what != "") out = out.concat(["C20: a Tier-0 loop holds " + what + " — a render position has no function to leave (§17.4, §49.6 rule 6)"])
+        }
+        const whole: Block = { stmts: [Stmt.Gather(g)] }
+        const w: string = blockWriteWitness(p, whole, [])
+        if (w != "") out = out.concat(["C20: a Tier-0 loop writes reactive state — " + w + " (§6.15: a render expression writes no reactive cell)"])
+        return out
+    }
+
+    fn viewGatherExit(n: Node) -> string {
+        return match n {
+            .NStmt(s: s) :> stmtExitKind(s)
+            .NProgram(p: q) :> ""
+            .NDecl(d: d) :> ""
+            .NField(f: f) :> ""
+            .NFn(f: f) :> ""
+            .NServerFn(f: f) :> ""
+            .NBlock(b: b) :> ""
+            .NExpr(e: e) :> ""
+            .NPlace(pl: pl) :> ""
+            .NInst(i: i) :> ""
+            .NPattern(pat: pat) :> ""
+            .NEdit(k: k) :> ""
+            .NView(v: v) :> ""
+            .NAttr(a: a) :> ""
+        }
+    }
+
+    fn stmtExitKind(s: Stmt) -> string {
+        return match s {
+            .Return(e: x) :> "a Return"
+            .Fail(err: x) :> "a Fail"
+            .Attempt(result: x) :> ""
+            .Let(sym: x) :> ""
+            .Assign(local: x) :> ""
+            .Write(cap: x) :> ""
+            .Commit(writes: x) :> ""
+            .If(cond: x) :> ""
+            .Eval(e: x) :> ""
+            .Suspend(bind: x) :> ""
+            .ResetSurface(of: x) :> ""
+            .Defer(body: x) :> ""
+            .Unpersist(decl: x) :> ""
+            .Join(k: x) :> ""
+            .Jump(k: x) :> ""
+            .Loop(label: x) :> ""
+            .Break(target: x) :> ""
+            .Continue(target: x) :> ""
+            .Gather(g: x) :> ""
+            .Lift(into: x) :> ""
+        }
     }
 
     // C16 (s451): `encl` is non-empty exactly inside a declaration (checkCore),
@@ -2566,6 +2858,8 @@ ${
             .Loop(label: x) :> "a Loop"
             .Break(target: x) :> "a Break"
             .Continue(target: x) :> "a Continue"
+            .Gather(g: x) :> "a Loop"
+            .Lift(into: x) :> "a Lift"
         }
     }
 
@@ -2604,6 +2898,8 @@ ${
             .Loop(label: x) :> "a Loop inside a Commit"
             .Break(target: x) :> "a Break inside a Commit"
             .Continue(target: x) :> "a Continue inside a Commit"
+            .Gather(g: x) :> "a Gather inside a Commit"
+            .Lift(into: x) :> "a Lift inside a Commit"
         }
     }
 
@@ -3170,6 +3466,8 @@ ${
             .Loop(label: x) :> not
             .Break(target: x) :> not
             .Continue(target: x) :> not
+            .Gather(g: x) :> not
+            .Lift(into: x) :> not
             .Attempt(result: x) :> not
             .Defer(body: x) :> not
             .Commit(writes: x) :> not
@@ -3274,6 +3572,7 @@ ${
             .Effect(deps: ds) :> not
             .ResetOn(triggers: ds) :> not
             .Errors(of: ds) :> not
+            .Gather(g: x) :> not
         }
     }
 
@@ -3332,6 +3631,8 @@ ${
             .Loop(label: x) :> not
             .Break(target: x) :> not
             .Continue(target: x) :> not
+            .Gather(g: x) :> not
+            .Lift(into: x) :> not
         }
     }
 
