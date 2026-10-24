@@ -77,3 +77,26 @@ classified as success. Gap: `g-server-return-match-failable-subject-unawaited-s4
   divergence (g-impl1-whole-error-binder-binds-data-s469).
 - Not changed: gauntlet 039's extra E-TYPE-027 kept (a positional binder whose variant no visible enum declares;
   refusing beats guessing; the file is already refused by E-MATCH-012/E-TYPE-006).
+
+## Round 4 (review of 048dba21a: FIX)
+
+- H-A / H-B: `failableCalleeErrorEnum` (type-system.ts) — ONE resolver for a failable callee's error enum (local
+  through aliases; imported via `importedFnSignatures`, whose `errorEnum` now follows aliases in the exporting
+  file), used by the `?` E-ERROR-010 payload check, the `!{}` guard stamp and the failable-match subject stamp.
+  Field compatibility = name SETS.
+- H-C: arm callee reader's text fallback reads template interpolations (tagged templates) before blanking.
+- M-1: `armTextReadsName` — the short-form `e` read test from the parsed arm (template substitutions included).
+- M-2 NOT changed (implemented, measured, reverted): binding the whole error makes examples/09 correct but turns
+  `_ e :> e.<field>` programs silently wrong (review probes, samples/blog-cms, samples/api-dashboard). Ruling owed;
+  recorded on g-impl1-whole-error-binder-binds-data-s469 with options + recommendation.
+- Pack: s7 / f4 / l2 / t2 (r4-shapes.js), 1010 shapes, pins for 12 families; library/tool load failure → UNJUDGED
+  with gap id; tool runner judges stdout first. Filed g-library-tool-cross-file-import-source-path-s469.
+- Corpus differential, CORRECTED full list (base b35babcc2 vs head; examples + samples 952, conformance + stdlib +
+  benchmarks 1912): changed artifacts — examples/09-error-handling.server.js (keyed fail payload); conformance
+  servers sql-transaction-in-function-rt and server-fn/cell-assign-failable-{arm-return-live, recovery-value,
+  success-then-read} (keyed fail payload); FOUR client twins server-db/sql-{aggregate-group, join-two-tables,
+  order-limit, update-returning}-rt-twin (`.Transport(t)` binds `.data.t`). Newly refused:
+  phase2-match-payload-arity-033 (E-TYPE-021, as its expected.json asks) and control-015-try-catch (E-TYPE-027;
+  SPEC says E-ERROR-013). Code changes on already-failing sources: error-004-in-logic E-CODEGEN-INVALID-LOGIC →
+  E-TYPE-027; +E-TYPE-027 on phase2-match-optional-039 and debate-async-dashboard-react-perspective. stdlib: no
+  real change.
