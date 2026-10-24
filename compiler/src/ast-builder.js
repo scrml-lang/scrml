@@ -4847,13 +4847,21 @@ function structuralRefusal(err) {
  * here; it fails as before (E-CODEGEN-INVALID-LOGIC).
  */
 function refuseDerivedTrailing(value, anchor, derivedAt, valueAt, prefix, filePath, errors) {
-  let node = null;
-  try {
-    ({ result: node } = captureTrailingContentWarnings(() => parseExprToNode(value, filePath, anchor.absStart + valueAt)));
-  } catch {
-    return;
+  let trailing = "";
+  if (value.startsWith("${")) {
+    // A `derived=${ … }` logic block: its extent is the shared `${ … }` reader's
+    // (interpolation-extent.ts `logicBlockClose`), the one the engine's effect slots use.
+    const close = logicBlockClose(value, 0);
+    trailing = close >= 0 ? value.slice(close + 1).trim() : "";
+  } else {
+    let node = null;
+    try {
+      ({ result: node } = captureTrailingContentWarnings(() => parseExprToNode(value, filePath, anchor.absStart + valueAt)));
+    } catch {
+      return;
+    }
+    trailing = node && typeof node === "object" && typeof node._s441TrailingText === "string" ? node._s441TrailingText.trim() : "";
   }
-  const trailing = node && typeof node === "object" && typeof node._s441TrailingText === "string" ? node._s441TrailingText.trim() : "";
   if (!trailing) return;
   // The parser reads a preprocessed copy; show the author's spelling of a bare `.Variant`.
   const shown = trailing.replace(/__scrml_bare_variant_[0-9a-z]+_([A-Za-z_$][\w$]*)__/g, ".$1");
@@ -4875,6 +4883,31 @@ function refuseDerivedTrailing(value, anchor, derivedAt, valueAt, prefix, filePa
       col: nl > 0 ? (derivedAt - lastNl) : anchor.col + derivedAt,
     },
   )));
+}
+
+/**
+ * S469 round 2 — where a raw-captured `<match>` / `<each>` opener ENDS, decided by the markup
+ * attribute tokenizer (its `TAG_CLOSE_GT` / `TAG_SELF_CLOSE`), the reader that also decides the
+ * opener's attributes (`readStructuralOpenerAttrs`). The builders' own quote-tracking scanners
+ * read an apostrophe inside a `${ // it's }` comment, or a quote in a regular expression, as a
+ * string opener and cut the opener short — so an `else` after it was never seen. `fallback` (the
+ * builder's scanner) is used only when the tokenizer reports no close.
+ */
+function tokenizerOpenerEnd(raw, fallback) {
+  if (typeof raw === "string" && raw.startsWith("<")) {
+    try {
+      const toks = tokenizeAttributes(raw, 0, 1, 1, "markup");
+      for (const t of toks) {
+        if (t && (t.kind === "TAG_CLOSE_GT" || t.kind === "TAG_SELF_CLOSE") && t.span && typeof t.span.start === "number") {
+          const at = t.kind === "TAG_SELF_CLOSE" ? raw.indexOf(">", t.span.start) : t.span.start;
+          if (at > 0 && raw[at] === ">") return at;
+        }
+      }
+    } catch {
+      // fall through to the builder's scanner
+    }
+  }
+  return fallback(raw);
 }
 
 /**
@@ -22429,7 +22462,7 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
           return -1;
         }
 
-        const firstLineEnd = _findMatchOpenerEnd(matchRaw);
+        const firstLineEnd = tokenizerOpenerEnd(matchRaw, _findMatchOpenerEnd);
         const headerLine = firstLineEnd >= 0
           ? matchRaw.slice(0, firstLineEnd)
           : matchRaw.split("\n")[0];
@@ -23448,7 +23481,7 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
           return -1;
         }
 
-        const firstLineEnd = _findEachOpenerEnd(eachRaw);
+        const firstLineEnd = tokenizerOpenerEnd(eachRaw, _findEachOpenerEnd);
         const headerLine = firstLineEnd >= 0
           ? eachRaw.slice(0, firstLineEnd)
           : eachRaw.split("\n")[0];
@@ -25019,7 +25052,7 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
           return -1;
         }
 
-        const firstLineEnd = _findMatchOpenerEnd(matchRaw);
+        const firstLineEnd = tokenizerOpenerEnd(matchRaw, _findMatchOpenerEnd);
         const headerLine = firstLineEnd >= 0
           ? matchRaw.slice(0, firstLineEnd)
           : matchRaw.split("\n")[0];
