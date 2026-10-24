@@ -32,7 +32,7 @@
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 267 | 5 |
 | MED | 684 | 8 |
-| LOW | 492 | 0 |
+| LOW | 493 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
 
@@ -107,6 +107,11 @@ Measured (pack `s4/ternary operand`, `s4/arrow body`, `s4/arm value async call, 
 Landed with the branch anyway because the branch is a strict improvement: pack 1367 shapes → head 5 FAIL (the known render-position class) vs 158 on the merge-base; these three escapes FAIL identically on base and prev.
 
 ### g-impl1-whole-error-binder-allowlist-stricter-than-spec-s469 — impl#1 refuses uses of a `!{}` whole-error binder `_ err :>` that §18.6.1's text allows: passing it whole to an untyped helper (`describe(err)`), holding it in a local or a cell, `String(err)` / a template, a container — and EVERY use when the handled call's error enum cannot be resolved (a stdlib or `Error`-default callee, an alias in a third file) — `NEW S469 (review of 716ee804e); LOW; open (fails closed; ruling owed)`
+
+<!-- @gap id=g-impl1-unknown-variant-arm-reported-as-type-027-s470 sev=LOW status=open locus=compiler/src/codegen/emit-control-flow.ts(the PayloadBinderRefusal planner, E-TYPE-027 return — located-not-traced) prov=adopter:flogence-S59-inbox-2026-10-24;spec:§19.8.1(SqlError variants are QueryFailed/ConstraintViolation/ConnectionLost) -->
+### g-impl1-unknown-variant-arm-reported-as-type-027-s470 — an `!{}` arm naming a variant the failure's enum does not declare (`::SQLError e :>` on a `?{}`-backed call) is reported as E-TYPE-027 "cannot tell which enum's field order", not as an unknown variant — `NEW S470`
+
+Found by flogence (55 sites, gate went red at #1539 `91133c96b`; bisected on a minimal repro, exit 0 at `42f8a49d2`). The refusal is correct: `SQLError` is not a `SqlError` variant (§19.8.1), and `::V m` binds the payload (§19.4, S451). Before #1539 impl#1 accepted the arm silently, which was fail-open. The defect is the message. It steers the author toward named binders (`.SQLError(<field>: <local>)`), which cannot fix it. It should name the subject's error enum and say the variant is not one of its variants. The repro is in the flogence inbox reply `2026-10-24-from-scrml-S470-to-flogence-re-type-027-sqlerror-arms.md`. Its minimal form is a `function` holding a `?{ … }.run()`, called with `!{ ::SQLError e :> { … } _ :> { … } }`.
 
 <!-- @gap id=g-impl1-whole-error-binder-allowlist-stricter-than-spec-s469 sev=LOW status=open locus=compiler/src/type-system.ts(auditWholeErrorBinderText — the allow-list) prov=review:S469-return-match-r5-HIGH-A;spec:§18.6.1("passing it on whole … is unaffected") -->
 
