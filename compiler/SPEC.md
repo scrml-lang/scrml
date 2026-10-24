@@ -27619,13 +27619,13 @@ are REFUSED by impl#1, `E-IMPL1-RULED-FORM-UNSUPPORTED` (its row lands with that
 | E-TYPE-011 | §3.3, §10.2 | `${ }` result not coercible to CSS class in style parent **(Reserved / spec-ahead, S263 — no fire site: the same unbuilt lift→parent coercion type-check subsystem as E-TYPE-010, style-parent branch. Excluded from the freeze fireable set.)** | Error |
 | E-TYPE-012 | §10.4 | Heterogeneous `lift` values not mutually coercible **(Reserved / spec-ahead, S263 — no fire site: no lift-value type-unification check is built — the same unbuilt coercion-check subsystem as E-TYPE-010/011. Excluded from the freeze fireable set.)** | Error |
 | E-TYPE-020 | §14.6, §18.8.1 | Non-exhaustive match over enum type | Error |
-| E-TYPE-021 | §18.7 | Payload arity mismatch in positional destructuring | Error |
-| E-TYPE-022 | §18.7 | Named binding references nonexistent payload field | Error |
+| E-TYPE-021 | §18.7 | Payload arity mismatch in positional destructuring — too few or too many positional binders, or positional and named binders mixed in one arm pattern. *(impl#1, S469: emitted at `compiler/src/codegen/emit-control-flow.ts` `planPayloadBinders` when the variant's field list is known at the arm — every match lowering, structured and text-lowered.)* | Error |
+| E-TYPE-022 | §18.7 | Named binding references nonexistent payload field. *(impl#1, S469: emitted at `compiler/src/codegen/emit-control-flow.ts` `planPayloadBinders` when the variant's field list is known at the arm.)* | Error |
 | E-TYPE-023 | §18.8.1 | Duplicate arm for the same variant | Error |
 | E-TYPE-024 | §18.8.2 | Match over a struct type (not supported) | Error |
 | E-TYPE-025 | §18.8.2 | Match over an UNRESOLVED subject — an `asIs`-typed value (resolve the type first), or, since S365, an `unknown`-typed one (§7.5.2). Both are the same absence of a type; the split changes WHY a subject is unresolved, never WHETHER it is, so the code fires on both. The `unknown` phrasing additionally names the AST node kind at which inference stopped, which the `asIs` phrasing cannot. *(Scope clarified S365 — dpa-036 call 1. The code's fire condition is UNCHANGED for `asIs`; omitting `unknown` would have silently retired this code for every un-annotated subject, which is a regression the split must not buy. Emitted by `compiler/src/type-system.ts` `checkMatchDiagnostics`.)* | Error |
 | E-TYPE-026 | §18.9 | Match expression in invalid context (markup, SQL, CSS, attribute) | Error |
-| E-TYPE-027 | §18.13 | Shorthand pattern used when enum type cannot be inferred | Error |
+| E-TYPE-027 | §18.13 | Shorthand pattern used when enum type cannot be inferred. *(impl#1, S469: emitted at `compiler/src/codegen/emit-control-flow.ts` `planPayloadBinders` for a POSITIONAL payload binder whose variant's declaring enum — so its field order — cannot be determined at the arm (an undeclared or ambiguous variant name); named binders, or a declared subject type, resolve it.)* | Error |
 | E-TYPE-028 | §18.16 | Literal arm used over an enum type | Error |
 | E-TYPE-061 | §14.5 | Shorthand `.VariantName` in a position where the enum type cannot be inferred | Error |
 | E-TYPE-062 | §18.17 | `is` operator applied to a non-enum-typed operand | Error |
