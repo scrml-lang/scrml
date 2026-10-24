@@ -778,7 +778,7 @@ export function liftOpenGatesBlockFnHazard(count) {
 
 /**
  * S469 (g-keyed-row-control-flow-if-not-reevaluated-s469) — a reactive `for … lift` loop lowered as the
- * plain loop because an `if` in its tree decides what a row renders (liftForTreeIfPins), emitted
+ * plain loop because an `if` / `match` statement in its tree decides what a row renders (liftForTreeIfPins), emitted
  * outside any reconciled row (inside one it is a region of that row, or that row is plain too): only
  * re-running the render that builds it re-reads the `if`. Counted like an open gate — an `if … lift`
  * arm re-renders on what it read; a `${}` block is made a re-render effect (its own text may name no
@@ -3558,9 +3558,9 @@ export function emitIfStmtWithContainer(ifNode, containerElVar, opts = {}) {
   // renders, built in that row (not in a region of it, not in a lift that escaped it): the row is
   // built once per key, so the `if` is read again only as a REGION of the row — the shape the
   // nested-loop region uses (emitForStmtWithContainer): a comment anchor inside the row element, and
-  // a live-keyed tracked effect that re-resolves the row's item, destroys the previous run's child
-  // owner scope, removes the nodes it built and re-runs the `if` into a fragment it inserts before
-  // the anchor. The row keeps its keying (its other nodes, their state and listeners). An `if` the
+  // a tracked effect that reads the row's live item (from the per-row slot below), destroys the
+  // previous run's child owner scope, removes the nodes it built and re-runs the `if` into a fragment
+  // it inserts before the anchor. The row keeps its keying (its other nodes, their state and listeners). An `if` the
   // row cannot hold that way was lowered with the row plain (liftForTreeIfPins); one that still
   // reaches here (the prediction missed) is refused, never left stale.
   const _rowCtx = currentLiftReconcileCtx();
