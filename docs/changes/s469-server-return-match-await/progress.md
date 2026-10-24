@@ -60,3 +60,20 @@ classified as success. Gap: `g-server-return-match-failable-subject-unawaited-s4
   generate-baseline.js's `observeCellSubprocess` and spliced (a full regen would restamp unrelated drift).
 - Gaps: main entry round-2 note; g-impl1-paren-free-binder-arity-s451 + g-impl1-payload-enum-wire-shape-s451
   resolved; render + refused-positions gaps extended.
+
+## Round 3 (review of b3712d7b3: FIX)
+
+- H1 (library / tool mode, regression): TS stamps `fail` with `__failVariantFields` from the TS-resolved enum
+  (aliases followed: `resolveErrorEnumThroughAliases`); `emitFailExpr` keys by it in every mode. runCG installs
+  the per-file variant registry once per file before ANY emitter; client/server snapshot+restore instead of clear.
+- H2 (short form): `emitShortFormArmBinding` projects the one declared field; otherwise binds nothing and refuses
+  a read of `e` (E-TYPE-021 / -027). Chosen over "stop synthesizing e" for compatibility (stated in the gap).
+- F1: `?` same-named variant with different fields → E-ERROR-010. F2: template-literal interpolations read by the
+  arm callee reader. F3 filed (g-impl1-async-colouring-ignores-local-shadow-s469).
+- Pack: SIDEs `library` / `tool`; s6 / f3 / l1 / t1 from r3-shapes.js; 935; producer-imports-enum shapes UNJUDGED
+  (g-server-js-imports-module-without-server-file-s467) not pinned PASS-500; pins regenerated for 8 families.
+- Tests: template-literal-lowering subject made SPEC-valid + pinned E-ERROR-013 divergence
+  (existing gap g-impl1-handler-on-non-failable-s451 — no duplicate filed); `_ err` test is a pinned §18.6.1
+  divergence (g-impl1-whole-error-binder-binds-data-s469).
+- Not changed: gauntlet 039's extra E-TYPE-027 kept (a positional binder whose variant no visible enum declares;
+  refusing beats guessing; the file is already refused by E-MATCH-012/E-TYPE-006).
