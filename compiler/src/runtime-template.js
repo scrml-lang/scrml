@@ -5028,10 +5028,17 @@ function _scrml_track(target, prop) {
  * Used by reconcile_list to avoid tracking every item.id access
  * in the key extraction loop — the list only needs to track the
  * array itself, not individual item properties.
+ * S469: restores the PRIOR state, so a call inside an already-paused window (a lifted bind's
+ * initial read inside _scrml_reconcile_list) does not turn tracking back on for the rest of it.
  */
 function _scrml_untracked(fn) {
+  const wasPaused = _scrml_tracking_paused;
   _scrml_tracking_paused = true;
-  try { return fn(); } finally { _scrml_tracking_paused = false; }
+  try {
+    return fn();
+  } finally {
+    _scrml_tracking_paused = wasPaused;
+  }
 }
 
 /**

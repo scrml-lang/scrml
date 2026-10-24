@@ -368,7 +368,9 @@ ${row}
   for (const [label, row] of [
     ["r5 — a row-local `const name`", `            const name = item.name
             lift <li class="row">\${name}</li>`],
-    ["a `const name` in a nested block of the row", `            if (item.id > 0) {
+    // S469 (g-keyed-row-control-flow-if-not-reevaluated-s469) — the nested block is a nested loop's body:
+    // an `if` that lifts decides what the row renders and lowers the list plain in any position.
+    ["a `const name` in a nested block of the row", `            for (let k of [1]) {
                 const name = item.name
                 lift <li class="row">\${name}</li>
             }`],
