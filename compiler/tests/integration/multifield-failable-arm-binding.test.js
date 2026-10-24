@@ -87,7 +87,8 @@ describe("multi-field !{} arm binding + multi-arg fail (gate fix-wave)", () => {
     expect(() => acorn.parse(clientJs, { ecmaVersion: 2022, sourceType: "module" })).not.toThrow();
     expect(clientJs).toMatch(/async function _scrml_fetchData_\d+\s*\(/);
     expect(clientJs).toMatch(/= await safeCallAsync\b/);
-    // Both binding names land (binding-name fallback when the imported schema is absent).
+    // Both binding names land: HostError.Thrown(message, name) is the seeded scrml:host schema
+    // (S469 r2 — no longer a guess from the binder names).
     expect(clientJs).toContain(".data.message");
     expect(clientJs).toContain(".data.name");
   });

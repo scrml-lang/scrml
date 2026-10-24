@@ -67,8 +67,13 @@ function inProcessFetch(serverMod, NativeRequest, NativeResponse) {
     const path = url.replace(/^[a-z]+:\/\/[^/]+/i, "");
     const headers = { ...Object.fromEntries(new Headers(init.headers ?? {}).entries()), Cookie: "scrml_csrf=tok", "X-CSRF-Token": "tok" };
     const req = new NativeRequest(`http://localhost${path}`, { method: init.method ?? "GET", headers, body: init.body });
-    const res = await serverMod.fetch(req);
-    return res ?? new NativeResponse("not found", { status: 404 });
+    // Every compiled server bundle of the shape (a multi-file shape's server functions live in the
+    // module that declares them), first route that answers.
+    for (const mod of serverMod) {
+      const res = await mod.fetch(req.clone());
+      if (res) return res;
+    }
+    return new NativeResponse("not found", { status: 404 });
   };
 }
 
@@ -306,10 +311,13 @@ export async function runShape(shape, side, dir) {
   const extraNames = Object.keys(shape.extra ?? {});
   let serverMod = null;
   if (side === "fullstack") {
-    const sp = resolve(out, "app.server.js");
-    if (!existsSync(sp)) return { cls: "UNJUDGED", detail: "fullstack shape with no server bundle" };
-    try { serverMod = await import(pathToFileURL(sp).href + "?" + Math.random().toString(36).slice(2)); }
-    catch (e) { return { cls: "PASS-500", detail: `bundle does not load: ${String(e?.message ?? e).slice(0, 60)}` }; }
+    const bundles = readdirSync(out).filter((f) => f.endsWith(".server.js"));
+    if (bundles.length === 0) return { cls: "UNJUDGED", detail: "fullstack shape with no server bundle" };
+    serverMod = [];
+    for (const b of bundles) {
+      try { serverMod.push(await import(pathToFileURL(resolve(out, b)).href + "?" + Math.random().toString(36).slice(2))); }
+      catch (e) { return { cls: "PASS-500", detail: `bundle ${b} does not load: ${String(e?.message ?? e).slice(0, 60)}` }; }
+    }
   }
   const wrong = await clickAndRead(out, "wrong", extraNames, serverMod);
   const right = await clickAndRead(out, "right", extraNames, serverMod);

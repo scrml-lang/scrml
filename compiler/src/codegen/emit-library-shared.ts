@@ -17,6 +17,8 @@ import { emitFnShortcutBody, emitParamDefault } from "./emit-logic.js";
 import { paramSignature, indentBodyLines } from "./utils.ts";
 import { bodyContains } from "./collect.ts";
 import { extractCalleeNames, buildCalleeImportMap } from "./scheduling.ts";
+import { splitMultiArmString, parseMatchArm } from "./emit-control-flow.ts";
+import { parseExprToNode } from "../expression-parser.ts";
 import { isPromiseReturningImportedCallee } from "../module-resolver.js";
 import { CGError } from "./errors.ts";
 // Phase-2 colorless-async — the clean-family combinator detector, shared with the
@@ -93,6 +95,47 @@ function _stripStringLiterals(s: string): string {
   return s.replace(/"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|`(?:[^`\\]|\\.)*`/g, '""');
 }
 
+/**
+ * S469 r2 — the callees of match-arm TEXT, read from the PARSED arm (the one arm reader:
+ * `splitMultiArmString` / `parseMatchArm`, then the expression parser), never a `\bname\s*\(`
+ * scan. The scan read a MEMBER call as a call of a same-named function: `q.includes("x")` in an
+ * arm coloured the enclosing sync client function `async` when the file had a server function
+ * named `includes`, and every render-position use (`if=${allowed(@pw)}`, a derived cell) then read
+ * a pending Promise — always truthy, so a wrong password LOGGED IN.
+ */
+function armListTextCallees(text: string, out: Set<string>, guard: boolean): void {
+  const t = text.trim().replace(/-\s*>/g, "->");
+  const pieces = splitMultiArmString(t);
+  for (const piece of pieces.length > 0 ? pieces : [t]) {
+    const arm = parseMatchArm(piece);
+    armBodyTextCallees(arm ? (arm.result ?? "") : piece, out, guard);
+  }
+}
+
+/** The callees of one arm BODY's text: its expression tree, else (a block body the expression
+ *  reader cannot model) the bare-name calls of its tokens — never a member call (`x.f(`). */
+function armBodyTextCallees(body: string, out: Set<string>, guard: boolean): void {
+  const text = body.trim();
+  if (!text) return;
+  let node: unknown = null;
+  try { node = parseExprToNode(text, "", 0); } catch { node = null; }
+  if (node && !treeHasEscapeHatch(node)) { collectCalleeIdents(node, out, guard); return; }
+  for (const m of _stripStringLiterals(text).matchAll(/(?<![.\w$])([A-Za-z_$][\w$]*)\s*\(/g)) out.add(m[1]);
+}
+
+function treeHasEscapeHatch(node: unknown): boolean {
+  if (!node || typeof node !== "object") return false;
+  if (Array.isArray(node)) return node.some(treeHasEscapeHatch);
+  const n = node as Record<string, unknown>;
+  if (n.kind === "escape-hatch") return true;
+  for (const k of Object.keys(n)) {
+    if (k === "span") continue;
+    const v = n[k];
+    if (v && typeof v === "object" && treeHasEscapeHatch(v)) return true;
+  }
+  return false;
+}
+
 function collectCalleeIdents(node: unknown, out: Set<string>, guardNestedFnValues = false): void {
   if (!node || typeof node !== "object") return;
   if (Array.isArray(node)) { for (const c of node) collectCalleeIdents(c, out, guardNestedFnValues); return; }
@@ -126,18 +169,19 @@ function collectCalleeIdents(node: unknown, out: Set<string>, guardNestedFnValue
     const arms = Array.isArray((n as ASTNode).body) ? ((n as ASTNode).body as ASTNode[]) : [];
     for (const arm of arms) {
       if (!arm || typeof arm !== "object") continue;
-      const s = typeof (arm as ASTNode).result === "string" && (arm as ASTNode).result
-        ? ((arm as ASTNode).result as string)
-        : (typeof (arm as ASTNode).expr === "string" ? ((arm as ASTNode).expr as string) : "");
-      if (s) for (const c of extractCalleeNames(_stripStringLiterals(s))) out.add(c);
+      if (typeof (arm as ASTNode).result === "string" && (arm as ASTNode).result) {
+        armBodyTextCallees((arm as ASTNode).result as string, out, guardNestedFnValues);
+      } else if (typeof (arm as ASTNode).expr === "string" && (arm as ASTNode).expr) {
+        armListTextCallees((arm as ASTNode).expr as string, out, guardNestedFnValues);
+      }
     }
     // S469 (g-server-return-match-failable-subject-unawaited-s469) — the EXPRESSION-tree match
     // (`v = match k { "a" :> isOk(p) ? … }`, an argument, an operand) carries its arms as
-    // `rawArms` strings: harvested the same way, or the enclosing client function was not
-    // coloured async and the arm tested a pending Promise (always truthy).
+    // `rawArms` strings: read the same way, or the enclosing client function was not coloured
+    // async and the arm tested a pending Promise (always truthy).
     const raw = (n as { rawArms?: unknown }).rawArms;
     if (Array.isArray(raw)) {
-      for (const r of raw) if (typeof r === "string" && r) for (const c of extractCalleeNames(_stripStringLiterals(r))) out.add(c);
+      for (const r of raw) if (typeof r === "string" && r) armListTextCallees(r, out, guardNestedFnValues);
     }
   }
   for (const key of Object.keys(n)) {

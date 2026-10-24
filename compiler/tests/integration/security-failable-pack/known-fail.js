@@ -25,6 +25,12 @@ export const KNOWN_FAIL = {
   // (read as `.Ok`). The same class as a plain `${isOk(@pw) ? … : …}` (g-markup-gate-tests-server-call-promise)
   // and `const <d> = isOk(@pw)` (g-derived-cell-rhs-server-call-renders-promise, ruling-gated). FAIL on base too.
   "f1/render: markup interpolation": "g-render-match-async-subject-unawaited-s469: a markup `${match check(@pw) { … }}` cannot await its subject (render time); the Promise reads as `.Ok`",
+  // S469 r2 — a helper that IS async (it calls a server function) read in a render position: the `if=`
+  // gate and the derived cell test its pending Promise (always truthy); FAIL on base too. The
+  // interpolation twin is awaited (#391) and PASSes.
+  "f2/async helper, if= with &&": "g-markup-gate-tests-server-call-promise: an `if=` over an async-coloured helper tests its Promise",
+  "f2/async helper, bare if=": "g-markup-gate-tests-server-call-promise: an `if=` over an async-coloured helper tests its Promise",
+  "f2/async helper, derived cell": "g-derived-cell-rhs-server-call-renders-promise: a derived cell over an async-coloured helper holds its Promise",
   "f1/render: derived cell": "g-render-match-async-subject-unawaited-s469: a derived `const <c> = match check(@pw) { … }` cannot await its subject (synchronous recompute); the Promise reads as `.Ok`",
   // S469 round 5 (s469-lift-if-render-gate) — main's evaluation PLACEMENT is the lane's oracle: only the
   // DOM operation changed (display toggle -> swap). These n23 positions are stale on main too (FAIL there,

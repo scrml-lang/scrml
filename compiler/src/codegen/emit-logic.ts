@@ -12,7 +12,7 @@ import { REFUSED_SERVER_TEXT } from "./server-text-guard.ts";
 import { bareBlockText, bareBlockSequenceTexts, PROBE_BODY_OFFSET } from "../validators/defer-structure.ts";
 import { armBlockStatementsDetailed } from "../arm-body-statements.ts";
 import { isWholeBraceBlock } from "../brace-pair.ts";
-import { emitIfStmt, emitForStmt, emitWhileStmt, emitDoWhileStmt, emitBreakStmt, emitContinueStmt, emitTryStmt, emitDeferScope, emitDeferRegistration, emitMatchExpr, emitMatchStmt, emitMultiScrutineeMatchInline, emitSwitchStmt, rewriteBlockBody, splitMultiArmString, parseMatchArm, matchArmInlineToMatchArm, emitVariantBindingPrelude, matchSubjectCtx, hasPayloadBindingOrTaggedVariant, getMatchSubjectVariantFields, isMatchSubjectFailable, getErrorVariantFieldSchema, emitTypedArmResultCtor, matchArmBlockToMatchArm, collectIfChainCond, isFailableOkMatch, isSqlFailableMatch, matchScrutineeHandlesSql, enterSqlErrorSchema, exitSqlErrorSchema, emitMatchTagDiscriminator, getVariantFieldSchema, armCondition, givenGuardToMatchArm, stampPropagateOperand, leaveStmtFromArmText, nestedMatchFromArmText, propagateOperandOfArmText, structureServerArm, emitArmValue, emitObjectLiteralArm, hostAsyncFacts, type MatchArm } from "./emit-control-flow.ts";
+import { emitIfStmt, emitForStmt, emitWhileStmt, emitDoWhileStmt, emitBreakStmt, emitContinueStmt, emitTryStmt, emitDeferScope, emitDeferRegistration, emitMatchExpr, emitMatchStmt, emitMultiScrutineeMatchInline, emitSwitchStmt, rewriteBlockBody, splitMultiArmString, parseMatchArm, matchArmInlineToMatchArm, emitVariantBindingPrelude, matchSubjectCtx, hasPayloadBindingOrTaggedVariant, getMatchSubjectVariantFields, isMatchSubjectFailable, getErrorVariantFieldSchema, getEnumVariantFieldSchema, CPS_AMBIENT_ERROR_VARIANTS, planPayloadBinders, parseBindingList, emitTypedArmResultCtor, matchArmBlockToMatchArm, collectIfChainCond, isFailableOkMatch, isSqlFailableMatch, matchScrutineeHandlesSql, enterSqlErrorSchema, exitSqlErrorSchema, emitMatchTagDiscriminator, getVariantFieldSchema, armCondition, givenGuardToMatchArm, stampPropagateOperand, leaveStmtFromArmText, nestedMatchFromArmText, propagateOperandOfArmText, structureServerArm, emitArmValue, emitObjectLiteralArm, hostAsyncFacts, type MatchArm, type SubjectVariantFields } from "./emit-control-flow.ts";
 import { isDestructurePattern, nameOrPatternText } from "./emit-destructure-pattern.ts";
 import type { DefaultLowerer } from "./emit-destructure-pattern.ts";
 import { markDeclaredImmutable, markDeclaredMutable, tildeDeclIsRebind, clearLiftScope } from "./declared-name-marks.ts";
@@ -689,7 +689,13 @@ function emitFailExpr(node: FailExprLike, opts: EmitLogicOpts): string {
     // stays `.data = <value>` so a reader in another file, which cannot type
     // the callee's error enum, still agrees with it (S438 review N2; the
     // field-keyed §51.3.2 shape for imported enums is residual (f)).
-    const schema = getErrorVariantFieldSchema(variant);
+    // S469 r2 — keyed by the DECLARING enum's fields, looked up by the enum name the `fail`
+    // writes (a local declaration or an imported enum): one shape in the declaring file and in
+    // every importer. The by-variant-name ERROR registry (local + ParseError) is the fallback for
+    // a name this file cannot resolve (an alias). Before, an importer's `fail` sent the bare value
+    // and the declaring file's the keyed object, so one of the two readers was always wrong.
+    const _byEnum = enumType ? getEnumVariantFieldSchema(enumType, variant) : undefined;
+    const schema = _byEnum !== undefined ? _byEnum : getErrorVariantFieldSchema(variant);
     // §51.3.2 / §19.3.2 — the error envelope's `.data` is a field-keyed object
     // whose keys are the variant's DECLARED payload field names, for BOTH single-
     // AND multi-field variants (matching the enum constructor `Shape.Circle(10)`
@@ -1071,32 +1077,30 @@ function emitGuardedArmBinding(
   binding: string,
   variantName: string,
   resultVar: string,
+  subject?: SubjectVariantFields | null,
 ): string[] {
   const names = binding.split(",").map((s) => s.trim()).filter((s) => s.length > 0 && s !== "_");
   if (names.length === 0) return [];
-  // S438 review F1 — the ERROR registry: exactly the pre-F11 lookup (local +
-  // ambient ParseError; an ambient CPS `NetworkError`/`ServerError` has no
-  // schema → whole `.data`), never an imported enum's same-named variant, which
-  // the by-name registry now also holds (F11). Same lookup as the `fail`
-  // producer, so producer and reader agree exactly as they did pre-F11.
-  const schema = variantName ? getErrorVariantFieldSchema(variantName) : null;
-  if (names.length === 1) {
-    // Declared single-field variant → project the field (§51.3.2). No schema
-    // (wildcard / ambient variant) → bind the whole `.data` payload.
-    if (schema && schema.length >= 1) {
-      return [`    const ${names[0]} = ${resultVar}.data.${schema[0]};`];
-    }
-    return [`    const ${names[0]} = ${resultVar}.data;`];
+  // A wildcard arm (`_ e :>`) binds the whole `.data` payload (no variant to project).
+  if (!variantName) return [`    const ${names[0]} = ${resultVar}.data;`];
+  // S469 r2 — the field list is the handled call's DECLARED error enum (TS stamps the guarded
+  // node, `__guardErrorVariants`; the `fail` producer keys its payload by the same declaring enum
+  // in every file); the by-name ERROR registry (local + ParseError) is the fallback. The binders are
+  // planned by the one §18.7 planner the `match` arms use (`planPayloadBinders`): positional by
+  // declared order, a mis-count E-TYPE-021, and — when no field list is visible — E-TYPE-027,
+  // except impl#1's CPS transport variants, whose `{ message, fn }` object binds whole. Before,
+  // an imported error enum's single binder bound the whole `.data` (a guess): against a keyed
+  // producer `x == "bad"` was false and a denied input logged in; a multi-binder used the binder
+  // NAMES as field names.
+  const schema = subject && subject.has(variantName)
+    ? (subject.get(variantName) ?? [])
+    : getErrorVariantFieldSchema(variantName);
+  const plan = planPayloadBinders(variantName, binding, parseBindingList(binding), schema, false, true);
+  if ("refusal" in plan) {
+    recordRefusedLowering(new CGError(plan.refusal.code, plan.refusal.message, currentLoweringSpan() as object), null);
+    return [];
   }
-  const out: string[] = [];
-  for (let i = 0; i < names.length; i++) {
-    if (names[i] === "_") continue;
-    // Multi-field always projects; fall back to binding-name-as-field when the
-    // schema is unknown (canonical usages name the binding to MATCH the field).
-    const field = schema && i < schema.length ? schema[i] : names[i];
-    out.push(`    const ${names[i]} = ${resultVar}.data.${field};`);
-  }
-  return out;
+  return plan.binds.map((b) => `    const ${b.local} = ${resultVar}.data${b.field === null ? "" : "." + b.field};`);
 }
 
 // ---------------------------------------------------------------------------
@@ -5203,7 +5207,12 @@ function _emitLogicNode(node: any, opts: EmitLogicOpts): string {
             const cond = `${resultVar}.variant === ${JSON.stringify(variantName)}`;
             lines.push(`  ${isFirst ? "if" : "else if"} (${cond}) {`);
             if (arm.binding && arm.binding !== "_") {
-              for (const l of emitGuardedArmBinding(arm.binding, variantName, resultVar)) lines.push(l);
+              // The §19 short form (`Gone :> …`) names no binder; its synthesized `e` binds the whole
+              // `.data` as it always has — not a positional payload binder.
+              const _armLines = (arm as { implicitBinding?: boolean }).implicitBinding
+                ? emitGuardedArmBinding(arm.binding, "", resultVar)
+                : emitGuardedArmBinding(arm.binding, variantName, resultVar, getMatchSubjectVariantFields({ __matchSubjectVariants: (node as { __guardErrorVariants?: unknown }).__guardErrorVariants }));
+              for (const l of _armLines) lines.push(l);
             }
             for (const l of armLines(armIsExpr)) lines.push(l);
             lines.push(`  }`);

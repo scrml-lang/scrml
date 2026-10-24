@@ -34,6 +34,7 @@
  */
 
 import { describe, test, expect } from "bun:test";
+import { resetRefusedLowerings, drainRefusedLowerings } from "../../src/codegen/refused-lowering-errors.ts";
 import { emitLogicNode } from "../../src/codegen/emit-logic.js";
 import { resetVarCounter } from "../../src/codegen/var-counter.ts";
 import { SCRML_RUNTIME } from "../../src/runtime-template.js";
@@ -450,10 +451,23 @@ describe("emit-logic §19 §13: guarded-expr multiple arms", () => {
 // ---------------------------------------------------------------------------
 
 describe("emit-logic §19 §14: guarded-expr arm binding reads .data", () => {
-  test("named arm binding is declared as const = resultVar.data", () => {
+  test("a payload binder on a variant with no visible field list is REFUSED (E-TYPE-027), never the whole .data", () => {
+    // S469 r2 — binding the whole `.data` guessed the payload shape; a keyed producer
+    // (`data: { reason }`) in another file made a deny-list on the binder log a denied input in.
+    resetRefusedLowerings();
     const node = makeGuardedExpr(
       makeBareExpr("getResource()"),
       [makeArm("::NotFoundError", "err", "handle404(err)")]
+    );
+    const result = resetAndRun(() => emitLogicNode(node));
+    expect(result).not.toMatch(/const err = _scrml_\w+\.data;/);
+    expect(drainRefusedLowerings().map((e) => e.code)).toEqual(["E-TYPE-027"]);
+  });
+
+  test("the wildcard binder `_ err` binds the whole .data", () => {
+    const node = makeGuardedExpr(
+      makeBareExpr("getResource()"),
+      [makeArm("_", "err", "handle404(err)")]
     );
     const result = resetAndRun(() => emitLogicNode(node));
     expect(result).toMatch(/const err = _scrml_\w+\.data;/);

@@ -3173,7 +3173,7 @@ function generateServerJsImpl(
   // (event-handler / escape-hatch paths) lower to the canonical
   // `{ variant, data }` tagged-object literal. Mirrors the client setup in
   // emit-client.ts:generateClientJs. Released at the bottom of this function.
-  const { fields: _scrmlVariantFields, collisions: _scrmlVariantCollisions, shadowed: _scrmlShadowed, imported: _scrmlImportedOnly } =
+  const { fields: _scrmlVariantFields, collisions: _scrmlVariantCollisions, shadowed: _scrmlShadowed, imported: _scrmlImportedOnly, byEnum: _scrmlVariantsByEnum } =
     buildVariantFieldsRegistry(fileAST);
   setVariantFieldsForRewriter(_scrmlVariantFields, new Set([..._scrmlVariantCollisions, ..._scrmlShadowed, ..._scrmlImportedOnly]));
   // S469 (g-server-return-match-failable-subject-unawaited-s469, binder half; and
@@ -3184,7 +3184,7 @@ function generateServerJsImpl(
   // envelope's `.data` is field-keyed for single- AND multi-field variants), so a correctly
   // written named binder bound `undefined` and a deny-list on it LOGGED IN; a positional binder
   // (`.Denied(r)`) bound nothing (`/* §1a: cannot positionally bind */`, ReferenceError on use).
-  setVariantFieldsForFile(_scrmlVariantFields, _scrmlVariantCollisions, _scrmlImportedOnly);
+  setVariantFieldsForFile(_scrmlVariantFields, _scrmlVariantCollisions, _scrmlImportedOnly, _scrmlVariantsByEnum);
   // S438 review N1/N3 — the local-shadowed names keep pre-F11 behaviour on the
   // server pass too (match binding + bare-dot constructors). S446 — imported-only
   // names are refused by the (untypeable) string-rewrite constructor path too.

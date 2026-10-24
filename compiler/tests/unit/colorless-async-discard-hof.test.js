@@ -148,7 +148,7 @@ describe("CLIENT mode — setTimeout async callback lowers on the browser path",
 \${
   import { safeCallAsync } from "scrml:host"
   function tick(obj) {
-    const r = safeCallAsync(() => obj.doThing()) !{ | ::Thrown(m) -> ({ ok: false }) }
+    const r = safeCallAsync(() => obj.doThing()) !{ | ::Thrown(m, _) -> ({ ok: false }) }
     return r.ok
   }
   function schedule(obj) { setTimeout(() => tick(obj), 1000) }

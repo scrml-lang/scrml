@@ -2282,10 +2282,10 @@ export function generateClientJs(ctx: CompileContext): string {
   // escape-hatch expressions, and other legacy emission surfaces lower to
   // the canonical `{ variant, data }` tagged-object literal (matches the
   // structured AST path in emit-expr.ts:emitCall).
-  const { fields, collisions, imported, shadowed } = clientStage(ctx, "build-variant-fields-registry", () =>
+  const { fields, collisions, imported, shadowed, byEnum } = clientStage(ctx, "build-variant-fields-registry", () =>
     buildVariantFieldsRegistry(fileAST)
   );
-  setVariantFieldsForFile(fields, collisions, imported);
+  setVariantFieldsForFile(fields, collisions, imported, byEnum);
   setShadowedVariantNames(shadowed, imported);
   // S438 review N3 — the string-rewrite path (handler bodies) cannot be typed:
   // a local-shadowed name is treated as a collision there (left unlowered →
@@ -4774,11 +4774,19 @@ export function buildVariantFieldsRegistry(fileAST: any): {
   imported: Set<string>;
   /** Names a LOCAL enum and an IMPORTED enum both declare with different fields (see setShadowedVariantNames). */
   shadowed: Set<string>;
+  /**
+   * S469 r2 — ENUM name (as written in this file: a local declaration, or an imported enum's
+   * local name) → variant → declared field list (null = unit). The `fail E::V(…)` producer keys
+   * its payload by the DECLARING enum's fields through this, so every file — the one declaring
+   * the enum and every one importing it — writes one shape.
+   */
+  byEnum: Map<string, Map<string, string[] | null>>;
 } {
   const fields = new Map<string, string[]>();
   const collisions = new Set<string>();
   const imported = new Set<string>();
   const shadowed = new Set<string>();
+  const byEnum = new Map<string, Map<string, string[] | null>>();
   const localShape = new Map<string, string[] | null>();
   const typeDecls: TypeDecl[] = fileAST?.typeDecls ?? fileAST?.ast?.typeDecls ?? [];
 
@@ -4787,6 +4795,9 @@ export function buildVariantFieldsRegistry(fileAST: any): {
   for (const decl of typeDecls) {
     if (decl.kind !== "type-decl" || decl.typeKind !== "enum") continue;
     const info = getAllVariantInfo(decl);
+    if (typeof (decl as { name?: unknown }).name === "string" && !byEnum.has((decl as { name: string }).name)) {
+      byEnum.set((decl as { name: string }).name, new Map(info.map((v) => [v.name, v.fieldNames])));
+    }
     for (const v of info) {
       localVariantNames.add(v.name);
       if (!localShape.has(v.name)) localShape.set(v.name, v.fieldNames);
@@ -4810,6 +4821,9 @@ export function buildVariantFieldsRegistry(fileAST: any): {
   const seenEnums = new Set<any>();
   for (const { localName, enumType } of getImportedEnumTypes(fileAST)) {
     const info = getAllVariantInfo({ variants: enumType.variants } as unknown as TypeDecl);
+    if (typeof localName === "string" && localName && !byEnum.has(localName)) {
+      byEnum.set(localName, new Map(info.map((v) => [v.name, v.fieldNames])));
+    }
     if (seenEnums.has(enumType)) continue;
     seenEnums.add(enumType);
     for (const v of info) {
@@ -4827,7 +4841,7 @@ export function buildVariantFieldsRegistry(fileAST: any): {
       else if (!sameFieldList(prev, v.fieldNames)) collisions.add(v.name);
     }
   }
-  return { fields, collisions, imported, shadowed };
+  return { fields, collisions, imported, shadowed, byEnum };
 }
 
 // ---------------------------------------------------------------------------

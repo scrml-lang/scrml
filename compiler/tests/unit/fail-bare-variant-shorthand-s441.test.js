@@ -240,7 +240,8 @@ describe("§4 bare-`!` function — built-in Error", () => {
     const r = compile(p);
     expect(codes(r)).toEqual([]);
     const bareJs = r.outputs.get(p)?.clientJs ?? "";
-    expect(bareJs).toContain(`return { __scrml_error: true, type: "Error", variant: "Generic", data: "empty" };`);
+    // S469 r2 — keyed by the built-in Error's declared field (§19.4.2 `Generic(message)`, §57.8).
+    expect(bareJs).toContain(`return { __scrml_error: true, type: "Error", variant: "Generic", data: { message: "empty" } };`);
     const q = fix("generic.scrml", program(`    function check(n: string) ! {
         if (n == "") fail Error.Generic("empty")
     }`, caller));

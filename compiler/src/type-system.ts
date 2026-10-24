@@ -10683,6 +10683,11 @@ function annotateNodes(
   // result cannot be lowered to discriminate it — `importedFailableUnreadableErr` makes such a
   // subject unprovable, so it is refused (E-ERROR-002), never compared as a plain value.
   const importedFailableUnreadableErr = new Set<string>();
+  // S469 r2 — an imported `!` function's DECLARED error enum, resolved in the exporting file
+  // (`importedFnSignatures`), kept even when this file cannot name it: a `!{}` arm's payload
+  // binder binds by THAT enum's field order (the order the producer keys the payload by), so
+  // `go(k) !{ .Boom(m) :> … }` reads `data.msg` without this file importing `E`.
+  const importedFnErrorEnums = new Map<string, EnumType>();
   for (const [localName, d] of importedFnDecls ?? []) {
     if (fnAllDeclared.has(localName)) continue; // a local declaration of the name is that binding
     const fnNode = d.fnNode;
@@ -10697,6 +10702,7 @@ function annotateNodes(
     if (cpsImplicit) { fnCpsImplicitFailable.add(localName); continue; }
     const errName = typeof fnNode.errorType === "string" ? fnNode.errorType.trim() : "";
     const depEnum = importedFnSignatures?.get(localName)?.errorEnum;
+    if (depEnum && (depEnum as EnumType).kind === "enum") importedFnErrorEnums.set(localName, depEnum as EnumType);
     const here = errName ? typeRegistry.get(errName) : undefined;
     if (depEnum && here && here.kind === "enum" && sameEnumShape(here as EnumType, depEnum)) {
       fnErrorTypes.set(localName, errName);
@@ -14182,6 +14188,19 @@ function annotateNodes(
 
         // Step 3: look up the function's errorType from our pre-built map.
         const errorTypeName = calleeName ? (fnErrorTypes.get(calleeName) ?? null) : null;
+
+        // S469 r2 — the handled call's DECLARED error enum, for codegen's payload binders
+        // (`emitGuardedArmBinding`): an arm binds by THAT enum's field order — the order the
+        // `fail` producer keys the payload by, in whichever file it runs — never by a by-name
+        // guess (the whole `.data` for an imported enum, which a keyed producer turned into a
+        // logged-in denied input). Same shape as a failable match subject's stamp.
+        {
+          const _errEnum = errorTypeName
+            ? resolveFailableErrorType(errorTypeName, typeRegistry)
+            : (calleeName ? importedFnErrorEnums.get(calleeName) ?? null : null);
+          const _vs = _errEnum && _errEnum.kind === "enum" ? matchSubjectVariantsOf(_errEnum) : null;
+          if (_vs) (n as Record<string, unknown>).__guardErrorVariants = _vs;
+        }
 
         // S452 r3 — a type-qualified arm (`T.V :>` / `T::V :>`, recorded by
         // parseErrorTokens as `arm.typeQualifier`) must name the handled error

@@ -58,7 +58,7 @@ function compile(inputFiles, { mode, wantFile, field }) {
 const GITI037_SRC = `\${
   import { safeCallAsync } from "scrml:host"
   export function callHost(obj) {
-    const r = safeCallAsync(() => obj.doThing()) !{ | ::Thrown(msg) :> ({ ok: false, error: msg }) }
+    const r = safeCallAsync(() => obj.doThing()) !{ | ::Thrown(msg, name) :> ({ ok: false, error: msg }) }
     return r.ok
   }
 }
@@ -91,7 +91,7 @@ describe("§2: transitive async coloring in a library (Gap 2)", () => {
     const p = fix("transitive-lib.scrml", `\${
   import { safeCallAsync } from "scrml:host"
   export function leaf(obj) {
-    const r = safeCallAsync(() => obj.doThing()) !{ | ::Thrown(msg) :> ({ ok: false }) }
+    const r = safeCallAsync(() => obj.doThing()) !{ | ::Thrown(msg, _) :> ({ ok: false }) }
     return r.ok
   }
   export function middle(obj) { const ok = leaf(obj); return ok }
@@ -117,7 +117,7 @@ describe("§3: cross-module async propagation (Gap 3)", () => {
     const helper = fix("helper.scrml", `\${
   import { safeCallAsync } from "scrml:host"
   export function wrapAsync(obj) {
-    const r = safeCallAsync(() => obj.doThing()) !{ | ::Thrown(msg) :> ({ ok: false }) }
+    const r = safeCallAsync(() => obj.doThing()) !{ | ::Thrown(msg, _) :> ({ ok: false }) }
     return r.ok
   }
 }
@@ -180,7 +180,7 @@ describe("§5: mixed ?{}+safeCallAsync module — ss1 value-export path (Gap 1)"
     return rows
   }
   export function callHost(obj) {
-    const r = safeCallAsync(() => obj.doThing()) !{ | ::Thrown(msg) :> ({ ok: false }) }
+    const r = safeCallAsync(() => obj.doThing()) !{ | ::Thrown(msg, _) :> ({ ok: false }) }
     return r.ok
   }
 }
@@ -261,7 +261,7 @@ describe("§8 (finding 2): client awaited-peer receiver is paren-wrapped", () =>
     const p = fix("f2-receiver.scrml", `<program>
 \${
   import { safeCallAsync } from "scrml:host"
-  function middle(cfg) { const r = safeCallAsync(() => cfg.load()) !{ | ::Thrown(m) -> ({ count: 0 }) }; return r }
+  function middle(cfg) { const r = safeCallAsync(() => cfg.load()) !{ | ::Thrown(m, _) -> ({ count: 0 }) }; return r }
   function outer(cfg) { const n = middle(cfg).count; @total = n }
   <total> = 0
 }
@@ -315,7 +315,7 @@ describe("§10 (finding 6): indirect async call via a local alias fails closed",
   test("`const g = middle; g(obj)` (middle async) fires E-ASYNC-STDLIB-IN-SYNC-CALLBACK", () => {
     const p = fix("f6-alias.scrml", `\${
   import { safeCallAsync } from "scrml:host"
-  export function middle(obj) { const r = safeCallAsync(() => obj.doThing()) !{ | ::Thrown(m) :> ({ ok: false }) }; return r.ok }
+  export function middle(obj) { const r = safeCallAsync(() => obj.doThing()) !{ | ::Thrown(m, _) :> ({ ok: false }) }; return r.ok }
   export function outer(obj) { const g = middle; const ok = g(obj); return ok }
 }
 `);
@@ -371,7 +371,7 @@ describe("§12 (finding 1): async call in a PARAM DEFAULT fails closed", () => {
     const p = fix("f1-param-peer.scrml", `<program>
 \${
   import { safeCallAsync } from "scrml:host"
-  function middle(o) { const r = safeCallAsync(() => o.load()) !{ | ::Thrown(m) -> ({ ok: false }) }; return r.ok }
+  function middle(o) { const r = safeCallAsync(() => o.load()) !{ | ::Thrown(m, _) -> ({ ok: false }) }; return r.ok }
   function outer(x = middle(window)) { @done = x }
   <done> = false
 }
@@ -386,7 +386,7 @@ describe("§12 (finding 1): async call in a PARAM DEFAULT fails closed", () => {
   test("library `export function h(x = callHost(obj))` (async peer) fails closed", () => {
     const p = fix("f1-param-lib.scrml", `\${
   import { safeCallAsync } from "scrml:host"
-  export function callHost(obj) { const r = safeCallAsync(() => obj.doThing()) !{ | ::Thrown(m) :> ({ ok: false }) }; return r.ok }
+  export function callHost(obj) { const r = safeCallAsync(() => obj.doThing()) !{ | ::Thrown(m, _) :> ({ ok: false }) }; return r.ok }
   export function h(obj, x = callHost(obj)) { return x }
 }
 `);
@@ -416,7 +416,7 @@ describe("§13 (finding 2): multi-hop alias chain fails closed / no false-positi
   test("`const g = middle; const h = g; h(o)` (middle async) fires E-ASYNC-STDLIB-IN-SYNC-CALLBACK", () => {
     const p = fix("f2-multihop.scrml", `\${
   import { safeCallAsync } from "scrml:host"
-  export function middle(o) { const r = safeCallAsync(() => o.doThing()) !{ | ::Thrown(m) :> ({ ok: false }) }; return r.ok }
+  export function middle(o) { const r = safeCallAsync(() => o.doThing()) !{ | ::Thrown(m, _) :> ({ ok: false }) }; return r.ok }
   export function outer(o) { const g = middle; const h = g; const ok = h(o); return ok }
 }
 `);
@@ -430,7 +430,7 @@ describe("§13 (finding 2): multi-hop alias chain fails closed / no false-positi
   test("a 3-hop chain `g -> h -> k; k(o)` also fails closed", () => {
     const p = fix("f2-threehop.scrml", `\${
   import { safeCallAsync } from "scrml:host"
-  export function middle(o) { const r = safeCallAsync(() => o.doThing()) !{ | ::Thrown(m) :> ({ ok: false }) }; return r.ok }
+  export function middle(o) { const r = safeCallAsync(() => o.doThing()) !{ | ::Thrown(m, _) :> ({ ok: false }) }; return r.ok }
   export function outer(o) { const g = middle; const h = g; const k = h; const ok = k(o); return ok }
 }
 `);
@@ -483,13 +483,13 @@ const GITI038_SRC = `\${
   import { safeCall, safeCallAsync } from "scrml:host"
   export function composeFail(handlers) {
     return function dispatch(req) {
-      const r = safeCallAsync(() => handlers[0](req)) !{ | ::Thrown(msg) :> ({ __err: msg }) }
+      const r = safeCallAsync(() => handlers[0](req)) !{ | ::Thrown(msg, _) :> ({ __err: msg }) }
       return r
     }
   }
   export function composeOkSync(handlers) {
     return function dispatchSync(req) {
-      const r = safeCall(() => handlers[0](req)) !{ | ::Thrown(msg) :> ({ __err: msg }) }
+      const r = safeCall(() => handlers[0](req)) !{ | ::Thrown(msg, _) :> ({ __err: msg }) }
       return r
     }
   }
@@ -540,7 +540,8 @@ describe("§14 (GITI-038): async color in a returned named function expression",
     // sufficient witness for a runtime-shape bug — R26 execute-don't-grep).
     const stubPath = join(FIXTURE_DIR, "giti038-host-stub.js");
     writeFileSync(stubPath, `
-      const sentinel = (e) => ({ __scrml_error: true, variant: "Thrown", data: String((e && e.message) || e) });
+      // The real runtime shape (compiler/runtime/stdlib/host.js): HostError.Thrown(message, name).
+      const sentinel = (e) => ({ __scrml_error: true, variant: "Thrown", data: { message: String((e && e.message) || e), name: String((e && e.name) || "Error") } });
       export function safeCall(thunk) { try { return thunk(); } catch (e) { return sentinel(e); } }
       export async function safeCallAsync(thunk) { try { return await thunk(); } catch (e) { return sentinel(e); } }
     `);
@@ -559,7 +560,7 @@ describe("§14 (GITI-038): async color in a returned named function expression",
 
     const dispatchT = mod.composeFail([() => { throw new Error("boom"); }]);
     const rt = await dispatchT("x");
-    expect(rt.__err).toBeDefined();                   // !{} Thrown arm → {__err}
+    expect(rt.__err).toBe("boom");                    // !{} Thrown arm → {__err}, msg = data.message (S469 r2)
 
     // controls execute synchronously (no Promise leak).
     const ds = mod.composeOkSync([(req) => ({ echoed: req })])("world");
@@ -573,9 +574,9 @@ describe("§14 (GITI-038): async color in a returned named function expression",
     const p = fix("giti038-both.scrml", `\${
   import { safeCallAsync } from "scrml:host"
   export function outerAsyncPlusReturn(handlers) {
-    const pre = safeCallAsync(() => handlers[0]("pre")) !{ | ::Thrown(msg) :> ({ __err: msg }) }
+    const pre = safeCallAsync(() => handlers[0]("pre")) !{ | ::Thrown(msg, _) :> ({ __err: msg }) }
     return function inner(req) {
-      const r = safeCallAsync(() => handlers[1](req)) !{ | ::Thrown(msg) :> ({ __err: msg }) }
+      const r = safeCallAsync(() => handlers[1](req)) !{ | ::Thrown(msg, _) :> ({ __err: msg }) }
       return r
     }
   }
@@ -609,7 +610,7 @@ describe("§14 (GITI-038): async color in a returned named function expression",
   import { safeCallAsync } from "scrml:host"
   export function arrowClosure(handlers) {
     return (req) => {
-      const r = safeCallAsync(() => handlers[0](req)) !{ | ::Thrown(msg) :> ({ __err: msg }) }
+      const r = safeCallAsync(() => handlers[0](req)) !{ | ::Thrown(msg, _) :> ({ __err: msg }) }
       return r
     }
   }
@@ -624,7 +625,7 @@ describe("§14 (GITI-038): async color in a returned named function expression",
   import { safeCallAsync } from "scrml:host"
   export function constBoundClosure(handlers) {
     const d = function(req) {
-      const r = safeCallAsync(() => handlers[0](req)) !{ | ::Thrown(msg) :> ({ __err: msg }) }
+      const r = safeCallAsync(() => handlers[0](req)) !{ | ::Thrown(msg, _) :> ({ __err: msg }) }
       return r
     }
     return d

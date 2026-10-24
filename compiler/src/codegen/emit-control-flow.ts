@@ -79,6 +79,31 @@ let _variantFieldCollisions: Set<string> | null = null;
 let _importedVariantNames: Set<string> | null = null;
 /** Local variants + ambient ParseError only — the error-envelope registry (see getErrorVariantFieldSchema). */
 let _localVariantFields: Map<string, string[]> | null = null;
+/** S469 r2 — enum name (local or imported local name) → variant → declared fields (see getEnumVariantFieldSchema). */
+let _variantFieldsByEnum: Map<string, Map<string, string[] | null>> | null = null;
+
+/**
+ * S469 r2 — the declared field list of `Enum::Variant` by the ENUM'S name as this file writes it
+ * (a local declaration or an imported enum). `undefined` when this file cannot see the enum (or the
+ * enum has no such variant); `null` for a unit variant. The `fail` producer keys its payload by it,
+ * so the declaring file and every importing file write ONE shape — the payload shape used to be
+ * decided per file ("does this file declare the variant?"), so an importer's `fail` sent the bare
+ * value while the declaring file sent the keyed object.
+ */
+export function getEnumVariantFieldSchema(enumName: string, variantName: string): string[] | null | undefined {
+  const m = _variantFieldsByEnum?.get(enumName);
+  if (!m || !m.has(variantName)) return undefined;
+  const f = m.get(variantName) ?? null;
+  return f === null ? null : [...f];
+}
+
+/**
+ * S469 r2 — impl#1's synthesized CPS transport variants (a server call that failed in transit):
+ * their envelope carries a `{ message, fn }` object the SPEC's own examples read whole
+ * (`::NetworkError(detail) :> … detail.message`). The ONLY variants a single positional binder may
+ * bind as the whole `.data` without a declared field list.
+ */
+export const CPS_AMBIENT_ERROR_VARIANTS: ReadonlySet<string> = new Set(["NetworkError", "ServerError"]);
 /**
  * S438 review (N1/N3) — variant names declared BOTH by a file-local enum and by
  * an imported enum with a DIFFERENT field list. A bare-dot CONSTRUCTOR of such
@@ -129,11 +154,31 @@ const PARSE_ERROR_VARIANT_FIELDS: ReadonlyArray<readonly [string, string[]]> = [
   ["Malformed", ["reason"]],
 ];
 
+/**
+ * Fixed ambient error schemas a `!{}` / failable-`match` arm may bind with no enum in scope:
+ * `scrml:host` HostError (`HostError.Thrown(message, name)`, compiler/runtime/stdlib/host.js) and
+ * §19.9.10's `Transport(t: ServerCallError)` — the variant every client call of a server function
+ * can fail with (impl#1 sends its own CPS `NetworkError` / `ServerError` instead, so it never fires
+ * there; the arm still binds the SPEC's one field).
+ */
+const HOST_ERROR_VARIANT_FIELDS: ReadonlyArray<readonly [string, string[]]> = [
+  ["Thrown", ["message", "name"]],
+  ["Transport", ["t"]],
+  // §19.4.2 — the built-in `Error` of a bare `!` / `! -> Error` function: `Error::Generic(message)`.
+  ["Generic", ["message"]],
+  // §19.8.1 — `SqlError`, for a `! -> SqlError` function's handler (a `?{}` handler scopes the same
+  // schema with enterSqlErrorSchema).
+  ...SQL_ERROR_VARIANT_FIELDS.map(([n, f]) => [n, [...f]] as const),
+  ["BatchPrepareFailed", ["sites"]],
+];
+
 export function setVariantFieldsForFile(
   variantFields: Map<string, string[]> | null,
   collisions?: Set<string> | null,
   importedNames?: Set<string> | null,
+  byEnum?: Map<string, Map<string, string[] | null>> | null,
 ): void {
+  _variantFieldsByEnum = byEnum ?? null;
   _variantFields = variantFields;
   _variantFieldCollisions = collisions ?? null;
   _importedVariantNames = importedNames ?? null;
@@ -148,6 +193,13 @@ export function setVariantFieldsForFile(
       _localVariantFields.set(name, fields);
     }
     for (const [name, fields] of PARSE_ERROR_VARIANT_FIELDS) {
+      if (!_localVariantFields.has(name)) _localVariantFields.set(name, [...fields]);
+    }
+    // S469 r2 — and `scrml:host`'s HostError (the `safeCall` / `safeCallAsync` failure), whose
+    // payload the runtime builds as `{ message, name }` (compiler/runtime/stdlib/host.js). A
+    // `!{ .Thrown(message, name) :> … }` arm binds by it; the binder planner no longer guesses
+    // a field list from the binder NAMES when none is visible.
+    for (const [name, fields] of HOST_ERROR_VARIANT_FIELDS) {
       if (!_localVariantFields.has(name)) _localVariantFields.set(name, [...fields]);
     }
   }
@@ -175,7 +227,8 @@ export function setVariantFieldsForFile(
  * the server pass (which publishes no per-file registry) still resolves it.
  */
 let _sqlErrorSchemaDepth = 0;
-const _sqlErrorSchema: ReadonlyMap<string, string[]> = new Map(SQL_ERROR_VARIANT_FIELDS.map(([n, f]) => [n, [...f]]));
+// S469 r2 — plus §8.9.4's `BatchPrepareFailed { sites }` (one declared field; impl#1 never produces it).
+const _sqlErrorSchema: ReadonlyMap<string, string[]> = new Map([...SQL_ERROR_VARIANT_FIELDS.map(([n, f]) => [n, [...f]] as [string, string[]]), ["BatchPrepareFailed", ["sites"]]]);
 export function enterSqlErrorSchema(): void { _sqlErrorSchemaDepth++; }
 export function exitSqlErrorSchema(): void { if (_sqlErrorSchemaDepth > 0) _sqlErrorSchemaDepth--; }
 
@@ -194,7 +247,15 @@ export function getErrorVariantFieldSchema(variantName: string): string[] | null
     const sqlFields = _sqlErrorSchema.get(variantName);
     if (sqlFields) return [...sqlFields];
   }
-  if (!_localVariantFields) return null;
+  if (!_localVariantFields) {
+    // S469 r2 — an emitter that publishes no per-file registry (library / tool mode) still knows
+    // the fixed ambient schemas (ParseError, HostError, Transport): the binder planner refuses
+    // rather than guesses when no field list is visible, so these must be visible everywhere.
+    for (const [name, fields] of [...PARSE_ERROR_VARIANT_FIELDS, ...HOST_ERROR_VARIANT_FIELDS]) {
+      if (name === variantName) return [...fields];
+    }
+    return null;
+  }
   if (_variantFieldCollisions && _variantFieldCollisions.has(variantName)
       && !(_importedVariantNames?.has(variantName) ?? false)) return null;
   return _localVariantFields.get(variantName) ?? null;
@@ -3431,6 +3492,12 @@ export function emitMatchExpr(node: any, opts?: any): string {
   // the pass fires only in an async body, and the IIFE header follows its emitted body.
   const _armAwaitOpts = opts?.enclosingExprCtx?.logicOpts ?? opts;
   const _valueArm = (text: string): string => {
+    // S469 r2 (HIGH 3) — an arm whose value is itself a `match` is lowered STRUCTURALLY, so its
+    // subject goes through the one subject context (`matchSubjectCtx`) like any match: as text
+    // (the client's `emitArmValue` path) `else :> match check(p) { … }` emitted the server call
+    // unawaited inside a sync IIFE — the Promise read as `.Ok` and a denied input logged in.
+    const nested = nestedMatchFromArmText(text);
+    if (nested) return emitMatchExpr(nested, opts);
     const v = emitTypedArmResultCtor(text, node, _matchCtx) ?? emitArmValue(text, _matchCtx);
     return _armAwaitOpts && typeof _armAwaitOpts === "object" && !("mode" in _armAwaitOpts)
       ? _awaitMatchArmServerCalls(v, _armAwaitOpts)
@@ -4558,11 +4625,15 @@ export function emitVariantBindingPrelude(
   // In an error context (a failable-result match, TS did not resolve the error
   // enum) the fallback is the ERROR registry — local + ambient ParseError, never
   // an unrelated imported enum's same-named variant (S438 review F1).
-  // Error contexts never read the subject: they keep the pre-F11 by-name error
-  // lookup, the same one the `fail` producer uses (S438 review N2).
-  const fromSubject = subject != null && subject.has(variantName) && !errorContext;
+  // S469 r2 — an error context READS the subject too. TS stamps a failable subject with its
+  // callee's DECLARED error enum (`stampFailableMatchSubject`), and the `fail` producer now keys its
+  // payload by that same declaring enum in every file (`getEnumVariantFieldSchema`), so the two
+  // agree across files. (S438 review N2 kept error contexts on the by-name lookup because the
+  // producer used it; the producer moved, so the reader follows it.) A unit variant is `[]`
+  // fields, so a binder on it is an arity error, not an unknown order.
+  const fromSubject = subject != null && subject.has(variantName);
   const fieldSchema = fromSubject
-    ? (subject!.get(variantName) ?? null)
+    ? (subject!.get(variantName) ?? [])
     : errorContext
       ? getErrorVariantFieldSchema(variantName)
       : (_variantFields?.get(variantName) ?? null);
@@ -4606,11 +4677,11 @@ export function compactArmPatternText(text: string): string {
  *     mismatch (too few or too many bindings) SHALL be a compile error"); a named binder must
  *     name a declared field (E-TYPE-022);
  *   - no known field list: a named binder reads the field it names (as before); a single
- *     positional binder in an ERROR context (a failable result / `!{}` subject whose variant has
- *     no field schema here — an ambient CPS `NetworkError` / `ServerError`, an imported error
- *     enum) binds the whole `.data`, exactly as the `!{}` reader does (emit-logic.ts
- *     `emitGuardedArmBinding`) and as `fail` writes a single unknown-schema argument; any other
- *     positional binder is E-TYPE-027 — the compiler cannot tell which enum's field order to use.
+ *     positional binder of impl#1's synthesized CPS transport variants (`NetworkError` /
+ *     `ServerError`, `CPS_AMBIENT_ERROR_VARIANTS`) in an ERROR context binds the whole `.data`;
+ *     any other positional binder is E-TYPE-027 — the compiler cannot tell which enum's field
+ *     order to use, and never guesses (S469 r2: the whole-`.data` guess for an imported error
+ *     enum bound the keyed object and a denied input logged in).
  *
  * Before: an unresolvable positional binder emitted `/* §1a: cannot positionally bind … *\/` and
  * left the name unbound (a ReferenceError when the arm used it), an extra binder was silently
@@ -4655,7 +4726,12 @@ export function planPayloadBinders(
     bindings.forEach((b, i) => { if (!b.discard) binds.push({ local: b.localName, field: schema![i] }); });
     return { binds };
   }
-  if (errorContext && bindings.length === 1) {
+  // S469 r2 — the whole `.data` only for impl#1's synthesized CPS transport variants (their
+  // envelope's `{ message, fn }` object IS the payload the SPEC's examples read). Any other variant
+  // with no visible field list is refused below: binding the whole `.data` guessed the shape, and a
+  // keyed producer in another file (`data: { reason: "bad" }`) made `x == "bad"` false — a denied
+  // input logged in.
+  if (errorContext && bindings.length === 1 && CPS_AMBIENT_ERROR_VARIANTS.has(variantName)) {
     if (!bindings[0].discard) binds.push({ local: bindings[0].localName, field: null });
     return { binds };
   }
@@ -4664,7 +4740,7 @@ export function planPayloadBinders(
     `E-TYPE-027: the arm pattern \`${pattern}\` binds the payload by position, but the compiler cannot tell which ` +
     `enum's \`${variantName}\` the subject holds` + (ambiguous ? ` (two enums in scope declare \`${variantName}\` with different fields)` : "") +
     `, so it does not know the field order (§18.7, §18.13). Use named binders — \`.${variantName}(<field>: <local>)\` — ` +
-    `or give the subject a declared enum type.` } };
+    `or make the enum visible here (import it, or give the subject a declared enum type).` } };
 }
 
 // ---------------------------------------------------------------------------

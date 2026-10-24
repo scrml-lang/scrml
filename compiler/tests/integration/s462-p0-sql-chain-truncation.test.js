@@ -464,7 +464,7 @@ describe("S465 fix round 1 — a `!{}` handler on a tailed `?{}` handles the QUE
         const n = ?{\`SELECT name, pw FROM users WHERE id = \${id} ${FAIL}\`}.get().name !{
           .QueryFailed(e) :> { return "qf" }
           .ConstraintViolation(e) :> { return "cv" }
-          .ConnectionLost(e) :> { return "cl" }
+          .ConnectionLost :> { return "cl" }
           .BatchPrepareFailed(e) :> { return "bp" }
         }
         return n
@@ -731,7 +731,7 @@ describe("S465 fix round 2 — a `!{}` handler covers ONLY the query it is on (�
   const FULL = `!{
           .QueryFailed(e) :> { return "qf" }
           .ConstraintViolation(e) :> { return "cv" }
-          .ConnectionLost(e) :> { return "cl" }
+          .ConnectionLost :> { return "cl" }
           .BatchPrepareFailed(e) :> { return "bp" }
         }`;
   const Q = (extra = "") => `?{\`SELECT name, pw FROM users WHERE id = \${id} ${extra}\`}`;

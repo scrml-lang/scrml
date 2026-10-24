@@ -21037,6 +21037,9 @@ function parseErrorTokens(tokens, filePath, errors) {
       arms.push(setArmHandlerSrcMap({
         pattern,
         binding,
+        // S469 r2 — the short form names no binder: `e` is synthesized and binds the whole `.data`
+        // (codegen emitGuardedArmBinding), never a positional payload binder (§18.7 arity).
+        implicitBinding: true,
         handler: _handlerTrimmed2,
         handlerExpr: _parseHandlerExpr(_handlerTrimmed2, filePath, tokenSpan(armStart, filePath)?.start ?? 0),
         armArrow: armArrow3,
