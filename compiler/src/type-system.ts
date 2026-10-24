@@ -1681,6 +1681,14 @@ function wholeErrorBinderMisuse(roots: unknown[], binder: string, filePath: stri
   return found;
 }
 
+/** S469 r5 — field name -> displayed type of `Enum.Variant` (empty for a unit / unknown variant). */
+function variantFieldTypes(en: EnumType, variant: string): Map<string, string> {
+  const v = (en.variants ?? []).find((x) => x.name === variant);
+  const out = new Map<string, string>();
+  if (v && v.payload instanceof Map) for (const [k, t] of v.payload) out.set(k, formatTypeForDiagnostic(t as ResolvedType));
+  return out;
+}
+
 /** The declared field names of `Enum.Variant` ([] for a unit variant), or undefined. */
 function variantFieldNames(en: EnumType, variant: string): string[] | undefined {
   const v = (en.variants ?? []).find((x) => x.name === variant);
@@ -10170,6 +10178,8 @@ function sameEnumShape(a: EnumType, b: EnumType): boolean {
     const fa = va.payload ? [...va.payload.keys()] : [];
     const fb = vb.payload ? [...vb.payload.keys()] : [];
     if (fa.length !== fb.length || fa.some((f, j) => f !== fb[j])) return false;
+    // S469 r5 (MED-1) — and the same field TYPES: `code: string` is not `code: number`.
+    if (fa.some((f) => formatTypeForDiagnostic(va.payload!.get(f) as ResolvedType) !== formatTypeForDiagnostic(vb.payload!.get(f) as ResolvedType))) return false;
   }
   return true;
 }
@@ -10785,9 +10795,13 @@ function annotateNodes(
   const _fileTypeDeclsForErrors: ASTNodeLike[] = ((fileAST.typeDecls as ASTNodeLike[] | undefined)
     ?? ((fileAST.ast as FileAST | undefined)?.typeDecls as ASTNodeLike[] | undefined) ?? []);
   const failableCalleeErrorEnum = (callee: string): EnumType | null => {
+    // An IMPORTED callee: the enum resolved where it is declared — never the importer's
+    // same-named enum (a name match is not a payload match; S469 r5).
+    const imported = importedFnErrorEnums.get(callee);
+    if (imported) return imported;
     const t = fnErrorTypes.get(callee);
     if (t) return resolveErrorEnumThroughAliases(t, typeRegistry, _fileTypeDeclsForErrors);
-    return importedFnErrorEnums.get(callee) ?? null;
+    return null;
   };
   for (const [localName, d] of importedFnDecls ?? []) {
     if (fnAllDeclared.has(localName)) continue; // a local declaration of the name is that binding
@@ -12473,10 +12487,26 @@ function annotateNodes(
                 const enclosingResolved = enclosingErrTypeName === "Error"
                   ? null
                   : resolveErrorEnumThroughAliases(enclosingErrTypeName, typeRegistry, _fileTypeDeclsForErrors);
-                const sameErrorEnum = !!calleeEnumResolved && !!enclosingResolved &&
-                  (calleeEnumResolved === enclosingResolved ||
-                    (calleeEnumResolved.name === enclosingResolved.name && sameEnumShape(calleeEnumResolved, enclosingResolved)));
-                if (calleeErrTypeName && calleeEnumResolved && !sameErrorEnum && calleeErrTypeName !== enclosingErrTypeName) {
+                // S469 r5 (HIGH-1) — the ONLY shortcut is identity: the very same enum needs no check.
+                // Two enums are never judged equal by NAME — an imported `AuthErr { Denied(reason) }`
+                // and a local `AuthErr { Denied(note) }` share a name, not a payload, and the name
+                // shortcut let `?` re-raise `data.reason` into readers of `data.note`. A structurally
+                // identical pair passes the variant / field / type checks below on its own.
+                const sameErrorEnum = !!calleeEnumResolved && !!enclosingResolved && calleeEnumResolved === enclosingResolved;
+                // S469 r5 — FAIL CLOSED: an imported `!` callee whose error enum cannot be resolved
+                // here (an alias declared in a THIRD file, say) cannot be checked, and `?` would
+                // re-raise a payload of unknown shape into readers of the enclosing type.
+                if (!calleeEnumResolved && importedFailableUnreadableErr.has(calleeName) && !fnCpsImplicitFailable.has(calleeName)) {
+                  errors.push(new TSError(
+                    "E-ERROR-010",
+                    `E-ERROR-010: '?' in function '${fnName}' propagates the errors of '${calleeName}', whose error type this file cannot resolve ` +
+                    `(it is declared through a name this compile cannot follow to an enum). '?' re-raises the error unchanged, so its payload ` +
+                    `could not be checked against '${enclosingErrTypeName}' (§19.5.3). Handle '${calleeName}' with 'match' or '!{}' and 'fail' ` +
+                    `the enclosing variant you mean, or import its error enum so it resolves here.`,
+                    (stmt.span ?? n.span) as Span,
+                  ));
+                }
+                if (calleeErrTypeName && calleeEnumResolved && !sameErrorEnum && (enclosingResolved || calleeErrTypeName !== enclosingErrTypeName)) {
                   // Resolve the callee's error-variant set.
                   const calleeEnum: ResolvedType = calleeEnumResolved;
                   // Resolve the enclosing fn's declared error-variant set (the
@@ -12542,9 +12572,13 @@ function annotateNodes(
                         const b = variantFieldNames(enclosingEnumForShape, cv.name) ?? [];
                         // Payloads are keyed by field NAME (§57.8), so the same names in another
                         // order are the same payload (a positional binder binds in its own enum's
-                        // declared order, which is what it reads). Compare the name SETS.
-                        if (a.length !== b.length || a.some((f) => !b.includes(f))) {
-                          mismatched.push(`'${cv.name}' (${errorTypeDisplayName(calleeErrTypeName)}: ${a.length ? a.join(", ") : "no fields"}; ${enclosingErrTypeName}: ${b.length ? b.join(", ") : "no fields"})`);
+                        // declared order, which is what it reads). Compare name -> TYPE maps
+                        // (S469 r5, MED-1: `code: string` re-raised as `code: number` compared
+                        // `"401" == 401` — false — and a deny-list on it logged in).
+                        const ta = variantFieldTypes(calleeEnum as EnumType, cv.name);
+                        const tb = variantFieldTypes(enclosingEnumForShape, cv.name);
+                        if (a.length !== b.length || a.some((f) => !b.includes(f) || ta.get(f) !== tb.get(f))) {
+                          mismatched.push(`'${cv.name}' (${errorTypeDisplayName(calleeErrTypeName)}: ${a.length ? a.map((f) => `${f}: ${ta.get(f)}`).join(", ") : "no fields"}; ${enclosingErrTypeName}: ${b.length ? b.map((f) => `${f}: ${tb.get(f)}`).join(", ") : "no fields"})`);
                         }
                       }
                       if (mismatched.length > 0) {
@@ -14364,6 +14398,12 @@ function annotateNodes(
             ? matchSubjectVariantsOf(_errEnum)
             : (calleeName ? stdlibFnErrorVariants.get(calleeName) ?? null : null);
           if (_vs) (n as Record<string, unknown>).__guardErrorVariants = _vs;
+          // S469 r5 — FAIL CLOSED: a handled call of an imported `!` function whose error enum cannot be
+          // resolved here: its arms' binders must not fall back to a same-named LOCAL variant (a guess
+          // that read `data.note` off a `data.reason` payload). Codegen then binds only what it knows.
+          else if (calleeName && importedFailableUnreadableErr.has(calleeName) && !fnCpsImplicitFailable.has(calleeName)) {
+            (n as Record<string, unknown>).__guardErrorUnknown = true;
+          }
         }
 
         // S469 r5 — §18.6.1 (ruling:user-voice-scrml.md S469 "SPEC: whole error + refuse

@@ -1103,36 +1103,64 @@ function armTextReadsName(text: string, name: string): boolean {
   if (!t) return false;
   let node: unknown = null;
   try { node = parseExprToNode(t, "<arm-body>", 0); } catch { node = null; }
-  const hasEscape = (x: unknown): boolean => {
-    if (!x || typeof x !== "object") return false;
-    if (Array.isArray(x)) return x.some(hasEscape);
-    const r = x as Record<string, unknown>;
-    if (r.kind === "escape-hatch") return true;
-    return Object.keys(r).some((k) => k !== "span" && hasEscape(r[k]));
-  };
-  if (node && !hasEscape(node)) {
-    let found = false;
-    const walk = (x: unknown): void => {
-      if (found || !x || typeof x !== "object") return;
-      if (Array.isArray(x)) { x.forEach(walk); return; }
-      const r = x as Record<string, unknown>;
-      if (r.kind === "ident" && r.name === name) { found = true; return; }
-      if (r.kind === "lit" && r.litType === "template" && typeof r.raw === "string" && (r.raw as string).includes("${")) {
-        const raw = r.raw as string;
-        const inner = raw.startsWith("`") && raw.endsWith("`") ? raw.slice(1, -1) : raw;
-        if (templateInterpolationPayloads(inner).some((pl) => armTextReadsName(pl, name))) { found = true; return; }
-      }
-      for (const k of Object.keys(r)) if (k !== "span") walk(r[k]);
-    };
-    walk(node);
-    return found;
-  }
+  if (node) return exprTreeMayReadName(node, name);
+  // Not an expression (a block body): a scan of the text — each template literal's interpolations
+  // read the same way, then the text with string literals blanked.
   for (const m of t.matchAll(/`(?:[^`\\]|\\.)*`/g)) {
     if (templateInterpolationPayloads(m[0].slice(1, -1)).some((pl) => armTextReadsName(pl, name))) return true;
   }
   const blanked = t.replace(/"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|`(?:[^`\\]|\\.)*`/g, '""');
   return new RegExp(`(?<![.\\w$])${name}(?![\\w$])`).test(blanked);
 }
+
+/**
+ * S469 r5 (HIGH-2) — FAIL CLOSED: may this expression tree read `name`? True for an `ident` or an
+ * object `shorthand` of that name; the kinds it models are walked in full (a `match`'s raw arm texts
+ * go back through `armTextReadsName`, a template's interpolations likewise); ANY kind it does not
+ * model (a lambda, an escape hatch, markup, a reset, a query, …) answers true. Over-refusal is the
+ * safe side: a missed read binds an outer `e` and a deny-list on it logs a denied input in
+ * (`({ e }).e`, `(match "x" { "x" :> e, … })` were missed).
+ */
+function exprTreeMayReadName(node: unknown, name: string): boolean {
+  if (!node || typeof node !== "object") return false;
+  if (Array.isArray(node)) return node.some((x) => exprTreeMayReadName(x, name));
+  const r = node as Record<string, unknown>;
+  const kids = (...keys: string[]): boolean => keys.some((k) => exprTreeMayReadName(r[k], name));
+  switch (r.kind) {
+    case "ident": return r.name === name;
+    case "shorthand": return r.name === name;
+    case "lit": {
+      if (r.litType === "template" && typeof r.raw === "string" && (r.raw as string).includes("${")) {
+        const raw = r.raw as string;
+        const inner = raw.startsWith("`") && raw.endsWith("`") ? raw.slice(1, -1) : raw;
+        return templateInterpolationPayloads(inner).some((pl) => armTextReadsName(pl, name));
+      }
+      return false;
+    }
+    case "array": return kids("elements");
+    case "object": return kids("props");
+    case "prop": return (r.computed === true && kids("key")) || kids("value");
+    case "spread": return kids("argument", "expr", "value");
+    case "unary": return kids("argument", "operand", "expr");
+    case "binary": return kids("left", "right");
+    case "assign": return kids("target", "value", "left", "right");
+    case "ternary": return kids("condition", "test", "consequent", "alternate", "then", "else");
+    case "member": return kids("object");
+    case "index": return kids("object", "index", "property");
+    case "call": case "new": return kids("callee", "args", "arguments");
+    case "cast": return kids("expression", "expr", "value");
+    case "match-expr": {
+      if (kids("subject", "subjects")) return true;
+      const raw = r.rawArms;
+      if (Array.isArray(raw)) return raw.some((a) => typeof a !== "string" || armTextReadsName(a, name));
+      return true;
+    }
+    default: return true;
+  }
+}
+
+/** S469 r5 — the handled call's error enum is known to be UNRESOLVABLE (TS `__guardErrorUnknown`). */
+const UNKNOWN_ERROR_ENUM: SubjectVariantFields = new Map();
 
 function emitShortFormArmBinding(
   arm: { binding?: string; handler?: string },
@@ -1142,9 +1170,11 @@ function emitShortFormArmBinding(
 ): string[] {
   const local = (arm.binding ?? "").trim();
   if (!local) return [];
-  const schema = subject && subject.has(variantName)
-    ? (subject.get(variantName) ?? [])
-    : getErrorVariantFieldSchema(variantName);
+  const schema = subject === UNKNOWN_ERROR_ENUM
+    ? null
+    : subject && subject.has(variantName)
+      ? (subject.get(variantName) ?? [])
+      : getErrorVariantFieldSchema(variantName);
   if (schema && schema.length === 1) return [`    const ${local} = ${resultVar}.data.${schema[0]};`];
   if (!armTextReadsName(String(arm.handler ?? ""), local)) return [];
   const code = schema ? "E-TYPE-021" : "E-TYPE-027";
@@ -1182,9 +1212,11 @@ function emitGuardedArmBinding(
   // an imported error enum's single binder bound the whole `.data` (a guess): against a keyed
   // producer `x == "bad"` was false and a denied input logged in; a multi-binder used the binder
   // NAMES as field names.
-  const schema = subject && subject.has(variantName)
-    ? (subject.get(variantName) ?? [])
-    : getErrorVariantFieldSchema(variantName);
+  const schema = subject === UNKNOWN_ERROR_ENUM
+    ? null
+    : subject && subject.has(variantName)
+      ? (subject.get(variantName) ?? [])
+      : getErrorVariantFieldSchema(variantName);
   const plan = planPayloadBinders(variantName, binding, parseBindingList(binding), schema, false, true);
   if ("refusal" in plan) {
     recordRefusedLowering(new CGError(plan.refusal.code, plan.refusal.message, currentLoweringSpan() as object), null);
@@ -5297,7 +5329,9 @@ function _emitLogicNode(node: any, opts: EmitLogicOpts): string {
             const cond = `${resultVar}.variant === ${JSON.stringify(variantName)}`;
             lines.push(`  ${isFirst ? "if" : "else if"} (${cond}) {`);
             if (arm.binding && arm.binding !== "_") {
-              const _subject = getMatchSubjectVariantFields({ __matchSubjectVariants: (node as { __guardErrorVariants?: unknown }).__guardErrorVariants });
+              const _subject = (node as { __guardErrorUnknown?: boolean }).__guardErrorUnknown
+                ? UNKNOWN_ERROR_ENUM
+                : getMatchSubjectVariantFields({ __matchSubjectVariants: (node as { __guardErrorVariants?: unknown }).__guardErrorVariants });
               const _armLines = (arm as { implicitBinding?: boolean }).implicitBinding
                 ? emitShortFormArmBinding(arm, variantName, resultVar, _subject)
                 : emitGuardedArmBinding(arm.binding, variantName, resultVar, _subject);
