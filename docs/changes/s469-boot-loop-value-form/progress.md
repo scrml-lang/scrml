@@ -79,7 +79,7 @@ Gap: `g-bootstrap-loop-value-form-s469` (MED). Ride-along: #1530 review (grant-s
 
 ## Owner questions
 
-1. **`lift` inside an arm block of a bound loop's body.** §49.6 rule 7 sends a `lift` "through … `match` arms and
+1. **`lift` inside an arm block of a bound loop's body** (review note: a value-position arm already takes the §18.5 reading and runs; only the statement-position arm is refused — the question is that position). §49.6 rule 7 sends a `lift` "through … `match` arms and
    `!{}` arms" to the nearest bound loop; §18.5 makes a value-position arm block's `lift` the ARM's value (and the
    bootstrap refuses a statement-position one). Which wins for a `match` / `!{}` inside a bound loop? Refused today.
 2. **The code for a `for` in an operand / argument / `return` position** — §49.4.4 calls it "a syntax error" and

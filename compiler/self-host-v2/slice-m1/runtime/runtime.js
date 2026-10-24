@@ -944,10 +944,17 @@ export function checkEdge(target, table, to) {
   // s469 (g-bootstrap-rule-transition-into-payload-variant-s469): the graph is
   // over VARIANTS — a payload value `{ variant, data }` is judged by its tag
   // (the edge table's keys and entries are tags), never by object identity.
-  const from = variantTag(target.peek());
+  const cur = target.peek();
+  const from = variantTag(cur);
   const toTag = variantTag(to);
-  if (from === toTag) return;
   const allowed = table[from];
+  if (from === toTag) {
+    // §51.0.F.1: a self-write is a NO-OP — the value is unchanged. A same-variant write that
+    // CHANGES the payload is not a no-op, so it needs a self-edge in the graph (fail closed).
+    if (cur === to || JSON.stringify(cur) === JSON.stringify(to)) return;
+    if (allowed && allowed.includes(toTag)) return;
+    throw new Error(`E-ENGINE-INVALID-TRANSITION: .${from} → .${toTag} changes the payload of .${from} and .${from} has no self-edge in this field's rule= graph`);
+  }
   if (!allowed || !allowed.includes(toTag)) {
     throw new Error(`E-ENGINE-INVALID-TRANSITION: .${from} → .${toTag} is not an edge of this field's rule= graph`);
   }

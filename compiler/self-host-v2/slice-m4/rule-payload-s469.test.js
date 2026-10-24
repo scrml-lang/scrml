@@ -69,7 +69,10 @@ describe("a `rule=` transition into a payload variant (runtime effect)", () => {
     let thrown = null;
     try { r.rt.checkEdge({ peek: () => "Dot" }, { Dot: ["Dot"], Box: ["Dot"] }, { variant: "Box", data: [3] }); } catch (e) { thrown = e; }
     expect(String(thrown)).toContain("E-ENGINE-INVALID-TRANSITION: .Dot → .Box");
-    // a same-variant payload write is not an edge question (§51.0.F.1)
-    expect(() => r.rt.checkEdge({ peek: () => ({ variant: "Box", data: [1] }) }, { Dot: [], Box: [] }, { variant: "Box", data: [2] })).not.toThrow();
+    // §51.0.F.1: a self-write is a no-op (an equal payload passes) …
+    expect(() => r.rt.checkEdge({ peek: () => ({ variant: "Box", data: [1] }) }, { Dot: [], Box: [] }, { variant: "Box", data: [1] })).not.toThrow();
+    // … but a same-variant write that CHANGES the payload needs a self-edge (review MED-1: fail closed)
+    expect(() => r.rt.checkEdge({ peek: () => ({ variant: "Box", data: [1] }) }, { Dot: [], Box: [] }, { variant: "Box", data: [2] })).toThrow("has no self-edge");
+    expect(() => r.rt.checkEdge({ peek: () => ({ variant: "Box", data: [1] }) }, { Dot: [], Box: ["Box"] }, { variant: "Box", data: [2] })).not.toThrow();
   });
 });
