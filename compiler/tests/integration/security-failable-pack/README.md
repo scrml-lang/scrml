@@ -233,6 +233,29 @@ server call in a client arm value is awaited; a short-form arm reading its impli
 template is refused when there is no single field to bind. The library / tool loaders report a module
 that cannot load as UNJUDGED (with the gap id), and the tool runner judges stdout before the exit code.
 
+## Measured (S469 s469-server-return-match-await round 5 — s8 / f5 / l3 / t3 and s9 / f6 / l4 / t4; 100 shapes)
+
+`r5-shapes.js` (the whole-error binder `_ e :>`, ruling "SPEC: whole error + refuse") and `r6-shapes.js`
+(the review of `cf01c66b8`) on four sides. FAIL counts, base `b35babcc2` → round 4 `cf01c66b8` → round 5:
+
+| family | base | round 4 | round 5 |
+|---|---|---|---|
+| s8 (server, 7) | 3 | 2 | 0 |
+| f5 (fullstack, 7) | 3 | 2 | 0 |
+| l3 (library, 7) | 3 | 2 | 0 |
+| t3 (tool, 7) | 0 | 0 | 0 |
+| s9 (server, 18) | 4 | 15 | 0 |
+| f6 (fullstack, 18) | 8 | 15 | 0 |
+| l4 (library, 18) | 2 | 9 | 0 |
+| t4 (tool, 18) | 3 | 14 | 0 |
+
+`_ e :>` binds the whole error: a payload-field read off it is E-TYPE-004, a comparison with a primitive
+E-EQ-001, and `e is not` over a unit variant is correct. `?` compares error enums by identity (never by
+name) and each re-raised field by name AND type; a callee whose enum cannot be resolved (an alias in a
+third file) is refused rather than guessed. The short form's "arm reads `e`" walk fails closed on any node
+it does not model (an object shorthand, a nested `match` arm). The t3 valid shapes are refused on every
+tree (a tool function's `return match` takes the async IIFE header; `g-impl1-async-match-positions-refused-s469`).
+
 ## Running
 
 ```sh

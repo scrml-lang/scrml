@@ -279,7 +279,7 @@ function loadFailure(e, what) {
   const m = /Cannot find module '\.\/([\w.-]+\.server\.js)'/.exec(msg);
   if (m) return { cls: "UNJUDGED", detail: `${what} imports ${m[1]}, never emitted (g-server-js-imports-module-without-server-file-s467)` };
   // S469 r4 — a library / tool module importing a dependency by its SOURCE path (`./auth.scrml`).
-  const sm = /Cannot find module '([^']+\.scrml)'|Cannot find module "([^"]+\.scrml)"|\.scrml/.exec(msg);
+  const sm = /Cannot find module ['"]([^'"]+\.scrml)['"]/.exec(msg);
   if (sm) return { cls: "UNJUDGED", detail: `${what} imports a .scrml source path (g-library-tool-cross-file-import-source-path-s469): ${msg.slice(0, 60)}` };
   return { cls: "PASS-500", detail: `${what} does not load: ${msg.slice(0, 60)}` };
 }
@@ -316,6 +316,8 @@ function runToolShape(out) {
   const detail = `wrong->${JSON.stringify(wrong.text)} (exit ${wrong.code}) right->${JSON.stringify(right.text)} (exit ${right.code})`;
   // S469 r4 — the verdict first: a run that printed LOGGED IN and THEN exited non-zero still logged in.
   if (wrong.text.includes("LOGGED IN")) return { cls: "FAIL", detail };
+  // S469 r5 — a run that never finished (spawnSync timeout: status null) judged nothing.
+  if (wrong.code === null || right.code === null) return { cls: "UNJUDGED", detail: `tool run timed out (${detail})` };
   // A module that never loaded never ran the shape.
   if (wrong.code !== 0 && /Cannot find module|Cannot find package/.test(wrong.err)) {
     const f = loadFailure(new Error(wrong.err), "tool module");
