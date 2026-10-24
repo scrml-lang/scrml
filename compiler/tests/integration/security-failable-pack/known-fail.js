@@ -20,18 +20,12 @@
 // callee position except a `const` alias by name (E-IMPL1-FAILABLE-FN-VALUE, an impl#1 limitation,
 // carried as `g-impl1-failable-fn-value-refused-s469`).
 export const KNOWN_FAIL = {
-  // S469 s469-server-return-match-await — a RENDER-time `match` (a markup interpolation, a derived cell) whose
-  // subject is a server call: there is no function body to await in, so the subject is the pending Promise
-  // (read as `.Ok`). The same class as a plain `${isOk(@pw) ? … : …}` (g-markup-gate-tests-server-call-promise)
-  // and `const <d> = isOk(@pw)` (g-derived-cell-rhs-server-call-renders-promise, ruling-gated). FAIL on base too.
-  "f1/render: markup interpolation": "g-render-match-async-subject-unawaited-s469: a markup `${match check(@pw) { … }}` cannot await its subject (render time); the Promise reads as `.Ok`",
-  // S469 r2 — a helper that IS async (it calls a server function) read in a render position: the `if=`
-  // gate and the derived cell test its pending Promise (always truthy); FAIL on base too. The
-  // interpolation twin is awaited (#391) and PASSes.
-  "f2/async helper, if= with &&": "g-markup-gate-tests-server-call-promise: an `if=` over an async-coloured helper tests its Promise",
-  "f2/async helper, bare if=": "g-markup-gate-tests-server-call-promise: an `if=` over an async-coloured helper tests its Promise",
-  "f2/async helper, derived cell": "g-derived-cell-rhs-server-call-renders-promise: a derived cell over an async-coloured helper holds its Promise",
-  "f1/render: derived cell": "g-render-match-async-subject-unawaited-s469: a derived `const <c> = match check(@pw) { … }` cannot await its subject (synchronous recompute); the Promise reads as `.Ok`",
+  // S470 s470-render-position-server-call-refused: EMPTY again. The five RENDER-position entries
+  // (f1/render: markup interpolation, f1/render: derived cell, f2/async helper × if= with && / bare if= /
+  // derived cell — g-markup-gate-tests-server-call-promise, g-derived-cell-rhs-server-call-renders-promise,
+  // g-render-match-async-subject-unawaited-s469) are refused: a waiting value in a render position is
+  // E-VALUE-SERVER-CALL (§13.7 / §13.8; ruling:user-voice-scrml.md S469 item 1 "Refuse in impl#1").
+  // The interpolation twin `f2/async helper, interpolation` (awaited, PASS) is refused by the same rule.
 
   // S469 s469-lift-gate-staleness: EMPTY again. The 36 n23 entries of round 5 (a cell read inside a called
   // function; the value-indexed row side; a body local in a keyed row) owed to

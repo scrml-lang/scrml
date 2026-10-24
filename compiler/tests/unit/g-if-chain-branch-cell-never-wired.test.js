@@ -148,8 +148,12 @@ describe("g-if-chain-branch-cell-never-wired", () => {
   });
 
   // A `server fn` DECLARED INSIDE a branch, called from that branch's markup.
+  // S470 — called from a HANDLER: `<p>v ${zzload()}</p>` (a render position) is E-VALUE-SERVER-CALL
+  // (§13.7), and was refused in the lone-if= oracle only — the chain form escaped, because the
+  // file's async set does not see a function declared in a chain branch (render-waiting-calls.ts
+  // now reads `serverPlacedFnNamesAnywhere`; render-waiting-call-refused-s470.test.js pins it).
   const SERVER_FN_SRC = `<open> = true
-<div if=@open>${D} server fn zzload() { return 41 + 1 } }<p>v ${D}zzload()}</p></div>
+<div if=@open>${D} server fn zzload() { return 41 + 1 } }<button onclick=zzload()>v</button></div>
 ${ELSE_ARM}
 `;
 

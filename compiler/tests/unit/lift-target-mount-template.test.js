@@ -382,20 +382,16 @@ server function greeting() { return "SRV_OK" }
 </program>
 `;
 
-  test("${serverFn()} one-shot display: rebinds from _scrml_nav_rewire", () => {
-    const { errors, js, html } = compile(SRV(true));
-    expect(errors).toEqual([]);
-    const [pid] = logicPids(html);
-    expect(js).not.toContain(`document.querySelector('[data-scrml-logic="${pid}"]')`);
-    const rewire = navRewireBody(js);
-    expect(rewire).toContain(`const _scrml_el = (_scrml_root || _scrml_g.document).querySelector('[data-scrml-logic="${pid}"]');`);
-    expect(rewire).toContain("_scrml_el.textContent = await (");
+  // S470 — SUPERSEDED: a server call in a markup interpolation is E-VALUE-SERVER-CALL (§13.7;
+  // ruling:user-voice-scrml.md S469 item 1), in a mount <template> and in the SSR body alike, so the
+  // `${serverFn()}` one-shot display site above is no longer reached.
+  test("${serverFn()} one-shot display inside a mount <template>: E-VALUE-SERVER-CALL", () => {
+    const { errors } = compile(SRV(true));
+    expect(errors.map((e) => e.code)).toEqual(["E-VALUE-SERVER-CALL"]);
   });
 
-  test("CONTROL ${serverFn()} one-shot in the SSR body: document-scoped (unchanged)", () => {
-    const { errors, js, html } = compile(SRV(false));
-    expect(errors).toEqual([]);
-    const [pid] = logicPids(html);
-    expect(js).toContain(`    const _scrml_el = _scrml_g.document.querySelector('[data-scrml-logic="${pid}"]');`);
+  test("CONTROL ${serverFn()} one-shot in the SSR body: E-VALUE-SERVER-CALL", () => {
+    const { errors } = compile(SRV(false));
+    expect(errors.map((e) => e.code)).toEqual(["E-VALUE-SERVER-CALL"]);
   });
 });

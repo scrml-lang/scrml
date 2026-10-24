@@ -58,6 +58,8 @@ export function getGreeting(name) { return "Hello, " + name + "!"; }
 `);
 
   // GITI-003 + GITI-004: server-only usage of the imported helper.
+  // (S470: the client calls the server function from a handler. A render-position
+  // `<p>${loadGreeting()}</p>` is E-VALUE-SERVER-CALL, §13.7.)
   serverOnlyFx = fix("server-only.scrml", `<program>
 
 \${
@@ -69,7 +71,7 @@ export function getGreeting(name) { return "Hello, " + name + "!"; }
 }
 
 <div>
-  <p>\${loadGreeting()}</p>
+  <button onclick=loadGreeting()>Load</button>
 </div>
 
 </program>

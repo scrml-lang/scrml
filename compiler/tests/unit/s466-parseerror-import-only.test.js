@@ -138,14 +138,14 @@ describe("compiler-provided error types are known arm qualifiers", () => {
     const q =
       "<program db=\"./app.db\">\n${\n  server function load(id) {\n" +
       "    const u = ?{`SELECT name FROM users WHERE id = ${id}`}.get() !{\n" +
-      "      SqlError.QueryFailed(m) :> { return \"q\" }\n      _ :> { return \"x\" }\n    }\n    return u\n  }\n}\n<p>${load(1)}</p>\n</>\n";
+      "      SqlError.QueryFailed(m) :> { return \"q\" }\n      _ :> { return \"x\" }\n    }\n    return u\n  }\n}\n<button onclick=load(1)>load</button>\n</>\n"; // S470: a handler (a render-position server call is E-VALUE-SERVER-CALL)
     expect(build(q, "sql-q").errors).not.toContain("E-SCOPE-001");
     expect(build(q, "sql-q").errors).toEqual([]);
     const f =
       "<program db=\"./app.db\">\n${\n  server function loadUser(id)! -> SqlError {\n" +
       "    return ?{`SELECT name FROM users WHERE id = ${id}`}.get()\n  }\n  server function q() {\n" +
       "    const v = loadUser(1) !{\n      SqlError::QueryFailed(m) :> { return \"q\" }\n      _ :> { return \"x\" }\n    }\n" +
-      "    return v\n  }\n}\n<p>${q()}</p>\n</>\n";
+      "    return v\n  }\n}\n<button onclick=q()>q</button>\n</>\n";
     expect(build(f, "sql-fn").errors).toEqual([]);
   });
 
