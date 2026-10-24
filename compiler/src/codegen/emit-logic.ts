@@ -708,7 +708,10 @@ function emitFailExpr(node: FailExprLike, opts: EmitLogicOpts): string {
     } else {
       const props = argParts.map((a, i) => {
         const field = schema && i < schema.length ? schema[i] : `_${i}`;
-        return `${field}: ${emitExprField(null, a.trim(), _makeExprCtx(opts))}`;
+        // A single argument IS `argsExpr` — lowered from its tree (`row.balance`, not the
+        // token-joined text `row . balance`), as the unknown-schema branch above does.
+        const argNode = argParts.length === 1 ? (node.argsExpr as Parameters<typeof emitExprField>[0]) : null;
+        return `${field}: ${emitExprField(argNode, a.trim(), _makeExprCtx(opts))}`;
       });
       data = `{ ${props.join(", ")} }`;
     }
