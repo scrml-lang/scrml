@@ -19181,6 +19181,14 @@ the variants an earlier arm matched: a later `match err { … }` is exhaustive o
   success value. A `match` that does not otherwise cover `.Ok` is non-exhaustive (**E-TYPE-020**,
   §19.7.1).
 - `_` with no name, and `else`, SHALL bind nothing (unchanged, §18.6).
+- *(S469)* Because `<name>` is the whole error value — an error-enum value, typed as above, not its
+  payload — reading a payload field off it (`err.message`, `err.reason`) SHALL be a compile error
+  (**E-TYPE-004**), and so SHALL comparing it with a primitive (`err == "bad"`, `err != ""`;
+  **E-EQ-001**). Its payload is reached by naming the variant (`.Denied(reason) :> …`) or by
+  `match err { … }`; passing it on whole (`@state = .Failed(err)`, `describe(err)`) is unaffected.
+  **Provenance:** ruling:user-voice-scrml.md S469 "SPEC: whole error + refuse (Recommended)". Before
+  this, impl#1 bound only the payload (`.data`), so `err.message` "worked" against one payload shape
+  and read `undefined` against another (`g-impl1-whole-error-binder-binds-data-s469`, resolved).
 - `_ <name>` in a `match` whose subject is not a failable result SHALL be a compile error
   (**E-MATCH-BARE-BINDER**, §18.2), as SHALL `else <name>` in any arm. The message for the first
   says that a match arm binds the whole value only where it is an error, and offers `_` / `else`
@@ -28056,7 +28064,7 @@ are REFUSED by impl#1, `E-IMPL1-RULED-FORM-UNSUPPORTED` (its row lands with that
 | E-TEST-004 | §~ | `~{}` test block: references variable from outer scope | Test |
 | E-TEST-005 | §~ | `~{}` test block: invalid test structure | Test |
 | E-TEST-006 | §19.12.7 | `~{}` test block: server-function call inside an active `test-bind` context references a server function with no `test-bind` declaration in scope. Fail-fast over silent passthrough (design-insight 22, S74). Test-mode-only; dead-code-eliminated from release builds (§47.5 cross-ref). | Test |
-| E-TYPE-004 | §14.3 | Struct field access on non-struct type | Error |
+| E-TYPE-004 | §14.3, §18.6.1 | Struct field access on non-struct type. *(S469: also a payload-field read off a `!{}` whole-error binder `_ err :>` — `err.message` — which is the whole error-enum value, §18.6.1; emitted at `compiler/src/type-system.ts` `wholeErrorBinderMisuse`.)* | Error |
 | E-TYPE-052 | §14.2 | InitCap algorithm: type name must be PascalCase | Error |
 | E-TYPE-080 | §19.7 | Non-exhaustive error handler: not all error variants covered | Error |
 | E-TYPE-ARM-QUALIFIER-MISMATCH | §19.4.5, §18.2 | A `!{}` handler arm's type qualifier names a type other than the handled error type — `F.Bad(m) :>` or `| S.Empty :>` on a call that fails with `E` (the arm pattern `TypeName.V` / `TypeName::V`). Dispatch is by variant name, so without this check the arm silently matched `E`'s same-named variant or was a dead arm. The message names both types and offers `E.V` or the bare `.V`. Both names are compared after type-alias resolution (`type A = E` is `E`); the check fires only where the handled call's error type and the qualifier both resolve to an enum, and is skipped otherwise. The unqualified foreign variant (`.Zap :>`) is not this code. **Provenance:** ruling:user-voice-scrml.md S452 "c looks right" (the §18.2 arm grammar for `!{}`), S452 review of `fix/s452-impl1-pipeless-arms` (LOW-3). Emitted at `compiler/src/type-system.ts` (`annotateNodes` → `visitNode`, `case "guarded-expr"`, before the E-TYPE-080 exhaustiveness step). | Error |
@@ -28338,7 +28346,7 @@ are REFUSED by impl#1, `E-IMPL1-RULED-FORM-UNSUPPORTED` (its row lands with that
 | E-USE-001 | §41 | `use` declaration appears inside a `${ }` context, component body, or other nested scope. `use` is only valid at file top level. (Catalog addition S78 audit; emitted at `compiler/src/gauntlet-phase1-checks.js`.) | Error |
 | E-USE-002 | §41 | `use` declaration appears after the first markup element or logic context in the file. All `use` declarations must precede file body content. (Catalog addition S78 audit; emitted at `compiler/src/gauntlet-phase1-checks.js`.) | Error |
 | E-USE-005 | §41 | `use` specifier uses an unrecognized protocol prefix (must begin with `scrml:`, `vendor:`, `./`, or `../`). Bare npm-style specifiers are not valid in scrml. (Catalog addition S78 audit; emitted at `compiler/src/gauntlet-phase1-checks.js`.) | Error |
-| E-EQ-001 | §45 | `==` applied to incompatible types. The type system prevents cross-type comparison before the operator is evaluated. (Catalog addition S78 audit; emitted at `compiler/src/gauntlet-phase3-eq-checks.js`.) | Error |
+| E-EQ-001 | §45, §18.6.1 | `==` applied to incompatible types. The type system prevents cross-type comparison before the operator is evaluated. (Catalog addition S78 audit; emitted at `compiler/src/gauntlet-phase3-eq-checks.js`. S469: also `==` / `!=` between a `!{}` whole-error binder `_ err :>` and a primitive, §18.6.1 — emitted at `compiler/src/type-system.ts` `wholeErrorBinderMisuse`.) | Error |
 | E-EQ-002 | §45 | `== not` used instead of `is not`. The absence check uses the keyword form `x is not`, not equality against the `not` sentinel. (Catalog addition S78 audit; emitted at `compiler/src/gauntlet-phase3-eq-checks.js`; also `compiler/src/ast-builder.js`.) | Error |
 | E-EQ-003 | §45 | `==` applied to a type containing function fields. Functions are not comparable for value-equality in scrml. (Catalog addition S78 audit; emitted at `compiler/src/gauntlet-phase3-eq-checks.js`.) | Error |
 | E-EQ-004 | §45 | `===` operator used in scrml source. scrml has a single equality operator `==` (with strict type-matching); the `===` triple-equals form is not valid. (Catalog addition S78 audit; emitted at `compiler/src/gauntlet-phase3-eq-checks.js`; also `compiler/src/ast-builder.js`.) | Error |

@@ -464,16 +464,17 @@ describe("emit-logic §19 §14: guarded-expr arm binding reads .data", () => {
     expect(drainRefusedLowerings().map((e) => e.code)).toEqual(["E-TYPE-027"]);
   });
 
-  // PINNED DIVERGENCE (g-impl1-whole-error-binder-binds-data-s469): SPEC §18.6.1 says `_ err :>`
-  // binds the WHOLE error value (variant and payload, typed as the call's error type); impl#1 binds
-  // only its `.data` payload. When the divergence is ruled and fixed this expectation changes.
-  test("PINNED DIVERGENCE — the wildcard binder `_ err` binds `.data`, not the whole error (§18.6.1)", () => {
+  // SPEC §18.6.1 — `_ err :>` binds the WHOLE error value (variant and payload): the envelope.
+  // (S469 r5, ruling "SPEC: whole error + refuse (Recommended)"; resolved
+  // g-impl1-whole-error-binder-binds-data-s469 — it bound only `.data`.)
+  test("the wildcard binder `_ err` binds the whole error value (§18.6.1)", () => {
     const node = makeGuardedExpr(
       makeBareExpr("getResource()"),
       [makeArm("_", "err", "handle404(err)")]
     );
     const result = resetAndRun(() => emitLogicNode(node));
-    expect(result).toMatch(/const err = _scrml_\w+\.data;/);
+    expect(result).toMatch(/const err = _scrml_\w+;/);
+    expect(result).not.toMatch(/const err = _scrml_\w+\.data;/);
   });
 });
 

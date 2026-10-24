@@ -1166,11 +1166,13 @@ function emitGuardedArmBinding(
 ): string[] {
   const names = binding.split(",").map((s) => s.trim()).filter((s) => s.length > 0 && s !== "_");
   if (names.length === 0) return [];
-  // A wildcard arm (`_ e :>`) binds the whole `.data` payload (no variant to project).
-  // PINNED DIVERGENCE (`g-impl1-whole-error-binder-binds-data-s469`): SPEC §18.6.1 says the WHOLE
-  // error value. Aligning it changes the meaning of every `_ e :> … e.<field> …` program (they read
-  // `.data` fields today) — a ruling is owed before it changes (S469 r4).
-  if (!variantName) return [`    const ${names[0]} = ${resultVar}.data;`];
+  // S469 r5 — the whole-error binder `_ e :>` binds the WHOLE error value, variant and payload
+  // (SPEC §18.6.1; ruling:user-voice-scrml.md S469 "SPEC: whole error + refuse (Recommended)"): the
+  // envelope itself — a `match e { … }` dispatches it by `.variant` and binds its payload from
+  // `.data`, and passing it on keeps the variant. It bound only `.data` (`null` for a unit variant,
+  // so `@phase = .Failed(err)` then `match err` ran no arm). Reading a payload field off it or
+  // comparing it to a primitive is refused by the checker (E-TYPE-004 / E-EQ-001, type-system.ts).
+  if (!variantName) return [`    const ${names[0]} = ${resultVar};`];
   // S469 r2 — the field list is the handled call's DECLARED error enum (TS stamps the guarded
   // node, `__guardErrorVariants`; the `fail` producer keys its payload by the same declaring enum
   // in every file); the by-name ERROR registry (local + ParseError) is the fallback. The binders are

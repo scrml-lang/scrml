@@ -1,5 +1,5 @@
 // PINNED_CLASS — the EXPECTED class of each shape in the families that pin it (S469
-// s469-server-return-match-await rounds 2-4: s4, f1, s5, f2, s6, f3, l1, t1, s7, f4, l2, t2). The floor ("a wrong password never logs in")
+// s469-server-return-match-await rounds 2-5: s4 … t3, 16 families). The floor ("a wrong password never logs in")
 // is asserted for every shape; a pinned shape must ALSO keep its class, so a PASS that degrades to
 // PASS-DENY / PASS-REFUSED / PASS-500 (a fix that silently stopped working, or a newly-refused valid
 // program) turns the suite red, and so does a refused shape that starts compiling (re-measure it, then
@@ -214,4 +214,32 @@ export const PINNED_CLASS = {
   "t2/? same field names in another order (accepted)": "PASS",
   "t2/short form reads e in a template, multi-field variant, outer e": "PASS-REFUSED",
   "t2/short form reads e in a template, unit variant, outer e": "PASS-REFUSED",
+  "s8/whole binder, passed on whole (matched in the callee)": "PASS",
+  "s8/whole binder, held in a local then passed on": "PASS",
+  "s8/whole binder, payload field read": "PASS-REFUSED",
+  "s8/whole binder, compared with a primitive (Generic)": "PASS-REFUSED",
+  "s8/whole binder, != a primitive": "PASS-REFUSED",
+  "s8/whole binder, payload field in a template": "PASS-REFUSED",
+  "s8/whole binder, payload field in a block arm": "PASS-REFUSED",
+  "f5/whole binder, passed on whole (matched in the callee)": "PASS",
+  "f5/whole binder, held in a local then passed on": "PASS-REFUSED",
+  "f5/whole binder, payload field read": "PASS-REFUSED",
+  "f5/whole binder, compared with a primitive (Generic)": "PASS-REFUSED",
+  "f5/whole binder, != a primitive": "PASS-REFUSED",
+  "f5/whole binder, payload field in a template": "PASS-REFUSED",
+  "f5/whole binder, payload field in a block arm": "PASS-REFUSED",
+  "l3/whole binder, passed on whole (matched in the callee)": "PASS",
+  "l3/whole binder, held in a local then passed on": "PASS",
+  "l3/whole binder, payload field read": "PASS-REFUSED",
+  "l3/whole binder, compared with a primitive (Generic)": "PASS-REFUSED",
+  "l3/whole binder, != a primitive": "PASS-REFUSED",
+  "l3/whole binder, payload field in a template": "PASS-REFUSED",
+  "l3/whole binder, payload field in a block arm": "PASS-REFUSED",
+  "t3/whole binder, passed on whole (matched in the callee)": "PASS-REFUSED",
+  "t3/whole binder, held in a local then passed on": "PASS-REFUSED",
+  "t3/whole binder, payload field read": "PASS-REFUSED",
+  "t3/whole binder, compared with a primitive (Generic)": "PASS-REFUSED",
+  "t3/whole binder, != a primitive": "PASS-REFUSED",
+  "t3/whole binder, payload field in a template": "PASS-REFUSED",
+  "t3/whole binder, payload field in a block arm": "PASS-REFUSED",
 };

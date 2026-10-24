@@ -335,7 +335,7 @@ ${
             | ::NetworkError e -> {
                 return { status: 0, body: "", networkError: e.message }
             }
-            | _ e -> {
+            | ::ServerError e -> {
                 return { status: 0, body: "", networkError: e.message }
             }
         }

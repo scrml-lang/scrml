@@ -72,6 +72,7 @@
  * Performance budget: <= 20 ms per file.
  */
 
+import { templateInterpolationPayloads } from "./interpolation-extent.ts";
 import { stdlibFailableErrorVariants } from "./stdlib-failable-errors.ts";
 import { armStatements, objectLiteralArmValue } from "./arm-body-statements.ts";
 import { readEngineBody, ENGINE_BODY_FILE, messageArmSource, onTransitionBodySource, guardSource, markBodyWalked, markOwnerReported } from "./engine-body-reader.ts";
@@ -1648,6 +1649,36 @@ function resolveErrorEnumThroughAliases(
     return r && r.kind === "enum" ? (r as EnumType) : null;
   }
   return null;
+}
+
+/**
+ * S469 r5 — does a `_ <binder> :>` arm body misuse its whole-error binder? "member": a property read
+ * off it (`e.message`); "compare": `==` / `!=` between it and a primitive literal. Reads the parsed
+ * body, and each template literal's `${…}` (parsed the same way). null when neither.
+ */
+function wholeErrorBinderMisuse(roots: unknown[], binder: string, filePath: string): "member" | "compare" | null {
+  let found: "member" | "compare" | null = null;
+  const isBinder = (x: unknown): boolean => !!x && typeof x === "object" && (x as { kind?: string; name?: string }).kind === "ident" && (x as { name?: string }).name === binder;
+  const isPrimitive = (x: unknown): boolean => !!x && typeof x === "object" && (x as { kind?: string }).kind === "lit"
+    && ["string", "number", "bool", "template"].includes(String((x as { litType?: string }).litType));
+  const walk = (x: unknown): void => {
+    if (found || !x || typeof x !== "object") return;
+    if (Array.isArray(x)) { x.forEach(walk); return; }
+    const r = x as Record<string, unknown>;
+    if (r.kind === "member" && isBinder(r.object) && r.property !== "variant") { found = "member"; return; }
+    if (r.kind === "binary" && (r.op === "==" || r.op === "!=")
+      && ((isBinder(r.left) && isPrimitive(r.right)) || (isBinder(r.right) && isPrimitive(r.left)))) { found = "compare"; return; }
+    if (r.kind === "lit" && r.litType === "template" && typeof r.raw === "string" && (r.raw as string).includes("${")) {
+      const raw = r.raw as string;
+      const inner = raw.startsWith("`") && raw.endsWith("`") ? raw.slice(1, -1) : raw;
+      for (const payload of templateInterpolationPayloads(inner)) {
+        try { walk(parseExprToNode(payload, filePath, 0)); } catch { /* unreadable: not judged here */ }
+      }
+    }
+    for (const k of Object.keys(r)) if (k !== "span") walk(r[k]);
+  };
+  walk(roots);
+  return found;
 }
 
 /** The declared field names of `Enum.Variant` ([] for a unit variant), or undefined. */
@@ -14333,6 +14364,45 @@ function annotateNodes(
             ? matchSubjectVariantsOf(_errEnum)
             : (calleeName ? stdlibFnErrorVariants.get(calleeName) ?? null : null);
           if (_vs) (n as Record<string, unknown>).__guardErrorVariants = _vs;
+        }
+
+        // S469 r5 — §18.6.1 (ruling:user-voice-scrml.md S469 "SPEC: whole error + refuse
+        // (Recommended)"): a whole-error binder `_ e :>` binds the WHOLE error value — typed as the
+        // handled call's error enum, not its payload. Reading a payload field off it (`e.message`,
+        // `e.reason`) or comparing it to a primitive (`e == "bad"`) is a type error: name the variant
+        // to bind its payload (`.Denied(reason) :>`), or `match e { … }` on it. Before, impl#1 bound
+        // the `.data` payload, so those reads "worked" against one payload shape and silently read
+        // `undefined` against another (a keyed producer in another file) — a denied input logged in.
+        for (const arm of errorArms as Array<{ pattern?: string; binding?: string; handler?: string; span?: Span }>) {
+          const pat = String(arm.pattern ?? "").replace(/^::/, "").replace(/^\./, "");
+          const binder = String(arm.binding ?? "").trim();
+          if (pat !== "_" || !binder || binder === "_" || !/^[A-Za-z_$][\w$]*$/.test(binder)) continue;
+          const body = String(arm.handler ?? "").trim();
+          if (!body) continue;
+          let roots: unknown[] = [];
+          if (body.startsWith("{") && body.endsWith("}")) {
+            const r = parseStatementTextDetailed(body.slice(1, -1), filePath, {});
+            if (r.ok) roots = r.stmts as unknown[];
+          } else {
+            try { const x = parseExprToNode(body, filePath, 0); if (x) roots = [x]; } catch { roots = []; }
+          }
+          const armSpan = ((arm.span ?? n.span) as Span);
+          const offense = wholeErrorBinderMisuse(roots, binder, filePath);
+          if (offense === "member") {
+            errors.push(new TSError(
+              "E-TYPE-004",
+              `E-TYPE-004: \`${binder}\` in \`_ ${binder} :>\` is the WHOLE error value (§18.6.1) — an error-enum value, not a struct — so \`${binder}.<field>\` reads no field. ` +
+              `Name the variant to bind its payload (\`.Denied(reason) :> …\`), or \`match ${binder} { .Denied(reason) :> … }\`.`,
+              armSpan,
+            ));
+          } else if (offense === "compare") {
+            errors.push(new TSError(
+              "E-EQ-001",
+              `E-EQ-001: \`${binder}\` in \`_ ${binder} :>\` is the WHOLE error value (§18.6.1) — an error-enum value — and is compared here with a primitive, which it never equals. ` +
+              `Name the variant to bind its payload (\`.Generic(message) :> message == …\`), or test the variant (\`${binder} is .Denied\` / \`match ${binder} { … }\`).`,
+              armSpan,
+            ));
+          }
         }
 
         // S452 r3 — a type-qualified arm (`T.V :>` / `T::V :>`, recorded by

@@ -116,7 +116,7 @@ describe("R25-Bug-38 §1: multi-stmt reactive-write arm body", () => {
     const setCount = (result.match(/_scrml_reactive_set\(/g) || []).length;
     expect(setCount).toBeGreaterThanOrEqual(4);
     // Wildcard binding for `e` is still emitted
-    expect(result).toContain("const e = _scrml__scrml_result_1.data");
+    expect(result).toContain("const e = _scrml__scrml_result_1;"); // §18.6.1: the WHOLE error (S469 r5)
   });
 });
 
