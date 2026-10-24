@@ -170,7 +170,7 @@ function treeHasEscapeHatch(node: unknown): boolean {
   return false;
 }
 
-function collectCalleeIdents(node: unknown, out: Set<string>, guardNestedFnValues = false): void {
+export function collectCalleeIdents(node: unknown, out: Set<string>, guardNestedFnValues = false): void {
   if (!node || typeof node !== "object") return;
   if (Array.isArray(node)) { for (const c of node) collectCalleeIdents(c, out, guardNestedFnValues); return; }
   const n = node as ASTNode;

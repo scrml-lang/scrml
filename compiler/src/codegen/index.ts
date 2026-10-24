@@ -81,7 +81,8 @@ import { compilationHasDatabase } from "../tenant-undeclared.ts";
 import { generateToolJs, generateToolLibraryJs } from "./emit-tool.ts";
 import { setFileSchedulerBindings } from "./async-combinators.ts";
 import { schedulerNamesNotProvablyGlobal } from "./js-async-analysis.ts";
-import { computeFileAsyncFnNames, serverFnNamesOfFile, setFileAsyncFnNames, adoptFileAsyncSet, waitingBindingsOfFile } from "./file-async-fns.ts";
+import { computeFileAsyncFnNames, serverFnNamesOfFile, setFileAsyncFnNames, adoptFileAsyncSet, waitingBindingsOfFile, namespaceImportLocalsOf, waitingFnPredicateOfFile, serverPlacedFnNamesAnywhere } from "./file-async-fns.ts";
+import { renderWaitingCallsOf } from "./render-waiting-calls.ts";
 import { isToolProgram, isLibraryShapedFile } from "../tool-program.ts";
 import { forEachProgramWithRole, findTopLevelProgram, findTopLevelPrograms, programRoleOptionsOf, NESTED_SESSION_ATTRS, nestedProgramAttrVerdict } from "../program-role.ts";
 import { getElementAttrSchema } from "../attribute-registry.js";
@@ -2785,6 +2786,34 @@ export function runCG(input: CgInput): CgOutput {
         // (server-text-guard, …) is not displaced by it; the compile fails either way.
         if (wb.textOnly) (err as CGError & { cascadeOnly?: boolean }).cascadeOnly = true;
         recordRefusedLowering(err, wb.node as object);
+      }
+      // S470 (SECURITY; §13.7 / §13.8, ruling:user-voice-scrml.md S469 item 1 "Refuse in impl#1") —
+      // a waiting value in a RENDER position (an interpolation, an attribute value, a derived
+      // formula, an `<each>` / `<match>` head, an engine `derived=`) is E-VALUE-SERVER-CALL. The
+      // position re-evaluates synchronously, so it would hold a pending Promise (always truthy: a
+      // gate opened on a wrong password). Judged on the SAME file set as the check above
+      // (render-waiting-calls.ts); impl#1 has no async render path (§13.9 is Nominal).
+      const _rwWaits = waitingFnPredicateOfFile(fileAST,
+        fileAsyncFnNamesOf(fileAST, files, _fileAsyncMemo, exportRegistryInput, importGraphInput),
+        _fileAsyncMemo.routeMap ?? null);
+      // A server function declared where the file set does not look (an if=/else chain branch, …).
+      const _rwServerAnywhere = serverPlacedFnNamesAnywhere(fileAST, _fileAsyncMemo.routeMap ?? null);
+      for (const site of renderWaitingCallsOf(getNodes(fileAST as never) as unknown[], {
+        waits: (n: string) => _rwWaits(n) || _rwServerAnywhere.has(n),
+        serverNames: new Set([...serverFnNamesOfFile(fileAST, _fileAsyncMemo.routeMap ?? null), ..._rwServerAnywhere]),
+        namespaceLocals: namespaceImportLocalsOf(fileAST),
+        filePath,
+      })) {
+        recordRefusedLowering(new CGError(
+          "E-VALUE-SERVER-CALL",
+          `E-VALUE-SERVER-CALL: ${site.position} calls ${site.what}. A render position is re-evaluated ` +
+            "synchronously while the page renders, so it cannot wait for the call: it would hold a pending " +
+            "Promise, which is always truthy (§13.7, §13.8). The language allows a waiting value in markup only " +
+            "through a pending cell (§13.9), and impl#1 has no async render path yet, so it cannot render this. " +
+            "Fix: make the call in an event handler, a `function`, or a `<request>` (§6.7.7) that writes a cell, " +
+            "and render the cell here.",
+          (site.span as object | undefined) ?? {},
+        ), site.anchor);
       }
 
       // s457 (§21.4) — this module's LOCAL `.scrml` re-exports, for emit-server's

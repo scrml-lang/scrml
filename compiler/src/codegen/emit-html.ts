@@ -549,7 +549,7 @@ const LIFECYCLE_SILENT_TAGS = new Set(["timer", "poll"]);
 // to a bare-expr at the program-body, ast-builder.js:8573/11968) and a bare
 // program-body `${ val() }` previously each emitted a spurious render slot
 // printing the call return ("[object Promise]" for async fns) at page top.
-const DEFAULT_LOGIC_MODE_TAGS = new Set(["program", "page", "channel"]);
+export const DEFAULT_LOGIC_MODE_TAGS: ReadonlySet<string> = new Set(["program", "page", "channel"]);
 
 // R25-Bug-41 (S138, 2026-05-27) — Server-side-only state-block types whose body
 // content MUST NOT appear in the HTML render-tree. `<schema>` (SPEC §39) and
@@ -600,7 +600,7 @@ const SERVER_ONLY_STATE_TYPES = new Set(["schema", "seeds"]);
  * `bare-expr` shortcut added. Kept inline (not imported) to avoid the
  * codegen circular-import surface.
  */
-function stmtContainsRenderableLogic(node: any): boolean {
+export function stmtContainsRenderableLogic(node: any): boolean {
   if (!node || typeof node !== "object") return false;
   // S458 slice 2 — a refined parameter's guard (a body-prepended bare-expr the
   // type-system stage adds, refinement-obligations.ts) renders nothing.
@@ -631,7 +631,7 @@ function stmtContainsRenderableLogic(node: any): boolean {
  * distinguish "purely bare-expr renderable" (suppress) from "contains lift"
  * (keep the placeholder + lift wiring).
  */
-function stmtContainsLiftExpr(node: any): boolean {
+export function stmtContainsLiftExpr(node: any): boolean {
   if (!node || typeof node !== "object") return false;
   if (node.kind === "lift-expr") return true;
   for (const key of ["body", "consequent", "alternate"]) {
@@ -666,7 +666,7 @@ function stmtContainsLiftExpr(node: any): boolean {
  * `emitIfValueExpr`) which are total for exactly these shapes — so a slot is
  * never allocated for a body the value emitter can't render.
  */
-function isValueFormControlFlowStmt(node: any): boolean {
+export function isValueFormControlFlowStmt(node: any): boolean {
   if (!node || typeof node !== "object") return false;
   if (node.kind === "match-stmt") {
     const arms: any[] = Array.isArray(node.body) ? node.body : [];
