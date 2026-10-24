@@ -1,0 +1,96 @@
+// Probe family `n27` — S469 (s469-structural-else-guard; g-structural-element-if-chain-and-show-composition-nominal,
+// g-if-on-structural-element-silently-ignored, SECURITY): the privileged control sits in a branch the author
+// GATED, on an element that never read the gate.
+//   (a) the `else` / `else-if=` branch of an `if=` chain is a structural element (`<engine>` / `<match>` /
+//       `<each>`) or an `<each>`'s `<empty>` fallback. The structural openers dropped the attribute at parse
+//       time and `collapseIfChains` chains markup only, so the branch rendered whatever the `if=` said;
+//   (b) the `if=` sits on an element whose lowering returns before the §17.1 mount gate — `<errorBoundary>`,
+//       `<render>`, a compound-state namespace wrapper, an `<each>`'s `<empty>` — and was dropped.
+// Positions: in markup, nested deeper, an `<each>` row, a component body, lifted markup (where the shape is
+// lowerable at all). `#wrong` sets the wrong password, `#right` the right one; both start from `""`.
+//
+// Measured on b0cffc6a4 (before the fix): 41 FAIL — the wrong password showed LOGGED IN — and 2 PASS-REFUSED
+// (an `<engine else>` in lifted markup, already E-CTRL-001 / -002 by the lift backstop). After the fix all 43
+// are refused — E-CTRL-001 / E-CTRL-002 (an `else` / `else-if=` not part of a lowered chain),
+// E-GATE-UNSUPPORTED-HOST (an `if=` on a host that does not gate) — PASS-REFUSED. (The component-body shapes
+// put `#out` on an inner element: the expansion appends a space to the root's text, which would hide a leak
+// from the exact-text judge.) The floor: none may ever show LOGGED IN on the wrong password, e.g. a
+// future chain lowering for structural elements that evaluates the chain once, or drops a branch condition.
+// Data, not logic: the default export is a list of [name, scrml source]. Side: client (click #wrong /
+// #right, read #out). Do not edit a shape to make it pass.
+
+export const SIDE = "client";
+
+const HEAD = `type Phase:enum = { Idle, Active }
+type Mode:enum = { A, B }
+type Badge:enum = { Granted renders <b>LOGGED IN</b>, Denied renders <i></i> }
+<mode>: Mode = .A
+<badge>: Badge = .Granted
+<pw> = ""
+<xs> = [1]
+<none> = []
+<signupForm>
+    <userName> = <input type="text"/>
+</>
+`;
+
+const PAGE = (out, extra = "", bare = false) => `${HEAD}${extra}<button id="wrong" onclick=\${ @pw = "wrong" }>go</button>
+<button id="right" onclick=\${ @pw = "secret" }>go</button>
+${bare ? out : `<div id="out">${out}</div>`}
+`;
+
+// The privileged branch, as each structural element. `A` is the element's opener attribute.
+const ELEMENTS = [
+  ["<engine>", (a) => `<engine ${a} for=Phase initial=.Idle><Idle rule=.Active><b>LOGGED IN</b></><Active rule=.Idle><b>LOGGED IN</b></></>`],
+  ["<match>", (a) => `<match ${a} for=Mode on=@mode><A><b>LOGGED IN</b></><B><b>LOGGED IN</b></></>`],
+  ["<each>", (a) => `<each ${a} in=@xs as r><b>LOGGED IN</b></each>`],
+];
+
+// (a) the chain: the head DENIES and renders nothing (true on any password but the right one); the privileged branch is the
+// `else` — or an `else-if=` that names the right password behind a head that is false on both.
+const CHAINS = [
+  ["else", (el) => `<span if=(@pw != "secret")></span>${el("else")}`],
+  ["else-if=", (el) => `<span if=(@pw == "nobody")></span>${el('else-if=(@pw == "secret")')}`],
+];
+
+const POSITIONS = [
+  ["in markup", (c) => PAGE(c)],
+  ["nested deeper", (c) => PAGE(`<section><p>${c}</p></section>`)],
+  ["in an <each> row", (c) => PAGE(`<each in=@xs as y><div>${c}</div></each>`)],
+  ["in a component body", (c) => PAGE(`<Gate/>`, `const Gate = <div><section id="out">${c}</section></div>\n`, true)],
+  ["in lifted markup", (c) => PAGE(`\${ for (y of @xs) { lift <div>${c}</div> } }`)],
+];
+
+const shapes = [];
+for (const [en, el] of ELEMENTS) {
+  for (const [cn, chain] of CHAINS) {
+    for (const [pn, pos] of POSITIONS) {
+      // An engine in a row / component body is refused by §51.0.K whatever its attributes; a `<match>` in
+      // lifted markup is E-MATCH-BLOCK-IN-LIFT. Those positions add nothing here.
+      if (en === "<engine>" && (pn === "in an <each> row" || pn === "in a component body")) continue;
+      if (en === "<match>" && pn === "in lifted markup") continue;
+      shapes.push([`${en} as the ${cn} branch, ${pn}`, pos(chain(el))]);
+    }
+  }
+}
+
+// The `<empty>` fallback of an empty list carries the chain attribute / the gate itself.
+const EMPTY = (a) => `<each in=@none as r><i></i><empty ${a}><b>LOGGED IN</b></empty></each>`;
+for (const [pn, pos] of POSITIONS) {
+  shapes.push([`<empty else> after a denying if=, ${pn}`, pos(`<span if=(@pw != "secret")></span>${EMPTY("else")}`)]);
+  shapes.push([`<empty if=> on the right password, ${pn}`, pos(EMPTY(`if=(@pw == "secret")`))]);
+}
+
+// (b) an `if=` on a host whose lowering bypasses the mount gate.
+const HOSTS = [
+  ["<errorBoundary>", `<errorBoundary if=(@pw == "secret")><b>LOGGED IN</b></errorBoundary>`],
+  ["<render>", `<render if=(@pw == "secret") of=@badge/>`],
+  ["a compound-state wrapper", `<signupForm if=(@pw == "secret")><b>LOGGED IN</b></signupForm>`],
+];
+for (const [hn, host] of HOSTS) {
+  for (const [pn, pos] of POSITIONS.slice(0, 2).concat([POSITIONS[3]])) {
+    shapes.push([`if= on ${hn}, ${pn}`, pos(host)]);
+  }
+}
+
+export default shapes;
