@@ -66,6 +66,7 @@
 // only a genuine URL is exempted; a real `// comment` still strips). See the
 // `urlSlashesAt` doc-comment in block-splitter.js for the exemption criteria.
 import { urlSlashesAt } from "./block-splitter.js";
+import { scanOpenerGateAttrs, rawOpenerGateDiagnostic } from "./gate-attr-refusal.ts";
 
 // §24 HTML void elements — self-terminating, admit no children. A void
 // opener (bare `<input>` or self-closed `<input/>`) inside a match-arm body
@@ -197,6 +198,11 @@ export interface MatchParseDiagnostic {
 export interface MatchParseResult {
   arms: MatchArmEntry[];
   diagnostics: MatchParseDiagnostic[];
+  /** S469 round 2 — an `if=` / `show=` / `else` / `else-if=` on an arm opener (refused by
+   *  codegen `buildMatchArms`, which every `<match>` lowering reaches — the SYM match walk does
+   *  not descend into `<each>` rows / chain branches). Kept apart from `diagnostics` so it is
+   *  reported once. */
+  gateDiagnostics: MatchParseDiagnostic[];
 }
 
 /**
@@ -208,8 +214,9 @@ export interface MatchParseResult {
 export function parseMatchArms(armsRaw: string): MatchParseResult {
   const arms: MatchArmEntry[] = [];
   const diagnostics: MatchParseDiagnostic[] = [];
+  const gateDiagnostics: MatchParseDiagnostic[] = [];
   if (!armsRaw || typeof armsRaw !== "string") {
-    return { arms, diagnostics };
+    return { arms, diagnostics, gateDiagnostics };
   }
 
   let pos = 0;
@@ -238,7 +245,7 @@ export function parseMatchArms(armsRaw: string): MatchParseResult {
     openerStart: number,
     nameEnd: number,
     payloadBindingsRaw: string,
-  ): { closeAt: number; selfClosing: boolean; attrs: MatchArmAttr[]; insideColonAt: number } {
+  ): { closeAt: number; selfClosing: boolean; attrs: MatchArmAttr[]; insideColonAt: number; bailedAt?: number } {
     const attrs: MatchArmAttr[] = [];
     let p = nameEnd;
     // If a payload `(...)` followed the name, skip past it.
@@ -270,8 +277,10 @@ export function parseMatchArms(armsRaw: string): MatchParseResult {
       }
       // Read attr name
       if (!/[A-Za-z_]/.test(c)) {
-        // Unexpected character — bail with what we have.
-        return { closeAt: p, selfClosing: false, attrs, insideColonAt: -1 };
+        // Unexpected character — bail with what we have. S469 round 5: the rest of the opener
+        // (`<Active = if=@n>` — a gate among it) would become body text; `bailedAt` makes the
+        // caller refuse the arm instead.
+        return { closeAt: p, selfClosing: false, attrs, insideColonAt: -1, bailedAt: p };
       }
       const attrNameStart = p;
       while (p < len && /[A-Za-z0-9_:-]/.test(armsRaw[p])) p++;
@@ -668,7 +677,36 @@ export function parseMatchArms(armsRaw: string): MatchParseResult {
     }
 
     // Parse attrs + find opener-close.
+    const _attrRegionStart = pos;
     const openerScan = scanOpenerAttrs(armOpenerStart + 1, pos, payloadBindingsRaw);
+    // §17.1 / §17.2 (S469 round 2) — `if=` / `show=` / `else` / `else-if=` on an arm opener,
+    // read by the markup attribute tokenizer. An arm is dispatched by its variant, not gated:
+    // the attribute was dropped and the arm rendered whatever it said. Refused (surfaced by
+    // codegen `buildMatchArms`, see `gateDiagnostics`).
+    if (typeof openerScan.bailedAt === "number") {
+      gateDiagnostics.push({
+        code: "E-ATTR-001",
+        message: `E-ATTR-001: the \`<${variantName}>\` arm opener cannot be read past \`${armsRaw[openerScan.bailedAt]}\` ` +
+          `(a stray character where an attribute name belongs), so the rest of it — a gate among it — would be read as ` +
+          `the arm's body. It is refused rather than read ungated.`,
+        spanStart: armOpenerStart,
+        spanEnd: Math.max(armOpenerStart + 1, openerScan.bailedAt + 1),
+      });
+    }
+    {
+      const regionEnd = openerScan.insideColonAt >= 0 ? openerScan.insideColonAt : openerScan.closeAt;
+      const _scan = scanOpenerGateAttrs(armsRaw.slice(_attrRegionStart, Math.max(_attrRegionStart, regionEnd)));
+      // S469 round 3 — the reader's own refusals (an operator value swallowing a later gate, a
+      // case-variant gate name) fail the compile here as they do on markup.
+      for (const pr of _scan.problems) {
+        gateDiagnostics.push({ code: pr.code, message: pr.message, spanStart: armOpenerStart, spanEnd: Math.max(armOpenerStart + 1, regionEnd) });
+      }
+      for (const g of _scan.names) {
+        const d = rawOpenerGateDiagnostic(g, variantName, `the \`<match>\` arm \`<${variantName}>\``,
+          `An arm is chosen by its variant; express the condition as arm structure (a variant for the gated state), or gate the whole \`<match if=COND>\`.`);
+        gateDiagnostics.push({ code: d.code, message: d.message, spanStart: armOpenerStart, spanEnd: Math.max(armOpenerStart + 1, regionEnd) });
+      }
+    }
     pos = openerScan.closeAt + 1; // advance past `>` or `/>`
 
     if (openerScan.selfClosing) {
@@ -789,7 +827,7 @@ export function parseMatchArms(armsRaw: string): MatchParseResult {
     });
   }
 
-  return { arms, diagnostics };
+  return { arms, diagnostics, gateDiagnostics };
 }
 
 /**

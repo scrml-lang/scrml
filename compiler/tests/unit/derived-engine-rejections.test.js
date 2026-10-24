@@ -257,7 +257,7 @@ describe("E-DERIVED-ENGINE-NO-INITIAL — `initial=` on derived engine", () => {
       "  @upstream: Phase = Phase.A",
       "}",
       "",
-      "<engine for=Mood derived=@upstream initial=.A/>",
+      "<engine for=Mood initial=.A derived=@upstream/>",
       "",
     ].join("\n");
     const { ast, sym } = runUpToSYM(source);
@@ -279,7 +279,7 @@ describe("E-DERIVED-ENGINE-NO-INITIAL — `initial=` on derived engine", () => {
       "  @upstream: Phase = Phase.A",
       "}",
       "",
-      "<engine for=Mood derived=@upstream initial=.A/>",
+      "<engine for=Mood initial=.A derived=@upstream/>",
       "",
     ].join("\n");
     const { ast, sym } = runUpToSYM(source);
