@@ -804,6 +804,10 @@ describe("S469 round 6 — a `while` inside a reconciled row: head's visible set
   // render-time value. MAIN_STEPS there are the condition's truth for each element (main hid `S2` at `@n = 2`
   // and duplicated the escaped markup on every render). The nested / arm-in-row lifts still land outside
   // their row's element (the escape below), in the list's host.
+  // s469-keyed-row-if-gate — the two `arm_in_row__cell` / `__vi` cases hold a row-deciding `if (@on)` inside the
+  // row element whose arm holds a `while`: no region holds a `while` (its lifts land outside the row), so the
+  // keyed row is lowered as the plain loop the block re-runs. Their expected steps are the conditions' truth
+  // (main showed `S2` twice — the counter read after the loop — and kept every escaped copy across renders).
   // The while body lifts to the AMBIENT target, outside the row (g-while-lift-in-reconciled-row-escapes-the-row-s469,
   // HIGH, main too). Round 5 registered those escaped gates' subscriptions with the row's owner scope, which the
   // reconciler drops at mount (the factory returns nothing): the gate never re-ran and SECRET stayed. MAIN_STEPS is the
@@ -2181,21 +2185,21 @@ describe("S469 round 6 — a `while` inside a reconciled row: head's visible set
    ]
   ],
   [
-   "div[] span[] div[] div[] b.g[S2] b.g[S2]",
-   "div[] span[] div[] div[]",
-   "div[] span[] div[] div[] b.g[S2] b.g[S2]",
-   "div[] span[] div[] div[] b.g[S2] b.g[S2]",
-   "div[] span[] div[] div[] b.g[S2] b.g[S2]",
-   "div[] span[] div[] div[] b.g[S2] b.g[S2]",
-   "div[] span[] div[] div[] b.g[S2] b.g[S2]",
-   "div[] span[] div[] div[] b.g[S2] b.g[S2]",
-   "div[] span[] div[] div[] b.g[S2] b.g[S2]",
-   "div[] span[] div[] div[] div[] b.g[S2] b.g[S2] b.g[S0] b.g[S1]",
-   "div[] span[] div[] div[] div[]",
-   "div[] span[] div[] div[] div[]",
-   "div[] span[] div[] div[] div[]",
+   "div[] span[] b.g[S0] b.g[S1] div[]",
    "div[] span[] div[]",
-   "div[] span[] div[] b.g[S2] b.g[S2] b.g[S0] b.g[S1]"
+   "div[] span[] b.g[S0] b.g[S1] div[]",
+   "div[] span[] b.g[S0] b.g[S1] div[]",
+   "div[] span[] b.g[S0] b.g[S1] div[]",
+   "div[] span[] b.g[S0] b.g[S1] div[]",
+   "div[] span[] b.g[S0] b.g[S1] div[]",
+   "div[] span[] div[]",
+   "div[] span[] b.g[S0] b.g[S1] div[]",
+   "div[] span[] b.g[S0] b.g[S1] div[] b.g[S0] b.g[S1] div[]",
+   "div[] span[] div[] div[]",
+   "div[] span[] div[] div[]",
+   "div[] span[] div[] div[]",
+   "div[] span[]",
+   "div[] span[]"
   ]
  ],
  [
@@ -2267,21 +2271,21 @@ describe("S469 round 6 — a `while` inside a reconciled row: head's visible set
    ]
   ],
   [
+   "div[] span[] div[]",
+   "div[] span[] div[]",
+   "div[] span[] div[]",
+   "div[] span[] b.g[S0] b.g[S1] div[]",
+   "div[] span[] div[]",
+   "div[] span[] div[]",
+   "div[] span[] div[]",
+   "div[] span[] div[]",
+   "div[] span[] div[]",
    "div[] span[] div[] div[]",
    "div[] span[] div[] div[]",
-   "div[] span[] div[] div[]",
-   "div[] span[] div[] div[] b.g[S2] b.g[S2]",
-   "div[] span[] div[] div[]",
-   "div[] span[] div[] div[]",
-   "div[] span[] div[] div[]",
-   "div[] span[] div[] div[]",
-   "div[] span[] div[] div[]",
-   "div[] span[] div[] div[] div[]",
-   "div[] span[] div[] div[] div[]",
-   "div[] span[] div[] div[] div[] b.g[S2] b.g[S2] b.g[S0] b.g[S1]",
-   "div[] span[] div[] div[] div[] b.g[S2] b.g[S2] b.g[S0] b.g[S1]",
-   "div[] span[] div[] b.g[S2] b.g[S2] b.g[S0] b.g[S1]",
-   "div[] span[] div[] b.g[S2] b.g[S2] b.g[S0] b.g[S1]"
+   "div[] span[] b.g[S0] b.g[S1] div[] b.g[S0] b.g[S1] div[]",
+   "div[] span[] b.g[S0] b.g[S1] div[] b.g[S0] b.g[S1] div[]",
+   "div[] span[]",
+   "div[] span[]"
   ]
  ],
  [

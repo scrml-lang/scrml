@@ -30,9 +30,9 @@
 | Severity | Open (owed by impl#1, the TS compiler) | Carried (owed by the bootstrap; xfail on impl#1) |
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 265 | 5 |
-| MED | 682 | 8 |
-| LOW | 486 | 0 |
+| HIGH | 264 | 5 |
+| MED | 683 | 8 |
+| LOW | 488 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
 
@@ -27131,8 +27131,8 @@ act on detached elements. Fix direction: make a re-rendering group an owner of w
 `own(mkEffect)` shape, client code only) so the next render disposes the previous one's effects — without pulling the
 `owner` chunk into list-free pages (runtime-size ratchet §4).
 
-### g-keyed-row-control-flow-if-not-reevaluated-s469 — (security) a control-flow `if` inside a keyed `for … lift` row is evaluated once, when the row is built: `for (r of @xs) { if (@role == "admin") { lift <b>x</b> } }` — the most direct authorization shape — keeps both rows' `<b>` after `@role` is revoked (2, want 0), and `for (r of @xs) { if (r.ok) { lift <b>x</b> } }` stays visible after a same-key replace with `ok: false` (and after an in-place write) — a guard that stays open — `NEW S469 (review of b57d697a9); HIGH; open (pre-existing, identical on main)`
-<!-- @gap id=g-keyed-row-control-flow-if-not-reevaluated-s469 sev=HIGH status=open locus=compiler/src/codegen/emit-control-flow.ts(the keyed row factory emits the body's if-stmt inline; nothing re-runs it)+compiler/src/codegen/emit-lift.js(emitIfStmtWithContainer) prov=review:s469-lift-gate-staleness-round-2;empirical:S469(main 14a788227 and branch: off=2 want 0, in-place off=2 want 0) -->
+### g-keyed-row-control-flow-if-not-reevaluated-s469 — (security) a control-flow `if` inside a keyed `for … lift` row is evaluated once, when the row is built: `for (r of @xs) { if (@role == "admin") { lift <b>x</b> } }` — the most direct authorization shape — keeps both rows' `<b>` after `@role` is revoked (2, want 0), and `for (r of @xs) { if (r.ok) { lift <b>x</b> } }` stays visible after a same-key replace with `ok: false` (and after an in-place write) — a guard that stays open — `NEW S469 (review of b57d697a9); HIGH; RESOLVED S469 (s469-keyed-row-if-gate)`
+<!-- @gap id=g-keyed-row-control-flow-if-not-reevaluated-s469 sev=HIGH status=resolved locus=compiler/src/codegen/emit-control-flow.ts(the keyed row factory emits the body's if-stmt inline; nothing re-runs it)+compiler/src/codegen/emit-lift.js(emitIfStmtWithContainer) prov=review:s469-lift-gate-staleness-round-2;empirical:S469(main 14a788227 and branch: off=2 want 0, in-place off=2 want 0) -->
 
 Found by the review of `b57d697a9`; reproduced on main and the branch (happy-dom): two rows granted, a same-key
 replace with `ok: false` → 2 `b` still in the page; an in-place `ok = false` → still 2. Widened by the review of
@@ -27147,6 +27147,81 @@ region would need reconciler support for a row whose root set changes (measured:
 roots re-inserted revoked content on a reorder — review of `b192c63de` — so regions are emitted only inside a row
 element). Fix direction: (b) with a stable anchor
 root per row, or (a) for the rows whose `if` reads the row or a cell, measured against the corpus.
+
+**RESOLVED S469** (branch `s469-keyed-row-if-gate`; option (a), the plain lowering #1529 proved, in EVERY position —
+round 2, review of b84c3f6de, removed the element-wrapped region of round 1: three ways to leave revoked content
+visible — a closed gate's element orphaned (HIGH-1, below), a nested loop of the region (HIGH-2), a non-reactive
+alias of the row's item (HIGH-3)). `compiler/src/codegen/lift-gate-scope.js` `liftForTreeIfPins` decides it from the
+row body's shape; an `if` "decides the row" when an arm lifts or leaves the row early (`continue` / `return` /
+`break`), and a `match` STATEMENT whose arms lift counts too:
+- the row is lowered as the plain loop the enclosing render re-runs — among the row's roots, its only root, beside
+  sibling roots, inside an element of the row, in a function in the row. Counted like an open gate
+  (`liftNoteRowIfPlainLoop`): a `${}` block is made a re-render effect (so `for (r of visible())` re-renders too),
+  an `if … lift` arm re-renders; where nothing re-runs it — markup built in a function body — it is REFUSED,
+  E-IMPL1-LIFT-GATE-UNTRACKED (the message: build the list in a `${}` block, or gate the row's elements with `if=`).
+- An `if` inside a loop nested in the row is that loop's: the loop is lowered plain, and is a re-runnable REGION of
+  the keyed row when #1529's test admits it (`liftRegionSafe`), else the row is plain too.
+- A prediction miss at emission (an `if` still reaching a keyed row's factory) is refused, never left stale.
+- Adjacent, needed so the plain lowering does not break a common shape: a lifted `bind:value` / `bind:checked`'s
+  initial read is untracked (`pushLiftBind`; the reverse-sync subscription is the binding's dependency) — read
+  tracked, it subscribed the render that builds the input, so in a plain-lowered list (the corpus's inline-edit
+  row in `gauntlet-r10-go-contacts`) every keystroke rebuilt the list and replaced the input being typed into. Round
+  2 (MED-1, branch-only): `_scrml_untracked` restored `false` instead of the PRIOR pause state, so the first row's
+  bind inside `_scrml_reconcile_list`'s paused window turned tracking back on and later rows' reads subscribed the
+  enclosing arm (an in-place write or an append re-rendered it; a sibling input lost its typed text — the todomvc
+  shape); it now restores the prior state (runtime gzip of the ratchet's `<each>` row shape 8432 B, main 8433).
+
+Measured (happy-dom): `compiler/tests/browser/keyed-row-if-gate-s469.browser.test.js` — 22 cases driven through 19
+separate handler-run steps (root vs element, `r.ok` / `@role`, if / else, else if, nested, around a nested loop,
+multi-root, siblings, index keys): main 22 FAIL, branch 0; plus the keying cost pinned (an unbound input in an
+element-wrapped `if` row is rebuilt), typing in a plain-lowered edit row, re-run contexts, `match`, refusal, the
+loop region's range (HIGH-1) and the bind regression (MED-1). Pack `n28` (109): main 88 FAIL / 18 PASS (controls) / 3
+PASS-DENY (the `match` shapes — main's lifts escaped `#out`), branch 109 PASS. Corpus (3,753 files, same layout): error
+sets identical; keyed → plain **2 lists in 2 files of 264 keyed call sites** (`gauntlet-r10-go-contacts`, whose Edit
+never switched rows on main, and `lift-5-repro`); 0 element-wrapped `if`s in the corpus; the visible set across every
+perturbed cell step of both files differs from main only by the list wrapper `<div>` the plain loop no longer builds.
+
+### g-lift-loop-region-orphans-closed-gate-element-s469 — (security) a CLOSED lifted gate inside #1529's nested-loop REGION of a keyed row (`lift <li>${ for (t of r.tags) { const l = t …; lift <i if=${l != ""}/>; lift <b if=${@role == "admin"}>…</b> } }</li>`) is left in the page, visible, after the inner list changes and the role is revoked (main: the `b` stays with its gate false), and a reorder duplicates rows' content — `NEW S469 (review of b84c3f6de, HIGH-1); HIGH; RESOLVED S469 (s469-keyed-row-if-gate round 2)`
+<!-- @gap id=g-lift-loop-region-orphans-closed-gate-element-s469 sev=HIGH status=resolved locus=compiler/src/codegen/emit-lift.js(emitForStmtWithContainer region: removed the nodes its last run snapshotted) prov=review:s469-keyed-row-if-gate-round-2(HIGH-1);empirical:S469(main 27f897748: the gate's b stayed after the revoke; a reorder duplicated c2 / a1 / b1) -->
+
+The region recorded `nodes = [...frag.childNodes]` once per run. A closed gate's `_scrml_ifrow_apply` later swapped
+its placeholder for its element, so the snapshot held only the placeholder; the next run removed that, destroying the
+owner scope disposed the gate's effect, and the element was orphaned and visible for good. **Resolved:** the region
+places a start and an end anchor and a re-run removes everything between them. Browser
+(`keyed-row-if-gate-s469.browser.test.js`, closed first: grant / reorder / shrink / regrow / empty + revoke / refill /
+remove / clear / refill / revoke; and empty-then-revoke in separate runs): main FAIL (duplicates, 3 orphaned `b`),
+branch pass. Pack `n28` +8 (the gate at the region body's root / nested in an element of it × 4 run sequences): main
+4 FAIL (the body-root gate), branch 0.
+
+### g-lift-row-and-region-gate-effects-not-gate-ordered-s469 — the per-row effects of a lifted `if=` in a keyed row, a nested-loop region's effect and a plain lift group's re-render effect are created as ordinary effects (not `gate = true`), so a write that closes them runs them in subscription order, not before the write's user-level reactions as SPEC §6.7.4 orders render gates — `NEW S469 (review of b84c3f6de, LOW); LOW; open`
+<!-- @gap id=g-lift-row-and-region-gate-effects-not-gate-ordered-s469 sev=LOW status=open locus=compiler/src/codegen/emit-lift.js(maybeWrapLiftPerItemEffect / the region effect: `_scrml_effect(() => …)` with no gate flag)+compiler/src/codegen/emit-reactive-wiring.ts(the group re-render effect) prov=review:s469-keyed-row-if-gate-round-2(LOW) -->
+
+§6.7.4 (Timing) orders the render gates a write affects before its `<effect>` / `when … changes` bodies,
+so user code triggered by the write that closed a gate never sees the gated subtree still mounted. impl#1's
+`_scrml_trigger` runs `gate = true` effects first; the top-level lifted gate is created that way, but the per-row gate
+effect, the region effect and the group re-render effect are not. Located-not-traced: no shape here observed a user
+reaction reading the pre-gate DOM. Fix direction: create those effects with `gate = true` (measured against the
+runtime ratchet and the ordering tests).
+
+### g-lift-loop-region-rebuilds-on-every-reconcile-s469 — the nested-loop REGION of a keyed row (an inner loop holding an open gate, #1529) re-runs on every reconcile of its list — a reorder or insert of ANY row — and rebuilds its nodes: typed text / focus in an input the region built is lost on an unrelated list change — `NEW S469 (s469-keyed-row-if-gate); LOW; open`
+<!-- @gap id=g-lift-loop-region-rebuilds-on-every-reconcile-s469 sev=LOW status=open locus=compiler/src/codegen/emit-lift.js(emitForStmtWithContainer region: the body is wrapped by maybeWrapLiftPerItemEffect, whose _scrml_resolve_item tracks the list's item slot) prov=s469-keyed-row-if-gate(measured round 1: a region re-resolving its item rebuilt on a reorder of the same objects) -->
+
+The region's effect re-resolves its row's item through `_scrml_resolve_item`, which tracks the list's item slot,
+and `_scrml_reconcile_list` triggers that slot on every pass. Correct (never fail-open) but it rebuilds the region's
+nodes on each list change. Fix direction: re-run the region only when its key resolves to a different item (a per-row
+slot republished on identity change), with its own review — round 1 of s469-keyed-row-if-gate tried that slot on an
+`if` region, which was removed in round 2 for other reasons (it was not the slot that failed).
+
+### g-match-stmt-lift-in-lifted-element-lands-outside-s469 — a `match` STATEMENT whose arms `lift`, inside lifted markup (`${ lift <ul>${ match @role { .Admin => { lift <b>x</b> } … } }</ul> }`), lifts to the AMBIENT target: the `<b>` lands beside the `<ul>`, not in it; in a keyed `for … lift` row it landed outside the row and accumulated on every reconcile — `NEW S469 (s469-keyed-row-if-gate); MED; open (pre-existing, identical on main)`
+<!-- @gap id=g-match-stmt-lift-in-lifted-element-lands-outside-s469 sev=MED status=open locus=compiler/src/codegen/emit-lift.js(emitCreateElementFromMarkup logic child: a match-stmt goes to emitLogicNode, whose lift has no containerVar) prov=empirical:s469-keyed-row-if-gate(main 27f897748: a keyed row's match lifts 4 at mount for 2 rows, 9 after an append, kept after the revoke) -->
+
+The `if` statement routes its arms' lifts to the element (`emitIfStmtWithContainer`); a `match` statement has no
+such path. In a keyed row this was also a guard that stayed open (the lifts escaped the row's reconcile: 4 `.g` at
+mount for 2 rows, 9 after an append, still 9 after the revoke) — closed by
+[[g-keyed-row-control-flow-if-not-reevaluated-s469]]: a lifting `match` statement lowers the row plain, so the block's
+re-render clears and rebuilds it (visible set correct; the content still sits in the list's host, not in the row's
+element). Fix direction: a `match` statement counterpart of `emitIfStmtWithContainer` (arms lift into the
+container), after which a `match` inside a row element could be a region like the `if`.
 
 ### g-lift-group-and-arm-call-reads-not-reactive-s469 — a `${ … lift … }` group or an `if … lift` arm condition that reads a cell only through a called function is never re-rendered: `${ lift <i>${isAdmin() ? "ADMIN" : "no"}</i> }` keeps "ADMIN", and `${ if (isAdmin()) { lift <b>x</b> } }` keeps `<b>` after the cell is revoked — `NEW S469 (review of b57d697a9); HIGH; open (pre-existing, identical on main)`
 <!-- @gap id=g-lift-group-and-arm-call-reads-not-reactive-s469 sev=HIGH status=open locus=compiler/src/codegen/emit-reactive-wiring.ts(a group is a re-render effect only when its emitted text names a reactive read — `_scrml_reactive_get(` — so a cell read inside a called function never wraps it) prov=review:s469-lift-gate-staleness-round-2;empirical:S469(main 14a788227 and branch) -->
@@ -28072,6 +28147,12 @@ Still as described on main (S464). The test scans whole outputs that include the
 
 ### g-lift-group-non-single-if-rerender-loses-input-state-s462 — a reactive markup lift group that is NOT a single `if` / if-chain (a bare `${ lift … }` group, a `for` group with mixed reads, …) still re-renders its whole body on every read change, so an `<input>` inside loses focus and typed text — `NEW S462; LOW; open (pre-existing, not a regression)`
 <!-- @gap id=g-lift-group-non-single-if-rerender-loses-input-state-s462 sev=LOW status=open locus=compiler/src/codegen/emit-reactive-wiring.ts:907(emitLiftGroup — the plain group's `_scrml_effect` clears the placeholder and re-runs the block; only emitLiftIfChainGroup :1015 gets the arm-selector + LIVE per-binding effects) prov=review:s462-markup-if-stale-render -->
+> **S469 — narrowed for bound inputs** (`s469-keyed-row-if-gate`). A lifted `bind:value` / `bind:checked` no
+> longer subscribes the group to its own cell (the initial read is untracked; the reverse sync updates it), so
+> typing into a bound input no longer re-renders the group that built it. Any other reactive read in the group
+> still re-renders it (an unbound input's typed text is lost), and a list a row-deciding `if` lowers plain re-renders
+> whole on every change it reads.
+>
 > **S469 round 5:** main's placement again (the gate is read where the element is built), so a gate flip
 > re-renders a plain group exactly as on main; the round-2 "flip in place" is gone (browser test kept as an
 > expected failure).
