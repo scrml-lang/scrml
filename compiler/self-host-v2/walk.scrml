@@ -9,7 +9,7 @@
 // over Core (the TS compiler's F1 "walker misses a position" family).
 // =============================================================================
 ${
-    import { Sym, Type, Place, InstRef, Literal, Pattern, Expr, MatchArm, EditKind, Stmt, Block, Failable, OkArm, ErrArm, LoopHead,
+    import { Sym, Type, Place, InstRef, Literal, Pattern, Expr, MatchArm, EditKind, Stmt, Block, Failable, OkArm, ErrArm, LoopHead, Gather, Lifted, GatherRow,
              Attr, View, CondArm, ConstructAttr, EffectDep, Field, Decl, Fn, ServerFn, CoreProgram,
              ValidityOf, validityInst } from "./core.scrml"
 
@@ -145,7 +145,28 @@ ${
             .Loop(label: l, head: h, body: b) :> loopHeadKids(h).concat([Node.NBlock(b)])   // s469 (§49)
             .Break(target: t) :> []
             .Continue(target: t) :> []
+            .Gather(g: g) :> gatherKids(g)                // s469 (§49.6)
+            .Lift(into: i, what: w) :> liftedKids(w)
         }
+    }
+
+    // s469 (§49.6) — a bound loop's children: its head, then its body.
+    fn gatherKids(g: Gather) -> Node[] {
+        return loopHeadKids(g.head).concat([Node.NBlock(g.body)])
+    }
+
+    fn liftedKids(w: Lifted) -> Node[] {
+        return match w {
+            .LValue(e: e) :> [Node.NExpr(e)]
+            .LRow(idx: x) :> []
+        }
+    }
+
+    // s469 (§17.4) — a Tier-0 gather's row templates, in index order.
+    fn gatherRowNodes(rows: GatherRow[]) -> Node[] {
+        let out: Node[] = []
+        for (const r of rows) { out = out.concat(viewNodes(r.views)) }
+        return out
     }
 
     // s469 — a loop head's children, in evaluation order: the counted head's
@@ -255,6 +276,7 @@ ${
             .Effect(deps: ds, body: b) :> effectDepNodes(ds).concat([Node.NBlock(b)])
             .ResetOn(triggers: ds, reset: b) :> effectDepNodes(ds).concat([Node.NBlock(b)])
             .Errors(of: x, all: a) :> [Node.NInst(validityInst(x))]
+            .Gather(g: g, rows: rows) :> gatherKids(g).concat(gatherRowNodes(rows))   // s469 (§17.4)
         }
     }
 
@@ -439,6 +461,8 @@ ${
             .Loop(label: l, head: h) :> loopBinds(l, h)  // s469
             .Break(target: x) :> []
             .Continue(target: x) :> []
+            .Gather(g: g) :> loopBinds(g.label, g.head).concat([g.bind])   // s469 (§49.6)
+            .Lift(into: x) :> []
         }
     }
 
@@ -468,6 +492,7 @@ ${
             .Effect(deps: ds) :> []
             .ResetOn(triggers: ds) :> []
             .Errors(of: x) :> []
+            .Gather(g: g) :> loopBinds(g.label, g.head).concat([g.bind])   // s469 (§17.4)
         }
     }
 
@@ -529,6 +554,8 @@ ${
             .Loop(label: x) :> -1
             .Break(target: x) :> -1
             .Continue(target: x) :> -1
+            .Gather(g: x) :> -1
+            .Lift(into: x) :> -1
         }
     }
 }

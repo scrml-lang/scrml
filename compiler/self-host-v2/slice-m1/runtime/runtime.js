@@ -1972,6 +1972,36 @@ export function cond(scope, anchor, arms) {
   });
 }
 
+/**
+ * s469 — a Tier-0 `${ for … lift … }` (SPEC §17.4, §49.6.2). `build` runs the
+ * loop TRACKED and returns its rows — `(scope, anchor) => …` render thunks, in
+ * the order their `lift`s ran. The rows render UNTRACKED, each into the one
+ * child scope of this run, before the marker; their own holes keep their own
+ * effects. When a cell the loop read changes, the old rows are torn down and
+ * the loop re-runs (no key: §17.4b keyed reconciliation is not built).
+ */
+export function gather(scope, anchor, build) {
+  let rowsScope = null;
+  effect(scope, () => {
+    const rows = build();
+    untrack(() => {
+      if (rowsScope) rowsScope.dispose();
+      rowsScope = scope.child();
+      for (const r of rows) r(rowsScope, anchor);
+    });
+  });
+}
+
+/** s469 — a Tier-0 row of text: a primitive value lifted in the loop (§17.4). */
+export function textRow(v) {
+  const text = display(v);
+  return (scope, anchor) => {
+    const t = document.createTextNode(text);
+    anchor.parentNode.insertBefore(t, anchor);
+    scope.own(() => { if (t.parentNode) t.parentNode.removeChild(t); });
+  };
+}
+
 /** Place use-site slot content (§66.15.2), if any. */
 export function slot(scope, anchor, fill) {
   if (fill) fill(scope, anchor);

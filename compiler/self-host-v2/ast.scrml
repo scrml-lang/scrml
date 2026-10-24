@@ -192,6 +192,17 @@ ${
         For(f: AFor),
         Break(label: string),
         Continue(label: string),
+        // s469 — `lift <expr>;` / `lift <markup>;` (§49.6.2): appends to the
+        // nearest enclosing bound loop (§49.6 rule 7). Which loop that is, and
+        // whether there is one, is analyze's (resolveLift).
+        Lift(what: ALift),
+    }
+
+    // s469 — what a `lift` appends: a value, or (in a Tier-0 `${ for … }` in
+    // markup only, §17.4) a markup element — the row it renders.
+    export type ALift:enum = {
+        LiftExpr(e: AExpr),
+        LiftNode(n: ANode),
     }
 
     // s469 — a `for` (§49.2.1). `label` is its `label:` prefix ("" — none).
@@ -212,7 +223,11 @@ ${
         HCounted(init: AStmt[], cond: AExpr | not, step: AExpr[]),
         HIter(bind: ABind, mutable: boolean, src: AIterSrc),
     }
-    export type AFor:struct = { nid: int, span: ASpan, label: string, head: AForHead, body: ABlock }
+    // s469 — `bound`: the loop is BOUND AS A VALUE (§49.2.1 `for-binding`,
+    // §49.6): `const xs = for (…) { … lift e; … };` — the binder, its
+    // mutability (`let`), and its written type; `not` for a statement loop.
+    export type AFor:struct = { nid: int, span: ASpan, label: string, head: AForHead, body: ABlock, bound: AForBound | not }
+    export type AForBound:struct = { nid: int, span: ASpan, name: string, mutable: boolean, ty: AType | not }
 
     // -------------------------------------------------------------------------
     // Type expressions and type declarations.
@@ -285,6 +300,11 @@ ${
         // `@scope`, or the inline `style=` of a constructor root — is decided by
         // its position (analyze, cssPass).
         Css(c: ACss),
+        // s469 — a Tier-0 `${ for (…) { … lift <li/>; … } }` (§17.4, §49.6.2):
+        // a `for` that is the sole content of a markup interpolation — the
+        // value form whose lifts are the rendered rows. Its `lift`s hold their
+        // markup (ALift.LiftNode).
+        Gather(f: AFor),
     }
 
     // -------------------------------------------------------------------------

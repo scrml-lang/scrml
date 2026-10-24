@@ -12,12 +12,12 @@
         @out = load("x") !{
             .NotFound(m) :> {
                 if (m == "x") {
-                    lift "x"
+                    lift "x";
                 }
                 lift m;
             },
             .Timeout :> "to",
-        }
+        };
     }
     <main>
         <button id="v" onclick=v()>v</button>

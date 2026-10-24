@@ -44,13 +44,13 @@
 // again, S440.)
 // =============================================================================
 ${
-    import { Token, TokenKind, LexStop, LexRun, lexFrom, lexFromMode } from "./lex.scrml"
+    import { Token, TokenKind, LexStop, LexRun, LexPause, lexFrom, lexFromMode, lexTier0 } from "./lex.scrml"
     import { Severity } from "./severity.scrml"
     import { ASpan, BinOp, UnOp, AExpr, AProp, AExprK, AStmt, ABlock, AStmtK, AEffect, AType, ATypeK,
              ATypeField, AVariant, ATypeBody, ATypeDecl, AParam, AFn, AImportName, AImport,
              AAttrValue, AAttr, AElem, ANode, ANodeK, ADeclAttr, AStateChild, ADeclChild, ADecl, AValArg, AValidator,
              AProgram, AItem, AItemK, FileAst, Diag, ASql, ASqlMode,
-             AHow, AHandled, AArm, APat, ABind, AArmBody, AFail, AFor, AForHead, AIterSrc, ACss, mkSpan, newDiag } from "./ast.scrml"
+             AHow, AHandled, AArm, APat, ABind, AArmBody, AFail, AFor, AForHead, AIterSrc, AForBound, ALift, ACss, mkSpan, newDiag } from "./ast.scrml"
     import { CssErr, CssParsed, parseCssBlock } from "./css-syntax.scrml"
 
     // =========================================================================
@@ -962,7 +962,7 @@ ${
         while (!isP(t, "}") && !atEnd(t)) {
             const before: int = t.i
             let done = false
-            if (isWord(t, "lift")) {
+            if (isWord(t, "lift") && !isRowTok(peekAt(t, 1))) {
                 const kw: PTok = cur(t)
                 // s469 r2 — `lift⏎expr`, like `return⏎expr`: refused fail closed
                 // until the newline-terminated corpus is migrated (the same PA
@@ -1670,11 +1670,13 @@ ${
         }
         // s451 (Ue): `match e { … }` (§19.7.1 — analyze admits a failable subject)
         if (t.v == "match") return parseMatch(tp, start)
-        // s469 — a `for` where a value stands: the value form (§49.6, `const xs =
-        // for (…) { lift … }`, and `${ for … lift }` in markup) is not in the
-        // bootstrap yet. Read past as a loop (so its own errors report), refused.
+        // s469 — a `for` where a value stands but is not bound (§49.4.4: "A
+        // `for` in any other expression position (an operand, an argument, a
+        // `return` operand) is neither and is a syntax error"). The SPEC names
+        // no code for that syntax error, so the bootstrap refuses it by name.
+        // Read past as a loop (so its own errors report).
         if (t.v == "for") {
-            const df: TP = diagAt(tp, "E-BOOTSTRAP-UNSUPPORTED", "a `for` used as a value (the value form, §49.6) is not in the bootstrap yet — write the loop as a statement in a function and return what it builds", t)
+            const df: TP = diagAt(tp, "E-BOOTSTRAP-UNSUPPORTED", "a `for` is a value only where it is BOUND (`const xs = for (…) { … lift e; … };`, §49.2.1) or is the sole content of a markup `" + interpOpen() + " }` (§17.4) — as an operand, an argument or a `return` operand it is a syntax error (§49.4.4); bind it first: `const xs = for (…) { … };`", t)
             const rf: RStmt = parseFor(df, "", start)
             // (refused: its body is not judged as statements — s469 E-STMT-NO-EFFECT)
             return mkE(dropNoEffect(rf.tp, df.diags.length), start, AExprK.Recovered)
@@ -1969,6 +1971,7 @@ ${
             .For(f: x) :> not
             .Break(label: x) :> not
             .Continue(label: x) :> not
+            .Lift(what: x) :> not          // s469: a `lift` operand is a value position (§40.8)
         }
     }
 
@@ -2108,9 +2111,10 @@ ${
             .EffectStmt(w: w) :> false
             .Defer(body: b) :> false
             .Fail(f: x) :> true
-            .For(f: x) :> false
+            .For(f: x) :> x.bound is given          // s469: a `for-binding` is a declaration (§49.2.1)
             .Break(label: x) :> true
             .Continue(label: x) :> true
+            .Lift(what: x) :> true
         }
     }
 
@@ -2172,14 +2176,10 @@ ${
             const re: RExpr = mkE(rb.tp, start, AExprK.Recovered)
             return mkS(re.tp, start, AStmtK.Eval(re.e))
         }
-        // s469 — `lift` (§10) is read only as the LAST statement of an arm block
-        // (parseArmBlock, §18.5); anywhere else it is refused by name, fail closed
-        if (isWord(tp, "lift")) {
-            const dl: TP = diagAt(tp, "E-BOOTSTRAP-UNSUPPORTED", "`lift` is in the bootstrap only as the LAST statement of a `match` / `!{}` arm block (§18.5: `.B :> { log(); lift 2 }`) — a `lift` anywhere else (a nested block, a markup or `for` value) is not in the bootstrap yet", t)
-            const lv: RExpr = parseAssign(adv(dl))
-            const lr: RExpr = mkE(lv.tp, start, AExprK.Recovered)
-            return mkS(lr.tp, start, AStmtK.Eval(lr.e))
-        }
+        // s469 — `lift` (§49.6.2): a statement; which bound loop it appends to
+        // — and whether one encloses it — is analyze's (resolveLift). An arm
+        // block's LAST `lift` is the arm's value (parseArmBlock, §18.5).
+        if (isWord(tp, "lift")) return parseLift(tp)
         if (isWord(tp, "return")) {
             const nx: PTok = peekAt(tp, 1)
             if (nx.cls == TC.End || tk(nx, "}") || tk(nx, ";")) {
@@ -2620,8 +2620,237 @@ ${
             const eb: RBlock = parseBlock(adv(d))
             return recoveredStmt(eb.tp, start)
         }
-        const f: AFor = { nid: tp.nid, span: spanFrom(tp, start), label: label, head: head, body: body }
+        const f: AFor = { nid: tp.nid, span: spanFrom(tp, start), label: label, head: head, body: body, bound: not }
         return mkS(bumpId(tp), start, AStmtK.For(f))
+    }
+
+    fn forOfStmt(s: AStmt) -> AFor | not {
+        const k: AStmtK = s.k
+        return match k {
+            .For(f: lf) :> lf
+            .Eval(e: x) :> not
+            .Local(name: n) :> not
+            .Return(e: x) :> not
+            .If(cond: c) :> not
+            .Given(name: n) :> not
+            .EffectStmt(w: w) :> not
+            .Defer(body: b) :> not
+            .Fail(f: x) :> not
+            .Break(label: x) :> not
+            .Continue(label: x) :> not
+            .Lift(what: x) :> not
+        }
+    }
+
+    // s469 — `const xs = for (…) { … };` (§49.2.1 `for-binding ::= ('const' |
+    // 'let') Identifier (':' type)? '=' for-stmt ';'`, the value form §49.6):
+    // at the `for` (or its label). The loop is a For statement carrying its
+    // binder (`bound`); a loop whose head was refused (parseFor reported it)
+    // leaves the name bound to a placeholder, so its uses are not a second error.
+    fn parseForBinding(tp: TP, start: int, nameTok: PTok, mutable: boolean, aty: AType | not) -> RStmt {
+        const ft: PTok = cur(tp)
+        let rf: RStmt = parseFor(tp, "", ft.start)
+        if (!isWord(tp, "for")) rf = parseFor(adv(adv(tp)), ft.v, ft.start)
+        const b: AForBound = { nid: rf.tp.nid, span: mkSpan(nameTok.start, nameTok.end), name: nameTok.v, mutable: mutable, ty: aty }
+        const t: TP = bumpId(rf.tp)
+        const f: AFor | not = forOfStmt(rf.s)
+        if (f is not) {
+            const re: RExpr = mkE(t, ft.start, AExprK.Recovered)
+            return mkS(re.tp, start, AStmtK.Local(nameTok.v, mutable, aty, re.e))
+        }
+        const nf: AFor = { nid: f.nid, span: f.span, label: f.label, head: f.head, body: f.body, bound: b }
+        return mkS(t, start, AStmtK.For(nf))
+    }
+
+    // =========================================================================
+    // s469 — `lift` (§49.6.2): `lift <expr>;`, which appends to the nearest
+    // enclosing bound loop (§49.6 rule 7 — analyze decides which, and refuses
+    // a `lift` that has none). In a Tier-0 `${ for … }` in markup the operand
+    // may be a markup element — the lexer paused before it and the parser read
+    // it as markup (parseTier0); here it is a row placeholder token, and the
+    // statement holds a stand-in node that parseTier0 replaces (fillRows).
+    // Markup anywhere else is not a value in the bootstrap: refused by name.
+    // A `lift` an arm block ends with is the arm's value (parseArmBlock, §18.5).
+    // =========================================================================
+    fn rowMark() -> string { return "lift-row" }
+
+    fn isRowTok(t: PTok) -> boolean { return t.cls == TC.Other && t.v == rowMark() }
+
+    fn parseLift(tp: TP) -> RStmt {
+        const kw: PTok = cur(tp)
+        const nx: PTok = peekAt(tp, 1)
+        let t: TP = tp
+        // `lift⏎expr`, like `return⏎expr`: refused fail closed until the
+        // newline-terminated corpus is migrated (parseArmBlock's rule)
+        if (nx.line != kw.line && !tk(nx, "}") && !tk(nx, ";") && !splitLiftReported(t, kw)) {
+            const ld: Diag = newDiag("E-STMT-MISSING-SEMICOLON", "Expected `;` to end the statement — a `lift` followed by a line break is refused for now: put the lifted value on the `lift` line. dpa-073 F1 would read `lift⏎expr;` as lifting `expr`; the bootstrap does not guess while newline-terminated code is still being migrated.", t.file, mkSpan(kw.end, kw.end))
+            t = { toks: t.toks, i: t.i, nid: t.nid, diags: t.diags.concat([ld]), file: t.file }
+        }
+        if (isRowTok(nx)) {
+            const stand: ANode = { nid: -1, span: mkSpan(nx.start, nx.end), k: ANodeK.Text("") }
+            return mkS(adv(adv(t)), kw.start, AStmtK.Lift(ALift.LiftNode(stand)))
+        }
+        if (tk(nx, "<") && nx.cls == TC.Punct) {
+            const tn: PTok = peekAt(tp, 2)
+            if ((tn.cls == TC.Ident || tn.cls == TC.Keyword) && tn.start == nx.end) {
+                const dm: TP = diagAt(t, "E-BOOTSTRAP-UNSUPPORTED", "lifting MARKUP is in the bootstrap only in a Tier-0 `" + interpOpen() + " for (…) { … lift <li>…</li>; … } }` in markup (§17.4) — here the nearest bound loop builds a tape of values; markup is not a value in the bootstrap's logic", nx)
+                const sk: TP = skipLiftOperand(adv(dm))
+                const rr: RExpr = mkE(sk, kw.start, AExprK.Recovered)
+                return mkS(rr.tp, kw.start, AStmtK.Lift(ALift.LiftExpr(rr.e)))
+            }
+        }
+        const v: RExpr = parseAssign(adv(t))
+        return mkS(v.tp, kw.start, AStmtK.Lift(ALift.LiftExpr(v.e)))
+    }
+
+    // (an arm block's speculative read of its last `lift` reports the split first)
+    fn splitLiftReported(tp: TP, kw: PTok) -> boolean {
+        for (const d of tp.diags) {
+            if (d.code == "E-STMT-MISSING-SEMICOLON" && d.span.start == kw.end) return true
+        }
+        return false
+    }
+
+    // Past a refused `lift` operand: up to its `;`, or the `}` that closes the
+    // block it stands in (neither consumed), at bracket depth 0.
+    fn skipLiftOperand(tp: TP) -> TP {
+        let t: TP = tp
+        let depth: int = 0
+        let going = true
+        while (going && !atEnd(t)) {
+            const x: PTok = cur(t)
+            if (depth == 0 && (tk(x, ";") || tk(x, "}"))) {
+                going = false
+            } else {
+                if (tk(x, "{") || tk(x, "(") || tk(x, "[")) depth = depth + 1
+                if (tk(x, "}") || tk(x, ")") || tk(x, "]")) depth = depth - 1
+                t = adv(t)
+            }
+        }
+        return t
+    }
+
+    // =========================================================================
+    // s469 — the Tier-0 `${ for … }` in markup (§17.4; §49.4.4: "A `for` that
+    // is the sole content of a markup `${ }` interpolation is the same value
+    // form, rendered"). The region is lexed by lexTier0, which pauses before
+    // each `lift <element>`; the element is read here as markup (text is not
+    // tokens) and the run resumes after it. Each element becomes a row
+    // placeholder token for parseLift; after the loop is parsed, fillRows puts
+    // each element into its `lift` (matched by offset). Anything but the one
+    // loop in the region is refused.
+    // =========================================================================
+    fn tier0Ahead(mp: MP) -> boolean {
+        const tp: TP = regionTP(mAdv(mp, 1), LexStop.Balanced)
+        if (!isP(tp, "{")) return false
+        const t: TP = adv(tp)
+        if (isWord(t, "for")) return true
+        return labelAhead(t)
+    }
+
+    fn parseInterpOrTier0(mp: MP) -> RNodeOne {
+        if (tier0Ahead(mp)) return parseTier0(mp)
+        return parseInterp(mp)
+    }
+
+    fn rowTok(src: string, start: int, end: int, line: int) -> PTok {
+        let text: string = src.substring(start, end)
+        if (text.length > 24 || text.indexOf("\n") >= 0) text = "<…>"
+        return { cls: TC.Other, v: rowMark(), text: text, start: start, end: end, line: line, bad: "" }
+    }
+
+    fn parseTier0(mp: MP) -> RNodeOne {
+        const start: int = mp.pos
+        let pos: int = mp.pos + 1
+        let depth: int = 0
+        let toks: PTok[] = []
+        let rows: ANode[] = []
+        let m: MP = mp
+        let going = true
+        while (going) {
+            const p: LexPause = lexTier0(mp.src, pos, depth)
+            const pt: PTok[] = toPToks(p.tokens)
+            toks = toks.concat(pt.slice(0, pt.length - 1))
+            if (!p.paused) {
+                toks = toks.concat([pt[pt.length - 1]])
+                going = false
+            } else {
+                const rn: RNodeOne = parseMarkupNode(mAt(m, p.end))
+                rows = rows.concat([rn.n])
+                m = rn.mp
+                toks = toks.concat([rowTok(mp.src, p.end, m.pos, p.line)])
+                pos = m.pos
+                depth = p.depth
+            }
+        }
+        let t: TP = { toks: toks, i: 0, nid: m.nid, diags: m.diags, file: m.file }
+        t = expectP(t, "{")
+        const rs: RStmt = parseStmt(t)
+        t = rs.tp
+        if (isP(t, ";")) t = adv(t)
+        if (!isP(t, "}") && !atEnd(t)) {
+            t = diagAt(t, "E-BOOTSTRAP-UNSUPPORTED", "a `" + interpOpen() + " for … }` in markup holds the loop and nothing else (§49.4.4: the loop is \"the sole content of a markup `" + interpOpen() + " }` interpolation\") — compute the rest in a function, or give it its own block", cur(t))
+            while (!atEnd(t) && !(isP(t, "}") && atEnd(adv(t)))) { t = adv(t) }
+        }
+        t = expectRegionEnd(expectP(t, "}"))
+        const mb: MP = backToMarkup(mp, t)
+        const f: AFor | not = forOfStmt(rs.s)
+        if (f is not) {
+            const re: AExpr = { nid: mb.nid, span: mkSpan(start, mb.pos), k: AExprK.Recovered }
+            const mr: MP = mBump(mb)
+            const nr: ANode = { nid: mr.nid, span: mkSpan(start, mr.pos), k: ANodeK.Interp(re) }
+            return { n: nr, mp: mBump(mr) }
+        }
+        const n: ANode = { nid: mb.nid, span: mkSpan(start, mb.pos), k: ANodeK.Gather(fillRowsFor(f, rows)) }
+        return { n: n, mp: mBump(mb) }
+    }
+
+    // Each row placeholder's stand-in node, replaced by the element read at its offset.
+    fn fillRowsFor(f: AFor, rows: ANode[]) -> AFor {
+        return { nid: f.nid, span: f.span, label: f.label, head: f.head, body: fillRowsBlock(f.body, rows), bound: f.bound }
+    }
+
+    fn fillRowsBlock(b: ABlock, rows: ANode[]) -> ABlock {
+        let out: AStmt[] = []
+        for (const s of b.stmts) { out = out.concat([fillRowsStmt(s, rows)]) }
+        return { nid: b.nid, span: b.span, stmts: out }
+    }
+
+    fn fillRowsMaybe(b: ABlock | not, rows: ANode[]) -> ABlock | not {
+        if (b is not) return not
+        return fillRowsBlock(b, rows)
+    }
+
+    fn fillRowsStmt(s: AStmt, rows: ANode[]) -> AStmt {
+        const k: AStmtK = s.k
+        return match k {
+            .Lift(what: w) :> withStmtK(s, AStmtK.Lift(fillLift(w, rows)))
+            .If(cond: c, thenB: tb, elseB: el) :> withStmtK(s, AStmtK.If(c, fillRowsBlock(tb, rows), fillRowsMaybe(el, rows)))
+            .Given(name: n, subject: sub, body: b) :> withStmtK(s, AStmtK.Given(n, sub, fillRowsBlock(b, rows)))
+            .For(f: lf) :> withStmtK(s, AStmtK.For(fillRowsFor(lf, rows)))
+            .Defer(body: b, arrayLead: a, bare: br) :> withStmtK(s, AStmtK.Defer(fillRowsBlock(b, rows), a, br))
+            .Eval(e: x) :> s
+            .Local(name: n) :> s
+            .Return(e: x) :> s
+            .EffectStmt(w: w) :> s
+            .Fail(f: x) :> s
+            .Break(label: x) :> s
+            .Continue(label: x) :> s
+        }
+    }
+
+    fn fillLift(w: ALift, rows: ANode[]) -> ALift {
+        return match w {
+            .LiftNode(n: n) :> ALift.LiftNode(rowAt(n, rows))
+            .LiftExpr(e: x) :> w
+        }
+    }
+
+    fn rowAt(n: ANode, rows: ANode[]) -> ANode {
+        for (const r of rows) {
+            if (r.span.start == n.span.start) return r
+        }
+        return n
     }
 
     fn isIterHead(h: AForHead) -> boolean {
@@ -2928,6 +3157,8 @@ ${
             t = ty.tp
         }
         t = expectP(t, "=")
+        // s469 — a `for-binding` (§49.2.1): the value form, from any head (§49.6)
+        if (isWord(t, "for") || labelAhead(t)) return parseForBinding(t, start, nameTok, mutable, aty)
         const init: RExpr = parseAssign(t)
         return mkS(init.tp, start, AStmtK.Local(nameTok.v, mutable, aty, init.e))
     }
@@ -2976,6 +3207,7 @@ ${
             .For(f: x) :> s
             .Break(label: x) :> s
             .Continue(label: x) :> s
+            .Lift(what: x) :> s
         }
     }
 
@@ -5282,7 +5514,8 @@ ${
                     m = mBump(m)
                     text = ""
                 }
-                const ri: RNodeOne = parseInterp(m)
+                // s469: a Tier-0 `${ for … }` (§17.4) — a free-text markup body's form
+                const ri: RNodeOne = parseInterpOrTier0(m)
                 out = out.concat([ri.n])
                 m = ri.mp
                 textStart = m.pos
