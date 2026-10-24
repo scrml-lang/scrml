@@ -39,6 +39,8 @@ export declare function pushLiftNonKeyed(): void;
 export declare function popLiftNonKeyed(): void;
 export declare function pushLiftLive(armNames?: Set<string>): void;
 export declare function liftInitialRenderCall(renderFn: string, iterableJs?: string): string;
+/** S469 — count (or refuse) a reactive list lowered plain because an `if` decides what its rows render. */
+export declare function liftNoteRowIfPlainLoop(forNode: object): void;
 export declare function liftArmDeclaredNames(root: object): Set<string>;
 export declare function popLiftLive(): void;
 export declare function liftNonKeyedActive(): boolean;

@@ -105,11 +105,29 @@ describe("Fix 3: continue → return in reactive for createItem", () => {
 </program>`;
     const { errors, clientJs } = compileSource(src);
     expect(errors).toHaveLength(0);
-    // No bare `continue;` should appear (illegal inside createItem function)
-    expect(clientJs).not.toContain("continue;");
-    // Should emit `return;` to skip the item instead
-    expect(clientJs).toContain("return;");
-    // createItem function must exist
+    // S469 (g-keyed-row-control-flow-if-not-reevaluated-s469) — an `if` that leaves the row early
+    // decides what the row renders, so the list is lowered as the plain loop the block re-runs (a keyed
+    // row would read it once): the `continue` is a real `continue` in a real loop, never inside a
+    // per-item factory.
+    expect(clientJs).not.toContain("_scrml_create_item");
+    expect(clientJs).toContain("for (const item of ");
+    expect(clientJs).toContain("continue;");
+    expect(() => new Function(clientJs)).not.toThrow();
+  });
+  it("a keyed row filtered by a lifted if= gate: the factory holds no `continue`", () => {
+    // The JS-validity floor of the reconciled path (a gate on the row's item keeps the row keyed).
+    const src = `<program>
+\${ @items = [{ id: 1, active: true }, { id: 2, active: false }] }
+\${
+  for (let item of @items) {
+    lift <div><b if=(item.active)>\${item.id}</b></div>
+  }
+}
+</program>`;
+    const { errors, clientJs } = compileSource(src);
+    expect(errors).toHaveLength(0);
     expect(clientJs).toContain("_scrml_create_item");
+    expect(clientJs).not.toContain("continue;");
+    expect(() => new Function(clientJs)).not.toThrow();
   });
 });
