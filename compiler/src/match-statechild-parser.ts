@@ -66,6 +66,7 @@
 // only a genuine URL is exempted; a real `// comment` still strips). See the
 // `urlSlashesAt` doc-comment in block-splitter.js for the exemption criteria.
 import { urlSlashesAt } from "./block-splitter.js";
+import { gateAttrNamesInOpener, rawOpenerGateDiagnostic } from "./gate-attr-refusal.ts";
 
 // §24 HTML void elements — self-terminating, admit no children. A void
 // opener (bare `<input>` or self-closed `<input/>`) inside a match-arm body
@@ -668,7 +669,20 @@ export function parseMatchArms(armsRaw: string): MatchParseResult {
     }
 
     // Parse attrs + find opener-close.
+    const _attrRegionStart = pos;
     const openerScan = scanOpenerAttrs(armOpenerStart + 1, pos, payloadBindingsRaw);
+    // §17.1 / §17.2 (S469 round 2) — `if=` / `show=` / `else` / `else-if=` on an arm opener,
+    // read by the markup attribute tokenizer. An arm is dispatched by its variant, not gated:
+    // the attribute was dropped and the arm rendered whatever it said. Refused (surfaced by
+    // the SYM match-block check with the rest of this parser's diagnostics).
+    {
+      const regionEnd = openerScan.insideColonAt >= 0 ? openerScan.insideColonAt : openerScan.closeAt;
+      for (const g of gateAttrNamesInOpener(armsRaw.slice(_attrRegionStart, Math.max(_attrRegionStart, regionEnd)))) {
+        const d = rawOpenerGateDiagnostic(g, variantName, `the \`<match>\` arm \`<${variantName}>\``,
+          `An arm is chosen by its variant; express the condition as arm structure (a variant for the gated state), or gate the whole \`<match if=COND>\`.`);
+        diagnostics.push({ code: d.code, message: d.message, spanStart: armOpenerStart, spanEnd: Math.max(armOpenerStart + 1, regionEnd) });
+      }
+    }
     pos = openerScan.closeAt + 1; // advance past `>` or `/>`
 
     if (openerScan.selfClosing) {

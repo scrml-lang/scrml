@@ -633,9 +633,9 @@ export interface OnTimeoutEntry {
   /** Substring offset (relative to the enclosing state-child's `bodyRaw`)
    *  of the `<onTimeout` opener. */
   rawOffset: number;
-  /** S469 — an `if=` / `else-if=` / `else` written on the opener (refused by the
+  /** S469 — an `if=` / `show=` / `else-if=` / `else` written on the opener (refused by the
    *  typer: E-GATE-UNSUPPORTED-HOST / E-CTRL-002 / E-CTRL-001). Absent when none. */
-  gateAttr?: "if" | "else" | "else-if";
+  gateAttr?: "if" | "else" | "else-if" | "show";
 }
 
 /**
@@ -665,8 +665,8 @@ export interface OnIdleEntry {
   /** Substring offset (relative to the engine's `rulesRaw`) of the
    *  `<onIdle` opener. */
   rawOffset: number;
-  /** S469 — an `if=` / `else-if=` / `else` written on the opener (refused). */
-  gateAttr?: "if" | "else" | "else-if";
+  /** S469 — an `if=` / `show=` / `else-if=` / `else` written on the opener (refused). */
+  gateAttr?: "if" | "else" | "else-if" | "show";
 }
 
 /**
@@ -677,10 +677,10 @@ export interface OnIdleEntry {
  */
 function timerGateAttrDiagnostic(
   element: "onTimeout" | "onIdle",
-  gateAttr: "if" | "else" | "else-if",
+  gateAttr: "if" | "else" | "else-if" | "show",
 ): { code: string; message: string } {
-  if (gateAttr === "if") {
-    return { code: GATE_UNSUPPORTED_HOST_CODE, message: gateUnsupportedHostMessage("if", element) };
+  if (gateAttr === "if" || gateAttr === "show") {
+    return { code: GATE_UNSUPPORTED_HOST_CODE, message: gateUnsupportedHostMessage(gateAttr, element) };
   }
   const code = gateAttr === "else" ? "E-CTRL-001" : "E-CTRL-002";
   const spelled = gateAttr === "else" ? "`else`" : "`else-if=`";
@@ -764,6 +764,9 @@ export interface OnTransitionEntry {
 export interface EngineStateChildEntry {
   /** PascalCase tag name, e.g., `"Small"` for `<Small ...>...</>`. */
   tag: string;
+  /** S469 round 2 — `if=` / `show=` / `else` / `else-if=` written on the state-child opener
+   *  (read by the markup attribute tokenizer). Refused (`stateChildGateDiagnostic`). */
+  gateAttrs?: Array<"if" | "else" | "else-if" | "show">;
   /** Parsed form of the `rule=` attribute. */
   rule: EngineRuleForm;
   /** Raw body text between the opener and closer. Today's AST stores
@@ -5777,7 +5780,7 @@ function stringLiteralValueOf(arg: any): string | null {
 // `ReferenceError: autoDeriveEngineVarName is not defined` (g-derived-engine-autoderive-crash).
 import { autoDeriveEngineVarName } from "./engine-varname";
 import { ENGINE_IN_ROW_CODE, ENGINE_IN_ROW_REFUSED, engineInEachRowMessage } from "./engine-in-each-row.ts";
-import { GATE_UNSUPPORTED_HOST_CODE, gateUnsupportedHostMessage } from "./gate-attr-refusal.ts";
+import { GATE_UNSUPPORTED_HOST_CODE, gateUnsupportedHostMessage, rawOpenerGateDiagnostic } from "./gate-attr-refusal.ts";
 export { autoDeriveEngineVarName };
 
 /**
@@ -11403,6 +11406,15 @@ export function validateEngineA5Extensions(
           // future parser extensions could surface them, at which point
           // this case becomes a defensive no-op).
           break;
+      }
+    }
+
+    // S469 round 2 — a gate / chain attribute on the state-child opener is never read: refuse it.
+    if (Array.isArray(sc.gateAttrs)) {
+      for (const g of sc.gateAttrs) {
+        const d = rawOpenerGateDiagnostic(g, sc.tag, `the engine state-child \`<${sc.tag}>\``,
+          `A state-child is entered by a transition; express the condition as state structure (a variant for the gated state), or gate the whole \`<engine if=COND>\`.`);
+        fireA5Diagnostic(errors, d.code, d.message, engineDecl, filePath, "error");
       }
     }
 

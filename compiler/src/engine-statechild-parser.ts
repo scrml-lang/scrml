@@ -84,6 +84,7 @@ import { urlSlashesAt } from "./block-splitter.js";
 // S469 (SECURITY) — every `${…}` block in an opener is bounded by acorn (`logicBlockClose`),
 // never by a brace counter: the text cut out is what the failable walk reads and codegen emits.
 import { logicBlockClose, braceBlockClose } from "./interpolation-extent.ts";
+import { gateAttrNamesInOpener, type GateAttrName } from "./gate-attr-refusal.ts";
 
 /**
  * S469 — the index one past a BODY `${…}` interpolation at `i` (a closer-finder's skip),
@@ -542,6 +543,18 @@ function afterAttrMatch(attrs: string): [string, string] | null {
 }
 
 /**
+ * §17.1 / §17.1.1 / §17.2 (S469, g-if-reject-unenforced-on-structural-declaration-elements) —
+ * the first `if=` / `else` / `else-if=` / `show=` written on an `<onTimeout>` / `<onIdle>`
+ * opener, read by the markup attribute tokenizer (`gateAttrNamesInOpener`) — the same predicate
+ * a `<p>` gets, so `else=""`, `else=${true}`, `title="x"else` are all seen. Neither timer reads
+ * one (§17.1.2: SHALL reject `if=`): the attribute was dropped and the timer armed whatever the
+ * condition said. Captured so the typer refuses it.
+ */
+function timerGateAttr(attrs: string): GateAttrName | undefined {
+  return gateAttrNamesInOpener(attrs)[0];
+}
+
+/**
  * A5-2 (§51.0.M) — scan a state-child body for `<onTimeout/>` siblings.
  *
  * `<onTimeout>` is a self-closing structural element with required `after`
@@ -561,24 +574,6 @@ function afterAttrMatch(attrs: string): [string, string] | null {
  * `<onTimeout>...</onTimeout>` is not in spec and is not matched here —
  * if observed, A5-3 typer can flag it.
  */
-/**
- * §17.1 / §17.1.1 (S469, g-if-reject-unenforced-on-structural-declaration-elements) — the
- * first `if=` / `else-if=` / `else` written on an `<onTimeout>` / `<onIdle>` opener. Neither
- * element reads one (§17.1.2 lists both as SHALL REJECT `if=`): the attribute was dropped and
- * the timer armed whatever the condition said, with no diagnostic. Captured so the typer can
- * refuse it. Quoted values and `${…}` bodies are masked first so an `if` inside a computed
- * `after=${…}` is never read as the attribute.
- */
-function timerGateAttr(attrs: string): "if" | "else" | "else-if" | undefined {
-  const masked = attrs
-    .replace(/\$\{[\s\S]*?\}/g, (m) => " ".repeat(m.length))
-    .replace(/"[^"]*"/g, (m) => " ".repeat(m.length))
-    .replace(/'[^']*'/g, (m) => " ".repeat(m.length));
-  const m = masked.match(/(?:^|\s)(if|else-if)\s*=|(?:^|\s)(else)(?![-\w=$])/);
-  if (!m) return undefined;
-  return (m[1] ?? m[2]) as "if" | "else" | "else-if";
-}
-
 export function scanForOnTimeoutEntries(
   bodyRaw: string,
   skipRegions: ReadonlyArray<readonly [number, number]> = [],
@@ -2955,11 +2950,18 @@ export function parseEngineStateChildren(rulesRaw: string): EngineStateChildEntr
       ? []
       : scanForOnTimeoutEntries(bodyRaw, skipRegions);
 
+    // §17.1 / §17.2 (S469 round 2) — `if=` / `show=` / `else` / `else-if=` on a state-child
+    // opener, read by the markup attribute tokenizer. A state-child is a dispatched arm, not a
+    // gated host: the attribute was dropped and the arm rendered whatever it said. The typer
+    // refuses it (symbol-table `stateChildGateDiagnostic`).
+    const gateAttrs = gateAttrNamesInOpener(afterTag);
+
     out.push({
       tag,
       rule: ruleForm,
       bodyRaw,
       isColonShorthand,
+      ...(gateAttrs.length > 0 ? { gateAttrs } : {}),
       // S160 (S154 ruling (b)) — legacy after-`>` placement marker.
       legacyColonPlacement,
       rawOffset: lt,

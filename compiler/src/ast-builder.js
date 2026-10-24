@@ -23882,6 +23882,12 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
       // The tag is `md` / `mD` — lowercase-first, so never a component reference (the block
       // splitter's rule: a component name is uppercase-first).
       if (typeof block.name === "string" && /^m[dD]$/.test(block.name)) {
+        // §17.2 (S469 round 2) — the `<md>` lowering never reads `show=` (measured: the
+        // markdown stayed visible whatever it said); `if=` IS honoured. Refused.
+        const _mdShow = attrs.find((a) => a && a.name === "show");
+        if (_mdShow) {
+          errors.push(new TABError(GATE_UNSUPPORTED_HOST_CODE, gateUnsupportedHostMessage("show", "md"), _mdShow.span ?? span));
+        }
         return lowerMdBlock(block, attrs, span, {
           filePath,
           counter,

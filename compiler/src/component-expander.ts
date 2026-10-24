@@ -42,6 +42,7 @@
  * Parallelism: per-file — fully parallel across Bun workers.
  */
 
+import { rawOpenerGateDiagnostic, type GateAttrName } from "./gate-attr-refusal.ts";
 import { placeholderParam } from "./placeholder-nonce.ts";
 import { readUnquotedAttrValue, unquotedRejectDiagnostic } from "./unquoted-attr-value.ts";
 import { nativeParseFile } from "../native-parser/parse-file.js";
@@ -1682,6 +1683,37 @@ function parseComponentDef(
       `${String(e.message).replace(/\(line \d+\)/, `(line ${line})`)} (in component \`${name}\`)`,
       at,
     ));
+  }
+  // S469 round 2 — a `<slot>` in a component body carrying `if=` / `show=` / `else` /
+  // `else-if=`. impl#1 does not place use-site children at a `<slot>` (§66.15.2 `<slot/>` is
+  // the bootstrap's): it appends them after the body and emits `<slot>` as a plain element,
+  // so the gate toggled an empty element while the children it was meant to gate rendered
+  // anyway. Refused, wherever the `<slot>` sits (a chain member included).
+  {
+    const defSpan = span ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 };
+    const seenSlot = new Set<unknown>();
+    const visitSlot = (v: unknown): void => {
+      if (!v || typeof v !== "object" || seenSlot.has(v)) return;
+      seenSlot.add(v);
+      if (Array.isArray(v)) { for (const x of v) visitSlot(x); return; }
+      const n = v as Record<string, unknown>;
+      if (n.kind === "markup" && n.tag === "slot" && Array.isArray(n.attrs)) {
+        for (const a of n.attrs as Array<{ name?: unknown; span?: { start?: number; end?: number } }>) {
+          if (a && (a.name === "if" || a.name === "show" || a.name === "else" || a.name === "else-if")) {
+            const d = rawOpenerGateDiagnostic(a.name as GateAttrName, "slot", `a component-body \`<slot>\``,
+              `impl#1 appends use-site children after the component body rather than at \`<slot>\`; gate the use site instead (\`<div if=COND><${name}>…</></div>\`).`);
+            ceErrors.push(makeCEError(d.code, `${d.message} (in component \`${name}\`)`,
+              bodyDiagnosticSourceSpan(defSpan, normalizedBody, a.span?.start, a.span?.end)));
+          }
+        }
+      }
+      for (const k of Object.keys(n)) {
+        if (k === "span" || k === "parent") continue;
+        const c = n[k];
+        if (c && typeof c === "object") visitSlot(c);
+      }
+    };
+    visitSlot(nodes);
   }
   const parseErrors = allParseErrors.filter((e) => e.code !== "E-ATTR-001" && e.code !== "E-SCRIPT-001" && e.code !== "E-STYLE-001" && !isStructuralChainRefusal(e));
   for (const e of allParseErrors) {
