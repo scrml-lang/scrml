@@ -340,3 +340,46 @@ describe("round 4 — the slot loop always reads to the end of the opener; slot 
     expect(compileCodes(`const Card = <div props={ Title: string }><p>c</p></div>\n<div id="out"><Card Title="x" Show=@n/></div>\n`)).toContain("E-GATE-ATTR-CASE");
   });
 });
+
+describe("round 5 — no attribute token is silently skipped; the sigil exemption is exact; reserved-word values", () => {
+  const STRAYS = ["x=.A= if=@n", "x=.A =if=@n", "x=.A= else", "x=.A=else", "x=.A:if=@n", "x= else", "x= if"];
+  for (const attrs of STRAYS) {
+    for (const [pn, pos] of [["top level", TOP], ["an <each> row", ROW]]) {
+      const want = refusalCodes(tab(pos(`<p ${attrs}>z</p>`)).errors);
+      test(`<p ${attrs}> in ${pn} is refused`, () => { expect(want.length).toBeGreaterThan(0); });
+      for (const el of Object.keys(STRUCTURAL)) {
+        test(`<${el} ${attrs}> in ${pn} — refused like <p ${attrs}>`, () => {
+          expect(refusalCodes(tab(pos(STRUCTURAL[el].src(attrs))).errors).length).toBeGreaterThan(0);
+        });
+      }
+    }
+  }
+  const ENGINE_SIGIL = [
+    "initial=.Active = if=@n", "initial=.Active= if=@n", "accepts=:Phase= if=@n initial=.Active",
+    "initial=.Active =if=@n", "initial=.Active= else", "initial=.Active=else", "initial=.Active:if=@n",
+    "initial=-.Active if=@n", "initial=$.Active if=@n",
+  ];
+  for (const o of ENGINE_SIGIL) {
+    test(`<engine for=Phase ${o}> — refused`, () => {
+      const { errors } = tab(`<div id="out"><engine for=Phase ${o}><Idle rule=.Active><p>i</p></><Active rule=.Idle><p>a</p></></></div>\n`);
+      expect(refusalCodes(errors).length).toBeGreaterThan(0);
+    });
+  }
+  for (const o of ["initial=.Active if=@n", "initial=.Active accepts=:Phase if=@n", "if=@n initial=.Active"]) {
+    test(`<engine for=Phase ${o}> — the sigil slots are read, the gate kept`, () => {
+      const { ast, errors } = tab(`<div id="out"><engine for=Phase ${o}><Idle rule=.Active><p>i</p></><Active rule=.Idle><p>a</p></></></div>\n`);
+      expect(refusalCodes(errors)).toEqual([]);
+      expect(findNode(ast.nodes, (v) => v.kind === "engine-decl").ifCond).toBeDefined();
+    });
+  }
+  for (const o of ["= if=@n", "=if=@n", "id=a =if=@n"]) {
+    test(`a <match> arm <Active ${o}> — refused (full compile)`, () => {
+      const codes = compileCodes(`<div id="out"><match for=Phase on=@ph><Idle><p>i</p></><Active ${o}><p>a</p></></></div>\n`);
+      expect(codes).toContain("E-ATTR-001");
+    });
+  }
+  test("a type-named upper-case tag with a case-variant gate (<Phase If=@n>) is refused; a registered component's declared prop is not", () => {
+    expect(refusalCodes(tab(`<div id="out"><Phase If=@n><p>u</p></Phase></div>\n`).errors)).toContain("E-GATE-ATTR-CASE");
+    expect(compileCodes(`const Card = <div props={ Show: boolean }><p>c</p></div>\n<div id="out"><Card Show=@n/></div>\n`)).not.toContain("E-GATE-ATTR-CASE");
+  });
+});

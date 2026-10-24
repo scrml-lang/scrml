@@ -19,6 +19,7 @@
 // Round 2 (shapes named `r2 …`): 61 FAIL on the round-1 head 456158a63, all PASS-REFUSED after.
 // Round 3 (shapes named `r3 …`): 197 FAIL / 3 PASS / 75 PASS-REFUSED on 412b77b8b, all PASS-REFUSED after.
 // Round 4 (shapes named `r4 …`): 109 FAIL / 1 PASS / 32 PASS-REFUSED on 20fadd7b4; 0 FAIL after (4 legal openers PASS).
+// Round 5 (shapes named `r5 …`): 13 FAIL / 3 PASS-DENY / 2 PASS / 8 PASS-REFUSED on 88d71e8ba; all PASS-REFUSED after.
 // Data, not logic: the default export is a list of [name, scrml source]. Side: client (click #wrong /
 // #right, read #out). Do not edit a shape to make it pass.
 
@@ -231,6 +232,37 @@ for (const opener of [
   `if=(@pw == "secret") key=r + 1 in=@xs as r`,
 ]) {
   shapes.push([`r4 each ${opener.split(" if=")[0]} … gate order, in markup`, POSITIONS[0][1](`<each ${opener}><b>LOGGED IN</b></each>`)]);
+}
+
+// ---------------------------------------------------------------------------------------------------
+// Round 5 (review of 88d71e8ba): a stray `=` after an engine sigil value (`initial=.Active = if=…`)
+// left an `=` + value pair no attribute owned, which the attribute parser skipped silently — and the
+// gate inside it with it (the SSR body shipped the content). Same mechanism on markup in a row
+// (`<p x=.A= if=…>`), on a `<match>` arm opener (`<A = if=…>`), and with a reserved-word value
+// (`x= else`). Measured on 88d71e8ba: every compiling `r5` shape showed LOGGED IN on the wrong
+// password; all PASS-REFUSED after.
+// ---------------------------------------------------------------------------------------------------
+const R5_ENG = (o) => `<engine for=Phase ${o}><Idle rule=.Active><b>LOGGED IN</b></><Active rule=.Idle><b>LOGGED IN</b></></>`;
+const PWG = `(@pw == "secret")`;
+for (const o of [
+  `initial=.Active = if=${PWG}`, `initial=.Active= if=${PWG}`, `accepts=:Phase= if=${PWG} initial=.Active`,
+  `initial=.Active =if=${PWG}`, `initial=.Active:if=${PWG}`, `initial=-.Active if=${PWG}`, `initial=$.Active if=${PWG}`,
+]) {
+  shapes.push([`r5 engine ${o.replace(PWG, "…")}, in markup`, POSITIONS[0][1](R5_ENG(o))]);
+}
+for (const o of [`initial=.Active= else`, `initial=.Active=else`]) {
+  shapes.push([`r5 engine ${o} after a denying if=, in markup`, POSITIONS[0][1](`<span if=(@pw != "secret")></span>${R5_ENG(o)}`)]);
+}
+for (const [en, el] of R3_ELEMENTS) {
+  for (const [pn, pos] of [POSITIONS[0], POSITIONS[2]]) {
+    if (en === "<engine>" && pn !== "in markup") continue;
+    shapes.push([`r5 ${en.slice(1, -1)} x=.A= if=, ${pn}`, pos(el(`x=.A= if=${PWG}`))]);
+    shapes.push([`r5 ${en.slice(1, -1)} x= else (reserved-word value) after a denying if=, ${pn}`,
+      pos(`<span if=(@pw != "secret")></span>${el("x= else")}`)]);
+  }
+}
+for (const o of [`= if=${PWG}`, `=if=${PWG}`, `id=a =if=${PWG}`]) {
+  shapes.push([`r5 <match> arm <A ${o.replace(PWG, "…")}>, in markup`, POSITIONS[0][1](ARM(o))]);
 }
 
 export default shapes;
