@@ -560,6 +560,13 @@ describe("ssr-a-terminus (f): an each under an inert `if=` template", () => {
 // it — its dispatch REWRITES the node to `main`/`div` keeping `if=` and re-enters
 // `emitNode`, so the gate does fire; the outlet case below guards that.
 
+// ⚑ S469 (s469-structural-else-guard) — this mirror guard is now MOSTLY VACUOUS. Every `if=` on
+// an IF_GATE_BYPASS_TAGS host (and on a compound-state wrapper) is refused, E-GATE-UNSUPPORTED-HOST
+// (`<page>`: E-PAGE-INVALID-ATTR), so no shape below compiles to a shipped artifact; the SSR
+// assertions guard a lowering only `compileBundles` (runCG, errors ignored) still reaches. The
+// mirror itself (emit-ssr-render.ts) is dead code for shipped programs — removal tracked as
+// g-if-gate-bypass-ssr-mirror-dead-s469. The exact-set pin of IF_GATE_BYPASS_TAGS stays live:
+// the refusal reads the same set.
 /** Every bypass tag, in a shape that puts the server-authority each UNDER it. */
 const BYPASS_TAG_SOURCES = {
   errorBoundary: `<errorBoundary if=@loaded fallback={<div>bad</>}><ul><each in=@accounts key=@.id><li : @.name></each></ul></errorBoundary>`,

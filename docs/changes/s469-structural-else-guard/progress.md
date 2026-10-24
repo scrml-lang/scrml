@@ -48,3 +48,15 @@ a lifted `<each>`.
       g-render-element-in-each-row-or-lift-renders-nothing-s469; state.ts --write.
 - [x] corpus differential (scripts/corpus-emit-differential.ts, 2864 sources, base b0cffc6a4 vs head): 1 newly refusing — conformance ssr/i-ssr-each-client-rendered-if-gate-bypass-neg (intended, re-pinned); 170 artifact diffs, ALL the `_scrml_project_root` checkout path (0 after root normalization); 0 syntax regressions.
 - [x] CI blocking-job commands: all exit 0 (facts --check exit 1 = stale FACTS.md, WARN-only by design; not regenerated).
+
+## Round 2 (review of 456158a63 — FIX)
+
+- [x] Stopped and reported: the markup tokenizer cannot read a `derived=` value (its `>` / `=>`). Ruling: option 1.
+- [x] Structural openers read by `tokenizeAttributes(…, "markup")` + `parseAttributes` (`readStructuralOpenerAttrs`,
+      `structuralGateFields`); word walk, mask, `pendingIf` deleted; `captureStructuralIfAttr` replaced.
+- [x] `<engine derived=…>`: tokenized up to `derived=`; extent → `parseExprToNode` (`${}` → `logicBlockClose`);
+      leftover → E-ENGINE-DERIVED-NOT-LAST. Other opener slots read from the prefix only. Bare `if` → E-CG-003.
+- [x] `<match>` / `<each>` opener END from the tokenizer (`tokenizerOpenerEnd`).
+- [x] timers / state-children / match arms (codegen `buildMatchArms`) / component-body `<slot>` / `<md show=>`.
+- [x] differential test (354), pack n27 +61 (862), SPEC (§17.1.2.2, §51.0.J, §34), gaps.
+- [ ] merge origin/main, CI rerun + hook-skipped browser files, per-spelling table.
