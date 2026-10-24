@@ -3,7 +3,7 @@ import { fallbackSqlHandle } from "./sql-handle-name.ts";
 import { liftScopeDeclaredNames } from "./declared-name-marks.ts";
 import { emitExpr, emitExprField, emitExprFromText, emitConditionField, type EmitExprContext } from "./emit-expr.ts";
 import { cStyleInitDeclaration } from "../validators/defer-structure.ts";
-import { emitLogicNode, emitSqlQueryShape, emitLogicBody, blockScopedDeclaredNames, planBlockArmLift, _awaitMatchArmServerCalls, _matchArmResultIsBlockBody, _blockTailIsValueExpr, emitPropagateArm, givenGuardCondition } from "./emit-logic.js";
+import { emitLogicNode, exprCtxOfLogicOpts, emitSqlQueryShape, emitLogicBody, blockScopedDeclaredNames, planBlockArmLift, _awaitMatchArmServerCalls, _matchArmResultIsBlockBody, _blockTailIsValueExpr, emitPropagateArm, givenGuardCondition } from "./emit-logic.js";
 import { hasFragmentedLiftBody, emitConsolidatedLift, emitLiftExpr, emitIfStmtWithContainer, emitForStmtWithContainer, buildLiftEngineCtxFromExtras, pushLiftReconcileCtx, popLiftReconcileCtx, buildLiftReconcileCtx, pushLiftRequestIds, popLiftRequestIds, forLiftTreeHasImpureLoop, liftNonKeyedActive, pushLiftNonKeyed, popLiftNonKeyed, withLoopBinders, forHeadKeyword, loopBodyDeclaredNames, liftInitialRenderCall } from "./emit-lift.js";
 import { emitTransitionGuard } from "./emit-machines.ts";
 import { emitStringFromTree, parseExprToNode, splitTopLevelCommas } from "../expression-parser.ts";
@@ -468,6 +468,33 @@ function detectHistoryFormFromString(rhs: string): { isHistoryForm: boolean; str
 // ---------------------------------------------------------------------------
 // i87 §13.2 — position-invariant auto-await body opts
 // ---------------------------------------------------------------------------
+
+/**
+ * S469 (g-server-return-match-failable-subject-unawaited-s469) — THE one context a `match`
+ * SUBJECT is lowered in, for every match lowering (the value IIFE `emitMatchExpr`, the
+ * statement / declaration inline lowerings, the multi-scrutinee forms). Whether the subject is
+ * awaited is decided in ONE place — `emitCall`, from the async facts this context carries —
+ * so every position agrees with what a plain statement of the same body would emit.
+ *
+ * Before: each lowering hand-built its own header context. The value IIFE's carried no async
+ * fact at all, so `return match check(k) { .Denied(r) :> … else :> "ok" }` in a SERVER function
+ * emitted `const _scrml_match_3 = check(k);` — a Promise, whose tag reads `.Ok` — and a DENIED
+ * input ran `else` (200 "ok"); the statement lowering had been patched with its own list
+ * (g-server-statement-match-failable-subject-unawaited-s468).
+ *
+ * `opts` is either a statement's options (`EmitLogicOpts` — the facts come from
+ * `exprCtxOfLogicOpts`, the same builder every statement expression uses) or, for a `match`
+ * nested inside an expression, the enclosing `EmitExprContext` (it already carries the facts its
+ * builder put there; its own `mode` is kept). The IIFE header is chosen afterwards from the
+ * emitted bytes (`_iifeHasOwnAwait`), so an awaited subject makes the value IIFE `async` and
+ * awaited — which is legal exactly where `emitCall` chose to await (a sync callback sets
+ * `peerAwaitable = false`, so no `await` is emitted there).
+ */
+export function matchSubjectCtx(opts: any, mode: "client" | "server"): EmitExprContext {
+  if (!opts) return { mode };
+  if (typeof opts.mode === "string" && opts.boundary === undefined) return { ...(opts as EmitExprContext) };
+  return { ...exprCtxOfLogicOpts(opts), mode };
+}
 
 /**
  * S465 (fix round 1) — the client async FACTS that travel WITH the host-async flag
@@ -2977,7 +3004,7 @@ function emitMultiScrutineeMatch(
   for (let i = 0; i < N; i++) {
     const valVar = genVar("scrut");
     const tagVar = genVar("tag");
-    const exprText = emitExprField(scrutineeExprs[i], rawScrutinees[i] ?? "", matchCtx);
+    const exprText = emitExprField(scrutineeExprs[i], rawScrutinees[i] ?? "", matchSubjectCtx(opts, matchMode));
     lines.push(`  const ${valVar} = ${exprText};`);
     lines.push(`  const ${tagVar} = (${valVar} != null && typeof ${valVar} === "object") ? ${valVar}.variant : ${valVar};`);
     valVars.push(valVar);
@@ -3342,7 +3369,9 @@ export function emitMatchExpr(node: any, opts?: any): string {
     return emitMultiScrutineeMatch(node, _scrutineeExprs, _matchCtx, _matchMode, opts);
   }
 
-  const headerRaw = emitExprField(node.headerExpr, (node.header ?? "").trim(), _matchCtx);
+  // S469 — the subject is lowered in the one match-subject context (async facts included).
+  const _subjectCtx = matchSubjectCtx(opts, _matchMode);
+  const headerRaw = emitExprField(node.headerExpr, (node.header ?? "").trim(), _subjectCtx);
 
   const tmpVar = genVar("match");
 
@@ -3364,7 +3393,7 @@ export function emitMatchExpr(node: any, opts?: any): string {
   // §19.8.3 — a `match` on a `?{}` query's result IS its handler: a query that
   // fails to run must reach the arms as a SqlError variant, not throw past them.
   const _handlesSql = matchScrutineeHandlesSql(node.headerExpr, failableMatch, _matchMode);
-  const header = _handlesSql ? emitSqlQueryShape(sqlQueryExprShape(node.headerExpr)!, _matchCtx, true) : headerRaw;
+  const header = _handlesSql ? emitSqlQueryShape(sqlQueryExprShape(node.headerExpr)!, _subjectCtx, true) : headerRaw;
   // The arms' error type is SqlError (released before this function returns).
   if (_handlesSql) enterSqlErrorSchema();
 
@@ -3611,6 +3640,8 @@ function emitMatchInline(node: any, opts?: any, multiArmBody?: (resultStr: strin
     // with the header, as on the `if` hop (`_ifExprCtx`): without them a statement `match
     // check(p) { … }` in a server function emitted `const _scrml_match_N = check(p);` with no
     // `await`, so the Promise read as `.Ok` and a wrong password logged in (200 LOGGED IN).
+    // The arm bodies keep these facts; the SUBJECT is lowered in `matchSubjectCtx` (S469,
+    // g-server-return-match-failable-subject-unawaited-s469), the one context every lowering shares.
     ...hostAsyncFacts(opts),
     serverFnNames: opts?.serverFnNames ?? null,
     serverFnPeerAliasNames: opts?.serverFnPeerAliasNames ?? null,
@@ -3629,7 +3660,8 @@ function emitMatchInline(node: any, opts?: any, multiArmBody?: (resultStr: strin
     return emitMultiScrutineeMatchStmt(node, _scrutineeExprs, _matchCtx, engineCtx, _matchMode, opts, multiArmBody);
   }
 
-  const headerRaw = emitExprField(node.headerExpr, (node.header ?? "").trim(), _matchCtx);
+  const _subjectCtx = matchSubjectCtx(opts, _matchMode);
+  const headerRaw = emitExprField(node.headerExpr, (node.header ?? "").trim(), _subjectCtx);
   const tmpVar = genVar("match");
   const arms = collectMatchArms(node.body ?? [], opts);
   if (arms.length === 0) {
@@ -3642,7 +3674,7 @@ function emitMatchInline(node: any, opts?: any, multiArmBody?: (resultStr: strin
   const needsTagNormalization = failableMatch || hasPayloadBindingOrTaggedVariant(arms, subjectVariants);
   const tagVar = needsTagNormalization ? genVar("tag") : tmpVar;
   const _handlesSql = matchScrutineeHandlesSql(node.headerExpr, failableMatch, _matchMode);
-  const header = _handlesSql ? emitSqlQueryShape(sqlQueryExprShape(node.headerExpr)!, _matchCtx, true) : headerRaw;
+  const header = _handlesSql ? emitSqlQueryShape(sqlQueryExprShape(node.headerExpr)!, _subjectCtx, true) : headerRaw;
   if (_handlesSql) enterSqlErrorSchema();
 
   const lines: string[] = [];
@@ -3782,7 +3814,7 @@ function emitMultiScrutineeMatchStmt(
   for (let i = 0; i < N; i++) {
     const valVar = genVar("scrut");
     const tagVar = genVar("tag");
-    const exprText = emitExprField(scrutineeExprs[i], rawScrutinees[i] ?? "", matchCtx);
+    const exprText = emitExprField(scrutineeExprs[i], rawScrutinees[i] ?? "", matchSubjectCtx(opts, matchMode));
     lines.push(`const ${valVar} = ${exprText};`);
     lines.push(`const ${tagVar} = (${valVar} != null && typeof ${valVar} === "object") ? ${valVar}.variant : ${valVar};`);
     valVars.push(valVar);
@@ -4090,6 +4122,11 @@ function emitNoLowerableArms(node: any, opts: any): string {
  * `_scrml_effect` (invalid JS). When the text does not parse, the token scan
  * below decides, erring toward async exactly as before.
  */
+/** S469 — exported for the text-lowered match (rewrite.ts `rewriteMatchExpr`): one IIFE-header rule. */
+export function iifeLinesHaveOwnAwait(iifeLines: string[]): boolean {
+  return _iifeHasOwnAwait(iifeLines);
+}
+
 function _iifeHasOwnAwait(iifeLines: string[]): boolean {
   const precise = fnTextHasOwnAwait("(async function() {\n" + iifeLines.slice(1).join("\n"));
   if (precise !== null) return precise;

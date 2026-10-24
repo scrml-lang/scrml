@@ -1,5 +1,5 @@
 import { genVar } from "./var-counter.ts";
-import { splitMultiArmString, parseMatchArm, parseBindingList } from "./emit-control-flow.ts";
+import { splitMultiArmString, parseMatchArm, parseBindingList, iifeLinesHaveOwnAwait } from "./emit-control-flow.ts";
 import { splitArmSeparatorCommas, armPiecesCover, rawArmHasStrayComma, rawArmHasLeadingPipeArm } from "../arm-list-split.ts";
 import { recordRefusedLowering } from "./refused-lowering-errors.ts";
 import { currentLoweringSpan } from "./sql-one-statement-guard.ts";
@@ -1928,6 +1928,13 @@ export function rewriteMatchExpr(expr: string): string {
   }
 
   lines.push(`})()`);
+  // S469 (g-server-return-match-failable-subject-unawaited-s469) — the IIFE header follows its
+  // emitted body, by the rule the structured value IIFE uses (emit-control-flow.ts
+  // `_iifeHasOwnAwait`): a subject or arm the upstream lowering awaited (a server function's
+  // `v = match check(p) { … }` — `await check(p)`) makes it `await (async function() { … })()`.
+  // The `await` there is legal: the upstream emitter awaits only in an async host (a sync
+  // callback emits the call bare). The sync header stranded that `await` (E-CODEGEN-INVALID-LOGIC).
+  if (iifeLinesHaveOwnAwait(lines)) lines[0] = `await (async function() {`;
 
   return prefix + lines.join("\n");
 }

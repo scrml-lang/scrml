@@ -12,7 +12,7 @@ import { REFUSED_SERVER_TEXT } from "./server-text-guard.ts";
 import { bareBlockText, bareBlockSequenceTexts, PROBE_BODY_OFFSET } from "../validators/defer-structure.ts";
 import { armBlockStatementsDetailed } from "../arm-body-statements.ts";
 import { isWholeBraceBlock } from "../brace-pair.ts";
-import { emitIfStmt, emitForStmt, emitWhileStmt, emitDoWhileStmt, emitBreakStmt, emitContinueStmt, emitTryStmt, emitDeferScope, emitDeferRegistration, emitMatchExpr, emitMatchStmt, emitMultiScrutineeMatchInline, emitSwitchStmt, rewriteBlockBody, splitMultiArmString, parseMatchArm, matchArmInlineToMatchArm, emitVariantBindingPrelude, hasPayloadBindingOrTaggedVariant, getMatchSubjectVariantFields, isMatchSubjectFailable, getErrorVariantFieldSchema, emitTypedArmResultCtor, matchArmBlockToMatchArm, collectIfChainCond, isFailableOkMatch, isSqlFailableMatch, matchScrutineeHandlesSql, enterSqlErrorSchema, exitSqlErrorSchema, emitMatchTagDiscriminator, getVariantFieldSchema, armCondition, givenGuardToMatchArm, stampPropagateOperand, leaveStmtFromArmText, nestedMatchFromArmText, propagateOperandOfArmText, structureServerArm, emitArmValue, emitObjectLiteralArm, hostAsyncFacts, type MatchArm } from "./emit-control-flow.ts";
+import { emitIfStmt, emitForStmt, emitWhileStmt, emitDoWhileStmt, emitBreakStmt, emitContinueStmt, emitTryStmt, emitDeferScope, emitDeferRegistration, emitMatchExpr, emitMatchStmt, emitMultiScrutineeMatchInline, emitSwitchStmt, rewriteBlockBody, splitMultiArmString, parseMatchArm, matchArmInlineToMatchArm, emitVariantBindingPrelude, matchSubjectCtx, hasPayloadBindingOrTaggedVariant, getMatchSubjectVariantFields, isMatchSubjectFailable, getErrorVariantFieldSchema, emitTypedArmResultCtor, matchArmBlockToMatchArm, collectIfChainCond, isFailableOkMatch, isSqlFailableMatch, matchScrutineeHandlesSql, enterSqlErrorSchema, exitSqlErrorSchema, emitMatchTagDiscriminator, getVariantFieldSchema, armCondition, givenGuardToMatchArm, stampPropagateOperand, leaveStmtFromArmText, nestedMatchFromArmText, propagateOperandOfArmText, structureServerArm, emitArmValue, emitObjectLiteralArm, hostAsyncFacts, type MatchArm } from "./emit-control-flow.ts";
 import { isDestructurePattern, nameOrPatternText } from "./emit-destructure-pattern.ts";
 import type { DefaultLowerer } from "./emit-destructure-pattern.ts";
 import { markDeclaredImmutable, markDeclaredMutable, tildeDeclIsRebind, clearLiftScope } from "./declared-name-marks.ts";
@@ -1318,6 +1318,17 @@ function serverParamDefaultLowerer(opts: EmitLogicOpts): DefaultLowerer | undefi
     ), null);
     return "null";
   };
+}
+
+/**
+ * The expression context a statement's options lower an expression in — every async fact
+ * (`serverFnNames`, peer aliases / dispatch tables, `clientAsyncFnNames` / `clientAsyncBody`, the
+ * stdlib classifier inputs, `syncPeerCalls`) travels with it. Exported for the `match` lowerings
+ * (emit-control-flow.ts `matchSubjectCtx`), whose subject must be lowered with the SAME facts a
+ * statement's own expressions are (S469, g-server-return-match-failable-subject-unawaited-s469).
+ */
+export function exprCtxOfLogicOpts(opts: EmitLogicOpts): EmitExprContext {
+  return _makeExprCtx(opts);
 }
 
 function _makeExprCtx(opts: EmitLogicOpts): EmitExprContext {
@@ -6992,7 +7003,8 @@ function emitMatchExprDecl(name: string, matchExpr: any, keyword: "let" | "const
   // Emit the match header into a temporary variable. The `const tmp = header`
   // line is a placeholder slot filled once the arms are known (§19.8.3: a match
   // on a `?{}` result evaluates its scrutinee through `_scrml_sql_attempt`).
-  const header = emitExprField(matchExpr.headerExpr, (matchExpr.header ?? "").trim(), _makeExprCtx(opts));
+  // S469 — the one match-subject context (emit-control-flow.ts `matchSubjectCtx`).
+  const header = emitExprField(matchExpr.headerExpr, (matchExpr.header ?? "").trim(), matchSubjectCtx(opts, opts.boundary === "server" ? "server" : "client"));
   const headerLineIdx = lines.length;
   lines.push(`const ${tmpVar} = ${header};`);
 
