@@ -1,6 +1,24 @@
 # primary.map.md
 # project: scrml
-# updated: 2026-10-17T19:18:33Z  commit: 5c43c3b8e
+# updated: 2026-10-24T21:10:17Z  commit: e0c4ad6cc
+# ⛑ **S469 STAMP — `5c43c3b8e` -> `e0c4ad6cc` (origin/main). 704 COMMITS, 85 first-parent (~44 s469 PRs #1444 … #1537 + bot/facts-regen merges).
+# Incremental refresh on branch `wrap/s469`; source tree = `e0c4ad6cc`. FIGURES (git ls-tree at e0c4ad6cc): `compiler/src` 319 files (+15 added,
+# none deleted/renamed), 1,820 test files (`compiler/tests`, grep '.test.'), `compiler/SPEC.md` 51,635 lines, 2,067 `case.scrml`. Test suites NOT re-run; diagnostic
+# code census NOT re-audited this pass (S468 error.map figures stand; consult FACTS.md for current counts).
+# NEW compiler/src modules: `arm-body-reader.ts` + `engine-body-reader.ts` (the ONE parse of match-arm / engine state-child raw-text bodies), `arm-list-split.ts` (lexer-based
+# split of raw arm lists), `engine-in-each-row.ts` (one diagnostic text for `<engine>` in an `<each>` row, §51.0.K), `identity-flow.ts` (location-aware binding resolver
+# for the identity follower), `impl1-ruled-form-refusal.ts` (E-IMPL1-RULED-FORM-UNSUPPORTED), `interpolation-extent.ts` (the one reader of where `${ }` ends),
+# `object-shorthand-cell.ts` (E-OBJECT-SHORTHAND-CELL); codegen/: `lift-gate-scope.js`+`.d.ts` (which bindings a lifted if=/show= reads), `if-gate-condition.ts` (the ONE if= predicate
+# lowering; callers emit-event-wiring), `emit-boundary-logic.ts` (§19.6.6 render-time `<errorBoundary>` logic), `string-equality-lowering.ts` (§45 `==` in string pipeline),
+# `build-identity.ts` (§20.8.2 step 0 build id vs soft-nav), `comment-text.ts` (sanitize text into generated JS comments). `gate-attr-refusal.ts` is NOT on origin/main (in-flight branch).
+# Heaviest edits: type-system.ts, failable-value-calls.ts, ast-builder.js, codegen/{fn-valued-bindings,emit-lift.js,emit-each,rewrite,emit-engine,emit-control-flow,emit-reactive-wiring,emit-html,emit-match}, route-inference.ts, runtime-template.js.
+# Bootstrap `compiler/self-host-v2/`: new `css-syntax.scrml`, `print-server.scrml`, `url.scrml`, `slice-m1/runtime/server-runtime.js`, `slice-m4/grant-scan.js` (tape-grant reader), many `slice-m4/*-s469.test.js`;
+# acceptance dirs added under `acceptance/`: arms css grants guess interp loop loop-value match opener parse positions security strings tapes templates termination toenum.
+# `compiler/tests/integration/security-failable-pack/`: +35 files (30 in `shapes/`: n1-n28, s1-s3 shape families; plus pack.js, classify.js, known-fail.js, README.md, failable-probe-pack.test.js).
+# `scripts/` new: ci-shards.ts, ci-test-timings.json, test-sharded.ts (hook/CI sharding), git-merge-generated.{sh,ts} + install-merge-driver.sh (generated-doc merge driver),
+# claim-gate-surface.js, doc-boot-check.js, doc-gate-markers.js, scrml-boot.ts, git-hooks/{post-merge,post-rewrite}.
+# MAP-STAMP RULE: watermark advanced to `e0c4ad6cc` (was 5c43c3b8e; 704 commits). Detail sections below are the S468 text, CARRIED, and may omit S469 specifics: grep source.
+# ━━━━━━━ BELOW IS THE PRIOR HEADER (stamp `5c43c3b8e`), CARRIED. ━━━━━━━
 # ⛑ **S468 STAMP — `41af4153a` -> `5c43c3b8e`. 94 COMMITS, 24 first-parent (the S465 maps refresh 8822c4d34 … #1436 the S467 wrap; 15 merge
 # commits incl. #1414 land/s464-batch): S462 landings — a braceless `if (c) a else b` keeps its else / an unclaimed `else` is
 # E-STMT-UNEXPECTED-TOKEN (3bfeec600, fd8f3b01f), structural client template emitter (4b14e4fcb), every runtime helper the

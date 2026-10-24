@@ -10,6 +10,8 @@
 
 > **Per-session narrative lives in `docs/changelog.md`** — the ONE narrative source of truth (DD3 Fork 1, ratified S171 / executed S173). §0 is the LIVE dashboard **only**: current stances, rules, definitions and gates. The S230→S372 session banners were rotated out S375 (`docs/changes/boot-trim-tier1-2026-08-25/`); two orphans (S246, S275) were moved into the changelog first.
 
+> **S469 (2026-10-24) gate fact:** the browser runtime-size ratchet sits AT its ceiling after #1534 (the `<each>` row `if=` shape 8,432 B vs 8,433 B gzip). The next runtime addition needs a bryan ruling to raise it (ratchets: lower freely, never raise without a ruling). Security-lane method: constrain fixes to the proven path (markup tokenizer, plain lowering, main as oracle) and refuse what it can't cover — see `docs/changelog.md` S469.
+
 > **⚑⚑ S322 (2026-08-05, bryan) — THE FREEZE CAMPAIGN IS PAUSED. Read this before reasoning from any dated entry below.**
 > **PAUSED, not abandoned.** bryan, verbatim: *"I say we pause the freeze campaign until I can feel truly satisfied with it, and until then. We could do some radical re-examining."* Motivation, verbatim: *"My motivation is to build the coolest freakin` language in existence. I have no real goal other than that."* His stated reason: **the freeze push predates real adopters revealing real holes.**
 > **Every entry below this line was written under a freeze motivation** — where the first question about a proposal is *"does this widen the surface?"* and the default answer is no. That is no longer the operating stance. The first question is now *"is this the best expression of the intent?"*, **and a widening can be the right answer.** Do not defer a design question to protect a freeze date; there is no date.
