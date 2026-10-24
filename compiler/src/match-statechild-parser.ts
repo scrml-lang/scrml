@@ -198,6 +198,11 @@ export interface MatchParseDiagnostic {
 export interface MatchParseResult {
   arms: MatchArmEntry[];
   diagnostics: MatchParseDiagnostic[];
+  /** S469 round 2 — an `if=` / `show=` / `else` / `else-if=` on an arm opener (refused by
+   *  codegen `buildMatchArms`, which every `<match>` lowering reaches — the SYM match walk does
+   *  not descend into `<each>` rows / chain branches). Kept apart from `diagnostics` so it is
+   *  reported once. */
+  gateDiagnostics: MatchParseDiagnostic[];
 }
 
 /**
@@ -209,8 +214,9 @@ export interface MatchParseResult {
 export function parseMatchArms(armsRaw: string): MatchParseResult {
   const arms: MatchArmEntry[] = [];
   const diagnostics: MatchParseDiagnostic[] = [];
+  const gateDiagnostics: MatchParseDiagnostic[] = [];
   if (!armsRaw || typeof armsRaw !== "string") {
-    return { arms, diagnostics };
+    return { arms, diagnostics, gateDiagnostics };
   }
 
   let pos = 0;
@@ -674,13 +680,13 @@ export function parseMatchArms(armsRaw: string): MatchParseResult {
     // §17.1 / §17.2 (S469 round 2) — `if=` / `show=` / `else` / `else-if=` on an arm opener,
     // read by the markup attribute tokenizer. An arm is dispatched by its variant, not gated:
     // the attribute was dropped and the arm rendered whatever it said. Refused (surfaced by
-    // the SYM match-block check with the rest of this parser's diagnostics).
+    // codegen `buildMatchArms`, see `gateDiagnostics`).
     {
       const regionEnd = openerScan.insideColonAt >= 0 ? openerScan.insideColonAt : openerScan.closeAt;
       for (const g of gateAttrNamesInOpener(armsRaw.slice(_attrRegionStart, Math.max(_attrRegionStart, regionEnd)))) {
         const d = rawOpenerGateDiagnostic(g, variantName, `the \`<match>\` arm \`<${variantName}>\``,
           `An arm is chosen by its variant; express the condition as arm structure (a variant for the gated state), or gate the whole \`<match if=COND>\`.`);
-        diagnostics.push({ code: d.code, message: d.message, spanStart: armOpenerStart, spanEnd: Math.max(armOpenerStart + 1, regionEnd) });
+        gateDiagnostics.push({ code: d.code, message: d.message, spanStart: armOpenerStart, spanEnd: Math.max(armOpenerStart + 1, regionEnd) });
       }
     }
     pos = openerScan.closeAt + 1; // advance past `>` or `/>`
@@ -803,7 +809,7 @@ export function parseMatchArms(armsRaw: string): MatchParseResult {
     });
   }
 
-  return { arms, diagnostics };
+  return { arms, diagnostics, gateDiagnostics };
 }
 
 /**

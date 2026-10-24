@@ -16,6 +16,7 @@
 // put `#out` on an inner element: the expansion appends a space to the root's text, which would hide a leak
 // from the exact-text judge.) The floor: none may ever show LOGGED IN on the wrong password, e.g. a
 // future chain lowering for structural elements that evaluates the chain once, or drops a branch condition.
+// Round 2 (shapes named `r2 …`): 61 FAIL on the round-1 head 456158a63, all PASS-REFUSED after.
 // Data, not logic: the default export is a list of [name, scrml source]. Side: client (click #wrong /
 // #right, read #out). Do not edit a shape to make it pass.
 
@@ -92,5 +93,55 @@ for (const [hn, host] of HOSTS) {
     shapes.push([`if= on ${hn}, ${pn}`, pos(host)]);
   }
 }
+
+// ---------------------------------------------------------------------------------------------------
+// Round 2 (review of 456158a63): spellings the round-1 word scan disagreed with the markup tokenizer
+// about — each one a chain member on a `<p>`, and on a structural opener compiled at exit 0 with the
+// gated branch visible — plus the positions round 1 left unhandled. Measured on 456158a63: every
+// shape below that compiled showed LOGGED IN on the wrong password.
+// ---------------------------------------------------------------------------------------------------
+const SPELLINGS = [
+  ['else=""', 'else=""'],
+  ['else="true"', 'else="true"'],
+  ["else=${true}", "else=${true}"],
+  ["else=(true)", "else=(true)"],
+  ["a bare if word swallowing else", "if else"],
+  ["data-x=if else", "data-x=if else"],
+  ['title="x"else (no space)', 'title="x"else'],
+  ["effect=${ // it's } else (an apostrophe in a comment)", "effect=${ // it's\n    @n = 1\n} else"],
+  ['effect=${ /"/ } else (a quote in a regex)', 'effect=${ @n = /"/.test("a") ? 1 : 0 } else'],
+];
+const R2_POSITIONS = [POSITIONS[0], POSITIONS[2], POSITIONS[3]]; // in markup, an <each> row, a component body
+for (const [sn, sp] of SPELLINGS) {
+  for (const [en, el] of ELEMENTS) {
+    for (const [pn, pos] of R2_POSITIONS) {
+      if (en === "<engine>" && pn !== "in markup") continue; // §51.0.K refuses an engine there anyway
+      if (sp.startsWith("effect=") && en !== "<engine>") continue; // effect= is an engine opener slot
+      shapes.push([`r2 <${en.slice(1, -1)} ${sn}> after a denying if=, ${pn}`,
+        pos(`<span if=(@pw != "secret")></span>${el(sp)}`)]);
+    }
+  }
+}
+shapes.push(["r2 <match on=(@mode)else> (no space) after a denying if=, in markup",
+  POSITIONS[0][1](`<span if=(@pw != "secret")></span><match for=Mode on=(@mode)else><A><b>LOGGED IN</b></><B><b>LOGGED IN</b></></>`)]);
+
+// A bare `<engine if …>` names no condition (§17.1: E-CG-003) — it rendered ungated.
+shapes.push(["r2 a bare <engine if> (no condition), in markup", POSITIONS[0][1](ELEMENTS[0][1]("if"))]);
+
+// A gate on an engine state-child / a `<match>` arm opener — the arm is dispatched by its variant.
+const SC = (a) => `<engine for=Phase initial=.Idle><Idle rule=.Active ${a}><b>LOGGED IN</b></><Active rule=.Idle><b>LOGGED IN</b></></>`;
+const ARM = (a) => `<match for=Mode on=@mode><A ${a}><b>LOGGED IN</b></><B><b>LOGGED IN</b></></>`;
+for (const [what, mk] of [["an engine state-child", SC], ["a <match> arm", ARM]]) {
+  shapes.push([`r2 if= on ${what}, in markup`, POSITIONS[0][1](mk(`if=(@pw == "secret")`))]);
+  shapes.push([`r2 show= on ${what}, in markup`, POSITIONS[0][1](mk(`show=(@pw == "secret")`))]);
+}
+shapes.push([`r2 if= on a <match> arm, ${POSITIONS[2][0]}`, POSITIONS[2][1](ARM(`if=(@pw == "secret")`))]);
+
+// A component-body `<slot>` with a gate: impl#1 appends the use-site children after the body, so the
+// gate toggled an empty `<slot>` while the children rendered.
+const SLOT = (body) => PAGE(`<Gate><b>LOGGED IN</b></Gate>`, `const Gate = <div><section id="out">${body}</section></div>\n`, true);
+shapes.push(["r2 <slot if=> in a component body", SLOT(`<slot if=(@pw == "secret")/>`)]);
+shapes.push(["r2 <slot show=> in a component body", SLOT(`<slot show=(@pw == "secret")/>`)]);
+shapes.push(["r2 <slot else> after a denying if= in a component body", SLOT(`<span if=(@pw != "secret")></span><slot else/>`)]);
 
 export default shapes;
