@@ -114,13 +114,13 @@ describe("Fix 3: continue → return in reactive for createItem", () => {
     expect(clientJs).toContain("continue;");
     expect(() => new Function(clientJs)).not.toThrow();
   });
-  it("a keyed row whose `if` sits in a row element: the factory holds no `continue`", () => {
-    // The JS-validity floor of the reconciled path the row keeps (the `if` is a region of the row).
+  it("a keyed row filtered by a lifted if= gate: the factory holds no `continue`", () => {
+    // The JS-validity floor of the reconciled path (a gate on the row's item keeps the row keyed).
     const src = `<program>
 \${ @items = [{ id: 1, active: true }, { id: 2, active: false }] }
 \${
   for (let item of @items) {
-    lift <div>\${ if (item.active) { lift <b>\${item.id}</b> } }</div>
+    lift <div><b if=(item.active)>\${item.id}</b></div>
   }
 }
 </program>`;

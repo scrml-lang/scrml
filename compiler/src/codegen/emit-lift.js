@@ -40,7 +40,7 @@ function isCallableJsExprText(text) {
   }
 }
 import { detectPredicateShapeBind } from "./predicate-bind-detector.js";
-import { liftGateReads, liftForTreeRowPins, liftForTreeIfPins, liftIfDecidesRow, liftIfRegionSafe, liftLoopInRowElement, liftGateInFunction, liftGateCellsAllNamed, liftGateBlockFnReadsItsBindings, liftRegionSafe } from "./lift-gate-scope.js";
+import { liftGateReads, liftForTreeRowPins, liftForTreeIfPins, liftIfDecidesRow, liftGateInFunction, liftGateCellsAllNamed, liftGateBlockFnReadsItsBindings, liftRegionSafe } from "./lift-gate-scope.js";
 
 // ---------------------------------------------------------------------------
 // Bug 64 (S159) — Tier-0 per-item content reactivity on reconcile.
@@ -3467,10 +3467,16 @@ export function emitForStmtWithContainer(forNode, containerElVar, opts = {}) {
   let _regionLines = null;
   let _regionVars = null;
   if (_asRegion) {
-    _regionVars = { anchor: genVar("region_end"), nodes: genVar("region_nodes"), sid: genVar("region_sid"), frag: genVar("region_frag") };
+    // S469 round 2 (review of b84c3f6de, HIGH-1) — the region owns the RANGE between two anchors, not a
+    // snapshot of the nodes its last run built: a gate in the region swaps its element in for its
+    // placeholder after the run (`_scrml_ifrow_apply`), so a snapshot held only the placeholder, the
+    // next run removed that, disposed the gate's effect with the scope, and left the element orphaned
+    // and visible for good.
+    _regionVars = { start: genVar("region_start"), anchor: genVar("region_end"), sid: genVar("region_sid"), frag: genVar("region_frag") };
+    lines.push(`const ${_regionVars.start} = _scrml_g.document.createComment("scrml-region-start");`);
     lines.push(`const ${_regionVars.anchor} = _scrml_g.document.createComment("scrml-region");`);
+    lines.push(`${containerElVar}.appendChild(${_regionVars.start});`);
     lines.push(`${containerElVar}.appendChild(${_regionVars.anchor});`);
-    lines.push(`let ${_regionVars.nodes} = [];`);
     lines.push(`let ${_regionVars.sid} = null;`);
     _regionLines = lines;
     lines = [];
@@ -3521,13 +3527,12 @@ export function emitForStmtWithContainer(forNode, containerElVar, opts = {}) {
     lines = _regionLines;
     const body = [
       `if (${v.sid} !== null) _scrml_owner_destroy(${v.sid});`,
-      `for (const _scrml_n of ${v.nodes}) if (_scrml_n.parentNode) _scrml_n.parentNode.removeChild(_scrml_n);`,
+      `while (${v.start}.nextSibling && ${v.start}.nextSibling !== ${v.anchor}) ${v.start}.parentNode.removeChild(${v.start}.nextSibling);`,
       `const ${v.frag} = _scrml_g.document.createDocumentFragment();`,
       `${v.sid} = _scrml_scope_open("as", _scrml_mount_owner(${v.anchor}));`,
       `_scrml_in_scope(${v.sid}, () => {`,
       ...loopLines.map((l) => '  ' + l),
       `});`,
-      `${v.nodes} = [...${v.frag}.childNodes];`,
       `${v.anchor}.parentNode.insertBefore(${v.frag}, ${v.anchor});`,
     ];
     for (const l of maybeWrapLiftPerItemEffect(body)) lines.push(l);
@@ -3555,64 +3560,14 @@ export function emitForStmtWithContainer(forNode, containerElVar, opts = {}) {
  */
 export function emitIfStmtWithContainer(ifNode, containerElVar, opts = {}) {
   // S469 (g-keyed-row-control-flow-if-not-reevaluated-s469) — an `if` that decides what a keyed row
-  // renders, built in that row (not in a region of it, not in a lift that escaped it): the row is
-  // built once per key, so the `if` is read again only as a REGION of the row — the shape the
-  // nested-loop region uses (emitForStmtWithContainer): a comment anchor inside the row element, and
-  // a tracked effect that reads the row's live item (from the per-row slot below), destroys the
-  // previous run's child owner scope, removes the nodes it built and re-runs the `if` into a fragment
-  // it inserts before the anchor. The row keeps its keying (its other nodes, their state and listeners). An `if` the
-  // row cannot hold that way was lowered with the row plain (liftForTreeIfPins); one that still
-  // reaches here (the prediction missed) is refused, never left stale.
+  // renders never reaches a keyed row's factory: the row is lowered as the plain loop the enclosing
+  // render re-runs (liftForTreeIfPins), in every position. One that still reaches here — built in a
+  // keyed row, not inside a re-runnable region of it, not in a lift that escaped it — means the
+  // prediction missed: it is refused, never left stale (it would be read once, when the row is built).
   const _rowCtx = currentLiftReconcileCtx();
   if (_rowCtx && _rowCtx.regionDepth === 0 && !_liftLandsOutsideRow() && liftIfDecidesRow(ifNode)) {
-    if (!_rowCtx.forNode || !liftLoopInRowElement(ifNode, _rowCtx.forNode) || !liftIfRegionSafe(ifNode, _rowCtx.forNode)) {
-      _refuseLiftIf(ifNode, "its row is built once per key, and impl#1 could not lower that row so that the `if` is re-run");
-      return "";
-    }
-    const v = { anchor: genVar("region_end"), nodes: genVar("region_nodes"), sid: genVar("region_sid"), frag: genVar("region_frag") };
-    let inner;
-    _rowCtx.regionDepth += 1;
-    try {
-      inner = _emitIfStmtInline(ifNode, v.frag, opts);
-    } finally {
-      _rowCtx.regionDepth -= 1;
-    }
-    const lines = [
-      `const ${v.anchor} = _scrml_g.document.createComment("scrml-region");`,
-      `${containerElVar}.appendChild(${v.anchor});`,
-      `let ${v.nodes} = [];`,
-      `let ${v.sid} = null;`,
-    ];
-    const body = [
-      `if (${v.sid} !== null) _scrml_owner_destroy(${v.sid});`,
-      `for (const _scrml_n of ${v.nodes}) if (_scrml_n.parentNode) _scrml_n.parentNode.removeChild(_scrml_n);`,
-      `const ${v.frag} = _scrml_g.document.createDocumentFragment();`,
-      `${v.sid} = _scrml_scope_open("as", _scrml_mount_owner(${v.anchor}));`,
-      `_scrml_in_scope(${v.sid}, () => {`,
-      ...inner.split('\n').map((l) => '  ' + l),
-      `});`,
-      `${v.nodes} = [...${v.frag}.childNodes];`,
-      `${v.anchor}.parentNode.insertBefore(${v.frag}, ${v.anchor});`,
-    ];
-    // The region re-runs when the row's item CHANGES IDENTITY (a same-key replace), when a field it
-    // reads is written in place, or when a cell it reads changes — not on every reconcile of the list:
-    // a per-item effect that re-resolved the item itself would re-run on each reorder / insert of ANY
-    // row (the list's item-slot trigger) and rebuild the arm's nodes (an input the arm lifts would
-    // lose its typed text and focus). A small effect re-resolves the item by key and publishes it
-    // only when it is a different item; the region tracks that slot.
-    const box = genVar("region_item");
-    lines.push(`const ${box} = { v: null };`);
-    lines.push(`_scrml_effect(() => {`);
-    lines.push(`  const _scrml_it = _scrml_resolve_item(${_rowCtx.wrapperVar}, ${_rowCtx.keyVar});`);
-    lines.push(`  if (_scrml_it !== null && _scrml_it !== ${box}.v) { ${box}.v = _scrml_it; _scrml_trigger(${box}, "v"); }`);
-    lines.push(`});`);
-    lines.push(`_scrml_effect(() => {`);
-    lines.push(`  _scrml_track(${box}, "v");`);
-    lines.push(`  const ${_rowCtx.iterVar} = ${box}.v;`);
-    lines.push(`  if (${_rowCtx.iterVar} === null) return;`);
-    for (const l of body) lines.push('  ' + l);
-    lines.push(`});`);
-    return lines.join('\n');
+    _refuseLiftIf(ifNode, "its row is built once per key, and impl#1 could not lower that row so that the `if` is re-run");
+    return "";
   }
   return _emitIfStmtInline(ifNode, containerElVar, opts);
 }
@@ -3626,8 +3581,8 @@ function _refuseLiftIf(node, why) {
     "E-IMPL1-LIFT-GATE-UNTRACKED",
     `E-IMPL1-LIFT-GATE-UNTRACKED: impl#1 cannot keep ${what}, and ${why}. A guard it cannot re-evaluate is ` +
       `refused rather than left open after it turns false (§17.1). Build the list in a \`\${}\` block of the ` +
-      `page, or read only cells, file-level bindings or the row's own item in a condition inside an element ` +
-      `of the row.`,
+      `page, or gate the row's elements with \`if=\` instead (a lifted gate that reads cells, file-level ` +
+      `bindings or the row's own item is re-evaluated in a keyed row).`,
     (node && node.span) ?? { start: 0, end: 0 },
   ), node);
 }

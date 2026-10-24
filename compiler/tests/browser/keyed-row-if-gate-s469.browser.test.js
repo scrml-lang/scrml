@@ -12,9 +12,10 @@
  * the page must show exactly what the conditions say for the current state (the floor: gated content
  * is never visible while its condition is false), in row order.
  *
- * Positions: the `if` among the row's ROOTS (the row is lowered as the plain loop the block re-runs)
- * and the `if` inside an ELEMENT of the row (a region of the keyed row: its own tracked effect re-runs
- * the `if` in a child owner scope; the row keeps its keying — the typed-input test pins that).
+ * Positions: the `if` among the row's ROOTS and the `if` inside an ELEMENT of the row. Either way the
+ * row is lowered as the plain loop the block re-runs (S469 round 2 removed a region for the element
+ * form); the keying cost is pinned below. Also the nested-loop region's range ownership (HIGH-1 of the
+ * review of b84c3f6de) and the bind / untracked regression (MED-1).
  */
 
 import { describe, test, expect } from "bun:test";
@@ -207,14 +208,19 @@ describe("index-keyed rows (no id)", () => {
   });
 });
 
-describe("an if inside a row ELEMENT keeps the row keyed", () => {
-  test("typed input text survives revoke, re-grant, an in-place write and a reorder", async () => {
+describe("an if inside a row ELEMENT: the row is lowered plain too (the keying cost)", () => {
+  // S469 round 2 (review of b84c3f6de): a region of the keyed row for an element-wrapped `if` was tried
+  // and removed (three ways to leave revoked content visible). The row is the plain loop the block
+  // re-runs: fresh at every step, but rebuilt on each change it reads — an unbound input in the row
+  // loses its typed text (the cost; the corpus holds no element-wrapped `if`).
+  test("fresh across revoke, re-grant, an in-place write and a reorder; the unbound input is rebuilt", async () => {
     const app = compileAndMount(`<role> = "admin"
 <xs> = [{ id: 1, ok: true }, { id: 2, ok: true }]
 <div id="out">\${ for (r of @xs) { lift <li data-id=\${r.id}><input class="in"/>\${ if (@role == "admin" && r.ok) { lift <b class="g">x</b> } }</li> } }</div>
 `);
     expect(app.errors).toEqual([]);
-    expect(app.clientJs).toMatch(/_scrml_reconcile_list\(/);
+    expect(app.clientJs).not.toMatch(/_scrml_reconcile_list\(/);
+    expect(app.clientJs).not.toContain("scrml-region");
     await flush();
     const input = (id) => document.querySelector(`#out li[data-id="${id}"] input.in`);
     const gates = () => document.querySelectorAll("#out b.g").length;
@@ -229,33 +235,62 @@ describe("an if inside a row ELEMENT keeps the row keyed", () => {
     expect(gates()).toBe(1);
     globalThis.__kri_set("xs", globalThis.__kri_deep([...globalThis.__kri_get("xs")].map((r) => ({ id: r.id, ok: r.ok })).reverse())); await flush();
     expect(gates()).toBe(1);
-    expect(input(2)).toBe(typed);
-    expect(input(2).value).toBe("typed by the user");
     expect(document.querySelector("#out li").getAttribute("data-id")).toBe("2");
+    // The keying cost, pinned so a change to it is seen: the row was rebuilt.
+    expect(input(2)).not.toBe(typed);
   });
 });
 
-describe("the region re-runs only when what it reads changes", () => {
-  test("an input the arm lifts keeps its node and typed text across a reorder and another row's in-place write", async () => {
-    const app = compileAndMount(`<xs> = [{ id: 1, ok: true }, { id: 2, ok: true }]
-<div id="out">\${ for (r of @xs) { lift <li data-id=\${r.id}>\${ if (r.ok) { lift <input class="g"/> } }</li> } }</div>
-`);
+describe("the nested-loop REGION of a keyed row owns a range, not a snapshot (review of b84c3f6de, HIGH-1)", () => {
+  // A region recorded the nodes its run built; a CLOSED gate inside it swaps its element in for its
+  // placeholder after the run, so the snapshot held only the placeholder. The next run removed that,
+  // disposed the gate's effect with the scope, and the element stayed in the page, visible for good
+  // (main too, #1529's loop region). The region now removes everything between its two anchors.
+  const PAGE = (role) => `<role> = "${role}"
+<xs> = [{ id: 1, tags: ["a", "b"] }, { id: 2, tags: ["c"] }]
+<div id="out">\${ for (r of @xs) { lift <li>\${ for (t of r.tags) { const lbl = t + r.id
+ lift <i class="k" data-k="i\${lbl}" if=\${lbl != ""}>x</i>
+ lift <b class="k" data-k="\${lbl}" if=\${@role == "admin"}>x</b> } }</li> } }</div>
+`;
+  const seen = () => [...document.querySelectorAll("#out .k")].map((e) => e.getAttribute("data-k")).join(" ");
+  const tagsOf = (id) => globalThis.__kri_get("xs").find((r) => r.id === id);
+  test("closed first: grant, reorder, shrink, regrow, empty + revoke, refill, remove, clear — no orphan, no duplicate", async () => {
+    const app = compileAndMount(PAGE("user"));
+    expect(app.errors).toEqual([]);
+    expect(app.clientJs).toMatch(/_scrml_reconcile_list\(/);
+    expect(app.clientJs).toContain('createComment("scrml-region")');
+    await flush();
+    const steps = [
+      ["mount", () => {}, "ia1 ib1 ic2"],
+      ["grant", () => globalThis.__kri_set("role", "admin"), "ia1 a1 ib1 b1 ic2 c2"],
+      ["reorder", () => globalThis.__kri_set("xs", globalThis.__kri_deep([...globalThis.__kri_get("xs")].reverse())), "ic2 c2 ia1 a1 ib1 b1"],
+      ["shrink", () => { tagsOf(1).tags = ["a"]; }, "ic2 c2 ia1 a1"],
+      ["regrow", () => { tagsOf(1).tags = ["a", "b", "z"]; }, "ic2 c2 ia1 a1 ib1 b1 iz1 z1"],
+      ["empty, then revoke", () => { tagsOf(1).tags = []; globalThis.__kri_set("role", "user"); }, "ic2"],
+      ["re-grant", () => globalThis.__kri_set("role", "admin"), "ic2 c2"],
+      ["refill", () => { tagsOf(1).tags = ["q"]; }, "ic2 c2 iq1 q1"],
+      ["remove a row", () => globalThis.__kri_set("xs", globalThis.__kri_deep([...globalThis.__kri_get("xs")].filter((r) => r.id !== 2))), "iq1 q1"],
+      ["clear", () => globalThis.__kri_set("xs", globalThis.__kri_deep([])), ""],
+      ["refill the list", () => globalThis.__kri_set("xs", globalThis.__kri_deep([{ id: 1, tags: ["a"] }, { id: 2, tags: ["x", "y"] }])), "ia1 a1 ix2 x2 iy2 y2"],
+      ["revoke", () => globalThis.__kri_set("role", "user"), "ia1 ix2 iy2"],
+    ];
+    for (const [label, step, want] of steps) {
+      step();
+      await flush();
+      expect(`${label}: ${seen()}`).toBe(`${label}: ${want}`);
+    }
+  });
+  test("the inner list emptied, then the role revoked in a separate run: nothing gated stays", async () => {
+    const app = compileAndMount(PAGE("user"));
     expect(app.errors).toEqual([]);
     await flush();
-    const inArm = () => document.querySelector('#out li[data-id="1"] input.g');
-    const typed = inArm();
-    typed.value = "typed by the user";
-    globalThis.__kri_set("xs", globalThis.__kri_deep([...globalThis.__kri_get("xs")].reverse())); await flush();
-    expect(inArm()).toBe(typed);
-    globalThis.__kri_get("xs")[0].ok = false; await flush(); // row 2 (now first) revoked in place
-    expect(document.querySelector('#out li[data-id="2"] input.g')).toBeNull();
-    expect(inArm()).toBe(typed);
-    expect(inArm().value).toBe("typed by the user");
-    // Row 1 revoked: the arm's input leaves; re-granted: it is built again.
-    globalThis.__kri_get("xs")[1].ok = false; await flush();
-    expect(inArm()).toBeNull();
-    globalThis.__kri_get("xs")[1].ok = true; await flush();
-    expect(inArm()).not.toBeNull();
+    globalThis.__kri_set("role", "admin"); await flush();
+    tagsOf(1).tags = []; await flush();
+    tagsOf(2).tags = []; await flush();
+    globalThis.__kri_set("role", "user"); await flush();
+    expect(document.querySelectorAll("#out b").length).toBe(0);
+    tagsOf(1).tags = ["n"]; await flush();
+    expect(seen()).toBe("in1");
   });
 });
 

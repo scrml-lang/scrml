@@ -601,14 +601,12 @@ function _regionTopOk(nm, loop) {
 //
 // A keyed row is built ONCE per key, so an `if` statement in it that decides what the row renders
 // (an arm that lifts, or an arm that leaves the row early with `continue` / `return` / `break`) is
-// read once. Two lowerings re-read it, both the machinery the lifted gates use:
-//   - the `if` sits inside an ELEMENT of the row, its arms read nothing the row's render computes
-//     but the row's own item, and it holds no early exit: it is a REGION of the row (emit-lift.js
-//     emitIfStmtWithContainer) — its own live-keyed tracked effect re-runs it in a child owner
-//     scope, inside that element; the row stays keyed;
-//   - anywhere else (among the row's roots, the row's only root, beside sibling roots, in a function
-//     or lambda in the row, an early exit, an arm reading a row local): the row is lowered as the
-//     plain loop the enclosing render re-runs (forLiftTreeHasImpureLoop).
+// read once. Wherever the `if` sits — among the row's roots, its only root, beside sibling roots,
+// inside an element of the row — the row is lowered as the plain loop the enclosing render re-runs
+// (forLiftTreeHasImpureLoop). (S469 round 2, review of b84c3f6de: a region of the row for an `if`
+// inside a row element was tried and removed — three ways to leave revoked content visible. The
+// corpus held no element-wrapped `if`, so constraining to the plain path costs nothing that exists.)
+// An `if` inside a loop nested in the row is that loop's (see liftForTreeIfPins).
 // Structural: decided by the row body's shape. Over-pinning is the safe direction.
 // ---------------------------------------------------------------------------
 
@@ -663,18 +661,6 @@ function _treeHasRowIf(root) {
 }
 
 /**
- * True when the `if` statement `ifNode`, in the keyed row of `rowLoop`, is lowered as a REGION of the
- * row: it sits inside an element of the row (never among the row's roots — the reconciler moves and
- * removes exactly the root nodes the row was built with), it holds no early exit, and everything it
- * reads is its own, the row's item, or what a re-render of nothing in the row re-initialises
- * (liftRegionSafe — the test the nested-loop region uses).
- */
-export function liftIfRegionSafe(ifNode, rowLoop) {
-  if (!liftIfDecidesRow(ifNode) || _ifExitsRow(ifNode)) return false;
-  return liftRegionSafe(ifNode, rowLoop);
-}
-
-/**
  * True when the tree of the rendering `for … lift` loop `forNode` holds an `if` its keyed row could
  * not re-read (see the section comment). An `if` inside a loop nested in the row is that loop's: the
  * nested loop either stays keyed (its iterable names a cell — every emitter keys it, and it judges its
@@ -701,14 +687,10 @@ export function liftForTreeIfPins(forNode) {
     }
     if (n.kind === "match-stmt") {
       // A `match` STATEMENT whose arms lift decides what the row renders the same way, and its lifts
-      // go to the ambient target (no region holds them): the row is lowered plain.
+      // go to the ambient target: the row is lowered plain.
       if (_hasNode(n, _isLift) || /\blift\b/.test(JSON.stringify(n, (k, v) => (k === "span" ? undefined : v)))) { pinned = true; return; }
     }
-    if (n.kind === "if-stmt" && liftIfDecidesRow(n)) {
-      if (inFn || !liftLoopInRowElement(n, forNode) || !liftIfRegionSafe(n, forNode)) pinned = true;
-      // A region re-runs everything in it (the `if`s and loops nested in its arms included).
-      return;
-    }
+    if (n.kind === "if-stmt" && liftIfDecidesRow(n)) { pinned = true; return; }
     const fn = inFn || _FN_KINDS.has(n.kind);
     for (const k of Object.keys(n)) {
       if (k === "span") continue;

@@ -28,9 +28,9 @@
  * S469 (g-keyed-row-control-flow-if-not-reevaluated-s469) — an `if` among a row's ROOTS that lifts (or
  * leaves the row early) decides what the row renders, and a keyed row is built once per key, so such a
  * list is now lowered as the plain loop the block re-runs (§1–§6 "root" cases pin that). The factory
- * path these tests were written for is kept by an `if` inside an ELEMENT of the row (a region of the
- * row: its own live-keyed effect re-runs it); the "element" cases pin LIFT-5's invariant there — no
- * ambient `_scrml_lift(() =>` inside a per-item factory.
+ * path these tests were written for no longer holds a row-deciding `if` in ANY position (S469 round 2
+ * removed the element-wrapped region): the "element" cases now pin that such a list is plain and that
+ * the `if`'s lifts are routed into the row's element, not to the ambient target.
  */
 
 import { describe, it, expect } from "bun:test";
@@ -72,14 +72,11 @@ describe("LIFT-5 §1 — no ambient _scrml_lift() inside reconciler factory", ()
     const { errors, clientJs } = compileSource(src);
     expect(errors.filter(e => e.severity !== "warning")).toHaveLength(0);
 
-    // Extract the body of _scrml_create_item_N
-    const createFnMatch = clientJs.match(/function (_scrml_create_item_\d+)\([^)]*\)\s*\{([\s\S]*?)^\}/m);
-    expect(createFnMatch).not.toBeNull();
-    const createFnBody = createFnMatch[2];
-
-    // The fix: no _scrml_lift(() => inside the factory body
-    expect(createFnBody).not.toContain("_scrml_lift(() =>");
-    expect(createFnBody).not.toContain("_scrml_lift(function");
+    // S469 round 2 — no per-item factory exists for this list (a row-deciding `if`, in any position,
+    // lowers the list plain), so the LIFT-5 null-ambient hazard cannot arise; the `if`'s lift is routed
+    // into the row's element, not to the ambient target.
+    expect(clientJs).not.toContain("_scrml_create_item_");
+    expect(clientJs).toMatch(/_scrml_lift_el_\d+\.appendChild\(\(\(\) => \{/);
   });
 });
 
@@ -126,13 +123,9 @@ describe("LIFT-5 §3 — factory returns DocumentFragment.firstChild", () => {
     const { errors, clientJs } = compileSource(src);
     expect(errors.filter(e => e.severity !== "warning")).toHaveLength(0);
 
-    const createFnMatch = clientJs.match(/function (_scrml_create_item_\d+)\([^)]*\)\s*\{([\s\S]*?)^\}/m);
-    expect(createFnMatch).not.toBeNull();
-    const createFnBody = createFnMatch[2];
-
-    // Factory must declare a DocumentFragment tmp variable and return its firstChild
-    expect(createFnBody).toContain("document.createDocumentFragment()");
-    expect(createFnBody).toMatch(/return \w+\.firstChild;/);
+    // S469 round 2 — the list is the plain loop (no factory, nothing for the reconciler to receive).
+    expect(clientJs).not.toContain("_scrml_create_item_");
+    expect(clientJs).not.toContain("_scrml_reconcile_list(");
   });
 });
 
@@ -179,18 +172,12 @@ describe("LIFT-5 §5 — if-else both lift branches use appendChild", () => {
     const { errors, clientJs } = compileSource(src);
     expect(errors.filter(e => e.severity !== "warning")).toHaveLength(0);
 
-    const createFnMatch = clientJs.match(/function (_scrml_create_item_\d+)\([^)]*\)\s*\{([\s\S]*?)^\}/m);
-    expect(createFnMatch).not.toBeNull();
-    const createFnBody = createFnMatch[2];
-
-    // Both branches must use .appendChild, not _scrml_lift()
-    expect(createFnBody).not.toContain("_scrml_lift(() =>");
-    // Count appendChild occurrences — one per branch
-    const appendCount = (createFnBody.match(/\.appendChild\(/g) || []).length;
+    // S469 round 2 — the plain loop; both branches append into the row's element.
+    expect(clientJs).not.toContain("_scrml_create_item_");
+    const appendCount = (clientJs.match(/_scrml_lift_el_\d+\.appendChild\(\(\(\) => \{/g) || []).length;
     expect(appendCount).toBeGreaterThanOrEqual(2);
-    // Both <li> elements present
-    expect(createFnBody).toContain('"even"');
-    expect(createFnBody).toContain('"odd"');
+    expect(clientJs).toContain('"even"');
+    expect(clientJs).toContain('"odd"');
   });
 });
 
@@ -212,14 +199,13 @@ describe("LIFT-5 §6 — _scrml_lift_target set and cleared around for block", (
     expect(errors.filter(e => e.severity !== "warning")).toHaveLength(0);
 
     // The block-level lift setup: _scrml_lift_target set before the factory decl
-    expect(clientJs).toContain("_scrml_lift_target = _scrml_g.document.querySelector(");
+    expect(clientJs).toMatch(/_scrml_lift_target = _scrml_lift_tgt_\d+;/);
     expect(clientJs).toContain("_scrml_lift_target = null;");
     // The wrapper element is lifted to _scrml_lift_target
     expect(clientJs).toContain("_scrml_lift(");
-    // list wrapper and render function are present
-    expect(clientJs).toContain("_scrml_list_wrapper_");
-    expect(clientJs).toContain("_scrml_render_list_");
-    expect(clientJs).toContain("_scrml_effect_static(");
+    // S469 round 2 — the plain loop, re-run by the block's render effect.
+    expect(clientJs).not.toContain("_scrml_create_item_");
+    expect(clientJs).toMatch(/_scrml_effect\(function\(\) \{\n\s*_scrml_lift_tgt_\d+\.innerHTML = "";/);
   });
 });
 
