@@ -7,7 +7,7 @@ PURE bootstrap (`compiler/self-host-v2/` front end + printer + runtime, no impl#
 Bucket definitions: the header of `scripts/bootstrap-conformance.ts`. A TRACKING number, not a gate.
 It is a run, not a static count, so it is NOT a `docs/FACTS.md` row (FACTS excludes run-derived figures).
 
-Scope: **1812 of 1812 cases attempted** — every attempted case reached the pure bootstrap (no impl#1 stage).
+Scope: **1813 of 1813 cases attempted** — every attempted case reached the pure bootstrap (no impl#1 stage).
 
 | bucket | cases | share of attempted |
 |---|---:|---:|
@@ -15,7 +15,7 @@ Scope: **1812 of 1812 cases attempted** — every attempted case reached the pur
 | CODES-ONLY | 0 | 0.0% |
 | FAIL | 64 | 3.5% |
 | LEGACY | 0 | 0.0% |
-| NOT-TWINNED | 684 | 37.7% |
+| NOT-TWINNED | 685 | 37.8% |
 | UNSUPPORTED | 814 | 44.9% |
 | CRASH | 0 | 0.0% |
 | INVALID | 0 | 0.0% |
@@ -34,7 +34,7 @@ Legacy-dialect cases graded on their generated §66 twin: **793** — PASS 150 �
 - `dialect.s66` overrides: 0 replace a twin's expectations · 11 exclude a case.
 - Superseded-code mappings applied: 2 case(s) (E-ENGINE-VAR-DUPLICATE→E-SCOPE-010). Rows: E-ENGINE-VAR-DUPLICATE→E-SCOPE-010 [applied] · E-ENGINE-STATE-CHILD-INVALID-VARIANT→∅ [owed] · E-ENGINE-RULE-INVALID-VARIANT→∅ [owed] · E-ENGINE-INITIAL-INVALID-VARIANT→∅ [owed] · E-CELL-NO-RENDER-SPEC→∅ [owed] · E-CELL-RENDER-SPEC-NOT-BINDABLE→∅ [owed] · E-DECL-RHS-INTERP-WRAPPED→∅ [owed] · E-COMPONENT-010→∅ [owed].
 
-NOT-TWINNED by reason (684 cases; a case counts once per distinct reason):
+NOT-TWINNED by reason (685 cases; a case counts once per distinct reason):
 
 - 107 — component-const: component `…` (structural rewrite — §66.15; hand-migrate)
 - 74 — rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
@@ -54,8 +54,8 @@ NOT-TWINNED by reason (684 cases; a case counts once per distinct reason):
 - 13 — rhs-decl: declaration text not found at the AST site
 - 12 — engine-simple: engine surface beyond the simple rule: accepts (⚑ O5 surface)
 - 11 — excluded by dialect.s66
+- 11 — rhs-decl: non-literal initializer needs a type (CTX — O35)
 - 10 — engine-simple: engine surface beyond the simple rule: derived (⚑ O5 surface)
-- 10 — rhs-decl: non-literal initializer needs a type (CTX — O35)
 - 9 — rhs-decl: legacy declaration impl#1's front end did not surface as a declaration (left untouched)
 - 8 — rhs-decl: initializer not parsed by impl#1
 - 8 — rhs-decl: object literal needs a struct type (CTX)
@@ -155,7 +155,7 @@ NOT-TWINNED by reason (684 cases; a case counts once per distinct reason):
 | schema | 10 | · | · | · | · | · | 10 | · | · |
 | schema-for | 15 | · | · | · | · | · | 15 | · | · |
 | server-db | 91 | 10 | · | · | · | 19 | 62 | · | · |
-| server-fn | 26 | · | · | 7 | · | 9 | 10 | · | · |
+| server-fn | 27 | · | · | 7 | · | 10 | 10 | · | · |
 | sql | 20 | 2 | · | · | · | 9 | 9 | · | · |
 | ssr | 14 | · | · | · | · | 14 | · | · | · |
 | style | 27 | 1 | · | 1 | · | 24 | 1 | · | · |
@@ -1412,7 +1412,7 @@ none
 - `type-state-codes/e-value-function-stored-neg` — twin · bootstrap-unsupported: member access `.size` on a value that is not a struct or an instance is not in bootstrap slice M2
 - `type-state-codes/e-value-function-stored-pos` — twin · bootstrap-unsupported: `.double(…)` is not in the bootstrap — only calls of a named function, `Date.now()`, `.filter(x => …)` / `.map(x => …)` / `.sort(…)` / `.reverse()` / `.join(sep)` on a tape, and the string methods `to
 
-### NOT-TWINNED (684)
+### NOT-TWINNED (685)
 
 - `attr-executable-sink/component-prop-substituted-neg` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate)
 - `attr-executable-sink/event-attr-interp-neg` — not mechanical: rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
@@ -2036,6 +2036,7 @@ none
 - `server-fn/optional-present` — not mechanical: rhs-decl: type `User | not` has a space at its top level — how it stands in an opener is not ruled (§66.2.4 covers refinement / lifecycle types only) · const-cell: non-literal initializer needs a type (CTX — O35)
 - `server-fn/sequence-two-fns` — not mechanical: rhs-decl: written sequence — its grants are the least §66.12 axes its writes use (CTX — grants)
 - `server-fn/sse-generator-binding-seed-survives` — not mechanical: rhs-decl: object literal needs a struct type (CTX)
+- `server-fn/value-server-call-init-neg` — not mechanical: rhs-decl: non-literal initializer needs a type (CTX — O35)
 - `server-fn/value-server-call-interp-neg` — not mechanical: program-wrap: `<page>` root with no `<program>` (route-file shape — not wrapped)
 - `sql/bad-conn-prefix-neg` — not mechanical: rhs-decl: written sequence — its grants are the least §66.12 axes its writes use (CTX — grants)
 - `sql/batch-warn-info` — not mechanical: rhs-decl: empty `[]` needs an element type (CTX — O35)

@@ -1,0 +1,9 @@
+<program>
+${
+    server function loadName(id: string) {
+        return "user " + id;
+    }
+}
+<name> = loadName("1")
+<p class="name">${@name}</p>
+</program>

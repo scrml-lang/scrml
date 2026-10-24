@@ -83,3 +83,61 @@ the failure mode `markup-autoawait-all-emitters` recorded. The fix does NOT go e
   and `bind:` attributes, `<request>` bodies, `when … changes` / message bodies, `on mount` bare-exprs, engine
   `effect=` / `<onTransition>` / message arms. Unknown node kinds in a render context are walked generically
   (every expression tree in them judged) — over-refusal, never a miss.
+
+## Log
+
+- 2026-10-24 impl: `codegen/render-waiting-calls.ts` + the call in codegen/index.ts. Refinements found by
+  execution while landing:
+  - the "is this a waiting function" predicate is now SHARED with the F4 binding judge
+    (`file-async-fns.ts waitingFnPredicateOfFile`, extracted from `waitingBindingsOfFile`, behaviour unchanged):
+    a sync helper placed on the server only by caller-context propagation is NOT waiting (the
+    `channel-onclient-inferred-server` "shared pure helper" case would otherwise be refused).
+  - `serverPlacedFnNamesAnywhere` (file-async-fns.ts): the file set is built by `collectTopLevelStatements`
+    (follows `children` only), so a server fn declared in an `if=`/`else` chain branch was invisible — its
+    render-position call escaped in the chain form and was refused in the lone-`if=` form
+    (g-if-chain-branch-cell-never-wired ROUTING PARITY test showed it). Read the same two facts
+    (`isServer`, route map server boundary, minus propagated-only) over the whole tree.
+  - a sole value-form `match` / `if` in a `${ }` renders (emit-html `isValueFormControlFlowStmt`, exported).
+  - `on=${…}` / `if=${…}` heads carried as raw text keep their `${ }`: unwrapped before the one parse.
+  - api.js collectErrors: one E-VALUE-SERVER-CALL per site (the TS `<errorBoundary>` report and the CG report
+    of the same line).
+- Tests updated (behaviour pins of the now-refused construct, or incidental scaffolding):
+  - server-fn-markup-interpolation (GITI-005 §1/§4) and bug-5-const-interpolation §6 and
+    lift-target-mount-template (`${serverFn()}` one-shot display ×2): now pin E-VALUE-SERVER-CALL.
+  - scaffolding moved from `<p>${serverFn()}</p>` to a handler: server-client-boundary (GITI-003),
+    s466-parseerror-import-only, giti-009-import-rewrite, stdlib-type-import-server-load-s462,
+    g-if-chain-branch-cell-never-wired; fixture a5/multipage-multirole/routes/loads.scrml (`for (… of
+    loadDrivers())` → a cell loaded from a handler).
+  - stdlib-client-registry: the fixture used `click=${ … }`, which is NOT an event attribute (a reactive
+    attribute binding, evaluated at render: emitted `setAttribute("click", …)` inside an effect) — so its call
+    DID run at render. Now `onclick=` as the comment intends.
+  - failable pack: KNOWN_FAIL emptied (5 entries); PINNED_CLASS re-measured with classify.js --json f1/ f2/:
+    exactly 6 changes (the 5 FAIL → PASS-REFUSED, and `f2/async helper, interpolation` PASS → PASS-REFUSED).
+  - conformance: `server-fn/value-server-call-interp-neg` XPASS → xfail removed; new
+    `server-fn/value-server-call-init-neg` (cell initializer, still not refused by impl#1) pins the carried
+    `g-impl1-value-server-call-s451`. docs/bootstrap-conformance.md regenerated (--write).
+- SPEC §34 E-VALUE-SERVER-CALL row: records the impl#1 partial emission (impl#1-provisional) + provenance.
+  `s34-census --check-new`: PASS.
+
+## Gap status for the PA to file (do not edit known-gaps.md here)
+
+- `g-markup-gate-tests-server-call-promise` (HIGH) — CLOSED by refusal (E-VALUE-SERVER-CALL at every render position).
+- `g-derived-cell-rhs-server-call-renders-promise` — CLOSED by refusal.
+- `g-render-match-async-subject-unawaited-s469` — CLOSED by refusal.
+- `g-impl1-value-server-call-s451` (carried) — NARROWED: impl#1 now emits E-VALUE-SERVER-CALL at every render
+  position; the divergence left is a cell initializer (`<n> = f()`, which impl#1 evaluates once and awaits).
+  Pinned by `conformance/cases/server-fn/value-server-call-init-neg`.
+- NEW candidate `g-async-set-misses-fns-in-if-chain-branches-s470` (MED, locus `codegen/collect.ts
+  collectTopLevelStatements` → `file-async-fns.ts computeFileAsyncFnNames` / `serverFnNamesOfFile`): the file's
+  async set does not see a function declared in an `if=`/`else` chain branch (or any non-`children` container),
+  so a call of it is not coloured async / not awaited elsewhere (handlers). The render refusal works around it
+  (`serverPlacedFnNamesAnywhere`); the colouring itself is unchanged.
+- NEW candidate `g-request-in-sibling-page-widens-role-chunk-s470` (needs verification, possibly SECURITY/auth,
+  locus reachability / chunk planner): measured on the a5 multipage fixture — adding
+  `<request id="driversLoad" deps=[]>${ @drivers = loadDrivers() }</>` to routes/loads.scrml made the HOME page's
+  Driver `initial` chunk carry 2 `_scrml_chunk_mount(…, "a")` anchors instead of 1 (the Admin-gated `<a
+  href="/admin">` inside `<auth role="Admin">` reached the Driver chunk). Reproduce with
+  ~/.cache-style scratch: compile the three route files with `emitPerRoute: true` and count anchors per role.
+- NEW candidate `g-host-promise-global-in-render-not-refused-s470` (LOW): a host Promise global (`fetch(…)`) written
+  directly in a render position is not coloured by the §13.2 facts (no stdlib import), so it is not refused.
+  §13.7 item 4 names it. Not decided by the existing facts → out of this lane's "reuse the predicate" method.

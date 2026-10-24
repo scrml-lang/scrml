@@ -1,0 +1,21 @@
+{
+  "id": "server-fn-value-server-call-init-neg",
+  "description": "S470: a server call as a cell's initializer (a cell not declared `(not to T)`) is a server call in a value position and is E-VALUE-SERVER-CALL (§13.7, §13.9.1). impl#1 refuses a waiting value in every RENDER position (interpolation, attribute value, derived formula, <each>/<match> head, engine derived= — server-fn/value-server-call-interp-neg now passes) but not in a cell initializer, which it evaluates once and awaits; here it still compiles at exit 0. This case replaces value-server-call-interp-neg as the pin of the carried gap.",
+  "language-version": "1.0",
+  "spec": "§13.7",
+  "rationale": "§13.7 rule item 1 + §13.9.1: a cell with no `(not to T)` marker whose initializer waits keeps E-VALUE-SERVER-CALL. Server data reaches a cell through a `<request>` (§6.7.7) or a pending cell (§13.9).",
+  "expect": {
+    "codes": ["E-VALUE-SERVER-CALL"],
+    "notCodes": []
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-impl1-value-server-call-s451",
+      "fails": {
+        "codes": [
+          "missing:E-VALUE-SERVER-CALL"
+        ]
+      }
+    }
+  }
+}
