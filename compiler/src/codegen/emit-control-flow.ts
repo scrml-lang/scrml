@@ -3,7 +3,7 @@ import { fallbackSqlHandle } from "./sql-handle-name.ts";
 import { liftScopeDeclaredNames } from "./declared-name-marks.ts";
 import { emitExpr, emitExprField, emitExprFromText, emitConditionField, type EmitExprContext } from "./emit-expr.ts";
 import { cStyleInitDeclaration } from "../validators/defer-structure.ts";
-import { emitLogicNode, emitSqlQueryShape, emitLogicBody, blockScopedDeclaredNames, planBlockArmLift, _awaitMatchArmServerCalls, _matchArmResultIsBlockBody, _blockTailIsValueExpr, emitPropagateArm, givenGuardCondition } from "./emit-logic.js";
+import { emitLogicNode, exprCtxOfLogicOpts, emitSqlQueryShape, emitLogicBody, blockScopedDeclaredNames, planBlockArmLift, _awaitMatchArmServerCalls, _matchArmResultIsBlockBody, _blockTailIsValueExpr, emitPropagateArm, givenGuardCondition } from "./emit-logic.js";
 import { hasFragmentedLiftBody, emitConsolidatedLift, emitLiftExpr, emitIfStmtWithContainer, emitForStmtWithContainer, buildLiftEngineCtxFromExtras, pushLiftReconcileCtx, popLiftReconcileCtx, buildLiftReconcileCtx, pushLiftRequestIds, popLiftRequestIds, forLiftTreeHasImpureLoop, liftNonKeyedActive, pushLiftNonKeyed, popLiftNonKeyed, withLoopBinders, forHeadKeyword, loopBodyDeclaredNames, liftInitialRenderCall, liftNoteRowIfPlainLoop } from "./emit-lift.js";
 import { emitTransitionGuard } from "./emit-machines.ts";
 import { emitStringFromTree, parseExprToNode, splitTopLevelCommas } from "../expression-parser.ts";
@@ -17,7 +17,7 @@ import { fnTextHasOwnAwait } from "./js-async-analysis.ts";
 import { tenantFloorTouchesSql } from "./rewrite.js";
 import { SQL_ERROR_VARIANT_FIELDS, sqlQueryExprShape, unhandledFailureThrow, handledSqlGuardInner, SQL_ATTEMPT_FN } from "./sql-attempt.ts";
 import { HOIST_VALUES_PLACEHOLDER } from "../hoist-sql-shape.ts";
-import { programStatementRefusal, sqlHoldsOneStatement } from "./sql-one-statement-guard.ts";
+import { programStatementRefusal, sqlHoldsOneStatement, currentLoweringSpan } from "./sql-one-statement-guard.ts";
 import { literalSpans, armPiecesCover } from "../arm-list-split.ts";
 
 // ---------------------------------------------------------------------------
@@ -79,6 +79,31 @@ let _variantFieldCollisions: Set<string> | null = null;
 let _importedVariantNames: Set<string> | null = null;
 /** Local variants + ambient ParseError only — the error-envelope registry (see getErrorVariantFieldSchema). */
 let _localVariantFields: Map<string, string[]> | null = null;
+/** S469 r2 — enum name (local or imported local name) → variant → declared fields (see getEnumVariantFieldSchema). */
+let _variantFieldsByEnum: Map<string, Map<string, string[] | null>> | null = null;
+
+/**
+ * S469 r2 — the declared field list of `Enum::Variant` by the ENUM'S name as this file writes it
+ * (a local declaration or an imported enum). `undefined` when this file cannot see the enum (or the
+ * enum has no such variant); `null` for a unit variant. The `fail` producer keys its payload by it,
+ * so the declaring file and every importing file write ONE shape — the payload shape used to be
+ * decided per file ("does this file declare the variant?"), so an importer's `fail` sent the bare
+ * value while the declaring file sent the keyed object.
+ */
+export function getEnumVariantFieldSchema(enumName: string, variantName: string): string[] | null | undefined {
+  const m = _variantFieldsByEnum?.get(enumName);
+  if (!m || !m.has(variantName)) return undefined;
+  const f = m.get(variantName) ?? null;
+  return f === null ? null : [...f];
+}
+
+/**
+ * S469 r2 — impl#1's synthesized CPS transport variants (a server call that failed in transit):
+ * their envelope carries a `{ message, fn }` object the SPEC's own examples read whole
+ * (`::NetworkError(detail) :> … detail.message`). The ONLY variants a single positional binder may
+ * bind as the whole `.data` without a declared field list.
+ */
+export const CPS_AMBIENT_ERROR_VARIANTS: ReadonlySet<string> = new Set(["NetworkError", "ServerError"]);
 /**
  * S438 review (N1/N3) — variant names declared BOTH by a file-local enum and by
  * an imported enum with a DIFFERENT field list. A bare-dot CONSTRUCTOR of such
@@ -100,6 +125,26 @@ let _shadowedVariantNames: Set<string> | null = null;
  * collision set). Set on BOTH the client and server passes, with the shadowed set.
  */
 let _importedOnlyVariantNames: Set<string> | null = null;
+
+/**
+ * S469 r3 — the per-file variant registries are installed ONCE per file by runCG (codegen/index.ts,
+ * before any emitter runs: browser client / server, library, tool, test, worker), so every emission
+ * mode keys a `fail` payload and binds an arm by the same field lists. An emitter that installs its own
+ * copy (generateClientJs / generateServerJs) RESTORES what it found on exit instead of clearing it:
+ * a clear stranded the emitters that run after it in the same file (library mode emits after the
+ * server; the additive tool-dep library after the client) with no registry, so a `fail` wrote the bare
+ * value while the reader — keyed by the TS-resolved enum — read `data.<field>`: `undefined`, and a
+ * deny-list on it logged a denied input in.
+ */
+export interface VariantRegistrySnapshot { readonly s: readonly unknown[] }
+export function snapshotVariantFieldsForFile(): VariantRegistrySnapshot {
+  return { s: [_variantFields, _variantFieldCollisions, _importedVariantNames, _localVariantFields, _variantFieldsByEnum, _shadowedVariantNames, _importedOnlyVariantNames] };
+}
+export function restoreVariantFieldsForFile(snap: VariantRegistrySnapshot): void {
+  const [f, c, i, l, b, sh, io] = snap.s as [any, any, any, any, any, any, any];
+  _variantFields = f; _variantFieldCollisions = c; _importedVariantNames = i; _localVariantFields = l;
+  _variantFieldsByEnum = b; _shadowedVariantNames = sh; _importedOnlyVariantNames = io;
+}
 
 export function setShadowedVariantNames(names: Set<string> | null, importedOnly?: Set<string> | null): void {
   _shadowedVariantNames = names && names.size > 0 ? names : null;
@@ -129,11 +174,31 @@ const PARSE_ERROR_VARIANT_FIELDS: ReadonlyArray<readonly [string, string[]]> = [
   ["Malformed", ["reason"]],
 ];
 
+/**
+ * Fixed ambient error schemas a `!{}` / failable-`match` arm may bind with no enum in scope:
+ * `scrml:host` HostError (`HostError.Thrown(message, name)`, compiler/runtime/stdlib/host.js) and
+ * §19.9.10's `Transport(t: ServerCallError)` — the variant every client call of a server function
+ * can fail with (impl#1 sends its own CPS `NetworkError` / `ServerError` instead, so it never fires
+ * there; the arm still binds the SPEC's one field).
+ */
+const HOST_ERROR_VARIANT_FIELDS: ReadonlyArray<readonly [string, string[]]> = [
+  ["Thrown", ["message", "name"]],
+  ["Transport", ["t"]],
+  // §19.4.2 — the built-in `Error` of a bare `!` / `! -> Error` function: `Error::Generic(message)`.
+  ["Generic", ["message"]],
+  // §19.8.1 — `SqlError`, for a `! -> SqlError` function's handler (a `?{}` handler scopes the same
+  // schema with enterSqlErrorSchema).
+  ...SQL_ERROR_VARIANT_FIELDS.map(([n, f]): readonly [string, string[]] => [n, [...f]]),
+  ["BatchPrepareFailed", ["sites"]],
+];
+
 export function setVariantFieldsForFile(
   variantFields: Map<string, string[]> | null,
   collisions?: Set<string> | null,
   importedNames?: Set<string> | null,
+  byEnum?: Map<string, Map<string, string[] | null>> | null,
 ): void {
+  _variantFieldsByEnum = byEnum ?? null;
   _variantFields = variantFields;
   _variantFieldCollisions = collisions ?? null;
   _importedVariantNames = importedNames ?? null;
@@ -148,6 +213,13 @@ export function setVariantFieldsForFile(
       _localVariantFields.set(name, fields);
     }
     for (const [name, fields] of PARSE_ERROR_VARIANT_FIELDS) {
+      if (!_localVariantFields.has(name)) _localVariantFields.set(name, [...fields]);
+    }
+    // S469 r2 — and `scrml:host`'s HostError (the `safeCall` / `safeCallAsync` failure), whose
+    // payload the runtime builds as `{ message, name }` (compiler/runtime/stdlib/host.js). A
+    // `!{ .Thrown(message, name) :> … }` arm binds by it; the binder planner no longer guesses
+    // a field list from the binder NAMES when none is visible.
+    for (const [name, fields] of HOST_ERROR_VARIANT_FIELDS) {
       if (!_localVariantFields.has(name)) _localVariantFields.set(name, [...fields]);
     }
   }
@@ -175,7 +247,8 @@ export function setVariantFieldsForFile(
  * the server pass (which publishes no per-file registry) still resolves it.
  */
 let _sqlErrorSchemaDepth = 0;
-const _sqlErrorSchema: ReadonlyMap<string, string[]> = new Map(SQL_ERROR_VARIANT_FIELDS.map(([n, f]) => [n, [...f]]));
+// S469 r2 — plus §8.9.4's `BatchPrepareFailed { sites }` (one declared field; impl#1 never produces it).
+const _sqlErrorSchema: ReadonlyMap<string, string[]> = new Map<string, string[]>([...SQL_ERROR_VARIANT_FIELDS.map(([n, f]): [string, string[]] => [n, [...f]]), ["BatchPrepareFailed", ["sites"]]]);
 export function enterSqlErrorSchema(): void { _sqlErrorSchemaDepth++; }
 export function exitSqlErrorSchema(): void { if (_sqlErrorSchemaDepth > 0) _sqlErrorSchemaDepth--; }
 
@@ -194,7 +267,15 @@ export function getErrorVariantFieldSchema(variantName: string): string[] | null
     const sqlFields = _sqlErrorSchema.get(variantName);
     if (sqlFields) return [...sqlFields];
   }
-  if (!_localVariantFields) return null;
+  if (!_localVariantFields) {
+    // S469 r2 — an emitter that publishes no per-file registry (library / tool mode) still knows
+    // the fixed ambient schemas (ParseError, HostError, Transport): the binder planner refuses
+    // rather than guesses when no field list is visible, so these must be visible everywhere.
+    for (const [name, fields] of [...PARSE_ERROR_VARIANT_FIELDS, ...HOST_ERROR_VARIANT_FIELDS]) {
+      if (name === variantName) return [...fields];
+    }
+    return null;
+  }
   if (_variantFieldCollisions && _variantFieldCollisions.has(variantName)
       && !(_importedVariantNames?.has(variantName) ?? false)) return null;
   return _localVariantFields.get(variantName) ?? null;
@@ -468,6 +549,54 @@ function detectHistoryFormFromString(rhs: string): { isHistoryForm: boolean; str
 // ---------------------------------------------------------------------------
 // i87 §13.2 — position-invariant auto-await body opts
 // ---------------------------------------------------------------------------
+
+/**
+ * S469 (g-server-return-match-failable-subject-unawaited-s469) — THE one context a `match`
+ * SUBJECT is lowered in, for every match lowering (the value IIFE `emitMatchExpr`, the
+ * statement / declaration inline lowerings, the multi-scrutinee forms). Whether the subject is
+ * awaited is decided in ONE place — `emitCall`, from the async facts this context carries —
+ * so every position agrees with what a plain statement of the same body would emit.
+ *
+ * Before: each lowering hand-built its own header context. The value IIFE's carried no async
+ * fact at all, so `return match check(k) { .Denied(r) :> … else :> "ok" }` in a SERVER function
+ * emitted `const _scrml_match_3 = check(k);` — a Promise, whose tag reads `.Ok` — and a DENIED
+ * input ran `else` (200 "ok"); the statement lowering had been patched with its own list
+ * (g-server-statement-match-failable-subject-unawaited-s468).
+ *
+ * `opts` is either a statement's options (`EmitLogicOpts` — the facts come from
+ * `exprCtxOfLogicOpts`, the same builder every statement expression uses) or, for a `match`
+ * nested inside an expression, the enclosing `EmitExprContext` (it already carries the facts its
+ * builder put there; its own `mode` is kept). The IIFE header is chosen afterwards from the
+ * emitted bytes (`_iifeHasOwnAwait`), so an awaited subject makes the value IIFE `async` and
+ * awaited — which is legal exactly where `emitCall` chose to await (a sync callback sets
+ * `peerAwaitable = false`, so no `await` is emitted there).
+ */
+export function matchSubjectCtx(opts: any, mode: "client" | "server"): EmitExprContext {
+  if (!opts) return { mode };
+  // The expression-position bridge (emit-expr.ts `emitMatchExpr`) hands the arms a bare options
+  // object and the enclosing expression context separately.
+  if (opts.enclosingExprCtx) return { ...(opts.enclosingExprCtx as EmitExprContext) };
+  if (typeof opts.mode === "string" && opts.boundary === undefined) return { ...(opts as EmitExprContext) };
+  return { ...exprCtxOfLogicOpts(opts), mode };
+}
+
+/**
+ * S469 — the async facts a match ARM's expressions are lowered with (the arm context keeps the
+ * match's own mode and engine extras; only these travel): `hostAsyncFacts` plus the server peer
+ * sets and the sync-callback accumulator. Read from the statement options, or — for a match the
+ * expression bridge lowers — from the enclosing expression context.
+ */
+export function matchArmAsyncFacts(opts: any): Partial<EmitExprContext> {
+  const src = opts?.enclosingExprCtx ?? opts;
+  if (!src) return {};
+  return {
+    ...hostAsyncFacts(src),
+    serverFnNames: src.serverFnNames ?? null,
+    serverFnPeerAliasNames: src.serverFnPeerAliasNames ?? null,
+    serverFnPeerDispatchObjs: src.serverFnPeerDispatchObjs ?? null,
+    syncPeerCalls: src.syncPeerCalls ?? null,
+  };
+}
 
 /**
  * S465 (fix round 1) — the client async FACTS that travel WITH the host-async flag
@@ -2981,7 +3110,7 @@ function emitMultiScrutineeMatch(
   for (let i = 0; i < N; i++) {
     const valVar = genVar("scrut");
     const tagVar = genVar("tag");
-    const exprText = emitExprField(scrutineeExprs[i], rawScrutinees[i] ?? "", matchCtx);
+    const exprText = emitExprField(scrutineeExprs[i], rawScrutinees[i] ?? "", matchSubjectCtx(opts, matchMode));
     lines.push(`  const ${valVar} = ${exprText};`);
     lines.push(`  const ${tagVar} = (${valVar} != null && typeof ${valVar} === "object") ? ${valVar}.variant : ${valVar};`);
     valVars.push(valVar);
@@ -3328,6 +3457,11 @@ export function emitMatchExpr(node: any, opts?: any): string {
   const _matchMode: "client" | "server" = opts?.boundary === "server" ? "server" : "client";
   const _matchCtx: EmitExprContext = {
     mode: _matchMode,
+    // S469 (g-server-return-match-failable-subject-unawaited-s469) — an arm VALUE that calls an
+    // async function is awaited like any expression of the body (`return match k { "a" :> isOk(p)
+    // ? "LOGGED IN" : "rejected" }` tested a pending Promise — always truthy). The IIFE header
+    // follows the emitted body (`_iifeHasOwnAwait`), so an awaited arm makes it async.
+    ...matchArmAsyncFacts(opts),
     // S462 (§19.9.9.7) — a CPS "cells" server batch records each cell write.
     ...(_matchMode === "server" && (opts as any)?.serverCellWrites ? { serverCellWrites: true } : {}),
     ...(engineCtx?.exprCtxExtras ?? {}),
@@ -3346,7 +3480,9 @@ export function emitMatchExpr(node: any, opts?: any): string {
     return emitMultiScrutineeMatch(node, _scrutineeExprs, _matchCtx, _matchMode, opts);
   }
 
-  const headerRaw = emitExprField(node.headerExpr, (node.header ?? "").trim(), _matchCtx);
+  // S469 — the subject is lowered in the one match-subject context (async facts included).
+  const _subjectCtx = matchSubjectCtx(opts, _matchMode);
+  const headerRaw = emitExprField(node.headerExpr, (node.header ?? "").trim(), _subjectCtx);
 
   const tmpVar = genVar("match");
 
@@ -3368,9 +3504,29 @@ export function emitMatchExpr(node: any, opts?: any): string {
   // §19.8.3 — a `match` on a `?{}` query's result IS its handler: a query that
   // fails to run must reach the arms as a SqlError variant, not throw past them.
   const _handlesSql = matchScrutineeHandlesSql(node.headerExpr, failableMatch, _matchMode);
-  const header = _handlesSql ? emitSqlQueryShape(sqlQueryExprShape(node.headerExpr)!, _matchCtx, true) : headerRaw;
+  const header = _handlesSql ? emitSqlQueryShape(sqlQueryExprShape(node.headerExpr)!, _subjectCtx, true) : headerRaw;
   // The arms' error type is SqlError (released before this function returns).
   if (_handlesSql) enterSqlErrorSchema();
+
+  // S469 (g-server-return-match-failable-subject-unawaited-s469) — an arm VALUE that calls a
+  // server function is awaited, as the declaration lowering's arms are (emit-logic.ts
+  // `_awaitMatchArmServerCalls`, the same pass): a client arm value is lowered from text, so
+  // `return match k { "a" :> isOk(p) ? "LOGGED IN" : "rejected" }` tested the pending Promise
+  // (always truthy) — and the body-level injector does not enter this IIFE. The await is legal:
+  // the pass fires only in an async body, and the IIFE header follows its emitted body.
+  const _armAwaitOpts = opts?.enclosingExprCtx?.logicOpts ?? opts;
+  const _valueArm = (text: string): string => {
+    // S469 r2 (HIGH 3) — an arm whose value is itself a `match` is lowered STRUCTURALLY, so its
+    // subject goes through the one subject context (`matchSubjectCtx`) like any match: as text
+    // (the client's `emitArmValue` path) `else :> match check(p) { … }` emitted the server call
+    // unawaited inside a sync IIFE — the Promise read as `.Ok` and a denied input logged in.
+    const nested = nestedMatchFromArmText(text);
+    if (nested) return emitMatchExpr(nested, opts);
+    const v = emitTypedArmResultCtor(text, node, _matchCtx) ?? emitArmValue(text, _matchCtx);
+    return _armAwaitOpts && typeof _armAwaitOpts === "object" && !("mode" in _armAwaitOpts)
+      ? _awaitMatchArmServerCalls(v, _armAwaitOpts)
+      : v;
+  };
 
   const iifeLines: string[] = [];
   // inline-sql-in-branch-cps (2026-06-01): a server-batch match-stmt may emit
@@ -3482,8 +3638,8 @@ export function emitMatchExpr(node: any, opts?: any): string {
       : inlineEngineWrite
         ? `{ ${bindingPrelude}${inlineEngineWrite.guardLines.join("\n")} }`
         : (bindingPrelude
-            ? `{ ${bindingPrelude}return ${(emitTypedArmResultCtor(arm.result, node, _matchCtx) ?? emitArmValue(arm.result, _matchCtx))}; }`
-            : `return ${(emitTypedArmResultCtor(arm.result, node, _matchCtx) ?? emitArmValue(arm.result, _matchCtx))};`);
+            ? `{ ${bindingPrelude}return ${_valueArm(arm.result)}; }`
+            : `return ${_valueArm(arm.result)};`);
 
     if (arm.kind === "wildcard") {
       if (arm.binding) {
@@ -3493,7 +3649,7 @@ export function emitMatchExpr(node: any, opts?: any): string {
           // block-body / errarm-refail re-`fail` cases).
           iifeLines.push(`  else { const ${arm.binding} = ${tmpVar}; ${emitResult} }`);
         } else {
-          iifeLines.push(`  else { const ${arm.binding} = ${tmpVar}; return ${(emitTypedArmResultCtor(arm.result, node, _matchCtx) ?? emitArmValue(arm.result, _matchCtx))}; }`);
+          iifeLines.push(`  else { const ${arm.binding} = ${tmpVar}; return ${_valueArm(arm.result)}; }`);
         }
       } else {
         iifeLines.push(`  else ${emitResult}`);
@@ -3615,11 +3771,10 @@ function emitMatchInline(node: any, opts?: any, multiArmBody?: (resultStr: strin
     // with the header, as on the `if` hop (`_ifExprCtx`): without them a statement `match
     // check(p) { … }` in a server function emitted `const _scrml_match_N = check(p);` with no
     // `await`, so the Promise read as `.Ok` and a wrong password logged in (200 LOGGED IN).
-    ...hostAsyncFacts(opts),
-    serverFnNames: opts?.serverFnNames ?? null,
-    serverFnPeerAliasNames: opts?.serverFnPeerAliasNames ?? null,
-    serverFnPeerDispatchObjs: opts?.serverFnPeerDispatchObjs ?? null,
-    syncPeerCalls: opts?.syncPeerCalls ?? null,
+    // The arm bodies keep these facts (`matchArmAsyncFacts`, shared with the value IIFE); the
+    // SUBJECT is lowered in `matchSubjectCtx` (S469, g-server-return-match-failable-subject-
+    // unawaited-s469), the one context every lowering shares.
+    ...matchArmAsyncFacts(opts),
     // S462 (§19.9.9.7) — a CPS "cells" server batch records each cell write.
     ...(_matchMode === "server" && (opts as any)?.serverCellWrites ? { serverCellWrites: true } : {}),
     ...(engineCtx?.exprCtxExtras ?? {}),
@@ -3633,7 +3788,8 @@ function emitMatchInline(node: any, opts?: any, multiArmBody?: (resultStr: strin
     return emitMultiScrutineeMatchStmt(node, _scrutineeExprs, _matchCtx, engineCtx, _matchMode, opts, multiArmBody);
   }
 
-  const headerRaw = emitExprField(node.headerExpr, (node.header ?? "").trim(), _matchCtx);
+  const _subjectCtx = matchSubjectCtx(opts, _matchMode);
+  const headerRaw = emitExprField(node.headerExpr, (node.header ?? "").trim(), _subjectCtx);
   const tmpVar = genVar("match");
   const arms = collectMatchArms(node.body ?? [], opts);
   if (arms.length === 0) {
@@ -3646,7 +3802,7 @@ function emitMatchInline(node: any, opts?: any, multiArmBody?: (resultStr: strin
   const needsTagNormalization = failableMatch || hasPayloadBindingOrTaggedVariant(arms, subjectVariants);
   const tagVar = needsTagNormalization ? genVar("tag") : tmpVar;
   const _handlesSql = matchScrutineeHandlesSql(node.headerExpr, failableMatch, _matchMode);
-  const header = _handlesSql ? emitSqlQueryShape(sqlQueryExprShape(node.headerExpr)!, _matchCtx, true) : headerRaw;
+  const header = _handlesSql ? emitSqlQueryShape(sqlQueryExprShape(node.headerExpr)!, _subjectCtx, true) : headerRaw;
   if (_handlesSql) enterSqlErrorSchema();
 
   const lines: string[] = [];
@@ -3786,7 +3942,7 @@ function emitMultiScrutineeMatchStmt(
   for (let i = 0; i < N; i++) {
     const valVar = genVar("scrut");
     const tagVar = genVar("tag");
-    const exprText = emitExprField(scrutineeExprs[i], rawScrutinees[i] ?? "", matchCtx);
+    const exprText = emitExprField(scrutineeExprs[i], rawScrutinees[i] ?? "", matchSubjectCtx(opts, matchMode));
     lines.push(`const ${valVar} = ${exprText};`);
     lines.push(`const ${tagVar} = (${valVar} != null && typeof ${valVar} === "object") ? ${valVar}.variant : ${valVar};`);
     valVars.push(valVar);
@@ -4094,6 +4250,11 @@ function emitNoLowerableArms(node: any, opts: any): string {
  * `_scrml_effect` (invalid JS). When the text does not parse, the token scan
  * below decides, erring toward async exactly as before.
  */
+/** S469 — exported for the text-lowered match (rewrite.ts `rewriteMatchExpr`): one IIFE-header rule. */
+export function iifeLinesHaveOwnAwait(iifeLines: string[]): boolean {
+  return _iifeHasOwnAwait(iifeLines);
+}
+
 function _iifeHasOwnAwait(iifeLines: string[]): boolean {
   const precise = fnTextHasOwnAwait("(async function() {\n" + iifeLines.slice(1).join("\n"));
   if (precise !== null) return precise;
@@ -4263,6 +4424,8 @@ export function hasPayloadBindingOrTaggedVariant(
   // is safe and under-including is the F16 never-matches miscompile.
   const isPayload = (t: string): boolean =>
     (_variantFields?.has(t) ?? false) || (subject?.get(t) != null);
+  // S469 r6 — a whole-error binder is always an envelope: always dispatch on its tag.
+  if (isWholeErrorBinderSubject(subject)) return true;
   return arms.some(a => {
     if (a.kind !== "variant") return false;
     if (a.binding) return true;
@@ -4361,7 +4524,41 @@ export function emitTypedArmResultCtor(result: string, matchNode: any, ctx: Emit
   return emitExpr(node, ctx);
 }
 
+/**
+ * S469 r6 (HIGH-B) — the whole-error binders `_ e :>` in scope while their arm body is emitted, each
+ * with the handled call's error enum (TS `__guardErrorVariants`, identity-resolved). A `match e`
+ * on such a binder binds by THAT enum's fields: before, the arm text was re-read with no subject
+ * type and the payload binders fell back to the file's by-NAME registry, so a local
+ * `AuthErr { Denied(note) }` read `data.note` off an imported `AuthErr { Denied(reason) }` payload.
+ * (TS refuses any other use of the binder, and any re-declaration of its name inside the arm.)
+ */
+const _wholeBinderScope: Array<{ name: string; fields: SubjectVariantFields }> = [];
+const _wholeBinderSubjects = new WeakSet<SubjectVariantFields>();
+export function pushWholeErrorBinder(name: string, fields: SubjectVariantFields | null): void {
+  const f: SubjectVariantFields = fields ? new Map(fields) : new Map();
+  _wholeBinderSubjects.add(f);
+  _wholeBinderScope.push({ name, fields: f });
+}
+export function popWholeErrorBinder(): void { _wholeBinderScope.pop(); }
+/** The fields of the whole-error binder a match subject names (a bare identifier), or null. */
+export function wholeErrorBinderFields(subject: unknown): SubjectVariantFields | null {
+  let name: string | null = null;
+  if (typeof subject === "string") { const t = subject.trim(); if (/^[A-Za-z_$][\w$]*$/.test(t)) name = t; }
+  else if (subject && typeof subject === "object" && (subject as { kind?: string }).kind === "ident") name = String((subject as { name?: string }).name ?? "");
+  if (!name) return null;
+  for (let i = _wholeBinderScope.length - 1; i >= 0; i--) if (_wholeBinderScope[i].name === name) return _wholeBinderScope[i].fields;
+  return null;
+}
+/** Is this subject map a whole-error binder's (its values are always `{ variant, data }` envelopes)? */
+export function isWholeErrorBinderSubject(subject: SubjectVariantFields | null | undefined): boolean {
+  return !!subject && _wholeBinderSubjects.has(subject);
+}
+
 export function getMatchSubjectVariantFields(node: any): SubjectVariantFields | null {
+  const _wb = node && (node.subject !== undefined || node.headerExpr !== undefined || typeof node.header === "string")
+    ? wholeErrorBinderFields(node.subject ?? node.headerExpr ?? node.header)
+    : null;
+  if (_wb) return _wb;
   const list = node?.__matchSubjectVariants;
   if (!Array.isArray(list) || list.length === 0) return null;
   const out: SubjectVariantFields = new Map();
@@ -4488,35 +4685,126 @@ export function emitVariantBindingPrelude(
   // In an error context (a failable-result match, TS did not resolve the error
   // enum) the fallback is the ERROR registry — local + ambient ParseError, never
   // an unrelated imported enum's same-named variant (S438 review F1).
-  // Error contexts never read the subject: they keep the pre-F11 by-name error
-  // lookup, the same one the `fail` producer uses (S438 review N2).
-  const fromSubject = subject != null && subject.has(variantName) && !errorContext;
+  // S469 r2 — an error context READS the subject too. TS stamps a failable subject with its
+  // callee's DECLARED error enum (`stampFailableMatchSubject`), and the `fail` producer now keys its
+  // payload by that same declaring enum in every file (`getEnumVariantFieldSchema`), so the two
+  // agree across files. (S438 review N2 kept error contexts on the by-name lookup because the
+  // producer used it; the producer moved, so the reader follows it.) A unit variant is `[]`
+  // fields, so a binder on it is an arity error, not an unknown order.
+  const fromSubject = subject != null && subject.has(variantName);
+  // S469 r6 — a whole-error binder's subject is its enum and nothing else: no by-name fallback.
+  const wholeBinder = isWholeErrorBinderSubject(subject);
   const fieldSchema = fromSubject
-    ? (subject!.get(variantName) ?? null)
-    : errorContext
-      ? getErrorVariantFieldSchema(variantName)
-      : (_variantFields?.get(variantName) ?? null);
-  const ambiguous = fromSubject || errorContext ? false : (_variantFieldCollisions?.has(variantName) ?? false);
+    ? (subject!.get(variantName) ?? [])
+    : wholeBinder
+      ? null
+      : errorContext
+        ? getErrorVariantFieldSchema(variantName)
+        : (_variantFields?.get(variantName) ?? null);
+  const ambiguous = fromSubject || errorContext || wholeBinder ? false : (_variantFieldCollisions?.has(variantName) ?? false);
 
-  const statements: string[] = [];
-  for (let i = 0; i < bindings.length; i++) {
-    const b = bindings[i];
-    if (b.discard) continue;
-    let fieldName: string | null = b.sourceField;
-    if (!fieldName) {
-      // Positional — resolve against the declared field order.
-      if (fieldSchema && !ambiguous && i < fieldSchema.length) {
-        fieldName = fieldSchema[i];
-      } else {
-        statements.push(
-          `/* §1a: cannot positionally bind '${b.localName}' — variant '${variantName}' field order unknown${ambiguous ? " (ambiguous across enums)" : ""} */`,
-        );
-        continue;
-      }
-    }
-    statements.push(`const ${b.localName} = ${tmpVar}.data.${fieldName};`);
+  // S469 — one binder planner for every match lowering (structured here, text-lowered in
+  // rewrite.ts). An unresolvable binder is a compile-time refusal, never a comment + an unbound
+  // name (a runtime ReferenceError) or a silently `undefined` field.
+  const plan = planPayloadBinders(variantName, arm.binding, bindings, fieldSchema, ambiguous, errorContext === true);
+  if ("refusal" in plan) {
+    recordRefusedLowering(new CGError(plan.refusal.code, plan.refusal.message, currentLoweringSpan() as object), null);
+    return "";
   }
+  const statements = plan.binds.map((b) =>
+    `const ${b.local} = ${tmpVar}.data${b.field === null ? "" : "." + b.field};`);
   return statements.length > 0 ? statements.join(" ") + " " : "";
+}
+
+/** A payload binder resolved to the `.data` field it reads (`null` = the whole `.data`). */
+export interface PlannedPayloadBind { local: string; field: string | null }
+export interface PayloadBinderRefusal { code: "E-TYPE-021" | "E-TYPE-022" | "E-TYPE-027"; message: string }
+
+/** `. Circle ( r )` (token-joined arm text) → `.Circle(r)`, for a diagnostic. */
+export function compactArmPatternText(text: string): string {
+  return String(text).replace(/\s+/g, " ").trim()
+    .replace(/\.\s+(?=[A-Za-z_$])/g, ".")
+    .replace(/\s*\(\s*/g, "(").replace(/\s*\)/g, ")")
+    .replace(/\s*,\s*/g, ", ").replace(/\s*:\s*/g, ": ");
+}
+
+/**
+ * S469 (g-server-return-match-failable-subject-unawaited-s469, binder half) — resolve a variant
+ * arm's payload binders to `.data` fields, by SPEC §18.7, for every match lowering: the
+ * structured value / statement / declaration lowerings (`emitVariantBindingPrelude`) and the
+ * text lowering (rewrite.ts `rewriteMatchExpr`).
+ *
+ *   - mixed positional + named binders → E-TYPE-021 (§18.7 "Mixed positional + named form is
+ *     FORBIDDEN");
+ *   - a known field list (`schema`, not ambiguous): positional binders bind left-to-right in
+ *     declaration order and must number exactly the fields (E-TYPE-021: "Positional arity
+ *     mismatch (too few or too many bindings) SHALL be a compile error"); a named binder must
+ *     name a declared field (E-TYPE-022);
+ *   - no known field list: a named binder reads the field it names (as before); a single
+ *     positional binder of impl#1's synthesized CPS transport variants (`NetworkError` /
+ *     `ServerError`, `CPS_AMBIENT_ERROR_VARIANTS`) in an ERROR context binds the whole `.data`;
+ *     any other positional binder is E-TYPE-027 — the compiler cannot tell which enum's field
+ *     order to use, and never guesses (S469 r2: the whole-`.data` guess for an imported error
+ *     enum bound the keyed object and a denied input logged in).
+ *
+ * Before: an unresolvable positional binder emitted `/* §1a: cannot positionally bind … *\/` and
+ * left the name unbound (a ReferenceError when the arm used it), an extra binder was silently
+ * dropped the same way, and a misspelled named binder read `undefined`.
+ */
+export function planPayloadBinders(
+  variantName: string,
+  bindingText: string,
+  bindings: PayloadBinding[],
+  schema: string[] | null,
+  ambiguous: boolean,
+  errorContext: boolean,
+): { binds: PlannedPayloadBind[] } | { refusal: PayloadBinderRefusal } {
+  const pattern = compactArmPatternText(`.${variantName}(${bindingText})`);
+  const named = bindings.filter((b) => b.sourceField !== null);
+  const known = schema !== null && !ambiguous;
+  const fieldList = known ? schema!.map((f) => `\`${f}\``).join(", ") : "";
+  if (named.length > 0 && named.length < bindings.length) {
+    return { refusal: { code: "E-TYPE-021", message:
+      `E-TYPE-021: the arm pattern \`${pattern}\` mixes positional and named payload binders. ` +
+      `Pick one form (§18.7): positional binds every field in declaration order; named (\`field: local\`) binds the fields it names.` } };
+  }
+  const binds: PlannedPayloadBind[] = [];
+  if (named.length > 0) {
+    for (const b of bindings) {
+      if (known && !schema!.includes(b.sourceField!)) {
+        return { refusal: { code: "E-TYPE-022", message:
+          `E-TYPE-022: the arm pattern \`${pattern}\` names the payload field \`${b.sourceField}\`, but \`${variantName}\` ` +
+          (schema!.length > 0 ? `declares ${fieldList}` : "declares no payload fields") + ` (§18.7). Name a declared field.` } };
+      }
+      if (!b.discard) binds.push({ local: b.localName, field: b.sourceField });
+    }
+    return { binds };
+  }
+  if (known) {
+    if (bindings.length !== schema!.length) {
+      return { refusal: { code: "E-TYPE-021", message:
+        `E-TYPE-021: the arm pattern \`${pattern}\` gives ${bindings.length} positional binder${bindings.length === 1 ? "" : "s"}, but ` +
+        `\`${variantName}\` has ${schema!.length} payload field${schema!.length === 1 ? "" : "s"}` + (schema!.length > 0 ? ` (${fieldList})` : "") +
+        `. Positional binding binds every field, in declaration order (§18.7); to bind some of them, use named binders (\`field: local\`).` } };
+    }
+    bindings.forEach((b, i) => { if (!b.discard) binds.push({ local: b.localName, field: schema![i] }); });
+    return { binds };
+  }
+  // S469 r2 — the whole `.data` only for impl#1's synthesized CPS transport variants (their
+  // envelope's `{ message, fn }` object IS the payload the SPEC's examples read). Any other variant
+  // with no visible field list is refused below: binding the whole `.data` guessed the shape, and a
+  // keyed producer in another file (`data: { reason: "bad" }`) made `x == "bad"` false — a denied
+  // input logged in.
+  if (errorContext && bindings.length === 1 && CPS_AMBIENT_ERROR_VARIANTS.has(variantName)) {
+    if (!bindings[0].discard) binds.push({ local: bindings[0].localName, field: null });
+    return { binds };
+  }
+  if (bindings.every((b) => b.discard)) return { binds };
+  return { refusal: { code: "E-TYPE-027", message:
+    `E-TYPE-027: the arm pattern \`${pattern}\` binds the payload by position, but the compiler cannot tell which ` +
+    `enum's \`${variantName}\` the subject holds` + (ambiguous ? ` (two enums in scope declare \`${variantName}\` with different fields)` : "") +
+    `, so it does not know the field order (§18.7, §18.13). Use named binders — \`.${variantName}(<field>: <local>)\` — ` +
+    `or make the enum visible here (import it, or give the subject a declared enum type).` } };
 }
 
 // ---------------------------------------------------------------------------

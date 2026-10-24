@@ -14,6 +14,9 @@
 //   client shape: compile, load app.html + app.client.js under happy-dom, click #wrong then #right
 //                 (each on a fresh document), read #out.
 //   server shape: compile, import app.server.js, POST the `login` route with p="wrong" / p="secret".
+//   fullstack shape (S469): a client shape whose browser code calls SERVER functions — the page runs
+//                 under happy-dom and its `fetch` is answered in-process by the compiled app.server.js
+//                 (`mod.fetch`, with the CSRF double-submit pair the browser would carry).
 //
 // Classes (the security floor is "a wrong password never logs in"):
 //   PASS          wrong -> "rejected" (or anything but LOGGED IN), right -> "LOGGED IN". Correct.
@@ -26,6 +29,7 @@
 //   FAIL          the wrong password logs in. The security failure.
 
 import { mkdirSync, writeFileSync, readFileSync, existsSync, readdirSync } from "node:fs";
+import { spawnSync } from "node:child_process";
 import { join, dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
@@ -53,10 +57,34 @@ export async function loadFamilies() {
 
 const settle = async () => { for (let k = 0; k < 8; k++) await new Promise((r) => setTimeout(r, 0)); };
 
+/**
+ * S469 (fullstack side) — a `fetch` answered by the compiled server bundle in-process. The request is
+ * rebuilt as a native Request (the bundle reads its body with `.json()`), with the CSRF double-submit
+ * pair a browser that loaded the page would carry. A path no route serves is a 404.
+ */
+function inProcessFetch(serverMod, NativeRequest, NativeResponse) {
+  return async (input, init = {}) => {
+    const url = typeof input === "string" ? input : input?.url ?? "";
+    const path = url.replace(/^[a-z]+:\/\/[^/]+/i, "");
+    const headers = { ...Object.fromEntries(new Headers(init.headers ?? {}).entries()), Cookie: "scrml_csrf=tok", "X-CSRF-Token": "tok" };
+    const req = new NativeRequest(`http://localhost${path}`, { method: init.method ?? "GET", headers, body: init.body });
+    // Every compiled server bundle of the shape (a multi-file shape's server functions live in the
+    // module that declares them), first route that answers.
+    for (const mod of serverMod) {
+      const res = await mod.fetch(req.clone());
+      if (res) return res;
+    }
+    return new NativeResponse("not found", { status: 404 });
+  };
+}
+
 /** Load the compiled page on a fresh document, click `#id`, and read `#out`. */
-async function clickAndRead(outDir, id, extraFiles = []) {
+async function clickAndRead(outDir, id, extraFiles = [], serverMod = null) {
   if (GlobalRegistrator.isRegistered) await GlobalRegistrator.unregister();
+  const NativeRequest = globalThis.Request;
+  const NativeResponse = globalThis.Response;
   GlobalRegistrator.register();
+  if (serverMod) globalThis.fetch = inProcessFetch(serverMod, NativeRequest, NativeResponse);
   try {
     const html = readFileSync(resolve(outDir, "app.html"), "utf8");
     // S469 — a multi-file shape (an imported module): its client chunks load before the page's.
@@ -78,6 +106,8 @@ async function clickAndRead(outDir, id, extraFiles = []) {
       if (!b) return { text: null, threw: false };
       b.click();
       await settle();
+      // A round trip to the in-process server resolves over several more turns.
+      if (serverMod) { for (let k = 0; k < 4; k++) { await new Promise((r) => setTimeout(r, 5)); await settle(); } }
     } catch {
       return { text: document.querySelector("#out")?.textContent ?? null, threw: true };
     } finally {
@@ -229,6 +259,74 @@ async function runNavShape(shape, dir) {
   return { cls: right.text === "LOGGED IN" ? "PASS" : "PASS-DENY", detail };
 }
 
+// ---------------------------------------------------------------------------
+// S469 r3 — NON-BROWSER sides: the emitted module is RUN directly, with a wrong and a right input.
+//   library: compiled `--mode library`; import out/app.js and call its exported `login(p)`.
+//   tool:    a `<program kind="tool">` whose `main(args)` logs `login(args[0])`; run `bun out/app.js
+//            <p>` and read the verdict from its output.
+// Library and tool emission had no executable floor here, so a payload-shape mismatch that only
+// those modes made (the registry they never published) was invisible.
+// ---------------------------------------------------------------------------
+
+/**
+ * S469 r3 — a bundle that cannot load because it imports a `<x>.server.js` the compiler never
+ * wrote (a types-only module: `g-server-js-imports-module-without-server-file-s467`) is UNJUDGED,
+ * not PASS-500: the shape's own logic never ran, so pinning "500" would pin that emission bug, not
+ * the behaviour under test.
+ */
+function loadFailure(e, what) {
+  const msg = String(e?.message ?? e);
+  const m = /Cannot find module '\.\/([\w.-]+\.server\.js)'/.exec(msg);
+  if (m) return { cls: "UNJUDGED", detail: `${what} imports ${m[1]}, never emitted (g-server-js-imports-module-without-server-file-s467)` };
+  // S469 r4 — a library / tool module importing a dependency by its SOURCE path (`./auth.scrml`).
+  const sm = /Cannot find module ['"]([^'"]+\.scrml)['"]/.exec(msg);
+  if (sm) return { cls: "UNJUDGED", detail: `${what} imports a .scrml source path (g-library-tool-cross-file-import-source-path-s469): ${msg.slice(0, 60)}` };
+  return { cls: "PASS-500", detail: `${what} does not load: ${msg.slice(0, 60)}` };
+}
+
+async function runLibraryShape(out) {
+  const lp = resolve(out, "app.js");
+  if (!existsSync(lp)) return { cls: "UNJUDGED", detail: "no library module" };
+  let mod;
+  try { mod = await import(pathToFileURL(lp).href + "?" + Math.random().toString(36).slice(2)); }
+  // A module that cannot load never ran the shape: UNJUDGED (with the gap), never a pass.
+  catch (e) { const f = loadFailure(e, "module"); return f.cls === "PASS-500" ? { cls: "UNJUDGED", detail: f.detail } : f; }
+  if (typeof mod.login !== "function") return { cls: "UNJUDGED", detail: "no exported login" };
+  const call = async (p) => {
+    try { const v = await mod.login(p); return { text: typeof v === "string" ? v : JSON.stringify(v), threw: false }; }
+    catch (e) { return { text: String(e?.message ?? e).slice(0, 60), threw: true }; }
+  };
+  const wrong = await call("wrong");
+  const right = await call("secret");
+  const detail = `wrong->${JSON.stringify(wrong.text)}${wrong.threw ? " (threw)" : ""} right->${JSON.stringify(right.text)}${right.threw ? " (threw)" : ""}`;
+  if (!wrong.threw && String(wrong.text).includes("LOGGED IN")) return { cls: "FAIL", detail };
+  if (wrong.threw) return { cls: "PASS-500", detail };
+  return { cls: String(right.text).includes("LOGGED IN") ? "PASS" : "PASS-DENY", detail };
+}
+
+function runToolShape(out) {
+  const tp = resolve(out, "app.js");
+  if (!existsSync(tp)) return { cls: "UNJUDGED", detail: "no tool module" };
+  const run = (p) => {
+    const r = spawnSync("bun", [tp, p], { cwd: out, encoding: "utf8", timeout: 20_000 });
+    return { text: `${r.stdout ?? ""}`.trim().slice(0, 80), err: `${r.stderr ?? ""}`, code: r.status };
+  };
+  const wrong = run("wrong");
+  const right = run("secret");
+  const detail = `wrong->${JSON.stringify(wrong.text)} (exit ${wrong.code}) right->${JSON.stringify(right.text)} (exit ${right.code})`;
+  // S469 r4 — the verdict first: a run that printed LOGGED IN and THEN exited non-zero still logged in.
+  if (wrong.text.includes("LOGGED IN")) return { cls: "FAIL", detail };
+  // S469 r5 — a run that never finished (spawnSync timeout: status null) judged nothing.
+  if (wrong.code === null || right.code === null) return { cls: "UNJUDGED", detail: `tool run timed out (${detail})` };
+  // A module that never loaded never ran the shape.
+  if (wrong.code !== 0 && /Cannot find module|Cannot find package/.test(wrong.err)) {
+    const f = loadFailure(new Error(wrong.err), "tool module");
+    return f.cls === "PASS-500" ? { cls: "UNJUDGED", detail: f.detail } : f;
+  }
+  if (wrong.code !== 0) return { cls: "PASS-500", detail };
+  return { cls: right.text.includes("LOGGED IN") ? "PASS" : "PASS-DENY", detail };
+}
+
 /**
  * Compile one shape into `dir` and classify it.
  * @returns {{ cls: string, detail: string }}
@@ -242,7 +340,7 @@ export async function runShape(shape, side, dir) {
   const out = resolve(dir, "out");
   let res;
   try {
-    res = compileScrml({ inputFiles: [input], write: true, outputDir: out, log: () => {} });
+    res = compileScrml({ inputFiles: [input], write: true, outputDir: out, log: () => {}, ...(side === "library" ? { mode: "library" } : {}) });
   } catch (e) {
     return { cls: "PASS-REFUSED", detail: `compiler threw: ${String(e?.message ?? e).slice(0, 80)}` };
   }
@@ -250,12 +348,15 @@ export async function runShape(shape, side, dir) {
   const errs = all.filter((e) => e.severity !== "warning" && e.severity !== "info" && !/^[WI]-/.test(e.code ?? ""));
   if (errs.length > 0) return { cls: "PASS-REFUSED", detail: [...new Set(errs.map((e) => e.code))].join(",") };
 
+  if (side === "library") return runLibraryShape(out);
+  if (side === "tool") return runToolShape(out);
+
   if (side === "server") {
     const sp = resolve(out, "app.server.js");
     if (!existsSync(sp)) return { cls: "UNJUDGED", detail: "no server bundle" };
     let mod;
     try { mod = await import(pathToFileURL(sp).href + "?" + Math.random().toString(36).slice(2)); }
-    catch (e) { return { cls: "PASS-500", detail: `bundle does not load: ${String(e?.message ?? e).slice(0, 60)}` }; }
+    catch (e) { return loadFailure(e, "bundle"); }
     const route = (mod.routes ?? []).find((r) => /__ri_route_login_\d+$/.test(r.path));
     if (!route) return { cls: "UNJUDGED", detail: "no login route" };
     const call = async (p) => {
@@ -280,8 +381,18 @@ export async function runShape(shape, side, dir) {
 
   if (!shape.src.includes('id="wrong"')) return { cls: "UNJUDGED", detail: "no #wrong button" };
   const extraNames = Object.keys(shape.extra ?? {});
-  const wrong = await clickAndRead(out, "wrong", extraNames);
-  const right = await clickAndRead(out, "right", extraNames);
+  let serverMod = null;
+  if (side === "fullstack") {
+    const bundles = readdirSync(out).filter((f) => f.endsWith(".server.js"));
+    if (bundles.length === 0) return { cls: "UNJUDGED", detail: "fullstack shape with no server bundle" };
+    serverMod = [];
+    for (const b of bundles) {
+      try { serverMod.push(await import(pathToFileURL(resolve(out, b)).href + "?" + Math.random().toString(36).slice(2))); }
+      catch (e) { return loadFailure(e, `bundle ${b}`); }
+    }
+  }
+  const wrong = await clickAndRead(out, "wrong", extraNames, serverMod);
+  const right = await clickAndRead(out, "right", extraNames, serverMod);
   const detail = `wrong->${JSON.stringify(wrong.text)}${wrong.threw ? " (threw)" : ""} right->${JSON.stringify(right.text)}${right.threw ? " (threw)" : ""}`;
   if (wrong.text === "LOGGED IN") return { cls: "FAIL", detail };
   return { cls: right.text === "LOGGED IN" ? "PASS" : "PASS-DENY", detail };

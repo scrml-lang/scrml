@@ -12,12 +12,12 @@ import type { AsyncRoot, AsyncEscapeSite } from "./local-async-fns.ts";
 import { getNodes } from "./collect.ts";
 import { collectReactiveVarNames, collectLocalMapSetNames, buildFnReturnMapKinds } from "./reactive-deps.ts";
 import { collectChannelNodes, emitChannelServerJs, emitChannelWsHandlers, emitChannelWatchesServerBoot, collectChannelFunctionMap, collectChannelCellMap, filterChannelImportSpecifiers } from "./emit-channel.ts";
-import { serverRewriteEmitted, setVariantFieldsForRewriter, setProtectContextForRewriter, drainProtectInfosFromRewriter, setTenantContextForRewriter, drainTenantStripsFromRewriter, drainTenantAcrossesFromRewriter, drainTenantViolationsFromRewriter, setBoolColumnsForRewriter } from "./rewrite.js";
+import { serverRewriteEmitted, setVariantFieldsForRewriter, snapshotRewriterVariantFields, restoreRewriterVariantFields, setProtectContextForRewriter, drainProtectInfosFromRewriter, setTenantContextForRewriter, drainTenantStripsFromRewriter, drainTenantAcrossesFromRewriter, drainTenantViolationsFromRewriter, setBoolColumnsForRewriter } from "./rewrite.js";
 import { buildBoolColumnsFromFileAST, SERVER_BOOL_COERCE_HELPER } from "./bool-coerce.ts";
 import { SQL_ATTEMPT_FN, SERVER_SQL_ATTEMPT_HELPER, handledSqlGuardInner } from "./sql-attempt.ts";
 import { planBatchCellReturn, cpsCellsPrologue, cpsCellsEpilogue, cpsCellWriteStatement, cpsCellLocal, multiBatchReturnCell, cpsCarriedLocals, cpsCarriedFunctionIndices } from "./cps-cell-writes.ts";
 import { buildVariantFieldsRegistry, emitEnumVariantObjects, emitEnumLookupTables } from "./emit-client.js";
-import { setShadowedVariantNames } from "./emit-control-flow.ts";
+import { setShadowedVariantNames, setVariantFieldsForFile, snapshotVariantFieldsForFile, restoreVariantFieldsForFile } from "./emit-control-flow.ts";
 import { drainServerAmbientSessionRefusalErrors, setServerSessionContextSpan } from "./server-session-guard.ts";
 import { emitExpr, emitExprField, setServerAsyncClassifier, setServerPromiseTrap, ASSERT_SETTLED_FN, type EmitExprContext } from "./emit-expr.ts";
 import {
@@ -2393,10 +2393,16 @@ function parseArmBindings(raw: string | undefined | null): EndpointArmBinding[] 
  */
 export function generateServerJs(...args: Parameters<typeof generateServerJsImpl>): string {
   const prevTrap = setServerPromiseTrap(null);
+  // S469 r3 — restore the per-file variant registries runCG installed (on any exit), never clear
+  // them: the emitters after this one in the same file (library mode) key by them too.
+  const _variantSnap = snapshotVariantFieldsForFile();
+  const _rewriterSnap = snapshotRewriterVariantFields();
   try {
     return generateServerJsImpl(...args);
   } finally {
     setServerPromiseTrap(prevTrap);
+    restoreVariantFieldsForFile(_variantSnap);
+    restoreRewriterVariantFields(_rewriterSnap);
   }
 }
 
@@ -3171,9 +3177,18 @@ function generateServerJsImpl(
   // (event-handler / escape-hatch paths) lower to the canonical
   // `{ variant, data }` tagged-object literal. Mirrors the client setup in
   // emit-client.ts:generateClientJs. Released at the bottom of this function.
-  const { fields: _scrmlVariantFields, collisions: _scrmlVariantCollisions, shadowed: _scrmlShadowed, imported: _scrmlImportedOnly } =
+  const { fields: _scrmlVariantFields, collisions: _scrmlVariantCollisions, shadowed: _scrmlShadowed, imported: _scrmlImportedOnly, byEnum: _scrmlVariantsByEnum } =
     buildVariantFieldsRegistry(fileAST);
   setVariantFieldsForRewriter(_scrmlVariantFields, new Set([..._scrmlVariantCollisions, ..._scrmlShadowed, ..._scrmlImportedOnly]));
+  // S469 (g-server-return-match-failable-subject-unawaited-s469, binder half; and
+  // g-tool-context-match-loses-enum-field-order's server half) — the STRUCTURED registry too,
+  // exactly as generateClientJs publishes it. Without it the server pass resolved no payload
+  // field: `fail AuthErr::Denied("bad")` wrote the bare `data: "bad"` while every reader — the
+  // client's, and this file's own `.Denied(reason: r)` — reads `data.reason` (§51.3.2: the
+  // envelope's `.data` is field-keyed for single- AND multi-field variants), so a correctly
+  // written named binder bound `undefined` and a deny-list on it LOGGED IN; a positional binder
+  // (`.Denied(r)`) bound nothing (`/* §1a: cannot positionally bind */`, ReferenceError on use).
+  setVariantFieldsForFile(_scrmlVariantFields, _scrmlVariantCollisions, _scrmlImportedOnly, _scrmlVariantsByEnum);
   // S438 review N1/N3 — the local-shadowed names keep pre-F11 behaviour on the
   // server pass too (match binding + bare-dot constructors). S446 — imported-only
   // names are refused by the (untypeable) string-rewrite constructor path too.
@@ -8313,8 +8328,7 @@ function generateServerJsImpl(
   // generateClientJs (which runs after generateServerJs per codegen/index.ts)
   // will re-populate for its own pass; clearing here keeps state from leaking
   // when only the server emit runs (e.g. dry-run / partial pipelines).
-  setVariantFieldsForRewriter(null, null);
-  setShadowedVariantNames(null);
+  // (S469 r3 — the variant registries are restored by generateServerJs on exit, not cleared here.)
 
   // g-pure-module-server-emit (S207): server-import tree-shaking — prune pass.
   // Now that the full server body is assembled, decide which deferred local-

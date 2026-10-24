@@ -5203,7 +5203,7 @@ function emitMatchExpr(node: MatchExpr, ctx: EmitExprContext): string {
       scrutinees: [] as string[],
       body: node.rawArms.map((arm) => bridgeProductArm(arm)),
     };
-    return emitStructuredMatchExpr(bridgedMulti, { errors: ctx.errors });
+    return emitStructuredMatchExpr(bridgedMulti, { errors: ctx.errors, enclosingExprCtx: ctx });
   }
 
   // S462 review M1 — a match whose FIRST arm is a `given` arm was re-read by the statement
@@ -5229,7 +5229,12 @@ function emitMatchExpr(node: MatchExpr, ctx: EmitExprContext): string {
   // 2026-05-29) reaches CG diagnostics even from this expression-position
   // bridge. Without this, an unlowerable match in expression position would
   // emit the valid-JS placeholder silently and rely on the A parse gate alone.
-  return emitStructuredMatchExpr(bridgedNode, { errors: ctx.errors });
+  // S469 (g-server-return-match-failable-subject-unawaited-s469) — and the enclosing context, so
+  // the SUBJECT is lowered with this expression's async facts (`matchSubjectCtx`): without them
+  // `v = match check(p) { … }` / `String(match check(p) { … })` / `@c = match check(p) { … }` in a
+  // client function emitted `_scrml_fetch_check(p)` unawaited — a Promise, read as `.Ok` — and a
+  // DENIED login ran the success arm.
+  return emitStructuredMatchExpr(bridgedNode, { errors: ctx.errors, enclosingExprCtx: ctx });
 }
 
 /**

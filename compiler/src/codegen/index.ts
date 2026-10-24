@@ -71,7 +71,7 @@ import { compilationTenantSet, COMPILATION_TENANT_KEY, type CompilationTenantSet
 import { buildProtectContext } from "./protect-egress.ts";
 import { setBatchLoopHoists, setBatchInListCap, setVariantFieldsForFile, setShadowedVariantNames } from "./emit-control-flow.ts";
 import { drainMachineCodegenErrors, clearMachineCodegenErrors } from "./emit-machines.ts";
-import { generateClientJs, collectClientReferencedIdentsForAST, setImportedTypesForCodegen } from "./emit-client.js";
+import { generateClientJs, collectClientReferencedIdentsForAST, setImportedTypesForCodegen, buildVariantFieldsRegistry } from "./emit-client.js";
 import { generateLibraryJs } from "./emit-library.ts";
 import { resetRefusedLowerings, drainRefusedLowerings, recordRefusedLowering } from "./refused-lowering-errors.ts";
 import { dropCascadeOnlyErrors } from "./server-text-guard.ts";
@@ -2602,6 +2602,17 @@ export function runCG(input: CgInput): CgOutput {
       // install used to happen only at the top-level reactive-wiring step, so
       // every earlier reader saw the previous file's (or previous compile's) set.
       beginEmitLogicFile(fileAST, collectStructuralDeclNames(fileAST));
+      // S469 r3 — THE per-file variant registries (payload field lists by variant and by enum), for
+      // EVERY emitter of this file: browser client / server, library, tool, test, worker. A `fail`
+      // keys its payload and an arm binds its binders by them (and by the TS stamps, which are
+      // mode-independent). Library and tool mode never installed them, so a `fail` there wrote the
+      // bare value while a stamped reader read `data.<field>` → undefined → a denied input logged in.
+      {
+        const _vr = buildVariantFieldsRegistry(fileAST);
+        setVariantFieldsForFile(_vr.fields, _vr.collisions, _vr.imported, _vr.byEnum);
+        setShadowedVariantNames(_vr.shadowed, _vr.imported);
+        setVariantFieldsForRewriter(_vr.fields, new Set([..._vr.collisions, ..._vr.shadowed, ..._vr.imported]));
+      }
       // s430-emit-state-leak — emit-each's local-var counter is reset per each
       // block on the main path, but the lift/markup-value path allocates from it
       // without a reset, so its names depended on the previous file's last value.
@@ -3520,6 +3531,10 @@ export function runCG(input: CgInput): CgOutput {
     // s430-emit-state-leak — drop the last file's emit-logic state so no later
     // emitter (or the next compile in this process) can read it.
     endEmitLogicFile();
+    // S469 r3 — and the last file's variant registries (installed per file above).
+    setVariantFieldsForFile(null, null);
+    setShadowedVariantNames(null);
+    setVariantFieldsForRewriter(null, null);
     // §32 / §47 (S397) — drain the fail-closed `~` floor. DELIBERATELY here in the
     // `finally` and not at the loop tail: the tool (`outputs.set(filePath, toolOutput)`)
     // and library (`libOutput`) paths each leave the iteration by their own `continue`,

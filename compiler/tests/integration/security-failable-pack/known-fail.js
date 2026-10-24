@@ -20,6 +20,19 @@
 // callee position except a `const` alias by name (E-IMPL1-FAILABLE-FN-VALUE, an impl#1 limitation,
 // carried as `g-impl1-failable-fn-value-refused-s469`).
 export const KNOWN_FAIL = {
+  // S469 s469-server-return-match-await — a RENDER-time `match` (a markup interpolation, a derived cell) whose
+  // subject is a server call: there is no function body to await in, so the subject is the pending Promise
+  // (read as `.Ok`). The same class as a plain `${isOk(@pw) ? … : …}` (g-markup-gate-tests-server-call-promise)
+  // and `const <d> = isOk(@pw)` (g-derived-cell-rhs-server-call-renders-promise, ruling-gated). FAIL on base too.
+  "f1/render: markup interpolation": "g-render-match-async-subject-unawaited-s469: a markup `${match check(@pw) { … }}` cannot await its subject (render time); the Promise reads as `.Ok`",
+  // S469 r2 — a helper that IS async (it calls a server function) read in a render position: the `if=`
+  // gate and the derived cell test its pending Promise (always truthy); FAIL on base too. The
+  // interpolation twin is awaited (#391) and PASSes.
+  "f2/async helper, if= with &&": "g-markup-gate-tests-server-call-promise: an `if=` over an async-coloured helper tests its Promise",
+  "f2/async helper, bare if=": "g-markup-gate-tests-server-call-promise: an `if=` over an async-coloured helper tests its Promise",
+  "f2/async helper, derived cell": "g-derived-cell-rhs-server-call-renders-promise: a derived cell over an async-coloured helper holds its Promise",
+  "f1/render: derived cell": "g-render-match-async-subject-unawaited-s469: a derived `const <c> = match check(@pw) { … }` cannot await its subject (synchronous recompute); the Promise reads as `.Ok`",
+
   // S469 s469-lift-gate-staleness: EMPTY again. The 36 n23 entries of round 5 (a cell read inside a called
   // function; the value-indexed row side; a body local in a keyed row) owed to
   // g-lift-gate-placement-inherits-main-staleness-s469 are fixed: a lifted gate re-evaluates by re-running the
@@ -29,6 +42,30 @@ export const KNOWN_FAIL = {
 // Shapes this instrument CANNOT judge: client pages with no #wrong button (a client function calling
 // a SERVER `check`; the decision needs the server half run). Listed so the hole is named.
 export const UNJUDGED = {
+  // S469 r3 — the producer module imports the enum from a types-only module; its server bundle imports
+  // a `types.server.js` the compiler never writes, so the bundle cannot load and the shape never runs.
+  // Judged UNJUDGED (pack.js `loadFailure`), not pinned as PASS-500 — that would pin the emission bug.
+  "s5/producer imports the enum: return match, positional": "g-server-js-imports-module-without-server-file-s467",
+  "s5/producer imports the enum: return match, named": "g-server-js-imports-module-without-server-file-s467",
+  "s5/producer imports the enum: !{}, positional": "g-server-js-imports-module-without-server-file-s467",
+  "f2/producer imports the enum: return match, positional": "g-server-js-imports-module-without-server-file-s467",
+  "f2/producer imports the enum: return match, named": "g-server-js-imports-module-without-server-file-s467",
+  "f2/producer imports the enum: !{}, positional": "g-server-js-imports-module-without-server-file-s467",
+
+  // S469 r6 — r7-shapes.js cross-file `match e` shapes whose emitted bundle / module cannot load (the
+  // emission bugs named): judged UNJUDGED (pack.js `loadFailure`), never counted as a pass. The same
+  // shapes run (and PASS) where the bundle loads: s10 / f7 / t5 "B imported enum …".
+  "s10/B imported from a third file enum + local same-name, match e": "g-server-js-imports-module-without-server-file-s467",
+  "s10/B imported from a third file enum, no local enum, match e": "g-server-js-imports-module-without-server-file-s467",
+  "f7/B imported from a third file enum + local same-name, match e": "g-server-js-imports-module-without-server-file-s467",
+  "f7/B imported from a third file enum, no local enum, match e": "g-server-js-imports-module-without-server-file-s467",
+  "l5/B imported enum + local same-name, match e": "g-library-tool-cross-file-import-source-path-s469",
+  "l5/B imported enum, no local enum, match e": "g-library-tool-cross-file-import-source-path-s469",
+  "l5/B imported from a third file enum + local same-name, match e": "g-library-tool-cross-file-import-source-path-s469",
+  "l5/B imported from a third file enum, no local enum, match e": "g-library-tool-cross-file-import-source-path-s469",
+  "t5/B imported from a third file enum + local same-name, match e": "g-library-tool-cross-file-import-source-path-s469",
+  "t5/B imported from a third file enum, no local enum, match e": "g-library-tool-cross-file-import-source-path-s469",
+
   "n6/cli->srv expr direct": "no #wrong button: client -> server call, needs the server half",
   "n6/cli->srv stmt direct": "no #wrong button: client -> server call, needs the server half",
 };

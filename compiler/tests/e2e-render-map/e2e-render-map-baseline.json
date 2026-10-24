@@ -6,9 +6,9 @@
     "histogram": {
       "renders-empty": 19,
       "needs-server": 9,
-      "renders-clean": 259,
+      "renders-clean": 258,
       "compiles-but-throws": 22,
-      "fails-compile": 127,
+      "fails-compile": 128,
       "smell-detected-wrong": 1,
       "HARNESS-TIMEOUT": 1
     },
@@ -1473,19 +1473,31 @@
       "detail": {
         "compileErrorCodes": [
           "E-MATCH-012",
-          "E-TYPE-006"
+          "E-TYPE-006",
+          "E-TYPE-027"
         ],
         "compileErrorMessages": [
           "E-MATCH-012: Match on `T | not` type lacks a `not` arm and lacks an `else`/wildcard arm. Add a `not => ...` arm or an `_ => ...` wildcard to handle the absence case (§42).",
-          "E-TYPE-006: Non-exhaustive match over union type. Missing members: string. Add arms for the missing types, or add an `else` arm to handle them all."
+          "E-TYPE-006: Non-exhaustive match over union type. Missing members: string. Add arms for the missing types, or add an `else` arm to handle them all.",
+          "E-TYPE-027: the arm pattern `.Some(s)` binds the payload by position, but the compiler cannot tell which enum's `Some` the subject holds, so it does not know the field order (§18.7, §18.13). Use named binders — `.Some(<field>: <local>)` — or make the enum visible here (import it, or give the subject a declared enum type)."
         ]
       }
     },
     "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-match-payload-arity-033.scrml#empty": {
       "tier": "probe",
-      "state": "renders-clean",
-      "smells": [],
-      "seeded": false
+      "state": "fails-compile",
+      "smells": [
+        "D0-COMPILE-ERROR"
+      ],
+      "seeded": false,
+      "detail": {
+        "compileErrorCodes": [
+          "E-TYPE-021"
+        ],
+        "compileErrorMessages": [
+          "E-TYPE-021: the arm pattern `.Rect(w)` gives 1 positional binder, but `Rect` has 2 payload fields (`w`, `h`). Positional binding binds every field, in declaration order (§18.7); to bind some of them, use named binders (`field: local`)."
+        ]
+      }
     },
     "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-match-payload-named-032.scrml#empty": {
       "tier": "probe",

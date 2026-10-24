@@ -12,13 +12,14 @@ import { REFUSED_SERVER_TEXT } from "./server-text-guard.ts";
 import { bareBlockText, bareBlockSequenceTexts, PROBE_BODY_OFFSET } from "../validators/defer-structure.ts";
 import { armBlockStatementsDetailed } from "../arm-body-statements.ts";
 import { isWholeBraceBlock } from "../brace-pair.ts";
-import { emitIfStmt, emitForStmt, emitWhileStmt, emitDoWhileStmt, emitBreakStmt, emitContinueStmt, emitTryStmt, emitDeferScope, emitDeferRegistration, emitMatchExpr, emitMatchStmt, emitMultiScrutineeMatchInline, emitSwitchStmt, rewriteBlockBody, splitMultiArmString, parseMatchArm, matchArmInlineToMatchArm, emitVariantBindingPrelude, hasPayloadBindingOrTaggedVariant, getMatchSubjectVariantFields, isMatchSubjectFailable, getErrorVariantFieldSchema, emitTypedArmResultCtor, matchArmBlockToMatchArm, collectIfChainCond, isFailableOkMatch, isSqlFailableMatch, matchScrutineeHandlesSql, enterSqlErrorSchema, exitSqlErrorSchema, emitMatchTagDiscriminator, getVariantFieldSchema, armCondition, givenGuardToMatchArm, stampPropagateOperand, leaveStmtFromArmText, nestedMatchFromArmText, propagateOperandOfArmText, structureServerArm, emitArmValue, emitObjectLiteralArm, hostAsyncFacts, type MatchArm } from "./emit-control-flow.ts";
+import { emitIfStmt, emitForStmt, emitWhileStmt, emitDoWhileStmt, emitBreakStmt, emitContinueStmt, emitTryStmt, emitDeferScope, emitDeferRegistration, emitMatchExpr, emitMatchStmt, emitMultiScrutineeMatchInline, emitSwitchStmt, rewriteBlockBody, splitMultiArmString, parseMatchArm, matchArmInlineToMatchArm, emitVariantBindingPrelude, matchSubjectCtx, hasPayloadBindingOrTaggedVariant, getMatchSubjectVariantFields, pushWholeErrorBinder, popWholeErrorBinder, isMatchSubjectFailable, getErrorVariantFieldSchema, getEnumVariantFieldSchema, CPS_AMBIENT_ERROR_VARIANTS, planPayloadBinders, parseBindingList, emitTypedArmResultCtor, matchArmBlockToMatchArm, collectIfChainCond, isFailableOkMatch, isSqlFailableMatch, matchScrutineeHandlesSql, enterSqlErrorSchema, exitSqlErrorSchema, emitMatchTagDiscriminator, getVariantFieldSchema, armCondition, givenGuardToMatchArm, stampPropagateOperand, leaveStmtFromArmText, nestedMatchFromArmText, propagateOperandOfArmText, structureServerArm, emitArmValue, emitObjectLiteralArm, hostAsyncFacts, type MatchArm, type SubjectVariantFields } from "./emit-control-flow.ts";
 import { isDestructurePattern, nameOrPatternText } from "./emit-destructure-pattern.ts";
 import type { DefaultLowerer } from "./emit-destructure-pattern.ts";
 import { markDeclaredImmutable, markDeclaredMutable, tildeDeclIsRebind, clearLiftScope } from "./declared-name-marks.ts";
 import { emitLiftExpr, emitCreateElementFromMarkup, emitMarkupValueExpr, forHeadKeyword, loopBodyDeclaredNames } from "./emit-lift.js";
 import { extractReactiveDeps, extractReactiveDepsFromExprNode, extractReactiveDepsTransitive, isMapTypeAnnotation, type FunctionBodyRegistry } from "./reactive-deps.ts";
 import { emitStringFromTree, parseExprToNode, blankLiteralTextInSource } from "../expression-parser.ts";
+import { templateInterpolationPayloads } from "../interpolation-extent.ts";
 import type { EncodingContext, ResolvedType, StructType } from "./type-encoding.ts";
 import { emitRefinementCheck, refinementOf, emitParamGuardStatement, emitRefineExpr, judgeDescriptorExpr, describeJudgeType } from "./emit-predicates.ts";
 import { emitTransitionGuard } from "./emit-machines.ts";
@@ -689,7 +690,18 @@ function emitFailExpr(node: FailExprLike, opts: EmitLogicOpts): string {
     // stays `.data = <value>` so a reader in another file, which cannot type
     // the callee's error enum, still agrees with it (S438 review N2; the
     // field-keyed §51.3.2 shape for imported enums is residual (f)).
-    const schema = getErrorVariantFieldSchema(variant);
+    // S469 r2 — keyed by the DECLARING enum's fields, looked up by the enum name the `fail`
+    // writes (a local declaration or an imported enum): one shape in the declaring file and in
+    // every importer. The by-variant-name ERROR registry (local + ParseError) is the fallback for
+    // a name this file cannot resolve (an alias). Before, an importer's `fail` sent the bare value
+    // and the declaring file's the keyed object, so one of the two readers was always wrong.
+    // S469 r3 — FIRST the TS stamp (`__failVariantFields`, type-system.ts: the variant's fields from
+    // the TS-resolved enum, aliases followed) — the same source every reader's stamp comes from, and
+    // present in every emission mode. The per-file registry is the fallback for a `fail` the checker
+    // did not reach (an arm re-fail).
+    const _stamped = (node as { __failVariantFields?: string[] }).__failVariantFields;
+    const _byEnum = Array.isArray(_stamped) ? _stamped : (enumType ? getEnumVariantFieldSchema(enumType, variant) : undefined);
+    const schema = _byEnum !== undefined ? _byEnum : getErrorVariantFieldSchema(variant);
     // §51.3.2 / §19.3.2 — the error envelope's `.data` is a field-keyed object
     // whose keys are the variant's DECLARED payload field names, for BOTH single-
     // AND multi-field variants (matching the enum constructor `Shape.Circle(10)`
@@ -708,7 +720,11 @@ function emitFailExpr(node: FailExprLike, opts: EmitLogicOpts): string {
     } else {
       const props = argParts.map((a, i) => {
         const field = schema && i < schema.length ? schema[i] : `_${i}`;
-        return `${field}: ${emitExprField(null, a.trim(), _makeExprCtx(opts))}`;
+        // A single argument IS `argsExpr` — lowered from its tree (`row.balance`, not the
+        // token-joined text `row . balance`), as the unknown-schema branch above does.
+        const _argsNode = node.argsExpr as { kind?: string } | null | undefined;
+        const argNode = argParts.length === 1 && _argsNode && _argsNode.kind !== "escape-hatch" ? (_argsNode as Parameters<typeof emitExprField>[0]) : null;
+        return `${field}: ${emitExprField(argNode, a.trim(), _makeExprCtx(opts))}`;
       });
       data = `{ ${props.join(", ")} }`;
     }
@@ -1064,36 +1080,149 @@ function _anchorSpansAt(
  *   producer side, which likewise emits the bare `.data` value for a single
  *   unknown-schema arg, keeping the reader and writer in step.
  */
+/**
+ * S469 r3 — the §19 SHORT-FORM arm (`Denied :> e == "bad" ? … : …`): the parser synthesizes the
+ * binder `e` (ast-builder `implicitBinding`); the user wrote none. It binds the variant's payload by
+ * its declared field list, exactly as before S469 r2 for a one-field variant: `e` = that field
+ * (`data.reason`). Round 2 bound the whole `.data` (`{ reason: "bad" }`), so `e == "bad"` was false
+ * and a denied input logged in. With no single field to project — a unit or multi-field variant, or
+ * no visible field list — `e` is bound to nothing; an arm body that READS `e` then is refused
+ * (E-TYPE-021 / E-TYPE-027), never handed a guessed value. (§19.4.5 makes every `!{}` arm a §18.2
+ * match-arm, and §18.2 has no implicit binder: the synthesized `e` is impl#1's legacy reading of the
+ * short form, kept for the programs that use it, and pinned to the payload's one field.)
+ */
+/**
+ * S469 r4 (M-1) — does an arm body READ `name`? From the parsed arm (its identifier nodes, and the
+ * `${…}` of every template literal in it, read the same way); a body the expression reader cannot
+ * model falls back to a scan of its text with string literals blanked and each template literal's
+ * interpolations scanned. Blanking every literal (round 3) hid `\`${e}\``, so an arm that read the
+ * implicit `e` was not refused and bound an outer `e` instead.
+ */
+function armTextReadsName(text: string, name: string): boolean {
+  const t = text.trim();
+  if (!t) return false;
+  let node: unknown = null;
+  try { node = parseExprToNode(t, "<arm-body>", 0); } catch { node = null; }
+  if (node) return exprTreeMayReadName(node, name);
+  // Not an expression (a block body): a scan of the text — each template literal's interpolations
+  // read the same way, then the text with string literals blanked.
+  for (const m of t.matchAll(/`(?:[^`\\]|\\.)*`/g)) {
+    if (templateInterpolationPayloads(m[0].slice(1, -1)).some((pl) => armTextReadsName(pl, name))) return true;
+  }
+  const blanked = t.replace(/"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|`(?:[^`\\]|\\.)*`/g, '""');
+  return new RegExp(`(?<![.\\w$])${name}(?![\\w$])`).test(blanked);
+}
+
+/**
+ * S469 r5 (HIGH-2) — FAIL CLOSED: may this expression tree read `name`? True for an `ident` or an
+ * object `shorthand` of that name; the kinds it models are walked in full (a `match`'s raw arm texts
+ * go back through `armTextReadsName`, a template's interpolations likewise); ANY kind it does not
+ * model (a lambda, an escape hatch, markup, a reset, a query, …) answers true. Over-refusal is the
+ * safe side: a missed read binds an outer `e` and a deny-list on it logs a denied input in
+ * (`({ e }).e`, `(match "x" { "x" :> e, … })` were missed).
+ */
+function exprTreeMayReadName(node: unknown, name: string): boolean {
+  if (!node || typeof node !== "object") return false;
+  if (Array.isArray(node)) return node.some((x) => exprTreeMayReadName(x, name));
+  const r = node as Record<string, unknown>;
+  const kids = (...keys: string[]): boolean => keys.some((k) => exprTreeMayReadName(r[k], name));
+  switch (r.kind) {
+    case "ident": return r.name === name;
+    case "shorthand": return r.name === name;
+    case "lit": {
+      if (r.litType === "template" && typeof r.raw === "string" && (r.raw as string).includes("${")) {
+        const raw = r.raw as string;
+        const inner = raw.startsWith("`") && raw.endsWith("`") ? raw.slice(1, -1) : raw;
+        return templateInterpolationPayloads(inner).some((pl) => armTextReadsName(pl, name));
+      }
+      return false;
+    }
+    case "array": return kids("elements");
+    case "object": return kids("props");
+    case "prop": return (r.computed === true && kids("key")) || kids("value");
+    case "spread": return kids("argument", "expr", "value");
+    case "unary": return kids("argument", "operand", "expr");
+    case "binary": return kids("left", "right");
+    case "assign": return kids("target", "value", "left", "right");
+    case "ternary": return kids("condition", "test", "consequent", "alternate", "then", "else");
+    case "member": return kids("object");
+    case "index": return kids("object", "index", "property");
+    case "call": case "new": return kids("callee", "args", "arguments");
+    case "cast": return kids("expression", "expr", "value");
+    case "match-expr": {
+      if (kids("subject", "subjects")) return true;
+      const raw = r.rawArms;
+      if (Array.isArray(raw)) return raw.some((a) => typeof a !== "string" || armTextReadsName(a, name));
+      return true;
+    }
+    default: return true;
+  }
+}
+
+/** S469 r5 — the handled call's error enum is known to be UNRESOLVABLE (TS `__guardErrorUnknown`). */
+const UNKNOWN_ERROR_ENUM: SubjectVariantFields = new Map();
+
+function emitShortFormArmBinding(
+  arm: { binding?: string; handler?: string },
+  variantName: string,
+  resultVar: string,
+  subject: SubjectVariantFields | null,
+): string[] {
+  const local = (arm.binding ?? "").trim();
+  if (!local) return [];
+  const schema = subject === UNKNOWN_ERROR_ENUM
+    ? null
+    : subject && subject.has(variantName)
+      ? (subject.get(variantName) ?? [])
+      : getErrorVariantFieldSchema(variantName);
+  if (schema && schema.length === 1) return [`    const ${local} = ${resultVar}.data.${schema[0]};`];
+  if (!armTextReadsName(String(arm.handler ?? ""), local)) return [];
+  const code = schema ? "E-TYPE-021" : "E-TYPE-027";
+  const why = schema
+    ? `\`${variantName}\` has ${schema.length} payload field${schema.length === 1 ? "" : "s"}, so there is no single field to bind`
+    : `the compiler cannot tell which enum's \`${variantName}\` the handled call fails with, so it does not know its field order`;
+  recordRefusedLowering(new CGError(code,
+    `${code}: the short-form arm \`${variantName} :> …\` reads \`${local}\`, the payload it binds implicitly, but ${why} (§18.7). ` +
+    `Write the arm with explicit binders — \`.${variantName}(<field>: <local>)\` or \`.${variantName}(a, b)\` — or \`_ ${local} :>\` for the whole error (§18.6.1).`,
+    currentLoweringSpan() as object), null);
+  return [];
+}
+
 function emitGuardedArmBinding(
   binding: string,
   variantName: string,
   resultVar: string,
+  subject?: SubjectVariantFields | null,
 ): string[] {
   const names = binding.split(",").map((s) => s.trim()).filter((s) => s.length > 0 && s !== "_");
   if (names.length === 0) return [];
-  // S438 review F1 — the ERROR registry: exactly the pre-F11 lookup (local +
-  // ambient ParseError; an ambient CPS `NetworkError`/`ServerError` has no
-  // schema → whole `.data`), never an imported enum's same-named variant, which
-  // the by-name registry now also holds (F11). Same lookup as the `fail`
-  // producer, so producer and reader agree exactly as they did pre-F11.
-  const schema = variantName ? getErrorVariantFieldSchema(variantName) : null;
-  if (names.length === 1) {
-    // Declared single-field variant → project the field (§51.3.2). No schema
-    // (wildcard / ambient variant) → bind the whole `.data` payload.
-    if (schema && schema.length >= 1) {
-      return [`    const ${names[0]} = ${resultVar}.data.${schema[0]};`];
-    }
-    return [`    const ${names[0]} = ${resultVar}.data;`];
+  // S469 r5 — the whole-error binder `_ e :>` binds the WHOLE error value, variant and payload
+  // (SPEC §18.6.1; ruling:user-voice-scrml.md S469 "SPEC: whole error + refuse (Recommended)"): the
+  // envelope itself — a `match e { … }` dispatches it by `.variant` and binds its payload from
+  // `.data`, and passing it on keeps the variant. It bound only `.data` (`null` for a unit variant,
+  // so `@phase = .Failed(err)` then `match err` ran no arm). Reading a payload field off it or
+  // comparing it to a primitive is refused by the checker (E-TYPE-004 / E-EQ-001, type-system.ts).
+  if (!variantName) return [`    const ${names[0]} = ${resultVar};`];
+  // S469 r2 — the field list is the handled call's DECLARED error enum (TS stamps the guarded
+  // node, `__guardErrorVariants`; the `fail` producer keys its payload by the same declaring enum
+  // in every file); the by-name ERROR registry (local + ParseError) is the fallback. The binders are
+  // planned by the one §18.7 planner the `match` arms use (`planPayloadBinders`): positional by
+  // declared order, a mis-count E-TYPE-021, and — when no field list is visible — E-TYPE-027,
+  // except impl#1's CPS transport variants, whose `{ message, fn }` object binds whole. Before,
+  // an imported error enum's single binder bound the whole `.data` (a guess): against a keyed
+  // producer `x == "bad"` was false and a denied input logged in; a multi-binder used the binder
+  // NAMES as field names.
+  const schema = subject === UNKNOWN_ERROR_ENUM
+    ? null
+    : subject && subject.has(variantName)
+      ? (subject.get(variantName) ?? [])
+      : getErrorVariantFieldSchema(variantName);
+  const plan = planPayloadBinders(variantName, binding, parseBindingList(binding), schema, false, true);
+  if ("refusal" in plan) {
+    recordRefusedLowering(new CGError(plan.refusal.code, plan.refusal.message, currentLoweringSpan() as object), null);
+    return [];
   }
-  const out: string[] = [];
-  for (let i = 0; i < names.length; i++) {
-    if (names[i] === "_") continue;
-    // Multi-field always projects; fall back to binding-name-as-field when the
-    // schema is unknown (canonical usages name the binding to MATCH the field).
-    const field = schema && i < schema.length ? schema[i] : names[i];
-    out.push(`    const ${names[i]} = ${resultVar}.data.${field};`);
-  }
-  return out;
+  return plan.binds.map((b) => `    const ${b.local} = ${resultVar}.data${b.field === null ? "" : "." + b.field};`);
 }
 
 // ---------------------------------------------------------------------------
@@ -1318,6 +1447,17 @@ function serverParamDefaultLowerer(opts: EmitLogicOpts): DefaultLowerer | undefi
     ), null);
     return "null";
   };
+}
+
+/**
+ * The expression context a statement's options lower an expression in — every async fact
+ * (`serverFnNames`, peer aliases / dispatch tables, `clientAsyncFnNames` / `clientAsyncBody`, the
+ * stdlib classifier inputs, `syncPeerCalls`) travels with it. Exported for the `match` lowerings
+ * (emit-control-flow.ts `matchSubjectCtx`), whose subject must be lowered with the SAME facts a
+ * statement's own expressions are (S469, g-server-return-match-failable-subject-unawaited-s469).
+ */
+export function exprCtxOfLogicOpts(opts: EmitLogicOpts): EmitExprContext {
+  return _makeExprCtx(opts);
 }
 
 function _makeExprCtx(opts: EmitLogicOpts): EmitExprContext {
@@ -5160,6 +5300,17 @@ function _emitLogicNode(node: any, opts: EmitLogicOpts): string {
         const hasWildcard = arms.some((a: LogicArm) => a.pattern === "_");
         let isFirst = true;
         for (const arm of arms) {
+          // S469 r6 (HIGH-B) — while a whole-error binder's arm (`_ e :>`) is emitted, `e` is in
+          // scope with the handled call's identity-resolved error enum, so a `match e` in the body
+          // binds by THAT enum (never the file's same-named variant).
+          const _wholeBinder = arm.pattern === "_" && typeof arm.binding === "string" && arm.binding.trim() && arm.binding.trim() !== "_"
+            ? arm.binding.trim() : null;
+          if (_wholeBinder) {
+            pushWholeErrorBinder(_wholeBinder, (node as { __guardErrorUnknown?: boolean }).__guardErrorUnknown
+              ? null
+              : getMatchSubjectVariantFields({ __matchSubjectVariants: (node as { __guardErrorVariants?: unknown }).__guardErrorVariants }));
+          }
+          try {
           // §19.4.3 / §18.5 (S468) — a block arm ending in an expression yields
           // that expression: lowered from its parsed statements, tail into resultVar.
           let blockValueLines = emitBlockArmValueToResult(arm, resultVar, opts);
@@ -5189,10 +5340,19 @@ function _emitLogicNode(node: any, opts: EmitLogicOpts): string {
             const cond = `${resultVar}.variant === ${JSON.stringify(variantName)}`;
             lines.push(`  ${isFirst ? "if" : "else if"} (${cond}) {`);
             if (arm.binding && arm.binding !== "_") {
-              for (const l of emitGuardedArmBinding(arm.binding, variantName, resultVar)) lines.push(l);
+              const _subject = (node as { __guardErrorUnknown?: boolean }).__guardErrorUnknown
+                ? UNKNOWN_ERROR_ENUM
+                : getMatchSubjectVariantFields({ __matchSubjectVariants: (node as { __guardErrorVariants?: unknown }).__guardErrorVariants });
+              const _armLines = (arm as { implicitBinding?: boolean }).implicitBinding
+                ? emitShortFormArmBinding(arm, variantName, resultVar, _subject)
+                : emitGuardedArmBinding(arm.binding, variantName, resultVar, _subject);
+              for (const l of _armLines) lines.push(l);
             }
             for (const l of armLines(armIsExpr)) lines.push(l);
             lines.push(`  }`);
+          }
+          } finally {
+            if (_wholeBinder) popWholeErrorBinder();
           }
           isFirst = false;
         }
@@ -6992,7 +7152,8 @@ function emitMatchExprDecl(name: string, matchExpr: any, keyword: "let" | "const
   // Emit the match header into a temporary variable. The `const tmp = header`
   // line is a placeholder slot filled once the arms are known (§19.8.3: a match
   // on a `?{}` result evaluates its scrutinee through `_scrml_sql_attempt`).
-  const header = emitExprField(matchExpr.headerExpr, (matchExpr.header ?? "").trim(), _makeExprCtx(opts));
+  // S469 — the one match-subject context (emit-control-flow.ts `matchSubjectCtx`).
+  const header = emitExprField(matchExpr.headerExpr, (matchExpr.header ?? "").trim(), matchSubjectCtx(opts, opts.boundary === "server" ? "server" : "client"));
   const headerLineIdx = lines.length;
   lines.push(`const ${tmpVar} = ${header};`);
 

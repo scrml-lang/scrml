@@ -1,5 +1,5 @@
 import { genVar } from "./var-counter.ts";
-import { splitMultiArmString, parseMatchArm, parseBindingList } from "./emit-control-flow.ts";
+import { splitMultiArmString, parseMatchArm, parseBindingList, iifeLinesHaveOwnAwait, planPayloadBinders, compactArmPatternText, wholeErrorBinderFields, type PayloadBinderRefusal, type SubjectVariantFields } from "./emit-control-flow.ts";
 import { splitArmSeparatorCommas, armPiecesCover, rawArmHasStrayComma, rawArmHasLeadingPipeArm } from "../arm-list-split.ts";
 import { recordRefusedLowering } from "./refused-lowering-errors.ts";
 import { currentLoweringSpan } from "./sql-one-statement-guard.ts";
@@ -139,6 +139,15 @@ export interface RewriteContext {
 // — a string-as-function call (runtime TypeError, the surface of Bug 2).
 let _rewriterVariantFields: Map<string, string[]> | null = null;
 let _rewriterVariantFieldCollisions: Set<string> | null = null;
+
+/** S469 r3 — see emit-control-flow.ts `snapshotVariantFieldsForFile`. */
+export function snapshotRewriterVariantFields(): readonly unknown[] {
+  return [_rewriterVariantFields, _rewriterVariantFieldCollisions];
+}
+export function restoreRewriterVariantFields(snap: readonly unknown[]): void {
+  _rewriterVariantFields = snap[0] as Map<string, string[]> | null;
+  _rewriterVariantFieldCollisions = snap[1] as Set<string> | null;
+}
 
 export function setVariantFieldsForRewriter(
   variantFields: Map<string, string[]> | null,
@@ -1763,21 +1772,19 @@ function splitInlineArms(armsStr: string): string[] {
 
 /**
  * S469 r8 — `const local = <tmp>.data.<field>;` for a payload variant arm's binding list
- * (`.Circle(r)`, `.Rect(w: a, h: b)`, `_` discards), the field of a positional binder read from the
- * declared field order. null when a positional binder's field cannot be resolved (unknown or
- * ambiguous variant) — the caller refuses rather than bind the wrong field.
+ * (`.Circle(r)`, `.Rect(w: a, h: b)`, `_` discards), resolved by the ONE binder planner every
+ * match lowering uses (emit-control-flow.ts `planPayloadBinders`, SPEC §18.7). A binder it
+ * cannot resolve — an unknown / ambiguous variant's positional binder (E-TYPE-027), a binder
+ * count that is not the field count (E-TYPE-021), a named binder for a field the variant does not
+ * declare (E-TYPE-022) — is returned as a refusal; the caller records it and emits no binding.
  */
-function payloadBindingPrelude(variant: string, binding: string, tmpVar: string): string | null {
-  const bindings = parseBindingList(binding);
-  const schema = getVariantFieldSchemaFromRewriter(variant);
-  const out: string[] = [];
-  for (let i = 0; i < bindings.length; i++) {
-    const b = bindings[i];
-    if (b.discard) continue;
-    const field = b.sourceField || (schema && i < schema.length ? schema[i] : null);
-    if (!field) return null;
-    out.push(`const ${b.localName} = ${tmpVar}.data.${field};`);
-  }
+function payloadBindingPrelude(variant: string, binding: string, tmpVar: string, subject: SubjectVariantFields | null = null): string | PayloadBinderRefusal {
+  // S469 r6 — a whole-error binder subject (`match e`) binds by its own enum, never by name.
+  const schema = subject ? (subject.has(variant) ? (subject.get(variant) ?? []) : null) : getVariantFieldSchemaFromRewriter(variant);
+  const ambiguous = !subject && schema === null && !!_rewriterVariantFieldCollisions?.has(variant);
+  const plan = planPayloadBinders(variant, binding, parseBindingList(binding), schema, ambiguous, false);
+  if ("refusal" in plan) return plan.refusal;
+  const out = plan.binds.map((b) => `const ${b.local} = ${tmpVar}.data${b.field === null ? "" : "." + b.field};`);
   return out.length > 0 ? out.join(" ") + " " : "";
 }
 
@@ -1815,14 +1822,13 @@ function readInlineArms(armsStr: string): InlineMatchArm[] | null {
 }
 
 /** Record the E-PARSE-001 refusal for an inline match the reader could not read; the placeholder. */
-function refuseInlineMatch(armsStr: string, why: string = ""): string {
-  const one = armsStr.replace(/\s+/g, " ").trim();
+function refuseInlineMatch(armsStr: string): string {
+  // S469 — the arm text arrives token-joined (`. Circle ( r )`); shown as written (`.Circle(r)`).
+  const one = compactArmPatternText(armsStr);
   recordRefusedLowering(new CGError(
     "E-PARSE-001",
     `E-PARSE-001: the \`match\` arms \`${one.length > 60 ? one.slice(0, 57) + "..." : one}\` cannot be read as an ` +
-      (why === "payload binding"
-        ? "arm list: a payload binder's field could not be resolved (an unknown or ambiguous variant). "
-        : "arm list without losing part of it (an arm no arm form reads, a `|`-led arm, or a stray `,`). ") +
+      "arm list without losing part of it (an arm no arm form reads, a `|`-led arm, or a stray `,`). " +
       "Write one arm per `<pattern> :> body`, separated by `,` or a line break (§18.2).",
     currentLoweringSpan() as object,
   ), null);
@@ -1872,6 +1878,7 @@ export function rewriteMatchExpr(expr: string): string {
   if (arms.length === 0) return expr;
 
   const tmpVar = genVar("match");
+  const _wbFields = wholeErrorBinderFields(matchTarget);
   // S469 r8 (g-impl1-text-lowered-match-payload-variant-misdispatch-s469) — a PAYLOAD variant
   // value is `{ variant, data }`, not its name: comparing the value with `"Circle"` never matched,
   // so the else arm ran silently (and `.Circle(r)` never bound `r`). When an arm names a payload
@@ -1880,7 +1887,7 @@ export function rewriteMatchExpr(expr: string): string {
   // direct comparison (a unit variant value IS its name) — their output is unchanged.
   const payloadVariant = (n: string | null | undefined) =>
     !!n && (!!_rewriterVariantFields?.has(n) || !!_rewriterVariantFieldCollisions?.has(n));
-  const useTag = arms.some((a) => a.kind === "variant" &&
+  const useTag = !!_wbFields || arms.some((a) => a.kind === "variant" &&
     (!!a.binding || (a.tests && a.tests.length > 1 ? a.tests : [a.test]).some(payloadVariant)));
   const tagVar = useTag ? genVar("tag") : tmpVar;
   const lines: string[] = [];
@@ -1910,8 +1917,11 @@ export function rewriteMatchExpr(expr: string): string {
           condition = `${tagVar} === "${arm.test}"`;
         }
         if (arm.binding) {
-          const bound = payloadBindingPrelude(arm.test ?? "", arm.binding, tmpVar);
-          if (bound === null) return prefix + refuseInlineMatch(armsStr, "payload binding");
+          const bound = payloadBindingPrelude(arm.test ?? "", arm.binding, tmpVar, _wbFields);
+          if (typeof bound !== "string") {
+            recordRefusedLowering(new CGError(bound.code, bound.message, currentLoweringSpan() as object), null);
+            return prefix + `null /* ${bound.code} */`;
+          }
           prelude = bound;
         }
       } else if (arm.tests && arm.tests.length > 1) {
@@ -1928,6 +1938,13 @@ export function rewriteMatchExpr(expr: string): string {
   }
 
   lines.push(`})()`);
+  // S469 (g-server-return-match-failable-subject-unawaited-s469) — the IIFE header follows its
+  // emitted body, by the rule the structured value IIFE uses (emit-control-flow.ts
+  // `_iifeHasOwnAwait`): a subject or arm the upstream lowering awaited (a server function's
+  // `v = match check(p) { … }` — `await check(p)`) makes it `await (async function() { … })()`.
+  // The `await` there is legal: the upstream emitter awaits only in an async host (a sync
+  // callback emits the call bare). The sync header stranded that `await` (E-CODEGEN-INVALID-LOGIC).
+  if (iifeLinesHaveOwnAwait(lines)) lines[0] = `await (async function() {`;
 
   return prefix + lines.join("\n");
 }

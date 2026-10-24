@@ -13,7 +13,7 @@ error object as a plain value (or reads a plain enum value as `.Ok`), the wrong 
 
 | file | what |
 |---|---|
-| `shapes/<family>.js` | the shapes, copied verbatim from the reviewer's scratch dir (`n1`–`n8` client, `s1`–`s2` server) and the fix-round dev's (`n9`, `n10`); S469 added `n11` (a failable `match` in every event-handler value form × container: top level, `<each>` row, component body, `if=` subtree) and `n12` (the `!` function imported; multi-file shapes — `pack.js` loads the imported modules' client chunks). 260 shapes (S469 fix round 2: n11 grew to 56 — the call-form argument and nested containers; n12 to 16 — `export *`; n13 — a handler through a `const` alias, 5; 265 shapes; S469 n14 — a failable call inside a template-literal interpolation, 10; 275 shapes; S469 n15 — an object shorthand or an exported `const` alias, 7; 282 shapes; S469 n16 — a labeled block in a function-expression body, or a `${…}` in a quoted attribute value, 19; 301 shapes; S469 n17 — a `}` in a comment or regular expression of a quoted-attribute interpolation, or a line terminator in a quoted template attribute, 10; 311 shapes; round 4 — an Annex B HTML-like comment in the interpolation, 4 more; 315 shapes; S469 s469-engine-effect-failable n18 — a failable call in an engine `effect=` / `<onTransition>` body or guard / message arm / `<onTimeout>` delay / `:`-shorthand body and a `<match>` arm, 45; 360 shapes; review of 6e0770356 — a handled call in a text-lowered slot (guard / delay / `derived=` / structural `if=` / `on=`) and a quoted guard, 14 more; 374 shapes; review of 5a88c3030 — `<each>` `if=` / `in=`, a `const` alias declared after the engine, and an unlexable slot, 14 more; 388 shapes; S469 n19 — an `if=` authorization guard on an `<each>` nested in another `<each>`'s row or in lifted markup, plain and handled-failable × 5 containers, 10; 398 shapes; review of 67bbca342 — a lifted `<each if=r.ok>` reading the stale loop item (id / index keys × `r.ok` / `(r.ok)`), 4, and an `else` sibling where no if= chain is built (nested / lifted `<each if=>`, markup `if=` in a row / in lifted markup), 4; 406 shapes; S469 n20 — an `if=` authorization guard on a `<match>` inside an `<each>` row (1 / 2 / 3 deep, under a row element, a component, an engine arm) or an `<each>`'s `<empty>` body, plain and call-ref, 14, and a guard reading the row / an outer row (id / index keys × `r.ok` / `(r.ok)`), 8; 428 shapes; S469 round 2 n21 — a markup `if=` guard on a NESTED element or a MULTI-root item root in an `<each>` row, revoked after the row is built (plain / call-ref × nested 1–2 deep, each in each, ×3, component, errorBoundary, multi-root head / tail), 16, and a row / outer-row / multi-root guard reading the row (id / index keys × `r.ok` / `(r.ok)`), 12; 456 shapes; S469 n22 — a STALE EFFECT of removed content (an arm in a removed row, the `<each>` rows of a torn-down arm, a row-scoped `<match if=…>` teardown, the rows of an `<each>` nested in a removed row) granting after the revoke, 9; 465 shapes; S469 round 2 — a top-level `<match>` / `<engine>` first dispatched by a write from inside a row build (the owner taken from the writer), 2; 467 shapes; S469 n23 — a markup `if=` guard in LIFTED markup (plain / call-ref / quoted / a cell read inside a called function, bare and in `&&` × a `for … lift` sole root / nested 1–2 deep / multi-root head / tail / lift in lift, a `for` over a literal, an `if … lift` root / nested, a bare `lift` root / nested, a function returning markup, a ternary markup value, a lift in an `<each>` in a `<match>` arm, a component in a row — gated, or with the gate in its body —, an `<each>` that is the lifted root), 85, a value-indexed `@pw == r.k` sole root / nested, 2, its ROW side (the same-key row's key revoked; sole root / nested × id / index keys), 4, and a row guard (nested / multi-root × id / index keys × `r.ok` / `(r.ok)`), 8; round 3 — a guard reading a LOCAL of the lift body (a while counter `>` / `!=`, a counter over `@items`, an accumulator, a flag set after the lift × plain group / `if … lift` arm / row), 13; round 4 — a local closure (over a flag, over a counter) and a mutated local array / object × the same three contexts, 12; S469 s469-softnav-build-guard n26 — SIDE `nav`: a soft navigation from a live build A into build B's page whose `#wrong` carries the same delegated handler id as A's privileged `#right` (via `navigate()` / a boosted link / popstate / an unstamped page / a delegated submit), 5, and round 2 (review F1) an ungated chunk served under a matching page, 1; S469 s469-engine-in-row n25 — an `<engine>` used as a GATE inside an `<each>` row (row root id / index keys, multi-root, nested element, `if=` element, an arm that reads the password, a `<match>` arm in the row with and without an `<each>`, the row of an `<each>` in a `<match>` arm, a nested `<each>` row, an `<empty>` in a row / at top level), 12 — PASS-DENY on `c9f8cd25b` (the engine was dropped), PASS-REFUSED after (E-COMPONENT-ENGINE-SCOPE; the top-level `<empty>` E-CG-003); 609 shapes; S469 s469-impl1-arm-commas n24 (client, 119) and s3 (server, 24) — a `match` arm list that impl#1's arm readers mis-split: a regex literal in an arm body (r2), a literal alternation (r3), a negative later alternate (r4), a `|`-led arm (r5, r6 — incl. a `|`-led first arm before two or more literal arms), a bare handled-call statement arm (r6), an engine `derived=match` and a server-function match lowered from text (r7), a PAYLOAD variant (`{ variant, data }`) compared by name in that text lowering (r8) — each a deny-list whose dropped arm or alternate logged the wrong password in, × newline / comma / mixed arm lists; 758 shapes; S469 s469-lift-gate-staleness n23 +28 — a cell read two calls deep or through a file-level `const` closure (× 8 positions × 2), a run-once group's / an arm's indirect gate beside a body local, 2, the value-indexed row side written IN PLACE (sole root / nested × id / index keys), 4, an item-derived local / a local closure over the row item in a row (× id / index keys), 4, a group local read in a row, 1, and an open gate in a function body (refused), 1; 786 shapes; round 2 (review of b57d697a9) +10 — a local or parameter holding a value computed by a call that reads the cell (`let ok = granted()`, destructured, negated, ternary, assigned later, in an arm / a plain loop / a component body, a function parameter — refused), main 8 FAIL, and an inner-loop local in a re-runnable region of a keyed row, 1; 797 shapes; round 3 (review of b192c63de) +4 — the same inner loop among a FRAGMENT row roots (group head, beside a sibling root, beside a gated root, in an arm with a sibling), revoked and reordered; 801 shapes; S469 s469-keyed-row-if-gate n28 — a control-flow `if` STATEMENT gating content in a keyed `for … lift` row: 14 positions (among the row's roots — sole, beside a sibling root, if / else, else if, nested, around a nested loop, an early `continue` — and inside a row element — plain, if / else, nested, around a nested loop, two deep, in one root of a multi-root row, between sibling elements) × 7 revokes (a cell; a cell then a reorder in a later timer turn; a reorder then the cell; a same-key replace; an in-place field write; an in-place write then a reorder; a cell then a remove + re-add), 98 — main 84 FAIL (the 14 PASS are the remove + re-add control: a re-added row is built fresh), branch 0 FAIL — and a `match` STATEMENT in the row (on a cell; on the row's field, same-key replace / in-place), 3 — PASS-DENY on main only because its lifts escaped the row (outside `#out`, or duplicated: `LOGGED INLOGGED IN` after the revoke — the instrument reads `#out` exactly), PASS on the branch; round 2 (review of b84c3f6de, HIGH-1) — a CLOSED gate inside #1529's nested-loop region of a keyed row (at the region body's root / nested in an element of it) × the inner list emptied / replaced / the row replaced under its key / emptied + refilled, each then revoked in a later run, 8 — main 4 FAIL (the body-root gate: its element was orphaned and stayed), branch 0; 910 shapes; S469 s469-structural-else-guard n27 — the privileged branch is the `else` / `else-if=` of an `if=` chain on `<engine>` / `<match>` / `<each>` (in markup, nested, an `<each>` row, a component body, lifted markup) or an `<each>`'s `<empty>`, or sits behind an `if=` on a host that does not gate (`<empty>`, `<errorBoundary>`, `<render>`, a compound-state wrapper), 43 — 41 FAIL on `b0cffc6a4`, all PASS-REFUSED after (E-CTRL-001 / E-CTRL-002 / E-GATE-UNSUPPORTED-HOST); 953 shapes; round 2 (review of `456158a63`) n27 +61 — the opener spellings the round-1 word scan disagreed with the markup tokenizer about (`else=""` / `"true"` / `${true}` / `(true)`, a bare `if` word, `data-x=if else`, `title="x"else`, `${ // it's }` and `/"/` in an engine `effect=`, `on=(@mode)else`) × markup / row / component body, a bare `<engine if>`, `if=` / `show=` on an engine state-child and a `<match>` arm, a gated component-body `<slot>` — 61 FAIL on `456158a63`, all PASS-REFUSED after; 1014 shapes; round 3 (review of `412b77b8b`) n27 +275 — an unquoted operator value (`data-z=a/`, `title=a/b`, `1+2`, `a?b:c`, `a&&b`, `a==b`, `a,`, `a;`) before an `else` / `else-if=` / `if=` on `<engine>` / `<match>` / `<each>` / `<b>` × markup / row / component body, the gate before it, the same on a `<match>` arm and an engine state-child, and case-variant gate names (`IF=`, `If=`, `ELSE`, `Else`, `ELSE-IF=`) on every element kind — 197 FAIL on `412b77b8b`, all PASS-REFUSED after; 1289 shapes; round 4 (review of `20fadd7b4`) n27 +142 — a value the tokenizer drops (`tabindex=-1`, `x=+1`, `x=.5`, `x=~1`, `x=)`, `x=]`) before an `else` / `else-if=` / `if=` on `<engine>` / `<match>` / `<each>` / `<b>` × markup / an `<each>` row, the same on a `<match>` arm and an engine state-child, 70 `key=` operator segments before a gate, and three order-independent `<each key=… in=…>` openers (legal and gated: PASS) — 109 FAIL on `20fadd7b4`, 0 after (138 PASS-REFUSED, 4 PASS); 1431 shapes; round 5 (review of `88d71e8ba`) n27 +26 — a stray `=` after an engine sigil value (`initial=.Active = if=…`, `= else`, `:if=`, `initial=-.Active`), `x=.A= if=` and a reserved-word value `x= else` on every element × markup / row, and an orphaned `=` on a `<match>` arm opener — 13 FAIL + 3 PASS-DENY (the arm opener rendered as text) on `88d71e8ba`, all PASS-REFUSED after; 1457 shapes; round 6 (review of `9be2cecf9`) n27 +6 — a whitespace (state) opener `< span if=…>` / `show=` / `IF=` / a dropped value before the gate, whose children rendered ungated (pre-existing, same on base) — all PASS-REFUSED; 1463 shapes). Data only; each family declares its `SIDE`. |
+| `shapes/<family>.js` | the shapes, copied verbatim from the reviewer's scratch dir (`n1`–`n8` client, `s1`–`s2` server) and the fix-round dev's (`n9`, `n10`); S469 added `n11` (a failable `match` in every event-handler value form × container: top level, `<each>` row, component body, `if=` subtree) and `n12` (the `!` function imported; multi-file shapes — `pack.js` loads the imported modules' client chunks). 260 shapes (S469 fix round 2: n11 grew to 56 — the call-form argument and nested containers; n12 to 16 — `export *`; n13 — a handler through a `const` alias, 5; 265 shapes; S469 n14 — a failable call inside a template-literal interpolation, 10; 275 shapes; S469 n15 — an object shorthand or an exported `const` alias, 7; 282 shapes; S469 n16 — a labeled block in a function-expression body, or a `${…}` in a quoted attribute value, 19; 301 shapes; S469 n17 — a `}` in a comment or regular expression of a quoted-attribute interpolation, or a line terminator in a quoted template attribute, 10; 311 shapes; round 4 — an Annex B HTML-like comment in the interpolation, 4 more; 315 shapes; S469 s469-engine-effect-failable n18 — a failable call in an engine `effect=` / `<onTransition>` body or guard / message arm / `<onTimeout>` delay / `:`-shorthand body and a `<match>` arm, 45; 360 shapes; review of 6e0770356 — a handled call in a text-lowered slot (guard / delay / `derived=` / structural `if=` / `on=`) and a quoted guard, 14 more; 374 shapes; review of 5a88c3030 — `<each>` `if=` / `in=`, a `const` alias declared after the engine, and an unlexable slot, 14 more; 388 shapes; S469 n19 — an `if=` authorization guard on an `<each>` nested in another `<each>`'s row or in lifted markup, plain and handled-failable × 5 containers, 10; 398 shapes; review of 67bbca342 — a lifted `<each if=r.ok>` reading the stale loop item (id / index keys × `r.ok` / `(r.ok)`), 4, and an `else` sibling where no if= chain is built (nested / lifted `<each if=>`, markup `if=` in a row / in lifted markup), 4; 406 shapes; S469 n20 — an `if=` authorization guard on a `<match>` inside an `<each>` row (1 / 2 / 3 deep, under a row element, a component, an engine arm) or an `<each>`'s `<empty>` body, plain and call-ref, 14, and a guard reading the row / an outer row (id / index keys × `r.ok` / `(r.ok)`), 8; 428 shapes; S469 round 2 n21 — a markup `if=` guard on a NESTED element or a MULTI-root item root in an `<each>` row, revoked after the row is built (plain / call-ref × nested 1–2 deep, each in each, ×3, component, errorBoundary, multi-root head / tail), 16, and a row / outer-row / multi-root guard reading the row (id / index keys × `r.ok` / `(r.ok)`), 12; 456 shapes; S469 n22 — a STALE EFFECT of removed content (an arm in a removed row, the `<each>` rows of a torn-down arm, a row-scoped `<match if=…>` teardown, the rows of an `<each>` nested in a removed row) granting after the revoke, 9; 465 shapes; S469 round 2 — a top-level `<match>` / `<engine>` first dispatched by a write from inside a row build (the owner taken from the writer), 2; 467 shapes; S469 n23 — a markup `if=` guard in LIFTED markup (plain / call-ref / quoted / a cell read inside a called function, bare and in `&&` × a `for … lift` sole root / nested 1–2 deep / multi-root head / tail / lift in lift, a `for` over a literal, an `if … lift` root / nested, a bare `lift` root / nested, a function returning markup, a ternary markup value, a lift in an `<each>` in a `<match>` arm, a component in a row — gated, or with the gate in its body —, an `<each>` that is the lifted root), 85, a value-indexed `@pw == r.k` sole root / nested, 2, its ROW side (the same-key row's key revoked; sole root / nested × id / index keys), 4, and a row guard (nested / multi-root × id / index keys × `r.ok` / `(r.ok)`), 8; round 3 — a guard reading a LOCAL of the lift body (a while counter `>` / `!=`, a counter over `@items`, an accumulator, a flag set after the lift × plain group / `if … lift` arm / row), 13; round 4 — a local closure (over a flag, over a counter) and a mutated local array / object × the same three contexts, 12; S469 s469-softnav-build-guard n26 — SIDE `nav`: a soft navigation from a live build A into build B's page whose `#wrong` carries the same delegated handler id as A's privileged `#right` (via `navigate()` / a boosted link / popstate / an unstamped page / a delegated submit), 5, and round 2 (review F1) an ungated chunk served under a matching page, 1; S469 s469-engine-in-row n25 — an `<engine>` used as a GATE inside an `<each>` row (row root id / index keys, multi-root, nested element, `if=` element, an arm that reads the password, a `<match>` arm in the row with and without an `<each>`, the row of an `<each>` in a `<match>` arm, a nested `<each>` row, an `<empty>` in a row / at top level), 12 — PASS-DENY on `c9f8cd25b` (the engine was dropped), PASS-REFUSED after (E-COMPONENT-ENGINE-SCOPE; the top-level `<empty>` E-CG-003); 609 shapes; S469 s469-impl1-arm-commas n24 (client, 119) and s3 (server, 24) — a `match` arm list that impl#1's arm readers mis-split: a regex literal in an arm body (r2), a literal alternation (r3), a negative later alternate (r4), a `|`-led arm (r5, r6 — incl. a `|`-led first arm before two or more literal arms), a bare handled-call statement arm (r6), an engine `derived=match` and a server-function match lowered from text (r7), a PAYLOAD variant (`{ variant, data }`) compared by name in that text lowering (r8) — each a deny-list whose dropped arm or alternate logged the wrong password in, × newline / comma / mixed arm lists; 758 shapes; S469 s469-lift-gate-staleness n23 +28 — a cell read two calls deep or through a file-level `const` closure (× 8 positions × 2), a run-once group's / an arm's indirect gate beside a body local, 2, the value-indexed row side written IN PLACE (sole root / nested × id / index keys), 4, an item-derived local / a local closure over the row item in a row (× id / index keys), 4, a group local read in a row, 1, and an open gate in a function body (refused), 1; 786 shapes; round 2 (review of b57d697a9) +10 — a local or parameter holding a value computed by a call that reads the cell (`let ok = granted()`, destructured, negated, ternary, assigned later, in an arm / a plain loop / a component body, a function parameter — refused), main 8 FAIL, and an inner-loop local in a re-runnable region of a keyed row, 1; 797 shapes; round 3 (review of b192c63de) +4 — the same inner loop among a FRAGMENT row roots (group head, beside a sibling root, beside a gated root, in an arm with a sibling), revoked and reordered; 801 shapes; S469 s469-keyed-row-if-gate n28 — a control-flow `if` STATEMENT gating content in a keyed `for … lift` row: 14 positions (among the row's roots — sole, beside a sibling root, if / else, else if, nested, around a nested loop, an early `continue` — and inside a row element — plain, if / else, nested, around a nested loop, two deep, in one root of a multi-root row, between sibling elements) × 7 revokes (a cell; a cell then a reorder in a later timer turn; a reorder then the cell; a same-key replace; an in-place field write; an in-place write then a reorder; a cell then a remove + re-add), 98 — main 84 FAIL (the 14 PASS are the remove + re-add control: a re-added row is built fresh), branch 0 FAIL — and a `match` STATEMENT in the row (on a cell; on the row's field, same-key replace / in-place), 3 — PASS-DENY on main only because its lifts escaped the row (outside `#out`, or duplicated: `LOGGED INLOGGED IN` after the revoke — the instrument reads `#out` exactly), PASS on the branch; round 2 (review of b84c3f6de, HIGH-1) — a CLOSED gate inside #1529's nested-loop region of a keyed row (at the region body's root / nested in an element of it) × the inner list emptied / replaced / the row replaced under its key / emptied + refilled, each then revoked in a later run, 8 — main 4 FAIL (the body-root gate: its element was orphaned and stayed), branch 0; 910 shapes; S469 s469-structural-else-guard n27 — the privileged branch is the `else` / `else-if=` of an `if=` chain on `<engine>` / `<match>` / `<each>` (in markup, nested, an `<each>` row, a component body, lifted markup) or an `<each>`'s `<empty>`, or sits behind an `if=` on a host that does not gate (`<empty>`, `<errorBoundary>`, `<render>`, a compound-state wrapper), 43 — 41 FAIL on `b0cffc6a4`, all PASS-REFUSED after (E-CTRL-001 / E-CTRL-002 / E-GATE-UNSUPPORTED-HOST); 953 shapes; round 2 (review of `456158a63`) n27 +61 — the opener spellings the round-1 word scan disagreed with the markup tokenizer about (`else=""` / `"true"` / `${true}` / `(true)`, a bare `if` word, `data-x=if else`, `title="x"else`, `${ // it's }` and `/"/` in an engine `effect=`, `on=(@mode)else`) × markup / row / component body, a bare `<engine if>`, `if=` / `show=` on an engine state-child and a `<match>` arm, a gated component-body `<slot>` — 61 FAIL on `456158a63`, all PASS-REFUSED after; 1014 shapes; round 3 (review of `412b77b8b`) n27 +275 — an unquoted operator value (`data-z=a/`, `title=a/b`, `1+2`, `a?b:c`, `a&&b`, `a==b`, `a,`, `a;`) before an `else` / `else-if=` / `if=` on `<engine>` / `<match>` / `<each>` / `<b>` × markup / row / component body, the gate before it, the same on a `<match>` arm and an engine state-child, and case-variant gate names (`IF=`, `If=`, `ELSE`, `Else`, `ELSE-IF=`) on every element kind — 197 FAIL on `412b77b8b`, all PASS-REFUSED after; 1289 shapes; round 4 (review of `20fadd7b4`) n27 +142 — a value the tokenizer drops (`tabindex=-1`, `x=+1`, `x=.5`, `x=~1`, `x=)`, `x=]`) before an `else` / `else-if=` / `if=` on `<engine>` / `<match>` / `<each>` / `<b>` × markup / an `<each>` row, the same on a `<match>` arm and an engine state-child, 70 `key=` operator segments before a gate, and three order-independent `<each key=… in=…>` openers (legal and gated: PASS) — 109 FAIL on `20fadd7b4`, 0 after (138 PASS-REFUSED, 4 PASS); 1431 shapes; round 5 (review of `88d71e8ba`) n27 +26 — a stray `=` after an engine sigil value (`initial=.Active = if=…`, `= else`, `:if=`, `initial=-.Active`), `x=.A= if=` and a reserved-word value `x= else` on every element × markup / row, and an orphaned `=` on a `<match>` arm opener — 13 FAIL + 3 PASS-DENY (the arm opener rendered as text) on `88d71e8ba`, all PASS-REFUSED after; 1457 shapes; round 6 (review of `9be2cecf9`) n27 +6 — a whitespace (state) opener `< span if=…>` / `show=` / `IF=` / a dropped value before the gate, whose children rendered ungated (pre-existing, same on base) — all PASS-REFUSED; 1920 shapes). Data only; each family declares its `SIDE`. | Plus S469 s469-server-return-match-await (457 shapes): s4–s10 server, f1–f7 fullstack, l1–l5 library, t1–t5 tool — a failable `match` subject awaited in every position, `fail` payloads keyed per enum in every emission mode, one resolver for a callee's error enum, and the `_ e` whole-error binder allow-list.
 | `pack.js` | compile → client: happy-dom, click `#wrong` / `#right`, read `#out`; server: POST the `login` route; nav (n26): compile builds A and B separately, mount A, soft-navigate into B's page, click `#wrong`, read `#out` (`#right` = A's own control on a fresh document; the id-collision precondition is asserted, else UNJUDGED) → classify |
 | `known-fail.js` | `KNOWN_FAIL` (shapes that log in on a wrong password today, each naming its gap), `UNJUDGED`, `BY_DESIGN_LOGS_IN` |
 | `failable-probe-pack.test.js` | the gate: one test per shape |
@@ -26,12 +26,17 @@ error object as a plain value (or reads a plain enum value as `.Ok`), the wrong 
 the right one: fail closed, a correctness defect or a probe whose callee is plain by design) ·
 `UNJUDGED` (no `#wrong` button / no `login` route) · `FAIL` (the wrong password logs in).
 
+Sides: `client` (happy-dom, no server), `server` (POST the `login` route), `nav` (a soft navigation
+across builds), and `fullstack` (S469) — a client shape whose `fetch` is answered in-process by the
+compiled `app.server.js` (`mod.fetch`, with the CSRF double-submit pair), so a client function calling a
+SERVER function is judged end to end.
+
 ## What turns it red
 
 - a shape not in `KNOWN_FAIL` / `BY_DESIGN_LOGS_IN` logs in on a wrong password;
 - a `KNOWN_FAIL` shape stops doing so (it was fixed: delete the entry);
 - a shape not in `UNJUDGED` comes out `UNJUDGED`, or an `UNJUDGED` one starts being judged;
-- the corpus stops holding exactly 1463 shapes; a list entry names no shape.
+- the corpus stops holding exactly 1920 shapes; a list entry names no shape. Plus S469 s469-server-return-match-await (457 shapes): s4–s10 server, f1–f7 fullstack, l1–l5 library, t1–t5 tool — a failable `match` subject awaited in every position, `fail` payloads keyed per enum in every emission mode, one resolver for a callee's error enum, and the `_ e` whole-error binder allow-list.
 
 It deliberately does NOT pin each shape's class: a shape moving from `PASS-REFUSED` to `PASS` is a
 compiler improvement, not a regression.
@@ -136,6 +141,140 @@ must not act again; every shape grants only through an effect the revoke should 
 
 The pack reads `#out`'s `textContent`, which includes a `display: none` element — so a display toggle is a
 FAIL here exactly as the SPEC means it (§17.1: the element is absent while the condition is false).
+
+## Measured (S469 s469-server-return-match-await — s4 server, f1 fullstack; 81 shapes)
+
+A `match` whose SUBJECT (or an arm value) is an async call — a `!` function, a server function, a member
+read off one — at every expression position, and the payload binders of its arms
+(`g-server-return-match-failable-subject-unawaited-s469`).
+
+| family | tree | PASS | PASS-REFUSED | PASS-500 | PASS-DENY | FAIL |
+|---|---|---|---|---|---|---|
+| s4 (48) | base `b35babcc2` (#1524) | 14 | 17 | 3 | 1 | **13** |
+| s4 (48) | after | 33 | 15 | 0 | 0 | 0 |
+| f1 (33) | base `b35babcc2` | 5 | 6 | 0 | 1 | **21** |
+| f1 (33) | after | 23 | 8 | 0 | 0 | **2** (KNOWN_FAIL, render time) |
+
+The value IIFE lowered its subject in a context with no async fact, so `return match check(k) { … else :>
+"ok" }` evaluated `check(k)` unawaited — a Promise, whose tag reads `.Ok` — and a denied input ran `else`.
+The client's expression bridge dropped the facts the same way (`v = match …`, an argument, an operand, a
+cell write). Every match lowering now lowers its subject in ONE context (`matchSubjectCtx`); arm values
+carry the same facts and the declaration path's arm await. The server pass now publishes the file's
+variant field registry, so a `fail` payload is field-keyed (§51.3.2 / §57.8) and `.Denied(r)` /
+`.Denied(reason: r)` bind it; a binder §18.7 rules out is E-TYPE-021 / E-TYPE-022 / E-TYPE-027. The two
+remaining FAILs are a RENDER-time match on a server call (a markup interpolation, a derived cell) — no
+function body to await in, the class of `g-markup-gate-tests-server-call-promise`; filed
+`g-render-match-async-subject-unawaited-s469`.
+
+## Measured (S469 s469-server-return-match-await round 2 — s5 server, f2 fullstack; 54 shapes)
+
+The review of `bc33320a7` (round 1) found two regressions and one in-scope miss; each is a family here.
+
+| family | base `b35babcc2` FAIL | round 1 `bc33320a7` FAIL | round 2 FAIL |
+|---|---|---|---|
+| s5 (17) | 3 | 3 | 0 |
+| f2 (37) | 13 | 17 | 3 (KNOWN_FAIL: an ASYNC helper in `if=` / a derived cell — the existing render-time class) |
+
+- **The payload shape across files** (HIGH 1, regression): round 1 keyed a `fail` payload only in the
+  file that declares the enum, and bound an importer's single positional binder to the whole `.data`
+  — a keyed object, so `x == "bad"` was false and a denied input logged in (server `return match`,
+  `!{}` on both boundaries). Now every `fail` keys by the declaring enum (`getEnumVariantFieldSchema`,
+  local or imported) and every reader binds by the handled call's DECLARED error enum (TS stamps a
+  failable match subject and, new, a `!{}` node — an imported callee's enum resolved in its exporting
+  file); with no visible field list a positional binder is E-TYPE-027, never a guess. The "producer
+  imports the enum" shapes stay PASS-500: the producer's server bundle imports a `types.server.js`
+  that is never written (`g-server-js-imports-module-without-server-file-s467`).
+- **A member call in a match arm** (HIGH 2, regression): `q.includes("ecre")` in an arm was read as a
+  call of `server function includes` (a `\bname\s*\(` scan), so a sync helper was coloured async and
+  `if=` / derived guards read a Promise. Arm callees are now read from the parsed arm tree; that also
+  fixed the base-side instances (`return match` / `const v = match` arms: FAIL on base).
+- **A nested `match` as an arm value** (HIGH 3): its subject went through the client's text lowering,
+  unawaited; it is now lowered structurally through `matchSubjectCtx`.
+
+`pinned-class.js` pins the class of every s4 / f1 / s5 / f2 shape.
+
+## Measured (S469 s469-server-return-match-await round 3 — s6 / f3 / l1 / t1; 42 shapes)
+
+One shape list (`r3-shapes.js`) on four sides, two of them new: `library` (compiled `--mode library`, the
+emitted `app.js` imported and its `login` called) and `tool` (a `<program kind="tool">` run as
+`bun app.js <p>`). FAIL counts, base `b35babcc2` → round 2 `b3712d7b3` → round 3:
+
+| family | base | round 2 | round 3 |
+|---|---|---|---|
+| s6 (server, 12) | 6 | 2 | 0 |
+| f3 (fullstack, 12) | 10 | 4 | 0 |
+| l1 (library, 9) | 3 | 6 | 0 |
+| t1 (tool, 9) | 1 | 2 | 0 |
+
+Round 2's regressions were single-file: library / tool mode never installed the per-file variant
+registry, so a `fail` wrote the bare value while the (TS-stamped) reader read `data.<field>`; and the
+§19 short-form arm bound its synthesized `e` to the whole `.data`. Now the producer's payload shape is
+decided once, from the TS-resolved enum (`__failVariantFields`), in every mode, and the short form
+projects its one field. Also fixed: `?` across two enums with a same-named variant of different fields
+(E-ERROR-010) and a server call in a template literal inside a match-arm value. A bundle that imports
+a never-written `<x>.server.js` is UNJUDGED (with the gap id), not pinned PASS-500.
+
+## Measured (S469 s469-server-return-match-await round 4 — s7 / f4 / l2 / t2; 32 shapes)
+
+`r4-shapes.js` on four sides. FAIL counts, base `b35babcc2` → round 3 `048dba21a` → round 4:
+
+| family | base | round 3 | round 4 |
+|---|---|---|---|
+| s7 (server, 9) | 1 | 6 | 0 |
+| f4 (fullstack, 9) | 4 | 7 | 0 |
+| l2 (library, 7) | 1 | 4 | 0 |
+| t2 (tool, 7) | 1 | 6 | 0 |
+
+`?` into an enum whose same-named variant has different fields is refused (E-ERROR-010) through a type
+alias on either side and for a cross-file callee (one resolver for a failable callee's error enum);
+the same field names in another order are accepted (payloads are keyed by name). A tagged template's
+server call in a client arm value is awaited; a short-form arm reading its implicit `e` inside a
+template is refused when there is no single field to bind. The library / tool loaders report a module
+that cannot load as UNJUDGED (with the gap id), and the tool runner judges stdout before the exit code.
+
+## Measured (S469 s469-server-return-match-await round 5 — s8 / f5 / l3 / t3 and s9 / f6 / l4 / t4; 100 shapes)
+
+`r5-shapes.js` (the whole-error binder `_ e :>`, ruling "SPEC: whole error + refuse") and `r6-shapes.js`
+(the review of `cf01c66b8`) on four sides. FAIL counts, base `b35babcc2` → round 4 `cf01c66b8` → round 5:
+
+| family | base | round 4 | round 5 |
+|---|---|---|---|
+| s8 (server, 7) | 3 | 2 | 0 |
+| f5 (fullstack, 7) | 3 | 2 | 0 |
+| l3 (library, 7) | 3 | 2 | 0 |
+| t3 (tool, 7) | 0 | 0 | 0 |
+| s9 (server, 18) | 4 | 15 | 0 |
+| f6 (fullstack, 18) | 8 | 15 | 0 |
+| l4 (library, 18) | 2 | 9 | 0 |
+| t4 (tool, 18) | 3 | 14 | 0 |
+
+`_ e :>` binds the whole error: a payload-field read off it is E-TYPE-004, a comparison with a primitive
+E-EQ-001, and `e is not` over a unit variant is correct. `?` compares error enums by identity (never by
+name) and each re-raised field by name AND type; a callee whose enum cannot be resolved (an alias in a
+third file) is refused rather than guessed. The short form's "arm reads `e`" walk fails closed on any node
+it does not model (an object shorthand, a nested `match` arm). The t3 valid shapes are refused on every
+tree (a tool function's `return match` takes the async IIFE header; `g-impl1-async-match-positions-refused-s469`).
+
+## Measured (S469 s469-server-return-match-await round 6 — s10 / f7 / l5 / t5; 148 shapes)
+
+`r7-shapes.js` (the review of `716ee804e`) on four sides. FAIL counts, base `b35babcc2` → round 5
+`716ee804e` → round 6:
+
+| family | base | round 5 | round 6 |
+|---|---|---|---|
+| s10 (server, 37) | 15 | 23 | 0 |
+| f7 (fullstack, 37) | 14 | 23 | 0 |
+| l5 (library, 37) | 11 | 17 | 0 |
+| t5 (tool, 37) | 15 | 22 | 0 |
+
+The whole-error binder `_ e :>` is checked by an ALLOW-list that fails closed (`match e` over its
+variants, `is`, `e.variant`, a variant constructor / local function typed with the same enum, `log`);
+every payload read, comparison, container, alias and cell write is refused. `match e` binds by the
+handled call's identity-resolved enum (never a same-named local enum) and works with no local enum.
+`?` compares canonical field types. 10 cross-file shapes are UNJUDGED (the bundle / module cannot load:
+`g-server-js-imports-module-without-server-file-s467`, `g-library-tool-cross-file-import-source-path-s469`);
+their single-file-loadable twins PASS. s8 / l3 "held in a local then passed on" is now PASS-REFUSED (a
+local alias is not an allowed use).
 
 ## Running
 

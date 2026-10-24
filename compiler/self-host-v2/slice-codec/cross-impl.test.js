@@ -218,11 +218,16 @@ describe("DIVERGENCES — impl#1 vs §57 (pinned; see progress.md)", () => {
     expect(decodeText(tb(Maybe(Named("Pt"))), '"not a Pt"').error.kind).toBe("malformed");
   });
 
-  test("D6 (s454): impl#1's `fail` envelope data is NOT §57.8's keyed object — unit → null, payload → the bare argument — and it is sent 200", () => {
+  test("D6 (s454; narrowed S469): impl#1's `fail` envelope data for a UNIT variant is NOT §57.8's `{}` (it is null) — and it is sent 200", () => {
     // §57.8: "For an error variant with no fields, `data` is `{}`"; a payload variant's `data` is keyed by
-    // declared field name. impl#1 (frozen) emits `data: null` / `data: "neg"`, status 200.
+    // declared field name. impl#1 (frozen) emits `data: null` for a unit variant, status 200.
+    // S469 (g-server-return-match-failable-subject-unawaited-s469): the SERVER pass now publishes the
+    // file's variant field registry, so a same-file PAYLOAD variant is keyed (`data: { msg: "neg" }`),
+    // as the client pass always wrote it — the bare `data: "neg"` made every reader's `data.msg`
+    // undefined (a deny-list on the bound payload accepted a denied input).
     expect(serverJs).toContain('return { __scrml_error: true, type: "LoadError", variant: "Gone", data: null };');
-    expect(serverJs).toContain('return { __scrml_error: true, type: "LoadError", variant: "Boom", data: "neg" };');
+    expect(serverJs).toContain('return { __scrml_error: true, type: "LoadError", variant: "Boom", data: { msg: "neg" } };');
+    expect(serverJs).not.toContain('data: "neg"');
     const errTb = tb(Named("LoadError"));
     // the bootstrap's strict envelope decoder refuses both (never coerces them into a variant) …
     expect(decodeError(errTb, { __scrml_error: true, type: "LoadError", variant: "Gone", data: null }, { canonicalOnly: true }).error)
