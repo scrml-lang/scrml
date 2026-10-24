@@ -37,3 +37,26 @@ classified as success. Gap: `g-server-return-match-failable-subject-unawaited-s4
   newly refused — `samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-match-payload-arity-033.scrml`
   (its expected.json asks for E-TYPE-021); +E-TYPE-027 on two already-failing sources. stdlib: no real change
   (only path-derived build hashes; base archive lacked compiler/ dirs → E-IMPORT-008 on stdlib/compiler/*).
+
+## Round 2 (review of bc33320a7: FIX)
+
+- Merged origin/main (#1523, #1526 and later).
+- HIGH 1 (cross-file payload shape, regression): fail keyed by the DECLARING enum in every file
+  (`getEnumVariantFieldSchema`, from `buildVariantFieldsRegistry` `byEnum`); readers bind by the handled call's
+  declared error enum: failable-match subject stamp (now read in error contexts), new `__guardErrorVariants` on
+  `!{}` (local / imported via `importedFnSignatures` / stdlib via `stdlib-failable-errors.ts`, drift-guarded).
+  Whole-`.data` guess kept only for CPS NetworkError/ServerError; ambient schemas (HostError, Transport(t),
+  Error::Generic(message), SqlError + BatchPrepareFailed) visible in every mode; §19 short-form binder keeps
+  whole `.data` (`implicitBinding`). Tests moved to SPEC arity (`.ConnectionLost :>`, `.Thrown(msg, _)`).
+- HIGH 2 (member call read as a server call, regression): arm callees from the parsed arm tree
+  (`armListTextCallees` / `armBodyTextCallees` in emit-library-shared.ts). Also fixes base instances.
+- HIGH 3 (nested match as an arm value): `_valueArm` lowers `nestedMatchFromArmText` structurally.
+- NOT built (fork): structural render-position guard for genuinely async helpers (`if=`, derived) — the open
+  class g-markup-gate-tests-server-call-promise / ruling-gated g-derived-cell-rhs-server-call-renders-promise;
+  pinned as KNOWN_FAIL (f2).
+- Pack: s5 (17) + f2 (37) → 893; `pinned-class.js` pins s4/f1/s5/f2 classes; fullstack fetch spans every
+  `.server.js`.
+- e2e-render-map baseline: cells 033 (now fails-compile E-TYPE-021) and 039 (+E-TYPE-027) re-observed with
+  generate-baseline.js's `observeCellSubprocess` and spliced (a full regen would restamp unrelated drift).
+- Gaps: main entry round-2 note; g-impl1-paren-free-binder-arity-s451 + g-impl1-payload-enum-wire-shape-s451
+  resolved; render + refused-positions gaps extended.
