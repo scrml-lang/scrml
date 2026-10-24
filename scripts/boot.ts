@@ -16,7 +16,7 @@
  *      unpulled-stale read is LOUD) — the anti-short-boot floor. Both user-voice
  *      ledgers + the per-user profile are in the set BY CONSTRUCTION (the S335 miss).
  *   3. RUNS the mandatory probes by DELEGATING to the authoritative scripts
- *      (review-debt.ts · threads.ts · dpa-debt.ts · issue-debt.ts) and gh
+ *      (review-debt.ts · threads.ts · dpa-debt.ts · issue-debt.ts · inbox-debt.ts) and gh
  *      (issues · pr · run) — never a reimplementation, so a probe can't drift
  *      from its source of truth. issue-debt.ts (S346) is the one that ASSERTS
  *      the obligation the raw `gh issue list` only READS: every open adopter
@@ -314,6 +314,11 @@ function allProbes(): Probe[] {
     // comments, no known-gaps entry, no dpa-queue item. pa-base §10: an obligation and its probe
     // must resolve to the same artifact — issue-debt.ts reads the two HOME artifacts and says OWED.
     runProbe("issue-debt", "Adopter issues (owed a home)", "bun", ["scripts/issue-debt.ts"]),
+    // S470: messages arrive on the `inbox` BRANCH (pa-base v2.18 §10, since S447), and are HANDLED
+    // once their file name is under handOffs/incoming/read/ on main. The boot listed only the LOCAL
+    // handOffs/incoming/ dir and reported "inbox empty" over an unhandled `needs: action` message on
+    // origin/inbox. inbox-debt.ts reads the two refs the obligation lives on, never the working tree.
+    runProbe("inbox-debt", "Inbox branch (unhandled messages)", "bun", ["scripts/inbox-debt.ts"]),
     runProbe("issues", "Adopter issues (open)", "gh", ["issue", "list", "--repo", "scrml-lang/scrml", "--state", "open"], 45_000),
     runProbe("prs", "Open PRs", "gh", ["pr", "list"], 45_000),
     runProbe("runs", "CI runs (main, last 3)", "gh", ["run", "list", "--branch", "main", "--limit", "3"], 45_000),
