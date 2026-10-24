@@ -2,6 +2,15 @@
 
 A rolling log of what just landed and what's actively underway in the compiler. For the full spec and pipeline docs see `compiler/SPEC.md` and `compiler/PIPELINE.md`.
 
+## S469 — 2026-10-17/24 (bryan · theRog) — 44 PRs: ten impl#1 guard holes closed, the bootstrap gained CSS, tape grants and the loop value form
+
+- **Security (impl#1):** template interpolations and engine/match bodies are walked; every `if=` guard in `<each>` rows, lifted markup, keyed rows and control-flow arms is honoured reactively and revoked guards close (#1491 #1502 #1517 #1529 #1534); removed rows dispose their effects (#1508); soft-nav never mixes builds (#1514); match-arm commas through one arm reader (#1524). impl#1 refuses what it can't lower rather than dropping it (#1496 #1521 #1526).
+- **Bootstrap:** `;` and arm `,` enforced (#1510); `#{}` CSS end to end (#1515); §7.2.2 termination rulings (#1520); one tape-grant reader with a structural scan (#1528 #1530); bound loops and Tier-0 `${ for … lift }` (#1536).
+- **SPEC / docs / tooling:** §7.2.2 rewritten; annotated params, comma arms, O10/O61 rulings; the docs moved to the ruled dialect behind bootstrap gates with claim-gate blocking; hook ~30% faster and runs the bootstrap slices; browser CI baseline 48 → 8; the recurring hook flakes fixed at their causes (#1532).
+- **Rulings (user-voice S469):** render-position server calls refused in impl#1; `_ e` binds the whole error; enum payloads are values, not tape positions; `<onTransition if=>` is the guard; plain-`let` guard residual left as is; CSS, ratchet and termination rulings.
+- **Landed at wrap:** #1538 (gates on elements that can't honour them are refused) and #1539 (failable match subjects awaited, payloads keyed per enum, `_ e` whole error); follow-up lane for three `_ e` allow-list escapes (identical on main).
+- **Lesson:** in four security lanes every review FIX came from new machinery (smarter readers, carve-outs, regions, regex scanners); the existing path never broke. Constrain to it and refuse the rest.
+
 ## S468 — 2026-10-17/18 (bryan · theRog, first boot) — new machine set up; 4 PRs merged, 11 in flight; the bootstrap's server half (U1c) built + reviewed; eight impl#1 wrong-password paths found
 
 - **Machine:** theRog replaces the dead ASUS (setup + the XPS USB backup restored; see hand-off §6). Two machine/window shutdowns mid-run; every branch checkpointed at wrap.
