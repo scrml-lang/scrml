@@ -282,3 +282,45 @@ describe("a row lowered plain keeps a bound input while the user types", () => {
     expect(document.querySelector("#out input.nm").value).toBe("hel");
   });
 });
+
+describe("where the plain list is re-run, and where it is refused", () => {
+  const four = async (app) => {
+    expect(app.errors).toEqual([]);
+    await flush();
+    const n = () => document.querySelectorAll("#out b.g").length;
+    const seq = [n()];
+    globalThis.__kri_set("xs", globalThis.__kri_deep([{ id: 1, ok: false }, { id: 2, ok: true }])); await flush(); seq.push(n());
+    globalThis.__kri_get("xs")[1].ok = false; await flush(); seq.push(n());
+    globalThis.__kri_set("xs", globalThis.__kri_deep([{ id: 1, ok: true }, { id: 2, ok: true }, { id: 3, ok: true }])); await flush(); seq.push(n());
+    expect(seq).toEqual([2, 1, 0, 3]);
+  };
+  const HEAD = `<xs> = [{ id: 1, ok: true }, { id: 2, ok: true }]\n`;
+  test("the iterable read through a function: the block is made a re-render effect", async () => {
+    await four(compileAndMount(HEAD + `\${ function vis() { return @xs } }\n<div id="out">\${ for (r of vis()) { if (r.ok) { lift <b class="g">x</b> } } }</div>\n`));
+  });
+  test("inside an `if … lift` arm: the arm re-renders", async () => {
+    await four(compileAndMount(HEAD + `<show> = true\n<div id="out">\${ if (@show) { for (r of @xs) { if (r.ok) { lift <b class="g">x</b> } } } }</div>\n`));
+  });
+  test("a `match` statement in the row: the row is lowered plain", async () => {
+    await four(compileAndMount(HEAD + `<div id="out">\${ for (r of @xs) { match r.ok { true => { lift <b class="g">x</b> } false => { lift <i>n</i> } } } }</div>\n`));
+  });
+  test("a `match` on a cell in the row: revoked", async () => {
+    const app = compileAndMount(`type R:enum = { Admin, User }
+<role>: R = .Admin
+<xs> = [{ id: 1 }, { id: 2 }]
+<div id="out">\${ for (r of @xs) { match @role { .Admin => { lift <b class="g">x</b> } .User => { lift <i class="u">n</i> } } } }</div>
+`);
+    expect(app.errors).toEqual([]);
+    await flush();
+    const n = () => [document.querySelectorAll("#out b.g").length, document.querySelectorAll("#out i.u").length];
+    expect(n()).toEqual([2, 0]);
+    globalThis.__kri_set("role", "User"); await flush();
+    expect(n()).toEqual([0, 2]);
+    globalThis.__kri_set("role", "Admin"); await flush();
+    expect(n()).toEqual([2, 0]);
+  });
+  test("markup built in a function body: no render re-runs the list — refused (fail closed)", () => {
+    const app = compileAndMount(HEAD + `\${ function list() { return <ul>\${ for (r of @xs) { if (r.ok) { lift <li class="g">x</li> } } }</ul> } }\n<div id="out">\${ list() }</div>\n`);
+    expect(app.errors).toContain("E-IMPL1-LIFT-GATE-UNTRACKED");
+  });
+});

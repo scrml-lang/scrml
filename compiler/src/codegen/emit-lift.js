@@ -767,7 +767,7 @@ export function setLiftGroupWindow(on) { _liftGroupWindow = !!on; }
  */
 export function refuseLiftOpenGatesSince(count, why) {
   for (const g of _liftOpenGates.slice(count)) {
-    if (g.rowIf) _refuseLiftIf(g.node, `${why}, and the row it is in was lowered as the plain loop that block re-runs`);
+    if (g.rowIf) _refuseLiftIf(g.node, why);
     else _refuseLiftGate(g.attrName, g.node, g.reads, why);
   }
 }
@@ -788,7 +788,7 @@ export function liftOpenGatesBlockFnHazard(count) {
 export function liftNoteRowIfPlainLoop(forNode) {
   if (currentLiftReconcileCtx() || !liftForTreeIfPins(forNode)) return;
   if (liftGateInFunction(forNode) || (!_liftLiveActive() && !_liftGroupWindow)) {
-    _refuseLiftIf(forNode, "the list is built where no render re-runs it (markup built in a function body, or outside a `${}` block), so a row cannot be rebuilt when the condition changes");
+    _refuseLiftIf(forNode, "it is built where no render re-runs it (markup built in a function body, or outside a `${}` block)");
     return;
   }
   _liftOpenGateCount++;
@@ -3566,7 +3566,7 @@ export function emitIfStmtWithContainer(ifNode, containerElVar, opts = {}) {
   const _rowCtx = currentLiftReconcileCtx();
   if (_rowCtx && _rowCtx.regionDepth === 0 && !_liftLandsOutsideRow() && liftIfDecidesRow(ifNode)) {
     if (!_rowCtx.forNode || !liftLoopInRowElement(ifNode, _rowCtx.forNode) || !liftIfRegionSafe(ifNode, _rowCtx.forNode)) {
-      _refuseLiftIf(ifNode, "the reconciled row it is built in is built once per key, and impl#1 could not lower that row so that the `if` is re-run");
+      _refuseLiftIf(ifNode, "its row is built once per key, and impl#1 could not lower that row so that the `if` is re-run");
       return "";
     }
     const v = { anchor: genVar("region_end"), nodes: genVar("region_nodes"), sid: genVar("region_sid"), frag: genVar("region_frag") };
@@ -3618,12 +3618,16 @@ export function emitIfStmtWithContainer(ifNode, containerElVar, opts = {}) {
 }
 
 function _refuseLiftIf(node, why) {
+  // `node` is the `if` statement, or the `for … lift` list a row-deciding `if` / `match` pinned plain.
+  const what = node && node.kind === "if-stmt"
+    ? "this `if` fresh: it decides what a reconciled `for … lift` row renders"
+    : "this `for … lift` list fresh: an `if` or `match` in its rows decides what a row renders, so it is lowered as the plain loop the render that builds it re-runs";
   recordRefusedLowering(new CGError(
     "E-IMPL1-LIFT-GATE-UNTRACKED",
-    `E-IMPL1-LIFT-GATE-UNTRACKED: impl#1 cannot keep this \`if\` fresh: it decides what a reconciled ` +
-      `\`for … lift\` row renders, and ${why}. A guard it cannot re-evaluate is refused rather than left ` +
-      `open after it turns false (§17.1). Read cells, file-level bindings or the row's own item in the ` +
-      `condition, or move the \`if\` inside an element of the row.`,
+    `E-IMPL1-LIFT-GATE-UNTRACKED: impl#1 cannot keep ${what}, and ${why}. A guard it cannot re-evaluate is ` +
+      `refused rather than left open after it turns false (§17.1). Build the list in a \`\${}\` block of the ` +
+      `page, or read only cells, file-level bindings or the row's own item in a condition inside an element ` +
+      `of the row.`,
     (node && node.span) ?? { start: 0, end: 0 },
   ), node);
 }

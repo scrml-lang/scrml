@@ -9,7 +9,7 @@
 // sibling elements). Revokes: a cell; a cell, then a reorder in a SEPARATE handler run (a later timer
 // turn — the shape #1529's review found one-run probes miss); a reorder, then the cell revoke; a same-key
 // replace; an in-place field write; an in-place write, then a reorder; a cell revoke, then a remove and
-// a re-add of the row that shows the text.
+// a re-add of the row that shows the text. And a `match` statement in the row (on a cell, on the row's field).
 //
 // Only row 2's gated element holds text (`${r.id == 2 ? "LOGGED IN" : ""}`), so a reorder that moves a
 // stale node of row 2 is visible in `#out`. Every page starts GRANTED and `#wrong` revokes.
@@ -70,4 +70,23 @@ const shapes = [];
 for (const [rn, guard, wrong, right] of REVOKES) {
   for (const [pn, pos] of POSITIONS) shapes.push([`${pn} — ${rn}`, PAGE(pos(guard), wrong, right)]);
 }
+// A `match` STATEMENT in the row decides what the row renders the same way (its lifts went to the ambient
+// target on main, outside the row, and were never re-read).
+const MATCH_PAGE = (head, row, wrong, right) => `${head}<pw> = "secret"
+<xs> = [${ROW(1, true)}, ${ROW(2, true)}]
+\${
+    function grant(p) { return p == "secret" }
+}
+<button id="wrong" onclick=\${ ${wrong} }>go</button>
+<button id="right" onclick=\${ ${right} }>go</button>
+<div id="out">\${ for (r of @xs) { ${row} } }</div>
+`;
+shapes.push(["a match statement on a cell — cell", MATCH_PAGE(`type Who:enum = { Admin, User }\n<who>: Who = .Admin\n`,
+  `match @who { .Admin => { lift ${B} } .User => { lift <i></i> } }`, `@who = .User`, `@who = .Admin`)]);
+shapes.push(["a match statement on the row's field — same-key replace", MATCH_PAGE("",
+  `match r.ok { true => { lift ${B} } false => { lift <i></i> } }`,
+  `@xs = [${ROW(1, 'grant("wrong")')}, ${ROW(2, 'grant("wrong")')}]`, `@xs = [${ROW(1, 'grant("secret")')}, ${ROW(2, 'grant("secret")')}]`)]);
+shapes.push(["a match statement on the row's field — in-place write", MATCH_PAGE("",
+  `match r.ok { true => { lift ${B} } false => { lift <i></i> } }`,
+  `@xs[1].ok = grant("wrong")`, `@xs[1].ok = grant("secret")`)]);
 export default shapes;

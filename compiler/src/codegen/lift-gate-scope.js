@@ -699,6 +699,11 @@ export function liftForTreeIfPins(forNode) {
       if (_hasNode(n, _isLift) && _hasNode(n, (m) => m.kind === "if-stmt" && _ifLifts(m))) pinned = true;
       return;
     }
+    if (n.kind === "match-stmt") {
+      // A `match` STATEMENT whose arms lift decides what the row renders the same way, and its lifts
+      // go to the ambient target (no region holds them): the row is lowered plain.
+      if (_hasNode(n, _isLift) || /\blift\b/.test(JSON.stringify(n, (k, v) => (k === "span" ? undefined : v)))) { pinned = true; return; }
+    }
     if (n.kind === "if-stmt" && liftIfDecidesRow(n)) {
       if (inFn || !liftLoopInRowElement(n, forNode) || !liftIfRegionSafe(n, forNode)) pinned = true;
       // A region re-runs everything in it (the `if`s and loops nested in its arms included).
