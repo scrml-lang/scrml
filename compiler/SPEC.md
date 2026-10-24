@@ -17159,12 +17159,22 @@ reads as toy-status, not as discipline.
 hooks, not rendered subtrees; a structural conditional on them has no defined meaning. The widening is
 exactly three elements wide and SHALL NOT be generalized to the registry.
 
-> **Enforcement status (measured S302, stated because the SHALL above is not yet uniformly enforced).**
-> `<page if=>` IS rejected (`E-PAGE-INVALID-ATTR`) — conformant. `<channel>` and `<errors>` emit only a
-> `W-ATTR-001` advisory and ignore the attribute; `<onTimeout>` and `<onIdle>` ignore it with **zero**
-> diagnostics. Those four are spec-ahead of enforcement; the diagnostic lands with the impl per the
-> named-codes-land-with-impl rule (§34). Tracked as
-> [[g-if-reject-unenforced-on-structural-declaration-elements]].
+> **Enforcement status (measured S302; re-measured and enforced S469).**
+> `<page if=>` IS rejected (`E-PAGE-INVALID-ATTR`) — conformant. S302 measured `<channel>` and `<errors>`
+> emitting only a `W-ATTR-001` advisory and ignoring the attribute, and `<onTimeout>` / `<onIdle>`
+> ignoring it with **zero** diagnostics. Since S469 all four — and `<render>` — are rejected:
+> **E-GATE-UNSUPPORTED-HOST** (§34; `compiler/src/codegen/emit-html.ts` ahead of the `IF_GATE_BYPASS_TAGS`
+> dispatches, `compiler/src/symbol-table.ts` `timerGateAttrDiagnostic` for the two timers). The same code
+> refuses an `if=` / `show=` on every OTHER host whose lowering never consults the §17.1 mount gate / §17.2
+> toggle, so a guard there failed open — the condition was dropped and the content rendered anyway:
+> `<errorBoundary>` (§19.6), `<program>`, the §6.7 state openers (`<request>`, `<timer>`, `<poll>`,
+> `<timeout>`, `<keyboard>`, `<mouse>`, `<gamepad>`), a compound-state namespace wrapper (§6.3.5), and
+> an `<each>`'s `<empty>` fallback. Those are not §17.1.2 language rules (an `<errorBoundary>` is a rendered
+> subtree); they are impl#1 refusing a guard it cannot honour (fail closed). Inside an `<each>` row and in
+> lifted markup, `<errorBoundary if=>` IS honoured (the row / lift emitters gate it) and is not refused.
+> `<onTransition if=>` is its §51.0.H guard and is admitted (§4.15 lists it as a slot; the reject list above
+> naming `<onTransition>` predates that and does not apply to the guard). Gaps
+> [[g-if-reject-unenforced-on-structural-declaration-elements]], [[g-if-on-structural-element-silently-ignored]].
 >
 > **`<auth>` is deliberately NOT in the reject list.** It is a `kind:"markup"` node, takes the ordinary
 > markup `if=` path, and gates its subtree correctly today — verified by execution (a real
@@ -17202,14 +17212,35 @@ stated only for `<engine>`.
 #### 17.1.2.2 Composition
 
 - **`else` / `else-if=` (§17.1.1) and `show=` (§17.2) composition with these three is NOMINAL —
-  specified, NOT yet implemented.** Measured S302, identical before and after the `if=` widening, so
-  this is a pre-existing gap rather than a regression it introduced: an `else` sibling following a
-  gated structural element fires **`E-CTRL-001`** (the chain detector recognizes only `kind:"markup"`
-  nodes as chain members); `else-if=` and `show=` on a structural element are silently dropped. The
-  normative intent is that all three compose under the ordinary chain rules and that `show=` hides
-  while `if=` removes; the wiring is owed. Tracked as
+  specified, NOT implemented in impl#1.** The normative intent is unchanged: all three compose under
+  the ordinary chain rules — a structural element MAY be an `else-if=` / `else` member of a chain, and
+  `show=` hides while `if=` removes. Tracked as
   [[g-structural-element-if-chain-and-show-composition-nominal]]. **Do not read this clause as
   describing shipped behaviour.**
+
+> **impl#1 divergence — refused, never rendered (S469).** Measured S469 (happy-dom, `b0cffc6a4`): the
+> structural openers rebuild the element from named attribute regexes, so an `else` / `else-if=` / `show=`
+> on `<engine>` / `<match>` / `<each>` was DROPPED at parse time, and the chain detector takes only
+> `kind:"markup"` nodes as members. `<div if=@f>a</div><engine else …>` therefore rendered BOTH branches
+> with `@f` true — at top level, nested, in an `<each>` row, in a component body and in lifted markup, at
+> exit 0. A branch the author gated rendered anyway: FAIL-OPEN, and a security defect when the branch holds
+> a privileged control (security pack family `n27`). impl#1 does not lower a structural element as a chain
+> member (frozen; the bootstrap owes the composition), so it now REFUSES:
+> - an `else` / `else-if=` on a structural element — **E-CTRL-001** / **E-CTRL-002**, the codes any `else` /
+>   `else-if=` that is not part of a lowered chain gets. Emitted at `compiler/src/ast-builder.js`
+>   (`refuseUnconsumedStructuralChainAttrs`): ONE check after `collapseIfChains`, over the whole tree —
+>   every non-markup node still carrying the attribute is by construction not a chain member. Codegen
+>   backstops cover the shapes that tree never holds: a lifted `<each>` (`compiler/src/codegen/emit-lift.js`
+>   `tryEmitNestedLiftEach`) and an `<each>`'s `<empty>` (`compiler/src/codegen/emit-each.ts`
+>   `renderEmptyChildToJs`). A structural element does not HEAD a chain either: `<each if=@f>` followed by
+>   `<p else>` stays E-CTRL-001 (unchanged).
+> - a `show=` on a structural element — **E-GATE-UNSUPPORTED-HOST** (§34), from the same check.
+>
+> Workaround: make the chain member a markup element and put the structural element inside it —
+> `<div else><match …>…</></div>` (an `<engine>` under a chain branch is itself refused, §17.1.1's
+> divergence note — give the engine its own `if=` with the negated condition instead); wrap for `show=`
+> the same way (`<div show=COND><each …>…</each></div>`). A plain-markup chain, and a component use-site /
+> `<errorBoundary>` / `<render>` as a chain member, are unaffected (byte-identical output).
 - `if=` INSIDE a dispatched arm body (a `<match>` arm, an `<engine>` state-child) is a **separate and
   REJECTED** surface — `E-IF-IN-DISPATCHED-ARM` fires, on markup and on all three structural elements
   alike. This subsection widens `if=` ON the structural element, not inside its arms.
@@ -28179,6 +28210,7 @@ are REFUSED by impl#1, `E-IMPL1-RULED-FORM-UNSUPPORTED` (its row lands with that
 | E-NAME-COLLIDES-RESERVED-PREFIX | §47.1.1 | A user-authored program declares or references a name beginning with `_scrml_` (the compiler/runtime namespace; S439 #7, S440 #9) — including a foreign block's `in:{}` crossing header and the `${}` interpolations of quoted attribute values. Decided on the parsed tree; string literals, comments, markup text, the literal text of quoted attribute values, object-literal keys in parsed logic, and the opaque body of `_{}` foreign code (§23.2.3) are not inspected. The same applies to a name beginning `__scrml_` (the compiler's placeholder/local namespace; S457), with the same positions and the same tree walk. The only exemption is the compiler's own placeholders, which carry a per-compilation unguessable token (§47.1.1); no author spelling matches them. `stdlib/` source exempt by real path. **Provenance:** ruling:user-voice-scrml.md S439 #7 + S440 #9; S457 "a for __scrml_" (supersedes: nothing ruled — §47.1.1 reserved only `_scrml_`). (impl#1 post-TAB, `compiler/src/validators/reserved-prefix.ts`, S454 #1301; bootstrap twin owed.) | Error |
 | E-STRUCTURAL-ELEMENT-MISPLACED | §4.15, §51.0.H, §51.0.M, §55.8 | A scrml-defined structural element is used outside its owning locus. Specific cases: `<onTransition>` outside `<engine>`; `<onTimeout>` outside an engine state-child (S67 — §51.0.M); `<errors>` without a parent context that supports it; **a structural-DECLARATION element (`<schema>` / `<engine>` / `<channel>` / `<page>` / `<auth>` / `<errors>` / `<onTransition>` / `<onTimeout>` / `<onIdle>`) appears inside a `${...}` logic body (S135 — silent-swallow class)**; etc. The owning section's error subsection documents the precise condition. **`<match>` (block-form) is the 10th §4.15 entry but is intentionally NOT covered by this code in the `${...}` context — block-form `<match>` is markup-as-value (§18.0.1 + §1.4 L1 pillar) and is canonical inside `${...}` markup-emit contexts (the canonical output of `bun scrml promote --match`, §56.10).** (Stage 0b D4; S67 amendment; S135 amendment — `${...}` logic-body silent-swallow class closed; emitted at `compiler/src/ast-builder.js:parseLogicBody` html-fragment fallback sites.) | Error |
 | E-IF-IN-DISPATCHED-ARM | §17.1, §17.1.1, §18.0.1, §51.0.B | **TEMPORARY IMPLEMENTATION RESTRICTION — not a language rule.** An `if=` element, or an `if=`/`else-if=`/`else` chain, appears inside the body of a DISPATCHED arm: a `<match>` block-form arm (§18.0.1) or an `<engine>` state-child (§51.0.B). Those bodies are emitted as HTML strings and injected with `innerHTML` on dispatch, then wired by a per-arm wire function; §17.1 `if=` puts its subtree inside a `<template>`, which that wire function cannot see into, and the `if=` controller itself is created at boot against a document that does not yet contain the arm. The gated subtree would therefore render empty or never appear, with NO runtime error — so the compiler refuses the composition instead of emitting it. Express the condition as ARM STRUCTURE (a variant for the gated state) until the restriction lifts. NOTE: hoisting the `if=` to wrap the whole `<match>`/`<engine>` is NOT a workaround — that is a separate defect. SPEC places no limit on where `if=` may appear; this row is expected to be REMOVED, not amended, when the arm-dispatch path re-runs the conditional controllers against the injected arm root. (S301 — `if=` Phase 2; emitted at `compiler/src/codegen/emit-html.ts:refuseConditionalInDispatchedArm` — **THREE call sites** as of S302: `:1508` (markup `if=`), `:1737` (`if`/`else-if`/`else` chain), `:2727` (`emitGatedStructural`, added with the §17.1.2 widening so the three structural elements refuse identically). The row previously said *two*; it was written before the structural surface existed. **Revert as a unit** — a partial revert leaves one surface refusing and another silently mis-emitting.) | Error |
+| E-GATE-UNSUPPORTED-HOST | §17.1, §17.1.2, §17.1.2.2, §17.2 | An `if=` or `show=` on an element that does not honour it, so the condition would be dropped and the content would render (or the timer arm) whatever it says. Two grounds: (1) **language** — §17.1.2: every scrml-defined element other than `<engine>` / `<match>` / `<each>` SHALL reject `if=` (`<errors>`, `<channel>`, `<render>`, `<onTimeout>`, `<onIdle>`; `<page>` keeps E-PAGE-INVALID-ATTR); (2) **impl#1 limitation, fail closed** — a host whose lowering never consults the §17.1 mount gate / §17.2 toggle: `<errorBoundary>`, `<program>`, the §6.7 state openers, a compound-state namespace wrapper, an `<each>`'s `<empty>`, a lifted `<each>` (`show=`), and `show=` on `<engine>` / `<match>` / `<each>`. Wrap the element in one that honours the attribute (`<div if=COND>…</div>`). S469, gaps g-if-on-structural-element-silently-ignored / g-structural-element-if-chain-and-show-composition-nominal / g-if-reject-unenforced-on-structural-declaration-elements; emitted at `compiler/src/codegen/refused-lowering-errors.ts` (`refuseIfOnUngatedHost`, called from `compiler/src/codegen/emit-html.ts`, `compiler/src/codegen/emit-each.ts`, `compiler/src/codegen/emit-lift.js`), `compiler/src/ast-builder.js` (`refuseUnconsumedStructuralChainAttrs`) and `compiler/src/symbol-table.ts` (`timerGateAttrDiagnostic`); message `compiler/src/gate-attr-refusal.ts`. | Error |
 | E-MULTI-STATEMENT-HANDLER | §5.2.3, §4.14 | NARROWED S435 (L19 reversed). Fires on exactly two shapes: (1) a BARE (unbraced) event-handler attribute value containing a top-level `;` statement sequence — `onclick=startGame(); track()` — whose extent cannot be told apart from the opener's following attributes; fix: wrap it in braces, `onclick={ startGame(); track() }`, or name a function; (2) a `:`-shorthand body (§4.14) containing multiple statements; fix: the bare-body form. An inline-block handler value (`onclick={ … }`) never fires it. (Stage 0b D4; narrowed per ruling:user-voice-scrml.md S435) (Emitted at `compiler/src/ast-builder.js:17890` — the unbraced bare `;` sequence on an event-handler attribute, at every markup position including `<each>` rows, engine state-children and `<match>` arms (forwarded out of those error-discarding sub-builds by `_forwardSubparseErrors`, S437) — and at `compiler/src/symbol-table.ts:7776` — the multi-statement `:`-shorthand body.) | Error |
 | E-IMPORT-PINNED-INVALID | §21.8.1 | The `pinned` modifier appears on an imported name that is not a state cell or an engine. `pinned` is meaningful only for cell-typed and engine-typed names; remove it for function or type imports. (Stage 0b D4) | Error |
 | E-DERIVED-CIRCULAR-DEP | §31.5, §6.6 | A `const <derived> = expr` cell whose RHS expression depends on itself directly or transitively forms a cycle in the dependency graph. Break the cycle. Distinct from `E-DERIVED-ENGINE-CIRCULAR` (§51.0.J) which is the engine-form cycle. (Stage 0b D4) Under §66 the derived cell is a LOCKED declaration with a reactive initializer (§66.9 rule 3), and on an unannotated cycle this code outranks `E-DECL-TYPE-NOT-INFERABLE` (§66.3 rule 8, S462 — ruling:user-voice-scrml.md S462 "go on the package"). (S462: also emitted by the bootstrap at `compiler/self-host-v2/analyze.scrml` (the derived-cycle check, `derivedCycles`) — program cells, direct `@` reads; a cycle only through a function's body is not traced there — a divergence from §6.6.10's SHALL, filed `g-bootstrap-derived-cycle-through-function-s462`.) | Error |
@@ -28273,8 +28305,8 @@ are REFUSED by impl#1, `E-IMPL1-RULED-FORM-UNSUPPORTED` (its row lands with that
 | E-COMPONENT-020 | §15.14, §16.4 | More than one `${...}` or `${children}` spread node in a component body. A component body has at most one spread fill-site; multiple spreads have no defined semantics. (Catalog addition S78 audit; emitted at `compiler/src/component-expander.ts`.) | Error |
 | E-COMPONENT-021 | §16.4 | Caller provides unslotted children but the target component has no `${...}` spread in its body — the children have nowhere to go. Resolution: add a spread in the component body, or remove the unslotted children. (Catalog addition S78 audit; emitted at `compiler/src/component-expander.ts`.) | Error |
 | W-COMPONENT-001 | §15.11 | Component declares a function-typed prop. Function props are an escape hatch (advisory): prefer `bind` props or state projection for typical cross-component data flow. The function-typed prop continues to work; this warning surfaces the escape-hatch nature so developers don't pick it by accident. (Catalog addition S78 audit; emitted at `compiler/src/component-expander.ts`.) | Warning |
-| E-CTRL-001 | §17.5 | `else` attribute appears on an element without a preceding `if=` or `else-if=` sibling at the same level. `else` only makes sense as a continuation of an `if=` chain. (Catalog addition S78 audit; emitted at `compiler/src/ast-builder.js`.) | Error |
-| E-CTRL-002 | §17.5 | `else-if=` attribute appears on an element without a preceding `if=` or `else-if=` sibling at the same level. `else-if=` only makes sense as a continuation of an `if=` chain. (Catalog addition S78 audit; emitted at `compiler/src/ast-builder.js`.) | Error |
+| E-CTRL-001 | §17.5, §17.1.1, §17.1.2.2 | `else` attribute appears on an element without a preceding `if=` or `else-if=` sibling at the same level — or on an element that is not part of a LOWERED `if=` chain: a structural element (`<engine>` / `<match>` / `<each>`, an `<each>`'s `<empty>`), an `<onTimeout>` / `<onIdle>` / `<onTransition>`, markup in an `<each>` row or lifted markup. `else` only makes sense as a continuation of an `if=` chain; where impl#1 builds none it is refused rather than rendered ungated (S469). (Catalog addition S78 audit; emitted at `compiler/src/ast-builder.js` (`collapseIfChains`, `refuseUnconsumedStructuralChainAttrs`), `compiler/src/codegen/refused-lowering-errors.ts` (`refuseUnloweredElseChain`), `compiler/src/symbol-table.ts` (`timerGateAttrDiagnostic`), `compiler/src/type-system.ts` (the `<onTransition>` check).) | Error |
+| E-CTRL-002 | §17.5, §17.1.1, §17.1.2.2 | `else-if=` attribute appears on an element without a preceding `if=` or `else-if=` sibling at the same level — or on an element that is not part of a LOWERED `if=` chain (the same positions as E-CTRL-001). `else-if=` only makes sense as a continuation of an `if=` chain. (Catalog addition S78 audit; emitted at `compiler/src/ast-builder.js` (`collapseIfChains`, `refuseUnconsumedStructuralChainAttrs`), `compiler/src/codegen/refused-lowering-errors.ts` (`refuseUnloweredElseChain`), `compiler/src/symbol-table.ts` (`timerGateAttrDiagnostic`), `compiler/src/type-system.ts` (the `<onTransition>` check).) | Error |
 | E-CTRL-003 | §17.5 | An element appears to extend an `if=` chain after a terminal `else` element — `else` is the chain terminator and nothing can follow it on the same chain. (Catalog addition S78 audit; emitted at `compiler/src/ast-builder.js`.) | Error |
 | E-CTRL-004 | §17.5 | `else` or `else-if=` appears on a state-object opener. State-object openers are declaration sites, not chain continuations; control-flow chaining is reserved for ordinary markup elements. (Catalog addition S78 audit; emitted at `compiler/src/ast-builder.js`.) | Error |
 | E-CTRL-005 | §17.5 | `else` or `else-if=` appears on the same element as `if=`. The two are mutually exclusive — an element either opens a chain (`if=`) or continues one (`else-if=` / `else`), never both. (Catalog addition S78 audit; emitted at `compiler/src/ast-builder.js`.) | Error |
