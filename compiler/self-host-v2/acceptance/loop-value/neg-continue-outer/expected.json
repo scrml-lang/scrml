@@ -1,0 +1,15 @@
+{
+  "id": "acceptance-loop-value-neg-continue-outer",
+  "description": "E-LOOP-005: `continue outer` leaves the loop bound to `cells`.",
+  "language-version": "1.0",
+  "spec": "§49.6 rule 6 · §49.4.3 · §49.9",
+  "rationale": "§49.4.3: \"a `break` or `continue` inside its body SHALL NOT target a loop outside it (E-LOOP-005)\".",
+  "expect": {
+    "codes": [
+      "E-LOOP-005"
+    ],
+    "codeCounts": {
+      "E-LOOP-005": 1
+    }
+  }
+}

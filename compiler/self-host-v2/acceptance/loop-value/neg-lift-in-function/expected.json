@@ -1,0 +1,15 @@
+{
+  "id": "acceptance-loop-value-neg-lift-in-function",
+  "description": "E-SYNTAX-002: the loop is not bound, so the `lift` stands in a bare `function` body.",
+  "language-version": "1.0",
+  "spec": "§10.4 · §49.6.2",
+  "rationale": "§49.6.2: \"`lift` inside a loop body inside a bare `function` SHALL be a compile error (E-SYNTAX-002), consistent with §10.4, unless the loop is bound\".",
+  "expect": {
+    "codes": [
+      "E-SYNTAX-002"
+    ],
+    "codeCounts": {
+      "E-SYNTAX-002": 1
+    }
+  }
+}

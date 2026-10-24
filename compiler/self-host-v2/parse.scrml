@@ -2649,8 +2649,8 @@ ${
     // leaves the name bound to a placeholder, so its uses are not a second error.
     fn parseForBinding(tp: TP, start: int, nameTok: PTok, mutable: boolean, aty: AType | not) -> RStmt {
         const ft: PTok = cur(tp)
-        let rf: RStmt = parseFor(tp, "", ft.start)
-        if (!isWord(tp, "for")) rf = parseFor(adv(adv(tp)), ft.v, ft.start)
+        const labelled: boolean = !isWord(tp, "for")
+        const rf: RStmt = labelled ? parseFor(adv(adv(tp)), ft.v, ft.start) : parseFor(tp, "", ft.start)
         const b: AForBound = { nid: rf.tp.nid, span: mkSpan(nameTok.start, nameTok.end), name: nameTok.v, mutable: mutable, ty: aty }
         const t: TP = bumpId(rf.tp)
         const f: AFor | not = forOfStmt(rf.s)

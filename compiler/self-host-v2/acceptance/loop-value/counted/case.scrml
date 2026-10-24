@@ -1,0 +1,11 @@
+// §49.6 rule 1: a counted head bound as a value.
+<program>
+    <zs:int[]=([3, 4, 5])/>
+    function f(ys: int[]) -> int {
+        const xs = for (let i = 0; i < 5; i = i + 2) { lift i; };
+        return xs.length * 10 + xs[2];
+    }
+    <main>
+        <p id="o">${f(@zs)}</p>
+    </main>
+</program>

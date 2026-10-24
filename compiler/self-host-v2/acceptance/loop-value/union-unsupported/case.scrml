@@ -1,0 +1,11 @@
+// §49.6 rule 2: lifted values of different types give their union — not in the bootstrap's type system.
+<program>
+    <zs:int[]=([3, 4, 5])/>
+    function f(ys: int[]) -> int {
+        const xs = for (y of ys) { if (y == 3) { lift "a"; } lift y; };
+        return xs.length;
+    }
+    <main>
+        <p id="o">${f(@zs)}</p>
+    </main>
+</program>

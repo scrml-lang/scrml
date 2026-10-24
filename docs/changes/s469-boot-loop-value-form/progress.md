@@ -32,7 +32,7 @@ Gap: `g-bootstrap-loop-value-form-s469` (MED). Ride-along: #1530 review (grant-s
   a row Lift only in a View.Gather, naming one of its rows; every Gather has ≥ 1 Lift into it (E-LOOP-007
   re-checked); a Gather body starts a jump scope holding only its own label (E-LOOP-005 re-checked in checkJumps);
   C19's loop-body rules (no Suspend / Join / Jump / Defer) apply; a View.Gather's loop holds no Return / Fail /
-  Attempt and writes no reactive state (C11's witness).
+  writes no reactive state (C11's witness).
 - **print** — `const xs = []; [L:] for (…) { … xs.push(v); … }`. Tier-0: `rt.gather(scope$, marker, () => { …loop…
   return rows; })`; a row Lift pushes `((a, b) => (scope$, anchor$) => { …render… })(a, b)` — a snapshot of the
   loop locals the row reads (a later rebinding never changes a row already lifted); a value Lift pushes
@@ -46,3 +46,41 @@ Gap: `g-bootstrap-loop-value-form-s469` (MED). Ride-along: #1530 review (grant-s
   3344 pass / 2 fail before the two pins below were moved (loops-s469 "value form refused" pin → an operand `for`;
   `acceptance/arms/neg-lift-nested` gained the `;`s its parse-level refusal used to mask — the case still tests the
   nested-lift refusal, same code, same bucket).
+- commit 2: `slice-m4/value-form-s469.test.js` (50), `acceptance/loop-value/*` (19: 12 run, 6 exact codes, 1
+  UNSUPPORTED target — the union tape); E-SYNTAX-002 for a `lift` in a bare `function` outside any bound loop
+  (§10.4 / §49.6.2 — `ruled-backlog-s469` pin moved); E-LOOP-007 is "no `lift` REACHABLE on some path"
+  (`liftReachable`); C20 no longer refuses an Attempt in a Tier-0 loop (a handled call there is legal; its arms'
+  Return / Fail still are). Ride-along: `g-bootstrap-rule-transition-into-payload-variant-s469` filed and fixed
+  (runtime `checkEdge` judges variant TAGS; lower `stateView` tests a payload variant by pattern) with
+  `slice-m4/rule-payload-s469.test.js` asserting the RUNTIME effect (red before: `.Dot → .[object Object]`).
+  Gaps: the value-form gap RESOLVED; `g-bootstrap-loop-value-form-residue-s469` (LOW) filed for what is still
+  refused. `bun scripts/gen-bootstrap-severity.ts` (E-LOOP-005 / E-LOOP-007 / E-SYNTAX-002 now named);
+  `bun scripts/bootstrap-conformance.ts --write` (one bucket move, below); `bun scripts/state.ts --write`
+  (master-list recent-sessions already current — untouched).
+
+## Conformance diff (`docs/bootstrap-conformance.md`)
+
+- **One bucket move:** `control-flow/ctrl-010-else-on-for-without-lift-neg` UNSUPPORTED → FAIL (twin-extra-error:
+  E-LOOP-007, E-VALUE-WRITES-STATE). The case is `<ul>${ for (let item of @items) { @total = @total + 1; } }</ul>`
+  and expects a clean compile. Under S469 a `for` that is the sole content of a markup `${ }` is the value form
+  (§49.4.4) — it must lift (E-LOOP-007) — and the interpolation is a render position that may not write (§6.15).
+  The case predates both rulings: an owner question, not a bootstrap defect (the corpus is not edited here).
+- Reason moves inside UNSUPPORTED (no bucket change): `ctrl-012-bare-control-flow-in-markup-neg` and
+  `ctrl-013-braceless-for-of-head-neg` now parse-reject on `lift <li>${x}</>` written without its `;` (they were
+  refused as a value-form `for`); `ctrl-010-for-lift-in-match-arm-neg` now stops at its `for … else`; four cases
+  name the new `lift` refusal text; `auth-graph-004-neg`, `e-match-block-in-lift-pos`, `sql-handled-lift-rt` now
+  stop at an earlier wall (`<program title=…>`, `<match>`, `<schema>`).
+- Totals: PASS 250 (unchanged) · FAIL 63 → 64 · UNSUPPORTED 815 → 814.
+
+## Owner questions
+
+1. **`lift` inside an arm block of a bound loop's body.** §49.6 rule 7 sends a `lift` "through … `match` arms and
+   `!{}` arms" to the nearest bound loop; §18.5 makes a value-position arm block's `lift` the ARM's value (and the
+   bootstrap refuses a statement-position one). Which wins for a `match` / `!{}` inside a bound loop? Refused today.
+2. **The code for a `for` in an operand / argument / `return` position** — §49.4.4 calls it "a syntax error" and
+   names no code (E-BOOTSTRAP-UNSUPPORTED today); likewise a Tier-0 loop that is not the sole content of its `${ }`.
+3. **`return` / `fail` inside a Tier-0 loop** — §49.6 rule 6 names a function's exits; a render position has none,
+   and the SPEC names no code (E-BOOTSTRAP-UNSUPPORTED today).
+4. **`ctrl-010-else-on-for-without-lift-neg`** (corpus) expects a lift-less, state-writing `${ for }` in markup to
+   compile clean; under §49.4.4 + §6.15 it is E-LOOP-007 + E-VALUE-WRITES-STATE. Re-target the case?
+5. **A union tape** (§49.6 rule 2) needs a union type in the bootstrap — the same wall as `T | U` in an opener.

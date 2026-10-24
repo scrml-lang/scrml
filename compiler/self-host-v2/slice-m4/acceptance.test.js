@@ -197,6 +197,27 @@ const STATUS = {
   "loop/neg-while": ["PASS", ["E-LOOP-WHILE-RETIRED"]],
   "loop/range": ["PASS", []],
   "loop/sum-tape": ["PASS", []],
+  // s469-boot-loop-value-form — the value form (§49.6) from every head, and the Tier-0 `${ for … lift }` (§17.4)
+  "loop-value/iterate": ["PASS", []],
+  "loop-value/range": ["PASS", []],
+  "loop-value/cond-head": ["PASS", []],
+  "loop-value/counted": ["PASS", []],
+  "loop-value/forever-break-prefix": ["PASS", []],
+  "loop-value/continue-keeps": ["PASS", []],
+  "loop-value/empty": ["PASS", []],
+  "loop-value/nested": ["PASS", []],
+  "loop-value/strings": ["PASS", []],
+  "loop-value/tier0-rows": ["PASS", []],
+  "loop-value/tier0-text": ["PASS", []],
+  "loop-value/tier0-break": ["PASS", []],
+  "loop-value/neg-break-outer": ["PASS", ["E-LOOP-005"]],
+  "loop-value/neg-continue-outer": ["PASS", ["E-LOOP-005"]],
+  "loop-value/neg-lifts-nothing": ["PASS", ["E-LOOP-007"]],
+  "loop-value/neg-tier0-lifts-nothing": ["PASS", ["E-LOOP-007"]],
+  "loop-value/neg-lift-in-function": ["PASS", ["E-SYNTAX-002"]],
+  "loop-value/neg-tier0-writes": ["PASS", ["E-VALUE-WRITES-STATE"]],
+  // the ruled union tape (§49.6 rule 2) needs a union type in the bootstrap's type system
+  "loop-value/union-unsupported": ["UNSUPPORTED", ["E-BOOTSTRAP-UNSUPPORTED"]],
   // s469 — logic backtick templates (§14.13.3, blocker #5): each slot a text sink; the honest text (§20.7.2)
   "templates/int-text": ["PASS", []],
   "templates/number-text": ["PASS", []],
@@ -288,6 +309,13 @@ describe("bootstrap acceptance cases — today's verdicts", () => {
                        "grants/local-sort-write", "grants/local-replace-granted", "grants/callsite-superset",
                        "grants/persist-session-struct-tape", "grants/enum-payload-ungranted-accepted",
                        "grants/spread-override-nested-keep", "grants/spread-identity-tape", "grants/spread-identity-struct"]) {
+      expect([rel, verdicts[rel].runtimeExecuted]).toEqual([rel, true]);
+    }
+  });
+  test("s469-boot-loop-value-form: every positive value-form / Tier-0 case RAN on the bootstrap (output checked)", () => {
+    for (const rel of ["loop-value/iterate", "loop-value/range", "loop-value/cond-head", "loop-value/counted",
+                       "loop-value/forever-break-prefix", "loop-value/continue-keeps", "loop-value/empty", "loop-value/nested",
+                       "loop-value/strings", "loop-value/tier0-rows", "loop-value/tier0-text", "loop-value/tier0-break"]) {
       expect([rel, verdicts[rel].runtimeExecuted]).toEqual([rel, true]);
     }
   });

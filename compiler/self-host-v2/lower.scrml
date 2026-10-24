@@ -1574,10 +1574,30 @@ ${
         const read: Expr = cellRead(c, v.decl, instOf(c, v.inst), [{ owner: v.decl, idx: v.idx }])
         let arms: CondArm[] = []
         for (const a of v.arms) {
-            const test: Expr = Expr.Prim(PrimOp.EqPrim, [read, Expr.Lit(Literal.Variant(v.enumSym, a.variant))])
-            arms = arms.concat([{ test: test, body: lowerNodes(c, a.body) }])
+            arms = arms.concat([{ test: variantIs(c, read, v.enumSym, a.variant), body: lowerNodes(c, a.body) }])
         }
         return View.Cond(arms)
+    }
+
+    // s469 (g-bootstrap-rule-transition-into-payload-variant-s469): "the cell is
+    // in variant `idx`" — a unit variant's value IS its tag (EqPrim); a PAYLOAD
+    // variant's value carries its fields, so the test is a variant pattern (a
+    // Core Match, printed as a tag test), never an identity comparison.
+    fn variantIs(c: LC, read: Expr, es: Sym, idx: int) -> Expr {
+        if (!variantHasFieldsIn(c.t, es, idx)) return Expr.Prim(PrimOp.EqPrim, [read, Expr.Lit(Literal.Variant(es, idx))])
+        const yes: MatchArm = { pat: Pattern.PVariant(es, idx, []), body: Expr.Lit(Literal.Bool(true)) }
+        const no: MatchArm = { pat: Pattern.PWild, body: Expr.Lit(Literal.Bool(false)) }
+        return Expr.Match(read, [yes, no])
+    }
+
+    fn variantHasFieldsIn(t: Tables, es: Sym, idx: int) -> boolean {
+        for (const ti of t.types) {
+            if (typeDefSym(ti.def).id == es.id) {
+                const vs: VariantDef[] = enumVariantsOfDef(ti.def)
+                if (idx >= 0 && idx < vs.length) return vs[idx].fields.length > 0
+            }
+        }
+        return false
     }
 
     fn attrKind(c: LC, a: AAttr) -> AttrKind | not {

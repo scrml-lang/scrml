@@ -1,0 +1,12 @@
+// §49.6 rule 1: a range head bound as a value.
+<program>
+    <zs:int[]=([3, 4, 5])/>
+    function f(ys: int[]) -> int {
+        const a = for (i of 0..4) { lift i * i; };
+        const b = for (i of 1..=3) { lift i; };
+        return a[3] * 100 + a.length * 10 + b.length;
+    }
+    <main>
+        <p id="o">${f(@zs)}</p>
+    </main>
+</program>

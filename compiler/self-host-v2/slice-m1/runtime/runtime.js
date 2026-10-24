@@ -941,12 +941,21 @@ export function edges(table) { return table; }
  * an all-or-nothing spread edit (RULED S440) checks every edge before any write.
  */
 export function checkEdge(target, table, to) {
-  const from = target.peek();
-  if (from === to) return;
+  // s469 (g-bootstrap-rule-transition-into-payload-variant-s469): the graph is
+  // over VARIANTS — a payload value `{ variant, data }` is judged by its tag
+  // (the edge table's keys and entries are tags), never by object identity.
+  const from = variantTag(target.peek());
+  const toTag = variantTag(to);
+  if (from === toTag) return;
   const allowed = table[from];
-  if (!allowed || !allowed.includes(to)) {
-    throw new Error(`E-ENGINE-INVALID-TRANSITION: .${from} → .${to} is not an edge of this field's rule= graph`);
+  if (!allowed || !allowed.includes(toTag)) {
+    throw new Error(`E-ENGINE-INVALID-TRANSITION: .${from} → .${toTag} is not an edge of this field's rule= graph`);
   }
+}
+
+/** An enum value's variant tag: a unit variant is its tag; a payload variant is `{ variant, data }`. */
+function variantTag(v) {
+  return v !== null && typeof v === "object" && typeof v.variant === "string" ? v.variant : v;
 }
 
 /** A graph write with a runtime edge check (§6.3). A self-write is a no-op (§51.0.F.1). */

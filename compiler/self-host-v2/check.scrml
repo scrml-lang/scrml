@@ -2786,7 +2786,7 @@ ${
         return match s {
             .Return(e: x) :> "a Return"
             .Fail(err: x) :> "a Fail"
-            .Attempt(result: x) :> "an Attempt"
+            .Attempt(result: x) :> ""
             .Let(sym: x) :> ""
             .Assign(local: x) :> ""
             .Write(cap: x) :> ""

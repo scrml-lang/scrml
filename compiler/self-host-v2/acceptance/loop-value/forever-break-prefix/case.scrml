@@ -1,0 +1,12 @@
+// §49.6 rule 5: `break` keeps the prefix (the infinite head).
+<program>
+    <zs:int[]=([3, 4, 5])/>
+    function f(ys: int[]) -> int {
+        let n = 0;
+        const xs = for { n = n + 1; if (n > 3) { break; } lift n; };
+        return xs.length;
+    }
+    <main>
+        <p id="o">${f(@zs)}</p>
+    </main>
+</program>

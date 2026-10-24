@@ -1,0 +1,16 @@
+{
+  "id": "acceptance-loop-value-continue-keeps",
+  "description": "Each element is lifted; the 0 after it is skipped for 4: 3 + 2 = 5.",
+  "language-version": "1.0",
+  "spec": "§49.6 rule 5",
+  "rationale": "§49.6 rule 5: \"`continue` skips the rest of the iteration and keeps what it already lifted.\"",
+  "expect": {
+    "codes": [],
+    "domAnchored": [
+      {
+        "selector": "#o",
+        "text": "5"
+      }
+    ]
+  }
+}

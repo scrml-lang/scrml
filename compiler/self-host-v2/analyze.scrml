@@ -10631,12 +10631,79 @@ ${
         const n0: int = st.lifts.length
         st = resolveFor(withLift(env, LiftCtx.LiftTo(rs.s, false)), s, f, st)
         const lr: LiftsOf = liftsInto(st, n0, rs.s)
-        if (lr.count == 0) st = addDiag(st, env.file, f.span, "E-LOOP-007", "The loop bound to `" + b.name + "` lifts nothing, so its value is always an empty tape. Add `lift <value>;` where the loop produces an element, or write the loop as a statement (§49.4.4, §49.6)")
+        if (lr.count == 0 || !liftReachable(f.body)) st = addDiag(st, env.file, f.span, "E-LOOP-007", "The loop bound to `" + b.name + "` lifts nothing on any path, so its value is always an empty tape. Add `lift <value>;` where the loop produces an element, or write the loop as a statement (§49.4.4, §49.6)")
         let lty: Type | not = lr.elem
         if (lty is given) lty = Type.Seq(lty, fixedSeq())
         if (annot is given) lty = annot
         const l: LocalB = { name: b.name, s: rs.s, ty: lty, mutable: b.mutable, narrowed: not, nDecl: not }
         return { env: withLocal(env, l), st: st }
+    }
+
+    // §49.4.4: "a `lift` reachable on some path" — a `lift` into THIS loop that
+    // some path reaches: through `if` / `given` blocks and statement loops (a
+    // nested bound loop captures its own, rule 7); a statement after one that
+    // always leaves its block (`break`, `continue`, `return`, `fail`, an `if`
+    // both of whose branches leave, a loop that never completes) is not reached.
+    fn liftReachable(b: ABlock) -> boolean {
+        for (const s of b.stmts) {
+            if (stmtLiftReachable(s)) return true
+            if (stmtEndsPath(s)) return false
+        }
+        return false
+    }
+
+    fn liftReachableMaybe(b: ABlock | not) -> boolean {
+        if (b is not) return false
+        return liftReachable(b)
+    }
+
+    fn stmtLiftReachable(s: AStmt) -> boolean {
+        const k: AStmtK = s.k
+        return match k {
+            .Lift(what: x) :> true
+            .If(cond: c, thenB: tb, elseB: el) :> liftReachable(tb) || liftReachableMaybe(el)
+            .Given(name: n, body: gb) :> liftReachable(gb)
+            .For(f: lf) :> lf.bound is not && liftReachable(lf.body)
+            .Eval(e: x) :> false
+            .Local(name: n) :> false
+            .Return(e: x) :> false
+            .EffectStmt(w: x) :> false
+            .Defer(body: x) :> false
+            .Fail(f: x) :> false
+            .Break(label: x) :> false
+            .Continue(label: x) :> false
+        }
+    }
+
+    // Does every path through `s` leave its block (nothing after it runs)?
+    fn stmtEndsPath(s: AStmt) -> boolean {
+        const k: AStmtK = s.k
+        return match k {
+            .Break(label: x) :> true
+            .Continue(label: x) :> true
+            .Return(e: x) :> true
+            .Fail(f: x) :> true
+            .If(cond: c, thenB: tb, elseB: el) :> blockEndsPath(tb) && blockEndsPathMaybe(el)
+            .For(f: lf) :> loopNeverCompletes(lf)
+            .Given(name: n) :> false
+            .Eval(e: x) :> false
+            .Local(name: n) :> false
+            .EffectStmt(w: x) :> false
+            .Defer(body: x) :> false
+            .Lift(what: x) :> false
+        }
+    }
+
+    fn blockEndsPath(b: ABlock) -> boolean {
+        for (const s of b.stmts) {
+            if (stmtEndsPath(s)) return true
+        }
+        return false
+    }
+
+    fn blockEndsPathMaybe(b: ABlock | not) -> boolean {
+        if (b is not) return false
+        return blockEndsPath(b)
     }
 
     // The lifts resolved since `n0` into `into`: how many, and the join of
@@ -10697,10 +10764,25 @@ ${
         const r: RX = resolveLifted(env, w, st0)
         let st: AS = r.st
         if (inArm) return addDiag(st, env.file, s.span, "E-BOOTSTRAP-UNSUPPORTED", "`lift` is in the bootstrap only as the LAST statement of a `match` / `!{}` arm block (§18.5: `.B :> { log(); lift 2 }`) — a `lift` inside an arm block appends to nothing here: inside a bound loop, §49.6 rule 7 would send it to the loop while §18.5 makes it the arm's value (an open reading) — lift after the `match` / `!{}` instead")
+        // §10.4 / §49.6.2: "`lift` inside a loop body inside a bare `function` SHALL be a
+        // compile error (E-SYNTAX-002) … unless the loop is bound" — a bare `function` body
+        // has no lift target. (A `fn` body's `~`, §48.5, is not in the bootstrap.)
+        if (tgt is not && inBareFunction(env)) return addDiag(st, env.file, s.span, "E-SYNTAX-002", "`lift` is not valid inside a bare `function` body (§10.4) — a `function` returns its value. Bind the loop as a value and return it (`const xs = for (…) { … lift e; … }; return xs;`, §49.6), or `return` the value and lift it at the call site")
         if (tgt is not) return addDiag(st, env.file, s.span, "E-BOOTSTRAP-UNSUPPORTED", "`lift` appends to a loop BOUND AS A VALUE (`const xs = for (…) { … lift e; … };`, §49.6) or to a Tier-0 `" + "$" + "{ for … }` in markup (§17.4) — this one stands in neither (lifting into a render target or a `fn` body's `~`, §10 / §48.5, is not in the bootstrap)")
         if (!tier0 && liftsMarkup(w)) return addDiag(st, env.file, s.span, "E-BOOTSTRAP-UNSUPPORTED", "lifted MARKUP is a row of a Tier-0 `" + "$" + "{ for … }` in markup (§17.4) — the nearest bound loop here is `" + tgt.hint + "`, which builds a tape of values")
         st = addBind(st, s.nid, BindFact.BJump(tgt))
         return addLift(st, tgt, r.x.ty)
+    }
+
+    // A bare `function` declaration's body (not a `fn`, not a handler / effect / markup).
+    fn inBareFunction(env: Env) -> boolean {
+        if (!env.fx.inFn || env.inEffect) return false
+        const h: HostCtx = env.host
+        return match h {
+            .HostPure :> false
+            .HostOk :> true
+            .HostNo :> true
+        }
     }
 
     fn resolveLifted(env: Env, w: ALift, st: AS) -> RX {
@@ -10737,7 +10819,7 @@ ${
         const fs: AStmt = forAsStmt(f)
         const n0: int = st.lifts.length
         st = resolveFor(withLift(env, LiftCtx.LiftTo(rs.s, true)), fs, f, st)
-        if (liftsInto(st, n0, rs.s).count == 0) st = addDiag(st, env.file, f.span, "E-LOOP-007", "This `" + "$" + "{ for … }` loop lifts nothing, so it always renders nothing. Add `lift <li>…</li>;` (or `lift <value>;`) where the loop produces a row, or compute the loop in a function (§17.4, §49.4.4)")
+        if (liftsInto(st, n0, rs.s).count == 0 || !liftReachable(f.body)) st = addDiag(st, env.file, f.span, "E-LOOP-007", "This `" + "$" + "{ for … }` loop lifts nothing, so it always renders nothing. Add `lift <li>…</li>;` (or `lift <value>;`) where the loop produces a row, or compute the loop in a function (§17.4, §49.4.4)")
         for (const rsite of returnSites(f.body)) {
             st = addDiag(st, env.file, f.span, "E-BOOTSTRAP-UNSUPPORTED", "a `return` inside a `" + "$" + "{ for … }` in markup has no function to leave (§49.6 rule 6 names a function's exits; a render position has none) — compute the loop in a function and render its result")
         }
