@@ -324,3 +324,31 @@ describe("where the plain list is re-run, and where it is refused", () => {
     expect(app.errors).toContain("E-IMPL1-LIFT-GATE-UNTRACKED");
   });
 });
+
+describe("a bind inside a keyed row does not subscribe the render around the list (review of b84c3f6de, MED-1)", () => {
+  // `_scrml_untracked` restored `false` instead of the prior pause state, so the first row's bind init
+  // (run inside `_scrml_reconcile_list`'s paused window) turned tracking back on and the later rows'
+  // reads subscribed the enclosing `if … lift` arm: an in-place write or an append re-rendered the arm
+  // and a sibling input lost its typed text (the todomvc shape).
+  for (const [label, step] of [
+    ["an in-place write of a row's field", () => { globalThis.__kri_get("xs")[1].id = 7; }],
+    ["an append", () => { globalThis.__kri_get("xs").push({ id: 3, n: "r" }); }],
+  ]) {
+    test(`${label}: the arm and its sibling input are kept`, async () => {
+      const app = compileAndMount(`<x> = "a"
+<show> = true
+<xs> = [{ id: 1, n: "p" }, { id: 2, n: "q" }]
+<div id="out">\${ if (@show) { lift <input class="top"/>
+ for (r of @xs) { lift <li><input class="in" bind:value=@x/>\${r.n}</li> } } }</div>
+`);
+      expect(app.errors).toEqual([]);
+      await flush();
+      const top = document.querySelector("#out input.top");
+      top.value = "typed by the user";
+      step();
+      await flush();
+      expect(document.querySelector("#out input.top")).toBe(top);
+      expect(top.value).toBe("typed by the user");
+    });
+  }
+});
