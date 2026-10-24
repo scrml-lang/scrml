@@ -59,4 +59,4 @@ a lifted `<each>`.
 - [x] `<match>` / `<each>` opener END from the tokenizer (`tokenizerOpenerEnd`).
 - [x] timers / state-children / match arms (codegen `buildMatchArms`) / component-body `<slot>` / `<md show=>`.
 - [x] differential test (354), pack n27 +61 (862), SPEC (§17.1.2.2, §51.0.J, §34), gaps.
-- [ ] merge origin/main, CI rerun + hook-skipped browser files, per-spelling table.
+- [x] merged origin/main (4e1983534); CI blocking commands all 0 (facts WARN 1; bootstrap-conformance regenerated); `bun test compiler/tests/browser` 2055 pass / 8 fail = the 8 browser-baseline names; corpus differential vs main: only the round-1 intended refusal, 170 artifact diffs all the checkout path.
