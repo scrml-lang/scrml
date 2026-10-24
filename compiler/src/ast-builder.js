@@ -4771,21 +4771,49 @@ function readStructuralOpenerAttrs(header, anchor, filePath, tagName, opts = {})
   const toks = [];
   let unread = "";
   let segStart = 0;
-  for (let guard = 0; guard < 64; guard++) {
+  // Each pass either ends the loop or moves `segStart` strictly forward (`consumed > 0`), so it
+  // terminates without a cap (round 3 had a 64-pass cap that, when exhausted, failed OPEN: the rest
+  // of the opener was never read — S469 round 4 HIGH-2).
+  for (;;) {
     const seg = tokenizeRange(segStart, end);
+    // The first expression slot (`name` + `=`) in this segment whose value the markup tokenizer
+    // could NOT read cleanly — an operator run (ATTR_OP_REJECT), or a value it dropped characters
+    // of and replaced by the next name (`key=-1 if=@n`, a `` `template` ``): that value is read by
+    // the expression parser instead. A clean value token (`@xs`, `@.id`, `"…"`, `(…)`, `${…}`, a
+    // call) stays the tokenizer's.
+    const CLEAN = new Set(["ATTR_IDENT", "ATTR_STRING", "ATTR_EXPR", "ATTR_CALL", "ATTR_BLOCK"]);
     let cut = -1;
-    for (let i = 2; i < seg.toks.length; i++) {
+    for (let i = 0; i + 1 < seg.toks.length; i++) {
       const t = seg.toks[i];
-      if (t && t.kind === "ATTR_OP_REJECT" && seg.toks[i - 1].kind === "ATTR_EQ" &&
-          seg.toks[i - 2].kind === "ATTR_NAME" && slots.has(seg.toks[i - 2].text)) { cut = i; break; }
+      if (t && t.kind === "ATTR_NAME" && slots.has(t.text) && seg.toks[i + 1] && seg.toks[i + 1].kind === "ATTR_EQ" &&
+          !(seg.toks[i + 2] && CLEAN.has(seg.toks[i + 2].kind))) { cut = i; break; }
     }
     const segToks = segStart > 0 ? seg.toks.filter((t) => t && t.kind !== "TAG_OPEN") : seg.toks;
     if (cut < 0) { toks.push(...segToks); unread = seg.unread; break; }
-    toks.push(...seg.toks.slice(segStart > 0 ? 1 : 0, cut - 2));
-    const valStart = seg.toks[cut].span.start - anchor.absStart;
+    toks.push(...seg.toks.slice(segStart > 0 ? 1 : 0, cut));
+    let valStart = seg.toks[cut + 1].span.end - anchor.absStart;
+    while (valStart < end && /\s/.test(text[valStart])) valStart++;
     const consumed = expressionSlotExtent(text.slice(valStart, end), filePath, anchor.absStart + valStart);
-    if (consumed < 0) { unread = text.slice(valStart, end); break; }
+    if (consumed <= 0) { unread = text.slice(valStart, end); break; }
     segStart = valStart + consumed;
+  }
+  // The builder's own sigil slots (`<engine initial=.Variant accepts=:Type>`, `<match on=.Variant>`):
+  // the markup tokenizer drops the `.` / `:` and reads the name as an ATTR_NAME value, which
+  // `parseAttributes` refuses (E-ATTR-001) — a refusal of a grammar the builder reads itself, not of
+  // the author. Such a triple is removed before the parse ONLY when the dropped character is that
+  // sigil and the name is not a gate / chain attribute name (any case): `initial=. if=@n` keeps its
+  // E-ATTR-001, so the gate it swallowed still fails the compile (S469 round 4).
+  const sigilSlots = new Set(opts.sigilSlots ?? []);
+  for (let i = 0; i + 2 < toks.length; i++) {
+    const n = toks[i], eq = toks[i + 1], v = toks[i + 2];
+    if (!n || n.kind !== "ATTR_NAME" || !sigilSlots.has(n.text) || !eq || eq.kind !== "ATTR_EQ") continue;
+    if (!v || v.kind !== "ATTR_NAME" || !v.span) continue;
+    const lower = String(v.text).toLowerCase();
+    if (lower === "if" || lower === "else" || lower === "else-if" || lower === "show") continue;
+    const sigil = text[v.span.start - anchor.absStart - 1];
+    if (sigil !== "." && sigil !== ":") continue;
+    toks.splice(i, 3);
+    i--;
   }
   const scratchErrors = [];
   const attrs = parseAttributes(toks, filePath, scratchErrors, false, tagName, tagName === "engine");
@@ -4809,6 +4837,11 @@ function expressionSlotExtent(value, filePath, absStart) {
     const close = logicBlockClose(value, 0);
     return close >= 0 ? close + 1 : -1;
   }
+  // The expression never runs past the next top-level attribute boundary — whitespace, a name,
+  // `=` (not `==` / `=>`) — so `key=x.id + 1 in=@xs` stops before `in=` (JavaScript's `in`
+  // operator would otherwise continue the parse) and a gate (`if=`, `else-if=`, `show=`) is never
+  // swallowed. A bare `else` has no `=`; the parser leaves it as trailing text.
+  value = value.slice(0, topLevelAttrBoundary(value));
   let node = null;
   try {
     ({ result: node } = captureTrailingContentWarnings(() => parseExprToNode(value, filePath, absStart)));
@@ -4820,6 +4853,31 @@ function expressionSlotExtent(value, filePath, absStart) {
   if (!trailing) return value.length;
   const body = value.replace(/\s+$/, "");
   return body.endsWith(trailing) ? body.length - trailing.length : -1;
+}
+
+/**
+ * Index of the first top-level ` name=` (not `==` / `=>`) in `value` — outside quotes, template
+ * literals and brackets — or `value.length`.
+ */
+function topLevelAttrBoundary(value) {
+  let depth = 0;
+  let quote = null;
+  for (let i = 0; i < value.length; i++) {
+    const c = value[i];
+    if (quote) {
+      if (c === "\\") { i++; continue; }
+      if (c === quote) quote = null;
+      continue;
+    }
+    if (c === '"' || c === "'" || c === "`") { quote = c; continue; }
+    if (c === "(" || c === "[" || c === "{") { depth++; continue; }
+    if (c === ")" || c === "]" || c === "}") { if (depth > 0) depth--; continue; }
+    if (depth === 0 && /\s/.test(c)) {
+      const m = /^\s+([A-Za-z_$][\w$:-]*)\s*=(?![=>])/.exec(value.slice(i));
+      if (m) return i;
+    }
+  }
+  return value.length;
 }
 
 /**
@@ -4884,7 +4942,7 @@ function structuralGateFields(scan, header, anchor, filePath, tagName, errors) {
   {
     const forwarded = new Set(errors);
     for (const e of scan.scratchErrors) {
-      if (e && typeof e.baseMessage === "string" && !forwarded.has(e)) errors.push(structuralRefusal(e));
+      if (e && !forwarded.has(e)) errors.push(structuralRefusal(e));
     }
   }
   for (const a of attrs) {
@@ -5181,13 +5239,22 @@ function parseAttributes(tokens, filePath, errors, isComponent = false, tagName 
             value = { kind: "absent", _refused: true };
           } else {
             // E-ATTR-001: unexpected token type as attribute value
-            errors.push(new TABError(
+            const _e001 = new TABError(
               "E-ATTR-001",
               `E-ATTR-001: The value \`${valTok.text}\` is not valid for attribute \`${name}\`. ` +
               `Attribute values must be a quoted string literal, an unquoted identifier, or a call expression. ` +
               `For example: \`${name}="hello"\`, \`${name}=myVar\`, or \`${name}=\${expression}\`.`,
               valSpan,
-            ));
+            );
+            // S469 round 4 — the tokenizer DROPPED the real value (`tabindex=-1`, `x=+1`, `x=.5`) and
+            // handed us the NEXT attribute's name as the value. When that name is a gate / chain
+            // attribute (any case), the gate was swallowed: marked so a sub-build (an `<each>` row)
+            // forwards it instead of discarding it — on a top-level `<p>` it fails the compile, and in
+            // a row it must too, or the element renders ungated.
+            if (valTok.kind === "ATTR_NAME" && /^(if|else|else-if|show)$/i.test(String(valTok.text))) {
+              _e001.structuralChainRefusal = true;
+            }
+            errors.push(_e001);
             value = { kind: "absent" };
           }
 
@@ -24434,7 +24501,7 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
         // `for=` / `initial=` written inside the derived expression is never picked up.
         // impl#1 requires `derived=` to be the LAST attribute (refuseDerivedTrailing).
         const _engineIfAnchor = structuralHeaderAnchor(block, header);
-        const _engineIfScan = readStructuralOpenerAttrs(header, _engineIfAnchor, filePath, "engine", { splitDerived: true });
+        const _engineIfScan = readStructuralOpenerAttrs(header, _engineIfAnchor, filePath, "engine", { splitDerived: true, sigilSlots: ["initial", "accepts"] });
         const _engineDerivedExtent = _engineIfScan.derivedAt >= 0 ? header.slice(_engineIfScan.derivedAt) : null;
         if (_engineIfScan.derivedAt >= 0) header = _engineIfScan.prefix.trimEnd();
 
@@ -26177,7 +26244,10 @@ function refuseUnconsumedStructuralChainAttrs(nodes, errors) {
     const kind = v.kind;
     // §17.1 (S469 round 3) — a case variant of a gate name (`IF=`, `Else`, `SHOW=`) on ANY element
     // is not a gate: refused (E-GATE-ATTR-CASE), the one predicate every reader applies.
-    if (typeof kind === "string" && Array.isArray(v.attrs)) {
+    // A component USE-SITE (upper-case tag) is checked by the component expander, which knows
+    // the component's declared props (a declared `Show` prop is not a gate — round 4).
+    const upperTagUseSite = kind === "markup" && typeof v.tag === "string" && /^[A-Z]/.test(v.tag);
+    if (typeof kind === "string" && Array.isArray(v.attrs) && !upperTagUseSite) {
       for (const a of v.attrs) {
         const lower = a && gateAttrCaseVariant(a.name);
         if (lower) errors.push(structuralRefusal(new TABError(GATE_ATTR_CASE_CODE, gateAttrCaseMessage(a.name, lower), a.span ?? v.span ?? { line: 0, col: 0 })));

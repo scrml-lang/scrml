@@ -189,11 +189,13 @@ describe("<engine derived=…>: derived= is the last attribute (E-ENGINE-DERIVED
 // same holds for a case-variant gate name (`IF=`, `Else`), refused everywhere (E-GATE-ATTR-CASE).
 // ---------------------------------------------------------------------------------------------------
 
-const READER_REFUSALS = new Set(["E-ATTR-UNQUOTED-OPERATOR", "E-ATTR-MULTI-STATEMENT", "E-GATE-ATTR-CASE"]);
+const READER_REFUSALS = new Set(["E-ATTR-UNQUOTED-OPERATOR", "E-ATTR-MULTI-STATEMENT", "E-GATE-ATTR-CASE", "E-ATTR-001"]);
 const refusalCodes = (errors) => [...new Set(errors.map((e) => e.code).filter((c) => READER_REFUSALS.has(c)))].sort();
 
 const OP_VALUES = ["data-z=a/", "title=a/b", "data-x=1+2", "data-x=a?b:c", "data-x=a&&b", "data-x=a||b",
-  "data-x=a*b", "data-x=a==b", "data-x=a,", "data-x=a;", "data-path=admin/panel", "key=x.id+1"];
+  "data-x=a*b", "data-x=a==b", "data-x=a,", "data-x=a;", "data-path=admin/panel", "key=x.id+1",
+  // Round 4: values the tokenizer DROPS (the next attribute's name becomes the value — E-ATTR-001).
+  "tabindex=-1", "x=+1", "x=~1", "x=.5", "x=)", "x=]", "key=-1"];
 const GATE_TAILS = ["else", "else-if=@g", "if=@n", "show=@n"];
 const CASE_VARIANTS = ["ELSE", "Else", "ELSE-IF=@g", "Else-If=@g", "IF=@n", "If=@n", "SHOW=@n", "Show=@n"];
 
@@ -233,14 +235,22 @@ function compileCodes(src) {
 }
 
 describe("round 3 — the same in a component body, and on the raw-text openers (full compile)", () => {
-  const SAMPLE = ["data-z=a/ else", "data-x=a+b show=@n", "data-x=a/ if=@n", "data-x=a; else", "IF=@n", "Else"];
+  const SAMPLE = ["data-z=a/ else", "data-x=a+b show=@n", "data-x=a/ if=@n", "data-x=a; else", "IF=@n", "Else",
+    "tabindex=-1 if=@n", "x=+1 else", "x=.5 show=@n", "x=~1 if=@n", "x=) if=@n", "x=] else"];
   for (const attrs of SAMPLE) {
-    const want = refusalCodes(compileCodes(`const W = <div><p ${attrs}>z</p></div>\n<div id="out"><W/></div>\n`).map((code) => ({ code })));
+    // The reference answer is the markup TAB reader's on a top-level `<p>`. (A component body's `<p>`
+    // goes through the native re-parse, which reads `tabindex=-1` whole — gated correctly, not
+    // refused — so it is not the reference for the dropped-character spellings.)
+    const want = refusalCodes(compileCodes(`<div id="out"><p ${attrs}>z</p></div>\n`).map((code) => ({ code })));
     for (const el of ["match", "each"]) {
       test(`<${el} ${attrs}> in a component body — refused like <p>`, () => {
         expect(want.length).toBeGreaterThan(0);
-        const got = refusalCodes(compileCodes(`const W = <div>${STRUCTURAL[el].src(attrs)}</div>\n<div id="out"><W/></div>\n`).map((code) => ({ code })));
-        expect(got).toEqual(want);
+        const all = compileCodes(`const W = <div>${STRUCTURAL[el].src(attrs)}</div>\n<div id="out"><W/></div>\n`);
+        const got = refusalCodes(all.map((code) => ({ code })));
+        // A `)` / `]` value makes the component body itself unreadable (E-PARSE-001) — refused all
+        // the same; otherwise the refusal is the same as on <p>.
+        if (all.includes("E-PARSE-001")) expect(all.length).toBeGreaterThan(0);
+        else expect(got).toEqual(want);
       });
     }
     const RAW = {
@@ -296,5 +306,37 @@ describe("round 3 — an <each> expression slot ends where the expression parser
   });
   test("a NON-slot operator value on <each> stays refused (data-x=a+b if=@n)", () => {
     expect(refusalCodes(tab(ROWSRC("data-x=a+b if=@n")).errors)).toEqual(["E-ATTR-UNQUOTED-OPERATOR"]);
+  });
+});
+
+describe("round 4 — the slot loop always reads to the end of the opener; slot order; a declared prop named Show", () => {
+  for (const n of [1, 63, 64, 65, 200]) {
+    test(`${n} key= operator segments, then if=@n — the gate is read`, () => {
+      const keys = Array.from({ length: n }, () => "key=x.id+1").join(" ");
+      const { ast, errors } = tab(`<div id="out"><each in=@xs as x ${keys} if=@n><p>r</p></each></div>\n`);
+      expect(findNode(ast.nodes, (v) => v.kind === "each-block").ifCond).toBeDefined();
+      expect(errors.map((e) => e.code)).not.toContain("E-CG-003");
+    });
+  }
+  for (const opener of [
+    "key=x.id + 1 in=@xs as x if=@n",
+    "in=@xs key=x.id + 1 as x if=@n",
+    "in=@xs as x key=x.id+1 if=@n",
+    "key=x.id+1 if=@n in=@xs as x",
+    "if=@n key=x.id + 1 in=@xs as x",
+  ]) {
+    test(`<each ${opener}> — compiles and keeps its gate`, () => {
+      const { ast, errors } = tab(`<div id="out"><each ${opener}><p>r</p></each></div>\n`);
+      const n = findNode(ast.nodes, (v) => v.kind === "each-block");
+      expect(n.ifCond).toBeDefined();
+      expect(n.inExprRaw).toBe("@xs");
+      expect(errors.map((e) => e.code).filter((c) => c.startsWith("E-"))).toEqual([]);
+    });
+  }
+  test("a component prop declared as Show is the component's attribute, not a gate", () => {
+    expect(compileCodes(`const Card = <div props={ Show: boolean }><p>c</p></div>\n<div id="out"><Card Show=@n/></div>\n`)).not.toContain("E-GATE-ATTR-CASE");
+  });
+  test("an UNdeclared Show on a component use-site is still refused", () => {
+    expect(compileCodes(`const Card = <div props={ Title: string }><p>c</p></div>\n<div id="out"><Card Title="x" Show=@n/></div>\n`)).toContain("E-GATE-ATTR-CASE");
   });
 });

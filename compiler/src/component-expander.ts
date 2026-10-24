@@ -1701,7 +1701,7 @@ function parseComponentDef(
       const n = v as Record<string, unknown>;
       // §17.1 (S469 round 3) — a case-variant gate name on any body element (the native re-parse
       // runs no TAB pass; a buildAST re-parse's own report was forwarded above — not twice).
-      if (typeof n.kind === "string" && Array.isArray(n.attrs)) {
+      if (typeof n.kind === "string" && Array.isArray(n.attrs) && !(n.kind === "markup" && typeof n.tag === "string" && /^[A-Z]/.test(n.tag))) {
         for (const a of n.attrs as Array<{ name?: unknown; span?: { start?: number; end?: number } }>) {
           const lower = a && gateAttrCaseVariant(a.name);
           if (!lower) continue;
@@ -3795,6 +3795,19 @@ function expandComponentNode(
     ));
     // Leave the node as-is to allow downstream error recovery
     return [node];
+  }
+
+  // §17.1 (S469 round 4) — a case-variant gate name on a component USE-SITE is refused
+  // (E-GATE-ATTR-CASE) UNLESS it is a prop this component declares (`props={ Show: boolean }`
+  // then `<Card Show=@t/>`): a declared prop is the component's own attribute, not a gate.
+  {
+    const declared = new Set((def.propsDecl ?? []).map((d) => d.name));
+    for (const a of (node.attrs ?? []) as Array<{ name?: unknown; span?: Span }>) {
+      const lower = a && gateAttrCaseVariant(a.name);
+      if (!lower || declared.has(String(a.name))) continue;
+      ceErrors.push(makeCEError(GATE_ATTR_CASE_CODE, gateAttrCaseMessage(String(a.name), lower),
+        a.span ?? node.span ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 }));
+    }
   }
 
   // ---------------------------------------------------------------------------

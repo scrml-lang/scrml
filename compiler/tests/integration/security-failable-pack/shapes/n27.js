@@ -18,6 +18,7 @@
 // future chain lowering for structural elements that evaluates the chain once, or drops a branch condition.
 // Round 2 (shapes named `r2 …`): 61 FAIL on the round-1 head 456158a63, all PASS-REFUSED after.
 // Round 3 (shapes named `r3 …`): 197 FAIL / 3 PASS / 75 PASS-REFUSED on 412b77b8b, all PASS-REFUSED after.
+// Round 4 (shapes named `r4 …`): 109 FAIL / 1 PASS / 32 PASS-REFUSED on 20fadd7b4; 0 FAIL after (4 legal openers PASS).
 // Data, not logic: the default export is a list of [name, scrml source]. Side: client (click #wrong /
 // #right, read #out). Do not edit a shape to make it pass.
 
@@ -196,6 +197,40 @@ for (const [cn, gate] of [
     shapes.push([`r3 ${en.slice(1, -1)} ${cn} (case variant), in markup`, POSITIONS[0][1](gate(el))]);
   }
   shapes.push([`r3 <match> arm ${cn} (case variant), in markup`, POSITIONS[0][1](ARM(cn.endsWith("=") ? `${cn}(@pw == "secret")` : cn))]);
+}
+
+// ---------------------------------------------------------------------------------------------------
+// Round 4 (review of 20fadd7b4): a value the markup tokenizer DROPS (`tabindex=-1`, `x=+1`, `x=.5`,
+// `x=~1`, `x=)`, `x=]`) leaves the next attribute's NAME as the value, so a gate written after it
+// becomes the previous attribute's value (E-ATTR-001 on a top-level `<p>`). Round 3 forwarded only the
+// operator-run refusals, so the gate vanished on the structural openers; and an `<each>` ROW discarded
+// the E-ATTR-001 of a markup `<p>` the same way. Plus the slot loop's 64-segment cap (fail-open past it)
+// and the order-independent `<each key=… in=…>` spelling (must compile and gate). Measured on 20fadd7b4:
+// every `r4` refusal shape that compiled showed LOGGED IN on the wrong password.
+// ---------------------------------------------------------------------------------------------------
+const DROPS = ["tabindex=-1", "x=+1", "x=.5", "x=~1", "x=)", "x=]"];
+for (const v of DROPS) {
+  for (const [gn, gate] of R3_GATES) {
+    for (const [en, el] of R3_ELEMENTS) {
+      for (const [pn, pos] of [POSITIONS[0], POSITIONS[2]]) {
+        if (en === "<engine>" && pn !== "in markup") continue;
+        shapes.push([`r4 ${en.slice(1, -1)} ${v} ${gn}, ${pn}`, pos(gate(v, el))]);
+      }
+    }
+  }
+  shapes.push([`r4 <match> arm ${v} if=, in markup`, POSITIONS[0][1](ARM(`${v} if=(@pw == "secret")`))]);
+  shapes.push([`r4 engine state-child ${v} if=, in markup`, POSITIONS[0][1](SC(`${v} if=(@pw == "secret")`))]);
+}
+// 70 `key=` operator segments (past round 3's 64-pass cap), then the gate.
+shapes.push(["r4 each 70x key=x.id+1 then if=, in markup",
+  POSITIONS[0][1](ELEMENTS[2][1](`${Array.from({ length: 70 }, () => "key=r+1").join(" ")} if=(@pw == "secret")`))]);
+// The order-independent each spellings: legal, and gated (PASS on the right password, never on the wrong).
+for (const opener of [
+  `key=r + 1 in=@xs as r if=(@pw == "secret")`,
+  `in=@xs key=r + 1 as r if=(@pw == "secret")`,
+  `if=(@pw == "secret") key=r + 1 in=@xs as r`,
+]) {
+  shapes.push([`r4 each ${opener.split(" if=")[0]} … gate order, in markup`, POSITIONS[0][1](`<each ${opener}><b>LOGGED IN</b></each>`)]);
 }
 
 export default shapes;

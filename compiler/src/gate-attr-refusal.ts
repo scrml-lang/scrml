@@ -60,8 +60,30 @@ export function scanOpenerGateAttrs(attrText: string): { names: GateAttrName[]; 
     return { names, problems };
   }
   let lastName = "";
-  for (const t of toks) {
+  const synthetic = `<x ${attrText.replace(/\/\s*$/, "")}>`;
+  for (let k = 0; k < toks.length; k++) {
+    const t = toks[k];
     if (!t) continue;
+    // S469 round 4 — a value the tokenizer DROPPED (`x=-1`, `x=+1`, `x=.5`, `x=~1`, `x=)`, `x=]`)
+    // leaves the next attribute's name as the value token: on a markup opener that is E-ATTR-001,
+    // and the swallowed name (a gate among them) is lost. Refused the same way here. A dropped
+    // `.` / `:` sigil of the opener's own slot grammar (`to=.Idle`, `rule=.A`) is not a refusal —
+    // unless the name it left is a gate name.
+    if (t.kind === "ATTR_NAME" && k > 0 && toks[k - 1] && toks[k - 1].kind === "ATTR_EQ") {
+      const span = (t as { span?: { start?: number } }).span;
+      const before = span && typeof span.start === "number" ? synthetic[span.start - 1] : "";
+      const lower = t.text.toLowerCase();
+      const gateish = GATE_ATTR_NAMES.has(lower);
+      if (!(before === "." || before === ":") || gateish) {
+        problems.push({
+          code: "E-ATTR-001",
+          message: `E-ATTR-001: the value of \`${lastName}\` could not be read — the characters before \`${t.text}\` ` +
+            `were dropped, so \`${t.text}\` would be taken as its value${gateish ? " and the gate lost" : ""}. ` +
+            `It is refused rather than read ungated. Quote or parenthesize the value (\`${lastName}="…"\` / \`${lastName}=(…)\`).`,
+        });
+      }
+      continue;
+    }
     if (t.kind === "ATTR_NAME") {
       lastName = t.text;
       if (GATE_ATTR_NAMES.has(t.text) && !names.includes(t.text as GateAttrName)) names.push(t.text as GateAttrName);
