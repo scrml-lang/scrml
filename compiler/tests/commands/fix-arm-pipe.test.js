@@ -88,19 +88,35 @@ describe("arm-pipe — `!{}` handler arms", () => {
   });
 
   test("a paren-free binder gains its parentheses: `.V m` / `::V m` / `T.V m`", () => {
-    const src = program([
+    // S469 r2 — each binder is on a ONE-field variant: a paren-free binder is a pattern with exactly
+    // one binder, so on the two-field `Pair` or the unit `Gone` it is E-TYPE-021 (§19.4.3, S451
+    // ruling 2), which impl#1 now reports — the file would not compile, and the fixer verifies by
+    // compiling.
+    const src = [
+      "<program>",
+      "type E:enum = { Bad(msg: string), Note(text: string), Code(n: number) }",
+      "function risky(n)! -> E {",
+      "    if (n < 2) fail E::Bad(\"bad-msg\")",
+      "    if (n < 3) fail E::Note(\"note\")",
+      "    if (n < 4) fail E::Code(4)",
+      "    return n",
+      "}",
+      "export function go(n) {",
       "    const r = risky(n) !{",
       "        | .Bad m :> m",
-      "        | ::Pair p :> \"pair\"",
-      "        | E.Gone g :> \"gone\"",
+      "        | ::Note p :> \"note\"",
+      "        | E.Code g :> \"code\"",
       "    }",
       "    return r",
-    ]);
+      "}",
+      "</program>",
+      "",
+    ].join("\n");
     const r = fix(src);
     expect(r.blockers).toEqual([]);
     expect(r.output).toContain("\n        .Bad(m) :> m\n");
-    expect(r.output).toContain("\n        ::Pair(p) :> \"pair\"\n");
-    expect(r.output).toContain("\n        E.Gone(g) :> \"gone\"\n");
+    expect(r.output).toContain("\n        ::Note(p) :> \"note\"\n");
+    expect(r.output).toContain("\n        E.Code(g) :> \"code\"\n");
   });
 
   test("the whole-error arm `| _ e :>` → `_ e :>`; a headless bare binder `| e :>` → `_ e :>`", () => {

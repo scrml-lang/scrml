@@ -168,7 +168,7 @@ const HOST_ERROR_VARIANT_FIELDS: ReadonlyArray<readonly [string, string[]]> = [
   ["Generic", ["message"]],
   // §19.8.1 — `SqlError`, for a `! -> SqlError` function's handler (a `?{}` handler scopes the same
   // schema with enterSqlErrorSchema).
-  ...SQL_ERROR_VARIANT_FIELDS.map(([n, f]) => [n, [...f]] as const),
+  ...SQL_ERROR_VARIANT_FIELDS.map(([n, f]): readonly [string, string[]] => [n, [...f]]),
   ["BatchPrepareFailed", ["sites"]],
 ];
 
@@ -228,7 +228,7 @@ export function setVariantFieldsForFile(
  */
 let _sqlErrorSchemaDepth = 0;
 // S469 r2 — plus §8.9.4's `BatchPrepareFailed { sites }` (one declared field; impl#1 never produces it).
-const _sqlErrorSchema: ReadonlyMap<string, string[]> = new Map([...SQL_ERROR_VARIANT_FIELDS.map(([n, f]) => [n, [...f]] as [string, string[]]), ["BatchPrepareFailed", ["sites"]]]);
+const _sqlErrorSchema: ReadonlyMap<string, string[]> = new Map<string, string[]>([...SQL_ERROR_VARIANT_FIELDS.map(([n, f]): [string, string[]] => [n, [...f]]), ["BatchPrepareFailed", ["sites"]]]);
 export function enterSqlErrorSchema(): void { _sqlErrorSchemaDepth++; }
 export function exitSqlErrorSchema(): void { if (_sqlErrorSchemaDepth > 0) _sqlErrorSchemaDepth--; }
 
