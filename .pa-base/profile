@@ -79,6 +79,10 @@ GATE:   tests-as-gate (stable infra) + runtime-verify (codegen) + types (BLOCKIN
     the S262 PA reported "no bug reached me" off an EMPTY INBOX while the report sat in `gh issue list` (the absence-of-
     evidence trap). Triage -> docs/known-gaps.md; on landing, CLOSE the issue with the SHA. LANE: adopter bugs = Peter's
     standing footprint (pa-profile-pjoliver11.md "Peter's LANE"); bryan holds tier-1/freeze. Disjoint by construction.
+  - INBOX-BRANCH probe (S470, MANDATORY at boot 0.6, both profiles): `bun scripts/inbox-debt.ts`.
+    Siblings push to the `origin/inbox` BRANCH (S447); `ls handOffs/incoming/` reads only this disk's directory and
+    reported "inbox empty" at S470 while a same-day `needs: action` from flogence sat on the branch. HANDLED = basename
+    under `handOffs/incoming/read/` on main. PA STATES the unhandled count (UNAVAILABLE = unverified) in the boot report.
   - conformance: `bun conformance/run.ts` (69->~220 cases; DATA-not-TS; the language-1.0 gate).
   - R26 EMPIRICAL (S138): HIGH codegen fixes re-compile real adopter .scrml on the post-fix baseline
     before claim-closed (regression-tests-pass != empirical-pass). Reverse-direction: verify-before-dispatch.
