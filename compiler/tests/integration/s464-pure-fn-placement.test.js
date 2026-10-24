@@ -21,20 +21,23 @@
  * body does, the `.client.js` when client code does. `server fn` keeps its pin.
  */
 
-import { describe, test, expect, beforeAll, afterAll } from "bun:test";
-import { fileURLToPath } from "node:url";
+import { describe, test, expect, afterAll } from "bun:test";
 import { resolve, dirname, join } from "path";
-import { writeFileSync, existsSync, mkdirSync, readFileSync } from "fs";
+import { writeFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync } from "fs";
+import { tmpdir } from "os";
 import { Database } from "bun:sqlite";
 import { compileScrml } from "../../src/api.js";
 import { patchAndImport, closeOpenedDbHandles, safeRmSync } from "../helpers/self-host-server-import.js";
 
 const EXECUTED_DB_TIMEOUT_MS = 30_000;
-const testDir = dirname(fileURLToPath(new URL(import.meta.url)));
-const TMP_ROOT = resolve(testDir, "_tmp_s464_pure_fn_placement");
+// S469 (s469-hook-flakes): a FRESH root per run, under the per-process temp root
+// (tmp-root-preload.js). It used to be the fixed `<testsDir>/_tmp_s464_pure_fn_placement`
+// with per-process counter tags (`shop-run-3`), so two runs of this file at once — or a run
+// after one killed by `--bail` (afterAll skipped, the seeded shop.db left behind) — seeded
+// the SAME `shop.db` and failed "table orders already exists".
+const TMP_ROOT = mkdtempSync(join(tmpdir(), "s464-pure-fn-"));
 let tmpCounter = 0;
 
-beforeAll(() => { if (!existsSync(TMP_ROOT)) mkdirSync(TMP_ROOT, { recursive: true }); });
 afterAll(async () => { await closeOpenedDbHandles(); safeRmSync(TMP_ROOT); });
 
 function compile(src, name, seedFiles = {}) {

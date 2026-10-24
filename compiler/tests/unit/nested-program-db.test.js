@@ -11,9 +11,18 @@
  * Scoped variants are `_scrml_sql_<n>` (was `_scrml_db_<n>`).
  */
 
-import { describe, test, expect } from "bun:test";
+import { describe, test, expect, beforeEach } from "bun:test";
 import { rewriteSqlRefs } from "../../src/codegen/rewrite.ts";
 import { emitLogicNode } from "../../src/codegen/emit-logic.ts";
+import { setFileSqlFallback } from "../../src/codegen/sql-handle-name.ts";
+
+// S469 (s469-hook-flakes): this file calls the codegen emitters (emitLogicNode / rewriteSqlRefs /
+// rewriteServerExpr) DIRECTLY, without the per-file codegen entry, so a `?{}` lowered with no
+// `dbVar` reads the module-level fallback handle (`sql-handle-name.ts` `fallbackSqlHandle()`).
+// That fallback is whatever the LAST compile in this process left: after any test file that
+// compiled a two-database program it is `_scrml_sql_UNRESOLVED`, so these tests failed only when
+// a hook shard happened to run such a file first. Pin the single-database default per test.
+beforeEach(() => setFileSqlFallback(1));
 
 describe("§A rewriteSqlRefs with dbVar parameter (§4.12.6)", () => {
   test("default dbVar produces _scrml_sql tagged template", () => {
