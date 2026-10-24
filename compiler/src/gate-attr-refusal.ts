@@ -59,38 +59,61 @@ export function scanOpenerGateAttrs(attrText: string): { names: GateAttrName[]; 
   } catch {
     return { names, problems };
   }
-  let lastName = "";
+  // Walked like `parseAttributes` walks a markup opener: NAME [= VALUE]. S469 round 5 — no token is
+  // ever silently skipped: an `=` or a value with no name before it is refused (E-ATTR-001), since
+  // it may hold a gate (`<Active = if=@n>`, `to=.Idle = if=@n`).
   const synthetic = `<x ${attrText.replace(/\/\s*$/, "")}>`;
-  for (let k = 0; k < toks.length; k++) {
-    const t = toks[k];
-    if (!t) continue;
-    // S469 round 4 — a value the tokenizer DROPPED (`x=-1`, `x=+1`, `x=.5`, `x=~1`, `x=)`, `x=]`)
-    // leaves the next attribute's name as the value token: on a markup opener that is E-ATTR-001,
-    // and the swallowed name (a gate among them) is lost. Refused the same way here. A dropped
-    // `.` / `:` sigil of the opener's own slot grammar (`to=.Idle`, `rule=.A`) is not a refusal —
-    // unless the name it left is a gate name.
-    if (t.kind === "ATTR_NAME" && k > 0 && toks[k - 1] && toks[k - 1].kind === "ATTR_EQ") {
-      const span = (t as { span?: { start?: number } }).span;
-      const before = span && typeof span.start === "number" ? synthetic[span.start - 1] : "";
-      const lower = t.text.toLowerCase();
-      const gateish = GATE_ATTR_NAMES.has(lower);
-      if (!(before === "." || before === ":") || gateish) {
-        problems.push({
-          code: "E-ATTR-001",
-          message: `E-ATTR-001: the value of \`${lastName}\` could not be read — the characters before \`${t.text}\` ` +
-            `were dropped, so \`${t.text}\` would be taken as its value${gateish ? " and the gate lost" : ""}. ` +
-            `It is refused rather than read ungated. Quote or parenthesize the value (\`${lastName}="…"\` / \`${lastName}=(…)\`).`,
-        });
-      }
+  type Tok = { kind: string; text: string; span?: { start?: number; end?: number } };
+  const T = toks as Tok[];
+  const stray = (t: Tok) => problems.push({
+    code: "E-ATTR-001",
+    message: `E-ATTR-001: \`${t.kind === "ATTR_EQ" ? "=" : String(t.text ?? "").slice(0, 40)}\` in this opener is not part of ` +
+      `any attribute (a stray \`=\`, or a value with no name before it), so it would be silently dropped — together ` +
+      `with any attribute it holds, a gate among them. It is refused rather than read ungated.`,
+  });
+  let k = 0;
+  while (k < T.length) {
+    const t = T[k];
+    if (!t || t.kind === "TAG_OPEN" || t.kind === "TAG_CLOSE_GT" || t.kind === "TAG_SELF_CLOSE" || t.kind === "EOF") { k++; continue; }
+    if (t.kind !== "ATTR_NAME") { stray(t); k++; continue; }
+    const name = t.text;
+    if (GATE_ATTR_NAMES.has(name) && !names.includes(name as GateAttrName)) names.push(name as GateAttrName);
+    const cv = gateAttrCaseVariant(name);
+    if (cv) problems.push({ code: GATE_ATTR_CASE_CODE, message: gateAttrCaseMessage(name, cv) });
+    k++;
+    if (!T[k] || T[k].kind !== "ATTR_EQ") continue;
+    const eq = T[k];
+    k++;
+    const v = T[k];
+    if (!v || v.kind === "TAG_CLOSE_GT" || v.kind === "TAG_SELF_CLOSE" || v.kind === "EOF") continue; // `rule=*`
+    k++;
+    if (v.kind === "ATTR_OP_REJECT") { problems.push(unquotedRejectDiagnostic(name, v.text)); continue; }
+    if (v.kind === "ATTR_IDENT" && (v.text === "else" || v.text === "if")) {
+      problems.push({
+        code: "E-ATTR-001",
+        message: `E-ATTR-001: \`${v.text}\` cannot be the value of \`${name}\` — it is a reserved word (§17.1.1), read as ` +
+          `\`${name}\`'s value because of the \`=\` before it, so it is not a gate. Remove the stray \`=\`.`,
+      });
       continue;
     }
-    if (t.kind === "ATTR_NAME") {
-      lastName = t.text;
-      if (GATE_ATTR_NAMES.has(t.text) && !names.includes(t.text as GateAttrName)) names.push(t.text as GateAttrName);
-      const lower = gateAttrCaseVariant(t.text);
-      if (lower) problems.push({ code: GATE_ATTR_CASE_CODE, message: gateAttrCaseMessage(t.text, lower) });
-    } else if (t.kind === "ATTR_OP_REJECT") {
-      problems.push(unquotedRejectDiagnostic(lastName, t.text));
+    if (v.kind === "ATTR_NAME") {
+      // A value the tokenizer DROPPED leaves the next name as the value (round 4). The one exemption is
+      // the opener's own sigil grammar (`to=.Idle`, `rule=.A`): exactly one `.` / `:` dropped, a bare
+      // identifier, not a gate name, and no `=` after it (round 5).
+      const gap = eq.span && v.span && typeof eq.span.end === "number" && typeof v.span.start === "number"
+        ? synthetic.slice(eq.span.end, v.span.start) : "";
+      const lower = String(v.text).toLowerCase();
+      const gateish = GATE_ATTR_NAMES.has(lower);
+      const sigilOk = (gap === "." || gap === ":") && /^[A-Za-z_]\w*$/.test(String(v.text)) && !gateish &&
+        !(T[k] && T[k].kind === "ATTR_EQ");
+      if (!sigilOk) {
+        problems.push({
+          code: "E-ATTR-001",
+          message: `E-ATTR-001: the value of \`${name}\` could not be read — the characters before \`${v.text}\` ` +
+            `were dropped, so \`${v.text}\` would be taken as its value${gateish ? " and the gate lost" : ""}. ` +
+            `It is refused rather than read ungated. Quote or parenthesize the value (\`${name}="…"\` / \`${name}=(…)\`).`,
+        });
+      }
     }
   }
   return { names, problems };

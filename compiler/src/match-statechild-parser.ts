@@ -245,7 +245,7 @@ export function parseMatchArms(armsRaw: string): MatchParseResult {
     openerStart: number,
     nameEnd: number,
     payloadBindingsRaw: string,
-  ): { closeAt: number; selfClosing: boolean; attrs: MatchArmAttr[]; insideColonAt: number } {
+  ): { closeAt: number; selfClosing: boolean; attrs: MatchArmAttr[]; insideColonAt: number; bailedAt?: number } {
     const attrs: MatchArmAttr[] = [];
     let p = nameEnd;
     // If a payload `(...)` followed the name, skip past it.
@@ -277,8 +277,10 @@ export function parseMatchArms(armsRaw: string): MatchParseResult {
       }
       // Read attr name
       if (!/[A-Za-z_]/.test(c)) {
-        // Unexpected character — bail with what we have.
-        return { closeAt: p, selfClosing: false, attrs, insideColonAt: -1 };
+        // Unexpected character — bail with what we have. S469 round 5: the rest of the opener
+        // (`<Active = if=@n>` — a gate among it) would become body text; `bailedAt` makes the
+        // caller refuse the arm instead.
+        return { closeAt: p, selfClosing: false, attrs, insideColonAt: -1, bailedAt: p };
       }
       const attrNameStart = p;
       while (p < len && /[A-Za-z0-9_:-]/.test(armsRaw[p])) p++;
@@ -681,6 +683,16 @@ export function parseMatchArms(armsRaw: string): MatchParseResult {
     // read by the markup attribute tokenizer. An arm is dispatched by its variant, not gated:
     // the attribute was dropped and the arm rendered whatever it said. Refused (surfaced by
     // codegen `buildMatchArms`, see `gateDiagnostics`).
+    if (typeof openerScan.bailedAt === "number") {
+      gateDiagnostics.push({
+        code: "E-ATTR-001",
+        message: `E-ATTR-001: the \`<${variantName}>\` arm opener cannot be read past \`${armsRaw[openerScan.bailedAt]}\` ` +
+          `(a stray character where an attribute name belongs), so the rest of it — a gate among it — would be read as ` +
+          `the arm's body. It is refused rather than read ungated.`,
+        spanStart: armOpenerStart,
+        spanEnd: Math.max(armOpenerStart + 1, openerScan.bailedAt + 1),
+      });
+    }
     {
       const regionEnd = openerScan.insideColonAt >= 0 ? openerScan.insideColonAt : openerScan.closeAt;
       const _scan = scanOpenerGateAttrs(armsRaw.slice(_attrRegionStart, Math.max(_attrRegionStart, regionEnd)));

@@ -4807,11 +4807,17 @@ function readStructuralOpenerAttrs(header, anchor, filePath, tagName, opts = {})
   for (let i = 0; i + 2 < toks.length; i++) {
     const n = toks[i], eq = toks[i + 1], v = toks[i + 2];
     if (!n || n.kind !== "ATTR_NAME" || !sigilSlots.has(n.text) || !eq || eq.kind !== "ATTR_EQ") continue;
-    if (!v || v.kind !== "ATTR_NAME" || !v.span) continue;
+    if (!v || v.kind !== "ATTR_NAME" || !v.span || !eq.span) continue;
     const lower = String(v.text).toLowerCase();
     if (lower === "if" || lower === "else" || lower === "else-if" || lower === "show") continue;
-    const sigil = text[v.span.start - anchor.absStart - 1];
-    if (sigil !== "." && sigil !== ":") continue;
+    // S469 round 5 — only the exact shape the builder reads: `name=` then ONE sigil character then
+    // a bare identifier, and no `=` after it (`initial=.Active = if=@n` / `initial=.Active=else`
+    // would otherwise orphan the rest; `initial=-.Active` / `initial=$.Active` were accepted and the
+    // engine silently started elsewhere).
+    if (!/^[A-Za-z_]\w*$/.test(String(v.text))) continue;
+    if (toks[i + 3] && toks[i + 3].kind === "ATTR_EQ") continue;
+    const gap = text.slice(eq.span.end - anchor.absStart, v.span.start - anchor.absStart);
+    if (gap !== "." && gap !== ":") continue;
     toks.splice(i, 3);
     i--;
   }
@@ -5157,6 +5163,19 @@ function parseAttributes(tokens, filePath, errors, isComponent = false, tagName 
               : splitArgs(rawArgs);
             const _argExprNodes = argList.map(a => safeParseExprToNodeGlobal(a, filePath, valSpan?.start ?? 0, errors)).filter(Boolean);
             value = { kind: "call-ref", name: parsed.name, args: argList, argExprNodes: _argExprNodes.length === argList.length ? _argExprNodes : undefined, span: valSpan };
+          } else if (valTok.kind === "ATTR_IDENT" && (valTok.text === "else" || valTok.text === "if")) {
+            // S469 round 5 (M5) — `if` / `else` are reserved words, never an attribute value. `x= else`
+            // reads the `else` as `x`'s value, so the author's chain attribute silently is not one.
+            const _rw = new TABError(
+              "E-ATTR-001",
+              `E-ATTR-001: \`${valTok.text}\` cannot be the value of \`${name}\` — it is a reserved word (§17.1.1), ` +
+              `here read as \`${name}\`'s value because of the \`=\` before it, so the \`${valTok.text}\` the author ` +
+              `wrote is not a gate. Remove the stray \`=\` (\`${name} ${valTok.text}\`) or quote the value.`,
+              valSpan,
+            );
+            _rw.structuralChainRefusal = true;
+            errors.push(_rw);
+            value = { kind: "absent", _refused: true };
           } else if (valTok.kind === "ATTR_IDENT") {
             value = { kind: "variable-ref", name: valTok.text, exprNode: safeParseExprToNodeGlobal(valTok.text, filePath, valSpan?.start ?? 0, errors), span: valSpan };
           } else if (valTok.kind === "ATTR_BLOCK") {
@@ -5363,7 +5382,24 @@ function parseAttributes(tokens, filePath, errors, isComponent = false, tagName 
       continue;
     }
 
-    // Skip TAG_OPEN, TAG_CLOSE_GT, TAG_SELF_CLOSE, EOF
+    // Skip TAG_OPEN, TAG_CLOSE_GT, TAG_SELF_CLOSE, EOF — the only tokens that are not part of an
+    // attribute. S469 round 5 — NO OTHER TOKEN IS EVER SILENTLY SKIPPED: an `=` / a value not
+    // attached to an attribute name (`initial=.Active = if=@n` leaves `= if=@n` orphaned once the
+    // name before it is read as a value; `<p x=.A= if=@n>`; `<Active = if=@n>`) would drop the gate
+    // it holds at exit 0. Refused (E-ATTR-001), and forwarded out of sub-builds.
+    if (tok.kind !== "TAG_OPEN" && tok.kind !== "TAG_CLOSE_GT" && tok.kind !== "TAG_SELF_CLOSE" &&
+        tok.kind !== "EOF" && tok.kind !== "ATTR_TYPED_DECL") {
+      const _stray = new TABError(
+        "E-ATTR-001",
+        `E-ATTR-001: \`${tok.kind === "ATTR_EQ" ? "=" : String(tok.text ?? "").slice(0, 40)}\` in this opener is not ` +
+        `part of any attribute (a stray \`=\`, or a value with no name before it), so it would be silently ` +
+        `dropped — together with any attribute it holds, a gate among them. It is refused rather than read ` +
+        `ungated. Remove it, or quote / parenthesize the value it belongs to.`,
+        tokenSpan(tok, filePath),
+      );
+      _stray.structuralChainRefusal = true;
+      errors.push(_stray);
+    }
     i++;
   }
 
@@ -26235,7 +26271,7 @@ const STRUCTURAL_CHAIN_TAG = { "engine-decl": "engine", "match-block": "match", 
  * refused by the codegen backstop `refuseUnloweredElseChain`. State openers carry their
  * own code (E-CTRL-004, `collapseIfChains`).
  */
-function refuseUnconsumedStructuralChainAttrs(nodes, errors) {
+function refuseUnconsumedStructuralChainAttrs(nodes, errors, componentNames = new Set()) {
   const seen = new Set();
   const visit = (v) => {
     if (v == null || typeof v !== "object" || seen.has(v)) return;
@@ -26246,7 +26282,10 @@ function refuseUnconsumedStructuralChainAttrs(nodes, errors) {
     // is not a gate: refused (E-GATE-ATTR-CASE), the one predicate every reader applies.
     // A component USE-SITE (upper-case tag) is checked by the component expander, which knows
     // the component's declared props (a declared `Show` prop is not a gate — round 4).
-    const upperTagUseSite = kind === "markup" && typeof v.tag === "string" && /^[A-Z]/.test(v.tag);
+    // Only a REGISTERED component (a same-file `const X = <…>` or an imported name) is left to the
+    // expander; any other upper-case tag (a type name like `<Phase Show=@n>`) is checked here
+    // (S469 round 5, M1).
+    const upperTagUseSite = kind === "markup" && typeof v.tag === "string" && componentNames.has(v.tag);
     if (typeof kind === "string" && Array.isArray(v.attrs) && !upperTagUseSite) {
       for (const a of v.attrs) {
         const lower = a && gateAttrCaseVariant(a.name);
@@ -26771,8 +26810,6 @@ function _buildASTImpl(bsOutput, tokenizerOverrides) {
 
   // §17.1.1: Collapse if=/else-if=/else sibling chains into IfChainExpr nodes
   nodes = collapseIfChains(nodes, errors, filePath);
-  // §17.1.2.2 — an `else` / `else-if=` on a structural element is never a chain member.
-  refuseUnconsumedStructuralChainAttrs(nodes, errors);
 
   // §67.6 (S462 md phase 2) — static `<md>` heading ids, page-wide: deduped against every
   // author `id=` in the file and every earlier `<md>` heading.
@@ -26807,6 +26844,21 @@ function _buildASTImpl(bsOutput, tokenizerOverrides) {
   // Hoist imports, exports, type decls, components, machine decls, channel decls
   // from logic blocks + top-level markup.
   const { imports, exports, typeDecls, components, machineDecls, channelDecls } = collectHoisted(nodes);
+
+  // §17.1.2.2 — an `else` / `else-if=` on a structural element is never a chain member (and the
+  // other gate-attribute refusals). Run after the hoist so a component use-site is recognized
+  // by name (same-file definitions and imported names).
+  {
+    const componentNames = new Set();
+    for (const c of components) if (c && typeof c.name === "string") componentNames.add(c.name);
+    for (const im of imports) {
+      for (const n of (im && Array.isArray(im.names) ? im.names : [])) {
+        const nm = typeof n === "string" ? n : (n && (n.local ?? n.name));
+        if (typeof nm === "string") componentNames.add(nm);
+      }
+    }
+    refuseUnconsumedStructuralChainAttrs(nodes, errors, componentNames);
+  }
 
   // W-PROGRAM-001: Check for <program> root element — a TOP-LEVEL `<program>` by
   // the one shared role definition (program-role.ts; §4.12, S445): no `<program>`
