@@ -100,3 +100,30 @@ classified as success. Gap: `g-server-return-match-failable-subject-unawaited-s4
   SPEC says E-ERROR-013). Code changes on already-failing sources: error-004-in-logic E-CODEGEN-INVALID-LOGIC →
   E-TYPE-027; +E-TYPE-027 on phase2-match-optional-039 and debate-async-dashboard-react-perspective. stdlib: no
   real change.
+
+## Round 5 (ruling on M-2 "SPEC: whole error + refuse"; review of cf01c66b8: FIX)
+
+- M-2 (5955e8a39): `_ e :>` binds the WHOLE error envelope in every mode; payload-field read off the binder →
+  E-TYPE-004, comparison with a primitive → E-EQ-001 (`wholeErrorBinderMisuse`); SPEC §18.6.1 normative bullet +
+  §34 rows; samples/blog-cms + samples/api-dashboard migrated to `::ServerError e` (both fail E-CTX-* on every tree,
+  not executable); examples/09 executed (head renders "Name is required.", base no arm);
+  g-impl1-whole-error-binder-binds-data-s469 resolved; emit-logic-s19 `_ err` test now SPEC-conforming.
+  Pack s8 / f5 / l3 / t3 (r5-shapes.js).
+- r5b (f0cab2cc4): HIGH-1 identity-only `sameErrorEnum`, name clause deleted, `failableCalleeErrorEnum` prefers the
+  imported enum; MED-1 field TYPES compared (also in `sameEnumShape`); HIGH-2 `exprTreeMayReadName` fail-closed
+  walk; fail closed on an imported callee whose error enum cannot be resolved (`?` → E-ERROR-010; readers get no
+  by-name fallback via `__guardErrorUnknown`). Unit file failable-reraise-identity-s469.test.js (14; 11 fail on
+  cf01c66b8).
+- Pack (abd785319): s9 / f6 / l4 / t4 (r6-shapes.js), 1110 shapes, pins for 20 families; tool spawn timeout →
+  UNJUDGED; `loadFailure` narrowed to a missing `.scrml` module.
+- Over-refusal recorded: a reader directly on a callee whose enum is an alias in a third file (reviewer `RD alias in
+  third file` BANG / short) is E-TYPE-027 (PASS on base by a same-name guess; refused on cf01c66b8 already).
+- Pre-existing refusals noted on g-impl1-async-match-positions-refused-s469: a tool fn's `return match e {…}` is
+  E-CODEGEN-INVALID-LOGIC (async IIFE header in a sync fn); a client block arm calling a server fn is
+  E-SERVER-FN-IN-SYNC-CALLBACK.
+- Corpus differential (cf01c66b8 head vs round-5 head, both lists, build ids normalised): diagnostics unchanged on
+  every source; artifacts changed by round 5 — examples/09-error-handling.client.js (2 `_ err` binders now the
+  whole error: the fix), examples/16-remote-data.client.js and examples/29-engine-vs-flags.client.js (`_ err`
+  unused; now the whole error). Other diffs in that window are main's lift / keyed-row `if=` changes
+  (12-snippets-slots, 23-trucking-dispatch load-detail pages, gauntlet-r10-odin-filebrowser, gauntlet-r10-rust-orders,
+  benchmarks/todomvc).
