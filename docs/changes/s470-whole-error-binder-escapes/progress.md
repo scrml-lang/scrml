@@ -33,3 +33,23 @@
 - 2026-10-24 probe pack: + r8-shapes.js (s11 / f8 / l6 / t6, 128 shapes), EXPECTED_SHAPE_COUNT 1920 -> 2048, pins
   regenerated from a run (not hand-written classes). r8 on base: 54 FAIL; on branch: 18 FAIL (all escape 3, KNOWN_FAIL).
   NEXT: full gate, types:check, R26 corpus on base vs branch.
+- 2026-10-24 gates: types:check OK (181 diagnostics, unchanged). R26: 913 files (examples/*.scrml + samples/**),
+  base 915b6775f vs branch — diagnostic codes IDENTICAL for every file (0 newly-rejected). Only 3 corpus files
+  use a whole binder (examples/09, 16, 29). Measured separately: the reverted ctor-refusal fallback
+  newly-rejects examples/09-error-handling.scrml (E-TYPE-031 x2), nothing else.
+
+## Gap status for the PA to file (do not edit known-gaps.md here)
+- `g-impl1-whole-error-binder-allowlist-escapes-s469` (HIGH) -> PARTIAL. Escapes 1 (callee by name) and 2
+  (`log` inherited) FIXED; the adjacent `match e { .Wrapped(i) :> i.reason }` FIXED (refused, impl#1). Escape 3
+  (whole `e` into a variant constructor) OPEN: 18 KNOWN_FAIL shapes in r8 (s11/t6 x6, f8/l6 x3). Decision owed:
+  (A) the fallback refusal (closes it; newly-rejects examples/09 and SPEC §18.6.1's `@state = .Failed(err)`), or
+  (B) the typed path (below), which closes it AND the new gap.
+- NEW `g-impl1-enum-value-member-read-unchecked-s470` (HIGH). Locus: `compiler/src/type-system.ts`
+  `checkRowFieldAccessInExpr` checks member reads on STRUCT-typed idents only; match / `!{}` payload binders
+  are bound `asIs` (case "match-arm-block"; the `!{}` arm binding loop). Symptom: a payload field read off an
+  enum value compiles and reads `undefined`: `!{ .Wrapped(i) :> i.reason == "bad" ? … }` and
+  `function chk(x: Inner) { return x.reason == "bad" }` log a wrong password in (server + tool, scratch r9).
+  §18 normative: "The type of each bound variable SHALL be the declared type of the corresponding field".
+- Code label: the S470 refusals use E-TYPE-031 (this audit's existing code) with "impl#1 limitation, not a
+  language rule" in the message; no new §34 code minted. If a labelled E-IMPL1-* code is wanted, that is a SPEC
+  §34 row + ruling.
