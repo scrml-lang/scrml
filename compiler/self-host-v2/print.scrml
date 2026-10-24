@@ -31,6 +31,7 @@ ${
              EditKind, Check, Stmt, Block, Attr, ConstructAttr, CondArm, View, EffectDep, FieldRole, Field,
              Decl, Fn, CoreProgram, CapOwner, SurfaceProp, ValidityOf, Validator, Persist, PersistStore,
              Failable, OkArm, ErrArm, ServerFn, SqlQuery, SqlMode, Param, LoopHead, RangeHead, CssUnit, CoreCss, CssVar,
+             Gather, Lifted, GatherRow,
              findDecl, findTypeDef, typeDefSym, capOwner, findFn, findServerFn } from "./core.scrml"
     import { Node, allNodes, sharedRefs, boundSyms, assignedSyms } from "./walk.scrml"
     import { JsOp, JsUnOp, JsExpr, JsProp, JsStmt, JsLoopHead, JsForInit,
@@ -77,7 +78,14 @@ ${
         // `async function` with `await` in place"); a Join's body follows its If and
         // a Jump prints nothing; a waiting function takes no task.
         server: boolean,
+        // s469 (§17.4): printing the loop of a Tier-0 View.Gather — `rows` holds
+        // each row template's render thunk (index order), which a row Lift
+        // appends; a value Lift appends a text row. `not` everywhere else (a
+        // Stmt.Gather's Lift appends its value).
+        tier0: Tier0Rows | not,
     }
+
+    type Tier0Rows:struct = { rows: JsExpr[] }
 
     type Rendered:struct = { stmts: JsStmt[], templates: Template[] }
     type Hole:struct = { path: int[], v: View }
@@ -682,6 +690,8 @@ ${
             .Loop(label: x) :> not
             .Break(target: x) :> not
             .Continue(target: x) :> not
+            .Gather(g: x) :> not
+            .Lift(into: x) :> not
         }
     }
 
@@ -705,6 +715,8 @@ ${
             .Loop(label: x) :> not
             .Break(target: x) :> not
             .Continue(target: x) :> not
+            .Gather(g: x) :> not
+            .Lift(into: x) :> not
         }
     }
 
@@ -714,6 +726,8 @@ ${
             .Loop(label: x) :> false
             .Break(target: x) :> false
             .Continue(target: x) :> false
+            .Gather(g: x) :> false
+            .Lift(into: x) :> false
             .Join(k: x) :> false
             .Suspend(bind: x) :> false
             .Let(sym: x) :> false
@@ -768,6 +782,8 @@ ${
             .Loop(label: x) :> false
             .Break(target: x) :> false
             .Continue(target: x) :> false
+            .Gather(g: x) :> false
+            .Lift(into: x) :> false
         }
     }
 
@@ -802,7 +818,51 @@ ${
             .Loop(label: l, head: h, body: lb) :> loopJs(ctx, l, h, lb, assigned)   // s469 (§49)
             .Break(target: t) :> [JsStmt.SBreak(symName(ctx, t))]
             .Continue(target: t) :> [JsStmt.SContinue(symName(ctx, t))]
+            .Gather(g: g) :> stmtGatherJs(ctx, g, assigned)                     // s469 (§49.6)
+            .Lift(into: i, what: w) :> [liftJs(ctx, i, w)]
         }
+    }
+
+    // -------------------------------------------------------------------------
+    // s469 — a loop bound as a value (§49.6): `const xs = [];` then the loop,
+    // each Lift `xs.push(v)`. The tape is fresh (nothing else holds it) and is
+    // complete when the loop ends — by its head, a `break` (the prefix, rule 5)
+    // or never; `return` / `fail` leave the function as from any loop (rule 6).
+    // Nothing reads `xs` inside its own loop (it is in scope after it).
+    // -------------------------------------------------------------------------
+    fn stmtGatherJs(ctx: Ctx, g: Gather, assigned: int[]) -> JsStmt[] {
+        const name: string = symName(ctx, g.bind)
+        let decl: JsStmt = JsStmt.SConst(name, JsExpr.JArray([]))
+        if (hasInt(assigned, g.bind.id)) decl = JsStmt.SLet(name, JsExpr.JArray([]))
+        return [decl].concat(loopJs(withTier0(ctx, not), g.label, g.head, g.body, assigned))
+    }
+
+    fn withTier0(ctx: Ctx, t: Tier0Rows | not) -> Ctx {
+        return { p: ctx.p, names: ctx.names, lexical: ctx.lexical, handles: ctx.handles, shared: ctx.shared,
+                 rows: ctx.rows, slot: ctx.slot, prebuilt: ctx.prebuilt, ret: ctx.ret, server: ctx.server, tier0: t }
+    }
+
+    // `into.push(v)`; in a Tier-0 loop a value is a text row (`rt.textRow(v)`)
+    // and a row Lift pushes its row's render thunk.
+    fn liftJs(ctx: Ctx, into: Sym, w: Lifted) -> JsStmt {
+        const acc: JsExpr = jid(symName(ctx, into))
+        const t0: Tier0Rows | not = ctx.tier0
+        return match w {
+            .LValue(e: e) :> sexpr(jmcall(acc, "push", [tier0Value(ctx, t0, exprJs(ctx, e))]))
+            .LRow(idx: k) :> sexpr(jmcall(acc, "push", [tier0Row(t0, k)]))
+        }
+    }
+
+    fn tier0Value(ctx: Ctx, t0: Tier0Rows | not, v: JsExpr) -> JsExpr {
+        if (t0 is not) return v
+        return rtCall(ctx, "textRow", [v])
+    }
+
+    // (check.scrml C20: a row Lift stands only in a View.Gather and names one of its rows)
+    fn tier0Row(t0: Tier0Rows | not, k: int) -> JsExpr {
+        if (t0 is not) return jid("unboundRow$" + k)
+        if (k < 0 || k >= t0.rows.length) return jid("unboundRow$" + k)
+        return t0.rows[k]
     }
 
     // -------------------------------------------------------------------------
@@ -872,6 +932,8 @@ ${
             .Loop(label: x) :> []
             .Break(target: x) :> []
             .Continue(target: x) :> []
+            .Gather(g: x) :> []
+            .Lift(into: x) :> []
         }
     }
 
@@ -895,6 +957,8 @@ ${
             .Loop(label: x) :> false
             .Break(target: x) :> false
             .Continue(target: x) :> false
+            .Gather(g: x) :> false
+            .Lift(into: x) :> false
         }
     }
 
@@ -948,6 +1012,8 @@ ${
         return match s {
             .Break(target: t) :> t.id
             .Continue(target: t) :> t.id
+            .Gather(g: x) :> -1
+            .Lift(into: x) :> -1
             .Loop(label: x) :> -1
             .Let(sym: x) :> -1
             .Assign(local: x) :> -1
@@ -1124,6 +1190,8 @@ ${
             .Loop :> []
             .Break :> []
             .Continue :> []
+            .Gather :> []
+            .Lift :> []
         }
     }
 
@@ -1147,6 +1215,8 @@ ${
             .Loop :> []
             .Break :> []
             .Continue :> []
+            .Gather :> []
+            .Lift :> []
         }
     }
 
@@ -1256,6 +1326,7 @@ ${
             .Effect :> hole(HNode.HComment("effect"), path, v)
             .ResetOn :> hole(HNode.HComment("reset-on"), path, v)
             .Errors :> hole(HNode.HComment("errors"), path, v)
+            .Gather :> hole(HNode.HComment("for"), path, v)       // s469 (§17.4)
         }
     }
 
@@ -1346,7 +1417,7 @@ ${
     // its instances when it mounts: those are the conditional ones (§66.7.5).
     fn nested(ctx: Ctx) -> Ctx {
         return { p: ctx.p, names: ctx.names, lexical: ctx.lexical, handles: ctx.handles, shared: ctx.shared,
-                 rows: ctx.rows, slot: ctx.slot, prebuilt: false, ret: ctx.ret, server: ctx.server }
+                 rows: ctx.rows, slot: ctx.slot, prebuilt: false, ret: ctx.ret, server: ctx.server, tier0: ctx.tier0 }
     }
 
     // F16: one arm binds a field (a match over an imported payload enum).
@@ -1364,6 +1435,7 @@ ${
             .Effect :> false
             .ResetOn :> false
             .Errors :> false
+            .Gather :> false
         }
     }
 
@@ -1382,6 +1454,7 @@ ${
             .Slot :> true
             .Star(decl: d) :> true
             .Errors(of: x) :> true
+            .Gather(g: x) :> true
         }
     }
 
@@ -1409,6 +1482,7 @@ ${
             .Effect :> []
             .ResetOn :> []
             .Errors :> []
+            .Gather :> []
         }
     }
 
@@ -1428,6 +1502,104 @@ ${
             .Effect(deps: ds, body: b) :> effectJs(ctx, ds, b)
             .ResetOn(triggers: ds, reset: b, rank: r) :> resetOnJs(ctx, ds, b, r)
             .Errors(of: x, all: a) :> only([sexpr(rtCall(ctx, "errors", [scopeVar(), node, jthunk(jmcall(surfaceJs(ctx, x), "messages", [])), JsExpr.JBool(a)]))])
+            .Gather(g: g, rows: rows) :> gatherJs(ctx, g, rows, node, tid + "/" + pathText(h.path))
+        }
+    }
+
+    // s469 — a Tier-0 `${ for … lift … }` (§17.4, §49.6.2): `rt.gather(scope$,
+    // node, build)`. `build` runs the loop and returns its rows — each a
+    // `(scope$, anchor$) => …` render thunk — which the runtime renders in order
+    // before the marker, inside an effect: when a cell the loop (or a row's
+    // value) read changes, every row is torn down and the loop re-runs (§6.15:
+    // a render expression; there is no key — §17.4b is not built). A row thunk
+    // is made WHEN its Lift runs and closes over a snapshot of the loop's locals
+    // it reads (`((x, i) => (scope$, anchor$) => { … })(x, i)`), so a local the
+    // loop rebinds later never changes a row already lifted (§49.6 rule 3).
+    fn gatherJs(ctx: Ctx, g: Gather, rows: GatherRow[], node: JsExpr, tid: string) -> Rendered {
+        const local: Sym[] = boundSyms(Node.NStmt(Stmt.Gather(g)))
+        let thunks: JsExpr[] = []
+        let templates: Template[] = []
+        let k = 0
+        for (const row of rows) {
+            const r: Rendered = renderViews(withTier0(nested(ctx), not), row.views, tid + "." + k)
+            const snap: string[] = rowSnapshot(ctx, local, row.views)
+            let args: JsExpr[] = []
+            for (const n of snap) { args = args.concat([jid(n)]) }
+            const render: JsExpr = JsExpr.JArrow(["scope$", "anchor$"], r.stmts)
+            thunks = thunks.concat([jcall(JsExpr.JArrowE(snap, render), args)])
+            templates = templates.concat(r.templates)
+            k = k + 1
+        }
+        const acc: string = symName(ctx, g.bind)
+        const assigned: int[] = assignedSyms(Node.NStmt(Stmt.Gather(g)))
+        const lctx: Ctx = withTier0(ctx, { rows: thunks })
+        const body: JsStmt[] = [JsStmt.SConst(acc, JsExpr.JArray([]))]
+            .concat(loopJs(lctx, g.label, g.head, g.body, assigned))
+            .concat([JsStmt.SReturn(jid(acc))])
+        return { stmts: [sexpr(rtCall(ctx, "gather", [scopeVar(), node, JsExpr.JArrow([], body)]))], templates: templates }
+    }
+
+    // The loop's locals (`local`: the Syms the Gather binds, at any depth of
+    // its head and body, in walk order) that a row reads, by name.
+    fn rowSnapshot(ctx: Ctx, local: Sym[], views: View[]) -> string[] {
+        let reads: int[] = []
+        for (const v of views) {
+            for (const n of allNodes(Node.NView(v))) {
+                const id: int = localReadOf(n)
+                if (id >= 0 && !hasInt(reads, id)) reads = reads.concat([id])
+            }
+        }
+        let out: string[] = []
+        for (const s of local) {
+            if (hasInt(reads, s.id) && out.indexOf(symName(ctx, s)) < 0) out = out.concat([symName(ctx, s)])
+        }
+        return out
+    }
+
+    fn localReadOf(n: Node) -> int {
+        return match n {
+            .NExpr(e: e) :> exprLocalOf(e)
+            .NPlace(pl: pl) :> placeLocalOf(pl)
+            .NProgram(p: x) :> -1
+            .NDecl(d: x) :> -1
+            .NField(f: x) :> -1
+            .NFn(f: x) :> -1
+            .NServerFn(f: x) :> -1
+            .NBlock(b: x) :> -1
+            .NStmt(s: x) :> -1
+            .NInst(i: x) :> -1
+            .NPattern(pat: x) :> -1
+            .NEdit(k: x) :> -1
+            .NView(v: x) :> -1
+            .NAttr(a: x) :> -1
+        }
+    }
+
+    fn exprLocalOf(e: Expr) -> int {
+        return match e {
+            .Local(sym: s) :> s.id
+            .Lit(lit: x) :> -1
+            .Read(place: x) :> -1
+            .Call(callee: x) :> -1
+            .Prim(op: x) :> -1
+            .Match(scrut: x) :> -1
+            .ArrayOf(elems: x) :> -1
+            .StructOf(ty: x) :> -1
+            .Handle(inst: x) :> -1
+            .InitOf(decl: x) :> -1
+            .Host(call: x) :> -1
+            .Lambda(params: x) :> -1
+            .SeqCall(op: x) :> -1
+            .Validity(of: x) :> -1
+            .ServerCall(fn: x) :> -1
+            .Query(q: x) :> -1
+        }
+    }
+
+    fn placeLocalOf(pl: Place) -> int {
+        return match pl {
+            .LocalPath(sym: s) :> s.id
+            .Cell(decl: x) :> -1
         }
     }
 
@@ -1510,6 +1682,8 @@ ${
             .Loop(label: x) :> false
             .Break(target: x) :> false
             .Continue(target: x) :> false
+            .Gather(g: x) :> false
+            .Lift(into: x) :> false
         }
     }
 
@@ -1652,7 +1826,7 @@ ${
         }
         const rowCtx: Ctx = {
             p: ctx.p, names: ctx.names, lexical: ctx.lexical, handles: rowHandles,
-            shared: ctx.shared, rows: ctx.rows.concat([bind.id]), slot: ctx.slot, prebuilt: false, ret: ctx.ret, server: ctx.server,
+            shared: ctx.shared, rows: ctx.rows.concat([bind.id]), slot: ctx.slot, prebuilt: false, ret: ctx.ret, server: ctx.server, tier0: ctx.tier0,
         }
         const r: Rendered = renderViews(rowCtx, row, tid)
         const keyFn: JsExpr = keyJs(ctx, bindName, key)
@@ -1753,6 +1927,7 @@ ${
             .Effect(deps: ds) :> false
             .ResetOn(triggers: ds) :> false
             .Errors(of: x) :> false
+            .Gather(g: x) :> false
         }
     }
 
@@ -1822,7 +1997,7 @@ ${
     // Declarations (§5.2).
     // -------------------------------------------------------------------------
     fn baseCtx(p: CoreProgram, names: NameTable) -> Ctx {
-        return { p: p, names: names, lexical: [], handles: [], shared: [], rows: [], slot: JsExpr.JNull, prebuilt: false, ret: "", server: false }
+        return { p: p, names: names, lexical: [], handles: [], shared: [], rows: [], slot: JsExpr.JNull, prebuilt: false, ret: "", server: false, tier0: not }
     }
 
     fn instCtx(ctx: Ctx, d: Decl) -> Ctx {
@@ -1832,7 +2007,7 @@ ${
             hs = hs.concat([{ sym: h.id, js: handleSlot(jid("inst$"), k, h.hint) }])
             k = k + 1
         }
-        return { p: ctx.p, names: ctx.names, lexical: [jid("inst$")], handles: hs, shared: [], rows: [], slot: jid("slot$"), prebuilt: true, ret: "", server: false }
+        return { p: ctx.p, names: ctx.names, lexical: [jid("inst$")], handles: hs, shared: [], rows: [], slot: jid("slot$"), prebuilt: true, ret: "", server: false, tier0: not }
     }
 
     fn declJs(ctx: Ctx, d: Decl, sharedUsed: Sym[]) -> Rendered {
@@ -2084,6 +2259,7 @@ ${
             .Effect :> []
             .ResetOn :> []
             .Errors :> []
+            .Gather :> []
         }
     }
 
@@ -2161,7 +2337,7 @@ ${
         }
         let ret: string = ""
         if (f.waits) ret = "ret$"
-        const fctx: Ctx = { p: ctx.p, names: ctx.names, lexical: [], handles: [], shared: shared, rows: [], slot: JsExpr.JNull, prebuilt: false, ret: ret, server: false }
+        const fctx: Ctx = { p: ctx.p, names: ctx.names, lexical: [], handles: [], shared: shared, rows: [], slot: JsExpr.JNull, prebuilt: false, ret: ret, server: false, tier0: not }
         let params: string[] = []
         for (const p of f.params) { params = params.concat([symName(ctx, p.sym)]) }
         if (!f.waits) return JsStmt.SFunc(symName(ctx, f.sym), params, prologue.concat(blockJs(fctx, f.body)))
@@ -2187,7 +2363,7 @@ ${
     export fn serverCtx(p: CoreProgram) -> Ctx {
         let names: NameTable = planNames(p)
         for (const sf of p.server) { names = mint(names, NameKey.OfSym(sf.sym.id), sf.sym.hint) }
-        return { p: p, names: names, lexical: [], handles: [], shared: [], rows: [], slot: JsExpr.JNull, prebuilt: false, ret: "", server: true }
+        return { p: p, names: names, lexical: [], handles: [], shared: [], rows: [], slot: JsExpr.JNull, prebuilt: false, ret: "", server: true, tier0: not }
     }
 
     export fn serverFnJs(ctx: Ctx, sym: Sym, params: Param[], body: Block, waits: boolean) -> JsStmt {
@@ -2603,6 +2779,8 @@ ${
             .Loop(label: x) :> not
             .Break(target: x) :> not
             .Continue(target: x) :> not
+            .Gather(g: x) :> not
+            .Lift(into: x) :> not
         }
     }
 

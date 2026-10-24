@@ -32,12 +32,12 @@ ${
              EditKind, Check, Stmt, Block, Attr, ConstructAttr, CondArm, View, EffectDep, FieldMode, FieldRole,
              GrantSet, TransitionGraph, Field, DeclKind, WiringAttr, Decl, Param, Fn, CoreProgram, Validator, SurfaceProp, ValidityOf, Persist,
              ServerFn, SqlMode, Db, SqlQuery, SqlKind, SqlTables, SqlColumns, Failable, OkArm, ErrArm, VariantDef,
-             LoopHead, EachHead, RangeHead, HostCall, CssUnit, CssDecl, CoreCss, CssVar,
+             LoopHead, EachHead, RangeHead, HostCall, CssUnit, CssDecl, CoreCss, CssVar, Gather, Lifted, GatherRow,
              block, litStr, mkSym, typeDefSym, readField } from "./core.scrml"
     import { partsText } from "./css.scrml"
     import { ASpan, BinOp, UnOp, AExpr, AProp, AExprK, AStmt, ABlock, AStmtK, AEffect, AType, AParam, AFn,
              AAttrValue, AAttr, AElem, ANode, ANodeK, ADecl, AProgram, AItem, AItemK, FileAst, Diag, ASql, ASqlMode,
-             AHow, AHandled, AArm, APat, ABind, AArmBody, AFail, AFor, AForHead, AIterSrc,
+             AHow, AHandled, AArm, APat, ABind, AArmBody, AFail, AFor, AForHead, AIterSrc, AForBound, ALift,
              mkSpan } from "./ast.scrml"
     import { Severity } from "./severity.scrml"
     import { Node, allNodes } from "./walk.scrml"
@@ -94,7 +94,9 @@ ${
     // the per-FIELD local of the field it reads (`fields`), or `whole` for a
     // read of the whole target value.
     type SnapB:struct = { decl: Sym, inst: InstRef, path: FieldRef[], whole: Sym, fields: SnapField[] }
-    type LC:struct = { t: Tables, file: string, subst: InstRef | not, snap: SnapB | not }
+    // s469 — `rows`: inside a Tier-0 `${ for … }` (§17.4), the node ids of its
+    // lifted markup rows in index order (a row Lift names its row by index).
+    type LC:struct = { t: Tables, file: string, subst: InstRef | not, snap: SnapB | not, rows: int[] }
 
     // Lowering is total over the facts analyze produced; a node with a missing
     // or mismatched fact means analyze reported an error, and lower emits a
@@ -713,9 +715,10 @@ ${
             .Return(e: e) :> hoistMaybe(c, e).concat(attemptsFor(c, e)).concat([Stmt.Return(returnValue(c, e))])
             .If(cond: x, thenB: t, elseB: el) :> hoistExpr(c, x).concat(joinMark(c, s)).concat([Stmt.If(lowerExpr(c, x), lowerBlock(c, t), maybeBlock(c, el))])
             .Given(name: n, subject: sub, body: b) :> givenStmts(c, s, b)
-            .For(f: lf) :> loopStmts(c, lf)                 // s469 (§49)
+            .For(f: lf) :> loopStmts(c, lf)                 // s469 (§49; a bound loop, §49.6)
             .Break(label: x) :> jumpStmts(c, s, true)
             .Continue(label: x) :> jumpStmts(c, s, false)
+            .Lift(what: w) :> liftStmts(c, s, w)            // s469 (§49.6.2)
             .EffectStmt(w: w) :> []              // analyze refused it (E-LIFECYCLE-016 / E-BOOTSTRAP-UNSUPPORTED)
             .Defer(body: b) :> [Stmt.Defer(lowerBlock(c, b))]   // s451 (§19.16)
             .Fail(f: f) :> hoistExprs(c, f.args).concat(failStmt(c, s, f))   // s451 (Ue, §19.3)
@@ -758,16 +761,101 @@ ${
         }
     }
 
+    // s469 — a bound loop (§49.6) is a Gather: its binder's Sym (analyze BBind
+    // on the AForBound) is the tape the loop's Lifts append to.
     fn loopStmts(c: LC, f: AFor) -> Stmt[] {
         const lb: LoopB | not = loopBOf(bindFact(c.t.binds, f.nid))
         if (lb is not) return []
         const body: Block = lowerBlock(c, f.body)
+        const h: LoopHead | not = loopHeadOf(c, lb, f)
+        if (h is not) return []
+        const fb: AForBound | not = f.bound
+        if (fb is given) {
+            const bs: Sym | not = letSym(bindFact(c.t.binds, fb.nid))
+            if (bs is not) return []
+            return [Stmt.Gather({ label: lb.label, bind: bs, head: h, body: body })]
+        }
+        return [Stmt.Loop(lb.label, h, body)]
+    }
+
+    fn loopHeadOf(c: LC, lb: LoopB, f: AFor) -> LoopHead | not {
         const h: AForHead = f.head
         return match h {
-            .HForever :> [Stmt.Loop(lb.label, LoopHead.Forever, body)]
-            .HCond(cond: x) :> [Stmt.Loop(lb.label, LoopHead.While(lowerExpr(c, x)), body)]
-            .HCounted(init: i, cond: x, step: sp) :> [Stmt.Loop(lb.label, LoopHead.Counted(lowerInits(c, i), maybeLowered(c, x), lowerSteps(c, sp)), body)]
-            .HIter(bind: b, src: src) :> iterLoop(c, lb, b, src, body)
+            .HForever :> LoopHead.Forever
+            .HCond(cond: x) :> LoopHead.While(lowerExpr(c, x))
+            .HCounted(init: i, cond: x, step: sp) :> LoopHead.Counted(lowerInits(c, i), maybeLowered(c, x), lowerSteps(c, sp))
+            .HIter(bind: b, src: src) :> iterHead(c, lb, b, src)
+        }
+    }
+
+    // `lift e` → Lift(into, LValue(e)) into the bound loop the binder resolved
+    // (BJump on the statement: the loop's bind Sym); a Tier-0 row → LRow(its
+    // index among the loop's rows).
+    fn liftStmts(c: LC, s: AStmt, w: ALift) -> Stmt[] {
+        const into: Sym | not = jumpTarget(bindFact(c.t.binds, s.nid))
+        if (into is not) return []
+        return match w {
+            .LiftExpr(e: e) :> hoistExpr(c, e).concat(attemptsFor(c, e)).concat([Stmt.Lift(into, Lifted.LValue(lowerExpr(c, e)))])
+            .LiftNode(n: n) :> [Stmt.Lift(into, Lifted.LRow(c.rows.indexOf(n.nid)))]
+        }
+    }
+
+    // s469 — a Tier-0 `${ for … }` (§17.4) → View.Gather: the loop (its Lifts
+    // into the accumulator analyze minted on the node), and its rows — each
+    // lifted element, lowered where it stands, in index order.
+    fn gatherView(c: LC, n: ANode, f: AFor) -> View[] {
+        const lb: LoopB | not = loopBOf(bindFact(c.t.binds, f.nid))
+        if (lb is not) return []
+        const acc: Sym | not = letSym(bindFact(c.t.binds, n.nid))
+        if (acc is not) return []
+        const rns: ANode[] = rowNodesOf(f.body)
+        let ids: int[] = []
+        for (const r of rns) { ids = ids.concat([r.nid]) }
+        const rc: LC = { t: c.t, file: c.file, subst: c.subst, snap: c.snap, rows: ids }
+        const h: LoopHead | not = loopHeadOf(rc, lb, f)
+        if (h is not) return []
+        const body: Block = lowerBlock(rc, f.body)
+        let rows: GatherRow[] = []
+        for (const r of rns) { rows = rows.concat([{ views: lowerNode(c, r) }]) }
+        return [View.Gather({ label: lb.label, bind: acc, head: h, body: body }, rows)]
+    }
+
+    // The lifted rows of a Tier-0 loop body, in source order (where parse's
+    // fillRows placed them: through `if` / `given` / nested loop / `defer`
+    // bodies).
+    fn rowNodesOf(b: ABlock) -> ANode[] {
+        let out: ANode[] = []
+        for (const s of b.stmts) { out = out.concat(rowNodesIn(s)) }
+        return out
+    }
+
+    fn rowNodesMaybe(b: ABlock | not) -> ANode[] {
+        if (b is not) return []
+        return rowNodesOf(b)
+    }
+
+    fn rowNodesIn(s: AStmt) -> ANode[] {
+        const k: AStmtK = s.k
+        return match k {
+            .Lift(what: w) :> liftedNode(w)
+            .If(cond: x, thenB: tb, elseB: el) :> rowNodesOf(tb).concat(rowNodesMaybe(el))
+            .Given(name: n, body: b) :> rowNodesOf(b)
+            .For(f: lf) :> rowNodesOf(lf.body)
+            .Defer(body: b) :> rowNodesOf(b)
+            .Eval(e: x) :> []
+            .Local(name: n) :> []
+            .Return(e: x) :> []
+            .EffectStmt(w: w) :> []
+            .Fail(f: x) :> []
+            .Break(label: x) :> []
+            .Continue(label: x) :> []
+        }
+    }
+
+    fn liftedNode(w: ALift) -> ANode[] {
+        return match w {
+            .LiftNode(n: n) :> [n]
+            .LiftExpr(e: x) :> []
         }
     }
 
@@ -794,19 +882,19 @@ ${
         return { bind: bind, counter: counter, end: end, lo: lo, hi: hi, inclusive: inclusive }
     }
 
-    fn iterLoop(c: LC, lb: LoopB, b: ABind, src: AIterSrc, body: Block) -> Stmt[] {
+    fn iterHead(c: LC, lb: LoopB, b: ABind, src: AIterSrc) -> LoopHead | not {
         const bs: Sym | not = letSym(bindFact(c.t.binds, b.nid))
-        if (bs is not) return []
+        if (bs is not) return not
         return match src {
-            .IterOf(e: x) :> [Stmt.Loop(lb.label, LoopHead.Each(eachHead(bs, lowerExpr(c, x))), body)]
-            .IterRange(lo: lo, hi: hi, inclusive: inc) :> rangeLoop(c, lb, bs, lo, hi, inc, body)
+            .IterOf(e: x) :> LoopHead.Each(eachHead(bs, lowerExpr(c, x)))
+            .IterRange(lo: lo, hi: hi, inclusive: inc) :> rangeHeadOf(c, lb, bs, lo, hi, inc)
         }
     }
 
-    fn rangeLoop(c: LC, lb: LoopB, bs: Sym, lo: AExpr, hi: AExpr, inclusive: boolean, body: Block) -> Stmt[] {
+    fn rangeHeadOf(c: LC, lb: LoopB, bs: Sym, lo: AExpr, hi: AExpr, inclusive: boolean) -> LoopHead | not {
         const end: Sym | not = lb.end
-        if (end is not) return []
-        return [Stmt.Loop(lb.label, LoopHead.Range(rangeHead(bs, lb.counter, end, lowerExpr(c, lo), lowerExpr(c, hi), inclusive)), body)]
+        if (end is not) return not
+        return LoopHead.Range(rangeHead(bs, lb.counter, end, lowerExpr(c, lo), lowerExpr(c, hi), inclusive))
     }
 
     fn jumpStmts(c: LC, s: AStmt, isBreak: boolean) -> Stmt[] {
@@ -974,7 +1062,7 @@ ${
     fn editStmts(c: LC, w: WriteFact, elems: AExpr[], tmps: Sym[], sn: SeqSnap) -> Stmt[] {
         const target: InstRef = instOf(c, w.inst)
         const place: FieldRef[] = [{ owner: sn.decl, idx: sn.idx }]
-        const sc: LC = { t: c.t, file: c.file, subst: c.subst, snap: { decl: sn.decl, inst: target, path: place, whole: sn.local, fields: [] } }
+        const sc: LC = { t: c.t, file: c.file, subst: c.subst, snap: { decl: sn.decl, inst: target, path: place, whole: sn.local, fields: [] }, rows: c.rows }
         let values: Expr[] = []
         for (const x of elems) { values = values.concat([lowerExpr(sc, x)]) }
         let pre: Stmt[] = []
@@ -1037,7 +1125,7 @@ ${
         // `@x = { ...@x }`: no override — the same value; nothing to write
         if (ws.length == 0) return []
         const operand: Expr = lowerExpr(c, ps[0].value)
-        const sc: LC = { t: c.t, file: c.file, subst: c.subst, snap: snapOf(operand, snap, fields) }
+        const sc: LC = { t: c.t, file: c.file, subst: c.subst, snap: snapOf(operand, snap, fields), rows: c.rows }
         let values: Expr[] = []
         for (const sw of ws) { values = values.concat([lowerExpr(sc, ps[sw.prop].value)]) }
         if (ws.length == 1) {
@@ -1148,7 +1236,7 @@ ${
         const target: InstRef = instOf(c, w.inst)
         const surf: Stmt[] = surfaceReset(di, target, idx).concat(unpersistReset(c.t, di, target, idx))
         if (!isProgramKind(di.kind)) return [Stmt.Write(w.cap, target, w.edit, Expr.InitOf(d, target, idx), w.check)].concat(surf)
-        const ic: LC = { t: c.t, file: c.file, subst: target, snap: not }
+        const ic: LC = { t: c.t, file: c.file, subst: target, snap: not, rows: c.rows }
         const init: Expr | not = lowerValue(ic, di.fields[idx].init)
         if (init is not) return []
         return [Stmt.Write(w.cap, target, w.edit, init, w.check)].concat(surf)
@@ -1186,7 +1274,7 @@ ${
         const f: FieldInfo = d.fields[idx]
         const cap: Sym | not = f.wcap
         if (cap is not) return []
-        const ic: LC = { t: c.t, file: c.file, subst: InstRef.Lexical(0), snap: not }
+        const ic: LC = { t: c.t, file: c.file, subst: InstRef.Lexical(0), snap: not, rows: c.rows }
         const init: Expr | not = lowerValue(ic, f.init)
         if (init is not) return []
         let edit: EditKind = EditKind.Replace
@@ -1240,6 +1328,7 @@ ${
             .DeclNode(d: d) :> not
             .Css(c: c) :> not
             .Effect(w: w) :> not
+            .Gather(f: x) :> not
         }
     }
 
@@ -1252,6 +1341,7 @@ ${
             .DeclNode(d: d) :> false
             .Css(c: c) :> true
             .Effect(w: w) :> false
+            .Gather(f: x) :> false
         }
     }
 
@@ -1363,6 +1453,7 @@ ${
                 .DeclNode(d: d) :> lowerNode(c, n)
                 .Css(c: c) :> lowerNode(c, n)
                 .Effect(w: w) :> lowerNode(c, n)
+                .Gather(f: x) :> lowerNode(c, n)
             }
             out = out.concat(vs)
         }
@@ -1387,6 +1478,7 @@ ${
             .DeclNode(d: d) :> []
             .Css(c: c) :> []
             .Effect(w: w) :> [effectView(c, w)]
+            .Gather(f: lf) :> gatherView(c, n, lf)        // s469 (§17.4)
         }
     }
 
@@ -1470,7 +1562,7 @@ ${
     fn inlineViews(c: LC, v: InlineView) -> View[] {
         const s: InstRef | not = v.subst
         if (s is not) return lowerNodes(c, v.nodes)
-        const ic: LC = { t: c.t, file: c.file, subst: s, snap: not }
+        const ic: LC = { t: c.t, file: c.file, subst: s, snap: not, rows: c.rows }
         return lowerNodes(ic, v.nodes)
     }
 
@@ -1482,10 +1574,30 @@ ${
         const read: Expr = cellRead(c, v.decl, instOf(c, v.inst), [{ owner: v.decl, idx: v.idx }])
         let arms: CondArm[] = []
         for (const a of v.arms) {
-            const test: Expr = Expr.Prim(PrimOp.EqPrim, [read, Expr.Lit(Literal.Variant(v.enumSym, a.variant))])
-            arms = arms.concat([{ test: test, body: lowerNodes(c, a.body) }])
+            arms = arms.concat([{ test: variantIs(c, read, v.enumSym, a.variant), body: lowerNodes(c, a.body) }])
         }
         return View.Cond(arms)
+    }
+
+    // s469 (g-bootstrap-rule-transition-into-payload-variant-s469): "the cell is
+    // in variant `idx`" — a unit variant's value IS its tag (EqPrim); a PAYLOAD
+    // variant's value carries its fields, so the test is a variant pattern (a
+    // Core Match, printed as a tag test), never an identity comparison.
+    fn variantIs(c: LC, read: Expr, es: Sym, idx: int) -> Expr {
+        if (!variantHasFieldsIn(c.t, es, idx)) return Expr.Prim(PrimOp.EqPrim, [read, Expr.Lit(Literal.Variant(es, idx))])
+        const yes: MatchArm = { pat: Pattern.PVariant(es, idx, []), body: Expr.Lit(Literal.Bool(true)) }
+        const no: MatchArm = { pat: Pattern.PWild, body: Expr.Lit(Literal.Bool(false)) }
+        return Expr.Match(read, [yes, no])
+    }
+
+    fn variantHasFieldsIn(t: Tables, es: Sym, idx: int) -> boolean {
+        for (const ti of t.types) {
+            if (typeDefSym(ti.def).id == es.id) {
+                const vs: VariantDef[] = enumVariantsOfDef(ti.def)
+                if (idx >= 0 && idx < vs.length) return vs[idx].fields.length > 0
+            }
+        }
+        return false
     }
 
     fn attrKind(c: LC, a: AAttr) -> AttrKind | not {
@@ -1859,7 +1971,7 @@ ${
     }
 
     fn lowerDecl(t: Tables, ss: DeclSyntax[], d: DeclInfo) -> Decl {
-        const c: LC = { t: t, file: d.file, subst: not, snap: not }
+        const c: LC = { t: t, file: d.file, subst: not, snap: not, rows: [] }
         let fields: Field[] = []
         for (const f of d.fields) { fields = fields.concat([lowerField(c, f)]) }
         let renders: View[] | not = not
@@ -1971,7 +2083,14 @@ ${
             .Effect(deps: ds) :> v
             .ResetOn(triggers: ds) :> v
             .Errors(of: o) :> v
+            .Gather(g: g, rows: rs) :> View.Gather(g, stampRows(rs, extra, keyed))
         }
+    }
+
+    fn stampRows(rs: GatherRow[], extra: Attr[], keyed: boolean) -> GatherRow[] {
+        let out: GatherRow[] = []
+        for (const r of rs) { out = out.concat([{ views: stampViews(r.views, extra, keyed) }]) }
+        return out
     }
 
     type FnSyntax:struct = { nid: int, f: AFn }
@@ -2017,7 +2136,7 @@ ${
     fn lowerFn(t: Tables, fs: FnSyntax[], info: FnInfo) -> Fn | not {
         for (const s of fs) {
             if (s.nid == info.nid) {
-                const c: LC = { t: t, file: info.file, subst: not, snap: not }
+                const c: LC = { t: t, file: info.file, subst: not, snap: not, rows: [] }
                 let params: Param[] = []
                 for (const p of s.f.params) { params = params.concat(paramOf(bindFact(t.binds, p.nid))) }
                 // s454 (U1b): a WAITING function (the suspension plan's `waiting`) — its
@@ -2183,6 +2302,7 @@ ${
             .EffectStmt(w: w) :> missing()
             .Defer(body: d) :> missing()
             .Fail(f: x) :> missing()
+            .Lift(what: x) :> missing()
         }
     }
 
@@ -2577,6 +2697,7 @@ ${
             .Break(label: x) :> not
             .Continue(label: x) :> not
             .EffectStmt(w: w) :> not
+            .Lift(what: x) :> not
             .Defer(body: d) :> not
             .Fail(f: x) :> not
         }
@@ -3048,6 +3169,8 @@ ${
             .Loop(label: x) :> not
             .Break(target: x) :> not
             .Continue(target: x) :> not
+            .Gather(g: x) :> not
+            .Lift(into: x) :> not
         }
     }
 
@@ -3071,6 +3194,8 @@ ${
             .Loop(label: x) :> not
             .Break(target: x) :> not
             .Continue(target: x) :> not
+            .Gather(g: x) :> not
+            .Lift(into: x) :> not
         }
     }
 
@@ -3094,6 +3219,8 @@ ${
             .Loop(label: x) :> not
             .Break(target: x) :> not
             .Continue(target: x) :> not
+            .Gather(g: x) :> not
+            .Lift(into: x) :> not
         }
     }
 
@@ -3106,6 +3233,8 @@ ${
             .Loop(label: x) :> false
             .Break(target: x) :> true
             .Continue(target: x) :> true
+            .Gather(g: x) :> false
+            .Lift(into: x) :> false
             .Suspend(bind: x) :> true
             .If(cond: x) :> false
             .Let(sym: x) :> false
@@ -3260,7 +3389,14 @@ ${
             .Effect(deps: x) :> v
             .ResetOn(triggers: x) :> v
             .Errors(of: x) :> v
+            .Gather(g: g, rows: rs) :> View.Gather(g, gateRows(p, rs))
         }
+    }
+
+    fn gateRows(p: CoreProgram, rs: GatherRow[]) -> GatherRow[] {
+        let out: GatherRow[] = []
+        for (const r of rs) { out = out.concat([{ views: gateViews(p, r.views) }]) }
+        return out
     }
 
     fn gateArms(p: CoreProgram, arms: CondArm[]) -> CondArm[] {
@@ -3329,6 +3465,7 @@ ${
             .Effect(deps: x) :> []
             .ResetOn(triggers: x) :> []
             .Errors(of: x) :> []
+            .Gather(g: x) :> []
         }
     }
 

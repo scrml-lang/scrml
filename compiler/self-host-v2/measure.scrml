@@ -72,6 +72,8 @@ ${
             .Loop(label: x) :> "Loop"
             .Break(target: x) :> "Break"
             .Continue(target: x) :> "Continue"
+            .Gather(g: x) :> "Gather"
+            .Lift(into: x) :> "Lift"
         }
     }
 
@@ -150,6 +152,7 @@ ${
             .Effect(deps: x) :> "Effect"
             .ResetOn(triggers: x) :> "ResetOn"
             .Errors(of: x) :> "Errors"
+            .Gather(g: x) :> "Gather"
         }
     }
 

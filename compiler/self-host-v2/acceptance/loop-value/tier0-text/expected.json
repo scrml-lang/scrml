@@ -1,0 +1,20 @@
+{
+  "id": "acceptance-loop-value-tier0-text",
+  "description": "Range and counted heads in markup: `012` and `024`.",
+  "language-version": "1.0",
+  "spec": "§17.4",
+  "rationale": "§17.4: \"every head (iterate, condition, counted, infinite) may appear here … Range heads work here too\".",
+  "expect": {
+    "codes": [],
+    "domAnchored": [
+      {
+        "selector": "#t",
+        "text": "012"
+      },
+      {
+        "selector": "#c",
+        "text": "024"
+      }
+    ]
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "id": "acceptance-loop-value-union-unsupported",
+  "description": "The target: `xs` is an `(int | string)[]` of 4 elements. Today the bootstrap refuses the union (E-BOOTSTRAP-UNSUPPORTED).",
+  "language-version": "1.0",
+  "spec": "§49.6 rule 2",
+  "rationale": "§49.6 rule 2: \"values of different types give their union, as for if-as-expression arms (§17.6.2)\".",
+  "expect": {
+    "codes": [],
+    "domAnchored": [
+      {
+        "selector": "#o",
+        "text": "4"
+      }
+    ]
+  }
+}

@@ -52,7 +52,7 @@ ${
              ATypeField, AVariant, ATypeBody, ATypeDecl, AParam, AFn, AImportName, AImport,
              AAttrValue, AAttr, AElem, ANode, ANodeK, ADeclAttr, AStateChild, ADeclChild, ADecl, AValArg, AValidator,
              AProgram, AItem, AItemK, FileAst, Diag, ASql,
-             AHow, AHandled, AArm, APat, ABind, AArmBody, AFail, AFor, AForHead, AIterSrc,
+             AHow, AHandled, AArm, APat, ABind, AArmBody, AFail, AFor, AForHead, AIterSrc, AForBound, ALift,
              ACss, ACssItem, ACssRule, ACssDecl, ACssPart, ACssRef, mkSpan, newDiag } from "./ast.scrml"
     import { Severity } from "./severity.scrml"
     import { WireBuild, WireTable, wireBuild, hasFixedLength } from "./codec.scrml"
@@ -590,7 +590,11 @@ ${
     type EffectSrc:struct = { w: AEffect, file: string }
     // `pend` (s452, dpa-066 M3): the binder's decisions that need the effect
     // summary — recorded where the binder meets them, decided by rulesPass.
-    type AS:struct = { facts: NodeFacts, diags: Diag[], nextSym: int, annots: LocalAnnot[], bad: Unresolved, effects: EffectSrc[], pend: Pending[] }
+    // s469 — `lifts`: every `lift` the binder resolved, by the tape it appends
+    // to and its operand's type where known (a bound loop's binder type is the
+    // join of its lifts', §49.6 rule 2; none at all is E-LOOP-007).
+    type AS:struct = { facts: NodeFacts, diags: Diag[], nextSym: int, annots: LocalAnnot[], bad: Unresolved, effects: EffectSrc[], pend: Pending[], lifts: LiftSeen[] }
+    type LiftSeen:struct = { into: int, ty: Type | not }
     type RSym:struct = { s: Sym, st: AS }
 
     fn noFacts() -> NodeFacts {
@@ -613,11 +617,11 @@ ${
     }
 
     fn mint(st: AS, hint: string) -> RSym {
-        return { s: mkSym(st.nextSym, hint), st: { facts: st.facts, diags: st.diags, nextSym: st.nextSym + 1, annots: st.annots, bad: st.bad, effects: st.effects, pend: st.pend } }
+        return { s: mkSym(st.nextSym, hint), st: { facts: st.facts, diags: st.diags, nextSym: st.nextSym + 1, annots: st.annots, bad: st.bad, effects: st.effects, pend: st.pend, lifts: st.lifts } }
     }
 
     fn withFacts(st: AS, fs: NodeFacts) -> AS {
-        return { facts: fs, diags: st.diags, nextSym: st.nextSym, annots: st.annots, bad: st.bad, effects: st.effects, pend: st.pend }
+        return { facts: fs, diags: st.diags, nextSym: st.nextSym, annots: st.annots, bad: st.bad, effects: st.effects, pend: st.pend, lifts: st.lifts }
     }
 
     fn addName(st: AS, nid: int, f: NameFact) -> AS {
@@ -668,34 +672,38 @@ ${
     }
 
     fn withDiag(st: AS, d: Diag) -> AS {
-        return { facts: st.facts, diags: st.diags.concat([d]), nextSym: st.nextSym, annots: st.annots, bad: st.bad, effects: st.effects, pend: st.pend }
+        return { facts: st.facts, diags: st.diags.concat([d]), nextSym: st.nextSym, annots: st.annots, bad: st.bad, effects: st.effects, pend: st.pend, lifts: st.lifts }
     }
 
     // s452 (dpa-066 M3): a decision for rulesPass, at the place in the
     // diagnostic list where the binder used to make it.
     fn addPending(st: AS, r: PendRule) -> AS {
         return { facts: st.facts, diags: st.diags, nextSym: st.nextSym, annots: st.annots, bad: st.bad, effects: st.effects,
-                 pend: st.pend.concat([{ at: st.diags.length, rule: r }]) }
+                 pend: st.pend.concat([{ at: st.diags.length, rule: r }]), lifts: st.lifts }
     }
 
     fn addAnnot(st: AS, s: Sym, ty: Type) -> AS {
-        return { facts: st.facts, diags: st.diags, nextSym: st.nextSym, annots: st.annots.concat([{ sym: s, ty: ty }]), bad: st.bad, effects: st.effects, pend: st.pend }
+        return { facts: st.facts, diags: st.diags, nextSym: st.nextSym, annots: st.annots.concat([{ sym: s, ty: ty }]), bad: st.bad, effects: st.effects, pend: st.pend, lifts: st.lifts }
+    }
+
+    fn addLift(st: AS, into: Sym, ty: Type | not) -> AS {
+        return { facts: st.facts, diags: st.diags, nextSym: st.nextSym, annots: st.annots, bad: st.bad, effects: st.effects, pend: st.pend, lifts: st.lifts.concat([{ into: into.id, ty: ty }]) }
     }
 
     fn badParam(st: AS, nid: int) -> AS {
         return { facts: st.facts, diags: st.diags, nextSym: st.nextSym, annots: st.annots,
-                 bad: { params: st.bad.params.concat([nid]), fields: st.bad.fields }, effects: st.effects, pend: st.pend }
+                 bad: { params: st.bad.params.concat([nid]), fields: st.bad.fields }, effects: st.effects, pend: st.pend, lifts: st.lifts }
     }
 
     fn badField(st: AS, id: int) -> AS {
         return { facts: st.facts, diags: st.diags, nextSym: st.nextSym, annots: st.annots,
-                 bad: { params: st.bad.params, fields: st.bad.fields.concat([id]) }, effects: st.effects, pend: st.pend }
+                 bad: { params: st.bad.params, fields: st.bad.fields.concat([id]) }, effects: st.effects, pend: st.pend, lifts: st.lifts }
     }
 
     // s449: record an effect the binder accepted (the no-write pass's input).
     fn addEffectSrc(st: AS, w: AEffect, file: string) -> AS {
         return { facts: st.facts, diags: st.diags, nextSym: st.nextSym, annots: st.annots, bad: st.bad,
-                 effects: st.effects.concat([{ w: w, file: file }]), pend: st.pend }
+                 effects: st.effects.concat([{ w: w, file: file }]), pend: st.pend, lifts: st.lifts }
     }
 
     // =========================================================================
@@ -1329,6 +1337,7 @@ ${
             .Interp(e: x) :> not
             .DeclNode(d: d) :> not
             .Css(c: c) :> not
+            .Gather(f: x) :> not
             .Effect(w: w) :> not
         }
     }
@@ -2645,6 +2654,7 @@ ${
                 .For(f: lf) :> retsFor(cx, lf, sc, stack, done)
                 .Break(label: x) :> noRets(done)
                 .Continue(label: x) :> noRets(done)
+                .Lift(what: w) :> retsInList(cx, liftExprs(w), sc, stack, done)
                 .Eval(e: x) :> retsInExpr(cx, x, sc, stack, done)
                 .Local(name: n, init: i) :> retsInExpr(cx, i, sc, stack, done)
                 .EffectStmt(w: w) :> noRets(done)
@@ -2673,7 +2683,8 @@ ${
             .Return(e: x) :> noBind(done)
             .If(cond: c) :> noBind(done)
             .Given(name: n) :> noBind(done)
-            .For(f: lf) :> noBind(done)
+            .For(f: lf) :> forBinding(cx, lf, done)        // s469: a bound loop binds its name (§49.6)
+            .Lift(what: x) :> noBind(done)
             .Break(label: x) :> noBind(done)
             .Continue(label: x) :> noBind(done)
             .Eval(e: x) :> noBind(done)
@@ -2681,6 +2692,19 @@ ${
             .Defer(body: db) :> noBind(done)
             .Fail(f: x) :> noBind(done)
         }
+    }
+
+    // s469 — a bound loop's binder: its written type, else untyped (returning
+    // it is not proven — write the function's return type).
+    fn forBinding(cx: InferCx, f: AFor, done: OwnT[]) -> RBind {
+        const b: AForBound | not = f.bound
+        if (b is not) return noBind(done)
+        const aty: AType | not = b.ty
+        if (aty is given) {
+            const rt: RType = resolveType(cx.te, aty, cx.st)
+            if (!rt.unresolved) return { b: { name: b.name, ty: rt.t, param: false }, done: done }
+        }
+        return { b: { name: b.name, ty: not, param: false }, done: done }
     }
 
     fn localOf(cx: InferCx, n: string, mutable: boolean, aty: AType | not, init: AExpr, sc: ParamT[], stack: string[], done: OwnT[]) -> RBind {
@@ -2702,6 +2726,7 @@ ${
             .For(f: lf) :> false
             .Break(label: x) :> false
             .Continue(label: x) :> false
+            .Lift(what: x) :> false
             .Eval(e: x) :> false
             .Local(name: n) :> false
             .EffectStmt(w: w) :> false
@@ -2718,6 +2743,7 @@ ${
             .For(f: lf) :> not
             .Break(label: x) :> not
             .Continue(label: x) :> not
+            .Lift(what: x) :> not
             .Eval(e: x) :> not
             .Local(name: n) :> not
             .EffectStmt(w: w) :> not
@@ -2751,6 +2777,17 @@ ${
 
     // The `return`s inside an expression's handling-form arm blocks (they
     // leave the function); an arm's binders are in scope in its block, untyped.
+    fn retsInList(cx: InferCx, es: AExpr[], sc: ParamT[], stack: string[], done0: OwnT[]) -> RRets {
+        let done: OwnT[] = done0
+        let out: RetAt[] = []
+        for (const e of es) {
+            const r: RRets = retsInExpr(cx, e, sc, stack, done)
+            out = out.concat(r.rs)
+            done = r.done
+        }
+        return { rs: out, done: done }
+    }
+
     fn retsInExpr(cx: InferCx, e: AExpr, sc: ParamT[], stack: string[], done0: OwnT[]) -> RRets {
         const k: AExprK = e.k
         if (isLambda(k)) return { rs: [], done: done0 }
@@ -3487,6 +3524,7 @@ ${
             .Interp(e: x) :> noHandles(st)
             .DeclNode(d: d) :> noHandles(st)
             .Css(c: c) :> noHandles(st)
+            .Gather(f: lf) :> handlesIn(g0, gatherRows(lf), w, st)
             .Effect(w: w) :> noHandles(st)
         }
     }
@@ -4304,6 +4342,7 @@ ${
             .For(f: lf) :> exprsClock(forExprs(lf)) || blockClock(lf.body)
             .Break(label: x) :> false
             .Continue(label: x) :> false
+            .Lift(what: w) :> exprsClock(liftExprs(w))
             .EffectStmt(w: w) :> blockClock(w.body)
             .Defer(body: b) :> blockClock(b)
             .Fail(f: f) :> exprsClock(failExprs(f))
@@ -4414,6 +4453,25 @@ ${
         own: string,            // s444: the child field whose own `renders` this is ("" — none): `@own` is this instance (O54 = (a), RULED S442)
         inEffect: boolean,      // s449: inside an effect body (an effect there is E-LIFECYCLE-016, §6.7.4)
         fx: FailCtx,            // s451 (Ue): the error-model context (see FailCtx)
+        lift: LiftCtx,          // s469 (§49.6): where a `lift` here appends (see LiftCtx)
+    }
+
+    // s469 — where a `lift` appends (§49.6 rule 7: "to the nearest enclosing
+    // bound loop"): `LiftTo(into, tier0)` inside a bound loop's body — `into`
+    // the loop's tape (a `for-binding`'s binder, or a Tier-0 loop's
+    // accumulator; `tier0`: markup may be lifted); `LiftInArm` inside an arm
+    // block (refused: §18.5 makes an arm block's `lift` the arm's value);
+    // `NoLift` anywhere else. A function body, a handler block and an effect
+    // body start at NoLift (a loop does not reach across them, §49.4.3).
+    type LiftCtx:enum = {
+        NoLift,
+        LiftTo(into: Sym, tier0: boolean),
+        LiftInArm,
+    }
+
+    fn withLift(env: Env, l: LiftCtx) -> Env {
+        return { g: env.g, file: env.file, ctx: env.ctx, locals: env.locals, rows: env.rows,
+                 handles: env.handles, inRenders: env.inRenders, narrows: env.narrows, present: env.present, host: env.host, own: env.own, inEffect: env.inEffect, fx: env.fx, lift: l }
     }
 
     // s451 (Ue) — the error-model context of the code being resolved.
@@ -4438,7 +4496,7 @@ ${
 
     fn withFx(env: Env, fx: FailCtx) -> Env {
         return { g: env.g, file: env.file, ctx: env.ctx, locals: env.locals, rows: env.rows,
-                 handles: env.handles, inRenders: env.inRenders, narrows: env.narrows, present: env.present, host: env.host, own: env.own, inEffect: env.inEffect, fx: fx }
+                 handles: env.handles, inRenders: env.inRenders, narrows: env.narrows, present: env.present, host: env.host, own: env.own, inEffect: env.inEffect, fx: fx, lift: env.lift }
     }
 
     fn withSubject(env: Env, nid: int) -> Env {
@@ -4477,34 +4535,34 @@ ${
 
     fn withLocal(env: Env, l: LocalB) -> Env {
         return { g: env.g, file: env.file, ctx: env.ctx, locals: env.locals.concat([l]), rows: env.rows,
-                 handles: env.handles, inRenders: env.inRenders, narrows: env.narrows, present: env.present, host: env.host, own: env.own, inEffect: env.inEffect, fx: env.fx }
+                 handles: env.handles, inRenders: env.inRenders, narrows: env.narrows, present: env.present, host: env.host, own: env.own, inEffect: env.inEffect, fx: env.fx, lift: env.lift }
     }
 
     fn withRow(env: Env, row: RowB, name: string, hs: HandleInfo[]) -> Env {
         const l: LocalB = { name: name, s: row.bind, ty: row.ty, mutable: false, narrowed: not, nDecl: not }
         return { g: env.g, file: env.file, ctx: env.ctx, locals: env.locals.concat([l]), rows: env.rows.concat([row]),
-                 handles: env.handles.concat(hs), inRenders: env.inRenders, narrows: env.narrows, present: env.present, host: env.host, own: env.own, inEffect: env.inEffect, fx: env.fx }
+                 handles: env.handles.concat(hs), inRenders: env.inRenders, narrows: env.narrows, present: env.present, host: env.host, own: env.own, inEffect: env.inEffect, fx: env.fx, lift: env.lift }
     }
 
     fn withNarrow(env: Env, n: NarrowB) -> Env {
         return { g: env.g, file: env.file, ctx: env.ctx, locals: env.locals, rows: env.rows,
-                 handles: env.handles, inRenders: env.inRenders, narrows: env.narrows.concat([n]), present: env.present, host: env.host, own: env.own, inEffect: env.inEffect, fx: env.fx }
+                 handles: env.handles, inRenders: env.inRenders, narrows: env.narrows.concat([n]), present: env.present, host: env.host, own: env.own, inEffect: env.inEffect, fx: env.fx, lift: env.lift }
     }
 
     fn withPresent(env: Env, name: string) -> Env {
         if (name == "") return env
         return { g: env.g, file: env.file, ctx: env.ctx, locals: env.locals, rows: env.rows,
-                 handles: env.handles, inRenders: env.inRenders, narrows: env.narrows, present: env.present.concat([name]), host: env.host, own: env.own, inEffect: env.inEffect, fx: env.fx }
+                 handles: env.handles, inRenders: env.inRenders, narrows: env.narrows, present: env.present.concat([name]), host: env.host, own: env.own, inEffect: env.inEffect, fx: env.fx, lift: env.lift }
     }
 
     fn withHost(env: Env, h: HostCtx) -> Env {
         return { g: env.g, file: env.file, ctx: env.ctx, locals: env.locals, rows: env.rows,
-                 handles: env.handles, inRenders: env.inRenders, narrows: env.narrows, present: env.present, host: h, own: env.own, inEffect: env.inEffect, fx: env.fx }
+                 handles: env.handles, inRenders: env.inRenders, narrows: env.narrows, present: env.present, host: h, own: env.own, inEffect: env.inEffect, fx: env.fx, lift: env.lift }
     }
 
     fn withOwn(env: Env, name: string) -> Env {
         return { g: env.g, file: env.file, ctx: env.ctx, locals: env.locals, rows: env.rows,
-                 handles: env.handles, inRenders: env.inRenders, narrows: env.narrows, present: env.present, host: env.host, own: name, inEffect: env.inEffect, fx: env.fx }
+                 handles: env.handles, inRenders: env.inRenders, narrows: env.narrows, present: env.present, host: env.host, own: name, inEffect: env.inEffect, fx: env.fx, lift: env.lift }
     }
 
     // s449: an effect body — a logic context (§6.7.4 "same rules as `${}`") run
@@ -4513,7 +4571,7 @@ ${
     // E-LIFECYCLE-016.
     fn effectBodyEnv(env: Env) -> Env {
         return { g: env.g, file: env.file, ctx: env.ctx, locals: env.locals, rows: env.rows,
-                 handles: env.handles, inRenders: env.inRenders, narrows: env.narrows, present: env.present, host: HostCtx.HostOk, own: env.own, inEffect: true, fx: env.fx }
+                 handles: env.handles, inRenders: env.inRenders, narrows: env.narrows, present: env.present, host: HostCtx.HostOk, own: env.own, inEffect: true, fx: env.fx, lift: LiftCtx.NoLift }
     }
 
     // s444 — O54 = (a) (RULED S442: "`@email` inside `email`'s own `renders` …
@@ -5363,6 +5421,7 @@ ${
             .For(f: lf) :> blocksValueReturn(fs, v, forExprBlocks(lf)) || valueReturnIn(fs, v, lf.body)
             .Break(label: x) :> false
             .Continue(label: x) :> false
+            .Lift(what: w) :> blocksValueReturn(fs, v, liftBlocks(w))
             .Eval(e: x) :> blocksValueReturn(fs, v, allExprBlocks(x))
             .Local(name: n, init: x) :> blocksValueReturn(fs, v, allExprBlocks(x))
             .EffectStmt(w: w) :> false
@@ -5436,6 +5495,7 @@ ${
             .For(f: lf) :> loopNeverCompletes(lf)
             .Break(label: x) :> false
             .Continue(label: x) :> false
+            .Lift(what: x) :> false
             .Local(name: n) :> false
             .EffectStmt(w: w) :> false
             .Defer(body: d) :> false
@@ -8360,9 +8420,10 @@ ${
             .Fail(f: f) :> keepEnv(env, resolveFail(env, s, f, st))       // s451 (Ue, §19.3)
             .If(cond: c, thenB: t, elseB: el) :> keepEnv(env, resolveIf(env, c, t, el, st))
             .Given(name: n, subject: sub, body: b) :> keepEnv(env, resolveGiven(env, s, n, sub, b, st))
-            .For(f: lf) :> keepEnv(env, resolveFor(env, s, lf, st))
+            .For(f: lf) :> resolveForStmt(env, s, lf, st)              // s469: a bound loop binds its name after it (§49.6)
             .Break(label: x) :> keepEnv(env, st)
             .Continue(label: x) :> keepEnv(env, st)
+            .Lift(what: w) :> keepEnv(env, resolveLift(env, s, w, st))  // s469 (§49.6.2)
             .EffectStmt(w: w) :> keepEnv(env, effectAsStatement(env, w, st))
             .Defer(body: b, arrayLead: a, bare: bare) :> keepEnv(env, resolveDefer(env, s, b, a, bare, st))
         }
@@ -8484,6 +8545,7 @@ ${
             .For(f: lf) :> deferChecksBlocks(file, forExprBlocks(lf), later, deferChecksIn(file, lf.body, later, st))
             .Break(label: x) :> st
             .Continue(label: x) :> st
+            .Lift(what: w) :> deferChecksBlocks(file, liftBlocks(w), later, st)
             .Eval(e: e) :> deferChecksBlocks(file, allExprBlocks(e), later, st)        // s451 (Ue): a braced arm block is a defer site (§19.16.2)
             .Local(name: n, init: i) :> deferChecksBlocks(file, allExprBlocks(i), later, st)
             .Return(e: e) :> deferChecksBlocks(file, maybeExprBlocks(e), later, st)
@@ -8526,6 +8588,7 @@ ${
             .For(f: lf) :> deferBodyRules(file, lf.body, st)
             .Break(label: x) :> addDiag(st, file, s.span, "E-DEFER-CONTROL-FLOW", "a deferred statement cannot contain a `break` that leaves it — it runs while its block is already exiting (§19.16.3 rule 1)")
             .Continue(label: x) :> addDiag(st, file, s.span, "E-DEFER-CONTROL-FLOW", "a deferred statement cannot contain a `continue` that leaves it — it runs while its block is already exiting (§19.16.3 rule 1)")
+            .Lift(what: w) :> deferLiftRules(file, liftExprs(w), st)
             .Eval(e: e) :> deferExprRules(file, e, st)
             .Local(name: n, init: i) :> deferExprRules(file, i, st)
             .EffectStmt(w: w) :> st
@@ -8537,6 +8600,12 @@ ${
     // (§19.16.3 rule 1: "a `?` propagation"), and the arms of a handling form
     // obey the deferred-body rules ("The rule reaches EVERY statement position
     // inside the deferred body, including … the arms of a `!{}` handler").
+    fn deferLiftRules(file: string, es: AExpr[], st0: AS) -> AS {
+        let st: AS = st0
+        for (const e of es) { st = deferExprRules(file, e, st) }
+        return st
+    }
+
     fn deferExprRules(file: string, e: AExpr, st0: AS) -> AS {
         let st: AS = st0
         const h: AHandled | not = handledOf(e.k)
@@ -8596,6 +8665,7 @@ ${
             .For(f: lf) :> forNameRefs(lf, bound)
             .Break(label: x) :> []
             .Continue(label: x) :> []
+            .Lift(what: w) :> exprsNameRefs(liftExprs(w), bound)
             .EffectStmt(w: w) :> []
             .Defer(body: d) :> blockNameRefs(d, bound)
             .Fail(f: f) :> exprsNameRefs(failExprs(f), bound)
@@ -8697,8 +8767,8 @@ ${
     // `onclick=${risky}`, or `onclick={ risky }`").
     fn bracedHandler(env: Env, b: ABlock, st: AS) -> AS {
         const r: AExpr | not = blockReference(b)
-        if (r is not) return loopChecks(env.file, b, resolveBlock(env, b, st))   // s469: a handler block is a loop-control boundary
-        return handlerReference(env, r, resolveBlock(withFnRef(env, r.nid), b, st))
+        if (r is not) return loopChecks(env.file, b, resolveBlock(withLift(env, LiftCtx.NoLift), b, st))   // s469: a handler block is a loop-control boundary (and a `lift` one)
+        return handlerReference(env, r, resolveBlock(withFnRef(withLift(env, LiftCtx.NoLift), r.nid), b, st))
     }
 
     // The one name a braced handler body consists of, else not.
@@ -8714,6 +8784,7 @@ ${
             .For(f: lf) :> not
             .Break(label: x) :> not
             .Continue(label: x) :> not
+            .Lift(what: x) :> not
             .EffectStmt(w: w) :> not
             .Defer(body: d) :> not
             .Fail(f: x) :> not
@@ -9509,7 +9580,7 @@ ${
     }
 
     fn emptyAS() -> AS {
-        return { facts: noFacts(), diags: [], nextSym: 0, annots: [], bad: { params: [], fields: [] }, effects: [], pend: [] }
+        return { facts: noFacts(), diags: [], nextSym: 0, annots: [], bad: { params: [], fields: [] }, effects: [], pend: [], lifts: [] }
     }
 
     // `f(…)?` / `f(…) !{ … }` / `match f(…) { … }` where `f` is server-
@@ -9900,7 +9971,7 @@ ${
     fn resolveArmBody(env: Env, a: AArm, body: AArmBody, cx: ArmCx, st: AS) -> AS {
         return match body {
             .ArmExpr(e: x) :> armExpr(env, a, x, cx, st)
-            .ArmBlock(b: b) :> armBlock(env, a, b, cx, st)
+            .ArmBlock(b: b) :> armBlock(withLift(env, LiftCtx.LiftInArm), a, b, cx, st)   // s469: no `lift` reaches past an arm (resolveLift)
         }
     }
 
@@ -10026,6 +10097,7 @@ ${
                 .For(f: lf) :> false
                 .Break(label: x) :> false
                 .Continue(label: x) :> false
+                .Lift(what: x) :> false
                 .EffectStmt(w: w) :> false
                 .Fail(f: x) :> false
             }
@@ -10045,6 +10117,7 @@ ${
             .For(f: lf) :> not
             .Break(label: x) :> not
             .Continue(label: x) :> not
+            .Lift(what: x) :> not
             .EffectStmt(w: w) :> not
             .Defer(body: d) :> not
             .Fail(f: x) :> not
@@ -10094,6 +10167,7 @@ ${
             .For(f: lf) :> loopNeverCompletes(lf)
             .Break(label: x) :> false
             .Continue(label: x) :> false
+            .Lift(what: x) :> false
             .Eval(e: x) :> false
             .Local(name: n) :> false
             .EffectStmt(w: w) :> false
@@ -10124,6 +10198,7 @@ ${
             .For(f: lf) :> forHasBareReturn(lf)
             .Break(label: x) :> false
             .Continue(label: x) :> false
+            .Lift(what: w) :> liftHasBareReturn(w)
             .Eval(e: x) :> exprHasBareReturn(x)
             .Local(name: n, init: i) :> exprHasBareReturn(i)
             .EffectStmt(w: w) :> false
@@ -10143,6 +10218,13 @@ ${
     }
 
     // ... inside a handling form's arm block in `e`, at any depth.
+    fn liftHasBareReturn(w: ALift) -> boolean {
+        for (const e of liftExprs(w)) {
+            if (exprHasBareReturn(e)) return true
+        }
+        return false
+    }
+
     fn exprHasBareReturn(e: AExpr) -> boolean {
         for (const b of exprBlocks(e)) {
             if (blockHasBareReturn(b)) return true
@@ -10225,6 +10307,7 @@ ${
             .For(f: lf) :> loopNeverCompletes(lf)
             .Break(label: x) :> false
             .Continue(label: x) :> false
+            .Lift(what: x) :> false
             .EffectStmt(w: w) :> false
             .Defer(body: x) :> false
         }
@@ -10517,6 +10600,269 @@ ${
         }
     }
 
+    // =========================================================================
+    // s469 — THE VALUE FORM (SPEC §49.6): a loop bound as a value, from any
+    // head. `const xs = for (…) { … lift e; … };` binds `xs` — in scope AFTER
+    // the loop, never in its own body — to a FRESH tape with no grants (rule 2:
+    // immutable, `fixedSeq`), of the values its `lift`s appended in the order
+    // they ran (rule 3); zero lifts at run time give `[]` (rule 4). The binder's
+    // Sym is minted before the body, so every `lift` the body holds names it
+    // (resolveLift: BJump on the statement — lower's Lift target). Its type
+    // here is the join of the lifts' (rule 2); the typer decides it for good
+    // (typeForStmt). A loop bound as a value whose body holds no `lift` at all
+    // is E-LOOP-007 (§49.4.4). `break` keeps the prefix (rule 5) and the body
+    // is a break boundary (rule 6, E-LOOP-005) — the loop-control pass.
+    // =========================================================================
+    fn resolveForStmt(env: Env, s: AStmt, f: AFor, st0: AS) -> RB {
+        const b: AForBound | not = f.bound
+        if (b is not) return keepEnv(env, resolveFor(env, s, f, st0))
+        let st: AS = st0
+        let annot: Type | not = not
+        const aty: AType | not = b.ty
+        if (aty is given && !hasErrIn(fileErrs(env.g.files, env.file), aty.span)) {
+            const te: TypeEnv = { stubs: env.g.te.stubs, declNames: env.g.te.declNames, declSyms: env.g.te.declSyms, file: env.file }
+            const rt: RType = resolveType(te, aty, st)
+            if (!rt.unresolved) annot = rt.t
+            st = rt.st
+        }
+        const rs: RSym = mint(st, b.name)
+        st = addBind(rs.st, b.nid, BindFact.BBind(rs.s))
+        if (annot is given) st = addAnnot(st, rs.s, annot)
+        const n0: int = st.lifts.length
+        st = resolveFor(withLift(env, LiftCtx.LiftTo(rs.s, false)), s, f, st)
+        const lr: LiftsOf = liftsInto(st, n0, rs.s)
+        if (lr.count == 0 || !liftReachable(f.body)) st = addDiag(st, env.file, f.span, "E-LOOP-007", "The loop bound to `" + b.name + "` lifts nothing on any path, so its value is always an empty tape. Add `lift <value>;` where the loop produces an element, or write the loop as a statement (§49.4.4, §49.6)")
+        let lty: Type | not = lr.elem
+        if (lty is given) lty = Type.Seq(lty, fixedSeq())
+        if (annot is given) lty = annot
+        const l: LocalB = { name: b.name, s: rs.s, ty: lty, mutable: b.mutable, narrowed: not, nDecl: not }
+        return { env: withLocal(env, l), st: st }
+    }
+
+    // §49.4.4: "a `lift` reachable on some path" — a `lift` into THIS loop that
+    // some path reaches: through `if` / `given` blocks and statement loops (a
+    // nested bound loop captures its own, rule 7); a statement after one that
+    // always leaves its block (`break`, `continue`, `return`, `fail`, an `if`
+    // both of whose branches leave, a loop that never completes) is not reached.
+    fn liftReachable(b: ABlock) -> boolean {
+        for (const s of b.stmts) {
+            if (stmtLiftReachable(s)) return true
+            if (stmtEndsPath(s)) return false
+        }
+        return false
+    }
+
+    fn liftReachableMaybe(b: ABlock | not) -> boolean {
+        if (b is not) return false
+        return liftReachable(b)
+    }
+
+    fn stmtLiftReachable(s: AStmt) -> boolean {
+        const k: AStmtK = s.k
+        return match k {
+            .Lift(what: x) :> true
+            .If(cond: c, thenB: tb, elseB: el) :> liftReachable(tb) || liftReachableMaybe(el)
+            .Given(name: n, body: gb) :> liftReachable(gb)
+            .For(f: lf) :> lf.bound is not && liftReachable(lf.body)
+            .Eval(e: x) :> false
+            .Local(name: n) :> false
+            .Return(e: x) :> false
+            .EffectStmt(w: x) :> false
+            .Defer(body: x) :> false
+            .Fail(f: x) :> false
+            .Break(label: x) :> false
+            .Continue(label: x) :> false
+        }
+    }
+
+    // Does every path through `s` leave its block (nothing after it runs)?
+    fn stmtEndsPath(s: AStmt) -> boolean {
+        const k: AStmtK = s.k
+        return match k {
+            .Break(label: x) :> true
+            .Continue(label: x) :> true
+            .Return(e: x) :> true
+            .Fail(f: x) :> true
+            .If(cond: c, thenB: tb, elseB: el) :> blockEndsPath(tb) && blockEndsPathMaybe(el)
+            .For(f: lf) :> loopNeverCompletes(lf)
+            .Given(name: n) :> false
+            .Eval(e: x) :> false
+            .Local(name: n) :> false
+            .EffectStmt(w: x) :> false
+            .Defer(body: x) :> false
+            .Lift(what: x) :> false
+        }
+    }
+
+    fn blockEndsPath(b: ABlock) -> boolean {
+        for (const s of b.stmts) {
+            if (stmtEndsPath(s)) return true
+        }
+        return false
+    }
+
+    fn blockEndsPathMaybe(b: ABlock | not) -> boolean {
+        if (b is not) return false
+        return blockEndsPath(b)
+    }
+
+    // The lifts resolved since `n0` into `into`: how many, and the join of
+    // their types (`not` when one is not known, or two do not join).
+    type LiftsOf:struct = { count: int, elem: Type | not }
+
+    fn liftsInto(st: AS, n0: int, into: Sym) -> LiftsOf {
+        let count: int = 0
+        let elem: Type | not = not
+        let known = true
+        let i: int = n0
+        while (i < st.lifts.length) {
+            const l: LiftSeen = st.lifts[i]
+            if (l.into == into.id) {
+                count = count + 1
+                const t: Type | not = l.ty
+                if (t is not) {
+                    known = false
+                } else if (elem is not) {
+                    elem = t
+                } else {
+                    const j: Type | not = knownOf(joinTypes(elem, t))
+                    if (j is not) known = false
+                    elem = j
+                }
+            }
+            i = i + 1
+        }
+        if (!known) return { count: count, elem: not }
+        return { count: count, elem: elem }
+    }
+
+    // `lift` (§49.6.2): the nearest enclosing bound loop's tape (BJump on the
+    // statement). Refused where there is none (a `lift` outside a bound loop
+    // or a Tier-0 loop is not in the bootstrap — §10 lift-to-render-target and
+    // the `fn`-body `~` are not built) and inside an arm block (PA reading,
+    // S469: §49.6 rule 7 sends it "through … `match` arms and `!{}` arms" to
+    // the loop, §18.5 makes a value-position arm block's `lift` the arm's value
+    // — the owner's to reconcile; fail closed). Lifted markup only in a Tier-0
+    // loop. The operand is resolved either way (its own errors report).
+    fn resolveLift(env: Env, s: AStmt, w: ALift, st0: AS) -> AS {
+        const lc: LiftCtx = env.lift
+        const tgt: Sym | not = match lc {
+            .LiftTo(into: i, tier0: t) :> i
+            .NoLift :> not
+            .LiftInArm :> not
+        }
+        const tier0: boolean = match lc {
+            .LiftTo(into: i, tier0: t) :> t
+            .NoLift :> false
+            .LiftInArm :> false
+        }
+        const inArm: boolean = match lc {
+            .LiftInArm :> true
+            .NoLift :> false
+            .LiftTo(into: i) :> false
+        }
+        // the operand is resolved either way (its own errors report) — a lifted row
+        // only where it is a row (a refused `lift` reads no markup)
+        const legal: boolean = !inArm && tgt is given && (tier0 || !liftsMarkup(w))
+        let r: RX = plain(not, st0)
+        if (legal || !liftsMarkup(w)) r = resolveLifted(env, w, st0)
+        let st: AS = r.st
+        if (inArm) return addDiag(st, env.file, s.span, "E-BOOTSTRAP-UNSUPPORTED", "`lift` is in the bootstrap only as the LAST statement of a `match` / `!{}` arm block (§18.5: `.B :> { log(); lift 2 }`) — a `lift` inside an arm block appends to nothing here: inside a bound loop, §49.6 rule 7 would send it to the loop while §18.5 makes it the arm's value (an open reading) — lift after the `match` / `!{}` instead")
+        // §10.4 / §49.6.2: "`lift` inside a loop body inside a bare `function` SHALL be a
+        // compile error (E-SYNTAX-002) … unless the loop is bound" — a bare `function` body
+        // has no lift target. (A `fn` body's `~`, §48.5, is not in the bootstrap.)
+        if (tgt is not && inBareFunction(env)) return addDiag(st, env.file, s.span, "E-SYNTAX-002", "`lift` is not valid inside a bare `function` body (§10.4) — a `function` returns its value. Bind the loop as a value and return it (`const xs = for (…) { … lift e; … }; return xs;`, §49.6), or `return` the value and lift it at the call site")
+        if (tgt is not) return addDiag(st, env.file, s.span, "E-BOOTSTRAP-UNSUPPORTED", "`lift` appends to a loop BOUND AS A VALUE (`const xs = for (…) { … lift e; … };`, §49.6) or to a Tier-0 `" + "$" + "{ for … }` in markup (§17.4) — this one stands in neither (lifting into a render target or a `fn` body's `~`, §10 / §48.5, is not in the bootstrap)")
+        if (!tier0 && liftsMarkup(w)) return addDiag(st, env.file, s.span, "E-BOOTSTRAP-UNSUPPORTED", "lifted MARKUP is a row of a Tier-0 `" + "$" + "{ for … }` in markup (§17.4) — the nearest bound loop here is `" + tgt.hint + "`, which builds a tape of values")
+        st = addBind(st, s.nid, BindFact.BJump(tgt))
+        return addLift(st, tgt, r.x.ty)
+    }
+
+    // A bare `function` declaration's body (not a `fn`, not a handler / effect / markup).
+    fn inBareFunction(env: Env) -> boolean {
+        if (!env.fx.inFn || env.inEffect) return false
+        const h: HostCtx = env.host
+        return match h {
+            .HostPure :> false
+            .HostOk :> true
+            .HostNo :> true
+        }
+    }
+
+    fn resolveLifted(env: Env, w: ALift, st: AS) -> RX {
+        return match w {
+            .LiftExpr(e: e) :> resolveExpr(withWholeAt(env, e.nid, "a `lift` operand"), e, not, st)
+            .LiftNode(n: n) :> plain(not, resolveRow(env, n, st))
+        }
+    }
+
+    // A Tier-0 row: markup, resolved where the `lift` stands (the loop's
+    // locals in scope). An unfilled stand-in (parse's fillRows found no row at
+    // its offset) is a defect, refused.
+    fn resolveRow(env: Env, n: ANode, st: AS) -> AS {
+        if (n.nid < 0) return addDiag(st, env.file, n.span, "E-BOOTSTRAP-UNSUPPORTED", "internal: a lifted element was not read (a bootstrap defect — please report it)")
+        return resolveNodes(withLift(env, LiftCtx.NoLift), [n], st)
+    }
+
+    fn liftsMarkup(w: ALift) -> boolean {
+        return match w {
+            .LiftNode(n: x) :> true
+            .LiftExpr(e: x) :> false
+        }
+    }
+
+    // s469 — the Tier-0 loop (§17.4, §49.6.2): the value form whose lifts are
+    // the rows the interpolation renders. Its accumulator is minted on the node
+    // (lower's View.Gather bind); the loop is a loop-control root of its own
+    // (§49.4) and must lift (E-LOOP-007, §49.4.4: "the same value form"). A
+    // `return` / `fail` in it has no function to leave — the SPEC gives the
+    // position no code: refused by name (PA reading, fail closed).
+    fn resolveTier0(env: Env, n: ANode, f: AFor, st0: AS) -> AS {
+        const rs: RSym = mint(st0, "rows")
+        let st: AS = addBind(rs.st, n.nid, BindFact.BBind(rs.s))
+        const fs: AStmt = forAsStmt(f)
+        const n0: int = st.lifts.length
+        st = resolveFor(withLift(env, LiftCtx.LiftTo(rs.s, true)), fs, f, st)
+        if (liftsInto(st, n0, rs.s).count == 0 || !liftReachable(f.body)) st = addDiag(st, env.file, f.span, "E-LOOP-007", "This `" + "$" + "{ for … }` loop lifts nothing, so it always renders nothing. Add `lift <li>…</li>;` (or `lift <value>;`) where the loop produces a row, or compute the loop in a function (§17.4, §49.4.4)")
+        for (const rsite of returnSites(f.body)) {
+            st = addDiag(st, env.file, f.span, "E-BOOTSTRAP-UNSUPPORTED", "a `return` inside a `" + "$" + "{ for … }` in markup has no function to leave (§49.6 rule 6 names a function's exits; a render position has none) — compute the loop in a function and render its result")
+        }
+        for (const fsp of failSpansIn(f.body)) {
+            st = addDiag(st, env.file, fsp, "E-BOOTSTRAP-UNSUPPORTED", "a `fail` inside a `" + "$" + "{ for … }` in markup has no function to leave (§49.6 rule 6) — compute the loop in a function and render its result")
+        }
+        return loopChecks(env.file, { nid: -1, span: f.span, stmts: [fs] }, st)
+    }
+
+    fn forAsStmt(f: AFor) -> AStmt {
+        return { nid: f.nid, span: f.span, k: AStmtK.For(f) }
+    }
+
+    // The `fail` statements under `b` (statement structure; arm blocks
+    // included — an arm's `fail` leaves the function too).
+    fn failSpansIn(b: ABlock) -> ASpan[] {
+        let out: ASpan[] = []
+        for (const s of b.stmts) {
+            const k: AStmtK = s.k
+            const own: ASpan[] = match k {
+                .Fail(f: x) :> [s.span]
+                .Eval(e: x) :> []
+                .Local(name: x) :> []
+                .Return(e: x) :> []
+                .If(cond: x) :> []
+                .Given(name: x) :> []
+                .EffectStmt(w: x) :> []
+                .Defer(body: x) :> []
+                .For(f: x) :> []
+                .Break(label: x) :> []
+                .Continue(label: x) :> []
+                .Lift(what: x) :> []
+            }
+            out = out.concat(own)
+            for (const nb of nestedBlocks(s)) { out = out.concat(failSpansIn(nb)) }
+        }
+        return out
+    }
+
     fn resolveCounted(env0: Env, f: AFor, init: AStmt[], cond: AExpr | not, step: AExpr[], st0: AS) -> AS {
         let env: Env = env0
         let st: AS = st0
@@ -10546,6 +10892,7 @@ ${
             .For(f: x) :> keepEnv(env, st)
             .Break(label: x) :> keepEnv(env, st)
             .Continue(label: x) :> keepEnv(env, st)
+            .Lift(what: x) :> keepEnv(env, st)
         }
     }
 
@@ -10689,6 +11036,61 @@ ${
         }
     }
 
+    // s469 — a `lift`'s value operand (none for a lifted row), the arm blocks
+    // inside it, and a Tier-0 loop's rows (every lifted element of its body, in
+    // source order — where parse's fillRows placed them).
+    fn liftExprs(w: ALift) -> AExpr[] {
+        return match w {
+            .LiftExpr(e: e) :> [e]
+            .LiftNode(n: x) :> []
+        }
+    }
+
+    fn liftBlocks(w: ALift) -> ABlock[] {
+        let out: ABlock[] = []
+        for (const e of liftExprs(w)) { out = out.concat(allExprBlocks(e)) }
+        return out
+    }
+
+    fn gatherRows(f: AFor) -> ANode[] {
+        return rowsOfBlock(f.body)
+    }
+
+    fn rowsOfBlock(b: ABlock) -> ANode[] {
+        let out: ANode[] = []
+        for (const s of b.stmts) {
+            const k: AStmtK = s.k
+            const own: ANode[] = match k {
+                .Lift(what: w) :> liftRowOf(w)
+                .If(cond: c, thenB: tb, elseB: el) :> rowsOfBlock(tb).concat(rowsOfMaybe(el))
+                .Given(name: n, body: gb) :> rowsOfBlock(gb)
+                .For(f: lf) :> rowsOfBlock(lf.body)
+                .Defer(body: db) :> rowsOfBlock(db)
+                .Eval(e: x) :> []
+                .Local(name: n) :> []
+                .Return(e: x) :> []
+                .EffectStmt(w: x) :> []
+                .Fail(f: x) :> []
+                .Break(label: x) :> []
+                .Continue(label: x) :> []
+            }
+            out = out.concat(own)
+        }
+        return out
+    }
+
+    fn rowsOfMaybe(b: ABlock | not) -> ANode[] {
+        if (b is not) return []
+        return rowsOfBlock(b)
+    }
+
+    fn liftRowOf(w: ALift) -> ANode[] {
+        return match w {
+            .LiftNode(n: n) :> [n]
+            .LiftExpr(e: x) :> []
+        }
+    }
+
     // Every expression the head evaluates — `init`'s included.
     fn forExprs(f: AFor) -> AExpr[] {
         let out: AExpr[] = []
@@ -10815,6 +11217,7 @@ ${
         return match k {
             .Break(label: l) :> (l == "" && direct) || (l != "" && l == label)
             .Continue(label: l) :> false
+            .Lift(what: x) :> false
             .For(f: lf) :> blockBreaksTo(lf.body, label, false)
             .Eval(e: x) :> blocksBreakTo(nestedBlocks(s), label, direct)
             .Local(name: n) :> blocksBreakTo(nestedBlocks(s), label, direct)
@@ -10853,7 +11256,10 @@ ${
     // `try … finally`, which a `break` would run correctly in JS, but neither
     // has been graded with loop control.
     // =========================================================================
-    type LoopFrame:struct = { label: string, sym: Sym }
+    // s469 — `wall`: the frame is a loop BOUND AS A VALUE (§49.6 rule 6): a
+    // `break` / `continue` below it may name it or a loop inside it, never a
+    // loop outside it (E-LOOP-005).
+    type LoopFrame:struct = { label: string, sym: Sym, wall: boolean }
     type LabelAt:struct = { name: string, span: ASpan }
 
     fn loopChecks(file: string, b: ABlock, st0: AS) -> AS {
@@ -10879,6 +11285,7 @@ ${
             .For(f: lf) :> lf
             .Break(label: x) :> not
             .Continue(label: x) :> not
+            .Lift(what: x) :> not
             .Eval(e: x) :> not
             .Local(name: n) :> not
             .Return(e: x) :> not
@@ -10926,6 +11333,7 @@ ${
             .For(f: lf) :> loopFor(file, lf, stack, inDefer, st)
             .Break(label: l) :> loopJump(file, s, l, true, stack, inDefer, st)
             .Continue(label: l) :> loopJump(file, s, l, false, stack, inDefer, st)
+            .Lift(what: w) :> loopBlocks(file, liftBlocks(w), stack, inDefer, st)
             .Defer(body: d) :> loopDefer(file, s, d, stack, st)
             .EffectStmt(w: w) :> loopBlock(file, w.body, [], inDefer, st)
             .Eval(e: x) :> loopBlocks(file, nestedBlocks(s), stack, inDefer, st)
@@ -10945,7 +11353,7 @@ ${
         for (const x of forHeadExprs(f)) { st = loopBlocks(file, allExprBlocks(x), stack, inDefer, st) }
         const sym: Sym | not = loopSymIn(st, f.nid)
         if (sym is not) return loopBlock(file, f.body, [], inDefer, addDiag(st, file, f.span, "E-BOOTSTRAP-UNSUPPORTED", "internal: this loop was not bound (a bootstrap defect — please report it)"))
-        return loopBlock(file, f.body, stack.concat([{ label: f.label, sym: sym }]), inDefer, st)
+        return loopBlock(file, f.body, stack.concat([{ label: f.label, sym: sym, wall: f.bound is given }]), inDefer, st)
     }
 
     fn loopJump(file: string, s: AStmt, label: string, isBreak: boolean, stack: LoopFrame[], inDefer: boolean, st: AS) -> AS {
@@ -10959,8 +11367,14 @@ ${
             return addDiag(st, file, s.span, code, "`" + kw + "` is not inside any loop — `" + kw + "` may only appear inside a `for` loop body (§49.4.1)")
         }
         let i: int = stack.length - 1
+        let crossed = false
         while (i >= 0) {
-            if (stack[i].label == label) return addBind(st, s.nid, BindFact.BJump(stack[i].sym))
+            if (stack[i].label == label) {
+                // s469 (§49.6 rule 6): past a bound loop's own frame, a label names a loop outside it
+                if (crossed) return addDiag(st, file, s.span, "E-LOOP-005", "`" + kw + " " + label + "` attempts to exit a loop outside the bound loop that contains it — `" + kw + "` cannot leave a loop bound as a value for a loop outside it (§49.4.3, §49.6 rule 6). Restructure so the loop control is not inside the bound loop, or lift a signal value and handle it after the loop")
+                return addBind(st, s.nid, BindFact.BJump(stack[i].sym))
+            }
+            if (stack[i].wall) crossed = true
             i = i - 1
         }
         if (inDefer && stack.length == 0) return st
@@ -11142,6 +11556,98 @@ ${
     // never-rebound local's survives into the loop (tDeferEnv's rule — fail
     // closed: a dropped narrowing makes a read unproven, never silently `T`),
     // and the same holds after it (a `break` leaves from anywhere in the body).
+    // s469 — a loop bound as a value (§49.6 rule 2): its binder's type is a
+    // tape with no grants whose element is the join of the lifted values'
+    // types ("values of different types give their union" — a union tape is
+    // not in the bootstrap's type system: refused by name). A written type
+    // is the binder's; every lifted value is checked against its element.
+    fn typeForStmt(env: TEnv, s: AStmt, f: AFor, ts0: TypeState) -> RTEnv {
+        const r: RTEnv = typeFor(env, s, f, ts0)
+        const b: AForBound | not = f.bound
+        if (b is not) return r
+        const sym: Sym | not = bindSym(bindFact(env.t.binds, b.nid))
+        if (sym is not) return r
+        let ts: TypeState = r.ts
+        const lifts: AExpr[] = liftOperands(f.body)
+        const annot: Type | not = annotOf(env.t, sym)
+        if (annot is given) {
+            const ae: Type | not = seqElem(annot)
+            if (ae is not) {
+                ts = report(ts, env, f.span, "E-TYPE-031", "`" + b.name + "` is written `" + typeName(annot) + "`, but a loop bound as a value is a tape (§49.6 rule 2: a fresh tape of the lifted values) — write `" + b.name + ": T[]`")
+            } else {
+                for (const e of lifts) {
+                    if (!hasErrIn(env.errs, e.span)) ts = checkValue(env, exprType0(ts, e.nid), ae, e.span, "a value the loop bound to `" + b.name + "` lifts", ts)
+                }
+            }
+            return keepTEnv(tWithLocal(r.env, sym, known(annot)), ts)
+        }
+        let vt: VType = VType.Unknown
+        let first = true
+        let allKnown = true
+        for (const e of lifts) {
+            const x: VType = exprType0(ts, e.nid)
+            if (knownOf(x) is not) allKnown = false
+            if (first) {
+                vt = x
+                first = false
+            } else {
+                vt = joinVT(vt, x)
+            }
+        }
+        const el: Type | not = knownOf(vt)
+        if (el is not) {
+            if (lifts.length > 1 && allKnown) ts = report(ts, env, f.span, "E-BOOTSTRAP-UNSUPPORTED", "the loop bound to `" + b.name + "` lifts values of different types — its value is a tape of their union (§49.6 rule 2), and a union tape is not in the bootstrap's type system; lift one type, or write the type: `const " + b.name + ": T[] = for …`")
+            return keepTEnv(tWithLocal(r.env, sym, VType.Unknown), ts)
+        }
+        const bvt: VType = known(Type.Seq(el, fixedSeq()))
+        return keepTEnv(tWithLocal(r.env, sym, bvt), contribute(ts, sym, bvt))
+    }
+
+    // A lifted value is typed as any expression; a lifted row as markup where
+    // it stands (§17.4).
+    fn typeLift(env: TEnv, w: ALift, ts: TypeState) -> TypeState {
+        return match w {
+            .LiftExpr(e: e) :> typeInterp(env, e, ts)
+            .LiftNode(n: n) :> typeNode(env, n, ts)
+        }
+    }
+
+    // The value operands of the `lift`s that append to THIS loop: through
+    // `if` / `given` blocks and statement loops, not into a nested bound loop
+    // (rule 7: it captures its own) or an arm block (refused there).
+    fn liftOperands(b: ABlock) -> AExpr[] {
+        let out: AExpr[] = []
+        for (const s of b.stmts) {
+            const k: AStmtK = s.k
+            const own: AExpr[] = match k {
+                .Lift(what: w) :> liftExprs(w)
+                .If(cond: c, thenB: tb, elseB: el) :> liftOperands(tb).concat(liftOperandsMaybe(el))
+                .Given(name: n, body: gb) :> liftOperands(gb)
+                .For(f: lf) :> nestedLiftOperands(lf)
+                .Eval(e: x) :> []
+                .Local(name: n) :> []
+                .Return(e: x) :> []
+                .EffectStmt(w: x) :> []
+                .Defer(body: x) :> []
+                .Fail(f: x) :> []
+                .Break(label: x) :> []
+                .Continue(label: x) :> []
+            }
+            out = out.concat(own)
+        }
+        return out
+    }
+
+    fn liftOperandsMaybe(b: ABlock | not) -> AExpr[] {
+        if (b is not) return []
+        return liftOperands(b)
+    }
+
+    fn nestedLiftOperands(f: AFor) -> AExpr[] {
+        if (f.bound is given) return []
+        return liftOperands(f.body)
+    }
+
     fn typeFor(env: TEnv, s: AStmt, f: AFor, ts0: TypeState) -> RTEnv {
         const entry: TEnv = tDeferEnv(env)
         const h: AForHead = f.head
@@ -11277,6 +11783,7 @@ ${
             .Fail(f: x) :> []
             .Break(label: x) :> []
             .Continue(label: x) :> []
+            .Lift(what: x) :> []
         }
     }
 
@@ -11321,6 +11828,7 @@ ${
                 .Interp(e: x) :> not
                 .DeclNode(d: d) :> not
                 .Css(c: c) :> not
+                .Gather(f: x) :> not
                 .Effect(w: w) :> not
             }
             if (e is given) {
@@ -11497,6 +12005,12 @@ ${
     }
 
     // `parent`: the tag of the nearest enclosing element ("" — none).
+    fn staticExecRows(t: Tables, file: string, rows: ANode[], parent: string) -> Diag[] {
+        let out: Diag[] = []
+        for (const r of rows) { out = out.concat(staticExecIn(t, file, r, parent)) }
+        return out
+    }
+
     fn staticExecIn(t: Tables, file: string, n: ANode, parent: string) -> Diag[] {
         const k: ANodeK = n.k
         return match k {
@@ -11505,6 +12019,7 @@ ${
             .Interp(e: x) :> []
             .DeclNode(d: d) :> []
             .Css(c: c) :> []
+            .Gather(f: lf) :> staticExecRows(t, file, gatherRows(lf), parent)
             .Effect(w: w) :> []
         }
     }
@@ -11669,6 +12184,7 @@ ${
             .DeclNode(d: d) :> addDiag(st, env.file, d.span, "E-BOOTSTRAP-UNSUPPORTED", "a declaration inside markup is not in bootstrap slice M2")
             .Css(c: c) :> st
             .Effect(w: w) :> resolveEffect(env, w, st)
+            .Gather(f: lf) :> resolveTier0(env, n, lf, st)                 // s469 (§17.4)
         }
     }
 
@@ -11840,6 +12356,7 @@ ${
         const k: ANodeK = n.k
         return match k {
             .Css(c: c) :> true
+            .Gather(f: x) :> false
             .Text(text: t) :> false
             .Elem(e: e) :> false
             .Interp(e: e) :> false
@@ -11856,6 +12373,7 @@ ${
             .Interp(e: e) :> false
             .DeclNode(d: d) :> false
             .Css(c: c) :> false
+            .Gather(f: x) :> false
             .Effect(w: w) :> false
         }
     }
@@ -12754,7 +13272,7 @@ ${
     fn declEnv(g: Globals, ds: DeclSrc, inRenders: boolean) -> Env {
         return { g: g, file: ds.file, ctx: CtxK.InDecl(ds.info.sym, ds.isProgram), locals: [], rows: [],
                  handles: handlesOwnedBy(g, ds.info.nid), inRenders: inRenders, narrows: [], present: [],
-                 host: HostCtx.HostNo, own: "", inEffect: false, fx: noFailCtx() }
+                 host: HostCtx.HostNo, own: "", inEffect: false, fx: noFailCtx(), lift: LiftCtx.NoLift }
     }
 
     fn phaseB(g: Globals, st0: AS) -> AS {
@@ -12786,7 +13304,7 @@ ${
             if (fs.info.pure) host = HostCtx.HostPure
             const fx: FailCtx = { inFn: true, fnName: fs.info.name, failable: fs.info.failable, err: fs.info.err, defer: false, subject: -1, whole: -1, fnRef: -1, wholeWhat: "",
                                   fnSym: fs.info.sym.id, serverOwn: fs.info.serverOwn, stmtCall: -1 }
-            let env: Env = { g: g, file: fs.info.file, ctx: CtxK.InFn, locals: [], rows: [], handles: hs, inRenders: false, narrows: [], present: [], host: host, own: "", inEffect: false, fx: fx }
+            let env: Env = { g: g, file: fs.info.file, ctx: CtxK.InFn, locals: [], rows: [], handles: hs, inRenders: false, narrows: [], present: [], host: host, own: "", inEffect: false, fx: fx, lift: LiftCtx.NoLift }
             const fte: TypeEnv = { stubs: g.te.stubs, declNames: g.te.declNames, declSyms: g.te.declSyms, file: fs.info.file }
             for (const p of fs.f.params) {
                 const rs: RSym = mint(st, p.name)
@@ -13138,6 +13656,19 @@ ${
         return out
     }
 
+    fn boundNameOf(f: AFor) -> string {
+        const b: AForBound | not = f.bound
+        if (b is not) return ""
+        return b.name
+    }
+
+    // s469 — a Tier-0 loop's rows are markup: each row's handler blocks.
+    fn rowsRedeclares(file: string, rows: ANode[]) -> Diag[] {
+        let out: Diag[] = []
+        for (const r of rows) { out = out.concat(nodeHandlerRedeclares(file, r)) }
+        return out
+    }
+
     fn redeclareDiag(file: string, name: string, span: ASpan, first: ASpan, isParam: boolean, inFn: boolean) -> Diag {
         let what: string = "a declaration"
         if (isParam) what = "a parameter"
@@ -13154,9 +13685,10 @@ ${
             .Return(e: e) :> ""
             .If(cond: c) :> ""
             .Given(name: n) :> ""
-            .For(f: lf) :> ""
+            .For(f: lf) :> boundNameOf(lf)          // s469: a bound loop binds its name (§49.6)
             .Break(label: x) :> ""
             .Continue(label: x) :> ""
+            .Lift(what: x) :> ""
             .EffectStmt(w: w) :> ""
             .Defer(body: b) :> ""
             .Fail(f: x) :> ""
@@ -13171,6 +13703,7 @@ ${
             .For(f: lf) :> forNestedBlocks(lf)
             .Break(label: x) :> []
             .Continue(label: x) :> []
+            .Lift(what: w) :> liftBlocks(w)
             .EffectStmt(w: w) :> []
             .Eval(e: e) :> allExprBlocks(e)                 // s451 (Ue): a handling form's arm blocks
             .Local(name: n, init: i) :> allExprBlocks(i)
@@ -13244,6 +13777,7 @@ ${
             .Interp(e: x) :> []
             .DeclNode(d: d) :> []
             .Css(c: c) :> []
+            .Gather(f: lf) :> blockRedeclares(file, lf.body, [], false).concat(rowsRedeclares(file, gatherRows(lf)))
             // s449: an effect body is a block like an inline handler's
             .Effect(w: w) :> blockRedeclares(file, w.body, [], false)
         }
@@ -13661,6 +14195,7 @@ ${
             .For(f: lf) :> loopNeverCompletes(lf)
             .Break(label: x) :> false
             .Continue(label: x) :> false
+            .Lift(what: x) :> false
             .EffectStmt(w: w) :> false
             .Defer(body: b) :> false
             .Fail(f: x) :> true                  // s451 (Ue): `fail` leaves the function (§19.3.2)
@@ -13837,6 +14372,7 @@ ${
             .For(f: lf) :> aliased(exprsEffects(forExprs(lf)), al).concat(blockEffects(lf.body, al))
             .Break(label: x) :> []
             .Continue(label: x) :> []
+            .Lift(what: w) :> aliased(exprsEffects(liftExprs(w)), al)
             .EffectStmt(w: w) :> []              // registers nothing where it stands (refused there) and writes nothing
             .Defer(body: b) :> blockEffects(b, al)   // s451: runs at the block's exit — its writes are the function's
             .Fail(f: f) :> aliased(exprsEffects(failExprs(f)), al)
@@ -16272,9 +16808,10 @@ ${
             .Return(e: e) :> keepTEnv(env, typeReturn(env, e, ts))
             .If(cond: c, thenB: tb, elseB: el) :> typeIf(env, c, tb, el, ts)
             .Given(name: n, subject: sub, body: b) :> typeGiven(env, s, sub, b, ts)
-            .For(f: lf) :> typeFor(env, s, lf, ts)
+            .For(f: lf) :> typeForStmt(env, s, lf, ts)
             .Break(label: x) :> keepTEnv(env, ts)
             .Continue(label: x) :> keepTEnv(env, ts)
+            .Lift(what: w) :> keepTEnv(env, typeLift(env, w, ts))       // s469 (§49.6.2)
             .EffectStmt(w: w) :> keepTEnv(env, ts)     // refused by the binder (E-LIFECYCLE-016 / E-BOOTSTRAP-UNSUPPORTED)
             .Defer(body: b) :> keepTEnv(env, typeBlock(tDeferEnv(env), b, ts))   // s451: typed at its exit, not where it stands
             .Fail(f: f) :> keepTEnv(env, typeFail(env, s, f, ts))               // s451 (Ue)
@@ -16793,6 +17330,7 @@ ${
             .DeclNode(d: d) :> ts
             .Css(c: c) :> ts
             .Effect(w: w) :> typeEffect(env, w, ts)
+            .Gather(f: lf) :> typeFor(env, forAsStmt(lf), lf, ts).ts      // s469 (§17.4)
         }
     }
 
@@ -17389,6 +17927,7 @@ ${
             .For(f: lf) :> scanBlock(cx, lf.body, scanExprs(cx, forExprs(lf), acc))
             .Break(label: x) :> acc
             .Continue(label: x) :> acc
+            .Lift(what: w) :> scanExprs(cx, liftExprs(w), acc)
             .EffectStmt(w: w) :> acc                // refused where it stands (E-LIFECYCLE-016 / E-BOOTSTRAP-UNSUPPORTED)
             .Defer(body: b) :> scanBlock(cx, b, acc)
             .Fail(f: f) :> scanExprs(cx, failExprs(f), acc)
@@ -18203,7 +18742,18 @@ ${
             .DeclNode(d: d) :> []          // refused where it stands
             .Css(c: c) :> []
             .Effect(w: w) :> []            // a lifecycle body — the effect rule's (§6.7.4), not a value position
+            .Gather(f: lf) :> tier0Positions(t, lf, n.span, file)
         }
+    }
+
+    // s469 — a Tier-0 `${ for … lift … }` is a render expression (§6.15 item 3:
+    // "including … a Tier-0 `${ for … lift … }` block (§17.4)"): its loop —
+    // head, body and lifted values — and every render position of its rows.
+    fn tier0Positions(t: Tables, f: AFor, span: ASpan, file: string) -> ValuePos[] {
+        const loop: ABlock = { nid: -1, span: f.span, stmts: [forAsStmt(f)] }
+        let out: ValuePos[] = [{ what: "the `" + "$" + "{ for … }` loop", vk: ValueKind.RenderKind, v: AAttrValue.Braced(loop), span: span, file: file }]
+        for (const r of gatherRows(f)) { out = out.concat(nodePositions(t, r, file)) }
+        return out
     }
 
     fn interpPos(x: AExpr, span: ASpan, file: string) -> ValuePos {
@@ -18872,12 +19422,19 @@ ${
         return st
     }
 
+    fn holdInRows(file: string, rows: ANode[], declared: string[], shadow: string[], st0: AS) -> AS {
+        let st: AS = st0
+        for (const r of rows) { st = holdInNode(file, r, declared, shadow, st) }
+        return st
+    }
+
     fn holdInNode(file: string, n: ANode, declared: string[], shadow: string[], st: AS) -> AS {
         const k: ANodeK = n.k
         return match k {
             .Elem(e: e) :> holdInElem(file, e, declared, shadow, st)
             .DeclNode(d: d) :> holdInDecl(file, d, declared, shadow, st)
             .Css(c: c) :> st
+            .Gather(f: lf) :> holdInRows(file, gatherRows(lf), declared, shadow, st)
             .Text(text: t) :> st
             .Interp(e: x) :> st
             .Effect(w: w) :> st
@@ -18929,6 +19486,7 @@ ${
             .Interp(e: x) :> []
             .DeclNode(d: d) :> []
             .Css(c: c) :> []
+            .Gather(f: lf) :> kidEffectSpans(gatherRows(lf))
         }
     }
 
@@ -19034,6 +19592,7 @@ ${
             .For(f: lf) :> sqlsInExprs(forExprs(lf)).concat(sqlsInBlock(lf.body))
             .Break(label: x) :> []
             .Continue(label: x) :> []
+            .Lift(what: w) :> sqlsInExprs(liftExprs(w))
             .EffectStmt(w: w) :> sqlsInBlock(w.body)
             .Defer(body: b) :> sqlsInBlock(b)
             .Fail(f: f) :> sqlsInExprs(failExprs(f))
@@ -19152,6 +19711,7 @@ ${
             .For(f: lf) :> readsInExprs(t, forExprs(lf)).concat(readsInBlock(t, lf.body))
             .Break(label: x) :> []
             .Continue(label: x) :> []
+            .Lift(what: w) :> readsInExprs(t, liftExprs(w))
             .EffectStmt(w: w) :> []
             .Defer(body: b) :> readsInBlock(t, b)
             .Fail(f: f) :> readsInExprs(t, failExprs(f))
@@ -19237,6 +19797,7 @@ ${
             .For(f: lf) :> domsInExprs(t, forExprs(lf)).concat(domsInBlock(t, lf.body))
             .Break(label: x) :> []
             .Continue(label: x) :> []
+            .Lift(what: w) :> domsInExprs(t, liftExprs(w))
             .EffectStmt(w: w) :> []
             .Defer(body: b) :> domsInBlock(t, b)
             .Fail(f: f) :> domsInExprs(t, failExprs(f))
@@ -19493,6 +20054,7 @@ ${
             .Effect(w: w) :> withSites(acc, sqlsInBlock(w.body), scope)
             .DeclNode(d: d) :> dbsInDecl(g, file, d, scope, acc)
             .Css(c: c) :> acc
+            .Gather(f: lf) :> dbsInRows(g, file, gatherRows(lf), scope, withSites(acc, sqlsInStmt(forAsStmt(lf)), scope))
             .Text(text: t) :> acc
         }
     }
@@ -19500,6 +20062,12 @@ ${
     // An element: its attribute values stand in the scope around it; a `<db
     // src=>` is the scope of its children (registered once — a program's
     // supplier is registered with the program).
+    fn dbsInRows(g: Globals, file: string, rows: ANode[], scope: int, acc0: RDbs) -> RDbs {
+        let acc: RDbs = acc0
+        for (const r of rows) { acc = dbsInNode(g, file, r, scope, acc) }
+        return acc
+    }
+
     fn dbsInElem(g: Globals, file: string, e: AElem, scope: int, acc0: RDbs) -> RDbs {
         let acc: RDbs = acc0
         for (const a of e.attrs) { acc = withSites(acc, sqlsInValue(a.value), scope) }
@@ -19584,6 +20152,7 @@ ${
             .Interp(e: x) :> not
             .DeclNode(d: d) :> not
             .Css(c: c) :> not
+            .Gather(f: x) :> not
             .Effect(w: w) :> not
         }
     }
@@ -19761,7 +20330,14 @@ ${
             .Interp(e: x) :> []
             .DeclNode(d: d) :> []
             .Css(c: c) :> []
+            .Gather(f: lf) :> rowActions(lf, file)      // s469: a row's handlers (the loop is a value position)
         }
+    }
+
+    fn rowActions(f: AFor, file: string) -> ActionPos[] {
+        let out: ActionPos[] = []
+        for (const r of gatherRows(f)) { out = out.concat(nodeActions(r, file)) }
+        return out
     }
 
     fn elemActions(e: AElem, file: string) -> ActionPos[] {
@@ -20629,6 +21205,7 @@ ${
             .For(f: lf) :> loopNeverCompletes(lf)
             .Break(label: x) :> false
             .Continue(label: x) :> false
+            .Lift(what: x) :> false
             .Eval(e: x) :> false
             .Local(name: n) :> false
             .EffectStmt(w: w) :> false
@@ -20657,6 +21234,7 @@ ${
             .For(f: lf) :> forRetCalls(t, lf)
             .Break(label: x) :> []
             .Continue(label: x) :> []
+            .Lift(what: w) :> liftRetCalls(t, w)
             .Eval(e: x) :> retCallsExpr(t, x)
             .Local(name: n, init: i) :> retCallsExpr(t, i)
             .EffectStmt(w: w) :> []
@@ -20682,6 +21260,12 @@ ${
     }
 
     // ... a `return` inside a handling form's arm block in `e`, at any depth.
+    fn liftRetCalls(t: Tables, w: ALift) -> int[] {
+        let out: int[] = []
+        for (const e of liftExprs(w)) { out = out.concat(retCallsExpr(t, e)) }
+        return out
+    }
+
     fn retCallsExpr(t: Tables, e: AExpr) -> int[] {
         let out: int[] = []
         for (const b of exprBlocks(e)) { out = out.concat(retCallsBlock(t, b)) }
@@ -20739,7 +21323,7 @@ ${
             if (i < st.diags.length) out = out.concat([st.diags[i]])
             i = i + 1
         }
-        return { facts: st.facts, diags: out, nextSym: st.nextSym, annots: st.annots, bad: st.bad, effects: st.effects, pend: [] }
+        return { facts: st.facts, diags: out, nextSym: st.nextSym, annots: st.annots, bad: st.bad, effects: st.effects, pend: [], lifts: st.lifts }
     }
 
     fn decide(s: Summary, r: PendRule) -> Diag[] {
@@ -20988,6 +21572,7 @@ ${
             .For(f: lf) :> planLoop(cx, lf, ps)
             .Break(label: x) :> ps
             .Continue(label: x) :> ps
+            .Lift(what: w) :> planExprs(cx, liftExprs(w), ps)
             .EffectStmt(w: w) :> ps
             .Defer(body: b) :> planDeferBody(cx, b, ps)
             .Fail(f: f) :> planExprs(cx, failExprs(f), ps)
@@ -21116,6 +21701,7 @@ ${
             .For(f: lf) :> forHeadExprs(lf)
             .Break(label: x) :> []
             .Continue(label: x) :> []
+            .Lift(what: w) :> liftExprs(w)
             .EffectStmt(w: w) :> []
             .Defer(body: b) :> []
             .Fail(f: f) :> failExprs(f)
@@ -21139,6 +21725,7 @@ ${
                 .For(f: lf) :> defersIn(lf.body)
                 .Break(label: x) :> []
                 .Continue(label: x) :> []
+                .Lift(what: x) :> []
                 .Eval(e: x) :> []
                 .Local(name: n) :> []
                 .Return(e: x) :> []
@@ -21613,6 +22200,7 @@ ${
                 .For(f: lf) :> forReturnSites(lf)
                 .Break(label: x) :> []
                 .Continue(label: x) :> []
+                .Lift(what: w) :> liftReturnSites(w)
                 .Eval(e: x) :> returnSitesIn(x)
                 .Local(name: n, init: i) :> returnSitesIn(i)
                 .EffectStmt(w: w) :> []
@@ -21630,6 +22218,12 @@ ${
     }
 
     // `return`s inside a handling form's arm blocks in an expression.
+    fn liftReturnSites(w: ALift) -> ReturnSite[] {
+        let out: ReturnSite[] = []
+        for (const e of liftExprs(w)) { out = out.concat(returnSitesIn(e)) }
+        return out
+    }
+
     fn returnSitesIn(e: AExpr | not) -> ReturnSite[] {
         if (e is not) return []
         let out: ReturnSite[] = []
@@ -21912,6 +22506,7 @@ ${
             const k: ANodeK = n.k
             const c: ACss | not = match k {
                 .Css(c: c) :> c
+                .Gather(f: x) :> not
                 .Elem(e: e) :> not
                 .Text(text: t) :> not
                 .Interp(e: x) :> not
@@ -21921,6 +22516,7 @@ ${
             const e: AElem | not = match k {
                 .Elem(e: e) :> e
                 .Css(c: c) :> not
+                .Gather(f: x) :> not
                 .Text(text: t) :> not
                 .Interp(e: x) :> not
                 .DeclNode(d: d) :> not
@@ -21928,8 +22524,23 @@ ${
             }
             if (c is given) a = cssBlock(g, prog, at, file, c, a)
             if (e is given) a = cssNodes(g, prog, below, file, e.kids, a)
+            // s469: a Tier-0 loop's rows stand where the loop does (§17.4)
+            const gf: AFor | not = gatherOfNode(k)
+            if (gf is given) a = cssNodes(g, prog, at, file, gatherRows(gf), a)
         }
         return a
+    }
+
+    fn gatherOfNode(k: ANodeK) -> AFor | not {
+        return match k {
+            .Gather(f: lf) :> lf
+            .Elem(e: x) :> not
+            .Css(c: x) :> not
+            .Text(text: x) :> not
+            .Interp(e: x) :> not
+            .DeclNode(d: x) :> not
+            .Effect(w: x) :> not
+        }
     }
 
     fn cssDeclRenders(d: ADecl) -> AElem[] {
@@ -22020,7 +22631,7 @@ ${
     }
 
     export fn analyze(files: FileAst[], entry: string) -> TypedProgram {
-        const st0: AS = { facts: noFacts(), diags: [], nextSym: 0, annots: [], bad: { params: [], fields: [] }, effects: [], pend: [] }
+        const st0: AS = { facts: noFacts(), diags: [], nextSym: 0, annots: [], bad: { params: [], fields: [] }, effects: [], pend: [], lifts: [] }
         const ra: RGlobals = phaseA(files, entry, st0)
         let st: AS = checkImports(files, ra.g, ra.st)
         st = phaseB(ra.g, st)
@@ -22178,6 +22789,12 @@ ${
     // (formsIn): inlines, Stars, uses, `<each>` rows, state-view arms, slot
     // content. A form the author wrote `novalidate` on is gated all the same
     // (S447 gate-calls item 1: "with or without `novalidate`").
+    fn gatesInRows(cx: CarryCx, rows: ANode[]) -> GateInfo[] {
+        let out: GateInfo[] = []
+        for (const r of rows) { out = out.concat(gatesIn(cx, r)) }
+        return out
+    }
+
     fn gatesIn(cx: CarryCx, n: ANode) -> GateInfo[] {
         const k: ANodeK = n.k
         return match k {
@@ -22186,6 +22803,7 @@ ${
             .Interp(e: x) :> []
             .DeclNode(d: d) :> []
             .Css(c: c) :> []
+            .Gather(f: lf) :> gatesInRows(cx, gatherRows(lf))
             .Effect(w: w) :> []
         }
     }
@@ -22412,6 +23030,12 @@ ${
     }
 
     // The `<form>` elements under `n` that carry lowered attributes.
+    fn formsInRows(cx: CarryCx, rows: ANode[]) -> int[] {
+        let out: int[] = []
+        for (const r of rows) { out = out.concat(formsIn(cx, r)) }
+        return out
+    }
+
     fn formsIn(cx: CarryCx, n: ANode) -> int[] {
         const k: ANodeK = n.k
         return match k {
@@ -22420,6 +23044,7 @@ ${
             .Interp(e: x) :> []
             .DeclNode(d: d) :> []
             .Css(c: c) :> []
+            .Gather(f: lf) :> formsInRows(cx, gatherRows(lf))
             .Effect(w: w) :> []
         }
     }
@@ -22467,6 +23092,7 @@ ${
             .Interp(e: x) :> not
             .DeclNode(d: d) :> not
             .Css(c: c) :> not
+            .Gather(f: x) :> not
             .Effect(w: w) :> not
         }
     }

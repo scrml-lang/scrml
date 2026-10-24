@@ -1,0 +1,16 @@
+{
+  "id": "acceptance-loop-value-counted",
+  "description": "`for (let i = 0; i < 5; i = i + 2)` lifts 0, 2, 4 → 34.",
+  "language-version": "1.0",
+  "spec": "§49.6 · §49.3.2",
+  "rationale": "§49.6 rule 1: \"A `for` with any of the four heads may be bound\".",
+  "expect": {
+    "codes": [],
+    "domAnchored": [
+      {
+        "selector": "#o",
+        "text": "34"
+      }
+    ]
+  }
+}

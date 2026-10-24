@@ -1,0 +1,15 @@
+{
+  "id": "acceptance-loop-value-neg-lifts-nothing",
+  "description": "E-LOOP-007: the loop bound to `xs` has no `lift`.",
+  "language-version": "1.0",
+  "spec": "§49.4.4 · §49.9",
+  "rationale": "§49.4.4: \"A `for` bound by a `for-binding` … SHALL contain a `lift` reachable on some path, or the compiler SHALL reject it with E-LOOP-007.\"",
+  "expect": {
+    "codes": [
+      "E-LOOP-007"
+    ],
+    "codeCounts": {
+      "E-LOOP-007": 1
+    }
+  }
+}

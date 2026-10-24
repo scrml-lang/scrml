@@ -31,8 +31,8 @@
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 265 | 5 |
-| MED | 685 | 8 |
-| LOW | 488 | 0 |
+| MED | 684 | 8 |
+| LOW | 489 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
 
@@ -516,11 +516,34 @@ The bootstrap's parser accepts both spellings and reports `E-MATCH-ARM-SEPARATOR
 
 **RESOLVED S469 (s469-boot-semicolons, #1510).** The bootstrap now reports every arm after the first that does not follow a `,` (`compiler/self-host-v2/parse.scrml` `parseArms` / `missingArmComma`), including a `!{}` list separated only by leading `|` (probed s469-spec-small: `!{ | .A :> 0 | .B :> 1 }` → E-MATCH-ARM-SEPARATOR; `!{ | .A :> 0, | .B :> 1 }` compiles with two W-ARM-PIPE-LEGACY). SPEC §18.2 / §19.4.5 / the §34 row updated.
 
-### g-bootstrap-loop-value-form-s469 — in the BOOTSTRAP, a `for` bound as a value (§49.6, `const xs = for (…) { lift e }`) and the Tier-0 `${ for … lift }` in markup are REFUSED (E-BOOTSTRAP-UNSUPPORTED) — `NEW S469; MED; open (refused, fails closed)`
+### g-bootstrap-loop-value-form-s469 — in the BOOTSTRAP, a `for` bound as a value (§49.6, `const xs = for (…) { lift e }`) and the Tier-0 `${ for … lift }` in markup are REFUSED (E-BOOTSTRAP-UNSUPPORTED) — `NEW S469; MED; RESOLVED S469 (s469-boot-loop-value-form)`
 
-<!-- @gap id=g-bootstrap-loop-value-form-s469 sev=MED status=open locus=compiler/self-host-v2/parse.scrml(parseKeywordPrimary: a `for` where a value stands is refused and read past as a loop) prov=brief:s469-boot-loops-1(value form optional for the first loop slice);spec:§49.6 -->
+<!-- @gap id=g-bootstrap-loop-value-form-s469 sev=MED status=resolved resolved-by=s469-boot-loop-value-form locus=compiler/self-host-v2/parse.scrml(parseKeywordPrimary: a `for` where a value stands is refused and read past as a loop) prov=brief:s469-boot-loops-1(value form optional for the first loop slice);spec:§49.6 -->
 
 The first loop slice (s469-boot-loops-1) builds the four heads as STATEMENTS. §49.6 rules 1-9 (any head, a fresh immutable tape, `break` keeps the prefix, the bound loop is a `break` boundary — E-LOOP-005 — and E-LOOP-007 for a bound loop that lifts nothing) are owed. The value positions §6.15 lists as owed when it lands (Tier-0 `for … lift`) are owed with it.
+
+**RESOLVED S469 (s469-boot-loop-value-form).** `const|let x[: T] = [label:] for (…) { … lift e; … };` from every head (parse `parseForBinding`; analyze `resolveForStmt` / `typeForStmt`): a fresh tape with no grants (`fixedSeq`, so a `let` binder is rebindable only under a written `T[replace]`), in lift order; `[]` when nothing is lifted at run time; `break` keeps the prefix; a labelled `break` / `continue` past the bound loop is **E-LOOP-005** (the loop-control pass's WALL frame); a bound loop with no `lift` reachable on some path is **E-LOOP-007**; a `lift` goes to the NEAREST bound loop through `if`s and statement loops, a nested binding captures its own. The Tier-0 `${ for … }` in a free-text markup body (§17.4) renders its lifted rows (markup or text; `parseTier0` + `lex.scrml lexTier0`, which pauses before each lifted element so it is read as markup), re-run when a cell the loop reads changes; it is a §6.15 render position (E-VALUE-WRITES-STATE / -UNPROVEN / E-VALUE-SERVER-CALL) and E-LOOP-007 applies. A `lift` in a bare `function` outside any bound loop is **E-SYNTAX-002** (§10.4, §49.6.2). Core `Stmt.Gather` / `Stmt.Lift` / `View.Gather`, judged by check.scrml **C20** (nearest-Gather lifts, ≥ 1 Lift, the jump boundary, no Return / Fail / write in a Tier-0 loop). Gates: `slice-m4/value-form-s469.test.js`, `acceptance/loop-value/*` (19: 12 run, 6 exact codes, 1 UNSUPPORTED target). What is still refused is `g-bootstrap-loop-value-form-residue-s469`.
+
+### g-bootstrap-loop-value-form-residue-s469 — what the BOOTSTRAP's value form (§49.6) and Tier-0 loop (§17.4) still refuse or do not build: a union tape, a derived / cell declaration bound to a loop, a `lift` inside an arm block of a bound loop, lifted markup outside a Tier-0 loop, `return` / `fail` in a Tier-0 loop, a Tier-0 loop sharing its `${ }`, keyed rows, W-EACH-PROMOTABLE — `NEW S469; LOW; open (refused, fails closed)`
+
+<!-- @gap id=g-bootstrap-loop-value-form-residue-s469 sev=LOW status=open locus=compiler/self-host-v2/analyze.scrml(resolveLift, typeForStmt, resolveTier0);compiler/self-host-v2/parse.scrml(parseTier0, parseLift, parseKeywordPrimary) prov=dispatch:s469-boot-loop-value-form;spec:§49.6;spec:§17.4 -->
+
+Each is refused with a named diagnostic (E-BOOTSTRAP-UNSUPPORTED unless stated), never approximated:
+- **a union tape** — lifts of different types (§49.6 rule 2: "values of different types give their union"): the bootstrap's type system has no general union (`opener/union-multi-unsupported`'s wall). `acceptance/loop-value/union-unsupported` is the target case.
+- **a derived / cell declaration bound to a loop** (§49.6 rule 9, `const <ids> = for (o of @orders) { … };` — "derived from §6.6; not separately ruled") — the declaration parser does not read a loop as an initializer.
+- **a `lift` inside a `match` / `!{}` arm block of a bound loop's body** — HALF built (S469 review): a VALUE-position arm block's `lift` already takes the §18.5 reading (it is the arm's value — `const v = match e { .A :> { lift y; } … }` and `f() !{ _ :> { lift 0; } }` inside a bound loop run), while a STATEMENT-position arm block's `lift` is refused. The open reading is only the statement position: §49.6 rule 7 sends a `lift` "through … `match` arms and `!{}` arms" to the bound loop, while §18.5 makes a value-position arm block's `lift` the arm's value (and refuses a statement-position one). Owner question (below).
+- **lifted markup outside a Tier-0 loop** (`const rows = for (…) { lift <li/>; };` in a function) — markup is not a value in the bootstrap's logic, and a function body is lexed as logic, so the element's text cascades after the refusal (the refusal is the first report).
+- **`return` / `fail` in a Tier-0 loop** — §49.6 rule 6 names a function's exits; a render position has none, and the SPEC names no code.
+- **a Tier-0 loop that is not the sole content of its `${ }`** (§49.4.4 "the sole content"); **an operand / argument / `return`-operand `for`** — §49.4.4 calls it "a syntax error" and names no code.
+- **keyed reconciliation** (§17.4b `key`, refused with the head surface — `g-bootstrap-loop-head-surface-s469`): a Tier-0 loop re-renders every row when a cell it reads changes.
+- **W-EACH-PROMOTABLE** (§17.4, an info lint on a mechanically promotable Tier-0 site) is not emitted.
+- A bound loop's binder is typed at RESOLVE time only when every lifted value's type is known there (a tape literal's element is not, so `for (y of [1, 2]) { lift y; }` gives a binder whose `.length` is refused — the loop-binder limitation of the first loop slice).
+
+### g-bootstrap-rule-transition-into-payload-variant-s469 — in the BOOTSTRAP, a `rule=` transition INTO a payload variant (`!{ _ e :> @s = e }` where `e` is `.Box(3)`) compiled clean and had NO EFFECT at run time: the edge check compared the payload value `{ variant, data }` with the edge table's tags (`.Dot → .[object Object]` refused), and the state view tested the cell by identity (`=== "Box"`) — `NEW S469 (pre-existing); LOW; RESOLVED S469 (s469-boot-loop-value-form)`
+
+<!-- @gap id=g-bootstrap-rule-transition-into-payload-variant-s469 sev=LOW status=resolved resolved-by=s469-boot-loop-value-form locus=compiler/self-host-v2/slice-m1/runtime/runtime.js(checkEdge — `table[from].includes(to)` with `to` a payload object);compiler/self-host-v2/lower.scrml(stateView — EqPrim of the cell and a Variant literal) prov=review:#1530(s469-boot-tape-grants-2) -->
+
+Found by the #1530 review: the program compiled with zero diagnostics and a clean checkCore, and every assertion that it "works" was a compile-clean assertion. Executed (s469-boot-loop-value-form): after `grow()`, `@s` stayed `Dot` and the runtime threw `E-ENGINE-INVALID-TRANSITION: .Dot → .[object Object] is not an edge of this field's rule= graph`. **RESOLVED S469:** `rt.checkEdge` judges the variant TAG of both sides (a payload value `{ variant, data }` by its `variant`; the graph is over variants), so the edge `.Dot → .Box` admits `Box(3)` and a non-edge is still refused naming the tags; `lower.scrml` `stateView` tests a PAYLOAD variant with a Core variant pattern (`variantIs` → a Match printed as `.variant === "Box"`), a unit variant with EqPrim as before. Gated on the RUNTIME effect — `slice-m4/rule-payload-s469.test.js`: the cell's value after the write and the arm the state view shows (`dot` → `box` → `dot` → `box`), and the refusal of a payload write that is not an edge.
 
 ### g-bootstrap-loop-wait-and-defer-s469 — in the BOOTSTRAP, a loop cannot wait or defer: a server call / waiting call / `?{}` in a loop head or body, a `defer` inside a loop body, and a loop inside a deferred body are REFUSED (E-BOOTSTRAP-UNSUPPORTED; check.scrml C19 re-checks the Core) — `NEW S469; MED; open (refused, fails closed)`
 

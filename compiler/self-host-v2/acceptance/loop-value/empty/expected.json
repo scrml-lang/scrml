@@ -1,0 +1,16 @@
+{
+  "id": "acceptance-loop-value-empty",
+  "description": "A loop that runs zero times, and one whose lifts never run: both `[]`.",
+  "language-version": "1.0",
+  "spec": "§49.6 rule 4",
+  "rationale": "§49.6 rule 4: \"A loop that runs zero times, or whose lifts never run, evaluates to `[]`.\"",
+  "expect": {
+    "codes": [],
+    "domAnchored": [
+      {
+        "selector": "#o",
+        "text": "0"
+      }
+    ]
+  }
+}

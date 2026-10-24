@@ -1,0 +1,16 @@
+{
+  "id": "acceptance-loop-value-strings",
+  "description": "A tape of strings: `a!,b!`.",
+  "language-version": "1.0",
+  "spec": "§49.6 rule 2",
+  "rationale": "§49.6 rule 2: \"Its element type is the type of the lifted values\".",
+  "expect": {
+    "codes": [],
+    "domAnchored": [
+      {
+        "selector": "#o",
+        "text": "a!,b!"
+      }
+    ]
+  }
+}
