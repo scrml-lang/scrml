@@ -1662,17 +1662,47 @@ interface WholeBinderAuditCtx {
   filePath: string;
   typeRegistry: Map<string, ResolvedType>;
   typeDecls: ASTNodeLike[];
-  /** This file's function declarations by name; null = declared more than once. */
-  fnDecls: Map<string, ASTNodeLike | null>;
   sourceText: string | null;
-  /** Functions whose parameter is being audited (recursion guard). */
-  seenFns: Set<string>;
+  /** Function declarations whose parameter is being audited (recursion guard). */
+  seenFns: Set<object>;
   /**
-   * Does `log` name the §20.6 builtin here (no binding of that name in scope)? Passing the error
-   * to the builtin `log(…)` is allowed: it renders the value to the console and returns nothing,
-   * so no payload reaches the program's control flow.
+   * S470 — the LEXICAL scope the audited text runs in: the handled call's scope, or, inside an
+   * audited callee, the scope that holds the callee's declaration. Every name the audit follows
+   * (a callee, `log`) is resolved from here, never by a file-wide name lookup.
    */
-  logIsBuiltin: boolean;
+  scope: Scope;
+  /**
+   * S470 — the declaration trees between the audited text and `scope`, innermost first: the arm
+   * body, each nested body the audit re-parses (a raw match arm, a template payload), an audited
+   * callee's parameters and body. A name declared ANYWHERE in one of them is a local binding the
+   * audit does not follow (refused), whatever `scope` holds.
+   */
+  frames: unknown[];
+  /**
+   * S470 — the ONE function declaration `name` denotes when looked up from `from` (the type
+   * checker's own by-binding resolver, `resolveFnBinding`), and the scope that holds it; null when
+   * the name is not provably exactly one function declaration there (a shadowing local, a
+   * parameter, an import, a name declared later, more than one declaration, nothing).
+   */
+  resolveFn: (name: string, from: Scope) => { decl: ASTNodeLike; scope: Scope } | null;
+  /** S470 — is `log` declared or imported anywhere in this file (then it is never the builtin)? */
+  fileDeclaresLog: boolean;
+}
+
+/** S470 — does a local declaration tree between the audited text and its scope declare `name`? */
+function auditFramesDeclare(ctx: WholeBinderAuditCtx, name: string): boolean {
+  return ctx.frames.some((f) => auditDeclaresName(f, name));
+}
+
+/**
+ * Does `log` name the §20.6 builtin where the audited text runs? Passing the error to the builtin
+ * `log(…)` is allowed: it renders the value to the console and returns nothing, so no payload
+ * reaches the program's control flow. S470 — recomputed at every audited body from THAT body's
+ * own frames and scope (a callee's `log` parameter or local is not the builtin), and refused
+ * outright when the file declares or imports a `log` anywhere.
+ */
+function auditLogIsBuiltin(ctx: WholeBinderAuditCtx): boolean {
+  return !ctx.fileDeclaresLog && !auditFramesDeclare(ctx, "log") && !ctx.scope.lookup("log");
 }
 
 interface WholeBinderRefusal { code: "E-TYPE-004" | "E-EQ-001" | "E-TYPE-028" | "E-TYPE-031"; what: string }
@@ -1825,8 +1855,9 @@ function auditWholeErrorBinderText(text: string, binder: string, ctx: WholeBinde
   }
   const roots = auditParseBody(text, ctx.filePath);
   if (roots === null) return { code: "E-TYPE-031", what: `the arm body could not be read` };
-  // A `log` declared inside the arm is not the builtin.
-  if (ctx.logIsBuiltin && auditDeclaresName(roots, "log")) ctx = { ...ctx, logIsBuiltin: false };
+  // S470 — the arm body is the innermost declaration frame: a name it declares (`const check = …`,
+  // `function log(…)`) shadows whatever the handled call's scope holds.
+  ctx = { ...ctx, frames: [roots, ...ctx.frames] };
   const st = { accounted: 0, refusal: null as WholeBinderRefusal | null };
   auditWholeBinderTree(roots, binder, ctx, st);
   if (st.refusal) return st.refusal;
@@ -1852,7 +1883,8 @@ function auditWholeBinderTree(
     const roots = auditParseBody(text, ctx.filePath);
     if (roots === null) { refuse("E-TYPE-031", "a nested body could not be read"); return; }
     const before = st.accounted;
-    auditWholeBinderTree(roots, binder, ctx, st);
+    // S470 — a re-parsed nested body is a declaration frame of its own.
+    auditWholeBinderTree(roots, binder, { ...ctx, frames: [roots, ...ctx.frames] }, st);
     if (!st.refusal && st.accounted - before !== n) refuse("E-TYPE-031", `a use of \`${binder}\` here is not one the compiler can check`);
   };
   // A re-declaration of the binder's name (a local, a parameter, a destructured name, an arm binder,
@@ -2016,12 +2048,28 @@ function auditBinderCallArgs(callee: unknown, idx: number[], ctx: WholeBinderAud
     const en = auditEnumOf(c.object.name, ctx);
     if (en) return ctor(en, c.property);
   }
-  if (c && c.kind === "ident" && c.name === "log" && ctx.logIsBuiltin && !ctx.fnDecls.has("log")) return null;
+  if (c && c.kind === "ident" && c.name === "log" && auditLogIsBuiltin(ctx)) return null;
   if (c && c.kind === "ident" && typeof c.name === "string") {
-    const fn = ctx.fnDecls.get(c.name);
-    if (!fn) return { code: "E-TYPE-031", what: `the error is passed to \`${c.name}\`, which is not a function of this file declared once` };
-    if (ctx.seenFns.has(c.name)) return { code: "E-TYPE-031", what: `the error is passed to \`${c.name}\` recursively` };
+    // S470 — the callee is the binding the call NAMES, resolved lexically: a name a local frame
+    // declares (the arm, a nested body, an audited callee's parameters / body) is a local binding
+    // the audit does not follow; otherwise it must resolve, from this text's scope, to exactly one
+    // function declaration (resolveFnBinding). Anything else is refused — fail closed.
+    if (auditFramesDeclare(ctx, c.name)) {
+      return { code: "E-TYPE-031", what: `the error is passed to \`${c.name}\`, a local binding here, which the compiler does not follow` };
+    }
+    const res = ctx.resolveFn(c.name, ctx.scope);
+    if (!res) return { code: "E-TYPE-031", what: `the error is passed to \`${c.name}\`, which here is not provably one function declaration of this file` };
+    const fn = res.decl;
+    if (ctx.seenFns.has(fn)) return { code: "E-TYPE-031", what: `the error is passed to \`${c.name}\` recursively` };
     const params = (Array.isArray(fn.params) ? fn.params : []) as Array<{ name?: string; typeAnnotation?: string }>;
+    // S470 — the callee's body runs in ITS lexical scope (the scope that holds its declaration),
+    // under its own parameters and body as frames; `log` and every further callee are resolved
+    // there, not at the call site.
+    const paramNames = params.map((p) => (p && typeof p.name === "string" ? p.name : "")).filter((s) => s);
+    const fnCtx: WholeBinderAuditCtx = {
+      ...ctx, scope: res.scope,
+      frames: [{ kind: "__audit-params", boundNames: paramNames }, fn.params, fn.body],
+    };
     const span = fn.span as Span | undefined;
     const src = ctx.sourceText;
     for (const i of idx) {
@@ -2045,8 +2093,8 @@ function auditBinderCallArgs(callee: unknown, idx: number[], ctx: WholeBinderAud
       const bodyText = fnText.slice(bodyStart);
       const n = countWordUses(bodyText, prm.name);
       const st = { accounted: 0, refusal: null as WholeBinderRefusal | null };
-      ctx.seenFns.add(c.name);
-      try { auditWholeBinderTree(fn.body, prm.name, ctx, st); } finally { ctx.seenFns.delete(c.name); }
+      ctx.seenFns.add(fn);
+      try { auditWholeBinderTree(fn.body, prm.name, fnCtx, st); } finally { ctx.seenFns.delete(fn); }
       if (st.refusal) return { code: st.refusal.code, what: `in \`${c.name}\`, ${st.refusal.what}` };
       if (st.accounted !== n) return { code: "E-TYPE-031", what: `in \`${c.name}\`, a use of \`${prm.name}\` is not one the compiler can check` };
     }
@@ -11279,21 +11327,47 @@ function annotateNodes(
   const _fileTypeDeclsForErrors: ASTNodeLike[] = ((fileAST.typeDecls as ASTNodeLike[] | undefined)
     ?? ((fileAST.ast as FileAST | undefined)?.typeDecls as ASTNodeLike[] | undefined) ?? []);
   // S469 r6 (HIGH-A) — the context of a whole-error binder audit (auditWholeErrorBinderText).
-  let _wholeBinderFnDecls: Map<string, ASTNodeLike | null> | null = null;
+  // S470 — `log` declared or imported ANYWHERE in the file (a function, a local, a parameter, an
+  // import): then no `log(…)` the audit meets is trusted as the builtin.
+  let _wholeBinderFileDeclaresLog: boolean | null = null;
+  const wholeBinderFileDeclaresLog = (): boolean => {
+    if (_wholeBinderFileDeclaresLog !== null) return _wholeBinderFileDeclaresLog;
+    let found = allFnDecls.some((d) => d.name === "log") || (importedFnDecls?.has("log") ?? false);
+    const seen = new WeakSet<object>();
+    const visit = (x: unknown): void => {
+      if (found || !x || typeof x !== "object" || seen.has(x as object)) return;
+      seen.add(x as object);
+      if (Array.isArray(x)) { for (const y of x) visit(y); return; }
+      const r = x as Record<string, unknown>;
+      if (typeof r.name === "string" && r.name === "log" && r.kind !== "ident" && r.kind !== "shorthand") { found = true; return; }
+      if (r.bindName === "log") { found = true; return; }
+      for (const k of ["boundNames", "payloadBindings", "names"]) if (Array.isArray(r[k]) && (r[k] as unknown[]).includes("log")) { found = true; return; }
+      if (Array.isArray(r.specifiers) && (r.specifiers as Array<{ local?: unknown }>).some((s) => s && s.local === "log")) { found = true; return; }
+      for (const k of Object.keys(r)) { if (k === "span" || k.startsWith("__")) continue; visit(r[k]); }
+    };
+    visit(fileTopLevelNodes);
+    _wholeBinderFileDeclaresLog = found;
+    return found;
+  };
+  // S470 — a callee name resolved BY BINDING (the checker's own `resolveFnBinding`, the lexical
+  // resolver the failable-call checks use): exactly one function declaration, or null.
+  const wholeBinderResolveFn = (name: string, from: Scope): { decl: ASTNodeLike; scope: Scope } | null => {
+    const r = resolveFnBinding(name, from, true);
+    if (r.k !== "decl" || r.decls.length !== 1) return null;
+    const d = r.decls[0];
+    if (!d || d.kind !== "function-decl") return null;
+    // A same-scope non-function binding of the name (a `const` beside the declaration) is not provably it.
+    const entry = r.scope.bindings.get(name);
+    if (entry && entry.kind !== "function" && r.scope !== scopeChain.global) return null;
+    return { decl: d, scope: fnDeclScope.get(d) ?? r.scope };
+  };
   const wholeBinderAuditCtx = (en: EnumType | null): WholeBinderAuditCtx => {
-    if (!_wholeBinderFnDecls) {
-      _wholeBinderFnDecls = new Map();
-      for (const d of allFnDecls) {
-        const nm = String(d.name ?? "");
-        if (!nm) continue;
-        _wholeBinderFnDecls.set(nm, _wholeBinderFnDecls.has(nm) ? null : d);
-      }
-    }
     const src = (fileAST as { _sourceText?: unknown })._sourceText ?? ((fileAST as { ast?: { _sourceText?: unknown } }).ast?._sourceText);
     return {
-      en, filePath, typeRegistry, typeDecls: _fileTypeDeclsForErrors, fnDecls: _wholeBinderFnDecls,
+      en, filePath, typeRegistry, typeDecls: _fileTypeDeclsForErrors,
       sourceText: typeof src === "string" ? src : null, seenFns: new Set(),
-      logIsBuiltin: !_wholeBinderFnDecls.has("log") && !(importedFnDecls?.has("log") ?? false) && !scopeChain.lookup("log"),
+      scope: scopeChain.current, frames: [], resolveFn: wholeBinderResolveFn,
+      fileDeclaresLog: wholeBinderFileDeclaresLog(),
     };
   };
   const wholeBinderRefusalError = (why: WholeBinderRefusal, binder: string, en: EnumType | null, span: Span): TSError => {
