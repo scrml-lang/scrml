@@ -1,0 +1,30 @@
+// RULED S469 ("Not a tape position"): an enum payload is a value, and grants do not apply
+// inside it. A whole write, `persist="local"` (cross-tab sync) and `reset` of an enum whose
+// payload holds an append-only tape are all accepted.
+<program>
+    type E:enum = { Dot, A(xs: int[free, append]) }
+    let <e:E=.Dot persist="local" key="acc.payload.e"/>
+    let <shown:string=""/>
+    function mk()! E {
+        fail .A([1, 2, 3]);
+    }
+    function label() -> string {
+        return match @e {
+            .Dot :> "dot",
+            .A(xs) :> "a"
+        };
+    }
+    function grow() {
+        mk() !{ _ x :> @e = x };
+        @shown = label();
+    }
+    function clear() {
+        reset(@e);
+        @shown = label();
+    }
+    <main>
+        <button id="go" onclick=grow()>go</button>
+        <button id="clear" onclick=clear()>clear</button>
+        <p id="out">${@shown}</p>
+    </main>
+</program>

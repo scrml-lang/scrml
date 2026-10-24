@@ -49865,6 +49865,8 @@ write, wherever the tape is held, wherever it came from, and however the write i
    **Inference never invents a grant.** An un-annotated binding (`let xs = []`, `const ys = load()`) holds a tape
    whose inferred type carries no grants, so it is immutable. To mutate it, write the grants in its type.
 
+   **An enum payload is a value, not a tape position (S469).** Grants do not apply inside an enum variant's payload, a struct held in a payload included: a whole write of the enum, a cross-tab sync of a `persist="local"` cell included, is not judged against a payload tape's grants. *(Provenance: ruling:user-voice-scrml.md S469 "⭐ RULED — render-position server calls, plain-`let` guards, enum-payload tapes, `<onTransition if=>`", item 3 — *"Not a tape position"*.)*
+
 2. **Values from the host.** A sequence that arrives from host JavaScript carries **no grants**. That covers the
    result of a host function or method (`Object.keys(o)`, `s.split(",")`, `JSON.parse(text)`), a value out of a
    `_{ }` foreign slice (§23), and an `asIs` value (§14.7). It becomes mutable only by being given a **tape type
