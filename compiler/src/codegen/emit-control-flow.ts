@@ -17,7 +17,7 @@ import { fnTextHasOwnAwait } from "./js-async-analysis.ts";
 import { tenantFloorTouchesSql } from "./rewrite.js";
 import { SQL_ERROR_VARIANT_FIELDS, sqlQueryExprShape, unhandledFailureThrow, handledSqlGuardInner, SQL_ATTEMPT_FN } from "./sql-attempt.ts";
 import { HOIST_VALUES_PLACEHOLDER } from "../hoist-sql-shape.ts";
-import { programStatementRefusal, sqlHoldsOneStatement } from "./sql-one-statement-guard.ts";
+import { programStatementRefusal, sqlHoldsOneStatement, currentLoweringSpan } from "./sql-one-statement-guard.ts";
 import { literalSpans, armPiecesCover } from "../arm-list-split.ts";
 
 // ---------------------------------------------------------------------------
@@ -4531,25 +4531,103 @@ export function emitVariantBindingPrelude(
       : (_variantFields?.get(variantName) ?? null);
   const ambiguous = fromSubject || errorContext ? false : (_variantFieldCollisions?.has(variantName) ?? false);
 
-  const statements: string[] = [];
-  for (let i = 0; i < bindings.length; i++) {
-    const b = bindings[i];
-    if (b.discard) continue;
-    let fieldName: string | null = b.sourceField;
-    if (!fieldName) {
-      // Positional — resolve against the declared field order.
-      if (fieldSchema && !ambiguous && i < fieldSchema.length) {
-        fieldName = fieldSchema[i];
-      } else {
-        statements.push(
-          `/* §1a: cannot positionally bind '${b.localName}' — variant '${variantName}' field order unknown${ambiguous ? " (ambiguous across enums)" : ""} */`,
-        );
-        continue;
-      }
-    }
-    statements.push(`const ${b.localName} = ${tmpVar}.data.${fieldName};`);
+  // S469 — one binder planner for every match lowering (structured here, text-lowered in
+  // rewrite.ts). An unresolvable binder is a compile-time refusal, never a comment + an unbound
+  // name (a runtime ReferenceError) or a silently `undefined` field.
+  const plan = planPayloadBinders(variantName, arm.binding, bindings, fieldSchema, ambiguous, errorContext === true);
+  if ("refusal" in plan) {
+    recordRefusedLowering(new CGError(plan.refusal.code, plan.refusal.message, currentLoweringSpan() as object), null);
+    return "";
   }
+  const statements = plan.binds.map((b) =>
+    `const ${b.local} = ${tmpVar}.data${b.field === null ? "" : "." + b.field};`);
   return statements.length > 0 ? statements.join(" ") + " " : "";
+}
+
+/** A payload binder resolved to the `.data` field it reads (`null` = the whole `.data`). */
+export interface PlannedPayloadBind { local: string; field: string | null }
+export interface PayloadBinderRefusal { code: "E-TYPE-021" | "E-TYPE-022" | "E-TYPE-027"; message: string }
+
+/** `. Circle ( r )` (token-joined arm text) → `.Circle(r)`, for a diagnostic. */
+export function compactArmPatternText(text: string): string {
+  return String(text).replace(/\s+/g, " ").trim()
+    .replace(/\.\s+(?=[A-Za-z_$])/g, ".")
+    .replace(/\s*\(\s*/g, "(").replace(/\s*\)/g, ")")
+    .replace(/\s*,\s*/g, ", ").replace(/\s*:\s*/g, ": ");
+}
+
+/**
+ * S469 (g-server-return-match-failable-subject-unawaited-s469, binder half) — resolve a variant
+ * arm's payload binders to `.data` fields, by SPEC §18.7, for every match lowering: the
+ * structured value / statement / declaration lowerings (`emitVariantBindingPrelude`) and the
+ * text lowering (rewrite.ts `rewriteMatchExpr`).
+ *
+ *   - mixed positional + named binders → E-TYPE-021 (§18.7 "Mixed positional + named form is
+ *     FORBIDDEN");
+ *   - a known field list (`schema`, not ambiguous): positional binders bind left-to-right in
+ *     declaration order and must number exactly the fields (E-TYPE-021: "Positional arity
+ *     mismatch (too few or too many bindings) SHALL be a compile error"); a named binder must
+ *     name a declared field (E-TYPE-022);
+ *   - no known field list: a named binder reads the field it names (as before); a single
+ *     positional binder in an ERROR context (a failable result / `!{}` subject whose variant has
+ *     no field schema here — an ambient CPS `NetworkError` / `ServerError`, an imported error
+ *     enum) binds the whole `.data`, exactly as the `!{}` reader does (emit-logic.ts
+ *     `emitGuardedArmBinding`) and as `fail` writes a single unknown-schema argument; any other
+ *     positional binder is E-TYPE-027 — the compiler cannot tell which enum's field order to use.
+ *
+ * Before: an unresolvable positional binder emitted `/* §1a: cannot positionally bind … *\/` and
+ * left the name unbound (a ReferenceError when the arm used it), an extra binder was silently
+ * dropped the same way, and a misspelled named binder read `undefined`.
+ */
+export function planPayloadBinders(
+  variantName: string,
+  bindingText: string,
+  bindings: PayloadBinding[],
+  schema: string[] | null,
+  ambiguous: boolean,
+  errorContext: boolean,
+): { binds: PlannedPayloadBind[] } | { refusal: PayloadBinderRefusal } {
+  const pattern = compactArmPatternText(`.${variantName}(${bindingText})`);
+  const named = bindings.filter((b) => b.sourceField !== null);
+  const known = schema !== null && !ambiguous;
+  const fieldList = known ? schema!.map((f) => `\`${f}\``).join(", ") : "";
+  if (named.length > 0 && named.length < bindings.length) {
+    return { refusal: { code: "E-TYPE-021", message:
+      `E-TYPE-021: the arm pattern \`${pattern}\` mixes positional and named payload binders. ` +
+      `Pick one form (§18.7): positional binds every field in declaration order; named (\`field: local\`) binds the fields it names.` } };
+  }
+  const binds: PlannedPayloadBind[] = [];
+  if (named.length > 0) {
+    for (const b of bindings) {
+      if (known && !schema!.includes(b.sourceField!)) {
+        return { refusal: { code: "E-TYPE-022", message:
+          `E-TYPE-022: the arm pattern \`${pattern}\` names the payload field \`${b.sourceField}\`, but \`${variantName}\` ` +
+          (schema!.length > 0 ? `declares ${fieldList}` : "declares no payload fields") + ` (§18.7). Name a declared field.` } };
+      }
+      if (!b.discard) binds.push({ local: b.localName, field: b.sourceField });
+    }
+    return { binds };
+  }
+  if (known) {
+    if (bindings.length !== schema!.length) {
+      return { refusal: { code: "E-TYPE-021", message:
+        `E-TYPE-021: the arm pattern \`${pattern}\` gives ${bindings.length} positional binder${bindings.length === 1 ? "" : "s"}, but ` +
+        `\`${variantName}\` has ${schema!.length} payload field${schema!.length === 1 ? "" : "s"}` + (schema!.length > 0 ? ` (${fieldList})` : "") +
+        `. Positional binding binds every field, in declaration order (§18.7); to bind some of them, use named binders (\`field: local\`).` } };
+    }
+    bindings.forEach((b, i) => { if (!b.discard) binds.push({ local: b.localName, field: schema![i] }); });
+    return { binds };
+  }
+  if (errorContext && bindings.length === 1) {
+    if (!bindings[0].discard) binds.push({ local: bindings[0].localName, field: null });
+    return { binds };
+  }
+  if (bindings.every((b) => b.discard)) return { binds };
+  return { refusal: { code: "E-TYPE-027", message:
+    `E-TYPE-027: the arm pattern \`${pattern}\` binds the payload by position, but the compiler cannot tell which ` +
+    `enum's \`${variantName}\` the subject holds` + (ambiguous ? ` (two enums in scope declare \`${variantName}\` with different fields)` : "") +
+    `, so it does not know the field order (§18.7, §18.13). Use named binders — \`.${variantName}(<field>: <local>)\` — ` +
+    `or give the subject a declared enum type.` } };
 }
 
 // ---------------------------------------------------------------------------

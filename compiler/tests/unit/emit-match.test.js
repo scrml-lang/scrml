@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach } from "bun:test";
 import { emitMatchExpr } from "../../src/codegen/emit-control-flow.js";
 import { rewriteMatchExpr, rewriteEnumVariantAccess, rewriteIsOperator } from "../../src/codegen/rewrite.js";
 import { resetVarCounter } from "../../src/codegen/var-counter.ts";
+import { resetRefusedLowerings, drainRefusedLowerings } from "../../src/codegen/refused-lowering-errors.ts";
 import * as acorn from "acorn";
 
 // Reset the var counter before each test so generated variable names are predictable.
@@ -43,11 +44,13 @@ describe("emitMatchExpr — .Variant => arms (new scrml-native syntax)", () => {
     expect(result).toContain('else if (_scrml_match_1 === "East") return 90');
   });
 
-  it("emits .Variant(binding) => arm — with no variant registry, binding resolves positionally via a warning comment", () => {
+  it("emits .Variant(binding) => arm — with no variant registry, a positional binder is REFUSED (E-TYPE-027)", () => {
     // S22 §1a slice 2: when the match emitter lacks a file-scoped variant
     // registry (unit-test callers here don't populate it), positional bindings
-    // cannot resolve their field names. The emitter inserts a comment so the
-    // output is still valid JS and unit variants like `.Point` keep working.
+    // cannot resolve their field names. S469: that is a compile-time refusal
+    // (E-TYPE-027), never a comment that leaves `r` unbound (a ReferenceError
+    // when the arm reads it). Unit variants like `.Point` keep working.
+    resetRefusedLowerings();
     const node = {
       header: "shape",
       body: [
@@ -61,8 +64,9 @@ describe("emitMatchExpr — .Variant => arms (new scrml-native syntax)", () => {
     // Variant comparison uses the __tag var.
     expect(result).toMatch(/_scrml_tag_\d+ === "Circle"/);
     expect(result).toMatch(/_scrml_tag_\d+ === "Point"/);
-    // Positional binding without a registry falls back to a diagnostic comment.
-    expect(result).toContain("cannot positionally bind 'r'");
+    // Positional binding without a registry is refused, not commented out.
+    expect(result).not.toContain("cannot positionally bind");
+    expect(drainRefusedLowerings().map((e) => e.code)).toEqual(["E-TYPE-027"]);
   });
 
   it("emits .Variant(binding) => arm — with a registry, positional binding destructures from .data.<field>", () => {
