@@ -569,8 +569,12 @@ describe("§11 integration — migrate --fix reaches the SQL-lift + handle class
     lift <span>$\{label}</span>
   }
 
-  <div onclick=loadContacts()>$\{pinnedPure()}</>
+  <div onclick=loadContacts()>contacts</>
+  <button onclick=pinnedPure()>pinned</button>
 </program>`;
+    // S470 — \`pinnedPure\` is called from a handler. It was rendered (\`<div …>\${pinnedPure()}</>\`):
+    // a server call in a render position is E-VALUE-SERVER-CALL (§13.7), so the "still compiles"
+    // step of this migrate test failed for a reason unrelated to the strip classes.
     const path = stage("integration-4class.scrml", source);
 
     // dry-run first: the Migration-4 counter must report exactly 2 strips
