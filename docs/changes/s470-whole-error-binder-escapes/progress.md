@@ -53,3 +53,39 @@
 - Code label: the S470 refusals use E-TYPE-031 (this audit's existing code) with "impl#1 limitation, not a
   language rule" in the message; no new §34 code minted. If a labelled E-IMPL1-* code is wanted, that is a SPEC
   §34 row + ruling.
+
+## Fix round 1 (review of frozen d015e3e34; probes ~/.cache/scrml/review/s470-l1/)
+- RULING (bryan, S470): escape 3 -> "(B) Type the binders (Recommended)". The (A) constructor refusal is NOT
+  landed. Escape 3 stays KNOWN_FAIL here. POINTER: lane (B) — type match / `!{}` payload binders from their
+  declared field type (§18 "The type of each bound variable SHALL be the declared type of the corresponding
+  field") and refuse a non-`.variant` member read on an enum-typed value (E-TYPE-004) — is a SEPARATE
+  type-system lane the PA dispatches after this one lands (same file, cannot run concurrently). It closes
+  escape 3, `g-impl1-enum-value-member-read-unchecked-s470` (reviewer Q4), and lets the S470 refusals of
+  `.Wrapped(i) :> match i {…}` / `i is .Bad` (reviewer Q3 / Q7) be lifted.
+- 2026-10-24 reproduced on d015e3e34 with the reviewer's run.mjs + shapes1–5: D1/D2/D4/D6 FAIL all 4 sides;
+  R3 FAIL fullstack; F1/F2/F4–F7/L3/L4 FAIL tool; Q4 FAIL all sides (lane B); Q1 / P2 refused; D3 crash.
+- #1 FIXED — an audited callee's parameter defaults are audited (each default naming the parameter is parsed
+  with auditParseBody and walked with the same audit + use count; a non-text default is refused).
+- #2 FIXED — the global scope obeys exactly-one-declaration: the file's top level is counted (functions,
+  const / let / cell / bare decls, destructured names, `export const|let`, imports); != 1 -> refused.
+- #3 FIXED — a `!{}` inside a function written as a value is audited: at every `checkLogicExprIdents` site
+  (the site that already walks such bodies for the ruled-form check), each function-expression / block-arrow
+  body is read with the existing check-time reader `escapeHatchBodyStatements` and each `!{}` in it is
+  audited through the same `auditWholeBinderArms` the statement visitor now calls, with the function's params
+  and body as frames. No new reader. (A body that reader cannot read is skipped: left to the checks that refuse it.)
+- #4 FIXED — the enum-holding payload refusal checks only the BOUND fields. Found while fixing: the
+  `match-arm-block` `payloadBindings` list flattens a named form (`.V(code: _, inner: i)` reads `["_","i"]`,
+  while the lowering binds `i = data.inner`), so positions are read from the arm's pattern TEXT (`binding`),
+  never from `payloadBindings`; a positional binder also checks the field it is named after (legacy
+  name-as-field binding); an unread part checks every field. Q3 / Q7 refusals stay (lane B lifts them).
+- #5 FIXED — a function declared directly in an audited callee's body (the only declaration of the name in
+  every frame) resolves through the scope the checker registered it on (`fnDeclScope`); P2 compiles again.
+- #8 FILED (not fixed, per instruction) — NEW gap `g-impl1-destructured-param-crashes-whole-error-audit-s470`
+  (LOW): `function f({ reason }: AuthErr)` passed `e` crashes the compiler ("name.replace is not a function",
+  `countWordUses` on a non-string param name in `auditBinderCallArgs`); base and head. Fails closed (no output).
+- #6 / #7: no action.
+- reviewer probes after the fix (shapes1–5, 4 sides): only FAILs left are Q4 x4 (lane B). Every change vs
+  d015e3e34 is FAIL -> PASS-REFUSED (the fixes), PASS-500 -> PASS-REFUSED (server F*), PASS-REFUSED -> PASS
+  (P2, Q1) or server R3 PASS -> PASS-REFUSED (the duplicate top-level name, now refused on every side).
+- pack: + r8 "5 D1/D2/D4/D6/R3/F1/F2" + "VALID Q1" (32 shapes), EXPECTED_SHAPE_COUNT 2048 -> 2080; full pack
+  2083 pass / 0 fail.
