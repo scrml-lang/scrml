@@ -4907,45 +4907,22 @@ function _emitLogicNode(node: any, opts: EmitLogicOpts): string {
     // M5-swap native pipeline reaches this arm too.
     case "ErrorEffect":
     case "error-effect": {
-      // A standalone `!{ … }` arm list (no guarded statement before it). The statement form
-      // `!{ tryBody } catch Type [as binding] { handler }` is refused at the AST (E-TRY-NOT-IN-SCRML,
-      // SPEC §19.1 — S470 ruling), so no node here carries a try body and none is emitted.
-      const arms: LogicArm[] = node.arms ?? [];
-      const errVar = genVar("_scrml_err");
-      const lines: string[] = [];
-
-      lines.push(`try {`);
-      lines.push(`} catch (${errVar}) {`);
-
-      if (arms.length > 0) {
-        let isFirst = true;
-        for (const arm of arms) {
-          if (arm.pattern === "_") {
-            lines.push(`  ${isFirst ? "" : "else "}{`);
-            if (arm.binding && arm.binding !== "_") {
-              lines.push(`    const ${arm.binding} = ${errVar};`);
-            }
-            const armCode = emitArmBody(arm, errVar, opts.machineBindings ?? null, opts);
-            for (const line of armCode.split("\n")) lines.push(`    ${line}`);
-            lines.push(`  }`);
-          } else {
-            const typeName = arm.pattern ?? "";
-            const cond = `${errVar} instanceof ${typeName} || (${errVar} && ${errVar}.type === ${JSON.stringify(typeName)})`;
-            lines.push(`  ${isFirst ? "if" : "else if"} (${cond}) {`);
-            if (arm.binding && arm.binding !== "_") {
-              lines.push(`    const ${arm.binding} = ${errVar};`);
-            }
-            const armCode = emitArmBody(arm, errVar, opts.machineBindings ?? null, opts);
-            for (const line of armCode.split("\n")) lines.push(`    ${line}`);
-            lines.push(`  }`);
-          }
-          isFirst = false;
-        }
-      } else {
-        lines.push(`  throw ${errVar};`);
+      // S470 (lane C review F6) — a `!{ … }` that reaches statement emission is attached to no
+      // expression: the statement form `!{ tryBody } catch …` is refused at the AST
+      // (E-TRY-NOT-IN-SCRML, SPEC §19.1) and a free-standing arm list is too (E-ERROR-014,
+      // §19.4.3: a handler is postfix). This used to emit `try { } catch (e) { arms }` — an empty
+      // try whose arms can never run. Any node that still gets here (a front end that did not
+      // refuse it) is refused, never lowered.
+      if (!(node as Record<string, unknown>).refused) {
+        recordRefusedLowering(new CGError(
+          "E-ERROR-014",
+          "E-ERROR-014: this `!{ … }` handler is attached to no expression, so no failure precedes it and none " +
+          "of its arms can run (§19.4.3: a handler follows the call it handles). Write it after the call — " +
+          "`call() !{ .Variant b :> … }`, or `call() !{ _ e :> … }` for the whole error.",
+          (node.span ?? {}) as object,
+        ), node as object);
       }
-      lines.push(`}`);
-      return lines.join("\n");
+      return "";
     }
 
     case "guarded-expr": {

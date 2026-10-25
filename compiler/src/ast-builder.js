@@ -7774,6 +7774,10 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       // as an expression-position `sql-ref` (emit-expr) with its full chain applied.
       const _sqlInOperandPosition = tok.kind === "BLOCK_REF" && tok.block?.type === "sql" && sqlOperandPositionAfter(lastTok, tok, ternaryColonTok);
       if (tok.kind === "BLOCK_REF" && depth === 0 && parts.length > 0 && (tok.block?.tagNesting ?? 0) === 0 && !_lastIsArrowGlyph && !_lastIsTernaryPunctInArrow && !_sqlInOperandPosition) break;
+      // S470 (lane C review F4) — a `!{ … } catch …` statement form collected INTO an expression (inside
+      // parentheses, a call argument, a literal) is consumed as text here, so the AST never builds it:
+      // refuse it at the collector (E-TRY-NOT-IN-SCRML), once per block.
+      if (tok.kind === "BLOCK_REF" && errorEffectIsStatementForm(tok.block)) reportTryFormOnce(tok, errors, filePath);
       // S89 §13.2 Sub-Phase B — `async function` / `async fn` decl-shape boundary.
       // When collectExpr sees `async` immediately followed by `function`/`fn` at
       // depth 0 (with optional `server` between), this is the start of an
@@ -8331,10 +8335,18 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
           // excluded, so `<count> = 3⏎@count` collected `3 @count` and acorn
           // dropped `@count` — a silent statement loss the body-top strictness
           // check (rejectBodyTopProse) would otherwise read as prose.
+          // S470 (lane C review F1) — a PREFIX-ONLY operator `!` on a later line after a value starts a
+          // new statement too: `a !b` is not an expression (`!` has no infix or postfix reading; `!=` /
+          // `!==` are their own tokens), so JS ASI ends the statement before it. Pre-fix `const st = {
+          // ok: true }⏎! { if (p != "secret") { st.ok = false } }` was collected as ONE declaration and
+          // the expression reader DROPPED the guard (rc 0, a wrong password logged in) — `! ( … )`,
+          // `! { … } catch …`, `!` + newline + `{` alike. Read as its own statement, a `!` statement is
+          // lowered or refused by the statement readers, never swallowed.
           const tokStartsStmt = (
             (tok.kind === "IDENT" && !WORD_INFIX_OPERATORS.has(tok.text)) ||
             (tok.kind === "KEYWORD" && !STMT_KEYWORDS.has(tok.text)) ||
-            tok.kind === "AT_IDENT"
+            tok.kind === "AT_IDENT" ||
+            (tok.kind === "PUNCT" && tok.text === "!")
           );
           if (lastEndsValue && tokStartsStmt) break;
           // S465 r3 — a `{` on a later line after a value OPENS A BARE BLOCK
@@ -12620,9 +12632,10 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
 
     // S470 (E-TRY-NOT-IN-SCRML, §19.1) — a `catch` at a statement start is never scrml: it is the arm
     // of a refused `!{ … } catch …` form whose `!{ … }` was read without it, or a bare catch clause.
-    if ((tok.kind === "KEYWORD" || tok.kind === "IDENT") && tok.text === "catch") {
+    if ((tok.kind === "KEYWORD" || tok.kind === "IDENT") && tok.text === "catch" && !_spacedBangReported.has(tok)) {
       errors.push(new TABError("E-TRY-NOT-IN-SCRML", TRY_CATCH_FORM_MESSAGE, tokenSpan(tok, filePath)));
     }
+    refuseSpacedBangBrace(tok, peek, errors, filePath);
 
     // BLOCK_REF — embedded child block
     if (tok.kind === "BLOCK_REF" && !sqlBlockRefHasTail(0)) {
@@ -12640,6 +12653,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
           // names — `.get()` and `.set()` tokenize as KEYWORD per tokenizer.ts:62.
           // (fix-lift-sql-chained-call-parallel-sites, S40 follow-up.)
           consumeSqlChainedCalls(childNode);
+          refuseDetachedHandler(childNode, errors);
           return childNode;
         }
       }
@@ -13293,6 +13307,9 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
           // boundary), which then became the loop BODY (E-PARSE-001). Inside the
           // parenthesized head it is part of the iterable expression.
           while (peek().kind === "BLOCK_REF" && peek().block && peek().block.type === "error-effect") {
+            // S470 (lane C review F4) — the `!{ … } catch …` statement form read into a loop head is
+            // refused like anywhere else (E-TRY-NOT-IN-SCRML); the head consumes the block as text.
+            if (errorEffectIsStatementForm(peek().block)) reportTryFormOnce(peek(), errors, filePath);
             iterExpr += " " + consume().text;
             if (!(peek().kind === "PUNCT" && peek().text === ")")) iterExpr += " " + collectExpr(")").expr;
           }
@@ -15898,6 +15915,9 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         // boundary), which then became the loop BODY (E-PARSE-001). Inside the
         // parenthesized head it is part of the iterable expression.
         while (peek().kind === "BLOCK_REF" && peek().block && peek().block.type === "error-effect") {
+          // S470 (lane C review F4) — the `!{ … } catch …` statement form read into a loop head is
+          // refused like anywhere else (E-TRY-NOT-IN-SCRML); the head consumes the block as text.
+          if (errorEffectIsStatementForm(peek().block)) reportTryFormOnce(peek(), errors, filePath);
           iterExpr += " " + consume().text;
           if (!(peek().kind === "PUNCT" && peek().text === ")")) iterExpr += " " + collectExpr(")").expr;
         }
@@ -16524,9 +16544,10 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
     // If the current token is a BLOCK_REF to error-effect AND we have a previous node,
     // replace the last node with a guarded-expr.
     // S470 (E-TRY-NOT-IN-SCRML, §19.1) — a `catch` at a statement start (see parseOneStatement).
-    if ((tok.kind === "KEYWORD" || tok.kind === "IDENT") && tok.text === "catch") {
+    if ((tok.kind === "KEYWORD" || tok.kind === "IDENT") && tok.text === "catch" && !_spacedBangReported.has(tok)) {
       errors.push(new TABError("E-TRY-NOT-IN-SCRML", TRY_CATCH_FORM_MESSAGE, tokenSpan(tok, filePath)));
     }
+    refuseSpacedBangBrace(tok, peek, errors, filePath);
 
     // g-impl1-bang-catch-try-body-cut-at-first-brace-s470 — not the statement form `!{ … } catch …`,
     // which is its own statement (gluing it to the previous node dropped its try body).
@@ -16562,6 +16583,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
           // names — `.get()` and `.set()` tokenize as KEYWORD per tokenizer.ts:62.
           // (fix-lift-sql-chained-call-parallel-sites, S40 follow-up.)
           consumeSqlChainedCalls(childNode);
+          refuseDetachedHandler(childNode, errors);
           nodes.push(childNode);
         }
       }
@@ -18775,6 +18797,9 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
           // boundary), which then became the loop BODY (E-PARSE-001). Inside the
           // parenthesized head it is part of the iterable expression.
           while (peek().kind === "BLOCK_REF" && peek().block && peek().block.type === "error-effect") {
+            // S470 (lane C review F4) — the `!{ … } catch …` statement form read into a loop head is
+            // refused like anywhere else (E-TRY-NOT-IN-SCRML); the head consumes the block as text.
+            if (errorEffectIsStatementForm(peek().block)) reportTryFormOnce(peek(), errors, filePath);
             iterExpr += " " + consume().text;
             if (!(peek().kind === "PUNCT" && peek().text === ")")) iterExpr += " " + collectExpr(")").expr;
           }
@@ -19765,6 +19790,14 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
   }
   _swallowed.finish();
   if (_covTrack) _covFlush();
+
+  // S470 (lane C review F4) — the `!{ … } catch …` statement form in ANY position of this body: a
+  // reader that consumed its block as text (a loop / `if` condition, a parenthesized operand) never
+  // built it, so it was never refused there. Every statement-form block this body's token run holds
+  // is refused once (E-TRY-NOT-IN-SCRML) — whichever reader reached it, or none.
+  for (const t of tokens) {
+    if (t && t.kind === "BLOCK_REF" && errorEffectIsStatementForm(t.block)) reportTryFormOnce(t, errors, filePath);
+  }
 
   return nodes;
 }
@@ -25962,7 +25995,10 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
         // handle a scrml failure (a failable call RETURNS its error), so the form only ever failed
         // open. It is detected from the splitter's record (`errorEffectExtent`), wherever it is
         // written, and refused once, at its `!{`; nothing of it is lowered.
-        errors.push(new TABError("E-TRY-NOT-IN-SCRML", TRY_CATCH_FORM_MESSAGE, span));
+        if (!_tryFormReported.has(block)) {
+          _tryFormReported.add(block);
+          errors.push(new TABError("E-TRY-NOT-IN-SCRML", TRY_CATCH_FORM_MESSAGE, span));
+        }
         return { id: ++counter.next, kind: "error-effect", arms: [], span, refused: true };
       } else {
         // Legacy `| ::Type e -> body` format
@@ -26054,6 +26090,73 @@ function bangStatementFormAt(tok, after, errors, filePath) {
   // Its `catch` is then refused where it starts a statement (one E-TRY-NOT-IN-SCRML, at the `catch`).
   if (after && (after.kind === "KEYWORD" || after.kind === "IDENT") && after.text === "catch") return true;
   return false;
+}
+
+/**
+ * S470 (lane C review F6) — a `!{ arms }` handler that is a statement of its own (the first
+ * statement of a body, a braceless `if (c) !{ … }`) is attached to no expression: §19.4.3 handlers
+ * are POSTFIX (`call() !{ .V b :> … }`). No failure precedes it, so none of its arms can run; it
+ * used to compile to `try { } catch (e) { arms }`. Refused with E-ERROR-014 (§19.4.3, the
+ * "attached to no expression" code). The statement form is already refused (E-TRY-NOT-IN-SCRML).
+ */
+function refuseDetachedHandler(node, errors) {
+  if (!node || node.kind !== "error-effect" || node.refused) return;
+  node.refused = true;
+  errors.push(new TABError(
+    "E-ERROR-014",
+    "E-ERROR-014: this `!{ … }` handler is attached to no expression, so no failure precedes it and none " +
+    "of its arms can run (§19.4.3: a handler follows the call it handles). Write it after the call — " +
+    "`call() !{ .Variant b :> … }`, or `call() !{ _ e :> … }` for the whole error — or `match` on the result.",
+    node.span && typeof node.span.line === "number" ? node.span : { start: 0, end: 0, line: 1, col: 1 },
+  ));
+}
+
+/**
+ * S470 (lane C review F1) — a statement that BEGINS `! {` (a `!`, then whitespace / a comment /
+ * a newline, then `{`) is the `!{ … }` block spelled with a gap: the splitter reads `!{` only when the
+ * two are adjacent, so this one reaches the statement readers as the tokens `!` `{` … . It is never a
+ * meaningful scrml statement (a negated object literal does nothing), and the writer meant the block:
+ * refuse it, located at the `!`, the way `!{` is — E-TRY-NOT-IN-SCRML when a `catch` follows its
+ * closing brace (the statement form), else E-ERROR-014 (a handler attached to no expression).
+ * Reported once per `!` token.
+ */
+const _spacedBangReported = new WeakSet();
+function refuseSpacedBangBrace(tok, peek, errors, filePath) {
+  if (!tok || tok.kind !== "PUNCT" || tok.text !== "!" || _spacedBangReported.has(tok)) return;
+  // A comment between the `!` and the `{` (or after the closing `}`) is skipped, as the reader skips it.
+  const next = (k) => { let j = k; while (peek(j) && peek(j).kind === "COMMENT") j++; return j; };
+  const openAt = next(1);
+  const open = peek(openAt);
+  if (!open || open.kind !== "PUNCT" || open.text !== "{") return;
+  _spacedBangReported.add(tok);
+  let depth = 0;
+  let k = openAt;
+  for (; k < 100000; k++) {
+    const t = peek(k);
+    if (!t || t.kind === "EOF") break;
+    if (t.kind === "PUNCT" && t.text === "{") depth++;
+    else if (t.kind === "PUNCT" && t.text === "}") { depth--; if (depth === 0) break; }
+  }
+  const after = peek(next(k + 1));
+  const isTry = !!after && (after.kind === "KEYWORD" || after.kind === "IDENT") && after.text === "catch";
+  if (isTry && after) _spacedBangReported.add(after);
+  errors.push(isTry
+    ? new TABError("E-TRY-NOT-IN-SCRML", TRY_CATCH_FORM_MESSAGE, tokenSpan(tok, filePath))
+    : new TABError(
+      "E-ERROR-014",
+      "E-ERROR-014: this `! { … }` (the `!{ … }` handler block, written with a gap) is attached to no expression, " +
+      "so no failure precedes it and none of its arms can run (§19.4.3: a handler follows the call it handles). " +
+      "Write it after the call — `call() !{ .Variant b :> … }`, or `call() !{ _ e :> … }` for the whole error.",
+      tokenSpan(tok, filePath),
+    ));
+}
+
+/** E-TRY-NOT-IN-SCRML for a statement-form BLOCK_REF a reader consumes as text — once per block. */
+const _tryFormReported = new WeakSet();
+function reportTryFormOnce(tok, errors, filePath) {
+  if (!tok || !tok.block || _tryFormReported.has(tok.block)) return;
+  _tryFormReported.add(tok.block);
+  errors.push(new TABError("E-TRY-NOT-IN-SCRML", TRY_CATCH_FORM_MESSAGE, tokenSpan(tok, filePath)));
 }
 
 /** The one message for the refused `!{ … } catch …` statement form (and a stray `catch`). */

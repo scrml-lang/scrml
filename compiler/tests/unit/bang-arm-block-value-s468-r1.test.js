@@ -151,21 +151,25 @@ function expectRefused(body, { arm = ".Denied", at = null, extra = "", alsoFaila
 // ---------------------------------------------------------------------------
 
 describe("A — a value-position arm the reader cannot read is a compile error on the client", () => {
-  test("`{ @note = \"d\"⏎ !yes }`", () => {
-    expectRefused(`const yes = true
+  // S470 (lane C round 3, review F1) — a line starting with `!` after a value is its OWN statement
+  // (JS ASI: `a !b` is no expression), so these arms are now READ: their last expression `!yes` /
+  // `!true` is the arm's value, and the wrong password is rejected. (They were refused while the
+  // collector glued the `!` line to the line above.)
+  test("`{ @note = \"d\"⏎ !yes }` — read: the arm yields `!yes`", async () => {
+    await expectRejectsWrong(`const yes = true
         const ok = check(p) !{ .Denied :> { @note = "d"
-            !yes } }`, { at: "! yes" });
+            !yes } }`);
   });
 
-  test("`{ @note = \"d\"⏎ !true }`", () => {
-    expectRefused(`const ok = check(p) !{ .Denied :> { @note = "d"
-            !true } }`, { at: "! true" });
+  test("`{ @note = \"d\"⏎ !true }` — read: the arm yields `!true`", async () => {
+    await expectRejectsWrong(`const ok = check(p) !{ .Denied :> { @note = "d"
+            !true } }`);
   });
 
-  test("an operand of an operator: `true && check(p) !{ … ⏎ !yes }`", () => {
-    expectRefused(`const yes = true
+  test("an operand of an operator: `true && check(p) !{ … ⏎ !yes }` — read", async () => {
+    await expectRejectsWrong(`const yes = true
         const ok = true && check(p) !{ .Denied :> { @note = "d"
-            !yes } }`, { at: "! yes" });
+            !yes } }`);
   });
 
   test("`{ @note = \"d\"⏎ 0 }`", () => {
@@ -184,10 +188,10 @@ describe("A — a value-position arm the reader cannot read is a compile error o
             0 } }`, { at: "0" });
   });
 
-  test("`{ plain(1)⏎ !yes }`", () => {
-    expectRefused(`const yes = true
+  test("`{ plain(1)⏎ !yes }` — read: the arm yields `!yes` (S470, see above)", async () => {
+    await expectRejectsWrong(`const yes = true
         const ok = check(p) !{ .Denied :> { plain(1)
-            !yes } }`, { at: "! yes" });
+            !yes } }`);
   });
 
   test("a line starting with `[` (joined to the line above, then refused by the strict reader)", () => {
@@ -313,15 +317,19 @@ describe("C — readable arms, statement positions and the server are unchanged"
       [`        let note = ""
         const ok = check(p) !{ .Denied :> { note = "d"
             0 } }`, "0"],
-      [`        let note = ""
-        const yes = true
-        const ok = check(p) !{ .Denied :> { note = "d"
-            !yes } }`, "! yes"],
     ]) {
       const out = compileSource(SERVER_LOGIN(body), "srv");
       expect(out.codes).toEqual(["E-STMT-UNEXPECTED-TOKEN"]);
       expect(out.errors[0].message).toContain(`no statement begins at \`${at}\``);
     }
+  });
+
+  test("the server READS a `⏎ !yes` arm tail as its own statement (S470: `!` after a value starts a statement)", () => {
+    const out = compileSource(SERVER_LOGIN(`        let note = ""
+        const yes = true
+        const ok = check(p) !{ .Denied :> { note = "d"
+            !yes } }`), "srv");
+    expect(out.codes).toEqual([]);
   });
 });
 

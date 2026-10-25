@@ -96,21 +96,18 @@ describe("block splitter — errorEffectExtent", () => {
     });
   }
 
-  test("each arm is recorded: header, handler open and close", () => {
+  test("each arm's start is recorded and the block ends after the last handler", () => {
     const { src, ee } = extentOf(`        !{ @ok = check(p) !{ _ :> false } } catch AuthErr as b { @ok = false } catch Error { @ok = false }`);
     const arms = ee.errorEffectExtent.arms;
     expect(arms.length).toBe(2);
-    expect(src.slice(arms[0].start, arms[0].open)).toBe("catch AuthErr as b ");
-    expect(src.slice(arms[1].start, arms[1].open)).toBe("catch Error ");
-    for (const a of arms) { expect(src[a.open]).toBe("{"); expect(src[a.close]).toBe("}"); }
-    expect(ee.span.end).toBe(arms[1].close + 1);
+    expect(src.slice(arms[0].start).startsWith("catch AuthErr as b {")).toBe(true);
+    expect(src.slice(arms[1].start).startsWith("catch Error {")).toBe(true);
+    expect(src.slice(ee.span.start, ee.span.end).endsWith("catch Error { @ok = false }")).toBe(true);
   });
 
   test("a handler is read by the same loop: a `}` in its string does not end it", () => {
     const { src, ee } = extentOf(FORM(`@ok = false`, `const s = "}"\n            @ok = false`));
-    const [a] = ee.errorEffectExtent.arms;
-    expect(src.slice(a.open + 1, a.close)).toContain(`const s = "}"`);
-    expect(src.slice(a.open + 1, a.close)).toContain(`@ok = false`);
+    expect(src.slice(ee.span.start, ee.span.end).endsWith(`const s = "}"\n            @ok = false }`)).toBe(true);
     expect(splitBlocks("t.scrml", src).errors.length).toBe(0);
   });
 
@@ -217,4 +214,66 @@ describe("compile — the statement form never compiles", () => {
     const r = compile(page(`        @ok = check(p) !{ _ e :> false }`));
     expect(r.codes).toEqual([]);
   });
+});
+
+// ---------------------------------------------------------------------------
+// 4. Review round (S470, lane C round 3).
+// ---------------------------------------------------------------------------
+describe("review F1 — a `!` statement after a value is never dropped silently", () => {
+  const page = (body) => `<msg> = ""\n\${\n    function login(p) {\n        const st = { ok: true }\n        ${body}\n        return st.ok ? "LOGGED IN" : "rejected"\n    }\n    function go(p) { @msg = login(p) }\n}\n<button onclick=go("wrong")>go</button>\n<p>\${@msg}</p>\n`;
+  for (const [name, body, code] of [
+    ["`! { … }`", `! { if (p != "secret") { st.ok = false } }`, "E-ERROR-014"],
+    ["`! { … } catch …`", `! { if (p != "secret") { st.ok = false } } catch AuthErr as b { st.ok = true }`, TRY],
+    ["`!` then a newline then `{ … }`", `!\n        { if (p != "secret") { st.ok = false } }`, "E-ERROR-014"],
+    ["`!` a comment `{ … }`", `! /* x */ { if (p != "secret") { st.ok = false } }`, "E-ERROR-014"],
+    ["`!` a tab `{ … }`", `!\t{ if (p != "secret") { st.ok = false } }`, "E-ERROR-014"],
+  ]) {
+    test(`${name} after a declaration is refused at the \`!\` (${code})`, () => {
+      const r = compile(page(body));
+      expect(r.codes).toContain(code);
+    });
+  }
+  test("`! ( … )` after a declaration is its own statement and RUNS (not dropped)", () => {
+    const r = compile(page(`! (st.ok = p == "secret")`));
+    expect(r.codes).toEqual([]);
+    const fn = r.clientJs.slice(r.clientJs.indexOf("function _scrml_login_"));
+    expect(fn).toMatch(/!\(st\.ok = /);
+  });
+  test("`!=` on a later line still continues the expression", () => {
+    const r = compile(page(`const same = p\n            != "x"\n        if (!same) { st.ok = false }`));
+    expect(r.codes).toEqual([]);
+  });
+});
+
+describe("review F6 — a `!{ arms }` attached to no expression is refused (E-ERROR-014)", () => {
+  const page = (fnBody) => `type E:enum = { Bad }\n<ok> = true\n\${\n    function risky()! -> E { fail E::Bad }\n    function f() {\n        ${fnBody}\n        risky() !{ _ :> 0 }\n    }\n}\n<button onclick=f()>b</button>\n<p>\${@ok}</p>\n`;
+  for (const [name, body] of [
+    ["the first statement of a body", `!{ _ e :> @ok = false }`],
+    ["a braceless if body", `if (true) !{ _ :> @ok = false }`],
+  ]) {
+    test(`${name}`, () => {
+      const r = compile(page(body));
+      expect(r.codes).toContain("E-ERROR-014");
+    });
+  }
+  test("a postfix handler is unaffected", () => {
+    expect(compile(page(`risky() !{ _ :> @ok = false }`)).codes).toEqual([]);
+  });
+});
+
+describe("review F4 — the statement form inside an expression or loop head is refused", () => {
+  const D = `    type AuthErr:enum = { Denied }\n    function lst(p)! -> AuthErr { if (p != "secret") fail AuthErr::Denied\n return [1] }`;
+  const F = `lst(p) !{ _ :> [] } catch AuthErr { st.ok = true }`;
+  const page = (body) => `<msg> = ""\n\${\n${D}\n    function login(p) {\n        const st = { ok: true }\n        ${body}\n        return st.ok ? "LOGGED IN" : "rejected"\n    }\n    function go(p) { @msg = login(p) }\n}\n<button onclick=go("wrong")>go</button>\n<p>\${@msg}</p>\n`;
+  for (const [name, body] of [
+    ["a for-of head", `for (const r of ${F}) { st.ok = false }`],
+    ["a while condition", `while ((${F}).length > 5) { st.ok = false }`],
+    ["an if condition", `if ((${F}).length > 0) { st.ok = false }`],
+    ["a call argument", `String(${F})`],
+    ["an array literal", `const a = [${F}]`],
+  ]) {
+    test(`${name}: E-TRY-NOT-IN-SCRML`, () => {
+      expect(compile(page(body)).codes).toContain(TRY);
+    });
+  }
 });

@@ -292,6 +292,12 @@ describe("§19.16.3 rule 4 — exported components, <onchange> arms, statement `
     const r = compile(logic(`    type E:enum = { Bad }\n    function risky()! -> E { return 1 }\n    function f() {\n        risky() !{ _ e :> defer note("x") }\n        note("after")\n    }`));
     expect(codes(r)).toContain("E-DEFER-UNSUPPORTED-SITE");
   });
+  // The OLD probe (a `defer` in the statement form's catch arm) still never compiles clean: the form
+  // itself is refused (E-TRY-NOT-IN-SCRML, §19.1).
+  test("the statement `!{ … } catch` arm holding a defer — E-TRY-NOT-IN-SCRML (live)", () => {
+    const r = compile(logic(`    function f() {\n        !{ note("t") } catch Error as e { defer note("x") }\n        note("after")\n    }`));
+    expect(codes(r)).toContain("E-TRY-NOT-IN-SCRML");
+  });
 });
 
 // ---------------------------------------------------------------------------
