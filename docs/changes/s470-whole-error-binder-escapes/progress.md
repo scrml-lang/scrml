@@ -236,3 +236,15 @@ const-decl.init, match-block.armsRaw, escape-hatch raw/bodyRaw — all in the li
   already failed to compile on main (c9 S5/S9, c17 K2/K4: E-ERROR-002 / E-PARSE-001 plus E-TYPE-031) and the
   allowed P3/P8. vs the reviewer's eb0d5677a run of all earlier sets: c1 M6 now precise (E-TYPE-004 BAD,
   OK no longer falsely refused), c5 K6 gains E-TYPE-031 (BAD shape). Only FAILs anywhere: Q4 x4 (lane B).
+- REBASED onto origin/main d455f482e (29 commits; main added its own pack family `f8` — this lane's renamed
+  `f9`; main's f8 file and pins restored after `rebase -X theirs`; main touched no type-system.ts).
+  EXPECTED_SHAPE_COUNT 1923 (main) + 269 (this lane) = 2192; full pack 2195 pass / 0 fail.
+- 2026-10-24 fix-round-4 gates on the rebased head: unit+integration+conformance --bail 40632 pass / 0 fail;
+  lsp+commands 774 / 0; root 2239 / 0; e2e-render-map 259 / 0; types:check OK (181, unchanged); slices lint +
+  m1/m2/m1-lowered/m3/m4/codec 0 fail; host-global 1/2 + 2/2 0 violations; snippet 113/0; claim 18/0;
+  compile-floor PASS; md-shim current; conflict-marker PASS; SPEC-INDEX OK; delta-lint PASS; s34 --check-new
+  (vs origin/main) PASS; bootstrap-severity current; TodoMVC gauntlet + node --check OK; browser-baseline PASS.
+  R26 vs origin/main d455f482e: the 913-file set (examples + samples) and the reviewer's corpus3 set (now 2666
+  files: benchmarks compiler/samples conformance docs stdlib) — diagnostic codes IDENTICAL for every file.
+  All probe sets (l1, l1b, l1c, c1–c8, l1d new/ c9–c17, n1–n4) rerun on the rebased head: unchanged from the
+  pre-rebase run; only FAILs Q4 x4 (lane B).
