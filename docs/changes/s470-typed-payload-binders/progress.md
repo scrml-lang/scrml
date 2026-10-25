@@ -94,6 +94,15 @@ is not a scrml member of an enum value.)
 E-PARSE-001 on both trees; re-written `| ::Wrapped i`. M5c, a named `!{}` binder, is impl#1-refused
 E-PARSE-001 on both trees — not a lane-B shape.)
 
+## Base moves
+- #1551 merged (66f2ee1c5); this branch REBASED onto origin/main 94c2026cb (only docs differed).
+- Then main moved again: #1553 (gap docs, incl. filing F4 as `g-impl1-nested-match-arm-bang-text-falsely-refused-s470`)
+  and #1554 (s470-action-body-await: codegen + pack families f10–f14). This lane's fullstack family
+  was renamed f10 → f15 (53971b4a7), then origin/main da3180405 was MERGED in (2151403c7) rather than
+  rebased (replaying the family rename through four commits would have conflicted at every step; the
+  tree is the same). EXPECTED_SHAPE_COUNT 2265 + 121 = 2386; full pack 2389 pass / 0 fail. The escapes
+  gap and main's F4 gap are marked resolved; gap counts regenerated with `bun scripts/state.ts --write`.
+
 ## Measured on the head (rebased onto origin/main 94c2026cb; compiler source = 980f40147 / 950ab710f)
 
 | shape | server | fullstack | library | tool |
@@ -178,3 +187,20 @@ scope) and binders typed:
    binder audit; §45.3 says cross-type `==` is an error. LOW.
 4. An `<engine>` / derived-machine cell typed by a NAMED machine (`@var: PM`) resolves to a `machine`
    type, not its governed enum, so member reads on it are not checked by this lane. LOW (not measured).
+
+## Final gates (merged head 2151403c7 + this progress commit; base for s34 / R26: origin/main da3180405)
+- R26 re-run vs origin/main da3180405 (git archive, in-tree stdlib): 3,615 files, 0 changed, 0 newly rejected.
+- Probe sets + matrix re-run on the merged head: FAIL 84 → 0 (matrix 80, Q4 4); the only differences from
+  the pre-merge run are main's new E-IMPL1-ACTION-NOT-AWAITED on already-refused shapes.
+- Pack: 2389 pass / 0 fail (2386 shapes). Pre-commit gate green on every commit.
+- CI-only jobs (commands as in .github/workflows/ci.yml, ~/.cache/scrml/s470/laneB/ci.sh, logs ci2/):
+  types:check OK (181, unchanged) · root `compiler/tests/*.test.js` 2239 / 0 · snippet-gate 113 / 0 (16
+  spec-ahead) · claim-gate 18 / 0 · corpus-compile-floor --check PASS · gen-md-shim current ·
+  conflict-marker PASS · regen-spec-index --check OK · delta-lint PASS · ci-shards needs OK · s34-census
+  --check-new --base da3180405 PASS · integration + lsp + commands 10154 / 0 · unit + conformance 31607 / 0
+  · TodoMVC compile + `node --check` OK · browser-baseline --check PASS (8 asserted) · lint-no-default-arm
+  OK · slice m1 / m2 / m1-lowered / m3 / m4 / codec 0 fail · e2e-render-map 259 / 0 · host-global-scan
+  1/2 and 2/2: 0 violations (2 / 135 compiles threw — the same counts as before this lane) ·
+  gen-bootstrap-severity current · bootstrap-conformance --check current.
+- One integration run under load (ci1, concurrent with the hook) had `dev-db-no-side-file` §3 return 500
+  for 503 at 30 s; it passed alone (26 / 0) and in the full ci2 run — a load flake, not this change.
