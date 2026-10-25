@@ -197,10 +197,12 @@ describe("§3: codegen subscribes to the dep-list, not the body's reads", () => 
       bodyRaw: "@log = double(@n)\nconst r = double(1)\n@out = r",
     };
     const output = emitLogicNode(node, { fnNameMap: new Map(), whenServerFnNames: new Set(["double"]) });
-    expect(output).toContain("async function()");
+    // s470-when-changes-latest-wins: the async body takes the run's gate and every
+    // own-level await is gated (§6.7.4 newest run wins).
+    expect(output).toContain("async function(_scrml_live)");
     // expression position (AST path) and statement position (block injector)
-    expect(output).toContain('_scrml_reactive_set("log", await double(_scrml_reactive_get("n")))');
-    expect(output).toContain("const r = await double(1)");
+    expect(output).toContain('_scrml_reactive_set("log", await _scrml_live(double(_scrml_reactive_get("n"))))');
+    expect(output).toContain("const r = await _scrml_live(double(1))");
   });
 });
 

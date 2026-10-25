@@ -1360,6 +1360,59 @@ export function bodyTextHasOwnAwait(bodyText: string): boolean | null {
   return fnTextHasOwnAwait("async function() {\n" + bodyText + "\n}");
 }
 
+/**
+ * s470-when-changes-latest-wins — wrap the operand of every OWN-level `await`
+ * in a function BODY (statement text) as `await <gate>(<operand>)`. Nested
+ * functions are their own scope and are left alone (the same scope rule as
+ * `fnTextHasOwnAwait`). Used for a `when … changes` body: the runtime hands
+ * each run a gate that never settles once a newer run has started (§6.7.4
+ * "newest run wins"), so a superseded run's continuation never resumes.
+ *
+ * Returns the rewritten text (unchanged when there is no own-level `await`),
+ * or `null` when the text does not parse or holds a `for await` (whose
+ * per-iteration resumption has no operand to wrap) — the caller must not ship
+ * an unguarded async body in that case.
+ */
+export function wrapOwnAwaits(bodyText: string, gate: string): string | null {
+  const PREFIX = "(async function() {\n";
+  const program = tryParse(PREFIX + bodyText + "\n})");
+  if (!program || program.body.length !== 1) return null;
+  const fn = program.body[0]?.expression;
+  if (!fn || !isFn(fn)) return null;
+  const opens: number[] = [];
+  const closes: number[] = [];
+  let forAwait = false;
+  const walk = (n: N): void => {
+    if (!n || typeof n !== "object") return;
+    if (Array.isArray(n)) { for (const c of n) walk(c); return; }
+    if (n !== fn && isFn(n)) return;
+    if (n.type === "ForOfStatement" && n.await === true) forAwait = true;
+    if (n.type === "AwaitExpression" && n.argument) {
+      opens.push(n.argument.start - PREFIX.length);
+      closes.push(n.argument.end - PREFIX.length);
+    }
+    for (const key of Object.keys(n)) {
+      if (key === "type" || key === "start" || key === "end") continue;
+      const v = n[key];
+      if (v && typeof v === "object") walk(v);
+    }
+  };
+  walk(fn.params);
+  walk(fn.body);
+  if (forAwait) return null;
+  if (opens.length === 0) return bodyText;
+  // Splice from the end so earlier offsets stay valid. At one offset a close
+  // (an inner operand ending) and an open never coincide in valid JS; equal
+  // opens / equal closes insert identical text, so their order is immaterial.
+  const edits: Array<[number, string]> = [
+    ...opens.map((o): [number, string] => [o, gate + "("]),
+    ...closes.map((c): [number, string] => [c, ")"]),
+  ].sort((a, b) => b[0] - a[0]);
+  let out = bodyText;
+  for (const [at, text] of edits) out = out.slice(0, at) + text + out.slice(at);
+  return out;
+}
+
 // ---------------------------------------------------------------------------
 // The active client emission (handler emitters with no ctx in reach)
 // ---------------------------------------------------------------------------

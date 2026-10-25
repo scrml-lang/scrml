@@ -39,3 +39,13 @@ passed as the body's parameter; the compiler wraps every own-level `await X` of 
 
 - Base race (harness copied from ~/.cache/scrml/review/s470-aw2 to ~/.cache/scrml/s470/laneE): whenhelper
   "LOGGED IN", whensrv "LOGGED IN" (FAIL); request fixtures "false"/"rejected" (pass).
+- Fix landed: runtime `_scrml_when_changes` seq gate + emitter wraps own-level awaits (`wrapOwnAwaits`
+  in js-async-analysis.ts, acorn-based, nested functions skipped). Unparseable / `for await` async body ->
+  internal error (fail closed, never an unguarded body).
+- Head race: whenhelper "rejected", whensrv "rejected" (PASS); request fixtures unchanged.
+- Runtime gzip-9 stripped, base 6081e0685 -> head: shell 6377 -> 6377 (+0); counter 4130 -> 4198 (+68);
+  lifted if= 4392 -> 4458; `<each>` row if= 8432 -> 8497 (+65; ceiling was 8433, trips);
+  lift no if= 4226 -> 4292.
+- Ratchet: owner ruling S470: allow raising the budget. Raised ONLY the `<each>` row if= recorded value
+  in compiler/tests/integration/runtime-size-ratchet.test.js §4: 8245 -> 8310 (+65 B, the measured delta).
+  Shell ceiling (§1) untouched.

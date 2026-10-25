@@ -33,7 +33,7 @@ import { markupNotRenderedMessage } from "../markup-statement-refusal.ts";
 import { rewriteMetaBodyCaptures, META_CAPTURE_VAR } from "./meta-capture-rewrite.ts";
 import { resolveLogLoc, resolveSpanLineCol } from "./log-loc.ts";
 import { localAsyncDeclRoot, rawAsyncUsesOf, walkScoped } from "./local-async-fns.ts";
-import { bodyTextHasOwnAwait, recordListenerSource } from "./js-async-analysis.ts";
+import { bodyTextHasOwnAwait, recordListenerSource, wrapOwnAwaits } from "./js-async-analysis.ts";
 import { sqlQueryExprShape, sqlQueryHeadOfExpr, replaceSqlQueryHead, unhandledFailureThrow, SQL_ATTEMPT_FN, handledSqlOfGuardedNode, type SqlQueryExprShape } from "./sql-attempt.ts";
 import { cpsCellWriteStatement } from "./cps-cell-writes.ts";
 import { parseGuardArmsFromRaw } from "../ast-builder.js";
@@ -5516,6 +5516,22 @@ function _emitLogicNode(node: any, opts: EmitLogicOpts): string {
       // s441 — own-level `await` only (a colored handler inside is its own scope).
       const _whenOwnAwait = bodyTextHasOwnAwait(body);
       const isAsync = !isServer && (_whenOwnAwait !== null ? _whenOwnAwait : /\bawait\b/.test(body));
+      // s470-when-changes-latest-wins — §6.7.4 "newest run wins": a re-trigger while
+      // a run is suspended cancels that run's continuation. `_scrml_when_changes`
+      // hands each run a gate (`_scrml_live`) carrying the `<request>`-style
+      // sequence check; every own-level `await X` becomes `await _scrml_live(X)`,
+      // which never settles once the run is stale, so its later writes and its
+      // error context never run. A sync body takes no parameter (unchanged).
+      if (isAsync) {
+        const gated = wrapOwnAwaits(body, "_scrml_live");
+        if (gated === null) {
+          throw new Error(
+            "scrml internal: a `when … changes` body is async but its emitted JS could not be gated for " +
+            "§6.7.4 newest-run-wins (unparseable, or a `for await`); refusing to emit an unguarded body.",
+          );
+        }
+        body = gated;
+      }
       const ctx = opts.encodingCtx;
       const seen = new Set<string>();
       const subs: string[] = [];
@@ -5525,7 +5541,7 @@ function _emitLogicNode(node: any, opts: EmitLogicOpts): string {
         const encodedDep = ctx ? ctx.encode(dep) : dep;
         subs.push(`_scrml_reactive_subscribe(${JSON.stringify(encodedDep)}, _h)`);
       }
-      return `_scrml_when_changes(function(_h) { return [${subs.join(", ")}]; }, ${isAsync ? "async " : ""}function() { ${body}; });`;
+      return `_scrml_when_changes(function(_h) { return [${subs.join(", ")}]; }, ${isAsync ? "async function(_scrml_live)" : "function()"} { ${body}; });`;
     }
 
     case "when-worker-message": {
