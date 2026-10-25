@@ -11644,8 +11644,7 @@ function annotateNodes(
       const body = String(arm.handler ?? "").trim();
       if (!body) continue;
       const armSpan = ((arm.span ?? fallbackSpan) as Span);
-      const why = auditWholeErrorBinderText(body, binder, { ...wholeBinderAuditCtx(en), scope, frames });
-      if (why) report(wholeBinderRefusalError(why, binder, en, armSpan));
+      const why = auditWholeErrorBinderText(body, binder, { ...wholeBinderAuditCtx(en), scope, frames });      if (why) report(wholeBinderRefusalError(why, binder, en, armSpan));
     }
   }
   // S470 fix round 2 — the scope each node the statement walk visits runs in (visitNode records
@@ -11653,9 +11652,10 @@ function annotateNodes(
   // whole-error binder audit runs after the walk (`_checkExpressionPositionHandlers`), keyed on
   // the `!{}` node itself wherever it sits, and reads these.
   const _wholeBinderNodeScope = new WeakMap<object, Scope>();
-  // S470 fix round 3 — every node the statement walk visited, in order: the post-walk also walks
-  // the ones it cannot reach from the file's tree (bodies the checker parsed from TEXT and visited —
-  // an engine opener `effect=`, a state-child `effect=`, an `<onTransition>` body, a guard, …).
+  // S470 fix round 3 — the engine bodies the checker parsed from TEXT (`readEngineBody`: the opener
+  // `effect=`, a state-child `effect=`, an `<onTransition>` body, a guard, a delay, a message arm)
+  // and visited: the post-walk walks these statements too (the file's tree does not reach them).
+  // Registered at the one place they are walked (`checkEngineRawBodies` `walk`).
   const _wholeBinderVisited: object[] = [];
   // S470 fix round 3 — owners whose raw body text the checker parsed and visited (engine bodies,
   // via `readEngineBody`): their text fields are covered by the visited statements above.
@@ -12306,7 +12306,7 @@ function annotateNodes(
     let resolvedType: ResolvedType;
     // S470 fix round 2 — the scope each visited node runs in, for the whole-error binder audit
     // (the post-walk `_checkExpressionPositionHandlers` resolves names from it).
-    if (!_wholeBinderNodeScope.has(n)) { _wholeBinderNodeScope.set(n, scopeChain.current); _wholeBinderVisited.push(n); }
+    if (!_wholeBinderNodeScope.has(n)) _wholeBinderNodeScope.set(n, scopeChain.current);
 
     // S462 review M1 — a `match` in expression position whose FIRST arm is a
     // `given` arm was re-read by the statement parser (ast-builder
@@ -18772,6 +18772,7 @@ function annotateNodes(
     // onto `span` (the statements' own spans are relative to the body's synthetic parse).
     const walk = (stmts: unknown[], what: string, span: Span, bindings: string[]): void => {
       markBodyWalked(stmts); // the codegen floor lowers only walked parses
+      _wholeBinderVisited.push(stmts); // S470 round 3 — the post-walk audits the same statements
       const before = errors.length;
       const savedWhere = handlerCheckWhere;
       const savedKind = handlerCheckKind;
@@ -19757,6 +19758,8 @@ function annotateNodes(
 
   function _checkExpressionPositionHandlers(roots: unknown[]): void {
     const seen = new WeakSet<object>();
+    // S470 round 3 — owners whose text body this walk read itself (effect bodies, an opener effect).
+    const _wholeBinderTextRead = new WeakSet<object>();
     /**
      * S470 round 3 — is a string field holding `!{` text that some reader already covers? (The
      * coverage list, progress.md "raw-text code fields".) Prose and literals: `value` (string
@@ -19774,6 +19777,7 @@ function annotateNodes(
     const wholeBinderTextFieldCovered = (o: Record<string, unknown>, k: string): boolean => {
       if (k === "value" || k === "handler" || k === "defaultValue") return true;
       if (_wholeBinderParsedOwners.has(o)) return true;
+      if (_wholeBinderTextRead.has(o) && (k === "bodyRaw" || k === "openerEffect")) return true;
       // An engine node carries copies of its bodies (`openerEffect`, …) beside its metadata, the
       // owner `readEngineBody` parsed them from.
       const rec = o._record as { engineMeta?: unknown } | undefined;
@@ -19787,6 +19791,10 @@ function annotateNodes(
           || (o.kind === "expr" && o.exprNode && typeof o.exprNode === "object"))) return true;
       if (k === "bodyRaw" && o.kind === "escape-hatch") return true;
       if (k === "armsRaw" && o.kind === "match-block") return true;
+      // An `<each>` body's source copy (its parsed body is the block's children, walked) and a
+      // markup `<match>` arm's re-parse copy (`_reparseEachArmBodyRaw`, parsed into the arm).
+      if (k === "bodyRaw" && o.kind === "each-block") return true;
+      if (k === "_reparseEachArmBodyRaw") return true;
       if (k === "rulesRaw" || k === "derivedExprText" || k === "inlineMatchBody" || k === "ifRaw") return true;
       // `arm.nestedHandlers[i].raw` (ast-builder `_nestedHandlersIn`, a kind-less lint copy): the
       // `!{}` text nested in an arm body — the arm body itself is read (and that `!{}` audited)
@@ -19885,6 +19893,31 @@ function annotateNodes(
       // S470 round 3 — every other field holding code as TEXT that holds a `!{`: read it if it is
       // a known body (an attribute expression kept without its tree), refuse it if it is not one
       // this walk or the statement walk reads (fail closed). See progress.md for the field list.
+      // S470 round 3 — effect bodies carried as TEXT (`when … changes` / `when message` / worker
+      // bodies, `<onchange>` arms): read the way the failable-call walk reads them
+      // (failable-value-calls.ts `effectBodies`: the statement reader), under their binding.
+      const effectBody = (owner: Record<string, unknown>, raw: unknown, binding: unknown): void => {
+        if (typeof raw !== "string" || raw.trim() === "") return;
+        _wholeBinderTextRead.add(owner);
+        const r = parseStatementTextDetailed(raw, filePath, {});
+        const binds = typeof binding === "string" && binding.trim() !== "" ? [binding.trim()] : [];
+        if (r.ok) walk(r.stmts as unknown[], here, scope, [r.stmts, { kind: "__audit-effect-binders", boundNames: binds }, ...frames], true);
+        else if (raw.includes("!{")) refuseUnreadText(`the ${String(owner.kind ?? "effect")} body`, hereSpan);
+      };
+      if (o.kind === "when-effect" || o.kind === "when-message" || o.kind === "when-worker-message" || o.kind === "when-worker-error") effectBody(o, o.bodyRaw, o.binding);
+      if (o.kind === "onchange-decl" && Array.isArray(o.arms)) {
+        for (const a of o.arms as Array<Record<string, unknown>>) if (a && typeof a === "object") effectBody(a, a.bodyRaw, a.binding);
+      }
+      // S470 round 3 — an engine opener `effect=` the statement walk did not parse (the engine was
+      // refused before its bodies were read): read with the one engine-body reader.
+      if (o.kind === "engine-decl" && typeof o.openerEffect === "string" && o.openerEffect.includes("!{") && !wholeBinderTextFieldCovered(o, "openerEffect")) {
+        const owner = ((o._record as { engineMeta?: object } | undefined)?.engineMeta ?? o) as object;
+        const read = readEngineBody(owner, "openerEffect", o.openerEffect, ENGINE_BODY_FILE.openerEffect);
+        _wholeBinderTextRead.add(o);
+        _wholeBinderTextRead.add(owner);
+        if (read.stmts) walk(read.stmts, here, scope, [read.stmts, ...frames], true);
+        else refuseUnreadText("the engine opener `effect=` body", hereSpan);
+      }
       // A template literal's `${…}` interpolations are code held as text: read with the one
       // template reader and walked (audit only).
       if (o.kind === "lit" && o.litType === "template" && typeof o.raw === "string" && o.raw.includes("!{")) {
@@ -19898,7 +19931,15 @@ function annotateNodes(
         if (typeof sv !== "string" || !sv.includes("!{")) continue;
         if (o.kind === "lit" && o.litType === "template" && k === "raw") continue; // read just above
         if (wholeBinderTextFieldCovered(o, k)) continue;
-        if (o.kind === "expr" && k === "raw" && !o.exprNode) { codeText(sv, hereSpan, scope, frames, "an expression held as text"); continue; }
+        if (o.kind === "expr" && k === "raw" && !o.exprNode) {
+          // An attribute / handler value kept without its tree: read with the one handler-value
+          // reader (ast-builder `parseHandlerStatementsForCheck`).
+          let hs: unknown[] | null = null;
+          try { hs = (parseHandlerStatementsForCheck(o, filePath) as unknown[] | null) ?? null; } catch { hs = null; }
+          if (hs) walk(hs, here, scope, [hs, ...frames], true);
+          else refuseUnreadText("an attribute value held as text", hereSpan);
+          continue;
+        }
         refuseUnreadText(`code held as text (\`${String(o.kind ?? "node")}.${k}\`)`, hereSpan);
       }
       // A parameter default the parser kept as TEXT (`function apply(f = () => risky() !{ … })`):

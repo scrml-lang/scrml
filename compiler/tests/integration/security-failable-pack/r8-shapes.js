@@ -101,6 +101,35 @@ function cases(srv) {
         ["6 AR6 callee pass arguments on", W(`${srv}function g(y) { return y.reason == "bad" }\n    ${srv}function f(x: AuthErr) { return g(...arguments) }`), X(`f(e)`)],
       ];
     })(),
+    // S470 fix round 3 (review of c26134ff4): a `!{}` held as TEXT (nested in another `!{}`'s
+    // arm, in a parameter default's arm); a callee name shadowing a file-level failable function
+    ...(() => {
+      const IN = `wrap(p) !{ _ e :> e.reason == "bad" ? "rejected" : "LOGGED IN" }`;
+      const R = `return v == true ? "LOGGED IN" : v`;
+      const W0 = W(`function id(a) { return a }`);
+      const DECLS = `type Inner:enum = { Bad(reason: string), Ok2 }
+    type AuthErr:enum = { Denied(reason: string), Wrapped(inner: string), Gone }
+    type BigErr:enum = { Denied(reason: string), Wrapped(inner: Inner), Gone }
+    ${srv}function w(p)! -> AuthErr {
+        if (p != "secret") fail AuthErr::Denied("x")
+        return true
+    }
+    ${srv}function wrapBig(p)! -> BigErr {
+        if (p != "secret") fail BigErr::Wrapped(Inner::Bad("bad"))
+        return true
+    }`;
+      const ARM = `_ e :> (match e { .Wrapped(i) :> i.reason == "bad", else :> true }) ? "rejected" : "LOGGED IN"`;
+      const ARM2 = `_ e :> (match e { .Wrapped(inner: i) :> i.reason == "bad", else :> true }) ? "rejected" : "LOGGED IN"`;
+      return [
+        ["7 NN1 nested !{} in call-arg arm", W0, `const v = id(wrap(p) !{ _ :> ${IN} })\n        ${R}`],
+        ["7 NN2 nested !{} in paren arm", W0, `const v = (wrap(p) !{ _ :> ${IN} })\n        ${R}`],
+        ["7 NN3 nested !{} in named arm", W0, `const v = id(wrap(p) !{ .Denied(r) :> ${IN}, _ :> "rejected" })\n        ${R}`],
+        ["7 NN4 return id(... nested)", W0, `return id(wrap(p) !{ _ :> ${IN} }) == true ? "LOGGED IN" : id(wrap(p) !{ _ :> ${IN} })`],
+        ["7 P7 default with nested !{} in arm", W(`function apply(a = wrap("wrong") !{ _ :> wrap("wrong") !{ _ e :> e.reason == "bad" ? "rejected" : "LOGGED IN" } }) { return a }`), `const v = apply()\n        ${R}`],
+        ["7 N2 local const w = wrapBig", DECLS, `const w = wrapBig\n        const v = w(p) !{ ${ARM} }\n        ${R}`],
+        ["7 N4 named-field match, local const", DECLS, `const w = wrapBig\n        const v = w(p) !{ ${ARM2} }\n        ${R}`],
+      ];
+    })(),
     // valid controls (the allowed uses still compile and deny)
     ["VALID check(e)", W(), X(`check(e)`)],
     ["VALID log(e)", W(), B(`log(e)\n            o = "rejected"`)],
@@ -170,7 +199,31 @@ function fullstackPages() {
   const HS = (p) => `@msg = (wrap("${p}") !{ _ e :> e.reason == "bad" ? "rejected" : "LOGGED IN" }) == "rejected" ? "rejected" : "LOGGED IN"`;
   const btns = (mk) => `<button id="wrong" onclick=${mk("wrong")}>w</button>\n<button id="right" onclick=${mk("secret")}>r</button>`;
   const src = `<msg> = "init"\n\${\n    ${ENUM}\n    server function wrap(p)! -> AuthErr {\n        if (p != "secret") fail AuthErr::Denied("bad")\n        return true\n    }\n}\n${btns((p) => `\${() => ${HS(p)}}`)}\n<p id="out">\${@msg}</p>\n`;
-  return [["6 M1c onclick expr arrow", src, undefined]];
+  // S470 fix round 3 — an engine OPENER `effect=` holding a `!{}` (raw text in engineMeta.openerEffect; review s19).
+  const ef = `\${
+    ${ENUM}
+    type Ph:enum = { A, B }
+    server function wrap(p)! -> AuthErr {
+        if (p != "secret") fail AuthErr::Denied("bad")
+        return true
+    }
+    function noop(x) { }
+}
+<msg> = "init"
+<pw> = "wrong"
+<engine for=Ph initial=.A effect=\${ @msg = wrap(@pw) !{ _ e :> e.reason == "bad" ? "rejected" : "LOGGED IN" } }>
+  <A rule=.B>
+    <p>a</p>
+  </>
+  <B rule=.A>
+    <p>b</p>
+  </>
+</>
+<button id="wrong" onclick=noop("w")>go</button>
+<button id="right" onclick=noop("r")>go</button>
+<p id="out">\${@msg}</p>
+`;
+  return [["6 M1c onclick expr arrow", src, undefined], ["7 EF1 engine opener effect= e.reason", ef, undefined]];
 }
 
 export function shapesFor(side) {

@@ -294,3 +294,50 @@ describe("fix round 2 #3 — `arguments` reads the error without naming it", () 
     });
   }
 });
+
+// S470 fix round 3 — the review of c26134ff4.
+describe("fix round 3 #1/#2 — a `!{}` held as TEXT is audited", () => {
+  const IN = `wrap(p) !{ _ e :> e.reason == "bad" ? "rejected" : "LOGGED IN" }`;
+  test("NN1 nested in an expression-position `!{}` arm → E-TYPE-004", () => {
+    expect(codesOf(W(`function id(a) { return a }`), R2(`const v = id(wrap(p) !{ _ :> ${IN} })`))).toContain("E-TYPE-004");
+  });
+  test("NN3 nested in a named arm → E-TYPE-004", () => {
+    expect(codesOf(W(`function id(a) { return a }`), R2(`const v = id(wrap(p) !{ .Denied(r) :> ${IN}, _ :> "rejected" })`))).toContain("E-TYPE-004");
+  });
+  test("P7 nested in a parameter default's arm → E-TYPE-004", () => {
+    expect(codesOf(W(`function apply(a = wrap("w") !{ _ :> wrap("w") !{ _ e :> e.reason == "bad" ? "rejected" : "LOGGED IN" } }) { return a }`), R2(`const v = apply()`))).toContain("E-TYPE-004");
+  });
+  test("ALLOWED: a valid nested whole-error use", () => {
+    expect(codesOf(W(`function id(a) { return a }`), R2(`const v = id(wrap(p) !{ _ :> wrap(p) !{ _ e :> e is .Denied ? "rejected" : "LOGGED IN" } })`))).toEqual([]);
+  });
+});
+
+describe("fix round 3 #3 — the handled call's enum is resolved BY BINDING", () => {
+  const DECLS = `type Inner:enum = { Bad(reason: string), Ok2 }
+    type AuthErr:enum = { Denied(reason: string), Wrapped(inner: string), Gone }
+    type BigErr:enum = { Denied(reason: string), Wrapped(inner: Inner), Gone }
+    server function w(p)! -> AuthErr {
+        if (p != "secret") fail AuthErr::Denied("x")
+        return true
+    }
+    server function wrapBig(p)! -> BigErr {
+        if (p != "secret") fail BigErr::Wrapped(Inner::Bad("bad"))
+        return true
+    }`;
+  test("N2 a local const shadowing a file-level failable function → E-TYPE-031", () => {
+    expect(codesOf(DECLS, R2(`const w = wrapBig\n        const v = w(p) !{ _ e :> (match e { .Wrapped(i) :> i.reason == "bad", else :> true }) ? "rejected" : "LOGGED IN" }`))).toContain("E-TYPE-031");
+  });
+});
+
+describe("fix round 3 #4 — `arguments` is read from the tree", () => {
+  const CASES = [
+    ["a string holding the word and a `/`", `"bad arguments / retry"`],
+    ["an object key", `({ arguments: 1 }).arguments == 1 ? "r" : "L"`],
+    ["a member name", `p.arguments == "x" ? "r" : "L"`],
+  ];
+  for (const [n, h] of CASES) {
+    test(`ALLOWED: ${n}`, () => {
+      expect(codesOf(W(), R2(`const v = wrap(p) !{ _ :> ${h} }`)).filter((c) => c === "E-TYPE-031")).toEqual([]);
+    });
+  }
+});
