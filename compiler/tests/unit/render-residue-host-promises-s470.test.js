@@ -119,6 +119,7 @@ const ACCEPTED = {
   "a timer-body local named fetch": `<timer interval=1>\${ const fetch = (u) => u == "secret"\nif (fetch(@pw)) { @msg = "LOGGED IN" } }</timer>\n<p>\${@msg}</p>`,
   "a member call api.fetch on an author object": `\${ const api = { fetch: (u) => u == "x" } }\n<p>\${ api.fetch("x") ? "a" : "b" }</p>`,
   "a string naming fetch": `<p>\${ "fetch" }</p>`,
+  "a helper whose parameter is named fetch": [`<p>\${ probe((u) => u == "x") ? "a" : "b" }</p>`, `    function probe(fetch) { return fetch("x") }`],
 };
 
 describe("gaps 2 + 3 — the host `fetch` (§13.7 item 4) is a waiting value", () => {

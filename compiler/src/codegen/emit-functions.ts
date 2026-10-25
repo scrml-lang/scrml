@@ -10,7 +10,7 @@ import { fnValuedBindingsOf, bindingPseudoFnsOf, isAnonFnValueName } from "./fn-
 import { scheduleStatements, buildCalleeImportMap, isProvablyReadOnlyServerFn, injectFnBodyServerCallAwaits, _clientServerFnNames, asyncImportedLocalsOfFile } from "./scheduling.js";
 // Seam-A colorless-async Gap 2 (GITI-037) — the transitive async-coloring fixpoint
 // + the shared no-silent-leak structural detectors / diagnostics (S239).
-import { computeAsyncFnNames, collectNonAwaitableAsyncCalls, collectAliasedAsyncCalls, aliasedAsyncCallError, syncCallbackErrorForSite, annotateNestedAsyncHelpers, asyncEscapeErrors, fileBoundNamesOf } from "./emit-library-shared.ts";
+import { computeAsyncFnNames, collectNonAwaitableAsyncCalls, collectAliasedAsyncCalls, aliasedAsyncCallError, syncCallbackErrorForSite, annotateNestedAsyncHelpers, asyncEscapeErrors, fileBoundNamesOf, locallyBoundOnlyCalleeNames } from "./emit-library-shared.ts";
 import type { AsyncEscapeSite } from "./local-async-fns.ts";
 import type { AsyncNameFacts } from "./async-combinators.ts";
 import { buildMachineBindingsMap } from "./emit-reactive-wiring.js";
@@ -1837,7 +1837,9 @@ export function emitFunctions(ctx: CompileContext): { lines: string[]; fnNameMap
       // S89 §13.2 Sub-Phase B Step 3 — thread calleeMap + exportRegistry so
       // the auto-await classifier inside scheduleStatements covers stdlib
       // Promise<T> callees alongside server functions.
-      const scheduled = scheduleStatements(body, fnNode, routeMap, depGraph, filePath, errors, machineBindings, engineBindings, engineVarNames, enginesWithHooks, _returnTypeAnnotation, name, enginesWithOnTimeout, enginesWithIdleWatchdog, enginesWithInternalRules, enginesWithHistory, enginesWithMessageArms, engineMessageVariants, _calleeMap, _exportRegistry, mapVarNames, orderedMapVarNames, setVarNames, _localMap, _localSet, _localOrdered, _clientPeerAwaitNames, _clientSyncPeerCalls, _fnIsAsync, ctx.synthCellKeys, _readOnlyServerFnNames);
+      const scheduled = scheduleStatements(body, fnNode, routeMap, depGraph, filePath, errors, machineBindings, engineBindings, engineVarNames, enginesWithHooks, _returnTypeAnnotation, name, enginesWithOnTimeout, enginesWithIdleWatchdog, enginesWithInternalRules, enginesWithHistory, enginesWithMessageArms, engineMessageVariants, _calleeMap, _exportRegistry, mapVarNames, orderedMapVarNames, setVarNames, _localMap, _localSet, _localOrdered, _clientPeerAwaitNames, _clientSyncPeerCalls, _fnIsAsync, ctx.synthCellKeys, _readOnlyServerFnNames,
+        // S470 — a sync host's calls of a LOCAL that shadows a server / async name are not awaited.
+        _fnIsAsync ? null : locallyBoundOnlyCalleeNames(fnNode as never));
       for (const line of scheduled) {
         lines.push(`  ${line}`);
       }

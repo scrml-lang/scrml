@@ -149,11 +149,16 @@ Measured with a scratch pack family on the base tree (~/.cache/scrml/s470/laneG/
    Fix direction: let the reactive-set lift await the host `fetch` (then add it to `lifted`).
 5. LOW (over-refusal, fails closed): shadowing is scope-aware for parameters and statement-list declarations in
    the AST, but not for a body re-parsed from text (engine bodies, `when` bodies read from `bodyRaw`), a
-   `for (const fetch of …)` / catch binder, or a file function whose PARAMETER is named `fetch` (the fixpoint is
-   scope-blind, so the function counts as reaching the host global).
+   `for (const fetch of …)` / catch binder. (A file function whose PARAMETER is named `fetch` was over-coloured by
+   the scope-blind fixpoint; since merging #1558, `computeAsyncFnNames` resolves callees against the function's own
+   scopes, so it is not — unit test "a helper whose parameter is named fetch".)
 6. LOW (fail-open residual, contrived): a module-scope binding named `fetch` anywhere in the file (by name, as
    `collectTopLevelStatements`-style scope) turns the host rule off file-wide, even for a render position outside
    that binding's real scope.
 7. Doc drift: `docs/changes/s441-audit-gap-filing/repro/fetch-inside-fn-accepted.scrml` now reports
    E-VALUE-SERVER-CALL (its "Actual: exit 0" line is stale); the gap it reproduces (`fn` purity, E-FN-003/004) is
    unaffected.
+
+- merge of origin/main 29fcaac8a (#1558 s470-async-colouring-scope): it took pack family name `f15`, so this lane's
+  family is `f16` (renamed before the merge); pack conflicts resolved (EXPECTED_SHAPE_COUNT 2680 + 22 = 2702;
+  both pin blocks kept). `hostPromiseReachOf` now inherits #1558's scope-resolved colouring.

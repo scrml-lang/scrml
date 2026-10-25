@@ -4,6 +4,8 @@
 // PASS-DENY / PASS-REFUSED / PASS-500 (a fix that silently stopped working, or a newly-refused valid
 // program) turns the suite red, and so does a refused shape that starts compiling (re-measure it, then
 // re-pin). Regenerate from `classify.js --json <family>/` — never by hand-editing to make the suite pass.
+import { R9_PINNED } from "./r9-pinned.js";
+
 export const PINNED_CLASS = {
   "s4/return match": "PASS",
   "s4/return match (newline arms)": "PASS",
@@ -845,4 +847,6 @@ export const PINNED_CLASS = {
   "f16/control: a bare fetch statement in a timer": "PASS-DENY",
   "f16/control: the author's own function named fetch": "PASS",
   "f16/control: a timer-body local named fetch": "PASS",
+  // S470 s470-async-colouring-scope — r9-shapes.js (s12 / f15 / l7 / t7), every shape pinned (r9-pinned.js).
+  ...R9_PINNED,
 };
