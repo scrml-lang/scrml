@@ -301,3 +301,70 @@ describe("fix round 2 — imported alias chains, E | not returns, recursive retu
     }
   });
 });
+
+// S470 fix round 3 (adversarial review of 73d4e2e2d).
+describe("fix round 3 — cycles in any order, imported struct fields, re-exports, the chain limit", () => {
+  // PENDING-POISON: the verdict on a cycle of functions must not depend on which member is declared,
+  // inferred or called first.
+  const F = {
+    fa: `function fa(p) {\n        if (p != "secret") return Inner::Bad("bad")\n        return ga(p)\n    }`,
+    ga: `function ga(p) { return fa("x") }`,
+    fc: `function fc(p) { return gc(p) }`,
+    gc: `function gc(p) { return hc(p) }`,
+    hc: `function hc(p) {\n        if (p != "secret") return Inner::Bad("bad")\n        return fc("x")\n    }`,
+  };
+  const perms = (xs) => xs.length <= 1 ? [xs] : xs.flatMap((x, i) => perms([...xs.slice(0, i), ...xs.slice(i + 1)]).map((r) => [x, ...r]));
+  for (const order of perms(["fa", "ga"])) {
+    for (const calls of perms(["fa", "ga"])) {
+      test(`2-cycle: declared ${order.join(",")}, called ${calls.join(",")} → E-TYPE-004 for each read`, () => {
+        const body = calls.map((c, i) => `const x${i} = ${c}(p)\n        const r${i} = x${i}.reason`).join("\n        ") + `\n        return "x"`;
+        const errs = compileFiles({ "app.scrml": lib(order.map((o) => F[o]).join("\n    "), body) }, "library").filter((e) => e.code === "E-TYPE-004");
+        for (let i = 0; i < calls.length; i++) expect(errs.some((e) => e.message.includes(`\`x${i}.reason\``))).toBe(true);
+      });
+    }
+  }
+  for (const order of perms(["fc", "gc", "hc"])) {
+    test(`3-cycle: declared ${order.join(",")}, each member called → E-TYPE-004 for each read`, () => {
+      const body = ["gc", "hc", "fc"].map((c, i) => `const x${i} = ${c}(p)\n        const r${i} = x${i}.reason`).join("\n        ") + `\n        return "x"`;
+      const errs = compileFiles({ "app.scrml": lib(order.map((o) => F[o]).join("\n    "), body) }, "library").filter((e) => e.code === "E-TYPE-004");
+      for (let i = 0; i < 3; i++) expect(errs.some((e) => e.message.includes(`\`x${i}.reason\``))).toBe(true);
+    });
+  }
+  const H0 = "${\n    export type Inner:enum = { Bad(reason: string), Ok2 }\n    export type I0 = Inner\n}\n";
+  const PAGE = (imports, decls, fn) => `${imports}\n<msg> = ""\n\${\n    ${decls}\n    ${fn}\n}\n<button onclick=go()>\${@msg}</button>\n`;
+  test("IMP-STRUCT: a struct field of an imported enum, alias and alias of an alias", () => {
+    const m = "import { I0 } from \"./h0.scrml\"\n${\n    export type K = I0\n}\n";
+    for (const [imp, ft] of [[`import { Inner } from "./h0.scrml"`, "Inner"], [`import { I0, Inner } from "./h0.scrml"`, "I0"], [`import { K } from "./m.scrml"\nimport { Inner } from "./h0.scrml"`, "K"]]) {
+      const src = PAGE(imp, `type SS:struct = { k: ${ft} }`, `function go() { const s: SS = { k: Inner::Bad("bad") }\n @msg = s.k.reason }`);
+      expect(codesOf(src, { "h0.scrml": H0, "m.scrml": m })).toContain("E-TYPE-004");
+    }
+  });
+  test("EXPORT-STAR / named re-export: an alias of a name re-exported through `export *` or `export { X } from`", () => {
+    for (const s of ["${\n    export * from \"./h0.scrml\"\n}\n", "${\n    export { I0 } from \"./h0.scrml\"\n}\n"]) {
+      const m = "import { I0 } from \"./s.scrml\"\n${\n    export type K = I0\n}\n";
+      const src = PAGE(`import { K } from "./m.scrml"\nimport { Inner } from "./h0.scrml"`, "", `function go() { const x: K = Inner::Bad("bad")\n @msg = x.reason }`);
+      expect(codesOf(src, { "h0.scrml": H0, "m.scrml": m, "s.scrml": s })).toContain("E-TYPE-004");
+    }
+  });
+  const chain = (n) => {
+    const files = { "h0.scrml": "${\n    export type Inner:enum = { Bad(reason: string), Ok2 }\n    export type C0 = Inner\n}\n" };
+    for (let k = 1; k <= n; k++) files[`h${k}.scrml`] = `import { C${k - 1} } from "./h${k - 1}.scrml"\n\${\n    export type C${k} = C${k - 1}\n}\n`;
+    return files;
+  };
+  test("DEPTH: a chain of 40 imported aliases is followed (E-TYPE-004)", () => {
+    const src = PAGE(`import { C40 } from "./h40.scrml"\nimport { Inner } from "./h0.scrml"`, "", `function go() { const x: C40 = Inner::Bad("bad")\n @msg = x.reason }`);
+    expect(codesOf(src, chain(40))).toContain("E-TYPE-004");
+  });
+  test("DEPTH: past the bound (80 files) the read is REFUSED, fail closed (E-TYPE-031), with the limit named", () => {
+    const src = PAGE(`import { C80 } from "./h80.scrml"\nimport { Inner } from "./h0.scrml"`, "", `function go() { const x: C80 = Inner::Bad("bad")\n @msg = x.reason }`);
+    const errs = compileFiles({ "app.scrml": src, ...chain(80) });
+    const e = errs.find((x) => x.code === "E-TYPE-031");
+    expect(e).toBeDefined();
+    expect(e.message).toContain("longer than the compiler follows");
+    expect(e.message).toContain("impl#1 limitation");
+  });
+  test("ALLOWED: `.variant` off a struct field of an imported enum", () => {
+    const src = PAGE(`import { Inner } from "./h0.scrml"`, `type SS:struct = { k: Inner }`, `function go() { const s: SS = { k: Inner::Bad("bad") }\n @msg = s.k.variant }`);
+    expect(codesOf(src, { "h0.scrml": H0 })).toEqual([]);
+  });
+});

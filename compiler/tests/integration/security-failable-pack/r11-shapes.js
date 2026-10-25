@@ -90,6 +90,19 @@ const VALID = [
   ["VALID W18 pop / shift then variant", `function f(rs: Role[]) { const a = rs.pop()\n const b = rs.shift()\n return a.variant + b.variant }`],
 ];
 
+// S470 fix round 3 (pack-control strength) — each VALID control CALLS its `f` in `login` at run time, so its
+// behaviour runs, not only its acceptance (a throw would surface as PASS-500 / PASS-DENY against the pin).
+// Arguments use payload variants where `f` reads `.variant` further (a UNIT variant's `.variant` reads `not` on
+// impl#1 — a separate pre-existing runtime defect, reported, not exercised here).
+const B1 = `Role::Banned("x")`;
+const USER = `{ name: "a", role: ${B1}, tags: [] }`;
+const VCALL = {
+  W1: `f(${USER})`, W2: `f([${USER}])`, W3: `f(${B1})`, W4: `f([${B1}])`, W5: `f([${B1}])`, W6: `f([${B1}, Role::Member(1)])`,
+  W7: `f([${B1}])`, W8: `f()`, W9: `f()`, W10: `f()`, W11: `f([${B1}, ${B1}])`, W12: `f(true)`, W13: `f()`, W14: `f()`,
+  W15: `f([[${B1}]])`, W16: `f()`, W17: `f()`, W18: `f([${B1}, ${B1}])`,
+};
+const VBODY = (n) => `const r0 = ${VCALL[n.split(" ")[1]]}\n        ${G}return "rejected"`;
+
 // Shapes that could not fail on baef28219 on a side (measured), and the library / tool importer
 // limitation (g-library-tool-cross-file-import-source-path-s469).
 const SKIP = new Set([
@@ -100,6 +113,9 @@ const SKIP = new Set([
     "1 U1 returns a constructor or not", "1 U13 optional read of an E | not result", "1 U-REC cycle of functions"].map((n) => `server/${n}`),
   // tool: a `return match` is refused there on every tree (g-impl1-async-match-positions-refused-s469).
   "tool/VALID W10 enum return then match payload",
+  // server: `f` calls a local function (`mk`) the server bundle does not ship once `login` calls `f` (PASS-500,
+  // "mk is not defined", the same on 73d4e2e2d) — a separate pre-existing defect, reported.
+  "server/VALID W10 enum return then match payload",
 ]);
 
 function page(side, d, body, imports = "") {
@@ -114,6 +130,6 @@ export function shapesFor(side) {
   const out = [];
   for (const [n, b] of RET) out.push([n, page(side, DD(srv), b), undefined]);
   for (const [n, b] of ALIAS2) out.push([n, page(side, `${srv}function ping(q) { return q }\n    type L4 = I3`, b, KIMP), { "h.scrml": H, "h2.scrml": H2 }]);
-  for (const [n, f] of VALID) out.push([n, page(side, `${srv}function ping(q) { return q }\n    ${VDECL}\n    ${f}`, `${G}return "rejected"`), undefined]);
+  for (const [n, f] of VALID) out.push([n, page(side, `${srv}function ping(q) { return q }\n    ${VDECL}\n    ${f}`, VBODY(n)), undefined]);
   return out.filter(([n]) => !SKIP.has(`${side}/${n}`));
 }

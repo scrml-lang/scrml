@@ -2283,10 +2283,27 @@ function auditBinderCallArgs(callee: unknown, idx: number[], ctx: WholeBinderAud
 
 /** S469 r6 — a payload field's DECLARED type text, per variant (parseEnumBody). */
 const variantFieldTypeText = new WeakMap<VariantDef, Map<string, string>>();
+/** S470 fix round 3 — a struct's fields' declared type text, its declaring registry and file. */
+const structDeclContext = new WeakMap<StructType, { fields: Map<string, string>; registry: Map<string, ResolvedType>; file?: string }>();
+/** A struct body's `field: typeText` pairs, split the way parseStructBody splits it. */
+function structFieldTexts(raw: string): Map<string, string> {
+  const out = new Map<string, string>();
+  let body = raw.trim();
+  if (body.startsWith("{")) body = body.slice(1);
+  if (body.endsWith("}")) body = body.slice(0, -1);
+  for (const line of splitTopLevel(body.trim(), [",", "\n"])) {
+    const t = line.trim();
+    const i = t.indexOf(":");
+    if (i === -1) continue;
+    const name = t.slice(0, i).trim();
+    if (/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(name)) out.set(name, t.slice(i + 1).trim());
+  }
+  return out;
+}
 /** S470 lane B — a `type A = <RHS>` alias's registry entry (an `asIs`) → its RHS and declaring registry. */
 const aliasDeclContext = new WeakMap<object, { rhs: string; registry: Map<string, ResolvedType>; file?: string }>();
 /** S469 r6 — the registry and alias table of the file an enum was declared in (buildTypeRegistry). */
-const enumDeclContext = new WeakMap<EnumType, { registry: Map<string, ResolvedType>; aliasRhs: Map<string, string> }>();
+const enumDeclContext = new WeakMap<EnumType, { registry: Map<string, ResolvedType>; aliasRhs: Map<string, string>; file?: string }>();
 
 /**
  * S469 r6 (MED) — the CANONICAL key of a resolved type, or null when it cannot be known. Two
@@ -6173,8 +6190,17 @@ function buildTypeRegistry(
     const raw = String(decl.raw ?? "").trim();
     if (raw && !raw.startsWith("{")) aliasRhs.set(String(decl.name), raw);
   }
+  const declFile = typeof fileSpan?.file === "string" ? fileSpan.file : undefined;
   for (const t of registry.values()) {
-    if (t && t.kind === "enum" && !enumDeclContext.has(t as EnumType)) enumDeclContext.set(t as EnumType, { registry, aliasRhs });
+    if (t && t.kind === "enum" && !enumDeclContext.has(t as EnumType)) enumDeclContext.set(t as EnumType, { registry, aliasRhs, file: declFile });
+  }
+  // S470 fix round 3 (IMP-STRUCT) — each struct remembers its fields' declared TEXT and where it was
+  // declared, so a field naming a type this registry does not hold yet (an import) can be resolved
+  // later in that file (enumReadStructField).
+  for (const decl of typeDecls) {
+    if (!decl.name || decl.typeKind !== "struct") continue;
+    const st = registry.get(decl.name as string);
+    if (st && st.kind === "struct") structDeclContext.set(st as StructType, { fields: structFieldTexts(String(decl.raw ?? "")), registry, file: declFile });
   }
 
   return registry;
@@ -11776,6 +11802,8 @@ function annotateNodes(
   // `return`s constructs (`return Box.Wrap(x)`). Cleared when this file's walk ends.
   {
     const ctorReturn = new Map<string, ResolvedType | null>();
+    /** The functions being inferred, innermost last, each with the in-progress functions it read PENDING for. */
+    const inferStack: Array<{ name: string; deps: Set<string> }> = [];
     const globalLookup: EnumReadLookup = (nm) => enumReadEntry(scopeChain.global.lookup(nm));
     // S470 lane B (fix round 1) — an un-annotated function's result: the ONE type its `return`s
     // yield, its body walked by the enum-read walker (locals, branches, ternaries, a unit variant
@@ -11792,13 +11820,39 @@ function annotateNodes(
       try { return enumReadReturnsOf(decl.body, ov, lookupFor, envFor); } finally { _enumReadEnv = saved; }
     };
     const inferCtorReturn = (name: string): ResolvedType | null => {
-      if (ctorReturn.has(name)) return ctorReturn.get(name) ?? null;
+      if (ctorReturn.has(name)) {
+        const v = ctorReturn.get(name);
+        if (v === ENUM_READ_PENDING) {
+          // S470 fix round 3 (PENDING-POISON) — `name` is still being inferred: every frame above it
+          // depends on it, so none of them may be memoized until it is final.
+          for (let i = inferStack.length - 1; i >= 0 && inferStack[i].name !== name; i--) inferStack[i].deps.add(name);
+          return ENUM_READ_PENDING;
+        }
+        return v ?? null;
+      }
       const decls = allFnDecls.filter((d) => d.name === name);
       if (decls.length !== 1 || (decls[0] as ASTNodeLike).returnTypeAnnotation) { ctorReturn.set(name, null); return null; }
       // S470 fix round 2 (U-REC) — while this function is inferred, a call of it (recursion, or a
-      // cycle of functions) reads PENDING, which unification skips. Memoized: each function once.
+      // cycle of functions) reads PENDING, which unification skips.
+      // S470 fix round 3 (PENDING-POISON) — a result that read PENDING for ANOTHER function still
+      // being inferred is provisional: it is returned (PENDING itself when it has no other value) but
+      // NOT memoized, and is recomputed once that function is final. The function at the head of a
+      // cycle (the one only its own recursion was pending on) is final and memoized: the verdict is the
+      // same whichever member of a cycle is inferred, or called, first.
       ctorReturn.set(name, ENUM_READ_PENDING);
-      let t = returnsOfDecl(decls[0] as ASTNodeLike, env, globalLookup);
+      inferStack.push({ name, deps: new Set() });
+      let t: ResolvedType | null;
+      let frame: { name: string; deps: Set<string> };
+      try {
+        t = returnsOfDecl(decls[0] as ASTNodeLike, env, globalLookup);
+      } finally {
+        frame = inferStack.pop()!;
+      }
+      frame.deps.delete(name);
+      if (frame.deps.size > 0) {
+        ctorReturn.delete(name);
+        return t;
+      }
       if (t === ENUM_READ_PENDING) t = null;
       ctorReturn.set(name, t);
       return t;
@@ -20487,43 +20541,85 @@ function enumReadEntry(e: ScopeEntry | null | undefined): { kind: string; t: Res
  * reads passes through here, so an alias position (a parameter, a local, a tape, a return, a struct
  * field, an imported alias) is the type it names. Other types are returned as they are.
  */
-function enumReadDeAlias(t: ResolvedType | null | undefined, depth = 0): ResolvedType | null {
+/**
+ * S470 fix round 3 (DEPTH) — how far a chain of aliases / imports / re-exports is followed (well above
+ * any real chain). Past it the type is ENUM_READ_LIMIT, and a member read off such a value is REFUSED
+ * (fail closed: E-TYPE-031, an impl#1 limit), never left unchecked. A CYCLE (an alias of itself, an import
+ * cycle) is not a chain: it names no type, and is unknown as before.
+ */
+const ENUM_READ_DEPTH_LIMIT = 256;
+const ENUM_READ_LIMIT = { kind: "enum-read-limit" } as unknown as ResolvedType;
+
+/**
+ * S470 fix round 3 — a declared type TEXT read where it was declared: `registry` is the declaring file's
+ * registry; a name it does not hold (an import, a dep registry being built from that file's own
+ * declarations only) is resolved through that file's imports and re-exports (`enumReadImportedTypeOf`),
+ * to the file that declares it; then aliases are seen through. The ONE resolver for an alias's RHS, a
+ * struct field's declared type and an enum payload field's declared type.
+ */
+function enumReadResolveText(text: string, registry: Map<string, ResolvedType>, file: string | undefined, depth: number, seen: Set<unknown>): ResolvedType | null {
+  if (depth > ENUM_READ_DEPTH_LIMIT) return ENUM_READ_LIMIT;
+  let reg = registry;
+  if (file) {
+    const missing = (text.match(/[A-Za-z_$][\w$]*/g) ?? []).filter((w) => {
+      const e = registry.get(w);
+      return !e || e.kind === "unknown";
+    });
+    if (missing.length > 0) {
+      const aug = new Map(registry);
+      for (const w of missing) {
+        const r = enumReadImportedTypeOf(file, w, depth + 1, seen);
+        if (r === ENUM_READ_LIMIT) return ENUM_READ_LIMIT;
+        if (r) aug.set(w, r);
+      }
+      reg = aug;
+    }
+  }
+  return enumReadDeAlias(resolveTypeExpr(text, reg), depth + 1, seen);
+}
+
+function enumReadDeAlias(t: ResolvedType | null | undefined, depth = 0, seen: Set<unknown> = new Set()): ResolvedType | null {
   if (!t || typeof t !== "object") return null;
-  if (depth > 16) return t;
+  if (t === ENUM_READ_LIMIT) return t;
+  if (depth > ENUM_READ_DEPTH_LIMIT) return ENUM_READ_LIMIT;
   if (t.kind === "asIs") {
     const ctx = aliasDeclContext.get(t as object);
     if (!ctx) return t;
-    // S470 fix round 2 (K-ALIAS2) — a name the alias's RHS uses that its declaring registry does not
-    // hold (an IMPORTED alias: a dep registry is built from that file's own declarations only) is
-    // resolved through the declaring file's imports, to the file that declares it, at any depth.
-    let reg = ctx.registry;
-    if (ctx.file) {
-      const missing = (ctx.rhs.match(/[A-Za-z_$][\w$]*/g) ?? []).filter((w) => {
-        const e = ctx.registry.get(w);
-        return !e || e.kind === "unknown";
-      });
-      if (missing.length > 0) {
-        const aug = new Map(ctx.registry);
-        for (const w of missing) {
-          const r = enumReadImportedTypeOf(ctx.file, w, depth + 1);
-          if (r) aug.set(w, r);
-        }
-        reg = aug;
-      }
-    }
-    return enumReadDeAlias(resolveTypeExpr(ctx.rhs, reg), depth + 1);
+    // An alias of itself (directly or through others) names no type.
+    if (seen.has(t)) return null;
+    const s2 = new Set(seen).add(t);
+    return enumReadResolveText(ctx.rhs, ctx.registry, ctx.file, depth + 1, s2);
   }
   if (t.kind === "array") {
     const el = (t as ArrayType).element;
-    const d = enumReadDeAlias(el, depth + 1);
+    const d = enumReadDeAlias(el, depth + 1, seen);
+    if (d === ENUM_READ_LIMIT) return d;
     return d && d !== el ? ({ ...(t as ArrayType), element: d } as ResolvedType) : t;
   }
   if (t.kind === "union") {
     const ms = (t as UnionType).members;
-    const ds = ms.map((m) => enumReadDeAlias(m, depth + 1) ?? m);
+    const ds = ms.map((m) => enumReadDeAlias(m, depth + 1, seen) ?? m);
+    if (ds.includes(ENUM_READ_LIMIT)) return ENUM_READ_LIMIT;
     return ds.some((d, i) => d !== ms[i]) ? ({ ...(t as UnionType), members: ds } as ResolvedType) : t;
   }
   return t;
+}
+
+/**
+ * S470 fix round 3 (IMP-STRUCT) — a struct field's type, read the way its declaration reads now: the
+ * registry-time type, unless that is `asIs` / unknown (the struct names a type the registry did not hold
+ * when it was built — an imported enum or alias), in which case the field's declared TEXT is resolved in
+ * the declaring file with its imports (`enumReadResolveText`).
+ */
+function enumReadStructField(st: StructType, field: string): ResolvedType | null {
+  const ft = st.fields.get(field);
+  if (ft === undefined) return null;
+  const d = enumReadDeAlias(ft);
+  if (d && d.kind !== "asIs" && d.kind !== "unknown") return d;
+  const ctx = structDeclContext.get(st);
+  const text = ctx?.fields.get(field);
+  if (!ctx || !text) return d;
+  return enumReadResolveText(text, ctx.registry, ctx.file, 0, new Set()) ?? d;
 }
 
 /** Registries of the compilation unit's files, built from each file's own type declarations (cached per run). */
@@ -20534,32 +20630,97 @@ const _enumReadModuleRegs = new Map<string, Map<string, ResolvedType>>();
  * the exporting module's own declarations, or — when that module re-exports or itself imports it —
  * followed on through its imports. `depth` bounds a cycle of imports. null when not found.
  */
-function enumReadImportedTypeOf(file: string, name: string, depth: number): ResolvedType | null {
+function enumReadImportedTypeOf(file: string, name: string, depth: number, seen: Set<unknown> = new Set()): ResolvedType | null {
   const mods = _enumReadModules;
-  if (!mods || depth > 16) return null;
+  if (!mods) return null;
+  if (depth > ENUM_READ_DEPTH_LIMIT) return ENUM_READ_LIMIT;
   const mod = mods.get(file);
   if (!mod) return null;
   for (const imp of mod.imports) {
     if (!imp || typeof imp.source !== "string") continue;
-    const src = imp.source as string;
-    if (!(src.startsWith("./") || src.startsWith("../"))) continue;
     const spec = ((Array.isArray(imp.specifiers) ? imp.specifiers : []) as Array<{ imported?: unknown; local?: unknown }>)
       .find((s) => s.local === name && typeof s.imported === "string");
     if (!spec) continue;
-    let p = pathResolve(pathDirname(file), src);
-    if (!mods.has(p) && mods.has(`${p}.scrml`)) p = `${p}.scrml`;
-    const dep = mods.get(p);
-    if (!dep) return null;
-    let reg = _enumReadModuleRegs.get(p);
-    if (!reg) {
-      reg = buildTypeRegistry(dep.typeDecls, [], { file: p, start: 0, end: 0, line: 1, col: 1 });
-      _enumReadModuleRegs.set(p, reg);
-    }
-    const t = reg.get(spec.imported as string);
-    if (t && t.kind !== "unknown" && t !== BUILTIN_TYPES.get(spec.imported as string)) return enumReadDeAlias(t, depth + 1);
-    return enumReadImportedTypeOf(p, spec.imported as string, depth + 1);
+    const p = enumReadModulePath(file, imp.source as string);
+    return p ? enumReadExportedTypeOf(p, spec.imported as string, depth + 1, seen) : null;
   }
   return null;
+}
+
+/** A relative module specifier `src` written in `from`, resolved to a module of this compilation unit, or null. */
+function enumReadModulePath(from: string, src: string): string | null {
+  const mods = _enumReadModules;
+  if (!mods || !(src.startsWith("./") || src.startsWith("../"))) return null;
+  const p = pathResolve(pathDirname(from), src);
+  if (mods.has(p)) return p;
+  return mods.has(`${p}.scrml`) ? `${p}.scrml` : null;
+}
+
+/**
+ * S470 fix round 3 (EXPORT-STAR) — the type module `file` EXPORTS as `name`: declared there; imported
+ * there and exported on; re-exported by name (`export { X } from`, `export { Y as X } from`); or through
+ * `export * from`. `seen` breaks an import / re-export cycle (unknown). null when not found.
+ */
+function enumReadExportedTypeOf(file: string, name: string, depth: number, seen: Set<unknown>): ResolvedType | null {
+  const mods = _enumReadModules;
+  if (!mods) return null;
+  if (depth > ENUM_READ_DEPTH_LIMIT) return ENUM_READ_LIMIT;
+  const key = `${file}::${name}`;
+  if (seen.has(key)) return null;
+  const s2 = new Set(seen).add(key);
+  const mod = mods.get(file);
+  if (!mod) return null;
+  let reg = _enumReadModuleRegs.get(file);
+  if (!reg) {
+    reg = buildTypeRegistry(mod.typeDecls, [], { file, start: 0, end: 0, line: 1, col: 1 });
+    _enumReadModuleRegs.set(file, reg);
+  }
+  const t = reg.get(name);
+  if (t && t.kind !== "unknown" && t !== BUILTIN_TYPES.get(name)) return enumReadDeAlias(t, depth + 1, s2);
+  const viaImport = enumReadImportedTypeOf(file, name, depth + 1, s2);
+  if (viaImport) return viaImport;
+  for (const x of enumReadModuleTops(mod.nodes)) {
+    if (!x || x.kind !== "export-decl" || typeof x.reExportSource !== "string") continue;
+    const p = enumReadModulePath(file, x.reExportSource as string);
+    if (!p) continue;
+    let srcName: string | null = null;
+    if (x.isReExportAll === true) srcName = name;
+    else if (Array.isArray(x.renames)) {
+      const r = (x.renames as Array<{ exported?: unknown; local?: unknown }>).find((y) => y.exported === name);
+      if (r && typeof r.local === "string") srcName = r.local;
+    }
+    if (srcName === null && x.exportedName === name) srcName = name;
+    if (srcName === null) continue;
+    const r = enumReadExportedTypeOf(p, srcName, depth + 1, s2);
+    if (r) return r;
+  }
+  return null;
+}
+
+/**
+ * S470 fix round 3 — an enum payload field's DECLARED type as the enum-read check reads it: the
+ * declaring file's resolution, and — when that leaves it unknown (a name the declaring registry did
+ * not hold: an import) — the declared text resolved with the declaring file's imports.
+ */
+function enumReadVariantField(en: EnumType, variant: string, field: string): ResolvedType | null {
+  const t = enumReadDeAlias(variantFieldResolvedType(en, variant, field));
+  if (t && t.kind !== "asIs" && t.kind !== "unknown") return t;
+  const v = (en.variants ?? []).find((x) => x.name === variant);
+  const text = v ? variantFieldTypeText.get(v)?.get(field) : undefined;
+  const ctx = enumDeclContext.get(en);
+  if (!text || !ctx) return t;
+  return enumReadResolveText(text, ctx.registry, ctx.file, 0, new Set()) ?? t;
+}
+
+/** A module's top-level statements: its own, and those of its top-level `${ … }` blocks. */
+function enumReadModuleTops(nodes: ASTNodeLike[]): ASTNodeLike[] {
+  const out: ASTNodeLike[] = [];
+  for (const x of nodes) {
+    if (!x) continue;
+    out.push(x);
+    if (x.kind === "logic" && Array.isArray(x.body)) out.push(...(x.body as ASTNodeLike[]));
+  }
+  return out;
 }
 
 /** The enum a value of type `t` is (an enum, or a union of enums with `not`; aliases seen through), or null. */
@@ -20591,6 +20752,7 @@ function enumReadUnify(ts0: Array<ResolvedType | null>): ResolvedType | null {
   // recursive or mutually recursive return) adds nothing: the type is the rest's.
   const ts = ts0.filter((t) => t !== ENUM_READ_PENDING);
   if (ts.length === 0) return ts0.length > 0 ? ENUM_READ_PENDING : null;
+  if (ts.some((t) => t === ENUM_READ_LIMIT)) return ENUM_READ_LIMIT; // fail closed (DEPTH)
   if (ts.some((t) => t === null)) return null;
   // S470 fix round 2 (U-NOT) — `not` (an absent value, a bare `return`) beside values of ONE enum is
   // that enum or absent: `E | not` (a declared `E | not` is read the same way).
@@ -20692,7 +20854,7 @@ function enumReadTypeOfRaw(node: unknown, ov: EnumReadOverlay | null, lookup: En
       if (en) return enumReadIsUnitVariant(en, n.property) ? en : null;
       const ot = sub(n.object);
       if (ot && ot.kind === "struct" && (ot as StructType).name !== FN_RETURN_TYPE_NAME) {
-        return (ot as StructType).fields.get(n.property) ?? null;
+        return enumReadStructField(ot as StructType, n.property);
       }
       return null;
     }
@@ -20830,7 +20992,7 @@ function enumReadDestructure(p: unknown, t0: ResolvedType | null, out: Map<strin
   }
   const st = t && t.kind === "struct" && (t as StructType).name !== FN_RETURN_TYPE_NAME ? (t as StructType) : null;
   for (const pr of p.properties) {
-    const ft = st && typeof pr.fieldName === "string" ? (st.fields.get(pr.fieldName) ?? null) : null;
+    const ft = st && typeof pr.fieldName === "string" ? enumReadStructField(st, pr.fieldName) : null;
     if (pr.kind === "name" && typeof pr.bindName === "string" && pr.bindName) out.set(pr.bindName, ft);
     else if (pr.kind === "nested" && pr.pattern) enumReadDestructure(pr.pattern, ft, out);
   }
@@ -20862,7 +21024,7 @@ function enumReadArmBinders(en: EnumType | null, pattern: string, errorCtx: bool
     if (owner && fields !== undefined && pieces.length === 1) {
       const plan = planPayloadBinders(m[2], bindText, bindings, fields, false, errorCtx);
       if ("binds" in plan) {
-        for (const b of plan.binds) typed.set(b.local, b.field === null ? null : variantFieldResolvedType(owner, m[2], b.field));
+        for (const b of plan.binds) typed.set(b.local, b.field === null ? null : enumReadVariantField(owner, m[2], b.field));
       }
     }
     for (const b of bindings) {
@@ -20914,6 +21076,16 @@ function checkEnumReadsIn(root: unknown, span: Span, lookup: EnumReadLookup, err
       `not a struct, so it has no field \`${member}\` (§14.3, §34). Reach a payload by naming the variant — ` +
       `\`match ${b} { ${pat} :> … }\`, or a \`!{}\` arm \`${pat} :> …\` (§18.7) — and test the variant with \`is\` ` +
       `(\`${b} is .${vn}\`); \`.variant\` is the only member an enum value has.`,
+      span));
+  };
+  // S470 fix round 3 (DEPTH) — the value's type is a chain of aliases / imports / re-exports longer than
+  // impl#1 follows (ENUM_READ_DEPTH_LIMIT): it may be an enum, so the read is refused (fail closed).
+  const refuseLimit = (whole: unknown): void => {
+    errors.push(new TSError("E-TYPE-031",
+      `E-TYPE-031: \`${enumReadShow(whole)}\` reads a member off a value whose type is a chain of type aliases / imports / ` +
+      `re-exports longer than the compiler follows (${ENUM_READ_DEPTH_LIMIT} steps), so it cannot tell whether it ${ENUM_READ_TAG}whose only member is \`.variant\`) ` +
+      `— an impl#1 limitation, not a language rule. Name the type closer to its declaration (import the enum or struct ` +
+      `itself) (§14.3, §21.4).`,
       span));
   };
   const refuseEq = (whole: unknown, base: unknown, lit: Record<string, unknown>, en: EnumType): void => {
@@ -21061,6 +21233,11 @@ function checkEnumReadsIn(root: unknown, span: Span, lookup: EnumReadLookup, err
           walk(n.object, ov);
           return;
         }
+        if (typeof n.property === "string" && !engineAdvance && !historyTarget && enumReadTypeOf(n.object, ov, lookup, env) === ENUM_READ_LIMIT) {
+          refuseLimit(n);
+          walk(n.object, ov);
+          return;
+        }
         if (typeof n.property === "string" && n.property !== "variant" && !engineAdvance && !historyTarget) {
           const en = enumReadEnumOf(enumReadTypeOf(n.object, ov, lookup, env));
           if (en && !quietBase(n.object, ov)) refuseRead(n, n.object, n.property, en);
@@ -21084,7 +21261,9 @@ function checkEnumReadsIn(root: unknown, span: Span, lookup: EnumReadLookup, err
         return;
       }
       case "index": {
-        const en = enumReadEnumOf(enumReadTypeOf(n.object, ov, lookup, env));
+        const it0 = enumReadTypeOf(n.object, ov, lookup, env);
+        if (it0 === ENUM_READ_LIMIT) refuseLimit(n);
+        const en = enumReadEnumOf(it0);
         if (en && !quietBase(n.object, ov)) {
           const ix = n.index as Record<string, unknown> | undefined;
           const shown = ix && ix.kind === "lit" && typeof ix.value === "string" ? ix.value : `[${enumReadShow(ix)}]`;
@@ -32385,7 +32564,7 @@ function processFile(
     const seenEnumRead = new Set<string>();
     for (let i = 0; i < errors.length; i++) {
       const e = errors[i];
-      if (!e || (e.code !== "E-TYPE-004" && e.code !== "E-EQ-001")
+      if (!e || (e.code !== "E-TYPE-004" && e.code !== "E-EQ-001" && e.code !== "E-TYPE-031")
           || !(e.message.includes(ENUM_READ_TAG) || e.message.startsWith("E-TYPE-004: Struct type `"))) continue;
       const k = `${(e.span as Partial<Span> | undefined)?.file ?? ""}|${e.code}|${e.message}`;
       if (seenEnumRead.has(k)) { errors.splice(i, 1); i--; continue; }
