@@ -1196,7 +1196,9 @@ export function rewriteIsOperator(expr: string): string {
  */
 function rewriteIsVariantWithOperand(expr: string): string {
   if (!/\bis\s+(?:[A-Z][A-Za-z0-9_]*\s*)?\.\s*[A-Z]/.test(expr)) return expr;
-  let out = expr;
+  // Review F7 — a comment is whitespace: blanked first, so `x /* c */ is .V` reads its
+  // operand instead of falling to the bare `=== "V"` regexes below.
+  let out = blankComments(expr);
   let cursor = 0;
   for (let guard = 0; guard < 1000; guard++) {
     const masked = maskNonCode(out);
@@ -1211,12 +1213,21 @@ function rewriteIsVariantWithOperand(expr: string): string {
       if (end < 0 || !/[A-Za-z0-9_$)\]]/.test(masked[end])) continue;
       const start = scanVariantOperandStart(masked, end);
       if (start < 0 || start > end || masked[start] === "#") continue;
-      const operand = out.slice(start, end + 1).trim();
+      let opStart = start;
+      // `new X() is .V` — the operand is the whole `new X()` (review F7).
+      {
+        let b = start - 1;
+        while (b >= 0 && /\s/.test(masked[b])) b--;
+        let w = b;
+        while (w >= 0 && /[A-Za-z0-9_$]/.test(masked[w])) w--;
+        if (b >= 0 && masked.slice(w + 1, b + 1) === "new") opStart = w + 1;
+      }
+      const operand = out.slice(opStart, end + 1).trim();
       // A keyword is not an operand (`return is .V` is not this construct).
       if (/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(operand) && PAREN_PRECEDING_KEYWORDS.has(operand)) continue;
       const text = lowerVariantCheck(operand, JSON.stringify(m[1]));
-      out = out.slice(0, start) + text + out.slice(m.index + m[0].length);
-      cursor = start + text.length;
+      out = out.slice(0, opStart) + text + out.slice(m.index + m[0].length);
+      cursor = opStart + text.length;
       changed = true;
       break;
     }
@@ -2541,21 +2552,35 @@ export function rewriteStructConstruction(expr: string): string {
  * `x.variant(…)`, a tagged template, a `new` operand; and the compiler's own
  * reads (`__scrml_is_v`, an `_scrml_*` temporary, a read already lowered).
  */
+let _variantPlaceText = 0;
+/**
+ * Run `f` with the `.variant` text pass off: the text `f` lowers is an assignment PATTERN
+ * (an escape-hatch `[s.variant, s.k]` target, review F4) — every member in it is a place.
+ */
+export function asVariantPlaceText<T>(f: () => T): T {
+  _variantPlaceText++;
+  try { return f(); } finally { _variantPlaceText--; }
+}
+
 export function rewriteVariantTagReads(expr: string): string {
-  if (!expr || typeof expr !== "string" || !/\bvariant\b/.test(expr)) return expr;
+  if (!expr || typeof expr !== "string" || _variantPlaceText > 0 || !/\bvariant\b/.test(expr)) return expr;
   let out = expr;
   let cursor = 0;
   for (let guard = 0; guard < 1000; guard++) {
     const masked = maskNonCode(out);
     if (masked === null) return out;
-    const re = /\.\s*variant\b/g;
+    // `.variant`, or a literal-key `["variant"]` / `['variant']` / `` [`variant`] `` (review F3;
+    // the key's text is masked, so the original is checked).
+    const re = /\.\s*variant\b|\[\s*#{9}\s*\]/g;
     re.lastIndex = cursor;
     let m: RegExpExecArray | null;
     let done = true;
     while ((m = re.exec(masked)) !== null) {
       const dotIdx = m.index;
       const after = dotIdx + m[0].length;
-      const lowered = lowerOneVariantRead(out, masked, dotIdx, after);
+      const bracket = m[0][0] === "[";
+      if (bracket && !/^\[\s*(["'`])variant\1\s*\]$/.test(out.slice(dotIdx, after))) continue;
+      const lowered = lowerOneVariantRead(out, masked, dotIdx, after, bracket);
       if (lowered === null) continue;
       out = out.slice(0, lowered.start) + lowered.text + out.slice(after);
       cursor = lowered.start + lowered.text.length;
@@ -2563,6 +2588,26 @@ export function rewriteVariantTagReads(expr: string): string {
       break;
     }
     if (done) return out;
+  }
+  return out;
+}
+
+/** `expr` with each comment (a masked run opening `//` or `/*`) replaced by spaces; newlines kept. */
+function blankComments(expr: string): string {
+  const masked = maskNonCode(expr);
+  if (masked === null) return expr;
+  let out = "";
+  let i = 0;
+  while (i < expr.length) {
+    if (masked[i] === "#" && expr[i] === "/" && (expr[i + 1] === "*" || expr[i + 1] === "/")) {
+      let j: number;
+      if (expr[i + 1] === "*") { const c = expr.indexOf("*/", i + 2); j = c < 0 ? expr.length : c + 2; }
+      else { const nl = expr.indexOf("\n", i); j = nl < 0 ? expr.length : nl; }
+      out += expr.slice(i, j).replace(/[^\n]/g, " ");
+      i = j;
+      continue;
+    }
+    out += expr[i++];
   }
   return out;
 }
@@ -2577,16 +2622,21 @@ function maskNonCode(expr: string): string | null {
   return m;
 }
 
-const PLACE_AFTER_RE = /^\s*(?:=(?![=>])|\+\+|--|(?:\*\*|<<|>>>|>>|&&|\|\||\?\?|[-+*/%&|^])=|\(|`)/;
+const PLACE_AFTER_RE = /^\s*(?:=(?![=>])|\+\+|--|(?:\*\*|<<|>>>|>>|&&|\|\||\?\?|[-+*/%&|^])=|\(|\?\.\(|`)/;
 
 function lowerOneVariantRead(
-  out: string, masked: string, dotIdx: number, after: number,
+  out: string, masked: string, dotIdx: number, after: number, bracket = false,
 ): { start: number; text: string } | null {
   // `x.variant = …`, `x.variant += …`, `x.variant++`, `x.variant(…)`, `` x.variant`…` ``: a place.
-  if (PLACE_AFTER_RE.test(out.slice(after))) return null;
+  // A comment between the member and the operator is whitespace (`x.variant /*c*/ = 1`;
+  // a comment is masked `#`, and no other literal can stand there).
+  if (/^\s*`/.test(out.slice(after))) return null;
+  if (PLACE_AFTER_RE.test(masked.slice(after).replace(/^[\s#]+/, " "))) return null;
   let optional = false;
   let end = dotIdx - 1;
-  if (end >= 0 && masked[end] === "?") { optional = true; end--; }
+  if (bracket) {
+    if (end >= 1 && masked[end] === "." && masked[end - 1] === "?") { optional = true; end -= 2; }
+  } else if (end >= 0 && masked[end] === "?") { optional = true; end--; }
   while (end >= 0 && /\s/.test(masked[end])) end--;
   if (end < 0 || !/[A-Za-z0-9_$)\]]/.test(masked[end])) return null;
   const start = scanVariantOperandStart(masked, end);
@@ -2595,17 +2645,27 @@ function lowerOneVariantRead(
   if (operandMasked.includes("?.")) optional = true;
   // A number literal (`1.variant` is not this), or a member link of a longer name.
   if (/^\d/.test(operandMasked)) return null;
-  // Before the chain: `++` / `--` / `delete` make it a place; `new X().variant` is `(new X()).variant`.
+  // Before the chain: `++` / `--` / `delete` make it a place; `new X().variant` is
+  // `(new X()).variant` — the operand is the whole `new X()` (review F7); `new X.variant`
+  // constructs `X.variant` (left alone). `for (x.variant of / in …)` assigns it: a place.
   let b = start - 1;
   while (b >= 0 && /\s/.test(masked[b])) b--;
   if (b >= 1 && (masked.slice(b - 1, b + 1) === "++" || masked.slice(b - 1, b + 1) === "--")) return null;
+  if (/\bfor\s*\(\s*$/.test(masked.slice(0, start)) && /^[\s#]*(?:of|in)\b/.test(masked.slice(after))) return null;
+  if (inAssignmentPattern(masked, start)) return null;
+  let opStart = start;
   if (b >= 0 && /[A-Za-z0-9_$]/.test(masked[b])) {
     let w = b;
     while (w >= 0 && /[A-Za-z0-9_$]/.test(masked[w])) w--;
     const word = masked.slice(w + 1, b + 1);
-    if (word === "delete" || word === "new") return null;
+    if (word === "delete") return null;
+    if (word === "new") {
+      if (!/\)\s*$/.test(operandMasked)) return null;
+      opStart = w + 1;
+    }
   }
-  const operand = out.slice(start, end + 1).trim();
+  const startFinal = opStart;
+  const operand = out.slice(startFinal, end + 1).trim();
   // The compiler's own reads: the lowering's IIFE parameter, a compiler temporary
   // (`_scrml_match_4.variant` inside a match dispatcher's object branch).
   if (operand === IS_OP_IIFE_LOCAL || /^_{1,2}scrml_[A-Za-z0-9_$]*$/.test(operand)) return null;
@@ -2617,7 +2677,35 @@ function lowerOneVariantRead(
   const escOp = operand.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   if (new RegExp(`typeof\\s+${escOp}\\s*===\\s*"string"\\s*\\?\\s*${escOp}\\s*:\\s*$`).test(out.slice(0, start))) return null;
   const trivial = /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(operand);
-  return { start, text: lowerVariantTagRead(operand, trivial, optional) };
+  return { start: startFinal, text: lowerVariantTagRead(operand, trivial, optional) };
+}
+
+/**
+ * Review F4 — is the read at `pos` an element of an assignment PATTERN (`[x.variant] = …`,
+ * `({ q: x.variant } = o)`, nested)? Walk out through the enclosing `[` / `{` groups (a `(`
+ * ends the walk): any whose close is followed by `=` (not `==` / `=>`) is a pattern.
+ */
+function inAssignmentPattern(masked: string, pos: number): boolean {
+  let depth = 0;
+  for (let k = pos - 1; k >= 0; k--) {
+    const c = masked[k];
+    if (c === ")" || c === "]" || c === "}") { depth++; continue; }
+    if (c === "(" || c === "[" || c === "{") {
+      if (depth > 0) { depth--; continue; }
+      if (c === "(") return false;
+      const close = c === "[" ? "]" : "}";
+      let d = 0, e = -1;
+      for (let j = k; j < masked.length; j++) {
+        const cj = masked[j];
+        if (cj === "(" || cj === "[" || cj === "{") d++;
+        else if (cj === ")" || cj === "]" || cj === "}") { d--; if (d === 0) { e = j; break; } }
+      }
+      if (e < 0 || masked[e] !== close) return false;
+      if (/^[\s#]*=(?![=>])/.test(masked.slice(e + 1))) return true;
+      // `for (const [a, x.variant] of …)` is not scrml; keep walking outward.
+    }
+  }
+  return false;
 }
 
 /** `_scanChainStartLeft`, `?.`-aware: the start of the member / call / index chain ending at `endIdx`. */

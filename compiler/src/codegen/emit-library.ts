@@ -1940,8 +1940,11 @@ export function generateLibraryJs(
           // Rewrite scrml `not`/`is not`/`is some`/`is .Variant` keywords to JS equivalents
           // Apply per-line, skipping comment lines to avoid mangling English text
           blockText = blockText.split("\n").map(line =>
-            line.trimStart().startsWith("//") ? line : rewriteVariantTagReads(rewriteIsOperator(rewriteNotKeyword(line)))
+            line.trimStart().startsWith("//") ? line : rewriteIsOperator(rewriteNotKeyword(line))
           ).join("\n");
+          // S470 (review F5) — over the WHOLE text, not per line: a multi-line template
+          // literal's content is masked as a literal only when the reader sees its backticks.
+          blockText = rewriteVariantTagReads(blockText);
           // §45.1 / §45.4 (S468) — this verbatim path re-printed scrml `==` / `!=`
           // as JS LOOSE `==` (`export const SAME = { a: 1 } == { a: 1 }` was
           // always false). Lower each operator from the parsed module text, the
@@ -2147,8 +2150,10 @@ export function generateLibraryJs(
         // Rewrite scrml `not`/`is not`/`is some`/`is .Variant` keywords to JS equivalents
         // Apply per-line, skipping comment lines to avoid mangling English text
         text = text.split("\n").map(line =>
-          line.trimStart().startsWith("//") ? line : rewriteVariantTagReads(rewriteIsOperator(rewriteNotKeyword(line)))
+          line.trimStart().startsWith("//") ? line : rewriteIsOperator(rewriteNotKeyword(line))
         ).join("\n");
+        // S470 (review F5) — whole text (a multi-line template literal stays a literal).
+        text = rewriteVariantTagReads(text);
 
         lines.push(text);
         lines.push("");

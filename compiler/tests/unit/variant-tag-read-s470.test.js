@@ -68,9 +68,32 @@ describe("rewriteVariantTagReads — the string-path twin", () => {
 
   test("a place keeps the plain member", () => {
     for (const s of [`x.variant = "Gone"`, `x.variant += "a"`, `x.variant ??= "a"`, `x.variant++`, `x.variant--`,
-      `++x.variant`, `delete x.variant`, `x.variant(1)`, "x.variant`t`", `new X().variant`]) {
+      `++x.variant`, `delete x.variant`, `x.variant(1)`, "x.variant`t`", `x.variant?.()`, `new x.variant()`,
+      // review F4 — a comment before the operator, an assignment pattern, a `for` head
+      `x.variant /*c*/ = 1`, `[x.variant] = [1]`, `[s.variant, s.k] = [s.k, 1]`, `({ q: x.variant } = o)`,
+      `for (x.variant of t) {}`, `for (x.variant in o) {}`]) {
       expect(rewriteVariantTagReads(s)).toBe(s);
     }
+  });
+
+  test("review F4 — the read side of a swap is still a read", () => {
+    expect(rewriteVariantTagReads(`[s.variant, s.k] = [s.k, s.variant]`)).toBe(
+      `[s.variant, s.k] = [s.k, (typeof s === "string" ? s : s.variant)]`,
+    );
+    expect(rewriteVariantTagReads(`x.variant in o`)).toBe(`(typeof x === "string" ? x : x.variant) in o`);
+  });
+
+  test("review F7 — `new X().variant` reads off the whole `new X()`", () => {
+    expect(rewriteVariantTagReads(`new X().variant`)).toBe(lowerVariantTagRead("new X()", false, false));
+  });
+
+  test("review F3 — a literal-key read is the same read; a dynamic key is left", () => {
+    expect(rewriteVariantTagReads(`x["variant"] == "Gone"`)).toBe(`(typeof x === "string" ? x : x.variant) == "Gone"`);
+    expect(rewriteVariantTagReads(`x?.['variant']`)).toBe(`(typeof x === "string" ? x : x?.variant)`);
+    expect(rewriteVariantTagReads(`f(p)["variant"]`)).toBe(lowerVariantTagRead("f(p)", false, false));
+    expect(rewriteVariantTagReads(`x["variant"] = 1`)).toBe(`x["variant"] = 1`);
+    expect(rewriteVariantTagReads(`x[k]`)).toBe(`x[k]`);
+    expect(rewriteVariantTagReads(`x["variants"]`)).toBe(`x["variants"]`);
   });
 
   test("a comparison is not an assignment", () => {
@@ -121,6 +144,11 @@ describe("rewriteIsOperator — `x is .V` in text is tag-normalized (a payload v
     expect(t("Denied")).toBe(true);
     expect(t("Gone")).toBe(false);
   });
+  test("review F7 — `new X()` is one operand; a comment before `is` is whitespace", () => {
+    expect(rewriteIsOperator(`new X() is .Denied`)).toBe(lowerVariantCheck("new X()", `"Denied"`));
+    expect(rewriteIsOperator(`x /* c */ is .Denied`)).toBe(lowerVariantCheck("x", `"Denied"`));
+  });
+
   test("literal text and `is not` / `is null` are left to the existing rules", () => {
     expect(rewriteIsOperator(`"x is .Denied"`)).toContain(`"x`);
     expect(rewriteIsOperator(`x is null`)).toBe(`x === null`);
@@ -206,6 +234,48 @@ describe("compiled: `.variant` agrees with `is` (library mode, executed)", () =>
     expect((await run(src, "gate", ["secret"])).value).toBe("ok");
   });
 
+  const DESTRUCTURE = [
+    ["review F2 — `const { variant } = …`", `const { variant } = mkG(p)\n        return variant`],
+    ["review F2 — a renamed key", `const { variant: tag } = mkG(p)\n        return tag`],
+    ["review F2 — `let` with a default", `let { variant = "none" } = mkG(p)\n        return variant`],
+    ["review F2 — a nested key", `const { e: { variant } } = { e: mkG(p) }\n        return variant`],
+    ["review F3 — a literal key", `const x = mkG(p)\n        return x["variant"]`],
+    ["review F3 — an optional literal key", `const x = mkG(p)\n        return x?.["variant"]`],
+  ];
+  for (const [name, body] of DESTRUCTURE) {
+    test(name, async () => {
+      expect((await run(LIB(body), "gate", ["wrong"])).value).toBe("Gone");
+      expect((await run(LIB(body), "gate", ["secret"])).value).toBe("Denied");
+    });
+  }
+
+  test("review F2 — a `variant` key in a parameter pattern is refused, not miscompiled", () => {
+    const { errors } = compileLibrary(LIB(`function f({ variant }) { return variant }\n        return f(mkG(p))`));
+    expect(errors.map((e) => e.code)).toContain("E-CODEGEN-INVALID-LOGIC");
+  });
+
+  test("review F6 — `x is AuthErr.Denied` matches a payload variant", async () => {
+    const src = `\${
+    type AuthErr:enum = { Denied(reason: string), Gone }
+    function mkD(p) -> AuthErr {
+        if (p != "secret") return AuthErr::Denied("bad")
+        return AuthErr::Gone
+    }
+    export function gate(p) {
+        const x = mkD(p)
+        return x is AuthErr.Denied ? "rejected" : "ok"
+    }
+}
+`;
+    expect((await run(src, "gate", ["wrong"])).value).toBe("rejected");
+    expect((await run(src, "gate", ["secret"])).value).toBe("ok");
+  });
+
+  test("review F4 — a swap through an assignment pattern still compiles and swaps", async () => {
+    const body = `const s = { variant: "a", k: "b" }\n        ;[s.variant, s.k] = [s.k, s.variant]\n        return s.variant + s.k`;
+    expect((await run(LIB(body), "gate", ["x"])).value).toBe("ba");
+  });
+
   test("the error envelope's `.variant` still reads its tag", async () => {
     const src = `\${
     type AuthErr:enum = { Denied(reason: string), Gone }
@@ -219,6 +289,24 @@ describe("compiled: `.variant` agrees with `is` (library mode, executed)", () =>
 }
 `;
     expect((await run(src, "gate", ["wrong"])).value).toBe("Gone");
+  });
+});
+
+describe("compiled: review F1 — an `<each>` row's `.variant` read is the tag read", () => {
+  test("`${r.e.variant}` / `@.e.variant` / a row `if=` emit the lowering, never a plain `.variant`", () => {
+    const dir = resolve(tmpdir(), `scrml-s470-vtag-each-${Date.now().toString(36)}`);
+    mkdirSync(dir, { recursive: true });
+    const p = resolve(dir, "app.scrml");
+    writeFileSync(p, `\${\n    type E:enum = { A(n: number), B }\n}\n<xs> = [{ id: 1, e: E::B }]\n<each in=@xs key=@.id as r><span if=\${r.e.variant != "B"}>\${r.e.variant}</span><b>\${@.e.variant}</b></each>\n`);
+    try {
+      const r = compileScrml({ inputFiles: [p], write: false, outputDir: resolve(dir, "out"), log: () => {} });
+      expect((r.errors ?? []).filter((e) => e.severity !== "warning").map((e) => e.code)).toEqual([]);
+      const js = [...r.outputs.values()][0]?.clientJs ?? "";
+      expect(js).toContain("__scrml_is_v.variant)(");
+      expect(js).not.toMatch(/\br\.e\.variant\b/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 

@@ -55,3 +55,28 @@ Base: main `d582ae04f`.
       0 fail, lsp+commands 0 fail, todomvc gauntlet ok, browser-baseline PASS, e2e-render-map 0 fail,
       slices 0 fail, no-default-arm 0, host-global-scan 0 violations. Runtime-size ratchet: 11 pass;
       runtime-template.js / compiler/runtime untouched, delta 0 B (no budget change needed).
+
+## Fix round 1 (review of be176f6ff)
+- [x] F1 `<each>` rows: emit-each.ts `rewriteAtCellAccess` (every caller emits CODE: row
+      expressions via `rewriteIterValueExpr` / `lowerEachExpr`, `in=` / `of=` iterables, `<empty :>`
+      bodies) now ends with the tag pass; the `:`-shorthand body and the `key=` expression too.
+      Re-parsed lowered text is not lowered twice (emitTernary recognizes the trivial form;
+      emitMember skips the reserved IIFE parameter).
+- [x] F2 destructuring: a top-level `variant` key in a `let` / `const` pattern splits the
+      declaration (temp, then destructure from `variantDestructureSource(temp)`); a nested
+      `{ e: { variant } }` binds the field twice (temp + pattern, `variant` defaulting to the temp
+      when it is a tag string); a `variant` key where neither works (a parameter, a `for` head, an
+      assignment pattern, an array element) is refused E-CODEGEN-INVALID-LOGIC.
+- [x] F3 `x["variant"]` / `x?.["variant"]` lowered (structured emitIndex + text pass). A dynamic key
+      `x[k]` keeps the plain JS read (candidate LOW gap).
+- [x] F4 places: assignment patterns (structured array/object targets; escape-hatch `*Pattern`
+      targets suppress the text pass), a comment before the operator, `for (x.variant of/in …)`,
+      `x.variant?.()`.
+- [x] F5 library verbatim path: the tag pass runs over the whole text, so a multi-line template
+      literal is masked (lib/ml.scrml now unchanged vs base). The `is` / `not` per-line corruption
+      inside a template (lib/ml2.scrml) is NOT fixed by this (those passes stay per line).
+- [x] F6 `x is AuthErr.Denied` / `AuthErr::Denied`: the parser folds it into one dotted ident; emitBinary
+      now treats it as a variant test (it compared against the constructor) — every side, not only
+      the server arm.
+- [x] F7 `new X() is .V` / `new X().variant` take the whole `new X()` as the operand; a comment
+      before `is` is blanked first.
