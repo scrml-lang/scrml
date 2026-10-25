@@ -2126,6 +2126,7 @@ export function emitEngineOpenerEffect(
   meta: EngineMetadata,
   emitOpts: import("./emit-logic.ts").EmitLogicOpts,
   serverFnNames: Set<string> | null = null,
+  clientAsyncFnNames: Set<string> | null = null,
 ): string[] {
   const lines: string[] = [];
   const openerEffect = meta.openerEffect;
@@ -2164,8 +2165,17 @@ export function emitEngineOpenerEffect(
   // `returnExitsWrapper` keeps a `!{}` arm's `return` a real `return` out of the
   // effect (it was rewritten to `<result> = null`, the effect ran on, and the
   // recovery write-back stored that null into the cell).
-  const _effectAsyncOpts = serverFnNames && serverFnNames.size > 0
-    ? { clientAsyncBody: true, serverFnNames }
+  // s470-action-body-await (SECURITY) — and a call of an async-coloured CLIENT helper that reaches
+  // one (`if (allowed(@pw))`) is awaited the same way (emit-expr `emitCall`'s client-peer branch
+  // reads `clientAsyncFnNames`); before, only a direct server call was.
+  const _hasSrv = !!serverFnNames && serverFnNames.size > 0;
+  const _hasHelpers = !!clientAsyncFnNames && clientAsyncFnNames.size > 0;
+  const _effectAsyncOpts = _hasSrv || _hasHelpers
+    ? {
+        clientAsyncBody: true,
+        ...(_hasSrv ? { serverFnNames } : {}),
+        ...(_hasHelpers ? { clientAsyncFnNames: new Set([...((emitOpts as { clientAsyncFnNames?: Set<string> | null }).clientAsyncFnNames ?? []), ...clientAsyncFnNames!]) } : {}),
+      }
     : {};
   let _effectIsAsync = false;
   const _effectBody: string[] = [];
@@ -2247,7 +2257,7 @@ function fileEngineEmitOpts(fileAST: any): import("./emit-logic.ts").EmitLogicOp
   } as import("./emit-logic.ts").EmitLogicOpts;
 }
 
-export function emitEngineOpenerEffectsForFile(fileAST: any, serverFnNames: Set<string> | null = null): string[] {
+export function emitEngineOpenerEffectsForFile(fileAST: any, serverFnNames: Set<string> | null = null, clientAsyncFnNames: Set<string> | null = null): string[] {
   const decls = collectC12EngineDecls(fileAST);
   if (decls.length === 0) return [];
   // Only build the (non-trivial) engine-aware opts if at least one engine
@@ -2282,7 +2292,7 @@ export function emitEngineOpenerEffectsForFile(fileAST: any, serverFnNames: Set<
   const lines: string[] = [];
   for (const decl of decls) {
     const meta = decl._record!.engineMeta!;
-    const effectLines = emitEngineOpenerEffect(meta, emitOpts, serverFnNames);
+    const effectLines = emitEngineOpenerEffect(meta, emitOpts, serverFnNames, clientAsyncFnNames);
     for (const l of effectLines) lines.push(l);
   }
   return lines;
