@@ -132,3 +132,75 @@ meta2/m*/n09). `UNAWAITED` = the emitted line(s).
   row's normative text says "Not this code: … every §6.15 action position"; impl#1 now reports
   E-VALUE-SERVER-CALL at action positions it cannot await (as #1547 r2 already did for a module-scope
   assignment). Naming fork below.
+
+## Measured matrix — AFTER (this branch)
+
+Every **YES** row of the before-matrix now either refuses (E-VALUE-SERVER-CALL, exit 1) or is awaited:
+
+- REFUSED (exit 1): a05 a13 a14 a15 a16 a18 a19 a25 a36 q34 (module init), q48 (cell declaration
+  testing the call), q49 q50 q56 (module-init lambdas), q55 (non-rendering `${}` in markup), q12 / m08
+  (`<onMount>` tag), q21 (`<onUnmount>`), q14 (`<timeout>`), q05 / n09 / q15 / q33 (`<request>`),
+  q19 / m02 / q35 / q52 (`<timer>`), q20 / m03 (`<poll>`), q23 / meta2 / q24 (runtime `^{}`), q25 / m11 /
+  q31 (state-child `effect=`), q27 / m12 / q28 (`<onTransition>` body), q61 (`<onTransition if=>`),
+  q60 (message arm), mf/page (imported server fn written into a cell at module init / in `<request>`).
+- NOW AWAITED (exit 0, no un-awaited call): q45 (`when` body, helper), q47 (opener `effect=`, helper),
+  and (found while checking) a `when` body / opener `effect=` calling an IMPORTED server function
+  (mf3 — un-awaited on base, `await isOk(…)` now).
+- UNCHANGED, accepted: q01 q02 q04 q36 q37 q38 q39 q43 q53 q57–q59 (whole cell writes the emitter's lift
+  awaits), q03 / q44 (bare fire-and-forget call), all function bodies / handlers / `on mount` (already
+  awaited — confirmed by probe, not assumed).
+- Over-refusal (LOW, accepted fail-closed): q40 `@c && (@msg = isOk(@pw))` — the lift does await a
+  reactive set in expression position, but the walk accepts only the WHOLE-statement write.
+- Still emitted un-awaited, by design of this lane (see gaps): q02's `_scrml_init_set` reset thunk;
+  q03 / q44 bare calls (value discarded); q54's detached write read later in the same body.
+
+## Gates (final tree)
+
+- pre-commit (`test-sharded` unit + integration + conformance): 46152 pass, 0 fail (baseline at start:
+  42537 pass / 0 fail on a hook run that skipped the bootstrap slices; the counts differ by the slices
+  the hook adds when codegen is touched).
+- CI job commands, run locally (`.github/workflows/ci.yml`): types-gate OK (after a ReadonlySet fix) ·
+  `bun test compiler/tests/*.test.js` 2239/0 · snippet-gate 0 fail · claim-gate 0 fail ·
+  corpus-compile-floor --check PASS (0 baselined) · gen-md-shim current · conflict-marker PASS ·
+  regen-spec-index --check OK · delta-lint PASS · ci-shards needs OK · s34-census --check-new (base
+  4058bd052) PASS (1 changed row, well-formed) · bootstrap-conformance current · bootstrap-severity
+  current · lsp + commands 774/0 · todomvc compile + `node --check` OK · browser-baseline --check PASS
+  (8 asserted) · lint-no-default-arm 0 · slice m1 100/0, m2 612/0, m1 lowered 100/0, m3 60/0, m4
+  2484/0, codec 166/0 · e2e-render-map 259/0 · host-global-scan --check 0 violations (the 150
+  not-judged / threw entries are pre-existing: the stdlib esm entries are identical on an extracted base
+  tree) · facts --check STALE (WARN-only; bot-owned, not regenerated per policy).
+- security-failable-pack (classify.js, 1953): PASS 725, PASS-REFUSED 1191, PASS-500 2, PASS-DENY 17,
+  UNJUDGED 18, **FAIL 0** (= #1547 final + f9's 2/26/0/2). security-await-pack: unchanged (its pinned
+  test file passes in the integration run).
+
+## Candidate gaps (for the PA to file — not edited into known-gaps.md here)
+
+- `g-sync-action-body-fire-and-forget-ordering-s470` (MED, locus emit-client reactive-set lift +
+  emit-reactive-wiring `emitLifecycleNode` / emit-engine `emitHookArm` / module-init emission): the two
+  shapes still accepted in a synchronous body are DETACHED, not awaited in place — a later statement of
+  the same body reads the cell before the write lands (q54: `<timer>${ @msg = isOk(@pw); if (@msg) … }`
+  tests the stale value — a stale TRUE from an earlier right password would open the branch), and a
+  bare call's side effect is not waited for (`save(); @x = load()` races). §13.8 (i) requires the
+  await at the suspension point. Path: give these bodies the `on mount` async host
+  (`colorAsyncStatements` + `(async () => {…})().catch(…)`, already proven there), which would also turn
+  most of this lane's refusals into awaits.
+- `g-cell-init-reset-thunk-holds-promise-s470` (MED): `<v> = isOk(@pw)` awaits the initial write but
+  emits the reset thunk `_scrml_init_set("v", () => _scrml_fetch_isOk_N(…))` — a `reset @v` (or form
+  reset) stores a pending Promise in the cell (truthy).
+- `g-host-promise-global-in-action-body-s470` (LOW): a host Promise global (`fetch(…)`) is not coloured
+  by the §13.2 facts, so it is neither refused in a synchronous action body nor awaited (sibling of #1547's
+  `g-host-promise-global-in-render-not-refused-s470`).
+- `g-sync-callback-in-async-host-client-s470` (LOW, not measured here): a server call inside a
+  SYNCHRONOUS callback nested in an async client host (`when` body / handler: `xs.sort((a, b) =>
+  isOk(a) ? …)`) — the client emitter records it in `syncPeerCalls` only when a sink is threaded; the
+  `when` / opener paths thread none. Worth a probe sweep.
+- `<onMount>` / `<onUnmount>` TAGS: impl#1 still treats them as plain unknown elements (lane 2's
+  finding); their `${ }` statements run once at module init, so this lane judges them as module-init
+  statements. If they are meant to be §13.8 lifecycle elements, that is a separate impl#1 gap.
+- Naming (PA / owner): the §34 E-VALUE-SERVER-CALL row's normative text says "Not this code: … every
+  §6.15 action position". This lane (like #1547 r2 for a module-scope assignment) reports
+  E-VALUE-SERVER-CALL at action positions impl#1 cannot await, with an action-specific message, per the
+  brief ("the existing E-VALUE-SERVER-CALL machinery or a clear existing code"). Recommendation: when the
+  owner next names impl#1 codes, mint a provisional `E-IMPL1-…` code for "an action body impl#1 runs
+  synchronously" (precedent: E-IMPL1-FAILABLE-FN-VALUE, S469) — the language allows these positions
+  (§13.8 (i)), so the honest label is an impl#1 limit, and the row's "Not this code" sentence stays true.
