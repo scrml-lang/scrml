@@ -115,16 +115,24 @@ describe("inbox-debt — frontmatter parse", () => {
 });
 
 describe("inbox-debt — MISDELIVERED?", () => {
-  test("the file name's -to-<who>- segment flags even when frontmatter says to: scrml (the S454 shape)", () => {
-    const m = classifyMessage(`${IN}${PETER}`, fm({ from: "scrml@asus-vivobook", to: "scrml", needs: "action" }));
+  test("the file name's -to-<who>- segment flags even when frontmatter says to: scrml", () => {
+    const m = classifyMessage(`${IN}2026-10-05-from-S454-bryan-to-giti-x.md`, fm({ from: "scrml@asus-vivobook", to: "scrml", needs: "action" }));
     expect(m.misdelivered).toBe(true);
-    expect(m.misdeliveredWhy).toContain("-to-peter-");
+    expect(m.misdeliveredWhy).toContain("-to-giti-");
   });
 
-  test("frontmatter to: someone else flags", () => {
-    const m = classifyMessage(`${IN}2026-10-30-from-x-re-y.md`, fm({ to: "peter", needs: "fyi" }));
+  test("frontmatter to: another desk flags", () => {
+    const m = classifyMessage(`${IN}2026-10-30-from-x-re-y.md`, fm({ to: "giti", needs: "fyi" }));
     expect(m.misdelivered).toBe(true);
-    expect(m.misdeliveredWhy).toContain("to: peter");
+    expect(m.misdeliveredWhy).toContain("to: giti");
+  });
+
+  test("peter and bryan are this desk's people (S470 ruling): the S454 -to-peter- shape is delivered", () => {
+    expect(classifyMessage(`${IN}${PETER}`, fm({ to: "scrml", needs: "action" })).misdelivered).toBe(false);
+    for (const to of ["peter", "Bryan", "bryan@host", "giti, peter"]) {
+      expect(classifyMessage(`${IN}2026-10-30-from-x-re-y.md`, fm({ to })).misdelivered).toBe(false);
+    }
+    expect(classifyMessage(`${IN}2026-10-30-from-flogence-to-bryan-y.md`, fm({})).misdelivered).toBe(false);
   });
 
   test("to: scrml@host, a list including scrml, a session-tagged scrml, and no address at all are NOT flagged", () => {
@@ -148,8 +156,9 @@ describe("inbox-debt — MISDELIVERED?", () => {
   });
 
   test("a misdelivered message is still UNHANDLED and still owes (a label, not an exemption)", () => {
-    const p = `${IN}${PETER}`;
+    const p = `${IN}2026-10-05-from-S454-bryan-to-giti-x.md`;
     const r = classify([p], [], new Map([[p, fm({ to: "scrml", needs: "action" })]]));
+    expect(r.unhandled[0].misdelivered).toBe(true);
     expect(r.unhandled).toHaveLength(1);
     expect(owes(r)).toBe(true);
   });
