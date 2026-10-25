@@ -26,6 +26,8 @@
  * recipient only in the FILE NAME (`…-from-S454-bryan-to-peter-…`) and the subject
  * ("(for Peter) …"). A `to:`-only check reads those three as correctly delivered. So: the
  * frontmatter `to:` AND the file-name `-to-<who>-` segment must each be scrml (or absent).
+ * S470 owner ruling: peter and bryan are this desk's people, so `-to-peter-` / `to: bryan` are
+ * delivered (SELF_PEOPLE); the S454 messages are now plain UNHANDLED, not MISDELIVERED?.
  * A flagged message is still UNHANDLED and still counts — MISDELIVERED? is a label, not an
  * exemption; someone must route it and move it to `read/`.
  *
@@ -69,6 +71,12 @@ export const INBOX_BRANCH = "inbox";
 export const MAIN_BRANCH = "main";
 /** The addressee this inbox serves. Anything else is MISDELIVERED?. */
 export const SELF = "scrml";
+/**
+ * The people this desk serves (S470 owner ruling): a message to peter or bryan on scrml's
+ * inbox is delivered — the scrml PA works for both. Only another desk (giti, flogence, …) is
+ * MISDELIVERED?.
+ */
+export const SELF_PEOPLE: readonly string[] = ["peter", "bryan"];
 /** `needs:` values that owe a response — sorted first, and the only ones `--check` fails on. */
 export const OWING = new Set(["action", "reply"]);
 
@@ -179,9 +187,9 @@ export function recipientsOf(to: string): string[] {
     .filter(Boolean);
 }
 
-/** Does a recipient token name scrml? `scrml` exactly, or a session-tagged `S470-scrml`. */
+/** Does a recipient token name this desk? `scrml` exactly, a session-tagged `S470-scrml`, or one of SELF_PEOPLE. */
 function namesSelf(token: string, self: string): boolean {
-  return token === self || token.endsWith(`-${self}`);
+  return token === self || token.endsWith(`-${self}`) || SELF_PEOPLE.includes(token);
 }
 
 export function classifyMessage(path: string, text: string | undefined, self: string = SELF): Message {
@@ -195,7 +203,7 @@ export function classifyMessage(path: string, text: string | undefined, self: st
     if (rs.length > 0 && !rs.some((r) => namesSelf(r, self))) reasons.push(`to: ${to}`);
   }
   const byName = addresseeFromName(name);
-  if (byName !== null && byName !== self) reasons.push(`file name says -to-${byName}-`);
+  if (byName !== null && !namesSelf(byName, self)) reasons.push(`file name says -to-${byName}-`);
   return {
     path,
     name,
