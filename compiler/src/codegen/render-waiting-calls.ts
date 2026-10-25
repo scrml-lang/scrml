@@ -379,7 +379,17 @@ class RenderWalk {
     if (kind === "bare-expr") {
       this.visited.add(s);
       // `on mount { … }` and a §40.8 default-logic body's bare expression are effects, not renders.
-      if (s._onMountEffect === true || s.refineParamGuard || c.defaultLogic || !c.renders) return;
+      if (s._onMountEffect === true || s.refineParamGuard) return;
+      if (c.defaultLogic || !c.renders) {
+        // S470 fix round 2 (review #2) — not rendered, it runs once at module init. A bare call
+        // there is an effect, but an ASSIGNMENT stores its value (`box.v = isOk(@pw)`; `ok = …`):
+        // the stored value is a §13.7 value position, exactly as a declaration's initializer is.
+        const ex = s.exprNode as AnyNode | undefined;
+        if (ex && typeof ex === "object" && ex.kind === "assign") {
+          this.judge(ex.value, s, s.span, "the value assigned at module scope");
+        }
+        return;
+      }
       if (s.exprNode && typeof s.exprNode === "object") this.judge(s.exprNode, s, s.span, "the interpolation");
       else this.judgeText(s.expr, s, s.span, "the interpolation");
       return;
@@ -400,7 +410,9 @@ class RenderWalk {
     // (A cell initializer `<x> = f()` is not — impl#1 awaits it: g-impl1-value-server-call-s451.)
     if (PLAIN_DECL_KINDS.has(String(kind)) && !stmtContainsLiftExpr(s)) {
       this.visited.add(s);
-      const pos = `the initializer of \`${String(s.name ?? "?")}\``;
+      const declName = typeof s.name === "string" ? s.name
+        : Array.isArray(s.boundNames) && s.boundNames.length > 0 ? (s.boundNames as string[]).join(", ") : "a destructuring";
+      const pos = `the initializer of \`${declName}\``;
       // A function VALUE (`const v = (w, p) => w(p)`) is not called by being declared: its body runs
       // where it is called (a waiting one is E-ASYNC-FN-ESCAPES-AS-VALUE's, §13.9.6).
       const ie = s.initExpr as AnyNode | undefined;
@@ -413,8 +425,19 @@ class RenderWalk {
     }
     // Any other statement renders only inside a rendering `${ }` (in a default-logic body, only one
     // that lifts markup — the rest run once at module init / mount).
-    if (c.defaultLogic && !stmtContainsLiftExpr(s)) return;
-    if (!c.renders) return;
+    if ((c.defaultLogic && !stmtContainsLiftExpr(s)) || !c.renders) {
+      // S470 fix round 2 (review #2) — module-init control flow (`if (@c) { ok = isOk(@pw) }`): its
+      // condition is an action-time test (an await question, not this rule), but the declarations
+      // and assignments in its bodies store values exactly like top-level ones: walk the bodies with
+      // the same (non-rendering) context.
+      this.visited.add(s);
+      for (const k of Object.keys(s)) {
+        if (!STATEMENT_CHILD_KEYS.has(k)) continue;
+        const v = s[k];
+        for (const ch of Array.isArray(v) ? v : [v]) this.stmt(ch, c);
+      }
+      return;
+    }
     this.visited.add(s);
     this.renderStatement(s);
   }
@@ -513,6 +536,11 @@ class RenderWalk {
     const pos = "the engine `derived=` expression";
     if (n.derivedExprNode && typeof n.derivedExprNode === "object") this.judge(n.derivedExprNode, n, n.span, pos);
     else this.judgeText(n.derivedExprText, n, n.span, pos);
+    // S470 fix round 2 (review #1) — `<engine … if=${…}>` is a render gate: emit-html
+    // `emitGatedStructural` gates the engine host on `engine-decl.ifCond`. Judged as <match>'s is.
+    if (isAttrValue(n.ifCond)) {
+      this.judgeAttrValue(n.ifCond, n.ifCond as object, (n.ifCond as AnyNode).span ?? n.span, "the `if=` value of <engine>");
+    }
     // S470 fix round (review #3) — only a state child's RENDERED body is a render position, read as
     // codegen renders it (emit-engine `buildEngineArms`): the `bodyChildren` markup node of each
     // state child's tag, its children filtered by emit-variant-guard's `filterRenderableChildren`.

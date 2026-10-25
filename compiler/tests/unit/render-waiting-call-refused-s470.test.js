@@ -233,6 +233,32 @@ ${body}
     expect(compile(src).messages.join("\n")).toContain("the initializer of `ok`");
   });
 
+  // ---- S470 fix round 2 (review of 110dada2e) ----
+  test("round 2 #1: `<engine … if=${…}>` is a render gate (emitGatedStructural)", () => {
+    const r = compile(enginePage(`  <Idle><p>SECRET</p></Idle>\n  <Active><p>A</p></Active>`).replace("<engine for=Phase>", "<engine for=Phase if=${isOk(@pw)}>"));
+    expect(r.messages.join("\n")).toContain("the `if=` value of <engine>");
+  });
+
+  test("round 2 #1 control: `<engine if=@c>` is not this code", () => {
+    const r = compile(`<c> = true\n` + enginePage(`  <Idle><p>SECRET</p></Idle>\n  <Active><p>A</p></Active>`).replace("<engine for=Phase>", "<engine for=Phase if=@c>"));
+    expect(r.messages).toEqual([]);
+  });
+
+  test("round 2 #2: an assignment inside module-init control flow stores a waiting value", () => {
+    const src = `<pw> = ""\n<c> = true\n\${\n    server function isOk(p) { return p == "secret" }\n}\n\${ let ok = false\nif (@c) { ok = isOk(@pw) } }\n<p><span if=\${ok}>IN</span></p>\n`;
+    expect(compile(src).messages.join("\n")).toContain("server function `isOk`");
+  });
+
+  test("round 2 #2: a module-scope member assignment stores a waiting value", () => {
+    const src = `<pw> = ""\n\${\n    server function isOk(p) { return p == "secret" }\n}\n\${ const box = { v: false }\nbox.v = isOk(@pw) }\n<p><span if=\${box.v}>IN</span></p>\n`;
+    expect(compile(src).messages.join("\n")).toContain("the value assigned at module scope");
+  });
+
+  test("round 2 #2 control: a module-init bare CALL is an effect, and a module-init if's condition is not judged", () => {
+    const src = `<pw> = ""\n<c> = true\n\${\n    server function isOk(p) { return p == "secret" }\n}\n\${ isOk("boot")\nif (@c) { isOk("x") } }\n<p>x</p>\n`;
+    expect(compile(src).messages).toEqual([]);
+  });
+
   test("an engine derived=match on a failable server call stays E-ERROR-002", () => {
     const src = `type AuthErr:enum = { Denied(reason: string), Gone }
 type Access:enum = { Granted, Rejected }

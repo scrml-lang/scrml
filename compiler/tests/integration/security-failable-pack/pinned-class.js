@@ -462,4 +462,8 @@ export const PINNED_CLASS = {
   "t5/M same-named alias, other base type, other file": "PASS-REFUSED",
   "t5/M same-named struct, other shape, other file": "PASS-REFUSED",
   "t5/M same-named nested enum, other variants, other file": "PASS-REFUSED",
+  // S470 fix round 2 — classify.js --json f8/ (FAIL on 110dada2e).
+  "f8/engine if= over a server call": "PASS-REFUSED",
+  "f8/module-init if assigns a server call": "PASS-REFUSED",
+  "f8/module-scope member assignment of a server call": "PASS-REFUSED",
 };

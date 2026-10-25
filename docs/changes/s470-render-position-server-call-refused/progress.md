@@ -183,7 +183,7 @@ Probes: ~/.cache/scrml/review/s470-l2/p/. Every finding was reproduced on d4e9c2
 | 6 | — | FILED | q04: markup held in a `const` initializer (`${ const m = <span if=${isOk(@pw)}>IN</span> }` then `${ m }`) is never walked (still compiles on this branch); q05 the reviewer's `($)` condition-loss on the sync twin. Candidate `g-markup-in-const-initializer-unwalked-s470` (MED). |
 | 9 | — | FILED | s01: the name set is scope-blind — a `server function fmt` in a chain branch and a sync `function fmt` in a component body share a name; the sync one's render call is refused (over-refusal, fails closed). Candidate `g-render-waiting-names-scope-blind-s470` (LOW). |
 | 10 | — | FILED | n06: a local `const isOk = (x) => x` inside a function shadows the server `isOk`; `${f2()}` is refused because `f2` is coloured async by the colouring's own scope-blind callee walk (over-refusal, fails closed; the colouring itself, not this check). Candidate `g-async-colouring-ignores-local-shadow-s470` (LOW). |
-| — | — | FILED (new, found in the sweep) | h03: a `function` declared inside a `<match>` arm body is never emitted — the arm calls a bare `hh(…)` (ReferenceError at run time; not an open gate). Candidate `g-fn-in-match-arm-body-not-emitted-s470` (MED). k02: `<engine for=… if=${isOk(@pw)}>` compiles and the `if=` is dropped (no gate emitted, no diagnostic; same on base). Candidate `g-engine-if-attr-dropped-s470` (MED/security-adjacent: an `if=` gate on an engine host is silently ignored). |
+| — | — | FILED (new, found in the sweep) | h03: a `function` declared inside a `<match>` arm body is never emitted — the arm calls a bare `hh(…)` (ReferenceError at run time; not an open gate). Candidate `g-fn-in-match-arm-body-not-emitted-s470` (MED) — round 2 (#4): also a function declared in an ENGINE STATE body (`<Idle>${ function hh(q) {…} }<span>${hh(@pw)}</span></Idle>`, review d/d09b) is not emitted. ~~k02: engine `if=` dropped~~ WRONG (round 2 #1): emit-html `emitGatedStructural` DOES gate on `engine-decl.ifCond`; k02 only looked dropped because its state bodies were self-closing. The engine `if=` is now judged (fixed in round 2), so no gap is filed for it. |
 
 Other sweep notes: `<onMount>` / `<onUnmount>` tags (m07, m09) are refused — impl#1 treats them as plain unknown
 elements and RENDERS their `${ }` (`<onMount><span data-scrml-logic>…` + `_scrml_render_value`), so by the
@@ -208,3 +208,28 @@ Gates (fix round, final tree):
 - R26 vs 915b6775f: newly-rejected 5 (gauntlet-r10-go-contacts, gauntlet-r10-rails-blog, gauntlet-r10-vue-datatable,
   phase1-fn-server-prefix-013, phase1-function-with-sql-002 — all genuine, left refused); 4 already-failing files gain the code.
 - host-global-scan --check: exit 0, 0 violations (2868 units). Not run: browser-baseline.
+
+## Fix round 2 (re-review of 110dada2e, verdict FIX) — 2026-10-24
+
+Probes: ~/.cache/scrml/review/s470-l2b/ (r/, d/, e/). A sweep of every probe there (r, d, e, p — 160+ files)
+against the reviewer's recorded head logs changes E-VALUE-SERVER-CALL on exactly four: e/k02c, p/k02 (same
+shape), r/r31, r/r32 — each from not-refused to refused. Nothing else moved.
+
+| # | sev | status | evidence |
+|---|---|---|---|
+| 1 | HIGH | FIXED | e/k02c (`<engine for=Phase if=${isOk(@pw)}>`) compiled at exit 0 on 110dada2e and the pack shape `f8/engine if= over a server call` measured FAIL (wrong → LOGGED IN) there; now E-VALUE-SERVER-CALL "the `if=` value of <engine>" (`engine()` judges `n.ifCond` as `matchBlock` does, anchored on the ifCond so a `derived=` site on the same engine is not swallowed). Control e/k02b (`if=@c`) clean. My round-1 report that the engine `if=` is dropped was wrong — retracted above. |
+| 2 | HIGH | FIXED | r31 (`let ok = false; if (@c) { ok = isOk(@pw) }`) and r32 (`box.v = isOk(@pw)`) compiled at exit 0 and measured FAIL on 110dada2e (pack f8); now refused. In a NON-rendering `${ }` (module init), (a) an assignment `bare-expr` stores its value: its right-hand side is judged ("the value assigned at module scope"); a bare CALL stays an effect (not judged); (b) control flow (`if` / loops) is walked into with the same non-rendering context so its declarations and assignments are judged; its CONDITION is not (an action-time test — an await question, see #3). Function bodies stay unwalked. Destructuring declarations are now named in the message (r06 printed `[object Object]`). |
+| 3 | — | PA DECISION, no code | runtime `^{ }` and `effect=` bodies (meta2, m11, m02/m03/m08/n09) keep head behaviour = base: not refused. An action body that tests a server call without awaiting it is an AWAIT bug; the PA files one HIGH gap and runs a separate lane. Pointer: that gap covers #4 of round 1 (m12, `<onTransition>` body emitted unawaited) and the module-init `if (isOk(…))` condition left unjudged by #2 above. |
+| 4 | — | FILED (entry extended) | d/d09b added to `g-fn-in-match-arm-body-not-emitted-s470` (see the round-1 table). |
+| 5 | — | no action | per-role chunk delta in the benchmark = the known cross-file node-id collision gap (PA-filed). |
+
+Permanent shapes: security-failable-pack family `f8` (+3: engine if=, module-init if assignment, member
+assignment; FAIL on 110dada2e, PASS-REFUSED here; pinned), EXPECTED_SHAPE_COUNT 1920 → 1923, README updated.
+Unit tests: 5 more in render-waiting-call-refused-s470 (54 pass).
+
+Gates (fix round 2, final tree):
+- pre-commit gate (test-sharded unit + integration + conformance): 40281 pass, 0 fail. types:check unchanged.
+- `bun scripts/corpus-compile-floor.ts --check`: PASS (0 baselined). `bun test compiler/tests/e2e-render-map/`: 259 pass, 0 fail.
+- failable pack (1923): PASS 723, PASS-REFUSED 1165, FAIL 0. await pack (904): FAIL 0, unchanged.
+- R26 vs 915b6775f (corpus = this branch's examples/samples): newly-rejected 5, already-failing +code 4, newly-clean 0 —
+  the same list as round 1 (the three gauntlet-r10 samples and the two phase1 samples); round 2 adds none.
