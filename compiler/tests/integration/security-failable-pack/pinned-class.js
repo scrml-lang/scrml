@@ -467,6 +467,10 @@ export const PINNED_CLASS = {
   "f8/module-init if assigns a server call": "PASS-REFUSED",
   "f8/module-scope member assignment of a server call": "PASS-REFUSED",
   // S470 s470-action-body-await — classify.js --json f9/ (every shape FAIL on 4058bd052).
+  "f9/imported: module-init cell write of the call": "PASS-REFUSED",
+  "f9/imported: request body cell write of the call": "PASS-REFUSED",
+  "f9/imported: when body tests the call": "PASS",
+  "f9/imported: engine opener effect= tests the call": "PASS-DENY",
   "f9/module-init block assigns a server call": "PASS-REFUSED",
   "f9/module-init if condition assigns a server call": "PASS-REFUSED",
   "f9/module-init call argument assigns a server call": "PASS-REFUSED",

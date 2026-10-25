@@ -113,7 +113,7 @@ meta2/m*/n09). `UNAWAITED` = the emitted line(s).
   isOk("x") }` ACCEPTED entry removed (a declaration holding a pending Promise; now refused, covered in
   the new file). New `compiler/tests/unit/action-body-await-s470.test.js` (64 tests: 35 refused positions,
   23 accepted, 3 emitted-await checks, 3 import-lift checks).
-- Pack: security-failable-pack family `f9` (SIDE fullstack, 26 shapes). Measured with classify.js on an
+- Pack: security-failable-pack family `f9` (SIDE fullstack, 26 shapes + 4 imported-function shapes added later = 30). Measured with classify.js on an
   extracted base tree (`git archive 4058bd052 compiler` + stdlib): **26/26 FAIL** (wrong → LOGGED IN);
   branch: 24 PASS-REFUSED, `when body tests an async helper` PASS, `engine opener effect= tests an async
   helper` PASS-DENY (boot-only effect: runs before the click, so both passwords read "rejected" — fail

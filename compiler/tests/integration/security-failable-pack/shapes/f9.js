@@ -27,7 +27,35 @@ const OUT = `<p id="out">\${@msg}</p>`;
 const GATE = (v) => `<p id="out"><span if=\${${v}}>LOGGED IN</span></p>`;
 const T = `"LOGGED IN" : "rejected"`;
 
+// The server function IMPORTED from another file (the emitter's cell-write lift does not cover it, and
+// the `when` / opener-effect hosts did not await it).
+const LIB = `\${
+    export server function isOk(p) { return p == "secret" }
+}
+`;
+const I = (logic, view = OUT) => [`type Phase:enum = { Idle, Active }
+<pw> = ""
+<msg> = "rejected"
+\${
+    import { isOk } from "./lib.scrml"
+    function login(p) { @pw = p }
+}
+<button id="wrong" onclick=login("wrong")>go</button>
+<button id="right" onclick=login("secret")>go</button>
+${logic}
+${view}
+`, { "lib.scrml": LIB }];
+
 export default [
+  ["imported: module-init cell write of the call", ...I(`<ok> = false
+\${ @ok = isOk(@pw) }`, GATE("@ok"))],
+  ["imported: request body cell write of the call", ...I(`<ok> = false
+<request id="r" deps=[@pw]>\${ @ok = isOk(@pw) }</>`, GATE("@ok"))],
+  ["imported: when body tests the call", ...I(`\${ when @pw changes { if (isOk(@pw)) { @msg = "LOGGED IN" } else { @msg = "rejected" } } }`)],
+  ["imported: engine opener effect= tests the call", ...I(`<engine for=Phase initial=.Idle effect=\${ if (isOk(@pw)) { @msg = "LOGGED IN" } }>
+  <Idle rule=.Active/>
+  <Active/>
+</>`)],
   // module init (the lane-2 l2c reproducers)
   ["module-init block assigns a server call", P(`\${ let ok = false
 { ok = isOk(@pw) } }`, GATE("ok"))],
