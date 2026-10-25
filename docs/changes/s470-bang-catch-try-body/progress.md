@@ -3,6 +3,30 @@
 Gap: `g-impl1-bang-catch-try-body-cut-at-first-brace-s470` (HIGH, security). Lane C, S470.
 Scratch: `~/.cache/scrml/s470/laneC/` (base tree = `git archive origin/main` d582ae04f in `basetree/`).
 
+## ROUND 4 — re-review of d102fa286 (FIX): R1 regression, PA ruling
+
+- **R1 (HIGH, my round-3 regression)**: the round-3 ASI boundary turned a MISSING OPERATOR
+  (`const ok = isMember⏎  !banned`, `!(banned)`, the value in an `if`, `return true⏎!banned`) into
+  `ok = isMember` plus a no-op `!banned` statement — a wrong password logged in on every side (server
+  and tool had refused it). SPEC §7.2.2 rule 4: a newline is whitespace → `isMember !banned`, no
+  expression. **PA ruling, implemented**: keep the boundary (nothing swallowed) but REFUSE a `!`-led
+  statement after a value-ending line with no `;` — E-STMT-UNEXPECTED-TOKEN at the `!` ("no statement
+  begins at `! banned`"), `! ( … )` included (`const z = 1⏎!(ok = f())` is `1 !(…)`). After a `;`, at a
+  block start, and a next-line postfix `!{ … }` (rule 4: `x⏎!{…}` handles `x`) are unaffected; a gapped
+  `! { … }` keeps E-ERROR-014 / E-TRY-NOT-IN-SCRML.
+- The two re-pointed tests are restored to their original (refused) expectations
+  (`s465-await-arm-r3` dropped-`!(…)` line; `bang-arm-block-value-s468-r1` arm tails): both met.
+- Also: a `catch` collected into an expression (`const q = ! { a: 1 } catch T { … }`, reviewer
+  detect2 "decl rhs space bang" — FAIL on d102fa286) → E-TRY-NOT-IN-SCRML (not after `.` / before `:` /
+  inside a source `try`).
+- LOW (`!` alone on a line then `{ … }`): measured E-ERROR-014 on this head at block start, after `;` and
+  after a declaration (E-TRY-NOT-IN-SCRML with a `catch`) — no change needed.
+- Pack group 17 (R1, 20 shapes): FAIL on d102fa286 on all 5 sides; on origin/main 55de8639c FAIL on
+  client / library / fullstack, PASS-REFUSED on server / tool; head PASS-REFUSED ×20. Group 14's
+  `! ( … )` shapes re-pinned PASS → PASS-REFUSED. r10 = 360, all PASS-REFUSED.
+  EXPECTED_SHAPE_COUNT = main 3021 + 360 = 3381 (measured 3384 tests, 0 fail).
+- Merged origin/main 55de8639c (lane B r11–r15).
+
 ## ROUND 3 — review of 3e52bcc45 (LAND-WITH-FOLLOWUPS): F1, F6, F4, F8, F9
 
 Probes: `~/.cache/scrml/review/s470-lc/` (read-only). Base for new shapes: extracted 3e52bcc45

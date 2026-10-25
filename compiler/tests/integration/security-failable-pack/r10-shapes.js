@@ -222,6 +222,20 @@ function positionPages(side, srv) {
     // E-ERROR-002 on the call the dropped catch left unhandled — and is locked by the unit tests)
     if (!dropSide) out.push(["16 statement form in a for-of head", DF, `const st = { ok: true }\n        for (const r of ${F}) { }\n        ${RR}`]);
   }
+  // S470 lane C round 4 (re-review of d102fa286, R1) — group 17: a MISSING OPERATOR before a `!` on the
+  // next line (`const ok = isMember⏎  !banned`). §7.2.2 rule 4: a newline is whitespace, so the line is
+  // `isMember !banned` — no expression — and is refused (E-STMT-UNEXPECTED-TOKEN). FAIL on origin/main
+  // on the client / library / fullstack sides (the `!banned` line was swallowed and dropped) and on
+  // d102fa286 on the server / tool sides (it became a separate no-op statement).
+  {
+    const MB = (tail) => `const isMember = true\n        const banned = p != "secret"\n        ${tail}`;
+    for (const [n, b] of [
+      ["!banned", MB(`const ok = isMember\n          !banned\n        return ok ? "LOGGED IN" : "rejected"`)],
+      ["!(banned)", MB(`const ok = isMember\n          !(banned)\n        return ok ? "LOGGED IN" : "rejected"`)],
+      ["in an if condition", `let ok = false\n        const banned = p != "secret"\n        const isMember = true\n        const g = isMember\n          !banned\n        if (g) { ok = true }\n        return ok ? "LOGGED IN" : "rejected"`],
+      ["after a return", `function allow(q) {\n            const banned = q != "secret"\n            return true\n              !banned\n        }\n        return allow(p) ? "LOGGED IN" : "rejected"`],
+    ]) out.push([`17 missing operator before a next-line ${n}`, `${ENUM}\n    ${srv}function check(p)! -> AuthErr {\n        if (p != "secret") fail AuthErr::Denied("bad")\n        return true\n    }`, b]);
+  }
   if (side === "client") {
     // more client positions: a nested function, a loop body, an engine opener `effect=` and an
     // `<onMount>` body (the last two run at boot, before any click: a wrong password never logs in

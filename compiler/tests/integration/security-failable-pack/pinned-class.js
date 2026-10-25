@@ -829,9 +829,10 @@ export const PINNED_CLASS = {
   "f13/engine opener effect= tests an async helper": "PASS-DENY",
   // S470 s470-bang-catch-try-body — r10-shapes.js (n29 / s13 / f16 / l8 / t8), the `!{ … } catch …`
   // statement form, REFUSED by the S470 ruling (E-TRY-NOT-IN-SCRML, SPEC §19.1); groups 1-13 on base
-  // d582ae04f: 100 FAIL, 112 PASS-DENY, 92 PASS-REFUSED, 8 PASS. Round 3 (review of 3e52bcc45) groups
-  // 14-16 on 3e52bcc45: 28 FAIL. On the lane head (340 shapes): 337 PASS-REFUSED, 3 PASS (299 with
-  // E-TRY-NOT-IN-SCRML; the PASS shapes are `! ( … )`, now its own statement, which runs).
+  // d582ae04f: 100 FAIL, 112 PASS-DENY, 92 PASS-REFUSED, 8 PASS. Round 3 groups 14-16 on 3e52bcc45:
+  // 28 FAIL. Round 4 group 17 (a missing operator before a next-line `!`, §7.2.2 rule 4): FAIL on
+  // d102fa286 on every side and on origin/main 55de8639c on client / library / fullstack.
+  // On the lane head (360 shapes): 360 PASS-REFUSED (299 with E-TRY-NOT-IN-SCRML).
   "n29/1 nested !{} (the F2 repro)": "PASS-REFUSED",
   "n29/1 nested !{} (the F2 repro) (bound first)": "PASS-REFUSED",
   "n29/1 nested !{} on one line": "PASS-REFUSED",
@@ -905,6 +906,10 @@ export const PINNED_CLASS = {
   "n29/15 handler with no expression: braceless if body": "PASS-REFUSED",
   "n29/15 handler with no expression: first in a block": "PASS-REFUSED",
   "n29/16 statement form in a for-of head": "PASS-REFUSED",
+  "n29/17 missing operator before a next-line !banned": "PASS-REFUSED",
+  "n29/17 missing operator before a next-line !(banned)": "PASS-REFUSED",
+  "n29/17 missing operator before a next-line in an if condition": "PASS-REFUSED",
+  "n29/17 missing operator before a next-line after a return": "PASS-REFUSED",
   "n29/13 nested function: handled": "PASS-REFUSED",
   "n29/13 loop body: handled": "PASS-REFUSED",
   "n29/13 engine opener effect: handled": "PASS-REFUSED",
@@ -973,6 +978,10 @@ export const PINNED_CLASS = {
   "s13/12 local written in the try body: revokes": "PASS-REFUSED",
   "s13/15 handler with no expression: braceless if body": "PASS-REFUSED",
   "s13/15 handler with no expression: first in a block": "PASS-REFUSED",
+  "s13/17 missing operator before a next-line !banned": "PASS-REFUSED",
+  "s13/17 missing operator before a next-line !(banned)": "PASS-REFUSED",
+  "s13/17 missing operator before a next-line in an if condition": "PASS-REFUSED",
+  "s13/17 missing operator before a next-line after a return": "PASS-REFUSED",
   "f16/1 nested !{} (the F2 repro)": "PASS-REFUSED",
   "f16/1 nested !{} (the F2 repro) (bound first)": "PASS-REFUSED",
   "f16/1 nested !{} on one line": "PASS-REFUSED",
@@ -1038,6 +1047,10 @@ export const PINNED_CLASS = {
   "f16/15 handler with no expression: braceless if body": "PASS-REFUSED",
   "f16/15 handler with no expression: first in a block": "PASS-REFUSED",
   "f16/16 statement form in a for-of head": "PASS-REFUSED",
+  "f16/17 missing operator before a next-line !banned": "PASS-REFUSED",
+  "f16/17 missing operator before a next-line !(banned)": "PASS-REFUSED",
+  "f16/17 missing operator before a next-line in an if condition": "PASS-REFUSED",
+  "f16/17 missing operator before a next-line after a return": "PASS-REFUSED",
   "l8/1 nested !{} (the F2 repro)": "PASS-REFUSED",
   "l8/1 nested !{} (the F2 repro) (bound first)": "PASS-REFUSED",
   "l8/1 nested !{} on one line": "PASS-REFUSED",
@@ -1108,6 +1121,10 @@ export const PINNED_CLASS = {
   "l8/15 handler with no expression: braceless if body": "PASS-REFUSED",
   "l8/15 handler with no expression: first in a block": "PASS-REFUSED",
   "l8/16 statement form in a for-of head": "PASS-REFUSED",
+  "l8/17 missing operator before a next-line !banned": "PASS-REFUSED",
+  "l8/17 missing operator before a next-line !(banned)": "PASS-REFUSED",
+  "l8/17 missing operator before a next-line in an if condition": "PASS-REFUSED",
+  "l8/17 missing operator before a next-line after a return": "PASS-REFUSED",
   "t8/1 nested !{} (the F2 repro)": "PASS-REFUSED",
   "t8/1 nested !{} (the F2 repro) (bound first)": "PASS-REFUSED",
   "t8/1 nested !{} on one line": "PASS-REFUSED",
@@ -1172,6 +1189,10 @@ export const PINNED_CLASS = {
   "t8/10 module init: after a declaration, body revokes": "PASS-REFUSED",
   "t8/15 handler with no expression: braceless if body": "PASS-REFUSED",
   "t8/15 handler with no expression: first in a block": "PASS-REFUSED",
+  "t8/17 missing operator before a next-line !banned": "PASS-REFUSED",
+  "t8/17 missing operator before a next-line !(banned)": "PASS-REFUSED",
+  "t8/17 missing operator before a next-line in an if condition": "PASS-REFUSED",
+  "t8/17 missing operator before a next-line after a return": "PASS-REFUSED",
   // S470 s470-async-colouring-scope — r9-shapes.js (s12 / f15 / l7 / t7), every shape pinned (r9-pinned.js).
   ...R9_PINNED,
   // S470 s470-typed-payload-binders — r11-shapes.js (s14 / f17 / l9 / t9), from a run (fams.mjs). "1 …" FAIL on
