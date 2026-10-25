@@ -15,7 +15,7 @@ import { isServerAmbientSession, refuseServerAmbientSession } from "./server-ses
 // GITI-017 (S125): shared regex/comment/string fence — see code-segments.ts header.
 import { rewriteCodeSegments, regexAllowedAfter } from "./code-segments.ts";
 import { lowerEqualityOps } from "./string-equality-lowering.ts";
-import { lowerIsPlaceholders, lowerPresenceCheck, lowerAbsenceCheck, isTrivialOperandText } from "./is-predicate-lowering.ts";
+import { lowerIsPlaceholders, lowerPresenceCheck, lowerAbsenceCheck, isTrivialOperandText, lowerVariantTagRead, lowerVariantCheck, IS_OP_IIFE_LOCAL } from "./is-predicate-lowering.ts";
 // §14.8.9 protected-column egress redaction — resolve the protected OUTPUT
 // columns a lowered `?{}` SELECT carries and wrap its result rows in the
 // `_scrml_protect_tag(...)` descriptor at query-lowering time (server only).
@@ -1176,11 +1176,53 @@ export function rewriteIsOperator(expr: string): string {
   // `x is not` becomes `x is null`. Rewrite to strict equality check.
   expr = expr.replace(/\bis\s+null\b/g, '=== null');
   expr = expr.replace(/\bis\s+undefined\b/g, '=== undefined');
+  // S470 (s470-unit-variant-tag-read) — `<operand> is .V` / `is T.V` with a readable
+  // operand lowers to the tag-normalized test (`lowerVariantCheck`, the structured
+  // path's form): a payload variant is `{ variant, data }`, so the bare `=== "V"`
+  // below was false for it (a library / server `match` arm value `x is .Denied`
+  // never matched). The regexes below remain for an operand the scan cannot read.
+  expr = rewriteIsVariantWithOperand(expr);
   // Allow optional whitespace between '.' and variant name: block-splitter may emit
   // "is . Small" (space after dot). The \s* handles both "is .Small" and "is . Small".
   expr = expr.replace(/\bis\s+[A-Z][A-Za-z0-9_]*\.\s*([A-Z][A-Za-z0-9_]*)\b/g, '=== "$1"');
   expr = expr.replace(/\bis\s+\.\s*([A-Z][A-Za-z0-9_]*)\b/g, '=== "$1"');
   return expr;
+}
+
+/**
+ * `<operand> is .V` / `<operand> is T.V` → `lowerVariantCheck(operand, "V")`, for every
+ * occurrence in CODE (literal / comment text masked, `maskNonCode`) whose operand is a
+ * member / call / index chain or a parenthesized group (`scanVariantOperandStart`).
+ */
+function rewriteIsVariantWithOperand(expr: string): string {
+  if (!/\bis\s+(?:[A-Z][A-Za-z0-9_]*\s*)?\.\s*[A-Z]/.test(expr)) return expr;
+  let out = expr;
+  let cursor = 0;
+  for (let guard = 0; guard < 1000; guard++) {
+    const masked = maskNonCode(out);
+    if (masked === null) return out;
+    const re = /\bis\s+(?:[A-Z][A-Za-z0-9_]*\s*)?\.\s*([A-Z][A-Za-z0-9_]*)\b(?!\s*\()/g;
+    re.lastIndex = cursor;
+    let m: RegExpExecArray | null;
+    let changed = false;
+    while ((m = re.exec(masked)) !== null) {
+      let end = m.index - 1;
+      while (end >= 0 && /\s/.test(masked[end])) end--;
+      if (end < 0 || !/[A-Za-z0-9_$)\]]/.test(masked[end])) continue;
+      const start = scanVariantOperandStart(masked, end);
+      if (start < 0 || start > end || masked[start] === "#") continue;
+      const operand = out.slice(start, end + 1).trim();
+      // A keyword is not an operand (`return is .V` is not this construct).
+      if (/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(operand) && PAREN_PRECEDING_KEYWORDS.has(operand)) continue;
+      const text = lowerVariantCheck(operand, JSON.stringify(m[1]));
+      out = out.slice(0, start) + text + out.slice(m.index + m[0].length);
+      cursor = start + text.length;
+      changed = true;
+      break;
+    }
+    if (!changed) return out;
+  }
+  return out;
 }
 
 // ---------------------------------------------------------------------------
@@ -2476,6 +2518,158 @@ export function rewriteStructConstruction(expr: string): string {
  * with `===` — reference equality for structs / maps / payload enums; gap
  * g-structural-eq-emitted-as-strict-eq-outside-typed-fn-bodies-s464.)
  */
+// ---------------------------------------------------------------------------
+// rewriteVariantTagReads — S470 (s470-unit-variant-tag-read)
+// ---------------------------------------------------------------------------
+
+/**
+ * The string-path twin of emit-expr.ts `emitMember`'s `.variant` lowering: a
+ * `.variant` VALUE read in text the structured emitter never saw (a handler
+ * attribute, a `match` arm lowered from text, an engine / `<match>` body kept
+ * as text, a server text lowering) is lowered to the variant tag read, the same
+ * `lowerVariantTagRead` form. A unit variant is its bare tag string (§51.3.2),
+ * so the plain read was `undefined` there and `x.variant == "Gone"` disagreed
+ * with `x is .Gone`.
+ *
+ * Runs as the LAST pass of both pipelines, over the finished JS text. Only code
+ * is read: string / template-static / regex / comment text is masked out
+ * (`rewriteCodeSegments`, the shared fence), so a `.variant` in a literal is not
+ * touched and a literal's brackets cannot mislead the operand scan. The operand
+ * is the member / call / index chain left of the `.` (the `_scanChainStartLeft`
+ * walk, `?.`-aware). Left as a plain member (a PLACE, not a read): an assignment
+ * / compound-assignment / `++` / `--` / `delete` target, a method call
+ * `x.variant(…)`, a tagged template, a `new` operand; and the compiler's own
+ * reads (`__scrml_is_v`, an `_scrml_*` temporary, a read already lowered).
+ */
+export function rewriteVariantTagReads(expr: string): string {
+  if (!expr || typeof expr !== "string" || !/\bvariant\b/.test(expr)) return expr;
+  let out = expr;
+  let cursor = 0;
+  for (let guard = 0; guard < 1000; guard++) {
+    const masked = maskNonCode(out);
+    if (masked === null) return out;
+    const re = /\.\s*variant\b/g;
+    re.lastIndex = cursor;
+    let m: RegExpExecArray | null;
+    let done = true;
+    while ((m = re.exec(masked)) !== null) {
+      const dotIdx = m.index;
+      const after = dotIdx + m[0].length;
+      const lowered = lowerOneVariantRead(out, masked, dotIdx, after);
+      if (lowered === null) continue;
+      out = out.slice(0, lowered.start) + lowered.text + out.slice(after);
+      cursor = lowered.start + lowered.text.length;
+      done = false;
+      break;
+    }
+    if (done) return out;
+  }
+  return out;
+}
+
+/** `expr` with every non-code character (literal / comment text) replaced by `#`; null if the fence changed the length. */
+function maskNonCode(expr: string): string | null {
+  const MARK = "\u0001";
+  const marked = rewriteCodeSegments(expr, (seg) => MARK.repeat(seg.length));
+  if (marked.length !== expr.length) return null;
+  let m = "";
+  for (let i = 0; i < expr.length; i++) m += marked[i] === MARK ? expr[i] : "#";
+  return m;
+}
+
+const PLACE_AFTER_RE = /^\s*(?:=(?![=>])|\+\+|--|(?:\*\*|<<|>>>|>>|&&|\|\||\?\?|[-+*/%&|^])=|\(|`)/;
+
+function lowerOneVariantRead(
+  out: string, masked: string, dotIdx: number, after: number,
+): { start: number; text: string } | null {
+  // `x.variant = …`, `x.variant += …`, `x.variant++`, `x.variant(…)`, `` x.variant`…` ``: a place.
+  if (PLACE_AFTER_RE.test(out.slice(after))) return null;
+  let optional = false;
+  let end = dotIdx - 1;
+  if (end >= 0 && masked[end] === "?") { optional = true; end--; }
+  while (end >= 0 && /\s/.test(masked[end])) end--;
+  if (end < 0 || !/[A-Za-z0-9_$)\]]/.test(masked[end])) return null;
+  const start = scanVariantOperandStart(masked, end);
+  if (start < 0 || start > end || masked[start] === "#") return null;
+  const operandMasked = masked.slice(start, end + 1);
+  if (operandMasked.includes("?.")) optional = true;
+  // A number literal (`1.variant` is not this), or a member link of a longer name.
+  if (/^\d/.test(operandMasked)) return null;
+  // Before the chain: `++` / `--` / `delete` make it a place; `new X().variant` is `(new X()).variant`.
+  let b = start - 1;
+  while (b >= 0 && /\s/.test(masked[b])) b--;
+  if (b >= 1 && (masked.slice(b - 1, b + 1) === "++" || masked.slice(b - 1, b + 1) === "--")) return null;
+  if (b >= 0 && /[A-Za-z0-9_$]/.test(masked[b])) {
+    let w = b;
+    while (w >= 0 && /[A-Za-z0-9_$]/.test(masked[w])) w--;
+    const word = masked.slice(w + 1, b + 1);
+    if (word === "delete" || word === "new") return null;
+  }
+  const operand = out.slice(start, end + 1).trim();
+  // The compiler's own reads: the lowering's IIFE parameter, a compiler temporary
+  // (`_scrml_match_4.variant` inside a match dispatcher's object branch).
+  if (operand === IS_OP_IIFE_LOCAL || /^_{1,2}scrml_[A-Za-z0-9_$]*$/.test(operand)) return null;
+  // The `is .V` lowering's own two reads (`lowerVariantCheck`: `(function(__v){return (typeof __v ===
+  // "object" && __v !== null && typeof __v.variant === "string" ? __v.variant : __v) === …`).
+  // (Token-spaced too: a raw that passed the block splitter reads `(function (__v) { return (typeof …`.)
+  if (operand === "__v" && /\(\s*function\s*\(\s*__v\s*\)\s*\{\s*return\s*\(\s*typeof\s+__v\s*===\s*"object"\s*&&\s*__v\s*!==\s*null\s*&&\s*typeof\s+(?:__v\s*\.\s*variant\s*===\s*"string"\s*\?\s*)?$/.test(out.slice(Math.max(0, start - 200), start))) return null;
+  // Already lowered: `(typeof x === "string" ? x : x.variant)`.
+  const escOp = operand.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  if (new RegExp(`typeof\\s+${escOp}\\s*===\\s*"string"\\s*\\?\\s*${escOp}\\s*:\\s*$`).test(out.slice(0, start))) return null;
+  const trivial = /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(operand);
+  return { start, text: lowerVariantTagRead(operand, trivial, optional) };
+}
+
+/** `_scanChainStartLeft`, `?.`-aware: the start of the member / call / index chain ending at `endIdx`. */
+function scanVariantOperandStart(s: string, endIdx: number): number {
+  let pos = endIdx;
+  let chainStart = endIdx;
+  while (pos >= 0) {
+    while (pos >= 0 && /\s/.test(s[pos])) pos--;
+    if (pos < 0) break;
+    const c = s[pos];
+    if (c === ")" || c === "]") {
+      const o = c === ")" ? _findMatchingOpenLeft(s, pos, "(", ")") : _findMatchingOpenLeft(s, pos, "[", "]");
+      if (o === -1) return -1;
+      chainStart = o;
+      pos = o - 1;
+      // `x?.(…)` / `x?.[…]`
+      let q = pos;
+      while (q >= 0 && /\s/.test(s[q])) q--;
+      if (q >= 1 && s[q] === "." && s[q - 1] === "?") { pos = q - 2; continue; }
+      // A grouping paren (nothing callable to its left) is the chain base.
+      if (c === ")" && !(q >= 0 && /[A-Za-z0-9_$)\]]/.test(s[q]))) return chainStart;
+      if (c === "]" && !(q >= 0 && /[A-Za-z0-9_$)\]]/.test(s[q]))) return chainStart;
+      if (q >= 0 && /[A-Za-z0-9_$]/.test(s[q])) {
+        // A keyword before a grouping paren (`return (x)`, `typeof (x)`) is not a callee.
+        let w = q;
+        while (w >= 0 && /[A-Za-z0-9_$]/.test(s[w])) w--;
+        if (PAREN_PRECEDING_KEYWORDS.has(s.slice(w + 1, q + 1))) return chainStart;
+      }
+      continue;
+    }
+    if (/[A-Za-z0-9_$]/.test(c)) {
+      while (pos >= 0 && /[A-Za-z0-9_$]/.test(s[pos])) pos--;
+      chainStart = pos + 1;
+      let scan = pos;
+      while (scan >= 0 && /\s/.test(s[scan])) scan--;
+      if (scan >= 0 && s[scan] === ".") {
+        // `a.b` / `a?.b` — keep walking (a `..` spread or a number's `.` ends the chain).
+        let prev = scan - 1;
+        if (prev >= 0 && s[prev] === "?") prev--;
+        if (prev >= 0 && s[prev] === ".") return chainStart;
+        pos = prev;
+        chainStart = scan;
+        continue;
+      }
+      if (scan >= 0 && s[scan] === "@") chainStart = scan;
+      return chainStart;
+    }
+    return chainStart;
+  }
+  return chainStart;
+}
+
 export function rewriteEqualityOps(expr: string): string {
   return lowerEqualityOps(expr);
 }
@@ -2784,6 +2978,9 @@ const clientPasses: RewritePass[] = [
   (s, _ctx) => rewriteInlineFunctionBodies(s),
   // Pass 18
   (s, _ctx) => rewriteEqualityOps(s),
+  // Pass 19 (S470) — a `.variant` value read → the variant tag read (last: it reads
+  // the finished JS, after the equality lowering wrapped its operands).
+  (s, _ctx) => rewriteVariantTagReads(s),
 ];
 
 // ---------------------------------------------------------------------------
@@ -2852,6 +3049,8 @@ const serverPasses: RewritePass[] = [
   (s, _ctx) => rewriteFnKeyword(s),
   // Pass 15
   (s, _ctx) => rewriteInlineFunctionBodies(s),
+  // Pass 16 (S470) — a `.variant` value read → the variant tag read (client Pass 19).
+  (s, _ctx) => rewriteVariantTagReads(s),
 ];
 
 // ---------------------------------------------------------------------------

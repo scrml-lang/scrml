@@ -6,7 +6,7 @@ import { isMetaKind } from "../types/ast.ts";
 import { emitLogicNode } from "./emit-logic.js";
 import { emitEnumVariantObjects } from "./emit-client.js";
 import { isServerOnlyNode, containsSqlOrTransaction } from "./collect.ts";
-import { rewriteNotKeyword, rewriteIsOperator } from "./rewrite.ts";
+import { rewriteNotKeyword, rewriteIsOperator, rewriteVariantTagReads } from "./rewrite.ts";
 import { lowerEqualityOps } from "./string-equality-lowering.ts";
 import type { CompileContext } from "./context.ts";
 // Seam-A colorless-async (GITI-037) — the structured async-fn emitter + its
@@ -1940,7 +1940,7 @@ export function generateLibraryJs(
           // Rewrite scrml `not`/`is not`/`is some`/`is .Variant` keywords to JS equivalents
           // Apply per-line, skipping comment lines to avoid mangling English text
           blockText = blockText.split("\n").map(line =>
-            line.trimStart().startsWith("//") ? line : rewriteIsOperator(rewriteNotKeyword(line))
+            line.trimStart().startsWith("//") ? line : rewriteVariantTagReads(rewriteIsOperator(rewriteNotKeyword(line)))
           ).join("\n");
           // §45.1 / §45.4 (S468) — this verbatim path re-printed scrml `==` / `!=`
           // as JS LOOSE `==` (`export const SAME = { a: 1 } == { a: 1 }` was
@@ -2147,7 +2147,7 @@ export function generateLibraryJs(
         // Rewrite scrml `not`/`is not`/`is some`/`is .Variant` keywords to JS equivalents
         // Apply per-line, skipping comment lines to avoid mangling English text
         text = text.split("\n").map(line =>
-          line.trimStart().startsWith("//") ? line : rewriteIsOperator(rewriteNotKeyword(line))
+          line.trimStart().startsWith("//") ? line : rewriteVariantTagReads(rewriteIsOperator(rewriteNotKeyword(line)))
         ).join("\n");
 
         lines.push(text);

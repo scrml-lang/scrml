@@ -1870,12 +1870,15 @@ function emitLit(node: LitExpr, ctx: EmitExprContext): string {
   // structural-emitter). It is now emitted from the PARSED template — quasi SOURCE
   // text + each `${…}` as an ExprNode — never by re-scanning template text.
   // Gated on an `@` in the source: a template with no cell read keeps its raw bytes.
+  // S470 (s470-unit-variant-tag-read) — or a `.variant` read in it: the raw bytes
+  // would keep the plain member read, which is `undefined` on a unit variant
+  // (emitMember lowers it to the tag read only when the read is emitted from the tree).
   if (
     node.litType === "template" &&
     ctx.mode !== "server" &&
     typeof node.raw === "string" &&
     node.raw.includes("${") &&
-    node.raw.includes("@")
+    (node.raw.includes("@") || /\.\s*variant\b/.test(node.raw))
   ) {
     const structured = emitTemplateLitStructured(node, ctx);
     if (structured !== null) return structured;

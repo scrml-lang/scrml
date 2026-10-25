@@ -4,6 +4,8 @@
 // PASS-DENY / PASS-REFUSED / PASS-500 (a fix that silently stopped working, or a newly-refused valid
 // program) turns the suite red, and so does a refused shape that starts compiling (re-measure it, then
 // re-pin). Regenerate from `classify.js --json <family>/` — never by hand-editing to make the suite pass.
+import { R16_PINNED } from "./r16-pinned.js";
+
 export const PINNED_CLASS = {
   "s4/return match": "PASS",
   "s4/return match (newline arms)": "PASS",
@@ -822,4 +824,6 @@ export const PINNED_CLASS = {
   "f13/engine message arm tests a server call": "PASS-REFUSED",
   "f13/when body tests an async helper": "PASS",
   "f13/engine opener effect= tests an async helper": "PASS-DENY",
+  // S470 s470-unit-variant-tag-read — r16-shapes.js (s19 / f22 / l14 / t14), every shape pinned (r16-pinned.js).
+  ...R16_PINNED,
 };

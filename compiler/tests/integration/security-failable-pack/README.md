@@ -36,7 +36,7 @@ SERVER function is judged end to end.
 - a shape not in `KNOWN_FAIL` / `BY_DESIGN_LOGS_IN` logs in on a wrong password;
 - a `KNOWN_FAIL` shape stops doing so (it was fixed: delete the entry);
 - a shape not in `UNJUDGED` comes out `UNJUDGED`, or an `UNJUDGED` one starts being judged;
-- the corpus stops holding exactly 2265 shapes; a list entry names no shape. Plus S469 s469-server-return-match-await (457 shapes): s4–s10 server, f1–f7 fullstack, l1–l5 library, t1–t5 tool — a failable `match` subject awaited in every position, `fail` payloads keyed per enum in every emission mode, one resolver for a callee's error enum, and the `_ e` whole-error binder allow-list.
+- the corpus stops holding exactly 2383 shapes; a list entry names no shape. Plus S469 s469-server-return-match-await (457 shapes): s4–s10 server, f1–f7 fullstack, l1–l5 library, t1–t5 tool — a failable `match` subject awaited in every position, `fail` payloads keyed per enum in every emission mode, one resolver for a callee's error enum, and the `_ e` whole-error binder allow-list.
 
 It deliberately does NOT pin each shape's class: a shape moving from `PASS-REFUSED` to `PASS` is a
 compiler improvement, not a regression.
@@ -332,3 +332,31 @@ Shape 6 is judged `accepted` (pack.js `nav.judge`): its floor is "a chunk that n
 | s469-structural-else-guard round 5 | 543 (+4 PASS) | 0 — no attribute token is ever silently skipped (E-ATTR-001); the sigil exemption exact |
 
 `g-structural-element-if-chain-and-show-composition-nominal`, `g-if-on-structural-element-silently-ignored`.
+
+## Measured (S470 s470-unit-variant-tag-read — r16: s19 / f22 / l14 / t14; 118 shapes)
+
+`r16-shapes.js`: a `.variant` read off a UNIT enum variant value. A unit variant is emitted as its bare
+tag string (§51.3.2), a payload variant as `{ variant, data }`, so the plain JS `x.variant` read
+`undefined` off a unit variant and `x.variant == "Gone"` disagreed with `x is .Gone` — a "reject when
+Gone" gate logged the wrong password in (lane B review, s470-lb4 b12 V2). Every value source (a return,
+a unit / `.`-shorthand literal, a call read directly, a typed parameter, an object / struct field, a tape
+element, a `for … of`, a `match` result, a callback, a function expression, `?.`, a template, an import,
+a cell) and, fullstack only, every client position outside a function body (markup interpolation,
+derived cell, `if=`, `for … lift` row, inline / block handler, `when` body, a `match` arm lowered from
+text). Plus `x is .Denied` in a `match` arm lowered from text — the text path wrote `x === "Denied"`,
+false for a payload variant (f22 / l14 FAIL on base); it now takes `lowerVariantCheck`. VALID controls: the error envelope's `e.variant`, a payload variant, `is .Gone` (also in a function
+value), and an object with its own `variant` field (string, number, written through `s.variant = …`).
+
+| tree | PASS | UNJUDGED | FAIL |
+|---|---|---|---|
+| base `d582ae04f` | 28 (the VALID controls; s19's arm `is`) | 1 | **88** — every other shape |
+| after | 116 | 1 | 0 |
+
+(+1 PASS-REFUSED on both trees: `t14/14 match arm is .Denied (payload)`, E-CODEGEN-INVALID-LOGIC.)
+
+A `.variant` VALUE read is lowered to the variant tag read (`typeof x === "string" ? x : x.variant`,
+`is-predicate-lowering.ts lowerVariantTagRead`) in the structured emitter (`emitMember`) and, for text the
+structured emitter never sees, by the last pass of both string pipelines (`rewrite.ts
+rewriteVariantTagReads`); a place (`x.variant = …`, `++`, `delete`, a method call) keeps the plain
+member. The UNJUDGED shape is `l14/10 imported function` (`g-library-tool-cross-file-import-source-path-s469`).
+
