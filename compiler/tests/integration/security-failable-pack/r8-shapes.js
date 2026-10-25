@@ -223,7 +223,29 @@ function fullstackPages() {
 <button id="right" onclick=noop("r")>go</button>
 <p id="out">\${@msg}</p>
 `;
-  return [["6 M1c onclick expr arrow", src, undefined], ["7 EF1 engine opener effect= e.reason", ef, undefined]];
+  // S470 fix round 4 — a `!{}` in a markup `<match>` arm whose body holds an `<each>` (the arm is
+  // blanked by the AST builder and re-read from text; review F1): in the row, in a component, and in
+  // a sibling `${ function … }` the row calls.
+  const head = `\${
+    ${ENUM}
+    type Ph:enum = { A, B(n: number) }
+    server function wrap(p)! -> AuthErr {
+        if (p != "secret") fail AuthErr::Denied("bad")
+        return true
+    }
+}
+<msg> = "init"
+<ph>: Ph = .A
+<xs> = [{ id: 1 }]
+`;
+  const row = (mk) => `<ul><each in=@xs key=@.id as x><li>${btns(mk)}</li></each></ul>`;
+  const arm = (body) => `<match for=Ph on=@ph>\n  <A>${body}</>\n  <B n>b</>\n</match>`;
+  const f1a = `${head}${arm(row((p) => `\${() => ${HS(p)}}`))}\n<p id="out">\${@msg}</p>\n`;
+  const f1b = `${head}const Card = <div props={ label: string }>\n  ${arm(row((p) => `\${() => ${HS(p)}}`))}\n</>\n<Card label="a"/>\n<p id="out">\${@msg}</p>\n`;
+  const f1c = `${head}${arm(`\${ function f(p) { ${HS("x").replace('"x"', "p")} } }${row((p) => `f("${p}")`)}`)}\n<p id="out">\${@msg}</p>\n`;
+  return [["6 M1c onclick expr arrow", src, undefined], ["7 EF1 engine opener effect= e.reason", ef, undefined],
+    ["8 F1a each in a <match> arm", f1a, undefined], ["8 F1b <match> arm each in a component", f1b, undefined],
+    ["8 F1c <match> arm each beside a logic fn", f1c, undefined]];
 }
 
 export function shapesFor(side) {

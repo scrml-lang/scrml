@@ -735,4 +735,9 @@ export const PINNED_CLASS = {
   "t6/7 P7 default with nested !{} in arm": "PASS-REFUSED",
   "t6/7 N2 local const w = wrapBig": "PASS-REFUSED",
   "t6/7 N4 named-field match, local const": "PASS-REFUSED",
+  // S470 fix round 4 (review of eb0d5677a, F1) — r8 "8 …" (fullstack): on eb0d5677a (and on main
+  // 915b6775f) F1a / F1b FAIL, F1c PASS-DENY (its function is not in the row's scope at run time).
+  "f8/8 F1a each in a <match> arm": "PASS-REFUSED",
+  "f8/8 F1b <match> arm each in a component": "PASS-REFUSED",
+  "f8/8 F1c <match> arm each beside a logic fn": "PASS-REFUSED",
 };

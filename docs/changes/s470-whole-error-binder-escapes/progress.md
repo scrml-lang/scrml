@@ -183,8 +183,8 @@ COVERED BY A TREE TWIN the walk reaches (the text is a copy): `expr`/`exprNode`,
 `condition`/`condExpr`, `iterable`/`iterExpr`, `if`/`ifExpr`, `for`/`forExpr`, `args`/`argsExpr`,
 `update`/`updateExpr`, `header`/`headerExpr`, `result`/`resultExpr`, any `x`/`xExpr`/`xNode`;
 whole-declaration source copies `function-decl.raw`, `export-decl.raw`, `component-def.raw`, `escape-hatch.raw`;
-`match-block.armsRaw` (arms are `bodyChildren` / `armBodyChildren`; verified with a `<match>` probe);
-`each-block.bodyRaw` (children); `_reparseEachArmBodyRaw`; engine `rulesRaw` (source copy).
+~~`match-block.armsRaw`; `_reparseEachArmBodyRaw`~~ — FALSE as written (round-4 review F1): see round 4 below;
+`each-block.bodyRaw` (children); engine `rulesRaw` (source copy).
 REFUSED-ON-FAILABLE elsewhere (`refuseFailableInTextSlot`: any failable call -> E-ERROR-002, so no `!{}` can
 stand): engine `derivedExprText`, `inlineMatchBody`, `ifRaw`.
 NOT CODE: `value` (string literals, markup text, comments).
@@ -205,3 +205,34 @@ const-decl.init, match-block.armsRaw, escape-hatch raw/bodyRaw — all in the li
   unchanged); snippet 113/0; claim 18/0; compile-floor PASS; md-shim current; conflict-marker PASS;
   SPEC-INDEX OK; delta-lint PASS; s34 --check-new PASS; bootstrap-severity current; TodoMVC gauntlet +
   node --check OK; browser-baseline PASS. `ci-shards needs` not runnable in the sandbox (ci.yml untouched).
+
+## Fix round 4 (adversarial review of eb0d5677a; ~/.cache/scrml/review/s470-l1d/)
+- F1 HIGH FIXED (review's root held). A markup `<match>` arm whose body holds an `<each>` is BLANKED by the
+  AST builder (children: [], text in `_reparseEachArmBodyRaw`); the checker re-parses it twice — `_reNodes`
+  (the read-side walk) and `walkCodegenCopy` (readBareArmBody / readShorthandBody: the nodes CODEGEN LOWERS).
+  Neither was registered, and the coverage list claimed both texts covered. Now: both node lists are pushed
+  to `_wholeBinderVisited` (the post-walk audits the SAME objects), and `armsRaw` / `_reparseEachArmBodyRaw`
+  count as covered ONLY when their parse was registered (an arm with a `!{` whose copy is empty must be held
+  by its `armBodyChildren` wrapper's children or registered re-parse) — else E-TYPE-031.
+  Two consequences fixed with it: (1) those re-read copies re-tokenize `:>` as `: >`, so the arm parser keeps
+  the separator at the head of the handler (`: > e is .Denied …`) — `wholeBinderArmHandler` drops that
+  remnant (else every valid arm in such a copy was refused); (2) a nested `<match>` in a copy is a native
+  `LogicEscape` with `bodyText` — read with the statement reader and audited.
+  Shapes F1/each-in-match-arm-BAD, match-in-component-BAD, each-sibling-logic-fn-BAD: refused (E-TYPE-004);
+  c11 / c12 (15 shapes): as main 915b6775f (all BAD refused). Pack: r8 "8 F1a–F1c" (fullstack; F1a/F1b FAIL
+  on eb0d5677a AND on main in this server-call form, F1c PASS-DENY). Unit tests added.
+- F3 MED FIXED. `<md>` prose (`text._mdText`) is not code. The catch-all tests only a field's CODE: string /
+  template text / comments blanked by the parser's own lexer (`blankLiteralTextInSource`, which returns the
+  text unchanged when it cannot lex it, so an unlexable field still refuses). F3/md.scrml, F3/app.scrml,
+  c15 FP1/FP16/FP14, c16 FQ3: clean. c14 P3 / P8 (a real `!{}` in a struct default, dropped by main): still
+  refused, as allowed.
+- Not mine (filed by the PA): F2 (try body cut at the first `}`), N1 (`<match>` shorthand `$`).
+- Twin-list audit by probe (round-4 `twins.mjs`, one BAD `!{}` per position; each must be refused): const
+  init, if / while condition, for-of iterable, C-style for parts, return operand, bare-expr, match header,
+  match inline arm result, lift operand, onclick single / multi-statement / block arrow, attribute value,
+  markup interpolation, `if=`, `<each>` row, `export const` init, function param default — ALL AUDITED
+  (E-TYPE-004). Component body: refused by E-ERROR-002 before the audit.
+- vs main 915b6775f on the l1d new/ set: every change is a BAD shape now audited, except OK controls that
+  already failed to compile on main (c9 S5/S9, c17 K2/K4: E-ERROR-002 / E-PARSE-001 plus E-TYPE-031) and the
+  allowed P3/P8. vs the reviewer's eb0d5677a run of all earlier sets: c1 M6 now precise (E-TYPE-004 BAD,
+  OK no longer falsely refused), c5 K6 gains E-TYPE-031 (BAD shape). Only FAILs anywhere: Q4 x4 (lane B).

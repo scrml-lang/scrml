@@ -341,3 +341,45 @@ describe("fix round 3 #4 — `arguments` is read from the tree", () => {
     });
   }
 });
+
+// S470 fix round 4 — the review of eb0d5677a.
+const RAWPAGE = (body, logic = "") => `\${
+    type AuthErr:enum = { Denied(reason: string), Gone }
+    type Ph:enum = { A, B(n: number) }
+    function wrap(p)! -> AuthErr {
+        if (p != "secret") fail AuthErr::Denied("bad")
+        return true
+    }
+    ${logic}
+}
+<msg> = "init"
+<ph>: Ph = .A
+<xs> = [{ id: 1 }]
+${body}
+<p id="out">\${@msg}</p>
+`;
+const rawCodes = (src) => codesOfFiles({ "app.scrml": src });
+describe("fix round 4 F1 — a `!{}` in a markup `<match>` arm holding an `<each>` is audited", () => {
+  const ROW = (arm) => `<match for=Ph on=@ph>\n  <A><ul><each in=@xs key=@.id as x><li><button onclick=\${ @msg = wrap("x") !{ ${arm} } }>b</button></li></each></ul></>\n  <B n>b</>\n</match>`;
+  test("in the row → E-TYPE-004", () => {
+    expect(rawCodes(RAWPAGE(ROW(`_ e :> e.reason == "bad" ? "rejected" : "LOGGED IN"`)))).toContain("E-TYPE-004");
+  });
+  test("in a component → E-TYPE-004", () => {
+    expect(rawCodes(RAWPAGE(`const Card = <div props={ label: string }>\n  ${ROW(`_ e :> e.reason == "bad" ? "rejected" : "LOGGED IN"`)}\n</>\n<Card label="a"/>`))).toContain("E-TYPE-004");
+  });
+  test("ALLOWED: a valid whole-error use in the row", () => {
+    expect(rawCodes(RAWPAGE(ROW(`_ e :> e is .Denied ? "rejected" : "LOGGED IN"`)))).toEqual([]);
+  });
+  test("ALLOWED: a `!{` only inside a string in the arm", () => {
+    expect(rawCodes(RAWPAGE(`<match for=Ph on=@ph>\n  <A><p>\${"!{"}</p><ul><each in=[1] as x><li>x</li></each></ul></>\n  <B>b</>\n</match>`))).toEqual([]);
+  });
+});
+
+describe("fix round 4 F3 — a literal `!{` in prose or a string is not a handler", () => {
+  test("ALLOWED: <md> prose", () => {
+    expect(rawCodes("<md>\nHandle a failure with `!{ _ e :> … }` — see §18.6.1.\n</md>\n")).toEqual([]);
+  });
+  test("ALLOWED: a struct field's string default", () => {
+    expect(rawCodes(`\${\n    type Msg:struct = { text: string, hint: string = "use !{ } to handle errors" }\n    const m: Msg = { text: "a" }\n}\n<p id="out">\${m.hint}</p>\n`)).toEqual([]);
+  });
+});
