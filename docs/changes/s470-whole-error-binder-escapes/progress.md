@@ -92,3 +92,34 @@
 - 2026-10-24 fix-round gates: unit+integration+conformance --bail 40426 pass / 0 fail / 125 skip / 18 todo;
   types:check OK (181, unchanged); R26 913 files base 915b6775f vs branch: diagnostic codes IDENTICAL (0
   newly-rejected). DONE.
+
+## Fix round 2 (review of frozen 43d162d52; probes ~/.cache/scrml/review/s470-l1b/ s6–s16)
+- ROOT FIX (binding shape): the whole-error binder audit is now keyed on the `!{}` NODE. ONE call site:
+  `_checkExpressionPositionHandlers` (the existing post-walk generic walker over every node of the file,
+  already used for expression-position handler exhaustiveness) calls `auditWholeBinderArms` once per `!{}`
+  — a statement `guarded-expr` or an expression-position guard-marker call (`guardCallArmsRaw`) — at any
+  depth, with:
+  - scope: the scope the statement walk recorded for the nearest visited node (`visitNode` records
+    `_wholeBinderNodeScope`, one generic line); global if none;
+  - frames: params + bodies of the functions written as values between that node and the `!{}`
+    (`lambda`; `escape-hatch` bodies read with `escapeHatchBodyStatements`; function-decl param
+    defaults read with `parseExprToNode`) — empty frames valid;
+  - enum: the one the statement walk resolved for a statement `!{}` (`_wholeBinderGuardEnum`), else the
+    callee's via `failableCalleeErrorEnum`; unresolvable -> every binder use refused.
+  Arms the guard-arm reader (`parseGuardArmsFromRaw`) cannot read, and a parameter default the expression
+  parser cannot read, are REFUSED (E-TYPE-031). Inside bodies read from text only the audit runs (the
+  walker's exhaustiveness checks keep their original reach). REMOVED: the statement-case audit call and the
+  round-1 `checkLogicExprIdents` hatch hook (+ its module-level variable).
+- #1 HIGH FIXED (J1–J4) and #2 HIGH FIXED (E2/E5/E6/E8/E10, K3–K6, H6, M1c): by the root fix. E10 (a `!{}`
+  in a parameter default) needed the default-reading above.
+- #3 HIGH FIXED: `arguments` anywhere in an audited callee's body or parameter defaults is refused (tree,
+  with the body-text use count as the backstop) — D13, D14, AR3, AR5, AR6.
+- NEW (found by the probes, not in the brief): `arguments` in the ARM ITSELF (s7 AR1/AR2) — the arm is
+  lowered inside a function receiving the error, so `arguments[0].reason` read the whole error in ANY arm
+  (even `_ :>` with no binder). Logged a wrong password in on every side. FIXED: refused in every `!{}`
+  arm body (E-TYPE-031, impl#1 limitation).
+- #4 LOW (Q1 refused via E-CODEGEN-INVALID-LOGIC on fullstack/library — the B-form statement match there,
+  unrelated to the audit) and #5 (D3 destructured-param crash, filed above as
+  `g-impl1-destructured-param-crashes-whole-error-audit-s470`): no action.
+- pack: + r8 "6 …" (19 shapes x4 sides + fullstack-only M1c = 77), EXPECTED_SHAPE_COUNT 2080 -> 2157.
+  On 43d162d52: 60 FAIL / 17 PASS-REFUSED; on the branch: 77 PASS-REFUSED. Full pack 2160 pass / 0 fail.
