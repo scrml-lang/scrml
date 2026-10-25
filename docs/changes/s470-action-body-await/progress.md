@@ -204,3 +204,79 @@ Every **YES** row of the before-matrix now either refuses (E-VALUE-SERVER-CALL, 
   owner next names impl#1 codes, mint a provisional `E-IMPL1-…` code for "an action body impl#1 runs
   synchronously" (precedent: E-IMPL1-FAILABLE-FN-VALUE, S469) — the language allows these positions
   (§13.8 (i)), so the honest label is an impl#1 limit, and the row's "Not this code" sentence stays true.
+
+## Fix round 1 (adversarial review of 41255a64b, verdict FIX) — 2026-10-25
+
+Rebased onto origin/main d455f482e (docs-only delta: known-gaps / pr-reviews). Reviewer material:
+`~/.cache/scrml/review/s470-aw/` (repro/, shapes1–5.mjs, bin/run.mjs = the pack's `runShape`).
+
+**CORRECTIONS to the round-0 text above (D1, L3)** — these statements were false; they are kept above
+only as the record of what round 0 claimed:
+- "a whole cell write … awaited by the emitter's reactive-set lift" was claimed for every synchronous
+  host. FALSE for a runtime `^{ }`: it is lowered through the capability object
+  (`_scrml_reactive_set("ok", _scrml_cap.isOk(…))`), which the lift does not match (H1). The
+  exemption no longer applies there. It is now PROVEN by execution in every host where it is kept
+  (below).
+- "impl#1 awaits a one-call cell initializer `<v> = f()`": only its INITIAL write is awaited; its
+  `_scrml_init_set` reset thunk returns the pending Promise (`g-cell-init-reset-thunk-holds-promise-s470`,
+  below). The SPEC note that said so is gone with the revert of the E-VALUE-SERVER-CALL row.
+- R26 "compiler/tests/conformance" holds 0 `.scrml` files — the round-0 R26 did not cover conformance at
+  all. Re-run below over the top-level `conformance/` and `docs/`.
+
+| # | sev | status | evidence |
+|---|---|---|---|
+| ruling | — | DONE | user-voice S470 "Mint E-IMPL1 code (Recommended)". Action-position refusals report **E-IMPL1-ACTION-NOT-AWAITED** (new §34 row modelled on E-IMPL1-FAILABLE-FN-VALUE: "impl#1-only — provisional name, owner's call", "an impl#1 limit, not a language rule", the positions, the accepted shapes, the emission site, provenance). §13.8 gains a 5-line note after the "server Promise trap" paragraph naming the code. The §34 E-VALUE-SERVER-CALL row is reverted byte-for-byte to main (its "Not this code: … every §6.15 action position" stands). Render / value positions — an interpolation, an attribute, a derived formula, a cell DECLARATION's initializer — keep E-VALUE-SERVER-CALL. Message: names the position and the fix (event handler / a `function` a handler calls / `on mount { }`, or a `<request>` into a cell); it no longer recommends the whole cell write. SPEC-INDEX regenerated; s34-census --check-new PASS. |
+| — | — | NOTE | a plain `const`/`let` at module init (#1547 r1 #2, "the initializer of `ok`") and a module-scope assignment (#1547 r2 #2) are statements of a body-top statement list — action positions — so they now read E-IMPL1-ACTION-NOT-AWAITED, not E-VALUE-SERVER-CALL (R26: 3 files change code, none newly rejected). The #1547 unit tests now assert the new code. |
+| H1 | HIGH | FIXED | `^{ @ok = isOk(@pw) }` (and under `if` / `for`) compiled and logged in on 41255a64b (reviewer shapes2/3: 6 FAIL). `liftedWrite` returns false while a `^{ }` body is walked (`noLift`) → refused. Proof of the KEPT exemption, by execution (`~/.cache/scrml/s470/await/lift-proof.mjs`, 12 hosts × plain / under if / under for / helper / `!{}`): request, timer, poll, state effect=, onTransition, message arm, when → PASS (wrong rejected, right logs in); timeout, `<div>` / bare module init, `<onMount>` tag, opener effect= → PASS-DENY with wrong="" (boot-only, run before the click; a pending Promise would have rendered LOGGED IN, so the write was awaited); request under if / for / `!{}` → PASS-DENY (not re-run on `deps=`; not a gate). One FAIL found there — `when` + `!{}` write (`@ok = isOk(@pw) !{ _ :> false }` lowered into a synchronous value IIFE) — now refused (asyncWaits, `whenHost`). |
+| H2 | HIGH | FIXED | a LOCAL function whose body waits (const / let lambda, block lambda, `function` value, nested `function`, lambda over a helper, IIFE), declared in a state effect= / `<onTransition>` / message arm / `^{ }` / `when` body / opener effect= and called (reviewer shapes5: 44 FAIL; shapes4: 2). In the synchronous local bodies (engine bodies, `^{ }`: `localScope`) a `function` declaration or a function value whose body waits is refused where it is declared, and a waiting function read as a value (`const f = isOk`) too (`valueRefWaits`; a member's property name is not a read — S469 r2). In the two ASYNC hosts (`when` body, opener effect=) a new walk (`asyncHost` / `asyncWaits`) accepts only an own-level call of a function the host awaits (`awaitedInAsyncHost` = scheduling `_clientServerFnNames` ∪ the client async set — the two sets emit-reactive-wiring / emit-client hand those emitters) and refuses a waiting call inside any nested function (callback, lambda, `function`, IIFE), a waiting function read as a value, a member call off a namespace import (L2), and in a `when` body a `!{ }`-handled call. The `when` body is read through engine-body-reader's parse of its `bodyRaw` (owner-cached); the opener through the same cached parse emit-engine lowers. |
+| sync callbacks | HIGH | FIXED | `[@pw].forEach(x => { if (isOk(x)) … })` in a `when` body / the opener (shapes1/2: 3 FAIL) — refused by the nested-function rule. Retires the round-0 candidate `g-sync-callback-in-async-host-client-s470` (it was HIGH, not LOW). |
+| L1 | LOW | RECORDED | `allowed(@pw).then((v) => { @ok = v })` in a timer / `<onTransition>` is refused; it ran correctly on base. Not exempted: §13.8 makes `.then` off an awaited waiting value E-ASYNC-CALL-PROMISE-METHOD, so blessing the Promise-chain shape in the one place impl#1 happens not to await would bless a form the language refuses. Candidate `g-then-chain-in-sync-action-body-refused-s470` (LOW, over-refusal). |
+| L2 | LOW | FIXED (refused) | `L.isOk(…)` (namespace import) in a `when` body: un-awaited and `L` undefined at run time. Refused by `asyncWaits` (namespace member call); reviewer shapes1 "import namespace when test" PASS-DENY → PASS-REFUSED. The `L` undefined-at-run-time half is not this lane: candidate `g-namespace-import-undefined-in-when-body-s470` (MED). |
+| L3 | — | FIXED | R26 re-run (below). |
+| D1 | — | FIXED | the two claims, corrected above; SPEC row reverted; the new row states only what the lift-proof run showed. |
+| M1 | — | RECORDED | candidate below. |
+
+Over-refusals found by the reviewer shapes (fail closed, recorded): a local function that only WRITES a
+cell (`const f = () => { @ok = isOk(@pw) }; f()`, shapes5 "lambda write") PASS → PASS-REFUSED in state
+effect= / onTransition / arm / when (the write inside a local function is lifted by the post-pass, but
+the walk does not follow the lambda to its calls).
+
+### Reviewer shapes on the new head (bin/run.mjs, same shapes)
+
+shapes1 0 FAIL / 103 · shapes2 0 / 34 · shapes3 0 / 68 · shapes4 0 / 80 · shapes5 0 / 80 (head 41255a64b:
+2, 2, 5, 2, 44 FAIL). Every class change vs the reviewer's head runs is FAIL → PASS-REFUSED, PASS-DENY →
+PASS-REFUSED (onTdirect ×7, namespace-when, opener lambda write), or the "lambda write" PASS → PASS-REFUSED
+over-refusal above. No PASS → FAIL.
+
+### Pack
+
+Family `f10` (+37): H1 ×3, H2 local functions × 6 hosts (the `^{ }` block-lambda / `function`-value
+forms omitted: already E-META-001 on 41255a64b), IIFE ×2, callbacks ×3, `when` `!{}` ×1. Measured with
+classify.js on an extracted 41255a64b tree: **37/37 FAIL**; this branch: **37 PASS-REFUSED**.
+EXPECTED_SHAPE_COUNT 1953 → 1990, pinned, README updated (f9's refusals now read
+E-IMPL1-ACTION-NOT-AWAITED; pinned classes are unchanged — the pin compares the class).
+
+### R26 (L3) — examples, samples, stdlib, benchmarks, conformance/, docs/ (3615 files)
+
+Base = extracted 4058bd052 compiler (= origin/main d455f482e's compiler: the delta is docs-only) + an
+in-tree stdlib copy + scrml.toml; branch = this worktree; corpus files = this worktree for both.
+- newly rejected: **0**; newly clean: 0 outside stdlib.
+- code changes on already-refused files: 3, each E-VALUE-SERVER-CALL → E-IMPL1-ACTION-NOT-AWAITED for
+  the same module-init site (a `const` initializer / object method at module init):
+  docs/changes/s441-async-escape-f4-f5/review-repro/t2-const-derived/case.scrml,
+  docs/changes/s441-async-escape-f4-f5/review-repro/tl-obj-method/case.scrml,
+  samples/compilation-tests/gauntlet-r10-rails-blog.scrml.
+- stdlib diffs in the whole-corpus run are harness artefacts (a worktree stdlib file compiled by the base
+  compiler is outside its tree → not stdlib: E-ASYNC-NOT-IN-SCRML / E-NAME-COLLIDES-RESERVED-PREFIX).
+  Re-run of stdlib/ with each compiler over its OWN in-tree copy: 54 files, **0 diffs**.
+
+### Candidate gaps added by fix round 1
+
+- `g-when-changes-stale-response-s470` (M1, MED, pre-existing, locus compiler/runtime/runtime-template.js
+  `_scrml_when_changes` ~5417): an async `when` body has no stale-response guard — `@pw` right then wrong
+  in quick succession: the right password's response lands last and the page ends LOGGED IN (reviewer
+  bin/race.mjs). The `<request>` settle machine has a seq guard; `when` has none.
+- `g-then-chain-in-sync-action-body-refused-s470` (L1, LOW, over-refusal) — above.
+- `g-namespace-import-undefined-in-when-body-s470` (L2 run-time half, MED) — above.
+- `g-local-fn-cell-write-refused-s470` (LOW, over-refusal) — the "lambda write" shapes above.
+- RETIRED: `g-sync-callback-in-async-host-client-s470` (fixed by refusal in this round).
