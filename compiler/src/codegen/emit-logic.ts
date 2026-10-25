@@ -340,7 +340,7 @@ export interface EmitLogicOpts {
    * `when-effect` branch ONLY. A `when` body awaited a server call but not a call of a client
    * helper that reaches one (`if (allowed(@pw))` tested the helper's pending Promise).
    */
-  whenClientAsyncFnNames?: Set<string> | null;
+  whenClientAsyncFnNames?: ReadonlySet<string> | null;
   /**
    * #284: names of LOCAL ALIAS bindings that resolve to a sibling server-fn PEER
    * through a first-class reference (`const p = groupByJob; … p(rows)` / a
@@ -5485,7 +5485,7 @@ function _emitLogicNode(node: any, opts: EmitLogicOpts): string {
         : (opts.whenServerFnNames ?? baseCtx.serverFnNames ?? null);
       // s470-action-body-await — a call of an async-coloured client helper is awaited the same way
       // (emit-expr `emitCall`'s client-peer branch, which reads `clientAsyncFnNames`).
-      const whenHelperNames: Set<string> | null = isServer ? null : (opts.whenClientAsyncFnNames ?? null);
+      const whenHelperNames: ReadonlySet<string> | null = isServer ? null : (opts.whenClientAsyncFnNames ?? null);
       const whenHasAsync = !!whenSrvNames || (!!whenHelperNames && whenHelperNames.size > 0);
       const whenCtx = isServer || !whenHasAsync
         ? { ...baseCtx, clientAsyncBody: false }

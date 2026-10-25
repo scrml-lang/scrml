@@ -2126,7 +2126,7 @@ export function emitEngineOpenerEffect(
   meta: EngineMetadata,
   emitOpts: import("./emit-logic.ts").EmitLogicOpts,
   serverFnNames: Set<string> | null = null,
-  clientAsyncFnNames: Set<string> | null = null,
+  clientAsyncFnNames: ReadonlySet<string> | null = null,
 ): string[] {
   const lines: string[] = [];
   const openerEffect = meta.openerEffect;
@@ -2257,7 +2257,7 @@ function fileEngineEmitOpts(fileAST: any): import("./emit-logic.ts").EmitLogicOp
   } as import("./emit-logic.ts").EmitLogicOpts;
 }
 
-export function emitEngineOpenerEffectsForFile(fileAST: any, serverFnNames: Set<string> | null = null, clientAsyncFnNames: Set<string> | null = null): string[] {
+export function emitEngineOpenerEffectsForFile(fileAST: any, serverFnNames: Set<string> | null = null, clientAsyncFnNames: ReadonlySet<string> | null = null): string[] {
   const decls = collectC12EngineDecls(fileAST);
   if (decls.length === 0) return [];
   // Only build the (non-trivial) engine-aware opts if at least one engine
