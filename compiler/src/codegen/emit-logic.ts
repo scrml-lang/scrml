@@ -42,6 +42,7 @@ import { sqlHoldsOneStatement, refuseMultipleStatements, judgeDriverCallDetail, 
 import type { ExprNode } from "../types/ast.ts";
 import { parsedParamDefault, analyzedParamDefault, paramDefaultParseProblem, paramDefaultSpan } from "../at-refs.ts";
 import { isAsyncCalleeName, type AsyncNameFacts } from "./async-combinators.ts";
+import { mentionedNames } from "../failable-value-calls.ts";
 
 // ---------------------------------------------------------------------------
 // Deep reactive wrapping helper (Reactivity Phase 1)
@@ -898,6 +899,29 @@ function emitArmBody(arm: LogicArm, errVar: string, machineBindings?: Map<string
     const code = emitExpr(node, _makeExprCtx(opts)).trim();
     return code.endsWith(";") ? code : code + ";";
   }
+  // S470 s470-nested-handler-await (SECURITY) — on the CLIENT the arm body is code
+  // that runs in the guarded statement's own host (§13.8 (i)): it is lowered with
+  // THAT statement's options (`armOpts`), so every async fact the host carries —
+  // the server-fn names, the client async set, the stdlib classifier inputs,
+  // `clientAsyncBody` — reaches the arm and a waiting call in it is awaited in place
+  // exactly where the guarded call itself is. The arm used to be lowered in an
+  // EMPTY context (`_makeExprCtx({})`, `rewriteBlockBody`, a nested guard re-parsed
+  // with `{ boundary: "client" }`): `check(p) !{ _ :> check("x") !{ _ :> false } }`
+  // emitted the inner call with no `await`, so the arm yielded a pending Promise —
+  // always truthy — and a wrong password logged in (lane C review F2). Where the
+  // host cannot be async, the waiting call is refused before emission
+  // (render-waiting-calls.ts: E-IMPL1-ACTION-NOT-AWAITED / E-VALUE-SERVER-CALL).
+  // The arm is its own block scope (as in `emitBlockArmValueToResult`); its
+  // statements neither read nor repoint an outer `~` slot.
+  // Only an ASYNC client host (`clientAsyncBody`, threaded from the function's own
+  // colouring — the same gate emit-expr's client await uses) gets the await path:
+  // in a synchronous host an `await` would be a syntax error, so the arm keeps its
+  // old lowering and the waiting call is refused by the non-awaitable-call drain
+  // (emit-functions `collectNonAwaitableAsyncCalls`) or the action-body walk.
+  const armOpts: EmitLogicOpts | null = opts && opts.clientAsyncBody === true
+    ? { ...opts, boundary: "client", machineBindings: machineBindings ?? opts.machineBindings ?? null,
+        declaredNames: new Set<string>(opts.declaredNames ?? []), tildeContext: undefined, exprPositionGuard: false }
+    : null;
   if (handler.startsWith("{") && handler.endsWith("}")) {
     const inner = handler.slice(1, -1).trim();
     if (!inner) return "";
@@ -907,13 +931,39 @@ function emitArmBody(arm: LogicArm, errVar: string, machineBindings?: Map<string
     // BS → TAB sub-pipeline so the nested guarded-expr becomes a real node and
     // emits correctly. Falls back to rewriteBlockBody if the re-parse fails.
     if (_handlerHasTopLevelGuardedExpr(inner)) {
-      const nested = _emitNestedGuardedArmBody(inner, { boundary: "client", machineBindings: machineBindings ?? null });
+      const nested = _emitNestedGuardedArmBody(inner, armOpts ?? { boundary: "client", machineBindings: machineBindings ?? null });
       if (nested) return nested;
+    }
+    // S470 — a block arm whose statements call a waiting function is lowered from
+    // its PARSED statements in the host's options (the reader the server arm and the
+    // value-block arm already use), so each such call is awaited in place. The text
+    // lowering below has no async facts at all.
+    if (armOpts && _armTextNamesAwaitedCallee(inner, armOpts)) {
+      const parsed = armBlockStatementsDetailed(handler);
+      if (parsed && parsed.ok && Array.isArray(parsed.stmts) && parsed.stmts.length > 0) {
+        const armSpan = (arm as { span?: { file?: string } }).span;
+        if (armSpan && typeof armSpan.file === "string") _anchorSpansAt(parsed.stmts, armSpan, (arm as { handlerSrcMap?: Array<[number, number, number]> }).handlerSrcMap ?? null);
+        return emitLogicBody(parsed.stmts, armOpts).filter((l: string) => l.trim() !== "").join("\n");
+      }
     }
     return rewriteBlockBody(inner, machineBindings ?? null);
   }
-  const rewritten = emitExprField(arm.handlerExpr, handler, _makeExprCtx({}));
+  const rewritten = emitExprField(arm.handlerExpr, handler, _makeExprCtx(armOpts ?? {}));
   return rewritten.trim().endsWith(";") ? rewritten.trim() : rewritten.trim() + ";";
+}
+
+/**
+ * S470 s470-nested-handler-await — does a client arm body's text name a function
+ * the host's options would await (a server function, a client async-coloured
+ * function, a Promise-returning import)? Read with the compiler's one name reader
+ * (`mentionedNames`: string contents and property names excluded). Over-inclusion
+ * only routes the arm through the parsed-statement lowering, never the reverse.
+ */
+function _armTextNamesAwaitedCallee(text: string, opts: EmitLogicOpts): boolean {
+  // The one asyncness rule, projected from the context the arm is lowered in.
+  const facts: AsyncNameFacts = { ...asyncNameFactsOf(_makeExprCtx(opts)), declaredNames: null };
+  for (const name of mentionedNames(text)) if (isAsyncCalleeName(name, facts)) return true;
+  return false;
 }
 
 /**
