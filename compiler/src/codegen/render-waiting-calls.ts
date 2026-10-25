@@ -92,6 +92,11 @@ export interface RenderWaitingFacts {
    * `globalThis.fetch(…)` member form.
    */
   hostNames?: ReadonlySet<string>;
+  /**
+   * The file's functions that wait ONLY because they reach a host Promise global (§13.7 item 2) —
+   * for the message (impl#1 does not emit them `async`).
+   */
+  hostOnlyReach?: ReadonlySet<string>;
   /** The `ident` nodes naming a host global that a local binding shadows: not the host global. */
   hostShadowed?: WeakSet<object>;
   filePath: string;
@@ -173,6 +178,9 @@ class RenderWalk {
   private describe(name: string): string {
     if (this.facts.serverNames.has(name)) return `server function \`${name}\``;
     if (this.facts.hostNames?.has(name)) return `the host \`${name}\`, which returns a Promise (§13.7 item 4)`;
+    if (this.facts.hostOnlyReach?.has(name)) {
+      return `\`${name}\`, which calls the host \`${[...(this.facts.hostNames ?? [])].join("` / `")}\` (a Promise-returning function: §13.7 item 2)`;
+    }
     if (this.facts.namespaceLocals.has(name)) return `\`${name}\` (a namespace import whose members impl#1 does not classify)`;
     return `\`${name}\`, which the compiler emits async (it calls a server function or a Promise-returning helper)`;
   }

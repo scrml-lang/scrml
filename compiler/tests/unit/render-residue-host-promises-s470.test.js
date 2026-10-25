@@ -148,4 +148,8 @@ describe("gaps 2 + 3 — the host `fetch` (§13.7 item 4) is a waiting value", (
     const r = compile(page(`<p><span if=\${fetch("/a")}>IN</span></p>`));
     expect(r.messages.join("\n")).toContain("the host `fetch`, which returns a Promise (§13.7 item 4)");
   });
+  test("a helper that reaches fetch is named as such (impl#1 does not emit it async)", () => {
+    const r = compile(page(`<p>\${probe(@pw)}</p>`, `    function probe(q) { fetch("/a?p=" + q)\n        return 1 }`));
+    expect(r.messages.join("\n")).toContain("`probe`, which calls the host `fetch` (a Promise-returning function: §13.7 item 2)");
+  });
 });

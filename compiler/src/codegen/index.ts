@@ -2826,6 +2826,8 @@ export function runCG(input: CgInput): CgOutput {
       for (const site of renderWaitingCallsOf(getNodes(fileAST as never) as unknown[], {
         waits: (n: string) => _rwWaits(n) || _rwServerAnywhere.has(n) || _rwClientAsync.has(n) || _rwHostReach.has(n),
         hostNames: _rwHostNames,
+        hostOnlyReach: new Set([..._rwHostReach].filter((n) => !_rwHostNames.has(n) &&
+          !(_rwWaits(n) || _rwServerAnywhere.has(n) || _rwClientAsync.has(n)))),
         hostShadowed: _rwHostShadowed,
         serverNames: _rwServerNames,
         namespaceLocals: namespaceImportLocalsOf(fileAST),
