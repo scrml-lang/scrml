@@ -114,6 +114,13 @@ describe("g-when-handler-multistatement-body-loses-ast-path-lowerings (S374)", (
       `    when @count changes {\n      @res = safeCallAsync(() => fetch("/x"))\n    }\n  }\n` +
       `  <p>\${@res}</p>\n</div>\n`;
     const { clientJs, errors } = compileToClient(src);
+    // S470 s470-render-residue-host-promises — the host `fetch` is a waiting value (SPEC §13.7 item 4 /
+    // §13.8 item 3), and a `when` body does not await a call inside a nested function, so impl#1 now
+    // refuses this body (E-IMPL1-ACTION-NOT-AWAITED) — fail closed, nothing emitted to strand an await in.
+    if (errors.some((e) => e.code === "E-IMPL1-ACTION-NOT-AWAITED")) {
+      expect(errors.map((e) => e.code)).toEqual(["E-IMPL1-ACTION-NOT-AWAITED"]);
+      return;
+    }
     noErr(errors);
     const m = clientJs.match(/_scrml_effect\(function\(\)\s*\{[\s\S]*?\}\);/g) || [];
     const effect = m.find((s) => /res/.test(s)) || "";
