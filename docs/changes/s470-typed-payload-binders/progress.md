@@ -303,6 +303,36 @@ old families were rewritten with it): r9 → **r11** (s14 / f17 / l9 / t9), r10 
 t10), r11 → **r13** (s16 / f19 / l11 / t11), round 3's r12 → **r14** (f20 / l12 / t12; no server family).
 EXPECTED_SHAPE_COUNT from this tree's own run: 2591 (the coordinator re-sums at landing).
 
+## Fix round 4 (adversarial review of 3620e8670: FIX; probes ~/.cache/scrml/review/s470-lb4/)
+- SCC-EXP FIXED (a round-3 regression). ONE return-inference engine (`inferFn`, keyed by (file,
+  function)) for this file AND its dependencies: Tarjan's algorithm finds each strongly connected group of
+  mutually-calling functions; when its head closes the group is solved once as a least fixpoint (every
+  member starts PENDING, re-inferred from the others' current values until no value changes; a group
+  that does not converge is ENUM_READ_LIMIT — fail closed) and every member is memoized. Inference count
+  (the new `enumReadInferenceCount()`, reset per run): scc10 20, scc20 40, scc24 48, scc26 52, the
+  400-function chain 400 — linear. Wall time scc24 0.04s (review: 101.8s on 3620e8670), chain 0.31s.
+  Unit tests: a size-bounded guard (≤ 4 bodies per function for 24 and 40-function groups) and the
+  round-3 order permutations (unchanged verdicts).
+- I1–I3 FIXED — the dependency environment's `fnReturnType` is the same engine: a dependency's local
+  helper, a cycle inside a dependency, and a function the dependency imports from another module
+  (`enumReadFnOwner`, through imports / named re-exports / `export *`) are inferred. [b11 I1 I2 I3]
+  Mutual recursion ACROSS two modules is an import cycle — E-IMPORT-002 (§21.3 "Circular imports SHALL
+  be a compile error") — and is refused there anyway.
+- DEEP-EXPR FIXED — the expression reader's bound is the shared ENUM_READ_DEPTH_LIMIT (256) and past it
+  returns ENUM_READ_LIMIT (E-TYPE-031, fail closed), not "unknown". A 34 / 40-deep ternary and a 40-long
+  `||` chain are read (E-TYPE-004); a 300-deep ternary is refused E-TYPE-031. Every other bound in the
+  reader returns the limit too (alias / import / re-export resolution, the fixpoint's iteration cap).
+  The E-TYPE-031 text now says "stops reading after 256 steps — a chain of type aliases / imports /
+  re-exports, or an expression nested that deep".
+- STAR-PREC FIXED — a module's own exports and its NAMED re-exports take precedence over `export *`
+  (two passes), for types and for functions. [k2 X7 refused, X6 allowed]
+- Pack: r15 (s18 / f21 / l13 / t13), 15 shapes, each FAIL on a 3620e8670 archive → PASS-REFUSED: D2 D3
+  D5 × 4 sides, fullstack I1 I2 I3. X7 and the cross-module cycle are unit-tested only (on 3620e8670 X7's
+  page bundle throws at load — it imports a TYPE through an `export *` module; the cross-module cycle is
+  E-IMPORT-002).
+- Merged origin/main 29fcaac8a (#1558, lane D's r9 s12 / f15 / l7 / t7): both families kept;
+  EXPECTED_SHAPE_COUNT 2680 + 341 = 3021, from a run (loadFamilies: 3021 shapes, ids unique).
+
 ## Candidate gaps (not filed here)
 1. A markup `<match>` nested in a `<match>` arm is never mounted: the inner mount `<div
    data-scrml-match-mount=…>` is emitted but no dispatcher is generated for it, so its content (buttons,
