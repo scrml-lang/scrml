@@ -218,7 +218,8 @@ describe("s470-action-body-await — the async hosts await an async-coloured cli
   test("a `when … changes` body awaits a helper call (was un-awaited)", () => {
     const r = compile(page("${ when @pw changes { if (allowed(@pw)) { @msg = \"IN\" } } }"));
     expect(r.messages).toEqual([]);
-    expect(r.clientJs).toMatch(/async function\(\) \{ if \(await _scrml_allowed_\d+\(/);
+    // s470-when-changes-latest-wins: the await is gated by the run's newest-run-wins check.
+    expect(r.clientJs).toMatch(/async function\(_scrml_live\) \{ if \(\(_scrml_live\(await _scrml_when_wait\(_scrml_allowed_\d+\(/);
   });
   test("an engine opener effect= awaits a helper call (was un-awaited)", () => {
     const r = compile(page(ENG("<engine for=Phase effect=${ if (allowed(@pw)) { @msg = \"IN\" } }>\n  <Idle rule=.Active/>\n  <Active/>\n</>")));
@@ -227,7 +228,7 @@ describe("s470-action-body-await — the async hosts await an async-coloured cli
   });
   test("control: the server-call form of both is still awaited", () => {
     const w = compile(page("${ when @pw changes { if (isOk(@pw)) { @msg = \"IN\" } } }"));
-    expect(w.clientJs).toMatch(/if \(await _scrml_fetch_isOk_\d+\(/);
+    expect(w.clientJs).toMatch(/if \(\(_scrml_live\(await _scrml_when_wait\(_scrml_fetch_isOk_\d+\(/);
   });
 });
 
