@@ -38,6 +38,7 @@
  */
 
 import type { ExprNode } from "../types/ast.ts";
+import { isMetaKind } from "../types/ast.ts";
 import { collectCalleeIdents, bodyHasForeignOrSql } from "./emit-library-shared.ts";
 import { templateInterpolationNodesAll, templateTextInterpolationNodes, guardCallArmsRaw, parseExprToNode } from "../expression-parser.ts";
 import { mentionedNames, isExprNodeValue, STATEMENT_CHILD_KEYS } from "../failable-value-calls.ts";
@@ -46,6 +47,7 @@ import { DEFAULT_LOGIC_MODE_TAGS, stmtContainsRenderableLogic, stmtContainsLiftE
 import { parseMatchArms } from "../match-statechild-parser.ts";
 import { readShorthandBody, readBareArmBody, matchArmKey } from "../arm-body-reader.ts";
 import { soleLogicBlockPayload } from "../interpolation-extent.ts";
+import { filterRenderableChildren } from "./emit-variant-guard.ts";
 
 type AnyNode = Record<string, unknown>;
 
@@ -82,6 +84,9 @@ const SKIPPED_STATEMENT_KINDS = new Set([
   "when-effect", "when-message", "when-worker-message", "when-worker-error", "onchange-decl",
 ]);
 
+/** Plain (non-cell) declarations: their initializer is a value position (§13.7). */
+const PLAIN_DECL_KINDS = new Set(["const-decl", "let-decl", "tilde-decl", "lin-decl"]);
+
 /** Markup elements whose BODY is an action (run per load / tick), never rendered from a value. */
 const ACTION_BODY_TAGS = new Set(["request", "timer", "poll"]);
 
@@ -100,6 +105,8 @@ class RenderWalk {
   readonly sites: RenderWaitingSite[] = [];
   private readonly reported = new WeakSet<object>();
   private readonly visited = new WeakSet<object>();
+  /** Set while walking a body re-parsed from text: its nodes' spans are relative to that text. */
+  private spanOverride: unknown = null;
 
   constructor(private readonly facts: RenderWaitingFacts) {}
 
@@ -219,7 +226,7 @@ class RenderWalk {
   private site(anchor: object, span: unknown, position: string, what: string | null): void {
     if (what === null || this.reported.has(anchor)) return;
     this.reported.add(anchor);
-    this.sites.push({ anchor, span, position, what });
+    this.sites.push({ anchor, span: this.spanOverride ?? span, position, what });
   }
 
   private judge(node: unknown, anchor: object, span: unknown, position: string): void {
@@ -287,6 +294,9 @@ class RenderWalk {
     const kind = node.kind;
     if (typeof kind !== "string") return;
     if (kind === "text" || kind === "comment") return;
+    // A `^{ }` meta block is an effect (§22.2: compile-time, or a runtime effect), never a render;
+    // markup a compile-time `emit()` splices is already in the tree this walk reads (review #5).
+    if (isMetaKind(kind)) return;
     this.visited.add(node);
     switch (kind) {
       case "markup": this.markup(node); return;
@@ -324,7 +334,13 @@ class RenderWalk {
     }
     if (ACTION_BODY_TAGS.has(tag)) return;
     if (typeof n.shorthandBodyRaw === "string" && n.shorthandBodyRaw.trim() !== "") {
-      this.judgeText(n.shorthandBodyRaw, n, n.span, `the \`:\` body of <${tag}>`);
+      // A `:`-shorthand body (`<p : expr>`) is carried parsed as the element's children, whose
+      // spans are relative to the body text: walked once, reported at the element (review #8).
+      // A body that left no children is read as text.
+      const kids = Array.isArray(n.children) ? n.children as unknown[] : [];
+      if (kids.length === 0) this.judgeText(n.shorthandBodyRaw, n, n.span, `the \`:\` body of <${tag}>`);
+      else this.withSpan(n.span, () => this.nodes(kids, false));
+      return;
     }
     this.nodes(n.children, DEFAULT_LOGIC_MODE_TAGS.has(tag));
   }
@@ -344,7 +360,7 @@ class RenderWalk {
     if (!st || typeof st !== "object" || this.visited.has(st as object)) return;
     const s = st as AnyNode;
     const kind = s.kind;
-    if (typeof kind !== "string" || SKIPPED_STATEMENT_KINDS.has(kind)) return;
+    if (typeof kind !== "string" || SKIPPED_STATEMENT_KINDS.has(kind) || isMetaKind(kind)) return;
     if (kind === "markup" || kind === "logic" || kind === "each-block" || kind === "match-block" ||
         kind === "engine-decl" || kind === "if-chain" || kind === "component-def" || kind === "state") {
       this.node(s, c.defaultLogic);
@@ -375,6 +391,24 @@ class RenderWalk {
         if (e.kind === "markup") this.node(e.node ?? e, false);
         else if (isExprNodeValue(e)) this.judge(e, s, s.span, "the lifted value");
       }
+      return;
+    }
+    // S470 fix round (review #2) — a plain `const` / `let` declared in a `${ }` block (outside any
+    // function) is a §13.7 value position too ("an initializer … own value"): impl#1 emits it as a
+    // module-level binding holding the call's result, so `${ const ok = isOk(@pw) }` held a pending
+    // Promise and a later `<span if=${ok}>` opened. Its initializer is judged wherever the block is.
+    // (A cell initializer `<x> = f()` is not — impl#1 awaits it: g-impl1-value-server-call-s451.)
+    if (PLAIN_DECL_KINDS.has(String(kind)) && !stmtContainsLiftExpr(s)) {
+      this.visited.add(s);
+      const pos = `the initializer of \`${String(s.name ?? "?")}\``;
+      // A function VALUE (`const v = (w, p) => w(p)`) is not called by being declared: its body runs
+      // where it is called (a waiting one is E-ASYNC-FN-ESCAPES-AS-VALUE's, §13.9.6).
+      const ie = s.initExpr as AnyNode | undefined;
+      const isFnValue = !!ie && typeof ie === "object" &&
+        (ie.kind === "lambda" || (ie.kind === "escape-hatch" && typeof ie.bodyRaw === "string"));
+      if (isFnValue) return;
+      if (s.initExpr && typeof s.initExpr === "object") this.judge(s.initExpr, s, s.span, pos);
+      else if (typeof s.init === "string") this.judgeText(s.init, s, s.span, pos);
       return;
     }
     // Any other statement renders only inside a rendering `${ }` (in a default-logic body, only one
@@ -457,7 +491,11 @@ class RenderWalk {
     const armsRaw = n.armsRaw;
     if (typeof armsRaw === "string" && armsRaw.length > 0) {
       let arms: Array<{ variantName: string; bodyForm: string; bodyRaw: string }> = [];
-      try { arms = parseMatchArms(armsRaw).arms as typeof arms; } catch { arms = []; }
+      try { arms = parseMatchArms(armsRaw).arms as typeof arms; } catch {
+        // The arm reader could not split the body: read it to refuse (fail closed, review #11).
+        this.site(n, n.span, "a <match> arm body", this.textNames(armsRaw));
+        arms = [];
+      }
       for (const [i, entry] of arms.entries()) {
         if (!entry || !entry.bodyRaw || entry.bodyRaw.trim().length === 0 || entry.bodyForm === "self-closing") continue;
         const key = matchArmKey(i, entry.variantName);
@@ -475,20 +513,44 @@ class RenderWalk {
     const pos = "the engine `derived=` expression";
     if (n.derivedExprNode && typeof n.derivedExprNode === "object") this.judge(n.derivedExprNode, n, n.span, pos);
     else this.judgeText(n.derivedExprText, n, n.span, pos);
-    this.nodes(n.bodyChildren, false);
-    // A `:`-shorthand state body (`<B rule=.A : expr>`) is rendered from arm-body-reader's parse.
+    // S470 fix round (review #3) — only a state child's RENDERED body is a render position, read as
+    // codegen renders it (emit-engine `buildEngineArms`): the `bodyChildren` markup node of each
+    // state child's tag, its children filtered by emit-variant-guard's `filterRenderableChildren`.
+    // A state child's attributes are engine configuration (`rule=`, `effect=` — an action body, as
+    // are `<onTransition>` / `<onTimeout>` / message arms) and an engine-level `<onTransition>` is
+    // an action: none of them is walked.
     const meta = (n._record as { engineMeta?: { stateChildren?: unknown } } | undefined)?.engineMeta;
     const children = Array.isArray(meta?.stateChildren) ? meta!.stateChildren as AnyNode[] : [];
+    const byTag = new Map<string, AnyNode>();
+    for (const bc of Array.isArray(n.bodyChildren) ? n.bodyChildren as AnyNode[] : []) {
+      if (bc && typeof bc === "object" && bc.kind === "markup" && typeof bc.tag === "string" && !byTag.has(bc.tag)) byTag.set(bc.tag, bc);
+    }
     const engineName = String(n.engineName ?? "?");
     for (const child of children) {
       if (!child || typeof child !== "object") continue;
-      if (child.isColonShorthand !== true || typeof child.bodyRaw !== "string" || child.bodyRaw.trim() === "") continue;
-      const trimmed = child.bodyRaw.trim();
-      const label = `<engine:${engineName}:${String(child.tag ?? "?")}>`;
-      const nodes = readShorthandBody(child, "shorthand", trimmed, label, this.facts.filePath, n.span, trimmed);
-      if (Array.isArray(nodes) && nodes.length > 0) this.nodes(nodes, false);
-      else this.site(child, n.span, `the \`:\` body of state .${String(child.tag ?? "?")}`, this.textNames(trimmed));
+      const tag = String(child.tag ?? "?");
+      const el = byTag.get(tag) ?? null;
+      const span = (el?.span ?? n.span) as unknown;
+      if (child.isColonShorthand === true) {
+        // A `:`-shorthand state body (`<B rule=.A : expr>`) is rendered from arm-body-reader's parse
+        // (review #8: reported once, at the state child).
+        if (typeof child.bodyRaw !== "string" || child.bodyRaw.trim() === "") continue;
+        const trimmed = child.bodyRaw.trim();
+        const label = `<engine:${engineName}:${tag}>`;
+        const nodes = readShorthandBody(child, "shorthand", trimmed, label, this.facts.filePath, n.span, trimmed);
+        if (Array.isArray(nodes) && nodes.length > 0) this.withSpan(span, () => this.nodes(nodes, false));
+        else this.site(child, span, `the \`:\` body of state .${tag}`, this.textNames(trimmed));
+        continue;
+      }
+      if (el) this.nodes(filterRenderableChildren(el.children as unknown[] as never[]), false);
     }
+  }
+
+  /** Report every site found inside `fn` at `span` (a body re-parsed from text carries its own offsets). */
+  private withSpan(span: unknown, fn: () => void): void {
+    const saved = this.spanOverride;
+    if (saved === null) this.spanOverride = span;
+    try { fn(); } finally { this.spanOverride = saved; }
   }
 }
 

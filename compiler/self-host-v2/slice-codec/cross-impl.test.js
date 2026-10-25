@@ -42,12 +42,16 @@ server function risky(k: int)! -> LoadError {
     if (k == 1) fail LoadError.Boom("neg")
     return
 }
-let a = maybePt(1)
-let b = onePt(1)
-let c = echo(not)
-<p>\${a}</p>
+function go() {
+    let a = maybePt(1)
+    let b = onePt(1)
+    let c = echo(not)
+}
+<button onclick=go()>go</button>
 </program>
 `;
+// S470 — the client calls sit in a handler's function. A program-body \`let a = maybePt(1)\` is a
+// §13.7 value position (E-VALUE-SERVER-CALL): impl#1 bound \`a\` to the pending Promise.
 
 const dir = mkdtempSync(join(tmpdir(), "uc-cross-impl-"));
 writeFileSync(join(dir, "app.scrml"), APP);

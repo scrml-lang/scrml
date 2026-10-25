@@ -134,6 +134,105 @@ describe("S470 E-VALUE-SERVER-CALL — a waiting value in a render position", ()
     expect(compile(src).messages.join("\n")).toContain("server function `zzload`");
   });
 
+  // ---- S470 fix round (review of d4e9c2545) ----
+  const chainPage = (chain, after = "") => `<pw> = ""
+<c> = true
+\${
+    server function isOk(p) { return p == "secret" }
+    function login(p) { @pw = p }
+}
+<button onclick=login("wrong")>go</button>
+${chain}
+<div else><p>c</p></div>
+${after}`;
+
+  test("#1: a CLIENT helper declared in an if=/else chain branch, used in that branch's if=", () => {
+    const r = compile(chainPage(`<div if=@c>\${ function hh(q) { return isOk(q) } }<p><span if=\${hh(@pw)}>IN</span></p></div>`));
+    expect(r.messages.join("\n")).toContain("`hh`");
+  });
+
+  test("#1: … and used outside the chain", () => {
+    const r = compile(chainPage(`<div if=@c>\${ function hh(q) { return isOk(q) } }<p>a</p></div>`, `<p><span if=\${hh(@pw)}>IN</span></p>`));
+    expect(r.messages.join("\n")).toContain("`hh`");
+  });
+
+  const enginePage = (body) => `type Phase:enum = { Idle, Active }
+<pw> = ""
+<msg> = ""
+\${
+    server function isOk(p) { return p == "secret" }
+    function allowed(q) { return isOk(q) }
+    function login(p) { @pw = p }
+}
+<button onclick=login("wrong")>go</button>
+<engine for=Phase>
+${body}
+</>
+`;
+  for (const [name, body] of Object.entries({
+    "#3: a state child effect= body": `  <Idle rule=.Active effect=\${ allowed(@pw) }/>\n  <Active/>`,
+    "#3: a state child effect= lambda": `  <Idle rule=.Active effect=\${ () => allowed(@pw) }/>\n  <Active/>`,
+    "#3: an engine <onTransition> body": `  <Idle rule=.Active/>\n  <Active/>\n  <onTransition from=.Idle to=.Active>\${ allowed(@pw) }</onTransition>`,
+  })) {
+    test(`not this code (action position): ${name}`, () => {
+      expect(compile(enginePage(body)).messages).toEqual([]);
+    });
+  }
+
+  test("#3 control: a state child's rendered body is still a render position", () => {
+    expect(compile(enginePage(`  <Idle>\${isOk(@pw) ? "IN" : "no"}</Idle>\n  <Active/>`)).messages.length).toBeGreaterThan(0);
+  });
+
+  for (const [name, view] of Object.entries({
+    "#5: a runtime ^{ } meta block (bare call)": `^{ isOk("x") }\n<p>x</p>`,
+    "#5: a runtime ^{ } meta block (declaration)": `^{ const r = isOk("x") }\n<p>x</p>`,
+  })) {
+    test(`not this code (effect): ${name}`, () => {
+      expect(compile(page(view)).messages).toEqual([]);
+    });
+  }
+
+  test("#7: two sites on one line are two reports (TS boundary report + CG report)", () => {
+    const src = `type AuthErr:enum = { Denied(reason: string), Gone }
+<pw> = ""
+\${
+    server function chk(p)! -> AuthErr {
+        if (p != "secret") fail AuthErr::Denied("bad")
+        return true
+    }
+    server function isOk(p) { return p == "secret" }
+    function login(p) { @pw = p }
+}
+<button onclick=login("wrong")>go</button>
+<errorBoundary><p>\${chk(@pw)}</p><span if=\${isOk(@pw)}>LOGGED IN</span></errorBoundary>
+`;
+    const r = compile(src);
+    expect(r.hits.length).toBe(2);
+    expect(r.messages.join("\n")).toContain("`isOk`");
+  });
+
+  test("#8: a `:`-shorthand body is reported once, at its element", () => {
+    const r = compile(page(`<p : isOk(@pw) ? "IN" : "no">`));
+    expect(r.hits.length).toBe(1);
+    expect(r.hits[0].span.line).toBe(13); // the `<p : …>` line of page()
+  });
+
+  test("#8: an engine `:`-shorthand state body is reported once", () => {
+    const r = compile(enginePage(`  <Idle : isOk(@pw) ? "IN" : "no">\n  <Active/>`));
+    expect(r.hits.length).toBe(1);
+  });
+
+  test("#2: a plain `const` initializer in a `${ }` block is a value position", () => {
+    const src = `<pw> = "wrong"
+\${
+    server function isOk(p) { return p == "secret" }
+    const ok = isOk(@pw)
+}
+<p><span if=\${ok}>LOGGED IN</span></p>
+`;
+    expect(compile(src).messages.join("\n")).toContain("the initializer of `ok`");
+  });
+
   test("an engine derived=match on a failable server call stays E-ERROR-002", () => {
     const src = `type AuthErr:enum = { Denied(reason: string), Gone }
 type Access:enum = { Granted, Rejected }

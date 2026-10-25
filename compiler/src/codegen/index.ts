@@ -120,7 +120,9 @@ import { beginEmitLogicFile, endEmitLogicFile } from "./emit-logic.ts";
 import { resetEachModuleState, resetEachLocalIdCounter } from "./emit-each.ts";
 import { resetLiftModuleState } from "./emit-lift.js";
 import { setVariantFieldsForRewriter, setProtectContextForRewriter, setBoolColumnsForRewriter, setTenantContextForRewriter } from "./rewrite.ts";
-import { collectTopLevelLogicStatements, containsSql, getNodes } from "./collect.ts";
+import { collectTopLevelLogicStatements, containsSql, getNodes, collectFunctions } from "./collect.ts";
+import { computeClientAsyncSets } from "./emit-functions.ts";
+import { buildCalleeImportMap } from "./scheduling.ts";
 import type { CompileContext } from "./context.ts";
 import type { ReachabilityRecord } from "../types/reachability.ts";
 import { resolveDbDriver } from "./db-driver.ts";
@@ -2798,17 +2800,27 @@ export function runCG(input: CgInput): CgOutput {
         _fileAsyncMemo.routeMap ?? null);
       // A server function declared where the file set does not look (an if=/else chain branch, …).
       const _rwServerAnywhere = serverPlacedFnNamesAnywhere(fileAST, _fileAsyncMemo.routeMap ?? null);
+      // S470 fix round (review #1) — the CLIENT emitter's own async set (emit-functions.ts
+      // `computeClientAsyncSets` over `collectFunctions`, which reaches if=/else chain branches):
+      // a client helper the emitter emits `async` (it calls a server function) is a waiting call
+      // here too, wherever it is declared. The same inputs the emitter passes it.
+      const _rwClientAsync = computeClientAsyncSets(
+        { filePath, fileAST, routeMap: safeRouteMap } as unknown as CompileContext,
+        ((analysis as { fnNodes?: unknown[] } | undefined)?.fnNodes ?? collectFunctions(fileAST as never)) as never,
+        buildCalleeImportMap(fileAST as never),
+        exportRegistryInput ?? null,
+      ).clientAsyncFnNames;
       for (const site of renderWaitingCallsOf(getNodes(fileAST as never) as unknown[], {
-        waits: (n: string) => _rwWaits(n) || _rwServerAnywhere.has(n),
+        waits: (n: string) => _rwWaits(n) || _rwServerAnywhere.has(n) || _rwClientAsync.has(n),
         serverNames: new Set([...serverFnNamesOfFile(fileAST, _fileAsyncMemo.routeMap ?? null), ..._rwServerAnywhere]),
         namespaceLocals: namespaceImportLocalsOf(fileAST),
         filePath,
       })) {
         recordRefusedLowering(new CGError(
           "E-VALUE-SERVER-CALL",
-          `E-VALUE-SERVER-CALL: ${site.position} calls ${site.what}. A render position is re-evaluated ` +
-            "synchronously while the page renders, so it cannot wait for the call: it would hold a pending " +
-            "Promise, which is always truthy (§13.7, §13.8). The language allows a waiting value in markup only " +
+          `E-VALUE-SERVER-CALL: ${site.position} calls ${site.what}. A value position (a render ` +
+            "position, re-evaluated synchronously while the page renders, or a declaration's initializer) " +
+            "cannot wait for the call: it would hold a pending Promise, which is always truthy (§13.7, §13.8). The language allows a waiting value in markup only " +
             "through a pending cell (§13.9), and impl#1 has no async render path yet, so it cannot render this. " +
             "Fix: make the call in an event handler, a `function`, or a `<request>` (§6.7.7) that writes a cell, " +
             "and render the cell here.",
