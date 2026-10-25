@@ -30,9 +30,9 @@
 | Severity | Open (owed by impl#1, the TS compiler) | Carried (owed by the bootstrap; xfail on impl#1) |
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 266 | 5 |
+| HIGH | 267 | 5 |
 | MED | 688 | 8 |
-| LOW | 495 | 0 |
+| LOW | 496 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
 
@@ -155,6 +155,16 @@ The identifier and declaration paths skip a function value (`ok = () => isOk(@pw
 ### g-host-promise-global-in-render-not-refused-s470 — a host Promise global (`fetch(…)`) written directly in a render position is not refused, because the §13.2 async facts do not colour it without a stdlib import; its Promise is always truthy — `NEW S470; MED; open`
 
 §13.7 item 4 names `fetch`. #1547 reused the existing waiting predicate rather than adding a host-global list, so the case was left out. Rated MED rather than LOW because it is the same always-truthy class, but an auth gate on a raw `fetch` is an unusual program.
+
+<!-- @gap id=g-impl1-bang-catch-try-body-cut-at-first-brace-s470 sev=HIGH status=open locus=compiler/src/ast-builder.js(~25940 — the `!{ tryBody } catch T as b { … }` reader ends the try body at the first `}`) prov=review:S470-s470-whole-error-binder-escapes-r3-review(F2);empirical:S470(PA re-ran ~/.cache/scrml/review/s470-l1d/F2/app.scrml on main 4058bd052) -->
+### g-impl1-bang-catch-try-body-cut-at-first-brace-s470 — (security) in the `!{ … } catch T as b { … }` form the try body is cut at its first `}`, so a nested handler inside it is dropped: `!{ @ok = check(p) !{ _ :> false } } catch AuthErr as b { @ok = false }` stores `check(p)`'s truthy failure value in `@ok` with no E-ERROR-002, and a wrong password renders "LOGGED IN" — `NEW S470; HIGH; open`
+
+Found by the lane-1 round-3 review (F2), pre-existing on base. PA-verified on main `4058bd052`: exit 0, and the emitted client JS is `_scrml_cs_reactive_set("ok", _scrml_check_3(p));`. That is the unhandled failable result, with neither the inner `!{}` nor the catch applied. Repro: `~/.cache/scrml/review/s470-l1d/F2/app.scrml`. Fix direction: read the try body with the brace-balanced block reader the other `!{}` forms use. If that reader cannot find the end, refuse.
+
+<!-- @gap id=g-impl1-match-shorthand-interpolation-dropped-s470 sev=LOW status=open locus=compiler/src/codegen(markup `<match>` inside-opener shorthand arm `<A : ${expr}>` lowering — located-not-traced) prov=review:S470-s470-whole-error-binder-escapes-r3-review(N1, new/c9.mjs S4);empirical:S470(~/.cache/scrml/s470/n1/n1.scrml on main 4058bd052) -->
+### g-impl1-match-shorthand-interpolation-dropped-s470 — a markup `<match>` arm in the inside-opener shorthand with an interpolation (`<A : ${@msg + "!"}>`) compiles at exit 0 to `_scrml_render_value(_scrml_arm_el, $)`: the expression is dropped and `$` is unbound (ReferenceError at render) — `NEW S470; LOW; open`
+
+Found by the lane-1 round-3 review (N1). PA-verified on main `4058bd052`. This is a silent miscompile, not a fail-open: the arm throws instead of rendering. The plain-text shorthand (`<B n : "b">`) is unaffected.
 
 <!-- @gap id=g-impl1-whole-error-binder-allowlist-stricter-than-spec-s469 sev=LOW status=open locus=compiler/src/type-system.ts(auditWholeErrorBinderText — the allow-list) prov=review:S469-return-match-r5-HIGH-A;spec:§18.6.1("passing it on whole … is unaffected") -->
 
