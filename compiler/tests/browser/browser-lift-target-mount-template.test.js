@@ -338,27 +338,25 @@ function loadItem(id: string)! LoadError {
     expect(document.querySelector("#ebv").textContent.trim()).toBe("EB_OK_42");
   });
 
-  test("a ${serverFn()} one-shot fires its call on EVERY mount, and not while unmounted", () => {
-    const app = compileAndMount(`<program>
+  // S470 (s470-render-position-server-call-refused) — SUPERSEDED: a `${serverFn()}` one-shot is a server
+  // call in a render position, E-VALUE-SERVER-CALL (§13.7; ruling:user-voice-scrml.md S469 item 1), so this
+  // display site is no longer reached. The test now pins the refusal (the unit twin in
+  // lift-target-mount-template.test.js does the same).
+  test("a ${serverFn()} one-shot display inside an if= mount <template> is E-VALUE-SERVER-CALL (S470)", () => {
+    const dir = resolve(tmpRoot, `srv-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`);
+    mkdirSync(dir, { recursive: true });
+    const input = resolve(dir, "srv.scrml");
+    writeFileSync(input, `<program>
 <show> = false
 server function greeting() { return "SRV_OK" }
 <div if=@show>
     <span id="sv">\${greeting()}</span>
 </div>
 </program>
-`, "srv");
-    // Counted as DELTAS around each transition, so the count does not pin the
-    // separate, pre-existing file-scope `_scrml_fetch_greeting_N();` statement
-    // the interpolation also emits at init (it fires even while the branch is
-    // unmounted — a stray call, noted in the change report, not asserted here).
-    const n = () => app.fetches.filter((u) => u.includes("greeting")).length;
-    const atInit = n();
-    app.set("show", true);
-    expect(n()).toBe(atInit + 1); // pre-fix: +0 — the display never fired
-    app.set("show", false);
-    expect(n()).toBe(atInit + 1);
-    app.set("show", true);
-    expect(n()).toBe(atInit + 2);
+`);
+    const result = compileScrml({ inputFiles: [input], write: false, outputDir: resolve(dir, "out"), log: () => {} });
+    const codes = (result.errors ?? []).filter((e) => (e.severity ?? "error") === "error").map((e) => e.code);
+    expect(codes).toEqual(["E-VALUE-SERVER-CALL"]);
   });
 });
 

@@ -292,62 +292,27 @@ for (const [name, markup, id, type, Ctor] of [
 // ---------------------------------------------------------------------------
 // B-2 — async <errorBoundary> with no fallback=.
 //
-// ⚠ impl#1 ALSO emits a render-time server call as a stray, unobserved
-// module-level statement (`_scrml_fetch_load_4();` right after the cell inits)
-// — a symptom of the carried g-impl1-value-server-call-s451 (a render-time
-// server call is E-VALUE-SERVER-CALL in the language, §13.7, and impl#1 accepts
-// it). That stray call is neither a boundary nor a handler and is OUT of S454's
-// scope; so the stub lets the FIRST call succeed (the stray one, at module
-// evaluation) and fails only the boundary's own render call, made at boot.
-// Without that, the stray rejection would be the only thing measured.
+// S470 (s470-render-position-server-call-refused) — SUPERSEDED. Both B-2 programs RENDER a server call
+// inside a boundary (`<errorBoundary><p>${load()}</p></errorBoundary>`). That is a server call in a
+// render position: E-VALUE-SERVER-CALL (§13.7, §19.6.1 "A server call SHALL NOT occur at render time:
+// in the boundary's content, as in any value position, it is E-VALUE-SERVER-CALL, and the boundary
+// SHALL NOT exempt it"), which impl#1 now enforces at every render position (ruling:user-voice-scrml.md
+// S469 item 1). The async boundary render body these tests drove (the stray `_scrml_fetch_load_4();`
+// noted here before was the same carried g-impl1-value-server-call-s451) is no longer reached, so the
+// two tests now pin the refusal. Server data reaches a boundary's content through a `<request>`.
 // ---------------------------------------------------------------------------
 
-function failAfterFirst(errMsg) {
-  let calls = 0;
-  globalThis.fetch = async () => {
-    inflight++;
-    try {
-      await new Promise((r) => setTimeout(r, 5));
-      calls++;
-      if (calls > 1) throw new TypeError(errMsg);
-      return new Response(JSON.stringify(10), { status: 200, headers: { "content-type": "application/json" } });
-    } finally { inflight--; }
-  };
-}
-
-test("S454 B-2 — an async <errorBoundary> render failure with no fallback is logged once and does not escape", async () => {
+test("S454 B-2 — a render-time server call inside an <errorBoundary> is E-VALUE-SERVER-CALL (S470)", () => {
   const pre = `  <x> = 0\n  server function load() { return 1 }\n`;
   const app = mount(`<program>\n${pre}  <errorBoundary><p id="q">\${load()}</p></errorBoundary>\n</program>\n`);
-  expect(app.clientJs).toMatch(/async function _scrml_eb_render_/);
-  failAfterFirst("render call failed");
-  await app.boot();
-  expect(app.initError).toBeNull();
-  const logged = app.consoleErrors.filter((m) => m.includes("[scrml errorBoundary"));
-  // logged by the body's own catch arm — and NOT a second time by the call-site arm
-  expect(logged.length).toBe(1);
-  expect(logged[0]).toContain("render call failed");
-  expect(app.escaped).toEqual([]);
+  expect(app.errs).toContain("E-VALUE-SERVER-CALL");
+  expect(app.clientJs).not.toMatch(/async function _scrml_eb_render_/);
   app.release();
 });
 
-test("S454 B-2 — a rejection the render body did NOT log (a throwing DOM write) is logged by the call-site arm", async () => {
-  // The body logs its own catch arm; anything thrown after it (here: the
-  // success-path DOM write, made to throw) is the call-site `.catch`'s job.
+test("S454 B-2 — the same refusal for a second boundary shape (S470)", () => {
   const pre = `  <x> = 0\n  server function save() { return 10 }\n`;
   const app = mount(`<program>\n${pre}  <errorBoundary><p id="q">\${save()}</p></errorBoundary>\n</program>\n`);
-  // make the boundary slot's textContent write throw
-  const slot = document.querySelector("[data-scrml-logic]");
-  expect(slot).not.toBeNull();
-  Object.defineProperty(slot, "textContent", {
-    configurable: true,
-    get() { return ""; },
-    set() { throw new Error("dom write failed"); },
-  });
-  await app.boot();
-  expect(app.initError).toBeNull();
-  const logged = app.consoleErrors.filter((m) => m.includes("[scrml errorBoundary"));
-  expect(logged.length).toBe(1);
-  expect(logged[0]).toContain("dom write failed");
-  expect(app.escaped).toEqual([]);
+  expect(app.errs).toContain("E-VALUE-SERVER-CALL");
   app.release();
 });
