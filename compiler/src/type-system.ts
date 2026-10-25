@@ -9853,6 +9853,11 @@ function dedupeRuledFormErrors(errors: TSError[]): void {
 }
 /** Per-file literal-tape names (collectLiteralTapeNames), set at the top of runTS. */
 let _ruledLiteralTapeNames: ReadonlySet<string> = new Set();
+/**
+ * S470 fix round 1 — the current file's whole-error binder audit of `!{}`s inside functions written
+ * as values (set per file by the checker; read at every `checkLogicExprIdents` site).
+ */
+let _wholeBinderHatchAudit: ((exprNode: unknown, span: Span) => void) | null = null;
 function checkRuledCallForms(
   exprNode: unknown,
   span: Span,
@@ -9943,6 +9948,8 @@ function checkLogicExprIdents(
   // (`int.parse(s)`, `E.parse(s)`, a tape's `append` / `prepend` / `insert` / `remove`) fails closed
   // here, at every expression site this walker covers. impl1-ruled-form-refusal.ts owns the list.
   checkRuledCallForms(exprNode, span, scopeChain, typeRegistry, errors);
+  // S470 fix round 1 — a `!{}` with a whole-error binder inside a function written as a value.
+  if (_wholeBinderHatchAudit) _wholeBinderHatchAudit(exprNode, span);
   forEachIdentInExprNode(exprNode as any, (ident) => {
     if (typeof ident.name !== "string") return;
     const raw = ident.name;
@@ -11540,6 +11547,62 @@ function annotateNodes(
       fileDeclaresLog: wholeBinderFileDeclaresLog(),
     };
   };
+  /**
+   * The whole-error binder audit of one `!{}`'s arms: every `_ <binder> :>` arm body is audited
+   * (auditWholeErrorBinderText) against the handled call's enum `en`, with `frames` the local
+   * declaration trees between the `!{}` and the current scope (S470 fix round 1: a function
+   * written as a value).
+   */
+  function auditWholeBinderArms(arms: unknown, en: EnumType | null, frames: unknown[], fallbackSpan: Span): void {
+    if (!Array.isArray(arms)) return;
+    for (const arm of arms as Array<{ pattern?: string; binding?: string; handler?: string; span?: Span }>) {
+      if (!arm || typeof arm !== "object") continue;
+      const pat = String(arm.pattern ?? "").replace(/^::/, "").replace(/^\./, "");
+      const binder = String(arm.binding ?? "").trim();
+      if (pat !== "_" || !binder || binder === "_" || !/^[A-Za-z_$][\w$]*$/.test(binder)) continue;
+      const body = String(arm.handler ?? "").trim();
+      if (!body) continue;
+      const armSpan = ((arm.span ?? fallbackSpan) as Span);
+      const why = auditWholeErrorBinderText(body, binder, { ...wholeBinderAuditCtx(en), frames });
+      if (why) errors.push(wholeBinderRefusalError(why, binder, en, armSpan));
+    }
+  }
+  // S470 fix round 1 (review #3) — a `!{}` inside a function written as a VALUE (a `function`
+  // expression, a block-bodied arrow) lives in body TEXT the statement visitor never reaches, so
+  // its whole-error binder was never audited. Every expression site `checkLogicExprIdents` covers
+  // is searched for such functions; each body is read with the ONE check-time reader
+  // (`escapeHatchBodyStatements`, the reader the ruled-form and optional-access checks use) and
+  // each `!{}` in it is audited like a statement one, with the function's parameters and body
+  // as declaration frames. A body the reader cannot read is left to the checks that refuse it.
+  const _hatchAudited = new WeakSet<object>();
+  const auditHatchWholeBinders = (x: unknown, span: Span, outer: unknown[] = []): void => {
+    const seen = new WeakSet<object>();
+    const visit = (v: unknown, frames: unknown[]): void => {
+      if (!v || typeof v !== "object" || seen.has(v as object)) return;
+      seen.add(v as object);
+      if (Array.isArray(v)) { for (const y of v) visit(y, frames); return; }
+      const r = v as Record<string, unknown>;
+      if (r.kind === "escape-hatch" && typeof r.bodyRaw === "string") {
+        if (_hatchAudited.has(r)) return;
+        _hatchAudited.add(r);
+        const { result, warnings } = captureTrailingContentWarnings(() => escapeHatchBodyStatements(r, span?.file ?? filePath));
+        if (!result || warnings.length > 0) return;
+        const inner = [result, r.params, ...frames];
+        visit(result, inner);
+        return;
+      }
+      if (r.kind === "guarded-expr" && frames.length > 0) {
+        const g = r.guardedNode as Record<string, unknown> | undefined;
+        const ex = g ? (g.exprNode ?? g.initExpr) as { kind?: string; callee?: { kind?: string; name?: string } } | undefined : undefined;
+        const callee = ex && ex.kind === "call" && ex.callee && ex.callee.kind === "ident" && typeof ex.callee.name === "string" ? ex.callee.name : null;
+        // An unresolvable callee leaves the enum unknown: every use of the binder is refused.
+        auditWholeBinderArms(r.arms, callee ? failableCalleeErrorEnum(callee) : null, frames, span);
+      }
+      for (const k of Object.keys(r)) { if (k === "span" || k.startsWith("__")) continue; visit(r[k], frames); }
+    };
+    visit(x, outer);
+  };
+  _wholeBinderHatchAudit = auditHatchWholeBinders;
   const wholeBinderRefusalError = (why: WholeBinderRefusal, binder: string, en: EnumType | null, span: Span): TSError => {
     const ty = en ? `\`${en.name}\`` : "the handled call's error enum";
     const allowed = `As a whole error it may only be \`match\`ed (\`match ${binder} { .Variant(x) :> … }\`), tested with \`is\` (\`${binder} is .Variant\`), ` +
@@ -15172,16 +15235,7 @@ function annotateNodes(
         // to bind its payload (`.Denied(reason) :>`), or `match e { … }` on it. Before, impl#1 bound
         // the `.data` payload, so those reads "worked" against one payload shape and silently read
         // `undefined` against another (a keyed producer in another file) — a denied input logged in.
-        for (const arm of errorArms as Array<{ pattern?: string; binding?: string; handler?: string; span?: Span }>) {
-          const pat = String(arm.pattern ?? "").replace(/^::/, "").replace(/^\./, "");
-          const binder = String(arm.binding ?? "").trim();
-          if (pat !== "_" || !binder || binder === "_" || !/^[A-Za-z_$][\w$]*$/.test(binder)) continue;
-          const body = String(arm.handler ?? "").trim();
-          if (!body) continue;
-          const armSpan = ((arm.span ?? n.span) as Span);
-          const why = auditWholeErrorBinderText(body, binder, wholeBinderAuditCtx(_errEnum));
-          if (why) errors.push(wholeBinderRefusalError(why, binder, _errEnum, armSpan));
-        }
+        auditWholeBinderArms(errorArms, _errEnum, [], n.span as Span);
 
         // S452 r3 — a type-qualified arm (`T.V :>` / `T::V :>`, recorded by
         // parseErrorTokens as `arm.typeQualifier`) must name the handled error
