@@ -786,6 +786,18 @@ export const PINNED_CLASS = {
   "f23/F2 reset of a cell an opener effect= writes through an expression, then a test": "PASS-REFUSED",
   "f23/F3 opener effect= written before a module-init write reads the cell": "PASS-REFUSED",
   "f23/F4 message arm: a write, then the transition's onTransition reads the cell": "PASS-REFUSED",
+  // fix round 2 (review of 4ae8261f7) — F13 FAIL on 4ae8261f7 (PASS / PASS-DENY on 6081e0685), F14 FAIL on
+  // 4ae8261f7, F18 VALID controls PASS-REFUSED on 4ae8261f7 (over-refusal) and PASS on 6081e0685.
+  "f23/F13 onTransition: a handled write with a fall-through arm, then a test": "PASS-REFUSED",
+  "f23/F13 onTransition: a handled write with fall-through arms (catch-all), then a test": "PASS-REFUSED",
+  "f23/F13 state effect: a handled write with fall-through arms, then a test": "PASS-REFUSED",
+  "f23/F13 timer: a handled write with fall-through arms, then a test": "PASS-REFUSED",
+  "f23/F13 timeout: a handled write with fall-through arms, then a test": "PASS-REFUSED",
+  "f23/F14 message arm write, then a when on the engine reads the cell": "PASS-REFUSED",
+  "f23/F14 message arm write, then a chained second engine's hook reads the cell": "PASS-REFUSED",
+  "f23/F14 message arm write, then the sending handler reads the cell": "PASS-REFUSED",
+  "f23/VALID F18 reset of a declared cell, then an awaited write in the handler": "PASS",
+  "f23/VALID F18 an awaited write, the test, then a reset to the declaration": "PASS",
   "f23/VALID handler: a cell write, then a test": "PASS",
   "f23/VALID when body: a cell write, then a test": "PASS",
   "f23/VALID timer body: a cell write, then a test": "PASS",

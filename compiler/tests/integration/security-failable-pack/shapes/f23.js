@@ -5,7 +5,8 @@
 // from BEFORE the call. A `reset(@v)` of a cell whose initializer waits returned before the re-run
 // call landed, the same way. Each page starts from a stale TRUE (an earlier right password), so the
 // stale read answered LOGGED IN on a wrong password. Each non-VALID shape FAILED on 6081e0685 (the
-// fix-round-1 `F1`–`F4` shapes on 817aadc0e too).
+// fix-round-1 `F1`–`F4` shapes on 817aadc0e too; the fix-round-2 `F13` / `F14` shapes on 4ae8261f7 — F13
+// PASS / PASS-DENY on 6081e0685; the `VALID F18` controls were over-refused on 4ae8261f7).
 // After: the bodies impl#1 now hosts async (`<timeout>`, a state-child `effect=`, an `<onTransition>`,
 // `on mount`) await the call in place; the bodies that stay synchronous (module init, a `<request>`
 // body, an `<onMount>` tag, a message arm, a runtime `^{ }`) and every non-sole `reset` of such a cell
@@ -71,6 +72,54 @@ ${view}
 <p id="out">\${@msg}</p>
 `;
 const TEST_V = `if (@v) { @msg = "LOGGED IN" } else { @msg = "rejected" }`;
+
+// fix round 2 helpers (the reviewer's bang.mjs / bang2.mjs / f4.mjs pages, verbatim in shape).
+const B13 = (view, fns = "; @phase = .Active", pw = "none") => `type Phase:enum = { Idle, Active }
+type AuthErr:enum = { Denied(reason: string), Gone }
+<pw> = "${pw}"
+<ok> = false
+<msg> = "rejected"
+\${
+    server function check(p)! -> AuthErr {
+        if (p != "secret") fail AuthErr::Denied("bad")
+        return true
+    }
+    function login(p) { @pw = p${fns} }
+}
+${view}<button id="wrong" onclick=login("wrong")>go</button>
+<button id="right" onclick=login("secret")>go</button>
+<p id="out">\${@msg}</p>
+`;
+const BANG = `@ok = check(@pw) !{ | .Denied(r) :> { @msg = "rejected" } }; if (@ok) { @msg = "LOGGED IN" } else { @msg = "rejected" }`;
+const BANG2 = `@ok = check(@pw) !{ | .Denied(r) :> { @msg = "rejected" } | _ :> { @msg = "rejected" } }\n if (@ok) { @msg = "LOGGED IN" } else { @msg = "rejected" }`;
+const ENG13 = (b) => `<engine for=Phase initial=.Idle>\n  <Idle rule=.Active/>\n  <Active rule=.Idle/>\n  <onTransition from=.Idle to=.Active>\${ ${b} }</onTransition>\n</>\n`;
+const EFF13 = (b) => `<engine for=Phase initial=.Idle>\n  <Idle rule=.Active effect=\${ ${b} }/>\n  <Active rule=.Idle/>\n</>\n`;
+const P14 = (logic, fns = "; @phase.advance(.Go)") => `type Phase:enum = { Idle, Active, Other }
+type Sw:enum = { Off, On }
+type Msg:enum = { Go }
+<pw> = "wrong"
+<ok> = true
+<msg> = "rejected"
+\${
+    server function isOk(p) { return p == "secret" }
+    function login(p) { @pw = p${fns} }
+}
+<button id="wrong" onclick=login("wrong")>go</button>
+<button id="right" onclick=login("secret")>go</button>
+${logic}
+<p id="out">\${@msg}</p>
+`;
+const ARM14 = (t, extra = "") => `<engine for=Phase initial=.Idle accepts=Msg>\n  <Idle rule=(.Active | .Other)>\n    | .Go :> { @ok = isOk(@pw); ${t} }\n    | _ :> @phase\n  </>\n  <Active rule=.Idle>\n    | _ :> @phase\n  </>\n  <Other rule=.Idle>\n    | _ :> @phase\n  </>\n${extra}</>`;
+const R18 = (body) => `<ok> = false
+<msg> = "rejected"
+\${
+    server function isOk(p) { return p == "secret" }
+    function login(p) { ${body} }
+}
+<button id="wrong" onclick=login("wrong")>go</button>
+<button id="right" onclick=login("secret")>go</button>
+<p id="out">\${@msg}</p>
+`;
 
 // fix round 1 helpers.
 const DTEST = (d) => `if (@${d}) { @msg = "LOGGED IN" } else { @msg = "rejected" }`;
@@ -146,6 +195,22 @@ export default [
   </>
   <onTransition from=.Idle to=.Active>\${ ${G_OK} }</onTransition>
 </>`, ADV)],
+  // fix round 2 (review of 4ae8261f7; reviewer bang.mjs / bang2.mjs / f4.mjs).
+  // F13: a `!{ }`-handled write whose arm falls through, in a body now awaited in place, writes the
+  // error envelope (truthy) into the cell — FAIL on 4ae8261f7, PASS / PASS-DENY on 6081e0685.
+  ["F13 onTransition: a handled write with a fall-through arm, then a test", B13(ENG13(BANG))],
+  ["F13 onTransition: a handled write with fall-through arms (catch-all), then a test", B13(ENG13(BANG2))],
+  ["F13 state effect: a handled write with fall-through arms, then a test", B13(EFF13(BANG2))],
+  ["F13 timer: a handled write with fall-through arms, then a test", B13(`<timer interval=1>\${ ${BANG2} }</timer>\n`, "")],
+  ["F13 timeout: a handled write with fall-through arms, then a test", B13(`<timeout delay=1>\${ ${BANG2} }</>\n`, "", "wrong")],
+  // F14: a message arm's last-statement write runs detached and is read stale after the transition.
+  ["F14 message arm write, then a when on the engine reads the cell", P14(ARM14(".Active") + `\n\${ when @phase changes { ${G_OK} } }`)],
+  ["F14 message arm write, then a chained second engine's hook reads the cell", P14(ARM14(".Active", `  <onTransition from=.Idle to=.Active>\${ @sw = .On }</onTransition>\n`) + `\n<engine for=Sw var=sw initial=.Off>\n  <Off rule=.On/>\n  <On/>\n  <onTransition from=.Off to=.On>\${ ${G_OK} }</onTransition>\n</>`)],
+  ["F14 message arm write, then the sending handler reads the cell", P14(ARM14(".Active"), `; @phase.advance(.Go); ${G_OK}`)],
+  // F18 VALID controls — a declared cell written from a server call in a function: `reset` restores
+  // the declaration, nothing waits (over-refused on 4ae8261f7: PASS-REFUSED there, PASS now).
+  ["VALID F18 reset of a declared cell, then an awaited write in the handler", R18(`reset(@ok); @ok = isOk(p); ${G_OK}`)],
+  ["VALID F18 an awaited write, the test, then a reset to the declaration", R18(`@ok = isOk(p); ${G_OK}; reset(@ok)`)],
   // VALID controls — correct on base and after
   ["VALID handler: a cell write, then a test", P(``, `; ${WRITE.replace(/@pw/g, "p")}`)],
   ["VALID when body: a cell write, then a test", P(`\${ when @pw changes { ${WRITE} } }`)],

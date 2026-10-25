@@ -206,3 +206,21 @@ Reviewer material (read-only): `~/.cache/scrml/review/s470-lf/`. Measurement tre
   one lsp/commands run (`dev-watches-copied-client-helper` hit its 20s timeout under machine load;
   re-run alone and the whole lsp + commands set: 774 / 0).
 - Merged origin/main again (d6e734814: lane E #1560 when-changes latest-wins — its when gate is named `_scrml_live`, so this lane's hook guard is renamed `_scrml_hook_live`; then 05422ddc7: #1563). EXPECTED_SHAPE_COUNT = 3053 (main 3021 + f23 32; the count test passes). Pre-commit on the final merge: 47610 / 0. R26 vs an extracted d6e734814: the same single justified file. CI job commands on the final tree: all exit 0 except facts --check (STALE, WARN-only).
+
+## Fix round 2 (re-review of 4ae8261f7, verdict FIX) — 2026-10-25
+
+Reviewer material (read-only): `~/.cache/scrml/review/s470-lf2/fx/`. "Before" tree: `git archive 4ae8261f7`
+in `~/.cache/scrml/s470/laneF/h4ae/`.
+
+| # | sev | status | evidence |
+|---|---|---|---|
+| F13 | HIGH (regression) | FIXED (refused) | In the bodies this lane awaits in place (`<timer>` / `<poll>` / `<timeout>`, state-child `effect=`, `<onTransition>`, `on mount { }`), `@ok = check(@pw) !{ …block arms… }` goes through the in-place `!{ }` relocation, where a fall-through arm leaves the error envelope (truthy) as the value written into the cell — `g-handled-error-arm-failure-writes-envelope-into-cell` (open; a handler function body has it on base). `handledFallThrough` refuses such a write there (an arm whose handler is a block / empty), E-IMPL1-ACTION-NOT-AWAITED with an envelope message naming the gap; value arms (`:> false`) stay accepted. Reviewer bang / bang2: every 4ae8261f7 FAIL in those hosts → PASS-REFUSED; "onTransition no-fallthrough return arms" stays PASS; "handler fn body exhaustive" is the base gap, unchanged (not this lane). The sole-write `onTransition bang … derived gate` shape (PASS on base and 4ae8261f7) is now refused too — fail closed: its failure path writes the envelope into the cell. |
+| F14 | HIGH | FIXED (refused) | a message arm returns its next state at once, so every un-waited site in it (a lifted write, a bare waiting call) is refused immediately (`OrderScope.refuseAll`), whatever follows — the reviewer's f4 rows (a `when @phase changes`, a chained engine's hook, the sending handler, a conditional target, a render): 5/5 PASS-REFUSED. **Corpus impact: none** (R26 head vs pre-change head: 0 diffs). |
+| F18 | MED (over-refusal) | FIXED | a cell's reset value waits only when the write that REGISTERS it waits (emit-logic `_emitInitThunkSidecar`): a declaration's `default=` / initializer; for an undeclared cell, its writes outside a function body (module init, lifecycle bodies, opener `effect=`, `when` — fail closed if any of them waits). `function refresh() { @items = load(@pw) }` + `function clear() { reset(@items) }` with `<items> = []` compiles again (ov-clear / ov-clear2). The message names what is re-run: "the initializer of `@x`", "the `default=` of `@x`", or "the write `@x = …` that registers the reset value of the undeclared cell `@x`". The s441 F7 test stays changed: its `@m` is UNDECLARED and registered by the opener's waiting write, so a function-body reset of it is still a waiting reset. |
+| engines ×2 | — | CHECKED | an engine cannot be instantiated twice: inside a component body it is E-COMPONENT-ENGINE-SCOPE (§51.0.K, "Engines are singletons"; measured), so the per-arm module-scope run counter is per instance. |
+
+- Pack f23 +10 (F13 ×5 — FAIL on 4ae8261f7, PASS / PASS-DENY on 6081e0685; F14 ×3 — FAIL on 4ae8261f7;
+  2 VALID F18 — PASS on 6081e0685, PASS-REFUSED on 4ae8261f7, PASS now), pinned; f23 = 42; count 3063.
+- Unit: await-residue-fr1-s470 +16 (F13 refused / accepted × 4 hosts, F14 ×3, F18 ×5); the round-0 / 1
+  arm-ACCEPTED tests moved to REFUSED (F14); the reset-message regex covers the new wording.
+- Pre-commit (code commit 8e18fdcda): 47626 / 0.
