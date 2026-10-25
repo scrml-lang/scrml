@@ -224,3 +224,4 @@ in `~/.cache/scrml/s470/laneF/h4ae/`.
 - Unit: await-residue-fr1-s470 +16 (F13 refused / accepted × 4 hosts, F14 ×3, F18 ×5); the round-0 / 1
   arm-ACCEPTED tests moved to REFUSED (F14); the reset-message regex covers the new wording.
 - Pre-commit (code commit 8e18fdcda): 47626 / 0.
+- Merged origin/main 55de8639c (docs-only: #1564 / #1565). EXPECTED_SHAPE_COUNT 3063 (count test passes). R26 vs an extracted origin/main 55de8639c: the same single justified file (other-contexts.scrml); the rest the stdlib harness artefact. CI job commands on the final tree: all exit 0 except facts --check (STALE, WARN-only, bot-owned).
