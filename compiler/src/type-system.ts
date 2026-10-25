@@ -130,6 +130,7 @@ import {
 import { _scrml_url_shape_ok } from "./runtime-url-guard.js";
 import { _SCRML_MESSAGE_SLOTS, _scrml_message_template_parse } from "./runtime-message-templates.js";
 import { rewriteFnKeyword } from "./codegen/rewrite.ts";
+import { planPayloadBinders, parseBindingList } from "./codegen/emit-control-flow.ts";
 import { checkValueFunctionStored, setValueFnModuleIndex } from "./value-function-stored.ts";
 import { judgeTypeOf, unjudgeableIn, wrapRefine, wrapRefineUpdate, wrapRefineMerge, paramGuardStatement, isRefineCall, structJudgeDef, type JudgeType } from "./refinement-obligations.ts";
 import * as acorn from "acorn";
@@ -1022,6 +1023,15 @@ interface AttributeShapeDef {
 interface ScopeEntry {
   kind: string;
   resolvedType: ResolvedType;
+  /**
+   * S470 lane B — the enum (or other static type) a binding's INITIALIZER is known to produce
+   * (`const b = Box.Wrap(e)`, `let x = .Bad("r")`, `const j = i`), read ONLY by the enum-value
+   * member-read check (`checkEnumReadsIn`). Kept beside `resolvedType` so no other check's view of
+   * the binding changes (an un-annotated declaration stays `asIs` / `unknown` everywhere else).
+   */
+  enumFact?: ResolvedType;
+  /** S470 lane B — a `!{}` whole-error binder `_ e :>`: its uses are the allow-list audit's to report. */
+  wholeErrorBinder?: boolean;
   isPure?: boolean;
   fullType?: ResolvedType;
   clientType?: ResolvedType;
@@ -2332,6 +2342,18 @@ function canonicalTypeKey(t: ResolvedType | undefined | null, seen: Set<object> 
  * registry; else the resolved payload type. null = unknown (a mismatch).
  */
 function canonicalFieldTypeKey(en: EnumType, variant: string, field: string, seen: Set<object> = new Set()): string | null {
+  const t = variantFieldResolvedType(en, variant, field);
+  return t === null ? null : canonicalTypeKey(t, seen);
+}
+
+/**
+ * S470 lane B — the DECLARED type of `Enum.Variant`'s payload field `field` (§18.7: "The type of
+ * each bound variable SHALL be the declared type of the corresponding field"), resolved in the
+ * enum's own declaring file with its aliases followed (so an imported enum's field resolves the
+ * way its declaration does, and a field naming an enum declared later in the file resolves too).
+ * null when the variant has no such field.
+ */
+function variantFieldResolvedType(en: EnumType, variant: string, field: string): ResolvedType | null {
   const v = (en.variants ?? []).find((x) => x.name === variant);
   if (!v || !(v.payload instanceof Map) || !v.payload.has(field)) return null;
   const text = variantFieldTypeText.get(v)?.get(field);
@@ -2348,9 +2370,9 @@ function canonicalFieldTypeKey(en: EnumType, variant: string, field: string, see
       });
       if (!changed) break;
     }
-    return canonicalTypeKey(resolveTypeExpr(cur, ctx.registry), seen);
+    return resolveTypeExpr(cur, ctx.registry);
   }
-  return canonicalTypeKey(v.payload.get(field), seen);
+  return v.payload.get(field) ?? null;
 }
 
 /** S469 r6 — field name -> canonical type key (null = unknown) of `Enum.Variant`. */
@@ -11736,6 +11758,56 @@ function annotateNodes(
     else callArgFnSignatures.set(name, sig);
   }
 
+  // S470 lane B — the facts the enum-value member-read check reads (checkEnumReadsIn). A call's
+  // result type: the callee's declared return type (this file's function declared once, or an
+  // imported one), else — for an un-annotated function of this file — the enum EVERY one of its
+  // `return`s constructs (`return Box.Wrap(x)`). Cleared when this file's walk ends.
+  {
+    const ctorReturn = new Map<string, ResolvedType | null>();
+    const globalLookup: EnumReadLookup = (nm) => enumReadEntry(scopeChain.global.lookup(nm));
+    const inferCtorReturn = (name: string): ResolvedType | null => {
+      if (ctorReturn.has(name)) return ctorReturn.get(name) ?? null;
+      ctorReturn.set(name, null);
+      const decls = allFnDecls.filter((d) => d.name === name);
+      if (decls.length !== 1 || (decls[0] as ASTNodeLike).returnTypeAnnotation) return null;
+      const rets: unknown[] = [];
+      const collect = (x: unknown): void => {
+        if (!x || typeof x !== "object") return;
+        if (Array.isArray(x)) { x.forEach(collect); return; }
+        const r = x as Record<string, unknown>;
+        if (r.kind === "function-decl" || r.kind === "fn-decl" || r.kind === "lambda" || r.kind === "escape-hatch") return;
+        if (r.kind === "return-stmt") { rets.push(r.exprNode ?? null); return; }
+        for (const k of Object.keys(r)) if (k !== "span" && !k.startsWith("__")) collect(r[k]);
+      };
+      collect((decls[0] as ASTNodeLike).body);
+      let en: EnumType | null = null;
+      for (const e of rets) {
+        const c = e as { kind?: string } | null;
+        const t = c && c.kind === "call" ? enumReadEnumOf(enumReadTypeOf(c, null, globalLookup, env)) : null;
+        if (!t || (en !== null && t !== en)) return null;
+        en = t;
+      }
+      ctorReturn.set(name, en);
+      return en;
+    };
+    const env: EnumReadEnv = {
+      typeRegistry,
+      filePath,
+      handledGuards: new WeakSet<object>(),
+      failableEnum: (name) => failableCalleeErrorEnum(name),
+      fnReturnType: (name) => {
+        const sig = callArgFnSignatures.get(name);
+        const rt = sig ? sig.returnType : null;
+        if (rt && rt.kind !== "asIs" && rt.kind !== "unknown") return rt;
+        if (fnNamesDeclaredTwice.has(name)) return null;
+        return inferCtorReturn(name);
+      },
+    };
+    _enumReadEnv = env;
+  }
+  /** S470 lane B — a `match` block arm's payload binders and their declared types (set by the `match`, read by its arm). */
+  const _armBinderTypes = new WeakMap<object, Map<string, ResolvedType | null>>();
+
   // ---------------------------------------------------------------------------
   // §41.13 / §53.10 — parseVariant call-site recognition pass.
   //
@@ -14092,11 +14164,18 @@ function annotateNodes(
             });
           }
         } else if (n.name) {
+          // S470 lane B — the static type the initializer is KNOWN to produce (a variant
+          // constructor, a typed name, a call of a function with a known return type), for the
+          // enum-value member-read check only (`enumFact`; `resolvedType` is unchanged).
+          const _initFact = !letAnnot && _enumReadEnv && (resolvedType.kind === "asIs" || resolvedType.kind === "unknown")
+            ? enumReadTypeOf((n as { initExpr?: unknown }).initExpr, null, enumReadScopeLookup(scopeChain), _enumReadEnv)
+            : null;
           scopeChain.bind(n.name as string, {
             kind: "variable",
             resolvedType,
             ...(_isConstBinding ? { isConst: true } : {}),
             ...(letAnnot ? { annotated: true } : {}),
+            ...(_initFact ? { enumFact: _initFact } : {}),
           });
         }
         // S19 Phase 2: visit embedded match-expr so exhaustiveness/arm checks fire.
@@ -15520,11 +15599,19 @@ function annotateNodes(
           // S469 r6 (HIGH-B) — the whole-error binder `_ e :>` is typed as the handled call's
           // error enum, resolved by identity (`_errEnum`), never by name.
           const _isWholeBinderArm = String(arm.pattern ?? "") === "_";
+          // S470 lane B — a variant arm's payload binders have their field's DECLARED type
+          // (§18.7), planned against the handled call's enum by the one binder planner.
+          const _payloadTypes = !_isWholeBinderArm && _enumReadEnv && typeof arm.binding === "string" && arm.binding.trim() !== ""
+            ? enumReadArmBinders(_errEnum,
+              `${(arm as { typeQualifier?: string }).typeQualifier ? (arm as { typeQualifier?: string }).typeQualifier + "." : "."}${String(arm.pattern ?? "").replace(/^::/, "").replace(/^\./, "")}(${arm.binding})`,
+              true, _enumReadEnv)
+            : null;
           if (typeof arm.binding === "string" && arm.binding.length > 0) {
             for (const rawName of arm.binding.split(",")) {
               const bindName = rawName.trim();
               if (bindName.length > 0) {
-                scopeChain.bind(bindName, { kind: "variable", resolvedType: _isWholeBinderArm && _errEnum ? _errEnum : tAsIs() });
+                const _pt = _payloadTypes?.get(bindName) ?? null;
+                scopeChain.bind(bindName, { kind: "variable", resolvedType: _isWholeBinderArm && _errEnum ? _errEnum : (_pt ?? tAsIs()), ...(_isWholeBinderArm ? { wholeErrorBinder: true } : {}) });
               }
             }
           }
@@ -15821,6 +15908,30 @@ function annotateNodes(
           if (headerExpr) {
             checkLogicExprIdents(headerExpr, matchSpan, scopeChain, typeRegistry, errors, undefined, fnAllDeclared);
           }
+          // S470 lane B — §18.7: each arm's payload binders have their field's DECLARED type
+          // (the subject's enum; a failable subject's declared error enum), bound into the
+          // block arm's scope below; and the arms' member reads on enum values are checked
+          // here (an inline arm's result is walked by nothing else).
+          {
+            const lookup = enumReadScopeLookup(scopeChain);
+            let subjEnum: EnumType | null = null;
+            let errorCtx = false;
+            if (_enumReadEnv && headerExpr) {
+              subjEnum = enumReadEnumOf(enumReadTypeOf(headerExpr, null, lookup, _enumReadEnv));
+              if (!subjEnum) {
+                const hc = headerExpr as { kind?: string; callee?: { kind?: string; name?: unknown } };
+                if (hc.kind === "call" && hc.callee && hc.callee.kind === "ident" && typeof hc.callee.name === "string") {
+                  subjEnum = failableCalleeErrorEnum(hc.callee.name);
+                  errorCtx = subjEnum !== null;
+                }
+              }
+              for (const arm of (Array.isArray(n.body) ? n.body : []) as Array<Record<string, unknown>>) {
+                if (!arm || arm.kind !== "match-arm-block" || arm.isWildcard || typeof arm.variant !== "string") continue;
+                _armBinderTypes.set(arm, enumReadArmBinders(subjEnum, `.${arm.variant}(${typeof arm.binding === "string" ? arm.binding : ""})`, errorCtx, _enumReadEnv));
+              }
+            }
+            checkEnumReadsIn(n, matchSpan, lookup, errors);
+          }
         }
         const mBody = n.body as ASTNodeLike[] | undefined;
         // H1 steer (S196) — when checkMatchDiagnostics fired
@@ -15864,14 +15975,17 @@ function annotateNodes(
           scopeChain.push(`match-arm:${label}:${nodeKey(n)}`);
           // Bind payload destructure names (`.Mushroom(n) => { ... }`) into
           // the arm scope so references like `n` inside the body resolve.
-          // Type is `tAsIs` for now — variant payload type inference is a
-          // separate concern (arm-pattern type-aware binding is post-B20
-          // territory; for B20 we just unblock scope resolution).
+          // S470 lane B — §18.7 "The type of each bound variable SHALL be the declared type of
+          // the corresponding field in the enum variant definition": the type the enclosing
+          // match planned for the binder (`_armBinderTypes`, the subject's enum through the one
+          // binder planner); `asIs` when the subject's enum or the field is not known.
           const payloadBindings = (n as { payloadBindings?: string[] }).payloadBindings;
+          const _armTypes = _armBinderTypes.get(n);
           if (Array.isArray(payloadBindings)) {
             for (const binding of payloadBindings) {
               if (typeof binding === "string" && binding.length > 0) {
-                scopeChain.bind(binding, { kind: "variable", resolvedType: tAsIs() });
+                const _bt = _armTypes?.get(binding);
+                scopeChain.bind(binding, { kind: "variable", resolvedType: _bt ?? tAsIs() });
               }
             }
           }
@@ -16418,7 +16532,11 @@ function annotateNodes(
           // `forVar.bogus` → E-TYPE-004). Bounded to sql-row provenance; every
           // other collection keeps the permissive `asIs` binding.
           const _forRow = resolveIterableRowElement((n as Record<string, unknown>).iterable);
-          scopeChain.bind(forVar, { kind: "variable", resolvedType: _forRow ?? tAsIs(), ..._forBinderConst });
+          // S470 lane B — the element type of a tape of known type, for the enum-read check only.
+          const _forElem = !_forRow && _enumReadEnv
+            ? enumReadElementOf((n as Record<string, unknown>).iterExpr, null, enumReadScopeLookup(scopeChain), _enumReadEnv)
+            : null;
+          scopeChain.bind(forVar, { kind: "variable", resolvedType: _forRow ?? tAsIs(), ..._forBinderConst, ...(_forElem ? { enumFact: _forElem } : {}) });
         } else if (isDestructurePattern(forVar)) {
           // A5 — structural destructuring walk. Each bound name enters scope
           // as a plain `asIs` variable in the loop's own scope (pushed above),
@@ -19691,6 +19809,9 @@ function annotateNodes(
   // Codegen checks every one was lowered (codegen/index.ts `refuseUnloweredBoundaryChecks`).
   if (boundaryCatchCalls.size > 0) (fileAST as Record<string, unknown>)._boundaryCheckCalls = [...boundaryCatchCalls];
 
+  // S470 lane B — this file's enum-read facts end with its walk.
+  _enumReadEnv = null;
+
   return nodeTypes;
 
   // ---------------------------------------------------------------------------
@@ -19894,6 +20015,17 @@ function annotateNodes(
           refuseUnreadText("the arms of this `!{ … }` handler", hereSpan);
         } else {
           auditWholeBinderArms(arms, en, scope, frames, hereSpan);
+          // S470 lane B — the payload binders' DECLARED types (§18.7) and the member reads on
+          // enum values in the arms, at every `!{}` the statement walk's expression sites did
+          // not already check (`handledGuards`). A name a declaration frame between the scope
+          // and here binds is not the scope's binding (its type is not known here).
+          if (_enumReadEnv && !_enumReadEnv.handledGuards.has(o)) {
+            const atScope = scope;
+            const atFrames = frames;
+            checkEnumReadsIn(o, hereSpan, (nm) => (atFrames.some((f) => auditDeclaresName(f, nm))
+              ? { kind: "variable", t: null }
+              : enumReadEntry(atScope.lookup(nm))), errors);
+          }
           // S470 round 3 — an arm's handler is code held as TEXT: read it with the arm readers'
           // parse and walk it (a `!{}` nested in it is audited the same way), under the arm's
           // binders. Text that does not parse and holds a `!{` is refused.
@@ -19971,6 +20103,23 @@ function annotateNodes(
         // A native-parser `${ … }` block (`LogicEscape.bodyText`, in a re-read arm copy): its body is
         // code text — read with the statement reader and audited.
         if (o.kind === "LogicEscape" && k === "bodyText") { codeText(sv, hereSpan, scope, frames, "a `${ … }` block"); continue; }
+        // S470 lane B (F4) — in a re-read `<match>` arm copy (`walkCodegenCopy`, the native parser's
+        // nodes), an attribute value carries its source twice beside `raw`: `expr.sourceText` (the
+        // `${ … }`-wrapped copy of `raw`, which is read just below or through its tree twin) and the
+        // native `ATTR_EXPR.text` (the same value text), read with the one handler-value reader
+        // (`parseHandlerStatementsForCheck`). Unreadable text is refused, as for `raw`.
+        if (o.kind === "expr" && k === "sourceText" && typeof o.raw === "string") {
+          const t = sv.trim();
+          const inner = t.startsWith("${") && t.endsWith("}") ? t.slice(2, -1) : t;
+          if (inner.trim() === o.raw.trim()) continue;
+        }
+        if (o.kind === "ATTR_EXPR" && k === "text") {
+          let hs: unknown[] | null = null;
+          try { hs = (parseHandlerStatementsForCheck({ kind: "expr", raw: sv }, filePath) as unknown[] | null) ?? null; } catch { hs = null; }
+          if (hs) walk(hs, here, scope, [hs, ...frames], true);
+          else refuseUnreadText("an attribute value held as text", hereSpan);
+          continue;
+        }
         if (o.kind === "expr" && k === "raw" && !o.exprNode) {
           // An attribute / handler value kept without its tree: read with the one handler-value
           // reader (ast-builder `parseHandlerStatementsForCheck`).
@@ -20125,6 +20274,509 @@ function checkNotReturn(returnType: ResolvedType, fnName: string): string | null
 }
 
 // ---------------------------------------------------------------------------
+// S470 lane B — a member read on an ENUM value (E-TYPE-004) and typed payload binders (§18.7)
+// ---------------------------------------------------------------------------
+//
+// Ruling (bryan, S470, user-voice-scrml.md "(B) Type the binders (Recommended)"): a payload binder
+// has its field's DECLARED type (§18.7 "The type of each bound variable SHALL be the declared type
+// of the corresponding field in the enum variant definition"), and a member read other than
+// `.variant` on an enum-typed value is refused (§34 E-TYPE-004 "Struct field access on non-struct
+// type", §14.3). Before, impl#1 checked member reads on STRUCT-typed names only and bound every
+// payload binder `asIs`, so `x.reason` with `x: Inner` (and `i.reason` with `.Wrapped(i)` binding an
+// `Inner`) compiled and read `undefined` — a denied input logged in
+// (g-impl1-enum-value-member-read-unchecked-s470).
+//
+// ONE walker (`checkEnumReadsIn`) over a tree — expressions and statements alike — carrying the
+// names the walked tree itself binds (an overlay over the caller's scope): `match` arm binders and
+// `!{}` arm binders (typed from the subject's / handled call's enum through the one §18.7 binder
+// planner, `planPayloadBinders`), local declarations, function / lambda parameters, loop binders.
+// The static type of an expression is read only where it is KNOWN: a name's binding, a variant
+// constructor (`E.V(…)`, `E::V(…)`, `.V(…)` when one enum declares `V`), a call of a function with
+// a declared (or constructor-returning) return type, a struct field, a tape element. Everything else
+// is unknown and unchecked (as before).
+
+/** The per-file facts the enum-value read check needs (installed by annotateNodes for its file). */
+interface EnumReadEnv {
+  typeRegistry: Map<string, ResolvedType>;
+  /** A function's return type, by the name a call writes (declared, or every `return` one enum's constructor); null = unknown. */
+  fnReturnType: (name: string) => ResolvedType | null;
+  /** The declared error enum of a failable function, by the name a call writes (the binders' field order, §19.4.3). */
+  failableEnum: (name: string) => EnumType | null;
+  filePath: string;
+  /** `!{}` nodes whose arms this walker already checked (the post-walk skips them). */
+  handledGuards: WeakSet<object>;
+}
+let _enumReadEnv: EnumReadEnv | null = null;
+
+/** Messages of this check carry this text (the per-file duplicate pass keys on it). */
+const ENUM_READ_TAG = "is an enum value (";
+
+/** A name the walked tree binds: its static type (null = not known). `quiet`: a whole-error binder (its audit reports). */
+interface EnumReadVar { t: ResolvedType | null; quiet: boolean }
+interface EnumReadOverlay { vars: Map<string, EnumReadVar>; parent: EnumReadOverlay | null }
+/** The caller's scope: a name's kind and static type, or null when it binds nothing there. */
+type EnumReadLookup = (name: string) => { kind: string; t: ResolvedType | null; quiet?: boolean } | null;
+
+function enumReadChild(parent: EnumReadOverlay | null): EnumReadOverlay {
+  return { vars: new Map(), parent };
+}
+
+function enumReadFind(ov: EnumReadOverlay | null, name: string): EnumReadVar | undefined {
+  for (let o = ov; o; o = o.parent) {
+    const v = o.vars.get(name);
+    if (v) return v;
+  }
+  return undefined;
+}
+
+/** A scope entry as the walker reads it. */
+function enumReadEntry(e: ScopeEntry | null | undefined): { kind: string; t: ResolvedType | null; quiet: boolean } | null {
+  return e ? { kind: e.kind, t: e.enumFact ?? e.resolvedType ?? null, quiet: e.wholeErrorBinder === true } : null;
+}
+
+/** The enum a value of type `t` is (an enum, or a union of enums with `not`), or null. */
+function enumReadEnumOf(t: ResolvedType | null | undefined): EnumType | null {
+  if (!t || typeof t !== "object") return null;
+  if (t.kind === "enum") return t as EnumType;
+  if (t.kind === "union") {
+    const ms = (t as UnionType).members.filter((m) => m && m.kind !== "not");
+    if (ms.length > 0 && ms.every((m) => m.kind === "enum")) return ms[0] as EnumType;
+  }
+  return null;
+}
+
+/** The ONE enum this file can see that declares variant `name` (the bare-dot constructor rule), or null. */
+function enumReadOwnerOfVariant(name: string, reg: Map<string, ResolvedType>): EnumType | null {
+  const owners = new Set<EnumType>();
+  for (const t of reg.values()) {
+    if (t && t.kind === "enum" && ((t as EnumType).variants ?? []).some((v) => v.name === name)) owners.add(t as EnumType);
+  }
+  return owners.size === 1 ? [...owners][0] : null;
+}
+
+/** `E` in `E.V` / `E::V`: the enum, when the name denotes an enum TYPE here (not a value). */
+function enumReadTypeName(obj: unknown, ov: EnumReadOverlay | null, lookup: EnumReadLookup, env: EnumReadEnv): EnumType | null {
+  const o = obj as { kind?: string; name?: unknown } | null;
+  if (!o || o.kind !== "ident" || typeof o.name !== "string") return null;
+  if (enumReadFind(ov, o.name)) return null;
+  const e = lookup(o.name);
+  if (e && e.kind !== "type") return null;
+  const t = env.typeRegistry.get(o.name);
+  return t && t.kind === "enum" ? (t as EnumType) : null;
+}
+
+function enumReadIsUnitVariant(en: EnumType, name: string): boolean {
+  const v = (en.variants ?? []).find((x) => x.name === name);
+  return !!v && !(v.payload instanceof Map && v.payload.size > 0);
+}
+
+/** The static type of an expression, where it is KNOWN (see the block comment); null otherwise. */
+function enumReadTypeOf(node: unknown, ov: EnumReadOverlay | null, lookup: EnumReadLookup, env: EnumReadEnv, depth = 0): ResolvedType | null {
+  if (!node || typeof node !== "object" || depth > 32) return null;
+  const n = node as Record<string, unknown>;
+  switch (n.kind) {
+    case "ident": {
+      const name = n.name;
+      if (typeof name !== "string") return null;
+      if (/^\.[A-Z]/.test(name)) {
+        // A bare unit variant `.V` (a payload variant's bare name is its constructor, not a value).
+        const en = enumReadOwnerOfVariant(name.slice(1), env.typeRegistry);
+        return en && enumReadIsUnitVariant(en, name.slice(1)) ? en : null;
+      }
+      const local = enumReadFind(ov, name);
+      if (local) return local.t;
+      const e = lookup(name);
+      if (!e || e.kind === "type" || e.kind === "function") return null;
+      return e.t;
+    }
+    case "member": {
+      if (typeof n.property !== "string") return null;
+      const en = enumReadTypeName(n.object, ov, lookup, env);
+      if (en) return enumReadIsUnitVariant(en, n.property) ? en : null;
+      const ot = enumReadTypeOf(n.object, ov, lookup, env, depth + 1);
+      if (ot && ot.kind === "struct" && (ot as StructType).name !== FN_RETURN_TYPE_NAME) {
+        return (ot as StructType).fields.get(n.property) ?? null;
+      }
+      return null;
+    }
+    case "call": {
+      const c = n.callee as Record<string, unknown> | undefined;
+      if (!c || typeof c !== "object") return null;
+      if (c.kind === "member" && typeof c.property === "string") {
+        const en = enumReadTypeName(c.object, ov, lookup, env);
+        return en && (en.variants ?? []).some((v) => v.name === c.property) ? en : null;
+      }
+      if (c.kind === "ident" && typeof c.name === "string") {
+        if (/^\.[A-Z]/.test(c.name)) return enumReadOwnerOfVariant(c.name.slice(1), env.typeRegistry);
+        if (enumReadFind(ov, c.name)) return null;
+        const e = lookup(c.name);
+        if (e && e.kind !== "function") return null;
+        return env.fnReturnType(c.name);
+      }
+      return null;
+    }
+    case "index": {
+      const ot = enumReadTypeOf(n.object, ov, lookup, env, depth + 1);
+      return ot && ot.kind === "array" ? ((ot as ArrayType).element ?? null) : null;
+    }
+    default:
+      return null;
+  }
+}
+
+/** The type of an iteration binder over `iter` (a tape of a known element type), or null. */
+function enumReadElementOf(iter: unknown, ov: EnumReadOverlay | null, lookup: EnumReadLookup, env: EnumReadEnv): ResolvedType | null {
+  const t = enumReadTypeOf(iter, ov, lookup, env);
+  return t && t.kind === "array" ? ((t as ArrayType).element ?? null) : null;
+}
+
+/**
+ * The names an arm pattern binds and their DECLARED field types (§18.7), planned by the one binder
+ * planner codegen lowers with (`planPayloadBinders`: positional in declaration order, named by
+ * field). `en` is the subject's / handled call's enum (null = unknown: an unqualified variant then
+ * resolves through the one enum declaring it, as the bare-dot constructor does). A binder the
+ * planner refuses, or one of an unknown variant, is bound with no known type.
+ */
+function enumReadArmBinders(en: EnumType | null, pattern: string, errorCtx: boolean, env: EnumReadEnv): Map<string, ResolvedType | null> {
+  const out = new Map<string, ResolvedType | null>();
+  const p = pattern.trim().replace(/^\|\s*/, "");
+  if (p === "" || p === "_" || p === "else") return out;
+  const pieces = splitTopLevel(p, ["|"]).map((s) => s.trim()).filter((s) => s !== "");
+  for (const piece of pieces) {
+    const m = /^(?:([A-Za-z_$][\w$]*)\s*(?:\.|::)\s*|::\s*|\.\s*)([A-Z][\w$]*)\s*(?:\(([\s\S]*)\))?(?:\s+([A-Za-z_$][\w$]*))?$/.exec(piece);
+    if (!m) continue;
+    const bindText = m[3] !== undefined ? m[3] : (m[4] ?? "");
+    const bindings = parseBindingList(bindText);
+    if (bindings.length === 0) continue;
+    const q = m[1] ? env.typeRegistry.get(m[1]) : undefined;
+    const owner = q && q.kind === "enum" ? (q as EnumType) : (m[1] ? null : (en ?? enumReadOwnerOfVariant(m[2], env.typeRegistry)));
+    const fields = owner ? variantFieldNames(owner, m[2]) : undefined;
+    const typed = new Map<string, ResolvedType | null>();
+    if (owner && fields !== undefined && pieces.length === 1) {
+      const plan = planPayloadBinders(m[2], bindText, bindings, fields, false, errorCtx);
+      if ("binds" in plan) {
+        for (const b of plan.binds) typed.set(b.local, b.field === null ? null : variantFieldResolvedType(owner, m[2], b.field));
+      }
+    }
+    for (const b of bindings) {
+      if (b.discard || !b.localName) continue;
+      out.set(b.localName, typed.has(b.localName) ? typed.get(b.localName)! : null);
+    }
+  }
+  return out;
+}
+
+/** Text of an expression for a diagnostic (bounded). */
+function enumReadShow(node: unknown): string {
+  let s = "";
+  try { s = emitStringFromTree(node as ExprNode); } catch { s = ""; }
+  s = s.replace(/\s+/g, " ").replace(/\s*\.\s*/g, ".").trim();
+  return s.length > 60 ? s.slice(0, 57) + "..." : s;
+}
+
+/**
+ * S470 lane B — refuse a member read other than `.variant` on an enum-typed value (E-TYPE-004), and
+ * `==` / `!=` between an enum-typed value and a primitive literal (E-EQ-001, §45.3 "`==` between
+ * incompatible types is a compile error"), anywhere in `root`. `lookup` is the scope `root` runs
+ * in; `ov` the names an enclosing walk bound. Reports at `span`.
+ */
+function checkEnumReadsIn(root: unknown, span: Span, lookup: EnumReadLookup, errors: TSError[], ov0: EnumReadOverlay | null = null): void {
+  const env = _enumReadEnv;
+  if (!env || !root || typeof root !== "object") return;
+  const filePath = env.filePath;
+  const seen = new Set<object>();
+  const quietBase = (obj: unknown, ov: EnumReadOverlay | null): boolean => {
+    const o = obj as { kind?: string; name?: unknown } | null;
+    if (!o || o.kind !== "ident" || typeof o.name !== "string") return false;
+    const local = enumReadFind(ov, o.name);
+    if (local) return local.quiet;
+    return lookup(o.name)?.quiet === true;
+  };
+  const refuseRead = (whole: unknown, base: unknown, member: string, en: EnumType): void => {
+    const b = enumReadShow(base) || "the value";
+    const v0 = (en.variants ?? []).find((v) => v.payload instanceof Map && v.payload.size > 0) ?? (en.variants ?? [])[0];
+    const vn = v0 ? v0.name : "Variant";
+    const f0 = v0 && v0.payload instanceof Map && v0.payload.size > 0 ? [...v0.payload.keys()][0] : "";
+    const pat = `.${vn}${f0 ? `(${f0})` : ""}`;
+    errors.push(new TSError("E-TYPE-004",
+      `E-TYPE-004: \`${enumReadShow(whole) || b + "." + member}\` reads \`${member}\` off \`${b}\`, which ${ENUM_READ_TAG}\`${en.name}\`) — ` +
+      `not a struct, so it has no field \`${member}\` (§14.3, §34). Reach a payload by naming the variant — ` +
+      `\`match ${b} { ${pat} :> … }\`, or a \`!{}\` arm \`${pat} :> …\` (§18.7) — and test the variant with \`is\` ` +
+      `(\`${b} is .${vn}\`); \`.variant\` is the only member an enum value has.`,
+      span));
+  };
+  const refuseEq = (whole: unknown, base: unknown, lit: Record<string, unknown>, en: EnumType): void => {
+    const b = enumReadShow(base) || "the value";
+    errors.push(new TSError("E-EQ-001",
+      `E-EQ-001: \`${enumReadShow(whole)}\` compares \`${b}\`, which ${ENUM_READ_TAG}\`${en.name}\`), with a ${String(lit.litType)} — ` +
+      `incompatible types (§45.3). Test its variant with \`is\` (\`${b} is .Variant\`), compare it with another \`${en.name}\` value, ` +
+      `or bind the payload first (\`.Variant(x) :> x == …\`, §18.7).`,
+      span));
+  };
+  const declare = (ov: EnumReadOverlay, name: unknown, t: ResolvedType | null): void => {
+    if (typeof name === "string" && name !== "") { ov.vars.set(name, { t, quiet: false }); return; }
+    if (isDestructurePattern(name)) for (const b of iterDestructuredNames(name as DestructurePatternShape)) ov.vars.set(b, { t: null, quiet: false });
+  };
+  const annotType = (annot: unknown): ResolvedType | null => {
+    if (typeof annot !== "string" || annot.trim() === "") return null;
+    const t = resolveTypeExpr(annot, env.typeRegistry);
+    return t && t.kind !== "asIs" && t.kind !== "unknown" ? t : null;
+  };
+  const withBinders = (ov: EnumReadOverlay | null, binders: Map<string, ResolvedType | null>): EnumReadOverlay => {
+    const c = enumReadChild(ov);
+    for (const [k, t] of binders) c.vars.set(k, { t, quiet: false });
+    return c;
+  };
+  // A `!{}` arm body, read the way the post-walk and the failable-call walk read it: a braced body
+  // as statements, else its `handlerExpr` tree, else the text as one expression / statements.
+  const armBody = (arm: Record<string, unknown>): unknown => {
+    const ht = wholeBinderArmHandler(arm.handler).trim();
+    if (ht === "") return (arm.handlerExpr as unknown) ?? null;
+    if (ht.startsWith("{") && ht.endsWith("}") && ht.slice(1, -1).trim() !== "") {
+      const r = parseStatementTextDetailed(ht, filePath, {});
+      if (r.ok) return r.stmts;
+    }
+    const he = arm.handlerExpr as { kind?: string; nativeKind?: string } | undefined;
+    if (he && typeof he === "object" && !(he.kind === "escape-hatch" && he.nativeKind === "ParseError")) return he;
+    return auditParseBody(ht, filePath);
+  };
+  const guardArms = (arms: unknown, en: EnumType | null, ov: EnumReadOverlay | null): void => {
+    if (!Array.isArray(arms)) return;
+    for (const arm of arms as Array<Record<string, unknown>>) {
+      if (!arm || typeof arm !== "object") continue;
+      const pat = String(arm.pattern ?? "").trim();
+      const binding = typeof arm.binding === "string" ? arm.binding.trim() : "";
+      const c = enumReadChild(ov);
+      if (pat === "_" || pat === "else") {
+        // The whole-error binder `_ e :>` (§18.6.1): the whole error, typed as the handled call's enum.
+        // Its own uses are the allow-list audit's (auditWholeErrorBinderText) to report.
+        if (/^[A-Za-z_$][\w$]*$/.test(binding)) c.vars.set(binding, { t: en, quiet: true });
+      } else if (binding !== "") {
+        const q = typeof arm.typeQualifier === "string" && arm.typeQualifier ? `${arm.typeQualifier}.` : "";
+        const v = pat.replace(/^::/, "").replace(/^\./, "");
+        for (const [k, t] of enumReadArmBinders(en, `${q === "" ? "." : q}${v}(${binding})`, true, env)) c.vars.set(k, { t, quiet: false });
+      }
+      if (arm.failExpr && typeof arm.failExpr === "object") walk(arm.failExpr, c);
+      const body = armBody(arm);
+      if (body) walk(body, c);
+    }
+  };
+  const guardEnumOf = (receiver: unknown): EnumType | null => {
+    const r = receiver as { kind?: string; callee?: { kind?: string; name?: unknown } } | null;
+    return r && r.kind === "call" && r.callee && r.callee.kind === "ident" && typeof r.callee.name === "string"
+      ? env.failableEnum(r.callee.name) : null;
+  };
+  const matchSubject = (header: unknown, ov: EnumReadOverlay | null): { en: EnumType | null; errorCtx: boolean } => {
+    const en = enumReadEnumOf(enumReadTypeOf(header, ov, lookup, env));
+    if (en) return { en, errorCtx: false };
+    const fe = guardEnumOf(header);
+    return { en: fe, errorCtx: fe !== null };
+  };
+  const walkStatements = (stmts: unknown, ov: EnumReadOverlay | null): void => {
+    const c = enumReadChild(ov);
+    walk(stmts, c);
+  };
+  const walk = (x: unknown, ov: EnumReadOverlay | null): void => {
+    if (!x || typeof x !== "object") return;
+    if (seen.has(x as object)) return;
+    seen.add(x as object);
+    if (Array.isArray(x)) { for (const y of x) walk(y, ov); return; }
+    const n = x as Record<string, unknown>;
+    const k = n.kind;
+    // An expression-position `!{}` (the guard-marker call): its receiver here, its arms by binder.
+    const gRaw = typeof k === "string" ? guardCallArmsRaw(n as unknown as ExprNode) : null;
+    if (gRaw !== null) {
+      const recv = (n.callee as Record<string, unknown>).object;
+      walk(recv, ov);
+      let arms: unknown[] | null = null;
+      try { arms = (parseGuardArmsFromRaw(gRaw, filePath) as unknown[] | null) ?? null; } catch { arms = null; }
+      if (arms) { guardArms(arms, guardEnumOf(recv), ov); env.handledGuards.add(n); }
+      return;
+    }
+    switch (k) {
+      case "member": {
+        // `@cell.advance(.V)` is the engine-cell transition (§51.0), not a read of the value.
+        const engineAdvance = n.property === "advance"
+          && (n.object as { kind?: string; name?: unknown } | undefined)?.kind === "ident"
+          && String((n.object as { name?: unknown }).name ?? "").startsWith("@");
+        // `.V.history` / `E.V.history` is the engine restore-form TARGET (§51.0.F), written on the
+        // variant reference itself — not a read of a value.
+        const ob0 = n.object as { kind?: string; name?: unknown; object?: unknown } | undefined;
+        const historyTarget = n.property === "history" && !!ob0
+          && ((ob0.kind === "ident" && /^\.[A-Z]/.test(String(ob0.name ?? "")))
+            || (ob0.kind === "member" && enumReadTypeName(ob0.object, ov, lookup, env) !== null));
+        if (typeof n.property === "string" && n.property !== "variant" && !engineAdvance && !historyTarget) {
+          const en = enumReadEnumOf(enumReadTypeOf(n.object, ov, lookup, env));
+          if (en && !quietBase(n.object, ov)) refuseRead(n, n.object, n.property, en);
+        }
+        // A name THIS walk bound to a struct (a payload binder of a struct-typed field, §18.7):
+        // the struct field check the scope's names get (checkRowFieldAccessInExpr), same text.
+        {
+          const ob = n.object as { kind?: string; name?: unknown } | undefined;
+          const local = ob && ob.kind === "ident" && typeof ob.name === "string" ? enumReadFind(ov, ob.name) : undefined;
+          const st = local?.t;
+          if (typeof n.property === "string" && st && st.kind === "struct" && (st as StructType).name !== FN_RETURN_TYPE_NAME
+              && (st as StructType).name !== SQL_ROW_TYPE_NAME && !(st as StructType).fields.has(n.property)) {
+            const avail = [...(st as StructType).fields.keys()];
+            errors.push(new TSError("E-TYPE-004",
+              `E-TYPE-004: Struct type \`${(st as StructType).name}\` does not have a field named \`${n.property}\`. ` +
+              `Available fields: ${avail.length ? avail.join(", ") : "(none)"}.`,
+              span));
+          }
+        }
+        walk(n.object, ov);
+        return;
+      }
+      case "index": {
+        const en = enumReadEnumOf(enumReadTypeOf(n.object, ov, lookup, env));
+        if (en && !quietBase(n.object, ov)) {
+          const ix = n.index as Record<string, unknown> | undefined;
+          const shown = ix && ix.kind === "lit" && typeof ix.value === "string" ? ix.value : `[${enumReadShow(ix)}]`;
+          if (shown !== "variant") refuseRead(n, n.object, shown, en);
+        }
+        walk(n.object, ov);
+        walk(n.index, ov);
+        return;
+      }
+      case "binary": {
+        if (n.op === "==" || n.op === "!=" || n.op === "===" || n.op === "!==") {
+          const sides: Array<[unknown, unknown]> = [[n.left, n.right], [n.right, n.left]];
+          for (const [a, b] of sides) {
+            const lit = b as Record<string, unknown> | undefined;
+            if (!lit || lit.kind !== "lit" || !["string", "number", "bool", "boolean"].includes(String(lit.litType))) continue;
+            const en = enumReadEnumOf(enumReadTypeOf(a, ov, lookup, env));
+            if (en && !quietBase(a, ov)) { refuseEq(n, a, lit, en); break; }
+          }
+        }
+        walk(n.left, ov);
+        walk(n.right, ov);
+        return;
+      }
+      case "lambda": {
+        const c = enumReadChild(ov);
+        for (const p of (Array.isArray(n.params) ? n.params : []) as Array<Record<string, unknown>>) {
+          if (!p || typeof p !== "object") continue;
+          if (p.defaultValue && typeof p.defaultValue === "object") walk(p.defaultValue, ov);
+          declare(c, p.name, annotType(p.typeAnnotation));
+        }
+        const body = n.body as { kind?: string; value?: unknown; stmts?: unknown } | undefined;
+        if (body && typeof body === "object") walk(body.kind === "expr" ? body.value : body.stmts ?? body, c);
+        return;
+      }
+      case "escape-hatch": {
+        // A function written as a value whose body the parser kept as TEXT: read with the one
+        // check-time reader; its parameters bind nothing known.
+        if (typeof n.bodyRaw !== "string") return;
+        const { result, warnings } = captureTrailingContentWarnings(() => escapeHatchBodyStatements(n, filePath));
+        if (!result || warnings.length > 0) return;
+        const c = enumReadChild(ov);
+        for (const p of (Array.isArray(n.params) ? n.params : []) as unknown[]) {
+          const nm = typeof p === "string" ? p : (p as { name?: unknown } | null)?.name;
+          if (typeof nm === "string") for (const b of boundNamesOf(nm)) c.vars.set(b, { t: null, quiet: false });
+          else declare(c, nm, null);
+        }
+        walk(result, c);
+        return;
+      }
+      case "guarded-expr": {
+        const g = n.guardedNode as Record<string, unknown> | undefined;
+        walk(g, ov);
+        const recv = g ? (g.exprNode ?? g.initExpr) : undefined;
+        guardArms(n.arms, guardEnumOf(recv), ov);
+        env.handledGuards.add(n);
+        // A guarded declaration binds its name after the handler.
+        if (g && (g.kind === "const-decl" || g.kind === "let-decl") && ov) declare(ov as EnumReadOverlay, g.name, null);
+        return;
+      }
+      case "const-decl":
+      case "let-decl":
+      case "tilde-decl":
+      case "lin-decl": {
+        for (const key of Object.keys(n)) {
+          if (key === "span" || key === "parent" || key.startsWith("__")) continue;
+          walk(n[key], ov);
+        }
+        if (ov) declare(ov, n.name, annotType(n.typeAnnotation) ?? enumReadTypeOf(n.initExpr, ov, lookup, env));
+        return;
+      }
+      case "function-decl":
+      case "fn-decl": {
+        if (ov) declare(ov, n.name, null);
+        const c = enumReadChild(ov);
+        for (const p of (Array.isArray(n.params) ? n.params : []) as unknown[]) {
+          if (typeof p === "string") { for (const b of boundNamesOf(p)) c.vars.set(b, { t: null, quiet: false }); continue; }
+          const po = p as Record<string, unknown> | null;
+          if (!po) continue;
+          const nm = typeof po.name === "string" ? boundNamesOf(po.name) : null;
+          if (nm && nm.length === 1) c.vars.set(nm[0], { t: annotType(po.typeAnnotation), quiet: false });
+          else if (nm) for (const b of nm) c.vars.set(b, { t: null, quiet: false });
+          else declare(c, po.name, null);
+        }
+        walk(n.body, c);
+        return;
+      }
+      case "for-stmt":
+      case "for-loop": {
+        const iter = n.iterExpr ?? null;
+        walk(iter, ov);
+        walk(n.cStyleParts, ov);
+        const c = enumReadChild(ov);
+        declare(c, n.variable, typeof n.variable === "string" ? enumReadElementOf(iter, ov, lookup, env) : null);
+        walk(n.body, c);
+        return;
+      }
+      case "match-stmt":
+      case "match-expr": {
+        if (Array.isArray(n.rawArms)) {
+          // An expression-parsed match: `{ subject, rawArms: ["<pattern> :> <body>", …] }`.
+          walk(n.subject, ov);
+          const { en, errorCtx } = matchSubject(n.subject, ov);
+          for (const raw of n.rawArms as unknown[]) {
+            const arm = typeof raw === "string" ? splitRawArm(raw) : null;
+            if (!arm) continue;
+            const body = auditParseBody(arm.body, filePath);
+            if (body) walk(body, withBinders(ov, enumReadArmBinders(en, arm.pattern, errorCtx, env)));
+          }
+          return;
+        }
+        const header = n.headerExpr ?? n.subject;
+        walk(header, ov);
+        const { en, errorCtx } = matchSubject(header, ov);
+        for (const arm of (Array.isArray(n.body) ? n.body : []) as Array<Record<string, unknown>>) {
+          if (!arm || typeof arm !== "object") continue;
+          if (arm.kind === "match-arm-inline") {
+            walk(arm.resultExpr, withBinders(ov, enumReadArmBinders(en, String(arm.test ?? ""), errorCtx, env)));
+          } else if (arm.kind === "match-arm-block") {
+            const binders = arm.isWildcard || typeof arm.variant !== "string"
+              ? new Map<string, ResolvedType | null>()
+              : enumReadArmBinders(en, `.${arm.variant}(${typeof arm.binding === "string" ? arm.binding : ""})`, errorCtx, env);
+            walk(arm.body, withBinders(ov, binders));
+          } else {
+            walk(arm, ov);
+          }
+        }
+        return;
+      }
+      default:
+        break;
+    }
+    for (const key of Object.keys(n)) {
+      if (key === "span" || key === "parent" || key.startsWith("__")) continue;
+      const v = n[key];
+      if (!v || typeof v !== "object") continue;
+      if (Array.isArray(v) && (key === "body" || key === "consequent" || key === "alternate" || key === "children")) walkStatements(v, ov);
+      else walk(v, ov);
+    }
+  };
+  walk(root, ov0 ?? enumReadChild(null));
+}
+
+/** The scope chain as the enum-read walker reads it. */
+function enumReadScopeLookup(scopeChain: { lookup(name: string): ScopeEntry | null }): EnumReadLookup {
+  return (name) => enumReadEntry(scopeChain.lookup(name));
+}
+
+// ---------------------------------------------------------------------------
 // Struct field access checker (E-TYPE-004)
 // ---------------------------------------------------------------------------
 
@@ -20200,6 +20852,8 @@ function checkRowFieldAccessInExpr(
     }
   };
   walk(exprNode);
+  // S470 lane B — the same sites: a member read off an ENUM-typed value (E-TYPE-004).
+  checkEnumReadsIn(exprNode, span, enumReadScopeLookup(scopeChain), errors);
 }
 
 /**
@@ -31220,6 +31874,21 @@ function processFile(
       const k = `${sp?.file ?? ""}|${sp?.start ?? ""}|${sp?.end ?? ""}|${sp?.line ?? ""}|${sp?.col ?? ""}|${e.message}`;
       if (seenE002.has(k)) { errors.splice(i, 1); i--; continue; }
       seenE002.add(k);
+    }
+  }
+  // S470 lane B — one enum-value read diagnostic per read: the same read is reached by the
+  // statement walk (its binding's scope) and by the `!{}` / `match` arm walk (the arm's binders),
+  // at the statement's span or the handler's. Identical diagnostics (code + text) in a file are
+  // reported once.
+  {
+    const seenEnumRead = new Set<string>();
+    for (let i = 0; i < errors.length; i++) {
+      const e = errors[i];
+      if (!e || (e.code !== "E-TYPE-004" && e.code !== "E-EQ-001")
+          || !(e.message.includes(ENUM_READ_TAG) || e.message.startsWith("E-TYPE-004: Struct type `"))) continue;
+      const k = `${(e.span as Partial<Span> | undefined)?.file ?? ""}|${e.code}|${e.message}`;
+      if (seenEnumRead.has(k)) { errors.splice(i, 1); i--; continue; }
+      seenEnumRead.add(k);
     }
   }
 

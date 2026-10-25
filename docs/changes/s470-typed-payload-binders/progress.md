@@ -19,6 +19,28 @@ refusal is NOT landed.
 ## Log
 - 2026-10-25 start: worktree reset to origin/s470-whole-error-binder-escapes 91c1c9ca4 (PR #1551 OPEN).
   bun install ok. Base tree for comparisons: `git archive 91c1c9ca4` at ~/.cache/scrml/s470/laneB/base.
+- 2026-10-25 IMPLEMENTED (compiler/src/type-system.ts), on the proven path:
+  - ONE walker `checkEnumReadsIn` (expressions + statements), called from the existing member-read
+    checker `checkRowFieldAccessInExpr` (every expression site the ident walker covers), from the
+    statement `match` case (an inline arm's result is walked by nothing else), and from the post-walk
+    `_checkExpressionPositionHandlers` at every `!{}` the statement walk did not already check.
+  - static type only where KNOWN: a binding's type (params / annotated locals / cells resolve as before;
+    a new `ScopeEntry.enumFact` carries an un-annotated `const`/`let`'s constructor / alias / call
+    initializer for THIS check only — `resolvedType` unchanged, so no other check moves), `E.V(…)`,
+    `E::V(…)`, `.V(…)` (the one enum declaring V — the bare-dot rule `auditBinderCallArgs` uses), a call
+    of a function with a declared return type (`callArgFnSignatures`, local + imported) or whose every
+    `return` constructs one enum, a struct field, a tape element.
+  - payload binders typed by the existing planner: `planPayloadBinders` + `parseBindingList` (codegen's
+    §18.7 planner) against the subject's enum (or the failable callee's enum via `failableCalleeErrorEnum`),
+    field types from the enum's declaring file (`variantFieldResolvedType`, factored out of
+    `canonicalFieldTypeKey`). Block `match` arms and statement `!{}` arms now BIND the binder with that
+    type in scope (was `asIs`).
+  - refusals: a member other than `.variant` (and `@cell.advance`, the §51 engine transition) on an
+    enum value → E-TYPE-004; `==`/`!=` enum value vs a primitive literal → E-EQ-001 (§45.3); a binder this
+    walk typed as a struct reading an unknown field → the existing struct E-TYPE-004 text. Whole-error
+    binder `_ e` uses stay the audit's (quiet here). One diagnostic per read (per-file duplicate pass).
+  - F4: in a re-read `<match>` arm copy, `expr.sourceText` is the `${…}` copy of `raw` (covered), and the
+    native `ATTR_EXPR.text` is read with `parseHandlerStatementsForCheck` (unreadable → still refused).
 
 ## Measured on the starting head 91c1c9ca4
 Probes: ~/.cache/scrml/s470/laneB/matrix.mjs (run with the pack's `runShape` via run.mjs; summ.mjs).
