@@ -96,6 +96,10 @@ const REFUSED_FR1 = {
   "when body: a forEach callback": ["${ when @pw changes { [@pw].forEach(x => { if (isOk(x)) { @msg = \"IN\" } }) } }", "inside a nested function"],
   "when body: an IIFE": ["${ when @pw changes { if ((() => isOk(@pw))()) { @msg = \"IN\" } } }", "inside a nested function"],
   "opener effect=: a forEach callback": [ENG("<engine for=Phase effect=${ [@pw].forEach(x => { if (isOk(x)) { @msg = \"IN\" } }) }>\n  <Idle rule=.Active/>\n  <Active/>\n</>"), "inside a nested function"],
+  // fix round 2 (N1) — an optional call is emitted without `await` in the async hosts
+  "opener effect=: an optional call": [ENG("<engine for=Phase effect=${ @msg = isOk?.(@pw) }>\n  <Idle rule=.Active/>\n  <Active/>\n</>"), "called optionally"],
+  "when body: an optional call": ["${ when @pw changes { if (isOk?.(@pw)) { @msg = \"IN\" } } }", "called optionally"],
+  "when body: an optional helper call": ["${ when @pw changes { if (allowed?.(@pw)) { @msg = \"IN\" } } }", "called optionally"],
   "when body: a `!{ }`-handled call": ["${ when @pw changes { @msg = isOk(@pw) !{ _ :> \"err\" } } }", "handled with"],
 };
 for (const [hn, h] of Object.entries(H2_HOSTS)) for (const [bn, b] of Object.entries(H2)) REFUSED_FR1[`H2 ${hn}: ${bn}`] = [h(b), "`"];
@@ -164,6 +168,9 @@ const ACCEPTED = {
   "on mount, helper": "${ on mount { if (allowed(@pw)) { @msg = \"IN\" } } }",
   "when … changes": "${ when @pw changes { @msg = isOk(@pw) ? \"IN\" : \"no\" } }",
   "when … changes, helper": "${ when @pw changes { if (allowed(@pw)) { @msg = \"IN\" } } }",
+  // fix round 2 — a C-style `for` head is read from its parsed parts (the emitter awaits it there)
+  "when … changes, C-style for head": "${ when @pw changes { for (let i = 0; isOk(@pw) && i < 1; i++) { @msg = \"IN\" } } }",
+  "when … changes, a parenthesised callee": "${ when @pw changes { if ((isOk)(@pw)) { @msg = \"IN\" } } }",
   "engine opener effect=": ENG("<engine for=Phase effect=${ @msg = isOk(@pw) ? \"a\" : \"b\" }>\n  <Idle rule=.Active/>\n  <Active/>\n</>"),
   "engine opener effect=, helper": ENG("<engine for=Phase effect=${ if (allowed(@pw)) { @msg = \"IN\" } }>\n  <Idle rule=.Active/>\n  <Active/>\n</>"),
   "a sync helper in a timer": "${ function plain(q) { return q == \"secret\" } }\n<timer interval=1000>${ if (plain(@pw)) { @msg = \"IN\" } }</timer>",

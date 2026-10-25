@@ -798,6 +798,13 @@ class RenderWalk {
         if (this.facts.waits(nm) && (inFn || !(this.facts.awaitedInAsyncHost?.(nm) ?? false))) {
           return inFn ? `${this.describe(nm)}, inside a nested function (a callback or a local function)` : this.describe(nm);
         }
+        // fix round 2 (N1) — an OPTIONAL call `f?.(…)` of a server function is emitted without
+        // `await` in these hosts (`_scrml_fetch_isOk_6?.("wrong")`, measured: the opener logged
+        // in). Refused for every waiting callee (a helper's optional call happens to be awaited;
+        // not relied on).
+        if (this.facts.waits(nm) && n.optional === true) {
+          return `${this.describe(nm)}, called optionally (\`${nm}?.(…)\`, which impl#1 does not await here)`;
+        }
       } else if (callee && callee.kind === "member") {
         const obj = callee.object as AnyNode | undefined;
         if (obj && obj.kind === "ident" && typeof obj.name === "string" && this.facts.namespaceLocals.has(obj.name)) {
@@ -807,6 +814,10 @@ class RenderWalk {
     }
     for (const k of Object.keys(n)) {
       if (k === "span" || k === "_record") continue;
+      // fix round 2 — a C-style `for` head is carried parsed in `cStyleParts` (walked); its
+      // `iterExpr` is the parser's SkippedExpr placeholder holding the same head as text.
+      if (k === "iterExpr" && n.cStyleParts && typeof n.cStyleParts === "object" &&
+          (n.iterExpr as AnyNode | undefined)?.nativeKind === "SkippedExpr") continue;
       if (k === "callee" && kind === "call" && (n.callee as AnyNode | undefined)?.kind === "ident") continue;
       if (k === "property" && kind === "member" && n.computed !== true) continue;
       const r = this.asyncWaits(n[k], inFn, seen);

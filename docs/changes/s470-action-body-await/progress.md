@@ -280,3 +280,40 @@ in-tree stdlib copy + scrml.toml; branch = this worktree; corpus files = this wo
 - `g-namespace-import-undefined-in-when-body-s470` (L2 run-time half, MED) — above.
 - `g-local-fn-cell-write-refused-s470` (LOW, over-refusal) — the "lambda write" shapes above.
 - RETIRED: `g-sync-callback-in-async-host-client-s470` (fixed by refusal in this round).
+
+## Fix round 2 (re-review of f55eb8d4a, verdict FIX — one HIGH) — 2026-10-25
+
+Reviewer material: `~/.cache/scrml/review/s470-aw2/` (repro/N1-opener-optional-call.scrml, shapes6/7).
+Call-form probe (scratch `~/.cache/scrml/s470/await/callforms.mjs`, run with the pack's `runShape`, each
+form × `when` body / opener `effect=`), on f55eb8d4a → this branch:
+
+| form | when | opener |
+|---|---|---|
+| optional call `isOk?.(x)` written / tested | PASS-REFUSED (E-CODEGEN-INVALID-LOGIC, unrelated) → PASS-REFUSED E-IMPL1-ACTION-NOT-AWAITED | **FAIL** (N1) → PASS-REFUSED |
+| optional HELPER call `allowed?.(x)` | E-CODEGEN-INVALID-LOGIC → E-IMPL1 | PASS-DENY (awaited) → PASS-REFUSED (not relied on) |
+| parenthesised callee `(isOk)(x)` | PASS (awaited) | PASS-DENY (awaited) — unchanged, accepted |
+| tagged template ``isOk`x` `` | PASS-REFUSED (E-IMPL1) | PASS-REFUSED — unchanged |
+| `new isOk(x)` | PASS-REFUSED (E-IMPL1) | PASS-REFUSED — unchanged |
+| C-style `for` head `for (…; isOk(x) && …; …)` | PASS-REFUSED (over-refusal) → **PASS** | PASS-REFUSED → PASS-DENY (emitted `await _scrml_fetch_isOk_N(…)` in the head) |
+| comma `(0, isOk(x))` | PASS-REFUSED (over-refusal) | PASS-REFUSED — kept (see below) |
+| plain call (control) | PASS | PASS-DENY |
+
+- N1 (HIGH) FIXED: `asyncWaits` refuses an optional call of any waiting callee (`optional === true`) in
+  both async hosts, E-IMPL1-ACTION-NOT-AWAITED "called optionally". An optional MEMBER call off a
+  namespace import was already refused (namespace member rule); an optional member call of a non-import
+  object calls no file function. §34 row: "an optional call (`f?.(…)`)" added to the list of what an
+  async host does not await (one-line edit; SPEC-INDEX current, s34-census PASS).
+- Over-refusal (C-style `for` head in `when` / opener) FIXED: the head is read from its parsed
+  `cStyleParts`; the parser's SkippedExpr placeholder `iterExpr` (the same head as text) is skipped.
+  Proven by execution: `when` PASS, opener (head over a cell) PASS-DENY with the `await` in the emitted head.
+- Over-refusal KEPT (LOW): a comma expression `(0, isOk(x))` is carried as an unparsed
+  `SequenceExpression` escape hatch — no tree to show the call is at the host's own level, so its text is
+  read to refuse (fail closed). Added to `g-local-fn-cell-write-refused-s470`'s sibling list:
+  `g-async-host-comma-expression-refused-s470` (LOW).
+- Found while probing (pre-existing, fails closed): the opener `effect=`'s C-style `for` head loses a
+  string literal's quotes — `for (let i = 0; isOk("wrong") && …)` emits `isOk(wrong)` → ReferenceError at
+  boot. Candidate `g-opener-effect-for-head-string-literal-unquoted-s470` (LOW: throws, never opens).
+- Pack: family `f11` (+2: opener optional call written into a cell / tested) — **2/2 FAIL on f55eb8d4a**
+  (extracted tree), PASS-REFUSED here. EXPECTED_SHAPE_COUNT 1990 → 1992, pinned, README.
+- Unit tests: +3 refused (optional call in the opener / `when`, optional helper), +2 accepted (`when`
+  C-style for head, parenthesised callee).

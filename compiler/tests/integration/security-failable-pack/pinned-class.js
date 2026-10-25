@@ -471,6 +471,9 @@ export const PINNED_CLASS = {
   "f9/imported: request body cell write of the call": "PASS-REFUSED",
   "f9/imported: when body tests the call": "PASS",
   "f9/imported: engine opener effect= tests the call": "PASS-DENY",
+  // s470-action-body-await fix round 2 — classify.js --json f11/ (every shape FAIL on f55eb8d4a).
+  "f11/opener effect= optional call written into a cell": "PASS-REFUSED",
+  "f11/opener effect= optional call tested": "PASS-REFUSED",
   // s470-action-body-await fix round 1 — classify.js --json f10/ (every shape FAIL on 41255a64b).
   "f10/H1 meta whole cell write": "PASS-REFUSED",
   "f10/H1 meta whole cell write under if": "PASS-REFUSED",
