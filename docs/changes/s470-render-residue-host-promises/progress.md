@@ -162,3 +162,39 @@ Measured with a scratch pack family on the base tree (~/.cache/scrml/s470/laneG/
 - merge of origin/main 29fcaac8a (#1558 s470-async-colouring-scope): it took pack family name `f15`, so this lane's
   family is `f16` (renamed before the merge); pack conflicts resolved (EXPECTED_SHAPE_COUNT 2680 + 22 = 2702;
   both pin blocks kept). `hostPromiseReachOf` now inherits #1558's scope-resolved colouring.
+
+## Fix round 1 (review of 618bb573b: LAND-WITH-FOLLOWUPS; F1–F6 folded in, F8 code alignment)
+
+Root (all residuals): `fetch` was in the render-waiting predicate only. Now it is in the file's §13.2
+async facts, by the ONE seed every await site / colouring / value-use judge reads:
+- `asyncImportedLocalsOf` (codegen/index.ts) adds `hostPromiseSeedOf(file)`: the unbound host `fetch`
+  plus the pseudo name `globalThis.fetch` (HOST_FETCH_MEMBER, never an identifier). So the file async
+  set, the client colouring seed (`_asyncImportedLocals`), the server callee map and the CPS await set
+  hold it — F5: a function / handler / `on mount` / `when` body / server function that calls `fetch`
+  is emitted `async` and the call is awaited, exactly where a server call or async import is.
+- the colouring's callee walks (`collectCalleeIdents`, #1558's `collectFreeCalleeIdents`) record a
+  call through the global object (`globalThis.fetch(…)`, `window["fetch"](…)`,
+  `document.defaultView.fetch(…)`; host-promise-names.ts is the one reader) as HOST_FETCH_MEMBER — F1.
+- emit-expr `emitCall`: a call of HOST_FETCH_MEMBER is awaited by the same rule as the bare spelling
+  (client peer set / server stdlib facts), receiver-wrapped `(await globalThis.fetch(u)).status`.
+- emit-functions: a SYNC function's calls of a name it binds locally (`function chk(q, fetch)`) are not
+  peer-awaited (#1558's `locallyBoundOnlyCalleeNames` applied to the peer set too).
+- value uses (F2): `mayHoldWaitingFn` / `refsAsync` (fn-valued-bindings) count a host member read; a
+  destructure `const { fetch: g } = globalThis` is a waiting binding → E-ASYNC-FN-ESCAPES-AS-VALUE (the
+  server twins' code). The render walk judges value reads in every position (F4, `exprWaitsAll`),
+  with SPEC's exemptions (`typeof f`, a scheduler argument).
+- F3: `fileBoundNamesOf` counts only module-scope declarations (not ones inside a statement's block),
+  and a declaration whose initializer holds the host fetch (`= globalThis.fetch`, `.bind`) neither
+  turns the rule off nor shadows it (it is itself refused as a waiting binding).
+- F6: a `when` body awaits `fetch` now (it is in the async host's peer set), so a bare `fetch` / helper
+  statement there is accepted like its server twin; measured twin parity (~/.cache/scrml/s470/laneG/fr1/
+  tw.mjs, 18 shapes): every fetch position classifies exactly as its `isOk` twin.
+- F8: `safeCallAsync(() => fetch(u))` now carries E-ASYNC-FN-ESCAPES-AS-VALUE as the `isOk` twin does
+  (when body) and E-ASYNC-STDLIB-IN-SYNC-CALLBACK where the twin has E-SERVER-FN-IN-SYNC-CALLBACK
+  (handler fn, on mount).
+
+Pack: family renamed r19 (`r19-shapes.js`, shape file `f25`; f16 collided with lane C). f16's 22 shapes
+are r19's `G0`. +51 fix-round shapes: base 618bb573b FAIL=39 (+1 refused), head FAIL=0 except the two G0
+shapes `when` / opener `effect=` "tests fetch" — those now AWAIT, so `if (fetch(u))` tests a Response
+(truthy for any password): moved to BY_DESIGN_LOGS_IN. F5 shapes read `.status` so an awaited 404
+answers "rejected" (PASS-DENY on head). EXPECTED_SHAPE_COUNT 2753; r19-pinned.js.

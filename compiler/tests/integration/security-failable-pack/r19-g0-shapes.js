@@ -1,4 +1,4 @@
-// Probe family `f16` — S470 s470-render-residue-host-promises (SIDE `fullstack`: the page's `fetch` is
+// r19 G0 (was family f16) — S470 s470-render-residue-host-promises (SIDE `fullstack`: the page's `fetch` is
 // answered in-process by the compiled server, so a `fetch` resolves to a real 404 Response — its Promise
 // is still pending, and truthy, when the gate reads it).
 //
@@ -17,7 +17,7 @@
 // function named `fetch`, a local named `fetch`) and must keep compiling.
 // Data, not logic. Do not edit a shape to make it pass.
 
-export const SIDE = "fullstack";
+// (fix round 1: moved out of shapes/ — the r19 family f25 carries these as its `G0` shapes.)
 
 const P = (logic, view, fns = "") => `type Phase:enum = { Idle, Active }
 <pw> = ""

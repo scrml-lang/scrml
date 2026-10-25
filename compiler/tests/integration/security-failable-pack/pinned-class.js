@@ -5,6 +5,7 @@
 // program) turns the suite red, and so does a refused shape that starts compiling (re-measure it, then
 // re-pin). Regenerate from `classify.js --json <family>/` — never by hand-editing to make the suite pass.
 import { R9_PINNED } from "./r9-pinned.js";
+import { R19_PINNED } from "./r19-pinned.js";
 
 export const PINNED_CLASS = {
   "s4/return match": "PASS",
@@ -824,29 +825,8 @@ export const PINNED_CLASS = {
   "f13/engine message arm tests a server call": "PASS-REFUSED",
   "f13/when body tests an async helper": "PASS",
   "f13/engine opener effect= tests an async helper": "PASS-DENY",
-  // S470 s470-render-residue-host-promises — classify.js --json f16/ (every BAD shape FAIL on 6081e0685; the five controls PASS / PASS-DENY on both).
-  "f16/render: if= tests fetch": "PASS-REFUSED",
-  "f16/render: interpolation ternary tests fetch": "PASS-REFUSED",
-  "f16/render: derived cell holds fetch": "PASS-REFUSED",
-  "f16/render: if= tests globalThis.fetch": "PASS-REFUSED",
-  "f16/render: if= tests window.fetch": "PASS-REFUSED",
-  "f16/render: if= tests a helper that returns fetch": "PASS-REFUSED",
-  "f16/render: markup held in a const initializer tests fetch": "PASS-REFUSED",
-  "f16/action: module-init if tests fetch": "PASS-REFUSED",
-  "f16/action: timer body tests fetch": "PASS-REFUSED",
-  "f16/action: poll body tests fetch": "PASS-REFUSED",
-  "f16/action: request body writes a fetch ternary": "PASS-REFUSED",
-  "f16/action: request body writes fetch into the gate cell": "PASS-REFUSED",
-  "f16/action: when body tests fetch": "PASS-REFUSED",
-  "f16/action: engine opener effect= tests fetch": "PASS-REFUSED",
-  "f16/markup value: const initializer, if= over a server call": "PASS-REFUSED",
-  "f16/markup value: const initializer, if= over a plain comparison": "PASS",
-  "f16/markup value: ternary, if= over a plain comparison": "PASS",
-  "f16/control: fetch in an event handler": "PASS-DENY",
-  "f16/control: fetch in on mount": "PASS-DENY",
-  "f16/control: a bare fetch statement in a timer": "PASS-DENY",
-  "f16/control: the author's own function named fetch": "PASS",
-  "f16/control: a timer-body local named fetch": "PASS",
   // S470 s470-async-colouring-scope — r9-shapes.js (s12 / f15 / l7 / t7), every shape pinned (r9-pinned.js).
   ...R9_PINNED,
+  // S470 s470-render-residue-host-promises — r19-shapes.js (f25), every shape pinned (r19-pinned.js).
+  ...R19_PINNED,
 };

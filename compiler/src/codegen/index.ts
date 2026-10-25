@@ -83,7 +83,7 @@ import { setFileSchedulerBindings } from "./async-combinators.ts";
 import { schedulerNamesNotProvablyGlobal } from "./js-async-analysis.ts";
 import { computeFileAsyncFnNames, serverFnNamesOfFile, setFileAsyncFnNames, adoptFileAsyncSet, waitingBindingsOfFile, namespaceImportLocalsOf, waitingFnPredicateOfFile, serverPlacedFnNamesAnywhere } from "./file-async-fns.ts";
 import { renderWaitingCallsOf } from "./render-waiting-calls.ts";
-import { unboundHostPromiseGlobalsOf, hostPromiseReachOf, hostShadowedRefsOf } from "./host-promise-globals.ts";
+import { unboundHostPromiseGlobalsOf, hostPromiseReachOf, hostShadowedRefsOf, hostPromiseSeedOf } from "./host-promise-globals.ts";
 import { collectEngineVarNames } from "./emit-engine.ts";
 import { isToolProgram, isLibraryShapedFile } from "../tool-program.ts";
 import { forEachProgramWithRole, findTopLevelProgram, findTopLevelPrograms, programRoleOptionsOf, NESTED_SESSION_ATTRS, nestedProgramAttrVerdict } from "../program-role.ts";
@@ -963,7 +963,10 @@ function fileAsyncFnNamesOf(
   if (fp) memo.set(fp, result); // cycle guard: register the (mutable) set first
   const seed = asyncImportedLocalsOf(fileAST, files, memo, exportRegistry, importGraph);
   adoptFileAsyncSet(result, computeFileAsyncFnNames(fileAST, {
-    asyncImportedLocals: seed,
+    // S470 s470-render-residue-host-promises fix round 1 (F5) — the SPEC-named host Promise global
+    // (`fetch`, §13.7 item 4 / §13.8 item 3; §13.2: "a Promise-returning standard-library function")
+    // seeds the file's async set like an async import, where the file does not bind the name.
+    asyncImportedLocals: new Set([...seed, ...hostPromiseSeedOf(fileAST)]),
     serverFnNames: serverFnNamesOfFile(fileAST, memo.routeMap ?? null),
     exportRegistry: exportRegistry ?? null,
   }));
@@ -2743,7 +2746,16 @@ export function runCG(input: CgInput): CgOutput {
       // into computeAsyncFnNames). Stashed here because emit-server has no `files`
       // handle. `computeToolAsyncImportedLocals` is generic (any fileAST); it
       // early-returns empty for an import-free file, so the cost is ~O(1) there.
-      (fileAST as any)._asyncImportedLocals = computeToolAsyncImportedLocals(fileAST, files, exportRegistryInput, importGraphInput, _fileAsyncMemo);
+      // S470 s470-render-residue-host-promises fix round 1 (F5) — plus the host Promise global the
+      // file reaches (`fetch` unbound, and the `globalThis.fetch` spelling): the client colouring
+      // seed, the server await map and the CPS await set all read this stash, so a body calling
+      // `fetch` is emitted `async` and the call awaited exactly as an async import's call is.
+      // (Not added to `computeToolAsyncImportedLocals` itself: its emptiness routes a tool-dep
+      // library's emit path.)
+      (fileAST as any)._asyncImportedLocals = new Set([
+        ...computeToolAsyncImportedLocals(fileAST, files, exportRegistryInput, importGraphInput, _fileAsyncMemo),
+        ...hostPromiseSeedOf(fileAST),
+      ]);
       // s466 fix round 5 — absent for a file no other file imports (its exported
       // functions serve consumers outside the compilation: all server-placed).
       (fileAST as any)._serverReachedExports = serverReachedExports.get(toPosix(filePath)) ?? undefined;

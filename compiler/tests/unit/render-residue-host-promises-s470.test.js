@@ -105,7 +105,6 @@ const REFUSED_ACTION = {
   "module-init if tests fetch": `\${ let ok = false\nif (fetch("/a")) { ok = true } }\n<p><span if=\${ok}>IN</span></p>`,
   "request body writes fetch to a cell": `<request id="r" deps=[@pw]>\${ @msg = fetch("/a?p=" + @pw) }</>\n<p>\${@msg}</p>`,
   "poll body tests fetch": `<poll interval=1000>\${ if (fetch("/a")) { @msg = "LOGGED IN" } }</poll>\n<p>\${@msg}</p>`,
-  "when body tests fetch (not awaited by that host)": `\${ when @pw changes { if (fetch("/a")) { @msg = "LOGGED IN" } } }\n<p>\${@msg}</p>`,
   "runtime ^{} tests fetch": `^{ if (fetch("/a")) { @msg = "LOGGED IN" } }\n<p>\${@msg}</p>`,
 };
 
@@ -119,6 +118,8 @@ const ACCEPTED = {
   "a timer-body local named fetch": `<timer interval=1>\${ const fetch = (u) => u == "secret"\nif (fetch(@pw)) { @msg = "LOGGED IN" } }</timer>\n<p>\${@msg}</p>`,
   "a member call api.fetch on an author object": `\${ const api = { fetch: (u) => u == "x" } }\n<p>\${ api.fetch("x") ? "a" : "b" }</p>`,
   "a string naming fetch": `<p>\${ "fetch" }</p>`,
+  // fix round 1 (F5 / F6) — a `when` body is an async host: it awaits the host `fetch` like its server twin.
+  "when body tests fetch (awaited by that host)": `\${ when @pw changes { if (fetch("/a")) { @msg = "LOGGED IN" } } }\n<p>\${@msg}</p>`,
   "a helper whose parameter is named fetch": [`<p>\${ probe((u) => u == "x") ? "a" : "b" }</p>`, `    function probe(fetch) { return fetch("x") }`],
 };
 
@@ -149,8 +150,22 @@ describe("gaps 2 + 3 — the host `fetch` (§13.7 item 4) is a waiting value", (
     const r = compile(page(`<p><span if=\${fetch("/a")}>IN</span></p>`));
     expect(r.messages.join("\n")).toContain("the host `fetch`, which returns a Promise (§13.7 item 4)");
   });
-  test("a helper that reaches fetch is named as such (impl#1 does not emit it async)", () => {
+  test("a helper that reaches fetch is coloured async (fix round 1 F5) and refused in a render position", () => {
     const r = compile(page(`<p>\${probe(@pw)}</p>`, `    function probe(q) { fetch("/a?p=" + q)\n        return 1 }`));
-    expect(r.messages.join("\n")).toContain("`probe`, which calls the host `fetch` (a Promise-returning function: §13.7 item 2)");
+    expect(r.messages.join("\n")).toContain("`probe`, which the compiler emits async");
+  });
+  test("F5 — fetch in a function body is awaited, and the function is emitted async", () => {
+    const r = compile(page(`<button onclick=go()>g</button>\n<p>\${@msg}</p>`,
+      `    function go() { const r = fetch("/a")\n        @msg = r.status == 200 ? "ok" : "no" }\n    function viaMember() { const r = globalThis.fetch("/a")\n        @msg = r.ok ? "ok" : "no" }`));
+    expect(r.messages).toEqual([]);
+    expect(r.client).toMatch(/async function _scrml_go_\d+\(/);
+    expect(r.client).toContain('await fetch("/a")');
+    expect(r.client).toContain('await globalThis.fetch("/a")');
+  });
+  test("F5 — a parameter named fetch is not awaited (the function stays sync)", () => {
+    const r = compile(page(`<button onclick=go()>g</button>\n<p>\${@msg}</p>`,
+      `    function chk(q, fetch) { return fetch(q) }\n    function go() { @msg = chk("x", (u) => u == "x") ? "a" : "b" }`));
+    expect(r.messages).toEqual([]);
+    expect(r.client).not.toMatch(/await fetch\(q\)/);
   });
 });

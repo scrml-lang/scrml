@@ -118,7 +118,9 @@ describe("g-when-handler-multistatement-body-loses-ast-path-lowerings (S374)", (
     // §13.8 item 3), and a `when` body does not await a call inside a nested function, so impl#1 now
     // refuses this body (E-IMPL1-ACTION-NOT-AWAITED) — fail closed, nothing emitted to strand an await in.
     if (errors.some((e) => e.code === "E-IMPL1-ACTION-NOT-AWAITED")) {
-      expect(errors.map((e) => e.code)).toEqual(["E-IMPL1-ACTION-NOT-AWAITED"]);
+      // fix round 1 (F8) — and the thunk is a waiting function value handed to a non-collection
+      // function: E-ASYNC-FN-ESCAPES-AS-VALUE, as for the `isOk` server twin.
+      expect([...new Set(errors.map((e) => e.code))].sort()).toEqual(["E-ASYNC-FN-ESCAPES-AS-VALUE", "E-IMPL1-ACTION-NOT-AWAITED"]);
       return;
     }
     noErr(errors);

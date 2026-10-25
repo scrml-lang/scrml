@@ -24,14 +24,37 @@
 import { computeAsyncFnNames } from "./emit-library-shared.ts";
 import { buildCalleeImportMap } from "./scheduling.ts";
 import { getNodes } from "./collect.ts";
+import { HOST_PROMISE_GLOBALS, HOST_FETCH_MEMBER, hostPromiseMemberOf } from "./host-promise-names.ts";
+export { HOST_PROMISE_GLOBALS, HOST_GLOBAL_OBJECTS, HOST_FETCH_MEMBER } from "./host-promise-names.ts";
 
 type AnyNode = Record<string, unknown>;
 
-/** The SPEC-named host Promise-returning globals (§13.7 item 4, §13.8 item 3). */
-export const HOST_PROMISE_GLOBALS: ReadonlySet<string> = new Set(["fetch"]);
+/**
+ * fix round 1 (F3) — does a declaration's initializer hold the host Promise global itself:
+ * `fetch`, `globalThis.fetch`, `window["fetch"]`, `window.fetch.bind(window)`? Such a binding IS the
+ * host function (`const fetch = globalThis.fetch`): it neither turns the host rule off nor
+ * shadows it — it is a waiting function value, refused where it is bound (§13.9.6).
+ */
+export function holdsHostPromise(v: unknown): boolean {
+  if (!v || typeof v !== "object") return false;
+  const n = v as AnyNode;
+  if (n.kind === "ident" && typeof n.name === "string") return HOST_PROMISE_GLOBALS.has(n.name);
+  if (hostPromiseMemberOf(n) !== null) return true;
+  if (n.kind === "call") {
+    const c = n.callee as AnyNode | undefined;
+    if (c && c.kind === "member" && c.property === "bind") return holdsHostPromise(c.object);
+  }
+  if (n.kind === "binary" || n.kind === "ternary") {
+    for (const k of ["left", "right", "consequent", "alternate"]) if (holdsHostPromise(n[k])) return true;
+  }
+  return false;
+}
 
-/** Objects whose member of the same name IS the host global (`globalThis.fetch(…)`, `window.fetch(…)`). */
-export const HOST_GLOBAL_OBJECTS: ReadonlySet<string> = new Set(["globalThis", "window", "self"]);
+/** The initializer of a plain declaration, when it holds the host Promise global. */
+function declHoldsHost(st: AnyNode): boolean {
+  return (st.kind === "const-decl" || st.kind === "let-decl" || st.kind === "tilde-decl" || st.kind === "lin-decl") &&
+    holdsHostPromise(st.initExpr);
+}
 
 /** Markup elements whose `${ }` body is lowered into a callback of its own (its declarations are local to it). */
 const LOCAL_BODY_TAGS = new Set(["request", "timer", "poll", "timeout"]);
@@ -62,25 +85,36 @@ function paramNames(p: unknown): string[] {
 }
 
 /**
- * The names the file binds at MODULE scope — a `function`, a plain declaration, an import — read
- * without entering a function body, a lambda, or a `<request>` / `<timer>` / `<poll>` / `<timeout>`
- * body (lowered into a callback of its own). A host global of such a name is the author's binding.
+ * The names the file binds at MODULE scope — an import, or a `function` / plain declaration written
+ * directly in a `${ }` body that markup holds (not inside a statement's block: `if (c) { const fetch
+ * = 1 }` binds only that block, fix round 1 F3) — read without entering a function body, a
+ * statement, a markup VALUE, an `<each>` / `<match>` / engine / component body, or a `<request>` /
+ * `<timer>` / `<poll>` / `<timeout>` body (lowered into a callback of its own). A declaration that
+ * holds the host Promise global itself (`const fetch = globalThis.fetch`) does not count. A host
+ * global of such a name is the author's binding.
  */
 export function fileBoundNamesOf(fileAST: unknown): Set<string> {
   const out = new Set<string>(buildCalleeImportMap(fileAST as never).keys());
   const seen = new WeakSet<object>();
+  const CONTAINERS = new Set(["markup", "logic", "if-chain", "state"]);
   const visit = (v: unknown): void => {
     if (!v || typeof v !== "object" || seen.has(v as object)) return;
     seen.add(v as object);
     if (Array.isArray(v)) { for (const x of v) visit(x); return; }
     const n = v as AnyNode;
-    for (const nm of declNames(n)) out.add(nm);
-    if (n.kind === "function-decl" || n.kind === "lambda") return;
-    if (n.kind === "markup" && typeof n.tag === "string" && LOCAL_BODY_TAGS.has(n.tag)) return;
-    for (const k of Object.keys(n)) {
-      if (k === "span" || k === "_record") continue;
-      const x = n[k];
-      if (x && typeof x === "object") visit(x);
+    if (n.kind === "logic") {
+      for (const st of Array.isArray(n.body) ? n.body as AnyNode[] : []) {
+        if (!st || typeof st !== "object") continue;
+        if (!declHoldsHost(st)) for (const nm of declNames(st)) out.add(nm);
+        if (typeof st.kind === "string" && CONTAINERS.has(st.kind)) visit(st);
+      }
+    } else if (n.kind === "markup") {
+      if (!(typeof n.tag === "string" && LOCAL_BODY_TAGS.has(n.tag))) visit(n.children);
+    } else if (n.kind === "state") {
+      visit(n.children);
+    } else if (n.kind === "if-chain") {
+      for (const b of Array.isArray(n.branches) ? n.branches as AnyNode[] : []) if (b && typeof b === "object") visit(b.element);
+      visit(n.elseBranch);
     }
   };
   visit(getNodes(fileAST as never));
@@ -101,8 +135,8 @@ export function unboundHostPromiseGlobalsOf(fileAST: unknown): Set<string> {
  * over-refusal, never a miss).
  */
 export function hostPromiseReachOf(fnNodes: unknown[], hostNames: ReadonlySet<string>): Set<string> {
-  if (hostNames.size === 0) return new Set();
-  return computeAsyncFnNames(fnNodes as never, null, new Set(hostNames));
+  // fix round 1 (F1) — the global-object spellings (`globalThis.fetch(…)`) are seeded too.
+  return computeAsyncFnNames(fnNodes as never, null, new Set([...hostNames, HOST_FETCH_MEMBER]));
 }
 
 /**
@@ -121,6 +155,8 @@ export function hostShadowedRefsOf(nodes: unknown, hostNames: ReadonlySet<string
     if (Array.isArray(v)) {
       let inner = scope;
       for (const x of v) {
+        // A declaration that holds the host global itself does not shadow it (F3).
+        if (x && typeof x === "object" && declHoldsHost(x as AnyNode)) continue;
         for (const nm of declNames(x as AnyNode)) {
           if (hostNames.has(nm)) { if (inner === scope) inner = new Set(scope); (inner as Set<string>).add(nm); }
         }
@@ -146,4 +182,14 @@ export function hostShadowedRefsOf(nodes: unknown, hostNames: ReadonlySet<string
   };
   visit(nodes, new Set());
   return out;
+}
+
+/**
+ * fix round 1 (F5) — the host names that seed the file's async facts (`asyncImportedLocalsOf`
+ * in codegen/index.ts): the SPEC-named host Promise globals the file does not bind.
+ */
+export function hostPromiseSeedOf(fileAST: unknown): Set<string> {
+  // The global-object spelling (`globalThis.fetch(…)`, recorded by the colouring's callee walk under
+  // `HOST_FETCH_MEMBER`) is the host function whatever the file binds.
+  return new Set([...unboundHostPromiseGlobalsOf(fileAST), HOST_FETCH_MEMBER]);
 }
