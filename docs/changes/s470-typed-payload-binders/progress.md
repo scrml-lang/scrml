@@ -261,6 +261,41 @@ untyped helper parameter, JSON round-trip [b1 A12 A14 A17 A18 A26 A31 A35].
   browser-baseline · lint-no-default-arm · slices m1/m2/m1-lowered/m3/m4/codec · e2e-render-map 259/0 ·
   host-global 1/2 + 2/2 0 violations (2 / 135 threw, as before) · bootstrap-severity / -conformance current.
 
+## Fix round 3 (adversarial review of 73d4e2e2d: FIX; probes ~/.cache/scrml/review/s470-lb3/)
+- PENDING-POISON FIXED — each inference frame records the in-progress functions it read PENDING for
+  (`inferStack`). A result that depended on ANOTHER function still being inferred is provisional:
+  returned to its caller (PENDING itself when it has no other value) but NOT memoized, and recomputed
+  once that function is final; the head of a cycle (pending only on its own recursion) is final. The
+  verdict is the same whichever member is declared, inferred or called first — unit tests permute every
+  declaration order × call order of a 2-cycle and every declaration order of a 3-cycle. [b10 P1–P8]
+- IMP-STRUCT FIXED — a struct (and an enum payload field) remembers each field's declared TEXT and its
+  declaring file (`structDeclContext`, `enumDeclContext.file`); a field whose registry-time type is
+  `asIs` / unknown (an imported enum or alias the registry did not hold yet) is resolved from that text
+  with the declaring file's imports — the same resolver an alias's RHS uses (`enumReadResolveText`), from
+  the one type reader (`enumReadStructField`, `enumReadVariantField`). [k/e2e R11 R11b R11c R11d R11e, k1 R11]
+- EXPORT-STAR FIXED — `enumReadExportedTypeOf`: a module's exported type is its declaration, an import it
+  exports on, a named re-export (`export { X } from`, `export { Y as X } from`) or `export * from`; a
+  (file, name) cycle is unknown. [k/e2e R4, k1 R1 R3 R4]
+- DEPTH FIXED (fail closed) — the bound is 256 resolution steps (~4 per file: a chain of ~60 files; 40
+  resolves, 80 does not). Past it the type is ENUM_READ_LIMIT and a member read off the value is REFUSED:
+  E-TYPE-031 (reused, as the whole-error binder audit's impl#1 refusals reuse it — no new §34 code minted),
+  the message naming the limit and "an impl#1 limitation, not a language rule". A cycle (an alias of
+  itself, an import cycle) is not a chain and stays unknown (H6 / R9 unchanged). [k/chain9 refused
+  E-TYPE-004 now; a generated 80-file chain E-TYPE-031]
+- NS-ALIAS — NOT valid scrml per SPEC: §21.3 "Named imports (`{ name }`) and default imports (`name`) from
+  `.scrml` files SHALL be resolved by the compiler against the exporting file's export list" names only
+  those two forms for `.scrml` imports (the only namespace-import mention is the §20 server-signal note on
+  `import * as X from "bun"`); there is no namespace-qualified type-name form (`h.I0`). Not resolved; for
+  the coordinator to file (impl#1 compiles k1 R5 clean today — it accepts a form the SPEC does not define).
+- Pack-control strength — the r11 VALID controls call their `f` at run time (payload-variant arguments
+  where `f` reads `.variant` further); server W10 dropped (PASS-500 on both trees: a local function the
+  server bundle does not ship once a server `login` calls `f`).
+- Pack: r12 (f18 / l10 / t10; no server family — every cycle shape was PASS-500 there), 16 shapes, each
+  FAIL on a 73d4e2e2d archive → PASS-REFUSED: P1 P4 P6 P7 × 3 sides, fullstack R11c R11b R11 and the
+  80-file chain. R4 (export *) is unit-tested only: on 73d4e2e2d its page's client bundle throws at load
+  (it imports a TYPE from the `export *` module), so it cannot be measured FAIL. EXPECTED_SHAPE_COUNT 2591.
+- Performance under a loaded machine (load avg ~55): chain 1.67s vs main 1.53s, cycle 0.51 / 0.57.
+
 ## Candidate gaps (not filed here)
 1. A markup `<match>` nested in a `<match>` arm is never mounted: the inner mount `<div
    data-scrml-match-mount=…>` is emitted but no dispatcher is generated for it, so its content (buttons,
@@ -273,6 +308,17 @@ untyped helper parameter, JSON round-trip [b1 A12 A14 A17 A18 A26 A31 A35].
    binder audit; §45.3 says cross-type `==` is an error. LOW.
 4. An `<engine>` / derived-machine cell typed by a NAMED machine (`@var: PM`) resolves to a `machine`
    type, not its governed enum, so member reads on it are not checked by this lane. LOW (not measured).
+5. (round 3) `.variant` on a UNIT variant value reads `not` at run time (a unit variant is emitted as its
+   bare tag string): `f(Role.Admin)` with `f(r: Role) { return r.variant }` logs `not` (tool, measured) —
+   the one member this lane ALLOWS is wrong for unit variants. Security-shaped: `e.variant == "Gone"` is
+   false for a unit error. MED–HIGH.
+6. (round 3) A server function calling a local function that calls another local `return match` function
+   (r11 W10 on the server side): "mk is not defined" at run time — the callee is not shipped to the server
+   bundle. PASS-500 on 73d4e2e2d and head. MED.
+7. (round 3) An importer of a TYPE through an `export *` module: the page's client bundle throws at load
+   (it imports the type as a value from the re-exporting module). Fails closed at run time. LOW–MED.
+8. (round 3) `import * as h` + `type K = h.I0` compiles clean although §21.3 defines no namespace import
+   for `.scrml` (k1 R5). LOW.
 
 ## Final gates (merged head 2151403c7 + this progress commit; base for s34 / R26: origin/main da3180405)
 - R26 re-run vs origin/main da3180405 (git archive, in-tree stdlib): 3,615 files, 0 changed, 0 newly rejected.
