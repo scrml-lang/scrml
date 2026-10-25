@@ -100,3 +100,16 @@ Base: main `d582ae04f`.
 | front-end `emitStringFromTree` (component-expander, body-pre-parser, body-dg-builder) | produces scrml SOURCE re-compiled by codegen, not JS |
 | meta-eval.ts (compile-time `^{}` evaluation) | not shipped JS; a compile-time `x.variant` on a unit variant is still `undefined` — candidate gap |
 | compiler-generated reads (`_scrml_match_N.variant`, engine `__prev.variant`, runtime) | compiler code, already tag-normalized |
+
+### Fix round 1 — R26 and CI (base = merge parent 55de8639c, 3618 sources)
+- Diagnostic codes: 0 programs differ.
+- Digests: 217 differ — 202 only by the embedded project root (tree path); 13 by the lowering alone
+  (the same 12 engine / machine samples + stdlib/data/validate.scrml as round 0); 2 by F6 — the census
+  fixtures `45-unknown-variant-qualified.{control,violation}.scrml` (`c is Color.Red` was
+  `(c === Color.Red)`, now the tag-normalized test against `"Red"`; same value for a unit variant;
+  the violation's unknown `Color.Purple` compared against `undefined`, now `"Purple"` — false both ways).
+- CI: types-gate unchanged; s34-census PASS; conflict-marker PASS; ci-shards needs OK; SPEC-INDEX OK;
+  delta-lint PASS; md shim current; root tests / snippet / claim / compile-floor PASS; unit +
+  integration + conformance (hook) 0 fail; lsp + commands 0 fail; e2e-render-map 259 pass; todomvc ok;
+  browser-baseline PASS; slices 0 fail; no-default-arm 0; host-global-scan 0 violations; runtime-size
+  ratchet 11 pass, runtime untouched (0 B).
