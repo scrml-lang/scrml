@@ -7778,6 +7778,15 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       // parentheses, a call argument, a literal) is consumed as text here, so the AST never builds it:
       // refuse it at the collector (E-TRY-NOT-IN-SCRML), once per block.
       if (tok.kind === "BLOCK_REF" && errorEffectIsStatementForm(tok.block)) reportTryFormOnce(tok, errors, filePath);
+      // A `catch` collected INTO an expression (`const q = ! { … } catch T { … }`) is the statement form's
+      // arm read as operand text — never scrml (a member `.catch` / an object key `catch:` excepted).
+      if ((tok.kind === "KEYWORD" || tok.kind === "IDENT") && tok.text === "catch" && parts.length > 0 &&
+          !(lastTok && (lastTok.text === "." || lastTok.text === "?.")) &&
+          !(peek(1) && peek(1).kind === "PUNCT" && peek(1).text === ":") && !_spacedBangReported.has(tok) &&
+          !parts.includes("try")) { // a source `try … catch` is E-TRY-NOT-IN-SCRML at its `try` already
+        _spacedBangReported.add(tok);
+        errors.push(new TABError("E-TRY-NOT-IN-SCRML", TRY_CATCH_FORM_MESSAGE, tokenSpan(tok, filePath)));
+      }
       // S89 §13.2 Sub-Phase B — `async function` / `async fn` decl-shape boundary.
       // When collectExpr sees `async` immediately followed by `function`/`fn` at
       // depth 0 (with optional `server` between), this is the start of an
@@ -8348,6 +8357,35 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
             tok.kind === "AT_IDENT" ||
             (tok.kind === "PUNCT" && tok.text === "!")
           );
+          // S470 PA ruling (lane C round 4, R1) — §7.2.2 rule 4: a newline is whitespace, so
+          // `isMember⏎!banned` reads `isMember !banned`, which is no expression (a missing operator), and
+          // rule 1 asks for the `;`. The boundary stays (nothing is swallowed into this statement), but
+          // a `!`-led statement after a value-ending line with no `;` between is REFUSED, located at the
+          // `!` — `!x`, `!(…)` alike. A gapped `! { … }` is refused by its own, more specific reader
+          // (refuseSpacedBangBrace: E-ERROR-014 / E-TRY-NOT-IN-SCRML). A `!`-led statement after a `;`
+          // or at the start of a block, and a next-line postfix `!{ … }` (a BLOCK_REF), are unaffected.
+          if (lastEndsValue && tok.kind === "PUNCT" && tok.text === "!") {
+            if (!bangOpensBraceBlock(peek)) {
+              // The `!`-led line as written (its tokens on the `!`'s own line), for the message.
+              const lineParts = [];
+              for (let j = 0; j < 40; j++) {
+                const t = peek(j);
+                if (!t || t.kind === "EOF" || !t.span || t.span.line !== tok.span.line) break;
+                lineParts.push(t.text);
+              }
+              let shown = lineParts.join(" ").trim();
+              if (shown.length > 80) shown = shown.slice(0, 77) + "...";
+              errors.push(new TABError(
+                "E-STMT-UNEXPECTED-TOKEN",
+                "E-STMT-UNEXPECTED-TOKEN: unexpected token — no statement begins at `" + shown + "`. A newline " +
+                "does not end a statement here (§7.2.2 rule 4: a newline is whitespace), so this line continues " +
+                "the one above as `… " + String(lastTok.text) + " !…`, which is not an expression. Put the operator " +
+                "you meant before the `!` (`a && !b`), or end the statement above with `;`.",
+                tokenSpan(tok, filePath),
+              ));
+            }
+            break;
+          }
           if (lastEndsValue && tokStartsStmt) break;
           // S465 r3 — a `{` on a later line after a value OPENS A BARE BLOCK
           // STATEMENT (SPEC §7.2.2 "Terms": a bare block is a statement list).
@@ -26149,6 +26187,14 @@ function refuseSpacedBangBrace(tok, peek, errors, filePath) {
       "Write it after the call — `call() !{ .Variant b :> … }`, or `call() !{ _ e :> … }` for the whole error.",
       tokenSpan(tok, filePath),
     ));
+}
+
+/** Is the `!` at `peek(0)` followed (comments skipped) by a `{` — the gapped `! { … }` block? */
+function bangOpensBraceBlock(peek) {
+  let j = 1;
+  while (peek(j) && peek(j).kind === "COMMENT") j++;
+  const t = peek(j);
+  return !!t && t.kind === "PUNCT" && t.text === "{";
 }
 
 /** E-TRY-NOT-IN-SCRML for a statement-form BLOCK_REF a reader consumes as text — once per block. */

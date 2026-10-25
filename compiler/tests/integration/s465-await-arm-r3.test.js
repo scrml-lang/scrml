@@ -76,14 +76,6 @@ const SHAPES = {
     { r = "WELCOME" }
     { if (!${H}(pass, row.pw)) { r = "REJECTED" } }
     return r`,
-  // S470 (lane C round 3, review F1) — a `!(…)` guard on the line after a value is its OWN statement
-  // (JS ASI: `a !b` is no expression). It was glued to the line above and refused (S465 r3's
-  // "dropped `!(…)` guard line"); it is now read and RUNS.
-  topBangGuardLine: (H) => `
-    let r = "WELCOME"
-    let ok = 1
-    !(r = ${H}(pass, row.pw) ? "WELCOME" : "REJECTED")
-    return r`,
   // Finding 4 — a bare block after a statement line (arm + top level).
   armBlockAfterLet: (H) => `
     let r = "REJECTED"${inArm(`{ let a = "WEL"
@@ -368,6 +360,10 @@ const REFUSED = [
   ["sequence — top level", `const r = (0, name == "zz") ? "A" : "B"
     return r`, "E-CODEGEN-INVALID-LOGIC"],
   // Finding 1(d) — an expression read by dropping the next line's statement.
+  ["a dropped `!(…)` guard line", `let r = "WELCOME"
+    let ok = 1
+    !(r = check(name, "h") ? "WELCOME" : "REJECTED")
+    return r`, "E-STMT-UNEXPECTED-TOKEN"],
   ["a dropped string statement", `let r = "R"
     let s = "a"
     "b"

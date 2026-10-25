@@ -233,11 +233,26 @@ describe("review F1 — a `!` statement after a value is never dropped silently"
       expect(r.codes).toContain(code);
     });
   }
-  test("`! ( … )` after a declaration is its own statement and RUNS (not dropped)", () => {
-    const r = compile(page(`! (st.ok = p == "secret")`));
+  // PA ruling (round 4, R1) — §7.2.2 rule 4: a newline is whitespace, so a `!`-led line after a
+  // value-ending line with no `;` is `a !b` (a missing operator): refused, never run as its own
+  // statement and never swallowed.
+  for (const [name, body] of [
+    ["`! ( … )`", `! (st.ok = p == "secret")`],
+    ["`!x` (a missing `&&`)", `const banned = p != "secret"\n        const ok = st.ok\n          !banned\n        st.ok = ok`],
+    ["`!(x)`", `const banned = p != "secret"\n        const ok = st.ok\n          !(banned)\n        st.ok = ok`],
+  ]) {
+    test(`${name} after a value-ending line is E-STMT-UNEXPECTED-TOKEN`, () => {
+      const r = compile(page(body));
+      expect(r.codes).toContain("E-STMT-UNEXPECTED-TOKEN");
+    });
+  }
+  test("a `!`-led statement after a `;` or at the start of a block is unaffected", () => {
+    expect(compile(page(`const z = 1;\n        !(st.ok = p == "secret")`)).codes).toEqual([]);
+    expect(compile(page(`if (true) {\n            !(st.ok = p == "secret")\n        }`)).codes).toEqual([]);
+  });
+  test("a next-line postfix `!{ … }` still handles the line above", () => {
+    const r = compile(`<msg> = ""\n\${\n    type AuthErr:enum = { Denied }\n    function check(p)! -> AuthErr { if (p != "secret") fail AuthErr::Denied\n return true }\n    function go(p) {\n        const v = check(p)\n        !{ _ :> false }\n        @msg = v ? "LOGGED IN" : "rejected"\n    }\n}\n<button onclick=go("x")>go</button>\n<p>\${@msg}</p>\n`);
     expect(r.codes).toEqual([]);
-    const fn = r.clientJs.slice(r.clientJs.indexOf("function _scrml_login_"));
-    expect(fn).toMatch(/!\(st\.ok = /);
   });
   test("`!=` on a later line still continues the expression", () => {
     const r = compile(page(`const same = p\n            != "x"\n        if (!same) { st.ok = false }`));
