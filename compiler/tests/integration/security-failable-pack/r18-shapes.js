@@ -68,13 +68,13 @@ const VALUE_ARMS = [
   ["ternary on a server call", (x) => `isOk(${x}) ? true : false`],
   ["async helper", (x) => `allowed(${x})`],
   ["block arm, several statements", (x) => `{
-            const r = isOk(${x})
-            const s = r
-            lift s
+            const got = isOk(${x})
+            const same = got
+            lift same
         }`],
   ["block arm, nested handler", (x) => `{
-            const r = check(${x}) !{ _ :> false }
-            lift r
+            const got = check(${x}) !{ _ :> false }
+            lift got
         }`],
 ];
 

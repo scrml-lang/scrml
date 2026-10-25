@@ -5,6 +5,7 @@
 // program) turns the suite red, and so does a refused shape that starts compiling (re-measure it, then
 // re-pin). Regenerate from `classify.js --json <family>/` — never by hand-editing to make the suite pass.
 import { R9_PINNED } from "./r9-pinned.js";
+import { R18_PINNED } from "./r18-pinned.js";
 
 export const PINNED_CLASS = {
   "s4/return match": "PASS",
@@ -826,4 +827,6 @@ export const PINNED_CLASS = {
   "f13/engine opener effect= tests an async helper": "PASS-DENY",
   // S470 s470-async-colouring-scope — r9-shapes.js (s12 / f15 / l7 / t7), every shape pinned (r9-pinned.js).
   ...R9_PINNED,
+  // S470 s470-nested-handler-await — r18-shapes.js (s21 / f24 / l16 / t16), every shape pinned (r18-pinned.js).
+  ...R18_PINNED,
 };

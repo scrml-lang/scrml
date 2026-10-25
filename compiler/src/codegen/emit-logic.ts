@@ -995,7 +995,7 @@ function _armTextNamesAwaitedCallee(text: string, opts: EmitLogicOpts): boolean 
  * whose value-position diagnostic E-ERROR-012 is g-impl1-value-position-arm-
  * fallthrough-s451).
  */
-function emitBlockArmValueToResult(arm: LogicArm, resultVar: string, opts: EmitLogicOpts): string[] | null {
+function emitBlockArmValueToResult(arm: LogicArm, resultVar: string, opts: EmitLogicOpts, valueUsed = false): string[] | null {
   if (arm.failExpr) return null;
   const handler = (arm.handler ?? "").trim();
   if (!(handler.startsWith("{") && handler.endsWith("}"))) return null;
@@ -1013,6 +1013,16 @@ function emitBlockArmValueToResult(arm: LogicArm, resultVar: string, opts: EmitL
     if (_blockTailIsValueExpr(tailText)) tailKind = "expr";
   } else if (tail.kind === "guarded-expr" && tail.guardedNode && tail.guardedNode.kind === "bare-expr") {
     tailKind = "guarded";
+  } else if (valueUsed && tail.kind === "lift-expr" && tail.expr && typeof tail.expr === "object" &&
+             tail.expr.kind === "expr" && tail.expr.exprNode && typeof tail.expr.exprNode === "object") {
+    // S470 s470-nested-handler-await — §18.5 / §19.4.3 (S469): a block arm in a VALUE position
+    // yields with `lift <expr>`. The tail was read as a statement — a markup `lift`
+    // (`_scrml_lift(() => textNode(r))`) in an event handler, invalid JS in a function body — so
+    // the guarded value stayed the (truthy) error envelope and a wrong password logged in. Only
+    // an expression operand in a value position; a markup `lift` keeps its own lowering.
+    tailText = typeof tail.expr.expr === "string" ? tail.expr.expr : "";
+    tailKind = "expr";
+    tail.exprNode = tail.expr.exprNode;
   }
   if (!tailKind) return null;
 
@@ -5370,7 +5380,7 @@ function _emitLogicNode(node: any, opts: EmitLogicOpts): string {
           try {
           // §19.4.3 / §18.5 (S468) — a block arm ending in an expression yields
           // that expression: lowered from its parsed statements, tail into resultVar.
-          let blockValueLines = emitBlockArmValueToResult(arm, resultVar, opts);
+          let blockValueLines = emitBlockArmValueToResult(arm, resultVar, opts, guardValueUsed);
           // S468 fix round 1 — FAIL CLOSED: in a value position a braced arm the
           // reader cannot read is a compile error on the client too (the server's
           // reader already refuses it, `serverArmBlockStatements`). Never the text
