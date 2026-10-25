@@ -21,6 +21,7 @@ import { resolve } from "path";
 import { tmpdir } from "os";
 import { writeFileSync, rmSync, mkdirSync } from "fs";
 import { compileScrml } from "../../src/api.js";
+import { enumReadInferenceCount } from "../../src/type-system.ts";
 
 function compileFiles(files, mode) {
   const uniq = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
@@ -360,11 +361,75 @@ describe("fix round 3 — cycles in any order, imported struct fields, re-export
     const errs = compileFiles({ "app.scrml": src, ...chain(80) });
     const e = errs.find((x) => x.code === "E-TYPE-031");
     expect(e).toBeDefined();
-    expect(e.message).toContain("longer than the compiler follows");
+    expect(e.message).toContain("stops reading after");
     expect(e.message).toContain("impl#1 limitation");
   });
   test("ALLOWED: `.variant` off a struct field of an imported enum", () => {
     const src = PAGE(`import { Inner } from "./h0.scrml"`, `type SS:struct = { k: Inner }`, `function go() { const s: SS = { k: Inner::Bad("bad") }\n @msg = s.k.variant }`);
     expect(codesOf(src, { "h0.scrml": H0 })).toEqual([]);
+  });
+});
+
+// S470 fix round 4 (adversarial review of 3620e8670).
+describe("fix round 4 — strongly connected groups solved once, dependency inference, deep expressions, star precedence", () => {
+  // SCC-EXP: a group of n mutually calling functions (each calls the next twice and the first) is
+  // inferred in O(n) bodies — the visit plus a fixpoint pass or two — never exponentially.
+  const scc = (n) => {
+    const fns = [];
+    for (let i = 1; i <= n; i++) {
+      const nx = i === n ? 1 : i + 1;
+      fns.push(`function f${i}(p) {\n        if (p == "a${i}") return Inner::Bad("bad")\n        if (p == "b${i}") return f${nx}(p)\n        if (p == "c${i}") return f${nx}(p + "x")\n        return f1(p + "y")\n    }`);
+    }
+    return fns.join("\n    ");
+  };
+  test("SCC perf guard: a 24-function group is inferred in at most 4 bodies per function, and refused", () => {
+    const errs = compileFiles({ "app.scrml": lib(scc(24), `const x = f12(p)\n        return x.reason`) }, "library");
+    expect(errs.map((e) => e.code)).toContain("E-TYPE-004");
+    expect(enumReadInferenceCount()).toBeLessThanOrEqual(4 * 24);
+  });
+  test("SCC perf guard: the bound grows linearly (40 functions)", () => {
+    compileFiles({ "app.scrml": lib(scc(40), `const x = f7(p)\n        return x.reason`) }, "library");
+    expect(enumReadInferenceCount()).toBeLessThanOrEqual(4 * 40);
+  });
+  const H = "${\n    export type Inner:enum = { Bad(reason: string), Ok2 }\n    function helper(p) {\n        if (p != \"secret\") return Inner::Bad(\"bad\")\n        return Inner::Ok2\n    }\n    export function viaHelper(p) { return helper(p) }\n    export function mutA(p) {\n        if (p != \"secret\") return Inner::Bad(\"bad\")\n        return mutB(p)\n    }\n    export function mutB(p) { return mutA(\"x\") }\n}\n";
+  const H2 = "import { cross2 } from \"./h3.scrml\"\nimport { Inner } from \"./h.scrml\"\n${\n    export function cross1(p) {\n        if (p != \"secret\") return Inner::Bad(\"bad\")\n        return cross2(p)\n    }\n}\n";
+  const H3 = "import { cross1 } from \"./h2.scrml\"\n${\n    export function cross2(p) { return cross1(\"x\") }\n}\n";
+  for (const [name, call, imp] of [
+    ["I1 an imported fn through the dependency's local helper", "viaHelper", `import { Inner, viaHelper } from "./h.scrml"`],
+    ["I2 imported mutual recursion, call A", "mutA", `import { Inner, mutA } from "./h.scrml"`],
+    ["I3 imported mutual recursion, call B", "mutB", `import { Inner, mutB } from "./h.scrml"`],
+  ]) {
+    test(name, () => {
+      const src = `${imp}\n<msg> = ""\n\${\n    function go() { const x = ${call}("y")\n @msg = x.reason }\n}\n<button onclick=go()>\${@msg}</button>\n`;
+      expect(codesOf(src, { "h.scrml": H })).toContain("E-TYPE-004");
+    });
+  }
+  test("I-cross: mutual recursion ACROSS two dependency files", () => {
+    const src = `import { cross1 } from "./h2.scrml"\nimport { Inner } from "./h.scrml"\n<msg> = ""\n\${\n    function go() { const x = cross1("y")\n @msg = x.reason }\n}\n<button onclick=go()>\${@msg}</button>\n`;
+    expect(codesOf(src, { "h.scrml": H, "h2.scrml": H2, "h3.scrml": H3 })).toContain("E-TYPE-004");
+  });
+  const nest = (k) => { let s = `Inner::Bad("bad")`; for (let i = 0; i < k; i++) s = `(p != "q${i}" ? ${s} : Inner::Ok2)`; return s; };
+  test("DEEP-EXPR: a 40-deep ternary and a 40-long || chain are read (E-TYPE-004)", () => {
+    expect(codesOf(lib("", `const x = ${nest(40)}\n        return x.reason`), {}, "library")).toContain("E-TYPE-004");
+    const ors = Array.from({ length: 40 }, () => `Inner::Bad("bad")`).join(" || ");
+    expect(codesOf(lib("", `const x = ${ors}\n        return x.reason`), {}, "library")).toContain("E-TYPE-004");
+  });
+  test("DEEP-EXPR: past the bound (a 300-deep ternary) the read is REFUSED, fail closed (E-TYPE-031)", () => {
+    const errs = compileFiles({ "app.scrml": lib("", `const x = ${nest(300)}\n        return x.reason`) }, "library");
+    const e = errs.find((x) => x.code === "E-TYPE-031");
+    expect(e).toBeDefined();
+    expect(e.message).toContain("stops reading after");
+  });
+  const EN = (nm) => `\${\n    export type ${nm}:enum = { Bad(reason: string), Ok2 }\n}\n`;
+  const ST = (nm) => `\${\n    export type ${nm}:struct = { reason: string }\n}\n`;
+  const APP = `import { K } from "./m.scrml"\n\${\n    export function f(x: K) { return x.reason }\n}\n`;
+  const M = "import { I0 } from \"./s.scrml\"\n${\n    export type K = I0\n}\n";
+  test("STAR-PREC: a named re-export of an ENUM wins over an earlier `export *` of a struct (refused)", () => {
+    const files = { "m.scrml": M, "s.scrml": "${\n    export * from \"./a.scrml\"\n    export { I0 } from \"./b.scrml\"\n}\n", "a.scrml": ST("I0"), "b.scrml": EN("I0") };
+    expect(codesOf(APP, files, "library")).toContain("E-TYPE-004");
+  });
+  test("STAR-PREC: a named re-export of a STRUCT wins over an earlier `export *` of an enum (allowed)", () => {
+    const files = { "m.scrml": M, "s.scrml": "${\n    export * from \"./b.scrml\"\n    export { I0 } from \"./a.scrml\"\n}\n", "a.scrml": ST("I0"), "b.scrml": EN("I0") };
+    expect(codesOf(APP, files, "library")).not.toContain("E-TYPE-004");
   });
 });

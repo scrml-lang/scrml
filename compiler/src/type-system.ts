@@ -11801,9 +11801,6 @@ function annotateNodes(
   // imported one), else — for an un-annotated function of this file — the enum EVERY one of its
   // `return`s constructs (`return Box.Wrap(x)`). Cleared when this file's walk ends.
   {
-    const ctorReturn = new Map<string, ResolvedType | null>();
-    /** The functions being inferred, innermost last, each with the in-progress functions it read PENDING for. */
-    const inferStack: Array<{ name: string; deps: Set<string> }> = [];
     const globalLookup: EnumReadLookup = (nm) => enumReadEntry(scopeChain.global.lookup(nm));
     // S470 lane B (fix round 1) — an un-annotated function's result: the ONE type its `return`s
     // yield, its body walked by the enum-read walker (locals, branches, ternaries, a unit variant
@@ -11819,72 +11816,151 @@ function annotateNodes(
       _enumReadEnv = envFor;
       try { return enumReadReturnsOf(decl.body, ov, lookupFor, envFor); } finally { _enumReadEnv = saved; }
     };
-    const inferCtorReturn = (name: string): ResolvedType | null => {
-      if (ctorReturn.has(name)) {
-        const v = ctorReturn.get(name);
-        if (v === ENUM_READ_PENDING) {
-          // S470 fix round 3 (PENDING-POISON) — `name` is still being inferred: every frame above it
-          // depends on it, so none of them may be memoized until it is final.
-          for (let i = inferStack.length - 1; i >= 0 && inferStack[i].name !== name; i--) inferStack[i].deps.add(name);
-          return ENUM_READ_PENDING;
+    // ---------------------------------------------------------------------------------------------
+    // S470 fix round 4 (SCC-EXP, I1–I3) — the ONE return-inference engine, for this file's functions
+    // AND the functions of the modules it imports (a dependency's local helper, a cycle inside a
+    // dependency or across two of them), keyed by (file, function). Tarjan's algorithm finds each
+    // strongly connected group of mutually-calling functions; when its head closes, the group is
+    // solved ONCE as a least fixpoint — every member starts PENDING (skipped by unification, U-REC) and
+    // is re-inferred from the others' current values until nothing changes — and every member is
+    // memoized. Each function is inferred on its visit plus a few fixpoint passes of its group, never
+    // per caller (round 3's provisional re-inference was exponential in the group size). The least
+    // fixpoint does not depend on which member is reached, declared or called first.
+    // ---------------------------------------------------------------------------------------------
+    const fnMemo = new Map<string, ResolvedType | null>();
+    const fnCur = new Map<string, ResolvedType | null>();
+    const fnIndex = new Map<string, number>();
+    const fnLow = new Map<string, number>();
+    const fnStack: string[] = [];
+    const fnOnStack = new Set<string>();
+    const fnFrames: string[] = [];
+    const fnSelf = new Set<string>();
+    let fnCounter = 0;
+    let fnActive: Set<string> | null = null;
+    const fnKey = (file: string, name: string): string => `${file}\u0000${name}`;
+    const fnDeclsByFile = new Map<string, Map<string, ASTNodeLike[]>>();
+    const declsIn = (file: string): Map<string, ASTNodeLike[]> => {
+      let m = fnDeclsByFile.get(file);
+      if (m) return m;
+      m = new Map();
+      const push = (d: ASTNodeLike): void => {
+        if (!d || d.kind !== "function-decl" || typeof d.name !== "string") return;
+        const a = m!.get(d.name) ?? [];
+        a.push(d);
+        m!.set(d.name, a);
+      };
+      if (file === filePath) for (const d of allFnDecls) push(d);
+      else for (const d of enumReadModuleTops(_enumReadModules?.get(file)?.nodes ?? [])) push(d);
+      fnDeclsByFile.set(file, m);
+      return m;
+    };
+    const valKey = (t: ResolvedType | null | undefined): string =>
+      t === null || t === undefined ? "N" : t === ENUM_READ_PENDING ? "P" : t === ENUM_READ_LIMIT ? "L" : (canonicalTypeKey(t) ?? `?${t.kind}`);
+    const evaluateFn = (key: string): ResolvedType | null => {
+      _enumReadInferCount++;
+      const at = key.indexOf("\u0000");
+      const file = key.slice(0, at), name = key.slice(at + 1);
+      const ds = declsIn(file).get(name) ?? [];
+      if (ds.length !== 1) return null;
+      const d = ds[0];
+      const annot = d.returnTypeAnnotation;
+      if (file === filePath) return typeof annot === "string" && annot.trim() !== "" ? null : returnsOfDecl(d, env, globalLookup);
+      const { e, l } = depEnv(file);
+      if (typeof annot === "string" && annot.trim() !== "") return enumReadAnnot(annot, e);
+      return returnsOfDecl(d, e, l);
+    };
+    const inferFn = (key: string): ResolvedType | null => {
+      if (fnMemo.has(key)) return fnMemo.get(key) ?? null;
+      if (fnActive && fnActive.has(key)) return fnCur.get(key) ?? ENUM_READ_PENDING;
+      if (fnOnStack.has(key)) {
+        const top = fnFrames[fnFrames.length - 1];
+        if (top !== undefined) {
+          fnLow.set(top, Math.min(fnLow.get(top)!, fnIndex.get(key)!));
+          if (top === key) fnSelf.add(key);
         }
-        return v ?? null;
+        return fnCur.has(key) ? (fnCur.get(key) ?? null) : ENUM_READ_PENDING;
       }
-      const decls = allFnDecls.filter((d) => d.name === name);
-      if (decls.length !== 1 || (decls[0] as ASTNodeLike).returnTypeAnnotation) { ctorReturn.set(name, null); return null; }
-      // S470 fix round 2 (U-REC) — while this function is inferred, a call of it (recursion, or a
-      // cycle of functions) reads PENDING, which unification skips.
-      // S470 fix round 3 (PENDING-POISON) — a result that read PENDING for ANOTHER function still
-      // being inferred is provisional: it is returned (PENDING itself when it has no other value) but
-      // NOT memoized, and is recomputed once that function is final. The function at the head of a
-      // cycle (the one only its own recursion was pending on) is final and memoized: the verdict is the
-      // same whichever member of a cycle is inferred, or called, first.
-      ctorReturn.set(name, ENUM_READ_PENDING);
-      inferStack.push({ name, deps: new Set() });
+      const i = fnCounter++;
+      fnIndex.set(key, i);
+      fnLow.set(key, i);
+      fnStack.push(key);
+      fnOnStack.add(key);
+      fnFrames.push(key);
       let t: ResolvedType | null;
-      let frame: { name: string; deps: Set<string> };
-      try {
-        t = returnsOfDecl(decls[0] as ASTNodeLike, env, globalLookup);
-      } finally {
-        frame = inferStack.pop()!;
+      try { t = evaluateFn(key); } finally { fnFrames.pop(); }
+      fnCur.set(key, t);
+      const parent = fnFrames[fnFrames.length - 1];
+      if (parent !== undefined && fnOnStack.has(parent)) fnLow.set(parent, Math.min(fnLow.get(parent)!, fnLow.get(key)!));
+      if (fnLow.get(key) === fnIndex.get(key)) {
+        const members: string[] = [];
+        let m: string;
+        do { m = fnStack.pop()!; fnOnStack.delete(m); members.push(m); } while (m !== key);
+        if (members.length === 1 && !fnSelf.has(key)) {
+          fnMemo.set(key, t === ENUM_READ_PENDING ? null : t);
+        } else {
+          const prev = fnActive;
+          fnActive = new Set(members);
+          try {
+            let converged = false;
+            for (let it = 0; it < 4 * members.length + 8; it++) {
+              let changed = false;
+              for (const mm of members) {
+                const v = evaluateFn(mm);
+                if (valKey(v) !== valKey(fnCur.get(mm))) { fnCur.set(mm, v); changed = true; }
+              }
+              if (!changed) { converged = true; break; }
+            }
+            // Not converging is a defect of this engine, not of the program: fail closed.
+            for (const mm of members) {
+              const v = converged ? (fnCur.get(mm) ?? null) : ENUM_READ_LIMIT;
+              fnMemo.set(mm, v === ENUM_READ_PENDING ? null : v);
+            }
+          } finally { fnActive = prev; }
+        }
       }
-      frame.deps.delete(name);
-      if (frame.deps.size > 0) {
-        ctorReturn.delete(name);
-        return t;
-      }
-      if (t === ENUM_READ_PENDING) t = null;
-      ctorReturn.set(name, t);
-      return t;
+      return fnMemo.has(key) ? (fnMemo.get(key) ?? null) : (fnCur.has(key) ? (fnCur.get(key) ?? null) : ENUM_READ_PENDING);
+    };
+    // A dependency module's function `name` (or the one it imports / re-exports under that name).
+    const depFnReturn = (file: string, name: string): ResolvedType | null => {
+      const owner = enumReadFnOwner(file, name, 0, new Set());
+      if (!owner) return null;
+      const ds = declsIn(owner[0]).get(owner[1]) ?? [];
+      return ds.length === 1 ? inferFn(fnKey(owner[0], owner[1])) : null;
     };
     // An IMPORTED function / value: read in the exporting file, with that file's registry (its
     // aliases seen through) — a declared `-> T`, else the type its returns / initializer yield.
     const depRegs = new Map<string, Map<string, ResolvedType>>();
-    const depEnv = (depFile: string, depTypeDecls: ASTNodeLike[]): { e: EnumReadEnv; l: EnumReadLookup } => {
+    const depEnvs = new Map<string, { e: EnumReadEnv; l: EnumReadLookup }>();
+    const depEnv = (depFile: string, depTypeDecls?: ASTNodeLike[]): { e: EnumReadEnv; l: EnumReadLookup } => {
+      const hit = depEnvs.get(depFile);
+      if (hit) return hit;
       let reg = depRegs.get(depFile);
       if (!reg) {
-        reg = buildTypeRegistry(depTypeDecls ?? [], [], { file: depFile, start: 0, end: 0, line: 1, col: 1 });
+        reg = buildTypeRegistry(depTypeDecls ?? _enumReadModules?.get(depFile)?.typeDecls ?? [], [], { file: depFile, start: 0, end: 0, line: 1, col: 1 });
         for (const [nm, t] of typeRegistry) if (!reg.has(nm)) reg.set(nm, t);
         depRegs.set(depFile, reg);
       }
       const r = reg;
-      return {
-        e: { ...env, typeRegistry: r, filePath: depFile, importedValueType: () => null, fnReturnType: () => null },
-        l: (nm) => (r.has(nm) ? { kind: "type", t: null } : null),
+      const fns = declsIn(depFile);
+      const out = {
+        e: { ...env, typeRegistry: r, filePath: depFile, importedValueType: () => null, fnReturnType: (nm: string) => depFnReturn(depFile, nm) } as EnumReadEnv,
+        // A function of the dependency (declared there, or imported into it) is a function binding there.
+        l: ((nm: string) => (r.has(nm) ? { kind: "type", t: null } : (fns.has(nm) || enumReadFnOwner(depFile, nm, 0, new Set()) ? { kind: "function", t: null } : null))) as EnumReadLookup,
       };
+      depEnvs.set(depFile, out);
+      return out;
     };
-    const importedRet = new Map<string, ResolvedType | null>();
     const importedFnReturn = (name: string): ResolvedType | null => {
-      if (importedRet.has(name)) return importedRet.get(name) ?? null;
-      importedRet.set(name, ENUM_READ_PENDING);
       const d = importedFnDecls?.get(name);
-      if (!d || fnAllDeclared.has(name)) { importedRet.set(name, null); return null; }
-      const { e, l } = depEnv(d.depFilePath, d.depTypeDecls);
+      if (!d || fnAllDeclared.has(name)) return null;
+      const orig = typeof (d.fnNode as ASTNodeLike).name === "string" ? (d.fnNode as ASTNodeLike).name as string : name;
+      // A dependency outside this compilation unit's modules (no module entry): its declaration only.
+      const ds = declsIn(d.depFilePath);
+      if (!ds.has(orig)) ds.set(orig, [d.fnNode as ASTNodeLike]);
+      depEnv(d.depFilePath, d.depTypeDecls);
       const annot = (d.fnNode as ASTNodeLike).returnTypeAnnotation;
-      let t = typeof annot === "string" && annot.trim() !== "" ? enumReadAnnot(annot, e) : returnsOfDecl(d.fnNode as ASTNodeLike, e, l);
-      if (t === ENUM_READ_PENDING) t = null;
-      importedRet.set(name, t);
-      return t;
+      if (typeof annot === "string" && annot.trim() !== "") return enumReadAnnot(annot, depEnv(d.depFilePath).e);
+      return inferFn(fnKey(d.depFilePath, orig));
     };
     // This file's import specifiers: local name → [source, imported name].
     const importSpecs = new Map<string, [string, string]>();
@@ -11945,7 +12021,7 @@ function annotateNodes(
         const rt = sig ? enumReadDeAlias(sig.returnType) : null;
         if (rt && rt.kind !== "asIs" && rt.kind !== "unknown") return rt;
         if (fnNamesDeclaredTwice.has(name)) return null;
-        return inferCtorReturn(name);
+        return inferFn(fnKey(filePath, name));
       },
     };
     _enumReadEnv = env;
@@ -20679,19 +20755,26 @@ function enumReadExportedTypeOf(file: string, name: string, depth: number, seen:
   if (t && t.kind !== "unknown" && t !== BUILTIN_TYPES.get(name)) return enumReadDeAlias(t, depth + 1, s2);
   const viaImport = enumReadImportedTypeOf(file, name, depth + 1, s2);
   if (viaImport) return viaImport;
-  for (const x of enumReadModuleTops(mod.nodes)) {
-    if (!x || x.kind !== "export-decl" || typeof x.reExportSource !== "string") continue;
-    const p = enumReadModulePath(file, x.reExportSource as string);
-    if (!p) continue;
+  // S470 fix round 4 (STAR-PREC) — as in ES modules, the module's own exports and its NAMED
+  // re-exports take precedence over `export *`, whatever the statement order; only then the stars.
+  const tops = enumReadModuleTops(mod.nodes).filter((x) => x && x.kind === "export-decl" && typeof x.reExportSource === "string");
+  for (const x of tops) {
+    if (x.isReExportAll === true) continue;
     let srcName: string | null = null;
-    if (x.isReExportAll === true) srcName = name;
-    else if (Array.isArray(x.renames)) {
+    if (Array.isArray(x.renames)) {
       const r = (x.renames as Array<{ exported?: unknown; local?: unknown }>).find((y) => y.exported === name);
       if (r && typeof r.local === "string") srcName = r.local;
     }
     if (srcName === null && x.exportedName === name) srcName = name;
     if (srcName === null) continue;
-    const r = enumReadExportedTypeOf(p, srcName, depth + 1, s2);
+    const p = enumReadModulePath(file, x.reExportSource as string);
+    return p ? enumReadExportedTypeOf(p, srcName, depth + 1, s2) : null;
+  }
+  for (const x of tops) {
+    if (x.isReExportAll !== true) continue;
+    const p = enumReadModulePath(file, x.reExportSource as string);
+    if (!p) continue;
+    const r = enumReadExportedTypeOf(p, name, depth + 1, s2);
     if (r) return r;
   }
   return null;
@@ -20713,6 +20796,57 @@ function enumReadVariantField(en: EnumType, variant: string, field: string): Res
 }
 
 /** A module's top-level statements: its own, and those of its top-level `${ … }` blocks. */
+/**
+ * S470 fix round 4 (I1–I3) — the module and name of the FUNCTION `file` knows as `name`: declared there,
+ * or imported (followed to the module that declares it, through its imports and re-exports). null when
+ * not found / a cycle.
+ */
+function enumReadFnOwner(file: string, name: string, depth: number, seen: Set<string>): [string, string] | null {
+  const mods = _enumReadModules;
+  if (!mods || depth > ENUM_READ_DEPTH_LIMIT) return null;
+  const key = `${file}::${name}`;
+  if (seen.has(key)) return null;
+  seen.add(key);
+  const mod = mods.get(file);
+  if (!mod) return null;
+  const tops = enumReadModuleTops(mod.nodes);
+  if (tops.some((x) => x && x.kind === "function-decl" && x.name === name)) return [file, name];
+  for (const imp of mod.imports) {
+    if (!imp || typeof imp.source !== "string") continue;
+    const spec = ((Array.isArray(imp.specifiers) ? imp.specifiers : []) as Array<{ imported?: unknown; local?: unknown }>)
+      .find((s) => s.local === name && typeof s.imported === "string");
+    if (!spec) continue;
+    const p = enumReadModulePath(file, imp.source as string);
+    return p ? enumReadFnOwner(p, spec.imported as string, depth + 1, seen) : null;
+  }
+  // Named re-exports before `export *` (STAR-PREC, as for types).
+  const reexports = tops.filter((x) => x && x.kind === "export-decl" && typeof x.reExportSource === "string");
+  for (const x of reexports) {
+    if (x.isReExportAll === true) continue;
+    let src: string | null = null;
+    if (Array.isArray(x.renames)) {
+      const r = (x.renames as Array<{ exported?: unknown; local?: unknown }>).find((y) => y.exported === name);
+      if (r && typeof r.local === "string") src = r.local;
+    }
+    if (src === null && x.exportedName === name) src = name;
+    if (src === null) continue;
+    const p = enumReadModulePath(file, x.reExportSource as string);
+    return p ? enumReadFnOwner(p, src, depth + 1, seen) : null;
+  }
+  for (const x of reexports) {
+    if (x.isReExportAll !== true) continue;
+    const p = enumReadModulePath(file, x.reExportSource as string);
+    if (!p) continue;
+    const o = enumReadFnOwner(p, name, depth + 1, seen);
+    if (o) return o;
+  }
+  return null;
+}
+
+/** S470 fix round 4 — how many function bodies the return-inference engine has inferred in this run (a perf guard). */
+let _enumReadInferCount = 0;
+export function enumReadInferenceCount(): number { return _enumReadInferCount; }
+
 function enumReadModuleTops(nodes: ASTNodeLike[]): ASTNodeLike[] {
   const out: ASTNodeLike[] = [];
   for (const x of nodes) {
@@ -20826,7 +20960,9 @@ function enumReadIsNullish(node: unknown): boolean {
 }
 
 function enumReadTypeOfRaw(node: unknown, ov: EnumReadOverlay | null, lookup: EnumReadLookup, env: EnumReadEnv, depth = 0): ResolvedType | null {
-  if (!node || typeof node !== "object" || depth > 32) return null;
+  if (!node || typeof node !== "object") return null;
+  // S470 fix round 4 (DEEP-EXPR) — past the bound the type is not known to be NOT an enum: fail closed.
+  if (depth > ENUM_READ_DEPTH_LIMIT) return ENUM_READ_LIMIT;
   const n = node as Record<string, unknown>;
   const sub = (x: unknown, o: EnumReadOverlay | null = ov): ResolvedType | null => enumReadTypeOf(x, o, lookup, env, depth + 1);
   // The absent value (`not`, and the host `null` / `undefined` spellings) — its own type (U-NOT).
@@ -21082,10 +21218,11 @@ function checkEnumReadsIn(root: unknown, span: Span, lookup: EnumReadLookup, err
   // impl#1 follows (ENUM_READ_DEPTH_LIMIT): it may be an enum, so the read is refused (fail closed).
   const refuseLimit = (whole: unknown): void => {
     errors.push(new TSError("E-TYPE-031",
-      `E-TYPE-031: \`${enumReadShow(whole)}\` reads a member off a value whose type is a chain of type aliases / imports / ` +
-      `re-exports longer than the compiler follows (${ENUM_READ_DEPTH_LIMIT} steps), so it cannot tell whether it ${ENUM_READ_TAG}whose only member is \`.variant\`) ` +
-      `— an impl#1 limitation, not a language rule. Name the type closer to its declaration (import the enum or struct ` +
-      `itself) (§14.3, §21.4).`,
+      `E-TYPE-031: \`${enumReadShow(whole)}\` reads a member off a value whose type the compiler stops reading after ` +
+      `${ENUM_READ_DEPTH_LIMIT} steps — a chain of type aliases / imports / re-exports, or an expression nested that deep — ` +
+      `so it cannot tell whether it ${ENUM_READ_TAG}whose only member is \`.variant\`): an impl#1 limitation, not a language ` +
+      `rule. Name the type closer to its declaration (import the enum or struct itself), or bind part of the expression ` +
+      `to a typed local (§14.3, §21.4).`,
       span));
   };
   const refuseEq = (whole: unknown, base: unknown, lit: Record<string, unknown>, en: EnumType): void => {
@@ -33295,6 +33432,7 @@ export function runTS(input: {
     // S470 lane B — the same modules, for the enum-read check's imported-value facts.
     _enumReadModules = new Map();
     _enumReadModuleRegs.clear();
+    _enumReadInferCount = 0;
     for (const f of files) {
       const fp = (f as { filePath?: unknown }).filePath;
       const ns = ((f as { nodes?: unknown }).nodes ?? (f as { ast?: { nodes?: unknown } }).ast?.nodes) as ASTNodeLike[] | undefined;
