@@ -38,6 +38,7 @@
       <authorEmail> = ""
       <noteTitle>   = ""
       <noteBody>    = ""
+      <notes>       = []
 
       function lookupUser(email) {
         return ?{`SELECT id, display_name FROM users WHERE email = ${email}`}.get() !{ _ :> not }
@@ -143,8 +144,11 @@
           white-space: pre-wrap;
         }
       }
+      // The feed loads into @notes through a <request> (§6.7.7); the loop renders the cell.
+      // (A server call in the loop head is a render position: E-VALUE-SERVER-CALL, §13.7.)
+      <request id="notesLoad" deps=[]>${ @notes = listNotes() }</>
       <ul class="feed">
-        ${ for (let n of listNotes()) {
+        ${ for (let n of @notes) {
           lift <li class="note">
             <h3>${n.title}</>
             <p class="meta">by ${n.author}</p>

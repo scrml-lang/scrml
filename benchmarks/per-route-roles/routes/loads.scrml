@@ -2,6 +2,10 @@
 // Driver-and-Dispatch flavored. Driver content visible to Driver+Dispatch+Admin;
 // dispatch-specific actions gated to Dispatch+Admin.
 
+// S470 — each list loads into a cell through a `<request>` (§6.7.7) and the loop renders the
+// cell. It was `for (… of loadX())` in the render: a server call in a render position is
+// E-VALUE-SERVER-CALL (§13.7) — the loop iterated a pending Promise.
+
 <program title="Loads" auth="required">
 
 server function loadDrivers() {
@@ -19,6 +23,9 @@ server function reassignLoad(loadId, driverId) {
   lift true
 }
 
+<drivers> = []
+<request id="driversLoad" deps=[]>${ @drivers = loadDrivers() }</>
+
 <nav class="flex items-center gap-3 p-4 border-b">
   <h1 class="text-xl font-semibold">Loads</h1>
   <a href="/" class="text-blue-600">Home</a>
@@ -29,7 +36,7 @@ server function reassignLoad(loadId, driverId) {
     <h2 class="text-lg font-medium mb-2">Driver roster</h2>
     <ul class="list-disc pl-6">
       ${
-        for (let driver of loadDrivers()) {
+        for (let driver of @drivers) {
           lift <li class="py-1">${driver.name} (${driver.status})</li>
         }
       }
@@ -45,7 +52,7 @@ server function reassignLoad(loadId, driverId) {
     </p>
     <ul class="list-decimal pl-6">
       ${
-        for (let driver of loadDrivers()) {
+        for (let driver of @drivers) {
           lift <li class="py-1">
             ${driver.name} - <button onclick=reassignLoad(1, driver.id) class="text-xs text-purple-800 underline">reassign load #1 here</button>
           </li>

@@ -1,6 +1,10 @@
 // per-route-roles bench — Customer route ("/customer")
 // Customer-flavored subtree showing only-Customer content.
 
+// S470 — each list loads into a cell through a `<request>` (§6.7.7) and the loop renders the
+// cell. It was `for (… of loadX())` in the render: a server call in a render position is
+// E-VALUE-SERVER-CALL (§13.7) — the loop iterated a pending Promise.
+
 <program title="Customer Portal" auth="required">
 
 server function loadOrders() {
@@ -10,6 +14,9 @@ server function loadOrders() {
     { id: 103, item: "Concrete blocks", status: "pending", eta: "2026-05-22" },
   ]
 }
+
+<orders> = []
+<request id="ordersLoad" deps=[]>${ @orders = loadOrders() }</>
 
 <nav class="flex items-center gap-3 p-4 border-b">
   <h1 class="text-xl font-semibold">Customer Portal</h1>
@@ -21,7 +28,7 @@ server function loadOrders() {
     <h2 class="text-lg font-medium mb-2">Your orders</h2>
     <ul class="list-none">
       ${
-        for (let order of loadOrders()) {
+        for (let order of @orders) {
           lift <li class="py-2 border-b">
             <span class="font-medium">#${order.id}</span> -
             ${order.item} - <em>${order.status}</em>

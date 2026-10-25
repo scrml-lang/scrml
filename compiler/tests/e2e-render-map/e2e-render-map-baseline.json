@@ -4,11 +4,11 @@
     "apps": 434,
     "cells": 438,
     "histogram": {
-      "renders-empty": 19,
-      "needs-server": 9,
-      "renders-clean": 258,
+      "renders-empty": 17,
+      "needs-server": 7,
+      "renders-clean": 260,
       "compiles-but-throws": 22,
-      "fails-compile": 128,
+      "fails-compile": 130,
       "smell-detected-wrong": 1,
       "HARNESS-TIMEOUT": 1
     },
@@ -23,12 +23,10 @@
       ],
       "seeded": false
     },
-    "benchmarks/per-route-roles/routes/loads.scrml#empty": {
+    "benchmarks/per-route-roles/routes/admin.scrml#empty": {
       "tier": "perf",
-      "state": "needs-server",
-      "smells": [
-        "NEEDS-SERVER"
-      ],
+      "state": "renders-clean",
+      "smells": [],
       "seeded": false
     },
     "benchmarks/todomvc/app.scrml#empty": {
@@ -153,10 +151,8 @@
     },
     "examples/17-schema-migrations.scrml#empty": {
       "tier": "flagship",
-      "state": "needs-server",
-      "smells": [
-        "NEEDS-SERVER"
-      ],
+      "state": "renders-clean",
+      "smells": [],
       "seeded": false
     },
     "examples/18-state-authority.scrml#empty": {
@@ -528,9 +524,19 @@
     },
     "samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-fn-server-prefix-013.scrml#empty": {
       "tier": "probe",
-      "state": "renders-empty",
-      "smells": [],
-      "seeded": false
+      "state": "fails-compile",
+      "smells": [
+        "D0-COMPILE-ERROR"
+      ],
+      "seeded": false,
+      "detail": {
+        "compileErrorCodes": [
+          "E-VALUE-SERVER-CALL"
+        ],
+        "compileErrorMessages": [
+          "E-VALUE-SERVER-CALL: the interpolation calls server function `computeKey`. A value position (a render position, re-evaluated synchronously while the page renders, or a declaration's initializer) cannot wait for the call: it would hold a pending Promise, which is always truthy (§13.7, §13.8). The language allows a waiting value in markup only through a pending cell (§13.9), and impl#1 has no async render path yet, so it cannot render this. Fix: make the call in an event handler, a `function`, or a `<request>` (§6.7.7) that writes a cell, and render the cell here."
+        ]
+      }
     },
     "samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-function-server-005.scrml#empty": {
       "tier": "probe",
@@ -540,9 +546,19 @@
     },
     "samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-function-with-sql-002.scrml#empty": {
       "tier": "probe",
-      "state": "renders-empty",
-      "smells": [],
-      "seeded": false
+      "state": "fails-compile",
+      "smells": [
+        "D0-COMPILE-ERROR"
+      ],
+      "seeded": false,
+      "detail": {
+        "compileErrorCodes": [
+          "E-VALUE-SERVER-CALL"
+        ],
+        "compileErrorMessages": [
+          "E-VALUE-SERVER-CALL: the interpolation calls server function `loadUsers`. A value position (a render position, re-evaluated synchronously while the page renders, or a declaration's initializer) cannot wait for the call: it would hold a pending Promise, which is always truthy (§13.7, §13.8). The language allows a waiting value in markup only through a pending cell (§13.9), and impl#1 has no async render path yet, so it cannot render this. Fix: make the call in an event handler, a `function`, or a `<request>` (§6.7.7) that writes a cell, and render the cell here."
+        ]
+      }
     },
     "samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-navigate-server-003.scrml#empty": {
       "tier": "probe",
