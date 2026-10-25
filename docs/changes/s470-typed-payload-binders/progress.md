@@ -332,6 +332,16 @@ EXPECTED_SHAPE_COUNT from this tree's own run: 2591 (the coordinator re-sums at 
   E-IMPORT-002).
 - Merged origin/main 29fcaac8a (#1558, lane D's r9 s12 / f15 / l7 / t7): both families kept;
   EXPECTED_SHAPE_COUNT 2680 + 341 = 3021, from a run (loadFamilies: 3021 shapes, ids unique).
+- Measured on the merged head: b11 vs main 29fcaac8a — I1–I3, D1–D5 FAIL / PASS-500 / UNJUDGED → PASS-
+  REFUSED on all sides; k2 X4 X5 X7 (BAD) newly refused, X3 / X6 (struct wins) clean, X1 / X2 E-IMPORT-004
+  as main; b12 = main (UNIT-VARIANT V2 out of scope). b1–b6 261 → 61 (the same 61), b7 b8 c20 fp2 = round
+  2, b9 b10 k1 = round 3, fp1 = main; earlier probe sets + matrix 84 → 0. R26 vs main 29fcaac8a: 3,618
+  files, 0 changed, 0 newly rejected.
+- CI-only jobs (ci6/, base 29fcaac8a): all exit 0 — types:check OK (181) · root 2239/0 · snippet 113/0 ·
+  claim 18/0 · floor · md-shim · conflict-marker · SPEC-INDEX · delta-lint · ci-shards needs · s34
+  --check-new · integration+lsp+commands 10789/0 · unit+conformance 31689/0 · TodoMVC + node --check ·
+  browser-baseline · lint-no-default-arm · slices m1/m2/m1-lowered/m3/m4/codec · e2e-render-map 259/0 ·
+  host-global 1/2 + 2/2 0 violations (2 / 135 threw, as before) · bootstrap-severity / -conformance current.
 
 ## Candidate gaps (not filed here)
 1. A markup `<match>` nested in a `<match>` arm is never mounted: the inner mount `<div
