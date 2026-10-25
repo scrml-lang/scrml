@@ -1024,7 +1024,7 @@ export function isProvablyReadOnlyServerFn(fnNode: any): boolean {
  * @param {CGError[]} [errors]
  * @returns {string[]}
  */
-export function scheduleStatements(body: ASTNode[], fnNode: ASTNode, routeMap: RouteMap, depGraph: DepGraph, filePath: string, errors: CGError[] = [], machineBindings?: Map<string, { engineName: string; tableName: string; rules: any[]; auditTarget?: string | null }> | null, engineBindings?: Map<string, { varName: string; forType: string; tableName: string }> | null, engineVarNames?: Set<string> | null, enginesWithHooks?: Set<string> | null, returnTypeAnnotation?: string | null, enclosingFnName?: string | null, enginesWithOnTimeout?: Set<string> | null, enginesWithIdleWatchdog?: Set<string> | null, enginesWithInternalRules?: Set<string> | null, enginesWithHistory?: Set<string> | null, enginesWithMessageArms?: Set<string> | null, engineMessageVariants?: Map<string, Set<string>> | null, calleeMap?: CalleeImportMap | null, exportRegistry?: Map<string, Map<string, { kind: string; category: string; isComponent: boolean; isAsync?: boolean }>> | null, mapVarNames?: Set<string> | null, orderedMapVarNames?: Set<string> | null, setVarNames?: Set<string> | null, localMapVarNames?: Set<string> | null, localSetVarNames?: Set<string> | null, localOrderedMapVarNames?: Set<string> | null, clientAsyncFnNames?: Set<string> | null, syncPeerCalls?: Array<{ name: string; span: unknown }> | null, clientAsyncBody?: boolean, synthCellKeys?: Set<string> | null, readOnlyServerFnNames?: Set<string> | null): string[] {
+export function scheduleStatements(body: ASTNode[], fnNode: ASTNode, routeMap: RouteMap, depGraph: DepGraph, filePath: string, errors: CGError[] = [], machineBindings?: Map<string, { engineName: string; tableName: string; rules: any[]; auditTarget?: string | null }> | null, engineBindings?: Map<string, { varName: string; forType: string; tableName: string }> | null, engineVarNames?: Set<string> | null, enginesWithHooks?: Set<string> | null, returnTypeAnnotation?: string | null, enclosingFnName?: string | null, enginesWithOnTimeout?: Set<string> | null, enginesWithIdleWatchdog?: Set<string> | null, enginesWithInternalRules?: Set<string> | null, enginesWithHistory?: Set<string> | null, enginesWithMessageArms?: Set<string> | null, engineMessageVariants?: Map<string, Set<string>> | null, calleeMap?: CalleeImportMap | null, exportRegistry?: Map<string, Map<string, { kind: string; category: string; isComponent: boolean; isAsync?: boolean }>> | null, mapVarNames?: Set<string> | null, orderedMapVarNames?: Set<string> | null, setVarNames?: Set<string> | null, localMapVarNames?: Set<string> | null, localSetVarNames?: Set<string> | null, localOrderedMapVarNames?: Set<string> | null, clientAsyncFnNames?: Set<string> | null, syncPeerCalls?: Array<{ name: string; span: unknown }> | null, clientAsyncBody?: boolean, synthCellKeys?: Set<string> | null, readOnlyServerFnNames?: Set<string> | null, localOnlyCalleeNames?: Set<string> | null): string[] {
   const lines: string[] = [];
   // Track declared names so tilde-decl can detect reassignment vs first declaration
   const declaredNames = new Set<string>();
@@ -1158,6 +1158,11 @@ export function scheduleStatements(body: ASTNode[], fnNode: ASTNode, routeMap: R
       if (isPromiseReturningImportedCallee(localName, calleeMap, exportRegistry)) _candidateNames.add(localName);
     }
   }
+  // S470 (g-impl1-async-colouring-ignores-local-shadow-s469) — in a SYNC host, a name the body
+  // calls only as a LOCAL binding (`const check = (x) => …` beside a `server function check`)
+  // is that local: the colouring did not count it, so it is not awaited here either (this
+  // injector reads emitted text a statement at a time and cannot see the declaration).
+  if (!clientAsyncBody && localOnlyCalleeNames) for (const n of localOnlyCalleeNames) _candidateNames.delete(n);
   const _isPromiseCallee: (name: string) => boolean = (n) => _candidateNames.has(n);
   // INVARIANT 2 — a statement whose emitted code IS a reactive / derived / init /
   // engine runtime sink (or an already-async IIFE) is owned by emit-client's own

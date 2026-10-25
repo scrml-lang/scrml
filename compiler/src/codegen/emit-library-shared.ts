@@ -34,6 +34,7 @@ import {
   localAsyncDeclRoot,
   annotateLocalAsyncFns,
   calleesThroughDirectlyCalledNestedFns,
+  walkScoped,
   anchorDiagnosticSpan,
   localSyncShadowOf,
   rawAsyncUsesOf,
@@ -199,6 +200,20 @@ export function collectCalleeIdents(node: unknown, out: Set<string>, guardNested
   // call-shaped token inside a `"…"` pattern/result is not a false coloring signal
   // (the S239 text-scan over-match guard). Structured arm bodies (match-arm-block)
   // are already covered by the generic recursion into their `.body` statement array.
+  matchArmTextCallees(n, out, guardNestedFnValues);
+  for (const key of Object.keys(n)) {
+    if (key === "span") continue;
+    const v = n[key];
+    if (v && typeof v === "object") collectCalleeIdents(v, out, guardNestedFnValues);
+  }
+}
+
+/**
+ * The callees a `match` node holds in its arm TEXT (see `collectCalleeIdents`): a value-form
+ * arm's raw `result` / `expr` string and an expression-tree match's `rawArms`. Not recursive —
+ * the structured children are the caller's walk.
+ */
+function matchArmTextCallees(n: ASTNode, out: Set<string>, guardNestedFnValues: boolean): void {
   if (n.kind === "match-expr" || n.kind === "match-stmt") {
     const arms = Array.isArray((n as ASTNode).body) ? ((n as ASTNode).body as ASTNode[]) : [];
     for (const arm of arms) {
@@ -218,11 +233,67 @@ export function collectCalleeIdents(node: unknown, out: Set<string>, guardNested
       for (const r of raw) if (typeof r === "string" && r) armListTextCallees(r, out, guardNestedFnValues);
     }
   }
-  for (const key of Object.keys(n)) {
-    if (key === "span") continue;
-    const v = n[key];
-    if (v && typeof v === "object") collectCalleeIdents(v, out, guardNestedFnValues);
-  }
+}
+
+/**
+ * S470 (g-impl1-async-colouring-ignores-local-shadow-s469, SECURITY) — the callees of a
+ * function's body that name the FILE-SCOPE binding: every call `collectCalleeIdents` reads,
+ * minus the calls whose callee is bound by the function's OWN scopes at the call — a
+ * parameter, a `let` / `const` / `lin` / tilde local declared before the call in an enclosing
+ * block, a nested `function` declaration in an enclosing block, a lambda parameter.
+ *
+ * Async colouring went by name: `const check = (x) => x == "secret"` inside a helper, beside a
+ * `server function check`, coloured the helper async — every render-position / parameter-default
+ * use of it was then refused, its library export became a Promise, and the shadowed call itself
+ * was emitted `await check(p)`. The call names the LOCAL; the helper is as sync as its own body.
+ *
+ * The scope model is the one `walkScoped` gives every other free-name reader (`free-name.ts`,
+ * the nested-helper marks), with `sequentialLocals`: a local shadows only the calls AFTER its
+ * declaration, the way the body emitter resolves a call (`declaredNames` grows statement by
+ * statement — a call before the declaration is lowered as the outer function's call). Every
+ * binder the model does not cover (a destructuring pattern, a loop binder, a `match` arm
+ * binder) leaves the name FREE: the fail-closed direction (the function stays async). A local
+ * binding is itself walked — a `const check = (x) => isOk(x)` still reaches `isOk`.
+ */
+export function collectFreeCalleeIdents(
+  fn: { params?: unknown; body?: unknown },
+  out: Set<string>,
+  guardNestedFnValues = false,
+  // The callee names that resolved to a LOCAL binding at some call (see `locallyBoundOnlyCalleeNames`).
+  boundOut?: Set<string>,
+): void {
+  const take = (name: string, isBound: (name: string) => boolean): void => {
+    if (!isBound(name)) out.add(name);
+    else if (boundOut) boundOut.add(name);
+  };
+  walkScoped(fn, (n, isBound) => {
+    if (n.kind === "call") {
+      if (typeof n.name === "string") take(n.name, isBound);
+      const callee = n.callee as ASTNode | undefined;
+      if (callee && callee.kind === "ident" && typeof callee.name === "string") take(callee.name, isBound);
+    }
+    if (n.kind === "match-expr" || n.kind === "match-stmt") {
+      const arm = new Set<string>();
+      matchArmTextCallees(n, arm, guardNestedFnValues);
+      for (const c of arm) take(c, isBound);
+    }
+  }, { stopAtNestedFns: guardNestedFnValues, skipRootParams: true, sequentialLocals: true });
+}
+
+/**
+ * S470 — the callee names a function's body calls ONLY as a local binding (every call of the
+ * name resolves to a parameter / local / nested function / lambda parameter of the function;
+ * none to the file-scope name). The async colouring does not count them, so a function whose
+ * only "server" calls are these is sync — and the text-level await injector, which reads names
+ * without scopes, must not await them there either (an `await` in a sync function). A name with
+ * any free call keeps the function async (and its awaits), so it is never in this set.
+ */
+export function locallyBoundOnlyCalleeNames(fn: { params?: unknown; body?: unknown }): Set<string> {
+  const free = new Set<string>();
+  const bound = new Set<string>();
+  collectFreeCalleeIdents(fn, free, false, bound);
+  for (const n of free) bound.delete(n);
+  return bound;
 }
 
 /**
@@ -293,14 +364,19 @@ export function computeAsyncFnNames(
     const name = fn.name as string | undefined;
     if (!name) continue;
     const callees = new Set<string>();
-    collectCalleeIdents(fn.body, callees, guardNestedFnValues === true);
+    // S470 — resolved against the function's own scopes: a call of a LOCAL that shadows an
+    // async file-scope name does not colour the function (`collectFreeCalleeIdents`).
+    collectFreeCalleeIdents(fn, callees, guardNestedFnValues === true);
     // s440 — the guarded walk stops at a nested function's body, but a body that
     // CALLS a nested helper awaits it (`local-async-fns.ts`), so the helper's own
-    // callees are this function's too. (The unguarded walk already descends.)
+    // callees are this function's too. (The unguarded walk already descends.) Which
+    // helpers are reached is read by name (the fail-closed direction); what each one
+    // contributes is its body's FREE callees, resolved against its own scopes.
     if (guardNestedFnValues === true) {
       for (const c of calleesThroughDirectlyCalledNestedFns(
         fn.body,
         (node, out) => collectCalleeIdents(node, out, true),
+        (nestedFn, out) => collectFreeCalleeIdents(nestedFn, out, true),
       )) callees.add(c);
     }
     calleesByName.set(name, callees);
@@ -1207,8 +1283,16 @@ export function emitLibraryFnMember(
       .map((p) => (typeof p === "string" ? p.split(/[:=]/)[0].trim() : (p as ASTNode)?.name))
       .filter((n): n is string => typeof n === "string" && n.length > 0),
   );
+  // S470 — a body lowered server-side under a NON-async signature (a GITI-038 holder) does not
+  // await the names it calls only as a local (a nested `function check` beside an async `check`):
+  // the colouring did not count them, and an `await` there would sit in a sync function.
+  let bodyAwaitNames = opts.asyncFnNames;
+  if (serverBody && !signatureAsync) {
+    const localOnly = locallyBoundOnlyCalleeNames(fnNode as never);
+    if (localOnly.size > 0) bodyAwaitNames = new Set([...opts.asyncFnNames].filter((n) => !localOnly.has(n)));
+  }
   const bodyOpts = serverBody
-    ? { boundary: "server", serverFnNames: opts.asyncFnNames, declaredNames, insideFunctionBody: true }
+    ? { boundary: "server", serverFnNames: bodyAwaitNames, declaredNames, insideFunctionBody: true }
     : { boundary: "client", declaredNames, insideFunctionBody: true };
   // §7.3.2 (s466 fix round 1) — defaults lowered (and refused) by the one helper,
   // with the body's options; the file's async fn set decides what needs an await.
