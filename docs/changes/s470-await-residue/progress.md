@@ -166,3 +166,34 @@ bot-owned; not regenerated per policy).
 - Over-refusals recorded (LOW, fail closed): a `reset` of a waiting cell as the LAST statement of a
   function body; a site in a one-iteration loop; a bare waiting call followed by any cell mention;
   `@a = loadA(); @b = loadB()` at module init (the second write is a call).
+
+## Fix round 1 (review of 817aadc0e, verdict FIX) — 2026-10-25
+
+Reviewer material (read-only): `~/.cache/scrml/review/s470-lf/`. Measurement tree for "before":
+`git archive 817aadc0e` in `~/.cache/scrml/s470/laneF/h817/`.
+
+| # | sev | status | evidence |
+|---|---|---|---|
+| F1 | HIGH | FIXED | `observes()` matched only the written cell's name. A mention of a DERIVED cell (`const <d>`, or a derived engine) now observes when its closure in the compiler's dependency graph reaches the cell — index.ts walks Stage 7's DG (`safeDepGraph`: a derived node's `reads` / `calls` / `awaits` / `engine-derived-reads` edges, through function nodes) and hands `derivedReach` to the walk; a derived name with no DG node reaches everything (fail closed). Shapes: module init, derived of derived, derived through a helper, a ternary, a `<request>` body (incl. its first-write load), a message arm, an `<onMount>` tag — FAIL on 817aadc0e, PASS-REFUSED now. |
+| F2 | HIGH | FIXED | the waiting-reset cells now include writes in the statement lists impl#1 parses from text and lowers registering `_scrml_init_set`: an engine opener `effect=` (emit-engine `emitEngineOpenerEffect` keeps `insideFunctionBody` false) and, fail closed, a `when` body — the same cached `readEngineBody` parses the walk judges. Reviewer reset-opener: 2 FAIL → PASS-REFUSED. |
+| F3 | MED | FIXED | the opener `effect=` and a `<poll>`'s immediate first tick are emitted after every module-init statement: both are now LATE followers, checked against the whole module-init order at the end of the walk (`finishModuleOrder`). The other "written before the write" reviewer shapes (`<onMount>` tag, `on mount`, `<request>`, `^{ }` before the write) read the DECLARED value before any write in emission order too (verified in the emitted JS: the read precedes the write) — not ordering defects; still FAIL in the reviewer's harness by its stale-TRUE seed, not in the pack. |
+| F4 | MED | FIXED | the sites still pending at a message arm's end are followed by the engine's `effect=` / `<onTransition>` bodies and guards (the transition fires them): refused when one observes. |
+| F5 | MED | FIXED | latest wins for the async engine hook hosts: each async hook arm gets a module-scope run counter (`let __scrml_engine_…_fire_hooks_run_N = 0`), the run takes `++counter`, and EVERY resume point is `_scrml_live(await …)` — a synchronous check at the resume, throwing a run-local sentinel caught at the run's end (no runtime change). A guarded host awaits a sole write too (so it is covered). emit-client's reactive-set lift recognises `_scrml_live(await stub(…))` and keeps the guard in its `!{}` in-place relocation (before, the guarded write stored the error envelope in the cell for a moment). `<timer>` / `<poll>` / `<timeout>` are not guarded (each tick re-reads; a slow tick must not starve the next). Race (`bin/race.mjs`, clicks right(slow 60ms), idle, wrong): base "rejected", 817aadc0e "LOGGED IN", head "rejected" for `<onTransition>`, `effect=`, a guarded write, a sole write; right alone still logs in. `compiler/tests/integration/await-residue-race-s470.test.js`: 4 FAIL on 817aadc0e, 8/8 pass on head. |
+| F9 | LOW | FIXED (message only) | the ordering message recommends `<request>` (and a handler), no longer `on mount { }`. |
+
+- Pack: family renamed `f15` → **`f23`** (lane family r17; lane D's r9 `f15`, #1558) and +9 shapes (F1 ×5,
+  F2 ×2, F3, F4): **9/9 FAIL on 817aadc0e** (and on 6081e0685), PASS-REFUSED on head; f23 total 32
+  (28 FAIL on 6081e0685, 4 VALID PASS). EXPECTED_SHAPE_COUNT 2288 → 2297 before the merge.
+- Reviewer probe sets on head: esc 0 FAIL except the 4 declared-value shapes (F3 row), esc2 0,
+  reset-opener 0, reset-opener2 0, host 0, reset 0 (identical classes to the reviewer's head run),
+  med: only its boot-correct "right seed" shape; my order / reset / lift-proof: no change except the
+  boot-only S rows (correct boot answer).
+- Test changed: `cell-assign-server-call-awaited.test.js` s441 F7 resets an opener-written cell from
+  `function doReset() { reset(@m) }` — now refused (F2 + the function-body rule, recorded over-refusal);
+  the test resets from the sole handler statement `onclick=${ reset(@m) }`, which keeps its intent
+  (the async reset thunk resolves).
+- R26 (3618): vs 817aadc0e **0 diffs**; vs base the same single justified file
+  (other-contexts.scrml); stdlib own-copy 0 diffs.
+- SPEC §34 row: the derived closure, the late followers, the arm → hooks order, latest wins, the
+  opener / `when` reset registration. s34-census --check-new PASS.
+- No runtime change (ratchet untouched).
