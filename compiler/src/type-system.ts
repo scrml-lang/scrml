@@ -1685,8 +1685,23 @@ interface WholeBinderAuditCtx {
    * parameter, an import, a name declared later, more than one declaration, nothing).
    */
   resolveFn: (name: string, from: Scope) => { decl: ASTNodeLike; scope: Scope } | null;
+  /** S470 fix round 1 — the scope the checker registered a function declaration on (`fnDeclScope`), or null. */
+  declScopeOf: (decl: ASTNodeLike) => Scope | null;
   /** S470 — is `log` declared or imported anywhere in this file (then it is never the builtin)? */
   fileDeclaresLog: boolean;
+}
+
+/** S470 fix round 1 — how many declarations of `name` a tree holds (auditDeclaresName's notion, counted). */
+function auditCountDecls(x: unknown, name: string): number {
+  if (!x || typeof x !== "object") return 0;
+  if (Array.isArray(x)) return x.reduce((s: number, y) => s + auditCountDecls(y, name), 0);
+  const r = x as Record<string, unknown>;
+  let n = 0;
+  if (typeof r.name === "string" && r.name === name && r.kind !== "ident" && r.kind !== "shorthand") n++;
+  if (r.bindName === name) n++;
+  for (const k of ["boundNames", "payloadBindings"]) if (Array.isArray(r[k])) n += (r[k] as unknown[]).filter((v) => v === name).length;
+  for (const k of Object.keys(r)) if (k !== "span" && !k.startsWith("__")) n += auditCountDecls(r[k], name);
+  return n;
 }
 
 /** S470 — does a local declaration tree between the audited text and its scope declare `name`? */
@@ -1812,13 +1827,38 @@ function auditBinderMatchPattern(pattern: string, binder: string, ctx: WholeBind
     if (m[3] !== undefined && countWordUses(m[3], binder) > 0) {
       return { code: "E-TYPE-031", what: `the arm \`${piece.trim()}\` re-binds \`${binder}\`` };
     }
-    if (m[3] !== undefined && m[3].split(",").some((b) => { const s = b.trim(); return s !== "" && s !== "_"; })) {
-      const bad = auditEnumPayloadBinderRefusal(m[2], ctx);
-      if (bad) return bad;
+    if (m[3] !== undefined) {
+      const binds = auditPayloadBindsOf(m[3]);
+      if (binds === null || binds.length > 0) {
+        const bad = auditEnumPayloadBinderRefusal(m[2], binds, ctx);
+        if (bad) return bad;
+      }
     }
   }
   return null;
 }
+
+/**
+ * S470 fix round 1 — the binders of an arm pattern's payload list (`x, _` / `field: x`): only the
+ * BOUND positions — `x` positional, `field: x` named, `_` binds nothing. null when a part is not
+ * read (a nested pattern): the caller then checks every field.
+ */
+function auditPayloadBindsOf(text: string): AuditPayloadBind[] | null {
+  const binds: AuditPayloadBind[] = [];
+  let unread = false;
+  splitTopLevel(text, [","]).forEach((part, pos) => {
+    const s = part.trim();
+    if (s === "" || s === "_") return;
+    const named = /^([A-Za-z_$][\w$]*)\s*:\s*([A-Za-z_$][\w$]*)$/.exec(s);
+    if (named) { if (named[2] !== "_") binds.push({ pos: -1, name: named[2], field: named[1] }); return; }
+    if (/^[A-Za-z_$][\w$]*$/.test(s)) { binds.push({ pos, name: s }); return; }
+    unread = true;
+  });
+  return unread ? null : binds;
+}
+
+/** S470 fix round 1 — one payload binder of a `match <binder>` arm: its position, or its field (named form). */
+interface AuditPayloadBind { pos: number; name: string; field?: string }
 
 /**
  * S470 — FAIL CLOSED: an arm of `match <binder>` that binds a payload of a variant one of whose
@@ -1829,12 +1869,32 @@ function auditBinderMatchPattern(pattern: string, binder: string, ctx: WholeBind
  * refused (an impl#1 limitation, not a language rule). Bind the payload with a named `!{}` arm or
  * `match` the enum value where it is declared.
  */
-function auditEnumPayloadBinderRefusal(variant: string, ctx: WholeBinderAuditCtx): WholeBinderRefusal | null {
+function auditEnumPayloadBinderRefusal(variant: string, binds: AuditPayloadBind[] | null, ctx: WholeBinderAuditCtx): WholeBinderRefusal | null {
   const en = ctx.en;
   const v = en ? (en.variants ?? []).find((x) => x.name === variant) : undefined;
   if (!en || !v) return null; // not a variant of the enum: the pattern checks refuse it
   const fields = v.payload instanceof Map ? [...v.payload.keys()] : [];
-  for (const f of fields) {
+  // S470 fix round 1 — check only the fields a binder takes. A positional binder is checked at its
+  // position AND at the field it is named after (the lowering's legacy name-as-field binding); a
+  // positional list whose length is not the field count (a named form the parser flattened) checks
+  // every field. `binds === null` (a pattern not read) checks every field.
+  let checked: string[] = fields;
+  if (binds !== null) {
+    const positional = binds.filter((b) => b.field === undefined);
+    const arityKnown = positional.length === 0 || binds.every((b) => b.field === undefined);
+    const posCount = binds.length === 0 ? 0 : Math.max(...binds.map((b) => b.pos)) + 1;
+    if (positional.length > 0 && (!arityKnown || posCount > fields.length)) checked = fields;
+    else {
+      const set = new Set<string>();
+      for (const b of binds) {
+        if (b.field !== undefined) { set.add(b.field); continue; }
+        if (fields[b.pos] !== undefined) set.add(fields[b.pos]);
+        if (fields.includes(b.name)) set.add(b.name);
+      }
+      checked = fields.filter((f) => set.has(f));
+    }
+  }
+  for (const f of checked) {
     const key = canonicalFieldTypeKey(en, variant, f);
     // In a canonical key an enum appears as `e{…}` / `e@Name` at a token start; null = unknown.
     if (key === null || /(?:^|[(:,|{])e[{@]/.test(key)) {
@@ -2020,7 +2080,11 @@ function auditWholeBinderTree(
             if (!arm.isWildcard && !(ctx.en!.variants ?? []).some((v) => v.name === arm.variant)) { refuse("E-TYPE-031", `an arm of \`match ${binder}\` is not a variant of the handled error enum`); return; }
             if (bindingNames(arm.payloadBindings).includes(binder) || bindingNames(arm.binding).includes(binder)) { refuse("E-TYPE-031", `an arm re-binds \`${binder}\``); return; }
             if (!arm.isWildcard && [...bindingNames(arm.payloadBindings), ...bindingNames(arm.binding)].some((s) => s !== "" && s !== "_")) {
-              const bad = auditEnumPayloadBinderRefusal(String(arm.variant ?? ""), ctx);
+              // S470 fix round 1 — `payloadBindings` flattens a named form (`.V(f: _, g: x)` reads
+              // `["_", "x"]`, while the lowering binds `x` to field `g`), so the arm's pattern TEXT
+              // (`binding`) is read instead; without it every field is checked.
+              const binds: AuditPayloadBind[] | null = typeof arm.binding === "string" ? auditPayloadBindsOf(arm.binding) : null;
+              const bad = auditEnumPayloadBinderRefusal(String(arm.variant ?? ""), binds, ctx);
               if (bad) { st.refusal = bad; return; }
             }
             auditWholeBinderTree(arm.body, binder, ctx, st);
@@ -2089,10 +2153,19 @@ function auditBinderCallArgs(callee: unknown, idx: number[], ctx: WholeBinderAud
     // declares (the arm, a nested body, an audited callee's parameters / body) is a local binding
     // the audit does not follow; otherwise it must resolve, from this text's scope, to exactly one
     // function declaration (resolveFnBinding). Anything else is refused — fail closed.
+    let res: { decl: ASTNodeLike; scope: Scope } | null = null;
     if (auditFramesDeclare(ctx, c.name)) {
-      return { code: "E-TYPE-031", what: `the error is passed to \`${c.name}\`, a local binding here, which the compiler does not follow` };
+      // S470 fix round 1 — a function declared directly in an audited callee's body (the only
+      // declaration of the name in every frame) is the binding the call names; the checker
+      // registered it on that body's scope (`fnDeclScope`), so it resolves the same way.
+      const total = ctx.frames.reduce((s: number, f) => s + auditCountDecls(f, c.name!), 0);
+      const direct = ctx.frames.flatMap((f) => (Array.isArray(f) ? f : []))
+        .filter((s) => s && typeof s === "object" && (s as ASTNodeLike).kind === "function-decl" && (s as ASTNodeLike).name === c.name) as ASTNodeLike[];
+      const sc = total === 1 && direct.length === 1 ? ctx.declScopeOf(direct[0]) : null;
+      if (!sc) return { code: "E-TYPE-031", what: `the error is passed to \`${c.name}\`, a local binding here, which the compiler does not follow` };
+      res = { decl: direct[0], scope: sc };
     }
-    const res = ctx.resolveFn(c.name, ctx.scope);
+    if (!res) res = ctx.resolveFn(c.name, ctx.scope);
     if (!res) return { code: "E-TYPE-031", what: `the error is passed to \`${c.name}\`, which here is not provably one function declaration of this file` };
     const fn = res.decl;
     if (ctx.seenFns.has(fn)) return { code: "E-TYPE-031", what: `the error is passed to \`${c.name}\` recursively` };
@@ -2128,6 +2201,24 @@ function auditBinderCallArgs(callee: unknown, idx: number[], ctx: WholeBinderAud
       const bodyText = fnText.slice(bodyStart);
       const n = countWordUses(bodyText, prm.name);
       const st = { accounted: 0, refusal: null as WholeBinderRefusal | null };
+      // S470 fix round 1 — a parameter DEFAULT runs in the callee too (`r = x.reason`, `y = x`,
+      // `h = () => x.reason`): each default that names the audited parameter is audited like a
+      // nested body (the same parse + walk + use count). A default the parser kept as anything
+      // but text cannot be read: refused.
+      for (const q of params as Array<{ defaultValue?: unknown }>) {
+        const dv = q ? q.defaultValue : undefined;
+        if (dv === undefined || dv === null) continue;
+        if (typeof dv !== "string") return { code: "E-TYPE-031", what: `in \`${c.name}\`, a parameter default could not be read` };
+        const dn = countWordUses(dv, prm.name);
+        if (dn === 0) continue;
+        const droots = auditParseBody(dv, ctx.filePath);
+        if (droots === null) return { code: "E-TYPE-031", what: `in \`${c.name}\`, a parameter default could not be read` };
+        const dst = { accounted: 0, refusal: null as WholeBinderRefusal | null };
+        ctx.seenFns.add(fn);
+        try { auditWholeBinderTree(droots, prm.name, { ...fnCtx, frames: [droots, ...fnCtx.frames] }, dst); } finally { ctx.seenFns.delete(fn); }
+        if (dst.refusal) return { code: dst.refusal.code, what: `in a parameter default of \`${c.name}\`, ${dst.refusal.what}` };
+        if (dst.accounted !== dn) return { code: "E-TYPE-031", what: `in a parameter default of \`${c.name}\`, a use of \`${prm.name}\` is not one the compiler can check` };
+      }
       ctx.seenFns.add(fn);
       try { auditWholeBinderTree(fn.body, prm.name, fnCtx, st); } finally { ctx.seenFns.delete(fn); }
       if (st.refusal) return { code: st.refusal.code, what: `in \`${c.name}\`, ${st.refusal.what}` };
@@ -11384,6 +11475,45 @@ function annotateNodes(
     _wholeBinderFileDeclaresLog = found;
     return found;
   };
+  // S470 fix round 1 — how many times the file's TOP LEVEL declares each name (a function, a
+  // `const` / `let` / cell / bare declaration, a destructured name, an import), walking the same
+  // nodes `ensureTopLevelFnDecls` registers from (`${}` bodies and markup children, not function
+  // bodies).
+  let _wholeBinderTopDecls: Map<string, number> | null = null;
+  const wholeBinderTopLevelDeclCount = (name: string): number => {
+    if (!_wholeBinderTopDecls) {
+      const m = new Map<string, number>();
+      const add = (nm: unknown): void => { if (typeof nm === "string" && nm) m.set(nm, (m.get(nm) ?? 0) + 1); };
+      const seen = new WeakSet<object>();
+      const visit = (nodes: unknown): void => {
+        if (!Array.isArray(nodes)) return;
+        for (const x of nodes) {
+          if (!x || typeof x !== "object" || seen.has(x as object)) continue;
+          seen.add(x as object);
+          const r = x as ASTNodeLike;
+          const k = r.kind;
+          if (k === "function-decl" || k === "const-decl" || k === "let-decl" || k === "tilde-decl" || k === "lin-decl" || k === "state-decl") {
+            if (typeof r.name === "string") add(r.name);
+            if (Array.isArray(r.boundNames)) for (const b of r.boundNames as unknown[]) add(b);
+            if (k === "function-decl") continue;
+          }
+          // An `export const` / `export let` carries its name on the export node (an exported
+          // function is also its own function-decl, counted there).
+          if (k === "export-decl" && (r.exportKind === "const" || r.exportKind === "let")) add(r.exportedName);
+          if (k === "import-decl") {
+            const sp = r.specifiers as Array<{ local?: unknown }> | undefined;
+            if (Array.isArray(sp) && sp.length > 0) for (const s of sp) add(s?.local);
+            else if (Array.isArray(r.names)) for (const nm of r.names as unknown[]) add(nm);
+          }
+          visit(r.body);
+          visit(r.children);
+        }
+      };
+      visit(fileTopLevelNodes);
+      _wholeBinderTopDecls = m;
+    }
+    return _wholeBinderTopDecls.get(name) ?? 0;
+  };
   // S470 — a callee name resolved BY BINDING (the checker's own `resolveFnBinding`, the lexical
   // resolver the failable-call checks use): exactly one function declaration, or null.
   const wholeBinderResolveFn = (name: string, from: Scope): { decl: ASTNodeLike; scope: Scope } | null => {
@@ -11394,6 +11524,10 @@ function annotateNodes(
     // A same-scope non-function binding of the name (a `const` beside the declaration) is not provably it.
     const entry = r.scope.bindings.get(name);
     if (entry && entry.kind !== "function" && r.scope !== scopeChain.global) return null;
+    // S470 fix round 1 — the global scope obeys the same rule. Its bindings cannot answer it (an
+    // exported function is pre-bound as a variable; a top-level `const` declared later is not bound
+    // yet), so the file's top level is counted: the name must be declared there exactly once.
+    if (r.scope === scopeChain.global && wholeBinderTopLevelDeclCount(name) !== 1) return null;
     return { decl: d, scope: fnDeclScope.get(d) ?? r.scope };
   };
   const wholeBinderAuditCtx = (en: EnumType | null): WholeBinderAuditCtx => {
@@ -11402,6 +11536,7 @@ function annotateNodes(
       en, filePath, typeRegistry, typeDecls: _fileTypeDeclsForErrors,
       sourceText: typeof src === "string" ? src : null, seenFns: new Set(),
       scope: scopeChain.current, frames: [], resolveFn: wholeBinderResolveFn,
+      declScopeOf: (decl: ASTNodeLike) => fnDeclScope.get(decl) ?? null,
       fileDeclaresLog: wholeBinderFileDeclaresLog(),
     };
   };
