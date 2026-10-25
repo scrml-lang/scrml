@@ -256,3 +256,41 @@ describe("fix round 1 #5 — a function declared in an audited callee's body res
  return g(x) }`), X(`f(e)`))).toContain("E-TYPE-004");
   });
 });
+
+// S470 fix round 2 — the review of 43d162d52: ONE audit keyed on the `!{}` node.
+const H2 = `wrap(p) !{ _ e :> e.reason == "bad" ? "rejected" : "LOGGED IN" }`;
+const R2 = (pre) => `${pre}\n        return v == true ? "LOGGED IN" : v`;
+describe("fix round 2 #1/#2 — a `!{}` in any expression position or function value is audited", () => {
+  const CASES = [
+    ["J1 a call argument", W(`function id(a) { return a }`), R2(`const v = id(${H2})`)],
+    ["J3 an object literal value", W(), R2(`const o = { a: ${H2} }\n        const v = o.a`)],
+    ["J4 a tape literal element", W(), R2(`const t = [${H2}]\n        const v = t[0]`)],
+    ["E2 an expression arrow passed as an argument", W(`function apply(f) { return f(1) }`), R2(`const v = apply((q) => ${H2})`)],
+    ["E5 an IIFE", W(), R2(`const v = (() => ${H2})()`)],
+    ["E10 an arrow as a parameter default", W(`function apply(f = () => wrap("wrong") !{ _ e :> e.reason == "bad" ? "rejected" : "LOGGED IN" }) { return f() }`), R2(`const v = apply()`)],
+    ["K4 an arrow inside a nested function", W(`function apply(f) { return f() }`), R2(`function f() { return apply(() => ${H2}) }\n        const v = f()`)],
+  ];
+  for (const [n, d, b] of CASES) {
+    test(`${n} → E-TYPE-004`, () => {
+      expect(codesOf(d, b)).toContain("E-TYPE-004");
+    });
+  }
+  test("ALLOWED: a valid whole-error use in an expression position", () => {
+    expect(codesOf(W(`function id(a) { return a }`), R2(`const v = id(wrap(p) !{ _ e :> e is .Denied ? "rejected" : "LOGGED IN" })`))).toEqual([]);
+  });
+});
+
+describe("fix round 2 #3 — `arguments` reads the error without naming it", () => {
+  const CASES = [
+    ["D14 in an audited callee's body", W(`server function f(x: AuthErr) { return arguments[0].reason == "bad" }`), X(`f(e)`)],
+    ["D13 in an audited callee's default", W(`server function f(x: AuthErr, r = arguments[0].reason) { return r == "bad" }`), X(`f(e)`)],
+    ["AR3 destructured in an audited callee", W(`server function f(x: AuthErr) { const [a] = arguments\n return a.reason == "bad" }`), X(`f(e)`)],
+    ["AR6 spread on from an audited callee", W(`server function g(y) { return y.reason == "bad" }\n    server function f(x: AuthErr) { return g(...arguments) }`), X(`f(e)`)],
+    ["AR1 in the arm itself", W(), X(`arguments[0].reason == "bad"`)],
+  ];
+  for (const [n, d, b] of CASES) {
+    test(`${n} → E-TYPE-031`, () => {
+      expect(codesOf(d, b)).toContain("E-TYPE-031");
+    });
+  }
+});

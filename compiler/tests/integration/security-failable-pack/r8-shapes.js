@@ -74,6 +74,33 @@ function cases(srv) {
     ["5 F1 fn-expr direct e.reason", W(), `const inner = function() { return wrap(p) !{ _ e :> e.reason == "bad" ? "rejected" : "LOGGED IN" } }\n        const v = inner()\n        return v == true ? "LOGGED IN" : v`],
     ["5 F2 block arrow direct e.reason", W(), `const inner = () => { return wrap(p) !{ _ e :> e.reason == "bad" ? "rejected" : "LOGGED IN" } }\n        const v = inner()\n        return v == true ? "LOGGED IN" : v`],
     ["VALID Q1 primitive sibling of enum field", W("", `type Inner:enum = { Bad(reason: string), Ok2 }\n    type AuthErr:enum = { Denied(reason: string), Wrapped(inner: Inner, code: number), Gone }`, `AuthErr::Wrapped(Inner::Bad("bad"), 1)`), B(`match e { .Wrapped(_, c) :> { if (c == 1) { o = "rejected" } } else :> { } }`)],
+    // S470 fix round 2 (review of 43d162d52): a `!{}` in any expression position or function value;
+    // `arguments` in an audited callee or in the arm itself; a `!{}` in a parameter default
+    ...(() => {
+      const H = `wrap(p) !{ _ e :> e.reason == "bad" ? "rejected" : "LOGGED IN" }`;
+      const R = (pre) => `${pre}\n        return v == true ? "LOGGED IN" : v`;
+      return [
+        ["6 J1 !{} as call arg", W(`function id(a) { return a }`), R(`const v = id(${H})`)],
+        ["6 J2 !{} paren in return", W(), `const v = 1\n        return (${H}) == true ? "LOGGED IN" : (${H})`],
+        ["6 J3 !{} in obj literal", W(), R(`const o = { a: ${H} }\n        const v = o.a`)],
+        ["6 J4 !{} in tape literal", W(), R(`const t = [${H}]\n        const v = t[0]`)],
+        ["6 E2 expr arrow arg w/ param", W(`function apply(f) { return f(1) }`), R(`const v = apply((q) => ${H})`)],
+        ["6 E5 expr arrow IIFE", W(), R(`const v = (() => ${H})()`)],
+        ["6 E8 expr arrow arg to method", W(), R(`const v = [1].map(() => ${H})[0]`)],
+        ["6 E10 expr arrow as default", W(`function apply(f = () => wrap("wrong") !{ _ e :> e.reason == "bad" ? "rejected" : "LOGGED IN" }) { return f() }`), R(`const v = apply()`)],
+        ["6 K3 block arrow > apply(expr arrow)", W(`function apply(f) { return f() }`), R(`const f = () => { return apply(() => ${H}) }\n        const v = f()`)],
+        ["6 K4 fn decl > apply(expr arrow)", W(`function apply(f) { return f() }`), R(`function f() { return apply(() => ${H}) }\n        const v = f()`)],
+        ["6 K5 top fn > apply(expr arrow)", W(`function apply(f) { return f() }\n    function f2(p) { return apply(() => ${H}) }`), R(`const v = f2(p)`)],
+        ["6 K6 expr arrow arg, paren body", W(`function apply(f) { return f() }`), R(`const v = apply(() => (${H}))`)],
+        ["6 D13 default via arguments", W(`${srv}function f(x: AuthErr, r = arguments[0].reason) { return r == "bad" }`), X(`f(e)`)],
+        ["6 D14 body via arguments", W(`${srv}function f(x: AuthErr) { return arguments[0].reason == "bad" }`), X(`f(e)`)],
+        ["6 AR1 arm arguments[0]", W(), X(`arguments[0].reason == "bad"`)],
+        ["6 AR2 arm block arguments[0]", W(), B(`if (arguments[0].reason == "bad") { o = "rejected" }`)],
+        ["6 AR3 callee arguments destructure", W(`${srv}function f(x: AuthErr) { const [a] = arguments\n return a.reason == "bad" }`), X(`f(e)`)],
+        ["6 AR5 callee arguments in nested arrow", W(`${srv}function f(x: AuthErr) { const h = () => arguments[0].reason\n return h() == "bad" }`), X(`f(e)`)],
+        ["6 AR6 callee pass arguments on", W(`${srv}function g(y) { return y.reason == "bad" }\n    ${srv}function f(x: AuthErr) { return g(...arguments) }`), X(`f(e)`)],
+      ];
+    })(),
     // valid controls (the allowed uses still compile and deny)
     ["VALID check(e)", W(), X(`check(e)`)],
     ["VALID log(e)", W(), B(`log(e)\n            o = "rejected"`)],
@@ -137,7 +164,17 @@ ${imports}
 `;
 }
 
+// S470 fix round 2 — fullstack only: a `!{}` in an expression-bodied arrow written as a markup
+// handler (`onclick=${() => …}`; review M1c). The full page, not the login template.
+function fullstackPages() {
+  const HS = (p) => `@msg = (wrap("${p}") !{ _ e :> e.reason == "bad" ? "rejected" : "LOGGED IN" }) == "rejected" ? "rejected" : "LOGGED IN"`;
+  const btns = (mk) => `<button id="wrong" onclick=${mk("wrong")}>w</button>\n<button id="right" onclick=${mk("secret")}>r</button>`;
+  const src = `<msg> = "init"\n\${\n    ${ENUM}\n    server function wrap(p)! -> AuthErr {\n        if (p != "secret") fail AuthErr::Denied("bad")\n        return true\n    }\n}\n${btns((p) => `\${() => ${HS(p)}}`)}\n<p id="out">\${@msg}</p>\n`;
+  return [["6 M1c onclick expr arrow", src, undefined]];
+}
+
 export function shapesFor(side) {
   const srv = side === "server" || side === "fullstack" ? "server " : "";
-  return cases(srv).map(([n, d, b, imp, extra]) => [n, page(side, d, b, imp ?? ""), extra ?? undefined]);
+  const out = cases(srv).map(([n, d, b, imp, extra]) => [n, page(side, d, b, imp ?? ""), extra ?? undefined]);
+  return side === "fullstack" ? [...out, ...fullstackPages()] : out;
 }
