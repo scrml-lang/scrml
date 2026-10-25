@@ -132,7 +132,7 @@ class) CLEAN → refused. No OK control newly refused. c4 T4 `String(x).includes
   shapes E-EQ-001); `KNOWN_FAIL` is empty. `@state = .Failed(err)` (SPEC §18.6.1, examples/09) compiles.
 
 ## Pack
-New family r9 (`r9-shapes.js`; `shapes/s12.js` `f15.js` `l7.js` `t7.js`), 121 shapes: every "1 …" shape
+New family r9 (`r11-shapes.js`; `shapes/s12.js` `f15.js` `l7.js` `t7.js`), 121 shapes: every "1 …" shape
 FAIL on 91c1c9ca4 → PASS-REFUSED (80 shapes); "VALID …" acceptance controls PASS on both (38, incl. the
 r7 VALID controls re-stated without r7's `getReasonT`, which is now refused); fullstack F4 ×3.
 EXPECTED_SHAPE_COUNT 2192 → 2313. pinned-class.js: the r9 shapes added from a run (fams.mjs), and the
@@ -220,7 +220,7 @@ untyped helper parameter, JSON round-trip [b1 A12 A14 A17 A18 A26 A31 A35].
   A5 A6 A7 A11 A12 A14 A16b A17 A18 A21 A26 A31 A32 A35 ×4, b3 X4 ×4, b6 D4). fp1 (25 VALID programs):
   identical to main. No OK control newly refused.
 - all earlier probe sets + matrix vs 91c1c9ca4: FAIL 84 → 0, the same changes as the round-0 head.
-- pack: r10 (`r10-shapes.js`; s13 / f16 / l8 / t8), 91 shapes, every one FAIL on 7453d57ff (measured,
+- pack: r10 (`r12-shapes.js`; s15 / f18 / l10 / t10), 91 shapes, every one FAIL on 7453d57ff (measured,
   fams.mjs on a 7453d57ff archive) → PASS-REFUSED; EXPECTED_SHAPE_COUNT 2477; full pack green.
 - R26 vs origin/main (compiler = da3180405; 3,615 files, in-tree stdlib): 0 changed, 0 newly rejected.
 - CI-only jobs (ci3/): types:check OK (181) · root 2239/0 · snippet 113/0 · claim 18/0 · floor PASS ·
@@ -243,7 +243,7 @@ untyped helper parameter, JSON round-trip [b1 A12 A14 A17 A18 A26 A31 A35].
   cycle of functions) reads PENDING, which unification skips (the result is the rest's). Each function is
   inferred once (memoized). [b7 U3, perf/cyclebad] Cost, best of 3 compiles (perf.mjs): chain 0.35s vs
   main 0.37s, chainbad 0.28 / 0.29, cycle 0.13 / 0.13, cyclebad 0.11 / 0.13.
-- PACK-CTRL — r11 (`r11-shapes.js`; s14 / f17 / l9 / t9), 99 shapes: 28 BAD (U1 U3 U7 U8 U9 U13, a cycle,
+- PACK-CTRL — r11 (`r13-shapes.js`; s16 / f19 / l11 / t11), 99 shapes: 28 BAD (U1 U3 U7 U8 U9 U13, a cycle,
   K1–K3) measured FAIL on a baef28219 archive → PASS-REFUSED; 71 VALID controls (the review's fp2 W1–W18 on
   every side, beside a login that must still compile and run) PASS on both. EXPECTED_SHAPE_COUNT 2576.
 - Left for the coordinator to file: U-MIX (b7 U2 `Inner | false`, H3 declared `Inner | string`), H6 (cyclic
@@ -290,11 +290,18 @@ untyped helper parameter, JSON round-trip [b1 A12 A14 A17 A18 A26 A31 A35].
 - Pack-control strength — the r11 VALID controls call their `f` at run time (payload-variant arguments
   where `f` reads `.variant` further); server W10 dropped (PASS-500 on both trees: a local function the
   server bundle does not ship once a server `login` calls `f`).
-- Pack: r12 (f18 / l10 / t10; no server family — every cycle shape was PASS-500 there), 16 shapes, each
+- Pack: r12 (f20 / l12 / t12; no server family — every cycle shape was PASS-500 there), 16 shapes, each
   FAIL on a 73d4e2e2d archive → PASS-REFUSED: P1 P4 P6 P7 × 3 sides, fullstack R11c R11b R11 and the
   80-file chain. R4 (export *) is unit-tested only: on 73d4e2e2d its page's client bundle throws at load
   (it imports a TYPE from the `export *` module), so it cannot be measured FAIL. EXPECTED_SHAPE_COUNT 2591.
 - Performance under a loaded machine (load avg ~55): chain 1.67s vs main 1.53s, cycle 0.51 / 0.57.
+
+## Pack family renumbering (coordinator, fix round 3 — two other lanes also made an `r9`)
+Lane D keeps r9 (s12 / f15 / l7 / t7), lane C takes r10. This lane's families, renamed (files, pin ids,
+README, the test-file comment; `renum.mjs`, one simultaneous mapping — history lines above that named the
+old families were rewritten with it): r9 → **r11** (s14 / f17 / l9 / t9), r10 → **r12** (s15 / f18 / l10 /
+t10), r11 → **r13** (s16 / f19 / l11 / t11), round 3's r12 → **r14** (f20 / l12 / t12; no server family).
+EXPECTED_SHAPE_COUNT from this tree's own run: 2591 (the coordinator re-sums at landing).
 
 ## Candidate gaps (not filed here)
 1. A markup `<match>` nested in a `<match>` arm is never mounted: the inner mount `<div
