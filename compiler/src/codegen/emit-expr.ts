@@ -2796,7 +2796,7 @@ function emitReceiver(node: ExprNode, ctx: EmitExprContext): string {
     // S470 fix round 1 — the awaited host `fetch` through the global object.
     (node.kind === "call" && ctx.peerAwaitable !== false && hostPromiseMemberOf((node as CallExpr).callee) !== null &&
       ((ctx.mode === "client" && ctx.clientAsyncFnNames != null && ctx.clientAsyncFnNames.has(HOST_FETCH_MEMBER)) ||
-        (ctx.mode === "server" && isStdlibAsyncCallee(HOST_FETCH_MEMBER, ctx)))) ||
+        (ctx.mode === "server" && (isStdlibAsyncCallee(HOST_FETCH_MEMBER, ctx) || (ctx.serverFnNames != null && ctx.serverFnNames.has(HOST_FETCH_MEMBER)))))) ||
     // s440 — an awaited NESTED async helper (`inner(x).ok` → `(await inner(x)).ok`).
     (node.kind === "call" && localCalleeOf(node)?.async === true && ctx.peerAwaitable !== false)
   ) return `(${s})`;
@@ -4587,7 +4587,7 @@ function emitCall(node: CallExpr, ctx: EmitExprContext): string {
   if (
     hostPromiseMemberOf(node.callee) !== null &&
     ((ctx.mode === "client" && ctx.clientAsyncFnNames != null && ctx.clientAsyncFnNames.has(HOST_FETCH_MEMBER)) ||
-      (ctx.mode === "server" && isStdlibAsyncCallee(HOST_FETCH_MEMBER, ctx)))
+      (ctx.mode === "server" && (isStdlibAsyncCallee(HOST_FETCH_MEMBER, ctx) || (ctx.serverFnNames != null && ctx.serverFnNames.has(HOST_FETCH_MEMBER)))))
   ) {
     const _open = node.optional ? "?.(" : "(";
     if (ctx.peerAwaitable === false) {

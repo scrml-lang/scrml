@@ -2898,7 +2898,14 @@ export function runCG(input: CgInput): CgOutput {
         // §64.6 — fail closed if the tool imports a non-importable `.scrml` dep
         // (page-shaped / no exports → no `<base>.js` → runtime Cannot-find-module).
         checkToolImportsAreImportable(fileAST, files, filePath, errors);
-        const asyncImportedNames = computeToolAsyncImportedLocals(fileAST, files, exportRegistryInput, importGraphInput, _fileAsyncMemo);
+        // S470 s470-host-fetch-followups (R1) — plus the host Promise global the tool reaches (`fetch`,
+        // SPEC §13.7 item 4): the tool's OWN colouring awaits it like an async import. Added here, on the
+        // tool's seed only — not inside `computeToolAsyncImportedLocals`, whose emptiness routes a
+        // tool-dep library's emit (`libAsyncImports.size > 0`).
+        const asyncImportedNames = new Set([
+          ...computeToolAsyncImportedLocals(fileAST, files, exportRegistryInput, importGraphInput, _fileAsyncMemo),
+          ...hostPromiseSeedOf(fileAST),
+        ]);
         // §64 (Fork 1A, Unit 2) — a `kind="tool" serve=` program hosts its
         // `<endpoint>`/SSE routes via a compiler-emitted `Bun.serve`. Thread the
         // route-inference routeMap + the auth/middleware/protect stage results
