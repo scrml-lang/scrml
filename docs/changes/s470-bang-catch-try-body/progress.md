@@ -3,6 +3,40 @@
 Gap: `g-impl1-bang-catch-try-body-cut-at-first-brace-s470` (HIGH, security). Lane C, S470.
 Scratch: `~/.cache/scrml/s470/laneC/` (base tree = `git archive origin/main` d582ae04f in `basetree/`).
 
+## ROUND 3 — review of 3e52bcc45 (LAND-WITH-FOLLOWUPS): F1, F6, F4, F8, F9
+
+Probes: `~/.cache/scrml/review/s470-lc/` (read-only). Base for new shapes: extracted 3e52bcc45
+(`~/.cache/scrml/s470/laneC/r2tree`). origin/main 29fcaac8a (#1558, lane D r9) merged first.
+
+- **F1 (HIGH)** — WHY: the statement collector (`collectExpr`, BUG-ASI-NEWLINE) did not end a statement
+  at a newline before `!`, so `const st = { ok: true }⏎! { … }` became ONE declaration; the expression
+  reader parsed `{ ok: true }` and dropped the rest (the server's S465 dropped-statement refusal caught
+  it; client / library did not). Fix at the reader that merged it: `!` is PREFIX-ONLY (`a !b` is no
+  expression; `!=` / `!==` are their own tokens), so after a value on a later line it STARTS a statement
+  (JS ASI). Then: a statement starting `!` `{` (the `!{` block with a gap — space, tab, newline, comment)
+  is refused at the `!` — E-TRY-NOT-IN-SCRML when a `catch` follows its brace, else E-ERROR-014; a
+  `! ( … )` statement is an ordinary expression statement and RUNS (not dropped).
+  - A broader attempt (emitExpr refusing ANY lost trailing content off the server) was measured and
+    dropped: false refusals (`t("T"); // tail`, a function body's `}`, `!{}` arm text, implied-lift tails,
+    promote-each key clauses).
+  - Consequence (tests updated): `bang-arm-block-value-s468-r1` arms `{ @note = "d"⏎ !yes }` were
+    refused as unreadable; they are now READ (the arm yields `!yes`) and reject the wrong password;
+    `s465-await-arm-r3` "dropped `!(…)` guard line" moved from refused to executed (WELCOME / REJECTED).
+- **F6** — a `!{ arms }` attached to no expression (first statement of a body, braceless `if (c) !{…}`)
+  → **E-ERROR-014** (existing §34 row: a `!{}` handler attached to no expression; its row names the
+  markup position — wording is the PA's, like F7). The emit-logic `error-effect` case now REFUSES
+  (E-ERROR-014) instead of emitting `try { } catch (e) { arms }` — kept as a fail-closed backstop for a
+  front end (the native re-parse) that does not refuse it.
+- **F4** — the form consumed as text by a loop head (3 for-of head readers), a condition or an operand:
+  every statement-form block a logic body's token run holds is refused once (E-TRY-NOT-IN-SCRML) at
+  the end of `parseLogicBody`, whichever reader reached it; plus the head loops and collectExpr report
+  it directly.
+- **F8** — the defer test also asserts the old source (defer in the catch arm) → E-TRY-NOT-IN-SCRML.
+- **F9** — `tryChildCount` and the arms' `open/close/childFrom/childTo` removed (no reader).
+- Pack: +28 shapes (groups 14 / 15 / 16), **all FAIL on 3e52bcc45**; head 25 PASS-REFUSED + 3 PASS
+  (`! ( … )` runs; 3 sides). r10 = 340; EXPECTED_SHAPE_COUNT = main 2680 + 340 = **3020** (measured).
+- R26 (3,618) vs origin/main 29fcaac8a: identical codes for every file.
+
 ## ROUND 2 — PA ruling: the statement form is REFUSED (supersedes "Fix" below where they differ)
 
 Ruling (S470, narrow class): refuse `!{ … } catch T [as b] { … }` with a located error. SPEC §19.1:

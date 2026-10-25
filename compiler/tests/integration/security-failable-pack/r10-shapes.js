@@ -187,6 +187,41 @@ function positionPages(side, srv) {
     out.push(["10 module init: unhandled call", `${DC}\n    ${init(`g.gate = check("wrong")`)}`, login]);
     out.push(["10 module init: after a declaration, body revokes", `${DC}\n    const g = { gate: true }\n    !{ if (true) { g.gate = false } } catch Error as e { g.gate = false }`, login]);
   }
+  // S470 lane C round 3 (review of 3e52bcc45) — three detection escapes, each FAIL on 3e52bcc45.
+  //   14 (F1): a `!` statement written after a value (`! { … }`, `! { … } catch …`, `! ( … )`, `!` +
+  //       newline + `{`, `!` + comment + `{`): collected into the previous declaration and DROPPED by
+  //       the expression reader off the server — the guard never ran. (The server already refused it.)
+  //   15 (F6): a `!{ arms }` attached to no expression (a braceless `if` body, the first statement of
+  //       a block): emitted as `try { } catch (e) { arms }`, so the revoking arm never ran.
+  //   16 (F4): the statement form inside a for-of head, consumed as text, never refused: its catch
+  //       (the revocation) was dropped.
+  {
+    const DF = `${ENUM}
+    ${srv}function lst(p)! -> AuthErr {
+        if (p != "secret") fail AuthErr::Denied("bad")
+        return [1]
+    }`;
+    const RR = `return st.ok ? "LOGGED IN" : "rejected"`;
+    const G = `if (p != "secret") { st.ok = false }`;
+    // Every shape below is FAIL on 3e52bcc45 on the sides it is listed for (the server and tool sides
+    // already refused group 14 and the for-of head through the server's dropped-statement rule).
+    const dropSide = side === "server" || side === "tool";
+    if (!dropSide) {
+      for (const [n, b] of [
+        ["! { … }", `! { ${G} }`],
+        ["! { … } catch", `! { ${G} } catch AuthErr as b { st.ok = false }`],
+        ["! ( … )", `! (st.ok = p == "secret")`],
+        ["! newline { … }", `!\n        { ${G} }`],
+        ["! comment { … }", `! /* x */ { ${G} }`],
+      ]) out.push([`14 after a declaration: ${n}`, DF, `const st = { ok: true }\n        ${b}\n        ${RR}`]);
+    }
+    out.push(["15 handler with no expression: braceless if body", DF, `const st = { ok: true }\n        if (p != "secret") !{ _ :> st.ok = false }\n        ${RR}`]);
+    out.push(["15 handler with no expression: first in a block", DF, `const st = { ok: true }\n        if (p != "secret") {\n            !{ _ :> st.ok = false }\n        }\n        ${RR}`]);
+    const F = `lst(p) !{ _ :> [] } catch AuthErr { st.ok = false }`;
+    // (a while / if condition or a call argument holding the form was already refused on 3e52bcc45 —
+    // E-ERROR-002 on the call the dropped catch left unhandled — and is locked by the unit tests)
+    if (!dropSide) out.push(["16 statement form in a for-of head", DF, `const st = { ok: true }\n        for (const r of ${F}) { }\n        ${RR}`]);
+  }
   if (side === "client") {
     // more client positions: a nested function, a loop body, an engine opener `effect=` and an
     // `<onMount>` body (the last two run at boot, before any click: a wrong password never logs in

@@ -36,7 +36,7 @@ SERVER function is judged end to end.
 - a shape not in `KNOWN_FAIL` / `BY_DESIGN_LOGS_IN` logs in on a wrong password;
 - a `KNOWN_FAIL` shape stops doing so (it was fixed: delete the entry);
 - a shape not in `UNJUDGED` comes out `UNJUDGED`, or an `UNJUDGED` one starts being judged;
-- the corpus stops holding exactly 2992 shapes; a list entry names no shape. Plus S469 s469-server-return-match-await (457 shapes): s4–s10 server, f1–f7 fullstack, l1–l5 library, t1–t5 tool — a failable `match` subject awaited in every position, `fail` payloads keyed per enum in every emission mode, one resolver for a callee's error enum, and the `_ e` whole-error binder allow-list.
+- the corpus stops holding exactly 3020 shapes; a list entry names no shape. Plus S469 s469-server-return-match-await (457 shapes): s4–s10 server, f1–f7 fullstack, l1–l5 library, t1–t5 tool — a failable `match` subject awaited in every position, `fail` payloads keyed per enum in every emission mode, one resolver for a callee's error enum, and the `_ e` whole-error binder allow-list.
 
 It deliberately does NOT pin each shape's class: a shape moving from `PASS-REFUSED` to `PASS` is a
 compiler improvement, not a regression.
@@ -276,7 +276,7 @@ handled call's identity-resolved enum (never a same-named local enum) and works 
 their single-file-loadable twins PASS. s8 / l3 "held in a local then passed on" is now PASS-REFUSED (a
 local alias is not an allowed use).
 
-## Measured (S470 s470-bang-catch-try-body — n29 / s13 / f16 / l8 / t8; 312 shapes)
+## Measured (S470 s470-bang-catch-try-body — n29 / s13 / f16 / l8 / t8; 312 + 28 shapes)
 
 `r10-shapes.js` (gap `g-impl1-bang-catch-try-body-cut-at-first-brace-s470`) on five sides: the statement
 form `!{ tryBody } catch T [as b] { handler }`. The try body held a nested `!{}`, a block, an object
@@ -301,6 +301,21 @@ handler, at module init, on every side. 293 shapes carry E-TRY-NOT-IN-SCRML; the
 where impl#1 keeps the code as TEXT (an `onclick={…}` block, an engine `effect=`) or hit the splitter's
 template-literal limit (a lone `` `}` ``: E-CTX-001) and are refused by that reader instead — still
 fail closed. A shape that compiles is a detection miss.
+
+
+**Round 3 (review of `3e52bcc45`) — groups 14–16, 28 shapes, every one FAIL on `3e52bcc45`:**
+- 14 (F1, client / fullstack / library): `! { … }`, `! { … } catch …`, `! ( … )`, `!` + newline + `{`,
+  `!` + comment + `{` after a declaration. The collector merged the `!` line into the declaration and
+  the expression reader dropped it (the server and tool sides already refused it). Now a `!` on a later
+  line after a value starts its own statement (JS ASI: `a !b` is no expression); a gapped `! {` is
+  refused at the `!` (E-ERROR-014, or E-TRY-NOT-IN-SCRML when a `catch` follows) and `! ( … )` RUNS
+  (PASS).
+- 15 (F6, every side): a `!{ arms }` attached to no expression (a braceless `if` body, the first
+  statement of a block) emitted `try { } catch (e) { arms }`: E-ERROR-014 now.
+- 16 (F4, client / fullstack / library): the form in a for-of head, consumed as text: E-TRY-NOT-IN-SCRML
+  now (every statement-form block a body's token run holds is refused, whichever reader reached it).
+
+Head: 337 PASS-REFUSED, 3 PASS (340 shapes).
 
 ## Measured (S470 s470-async-colouring-scope — s12 / f15 / l7 / t7; 415 shapes)
 

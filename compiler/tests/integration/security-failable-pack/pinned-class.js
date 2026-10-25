@@ -825,9 +825,10 @@ export const PINNED_CLASS = {
   "f13/when body tests an async helper": "PASS",
   "f13/engine opener effect= tests an async helper": "PASS-DENY",
   // S470 s470-bang-catch-try-body — r10-shapes.js (n29 / s13 / f16 / l8 / t8), the `!{ … } catch …`
-  // statement form, REFUSED by the S470 ruling (E-TRY-NOT-IN-SCRML, SPEC §19.1). On base d582ae04f:
-  // 100 FAIL, 112 PASS-DENY, 92 PASS-REFUSED, 8 PASS. On the lane head: 312 PASS-REFUSED (293 with E-TRY-NOT-IN-SCRML; the rest
-  // refused by another fail-closed reader where the form is held as text). A shape that compiles is a detection miss.
+  // statement form, REFUSED by the S470 ruling (E-TRY-NOT-IN-SCRML, SPEC §19.1); groups 1-13 on base
+  // d582ae04f: 100 FAIL, 112 PASS-DENY, 92 PASS-REFUSED, 8 PASS. Round 3 (review of 3e52bcc45) groups
+  // 14-16 on 3e52bcc45: 28 FAIL. On the lane head (340 shapes): 337 PASS-REFUSED, 3 PASS (299 with
+  // E-TRY-NOT-IN-SCRML; the PASS shapes are `! ( … )`, now its own statement, which runs).
   "n29/1 nested !{} (the F2 repro)": "PASS-REFUSED",
   "n29/1 nested !{} (the F2 repro) (bound first)": "PASS-REFUSED",
   "n29/1 nested !{} on one line": "PASS-REFUSED",
@@ -893,6 +894,14 @@ export const PINNED_CLASS = {
   "n29/10 module init: string holding } (bound first)": "PASS-REFUSED",
   "n29/10 module init: unhandled call": "PASS-REFUSED",
   "n29/10 module init: after a declaration, body revokes": "PASS-REFUSED",
+  "n29/14 after a declaration: ! { … }": "PASS-REFUSED",
+  "n29/14 after a declaration: ! { … } catch": "PASS-REFUSED",
+  "n29/14 after a declaration: ! ( … )": "PASS",
+  "n29/14 after a declaration: ! newline { … }": "PASS-REFUSED",
+  "n29/14 after a declaration: ! comment { … }": "PASS-REFUSED",
+  "n29/15 handler with no expression: braceless if body": "PASS-REFUSED",
+  "n29/15 handler with no expression: first in a block": "PASS-REFUSED",
+  "n29/16 statement form in a for-of head": "PASS-REFUSED",
   "n29/13 nested function: handled": "PASS-REFUSED",
   "n29/13 loop body: handled": "PASS-REFUSED",
   "n29/13 engine opener effect: handled": "PASS-REFUSED",
@@ -959,6 +968,8 @@ export const PINNED_CLASS = {
   "s13/11 after a declaration in a block: body revokes": "PASS-REFUSED",
   "s13/12 local written in the try body: handled call": "PASS-REFUSED",
   "s13/12 local written in the try body: revokes": "PASS-REFUSED",
+  "s13/15 handler with no expression: braceless if body": "PASS-REFUSED",
+  "s13/15 handler with no expression: first in a block": "PASS-REFUSED",
   "f16/1 nested !{} (the F2 repro)": "PASS-REFUSED",
   "f16/1 nested !{} (the F2 repro) (bound first)": "PASS-REFUSED",
   "f16/1 nested !{} on one line": "PASS-REFUSED",
@@ -1016,6 +1027,14 @@ export const PINNED_CLASS = {
   "f16/9 event handler block: nested !{}": "PASS-REFUSED",
   "f16/9 event handler block: string holding }": "PASS-REFUSED",
   "f16/9 event handler block: unhandled call": "PASS-REFUSED",
+  "f16/14 after a declaration: ! { … }": "PASS-REFUSED",
+  "f16/14 after a declaration: ! { … } catch": "PASS-REFUSED",
+  "f16/14 after a declaration: ! ( … )": "PASS",
+  "f16/14 after a declaration: ! newline { … }": "PASS-REFUSED",
+  "f16/14 after a declaration: ! comment { … }": "PASS-REFUSED",
+  "f16/15 handler with no expression: braceless if body": "PASS-REFUSED",
+  "f16/15 handler with no expression: first in a block": "PASS-REFUSED",
+  "f16/16 statement form in a for-of head": "PASS-REFUSED",
   "l8/1 nested !{} (the F2 repro)": "PASS-REFUSED",
   "l8/1 nested !{} (the F2 repro) (bound first)": "PASS-REFUSED",
   "l8/1 nested !{} on one line": "PASS-REFUSED",
@@ -1078,6 +1097,14 @@ export const PINNED_CLASS = {
   "l8/10 module init: string holding } (bound first)": "PASS-REFUSED",
   "l8/10 module init: unhandled call": "PASS-REFUSED",
   "l8/10 module init: after a declaration, body revokes": "PASS-REFUSED",
+  "l8/14 after a declaration: ! { … }": "PASS-REFUSED",
+  "l8/14 after a declaration: ! { … } catch": "PASS-REFUSED",
+  "l8/14 after a declaration: ! ( … )": "PASS",
+  "l8/14 after a declaration: ! newline { … }": "PASS-REFUSED",
+  "l8/14 after a declaration: ! comment { … }": "PASS-REFUSED",
+  "l8/15 handler with no expression: braceless if body": "PASS-REFUSED",
+  "l8/15 handler with no expression: first in a block": "PASS-REFUSED",
+  "l8/16 statement form in a for-of head": "PASS-REFUSED",
   "t8/1 nested !{} (the F2 repro)": "PASS-REFUSED",
   "t8/1 nested !{} (the F2 repro) (bound first)": "PASS-REFUSED",
   "t8/1 nested !{} on one line": "PASS-REFUSED",
@@ -1140,6 +1167,8 @@ export const PINNED_CLASS = {
   "t8/10 module init: string holding } (bound first)": "PASS-REFUSED",
   "t8/10 module init: unhandled call": "PASS-REFUSED",
   "t8/10 module init: after a declaration, body revokes": "PASS-REFUSED",
+  "t8/15 handler with no expression: braceless if body": "PASS-REFUSED",
+  "t8/15 handler with no expression: first in a block": "PASS-REFUSED",
   // S470 s470-async-colouring-scope — r9-shapes.js (s12 / f15 / l7 / t7), every shape pinned (r9-pinned.js).
   ...R9_PINNED,
 };
