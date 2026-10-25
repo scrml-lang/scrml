@@ -80,6 +80,29 @@ Two more holes measured on the same shapes:
 - Shape fix while measuring: `.Denied(r) :> { const r = … }` redeclared `r` (E-CODEGEN-INVALID-LOGIC on the
   server, E-ASYNC-HANDLER-UNANALYZABLE in a handler) — the block locals are named `got` / `same` instead.
 
+- c3: SPEC §34 E-IMPL1-ACTION-NOT-AWAITED row — one clause added to the async-host list ("in either host a
+  waiting function named in a `!{ }` handler ARM"), plus a note that an arm in an async client function body /
+  event handler is awaited in place. SPEC-INDEX current (`regen-spec-index --check` OK); `s34-census --check-new
+  --base 29fcaac8a` PASS (1 changed row, well-formed).
+
+## R26 — the whole corpus (3618 files)
+
+`bin/r26.mjs` (one in-process compile per file; diagnostic codes with severity + a sha256 digest of every
+emitted output, tree path normalised), 6 shards per tree. Base = `basefull/` (`git archive 29fcaac8a` of
+benchmarks, compiler — incl. `compiler/samples/mcp-v0-fixture` —, conformance, docs, examples, samples, stdlib,
+scrml.toml; each tree compiles its OWN stdlib copy); head = this worktree. File list = every `.scrml` under those
+roots (no dist / node_modules) — 3618, identical to the lane-C reviewer's list.
+
+- diagnostic-code diffs: **0**. Newly rejected: 0. Newly clean: 0.
+- emitted-JS digest diffs: **1** — `conformance/cases/components/missing-required-slot-reject/case.scrml`
+  (an E-COMPONENT-010 file): harness noise — its digest differs run to run on EACH tree (two runs per tree, four
+  different digests). No other program's emitted JS changed.
+- 1 file throws on both trees (`samples/gauntlet-s19-phase4/nested-comments.scrml`, "Maximum call stack size
+  exceeded") — pre-existing.
+
+So no corpus program writes a waiting call in a `!{}` arm of an async host, a value block arm ending in `lift`,
+or such an arm in a `when` body / opener `effect=`: the fix changes no existing program's output.
+
 ## Shapes — executed, base 29fcaac8a → head (pack `runShape`, classify classes)
 
 Driver: `~/.cache/scrml/s470/laneI/bin/drive.mjs` (`runShape` of each tree's own pack.js over `shapesFor(side)`),
