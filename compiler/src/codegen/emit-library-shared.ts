@@ -18,7 +18,8 @@ import { paramSignature, indentBodyLines } from "./utils.ts";
 import { bodyContains } from "./collect.ts";
 import { extractCalleeNames, buildCalleeImportMap } from "./scheduling.ts";
 import { splitMultiArmString, parseMatchArm } from "./emit-control-flow.ts";
-import { parseExprToNode } from "../expression-parser.ts";
+import { parseExprToNode, guardCallArmsRaw, hasLostTrailingContent } from "../expression-parser.ts";
+import { parseGuardArmsFromRaw } from "../ast-builder.js";
 import { templateInterpolationPayloads } from "../interpolation-extent.ts";
 import { isPromiseReturningImportedCallee } from "../module-resolver.js";
 import { CGError } from "./errors.ts";
@@ -121,7 +122,9 @@ function armBodyTextCallees(body: string, out: Set<string>, guard: boolean): voi
   if (!text) return;
   let node: unknown = null;
   try { node = parseExprToNode(text, "", 0); } catch { node = null; }
-  if (node && !treeHasEscapeHatch(node)) {
+  // S470 s470-nested-handler-await — a parse that DROPPED trailing content (`lift isOk(p)` reads
+  // as the bare ident `lift`) is not this body: the token scan below reads it instead.
+  if (node && !treeHasEscapeHatch(node) && !hasLostTrailingContent(node)) {
     collectCalleeIdents(node, out, guard);
     // S469 r3 (F2) — a template literal's `${…}` parts are carried as raw text on the `lit`
     // node, invisible to the tree walk: read each interpolation the same way, so a server call
@@ -201,6 +204,7 @@ export function collectCalleeIdents(node: unknown, out: Set<string>, guardNested
   // (the S239 text-scan over-match guard). Structured arm bodies (match-arm-block)
   // are already covered by the generic recursion into their `.body` statement array.
   matchArmTextCallees(n, out, guardNestedFnValues);
+  guardArmTextCallees(n, out, guardNestedFnValues);
   for (const key of Object.keys(n)) {
     if (key === "span") continue;
     const v = n[key];
@@ -232,6 +236,32 @@ function matchArmTextCallees(n: ASTNode, out: Set<string>, guardNestedFnValues: 
     if (Array.isArray(raw)) {
       for (const r of raw) if (typeof r === "string" && r) armListTextCallees(r, out, guardNestedFnValues);
     }
+  }
+}
+
+/**
+ * S470 s470-nested-handler-await (SECURITY) — the callees an EXPRESSION-position `!{ }` handler
+ * holds in its arms. The expression parser carries such a handler as the placeholder call
+ * `<operand>.__scrml_guard__("!{ … }")` whose arms are a string literal, invisible to the tree
+ * walk: `(local(p) !{ _ :> isOk(p) }) ? …` left `login` sync, so the arm's server call was
+ * emitted with no `await` and the guard yielded a pending Promise (always truthy — a wrong
+ * password logged in). The arms are read with the statement guard's own arm reader
+ * (`parseGuardArmsFromRaw`), each arm body as `matchArmTextCallees` reads a match arm; arms the
+ * reader refuses are token-scanned whole (fail closed: the function stays async). Not
+ * recursive — the operand is the caller's walk.
+ */
+export function guardArmTextCallees(n: ASTNode, out: Set<string>, guardNestedFnValues = false): void {
+  if (!n || n.kind !== "call") return;
+  const raw = guardCallArmsRaw(n as never);
+  if (raw === null) return;
+  let arms: Array<{ handler?: unknown }> | null = null;
+  try { arms = parseGuardArmsFromRaw(raw, "") as Array<{ handler?: unknown }> | null; } catch { arms = null; }
+  if (!arms) { armBodyTextCallees(raw.replace(/^\s*!\{/, "").replace(/\}\s*$/, ""), out, guardNestedFnValues); return; }
+  for (const arm of arms) {
+    const h = typeof arm?.handler === "string" ? arm.handler.trim() : "";
+    if (!h) continue;
+    // A braced body is a statement block: read by the block fallback (its bare-name calls).
+    armBodyTextCallees(h.startsWith("{") && h.endsWith("}") ? h.slice(1, -1) : h, out, guardNestedFnValues);
   }
 }
 
@@ -275,6 +305,11 @@ export function collectFreeCalleeIdents(
     if (n.kind === "match-expr" || n.kind === "match-stmt") {
       const arm = new Set<string>();
       matchArmTextCallees(n, arm, guardNestedFnValues);
+      for (const c of arm) take(c, isBound);
+    }
+    if (n.kind === "call") {
+      const arm = new Set<string>();
+      guardArmTextCallees(n, arm, guardNestedFnValues);
       for (const c of arm) take(c, isBound);
     }
   }, { stopAtNestedFns: guardNestedFnValues, skipRootParams: true, sequentialLocals: true });

@@ -940,7 +940,9 @@ function emitArmBody(arm: LogicArm, errVar: string, machineBindings?: Map<string
     // lowering below has no async facts at all.
     if (armOpts && _armTextNamesAwaitedCallee(inner, armOpts)) {
       const parsed = armBlockStatementsDetailed(handler);
-      if (parsed && parsed.ok && Array.isArray(parsed.stmts) && parsed.stmts.length > 0) {
+      // A `lift` in a STATEMENT-position arm block yields to nothing (§18.5): never lowered here
+      // (it would become a markup `lift`); the text lowering below keeps refusing it.
+      if (parsed && parsed.ok && Array.isArray(parsed.stmts) && parsed.stmts.length > 0 && !_armBlockHasLift(parsed.stmts, null)) {
         const armSpan = (arm as { span?: { file?: string } }).span;
         if (armSpan && typeof armSpan.file === "string") _anchorSpansAt(parsed.stmts, armSpan, (arm as { handlerSrcMap?: Array<[number, number, number]> }).handlerSrcMap ?? null);
         return emitLogicBody(parsed.stmts, armOpts).filter((l: string) => l.trim() !== "").join("\n");
@@ -950,6 +952,30 @@ function emitArmBody(arm: LogicArm, errVar: string, machineBindings?: Map<string
   }
   const rewritten = emitExprField(arm.handlerExpr, handler, armOpts ? _makeExprCtx(armOpts) : _makeExprCtx({}));
   return rewritten.trim().endsWith(";") ? rewritten.trim() : rewritten.trim() + ";";
+}
+
+/**
+ * S470 s470-nested-handler-await (fix round 1, F3) — does an arm block's parsed statement list hold a
+ * `lift` other than `allowed` (the value tail)? Nested statement bodies are searched; a nested
+ * function / lambda value is not (its `lift` is its own).
+ */
+function _armBlockHasLift(stmts: unknown, allowed: unknown): boolean {
+  const seen = new WeakSet<object>();
+  const walk = (v: unknown): boolean => {
+    if (!v || typeof v !== "object" || seen.has(v as object)) return false;
+    seen.add(v as object);
+    if (Array.isArray(v)) return v.some(walk);
+    const n = v as Record<string, unknown>;
+    if (n.kind === "lift-expr" && v !== allowed) return true;
+    if (n.kind === "function-decl" || n.kind === "lambda") return false;
+    for (const k of Object.keys(n)) {
+      if (k === "span") continue;
+      const c = n[k];
+      if (c && typeof c === "object" && walk(c)) return true;
+    }
+    return false;
+  };
+  return walk(stmts);
 }
 
 /**
@@ -1014,7 +1040,10 @@ function emitBlockArmValueToResult(arm: LogicArm, resultVar: string, opts: EmitL
   } else if (tail.kind === "guarded-expr" && tail.guardedNode && tail.guardedNode.kind === "bare-expr") {
     tailKind = "guarded";
   } else if (valueUsed && tail.kind === "lift-expr" && tail.expr && typeof tail.expr === "object" &&
-             tail.expr.kind === "expr" && tail.expr.exprNode && typeof tail.expr.exprNode === "object") {
+             tail.expr.kind === "expr" && tail.expr.exprNode && typeof tail.expr.exprNode === "object" &&
+             !_armBlockHasLift(stmts, tail)) {
+    // (fix round 1, F3) — only the TAIL `lift` yields: a block holding any other `lift` (one
+    // nested in an `if`, a second one) is outside §18.5 / E-LIFT-002 and keeps its old refusal.
     // S470 s470-nested-handler-await — §18.5 / §19.4.3 (S469): a block arm in a VALUE position
     // yields with `lift <expr>`. The tail was read as a statement — a markup `lift`
     // (`_scrml_lift(() => textNode(r))`) in an event handler, invalid JS in a function body — so

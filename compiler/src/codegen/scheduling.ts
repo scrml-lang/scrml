@@ -1,7 +1,7 @@
 import { parse as acornParse } from "acorn";
 import { genVar } from "./var-counter.ts";
 import { emitExpr, emitExprField, type EmitExprContext } from "./emit-expr.ts";
-import { exprNodeCollectCallees } from "../expression-parser.ts";
+import { exprNodeCollectCallees, guardCallArmsRaw } from "../expression-parser.ts";
 import { emitLogicNode, nodeListContainsTildeRef } from "./emit-logic.js";
 import { CGError } from "./errors.ts";
 import { handledSqlGuardInner } from "./sql-attempt.ts";
@@ -1301,6 +1301,13 @@ export function scheduleStatements(body: ASTNode[], fnNode: ASTNode, routeMap: R
   // only to `k+1`, missed). A pure decl is NOT here, so the S212 skip of a
   // dependent pure decl to reach a later independent one is preserved.
   function isControlFlowBoundary(stmt: ASTNode): boolean {
+    // S470 s470-nested-handler-await (SECURITY) — a statement holding an EXPRESSION-position
+    // `!{ }` handler (`const v = (local(p) !{ _ :> isOk(p) }) ? …`) is lowered by the statement
+    // emitter, whose guard lowering awaits the arms in place. As a `Promise.all` member its init
+    // was taken as TEXT (`extractInitExpr`), so the arm's server call ran un-awaited inside a
+    // synchronous IIFE and the guard yielded a pending Promise (truthy: a wrong password logged
+    // in). Such a statement is never batched.
+    if (holdsExprGuard(stmt)) return true;
     switch ((stmt as ASTNode).kind) {
       case "if-stmt":
       case "for-stmt":
@@ -1732,4 +1739,19 @@ export function scheduleStatements(body: ASTNode[], fnNode: ASTNode, routeMap: R
   }
 
   return lines;
+}
+
+/** Does `node` hold an expression-position `!{ }` handler placeholder anywhere (S470)? */
+function holdsExprGuard(node: unknown, seen: WeakSet<object> = new WeakSet()): boolean {
+  if (!node || typeof node !== "object" || seen.has(node as object)) return false;
+  seen.add(node as object);
+  if (Array.isArray(node)) return node.some((c) => holdsExprGuard(c, seen));
+  const n = node as Record<string, unknown>;
+  if (n.kind === "call" && guardCallArmsRaw(n as never) !== null) return true;
+  for (const k of Object.keys(n)) {
+    if (k === "span") continue;
+    const v = n[k];
+    if (v && typeof v === "object" && holdsExprGuard(v, seen)) return true;
+  }
+  return false;
 }

@@ -208,6 +208,64 @@ ${logic}
   });
 });
 
+describe("fix round 1 — the handler in EXPRESSION position (F1 / F2)", () => {
+  const exprPage = (body) => fnPage(body).replace("function login(p) {", `function decide(v) { return v ? "LOGGED IN" : "rejected" }
+    function login(p) {`);
+  for (const [pn, body] of [
+    ["ternary operand", `const v = (local(p) !{ _ :> isOk(p) }) ? true : false
+        return v ? "LOGGED IN" : "rejected"`],
+    ["call argument", `return decide(local(p) !{ _ :> isOk(p) })`],
+    ["if condition", `if (local(p) !{ _ :> allowed(p) }) { return "LOGGED IN" }
+        return "rejected"`],
+    ["array literal", `const o = [local(p) !{ _ :> isOk(p) }]
+        return o[0] ? "LOGGED IN" : "rejected"`],
+    ["block arm ending in lift (F2)", `return decide(local(p) !{ _ :> { const got = isOk(p)
+            lift got } })`],
+    ["block arm `{ lift isOk(p) }` (F2)", `return decide(local(p) !{ _ :> { lift isOk(p) } })`],
+  ]) {
+    test(`a SYNC outer callee, ${pn}: login is coloured async and the arm awaited`, () => {
+      const { js, codes } = compile(exprPage(body));
+      expect(codes).toEqual([]);
+      const body2 = loginOf(js);
+      expect(body2).not.toBe("");
+      expect(body2).toMatch(/\(await \(async \(\) => \{/);
+      expect(body2).toMatch(/await _scrml_(fetch_isOk|allowed)_\d+\(p\)/);
+    });
+  }
+
+  test("beside an awaited const: the guard is not batched into Promise.all", () => {
+    const { js, codes } = compile(exprPage(`const z = isOk("q")
+        const v = (local(p) !{ _ :> isOk(p) }) ? true : false
+        return v ? "LOGGED IN" : "rejected"`));
+    expect(codes).toEqual([]);
+    const body = loginOf(js);
+    expect(body).not.toMatch(/Promise\.all/);
+    expect(body).toMatch(/await _scrml_fetch_isOk_\d+\(p\)/);
+  });
+});
+
+describe("fix round 1 — F3: only a value-position TAIL `lift` yields", () => {
+  test("a lift nested in an `if` beside the tail lift stays refused", () => {
+    const { js, codes } = compile(fnPage(`const v = local(p) !{ _ :> {
+            if (p == "x") {
+                lift true
+            }
+            lift false
+        } }
+        return v ? "LOGGED IN" : "rejected"`));
+    expect(codes.length).toBeGreaterThan(0);
+    expect(js).not.toMatch(/_scrml_lift\(/);
+  });
+  test("a lift in a STATEMENT-position block arm (an async arm) stays refused", () => {
+    const { js, codes } = compile(fnPage(`let okv = true
+        local(p) !{ _ :> { okv = isOk(p)
+            lift "x" } }
+        return okv ? "LOGGED IN" : "rejected"`));
+    expect(codes.length).toBeGreaterThan(0);
+    expect(js).not.toMatch(/_scrml_lift\(/);
+  });
+});
+
 describe("--mode library: the arm is awaited (server-boundary lowering)", () => {
   test("a nested handler and a helper in an arm", () => {
     const { js, codes } = compile(`import { hmac } from "scrml:crypto"

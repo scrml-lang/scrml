@@ -189,3 +189,33 @@ kept — EXPECTED_SHAPE_COUNT = main's 3021 + r18's 737 = **3758**, R18_PINNED s
 pin unchanged on lane B's type-system). Re-run on the merged tree: types-gate OK (181, unchanged), s34-census
 PASS, regen-spec-index OK, delta-lint PASS, conflict-marker PASS, e2e-render-map 259 / 0, browser-baseline PASS
 (8 asserted), host-global-scan 0 violations.
+
+## Fix round 1 (review of bc905b009, verdict FIX) — 2026-10-25
+
+Reviewer material: `~/.cache/scrml/review/s470-li/` (read-only; shapes copied to `~/.cache/scrml/s470/laneI/rev/`).
+Trees measured: base `55de8639c` (`t-55d/`), round 0 `bc905b009` (`t-bc9/`), this head.
+
+| # | sev | status | evidence |
+|---|---|---|---|
+| F1 | HIGH | FIXED | An EXPRESSION-position `!{}` (`(local(p) !{ _ :> isOk(p) }) ? …`, an argument, a `return` / `if` / `&&` / `!!` operand, an object / array member) is carried by the expression parser as the placeholder call `<operand>.__scrml_guard__("!{ … }")` — its arms a STRING the colouring never read, so with a SYNC outer callee `login` stayed sync, `clientAsyncBody` was false and the arm's server call was emitted un-awaited. The colouring now reads those arms (`emit-library-shared.ts guardArmTextCallees`, called from `collectCalleeIdents` and `collectFreeCalleeIdents` — the same pattern `matchArmTextCallees` uses for a match's raw arms; the arms via the statement guard's own reader `parseGuardArmsFromRaw`, each body through `armBodyTextCallees`). The enclosing function is coloured async, so round 0's `clientAsyncBody` path lowers the arm awaited and `emitNestedGuardExpr` emits `(await (async () => …)())` — no new walker. Library / tool sides had the same hole (base 41 / 9 FAIL): fixed by the same colouring. h2/002 (batched into `Promise.all` beside an awaited const — the member's init taken as TEXT, `extractInitExpr`): `scheduling.ts isControlFlowBoundary` now treats a statement holding an expression-position guard as a batch boundary (`holdsExprGuard`), so it is emitted by the statement emitter, awaited in place. Hosts that cannot be async (an event-handler block / inline value, a render `if=`, a derived cell) refuse: E-ASYNC-HANDLER-UNANALYZABLE / E-VALUE-SERVER-CALL / E-ERROR-002 (existing codes, already so on base — not E-IMPL1-ACTION-NOT-AWAITED; noted). |
+| F2 | HIGH | FIXED | `decide(local(p) !{ _ :> { const g = isOk(p) ⏎ lift g } })`, `{ lift isOk(p) }`: fixed by F1 (now awaited). One more hole found on the way: `armBodyTextCallees` trusted a parse that DROPPED trailing content — `lift isOk(p)` reads as the ident `lift` — so its call was invisible; such a parse now falls to the token scan (`hasLostTrailingContent`). |
+| F3 | LOW | FIXED | Only a value-position TAIL `lift` yields: `emitBlockArmValueToResult` takes a `lift` tail only when the block holds no other `lift` (`_armBlockHasLift`), and `emitArmBody`'s parsed-statement path is not taken for a block holding a `lift`. Both shapes (probes/nlv, h4/064) are refused again exactly as on base (E-CODEGEN-INVALID-LOGIC — see naming note). |
+
+Reviewer shapes on this head: shapes2 0 FAIL / 16 (15 PASS, 1 PASS-REFUSED), shapes3 0 FAIL / 18 (5 PASS-500 = the
+helper-not-emitted class), shapes2 with its disabled server / event-handler / inline families enabled (`rev/shapes6.mjs`):
+0 FAIL / 43.
+
+**Naming note (PA / owner):** the F3 refusal is base's own — the arm is left to the text lowering, which emits
+`lift …;` verbatim and the emit gate reports E-CODEGEN-INVALID-LOGIC ("a compiler defect"). That keeps the
+refusal byte-identical to base, but the message blames the compiler for an author error. Recommendation: refuse
+by name — E-LIFT-002 for a second / nested `lift` in a value-position arm (§18.5 already names it: "`lift` in an
+arm block designates that arm's value at most once on any path (E-LIFT-002)"), and an impl#1 code for a `lift` in a
+statement-position arm (the bootstrap uses E-BOOTSTRAP-UNSUPPORTED; §18.5 names no code for it).
+
+### Pack (r18 +530 = 1267 shapes)
+
+See the README "Fix round 1" table: base 55de8639c FAIL f24 58 / l16 41 / t16 9; round 0 bc905b009 FAIL f24 70 /
+l16 56; this head 0 everywhere. Every class pinned (`r18-pinned.js` regenerated from `h5` (the 737, unchanged on
+this head — measured) + `nh` (the 530)). EXPECTED_SHAPE_COUNT 3758 → 4288.
+
+Unit tests: +9 (`nested-handler-await-s470.test.js`, 30 total) — all 9 fail on bc905b009.

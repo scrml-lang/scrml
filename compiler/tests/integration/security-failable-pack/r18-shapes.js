@@ -318,5 +318,108 @@ export function shapesFor(side) {
     out.push(["VALID event handler: check outer, sync arm", handlerPage((x) => `const v = check(${x}) !{ _ :> false }
         @msg = v ? "LOGGED IN" : "rejected"`), undefined]);
   }
+  for (const s of exprShapes(side)) out.push(s);
+  return out;
+}
+
+// ── fix round 1 (review of bc905b009) ──────────────────────────────────────────────────────────
+// F1 / F2 — the handler in EXPRESSION position (an operand, an argument, a `return` operand, an
+// `if` condition, `&&`, `!!`, an object / array literal, beside an awaited `const` that the
+// scheduler batches into `Promise.all`). The expression parser carries such a handler as a
+// placeholder call whose arms are a string, so the colouring did not see an arm's waiting call:
+// with a SYNC outer callee the enclosing function stayed sync and the arm yielded a pending
+// Promise. F3 — a `lift` that is not a value-position block arm's TAIL stays refused.
+const EXPR_ARMS = [
+  ["server call", (x) => `_ :> isOk(${x})`],
+  ["async helper", (x) => `_ :> allowed(${x})`],
+  ["nested handler", (x) => `_ :> check(${x}) !{ _ :> false }`],
+  ["block lift of a bound call", (x) => `_ :> { const got = isOk(${x})
+            lift got }`],
+  ["block lift of the call", (x) => `_ :> { lift isOk(${x}) }`],
+  ["_ e arm", (x) => `_ e :> isOk(${x})`],
+  [".Denied(r) arm", (x) => `.Denied(r) :> isOk(${x}), _ :> false`],
+];
+const EXPR_POS = [
+  ["ternary operand", (g) => `const v = (${g}) ? true : false
+        return v ? "LOGGED IN" : "rejected"`],
+  ["call argument", (g) => `return decide(${g})`],
+  ["return operand", (g) => `return (${g}) ? "LOGGED IN" : "rejected"`],
+  ["if condition", (g) => `if (${g}) { return "LOGGED IN" }
+        return "rejected"`],
+  ["&& operand", (g) => `const v = true && (${g})
+        return v ? "LOGGED IN" : "rejected"`],
+  ["!! operand", (g) => `const v = !!(${g})
+        return v ? "LOGGED IN" : "rejected"`],
+  ["object literal", (g) => `const o = { a: ${g} }
+        return o.a ? "LOGGED IN" : "rejected"`],
+  ["array literal", (g) => `const o = [${g}]
+        return o[0] ? "LOGGED IN" : "rejected"`],
+  ["beside an awaited const (Promise.all batch)", (g) => `const z = isOk("q")
+        const v = (${g}) ? true : false
+        return v ? "LOGGED IN" : "rejected"`],
+];
+const DECIDE = `function decide(v) { return v ? "LOGGED IN" : "rejected" }`;
+
+function exprShapes(side) {
+  const out = [];
+  // `decide` is declared before the shared declarations (the `login` opener differs per side).
+  const page = (body) => fnPage(side, body).replace("type AuthErr:enum", `${DECIDE}\n    type AuthErr:enum`);
+  for (const outer of ["local", "check"]) {
+    for (const [pn, pos] of EXPR_POS) {
+      for (const [an, arm] of EXPR_ARMS) {
+        out.push([`expr position: ${outer} outer, ${pn}, ${an}`, page(pos(`${outer}(p) !{ ${arm("p")} }`)), undefined]);
+      }
+    }
+  }
+  out.push(["VALID expr position: local outer, ternary operand, sync arm", page(EXPR_POS[0][1](`local(p) !{ _ :> false }`)), undefined]);
+  out.push(["VALID expr position: check outer, call argument, sync arm", page(EXPR_POS[1][1](`check(p) !{ _ :> false }`)), undefined]);
+  // F3 — refused: a `lift` nested in an `if` beside the tail `lift` (two on a path), and a `lift`
+  // in a STATEMENT-position block arm (it yields to nothing, §18.5).
+  out.push(["F3 refused: value block arm with a nested lift beside the tail", page(`const v = local(p) !{ _ :> {
+            if (p == "x") {
+                lift true
+            }
+            lift false
+        } }
+        return v ? "LOGGED IN" : "rejected"`), undefined]);
+  out.push(["F3 refused: statement block arm holding a lift (async arm)", page(`let okv = true
+        local(p) !{ _ :> { okv = isOk(p)
+            lift "x" } }
+        return okv ? "LOGGED IN" : "rejected"`), undefined]);
+  if (side === "fullstack") {
+    // Hosts that cannot be made async around an expression: an event-handler block / inline value,
+    // a render `if=` gate, a derived cell.
+    for (const [an, arm] of EXPR_ARMS) {
+      out.push([`expr position, event handler: local outer, call argument, ${an}`,
+        handlerPage((x) => `@msg = decide(local(${x}) !{ ${arm(x)} })`).replace("${\n    type", `\${\n    ${DECIDE}\n    type`), undefined]);
+    }
+    out.push(["expr position, inline handler: local outer, ternary, server call", `<msg> = "init"
+\${
+    ${DECLS("fullstack")}
+}
+<button id="wrong" onclick=\${@msg = (local("wrong") !{ _ :> isOk("wrong") }) ? "LOGGED IN" : "rejected"}>go</button>
+<button id="right" onclick=\${@msg = (local("secret") !{ _ :> isOk("secret") }) ? "LOGGED IN" : "rejected"}>go</button>
+<p id="out">\${@msg}</p>
+`, undefined]);
+    out.push(["expr position, render if= gate: local outer, ternary, server call", `<pw> = ""
+\${
+    ${DECLS("fullstack")}
+    function login(p) { @pw = p }
+}
+<button id="wrong" onclick=login("wrong")>go</button>
+<button id="right" onclick=login("secret")>go</button>
+<p id="out"><span if=\${ (local(@pw) !{ _ :> isOk(@pw) }) ? true : false }>LOGGED IN</span></p>
+`, undefined]);
+    out.push(["expr position, derived cell: local outer, ternary, server call", `<pw> = ""
+\${
+    ${DECLS("fullstack")}
+    function login(p) { @pw = p }
+}
+const <ok> = (local(@pw) !{ _ :> isOk(@pw) }) ? true : false
+<button id="wrong" onclick=login("wrong")>go</button>
+<button id="right" onclick=login("secret")>go</button>
+<p id="out"><span if=\${@ok}>LOGGED IN</span></p>
+`, undefined]);
+  }
   return out;
 }
