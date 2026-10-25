@@ -572,9 +572,6 @@ describe("s441 round 3 — engine opener effect=", () => {
     function grow() {
         @m.push(9)
     }
-    function doReset() {
-        reset(@m)
-    }
 }
 <engine for=Phase initial=.Loading effect=\${
     @m = [0, ...loadTasks()]
@@ -586,9 +583,12 @@ describe("s441 round 3 — engine opener effect=", () => {
 </>
 <program>
 <button id="grow" onclick=grow()>g</>
-<button id="rst" onclick=doReset()>r</>
+<button id="rst" onclick=\${ reset(@m) }>r</>
 </program>
 `;
+    // s470-await-residue — the reset is the handler's SOLE statement (§13.8 (i), S450): a reset of a
+    // cell whose reset value waits anywhere else (a `function doReset() { reset(@m) }` its caller goes
+    // on after) is E-IMPL1-ACTION-NOT-AWAITED.
     const js = clientJs(src);
     expect(js).toMatch(/_scrml_cs_init_set\("m", async \(\) => /);
     const r = await run(src, [{ wait: "settle" }, { click: "#grow" }, { wait: "settle" }, { click: "#rst" }, { wait: "settle" }], {}, { loadTasks: [1, 2] });

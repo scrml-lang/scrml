@@ -2815,7 +2815,44 @@ export function runCG(input: CgInput): CgOutput {
       const _rwHostServer = safeRouteMap ? _clientServerFnNames(safeRouteMap as never, filePath) : new Set<string>();
       const _rwLocalFnNames = new Set(_rwFnNodes.map((f) => (f as { name?: unknown }).name).filter((x): x is string => typeof x === "string"));
       const _rwServerNames = new Set([...serverFnNamesOfFile(fileAST, _fileAsyncMemo.routeMap ?? null), ..._rwServerAnywhere]);
+      // s470-await-residue fix round 1 (F1) — what a derived cell READS, transitively, off the
+      // compiler's dependency graph (Stage 7): a derived node's `reads` / `calls` / `awaits` /
+      // `engine-derived-reads` edges, through function nodes, to the cells they reach. A mention of
+      // a derived cell observes an un-waited write to any cell in its closure. null = this file has
+      // no DG node of that name (the caller fails closed for a derived name).
+      const _rwDgReach = new Map<string, Set<string> | null>();
+      const _rwDerivedReach = (name: string): Set<string> | null => {
+        if (_rwDgReach.has(name)) return _rwDgReach.get(name) ?? null;
+        const starts: string[] = [];
+        for (const [id, n] of safeDepGraph.nodes) {
+          const dn = n as { kind?: unknown; varName?: unknown; span?: { file?: unknown } };
+          if (dn.kind === "reactive" && dn.varName === name && (dn.span?.file === undefined || dn.span.file === filePath)) starts.push(id);
+        }
+        if (starts.length === 0) { _rwDgReach.set(name, null); return null; }
+        const out = new Set<string>();
+        const seen = new Set<string>(starts);
+        const queue = [...starts];
+        const adj = new Map<string, string[]>();
+        for (const e of safeDepGraph.edges as Array<{ from: string; to: string; kind?: string }>) {
+          if (e.kind === "renders" || e.kind === "writes") continue;
+          const l = adj.get(e.from);
+          if (l) l.push(e.to); else adj.set(e.from, [e.to]);
+        }
+        while (queue.length > 0) {
+          const id = queue.shift()!;
+          for (const to of adj.get(id) ?? []) {
+            if (seen.has(to)) continue;
+            seen.add(to);
+            const tn = safeDepGraph.nodes.get(to) as { kind?: unknown; varName?: unknown } | undefined;
+            if (tn && tn.kind === "reactive" && typeof tn.varName === "string") out.add(tn.varName);
+            queue.push(to);
+          }
+        }
+        _rwDgReach.set(name, out);
+        return out;
+      };
       for (const site of renderWaitingCallsOf(getNodes(fileAST as never) as unknown[], {
+        derivedReach: _rwDerivedReach,
         waits: (n: string) => _rwWaits(n) || _rwServerAnywhere.has(n) || _rwClientAsync.has(n),
         serverNames: _rwServerNames,
         namespaceLocals: namespaceImportLocalsOf(fileAST),
@@ -2844,8 +2881,9 @@ export function runCG(input: CgInput): CgOutput {
             "(§13.8 (i)), but impl#1 runs this body synchronously: it starts the call and goes on, so the later " +
             "code sees the value from BEFORE the call (a previous TRUE still opens a gate) or races its effects. " +
             "This is an impl#1 limit, not a language rule. Fix: move the code into an event handler (or a " +
-            "`function` an event handler calls) or an `on mount { }` block, where impl#1 awaits the call in " +
-            "place, or make the call the last thing this body does."
+            "`function` an event handler calls), where impl#1 awaits the call in place, or load the value with a " +
+            "`<request>` (§6.7.7) into a cell (`<request id=\"r\">${ @cell = f(…) }</>`) and read the cell from " +
+            "markup or a handler; or make the call the last thing this body does."
           : site.kind === "action"
           ? `E-IMPL1-ACTION-NOT-AWAITED: ${site.position} calls ${site.what}. The language allows a waiting ` +
             "call here and awaits it (§13.8 (i)), but impl#1 cannot: it runs this code with no `await` at that " +

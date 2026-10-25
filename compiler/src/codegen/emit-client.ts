@@ -3759,6 +3759,16 @@ function generateClientJsImpl(ctx: CompileContext): string {
         // The IIFE survives only where the emitter could NOT await (a module-init
         // statement of a classic script, a sync host) — the case it was built for.
         let emitterAwaited = false;
+        // s470-await-residue fix round 1 (F5) — a latest-wins async hook body wraps each resume point
+        // as `_scrml_live(await stub(…))` (js-async-analysis `colorAsyncActionBody`): the same
+        // emitter-awaited site, its guard kept in every rewrite below.
+        const LIVE = "_scrml_live(";
+        let liveWrap = false;
+        if (clientCode.slice(valStart, valStart + LIVE.length) === LIVE) {
+          let p = valStart + LIVE.length;
+          while (p < clientCode.length && /\s/.test(clientCode[p])) p++;
+          if (clientCode.slice(p, p + 5) === "await" && /\s/.test(clientCode[p + 5] ?? "")) { liveWrap = true; valStart = p; }
+        }
         if (clientCode.slice(valStart, valStart + 5) === "await" &&
             /\s/.test(clientCode[valStart + 5] ?? "")) {
           emitterAwaited = true;
@@ -3795,6 +3805,16 @@ function generateClientJsImpl(ctx: CompileContext): string {
         // _scrml_reactive_set should close right after.
         let outerClose = k + 1;
         while (outerClose < clientCode.length && /\s/.test(clientCode[outerClose])) outerClose++;
+        if (liveWrap) {
+          // The `_scrml_live(` close comes first, then the reactive set's.
+          if (clientCode[outerClose] !== ")") {
+            parts.push(clientCode.slice(i, setIdx + setHead.length));
+            i = setIdx + setHead.length;
+            continue;
+          }
+          outerClose++;
+          while (outerClose < clientCode.length && /\s/.test(clientCode[outerClose])) outerClose++;
+        }
         if (clientCode[outerClose] !== ")") {
           parts.push(clientCode.slice(i, setIdx + setHead.length));
           i = setIdx + setHead.length;
@@ -3870,7 +3890,7 @@ function generateClientJsImpl(ctx: CompileContext): string {
                   const lineStart = clientCode.lastIndexOf("\n", letStart - 1) + 1;
                   const indent = /^[ \t]*/.exec(clientCode.slice(lineStart, letStart))![0];
                   const inPlace =
-                    `let ${resultVar} = await ${mangledName}(${args});` +
+                    `let ${resultVar} = ${liveWrap ? "_scrml_live(" : ""}await ${mangledName}(${args})${liveWrap ? ")" : ""};` +
                     interveningText +
                     `${ifBlock} else {\n` +
                     `  _scrml_reactive_set(${nameArg}, ${resultVar});\n` +

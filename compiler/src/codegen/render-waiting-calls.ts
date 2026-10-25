@@ -84,6 +84,11 @@ export interface RenderWaitingFacts {
   awaitedInAsyncHost?: (name: string) => boolean;
   /** The file's engine variables: a write to one is an engine transition, never the lifted reactive set. */
   engineVars?: ReadonlySet<string>;
+  /**
+   * s470-await-residue fix round 1 (F1) — the cells a derived cell reads, transitively, off the
+   * compiler's dependency graph (index.ts, Stage 7 DG edges). null = no DG node of that name.
+   */
+  derivedReach?: (name: string) => ReadonlySet<string> | null;
   filePath: string;
 }
 
@@ -446,7 +451,8 @@ class RenderWalk {
       for (const ch of Array.isArray(n.children) ? n.children as AnyNode[] : []) {
         if (!ch || typeof ch !== "object" || ch.kind !== "logic" || this.visited.has(ch)) continue;
         this.visited.add(ch);
-        if (atInit) this.withOrder(this.moduleOrder, () => this.orderFollow(ch.body));
+        if (tag === "poll") this.lateInitFollowers.push(ch.body);
+        else if (atInit) this.withOrder(this.moduleOrder, () => this.orderFollow(ch.body));
         this.withOrder(order, () => this.syncStmts(ch.body, `the body of <${tag}>`));
       }
       return;
@@ -821,8 +827,88 @@ class RenderWalk {
       for (const k of Object.keys(n)) if (k !== "span" && k !== "_record") gens(n[k]);
     };
     gens(nodes);
-    const cells = this.collectWaitingResetCells(nodes);
+    this.collectDerivedNames(nodes);
+    const cells = this.collectWaitingResetCells([nodes, ...this.textBodiesOf(nodes)]);
     this.waitingResetCells = cells.size > 0 ? cells : null;
+  }
+
+  // ---- fix round 1 (F1) — a derived cell observes what it reads ---------------------------------
+
+  /** The file's derived cells (`const <d> = …`) and derived engines (`derived=`). */
+  private readonly derivedNames = new Set<string>();
+
+  private collectDerivedNames(nodes: unknown): void {
+    const seen = new WeakSet<object>();
+    const visit = (v: unknown): void => {
+      if (!v || typeof v !== "object" || seen.has(v as object)) return;
+      seen.add(v as object);
+      if (Array.isArray(v)) { for (const x of v) visit(x); return; }
+      const n = v as AnyNode;
+      if (n.kind === "state-decl" && n.shape === "derived" && typeof n.name === "string") this.derivedNames.add(n.name);
+      if (n.kind === "engine-decl") {
+        const meta = (n._record as { engineMeta?: { varName?: unknown; derivedExpr?: unknown } } | undefined)?.engineMeta;
+        if (meta && typeof meta.varName === "string" && meta.derivedExpr) this.derivedNames.add(meta.varName);
+      }
+      for (const k of Object.keys(n)) if (k !== "span" && k !== "_record") visit(n[k]);
+    };
+    visit(nodes);
+  }
+
+  /**
+   * Whether a mention of `name` observes an un-waited write to `cell`: `name` is a derived cell whose
+   * dependency closure (the compiler's DG) reaches `cell`. A derived name the DG has no node for is
+   * taken to reach every cell (fail closed).
+   */
+  private derivedReaches(name: string, cell: string): boolean {
+    if (!this.derivedNames.has(name)) return false;
+    const reach = this.facts.derivedReach ? this.facts.derivedReach(name) : null;
+    if (reach === null) return true;
+    for (const r of reach) if (r === cell || r.startsWith(cell + ".") || cell.startsWith(r + ".")) return true;
+    return false;
+  }
+
+  /**
+   * fix round 1 (F2) — the statement lists impl#1 parses from TEXT and lowers with a cell write
+   * registering its `_scrml_init_set` reset thunk (an engine opener `effect=`, emit-engine
+   * `emitEngineOpenerEffect`; a `when … changes` body, read the same way, fail closed): the same
+   * cached parses the walk judges (engine-body-reader `readEngineBody`, same owner / slot / file).
+   */
+  private textBodiesOf(nodes: unknown): unknown[] {
+    const out: unknown[] = [];
+    const seen = new WeakSet<object>();
+    const visit = (v: unknown): void => {
+      if (!v || typeof v !== "object" || seen.has(v as object)) return;
+      seen.add(v as object);
+      if (Array.isArray(v)) { for (const x of v) visit(x); return; }
+      const n = v as AnyNode;
+      if (n.kind === "engine-decl") {
+        const meta = (n._record as { engineMeta?: Record<string, unknown> } | undefined)?.engineMeta;
+        const opener = meta?.openerEffect;
+        if (meta && typeof opener === "string" && opener.length > 0) {
+          const read = readEngineBody(meta, "openerEffect", opener, ENGINE_BODY_FILE.openerEffect);
+          if (read.stmts) out.push(read.stmts);
+        }
+      }
+      if (n.kind === "when-effect" && typeof n.bodyRaw === "string" && n.bodyRaw.trim() !== "") {
+        const read = readEngineBody(n, "whenBody", n.bodyRaw, "__when_body__.scrml");
+        if (read.stmts) out.push(read.stmts);
+      }
+      for (const k of Object.keys(n)) if (k !== "span" && k !== "_record") visit(n[k]);
+    };
+    visit(nodes);
+    return out;
+  }
+
+  /**
+   * fix round 1 (F3) — bodies impl#1 emits AFTER every module-init statement (the engine opener
+   * `effect=` — emit-client's opener stage; a `<poll>`'s immediate first tick — the lifecycle stage),
+   * whatever their place in the text: checked against the WHOLE module-init order, at the end.
+   */
+  private readonly lateInitFollowers: unknown[] = [];
+
+  /** Check the late module-init followers against every module-init site (end of the walk). */
+  finishModuleOrder(): void {
+    for (const f of this.lateInitFollowers) this.withOrder(this.moduleOrder, () => this.orderFollow(f));
   }
 
   /** The file's generator functions (a §36 SSE write subscribes; it is not an un-waited call). */
@@ -986,7 +1072,7 @@ class RenderWalk {
       const text = typeof n.bodyRaw === "string" ? n.bodyRaw : typeof n.raw === "string" ? n.raw : "";
       return text.trim() !== "" || !isPlaceholderHatch(n);
     }
-    const mentions = (name: string): boolean => cell === null || name === cell || name.startsWith(cell + ".");
+    const mentions = (name: string): boolean => cell === null || name === cell || name.startsWith(cell + ".") || this.derivedReaches(name, cell);
     if (kind === "ident" && typeof n.name === "string" && n.name.startsWith("@")) return mentions(n.name.slice(1));
     if (kind === "state-decl" && typeof n.name === "string" && mentions(n.name)) return true;
     if (kind === "lit" && n.litType === "template" && n.hasInterpolation !== false && typeof n.raw === "string") {
@@ -1426,12 +1512,20 @@ class RenderWalk {
   private engineActionBodies(n: AnyNode, children: AnyNode[], byTag: Map<string, AnyNode>, engineName: string): void {
     const meta = (n._record as { engineMeta?: Record<string, unknown> } | undefined)?.engineMeta;
     if (!meta) return;
+    // fix round 1 (F4) — an arm's transition fires the engine's hooks (state-child `effect=`,
+    // `<onTransition>` bodies and guards) right after the arm returns: they FOLLOW the un-waited sites
+    // still pending at the arm's end.
+    const armScopes: Array<{ scope: OrderScope; span: unknown }> = [];
+    const hookBodies: unknown[] = [];
     const body = (owner: object, slot: string, src: string, file: string, span: unknown, pos: string, strict: boolean): void => {
       const read = readEngineBody(owner, slot, src, file);
       if (!read.stmts) return;
+      if (slot === "effect" || slot === "body" || slot === "if") hookBodies.push(read.stmts);
+      const scope: OrderScope | null = slot === "arm" ? { pending: [] } : null;
+      if (scope) armScopes.push({ scope, span });
       // s470-await-residue — a message arm is still a synchronous body (it returns the next state):
       // its own order. A state-child `effect=` / an `<onTransition>` body has an async host now.
-      this.withOrder(slot === "arm" ? { pending: [] } : null, () => this.inLocal(false, () => this.withSpan(span, () => {
+      this.withOrder(scope, () => this.inLocal(false, () => this.withSpan(span, () => {
         if (strict) { for (const st of read.stmts!) this.syncStmt(st, pos, false); }
         else this.syncStmts(read.stmts, pos);
         this.resets(read.stmts);
@@ -1476,13 +1570,23 @@ class RenderWalk {
     }
     const idle = meta.idleWatchdog as AnyNode | undefined;
     if (idle && typeof idle === "object") delay(idle, "the <onIdle after=> delay", n.span);
+    for (const { scope, span } of armScopes) {
+      if (scope.pending.length === 0) continue;
+      this.withOrder(scope, () => this.withSpan(span, () => {
+        for (const h of hookBodies) {
+          for (const p of scope.pending.slice()) {
+            if (this.observes(h, p.cell, new WeakSet())) this.orderReport(p, "the transition's hook (an `effect=` / `<onTransition>` of this engine)");
+          }
+        }
+      }));
+    }
     // fix round 1 (H2) — the opener `effect=` is an ASYNC host: only its own-level calls of the
     // functions it awaits are accepted (`asyncHost`). The parse emit-engine lowers (same owner / slot).
     const opener = meta.openerEffect;
     if (typeof opener === "string" && opener.length > 0) {
       const read = readEngineBody(meta, "openerEffect", opener, ENGINE_BODY_FILE.openerEffect);
-      // The opener runs once at boot, during module init: it follows the module-init statements before it.
-      this.withOrder(this.moduleOrder, () => this.orderFollow(read.stmts ?? opener));
+      // The opener runs once at boot, AFTER every module-init statement (F3): a late follower.
+      if (read.stmts) this.lateInitFollowers.push(read.stmts);
       this.withOrder(null, () => this.inLocal(false, () => this.asyncHost(read.stmts, opener, n, n.span, `the opener \`effect=\` body of engine \`${engineName}\``)));
       this.withSpan(n.span, () => this.resets(read.stmts));
     }
@@ -1504,6 +1608,7 @@ export function renderWaitingCallsOf(nodes: unknown[], facts: RenderWaitingFacts
   const w = new RenderWalk(facts);
   w.beginResets(nodes);
   w.nodes(nodes, true);
+  w.finishModuleOrder();
   w.resets(nodes);
   return w.sites;
 }

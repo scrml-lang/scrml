@@ -1711,7 +1711,7 @@ export function activeSseFnNames(): ReadonlySet<string> | null {
  * `active` defaults to the active client emission; a caller that runs before it is installed
  * passes it explicitly.
  */
-export function colorAsyncActionBody(code: string, label: string, span: unknown, active: ActiveClientAsync | null = _activeClientAsync): string {
+export function colorAsyncActionBody(code: string, label: string, span: unknown, active: ActiveClientAsync | null = _activeClientAsync, seqVar: string | null = null): string {
   if (!active || !code || code.trim() === "") return code;
   const PREFIX = "(() => {\n";
   const SUFFIX = "\n})";
@@ -1726,13 +1726,75 @@ export function colorAsyncActionBody(code: string, label: string, span: unknown,
     if (hits.length) active.report({ calls: [], escapes: [], unanalyzable: hits }, span);
     return code;
   }
+  // A guarded host (`seqVar`) awaits EVERY write in place — a sole write too — so the guard covers it.
   const r = analyze(src, program, PREFIX.length, src.length - SUFFIX.length, active.resolveFree, {
-    transform: true, root, reactiveArg1Skip: true, reactiveArg1SkipKeep: active.sseFnNames ?? null, handlerRoot: true,
+    transform: true, root, reactiveArg1Skip: seqVar === null, reactiveArg1SkipKeep: active.sseFnNames ?? null, handlerRoot: true,
   });
   active.report(r, span);
   if (!r.rootAsync) return r.code;
+  const lbl = JSON.stringify(label);
+  if (seqVar !== null) {
+    const guarded = guardRootAwaits(r.code, "_scrml_live");
+    if (guarded !== null) {
+      // s470-await-residue fix round 1 (F5) — LATEST WINS, the `<request>` settle machine's rule: a
+      // run superseded by a later run of the same host (`seqVar`, a module-scope counter) does not
+      // resume. The check is made synchronously AT each resume point — `_scrml_live(await …)` runs
+      // in the same microtask the await resumes in, before anything the statement does next — and
+      // throws a run-local sentinel that ends the run silently.
+      const body = guarded.split("\n").map((l) => (l.length ? "    " + l : l)).join("\n");
+      return `(async () => {\n` +
+        `  const _scrml_run = ++${seqVar};\n` +
+        `  const _scrml_stale = {};\n` +
+        `  const _scrml_live = (v) => { if (_scrml_run !== ${seqVar}) throw _scrml_stale; return v; };\n` +
+        `  try {\n${body}\n  } catch (_scrml_e) {\n    if (_scrml_e !== _scrml_stale) throw _scrml_e;\n  }\n` +
+        `})().catch(_scrml_async_err => _scrml_error_boundary_log(${lbl}, _scrml_async_err));`;
+    }
+  }
   const indented = r.code.split("\n").map((l) => (l.length ? "  " + l : l)).join("\n");
-  return `(async () => {\n${indented}\n})().catch(_scrml_async_err => _scrml_error_boundary_log(${JSON.stringify(label)}, _scrml_async_err));`;
+  return `(async () => {\n${indented}\n})().catch(_scrml_async_err => _scrml_error_boundary_log(${lbl}, _scrml_async_err));`;
+}
+
+/**
+ * fix round 1 (F5) — wrap every `await X` of the body as `live(await X)`, so no resume point of a
+ * superseded run goes on. null when the text does not parse.
+ */
+function guardRootAwaits(code: string, live: string): string | null {
+  const PREFIX = "(async () => {\n";
+  const SUFFIX = "\n})";
+  const src = PREFIX + code + SUFFIX;
+  const program = tryParse(src);
+  const root = program ? program.body[0]?.expression : null;
+  if (!program || !root || root.type !== "ArrowFunctionExpression") return null;
+  const hits: Array<{ start: number; end: number }> = [];
+  const visit = (n: N, inFn: boolean): void => {
+    if (!n || typeof n !== "object") return;
+    if (Array.isArray(n)) { for (const x of n) visit(x, inFn); return; }
+    if (typeof n.type !== "string") return;
+    const isFn = n.type === "FunctionExpression" || n.type === "FunctionDeclaration" || n.type === "ArrowFunctionExpression";
+    const nested = inFn || (isFn && n !== root);
+    // Every await — a nested async function here is one the colouring made async and awaits in
+    // place (an arm IIFE, a combinator callback): its resume point is this run's too.
+    if (n.type === "AwaitExpression") hits.push({ start: n.start, end: n.end });
+    for (const k of Object.keys(n)) {
+      if (k === "loc" || k === "start" || k === "end" || k === "type") continue;
+      const v = (n as Record<string, unknown>)[k];
+      if (v && typeof v === "object") visit(v as N, nested);
+    }
+  };
+  visit(root, false);
+  if (hits.length === 0) return code;
+  // Innermost-last edits applied from the end; an await nested in another's operand is wrapped too.
+  const opens = new Map<number, number>();
+  const closes = new Map<number, number>();
+  for (const h of hits) { opens.set(h.start, (opens.get(h.start) ?? 0) + 1); closes.set(h.end, (closes.get(h.end) ?? 0) + 1); }
+  let out = "";
+  for (let i = PREFIX.length; i < src.length - SUFFIX.length; i++) {
+    const c = closes.get(i); if (c) out += ")".repeat(c);
+    const o = opens.get(i); if (o) out += `${live}(`.repeat(o);
+    out += src[i];
+  }
+  const c = closes.get(src.length - SUFFIX.length); if (c) out += ")".repeat(c);
+  return out;
 }
 
 /**

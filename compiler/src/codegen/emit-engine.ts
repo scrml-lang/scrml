@@ -4553,6 +4553,7 @@ function emitHookArm(
   varName: string,
   emitOpts: import("./emit-logic.ts").EmitLogicOpts = { boundary: "client" } as import("./emit-logic.ts").EmitLogicOpts,
   active?: ActiveClientAsync | null,
+  seqVar: string | null = null,
 ): string[] {
   const lines: string[] = [];
   const fromKey = JSON.stringify(arm.from);
@@ -4591,6 +4592,9 @@ function emitHookArm(
     arm.kind === "effect" ? `effect= .${arm.from} -> .${arm.to}` : `<onTransition> .${arm.from} -> .${arm.to}`,
     (arm.owner as { span?: unknown } | undefined)?.span ?? null,
     active,
+    // fix round 1 (F5) — latest wins per hook: a run superseded by a later firing of the same hook
+    // does not resume (the counter is declared at module scope by the firing function's emitter).
+    seqVar,
   ).split("\n");
   const body = (indent: string): void => { for (const l of bodyLines) lines.push(`${indent}${l}`); };
 
@@ -4721,11 +4725,24 @@ export function emitEngineHookFiringFunction(
 
   if (lines.length > 0) lines.push("");
 
+  // fix round 1 (F5) — one latest-wins counter per hook arm whose body runs async.
+  const armBlocks: string[][] = [];
+  const seqDecls: string[] = [];
+  arms.forEach((arm, i) => {
+    const seqVar = `${fnName}_run_${i}`;
+    const armLines = emitHookArm(arm, varName, emitOpts, active, seqVar);
+    if (armLines.some((l) => l.includes(`++${seqVar}`))) seqDecls.push(`let ${seqVar} = 0;`);
+    armBlocks.push(armLines);
+  });
+  if (seqDecls.length > 0) {
+    lines.push(`// §51.0.H latest-wins run counters for engine ${varName}'s async hook bodies (§13.8 (i))`);
+    for (const d of seqDecls) lines.push(d);
+  }
+
   lines.push(`// §51.0.H hook-firing function for engine ${varName} (${meta.forType})`);
   lines.push(`function ${fnName}(_scrml_from, _scrml_to) {`);
 
-  for (const arm of arms) {
-    const armLines = emitHookArm(arm, varName, emitOpts, active);
+  for (const armLines of armBlocks) {
     for (const l of armLines) lines.push(l);
   }
 
