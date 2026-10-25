@@ -233,3 +233,30 @@ Gates (fix round 2, final tree):
 - failable pack (1923): PASS 723, PASS-REFUSED 1165, FAIL 0. await pack (904): FAIL 0, unchanged.
 - R26 vs 915b6775f (corpus = this branch's examples/samples): newly-rejected 5, already-failing +code 4, newly-clean 0 —
   the same list as round 1 (the three gauntlet-r10 samples and the two phase1 samples); round 2 adds none.
+
+## CI round (PR #1547 red at cdbb2fa00 in integration 1/3 + browser) — 2026-10-24
+
+- integration: `compiler/tests/commands/migrate-server-keyword.test.js` §11 4-class fixture rendered
+  `${pinnedPure()}` (a `server fn`) — E-VALUE-SERVER-CALL, so the migrate step's compile reported `failed`
+  (reproduced: 571 pass / 1 fail). The call moved to `<button onclick=pinnedPure()>`; all four strip classes
+  kept. `bun test compiler/tests/commands/`: 572 pass, 0 fail. (5b7561690)
+- browser (`bun scripts/browser-baseline.ts --check` reported 3 NEW failures, reproduced):
+  - callref-handler-rejection-log-s454 B-2 ×2 — an async `<errorBoundary>` rendering `${load()}` / `${save()}`
+    (a render-time server call, E-VALUE-SERVER-CALL; §19.6.1 says the boundary does not exempt it). The tests
+    drove the now-unreached async boundary render body; they now pin the refusal.
+  - browser-lift-target-mount-template — the `${serverFn()}` one-shot display in an `if=` mount (the unit twin
+    was converted in round 0); now pins the refusal.
+  - `browser-baseline --check`: PASS (8 asserted). (b7e859614)
+- Every PR-blocking CI job command, run locally on the final tree (`.github/workflows/ci.yml`; the other
+  workflows are dispatch / schedule / push-to-main only):
+  - checks: types-gate OK (unchanged) · `bun test compiler/tests/*.test.js` 2239/0 · snippet-gate 0 fail ·
+    claim-gate 0 fail · corpus-compile-floor PASS · facts --check (WARN-only step) · gen-md-shim current ·
+    conflict-marker-gate PASS · regen-spec-index OK · delta-lint PASS · ci-shards needs OK · s34-census PASS ·
+    bootstrap-conformance --check current.
+  - unit: `bun test compiler/tests/unit compiler/tests/conformance` 31364/0.
+  - integration: `bun run pretest` + `bun test compiler/tests/integration compiler/tests/lsp compiler/tests/commands` 9691/0.
+  - browser: pretest + todomvc compile + `node --check` OK + browser-baseline --check PASS.
+  - slices: lint-no-default-arm 0 · m1 100/0 · m2 612/0 · m1 lowered 100/0 · m3 60/0 · m4 2484/0 · codec 166/0 ·
+    e2e-render-map 259/0.
+  - host-global: `bun scripts/host-global-scan.ts --check` (all modes, unsharded) exit 0, 0 violations.
+  - tracking: gen-bootstrap-severity --check current.
