@@ -87,3 +87,82 @@ tick re-reads, the defect is per tick), `when`, opener `effect=`, handlers / fun
   event-handler value (S450). One deep walk of the file AST (function bodies and handlers included)
   plus the engine / `when` / opener bodies parsed from text; text without a tree is read only to refuse.
 - No runtime change (the owner's S470 ratchet allowance was not needed: shell-runtime size unchanged).
+
+## Measured AFTER (head b2deb2c39; same probes, same runner)
+
+- `shapes/order.mjs`: every base FAIL is now PASS-REFUSED (module init, `<request>`, `<onMount>`
+  tag, message arm, runtime `^{ }`) or awaited in place — `<timeout>` / `on mount` W: PASS-DENY
+  (boot-only, correct "rejected"), state-child `effect=` / `<onTransition>` S and W: PASS (wrong →
+  rejected, right → LOGGED IN). No FAIL except the boot-only S rows whose "LOGGED IN" is the correct
+  boot answer (the page starts on the right password).
+- `shapes/reset.mjs`: every base FAIL → PASS-REFUSED; the sole-statement handler `reset` control
+  stays PASS. (`onclick=reset(@v)` call-ref form: PASS-DENY on base AND head — it emits
+  `reset(<value>)`, a ReferenceError; pre-existing, candidate gap below.)
+- #1554's lift-proof (60 shapes, the kept whole-write exemption × 12 hosts × 5 forms): 0 FAIL on head;
+  5 changes, all PASS / PASS-DENY → PASS-REFUSED for a write inside a one-iteration `for` in a
+  synchronous body (the loop rule; LOW over-refusal).
+- Pack family **f15** (fullstack, 23): base 6081e0685 **19/19 FAIL**, 4 VALID PASS; head 0 FAIL
+  (13 PASS-REFUSED, 4 PASS awaited, 2 PASS-DENY boot-only awaited, 4 VALID PASS), pinned.
+  EXPECTED_SHAPE_COUNT 2265 → 2288, README. Full integration + conformance run (incl. both packs):
+  11975 pass / 0 fail.
+
+## R26 — 3618 files (examples, samples, stdlib, benchmarks, conformance/, docs/, compiler/samples)
+
+Base = `git archive 6081e0685` (compiler + stdlib + scrml.toml), head = this worktree; corpus files =
+this worktree for both. One in-process compile per file.
+- newly rejected: **1** — `docs/changes/s441-cell-assign-server-call-awaited/repro/other-contexts.scrml`
+  (`<init> : number = double(3)` … `function resetThen() { reset(@init); @seen = "reset:" + @init }`):
+  exactly the defect (the read after the reset sees the pre-reset value). Justified.
+- already-failing files gaining a code: 0. Newly clean: 0 outside stdlib.
+- stdlib diffs in the whole-corpus run are the known harness artefact (a worktree stdlib file compiled
+  by the base compiler is outside its tree). Re-run of `stdlib/` with each compiler over its OWN copy:
+  54 files, **0 diffs**.
+- Found and fixed on the way (an earlier head): an `@a = gen()` §36 SSE subscription followed by
+  another write was refused (GITI-025 unit test) → generator writes are not sites; two independent
+  `<request>` loads (benchmarks/per-route-roles admin / dispatch) were refused → a `<request>` body is
+  its own order and its settle-machine load is not a module-init site; statements inside a rendering
+  `for … lift` (samples/file-manager-r11, gauntlet-r11-task-dashboard) were read as module-init
+  followers → render contexts carry no order.
+
+## Gates (final tree, after merging origin/main d582ae04f)
+
+pre-commit (unit + integration + conformance, sharded): 46652 pass / 0 fail. CI job commands
+(.github/workflows/ci.yml, run locally): types-gate OK (181, unchanged) · root tests · snippet-gate ·
+claim-gate · corpus-compile-floor --check · gen-md-shim --check · conflict-marker · regen-spec-index
+--check · delta-lint · ci-shards needs · s34-census --check-new (base origin/main: 1 changed row,
+well-formed, PASS) · bootstrap-conformance · bootstrap-severity · lsp + commands · todomvc compile +
+`node --check` · browser-baseline --check · lint-no-default-arm · slices m1 / m2 / m1-lowered / m3 /
+m4 / codec · e2e-render-map · host-global-scan --check: all exit 0. facts --check STALE (WARN-only,
+bot-owned; not regenerated per policy).
+
+## Candidate gaps (for the PA — not edited into known-gaps.md)
+
+- RESOLVES `g-sync-action-body-fire-and-forget-ordering-s470` and `g-cell-init-reset-thunk-holds-promise-s470`
+  (the latter's premise corrected: the cell never holds the Promise; the hole was ordering).
+- `g-impl1-onmount-one-line-statement-dropped-s470` (MED, pre-existing, silent): `${ on mount { @ok =
+  isOk(@pw); if (@ok) { … } else { … } } }` on ONE line drops the `if` from the emitted block (base and
+  head); the multi-line form keeps it.
+- `g-impl1-callref-reset-handler-unbound-s470` (LOW, pre-existing, throws): `onclick=reset(@v)` (the
+  call-ref form) emits `reset(_scrml_reactive_get("v"))` — `reset` is not defined at run time; the
+  `${ reset(@v) }` form works.
+- `g-reset-settle-no-stale-guard-s470` (MED, not measured): `_scrml_reset_apply` settles a waiting
+  reset detached with no sequence guard — a write to the cell after the reset (or a second reset) can
+  be overwritten by the late settle. Sibling of `g-when-changes-stale-response-s470`; the accepted
+  sole-handler reset is exposed.
+- `g-async-action-body-stale-response-s470` (MED, not measured): the newly async `<timer>` / `<poll>`
+  ticks, `effect=` / `<onTransition>` bodies have no latest-wins guard either (an earlier tick's slow
+  response lands after a later one's).
+- `g-cross-body-detached-ordering-s470` (LOW): ordering is enforced WITHIN a body; across bodies it is
+  not — a message arm's (accepted, last-statement) write lands after the transition's hooks ran; an
+  async-hosted `<onTransition>` body no longer blocks the transition, so a sibling hook of the same
+  transition reads the pre-call value.
+- `g-request-body-trailing-statements-run-once-s470` (MED, pre-existing semantics): a `<request>`
+  body's statements after its first whole write run ONCE at module init, not per load; now refused
+  when they observe the load, still run once otherwise.
+- `g-impl1-async-host-bodies-still-refuse-s470` (LOW, over-refusal): the `<timer>` / `<poll>` /
+  `<timeout>` / `effect=` / `<onTransition>` bodies now await every async call in place, but #1554's
+  walk still refuses every waiting shape there except the two it accepted (e.g. `if (isOk(@pw))` in a
+  tick). Widening needs those bodies read like `asyncHost` (the accounting invariant).
+- Over-refusals recorded (LOW, fail closed): a `reset` of a waiting cell as the LAST statement of a
+  function body; a site in a one-iteration loop; a bare waiting call followed by any cell mention;
+  `@a = loadA(); @b = loadB()` at module init (the second write is a call).
