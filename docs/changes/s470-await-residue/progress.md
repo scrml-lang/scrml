@@ -205,3 +205,4 @@ Reviewer material (read-only): `~/.cache/scrml/review/s470-lf/`. Measurement tre
 - CI job commands on the merged tree: all exit 0 except facts --check (STALE, WARN-only, bot-owned) and
   one lsp/commands run (`dev-watches-copied-client-helper` hit its 20s timeout under machine load;
   re-run alone and the whole lsp + commands set: 774 / 0).
+- Merged origin/main again (d6e734814: lane E #1560 when-changes latest-wins — its when gate is named `_scrml_live`, so this lane's hook guard is renamed `_scrml_hook_live`; then 05422ddc7: #1563). EXPECTED_SHAPE_COUNT = 3053 (main 3021 + f23 32; the count test passes). Pre-commit on the final merge: 47610 / 0. R26 vs an extracted d6e734814: the same single justified file. CI job commands on the final tree: all exit 0 except facts --check (STALE, WARN-only).
