@@ -30,8 +30,8 @@
 | Severity | Open (owed by impl#1, the TS compiler) | Carried (owed by the bootstrap; xfail on impl#1) |
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 267 | 5 |
-| MED | 684 | 8 |
+| HIGH | 268 | 5 |
+| MED | 685 | 8 |
 | LOW | 493 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
@@ -107,6 +107,16 @@ Measured (pack `s4/ternary operand`, `s4/arrow body`, `s4/arm value async call, 
 Landed with the branch anyway because the branch is a strict improvement: pack 1367 shapes → head 5 FAIL (the known render-position class) vs 158 on the merge-base; these three escapes FAIL identically on base and prev.
 
 ### g-impl1-whole-error-binder-allowlist-stricter-than-spec-s469 — impl#1 refuses uses of a `!{}` whole-error binder `_ err :>` that §18.6.1's text allows: passing it whole to an untyped helper (`describe(err)`), holding it in a local or a cell, `String(err)` / a template, a container — and EVERY use when the handled call's error enum cannot be resolved (a stdlib or `Error`-default callee, an alias in a third file) — `NEW S469 (review of 716ee804e); LOW; open (fails closed; ruling owed)`
+
+<!-- @gap id=g-impl1-enum-value-member-read-unchecked-s470 sev=HIGH status=open locus=compiler/src/type-system.ts(checkRowFieldAccessInExpr checks member reads on struct-typed values only; match/!{} payload binders bound asIs — located by the S470 lane-1 agent, not traced by the PA) prov=spec:§14.3+§34 E-TYPE-004("Struct field access on non-struct type");ruling:user-voice-scrml.md S470 "(B) Type the binders (Recommended)" -->
+### g-impl1-enum-value-member-read-unchecked-s470 — (security) a field read on an enum-typed value compiles with no diagnostic, so `x.reason == "bad"` over an auth error logs a wrong password in — `NEW S470`
+
+PA-verified by execution on main `915b6775f`: `type Inner:enum = { Bad(reason: string), Ok }` + `function chk(x: Inner) { return x.reason == "bad" }` compiles at exit 0 with no error (repro `~/.cache/scrml/s470/enum-read/t.scrml`). E-TYPE-004 (§14.3: struct field access on a non-struct type) should fire. The S470 lane-1 agent also measured `!{ .Wrapped(i) :> i.reason == "bad" ? … }` logging in on server and tool. It is the root of `g-impl1-whole-error-binder-allowlist-escapes-s469` escape 3 (the constructor residual, `Box.Wrap(e)` then reading the payload). bryan ruled (B): type payload binders from their declared field type (§18 already requires it), and refuse any non-`.variant` member read on an enum-typed value. This is its own type-system lane, dispatched after s470-whole-error-binder-escapes lands (same file). Newly-rejecting language-wide, so measure the corpus before landing.
+
+<!-- @gap id=g-reachability-node-id-collides-across-files-s470 sev=MED status=open locus=compiler/src/reachability/component-4.ts(buildGateAncestryIndex/walkAncestry: out.set(m.id, …) keyed by per-file MarkupNode.id across all files; isVisibleForRole)+compiler/src/auth-graph.ts(gates: Map<MarkupNodeId, AuthGate>)+compiler/src/reachability-solver.ts(filterComponentsByRole) — TRACED by the S470 investigation agent prov=empirical:S470(~/.cache/scrml/review/s470-authleak/run.mjs on origin/main 93c238af1) -->
+### g-reachability-node-id-collides-across-files-s470 — per-role chunk membership is computed from per-FILE markup node ids keyed across the whole compile unit, so an unrelated edit on one page lets a gated node take an ungated node's id from another file and land in another role's chunk (or drops an ungated one) — `NEW S470`
+
+Found by investigating a lane-2 dev agent's "`<request>` widens the Driver chunk" report. The `<request>` was a red herring; the cause is the id collision. Reproduced on unmodified main: the a5 multipage-multirole fixture (`compiler/tests/integration/multipage-multirole-integration.test.js` harness, `emitPerRoute: true`) already places admin page `31:p` (an Admin-only subtree) in the Driver initial chunk. Adding one `<span>a</span>` before `<nav class` on `routes/index.scrml` puts the Admin-gated `<a href="/admin">` (now id 41, which collides with loads' `41:section`) into Driver's home chunk. Files are walked alphabetically, so the last file wins. The same collision can also drop ungated nodes for a role. **Severity MED, not HIGH, today:** `<auth role>` is a JS-mount gate, not content secrecy (§40.9.5; the served HTML carries the gated markup for every role, and `W-AUTH-CONTENT-NOT-GATED` fires), and `_scrml_chunk_mount` only records `_SCRML_MOUNTS[id]=tag`. **It becomes HIGH** if the server-render-time role-gating arc reuses the Component-4 verdict. Fix direction: key ancestry and gates by (filePath, nodeId). Test gap: A-5.1 asserts only `adminMounts > driverMounts`, so the baseline leak passes.
 
 <!-- @gap id=g-impl1-unknown-variant-arm-reported-as-type-027-s470 sev=LOW status=open locus=compiler/src/codegen/emit-control-flow.ts(the PayloadBinderRefusal planner, E-TYPE-027 return — located-not-traced) prov=adopter:flogence-S59-inbox-2026-10-24;spec:§19.8.1(SqlError variants are QueryFailed/ConstraintViolation/ConnectionLost) -->
 ### g-impl1-unknown-variant-arm-reported-as-type-027-s470 — an `!{}` arm naming a variant the failure's enum does not declare (`::SQLError e :>` on a `?{}`-backed call) is reported as E-TYPE-027 "cannot tell which enum's field order", not as an unknown variant — `NEW S470`
