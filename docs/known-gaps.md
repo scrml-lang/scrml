@@ -30,9 +30,9 @@
 | Severity | Open (owed by impl#1, the TS compiler) | Carried (owed by the bootstrap; xfail on impl#1) |
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 263 | 5 |
-| MED | 696 | 8 |
-| LOW | 507 | 0 |
+| HIGH | 264 | 5 |
+| MED | 699 | 8 |
+| LOW | 512 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
 
@@ -157,6 +157,47 @@ Escape 3 (the constructor residual) and the Q4 shapes remain open. They are pinn
 PA-verified by execution on main `915b6775f`: `type Inner:enum = { Bad(reason: string), Ok }` + `function chk(x: Inner) { return x.reason == "bad" }` compiles at exit 0 with no error (repro `~/.cache/scrml/s470/enum-read/t.scrml`). E-TYPE-004 (§14.3: struct field access on a non-struct type) should fire. The S470 lane-1 agent also measured `!{ .Wrapped(i) :> i.reason == "bad" ? … }` logging in on server and tool. It is the root of `g-impl1-whole-error-binder-allowlist-escapes-s469` escape 3 (the constructor residual, `Box.Wrap(e)` then reading the payload). bryan ruled (B): type payload binders from their declared field type (§18 already requires it), and refuse any non-`.variant` member read on an enum-typed value. This is its own type-system lane, dispatched after s470-whole-error-binder-escapes lands (same file). Newly-rejecting language-wide, so measure the corpus before landing.
 
 **Resolved (S470, `s470-typed-payload-binders`).** `compiler/src/type-system.ts` `checkEnumReadsIn`, reached from the existing member-read checker `checkRowFieldAccessInExpr` (every expression site), the statement `match` case and the post-walk at every `!{}`: a member other than `.variant` (and the engine-cell `@x.advance(…)` / the `.V.history` restore target) read off a value of KNOWN enum type is E-TYPE-004 — a typed parameter, local or cell, a struct field holding an enum, a variant constructor (`E.V(…)`, `E::V(…)`, `.V(…)`), a call of a function declared `-> E` or whose every `return` constructs `E`, a tape element (`for` / `<each>`), an imported enum, and every payload binder (`match` arms, `!{}` arms `.V(x)` / `::V(x)` / `| ::V x`, block arms), typed through codegen's §18.7 planner `planPayloadBinders`; an enum value `==` / `!=` a primitive literal is E-EQ-001 (§45.3). Measured on the four pack sides (probe matrix, `~/.cache/scrml/s470/laneB/`): 80 FAIL → 0; the lane-1 review probe sets (l1, l1b–l1e): 4 FAIL (Q4, one per side) → 0, no OK control newly refused. Corpus (examples, samples, stdlib, benchmarks, conformance, docs; 3,615 files): diagnostic codes identical on base and head. Pack: r9 (s14 / f17 / l9 / t9, 121 shapes). A value whose type is NOT known (an un-annotated parameter, a host value, `String(x)`) is still unchecked, as before.
+
+<!-- @gap id=g-impl1-enum-member-read-residue-s470 sev=MED status=open locus=compiler/src/type-system.ts(enumReadTypeOf — no static type for these flows; enumReadUnify — a union of an enum and a non-enum reads unknown) prov=review:S470-#1563(b1 A5 A6 A7 A11 A12 A14 A16b A17 A18 A21 A26 A31 A32 A35, b6 D4, b7 H3 U2 U5, b10 N4; ~/.cache/scrml/review/s470-lb*/b/) -->
+### g-impl1-enum-member-read-residue-s470 — (security) after #1563 a field read on an enum value still compiles unchecked when no static type reaches the read: untyped tape or object literals (`[Inner::Bad("x")][0].reason`), `.push`, an untyped tape cell, dynamic flows (identity / `asIs` functions, `Object.values`, a JSON round trip), and a union of the enum with a non-enum (`Inner | false`, a declared `Inner | string`, enum-or-number returns) — `NEW S470 (review of #1563); MED; open`
+
+Measured by the #1563 review across its five rounds, on head and main (the recorded / left / filing sets). Untyped literals and `.push` need element-type inference impl#1 does not have. The dynamic flows (B-DYN) cannot be typed statically; scrml's only defence there is a runtime check. The union class (U-MIX) is a type error under §14.3 when the member is not valid on every member of the union, so it could be refused statically. The cyclic alias `type CA = CB; type CB = CA` is accepted silently and used as a type (H6, no hang).
+
+<!-- @gap id=g-spec-enum-payload-field-named-variant-s470 sev=LOW status=open locus=SPEC(§14.4 enum payload field names) prov=review:S470-#1563-round-0(X-VAR, b3 X4) -->
+### g-spec-enum-payload-field-named-variant-s470 — an enum payload field named `variant` (`Bad(variant: string)`) is accepted, but `x.variant` reads the TAG, so the field is silently shadowed; SPEC says nothing about reserving the name — `NEW S470; LOW; open (owner ruling needed)`
+
+Refusing it would be a new language rule, so it needs SPEC text and an owner ruling. PA recommendation: refuse a payload field named `variant`.
+
+<!-- @gap id=g-impl1-namespace-import-type-name-accepted-s470 sev=LOW status=open locus=UNTRACED(type resolution of a dotted name) prov=review:S470-#1563(NS-ALIAS, k/k1.mjs R5);spec:§21.3 -->
+### g-impl1-namespace-import-type-name-accepted-s470 — `import * as h from "./t.scrml"` then `type K = h.I0` compiles clean, with `K` silently `asIs`, so a member read through it is unchecked; §21.3 defines only named and default imports for `.scrml` files — `NEW S470; LOW; open`
+
+Fix: refuse a namespace import of a `.scrml` file (an E-IMPORT code), or refuse a dotted type name.
+
+<!-- @gap id=g-impl1-advance-history-exemption-residue-s470 sev=LOW status=open locus=compiler/src/type-system.ts(the `.advance` / `.V.history` exemptions of checkEnumReadsIn) prov=review:S470-#1563-round-1(Z3, Z6; c20.mjs) -->
+### g-impl1-advance-history-exemption-residue-s470 — two narrow residues of #1563's exemptions: an engine over an enum whose payload field is named `advance` reads `@ad.advance` exempt (Z3), and `@hc = .A.history` into a NON-engine cell is exempt (Z6) — `NEW S470; LOW; open`
+
+Both contrived: in Z3 the cell is in a unit state, and Z6 writes without reading.
+
+<!-- @gap id=g-impl1-enum-adjacent-checks-unchecked-s470 sev=MED status=open locus=compiler/src/type-system.ts prov=dispatch:s470-typed-payload-binders(candidates) -->
+### g-impl1-enum-adjacent-checks-unchecked-s470 — comparisons next to #1563's rule are unchecked: `String(enumValue) == "Bad"`, an enum compared with a `const` bound to a string (`x == bad`, not E-EQ-001 the way a literal is), and member reads on a MACHINE-typed cell — `NEW S470 (s470-typed-payload-binders candidates); MED; open`
+
+Reported by the lane and not executed by a review. Each could make an auth check compare against a value that is never equal.
+
+<!-- @gap id=g-impl1-nested-match-in-arm-never-mounted-s470 sev=MED status=open locus=UNTRACED(markup `<match>` arm body lowering) prov=dispatch:s470-typed-payload-binders(candidate) -->
+### g-impl1-nested-match-in-arm-never-mounted-s470 — a markup `<match>` nested inside another `<match>`'s arm is never mounted: its arms render nothing — `NEW S470 (s470-typed-payload-binders candidate); MED; open`
+
+<!-- @gap id=g-impl1-export-star-type-import-client-throws-s470 sev=LOW status=open locus=UNTRACED(client bundle imports for a type-only `export *` re-export) prov=dispatch:s470-typed-payload-binders(candidate 7);review:S470-#1563(R4) -->
+### g-impl1-export-star-type-import-client-throws-s470 — a page that imports a TYPE through an `export *` module compiles, and its client bundle throws when it loads — `NEW S470; LOW–MED; open (fails closed at load)`
+
+<!-- @gap id=g-impl1-redundant-enum-payload-binder-refusal-s470 sev=LOW status=open locus=compiler/src/type-system.ts(auditEnumPayloadBinderRefusal) prov=dispatch:s470-typed-payload-binders(Q3/Q7) -->
+### g-impl1-redundant-enum-payload-binder-refusal-s470 — `auditEnumPayloadBinderRefusal` (the S469 text audit of payload binders) is now redundant with #1563's typed reads and still falsely refuses some valid binder uses (lane Q3 / Q7) — `NEW S470; LOW; open (over-refusal, fails closed)`
+
+Follow-up: lift it once #1563's typed reads are confirmed to cover every shape it refuses.
+
+<!-- @gap id=g-impl1-unit-variant-dot-variant-reads-undefined-s470 sev=HIGH status=open locus=compiler/src/codegen(member access `.variant` on a unit variant, which is emitted as the bare tag string) prov=review:S470-#1563-round-3(UNIT-VARIANT, b/b12.mjs V2);dispatch:s470-unit-variant-tag-read -->
+### g-impl1-unit-variant-dot-variant-reads-undefined-s470 — (security) a unit variant value is emitted as the bare tag string (`"Gone"`), so `x.variant` reads `undefined`: `x.variant == "Gone"` is false, and a "reject when Gone" gate logs a wrong password in, on every side — `NEW S470 (review of #1563); HIGH; open (lane s470-unit-variant-tag-read in flight)`
+
+`.variant` is the one member #1563 leaves allowed on an enum value, so this is the member authors are steered to. SPEC's canonical variant test is `x is .V` (§18); SPEC defines no user-facing `.variant` member, which is a separate owner question.
 
 <!-- @gap id=g-reachability-node-id-collides-across-files-s470 sev=MED status=open locus=compiler/src/reachability/component-4.ts(buildGateAncestryIndex/walkAncestry: out.set(m.id, …) keyed by per-file MarkupNode.id across all files; isVisibleForRole)+compiler/src/auth-graph.ts(gates: Map<MarkupNodeId, AuthGate>)+compiler/src/reachability-solver.ts(filterComponentsByRole) — TRACED by the S470 investigation agent prov=empirical:S470(~/.cache/scrml/review/s470-authleak/run.mjs on origin/main 93c238af1) -->
 ### g-reachability-node-id-collides-across-files-s470 — per-role chunk membership is computed from per-FILE markup node ids keyed across the whole compile unit, so an unrelated edit on one page lets a gated node take an ungated node's id from another file and land in another role's chunk (or drops an ungated one) — `NEW S470`
@@ -1643,6 +1684,8 @@ The long-standing cell-sync model: a cell is client state and its value travels 
 ### g-server-bundle-omits-helper-reached-from-nested-fn-or-lambda-s468 — a file-scope helper called from a server function only through a BLOCK-nested `function` declaration or a callback lambda is not emitted in the server bundle: `function run(p, h) { if (p) { function chk2(a, b) { return helper(a, b) } return chk2(p, h) } … }` → `ReferenceError: helper is not defined` (HTTP 500) — `NEW S468 (filed; pre-existing); LOW; open (fails closed)`
 
 <!-- @gap id=g-server-bundle-omits-helper-reached-from-nested-fn-or-lambda-s468 sev=LOW status=open locus=UNTRACED-hypothesis:compiler/src/codegen/emit-server.ts(server-fn body walk `_walk` / `_calledPeerNames` ~:4906 and planModuleBindingClosure — the server-side helper reach does not follow a call inside a block-nested function declaration or a callback lambda) prov=review:S468-rev-1434(f.mjs transitive_*);empirical:S468-await-f4-followups(gap1.mjs, gap1b.mjs, f3b.mjs) -->
+
+**S470 (#1563 VALID control W10):** also reached from a server function through a top-level local helper that calls a local `return match` function ("mk is not defined", PASS-500 on both trees). The review could not confirm it is exactly this shape; check it here before splitting it out.
 
 **S470 (review of #1558, F4):** also reached through a callback written directly in the server function body (`[p].map(allowed)`, `filter((q) => allowed(q))`): the peer `allowed` is not emitted and the route returns 500 "allowed is not defined". Same on main; fails closed.
 
