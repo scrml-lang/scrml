@@ -83,6 +83,7 @@ import { setFileSchedulerBindings } from "./async-combinators.ts";
 import { schedulerNamesNotProvablyGlobal } from "./js-async-analysis.ts";
 import { computeFileAsyncFnNames, serverFnNamesOfFile, setFileAsyncFnNames, adoptFileAsyncSet, waitingBindingsOfFile, namespaceImportLocalsOf, waitingFnPredicateOfFile, serverPlacedFnNamesAnywhere } from "./file-async-fns.ts";
 import { renderWaitingCallsOf } from "./render-waiting-calls.ts";
+import { collectEngineVarNames } from "./emit-engine.ts";
 import { isToolProgram, isLibraryShapedFile } from "../tool-program.ts";
 import { forEachProgramWithRole, findTopLevelProgram, findTopLevelPrograms, programRoleOptionsOf, NESTED_SESSION_ATTRS, nestedProgramAttrVerdict } from "../program-role.ts";
 import { getElementAttrSchema } from "../attribute-registry.js";
@@ -122,7 +123,7 @@ import { resetLiftModuleState } from "./emit-lift.js";
 import { setVariantFieldsForRewriter, setProtectContextForRewriter, setBoolColumnsForRewriter, setTenantContextForRewriter } from "./rewrite.ts";
 import { collectTopLevelLogicStatements, containsSql, getNodes, collectFunctions } from "./collect.ts";
 import { computeClientAsyncSets } from "./emit-functions.ts";
-import { buildCalleeImportMap } from "./scheduling.ts";
+import { buildCalleeImportMap, _clientServerFnNames } from "./scheduling.ts";
 import type { CompileContext } from "./context.ts";
 import type { ReachabilityRecord } from "../types/reachability.ts";
 import { resolveDbDriver } from "./db-driver.ts";
@@ -2804,28 +2805,51 @@ export function runCG(input: CgInput): CgOutput {
       // `computeClientAsyncSets` over `collectFunctions`, which reaches if=/else chain branches):
       // a client helper the emitter emits `async` (it calls a server function) is a waiting call
       // here too, wherever it is declared. The same inputs the emitter passes it.
+      const _rwFnNodes = ((analysis as { fnNodes?: unknown[] } | undefined)?.fnNodes ?? collectFunctions(fileAST as never)) as unknown[];
       const _rwClientAsync = computeClientAsyncSets(
         { filePath, fileAST, routeMap: safeRouteMap } as unknown as CompileContext,
-        ((analysis as { fnNodes?: unknown[] } | undefined)?.fnNodes ?? collectFunctions(fileAST as never)) as never,
+        _rwFnNodes as never,
         buildCalleeImportMap(fileAST as never),
         exportRegistryInput ?? null,
       ).clientAsyncFnNames;
+      const _rwHostServer = safeRouteMap ? _clientServerFnNames(safeRouteMap as never, filePath) : new Set<string>();
+      const _rwLocalFnNames = new Set(_rwFnNodes.map((f) => (f as { name?: unknown }).name).filter((x): x is string => typeof x === "string"));
+      const _rwServerNames = new Set([...serverFnNamesOfFile(fileAST, _fileAsyncMemo.routeMap ?? null), ..._rwServerAnywhere]);
       for (const site of renderWaitingCallsOf(getNodes(fileAST as never) as unknown[], {
         waits: (n: string) => _rwWaits(n) || _rwServerAnywhere.has(n) || _rwClientAsync.has(n),
-        serverNames: new Set([...serverFnNamesOfFile(fileAST, _fileAsyncMemo.routeMap ?? null), ..._rwServerAnywhere]),
+        serverNames: _rwServerNames,
         namespaceLocals: namespaceImportLocalsOf(fileAST),
+        // s470-action-body-await — what emit-client's reactive-set lift awaits in a synchronous
+        // host: the file's server-function stubs and its async-coloured client functions.
+        // Only a function this file DECLARES has an emitted stub / async client function the lift
+        // matches (fnNameMap); an imported async function is emitted as a bare call.
+        lifted: (n: string) => _rwLocalFnNames.has(n) && (_rwServerNames.has(n) || _rwClientAsync.has(n)),
+        engineVars: collectEngineVarNames(fileAST),
+        // fix round 1 (H2) — what an async action host (a `when` body, the engine opener `effect=`)
+        // awaits at its own level: the same two sets emit-reactive-wiring / emit-client hand them.
+        awaitedInAsyncHost: (n: string) => _rwHostServer.has(n) || _rwClientAsync.has(n),
         filePath,
       })) {
-        recordRefusedLowering(new CGError(
-          "E-VALUE-SERVER-CALL",
-          `E-VALUE-SERVER-CALL: ${site.position} calls ${site.what}. A value position (a render ` +
+        // fix round 1 (ruling: user-voice-scrml.md S470 "Mint E-IMPL1 code (Recommended)") — an
+        // ACTION position (§13.8 (i)) whose impl#1 emitter has no async host is NOT E-VALUE-SERVER-CALL
+        // (that row's "Not this code: … every §6.15 action position" stays true): the language allows
+        // the waiting call there; impl#1 refuses it, an impl#1 limit, until those bodies get an async
+        // host. Render / value positions keep E-VALUE-SERVER-CALL.
+        const code = site.kind === "action" ? "E-IMPL1-ACTION-NOT-AWAITED" : "E-VALUE-SERVER-CALL";
+        const message = site.kind === "action"
+          ? `E-IMPL1-ACTION-NOT-AWAITED: ${site.position} calls ${site.what}. The language allows a waiting ` +
+            "call here and awaits it (§13.8 (i)), but impl#1 cannot: it runs this code with no `await` at that " +
+            "point, so the code would get a pending Promise — always truthy, so a test of it passes for every " +
+            "input. This is an impl#1 limit, not a language rule. Fix: move the code into an event handler (or a " +
+            "`function` an event handler calls) or an `on mount { }` block, or load the value with a `<request>` " +
+            "(§6.7.7) into a cell (`<request id=\"r\">${ @cell = f(…) }</>`) and read the cell here."
+          : `E-VALUE-SERVER-CALL: ${site.position} calls ${site.what}. A value position (a render ` +
             "position, re-evaluated synchronously while the page renders, or a declaration's initializer) " +
             "cannot wait for the call: it would hold a pending Promise, which is always truthy (§13.7, §13.8). The language allows a waiting value in markup only " +
             "through a pending cell (§13.9), and impl#1 has no async render path yet, so it cannot render this. " +
             "Fix: make the call in an event handler, a `function`, or a `<request>` (§6.7.7) that writes a cell, " +
-            "and render the cell here.",
-          (site.span as object | undefined) ?? {},
-        ), site.anchor);
+            "and render the cell here.";
+        recordRefusedLowering(new CGError(code, message, (site.span as object | undefined) ?? {}), site.anchor);
       }
 
       // s457 (§21.4) — this module's LOCAL `.scrml` re-exports, for emit-server's

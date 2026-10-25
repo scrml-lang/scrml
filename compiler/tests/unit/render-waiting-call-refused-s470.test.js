@@ -21,6 +21,10 @@ import { writeFileSync, rmSync, mkdirSync } from "fs";
 import { compileScrml } from "../../src/api.js";
 
 const CODE = "E-VALUE-SERVER-CALL";
+// fix round 1 of s470-action-body-await (ruling S470 "Mint E-IMPL1 code") — a module-init statement
+// is an ACTION position (a body-top statement list, §13.8 (i)): impl#1's refusal there is
+// E-IMPL1-ACTION-NOT-AWAITED, not E-VALUE-SERVER-CALL.
+const ACTION = "E-IMPL1-ACTION-NOT-AWAITED";
 
 function compile(src) {
   const dir = resolve(tmpdir(), `scrml-s470-render-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`);
@@ -30,7 +34,7 @@ function compile(src) {
   try {
     const result = compileScrml({ inputFiles: [file], write: false, outputDir: resolve(dir, "out"), log: () => {} });
     const all = [...(result.errors ?? []), ...(result.warnings ?? [])];
-    const hits = all.filter((e) => e.code === CODE);
+    const hits = all.filter((e) => e.code === CODE || e.code === ACTION);
     return { codes: all.map((e) => e.code), hits, messages: hits.map((e) => e.message) };
   } finally {
     rmSync(dir, { recursive: true, force: true });
@@ -84,7 +88,10 @@ const REFUSED = {
 const ACCEPTED = {
   "handler calling a server function": `<button onclick=\${() => { @pw = isOk("x") ? "a" : "b" }}>x</button>`,
   "function body": `\${ function go() { const v = allowed(@pw); @pw = v ? "a" : "b" } }\n<button onclick=go()>g</button>`,
-  "<request> body": `<request id="r1" deps=[]>\${ @pw = isOk("x") ? "a" : "b" }</>`,
+  // s470-action-body-await — a <request> body is an action body impl#1 runs synchronously: only
+  // the whole cell write of one call (awaited by the settle machine) is accepted; the ternary
+  // form this entry used to hold is refused (action-body-await-s470.test.js).
+  "<request> body": `<request id="r1" deps=[]>\${ @pw = isOk("x") }</>`,
   "on mount": `\${ on mount { allowed("a") } }`,
   "when … changes": `\${ when @pw changes { allowed(@pw) } }`,
   "a sync helper in if=": `<p><span if=\${plain(@pw)}>IN</span></p>`,
@@ -185,7 +192,8 @@ ${body}
 
   for (const [name, view] of Object.entries({
     "#5: a runtime ^{ } meta block (bare call)": `^{ isOk("x") }\n<p>x</p>`,
-    "#5: a runtime ^{ } meta block (declaration)": `^{ const r = isOk("x") }\n<p>x</p>`,
+    // (`^{ const r = isOk("x") }` — a declaration's initializer holding a pending Promise — is
+    // refused since s470-action-body-await: action-body-await-s470.test.js.)
   })) {
     test(`not this code (effect): ${name}`, () => {
       expect(compile(page(view)).messages).toEqual([]);
@@ -222,7 +230,7 @@ ${body}
     expect(r.hits.length).toBe(1);
   });
 
-  test("#2: a plain `const` initializer in a `${ }` block is a value position", () => {
+  test("#2: a plain `const` initializer in a module-init `${ }` block is refused (an action statement since s470-action-body-await)", () => {
     const src = `<pw> = "wrong"
 \${
     server function isOk(p) { return p == "secret" }
@@ -230,7 +238,9 @@ ${body}
 }
 <p><span if=\${ok}>LOGGED IN</span></p>
 `;
-    expect(compile(src).messages.join("\n")).toContain("the initializer of `ok`");
+    const r = compile(src);
+    expect(r.messages.join("\n")).toContain("the initializer of `ok`");
+    expect(r.codes).toContain(ACTION);
   });
 
   // ---- S470 fix round 2 (review of 110dada2e) ----
@@ -246,12 +256,16 @@ ${body}
 
   test("round 2 #2: an assignment inside module-init control flow stores a waiting value", () => {
     const src = `<pw> = ""\n<c> = true\n\${\n    server function isOk(p) { return p == "secret" }\n}\n\${ let ok = false\nif (@c) { ok = isOk(@pw) } }\n<p><span if=\${ok}>IN</span></p>\n`;
-    expect(compile(src).messages.join("\n")).toContain("server function `isOk`");
+    const r = compile(src);
+    expect(r.messages.join("\n")).toContain("server function `isOk`");
+    expect(r.codes).toContain(ACTION);
   });
 
   test("round 2 #2: a module-scope member assignment stores a waiting value", () => {
     const src = `<pw> = ""\n\${\n    server function isOk(p) { return p == "secret" }\n}\n\${ const box = { v: false }\nbox.v = isOk(@pw) }\n<p><span if=\${box.v}>IN</span></p>\n`;
-    expect(compile(src).messages.join("\n")).toContain("the value assigned at module scope");
+    const r = compile(src);
+    expect(r.messages.join("\n")).toContain("the value assigned at module scope");
+    expect(r.codes).toContain(ACTION);
   });
 
   test("round 2 #2 control: a module-init bare CALL is an effect, and a module-init if's condition is not judged", () => {

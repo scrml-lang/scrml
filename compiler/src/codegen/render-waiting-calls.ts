@@ -41,13 +41,15 @@ import type { ExprNode } from "../types/ast.ts";
 import { isMetaKind } from "../types/ast.ts";
 import { collectCalleeIdents, bodyHasForeignOrSql } from "./emit-library-shared.ts";
 import { templateInterpolationNodesAll, templateTextInterpolationNodes, guardCallArmsRaw, parseExprToNode } from "../expression-parser.ts";
-import { mentionedNames, isExprNodeValue, STATEMENT_CHILD_KEYS } from "../failable-value-calls.ts";
+import { mentionedNames, mentionedNameCounts, isExprNodeValue, STATEMENT_CHILD_KEYS } from "../failable-value-calls.ts";
 import { isEventHandlerAttrName } from "../multi-statement-scan.ts";
 import { DEFAULT_LOGIC_MODE_TAGS, stmtContainsRenderableLogic, stmtContainsLiftExpr, isValueFormControlFlowStmt } from "./emit-html.ts";
 import { parseMatchArms } from "../match-statechild-parser.ts";
 import { readShorthandBody, readBareArmBody, matchArmKey } from "../arm-body-reader.ts";
 import { soleLogicBlockPayload } from "../interpolation-extent.ts";
 import { filterRenderableChildren } from "./emit-variant-guard.ts";
+import { readEngineBody, ENGINE_BODY_FILE, messageArmSource, onTransitionBodySource, guardSource } from "../engine-body-reader.ts";
+import { parseAfterDuration } from "./parse-after-duration.ts";
 
 type AnyNode = Record<string, unknown>;
 
@@ -64,6 +66,24 @@ export interface RenderWaitingFacts {
   serverNames: ReadonlySet<string>;
   /** Locals of `import * as NAME from "<scrml module>"` (members not classified: fail closed). */
   namespaceLocals: ReadonlySet<string>;
+  /**
+   * s470-action-body-await — the callees whose call, written as a WHOLE cell write
+   * (`@cell = f(args)`), the client emitter awaits even in a synchronous host: emit-client.ts's
+   * reactive-set lift (`(async () => _scrml_reactive_set(…, await f(…)))()`, the `<request>`
+   * settle machine) matches the file's server-function fetch stubs and the file's async-coloured
+   * client functions (`clientAsyncFactsOf`). An imported async function is NOT lifted (it is
+   * emitted as a bare call), so it is not in this set. Absent → nothing is lifted (fail closed).
+   */
+  lifted?: (name: string) => boolean;
+  /**
+   * fix round 1 (H2) — the callees an ASYNC action host (a `when` body, the engine opener
+   * `effect=`) awaits at its own level: the file's client server-function names
+   * (scheduling `_clientServerFnNames`) and its async-coloured client functions — the sets
+   * emit-reactive-wiring / emit-client hand those emitters. Absent → none (fail closed).
+   */
+  awaitedInAsyncHost?: (name: string) => boolean;
+  /** The file's engine variables: a write to one is an engine transition, never the lifted reactive set. */
+  engineVars?: ReadonlySet<string>;
   filePath: string;
 }
 
@@ -76,6 +96,12 @@ export interface RenderWaitingSite {
   position: string;
   /** What would wait (`server function \`isOk\``, `a \`?{}\` query`, …). */
   what: string;
+  /**
+   * s470-action-body-await — `"action"`: the position is an ACTION position (§13.8 (i)) whose
+   * impl#1 emitter runs it synchronously (module init, a `<timer>` tick, an engine hook, …), so
+   * the call is not awaited there. `"render"` (absent): a render / value position.
+   */
+  kind?: "render" | "action";
 }
 
 /** Statement kinds that are action positions or declarations without a render-time value. */
@@ -89,6 +115,28 @@ const PLAIN_DECL_KINDS = new Set(["const-decl", "let-decl", "tilde-decl", "lin-d
 
 /** Markup elements whose BODY is an action (run per load / tick), never rendered from a value. */
 const ACTION_BODY_TAGS = new Set(["request", "timer", "poll"]);
+
+/** The position label of a statement run once at module init (s470-action-body-await). */
+const MODULE_INIT = "a statement run once at module init";
+
+/** String keys of a statement that are names / tags, never expression text (read-to-refuse skips them). */
+const TEXT_SKIP_KEYS = new Set([
+  "kind", "id", "name", "op", "tag", "variable", "label", "binding", "pattern", "armArrow", "litType",
+  "nativeKind", "shape", "parentContext",
+]);
+
+/**
+ * A structural placeholder the parser leaves where it kept an expression only as the statement's
+ * TEXT (a C-style `for` head's `iterExpr`, an unparsed block): no text of its own to read. The
+ * statement's text is read instead (`syncStmt`).
+ */
+function isPlaceholderHatch(v: unknown): boolean {
+  if (!v || typeof v !== "object") return false;
+  const n = v as AnyNode;
+  if (n.kind !== "escape-hatch") return false;
+  if (n.nativeKind !== "SkippedExpr" && n.nativeKind !== "ParseError") return false;
+  return !(typeof n.raw === "string" && n.raw.trim() !== "") && typeof n.bodyRaw !== "string";
+}
 
 /** Attribute-value wrapper kinds the AST builder writes on a markup attribute. */
 const ATTR_VALUE_KINDS = new Set(["expr", "call-ref", "variable-ref", "string-literal", "props-block", "absent"]);
@@ -226,11 +274,20 @@ class RenderWalk {
   private site(anchor: object, span: unknown, position: string, what: string | null): void {
     if (what === null || this.reported.has(anchor)) return;
     this.reported.add(anchor);
-    this.sites.push({ anchor, span: this.spanOverride ?? span, position, what });
+    this.sites.push({ anchor, span: this.spanOverride ?? span, position, what, kind: this.actionMode ? "action" : "render" });
+  }
+
+  /** Set while judging a synchronous action body (`syncStmt`): its sites are `kind: "action"`. */
+  private actionMode = false;
+
+  private inMode<T>(action: boolean, fn: () => T): T {
+    const saved = this.actionMode;
+    this.actionMode = action;
+    try { return fn(); } finally { this.actionMode = saved; }
   }
 
   private judge(node: unknown, anchor: object, span: unknown, position: string): void {
-    this.site(anchor, span, position, this.exprWaits(node));
+    this.site(anchor, span, position, this.localScope ? this.exprWaitsAll(node) : this.exprWaits(node));
   }
 
   /** Expression TEXT the tree holds unparsed: read with the one expression reader, else read to refuse. */
@@ -288,6 +345,11 @@ class RenderWalk {
   }
 
   node(n: unknown, defaultLogic: boolean): void {
+    // A markup node is a render context, also when a synchronous action body holds it.
+    this.inMode(false, () => this.nodeInner(n, defaultLogic));
+  }
+
+  private nodeInner(n: unknown, defaultLogic: boolean): void {
     if (!n || typeof n !== "object" || this.visited.has(n as object)) return;
     if (Array.isArray(n)) { this.nodes(n, defaultLogic); return; }
     const node = n as AnyNode;
@@ -296,7 +358,10 @@ class RenderWalk {
     if (kind === "text" || kind === "comment") return;
     // A `^{ }` meta block is an effect (§22.2: compile-time, or a runtime effect), never a render;
     // markup a compile-time `emit()` splices is already in the tree this walk reads (review #5).
-    if (isMetaKind(kind)) return;
+    // s470-action-body-await — but its body is a SYNCHRONOUS action body (a runtime `^{ }` is
+    // lowered into a plain function over the capability object, `_scrml_cap.isOk(…)`, and called
+    // at module init): judged as one.
+    if (isMetaKind(kind)) { this.meta(node); return; }
     this.visited.add(node);
     switch (kind) {
       case "markup": this.markup(node); return;
@@ -332,7 +397,18 @@ class RenderWalk {
       if (isEventHandlerAttrName(name) || name.startsWith("bind:")) continue; // action positions
       if (isAttrValue(a.value)) this.judgeAttrValue(a.value, a, a.span ?? n.span, `the \`${name}=\` value of <${tag}>`);
     }
-    if (ACTION_BODY_TAGS.has(tag)) return;
+    if (ACTION_BODY_TAGS.has(tag)) {
+      // s470-action-body-await — the body is an action (run per load / tick), but impl#1 lowers
+      // it SYNCHRONOUSLY: a `<request>` body's statements run at module init, a `<timer>` /
+      // `<poll>` body inside the plain `function() { … }` callback emit-reactive-wiring
+      // `emitLifecycleNode` hands `_scrml_timer_start`. Its `${ }` statements are judged as such.
+      for (const ch of Array.isArray(n.children) ? n.children as AnyNode[] : []) {
+        if (!ch || typeof ch !== "object" || ch.kind !== "logic" || this.visited.has(ch)) continue;
+        this.visited.add(ch);
+        this.syncStmts(ch.body, `the body of <${tag}>`);
+      }
+      return;
+    }
     if (typeof n.shorthandBodyRaw === "string" && n.shorthandBodyRaw.trim() !== "") {
       // A `:`-shorthand body (`<p : expr>`) is carried parsed as the element's children, whose
       // spans are relative to the body text: walked once, reported at the element (review #8).
@@ -342,8 +418,13 @@ class RenderWalk {
       else this.withSpan(n.span, () => this.nodes(kids, false));
       return;
     }
-    this.nodes(n.children, DEFAULT_LOGIC_MODE_TAGS.has(tag));
+    const savedHost = this.host;
+    this.host = tag;
+    try { this.nodes(n.children, DEFAULT_LOGIC_MODE_TAGS.has(tag)); } finally { this.host = savedHost; }
   }
+
+  /** The innermost markup element being walked (names a module-init statement's host in the message). */
+  private host: string | null = null;
 
   private logic(n: AnyNode, defaultLogic: boolean): void {
     const body = Array.isArray(n.body) ? n.body as AnyNode[] : [];
@@ -360,36 +441,41 @@ class RenderWalk {
     if (!st || typeof st !== "object" || this.visited.has(st as object)) return;
     const s = st as AnyNode;
     const kind = s.kind;
-    if (typeof kind !== "string" || SKIPPED_STATEMENT_KINDS.has(kind) || isMetaKind(kind)) return;
+    if (kind === "when-effect") { this.whenBody(s); return; }
+    if (typeof kind !== "string" || SKIPPED_STATEMENT_KINDS.has(kind)) return;
+    if (isMetaKind(kind)) { this.meta(s); return; }
     if (kind === "markup" || kind === "logic" || kind === "each-block" || kind === "match-block" ||
         kind === "engine-decl" || kind === "if-chain" || kind === "component-def" || kind === "state") {
       this.node(s, c.defaultLogic);
       return;
     }
     // A derived cell recomputes on every change of what it reads: always a render position.
-    if (kind === "state-decl") {
+    if (kind === "state-decl" && s.shape === "derived") {
       this.visited.add(s);
-      if (s.shape === "derived") {
-        const pos = `the formula of derived \`@${String(s.name ?? "?")}\``;
-        if (s.initExpr && typeof s.initExpr === "object") this.judge(s.initExpr, s, s.span, pos);
-        else this.judgeText(s.init, s, s.span, pos);
-      }
+      const pos = `the formula of derived \`@${String(s.name ?? "?")}\``;
+      if (s.initExpr && typeof s.initExpr === "object") this.judge(s.initExpr, s, s.span, pos);
+      else this.judgeText(s.init, s, s.span, pos);
       return;
     }
+    // s470-action-body-await — a statement that does not render runs ONCE, synchronously, at module
+    // init (in a default-logic body, every statement that does not lift markup; elsewhere every
+    // statement of a `${ }` that does not render). §13.8 (i) makes a body-top statement list an
+    // action position, where the compiler awaits a waiting value — but impl#1 emits module-init code
+    // as plain top-level statements with no async host (`if (isOk(@pw))` tested the pending Promise:
+    // always truthy). Every waiting value in it is refused, except the two shapes the emitter
+    // awaits or discards itself (`syncStmt`). This replaces the S470 round-2 partial rule (an
+    // assignment's right-hand side and a declaration's initializer only), which left the
+    // conditions and nested sub-expressions unjudged.
+    if ((c.defaultLogic && !stmtContainsLiftExpr(s)) || !c.renders) {
+      this.syncStmt(s, this.host ? `a statement in <${this.host}> (run once at module init)` : MODULE_INIT);
+      return;
+    }
+    // A cell write while rendering: the same judgement (the write is not awaited either).
+    if (kind === "state-decl") { this.syncStmt(s, "a cell write while rendering"); return; }
     if (kind === "bare-expr") {
       this.visited.add(s);
-      // `on mount { … }` and a §40.8 default-logic body's bare expression are effects, not renders.
+      // `on mount { … }` is an effect, not a render.
       if (s._onMountEffect === true || s.refineParamGuard) return;
-      if (c.defaultLogic || !c.renders) {
-        // S470 fix round 2 (review #2) — not rendered, it runs once at module init. A bare call
-        // there is an effect, but an ASSIGNMENT stores its value (`box.v = isOk(@pw)`; `ok = …`):
-        // the stored value is a §13.7 value position, exactly as a declaration's initializer is.
-        const ex = s.exprNode as AnyNode | undefined;
-        if (ex && typeof ex === "object" && ex.kind === "assign") {
-          this.judge(ex.value, s, s.span, "the value assigned at module scope");
-        }
-        return;
-      }
       if (s.exprNode && typeof s.exprNode === "object") this.judge(s.exprNode, s, s.span, "the interpolation");
       else this.judgeText(s.expr, s, s.span, "the interpolation");
       return;
@@ -407,40 +493,427 @@ class RenderWalk {
     // function) is a §13.7 value position too ("an initializer … own value"): impl#1 emits it as a
     // module-level binding holding the call's result, so `${ const ok = isOk(@pw) }` held a pending
     // Promise and a later `<span if=${ok}>` opened. Its initializer is judged wherever the block is.
-    // (A cell initializer `<x> = f()` is not — impl#1 awaits it: g-impl1-value-server-call-s451.)
     if (PLAIN_DECL_KINDS.has(String(kind)) && !stmtContainsLiftExpr(s)) {
       this.visited.add(s);
-      const declName = typeof s.name === "string" ? s.name
-        : Array.isArray(s.boundNames) && s.boundNames.length > 0 ? (s.boundNames as string[]).join(", ") : "a destructuring";
-      const pos = `the initializer of \`${declName}\``;
-      // A function VALUE (`const v = (w, p) => w(p)`) is not called by being declared: its body runs
-      // where it is called (a waiting one is E-ASYNC-FN-ESCAPES-AS-VALUE's, §13.9.6).
-      const ie = s.initExpr as AnyNode | undefined;
-      const isFnValue = !!ie && typeof ie === "object" &&
-        (ie.kind === "lambda" || (ie.kind === "escape-hatch" && typeof ie.bodyRaw === "string"));
-      if (isFnValue) return;
-      if (s.initExpr && typeof s.initExpr === "object") this.judge(s.initExpr, s, s.span, pos);
-      else if (typeof s.init === "string") this.judgeText(s.init, s, s.span, pos);
-      return;
-    }
-    // Any other statement renders only inside a rendering `${ }` (in a default-logic body, only one
-    // that lifts markup — the rest run once at module init / mount).
-    if ((c.defaultLogic && !stmtContainsLiftExpr(s)) || !c.renders) {
-      // S470 fix round 2 (review #2) — module-init control flow (`if (@c) { ok = isOk(@pw) }`): its
-      // condition is an action-time test (an await question, not this rule), but the declarations
-      // and assignments in its bodies store values exactly like top-level ones: walk the bodies with
-      // the same (non-rendering) context.
-      this.visited.add(s);
-      for (const k of Object.keys(s)) {
-        if (!STATEMENT_CHILD_KEYS.has(k)) continue;
-        const v = s[k];
-        for (const ch of Array.isArray(v) ? v : [v]) this.stmt(ch, c);
-      }
+      this.declInit(s);
       return;
     }
     this.visited.add(s);
     this.renderStatement(s);
   }
+
+  /** A plain declaration's initializer: a §13.7 value position (a function VALUE is not called by being declared). */
+  private declInit(s: AnyNode, action = false): void {
+    const declName = typeof s.name === "string" ? s.name
+      : Array.isArray(s.boundNames) && s.boundNames.length > 0 ? (s.boundNames as string[]).join(", ") : "a destructuring";
+    const pos = `the initializer of \`${declName}\``;
+    // A function VALUE (`const v = (w, p) => w(p)`) is not called by being declared: its body runs
+    // where it is called (a waiting one is E-ASYNC-FN-ESCAPES-AS-VALUE's, §13.9.6).
+    const ie = s.initExpr as AnyNode | undefined;
+    const isFnValue = !!ie && typeof ie === "object" &&
+      (ie.kind === "lambda" || (ie.kind === "escape-hatch" && typeof ie.bodyRaw === "string"));
+    if (isFnValue) {
+      // fix round 1 (H2) — in a LOCAL body (an engine body, a `^{ }`) nothing colours a local
+      // function value async, so a call of it is never awaited: a function value whose body
+      // waits is refused where it is declared.
+      if (this.localScope) this.inMode(true, () => this.site(s, s.span, `the local function \`${declName}\``, this.exprWaitsAll(ie)));
+      return;
+    }
+    this.inMode(action, () => {
+      if (s.initExpr && typeof s.initExpr === "object" && !isPlaceholderHatch(s.initExpr)) this.judge(s.initExpr, s, s.span, pos);
+      else if (typeof s.init === "string") this.judgeText(s.init, s, s.span, pos);
+    });
+  }
+
+  // ---- synchronous action bodies (s470-action-body-await) -------------------
+  //
+  // §13.8 (i): in an ACTION position a waiting value stands at a suspension point and the compiler
+  // awaits it. impl#1 has an async host for a function body, an event handler, `on mount`, a
+  // `when … changes` body and an engine opener `effect=` — and NONE for the bodies judged here:
+  // module-init statements, a `<request>` body, a `<timer>` / `<poll>` tick, a runtime `^{ }`, an
+  // engine state-child `effect=`, an `<onTransition>` body and guard, a `(state × message)` arm, a
+  // computed `after=` delay. Their emitters lower the statements into a plain synchronous host, so a
+  // waiting value there is a pending Promise (always truthy). impl#1 refuses it (no new async
+  // machinery — brief), except two shapes whose emission is already right:
+  //   (1) a WHOLE cell write of one lifted call, `@cell = f(args)` (also under `!{ }`): emit-client's
+  //       reactive-set lift awaits it in its own async IIFE (or the `<request>` settle machine);
+  //   (2) a bare call statement, `f(args)`: its value is discarded (fire-and-forget).
+  // In both the arguments are judged (an argument is a value). Everything else — a condition, a
+  // loop head, an operand, an argument, a lambda body, a member or local assignment — is judged.
+
+  /** Every statement of a synchronous action body. */
+  private syncStmts(list: unknown, pos: string): void {
+    if (!Array.isArray(list)) return;
+    for (const st of list) this.syncStmt(st, pos);
+  }
+
+  private syncStmt(st: unknown, pos: string, fireAndForget = true): void {
+    if (!st || typeof st !== "object" || this.visited.has(st as object)) return;
+    if (Array.isArray(st)) { for (const x of st) this.syncStmt(x, pos, fireAndForget); return; }
+    const s = st as AnyNode;
+    const kind = s.kind;
+    if (typeof kind !== "string") { this.syncParts(s, s, pos, { needText: false }); return; }
+    if (kind === "when-effect") { this.whenBody(s); return; }
+    if (kind === "function-decl" && this.localScope) { this.localFunction(s, pos); return; }
+    if (SKIPPED_STATEMENT_KINDS.has(kind)) return;
+    if (isMetaKind(kind)) { this.meta(s); return; }
+    if (kind === "markup" || kind === "logic" || kind === "each-block" || kind === "match-block" ||
+        kind === "engine-decl" || kind === "if-chain" || kind === "component-def" || kind === "state" ||
+        kind === "lift-expr") {
+      if (kind === "lift-expr") { this.stmt(s, { renders: true, defaultLogic: false }); return; }
+      this.node(s, false);
+      return;
+    }
+    if (isExprNodeValue(s)) { this.inMode(true, () => this.judge(s, s, s.span, pos)); return; }
+    if (kind === "state-decl" && s.shape === "derived") { this.stmt(s, { renders: false, defaultLogic: false }); return; }
+    if (PLAIN_DECL_KINDS.has(kind) && !stmtContainsLiftExpr(s)) { this.visited.add(s); this.declInit(s, true); return; }
+    this.visited.add(s);
+    this.inMode(true, () => {
+      switch (kind) {
+        case "state-decl": {
+          // A §52 `<x server>` declaration's right-hand side is a server-side load (§52.4.3).
+          if (s.isServer === true) return;
+          if (this.liftedWrite(s)) return;
+          // A cell DECLARATION's initializer (`<v> = …`) is a §13.7 value position; a write
+          // (`@v = …`) is a statement of the action body.
+          const decl = s.structuralForm === true;
+          const p = decl ? `the initializer of cell \`@${String(s.name ?? "?")}\``
+            : `the value written to \`@${String(s.name ?? "?")}\` (${pos})`;
+          this.inMode(!decl, () => {
+            if (s.initExpr && typeof s.initExpr === "object" && !isPlaceholderHatch(s.initExpr)) this.judge(s.initExpr, s, s.span, p);
+            else this.judgeText(s.init, s, s.span, p);
+          });
+          return;
+        }
+        case "bare-expr": {
+          // `on mount { … }` has its own async host (emit-reactive-wiring colorAsyncStatements).
+          if (s._onMountEffect === true || s.refineParamGuard) return;
+          const ex = s.exprNode as AnyNode | undefined;
+          if (fireAndForget && ex && this.firedAndForgotten(ex)) return;
+          const p = pos === MODULE_INIT && ex && ex.kind === "assign" ? "the value assigned at module scope" : pos;
+          if (ex && typeof ex === "object" && !isPlaceholderHatch(ex)) this.judge(ex, s, s.span, p);
+          else this.judgeText(s.expr, s, s.span, p);
+          return;
+        }
+        case "guarded-expr": {
+          // `@cell = f(args) !{ … }` — the lift relocates the arm after the await (ss41). Any other
+          // guarded statement tests the envelope of an un-awaited call: judged, no fire-and-forget.
+          const g = s.guardedNode as AnyNode | undefined;
+          if (g && typeof g === "object" && g.kind === "state-decl" && this.liftedWrite(g)) this.visited.add(g);
+          else this.syncStmt(g, pos, false);
+          this.syncParts(s.arms, s, pos, { needText: false });
+          return;
+        }
+        default: {
+          const flags = { needText: false };
+          for (const k of Object.keys(s)) {
+            if (k === "span" || k === "id" || k === "_record") continue;
+            const v = s[k];
+            if (!v || typeof v !== "object") continue;
+            if (STATEMENT_CHILD_KEYS.has(k)) { this.syncStmt(v, pos, fireAndForget); continue; }
+            this.syncParts(v, s, pos, flags);
+          }
+          // A head the parser kept only as text (a placeholder where its expression would be — a
+          // C-style `for` head, …): the statement's text is read to refuse.
+          if (flags.needText) {
+            for (const k of Object.keys(s)) {
+              if (TEXT_SKIP_KEYS.has(k) || typeof s[k] !== "string") continue;
+              this.site(s, s.span, pos, this.textNamesOf(s[k] as string));
+            }
+          }
+          return;
+        }
+      }
+    });
+  }
+
+  /** A non-statement value of a synchronous statement: an expression judged, a nested statement walked. */
+  private syncParts(v: unknown, owner: AnyNode, pos: string, flags: { needText: boolean }): void {
+    if (!v || typeof v !== "object") return;
+    if (Array.isArray(v)) { for (const x of v) this.syncParts(x, owner, pos, flags); return; }
+    if (isPlaceholderHatch(v)) { flags.needText = true; return; }
+    if (isExprNodeValue(v)) { this.inMode(true, () => this.judge(v, owner, owner.span, pos)); return; }
+    if (isAttrValue(v)) { this.inMode(true, () => this.judgeAttrValue(v, owner, (v as AnyNode).span ?? owner.span, pos)); return; }
+    const k = (v as AnyNode).kind;
+    if (typeof k === "string") { this.syncStmt(v, pos, false); return; }
+    for (const key of Object.keys(v as object)) {
+      if (key === "span") continue;
+      const x = (v as AnyNode)[key];
+      if (x && typeof x === "object") this.syncParts(x, owner, pos, flags);
+    }
+  }
+
+  private textNamesOf(text: string): string | null { return this.textNames(text); }
+
+  /**
+   * Shape (1): `@cell = f(args)` — a non-derived cell write whose whole value is ONE call of a
+   * function the emitter's reactive-set lift awaits (`facts.lifted`), to a cell that is not an
+   * engine variable, with no waiting argument.
+   */
+  private liftedWrite(s: AnyNode): boolean {
+    if (s.kind !== "state-decl" || s.shape === "derived" || s.isServer === true) return false;
+    // fix round 1 (H1) — a `^{ }` body is lowered through the capability object
+    // (`_scrml_cap.isOk(…)`), which the reactive-set lift does not match: no write is awaited there.
+    if (this.noLift) return false;
+    const lifted = this.facts.lifted;
+    if (!lifted) return false;
+    const name = typeof s.name === "string" ? s.name : "";
+    if (name === "" || name.includes(".") || this.facts.engineVars?.has(name)) return false;
+    const ie = s.initExpr as AnyNode | undefined;
+    if (!ie || ie.kind !== "call" || ie.optional === true) return false;
+    const callee = ie.callee as AnyNode | undefined;
+    if (!callee || callee.kind !== "ident" || typeof callee.name !== "string" || !lifted(callee.name)) return false;
+    return (Array.isArray(ie.args) ? ie.args : []).every((a) => this.exprWaits(a) === null);
+  }
+
+  /** Shape (2): a bare call statement `f(args)` (value discarded) with no waiting argument or receiver. */
+  private firedAndForgotten(ex: AnyNode): boolean {
+    // A function value written as a statement (`effect=${ () => f() }`) is never called: nothing runs.
+    if (ex.kind === "lambda") return true;
+    if (ex.kind !== "call") return false;
+    if (guardCallArmsRaw(ex as unknown as ExprNode) !== null) return false;
+    const callee = ex.callee as AnyNode | undefined;
+    if (!callee || typeof callee !== "object") return false;
+    if (callee.kind === "member") {
+      if (this.exprWaits(callee.object) !== null) return false;
+    } else if (callee.kind !== "ident") return false;
+    return (Array.isArray(ex.args) ? ex.args : []).every((a) => this.exprWaits(a) === null);
+  }
+
+  /** A `^{ }` block: its body is a synchronous action body. */
+  private meta(n: AnyNode): void {
+    if (this.visited.has(n)) return;
+    this.visited.add(n);
+    this.inLocal(true, () => this.syncStmts(n.body, "a runtime `^{ }` body"));
+  }
+
+  // ---- local bodies (fix round 1, H1 / H2) ----------------------------------
+
+  /**
+   * Set while walking a body impl#1 lowers OUTSIDE the file's async colouring — an engine body, a
+   * `^{ }`, a `when` body, the opener `effect=`: a function declared there is not coloured, so
+   * nothing awaits a call of it (H2), and a waiting function read as a value there is followed by
+   * no other check (E-ASYNC-FN-ESCAPES-AS-VALUE does not reach these bodies).
+   */
+  private localScope = false;
+  /** Set while walking a `^{ }` body: the whole-write lift does not reach it (H1). */
+  private noLift = false;
+
+  private inLocal(meta: boolean, fn: () => void): void {
+    const sl = this.localScope, sn = this.noLift;
+    this.localScope = true;
+    if (meta) this.noLift = true;
+    try { fn(); } finally { this.localScope = sl; this.noLift = sn; }
+  }
+
+  /** A `function` declared inside a local body: a body that waits is refused (nothing awaits its calls). */
+  private localFunction(s: AnyNode, pos: string): void {
+    this.visited.add(s);
+    const name = typeof s.name === "string" ? s.name : "?";
+    this.inMode(true, () => this.site(s, s.span, `the local function \`${name}\` declared in ${pos}`, this.exprWaitsAll(s)));
+  }
+
+  /** Every waiting thing in a whole subtree, a waiting function read as a value included. */
+  private exprWaitsAll(node: unknown): string | null {
+    return this.exprWaits(node) ?? this.valueRefWaits(node, new WeakSet());
+  }
+
+  /**
+   * A waiting function READ AS A VALUE (`const f = isOk`, `xs.some(isOk)`), not called. A member's
+   * property name is not a read of a function of that name (the S469 r2 lesson).
+   */
+  private valueRefWaits(v: unknown, seen: WeakSet<object>): string | null {
+    if (!v || typeof v !== "object" || seen.has(v as object)) return null;
+    seen.add(v as object);
+    if (Array.isArray(v)) { for (const x of v) { const r = this.valueRefWaits(x, seen); if (r) return r; } return null; }
+    const n = v as AnyNode;
+    if (n.kind === "markup-value") return null;
+    if (n.kind === "ident" && typeof n.name === "string" && !n.name.startsWith("@") && this.facts.waits(n.name)) {
+      return `${this.describe(n.name)}, read as a value`;
+    }
+    for (const k of Object.keys(n)) {
+      if (k === "span") continue;
+      if (k === "callee" && n.kind === "call" && (n.callee as AnyNode | undefined)?.kind === "ident") continue;
+      if (k === "property" && n.kind === "member" && n.computed !== true) continue;
+      const r = this.valueRefWaits(n[k], seen);
+      if (r) return r;
+    }
+    return null;
+  }
+
+  // ---- async action hosts: a `when … changes` body, the engine opener `effect=` ----------------
+  //
+  // Both are lowered into an async wrapper whose OWN level awaits a call of a function in
+  // `facts.awaitedInAsyncHost` (emit-logic `when-effect`, emit-engine `emitEngineOpenerEffect`).
+  // Nothing else there is awaited: a call inside a nested function (a lambda, a callback such as
+  // `[@pw].forEach(x => isOk(x))`, a `function` expression, a local `function`, an IIFE), a member
+  // call off a namespace import, a waiting function read as a value, or a waiting callee outside
+  // that set. Each is refused (fix round 1, H2 / L2). Read through engine-body-reader's one parse
+  // (the opener: the parse emit-engine lowers; a `when` body: the same reader over its `bodyRaw`).
+
+  private asyncHost(stmts: unknown[] | null, raw: string, anchor: AnyNode, span: unknown, pos: string): void {
+    this.inMode(true, () => this.withSpan(span, () => {
+      if (!stmts) { this.site(anchor, span, pos, this.textNames(raw)); return; }
+      // fix round 4 — the ACCOUNTING INVARIANT (R2 / R3, the third hole in this walk). The source
+      // text of each statement (the parse's span over the wrapped body engine-body-reader parsed;
+      // the whole body when a span cannot be placed) is read with the compiler's name reader
+      // (`mentionedNameCounts`, the `mentionedNames` reader counting occurrences: template
+      // interpolations and nested functions included, string contents and property names
+      // excluded). The statement is accepted only when the number of waiting-name occurrences in
+      // it EQUALS the number of call sites this walk accepted as awaited at the host's own level.
+      // Any occurrence the walk did not see (a callback inside a template interpolation, a head
+      // carried as text, a shape not thought of) is a mismatch: refused, fail closed.
+      const wrapped = "${\n" + raw + "\n}";
+      let placed = true;
+      let acceptedTotal = 0;
+      let refusedAny = false;
+      for (const st of stmts) {
+        if (!st || typeof st !== "object") continue;
+        this.acceptedAwaitedCalls = 0;
+        const why = this.asyncWaits(st, false, new WeakSet());
+        const accepted = this.acceptedAwaitedCalls;
+        acceptedTotal += accepted;
+        if (why !== null) { refusedAny = true; this.site(st as object, span, pos, why); continue; }
+        const sp = (st as AnyNode).span as { start?: unknown; end?: unknown } | undefined;
+        const text = sp && typeof sp.start === "number" && typeof sp.end === "number" && sp.end > sp.start && sp.end <= wrapped.length
+          ? wrapped.slice(sp.start, sp.end) : null;
+        if (text === null) { placed = false; continue; }
+        const named = this.waitingNameCount(text);
+        if (named !== accepted) {
+          refusedAny = true;
+          this.site(st as object, span, pos, this.unaccountedWhy(named, accepted));
+        }
+      }
+      // A statement whose text could not be placed: the same invariant over the whole body.
+      if (!placed && !refusedAny) {
+        const named = this.waitingNameCount(raw);
+        if (named !== acceptedTotal) this.site(anchor, span, pos, this.unaccountedWhy(named, acceptedTotal));
+      }
+    }));
+  }
+
+  /** Call sites `asyncWaits` accepted as awaited at the host's own level (fix round 4). */
+  private acceptedAwaitedCalls = 0;
+
+  /** How many times `text` names a waiting function (the occurrence-counting name reader). */
+  private waitingNameCount(text: string): number {
+    let n = 0;
+    for (const [name, c] of mentionedNameCounts(text)) if (this.facts.waits(name)) n += c;
+    return n;
+  }
+
+  private unaccountedWhy(named: number, accepted: number): string {
+    return `a waiting function (its text names one ${named} time${named === 1 ? "" : "s"}, but only ${accepted} ` +
+      `of those ${accepted === 1 ? "is a call" : "are calls"} impl#1 awaits at this body's own level — e.g. a call inside a ` +
+      "template-literal interpolation's callback, which impl#1 does not await here)";
+  }
+
+  private asyncWaits(v: unknown, inFn: boolean, seen: WeakSet<object>): string | null {
+    if (!v || typeof v !== "object" || seen.has(v as object)) return null;
+    seen.add(v as object);
+    if (Array.isArray(v)) { for (const x of v) { const r = this.asyncWaits(x, inFn, seen); if (r) return r; } return null; }
+    const n = v as AnyNode;
+    const kind = n.kind;
+    if (kind === "markup-value") return null;
+    if (kind === "function-decl" || kind === "lambda") inFn = true;
+    // fix round 3 (R1) — a C-style `for` head is carried as TOKENIZED text whose string / template
+    // literals have lost their delimiters (`isOk("wrong")` → `isOk ( wrong )`; a template collapses to
+    // `${…}` and its `cStyleParts` condition to a bare `$` ident), so the parsed parts this walk reads
+    // are not the head the opener `effect=` emits (`for (let i = 0; $; i++)`, measured — a global `$`
+    // logged a wrong password in). Outside a `when` body, a head that names a waiting function is
+    // refused (the f55eb8d4a behaviour). A `when` body lowers the head from its own `bodyRaw`
+    // correctly (reviewer-confirmed: `${await …}`): there the head is judged by the invariant below.
+    if (kind === "for-stmt" && n.cStyleParts && typeof n.cStyleParts === "object") {
+      const textW = typeof n.iterable === "string" ? this.textNames(n.iterable) : null;
+      // In a `when` body the head is judged by the accounting invariant (`asyncHost`): its text's
+      // waiting-name occurrences must all be accepted calls in the parsed parts (fix round 4 — an
+      // any-match let a decoy call vouch for a hidden one, R2).
+      if (textW !== null && !this.whenHost) return `${textW}, in a C-style \`for\` head (impl#1 does not lower that head faithfully here)`;
+    }
+    // A `!{ }`-handled call in a `when` body is lowered into a synchronous value IIFE
+    // (`(() => { let r = f(…); if (r && r.__scrml_error) … })()`): the call is not awaited and the
+    // handler tests a pending Promise (measured: wrong password logged in). Refused there.
+    if (kind === "guarded-expr" && this.whenHost) {
+      const w = this.exprWaits(n.guardedNode);
+      if (w) return `${w}, handled with \`!{ }\` (impl#1 lowers that handler in a \`when\` body without awaiting the call)`;
+    }
+    if (kind === "escape-hatch") {
+      if (n.nativeKind === "Literal") return null;
+      const text = typeof n.bodyRaw === "string" ? n.bodyRaw : typeof n.raw === "string" ? n.raw : "";
+      if (text.trim() === "") return isPlaceholderHatch(n) ? null : "an expression impl#1 cannot read";
+      // Text the reader cannot place (a `function` expression, an unparsed expression): any
+      // waiting name in it is refused (fail closed).
+      const named = this.textNames(text);
+      return named !== null && (typeof n.bodyRaw === "string" || inFn)
+        ? `${named}, inside a nested function (a callback or a local function)` : named;
+    }
+    if (kind === "ident" && typeof n.name === "string" && !n.name.startsWith("@") && this.facts.waits(n.name)) {
+      return `${this.describe(n.name)}, read as a value`;
+    }
+    // fix round 4 — a template literal's interpolations are expressions of this statement (the
+    // compiler's one template slicer): walked like any other, so an own-level call there is
+    // accepted (and counted for the invariant) and a callback there is a nested function (R3).
+    if (kind === "lit" && n.litType === "template" && n.hasInterpolation !== false && typeof n.raw === "string") {
+      for (const e of templateInterpolationNodesAll(n as never)) {
+        const r = this.asyncWaits(e, inFn, seen);
+        if (r) return r;
+      }
+      return null;
+    }
+    if (kind === "call") {
+      const arms = guardCallArmsRaw(n as unknown as ExprNode);
+      if (arms !== null) { const r = this.textNames(arms); if (r) return r; }
+      const callee = n.callee as AnyNode | undefined;
+      if (callee && callee.kind === "ident" && typeof callee.name === "string") {
+        const nm = callee.name;
+        if (this.facts.waits(nm) && (inFn || !(this.facts.awaitedInAsyncHost?.(nm) ?? false))) {
+          return inFn ? `${this.describe(nm)}, inside a nested function (a callback or a local function)` : this.describe(nm);
+        }
+        // fix round 2 (N1) — an OPTIONAL call `f?.(…)` of a server function is emitted without
+        // `await` in these hosts (`_scrml_fetch_isOk_6?.("wrong")`, measured: the opener logged
+        // in). Refused for every waiting callee (a helper's optional call happens to be awaited;
+        // not relied on).
+        if (this.facts.waits(nm) && n.optional === true) {
+          return `${this.describe(nm)}, called optionally (\`${nm}?.(…)\`, which impl#1 does not await here)`;
+        }
+        // An own-level call of a function this host awaits: counted for the invariant (`asyncHost`).
+        if (this.facts.waits(nm)) this.acceptedAwaitedCalls++;
+      } else if (callee && callee.kind === "member") {
+        const obj = callee.object as AnyNode | undefined;
+        if (obj && obj.kind === "ident" && typeof obj.name === "string" && this.facts.namespaceLocals.has(obj.name)) {
+          return this.describe(obj.name);
+        }
+      }
+    }
+    for (const k of Object.keys(n)) {
+      if (k === "span" || k === "_record") continue;
+      // fix round 2 — a C-style `for` head is carried parsed in `cStyleParts` (walked); its
+      // `iterExpr` is the parser's SkippedExpr placeholder holding the same head as text.
+      if (k === "iterExpr" && n.cStyleParts && typeof n.cStyleParts === "object" &&
+          (n.iterExpr as AnyNode | undefined)?.nativeKind === "SkippedExpr") continue;
+      if (k === "callee" && kind === "call" && (n.callee as AnyNode | undefined)?.kind === "ident") continue;
+      if (k === "property" && kind === "member" && n.computed !== true) continue;
+      const r = this.asyncWaits(n[k], inFn, seen);
+      if (r) return r;
+    }
+    return null;
+  }
+
+  /** A `when … changes { }` body (its `bodyRaw`, read once). */
+  private whenBody(s: AnyNode): void {
+    if (this.visited.has(s)) return;
+    this.visited.add(s);
+    const raw = typeof s.bodyRaw === "string" ? s.bodyRaw : "";
+    if (raw.trim() === "") return;
+    const read = readEngineBody(s, "whenBody", raw, "__when_body__.scrml");
+    const saved = this.whenHost;
+    this.whenHost = true;
+    try { this.inLocal(false, () => this.asyncHost(read.stmts, raw, s, s.span, "a `when … changes` body")); }
+    finally { this.whenHost = saved; }
+  }
+
+  /** Set while walking a `when` body (its `!{ }` lowering is not awaited, see `asyncWaits`). */
+  private whenHost = false;
 
   /** A statement evaluated while rendering (a value-form `if` / `for`, a lifting loop, a local). */
   private renderStatement(s: AnyNode): void {
@@ -571,6 +1044,76 @@ class RenderWalk {
         continue;
       }
       if (el) this.nodes(filterRenderableChildren(el.children as unknown[] as never[]), false);
+    }
+    this.engineActionBodies(n, children, byTag, engineName);
+  }
+
+  /**
+   * s470-action-body-await — the engine's ACTION bodies impl#1 lowers synchronously: a state child's
+   * `effect=` and its `<onTransition>` bodies (statements of the plain `…_fire_hooks(from, to)`
+   * function, emit-engine `emitHookArm`), an `<onTransition if=>` guard, a `(state × message)` arm
+   * (a dispatch-table function), and a computed `<onTimeout after=>` / `<onIdle after=>` delay.
+   * Each is read through engine-body-reader's ONE cached parse — the statements the type system
+   * walked and codegen lowers (`readEngineBody`, same owner / slot / file name). A body that does
+   * not parse is the type system's refusal (E-ERROR-002), never lowered. The opener `effect=` is
+   * NOT judged: it has an async host (emit-engine `emitEngineOpenerEffect`, s441).
+   */
+  private engineActionBodies(n: AnyNode, children: AnyNode[], byTag: Map<string, AnyNode>, engineName: string): void {
+    const meta = (n._record as { engineMeta?: Record<string, unknown> } | undefined)?.engineMeta;
+    if (!meta) return;
+    const body = (owner: object, slot: string, src: string, file: string, span: unknown, pos: string, strict: boolean): void => {
+      const read = readEngineBody(owner, slot, src, file);
+      if (!read.stmts) return;
+      this.inLocal(false, () => this.withSpan(span, () => {
+        if (strict) { for (const st of read.stmts!) this.syncStmt(st, pos, false); }
+        else this.syncStmts(read.stmts, pos);
+      }));
+    };
+    const onTransition = (entry: AnyNode, where: string, span: unknown): void => {
+      const b = onTransitionBodySource(entry);
+      if (b && "src" in b) body(entry, "body", b.src, ENGINE_BODY_FILE.onTransition, span, `the <onTransition> body ${where}`, false);
+      if (entry.ifExprRaw !== undefined && entry.ifExprRaw !== null) {
+        const g = guardSource(entry.ifExprRaw);
+        if (g && "src" in g) body(entry, "if", g.src, ENGINE_BODY_FILE.guard, span, `the <onTransition if=> guard ${where}`, true);
+      }
+    };
+    const delay = (entry: AnyNode, what: string, span: unknown): void => {
+      if (typeof entry.after !== "string") return;
+      const parsed = parseAfterDuration(entry.after) as { kind: string; exprText?: string };
+      if (parsed.kind === "computed" && typeof parsed.exprText === "string") {
+        body(entry, "after", parsed.exprText, ENGINE_BODY_FILE.guard, span, what, true);
+      }
+    };
+    for (const child of children) {
+      if (!child || typeof child !== "object") continue;
+      const tag = String(child.tag ?? "?");
+      const span = (byTag.get(tag)?.span ?? n.span) as unknown;
+      if (typeof child.effectRaw === "string" && child.effectRaw.length > 0) {
+        body(child, "effect", child.effectRaw, ENGINE_BODY_FILE.stateEffect, span, `the \`effect=\` body of state .${tag}`, false);
+      }
+      for (const entry of Array.isArray(child.onTransitionElements) ? child.onTransitionElements as AnyNode[] : []) {
+        if (entry && typeof entry === "object") onTransition(entry, `in state .${tag}`, span);
+      }
+      for (const arm of Array.isArray(child.messageArms) ? child.messageArms as AnyNode[] : []) {
+        if (!arm || typeof arm !== "object") continue;
+        const armName = arm.isWildcard ? "_" : String(arm.variantName ?? "?");
+        body(arm, "arm", messageArmSource(arm as never), ENGINE_BODY_FILE.messageArm, span, `the message arm .${armName} of state .${tag}`, false);
+      }
+      for (const ot of Array.isArray(child.onTimeoutElements) ? child.onTimeoutElements as AnyNode[] : []) {
+        if (ot && typeof ot === "object") delay(ot, `the <onTimeout after=> delay in state .${tag}`, span);
+      }
+    }
+    for (const entry of Array.isArray(meta.engineOnTransitions) ? meta.engineOnTransitions as AnyNode[] : []) {
+      if (entry && typeof entry === "object") onTransition(entry, `(engine-direct) of engine \`${engineName}\``, n.span);
+    }
+    const idle = meta.idleWatchdog as AnyNode | undefined;
+    if (idle && typeof idle === "object") delay(idle, "the <onIdle after=> delay", n.span);
+    // fix round 1 (H2) — the opener `effect=` is an ASYNC host: only its own-level calls of the
+    // functions it awaits are accepted (`asyncHost`). The parse emit-engine lowers (same owner / slot).
+    const opener = meta.openerEffect;
+    if (typeof opener === "string" && opener.length > 0) {
+      const read = readEngineBody(meta, "openerEffect", opener, ENGINE_BODY_FILE.openerEffect);
+      this.inLocal(false, () => this.asyncHost(read.stmts, opener, n, n.span, `the opener \`effect=\` body of engine \`${engineName}\``));
     }
   }
 

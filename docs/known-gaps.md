@@ -31,7 +31,7 @@
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 265 | 5 |
-| MED | 688 | 8 |
+| MED | 689 | 8 |
 | LOW | 496 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
@@ -101,7 +101,7 @@ Measured (pack `s4/ternary operand`, `s4/arrow body`, `s4/arm value async call, 
 **Round 2 additions (measured, PASS-REFUSED on base and head):** a nested `match` as an arm VALUE in a reassignment or a call argument (`v = match s { … else :> match check(p) { … } }`, `String(match s { … })`) is E-ERROR-002 (+ E-SERVER-FN-IN-SYNC-CALLBACK on the client) — pack `s5` / `f2` `nested match arm value, reassignment` / `call argument`; and a synchronous callback whose BLOCK body matches a sync failable subject (`[p].map((x) => { return match check(x) { … } })`) is E-CODEGEN-INVALID-LOGIC — the arm text reaches the emitted JS as a quoted fragment (`"... ( r ) :> \"rejected\"", ""Gone" :> …`), billed to the adopter as a compiler defect.
 
 **Round 5 additions (measured, PASS-REFUSED on base `b35babcc2`, round 4 and round 5):** in a `<program kind="tool">` a function whose body is `return match e { … }` over a plain parameter is E-CODEGEN-INVALID-LOGIC ("Cannot use keyword 'await' outside an async function") — the value IIFE takes the async header whenever the match is lowered in server mode (`emitMatchExpr`, emit-control-flow.ts `_matchMode === "server" || _bodyHasAwait`), and a tool function is synchronous; pack `t3/whole binder, passed on whole …` / `… held in a local …`. And on the client a block arm whose last statement calls a server function (`check(p) !{ _ e :> { const held = e⏎ verdictOf(held) } }`) is E-SERVER-FN-IN-SYNC-CALLBACK (pack `f5/whole binder, held in a local then passed on`). Both fail closed; the first bills a valid program to the adopter as a compiler defect.
-### g-impl1-whole-error-binder-allowlist-escapes-s469 — (security) three ways past the `_ e` whole-error binder allow-list still log a wrong password in on every side: a shadowed local-function name, a shadowed `log`, and a payload re-extracted from a variant constructor — `NEW S469 (final review of fb0bff415); HIGH; open (identical on 716ee804e and the merge-base — not a regression)`
+### g-impl1-whole-error-binder-allowlist-escapes-s469 — (security) three ways past the `_ e` whole-error binder allow-list still log a wrong password in on every side: a shadowed local-function name, a shadowed `log`, and a payload re-extracted from a variant constructor — `NEW S469 (final review of fb0bff415); HIGH; NARROWED S470 (#1551: escapes 1 and 2 closed); RESOLVED S470 (escape 3: s470-typed-payload-binders)`
 
 <!-- @gap id=g-impl1-whole-error-binder-allowlist-escapes-s469 sev=HIGH status=resolved resolved-by=s470-whole-error-binder-escapes+s470-typed-payload-binders locus=compiler/src/type-system.ts(auditWholeErrorBinderText — auditBinderCallArgs resolves the callee by NAME in the file-wide fnDecls map; the recursive function audit inherits the call site's logIsBuiltin; the constructor rule admits e into a payload with no follow-up) prov=review:s469-server-return-match-await-r6-final;empirical:S469(probes ~/.cache/scrml/review/return-match-r6-keep/ r6a.mjs r6b.mjs) -->
 
@@ -110,6 +110,16 @@ Measured (pack `s4/ternary operand`, `s4/arrow body`, `s4/arm value async call, 
 3. **Constructor residual.** Passing `e` whole to a variant constructor is allowed, but nothing follows the payload: `Box.Wrap(e).data.inner.reason == "bad"`, or `match b { .Wrap(i) :> i.reason == "bad" }`, or `i == "bad"` logs in on all four sides. Fix: refuse a whole `e` into a constructor, or (the general rule) refuse a payload-field member read on ANY enum-typed value (E-TYPE-004) everywhere.
 
 Landed with the branch anyway because the branch is a strict improvement: pack 1367 shapes → head 5 FAIL (the known render-position class) vs 158 on the merge-base; these three escapes FAIL identically on base and prev.
+
+**Narrowed S470 (#1551, `s470-whole-error-binder-escapes`, merge `66f2ee1c5`).** Escapes 1 and 2 are closed:
+- Each callee, and its error enum, is resolved by binding through one resolver. An unprovable binding gives an unknown enum, and every use of the binder is then refused.
+- `log` counts as the builtin only where it is not shadowed. This is recomputed for each body.
+- One audit call site (`auditWholeBinderArms`) now also covers parameter defaults, global scope, expression-position handlers, and code held as text: arm handlers, all engine bodies, `when` / worker / `<onchange>` bodies, escape hatches, and `<each>`-bearing `<match>` arms.
+- Unreadable text holding `!{` is refused with E-TYPE-031.
+
+Evidence: five S239 review rounds on frozen refs (the round-3 F1 regression was PA-reproduced); security pack family `f9` (+269 shapes, 0 FAIL); R26 identical diagnostic codes for every file across 913 + 2666 files.
+
+Escape 3 (the constructor residual) and the Q4 shapes remain open. They are pinned `[known-fail]` in the pack (`3 ctor …`) and owed to `s470-typed-payload-binders`, per bryan's ruling (B) "Type the binders" (`g-impl1-enum-value-member-read-unchecked-s470`).
 
 **Resolved (S470).** Escapes 1 and 2 by `s470-whole-error-binder-escapes` (#1551: the callee resolved by binding, `log` recomputed per audited body). Escape 3 by `s470-typed-payload-binders` under bryan's ruling "(B) Type the binders (Recommended)" (user-voice-scrml.md S470; the (A) constructor refusal was NOT landed, so `@state = .Failed(err)` stays allowed): a payload binder has its field's declared type (§18.7) and a member read other than `.variant` on an enum-typed value is E-TYPE-004, so `Box.Wrap(e).data…`, `const b = Box.Wrap(e)` then `b.data…`, `wr(e).data…` (a function returning a constructor) and `match b { .Wrap(i) :> i.reason … }` are refused, and `.Wrap(i) :> i == "bad"` is E-EQ-001 (§45.3). The pack's 18 escape-3 `KNOWN_FAIL` shapes (r8 s11 / t6 ×6, f9 / l6 ×3) are PASS-REFUSED; `KNOWN_FAIL` is empty.
 
@@ -169,6 +179,18 @@ Found by the lane-1 round-3 review (F2), pre-existing on base. PA-verified on ma
 ### g-impl1-match-shorthand-interpolation-dropped-s470 — a markup `<match>` arm in the inside-opener shorthand with an interpolation (`<A : ${@msg + "!"}>`) compiles at exit 0 to `_scrml_render_value(_scrml_arm_el, $)`: the expression is dropped and `$` is unbound (ReferenceError at render) — `NEW S470; LOW; open`
 
 Found by the lane-1 round-3 review (N1). PA-verified on main `4058bd052`. This is a silent miscompile, not a fail-open: the arm throws instead of rendering. The plain-text shorthand (`<B n : "b">`) is unaffected.
+
+<!-- @gap id=g-impl1-nested-match-arm-bang-text-falsely-refused-s470 sev=MED status=resolved resolved-by=s470-typed-payload-binders locus=compiler/src/type-system.ts(wholeBinderTextFieldCovered — native-parser ATTR_EXPR.text / expr.sourceText on walkCodegenCopy nodes registered in _wholeBinderVisited) prov=review:S470-#1551-final-review(F4);empirical:S470(~/.cache/scrml/review/s470-l1e/F4/ on 91c1c9ca4) -->
+### g-impl1-nested-match-arm-bang-text-falsely-refused-s470 — a valid `!{}` in an event handler inside a `<match>` nested in another `<match>`'s arm is refused with E-TYPE-031 "code held as text (`ATTR_EXPR.text`)" / "(`expr.sourceText`)"; the binder-less `!{ _ :> "rejected" }` too — `NEW S470 (introduced by #1551 fix round 4); MED; open (fails closed)`
+
+PA-verified on 91c1c9ca4: `~/.cache/scrml/review/s470-l1e/F4/nested-match-in-arm-OK.scrml` and `nested-match-in-arm-nobinder.scrml` exit 1. No corpus file has the shape. BAD shapes in the same position stay refused (E-TYPE-004), so this is not an escape. Folded into lane `s470-typed-payload-binders` (same file).
+
+**Resolved (S470, `s470-typed-payload-binders`).** In the re-read arm copy (`walkCodegenCopy`), `expr.sourceText` is the `${ … }`-wrapped copy of the value's `raw` (read through the handler-value reader or its tree twin) and is covered when it is exactly that; the native `ATTR_EXPR.text` is read with the one handler-value reader (`parseHandlerStatementsForCheck`) and audited — unreadable text is still refused. Both F4 files compile; the c18 OK controls Q1 / Q2 / Q7 / Q8 / Q9 compile; their BAD twins are refused with E-TYPE-004 alone. (The compiled F4 page's inner `<match>` is never mounted — no dispatcher is emitted for a `<match>` nested in a `<match>` arm, so its content does not render; pre-existing on 91c1c9ca4 for the interpolation variant that compiled there, a separate codegen defect not filed here.)
+
+<!-- @gap id=g-impl1-c-for-head-template-and-string-literals-mangled-s470 sev=MED status=open locus=compiler/src(the C-style `for` head is re-tokenised from text; `cStyleParts` / `iterExpr` lose string quotes and template delimiters — located-not-traced) prov=review:S470-s470-action-body-await-round-2-delta-review(R1,R1b,L5);empirical:S470(~/.cache/scrml/review/s470-aw3/d/tpl2.scrml, tpl3.scrml) -->
+### g-impl1-c-for-head-template-and-string-literals-mangled-s470 — a C-style `for` head loses its literals: a template literal in the test is emitted as a bare `$` (`for (let i = 0; $; i++)`: the template, any call in it, and the rest of the test are gone), and a string literal loses its quotes (`isOk("wrong")` → `isOk(wrong)`). It occurs in function bodies, `<timer>` bodies, module init and the engine opener, with or without a server call; only `when` bodies emit it correctly — `NEW S470; MED; open (HIGH on a page with a global `$`)`
+
+PA-verified on 07ebed34b (`~/.cache/scrml/review/s470-aw3/d/tpl2.scrml`): exit 0, emitted `for (let i = 0; $; i++) {`. Without a global `$` this throws a ReferenceError (fails closed). With jQuery, or any page-level `$`, the test is truthy, so `` `${@pw}` == "secret" ``-style gates pass for every input. A lost quote turns a string into an identifier read, so it throws. The `s470-action-body-await` lane refuses a C-style head naming a waiting function outside `when`, so the server-call instance is closed. The emitter defect itself is open everywhere. Fix direction: read the head with the expression reader (the parsed tree), not re-tokenised text.
 
 <!-- @gap id=g-impl1-whole-error-binder-allowlist-stricter-than-spec-s469 sev=LOW status=open locus=compiler/src/type-system.ts(auditWholeErrorBinderText — the allow-list) prov=review:S469-return-match-r5-HIGH-A;spec:§18.6.1("passing it on whole … is unaffected") -->
 

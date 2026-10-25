@@ -3093,7 +3093,9 @@ function generateClientJsImpl(ctx: CompileContext): string {
   // s441 — the file's server-fn names (the SAME file-filtered set the §6.7.4
   // `when` body uses) so a server call in the effect body is awaited in place.
   const engineOpenerEffectLines = clientStage(ctx, "emit-engine-opener-effects", () =>
-    emitEngineOpenerEffectsForFile(fileAST, ctx.routeMap ? _clientServerFnNames(ctx.routeMap, ctx.filePath ?? "") : null));
+    emitEngineOpenerEffectsForFile(fileAST, ctx.routeMap ? _clientServerFnNames(ctx.routeMap, ctx.filePath ?? "") : null,
+      // s470-action-body-await — the async-coloured client helpers, awaited the same way.
+      ctx.routeMap ? (clientAsyncFactsOf(ctx).asyncFnNames ?? null) : null));
   if (engineOpenerEffectLines.length > 0) {
     lines.push("");
     lines.push("// --- engine opener effect= boot-init effects (compiler-generated, §51.0.H Form 3) ---");

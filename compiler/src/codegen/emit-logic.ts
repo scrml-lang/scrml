@@ -335,6 +335,13 @@ export interface EmitLogicOpts {
    */
   whenServerFnNames?: Set<string> | null;
   /**
+   * s470-action-body-await (SECURITY, §6.7.4 / §13.2): the file's async-coloured CLIENT function
+   * names (`clientAsyncFactsOf(ctx).asyncFnNames`), threaded beside `whenServerFnNames` for the
+   * `when-effect` branch ONLY. A `when` body awaited a server call but not a call of a client
+   * helper that reaches one (`if (allowed(@pw))` tested the helper's pending Promise).
+   */
+  whenClientAsyncFnNames?: ReadonlySet<string> | null;
+  /**
    * #284: names of LOCAL ALIAS bindings that resolve to a sibling server-fn PEER
    * through a first-class reference (`const p = groupByJob; … p(rows)` / a
    * dispatch table). Forwarded to `EmitExprContext.serverFnPeerAliasNames` so
@@ -5476,15 +5483,27 @@ function _emitLogicNode(node: any, opts: EmitLogicOpts): string {
       const whenSrvNames: Set<string> | null = isServer
         ? null
         : (opts.whenServerFnNames ?? baseCtx.serverFnNames ?? null);
-      const whenCtx = isServer || !whenSrvNames
+      // s470-action-body-await — a call of an async-coloured client helper is awaited the same way
+      // (emit-expr `emitCall`'s client-peer branch, which reads `clientAsyncFnNames`).
+      const whenHelperNames: ReadonlySet<string> | null = isServer ? null : (opts.whenClientAsyncFnNames ?? null);
+      const whenHasAsync = !!whenSrvNames || (!!whenHelperNames && whenHelperNames.size > 0);
+      const whenCtx = isServer || !whenHasAsync
         ? { ...baseCtx, clientAsyncBody: false }
-        : { ...baseCtx, clientAsyncBody: true, serverFnNames: whenSrvNames };
+        : {
+            ...baseCtx,
+            clientAsyncBody: true,
+            serverFnNames: whenSrvNames ?? baseCtx.serverFnNames ?? null,
+            ...(whenHelperNames && whenHelperNames.size > 0
+              ? { clientAsyncFnNames: new Set([...(baseCtx.clientAsyncFnNames ?? []), ...whenHelperNames]) }
+              : {}),
+          };
       let body = rewriteBlockBody(node.bodyRaw ?? "", null, null, isServer ? "server" : "client", whenCtx).replace(/;\s*$/, "");
       // The expression-level await (above) covers a call in an expression the body
       // lowers through the AST path (`@x = srv()`); a statement the block lowering
       // passes through as text (`const r = srv()`) is reached by the same
       // paren-correct, scope-legal injector every client fn body uses (§13.2).
-      if (whenSrvNames && whenSrvNames.size > 0 && [...whenSrvNames].some((n) => body.includes(n))) {
+      const whenAwaitNames = new Set<string>([...(whenSrvNames ?? []), ...(whenHelperNames ?? [])]);
+      if (whenAwaitNames.size > 0 && [...whenAwaitNames].some((n) => body.includes(n))) {
         // eslint-disable-next-line @typescript-eslint/no-require-imports
         const sched = require("./scheduling.js") as {
           injectFnBodyServerCallAwaits: (c: string, p: (n: string) => boolean, skip?: "arg1" | "sink" | "none") => string;
@@ -5492,7 +5511,7 @@ function _emitLogicNode(node: any, opts: EmitLogicOpts): string {
         // "none": no statement lift reaches a when body, so a server call nested
         // in a reactive write inside `if` / `for` (lowered as text, not through the
         // AST path above) is awaited here too.
-        body = sched.injectFnBodyServerCallAwaits(body, (n) => whenSrvNames.has(n), "none");
+        body = sched.injectFnBodyServerCallAwaits(body, (n) => whenAwaitNames.has(n), "none");
       }
       // s441 — own-level `await` only (a colored handler inside is its own scope).
       const _whenOwnAwait = bodyTextHasOwnAwait(body);
