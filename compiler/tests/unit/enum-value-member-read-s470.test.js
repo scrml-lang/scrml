@@ -2,7 +2,7 @@
  * enum-value-member-read-s470.test.js — S470 lane B (s470-typed-payload-binders):
  * g-impl1-enum-value-member-read-unchecked-s470 + escape 3 of
  * g-impl1-whole-error-binder-allowlist-escapes-s469. Executed floor: security-failable-pack
- * r9-shapes.js (families s12 / f10 / l7 / t7).
+ * r9-shapes.js (families s12 / f15 / l7 / t7).
  *
  * Ruling (bryan, S470, user-voice-scrml.md "(B) Type the binders (Recommended)"):
  *  - a payload binder has its field's DECLARED type — SPEC §18.7 "The type of each bound variable

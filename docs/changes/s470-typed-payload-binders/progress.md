@@ -123,7 +123,7 @@ class) CLEAN → refused. No OK control newly refused. c4 T4 `String(x).includes
   shapes E-EQ-001); `KNOWN_FAIL` is empty. `@state = .Failed(err)` (SPEC §18.6.1, examples/09) compiles.
 
 ## Pack
-New family r9 (`r9-shapes.js`; `shapes/s12.js` `f10.js` `l7.js` `t7.js`), 121 shapes: every "1 …" shape
+New family r9 (`r9-shapes.js`; `shapes/s12.js` `f15.js` `l7.js` `t7.js`), 121 shapes: every "1 …" shape
 FAIL on 91c1c9ca4 → PASS-REFUSED (80 shapes); "VALID …" acceptance controls PASS on both (38, incl. the
 r7 VALID controls re-stated without r7's `getReasonT`, which is now refused); fullstack F4 ×3.
 EXPECTED_SHAPE_COUNT 2192 → 2313. pinned-class.js: the r9 shapes added from a run (fams.mjs), and the

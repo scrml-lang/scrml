@@ -1,5 +1,5 @@
 // S470 s470-typed-payload-binders (lane B; gap g-impl1-enum-value-member-read-unchecked-s470, and the
-// Q4 shape of the S470 lane-1 review) — on every side (server `s12`, fullstack `f10`, library `l7`,
+// Q4 shape of the S470 lane-1 review) — on every side (server `s12`, fullstack `f15`, library `l7`,
 // tool `t7`). Ruling (bryan, S470, user-voice-scrml.md "(B) Type the binders (Recommended)"): a payload
 // binder has its field's DECLARED type (§18.7), and a member read other than `.variant` on an
 // ENUM-typed value is refused (§34 E-TYPE-004). impl#1 checked member reads on STRUCT-typed names only
