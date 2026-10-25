@@ -143,3 +143,65 @@
 - browser: TodoMVC gauntlet compile + `node --check` OK; browser-baseline --check PASS (8 asserted)
 - NOT RUN: `ci-shards.ts needs .github/workflows/ci.yml` — the worktree sandbox refuses the command (the
   `.github` path); this branch does not touch ci.yml.
+
+## Fix round 3 (review of frozen c26134ff4; probes ~/.cache/scrml/review/s470-l1c/ s17–s21, c1–c8)
+- #1 HIGH FIXED — a `!{}` nested in another `!{}`'s arm (call-arg / paren / named arm / 3-deep / a parameter
+  default): every arm's handler is read the way the failable-call walk reads it (failable-value-calls.ts
+  `guardArms`: a braced body via `parseStatementTextDetailed`, else its `handlerExpr` tree, else the text as
+  a body via `auditParseBody`) and walked by the same post-walk, so the nested `!{}` reaches the ONE audit
+  call; unreadable text holding `!{` is refused (E-TYPE-031, impl#1).
+- #2 HIGH FIXED — an engine opener `effect=` (and every engine body `checkEngineRawBodies` reads with
+  `readEngineBody`: state-child `effect=`, `<onTransition>` body / guard, timer delays, message arms): the
+  statements that walk visits are registered and walked by the post-walk (the SAME parsed objects codegen
+  lowers). An opener the statement walk never parsed (engine refused earlier) is read with `readEngineBody`.
+- #3 HIGH FIXED — the handled call's enum is the enum of the callee the call names BY BINDING
+  (`wholeBinderCalleeEnum` -> `wholeBinderResolveFn`, the round-1 callee resolver): a frame-declared name,
+  an alias / shadow / not-provable binding -> unknown -> every binder use refused. `const w = wrapBig`
+  beside `function w()! -> AuthErr` is now refused (s18 N2 / N4). A function binding in a scope that
+  registers no declarations (a `<program>` / markup scope) resolves to the file's one declaration of the
+  name (examples/09 kept compiling).
+- #4 LOW FIXED — `arguments` read from the tree only (an `ident` / `shorthand` reference; never a property
+  key or member name); the raw word count only where the text does not parse (c2 A3 / A4 / A5 now clean).
+- #5 (the parser accepting an empty default): no action, noted.
+- `arm.nestedHandlers` (ast-builder `_nestedHandlersIn`, a kind-less lint copy of a nested `!{}`): covered by
+  the arm-body read above.
+
+### Raw-text code fields — the coverage claim (grep of ast-builder.js / engine-statechild-parser.ts /
+### match-statechild-parser.ts for fields holding unparsed code, plus a corpus dump of every string field
+### holding `!{` across examples/ samples/ conformance/ stdlib/)
+REACHED by the post-walk (read with an existing reader and audited):
+- `!{}` arm `handler` (statement `guarded-expr` arms and guard-marker arms) — statement / handlerExpr / body reader
+- guard-marker call literal `"!{…}"` — `parseGuardArmsFromRaw`
+- `escape-hatch.bodyRaw` (function expression / block arrow) — `escapeHatchBodyStatements` (unreadable + `!{` -> refused)
+- function / lambda `params[].defaultValue` — `parseExprToNode` (unreadable + `!{` -> refused)
+- template `lit.raw` (`${…}` interpolations) — `templateInterpolationNodesAll`
+- `expr.raw` WITHOUT `exprNode` (an attribute / handler value) — `parseHandlerStatementsForCheck`
+- `when-effect` / `when-message` / `when-worker-message` / `when-worker-error` `.bodyRaw`, `onchange-decl.arms[].bodyRaw` — `parseStatementTextDetailed`
+- engine bodies (`engineMeta.openerEffect`, state-child `effectRaw`, `<onTransition>` `bodyRaw`, guard `ifExprRaw`,
+  timer delays, message-arm `bodyRaw`) — `readEngineBody` (the statements `checkEngineRawBodies` visits)
+COVERED BY A TREE TWIN the walk reaches (the text is a copy): `expr`/`exprNode`, `init`/`initExpr`,
+`condition`/`condExpr`, `iterable`/`iterExpr`, `if`/`ifExpr`, `for`/`forExpr`, `args`/`argsExpr`,
+`update`/`updateExpr`, `header`/`headerExpr`, `result`/`resultExpr`, any `x`/`xExpr`/`xNode`;
+whole-declaration source copies `function-decl.raw`, `export-decl.raw`, `component-def.raw`, `escape-hatch.raw`;
+`match-block.armsRaw` (arms are `bodyChildren` / `armBodyChildren`; verified with a `<match>` probe);
+`each-block.bodyRaw` (children); `_reparseEachArmBodyRaw`; engine `rulesRaw` (source copy).
+REFUSED-ON-FAILABLE elsewhere (`refuseFailableInTextSlot`: any failable call -> E-ERROR-002, so no `!{}` can
+stand): engine `derivedExprText`, `inlineMatchBody`, `ifRaw`.
+NOT CODE: `value` (string literals, markup text, comments).
+EVERYTHING ELSE: a string field holding `!{` that none of the above covers is REFUSED (E-TYPE-031, impl#1).
+Corpus dump at c26134ff4: the only `!{`-holding fields were lit.value/raw, expr.raw (+exprNode, and 1
+without), comment.value, text.value, function-decl/export-decl/component-def raw, if-stmt.condition,
+const-decl.init, match-block.armsRaw, escape-hatch raw/bodyRaw — all in the lists above.
+- Known extra refusal: c3 E2b (an engine opener `effect=` holding `const f = () => wrap(x) !{ _ e :> … }`)
+  gains E-TYPE-031 beside its existing E-ERROR-002 — that parse puts the `!{}` on the arrow, not on a call,
+  so its enum is unknown (fail closed); the file did not compile before either.
+- 2026-10-24 fix-round-3 gates: reviewer s6–s21 + shapes1–5 (4 sides): only FAILs are Q4 x4 (lane B);
+  2 UNJUDGED (library G9/G10, harness, as before). c1–c8 vs the reviewer's c26134ff4 run: every change is
+  CLEAN/OTHER-ERR -> AUDITED on a BAD shape, or AUDITED -> CLEAN on the `arguments` false positives (A3/A4/
+  A5); no OK control newly refused except E2b above. Pack 2186. Gate unit+integration+conformance --bail
+  40553 pass / 0 fail; types:check OK (181, unchanged); R26 913 files vs main 915b6775f: IDENTICAL.
+  CI jobs (as before): lsp+commands 774 pass / 0 fail; root 2239 / 0 fail; e2e-render-map 259 / 0 fail;
+  slices lint + m1/m2/m1-lowered/m3/m4/codec 0 fail; host-global 1/2 + 2/2 0 violations (2 / 135 threw,
+  unchanged); snippet 113/0; claim 18/0; compile-floor PASS; md-shim current; conflict-marker PASS;
+  SPEC-INDEX OK; delta-lint PASS; s34 --check-new PASS; bootstrap-severity current; TodoMVC gauntlet +
+  node --check OK; browser-baseline PASS. `ci-shards needs` not runnable in the sandbox (ci.yml untouched).
