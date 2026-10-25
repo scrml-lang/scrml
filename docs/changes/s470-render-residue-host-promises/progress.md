@@ -93,7 +93,7 @@ functions are NOT added — no SPEC text makes them a waiting value. Nothing is 
 
 ## Measurements
 
-### Pack family f15 (security-failable-pack, SIDE fullstack) — classify.js
+### Pack family f16 (named f15 until the merge with #1558, which took f15) (security-failable-pack, SIDE fullstack) — classify.js
 | | base 6081e0685 | head |
 |---|---|---|
 | 17 BAD shapes (render ×7, action ×7, markup value ×3) | **17 FAIL** (wrong → LOGGED IN) | 15 PASS-REFUSED + 2 PASS (the two plain-comparison markup values now gate correctly) |
