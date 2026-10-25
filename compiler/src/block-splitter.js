@@ -2622,6 +2622,17 @@ export function splitBlocks(filePath, source) {
     if (frame.type === "foreign") {
       block.foreignLevel = frame.foreignLevel || 0;
     }
+    // g-impl1-bang-catch-try-body-cut-at-first-brace-s470 — where this reader ended the try body and
+    // each `catch` arm (absolute source offsets; `children` index ranges per region). Absent when the
+    // block never reached its closing brace here.
+    if (frame.type === "error-effect" && frame._eeTryEnd !== undefined) {
+      block.errorEffectExtent = {
+        tryEnd: frame._eeTryEnd,
+        tryChildCount: frame._eeTryChildCount,
+        arms: frame._eeArms,
+        malformedAt: frame._eeMalformedAt ?? -1,
+      };
+    }
     targetChildren().push(block);
   }
 
@@ -3163,31 +3174,42 @@ export function splitBlocks(filePath, source) {
         if (frame.braceDepth === 0) {
           flushText();
           step(); // consume '}'
-          // For error-effect blocks: consume trailing `catch TYPE [as BINDING] { body }` clauses
+          // For error-effect blocks: the statement form `!{ tryBody } catch TYPE [as BINDING] { handler } …`.
+          //
+          // g-impl1-bang-catch-try-body-cut-at-first-brace-s470 — the try body ends HERE, at the
+          // brace this loop just balanced (strings, comments and nested sigil blocks included), and
+          // that position is recorded on the block (`errorEffectExtent`) so the AST builder slices
+          // the body where this reader ended it instead of re-finding the end (it used the first
+          // `}`). Each handler body is read by THIS loop too: after `catch TYPE [as BINDING] {` the
+          // frame is re-opened at depth 1 and the scan continues, so a `}` inside a handler's string,
+          // comment or nested block is read exactly as in the try body (the old handler reader was a
+          // bare brace counter). Children are recorded per region (try body / each arm).
           if (frame.type === "error-effect") {
-            // Keep consuming catch arms until no more `catch` keyword follows
-            while (pos < len) {
-              // Skip whitespace/newlines
-              let lookAhead = pos;
-              while (lookAhead < len && /\s/.test(source[lookAhead])) lookAhead++;
-              // Check for `catch` keyword
-              if (source.slice(lookAhead, lookAhead + 5) === "catch" &&
-                  (lookAhead + 5 >= len || /\W/.test(source[lookAhead + 5]))) {
-                // Advance past whitespace and `catch`
-                while (pos < lookAhead + 5) step();
-                // Now consume until the matching `}` (tracking nesting)
-                let catchBraceDepth = 0;
-                while (pos < len) {
-                  if (source[pos] === "{") { catchBraceDepth++; step(); }
-                  else if (source[pos] === "}") {
-                    catchBraceDepth--;
-                    step();
-                    if (catchBraceDepth === 0) break;
-                  } else { step(); }
-                }
-              } else {
-                break; // no more catch clauses
+            if (frame._eeTryEnd === undefined) {
+              frame._eeTryEnd = curPos;
+              frame._eeTryChildCount = frame.children.length;
+              frame._eeArms = [];
+            } else if (frame._eeArms.length > 0) {
+              const arm = frame._eeArms[frame._eeArms.length - 1];
+              arm.close = curPos;
+              arm.childTo = frame.children.length;
+            }
+            let lookAhead = pos;
+            while (lookAhead < len && /\s/.test(source[lookAhead])) lookAhead++;
+            if (source.slice(lookAhead, lookAhead + 5) === "catch" &&
+                (lookAhead + 5 >= len || /\W/.test(source[lookAhead + 5]))) {
+              // The arm header runs to the handler's `{`; it holds no brace (a header with one is
+              // malformed — recorded, and refused by the AST builder with its location).
+              let open = lookAhead + 5;
+              while (open < len && source[open] !== "{" && source[open] !== "}") open++;
+              if (open < len && source[open] === "{") {
+                frame._eeArms.push({ start: lookAhead, open, close: -1, childFrom: frame.children.length, childTo: -1 });
+                while (pos <= open) step(); // the whitespace, `catch`, the header and its `{`
+                frame.braceDepth = 1;
+                frame._codeFrom = pos;
+                continue;
               }
+              frame._eeMalformedAt = lookAhead;
             }
           }
           popBraceContext();
