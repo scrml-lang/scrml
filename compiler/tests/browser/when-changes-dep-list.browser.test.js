@@ -302,7 +302,7 @@ describe("§6.7.4 semantics", () => {
   <button id="n" onclick=\${@n = @n + 1}>n</button>
 </program>
 `, { fetchReply: 42 });
-    expect(app.clientJs).toMatch(/_scrml_when_changes\([\s\S]*?async function\(\)/);
+    expect(app.clientJs).toMatch(/_scrml_when_changes\([\s\S]*?async function\(_scrml_live\)/); // s470: the run's newest-run-wins gate
     await settle();
     expect(app.get("log")).toBe(""); // no boot fetch-and-write
     app.click("n");
