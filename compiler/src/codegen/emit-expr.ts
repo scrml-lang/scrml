@@ -113,7 +113,7 @@ import { isServerAmbientSession, refuseServerAmbientSession } from "./server-ses
 import { clearLiftScope } from "./declared-name-marks.ts";
 import { srcmapMark } from "./srcmap-provenance.ts";
 import { iterDestructuredNames } from "../type-system.ts";
-import { lowerPresenceCheck, lowerAbsenceCheck, lowerVariantCheck } from "./is-predicate-lowering.ts";
+import { lowerPresenceCheck, lowerAbsenceCheck, lowerVariantCheck, lowerVariantTagRead } from "./is-predicate-lowering.ts";
 import { parseExprToNode, splitTopLevelCommas, guardCallArmsRaw, droppedStatementTextOf, hasLostTrailingContent, rawArmHasStrayComma } from "../expression-parser.ts";
 import { armHasDivisionSlash, rawArmHasLeadingPipeArm, armPiecesCover } from "../arm-list-split.ts";
 import { sqlQueryExprShape, type SqlQueryExprShape } from "./sql-attempt.ts";
@@ -2056,7 +2056,8 @@ function emitUnaryPlain(node: UnaryExpr, ctx: EmitExprContext): string {
     const bare = node.argument.name.slice(1);
     return `${srcmapMark(node.span, bare)}(_scrml_written["${bare}"] = true, ${node.op}_scrml_body["${bare}"])`;
   }
-  let arg = emitExpr(node.argument, ctx);
+  // `++x.variant` / `delete x.variant` write a place, not a tag read (emitPlace).
+  let arg = (node.op === "++" || node.op === "--" || node.op === "delete") ? emitPlace(node.argument, ctx) : emitExpr(node.argument, ctx);
   // §13.2 server Promise trap (S462 Q20) — `!` tests its operand.
   if (node.op === "!") arg = trapBooleanOperand(node.argument, arg, ctx);
   if (node.prefix) {
@@ -3260,7 +3261,7 @@ function emitAssign(node: AssignExpr, ctx: EmitExprContext): string {
     return `${srcmapMark(node.span, bare)}_scrml_reactive_set("${bare}", ${getter} ${baseOp} ${value})`;
   }
 
-  const lhs = emitExpr(target, ctx);
+  const lhs = emitPlace(target, ctx);
   const assigned = `${lhs} ${node.op} ${value}`;
   // §6.5.1 / §6.3 — a write to a FIELD or INDEX of a reactive cell in expression
   // position (`onclick=${@o.x = @o.x + 1}`, `@o.n += 1`, `@rows[i].done = true`)
@@ -3288,7 +3289,32 @@ function emitTernary(node: TernaryExpr, ctx: EmitExprContext): string {
 // Access and call
 // ---------------------------------------------------------------------------
 
-function emitMember(node: MemberExpr, ctx: EmitExprContext): string {
+/**
+ * Emit `node` as a PLACE — an assignment / `++` / `delete` target or a method
+ * callee — rather than as a value read. Only differs from `emitExpr` for a
+ * `.variant` member, whose value read is the tag read (`lowerVariantTagRead`);
+ * a place keeps the plain JS member so the write / call hits the real property.
+ */
+function emitPlace(node: ExprNode, ctx: EmitExprContext): string {
+  return node.kind === "member" ? emitMember(node as MemberExpr, ctx, true) : emitExpr(node, ctx);
+}
+
+/** Does this member/index/call chain contain a `?.` link (so a nullish link short-circuits)? */
+function chainHasOptionalLink(node: ExprNode): boolean {
+  let n: ExprNode | undefined = node;
+  while (n) {
+    if (n.kind === "member" || n.kind === "index") {
+      if ((n as MemberExpr).optional) return true;
+      n = (n as MemberExpr).object;
+    } else if (n.kind === "call") {
+      if ((n as CallExpr).optional) return true;
+      n = (n as CallExpr).callee;
+    } else return false;
+  }
+  return false;
+}
+
+function emitMember(node: MemberExpr, ctx: EmitExprContext, asPlace = false): string {
   // Bug 61 (§55.5 / §55.6 / §55.7) — auto-synthesized validity-surface read.
   //
   // A member chain rooted at `@<compound>` whose LEAF property is a synthesized
@@ -3403,6 +3429,15 @@ function emitMember(node: MemberExpr, ctx: EmitExprContext): string {
         (node.property === "then" ? "." : ` (a failure is handled with \`!{}\`, §19).`),
       (node as { span?: object }).span ?? {},
     ), node as object);
+  }
+  // S470 (s470-unit-variant-tag-read) — a `.variant` VALUE read is the variant
+  // tag read: a unit variant is its bare tag string (§51.3.2), so a plain
+  // `x.variant` read `undefined` off it and `x.variant == "Gone"` disagreed with
+  // `x is .Gone`. See lowerVariantTagRead. A place (`x.variant = …`, a method
+  // callee) keeps the plain member.
+  if (node.property === "variant" && !asPlace) {
+    const trivial = node.object.kind === "ident" && obj === (node.object as IdentExpr).name;
+    return lowerVariantTagRead(obj, trivial, node.optional || chainHasOptionalLink(node.object));
   }
   return `${obj}${dot}${node.property}`;
 }
@@ -4234,7 +4269,10 @@ function emitCall(node: CallExpr, ctx: EmitExprContext): string {
     }
   }
 
-  const callee = emitReceiver(node.callee, ctx);
+  // A called `x.variant(…)` is a method call (its `this` is `x`), not a tag read (emitPlace).
+  const callee = node.callee.kind === "member" && (node.callee as MemberExpr).property === "variant"
+    ? emitPlace(node.callee, ctx)
+    : emitReceiver(node.callee, ctx);
   const args = node.args.map(a => emitExpr(a, ctx)).join(", ");
 
   // s440-sync-callback-async-helper — an async function passed BY REFERENCE to a
@@ -4857,7 +4895,10 @@ function reactiveArrayMutationCell(node: CallExpr, ctx: EmitExprContext): string
 }
 
 function emitNew(node: NewExpr, ctx: EmitExprContext): string {
-  const callee = emitReceiver(node.callee, ctx);
+  // A called `x.variant(…)` is a method call (its `this` is `x`), not a tag read (emitPlace).
+  const callee = node.callee.kind === "member" && (node.callee as MemberExpr).property === "variant"
+    ? emitPlace(node.callee, ctx)
+    : emitReceiver(node.callee, ctx);
   const args = node.args.map(a => emitExpr(a, ctx)).join(", ");
   return `new ${callee}(${args})`;
 }
