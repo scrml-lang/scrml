@@ -146,6 +146,8 @@ export function variantDestructureSource(valueJs: string): string {
 
 const _variantTemps = new WeakMap<object, string>();
 let _variantTempSeq = 0;
+/** Reset per compile (resetCodegenModuleState) — the temp names are part of the build identity. */
+export function resetVariantDestructureTemps(): void { _variantTempSeq = 0; }
 function variantTempFor(p: object): string {
   let t = _variantTemps.get(p);
   if (!t) { t = `__scrml_dv_${++_variantTempSeq}`; _variantTemps.set(p, t); }

@@ -2606,20 +2606,29 @@ function lowerTextVariantPatterns(expr: string): string {
   for (let guard = 0; guard < 200; guard++) {
     const masked = maskNonCode(out);
     if (masked === null) return out;
-    const open = masked.indexOf("{", from);
-    if (open < 0) return out;
+    // Review G1 — an object OR array pattern, at any position (a later declarator, an
+    // array element, a nested group), naming `variant` as a key at any depth, quoted or
+    // computed (`{ "variant": v }`, `{ ["variant"]: v }`).
+    const re = /[{[]/g;
+    re.lastIndex = from;
+    const om = re.exec(masked);
+    if (!om) return out;
+    const open = om.index;
     const close = matchingClose(masked, open);
     if (close < 0) return out;
     from = open + 1;
-    const group = masked.slice(open, close + 1);
-    if (!/\bvariant\b/.test(group)) continue;
-    if (classifyBraceGroup(masked, open, close + 1) !== "binding-pattern") continue;
+    if (!isPatternGroup(masked, open, close)) continue;
     // Only the outermost pattern is judged (an inner group is part of it).
     if (enclosingPatternOpen(masked, open)) continue;
+    const keys = variantKeysIn(out, masked, open, close);
+    if (keys.length === 0) continue;
+    const group = masked.slice(open, close + 1);
     const top = topLevelKeys(group);
-    const isDecl = /\b(?:const|let|var)\s*$/.test(masked.slice(0, open)) && !/\bfor\s*\(\s*(?:const|let|var)\s*$/.test(masked.slice(0, open));
+    const isDecl = masked[open] === "{" && /\b(?:const|let|var)\s*$/.test(masked.slice(0, open)) && !/\bfor\s*\(\s*(?:const|let|var)\s*$/.test(masked.slice(0, open));
     const eq = /^\s*=(?![=>])/.exec(masked.slice(close + 1));
-    if (isDecl && eq && top.includes("variant") && !nestedKeyNamesVariant(group)) {
+    // Lowerable: the first declarator of a `const` / `let` / `var`, an object pattern, whose ONLY
+    // `variant` key is a plain one at its own level.
+    if (isDecl && eq && top.includes("variant") && keys.length === 1 && keys[0].depth === 1 && !keys[0].quoted) {
       const initStart = close + 1 + eq[0].length;
       const initEnd = initializerEnd(masked, initStart);
       const init = out.slice(initStart, initEnd);
@@ -2653,7 +2662,21 @@ function matchingClose(m: string, open: number): number {
   return -1;
 }
 
-/** Is the `{` at `open` inside another destructuring pattern group (`{ e: { variant } } = …`)? */
+/**
+ * Is the `{` / `[` group [open, close] a destructuring PATTERN? An object group as
+ * `classifyBraceGroup` decides; an array group when it is assigned to (`[…] = …`), declared
+ * (`const [ … ]`, a `for` head), or an arrow parameter (`([…]) =>`).
+ */
+function isPatternGroup(m: string, open: number, close: number): boolean {
+  if (m[open] === "{") return classifyBraceGroup(m, open, close + 1) === "binding-pattern";
+  const after = m.slice(close + 1);
+  if (/^\s*=(?![=>])/.test(after)) return true;
+  if (/\b(?:const|let|var)\s*$/.test(m.slice(0, open))) return true;
+  if (/^\s*\)\s*=>/.test(after) && /\(\s*$/.test(m.slice(0, open))) return true;
+  return false;
+}
+
+/** Is the group at `open` inside another destructuring pattern group (`{ e: { variant } } = …`)? */
 function enclosingPatternOpen(m: string, open: number): boolean {
   let d = 0;
   for (let k = open - 1; k >= 0; k--) {
@@ -2664,11 +2687,38 @@ function enclosingPatternOpen(m: string, open: number): boolean {
       if (c === "(") return false;
       const cl = matchingClose(m, k);
       if (cl < 0) return false;
-      if (c === "{" && classifyBraceGroup(m, k, cl + 1) === "binding-pattern") return true;
-      if (c === "[" && /^\s*=(?![=>])/.test(m.slice(cl + 1))) return true;
+      if (isPatternGroup(m, k, cl)) return true;
     }
   }
   return false;
+}
+
+/**
+ * Every `variant` KEY of an object group inside the pattern [open, close]: plain
+ * (`{ variant }`, `{ variant: v }`, `{ variant = d }`), quoted (`{ "variant": v }`) or computed
+ * with a literal (`{ ["variant"]: v }`). `depth` is the object nesting (1 = the pattern's own
+ * object level when it is an object pattern). A `variant` that is a default VALUE or an array
+ * element binding is not a key and is not listed.
+ */
+function variantKeysIn(out: string, m: string, open: number, close: number): Array<{ depth: number; quoted: boolean }> {
+  const keys: Array<{ depth: number; quoted: boolean }> = [];
+  const stack: string[] = [];
+  for (let j = open; j <= close; j++) {
+    const c = m[j];
+    if (c === "{" || c === "[" || c === "(") { stack.push(c); }
+    else if (c === "}" || c === "]" || c === ")") { stack.pop(); continue; }
+    if ((c === "{" || c === ",") && stack[stack.length - 1] === "{") {
+      const rest = m.slice(j + 1);
+      const k = /^\s*(variant|#{9}|\[\s*#{9}\s*\])\s*(?=[,}:=])/.exec(rest);
+      if (!k) continue;
+      const raw = out.slice(j + 1 + (k[0].length - k[0].trimStart().length), j + 1 + k[0].length).trim();
+      const quoted = k[1] !== "variant";
+      if (quoted && !/^(?:(["'])variant\1|\[\s*(["'`])variant\2\s*\])$/.test(raw)) continue;
+      const depth = stack.filter((x) => x === "{").length;
+      keys.push({ depth, quoted });
+    }
+  }
+  return keys;
 }
 
 /** The keys of an object pattern's own level (`{ a, b: c, d = 1, e: { f } }` → a, b, d, e). */

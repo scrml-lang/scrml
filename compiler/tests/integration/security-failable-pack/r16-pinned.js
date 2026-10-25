@@ -5,6 +5,9 @@
 // Fix round 1 (+47) on be176f6ff: 32 FAIL (F1 each rows, F2 destructuring, F3 literal keys, F6 qualified
 // `is`), 6 PASS-REFUSED (incl. the 4 F4 swap regressions), 3 PASS-500 (F2 `let` default); base accdd5f2
 // FAILs every F1 / F2 / F3 shape too.
+// Fix round 2 (+10, G1) on 43386e9d5: 4 FAIL (text-path `[{ variant }]`, `[a, { variant }]`, quoted and
+// computed keys in a `when` body), 6 PASS-REFUSED; base 55de8639c FAILs all 6 text shapes and the 4
+// structured `[{ variant }]` shapes. All refused after (E-CODEGEN-INVALID-LOGIC).
 export const R16_PINNED = {
   "s19/1 typed local from a return": "PASS",
   "s19/1 untyped local from a return": "PASS",
@@ -36,6 +39,7 @@ export const R16_PINNED = {
   "s19/15 F2 destructure renamed": "PASS",
   "s19/15 F2 destructure let with default": "PASS",
   "s19/15 F2 destructure nested": "PASS",
+  "s19/21 G1 array element pattern": "PASS-REFUSED",
   "s19/16 F3 literal key": "PASS",
   "s19/16 F3 optional literal key": "PASS",
   "s19/17 F6 qualified is, payload": "PASS",
@@ -72,6 +76,7 @@ export const R16_PINNED = {
   "f22/15 F2 destructure renamed": "PASS",
   "f22/15 F2 destructure let with default": "PASS",
   "f22/15 F2 destructure nested": "PASS",
+  "f22/21 G1 array element pattern": "PASS-REFUSED",
   "f22/16 F3 literal key": "PASS",
   "f22/16 F3 optional literal key": "PASS",
   "f22/17 F6 qualified is, payload": "PASS",
@@ -95,6 +100,12 @@ export const R16_PINNED = {
   "f22/18 F1 each row of unit values": "PASS",
   "f22/18 F1 each row template literal": "PASS",
   "f22/19 F2 when body destructure": "PASS",
+  "f22/20 G1 when array element pattern": "PASS-REFUSED",
+  "f22/20 G1 when later array element": "PASS-REFUSED",
+  "f22/20 G1 when array under a key": "PASS-REFUSED",
+  "f22/20 G1 when later declarator": "PASS-REFUSED",
+  "f22/20 G1 when quoted key": "PASS-REFUSED",
+  "f22/20 G1 when computed key": "PASS-REFUSED",
   "f22/19 F3 when body literal key": "PASS",
   "f22/VALID function expression is .Denied (payload)": "PASS",
   "f22/VALID block arrow is .Gone (unit)": "PASS",
@@ -129,6 +140,7 @@ export const R16_PINNED = {
   "l14/15 F2 destructure renamed": "PASS",
   "l14/15 F2 destructure let with default": "PASS",
   "l14/15 F2 destructure nested": "PASS",
+  "l14/21 G1 array element pattern": "PASS-REFUSED",
   "l14/16 F3 literal key": "PASS",
   "l14/16 F3 optional literal key": "PASS",
   "l14/17 F6 qualified is, payload": "PASS",
@@ -165,6 +177,7 @@ export const R16_PINNED = {
   "t14/15 F2 destructure renamed": "PASS",
   "t14/15 F2 destructure let with default": "PASS",
   "t14/15 F2 destructure nested": "PASS",
+  "t14/21 G1 array element pattern": "PASS-REFUSED",
   "t14/16 F3 literal key": "PASS",
   "t14/16 F3 optional literal key": "PASS",
   "t14/17 F6 qualified is, payload": "PASS",

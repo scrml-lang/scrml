@@ -65,6 +65,8 @@ function cases(srv, side) {
     ["15 F2 destructure renamed", D(), `const { variant: tag } = mkG(p)\n        ${G(`tag == "Gone"`)}`],
     ["15 F2 destructure let with default", D(), `let { variant = "none" } = mkG(p)\n        ${G(`variant == "Gone"`)}`],
     ["15 F2 destructure nested", D(), `const { e: { variant } } = { e: mkG(p) }\n        ${G(`variant == "Gone"`)}`],
+    // fix round 2 — G1 in a function body (the structured declaration path)
+    ["21 G1 array element pattern", D(), `const [{ variant }] = [mkG(p)]\n        ${G(`variant == "Gone"`)}`],
     // F3: a literal-key read
     ["16 F3 literal key", D(), `const x = mkG(p)\n        ${G(`x["variant"] == "Gone"`)}`],
     ["16 F3 optional literal key", D(), `const x = mkG(p)\n        ${G(`x?.["variant"] == "Gone"`)}`],
@@ -186,6 +188,14 @@ ${cells}
     ["18 F1 each row of unit values", pg(`function go(p) { @xs = [mkG(p)] }`, `<each in=@xs as r><span>\${r.variant == "Gone" ? ${R}}</span></each>`, D1, XC)],
     ["18 F1 each row template literal", pg(XS, "<each in=@xs key=@.id as r><span>${`${r.e.variant}` == \"Gone\" ? " + R + "}</span></each>", D1, XC)],
     ["19 F2 when body destructure", pg(`${GO}\n    when @st changes { const { variant } = @st\n @msg = variant == "Gone" ? ${R} }`, `\${@msg}`)],
+    // fix round 2 (re-review of 43386e9d5) — G1: a text-lowered (`when` body) pattern naming `variant`
+    // anywhere but the top of the first declarator's object, or as a quoted / computed key
+    ["20 G1 when array element pattern", pg(`${GO}\n    when @st changes { const [{ variant }] = [@st]\n @msg = variant == "Gone" ? ${R} }`, `\${@msg}`)],
+    ["20 G1 when later array element", pg(`${GO}\n    when @st changes { const [a, { variant }] = [1, @st]\n @msg = variant == "Gone" ? ${R} }`, `\${@msg}`)],
+    ["20 G1 when array under a key", pg(`${GO}\n    when @st changes { const { a: [{ variant }] } = { a: [@st] }\n @msg = variant == "Gone" ? ${R} }`, `\${@msg}`)],
+    ["20 G1 when later declarator", pg(`${GO}\n    when @st changes { const y = 1, { variant } = @st\n @msg = variant == "Gone" && y == 1 ? ${R} }`, `\${@msg}`)],
+    ["20 G1 when quoted key", pg(`${GO}\n    when @st changes { const { "variant": v } = @st\n @msg = v == "Gone" ? ${R} }`, `\${@msg}`)],
+    ["20 G1 when computed key", pg(`${GO}\n    when @st changes { const { ["variant"]: v } = @st\n @msg = v == "Gone" ? ${R} }`, `\${@msg}`)],
     ["19 F3 when body literal key", pg(`${GO}\n    when @st changes { @msg = @st["variant"] == "Gone" ? ${R} }`, `\${@msg}`)],
     ["VALID function expression is .Denied (payload)", pg(`function go(p) { const f = function(v) { return v is .Denied }\n @msg = f(mkD(p)) ? ${R} }`, `\${@msg}`)],
     ["VALID block arrow is .Gone (unit)", pg(`function go(p) { const f = (v) => { return v is .Gone }\n @msg = f(mkG(p)) ? ${R} }`, `\${@msg}`)],

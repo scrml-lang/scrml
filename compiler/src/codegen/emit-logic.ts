@@ -2929,6 +2929,8 @@ function _ensureBoundary(opts: EmitLogicOpts, context: string): EmitLogicOpts {
 }
 
 let _variantDeclSeq = 0;
+/** Reset per compile (resetCodegenModuleState) — the temp names are part of the build identity. */
+export function resetVariantDeclSeq(): void { _variantDeclSeq = 0; }
 /**
  * S470 (s470-unit-variant-tag-read, review F2) — `const { variant, … } = v` / `let …`: a
  * pattern cannot read `variant` off a unit variant (its bare tag string, §51.3.2), so the

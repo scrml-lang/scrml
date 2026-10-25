@@ -113,3 +113,11 @@ Base: main `d582ae04f`.
   integration + conformance (hook) 0 fail; lsp + commands 0 fail; e2e-render-map 259 pass; todomvc ok;
   browser-baseline PASS; slices 0 fail; no-default-arm 0; host-global-scan 0 violations; runtime-size
   ratchet 11 pass, runtime untouched (0 B).
+
+## Fix round 2 (re-review of 43386e9d5)
+- [x] G2 determinism: `_variantTempSeq` / `_variantDeclSeq` reset in `resetCodegenModuleState`; unit test
+      compiles one file twice in one process and asserts identical output (review det.mjs d1: identical).
+- [x] G1 text-path patterns: every outermost object OR array pattern (a later declarator, an array
+      element, under a key, a parameter, a `for` head) naming `variant` as a key at any depth — plain,
+      quoted or computed — is refused unless it is the one lowerable form (first declarator, object
+      pattern, a single plain top-level `variant` key). Pack r16 +10 (175).

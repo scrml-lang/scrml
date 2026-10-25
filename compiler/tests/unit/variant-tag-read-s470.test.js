@@ -20,6 +20,7 @@ import { pathToFileURL } from "url";
 import { compileScrml } from "../../src/api.js";
 import { lowerVariantTagRead, lowerVariantCheck } from "../../src/codegen/is-predicate-lowering.ts";
 import { rewriteVariantTagReads, rewriteIsOperator, rewriteExpr, rewriteServerExpr } from "../../src/codegen/rewrite.ts";
+import { resetRefusedLowerings, drainRefusedLowerings } from "../../src/codegen/refused-lowering-errors.ts";
 
 describe("lowerVariantTagRead — the one lowering", () => {
   test("a bare name is read in place; anything else is bound once", () => {
@@ -92,6 +93,26 @@ describe("rewriteVariantTagReads — the string-path twin", () => {
     const once = rewriteVariantTagReads(`const { variant } = v;`);
     expect(rewriteVariantTagReads(once)).toBe(once);
     expect(rewriteVariantTagReads(`const o = { variant: 1 };`)).toBe(`const o = { variant: 1 };`);
+  });
+
+  test("review G1 — a text pattern naming `variant` anywhere it cannot be lowered is refused", () => {
+    const refused = (s) => {
+      resetRefusedLowerings();
+      const out = rewriteVariantTagReads(s);
+      return { out, codes: drainRefusedLowerings().map((e) => e.code) };
+    };
+    for (const s of [`const [{ variant }] = [x]`, `const [a, { variant }] = t`, `let [{ variant: v }] = t`,
+      `const { a: [{ variant }] } = o`, `const [[{ variant }]] = t`, `const y = 1, { variant } = x`,
+      `const { ["variant"]: v } = x`, `const { "variant": v } = x`, `const { 'variant': v } = x`,
+      `const { e: { variant } } = r`, `for (const { variant } of xs) {}`, `const f = ({ variant }) => variant`]) {
+      expect(refused(s).codes).toEqual(["E-CODEGEN-INVALID-LOGIC"]);
+    }
+    // not patterns, or no `variant` key: untouched, no refusal
+    for (const s of [`const [a, variant] = t`, `const o = { "variant": 1 }`, `f({ variant: 1 })`, `const t = [{ variant: 1 }]`]) {
+      expect(refused(s)).toEqual({ out: s, codes: [] });
+    }
+    // the lowerable form is lowered, not refused
+    expect(refused(`const {variant} = x, y = 1`).codes).toEqual([]);
   });
 
   test("review F7 — `new X().variant` reads off the whole `new X()`", () => {
@@ -259,6 +280,19 @@ describe("compiled: `.variant` agrees with `is` (library mode, executed)", () =>
       expect((await run(LIB(body), "gate", ["secret"])).value).toBe("Denied");
     });
   }
+
+  test("review G2 — the destructuring temporaries are deterministic: the same file compiled twice in one process", () => {
+    const src = LIB(`const { variant } = mkG(p)\n        const r = { e: mkG(p) }\n        const { e: { variant: v2 } } = r\n        return variant + v2`);
+    const a = compileLibrary(src);
+    const b = compileLibrary(src);
+    try {
+      expect(a.js).toContain("__scrml_dv_");
+      expect(b.js).toBe(a.js);
+    } finally {
+      rmSync(a.dir, { recursive: true, force: true });
+      rmSync(b.dir, { recursive: true, force: true });
+    }
+  });
 
   test("review F2 — a `variant` key in a parameter pattern is refused, not miscompiled", () => {
     const { errors } = compileLibrary(LIB(`function f({ variant }) { return variant }\n        return f(mkG(p))`));
