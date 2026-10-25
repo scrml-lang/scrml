@@ -31,8 +31,8 @@
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 265 | 5 |
-| MED | 695 | 8 |
-| LOW | 501 | 0 |
+| MED | 697 | 8 |
+| LOW | 507 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
 
@@ -214,10 +214,50 @@ PA-verified on 91c1c9ca4: `~/.cache/scrml/review/s470-l1e/F4/nested-match-in-arm
 
 PA-verified on 07ebed34b (`~/.cache/scrml/review/s470-aw3/d/tpl2.scrml`): exit 0, emitted `for (let i = 0; $; i++) {`. Without a global `$` this throws a ReferenceError (fails closed). With jQuery, or any page-level `$`, the test is truthy, so `` `${@pw}` == "secret" ``-style gates pass for every input. A lost quote turns a string into an identifier read, so it throws. The `s470-action-body-await` lane refuses a C-style head naming a waiting function outside `when`, so the server-call instance is closed. The emitter defect itself is open everywhere. Fix direction: read the head with the expression reader (the parsed tree), not re-tokenised text.
 
-<!-- @gap id=g-when-changes-stale-response-s470 sev=MED status=open locus=compiler/runtime/runtime-template.js(_scrml_when_changes ~5417 — no sequence / stale-response guard on an async body) prov=review:S470-#1554-round-1(M1, bin/race.mjs);empirical:S470(~/.cache/scrml/review/s470-aw2/race/whenhelper.scrml) -->
-### g-when-changes-stale-response-s470 — (security, race) an async `when … changes` body has no stale-response guard: `@pw` set right then wrong in quick succession, with the right password's round trip slower, ends on "LOGGED IN" while `@pw` is "wrong" — `NEW S470; MED; open (pre-existing)`
+<!-- @gap id=g-when-changes-stale-response-s470 sev=MED status=narrowed narrowed-by=s470-when-changes-latest-wins locus=compiler/runtime/runtime-template.js(_scrml_when_changes ~5417 — no sequence / stale-response guard on an async body) prov=review:S470-#1554-round-1(M1, bin/race.mjs);empirical:S470(~/.cache/scrml/review/s470-aw2/race/whenhelper.scrml) -->
+### g-when-changes-stale-response-s470 — (security, race) an async `when … changes` body has no stale-response guard: `@pw` set right then wrong in quick succession, with the right password's round trip slower, ends on "LOGGED IN" while `@pw` is "wrong" — `NEW S470; MED; NARROWED S470 (#1560: the body's own awaits; a helper that writes the cell itself remains)`
 
 Measured by the #1554 reviewer's race harness on base and on every lane head. `<request>`'s settle machine has a sequence guard and ends "false" on the same race; `when` has none. Fix direction: give `_scrml_when_changes` the same latest-wins sequence check.
+
+> **NARROWED S470 (#1560, s470-when-changes-latest-wins).** SPEC §6.7.4: a run suspended at a server call when its effect re-triggers "is cancelled and never resumes", and the settled value or failure is discarded. `when … changes` is a spelling of `<effect>`. `_scrml_when_changes` (compiler/src/runtime-template.js) keeps a per-instance sequence counter, the `<request>` mechanism. `wrapOwnAwaits` (compiler/src/codegen/js-async-analysis.ts) rewrites every own-level `await X` of the body as `(C(await W(X)) ? C.value : await S())`, so the check runs synchronously at the point the run resumes, with no microtask window. A stale or disposed run awaits a fresh promise that never settles, so its catch and finally do not run. A body that cannot be gated is refused with a located E-CODEGEN-INVALID-LOGIC. The race fixtures end "rejected" (main: "LOGGED IN"), and the review's microtask sweep shows no stale writes at K=0..59. Cost: +130 B gzip in core runtime; the `<each>` row if= ratchet was raised 8,245 → 8,375 (owner ruling S470, "allow raising the budget").
+>
+> **Still open (MED):** the gate wraps only the BODY's own awaits. A helper the body calls that awaits a server call internally and writes the cell itself, `function check(p){ if (isOk(p)) { @msg = "LOGGED IN" } … }` with body `check(@pw)`, still lands its stale write: "LOGGED IN" with `@pw` = wrong (review F1, `~/.cache/scrml/review/s470-le/fx/a01-helperwrite.scrml`, executed on #1560 and main). A related question needs an owner ruling (review F2, `fx/a15-helperbeacon.scrml`): is the rest of a called helper part of the cancelled run's "continuation"? Today a stale helper still sends its outside-world call (`beacon("secret")`). PA recommendation: yes, callee frames are part of the continuation. Fix directions: thread the run's gate into async-coloured helpers called from a `when` body, or enforce §6.7.4's E-EFFECT-WRITES-STATE. The second removes F1 but not F2.
+
+<!-- @gap id=g-when-in-engine-body-dropped-s470 sev=MED status=open locus=UNTRACED(engine state/body lowering — a `${ when … changes { … } }` in an `<engine>` body is never emitted) prov=dispatch:s470-when-changes-latest-wins(candidate 1);review:S470-#1560(F5, fx/k/eng.scrml executed) -->
+### g-when-in-engine-body-dropped-s470 — a `${ when … changes { … } }` inside an `<engine>` body is silently dropped: exit 0, no `_scrml_when_changes` in the output, no diagnostic — `NEW S470; MED; open`
+
+The same on main. A gate or guard written there never runs. Fix: emit it like a top-level `when`, or refuse it with a located error.
+
+<!-- @gap id=g-request-body-trailing-statements-run-once-s470 sev=MED status=open locus=UNTRACED(`<request>` body lowering — statements after the first write are emitted at module init, outside the fetch) prov=dispatch:s470-when-changes-latest-wins(candidate 2);dispatch:s470-await-residue(candidate);review:S470-#1560(F6, fx/k/req2.scrml);review:S470-lane-F(F8, fx/med.mjs row 4) -->
+### g-request-body-trailing-statements-run-once-s470 — in a multi-statement `<request>` body, the statements after the first write are emitted at module init, outside the fetch: `if (@ok) { … }` runs once at boot and never after a load (`n=1` after reloads) — `NEW S470; MED; open (pre-existing semantics)`
+
+Reproduced by two lanes and two reviews, on main. SPEC §6.7.7 treats the body as the fetch's continuation. Fix: lower the whole body inside the settle continuation, or refuse trailing statements.
+
+<!-- @gap id=g-engine-effect-async-no-newest-wins-s470 sev=LOW status=open locus=compiler/src/codegen/emit-engine.ts(opener `effect=` / transition effects emit an unguarded `(async function () {…})()`) prov=dispatch:s470-when-changes-latest-wins(candidate 3);review:S470-#1560(F7, read-only, fx/k/engopen.scrml) -->
+### g-engine-effect-async-no-newest-wins-s470 — engine transition effects and the opener `effect=` can be async, and impl#1 emits them as an unguarded `(async function () {…})()`; SPEC §51.7.1 gives engine effects no rule for a re-trigger while one is suspended, so a stale run may land last (the `when` race class) — `NEW S470; LOW; open (SPEC question)`
+
+Read from emitted JS only; no race was built. The lane F review measured the same class on the newly async `<onTransition>` / state `effect=` hosts (F5), which lane s470-await-residue is fixing. A SPEC sentence extending §6.7.4's newest-run-wins to engine effects would settle it.
+
+<!-- @gap id=g-impl1-nested-when-wrong-code-s470 sev=LOW status=open locus=UNTRACED(when-in-when lowering) prov=dispatch:s470-when-changes-latest-wins(candidate 4);review:S470-#1560(F8, fx/k/nested.scrml executed) -->
+### g-impl1-nested-when-wrong-code-s470 — a `when` nested in a `when` body is refused as E-CODEGEN-INVALID-LOGIC (a compiler-defect code) instead of SPEC's E-LIFECYCLE-016 — `NEW S470; LOW; open (fails closed, wrong code)`
+
+<!-- @gap id=g-impl1-when-body-false-boundary-warning-s470 sev=LOW status=open locus=UNTRACED(a reader of the when body sees only its first statement) prov=dispatch:s470-when-changes-latest-wins(candidate 5);review:S470-#1560(F9, fx/k/multi.scrml) -->
+### g-impl1-when-body-false-boundary-warning-s470 — a multi-statement `when` body logs "statement boundary not detected — trailing content would be silently dropped", but the emitted body is complete: some other reader of the body sees only its first statement — `NEW S470; LOW; open (diagnostic noise; reader not traced)`
+
+<!-- @gap id=g-impl1-when-body-nested-block-newline-s470 sev=LOW status=open locus=UNTRACED(when body re-read from text) prov=review:S470-#1560(F13, fx/a02, a03, a05) -->
+### g-impl1-when-body-nested-block-newline-s470 — a newline inside a nested block of a `when` body (`if` / `try` / `switch`) is E-CODEGEN-INVALID-LOGIC, while the one-line `try` / `switch` forms compile clean although §7.2.1 forbids `try` and `switch` — `NEW S470; LOW; open`
+
+The multi-line forms fail closed. The accepted one-line `try` / `switch` is a missing refusal, not a known fail-open.
+
+<!-- @gap id=g-when-gate-asi-hazard-s470 sev=LOW status=open locus=compiler/src/codegen/js-async-analysis.ts(wrapOwnAwaits — the rewrite starts with `(`) prov=review:S470-#1560-round-2(R1, bin/gate.mjs case 10) -->
+### g-when-gate-asi-hazard-s470 — the `when` gate rewrite of an `await` starts with `(`, so a statement-start `await` after a line with no `;` becomes a call of the previous line (`x = 1⏎(_scrml_live(…` → "1 is not a function") — `NEW S470; LOW; open (latent)`
+
+Latent: every compiler-emitted body joins statements with `; `, and statement-start awaits are refused (E-IMPL1-ACTION-NOT-AWAITED); reached only through the API. Fix: emit a leading `;` when the AwaitExpression starts an ExpressionStatement.
+
+<!-- @gap id=g-when-gate-helpers-in-core-runtime-s470 sev=LOW status=open locus=compiler/src/runtime-template.js(`_scrml_when_wait` / `_scrml_when_stop` in core) prov=review:S470-#1560-round-2(R2, bin/meas.mjs) -->
+### g-when-gate-helpers-in-core-runtime-s470 — the `when` gate helpers ship in the core runtime, so every page pays +130 B gzip even with no `when`, and the `<each>` row if= shape sits 1 B under its raised ceiling — `NEW S470; LOW; open (size)`
+
+Fix: ship `_scrml_when_wait` / `_scrml_when_stop` only on pages that emit an async `when` body, which wins back the raise.
 
 <!-- @gap id=g-cell-init-reset-thunk-holds-promise-s470 sev=MED status=open locus=compiler/src/codegen(cell-initializer emission — `_scrml_init_set(name, () => <init>)` reset thunk) prov=dispatch:s470-action-body-await(candidate gap) -->
 ### g-cell-init-reset-thunk-holds-promise-s470 — `<v> = isOk(@pw)` awaits the initial write, but its reset thunk is `_scrml_init_set("v", () => _scrml_fetch_isOk_N(…))`, so a `reset @v` (or a form reset) stores a pending Promise in the cell, which is truthy — `NEW S470; MED; open (read from emitted JS, not executed)`
