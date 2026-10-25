@@ -15545,18 +15545,6 @@ function annotateNodes(
       // ------------------------------------------------------------------
       case "ErrorEffect":
       case "error-effect": {
-        // g-impl1-bang-catch-try-body-cut-at-first-brace-s470 — the statement form's try body
-        // (`!{ tryBody } catch T as b { … }`) is ordinary statements of the enclosing body, checked
-        // as a block. It was never visited, so nothing in it was checked: an unhandled failable call
-        // (E-ERROR-002), an undeclared name, an undeclared cell. The `catch` arms do NOT handle a
-        // failable call — the call returns its error, it does not throw — so a call there must be
-        // handled in place, like anywhere else.
-        const eeTryBody = n.body as ASTNodeLike[] | undefined;
-        if (Array.isArray(eeTryBody)) {
-          scopeChain.push(`error-effect-try:${nodeKey(n)}`);
-          for (const child of eeTryBody) visitNode(child);
-          scopeChain.pop();
-        }
         resolvedType = tAsIs();
         break;
       }

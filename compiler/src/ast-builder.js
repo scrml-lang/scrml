@@ -12618,6 +12618,12 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
     dropArmHeadComments();
     const tok = peek();
 
+    // S470 (E-TRY-NOT-IN-SCRML, §19.1) — a `catch` at a statement start is never scrml: it is the arm
+    // of a refused `!{ … } catch …` form whose `!{ … }` was read without it, or a bare catch clause.
+    if ((tok.kind === "KEYWORD" || tok.kind === "IDENT") && tok.text === "catch") {
+      errors.push(new TABError("E-TRY-NOT-IN-SCRML", TRY_CATCH_FORM_MESSAGE, tokenSpan(tok, filePath)));
+    }
+
     // BLOCK_REF — embedded child block
     if (tok.kind === "BLOCK_REF" && !sqlBlockRefHasTail(0)) {
       const _refIdx = i;
@@ -16517,6 +16523,11 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
     // GUARDED-EXPR (outer loop): error-effect BLOCK_REF after a node wraps previous node
     // If the current token is a BLOCK_REF to error-effect AND we have a previous node,
     // replace the last node with a guarded-expr.
+    // S470 (E-TRY-NOT-IN-SCRML, §19.1) — a `catch` at a statement start (see parseOneStatement).
+    if ((tok.kind === "KEYWORD" || tok.kind === "IDENT") && tok.text === "catch") {
+      errors.push(new TABError("E-TRY-NOT-IN-SCRML", TRY_CATCH_FORM_MESSAGE, tokenSpan(tok, filePath)));
+    }
+
     // g-impl1-bang-catch-try-body-cut-at-first-brace-s470 — not the statement form `!{ … } catch …`,
     // which is its own statement (gluing it to the previous node dropped its try body).
     if (tok.kind === "BLOCK_REF" && tok.block && tok.block.type === "error-effect" && nodes.length > 0 &&
@@ -25938,77 +25949,21 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
       //   Statement: `!{ tryBody } catch Type [as binding] { handlerBody } ...`
       //
       // g-impl1-bang-catch-try-body-cut-at-first-brace-s470 (security) — the statement form's try
-      // body used to be cut at the FIRST `}` of the raw, so any nested brace (a handled call's
-      // `!{ … }`, a block, an object literal, a `}` in a string or comment) ended it early: the
-      // handled call lost its handler and every catch arm was dropped. The try body and each arm are
-      // now sliced where the BLOCK SPLITTER ended them (`errorEffectExtent`, recorded by the reader
-      // that balanced the whole block); a statement form without that record, or one the logic
-      // tokenizer does not read as the same balanced body, is refused here with its location —
-      // never re-scanned or guessed.
+      // body used to be cut at the FIRST `}` of the raw, so a nested brace ended it early and the
+      // handled call lost its handler. The form is now refused (S470 ruling, below); the splitter's
+      // `errorEffectExtent` is what detects it.
       const rawContent = block.raw.slice(2); // strip leading `!{`
-      const arms = [];
-      const ext = block.errorEffectExtent;
       const isStatementForm = errorEffectIsStatementForm(block);
 
       if (isStatementForm) {
-        const base = block.span.start;
-        const refuse = (msg, at) => {
-          errors.push(new TABError(
-            "E-PARSE-001",
-            "E-PARSE-001: " + msg + " (the statement form is `!{ … } catch Type [as name] { … }`, §19).",
-            at === undefined ? span : { ...span, start: at, end: at + 1, line: lineColAt(block, at).line, col: lineColAt(block, at).col },
-          ));
-          return { id: ++counter.next, kind: "error-effect", body: [], arms: [], span, refused: true };
-        };
-        if (!ext) {
-          return refuse("impl#1 cannot read where this `!{ … }` try body ends before its `catch` arm here, so it is not compiled. Move the statement into a function body");
-        }
-        if (ext.malformedAt >= 0) {
-          return refuse("this `catch` arm has no `{ … }` handler body", ext.malformedAt);
-        }
-        const tryBodyRaw = block.raw.slice(2, ext.tryEnd - base);
-        const bodyOffset = base + 2;
-        const tryChildren = (block.children ?? []).slice(0, ext.tryChildCount);
-        const tryTokens = tokenizeLogic(tryBodyRaw, bodyOffset, block.span.line, block.span.col + 2, tryChildren);
-        const disagree = tokensLeaveBodyOpen(tryTokens, tryBodyRaw, bodyOffset);
-        if (disagree) {
-          return refuse(`impl#1's readers disagree on where this \`!{ … }\` try body ends (${disagree}), so it is not compiled`, ext.tryEnd);
-        }
-
-        // Each `catch TYPE [as BINDING] { handlerBody }` arm, sliced where the splitter read it.
-        const armHeader = /^catch\s+([A-Za-z_$][A-Za-z0-9_$]*)(?:\s+as\s+([A-Za-z_$][A-Za-z0-9_$]*))?\s*$/;
-        for (const a of ext.arms) {
-          if (a.close < 0) return refuse("this `catch` arm's handler body is not closed", a.start);
-          const header = block.raw.slice(a.start - base, a.open - base);
-          const m = armHeader.exec(header);
-          if (!m) return refuse(`this \`catch\` arm header \`${header.trim().slice(0, 60)}\` is not \`catch Type\` or \`catch Type as name\``, a.start);
-          const handlerOffset = a.open + 1;
-          const handlerRaw = block.raw.slice(handlerOffset - base, a.close - base);
-          const armChildren = (block.children ?? []).slice(a.childFrom, a.childTo);
-          const hTokens = tokenizeLogic(handlerRaw, handlerOffset, block.span.line, block.span.col, armChildren);
-          const hDisagree = tokensLeaveBodyOpen(hTokens, handlerRaw, handlerOffset);
-          if (hDisagree) return refuse(`impl#1's readers disagree on where this \`catch\` arm's handler body ends (${hDisagree}), so it is not compiled`, a.close);
-          const handlerBody = handlerRaw.trim();
-          arms.push({
-            pattern: m[1],
-            binding: m[2] ?? "",
-            handler: handlerBody,
-            handlerExpr: safeParseExprToNodeGlobal(handlerBody, filePath, handlerOffset),
-            span: { file: filePath, start: a.start, end: a.close + 1, line: block.span.line, col: block.span.col },
-          });
-        }
-
-        // Parse the try body as logic nodes, with the block's own nested blocks as BLOCK_REFs.
-        noteIsSomeTokens(tryTokens);
-        const tryBody = parseLogicBody(tryTokens, filePath, tryChildren, block, counter, errors, "logic");
-
-        return {
-          id: ++counter.next,
-          kind: "error-effect",
-          body: tryBody,
-          arms,
-          span,
-        };
+        // S470 ruling (PA, g-impl1-bang-catch-try-body-cut-at-first-brace-s470): the statement form is
+        // REFUSED — SPEC §19.1 "There is NO try/catch. There are NO exceptions. Errors are values that
+        // flow through the type system and are checked at compile time." Its catch arm could never
+        // handle a scrml failure (a failable call RETURNS its error), so the form only ever failed
+        // open. It is detected from the splitter's record (`errorEffectExtent`), wherever it is
+        // written, and refused once, at its `!{`; nothing of it is lowered.
+        errors.push(new TABError("E-TRY-NOT-IN-SCRML", TRY_CATCH_FORM_MESSAGE, span));
+        return { id: ++counter.next, kind: "error-effect", arms: [], span, refused: true };
       } else {
         // Legacy `| ::Type e -> body` format
         const bodyRaw = rawContent.slice(0, rawContent.length - 1); // strip trailing `}`
@@ -26090,23 +26045,24 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
 /**
  * g-impl1-bang-catch-try-body-cut-at-first-brace-s470 — is the `!{ … }` BLOCK_REF `tok` (followed by
  * token `after`) the STATEMENT form `!{ tryBody } catch …`, which is never a postfix handler of the
- * statement before it? A `!{ … }` whose `catch` arms were not read with it (a block re-read from
- * text: the arms are left behind as tokens) is refused here — its try body's extent is unknown.
+ * statement before it? The form is refused (E-TRY-NOT-IN-SCRML) where it is built; a `!{ … }` whose
+ * `catch` arms were not read with it (a block re-read from text: the arms are left behind as tokens)
+ * is refused at that `catch` (parseOneStatement).
  */
 function bangStatementFormAt(tok, after, errors, filePath) {
   if (errorEffectIsStatementForm(tok.block)) return true;
-  if (after && (after.kind === "KEYWORD" || after.kind === "IDENT") && after.text === "catch") {
-    errors.push(new TABError(
-      "E-PARSE-001",
-      "E-PARSE-001: impl#1 cannot read this `!{ … } catch …` statement here (its `catch` arm was not read " +
-      "with its try body), so it is not compiled. Move it into a function body, or handle the call in place " +
-      "with `call() !{ .Variant :> … }` (§19).",
-      tokenSpan(tok, filePath),
-    ));
-    return true;
-  }
+  // Its `catch` is then refused where it starts a statement (one E-TRY-NOT-IN-SCRML, at the `catch`).
+  if (after && (after.kind === "KEYWORD" || after.kind === "IDENT") && after.text === "catch") return true;
   return false;
 }
+
+/** The one message for the refused `!{ … } catch …` statement form (and a stray `catch`). */
+const TRY_CATCH_FORM_MESSAGE =
+  "E-TRY-NOT-IN-SCRML: scrml has no `try`/`catch` (§19.1: \"There is NO try/catch. There are NO exceptions.\"). " +
+  "The statement form `!{ … } catch Type [as name] { … }` is not scrml, and its catch could never run for a " +
+  "scrml failure: a failable call RETURNS its error, it does not throw. Handle the call where it is made — " +
+  "`call() !{ .Variant b :> … }`, or bind the whole error with `call() !{ _ e :> … }` (§19.4.3, §18.6.1) — " +
+  "or `match` on its result.";
 
 /**
  * g-impl1-bang-catch-try-body-cut-at-first-brace-s470 — is this `!{ … }` block the STATEMENT
@@ -26115,50 +26071,13 @@ function bangStatementFormAt(tok, after, errors, filePath) {
  * The block splitter records where it ended the try body and each `catch` arm
  * (`errorEffectExtent`); a block with a recorded arm, or a recorded malformed `catch`, is the
  * statement form. A block built without that record (a `!{` re-read from text) is judged by the
- * presence of `} catch` after a brace — the statement form there is refused by the caller, since
- * its extent was never read.
+ * presence of `} catch` after a brace. Either way the form is refused (E-TRY-NOT-IN-SCRML).
  */
 export function errorEffectIsStatementForm(block) {
   if (!block || block.type !== "error-effect") return false;
   const ext = block.errorEffectExtent;
   if (ext) return ext.arms.length > 0 || ext.malformedAt >= 0;
   return /\}\s*catch\b/.test(String(block.raw ?? "").slice(2));
-}
-
-/**
- * The logic tokenizer's reading of a body the block splitter delimited: a reason string when the
- * tokenizer does NOT see the same balanced body (a `{` / `}` that does not balance, or a string /
- * template literal still open at the end — the splitter ended the body inside it), else null.
- */
-function tokensLeaveBodyOpen(tokens, content, baseOffset) {
-  let depth = 0;
-  for (const t of tokens) {
-    if (t.kind === "PUNCT" && t.text === "{") depth++;
-    else if (t.kind === "PUNCT" && t.text === "}") {
-      depth--;
-      if (depth < 0) return "a `}` closes more than the body opened";
-    } else if (t.kind === "STRING" && t.span) {
-      const end = t.span.end - baseOffset;
-      if (end >= content.length) {
-        const open = content[t.span.start - baseOffset];
-        const close = content[content.length - 1];
-        if (end - (t.span.start - baseOffset) < 2 || close !== open) return "a string or template literal is still open at its end";
-      }
-    }
-  }
-  if (depth !== 0) return "a `{` is not closed inside the body";
-  return null;
-}
-
-/** 1-based line / col of absolute offset `at` inside `block` (counted from the block's own start). */
-function lineColAt(block, at) {
-  const rel = Math.max(0, Math.min(String(block.raw ?? "").length, at - block.span.start));
-  const before = String(block.raw ?? "").slice(0, rel);
-  const nl = before.lastIndexOf("\n");
-  if (nl < 0) return { line: block.span.line, col: block.span.col + rel };
-  let lines = 0;
-  for (let i = 0; i < before.length; i++) if (before[i] === "\n") lines++;
-  return { line: block.span.line + lines, col: rel - nl };
 }
 
 /**
