@@ -1419,7 +1419,12 @@ export function emitReactiveWiring(ctx: CompileContext): string[] {
   // file-filtered server-fn names reach it under a key ONLY that branch reads, so
   // no other top-level statement's lowering changes.
   const whenServerFnNames = ctx.routeMap ? _clientServerFnNames(ctx.routeMap, ctx.filePath ?? "") : null;
-  const whenEmitSpread = whenServerFnNames && whenServerFnNames.size > 0 ? { whenServerFnNames } : {};
+  // s470-action-body-await — and the file's async-coloured client helpers (awaited the same way).
+  const whenClientAsyncFnNames = ctx.routeMap ? (clientAsyncFactsOf(ctx).asyncFnNames ?? null) : null;
+  const whenEmitSpread = {
+    ...(whenServerFnNames && whenServerFnNames.size > 0 ? { whenServerFnNames } : {}),
+    ...(whenClientAsyncFnNames && whenClientAsyncFnNames.size > 0 ? { whenClientAsyncFnNames } : {}),
+  };
 
   for (const group of drainGroups()) {
     const { pid, stmts } = group;

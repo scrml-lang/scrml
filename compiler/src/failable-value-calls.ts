@@ -235,11 +235,6 @@ function hasStructuredExpression(st: Record<string, unknown>): boolean {
   return false;
 }
 
-/** Every identifier-shaped run of `t` (the over-approximating fallback of mentionedNames). */
-function identifierRuns(t: string, out: Set<string>): void {
-  for (const m of t.matchAll(/[A-Za-z_$][\w$]*/g)) out.add(m[0]);
-}
-
 /**
  * S469 follow-up (§19.4.3) — every name a piece of source TEXT could refer to, read with the
  * compiler's own logic tokenizer. Used ONLY to REFUSE: when text this walk must read does not
@@ -253,12 +248,31 @@ function identifierRuns(t: string, out: Set<string>): void {
  */
 export function mentionedNames(text: string): Set<string> {
   const out = new Set<string>();
+  scanMentionedNames(text, (n) => out.add(n));
+  return out;
+}
+
+/**
+ * s470-action-body-await fix round 4 — the same reader as `mentionedNames`, counting every
+ * OCCURRENCE of each name (a `${ … }` interpolation's names included; a name read as a property
+ * excluded). Used ONLY to refuse: a body whose text names a waiting function more times than a
+ * walk accounted for holds an occurrence that walk did not see.
+ */
+export function mentionedNameCounts(text: string): Map<string, number> {
+  const out = new Map<string, number>();
+  scanMentionedNames(text, (n) => out.set(n, (out.get(n) ?? 0) + 1));
+  return out;
+}
+
+/** The one scan behind `mentionedNames` / `mentionedNameCounts`: `emit` is called per occurrence. */
+function scanMentionedNames(text: string, emit: (name: string) => void): void {
+  const runs = (t: string): void => { for (const m of t.matchAll(/[A-Za-z_$][\w$]*/g)) emit(m[0]); };
   const scan = (t: string, depth: number): void => {
     let toks: Array<{ kind: string; text: string }>;
     try {
       toks = tokenizeLogic(t, 0, 1, 1, []) as unknown as Array<{ kind: string; text: string }>;
     } catch {
-      identifierRuns(t, out);
+      runs(t);
       return;
     }
     for (let i = 0; i < toks.length; i++) {
@@ -266,20 +280,19 @@ export function mentionedNames(text: string): Set<string> {
       if (k.kind === "IDENT" || k.kind === "KEYWORD") {
         const prev = i > 0 ? toks[i - 1] : null;
         if (prev && prev.kind === "PUNCT" && (prev.text === "." || prev.text === "?.")) continue;
-        out.add(k.text);
+        emit(k.text);
       } else if (k.kind === "STRING") {
         if (!k.text.includes("${")) continue;
         if (depth < 32) scan(k.text, depth + 1);
-        else identifierRuns(k.text, out);
+        else runs(k.text);
       } else if (k.kind !== "NUMBER" && k.kind !== "PUNCT" && k.kind !== "OPERATOR" && k.kind !== "EOF") {
         // An `@cell`, a block reference, or a token kind this reader has no class for: its text
         // may hold a name.
-        identifierRuns(k.text, out);
+        runs(k.text);
       }
     }
   };
   scan(text, 0);
-  return out;
 }
 
 function resolveName(name: string, scope: LocalScope | null, env: FailableEnv): string | null {
