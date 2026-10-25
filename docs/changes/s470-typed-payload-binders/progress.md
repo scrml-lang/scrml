@@ -175,6 +175,61 @@ scope) and binders typed:
   system makes unnecessary. The rest (untyped helpers, containers, unknown enums) still needs the
   allow-list or a ruling.
 
+## Fix round 1 (adversarial review of 7453d57ff: FIX; probes ~/.cache/scrml/review/s470-lb/b/ b1–b6, fp1, repin/)
+Root cause (the reviewer's): the enum fact was computed per syntactic form, not from the type. Now ONE
+type reader (`enumReadTypeOf`) gives every expression's static type and every type passes through
+`enumReadDeAlias`: a `type A = <RHS>` alias's registry entry stays `asIs` (no other check's view moves)
+but remembers its RHS and declaring registry (`aliasDeclContext`, set in `buildTypeRegistry`), so an alias
+resolves the way its declaration does — in its own file and in every importer (the importer receives the
+same registry object). Value flows reuse the walker itself (`enumReadReturnsOf`: a body's `return`s under
+its locals and branches) and the existing scope / overlay bindings.
+
+**Covered flows (each probed; the probe in brackets):**
+- a name's binding: a parameter / local / `lin` / cell / loop / `<each>` binder typed with an enum OR AN
+  ALIAS of one, incl. `A[]`, `A | not`, and an imported alias [b2 B6 B7 B8, b1 A13b, b5 C4, b2 B15, b1 A29];
+- a struct field of enum or alias type, a struct in a tape [b2 B17, b1 A16 A16c A36 A37];
+- a constructor `E.V(…)` / `E::V(…)` / `.V(…)`, a unit variant `E.U` / `E::U` / `.U`, through an alias name;
+- a call of a function: declared `-> T` (local, imported, an alias `-> I2`), else the ONE type every
+  `return` yields — constructors, unit variants, ternaries, locals, branches [b2 B1–B5, b1 A8–A10 A28];
+- an imported function (declared or inferred, read in the exporting file) and an imported `export const`
+  bound to a constructor [b5 C1–C3];
+- a ternary / `||` / `??` of values of one enum [b1 A2 A3 A4, b2 B13 B14];
+- a value `match` whose arms all yield one enum (each arm under its binders) [b2 B20, b1 A15 A30];
+- a closure's result (`const f = () => E.V(…)`, a block arrow, an IIFE) [b1 A19];
+- a tape of known element type: `xs[i]`, `.find` / `.findLast` / `.at` / `.pop` / `.shift` (element),
+  `.filter` / `.slice` / `.toSorted` / … (the tape), a callback's parameter (`.map((v) => …)` and the
+  other element callbacks; `reduce`'s 2nd), array destructuring [b2 B9–B12, b1 A22–A24];
+- local copies, reassignment of a typed `let` [b2 B16 B19, b1 A1 A20];
+- payload binders of `match` / `!{}` arms (round 0).
+- X-ADV: `@x.advance` is exempt only when `x` is an engine / machine cell (the machine registry's auto
+  cells) [b4 X2a X2c, fp1 V16]. X-HIST: `.V.history` / `E.V.history` is exempt only as an `@cell` write's
+  value or an `@cell.advance(…)` argument; anywhere else it is refused [b3 X6; engine-a7-history and
+  engine-event-handler-writes unit suites still pass].
+- PIN-COV: r7 declares `getReasonT` only for "A helper typed with the enum"; re-pinned from a run — every
+  r7 class now equals the reviewer's main run of r7-noT (VALID controls PASS again).
+
+**Not covered (recorded; no existing inference types them):** an UNTYPED tape literal `[E.V(…)]` and what
+is read off it (`xs[0]`, `for … of`, destructuring, a function returning `[…][0]`) [b1 A5 A6 A11 A21],
+an untyped struct / object literal and its destructuring [b1 A7 A16b], `.push` into an untyped tape
+[b1 A32], an untyped tape cell [b6 D4]. And, per the coordinator (to be filed): X-VAR (a payload field
+named `variant`) [b3 X4]; B-DYN — identity function, `: asIs`, `Object.values` / `entries`, spread,
+untyped helper parameter, JSON round-trip [b1 A12 A14 A17 A18 A26 A31 A35].
+
+**Fix-round-1 measurements** (head = dfcd31919 + merge of origin/main 6081e0685):
+- review probes b1–b6 + fp1 vs main da3180405: FAIL 261 → 61. The 61 are the recorded set only (b1
+  A5 A6 A7 A11 A12 A14 A16b A17 A18 A21 A26 A31 A32 A35 ×4, b3 X4 ×4, b6 D4). fp1 (25 VALID programs):
+  identical to main. No OK control newly refused.
+- all earlier probe sets + matrix vs 91c1c9ca4: FAIL 84 → 0, the same changes as the round-0 head.
+- pack: r10 (`r10-shapes.js`; s13 / f16 / l8 / t8), 91 shapes, every one FAIL on 7453d57ff (measured,
+  fams.mjs on a 7453d57ff archive) → PASS-REFUSED; EXPECTED_SHAPE_COUNT 2477; full pack green.
+- R26 vs origin/main (compiler = da3180405; 3,615 files, in-tree stdlib): 0 changed, 0 newly rejected.
+- CI-only jobs (ci3/): types:check OK (181) · root 2239/0 · snippet 113/0 · claim 18/0 · floor PASS ·
+  md-shim current · conflict-marker PASS · SPEC-INDEX OK · delta-lint PASS · ci-shards needs OK ·
+  s34 --check-new (6081e0685) PASS · integration+lsp+commands 10245/0 · unit+conformance 31628/0 ·
+  TodoMVC + node --check OK · browser-baseline PASS · lint-no-default-arm OK · slices m1/m2/m1-lowered/
+  m3/m4/codec 0 fail · e2e-render-map 259/0 · host-global 1/2 + 2/2 0 violations (2 / 135 threw, as
+  before) · bootstrap-severity + bootstrap-conformance current.
+
 ## Candidate gaps (not filed here)
 1. A markup `<match>` nested in a `<match>` arm is never mounted: the inner mount `<div
    data-scrml-match-mount=…>` is emitted but no dispatcher is generated for it, so its content (buttons,
