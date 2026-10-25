@@ -250,3 +250,54 @@ describe("fix round 1 — enum facts from the type (aliases, returns, imports, f
     expect(codesOf(src).filter((c) => c === "E-TYPE-004")).toEqual([]);
   });
 });
+
+// S470 fix round 2 (adversarial review of baef28219).
+describe("fix round 2 — imported alias chains, E | not returns, recursive returns", () => {
+  const DN = `function m1(p) {
+        if (p != "secret") return Inner::Bad("bad")
+        return not
+    }
+    function m3(p, n) {
+        if (p != "secret") return Inner::Bad("bad")
+        if (n > 0) return m3(p, n - 1)
+        return Inner::Ok2
+    }
+    function m7(p) {
+        if (p != "secret") return Inner::Bad("bad")
+        return
+    }
+    function m8(p) {
+        const r = m1(p)
+        return r
+    }
+    function m9(p) { return p != "secret" ? Inner::Bad("bad") : not }
+    function h0(p) { return p > 0 ? Inner.Ok2 : h1(p - 1) }
+    function h1(p) { return p > 1 ? Inner.Ok2 : h2(p - 1) }
+    function h2(p) { return p > 2 ? Inner::Bad("bad") : h0(p - 1) }`;
+  const REFUSED = [
+    ["U-NOT: a constructor or `not`", R(`m1(p).reason == "bad"`)],
+    ["U-NOT: a bare `return`", R(`m7(p).reason == "bad"`)],
+    ["U-NOT: passed through a local", R(`m8(p).reason == "bad"`)],
+    ["U-NOT: a ternary with `not`", R(`m9(p).reason == "bad"`)],
+    ["U-NOT: an optional read", R(`m1(p)?.reason == "bad"`)],
+    ["U-REC: a recursive return", R(`m3(p, 2).reason == "bad"`)],
+    ["U-REC: a cycle of functions", R(`h0(3).reason == "bad"`)],
+  ];
+  for (const [name, body] of REFUSED) {
+    test(name, () => { expect(codesOf(lib(DN, body), {}, "library")).toContain("E-TYPE-004"); });
+  }
+  test("ALLOWED: an E | not result tested with `is` / read as `.variant` with `?.`", () => {
+    expect(codesOf(lib(DN, R(`m1(p) is not || m1(p)?.variant == "Bad"`)), {}, "library")).toEqual([]);
+  });
+  test("ALLOWED: a recursive function of numbers", () => {
+    expect(codesOf(lib(`function fib(n) { if (n < 2) return n\n return fib(n - 1) + fib(n - 2) }`, R(`fib(10).toFixed(0) == "55"`)), {}, "library")).toEqual([]);
+  });
+  test("K-ALIAS2: an imported alias of an imported alias (local, tape, local alias of it)", () => {
+    const h = "${\n    export type Inner:enum = { Bad(reason: string), Ok2 }\n    export type I2 = Inner\n}\n";
+    const h2 = "import { I2 } from \"./h.scrml\"\n${\n    export type I3 = I2\n    export type I3L = I2[]\n}\n";
+    for (const body of [`const x: I3 = Inner::Bad("bad")\n @msg = x.reason`, `const xs: I3L = [Inner::Bad("bad")]\n @msg = xs[0].reason`, `const x: L4 = Inner::Bad("bad")\n @msg = x.reason`]) {
+      const src = `import { Inner } from "./h.scrml"\nimport { I3, I3L } from "./h2.scrml"\n<msg> = ""\n\${\n    type L4 = I3\n    function go() { ${body} }\n}\n<button onclick=go()>\${@msg}</button>\n`;
+      expect(codesOf(src, { "h.scrml": h, "h2.scrml": h2 })).toContain("E-TYPE-004");
+    }
+  });
+});
