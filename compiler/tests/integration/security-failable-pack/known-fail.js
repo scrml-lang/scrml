@@ -27,6 +27,30 @@ export const KNOWN_FAIL = {
   // E-VALUE-SERVER-CALL (§13.7 / §13.8; ruling:user-voice-scrml.md S469 item 1 "Refuse in impl#1").
   // The interpolation twin `f2/async helper, interpolation` (awaited, PASS) is refused by the same rule.
 
+  // S470 s470-whole-error-binder-escapes — escape 3 of g-impl1-whole-error-binder-allowlist-escapes-s469, OPEN
+  // (PA decision owed): a whole `e` passed to a variant constructor is allowed (§18.6.1 `.Failed(err)`), and
+  // impl#1 cannot follow the wrapped error back out — a constructor call, a `const` bound to one and a match
+  // payload binder carry no type, so the payload read is unchecked. The fallback refusal (a whole error into
+  // a constructor) newly-rejects examples/09-error-handling.scrml. FAIL on base 915b6775f too.
+  "s11/3 ctor extract match": "g-impl1-whole-error-binder-allowlist-escapes-s469 (escape 3): `match Box.Wrap(e) { .Wrap(i) :> i.reason … }`",
+  "s11/3 ctor extract dot ctor": "g-impl1-whole-error-binder-allowlist-escapes-s469 (escape 3): `.Wrap(e)` then `.Wrap(i) :> i.reason`",
+  "s11/3 ctor data member": "g-impl1-whole-error-binder-allowlist-escapes-s469 (escape 3): `Box.Wrap(e).data.inner.reason`",
+  "s11/3 ctor extract match eq": "g-impl1-whole-error-binder-allowlist-escapes-s469 (escape 3): `.Wrap(i) :> i == \"bad\"`",
+  "s11/3 ctor local alias data": "g-impl1-whole-error-binder-allowlist-escapes-s469 (escape 3): `const b = Box.Wrap(e)` then `b.data.inner.reason`",
+  "s11/3 ctor via typed fn": "g-impl1-whole-error-binder-allowlist-escapes-s469 (escape 3): `wr(x: AuthErr) { return Box.Wrap(x) }` then `.data.inner.reason`",
+  "f9/3 ctor data member": "g-impl1-whole-error-binder-allowlist-escapes-s469 (escape 3): `Box.Wrap(e).data.inner.reason`",
+  "f9/3 ctor local alias data": "g-impl1-whole-error-binder-allowlist-escapes-s469 (escape 3): `const b = Box.Wrap(e)` then `b.data.inner.reason`",
+  "f9/3 ctor via typed fn": "g-impl1-whole-error-binder-allowlist-escapes-s469 (escape 3): `wr(x: AuthErr) { return Box.Wrap(x) }` then `.data.inner.reason`",
+  "l6/3 ctor data member": "g-impl1-whole-error-binder-allowlist-escapes-s469 (escape 3): `Box.Wrap(e).data.inner.reason`",
+  "l6/3 ctor local alias data": "g-impl1-whole-error-binder-allowlist-escapes-s469 (escape 3): `const b = Box.Wrap(e)` then `b.data.inner.reason`",
+  "l6/3 ctor via typed fn": "g-impl1-whole-error-binder-allowlist-escapes-s469 (escape 3): `wr(x: AuthErr) { return Box.Wrap(x) }` then `.data.inner.reason`",
+  "t6/3 ctor extract match": "g-impl1-whole-error-binder-allowlist-escapes-s469 (escape 3): `match Box.Wrap(e) { .Wrap(i) :> i.reason … }`",
+  "t6/3 ctor extract dot ctor": "g-impl1-whole-error-binder-allowlist-escapes-s469 (escape 3): `.Wrap(e)` then `.Wrap(i) :> i.reason`",
+  "t6/3 ctor data member": "g-impl1-whole-error-binder-allowlist-escapes-s469 (escape 3): `Box.Wrap(e).data.inner.reason`",
+  "t6/3 ctor extract match eq": "g-impl1-whole-error-binder-allowlist-escapes-s469 (escape 3): `.Wrap(i) :> i == \"bad\"`",
+  "t6/3 ctor local alias data": "g-impl1-whole-error-binder-allowlist-escapes-s469 (escape 3): `const b = Box.Wrap(e)` then `b.data.inner.reason`",
+  "t6/3 ctor via typed fn": "g-impl1-whole-error-binder-allowlist-escapes-s469 (escape 3): `wr(x: AuthErr) { return Box.Wrap(x) }` then `.data.inner.reason`",
+
   // S469 s469-lift-gate-staleness: EMPTY again. The 36 n23 entries of round 5 (a cell read inside a called
   // function; the value-indexed row side; a body local in a keyed row) owed to
   // g-lift-gate-placement-inherits-main-staleness-s469 are fixed: a lifted gate re-evaluates by re-running the
