@@ -197,3 +197,11 @@ Reviewer material (read-only): `~/.cache/scrml/review/s470-lf/`. Measurement tre
 - SPEC §34 row: the derived closure, the late followers, the arm → hooks order, latest wins, the
   opener / `when` reset registration. s34-census --check-new PASS.
 - No runtime change (ratchet untouched).
+- Merged origin/main 646378d6f (incl. #1558 s470-async-colouring-scope: r9-shapes.js s12 / f15 / l7 /
+  t7, +415). Both families kept; EXPECTED_SHAPE_COUNT = 2712 (the pack's own count test passes on the
+  merged tree: 2680 + f23's 32). Pre-commit on the merge: 47132 pass / 0 fail (full pack included).
+- R26 after the merge (merged head vs an extracted origin/main 646378d6f): the same single justified
+  file (other-contexts.scrml); the rest are the stdlib harness artefact.
+- CI job commands on the merged tree: all exit 0 except facts --check (STALE, WARN-only, bot-owned) and
+  one lsp/commands run (`dev-watches-copied-client-helper` hit its 20s timeout under machine load;
+  re-run alone and the whole lsp + commands set: 774 / 0).
