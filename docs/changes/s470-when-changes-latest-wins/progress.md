@@ -74,3 +74,12 @@ passed as the body's parameter; the compiler wraps every own-level `await X` of 
   server-fn sites 49/49. Artifact content diffs 5545/11073 are the runtime file + its content-hash
   references: after normalising runtime hash / build ids / project root, 8937 of 8937 non-runtime
   artifacts are identical. No corpus source emits an async when body (no `_scrml_live` anywhere).
+- Merged origin/main (d582ae04f, inbox-debt only). Post-merge race: whenhelper/whensrv "rejected".
+- CI job commands, all rc=0: types-gate --check; root-level parser tests; snippet-gate; claim-gate;
+  corpus-compile-floor --check; gen-md-shim --check; conflict-marker-gate; regen-spec-index --check;
+  delta-lint; ci-shards needs; s34-census --check-new --base origin/main; lsp + commands tests;
+  lint-no-default-arm; self-host-v2 slice-m1 / m2 / m1 (SLICE_CORE=lowered) / m3 / m4 / codec;
+  host-global-scan --check 1/2 and 2/2; gen-bootstrap-severity --check; bootstrap-conformance --check;
+  e2e-render-map (259 pass); browser-baseline --check PASS; runtime-size-ratchet 11 pass;
+  pre-commit hook (unit+integration+conformance) 43079 pass / 0 fail.
+- STATUS: complete.
