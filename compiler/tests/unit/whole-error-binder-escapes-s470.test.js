@@ -179,3 +179,80 @@ describe("adjacent — a `match e` arm binding an enum-holding payload is refuse
     expect(codesOf(W(), X(`(match e { .Denied(r) :> r == "bad", else :> true })`))).toEqual([]);
   });
 });
+
+// S470 fix round 1 — the review of d015e3e34.
+const ENUM3 = `type Inner:enum = { Bad(reason: string), Ok2 }
+    type AuthErr:enum = { Denied(reason: string), Wrapped(inner: Inner, code: number), Gone }`;
+const W3 = (more = "") => `${ENUM3}
+    ${more}
+    server function wrap(p)! -> AuthErr {
+        if (p != "secret") fail AuthErr::Wrapped(Inner::Bad("bad"), 1)
+        return true
+    }`;
+
+describe("fix round 1 #1 — an audited callee's parameter DEFAULTS are audited", () => {
+  const REFUSED = [
+    ["D1 a default reads x.reason", `server function f(x: AuthErr, r = x.reason) { return r == "bad" }`, "E-TYPE-004"],
+    ["D2 a default aliases x", `server function f(x: AuthErr, y = x) { return y.reason == "bad" }`, "E-TYPE-031"],
+    ["D4 a default on the error parameter, another reads it", `server function f(x: AuthErr = AuthErr::Gone, r = x.reason) { return r == "bad" }`, "E-TYPE-004"],
+    ["D6 a default closure reads x.reason", `server function f(x: AuthErr, h = () => x.reason) { return h() == "bad" }`, "E-TYPE-004"],
+  ];
+  for (const [n, fn, code] of REFUSED) {
+    test(`${n} → ${code}`, () => {
+      expect(codesOf(W(fn), X(`f(e)`))).toContain(code);
+    });
+  }
+  test("ALLOWED by the audit: a default passing x to an audited function", () => {
+    // (A server-function default that calls a server function is E-PARAM-DEFAULT-AWAIT, unrelated.)
+    const codes = codesOf(W(`server function g(y: AuthErr) { return y is .Denied }
+    server function f(x: AuthErr, r = g(x)) { return r }`), X(`f(e)`));
+    expect(codes.filter((c) => c === "E-TYPE-031" || c === "E-TYPE-004")).toEqual([]);
+  });
+});
+
+describe("fix round 1 #2 — a top-level name declared twice is not one function declaration", () => {
+  test("R3 a top-level const beside the audited function → E-TYPE-031", () => {
+    expect(codesOf(W(`const check = (y) => y.reason == "bad"`), X(`check(e)`))).toContain("E-TYPE-031");
+  });
+});
+
+describe("fix round 1 #3 — a `!{}` inside a function written as a value is audited", () => {
+  test("F1 a function expression, direct e.reason → E-TYPE-004", () => {
+    expect(codesOf(W(), `const inner = function() { return wrap(p) !{ _ e :> e.reason == "bad" ? "rejected" : "LOGGED IN" } }
+        const v = inner()
+        return v == true ? "LOGGED IN" : v`)).toContain("E-TYPE-004");
+  });
+  test("F2 a block-bodied arrow, direct e.reason → E-TYPE-004", () => {
+    expect(codesOf(W(), `const inner = () => { return wrap(p) !{ _ e :> e.reason == "bad" ? "rejected" : "LOGGED IN" } }
+        const v = inner()
+        return v == true ? "LOGGED IN" : v`)).toContain("E-TYPE-004");
+  });
+  test("a parameter of the function expression shadows the audited `check` → E-TYPE-031", () => {
+    expect(codesOf(W(), `const inner = (check) => { return wrap(p) !{ _ e :> check(e) ? "rejected" : "LOGGED IN" } }
+        const v = inner((x) => x.reason == "bad")
+        return v == true ? "LOGGED IN" : v`)).toContain("E-TYPE-031");
+  });
+});
+
+describe("fix round 1 #4 — only the BOUND payload positions are checked", () => {
+  test("Q1 `.Wrapped(_, c)` binds only the primitive field → allowed", () => {
+    expect(codesOf(W3(), B(`match e { .Wrapped(_, c) :> { if (c == 1) { o = "rejected" } } else :> { } }`))).toEqual([]);
+  });
+  test("a named form binding the enum field (`code: _, inner: i`) → E-TYPE-031", () => {
+    expect(codesOf(W3(), B(`match e { .Wrapped(code: _, inner: i) :> { log(i) } else :> { } }`))).toContain("E-TYPE-031");
+  });
+  test("a positional binder of the enum field → E-TYPE-031", () => {
+    expect(codesOf(W3(), B(`match e { .Wrapped(i, _) :> { if (i.reason == "bad") { o = "rejected" } } else :> { } }`))).toContain("E-TYPE-031");
+  });
+});
+
+describe("fix round 1 #5 — a function declared in an audited callee's body resolves", () => {
+  test("P2 a nested typed helper → allowed", () => {
+    expect(codesOf(W(`server function f(x: AuthErr) { function g(y: AuthErr) { return y is .Denied }
+ return g(x) }`), X(`f(e)`))).toEqual([]);
+  });
+  test("a nested helper that reads a field → E-TYPE-004", () => {
+    expect(codesOf(W(`server function f(x: AuthErr) { function g(y: AuthErr) { return y.reason == "bad" }
+ return g(x) }`), X(`f(e)`))).toContain("E-TYPE-004");
+  });
+});
