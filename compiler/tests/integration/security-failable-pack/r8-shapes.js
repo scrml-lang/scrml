@@ -64,6 +64,16 @@ function cases(srv) {
     // adjacent — a `match e` arm binding an enum-holding payload
     ["4 nested enum payload member", W2(), B(`match e { .Wrapped(i) :> { if (i.reason == "bad") { o = "rejected" } } else :> { } }`)],
     ["4 nested enum payload eq", W2(), B(`match e { .Wrapped(i) :> { if (i == "bad") { o = "rejected" } } else :> { } }`)],
+    // S470 fix round 1 (review of d015e3e34): an audited callee's parameter defaults; a top-level
+    // const beside the audited function; a `!{}` in a function written as a value; a bound position
+    ["5 D1 default param reads x.reason", W(`${srv}function f(x: AuthErr, r = x.reason) { return r == "bad" }`), X(`f(e)`)],
+    ["5 D2 default param aliases x", W(`${srv}function f(x: AuthErr, y = x) { return y.reason == "bad" }`), X(`f(e)`)],
+    ["5 D4 default on the error param", W(`${srv}function f(x: AuthErr = AuthErr::Gone, r = x.reason) { return r == "bad" }`), X(`f(e)`)],
+    ["5 D6 default param closure", W(`${srv}function f(x: AuthErr, h = () => x.reason) { return h() == "bad" }`), X(`f(e)`)],
+    ["5 R3 top const beside fn", W(`const check = (y) => y.reason == "bad"`), X(`check(e)`)],
+    ["5 F1 fn-expr direct e.reason", W(), `const inner = function() { return wrap(p) !{ _ e :> e.reason == "bad" ? "rejected" : "LOGGED IN" } }\n        const v = inner()\n        return v == true ? "LOGGED IN" : v`],
+    ["5 F2 block arrow direct e.reason", W(), `const inner = () => { return wrap(p) !{ _ e :> e.reason == "bad" ? "rejected" : "LOGGED IN" } }\n        const v = inner()\n        return v == true ? "LOGGED IN" : v`],
+    ["VALID Q1 primitive sibling of enum field", W("", `type Inner:enum = { Bad(reason: string), Ok2 }\n    type AuthErr:enum = { Denied(reason: string), Wrapped(inner: Inner, code: number), Gone }`, `AuthErr::Wrapped(Inner::Bad("bad"), 1)`), B(`match e { .Wrapped(_, c) :> { if (c == 1) { o = "rejected" } } else :> { } }`)],
     // valid controls (the allowed uses still compile and deny)
     ["VALID check(e)", W(), X(`check(e)`)],
     ["VALID log(e)", W(), B(`log(e)\n            o = "rejected"`)],
