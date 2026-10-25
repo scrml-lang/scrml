@@ -79,3 +79,56 @@ meta2/m*/n09). `UNAWAITED` = the emitted line(s).
 
 ## Log
 
+
+- Design (one AST walk, the #1547 one — no new scanner, no new async machinery):
+  `codegen/render-waiting-calls.ts` gains a SYNCHRONOUS-ACTION-BODY judgement (`syncStmt`), reached
+  from (a) every module-init statement (a `${ }` statement that does not render — replaces the S470
+  round-2 partial rule, which judged only an assignment's RHS / a declaration's initializer), (b) a
+  `<request>` / `<timer>` / `<poll>` body (were skipped as "action"), (c) a `^{ }` body (was skipped),
+  (d) the engine's synchronous bodies read through engine-body-reader's ONE cached parse
+  (`readEngineBody`, same owner/slot/file as the type system): state-child `effect=`, `<onTransition>`
+  body and `if=` guard, message arms, computed `after=` delays. The waiting predicate is the existing
+  one (`waits` = `waitingFnPredicateOfFile` ∪ `serverPlacedFnNamesAnywhere` ∪ `computeClientAsyncSets`).
+  Two shapes stay accepted because the EMITTER already handles them: (1) a whole cell write of one call
+  `@cell = f(args)` (also under `!{}`) where `f` is a function THIS FILE declares that is server-placed or
+  client-async (= what emit-client's reactive-set lift matches: fnNameMap stub / `clientAsyncFactsOf`),
+  not an engine var, args not waiting; (2) a bare call statement (value discarded) with no waiting
+  argument / receiver; plus a lambda written as a statement (never called). Sites carry
+  `kind: "action"`; index.ts reports them as E-VALUE-SERVER-CALL with an action-position message
+  ("impl#1 runs this code synchronously and inserts no `await` here … Fix: … event handler / function,
+  or write its result straight into a cell as the whole statement"). A cell DECLARATION's initializer
+  and a plain decl's initializer keep the render (value-position) message.
+- Await fix where an async host exists (brief: "make it await via the existing path"): a
+  `when … changes` body and an engine opener `effect=` awaited a server call but not an async-coloured
+  client helper (q45 / q47). Both now thread the file's `clientAsyncFactsOf(ctx).asyncFnNames` into the
+  lowering ctx as `clientAsyncFnNames` (emit-expr `emitCall`'s existing client-peer await) and the
+  when-body text injector predicate. Gated on `ctx.routeMap` like the server names (synthetic-ctx unit
+  tests have none — timeout.test.js caught it).
+- Found by execution: the lift does NOT cover an IMPORTED async function (mf/page: `@msg = isOk(@pw)`
+  with `isOk` imported emitted `_scrml_reactive_set("msg", isOk(…))` — a Promise in the cell, at module
+  init and in a `<request>` body). The exemption is limited to functions the file declares, so those are
+  now refused (unit test "the lift exemption is limited…").
+- Tests updated: render-waiting-call-refused-s470 — `<request>` ACCEPTED entry `@pw = isOk("x") ? "a" :
+  "b"` (a Promise test — exactly the bug) → the whole-write form `@pw = isOk("x")`; the `^{ const r =
+  isOk("x") }` ACCEPTED entry removed (a declaration holding a pending Promise; now refused, covered in
+  the new file). New `compiler/tests/unit/action-body-await-s470.test.js` (64 tests: 35 refused positions,
+  23 accepted, 3 emitted-await checks, 3 import-lift checks).
+- Pack: security-failable-pack family `f9` (SIDE fullstack, 26 shapes). Measured with classify.js on an
+  extracted base tree (`git archive 4058bd052 compiler` + stdlib): **26/26 FAIL** (wrong → LOGGED IN);
+  branch: 24 PASS-REFUSED, `when body tests an async helper` PASS, `engine opener effect= tests an async
+  helper` PASS-DENY (boot-only effect: runs before the click, so both passwords read "rejected" — fail
+  closed, honest). EXPECTED_SHAPE_COUNT 1923 → 1949, pinned, README updated.
+- Full failable pack on branch: PASS=724 PASS-REFUSED=1189 PASS-500=2 PASS-DENY=16 UNJUDGED=18 **FAIL=0**
+  (= #1547's final 723/1165/2/15/18/0 + f9's 1/24/0/1). No other shape moved.
+- R26 (examples, samples, stdlib, benchmarks, compiler/tests/conformance — 1013 files; one in-process
+  compile per file; base = extracted 4058bd052 tree, branch = this worktree, same corpus files):
+  **newly-rejected 0, already-failing files gaining E-VALUE-SERVER-CALL 0, newly-clean 0.** The only
+  diffs are base-harness artefacts, verified: stdlib files read E-ASYNC-NOT-IN-SCRML when the base's
+  stdlib was a symlink (path outside the tree → not stdlib), and stdlib/compiler/* read E-IMPORT-008 on
+  base (no scrml.toml at the extracted root → `import:host` disabled). Re-run with a copied stdlib: no
+  other diff. E-VALUE-SERVER-CALL occurs in 21 files on both sides.
+- SPEC §34 E-VALUE-SERVER-CALL row: impl#1-emission note extended (impl#1-provisional) with the action
+  positions, the two accepted shapes, the emission site, and the when/opener await. NOTE for the PA: the
+  row's normative text says "Not this code: … every §6.15 action position"; impl#1 now reports
+  E-VALUE-SERVER-CALL at action positions it cannot await (as #1547 r2 already did for a module-scope
+  assignment). Naming fork below.

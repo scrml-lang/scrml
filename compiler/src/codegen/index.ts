@@ -2835,8 +2835,8 @@ export function runCG(input: CgInput): CgOutput {
             "body (§13.8 (i)); impl#1 does so only in a function body, an event handler, `on mount { }`, a " +
             "`when … changes { }` body and an engine opener `effect=`, so it refuses it here. Fix: make the call " +
             "in one of those (an event handler, or a `function` the handler calls), or write its result straight " +
-            "into a cell as the whole statement (`@cell = f(…)`, which impl#1 awaits — in a `<request>` (§6.7.7) " +
-            "for a load) and test the cell."
+            "into a cell as the whole statement (`@cell = f(…)` with `f` a function this file declares, which " +
+            "impl#1 awaits — in a `<request>` (§6.7.7) for a load) and test the cell."
           : `E-VALUE-SERVER-CALL: ${site.position} calls ${site.what}. A value position (a render ` +
             "position, re-evaluated synchronously while the page renders, or a declaration's initializer) " +
             "cannot wait for the call: it would hold a pending Promise, which is always truthy (§13.7, §13.8). The language allows a waiting value in markup only " +
