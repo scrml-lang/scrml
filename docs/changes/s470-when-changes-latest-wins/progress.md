@@ -110,3 +110,11 @@ passed as the body's parameter; the compiler wraps every own-level `await X` of 
   Ratchet (owner ruling S470: allow raising the budget): `<each>` row if= recorded 8245 -> 8375
   (+130 B = the measured delta from base; round 1 had 8310). Shell ceiling untouched. Trimmed the
   helper before measuring (box field names, an async `wait`): 8583 -> 8562.
+- R26 round 1 (base 6081e0685 manifest vs head d5014635a, 3618 sources): identical shape to round 0 — 0
+  compile-outcome / 0 diagnostic-code changes, 1 text-only (samples/login.scrml bundle line offset),
+  syntax delta 0, bare sites 49/49; 8937/8937 non-runtime artifacts identical after hash normalisation.
+- Merged origin/main (29fcaac8a, #1558 async-colouring-scope). Post-merge: unit+integration+conformance
+  41286 pass / 0 fail; fixture sweep unchanged (21 rejected, 1 rejected|rejected, a01 = F1); runtime
+  sizes unchanged; all 23 CI job commands rc=0 (list as before, incl. the security-failable pack in
+  integration); e2e-render-map 259 pass; browser-baseline --check PASS.
+- STATUS: fix round 1 complete.
