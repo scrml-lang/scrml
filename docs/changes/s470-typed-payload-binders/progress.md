@@ -230,6 +230,37 @@ untyped helper parameter, JSON round-trip [b1 A12 A14 A17 A18 A26 A31 A35].
   m3/m4/codec 0 fail · e2e-render-map 259/0 · host-global 1/2 + 2/2 0 violations (2 / 135 threw, as
   before) · bootstrap-severity + bootstrap-conformance current.
 
+## Fix round 2 (adversarial review of baef28219: FIX, narrowly; probes ~/.cache/scrml/review/s470-lb2/b/)
+- K-ALIAS2 FIXED — an alias's context now remembers its declaring FILE. A name its RHS uses that the
+  declaring registry does not hold (a dep registry is built from that file's own declarations only — api.js
+  `getDepRegistry` — so `h2`'s `type I3 = I2` saw no `I2`) is resolved through the declaring file's
+  imports to the file that declares it, at any depth (`enumReadImportedTypeOf`; depth-bounded against
+  import cycles). [b8 K1 K2 K3; K0 still refused]
+- U-NOT FIXED — `not` / `null` (a `lit` of value null) and a value-less `return` are the absent type;
+  `enumReadUnify` unifies one enum with it to `E | not` (what a declared `Inner | not` is read as), through
+  unions too, so a pass-through local keeps it. [b7 U1 U7 U8 U9 U13]
+- U-REC FIXED — while a function's result is inferred its memo holds PENDING; a call of it (recursion, or a
+  cycle of functions) reads PENDING, which unification skips (the result is the rest's). Each function is
+  inferred once (memoized). [b7 U3, perf/cyclebad] Cost, best of 3 compiles (perf.mjs): chain 0.35s vs
+  main 0.37s, chainbad 0.28 / 0.29, cycle 0.13 / 0.13, cyclebad 0.11 / 0.13.
+- PACK-CTRL — r11 (`r11-shapes.js`; s14 / f17 / l9 / t9), 99 shapes: 28 BAD (U1 U3 U7 U8 U9 U13, a cycle,
+  K1–K3) measured FAIL on a baef28219 archive → PASS-REFUSED; 71 VALID controls (the review's fp2 W1–W18 on
+  every side, beside a login that must still compile and run) PASS on both. EXPECTED_SHAPE_COUNT 2576.
+- Left for the coordinator to file: U-MIX (b7 U2 `Inner | false`, H3 declared `Inner | string`), H6 (cyclic
+  alias, accepted silently), Z3 (an engine payload field named `advance`), Z6 (`.A.history` into a
+  non-engine cell). U5 (a return through an untyped tape literal) is the recorded untyped-literal class.
+- Measured on the head: b7 / b8 vs baef28219 — every U1 U3 U7 U8 U9 U13 K1 K2 K3 FAIL → PASS-REFUSED
+  on all sides; the only FAILs left are H3 H6 U2 U5 (above). c20: Z1 / Z4 newly refused (BAD), Z5 (the
+  valid restore write) clean, Z3 / Z6 as main. fp2 (18 valid programs) and fp1 (25): identical to main.
+  b1–b6: 261 → 61 FAIL vs main, the same 61 as round 1. Earlier probe sets + matrix: 84 → 0.
+- R26 vs origin/main (compiler = da3180405), now incl. compiler/samples/mcp-v0-fixture/routes: 3,618
+  files, 0 changed, 0 newly rejected.
+- CI-only jobs (ci4/, base 6081e0685): all exit 0 — types:check OK (181) · root 2239/0 · snippet 113/0 ·
+  claim 18/0 · floor · md-shim · conflict-marker · SPEC-INDEX · delta-lint · ci-shards needs · s34
+  --check-new · integration+lsp+commands 10344/0 · unit+conformance 31638/0 · TodoMVC + node --check ·
+  browser-baseline · lint-no-default-arm · slices m1/m2/m1-lowered/m3/m4/codec · e2e-render-map 259/0 ·
+  host-global 1/2 + 2/2 0 violations (2 / 135 threw, as before) · bootstrap-severity / -conformance current.
+
 ## Candidate gaps (not filed here)
 1. A markup `<match>` nested in a `<match>` arm is never mounted: the inner mount `<div
    data-scrml-match-mount=…>` is emitted but no dispatcher is generated for it, so its content (buttons,
