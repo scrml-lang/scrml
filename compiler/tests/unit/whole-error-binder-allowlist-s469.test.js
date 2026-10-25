@@ -71,6 +71,10 @@ const B = (blk) => `let o = "LOGGED IN"
         } }
         return v == true ? "LOGGED IN" : o`;
 const codesOf = (body, decls = DECLS) => compileFiles({ "app.scrml": page(decls, body) }).codes;
+// S470 lane B (s470-typed-payload-binders): `getReasonT(x: AuthErr) { return x.reason }` is itself a
+// member read off an enum value — E-TYPE-004 under the S470 ruling "(B) Type the binders" — so the
+// ALLOWED uses compile against the same declarations without it.
+const DECLS_ALLOWED = DECLS.replace("    server function getReasonT(x: AuthErr) { return x.reason }\n", "");
 
 describe("HIGH-A — every other use of the whole-error binder is refused", () => {
   const REFUSED = [
@@ -115,7 +119,7 @@ describe("HIGH-A — the allowed uses compile", () => {
   ];
   for (const [n, body] of ALLOWED) {
     test(n, () => {
-      expect(codesOf(body)).toEqual([]);
+      expect(codesOf(body, DECLS_ALLOWED)).toEqual([]);
     });
   }
   test("a `log` the arm declares is not the builtin", () => {
