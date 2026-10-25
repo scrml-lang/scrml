@@ -18,12 +18,15 @@ const ENUM = `type AuthErr:enum = { Denied(reason: string), Gone }`;
 
 // `describe` (a `return match`) only where a shape uses it: a tool-mode function's `return match` is
 // refused on every tree (g-impl1-async-match-positions-refused-s469), which would refuse every shape.
-function decls(srv, withDescribe = false) {
+// S470 s470-typed-payload-binders (fix round 1, PIN-COV): `getReasonT(x: AuthErr) { return x.reason }` is
+// itself a member read off an enum value (E-TYPE-004 under the S470 ruling "(B) Type the binders"), so it is
+// declared only where a shape uses it — else every shape here would be refused by the prelude, not by its own body.
+function decls(srv, withDescribe = false, withT = false) {
   return `${ENUM}
     type Phase:enum = { Idle, Failed(err: AuthErr) }
     const bad = "bad"
     ${srv}function getReason(x) { return x.reason }
-    ${srv}function getReasonT(x: AuthErr) { return x.reason }
+    ${withT ? `${srv}function getReasonT(x: AuthErr) { return x.reason }` : ""}
     ${withDescribe ? `${srv}function describe(x: AuthErr) { return match x { .Denied(r) :> r == "bad" ? "rejected" : "LOGGED IN", .Gone :> "rejected" } }` : ""}
     ${srv}function wrap(p)! -> AuthErr {
         if (p != "secret") fail AuthErr::Denied("bad")
@@ -89,7 +92,7 @@ const HOLD = `let o = "LOGGED IN"
         return v == true ? "LOGGED IN" : o`;
 
 function cases(srv) {
-  const out = A.map(([n, b]) => [n, decls(srv, n.includes("describe")), b, "", null]);
+  const out = A.map(([n, b]) => [n, decls(srv, n.includes("describe"), n.includes("getReasonT") || n === "A helper typed with the enum"), b, "", null]);
   const IMP = `import { check } from "./auth.scrml"`;
   const DESC = `${srv}function describe(x: AuthErr) { return match x { .Denied(r) :> r == "bad" ? "rejected" : "LOGGED IN", .Gone :> "rejected" } }`;
   const ex = { "auth.scrml": AUTH(srv) };
