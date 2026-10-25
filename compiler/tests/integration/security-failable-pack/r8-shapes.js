@@ -1,0 +1,255 @@
+// S470 s470-whole-error-binder-escapes (gap g-impl1-whole-error-binder-allowlist-escapes-s469) — the
+// S469 final review's round-6 probes (r6a / r6b) plus this lane's r7, on every side (server `s11`,
+// fullstack `f9`, library `l6`, tool `t6`). The whole-error binder `_ e :>` allow-list followed `e`
+// into callees and constructors; three escapes logged a wrong password in:
+//   1. a callee resolved by NAME (file-wide), not by the binding the call names: a shadowing const /
+//      let / parameter / arm-local / callee-local / import / top-level const `check` was trusted as the
+//      audited `function check(x: AuthErr)`;
+//   2. `log` inherited from the call site into an audited callee (`log` parameter / local there);
+//   3. a whole `e` into a variant constructor, its payload read back out (`Box.Wrap(e).data.inner…`,
+//      `match b { .Wrap(i) :> i.reason … }`, `i == "bad"`) — OPEN after S470 (KNOWN_FAIL; the fallback
+//      refusal newly-rejects examples/09-error-handling.scrml, so it is a PA decision);
+// and the adjacent shape: a `match e` arm binding an enum-holding payload (`.Wrapped(i) :> i.reason`).
+// Data, not logic: `shapesFor(side)` returns [name, scrml source, extraFiles?]. Do not edit a shape to
+// make it pass.
+
+const ENUM = `type AuthErr:enum = { Denied(reason: string), Gone }`;
+const ENUM2 = `type Inner:enum = { Bad(reason: string), Ok2 }
+    type AuthErr:enum = { Denied(reason: string), Wrapped(inner: Inner), Gone }`;
+
+function cases(srv) {
+  const W = (more = "", en = ENUM, failv = `AuthErr::Denied("bad")`) => `${en}
+    type Box:enum = { Wrap(inner: AuthErr), Empty }
+    ${srv}function check(x: AuthErr) { return x is .Denied }
+    ${more}
+    ${srv}function wrap(p)! -> AuthErr {
+        if (p != "secret") fail ${failv}
+        return true
+    }`;
+  const W2 = (more = "", failv = `AuthErr::Wrapped(Inner::Bad("bad"))`) => W(more, ENUM2, failv);
+  const X = (cond, pre = "") => `${pre}\n        const v = wrap(p) !{ _ e :> ${cond} ? "rejected" : "LOGGED IN" }\n        return v == true ? "LOGGED IN" : v`;
+  const B = (blk, pre = "") => `${pre}\n        let o = "LOGGED IN"\n        const v = wrap(p) !{ _ e :> {\n            ${blk}\n        } }\n        return v == true ? "LOGGED IN" : o`;
+  const WRAP = `${srv}function wrap(p)! -> AuthErr {
+        if (p != "secret") fail AuthErr::Denied("bad")
+        return true
+    }`;
+  const LIB = { "h.scrml": `\${\n    export ${srv}function check(x) { return x.reason == "bad" }\n    export const log = (x) => x.reason == "bad"\n}\n` };
+  const out = [
+    // escape 1 — the callee by name
+    ["1 shadow const arrow in login", W(), X(`check(e)`, `const check = (x) => x.reason == "bad"`)],
+    ["1 shadow let fn in login", W(), X(`check(e)`, `let check = function(x) { return x.reason == "bad" }`)],
+    ["1 shadow nested param", W(), `function inner(check) { return wrap(p) !{ _ e :> check(e) ? "rejected" : "LOGGED IN" } }\n        const v = inner((x) => x.reason == "bad")\n        return v == true ? "LOGGED IN" : v`],
+    ["1 shadow arm-local const", W(), B(`const check = (x) => x.reason == "bad"\n            if (check(e)) { o = "rejected" }`)],
+    ["1 shadow arm-local fn", W(), B(`function check(x) { return x.reason == "bad" }\n            if (check(e)) { o = "rejected" }`)],
+    ["1 fn shadowed in fn by const", W(`${srv}function g2(x: AuthErr) { return x is .Denied }\n    ${srv}function f2(x: AuthErr) { const g2 = (y) => y.reason == "bad"\n return g2(x) }`), X(`f2(e)`)],
+    ["1 import check + nested local check", `${ENUM}\n    ${WRAP}\n    function outer() { function check(x: AuthErr) { return x is .Denied }\n return 1 }`, X(`check(e)`), `import { check } from "./h.scrml"`, LIB],
+    ["1 top-level const check + nested fn check", `${ENUM}\n    ${WRAP}\n    const check = (x) => x.reason == "bad"\n    function outer() { function check(x: AuthErr) { return x is .Denied }\n return 1 }`, X(`check(e)`)],
+    ["1 fn shadowed by a param of the callee", `${ENUM}\n    ${WRAP}\n    ${srv}function g(x: AuthErr) { return x is .Denied }\n    ${srv}function f(x: AuthErr, g) { return g(x) }`, X(`f(e, (y) => y.reason == "bad")`)],
+    ["1 shadow const declared later in login", W(), X(`check(e)`) + `\n        const check = (y) => y.reason == "bad"`],
+    // escape 2 — `log` inherited
+    ["2 fn body log param", W(`${srv}function chk2(x: AuthErr, log) { return log(x) }`), X(`chk2(e, (y) => y.reason == "bad")`)],
+    ["2 fn body local log", W(`${srv}function chk3(x: AuthErr) { const log = (y) => y.reason == "bad"\n return log(x) }`), X(`chk3(e)`)],
+    ["2 fn body local fn log", W(`${srv}function chk4(x: AuthErr) { function log(y) { return y.reason == "bad" }\n return log(x) }`), X(`chk4(e)`)],
+    ["2 login-local log arrow", W(), X(`log(e)`, `const log = (y) => y.reason == "bad"`)],
+    ["2 arm-local log", W(), B(`const log = (y) => y.reason == "bad"\n            if (log(e)) { o = "rejected" }`)],
+    ["2 import const log", `${ENUM}\n    ${WRAP}`, X(`log(e)`), `import { log } from "./h.scrml"`, LIB],
+    // escape 3 — a whole `e` into a constructor
+    ["3 ctor extract match", W(), B(`const b = Box.Wrap(e)\n            match b { .Wrap(i) :> { if (i.reason == "bad") { o = "rejected" } } else :> { } }`)],
+    ["3 ctor extract dot ctor", W(), B(`const b = .Wrap(e)\n            match b { .Wrap(i) :> { if (i.reason == "bad") { o = "rejected" } } else :> { } }`)],
+    ["3 ctor inline member", W(), X(`Box.Wrap(e).inner.reason == "bad"`)],
+    ["3 ctor data member", W(), X(`Box.Wrap(e).data.inner.reason == "bad"`)],
+    ["3 ctor extract match eq", W(), B(`const b = Box.Wrap(e)\n            match b { .Wrap(i) :> { if (i == "bad") { o = "rejected" } } else :> { } }`)],
+    ["3 ctor local alias data", W(), B(`const b = Box.Wrap(e)\n            if (b.data.inner.reason == "bad") { o = "rejected" }`)],
+    ["3 ctor via typed fn", W(`${srv}function wr(x: AuthErr) { return Box.Wrap(x) }`), X(`wr(e).data.inner.reason == "bad"`)],
+    // adjacent — a `match e` arm binding an enum-holding payload
+    ["4 nested enum payload member", W2(), B(`match e { .Wrapped(i) :> { if (i.reason == "bad") { o = "rejected" } } else :> { } }`)],
+    ["4 nested enum payload eq", W2(), B(`match e { .Wrapped(i) :> { if (i == "bad") { o = "rejected" } } else :> { } }`)],
+    // S470 fix round 1 (review of d015e3e34): an audited callee's parameter defaults; a top-level
+    // const beside the audited function; a `!{}` in a function written as a value; a bound position
+    ["5 D1 default param reads x.reason", W(`${srv}function f(x: AuthErr, r = x.reason) { return r == "bad" }`), X(`f(e)`)],
+    ["5 D2 default param aliases x", W(`${srv}function f(x: AuthErr, y = x) { return y.reason == "bad" }`), X(`f(e)`)],
+    ["5 D4 default on the error param", W(`${srv}function f(x: AuthErr = AuthErr::Gone, r = x.reason) { return r == "bad" }`), X(`f(e)`)],
+    ["5 D6 default param closure", W(`${srv}function f(x: AuthErr, h = () => x.reason) { return h() == "bad" }`), X(`f(e)`)],
+    ["5 R3 top const beside fn", W(`const check = (y) => y.reason == "bad"`), X(`check(e)`)],
+    ["5 F1 fn-expr direct e.reason", W(), `const inner = function() { return wrap(p) !{ _ e :> e.reason == "bad" ? "rejected" : "LOGGED IN" } }\n        const v = inner()\n        return v == true ? "LOGGED IN" : v`],
+    ["5 F2 block arrow direct e.reason", W(), `const inner = () => { return wrap(p) !{ _ e :> e.reason == "bad" ? "rejected" : "LOGGED IN" } }\n        const v = inner()\n        return v == true ? "LOGGED IN" : v`],
+    ["VALID Q1 primitive sibling of enum field", W("", `type Inner:enum = { Bad(reason: string), Ok2 }\n    type AuthErr:enum = { Denied(reason: string), Wrapped(inner: Inner, code: number), Gone }`, `AuthErr::Wrapped(Inner::Bad("bad"), 1)`), B(`match e { .Wrapped(_, c) :> { if (c == 1) { o = "rejected" } } else :> { } }`)],
+    // S470 fix round 2 (review of 43d162d52): a `!{}` in any expression position or function value;
+    // `arguments` in an audited callee or in the arm itself; a `!{}` in a parameter default
+    ...(() => {
+      const H = `wrap(p) !{ _ e :> e.reason == "bad" ? "rejected" : "LOGGED IN" }`;
+      const R = (pre) => `${pre}\n        return v == true ? "LOGGED IN" : v`;
+      return [
+        ["6 J1 !{} as call arg", W(`function id(a) { return a }`), R(`const v = id(${H})`)],
+        ["6 J2 !{} paren in return", W(), `const v = 1\n        return (${H}) == true ? "LOGGED IN" : (${H})`],
+        ["6 J3 !{} in obj literal", W(), R(`const o = { a: ${H} }\n        const v = o.a`)],
+        ["6 J4 !{} in tape literal", W(), R(`const t = [${H}]\n        const v = t[0]`)],
+        ["6 E2 expr arrow arg w/ param", W(`function apply(f) { return f(1) }`), R(`const v = apply((q) => ${H})`)],
+        ["6 E5 expr arrow IIFE", W(), R(`const v = (() => ${H})()`)],
+        ["6 E8 expr arrow arg to method", W(), R(`const v = [1].map(() => ${H})[0]`)],
+        ["6 E10 expr arrow as default", W(`function apply(f = () => wrap("wrong") !{ _ e :> e.reason == "bad" ? "rejected" : "LOGGED IN" }) { return f() }`), R(`const v = apply()`)],
+        ["6 K3 block arrow > apply(expr arrow)", W(`function apply(f) { return f() }`), R(`const f = () => { return apply(() => ${H}) }\n        const v = f()`)],
+        ["6 K4 fn decl > apply(expr arrow)", W(`function apply(f) { return f() }`), R(`function f() { return apply(() => ${H}) }\n        const v = f()`)],
+        ["6 K5 top fn > apply(expr arrow)", W(`function apply(f) { return f() }\n    function f2(p) { return apply(() => ${H}) }`), R(`const v = f2(p)`)],
+        ["6 K6 expr arrow arg, paren body", W(`function apply(f) { return f() }`), R(`const v = apply(() => (${H}))`)],
+        ["6 D13 default via arguments", W(`${srv}function f(x: AuthErr, r = arguments[0].reason) { return r == "bad" }`), X(`f(e)`)],
+        ["6 D14 body via arguments", W(`${srv}function f(x: AuthErr) { return arguments[0].reason == "bad" }`), X(`f(e)`)],
+        ["6 AR1 arm arguments[0]", W(), X(`arguments[0].reason == "bad"`)],
+        ["6 AR2 arm block arguments[0]", W(), B(`if (arguments[0].reason == "bad") { o = "rejected" }`)],
+        ["6 AR3 callee arguments destructure", W(`${srv}function f(x: AuthErr) { const [a] = arguments\n return a.reason == "bad" }`), X(`f(e)`)],
+        ["6 AR5 callee arguments in nested arrow", W(`${srv}function f(x: AuthErr) { const h = () => arguments[0].reason\n return h() == "bad" }`), X(`f(e)`)],
+        ["6 AR6 callee pass arguments on", W(`${srv}function g(y) { return y.reason == "bad" }\n    ${srv}function f(x: AuthErr) { return g(...arguments) }`), X(`f(e)`)],
+      ];
+    })(),
+    // S470 fix round 3 (review of c26134ff4): a `!{}` held as TEXT (nested in another `!{}`'s
+    // arm, in a parameter default's arm); a callee name shadowing a file-level failable function
+    ...(() => {
+      const IN = `wrap(p) !{ _ e :> e.reason == "bad" ? "rejected" : "LOGGED IN" }`;
+      const R = `return v == true ? "LOGGED IN" : v`;
+      const W0 = W(`function id(a) { return a }`);
+      const DECLS = `type Inner:enum = { Bad(reason: string), Ok2 }
+    type AuthErr:enum = { Denied(reason: string), Wrapped(inner: string), Gone }
+    type BigErr:enum = { Denied(reason: string), Wrapped(inner: Inner), Gone }
+    ${srv}function w(p)! -> AuthErr {
+        if (p != "secret") fail AuthErr::Denied("x")
+        return true
+    }
+    ${srv}function wrapBig(p)! -> BigErr {
+        if (p != "secret") fail BigErr::Wrapped(Inner::Bad("bad"))
+        return true
+    }`;
+      const ARM = `_ e :> (match e { .Wrapped(i) :> i.reason == "bad", else :> true }) ? "rejected" : "LOGGED IN"`;
+      const ARM2 = `_ e :> (match e { .Wrapped(inner: i) :> i.reason == "bad", else :> true }) ? "rejected" : "LOGGED IN"`;
+      return [
+        ["7 NN1 nested !{} in call-arg arm", W0, `const v = id(wrap(p) !{ _ :> ${IN} })\n        ${R}`],
+        ["7 NN2 nested !{} in paren arm", W0, `const v = (wrap(p) !{ _ :> ${IN} })\n        ${R}`],
+        ["7 NN3 nested !{} in named arm", W0, `const v = id(wrap(p) !{ .Denied(r) :> ${IN}, _ :> "rejected" })\n        ${R}`],
+        ["7 NN4 return id(... nested)", W0, `return id(wrap(p) !{ _ :> ${IN} }) == true ? "LOGGED IN" : id(wrap(p) !{ _ :> ${IN} })`],
+        ["7 P7 default with nested !{} in arm", W(`function apply(a = wrap("wrong") !{ _ :> wrap("wrong") !{ _ e :> e.reason == "bad" ? "rejected" : "LOGGED IN" } }) { return a }`), `const v = apply()\n        ${R}`],
+        ["7 N2 local const w = wrapBig", DECLS, `const w = wrapBig\n        const v = w(p) !{ ${ARM} }\n        ${R}`],
+        ["7 N4 named-field match, local const", DECLS, `const w = wrapBig\n        const v = w(p) !{ ${ARM2} }\n        ${R}`],
+      ];
+    })(),
+    // valid controls (the allowed uses still compile and deny)
+    ["VALID check(e)", W(), X(`check(e)`)],
+    ["VALID log(e)", W(), B(`log(e)\n            o = "rejected"`)],
+    ["VALID nested audited fn", W(), X(`near(e)`, `function near(x: AuthErr) { return x is .Denied }`)],
+    ["VALID chain f->g", W(`${srv}function g1(x: AuthErr) { return x is .Denied }\n    ${srv}function f1(x: AuthErr) { return g1(x) }`), X(`f1(e)`)],
+    ["VALID primitive payload of match e", W(), X(`(match e { .Denied(r) :> r == "bad", else :> true })`)],
+    // the SPEC §18.6.1 idiom (a whole error into a constructor) — still compiles: escape 3 is open
+    ["VALID ctor match", W(), B(`const b = Box.Wrap(e)\n            match b { .Wrap(i) :> { o = "rejected" } else :> { } }`)],
+    // a valid program impl#1 now refuses (S470 impl#1 limitation; pinned PASS-REFUSED)
+    ["REFUSED-VALID nested enum match", W2(), B(`match e { .Wrapped(i) :> { match i { .Bad(r) :> { if (r == "bad") { o = "rejected" } } else :> { } } } else :> { } }`)],
+  ];
+  return out;
+}
+
+function page(side, d, body, imports = "") {
+  if (side === "library") return `${imports}
+\${
+    ${d}
+    export function login(p) {
+        ${body}
+    }
+}
+`;
+  if (side === "tool") return `<program kind="tool">
+${imports}
+\${
+    ${d}
+    function login(p) {
+        ${body}
+    }
+    function main(args) {
+        log(login(args[0]))
+    }
+}
+</program>
+`;
+  if (side === "server") return `${imports}
+<msg> = "init"
+\${
+    ${d}
+    server function login(p) {
+        ${body}
+    }
+    function go() { @msg = login("wrong") !{ _ :> "err" } }
+}
+<button onclick=go()>go</button>
+<p>\${@msg}</p>
+`;
+  return `${imports}
+<msg> = "init"
+\${
+    ${d}
+    function login(p) {
+        ${body}
+    }
+    function go(p) { @msg = login(p) }
+}
+<button id="wrong" onclick=go("wrong")>go</button>
+<button id="right" onclick=go("secret")>go</button>
+<p id="out">\${@msg}</p>
+`;
+}
+
+// S470 fix round 2 — fullstack only: a `!{}` in an expression-bodied arrow written as a markup
+// handler (`onclick=${() => …}`; review M1c). The full page, not the login template.
+function fullstackPages() {
+  const HS = (p) => `@msg = (wrap("${p}") !{ _ e :> e.reason == "bad" ? "rejected" : "LOGGED IN" }) == "rejected" ? "rejected" : "LOGGED IN"`;
+  const btns = (mk) => `<button id="wrong" onclick=${mk("wrong")}>w</button>\n<button id="right" onclick=${mk("secret")}>r</button>`;
+  const src = `<msg> = "init"\n\${\n    ${ENUM}\n    server function wrap(p)! -> AuthErr {\n        if (p != "secret") fail AuthErr::Denied("bad")\n        return true\n    }\n}\n${btns((p) => `\${() => ${HS(p)}}`)}\n<p id="out">\${@msg}</p>\n`;
+  // S470 fix round 3 — an engine OPENER `effect=` holding a `!{}` (raw text in engineMeta.openerEffect; review s19).
+  const ef = `\${
+    ${ENUM}
+    type Ph:enum = { A, B }
+    server function wrap(p)! -> AuthErr {
+        if (p != "secret") fail AuthErr::Denied("bad")
+        return true
+    }
+    function noop(x) { }
+}
+<msg> = "init"
+<pw> = "wrong"
+<engine for=Ph initial=.A effect=\${ @msg = wrap(@pw) !{ _ e :> e.reason == "bad" ? "rejected" : "LOGGED IN" } }>
+  <A rule=.B>
+    <p>a</p>
+  </>
+  <B rule=.A>
+    <p>b</p>
+  </>
+</>
+<button id="wrong" onclick=noop("w")>go</button>
+<button id="right" onclick=noop("r")>go</button>
+<p id="out">\${@msg}</p>
+`;
+  // S470 fix round 4 — a `!{}` in a markup `<match>` arm whose body holds an `<each>` (the arm is
+  // blanked by the AST builder and re-read from text; review F1): in the row, in a component, and in
+  // a sibling `${ function … }` the row calls.
+  const head = `\${
+    ${ENUM}
+    type Ph:enum = { A, B(n: number) }
+    server function wrap(p)! -> AuthErr {
+        if (p != "secret") fail AuthErr::Denied("bad")
+        return true
+    }
+}
+<msg> = "init"
+<ph>: Ph = .A
+<xs> = [{ id: 1 }]
+`;
+  const row = (mk) => `<ul><each in=@xs key=@.id as x><li>${btns(mk)}</li></each></ul>`;
+  const arm = (body) => `<match for=Ph on=@ph>\n  <A>${body}</>\n  <B n>b</>\n</match>`;
+  const f1a = `${head}${arm(row((p) => `\${() => ${HS(p)}}`))}\n<p id="out">\${@msg}</p>\n`;
+  const f1b = `${head}const Card = <div props={ label: string }>\n  ${arm(row((p) => `\${() => ${HS(p)}}`))}\n</>\n<Card label="a"/>\n<p id="out">\${@msg}</p>\n`;
+  const f1c = `${head}${arm(`\${ function f(p) { ${HS("x").replace('"x"', "p")} } }${row((p) => `f("${p}")`)}`)}\n<p id="out">\${@msg}</p>\n`;
+  return [["6 M1c onclick expr arrow", src, undefined], ["7 EF1 engine opener effect= e.reason", ef, undefined],
+    ["8 F1a each in a <match> arm", f1a, undefined], ["8 F1b <match> arm each in a component", f1b, undefined],
+    ["8 F1c <match> arm each beside a logic fn", f1c, undefined]];
+}
+
+export function shapesFor(side) {
+  const srv = side === "server" || side === "fullstack" ? "server " : "";
+  const out = cases(srv).map(([n, d, b, imp, extra]) => [n, page(side, d, b, imp ?? ""), extra ?? undefined]);
+  return side === "fullstack" ? [...out, ...fullstackPages()] : out;
+}

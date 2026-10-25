@@ -344,3 +344,7 @@ form × `when` body / opener `effect=`), on f55eb8d4a → this branch:
   lambda in the test); a comma expression anywhere in an async host (round 2).
 - Not this lane (the PA files it): the same head mangling with NO server call in a function body, a
   `<timer>` body and module init (reviewer `d/tpl3.scrml`).
+- Merged origin/main 66f2ee1c5 (#1551 s470-whole-error-binder-escapes). Its pack family is named `f9`
+  too: this lane's `f9` is RENAMED **`f13`** (shapes/f13.js, pinned keys `f13/…`, README); every
+  "f9" above in this file means today's `f13`. EXPECTED_SHAPE_COUNT = main's 2192 + this lane's 71
+  (f13 30, f10 37, f11 2, f12 2) = 2263.
