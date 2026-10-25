@@ -89,3 +89,6 @@
   (P2, Q1) or server R3 PASS -> PASS-REFUSED (the duplicate top-level name, now refused on every side).
 - pack: + r8 "5 D1/D2/D4/D6/R3/F1/F2" + "VALID Q1" (32 shapes), EXPECTED_SHAPE_COUNT 2048 -> 2080; full pack
   2083 pass / 0 fail.
+- 2026-10-24 fix-round gates: unit+integration+conformance --bail 40426 pass / 0 fail / 125 skip / 18 todo;
+  types:check OK (181, unchanged); R26 913 files base 915b6775f vs branch: diagnostic codes IDENTICAL (0
+  newly-rejected). DONE.
