@@ -84,6 +84,20 @@ describe("a member read off an enum-typed value is E-TYPE-004 (§14.3, §34)", (
     const src = `<st>: Inner = Inner.Bad("bad")\n<msg> = ""\n\${\n    type Inner:enum = { Bad(reason: string), Ok2 }\n    function go() { @msg = @st.reason == "bad" ? "a" : "b" }\n}\n<button onclick=go()>\${@msg}</button>\n`;
     expect(codesOf(src)).toContain("E-TYPE-004");
   });
+  test("an `<each>` binder over an enum tape, and a tape element", () => {
+    const src = `\${\n    type Inner:enum = { Bad(reason: string), Ok2 }\n}\n<xs>: Inner[] = [Inner.Bad("bad")]\n<ul><each in=@xs as x><li>\${x.reason}</li></each></ul>\n<p>\${ @xs[0].reason }</p>\n`;
+    const msgs = compileFiles({ "app.scrml": src }).filter((e) => e.code === "E-TYPE-004").map((e) => e.message);
+    expect(msgs.some((m) => m.includes("`x.reason`"))).toBe(true);
+    expect(msgs.some((m) => m.includes("`@xs[0].reason`"))).toBe(true);
+  });
+  test("a markup `<match>` arm binder of an enum-typed field", () => {
+    const src = `\${\n    type Inner:enum = { Bad(reason: string), Ok2 }\n    type Outer:enum = { Wrapped(inner: Inner), None }\n}\n<w>: Outer = Outer.Wrapped(Inner.Bad("bad"))\n<match for=Outer on=@w>\n  <Wrapped inner><p>\${inner.reason}</p></>\n  <None>n</>\n</match>\n`;
+    expect(codesOf(src)).toContain("E-TYPE-004");
+  });
+  test("NOT refused: the engine-cell transition `@cell.advance(.V)` and the `.V.history` restore target", () => {
+    const src = `<program>\ntype Mode:enum = { Nav, Edit }\n<transitions> = 0\nfunction go() { if (@mode == Mode.Nav) { @mode.advance(.Edit) } }\n<engine for=Mode initial=.Nav>\n  <Nav rule=.Edit>\n    <onTransition to=.Edit>\${ @transitions = @transitions + 1 }</onTransition>\n  </>\n  <Edit rule=.Nav />\n</engine>\n<div><button onclick=go()>go</button><span>\${@mode}</span><span>\${@transitions}</span></div>\n</program>`;
+    expect(codesOf(src)).toEqual([]);
+  });
   test("the diagnostic names the read, the enum and the variant way to the payload", () => {
     const errs = compileFiles({ "app.scrml": lib(`function chk(x: Inner) { return x.reason == "bad" }`, R(`chk(Inner.Bad("bad"))`)) }, "library");
     const m = errs.find((e) => e.code === "E-TYPE-004")?.message ?? "";

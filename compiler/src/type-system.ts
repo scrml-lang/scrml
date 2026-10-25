@@ -16968,7 +16968,15 @@ function annotateNodes(
           // binds `x` to the row STRUCT (parity with the for-of path above).
           // Bounded to sql-row provenance; otherwise `asIs`.
           const _eachRow = resolveIterableRowElement((n as Record<string, unknown>).inExprRaw);
-          scopeChain.bind(asName, { kind: "variable", resolvedType: _eachRow ?? tAsIs() });
+          // S470 lane B — the element type of a tape of known type, for the enum-read check only.
+          let _eachElem: ResolvedType | null = null;
+          const _inRaw = (n as Record<string, unknown>).inExprRaw;
+          if (!_eachRow && _enumReadEnv && typeof _inRaw === "string" && _inRaw.trim() !== "") {
+            let _inNode: unknown = null;
+            try { _inNode = parseExprToNode(_inRaw, filePath, 0); } catch { _inNode = null; }
+            _eachElem = enumReadElementOf(_inNode, null, enumReadScopeLookup(scopeChain), _enumReadEnv);
+          }
+          scopeChain.bind(asName, { kind: "variable", resolvedType: _eachRow ?? tAsIs(), ...(_eachElem ? { enumFact: _eachElem } : {}) });
         }
         // §59.8 / §14.11 (S169) — the 2-name positional destructure
         // `as (k, v)` on a `<each in=@m.entries()>` opener binds two locals
