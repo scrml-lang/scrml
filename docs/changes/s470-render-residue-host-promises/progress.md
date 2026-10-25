@@ -114,3 +114,46 @@ corpus files = this worktree for both. Harness ~/.cache/scrml/s470/laneG/r26.mjs
   #1554 note). Re-run of stdlib/ with each compiler over its OWN in-tree copy: 54 files, **0 diffs**.
 - No example, sample, benchmark or conformance case changes code. `fetch` in the corpus sits in handlers and
   function bodies (action positions this check does not walk), never in a render position or a sync body.
+
+### CI job commands (.github/workflows/ci.yml), run locally after merging origin/main (d582ae04f)
+types-gate --check 0 · root `compiler/tests/*.test.js` 0 · snippet-gate 0 · claim-gate 0 · corpus-compile-floor
+--check 0 · gen-md-shim --check 0 · conflict-marker-gate 0 · regen-spec-index --check 0 · delta-lint 0 · ci-shards
+needs 0 · s34-census --check-new (base origin/main) PASS (1 changed row, well-formed) · facts --check 1 (WARN-only
+step; FACTS.md is bot-owned, not touched) · unit + conformance 31654 pass / 0 fail · pretest · integration + lsp +
+commands 10137 pass / 0 fail · todomvc compile + `node --check` 0 · browser-baseline --check 0 ·
+lint-no-default-arm 0 · slice m1 / m2 / m1-lowered / m3 / m4 / codec 0 · e2e-render-map 0 · host-global-scan
+--check 0 · gen-bootstrap-severity --check 0.
+
+## Candidate gaps (for the PA to file — known-gaps.md not edited)
+
+Measured with a scratch pack family on the base tree (~/.cache/scrml/s470/laneG/scratchpack/x1.js), SIDE fullstack:
+1. **HIGH — a waiting function passed as a CALLBACK VALUE in a render position or a sync action body**:
+   `<span if=${@xs.some(isOk)}>` (render) and `<timer>${ if (@xs.some(isOk)) … }` — FAIL on 6081e0685 and on this
+   head (`.some` of Promises is true). The walk judges a value reference only in local bodies (`exprWaitsAll`).
+   Fix direction: judge render and sync-body positions with `valueRefWaits` too, keeping SPEC's exemptions
+   (a fire-and-forget scheduler argument, `typeof f`). Same for `@xs.map(fetch)`.
+2. **HIGH — the host `fetch` is never coloured async in function bodies / handlers**: `function login(p) { @pw = p;
+   if (fetch("/api?p=" + p)) { @msg = "LOGGED IN" } }` — FAIL on base and head (handlers / functions are not walked
+   by this check; impl#1 emits `fetch(…)` un-awaited). §13.2 makes a Promise-returning standard-library function
+   async-coloured, and §13.7 / §13.8 name `fetch` one. Locus: the file's async set (file-async-fns
+   `computeFileAsyncFnNames`, emit-functions `computeClientAsyncSets`) — `fetch` is not a seed. Also: the brief's
+   premise "an awaited fetch in a handler" is not true of impl#1 today; the handler control compiles but is
+   not awaited.
+3. **LOW (SPEC fork) — host Promise values SPEC does not name**: `<span if=${Promise.resolve(@pw == "secret")}>` —
+   FAIL on base and head. §13.8's waiting-value definition "does not widen", so this lane did not refuse it.
+   Recommendation: amend §13.8 item 3 to name host Promise constructors / statics (`Promise.resolve`,
+   `Promise.all`, `new Promise`, …) and host functions documented to return a Promise.
+4. **MED — `<request>${ @data = fetch(url) }</>` is refused** (E-IMPL1-ACTION-NOT-AWAITED, fail closed): the
+   settle machine emitted `_scrml_cs_reactive_set("data", fetch(…))`, storing a pending Promise. SPEC §6.7.7 calls
+   the body "the fetch expression", so this is a valid program impl#1 cannot run correctly. 0 corpus files.
+   Fix direction: let the reactive-set lift await the host `fetch` (then add it to `lifted`).
+5. LOW (over-refusal, fails closed): shadowing is scope-aware for parameters and statement-list declarations in
+   the AST, but not for a body re-parsed from text (engine bodies, `when` bodies read from `bodyRaw`), a
+   `for (const fetch of …)` / catch binder, or a file function whose PARAMETER is named `fetch` (the fixpoint is
+   scope-blind, so the function counts as reaching the host global).
+6. LOW (fail-open residual, contrived): a module-scope binding named `fetch` anywhere in the file (by name, as
+   `collectTopLevelStatements`-style scope) turns the host rule off file-wide, even for a render position outside
+   that binding's real scope.
+7. Doc drift: `docs/changes/s441-audit-gap-filing/repro/fetch-inside-fn-accepted.scrml` now reports
+   E-VALUE-SERVER-CALL (its "Actual: exit 0" line is stale); the gap it reproduces (`fn` purity, E-FN-003/004) is
+   unaffected.
