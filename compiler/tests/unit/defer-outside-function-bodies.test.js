@@ -215,7 +215,7 @@ describe("§19.16.3 rule 4 — every non-function body kind × both front-ends",
 
 // ---------------------------------------------------------------------------
 // S446 — the two S432 round-2 review misses (an EXPORTED component; a
-// `<channel>` `<onchange>` arm) plus the statement `!{ … } catch` arm. Each
+// `<channel>` `<onchange>` arm) plus a `!{}` handler arm (was the statement `!{ … } catch` arm). Each
 // compiled CLEAN and emitted `defer …` verbatim into the client JS.
 // ---------------------------------------------------------------------------
 
@@ -285,8 +285,11 @@ describe("§19.16.3 rule 4 — exported components, <onchange> arms, statement `
   test("an <onchange> arm that only mentions defer is untouched — live", () => {
     expect(codes(compile(CHANNEL(`      <Inserted(row) : print("defer " + row)>`)))).toEqual([]);
   });
-  test("a statement `!{ … } catch` arm inside a function — E-DEFER-UNSUPPORTED-SITE (live)", () => {
-    const r = compile(logic(`    function f() {\n        !{ note("t") } catch Error as e { defer note("x") }\n        note("after")\n    }`));
+  // S470 — the statement form `!{ … } catch T as e { … }` is refused (E-TRY-NOT-IN-SCRML, §19.1), so
+  // this probe now uses the `!{}` handler arm it stood for: a `defer` in an unbraced arm of a handler
+  // inside a function is still not a defer site.
+  test("an unbraced `!{}` handler arm inside a function — E-DEFER-UNSUPPORTED-SITE (live)", () => {
+    const r = compile(logic(`    type E:enum = { Bad }\n    function risky()! -> E { return 1 }\n    function f() {\n        risky() !{ _ e :> defer note("x") }\n        note("after")\n    }`));
     expect(codes(r)).toContain("E-DEFER-UNSUPPORTED-SITE");
   });
 });
