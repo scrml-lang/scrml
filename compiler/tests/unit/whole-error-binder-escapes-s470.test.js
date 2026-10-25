@@ -8,8 +8,8 @@
  *  1. a callee resolved by NAME (file-wide), not by the binding the call names — a shadowing local,
  *     parameter, import or arm-local `check` was trusted as the audited top-level `check`;
  *  2. `log` inherited from the call site into an audited callee (a `log` parameter / local there);
- *  3. a whole `e` into a variant constructor, whose payload came back out unchecked — NOT fixed in
- *     S470 (blocked on a PA decision; see the escape-3 block below);
+ *  3. a whole `e` into a variant constructor, whose payload came back out unchecked — closed by the
+ *     S470 lane-B ruling "(B) Type the binders" (s470-typed-payload-binders; the escape-3 block below);
  * plus the adjacent shape found here: a `match e` arm binding an enum-holding payload (`.Wrapped(i)`)
  * lets that enum value be misread the same way — refused (impl#1 limitation, fail closed).
  */
@@ -152,17 +152,29 @@ describe("escape 2 — `log` is the builtin only where THAT body has no `log` bi
   });
 });
 
-describe("escape 3 — a whole `e` into a variant constructor (OPEN: blocked on a PA decision)", () => {
-  // Neither fix lands in S470. The preferred rule (refuse a payload read on any enum-typed value,
-  // from the value's type) is not decidable on impl#1's path: a constructor call, a `const` bound to
-  // it, and a match payload binder carry no type. The fallback (refuse a whole `e` into a
-  // constructor) newly-rejects examples/09-error-handling.scrml and SPEC §18.6.1's own
-  // `@state = .Failed(err)`. The security pack carries these shapes as KNOWN_FAIL (r8-shapes.js "3 …").
-  test.todo("inline member off the constructed value (`Box.Wrap(e).data.inner.reason`)");
-  test.todo("constructed then matched (`match b { .Wrap(i) :> i.reason … }`)");
-  test.todo("constructed then compared (`.Wrap(i) :> i == \"bad\"`)");
-  test.todo("constructed then member read through a local (`b.data.inner.reason`)");
-  test.todo("constructed inside an audited callee (`function wr(x: AuthErr) { return Box.Wrap(x) }`)");
+describe("escape 3 — a whole `e` into a variant constructor, its payload read back out (S470 lane B)", () => {
+  // Ruling (bryan, S470, user-voice-scrml.md "(B) Type the binders (Recommended)"): a payload binder
+  // has its field's declared type (§18.7) and a member read other than `.variant` on an enum value is
+  // E-TYPE-004 — so the payload of a constructed value cannot be read back out except by naming the
+  // variant. The (A) constructor refusal is NOT landed: `@state = .Failed(err)` stays allowed.
+  test("inline member off the constructed value (`Box.Wrap(e).data.inner.reason`) → E-TYPE-004", () => {
+    expect(codesOf(W(), X(`Box.Wrap(e).data.inner.reason == "bad"`))).toContain("E-TYPE-004");
+  });
+  test("constructed then matched (`match b { .Wrap(i) :> i.reason … }`) → E-TYPE-004", () => {
+    expect(codesOf(W(), B(`const b = Box.Wrap(e)\n            match b { .Wrap(i) :> { if (i.reason == "bad") { o = "rejected" } } else :> { } }`))).toContain("E-TYPE-004");
+  });
+  test("constructed by a bare `.Wrap(e)` then matched → E-TYPE-004", () => {
+    expect(codesOf(W(), B(`const b = .Wrap(e)\n            match b { .Wrap(i) :> { if (i.reason == "bad") { o = "rejected" } } else :> { } }`))).toContain("E-TYPE-004");
+  });
+  test("constructed then compared (`.Wrap(i) :> i == \"bad\"`) → E-EQ-001", () => {
+    expect(codesOf(W(), B(`const b = Box.Wrap(e)\n            match b { .Wrap(i) :> { if (i == "bad") { o = "rejected" } } else :> { } }`))).toContain("E-EQ-001");
+  });
+  test("constructed then member read through a local (`b.data.inner.reason`) → E-TYPE-004", () => {
+    expect(codesOf(W(), B(`const b = Box.Wrap(e)\n            if (b.data.inner.reason == "bad") { o = "rejected" }`))).toContain("E-TYPE-004");
+  });
+  test("constructed inside an audited callee (`function wr(x: AuthErr) { return Box.Wrap(x) }`) → E-TYPE-004", () => {
+    expect(codesOf(W(`server function wr(x: AuthErr) { return Box.Wrap(x) }`), X(`wr(e).data.inner.reason == "bad"`))).toContain("E-TYPE-004");
+  });
   test("still ALLOWED (the SPEC §18.6.1 idiom): a whole error into a constructor whose field is the enum", () => {
     expect(codesOf(W(), B(`const b = Box.Wrap(e)\n            o = "rejected"`))).toEqual([]);
   });
