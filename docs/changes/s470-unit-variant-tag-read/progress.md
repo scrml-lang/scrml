@@ -40,5 +40,18 @@ Base: main `d582ae04f`.
 - [x] Unit tests: compiler/tests/unit/variant-tag-read-s470.test.js.
 - [x] Security pack r16 (s19/f22/l14/t14, 118 shapes): base 88 FAIL / 28 PASS / 1 REFUSED / 1 UNJUDGED;
       head 116 PASS / 1 REFUSED / 1 UNJUDGED.
-- [ ] R26 corpus diff.
-- [ ] CI job commands.
+- [x] R26 corpus diff (3618 sources: examples, samples, conformance, stdlib, benchmarks, docs,
+      compiler/samples incl. mcp-v0-fixture; one compile per file, each tree's own compiler + stdlib;
+      base = merge parent accdd5f2). Diagnostic codes: 0 programs differ. Emitted-JS digest (build
+      identity folded): 215 differ — 202 only by the embedded `_scrml_project_root` (the two trees live
+      at different paths; equal once both roots are folded), 13 by the lowering alone (equal once the
+      lowered forms are undone): 12 engine / machine samples rendering `${@cell.variant}` (a unit
+      variant engine cell rendered `undefined`; now the tag) and stdlib/data/validate.scrml
+      (`typeof rule == "object" ? rule.variant : rule` — same value, the read is lowered inside the
+      object branch).
+- [x] CI job commands: types-gate OK (unchanged), s34-census --check-new PASS, conflict-marker PASS,
+      ci-shards needs OK, SPEC-INDEX OK, delta-lint PASS, gen-md-shim current, root tests 0 fail,
+      snippet-gate 0 fail, claim-gate 0 fail, corpus-compile-floor PASS, unit+integration+conformance
+      0 fail, lsp+commands 0 fail, todomvc gauntlet ok, browser-baseline PASS, e2e-render-map 0 fail,
+      slices 0 fail, no-default-arm 0, host-global-scan 0 violations. Runtime-size ratchet: 11 pass;
+      runtime-template.js / compiler/runtime untouched, delta 0 B (no budget change needed).
