@@ -3,6 +3,35 @@
 Gap: `g-impl1-bang-catch-try-body-cut-at-first-brace-s470` (HIGH, security). Lane C, S470.
 Scratch: `~/.cache/scrml/s470/laneC/` (base tree = `git archive origin/main` d582ae04f in `basetree/`).
 
+## ROUND 2 — PA ruling: the statement form is REFUSED (supersedes "Fix" below where they differ)
+
+Ruling (S470, narrow class): refuse `!{ … } catch T [as b] { … }` with a located error. SPEC §19.1:
+"There is NO try/catch. There are NO exceptions. Errors are values that flow through the type system and
+are checked at compile time." Corpus uses: 0.
+
+- Code: **E-TRY-NOT-IN-SCRML** (existing §34 row: "scrml has no `try`/`catch`/`finally`; the error model is
+  `fail` / `?` / `!{}` / `<errorBoundary>`"). Reused rather than minting: the construct IS a try/catch in
+  scrml source; no SPEC edit (the row's first sentence names the `try` keyword — a catalog-text widening
+  is the PA's call if wanted).
+- Kept: the splitter's `errorEffectExtent` + main-loop catch-arm reading (detection) and the no-glue fix.
+- ast-builder: one E-TRY-NOT-IN-SCRML at the form's `!{`, nothing lowered; a `catch` that starts a
+  statement (an arm left behind by a `!{ … }` re-read from text, or a bare clause) is refused at the
+  `catch`. Removed: the try-body/arm slicing, tokensLeaveBodyOpen / lineColAt, the E-PARSE-001 refusals.
+- emit-logic.ts: the try-body emission loop removed (no node carries a body). The case stays — a
+  standalone legacy `!{ arms }` with no guarded statement still reaches it.
+- type-system.ts: reverted to origin/main (zero diff — helps lane B).
+- defer-outside-function-bodies: its statement-form probe now writes `risky() !{ _ e :> defer note("x") }`
+  (still E-DEFER-UNSUPPORTED-SITE).
+- Pack renumbered to r10 (n29 / s13 / f16 / l8 / t8); all 312 shapes PASS-REFUSED on head, 293 with
+  E-TRY-NOT-IN-SCRML. The other 19 hold the form where impl#1 keeps code as TEXT (onclick block: E-CODEGEN-
+  INVALID-LOGIC / E-ASYNC-HANDLER-UNANALYZABLE / E-ATTR-UNQUOTED-OPERATOR; engine `effect=`: E-ERROR-002) or
+  hit the splitter template limit (lone `` `}` ``: E-CTX-001) — still fail closed. EXPECTED_SHAPE_COUNT =
+  main 2265 + 312 = 2577.
+- Text-held positions with a NON-failable body (scratch textpos.mjs): engine opener / state effect
+  (E-ERROR-002), onclick block and `${() => {…}}` (E-CODEGEN-INVALID-LOGIC), when body (E-TYPE-031),
+  `<match>` arm markup, component body: refused; onMount, `^{}`, `<timer>`, markup interpolation, server
+  fn: E-TRY-NOT-IN-SCRML. None compiles.
+
 ## Findings (measured on base d582ae04f = 6081e0685 + an inbox-only commit)
 
 - Repro `~/.cache/scrml/review/s470-l1d/F2/app.scrml` reproduced: exit 0, `_scrml_cs_reactive_set("ok", _scrml_check_3(p))`,

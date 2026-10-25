@@ -1,16 +1,14 @@
 /**
  * bang-catch-try-body-s470.test.js — g-impl1-bang-catch-try-body-cut-at-first-brace-s470 (security).
  *
- * The statement form `!{ tryBody } catch T [as b] { handler }`:
- *   1. the try body was cut at the FIRST `}` of the block (ast-builder), so a nested `!{}` handler,
- *      a block, an object literal or a `}` in a string / comment ended it early — the handled call
- *      lost its handler and every catch arm was dropped;
- *   2. written after a statement, the form was glued to it as a postfix handler, dropping the body;
- *   3. the body was emitted with no options, so a write to an enclosing local became a `const`;
- *   4. the body was never type-checked, so an unhandled failable call in it compiled — and a catch
- *      arm cannot handle one (the call returns its error, it does not throw).
- * The wrong-password floor for every shape × side is the r9 family of
- * ../integration/security-failable-pack (n29 / s12 / f15 / l7 / t7).
+ * The statement form `!{ tryBody } catch T [as b] { handler }` cut its try body at the FIRST `}`
+ * (a nested `!{}` handler lost its handler, the catch arms were dropped), was glued to the statement
+ * before it as a postfix handler (the body dropped), and its catch could never handle a scrml
+ * failure (a failable call RETURNS its error). S470 ruling: the form is REFUSED (E-TRY-NOT-IN-SCRML,
+ * SPEC §19.1 "There is NO try/catch"). The block splitter's extent record is what detects it, so
+ * these tests lock the record and the refusal wherever the form is written.
+ * The wrong-password floor for every shape × side is the r10 family of
+ * ../integration/security-failable-pack (n29 / s13 / f16 / l8 / t8).
  */
 
 import { describe, test, expect } from "bun:test";
@@ -124,117 +122,99 @@ describe("block splitter — errorEffectExtent", () => {
 });
 
 // ---------------------------------------------------------------------------
-// 2. The AST builder slices the body / arms where the splitter ended them.
+// 2. The statement form is REFUSED (S470 ruling — SPEC §19.1 "There is NO try/catch"), once, at its
+//    `!{`, wherever it is written; a stray `catch` is refused at the `catch`.
 // ---------------------------------------------------------------------------
-describe("AST — the statement form", () => {
-  test("the F2 repro: the nested `!{}` stays on its call and the catch arm is kept", () => {
-    const { tab } = parse(fileWith(FORM(`@ok = check(p) !{ _ :> false }`)));
-    expect(errCodes(tab.errors)).toEqual([]);
-    const [ee] = findNodes(tab.ast, "error-effect").filter((n) => Array.isArray(n.body));
-    expect(ee.body.map((n) => n.kind)).toEqual(["guarded-expr"]);
-    expect(ee.arms.map((a) => [a.pattern, a.binding, a.handler])).toEqual([["AuthErr", "b", "@ok = false"]]);
-  });
+const TRY = "E-TRY-NOT-IN-SCRML";
+const tryErrs = (errors) => (errors ?? []).filter((e) => e.code === TRY);
 
-  test("a nested block, a string and a comment holding braces stay in the body", () => {
-    const { tab } = parse(fileWith(FORM(`const s = "}"\n            // a } here\n            if (p != "") {\n                @ok = check(p) !{ _ :> false }\n            }`)));
-    expect(errCodes(tab.errors)).toEqual([]);
-    const [ee] = findNodes(tab.ast, "error-effect").filter((n) => Array.isArray(n.body));
-    expect(ee.body.map((n) => n.kind)).toEqual(["const-decl", "if-stmt"]);
-    expect(findNodes(ee.body, "guarded-expr").length).toBe(1);
-    expect(ee.arms.length).toBe(1);
-  });
-
-  test("two arms, and an arm without a binder", () => {
-    const { tab } = parse(fileWith(`        !{ @ok = check(p) !{ _ :> false } } catch AuthErr { @ok = false } catch Error as e { @ok = false }`));
-    const [ee] = findNodes(tab.ast, "error-effect").filter((n) => Array.isArray(n.body));
-    expect(ee.arms.map((a) => [a.pattern, a.binding])).toEqual([["AuthErr", ""], ["Error", "e"]]);
-  });
-
-  test("written after a statement it is its own statement, not that statement's handler", () => {
-    for (const lead of ["const st = { ok: true }", "let n = 1;", "@ok = true"]) {
-      const { tab } = parse(fileWith(`        ${lead}\n        !{ if (p != "secret") { @ok = false } } catch Error as e { @ok = false }`));
-      const fn = findNodes(tab.ast, "function-decl").find((f) => f.name === "go");
-      expect(fn.body.map((n) => n.kind).includes("guarded-expr")).toBe(false);
-      const ee = fn.body.find((n) => n.kind === "error-effect");
-      expect(ee).toBeTruthy();
-      expect(ee.body.map((n) => n.kind)).toEqual(["if-stmt"]);
-    }
-  });
-
-  test("a postfix handler after a statement is still that statement's handler", () => {
-    const { tab } = parse(fileWith(`        const v = check(p)\n        !{ _ :> false }`));
-    const fn = findNodes(tab.ast, "function-decl").find((f) => f.name === "go");
-    expect(fn.body.map((n) => n.kind)).toEqual(["guarded-expr"]);
-  });
-
-  test("a malformed arm header is refused with its location", () => {
-    const src = fileWith(`        !{ @ok = false } catch (e) { @ok = false }`);
-    const { tab } = parse(src);
-    const e = tab.errors.find((x) => x.code === "E-PARSE-001" && /catch/.test(x.message));
-    expect(e).toBeTruthy();
-    expect(src.slice(e.tabSpan.start, e.tabSpan.start + 5)).toBe("catch");
-  });
-
-  test("a statement form whose extent was not recorded is refused, never re-scanned", () => {
-    const bs = splitBlocks("t.scrml", fileWith(FORM(`@ok = check(p) !{ _ :> false }`)));
-    for (const b of findBlocks(bs.blocks, "error-effect")) delete b.errorEffectExtent;
-    const tab = buildAST(bs);
-    expect(tab.errors.some((x) => x.code === "E-PARSE-001" && /try body ends/.test(x.message))).toBe(true);
-  });
-
-  test("an extent the logic tokenizer does not read as a balanced body is refused", () => {
-    const src = fileWith(FORM(`const s = "a}b"\n            @ok = false`));
-    const bs = splitBlocks("t.scrml", src);
-    const ee = findBlocks(bs.blocks, "error-effect").find((b) => b.errorEffectExtent?.arms.length);
-    ee.errorEffectExtent.tryEnd = src.indexOf("a}b") + 1; // inside the string
-    const tab = buildAST(bs);
-    expect(tab.errors.some((x) => x.code === "E-PARSE-001" && /disagree/.test(x.message))).toBe(true);
-  });
-
-  test("a `!{ … }` re-read from text with its `catch` left behind is refused", () => {
-    // A logic block with NO pre-split children: the tokenizer synthesizes the `!{ … }` BLOCK_REF
-    // (it stops at the block's own brace), leaving `catch …` as tokens.
-    const raw = "${ function go(p) { const n = 1\n !{ @ok = false } catch Error as e { @ok = false } } }";
-    const bs = { filePath: "t.scrml", errors: [], blocks: [{ type: "logic", raw, span: { start: 0, end: raw.length, line: 1, col: 1 }, depth: 0, children: [], name: null, closerForm: null, isComponent: false }] };
-    const tab = buildAST(bs);
-    expect(tab.errors.some((x) => x.code === "E-PARSE-001" && /catch/.test(x.message))).toBe(true);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// 3 / 4. Codegen and the type checker.
-// ---------------------------------------------------------------------------
-describe("compile — the statement form", () => {
-  const page = (fnBody) => `<ok> = false\n${fileWith(fnBody)}<button onclick=go("x")>go</button>\n<p>\${@ok}</p>\n`;
-
-  test("the F2 repro lowers the nested handler inside the try and keeps the catch arm", () => {
-    const r = compile(page(FORM(`@ok = check(p) !{ _ :> false }`)));
-    expect(r.codes).toEqual([]);
-    const fn = r.clientJs.slice(r.clientJs.indexOf("function _scrml_go_"));
-    expect(fn).toMatch(/try \{[\s\S]*__scrml_error[\s\S]*\} catch \(/);
-    expect(fn).toMatch(/\.type === "AuthErr"/);
-  });
-
-  test("a local declared before the form is written, not shadowed", () => {
-    const r = compile(page(`        let granted = false\n        if (p != "") {\n${FORM(`granted = true`, `granted = false`)}\n        }\n        @ok = granted`));
-    expect(r.codes).toEqual([]);
-    const fn = r.clientJs.slice(r.clientJs.indexOf("function _scrml_go_"));
-    expect(fn).toMatch(/try \{\s*granted = true;/);
-    expect(fn).not.toMatch(/const granted = true/);
-  });
-
-  for (const [name, body] of [
-    ["an unhandled call in the try body", `@ok = check(p)`],
-    ["an unhandled call in a block in the try body", `if (p != "") { @ok = check(p) }`],
-    ["an unhandled call bound in the try body", `const v = check(p)\n            @ok = v`],
+describe("AST — the statement form is refused", () => {
+  for (const [name, fnBody] of [
+    ["the F2 repro (a nested `!{}`)", FORM(`@ok = check(p) !{ _ :> false }`)],
+    ["a nested block", FORM(`if (p != "") { @ok = check(p) !{ _ :> false } }`)],
+    ["a string and a comment holding braces", FORM(`const s = "}"\n            // a } here\n            @ok = false`)],
+    ["a handler holding a string with }", FORM(`@ok = false`, `const s = "}"\n            @ok = false`)],
+    ["two arms", `        !{ @ok = false } catch AuthErr { @ok = false } catch Error as e { @ok = false }`],
+    ["after a declaration", `        const st = { ok: true }\n        !{ if (p != "secret") { st.ok = false } } catch Error as e { st.ok = false }`],
+    ["after a semicolon", `        let n = 1;\n        !{ @ok = false } catch Error as e { @ok = false }`],
+    ["after a cell write", `        @ok = true\n        !{ @ok = false } catch Error as e { @ok = false }`],
+    ["nested in another", FORM(`!{ @ok = false } catch AuthErr as c { @ok = false }`)],
+    ["a malformed arm header", `        !{ @ok = false } catch (e) { @ok = false }`],
+    ["a catch with no handler body", `        !{ @ok = false } catch AuthErr`],
   ]) {
-    test(`${name} is E-ERROR-002 — a catch arm cannot handle a returned error`, () => {
-      expect(compile(page(FORM(body))).codes).toContain("E-ERROR-002");
+    test(`${name}: one E-TRY-NOT-IN-SCRML at the form's \`!{\``, () => {
+      const src = fileWith(fnBody);
+      const { tab } = parse(src);
+      const errs = tryErrs(tab.errors);
+      expect(errs.length).toBeGreaterThanOrEqual(1);
+      const at = errs[0].tabSpan.start;
+      expect(src.slice(at, at + 2)).toBe("!{");
+      expect(errs[0].message).toContain("!{ _ e :>");
+      // nothing of the form is kept to lower
+      for (const ee of findNodes(tab.ast, "error-effect")) expect(ee.body ?? []).toEqual([]);
     });
   }
 
-  test("an undeclared name in the try body is reported", () => {
-    const r = compile(page(FORM(`@ok = noSuchName(p)`)));
+  test("written after a statement, it is not glued to that statement as its handler", () => {
+    const { tab } = parse(fileWith(`        const st = { ok: true }\n        !{ if (p != "secret") { st.ok = false } } catch Error as e { st.ok = false }`));
+    const fn = findNodes(tab.ast, "function-decl").find((f) => f.name === "go");
+    expect(fn.body.map((n) => n.kind).includes("guarded-expr")).toBe(false);
+  });
+
+  test("a postfix handler after a statement is still that statement's handler (not refused)", () => {
+    const { tab } = parse(fileWith(`        const v = check(p)\n        !{ _ :> false }`));
+    const fn = findNodes(tab.ast, "function-decl").find((f) => f.name === "go");
+    expect(fn.body.map((n) => n.kind)).toEqual(["guarded-expr"]);
+    expect(tryErrs(tab.errors)).toEqual([]);
+  });
+
+  test("a statement form whose extent was not recorded is still refused (judged from its text)", () => {
+    const bs = splitBlocks("t.scrml", fileWith(FORM(`@ok = check(p) !{ _ :> false }`)));
+    for (const b of findBlocks(bs.blocks, "error-effect")) delete b.errorEffectExtent;
+    expect(tryErrs(buildAST(bs).errors).length).toBe(1);
+  });
+
+  for (const [name, raw] of [
+    ["first in its body", "${ function go(p) { !{ @ok = false } catch Error as e { @ok = false } } }"],
+    ["after a statement", "${ function go(p) { const n = 1\n !{ @ok = false } catch Error as e { @ok = false } } }"],
+    ["a bare catch clause", "${ function go(p) { catch Error as e { @ok = false } } }"],
+  ]) {
+    test(`a \`!{ … }\` re-read from text with its \`catch\` left behind (${name}) is refused at the \`catch\``, () => {
+      // A logic block with NO pre-split children: the tokenizer synthesizes the `!{ … }` BLOCK_REF
+      // (it stops at the block's own brace), leaving `catch …` as tokens.
+      const bs = { filePath: "t.scrml", errors: [], blocks: [{ type: "logic", raw, span: { start: 0, end: raw.length, line: 1, col: 1 }, depth: 0, children: [], name: null, closerForm: null, isComponent: false }] };
+      const errs = tryErrs(buildAST(bs).errors);
+      expect(errs.length).toBe(1);
+      expect(raw.slice(errs[0].tabSpan.start, errs[0].tabSpan.start + 5)).toBe("catch");
+    });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// 3. End to end: never compiles, on any side or position.
+// ---------------------------------------------------------------------------
+describe("compile — the statement form never compiles", () => {
+  const page = (fnBody) => `<ok> = false\n${fileWith(fnBody)}<button onclick=go("x")>go</button>\n<p>\${@ok}</p>\n`;
+  for (const [name, src] of [
+    ["in a function", page(FORM(`@ok = check(p) !{ _ :> false }`))],
+    ["after a statement", page(`        @ok = true\n        !{ if (p != "secret") { @ok = false } } catch Error as e { @ok = false }`)],
+    ["at module init", `<ok> = false\n\${\n${DECLS}\n    if (true) {\n    !{ @ok = check("x") !{ _ :> false } } catch AuthErr as b { @ok = false }\n    }\n}\n<p>\${@ok}</p>\n`],
+  ]) {
+    test(`${name}: E-TRY-NOT-IN-SCRML, no output`, () => {
+      const r = compile(src);
+      expect(r.codes).toContain(TRY);
+    });
+  }
+
+  // A `when` body is held as TEXT: the form there is not detected as such, but the body's reader
+  // refuses any `!{ … }` it cannot read (E-TYPE-031) — fail closed, never compiled.
+  test("in a when body (held as text): refused, never compiled", () => {
+    const r = compile(`<ok> = false\n<pw> = ""\n\${\n${DECLS}\n    when @pw changes {\n        !{ @ok = true } catch Error as e { @ok = false }\n    }\n}\n<p>\${@ok}</p>\n`);
     expect(r.codes.length).toBeGreaterThan(0);
+  });
+
+  test("the `!{}` handler the message points at compiles", () => {
+    const r = compile(page(`        @ok = check(p) !{ _ e :> false }`));
+    expect(r.codes).toEqual([]);
   });
 });

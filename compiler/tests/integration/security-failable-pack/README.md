@@ -276,39 +276,31 @@ handled call's identity-resolved enum (never a same-named local enum) and works 
 their single-file-loadable twins PASS. s8 / l3 "held in a local then passed on" is now PASS-REFUSED (a
 local alias is not an allowed use).
 
-## Measured (S470 s470-bang-catch-try-body — n29 / s12 / f15 / l7 / t7; 312 shapes)
+## Measured (S470 s470-bang-catch-try-body — n29 / s13 / f16 / l8 / t8; 312 shapes)
 
-`r9-shapes.js` (gap `g-impl1-bang-catch-try-body-cut-at-first-brace-s470`) on five sides: the statement
+`r10-shapes.js` (gap `g-impl1-bang-catch-try-body-cut-at-first-brace-s470`) on five sides: the statement
 form `!{ tryBody } catch T [as b] { handler }`. The try body held a nested `!{}`, a block, an object
 literal, a template / string / comment with a brace, a nested `match` or a nested catch; the handled
 call wrote its result into a field read after the form, so a dropped handler logged a wrong password in.
 
-| family | base `d582ae04f` FAIL | base other | head FAIL | head |
-|---|---|---|---|---|
-| n29 (client, 77) | 29 | 4 PASS, 17 PASS-REFUSED, 27 PASS-DENY | 0 | 33 PASS, 40 PASS-REFUSED, 4 PASS-DENY |
-| s12 (server, 54) | 17 | 14 PASS-REFUSED, 23 PASS-DENY | 0 | 24 PASS, 30 PASS-REFUSED |
-| f15 (fullstack, 57) | 17 | 17 PASS-REFUSED, 23 PASS-DENY | 0 | 25 PASS, 32 PASS-REFUSED |
-| l7 (library, 62) | 16 | 30 PASS-REFUSED, 16 PASS-DENY | 0 | 20 PASS, 42 PASS-REFUSED |
-| t7 (tool, 62) | 21 | 4 PASS, 14 PASS-REFUSED, 23 PASS-DENY | 0 | 28 PASS, 34 PASS-REFUSED |
+| family | base `d582ae04f` | head |
+|---|---|---|
+| n29 (client, 77) | 29 FAIL, 4 PASS, 17 PASS-REFUSED, 27 PASS-DENY | 77 PASS-REFUSED |
+| s13 (server, 54) | 17 FAIL, 14 PASS-REFUSED, 23 PASS-DENY | 54 PASS-REFUSED |
+| f16 (fullstack, 57) | 17 FAIL, 17 PASS-REFUSED, 23 PASS-DENY | 57 PASS-REFUSED |
+| l8 (library, 62) | 16 FAIL, 30 PASS-REFUSED, 16 PASS-DENY | 62 PASS-REFUSED |
+| t8 (tool, 62) | 21 FAIL, 4 PASS, 14 PASS-REFUSED, 23 PASS-DENY | 62 PASS-REFUSED |
 
-Four defects, each closed:
-
-- **The try body ended at its first `}`** (`ast-builder.js`): now sliced where the block splitter
-  ended it (`errorEffectExtent`), and each `catch` handler is read by the splitter's own loop (it was
-  a bare brace counter). A body the logic tokenizer does not read as the same balanced span is refused
-  (E-PARSE-001), never re-scanned.
-- **Written after a statement, the form was that statement's postfix handler**: the whole try body was
-  dropped, so a body that REVOKES access never ran (group 11 — FAIL on base). It is its own statement now.
-- **The try body was emitted with no options**: a write to a local declared before the form became a
-  shadowing `const` (group 12). It is emitted as a block of the enclosing body.
-- **The try body was never type-checked**: an unhandled failable call there compiled. A `catch` arm
-  cannot handle one — the call RETURNS its error, it does not throw — so it is E-ERROR-002 now, as
-  anywhere else (group 8, and every "direct" shape).
-
-Most head PASS-REFUSED are E-ERROR-002 on `st.ok = check(p) !{ … }`: a handled call written straight
-into a member is refused even outside this form (each has a "bound first" twin that PASSes). A `}` in a
-template literal or a block comment is E-CTX-001 in any brace context (pre-existing, fails closed). The
-engine-opener and `<onMount>` shapes run at boot, before any click, so PASS-DENY is their correct class.
+On base the try body was cut at its first `}` (the handled call lost its handler, the catch arms were
+dropped), the form written after a statement was glued to it as a postfix handler (the body dropped),
+and the catch could never handle a scrml failure anyway (a failable call RETURNS its error). **S470
+ruling: the form is refused** — E-TRY-NOT-IN-SCRML, SPEC §19.1 "There is NO try/catch". It is detected
+from the block splitter's record of where it read the try body and each `catch` arm
+(`errorEffectExtent`), so it is found after a statement, nested, with braces in strings / comments, in a
+handler, at module init, on every side. 293 shapes carry E-TRY-NOT-IN-SCRML; the other 19 hold the form
+where impl#1 keeps the code as TEXT (an `onclick={…}` block, an engine `effect=`) or hit the splitter's
+template-literal limit (a lone `` `}` ``: E-CTX-001) and are refused by that reader instead — still
+fail closed. A shape that compiles is a detection miss.
 
 ## Running
 

@@ -1,12 +1,14 @@
 // S470 s470-bang-catch-try-body (gap g-impl1-bang-catch-try-body-cut-at-first-brace-s470) — the
-// statement form `!{ tryBody } catch T [as b] { handler }` on every side (client `n29`, server `s12`,
-// fullstack `f15`, library `l7`, tool `t7`). impl#1 cut the try body at its FIRST `}`, so a nested
+// statement form `!{ tryBody } catch T [as b] { handler }` on every side (client `n29`, server `s13`,
+// fullstack `f16`, library `l8`, tool `t8`). impl#1 cut the try body at its FIRST `}`, so a nested
 // handler (`check(p) !{ _ :> false }`), a nested block, an object literal, a string / comment holding
 // a `}` or a nested `!{}` / `match` ended the body early: the handled call lost its handler and the
 // catch arms were dropped (`try { ok = check(p) } catch (e) { throw e }`), so the call's truthy error
-// value logged a wrong password in. And the catch itself never handles a failable call: the call
-// RETURNS its error (it does not throw), so `!{ ok = check(p) } catch AuthErr as b { ok = false }` —
-// read correctly — still logged in, with no E-ERROR-002 (the try body was never type-checked).
+// value logged a wrong password in; written after a statement, the whole form was glued to it as a
+// postfix handler and dropped. And the catch itself never handles a failable call (the call RETURNS
+// its error). S470 ruling: the form is REFUSED (E-TRY-NOT-IN-SCRML, SPEC §19.1 "There is NO
+// try/catch"). Every shape writes the form; the list is kept so its DETECTION is regression-locked —
+// a shape that compiles is a detection miss.
 // Data, not logic: `shapesFor(side)` returns [name, scrml source, extraFiles?]. Do not edit a shape to
 // make it pass.
 
