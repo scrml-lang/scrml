@@ -80,3 +80,23 @@ Base: main `d582ae04f`.
       the server arm.
 - [x] F7 `new X() is .V` / `new X().variant` take the whole `new X()` as the operand; a comment
       before `is` is blanked first.
+- [x] F2 string path: `rewriteVariantTagReads` first lowers a destructuring pattern in TEXT
+      (`const { variant } = @st` in a `when` body): a declaration with a top-level `variant` key
+      wraps its initializer; any other text pattern naming `variant` is refused.
+- [x] SSR `<each>` row reads (`emit-ssr-render.ts resolveRowRead`): a `variant` path segment is the tag read.
+
+### Audit — emitters that produce expression JS without `emitMember` or a pipeline's last pass
+| emitter | disposition |
+|---|---|
+| emit-each `rewriteIterValueExpr` / `lowerEachExpr` / `emitEachInterpExprToJs` / `buildEachAttrTemplate` segments / row handlers / `in=` `of=` iterables / `<empty :>` body | ROUTED — `rewriteAtCellAccess` (all callers emit code) ends with the tag pass |
+| emit-each `:`-shorthand row body, `key=` expression | ROUTED (explicit pass) |
+| emit-each `rewriteContextualSigil` on markup TEXT (literal text nodes, lines ~1098/1105/1503/1521) | cannot carry a read — the result is `JSON.stringify`'d text |
+| emit-each `rewriteContextualSigil` then `parseExprToNode` (logic children, row `if=` scope, map-aware iterables) | structured → `emitMember` |
+| emit-bindings `class:` / binding call-ref args (`rewriteReactiveRefs(callExpr)`, 2 sites) | ROUTED |
+| rewrite.ts `rewriteTemplateAttrValue` interpolations (quoted template attribute) | ROUTED |
+| emit-ssr-render `resolveRowRead` (SSR `<each>` field paths) | ROUTED (`variant` segment) |
+| emit-library verbatim block / export text | ROUTED (whole text, F5) |
+| client template literal with no `@` (emitLit raw) | ROUTED (structured template emitter when it reads `.variant`) |
+| front-end `emitStringFromTree` (component-expander, body-pre-parser, body-dg-builder) | produces scrml SOURCE re-compiled by codegen, not JS |
+| meta-eval.ts (compile-time `^{}` evaluation) | not shipped JS; a compile-time `x.variant` on a unit variant is still `undefined` — candidate gap |
+| compiler-generated reads (`_scrml_match_N.variant`, engine `__prev.variant`, runtime) | compiler code, already tag-normalized |

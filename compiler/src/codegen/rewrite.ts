@@ -3499,7 +3499,8 @@ export function rewriteTemplateAttrValue(value: string): TemplateAttrResult {
   let result = "`";
   for (const seg of sliceTemplateText(value ?? "", { bare: true }).segments) {
     if (seg.kind === "expr") {
-      result += `\${${rewriteAtRefTokens(seg.text, reactiveVars)}}`;
+      // S470 (review F1 audit) — the interpolation is emitted as code: lower a `.variant` read.
+      result += `\${${rewriteVariantTagReads(rewriteAtRefTokens(seg.text, reactiveVars))}}`;
       continue;
     }
     const q = seg.text;
