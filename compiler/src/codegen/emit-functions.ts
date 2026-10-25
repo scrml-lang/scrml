@@ -1837,9 +1837,16 @@ export function emitFunctions(ctx: CompileContext): { lines: string[]; fnNameMap
       // S89 §13.2 Sub-Phase B Step 3 — thread calleeMap + exportRegistry so
       // the auto-await classifier inside scheduleStatements covers stdlib
       // Promise<T> callees alongside server functions.
-      const scheduled = scheduleStatements(body, fnNode, routeMap, depGraph, filePath, errors, machineBindings, engineBindings, engineVarNames, enginesWithHooks, _returnTypeAnnotation, name, enginesWithOnTimeout, enginesWithIdleWatchdog, enginesWithInternalRules, enginesWithHistory, enginesWithMessageArms, engineMessageVariants, _calleeMap, _exportRegistry, mapVarNames, orderedMapVarNames, setVarNames, _localMap, _localSet, _localOrdered, _clientPeerAwaitNames, _clientSyncPeerCalls, _fnIsAsync, ctx.synthCellKeys, _readOnlyServerFnNames,
-        // S470 — a sync host's calls of a LOCAL that shadows a server / async name are not awaited.
-        _fnIsAsync ? null : locallyBoundOnlyCalleeNames(fnNode as never));
+      // S470 — a sync host's calls of a LOCAL that shadows a server / async name are not awaited.
+      const _localOnlyCallees = _fnIsAsync ? null : locallyBoundOnlyCalleeNames(fnNode as never);
+      // S470 s470-render-residue-host-promises fix round 1 — nor its calls of a local that shadows
+      // an async PEER name (the host `fetch` is one: `function chk(q, fetch) { return fetch(q) }`
+      // is sync, so `fetch(q)` there is the parameter, never awaited).
+      const _peerAwaitNames = _localOnlyCallees && _localOnlyCallees.size > 0 && _clientPeerAwaitNames
+        ? new Set([..._clientPeerAwaitNames].filter((n) => !_localOnlyCallees.has(n)))
+        : _clientPeerAwaitNames;
+      const scheduled = scheduleStatements(body, fnNode, routeMap, depGraph, filePath, errors, machineBindings, engineBindings, engineVarNames, enginesWithHooks, _returnTypeAnnotation, name, enginesWithOnTimeout, enginesWithIdleWatchdog, enginesWithInternalRules, enginesWithHistory, enginesWithMessageArms, engineMessageVariants, _calleeMap, _exportRegistry, mapVarNames, orderedMapVarNames, setVarNames, _localMap, _localSet, _localOrdered, _peerAwaitNames, _clientSyncPeerCalls, _fnIsAsync, ctx.synthCellKeys, _readOnlyServerFnNames,
+        _localOnlyCallees);
       for (const line of scheduled) {
         lines.push(`  ${line}`);
       }
