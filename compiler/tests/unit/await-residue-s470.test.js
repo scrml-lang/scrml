@@ -141,10 +141,10 @@ describe("s470-await-residue — ORDER: async-hosted bodies await the call in pl
         const js = r.clientJs;
         // The body's own async scope, the call awaited, and NOT the detached lift for this write.
         expect(js).toMatch(/\(async \(\) => \{\n/);
-        expect(js).toMatch(shape.startsWith("write") ? /reactive_set\("ok", (_scrml_live\()?await _scrml_fetch_isOk_\d+\(/ : /await _scrml_stash_\d+\(/);
+        expect(js).toMatch(shape.startsWith("write") ? /reactive_set\("ok", (_scrml_hook_live\()?await _scrml_fetch_isOk_\d+\(/ : /await _scrml_stash_\d+\(/);
         expect(js).not.toMatch(/\(async \(\) => _scrml_(cs_)?reactive_set\("ok"/);
         // The test reads the cell AFTER the awaited write, in the same async scope.
-        const at = js.search(shape.startsWith("write") ? /reactive_set\("ok", (_scrml_live\()?await/ : /await _scrml_stash_/);
+        const at = js.search(shape.startsWith("write") ? /reactive_set\("ok", (_scrml_hook_live\()?await/ : /await _scrml_stash_/);
         const test = js.indexOf(shape.startsWith("write") ? 'reactive_get("ok"))' : 'reactive_get("tmp"))', at);
         expect(at).toBeGreaterThan(-1);
         expect(test).toBeGreaterThan(at);

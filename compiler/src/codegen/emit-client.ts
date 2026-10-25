@@ -3760,9 +3760,9 @@ function generateClientJsImpl(ctx: CompileContext): string {
         // statement of a classic script, a sync host) — the case it was built for.
         let emitterAwaited = false;
         // s470-await-residue fix round 1 (F5) — a latest-wins async hook body wraps each resume point
-        // as `_scrml_live(await stub(…))` (js-async-analysis `colorAsyncActionBody`): the same
+        // as `_scrml_hook_live(await stub(…))` (js-async-analysis `colorAsyncActionBody`): the same
         // emitter-awaited site, its guard kept in every rewrite below.
-        const LIVE = "_scrml_live(";
+        const LIVE = "_scrml_hook_live(";
         let liveWrap = false;
         if (clientCode.slice(valStart, valStart + LIVE.length) === LIVE) {
           let p = valStart + LIVE.length;
@@ -3806,7 +3806,7 @@ function generateClientJsImpl(ctx: CompileContext): string {
         let outerClose = k + 1;
         while (outerClose < clientCode.length && /\s/.test(clientCode[outerClose])) outerClose++;
         if (liveWrap) {
-          // The `_scrml_live(` close comes first, then the reactive set's.
+          // The `_scrml_hook_live(` close comes first, then the reactive set's.
           if (clientCode[outerClose] !== ")") {
             parts.push(clientCode.slice(i, setIdx + setHead.length));
             i = setIdx + setHead.length;
@@ -3890,7 +3890,7 @@ function generateClientJsImpl(ctx: CompileContext): string {
                   const lineStart = clientCode.lastIndexOf("\n", letStart - 1) + 1;
                   const indent = /^[ \t]*/.exec(clientCode.slice(lineStart, letStart))![0];
                   const inPlace =
-                    `let ${resultVar} = ${liveWrap ? "_scrml_live(" : ""}await ${mangledName}(${args})${liveWrap ? ")" : ""};` +
+                    `let ${resultVar} = ${liveWrap ? "_scrml_hook_live(" : ""}await ${mangledName}(${args})${liveWrap ? ")" : ""};` +
                     interveningText +
                     `${ifBlock} else {\n` +
                     `  _scrml_reactive_set(${nameArg}, ${resultVar});\n` +

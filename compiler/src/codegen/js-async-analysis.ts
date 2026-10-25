@@ -1360,6 +1360,77 @@ export function bodyTextHasOwnAwait(bodyText: string): boolean | null {
   return fnTextHasOwnAwait("async function() {\n" + bodyText + "\n}");
 }
 
+/**
+ * s470-when-changes-latest-wins — gate every OWN-level `await` in a function
+ * BODY (statement text) for §6.7.4 "newest run wins". With `gate` =
+ * `{ check: C, wait: W, stop: S }`, each `await X` becomes
+ *
+ *     (C(await W(X)) ? C.value : await S())
+ *
+ * where `C` is the run's gate (`_scrml_when_changes` passes it to the body) and
+ * `W` / `S` are runtime helpers. `W(X)` settles to a box whether X fulfils or
+ * rejects. `C(box)` runs SYNCHRONOUSLY at
+ * the point the run resumes, so no microtask can slip a re-trigger between the
+ * staleness check and the code after the await (the `<request>` shape: check
+ * after resuming). For the current run it yields the value (or re-throws the
+ * failure, as the bare `await` would); for a stale run it is false and the run
+ * awaits `S()`, which never settles, so its continuation never resumes.
+ * Nested functions are their own scope and are left alone (the same scope rule
+ * as `fnTextHasOwnAwait`).
+ *
+ * Returns the rewritten text (unchanged when there is no own-level `await`),
+ * or `null` when the text does not parse or holds a `for await` (whose
+ * per-iteration resumption has no operand to gate) — the caller must not ship
+ * an ungated async body in that case.
+ */
+export interface AwaitGate { check: string; wait: string; stop: string }
+export function wrapOwnAwaits(bodyText: string, gate: AwaitGate): string | null {
+  const PREFIX = "(async function() {\n";
+  const program = tryParse(PREFIX + bodyText + "\n})");
+  if (!program || program.body.length !== 1) return null;
+  const fn = program.body[0]?.expression;
+  if (!fn || !isFn(fn)) return null;
+  // One insertion: offset, text, opener or closer, await-nesting depth.
+  const edits: Array<{ at: number; text: string; open: boolean; depth: number }> = [];
+  const off = PREFIX.length;
+  let forAwait = false;
+  const walk = (n: N, depth: number): void => {
+    if (!n || typeof n !== "object") return;
+    if (Array.isArray(n)) { for (const c of n) walk(c, depth); return; }
+    if (n !== fn && isFn(n)) return;
+    if (n.type === "ForOfStatement" && n.await === true) forAwait = true;
+    let inner = depth;
+    if (n.type === "AwaitExpression" && n.argument) {
+      edits.push({ at: n.start - off, text: `(${gate.check}(`, open: true, depth });
+      edits.push({ at: n.argument.start - off, text: `${gate.wait}(`, open: true, depth });
+      edits.push({ at: n.argument.end - off, text: `)) ? ${gate.check}.value : await ${gate.stop}())`, open: false, depth });
+      inner = depth + 1;
+    }
+    for (const key of Object.keys(n)) {
+      if (key === "type" || key === "start" || key === "end") continue;
+      const v = n[key];
+      if (v && typeof v === "object") walk(v, inner);
+    }
+  };
+  walk(fn.params, 0);
+  walk(fn.body, 0);
+  if (forAwait) return null;
+  if (edits.length === 0) return bodyText;
+  // Splice from the end so earlier offsets stay valid. At one offset the LAST
+  // splice lands leftmost, so openers go deeper-first (the outer one ends up
+  // outside) and closers shallower-first (the inner one ends up inside). In
+  // `await await x` the outer `W(` and the inner `(C(` share an offset,
+  // and so do the two closers.
+  edits.sort((a, b) => {
+    if (a.at !== b.at) return b.at - a.at;
+    if (a.open !== b.open) return a.open ? -1 : 1;
+    return a.open ? b.depth - a.depth : a.depth - b.depth;
+  });
+  let out = bodyText;
+  for (const e of edits) out = out.slice(0, e.at) + e.text + out.slice(e.at);
+  return out;
+}
+
 // ---------------------------------------------------------------------------
 // The active client emission (handler emitters with no ctx in reach)
 // ---------------------------------------------------------------------------
@@ -1734,19 +1805,19 @@ export function colorAsyncActionBody(code: string, label: string, span: unknown,
   if (!r.rootAsync) return r.code;
   const lbl = JSON.stringify(label);
   if (seqVar !== null) {
-    const guarded = guardRootAwaits(r.code, "_scrml_live");
+    const guarded = guardRootAwaits(r.code, "_scrml_hook_live");
     if (guarded !== null) {
       // s470-await-residue fix round 1 (F5) — LATEST WINS, the `<request>` settle machine's rule: a
       // run superseded by a later run of the same host (`seqVar`, a module-scope counter) does not
-      // resume. The check is made synchronously AT each resume point — `_scrml_live(await …)` runs
+      // resume. The check is made synchronously AT each resume point — `_scrml_hook_live(await …)` runs
       // in the same microtask the await resumes in, before anything the statement does next — and
       // throws a run-local sentinel that ends the run silently.
       const body = guarded.split("\n").map((l) => (l.length ? "    " + l : l)).join("\n");
       return `(async () => {\n` +
-        `  const _scrml_run = ++${seqVar};\n` +
-        `  const _scrml_stale = {};\n` +
-        `  const _scrml_live = (v) => { if (_scrml_run !== ${seqVar}) throw _scrml_stale; return v; };\n` +
-        `  try {\n${body}\n  } catch (_scrml_e) {\n    if (_scrml_e !== _scrml_stale) throw _scrml_e;\n  }\n` +
+        `  const _scrml_hook_run = ++${seqVar};\n` +
+        `  const _scrml_hook_stale = {};\n` +
+        `  const _scrml_hook_live = (v) => { if (_scrml_hook_run !== ${seqVar}) throw _scrml_hook_stale; return v; };\n` +
+        `  try {\n${body}\n  } catch (_scrml_e) {\n    if (_scrml_e !== _scrml_hook_stale) throw _scrml_e;\n  }\n` +
         `})().catch(_scrml_async_err => _scrml_error_boundary_log(${lbl}, _scrml_async_err));`;
     }
   }

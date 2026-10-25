@@ -7,7 +7,7 @@
  * 60ms), go back to Idle, click the wrong one — the right password's run landed LAST and the page
  * showed LOGGED IN with `@pw` = "wrong" (measured on 817aadc0e; base 6081e0685 showed "rejected").
  * Each hook arm now carries a module-scope run counter; a superseded run's continuation never
- * resumes — the check `_scrml_live(await …)` runs synchronously at the resume point — the
+ * resumes — the check `_scrml_hook_live(await …)` runs synchronously at the resume point — the
  * `<request>` settle machine's latest-wins rule. A `<timer>` (which re-reads on its next tick) is the
  * reference behaviour.
  */

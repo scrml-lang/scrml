@@ -139,19 +139,19 @@ describe("F5 — an async engine hook host is latest-wins", () => {
       const js = r.clientJs;
       const m = /let (__scrml_engine_\w+_fire_hooks_run_\d+) = 0;/.exec(js);
       expect(m).not.toBeNull();
-      expect(js).toContain(`const _scrml_run = ++${m[1]};`);
-      expect(js).toMatch(/reactive_set\("ok", _scrml_live\(await _scrml_fetch_isOk_\d+\(/);
+      expect(js).toContain(`const _scrml_hook_run = ++${m[1]};`);
+      expect(js).toMatch(/reactive_set\("ok", _scrml_hook_live\(await _scrml_fetch_isOk_\d+\(/);
       expect(js).not.toMatch(/\(async \(\) => _scrml_(cs_)?reactive_set\("ok"/);
     });
   }
   test("<onTransition>, a guarded write: the in-place `!{ }` relocation keeps the guard", () => {
     const r = compile(page(`<engine for=Phase initial=.Idle>\n  <Idle rule=.Active/>\n  <Active/>\n  <onTransition from=.Idle to=.Active>\${ @ok = isOk(@pw) !{ _ :> false }\n if (@ok) { @msg = "IN" } }</onTransition>\n</>`, "; @phase = .Active"));
     expect(r.codes).toEqual([]);
-    expect(r.clientJs).toMatch(/let \w+ = _scrml_live\(await _scrml_fetch_isOk_\d+\(/);
-    expect(r.clientJs).not.toMatch(/reactive_set\("ok", _scrml_live/);
+    expect(r.clientJs).toMatch(/let \w+ = _scrml_hook_live\(await _scrml_fetch_isOk_\d+\(/);
+    expect(r.clientJs).not.toMatch(/reactive_set\("ok", _scrml_hook_live/);
   });
   test("<timer>: no run counter (each tick re-reads; a slow tick must not starve the next)", () => {
-    expect(compile(page(`<timer interval=10>\${ ${WRITE_TEST} }</timer>`)).clientJs).not.toMatch(/_scrml_live/);
+    expect(compile(page(`<timer interval=10>\${ ${WRITE_TEST} }</timer>`)).clientJs).not.toMatch(/_scrml_hook_live/);
   });
 });
 
