@@ -191,3 +191,62 @@ describe("F4 — a `!{}` in an event handler in a `<match>` nested in a `<match>
     expect(codes).not.toContain("E-TYPE-031");
   });
 });
+
+// S470 fix round 1 (adversarial review of 7453d57ff) — the enum fact read from the TYPE, not the form.
+describe("fix round 1 — enum facts from the type (aliases, returns, imports, flows)", () => {
+  const DA = `type I2 = Inner
+    type SA:struct = { i: I2 }
+    function u1(p) {
+        if (p != "secret") return Inner::Bad("bad")
+        return Inner.Ok2
+    }
+    function u2(p) {
+        if (p != "secret") return Inner::Bad("bad")
+        return .Ok2
+    }
+    function u3(p) {
+        const r = Inner::Bad("bad")
+        return p != "secret" ? r : Inner.Ok2
+    }
+    function ra(p) -> I2 { return Inner::Bad("bad") }`;
+  const REFUSED = [
+    ["B-ALIAS parameter", `function g(y: I2) { return y.reason }\n        ${R(`g(Inner::Bad("bad")) == "bad"`)}`],
+    ["B-ALIAS local", `const x: I2 = Inner::Bad("bad")\n        ${R(`x.reason == "bad"`)}`],
+    ["B-ALIAS tape", `const xs: I2[] = [Inner::Bad("bad")]\n        ${R(`xs[0].reason == "bad"`)}`],
+    ["B-ALIAS return", R(`ra(p).reason == "bad"`)],
+    ["B-ALIAS struct field", `const s: SA = { i: Inner::Bad("bad") }\n        ${R(`s.i.reason == "bad"`)}`],
+    ["B-UNITRET E.Unit", R(`u1(p).reason == "bad"`)],
+    ["B-UNITRET .Unit", R(`u2(p).reason == "bad"`)],
+    ["B-UNITRET local + ternary", R(`u3(p).reason == "bad"`)],
+    ["ternary of constructors", `const x = p != "" ? Inner::Bad("bad") : Inner.Ok2\n        ${R(`x.reason == "bad"`)}`],
+    ["|| of constructors", `const x = Inner::Bad("bad") || Inner.Ok2\n        ${R(`x.reason == "bad"`)}`],
+    ["lin", `lin x = Inner::Bad("bad")\n        ${R(`x.reason == "bad"`)}`],
+    ["typed tape destructured", `const xs: Inner[] = [Inner::Bad("bad")]\n        const [x] = xs\n        ${R(`x.reason == "bad"`)}`],
+    ["typed tape .find", `const xs: Inner[] = [Inner::Bad("bad")]\n        ${R(`xs.find((v) => true).reason == "bad"`)}`],
+    ["typed tape .at", `const xs: Inner[] = [Inner::Bad("bad")]\n        ${R(`xs.at(0).reason == "bad"`)}`],
+    ["typed tape callback parameter", `const xs: Inner[] = [Inner::Bad("bad")]\n        ${R(`xs.map((v) => v.reason)[0] == "bad"`)}`],
+    ["value match of typed values", `const a: Inner = Inner::Bad("bad")\n        const x = match a { .Bad(r) :> a, else :> a }\n        ${R(`x.reason == "bad"`)}`],
+    ["closure result", `const f = () => Inner::Bad("bad")\n        ${R(`f().reason == "bad"`)}`],
+    [".V.history read outside the restore form", R(`Inner.Ok2.history == "bad"`)],
+  ];
+  for (const [name, body] of REFUSED) {
+    test(name, () => { expect(codesOf(lib(DA, body), {}, "library")).toContain("E-TYPE-004"); });
+  }
+  test("B-IMPORTFN: an imported fn declared -> Inner, a constructor-returning fn, a const ctor, an alias", () => {
+    const h = "${\n    export type Inner:enum = { Bad(reason: string), Ok2 }\n    export const badC = Inner::Bad(\"bad\")\n    export function mkI(p) { return Inner::Bad(\"bad\") }\n    export function mkT(p) -> Inner { return Inner::Bad(\"bad\") }\n    export type I3 = Inner\n}\n";
+    for (const body of [`mkT("x").reason == "bad"`, `mkI("x").reason == "bad"`, `badC.reason == "bad"`]) {
+      const src = `import { Inner, badC, mkI, mkT, I3 } from "./h.scrml"\n<msg> = ""\n\${\n    function go() { @msg = ${body} ? "a" : "b" }\n}\n<button onclick=go()>\${@msg}</button>\n`;
+      expect(codesOf(src, { "h.scrml": h })).toContain("E-TYPE-004");
+    }
+    const src = `import { Inner, I3 } from "./h.scrml"\n<msg> = ""\n\${\n    function go() { const x: I3 = Inner::Bad("bad")\n @msg = x.reason }\n}\n<button onclick=go()>\${@msg}</button>\n`;
+    expect(codesOf(src, { "h.scrml": h })).toContain("E-TYPE-004");
+  });
+  test("X-ADV: `.advance` on a NON-engine cell is a payload read", () => {
+    const src = `<ac>: Ad = Ad::Bad("bad")\n<msg> = ""\n\${\n    type Ad:enum = { Bad(advance: string), Ok2 }\n    function go() { @msg = @ac.advance == "bad" ? "a" : "b" }\n}\n<button onclick=go()>\${@msg}</button>\n`;
+    expect(codesOf(src)).toContain("E-TYPE-004");
+  });
+  test("still ALLOWED: the restore form `@cell = .V.history` / `.advance(.V.history)` on an engine cell", () => {
+    const src = `<program>\ntype Ph:enum = { A, B }\nfunction f() { @ph = .B.history }\nfunction g() { @ph.advance(.B.history) }\n<engine for=Ph initial=.A>\n  <A rule=.B><button onclick=f()>x</button><button onclick=g()>y</button></>\n  <B rule=.A>b</>\n</engine>\n</program>`;
+    expect(codesOf(src).filter((c) => c === "E-TYPE-004")).toEqual([]);
+  });
+});
