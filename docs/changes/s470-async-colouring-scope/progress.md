@@ -46,6 +46,17 @@ both artefacts — `conformance/cases/components/missing-required-slot-reject/ca
 which differs between two head runs too) and `stdlib/auth/templates/login.scrml` (`_scrml_project_root`, the
 tree path). No corpus program changes emission.
 
+## CI job commands (.github/workflows/ci.yml), on `56366fee1`
+
+All exit 0: types-gate (181 diagnostics, unchanged) · root tests (2239) · snippet-gate (113 / 0 fail) ·
+claim-gate (18 / 0 fail) · corpus-compile-floor · md-shim · conflict-marker · spec-index · delta-lint ·
+ci-shards needs · s34-census --check-new --base origin/main (no new §34 rows) · bootstrap-conformance ·
+bootstrap-severity · lsp + commands (777 / 0 fail) · todomvc + node --check · browser-baseline (name set
+unchanged) · lint-no-default-arm · slices m1 / m2 / m1-lowered / m3 / m4 / codec · e2e-render-map (259 / 0
+fail) · host-global (0 violations; its "7 pinned throws no longer throw" note is the same on base — the
+files compile on `6081e0685` too). `facts --check` exit 1 = stale, WARN-only in CI; not regenerated (bot-owned).
+Pre-commit hook (unit + integration + conformance, incl. the 2680-shape pack): 43495 pass / 0 fail.
+
 ## Log
 
 - WIP 1 (`d7f1456e5`): fix + pack families s12 / f15 / l7 / t7 (354 shapes, r9-shapes.js, r9-pinned.js) +
