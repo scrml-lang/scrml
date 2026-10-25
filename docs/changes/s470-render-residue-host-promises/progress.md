@@ -83,3 +83,34 @@ functions are NOT added — no SPEC text makes them a waiting value. Nothing is 
 - `render-waiting-calls.ts`: a shadowed ident is not the host global (`waitingIdent`, the callee walk);
   `hostMemberCall` for `globalThis.` / `window.` / `self.fetch`; the message names "the host `fetch`, which
   returns a Promise (§13.7 item 4)".
+- ee375662f — gaps 2 + 3 + pack f15 + unit tests. One existing test updated:
+  `g-when-handler-astpath-lowering.test.js` §6 (`@res = safeCallAsync(() => fetch("/x"))` in a `when` body, an
+  un-imported `safeCallAsync`): now refused E-IMPL1-ACTION-NOT-AWAITED (`fetch` inside a nested function in a
+  `when` body, which impl#1 does not await). SPEC basis: the thunk is an async-coloured function value passed to
+  a non-collection function (§13.2 value-use ban). The test now accepts that fail-closed refusal.
+- next — the message for a helper that reaches `fetch` names it ("`probe`, which calls the host `fetch` …
+  §13.7 item 2") instead of "which the compiler emits async" (impl#1 does not).
+
+## Measurements
+
+### Pack family f15 (security-failable-pack, SIDE fullstack) — classify.js
+| | base 6081e0685 | head |
+|---|---|---|
+| 17 BAD shapes (render ×7, action ×7, markup value ×3) | **17 FAIL** (wrong → LOGGED IN) | 15 PASS-REFUSED + 2 PASS (the two plain-comparison markup values now gate correctly) |
+| 5 controls | 2 PASS + 3 PASS-DENY | same |
+A `^{ }` shape was measured and dropped: PASS-REFUSED E-META-001 on base (no `fetch` in `^{}`, Approach C).
+EXPECTED_SHAPE_COUNT 2265 → 2287; pinned; README updated.
+
+### R26 — the whole corpus (4067 `.scrml` files: every file in the tree outside node_modules / .git)
+One in-process compile per file; base = an extracted 6081e0685 tree (+ scrml.toml), head = this worktree;
+corpus files = this worktree for both. Harness ~/.cache/scrml/s470/laneG/r26.mjs, r26diff.mjs.
+- **newly rejected: 1** — `docs/changes/s441-audit-gap-filing/repro/fetch-inside-fn-accepted.scrml` (a gap
+  REPRODUCER, not a program): `fn get(u) { fetch(u); return 1 }` then `<p>${get("x")}</p>` → E-VALUE-SERVER-CALL
+  "`get`, which calls the host `fetch` … §13.7 item 2". SPEC basis: §13.7 item 2 ("a client function … async-colored
+  (§13.2: it calls, directly or transitively, … a Promise-returning standard-library function)") in a render
+  position. Not rewritten (it reproduces a different, ruling-gated `fn`-purity gap; its "Actual" line is now stale).
+- newly clean: 3, codes changed: 13 — ALL stdlib, all harness artefacts (a worktree stdlib file compiled by the
+  base compiler is outside its tree → not stdlib: E-ASYNC-NOT-IN-SCRML / E-NAME-COLLIDES-RESERVED-PREFIX, the
+  #1554 note). Re-run of stdlib/ with each compiler over its OWN in-tree copy: 54 files, **0 diffs**.
+- No example, sample, benchmark or conformance case changes code. `fetch` in the corpus sits in handlers and
+  function bodies (action positions this check does not walk), never in a render position or a sync body.
