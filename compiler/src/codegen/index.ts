@@ -123,7 +123,7 @@ import { resetLiftModuleState } from "./emit-lift.js";
 import { setVariantFieldsForRewriter, setProtectContextForRewriter, setBoolColumnsForRewriter, setTenantContextForRewriter } from "./rewrite.ts";
 import { collectTopLevelLogicStatements, containsSql, getNodes, collectFunctions } from "./collect.ts";
 import { computeClientAsyncSets } from "./emit-functions.ts";
-import { buildCalleeImportMap } from "./scheduling.ts";
+import { buildCalleeImportMap, _clientServerFnNames } from "./scheduling.ts";
 import type { CompileContext } from "./context.ts";
 import type { ReachabilityRecord } from "../types/reachability.ts";
 import { resolveDbDriver } from "./db-driver.ts";
@@ -2812,6 +2812,7 @@ export function runCG(input: CgInput): CgOutput {
         buildCalleeImportMap(fileAST as never),
         exportRegistryInput ?? null,
       ).clientAsyncFnNames;
+      const _rwHostServer = safeRouteMap ? _clientServerFnNames(safeRouteMap as never, filePath) : new Set<string>();
       const _rwLocalFnNames = new Set(_rwFnNodes.map((f) => (f as { name?: unknown }).name).filter((x): x is string => typeof x === "string"));
       const _rwServerNames = new Set([...serverFnNamesOfFile(fileAST, _fileAsyncMemo.routeMap ?? null), ..._rwServerAnywhere]);
       for (const site of renderWaitingCallsOf(getNodes(fileAST as never) as unknown[], {
@@ -2824,26 +2825,31 @@ export function runCG(input: CgInput): CgOutput {
         // matches (fnNameMap); an imported async function is emitted as a bare call.
         lifted: (n: string) => _rwLocalFnNames.has(n) && (_rwServerNames.has(n) || _rwClientAsync.has(n)),
         engineVars: collectEngineVarNames(fileAST),
+        // fix round 1 (H2) — what an async action host (a `when` body, the engine opener `effect=`)
+        // awaits at its own level: the same two sets emit-reactive-wiring / emit-client hand them.
+        awaitedInAsyncHost: (n: string) => _rwHostServer.has(n) || _rwClientAsync.has(n),
         filePath,
       })) {
+        // fix round 1 (ruling: user-voice-scrml.md S470 "Mint E-IMPL1 code (Recommended)") — an
+        // ACTION position (§13.8 (i)) whose impl#1 emitter has no async host is NOT E-VALUE-SERVER-CALL
+        // (that row's "Not this code: … every §6.15 action position" stays true): the language allows
+        // the waiting call there; impl#1 refuses it, an impl#1 limit, until those bodies get an async
+        // host. Render / value positions keep E-VALUE-SERVER-CALL.
+        const code = site.kind === "action" ? "E-IMPL1-ACTION-NOT-AWAITED" : "E-VALUE-SERVER-CALL";
         const message = site.kind === "action"
-          // s470-action-body-await (SECURITY) — an ACTION position (§13.8 (i)) whose impl#1 emitter
-          // has no async host: the language awaits the call here; impl#1 cannot, so it refuses it.
-          ? `E-VALUE-SERVER-CALL: ${site.position} calls ${site.what}. impl#1 runs this code synchronously ` +
-            "and inserts no `await` here, so the code would get a pending Promise — always truthy, so a test of it " +
-            "passes for every input (§13.2, §13.8). The language awaits a waiting value at a statement of an action " +
-            "body (§13.8 (i)); impl#1 does so only in a function body, an event handler, `on mount { }`, a " +
-            "`when … changes { }` body and an engine opener `effect=`, so it refuses it here. Fix: make the call " +
-            "in one of those (an event handler, or a `function` the handler calls), or write its result straight " +
-            "into a cell as the whole statement (`@cell = f(…)` with `f` a function this file declares, which " +
-            "impl#1 awaits — in a `<request>` (§6.7.7) for a load) and test the cell."
+          ? `E-IMPL1-ACTION-NOT-AWAITED: ${site.position} calls ${site.what}. The language allows a waiting ` +
+            "call here and awaits it (§13.8 (i)), but impl#1 cannot: it runs this code with no `await` at that " +
+            "point, so the code would get a pending Promise — always truthy, so a test of it passes for every " +
+            "input. This is an impl#1 limit, not a language rule. Fix: move the code into an event handler (or a " +
+            "`function` an event handler calls) or an `on mount { }` block, or load the value with a `<request>` " +
+            "(§6.7.7) into a cell (`<request id=\"r\">${ @cell = f(…) }</>`) and read the cell here."
           : `E-VALUE-SERVER-CALL: ${site.position} calls ${site.what}. A value position (a render ` +
             "position, re-evaluated synchronously while the page renders, or a declaration's initializer) " +
             "cannot wait for the call: it would hold a pending Promise, which is always truthy (§13.7, §13.8). The language allows a waiting value in markup only " +
             "through a pending cell (§13.9), and impl#1 has no async render path yet, so it cannot render this. " +
             "Fix: make the call in an event handler, a `function`, or a `<request>` (§6.7.7) that writes a cell, " +
             "and render the cell here.";
-        recordRefusedLowering(new CGError("E-VALUE-SERVER-CALL", message, (site.span as object | undefined) ?? {}), site.anchor);
+        recordRefusedLowering(new CGError(code, message, (site.span as object | undefined) ?? {}), site.anchor);
       }
 
       // s457 (§21.4) — this module's LOCAL `.scrml` re-exports, for emit-server's

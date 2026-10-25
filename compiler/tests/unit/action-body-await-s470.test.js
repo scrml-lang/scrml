@@ -15,7 +15,15 @@
  *
  * Two shapes stay accepted in a synchronous body because their emission is already right: a whole
  * cell write of one call of a function the file declares (`@cell = f(args)`, which emit-client's
- * reactive-set lift awaits) and a bare call statement (its value is discarded).
+ * reactive-set lift awaits — NOT in a `^{ }`, which is lowered through `_scrml_cap.*` and is not
+ * lifted, fix round 1 H1) and a bare call statement (its value is discarded).
+ *
+ * Fix round 1 (ruling: user-voice-scrml.md S470 "Mint E-IMPL1 code (Recommended)") — an action
+ * position impl#1 cannot await is E-IMPL1-ACTION-NOT-AWAITED (an impl#1 limit, not a language rule);
+ * render / value positions (a cell declaration's initializer) keep E-VALUE-SERVER-CALL. H2: a local
+ * function (a lambda / `function` value, a nested `function`, an IIFE) whose body waits, declared in
+ * an engine body, a `^{ }`, a `when` body or the opener `effect=`, and a waiting call inside a
+ * callback in a `when` body / the opener, are refused: nothing awaits them there.
  */
 import { describe, test, expect } from "bun:test";
 import { resolve } from "path";
@@ -24,6 +32,7 @@ import { writeFileSync, rmSync, mkdirSync } from "fs";
 import { compileScrml } from "../../src/api.js";
 
 const CODE = "E-VALUE-SERVER-CALL";
+const ACTION = "E-IMPL1-ACTION-NOT-AWAITED";
 
 function compileFiles(files) {
   const dir = resolve(tmpdir(), `scrml-s470-await-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`);
@@ -37,10 +46,10 @@ function compileFiles(files) {
   try {
     const result = compileScrml({ inputFiles: paths, write: false, outputDir: resolve(dir, "out"), log: () => {} });
     const all = [...(result.errors ?? []), ...(result.warnings ?? [])];
-    const hits = all.filter((e) => e.code === CODE);
+    const hits = all.filter((e) => e.code === CODE || e.code === ACTION);
     const outs = [...(result.outputs?.values?.() ?? [])];
     const page = outs.find((o) => /app/.test(String(o.sourceFile ?? o.filePath ?? ""))) ?? outs[outs.length - 1] ?? {};
-    return { codes: all.map((e) => e.code), hits, messages: hits.map((e) => e.message), clientJs: page.clientJs ?? "" };
+    return { codes: all.map((e) => e.code), hits, hitCodes: [...new Set(hits.map((e) => e.code))], messages: hits.map((e) => e.message), clientJs: page.clientJs ?? "" };
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -62,6 +71,35 @@ ${view}
 const ENG = (body) => `type Phase:enum = { Idle, Active }\n${body}`;
 
 // [view, fragment the message must name]
+// [view, fragment the message must name, code (default E-IMPL1-ACTION-NOT-AWAITED)]
+const H2 = {
+  "a const lambda": "const f = () => isOk(@pw)\n if (f()) { @msg = \"IN\" }",
+  "a block lambda": "const f = () => { return isOk(@pw) }\n if (f()) { @msg = \"IN\" }",
+  "a function expression": "const f = function () { return isOk(@pw) }\n if (f()) { @msg = \"IN\" }",
+  "a nested function": "function f() { return isOk(@pw) }\n if (f()) { @msg = \"IN\" }",
+  "a helper through a lambda": "const f = () => allowed(@pw)\n if (f()) { @msg = \"IN\" }",
+  "an alias of the function": "const f = isOk\n if (f(@pw)) { @msg = \"IN\" }",
+};
+const H2_HOSTS = {
+  "state effect=": (b) => ENG(`<engine for=Phase>\n  <Idle rule=.Active effect=\${ ${b} }/>\n  <Active/>\n</>`),
+  "<onTransition>": (b) => ENG(`<engine for=Phase>\n  <Idle rule=.Active/>\n  <Active/>\n  <onTransition from=.Idle to=.Active>\${ ${b} }</onTransition>\n</>`),
+  "^{ }": (b) => `^{ ${b} }`,
+  "when body": (b) => `\${ when @pw changes { ${b} } }`,
+  "opener effect=": (b) => ENG(`<engine for=Phase effect=\${ ${b} }>\n  <Idle rule=.Active/>\n  <Active/>\n</>`),
+};
+const REFUSED_FR1 = {
+  // H1 — a `^{ }` cell write is lowered through `_scrml_cap.*` and NOT lifted
+  "^{ } whole cell write": ["^{ @msg = isOk(@pw) }", "a runtime `^{ }` body"],
+  "^{ } whole cell write under if": ["^{ if (@c) { @msg = isOk(@pw) } }", "a runtime `^{ }` body"],
+  "^{ } whole cell write under for": ["^{ for (const x of [1]) { @msg = isOk(@pw) } }", "a runtime `^{ }` body"],
+  // H2 sync callbacks in the async hosts
+  "when body: a forEach callback": ["${ when @pw changes { [@pw].forEach(x => { if (isOk(x)) { @msg = \"IN\" } }) } }", "inside a nested function"],
+  "when body: an IIFE": ["${ when @pw changes { if ((() => isOk(@pw))()) { @msg = \"IN\" } } }", "inside a nested function"],
+  "opener effect=: a forEach callback": [ENG("<engine for=Phase effect=${ [@pw].forEach(x => { if (isOk(x)) { @msg = \"IN\" } }) }>\n  <Idle rule=.Active/>\n  <Active/>\n</>"), "inside a nested function"],
+  "when body: a `!{ }`-handled call": ["${ when @pw changes { @msg = isOk(@pw) !{ _ :> \"err\" } } }", "handled with"],
+};
+for (const [hn, h] of Object.entries(H2_HOSTS)) for (const [bn, b] of Object.entries(H2)) REFUSED_FR1[`H2 ${hn}: ${bn}`] = [h(b), "`"];
+
 const REFUSED = {
   // module init — the lane-2 reproducers (l2c/miss)
   "module init: block `{ ok = isOk(@pw) }`": ["${ let ok = false\n{ ok = isOk(@pw) } }", "server function `isOk`"],
@@ -78,7 +116,7 @@ const REFUSED = {
   "module init: a lambda body (`setTimeout`)": ["${ setTimeout(() => { if (isOk(@pw)) { @msg = \"IN\" } }, 10) }", "module init"],
   "module init: a collection callback": ["${ const xs = [1]\nxs.forEach(x => { if (isOk(@pw)) { @msg = \"IN\" } }) }", "module init"],
   "module init: the call is an argument of a bare call": ["${ console.log(isOk(@pw)) }", "module init"],
-  "cell declaration whose initializer tests the call": ["<v> = isOk(@pw) ? \"a\" : \"b\"\n<p>${@v}</p>", "the initializer of cell `@v`"],
+  "cell declaration whose initializer tests the call": ["<v> = isOk(@pw) ? \"a\" : \"b\"\n<p>${@v}</p>", "the initializer of cell `@v`", CODE],
   "a non-rendering `${ }` in markup": ["<div>${ if (isOk(@pw)) { @msg = \"IN\" } }</div>", "<div>"],
   "<onMount> tag body (a plain element: its `${ }` runs at module init)": ["<onMount>${ if (isOk(@pw)) { @msg = \"IN\" } }</>", "<onMount>"],
   "<onUnmount> tag body": ["<onUnmount>${ @msg = isOk(@pw) ? \"a\" : \"b\" }</>", "<onUnmount>"],
@@ -132,14 +170,23 @@ const ACCEPTED = {
 };
 
 describe("s470-action-body-await — a waiting value in a synchronous action body is refused", () => {
-  for (const [name, [view, frag]] of Object.entries(REFUSED)) {
+  for (const [name, [view, frag, code]] of Object.entries({ ...REFUSED, ...REFUSED_FR1 })) {
     test(`refused: ${name}`, () => {
       const r = compile(page(view));
       expect(r.hits.length).toBeGreaterThan(0);
+      expect(r.hitCodes).toEqual([code ?? ACTION]);
       const all = r.messages.join("\n");
       expect(all).toContain(frag);
-      // The message names the fix (a handler / function, or a whole cell write).
-      expect(all).toMatch(/event handler|writes a cell/);
+      if ((code ?? ACTION) === ACTION) {
+        // The impl#1-limit framing and the fix (a handler / `on mount`, or a `<request>` into a cell).
+        expect(all).toContain("impl#1 limit, not a language rule");
+        expect(all).toContain("`on mount { }`");
+        expect(all).toContain("<request");
+        // Never the H1 advice (a whole cell write is not awaited everywhere).
+        expect(all).not.toContain("as the whole statement");
+      } else {
+        expect(all).toContain("writes a cell");
+      }
     });
   }
 });
