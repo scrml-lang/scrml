@@ -769,6 +769,21 @@ class RenderWalk {
     const kind = n.kind;
     if (kind === "markup-value") return null;
     if (kind === "function-decl" || kind === "lambda") inFn = true;
+    // fix round 3 (R1) — a C-style `for` head is carried as TOKENIZED text whose string / template
+    // literals have lost their delimiters (`isOk("wrong")` → `isOk ( wrong )`; a template collapses to
+    // `${…}` and its `cStyleParts` condition to a bare `$` ident), so the parsed parts this walk reads
+    // are not the head the opener `effect=` emits (`for (let i = 0; $; i++)`, measured — a global `$`
+    // logged a wrong password in). Outside a `when` body, a head that names a waiting function is
+    // refused (the f55eb8d4a behaviour). A `when` body lowers the head from its own `bodyRaw`
+    // correctly (reviewer-confirmed: `${await …}`): there the head is accepted only when its parsed
+    // parts account for every waiting name its text holds.
+    if (kind === "for-stmt" && n.cStyleParts && typeof n.cStyleParts === "object") {
+      const textW = typeof n.iterable === "string" ? this.textNames(n.iterable) : null;
+      if (textW !== null) {
+        if (!this.whenHost) return `${textW}, in a C-style \`for\` head (impl#1 does not lower that head faithfully here)`;
+        if (this.exprWaits(n.cStyleParts) === null) return `${textW}, in a C-style \`for\` head impl#1 cannot read`;
+      }
+    }
     // A `!{ }`-handled call in a `when` body is lowered into a synchronous value IIFE
     // (`(() => { let r = f(…); if (r && r.__scrml_error) … })()`): the call is not awaited and the
     // handler tests a pending Promise (measured: wrong password logged in). Refused there.

@@ -317,3 +317,30 @@ form × `when` body / opener `effect=`), on f55eb8d4a → this branch:
   (extracted tree), PASS-REFUSED here. EXPECTED_SHAPE_COUNT 1990 → 1992, pinned, README.
 - Unit tests: +3 refused (optional call in the opener / `when`, optional helper), +2 accepted (`when`
   C-style for head, parenthesised callee).
+
+## Fix round 3 (delta review of 07ebed34b, LAND-WITH-FOLLOWUPS — one re-opened shape) — 2026-10-25
+
+- R1 (HIGH, re-opened by round 2) FIXED. `effect=${ for (let i = 0; `${isOk(@pw)}` == "true" && i < 1; i++) { … break } }`
+  compiled at exit 0 on 07ebed34b and emitted `for (let i = 0; $; i++)`. Cause, measured on the TAB
+  output: a C-style head is carried as TOKENIZED text whose string / template literals lose their
+  delimiters (`iterable: "( let i = 0 ; ${isOk(@pw)} == true && … )"`), and its parsed `cStyleParts`
+  condition is a bare `$` ident — round 2 read those parts, which are not what the opener emits.
+  Opener head probe (`~/.cache/scrml/s470/await/heads/gen.mjs`, 11 kinds): a string literal loses its
+  quotes (`isOk("wrong")` → `isOk(wrong)`, `/a/.test("a")` → `/a/.test(a)`), a template collapses to
+  `$`; regex / object / arrow / nested parens / member / negation / cell comparison / numbers are emitted
+  faithfully. Because the quote loss is invisible in the parse too, the walk cannot tell a faithful head
+  from a mangled one, so: outside a `when` body a C-style head that names a waiting function is refused
+  (= the f55eb8d4a behaviour; round 2's opener acceptance is withdrawn). In a `when` body (emitted from
+  `bodyRaw`, reviewer-confirmed `${await …}`) a head is accepted only when its parsed parts account for
+  every waiting name its text holds — a template head there is refused ("cannot read"), fail closed.
+- Correction to round 2: "opener (head over a cell) PASS-DENY" — still true of the emission, but no
+  longer accepted: refused again.
+- Pack: family `f12` (+2, a file-level `const $ = 1` stands in for a page's jQuery) — **2/2 FAIL on
+  07ebed34b**, PASS-REFUSED here. EXPECTED_SHAPE_COUNT 1992 → 1994. §34 row: the opener head added to
+  the async-host list. Unit tests +3.
+- Over-refusals recorded (LOW, fail closed) — `g-c-for-head-over-refusal-s470`: in the opener, every
+  C-style head naming a waiting function (even a faithful one); in a `when` body, a head whose parts
+  do not read (a template, a `let` init, a comma init / update, a `;` inside a string or an argument, a
+  lambda in the test); a comma expression anywhere in an async host (round 2).
+- Not this lane (the PA files it): the same head mangling with NO server call in a function body, a
+  `<timer>` body and module init (reviewer `d/tpl3.scrml`).
