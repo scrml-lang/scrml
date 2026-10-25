@@ -116,13 +116,15 @@ describe("F3 / F4 — a follower is judged where it actually runs", () => {
   test("F4 REFUSED — an arm's last write, then the transition's <onTransition> reads the cell", () => {
     const r = compile(page(ARM(`@ok = isOk(@pw)`, "", `  <onTransition from=.Idle to=.Active>\${ if (@ok) { @msg = "IN" } }</onTransition>\n`)));
     expect(r.codes).toContain(ACTION);
-    expect(r.messages.some((m) => /the transition's hook/.test(m))).toBe(true);
+    expect(r.messages.some((m) => /the arm returns its next state at once/.test(m))).toBe(true);
   });
   test("F4 REFUSED — the target state's effect= reads the cell", () => {
     expect(compile(page(ARM(`@ok = isOk(@pw)`, ` effect=\${ if (@ok) { @msg = "IN" } }`))).codes).toContain(ACTION);
   });
-  test("F4 ACCEPTED — the hooks do not read the cell", () => {
-    expect(compile(page(ARM(`@ok = isOk(@pw)`, "", `  <onTransition from=.Idle to=.Active>\${ @msg = "moved" }</onTransition>\n`))).codes).not.toContain(ACTION);
+  // fix round 2 (F14) — refused even when no hook reads the cell: the handler that sent the message,
+  // a `when @phase changes` or a chained engine may (review of 4ae8261f7, f4.mjs rows 1 / 3 / 5).
+  test("F14 REFUSED — an arm's last write even when the hooks do not read the cell", () => {
+    expect(compile(page(ARM(`@ok = isOk(@pw)`, "", `  <onTransition from=.Idle to=.Active>\${ @msg = "moved" }</onTransition>\n`))).codes).toContain(ACTION);
   });
 });
 
@@ -160,5 +162,93 @@ describe("F9 — the ordering message recommends <request>, not on mount", () =>
     const m = compile(page(`\${ ${WRITE_TEST} }`)).messages.find((x) => /does not wait for it/.test(x)) ?? "";
     expect(m).toMatch(/<request>/);
     expect(m).not.toMatch(/on mount/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// fix round 2 (review of 4ae8261f7) — F13 / F14 / F18.
+// ---------------------------------------------------------------------------
+
+describe("fix round 2 — F13: a `!{ }`-handled cell write with a fall-through arm in an async-hosted body", () => {
+  const H = (view, fns = "") => `type Phase:enum = { Idle, Active }
+type AuthErr:enum = { Denied(reason: string), Gone }
+<pw> = ""
+<ok> = false
+<msg> = ""
+\${
+    server function check(p)! -> AuthErr {
+        if (p != "secret") fail AuthErr::Denied("bad")
+        return true
+    }
+    function login(p) { @pw = p${fns} }
+}
+<button onclick=login("wrong")>go</button>
+${view}
+<p>\${@msg}</p>
+`;
+  const FALL = `@ok = check(@pw) !{ | .Denied(r) :> { @msg = "no" } | _ :> { @msg = "no" } }\n if (@ok) { @msg = "IN" }`;
+  const VALUE = `@ok = check(@pw) !{ | .Denied(r) :> false | _ :> false }\n if (@ok) { @msg = "IN" }`;
+  const HOSTS = {
+    "<timer>": [(b) => `<timer interval=10>\${ ${b} }</timer>`, ""],
+    "<timeout>": [(b) => `<timeout delay=10>\${ ${b} }</>`, ""],
+    "state-child effect=": [(b) => `<engine for=Phase initial=.Idle>\n  <Idle rule=.Active effect=\${ ${b} }/>\n  <Active/>\n</>`, "; @phase = .Active"],
+    "<onTransition>": [(b) => `<engine for=Phase initial=.Idle>\n  <Idle rule=.Active/>\n  <Active/>\n  <onTransition from=.Idle to=.Active>\${ ${b} }</onTransition>\n</>`, "; @phase = .Active"],
+  };
+  for (const [host, [h, fns]] of Object.entries(HOSTS)) {
+    test(`REFUSED — ${host}: an arm that falls through`, () => {
+      const r = compile(H(h(FALL), fns));
+      expect(r.codes).toContain(ACTION);
+      expect(r.messages.some((m) => /ERROR ENVELOPE/.test(m) && /falls through/.test(m))).toBe(true);
+    });
+    test(`ACCEPTED — ${host}: every arm gives the cell a value`, () => {
+      expect(compile(H(h(VALUE), fns)).codes).not.toContain(ACTION);
+    });
+  }
+});
+
+describe("fix round 2 — F14: a message arm refuses every un-waited write", () => {
+  test("REFUSED — a write then only the next state; the message says why", () => {
+    const r = compile(page(ARM(`@ok = isOk(@pw)`)));
+    expect(r.codes).toContain(ACTION);
+    expect(r.messages.some((m) => /the arm returns its next state at once/.test(m))).toBe(true);
+  });
+  test("REFUSED — a bare waiting call", () => {
+    expect(compile(page(ARM(`isOk(@pw)`))).codes).toContain(ACTION);
+  });
+  test("ACCEPTED — a plain write in an arm", () => {
+    expect(compile(page(ARM(`@msg = "go"`))).codes).not.toContain(ACTION);
+  });
+});
+
+describe("fix round 2 — F18: only the write that REGISTERS the reset value makes a reset wait", () => {
+  const R = (decls, fns, view = "") => `<pw> = "x"
+${decls}
+\${
+    server function load(p) { return [1, 2] }
+${fns}
+}
+<button onclick=refresh()>r</button>
+<button onclick=clear()>c</button>
+${view}
+<p>\${@items.length}</p>
+`;
+  test("ACCEPTED (VALID) — a declared cell written from a server call in a function; reset restores the declaration", () => {
+    expect(compile(R(`<items> = []`, `    function refresh() { @items = load(@pw) }\n    function clear() { reset(@items) }`)).codes).not.toContain(ACTION);
+  });
+  test("ACCEPTED (VALID) — the same, the reset followed by a read", () => {
+    expect(compile(R(`<items> = []\n<n> = 0`, `    function refresh() { @items = load(@pw) }\n    function clear() { reset(@items); @n = @items.length }`)).codes).not.toContain(ACTION);
+  });
+  test("ACCEPTED (VALID) — a declared cell written from a server call at module init; reset restores the declaration", () => {
+    expect(compile(R(`<items> = []`, `    function refresh() { @items = [] }\n    function clear() { reset(@items) }`, `\${ @items = load(@pw) }`)).codes).not.toContain(ACTION);
+  });
+  test("REFUSED — the DECLARATION waits; the message names the initializer", () => {
+    const r = compile(R(`<items> = load(@pw)`, `    function refresh() { @items = [] }\n    function clear() { reset(@items) }`));
+    expect(r.codes).toContain(ACTION);
+    expect(r.messages.some((m) => /re-runs the initializer of `@items`/.test(m))).toBe(true);
+  });
+  test("REFUSED — an UNDECLARED cell whose registering module-init write waits; the message names the write", () => {
+    const r = compile(R(``, `    function refresh() { @items = [] }\n    function clear() { reset(@items) }`, `\${ @items = load(@pw) }`));
+    expect(r.codes).toContain(ACTION);
+    expect(r.messages.some((m) => /registers the reset value of the undeclared cell `@items`/.test(m))).toBe(true);
   });
 });

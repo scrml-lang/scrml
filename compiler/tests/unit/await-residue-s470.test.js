@@ -87,6 +87,8 @@ describe("s470-await-residue — ORDER: a synchronous body's un-waited call foll
     "<onMount> tag: write then test": `<onMount>\${ ${WRITE_TEST} }</>`,
     "message arm: write then test": ARM(WRITE_TEST),
     "message arm: bare call then test": ARM(BARE_TEST),
+    // fix round 2 (F14) — a message arm returns its next state at once: every un-waited write refused.
+    "message arm: a write, then only the next state": ARM(`@ok = isOk(@pw)`),
     // Bodies that run DURING module init follow the module-init statements before them.
     "module init write, then a <request> body that reads it": `\${ @ok = isOk(@pw) }\n<request id="r" deps=[@pw]>\${ @tmp = allowed(@pw)\n if (@ok) { @msg = "IN" } }</>`,
     "module init write, then a <poll> (immediate first tick) that reads it": `\${ @ok = isOk(@pw) }\n<poll interval=1000>\${ if (@ok) { @msg = "IN" } }</poll>`,
@@ -107,7 +109,6 @@ describe("s470-await-residue — ORDER: a synchronous body's un-waited call foll
     "module init: a write, then only declarations and literals": `\${ @ok = isOk(@pw) }\n<n> = 0\n\${ function shown() { return @ok } }`,
     "module init: a write in one branch, a literal write in the other": `\${ if (@c) { @ok = isOk(@pw) } else { @msg = "none" } }`,
     "module init: a write, then markup that renders the cell": `\${ @ok = isOk(@pw) }\n<span if=\${@ok}>IN</span>`,
-    "message arm: a write, then the next state": ARM(`@ok = isOk(@pw)`),
     // A `<timer>` tick runs after module init (each tick re-reads the cell).
     "module init write, then a <timer> that reads it": `\${ @ok = isOk(@pw) }\n<timer interval=1000>\${ if (@ok) { @msg = "IN" } }</timer>`,
     // A `<request>` body's whole write is its settle machine's LOAD into the cell (like a cell
@@ -200,7 +201,7 @@ ${view}
     test(`REFUSED — ${name}`, () => {
       const r = compile(src);
       expect(r.codes).toContain(ACTION);
-      expect(r.messages.some((m) => /reset\(@/.test(m) && /re-runs the initializer/.test(m))).toBe(true);
+      expect(r.messages.some((m) => /reset\(@/.test(m) && /re-runs (the initializer|the `default=`|the write)/.test(m))).toBe(true);
     });
   }
   const ACCEPTED = {

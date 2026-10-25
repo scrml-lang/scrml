@@ -115,6 +115,8 @@ export interface RenderWaitingSite {
    * the ordering message.
    */
   order?: boolean;
+  /** fix round 2 (F13) — a `!{ }`-handled cell write whose arm falls through, in an async-hosted body. */
+  envelope?: boolean;
 }
 
 /** s470-await-residue — a waiting call a synchronous body starts and does not wait for. */
@@ -129,7 +131,15 @@ interface PendingOrder {
 }
 
 /** An ordered synchronous body: the waiting calls started and not yet followed by an observer. */
-interface OrderScope { pending: PendingOrder[] }
+interface OrderScope {
+  pending: PendingOrder[];
+  /**
+   * fix round 2 (F14) — a `(state × message)` arm returns its next state synchronously, so NOTHING
+   * after it (the handler that sent the message, a `when @phase changes`, the hooks of this or a
+   * chained engine) can wait for a call it starts: every un-waited site there is refused at once.
+   */
+  refuseAll?: string;
+}
 
 /** Loop statement kinds: a site in the body is followed by the body's next iteration. */
 const LOOP_KINDS = new Set(["for-stmt", "while-stmt", "do-while-stmt", "for-expr"]);
@@ -451,6 +461,7 @@ class RenderWalk {
       for (const ch of Array.isArray(n.children) ? n.children as AnyNode[] : []) {
         if (!ch || typeof ch !== "object" || ch.kind !== "logic" || this.visited.has(ch)) continue;
         this.visited.add(ch);
+        if (ASYNC_HOSTED_TAGS.has(tag)) this.handledFallThrough(ch.body, `the body of <${tag}>`);
         if (tag === "poll") this.lateInitFollowers.push(ch.body);
         else if (atInit) this.withOrder(this.moduleOrder, () => this.orderFollow(ch.body));
         this.withOrder(order, () => this.syncStmts(ch.body, `the body of <${tag}>`));
@@ -491,6 +502,8 @@ class RenderWalk {
     const kind = s.kind;
     if (kind === "when-effect") { this.whenBody(s); return; }
     if (typeof kind !== "string" || SKIPPED_STATEMENT_KINDS.has(kind)) return;
+    // fix round 2 (F13) — an `on mount { }` statement is coloured in place too.
+    if (s._onMountEffect === true) this.handledFallThrough(s, "an `on mount { }` block");
     if (isMetaKind(kind)) { this.meta(s); return; }
     if (kind === "markup" || kind === "logic" || kind === "each-block" || kind === "match-block" ||
         kind === "engine-decl" || kind === "if-chain" || kind === "component-def" || kind === "state") {
@@ -771,7 +784,9 @@ class RenderWalk {
     // A §36 SSE generator write is a SUBSCRIPTION (emit-client GITI-026), not a value to wait for.
     const callee = call && typeof call === "object" ? (call as AnyNode).callee as AnyNode | undefined : undefined;
     if (callee && callee.kind === "ident" && typeof callee.name === "string" && this.generatorFns.has(callee.name)) return;
-    this.order.pending.push({ anchor, span: this.spanOverride ?? anchor.span, pos, what, cell });
+    const p: PendingOrder = { anchor, span: this.spanOverride ?? anchor.span, pos, what, cell };
+    if (this.order.refuseAll) { this.order.pending.push(p); this.orderReport(p, this.order.refuseAll); return; }
+    this.order.pending.push(p);
   }
 
   /** `st` runs after every pending site of the current body: refuse each one it observes. */
@@ -919,27 +934,67 @@ class RenderWalk {
   /** `reset` nodes that are the sole statement of an event-handler value. */
   private readonly soleHandlerResets = new WeakSet<object>();
 
+  /**
+   * fix round 2 (F18) — the cells whose RESET VALUE waits, read off the write that REGISTERS that
+   * value (emit-logic `_emitInitThunkSidecar`, §6.8.1), not off any waiting write: a cell DECLARATION
+   * (`<c> = …`, its `default=` first); for a cell with no declaration (an implicit cell), its writes
+   * outside a function body (module init, a `<request>` / `<onMount>` / `<timer>` body, an opener
+   * `effect=`, a `when` body — `textBodiesOf`) — fail closed: if ANY of those waits, although only
+   * the first one in emission order registers. A write inside a function (and an engine hook / arm
+   * body, lowered as one) never registers: `function refresh() { @items = load() }` leaves `reset`
+   * the declared `[]`.
+   */
+  private readonly resetVia = new Map<string, string>();
+
   private collectWaitingResetCells(nodes: unknown): Map<string, string> {
     const out = new Map<string, string>();
+    const declared = new Set<string>();
+    const writes = new Map<string, AnyNode[]>();
     const seen = new WeakSet<object>();
-    const visit = (v: unknown, prefix: string): void => {
+    const thunkOf = (n: AnyNode): unknown =>
+      (n.defaultExpr && typeof n.defaultExpr === "object") ? n.defaultExpr
+        : (n.initExpr && typeof n.initExpr === "object" && !isPlaceholderHatch(n.initExpr)) ? n.initExpr : null;
+    const waitsOf = (n: AnyNode): string | null => {
+      const t = thunkOf(n);
+      return t ? this.exprWaits(t) : (typeof n.init === "string" ? this.textNames(n.init) : null);
+    };
+    const visit = (v: unknown, prefix: string, inFn: boolean): void => {
       if (!v || typeof v !== "object" || seen.has(v as object)) return;
       seen.add(v as object);
-      if (Array.isArray(v)) { for (const x of v) visit(x, prefix); return; }
+      if (Array.isArray(v)) { for (const x of v) visit(x, prefix, inFn); return; }
       const n = v as AnyNode;
+      const fn = inFn || n.kind === "function-decl" || n.kind === "lambda" || (n.kind === "escape-hatch" && typeof n.bodyRaw === "string");
       if (n.kind === "state-decl" && typeof n.name === "string" && n.shape !== "derived" && n.isServer !== true) {
         const key = prefix + n.name;
-        const thunk = (n.defaultExpr && typeof n.defaultExpr === "object") ? n.defaultExpr
-          : (n.initExpr && typeof n.initExpr === "object" && !isPlaceholderHatch(n.initExpr)) ? n.initExpr : null;
-        const w = thunk ? this.exprWaits(thunk) : (typeof n.init === "string" ? this.textNames(n.init) : null);
-        if (w !== null) out.set(key, w);
-        if (Array.isArray(n.children)) visit(n.children, key + ".");
-        for (const k of Object.keys(n)) if (k !== "children" && k !== "span" && k !== "_record") visit(n[k], prefix);
+        if (n.structuralForm === true) {
+          declared.add(key);
+          const w = waitsOf(n);
+          if (w !== null) {
+            out.set(key, w);
+            this.resetVia.set(key, n.defaultExpr && typeof n.defaultExpr === "object" ? `the \`default=\` of \`@${key}\`` : `the initializer of \`@${key}\``);
+          }
+        } else if (!fn) {
+          const l = writes.get(key);
+          if (l) l.push(n); else writes.set(key, [n]);
+        }
+        if (Array.isArray(n.children)) visit(n.children, key + ".", fn);
+        for (const k of Object.keys(n)) if (k !== "children" && k !== "span" && k !== "_record") visit(n[k], prefix, fn);
         return;
       }
-      for (const k of Object.keys(n)) if (k !== "span" && k !== "_record") visit(n[k], prefix);
+      for (const k of Object.keys(n)) if (k !== "span" && k !== "_record") visit(n[k], prefix, fn);
     };
-    visit(nodes, "");
+    visit(nodes, "", false);
+    for (const [key, list] of writes) {
+      if (declared.has(key) || out.has(key)) continue;
+      for (const n of list) {
+        const w = waitsOf(n);
+        if (w !== null) {
+          out.set(key, w);
+          this.resetVia.set(key, `the write \`@${key} = …\` that registers the reset value of the undeclared cell \`@${key}\``);
+          break;
+        }
+      }
+    }
     return out;
   }
 
@@ -969,7 +1024,7 @@ class RenderWalk {
     this.reported.add(anchor);
     this.sites.push({
       anchor, span: this.spanOverride ?? span, position: `\`reset(@${path})\``, kind: "action", order: true,
-      what: `${hit.what} again (it re-runs the initializer of \`@${hit.key}\`) and does not wait for it, but what ` +
+      what: `${hit.what} again (it re-runs ${this.resetVia.get(hit.key) ?? `the reset value of \`@${hit.key}\``}) and does not wait for it, but what ` +
         "runs after the reset reads the value from before it",
     });
   }
@@ -1041,6 +1096,43 @@ class RenderWalk {
     for (const [key, what] of this.waitingResetCells!) {
       const root = key.split(".")[0]!;
       if (names.has(root)) { this.resetSite(anchor, span, root, { key, what }); return; }
+    }
+  }
+
+  // ---- fix round 2 (F13) — a handled write whose arm falls through, in an async-hosted body -------
+
+  /**
+   * The bodies impl#1 now awaits in place (`<timer>` / `<poll>` / `<timeout>`, a state-child
+   * `effect=`, an `<onTransition>` body, an `on mount { }` block) lower `@c = f(…) !{ … }` through the
+   * in-place `!{ }` relocation, where an arm that does not produce a value (a block arm, which falls
+   * through) leaves the handled failure's ERROR ENVELOPE — a truthy object — as the value written to
+   * the cell (`g-handled-error-arm-failure-writes-envelope-into-cell`, open; the same lowering a
+   * function body has on base). A later `if (@c)` then passes for a wrong password. Refused there
+   * (fail closed) until that gap is closed.
+   */
+  private handledFallThrough(v: unknown, pos: string, seen: WeakSet<object> = new WeakSet()): void {
+    if (!v || typeof v !== "object" || seen.has(v as object)) return;
+    seen.add(v as object);
+    if (Array.isArray(v)) { for (const x of v) this.handledFallThrough(x, pos, seen); return; }
+    const n = v as AnyNode;
+    if (n.kind === "guarded-expr") {
+      const g = n.guardedNode as AnyNode | undefined;
+      const arms = Array.isArray(n.arms) ? n.arms as AnyNode[] : [];
+      const falls = arms.find((a) => !a || typeof a.handler !== "string" || a.handler.trim() === "" || a.handler.trim().startsWith("{"));
+      if (g && typeof g === "object" && g.kind === "state-decl" && g.shape !== "derived" && g.structuralForm !== true &&
+          (falls !== undefined || arms.length === 0) && !this.reported.has(n)) {
+        this.reported.add(n);
+        const cell = String(g.name ?? "?");
+        this.sites.push({
+          anchor: n, span: this.spanOverride ?? n.span ?? g.span, position: pos, kind: "action", envelope: true,
+          what: `\`@${cell} = …\` handled with \`!{ }\`, and the arm \`${falls ? String(falls.pattern ?? "?") : "?"} :> ${falls && typeof falls.handler === "string" ? falls.handler.trim().slice(0, 40) : ""}\` does not produce a value (it falls through)`,
+        });
+      }
+    }
+    for (const k of Object.keys(n)) {
+      if (k === "span" || k === "_record") continue;
+      const x = n[k];
+      if (x && typeof x === "object") this.handledFallThrough(x, pos, seen);
     }
   }
 
@@ -1521,7 +1613,10 @@ class RenderWalk {
       const read = readEngineBody(owner, slot, src, file);
       if (!read.stmts) return;
       if (slot === "effect" || slot === "body" || slot === "if") hookBodies.push(read.stmts);
-      const scope: OrderScope | null = slot === "arm" ? { pending: [] } : null;
+      if (slot === "effect" || slot === "body") this.withSpan(span, () => this.handledFallThrough(read.stmts, pos));
+      const scope: OrderScope | null = slot === "arm"
+        ? { pending: [], refuseAll: "the arm returns its next state at once — the transition, the handler that sent the message, a `when` on the engine and the hooks it fires (here or in a chained engine) all run" }
+        : null;
       if (scope) armScopes.push({ scope, span });
       // s470-await-residue — a message arm is still a synchronous body (it returns the next state):
       // its own order. A state-child `effect=` / an `<onTransition>` body has an async host now.
