@@ -36,7 +36,7 @@ SERVER function is judged end to end.
 - a shape not in `KNOWN_FAIL` / `BY_DESIGN_LOGS_IN` logs in on a wrong password;
 - a `KNOWN_FAIL` shape stops doing so (it was fixed: delete the entry);
 - a shape not in `UNJUDGED` comes out `UNJUDGED`, or an `UNJUDGED` one starts being judged;
-- the corpus stops holding exactly 2619 shapes; a list entry names no shape. Plus S469 s469-server-return-match-await (457 shapes): s4–s10 server, f1–f7 fullstack, l1–l5 library, t1–t5 tool — a failable `match` subject awaited in every position, `fail` payloads keyed per enum in every emission mode, one resolver for a callee's error enum, and the `_ e` whole-error binder allow-list.
+- the corpus stops holding exactly 2680 shapes; a list entry names no shape. Plus S469 s469-server-return-match-await (457 shapes): s4–s10 server, f1–f7 fullstack, l1–l5 library, t1–t5 tool — a failable `match` subject awaited in every position, `fail` payloads keyed per enum in every emission mode, one resolver for a callee's error enum, and the `_ e` whole-error binder allow-list.
 
 It deliberately does NOT pin each shape's class: a shape moving from `PASS-REFUSED` to `PASS` is a
 compiler improvement, not a regression.
@@ -276,7 +276,7 @@ handled call's identity-resolved enum (never a same-named local enum) and works 
 their single-file-loadable twins PASS. s8 / l3 "held in a local then passed on" is now PASS-REFUSED (a
 local alias is not an allowed use).
 
-## Measured (S470 s470-async-colouring-scope — s12 / f15 / l7 / t7; 354 shapes)
+## Measured (S470 s470-async-colouring-scope — s12 / f15 / l7 / t7; 415 shapes)
 
 `r9-shapes.js` on four sides (`g-impl1-async-colouring-ignores-local-shadow-s469`). Async colouring
 (§13.2) read callees by NAME: a helper calling a LOCAL `check` (a `const` / `let` / bare-assignment
@@ -288,16 +288,19 @@ alias, a parameter handed the async function — the helper must stay async; eve
 call's result itself, so a helper wrongly made sync logs the wrong password in). Base `6081e0685` →
 head, class transitions:
 
-| family | base FAIL | head FAIL | PASS-REFUSED → PASS | unchanged |
-|---|---|---|---|---|
-| s12 (server, 42) | 0 | 0 | 0 | 42 |
-| f15 (fullstack, 160) | 0 | 0 | 32 | 128 |
-| l7 (library, 76) | 0 | 0 | 10 | 66 |
-| t7 (tool, 76) | **1** | 0 | 10 | 65 |
+| family | base FAIL | head FAIL | PASS-REFUSED → PASS | PASS-REFUSED → PASS-DENY | unchanged |
+|---|---|---|---|---|---|
+| s12 (server, 42) | 0 | 0 | 0 | 0 | 42 |
+| f15 (fullstack, 221) | 0 | 0 | 32 | 10 | 179 |
+| l7 (library, 76) | 0 | 0 | 10 | 0 | 66 |
+| t7 (tool, 76) | **1** | 0 | 10 | 0 | 65 |
 
 The over-colouring was fail-CLOSED after #1547 / #1554: a shadowing helper was refused in a render
-position (E-VALUE-SERVER-CALL) and in a parameter default (E-PARAM-DEFAULT-AWAIT) — those are the 52
-PASS-REFUSED → PASS. The one FAIL on base is a tool-mode fail-OPEN of the same root in the other
+position (E-VALUE-SERVER-CALL), in a parameter default (E-PARAM-DEFAULT-AWAIT) and in a synchronously
+emitted action body (`<request>`, E-IMPL1-ACTION-NOT-AWAITED) — those are the 52 PASS-REFUSED → PASS and
+the 10 → PASS-DENY (the `<request>` probe denies the right password too, its VALID control included: it
+measures the refusal, not the run). Every DUAL helper in a render position or a `<request>` body is still
+refused, and in a `when … changes` body (an async host) still awaited. The one FAIL on base is a tool-mode fail-OPEN of the same root in the other
 direction: every tool function body shared ONE `declaredNames` set, so a `const check` in one function
 made a later function's call of the async `check` read as that local and emitted it without `await`
 (`t7/dual shadow in a sibling top-level function, direct`). No shape moved toward FAIL. Instrument check

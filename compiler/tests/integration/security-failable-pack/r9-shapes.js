@@ -295,6 +295,29 @@ ${gate}
 `;
 }
 
+// Fullstack only: the helper read in an ACTION body (#1554): a `<request>` body (impl#1 emits it
+// synchronously — an async helper there is E-IMPL1-ACTION-NOT-AWAITED; a sync one runs) and a
+// `when … changes` body (an async host — the helper is awaited when async; a DUAL helper made sync there
+// would test a pending Promise).
+function actionPage(d, how) {
+  const body = `@msg = allowed(@pw) ? "LOGGED IN" : "rejected"`;
+  const host = how === "request body"
+    ? `<request id="r" deps=[@pw]>\${ ${body} }</>`
+    : `\${ when @pw changes { ${body} } }`;
+  return `<pw> = ""
+<msg> = "init"
+\${
+    ${ASYNC_DECLS("fullstack")}
+    ${d}
+    function login(p) { @pw = p }
+}
+<button id="wrong" onclick=login("wrong")>go</button>
+<button id="right" onclick=login("secret")>go</button>
+${host}
+<p id="out">\${@msg}</p>
+`;
+}
+
 // The async function comes from ANOTHER file (fullstack / server): imported by name, or under an alias.
 const IMPORTED = {
   "h.scrml": `\${\n    export server function check(p) { return p == "secret" }\n    export server function verify(p) { return p == "secret" }\n}\n`,
@@ -334,6 +357,11 @@ export function shapesFor(side) {
       for (const [hn, helper] of SHADOW) out.push([`render ${how}: shadow ${hn}`, renderPage(helper, how), undefined]);
       for (const [hn, helper] of DUAL) out.push([`render ${how}: dual ${hn}`, renderPage(helper, how), undefined]);
       out.push([`render ${how}: VALID plain sync helper`, renderPage(`function allowed(p) { return p == "secret" }`, how), undefined]);
+    }
+    for (const [hn, helper] of SHADOW) out.push([`action request body: shadow ${hn}`, actionPage(helper, "request body"), undefined]);
+    for (const how of ["request body", "when body"]) {
+      for (const [hn, helper] of DUAL) out.push([`action ${how}: dual ${hn}`, actionPage(helper, how), undefined]);
+      out.push([`action ${how}: VALID plain sync helper`, actionPage(`function allowed(p) { return p == "secret" }`, how), undefined]);
     }
   }
   return out;

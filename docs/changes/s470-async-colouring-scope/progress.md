@@ -48,5 +48,10 @@ tree path). No corpus program changes emission.
 
 ## Log
 
-- WIP 1: fix + pack families s12 / f15 / l7 / t7 (354 shapes, r9-shapes.js, r9-pinned.js) + unit tests
-  `compiler/tests/unit/async-colouring-scope-s470.test.js` (25).
+- WIP 1 (`d7f1456e5`): fix + pack families s12 / f15 / l7 / t7 (354 shapes, r9-shapes.js, r9-pinned.js) +
+  unit tests `compiler/tests/unit/async-colouring-scope-s470.test.js` (25). Hook: 46955 pass / 0 fail.
+- merged origin/main `d582ae04f` (docs / scripts only).
+- WIP 2: f15 +61 ACTION shapes (#1554 consumers): a `<request>` body (sync host) — 15 SHADOW refused on
+  base, accepted on head (PASS-DENY: the probe's request does not re-run, VALID control included); 22 DUAL
+  + VALID still refused / unchanged; a `when … changes` body (async host) — 22 DUAL + VALID unchanged
+  (awaited). Render positions (#1547): every DUAL still E-VALUE-SERVER-CALL. 415 shapes, count 2680.
