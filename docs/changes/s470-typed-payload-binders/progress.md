@@ -1,0 +1,385 @@
+# progress — s470-typed-payload-binders (lane B)
+
+Ruling: bryan S470, user-voice-scrml.md "(B) Type the binders (Recommended)". Payload binders get their
+DECLARED field type; a non-`.variant` member read on an ENUM-typed value is refused. The (A) constructor
+refusal is NOT landed.
+
+## Governing SPEC sentences (quoted)
+- §34 row: "| E-TYPE-004 | §14.3, §18.6.1 | Struct field access on non-struct type. …"
+- §18.7: "**Type of bound variables:** A bound variable in a payload destructuring pattern has the
+  type declared for that field in the enum definition." and (normative) "The type of each bound
+  variable SHALL be the declared type of the corresponding field in the enum variant definition."
+  "Positional binding SHALL assign fields left-to-right in declaration order."
+- §18.6.1 (S469): "Its payload is reached by naming the variant (`.Denied(reason) :> …`) or by
+  `match err { … }`" — the payload of an enum value is reached through a variant pattern, not a member read.
+- §14.3.2: "The field value is an enum variant (including payload fields for payload variants)." and
+  "Pattern matching on an enum-typed struct field is valid and works identically to pattern matching on
+  any enum-typed variable".
+
+## Log
+- 2026-10-25 start: worktree reset to origin/s470-whole-error-binder-escapes 91c1c9ca4 (PR #1551 OPEN).
+  bun install ok. Base tree for comparisons: `git archive 91c1c9ca4` at ~/.cache/scrml/s470/laneB/base.
+- 2026-10-25 IMPLEMENTED (compiler/src/type-system.ts), on the proven path:
+  - ONE walker `checkEnumReadsIn` (expressions + statements), called from the existing member-read
+    checker `checkRowFieldAccessInExpr` (every expression site the ident walker covers), from the
+    statement `match` case (an inline arm's result is walked by nothing else), and from the post-walk
+    `_checkExpressionPositionHandlers` at every `!{}` the statement walk did not already check.
+  - static type only where KNOWN: a binding's type (params / annotated locals / cells resolve as before;
+    a new `ScopeEntry.enumFact` carries an un-annotated `const`/`let`'s constructor / alias / call
+    initializer for THIS check only — `resolvedType` unchanged, so no other check moves), `E.V(…)`,
+    `E::V(…)`, `.V(…)` (the one enum declaring V — the bare-dot rule `auditBinderCallArgs` uses), a call
+    of a function with a declared return type (`callArgFnSignatures`, local + imported) or whose every
+    `return` constructs one enum, a struct field, a tape element.
+  - payload binders typed by the existing planner: `planPayloadBinders` + `parseBindingList` (codegen's
+    §18.7 planner) against the subject's enum (or the failable callee's enum via `failableCalleeErrorEnum`),
+    field types from the enum's declaring file (`variantFieldResolvedType`, factored out of
+    `canonicalFieldTypeKey`). Block `match` arms and statement `!{}` arms now BIND the binder with that
+    type in scope (was `asIs`).
+  - refusals: a member other than `.variant` (and `@cell.advance`, the §51 engine transition) on an
+    enum value → E-TYPE-004; `==`/`!=` enum value vs a primitive literal → E-EQ-001 (§45.3); a binder this
+    walk typed as a struct reading an unknown field → the existing struct E-TYPE-004 text. Whole-error
+    binder `_ e` uses stay the audit's (quiet here). One diagnostic per read (per-file duplicate pass).
+  - F4: in a re-read `<match>` arm copy, `expr.sourceText` is the `${…}` copy of `raw` (covered), and the
+    native `ATTR_EXPR.text` is read with `parseHandlerStatementsForCheck` (unreadable → still refused).
+
+## Measured on the starting head 91c1c9ca4
+Probes: ~/.cache/scrml/s470/laneB/matrix.mjs (run with the pack's `runShape` via run.mjs; summ.mjs).
+Each shape logs in on the wrong password iff the enum member read is unchecked (reads `undefined`).
+
+- Repro `~/.cache/scrml/s470/enum-read/t.scrml` (`x.reason` with `x: Inner`): compiles, exit 0.
+- Q4 (`!{ .Wrapped(i) :> i.reason == "bad" ? … }`, l1 shapes4): FAIL on all 4 sides (rerun-l1e.log).
+- F4: `F4/nested-match-in-arm-OK.scrml` and `-nobinder.scrml` refused with E-TYPE-031
+  "code held as text (`expr.sourceText`)" + "(`ATTR_EXPR.text`)"; `nested-match-interp-nobinder.scrml` compiles.
+  c18 OK controls Q1/Q2/Q7/Q8/Q9: E-TYPE-031 (false positive); the BAD twins E-TYPE-004 + E-TYPE-031.
+- Escape 3: 18 KNOWN_FAIL shapes in the pack (s11/t6 x6, f9/l6 x3).
+
+Matrix (server | fullstack | library | tool):
+
+| shape | server | fullstack | library | tool |
+|---|---|---|---|---|
+| M1 param x: Inner | FAIL | FAIL | FAIL | FAIL |
+| M1b param x: Inner (unit .Ok2 arg) | FAIL | FAIL | FAIL | FAIL |
+| M2 typed local const | FAIL | FAIL | FAIL | FAIL |
+| M3 untyped local ctor E.V() | FAIL | FAIL | FAIL | FAIL |
+| M3b untyped local ctor E::V() | FAIL | FAIL | FAIL | FAIL |
+| M3c let ctor | FAIL | FAIL | FAIL | FAIL |
+| M3d inline ctor member | FAIL | FAIL | FAIL | FAIL |
+| M3e .data on ctor | PASS | PASS | PASS | PASS |
+| M4 match binder positional | FAIL | FAIL | FAIL | FAIL |
+| M4b match binder named | FAIL | FAIL | FAIL | FAIL |
+| M4c match untyped subject | REF(E-TYPE-025,E-TYPE-027) | same | same | same |
+| M4d match block arm | FAIL | FAIL | FAIL | FAIL |
+| M5 !{} .V(i) binder (Q4) | FAIL | FAIL | FAIL | FAIL |
+| M5b !{} `\| ::V i` binder | FAIL | FAIL | FAIL | FAIL |
+| M5d !{} ::V(i) binder | FAIL | FAIL | FAIL | FAIL |
+| M5e !{} block arm .V(i) | FAIL | REF(E-CODEGEN-INVALID-LOGIC) | REF(E-CODEGEN-INVALID-LOGIC) | FAIL |
+| M5c !{} .V(inner: i) named | REF(E-PARSE-001: impl#1 has no named `!{}` binder) | same | same | same |
+| M6 struct field holding enum | FAIL | FAIL | FAIL | FAIL |
+| M7 fn return declared enum | FAIL | FAIL | FAIL | FAIL |
+| M7b fn return inferred enum | FAIL | FAIL | FAIL | FAIL |
+| M8 param method call `x.toString()` | FAIL | FAIL | FAIL | FAIL |
+| M9 bracket read `x["reason"]` | FAIL | FAIL | FAIL | FAIL |
+| M10 cell `<st>: Inner` | REF(E-REACTIVE-003) | FAIL | REF(E-CODEGEN-INVALID-LOGIC) | REF(E-STATE-UNDECLARED) |
+| M11 imported enum param | UNJUDGED (harness) | UNJUDGED | UNJUDGED | FAIL |
+| M12 `match e` block arm from `_ e` | REF(E-TYPE-031) | same | same | same |
+| M13 for-of over `Inner[]` | FAIL | FAIL | FAIL | FAIL |
+| OK1 `.variant` read | PASS | PASS | PASS | PASS |
+| OK2 primitive binder via nested match | PASS | PASS | PASS | PASS |
+| OK3 `i is .Bad` | PASS | PASS | PASS | PASS |
+| OK4 struct primitive field read | PASS | PASS | PASS | PASS |
+
+(M3e `.data` "works" because impl#1's runtime value is `{ variant, data }`; the ruling refuses it: `.data`
+is not a scrml member of an enum value.)
+(M5b initially written `::Wrapped i` with commas: impl#1 needs the legacy `|` for a paren-free binder —
+E-PARSE-001 on both trees; re-written `| ::Wrapped i`. M5c, a named `!{}` binder, is impl#1-refused
+E-PARSE-001 on both trees — not a lane-B shape.)
+
+## Base moves
+- #1551 merged (66f2ee1c5); this branch REBASED onto origin/main 94c2026cb (only docs differed).
+- Then main moved again: #1553 (gap docs, incl. filing F4 as `g-impl1-nested-match-arm-bang-text-falsely-refused-s470`)
+  and #1554 (s470-action-body-await: codegen + pack families f10–f14). This lane's fullstack family
+  was renamed f10 → f15 (53971b4a7), then origin/main da3180405 was MERGED in (2151403c7) rather than
+  rebased (replaying the family rename through four commits would have conflicted at every step; the
+  tree is the same). EXPECTED_SHAPE_COUNT 2265 + 121 = 2386; full pack 2389 pass / 0 fail. The escapes
+  gap and main's F4 gap are marked resolved; gap counts regenerated with `bun scripts/state.ts --write`.
+
+## Measured on the head (rebased onto origin/main 94c2026cb; compiler source = 980f40147 / 950ab710f)
+
+| shape | server | fullstack | library | tool |
+|---|---|---|---|---|
+| M1 … M9, M13 (every BAD read above) | REF(E-TYPE-004) | REF(E-TYPE-004) | REF(E-TYPE-004) | REF(E-TYPE-004) |
+| M3e `.data` on a constructor | REF(E-TYPE-004) | same | same | same |
+| M4c match untyped subject | REF(E-TYPE-025,E-TYPE-004,E-TYPE-027) | same | same | same |
+| M5c named `!{}` binder | REF(E-PARSE-001) | same | same | same |
+| M10 cell | REF(E-REACTIVE-003,E-TYPE-004) | REF(E-TYPE-004) | REF(E-TYPE-004) | REF(E-STATE-UNDECLARED) |
+| M11 imported enum | REF(E-TYPE-004) | REF(E-TYPE-004) | REF(E-TYPE-004) | REF(E-TYPE-004) |
+| M12 `match e` block arm from `_ e` | REF(E-TYPE-031,E-TYPE-004) | same | same | same |
+| OK1 … OK4 | PASS | PASS | PASS | PASS |
+
+Matrix FAIL 80 → 0. The lane-1 review probe sets (l1 shapes1–5, l1b s6–s16, l1c s17–s21 + c1–c8, l1d/l1e
+new c9–c19 + n1–n4, rerun with ~/.cache/scrml/s470/laneB/rerun.sh, compared with cmp.mjs): FAIL 4 → 0
+(Q4, one per side). Every other change is an already-refused BAD shape gaining E-TYPE-004 / E-EQ-001, or
+c4 T1/T2/T3/T5 (`x: AuthErr` then `x.reason` / `x.data.reason` / `x == "bad"` / `x[k]` — the gap's own
+class) CLEAN → refused. No OK control newly refused. c4 T4 `String(x).includes("bad")` stays CLEAN
+(a stringified enum value; not a member read — candidate gap below).
+- **Q4: CLOSED** — PASS-REFUSED (E-TYPE-004) on all four sides.
+- **F4: CLOSED** — `F4/nested-match-in-arm-OK.scrml`, `-nobinder.scrml` compile clean;
+  `nested-match-interp-nobinder.scrml` still clean; c18 Q1/Q2/Q7/Q8/Q9 OK → CLEAN, their BAD twins
+  E-TYPE-004 only (the false E-TYPE-031 gone). Pack r9 `VALID F4 …` shapes: the program now compiles
+  but its inner `<match>` is never mounted (PASS-DENY) — a SEPARATE pre-existing codegen defect (the same
+  on 91c1c9ca4 for the interpolation variant that compiled there): candidate gap below.
+- **Escape 3: CLOSED** — the 18 `KNOWN_FAIL` shapes are PASS-REFUSED (E-TYPE-004; the two `… match eq`
+  shapes E-EQ-001); `KNOWN_FAIL` is empty. `@state = .Failed(err)` (SPEC §18.6.1, examples/09) compiles.
+
+## Pack
+New family r9 (`r11-shapes.js`; `shapes/s12.js` `f15.js` `l7.js` `t7.js`), 121 shapes: every "1 …" shape
+FAIL on 91c1c9ca4 → PASS-REFUSED (80 shapes); "VALID …" acceptance controls PASS on both (38, incl. the
+r7 VALID controls re-stated without r7's `getReasonT`, which is now refused); fullstack F4 ×3.
+EXPECTED_SHAPE_COUNT 2192 → 2313. pinned-class.js: the r9 shapes added from a run (fams.mjs), and the
+changed pins re-pinned from the same run (repin.mjs, never by hand): r7 `VALID …` ×23 + `l5/A match-form
+_ e member` PASS → PASS-REFUSED (r7's shared declarations hold `getReasonT(x: AuthErr) { return
+x.reason }`, now E-TYPE-004), r8 escape-3 ×18 FAIL → PASS-REFUSED, r8 `3 ctor inline member` ×4
+PASS / PASS-500 → PASS-REFUSED. Full pack: 2316 pass / 0 fail.
+Unit tests: compiler/tests/unit/enum-value-member-read-s470.test.js (45); the escape-3 `test.todo`s in
+whole-error-binder-escapes-s470.test.js are real tests now; whole-error-binder-allowlist-s469.test.js's
+ALLOWED cases compile against its declarations minus `getReasonT` (the refused read).
+
+## R26 (corpus, base 91c1c9ca4 archive vs head; both trees' own in-tree stdlib, no symlink)
+examples 71 + samples 881 + stdlib 54 + benchmarks 7 + conformance 1852 + docs 750 = 3,615 files, each
+compiled separately (corpus.mjs), every diagnostic code (errors and warnings) compared per file (cdiff.mjs):
+**0 files changed, 0 newly rejected.** No example or benchmark needed a migration: the corpus's
+`e.message` reads (samples/blog-cms, contact-directory, login, api-dashboard, recipe-book, gauntlet
+samples) are on binders / cells whose type impl#1 does not know (`| ::SQLError e` — a variant no callee
+declares; untyped `<loadError> = not`), and those files fail today for other reasons (E-CTX-*, E-STYLE-001,
+E-SCOPE-001 …) — unchanged.
+
+## Allow-list redundancy (auditWholeErrorBinderText) — what ordinary type checking now covers
+Not removed (per the brief). With the whole binder `_ e` bound to the handled enum (it already was, in
+scope) and binders typed:
+- COVERED by the type system now (where the handled enum is known): a payload read off `e` in every
+  member / optional-member / bracket spelling (E-TYPE-004); `e == <primitive literal>` (E-EQ-001); a
+  local alias of `e` (`const err = e` / `let s = e`) then a read or a literal compare (the alias carries
+  `enumFact`); a callee whose parameter is typed with the enum (`getReasonT(x: AuthErr)`: its body's
+  `x.reason` is refused on its own, whoever calls it); `match e { .V(i) :> i.reason / i == "bad" }` (typed
+  binders) — so the S470 round-1 "enum-holding payload binder" refusal (`auditEnumPayloadBinderRefusal`)
+  is now redundant for reads and comparisons; it remains the part that falsely refuses the VALID
+  `.Wrapped(i) :> match i {…}` / `i is .Bad` (lane-1 Q3 / Q7) and can be lifted in a follow-up lane;
+  a whole `e` into a constructor then re-extracted (escape 3); a cell typed with the enum that holds it.
+- STILL NEEDED (no type reaches them): an untyped helper (`getReason(e)`), a lambda / destructuring
+  parameter, `const { reason } = e`, `String(e)` / a template / tagged template, a container
+  (`[e][0]`, `({ x: e }).x`), `arguments`, a comparison with a non-literal (`e == bad`, `e == "ba" + "d"`),
+  the shadowing / `log`-builtin rules, a cell with no type, and every use when the enum is unknown.
+- `g-impl1-whole-error-binder-allowlist-stricter-than-spec-s469` (LOW): NOT narrowed in this lane (the
+  audit is unchanged). It CAN narrow: a local alias (`const held = err`) and a cell typed with the enum
+  are now type-checked, and the enum-holding binder refusal is redundant — both are refusals the type
+  system makes unnecessary. The rest (untyped helpers, containers, unknown enums) still needs the
+  allow-list or a ruling.
+
+## Fix round 1 (adversarial review of 7453d57ff: FIX; probes ~/.cache/scrml/review/s470-lb/b/ b1–b6, fp1, repin/)
+Root cause (the reviewer's): the enum fact was computed per syntactic form, not from the type. Now ONE
+type reader (`enumReadTypeOf`) gives every expression's static type and every type passes through
+`enumReadDeAlias`: a `type A = <RHS>` alias's registry entry stays `asIs` (no other check's view moves)
+but remembers its RHS and declaring registry (`aliasDeclContext`, set in `buildTypeRegistry`), so an alias
+resolves the way its declaration does — in its own file and in every importer (the importer receives the
+same registry object). Value flows reuse the walker itself (`enumReadReturnsOf`: a body's `return`s under
+its locals and branches) and the existing scope / overlay bindings.
+
+**Covered flows (each probed; the probe in brackets):**
+- a name's binding: a parameter / local / `lin` / cell / loop / `<each>` binder typed with an enum OR AN
+  ALIAS of one, incl. `A[]`, `A | not`, and an imported alias [b2 B6 B7 B8, b1 A13b, b5 C4, b2 B15, b1 A29];
+- a struct field of enum or alias type, a struct in a tape [b2 B17, b1 A16 A16c A36 A37];
+- a constructor `E.V(…)` / `E::V(…)` / `.V(…)`, a unit variant `E.U` / `E::U` / `.U`, through an alias name;
+- a call of a function: declared `-> T` (local, imported, an alias `-> I2`), else the ONE type every
+  `return` yields — constructors, unit variants, ternaries, locals, branches [b2 B1–B5, b1 A8–A10 A28];
+- an imported function (declared or inferred, read in the exporting file) and an imported `export const`
+  bound to a constructor [b5 C1–C3];
+- a ternary / `||` / `??` of values of one enum [b1 A2 A3 A4, b2 B13 B14];
+- a value `match` whose arms all yield one enum (each arm under its binders) [b2 B20, b1 A15 A30];
+- a closure's result (`const f = () => E.V(…)`, a block arrow, an IIFE) [b1 A19];
+- a tape of known element type: `xs[i]`, `.find` / `.findLast` / `.at` / `.pop` / `.shift` (element),
+  `.filter` / `.slice` / `.toSorted` / … (the tape), a callback's parameter (`.map((v) => …)` and the
+  other element callbacks; `reduce`'s 2nd), array destructuring [b2 B9–B12, b1 A22–A24];
+- local copies, reassignment of a typed `let` [b2 B16 B19, b1 A1 A20];
+- payload binders of `match` / `!{}` arms (round 0).
+- X-ADV: `@x.advance` is exempt only when `x` is an engine / machine cell (the machine registry's auto
+  cells) [b4 X2a X2c, fp1 V16]. X-HIST: `.V.history` / `E.V.history` is exempt only as an `@cell` write's
+  value or an `@cell.advance(…)` argument; anywhere else it is refused [b3 X6; engine-a7-history and
+  engine-event-handler-writes unit suites still pass].
+- PIN-COV: r7 declares `getReasonT` only for "A helper typed with the enum"; re-pinned from a run — every
+  r7 class now equals the reviewer's main run of r7-noT (VALID controls PASS again).
+
+**Not covered (recorded; no existing inference types them):** an UNTYPED tape literal `[E.V(…)]` and what
+is read off it (`xs[0]`, `for … of`, destructuring, a function returning `[…][0]`) [b1 A5 A6 A11 A21],
+an untyped struct / object literal and its destructuring [b1 A7 A16b], `.push` into an untyped tape
+[b1 A32], an untyped tape cell [b6 D4]. And, per the coordinator (to be filed): X-VAR (a payload field
+named `variant`) [b3 X4]; B-DYN — identity function, `: asIs`, `Object.values` / `entries`, spread,
+untyped helper parameter, JSON round-trip [b1 A12 A14 A17 A18 A26 A31 A35].
+
+**Fix-round-1 measurements** (head = dfcd31919 + merge of origin/main 6081e0685):
+- review probes b1–b6 + fp1 vs main da3180405: FAIL 261 → 61. The 61 are the recorded set only (b1
+  A5 A6 A7 A11 A12 A14 A16b A17 A18 A21 A26 A31 A32 A35 ×4, b3 X4 ×4, b6 D4). fp1 (25 VALID programs):
+  identical to main. No OK control newly refused.
+- all earlier probe sets + matrix vs 91c1c9ca4: FAIL 84 → 0, the same changes as the round-0 head.
+- pack: r10 (`r12-shapes.js`; s15 / f18 / l10 / t10), 91 shapes, every one FAIL on 7453d57ff (measured,
+  fams.mjs on a 7453d57ff archive) → PASS-REFUSED; EXPECTED_SHAPE_COUNT 2477; full pack green.
+- R26 vs origin/main (compiler = da3180405; 3,615 files, in-tree stdlib): 0 changed, 0 newly rejected.
+- CI-only jobs (ci3/): types:check OK (181) · root 2239/0 · snippet 113/0 · claim 18/0 · floor PASS ·
+  md-shim current · conflict-marker PASS · SPEC-INDEX OK · delta-lint PASS · ci-shards needs OK ·
+  s34 --check-new (6081e0685) PASS · integration+lsp+commands 10245/0 · unit+conformance 31628/0 ·
+  TodoMVC + node --check OK · browser-baseline PASS · lint-no-default-arm OK · slices m1/m2/m1-lowered/
+  m3/m4/codec 0 fail · e2e-render-map 259/0 · host-global 1/2 + 2/2 0 violations (2 / 135 threw, as
+  before) · bootstrap-severity + bootstrap-conformance current.
+
+## Fix round 2 (adversarial review of baef28219: FIX, narrowly; probes ~/.cache/scrml/review/s470-lb2/b/)
+- K-ALIAS2 FIXED — an alias's context now remembers its declaring FILE. A name its RHS uses that the
+  declaring registry does not hold (a dep registry is built from that file's own declarations only — api.js
+  `getDepRegistry` — so `h2`'s `type I3 = I2` saw no `I2`) is resolved through the declaring file's
+  imports to the file that declares it, at any depth (`enumReadImportedTypeOf`; depth-bounded against
+  import cycles). [b8 K1 K2 K3; K0 still refused]
+- U-NOT FIXED — `not` / `null` (a `lit` of value null) and a value-less `return` are the absent type;
+  `enumReadUnify` unifies one enum with it to `E | not` (what a declared `Inner | not` is read as), through
+  unions too, so a pass-through local keeps it. [b7 U1 U7 U8 U9 U13]
+- U-REC FIXED — while a function's result is inferred its memo holds PENDING; a call of it (recursion, or a
+  cycle of functions) reads PENDING, which unification skips (the result is the rest's). Each function is
+  inferred once (memoized). [b7 U3, perf/cyclebad] Cost, best of 3 compiles (perf.mjs): chain 0.35s vs
+  main 0.37s, chainbad 0.28 / 0.29, cycle 0.13 / 0.13, cyclebad 0.11 / 0.13.
+- PACK-CTRL — r11 (`r13-shapes.js`; s16 / f19 / l11 / t11), 99 shapes: 28 BAD (U1 U3 U7 U8 U9 U13, a cycle,
+  K1–K3) measured FAIL on a baef28219 archive → PASS-REFUSED; 71 VALID controls (the review's fp2 W1–W18 on
+  every side, beside a login that must still compile and run) PASS on both. EXPECTED_SHAPE_COUNT 2576.
+- Left for the coordinator to file: U-MIX (b7 U2 `Inner | false`, H3 declared `Inner | string`), H6 (cyclic
+  alias, accepted silently), Z3 (an engine payload field named `advance`), Z6 (`.A.history` into a
+  non-engine cell). U5 (a return through an untyped tape literal) is the recorded untyped-literal class.
+- Measured on the head: b7 / b8 vs baef28219 — every U1 U3 U7 U8 U9 U13 K1 K2 K3 FAIL → PASS-REFUSED
+  on all sides; the only FAILs left are H3 H6 U2 U5 (above). c20: Z1 / Z4 newly refused (BAD), Z5 (the
+  valid restore write) clean, Z3 / Z6 as main. fp2 (18 valid programs) and fp1 (25): identical to main.
+  b1–b6: 261 → 61 FAIL vs main, the same 61 as round 1. Earlier probe sets + matrix: 84 → 0.
+- R26 vs origin/main (compiler = da3180405), now incl. compiler/samples/mcp-v0-fixture/routes: 3,618
+  files, 0 changed, 0 newly rejected.
+- CI-only jobs (ci4/, base 6081e0685): all exit 0 — types:check OK (181) · root 2239/0 · snippet 113/0 ·
+  claim 18/0 · floor · md-shim · conflict-marker · SPEC-INDEX · delta-lint · ci-shards needs · s34
+  --check-new · integration+lsp+commands 10344/0 · unit+conformance 31638/0 · TodoMVC + node --check ·
+  browser-baseline · lint-no-default-arm · slices m1/m2/m1-lowered/m3/m4/codec · e2e-render-map 259/0 ·
+  host-global 1/2 + 2/2 0 violations (2 / 135 threw, as before) · bootstrap-severity / -conformance current.
+
+## Fix round 3 (adversarial review of 73d4e2e2d: FIX; probes ~/.cache/scrml/review/s470-lb3/)
+- PENDING-POISON FIXED — each inference frame records the in-progress functions it read PENDING for
+  (`inferStack`). A result that depended on ANOTHER function still being inferred is provisional:
+  returned to its caller (PENDING itself when it has no other value) but NOT memoized, and recomputed
+  once that function is final; the head of a cycle (pending only on its own recursion) is final. The
+  verdict is the same whichever member is declared, inferred or called first — unit tests permute every
+  declaration order × call order of a 2-cycle and every declaration order of a 3-cycle. [b10 P1–P8]
+- IMP-STRUCT FIXED — a struct (and an enum payload field) remembers each field's declared TEXT and its
+  declaring file (`structDeclContext`, `enumDeclContext.file`); a field whose registry-time type is
+  `asIs` / unknown (an imported enum or alias the registry did not hold yet) is resolved from that text
+  with the declaring file's imports — the same resolver an alias's RHS uses (`enumReadResolveText`), from
+  the one type reader (`enumReadStructField`, `enumReadVariantField`). [k/e2e R11 R11b R11c R11d R11e, k1 R11]
+- EXPORT-STAR FIXED — `enumReadExportedTypeOf`: a module's exported type is its declaration, an import it
+  exports on, a named re-export (`export { X } from`, `export { Y as X } from`) or `export * from`; a
+  (file, name) cycle is unknown. [k/e2e R4, k1 R1 R3 R4]
+- DEPTH FIXED (fail closed) — the bound is 256 resolution steps (~4 per file: a chain of ~60 files; 40
+  resolves, 80 does not). Past it the type is ENUM_READ_LIMIT and a member read off the value is REFUSED:
+  E-TYPE-031 (reused, as the whole-error binder audit's impl#1 refusals reuse it — no new §34 code minted),
+  the message naming the limit and "an impl#1 limitation, not a language rule". A cycle (an alias of
+  itself, an import cycle) is not a chain and stays unknown (H6 / R9 unchanged). [k/chain9 refused
+  E-TYPE-004 now; a generated 80-file chain E-TYPE-031]
+- NS-ALIAS — NOT valid scrml per SPEC: §21.3 "Named imports (`{ name }`) and default imports (`name`) from
+  `.scrml` files SHALL be resolved by the compiler against the exporting file's export list" names only
+  those two forms for `.scrml` imports (the only namespace-import mention is the §20 server-signal note on
+  `import * as X from "bun"`); there is no namespace-qualified type-name form (`h.I0`). Not resolved; for
+  the coordinator to file (impl#1 compiles k1 R5 clean today — it accepts a form the SPEC does not define).
+- Pack-control strength — the r11 VALID controls call their `f` at run time (payload-variant arguments
+  where `f` reads `.variant` further); server W10 dropped (PASS-500 on both trees: a local function the
+  server bundle does not ship once a server `login` calls `f`).
+- Pack: r12 (f20 / l12 / t12; no server family — every cycle shape was PASS-500 there), 16 shapes, each
+  FAIL on a 73d4e2e2d archive → PASS-REFUSED: P1 P4 P6 P7 × 3 sides, fullstack R11c R11b R11 and the
+  80-file chain. R4 (export *) is unit-tested only: on 73d4e2e2d its page's client bundle throws at load
+  (it imports a TYPE from the `export *` module), so it cannot be measured FAIL. EXPECTED_SHAPE_COUNT 2591.
+- Performance under a loaded machine (load avg ~55): chain 1.67s vs main 1.53s, cycle 0.51 / 0.57.
+
+## Pack family renumbering (coordinator, fix round 3 — two other lanes also made an `r9`)
+Lane D keeps r9 (s12 / f15 / l7 / t7), lane C takes r10. This lane's families, renamed (files, pin ids,
+README, the test-file comment; `renum.mjs`, one simultaneous mapping — history lines above that named the
+old families were rewritten with it): r9 → **r11** (s14 / f17 / l9 / t9), r10 → **r12** (s15 / f18 / l10 /
+t10), r11 → **r13** (s16 / f19 / l11 / t11), round 3's r12 → **r14** (f20 / l12 / t12; no server family).
+EXPECTED_SHAPE_COUNT from this tree's own run: 2591 (the coordinator re-sums at landing).
+
+## Fix round 4 (adversarial review of 3620e8670: FIX; probes ~/.cache/scrml/review/s470-lb4/)
+- SCC-EXP FIXED (a round-3 regression). ONE return-inference engine (`inferFn`, keyed by (file,
+  function)) for this file AND its dependencies: Tarjan's algorithm finds each strongly connected group of
+  mutually-calling functions; when its head closes the group is solved once as a least fixpoint (every
+  member starts PENDING, re-inferred from the others' current values until no value changes; a group
+  that does not converge is ENUM_READ_LIMIT — fail closed) and every member is memoized. Inference count
+  (the new `enumReadInferenceCount()`, reset per run): scc10 20, scc20 40, scc24 48, scc26 52, the
+  400-function chain 400 — linear. Wall time scc24 0.04s (review: 101.8s on 3620e8670), chain 0.31s.
+  Unit tests: a size-bounded guard (≤ 4 bodies per function for 24 and 40-function groups) and the
+  round-3 order permutations (unchanged verdicts).
+- I1–I3 FIXED — the dependency environment's `fnReturnType` is the same engine: a dependency's local
+  helper, a cycle inside a dependency, and a function the dependency imports from another module
+  (`enumReadFnOwner`, through imports / named re-exports / `export *`) are inferred. [b11 I1 I2 I3]
+  Mutual recursion ACROSS two modules is an import cycle — E-IMPORT-002 (§21.3 "Circular imports SHALL
+  be a compile error") — and is refused there anyway.
+- DEEP-EXPR FIXED — the expression reader's bound is the shared ENUM_READ_DEPTH_LIMIT (256) and past it
+  returns ENUM_READ_LIMIT (E-TYPE-031, fail closed), not "unknown". A 34 / 40-deep ternary and a 40-long
+  `||` chain are read (E-TYPE-004); a 300-deep ternary is refused E-TYPE-031. Every other bound in the
+  reader returns the limit too (alias / import / re-export resolution, the fixpoint's iteration cap).
+  The E-TYPE-031 text now says "stops reading after 256 steps — a chain of type aliases / imports /
+  re-exports, or an expression nested that deep".
+- STAR-PREC FIXED — a module's own exports and its NAMED re-exports take precedence over `export *`
+  (two passes), for types and for functions. [k2 X7 refused, X6 allowed]
+- Pack: r15 (s18 / f21 / l13 / t13), 15 shapes, each FAIL on a 3620e8670 archive → PASS-REFUSED: D2 D3
+  D5 × 4 sides, fullstack I1 I2 I3. X7 and the cross-module cycle are unit-tested only (on 3620e8670 X7's
+  page bundle throws at load — it imports a TYPE through an `export *` module; the cross-module cycle is
+  E-IMPORT-002).
+- Merged origin/main 29fcaac8a (#1558, lane D's r9 s12 / f15 / l7 / t7): both families kept;
+  EXPECTED_SHAPE_COUNT 2680 + 341 = 3021, from a run (loadFamilies: 3021 shapes, ids unique).
+- Measured on the merged head: b11 vs main 29fcaac8a — I1–I3, D1–D5 FAIL / PASS-500 / UNJUDGED → PASS-
+  REFUSED on all sides; k2 X4 X5 X7 (BAD) newly refused, X3 / X6 (struct wins) clean, X1 / X2 E-IMPORT-004
+  as main; b12 = main (UNIT-VARIANT V2 out of scope). b1–b6 261 → 61 (the same 61), b7 b8 c20 fp2 = round
+  2, b9 b10 k1 = round 3, fp1 = main; earlier probe sets + matrix 84 → 0. R26 vs main 29fcaac8a: 3,618
+  files, 0 changed, 0 newly rejected.
+- CI-only jobs (ci6/, base 29fcaac8a): all exit 0 — types:check OK (181) · root 2239/0 · snippet 113/0 ·
+  claim 18/0 · floor · md-shim · conflict-marker · SPEC-INDEX · delta-lint · ci-shards needs · s34
+  --check-new · integration+lsp+commands 10789/0 · unit+conformance 31689/0 · TodoMVC + node --check ·
+  browser-baseline · lint-no-default-arm · slices m1/m2/m1-lowered/m3/m4/codec · e2e-render-map 259/0 ·
+  host-global 1/2 + 2/2 0 violations (2 / 135 threw, as before) · bootstrap-severity / -conformance current.
+
+## Candidate gaps (not filed here)
+1. A markup `<match>` nested in a `<match>` arm is never mounted: the inner mount `<div
+   data-scrml-match-mount=…>` is emitted but no dispatcher is generated for it, so its content (buttons,
+   text) never renders. Pre-existing (91c1c9ca4, `F4/nested-match-interp-nobinder.scrml`, which compiled
+   there). Silent missing UI — MED.
+2. `String(x)` / `` `${x}` `` / `x + ""` of an enum-typed value compared with a string is unchecked
+   (c4 T4 `String(x).includes("bad")`, CLEAN on base and head): a unit variant stringifies to its tag, a
+   payload variant to "[object Object]". Not a member read (outside this ruling). LOW–MED (security-shaped).
+3. `x == bad` with `const bad = "bad"` (a non-literal primitive) is not E-EQ-001 outside the whole-error
+   binder audit; §45.3 says cross-type `==` is an error. LOW.
+4. An `<engine>` / derived-machine cell typed by a NAMED machine (`@var: PM`) resolves to a `machine`
+   type, not its governed enum, so member reads on it are not checked by this lane. LOW (not measured).
+5. (round 3) `.variant` on a UNIT variant value reads `not` at run time (a unit variant is emitted as its
+   bare tag string): `f(Role.Admin)` with `f(r: Role) { return r.variant }` logs `not` (tool, measured) —
+   the one member this lane ALLOWS is wrong for unit variants. Security-shaped: `e.variant == "Gone"` is
+   false for a unit error. MED–HIGH.
+6. (round 3) A server function calling a local function that calls another local `return match` function
+   (r11 W10 on the server side): "mk is not defined" at run time — the callee is not shipped to the server
+   bundle. PASS-500 on 73d4e2e2d and head. MED.
+7. (round 3) An importer of a TYPE through an `export *` module: the page's client bundle throws at load
+   (it imports the type as a value from the re-exporting module). Fails closed at run time. LOW–MED.
+8. (round 3) `import * as h` + `type K = h.I0` compiles clean although §21.3 defines no namespace import
+   for `.scrml` (k1 R5). LOW.
+
+## Final gates (merged head 2151403c7 + this progress commit; base for s34 / R26: origin/main da3180405)
+- R26 re-run vs origin/main da3180405 (git archive, in-tree stdlib): 3,615 files, 0 changed, 0 newly rejected.
+- Probe sets + matrix re-run on the merged head: FAIL 84 → 0 (matrix 80, Q4 4); the only differences from
+  the pre-merge run are main's new E-IMPL1-ACTION-NOT-AWAITED on already-refused shapes.
+- Pack: 2389 pass / 0 fail (2386 shapes). Pre-commit gate green on every commit.
+- CI-only jobs (commands as in .github/workflows/ci.yml, ~/.cache/scrml/s470/laneB/ci.sh, logs ci2/):
+  types:check OK (181, unchanged) · root `compiler/tests/*.test.js` 2239 / 0 · snippet-gate 113 / 0 (16
+  spec-ahead) · claim-gate 18 / 0 · corpus-compile-floor --check PASS · gen-md-shim current ·
+  conflict-marker PASS · regen-spec-index --check OK · delta-lint PASS · ci-shards needs OK · s34-census
+  --check-new --base da3180405 PASS · integration + lsp + commands 10154 / 0 · unit + conformance 31607 / 0
+  · TodoMVC compile + `node --check` OK · browser-baseline --check PASS (8 asserted) · lint-no-default-arm
+  OK · slice m1 / m2 / m1-lowered / m3 / m4 / codec 0 fail · e2e-render-map 259 / 0 · host-global-scan
+  1/2 and 2/2: 0 violations (2 / 135 compiles threw — the same counts as before this lane) ·
+  gen-bootstrap-severity current · bootstrap-conformance --check current.
+- One integration run under load (ci1, concurrent with the hook) had `dev-db-no-side-file` §3 return 500
+  for 503 at 30 s; it passed alone (26 / 0) and in the full ci2 run — a load flake, not this change.
