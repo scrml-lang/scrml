@@ -157,12 +157,54 @@ the failure mode `markup-autoawait-all-emitters` recorded. The fix does NOT go e
   async set does not see a function declared in an `if=`/`else` chain branch (or any non-`children` container),
   so a call of it is not coloured async / not awaited elsewhere (handlers). The render refusal works around it
   (`serverPlacedFnNamesAnywhere`); the colouring itself is unchanged.
-- NEW candidate `g-request-in-sibling-page-widens-role-chunk-s470` (needs verification, possibly SECURITY/auth,
-  locus reachability / chunk planner): measured on the a5 multipage fixture — adding
-  `<request id="driversLoad" deps=[]>${ @drivers = loadDrivers() }</>` to routes/loads.scrml made the HOME page's
-  Driver `initial` chunk carry 2 `_scrml_chunk_mount(…, "a")` anchors instead of 1 (the Admin-gated `<a
-  href="/admin">` inside `<auth role="Admin">` reached the Driver chunk). Reproduce with
-  ~/.cache-style scratch: compile the three route files with `emitPerRoute: true` and count anchors per role.
+- (DROPPED per PA: the "`<request>` in a sibling page widens a role chunk" observation is a pre-existing
+  cross-file node-id collision in reachability/component-4.ts, not this change; the PA files it. Note the fix
+  round's benchmark rewrite adds `<request>` elements to benchmarks/per-route-roles, which that bug may touch.)
 - NEW candidate `g-host-promise-global-in-render-not-refused-s470` (LOW): a host Promise global (`fetch(…)`) written
   directly in a render position is not coloured by the §13.2 facts (no stdlib import), so it is not refused.
   §13.7 item 4 names it. Not decided by the existing facts → out of this lane's "reuse the predicate" method.
+
+## Fix round (S239 review of d4e9c2545) — 2026-10-24
+
+Rulings (bryan, S470): (1) uniform refusal kept; (2) rewrite per-route-roles + example 17 in this PR.
+Probes: ~/.cache/scrml/review/s470-l2/p/. Every finding was reproduced on d4e9c2545 before acting.
+
+| # | sev | status | evidence |
+|---|---|---|---|
+| 1 | HIGH | FIXED (db3c97fdb) | g01 / h02 exit 0 on d4e9c2545 → E-VALUE-SERVER-CALL "`hh`, which the compiler emits async". The check now also reads the client emitter's OWN async set (`computeClientAsyncSets` over `collectFunctions`, same inputs as emit-functions.ts), which reaches chain branches. Unit tests "#1 …". |
+| 2 | HIGH | FIXED (db3c97fdb) — refused under the same rule | g05b / g05 / g06 now E-VALUE-SERVER-CALL "the initializer of `ok`": a plain `const`/`let` declared in a `${ }` block (never inside a function) is a §13.7 value position ("an initializer … own value"); impl#1 emitted `const ok = _scrml_fetch_isOk_4(…)` (a Promise). No new machinery: one more statement kind in the existing walk. A function VALUE initializer (`const v = (w, p) => w(p)`) is skipped (not called by being declared; s465-await-r8 paramShadowsBinding). Cell initializers stay out (impl#1 awaits them). R26: +1 newly-rejected gauntlet sample (gauntlet-r10-rails-blog `const initialPosts = loadPosts()`). |
+| 3 | MED | FIXED (db3c97fdb) | n13 / m05 / m01 refused on d4e9c2545 → clean. The engine walk now reads only what codegen renders (emit-engine `buildEngineArms`): each state child's `bodyChildren` node, children filtered by emit-variant-guard `filterRenderableChildren`; state-child attributes (`rule=`, `effect=`), `<onTransition>` / `<onTimeout>` / `<onIdle>` and an engine-level `<onTransition>` are never walked. Control: a state child's rendered `${isOk(@pw)}` is still refused (f18, unit test). |
+| 5 | MED | FIXED (db3c97fdb) | f14 / n25 refused → clean: `isMetaKind` nodes are skipped in both the node and statement walks. |
+| 7 | LOW | FIXED (db3c97fdb) | d01 reported 1 (the CG `isOk` site dropped, same line) → 2. api.js key is file + line + column. |
+| 8 | LOW | FIXED (db3c97fdb) | f06 / f19 reported 2 (one with a 1:6 span from the re-parse) → 1, at the element / state child (`withSpan`). |
+| 11 | LOW | FIXED (db3c97fdb) | a `parseMatchArms` throw now reads `armsRaw` to refuse (`textNames`) instead of yielding no arms. No reproducer (the reader did not throw on any probe). |
+| 2-pre | — | n/a | see #2 (g05b closed by refusal; `g-markup-gate-tests-server-call-promise` may be reported CLOSED: g05b no longer compiles). |
+| 4 | — | FILED | m12: an engine `<onTransition>` body `@msg = isOk(@pw) ? … : …` is emitted synchronously (not awaited) — an action position whose emitter does not await. Not this lane (action positions are out of the render rule). Candidate `g-engine-hook-body-server-call-not-awaited-s470` (MED, locus emit-engine onTransition / effect= body lowering). |
+| 6 | — | FILED | q04: markup held in a `const` initializer (`${ const m = <span if=${isOk(@pw)}>IN</span> }` then `${ m }`) is never walked (still compiles on this branch); q05 the reviewer's `($)` condition-loss on the sync twin. Candidate `g-markup-in-const-initializer-unwalked-s470` (MED). |
+| 9 | — | FILED | s01: the name set is scope-blind — a `server function fmt` in a chain branch and a sync `function fmt` in a component body share a name; the sync one's render call is refused (over-refusal, fails closed). Candidate `g-render-waiting-names-scope-blind-s470` (LOW). |
+| 10 | — | FILED | n06: a local `const isOk = (x) => x` inside a function shadows the server `isOk`; `${f2()}` is refused because `f2` is coloured async by the colouring's own scope-blind callee walk (over-refusal, fails closed; the colouring itself, not this check). Candidate `g-async-colouring-ignores-local-shadow-s470` (LOW). |
+| — | — | FILED (new, found in the sweep) | h03: a `function` declared inside a `<match>` arm body is never emitted — the arm calls a bare `hh(…)` (ReferenceError at run time; not an open gate). Candidate `g-fn-in-match-arm-body-not-emitted-s470` (MED). k02: `<engine for=… if=${isOk(@pw)}>` compiles and the `if=` is dropped (no gate emitted, no diagnostic; same on base). Candidate `g-engine-if-attr-dropped-s470` (MED/security-adjacent: an `if=` gate on an engine host is silently ignored). |
+
+Other sweep notes: `<onMount>` / `<onUnmount>` tags (m07, m09) are refused — impl#1 treats them as plain unknown
+elements and RENDERS their `${ }` (`<onMount><span data-scrml-logic>…` + `_scrml_render_value`), so by the
+emitter they are render positions. If they are meant to be §13.8 lifecycle elements, that is a separate impl#1 gap.
+
+Benchmark / example rewrite (f507a833a): per-route-roles admin (2 loops), customer (1), dispatch (2), loads (2 loops,
+1 cell) and example 17 (1) load cells through `<request id=… deps=[]>${ @cell = loadX() }</>` and render the cell.
+e2e-render-map baseline: only the cells this change moves are updated (per-route-roles: orphan routes/loads.scrml
+cell replaced by routes/admin.scrml renders-clean; example 17 needs-server → renders-clean; phase1-fn-server-prefix-013
+and phase1-function-with-sql-002 → fails-compile E-VALUE-SERVER-CALL). A full regen would also move ~40 cells other
+lanes changed; not written. `generate-baseline.js --check` still lists 5 green→red cells that are equally red on base
+915b6775f (pre-existing, not this change).
+
+Gates (fix round, final tree):
+- pre-commit gate `scripts/test-sharded.ts unit integration conformance`: 40273 pass, 0 fail.
+- `bun scripts/corpus-compile-floor.ts --check`: PASS — every showcase program compiles clean on HEAD (0 baselined).
+- `bun test compiler/tests/e2e-render-map/`: 259 pass, 0 fail.
+- self-host-v2 slices (CI job commands): m1+m2+m3+m4 3256 pass 0 fail; m1 SLICE_CORE=lowered 100 pass; slice-codec 166 pass
+  (cross-impl fixture: its program-body `let a = maybePt(1)` moved into a handler function — #2 refuses it).
+- types:check unchanged; s34-census --check-new PASS; snippet-gate 0 fail; claim-gate 0 fail; root tests 2239 pass.
+- failable pack FAIL 0 (PASS 723, PASS-REFUSED 1162); await pack FAIL 0 (unchanged).
+- R26 vs 915b6775f: newly-rejected 5 (gauntlet-r10-go-contacts, gauntlet-r10-rails-blog, gauntlet-r10-vue-datatable,
+  phase1-fn-server-prefix-013, phase1-function-with-sql-002 — all genuine, left refused); 4 already-failing files gain the code.
+- host-global-scan --check: exit 0, 0 violations (2868 units). Not run: browser-baseline.
