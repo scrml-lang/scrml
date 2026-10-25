@@ -37,7 +37,7 @@ SERVER function is judged end to end.
 - a shape not in `KNOWN_FAIL` / `BY_DESIGN_LOGS_IN` logs in on a wrong password;
 - a `KNOWN_FAIL` shape stops doing so (it was fixed: delete the entry);
 - a shape not in `UNJUDGED` comes out `UNJUDGED`, or an `UNJUDGED` one starts being judged;
-- the corpus stops holding exactly 2606 shapes (`EXPECTED_SHAPE_COUNT`); a list entry names no shape. Plus S469 s469-server-return-match-await (457 shapes): s4–s10 server, f1–f7 fullstack, l1–l5 library, t1–t5 tool — a failable `match` subject awaited in every position, `fail` payloads keyed per enum in every emission mode, one resolver for a callee's error enum, and the `_ e` whole-error binder allow-list.
+- the corpus stops holding exactly 3021 shapes (`EXPECTED_SHAPE_COUNT`); a list entry names no shape. Plus S469 s469-server-return-match-await (457 shapes): s4–s10 server, f1–f7 fullstack, l1–l5 library, t1–t5 tool — a failable `match` subject awaited in every position, `fail` payloads keyed per enum in every emission mode, one resolver for a callee's error enum, and the `_ e` whole-error binder allow-list.
 
 It deliberately does NOT pin each shape's class: a shape moving from `PASS-REFUSED` to `PASS` is a
 compiler improvement, not a regression.
@@ -276,6 +276,42 @@ handled call's identity-resolved enum (never a same-named local enum) and works 
 `g-server-js-imports-module-without-server-file-s467`, `g-library-tool-cross-file-import-source-path-s469`);
 their single-file-loadable twins PASS. s8 / l3 "held in a local then passed on" is now PASS-REFUSED (a
 local alias is not an allowed use).
+
+## Measured (S470 s470-async-colouring-scope — s12 / f15 / l7 / t7; 415 shapes)
+
+`r9-shapes.js` on four sides (`g-impl1-async-colouring-ignores-local-shadow-s469`). Async colouring
+(§13.2) read callees by NAME: a helper calling a LOCAL `check` (a `const` / `let` / bare-assignment
+arrow, a function expression, a parameter, a nested `function`, a block-scoped local, a lambda
+parameter) beside an async file-scope `check` was coloured async. Two directions: SHADOW shapes (the
+helper must be sync) and DUAL shapes (the call names the async function — a shadow in a sibling block /
+a nested function / a lambda / a sibling top-level function, a use before the shadow, a closure, an
+alias, a parameter handed the async function — the helper must stay async; every DUAL helper tests the
+call's result itself, so a helper wrongly made sync logs the wrong password in). Base `6081e0685` →
+head, class transitions:
+
+| family | base FAIL | head FAIL | PASS-REFUSED → PASS | PASS-REFUSED → PASS-DENY | unchanged |
+|---|---|---|---|---|---|
+| s12 (server, 42) | 0 | 0 | 0 | 0 | 42 |
+| f15 (fullstack, 221) | 0 | 0 | 32 | 10 | 179 |
+| l7 (library, 76) | 0 | 0 | 10 | 0 | 66 |
+| t7 (tool, 76) | **1** | 0 | 10 | 0 | 65 |
+
+The over-colouring was fail-CLOSED after #1547 / #1554: a shadowing helper was refused in a render
+position (E-VALUE-SERVER-CALL), in a parameter default (E-PARAM-DEFAULT-AWAIT) and in a synchronously
+emitted action body (`<request>`, E-IMPL1-ACTION-NOT-AWAITED) — those are the 52 PASS-REFUSED → PASS and
+the 10 → PASS-DENY (the `<request>` probe denies the right password too, its VALID control included: it
+measures the refusal, not the run). Every DUAL helper in a render position or a `<request>` body is still
+refused, and in a `when … changes` body (an async host) still awaited. The one FAIL on base is a tool-mode fail-OPEN of the same root in the other
+direction: every tool function body shared ONE `declaredNames` set, so a `const check` in one function
+made a later function's call of the async `check` read as that local and emitted it without `await`
+(`t7/dual shadow in a sibling top-level function, direct`). No shape moved toward FAIL. Instrument check
+(a mutation reading `check` / `verify2` as bound everywhere — a by-name "fix"): 18 / 16 / 18 DUAL shapes
+FAIL on f15 / l7 / t7. The server side does not FAIL under that mutation (its in-process peer awaits do
+not read this colouring), so s12 pins its classes only. Still refused, by consumers this lane did not
+change (fail closed): a lambda calling a parameter / local named like a server function
+(E-SERVER-FN-IN-SYNC-CALLBACK / E-ASYNC-STDLIB-IN-SYNC-CALLBACK — the sync-callback drain reads names),
+a function value in a tape / object (E-VALUE-FUNCTION-STORED), a `for` / destructured binder
+(E-ASYNC-FN-ESCAPES-AS-VALUE — the escape check reads names). `r9-pinned.js` pins every shape's class.
 
 ## Running
 

@@ -4,6 +4,8 @@
 // PASS-DENY / PASS-REFUSED / PASS-500 (a fix that silently stopped working, or a newly-refused valid
 // program) turns the suite red, and so does a refused shape that starts compiling (re-measure it, then
 // re-pin). Regenerate from `classify.js --json <family>/` — never by hand-editing to make the suite pass.
+import { R9_PINNED } from "./r9-pinned.js";
+
 export const PINNED_CLASS = {
   "s4/return match": "PASS",
   "s4/return match (newline arms)": "PASS",
@@ -825,6 +827,8 @@ export const PINNED_CLASS = {
   "f13/engine message arm tests a server call": "PASS-REFUSED",
   "f13/when body tests an async helper": "PASS",
   "f13/engine opener effect= tests an async helper": "PASS-DENY",
+  // S470 s470-async-colouring-scope — r9-shapes.js (s12 / f15 / l7 / t7), every shape pinned (r9-pinned.js).
+  ...R9_PINNED,
   // S470 s470-typed-payload-binders — r11-shapes.js (s14 / f17 / l9 / t9), from a run (fams.mjs). "1 …" FAIL on
   // 91c1c9ca4 -> PASS-REFUSED; "VALID …" PASS on both; "VALID F4 …" PASS-REFUSED (E-TYPE-031, false) on 91c1c9ca4 ->
   // PASS-DENY: the program compiles now, but the nested `<match>` in the arm is never mounted (its buttons never
