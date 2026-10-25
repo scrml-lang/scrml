@@ -31,7 +31,7 @@ import type { CompileContext } from "./context.ts";
 import { sqlHandleRegExp, compareSqlHandles, UNRESOLVED_SQL_HANDLE } from "./sql-handle-name.ts";
 import { getNodes, containsSql, containsSqlOrTransaction, collectTopLevelStatements } from "./collect.ts";
 export { collectTopLevelStatements };
-import { bodyHasForeignOrSql, computeAsyncFnNames, emitLibraryFnMember, collectNonAwaitableAsyncCalls, syncCallbackErrorForSite, annotateNestedAsyncHelpers, asyncEscapeErrors, fileBoundNamesOf } from "./emit-library-shared.ts";
+import { bodyHasForeignOrSql, computeAsyncFnNames, emitLibraryFnMember, collectNonAwaitableAsyncCalls, syncCallbackErrorForSite, annotateNestedAsyncHelpers, asyncEscapeErrors, fileBoundNamesOf, locallyBoundOnlyCalleeNames } from "./emit-library-shared.ts";
 import type { AsyncEscapeSite } from "./local-async-fns.ts";
 import { buildCalleeImportMap } from "./scheduling.ts";
 import { emitLogicNode, emitParamDefault } from "./emit-logic.js";
@@ -182,6 +182,36 @@ function collectServeImportReachabilitySrc(fileAST: ASTNode): string {
     }
   }
   return parts.join("\n");
+}
+
+/**
+ * S470 (g-impl1-async-colouring-ignores-local-shadow-s469) — the emit options of ONE tool
+ * function body: the module's options with a `declaredNames` of its OWN — the module-level
+ * names declared so far plus its parameters. Every function body used to share the module's
+ * one set, so a local of one function (`const check = (x) => …` in `other`) was still
+ * "declared" in every function emitted after it: a call of the file's async `check` there was
+ * read as the shadowing local's and emitted WITHOUT its `await` — a pending Promise, always
+ * truthy (a wrong password logged in). The body's own declarations still grow this set
+ * statement by statement, as every other function emitter's does (emit-functions /
+ * `emitLibraryFnMember` start each function from its parameters).
+ *
+ * A SYNC function (not in the async set) is emitted with an await set WITHOUT the names its
+ * body calls only as a local binding (`locallyBoundOnlyCalleeNames`): the colouring did not
+ * count those calls — a nested `function check(x)` beside the file's async `check` — so an
+ * `await` on one would land in a sync function. Every other call of an async name keeps it
+ * (and such a call would have coloured the function async).
+ */
+function toolFnBodyOpts<T extends { declaredNames: Set<string>; serverFnNames: Set<string> }>(moduleOpts: T, fn: ASTNode): T {
+  const params = ((fn.params ?? []) as unknown[])
+    .map((p) => (typeof p === "string" ? p.replace(/^\.\.\./, "").split(/[:=]/)[0].trim() : (p as { name?: unknown } | null)?.name))
+    .filter((n): n is string => typeof n === "string" && n.length > 0);
+  const out = { ...moduleOpts, declaredNames: new Set<string>([...moduleOpts.declaredNames, ...params]) };
+  const name = typeof fn.name === "string" ? fn.name : "";
+  if (!moduleOpts.serverFnNames.has(name)) {
+    const localOnly = locallyBoundOnlyCalleeNames(fn as never);
+    if (localOnly.size > 0) out.serverFnNames = new Set([...moduleOpts.serverFnNames].filter((n) => !localOnly.has(n)));
+  }
+  return out;
 }
 
 /** Format ONE tool function-declaration parameter: strip its `:Type`, keep a
@@ -674,14 +704,15 @@ export function generateToolJs(
       const name = (stmt.name ?? "anon") as string;
       if (name === "main") mainFn = stmt;
       const params = (stmt.params ?? []) as unknown[];
-      const paramList = params.map((p, i) => toolParamSignature(p, i, stmt, emitOpts, asyncFnNames)).join(", ");
+      const fnOpts = toolFnBodyOpts(emitOpts, stmt);
+      const paramList = params.map((p, i) => toolParamSignature(p, i, stmt, fnOpts, asyncFnNames)).join(", ");
       const star = stmt.isGenerator ? "*" : "";
       const asyncPrefix = asyncFnNames.has(name) ? "async " : "";
       bodyLines.push(`${asyncPrefix}function${star} ${name}(${paramList}) {`);
       const inner = (stmt.body ?? []) as ASTNode[];
       for (const bodyStmt of inner) {
         if (!bodyStmt) continue;
-        const code = emitLogicNode(bodyStmt, emitOpts as never);
+        const code = emitLogicNode(bodyStmt, fnOpts as never);
         if (code) for (const line of indentBodyLines(code, "  ")) bodyLines.push(line);
       }
       bodyLines.push("}");
@@ -890,13 +921,14 @@ function generateServeHarnessToolJs(
       // The headless already emits route fns + private/value-export helpers.
       if (name !== "main" && (isRouteFn(stmt) || headlessDefinesFn(name))) continue;
       const params = (stmt.params ?? []) as unknown[];
-      const paramList = params.map((p, i) => toolParamSignature(p, i, stmt, emitOpts, asyncFnNames)).join(", ");
+      const fnOpts = toolFnBodyOpts(emitOpts, stmt);
+      const paramList = params.map((p, i) => toolParamSignature(p, i, stmt, fnOpts, asyncFnNames)).join(", ");
       const star = stmt.isGenerator ? "*" : "";
       const asyncPrefix = asyncFnNames.has(name) ? "async " : "";
       extraLines.push(`${asyncPrefix}function${star} ${name}(${paramList}) {`);
       for (const bodyStmt of (stmt.body ?? []) as ASTNode[]) {
         if (!bodyStmt) continue;
-        const code = emitLogicNode(bodyStmt, emitOpts as never);
+        const code = emitLogicNode(bodyStmt, fnOpts as never);
         if (code) for (const line of code.split("\n")) extraLines.push(`  ${line}`);
       }
       extraLines.push("}");
