@@ -13,7 +13,7 @@ import { ScrmlParser } from "../scrml-acorn.ts";
 import { CGError } from "./errors.ts";
 import { isServerAmbientSession, refuseServerAmbientSession } from "./server-session-guard.ts";
 // GITI-017 (S125): shared regex/comment/string fence — see code-segments.ts header.
-import { rewriteCodeSegments, regexAllowedAfter } from "./code-segments.ts";
+import { rewriteCodeSegments, regexAllowedAfter, classifyBraceGroup } from "./code-segments.ts";
 import { lowerEqualityOps } from "./string-equality-lowering.ts";
 import { lowerIsPlaceholders, lowerPresenceCheck, lowerAbsenceCheck, isTrivialOperandText, lowerVariantTagRead, lowerVariantCheck, IS_OP_IIFE_LOCAL } from "./is-predicate-lowering.ts";
 // §14.8.9 protected-column egress redaction — resolve the protected OUTPUT
@@ -2564,7 +2564,7 @@ export function asVariantPlaceText<T>(f: () => T): T {
 
 export function rewriteVariantTagReads(expr: string): string {
   if (!expr || typeof expr !== "string" || _variantPlaceText > 0 || !/\bvariant\b/.test(expr)) return expr;
-  let out = expr;
+  let out = lowerTextVariantPatterns(expr);
   let cursor = 0;
   for (let guard = 0; guard < 1000; guard++) {
     const masked = maskNonCode(out);
@@ -2590,6 +2590,131 @@ export function rewriteVariantTagReads(expr: string): string {
     if (done) return out;
   }
   return out;
+}
+
+/**
+ * Review F2, the string path — a destructuring pattern in TEXT that names a `variant` key
+ * (`const { variant } = @st` in a `when` body). A declaration with the key at its top
+ * level destructures from `variantDestructureSource`'s form (a tag string read as
+ * `{ variant: tag }`); any other pattern naming `variant` (nested, a parameter, a `for`
+ * head, an assignment) is refused — a pattern cannot read a unit variant's tag.
+ */
+function lowerTextVariantPatterns(expr: string): string {
+  if (!/\bvariant\b/.test(expr)) return expr;
+  let out = expr;
+  let from = 0;
+  for (let guard = 0; guard < 200; guard++) {
+    const masked = maskNonCode(out);
+    if (masked === null) return out;
+    const open = masked.indexOf("{", from);
+    if (open < 0) return out;
+    const close = matchingClose(masked, open);
+    if (close < 0) return out;
+    from = open + 1;
+    const group = masked.slice(open, close + 1);
+    if (!/\bvariant\b/.test(group)) continue;
+    if (classifyBraceGroup(masked, open, close + 1) !== "binding-pattern") continue;
+    // Only the outermost pattern is judged (an inner group is part of it).
+    if (enclosingPatternOpen(masked, open)) continue;
+    const top = topLevelKeys(group);
+    const isDecl = /\b(?:const|let|var)\s*$/.test(masked.slice(0, open)) && !/\bfor\s*\(\s*(?:const|let|var)\s*$/.test(masked.slice(0, open));
+    const eq = /^\s*=(?![=>])/.exec(masked.slice(close + 1));
+    if (isDecl && eq && top.includes("variant") && !nestedKeyNamesVariant(group)) {
+      const initStart = close + 1 + eq[0].length;
+      const initEnd = initializerEnd(masked, initStart);
+      const init = out.slice(initStart, initEnd);
+      // Already the destructuring source (the structured split's own text): leave it.
+      if (/^\s*\(\(__scrml_is_v\) => typeof __scrml_is_v === "string" \? \{ variant: __scrml_is_v \}/.test(init)) { from = initEnd; continue; }
+      const wrapped = ` ((__scrml_is_v) => typeof __scrml_is_v === "string" ? { variant: __scrml_is_v } : __scrml_is_v)(${init.trim()})`;
+      out = out.slice(0, initStart) + wrapped + out.slice(initEnd);
+      from = initStart + wrapped.length;
+      continue;
+    }
+    recordRefusedLowering(new CGError(
+      "E-CODEGEN-INVALID-LOGIC",
+      "E-CODEGEN-INVALID-LOGIC: this destructuring pattern names a `variant` key where the compiler cannot " +
+        "lower it (a nested pattern, a parameter, a `for` head, or an assignment). A unit enum variant is its " +
+        "bare tag (§51.3.2), so the pattern would bind `undefined` and a gate on it would fail open. Bind the " +
+        "whole value and read `x.variant` (or test `x is .V`) instead.",
+      currentLoweringSpan() ?? {},
+    ), null);
+    return out;
+  }
+  return out;
+}
+
+function matchingClose(m: string, open: number): number {
+  let d = 0;
+  for (let j = open; j < m.length; j++) {
+    const c = m[j];
+    if (c === "(" || c === "[" || c === "{") d++;
+    else if (c === ")" || c === "]" || c === "}") { d--; if (d === 0) return j; }
+  }
+  return -1;
+}
+
+/** Is the `{` at `open` inside another destructuring pattern group (`{ e: { variant } } = …`)? */
+function enclosingPatternOpen(m: string, open: number): boolean {
+  let d = 0;
+  for (let k = open - 1; k >= 0; k--) {
+    const c = m[k];
+    if (c === ")" || c === "]" || c === "}") { d++; continue; }
+    if (c === "(" || c === "[" || c === "{") {
+      if (d > 0) { d--; continue; }
+      if (c === "(") return false;
+      const cl = matchingClose(m, k);
+      if (cl < 0) return false;
+      if (c === "{" && classifyBraceGroup(m, k, cl + 1) === "binding-pattern") return true;
+      if (c === "[" && /^\s*=(?![=>])/.test(m.slice(cl + 1))) return true;
+    }
+  }
+  return false;
+}
+
+/** The keys of an object pattern's own level (`{ a, b: c, d = 1, e: { f } }` → a, b, d, e). */
+function topLevelKeys(group: string): string[] {
+  const keys: string[] = [];
+  let d = 0, seg = "";
+  const flush = () => { const k = /^\s*(?:\.\.\.)?\s*([A-Za-z_$][\w$]*)/.exec(seg); if (k && !/^\s*\.\.\./.test(seg)) keys.push(k[1]); seg = ""; };
+  for (let j = 1; j < group.length - 1; j++) {
+    const c = group[j];
+    if (c === "(" || c === "[" || c === "{") d++;
+    else if (c === ")" || c === "]" || c === "}") d--;
+    if (d === 0 && c === ",") { flush(); continue; }
+    seg += c;
+  }
+  flush();
+  return keys;
+}
+
+/** Does a pattern NESTED in this group name `variant` (a key the top-level split cannot reach)? */
+function nestedKeyNamesVariant(group: string): boolean {
+  const inner = group.slice(1, -1);
+  let d = 0;
+  for (let j = 0; j < inner.length; j++) {
+    const c = inner[j];
+    if (c === "{" || c === "[") { d++; continue; }
+    if (c === "}" || c === "]") { d--; continue; }
+    if (d > 0 && /\bvariant\b/.test(inner.slice(j, j + 7)) && !/[\w$.]/.test(inner[j - 1] ?? "")) return true;
+  }
+  return false;
+}
+
+/** End (exclusive) of a declaration initializer starting at `i`: a depth-0 `;` / `,`, an unmatched close, or a statement-ending newline. */
+function initializerEnd(m: string, i: number): number {
+  let d = 0;
+  for (let j = i; j < m.length; j++) {
+    const c = m[j];
+    if (c === "(" || c === "[" || c === "{") { d++; continue; }
+    if (c === ")" || c === "]" || c === "}") { if (d === 0) return j; d--; continue; }
+    if (d === 0 && (c === ";" || c === ",")) return j;
+    if (d === 0 && c === "\n") {
+      const before = m.slice(i, j).trimEnd();
+      const after = m.slice(j + 1).trimStart();
+      if (before && !/[-+*/%&|^!=<>?:.,(]$/.test(before) && !/^[.?\])}+\-*/%&|^=<>:,]/.test(after)) return j;
+    }
+  }
+  return m.length;
 }
 
 /** `expr` with each comment (a masked run opening `//` or `/*`) replaced by spaces; newlines kept. */

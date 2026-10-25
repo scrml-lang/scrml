@@ -1,8 +1,10 @@
 // R16_PINNED — the pinned class of every r16-shapes.js shape (S470 s470-unit-variant-tag-read; families
 // s19 / f22 / l14 / t14). Spread into PINNED_CLASS (pinned-class.js). Regenerate from
-// `classify.js --json <family>/` — never by hand-editing to make the suite pass. On base d582ae04f:
-// 88 FAIL, 28 PASS (the VALID controls and s19's `match` arm `is`), 1 PASS-REFUSED (t14's `match` arm
-// `is`: E-CODEGEN-INVALID-LOGIC on both trees), 1 UNJUDGED.
+// `classify.js --json <family>/` — never by hand-editing to make the suite pass.
+// Round 0 (118 shapes) on base d582ae04f: 88 FAIL, 28 PASS, 1 PASS-REFUSED, 1 UNJUDGED.
+// Fix round 1 (+47) on be176f6ff: 32 FAIL (F1 each rows, F2 destructuring, F3 literal keys, F6 qualified
+// `is`), 6 PASS-REFUSED (incl. the 4 F4 swap regressions), 3 PASS-500 (F2 `let` default); base accdd5f2
+// FAILs every F1 / F2 / F3 shape too.
 export const R16_PINNED = {
   "s19/1 typed local from a return": "PASS",
   "s19/1 untyped local from a return": "PASS",
@@ -30,6 +32,16 @@ export const R16_PINNED = {
   "s19/VALID struct-like string variant field": "PASS",
   "s19/VALID struct-like number variant field": "PASS",
   "s19/VALID variant field written then read": "PASS",
+  "s19/15 F2 destructure variant": "PASS",
+  "s19/15 F2 destructure renamed": "PASS",
+  "s19/15 F2 destructure let with default": "PASS",
+  "s19/15 F2 destructure nested": "PASS",
+  "s19/16 F3 literal key": "PASS",
+  "s19/16 F3 optional literal key": "PASS",
+  "s19/17 F6 qualified is, payload": "PASS",
+  "s19/17 F6 qualified is in a match arm, payload": "PASS",
+  "s19/VALID F4 swap through an assignment pattern": "PASS",
+  "s19/VALID F5 multi-line template keeps .variant text": "PASS",
   "f22/1 typed local from a return": "PASS",
   "f22/1 untyped local from a return": "PASS",
   "f22/1 not-equal gate": "PASS",
@@ -56,6 +68,16 @@ export const R16_PINNED = {
   "f22/VALID struct-like string variant field": "PASS",
   "f22/VALID struct-like number variant field": "PASS",
   "f22/VALID variant field written then read": "PASS",
+  "f22/15 F2 destructure variant": "PASS",
+  "f22/15 F2 destructure renamed": "PASS",
+  "f22/15 F2 destructure let with default": "PASS",
+  "f22/15 F2 destructure nested": "PASS",
+  "f22/16 F3 literal key": "PASS",
+  "f22/16 F3 optional literal key": "PASS",
+  "f22/17 F6 qualified is, payload": "PASS",
+  "f22/17 F6 qualified is in a match arm, payload": "PASS",
+  "f22/VALID F4 swap through an assignment pattern": "PASS",
+  "f22/VALID F5 multi-line template keeps .variant text": "PASS",
   "f22/11 cell holding a unit variant": "PASS",
   "f22/12 markup interpolation": "PASS",
   "f22/12 derived cell": "PASS",
@@ -67,6 +89,13 @@ export const R16_PINNED = {
   "f22/13 match arm value": "PASS",
   "f22/13 cell read in a function": "PASS",
   "f22/13 tape map callback": "PASS",
+  "f22/18 F1 each row r.e.variant": "PASS",
+  "f22/18 F1 each row @.e.variant": "PASS",
+  "f22/18 F1 each row if=": "PASS",
+  "f22/18 F1 each row of unit values": "PASS",
+  "f22/18 F1 each row template literal": "PASS",
+  "f22/19 F2 when body destructure": "PASS",
+  "f22/19 F3 when body literal key": "PASS",
   "f22/VALID function expression is .Denied (payload)": "PASS",
   "f22/VALID block arrow is .Gone (unit)": "PASS",
   "f22/VALID markup is .Gone": "PASS",
@@ -96,6 +125,16 @@ export const R16_PINNED = {
   "l14/VALID struct-like string variant field": "PASS",
   "l14/VALID struct-like number variant field": "PASS",
   "l14/VALID variant field written then read": "PASS",
+  "l14/15 F2 destructure variant": "PASS",
+  "l14/15 F2 destructure renamed": "PASS",
+  "l14/15 F2 destructure let with default": "PASS",
+  "l14/15 F2 destructure nested": "PASS",
+  "l14/16 F3 literal key": "PASS",
+  "l14/16 F3 optional literal key": "PASS",
+  "l14/17 F6 qualified is, payload": "PASS",
+  "l14/17 F6 qualified is in a match arm, payload": "PASS",
+  "l14/VALID F4 swap through an assignment pattern": "PASS",
+  "l14/VALID F5 multi-line template keeps .variant text": "PASS",
   "t14/1 typed local from a return": "PASS",
   "t14/1 untyped local from a return": "PASS",
   "t14/1 not-equal gate": "PASS",
@@ -122,4 +161,14 @@ export const R16_PINNED = {
   "t14/VALID struct-like string variant field": "PASS",
   "t14/VALID struct-like number variant field": "PASS",
   "t14/VALID variant field written then read": "PASS",
+  "t14/15 F2 destructure variant": "PASS",
+  "t14/15 F2 destructure renamed": "PASS",
+  "t14/15 F2 destructure let with default": "PASS",
+  "t14/15 F2 destructure nested": "PASS",
+  "t14/16 F3 literal key": "PASS",
+  "t14/16 F3 optional literal key": "PASS",
+  "t14/17 F6 qualified is, payload": "PASS",
+  "t14/17 F6 qualified is in a match arm, payload": "PASS-REFUSED",
+  "t14/VALID F4 swap through an assignment pattern": "PASS",
+  "t14/VALID F5 multi-line template keeps .variant text": "PASS",
 };

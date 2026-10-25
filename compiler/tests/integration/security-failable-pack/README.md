@@ -36,7 +36,7 @@ SERVER function is judged end to end.
 - a shape not in `KNOWN_FAIL` / `BY_DESIGN_LOGS_IN` logs in on a wrong password;
 - a `KNOWN_FAIL` shape stops doing so (it was fixed: delete the entry);
 - a shape not in `UNJUDGED` comes out `UNJUDGED`, or an `UNJUDGED` one starts being judged;
-- the corpus stops holding exactly 2798 shapes; a list entry names no shape. Plus S469 s469-server-return-match-await (457 shapes): s4–s10 server, f1–f7 fullstack, l1–l5 library, t1–t5 tool — a failable `match` subject awaited in every position, `fail` payloads keyed per enum in every emission mode, one resolver for a callee's error enum, and the `_ e` whole-error binder allow-list.
+- the corpus stops holding exactly 2845 shapes; a list entry names no shape. Plus S469 s469-server-return-match-await (457 shapes): s4–s10 server, f1–f7 fullstack, l1–l5 library, t1–t5 tool — a failable `match` subject awaited in every position, `fail` payloads keyed per enum in every emission mode, one resolver for a callee's error enum, and the `_ e` whole-error binder allow-list.
 
 It deliberately does NOT pin each shape's class: a shape moving from `PASS-REFUSED` to `PASS` is a
 compiler improvement, not a regression.
@@ -369,7 +369,7 @@ Shape 6 is judged `accepted` (pack.js `nav.judge`): its floor is "a chunk that n
 
 `g-structural-element-if-chain-and-show-composition-nominal`, `g-if-on-structural-element-silently-ignored`.
 
-## Measured (S470 s470-unit-variant-tag-read — r16: s19 / f22 / l14 / t14; 118 shapes)
+## Measured (S470 s470-unit-variant-tag-read — r16: s19 / f22 / l14 / t14; 165 shapes)
 
 `r16-shapes.js`: a `.variant` read off a UNIT enum variant value. A unit variant is emitted as its bare
 tag string (§51.3.2), a payload variant as `{ variant, data }`, so the plain JS `x.variant` read
@@ -395,4 +395,17 @@ A `.variant` VALUE read is lowered to the variant tag read (`typeof x === "strin
 structured emitter never sees, by the last pass of both string pipelines (`rewrite.ts
 rewriteVariantTagReads`); a place (`x.variant = …`, `++`, `delete`, a method call) keeps the plain
 member. The UNJUDGED shape is `l14/10 imported function` (`g-library-tool-cross-file-import-source-path-s469`).
+
+Fix round 1 (review of `be176f6ff`, +47): F1 an `<each>` row (emit-each lowers rows as text, outside
+both pipelines), F2 a destructured `variant` key (top level / renamed / `let` default / nested, and in a
+`when` body), F3 a literal key `x["variant"]` / `x?.["variant"]`, F6 a qualified `x is AuthErr.Denied`
+(the parser folds it into one dotted name; it compared the constructor), and regressions F4 (a swap
+through an assignment pattern was refused) / F5 (a library multi-line template literal's text was
+rewritten).
+
+| tree | FAIL (of the 47) |
+|---|---|
+| base `accdd5f2` | every F1 / F2 / F3 shape; F6 on every side but the text-lowered arms |
+| `be176f6ff` | 32 (+ 4 PASS-REFUSED: F4) |
+| after | 0 |
 

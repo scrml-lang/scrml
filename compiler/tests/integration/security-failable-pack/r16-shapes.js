@@ -60,6 +60,28 @@ function cases(srv, side) {
     ["VALID struct-like string variant field", D(), `let g = false\n        if (mkG(p) is .Gone) { g = true }\n        const s = { variant: g ? "Gone" : "Ok" }\n        ${G(`s.variant == "Gone"`)}`],
     ["VALID struct-like number variant field", D(), `let g = false\n        if (mkG(p) is .Gone) { g = true }\n        const s = { variant: g ? 1 : 2 }\n        ${G(`s.variant == 1`)}`],
     ["VALID variant field written then read", D(), `const s = { variant: "Ok" }\n        if (mkG(p) is .Gone) { s.variant = "Gone" }\n        ${G(`s.variant == "Gone"`)}`],
+    // fix round 1 (review of be176f6ff) — F2: a destructured `variant` key
+    ["15 F2 destructure variant", D(), `const { variant } = mkG(p)\n        ${G(`variant == "Gone"`)}`],
+    ["15 F2 destructure renamed", D(), `const { variant: tag } = mkG(p)\n        ${G(`tag == "Gone"`)}`],
+    ["15 F2 destructure let with default", D(), `let { variant = "none" } = mkG(p)\n        ${G(`variant == "Gone"`)}`],
+    ["15 F2 destructure nested", D(), `const { e: { variant } } = { e: mkG(p) }\n        ${G(`variant == "Gone"`)}`],
+    // F3: a literal-key read
+    ["16 F3 literal key", D(), `const x = mkG(p)\n        ${G(`x["variant"] == "Gone"`)}`],
+    ["16 F3 optional literal key", D(), `const x = mkG(p)\n        ${G(`x?.["variant"] == "Gone"`)}`],
+    // F6: a qualified `is` (the parser folds `AuthErr.Denied` into one name; it compared the constructor)
+    ["17 F6 qualified is, payload", D(`${srv}function mkD(p) -> AuthErr {
+        if (p != "secret") return AuthErr::Denied("bad")
+        return AuthErr::Gone
+    }`), `const x = mkD(p)\n        ${G(`x is AuthErr.Denied`)}`],
+    ["17 F6 qualified is in a match arm, payload", D(`${srv}function mkD(p) -> AuthErr {
+        if (p != "secret") return AuthErr::Denied("bad")
+        return AuthErr::Gone
+    }`), `const x = mkD(p)\n        const q: string = p\n        return match q { "zz" :> "z", else :> x is AuthErr.Denied ? "rejected" : "LOGGED IN" }`],
+    // regressions of be176f6ff (F4 / F5): must keep compiling and keep their value
+    ["VALID F4 swap through an assignment pattern", D(), `const s = { variant: "a", k: "b" }\n        ;[s.variant, s.k] = [s.k, s.variant]\n        if (s.variant != "b") { return "LOGGED IN" }\n        ${G(`mkG(p) is .Gone`)}`],
+    ["VALID F5 multi-line template keeps .variant text", D(`${side === "library" ? "export " : ""}const DOC = \`line one
+  read x.variant here
+end\``), `if (!DOC.includes("x.variant")) { return "LOGGED IN" }\n        ${G(`mkG(p) is .Gone`)}`],
   ];
   // a reactive cell holding a unit variant (a client function body: fullstack only)
   if (side === "fullstack") out.push(["11 cell holding a unit variant", D(), `@st = mkG(p)\n        ${G(`@st.variant == "Gone"`)}`, undefined, undefined, `<st> = "init"`]);
@@ -131,8 +153,9 @@ function fullstackPages() {
         return AuthErr::Gone
     }`;
   const R = `"rejected" : "LOGGED IN"`;
-  const pg = (logic, out, btn = (p) => `go("${p}")`) => `<msg> = "init"
+  const pg = (logic, out, btn = (p) => `go("${p}")`, cells = "") => `<msg> = "init"
 <st> = "init"
+${cells}
 \${
     ${DECL}
     ${logic}
@@ -142,6 +165,9 @@ function fullstackPages() {
 <p id="out">${out}</p>
 `;
   const GO = `function go(p) { @st = mkG(p) }`;
+  const XS = `function go(p) { @xs = [{ id: 1, e: mkG(p) }] }`;
+  const XC = `<xs> = []`;
+  const D1 = undefined;
   return [
     ["12 markup interpolation", pg(GO, `\${@st.variant == "Gone" ? ${R}}`)],
     ["12 derived cell", pg(`${GO}\n    const <d> = @st.variant == "Gone" ? ${R}`, `\${@d}`)],
@@ -153,6 +179,14 @@ function fullstackPages() {
     ["13 match arm value", pg(`function go(p) { const x = mkG(p)\n @msg = match p { "zz" :> "z", else :> x.variant == "Gone" ? ${R} } }`, `\${@msg}`)],
     ["13 cell read in a function", pg(`function go(p) { @st = mkG(p)\n @msg = @st.variant == "Gone" ? ${R} }`, `\${@msg}`)],
     ["13 tape map callback", pg(`function go(p) { @msg = [mkG(p)].map((v) => v.variant)[0] == "Gone" ? ${R} }`, `\${@msg}`)],
+    // fix round 1 — F1: an `<each>` row (rows lowered as text by emit-each), and F2 in a `when` body
+    ["18 F1 each row r.e.variant", pg(XS, `<each in=@xs key=@.id as r>\${r.e.variant == "Gone" ? ${R}}</each>`, D1, XC)],
+    ["18 F1 each row @.e.variant", pg(XS, `<each in=@xs key=@.id><span>\${@.e.variant == "Gone" ? ${R}}</span></each>`, D1, XC)],
+    ["18 F1 each row if=", pg(XS, `<each in=@xs key=@.id as r><span if=\${r.e.variant != "Gone"}>LOGGED IN</span></each>`, D1, XC)],
+    ["18 F1 each row of unit values", pg(`function go(p) { @xs = [mkG(p)] }`, `<each in=@xs as r><span>\${r.variant == "Gone" ? ${R}}</span></each>`, D1, XC)],
+    ["18 F1 each row template literal", pg(XS, "<each in=@xs key=@.id as r><span>${`${r.e.variant}` == \"Gone\" ? " + R + "}</span></each>", D1, XC)],
+    ["19 F2 when body destructure", pg(`${GO}\n    when @st changes { const { variant } = @st\n @msg = variant == "Gone" ? ${R} }`, `\${@msg}`)],
+    ["19 F3 when body literal key", pg(`${GO}\n    when @st changes { @msg = @st["variant"] == "Gone" ? ${R} }`, `\${@msg}`)],
     ["VALID function expression is .Denied (payload)", pg(`function go(p) { const f = function(v) { return v is .Denied }\n @msg = f(mkD(p)) ? ${R} }`, `\${@msg}`)],
     ["VALID block arrow is .Gone (unit)", pg(`function go(p) { const f = (v) => { return v is .Gone }\n @msg = f(mkG(p)) ? ${R} }`, `\${@msg}`)],
     ["VALID markup is .Gone", pg(GO, `\${@st is .Gone ? ${R}}`)],

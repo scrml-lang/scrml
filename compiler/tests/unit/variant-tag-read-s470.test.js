@@ -83,6 +83,17 @@ describe("rewriteVariantTagReads — the string-path twin", () => {
     expect(rewriteVariantTagReads(`x.variant in o`)).toBe(`(typeof x === "string" ? x : x.variant) in o`);
   });
 
+  test("review F2 (text) — a declaration destructuring `variant` reads it off the tag-read source", () => {
+    const src = `((__scrml_is_v) => typeof __scrml_is_v === "string" ? { variant: __scrml_is_v } : __scrml_is_v)`;
+    expect(rewriteVariantTagReads(`const {variant} = _scrml_reactive_get("st"); x`)).toBe(
+      `const {variant} = ${src}(_scrml_reactive_get("st")); x`,
+    );
+    expect(rewriteVariantTagReads(`let { variant: t, k } = f(a, b)\ny`)).toBe(`let { variant: t, k } = ${src}(f(a, b))\ny`);
+    const once = rewriteVariantTagReads(`const { variant } = v;`);
+    expect(rewriteVariantTagReads(once)).toBe(once);
+    expect(rewriteVariantTagReads(`const o = { variant: 1 };`)).toBe(`const o = { variant: 1 };`);
+  });
+
   test("review F7 — `new X().variant` reads off the whole `new X()`", () => {
     expect(rewriteVariantTagReads(`new X().variant`)).toBe(lowerVariantTagRead("new X()", false, false));
   });
