@@ -127,3 +127,19 @@
   2 UNJUDGED (library G9 / G10, harness, same on the reviewer's run). unit+integration+conformance --bail
   40516 pass / 0 fail / 125 skip / 18 todo; types:check OK (181, unchanged); R26 913 files 43d162d52 vs
   branch: diagnostic codes IDENTICAL (0 newly-rejected; 43d162d52 was itself identical to main). DONE.
+
+## CI jobs the hook does not run (on c26134ff4, commands as in .github/workflows/ci.yml) — all GREEN
+- integration + lsp + commands (after `bun run pretest`): 9925 pass / 0 fail / 77 skip / 5 todo
+- root conformance `bun test compiler/tests/*.test.js`: 2239 tests, 0 fail
+- snippet-gate: 113 pass / 0 fail / 16 spec-ahead · claim-gate: 18 pass / 0 fail
+- corpus-compile-floor --check: PASS · gen-md-shim --check: current · conflict-marker-gate: PASS
+- regen-spec-index --check: OK · delta-lint: PASS · s34-census --check-new --base 915b6775f: PASS
+- gen-bootstrap-severity --check: current · bootstrap-conformance --check: not required (no conformance/cases
+  or self-host-v2 change)
+- slices: lint-no-default-arm OK; slice-m1 / m2 / m1 lowered / m3 / m4 / codec all 0 fail
+- e2e-render-map: 259 tests, 0 fail
+- host-global-scan --check 1/2 and 2/2: exit 0, 0 violations (2 / 135 compiles threw — same counts as the
+  S469 CI logs, pre-existing)
+- browser: TodoMVC gauntlet compile + `node --check` OK; browser-baseline --check PASS (8 asserted)
+- NOT RUN: `ci-shards.ts needs .github/workflows/ci.yml` — the worktree sandbox refuses the command (the
+  `.github` path); this branch does not touch ci.yml.

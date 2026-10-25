@@ -1701,7 +1701,7 @@ function auditTreeNamesIdent(x: unknown, name: string, filePath: string, seen: W
   seen.add(x as object);
   if (Array.isArray(x)) return x.some((y) => auditTreeNamesIdent(y, name, filePath, seen));
   const r = x as Record<string, unknown>;
-  if (r.kind === "ident" && r.name === name) return true;
+  if ((r.kind === "ident" || r.kind === "shorthand") && r.name === name) return true;
   if (r.kind === "escape-hatch" && typeof r.bodyRaw === "string") {
     const { result, warnings } = captureTrailingContentWarnings(() => escapeHatchBodyStatements(r, filePath));
     if (!result || warnings.length > 0) return true;
@@ -2221,11 +2221,12 @@ function auditBinderCallArgs(callee: unknown, idx: number[], ctx: WholeBinderAud
       // S470 fix round 2 — `arguments` reads the error without naming the parameter
       // (`arguments[0].reason`, `const [a] = arguments`, `g(...arguments)`): refused anywhere in
       // the callee's body or parameter defaults, read from the tree (a function body kept as text
-      // is read with the check-time reader; an unreadable one is refused), with the use count over
-      // the body text as the same fail-closed backstop the audit's coverage check uses.
+      // is read with the check-time reader; an unreadable one is refused).
       const defaultRoots = (params as Array<{ defaultValue?: unknown }>).map((q) => (q && typeof q.defaultValue === "string" ? auditParseBody(q.defaultValue, ctx.filePath) : null));
-      if (auditTreeNamesIdent([fn.body, defaultRoots], "arguments", ctx.filePath) || countWordUses(bodyText, "arguments") > 0
-          || (params as Array<{ defaultValue?: unknown }>).some((q) => q && typeof q.defaultValue === "string" && countWordUses(q.defaultValue, "arguments") > 0)) {
+      // (S470 round 3: from the tree — an identifier reference, never a property key or member
+      // name; the raw use count only for a default that does not parse.)
+      if (auditTreeNamesIdent([fn.body, defaultRoots], "arguments", ctx.filePath)
+          || (params as Array<{ defaultValue?: unknown }>).some((q, i) => q && typeof q.defaultValue === "string" && defaultRoots[i] === null && countWordUses(q.defaultValue, "arguments") > 0)) {
         return { code: "E-TYPE-031", what: `in \`${c.name}\`, \`arguments\` reads the error without naming the parameter, which the compiler does not follow` };
       }
       const n = countWordUses(bodyText, prm.name);
@@ -11547,6 +11548,20 @@ function annotateNodes(
   // resolver the failable-call checks use): exactly one function declaration, or null.
   const wholeBinderResolveFn = (name: string, from: Scope): { decl: ASTNodeLike; scope: Scope } | null => {
     const r = resolveFnBinding(name, from, true);
+    if (r.k === "unknown") {
+      // S470 round 3 — the nearest binding of the name is a FUNCTION binding in a scope that
+      // registers no declarations (a markup / `<program>` scope): it is the file's one function
+      // declaration of that name, or not provable.
+      for (let s: Scope | null = from; s !== null; s = s.parent) {
+        if (!s.hasOwn(name)) continue;
+        const entry = s.bindings.get(name);
+        if (!entry || entry.kind !== "function") return null;
+        const ds = allFnDecls.filter((d) => d.name === name);
+        if (ds.length !== 1 || wholeBinderTopLevelDeclCount(name) > 1) return null;
+        return { decl: ds[0], scope: fnDeclScope.get(ds[0]) ?? s };
+      }
+      return null;
+    }
     if (r.k !== "decl" || r.decls.length !== 1) return null;
     const d = r.decls[0];
     if (!d || d.kind !== "function-decl") return null;
@@ -11575,19 +11590,49 @@ function annotateNodes(
    * declaration trees between the `!{}` and the current scope (S470 fix round 1: a function
    * written as a value).
    */
+  /**
+   * S470 fix round 3 — the handled call's error enum, from the callee resolved BY BINDING at the
+   * `!{}`: a name local frames declare, or one the scope binds to anything but exactly one
+   * function declaration, has no known enum (every use of the binder is then refused). Before, the
+   * enum was looked up by NAME, so `const w = wrapBig` beside a file-level `function w()! -> E`
+   * audited the arms against `E`.
+   */
+  function wholeBinderCalleeEnum(name: string | null, scope: Scope, frames: unknown[]): EnumType | null {
+    if (!name) return null;
+    if (frames.some((f) => auditDeclaresName(f, name))) return null;
+    // The SAME by-binding resolution the callee audit uses (wholeBinderResolveFn).
+    const res = wholeBinderResolveFn(name, scope);
+    if (res) {
+      const errName = typeof res.decl.errorType === "string" ? res.decl.errorType.trim() : "";
+      return errName ? resolveErrorEnumThroughAliases(errName, typeRegistry, _fileTypeDeclsForErrors) : null;
+    }
+    // Nothing in this file binds the name: an IMPORTED failable function.
+    const r = resolveFnBinding(name, scope, true);
+    if (r.k === "unknown" && importedFnErrorEnums.has(name) && wholeBinderTopLevelDeclCount(name) === 1 && !allFnDecls.some((d) => d.name === name)) {
+      return importedFnErrorEnums.get(name) ?? null;
+    }
+    return null;
+  }
   function auditWholeBinderArms(arms: unknown, en: EnumType | null, scope: Scope, frames: unknown[], fallbackSpan: Span): void {
     if (!Array.isArray(arms)) return;
+    const report = (e: TSError): void => {
+      const key = `${e.code}|${(e.span as Span | undefined)?.start ?? ""}|${(e.span as Span | undefined)?.file ?? ""}|${e.message}`;
+      if (_wholeBinderReported.has(key)) return;
+      _wholeBinderReported.add(key);
+      errors.push(e);
+    };
     for (const arm of arms as Array<{ pattern?: string; binding?: string; handler?: string; span?: Span }>) {
       if (!arm || typeof arm !== "object") continue;
       // S470 fix round 2 — FAIL CLOSED: an arm body is lowered inside a function that receives the
       // error, so `arguments` there reads the whole error in ANY arm (`_ :>` with no binder
-      // included) without naming a binder. Refused, read from the arm's tree (with the use count
-      // over its text as the backstop).
+      // included) without naming a binder. Refused, read from the arm's tree (S470 round 3: an
+      // identifier reference — not a property key or member name; the use count over the text
+      // only when the text does not parse).
       const armText = String(arm.handler ?? "");
       if (armText.trim() !== "") {
         const roots = auditParseBody(armText.trim(), filePath);
-        if (countWordUses(armText, "arguments") > 0 || (roots !== null && auditTreeNamesIdent(roots, "arguments", filePath))) {
-          errors.push(new TSError("E-TYPE-031",
+        if (roots === null ? countWordUses(armText, "arguments") > 0 : auditTreeNamesIdent(roots, "arguments", filePath)) {
+          report(new TSError("E-TYPE-031",
             `E-TYPE-031: \`arguments\` in a \`!{}\` handler arm reads the error value without a binder, which the compiler cannot check (an impl#1 limitation, not a language rule). Bind it in the arm (\`_ err :>\`, \`.Variant(x) :>\`) instead (§18.6.1).`,
             (arm.span ?? fallbackSpan) as Span));
           continue;
@@ -11600,7 +11645,7 @@ function annotateNodes(
       if (!body) continue;
       const armSpan = ((arm.span ?? fallbackSpan) as Span);
       const why = auditWholeErrorBinderText(body, binder, { ...wholeBinderAuditCtx(en), scope, frames });
-      if (why) errors.push(wholeBinderRefusalError(why, binder, en, armSpan));
+      if (why) report(wholeBinderRefusalError(why, binder, en, armSpan));
     }
   }
   // S470 fix round 2 — the scope each node the statement walk visits runs in (visitNode records
@@ -11608,7 +11653,16 @@ function annotateNodes(
   // whole-error binder audit runs after the walk (`_checkExpressionPositionHandlers`), keyed on
   // the `!{}` node itself wherever it sits, and reads these.
   const _wholeBinderNodeScope = new WeakMap<object, Scope>();
-  const _wholeBinderGuardEnum = new WeakMap<object, EnumType | null>();
+  // S470 fix round 3 — every node the statement walk visited, in order: the post-walk also walks
+  // the ones it cannot reach from the file's tree (bodies the checker parsed from TEXT and visited —
+  // an engine opener `effect=`, a state-child `effect=`, an `<onTransition>` body, a guard, …).
+  const _wholeBinderVisited: object[] = [];
+  // S470 fix round 3 — owners whose raw body text the checker parsed and visited (engine bodies,
+  // via `readEngineBody`): their text fields are covered by the visited statements above.
+  const _wholeBinderParsedOwners = new WeakSet<object>();
+  // S470 fix round 3 — refusals already reported (one `!{}` can be reached twice: as a tree and
+  // as the text it was parsed from).
+  const _wholeBinderReported = new Set<string>();
   const wholeBinderRefusalError = (why: WholeBinderRefusal, binder: string, en: EnumType | null, span: Span): TSError => {
     const ty = en ? `\`${en.name}\`` : "the handled call's error enum";
     const allowed = `As a whole error it may only be \`match\`ed (\`match ${binder} { .Variant(x) :> … }\`), tested with \`is\` (\`${binder} is .Variant\`), ` +
@@ -12252,7 +12306,7 @@ function annotateNodes(
     let resolvedType: ResolvedType;
     // S470 fix round 2 — the scope each visited node runs in, for the whole-error binder audit
     // (the post-walk `_checkExpressionPositionHandlers` resolves names from it).
-    if (!_wholeBinderNodeScope.has(n)) _wholeBinderNodeScope.set(n, scopeChain.current);
+    if (!_wholeBinderNodeScope.has(n)) { _wholeBinderNodeScope.set(n, scopeChain.current); _wholeBinderVisited.push(n); }
 
     // S462 review M1 — a `match` in expression position whose FIRST arm is a
     // `given` arm was re-read by the statement parser (ast-builder
@@ -15244,8 +15298,6 @@ function annotateNodes(
         // to bind its payload (`.Denied(reason) :>`), or `match e { … }` on it. Before, impl#1 bound
         // the `.data` payload, so those reads "worked" against one payload shape and silently read
         // `undefined` against another (a keyed producer in another file) — a denied input logged in.
-        // S470 fix round 2 — recorded for the ONE audit (`_checkExpressionPositionHandlers`).
-        _wholeBinderGuardEnum.set(n, _errEnum);
 
         // S452 r3 — a type-qualified arm (`T.V :>` / `T::V :>`, recorded by
         // parseErrorTokens as `arm.typeQualifier`) must name the handled error
@@ -18752,6 +18804,7 @@ function annotateNodes(
     };
     // A STATEMENT body: read, refuse when unreadable, walk.
     const statementBody = (owner: object, slot: string, src: string, file: string, what: string, span: Span, bindings: string[]): void => {
+      _wholeBinderParsedOwners.add(owner); // S470 round 3 — its visited statements carry the audit
       const before = errors.length;
       statementBodyCheck(owner, slot, src, file, what, span, bindings);
       if (errors.length > before) markOwnerReported(owner); // L1 — codegen does not report it again
@@ -18783,6 +18836,7 @@ function annotateNodes(
     // An EXPRESSION slot lowered from its text by `rewriteExpr`: one expression statement, no
     // failable `match` (rewriteExpr would compare the error object as a plain value).
     const expressionSlot = (owner: object, slot: string, src: string, what: string, span: Span, bindings: string[]): void => {
+      _wholeBinderParsedOwners.add(owner); // S470 round 3 — its visited statements carry the audit
       const before = errors.length;
       expressionSlotCheck(owner, slot, src, what, span, bindings);
       if (errors.length > before) markOwnerReported(owner); // L1 — codegen does not report it again
@@ -19704,6 +19758,59 @@ function annotateNodes(
   function _checkExpressionPositionHandlers(roots: unknown[]): void {
     const seen = new WeakSet<object>();
     /**
+     * S470 round 3 — is a string field holding `!{` text that some reader already covers? (The
+     * coverage list, progress.md "raw-text code fields".) Prose and literals: `value` (string
+     * literals, markup text, comments). Fields with a parsed TREE twin the walk reaches: `expr` /
+     * `exprNode`, `init` / `initExpr`, `condition` / `condExpr`, `header` / `headerExpr`, `result` /
+     * `resultExpr`, any `x` beside `xExpr`. Whole-declaration source copies whose structure the walk
+     * reaches: `raw` on `function-decl`, `export-decl`, `component-def`, a template / string `lit`, an
+     * `escape-hatch` (its body is read above), an attribute `expr` with its `exprNode`; `armsRaw` on a
+     * markup `match-block` (its arms are `bodyChildren` / `armBodyChildren`). Read by this walk:
+     * `handler` (arms), `defaultValue` (parameters), `bodyRaw` (escape hatch). Engine bodies the
+     * statement walk parsed and visited (`readEngineBody` owners: their statements are walked below)
+     * and the engine's text slots `refuseFailableInTextSlot` refuses for any failable call
+     * (`derivedExprText`, `inlineMatchBody`, `ifRaw`) and its source copy `rulesRaw`.
+     */
+    const wholeBinderTextFieldCovered = (o: Record<string, unknown>, k: string): boolean => {
+      if (k === "value" || k === "handler" || k === "defaultValue") return true;
+      if (_wholeBinderParsedOwners.has(o)) return true;
+      // An engine node carries copies of its bodies (`openerEffect`, …) beside its metadata, the
+      // owner `readEngineBody` parsed them from.
+      const rec = o._record as { engineMeta?: unknown } | undefined;
+      if (o.kind === "engine-decl" && rec && rec.engineMeta && typeof rec.engineMeta === "object" && _wholeBinderParsedOwners.has(rec.engineMeta as object)) return true;
+      // A text field with its parsed TREE twin (ast-builder naming: `xExpr` / `xNode`, or below).
+      const TWIN: Record<string, string> = { expr: "exprNode", condition: "condExpr", cond: "condExpr", iterable: "iterExpr", if: "ifExpr",
+        for: "forExpr", args: "argsExpr", update: "updateExpr", header: "headerExpr", result: "resultExpr", init: "initExpr" };
+      for (const t of [`${k}Expr`, `${k}Node`, TWIN[k]]) if (t && o[t] && typeof o[t] === "object") return true;
+      if (k === "raw" && (o.kind === "function-decl" || o.kind === "export-decl" || o.kind === "component-def" || o.kind === "escape-hatch"
+          || (o.kind === "lit" && o.litType !== "template")
+          || (o.kind === "expr" && o.exprNode && typeof o.exprNode === "object"))) return true;
+      if (k === "bodyRaw" && o.kind === "escape-hatch") return true;
+      if (k === "armsRaw" && o.kind === "match-block") return true;
+      if (k === "rulesRaw" || k === "derivedExprText" || k === "inlineMatchBody" || k === "ifRaw") return true;
+      // `arm.nestedHandlers[i].raw` (ast-builder `_nestedHandlersIn`, a kind-less lint copy): the
+      // `!{}` text nested in an arm body — the arm body itself is read (and that `!{}` audited)
+      // above, or refused when it cannot be read.
+      if (k === "raw" && o.kind === undefined && Array.isArray(o.arms) && typeof o.raw === "string" && o.raw.startsWith("!{")) return true;
+      return false;
+    };
+    // S470 round 3 — code held as TEXT that this walk cannot read, holding a `!{`: refused.
+    const refuseUnreadText = (what: string, span: Span): void => {
+      const key = `unread|${span.file ?? ""}|${span.start}|${what}`;
+      if (_wholeBinderReported.has(key)) return;
+      _wholeBinderReported.add(key);
+      errors.push(new TSError("E-TYPE-031",
+        `E-TYPE-031: ${what} holds a \`!{ … }\` handler the compiler cannot read, so a whole-error binder in it (\`_ e :>\`, §18.6.1) cannot be checked (an impl#1 limitation, not a language rule).`, span));
+    };
+    // S470 round 3 — code held as TEXT: parsed the way the arm readers parse a body (a block or
+    // one expression, auditParseBody) and walked (audit only); unreadable with a `!{` → refused.
+    const codeText = (text: string, span: Span, scope: Scope, frames: unknown[], what: string): void => {
+      if (text.trim() === "") return;
+      const roots2 = auditParseBody(text, filePath);
+      if (roots2 === null) { if (text.includes("!{")) refuseUnreadText(what, span); return; }
+      walk(roots2, span, scope, [roots2, ...frames], true);
+    };
+    /**
      * `scope` — the scope the nearest statement the statement walk visited runs in;
      * `frames` — the declaration trees of the functions written as values between that statement
      * and here (their parameters and bodies); `inText` — inside a function body this walk read
@@ -19730,25 +19837,69 @@ function annotateNodes(
         const calleeOf = (ex: { kind?: string; callee?: { kind?: string; name?: string } } | undefined): string | null =>
           ex && ex.kind === "call" && ex.callee && ex.callee.kind === "ident" && typeof ex.callee.name === "string" ? ex.callee.name : null;
         let arms: unknown[] | null;
-        let en: EnumType | null;
+        let callee: string | null;
         if (wbRaw === null) {
           arms = Array.isArray(o.arms) ? o.arms as unknown[] : [];
-          // The enum the statement walk resolved for it; else (a `!{}` in a body read from text)
-          // the callee's, by the one resolver. Unresolvable: every use of the binder is refused.
           const g = o.guardedNode as Record<string, unknown> | undefined;
-          const callee = g ? calleeOf((g.exprNode ?? g.initExpr) as never) : null;
-          en = _wholeBinderGuardEnum.has(o) ? (_wholeBinderGuardEnum.get(o) ?? null) : (callee ? failableCalleeErrorEnum(callee) : null);
+          callee = g ? calleeOf((g.exprNode ?? g.initExpr) as never) : null;
         } else {
           try { arms = (parseGuardArmsFromRaw(wbRaw, filePath) as unknown[] | null) ?? null; } catch { arms = null; }
-          const callee = calleeOf((o.callee as Record<string, unknown>).object as never);
-          en = callee ? failableCalleeErrorEnum(callee) : null;
+          callee = calleeOf((o.callee as Record<string, unknown>).object as never);
         }
+        // S470 round 3 — the enum of the callee the call names BY BINDING (unresolvable: unknown,
+        // and every use of the binder is refused).
+        const en = wholeBinderCalleeEnum(callee, scope, frames);
         if (arms === null) {
           // FAIL CLOSED: arms the reader cannot read may hold a whole-error binder.
-          errors.push(new TSError("E-TYPE-031", `E-TYPE-031: the arms of this \`!{ … }\` handler could not be read, so a whole-error binder in them (\`_ e :>\`, §18.6.1) cannot be checked.`, hereSpan));
+          refuseUnreadText("the arms of this `!{ … }` handler", hereSpan);
         } else {
           auditWholeBinderArms(arms, en, scope, frames, hereSpan);
+          // S470 round 3 — an arm's handler is code held as TEXT: read it with the arm readers'
+          // parse and walk it (a `!{}` nested in it is audited the same way), under the arm's
+          // binders. Text that does not parse and holds a `!{` is refused.
+          // The arm body is read the way the failable-call walk reads it (failable-value-calls.ts
+          // `guardArms`): a braced body as a statement list (`parseStatementTextDetailed`), else
+          // its `handlerExpr` tree, else the text as one expression / statements.
+          for (const arm of arms as Array<{ handler?: unknown; binding?: unknown; handlerExpr?: unknown }>) {
+            if (!arm || typeof arm !== "object" || typeof arm.handler !== "string") continue;
+            const binds = typeof arm.binding === "string" ? arm.binding.split(",").map((s) => s.trim()).filter((s) => /^[A-Za-z_$][\w$]*$/.test(s)) : [];
+            const armFrames = [{ kind: "__audit-arm-binders", boundNames: binds }, ...frames];
+            const ht = arm.handler.trim();
+            if (ht === "") continue;
+            const braced = ht.startsWith("{") && ht.endsWith("}") && ht.slice(1, -1).trim() !== "";
+            if (braced) {
+              const r = parseStatementTextDetailed(ht, filePath, {});
+              if (r.ok) { walk(r.stmts as unknown[], hereSpan, scope, [r.stmts, ...armFrames], true); continue; }
+            }
+            const he = arm.handlerExpr as { kind?: string; nativeKind?: string } | undefined;
+            if (he && typeof he === "object" && !(he.kind === "escape-hatch" && he.nativeKind === "ParseError")) {
+              walk(he, hereSpan, scope, [he, ...armFrames], true);
+              // A braced body that did not parse: `handlerExpr` reads only its first statement.
+              if (braced && ht.includes("!{")) refuseUnreadText("a `!{}` handler arm", hereSpan);
+              continue;
+            }
+            codeText(ht, hereSpan, scope, armFrames, "a `!{}` handler arm");
+          }
         }
+      }
+      // S470 round 3 — every other field holding code as TEXT that holds a `!{`: read it if it is
+      // a known body (an attribute expression kept without its tree), refuse it if it is not one
+      // this walk or the statement walk reads (fail closed). See progress.md for the field list.
+      // A template literal's `${…}` interpolations are code held as text: read with the one
+      // template reader and walked (audit only).
+      if (o.kind === "lit" && o.litType === "template" && typeof o.raw === "string" && o.raw.includes("!{")) {
+        let parts: unknown[] | null = null;
+        try { parts = templateInterpolationNodesAll(o as unknown as Parameters<typeof templateInterpolationNodesAll>[0]) as unknown[]; } catch { parts = null; }
+        if (parts === null) refuseUnreadText("a template literal's interpolation", hereSpan);
+        else walk(parts, here, scope, frames, true);
+      }
+      for (const k of Object.keys(o)) {
+        const sv = o[k];
+        if (typeof sv !== "string" || !sv.includes("!{")) continue;
+        if (o.kind === "lit" && o.litType === "template" && k === "raw") continue; // read just above
+        if (wholeBinderTextFieldCovered(o, k)) continue;
+        if (o.kind === "expr" && k === "raw" && !o.exprNode) { codeText(sv, hereSpan, scope, frames, "an expression held as text"); continue; }
+        refuseUnreadText(`code held as text (\`${String(o.kind ?? "node")}.${k}\`)`, hereSpan);
       }
       // A parameter default the parser kept as TEXT (`function apply(f = () => risky() !{ … })`):
       // read with the expression parser and walked under the function's parameters (only the
@@ -19760,7 +19911,7 @@ function annotateNodes(
           let dn: unknown = null;
           try { dn = parseExprToNode(dv, filePath, 0); } catch { dn = null; }
           if (!dn) {
-            errors.push(new TSError("E-TYPE-031", `E-TYPE-031: the parameter default \`${dv.trim().slice(0, 40)}\` could not be read, so a \`!{}\` handler in it cannot be checked.`, hereSpan));
+            if (dv.includes("!{")) refuseUnreadText(`the parameter default \`${dv.trim().slice(0, 40)}\``, hereSpan);
             continue;
           }
           walk(dn, here, scope, [o.params, ...frames], true);
@@ -19777,6 +19928,7 @@ function annotateNodes(
       if (o.kind === "escape-hatch" && typeof o.bodyRaw === "string") {
         const { result, warnings } = captureTrailingContentWarnings(() => escapeHatchBodyStatements(o, filePath));
         if (result && warnings.length === 0) walk(result, here, scope, [result, o.params, ...frames], true);
+        else if (o.bodyRaw.includes("!{")) refuseUnreadText("the body of this function written as a value", hereSpan);
         return;
       }
       if (inText) {
@@ -19839,6 +19991,10 @@ function annotateNodes(
       }
     };
     walk(roots, null);
+    // S470 round 3 — the nodes the statement walk visited that the file's tree does not reach
+    // (bodies it parsed from text: engine `effect=` / `<onTransition>` / guards, …): walked for the
+    // audit only (`seen` skips every node already walked above).
+    for (const n of _wholeBinderVisited) walk(n, null, _wholeBinderNodeScope.get(n) ?? scopeChain.global, [], true);
   }
 }
 
