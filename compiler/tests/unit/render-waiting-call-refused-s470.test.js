@@ -84,7 +84,10 @@ const REFUSED = {
 const ACCEPTED = {
   "handler calling a server function": `<button onclick=\${() => { @pw = isOk("x") ? "a" : "b" }}>x</button>`,
   "function body": `\${ function go() { const v = allowed(@pw); @pw = v ? "a" : "b" } }\n<button onclick=go()>g</button>`,
-  "<request> body": `<request id="r1" deps=[]>\${ @pw = isOk("x") ? "a" : "b" }</>`,
+  // s470-action-body-await — a <request> body is an action body impl#1 runs synchronously: only
+  // the whole cell write of one call (awaited by the settle machine) is accepted; the ternary
+  // form this entry used to hold is refused (action-body-await-s470.test.js).
+  "<request> body": `<request id="r1" deps=[]>\${ @pw = isOk("x") }</>`,
   "on mount": `\${ on mount { allowed("a") } }`,
   "when … changes": `\${ when @pw changes { allowed(@pw) } }`,
   "a sync helper in if=": `<p><span if=\${plain(@pw)}>IN</span></p>`,
@@ -185,7 +188,8 @@ ${body}
 
   for (const [name, view] of Object.entries({
     "#5: a runtime ^{ } meta block (bare call)": `^{ isOk("x") }\n<p>x</p>`,
-    "#5: a runtime ^{ } meta block (declaration)": `^{ const r = isOk("x") }\n<p>x</p>`,
+    // (`^{ const r = isOk("x") }` — a declaration's initializer holding a pending Promise — is
+    // refused since s470-action-body-await: action-body-await-s470.test.js.)
   })) {
     test(`not this code (effect): ${name}`, () => {
       expect(compile(page(view)).messages).toEqual([]);

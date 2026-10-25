@@ -83,6 +83,7 @@ import { setFileSchedulerBindings } from "./async-combinators.ts";
 import { schedulerNamesNotProvablyGlobal } from "./js-async-analysis.ts";
 import { computeFileAsyncFnNames, serverFnNamesOfFile, setFileAsyncFnNames, adoptFileAsyncSet, waitingBindingsOfFile, namespaceImportLocalsOf, waitingFnPredicateOfFile, serverPlacedFnNamesAnywhere } from "./file-async-fns.ts";
 import { renderWaitingCallsOf } from "./render-waiting-calls.ts";
+import { collectEngineVarNames } from "./emit-engine.ts";
 import { isToolProgram, isLibraryShapedFile } from "../tool-program.ts";
 import { forEachProgramWithRole, findTopLevelProgram, findTopLevelPrograms, programRoleOptionsOf, NESTED_SESSION_ATTRS, nestedProgramAttrVerdict } from "../program-role.ts";
 import { getElementAttrSchema } from "../attribute-registry.js";
@@ -2804,28 +2805,45 @@ export function runCG(input: CgInput): CgOutput {
       // `computeClientAsyncSets` over `collectFunctions`, which reaches if=/else chain branches):
       // a client helper the emitter emits `async` (it calls a server function) is a waiting call
       // here too, wherever it is declared. The same inputs the emitter passes it.
+      const _rwFnNodes = ((analysis as { fnNodes?: unknown[] } | undefined)?.fnNodes ?? collectFunctions(fileAST as never)) as unknown[];
       const _rwClientAsync = computeClientAsyncSets(
         { filePath, fileAST, routeMap: safeRouteMap } as unknown as CompileContext,
-        ((analysis as { fnNodes?: unknown[] } | undefined)?.fnNodes ?? collectFunctions(fileAST as never)) as never,
+        _rwFnNodes as never,
         buildCalleeImportMap(fileAST as never),
         exportRegistryInput ?? null,
       ).clientAsyncFnNames;
+      const _rwLocalFnNames = new Set(_rwFnNodes.map((f) => (f as { name?: unknown }).name).filter((x): x is string => typeof x === "string"));
+      const _rwServerNames = new Set([...serverFnNamesOfFile(fileAST, _fileAsyncMemo.routeMap ?? null), ..._rwServerAnywhere]);
       for (const site of renderWaitingCallsOf(getNodes(fileAST as never) as unknown[], {
         waits: (n: string) => _rwWaits(n) || _rwServerAnywhere.has(n) || _rwClientAsync.has(n),
-        serverNames: new Set([...serverFnNamesOfFile(fileAST, _fileAsyncMemo.routeMap ?? null), ..._rwServerAnywhere]),
+        serverNames: _rwServerNames,
         namespaceLocals: namespaceImportLocalsOf(fileAST),
+        // s470-action-body-await — what emit-client's reactive-set lift awaits in a synchronous
+        // host: the file's server-function stubs and its async-coloured client functions.
+        // Only a function this file DECLARES has an emitted stub / async client function the lift
+        // matches (fnNameMap); an imported async function is emitted as a bare call.
+        lifted: (n: string) => _rwLocalFnNames.has(n) && (_rwServerNames.has(n) || _rwClientAsync.has(n)),
+        engineVars: collectEngineVarNames(fileAST),
         filePath,
       })) {
-        recordRefusedLowering(new CGError(
-          "E-VALUE-SERVER-CALL",
-          `E-VALUE-SERVER-CALL: ${site.position} calls ${site.what}. A value position (a render ` +
+        const message = site.kind === "action"
+          // s470-action-body-await (SECURITY) — an ACTION position (§13.8 (i)) whose impl#1 emitter
+          // has no async host: the language awaits the call here; impl#1 cannot, so it refuses it.
+          ? `E-VALUE-SERVER-CALL: ${site.position} calls ${site.what}. impl#1 runs this code synchronously ` +
+            "and inserts no `await` here, so the code would get a pending Promise — always truthy, so a test of it " +
+            "passes for every input (§13.2, §13.8). The language awaits a waiting value at a statement of an action " +
+            "body (§13.8 (i)); impl#1 does so only in a function body, an event handler, `on mount { }`, a " +
+            "`when … changes { }` body and an engine opener `effect=`, so it refuses it here. Fix: make the call " +
+            "in one of those (an event handler, or a `function` the handler calls), or write its result straight " +
+            "into a cell as the whole statement (`@cell = f(…)`, which impl#1 awaits — in a `<request>` (§6.7.7) " +
+            "for a load) and test the cell."
+          : `E-VALUE-SERVER-CALL: ${site.position} calls ${site.what}. A value position (a render ` +
             "position, re-evaluated synchronously while the page renders, or a declaration's initializer) " +
             "cannot wait for the call: it would hold a pending Promise, which is always truthy (§13.7, §13.8). The language allows a waiting value in markup only " +
             "through a pending cell (§13.9), and impl#1 has no async render path yet, so it cannot render this. " +
             "Fix: make the call in an event handler, a `function`, or a `<request>` (§6.7.7) that writes a cell, " +
-            "and render the cell here.",
-          (site.span as object | undefined) ?? {},
-        ), site.anchor);
+            "and render the cell here.";
+        recordRefusedLowering(new CGError("E-VALUE-SERVER-CALL", message, (site.span as object | undefined) ?? {}), site.anchor);
       }
 
       // s457 (§21.4) — this module's LOCAL `.scrml` re-exports, for emit-server's
