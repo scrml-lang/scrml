@@ -229,16 +229,25 @@ function populateScope(owner: ASTNode, scope: Scope): void {
  * nested async `inner` look like a plain binding. Registering each block's DIRECT
  * statements (hoisted within the block) gives both their real extent.
  */
-function populateBlock(arr: unknown[], scope: Scope): void {
+function populateBlock(arr: unknown[], scope: Scope, sequential = false): void {
   for (const c of arr) {
     if (!c || typeof c !== "object" || Array.isArray(c)) continue;
     const n = c as ASTNode;
     if (isFnDecl(n)) {
       if (typeof n.name === "string" && n.name) scope.fns.set(n.name, n);
-    } else if (typeof n.kind === "string" && DECL_KINDS.has(n.kind) && typeof n.name === "string") {
-      const nm = paramIdent(n.name);
-      if (nm) scope.others.add(nm);
+    } else if (!sequential) {
+      declareBlockLocal(n, scope);
     }
+  }
+}
+
+/** Register a block statement's `let` / `const` / `lin` / tilde binding in `scope`. */
+function declareBlockLocal(c: unknown, scope: Scope): void {
+  if (!c || typeof c !== "object" || Array.isArray(c)) return;
+  const n = c as ASTNode;
+  if (typeof n.kind === "string" && DECL_KINDS.has(n.kind) && typeof n.name === "string") {
+    const nm = paramIdent(n.name);
+    if (nm) scope.others.add(nm);
   }
 }
 
@@ -285,7 +294,9 @@ function walkWithScopes(
   onIdent: (ident: ASTNode, scope: Scope, link: ParentLink) => void,
   stopAtNestedFns: boolean,
   onNode?: (node: ASTNode, scope: Scope, link: ParentLink) => void,
+  walkOpts: WalkScopedOpts = {},
 ): void {
+  const sequential = walkOpts.sequentialLocals === true;
   const seen = new WeakSet<object>();
   const scopeFor = (owner: ASTNode, parent: Scope): Scope => {
     let s = scopes.get(owner);
@@ -300,7 +311,7 @@ function walkWithScopes(
     let s = scopes.get(arr);
     if (!s) {
       s = { parent, fns: new Map(), others: new Set() };
-      populateBlock(arr, s);
+      populateBlock(arr, s, sequential);
       scopes.set(arr, s);
     }
     return s;
@@ -311,7 +322,13 @@ function walkWithScopes(
     seen.add(node as object);
     if (Array.isArray(node)) {
       const block = blockFor(node, scope);
-      for (let i = 0; i < node.length; i++) visit(node[i], block, { parent: link.parent, key: link.key, index: i, anchor: link.anchor });
+      for (let i = 0; i < node.length; i++) {
+        visit(node[i], block, { parent: link.parent, key: link.key, index: i, anchor: link.anchor });
+        // `sequentialLocals` — a `let` / `const` / `lin` / tilde binding is in scope only
+        // AFTER its declaration statement (its own initializer and every earlier statement
+        // read the outer name), which is how the body emitter's `declaredNames` reads it.
+        if (sequential) declareBlockLocal(node[i], block);
+      }
       return;
     }
     const n = node as ASTNode;
@@ -340,7 +357,7 @@ function walkWithScopes(
     }
   };
   const rootAnchor = hasRealPosition(root.span) ? root.span : undefined;
-  visit(root.params, rootScope, { parent: root, key: "params", index: -1, anchor: rootAnchor });
+  if (walkOpts.skipRootParams !== true) visit(root.params, rootScope, { parent: root, key: "params", index: -1, anchor: rootAnchor });
   visit(root.body, rootScope, { parent: root, key: "body", index: -1, anchor: rootAnchor });
 }
 
@@ -358,14 +375,40 @@ function walkWithScopes(
 export function walkScoped(
   owner: { params?: unknown; body?: unknown; span?: unknown },
   visit: (node: ASTNode, isBound: (name: string) => boolean, link: ParentLink) => void,
+  opts: WalkScopedOpts = {},
 ): void {
   if (!owner || typeof owner !== "object") return;
   const scopes = new Map<object, Scope>();
   const root: Scope = { parent: null, fns: new Map(), others: new Set() };
   populateScope(owner as ASTNode, root);
   scopes.set(owner as object, root);
-  walkWithScopes(owner as ASTNode, root, scopes, () => {}, () => {}, false,
-    (n, scope, link) => visit(n, (name) => resolve(name, scope) !== null, link));
+  walkWithScopes(owner as ASTNode, root, scopes, () => {}, () => {}, opts.stopAtNestedFns === true,
+    (n, scope, link) => visit(n, (name) => resolve(name, scope) !== null, link), opts);
+}
+
+/**
+ * S470 (g-impl1-async-colouring-ignores-local-shadow-s469) — options of `walkScoped`.
+ * Every default is the s466 behaviour.
+ */
+export interface WalkScopedOpts {
+  /**
+   * Do not descend into a nested `function` declaration (the node itself is still
+   * visited). The guarded (library) colouring walk: a nested function's body colours
+   * its own signature, not the enclosing one's.
+   */
+  stopAtNestedFns?: boolean;
+  /** Do not visit the owner's own parameter list (its names are still in scope). */
+  skipRootParams?: boolean;
+  /**
+   * A `let` / `const` / `lin` / tilde binding is in scope only AFTER its declaration
+   * statement, not across its whole block: a use before the declaration — and the
+   * declaration's own initializer — reads the OUTER name. The body emitter resolves a
+   * call that way (its `declaredNames` grows statement by statement), so a reader that
+   * must agree with the emitted call — the async colouring — reads it that way too.
+   * Nested `function` declarations stay hoisted to their block (the nested-callee
+   * marks resolve them so).
+   */
+  sequentialLocals?: boolean;
 }
 
 export interface LocalAsyncAnnotateOpts {
@@ -696,6 +739,10 @@ function calleeTextOf(callee: ASTNode | undefined): string | null {
 export function calleesThroughDirectlyCalledNestedFns(
   body: unknown,
   collectDirectCallees: (node: unknown, out: Set<string>) => void,
+  // S470 — when given, what each reached nested function CONTRIBUTES to the result is
+  // read with this (its body's callees resolved against its own scopes), while which
+  // nested functions are reached is still read by name with `collectDirectCallees`.
+  collectContributedCallees?: (nestedFn: ASTNode, out: Set<string>) => void,
 ): Set<string> {
   const out = new Set<string>();
   const nested = new Map<string, ASTNode>();
@@ -726,9 +773,10 @@ export function calleesThroughDirectlyCalledNestedFns(
     const inner = new Set<string>();
     collectDirectCallees(nested.get(nm)!.body, inner);
     for (const c of inner) {
-      out.add(c);
+      if (!collectContributedCallees) out.add(c);
       if (nested.has(c) && !done.has(c)) queue.push(c);
     }
+    if (collectContributedCallees) collectContributedCallees(nested.get(nm)!, out);
   }
   return out;
 }
