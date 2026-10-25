@@ -81,7 +81,7 @@ import { parseAfterDuration } from "./codegen/parse-after-duration.ts";
 import { ScrmlParser } from "./scrml-acorn.ts";
 import { soleLogicBlockPayload } from "./interpolation-extent.ts";
 import { getElementShape, getAllElementNames } from "./html-elements.js";
-import { forEachIdentInExprNode, forEachCallInExprNode, classifyLiteralFromExprNode, exprNodeContainsCall, emitStringFromTree, parseExprToNode, extractValueIdentifiersFromAST, guardCallArmsRaw, templateTextInterpolationNodes, templateInterpolationNodesAll, captureTrailingContentWarnings } from "./expression-parser.ts";
+import { forEachIdentInExprNode, forEachCallInExprNode, classifyLiteralFromExprNode, exprNodeContainsCall, emitStringFromTree, parseExprToNode, extractValueIdentifiersFromAST, guardCallArmsRaw, templateTextInterpolationNodes, templateInterpolationNodesAll, captureTrailingContentWarnings, blankLiteralTextInSource } from "./expression-parser.ts";
 import { forEachCallInValuePosition, forEachCallInStatement, VALUE_POSITION_STMT_KINDS, STATEMENT_CHILD_KEYS, provableSubjectCallees, failableBindingFacts, failableFnValueOf } from "./failable-value-calls.ts";
 import type { FailableEnv, FailableCallCandidate, RootHandling } from "./failable-value-calls.ts";
 import { PH_EB_CHECK, isCompilerPlaceholderName } from "./placeholder-nonce.ts";
@@ -1708,6 +1708,17 @@ function auditTreeNamesIdent(x: unknown, name: string, filePath: string, seen: W
     if (auditTreeNamesIdent(result, name, filePath, seen)) return true;
   }
   return Object.keys(r).some((k) => k !== "span" && !k.startsWith("__") && auditTreeNamesIdent(r[k], name, filePath, seen));
+}
+
+/**
+ * S470 round 4 — a `!{}` arm's handler TEXT. A markup `<match>` arm body re-read from text
+ * (`readBareArmBody`, the copy codegen lowers) re-tokenizes `:>` as `: >`, so the arm parser keeps
+ * the separator at the head of the handler (`_ e` / `: > e is .Denied ? …`); that remnant is not
+ * part of the body and is dropped here.
+ */
+function wholeBinderArmHandler(handler: unknown): string {
+  const t = typeof handler === "string" ? handler : "";
+  return t.replace(/^\s*:\s*>\s*/, "");
 }
 
 /** S470 fix round 1 — how many declarations of `name` a tree holds (auditDeclaresName's notion, counted). */
@@ -11628,7 +11639,7 @@ function annotateNodes(
       // included) without naming a binder. Refused, read from the arm's tree (S470 round 3: an
       // identifier reference — not a property key or member name; the use count over the text
       // only when the text does not parse).
-      const armText = String(arm.handler ?? "");
+      const armText = wholeBinderArmHandler(arm.handler);
       if (armText.trim() !== "") {
         const roots = auditParseBody(armText.trim(), filePath);
         if (roots === null ? countWordUses(armText, "arguments") > 0 : auditTreeNamesIdent(roots, "arguments", filePath)) {
@@ -11641,7 +11652,7 @@ function annotateNodes(
       const pat = String(arm.pattern ?? "").replace(/^::/, "").replace(/^\./, "");
       const binder = String(arm.binding ?? "").trim();
       if (pat !== "_" || !binder || binder === "_" || !/^[A-Za-z_$][\w$]*$/.test(binder)) continue;
-      const body = String(arm.handler ?? "").trim();
+      const body = wholeBinderArmHandler(arm.handler).trim();
       if (!body) continue;
       const armSpan = ((arm.span ?? fallbackSpan) as Span);
       const why = auditWholeErrorBinderText(body, binder, { ...wholeBinderAuditCtx(en), scope, frames });      if (why) report(wholeBinderRefusalError(why, binder, en, armSpan));
@@ -11657,6 +11668,10 @@ function annotateNodes(
   // and visited: the post-walk walks these statements too (the file's tree does not reach them).
   // Registered at the one place they are walked (`checkEngineRawBodies` `walk`).
   const _wholeBinderVisited: object[] = [];
+  // S470 round 4 — `<match>` arm wrappers whose blanked each-bearing body (`_reparseEachArmBodyRaw`)
+  // the checker re-parsed (and registered above); `<match>` blocks whose `armsRaw` it read into the
+  // codegen copies (`walkCodegenCopy`). A text field is covered only when its parse is registered.
+  const _wholeBinderReparsed = new WeakSet<object>();
   // S470 fix round 3 — owners whose raw body text the checker parsed and visited (engine bodies,
   // via `readEngineBody`): their text fields are covered by the visited statements above.
   const _wholeBinderParsedOwners = new WeakSet<object>();
@@ -17245,6 +17260,8 @@ function annotateNodes(
                   _reNodes, _reFileStart, _reBaseLine, _reBaseCol, _reBodyRaw, _nextReparseIdBase(),
                 );
               }
+              _wholeBinderVisited.push(_reNodes); // S470 round 4 — audited by the post-walk too
+              _wholeBinderReparsed.add(wrapper as object);
               for (const _rn of _reNodes) {
                 if (_rn && typeof _rn === "object" && (_rn as ASTNodeLike).kind) {
                   visitNode(_rn as ASTNodeLike);
@@ -17267,7 +17284,8 @@ function annotateNodes(
             const tabFound = errors.slice(_tabArmErrStart).some((e) => isFailableCode(e as { code?: string }));
             const mSpan = ((n.span as Span | undefined) ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 }) as Span;
             let parsedArms: Array<{ variantName: string; bodyForm: string; bodyRaw: string }> = [];
-            try { parsedArms = parseMatchArms(armsRaw).arms as typeof parsedArms; } catch { parsedArms = []; }
+            let _armsParsed = true;
+            try { parsedArms = parseMatchArms(armsRaw).arms as typeof parsedArms; } catch { parsedArms = []; _armsParsed = false; }
             for (const [i, entry] of parsedArms.entries()) {
               if (!entry || !entry.bodyRaw || entry.bodyRaw.trim().length === 0 || entry.bodyForm === "self-closing") continue;
               const tag = entry.variantName;
@@ -17276,8 +17294,17 @@ function annotateNodes(
               const nodes = entry.bodyForm === "shorthand"
                 ? readShorthandBody(n as object, key, entry.bodyRaw, label, filePath, n.span, entry.bodyRaw)
                 : readBareArmBody(n as object, key, entry.bodyRaw, label).nodes;
+              // S470 round 4 — an arm body holding a `!{` that yields no parsed copy is not covered,
+              // unless the arm's tree (`armBodyChildren` wrapper: its children, or its registered
+              // each-bearing re-parse) holds it.
+              if ((!Array.isArray(nodes) || nodes.length === 0) && entry.bodyRaw.includes("!{")) {
+                const w = (Array.isArray(armWrappers) ? armWrappers : []).find((x) => x && (x as { tag?: unknown }).tag === tag) as Record<string, unknown> | undefined;
+                const treeHolds = !!w && ((Array.isArray(w.children) && w.children.length > 0) || _wholeBinderReparsed.has(w));
+                if (!treeHolds) _armsParsed = false;
+              }
               walkCodegenCopy(nodes, bindingsByVariant.get(tag) ?? [], label, mSpan, !tabFound);
             }
+            if (_armsParsed) _wholeBinderReparsed.add(n as object);
           }
         }
         // Walk any OTHER array fields generically (e.g. `bodyChildren` — the
@@ -18983,6 +19010,7 @@ function annotateNodes(
   function walkCodegenCopy(nodes: unknown[], bindings: string[], label: string, span: Span, report: boolean): void {
     if (!Array.isArray(nodes) || nodes.length === 0) return;
     markBodyWalked(nodes); // the codegen floor lowers only walked parses
+    _wholeBinderVisited.push(nodes); // S470 round 4 — the post-walk audits the SAME nodes codegen lowers
     const saved: Array<[Record<string, unknown>, unknown]> = [];
     const seen = new WeakSet<object>();
     let next = _nextReparseIdBase();
@@ -19776,6 +19804,8 @@ function annotateNodes(
      */
     const wholeBinderTextFieldCovered = (o: Record<string, unknown>, k: string): boolean => {
       if (k === "value" || k === "handler" || k === "defaultValue") return true;
+      // S470 round 4 — markdown prose (`<md>` text, `text._mdText`) is not code.
+      if (k === "_mdText") return true;
       if (_wholeBinderParsedOwners.has(o)) return true;
       if (_wholeBinderTextRead.has(o) && (k === "bodyRaw" || k === "openerEffect")) return true;
       // An engine node carries copies of its bodies (`openerEffect`, …) beside its metadata, the
@@ -19790,11 +19820,13 @@ function annotateNodes(
           || (o.kind === "lit" && o.litType !== "template")
           || (o.kind === "expr" && o.exprNode && typeof o.exprNode === "object"))) return true;
       if (k === "bodyRaw" && o.kind === "escape-hatch") return true;
-      if (k === "armsRaw" && o.kind === "match-block") return true;
-      // An `<each>` body's source copy (its parsed body is the block's children, walked) and a
-      // markup `<match>` arm's re-parse copy (`_reparseEachArmBodyRaw`, parsed into the arm).
+      // S470 round 4 — a markup `<match>`'s arms text and a blanked each-bearing arm's body text are
+      // covered ONLY when the checker registered their parse (the codegen copies `walkCodegenCopy`
+      // walks; the `_reNodes` re-parse) — those nodes are walked below.
+      if (k === "armsRaw" && o.kind === "match-block") return _wholeBinderReparsed.has(o);
+      if (k === "_reparseEachArmBodyRaw") return _wholeBinderReparsed.has(o);
+      // An `<each>` body's source copy: its parsed body is the block's children, walked.
       if (k === "bodyRaw" && o.kind === "each-block") return true;
-      if (k === "_reparseEachArmBodyRaw") return true;
       if (k === "rulesRaw" || k === "derivedExprText" || k === "inlineMatchBody" || k === "ifRaw") return true;
       // `arm.nestedHandlers[i].raw` (ast-builder `_nestedHandlersIn`, a kind-less lint copy): the
       // `!{}` text nested in an arm body — the arm body itself is read (and that `!{}` audited)
@@ -19872,7 +19904,7 @@ function annotateNodes(
             if (!arm || typeof arm !== "object" || typeof arm.handler !== "string") continue;
             const binds = typeof arm.binding === "string" ? arm.binding.split(",").map((s) => s.trim()).filter((s) => /^[A-Za-z_$][\w$]*$/.test(s)) : [];
             const armFrames = [{ kind: "__audit-arm-binders", boundNames: binds }, ...frames];
-            const ht = arm.handler.trim();
+            const ht = wholeBinderArmHandler(arm.handler).trim();
             if (ht === "") continue;
             const braced = ht.startsWith("{") && ht.endsWith("}") && ht.slice(1, -1).trim() !== "";
             if (braced) {
@@ -19931,6 +19963,14 @@ function annotateNodes(
         if (typeof sv !== "string" || !sv.includes("!{")) continue;
         if (o.kind === "lit" && o.litType === "template" && k === "raw") continue; // read just above
         if (wholeBinderTextFieldCovered(o, k)) continue;
+        // S470 round 4 — only CODE counts: a `!{` inside a string / template text / comment of the
+        // field (`hint: string = "use !{ } to handle"`) is not a handler. Blanked with the parser's
+        // own literal lexer (`blankLiteralTextInSource`; it returns the text unchanged when it cannot
+        // lex it, so an unlexable field still refuses).
+        if (!blankLiteralTextInSource(sv).includes("!{")) continue;
+        // A native-parser `${ … }` block (`LogicEscape.bodyText`, in a re-read arm copy): its body is
+        // code text — read with the statement reader and audited.
+        if (o.kind === "LogicEscape" && k === "bodyText") { codeText(sv, hereSpan, scope, frames, "a `${ … }` block"); continue; }
         if (o.kind === "expr" && k === "raw" && !o.exprNode) {
           // An attribute / handler value kept without its tree: read with the one handler-value
           // reader (ast-builder `parseHandlerStatementsForCheck`).
