@@ -4907,21 +4907,14 @@ function _emitLogicNode(node: any, opts: EmitLogicOpts): string {
     // M5-swap native pipeline reaches this arm too.
     case "ErrorEffect":
     case "error-effect": {
-      // Standalone `!{ tryBody } catch Type [as binding] { handler }` form
+      // A standalone `!{ … }` arm list (no guarded statement before it). The statement form
+      // `!{ tryBody } catch Type [as binding] { handler }` is refused at the AST (E-TRY-NOT-IN-SCRML,
+      // SPEC §19.1 — S470 ruling), so no node here carries a try body and none is emitted.
       const arms: LogicArm[] = node.arms ?? [];
-      const tryBody: object[] = (node as Record<string, unknown>).body as object[] ?? [];
       const errVar = genVar("_scrml_err");
       const lines: string[] = [];
 
       lines.push(`try {`);
-      // g-impl1-bang-catch-try-body-cut-at-first-brace-s470 — the try body is a BLOCK of the
-      // enclosing body: it is emitted with the enclosing options (its boundary, server-call facts
-      // and declarations — a block-scoped copy, as every block body gets). It was emitted with NO
-      // options, so `ok = …` on a local declared before the form became a shadowing `const ok`
-      // and the write never left the try body.
-      for (const code of emitLogicBody(tryBody, { ...opts, declaredNames: blockScopedDeclaredNames(opts.declaredNames), tildeContext: undefined })) {
-        for (const line of code.split("\n")) lines.push(`  ${line}`);
-      }
       lines.push(`} catch (${errVar}) {`);
 
       if (arms.length > 0) {
