@@ -180,3 +180,12 @@ E-VALUE-SERVER-CALL).
 - impl#1 `lift` in a !{} block arm (§18.5 S469, "Nominal on impl#1"): a VALUE-position arm ending in
   `lift <expr>` now yields `<expr>` on both boundaries (fix 3); a statement-position arm's `lift` and the
   E-ARM-TAIL-VALUE check are unchanged (the S469 row's Nominal status stands; bootstrap emits it).
+
+## Second merge (origin/main b49d7d85f — #1563 s470-typed-payload-binders, lane B)
+
+Conflicts in the pack's shared files only (README, `failable-probe-pack.test.js`, `pinned-class.js`): both sides
+kept — EXPECTED_SHAPE_COUNT = main's 3021 + r18's 737 = **3758**, R18_PINNED spread after main's new pins, an
+`r18-shapes.js` row in the README table. Hook on the merge commit: 48253 pass / 0 fail (the pack with every r18
+pin unchanged on lane B's type-system). Re-run on the merged tree: types-gate OK (181, unchanged), s34-census
+PASS, regen-spec-index OK, delta-lint PASS, conflict-marker PASS, e2e-render-map 259 / 0, browser-baseline PASS
+(8 asserted), host-global-scan 0 violations.
