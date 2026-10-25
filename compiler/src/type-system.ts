@@ -11579,6 +11579,20 @@ function annotateNodes(
     if (!Array.isArray(arms)) return;
     for (const arm of arms as Array<{ pattern?: string; binding?: string; handler?: string; span?: Span }>) {
       if (!arm || typeof arm !== "object") continue;
+      // S470 fix round 2 — FAIL CLOSED: an arm body is lowered inside a function that receives the
+      // error, so `arguments` there reads the whole error in ANY arm (`_ :>` with no binder
+      // included) without naming a binder. Refused, read from the arm's tree (with the use count
+      // over its text as the backstop).
+      const armText = String(arm.handler ?? "");
+      if (armText.trim() !== "") {
+        const roots = auditParseBody(armText.trim(), filePath);
+        if (countWordUses(armText, "arguments") > 0 || (roots !== null && auditTreeNamesIdent(roots, "arguments", filePath))) {
+          errors.push(new TSError("E-TYPE-031",
+            `E-TYPE-031: \`arguments\` in a \`!{}\` handler arm reads the error value without a binder, which the compiler cannot check (an impl#1 limitation, not a language rule). Bind it in the arm (\`_ err :>\`, \`.Variant(x) :>\`) instead (§18.6.1).`,
+            (arm.span ?? fallbackSpan) as Span));
+          continue;
+        }
+      }
       const pat = String(arm.pattern ?? "").replace(/^::/, "").replace(/^\./, "");
       const binder = String(arm.binding ?? "").trim();
       if (pat !== "_" || !binder || binder === "_" || !/^[A-Za-z_$][\w$]*$/.test(binder)) continue;
@@ -19734,6 +19748,22 @@ function annotateNodes(
           errors.push(new TSError("E-TYPE-031", `E-TYPE-031: the arms of this \`!{ … }\` handler could not be read, so a whole-error binder in them (\`_ e :>\`, §18.6.1) cannot be checked.`, hereSpan));
         } else {
           auditWholeBinderArms(arms, en, scope, frames, hereSpan);
+        }
+      }
+      // A parameter default the parser kept as TEXT (`function apply(f = () => risky() !{ … })`):
+      // read with the expression parser and walked under the function's parameters (only the
+      // audit runs there). A default it cannot read is refused (fail closed).
+      if (Array.isArray(o.params)) {
+        for (const q of o.params as Array<{ defaultValue?: unknown }>) {
+          const dv = q && typeof q === "object" ? q.defaultValue : undefined;
+          if (typeof dv !== "string" || dv.trim() === "") continue;
+          let dn: unknown = null;
+          try { dn = parseExprToNode(dv, filePath, 0); } catch { dn = null; }
+          if (!dn) {
+            errors.push(new TSError("E-TYPE-031", `E-TYPE-031: the parameter default \`${dv.trim().slice(0, 40)}\` could not be read, so a \`!{}\` handler in it cannot be checked.`, hereSpan));
+            continue;
+          }
+          walk(dn, here, scope, [o.params, ...frames], true);
         }
       }
       // A function written as a value: its parameters and body are declaration frames below it.
