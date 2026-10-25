@@ -36,7 +36,7 @@ SERVER function is judged end to end.
 - a shape not in `KNOWN_FAIL` / `BY_DESIGN_LOGS_IN` logs in on a wrong password;
 - a `KNOWN_FAIL` shape stops doing so (it was fixed: delete the entry);
 - a shape not in `UNJUDGED` comes out `UNJUDGED`, or an `UNJUDGED` one starts being judged;
-- the corpus stops holding exactly 2265 shapes; a list entry names no shape. Plus S469 s469-server-return-match-await (457 shapes): s4–s10 server, f1–f7 fullstack, l1–l5 library, t1–t5 tool — a failable `match` subject awaited in every position, `fail` payloads keyed per enum in every emission mode, one resolver for a callee's error enum, and the `_ e` whole-error binder allow-list.
+- the corpus stops holding exactly 2577 shapes; a list entry names no shape. Plus S469 s469-server-return-match-await (457 shapes): s4–s10 server, f1–f7 fullstack, l1–l5 library, t1–t5 tool — a failable `match` subject awaited in every position, `fail` payloads keyed per enum in every emission mode, one resolver for a callee's error enum, and the `_ e` whole-error binder allow-list.
 
 It deliberately does NOT pin each shape's class: a shape moving from `PASS-REFUSED` to `PASS` is a
 compiler improvement, not a regression.
@@ -275,6 +275,40 @@ handled call's identity-resolved enum (never a same-named local enum) and works 
 `g-server-js-imports-module-without-server-file-s467`, `g-library-tool-cross-file-import-source-path-s469`);
 their single-file-loadable twins PASS. s8 / l3 "held in a local then passed on" is now PASS-REFUSED (a
 local alias is not an allowed use).
+
+## Measured (S470 s470-bang-catch-try-body — n29 / s12 / f15 / l7 / t7; 312 shapes)
+
+`r9-shapes.js` (gap `g-impl1-bang-catch-try-body-cut-at-first-brace-s470`) on five sides: the statement
+form `!{ tryBody } catch T [as b] { handler }`. The try body held a nested `!{}`, a block, an object
+literal, a template / string / comment with a brace, a nested `match` or a nested catch; the handled
+call wrote its result into a field read after the form, so a dropped handler logged a wrong password in.
+
+| family | base `d582ae04f` FAIL | base other | head FAIL | head |
+|---|---|---|---|---|
+| n29 (client, 77) | 29 | 4 PASS, 17 PASS-REFUSED, 27 PASS-DENY | 0 | 33 PASS, 40 PASS-REFUSED, 4 PASS-DENY |
+| s12 (server, 54) | 17 | 14 PASS-REFUSED, 23 PASS-DENY | 0 | 24 PASS, 30 PASS-REFUSED |
+| f15 (fullstack, 57) | 17 | 17 PASS-REFUSED, 23 PASS-DENY | 0 | 25 PASS, 32 PASS-REFUSED |
+| l7 (library, 62) | 16 | 30 PASS-REFUSED, 16 PASS-DENY | 0 | 20 PASS, 42 PASS-REFUSED |
+| t7 (tool, 62) | 21 | 4 PASS, 14 PASS-REFUSED, 23 PASS-DENY | 0 | 28 PASS, 34 PASS-REFUSED |
+
+Four defects, each closed:
+
+- **The try body ended at its first `}`** (`ast-builder.js`): now sliced where the block splitter
+  ended it (`errorEffectExtent`), and each `catch` handler is read by the splitter's own loop (it was
+  a bare brace counter). A body the logic tokenizer does not read as the same balanced span is refused
+  (E-PARSE-001), never re-scanned.
+- **Written after a statement, the form was that statement's postfix handler**: the whole try body was
+  dropped, so a body that REVOKES access never ran (group 11 — FAIL on base). It is its own statement now.
+- **The try body was emitted with no options**: a write to a local declared before the form became a
+  shadowing `const` (group 12). It is emitted as a block of the enclosing body.
+- **The try body was never type-checked**: an unhandled failable call there compiled. A `catch` arm
+  cannot handle one — the call RETURNS its error, it does not throw — so it is E-ERROR-002 now, as
+  anywhere else (group 8, and every "direct" shape).
+
+Most head PASS-REFUSED are E-ERROR-002 on `st.ok = check(p) !{ … }`: a handled call written straight
+into a member is refused even outside this form (each has a "bound first" twin that PASSes). A `}` in a
+template literal or a block comment is E-CTX-001 in any brace context (pre-existing, fails closed). The
+engine-opener and `<onMount>` shapes run at boot, before any click, so PASS-DENY is their correct class.
 
 ## Running
 
