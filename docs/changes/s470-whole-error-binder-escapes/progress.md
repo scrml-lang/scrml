@@ -123,3 +123,7 @@
   `g-impl1-destructured-param-crashes-whole-error-audit-s470`): no action.
 - pack: + r8 "6 …" (19 shapes x4 sides + fullstack-only M1c = 77), EXPECTED_SHAPE_COUNT 2080 -> 2157.
   On 43d162d52: 60 FAIL / 17 PASS-REFUSED; on the branch: 77 PASS-REFUSED. Full pack 2160 pass / 0 fail.
+- 2026-10-24 fix-round-2 gates: reviewer s6–s16 + shapes1–5 on 4 sides: only FAILs left are Q4 x4 (lane B);
+  2 UNJUDGED (library G9 / G10, harness, same on the reviewer's run). unit+integration+conformance --bail
+  40516 pass / 0 fail / 125 skip / 18 todo; types:check OK (181, unchanged); R26 913 files 43d162d52 vs
+  branch: diagnostic codes IDENTICAL (0 newly-rejected; 43d162d52 was itself identical to main). DONE.
