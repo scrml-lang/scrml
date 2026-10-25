@@ -132,3 +132,51 @@ Measured hosts, every one: function body (client / server / library / tool), eve
 gate (render), a derived cell. The synchronous hosts were already refused on base (#1554's `syncParts` walks a
 guarded statement's arms) and stay refused; the render / derived positions are refused (E-ERROR-002 /
 E-VALUE-SERVER-CALL).
+
+## Merge + gates (final tree)
+
+- Merged origin/main d6e734814 (#1559 s470-when-changes-latest-wins + bot FACTS regen; it touched emit-logic.ts's
+  when-effect lowering) — clean merge, no conflict.
+- types-gate: the first run reported 1 NEW TS2345 at the arm's expression lowering (`_makeExprCtx(armOpts ?? {})`
+  — the `{}` member) and the baselined `_makeExprCtx({})` gone; rewritten as
+  `armOpts ? _makeExprCtx(armOpts) : _makeExprCtx({})`, so the baseline is unchanged: OK, 181 diagnostics.
+- CI job commands (`.github/workflows/ci.yml`), run locally on the merged tree (`~/.cache/scrml/s470/laneI/bin/ci.sh`,
+  logs in `ci/`): types-gate OK · `bun test compiler/tests/*.test.js` 2239 / 0 fail · snippet-gate 0 fail ·
+  claim-gate 0 fail · corpus-compile-floor --check PASS · facts --check STALE (WARN-only; bot-owned, not
+  regenerated) · gen-md-shim current · bootstrap-conformance current · conflict-marker PASS · regen-spec-index
+  --check OK · delta-lint PASS · ci-shards needs OK · s34-census --check-new (base origin/main) PASS (1 changed
+  row) · unit + conformance 31697 / 0 fail · integration + lsp + commands 11267 / 0 fail (the pack, 3417 shapes,
+  pins included) · todomvc compile + `node --check` OK · browser-baseline --check PASS (8 asserted) ·
+  lint-no-default-arm 0 · slice m1 100 / m2 612 / m1-lowered 100 / m3 60 / m4 2489 / codec 166, 0 fail ·
+  e2e-render-map 259 / 0 fail · host-global-scan --check 0 violations · gen-bootstrap-severity current.
+- pre-commit hook (every commit): 47775 pass / 0 fail on the last code commit.
+
+## Candidate gaps (for the PA to file — known-gaps.md not edited)
+
+- `g-block-arm-waiting-call-refused-in-async-host-s470` (LOW, over-refusal, fails closed; locus
+  emit-library-shared `collectNonAwaitableAsyncCalls` + `computeAsyncFnNames`, ast-builder `_parseHandlerExpr`): a
+  `!{}` BLOCK arm of several statements / an `if` / a leave statement (`_ :> return isOk(p) ? …`) that names a
+  waiting function, in an async client / library / tool function body, is refused E-SERVER-FN-IN-SYNC-CALLBACK /
+  E-ASYNC-STDLIB-IN-SYNC-CALLBACK — its `handlerExpr` is the unparsed escape hatch, which the drain reads as
+  un-awaitable and the colouring does not read at all. 36 shapes per side in r18 (f24 / l16 / t16). The emitter
+  now lowers such a block from its parsed statements in an async host; the fix is for the colouring and the drain
+  to read the same parse (all three must agree — a drain that accepts what the colouring did not colour would
+  hand a SYNC host a bare call).
+- `g-server-fn-arm-only-helper-not-emitted-s470` (MED, fails closed at run time; locus the server bundle's
+  helper closure): a client function reached only from a server function's `!{}` arm is not emitted on the
+  server — `allowed is not defined` on the failure path (s21: 12 PASS-500). The same helper called from the
+  server function's body is emitted (s12 PASS).
+- `g-when-body-guarded-statement-codegen-invalid-s470` (LOW, fails closed; locus emit-logic `when-effect` →
+  `rewriteBlockBody`, lane E's area): ANY `!{}`-handled statement in a `when … changes` body — a SYNC callee and a
+  sync arm included (`const v = local(@pw) !{ _ :> false }`) — emits a raw `!{` (E-CODEGEN-INVALID-LOGIC). The
+  arm refusal this lane adds is reached first when the arm names a waiting function.
+- `g-markup-guard-through-parens-unhandled-s470` (LOW, fails closed): a `!{}` written inside parentheses in a
+  markup / derived position (`const <ok> = (local(@pw) !{ _ :> false })`, `${ (local(@pw) !{…}) ? … }`) is
+  E-ERROR-002 (the handler is not seen), and `const <ok> = local(@pw) !{ _ :> isOk(@pw) }` is E-ERROR-002 where
+  the sync-arm twin compiles.
+- `g-fail-payload-waiting-call-in-async-host-arm-s470` (LOW, not measured): the new arm refusal in the `when` body /
+  opener reads an arm's `handler` TEXT; a re-`fail` arm (`_ :> fail E::X(isOk(p))`) carries its payload in
+  `failExpr`, which this check does not read. Probe before filing.
+- impl#1 `lift` in a !{} block arm (§18.5 S469, "Nominal on impl#1"): a VALUE-position arm ending in
+  `lift <expr>` now yields `<expr>` on both boundaries (fix 3); a statement-position arm's `lift` and the
+  E-ARM-TAIL-VALUE check are unchanged (the S469 row's Nominal status stands; bootstrap emits it).

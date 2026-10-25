@@ -948,7 +948,7 @@ function emitArmBody(arm: LogicArm, errVar: string, machineBindings?: Map<string
     }
     return rewriteBlockBody(inner, machineBindings ?? null);
   }
-  const rewritten = emitExprField(arm.handlerExpr, handler, _makeExprCtx(armOpts ?? {}));
+  const rewritten = emitExprField(arm.handlerExpr, handler, armOpts ? _makeExprCtx(armOpts) : _makeExprCtx({}));
   return rewritten.trim().endsWith(";") ? rewritten.trim() : rewritten.trim() + ";";
 }
 
