@@ -1161,4 +1161,21 @@ export const PINNED_CLASS = {
   "t12/1 P4 mutual: f only g; call g": "PASS-REFUSED",
   "t12/1 P6 3-cycle; call g": "PASS-REFUSED",
   "t12/1 P7 3-cycle; call h then f": "PASS-REFUSED",
+  // S470 s470-typed-payload-binders fix round 4 — r15-shapes.js (s18 / f21 / l13 / t13), from a run (fams.mjs):
+  // every shape FAIL on 3620e8670 -> PASS-REFUSED (E-TYPE-004).
+  "f21/1 D2 a 40-deep ternary": "PASS-REFUSED",
+  "f21/1 D3 a 40-long || chain": "PASS-REFUSED",
+  "f21/1 D5 a 34-deep ternary": "PASS-REFUSED",
+  "f21/1 I1 an imported fn through its module's local helper": "PASS-REFUSED",
+  "f21/1 I2 imported mutual recursion, call A": "PASS-REFUSED",
+  "f21/1 I3 imported mutual recursion, call B": "PASS-REFUSED",
+  "l13/1 D2 a 40-deep ternary": "PASS-REFUSED",
+  "l13/1 D3 a 40-long || chain": "PASS-REFUSED",
+  "l13/1 D5 a 34-deep ternary": "PASS-REFUSED",
+  "s18/1 D2 a 40-deep ternary": "PASS-REFUSED",
+  "s18/1 D3 a 40-long || chain": "PASS-REFUSED",
+  "s18/1 D5 a 34-deep ternary": "PASS-REFUSED",
+  "t13/1 D2 a 40-deep ternary": "PASS-REFUSED",
+  "t13/1 D3 a 40-long || chain": "PASS-REFUSED",
+  "t13/1 D5 a 34-deep ternary": "PASS-REFUSED",
 };
