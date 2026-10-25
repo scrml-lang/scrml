@@ -169,3 +169,45 @@ describe("gaps 2 + 3 — the host `fetch` (§13.7 item 4) is a waiting value", (
     expect(r.client).not.toMatch(/await fetch\(q\)/);
   });
 });
+
+// fix round 1 (review of 618bb573b) — F1–F4.
+const VALUE = "E-ASYNC-FN-ESCAPES-AS-VALUE";
+describe("fix round 1 — fetch through the global object, as a value, under a binding; callback values", () => {
+  const refusedAny = (view, extra = "") => {
+    const dir = compile(page(view, extra));
+    return dir;
+  };
+  const CASES = {
+    "F1 helper calling globalThis.fetch, rendered": [`<p><span if=\${probe(@pw)}>IN</span></p>`, `    function probe(q) { return globalThis.fetch("/a?p=" + q) }`],
+    "F1 helper calling window[\"fetch\"], rendered": [`<p><span if=\${probe(@pw)}>IN</span></p>`, `    function probe(q) { return window["fetch"]("/a?p=" + q) }`],
+    "F2 tape element [fetch][0]": [`<p><span if=\${[fetch][0]("/a")}>IN</span></p>`, ""],
+    "F2 fetch passed as an argument": [`<p><span if=\${call(fetch, "/a")}>IN</span></p>`, `    function call(f, x) { return f(x) }`],
+    "F2 document.defaultView.fetch": [`<p><span if=\${document.defaultView.fetch("/a")}>IN</span></p>`, ""],
+    "F3 block-scoped const fetch does not turn the rule off": [`\${ if (true) { const fetch = 1 } }\n<p><span if=\${fetch("/a")}>IN</span></p>`, ""],
+    "F4 a server helper passed to .some in a render position": [`<p><span if=\${@xs.some(isOkW)}>IN</span></p>`, `    function isOkW(x) { return isOk(@pw) }`],
+    "F4 fetch passed to .map in a render position": [`<p><span if=\${@xs.map(fetch)[0]}>IN</span></p>`, ""],
+  };
+  for (const [name, [view, extra]] of Object.entries(CASES)) {
+    test(`refused: ${name}`, () => {
+      const r = refusedAny(view, extra);
+      expect(r.codes.length).toBeGreaterThan(0);
+    });
+  }
+  test("F2 / F3 — a binding of the host fetch is E-ASYNC-FN-ESCAPES-AS-VALUE (the server twin's code)", () => {
+    for (const decl of ["    const f = fetch", "    const { fetch: g } = globalThis", "    const fetch = globalThis.fetch", "    const fetch = window.fetch.bind(window)", "    const probe = (q) => fetch(q)"]) {
+      const dir = resolve(tmpdir(), `scrml-s470-hostv-${Math.random().toString(36).slice(2, 8)}`);
+      mkdirSync(dir, { recursive: true });
+      const file = resolve(dir, "app.scrml");
+      writeFileSync(file, page(`<p>\${@msg}</p>`, decl));
+      try {
+        const result = compileScrml({ inputFiles: [file], write: false, outputDir: resolve(dir, "out"), log: () => {} });
+        expect([decl, (result.errors ?? []).some((e) => e.code === VALUE)]).toEqual([decl, true]);
+      } finally { rmSync(dir, { recursive: true, force: true }); }
+    }
+  });
+  test("SPEC §13.2 exemptions: typeof fetch, and a scheduler argument", () => {
+    expect(compile(page(`<p>\${ typeof fetch == "function" ? "a" : "b" }</p>`)).messages).toEqual([]);
+    expect(compile(page(`<p>\${@msg}</p>\n\${ setTimeout(ping, 0) }`, `    function ping() { fetch("/ping") }`)).messages).toEqual([]);
+  });
+});
+

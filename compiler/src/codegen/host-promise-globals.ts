@@ -189,7 +189,40 @@ export function hostShadowedRefsOf(nodes: unknown, hostNames: ReadonlySet<string
  * in codegen/index.ts): the SPEC-named host Promise globals the file does not bind.
  */
 export function hostPromiseSeedOf(fileAST: unknown): Set<string> {
+  // Only a file whose code can reach the host global is seeded: several emitters read an EMPTY
+  // async set as "nothing here waits" (a one-shot interpolation's async wrap is decided by diffing
+  // two emits when the client set is non-empty), so a file that never names `fetch` must keep
+  // the facts it had.
+  if (!fileMentionsHostPromise(fileAST)) return new Set();
   // The global-object spelling (`globalThis.fetch(…)`, recorded by the colouring's callee walk under
   // `HOST_FETCH_MEMBER`) is the host function whatever the file binds.
   return new Set([...unboundHostPromiseGlobalsOf(fileAST), HOST_FETCH_MEMBER]);
+}
+
+/**
+ * Does the file's tree name a host Promise global anywhere — an identifier, a read through the
+ * global object, or text kept unparsed (an escape hatch, a body held as text) that mentions it?
+ * Fail closed on text: any mention counts.
+ */
+function fileMentionsHostPromise(fileAST: unknown): boolean {
+  const names = [...HOST_PROMISE_GLOBALS];
+  const textRe = new RegExp(`\\b(?:${names.join("|")})\\b`);
+  const seen = new WeakSet<object>();
+  let hit = false;
+  const visit = (v: unknown): void => {
+    if (hit || !v || typeof v !== "object" || seen.has(v as object)) return;
+    seen.add(v as object);
+    if (Array.isArray(v)) { for (const x of v) visit(x); return; }
+    const n = v as AnyNode;
+    if (n.kind === "ident" && typeof n.name === "string" && HOST_PROMISE_GLOBALS.has(n.name)) { hit = true; return; }
+    if (hostPromiseMemberOf(n) !== null) { hit = true; return; }
+    for (const k of Object.keys(n)) {
+      if (k === "span" || k === "_record") continue;
+      const x = n[k];
+      if (typeof x === "string") { if (k !== "kind" && textRe.test(x)) { hit = true; return; } continue; }
+      if (x && typeof x === "object") visit(x);
+    }
+  };
+  visit(getNodes(fileAST as never));
+  return hit;
 }
