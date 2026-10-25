@@ -1503,6 +1503,13 @@ export interface ColorOpts {
    */
   reactiveArg1SkipKeep?: ReadonlySet<string> | null;
   /**
+   * s470-await-residue — `colorAsyncStatements` only: colour the statements with the
+   * event-handler root policy (AnalyzeOpts.handlerRoot, S450): the arg1 skip holds only for a
+   * write that is the body's SOLE root statement; every other write is awaited in place, so
+   * the statements after it observe the settled value (§13.8 (i)). Used by `on mount { }`.
+   */
+  handlerRoot?: boolean;
+  /**
    * S453 (bryan S449 ruling A3) — the boundary id this listener's rejection is
    * logged under (see `wrapHandlerRejectionLog`). A site that knows its event
    * and placeholder passes `"<eventName> <placeholderId>"`; everything else
@@ -1672,7 +1679,60 @@ export function colorAsyncStatements(code: string, resolveFree: FreeAsyncResolve
   if (!program) return null;
   const root = program.body[0]?.expression;
   if (!root || root.type !== "ArrowFunctionExpression") return null;
-  return analyze(src, program, PREFIX.length, src.length - SUFFIX.length, resolveFree, { transform: true, root, reactiveArg1Skip: opts.reactiveArg1Skip !== false });
+  return analyze(src, program, PREFIX.length, src.length - SUFFIX.length, resolveFree, {
+    transform: true, root, reactiveArg1Skip: opts.reactiveArg1Skip !== false,
+    ...(opts.handlerRoot === true ? { handlerRoot: true, reactiveArg1SkipKeep: opts.reactiveArg1SkipKeep ?? null } : {}),
+  });
+}
+
+/** s470-await-residue — the active client emission's §36 SSE keep set (see `handlerStatementListColor`). */
+export function activeSseFnNames(): ReadonlySet<string> | null {
+  return _activeClientAsync?.sseFnNames ?? null;
+}
+
+/**
+ * s470-await-residue (SECURITY, §13.8 (i)) — the ASYNC HOST of an ACTION body impl#1 runs in
+ * a compiler-controlled scope: a `<timer>` / `<poll>` tick, a `<timeout>` callback, an engine
+ * state-child `effect=` / `<onTransition>` body, an `on mount { }` block. §13.8 (i): a waiting
+ * value at a suspension point of an action position is awaited THERE, so every statement after
+ * it observes the settled value, in order. These bodies were emitted as plain synchronous
+ * statements; a whole cell write `@ok = isOk(@pw)` was left to emit-client's DETACHED
+ * `(async () => …)()` lift, and the next statement (`if (@ok) …`) read the cell before the
+ * write landed (measured: a stale TRUE logged a wrong password in).
+ *
+ * The body is coloured with the SAME analysis and the same handler-root policy every event
+ * handler gets (`colorAsyncFunctionExpr`, S450): an async call is awaited in place; only a
+ * write that is the body's SOLE root statement keeps the fire-and-forget lift (no statement
+ * of the body follows it). When the body awaits, it runs inside
+ * `(async () => { … })().catch(…)` — the shape `on mount` already used (GH #237). What
+ * cannot be awaited, or an async function used as a value, is reported (fail closed). A body
+ * that does not parse is reported when it names any async function, and kept as emitted.
+ *
+ * `active` defaults to the active client emission; a caller that runs before it is installed
+ * passes it explicitly.
+ */
+export function colorAsyncActionBody(code: string, label: string, span: unknown, active: ActiveClientAsync | null = _activeClientAsync): string {
+  if (!active || !code || code.trim() === "") return code;
+  const PREFIX = "(() => {\n";
+  const SUFFIX = "\n})";
+  const src = PREFIX + code + SUFFIX;
+  const program = tryParse(src);
+  const root = program ? program.body[0]?.expression : null;
+  if (!program || !root || root.type !== "ArrowFunctionExpression") {
+    const names = new Set<string>();
+    for (const m of code.matchAll(/[A-Za-z_$][A-Za-z0-9_$]*/g)) names.add(m[0]);
+    const hits: Array<{ name: string }> = [];
+    for (const nm of names) if (active.resolveFree(nm)) hits.push({ name: nm });
+    if (hits.length) active.report({ calls: [], escapes: [], unanalyzable: hits }, span);
+    return code;
+  }
+  const r = analyze(src, program, PREFIX.length, src.length - SUFFIX.length, active.resolveFree, {
+    transform: true, root, reactiveArg1Skip: true, reactiveArg1SkipKeep: active.sseFnNames ?? null, handlerRoot: true,
+  });
+  active.report(r, span);
+  if (!r.rootAsync) return r.code;
+  const indented = r.code.split("\n").map((l) => (l.length ? "  " + l : l)).join("\n");
+  return `(async () => {\n${indented}\n})().catch(_scrml_async_err => _scrml_error_boundary_log(${JSON.stringify(label)}, _scrml_async_err));`;
 }
 
 /**

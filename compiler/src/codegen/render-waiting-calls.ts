@@ -102,7 +102,32 @@ export interface RenderWaitingSite {
    * the call is not awaited there. `"render"` (absent): a render / value position.
    */
   kind?: "render" | "action";
+  /**
+   * s470-await-residue — an ORDER refusal (§13.8 (i)): the waiting call itself is one impl#1
+   * starts without waiting (a whole cell write lifted into a detached IIFE, a bare call, a
+   * `reset` of a cell whose initializer waits), and a later statement of the same synchronous
+   * body observes the state from before it settles. Reported as E-IMPL1-ACTION-NOT-AWAITED with
+   * the ordering message.
+   */
+  order?: boolean;
 }
+
+/** s470-await-residue — a waiting call a synchronous body starts and does not wait for. */
+interface PendingOrder {
+  anchor: object;
+  span: unknown;
+  pos: string;
+  /** The waiting call, for the message. */
+  what: string;
+  /** The cell it writes (`@ok = f(…)`, `reset(@ok)`), or null for a bare call (any cell, any call observes). */
+  cell: string | null;
+}
+
+/** An ordered synchronous body: the waiting calls started and not yet followed by an observer. */
+interface OrderScope { pending: PendingOrder[] }
+
+/** Loop statement kinds: a site in the body is followed by the body's next iteration. */
+const LOOP_KINDS = new Set(["for-stmt", "while-stmt", "do-while-stmt", "for-expr"]);
 
 /** Statement kinds that are action positions or declarations without a render-time value. */
 const SKIPPED_STATEMENT_KINDS = new Set([
@@ -114,7 +139,15 @@ const SKIPPED_STATEMENT_KINDS = new Set([
 const PLAIN_DECL_KINDS = new Set(["const-decl", "let-decl", "tilde-decl", "lin-decl"]);
 
 /** Markup elements whose BODY is an action (run per load / tick), never rendered from a value. */
-const ACTION_BODY_TAGS = new Set(["request", "timer", "poll"]);
+const ACTION_BODY_TAGS = new Set(["request", "timer", "poll", "timeout"]);
+
+/**
+ * s470-await-residue — the action bodies whose emitter now gives them an ASYNC host
+ * (`colorAsyncActionBody`: a `<timer>` / `<poll>` tick, a `<timeout>` callback, a state-child
+ * `effect=`, an `<onTransition>` body): a waiting call there is awaited in place, so the statements
+ * after it observe the settled value. No ordering refusal applies inside them.
+ */
+const ASYNC_HOSTED_TAGS = new Set(["timer", "poll", "timeout"]);
 
 /** The position label of a statement run once at module init (s470-action-body-await). */
 const MODULE_INIT = "a statement run once at module init";
@@ -402,10 +435,19 @@ class RenderWalk {
       // it SYNCHRONOUSLY: a `<request>` body's statements run at module init, a `<timer>` /
       // `<poll>` body inside the plain `function() { … }` callback emit-reactive-wiring
       // `emitLifecycleNode` hands `_scrml_timer_start`. Its `${ }` statements are judged as such.
+      // s470-await-residue — a `<timer>` / `<poll>` / `<timeout>` body now has an async host (its
+      // waiting calls are awaited in place). A `<request>` body is its own synchronous order: its
+      // first whole write is the settle machine's load (a cell load, like a declaration's), but the
+      // statements after it run at module init, before that load lands.
+      const order = ASYNC_HOSTED_TAGS.has(tag) ? null : { pending: [] };
+      // A body that runs DURING module init (a `<request>` body's statements, a `<poll>`'s immediate
+      // first tick) follows the module-init statements before it.
+      const atInit = tag === "request" || tag === "poll";
       for (const ch of Array.isArray(n.children) ? n.children as AnyNode[] : []) {
         if (!ch || typeof ch !== "object" || ch.kind !== "logic" || this.visited.has(ch)) continue;
         this.visited.add(ch);
-        this.syncStmts(ch.body, `the body of <${tag}>`);
+        if (atInit) this.withOrder(this.moduleOrder, () => this.orderFollow(ch.body));
+        this.withOrder(order, () => this.syncStmts(ch.body, `the body of <${tag}>`));
       }
       return;
     }
@@ -467,11 +509,19 @@ class RenderWalk {
     // assignment's right-hand side and a declaration's initializer only), which left the
     // conditions and nested sub-expressions unjudged.
     if ((c.defaultLogic && !stmtContainsLiftExpr(s)) || !c.renders) {
-      this.syncStmt(s, this.host ? `a statement in <${this.host}> (run once at module init)` : MODULE_INIT);
+      // s470-await-residue — module-init statements run in ONE synchronous order across the file.
+      this.withOrder(this.moduleOrder, () => {
+        this.orderFollow(s);
+        this.syncStmt(s, this.host ? `a statement in <${this.host}> (run once at module init)` : MODULE_INIT);
+      });
       return;
     }
     // A cell write while rendering: the same judgement (the write is not awaited either).
-    if (kind === "state-decl") { this.syncStmt(s, "a cell write while rendering"); return; }
+    if (kind === "state-decl") {
+      // A render context re-runs reactively (it observes the write when it lands): no module-init order.
+      this.withOrder(null, () => this.syncStmt(s, "a cell write while rendering"));
+      return;
+    }
     if (kind === "bare-expr") {
       this.visited.add(s);
       // `on mount { … }` is an effect, not a render.
@@ -544,12 +594,12 @@ class RenderWalk {
   /** Every statement of a synchronous action body. */
   private syncStmts(list: unknown, pos: string): void {
     if (!Array.isArray(list)) return;
-    for (const st of list) this.syncStmt(st, pos);
+    for (const st of list) { this.orderFollow(st); this.syncStmt(st, pos); }
   }
 
   private syncStmt(st: unknown, pos: string, fireAndForget = true): void {
     if (!st || typeof st !== "object" || this.visited.has(st as object)) return;
-    if (Array.isArray(st)) { for (const x of st) this.syncStmt(x, pos, fireAndForget); return; }
+    if (Array.isArray(st)) { for (const x of st) { this.orderFollow(x); this.syncStmt(x, pos, fireAndForget); } return; }
     const s = st as AnyNode;
     const kind = s.kind;
     if (typeof kind !== "string") { this.syncParts(s, s, pos, { needText: false }); return; }
@@ -573,7 +623,12 @@ class RenderWalk {
         case "state-decl": {
           // A §52 `<x server>` declaration's right-hand side is a server-side load (§52.4.3).
           if (s.isServer === true) return;
-          if (this.liftedWrite(s)) return;
+          if (this.liftedWrite(s)) {
+            // A cell DECLARATION's initializer is a value position (§13.8's table), not a suspension
+            // point: only a WRITE starts an ordered, un-waited call.
+            if (s.structuralForm !== true) this.orderStart(s, pos, this.liftedWhat(s), String(s.name), s.initExpr);
+            return;
+          }
           // A cell DECLARATION's initializer (`<v> = …`) is a §13.7 value position; a write
           // (`@v = …`) is a statement of the action body.
           const decl = s.structuralForm === true;
@@ -589,7 +644,11 @@ class RenderWalk {
           // `on mount { … }` has its own async host (emit-reactive-wiring colorAsyncStatements).
           if (s._onMountEffect === true || s.refineParamGuard) return;
           const ex = s.exprNode as AnyNode | undefined;
-          if (fireAndForget && ex && this.firedAndForgotten(ex)) return;
+          if (fireAndForget && ex && this.firedAndForgotten(ex)) {
+            // A bare WAITING call is started and not waited for: its effects are unordered.
+            if (ex.kind === "call") { const w = this.exprWaits(ex); if (w !== null) this.orderStart(s, pos, w, null, ex); }
+            return;
+          }
           const p = pos === MODULE_INIT && ex && ex.kind === "assign" ? "the value assigned at module scope" : pos;
           if (ex && typeof ex === "object" && !isPlaceholderHatch(ex)) this.judge(ex, s, s.span, p);
           else this.judgeText(s.expr, s, s.span, p);
@@ -599,19 +658,43 @@ class RenderWalk {
           // `@cell = f(args) !{ … }` — the lift relocates the arm after the await (ss41). Any other
           // guarded statement tests the envelope of an un-awaited call: judged, no fire-and-forget.
           const g = s.guardedNode as AnyNode | undefined;
-          if (g && typeof g === "object" && g.kind === "state-decl" && this.liftedWrite(g)) this.visited.add(g);
-          else this.syncStmt(g, pos, false);
+          if (g && typeof g === "object" && g.kind === "state-decl" && this.liftedWrite(g)) {
+            this.visited.add(g);
+            if (g.structuralForm !== true) this.orderStart(s, pos, this.liftedWhat(g), String(g.name), g.initExpr);
+          } else this.syncStmt(g, pos, false);
           this.syncParts(s.arms, s, pos, { needText: false });
           return;
         }
         default: {
           const flags = { needText: false };
+          // s470-await-residue — the ORDER of the body: an `if`'s branches are alternatives (a site
+          // in the then-branch is not followed by the else-branch), and a site in a loop body is
+          // followed by the loop's next iteration.
+          const ord = this.order;
+          const isIf = kind === "if-stmt";
+          const before = ord ? ord.pending.slice() : [];
+          const branchAdds: PendingOrder[] = [];
           for (const k of Object.keys(s)) {
             if (k === "span" || k === "id" || k === "_record") continue;
             const v = s[k];
             if (!v || typeof v !== "object") continue;
-            if (STATEMENT_CHILD_KEYS.has(k)) { this.syncStmt(v, pos, fireAndForget); continue; }
+            if (STATEMENT_CHILD_KEYS.has(k)) {
+              if (ord && isIf && (k === "consequent" || k === "alternate")) {
+                ord.pending = before.filter((p) => !this.orderReported.has(p));
+                this.syncStmt(v, pos, fireAndForget);
+                for (const p of ord.pending) if (!before.includes(p)) branchAdds.push(p);
+                continue;
+              }
+              this.syncStmt(v, pos, fireAndForget);
+              continue;
+            }
             this.syncParts(v, s, pos, flags);
+          }
+          if (ord && isIf) ord.pending = before.filter((p) => !this.orderReported.has(p)).concat(branchAdds);
+          if (ord && LOOP_KINDS.has(kind)) {
+            for (const p of ord.pending.slice()) {
+              if (!before.includes(p)) this.orderReport(p, "the loop's next iteration");
+            }
           }
           // A head the parser kept only as text (a placeholder where its expression would be — a
           // C-style `for` head, …): the statement's text is read to refuse.
@@ -644,6 +727,284 @@ class RenderWalk {
   }
 
   private textNamesOf(text: string): string | null { return this.textNames(text); }
+
+  // ---- ORDER in a synchronous action body (s470-await-residue) --------------------------------
+  //
+  // §13.8 (i): at a suspension point the compiler waits "and resumes with what follows" — every
+  // statement after a waiting call observes its settled value. The two shapes #1554 accepts in a
+  // body impl#1 still runs SYNCHRONOUSLY (module init — the file's `${ }` statements, a `<request>`
+  // body, an `<onMount>` tag, a runtime `^{ }` — and a `(state × message)` arm, which must return its
+  // next state synchronously) are started and NOT waited for: a whole cell write `@c = f(…)` is lifted
+  // into a detached `(async () => …)()`, a bare call `f(…)` runs fire-and-forget. A later statement
+  // of the same body therefore read the cell from BEFORE the call (measured: a stale TRUE logged a
+  // wrong password in) or raced the call's effects (`save(); @x = load()`). Such a site stays
+  // accepted only when nothing after it in its body observes it; otherwise it is refused
+  // (E-IMPL1-ACTION-NOT-AWAITED). What observes (`observes`, fail closed): any call / `new` /
+  // `reset` / `?{}` / unparsed text, and — for a cell write — a mention of that cell; for a bare
+  // call, a mention of ANY cell. Module-init statements run in ONE order across the whole file
+  // (`moduleOrder`). The bodies impl#1 now runs in an async host (`<timer>` / `<poll>` / `<timeout>`,
+  // engine `effect=` / `<onTransition>`, `on mount`, handlers, function bodies, `when`, the opener)
+  // await the call in place: no order rule there.
+
+  /** The ordered body being walked (null: an async-hosted body, or not an action body). */
+  private order: OrderScope | null = null;
+  /** The file's module-init statement order (one body: every `${ }` statement runs at init, in order). */
+  private readonly moduleOrder: OrderScope = { pending: [] };
+  /** Pending sites already reported (each refused once). */
+  private readonly orderReported = new Set<PendingOrder>();
+
+  private withOrder(scope: OrderScope | null, fn: () => void): void {
+    const saved = this.order;
+    this.order = scope;
+    try { fn(); } finally { this.order = saved; }
+  }
+
+  /** A waiting call `anchor` starts without waiting for it, in the current ordered body. */
+  private orderStart(anchor: AnyNode, pos: string, what: string, cell: string | null, call?: unknown): void {
+    if (!this.order) return;
+    // A §36 SSE generator write is a SUBSCRIPTION (emit-client GITI-026), not a value to wait for.
+    const callee = call && typeof call === "object" ? (call as AnyNode).callee as AnyNode | undefined : undefined;
+    if (callee && callee.kind === "ident" && typeof callee.name === "string" && this.generatorFns.has(callee.name)) return;
+    this.order.pending.push({ anchor, span: this.spanOverride ?? anchor.span, pos, what, cell });
+  }
+
+  /** `st` runs after every pending site of the current body: refuse each one it observes. */
+  private orderFollow(st: unknown): void {
+    const ord = this.order;
+    if (!ord || ord.pending.length === 0 || !st || typeof st !== "object") return;
+    const kept: PendingOrder[] = [];
+    for (const p of ord.pending) {
+      if (this.observes(st, p.cell, new WeakSet())) {
+        const line = this.spanOverride === null ? ((st as AnyNode).span as { line?: unknown } | undefined)?.line : undefined;
+        this.orderReport(p, typeof line === "number" ? `a later statement (line ${line})` : "a later statement of the same body");
+      }
+      else kept.push(p);
+    }
+    ord.pending = kept;
+  }
+
+  private orderReport(p: PendingOrder, follower: string): void {
+    if (this.orderReported.has(p)) return;
+    this.orderReported.add(p);
+    if (this.order) this.order.pending = this.order.pending.filter((x) => x !== p);
+    if (this.reported.has(p.anchor)) return;
+    this.reported.add(p.anchor);
+    const target = p.cell === null ? "its effects" : `the write to \`@${p.cell}\``;
+    this.sites.push({
+      anchor: p.anchor, span: p.span, position: p.pos, kind: "action", order: true,
+      what: `${p.what} and does not wait for it, but ${follower} runs before ${target} lands`,
+    });
+  }
+
+  // ---- `reset(@c)` of a cell whose reset value waits (s470-await-residue) ----------------------
+  //
+  // §6.8.1: `reset(@c)` re-evaluates the cell's `default=` (else its initializer) and writes the
+  // result. When that expression waits (`<v> = isOk(@pw)`), the runtime settles the re-run call
+  // DETACHED (`_scrml_reset_apply`, S368) — the cell never holds the Promise, but `reset` returns at
+  // once, so every statement after it reads the value from BEFORE the reset (measured: `reset(@v);
+  // if (@v) …` with a previous TRUE logged a wrong password in, in a function body, a `when` body and
+  // a handler). impl#1 awaits a reset nowhere, and the function colouring does not see one (a
+  // `reset` is not a call), so it is refused wherever anything can follow it — everywhere except the
+  // SOLE statement of an event-handler value (the S450 sole-root rule: nothing of that handler
+  // follows it). One walk over the whole file (function bodies and handlers included) plus the
+  // engine / `when` bodies parsed from text.
+
+  /** Collect the file's waiting-reset cells (before the walk: engine / `when` bodies are judged during it). */
+  beginResets(nodes: unknown): void {
+    const seen = new WeakSet<object>();
+    const gens = (v: unknown): void => {
+      if (!v || typeof v !== "object" || seen.has(v as object)) return;
+      seen.add(v as object);
+      if (Array.isArray(v)) { for (const x of v) gens(x); return; }
+      const n = v as AnyNode;
+      if (n.kind === "function-decl" && n.isGenerator === true && typeof n.name === "string") this.generatorFns.add(n.name);
+      for (const k of Object.keys(n)) if (k !== "span" && k !== "_record") gens(n[k]);
+    };
+    gens(nodes);
+    const cells = this.collectWaitingResetCells(nodes);
+    this.waitingResetCells = cells.size > 0 ? cells : null;
+  }
+
+  /** The file's generator functions (a §36 SSE write subscribes; it is not an un-waited call). */
+  private readonly generatorFns = new Set<string>();
+
+  /** The cells whose reset value waits: key path (`v`, `form.w`) → what waits. */
+  private waitingResetCells: Map<string, string> | null = null;
+  /** `reset` nodes that are the sole statement of an event-handler value. */
+  private readonly soleHandlerResets = new WeakSet<object>();
+
+  private collectWaitingResetCells(nodes: unknown): Map<string, string> {
+    const out = new Map<string, string>();
+    const seen = new WeakSet<object>();
+    const visit = (v: unknown, prefix: string): void => {
+      if (!v || typeof v !== "object" || seen.has(v as object)) return;
+      seen.add(v as object);
+      if (Array.isArray(v)) { for (const x of v) visit(x, prefix); return; }
+      const n = v as AnyNode;
+      if (n.kind === "state-decl" && typeof n.name === "string" && n.shape !== "derived" && n.isServer !== true) {
+        const key = prefix + n.name;
+        const thunk = (n.defaultExpr && typeof n.defaultExpr === "object") ? n.defaultExpr
+          : (n.initExpr && typeof n.initExpr === "object" && !isPlaceholderHatch(n.initExpr)) ? n.initExpr : null;
+        const w = thunk ? this.exprWaits(thunk) : (typeof n.init === "string" ? this.textNames(n.init) : null);
+        if (w !== null) out.set(key, w);
+        if (Array.isArray(n.children)) visit(n.children, key + ".");
+        for (const k of Object.keys(n)) if (k !== "children" && k !== "span" && k !== "_record") visit(n[k], prefix);
+        return;
+      }
+      for (const k of Object.keys(n)) if (k !== "span" && k !== "_record") visit(n[k], prefix);
+    };
+    visit(nodes, "");
+    return out;
+  }
+
+  /** The waiting cell a `reset` of `path` re-runs (the cell, or a compound's waiting child), or null. */
+  private resetWaits(path: string): { key: string; what: string } | null {
+    const cells = this.waitingResetCells;
+    if (!cells || cells.size === 0) return null;
+    for (const [key, what] of cells) if (key === path || key.startsWith(path + ".")) return { key, what };
+    return null;
+  }
+
+  private resetTargetPath(t: unknown): string | null {
+    if (!t || typeof t !== "object") return null;
+    const n = t as AnyNode;
+    if (n.kind === "ident" && typeof n.name === "string") return n.name.replace(/^@/, "");
+    if (n.kind === "member" && n.computed !== true) {
+      const o = this.resetTargetPath(n.object);
+      const prop = typeof n.property === "string" ? n.property
+        : (n.property && typeof (n.property as AnyNode).name === "string") ? String((n.property as AnyNode).name) : null;
+      return o !== null && prop !== null ? `${o}.${prop}` : null;
+    }
+    return null;
+  }
+
+  private resetSite(anchor: object, span: unknown, path: string, hit: { key: string; what: string }): void {
+    if (this.reported.has(anchor)) return;
+    this.reported.add(anchor);
+    this.sites.push({
+      anchor, span: this.spanOverride ?? span, position: `\`reset(@${path})\``, kind: "action", order: true,
+      what: `${hit.what} again (it re-runs the initializer of \`@${hit.key}\`) and does not wait for it, but what ` +
+        "runs after the reset reads the value from before it",
+    });
+  }
+
+  /** Every `reset` in `v` (any position) of a cell whose reset value waits, except a sole handler statement. */
+  resets(v: unknown): void {
+    if (this.waitingResetCells === null) return;
+    this.resetWalk(v, null, new WeakSet());
+  }
+
+  private resetWalk(v: unknown, span: unknown, seen: WeakSet<object>): void {
+    if (!v || typeof v !== "object" || seen.has(v as object)) return;
+    seen.add(v as object);
+    if (Array.isArray(v)) { for (const x of v) this.resetWalk(x, span, seen); return; }
+    const n = v as AnyNode;
+    const sp = n.span ?? span;
+    if (n.kind === "reset-expr") {
+      if (this.soleHandlerResets.has(n)) return;
+      const path = this.resetTargetPath(n.target);
+      const hit = path !== null ? this.resetWaits(path) : null;
+      if (path !== null && hit) this.resetSite(n, sp, path, hit);
+      else if (path === null && this.waitingResetCells!.size > 0) {
+        // A target this walk cannot read: fail closed.
+        const first = this.waitingResetCells!.entries().next().value as [string, string];
+        this.resetSite(n, sp, "…", { key: first[0], what: first[1] });
+      }
+      return;
+    }
+    // An event-handler attribute: a `reset` that is its SOLE statement may run fire-and-forget.
+    if (typeof n.name === "string" && isEventHandlerAttrName(n.name) && n.value && typeof n.value === "object") {
+      const val = n.value as AnyNode;
+      if (val.kind === "call-ref" && val.name === "reset") {
+        const args = Array.isArray(val.argExprNodes) ? val.argExprNodes : [];
+        if (args.length !== 1) {
+          const a0 = Array.isArray(val.args) ? (val.args as unknown[])[0] : null;
+          const path = typeof a0 === "string" ? a0.replace(/^@/, "") : null;
+          const hit = path !== null ? this.resetWaits(path) : null;
+          if (path !== null && hit) this.resetSite(val, sp, path, hit);
+        }
+        return; // sole statement: `onclick=reset(@v)`
+      }
+      if (val.kind === "expr") {
+        const stmts = val.handlerBlock && Array.isArray((val.handlerBlock as AnyNode).stmts) ? (val.handlerBlock as AnyNode).stmts as AnyNode[] : null;
+        if (!stmts || stmts.length === 1) {
+          const sole = stmts ? (stmts[0]?.exprNode as AnyNode | undefined) : (val.exprNode as AnyNode | undefined);
+          if (sole && sole.kind === "reset-expr") {
+            this.soleHandlerResets.add(sole);
+            if (val.exprNode && (val.exprNode as AnyNode).kind === "reset-expr") this.soleHandlerResets.add(val.exprNode as object);
+          }
+        }
+        if (!val.exprNode && !val.handlerBlock && typeof val.raw === "string") this.resetText(val.raw, val, sp);
+      }
+    }
+    if (n.kind === "escape-hatch") {
+      const text = typeof n.bodyRaw === "string" ? n.bodyRaw : typeof n.raw === "string" ? n.raw : "";
+      if (text) this.resetText(text, n, sp);
+    }
+    for (const k of Object.keys(n)) {
+      if (k === "span" || k === "_record") continue;
+      const x = n[k];
+      if (x && typeof x === "object") this.resetWalk(x, sp, seen);
+    }
+  }
+
+  /** Text the tree does not carry: read only to refuse (`reset` beside a waiting cell's name). */
+  private resetText(text: string, anchor: object, span: unknown): void {
+    const names = mentionedNames(text);
+    if (!names.has("reset")) return;
+    for (const [key, what] of this.waitingResetCells!) {
+      const root = key.split(".")[0]!;
+      if (names.has(root)) { this.resetSite(anchor, span, root, { key, what }); return; }
+    }
+  }
+
+  /** What a lifted whole write `@c = f(…)` calls (for the message). */
+  private liftedWhat(s: AnyNode): string {
+    const ie = s.initExpr as AnyNode | undefined;
+    const callee = ie?.callee as AnyNode | undefined;
+    return callee && typeof callee.name === "string" ? this.describe(callee.name) : "a waiting function";
+  }
+
+  /**
+   * Whether `v` (a statement that runs after a pending site) can observe it: a call of any kind, a
+   * `new`, a `reset`, a `?{}`, or text the tree does not carry (fail closed); a write's cell (read or
+   * written) — any cell, for a bare call. A function VALUE (a lambda, a nested `function`) does not
+   * run where it is declared; markup renders reactively (it re-renders when the write lands).
+   */
+  private observes(v: unknown, cell: string | null, seen: WeakSet<object>): boolean {
+    if (!v || typeof v !== "object" || seen.has(v as object)) return false;
+    seen.add(v as object);
+    if (Array.isArray(v)) { for (const x of v) if (this.observes(x, cell, seen)) return true; return false; }
+    const n = v as AnyNode;
+    const kind = n.kind;
+    if (kind === "lambda" || kind === "function-decl" || kind === "markup" || kind === "markup-value") return false;
+    if (typeof kind === "string" && SKIPPED_STATEMENT_KINDS.has(kind)) return false;
+    if (kind === "call" || kind === "new" || kind === "reset-expr" || kind === "sql-ref" || kind === "sql" ||
+        kind === "guarded-expr" || kind === "match-expr" || kind === "match-stmt") return true;
+    if (kind === "escape-hatch") {
+      if (n.nativeKind === "Literal") return false;
+      const text = typeof n.bodyRaw === "string" ? n.bodyRaw : typeof n.raw === "string" ? n.raw : "";
+      return text.trim() !== "" || !isPlaceholderHatch(n);
+    }
+    const mentions = (name: string): boolean => cell === null || name === cell || name.startsWith(cell + ".");
+    if (kind === "ident" && typeof n.name === "string" && n.name.startsWith("@")) return mentions(n.name.slice(1));
+    if (kind === "state-decl" && typeof n.name === "string" && mentions(n.name)) return true;
+    if (kind === "lit" && n.litType === "template" && n.hasInterpolation !== false && typeof n.raw === "string") {
+      for (const e of templateInterpolationNodesAll(n as never)) if (this.observes(e, cell, seen)) return true;
+      return false;
+    }
+    // A statement that holds its expression only as text (no tree): fail closed.
+    const treeless = (textKey: string, treeKey: string): boolean =>
+      typeof n[textKey] === "string" && (n[textKey] as string).trim() !== "" && (!n[treeKey] || typeof n[treeKey] !== "object");
+    if (kind === "bare-expr" && treeless("expr", "exprNode")) return true;
+    if ((kind === "state-decl" || (typeof kind === "string" && PLAIN_DECL_KINDS.has(kind))) && treeless("init", "initExpr")) return true;
+    for (const k of Object.keys(n)) {
+      if (k === "span" || k === "_record" || k === "id") continue;
+      const x = n[k];
+      if (x && typeof x === "object" && this.observes(x, cell, seen)) return true;
+    }
+    return false;
+  }
 
   /**
    * Shape (1): `@cell = f(args)` — a non-derived cell write whose whole value is ONE call of a
@@ -684,7 +1045,8 @@ class RenderWalk {
   private meta(n: AnyNode): void {
     if (this.visited.has(n)) return;
     this.visited.add(n);
-    this.inLocal(true, () => this.syncStmts(n.body, "a runtime `^{ }` body"));
+    // s470-await-residue — a runtime `^{ }` runs once at module init: in the module-init order.
+    this.withOrder(this.moduleOrder, () => this.inLocal(true, () => this.syncStmts(n.body, "a runtime `^{ }` body")));
   }
 
   // ---- local bodies (fix round 1, H1 / H2) ----------------------------------
@@ -908,7 +1270,10 @@ class RenderWalk {
     const read = readEngineBody(s, "whenBody", raw, "__when_body__.scrml");
     const saved = this.whenHost;
     this.whenHost = true;
-    try { this.inLocal(false, () => this.asyncHost(read.stmts, raw, s, s.span, "a `when … changes` body")); }
+    try {
+      this.withOrder(null, () => this.inLocal(false, () => this.asyncHost(read.stmts, raw, s, s.span, "a `when … changes` body")));
+      this.withSpan(s.span, () => this.resets(read.stmts));
+    }
     finally { this.whenHost = saved; }
   }
 
@@ -1064,10 +1429,13 @@ class RenderWalk {
     const body = (owner: object, slot: string, src: string, file: string, span: unknown, pos: string, strict: boolean): void => {
       const read = readEngineBody(owner, slot, src, file);
       if (!read.stmts) return;
-      this.inLocal(false, () => this.withSpan(span, () => {
+      // s470-await-residue — a message arm is still a synchronous body (it returns the next state):
+      // its own order. A state-child `effect=` / an `<onTransition>` body has an async host now.
+      this.withOrder(slot === "arm" ? { pending: [] } : null, () => this.inLocal(false, () => this.withSpan(span, () => {
         if (strict) { for (const st of read.stmts!) this.syncStmt(st, pos, false); }
         else this.syncStmts(read.stmts, pos);
-      }));
+        this.resets(read.stmts);
+      })));
     };
     const onTransition = (entry: AnyNode, where: string, span: unknown): void => {
       const b = onTransitionBodySource(entry);
@@ -1113,7 +1481,10 @@ class RenderWalk {
     const opener = meta.openerEffect;
     if (typeof opener === "string" && opener.length > 0) {
       const read = readEngineBody(meta, "openerEffect", opener, ENGINE_BODY_FILE.openerEffect);
-      this.inLocal(false, () => this.asyncHost(read.stmts, opener, n, n.span, `the opener \`effect=\` body of engine \`${engineName}\``));
+      // The opener runs once at boot, during module init: it follows the module-init statements before it.
+      this.withOrder(this.moduleOrder, () => this.orderFollow(read.stmts ?? opener));
+      this.withOrder(null, () => this.inLocal(false, () => this.asyncHost(read.stmts, opener, n, n.span, `the opener \`effect=\` body of engine \`${engineName}\``)));
+      this.withSpan(n.span, () => this.resets(read.stmts));
     }
   }
 
@@ -1131,6 +1502,8 @@ class RenderWalk {
  */
 export function renderWaitingCallsOf(nodes: unknown[], facts: RenderWaitingFacts): RenderWaitingSite[] {
   const w = new RenderWalk(facts);
+  w.beginResets(nodes);
   w.nodes(nodes, true);
+  w.resets(nodes);
   return w.sites;
 }

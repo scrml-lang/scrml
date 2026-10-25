@@ -55,6 +55,7 @@ import { parseAfterDuration } from "./parse-after-duration.ts";
 import { nsName, nsCellKey, stripNsName } from "./chunk-namespace.ts";
 import { judgeDescriptorExpr, describeJudgeType } from "./emit-predicates.ts";
 import { CGError } from "./errors.ts";
+import { colorAsyncActionBody, type ActiveClientAsync } from "./js-async-analysis.ts";
 import { recordRefusedLowering } from "./refused-lowering-errors.ts";
 import { readShorthandBody, walkedArmBodyOrRefuse } from "../arm-body-reader.ts";
 import { readEngineBody, ENGINE_BODY_FILE, messageArmSource, onTransitionBodySource, guardSource, bodyWasWalked, ownerReported } from "../engine-body-reader.ts";
@@ -4551,6 +4552,7 @@ function emitHookArm(
   arm: EngineHookArm,
   varName: string,
   emitOpts: import("./emit-logic.ts").EmitLogicOpts = { boundary: "client" } as import("./emit-logic.ts").EmitLogicOpts,
+  active?: ActiveClientAsync | null,
 ): string[] {
   const lines: string[] = [];
   const fromKey = JSON.stringify(arm.from);
@@ -4580,7 +4582,16 @@ function emitHookArm(
   }
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const logic = require("./emit-logic.ts") as { emitLogicBody: (nodes: any[], opts: any) => string[] };
-  const bodyLines = logic.emitLogicBody(stmts, { ...emitOpts, boundary: "client", insideFunctionBody: true });
+  const rawBodyLines = logic.emitLogicBody(stmts, { ...emitOpts, boundary: "client", insideFunctionBody: true });
+  // s470-await-residue (§13.8 (i)) — the hook body is an action body: its async calls are awaited
+  // in place, in statement order, inside its own async scope (`colorAsyncActionBody`). The firing
+  // function stays synchronous (the transition does not wait for the body).
+  const bodyLines = colorAsyncActionBody(
+    rawBodyLines.join("\n"),
+    arm.kind === "effect" ? `effect= .${arm.from} -> .${arm.to}` : `<onTransition> .${arm.from} -> .${arm.to}`,
+    (arm.owner as { span?: unknown } | undefined)?.span ?? null,
+    active,
+  ).split("\n");
   const body = (indent: string): void => { for (const l of bodyLines) lines.push(`${indent}${l}`); };
 
   // For effect arms there is no once / if=expr (Form 1 has no such attrs).
@@ -4690,6 +4701,7 @@ function emitHookArm(
 export function emitEngineHookFiringFunction(
   meta: EngineMetadata,
   emitOpts?: import("./emit-logic.ts").EmitLogicOpts,
+  active?: ActiveClientAsync | null,
 ): string[] {
   const arms = collectEngineHooks(meta);
   if (arms.length === 0) return [];
@@ -4713,7 +4725,7 @@ export function emitEngineHookFiringFunction(
   lines.push(`function ${fnName}(_scrml_from, _scrml_to) {`);
 
   for (const arm of arms) {
-    const armLines = emitHookArm(arm, varName, emitOpts);
+    const armLines = emitHookArm(arm, varName, emitOpts, active);
     for (const l of armLines) lines.push(l);
   }
 
@@ -4971,7 +4983,7 @@ export function maybeLowerCancelTimerCallRef(
  *
  * Both non-derived and derived engines participate (per §51.0.J line 20640).
  */
-export function emitEngineHookFiringFunctionsForFile(fileAST: any): string[] {
+export function emitEngineHookFiringFunctionsForFile(fileAST: any, active?: ActiveClientAsync | null): string[] {
   const lines: string[] = [];
   // S469 — hook bodies are lowered as statements (emitLogicBody) with the file's engine-aware
   // opts, so an engine write inside one routes through the transition machinery like the
@@ -4982,7 +4994,7 @@ export function emitEngineHookFiringFunctionsForFile(fileAST: any): string[] {
   for (const decl of collectC12EngineDecls(fileAST)) {
     const meta = decl._record?.engineMeta;
     if (!meta) continue;
-    const fnLines = emitEngineHookFiringFunction(meta, emitOpts);
+    const fnLines = emitEngineHookFiringFunction(meta, emitOpts, active);
     if (fnLines.length === 0) continue;
     if (lines.length > 0) lines.push("");
     for (const l of fnLines) lines.push(l);
@@ -4992,7 +5004,7 @@ export function emitEngineHookFiringFunctionsForFile(fileAST: any): string[] {
   for (const decl of collectC14DerivedEngineDecls(fileAST)) {
     const meta = decl._record?.engineMeta;
     if (!meta) continue;
-    const fnLines = emitEngineHookFiringFunction(meta, emitOpts);
+    const fnLines = emitEngineHookFiringFunction(meta, emitOpts, active);
     if (fnLines.length === 0) continue;
     if (lines.length > 0) lines.push("");
     for (const l of fnLines) lines.push(l);
