@@ -749,6 +749,9 @@ export const PINNED_CLASS = {
   "f13/imported: request body cell write of the call": "PASS-REFUSED",
   "f13/imported: when body tests the call": "PASS",
   "f13/imported: engine opener effect= tests the call": "PASS-DENY",
+  // s470-action-body-await fix round 4 — classify.js --json f14/ (every shape FAIL on 37fa2154f).
+  "f14/when: template interpolation holds a callback over a server call (R3)": "PASS-REFUSED",
+  "f14/when: C-style head with a decoy call beside a template callback (R2)": "PASS-REFUSED",
   // s470-action-body-await fix round 3 — classify.js --json f12/ (every shape FAIL on 07ebed34b).
   "f12/opener effect= for head: template over a server call": "PASS-REFUSED",
   "f12/opener effect= for head: template over a server call, no bound": "PASS-REFUSED",

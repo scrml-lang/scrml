@@ -103,7 +103,10 @@ const REFUSED_FR1 = {
   // fix round 3 (R1) — outside a `when` body a C-style `for` head is not lowered faithfully
   "opener effect=: a C-style for head over a template": [ENG("<engine for=Phase effect=${ for (let i = 0; `${isOk(@pw)}` == \"true\" && i < 1; i++) { @msg = \"IN\" } }>\n  <Idle rule=.Active/>\n  <Active/>\n</>"), "C-style `for` head"],
   "opener effect=: a C-style for head": [ENG("<engine for=Phase effect=${ for (let i = 0; isOk(@pw) && i < 1; i++) { @msg = \"IN\" } }>\n  <Idle rule=.Active/>\n  <Active/>\n</>"), "C-style `for` head"],
-  "when body: a C-style for head over a template (unreadable parts)": ["${ when @pw changes { for (let i = 0; `${isOk(@pw)}` == \"true\" && i < 1; i++) { @msg = \"IN\" } } }", "cannot read"],
+  "when body: a C-style for head over a template (unreadable parts)": ["${ when @pw changes { for (let i = 0; `${isOk(@pw)}` == \"true\" && i < 1; i++) { @msg = \"IN\" } } }", "its text names one"],
+  // fix round 4 — the accounting invariant: an occurrence the walk did not accept (R3, R2)
+  "when body: a callback inside a template interpolation (R3)": ["${ when @pw changes { if (`${[@pw].filter((x) => isOk(x)).length}` == \"1\") { @msg = \"IN\" } } }", "inside a nested function"],
+  "when body: a decoy call in a C-style head beside a template callback (R2)": ["${ when @pw changes { for (let i = 0; (isOk(\"x\") || true) && `${[@pw].filter((x) => isOk(x)).length}` == \"1\" && i < 1; i++) { @msg = \"IN\" } } }", "its text names one"],
   "when body: a `!{ }`-handled call": ["${ when @pw changes { @msg = isOk(@pw) !{ _ :> \"err\" } } }", "handled with"],
 };
 for (const [hn, h] of Object.entries(H2_HOSTS)) for (const [bn, b] of Object.entries(H2)) REFUSED_FR1[`H2 ${hn}: ${bn}`] = [h(b), "`"];

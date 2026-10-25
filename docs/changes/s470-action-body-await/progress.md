@@ -348,3 +348,38 @@ form × `when` body / opener `effect=`), on f55eb8d4a → this branch:
   too: this lane's `f9` is RENAMED **`f13`** (shapes/f13.js, pinned keys `f13/…`, README); every
   "f9" above in this file means today's `f13`. EXPECTED_SHAPE_COUNT = main's 2192 + this lane's 71
   (f13 30, f10 37, f11 2, f12 2) = 2263.
+
+## Fix round 4 (delta review of 37fa2154f, FIX — two holes in the `when` acceptance walk) — 2026-10-25
+
+The third hole across rounds, so the fix is an INVARIANT, not another shape (mirrors lane 1's use-count rule).
+
+- **Accounting invariant** (`asyncHost`, both async hosts — `when` body and opener `effect=`): for each
+  statement, the waiting-name OCCURRENCES in its source text (its parse span over the wrapped body
+  engine-body-reader parsed; the whole body when a span cannot be placed) are counted with the compiler's
+  name reader — `mentionedNameCounts`, a new occurrence-counting sibling of `mentionedNames` in
+  failable-value-calls.ts sharing its one scan (template interpolations and nested functions included,
+  plain string contents and property names excluded; `mentionedNames` behaviour unchanged). The
+  statement is accepted only when that count EQUALS the call sites the walk accepted as awaited at the
+  host's own level; any mismatch is E-IMPL1-ACTION-NOT-AWAITED ("its text names one N times, but only M
+  of those are calls impl#1 awaits at this body's own level"). Fail closed for any shape the walk cannot see.
+- The C-style head's `exprWaits(parts) === null` any-match is REMOVED (a decoy own-level call vouched for
+  a hidden one — R2); in a `when` body the head is judged by the invariant.
+- The walk now reads a template literal's interpolations (the one template slicer,
+  `templateInterpolationNodesAll`): an own-level call there is accepted and counted; a callback there is a
+  nested function (R3 refused by that rule, the invariant behind it).
+- R3 (`when … { if (`${[@pw].filter((x) => isOk(x)).length}` == "1") … }`, emitted non-async
+  `.filter(x => _scrml_fetch_isOk_N(x))`) and R2 (the same beside a decoy `isOk("x")` in a C-style head)
+  are refused. Pack family **f14** (+2) — **2/2 FAIL on 37fa2154f**, PASS-REFUSED here;
+  EXPECTED_SHAPE_COUNT 2263 → 2265. A third candidate (`@ok = `${…filter(x => isOk(x))…}` == "1"`)
+  PASSED on 37fa2154f, so it is not a pack shape (it is now refused — over-refusal below).
+- Reviewer probe sets shapes1–12 on this head: FAIL 0 / 0 / 0 / 0 / 0 / 2 / 4 / 0 / 0 / 0 / 0 / 0 (the 6
+  are the shapes that log in by design: `typeof isOk(…) == "boolean"`, `Promise.resolve(1)`); every
+  class change vs the reviewer's head runs is → PASS-REFUSED.
+- Over-refusals recorded (LOW, fail closed, sibling of `g-c-for-head-over-refusal-s470`): a template
+  literal inside a C-style `for` head in a `when` body (its parsed parts are mangled — `$` — so its
+  calls are not counted: "when template" head forms, L7 included; decoy + template call / helper; alias
+  import head); a callback inside a template interpolation that only feeds a cell write or a boot-only
+  opener test ("when write template cb", "opener if template cb"), which were PASS / PASS-DENY on
+  37fa2154f.
+- E1 (template / string literals mangled in a C-style head) is the PA's
+  `g-impl1-c-for-head-template-and-string-literals-mangled-s470` (#1553): untouched.

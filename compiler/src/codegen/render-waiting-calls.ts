@@ -41,7 +41,7 @@ import type { ExprNode } from "../types/ast.ts";
 import { isMetaKind } from "../types/ast.ts";
 import { collectCalleeIdents, bodyHasForeignOrSql } from "./emit-library-shared.ts";
 import { templateInterpolationNodesAll, templateTextInterpolationNodes, guardCallArmsRaw, parseExprToNode } from "../expression-parser.ts";
-import { mentionedNames, isExprNodeValue, STATEMENT_CHILD_KEYS } from "../failable-value-calls.ts";
+import { mentionedNames, mentionedNameCounts, isExprNodeValue, STATEMENT_CHILD_KEYS } from "../failable-value-calls.ts";
 import { isEventHandlerAttrName } from "../multi-statement-scan.ts";
 import { DEFAULT_LOGIC_MODE_TAGS, stmtContainsRenderableLogic, stmtContainsLiftExpr, isValueFormControlFlowStmt } from "./emit-html.ts";
 import { parseMatchArms } from "../match-statechild-parser.ts";
@@ -754,11 +754,58 @@ class RenderWalk {
   private asyncHost(stmts: unknown[] | null, raw: string, anchor: AnyNode, span: unknown, pos: string): void {
     this.inMode(true, () => this.withSpan(span, () => {
       if (!stmts) { this.site(anchor, span, pos, this.textNames(raw)); return; }
+      // fix round 4 — the ACCOUNTING INVARIANT (R2 / R3, the third hole in this walk). The source
+      // text of each statement (the parse's span over the wrapped body engine-body-reader parsed;
+      // the whole body when a span cannot be placed) is read with the compiler's name reader
+      // (`mentionedNameCounts`, the `mentionedNames` reader counting occurrences: template
+      // interpolations and nested functions included, string contents and property names
+      // excluded). The statement is accepted only when the number of waiting-name occurrences in
+      // it EQUALS the number of call sites this walk accepted as awaited at the host's own level.
+      // Any occurrence the walk did not see (a callback inside a template interpolation, a head
+      // carried as text, a shape not thought of) is a mismatch: refused, fail closed.
+      const wrapped = "${\n" + raw + "\n}";
+      let placed = true;
+      let acceptedTotal = 0;
+      let refusedAny = false;
       for (const st of stmts) {
         if (!st || typeof st !== "object") continue;
-        this.site(st as object, span, pos, this.asyncWaits(st, false, new WeakSet()));
+        this.acceptedAwaitedCalls = 0;
+        const why = this.asyncWaits(st, false, new WeakSet());
+        const accepted = this.acceptedAwaitedCalls;
+        acceptedTotal += accepted;
+        if (why !== null) { refusedAny = true; this.site(st as object, span, pos, why); continue; }
+        const sp = (st as AnyNode).span as { start?: unknown; end?: unknown } | undefined;
+        const text = sp && typeof sp.start === "number" && typeof sp.end === "number" && sp.end > sp.start && sp.end <= wrapped.length
+          ? wrapped.slice(sp.start, sp.end) : null;
+        if (text === null) { placed = false; continue; }
+        const named = this.waitingNameCount(text);
+        if (named !== accepted) {
+          refusedAny = true;
+          this.site(st as object, span, pos, this.unaccountedWhy(named, accepted));
+        }
+      }
+      // A statement whose text could not be placed: the same invariant over the whole body.
+      if (!placed && !refusedAny) {
+        const named = this.waitingNameCount(raw);
+        if (named !== acceptedTotal) this.site(anchor, span, pos, this.unaccountedWhy(named, acceptedTotal));
       }
     }));
+  }
+
+  /** Call sites `asyncWaits` accepted as awaited at the host's own level (fix round 4). */
+  private acceptedAwaitedCalls = 0;
+
+  /** How many times `text` names a waiting function (the occurrence-counting name reader). */
+  private waitingNameCount(text: string): number {
+    let n = 0;
+    for (const [name, c] of mentionedNameCounts(text)) if (this.facts.waits(name)) n += c;
+    return n;
+  }
+
+  private unaccountedWhy(named: number, accepted: number): string {
+    return `a waiting function (its text names one ${named} time${named === 1 ? "" : "s"}, but only ${accepted} ` +
+      `of those ${accepted === 1 ? "is a call" : "are calls"} impl#1 awaits at this body's own level — e.g. a call inside a ` +
+      "template-literal interpolation's callback, which impl#1 does not await here)";
   }
 
   private asyncWaits(v: unknown, inFn: boolean, seen: WeakSet<object>): string | null {
@@ -775,14 +822,13 @@ class RenderWalk {
     // are not the head the opener `effect=` emits (`for (let i = 0; $; i++)`, measured — a global `$`
     // logged a wrong password in). Outside a `when` body, a head that names a waiting function is
     // refused (the f55eb8d4a behaviour). A `when` body lowers the head from its own `bodyRaw`
-    // correctly (reviewer-confirmed: `${await …}`): there the head is accepted only when its parsed
-    // parts account for every waiting name its text holds.
+    // correctly (reviewer-confirmed: `${await …}`): there the head is judged by the invariant below.
     if (kind === "for-stmt" && n.cStyleParts && typeof n.cStyleParts === "object") {
       const textW = typeof n.iterable === "string" ? this.textNames(n.iterable) : null;
-      if (textW !== null) {
-        if (!this.whenHost) return `${textW}, in a C-style \`for\` head (impl#1 does not lower that head faithfully here)`;
-        if (this.exprWaits(n.cStyleParts) === null) return `${textW}, in a C-style \`for\` head impl#1 cannot read`;
-      }
+      // In a `when` body the head is judged by the accounting invariant (`asyncHost`): its text's
+      // waiting-name occurrences must all be accepted calls in the parsed parts (fix round 4 — an
+      // any-match let a decoy call vouch for a hidden one, R2).
+      if (textW !== null && !this.whenHost) return `${textW}, in a C-style \`for\` head (impl#1 does not lower that head faithfully here)`;
     }
     // A `!{ }`-handled call in a `when` body is lowered into a synchronous value IIFE
     // (`(() => { let r = f(…); if (r && r.__scrml_error) … })()`): the call is not awaited and the
@@ -804,6 +850,16 @@ class RenderWalk {
     if (kind === "ident" && typeof n.name === "string" && !n.name.startsWith("@") && this.facts.waits(n.name)) {
       return `${this.describe(n.name)}, read as a value`;
     }
+    // fix round 4 — a template literal's interpolations are expressions of this statement (the
+    // compiler's one template slicer): walked like any other, so an own-level call there is
+    // accepted (and counted for the invariant) and a callback there is a nested function (R3).
+    if (kind === "lit" && n.litType === "template" && n.hasInterpolation !== false && typeof n.raw === "string") {
+      for (const e of templateInterpolationNodesAll(n as never)) {
+        const r = this.asyncWaits(e, inFn, seen);
+        if (r) return r;
+      }
+      return null;
+    }
     if (kind === "call") {
       const arms = guardCallArmsRaw(n as unknown as ExprNode);
       if (arms !== null) { const r = this.textNames(arms); if (r) return r; }
@@ -820,6 +876,8 @@ class RenderWalk {
         if (this.facts.waits(nm) && n.optional === true) {
           return `${this.describe(nm)}, called optionally (\`${nm}?.(…)\`, which impl#1 does not await here)`;
         }
+        // An own-level call of a function this host awaits: counted for the invariant (`asyncHost`).
+        if (this.facts.waits(nm)) this.acceptedAwaitedCalls++;
       } else if (callee && callee.kind === "member") {
         const obj = callee.object as AnyNode | undefined;
         if (obj && obj.kind === "ident" && typeof obj.name === "string" && this.facts.namespaceLocals.has(obj.name)) {
