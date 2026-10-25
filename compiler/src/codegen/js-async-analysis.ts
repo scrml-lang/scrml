@@ -1361,55 +1361,73 @@ export function bodyTextHasOwnAwait(bodyText: string): boolean | null {
 }
 
 /**
- * s470-when-changes-latest-wins — wrap the operand of every OWN-level `await`
- * in a function BODY (statement text) as `await <gate>(<operand>)`. Nested
- * functions are their own scope and are left alone (the same scope rule as
- * `fnTextHasOwnAwait`). Used for a `when … changes` body: the runtime hands
- * each run a gate that never settles once a newer run has started (§6.7.4
- * "newest run wins"), so a superseded run's continuation never resumes.
+ * s470-when-changes-latest-wins — gate every OWN-level `await` in a function
+ * BODY (statement text) for §6.7.4 "newest run wins". With `gate` =
+ * `{ check: C, wait: W, stop: S }`, each `await X` becomes
+ *
+ *     (C(await W(X)) ? C.value : await S())
+ *
+ * where `C` is the run's gate (`_scrml_when_changes` passes it to the body) and
+ * `W` / `S` are runtime helpers. `W(X)` settles to a box whether X fulfils or
+ * rejects. `C(box)` runs SYNCHRONOUSLY at
+ * the point the run resumes, so no microtask can slip a re-trigger between the
+ * staleness check and the code after the await (the `<request>` shape: check
+ * after resuming). For the current run it yields the value (or re-throws the
+ * failure, as the bare `await` would); for a stale run it is false and the run
+ * awaits `S()`, which never settles, so its continuation never resumes.
+ * Nested functions are their own scope and are left alone (the same scope rule
+ * as `fnTextHasOwnAwait`).
  *
  * Returns the rewritten text (unchanged when there is no own-level `await`),
  * or `null` when the text does not parse or holds a `for await` (whose
- * per-iteration resumption has no operand to wrap) — the caller must not ship
- * an unguarded async body in that case.
+ * per-iteration resumption has no operand to gate) — the caller must not ship
+ * an ungated async body in that case.
  */
-export function wrapOwnAwaits(bodyText: string, gate: string): string | null {
+export interface AwaitGate { check: string; wait: string; stop: string }
+export function wrapOwnAwaits(bodyText: string, gate: AwaitGate): string | null {
   const PREFIX = "(async function() {\n";
   const program = tryParse(PREFIX + bodyText + "\n})");
   if (!program || program.body.length !== 1) return null;
   const fn = program.body[0]?.expression;
   if (!fn || !isFn(fn)) return null;
-  const opens: number[] = [];
-  const closes: number[] = [];
+  // One insertion: offset, text, opener or closer, await-nesting depth.
+  const edits: Array<{ at: number; text: string; open: boolean; depth: number }> = [];
+  const off = PREFIX.length;
   let forAwait = false;
-  const walk = (n: N): void => {
+  const walk = (n: N, depth: number): void => {
     if (!n || typeof n !== "object") return;
-    if (Array.isArray(n)) { for (const c of n) walk(c); return; }
+    if (Array.isArray(n)) { for (const c of n) walk(c, depth); return; }
     if (n !== fn && isFn(n)) return;
     if (n.type === "ForOfStatement" && n.await === true) forAwait = true;
+    let inner = depth;
     if (n.type === "AwaitExpression" && n.argument) {
-      opens.push(n.argument.start - PREFIX.length);
-      closes.push(n.argument.end - PREFIX.length);
+      edits.push({ at: n.start - off, text: `(${gate.check}(`, open: true, depth });
+      edits.push({ at: n.argument.start - off, text: `${gate.wait}(`, open: true, depth });
+      edits.push({ at: n.argument.end - off, text: `)) ? ${gate.check}.value : await ${gate.stop}())`, open: false, depth });
+      inner = depth + 1;
     }
     for (const key of Object.keys(n)) {
       if (key === "type" || key === "start" || key === "end") continue;
       const v = n[key];
-      if (v && typeof v === "object") walk(v);
+      if (v && typeof v === "object") walk(v, inner);
     }
   };
-  walk(fn.params);
-  walk(fn.body);
+  walk(fn.params, 0);
+  walk(fn.body, 0);
   if (forAwait) return null;
-  if (opens.length === 0) return bodyText;
-  // Splice from the end so earlier offsets stay valid. At one offset a close
-  // (an inner operand ending) and an open never coincide in valid JS; equal
-  // opens / equal closes insert identical text, so their order is immaterial.
-  const edits: Array<[number, string]> = [
-    ...opens.map((o): [number, string] => [o, gate + "("]),
-    ...closes.map((c): [number, string] => [c, ")"]),
-  ].sort((a, b) => b[0] - a[0]);
+  if (edits.length === 0) return bodyText;
+  // Splice from the end so earlier offsets stay valid. At one offset the LAST
+  // splice lands leftmost, so openers go deeper-first (the outer one ends up
+  // outside) and closers shallower-first (the inner one ends up inside). In
+  // `await await x` the outer `W(` and the inner `(C(` share an offset,
+  // and so do the two closers.
+  edits.sort((a, b) => {
+    if (a.at !== b.at) return b.at - a.at;
+    if (a.open !== b.open) return a.open ? -1 : 1;
+    return a.open ? b.depth - a.depth : a.depth - b.depth;
+  });
   let out = bodyText;
-  for (const [at, text] of edits) out = out.slice(0, at) + text + out.slice(at);
+  for (const e of edits) out = out.slice(0, e.at) + e.text + out.slice(e.at);
   return out;
 }
 

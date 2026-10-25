@@ -201,8 +201,9 @@ describe("§3: codegen subscribes to the dep-list, not the body's reads", () => 
     // own-level await is gated (§6.7.4 newest run wins).
     expect(output).toContain("async function(_scrml_live)");
     // expression position (AST path) and statement position (block injector)
-    expect(output).toContain('_scrml_reactive_set("log", await _scrml_live(double(_scrml_reactive_get("n"))))');
-    expect(output).toContain("const r = await _scrml_live(double(1))");
+    const G = (x) => `(_scrml_live(await _scrml_when_wait(${x})) ? _scrml_live.value : await _scrml_when_stop())`;
+    expect(output).toContain(`_scrml_reactive_set("log", ${G('double(_scrml_reactive_get("n"))')})`);
+    expect(output).toContain(`const r = ${G("double(1)")}`);
   });
 });
 

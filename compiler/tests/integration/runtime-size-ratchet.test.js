@@ -386,15 +386,18 @@ describe("§3 the 16 KB aspiration, measured on both shapes", () => {
  * (`_scrml_build_admit` / `_scrml_build_owns`) ships on every page. Ruled S469 (user-voice
  * 98a5292, "Re-record with guard"; the shell raise is 0908198).
  *
- * ⚑ RAISED S470 — `<each>` row if= 8,245 -> 8,310 (+65 B), owner ruling S470: allow raising the
+ * ⚑ RAISED S470 — `<each>` row if= 8,245 -> 8,375 (+130 B), owner ruling S470: allow raising the
  * budget (s470-when-changes-latest-wins, g-when-changes-stale-response-s470, a security race fix,
  * SPEC §6.7.4 "newest run wins"). `_scrml_when_changes` (core) gains the `<request>`-style
- * sequence gate. Measured with this file's pinned compressor, stripped, base 6081e0685 -> head:
+ * sequence check, made synchronously where the run resumes (`_scrml_when_wait` /
+ * `_scrml_when_stop` + a per-run gate). Round 1 measured +65 B with a settle-time check; review F3
+ * showed that left a microtask window, and the resume-point check costs +65 B more. Measured with
+ * this file's pinned compressor, stripped, base 6081e0685 -> head:
  *
  *     shape                       base                    head
- *     lifted if=, no list         19,235 raw / 4,392 B    19,401 raw / 4,458 B  (+66 B, inside the band)
- *     <each> row if=              36,374 raw / 8,432 B    36,540 raw / 8,497 B  (+65 B; base was 1 B under)
- *     lift, no if=                18,670 raw / 4,226 B    18,836 raw / 4,292 B  (+66 B, inside the band)
+ *     lifted if=, no list         19,235 raw / 4,392 B    19,563 raw / 4,527 B  (+135 B, inside the band)
+ *     <each> row if=              36,374 raw / 8,432 B    36,702 raw / 8,562 B  (+130 B; base was 1 B under)
+ *     lift, no if=                18,670 raw / 4,226 B    18,998 raw / 4,358 B  (+132 B, inside the band)
  *     shell (§1)                  23,764 raw / 6,377 B    23,764 raw / 6,377 B  (+0: no when in the shell)
  *
  * Only the `<each>` row if= ceiling is raised, by the measured delta.
@@ -410,7 +413,7 @@ const IF_GATE_SHAPES = [
 <xs> = [1, 2]
 <button onclick={ @ok = !@ok }>toggle</button>
 <div id="out"><each in=@xs as y><span><b if=@ok>\${y}</b></span></each></div>
-`, 8310, { ifrow: true, reconcile: true, owner: true }],
+`, 8375, { ifrow: true, reconcile: true, owner: true }],
   ["a lift with no if=", `<n> = 0
 <button onclick={ @n = @n + 1 }>inc</button>
 <div id="out">\${ lift <span>\${@n}</span> }</div>

@@ -5407,13 +5407,18 @@ function _scrml_effect_static(fn, gate) {
  *   - An async (CPS, §13) body's rejection is reported here; it does not reach
  *     the writer (§6.7.4 "does NOT propagate to the enclosing scope").
  *   - Newest run wins (§6.7.4 "Re-trigger while suspended"): the same sequence
- *     check \`<request>\` uses (\`_scrml_seq !== _scrml_request_<id>_seq\`). Each run
- *     takes the next seq and is handed a gate; the compiler wraps every own-level
- *     \`await X\` of an async body as \`await gate(X)\`. Once a newer run has started
- *     (or the effect is disposed), the gate settles never, so the superseded
- *     run's continuation does not resume: its later writes and its error context
- *     (\`!{}\`) do not run, and its settled value or failure is discarded. Not a
- *     rollback — what it did before the suspension stands; no transport abort.
+ *     check \`<request>\` uses (\`_scrml_seq !== _scrml_request_<id>_seq\`), made
+ *     where the run RESUMES. Each run takes the next seq and is handed a gate
+ *     \`live\`; the compiler writes every own-level \`await X\` of an async body as
+ *     \`(live(await _scrml_when_wait(X)) ? live.value : await _scrml_when_stop())\`.
+ *     The wait settles to a box either way; \`live(box)\` runs synchronously at
+ *     the resume point. For the current run it yields the value (or re-throws
+ *     the failure); for a stale or disposed one it returns false and the run
+ *     awaits the stop promise, which never settles. So a superseded run's
+ *     continuation never resumes: its later writes and its error context
+ *     (\`!{}\`, \`finally\`) do not run, and its settled value or failure is
+ *     discarded. Not a rollback — what it did before the suspension stands; no
+ *     transport abort.
  *   - The disposer is registered against the if= mount being wired, if any
  *     (§6.7.2 step 1), and returned so any other host can own it.
  *
@@ -5422,6 +5427,10 @@ function _scrml_effect_static(fn, gate) {
  * @returns {function} dispose
  */
 const _SCRML_WHEN_RERUN_CAP = 1;
+async function _scrml_when_wait(p) {
+  try { return { value: await p }; } catch (error) { return { error: error }; }
+}
+function _scrml_when_stop() { return new Promise(function () {}); }
 function _scrml_when_changes(subscribe, body) {
   let running = false;
   let pending = false;
@@ -5438,12 +5447,13 @@ function _scrml_when_changes(subscribe, body) {
       do {
         pending = false;
         const my = ++seq;
-        const r = body(function (p) {
-          // Settled either way: a current run adopts q (value or failure); a stale one never settles.
-          const q = Promise.resolve(p);
-          const k = function () { return my === seq && !disposed ? q : new Promise(function () {}); };
-          return q.then(k, k);
-        });
+        const live = function (box) {
+          if (my !== seq || disposed) return false;
+          if ("error" in box) throw box.error;
+          live.value = box.value;
+          return true;
+        };
+        const r = body(live);
         if (r && typeof r.then === "function") {
           r.then(null, function (e) { console.error("scrml when-effect error:", e); });
         }

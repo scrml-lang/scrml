@@ -12,7 +12,9 @@
  * "LOGGED IN" with `@pw` == "wrong". `<request>` ended "false" on the same race (its per-instance
  * `_scrml_seq !== _scrml_request_<id>_seq` check). The fix reuses that sequence check:
  * `_scrml_when_changes` numbers each run and hands it a gate; the emitter wraps every own-level
- * `await X` of an async body as `await _scrml_live(X)`; a stale run's gate never settles.
+ * `await X` of an async body as `(_scrml_live(await _scrml_when_wait(X)) ? _scrml_live.value : await
+ * _scrml_when_stop())` — the check runs synchronously where the run resumes (review F3: a check at
+ * settle time left a microtask window); a stale run awaits a promise that never settles.
  *
  * Every race below is DETERMINISTIC: `fetch` is stubbed with promises the test resolves by hand, in
  * the order the case names. The only waiting is draining already-queued tasks (no latency sleeps).
@@ -32,6 +34,7 @@ import { compileScrml } from "../../src/api.js";
 import { SCRML_RUNTIME } from "../../src/runtime-template.js";
 import { wrapOwnAwaits } from "../../src/codegen/js-async-analysis.ts";
 import { emitLogicNode } from "../../src/codegen/emit-logic.js";
+import { drainRefusedLowerings, resetRefusedLowerings } from "../../src/codegen/refused-lowering-errors.ts";
 
 const NativeResponse = globalThis.Response;
 
@@ -48,29 +51,38 @@ async function drain() {
 // §1 wrapOwnAwaits
 // ---------------------------------------------------------------------------
 
-describe("§1 wrapOwnAwaits wraps every own-level await operand", () => {
+/** The gated form of one `await X` for gate name G. */
+const GATE = { check: "G", wait: "W", stop: "S" };
+const W = (x) => `(G(await W(${x})) ? G.value : await S())`;
+
+describe("§1 wrapOwnAwaits gates every own-level await at its resume point", () => {
   test("an await in an expression", () => {
-    expect(wrapOwnAwaits('set("m", await f(x) ? "A" : "B")', "G")).toBe('set("m", await G(f(x)) ? "A" : "B")');
+    expect(wrapOwnAwaits('set("m", await f(x) ? "A" : "B")', GATE)).toBe(`set("m", ${W("f(x)")} ? "A" : "B")`);
   });
   test("several statements, several awaits", () => {
-    expect(wrapOwnAwaits("const a = await f(1); const b = await g(a); h(b);", "G"))
-      .toBe("const a = await G(f(1)); const b = await G(g(a)); h(b);");
+    expect(wrapOwnAwaits("const a = await f(1); const b = await g(a); h(b);", GATE))
+      .toBe(`const a = ${W("f(1)")}; const b = ${W("g(a)")}; h(b);`);
   });
   test("a nested await inside an await operand: both gated", () => {
-    expect(wrapOwnAwaits("await f(await g())", "G")).toBe("await G(f(await G(g())))");
+    expect(wrapOwnAwaits("await f(await g())", GATE)).toBe(W(`f(${W("g()")})`));
+  });
+  test("`await await x`: openers and closers sharing an offset nest correctly", () => {
+    const out = wrapOwnAwaits("h(await await x);", GATE);
+    expect(out).toBe(`h(${W(W("x"))});`);
+    expect(() => new Function(`return async function (G, W, S) { ${out} }`)).not.toThrow();
   });
   test("an await inside a nested function is its own scope: left alone", () => {
     const src = "const k = async () => { await f(); }; await g();";
-    expect(wrapOwnAwaits(src, "G")).toBe("const k = async () => { await f(); }; await G(g());");
+    expect(wrapOwnAwaits(src, GATE)).toBe(`const k = async () => { await f(); }; ${W("g()")};`);
   });
   test("no await: text unchanged", () => {
-    expect(wrapOwnAwaits('set("m", 1);', "G")).toBe('set("m", 1);');
+    expect(wrapOwnAwaits('set("m", 1);', GATE)).toBe('set("m", 1);');
   });
   test("a `for await` has no operand to gate: null (the emitter refuses)", () => {
-    expect(wrapOwnAwaits("for await (const x of s) { h(x); }", "G")).toBeNull();
+    expect(wrapOwnAwaits("for await (const x of s) { h(x); }", GATE)).toBeNull();
   });
   test("unparseable text: null", () => {
-    expect(wrapOwnAwaits("await (", "G")).toBeNull();
+    expect(wrapOwnAwaits("await (", GATE)).toBeNull();
   });
 });
 
@@ -85,9 +97,11 @@ describe("§2 emission", () => {
       { fnNameMap: new Map(), whenServerFnNames: new Set(["srv"]) },
     );
     expect(out).toContain("async function(_scrml_live) {");
-    expect(out).toContain('_scrml_reactive_set("a", await _scrml_live(srv(_scrml_reactive_get("n"))))');
-    expect(out).toContain("const r = await _scrml_live(srv(1))");
-    expect(out).not.toMatch(/await (?!_scrml_live\()/);
+    const G = (x) => `(_scrml_live(await _scrml_when_wait(${x})) ? _scrml_live.value : await _scrml_when_stop())`;
+    expect(out).toContain(`_scrml_reactive_set("a", ${G('srv(_scrml_reactive_get("n"))')})`);
+    expect(out).toContain(`const r = ${G("srv(1)")}`);
+    // every await is either the gated resume or the stale run's stop()
+    expect(out).not.toMatch(/await (?!_scrml_when_wait\(|_scrml_when_stop\(\))/);
   });
   test("a synchronous body is unchanged: no parameter, no gate", () => {
     const out = emitLogicNode({ kind: "when-effect", dependencies: ["q"], bodyRaw: "@page = 1" }, { fnNameMap: new Map() });
@@ -110,7 +124,8 @@ function loadRuntime() {
   const box = {};
   new Function("box", `${SCRML_RUNTIME}
 box.when = _scrml_when_changes; box.set = _scrml_reactive_set; box.get = _scrml_reactive_get;
-box.sub = _scrml_reactive_subscribe;`)(box);
+box.sub = _scrml_reactive_subscribe;
+box.wait = _scrml_when_wait; box.stop = _scrml_when_stop;`)(box);
   return box;
 }
 
@@ -132,7 +147,7 @@ describe("§3 _scrml_when_changes — newest run wins", () => {
       const pw = rt.get("pw");
       seen.push("start " + pw);
       const d = deferred(); calls.push(d);
-      const ok = await live(d.p);
+      const ok = (live(await rt.wait(d.p)) ? live.value : await rt.stop());
       seen.push("end " + pw + " " + ok);
     });
     rt.set("pw", "secret");
@@ -150,7 +165,7 @@ describe("§3 _scrml_when_changes — newest run wins", () => {
     rt.when((h) => [rt.sub("pw", h)], async function (live) {
       const pw = rt.get("pw");
       const d = deferred(); calls.push(d);
-      seen.push(pw + " " + (await live(d.p)));
+      seen.push(pw + " " + ((live(await rt.wait(d.p)) ? live.value : await rt.stop())));
     });
     rt.set("pw", "secret");
     rt.set("pw", "wrong");
@@ -167,7 +182,7 @@ describe("§3 _scrml_when_changes — newest run wins", () => {
       const handled = [];
       rt.when((h) => [rt.sub("k", h)], async function (live) {
         const d = deferred(); calls.push(d);
-        try { await live(d.p); } catch (e) { handled.push(String(e)); throw e; }
+        try { (live(await rt.wait(d.p)) ? live.value : await rt.stop()); } catch (e) { handled.push(String(e)); throw e; }
       });
       rt.set("k", 1);
       rt.set("k", 2);
@@ -189,10 +204,10 @@ describe("§3 _scrml_when_changes — newest run wins", () => {
       const pw = rt.get("pw");
       seen.push("a " + pw);
       const d1 = deferred(); calls.push(d1);
-      await live(d1.p);
+      (live(await rt.wait(d1.p)) ? live.value : await rt.stop());
       seen.push("b " + pw);
       const d2 = deferred(); calls.push(d2);
-      await live(d2.p);
+      (live(await rt.wait(d2.p)) ? live.value : await rt.stop());
       seen.push("c " + pw);
     });
     rt.set("pw", "secret");
@@ -210,7 +225,7 @@ describe("§3 _scrml_when_changes — newest run wins", () => {
     rt.set("k", 0);
     const d = deferred();
     const seen = [];
-    const dispose = rt.when((h) => [rt.sub("k", h)], async function (live) { seen.push(await live(d.p)); });
+    const dispose = rt.when((h) => [rt.sub("k", h)], async function (live) { seen.push((live(await rt.wait(d.p)) ? live.value : await rt.stop())); });
     rt.set("k", 1);
     dispose();
     d.res("late"); await drain();
@@ -220,7 +235,7 @@ describe("§3 _scrml_when_changes — newest run wins", () => {
   test("a run that is never superseded resumes normally, with a non-promise operand too", async () => {
     rt.set("k", 0);
     const seen = [];
-    rt.when((h) => [rt.sub("k", h)], async function (live) { seen.push(await live(7)); seen.push(await live(Promise.resolve(8))); });
+    rt.when((h) => [rt.sub("k", h)], async function (live) { seen.push((live(await rt.wait(7)) ? live.value : await rt.stop())); seen.push((live(await rt.wait(Promise.resolve(8))) ? live.value : await rt.stop())); });
     rt.set("k", 1); await drain();
     expect(seen).toEqual([7, 8]);
   });
@@ -279,11 +294,18 @@ async function boot(source) {
   const m = out.html.match(/<body[^>]*>([\s\S]*)<\/body>/i);
   document.body.innerHTML = (m ? m[1] : out.html).replace(/<script[^>]*>[\s\S]*?<\/script>/g, "").trim();
   // eslint-disable-next-line no-eval
-  (0, eval)(`(function() {\n${SCRML_RUNTIME}\n${out.clientJs}\n})();`);
+  // Cell access for the tick probe: the chunk cell scope prefixes every key (`<id>$name`).
+  const pfx = (out.clientJs.match(/"(\w+)\$" \+ raw/) || [, ""])[1];
+  globalThis.__s470_key = (n) => (pfx ? pfx + "$" : "") + n;
+  (0, eval)(`(function() {\n${SCRML_RUNTIME}\n${out.clientJs}\n` +
+    `globalThis.__s470_get = (n) => _scrml_reactive_get(globalThis.__s470_key(n));\n` +
+    `globalThis.__s470_sub = (n, f) => _scrml_reactive_subscribe(globalThis.__s470_key(n), f);\n})();`);
   document.dispatchEvent(new Event("DOMContentLoaded", { bubbles: true }));
   await drain();
   return {
     clientJs: out.clientJs,
+    get: (n) => globalThis.__s470_get(n),
+    sub: (n, f) => globalThis.__s470_sub(n, f),
     pending,
     click: (sel) => document.querySelector(sel).click(),
     text: (sel) => document.querySelector(sel).textContent,
@@ -405,5 +427,104 @@ describe("§4 executed: a when over several cells", () => {
     page.call('"secretx"').resolve(false); await drain();
     page.call('"secret"').resolve(true); await drain();
     expect(page.text("#out")).toBe("rejected");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// §5 review F3 — no microtask window between the staleness check and the resume
+// ---------------------------------------------------------------------------
+//
+// The first gate checked the seq when the operand SETTLED and then handed back a promise the
+// `await` still had to adopt (~3 microtasks). A re-trigger inside that window let the stale
+// continuation write (the review's tick.mjs: K = 4, 5, 6). The check now runs synchronously where
+// the run resumes. Each K below re-triggers exactly K microtasks after the stale run's call settles.
+
+/** Run `step` after exactly `k` queued microtasks. */
+function afterTicks(k, step) {
+  return new Promise((done) => {
+    let i = 0;
+    const tick = () => { if (i++ >= k) { step(); done(); } else queueMicrotask(tick); };
+    queueMicrotask(tick);
+  });
+}
+
+describe("§5 F3: a re-trigger K microtasks after the stale call settles never lets it write", () => {
+  test("runtime: for K = 0..40 the superseded run either finished before the re-trigger or never resumes", async () => {
+    const late = [];
+    for (let K = 0; K <= 40; K++) {
+      const rt = loadRuntime();
+      rt.set("pw", "");
+      const calls = [];
+      const events = [];
+      rt.when((h) => [rt.sub("pw", h)], async function (live) {
+        const pw = rt.get("pw");
+        const d = deferred(); calls.push(d);
+        const ok = (live(await rt.wait(d.p)) ? live.value : await rt.stop());
+        events.push(`write ${pw}=${ok}`);
+      });
+      rt.set("pw", "secret");
+      calls[0].res(true);
+      await afterTicks(K, () => { events.push("retrigger"); rt.set("pw", "wrong"); });
+      calls[1].res(false);
+      await drain();
+      const after = events.slice(events.indexOf("retrigger"));
+      if (after.includes("write secret=true")) late.push(K);
+      expect(events[events.length - 1]).toBe("write wrong=false");
+    }
+    expect(late).toEqual([]);
+  });
+
+  test("executed page (the review's tick.mjs shape): for K = 0..30 no LOGGED IN lands while @pw is wrong", async () => {
+    const page = await boot(LOGIN('@msg = isOk(@pw) ? "LOGGED IN" : "rejected"'));
+    const trace = [];
+    page.sub("msg", () => trace.push(`${page.get("msg")}@${page.get("pw")}`));
+    const bad = [];
+    for (let K = 0; K <= 30; K++) {
+      // reset to a known state through the page's own path
+      page.click("#wrong"); await drain();
+      for (const p of page.pending) if (!p.done) { p.done = true; p.resolve(false); }
+      await drain();
+      trace.length = 0;
+      page.click("#right"); await drain();
+      page.call("secret").resolve(true);
+      await afterTicks(K, () => page.click("#wrong"));
+      await drain();
+      page.call("wrong").resolve(false);
+      await drain();
+      if (trace.some((t) => t === "LOGGED IN@wrong")) bad.push(K);
+      expect(page.text("#out")).toBe("rejected");
+    }
+    expect(bad).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// §6 review F4 — a body the gate cannot read is refused with diagnostics, not a crash
+// ---------------------------------------------------------------------------
+
+describe("§6 F4: an ungateable async body fails closed with located diagnostics", () => {
+  test("an `(async () => …)()` in a when body keeps the earlier diagnostics and writes nothing", () => {
+    const src = LOGIN('(async () => { @msg = (await isOk(@pw)) ? "LOGGED IN" : "rejected" })()');
+    const out = compileSource(src);
+    expect(out.codes).toContain("E-ASYNC-NOT-IN-SCRML");
+    expect(out.codes).toContain("E-IMPL1-ACTION-NOT-AWAITED");
+    expect(out.codes).toContain("E-CODEGEN-INVALID-LOGIC");
+    expect(out.clientJs).toBe("");
+  });
+  test("the emitter records a located E-CODEGEN-INVALID-LOGIC (no throw) when the body cannot be gated", () => {
+    resetRefusedLowerings();
+    const span = { file: "/t/app.scrml", start: 0, end: 1, line: 3, col: 1 };
+    let out;
+    expect(() => {
+      out = emitLogicNode(
+        { kind: "when-effect", dependencies: ["n"], bodyRaw: "(async () => { @a = (await srv(@n)) })()", span },
+        { fnNameMap: new Map(), whenServerFnNames: new Set(["srv"]) },
+      );
+    }).not.toThrow();
+    expect(typeof out).toBe("string");
+    const errs = drainRefusedLowerings();
+    expect(errs.map((e) => e.code)).toEqual(["E-CODEGEN-INVALID-LOGIC"]);
+    expect(errs[0].span).toEqual(span);
+    expect(errs[0].severity).toBe("error");
   });
 });

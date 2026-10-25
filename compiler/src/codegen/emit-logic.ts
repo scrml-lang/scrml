@@ -5519,18 +5519,28 @@ function _emitLogicNode(node: any, opts: EmitLogicOpts): string {
       // s470-when-changes-latest-wins — §6.7.4 "newest run wins": a re-trigger while
       // a run is suspended cancels that run's continuation. `_scrml_when_changes`
       // hands each run a gate (`_scrml_live`) carrying the `<request>`-style
-      // sequence check; every own-level `await X` becomes `await _scrml_live(X)`,
-      // which never settles once the run is stale, so its later writes and its
-      // error context never run. A sync body takes no parameter (unchanged).
+      // sequence check, made where the run resumes: every own-level `await X`
+      // becomes `(_scrml_live(await _scrml_when_wait(X)) ? _scrml_live.value :
+      // await _scrml_when_stop())` (see `wrapOwnAwaits`), so a stale run's later
+      // writes and its error context never run. A sync body takes no parameter.
       if (isAsync) {
-        const gated = wrapOwnAwaits(body, "_scrml_live");
+        const gated = wrapOwnAwaits(body, { check: "_scrml_live", wait: "_scrml_when_wait", stop: "_scrml_when_stop" });
         if (gated === null) {
-          throw new Error(
-            "scrml internal: a `when … changes` body is async but its emitted JS could not be gated for " +
-            "§6.7.4 newest-run-wins (unparseable, or a `for await`); refusing to emit an unguarded body.",
-          );
+          // Fail closed WITHOUT crashing: an error-severity diagnostic means no
+          // artifact is written (§2.2.1), and the diagnostics other stages already
+          // found for this body (often the real cause) are still reported.
+          recordRefusedLowering(new CGError(
+            "E-CODEGEN-INVALID-LOGIC",
+            "E-CODEGEN-INVALID-LOGIC: the compiler could not lower this `when … changes` body: it waits on a call, " +
+            "but its lowered code could not be read back (it does not parse, or it holds a `for await`), so the " +
+            "§6.7.4 newest-run-wins guard could not be applied. No output is written for an unguarded body. " +
+            "This is usually a construct scrml does not have (see any other error reported for this body); " +
+            "otherwise it is a compiler defect — please report it.",
+            (node.span as object | undefined) ?? currentLoweringSpanForFnValue(),
+          ), (node as object));
+        } else {
+          body = gated;
         }
-        body = gated;
       }
       const ctx = opts.encodingCtx;
       const seen = new Set<string>();

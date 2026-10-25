@@ -83,3 +83,30 @@ passed as the body's parameter; the compiler wraps every own-level `await X` of 
   e2e-render-map (259 pass); browser-baseline --check PASS; runtime-size-ratchet 11 pass;
   pre-commit hook (unit+integration+conformance) 43079 pass / 0 fail.
 - STATUS: complete.
+
+## Fix round 1 (review of e02110c9d: LAND-WITH-FOLLOWUPS)
+
+- F3 (TOCTOU): the round-1 gate checked the seq when the operand SETTLED, then returned a promise the
+  `await` still had to adopt (~3 microtasks) — a re-trigger inside that window let the stale
+  continuation write (review tick.mjs: K = 4, 5, 6; reproduced here on e02110c9d). Fix: the check runs
+  synchronously where the run resumes, the `<request>` shape. Each own-level `await X` is now
+  `(_scrml_live(await _scrml_when_wait(X)) ? _scrml_live.value : await _scrml_when_stop())`:
+  `_scrml_when_wait` settles to a `{ value }` / `{ error }` box; `_scrml_live(box)` returns true (value
+  in `.value`) or re-throws the failure for the current run, false for a stale/disposed run, which then
+  awaits `_scrml_when_stop()` (a fresh never-settling promise — not shared, so nothing leaks).
+  No throw is used to cancel, so a stale run's `catch`/`finally` never run (SPEC: "never resumes").
+  tick.mjs on whensrv: K = [] (was [4,5,6]). Reviewer fixture sweep (race + tick, 24 fixtures): every
+  compiling fixture ends "rejected" with K = [], except a01-helperwrite (F1, filed by the coordinator,
+  out of scope: the helper writes the cell itself).
+- F4 (crash): `wrapOwnAwaits` returning null now records a located E-CODEGEN-INVALID-LOGIC through
+  `recordRefusedLowering` (no throw). fx/a11-iife.scrml: E-ASYNC-NOT-IN-SCRML + E-IMPL1-ACTION-NOT-AWAITED
+  (as on base) + E-CODEGEN-INVALID-LOGIC, no files written. Refusal codes on a02/a03/a05/d01/f01 are
+  identical to base.
+- Tests: §5 (F3: runtime K = 0..40 microtask sweep; executed page K = 0..30, the tick.mjs shape) and §6
+  (F4: compile keeps the earlier diagnostics + writes nothing; emitter records a located error, no
+  throw). Against e02110c9d both §5 tests fail; head 30 pass.
+- Runtime gzip-9 stripped, base 6081e0685 -> head: shell 6377 -> 6377 (+0); counter 4130 -> 4264;
+  lifted if= 4392 -> 4527; `<each>` row if= 8432 -> 8562 (+130); lift no if= 4226 -> 4358.
+  Ratchet (owner ruling S470: allow raising the budget): `<each>` row if= recorded 8245 -> 8375
+  (+130 B = the measured delta from base; round 1 had 8310). Shell ceiling untouched. Trimmed the
+  helper before measuring (box field names, an async `wait`): 8583 -> 8562.
