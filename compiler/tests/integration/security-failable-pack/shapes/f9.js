@@ -3,7 +3,7 @@
 // a `<request>` / `<timer>` / `<poll>` / `<timeout>` / `<onMount>` body, a runtime `^{ }`, an engine
 // state-child `effect=`, an `<onTransition>` body or guard, a message arm — was emitted without `await`, so
 // the code tested a pending Promise (always truthy) and answered LOGGED IN on a wrong password. Refused
-// after (E-VALUE-SERVER-CALL). Two async hosts that awaited a server call but not a helper (a
+// after (E-IMPL1-ACTION-NOT-AWAITED since fix round 1; the cell-declaration shape E-VALUE-SERVER-CALL). Two async hosts that awaited a server call but not a helper (a
 // `when … changes` body, an engine opener `effect=`) now await it.
 // Each FAILED (wrong -> LOGGED IN) on 4058bd052. Data, not logic. Do not edit a shape to make it pass.
 
