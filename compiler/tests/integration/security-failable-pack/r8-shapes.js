@@ -1,6 +1,6 @@
 // S470 s470-whole-error-binder-escapes (gap g-impl1-whole-error-binder-allowlist-escapes-s469) — the
 // S469 final review's round-6 probes (r6a / r6b) plus this lane's r7, on every side (server `s11`,
-// fullstack `f8`, library `l6`, tool `t6`). The whole-error binder `_ e :>` allow-list followed `e`
+// fullstack `f9`, library `l6`, tool `t6`). The whole-error binder `_ e :>` allow-list followed `e`
 // into callees and constructors; three escapes logged a wrong password in:
 //   1. a callee resolved by NAME (file-wide), not by the binding the call names: a shadowing const /
 //      let / parameter / arm-local / callee-local / import / top-level const `check` was trusted as the
