@@ -4914,11 +4914,13 @@ function _emitLogicNode(node: any, opts: EmitLogicOpts): string {
       const lines: string[] = [];
 
       lines.push(`try {`);
-      for (const bodyNode of tryBody) {
-        const code = emitLogicNode(bodyNode as Parameters<typeof emitLogicNode>[0]);
-        if (code) {
-          for (const line of code.split("\n")) lines.push(`  ${line}`);
-        }
+      // g-impl1-bang-catch-try-body-cut-at-first-brace-s470 — the try body is a BLOCK of the
+      // enclosing body: it is emitted with the enclosing options (its boundary, server-call facts
+      // and declarations — a block-scoped copy, as every block body gets). It was emitted with NO
+      // options, so `ok = …` on a local declared before the form became a shadowing `const ok`
+      // and the write never left the try body.
+      for (const code of emitLogicBody(tryBody, { ...opts, declaredNames: blockScopedDeclaredNames(opts.declaredNames), tildeContext: undefined })) {
+        for (const line of code.split("\n")) lines.push(`  ${line}`);
       }
       lines.push(`} catch (${errVar}) {`);
 
