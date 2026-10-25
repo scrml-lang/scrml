@@ -18,11 +18,18 @@
  *     assigns the resolved value to el.textContent.
  *   - Non-server interpolations are unchanged.
  *
+ * S470 (s470-render-position-server-call-refused) — SUPERSEDED for the server-fn cases. SPEC §13.7
+ * names `<p>${userCount()}</p>` as E-VALUE-SERVER-CALL ("a value position cannot wait for the
+ * server; load the value with a `<request>`"), and ruling:user-voice-scrml.md S469 item 1 refuses a
+ * server/async call in every render position in impl#1. The async-IIFE wiring above awaited the
+ * WHOLE expression, so `${isOk(@pw) ? "IN" : "no"}` tested the pending Promise (always truthy) —
+ * the reason the class is refused as one rule. §1 and §4 now pin the refusal; the idiom is a
+ * `<request>` (or a handler / function) that writes a cell, rendered by `${@cell}`.
+ *
  * Coverage:
- *   §1  Bug GITI-005 repro — `${loadGreeting()}` produces awaited DOM wiring
- *   §2  Emitted JS parses as a module (no SyntaxError)
+ *   §1  `${loadGreeting()}` is E-VALUE-SERVER-CALL (was: awaited DOM wiring)
  *   §3  Regression guard — `${@var}` still uses synchronous reactive effect
- *   §4  Mixed expression `${@count + suffix()}` (reactive + server fn) is async
+ *   §4  Mixed expression `${@count + suffix()}` (reactive + server fn) is E-VALUE-SERVER-CALL
  */
 
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
@@ -92,41 +99,12 @@ function compile(path) {
 // §1: Bug GITI-005 — `${serverFn()}` in markup produces awaited wiring
 // ---------------------------------------------------------------------------
 
-describe("§1: GITI-005 — `${serverFn()}` wires an awaited fetch to DOM", () => {
-  test("compile succeeds", () => {
+describe("§1: GITI-005 — `${serverFn()}` in markup is E-VALUE-SERVER-CALL (S470)", () => {
+  test("the interpolation is refused, naming the server function", () => {
     const result = compile(gitiFx);
-    expect(result.errors).toEqual([]);
-  });
-
-  test("client.js contains an async IIFE that awaits the server-fn fetch", () => {
-    const result = compile(gitiFx);
-    const js = result.outputs.get(gitiFx).clientJs;
-    // The async arrow IIFE assigning awaited value to textContent
-    expect(js).toMatch(/\(async\s*\(\s*\)\s*=>\s*\{[^}]*await\s*\(_scrml_fetch_loadGreeting_\d+\(\)\)/);
-    // textContent is set (not left empty like before)
-    expect(js).toContain("_scrml_el.textContent = await");
-  });
-
-  test("the reactive-display-wiring block is NOT empty for server-fn interpolations", () => {
-    const result = compile(gitiFx);
-    const js = result.outputs.get(gitiFx).clientJs;
-    // Before fix: `// --- Reactive display wiring ---\n});` — empty block.
-    // After fix: the wiring block contains the async IIFE.
-    expect(js).not.toMatch(/Reactive display wiring ---\s*\n\s*\}\);/);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// §2: Emitted JS parses as an ES module (no SyntaxError)
-// ---------------------------------------------------------------------------
-
-describe("§2: emitted JS is parseable", () => {
-  test("GITI-005 output parses as a module via new Function", () => {
-    const result = compile(gitiFx);
-    const js = result.outputs.get(gitiFx).clientJs;
-    // Strip the top-level import (new Function can't handle import syntax)
-    const stripped = js.replace(/^\s*import\s[^;]*;/gm, "");
-    expect(() => new Function(stripped)).not.toThrow();
+    const codes = (result.errors ?? []).map((e) => e.code);
+    expect(codes).toEqual(["E-VALUE-SERVER-CALL"]);
+    expect(result.errors[0].message).toContain("server function `loadGreeting`");
   });
 });
 
@@ -153,22 +131,11 @@ describe("§3: `${@var}` interpolation uses synchronous effect (no async wrappin
 // §4: Mixed reactive + server-fn expression uses async form
 // ---------------------------------------------------------------------------
 
-describe("§4: mixed `${@var + serverFn()}` uses async wrapping", () => {
-  test("compile succeeds", () => {
+describe("§4: mixed `${@var + serverFn()}` is E-VALUE-SERVER-CALL (S470)", () => {
+  test("the reactive interpolation over a server call is refused", () => {
     const result = compile(mixedFx);
-    expect(result.errors).toEqual([]);
-  });
-
-  test("the reactive effect re-runs with an async wrapper", () => {
-    const result = compile(mixedFx);
-    const js = result.outputs.get(mixedFx).clientJs;
-    // Effect body contains an async IIFE awaiting an expression that
-    // includes the server-fn call (the expression also has @count rewrite,
-    // so match await + server-fn presence separately).
-    expect(js).toMatch(/_scrml_effect\(function\(\)\s*\{\s*\(async/);
-    expect(js).toContain("await (");
-    expect(js).toMatch(/_scrml_fetch_loadSuffix_\d+\(\)/);
-    // The reactive var also participates in the async-wrapped expression
-    expect(js).toContain('_scrml_cs_reactive_get("count")');
+    const codes = (result.errors ?? []).map((e) => e.code);
+    expect(codes).toEqual(["E-VALUE-SERVER-CALL"]);
+    expect(result.errors[0].message).toContain("server function `loadSuffix`");
   });
 });

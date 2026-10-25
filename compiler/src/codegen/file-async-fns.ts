@@ -34,7 +34,7 @@
  * the declaring module's set holds the export).
  */
 import { computeAsyncFnNames } from "./emit-library-shared.ts";
-import { collectTopLevelStatements } from "./collect.ts";
+import { collectTopLevelStatements, getNodes } from "./collect.ts";
 import { fnValuedBindingsOf, bindingPseudoFnsOf, isAnonFnValueName, waitingBindingsOf } from "./fn-valued-bindings.ts";
 import type { WaitingBinding } from "./fn-valued-bindings.ts";
 import { ASYNC_COMBINATOR_METHODS } from "./async-combinators.ts";
@@ -114,6 +114,67 @@ export function waitingBindingsOfFile(
   // classified member by member, so `auth.verifyPassword` cannot be shown sync: its local
   // counts as async here (fail closed — §13.9.6 refuses a binding not PROVABLY free of a
   // waiting function).
+  const isAsync = waitingFnPredicateOfFile(fileAST, fileSet, routeMap);
+  const names = [...fileSet, ...namespaceImportLocalsOf(fileAST)].filter((n) => !isAnonFnValueName(n) && isAsync(n));
+  return waitingBindingsOf(collectTopLevelStatements(fileAST as never) as unknown[], isAsync, names,
+    ASYNC_COMBINATOR_METHODS);
+}
+
+/**
+ * S470 — the server-placed functions of a file declared ANYWHERE in its tree, by the same two
+ * facts `serverFnNamesOfFile` reads (`isServer`, the route map's server boundary). The file set is
+ * built from `collectTopLevelStatements`, which follows `children` only, so a function declared in
+ * an `if=` / `else` chain branch (`branches[].element`), an `<each>` / `<match>` body or a component
+ * definition is not in it (measured: `<div if=@c>${ server fn f() {…} }<p>${f()}</p></div><div else/>`
+ * — `f` placed on the server, absent from the set). The render-position refusal reads this set too,
+ * so a call it cannot see in the file set still counts as a server call (fail closed). Function
+ * bodies are not entered: a function declared in another function is that function's local.
+ */
+export function serverPlacedFnNamesAnywhere(
+  fileAST: unknown,
+  routeMap?: { functions?: Map<string, unknown> } | null,
+): Set<string> {
+  const out = new Set<string>();
+  const fp = (fileAST as { filePath?: string } | null)?.filePath ?? "";
+  const seen = new WeakSet<object>();
+  const visit = (v: unknown): void => {
+    if (!v || typeof v !== "object" || seen.has(v as object)) return;
+    seen.add(v as object);
+    if (Array.isArray(v)) { for (const x of v) visit(x); return; }
+    const n = v as AnyFile;
+    if (n.kind === "function-decl" && typeof n.name === "string" && n.name) {
+      const span = n.span as { start?: number } | undefined;
+      const r = (routeMap?.functions && span) ? routeMap.functions.get(`${fp}::${span.start}`) as
+        { boundary?: string; escalationReasons?: Array<{ kind?: string; resourceType?: string }> } | undefined : undefined;
+      // As in `waitingFnPredicateOfFile`: a sync helper placed on the server only by its callers
+      // (caller-context propagation) runs where its caller runs — not a waiting function.
+      const reasons = r?.escalationReasons ?? [];
+      const propagatedOnly = reasons.length > 0 &&
+        reasons.every((x) => x.kind === "server-only-resource" && x.resourceType === "caller-context-propagation");
+      if (n.isServer === true || (r?.boundary === "server" && !propagatedOnly)) out.add(n.name);
+      return;
+    }
+    for (const k of Object.keys(n)) {
+      if (k === "span" || k === "_record") continue;
+      const x = n[k];
+      if (x && typeof x === "object") visit(x);
+    }
+  };
+  visit(getNodes(fileAST as never));
+  return out;
+}
+
+/**
+ * THE "is this name a waiting function" predicate of a file (S467 r10, shared S470): a name in
+ * the file's async set, or a namespace import of a scrml module (its members are not classified
+ * one by one, so it counts as waiting — fail closed). Read by the F4 binding judge above and by
+ * the render-position refusal (render-waiting-calls.ts, E-VALUE-SERVER-CALL).
+ */
+export function waitingFnPredicateOfFile(
+  fileAST: unknown,
+  fileSet: Set<string>,
+  routeMap?: { functions?: Map<string, unknown> } | null,
+): (name: string) => boolean {
   const ns = namespaceImportLocalsOf(fileAST);
   // A helper placed on the server ONLY because its callers run there (route inference's
   // caller-context propagation) and synchronous by its body is not a waiting function: it
@@ -123,10 +184,7 @@ export function waitingBindingsOfFile(
   // awaits. It is in the file set only as an in-process peer.
   const byBody = asyncByBodyOf(fileSet);
   const propagated = callerPropagatedFnNamesOfFile(fileAST, routeMap ?? null);
-  const isAsync = (n: string): boolean => ns.has(n) || (fileSet.has(n) && (byBody.has(n) || !propagated.has(n)));
-  const names = [...fileSet, ...ns].filter((n) => !isAnonFnValueName(n) && isAsync(n));
-  return waitingBindingsOf(collectTopLevelStatements(fileAST as never) as unknown[], isAsync, names,
-    ASYNC_COMBINATOR_METHODS);
+  return (n: string): boolean => ns.has(n) || (fileSet.has(n) && (byBody.has(n) || !propagated.has(n)));
 }
 
 /**
@@ -157,7 +215,7 @@ function callerPropagatedFnNamesOfFile(
 }
 
 /** The locals of `import * as NAME from "<scrml module>"` (a `.scrml` file or a `scrml:` module). */
-function namespaceImportLocalsOf(fileAST: unknown): Set<string> {
+export function namespaceImportLocalsOf(fileAST: unknown): Set<string> {
   const out = new Set<string>();
   const f = fileAST as { ast?: { imports?: unknown }; imports?: unknown } | null;
   const imports = (f?.ast?.imports ?? f?.imports ?? []) as Array<{ kind?: string; raw?: string; source?: string | null }>;

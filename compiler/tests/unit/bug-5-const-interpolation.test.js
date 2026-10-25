@@ -28,7 +28,7 @@
  *   §3  `${"string-literal"}` — literal interpolation
  *   §4  Emitted JS parses as ES module (no SyntaxError)
  *   §5  Regression — `${@var}` still uses synchronous _scrml_effect subscription
- *   §6  Regression — `${serverFn()}` still uses async IIFE wrapper
+ *   §6  `${serverFn()}` is E-VALUE-SERVER-CALL (S470; was: still uses the async IIFE wrapper)
  *   §7  Tilde guard — `${ initializer; ~ }` does NOT emit invalid JS (bitwise-NOT)
  *   §8  Reactive-display-wiring block is NOT empty for const interpolations
  *   §12 ss3 item7 (giti-006) — dotted-path `${@data.name}` does NOT leak a
@@ -272,21 +272,16 @@ describe("§5: regression — `${@var}` interpolation still uses synchronous rea
 });
 
 // ---------------------------------------------------------------------------
-// §6: Regression — `${serverFn()}` still uses async IIFE wrapper
+// §6: `${serverFn()}` is E-VALUE-SERVER-CALL (S470)
 // ---------------------------------------------------------------------------
 
-describe("§6: regression — `${serverFn()}` still uses async IIFE wrapper", () => {
-  test("compile succeeds", () => {
+// S470 — SUPERSEDED: `${serverFn()}` in markup is E-VALUE-SERVER-CALL (§13.7; ruling:user-voice-scrml.md
+// S469 item 1 — a server/async call in a render position is refused in impl#1). The GITI-005 async
+// IIFE is no longer reached; the const-interpolation fix this file pins is unaffected.
+describe("§6: `${serverFn()}` is E-VALUE-SERVER-CALL (S470; was the GITI-005 async IIFE)", () => {
+  test("the server-fn interpolation is refused", () => {
     const result = compile(serverFnFx);
-    expect(result.errors).toEqual([]);
-  });
-
-  test("client.js still wraps the server-fn call in async/await form", () => {
-    const result = compile(serverFnFx);
-    const js = result.outputs.get(serverFnFx).clientJs;
-    // GITI-005 shape preserved
-    expect(js).toMatch(/\(async\s*\(\s*\)\s*=>\s*\{[^}]*await\s*\(_scrml_fetch_loadGreeting_\d+\(\)\)/);
-    expect(js).toContain("_scrml_el.textContent = await");
+    expect((result.errors ?? []).map((e) => e.code)).toEqual(["E-VALUE-SERVER-CALL"]);
   });
 });
 

@@ -113,9 +113,14 @@ function clientProgram(mod, fn) {
     @out = ""
 }
 <p>\${@out}</>
-<button click=\${ @out = ${fn}("x") }>go</>
+<button onclick=\${ @out = ${fn}("x") }>go</>
 `;
 }
+// S470 — was `click=\${ … }`. `click=` is not an event attribute: it is a reactive attribute
+// binding, evaluated at render (setAttribute("click", …) in an effect), so the call DID run at
+// first render, and a Promise-returning export there (`scrml:http` `get`) is now refused as a
+// waiting value in a render position (E-VALUE-SERVER-CALL, §13.7). `onclick=` is the handler the
+// comment above intends.
 
 /**
  * The first exported binding of a shim, read from the shim itself.

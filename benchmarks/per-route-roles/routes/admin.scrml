@@ -1,6 +1,10 @@
 // per-route-roles bench — Admin route ("/admin")
 // Admin-only subtree. Maximum-overhead role with admin controls.
 
+// S470 — each list loads into a cell through a `<request>` (§6.7.7) and the loop renders the
+// cell. It was `for (… of loadX())` in the render: a server call in a render position is
+// E-VALUE-SERVER-CALL (§13.7) — the loop iterated a pending Promise.
+
 <program title="Admin" auth="required">
 
 server function loadAllUsers() {
@@ -29,6 +33,11 @@ server function disableUser(userId) {
   lift true
 }
 
+<users> = []
+<request id="usersLoad" deps=[]>${ @users = loadAllUsers() }</>
+<auditLog> = []
+<request id="auditLogLoad" deps=[]>${ @auditLog = loadAuditLog() }</>
+
 <nav class="flex items-center gap-3 p-4 border-b">
   <h1 class="text-xl font-semibold">Admin</h1>
   <a href="/" class="text-blue-600">Home</a>
@@ -46,7 +55,7 @@ server function disableUser(userId) {
       <thead><tr><th>ID</th><th>Email</th><th>Role</th><th>Last login</th><th>Actions</th></tr></thead>
       <tbody>
         ${
-          for (let user of loadAllUsers()) {
+          for (let user of @users) {
             lift <tr class="border-b">
               <td>#${user.id}</td>
               <td>${user.email}</td>
@@ -67,7 +76,7 @@ server function disableUser(userId) {
     <h2 class="text-lg font-medium mb-2">Audit log</h2>
     <ul class="font-mono text-xs">
       ${
-        for (let entry of loadAuditLog()) {
+        for (let entry of @auditLog) {
           lift <li class="py-1">
             ${entry.ts} - ${entry.actor} - ${entry.action} on ${entry.target}
           </li>

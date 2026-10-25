@@ -161,10 +161,12 @@ describe("GITI-009 integration: compile rewrites import paths", () => {
 }
 
 <div>
-  <p>value: \${getValue().value}</p>
+  <button onclick=getValue()>value</button>
 </div>
 
 </program>`);
+    // S470 — the server function is called from a handler. `<p>value: ${getValue().value}</p>`
+    // (a render position) is E-VALUE-SERVER-CALL (§13.7): it read `.value` off a pending Promise.
 
     writeFileSync(join(tmpDir, "src", "sub", "app-helper.js"),
       `export function helper() { return 42; }`);

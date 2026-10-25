@@ -104,7 +104,9 @@ describe("S462 — every reachable stdlib type import leaves a LOADABLE server b
         `<program>\n` +
         `import { ${names.join(", ")} } from '${spec}'\n` +
         `server function probe(${params}) {\n    return 1\n}\n` +
-        `<p>\${probe(${names.map(() => "not").join(", ")})}</p>\n` +
+        // S470 — called from a handler: a render-position `<p>${probe(…)}</p>` is
+        // E-VALUE-SERVER-CALL (§13.7).
+        `<button onclick=probe(${names.map(() => "not").join(", ")})>probe</button>\n` +
         `</program>\n`;
       require("fs").mkdirSync(dir, { recursive: true });
       writeFileSync(src, program);

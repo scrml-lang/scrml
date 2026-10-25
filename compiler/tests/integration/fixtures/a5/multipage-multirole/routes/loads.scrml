@@ -11,6 +11,10 @@
 // but cross-references the home route via `<a href="/">`. The A-4.4
 // hover-prefetch wiring should attach data-scrml-prefetch="/" to the
 // Home link.
+//
+// S470 — the roster loads into a cell from a handler (an action position). It was
+// `for (let driver of loadDrivers())` in the render: a server call in a render
+// position is E-VALUE-SERVER-CALL (§13.7) — the loop iterated a pending Promise.
 
 <program title="Loads" auth="required">
 
@@ -21,6 +25,9 @@ server function loadDrivers() {
   ]
 }
 
+<drivers> = []
+function refreshDrivers() { @drivers = loadDrivers() }
+
 <nav class="flex items-center gap-3 p-4 border-b">
   <h1 class="text-xl font-semibold">Loads</h1>
   <a href="/" class="text-blue-600">Home</a>
@@ -28,9 +35,10 @@ server function loadDrivers() {
 
 <section class="p-4">
   <h2 class="text-lg font-medium mb-2">Driver roster</h2>
+  <button onclick=refreshDrivers()>Load roster</button>
   <ul class="list-disc pl-6">
     ${
-      for (let driver of loadDrivers()) {
+      for (let driver of @drivers) {
         lift <li class="py-1">${driver.name}</li>
       }
     }

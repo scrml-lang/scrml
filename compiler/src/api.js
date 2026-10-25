@@ -1649,6 +1649,16 @@ function _compileScrmlImpl(options = {}) {
             _refusedElementFilesSeen.add(`*|${enriched.code}`);
           }
         }
+        // S470 — E-VALUE-SERVER-CALL: the type system refuses a server `!` call rendered inside an
+        // `<errorBoundary>` (S468); codegen's render-position check (render-waiting-calls.ts)
+        // refuses every render position, that one included. One report per site: a CG report is
+        // dropped when an earlier stage already reported the code at the same file, line and column.
+        if (enriched.code === "E-VALUE-SERVER-CALL") {
+          const rawFile = String(enriched.filePath ?? (enriched.span && enriched.span.file) ?? "");
+          const vscKey = `VSC|${rawFile}|L${enriched.span && enriched.span.line}|C${enriched.span && enriched.span.col}`;
+          if (stageName === "CG" && _attrInterpExecutableSeen.has(vscKey)) continue;
+          if (stageName !== "CG") _attrInterpExecutableSeen.add(vscKey);
+        }
         // S469 — E-OBJECT-SHORTHAND-CELL: the front end (GCP1) refuses `{ @x }`; codegen's
         // emitProp backstop refuses any copy it is asked to lower. One report per site: a
         // backstop report is dropped when the front end already refused the same `{ @x }` in
