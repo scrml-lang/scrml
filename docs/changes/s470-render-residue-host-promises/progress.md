@@ -198,3 +198,42 @@ are r19's `G0`. +51 fix-round shapes: base 618bb573b FAIL=39 (+1 refused), head 
 shapes `when` / opener `effect=` "tests fetch" — those now AWAIT, so `if (fetch(u))` tests a Response
 (truthy for any password): moved to BY_DESIGN_LOGS_IN. F5 shapes read `.status` so an awaited 404
 answers "rejected" (PASS-DENY on head). EXPECTED_SHAPE_COUNT 2753; r19-pinned.js.
+- Two traps found while landing, both "an EMPTY async set is a signal" readers:
+  (1) `computeToolAsyncImportedLocals`'s emptiness routes a tool-dep library to the in-process emit
+  (`libAsyncImports.size > 0`): the host seed is NOT added there (only to the file set and the
+  `_asyncImportedLocals` stash) — measured: t5/B flipped UNJUDGED → PASS until moved.
+  (2) emit-event-wiring decides a one-shot interpolation's async wrap by diffing two emits whenever the
+  client async set is non-empty (counter-named temporaries differ): `hostPromiseSeedOf` seeds only a
+  file whose tree names `fetch` (identifier, global-object read, or unparsed text) — measured: the
+  giti033 conformance case's emit changed until then.
+
+### R26 with an emitted-JS digest (fix round 1) — 4067 files, base 618bb573b vs head bc6b187d4
+Harness ~/.cache/scrml/s470/laneG/r26d.mjs (codes + sha1 of every emitted artifact, write:true).
+- newly rejected: **0**. Emitted JS changed on a file that compiles on both sides: **0**.
+- codes changed: 3 already-refused docs repros gain one E-IMPL1-ACTION-NOT-AWAITED beside their existing
+  E-ASYNC-FN-ESCAPES-AS-VALUE (F4: a server function read as a VALUE at module init — the same root):
+  docs/changes/colorless-async-combinators-2026-07-19/repros/f2-paramdefault-failclosed.scrml,
+  docs/changes/s441-async-escape-f4-f5/repro/blast-toplevel.scrml,
+  docs/changes/s441-async-escape-f4-f5/review-repro/xf-toplevel-obj/case.scrml.
+- every other diff is stdlib/, the known harness artefact (a worktree stdlib file compiled by the base
+  compiler is outside its tree); each compiler over its OWN stdlib copy: 54 files, 0 code diffs, 0 emit diffs.
+- Why no handler emission changed: the corpus has no compiled `fetch` call. Every `fetch(` in it is in a
+  comment, markup text, a `<foreign>` / `^{}`-free docs page, a file already refused (samples/api-dashboard,
+  phase1-fn-prohibition-async-008), or the author's own `function fetch` (s457-host-global-alias, emit
+  unchanged — the name is bound). F5's emission is pinned by the unit tests (`await fetch("/a")`,
+  `await globalThis.fetch("/a")`, `async function _scrml_go_N`) and the pack's F5 shapes.
+
+### CI job commands (fix round 1, after merging origin/main 05422ddc7)
+All exit 0 except the WARN-only `facts --check` (bot-owned FACTS.md, not touched): types-gate, root tests,
+snippet-gate, claim-gate, corpus-compile-floor, md-shim, conflict-marker, spec-index, delta-lint, ci-shards,
+s34-census --check-new, unit + conformance, pretest, integration + lsp + commands, todomvc + node --check,
+browser-baseline --check, lint-no-default-arm, slices m1 / m2 / m1-lowered / m3 / m4 / codec,
+e2e-render-map, host-global-scan --check, gen-bootstrap-severity --check; classify f25: FAIL 0 (the two
+BY_DESIGN_LOGS_IN shapes aside).
+
+### Left as filed by the coordinator / residuals
+- F7, F9 (coordinator files), F8 SPEC fork (owner) — code matches the twin.
+- `setTimeout(() => X)` in a `when` / timer body: refused for fetch AND for the server twin (pre-existing).
+- `kind="tool"` bodies: the host seed is not given to the tool's own colouring (`computeToolAsyncImportedLocals`
+  routes a library's emit by emptiness); a tool function calling `fetch` is not awaited — candidate gap.
+- `if (fetch(u))` awaited still tests a Response (truthy): correct per SPEC, the program's own logic.
