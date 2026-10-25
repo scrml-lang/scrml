@@ -84,6 +84,7 @@ import { schedulerNamesNotProvablyGlobal } from "./js-async-analysis.ts";
 import { computeFileAsyncFnNames, serverFnNamesOfFile, setFileAsyncFnNames, adoptFileAsyncSet, waitingBindingsOfFile, namespaceImportLocalsOf, waitingFnPredicateOfFile, serverPlacedFnNamesAnywhere } from "./file-async-fns.ts";
 import { renderWaitingCallsOf } from "./render-waiting-calls.ts";
 import { unboundHostPromiseGlobalsOf, hostPromiseReachOf, hostShadowedRefsOf, hostPromiseSeedOf } from "./host-promise-globals.ts";
+import { markHostGlobalAliases } from "./host-promise-names.ts";
 import { collectEngineVarNames } from "./emit-engine.ts";
 import { isToolProgram, isLibraryShapedFile } from "../tool-program.ts";
 import { forEachProgramWithRole, findTopLevelProgram, findTopLevelPrograms, programRoleOptionsOf, NESTED_SESSION_ATTRS, nestedProgramAttrVerdict } from "../program-role.ts";
@@ -2528,6 +2529,12 @@ export function runCG(input: CgInput): CgOutput {
     compilationTenantInput ?? compilationTenantSet(files, buildProtectContext(protectAnalysis));
   for (const fileAST of files) {
     if (fileAST && typeof fileAST === "object") (fileAST as any)[COMPILATION_TENANT_KEY] = compilationTenant;
+  }
+  // S470 s470-host-fetch-followups (R3) — a binding of the host global object (`const w = window`)
+  // is that object for every reader of the host `fetch` spellings (host-promise-names.ts): marked on
+  // every file before any file's async facts are computed (an importer asks an imported file's set).
+  for (const fileAST of files) {
+    if (fileAST && typeof fileAST === "object") markHostGlobalAliases(fileAST);
   }
   // §14.8.10 item (1) (S457, g-sql-checker-and-lowering-read-different-text-s457) — every
   // `?{}` lowering holds the SQL its driver call sends to the program-body statement allow-list,
