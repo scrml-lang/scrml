@@ -306,3 +306,7 @@ types-gate OK (181, unchanged) · root tests 2239 / 0 · snippet-gate 0 fail · 
 
 - `armBodyTextCallees`' token-scan fallback still reads a `match` arm's comment text as names (over-colouring, fail closed); the `!{}` arm path no longer does.
 - Lane J (s470-promise-all-batch-elements) also edits scheduling.ts: this lane's change is confined to `holdsExprGuard` + the `_guardArmWaits` predicate beside `isControlFlowBoundary`.
+
+### Merge of origin/main 8f65bb0a1 (#1571 s470-unit-variant-tag-read, r16 / s19 f22 l14 t14 — touches emit-logic / emit-expr / emit-library)
+
+Conflicts only in the pack's README count, the test count and pinned-class imports: EXPECTED_SHAPE_COUNT = main's 3653 + r18's 1311 = **4964**; both pin spreads kept. Hook on the merge a88386443: 49617 pass / 0 fail (every r18 pin unchanged). s34-census PASS, types-gate OK, e2e-render-map 0 fail, browser-baseline PASS (8), host-global-scan 0 violations.
