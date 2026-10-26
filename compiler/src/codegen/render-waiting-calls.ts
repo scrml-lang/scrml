@@ -131,8 +131,6 @@ export interface RenderWaitingSite {
    * the ordering message.
    */
   order?: boolean;
-  /** fix round 2 (F13) — a `!{ }`-handled cell write whose arm falls through, in an async-hosted body. */
-  envelope?: boolean;
 }
 
 /** s470-await-residue — a waiting call a synchronous body starts and does not wait for. */
@@ -508,7 +506,6 @@ class RenderWalk {
       for (const ch of Array.isArray(n.children) ? n.children as AnyNode[] : []) {
         if (!ch || typeof ch !== "object" || ch.kind !== "logic" || this.visited.has(ch)) continue;
         this.visited.add(ch);
-        if (ASYNC_HOSTED_TAGS.has(tag)) this.handledFallThrough(ch.body, `the body of <${tag}>`);
         if (tag === "poll") this.lateInitFollowers.push(ch.body);
         else if (atInit) this.withOrder(this.moduleOrder, () => this.orderFollow(ch.body));
         this.withOrder(order, () => this.syncStmts(ch.body, `the body of <${tag}>`));
@@ -549,8 +546,6 @@ class RenderWalk {
     const kind = s.kind;
     if (kind === "when-effect") { this.whenBody(s); return; }
     if (typeof kind !== "string" || SKIPPED_STATEMENT_KINDS.has(kind)) return;
-    // fix round 2 (F13) — an `on mount { }` statement is coloured in place too.
-    if (s._onMountEffect === true) this.handledFallThrough(s, "an `on mount { }` block");
     if (isMetaKind(kind)) { this.meta(s); return; }
     if (kind === "markup" || kind === "logic" || kind === "each-block" || kind === "match-block" ||
         kind === "engine-decl" || kind === "if-chain" || kind === "component-def" || kind === "state") {
@@ -1146,43 +1141,6 @@ class RenderWalk {
     }
   }
 
-  // ---- fix round 2 (F13) — a handled write whose arm falls through, in an async-hosted body -------
-
-  /**
-   * The bodies impl#1 now awaits in place (`<timer>` / `<poll>` / `<timeout>`, a state-child
-   * `effect=`, an `<onTransition>` body, an `on mount { }` block) lower `@c = f(…) !{ … }` through the
-   * in-place `!{ }` relocation, where an arm that does not produce a value (a block arm, which falls
-   * through) leaves the handled failure's ERROR ENVELOPE — a truthy object — as the value written to
-   * the cell (`g-handled-error-arm-failure-writes-envelope-into-cell`, open; the same lowering a
-   * function body has on base). A later `if (@c)` then passes for a wrong password. Refused there
-   * (fail closed) until that gap is closed.
-   */
-  private handledFallThrough(v: unknown, pos: string, seen: WeakSet<object> = new WeakSet()): void {
-    if (!v || typeof v !== "object" || seen.has(v as object)) return;
-    seen.add(v as object);
-    if (Array.isArray(v)) { for (const x of v) this.handledFallThrough(x, pos, seen); return; }
-    const n = v as AnyNode;
-    if (n.kind === "guarded-expr") {
-      const g = n.guardedNode as AnyNode | undefined;
-      const arms = Array.isArray(n.arms) ? n.arms as AnyNode[] : [];
-      const falls = arms.find((a) => !a || typeof a.handler !== "string" || a.handler.trim() === "" || a.handler.trim().startsWith("{"));
-      if (g && typeof g === "object" && g.kind === "state-decl" && g.shape !== "derived" && g.structuralForm !== true &&
-          (falls !== undefined || arms.length === 0) && !this.reported.has(n)) {
-        this.reported.add(n);
-        const cell = String(g.name ?? "?");
-        this.sites.push({
-          anchor: n, span: this.spanOverride ?? n.span ?? g.span, position: pos, kind: "action", envelope: true,
-          what: `\`@${cell} = …\` handled with \`!{ }\`, and the arm \`${falls ? String(falls.pattern ?? "?") : "?"} :> ${falls && typeof falls.handler === "string" ? falls.handler.trim().slice(0, 40) : ""}\` does not produce a value (it falls through)`,
-        });
-      }
-    }
-    for (const k of Object.keys(n)) {
-      if (k === "span" || k === "_record") continue;
-      const x = n[k];
-      if (x && typeof x === "object") this.handledFallThrough(x, pos, seen);
-    }
-  }
-
   /** What a lifted whole write `@c = f(…)` calls (for the message). */
   private liftedWhat(s: AnyNode): string {
     const ie = s.initExpr as AnyNode | undefined;
@@ -1683,7 +1641,6 @@ class RenderWalk {
       const read = readEngineBody(owner, slot, src, file);
       if (!read.stmts) return;
       if (slot === "effect" || slot === "body" || slot === "if") hookBodies.push(read.stmts);
-      if (slot === "effect" || slot === "body") this.withSpan(span, () => this.handledFallThrough(read.stmts, pos));
       const scope: OrderScope | null = slot === "arm"
         ? { pending: [], refuseAll: "the arm returns its next state at once — the transition, the handler that sent the message, a `when` on the engine and the hooks it fires (here or in a chained engine) all run" }
         : null;

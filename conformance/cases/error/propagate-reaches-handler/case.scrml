@@ -29,7 +29,7 @@ ${
 
 ${
     function handleMissing() {
-        let r = outer("missing") !{
+        outer("missing") !{
             .NotFound(mid) :> @phase = Phase.Missing(mid),
             .Timeout :> @phase = Phase.TimedOut
         };

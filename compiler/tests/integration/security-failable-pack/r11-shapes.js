@@ -77,7 +77,10 @@ function r7Valid(srv) {
         return true
     }`;
   const X = (cond) => `const v = wrap(p) !{ _ e :> ${cond} ? "rejected" : "LOGGED IN" }\n        return v == true ? "LOGGED IN" : v`;
-  const B = (blk) => `let o = "LOGGED IN"\n        const v = wrap(p) !{ _ e :> {\n            ${blk}\n        } }\n        return v == true ? "LOGGED IN" : o`;
+  // S470 (ruling "Emit E-ERROR-012", SPEC §19.4.3): the `!{ }` result `v` is READ, so its arm is in a value position
+  // and must yield a value — the block ends in `false` (before, a fall-through arm left the error envelope in `v`,
+  // which `v == true` read as not-true: the same outcome these shapes judge).
+  const B = (blk) => `let o = "LOGGED IN"\n        const v = wrap(p) !{ _ e :> {\n            ${blk}\n            false\n        } }\n        return v == true ? "LOGGED IN" : o`;
   return [
     ["VALID r7 is variant", D7(false), X(`e is .Denied`), ALL],
     ["VALID r7 e.variant", D7(false), X(`e.variant == "Denied"`), ALL],

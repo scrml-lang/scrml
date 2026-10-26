@@ -411,7 +411,9 @@ describe("r2 F1 — a lifted attribute value that swallowed later attributes is 
 // correctly handled `!{}` there was a false E-ERROR-002. These pin the handled shapes in the
 // pre-commit gate (the browser dir is not in it), and the unhandled ones stay refused.
 describe("r3 — a lifted event handler is read as statements", () => {
-  const H_OK = "@msg = check(x) !{ | e :> { @s = \"err\" } }; @y = @msg == true ? 1 : 2";
+  // S470 (E-ERROR-012, §19.4.3): `@msg = …` is a value position, so the arm yields `false` (before, the
+  // fall-through arm left the error envelope in `@msg`, which `@msg == true` also read as not-true).
+  const H_OK = "@msg = check(x) !{ | e :> { @s = \"err\"; false } }; @y = @msg == true ? 1 : 2";
   const LIFT = (h) => `<ul>\${ for (x of [@pw]) { lift <li><button id="go" onclick=\${${h}}>b</button></li>; } }</ul>`;
   const ARM = (inner) => `<div><match for=Doc on=@cur><Empty><p>none</p></><Note(note)>${inner}</></match></div>`;
   const PAGE = (body) => MSG("", body)

@@ -83,6 +83,8 @@ import { setFileSchedulerBindings } from "./async-combinators.ts";
 import { schedulerNamesNotProvablyGlobal } from "./js-async-analysis.ts";
 import { computeFileAsyncFnNames, serverFnNamesOfFile, setFileAsyncFnNames, adoptFileAsyncSet, waitingBindingsOfFile, namespaceImportLocalsOf, waitingFnPredicateOfFile, serverPlacedFnNamesAnywhere } from "./file-async-fns.ts";
 import { renderWaitingCallsOf } from "./render-waiting-calls.ts";
+import { failableMatchFallThroughs } from "./arm-structure.ts";
+import { _blockTailIsValueExpr } from "./emit-logic.ts";
 import { unboundHostPromiseGlobalsOf, hostPromiseReachOf, hostShadowedRefsOf, hostPromiseSeedOf } from "./host-promise-globals.ts";
 import { collectEngineVarNames } from "./emit-engine.ts";
 import { isToolProgram, isLibraryShapedFile } from "../tool-program.ts";
@@ -2871,6 +2873,9 @@ export function runCG(input: CgInput): CgOutput {
       const _rwHostNames = unboundHostPromiseGlobalsOf(fileAST);
       const _rwHostReach = hostPromiseReachOf(_rwFnNodes, _rwHostNames);
       const _rwHostShadowed = hostShadowedRefsOf(getNodes(fileAST as never), _rwHostNames);
+      // S470 (ruling "Emit E-ERROR-012") — a value-position `match` on a failable call whose arm falls
+      // through (§19.4.3); the `!{ }` half is judged where the guard is lowered (emit-logic).
+      failableMatchFallThroughs(getNodes(fileAST as never), _blockTailIsValueExpr);
       for (const site of renderWaitingCallsOf(getNodes(fileAST as never) as unknown[], {
         derivedReach: _rwDerivedReach,
         waits: (n: string) => _rwWaits(n) || _rwServerAnywhere.has(n) || _rwClientAsync.has(n) || _rwHostReach.has(n),
@@ -2899,15 +2904,7 @@ export function runCG(input: CgInput): CgOutput {
         const code = site.kind === "action" ? "E-IMPL1-ACTION-NOT-AWAITED" : "E-VALUE-SERVER-CALL";
         // s470-await-residue — an ORDER refusal: the call is started and not waited for, and a later
         // statement of the same synchronous body observes the state from before it lands.
-        // s470-await-residue fix round 2 (F13) — a `!{ }`-handled cell write with a fall-through arm in
-        // a body impl#1 awaits in place: the handled failure's envelope would be written to the cell.
-        const message = site.envelope === true
-          ? `E-IMPL1-ACTION-NOT-AWAITED: ${site.position} writes ${site.what}. impl#1 awaits this body in ` +
-            "place (§13.8 (i)), and there a handled failure whose arm falls through writes the call's ERROR " +
-            "ENVELOPE — a truthy object — into the cell (impl#1 gap g-handled-error-arm-failure-writes-envelope-into-cell), " +
-            "so a later test of the cell passes for a wrong password. This is an impl#1 limit, not a language rule. " +
-            "Fix: give every arm a value for the cell (`!{ .Denied(r) :> false, _ :> false }`)."
-          : site.order === true
+        const message = site.order === true
           ? `E-IMPL1-ACTION-NOT-AWAITED: ${site.position} calls ${site.what}. The language waits for a ` +
             "waiting call at a suspension point of an action position and runs what follows after it settles " +
             "(§13.8 (i)), but impl#1 runs this body synchronously: it starts the call and goes on, so the later " +

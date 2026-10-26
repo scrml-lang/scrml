@@ -45,6 +45,8 @@
  *   §12 End-to-end — node-parseable function body slice
  */
 
+// S470 (ruling "Emit E-ERROR-012", SPEC §19.4.3): a `const|let r = f() !{ … }` handler is a value position, so
+// each arm of such a fixture ends with `return` (it leaves) — the arm bodies and writes these tests pin are unchanged.
 import { describe, test, expect } from "bun:test";
 import { emitLogicNode } from "../../src/codegen/emit-logic.js";
 import { resetVarCounter } from "../../src/codegen/var-counter.ts";
@@ -426,8 +428,8 @@ describe("R25-Bug-38 §11: end-to-end — `let r = ...` workaround form", () => 
       "  }",
       "  function init() {",
       "    let r = loadRow() !{",
-      '      | ::NotFound -> { @x = "miss"; @y = 0 }',
-      "      | ::Empty    -> { @y = 1 }",
+      '      | ::NotFound -> { @x = "miss"; @y = 0; return }',
+      "      | ::Empty    -> { @y = 1; return }",
       "    }",
       "  }",
       "}",

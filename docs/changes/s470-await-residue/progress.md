@@ -261,3 +261,103 @@ handlers with fall-through arms in 13 files, all under `conformance/cases/`.
 So `@x = f() !{ | e :> { … } }` with a no-value arm is not a program whose failure leaves `@x` unchanged. It is
 E-ERROR-012. "Run the arm and don't write the target" would make impl#1 accept a program the language refuses,
 which would be a new divergence. Not built; no code was changed in this round.
+
+## Fix round 3, part 2 — E-ERROR-012 emitted (ruling S470 "Emit E-ERROR-012 (Recommended)", user-voice e2e4c7a)
+
+- Built under the S435 security exception. Governing text: SPEC §19.4.3 / §19.4.4, quoted in the part-1 section above.
+- **`!{ }` half.** `compiler/src/codegen/emit-logic.ts`, the guarded-expr lowering, where `guardValueUsed` already
+  decides the value position (a binding, a cell write, a `return` / `yield`, an assignment, an expression-position
+  guard). Every side shares it (client, server, library, tool), and every host lowers through it (handler, function
+  body, helper, engine hooks, `<timer>`, the opener, `when`). Each arm is judged by `arm-structure.ts`
+  `valueArmFallsThrough`, with impl#1's one arm reading (`armBlockStatementsDetailed`, `_blockTailIsValueExpr`; the
+  same predicates the value lowering uses):
+  - an expression arm yields; a write, a declaration or an empty arm falls through;
+  - a block yields when its tail is an expression, a `lift`, or a handled call;
+  - a block (or a `fail` arm) leaves when its tail is `return` / `fail` / `break` / `continue`, or an `if` / `else`
+    whose branches all leave;
+  - a block the reader cannot read stays `refuseUnreadableValueArm`'s.
+  - Limit: impl#1 does not type an arm's value, so a `log(m)` tail is taken as a value. SPEC also counts that as
+    falling through ("a call whose result is not a value of the success type"). Recorded, not judged here.
+- **`match` half.** `arm-structure.ts` `failableMatchFallThroughs` covers a `match` stamped `__matchSubjectFailable`
+  that is a declaration's value or sits inside an expression. Its inline arms (`result`) and block arms (`body`) are
+  judged by the same rule. A `match` statement is a statement position.
+- **F13 syntactic refusal removed.** `render-waiting-calls.ts` `handledFallThrough`, its `envelope` site flag and
+  the index.ts message are gone, and the SPEC §34 E-IMPL1 row sentence about it is removed. E-ERROR-012 covers every
+  shape it refused. Value-tail block arms it over-refused now compile and are correct by execution
+  (`shapes/e12.mjs`: value tail, `return` tail in a helper, value arms × handler / onTransition / timer / helper).
+  No part of it was kept.
+- **Conformance migrated (8 cases).** Each case still tests what it tested.
+  - The binding is unused, so it was dropped (statement position): `error/fail-bare-variant-reaches-handler`,
+    `error/fail-imported-builtin-name-enum-ok`, `error/propagate-reaches-handler`,
+    `control-flow/s437-braceless-else-in-failable-arm`, and `error/failable-handler-lift{,-success,-timeout}`
+    (`handleMissing` / `handleSlow`).
+  - The binding / cell is read after, so each arm now leaves with `return`: `error/failable-handler-lift*`
+    `handleOk`, `error/propagate-success-unwrap`, `parse-variant/happy-{payload,unit}-variant` (`@result =
+    parseVariant(…) !{ …@parseError writes… }`).
+  - No `expected.json` changed. Every assertion is on the success path, or on the arm's writes, which still run.
+  - The SPEC's other three listed cases (`handler-exhaustive-neg`, `handler-wildcard-escape`,
+    `handler-non-exhaustive`) emit no E-ERROR-012 on today's text.
+- **Probes on head (all shapes refused at compile time).**
+  - Reviewer's atk.mjs: 19/19 PASS-REFUSED, E-ERROR-012 on every F13 row. Its "value arm … (control)" rows are
+    refused only because the shared header declares the fall-through helper `chk`.
+  - hh.mjs: 1/1 refused. bang.mjs: 6/6. bang2.mjs: 6/7, with the no-fall-through control staying PASS.
+  - The twins that fail on main are refused: handler fn bang, handler-calls-helper, opener bang.
+- **Pack f23 +5 (E12, pinned).**
+  - On 4abccb31d: 5/5 FAIL.
+  - On main ffbcf4432: the handler / handler-calls-helper / opener shapes FAIL; the helper-in-onTransition / timer
+    shapes are PASS-DENY / PASS.
+  - Head: 5/5 PASS-REFUSED (E-ERROR-012). f23 = 47; count 3501.
+- **R26 with digests (3618 files).** Head against an extracted HEAD-before-change (7007745a1); every emitted
+  artifact hashed, path-normalized.
+  - newly rejected: **0**. No file outside `conformance/cases/` is newly refused, and the migrated cases compile
+    clean.
+  - Two already-refused files gain E-ERROR-012:
+    - `samples/compilation-tests/error-004-in-logic.scrml`: a `!{}` after `let data = not`. SPEC calls this
+      E-ERROR-013's shape, which is not emitted.
+    - `samples/login.scrml`: the legacy `| AuthError e -> {…}` arm parses to a garbage handler.
+  - Emitted output changed for no compiling file: 3561 identical. The one digest difference
+    (`conformance/cases/components/missing-required-slot-reject`, refused) is nondeterministic on both compilers:
+    two runs of each gave four different digests.
+  - stdlib (own copy): 0 diffs.
+- **SPEC.**
+  - §19.4.3's provenance and both E-ERROR-012 rows (the §19 table and §34): "Nominal / not yet emitted by impl#1"
+    is replaced by the emitted note (the emission sites, the arm rule and its `log(m)` limit, the migration).
+  - The §34 E-IMPL1 row loses the F13 sentence.
+  - SPEC-INDEX regenerated; s34-census PASS (3 changed rows, well-formed).
+- **Candidate gap resolutions (PA files them).** `g-handled-error-arm-failure-writes-envelope-into-cell` and
+  `g-impl1-value-position-arm-fallthrough-s451` → RESOLVED by E-ERROR-012, except the `log(m)` (untyped arm value)
+  residue.
+- **Test fixtures that relied on value-position fall-through (migrated; each still tests what it tested).**
+  The full unit + integration + conformance run with E-ERROR-012 on gave 66 failures, all from fixtures that bind
+  or write a handled result whose arms only write. Each fixture was migrated mechanically: the binding dropped where
+  unread, or each arm given a leave / a value.
+  - Arms end with `return`: `error-handler-const-bind-r25-bug-49` (the bound form is its subject),
+    `r24-bug-31-if-as-expression-result-binding`, `error-handler-arm-body-emission`, `error-arm-reactive`,
+    `nested-error-handler-no-invalid-js`.
+  - Arms end with a value: `whole-error-binder-{escapes-s470,allowlist-s469}` (`… false`),
+    `e-error-002-value-form-followups-s469` H_OK (`; false` — the expected `err/2` is unchanged, because a falsy
+    value and the old envelope both read as `!= true`), `failable-arm-template-literal-lowering` (block tail `n`),
+    `request-tag-and-server-fn-reactive` (the arm ends in the cell it wrote),
+    browser `handler-server-assign-order-s446` (`; 0`), `e-error-002-handler-forms` N5 (a non-simple-param arrow body
+    is an expression-position handler; its arm yields `1`).
+  - Binding dropped (statement position): `s462-handler-runtime-helpers-shipped` (guard-arm-*),
+    `s465-await-arm-bodies` handlerStmt, `s465-await-arm-r2` cforHandler / switch.
+  - Expectations changed because they encoded the old behaviour:
+    - `bang-arm-block-value-s468` "a block that ends in a write …" now asserts E-ERROR-012 (it pinned the fall-through
+      emission).
+    - `s465-await-arm-bodies` "an empty braced `!{ _ :> {} }` …" now asserts E-ERROR-012 (an empty block falls through
+      in a value position, which proves it is not the object value `{}`).
+- **Pack: shared shape helpers migrated, not edited per shape.**
+  - The `B` helper of `r7-shapes.js`, `r8-shapes.js` and `r11-shapes.js` (a bound `const v = wrap(p) !{ _ e :> { … } }`
+    read as `v == true`) now ends its block arm in `false`. The outcome the shapes judge is unchanged: before, `v` was
+    the envelope, which is also not `== true`.
+  - Their 23 VALID shapes compile again.
+  - Six pins changed, all IMPROVEMENTS (re-pinned with a comment):
+    - `f9/VALID ctor match` and `f9/VALID Q1 primitive sibling of enum field`: PASS-REFUSED → PASS.
+    - `l6/VALID ctor match` and `l6/VALID Q1 …`: PASS-REFUSED → PASS.
+    - `l5/VALID logged` and `l6/VALID log(e)`: PASS-500 → PASS.
+- Unit: new `e-error-012-value-arm-fallthrough-s470.test.js` (23). It covers a fall-through write / block / empty /
+  declaration / loop / one-leaving-`if`; `let` / `const` / `return` positions; a helper from `<onTransition>` and from
+  `<timer>`; an `<onTransition>` body; the opener; a handler attribute; a server function; library mode; yielding /
+  leaving / `fail` arms and statement position ACCEPTED; and the `match` half.
+- Full run after migration: unit + integration + conformance **42432 pass / 0 fail**. snippet-gate 113 / 0.

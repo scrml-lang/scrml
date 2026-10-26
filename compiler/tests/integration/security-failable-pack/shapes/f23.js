@@ -121,6 +121,25 @@ const R18 = (body) => `<ok> = false
 <p id="out">\${@msg}</p>
 `;
 
+// fix round 3 helpers (the reviewer's atk.mjs / hh.mjs pages).
+const E12BANG = `@ok = check(@pw) !{ | .Denied(r) :> { @msg = "rejected" } | _ :> { @msg = "rejected" } }`;
+const E12LOGIN = (x = "") => `    function login(p) { @pw = p${x} }\n}\n`;
+const E12 = (rest, pw = "none") => `type Phase:enum = { Idle, Active }
+type AuthErr:enum = { Denied(reason: string), Gone }
+<pw> = "${pw}"
+<ok> = false
+<msg> = "rejected"
+\${
+    server function check(p)! -> AuthErr {
+        if (p != "secret") fail AuthErr::Denied("bad")
+        return true
+    }
+    function chk(p) { @ok = check(p) !{ | .Denied(r) :> { @msg = "rejected" } | _ :> { @msg = "rejected" } } }
+${rest}<button id="wrong" onclick=login("wrong")>go</button>
+<button id="right" onclick=login("secret")>go</button>
+<p id="out">\${@msg}</p>
+`;
+
 // fix round 1 helpers.
 const DTEST = (d) => `if (@${d}) { @msg = "LOGGED IN" } else { @msg = "rejected" }`;
 const G_OK = `if (@ok) { @msg = "LOGGED IN" } else { @msg = "rejected" }`;
@@ -211,6 +230,15 @@ export default [
   // the declaration, nothing waits (over-refused on 4ae8261f7: PASS-REFUSED there, PASS now).
   ["VALID F18 reset of a declared cell, then an awaited write in the handler", R18(`reset(@ok); @ok = isOk(p); ${G_OK}`)],
   ["VALID F18 an awaited write, the test, then a reset to the declaration", R18(`@ok = isOk(p); ${G_OK}; reset(@ok)`)],
+  // fix round 3 (re-review of 4abccb31d; ruling S470 "Emit E-ERROR-012") — a `!{ }`-handled cell
+  // write whose arm falls through, reached through a HELPER function, in a handler, in the opener: the
+  // handled failure's error envelope (truthy) was written into the cell. FAIL on 4abccb31d (the
+  // handler and opener shapes on main too); refused at compile time after (E-ERROR-012, §19.4.3).
+  ["E12 helper with a fall-through arm, called from an onTransition, then a test", E12(`${E12LOGIN("; @phase = .Active")}${ENG13(`chk(@pw)\n ${G_OK}`)}`)],
+  ["E12 helper with a fall-through arm, called from a timer, then a test", E12(`${E12LOGIN()}<timer interval=1>\${ chk(@pw)\n ${G_OK} }</timer>\n`)],
+  ["E12 handler: a fall-through arm write, then a test", E12(`    function login(p) { @pw = p\n ${E12BANG}\n ${G_OK} }\n}\n`)],
+  ["E12 handler calls the helper, then a test", E12(`    function login(p) { @pw = p; chk(p); ${G_OK} }\n}\n`)],
+  ["E12 opener effect=: a fall-through arm write, then a test", E12(`${E12LOGIN()}<engine for=Phase initial=.Idle effect=\${ ${E12BANG}\n ${G_OK} }>\n  <Idle rule=.Active/>\n  <Active/>\n</>\n`, "wrong")],
   // VALID controls — correct on base and after
   ["VALID handler: a cell write, then a test", P(``, `; ${WRITE.replace(/@pw/g, "p")}`)],
   ["VALID when body: a cell write, then a test", P(`\${ when @pw changes { ${WRITE} } }`)],

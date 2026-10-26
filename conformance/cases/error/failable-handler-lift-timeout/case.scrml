@@ -22,21 +22,21 @@ ${
 
 ${
     function handleMissing() {
-        let result = loadItem("missing") !{
+        loadItem("missing") !{
             .NotFound(mid) :> @phase = Phase.Missing(mid),
             .Timeout :> @phase = Phase.TimedOut
         }
     }
     function handleSlow() {
-        let result = loadItem("slow") !{
+        loadItem("slow") !{
             .NotFound(mid) :> @phase = Phase.Missing(mid),
             .Timeout :> @phase = Phase.TimedOut
         }
     }
     function handleOk() {
         let result = loadItem("ok") !{
-            .NotFound(mid) :> @phase = Phase.Missing(mid),
-            .Timeout :> @phase = Phase.TimedOut
+            .NotFound(mid) :> { @phase = Phase.Missing(mid); return },
+            .Timeout :> { @phase = Phase.TimedOut; return }
         }
         @phase = Phase.Loaded(result);
     }

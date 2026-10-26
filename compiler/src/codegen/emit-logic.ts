@@ -6,7 +6,7 @@ import { nsId } from "./chunk-namespace.ts";
 import { extractSqlParams, rewriteTildeRef, buildTaggedTemplate, protectTagSqlResult, boolCoerceSqlResult, _lowerTenantForQuery } from "./rewrite.js";
 import { emitExpr, emitFnValueParams, emitExprField, emitExprFromText, emitConditionField, arrowBodyNeedsParens, arrowBodyStringNeedsParens, isStdlibAsyncCallee, recordExprGuardError, asyncNameFactsOf, type EmitExprContext } from "./emit-expr.ts";
 import { stripLeakedComments, isLeakedComment, splitBareExprStatements, splitMergedStatements } from "./compat/parser-workarounds.js";
-import { serverArmBlockStatements, serverArmExprNode, refuseServerArm, refuseUnreadableValueArm } from "./arm-structure.ts";
+import { serverArmBlockStatements, serverArmExprNode, refuseServerArm, refuseUnreadableValueArm, valueArmFallsThrough, refuseFallThroughValueArm } from "./arm-structure.ts";
 import * as acorn from "acorn";
 import { REFUSED_SERVER_TEXT } from "./server-text-guard.ts";
 import { bareBlockText, bareBlockSequenceTexts, PROBE_BODY_OFFSET } from "../validators/defer-structure.ts";
@@ -5274,6 +5274,33 @@ function _emitLogicNode(node: any, opts: EmitLogicOpts): string {
       const _gExpr = guardedNode && guardedNode.kind === "bare-expr" ? guardedNode.exprNode : null;
       const guardValueUsed = !!(bindingName || returnsResult || yieldsResult || reactiveCellName || cellWriteNode ||
         opts.exprPositionGuard || (_gExpr && _gExpr.kind === "assign"));
+
+      // S470 (ruling "Emit E-ERROR-012") — §19.4.3 / §19.4.4: in a value position an arm that neither
+      // yields a value nor leaves FALLS THROUGH, a compile error (E-ERROR-012). Every side shares this
+      // lowering (client, server, library, tool), and every host lowers its statements through it.
+      if (guardValueUsed) {
+        const _callee = (() => {
+          const roots = [guardedNode?.initExpr, guardedNode?.exprNode, guardedNode?.exprNode?.value];
+          for (const r of roots) {
+            let n: any = r;
+            for (let d = 0; n && d < 8; d++) {
+              if (n.kind === "call" && n.callee && n.callee.kind === "ident" && typeof n.callee.name === "string") return n.callee.name;
+              if (n.kind === "call" && n.callee && n.callee.kind === "member" && n.callee.property) return String(n.callee.property.name ?? n.callee.property);
+              n = n.kind === "assign" ? n.value : n.kind === "await" ? n.argument : null;
+            }
+          }
+          return handlesSql ? "?{…}" : "the call";
+        })();
+        const _position = reactiveCellName || cellWriteNode ? `written to \`@${String(reactiveCellName ?? cellWriteNode?.name ?? "?")}\``
+          : bindingName ? `bound to \`${bindingName}\``
+          : returnsResult ? "returned"
+          : yieldsResult ? "yielded"
+          : (_gExpr && _gExpr.kind === "assign") ? "assigned"
+          : "used in an expression";
+        for (const arm of arms) {
+          if (valueArmFallsThrough(arm, _blockTailIsValueExpr)) refuseFallThroughValueArm(arm, _callee, _position);
+        }
+      }
 
       if (arms.length > 0) {
         const hasWildcard = arms.some((a: LogicArm) => a.pattern === "_");

@@ -264,10 +264,12 @@ describe("C — non-value arms are unchanged", () => {
     expect(page.text("#note")).toBe("d");
   });
 
-  test("a block that ends in a write emits no result assignment for the write", () => {
+  // S470 (ruling "Emit E-ERROR-012", §19.4.3): a block that ends in a write FALLS THROUGH, and in this
+  // value position (`const ok = …`) that is a compile error — before, impl#1 emitted it and `ok` kept the
+  // error envelope (g-handled-error-arm-failure-writes-envelope-into-cell).
+  test("a block that ends in a write falls through: E-ERROR-012", () => {
     const out = compileSource(LOGIN(`const ok = check(p) !{ .Denied :> { @note = "d" } }`));
-    expect(out.codes).toEqual([]);
-    expect(out.clientJs).not.toMatch(/_scrml__scrml_result_\d+\s*=\s*_scrml_cs_reactive_set/);
+    expect(out.codes).toContain("E-ERROR-012");
   });
 });
 

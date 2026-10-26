@@ -69,6 +69,8 @@
  *       inherits it).
  */
 
+// S470 (ruling "Emit E-ERROR-012", SPEC §19.4.3): a `const|let r = f() !{ … }` handler is a value position, so
+// each arm of such a fixture ends with `return` (it leaves) — the arm bodies and writes these tests pin are unchanged.
 import { describe, test, expect } from "bun:test";
 import { compileScrml } from "../../src/api.js";
 import { writeFileSync, mkdirSync, rmSync, readFileSync } from "fs";
@@ -176,8 +178,8 @@ describe("R24-Bug-31 §2: const-binding after bare return", () => {
       'function load() {',
       '    if (!@searchTerm) return',
       '    const r = fetchItems() !{',
-      '        | ::Network msg -> { @searchTerm = msg }',
-      '        | ::Empty       -> { @searchTerm = "empty" }',
+      '        | ::Network msg -> { @searchTerm = msg; return }',
+      '        | ::Empty       -> { @searchTerm = "empty"; return }',
       '    }',
       '}',
       '</program>',
@@ -214,8 +216,8 @@ describe("R24-Bug-31 §3: let-binding after bare return", () => {
       'function load() {',
       '    if (!@searchTerm) return',
       '    let r = fetchItems() !{',
-      '        | ::Network msg -> { @searchTerm = msg }',
-      '        | ::Empty       -> { @searchTerm = "empty" }',
+      '        | ::Network msg -> { @searchTerm = msg; return }',
+      '        | ::Empty       -> { @searchTerm = "empty"; return }',
       '    }',
       '}',
       '</program>',
@@ -278,8 +280,8 @@ describe("R24-Bug-31 §5: regression-guard — no early-return path STILL works"
       'server function risky() ! ErrT { fail ErrT::A }',
       'function load() {',
       '    const r = risky() !{',
-      '        | ::A -> { @msg = "a" }',
-      '        | ::B -> { @msg = "b" }',
+      '        | ::A -> { @msg = "a"; return }',
+      '        | ::B -> { @msg = "b"; return }',
       '    }',
       '}',
       '</program>',

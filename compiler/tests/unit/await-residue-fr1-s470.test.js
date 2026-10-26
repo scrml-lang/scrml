@@ -195,10 +195,11 @@ ${view}
     "<onTransition>": [(b) => `<engine for=Phase initial=.Idle>\n  <Idle rule=.Active/>\n  <Active/>\n  <onTransition from=.Idle to=.Active>\${ ${b} }</onTransition>\n</>`, "; @phase = .Active"],
   };
   for (const [host, [h, fns]] of Object.entries(HOSTS)) {
-    test(`REFUSED — ${host}: an arm that falls through`, () => {
+    // fix round 3 (ruling S470 "Emit E-ERROR-012") — the root: §19.4.3's E-ERROR-012 for a value-position
+    // arm that falls through, in every host (the round-2 syntactic refusal is removed).
+    test(`REFUSED — ${host}: an arm that falls through (E-ERROR-012)`, () => {
       const r = compile(H(h(FALL), fns));
-      expect(r.codes).toContain(ACTION);
-      expect(r.messages.some((m) => /ERROR ENVELOPE/.test(m) && /falls through/.test(m))).toBe(true);
+      expect(r.codes).toContain("E-ERROR-012");
     });
     test(`ACCEPTED — ${host}: every arm gives the cell a value`, () => {
       expect(compile(H(h(VALUE), fns)).codes).not.toContain(ACTION);

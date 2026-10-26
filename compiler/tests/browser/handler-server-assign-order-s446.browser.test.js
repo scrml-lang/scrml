@@ -18,6 +18,8 @@
  * emit (a separate language question) — pinned below.
  */
 
+// S470 (E-ERROR-012, §19.4.3): a `@x = f() !{ … }` write is a value position, so its `e` arm yields `0`
+// after writing `@s` (a fall-through arm left the error envelope in `@x`).
 import { describe, test, expect, beforeEach, afterEach, afterAll } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { resolve, join } from "path";
@@ -187,8 +189,8 @@ const CASES = [
   ["write then a DOM read of the rendered cell", '@x = save(); @s = document.getElementById("o").textContent', { x: 10, s: "10" }],
   ["non-final write, then a statement, then a DOM read", '@x = save(); @c = false; @s = document.getElementById("o").textContent', { x: 10, s: "10" }],
   ["write inside an if, then read", "if (@c) { @x = save() }; @y = @x + 1", { x: 10, y: 11 }],
-  ["`!{}` error arm (success path), then read", '@x = okf() !{ | e :> { @s = "err" } }; @y = @x + 1', { s: "", x: 10, y: 11 }],
-  ["`!{}` error arm (failure path) runs before the next statement", '@x = boom() !{ | e :> { @s = "err" } }; @y = @s == "err" ? 1 : 2', { s: "err", y: 1 }],
+  ["`!{}` error arm (success path), then read", '@x = okf() !{ | e :> { @s = "err"; 0 } }; @y = @x + 1', { s: "", x: 10, y: 11 }],
+  ["`!{}` error arm (failure path) runs before the next statement", '@x = boom() !{ | e :> { @s = "err"; 0 } }; @y = @s == "err" ? 1 : 2', { s: "err", y: 1 }],
   ["single statement (unchanged path) still writes", "@x = save()", { x: 10 }],
 ];
 
@@ -240,7 +242,7 @@ for (const pos of Object.keys(POSITIONS)) {
 // handlerBlock (a guarded `!{}` write; a single statement split across lines)
 // keeps its detached-IIFE emit and its `.catch` → error-boundary log.
 const SINGLE_BLOCK_FORMS = [
-  ["guarded `!{}` write", '@x = okf() !{ | e :> { @s = "err" } }'],
+  ["guarded `!{}` write", '@x = okf() !{ | e :> { @s = "err"; 0 } }'],
   ["write split across lines", "@x = save(\n    )"],
 ];
 for (const pos of Object.keys(POSITIONS)) {

@@ -416,7 +416,7 @@ export const PINNED_CLASS = {
   "l5/VALID match e": "PASS",
   "l5/VALID describe(e) typed with the same enum": "PASS",
   "l5/VALID into a variant typed with the enum": "PASS",
-  "l5/VALID logged": "PASS-500",
+  "l5/VALID logged": "PASS", // S470 E-ERROR-012 migration (the arm yields `false`): was PASS-500
   "l5/A match-form _ e member": "PASS",
   "l5/B imported enum + local same-name, match e": "UNJUDGED",
   "l5/B imported enum, no local enum, match e": "UNJUDGED",
@@ -532,7 +532,7 @@ export const PINNED_CLASS = {
   "f9/VALID nested audited fn": "PASS",
   "f9/VALID chain f->g": "PASS",
   "f9/VALID primitive payload of match e": "PASS",
-  "f9/VALID ctor match": "PASS-REFUSED",
+  "f9/VALID ctor match": "PASS", // S470 E-ERROR-012 migration (the arm yields `false`): was PASS-REFUSED
   "f9/REFUSED-VALID nested enum match": "PASS-REFUSED",
   "l6/1 shadow const arrow in login": "PASS-REFUSED",
   "l6/1 shadow let fn in login": "PASS-REFUSED",
@@ -560,11 +560,11 @@ export const PINNED_CLASS = {
   "l6/4 nested enum payload member": "PASS-REFUSED",
   "l6/4 nested enum payload eq": "PASS-REFUSED",
   "l6/VALID check(e)": "PASS",
-  "l6/VALID log(e)": "PASS-500",
+  "l6/VALID log(e)": "PASS", // S470 E-ERROR-012 migration (the arm yields `false`): was PASS-500
   "l6/VALID nested audited fn": "PASS",
   "l6/VALID chain f->g": "PASS",
   "l6/VALID primitive payload of match e": "PASS",
-  "l6/VALID ctor match": "PASS-REFUSED",
+  "l6/VALID ctor match": "PASS", // S470 E-ERROR-012 migration (the arm yields `false`): was PASS-REFUSED
   "l6/REFUSED-VALID nested enum match": "PASS-REFUSED",
   "t6/1 shadow const arrow in login": "PASS-REFUSED",
   "t6/1 shadow let fn in login": "PASS-REFUSED",
@@ -615,7 +615,7 @@ export const PINNED_CLASS = {
   "f9/5 R3 top const beside fn": "PASS-REFUSED",
   "f9/5 F1 fn-expr direct e.reason": "PASS-REFUSED",
   "f9/5 F2 block arrow direct e.reason": "PASS-REFUSED",
-  "f9/VALID Q1 primitive sibling of enum field": "PASS-REFUSED",
+  "f9/VALID Q1 primitive sibling of enum field": "PASS", // S470 E-ERROR-012 migration (the arm yields `false`): was PASS-REFUSED
   "l6/5 D1 default param reads x.reason": "PASS-REFUSED",
   "l6/5 D2 default param aliases x": "PASS-REFUSED",
   "l6/5 D4 default on the error param": "PASS-REFUSED",
@@ -623,7 +623,7 @@ export const PINNED_CLASS = {
   "l6/5 R3 top const beside fn": "PASS-REFUSED",
   "l6/5 F1 fn-expr direct e.reason": "PASS-REFUSED",
   "l6/5 F2 block arrow direct e.reason": "PASS-REFUSED",
-  "l6/VALID Q1 primitive sibling of enum field": "PASS-REFUSED",
+  "l6/VALID Q1 primitive sibling of enum field": "PASS", // S470 E-ERROR-012 migration (the arm yields `false`): was PASS-REFUSED
   "t6/5 D1 default param reads x.reason": "PASS-REFUSED",
   "t6/5 D2 default param aliases x": "PASS-REFUSED",
   "t6/5 D4 default on the error param": "PASS-REFUSED",
@@ -799,6 +799,12 @@ export const PINNED_CLASS = {
   "f23/F14 message arm write, then the sending handler reads the cell": "PASS-REFUSED",
   "f23/VALID F18 reset of a declared cell, then an awaited write in the handler": "PASS",
   "f23/VALID F18 an awaited write, the test, then a reset to the declaration": "PASS",
+  // fix round 3 (re-review of 4abccb31d) — every E12 shape FAIL on 4abccb31d (handler / opener on main too); E-ERROR-012 after.
+  "f23/E12 helper with a fall-through arm, called from an onTransition, then a test": "PASS-REFUSED",
+  "f23/E12 helper with a fall-through arm, called from a timer, then a test": "PASS-REFUSED",
+  "f23/E12 handler: a fall-through arm write, then a test": "PASS-REFUSED",
+  "f23/E12 handler calls the helper, then a test": "PASS-REFUSED",
+  "f23/E12 opener effect=: a fall-through arm write, then a test": "PASS-REFUSED",
   "f23/VALID handler: a cell write, then a test": "PASS",
   "f23/VALID when body: a cell write, then a test": "PASS",
   "f23/VALID timer body: a cell write, then a test": "PASS",
