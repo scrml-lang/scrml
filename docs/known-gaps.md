@@ -30,8 +30,8 @@
 | Severity | Open (owed by impl#1, the TS compiler) | Carried (owed by the bootstrap; xfail on impl#1) |
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 261 | 5 |
-| MED | 703 | 8 |
+| HIGH | 262 | 5 |
+| MED | 702 | 8 |
 | LOW | 526 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
@@ -391,10 +391,12 @@ Also: the §34 rows for E-ERROR-014 (written for the markup position) and E-TRY-
 <!-- @gap id=g-impl1-variant-read-residue-s470 sev=LOW status=open locus=compiler/src/codegen(emit-expr.ts / rewrite.ts / emit-library.ts) prov=review:S470-#1571(rounds 1–3) -->
 ### g-impl1-variant-read-residue-s470 — residue of #1571: a dynamic key `x[k]` with `k = "variant"` keeps the plain read; a declaration default is serialized without its quotes (`{ a = x["variant"] }` → 500 "variant is not defined", fails closed); `x is Math.PI` (a non-enum dotted name) is treated as `Enum.Variant`; library multi-line templates still corrupt `is` / `not` text (lib/ml2); compile-time `^{}` meta-eval reads `.variant` as `undefined` on a unit variant; a `variant` key in a parameter or `for` head is refused; the OAuth `.scrml` storage check now gives a worse error for a bare string (still fails closed) — `NEW S470; LOW; open`
 
-<!-- @gap id=g-impl1-null-in-expression-position-arm-not-refused-s470 sev=MED status=open locus=UNTRACED(expression-position `!{}` arm text — no `null` refusal on that path; `!= null` lowers to `!_scrml_structural_eq(…, null)`) prov=dispatch:s470-nested-handler-await(review follow-up);review:S470-#1576-round-4(FU1; ~/.cache/scrml/review/s470-li4/runs/h16/024, 025) -->
-### g-impl1-null-in-expression-position-arm-not-refused-s470 — (security) `null` is not refused inside an expression-position `!{}` arm: `return (local(p) !{ _ :> [p].find(isOk) != null }) ? "LOGGED IN" : "rejected"` compiles, the comparison is emitted as `!_scrml_structural_eq(await _scrml_findAsync([p], isOk), null)`, and both passwords log in (library and fullstack) — `NEW S470 (review of #1576); MED; open (pre-existing on base)`
+<!-- @gap id=g-impl1-null-in-expression-position-arm-not-refused-s470 sev=HIGH status=open locus=UNTRACED(expression-position `!{}` arm text — no `null` refusal on that path; `!= null` lowers to `!_scrml_structural_eq(…, null)`) prov=dispatch:s470-nested-handler-await(review follow-up);review:S470-#1576-round-4(FU1; ~/.cache/scrml/review/s470-li4/runs/h16/024, 025) -->
+### g-impl1-null-in-expression-position-arm-not-refused-s470 — (security) `null` is not refused inside an expression-position `!{}` arm: `return (local(p) !{ _ :> [p].find(isOk) != null }) ? "LOGGED IN" : "rejected"` compiles, the comparison is emitted as `!_scrml_structural_eq(await _scrml_findAsync([p], isOk), null)`, and both passwords log in (library and fullstack) — `NEW S470 (review of #1576); HIGH; open (pre-existing on base)`
 
 Executed by the #1576 round-4 review on head and base (h16 / b16 rows 024, 025: FAIL on both). The server call itself is awaited (#1576's fix holds). The failure comes from the `null` comparison. SPEC §42 says absence is `not`, and the bootstrap refuses `null` with E-PARSE-NO-NULL. Fix: refuse `null` in this position (§42).
+
+PA re-rated MED→HIGH (wrong-password login).
 
 <!-- @gap id=g-fullstack-point-free-async-callback-server-placed-s470 sev=LOW status=open locus=compiler/src/route-inference.ts(placement of a client function whose only server reach is a by-reference combinator callback — located-not-traced) prov=dispatch:s470-nested-handler-await(round 3 candidate);review:S470-#1576-round-4(FU2) -->
 ### g-fullstack-point-free-async-callback-server-placed-s470 — a client function whose body is `[p].map(isOk)` (`isOk` a server function) is server-placed by route inference, and its call fails (`init` for both passwords) — `NEW S470 (review of #1576); LOW; open (pre-existing, fails closed)`
