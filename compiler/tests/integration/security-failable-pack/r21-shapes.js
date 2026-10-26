@@ -77,6 +77,7 @@ const VALID = [
 const DECLS = (srv) => `${srv}function isOk(p) { return p == "secret" }
     ${srv}function ping(q) { return q }
     ${srv}function info(p) { return { denied: p != "secret", granted: p == "secret" } }
+    ${srv}function pair(p) { return [p != "secret", 1] }
     type AuthErr:enum = { Denied(reason: string) }
     function local(p)! -> AuthErr {
         if (p != "secret") fail AuthErr::Denied("bad")
@@ -86,13 +87,42 @@ const DECLS = (srv) => `${srv}function isOk(p) { return p == "secret" }
     function same(x) { return x }
     function flip(x) { return !x }`;
 
-function page(side, stmts, ret, view) {
+// Fix round 1 (review of 03a2ef2ed, ~/.cache/scrml/review/s470-lj/p/s1-s3.mjs) — fullstack only.
+//   F5: shapes the round-0 element test fixed beyond the first list (FAIL on ffbcf4432, PASS after): `new`,
+//       a spread argument, a parenthesized / ternary callee, an optional call, `in` + member reads, an
+//       imported async helper under `!`.
+//   F2: an inert MAP read in the batch — a member element was re-emitted under a bare `{ mode: "client" }`
+//       context, so `@deny[p]` on a map cell read as a plain index -> undefined and the deny-list missed
+//       (FAIL on ffbcf4432 and on round 0 03a2ef2ed). The element is now the statement's own emission.
+//   F4: a destructuring decl beside a batch seed (E-CODEGEN-INVALID-LOGIC on ffbcf4432; now a batch
+//       boundary, emitted in place — VALID).
+const DENY = `\${ <deny>: [string:bool] = ["wrong": true] }\n`;
+const LIB = `\${
+    export server function isOk2(p) { return p == "secret" }
+    export function allowedX(q) { return isOk2(q) }
+}
+`;
+const ROUND1 = [
+  ["F5 new over the call", [`const a = ping(1)`, `const v = new Boolean(isOk(p)).valueOf()`], `v ? "LOGGED IN" : "rejected"`],
+  ["F5 spread argument", [`const a = ping(1)`, `const v = flip(...[isOk(p)])`], `v ? "rejected" : "LOGGED IN"`],
+  ["F5 parenthesized callee", [`const a = ping(1)`, `const v = (flip)(isOk(p))`], `v ? "rejected" : "LOGGED IN"`],
+  ["F5 ternary callee", [`const a = ping(1)`, `const v = (p == "zz" ? same : flip)(isOk(p))`], `v ? "rejected" : "LOGGED IN"`],
+  ["F5 optional call", [`const a = ping(1)`, `const v = flip?.(isOk(p))`], `v ? "rejected" : "LOGGED IN"`],
+  ["F5 in and a member read", [`const a = ping(1)`, `const v = "denied" in info(p) && info(p).denied`], `v ? "rejected" : "LOGGED IN"`],
+  ["F5 imported async helper under not", [`const a = ping(1)`, `const v = !allowedX(p)`], `v ? "rejected" : "LOGGED IN"`, { imp: `import { allowedX } from "./lib.scrml"\n    `, extra: { "lib.scrml": LIB } }],
+  ["F2 inert map index in the batch", [`const a = ping(1)`, `const d = @deny[p]`], `d == true ? "rejected" : "LOGGED IN"`, { cell: DENY }],
+  ["F2 map index as a bare call's argument", [`const a = ping(1)`, `const d = flip(@deny[p])`], `d ? "LOGGED IN" : "rejected"`, { cell: DENY }],
+  ["F4 VALID destructure an object beside a seed", [`const a = ping(1)`, `const { denied } = info(p)`], `denied ? "rejected" : "LOGGED IN"`],
+  ["F4 VALID destructure an array beside a seed", [`const a = ping(1)`, `const [d, n] = pair(p)`], `d ? "rejected" : "LOGGED IN"`],
+];
+
+function page(side, stmts, ret, view, o = {}) {
   const body = [...stmts, `return ${ret}`].join("\n        ");
   if (side === "library") return `\${\n    ${DECLS("")}\n    export function login(p) {\n        ${body}\n    }\n}\n`;
   if (side === "tool") return `<program kind="tool">\n\${\n    ${DECLS("")}\n    function login(p) {\n        ${body}\n    }\n    function main(args) {\n        log(login(args[0]))\n    }\n}\n</program>\n`;
   if (side === "server") return `<msg> = "init"\n\${\n    ${DECLS("server ")}\n    server function login(p) {\n        ${body}\n    }\n    function go() { @msg = login("wrong") !{ _ :> "err" } }\n}\n<button onclick=go()>go</button>\n<p>\${@msg}</p>\n`;
   const out = view === "gate" ? `<p id="out"><span if=\${@msg == "LOGGED IN"}>LOGGED IN</span></p>` : `<p id="out">\${@msg}</p>`;
-  return `<msg> = "init"\n\${\n    ${DECLS("server ")}\n    function login(p) {\n        ${body}\n    }\n    function go(p) { @msg = login(p) }\n}\n<button id="wrong" onclick=go("wrong")>go</button>\n<button id="right" onclick=go("secret")>go</button>\n${out}\n`;
+  return `<msg> = "init"\n${o.cell ?? ""}\${\n    ${o.imp ?? ""}${DECLS("server ")}\n    function login(p) {\n        ${body}\n    }\n    function go(p) { @msg = login(p) }\n}\n<button id="wrong" onclick=go("wrong")>go</button>\n<button id="right" onclick=go("secret")>go</button>\n${out}\n`;
 }
 
 export function shapesFor(side) {
@@ -103,6 +133,7 @@ export function shapesFor(side) {
     // BAD shapes only where a client batch exists (fullstack); measured PASS elsewhere on base.
     if (side === "fullstack") for (const [n, stmts, ret] of BAD) out.push([`${n}${tag}`, page(side, stmts, ret, view)]);
     for (const [n, stmts, ret] of VALID) out.push([`${n}${tag}`, page(side, stmts, ret, view)]);
+    if (side === "fullstack") for (const [n, stmts, ret, o] of ROUND1) out.push([`${n}${tag}`, page(side, stmts, ret, view, o ?? {}), o?.extra]);
   }
   return out;
 }

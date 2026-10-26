@@ -38,7 +38,7 @@ SERVER function is judged end to end.
 - a shape not in `KNOWN_FAIL` / `BY_DESIGN_LOGS_IN` logs in on a wrong password;
 - a `KNOWN_FAIL` shape stops doing so (it was fixed: delete the entry);
 - a shape not in `UNJUDGED` comes out `UNJUDGED`, or an `UNJUDGED` one starts being judged;
-- the corpus stops holding exactly 3561 shapes (`EXPECTED_SHAPE_COUNT`); a list entry names no shape. Plus S469 s469-server-return-match-await (457 shapes): s4–s10 server, f1–f7 fullstack, l1–l5 library, t1–t5 tool — a failable `match` subject awaited in every position, `fail` payloads keyed per enum in every emission mode, one resolver for a callee's error enum, and the `_ e` whole-error binder allow-list.
+- the corpus stops holding exactly 3583 shapes (`EXPECTED_SHAPE_COUNT`); a list entry names no shape. Plus S469 s469-server-return-match-await (457 shapes): s4–s10 server, f1–f7 fullstack, l1–l5 library, t1–t5 tool — a failable `match` subject awaited in every position, `fail` payloads keyed per enum in every emission mode, one resolver for a callee's error enum, and the `_ e` whole-error binder allow-list.
 
 It deliberately does NOT pin each shape's class: a shape moving from `PASS-REFUSED` to `PASS` is a
 compiler improvement, not a regression.
@@ -435,3 +435,8 @@ an independent decl with a call anywhere else ends the batch and is emitted in p
 
 The BAD shapes were measured on the server / library / tool sides too and PASS on base (no batch there;
 the server side's `!{}` shape PASS-500), so they are fullstack only.
+
+Fix round 1 (review of `03a2ef2ed`) +22, fullstack (msg / gate):
+- **F5** (7 × 2): positions the element test already fixed. They FAIL on `ffbcf4432` and PASS after: `new`, a spread argument, a parenthesized or ternary callee, an optional call, `in` plus a member read, and an imported async helper under `!`.
+- **F2** (2 × 2): an inert map read `@deny[p]` in the batch, alone or as a bare call's argument. The element was re-emitted under a bare client context and read `undefined`. FAIL on `ffbcf4432` and on `03a2ef2ed`; PASS after, because the element is now the statement's own emission.
+- **F4** (2 × 2): a destructuring decl next to a batch seed. It was E-CODEGEN-INVALID-LOGIC on `ffbcf4432` (PASS-REFUSED); it is now a batch boundary and PASSes.

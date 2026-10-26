@@ -1337,7 +1337,11 @@ export function scheduleStatements(body: ASTNode[], fnNode: ASTNode, routeMap: R
   // (sequential emit handles their await injection correctly).
   function isDeclShapeStmt(stmt: ASTNode): boolean {
     const k = (stmt as ASTNode).kind;
-    return k === "let-decl" || k === "const-decl";
+    // S470 fix round 1 (F4) — a DESTRUCTURING decl (`const { d } = info(p)`,
+    // `const [d, n] = pair(p)`: `name` is a pattern, not a string) cannot be one
+    // name of the batch's `const [...]` destructure; it is a boundary like a
+    // non-decl and is emitted in place.
+    return (k === "let-decl" || k === "const-decl") && typeof (stmt as ASTNode).name === "string";
   }
 
   // S212 g-lift-concurrent-transitive-exclusion-tdz (Repro B — the let-
@@ -1738,6 +1742,11 @@ export function scheduleStatements(body: ASTNode[], fnNode: ASTNode, routeMap: R
       const callExprs: string[] = [];
       // s441 F1 -- the cell writes, landed after the batch in source order.
       const deferredWrites: string[] = [];
+      // S470 fix round 1 (F2) — every member's statement emitted by the
+      // sequential path, in source order: the fallback when a decl member's own
+      // emission is not one clean `const|let NAME = <rhs>;` line (see below).
+      const sequential: string[] = [];
+      let batchable = true;
 
       for (const idx of group) {
         const stmt = body[idx];
@@ -1758,21 +1767,41 @@ export function scheduleStatements(body: ASTNode[], fnNode: ASTNode, routeMap: R
           varNames.push(tmp);
           callExprs.push(cw.callExpr);
           deferredWrites.push(`${cw.before}${tmp}${cw.after}`);
+          sequential.push(`${cw.before}await ${cw.callExpr}${cw.after}`);
           continue;
         }
         const code = emitLogicNode(stmt, emitOpts);
         if (!code) continue;
+        sequential.push(_autoAwaitFnBody(code));
 
         if ((stmt as ASTNode).kind === "let-decl" || (stmt as ASTNode).kind === "const-decl") {
-          varNames.push((stmt as ASTNode).name as string || genVar("tmp"));
-          callExprs.push(extractInitExpr(stmt as ASTNode));
+          // S470 fix round 1 (F2) — the element is the statement's OWN emitted
+          // initializer (the full emit context: map / set / synth-cell / engine
+          // facts, the call-site awaits), never a re-emission under a bare
+          // `{ mode: "client" }` context (`extractInitExpr`), which lowered
+          // `@deny[p]` on a map cell as a plain index → `undefined`. A bare
+          // member's one top-level `await` is dropped (`Promise.all` awaits the
+          // element); an inert member has none. Anything else — a refinement
+          // check, a multi-line lowering, an `await` left inside — is not a clean
+          // element, and the whole group falls back to the sequential path.
+          const name = (stmt as ASTNode).name;
+          const m = typeof name === "string" && !code.includes("\n")
+            ? /^\s*(?:const|let)\s+([A-Za-z_$][\w$]*)\s*=\s*([\s\S]*?);?\s*$/.exec(code)
+            : null;
+          let rhs = m && m[1] === name ? m[2] : null;
+          if (rhs !== null && declElementShape(idx) === "bare") rhs = rhs.replace(/^await\s+/, "");
+          if (rhs === null || /\bawait\b/.test(rhs)) { batchable = false; continue; }
+          varNames.push(name as string);
+          callExprs.push(rhs);
         } else {
           varNames.push(genVar("tmp"));
           callExprs.push(code.replace(/;$/, ""));
         }
       }
 
-      if (callExprs.length > 1) {
+      if (!batchable) {
+        for (const s of sequential) lines.push(s);
+      } else if (callExprs.length > 1) {
         lines.push(`const [${varNames.join(", ")}] = await _scrml_g.Promise.all([`);
         for (let k = 0; k < callExprs.length; k++) {
           const comma = k < callExprs.length - 1 ? "," : "";
@@ -1782,7 +1811,7 @@ export function scheduleStatements(body: ASTNode[], fnNode: ASTNode, routeMap: R
       } else if (callExprs.length === 1) {
         lines.push(`const ${varNames[0]} = await ${callExprs[0]};`);
       }
-      for (const w of deferredWrites) lines.push(w);
+      if (batchable) for (const w of deferredWrites) lines.push(w);
     } else {
       // Single statement — emit with await if it has dependencies on prior statements
       const stmt = body[group[0]];

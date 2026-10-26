@@ -63,7 +63,7 @@ function compileBody(stmts) {
 }
 
 function fnBody(code, fnName) {
-  const m = new RegExp(`async function _scrml_${fnName}_\\d+\\(`).exec(code);
+  const m = new RegExp(`(?:async )?function _scrml_${fnName}_\\d+\\(`).exec(code);
   if (!m) return "";
   const start = code.indexOf("{", m.index);
   let depth = 0;
@@ -151,6 +151,62 @@ describe("g-promise-all-batch-puts-unawaited-call-under-sync-operator — a call
     const { body } = compileBody([`const a = ping(1)`, `const f = (q) => q + 1`, `const v = f(1)`]);
     expect(body).not.toContain("Promise.all");
   });
+});
+
+describe("fix round 1 — F2 element emitted in the statement's own context; F4 destructuring decls", () => {
+  function compileWith(cell, stmts) {
+    const name = `r1case${seq++}`;
+    const dir = join(FIXTURE_DIR, name);
+    mkdirSync(dir, { recursive: true });
+    const src = `<msg> = "init"
+${cell}\${
+    server function ping(q) { return q }
+    server function info(p) { return { denied: p != "secret" } }
+    server function pair(p) { return [p != "secret", 1] }
+    function flip(x) { return !x }
+    function login(p) {
+        ${stmts.join("\n        ")}
+        return 1
+    }
+    function go(p) { @msg = login(p) }
+}
+<button onclick=go("x")>go</button>
+<p>\${@msg}</p>
+`;
+    writeFileSync(join(dir, "app.scrml"), src);
+    const r = compileScrml({ inputFiles: [join(dir, "app.scrml")], outputDir: join(dir, "out"), write: true, log: () => {} });
+    const errors = (r.errors || []).filter((e) => e.severity !== "warning" && e.severity !== "info" && !/^[WI]-/.test(e.code ?? ""));
+    let clientJs = "";
+    const out = join(dir, "out");
+    if (existsSync(out)) for (const f of readdirSync(out)) if (f.endsWith(".client.js")) clientJs = readFileSync(join(out, f), "utf8");
+    return { errors, body: fnBody(clientJs, "login") };
+  }
+  const DENY = `\${ <deny>: [string:bool] = ["wrong": true] }\n`;
+
+  test("an inert map read in the batch is lowered exactly as the in-place path lowers it", () => {
+    const solo = compileWith(DENY, [`const d = @deny[p]`]).body;
+    const inPlace = /const d = (.*);/.exec(solo)[1];
+    const { errors, body } = compileWith(DENY, [`const a = ping(1)`, `const d = @deny[p]`]);
+    expect(errors.map((e) => e.code)).toEqual([]);
+    expect(body).toMatch(/const \[a, d\] = await _scrml_g\.Promise\.all\(\[/);
+    expect(body).toContain(inPlace);
+    expect(body).not.toContain(`_scrml_cs_reactive_get("deny")[p]`);
+  });
+
+  test("a map read as a bare call's argument is lowered in the statement's context", () => {
+    const solo = compileWith(DENY, [`const d = flip(@deny[p])`]).body;
+    const inPlace = /const d = (.*);/.exec(solo)[1];
+    const { body } = compileWith(DENY, [`const a = ping(1)`, `const d = flip(@deny[p])`]);
+    expect(body).toContain(inPlace);
+  });
+
+  for (const decl of [`const { denied } = info(p)`, `const [d, n] = pair(p)`]) {
+    test(`a destructuring decl beside a seed compiles and is not a batch member: ${decl}`, () => {
+      const { errors, body } = compileWith("", [`const a = ping(1)`, decl]);
+      expect(errors.map((e) => e.code)).toEqual([]);
+      expect(body).not.toContain("Promise.all");
+    });
+  }
 });
 
 describe("§13.2 parallelism kept — bare independent calls still batch", () => {

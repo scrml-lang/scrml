@@ -112,3 +112,31 @@ in-tree stdlib. 3618 sources enumerated on both sides, same set.
   absolute compiler root: two checkouts at different path lengths report every server bundle as
   differing (202 here). Normalising the compiler root in artifacts (as the stream path already does)
   would remove the noise.
+
+## Fix round 1 (review of 03a2ef2ed: FIX)
+
+- **F1 (HIGH, landing order):** an expression-position `!{}` whose value IS the waiting value, next to a
+  seed (review s1 R1/R3/R4/R5). On base it was a batch element that `Promise.all` resolved by accident.
+  Since round 0 it is mixed, emitted in place, and hits the sync-IIFE defect. Lane
+  s470-nested-handler-await fixes that root defect, so this lane lands AFTER lane I. No change to
+  scheduling.ts here. After lane I lands: merge, delete the two h2/002 KNOWN_FAIL entries, and add R1–R6
+  to r21, pinned PASS.
+- **F2 (HIGH, pre-existing):** a batch element was re-emitted by `extractInitExpr` under a bare
+  `{ mode: "client" }` context, so `@deny[p]` on a map cell lowered to `_scrml_cs_reactive_get("deny")[p]`,
+  which is undefined, and the deny-list missed. Now each decl member's element is the RHS of its own
+  `emitLogicNode` emission:
+  - The statement was already emitted at that point, so the emission count and order are unchanged.
+  - A bare member's one leading `await` is dropped, because `Promise.all` awaits the element.
+  - If a member's emission is not one clean `const|let NAME = <rhs>;` line with no `await` left (a
+    refinement check, a multi-line lowering), the whole group falls back to the sequential emissions in
+    source order. This fails closed.
+  - Review s2 M1/M2: FAIL on base and on 03a2ef2ed, PASS now.
+- **F4 (LOW):** a destructuring decl (the name is a pattern) is no longer decl-shaped for the batch. It is
+  a boundary and is emitted in place. Review s1 B4/B5: E-CODEGEN-INVALID-LOGIC on base, PASS now.
+- **F5:** pack shapes added — B6, B7, B8, B9, B11, B19 from s1 and I4 from s3. All FAIL on base and
+  PASS on head.
+- **F3:** left alone, per the coordinator (S212 dependent-skip ordering; the PA is filing it).
+- **r21:** +22 shapes on f27 (F5 7, F2 2, F4 2, each in msg and gate views); pack total 3583. f27 on
+  base → head: 68 FAIL→PASS, 2 FAIL→FAIL (KNOWN_FAIL h2/002), 4 PASS-REFUSED→PASS (F4), 22 PASS→PASS.
+  s24, l19 and t19 are unchanged.
+- **Unit tests:** +4 (F2 ×2, F4 ×2), all 4 FAIL on base.
