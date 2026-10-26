@@ -151,7 +151,8 @@ beforeAll(() => {
 </program>
 `);
 
-  // ss32-item-1 fixture: a `!{}`-carrying reactive server assignment.
+  // ss32-item-1 fixture: a `!{}`-carrying reactive server assignment. (S470, E-ERROR-012 §19.4.3: the
+  // write is a value position, so the arm ends in a value — the cell it just wrote.)
   // `@data = serverFn() !{ ... }` emits the auto-await IIFE PLUS a sibling
   // `let _scrml__scrml_result_N = ...; if (_scrml__scrml_result_N.__scrml_error) {...}`
   // dispatch. The IIFE must still carry the ss32-item-1 `.catch` error arm
@@ -166,7 +167,10 @@ beforeAll(() => {
 
 \${
   @data = loadData() !{
-    | ::NetworkError e -> { @data = { value: 0 } }
+    | ::NetworkError e -> {
+      @data = { value: 0 }
+      @data
+    }
   }
 }
 

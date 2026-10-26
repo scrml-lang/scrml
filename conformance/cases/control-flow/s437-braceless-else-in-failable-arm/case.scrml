@@ -11,7 +11,7 @@ ${
 <r> = ""
 ${
     function go() {
-        let result = loadItem("missing") !{
+        loadItem("missing") !{
             .NotFound(mid) :> {
                 if (mid == "missing") @r = "yes"; else @r = "no";
                 @r = @r + "!";

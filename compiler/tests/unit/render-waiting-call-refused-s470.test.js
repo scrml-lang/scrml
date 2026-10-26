@@ -269,8 +269,13 @@ ${body}
   });
 
   test("round 2 #2 control: a module-init bare CALL is an effect, and a module-init if's condition is not judged", () => {
-    const src = `<pw> = ""\n<c> = true\n\${\n    server function isOk(p) { return p == "secret" }\n}\n\${ isOk("boot")\nif (@c) { isOk("x") } }\n<p>x</p>\n`;
-    expect(compile(src).messages).toEqual([]);
+    // s470-await-residue — each bare call is accepted on its own; written one after the other they
+    // are refused by the ORDER rule (the first is not waited for before the second runs, §13.8 (i)),
+    // so the two statements are checked in separate files.
+    const pre = `<pw> = ""\n<c> = true\n\${\n    server function isOk(p) { return p == "secret" }\n}\n`;
+    expect(compile(`${pre}\${ isOk("boot") }\n<p>x</p>\n`).messages).toEqual([]);
+    expect(compile(`${pre}\${ if (@c) { isOk("x") } }\n<p>x</p>\n`).messages).toEqual([]);
+    expect(compile(`${pre}\${ isOk("boot")\nif (@c) { isOk("x") } }\n<p>x</p>\n`).messages.some((m) => /does not wait for it/.test(m))).toBe(true);
   });
 
   test("an engine derived=match on a failable server call stays E-ERROR-002", () => {

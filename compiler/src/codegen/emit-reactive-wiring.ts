@@ -27,7 +27,7 @@ import { emitInitialLoad, emitUnifiedMountHydrate, emitServerAuthorityLoad, emit
 import { emitParseVariantDecodeIIFE, type ParseVariantEnumLike } from "./emit-parse-variant.ts";
 import { liftEmittedStatementAwaits, emittedCodeCallsServerFn, _clientServerFnNames } from "./scheduling.ts";
 import type { AsyncNameFacts } from "./async-combinators.ts";
-import { colorAsyncStatements, analyzeRawJsFragment } from "./js-async-analysis.ts";
+import { colorAsyncStatements, colorAsyncActionBody, activeSseFnNames, analyzeRawJsFragment } from "./js-async-analysis.ts";
 import { freeAsyncResolverFromFacts, jsAsyncUsesErrors } from "./emit-library-shared.ts";
 import { clientAsyncFactsOf } from "./emit-functions.ts";
 import { asyncFnValueDecl } from "./fn-valued-bindings.ts";
@@ -1627,7 +1627,11 @@ export function emitReactiveWiring(ctx: CompileContext): string[] {
       // (S440 F4) — fails closed. A body that does not parse keeps the old lift.
       if (code && (stmt as any)._onMountEffect === true) {
         const _mountFacts = clientAsyncFactsOf(ctx);
-        const colored = colorAsyncStatements(code, freeAsyncResolverFromFacts(_mountFacts));
+        // s470-await-residue (§13.8 (i)) — the handler-root policy: a write is awaited in place
+        // unless it is the block's sole root statement, so a later statement of the block reads
+        // the settled cell (it read the pre-call value under the detached lift).
+        const colored = colorAsyncStatements(code, freeAsyncResolverFromFacts(_mountFacts),
+          { handlerRoot: true, reactiveArg1SkipKeep: activeSseFnNames() });
         if (colored) {
           for (const err of jsAsyncUsesErrors(colored, (stmt as any).span, ctx.filePath)) errors.push(err);
           if (colored.rootAsync) {
@@ -2569,7 +2573,9 @@ function emitLifecycleNode(node: any, errors: CGError[], filePath: string): stri
       const code = emitLogicNode(stmt);
       if (code) bodyLines.push(code);
     }
-    bodyCode = bodyLines.join("\n  ");
+    // s470-await-residue (§13.8 (i)) — the tick is an action body: its async calls are awaited
+    // in place, in statement order (`colorAsyncActionBody`), not left to the detached lift.
+    bodyCode = colorAsyncActionBody(bodyLines.join("\n"), `<${tag}>`, span).split("\n").join("\n  ");
   }
 
   // §6.7.6 — a `<poll>` fires an immediate first tick on arming; a `<timer>` never does
@@ -3056,7 +3062,8 @@ function emitTimeoutNode(node: any, errors: CGError[], filePath: string): string
         const code = emitLogicNode(stmt);
         if (code) bodyLines.push(code);
       }
-      bodyCode = bodyLines.join("\n    ");
+      // s470-await-residue (§13.8 (i)) — awaited in place, in order (see emitLifecycleNode).
+      bodyCode = colorAsyncActionBody(bodyLines.join("\n"), "<timeout>", node.span ?? null).split("\n").join("\n    ");
     }
   }
 

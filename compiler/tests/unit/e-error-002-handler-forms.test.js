@@ -515,10 +515,13 @@ describe("arrow-valued handlers — S440 ruling: checked like `{ … }`, guard e
   });
 
   // N5 — non-simple params are not modelled: unchecked and emitted as before.
+  // S470 (E-ERROR-012, §19.4.3): such an arrow's body is lowered as an EXPRESSION-position handler (its
+  // value is the arrow's), where every arm must yield — the arm yields `1` (it wrote `@r = 1`, which
+  // falls through there).
   for (const [label, param] of [["default", "(e = 1)"], ["rest", "(...a)"]]) {
     test(`an arrow with a ${label} parameter is emitted as before (no E-CODEGEN-INVALID-LOGIC)`, () => {
       const { errors, clientJs } = compileBody(
-        `<button onclick=\${${param} => risky() !{ | .Empty :> @r = 1 }}>x</>`,
+        `<button onclick=\${${param} => risky() !{ | .Empty :> 1 }}>x</>`,
         { emit: true },
       );
       expect(errors).toEqual([]);

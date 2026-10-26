@@ -85,6 +85,9 @@ import { setFileSchedulerBindings } from "./async-combinators.ts";
 import { schedulerNamesNotProvablyGlobal } from "./js-async-analysis.ts";
 import { computeFileAsyncFnNames, serverFnNamesOfFile, setFileAsyncFnNames, adoptFileAsyncSet, waitingBindingsOfFile, namespaceImportLocalsOf, waitingFnPredicateOfFile, serverPlacedFnNamesAnywhere } from "./file-async-fns.ts";
 import { renderWaitingCallsOf } from "./render-waiting-calls.ts";
+import { failableMatchFallThroughs } from "./arm-structure.ts";
+import { splitMultiArmString, parseMatchArm } from "./emit-control-flow.ts";
+import { _blockTailIsValueExpr } from "./emit-logic.ts";
 import { unboundHostPromiseGlobalsOf, hostPromiseReachOf, hostShadowedRefsOf, hostPromiseSeedOf } from "./host-promise-globals.ts";
 import { markHostGlobalAliases } from "./host-promise-names.ts";
 import { collectEngineVarNames } from "./emit-engine.ts";
@@ -2840,6 +2843,42 @@ export function runCG(input: CgInput): CgOutput {
       const _rwHostServer = safeRouteMap ? _clientServerFnNames(safeRouteMap as never, filePath) : new Set<string>();
       const _rwLocalFnNames = new Set(_rwFnNodes.map((f) => (f as { name?: unknown }).name).filter((x): x is string => typeof x === "string"));
       const _rwServerNames = new Set([...serverFnNamesOfFile(fileAST, _fileAsyncMemo.routeMap ?? null), ..._rwServerAnywhere]);
+      // s470-await-residue fix round 1 (F1) — what a derived cell READS, transitively, off the
+      // compiler's dependency graph (Stage 7): a derived node's `reads` / `calls` / `awaits` /
+      // `engine-derived-reads` edges, through function nodes, to the cells they reach. A mention of
+      // a derived cell observes an un-waited write to any cell in its closure. null = this file has
+      // no DG node of that name (the caller fails closed for a derived name).
+      const _rwDgReach = new Map<string, Set<string> | null>();
+      const _rwDerivedReach = (name: string): Set<string> | null => {
+        if (_rwDgReach.has(name)) return _rwDgReach.get(name) ?? null;
+        const starts: string[] = [];
+        for (const [id, n] of safeDepGraph.nodes) {
+          const dn = n as { kind?: unknown; varName?: unknown; span?: { file?: unknown } };
+          if (dn.kind === "reactive" && dn.varName === name && (dn.span?.file === undefined || dn.span.file === filePath)) starts.push(id);
+        }
+        if (starts.length === 0) { _rwDgReach.set(name, null); return null; }
+        const out = new Set<string>();
+        const seen = new Set<string>(starts);
+        const queue = [...starts];
+        const adj = new Map<string, string[]>();
+        for (const e of safeDepGraph.edges as Array<{ from: string; to: string; kind?: string }>) {
+          if (e.kind === "renders" || e.kind === "writes") continue;
+          const l = adj.get(e.from);
+          if (l) l.push(e.to); else adj.set(e.from, [e.to]);
+        }
+        while (queue.length > 0) {
+          const id = queue.shift()!;
+          for (const to of adj.get(id) ?? []) {
+            if (seen.has(to)) continue;
+            seen.add(to);
+            const tn = safeDepGraph.nodes.get(to) as { kind?: unknown; varName?: unknown } | undefined;
+            if (tn && tn.kind === "reactive" && typeof tn.varName === "string") out.add(tn.varName);
+            queue.push(to);
+          }
+        }
+        _rwDgReach.set(name, out);
+        return out;
+      };
       // S470 (s470-render-residue-host-promises) — the SPEC-named host Promise global (`fetch`,
       // §13.7 item 4 / §13.8 item 3) is a waiting value too, where the file does not bind the name
       // itself; so is a file function that reaches it (§13.7 item 2), by the colouring's own
@@ -2847,7 +2886,19 @@ export function runCG(input: CgInput): CgOutput {
       const _rwHostNames = unboundHostPromiseGlobalsOf(fileAST);
       const _rwHostReach = hostPromiseReachOf(_rwFnNodes, _rwHostNames);
       const _rwHostShadowed = hostShadowedRefsOf(getNodes(fileAST as never), _rwHostNames);
+      // S470 (ruling "Emit E-ERROR-012") — a value-position `match` on a failable call whose arm falls
+      // through (§19.4.3); the `!{ }` half is judged where the guard is lowered (emit-logic).
+      failableMatchFallThroughs(getNodes(fileAST as never), _blockTailIsValueExpr, (raw: string) => {
+        const out: Array<{ test: string; result: string }> = [];
+        for (const piece of splitMultiArmString(raw.trim().replace(/-\s*>/g, "->"))) {
+          const parsed = parseMatchArm(piece);
+          if (!parsed) return null;
+          out.push({ test: String(parsed.test ?? "_"), result: String(parsed.result ?? "") });
+        }
+        return out;
+      });
       for (const site of renderWaitingCallsOf(getNodes(fileAST as never) as unknown[], {
+        derivedReach: _rwDerivedReach,
         waits: (n: string) => _rwWaits(n) || _rwServerAnywhere.has(n) || _rwClientAsync.has(n) || _rwHostReach.has(n),
         hostNames: _rwHostNames,
         hostOnlyReach: new Set([..._rwHostReach].filter((n) => !_rwHostNames.has(n) &&
@@ -2872,7 +2923,18 @@ export function runCG(input: CgInput): CgOutput {
         // the waiting call there; impl#1 refuses it, an impl#1 limit, until those bodies get an async
         // host. Render / value positions keep E-VALUE-SERVER-CALL.
         const code = site.kind === "action" ? "E-IMPL1-ACTION-NOT-AWAITED" : "E-VALUE-SERVER-CALL";
-        const message = site.kind === "action"
+        // s470-await-residue — an ORDER refusal: the call is started and not waited for, and a later
+        // statement of the same synchronous body observes the state from before it lands.
+        const message = site.order === true
+          ? `E-IMPL1-ACTION-NOT-AWAITED: ${site.position} calls ${site.what}. The language waits for a ` +
+            "waiting call at a suspension point of an action position and runs what follows after it settles " +
+            "(§13.8 (i)), but impl#1 runs this body synchronously: it starts the call and goes on, so the later " +
+            "code sees the value from BEFORE the call (a previous TRUE still opens a gate) or races its effects. " +
+            "This is an impl#1 limit, not a language rule. Fix: move the code into an event handler (or a " +
+            "`function` an event handler calls), where impl#1 awaits the call in place, or load the value with a " +
+            "`<request>` (§6.7.7) into a cell (`<request id=\"r\">${ @cell = f(…) }</>`) and read the cell from " +
+            "markup or a handler; or make the call the last thing this body does."
+          : site.kind === "action"
           ? `E-IMPL1-ACTION-NOT-AWAITED: ${site.position} calls ${site.what}. The language allows a waiting ` +
             "call here and awaits it (§13.8 (i)), but impl#1 cannot: it runs this code with no `await` at that " +
             "point, so the code would get a pending Promise — always truthy, so a test of it passes for every " +

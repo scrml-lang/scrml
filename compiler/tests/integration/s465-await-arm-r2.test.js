@@ -154,10 +154,11 @@ const SHAPES = {
       }
     }
     return r`,
-  // a `!{}` handler arm with a C-style `for`.
+  // a `!{}` handler arm with a C-style `for` (S470: a statement — its result was never read, and a bound
+  // handler with a fall-through arm is E-ERROR-012, §19.4.3).
   cforHandler: (H) => `
     let r = "REJECTED"
-    const x = ?{\`SELECT nope FROM missing\`}.get() !{ _ :> { for (let i = 0; i < 1; i++) { if (${H}(pass, row.pw)) { r = "WELCOME" } } } }
+    ?{\`SELECT nope FROM missing\`}.get() !{ _ :> { for (let i = 0; i < 1; i++) { if (${H}(pass, row.pw)) { r = "WELCOME" } } } }
     return r`,
 };
 
@@ -352,7 +353,7 @@ describe("S465 r2 — a server arm body the parser refuses is a compile error (f
 
   test("`switch` in a `!{}` handler arm is E-SWITCH-FORBIDDEN", () => {
     const body = `let r = "REJECTED"
-    const x = ?{\`SELECT nope FROM missing\`}.get() !{ _ :> { switch (r) { case "a": r = "b" } } }
+    ?{\`SELECT nope FROM missing\`}.get() !{ _ :> { switch (r) { case "a": r = "b" } } }
     return r`;
     expect(compileOne("handler-switch", body)).toContain("E-SWITCH-FORBIDDEN");
   }, EXECUTED_DB_TIMEOUT_MS);

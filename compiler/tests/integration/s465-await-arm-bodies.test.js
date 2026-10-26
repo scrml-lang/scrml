@@ -154,18 +154,20 @@ const SHAPES = {
   handlerValue: (H) => `
     const x = ?{\`SELECT nope FROM missing\`}.get() !{ _ :> ${H}(pass, row.pw) }
     return x ? "WELCOME" : "REJECTED"`,
-  // Guard on the fix itself: an EMPTY braced handler is an empty BLOCK (the
-  // binding takes `null`), never the object value `{}` (truthy) — so this shape
-  // answers REJECTED for any password. Checked on its own below.
+  // Guard on the fix itself: an EMPTY braced handler is an empty BLOCK, never the
+  // object value `{}` (truthy). S470 (E-ERROR-012, §19.4.3): an empty block arm
+  // whose result is bound falls through, so the shape is refused at compile time —
+  // which a `{}` VALUE (an expression arm) would not be. Checked on its own below.
   handlerEmpty: () => `
     const x = ?{\`SELECT nope FROM missing\`}.get() !{ _ :> {} }
     return x ? "WELCOME" : "REJECTED"`,
-  // A one-line `!{}` STATEMENT arm. At the base it did not even compile — the
+  // A one-line `!{}` STATEMENT arm (S470: written as a statement — its result was
+  // never read, and a bound handler with a fall-through arm is E-ERROR-012). At the base it did not even compile — the
   // token rewrite produced `_scrml_result = if ( … )` (E-CODEGEN-INVALID-LOGIC) —
   // so it is its own compile unit, keeping the other shapes' failures behavioural.
   handlerStmt: (H) => `
     let r = "REJECTED"
-    const x = ?{\`SELECT nope FROM missing\`}.get() !{ _ :> { if (${H}(pass, row.pw)) { r = "WELCOME" } } }
+    ?{\`SELECT nope FROM missing\`}.get() !{ _ :> { if (${H}(pass, row.pw)) { r = "WELCOME" } } }
     return r`,
 };
 
@@ -283,10 +285,9 @@ describe("S465 r1 — a Promise-returning call in a server arm body is awaited (
     }
   }
 
-  test("an empty braced `!{ _ :> {} }` handler is an empty block (binds null), not the value `{}`", async () => {
-    expect(await call("handler-empty", "handlerEmptyImp", "right-password")).toBe("REJECTED");
-    expect(units.get("handler-empty").serverJs).not.toMatch(/_scrml__scrml_result_\d+ = \{\};/);
-  }, EXECUTED_DB_TIMEOUT_MS);
+  test("an empty braced `!{ _ :> {} }` handler is an empty block (falls through: E-ERROR-012), not the value `{}`", () => {
+    expect(units.get("handler-empty").errors).toContain("E-ERROR-012");
+  });
 
   test("no arm body is re-emitted as raw token text in the server bundle", () => {
     for (const [unit] of UNITS) {

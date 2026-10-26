@@ -11,26 +11,26 @@ Scope: **1813 of 1813 cases attempted** — every attempted case reached the pur
 
 | bucket | cases | share of attempted |
 |---|---:|---:|
-| PASS | 250 | 13.8% |
+| PASS | 251 | 13.8% |
 | CODES-ONLY | 0 | 0.0% |
-| FAIL | 64 | 3.5% |
+| FAIL | 63 | 3.5% |
 | LEGACY | 0 | 0.0% |
 | NOT-TWINNED | 685 | 37.8% |
 | UNSUPPORTED | 814 | 44.9% |
 | CRASH | 0 | 0.0% |
 | INVALID | 0 | 0.0% |
 
-**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 314; of those, 250 hold (79.6%). Runtime half executed on the bootstrap for 99 case(s).
+**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 314; of those, 251 hold (79.9%). Runtime half executed on the bootstrap for 100 case(s).
 
-- **Vacuous** passes: 20 of 250 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **230**.
-- FAILs whose required code appears nowhere in the bootstrap's sources (check not implemented): 31 of 64; the other 33 are implemented checks that answered wrong.
+- **Vacuous** passes: 20 of 251 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **231**.
+- FAILs whose required code appears nowhere in the bootstrap's sources (check not implemented): 31 of 63; the other 32 are implemented checks that answered wrong.
 
 LEGACY by marker (a case may carry several): none.
 UNSUPPORTED by reason: bootstrap-unsupported 499 · parse-reject 315.
 
 ### §66 twins (S449 dialect ruling 1 — generated at test time by the `scrml fix` §66 rules)
 
-Legacy-dialect cases graded on their generated §66 twin: **793** — PASS 150 · FAIL 49 · UNSUPPORTED 594. Twin holds 150 (non-vacuous 134). Every twin verdict above is included in the bucket table.
+Legacy-dialect cases graded on their generated §66 twin: **793** — PASS 151 · FAIL 48 · UNSUPPORTED 594. Twin holds 151 (non-vacuous 135). Every twin verdict above is included in the bucket table.
 - `dialect.s66` overrides: 0 replace a twin's expectations · 11 exclude a case.
 - Superseded-code mappings applied: 2 case(s) (E-ENGINE-VAR-DUPLICATE→E-SCOPE-010). Rows: E-ENGINE-VAR-DUPLICATE→E-SCOPE-010 [applied] · E-ENGINE-STATE-CHILD-INVALID-VARIANT→∅ [owed] · E-ENGINE-RULE-INVALID-VARIANT→∅ [owed] · E-ENGINE-INITIAL-INVALID-VARIANT→∅ [owed] · E-CELL-NO-RENDER-SPEC→∅ [owed] · E-CELL-RENDER-SPEC-NOT-BINDABLE→∅ [owed] · E-DECL-RHS-INTERP-WRAPPED→∅ [owed] · E-COMPONENT-010→∅ [owed].
 
@@ -108,7 +108,7 @@ NOT-TWINNED by reason (685 cases; a case counts once per distinct reason):
 | codegen | 4 | · | · | · | · | 3 | 1 | · | · |
 | components | 68 | · | · | 1 | · | 65 | 2 | · | · |
 | condition | 36 | 18 | · | 5 | · | 8 | 5 | · | · |
-| control-flow | 76 | 15 | · | 3 | · | 21 | 37 | · | · |
+| control-flow | 76 | 16 | · | 2 | · | 21 | 37 | · | · |
 | defer | 51 | 13 | · | 2 | · | 4 | 32 | · | · |
 | derived | 6 | · | · | 1 | · | 5 | · | · | · |
 | each | 25 | · | · | · | · | 25 | · | · | · |
@@ -163,7 +163,7 @@ NOT-TWINNED by reason (685 cases; a case counts once per distinct reason):
 | tenant | 23 | · | · | · | · | · | 23 | · | · |
 | type-state-codes | 32 | 3 | · | 1 | · | 3 | 25 | · | · |
 
-### FAIL (64)
+### FAIL (63)
 
 - `components/post-ce-residual-component-reject` (codes; not in the bootstrap: E-COMPONENT-035)
   - missing E-COMPONENT-035
@@ -187,8 +187,6 @@ NOT-TWINNED by reason (685 cases; a case counts once per distinct reason):
   - severity: E-CTRL-004 did not fire (expected error)
 - `control-flow/ctrl-010-else-on-for-without-lift-neg` (twin · twin-extra-error)
   - twin emitted unasserted error(s): E-LOOP-007, E-VALUE-WRITES-STATE
-- `control-flow/s437-braceless-else-in-failable-arm` (twin · runtime)
-  - runtime: no artifact — the compile reported an error (E-ERROR-012)
 - `defer/deferred-server-call-completes` (twin · codes+runtime)
   - forbidden family E-DEFER-* fired: E-DEFER-UNHANDLED-FAILABLE
   - runtime: no artifact — the compile reported an error (E-DEFER-UNHANDLED-FAILABLE)
@@ -342,7 +340,7 @@ none
 
 none
 
-### PASS / CODES-ONLY (250)
+### PASS / CODES-ONLY (251)
 
 - `attr-executable-sink/bound-svg-animation-runtime-guard` — PASS · TWIN
 - `attr-executable-sink/bound-url-runtime-guard` — PASS · TWIN
@@ -400,6 +398,7 @@ none
 - `control-flow/ctrl-switch-forbidden-match-neg` — PASS · TWIN · VACUOUS
 - `control-flow/if-chain-inactive-branches-absent` — PASS · TWIN
 - `control-flow/if-chain-program-first-true-rt` — PASS
+- `control-flow/s437-braceless-else-in-failable-arm` — PASS · TWIN
 - `control-flow/s437-r5-braced-else-block-comment-fn` — PASS · TWIN
 - `control-flow/s437-r5-braced-else-if-chain-comments-fn` — PASS · TWIN
 - `control-flow/s437-r5-braced-else-line-comment-fn` — PASS · TWIN
