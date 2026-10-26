@@ -50,6 +50,8 @@ import { soleLogicBlockPayload } from "../interpolation-extent.ts";
 import { filterRenderableChildren } from "./emit-variant-guard.ts";
 import { readEngineBody, ENGINE_BODY_FILE, messageArmSource, onTransitionBodySource, guardSource } from "../engine-body-reader.ts";
 import { parseAfterDuration } from "./parse-after-duration.ts";
+import { hostPromiseMemberOf, HOST_FETCH_MEMBER } from "./host-promise-names.ts";
+import { isGlobalSchedulerCallee } from "./async-combinators.ts";
 
 type AnyNode = Record<string, unknown>;
 
@@ -84,6 +86,20 @@ export interface RenderWaitingFacts {
   awaitedInAsyncHost?: (name: string) => boolean;
   /** The file's engine variables: a write to one is an engine transition, never the lifted reactive set. */
   engineVars?: ReadonlySet<string>;
+  /**
+   * S470 (s470-render-residue-host-promises) — the SPEC-named host Promise globals (§13.7 item 4,
+   * host-promise-globals.ts) this file does not bind at module scope. `waits` holds them (and the
+   * file's functions that reach them); this set names them in the message and for the
+   * `globalThis.fetch(…)` member form.
+   */
+  hostNames?: ReadonlySet<string>;
+  /**
+   * The file's functions that wait ONLY because they reach a host Promise global (§13.7 item 2) —
+   * for the message (impl#1 does not emit them `async`).
+   */
+  hostOnlyReach?: ReadonlySet<string>;
+  /** The `ident` nodes naming a host global that a local binding shadows: not the host global. */
+  hostShadowed?: WeakSet<object>;
   filePath: string;
 }
 
@@ -162,6 +178,10 @@ class RenderWalk {
 
   private describe(name: string): string {
     if (this.facts.serverNames.has(name)) return `server function \`${name}\``;
+    if (this.facts.hostNames?.has(name)) return `the host \`${name}\`, which returns a Promise (§13.7 item 4)`;
+    if (this.facts.hostOnlyReach?.has(name)) {
+      return `\`${name}\`, which calls the host \`${[...(this.facts.hostNames ?? [])].join("` / `")}\` (a Promise-returning function: §13.7 item 2)`;
+    }
     if (this.facts.namespaceLocals.has(name)) return `\`${name}\` (a namespace import whose members impl#1 does not classify)`;
     return `\`${name}\`, which the compiler emits async (it calls a server function or a Promise-returning helper)`;
   }
@@ -169,6 +189,27 @@ class RenderWalk {
   /** A name the facts call waiting (an async function, or a namespace import — fail closed). */
   private waitingName(name: string): boolean {
     return this.facts.waits(name);
+  }
+
+  /** An `ident` node that names a waiting function — not a local that shadows a host global. */
+  private waitingIdent(x: unknown): boolean {
+    if (!x || typeof x !== "object") return false;
+    const n = x as AnyNode;
+    if (n.kind !== "ident" || typeof n.name !== "string" || n.name.startsWith("@")) return false;
+    if (this.facts.hostShadowed?.has(n)) return false;
+    return this.facts.waits(n.name);
+  }
+
+  /**
+   * `globalThis.fetch(…)` / `window.fetch(…)` / `self.fetch(…)`: a call of the host global through
+   * its global object (a member call is otherwise not a call of a function of that name).
+   */
+  private hostMemberCall(callee: AnyNode | undefined): string | null {
+    // fix round 1 (F1 / F2) — also `window["fetch"]`, `globalThis.window.fetch`,
+    // `document.defaultView.fetch` (host-promise-names.ts, the one reader of these spellings).
+    const pname = hostPromiseMemberOf(callee);
+    if (pname === null) return null;
+    return `the host \`${pname}\` (read through the global object), which returns a Promise (§13.7 item 4)`;
   }
 
   /** Text read only to refuse: the first waiting function it names, or null. */
@@ -208,7 +249,8 @@ class RenderWalk {
     for (const k of Object.keys(n)) {
       const x = n[k];
       if (x && typeof x === "object") {
-        if (k === "callee" && (x as AnyNode).kind === "ident") shallow[k] = x;
+        // A local that shadows a host global (`(fetch) => fetch(u)`) is not a call of it.
+        if (k === "callee" && (x as AnyNode).kind === "ident") { if (!this.facts.hostShadowed?.has(x as object)) shallow[k] = x; }
         else if (isMatch && (k === "body" || k === "rawArms")) shallow[k] = x;
         continue;
       }
@@ -257,6 +299,8 @@ class RenderWalk {
           return this.describe(obj.name);
         }
       }
+      const host = this.hostMemberCall(callee);
+      if (host) return host;
     }
     if (n.kind === "markup-value") {
       // Markup held by an expression renders like any markup: walked as such (its own sites).
@@ -287,7 +331,10 @@ class RenderWalk {
   }
 
   private judge(node: unknown, anchor: object, span: unknown, position: string): void {
-    this.site(anchor, span, position, this.localScope ? this.exprWaitsAll(node) : this.exprWaits(node));
+    // fix round 1 (F4) — a waiting function read as a VALUE (`@xs.some(isOkW)`, `[fetch][0](u)`,
+    // `call(fetch, u)`) is judged in every position, not only in local bodies: a render position
+    // and a synchronous action body have no awaited combinator, so `.some` of Promises is true.
+    this.site(anchor, span, position, this.exprWaitsAll(node));
   }
 
   /** Expression TEXT the tree holds unparsed: read with the one expression reader, else read to refuse. */
@@ -728,12 +775,24 @@ class RenderWalk {
     if (Array.isArray(v)) { for (const x of v) { const r = this.valueRefWaits(x, seen); if (r) return r; } return null; }
     const n = v as AnyNode;
     if (n.kind === "markup-value") return null;
-    if (n.kind === "ident" && typeof n.name === "string" && !n.name.startsWith("@") && this.facts.waits(n.name)) {
-      return `${this.describe(n.name)}, read as a value`;
+    if (this.waitingIdent(n)) {
+      return `${this.describe(n.name as string)}, read as a value`;
+    }
+    // fix round 1 (F2) — the host `fetch` read through a global object as a value
+    // (`[globalThis.fetch]`, `window["fetch"]` handed on).
+    if (hostPromiseMemberOf(n) !== null) return `${this.hostMemberCall(n)}, read as a value`;
+    // SPEC §13.2 — not a use as a value: `typeof f`, and an argument of a fire-and-forget
+    // scheduler (`setTimeout(f, 0)`), which discards the return.
+    if (n.kind === "unary" && n.op === "typeof") return null;
+    if (n.kind === "call") {
+      const c = n.callee as AnyNode | undefined;
+      if (c && c.kind === "ident" && typeof c.name === "string" && isGlobalSchedulerCallee(c.name)) return null;
     }
     for (const k of Object.keys(n)) {
       if (k === "span") continue;
       if (k === "callee" && n.kind === "call" && (n.callee as AnyNode | undefined)?.kind === "ident") continue;
+      // A call THROUGH the global object is a call (judged by `exprWaits`), not a value read.
+      if (k === "callee" && n.kind === "call" && hostPromiseMemberOf(n.callee) !== null) continue;
       if (k === "property" && n.kind === "member" && n.computed !== true) continue;
       const r = this.valueRefWaits(n[k], seen);
       if (r) return r;
@@ -860,9 +919,11 @@ class RenderWalk {
       return named !== null && (typeof n.bodyRaw === "string" || inFn)
         ? `${named}, inside a nested function (a callback or a local function)` : named;
     }
-    if (kind === "ident" && typeof n.name === "string" && !n.name.startsWith("@") && this.facts.waits(n.name)) {
-      return `${this.describe(n.name)}, read as a value`;
+    if (this.waitingIdent(n)) {
+      return `${this.describe(n.name as string)}, read as a value`;
     }
+    // fix round 1 (F2) — the host `fetch` read through a global object as a value.
+    if (hostPromiseMemberOf(n) !== null) return `${this.hostMemberCall(n)}, read as a value`;
     // fix round 4 — a template literal's interpolations are expressions of this statement (the
     // compiler's one template slicer): walked like any other, so an own-level call there is
     // accepted (and counted for the invariant) and a callback there is a nested function (R3).
@@ -877,7 +938,7 @@ class RenderWalk {
       const arms = guardCallArmsRaw(n as unknown as ExprNode);
       if (arms !== null) { const r = this.textNames(arms); if (r) return r; }
       const callee = n.callee as AnyNode | undefined;
-      if (callee && callee.kind === "ident" && typeof callee.name === "string") {
+      if (callee && callee.kind === "ident" && typeof callee.name === "string" && !this.facts.hostShadowed?.has(callee)) {
         const nm = callee.name;
         if (this.facts.waits(nm) && (inFn || !(this.facts.awaitedInAsyncHost?.(nm) ?? false))) {
           return inFn ? `${this.describe(nm)}, inside a nested function (a callback or a local function)` : this.describe(nm);
@@ -897,6 +958,14 @@ class RenderWalk {
           return this.describe(obj.name);
         }
       }
+      // The host global through its global object: awaited at the host's own level when the
+      // host awaits it (fix round 1 F5 / F6 — exactly as the bare `fetch` and the server twins).
+      const host = this.hostMemberCall(callee);
+      if (host) {
+        if (inFn) return `${host}, inside a nested function (a callback or a local function)`;
+        if (n.optional === true) return `${host}, called optionally (which impl#1 does not await here)`;
+        if (!(this.facts.awaitedInAsyncHost?.(HOST_FETCH_MEMBER) ?? false)) return host;
+      }
     }
     for (const k of Object.keys(n)) {
       if (k === "span" || k === "_record") continue;
@@ -905,6 +974,7 @@ class RenderWalk {
       if (k === "iterExpr" && n.cStyleParts && typeof n.cStyleParts === "object" &&
           (n.iterExpr as AnyNode | undefined)?.nativeKind === "SkippedExpr") continue;
       if (k === "callee" && kind === "call" && (n.callee as AnyNode | undefined)?.kind === "ident") continue;
+      if (k === "callee" && kind === "call" && hostPromiseMemberOf(n.callee) !== null) continue;
       if (k === "property" && kind === "member" && n.computed !== true) continue;
       const r = this.asyncWaits(n[k], inFn, seen);
       if (r) return r;
