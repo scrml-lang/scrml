@@ -191,7 +191,7 @@ export function valueArmFallsThrough(
   const LEAVE = /^(return|fail|break|continue)(?![A-Za-z0-9_$])/;
   if (!(t.startsWith("{") && t.endsWith("}"))) {
     if (LEAVE.test(t) || /^lift(?![A-Za-z0-9_$])/.test(t)) return false;
-    return !isValueTail(t);
+    return !isValueTail(t) || textHasWrite(t);
   }
   if (!t.slice(1, -1).trim()) return true;
   const r = armBlockStatementsDetailed(t);
@@ -217,12 +217,57 @@ export function armStatementsFallThrough(stmts: any[], isValueTail: (text: strin
   const tail = stmts[stmts.length - 1];
   if (leaves(tail)) return false;
   if (tail && tail.kind === "lift-expr") return false;
-  if (tail && tail.kind === "guarded-expr" && tail.guardedNode && tail.guardedNode.kind === "bare-expr") return false;
+  // fix round 4 (1) — a handled call as the tail yields its handler's value: only when its own arms
+  // yield (or leave), recursively; a nested arm that falls through leaves the envelope.
+  if (tail && tail.kind === "guarded-expr" && tail.guardedNode && tail.guardedNode.kind === "bare-expr") {
+    const inner = Array.isArray(tail.arms) ? tail.arms : [];
+    return inner.length === 0 || inner.some((a: any) => valueArmFallsThrough(a, isValueTail));
+  }
   if (tail && tail.kind === "bare-expr" && !tail._onMountEffect) {
     const text = typeof tail.expr === "string" ? tail.expr : "";
-    if (text && isValueTail(text)) return false;
+    // fix round 4 (2, 3) — a tail that WRITES anywhere in it (an assignment, a compound / logical
+    // assignment, `++` / `--`, in parentheses, a ternary branch, a comma, `&&` / `||`) falls through:
+    // its value is the write's, not a value of the success type.
+    if (text && isValueTail(text) && !exprHasWrite(tail.exprNode ?? null, text)) return false;
   }
   return true;
+}
+
+/**
+ * fix round 4 — whether an arm's value expression WRITES (outside a nested function): an assignment
+ * of any operator, an update (`++` / `--`, prefix or postfix), at any depth. An expression the
+ * parser kept only as text (an escape hatch, e.g. a comma sequence) is read for `=` / `++` / `--`
+ * (fail closed: a `=` in a string counts too).
+ */
+export function exprHasWrite(node: unknown, text: string): boolean {
+  const WRITE_TEXT = /\+\+|--|(?<![=!<>])=(?![=>])/;
+  if (!node || typeof node !== "object") return WRITE_TEXT.test(text);
+  const seen = new WeakSet<object>();
+  const walk = (v: unknown): boolean => {
+    if (!v || typeof v !== "object" || seen.has(v as object)) return false;
+    seen.add(v as object);
+    if (Array.isArray(v)) return v.some(walk);
+    const n = v as any;
+    if (n.kind === "lambda") return false;
+    if (n.kind === "assign") return true;
+    if (n.kind === "unary" && (n.op === "++" || n.op === "--")) return true;
+    if (n.kind === "escape-hatch") {
+      if (typeof n.bodyRaw === "string") return false; // a function value
+      return typeof n.raw === "string" && WRITE_TEXT.test(n.raw);
+    }
+    for (const k of Object.keys(n)) {
+      if (k === "span") continue;
+      if (walk(n[k])) return true;
+    }
+    return false;
+  };
+  return walk(node);
+}
+
+function textHasWrite(text: string): boolean {
+  let node: unknown = null;
+  try { node = parseExprToNode(text, "<arm-value>", 0); } catch { node = null; }
+  return exprHasWrite(node, text);
 }
 
 /** The E-ERROR-012 diagnostic (§19.4.3's message), recorded against the arm. */
@@ -302,21 +347,61 @@ export function serverArmExprNode(text: string, mode: Mode, node?: any, anchor?:
  * a statement position (fall-through allowed). Arms are read as impl#1 lowers them: an inline arm's
  * `result` text, a block arm's parsed `body`.
  */
-export function failableMatchFallThroughs(nodes: unknown, isValueTail: (text: string) => boolean): void {
+export function failableMatchFallThroughs(
+  nodes: unknown,
+  isValueTail: (text: string) => boolean,
+  /** fix round 4 — the expression-position arm reader (emit-control-flow `splitMultiArmString` + `parseMatchArm`). */
+  readRawArm?: (raw: string) => Array<{ test: string; result: string }> | null,
+): void {
   const seen = new WeakSet<object>();
   const visit = (v: unknown, valuePos: boolean, where: string): void => {
     if (!v || typeof v !== "object" || seen.has(v as object)) return;
     seen.add(v as object);
     if (Array.isArray(v)) { for (const x of v) visit(x, valuePos, where); return; }
     const n = v as any;
-    if (n.kind === "match-expr" && n.__matchSubjectFailable === true && valuePos) {
+    // fix round 4 — an EXPRESSION-position `match` (`@ok = match check(p) { … }`) carries its arms as
+    // raw text (`rawArms`), read the way its lowering reads them; each arm result judged by one rule.
+    if (n.kind === "match-expr" && n.__matchSubjectFailable === true && valuePos && Array.isArray(n.rawArms) && !Array.isArray(n.body)) {
+      const callee = n.subject && n.subject.kind === "call" && n.subject.callee && typeof n.subject.callee.name === "string" ? n.subject.callee.name : "the call";
+      for (const raw of n.rawArms) {
+        const arms = typeof raw === "string" && readRawArm ? readRawArm(raw) : null;
+        const list = arms ?? [{ test: "?", result: "" }];
+        for (const a of list) {
+          const r = (a.result ?? "").trim();
+          let falls: boolean;
+          if (r.startsWith("{") && r.endsWith("}")) {
+            const rb = r.slice(1, -1).trim() ? armBlockStatementsDetailed(r) : null;
+            falls = r.slice(1, -1).trim() === "" ? true : !rb || !rb.ok ? true : armStatementsFallThrough(rb.stmts as any[], isValueTail);
+          } else {
+            falls = r === "" ? true
+              : /^(return|fail|break|continue|lift)(?![A-Za-z0-9_$])/.test(r) ? false
+              : !isValueTail(r) || textHasWrite(r);
+          }
+          if (!falls) continue;
+          const sp = n.span as { file?: unknown; start?: unknown } | undefined;
+          const span = sp && typeof sp.file === "string" && typeof sp.start === "number" ? sp : currentLoweringSpan();
+          recordRefusedLowering(new CGError(
+            "E-ERROR-012",
+            `E-ERROR-012: Arm '${String(a.test ?? "?")}' of the \`match\` on '${callee}(…)' produces no value, but the match's ` +
+              `result is used here (${where}). In a value position every arm must yield a value of '${callee}'s success ` +
+              `type or leave with 'return' / 'fail' (§19.4.3). End the arm with a value, leave with 'return', or write ` +
+              `the \`match\` as a statement and keep the writes in its arms.`,
+            span as any,
+          ), n as object);
+          break;
+        }
+      }
+    }
+    if (n.kind === "match-expr" && n.__matchSubjectFailable === true && valuePos && Array.isArray(n.body)) {
       const callee = typeof n.header === "string" ? (n.header.trim().match(/^[A-Za-z_$][\w$]*/)?.[0] ?? "the call") : "the call";
       for (const arm of Array.isArray(n.body) ? n.body : []) {
         if (!arm || typeof arm !== "object") continue;
         let falls = false;
         if (arm.kind === "match-arm-inline") {
           const r = typeof arm.result === "string" ? arm.result.trim() : "";
-          falls = r === "" ? true : !(/^(return|fail|break|continue|lift)(?![A-Za-z0-9_$])/.test(r) || isValueTail(r));
+          falls = r === "" ? true
+            : /^(return|fail|break|continue|lift)(?![A-Za-z0-9_$])/.test(r) ? false
+            : !isValueTail(r) || exprHasWrite(arm.resultExpr ?? null, r);
         } else if (arm.kind === "match-arm-block") {
           falls = armStatementsFallThrough(arm.body, isValueTail);
         }

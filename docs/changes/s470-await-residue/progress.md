@@ -377,3 +377,28 @@ which would be a new divergence. Not built; no code was changed in this round.
   bootstrap already emits) into a PASS.
 - **CI job commands on the final tree:** all exit 0, except facts --check (STALE, WARN-only, bot-owned).
   bootstrap-conformance was stale until the regeneration above.
+
+## Fix round 4 (re-review of 09baae43c, verdict FIX — narrow: the "yields" classifier)
+
+Reviewer probes (read-only): `~/.cache/scrml/review/s470-lf4/fx/arm.mjs`, `arm2.mjs`.
+
+| # | sev | status | evidence |
+|---|---|---|---|
+| 1 | HIGH | FIXED | A nested `!{ }` as a block TAIL now yields only when its own arms yield (or leave), checked recursively (`armStatementsFallThrough`, guarded-expr tail). "tail nested bang fallthrough" and "const bind nested": FAIL → E-ERROR-012. "tail nested bang value" stays PASS. |
+| 2 | HIGH | FIXED | An update (`++` / `--`, prefix or postfix) is a write and falls through. "tail increment" and "increment tail in onTransition": FAIL → E-ERROR-012. |
+| 3 | MED | FIXED | `exprHasWrite`: any assignment (any operator) or update, at any depth of the tail or of an expression arm, outside a nested function (a lambda / function value), falls through. An expression the parser keeps only as text (a comma sequence) is read for `=` / `++` / `--`, fail closed. Covers parentheses, ternary branches, comma, `&&` / `\|\|`. "tail assignment expr parens", "tail ternary both writes" and "paren assign tail in timer": FAIL → E-ERROR-012. "tail ternary write branch" (one branch writes) is refused too: PASS → E-ERROR-012, by the rule. |
+| LOW | — | FIXED | The expression-form failable `match` (`@ok = match check(p) { … }`, a `match-expr` carrying `rawArms`) is read with its own lowering's arm reader (`splitMultiArmString` + `parseMatchArm`, passed in from index.ts to avoid an import cycle), and each arm is judged by the same rule. "value match fallthrough": PASS (it failed closed) → E-ERROR-012. |
+
+- Probes on head:
+  - arm.mjs: every row FIXED as above. The rows still reading FAIL ("tail call returns arg (truthy)", "tail object
+    literal", "tail string") yield a TRUTHY VALUE by the probe's own logic. They are valid programs that log in by
+    design, not classifier escapes.
+  - arm2.mjs: 7/7 refused.
+- Pack f23 +7 (E12b, pinned PASS-REFUSED): **7/7 FAIL on 09baae43c**, refused after. f23 = 54; count 3726 → **3733**.
+- Unit: e-error-012 +14 (nine falling forms, three yielding controls, the expression-form match refused /
+  accepted).
+- Full unit + integration + conformance run: 42736 / 0. No further fixture migration was needed.
+- R26 with digests vs an extracted 09baae43c (3618 files): **0 code changes**. The only digest difference is the
+  run-to-run nondeterministic `missing-required-slot-reject` (refused on both). No new over-refusal.
+- SPEC: the emitted note on the three E-ERROR-012 texts states the write rule, the recursive handled-call tail, and
+  the expression-form `match`. s34-census PASS.

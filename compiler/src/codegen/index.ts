@@ -86,6 +86,7 @@ import { schedulerNamesNotProvablyGlobal } from "./js-async-analysis.ts";
 import { computeFileAsyncFnNames, serverFnNamesOfFile, setFileAsyncFnNames, adoptFileAsyncSet, waitingBindingsOfFile, namespaceImportLocalsOf, waitingFnPredicateOfFile, serverPlacedFnNamesAnywhere } from "./file-async-fns.ts";
 import { renderWaitingCallsOf } from "./render-waiting-calls.ts";
 import { failableMatchFallThroughs } from "./arm-structure.ts";
+import { splitMultiArmString, parseMatchArm } from "./emit-control-flow.ts";
 import { _blockTailIsValueExpr } from "./emit-logic.ts";
 import { unboundHostPromiseGlobalsOf, hostPromiseReachOf, hostShadowedRefsOf, hostPromiseSeedOf } from "./host-promise-globals.ts";
 import { markHostGlobalAliases } from "./host-promise-names.ts";
@@ -2887,7 +2888,15 @@ export function runCG(input: CgInput): CgOutput {
       const _rwHostShadowed = hostShadowedRefsOf(getNodes(fileAST as never), _rwHostNames);
       // S470 (ruling "Emit E-ERROR-012") — a value-position `match` on a failable call whose arm falls
       // through (§19.4.3); the `!{ }` half is judged where the guard is lowered (emit-logic).
-      failableMatchFallThroughs(getNodes(fileAST as never), _blockTailIsValueExpr);
+      failableMatchFallThroughs(getNodes(fileAST as never), _blockTailIsValueExpr, (raw: string) => {
+        const out: Array<{ test: string; result: string }> = [];
+        for (const piece of splitMultiArmString(raw.trim().replace(/-\s*>/g, "->"))) {
+          const parsed = parseMatchArm(piece);
+          if (!parsed) return null;
+          out.push({ test: String(parsed.test ?? "_"), result: String(parsed.result ?? "") });
+        }
+        return out;
+      });
       for (const site of renderWaitingCallsOf(getNodes(fileAST as never) as unknown[], {
         derivedReach: _rwDerivedReach,
         waits: (n: string) => _rwWaits(n) || _rwServerAnywhere.has(n) || _rwClientAsync.has(n) || _rwHostReach.has(n),

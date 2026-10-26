@@ -121,6 +121,47 @@ const R18 = (body) => `<ok> = false
 <p id="out">\${@msg}</p>
 `;
 
+// fix round 4 helpers (the reviewer's arm.mjs / arm2.mjs pages).
+const ARMA = (body) => `| .Denied(r) :> ${body} | _ :> ${body}`;
+const ARMP = (arms) => `type AuthErr:enum = { Denied(reason: string), Gone }
+<pw> = "none"
+<ok> = false
+<seen> = 0
+<items> = []
+<msg> = "rejected"
+\${
+    server function check(p)! -> AuthErr {
+        if (p != "secret") fail AuthErr::Denied("bad")
+        return true
+    }
+    function login(p) {
+        @pw = p
+        @ok = check(p) !{ ${arms} }
+        if (@ok) { @msg = "LOGGED IN" } else { @msg = "rejected" }
+    }
+}
+<button id="wrong" onclick=login("wrong")>go</button>
+<button id="right" onclick=login("secret")>go</button>
+<p id="out">\${@msg}</p>
+`;
+const E12B = (loginTail, view = "", seen = 0) => `type Phase:enum = { Idle, Active }
+type AuthErr:enum = { Denied(reason: string), Gone }
+<pw> = "none"
+<ok> = false
+<seen> = ${seen}
+<msg> = "rejected"
+\${
+    server function check(p)! -> AuthErr {
+        if (p != "secret") fail AuthErr::Denied("bad")
+        return true
+    }
+    function login(p) { @pw = p${loginTail ? "\n " + loginTail : ""} }
+}
+${view}<button id="wrong" onclick=login("wrong")>go</button>
+<button id="right" onclick=login("secret")>go</button>
+<p id="out">\${@msg}</p>
+`;
+
 // fix round 3 helpers (the reviewer's atk.mjs / hh.mjs pages).
 const E12BANG = `@ok = check(@pw) !{ | .Denied(r) :> { @msg = "rejected" } | _ :> { @msg = "rejected" } }`;
 const E12LOGIN = (x = "") => `    function login(p) { @pw = p${x} }\n}\n`;
@@ -239,6 +280,17 @@ export default [
   ["E12 handler: a fall-through arm write, then a test", E12(`    function login(p) { @pw = p\n ${E12BANG}\n ${G_OK} }\n}\n`)],
   ["E12 handler calls the helper, then a test", E12(`    function login(p) { @pw = p; chk(p); ${G_OK} }\n}\n`)],
   ["E12 opener effect=: a fall-through arm write, then a test", E12(`${E12LOGIN()}<engine for=Phase initial=.Idle effect=\${ ${E12BANG}\n ${G_OK} }>\n  <Idle rule=.Active/>\n  <Active/>\n</>\n`, "wrong")],
+  // fix round 4 (re-review of 09baae43c; reviewer arm.mjs / arm2.mjs) — an arm the round-3 classifier
+  // took as yielding but whose value is the envelope or a write's truthy result: a nested `!{ }` tail
+  // whose own arms fall through, an update `@seen++`, an assignment in parentheses / ternary branches.
+  // FAIL on 09baae43c; E-ERROR-012 after.
+  ["E12b tail: an assignment in parentheses", ARMP(ARMA(`{ (@seen = 1) }`))],
+  ["E12b tail: a ternary whose branches both write", ARMP(ARMA(`{ @pw == "" ? (@seen = 1) : (@seen = 2) }`))],
+  ["E12b tail: a nested handled call whose arm falls through", ARMP(ARMA(`{ check(@pw) !{ | _ :> { @seen = 1 } } }`))],
+  ["E12b tail: an increment", ARMP(ARMA(`{ @seen++ }`))],
+  ["E12b const binding: a nested handled call whose arm falls through", E12B(`const v = check(p) !{ | _ :> { check(p) !{ | _ :> { @seen = 1 } } } }\n if (v) { @msg = "LOGGED IN" } else { @msg = "rejected" }`)],
+  ["E12b onTransition: an increment tail", E12B("@phase = .Active", ENG13(`@ok = check(@pw) !{ | _ :> { @seen++ } }\n ${G_OK}`))],
+  ["E12b timer: an assignment-in-parentheses tail", E12B("", `<timer interval=1>\${ @ok = check(@pw) !{ | _ :> { (@seen = 5) } }\n ${G_OK} }</timer>\n`, 1)],
   // VALID controls — correct on base and after
   ["VALID handler: a cell write, then a test", P(``, `; ${WRITE.replace(/@pw/g, "p")}`)],
   ["VALID when body: a cell write, then a test", P(`\${ when @pw changes { ${WRITE} } }`)],

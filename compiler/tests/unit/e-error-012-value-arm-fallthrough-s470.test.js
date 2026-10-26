@@ -123,6 +123,44 @@ describe("E-ERROR-012 — a value-position `!{ }` arm that falls through", () =>
   });
 });
 
+describe("E-ERROR-012 fix round 4 — tails the round-3 classifier took as yielding (review of 09baae43c)", () => {
+  const W = (arm) => page(`    function login(p) { @ok = check(p) !{ .Denied(r) :> ${arm}, _ :> false }\n if (@ok) { @msg = "IN" } }`);
+  const FALLS = {
+    "a nested handled call whose own arm falls through": `{ check(p) !{ _ :> { @msg = "x" } } }`,
+    "a postfix increment": `{ @seen++ }`,
+    "a prefix decrement": `{ --@seen }`,
+    "an assignment in parentheses": `{ (@msg = "x") }`,
+    "a ternary with a write in one branch": `{ @pw == "" ? (@msg = "x") : false }`,
+    "a ternary with writes in both branches": `{ @pw == "" ? (@msg = "x") : (@msg = "y") }`,
+    "a write behind &&": `{ @pw == "" && (@msg = "x") }`,
+    "a comma sequence ending in a write": `{ (false, @msg = "x") }`,
+    "an expression arm that is an increment": `@seen++`,
+  };
+  for (const [name, arm] of Object.entries(FALLS)) {
+    test(`REFUSED — ${name}`, () => {
+      expect(compile(W(arm).replace("<msg> = \"\"", "<msg> = \"\"\n<seen> = 0")).codes).toContain(CODE);
+    });
+  }
+  const YIELDS = {
+    "a nested handled call whose arms yield": `{ check(p) !{ _ :> false } }`,
+    "a ternary of values": `{ @pw == "" ? false : true }`,
+    "a call inside a lambda that writes (not this tail's write)": `{ [1].some((x) => x == 2) }`,
+  };
+  for (const [name, arm] of Object.entries(YIELDS)) {
+    test(`ACCEPTED — ${name}`, () => {
+      expect(compile(W(arm)).codes).not.toContain(CODE);
+    });
+  }
+  test("REFUSED — an expression-position failable `match` with a fall-through arm (`@ok = match check(p) { … }`)", () => {
+    const r = compile(page(`    function login(p) {\n        @ok = match check(p) { .Ok(v) :> v  .Denied(r) :> { @msg = "no" }  .Gone :> false }\n        if (@ok) { @msg = "IN" }\n    }`));
+    expect(r.codes).toContain(CODE);
+  });
+  test("ACCEPTED — an expression-position failable `match` whose arms yield", () => {
+    const r = compile(page(`    function login(p) {\n        @ok = match check(p) { .Ok(v) :> v  .Denied(r) :> false  .Gone :> false }\n        if (@ok) { @msg = "IN" }\n    }`));
+    expect(r.codes).not.toContain(CODE);
+  });
+});
+
 describe("E-ERROR-012 — a value-position `match` on a failable call", () => {
   test("REFUSED — an arm that only writes, the match bound to a name", () => {
     const r = compile(page(`    function login(p) {\n        let m = match check(p) {\n            .Ok(v) :> v\n            .Denied(x) :> { @msg = "no" }\n            .Gone :> false\n        }\n        if (m) { @msg = "IN" }\n    }`));
