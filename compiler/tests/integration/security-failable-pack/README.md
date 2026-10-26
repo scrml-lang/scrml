@@ -37,7 +37,7 @@ SERVER function is judged end to end.
 - a shape not in `KNOWN_FAIL` / `BY_DESIGN_LOGS_IN` logs in on a wrong password;
 - a `KNOWN_FAIL` shape stops doing so (it was fixed: delete the entry);
 - a shape not in `UNJUDGED` comes out `UNJUDGED`, or an `UNJUDGED` one starts being judged;
-- the corpus stops holding exactly 3196 shapes (`EXPECTED_SHAPE_COUNT`); a list entry names no shape. Plus S469 s469-server-return-match-await (457 shapes): s4–s10 server, f1–f7 fullstack, l1–l5 library, t1–t5 tool — a failable `match` subject awaited in every position, `fail` payloads keyed per enum in every emission mode, one resolver for a callee's error enum, and the `_ e` whole-error binder allow-list.
+- the corpus stops holding exactly 3220 shapes (`EXPECTED_SHAPE_COUNT`); a list entry names no shape. Plus S469 s469-server-return-match-await (457 shapes): s4–s10 server, f1–f7 fullstack, l1–l5 library, t1–t5 tool — a failable `match` subject awaited in every position, `fail` payloads keyed per enum in every emission mode, one resolver for a callee's error enum, and the `_ e` whole-error binder allow-list.
 
 It deliberately does NOT pin each shape's class: a shape moving from `PASS-REFUSED` to `PASS` is a
 compiler improvement, not a regression.
@@ -370,7 +370,7 @@ Shape 6 is judged `accepted` (pack.js `nav.judge`): its floor is "a chunk that n
 
 `g-structural-element-if-chain-and-show-composition-nominal`, `g-if-on-structural-element-silently-ignored`.
 
-## Measured (S470 s470-unit-variant-tag-read — r16: s19 / f22 / l14 / t14; 175 shapes)
+## Measured (S470 s470-unit-variant-tag-read — r16: s19 / f22 / l14 / t14; 199 shapes)
 
 `r16-shapes.js`: a `.variant` read off a UNIT enum variant value. A unit variant is emitted as its bare
 tag string (§51.3.2), a payload variant as `{ variant, data }`, so the plain JS `x.variant` read
@@ -414,4 +414,9 @@ Fix round 2 (re-review of `43386e9d5`, +10): G1 — a destructuring pattern in T
 `variant` inside an array element, under a key, in a later declarator, or as a quoted / computed key was
 emitted verbatim (4 FAIL on `43386e9d5`, all 6 FAIL on base); plus the structured `[{ variant }]` on every
 side. Every one is refused now (E-CODEGEN-INVALID-LOGIC).
+
+Fix round 3 (re-review of `46ae4c38a`, +24): H1 — round 2's pattern scan treated a pattern's DEFAULTS as
+places, so `const { a = @st.variant } = …` (a `when` body, a handler block), `[a = x.variant] = []` (an
+assignment pattern) kept the plain read and logged in (7 FAIL on `46ae4c38a`). Only binding targets are
+places now; a default and a computed key are reads.
 

@@ -8,6 +8,10 @@
 // Fix round 2 (+10, G1) on 43386e9d5: 4 FAIL (text-path `[{ variant }]`, `[a, { variant }]`, quoted and
 // computed keys in a `when` body), 6 PASS-REFUSED; base 55de8639c FAILs all 6 text shapes and the 4
 // structured `[{ variant }]` shapes. All refused after (E-CODEGEN-INVALID-LOGIC).
+// Fix round 3 (+24, H1: a pattern default is a read) on 46ae4c38a: 7 FAIL (an assignment-pattern default on
+// server / library / tool; the 4 text-lowered `when` / handler defaults), 4 PASS-REFUSED + 1 PASS-DENY on
+// fullstack (the Promise.all batch serializes the pattern: G5), 3 PASS-500 (`x["variant"]` in a declaration
+// default: `variant is not defined`, the same on both trees — a pre-existing default-serialization defect).
 export const R16_PINNED = {
   "s19/1 typed local from a return": "PASS",
   "s19/1 untyped local from a return": "PASS",
@@ -40,6 +44,11 @@ export const R16_PINNED = {
   "s19/15 F2 destructure let with default": "PASS",
   "s19/15 F2 destructure nested": "PASS",
   "s19/21 G1 array element pattern": "PASS-REFUSED",
+  "s19/22 H1 object pattern default": "PASS",
+  "s19/22 H1 array pattern default": "PASS",
+  "s19/22 H1 default literal key": "PASS-500",
+  "s19/22 H1 default member of an object": "PASS",
+  "s19/22 H1 assignment pattern default": "PASS",
   "s19/16 F3 literal key": "PASS",
   "s19/16 F3 optional literal key": "PASS",
   "s19/17 F6 qualified is, payload": "PASS",
@@ -77,6 +86,11 @@ export const R16_PINNED = {
   "f22/15 F2 destructure let with default": "PASS",
   "f22/15 F2 destructure nested": "PASS",
   "f22/21 G1 array element pattern": "PASS-REFUSED",
+  "f22/22 H1 object pattern default": "PASS-REFUSED",
+  "f22/22 H1 array pattern default": "PASS-REFUSED",
+  "f22/22 H1 default literal key": "PASS-REFUSED",
+  "f22/22 H1 default member of an object": "PASS-REFUSED",
+  "f22/22 H1 assignment pattern default": "PASS-DENY",
   "f22/16 F3 literal key": "PASS",
   "f22/16 F3 optional literal key": "PASS",
   "f22/17 F6 qualified is, payload": "PASS",
@@ -106,6 +120,10 @@ export const R16_PINNED = {
   "f22/20 G1 when later declarator": "PASS-REFUSED",
   "f22/20 G1 when quoted key": "PASS-REFUSED",
   "f22/20 G1 when computed key": "PASS-REFUSED",
+  "f22/23 H1 when pattern default": "PASS",
+  "f22/23 H1 handler block pattern default": "PASS",
+  "f22/23 H1 when array default": "PASS",
+  "f22/23 H1 when default literal key": "PASS",
   "f22/19 F3 when body literal key": "PASS",
   "f22/VALID function expression is .Denied (payload)": "PASS",
   "f22/VALID block arrow is .Gone (unit)": "PASS",
@@ -141,6 +159,11 @@ export const R16_PINNED = {
   "l14/15 F2 destructure let with default": "PASS",
   "l14/15 F2 destructure nested": "PASS",
   "l14/21 G1 array element pattern": "PASS-REFUSED",
+  "l14/22 H1 object pattern default": "PASS",
+  "l14/22 H1 array pattern default": "PASS",
+  "l14/22 H1 default literal key": "PASS-500",
+  "l14/22 H1 default member of an object": "PASS",
+  "l14/22 H1 assignment pattern default": "PASS",
   "l14/16 F3 literal key": "PASS",
   "l14/16 F3 optional literal key": "PASS",
   "l14/17 F6 qualified is, payload": "PASS",
@@ -178,6 +201,11 @@ export const R16_PINNED = {
   "t14/15 F2 destructure let with default": "PASS",
   "t14/15 F2 destructure nested": "PASS",
   "t14/21 G1 array element pattern": "PASS-REFUSED",
+  "t14/22 H1 object pattern default": "PASS",
+  "t14/22 H1 array pattern default": "PASS",
+  "t14/22 H1 default literal key": "PASS-500",
+  "t14/22 H1 default member of an object": "PASS",
+  "t14/22 H1 assignment pattern default": "PASS",
   "t14/16 F3 literal key": "PASS",
   "t14/16 F3 optional literal key": "PASS",
   "t14/17 F6 qualified is, payload": "PASS",

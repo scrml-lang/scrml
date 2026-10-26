@@ -115,6 +115,17 @@ describe("rewriteVariantTagReads — the string-path twin", () => {
     expect(refused(`const {variant} = x, y = 1`).codes).toEqual([]);
   });
 
+  test("review H1 — a pattern's default / computed key is a read; only its binding targets are places", () => {
+    const L = (o) => `(typeof ${o} === "string" ? ${o} : ${o}.variant)`;
+    expect(rewriteVariantTagReads(`const { a = x.variant } = o`)).toBe(`const { a = ${L("x")} } = o`);
+    expect(rewriteVariantTagReads(`const [a = x.variant] = t`)).toBe(`const [a = ${L("x")}] = t`);
+    expect(rewriteVariantTagReads(`const { a = x["variant"] } = o`)).toBe(`const { a = ${L("x")} } = o`);
+    expect(rewriteVariantTagReads(`let { a = { q: x.variant }.q } = o`)).toBe(`let { a = { q: ${L("x")} }.q } = o`);
+    expect(rewriteVariantTagReads(`({ q: s.variant = d.variant } = o)`)).toBe(`({ q: s.variant = ${L("d")} } = o)`);
+    expect(rewriteVariantTagReads(`({ [k.variant]: s.variant } = o)`)).toBe(`({ [${L("k")}]: s.variant } = o)`);
+    expect(rewriteVariantTagReads(`[...s.variant] = t`)).toBe(`[...s.variant] = t`);
+  });
+
   test("review F7 — `new X().variant` reads off the whole `new X()`", () => {
     expect(rewriteVariantTagReads(`new X().variant`)).toBe(lowerVariantTagRead("new X()", false, false));
   });
@@ -314,6 +325,13 @@ describe("compiled: `.variant` agrees with `is` (library mode, executed)", () =>
 `;
     expect((await run(src, "gate", ["wrong"])).value).toBe("rejected");
     expect((await run(src, "gate", ["secret"])).value).toBe("ok");
+  });
+
+  test("review H1 — an assignment-pattern default reads the tag (structured and escape-hatch targets)", async () => {
+    const a = `const x = mkG(p)\n        let a = "z"\n        ;[a = x.variant] = []\n        return a`;
+    expect((await run(LIB(a), "gate", ["wrong"])).value).toBe("Gone");
+    const b = `const x = mkG(p)\n        const { a = x.variant } = { k: 1 }\n        return a`;
+    expect((await run(LIB(b), "gate", ["wrong"])).value).toBe("Gone");
   });
 
   test("review F4 — a swap through an assignment pattern still compiles and swaps", async () => {

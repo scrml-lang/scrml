@@ -121,3 +121,12 @@ Base: main `d582ae04f`.
       element, under a key, a parameter, a `for` head) naming `variant` as a key at any depth — plain,
       quoted or computed — is refused unless it is the one lowerable form (first declarator, object
       pattern, a single plain top-level `variant` key). Pack r16 +10 (175).
+
+## Fix round 3 (re-review of 46ae4c38a)
+- [x] H1: only a pattern's BINDING TARGETS are places. Text path: `inAssignmentPattern` walks the
+      enclosing groups to the pattern root, then inward, and calls a position a place only if it lies
+      in each level's target region (after `key:`, before a level-0 `=` default; a computed key is not a
+      target). An escape-hatch pattern target lowered on its own (`asVariantPlaceText`) now runs the
+      pass with its outermost group as the root instead of skipping the pass. Structured path: an
+      `assign` default and a computed key inside an assignment pattern are emitted with the place
+      depth cleared. Pack r16 +24 (199): 7 FAIL on 46ae4c38a, 0 after.

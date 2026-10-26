@@ -67,6 +67,12 @@ function cases(srv, side) {
     ["15 F2 destructure nested", D(), `const { e: { variant } } = { e: mkG(p) }\n        ${G(`variant == "Gone"`)}`],
     // fix round 2 — G1 in a function body (the structured declaration path)
     ["21 G1 array element pattern", D(), `const [{ variant }] = [mkG(p)]\n        ${G(`variant == "Gone"`)}`],
+    // fix round 3 (re-review of 46ae4c38a) — H1: a pattern DEFAULT is a read, not a place
+    ["22 H1 object pattern default", D(), `const x = mkG(p)\n        const { a = x.variant } = { k: 1 }\n        ${G(`a == "Gone"`)}`],
+    ["22 H1 array pattern default", D(), `const x = mkG(p)\n        const [a = x.variant] = []\n        ${G(`a == "Gone"`)}`],
+    ["22 H1 default literal key", D(), `const x = mkG(p)\n        const { a = x["variant"] } = { k: 1 }\n        ${G(`a == "Gone"`)}`],
+    ["22 H1 default member of an object", D(), `const x = mkG(p)\n        let { a = { q: x.variant }.q } = { k: 1 }\n        ${G(`a == "Gone"`)}`],
+    ["22 H1 assignment pattern default", D(), `const x = mkG(p)\n        let a = "z"\n        ;[a = x.variant] = []\n        ${G(`a == "Gone"`)}`],
     // F3: a literal-key read
     ["16 F3 literal key", D(), `const x = mkG(p)\n        ${G(`x["variant"] == "Gone"`)}`],
     ["16 F3 optional literal key", D(), `const x = mkG(p)\n        ${G(`x?.["variant"] == "Gone"`)}`],
@@ -196,6 +202,11 @@ ${cells}
     ["20 G1 when later declarator", pg(`${GO}\n    when @st changes { const y = 1, { variant } = @st\n @msg = variant == "Gone" && y == 1 ? ${R} }`, `\${@msg}`)],
     ["20 G1 when quoted key", pg(`${GO}\n    when @st changes { const { "variant": v } = @st\n @msg = v == "Gone" ? ${R} }`, `\${@msg}`)],
     ["20 G1 when computed key", pg(`${GO}\n    when @st changes { const { ["variant"]: v } = @st\n @msg = v == "Gone" ? ${R} }`, `\${@msg}`)],
+    // fix round 3 — H1 in text-lowered bodies (review a10 T1 / T5)
+    ["23 H1 when pattern default", pg(`${GO}\n    when @st changes { const { a = @st.variant } = { k: 1 }\n @msg = a == "Gone" ? ${R} }`, `\${@msg}`)],
+    ["23 H1 handler block pattern default", pg(`function noop() { }`, `\${@msg}`, (p) => `\${() => { const x = mkG("${p}")\n const { a = x.variant } = { k: 1 }\n @msg = a == "Gone" ? ${R} }}`)],
+    ["23 H1 when array default", pg(`${GO}\n    when @st changes { const [a = @st.variant] = []\n @msg = a == "Gone" ? ${R} }`, `\${@msg}`)],
+    ["23 H1 when default literal key", pg(`${GO}\n    when @st changes { const { a = @st["variant"] } = { k: 1 }\n @msg = a == "Gone" ? ${R} }`, `\${@msg}`)],
     ["19 F3 when body literal key", pg(`${GO}\n    when @st changes { @msg = @st["variant"] == "Gone" ? ${R} }`, `\${@msg}`)],
     ["VALID function expression is .Denied (payload)", pg(`function go(p) { const f = function(v) { return v is .Denied }\n @msg = f(mkD(p)) ? ${R} }`, `\${@msg}`)],
     ["VALID block arrow is .Gone (unit)", pg(`function go(p) { const f = (v) => { return v is .Gone }\n @msg = f(mkG(p)) ? ${R} }`, `\${@msg}`)],

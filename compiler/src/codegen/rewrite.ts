@@ -2554,8 +2554,9 @@ export function rewriteStructConstruction(expr: string): string {
  */
 let _variantPlaceText = 0;
 /**
- * Run `f` with the `.variant` text pass off: the text `f` lowers is an assignment PATTERN
- * (an escape-hatch `[s.variant, s.k]` target, review F4) — every member in it is a place.
+ * Run `f` with the text `f` lowers known to be an assignment PATTERN (an escape-hatch
+ * `[s.variant, s.k]` target, review F4): its binding targets are places, its defaults and
+ * computed keys still reads (review H1).
  */
 export function asVariantPlaceText<T>(f: () => T): T {
   _variantPlaceText++;
@@ -2563,7 +2564,7 @@ export function asVariantPlaceText<T>(f: () => T): T {
 }
 
 export function rewriteVariantTagReads(expr: string): string {
-  if (!expr || typeof expr !== "string" || _variantPlaceText > 0 || !/\bvariant\b/.test(expr)) return expr;
+  if (!expr || typeof expr !== "string" || !/\bvariant\b/.test(expr)) return expr;
   let out = lowerTextVariantPatterns(expr);
   let cursor = 0;
   for (let guard = 0; guard < 1000; guard++) {
@@ -2861,26 +2862,77 @@ function lowerOneVariantRead(
  * ends the walk): any whose close is followed by `=` (not `==` / `=>`) is a pattern.
  */
 function inAssignmentPattern(masked: string, pos: number): boolean {
+  // Review H1 — only a pattern's BINDING TARGETS are places. A default (`{ a = x.variant }`,
+  // `[a = x.variant]`), a computed key (`{ [x.variant]: v }`) or anything nested in one is an
+  // ordinary expression: a read. Walk out to the enclosing groups (innermost first; a `(` ends it).
+  const groups: Array<{ open: number; close: number }> = [];
   let depth = 0;
   for (let k = pos - 1; k >= 0; k--) {
     const c = masked[k];
     if (c === ")" || c === "]" || c === "}") { depth++; continue; }
     if (c === "(" || c === "[" || c === "{") {
       if (depth > 0) { depth--; continue; }
-      if (c === "(") return false;
-      const close = c === "[" ? "]" : "}";
-      let d = 0, e = -1;
-      for (let j = k; j < masked.length; j++) {
-        const cj = masked[j];
-        if (cj === "(" || cj === "[" || cj === "{") d++;
-        else if (cj === ")" || cj === "]" || cj === "}") { d--; if (d === 0) { e = j; break; } }
-      }
-      if (e < 0 || masked[e] !== close) return false;
-      if (/^[\s#]*=(?![=>])/.test(masked.slice(e + 1))) return true;
-      // `for (const [a, x.variant] of …)` is not scrml; keep walking outward.
+      if (c === "(") break;
+      const close = matchingClose(masked, k);
+      if (close < 0) return false;
+      groups.push({ open: k, close });
     }
   }
-  return false;
+  // The outermost group that is a pattern ROOT: assigned to, or a declaration's pattern.
+  let root = -1;
+  for (let g = groups.length - 1; g >= 0; g--) {
+    const { open, close } = groups[g];
+    if (/^[\s#]*=(?![=>])/.test(masked.slice(close + 1)) || /\b(?:const|let|var)\s*$/.test(masked.slice(0, open))) { root = g; break; }
+  }
+  // An escape-hatch pattern target lowered on its own (`asVariantPlaceText`): its outermost
+  // group IS the assigned pattern (the `= value` is emitted elsewhere).
+  if (root < 0 && _variantPlaceText > 0 && groups.length > 0) root = groups.length - 1;
+  if (root < 0) return false;
+  // From the root inward, the position must sit in each level's TARGET region.
+  for (let g = root; g >= 0; g--) {
+    const { open, close } = groups[g];
+    const t = g > 0 ? groups[g - 1].open : pos;
+    const region = targetRegionAt(masked, open, close, t);
+    if (!region || t < region.start || t >= region.end) return false;
+    if (g > 0 && t !== region.start) return false; // a nested group that is not the whole target
+  }
+  return true;
+}
+
+/**
+ * The binding-target span of the element of pattern group [open, close] that contains `t`:
+ * after a level-0 `:` (an object element `key: target`), before a level-0 `=` (a default).
+ */
+function targetRegionAt(m: string, open: number, close: number, t: number): { start: number; end: number } | null {
+  let segStart = open + 1, d = 0;
+  let segEnd = close;
+  for (let j = open + 1; j < close; j++) {
+    const c = m[j];
+    if (c === "(" || c === "[" || c === "{") { d++; continue; }
+    if (c === ")" || c === "]" || c === "}") { d--; continue; }
+    if (d === 0 && c === ",") {
+      if (j < t) segStart = j + 1;
+      else { segEnd = j; break; }
+    }
+  }
+  let colon = -1, eq = -1;
+  d = 0;
+  for (let j = segStart; j < segEnd; j++) {
+    const c = m[j];
+    if (c === "(" || c === "[" || c === "{") { d++; continue; }
+    if (c === ")" || c === "]" || c === "}") { d--; continue; }
+    if (d !== 0) continue;
+    if (c === ":" && colon < 0 && eq < 0 && m[open] === "{") colon = j;
+    if (c === "=" && m[j + 1] !== "=" && m[j + 1] !== ">" && m[j - 1] !== "=" && m[j - 1] !== "!" && m[j - 1] !== "<" && m[j - 1] !== ">" && eq < 0) eq = j;
+  }
+  let start = colon >= 0 ? colon + 1 : segStart;
+  // An object element with no `key:` is a shorthand binding (an identifier): no member target.
+  if (m[open] === "{" && colon < 0) {
+    if (!/^\s*\.\.\./.test(m.slice(segStart, segEnd))) return null;
+  }
+  while (start < segEnd && /\s/.test(m[start])) start++;
+  if (/^\.\.\./.test(m.slice(start, start + 3))) { start += 3; while (start < segEnd && /\s/.test(m[start])) start++; }
+  return { start, end: eq >= 0 ? eq : segEnd };
 }
 
 /** `_scanChainStartLeft`, `?.`-aware: the start of the member / call / index chain ending at `endIdx`. */

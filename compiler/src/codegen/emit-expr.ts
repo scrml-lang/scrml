@@ -1923,8 +1923,14 @@ function emitObjectKey(key: string): string {
 function emitProp(prop: ObjectProp, ctx: EmitExprContext): string {
   switch (prop.kind) {
     case "prop": {
+      // S470 (review H1) — a computed key is an ordinary expression even inside a pattern.
+      const keyExpr = (k: ExprNode): string => {
+        const saved = _variantPlaceDepth;
+        _variantPlaceDepth = 0;
+        try { return emitExpr(k, ctx); } finally { _variantPlaceDepth = saved; }
+      };
       const key = prop.computed
-        ? `[${typeof prop.key === "string" ? JSON.stringify(prop.key) : emitExpr(prop.key, ctx)}]`
+        ? `[${typeof prop.key === "string" ? JSON.stringify(prop.key) : keyExpr(prop.key)}]`
         : typeof prop.key === "string" ? emitObjectKey(prop.key) : emitExpr(prop.key, ctx);
       const val = emitExpr(prop.value, ctx);
       return `${key}: ${val}`;
@@ -3179,7 +3185,12 @@ function emitAssign(node: AssignExpr, ctx: EmitExprContext): string {
   const valueCtx: EmitExprContext = targetIsOrderedMap
     ? { ...ctx, emitMapLitOrdered: true }
     : ctx;
-  const value = emitExpr(node.value, valueCtx);
+  // S470 (review H1) — inside an assignment PATTERN an `assign` element is a default
+  // (`[a = x.variant] = t`): its value is an ordinary expression, never a place.
+  const _savedPlaceDepth = _variantPlaceDepth;
+  _variantPlaceDepth = 0;
+  let value: string;
+  try { value = emitExpr(node.value, valueCtx); } finally { _variantPlaceDepth = _savedPlaceDepth; }
 
   // Reactive assignment: @var = expr → _scrml_reactive_set("var", expr)
   if (target.kind === "ident" && target.name.startsWith("@")) {
