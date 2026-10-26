@@ -37,7 +37,7 @@ SERVER function is judged end to end.
 - a shape not in `KNOWN_FAIL` / `BY_DESIGN_LOGS_IN` logs in on a wrong password;
 - a `KNOWN_FAIL` shape stops doing so (it was fixed: delete the entry);
 - a shape not in `UNJUDGED` comes out `UNJUDGED`, or an `UNJUDGED` one starts being judged;
-- the corpus stops holding exactly 3094 shapes (`EXPECTED_SHAPE_COUNT`); a list entry names no shape. Plus S469 s469-server-return-match-await (457 shapes): s4–s10 server, f1–f7 fullstack, l1–l5 library, t1–t5 tool — a failable `match` subject awaited in every position, `fail` payloads keyed per enum in every emission mode, one resolver for a callee's error enum, and the `_ e` whole-error binder allow-list.
+- the corpus stops holding exactly 3454 shapes (`EXPECTED_SHAPE_COUNT`); a list entry names no shape. Plus S469 s469-server-return-match-await (457 shapes): s4–s10 server, f1–f7 fullstack, l1–l5 library, t1–t5 tool — a failable `match` subject awaited in every position, `fail` payloads keyed per enum in every emission mode, one resolver for a callee's error enum, and the `_ e` whole-error binder allow-list.
 
 It deliberately does NOT pin each shape's class: a shape moving from `PASS-REFUSED` to `PASS` is a
 compiler improvement, not a regression.
@@ -276,6 +276,56 @@ handled call's identity-resolved enum (never a same-named local enum) and works 
 `g-server-js-imports-module-without-server-file-s467`, `g-library-tool-cross-file-import-source-path-s469`);
 their single-file-loadable twins PASS. s8 / l3 "held in a local then passed on" is now PASS-REFUSED (a
 local alias is not an allowed use).
+
+## Measured (S470 s470-bang-catch-try-body — n29 / s13 / f16 / l8 / t8; 312 + 28 + 20 shapes)
+
+`r10-shapes.js` (gap `g-impl1-bang-catch-try-body-cut-at-first-brace-s470`) on five sides: the statement
+form `!{ tryBody } catch T [as b] { handler }`. The try body held a nested `!{}`, a block, an object
+literal, a template / string / comment with a brace, a nested `match` or a nested catch; the handled
+call wrote its result into a field read after the form, so a dropped handler logged a wrong password in.
+
+| family | base `d582ae04f` | head |
+|---|---|---|
+| n29 (client, 77) | 29 FAIL, 4 PASS, 17 PASS-REFUSED, 27 PASS-DENY | 77 PASS-REFUSED |
+| s13 (server, 54) | 17 FAIL, 14 PASS-REFUSED, 23 PASS-DENY | 54 PASS-REFUSED |
+| f16 (fullstack, 57) | 17 FAIL, 17 PASS-REFUSED, 23 PASS-DENY | 57 PASS-REFUSED |
+| l8 (library, 62) | 16 FAIL, 30 PASS-REFUSED, 16 PASS-DENY | 62 PASS-REFUSED |
+| t8 (tool, 62) | 21 FAIL, 4 PASS, 14 PASS-REFUSED, 23 PASS-DENY | 62 PASS-REFUSED |
+
+On base the try body was cut at its first `}` (the handled call lost its handler, the catch arms were
+dropped), the form written after a statement was glued to it as a postfix handler (the body dropped),
+and the catch could never handle a scrml failure anyway (a failable call RETURNS its error). **S470
+ruling: the form is refused** — E-TRY-NOT-IN-SCRML, SPEC §19.1 "There is NO try/catch". It is detected
+from the block splitter's record of where it read the try body and each `catch` arm
+(`errorEffectExtent`), so it is found after a statement, nested, with braces in strings / comments, in a
+handler, at module init, on every side. 293 shapes carry E-TRY-NOT-IN-SCRML; the other 19 hold the form
+where impl#1 keeps the code as TEXT (an `onclick={…}` block, an engine `effect=`) or hit the splitter's
+template-literal limit (a lone `` `}` ``: E-CTX-001) and are refused by that reader instead — still
+fail closed. A shape that compiles is a detection miss.
+
+
+**Round 3 (review of `3e52bcc45`) — groups 14–16, 28 shapes, every one FAIL on `3e52bcc45`:**
+- 14 (F1, client / fullstack / library): `! { … }`, `! { … } catch …`, `! ( … )`, `!` + newline + `{`,
+  `!` + comment + `{` after a declaration. The collector merged the `!` line into the declaration and
+  the expression reader dropped it (the server and tool sides already refused it). Now a `!` on a later
+  line after a value starts its own statement (JS ASI: `a !b` is no expression); a gapped `! {` is
+  refused at the `!` (E-ERROR-014, or E-TRY-NOT-IN-SCRML when a `catch` follows); `! ( … )` is refused
+  since round 4 (E-STMT-UNEXPECTED-TOKEN, below).
+- 15 (F6, every side): a `!{ arms }` attached to no expression (a braceless `if` body, the first
+  statement of a block) emitted `try { } catch (e) { arms }`: E-ERROR-014 now.
+- 16 (F4, client / fullstack / library): the form in a for-of head, consumed as text: E-TRY-NOT-IN-SCRML
+  now (every statement-form block a body's token run holds is refused, whichever reader reached it).
+
+**Round 4 (re-review of `d102fa286`, R1) — group 17, 20 shapes:** a MISSING OPERATOR before a `!` on
+the next line (`const ok = isMember⏎  !banned`, `!(banned)`, the value in an `if`, after a `return`).
+SPEC §7.2.2 rule 4: a newline is whitespace, so it reads `isMember !banned` — no expression. On
+`d102fa286` the `!` line became its own no-op statement on every side (FAIL); on origin/main the client /
+library / fullstack sides swallowed and dropped it (FAIL) while server / tool refused it. PA ruling: a
+`!`-led statement after a value-ending line with no `;` is refused (E-STMT-UNEXPECTED-TOKEN, `! ( … )`
+included) — so group 14's `! ( … )` shapes are PASS-REFUSED now too. A `!`-led statement after a `;` or
+at a block start, and a next-line postfix `!{ … }`, are unaffected.
+
+Head: 360 PASS-REFUSED (360 shapes).
 
 ## Measured (S470 s470-async-colouring-scope — s12 / f15 / l7 / t7; 415 shapes)
 
