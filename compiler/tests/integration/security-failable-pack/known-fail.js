@@ -82,4 +82,9 @@ export const BY_DESIGN_LOGS_IN = {
   "n2/expr || truthy left": "`p != \"\" || check(p)` is true for any non-empty password",
   "n2/expr ! not": "`!(match …)` inverts the verdict",
   "n2/expr Ok binds left value": "`.Ok(v)` on `p == \"wrong\" || check(p)` binds `true` for \"wrong\"",
+  // S470 s470-render-residue-host-promises fix round 1 — a `when` body and the engine opener `effect=`
+  // now AWAIT the host `fetch` (§13.2, like their server twins), so `if (fetch(u))` tests the resolved
+  // Response, which is truthy for every password: the shape's own logic logs in.
+  "f25/G0 action: when body tests fetch": "an awaited `fetch` resolves to a Response, truthy for any password",
+  "f25/G0 action: engine opener effect= tests fetch": "an awaited `fetch` resolves to a Response, truthy for any password",
 };

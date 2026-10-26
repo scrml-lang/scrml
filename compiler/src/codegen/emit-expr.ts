@@ -123,6 +123,7 @@ import { resolveLogLoc, resolveSpanLineCol } from "./log-loc.ts";
 // expression-level auto-await in emitCall. module-resolver.js imports only node
 // builtins (no codegen), so this is cycle-free.
 import { isPromiseReturningImportedCallee, isPromiseReturningStdlibImportedCallee, isStdlibImportedCallee } from "../module-resolver.js";
+import { hostPromiseMemberOf, HOST_FETCH_MEMBER } from "./host-promise-names.ts";
 // markup-value-in-expression-2026-06-17 (a)+(b) — DOM-node lowering for
 // markup-as-value in expression position (shared with form (c) `return <markup>`).
 import { emitMarkupValueExpr } from "./emit-lift.js";
@@ -2802,6 +2803,10 @@ function emitReceiver(node: ExprNode, ctx: EmitExprContext): string {
     isAwaitedClientAsyncCall(node, ctx) ||
     isAwaitedClientServerFnCall(node, ctx) ||
     isAwaitedCombinatorCall(node, ctx) ||
+    // S470 fix round 1 — the awaited host `fetch` through the global object.
+    (node.kind === "call" && ctx.peerAwaitable !== false && hostPromiseMemberOf((node as CallExpr).callee) !== null &&
+      ((ctx.mode === "client" && ctx.clientAsyncFnNames != null && ctx.clientAsyncFnNames.has(HOST_FETCH_MEMBER)) ||
+        (ctx.mode === "server" && isStdlibAsyncCallee(HOST_FETCH_MEMBER, ctx)))) ||
     // s440 — an awaited NESTED async helper (`inner(x).ok` → `(await inner(x)).ok`).
     (node.kind === "call" && localCalleeOf(node)?.async === true && ctx.peerAwaitable !== false)
   ) return `(${s})`;
@@ -4677,6 +4682,25 @@ function emitCall(node: CallExpr, ctx: EmitExprContext): string {
       if (ctx.mode === "server") {
         _serverAsyncClassifier?.syncCallSink?.push({ name: node.callee.name, span: anchorDiagnosticSpan(node.span, ctx.stmtSpan) });
       }
+      return `${callee}${_open}${args})`;
+    }
+    return `await ${callee}${_open}${args})`;
+  }
+
+  // S470 s470-render-residue-host-promises fix round 1 (F1 / F5) — the host `fetch` called
+  // THROUGH the global object (`globalThis.fetch(u)`, `window["fetch"](u)`) is the same
+  // Promise-returning function as the bare `fetch` (SPEC §13.7 item 4): awaited exactly where the
+  // bare spelling is — the client peer branch (the enclosing body is coloured async by the
+  // `HOST_FETCH_MEMBER` callee) and the server stdlib branch (the file's async facts hold it).
+  if (
+    hostPromiseMemberOf(node.callee) !== null &&
+    ((ctx.mode === "client" && ctx.clientAsyncFnNames != null && ctx.clientAsyncFnNames.has(HOST_FETCH_MEMBER)) ||
+      (ctx.mode === "server" && isStdlibAsyncCallee(HOST_FETCH_MEMBER, ctx)))
+  ) {
+    const _open = node.optional ? "?.(" : "(";
+    if (ctx.peerAwaitable === false) {
+      if (ctx.mode === "server") _serverAsyncClassifier?.syncCallSink?.push({ name: HOST_FETCH_MEMBER, span: anchorDiagnosticSpan(node.span, ctx.stmtSpan) });
+      else if (ctx.syncPeerCalls) ctx.syncPeerCalls.push({ name: HOST_FETCH_MEMBER, span: anchorDiagnosticSpan(node.span, ctx.stmtSpan) });
       return `${callee}${_open}${args})`;
     }
     return `await ${callee}${_open}${args})`;

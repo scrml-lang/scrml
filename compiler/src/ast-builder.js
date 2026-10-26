@@ -6881,9 +6881,18 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         }
         if (c === '"' || c === "'" || c === "`") { tagQuote = c; i++; continue; }
         if (c === ">") { inTag = false; i++; continue; }
-        i++; continue;
+        // S470 (g-markup-in-const-initializer-unwalked-s470) — an UNQUOTED attribute value
+        // `attr=${…}` is pre-split too, as the block splitter pre-splits it in a
+        // `lift <tag attr=${…}>` (the proven path: `_parseLiftAttrValue`'s BLOCK_REF branch
+        // strips the `${ }` and parses the interior). Left to the logic tokenizer, the `$`
+        // was read as the whole value and the interior dropped: `<span if=${isOk(@pw)}>`
+        // held as a value compiled to `_scrml_ifrow_apply(…, ($))` (the condition lost), and
+        // the render-position check judged `$`, not the server call. A `${` inside a quoted
+        // value is that attribute's template text (skipped above). Falls through to the
+        // shared scan below, which also keeps a `>` in the interior from closing the tag.
+        if (!(c === "$" && src[i + 1] === "{")) { i++; continue; }
       }
-      if (c === "<") { inTag = true; i++; continue; }
+      if (!inTag && c === "<") { inTag = true; i++; continue; }
       if (c === "$" && src[i + 1] === "{") {
         const start = i;
         i += 2;
