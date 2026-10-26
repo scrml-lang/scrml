@@ -263,3 +263,7 @@ pin imports kept. render-waiting-calls.ts / emit-library-shared.ts auto-merged. 
   on base), not E-IMPL1-ACTION-NOT-AWAITED as the brief suggested — fail closed under an existing code.
 
 Re-checked on the merge 8d67480b7: pre-commit hook 48911 pass / 0 fail (pack 4361 with every r18 pin unchanged); s34-census PASS, regen-spec-index OK, types-gate OK, e2e-render-map 259 / 0, browser-baseline PASS (8), host-global-scan 0 violations.
+
+### Merge of origin/main 10ad1cfc0 (#1568 s470-bang-catch-try-body, lane C: ast-builder / block-splitter / emit-logic, r10)
+
+Conflicts only in the pack's README and test count: EXPECTED_SHAPE_COUNT = main's 3454 + r18's 1267 = **4721**. Hook on the merge 666525f39: 49321 pass / 0 fail (the pack with every r18 pin unchanged on lane C's parser). s34-census PASS, types-gate OK, e2e-render-map 0 fail, browser-baseline PASS (8), host-global-scan 0 violations.
