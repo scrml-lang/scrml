@@ -191,3 +191,28 @@ in-tree stdlib. 3618 sources enumerated on both sides, same set.
     so it fails closed.
   - Candidate gap: `g-pattern-default-quoted-key-unquoted-s470`.
   - Full pack run before the re-pin: 5194 pass / 4 fail (exactly these 4).
+
+## Merge of lane F (#1577) and final gates
+
+- **Merge:** origin/main 5f4b01533 (#1577 s470-await-residue f23, #1578), then c2eefb449 (#1579, facts
+  only). The pack count was re-summed from a `loadFamilies()` run: 5249 (5104 on main + r21 145).
+- **r21 at 3071cc08e vs base ffbcf4432:**
+  - f27 (112 shapes): 74 FAIL→PASS, 34 PASS→PASS, 4 PASS-REFUSED→PASS; 0 FAIL at head.
+  - s24, l19, t19: 11 PASS→PASS each.
+- **Reviewer probes at head:**
+  - s1: 21 PASS, 10 PASS-REFUSED, 1 FAIL. The FAIL is B18 `isOk(p) is not`, which logs in by the
+    probe's own logic on every tree.
+  - s2: 4 / 4 PASS. s3: 5 / 5 PASS.
+- **R26 vs main c2eefb449** (`git worktree`, 3618 sources, each tree's own stdlib):
+  - 0 compile / diagnostic / syntax / load-context changes; bare server-call sites 48 → 36.
+  - 214 artifact diffs: 202 are `*.server.js` that differ only by the embedded compiler root (identical
+    after normalisation); the other 12 are the same 6 gap reproducers (blast-fnbody2, c-batch-{and,arr,
+    not,obj,ternary}), client.js + html.
+  - No other program changed.
+- **CI job commands at 3071cc08e:** all rc=0.
+  - Gates: types-gate (181, unchanged), root tests, snippet-gate, claim-gate, corpus-compile-floor,
+    gen-md-shim, conflict-marker-gate, regen-spec-index, delta-lint, ci-shards, s34-census --check-new
+    (no new §34 rows), bootstrap-severity.
+  - Tests: unit + conformance 32078 / 0; integration + lsp + commands 13025 / 0; e2e-render-map 259.
+  - Browser and corpus: TodoMVC; browser-baseline (name set matches); slices; host-global-scan (0
+    violations).
