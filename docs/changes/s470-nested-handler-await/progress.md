@@ -346,3 +346,7 @@ types-gate OK (181, unchanged) · root tests 2239 / 0 · snippet-gate 0 fail · 
 ### Candidate gaps (round 3)
 
 - `g-fullstack-point-free-async-callback-server-placed-s470` (LOW, pre-existing, fails closed): a client function whose body is `[p].map(isOk)` (`isOk` a server function) is server-placed by route inference and its call fails (`init` on both passwords).
+
+### Merge of origin/main cb696fe12 (#1572 s470-host-fetch-followups, r20 / s23 f26 l18 t18)
+
+Conflicts only in the pack README count and the test count: EXPECTED_SHAPE_COUNT = main's 3679 + r18's 1371 = **5050**. Hook on the merge 5c949d4b0: 49723 pass / 0 fail (every r18 pin unchanged). s34-census PASS, types-gate OK, e2e-render-map 0 fail, browser-baseline PASS (8), host-global-scan 0 violations.
