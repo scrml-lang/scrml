@@ -54,10 +54,20 @@ function objectOf(n: AnyNode): AnyNode | null {
 export function isHostGlobalObjectExpr(v: unknown, isBound: (name: string) => boolean = () => false): boolean {
   if (!v || typeof v !== "object") return false;
   const n = v as AnyNode;
-  if (n.kind === "ident" && typeof n.name === "string") return HOST_GLOBAL_OBJECTS.has(n.name) && !isBound(n.name);
+  if (n.kind === "ident" && typeof n.name === "string") {
+    // S470 s470-host-fetch-followups (R3) — a binding whose value is the host global object
+    // (`const w = window`), marked by `markHostGlobalAliases`, IS that object.
+    if (n[HOST_ALIAS_MARK] === true) return true;
+    return HOST_GLOBAL_OBJECTS.has(n.name) && !isBound(n.name);
+  }
   if (n.kind === "member" || n.kind === "index") {
-    const key = staticKey(n);
     const obj = objectOf(n);
+    // R5 — `frames[0]` / `window[0]`: a numerically indexed window of the host is a host window.
+    const idx = (n.kind === "index" ? n.index : n.computed === true ? n.property : null) as AnyNode | null | undefined;
+    if (obj && idx && typeof idx === "object" && idx.kind === "lit" && typeof idx.value === "number") {
+      return isHostGlobalObjectExpr(obj, isBound);
+    }
+    const key = staticKey(n);
     if (key === null || !obj) return false;
     if (HOST_GLOBAL_SELF_PROPS.has(key)) return isHostGlobalObjectExpr(obj, isBound);
     if (key === "defaultView") {
@@ -81,4 +91,68 @@ export function hostPromiseMemberOf(v: unknown, isBound: (name: string) => boole
   const key = staticKey(n);
   if (key === null || !HOST_PROMISE_GLOBALS.has(key)) return null;
   return isHostGlobalObjectExpr(objectOf(n), isBound) ? key : null;
+}
+
+/** The mark `markHostGlobalAliases` sets on an identifier that names a host-global-object alias. */
+export const HOST_ALIAS_MARK = "_scrmlHostGlobalAlias";
+
+const ALIAS_DECL_KINDS = new Set(["const-decl", "let-decl", "tilde-decl", "lin-decl"]);
+
+/** Does an initializer hold the host global object (directly, or as a branch of `?:` / `||` / `&&` / `??`)? */
+function holdsHostObject(v: unknown): boolean {
+  if (!v || typeof v !== "object") return false;
+  const n = v as AnyNode;
+  if (isHostGlobalObjectExpr(n)) return true;
+  if (n.kind === "ternary") return holdsHostObject(n.consequent) || holdsHostObject(n.alternate);
+  if (n.kind === "binary" && (n.op === "||" || n.op === "&&" || n.op === "??")) return holdsHostObject(n.left) || holdsHostObject(n.right);
+  if (n.kind === "sequence" && Array.isArray(n.expressions)) return holdsHostObject(n.expressions[n.expressions.length - 1]);
+  return false;
+}
+
+/**
+ * S470 s470-host-fetch-followups (R3) — `const w = window; w.fetch(u)`: a name bound (declared or
+ * assigned, in any scope) to the host global object is that object, so `w.fetch` is the host
+ * `fetch`. Every identifier of such a name in the file is marked (`HOST_ALIAS_MARK`), by name and
+ * scope-blind — the fail-closed direction: a same-named binding elsewhere also reads as the host
+ * object, so its `.fetch(…)` is awaited / refused, never treated as an author function. Chains
+ * (`const a = window; const b = a`) are followed to a fixpoint. Idempotent; returns the names.
+ */
+export function markHostGlobalAliases(fileAST: unknown): Set<string> {
+  const names = new Set<string>();
+  const roots: unknown[] = [];
+  const f = fileAST as AnyNode | null;
+  if (f && typeof f === "object") roots.push(f);
+  const allIdents: AnyNode[] = [];
+  const bindings: Array<[string, unknown]> = [];
+  const seen = new WeakSet<object>();
+  const visit = (v: unknown): void => {
+    if (!v || typeof v !== "object" || seen.has(v as object)) return;
+    seen.add(v as object);
+    if (Array.isArray(v)) { for (const x of v) visit(x); return; }
+    const n = v as AnyNode;
+    if (n.kind === "ident" && typeof n.name === "string") allIdents.push(n);
+    if (typeof n.kind === "string" && ALIAS_DECL_KINDS.has(n.kind) && typeof n.name === "string") bindings.push([n.name, n.initExpr]);
+    if (n.kind === "assign" && n.op === "=") {
+      const t = n.target as AnyNode | undefined;
+      if (t && t.kind === "ident" && typeof t.name === "string") bindings.push([t.name, n.value]);
+    }
+    for (const k of Object.keys(n)) {
+      if (k === "span" || k === "_record") continue;
+      const x = n[k];
+      if (x && typeof x === "object") visit(x);
+    }
+  };
+  for (const r of roots) visit(r);
+  for (let changed = true; changed;) {
+    changed = false;
+    for (const [name, val] of bindings) {
+      if (names.has(name) || HOST_GLOBAL_OBJECTS.has(name)) continue;
+      if (holdsHostObject(val)) {
+        names.add(name);
+        changed = true;
+        for (const id of allIdents) if (id.name === name) id[HOST_ALIAS_MARK] = true;
+      }
+    }
+  }
+  return names;
 }
