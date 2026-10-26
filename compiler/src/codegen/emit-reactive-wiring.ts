@@ -1728,7 +1728,8 @@ export function emitReactiveWiring(ctx: CompileContext): string[] {
         !groupTildeCtx &&
         stmt.kind === "bare-expr" &&
         code &&
-        /^(?:[A-Za-z_$][A-Za-z0-9_$]*(?:\.[A-Za-z_$][A-Za-z0-9_$]*)*|_scrml_(?:reactive|derived)_get\([^)]*\)(?:\.[A-Za-z_$][A-Za-z0-9_$]*|\[[^\]]*\])*|_scrml_input_state_registry\.get\([^)]*\)(?:\.[A-Za-z_$][A-Za-z0-9_$]*|\[[^\]]*\]|\([^)]*\))*)\s*;?\s*$/.test(code.trim())
+        (isVariantReadOrphanChain((stmt as { exprNode?: unknown }).exprNode) ||
+        /^(?:[A-Za-z_$][A-Za-z0-9_$]*(?:\.[A-Za-z_$][A-Za-z0-9_$]*)*|_scrml_(?:reactive|derived)_get\([^)]*\)(?:\.[A-Za-z_$][A-Za-z0-9_$]*|\[[^\]]*\])*|_scrml_input_state_registry\.get\([^)]*\)(?:\.[A-Za-z_$][A-Za-z0-9_$]*|\[[^\]]*\]|\([^)]*\))*)\s*;?\s*$/.test(code.trim()))
       ) {
         continue;
       }
@@ -3091,3 +3092,32 @@ function emitTimeoutNode(node: any, errors: CGError[], filePath: string): string
 }
 
 // (§52.6 collectServerVarDecls moved to collect.ts for cross-module sharing)
+
+/**
+ * S470 (s470-unit-variant-tag-read) — the "pure read orphan" shape of a markup
+ * interpolation whose read chain includes a `.variant` link (`${@phase.variant}`,
+ * `${@row.err.variant}`). emitMember lowers a `.variant` read to the tag read
+ * (`lowerVariantTagRead`), whose emitted text the orphan regex above does not
+ * know — so the dead file-scope statement would leak again (and, over a cell
+ * holding a `null` placeholder, throw at module init: ss3 item7). Decided on the
+ * tree, and only for the chains the regex skipped when the read was a plain
+ * member: a bare name followed by `.prop` links, or an `@cell` followed by
+ * `.prop` / `[lit-or-name]` links; no call, no `?.`.
+ */
+function isVariantReadOrphanChain(node: unknown): boolean {
+  let n = node as { kind?: string; object?: unknown; property?: unknown; optional?: boolean; index?: { kind?: string }; name?: unknown } | undefined;
+  let sawVariant = false;
+  let sawIndex = false;
+  while (n && (n.kind === "member" || n.kind === "index")) {
+    if (n.optional) return false;
+    if (n.kind === "member") {
+      if (n.property === "variant") sawVariant = true;
+    } else {
+      if (!n.index || (n.index.kind !== "lit" && n.index.kind !== "ident")) return false;
+      sawIndex = true;
+    }
+    n = n.object as typeof n;
+  }
+  if (!sawVariant || !n || n.kind !== "ident" || typeof n.name !== "string") return false;
+  return n.name.startsWith("@") || !sawIndex;
+}

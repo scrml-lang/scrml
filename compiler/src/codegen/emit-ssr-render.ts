@@ -149,9 +149,13 @@ function resolveRowRead(exprText: string, iterVarName: string | null): string {
   const t = String(exprText ?? "").replace(/\s*\.\s*/g, ".").trim();
   if (!t) throw new SsrUnsupported("empty expression");
 
+  // S470 (s470-unit-variant-tag-read) — a `variant` segment is the variant TAG read (a unit
+  // variant is its bare tag string, §51.3.2), so the server-rendered text agrees with the
+  // client's lowered `.variant` read instead of rendering "" for a unit variant.
   const pathToRead = (path: string): string =>
-    "_scrml_item" +
-    path.split(".").map((seg) => `?.[${JSON.stringify(seg)}]`).join("");
+    path.split(".").reduce((acc, seg) => seg === "variant"
+      ? `((__scrml_is_v) => typeof __scrml_is_v === "string" ? __scrml_is_v : __scrml_is_v?.["variant"])(${acc})`
+      : `${acc}?.[${JSON.stringify(seg)}]`, "_scrml_item");
 
   // `@.` contextual sigil — whole item or a dotted field path.
   if (t === "@.") return "_scrml_item";
