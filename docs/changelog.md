@@ -2,6 +2,15 @@
 
 A rolling log of what just landed and what's actively underway in the compiler. For the full spec and pipeline docs see `compiler/SPEC.md` and `compiler/PIPELINE.md`.
 
+## S470 — 2026-10-24/26 (bryan · theRog) — 26 PRs: impl#1 now awaits or refuses every waiting value in render, value, action and handler-arm positions, and emits E-ERROR-012
+
+- **Security (impl#1, waiting values, §13.7/§13.8):** a waiting call in a render or value position is refused (E-VALUE-SERVER-CALL, #1547). An action-body server call is awaited, or refused where the body is lowered synchronously (E-IMPL1-ACTION-NOT-AWAITED, #1554). Async colouring resolves callees by scope (#1558). An async `when … changes` body: newest run wins (#1560). Host `fetch` is a waiting value on every side (#1566 #1572). `!{}` handler arms are awaited (#1576). Action bodies are ordered, waiting resets are refused, and async engine hooks get newest-run-wins (#1577).
+- **Error handling and enums:** the `_ e` allow-list escapes are closed (#1551). Field reads on enum-typed values are refused, typed by the resolved type (#1563). The `!{…} catch` statement form is refused (E-TRY-NOT-IN-SCRML), and `!` statements are never swallowed (#1568). `.variant` works on unit variants (#1571). impl#1 emits SPEC's E-ERROR-012 for a value-position fall-through arm (#1577).
+- **Tooling:** the boot reads the `origin/inbox` branch (#1544). inbox-debt accepts peter and bryan (#1557). Ten gaps PRs plus the wrap: 11 HIGH resolved, about 50 follow-ups filed, 1 new HIGH (`g-impl1-null-in-expression-position-arm-not-refused-s470`).
+- **Rulings (user-voice S470):** render-position refusal is uniform; the benchmark and example are rewritten in the PR; payload binders are typed; E-IMPL1 code for action-position refusals; inbox addressees; the runtime ratchet may be raised for this session's security lanes; impl#1 emits E-ERROR-012.
+- **Landed at wrap:** #1581. `Promise.all` batch elements use the statement's own emission, so no unawaited call sits under a sync operator. It closes the S441 HIGH.
+- **Lesson:** every concurrent security landing conflicts on the pack's `EXPECTED_SHAPE_COUNT`. Keep both sides and re-sum. Verify a lane's reported SHA before freezing a review tree.
+
 ## S469 — 2026-10-17/24 (bryan · theRog) — 44 PRs: ten impl#1 guard holes closed, the bootstrap gained CSS, tape grants and the loop value form
 
 - **Security (impl#1):** template interpolations and engine/match bodies are walked; every `if=` guard in `<each>` rows, lifted markup, keyed rows and control-flow arms is honoured reactively and revoked guards close (#1491 #1502 #1517 #1529 #1534); removed rows dispose their effects (#1508); soft-nav never mixes builds (#1514); match-arm commas through one arm reader (#1524). impl#1 refuses what it can't lower rather than dropping it (#1496 #1521 #1526).
