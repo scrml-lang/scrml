@@ -18,7 +18,10 @@ import { paramSignature, indentBodyLines } from "./utils.ts";
 import { bodyContains } from "./collect.ts";
 import { extractCalleeNames, buildCalleeImportMap } from "./scheduling.ts";
 import { splitMultiArmString, parseMatchArm } from "./emit-control-flow.ts";
-import { parseExprToNode } from "../expression-parser.ts";
+import { parseExprToNode, guardCallArmsRaw, hasLostTrailingContent } from "../expression-parser.ts";
+import { parseGuardArmsFromRaw } from "../ast-builder.js";
+import { armBlockStatementsDetailed } from "../arm-body-statements.ts";
+import { mentionedNames } from "../failable-value-calls.ts";
 import { templateInterpolationPayloads } from "../interpolation-extent.ts";
 import { isPromiseReturningImportedCallee } from "../module-resolver.js";
 import { hostPromiseMemberOf, HOST_FETCH_MEMBER } from "./host-promise-names.ts";
@@ -122,7 +125,9 @@ function armBodyTextCallees(body: string, out: Set<string>, guard: boolean): voi
   if (!text) return;
   let node: unknown = null;
   try { node = parseExprToNode(text, "", 0); } catch { node = null; }
-  if (node && !treeHasEscapeHatch(node)) {
+  // S470 s470-nested-handler-await — a parse that DROPPED trailing content (`lift isOk(p)` reads
+  // as the bare ident `lift`) is not this body: the token scan below reads it instead.
+  if (node && !treeHasEscapeHatch(node) && !hasLostTrailingContent(node)) {
     collectCalleeIdents(node, out, guard);
     // S469 r3 (F2) — a template literal's `${…}` parts are carried as raw text on the `lit`
     // node, invisible to the tree walk: read each interpolation the same way, so a server call
@@ -172,6 +177,24 @@ function treeHasEscapeHatch(node: unknown): boolean {
   return false;
 }
 
+/**
+ * S470 s470-nested-handler-await (fix round 3, N2) — a function passed BY REFERENCE as the callback of
+ * an awaited collection method (`[p].map(isOk)`, `.some(isOk)`, `.filter(allowed)`): the method CALLS
+ * it, and the s441 F4 rule (`asyncFnArgRole`: "allowed") rests on emit-expr lifting that call to the
+ * awaited `_scrml_<m>Async` combinator — which it does only in a function the colouring made async.
+ * The colouring read only call callees, so `login` stayed sync, the native `.map` ran, and its
+ * element was a pending Promise (truthy: a wrong password logged in, library mode and `!{}` arms).
+ * The referenced name is therefore a callee of the enclosing function. Returns it, or null.
+ */
+function combinatorCallbackRefName(n: ASTNode): string | null {
+  if (n.kind !== "call" || n.optional) return null;
+  const callee = n.callee as ASTNode | undefined;
+  if (!callee || callee.kind !== "member" || callee.optional || typeof callee.property !== "string") return null;
+  if (!ASYNC_COMBINATOR_METHODS.has(callee.property)) return null;
+  const a0 = Array.isArray(n.args) ? (n.args as ASTNode[])[0] : undefined;
+  return a0 && a0.kind === "ident" && typeof a0.name === "string" ? a0.name : null;
+}
+
 export function collectCalleeIdents(node: unknown, out: Set<string>, guardNestedFnValues = false): void {
   if (!node || typeof node !== "object") return;
   if (Array.isArray(node)) { for (const c of node) collectCalleeIdents(c, out, guardNestedFnValues); return; }
@@ -192,6 +215,8 @@ export function collectCalleeIdents(node: unknown, out: Set<string>, guardNested
     // S470 (s470-render-residue-host-promises F1) — the host `fetch` called through a global
     // object (`globalThis.fetch(…)`, `window["fetch"](…)`) is recorded under its pseudo name.
     else if (callee && hostPromiseMemberOf(callee) !== null) out.add(HOST_FETCH_MEMBER);
+    const ref = combinatorCallbackRefName(n);
+    if (ref !== null) out.add(ref);
   }
   // g-match-arm-server-call-no-autoawait (§13.2 / §19.9.3) — a value-form match
   // arm frequently carries its RESULT as a raw expression STRING (`match-arm-inline`
@@ -205,6 +230,7 @@ export function collectCalleeIdents(node: unknown, out: Set<string>, guardNested
   // (the S239 text-scan over-match guard). Structured arm bodies (match-arm-block)
   // are already covered by the generic recursion into their `.body` statement array.
   matchArmTextCallees(n, out, guardNestedFnValues);
+  guardArmTextCallees(n, out, guardNestedFnValues);
   for (const key of Object.keys(n)) {
     if (key === "span") continue;
     const v = n[key];
@@ -236,6 +262,85 @@ function matchArmTextCallees(n: ASTNode, out: Set<string>, guardNestedFnValues: 
     if (Array.isArray(raw)) {
       for (const r of raw) if (typeof r === "string" && r) armListTextCallees(r, out, guardNestedFnValues);
     }
+  }
+}
+
+/**
+ * S470 s470-nested-handler-await (SECURITY) — the callees an EXPRESSION-position `!{ }` handler
+ * holds in its arms. The expression parser carries such a handler as the placeholder call
+ * `<operand>.__scrml_guard__("!{ … }")` whose arms are a string literal, invisible to the tree
+ * walk: `(local(p) !{ _ :> isOk(p) }) ? …` left `login` sync, so the arm's server call was
+ * emitted with no `await` and the guard yielded a pending Promise (always truthy — a wrong
+ * password logged in). The arms are read with the statement guard's own arm reader
+ * (`parseGuardArmsFromRaw`), each arm body as `matchArmTextCallees` reads a match arm; arms the
+ * reader refuses are token-scanned whole (fail closed: the function stays async). Not
+ * recursive — the operand is the caller's walk.
+ */
+/**
+ * S470 (fix round 2, R1) — the parsed bodies of an expression-position `!{ }` handler's arms (a
+ * braced body's statements, else the arm's expression), or [] for anything else. A body the
+ * readers cannot parse is returned as an escape hatch over its text, which every walker treats as
+ * un-awaitable (fail closed).
+ */
+export function exprGuardArmBodies(n: ASTNode): unknown[] {
+  if (!n || n.kind !== "call") return [];
+  const raw = guardCallArmsRaw(n as never);
+  if (raw === null) return [];
+  const hatch = (text: string): unknown => unreadableArm(text);
+  let arms: Array<{ handler?: unknown; handlerExpr?: unknown }> | null = null;
+  try { arms = parseGuardArmsFromRaw(raw, "") as Array<{ handler?: unknown; handlerExpr?: unknown }> | null; } catch { arms = null; }
+  if (!arms) return [hatch(raw)];
+  const out: unknown[] = [];
+  for (const arm of arms) {
+    const h = typeof arm?.handler === "string" ? arm.handler.trim() : "";
+    if (!h) continue;
+    if (h.startsWith("{") && h.endsWith("}")) {
+      const r = armBlockStatementsDetailed(h);
+      out.push(r && r.ok && Array.isArray(r.stmts) ? r.stmts : hatch(h));
+    } else {
+      out.push(arm.handlerExpr && typeof arm.handlerExpr === "object" ? arm.handlerExpr : hatch(h));
+    }
+  }
+  return out;
+}
+
+/**
+ * S470 (fix round 3, N1) — the parsed bodies of every `!{ }` arm a node carries as TEXT: each arm of
+ * an expression-position handler (`exprGuardArmBodies`) and each BRACED arm of a statement guard (an
+ * unbraced one is already a parsed `handlerExpr`). An arm the reader refuses comes back as an escape
+ * hatch carrying the names its text mentions (`armUnreadableNames`), so a consumer can fail closed.
+ */
+export function guardArmBodiesOf(n: ASTNode): unknown[] {
+  if (!n || typeof n !== "object") return [];
+  if (n.kind === "call") return exprGuardArmBodies(n);
+  if (n.kind !== "guarded-expr" || !Array.isArray(n.arms)) return [];
+  const out: unknown[] = [];
+  for (const arm of n.arms as Array<{ handler?: unknown }>) {
+    const h = typeof arm?.handler === "string" ? arm.handler.trim() : "";
+    if (!(h.startsWith("{") && h.endsWith("}")) || !h.slice(1, -1).trim()) continue;
+    const r = armBlockStatementsDetailed(h);
+    out.push(r && r.ok && Array.isArray(r.stmts) ? r.stmts : unreadableArm(h));
+  }
+  return out;
+}
+
+/** An arm body no reader can parse: an escape hatch carrying the names its text mentions. */
+function unreadableArm(text: string): unknown {
+  return { kind: "escape-hatch", raw: text, nativeKind: "Unparsed", armUnreadableNames: [...mentionedNames(text)] };
+}
+
+export function guardArmTextCallees(n: ASTNode, out: Set<string>, guardNestedFnValues = false): void {
+  if (!n || n.kind !== "call") return;
+  const raw = guardCallArmsRaw(n as never);
+  if (raw === null) return;
+  let arms: Array<{ handler?: unknown }> | null = null;
+  try { arms = parseGuardArmsFromRaw(raw, "") as Array<{ handler?: unknown }> | null; } catch { arms = null; }
+  if (!arms) { armBodyTextCallees(raw.replace(/^\s*!\{/, "").replace(/\}\s*$/, ""), out, guardNestedFnValues); return; }
+  for (const arm of arms) {
+    const h = typeof arm?.handler === "string" ? arm.handler.trim() : "";
+    if (!h) continue;
+    // A braced body is a statement block: read by the block fallback (its bare-name calls).
+    armBodyTextCallees(h.startsWith("{") && h.endsWith("}") ? h.slice(1, -1) : h, out, guardNestedFnValues);
   }
 }
 
@@ -282,6 +387,13 @@ export function collectFreeCalleeIdents(
       const arm = new Set<string>();
       matchArmTextCallees(n, arm, guardNestedFnValues);
       for (const c of arm) take(c, isBound);
+    }
+    if (n.kind === "call") {
+      const arm = new Set<string>();
+      guardArmTextCallees(n, arm, guardNestedFnValues);
+      for (const c of arm) take(c, isBound);
+      const ref = combinatorCallbackRefName(n);
+      if (ref !== null) take(ref, isBound);
     }
   }, { stopAtNestedFns: guardNestedFnValues, skipRootParams: true, sequentialLocals: true });
 }
@@ -628,6 +740,7 @@ export function annotateNestedAsyncHelpers(
         (ASYNC_COMBINATOR_METHODS.has(callee.property) || isSyncCallbackConsumerCall(call));
     },
     fnArgRole: asyncFnArgRole,
+    armBodies: guardArmBodiesOf,
     analyzeRaw: (raw, resolveFree) => analyzeRawJsFragment(raw, resolveFree) as RawAsyncUses | null,
     ...(escapes ? { escapes } : {}),
     ...(escapeFacts ? { escapeOuterAsync: (name: string) => outerAsyncRootFromFacts(name, escapeFacts) } : {}),
@@ -944,6 +1057,8 @@ export function collectAliasedAsyncCalls(
       }
       if (rhs && rhs !== n.name) declToRhs.set(n.name, rhs);
     }
+    // S470 (fix round 2, R1) — an expression-position `!{ }` handler's arms (a string on the node).
+    if (n.kind === "call") for (const b of exprGuardArmBodies(n)) collectAliases(b);
     for (const key of Object.keys(n)) {
       if (key === "span") continue;
       const v = n[key];
@@ -984,6 +1099,7 @@ export function collectAliasedAsyncCalls(
         const key = `${name}@${sp.start ?? -1}`;
         if (!seen.has(key)) { seen.add(key); out.push({ alias: name, resolved: aliasToResolved.get(name)!, span: n.span }); }
       }
+      for (const b of exprGuardArmBodies(n)) findCalls(b);
     }
     for (const key of Object.keys(n)) {
       if (key === "span") continue;
@@ -1128,6 +1244,15 @@ export function collectNonAwaitableAsyncCalls(
     const k = n.kind as string | undefined;
     const here = anchorDiagnosticSpan(n.span, anchor);
     const at = (span: unknown): unknown => anchorDiagnosticSpan(span, anchor);
+    // S470 s470-nested-handler-await (fix round 2, R1) — an EXPRESSION-position `!{ }` handler is a
+    // placeholder call whose arms are a string, so this walk never reached an arm: a waiting call
+    // inside a callback in an arm (`{ const f = (x) => isOk(x); lift f(p) }`, an IIFE, a function
+    // value) was neither awaited nor refused in library / tool mode, and the guard yielded a
+    // pending Promise. Each arm is read with the statement guard's own readers — a braced body's
+    // parsed statements, else the arm's expression — and walked like the arm of a statement guard.
+    if (k === "call") {
+      for (const armBody of exprGuardArmBodies(n)) walk(armBody, insideCallback, here);
+    }
     // Raw escape-hatch (block-body callback / raw JS) or template `.raw` — emitted
     // VERBATIM, so any async call inside is un-awaitable regardless of nesting.
     if ((k === "escape-hatch" || (k === "lit" && n.litType === "template")) && typeof n.raw === "string") {
