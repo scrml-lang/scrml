@@ -121,7 +121,8 @@ describe("failable-arm template-literal lowering (g-failable-arm-body-multiline-
 
   it("REGRESSION — a multi-statement BLOCK arm body stays multi-statement (not wrapped as one expression)", () => {
     const { errorCodes, out } = compile(
-      `<program>\n${SUBJECT}  export fn go(src: string) {\n    return parseJson(src) !{ ::SyntaxError(e) :> {\n      let m = "one"\n      let n = "two"\n    } }\n  }\n</program>\n`,
+      // S470 (E-ERROR-012, §19.4.3): a `return` operand is a value position — the block ends in a value (`n`).
+      `<program>\n${SUBJECT}  export fn go(src: string) {\n    return parseJson(src) !{ ::SyntaxError(e) :> {\n      let m = "one"\n      let n = "two"\n      n\n    } }\n  }\n</program>\n`,
     );
     expect(errorCodes).toEqual([]);
     // Both statements survive as distinct statements — the expression-body

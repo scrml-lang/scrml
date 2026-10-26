@@ -65,9 +65,13 @@ const DECLS = `type AuthErr:enum = { Denied(reason: string), Gone }
     }`;
 const X = (cond) => `const v = wrap(p) !{ _ e :> ${cond} ? "rejected" : "LOGGED IN" }
         return v == true ? "LOGGED IN" : v`;
+// S470 (ruling "Emit E-ERROR-012", SPEC §19.4.3): `v` is READ, so the arm is in a value position and must
+// yield — the block ends in `false` (a fall-through arm left the error envelope in `v`, which `v == true`
+// also read as not-true: the outcome these tests judge is unchanged).
 const B = (blk) => `let o = "LOGGED IN"
         const v = wrap(p) !{ _ e :> {
             ${blk}
+            false
         } }
         return v == true ? "LOGGED IN" : o`;
 const codesOf = (body, decls = DECLS) => compileFiles({ "app.scrml": page(decls, body) }).codes;

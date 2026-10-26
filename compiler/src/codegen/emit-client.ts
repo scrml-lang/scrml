@@ -2585,7 +2585,20 @@ function generateClientJsImpl(ctx: CompileContext): string {
   // others don't, hookless engines emit no hook-firing function (the wrap
   // emitters at the write-site call sites gate on `enginesWithHooks` /
   // `EngineBindingInfo.hasHooks`).
-  const engineHookLines = clientStage(ctx, "emit-engine-hook-firing-functions", () => emitEngineHookFiringFunctionsForFile(fileAST));
+  // s470-await-residue — the hook bodies are coloured async (§13.8 (i)) against the file's client
+  // async facts: the same object installed as the active client emission below.
+  const _clientAsyncActive = (() => {
+    const _facts = clientAsyncFactsOf(ctx);
+    const _resolveFree = freeAsyncResolverFromFacts(_facts);
+    return {
+      resolveFree: _resolveFree,
+      report: (uses: Parameters<typeof jsAsyncUsesErrors>[0], span: unknown) => {
+        for (const err of jsAsyncUsesErrors(uses, span, ctx.filePath)) errors.push(err);
+      },
+      sseFnNames: ctx.routeMap ? _clientSseFnNames(ctx.routeMap, ctx.filePath ?? "") : null,
+    };
+  })();
+  const engineHookLines = clientStage(ctx, "emit-engine-hook-firing-functions", () => emitEngineHookFiringFunctionsForFile(fileAST, _clientAsyncActive));
   if (engineHookLines.length > 0) {
     lines.push("// --- engine hook-firing functions (compiler-generated, §51.0.H) ---");
     for (const line of engineHookLines) lines.push(line);
@@ -2633,17 +2646,7 @@ function generateClientJsImpl(ctx: CompileContext): string {
   // s441 — compute the client async facts BEFORE any body-render stage and make
   // them the ACTIVE client emission: the `<each>` row and lift handler emitters
   // (deep call chains with no ctx) color their handlers against them (F5).
-  {
-    const _facts = clientAsyncFactsOf(ctx);
-    const _resolveFree = freeAsyncResolverFromFacts(_facts);
-    setActiveClientAsync({
-      resolveFree: _resolveFree,
-      report: (uses, span) => {
-        for (const err of jsAsyncUsesErrors(uses, span, ctx.filePath)) errors.push(err);
-      },
-      sseFnNames: ctx.routeMap ? _clientSseFnNames(ctx.routeMap, ctx.filePath ?? "") : null,
-    });
-  }
+  setActiveClientAsync(_clientAsyncActive);
   const c12BodyRender = clientStage(ctx, "emit-engine-body-render", () => emitEngineBodyRenderForFile(fileAST, ctx));
   const c14BodyRender = clientStage(ctx, "emit-derived-engine-body-render", () => emitDerivedEngineBodyRenderForFile(fileAST, ctx));
   // S108 Phase 3 — match-block body render (SPEC §18.0.1). Mirrors C12/C14
@@ -3756,6 +3759,16 @@ function generateClientJsImpl(ctx: CompileContext): string {
         // The IIFE survives only where the emitter could NOT await (a module-init
         // statement of a classic script, a sync host) — the case it was built for.
         let emitterAwaited = false;
+        // s470-await-residue fix round 1 (F5) — a latest-wins async hook body wraps each resume point
+        // as `_scrml_hook_live(await stub(…))` (js-async-analysis `colorAsyncActionBody`): the same
+        // emitter-awaited site, its guard kept in every rewrite below.
+        const LIVE = "_scrml_hook_live(";
+        let liveWrap = false;
+        if (clientCode.slice(valStart, valStart + LIVE.length) === LIVE) {
+          let p = valStart + LIVE.length;
+          while (p < clientCode.length && /\s/.test(clientCode[p])) p++;
+          if (clientCode.slice(p, p + 5) === "await" && /\s/.test(clientCode[p + 5] ?? "")) { liveWrap = true; valStart = p; }
+        }
         if (clientCode.slice(valStart, valStart + 5) === "await" &&
             /\s/.test(clientCode[valStart + 5] ?? "")) {
           emitterAwaited = true;
@@ -3792,6 +3805,16 @@ function generateClientJsImpl(ctx: CompileContext): string {
         // _scrml_reactive_set should close right after.
         let outerClose = k + 1;
         while (outerClose < clientCode.length && /\s/.test(clientCode[outerClose])) outerClose++;
+        if (liveWrap) {
+          // The `_scrml_hook_live(` close comes first, then the reactive set's.
+          if (clientCode[outerClose] !== ")") {
+            parts.push(clientCode.slice(i, setIdx + setHead.length));
+            i = setIdx + setHead.length;
+            continue;
+          }
+          outerClose++;
+          while (outerClose < clientCode.length && /\s/.test(clientCode[outerClose])) outerClose++;
+        }
         if (clientCode[outerClose] !== ")") {
           parts.push(clientCode.slice(i, setIdx + setHead.length));
           i = setIdx + setHead.length;
@@ -3867,7 +3890,7 @@ function generateClientJsImpl(ctx: CompileContext): string {
                   const lineStart = clientCode.lastIndexOf("\n", letStart - 1) + 1;
                   const indent = /^[ \t]*/.exec(clientCode.slice(lineStart, letStart))![0];
                   const inPlace =
-                    `let ${resultVar} = await ${mangledName}(${args});` +
+                    `let ${resultVar} = ${liveWrap ? "_scrml_hook_live(" : ""}await ${mangledName}(${args})${liveWrap ? ")" : ""};` +
                     interveningText +
                     `${ifBlock} else {\n` +
                     `  _scrml_reactive_set(${nameArg}, ${resultVar});\n` +

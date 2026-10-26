@@ -148,9 +148,11 @@ export const DEFERRED_BODY_FIXTURES = [
   ["engine-message-arm", ENG + `<engine for=Ph initial=.Idle accepts=Msg>\n  <Idle rule=.Busy>\n    | .Go :> { @o.a.b = 5; .Busy }\n    | _ :> @ph\n    <p>idle</p>\n  </>\n  <Busy rule=.Idle>\n    | .Stop :> .Idle\n    | _ :> @ph\n    <p>busy</p>\n  </>\n</>\n<button id="b" onclick=@ph.advance(.Go)>b</button>\n` + P + `</program>\n`],
   ["engine-opener-effect", ENG + `<engine for=Ph initial=.Idle effect=\${\n    @o.a.b = 5\n}>\n  <Idle rule=.Busy><p>idle</p></>\n  <Busy rule=.Idle><p>busy</p></>\n</>\n` + P + `</program>\n`],
   ["engine-shorthand-arm", ENG + `<engine for=Ph initial=.Idle>\n  <Idle rule=.Busy> : ${mBtn()}\n  <Busy rule=.Idle><p>busy</p></>\n</>\n` + TOG + P + `</program>\n`],
-  ["guard-arm-fn", O + ERRF + `\${ function go() { const r = risky() !{ | e :> { @o.a.b = 5 } } } }\n<button id="b" onclick=go()>b</button>\n` + P],
-  ["guard-arm-nested", O + ERRF + `\${ function go() { const r = risky() !{ | e :> { const q = risky() !{ | f :> { @o.a.b = 7 } } } } } }\n<button id="b" onclick=go()>b</button>\n` + P],
-  ["guard-arm-handler", O + ERRF + `<button id="b" onclick={ const r = risky() !{ | e :> { @o.a.b = 5 } } }>b</button>\n` + P],
+  // S470 (E-ERROR-012, §19.4.3): the handled calls are STATEMENTS (their bindings were never read; a bound
+  // handler whose arm only writes falls through, a compile error) — the arm bodies still ship their helpers.
+  ["guard-arm-fn", O + ERRF + `\${ function go() { risky() !{ | e :> { @o.a.b = 5 } } } }\n<button id="b" onclick=go()>b</button>\n` + P],
+  ["guard-arm-nested", O + ERRF + `\${ function go() { risky() !{ | e :> { risky() !{ | f :> { @o.a.b = 7 } } } } } }\n<button id="b" onclick=go()>b</button>\n` + P],
+  ["guard-arm-handler", O + ERRF + `<button id="b" onclick={ risky() !{ | e :> { @o.a.b = 5 } } }>b</button>\n` + P],
   ["match-stmt-arms", MC + `\${ function go() { match @col { .Red :> { @o.a.b = 5 } .Blue :> { @o.a.b = 9 } } } }\n<button id="b" onclick=go()>b</button>\n` + P],
 ];
 

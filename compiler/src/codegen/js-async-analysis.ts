@@ -1574,6 +1574,13 @@ export interface ColorOpts {
    */
   reactiveArg1SkipKeep?: ReadonlySet<string> | null;
   /**
+   * s470-await-residue — `colorAsyncStatements` only: colour the statements with the
+   * event-handler root policy (AnalyzeOpts.handlerRoot, S450): the arg1 skip holds only for a
+   * write that is the body's SOLE root statement; every other write is awaited in place, so
+   * the statements after it observe the settled value (§13.8 (i)). Used by `on mount { }`.
+   */
+  handlerRoot?: boolean;
+  /**
    * S453 (bryan S449 ruling A3) — the boundary id this listener's rejection is
    * logged under (see `wrapHandlerRejectionLog`). A site that knows its event
    * and placeholder passes `"<eventName> <placeholderId>"`; everything else
@@ -1743,7 +1750,122 @@ export function colorAsyncStatements(code: string, resolveFree: FreeAsyncResolve
   if (!program) return null;
   const root = program.body[0]?.expression;
   if (!root || root.type !== "ArrowFunctionExpression") return null;
-  return analyze(src, program, PREFIX.length, src.length - SUFFIX.length, resolveFree, { transform: true, root, reactiveArg1Skip: opts.reactiveArg1Skip !== false });
+  return analyze(src, program, PREFIX.length, src.length - SUFFIX.length, resolveFree, {
+    transform: true, root, reactiveArg1Skip: opts.reactiveArg1Skip !== false,
+    ...(opts.handlerRoot === true ? { handlerRoot: true, reactiveArg1SkipKeep: opts.reactiveArg1SkipKeep ?? null } : {}),
+  });
+}
+
+/** s470-await-residue — the active client emission's §36 SSE keep set (see `handlerStatementListColor`). */
+export function activeSseFnNames(): ReadonlySet<string> | null {
+  return _activeClientAsync?.sseFnNames ?? null;
+}
+
+/**
+ * s470-await-residue (SECURITY, §13.8 (i)) — the ASYNC HOST of an ACTION body impl#1 runs in
+ * a compiler-controlled scope: a `<timer>` / `<poll>` tick, a `<timeout>` callback, an engine
+ * state-child `effect=` / `<onTransition>` body, an `on mount { }` block. §13.8 (i): a waiting
+ * value at a suspension point of an action position is awaited THERE, so every statement after
+ * it observes the settled value, in order. These bodies were emitted as plain synchronous
+ * statements; a whole cell write `@ok = isOk(@pw)` was left to emit-client's DETACHED
+ * `(async () => …)()` lift, and the next statement (`if (@ok) …`) read the cell before the
+ * write landed (measured: a stale TRUE logged a wrong password in).
+ *
+ * The body is coloured with the SAME analysis and the same handler-root policy every event
+ * handler gets (`colorAsyncFunctionExpr`, S450): an async call is awaited in place; only a
+ * write that is the body's SOLE root statement keeps the fire-and-forget lift (no statement
+ * of the body follows it). When the body awaits, it runs inside
+ * `(async () => { … })().catch(…)` — the shape `on mount` already used (GH #237). What
+ * cannot be awaited, or an async function used as a value, is reported (fail closed). A body
+ * that does not parse is reported when it names any async function, and kept as emitted.
+ *
+ * `active` defaults to the active client emission; a caller that runs before it is installed
+ * passes it explicitly.
+ */
+export function colorAsyncActionBody(code: string, label: string, span: unknown, active: ActiveClientAsync | null = _activeClientAsync, seqVar: string | null = null): string {
+  if (!active || !code || code.trim() === "") return code;
+  const PREFIX = "(() => {\n";
+  const SUFFIX = "\n})";
+  const src = PREFIX + code + SUFFIX;
+  const program = tryParse(src);
+  const root = program ? program.body[0]?.expression : null;
+  if (!program || !root || root.type !== "ArrowFunctionExpression") {
+    const names = new Set<string>();
+    for (const m of code.matchAll(/[A-Za-z_$][A-Za-z0-9_$]*/g)) names.add(m[0]);
+    const hits: Array<{ name: string }> = [];
+    for (const nm of names) if (active.resolveFree(nm)) hits.push({ name: nm });
+    if (hits.length) active.report({ calls: [], escapes: [], unanalyzable: hits }, span);
+    return code;
+  }
+  // A guarded host (`seqVar`) awaits EVERY write in place — a sole write too — so the guard covers it.
+  const r = analyze(src, program, PREFIX.length, src.length - SUFFIX.length, active.resolveFree, {
+    transform: true, root, reactiveArg1Skip: seqVar === null, reactiveArg1SkipKeep: active.sseFnNames ?? null, handlerRoot: true,
+  });
+  active.report(r, span);
+  if (!r.rootAsync) return r.code;
+  const lbl = JSON.stringify(label);
+  if (seqVar !== null) {
+    const guarded = guardRootAwaits(r.code, "_scrml_hook_live");
+    if (guarded !== null) {
+      // s470-await-residue fix round 1 (F5) — LATEST WINS, the `<request>` settle machine's rule: a
+      // run superseded by a later run of the same host (`seqVar`, a module-scope counter) does not
+      // resume. The check is made synchronously AT each resume point — `_scrml_hook_live(await …)` runs
+      // in the same microtask the await resumes in, before anything the statement does next — and
+      // throws a run-local sentinel that ends the run silently.
+      const body = guarded.split("\n").map((l) => (l.length ? "    " + l : l)).join("\n");
+      return `(async () => {\n` +
+        `  const _scrml_hook_run = ++${seqVar};\n` +
+        `  const _scrml_hook_stale = {};\n` +
+        `  const _scrml_hook_live = (v) => { if (_scrml_hook_run !== ${seqVar}) throw _scrml_hook_stale; return v; };\n` +
+        `  try {\n${body}\n  } catch (_scrml_e) {\n    if (_scrml_e !== _scrml_hook_stale) throw _scrml_e;\n  }\n` +
+        `})().catch(_scrml_async_err => _scrml_error_boundary_log(${lbl}, _scrml_async_err));`;
+    }
+  }
+  const indented = r.code.split("\n").map((l) => (l.length ? "  " + l : l)).join("\n");
+  return `(async () => {\n${indented}\n})().catch(_scrml_async_err => _scrml_error_boundary_log(${lbl}, _scrml_async_err));`;
+}
+
+/**
+ * fix round 1 (F5) — wrap every `await X` of the body as `live(await X)`, so no resume point of a
+ * superseded run goes on. null when the text does not parse.
+ */
+function guardRootAwaits(code: string, live: string): string | null {
+  const PREFIX = "(async () => {\n";
+  const SUFFIX = "\n})";
+  const src = PREFIX + code + SUFFIX;
+  const program = tryParse(src);
+  const root = program ? program.body[0]?.expression : null;
+  if (!program || !root || root.type !== "ArrowFunctionExpression") return null;
+  const hits: Array<{ start: number; end: number }> = [];
+  const visit = (n: N, inFn: boolean): void => {
+    if (!n || typeof n !== "object") return;
+    if (Array.isArray(n)) { for (const x of n) visit(x, inFn); return; }
+    if (typeof n.type !== "string") return;
+    const isFn = n.type === "FunctionExpression" || n.type === "FunctionDeclaration" || n.type === "ArrowFunctionExpression";
+    const nested = inFn || (isFn && n !== root);
+    // Every await — a nested async function here is one the colouring made async and awaits in
+    // place (an arm IIFE, a combinator callback): its resume point is this run's too.
+    if (n.type === "AwaitExpression") hits.push({ start: n.start, end: n.end });
+    for (const k of Object.keys(n)) {
+      if (k === "loc" || k === "start" || k === "end" || k === "type") continue;
+      const v = (n as Record<string, unknown>)[k];
+      if (v && typeof v === "object") visit(v as N, nested);
+    }
+  };
+  visit(root, false);
+  if (hits.length === 0) return code;
+  // Innermost-last edits applied from the end; an await nested in another's operand is wrapped too.
+  const opens = new Map<number, number>();
+  const closes = new Map<number, number>();
+  for (const h of hits) { opens.set(h.start, (opens.get(h.start) ?? 0) + 1); closes.set(h.end, (closes.get(h.end) ?? 0) + 1); }
+  let out = "";
+  for (let i = PREFIX.length; i < src.length - SUFFIX.length; i++) {
+    const c = closes.get(i); if (c) out += ")".repeat(c);
+    const o = opens.get(i); if (o) out += `${live}(`.repeat(o);
+    out += src[i];
+  }
+  const c = closes.get(src.length - SUFFIX.length); if (c) out += ")".repeat(c);
+  return out;
 }
 
 /**

@@ -84,9 +84,12 @@ describe("GH #264 Defect 1 — nested server-fn calls are awaited (end-to-end)",
     const js = compileCase("caseB", `            @n = serverRead()\n            @msg = eq("x", tag())`, "tag", "        <msg> = \"\"\n        <n> = 0");
     expect(js).toMatch(/\bawait tag\(\)/);                                    // Defect 1: nested await
     expect(js).toMatch(/_scrml_cs_reactive_set\("msg", _scrml_eq_\d+\(/);     // Defect 2: statement not dropped
-    // statement 1's DIRECT reactive-server write keeps emit-client's IIFE lift
-    // (it must NOT be double-awaited by the nested pass).
-    expect(js).toMatch(/\(async \(\) => _scrml_cs_reactive_set\("n", await _scrml_fetch_serverRead_\d+\(\)\)\)/);
+    // statement 1's DIRECT reactive-server write is awaited IN PLACE (s470-await-residue, §13.8 (i):
+    // statement 2 runs after it settles — the block is coloured with the handler-root policy, so
+    // only a SOLE write keeps emit-client's detached IIFE lift) — and is not double-awaited.
+    expect(js).toMatch(/\n\s*_scrml_cs_reactive_set\("n", await _scrml_fetch_serverRead_\d+\(\)\);/);
+    expect(js).not.toMatch(/\(async \(\) => _scrml_cs_reactive_set\("n"/);
+    expect(js).not.toMatch(/await\s+await/);
   });
 
   test("Case C — server call in an `if` CONDITION is awaited", () => {

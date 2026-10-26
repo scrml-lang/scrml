@@ -1,4 +1,6 @@
 import { describe, it, expect } from "bun:test";
+// S470 (ruling "Emit E-ERROR-012", SPEC §19.4.3): a `const|let r = f() !{ … }` handler is a value position, so
+// each arm of such a fixture ends with `return` (it leaves) — the arm bodies and writes these tests pin are unchanged.
 import { compileScrml } from "../../src/api.js";
 import { writeFileSync, mkdirSync, rmSync } from "fs";
 import { join } from "path";
@@ -34,8 +36,8 @@ describe("Reactive assignment in error handler arm bodies", () => {
       '  function doFetch() {',
       '    @loading = true',
       '    let result = fetchData() !{',
-      '      | ::NetworkError e -> { @loading = false; @errorMsg = e.msg }',
-      '      | ::NotFound -> { @loading = false; @errorMsg = "Not found" }',
+      '      | ::NetworkError e -> { @loading = false; @errorMsg = e.msg; return }',
+      '      | ::NotFound -> { @loading = false; @errorMsg = "Not found"; return }',
       '    }',
       '    @loading = false',
       '  }',

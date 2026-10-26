@@ -28,7 +28,10 @@ function cases(srv) {
     }`;
   const W2 = (more = "", failv = `AuthErr::Wrapped(Inner::Bad("bad"))`) => W(more, ENUM2, failv);
   const X = (cond, pre = "") => `${pre}\n        const v = wrap(p) !{ _ e :> ${cond} ? "rejected" : "LOGGED IN" }\n        return v == true ? "LOGGED IN" : v`;
-  const B = (blk, pre = "") => `${pre}\n        let o = "LOGGED IN"\n        const v = wrap(p) !{ _ e :> {\n            ${blk}\n        } }\n        return v == true ? "LOGGED IN" : o`;
+  // S470 (ruling "Emit E-ERROR-012", SPEC §19.4.3): the `!{ }` result `v` is READ, so its arm is in a value position
+  // and must yield a value — the block ends in `false` (before, a fall-through arm left the error envelope in `v`,
+  // which `v == true` read as not-true: the same outcome these shapes judge).
+  const B = (blk, pre = "") => `${pre}\n        let o = "LOGGED IN"\n        const v = wrap(p) !{ _ e :> {\n            ${blk}\n            false\n        } }\n        return v == true ? "LOGGED IN" : o`;
   const WRAP = `${srv}function wrap(p)! -> AuthErr {
         if (p != "secret") fail AuthErr::Denied("bad")
         return true

@@ -35,9 +35,13 @@ function decls(srv, withDescribe = false, withT = false) {
 }
 const X = (cond) => `const v = wrap(p) !{ _ e :> ${cond} ? "rejected" : "LOGGED IN" }
         return v == true ? "LOGGED IN" : v`;
+// S470 (ruling "Emit E-ERROR-012", SPEC §19.4.3): the `!{ }` result `v` is READ, so its arm is in a value position
+// and must yield a value — the block ends in `false` (before, a fall-through arm left the error envelope in `v`,
+// which `v == true` read as not-true: the same outcome these shapes judge).
 const B = (blk) => `let o = "LOGGED IN"
         const v = wrap(p) !{ _ e :> {
             ${blk}
+            false
         } }
         return v == true ? "LOGGED IN" : o`;
 
