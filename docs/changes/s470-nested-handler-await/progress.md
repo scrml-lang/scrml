@@ -219,3 +219,47 @@ l16 56; this head 0 everywhere. Every class pinned (`r18-pinned.js` regenerated 
 this head — measured) + `nh` (the 530)). EXPECTED_SHAPE_COUNT 3758 → 4288.
 
 Unit tests: +9 (`nested-handler-await-s470.test.js`, 30 total) — all 9 fail on bc905b009.
+
+### R26 (fix round 1) — 3981 files, the reviewer's list (adds compiler/self-host-v2, compiler/tests fixtures, docs/website …)
+
+Base = `git archive 55de8639c` (whole tree, `base55full/`); head = the fix-round-1 commit. Same `bin/r26.mjs`
+(codes + emitted-output digest).
+- code diffs: **1** — `compiler/tests/integration/bootstrap-conformance-counter/fixtures/runtime/server-stub/case.scrml`
+  (a bootstrap-syntax fixture, refused on both trees by E-MARKUP-001 / E-SCOPE-001 / E-STATE-UNDECLARED) loses
+  E-ASYNC-HANDLER-UNANALYZABLE: its handler `@n = count() !{ .Transport(t) :> { @seen = "failed"; lift 0; } }` is a
+  value-position block arm ending in `lift`, now lowered (Fix 3, §18.5) instead of emitted as unparseable text, so
+  the handler is analysable. Still refused. Justified.
+- digest diffs: **2** — `conformance/cases/components/missing-required-slot-reject` (run-to-run noise on both trees,
+  as before) and `compiler/self-host-v2/acceptance/arms/lift-guard-value/case.scrml` (refused on both trees, same
+  codes; its in-memory client JS changes `lift "nf:" + m;` → `_scrml__scrml_result_7 = "nf:" + m;` — Fix 3; stable
+  across two runs per tree).
+- The two acceptance fixtures the reviewer named, `acceptance/arms/neg-lift-nested` and `neg-lift-statement-arm`:
+  identical codes AND digest on both trees (impl#1 refuses their bootstrap syntax before any arm is lowered). The
+  impl#1 forms of the same shapes (probes/nlv, h4/064, the pack's two F3 shapes) are refused on base, accepted on
+  bc905b009, refused again here.
+- 1 file throws on both (`samples/gauntlet-s19-phase4/nested-comments.scrml`, pre-existing).
+
+### CI job commands (fix round 1 head, before the merge; `bin/ci.sh`, logs `ci/`)
+
+types-gate OK (181, unchanged) · root tests 2239 / 0 · snippet-gate 0 fail · claim-gate 0 fail ·
+corpus-compile-floor PASS · facts STALE (WARN-only, bot-owned) · gen-md-shim current · bootstrap-conformance
+current · conflict-marker PASS · regen-spec-index OK · delta-lint PASS · ci-shards OK · s34-census PASS ·
+unit + conformance 31808 / 0 · integration + lsp + commands 12138 / 0 (pack 4288, pins) · todomvc OK ·
+browser-baseline PASS (8) · lint-no-default-arm 0 · slices m1 100 / m2 612 / m1-lowered 100 / m3 60 / m4 2489 /
+codec 166, 0 fail · e2e-render-map 259 / 0 · host-global-scan 0 violations · bootstrap-severity current.
+
+### Merge of origin/main e713ef1aa (#1566 s470-render-residue-host-promises, r19 / f25)
+
+Conflicts only in the pack's shared files: EXPECTED_SHAPE_COUNT = main's 3094 + r18's 1267 = **4361**; both
+pin imports kept. render-waiting-calls.ts / emit-library-shared.ts auto-merged. Re-checked on the merge (below).
+
+### Candidate gaps added by fix round 1
+
+- `g-server-boundary-statement-arm-lift-runs-as-return-s470` (LOW, pre-existing on base): on the server boundary
+  (server / library / tool) a `lift` in a STATEMENT-position `!{}` block arm, and a nested `lift` in a value one, is
+  lowered as `return` from the enclosing function (`wrong -> "x"`); §18.5 gives it no meaning there. Not a regression.
+- Naming (above): the F3 refusal reads E-CODEGEN-INVALID-LOGIC.
+- Expression-position guards in an event-handler block / inline handler are refused E-ASYNC-HANDLER-UNANALYZABLE (as
+  on base), not E-IMPL1-ACTION-NOT-AWAITED as the brief suggested — fail closed under an existing code.
+
+Re-checked on the merge 8d67480b7: pre-commit hook 48911 pass / 0 fail (pack 4361 with every r18 pin unchanged); s34-census PASS, regen-spec-index OK, types-gate OK, e2e-render-map 259 / 0, browser-baseline PASS (8), host-global-scan 0 violations.
