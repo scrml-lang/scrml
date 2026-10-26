@@ -310,3 +310,39 @@ types-gate OK (181, unchanged) · root tests 2239 / 0 · snippet-gate 0 fail · 
 ### Merge of origin/main 8f65bb0a1 (#1571 s470-unit-variant-tag-read, r16 / s19 f22 l14 t14 — touches emit-logic / emit-expr / emit-library)
 
 Conflicts only in the pack's README count, the test count and pinned-class imports: EXPECTED_SHAPE_COUNT = main's 3653 + r18's 1311 = **4964**; both pin spreads kept. Hook on the merge a88386443: 49617 pass / 0 fail (every r18 pin unchanged). s34-census PASS, types-gate OK, e2e-render-map 0 fail, browser-baseline PASS (8), host-global-scan 0 violations.
+
+## Fix round 3 (re-review of fe3302e26, verdict FIX) — 2026-10-26
+
+Reviewer material: `~/.cache/scrml/review/s470-li3/` (read-only; shapes copied to `~/.cache/scrml/s470/laneI/rev3/`).
+
+| # | sev | status | evidence |
+|---|---|---|---|
+| N1 | HIGH (regression from round 0's lift tail) | FIXED | The escape rule (E-ASYNC-FN-ESCAPES-AS-VALUE, `local-async-fns.ts annotateLocalAsyncFns`) read a braced `!{}` arm only through its raw-fragment analysis (`analyzeRawJsFragment`), which cannot parse `lift`: `{ const h = isOk; lift h(p) }` returned no analysis, so the alias escaped unreported (the bare-tail twin parsed as JS and was refused). `walkWithScopes` now takes an injected `armBodies` reader (`emit-library-shared.ts guardArmBodiesOf`: a braced statement-guard arm's parsed statements, every expression-guard arm) and walks each in the node's scope, so the ident is judged structurally (`aliased by a variable declaration`, `stored in an object`). Fail closed: an arm no reader parses comes back as an escape hatch carrying the names its text mentions, and every async one is reported ("named in a `!{ }` arm the compiler cannot read"). Reviewer h15/004,006, h14/019,021, h13/034,036,040,042,043,045,046,048 → PASS-REFUSED. |
+| N2 | HIGH (pre-existing) | FIXED (by awaiting, per the F4 rule) | `[p].map(isOk)` / `.some(isOk)` / `.filter(allowed)`: the s441 F4 rule (`asyncFnArgRole`) ALLOWS an async function as the first argument of an awaited collection method — its stated reason is that emit-expr lifts the call to the awaited `_scrml_<m>Async` combinator. It does, but only inside a function the colouring made async, and the colouring read only call callees: `login` stayed sync, the native method ran, its element was a Promise. The colouring now counts such a by-reference callback as a callee (`combinatorCallbackRefName`, in `collectCalleeIdents` / `collectFreeCalleeIdents`), so the caller is async and the combinator awaits each call (`export async function login(p) { return (await _scrml_mapAsync([p], isOk))[0] ? … }`). I did not refuse it: the landed rule sanctions this form, and refusing would contradict the E-ASYNC-FN-ESCAPES-AS-VALUE message's own remedy ("hand it to an awaited collection method"). Library and tool now PASS (tool was refused only by an E-CODEGEN-INVALID-LOGIC accident); fullstack arms PASS. The fullstack plain-body form stays PASS-DENY (`login` is server-placed and the call fails — pre-existing, fails closed). |
+| N3 | MED (pre-existing, tool) | FIXED by N1 | The tool's escape check is the same `annotateNestedAsyncHelpers` → `annotateLocalAsyncFns` walk: h13/035,041,044,047, h14/020, h15/005 → PASS-REFUSED. |
+
+Reviewer shapes on this head: shapes1–15 **0 FAIL**. shapes13–15 against the reviewer's fe3302e26 runs: every change is
+FAIL → PASS / PASS-REFUSED or PASS-REFUSED → PASS (the tool's accidental E-CODEGEN-INVALID-LOGIC on point-free callbacks,
+now awaited). shapes1–10 classes identical to round 2's head run.
+
+### Pack (r18 +60 = 1371 shapes)
+
+`round3Shapes(side)`, 15 per side: N1 (3 escape forms × const binding / expression position) and N2 (3 point-free
+callbacks × function body / expression-position arm / const-binding arm). FAIL: fe3302e26 — s21 0, f24 10, l16 13, t16 4
+(27); base 8f65bb0a1 — s21 0, f24 6, l16 9, t16 6 (21); head 0. The server side awaits every in-process peer and is a
+pinned floor. Pins regenerated from a full run of all 1371 on this head; one existing pin moved: s21 "R1 … alias of the
+async function then call" PASS-500 → PASS-REFUSED (the alias escape is now caught). EXPECTED_SHAPE_COUNT 4964 → 5024.
+Unit tests +8 (45) — all 8 fail on fe3302e26.
+
+### R26 (round 3) — 3981 files, base = origin/main 8f65bb0a1 (whole tree)
+
+Identical to rounds 1–2: 1 code diff (the bootstrap `server-stub` fixture — Fix 3), 2 digest diffs (`lift-guard-value`
+— Fix 3; `missing-required-slot-reject` — noise), 1 file throws on both. The round-3 changes change no corpus program.
+
+### CI job commands (round 3 head; `bin/ci.sh`)
+
+types-gate OK (181, unchanged) · root tests 2239 / 0 · snippet-gate 0 fail · claim-gate 0 fail · corpus-compile-floor PASS · facts STALE (WARN-only, bot-owned) · gen-md-shim current · bootstrap-conformance current · conflict-marker PASS · regen-spec-index OK · delta-lint PASS · ci-shards OK · s34-census PASS · unit + conformance 31965 / 0 · integration + lsp + commands 12874 / 0 (pack 5024 with pins) · todomvc OK · browser-baseline PASS (8) · lint-no-default-arm 0 · slices m1 100 / m2 612 / m1-lowered 100 / m3 60 / m4 2489 / codec 166, 0 fail · e2e-render-map 259 / 0 · host-global-scan 0 violations · bootstrap-severity current.
+
+### Candidate gaps (round 3)
+
+- `g-fullstack-point-free-async-callback-server-placed-s470` (LOW, pre-existing, fails closed): a client function whose body is `[p].map(isOk)` (`isOk` a server function) is server-placed by route inference and its call fails (`init` on both passwords).
