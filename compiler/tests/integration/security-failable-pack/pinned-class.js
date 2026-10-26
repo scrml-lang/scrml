@@ -5,6 +5,7 @@
 // program) turns the suite red, and so does a refused shape that starts compiling (re-measure it, then
 // re-pin). Regenerate from `classify.js --json <family>/` — never by hand-editing to make the suite pass.
 import { R9_PINNED } from "./r9-pinned.js";
+import { R16_PINNED } from "./r16-pinned.js";
 import { R19_PINNED } from "./r19-pinned.js";
 import { R20_PINNED } from "./r20-pinned.js";
 
@@ -1554,4 +1555,6 @@ export const PINNED_CLASS = {
   "t13/1 D2 a 40-deep ternary": "PASS-REFUSED",
   "t13/1 D3 a 40-long || chain": "PASS-REFUSED",
   "t13/1 D5 a 34-deep ternary": "PASS-REFUSED",
+  // S470 s470-unit-variant-tag-read — r16-shapes.js (s19 / f22 / l14 / t14), every shape pinned (r16-pinned.js).
+  ...R16_PINNED,
 };

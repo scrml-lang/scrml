@@ -593,25 +593,27 @@ describe("rewriteEnumVariantAccess — legacy :: syntax (backwards compat)", () 
 // rewriteIsOperator — single-variant boolean check
 // ---------------------------------------------------------------------------
 
-describe("rewriteIsOperator — x is .Variant → x === 'Variant'", () => {
+// S470 (s470-unit-variant-tag-read) — a readable operand takes the tag-normalized test
+// (lowerVariantCheck): the old `x === "V"` was false for a payload variant `{ variant, data }`.
+describe("rewriteIsOperator — x is .Variant → tag-normalized variant test", () => {
   it("rewrites 'status is .Active' to equality check", () => {
     const result = rewriteIsOperator("status is .Active");
-    expect(result).toBe('status === "Active"');
+    expect(result).toBe('(function(__v){return (typeof __v === "object" && __v !== null && typeof __v.variant === "string" ? __v.variant : __v) === "Active";})(status)');
   });
 
   it("rewrites 'role is .Admin' in a condition", () => {
     const result = rewriteIsOperator("if (role is .Admin) { doSomething() }");
-    expect(result).toBe('if (role === "Admin") { doSomething() }');
+    expect(result).toBe('if ((function(__v){return (typeof __v === "object" && __v !== null && typeof __v.variant === "string" ? __v.variant : __v) === "Admin";})(role)) { doSomething() }');
   });
 
   it("rewrites fully qualified 'x is TypeName.Variant' form", () => {
     const result = rewriteIsOperator("status is Status.Active");
-    expect(result).toBe('status === "Active"');
+    expect(result).toBe('(function(__v){return (typeof __v === "object" && __v !== null && typeof __v.variant === "string" ? __v.variant : __v) === "Active";})(status)');
   });
 
   it("rewrites 'role is Priority.High' (fully qualified)", () => {
     const result = rewriteIsOperator("task.priority is Priority.High");
-    expect(result).toBe('task.priority === "High"');
+    expect(result).toBe('(function(__v){return (typeof __v === "object" && __v !== null && typeof __v.variant === "string" ? __v.variant : __v) === "High";})(task.priority)');
   });
 
   it("leaves non-is expressions unchanged", () => {
@@ -621,7 +623,7 @@ describe("rewriteIsOperator — x is .Variant → x === 'Variant'", () => {
 
   it("handles multiple is checks in same expression", () => {
     const result = rewriteIsOperator("(x is .A) && (y is .B)");
-    expect(result).toBe('(x === "A") && (y === "B")');
+    expect(result).toBe('((function(__v){return (typeof __v === "object" && __v !== null && typeof __v.variant === "string" ? __v.variant : __v) === "A";})(x)) && ((function(__v){return (typeof __v === "object" && __v !== null && typeof __v.variant === "string" ? __v.variant : __v) === "B";})(y))');
   });
 
   it("does not rewrite 'island' or 'isActive' (word boundary respected)", () => {

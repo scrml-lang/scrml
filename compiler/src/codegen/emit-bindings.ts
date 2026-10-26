@@ -5,7 +5,7 @@ import { emitExprField, reparseRequestRefEscapeHatch } from "./emit-expr.ts";
 import type { ExprNode } from "../types/ast.ts";
 import { collectMarkupNodes } from "./collect.ts";
 import { getNodes } from "./collect.ts";
-import { rewriteTemplateAttrValue, rewriteReactiveRefs } from "./rewrite.js";
+import { rewriteTemplateAttrValue, rewriteReactiveRefs, rewriteVariantTagReads } from "./rewrite.js";
 import { quotedUrlAttrNeedsGuard, urlGuardTarget, wrapUrlGuard } from "./url-attr-guard.ts";
 import type { EncodingContext } from "./type-encoding.ts";
 import type { CompileContext } from "./context.ts";
@@ -419,7 +419,8 @@ export function lowerClassDirectiveCondition(
     const fnArgs = (attrValue.args ?? []) as string[];
     const rawArgs = fnArgs.join(", ");
     const callExpr = rawArgs ? `${fnName}(${rawArgs})` : `${fnName}()`;
-    const rewrittenCall = rewriteReactiveRefs(callExpr) as string;
+    // S470 (review F1 audit) — a call-ref is emitted as code: lower a `.variant` value read in its args.
+    const rewrittenCall = rewriteVariantTagReads(rewriteReactiveRefs(callExpr) as string);
     const callRefs: string[] = [];
     const refRe = /@([A-Za-z_$][A-Za-z0-9_$]*)/g;
     let refMatch: RegExpExecArray | null;
@@ -963,7 +964,8 @@ export function emitBindings(ctx: CompileContext): string[] {
           const rawArgs = fnArgs.join(", ");
           const callExpr = rawArgs ? `${fnName}(${rawArgs})` : `${fnName}()`;
           // Rewrite any @var references in the call args to _scrml_reactive_get() calls
-          const rewrittenCall = rewriteReactiveRefs(callExpr) as string;
+          // S470 (review F1 audit) — a call-ref is emitted as code: lower a `.variant` value read in its args.
+    const rewrittenCall = rewriteVariantTagReads(rewriteReactiveRefs(callExpr) as string);
           // Collect reactive dep names from raw args (before rewrite)
           const callRefs: string[] = [];
           const refRe = /@([A-Za-z_$][A-Za-z0-9_$]*)/g;

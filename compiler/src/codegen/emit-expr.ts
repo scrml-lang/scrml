@@ -40,7 +40,7 @@ import type {
   MarkupValueExpr,
 } from "../types/ast.ts";
 import { parseExpressionAt as acornParseExpressionAt } from "acorn";
-import { rewriteExpr, rewriteServerExpr, rewriteExprArrowBody, rewriteServerExprArrowBody, rewriteExprWithDerived, setRewriteCurrentUserAmbientActive } from "./rewrite.js";
+import { rewriteExpr, rewriteServerExpr, rewriteExprArrowBody, rewriteServerExprArrowBody, rewriteExprWithDerived, setRewriteCurrentUserAmbientActive, asVariantPlaceText } from "./rewrite.js";
 import { emitParseVariantCall, isParseVariantCall } from "./emit-parse-variant.ts";
 import { isRefineCall } from "../refinement-obligations.ts";
 import { emitRefineExpr, emitRefineUpdate, emitRefineMerge } from "./emit-predicates.ts";
@@ -113,7 +113,7 @@ import { isServerAmbientSession, refuseServerAmbientSession } from "./server-ses
 import { clearLiftScope } from "./declared-name-marks.ts";
 import { srcmapMark } from "./srcmap-provenance.ts";
 import { iterDestructuredNames } from "../type-system.ts";
-import { lowerPresenceCheck, lowerAbsenceCheck, lowerVariantCheck } from "./is-predicate-lowering.ts";
+import { lowerPresenceCheck, lowerAbsenceCheck, lowerVariantCheck, lowerVariantTagRead, IS_OP_IIFE_LOCAL } from "./is-predicate-lowering.ts";
 import { parseExprToNode, splitTopLevelCommas, guardCallArmsRaw, droppedStatementTextOf, hasLostTrailingContent, rawArmHasStrayComma } from "../expression-parser.ts";
 import { armHasDivisionSlash, rawArmHasLeadingPipeArm, armPiecesCover } from "../arm-list-split.ts";
 import { sqlQueryExprShape, type SqlQueryExprShape } from "./sql-attempt.ts";
@@ -1871,12 +1871,15 @@ function emitLit(node: LitExpr, ctx: EmitExprContext): string {
   // structural-emitter). It is now emitted from the PARSED template — quasi SOURCE
   // text + each `${…}` as an ExprNode — never by re-scanning template text.
   // Gated on an `@` in the source: a template with no cell read keeps its raw bytes.
+  // S470 (s470-unit-variant-tag-read) — or a `.variant` read in it: the raw bytes
+  // would keep the plain member read, which is `undefined` on a unit variant
+  // (emitMember lowers it to the tag read only when the read is emitted from the tree).
   if (
     node.litType === "template" &&
     ctx.mode !== "server" &&
     typeof node.raw === "string" &&
     node.raw.includes("${") &&
-    node.raw.includes("@")
+    (node.raw.includes("@") || /\.\s*variant\b/.test(node.raw))
   ) {
     const structured = emitTemplateLitStructured(node, ctx);
     if (structured !== null) return structured;
@@ -1921,8 +1924,14 @@ function emitObjectKey(key: string): string {
 function emitProp(prop: ObjectProp, ctx: EmitExprContext): string {
   switch (prop.kind) {
     case "prop": {
+      // S470 (review H1) — a computed key is an ordinary expression even inside a pattern.
+      const keyExpr = (k: ExprNode): string => {
+        const saved = _variantPlaceDepth;
+        _variantPlaceDepth = 0;
+        try { return emitExpr(k, ctx); } finally { _variantPlaceDepth = saved; }
+      };
       const key = prop.computed
-        ? `[${typeof prop.key === "string" ? JSON.stringify(prop.key) : emitExpr(prop.key, ctx)}]`
+        ? `[${typeof prop.key === "string" ? JSON.stringify(prop.key) : keyExpr(prop.key)}]`
         : typeof prop.key === "string" ? emitObjectKey(prop.key) : emitExpr(prop.key, ctx);
       const val = emitExpr(prop.value, ctx);
       return `${key}: ${val}`;
@@ -2057,7 +2066,8 @@ function emitUnaryPlain(node: UnaryExpr, ctx: EmitExprContext): string {
     const bare = node.argument.name.slice(1);
     return `${srcmapMark(node.span, bare)}(_scrml_written["${bare}"] = true, ${node.op}_scrml_body["${bare}"])`;
   }
-  let arg = emitExpr(node.argument, ctx);
+  // `++x.variant` / `delete x.variant` write a place, not a tag read (emitPlace).
+  let arg = (node.op === "++" || node.op === "--" || node.op === "delete") ? emitPlace(node.argument, ctx) : emitExpr(node.argument, ctx);
   // §13.2 server Promise trap (S462 Q20) — `!` tests its operand.
   if (node.op === "!") arg = trapBooleanOperand(node.argument, arg, ctx);
   if (node.prefix) {
@@ -3126,6 +3136,11 @@ function emitBinary(node: BinaryExpr, ctx: EmitExprContext): string {
       } else if (node.right.kind === "member") {
         // Enum.Variant → "Variant"
         rhs = `"${node.right.property}"`;
+      } else if (node.right.kind === "ident" && /^[A-Z][A-Za-z0-9_$]*\.[A-Z][A-Za-z0-9_$]*$/.test(node.right.name)) {
+        // S470 (review F6) — the parser folds `Enum.Variant` / `Enum::Variant` into ONE
+        // dotted ident. It fell to the `===` branch below and compared against the
+        // variant's CONSTRUCTOR (`x === AuthErr.Denied`), false for every payload value.
+        rhs = `"${node.right.name.split(".")[1]}"`;
       } else {
         // Right side is not an enum variant (e.g. `is null` / `is undefined`)
         // — preserve legacy `===` shape without tag normalization, since
@@ -3175,7 +3190,12 @@ function emitAssign(node: AssignExpr, ctx: EmitExprContext): string {
   const valueCtx: EmitExprContext = targetIsOrderedMap
     ? { ...ctx, emitMapLitOrdered: true }
     : ctx;
-  const value = emitExpr(node.value, valueCtx);
+  // S470 (review H1) — inside an assignment PATTERN an `assign` element is a default
+  // (`[a = x.variant] = t`): its value is an ordinary expression, never a place.
+  const _savedPlaceDepth = _variantPlaceDepth;
+  _variantPlaceDepth = 0;
+  let value: string;
+  try { value = emitExpr(node.value, valueCtx); } finally { _variantPlaceDepth = _savedPlaceDepth; }
 
   // Reactive assignment: @var = expr → _scrml_reactive_set("var", expr)
   if (target.kind === "ident" && target.name.startsWith("@")) {
@@ -3265,7 +3285,7 @@ function emitAssign(node: AssignExpr, ctx: EmitExprContext): string {
     return `${srcmapMark(node.span, bare)}_scrml_reactive_set("${bare}", ${getter} ${baseOp} ${value})`;
   }
 
-  const lhs = emitExpr(target, ctx);
+  const lhs = emitPlace(target, ctx);
   const assigned = `${lhs} ${node.op} ${value}`;
   // §6.5.1 / §6.3 — a write to a FIELD or INDEX of a reactive cell in expression
   // position (`onclick=${@o.x = @o.x + 1}`, `@o.n += 1`, `@rows[i].done = true`)
@@ -3276,6 +3296,10 @@ function emitAssign(node: AssignExpr, ctx: EmitExprContext): string {
 }
 
 function emitTernary(node: TernaryExpr, ctx: EmitExprContext): string {
+  // S470 — a re-parsed trivial tag read `typeof x === "string" ? x : x.variant` is
+  // already the lowering: re-emit it as is (emitMember would lower `x.variant` again).
+  const tagRead = alreadyLoweredTagRead(node);
+  if (tagRead !== null) return tagRead;
   // S459 round 6 — the condition is a ShortCircuitExpression in JS: an arrow, an assignment
   // or a nested conditional there must be parenthesized (`(() => f()) ? a : b`; a component
   // callback prop substituted into `onGo ? onGo() : 0` emitted `() => f() ? … : 0`, which
@@ -3293,7 +3317,47 @@ function emitTernary(node: TernaryExpr, ctx: EmitExprContext): string {
 // Access and call
 // ---------------------------------------------------------------------------
 
-function emitMember(node: MemberExpr, ctx: EmitExprContext): string {
+/**
+ * Emit `node` as a PLACE — an assignment / `++` / `delete` target or a method
+ * callee — rather than as a value read. Only differs from `emitExpr` for a
+ * `.variant` member, whose value read is the tag read (`lowerVariantTagRead`);
+ * a place keeps the plain JS member so the write / call hits the real property.
+ */
+function emitPlace(node: ExprNode, ctx: EmitExprContext): string {
+  if (node.kind === "member") return emitMember(node as MemberExpr, ctx, true);
+  if (node.kind === "index") return emitIndex(node as IndexExpr, ctx, true);
+  // S470 (review F4) — an array / object literal as an assignment target is a PATTERN:
+  // every `.variant` member in it is a place (`[s.variant, s.k] = [s.k, s.variant]`).
+  if (node.kind === "array" || node.kind === "object") {
+    _variantPlaceDepth++;
+    try { return emitExpr(node, ctx); } finally { _variantPlaceDepth--; }
+  }
+  // …and a pattern the expression parser kept as text (`[s.variant, s.k] = …`).
+  if (node.kind === "escape-hatch" && /Pattern$/.test(String((node as EscapeHatchExpr).nativeKind ?? ""))) {
+    return asVariantPlaceText(() => emitExpr(node, ctx));
+  }
+  return emitExpr(node, ctx);
+}
+
+/** > 0 while an assignment PATTERN is emitted: its `.variant` members are places (emitPlace). */
+let _variantPlaceDepth = 0;
+
+/** Does this member/index/call chain contain a `?.` link (so a nullish link short-circuits)? */
+function chainHasOptionalLink(node: ExprNode): boolean {
+  let n: ExprNode | undefined = node;
+  while (n) {
+    if (n.kind === "member" || n.kind === "index") {
+      if ((n as MemberExpr).optional) return true;
+      n = (n as MemberExpr).object;
+    } else if (n.kind === "call") {
+      if ((n as CallExpr).optional) return true;
+      n = (n as CallExpr).callee;
+    } else return false;
+  }
+  return false;
+}
+
+function emitMember(node: MemberExpr, ctx: EmitExprContext, asPlace = false): string {
   // Bug 61 (§55.5 / §55.6 / §55.7) — auto-synthesized validity-surface read.
   //
   // A member chain rooted at `@<compound>` whose LEAF property is a synthesized
@@ -3409,10 +3473,37 @@ function emitMember(node: MemberExpr, ctx: EmitExprContext): string {
       (node as { span?: object }).span ?? {},
     ), node as object);
   }
+  // S470 (s470-unit-variant-tag-read) — a `.variant` VALUE read is the variant
+  // tag read: a unit variant is its bare tag string (§51.3.2), so a plain
+  // `x.variant` read `undefined` off it and `x.variant == "Gone"` disagreed with
+  // `x is .Gone`. See lowerVariantTagRead. A place (`x.variant = …`, a method
+  // callee) keeps the plain member.
+  // Text already lowered (a re-parsed `lowerVariantTagRead` / `lowerVariantCheck`): its
+  // own reads off the reserved IIFE parameter are not lowered again.
+  if (node.property === "variant" && !asPlace && _variantPlaceDepth === 0 && !(node.object.kind === "ident" && (node.object as IdentExpr).name === IS_OP_IIFE_LOCAL)) {
+    const trivial = node.object.kind === "ident" && obj === (node.object as IdentExpr).name;
+    return lowerVariantTagRead(obj, trivial, node.optional || chainHasOptionalLink(node.object));
+  }
   return `${obj}${dot}${node.property}`;
 }
 
 const PROMISE_METHOD_NAMES = new Set(["then", "catch", "finally"]);
+
+/** `typeof x === "string" ? x : x.variant` (x a bare name) → its `lowerVariantTagRead` text, else null. */
+function alreadyLoweredTagRead(node: TernaryExpr): string | null {
+  const t = node.condition as { kind?: string; op?: string; left?: any; right?: any };
+  if (!t || t.kind !== "binary" || (t.op !== "===" && t.op !== "==")) return null;
+  const l = t.left, r = t.right;
+  if (!l || l.kind !== "unary" || l.op !== "typeof" || !l.argument || l.argument.kind !== "ident") return null;
+  if (!r || r.kind !== "lit" || (r.value !== "string" && r.raw !== `"string"`)) return null;
+  const name = l.argument.name as string;
+  if (typeof name !== "string" || name.startsWith("@")) return null;
+  const c = node.consequent as { kind?: string; name?: string };
+  const a = node.alternate as { kind?: string; object?: any; property?: string; optional?: boolean };
+  if (!c || c.kind !== "ident" || c.name !== name) return null;
+  if (!a || a.kind !== "member" || a.property !== "variant" || !a.object || a.object.kind !== "ident" || a.object.name !== name) return null;
+  return lowerVariantTagRead(name, true, !!a.optional);
+}
 
 /**
  * Bug 61 helper — walk a `@<compound>[.field].<synthProp>` member chain to its
@@ -3533,7 +3624,7 @@ function mapIndexRootName(node: IndexExpr, ctx: EmitExprContext): string | null 
   return mapCellBareName(cursor, ctx);
 }
 
-function emitIndex(node: IndexExpr, ctx: EmitExprContext): string {
+function emitIndex(node: IndexExpr, ctx: EmitExprContext, asPlace = false): string {
   // §59.6 — map bracket-READ. When the chain ROOT is a known map cell, lower
   // `@m[k]` to `_scrml_map_get(m, k)` (returns `V | not` — JS null on a key-miss,
   // composing with `given` / `is some`). For a NESTED chain `@outer["a"]["b"]`
@@ -3592,7 +3683,20 @@ function emitIndex(node: IndexExpr, ctx: EmitExprContext): string {
   const obj = emitReceiver(node.object, ctx);
   const idx = emitExpr(node.index, ctx);
   const bracket = node.optional ? "?.[" : "[";
+  // S470 (review F3) — `x["variant"]` / `x?.["variant"]` is the same read as `x.variant`
+  // (a literal key): the tag read. A dynamic key `x[k]` keeps the plain JS read.
+  if (!asPlace && _variantPlaceDepth === 0 && isVariantKeyLit(node.index)) {
+    const trivial = node.object.kind === "ident" && obj === (node.object as IdentExpr).name;
+    return lowerVariantTagRead(obj, trivial, node.optional || chainHasOptionalLink(node.object));
+  }
   return `${obj}${bracket}${idx}]`;
+}
+
+/** A string-literal `"variant"` / `'variant'` index (a no-substitution template too). */
+function isVariantKeyLit(n: ExprNode): boolean {
+  if (!n || n.kind !== "lit") return false;
+  const l = n as LitExpr;
+  return (l.litType === "string" || l.litType === "template") && l.value === "variant";
 }
 
 function emitCall(node: CallExpr, ctx: EmitExprContext): string {
@@ -4239,7 +4343,11 @@ function emitCall(node: CallExpr, ctx: EmitExprContext): string {
     }
   }
 
-  const callee = emitReceiver(node.callee, ctx);
+  // A called `x.variant(…)` is a method call (its `this` is `x`), not a tag read (emitPlace).
+  const callee = (node.callee.kind === "member" && (node.callee as MemberExpr).property === "variant") ||
+      (node.callee.kind === "index" && isVariantKeyLit((node.callee as IndexExpr).index))
+    ? emitPlace(node.callee, ctx)
+    : emitReceiver(node.callee, ctx);
   const args = node.args.map(a => emitExpr(a, ctx)).join(", ");
 
   // s440-sync-callback-async-helper — an async function passed BY REFERENCE to a
@@ -4881,7 +4989,11 @@ function reactiveArrayMutationCell(node: CallExpr, ctx: EmitExprContext): string
 }
 
 function emitNew(node: NewExpr, ctx: EmitExprContext): string {
-  const callee = emitReceiver(node.callee, ctx);
+  // A called `x.variant(…)` is a method call (its `this` is `x`), not a tag read (emitPlace).
+  const callee = (node.callee.kind === "member" && (node.callee as MemberExpr).property === "variant") ||
+      (node.callee.kind === "index" && isVariantKeyLit((node.callee as IndexExpr).index))
+    ? emitPlace(node.callee, ctx)
+    : emitReceiver(node.callee, ctx);
   const args = node.args.map(a => emitExpr(a, ctx)).join(", ");
   return `new ${callee}(${args})`;
 }

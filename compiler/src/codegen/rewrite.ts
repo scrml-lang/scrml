@@ -13,9 +13,9 @@ import { ScrmlParser } from "../scrml-acorn.ts";
 import { CGError } from "./errors.ts";
 import { isServerAmbientSession, refuseServerAmbientSession } from "./server-session-guard.ts";
 // GITI-017 (S125): shared regex/comment/string fence — see code-segments.ts header.
-import { rewriteCodeSegments, regexAllowedAfter } from "./code-segments.ts";
+import { rewriteCodeSegments, regexAllowedAfter, classifyBraceGroup } from "./code-segments.ts";
 import { lowerEqualityOps } from "./string-equality-lowering.ts";
-import { lowerIsPlaceholders, lowerPresenceCheck, lowerAbsenceCheck, isTrivialOperandText } from "./is-predicate-lowering.ts";
+import { lowerIsPlaceholders, lowerPresenceCheck, lowerAbsenceCheck, isTrivialOperandText, lowerVariantTagRead, lowerVariantCheck, IS_OP_IIFE_LOCAL } from "./is-predicate-lowering.ts";
 // §14.8.9 protected-column egress redaction — resolve the protected OUTPUT
 // columns a lowered `?{}` SELECT carries and wrap its result rows in the
 // `_scrml_protect_tag(...)` descriptor at query-lowering time (server only).
@@ -1176,11 +1176,64 @@ export function rewriteIsOperator(expr: string): string {
   // `x is not` becomes `x is null`. Rewrite to strict equality check.
   expr = expr.replace(/\bis\s+null\b/g, '=== null');
   expr = expr.replace(/\bis\s+undefined\b/g, '=== undefined');
+  // S470 (s470-unit-variant-tag-read) — `<operand> is .V` / `is T.V` with a readable
+  // operand lowers to the tag-normalized test (`lowerVariantCheck`, the structured
+  // path's form): a payload variant is `{ variant, data }`, so the bare `=== "V"`
+  // below was false for it (a library / server `match` arm value `x is .Denied`
+  // never matched). The regexes below remain for an operand the scan cannot read.
+  expr = rewriteIsVariantWithOperand(expr);
   // Allow optional whitespace between '.' and variant name: block-splitter may emit
   // "is . Small" (space after dot). The \s* handles both "is .Small" and "is . Small".
   expr = expr.replace(/\bis\s+[A-Z][A-Za-z0-9_]*\.\s*([A-Z][A-Za-z0-9_]*)\b/g, '=== "$1"');
   expr = expr.replace(/\bis\s+\.\s*([A-Z][A-Za-z0-9_]*)\b/g, '=== "$1"');
   return expr;
+}
+
+/**
+ * `<operand> is .V` / `<operand> is T.V` → `lowerVariantCheck(operand, "V")`, for every
+ * occurrence in CODE (literal / comment text masked, `maskNonCode`) whose operand is a
+ * member / call / index chain or a parenthesized group (`scanVariantOperandStart`).
+ */
+function rewriteIsVariantWithOperand(expr: string): string {
+  if (!/\bis\s+(?:[A-Z][A-Za-z0-9_]*\s*)?\.\s*[A-Z]/.test(expr)) return expr;
+  // Review F7 — a comment is whitespace: blanked first, so `x /* c */ is .V` reads its
+  // operand instead of falling to the bare `=== "V"` regexes below.
+  let out = blankComments(expr);
+  let cursor = 0;
+  for (let guard = 0; guard < 1000; guard++) {
+    const masked = maskNonCode(out);
+    if (masked === null) return out;
+    const re = /\bis\s+(?:[A-Z][A-Za-z0-9_]*\s*)?\.\s*([A-Z][A-Za-z0-9_]*)\b(?!\s*\()/g;
+    re.lastIndex = cursor;
+    let m: RegExpExecArray | null;
+    let changed = false;
+    while ((m = re.exec(masked)) !== null) {
+      let end = m.index - 1;
+      while (end >= 0 && /\s/.test(masked[end])) end--;
+      if (end < 0 || !/[A-Za-z0-9_$)\]]/.test(masked[end])) continue;
+      const start = scanVariantOperandStart(masked, end);
+      if (start < 0 || start > end || masked[start] === "#") continue;
+      let opStart = start;
+      // `new X() is .V` — the operand is the whole `new X()` (review F7).
+      {
+        let b = start - 1;
+        while (b >= 0 && /\s/.test(masked[b])) b--;
+        let w = b;
+        while (w >= 0 && /[A-Za-z0-9_$]/.test(masked[w])) w--;
+        if (b >= 0 && masked.slice(w + 1, b + 1) === "new") opStart = w + 1;
+      }
+      const operand = out.slice(opStart, end + 1).trim();
+      // A keyword is not an operand (`return is .V` is not this construct).
+      if (/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(operand) && PAREN_PRECEDING_KEYWORDS.has(operand)) continue;
+      const text = lowerVariantCheck(operand, JSON.stringify(m[1]));
+      out = out.slice(0, opStart) + text + out.slice(m.index + m[0].length);
+      cursor = opStart + text.length;
+      changed = true;
+      break;
+    }
+    if (!changed) return out;
+  }
+  return out;
 }
 
 // ---------------------------------------------------------------------------
@@ -2476,6 +2529,462 @@ export function rewriteStructConstruction(expr: string): string {
  * with `===` — reference equality for structs / maps / payload enums; gap
  * g-structural-eq-emitted-as-strict-eq-outside-typed-fn-bodies-s464.)
  */
+// ---------------------------------------------------------------------------
+// rewriteVariantTagReads — S470 (s470-unit-variant-tag-read)
+// ---------------------------------------------------------------------------
+
+/**
+ * The string-path twin of emit-expr.ts `emitMember`'s `.variant` lowering: a
+ * `.variant` VALUE read in text the structured emitter never saw (a handler
+ * attribute, a `match` arm lowered from text, an engine / `<match>` body kept
+ * as text, a server text lowering) is lowered to the variant tag read, the same
+ * `lowerVariantTagRead` form. A unit variant is its bare tag string (§51.3.2),
+ * so the plain read was `undefined` there and `x.variant == "Gone"` disagreed
+ * with `x is .Gone`.
+ *
+ * Runs as the LAST pass of both pipelines, over the finished JS text. Only code
+ * is read: string / template-static / regex / comment text is masked out
+ * (`rewriteCodeSegments`, the shared fence), so a `.variant` in a literal is not
+ * touched and a literal's brackets cannot mislead the operand scan. The operand
+ * is the member / call / index chain left of the `.` (the `_scanChainStartLeft`
+ * walk, `?.`-aware). Left as a plain member (a PLACE, not a read): an assignment
+ * / compound-assignment / `++` / `--` / `delete` target, a method call
+ * `x.variant(…)`, a tagged template, a `new` operand; and the compiler's own
+ * reads (`__scrml_is_v`, an `_scrml_*` temporary, a read already lowered).
+ */
+let _variantPlaceText = 0;
+/**
+ * Run `f` with the text `f` lowers known to be an assignment PATTERN (an escape-hatch
+ * `[s.variant, s.k]` target, review F4): its binding targets are places, its defaults and
+ * computed keys still reads (review H1).
+ */
+export function asVariantPlaceText<T>(f: () => T): T {
+  _variantPlaceText++;
+  try { return f(); } finally { _variantPlaceText--; }
+}
+
+export function rewriteVariantTagReads(expr: string): string {
+  if (!expr || typeof expr !== "string" || !/\bvariant\b/.test(expr)) return expr;
+  let out = lowerTextVariantPatterns(expr);
+  let cursor = 0;
+  for (let guard = 0; guard < 1000; guard++) {
+    const masked = maskNonCode(out);
+    if (masked === null) return out;
+    // `.variant`, or a literal-key `["variant"]` / `['variant']` / `` [`variant`] `` (review F3;
+    // the key's text is masked, so the original is checked).
+    const re = /\.\s*variant\b|\[\s*#{9}\s*\]/g;
+    re.lastIndex = cursor;
+    let m: RegExpExecArray | null;
+    let done = true;
+    while ((m = re.exec(masked)) !== null) {
+      const dotIdx = m.index;
+      const after = dotIdx + m[0].length;
+      const bracket = m[0][0] === "[";
+      if (bracket && !/^\[\s*(["'`])variant\1\s*\]$/.test(out.slice(dotIdx, after))) continue;
+      const lowered = lowerOneVariantRead(out, masked, dotIdx, after, bracket);
+      if (lowered === null) continue;
+      out = out.slice(0, lowered.start) + lowered.text + out.slice(after);
+      cursor = lowered.start + lowered.text.length;
+      done = false;
+      break;
+    }
+    if (done) return out;
+  }
+  return out;
+}
+
+/**
+ * Review F2, the string path — a destructuring pattern in TEXT that names a `variant` key
+ * (`const { variant } = @st` in a `when` body). A declaration with the key at its top
+ * level destructures from `variantDestructureSource`'s form (a tag string read as
+ * `{ variant: tag }`); any other pattern naming `variant` (nested, a parameter, a `for`
+ * head, an assignment) is refused — a pattern cannot read a unit variant's tag.
+ */
+function lowerTextVariantPatterns(expr: string): string {
+  if (!/\bvariant\b/.test(expr)) return expr;
+  let out = expr;
+  let from = 0;
+  for (let guard = 0; guard < 200; guard++) {
+    const masked = maskNonCode(out);
+    if (masked === null) return out;
+    // Review G1 — an object OR array pattern, at any position (a later declarator, an
+    // array element, a nested group), naming `variant` as a key at any depth, quoted or
+    // computed (`{ "variant": v }`, `{ ["variant"]: v }`).
+    const re = /[{[]/g;
+    re.lastIndex = from;
+    const om = re.exec(masked);
+    if (!om) return out;
+    const open = om.index;
+    const close = matchingClose(masked, open);
+    if (close < 0) return out;
+    from = open + 1;
+    if (!isPatternGroup(masked, open, close)) continue;
+    // Only the outermost pattern is judged (an inner group is part of it).
+    if (enclosingPatternOpen(masked, open)) continue;
+    const keys = variantKeysIn(out, masked, open, close);
+    if (keys.length === 0) continue;
+    const group = masked.slice(open, close + 1);
+    const top = topLevelKeys(group);
+    const isDecl = masked[open] === "{" && /\b(?:const|let|var)\s*$/.test(masked.slice(0, open)) && !/\bfor\s*\(\s*(?:const|let|var)\s*$/.test(masked.slice(0, open));
+    const eq = /^\s*=(?![=>])/.exec(masked.slice(close + 1));
+    // Lowerable: the first declarator of a `const` / `let` / `var`, an object pattern, whose ONLY
+    // `variant` key is a plain one at its own level.
+    if (isDecl && eq && top.includes("variant") && keys.length === 1 && keys[0].depth === 1 && !keys[0].quoted) {
+      const initStart = close + 1 + eq[0].length;
+      const initEnd = initializerEnd(masked, initStart);
+      const init = out.slice(initStart, initEnd);
+      // Already the destructuring source (the structured split's own text): leave it.
+      if (/^\s*\(\(__scrml_is_v\) => typeof __scrml_is_v === "string" \? \{ variant: __scrml_is_v \}/.test(init)) { from = initEnd; continue; }
+      const wrapped = ` ((__scrml_is_v) => typeof __scrml_is_v === "string" ? { variant: __scrml_is_v } : __scrml_is_v)(${init.trim()})`;
+      out = out.slice(0, initStart) + wrapped + out.slice(initEnd);
+      from = initStart + wrapped.length;
+      continue;
+    }
+    recordRefusedLowering(new CGError(
+      "E-CODEGEN-INVALID-LOGIC",
+      "E-CODEGEN-INVALID-LOGIC: this destructuring pattern names a `variant` key where the compiler cannot " +
+        "lower it (a nested pattern, a parameter, a `for` head, or an assignment). A unit enum variant is its " +
+        "bare tag (§51.3.2), so the pattern would bind `undefined` and a gate on it would fail open. Bind the " +
+        "whole value and read `x.variant` (or test `x is .V`) instead.",
+      currentLoweringSpan() ?? {},
+    ), null);
+    return out;
+  }
+  return out;
+}
+
+function matchingClose(m: string, open: number): number {
+  let d = 0;
+  for (let j = open; j < m.length; j++) {
+    const c = m[j];
+    if (c === "(" || c === "[" || c === "{") d++;
+    else if (c === ")" || c === "]" || c === "}") { d--; if (d === 0) return j; }
+  }
+  return -1;
+}
+
+/**
+ * Is the `{` / `[` group [open, close] a destructuring PATTERN? An object group as
+ * `classifyBraceGroup` decides; an array group when it is assigned to (`[…] = …`), declared
+ * (`const [ … ]`, a `for` head), or an arrow parameter (`([…]) =>`).
+ */
+function isPatternGroup(m: string, open: number, close: number): boolean {
+  if (m[open] === "{") return classifyBraceGroup(m, open, close + 1) === "binding-pattern";
+  const after = m.slice(close + 1);
+  if (/^\s*=(?![=>])/.test(after)) return true;
+  if (/\b(?:const|let|var)\s*$/.test(m.slice(0, open))) return true;
+  if (/^\s*\)\s*=>/.test(after) && /\(\s*$/.test(m.slice(0, open))) return true;
+  return false;
+}
+
+/** Is the group at `open` inside another destructuring pattern group (`{ e: { variant } } = …`)? */
+function enclosingPatternOpen(m: string, open: number): boolean {
+  let d = 0;
+  for (let k = open - 1; k >= 0; k--) {
+    const c = m[k];
+    if (c === ")" || c === "]" || c === "}") { d++; continue; }
+    if (c === "(" || c === "[" || c === "{") {
+      if (d > 0) { d--; continue; }
+      if (c === "(") return false;
+      const cl = matchingClose(m, k);
+      if (cl < 0) return false;
+      if (isPatternGroup(m, k, cl)) return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Every `variant` KEY of an object group inside the pattern [open, close]: plain
+ * (`{ variant }`, `{ variant: v }`, `{ variant = d }`), quoted (`{ "variant": v }`) or computed
+ * with a literal (`{ ["variant"]: v }`). `depth` is the object nesting (1 = the pattern's own
+ * object level when it is an object pattern). A `variant` that is a default VALUE or an array
+ * element binding is not a key and is not listed.
+ */
+function variantKeysIn(out: string, m: string, open: number, close: number): Array<{ depth: number; quoted: boolean }> {
+  const keys: Array<{ depth: number; quoted: boolean }> = [];
+  const stack: string[] = [];
+  for (let j = open; j <= close; j++) {
+    const c = m[j];
+    if (c === "{" || c === "[" || c === "(") { stack.push(c); }
+    else if (c === "}" || c === "]" || c === ")") { stack.pop(); continue; }
+    if ((c === "{" || c === ",") && stack[stack.length - 1] === "{") {
+      const rest = m.slice(j + 1);
+      const k = /^\s*(variant|#{9}|\[\s*#{9}\s*\])\s*(?=[,}:=])/.exec(rest);
+      if (!k) continue;
+      const raw = out.slice(j + 1 + (k[0].length - k[0].trimStart().length), j + 1 + k[0].length).trim();
+      const quoted = k[1] !== "variant";
+      if (quoted && !/^(?:(["'])variant\1|\[\s*(["'`])variant\2\s*\])$/.test(raw)) continue;
+      const depth = stack.filter((x) => x === "{").length;
+      keys.push({ depth, quoted });
+    }
+  }
+  return keys;
+}
+
+/** The keys of an object pattern's own level (`{ a, b: c, d = 1, e: { f } }` → a, b, d, e). */
+function topLevelKeys(group: string): string[] {
+  const keys: string[] = [];
+  let d = 0, seg = "";
+  const flush = () => { const k = /^\s*(?:\.\.\.)?\s*([A-Za-z_$][\w$]*)/.exec(seg); if (k && !/^\s*\.\.\./.test(seg)) keys.push(k[1]); seg = ""; };
+  for (let j = 1; j < group.length - 1; j++) {
+    const c = group[j];
+    if (c === "(" || c === "[" || c === "{") d++;
+    else if (c === ")" || c === "]" || c === "}") d--;
+    if (d === 0 && c === ",") { flush(); continue; }
+    seg += c;
+  }
+  flush();
+  return keys;
+}
+
+/** Does a pattern NESTED in this group name `variant` (a key the top-level split cannot reach)? */
+function nestedKeyNamesVariant(group: string): boolean {
+  const inner = group.slice(1, -1);
+  let d = 0;
+  for (let j = 0; j < inner.length; j++) {
+    const c = inner[j];
+    if (c === "{" || c === "[") { d++; continue; }
+    if (c === "}" || c === "]") { d--; continue; }
+    if (d > 0 && /\bvariant\b/.test(inner.slice(j, j + 7)) && !/[\w$.]/.test(inner[j - 1] ?? "")) return true;
+  }
+  return false;
+}
+
+/** End (exclusive) of a declaration initializer starting at `i`: a depth-0 `;` / `,`, an unmatched close, or a statement-ending newline. */
+function initializerEnd(m: string, i: number): number {
+  let d = 0;
+  for (let j = i; j < m.length; j++) {
+    const c = m[j];
+    if (c === "(" || c === "[" || c === "{") { d++; continue; }
+    if (c === ")" || c === "]" || c === "}") { if (d === 0) return j; d--; continue; }
+    if (d === 0 && (c === ";" || c === ",")) return j;
+    if (d === 0 && c === "\n") {
+      const before = m.slice(i, j).trimEnd();
+      const after = m.slice(j + 1).trimStart();
+      if (before && !/[-+*/%&|^!=<>?:.,(]$/.test(before) && !/^[.?\])}+\-*/%&|^=<>:,]/.test(after)) return j;
+    }
+  }
+  return m.length;
+}
+
+/** `expr` with each comment (a masked run opening `//` or `/*`) replaced by spaces; newlines kept. */
+function blankComments(expr: string): string {
+  const masked = maskNonCode(expr);
+  if (masked === null) return expr;
+  let out = "";
+  let i = 0;
+  while (i < expr.length) {
+    if (masked[i] === "#" && expr[i] === "/" && (expr[i + 1] === "*" || expr[i + 1] === "/")) {
+      let j: number;
+      if (expr[i + 1] === "*") { const c = expr.indexOf("*/", i + 2); j = c < 0 ? expr.length : c + 2; }
+      else { const nl = expr.indexOf("\n", i); j = nl < 0 ? expr.length : nl; }
+      out += expr.slice(i, j).replace(/[^\n]/g, " ");
+      i = j;
+      continue;
+    }
+    out += expr[i++];
+  }
+  return out;
+}
+
+/** `expr` with every non-code character (literal / comment text) replaced by `#`; null if the fence changed the length. */
+function maskNonCode(expr: string): string | null {
+  const MARK = "\u0001";
+  const marked = rewriteCodeSegments(expr, (seg) => MARK.repeat(seg.length));
+  if (marked.length !== expr.length) return null;
+  let m = "";
+  for (let i = 0; i < expr.length; i++) m += marked[i] === MARK ? expr[i] : "#";
+  return m;
+}
+
+const PLACE_AFTER_RE = /^\s*(?:=(?![=>])|\+\+|--|(?:\*\*|<<|>>>|>>|&&|\|\||\?\?|[-+*/%&|^])=|\(|\?\.\(|`)/;
+
+function lowerOneVariantRead(
+  out: string, masked: string, dotIdx: number, after: number, bracket = false,
+): { start: number; text: string } | null {
+  // `x.variant = …`, `x.variant += …`, `x.variant++`, `x.variant(…)`, `` x.variant`…` ``: a place.
+  // A comment between the member and the operator is whitespace (`x.variant /*c*/ = 1`;
+  // a comment is masked `#`, and no other literal can stand there).
+  if (/^\s*`/.test(out.slice(after))) return null;
+  if (PLACE_AFTER_RE.test(masked.slice(after).replace(/^[\s#]+/, " "))) return null;
+  let optional = false;
+  let end = dotIdx - 1;
+  if (bracket) {
+    if (end >= 1 && masked[end] === "." && masked[end - 1] === "?") { optional = true; end -= 2; }
+  } else if (end >= 0 && masked[end] === "?") { optional = true; end--; }
+  while (end >= 0 && /\s/.test(masked[end])) end--;
+  if (end < 0 || !/[A-Za-z0-9_$)\]]/.test(masked[end])) return null;
+  const start = scanVariantOperandStart(masked, end);
+  if (start < 0 || start > end || masked[start] === "#") return null;
+  const operandMasked = masked.slice(start, end + 1);
+  if (operandMasked.includes("?.")) optional = true;
+  // A number literal (`1.variant` is not this), or a member link of a longer name.
+  if (/^\d/.test(operandMasked)) return null;
+  // Before the chain: `++` / `--` / `delete` make it a place; `new X().variant` is
+  // `(new X()).variant` — the operand is the whole `new X()` (review F7); `new X.variant`
+  // constructs `X.variant` (left alone). `for (x.variant of / in …)` assigns it: a place.
+  let b = start - 1;
+  while (b >= 0 && /\s/.test(masked[b])) b--;
+  if (b >= 1 && (masked.slice(b - 1, b + 1) === "++" || masked.slice(b - 1, b + 1) === "--")) return null;
+  if (/\bfor\s*\(\s*$/.test(masked.slice(0, start)) && /^[\s#]*(?:of|in)\b/.test(masked.slice(after))) return null;
+  if (inAssignmentPattern(masked, start)) return null;
+  let opStart = start;
+  if (b >= 0 && /[A-Za-z0-9_$]/.test(masked[b])) {
+    let w = b;
+    while (w >= 0 && /[A-Za-z0-9_$]/.test(masked[w])) w--;
+    const word = masked.slice(w + 1, b + 1);
+    if (word === "delete") return null;
+    if (word === "new") {
+      if (!/\)\s*$/.test(operandMasked)) return null;
+      opStart = w + 1;
+    }
+  }
+  const startFinal = opStart;
+  const operand = out.slice(startFinal, end + 1).trim();
+  // The compiler's own reads: the lowering's IIFE parameter, a compiler temporary
+  // (`_scrml_match_4.variant` inside a match dispatcher's object branch).
+  if (operand === IS_OP_IIFE_LOCAL || /^_{1,2}scrml_[A-Za-z0-9_$]*$/.test(operand)) return null;
+  // The `is .V` lowering's own two reads (`lowerVariantCheck`: `(function(__v){return (typeof __v ===
+  // "object" && __v !== null && typeof __v.variant === "string" ? __v.variant : __v) === …`).
+  // (Token-spaced too: a raw that passed the block splitter reads `(function (__v) { return (typeof …`.)
+  if (operand === "__v" && /\(\s*function\s*\(\s*__v\s*\)\s*\{\s*return\s*\(\s*typeof\s+__v\s*===\s*"object"\s*&&\s*__v\s*!==\s*null\s*&&\s*typeof\s+(?:__v\s*\.\s*variant\s*===\s*"string"\s*\?\s*)?$/.test(out.slice(Math.max(0, start - 200), start))) return null;
+  // Already lowered: `(typeof x === "string" ? x : x.variant)`.
+  const escOp = operand.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  if (new RegExp(`typeof\\s+${escOp}\\s*===\\s*"string"\\s*\\?\\s*${escOp}\\s*:\\s*$`).test(out.slice(0, start))) return null;
+  const trivial = /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(operand);
+  return { start: startFinal, text: lowerVariantTagRead(operand, trivial, optional) };
+}
+
+/**
+ * Review F4 — is the read at `pos` an element of an assignment PATTERN (`[x.variant] = …`,
+ * `({ q: x.variant } = o)`, nested)? Walk out through the enclosing `[` / `{` groups (a `(`
+ * ends the walk): any whose close is followed by `=` (not `==` / `=>`) is a pattern.
+ */
+function inAssignmentPattern(masked: string, pos: number): boolean {
+  // Review H1 — only a pattern's BINDING TARGETS are places. A default (`{ a = x.variant }`,
+  // `[a = x.variant]`), a computed key (`{ [x.variant]: v }`) or anything nested in one is an
+  // ordinary expression: a read. Walk out to the enclosing groups (innermost first; a `(` ends it).
+  const groups: Array<{ open: number; close: number }> = [];
+  let depth = 0;
+  for (let k = pos - 1; k >= 0; k--) {
+    const c = masked[k];
+    if (c === ")" || c === "]" || c === "}") { depth++; continue; }
+    if (c === "(" || c === "[" || c === "{") {
+      if (depth > 0) { depth--; continue; }
+      if (c === "(") break;
+      const close = matchingClose(masked, k);
+      if (close < 0) return false;
+      groups.push({ open: k, close });
+    }
+  }
+  // The outermost group that is a pattern ROOT: assigned to, or a declaration's pattern.
+  let root = -1;
+  for (let g = groups.length - 1; g >= 0; g--) {
+    const { open, close } = groups[g];
+    if (/^[\s#]*=(?![=>])/.test(masked.slice(close + 1)) || /\b(?:const|let|var)\s*$/.test(masked.slice(0, open))) { root = g; break; }
+  }
+  // An escape-hatch pattern target lowered on its own (`asVariantPlaceText`): its outermost
+  // group IS the assigned pattern (the `= value` is emitted elsewhere).
+  if (root < 0 && _variantPlaceText > 0 && groups.length > 0) root = groups.length - 1;
+  if (root < 0) return false;
+  // From the root inward, the position must sit in each level's TARGET region.
+  for (let g = root; g >= 0; g--) {
+    const { open, close } = groups[g];
+    const t = g > 0 ? groups[g - 1].open : pos;
+    const region = targetRegionAt(masked, open, close, t);
+    if (!region || t < region.start || t >= region.end) return false;
+    if (g > 0 && t !== region.start) return false; // a nested group that is not the whole target
+  }
+  return true;
+}
+
+/**
+ * The binding-target span of the element of pattern group [open, close] that contains `t`:
+ * after a level-0 `:` (an object element `key: target`), before a level-0 `=` (a default).
+ */
+function targetRegionAt(m: string, open: number, close: number, t: number): { start: number; end: number } | null {
+  let segStart = open + 1, d = 0;
+  let segEnd = close;
+  for (let j = open + 1; j < close; j++) {
+    const c = m[j];
+    if (c === "(" || c === "[" || c === "{") { d++; continue; }
+    if (c === ")" || c === "]" || c === "}") { d--; continue; }
+    if (d === 0 && c === ",") {
+      if (j < t) segStart = j + 1;
+      else { segEnd = j; break; }
+    }
+  }
+  let colon = -1, eq = -1;
+  d = 0;
+  for (let j = segStart; j < segEnd; j++) {
+    const c = m[j];
+    if (c === "(" || c === "[" || c === "{") { d++; continue; }
+    if (c === ")" || c === "]" || c === "}") { d--; continue; }
+    if (d !== 0) continue;
+    if (c === ":" && colon < 0 && eq < 0 && m[open] === "{") colon = j;
+    if (c === "=" && m[j + 1] !== "=" && m[j + 1] !== ">" && m[j - 1] !== "=" && m[j - 1] !== "!" && m[j - 1] !== "<" && m[j - 1] !== ">" && eq < 0) eq = j;
+  }
+  let start = colon >= 0 ? colon + 1 : segStart;
+  // An object element with no `key:` is a shorthand binding (an identifier): no member target.
+  if (m[open] === "{" && colon < 0) {
+    if (!/^\s*\.\.\./.test(m.slice(segStart, segEnd))) return null;
+  }
+  while (start < segEnd && /\s/.test(m[start])) start++;
+  if (/^\.\.\./.test(m.slice(start, start + 3))) { start += 3; while (start < segEnd && /\s/.test(m[start])) start++; }
+  return { start, end: eq >= 0 ? eq : segEnd };
+}
+
+/** `_scanChainStartLeft`, `?.`-aware: the start of the member / call / index chain ending at `endIdx`. */
+function scanVariantOperandStart(s: string, endIdx: number): number {
+  let pos = endIdx;
+  let chainStart = endIdx;
+  while (pos >= 0) {
+    while (pos >= 0 && /\s/.test(s[pos])) pos--;
+    if (pos < 0) break;
+    const c = s[pos];
+    if (c === ")" || c === "]") {
+      const o = c === ")" ? _findMatchingOpenLeft(s, pos, "(", ")") : _findMatchingOpenLeft(s, pos, "[", "]");
+      if (o === -1) return -1;
+      chainStart = o;
+      pos = o - 1;
+      // `x?.(…)` / `x?.[…]`
+      let q = pos;
+      while (q >= 0 && /\s/.test(s[q])) q--;
+      if (q >= 1 && s[q] === "." && s[q - 1] === "?") { pos = q - 2; continue; }
+      // A grouping paren (nothing callable to its left) is the chain base.
+      if (c === ")" && !(q >= 0 && /[A-Za-z0-9_$)\]]/.test(s[q]))) return chainStart;
+      if (c === "]" && !(q >= 0 && /[A-Za-z0-9_$)\]]/.test(s[q]))) return chainStart;
+      if (q >= 0 && /[A-Za-z0-9_$]/.test(s[q])) {
+        // A keyword before a grouping paren (`return (x)`, `typeof (x)`) is not a callee.
+        let w = q;
+        while (w >= 0 && /[A-Za-z0-9_$]/.test(s[w])) w--;
+        if (PAREN_PRECEDING_KEYWORDS.has(s.slice(w + 1, q + 1))) return chainStart;
+      }
+      continue;
+    }
+    if (/[A-Za-z0-9_$]/.test(c)) {
+      while (pos >= 0 && /[A-Za-z0-9_$]/.test(s[pos])) pos--;
+      chainStart = pos + 1;
+      let scan = pos;
+      while (scan >= 0 && /\s/.test(s[scan])) scan--;
+      if (scan >= 0 && s[scan] === ".") {
+        // `a.b` / `a?.b` — keep walking (a `..` spread or a number's `.` ends the chain).
+        let prev = scan - 1;
+        if (prev >= 0 && s[prev] === "?") prev--;
+        if (prev >= 0 && s[prev] === ".") return chainStart;
+        pos = prev;
+        chainStart = scan;
+        continue;
+      }
+      if (scan >= 0 && s[scan] === "@") chainStart = scan;
+      return chainStart;
+    }
+    return chainStart;
+  }
+  return chainStart;
+}
+
 export function rewriteEqualityOps(expr: string): string {
   return lowerEqualityOps(expr);
 }
@@ -2784,6 +3293,9 @@ const clientPasses: RewritePass[] = [
   (s, _ctx) => rewriteInlineFunctionBodies(s),
   // Pass 18
   (s, _ctx) => rewriteEqualityOps(s),
+  // Pass 19 (S470) — a `.variant` value read → the variant tag read (last: it reads
+  // the finished JS, after the equality lowering wrapped its operands).
+  (s, _ctx) => rewriteVariantTagReads(s),
 ];
 
 // ---------------------------------------------------------------------------
@@ -2852,6 +3364,8 @@ const serverPasses: RewritePass[] = [
   (s, _ctx) => rewriteFnKeyword(s),
   // Pass 15
   (s, _ctx) => rewriteInlineFunctionBodies(s),
+  // Pass 16 (S470) — a `.variant` value read → the variant tag read (client Pass 19).
+  (s, _ctx) => rewriteVariantTagReads(s),
 ];
 
 // ---------------------------------------------------------------------------
@@ -3087,7 +3601,8 @@ export function rewriteTemplateAttrValue(value: string): TemplateAttrResult {
   let result = "`";
   for (const seg of sliceTemplateText(value ?? "", { bare: true }).segments) {
     if (seg.kind === "expr") {
-      result += `\${${rewriteAtRefTokens(seg.text, reactiveVars)}}`;
+      // S470 (review F1 audit) — the interpolation is emitted as code: lower a `.variant` read.
+      result += `\${${rewriteVariantTagReads(rewriteAtRefTokens(seg.text, reactiveVars))}}`;
       continue;
     }
     const q = seg.text;

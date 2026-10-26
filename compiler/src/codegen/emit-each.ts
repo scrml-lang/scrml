@@ -1653,7 +1653,8 @@ function renderTemplateChildToJs(
       // `:`-shorthand body — the single expression becomes the element's body:
       // mounted for flow content, `.value` for RCDATA (s328), `.textContent`
       // otherwise. Rewrite `@.` to iterVar so `<li : @.name>` → `item.name`.
-      const exprRewritten = rewriteContextualSigil(shorthandExpr, iterVarName);
+      // S470 (review F1) — emitted as code below: lower a `.variant` value read.
+      const exprRewritten = eachVariantTagReads(rewriteContextualSigil(shorthandExpr, iterVarName));
       // g-each-nested-markup-interp-stringifies residual-1 — a shorthand body
       // that is a CALL to a same-file markup-returning fn (`<li : badge(it)>`)
       // must MOUNT the returned DOM node, at parity with the longhand
@@ -3905,7 +3906,8 @@ function resolveKeyFnBody(
     const trimmed = node.keyExprRaw.trim();
     if (trimmed === "__index__") return iterIdxName;
     // Rewrite `@.field` and bare `as name` references inside the expr.
-    const rewritten = rewriteContextualSigil(trimmed, iterVarName);
+    // S470 (review F1) — a key expression is code: lower a `.variant` value read.
+    const rewritten = eachVariantTagReads(rewriteContextualSigil(trimmed, iterVarName));
     return rewritten;
   }
   // of= form: default key is the index.
@@ -4864,7 +4866,18 @@ export function emitEachBodyRenderForFile(
 function rewriteAtCellAccess(text: string): string {
   if (!text || typeof text !== "string") return text;
   // Order matters: handle `@ident` (excluding `@.`).
-  return text.replace(/@([A-Za-z_$][A-Za-z0-9_$]*)/g, (_m, name) => `_scrml_reactive_get(${JSON.stringify(name)})`);
+  const out = text.replace(/@([A-Za-z_$][A-Za-z0-9_$]*)/g, (_m, name) => `_scrml_reactive_get(${JSON.stringify(name)})`);
+  // S470 (s470-unit-variant-tag-read, review F1) — every caller emits the result as
+  // CODE (a row expression, an `in=` / `of=` iterable, an `<empty :>` body), never
+  // through the client pipeline: lower a `.variant` value read to the tag read here.
+  return eachVariantTagReads(out);
+}
+
+/** rewrite.ts `rewriteVariantTagReads`, required lazily (emit-each ↔ rewrite import order). */
+function eachVariantTagReads(code: string): string {
+  if (!code || !/\bvariant\b/.test(code)) return code;
+  const { rewriteVariantTagReads } = require("./rewrite.ts") as { rewriteVariantTagReads: (s: string) => string };
+  return rewriteVariantTagReads(code);
 }
 
 /**
