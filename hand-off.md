@@ -39,9 +39,11 @@ Branch `s470-promise-all-batch-elements` (worktree `.claude/worktrees/agent-a96f
 5. **Enum payload field named `variant`:** it collides with the tag read. Rec: refuse the field name (needs a SPEC sentence).
 6. **Is `.variant` a user-facing member?** #1571 made it read the tag on unit variants too. Rec: yes; document it in §18.
 7. **§34 wording** for E-ERROR-014 (gapped `! {`) and E-TRY-NOT-IN-SCRML. impl#1 emits them; the rows need owner-approved text.
-8. **Carried from S469 §3** (still open): `_ e` allow-list as the §18.6.1 rule; loop value form (a)–(d); tape-grants Q1–Q8; six CSS items; statement match with pure arms → E-STMT-NO-EFFECT; the `E-IMPL1-LIFT-GATE-UNTRACKED` name. The runtime-ratchet question is answered for this session's security lanes only (user-voice 552a379).
+8. **Make the `windows` CI job a required check?** It caught a security fail-open (above) that no required check saw. Rec: yes. It costs about 15 min per PR, but it runs in parallel with the others.
+9. **Carried from S469 §3** (still open): `_ e` allow-list as the §18.6.1 rule; loop value form (a)–(d); tape-grants Q1–Q8; six CSS items; statement match with pure arms → E-STMT-NO-EFFECT; the `E-IMPL1-LIFT-GATE-UNTRACKED` name. The runtime-ratchet question is answered for this session's security lanes only (user-voice 552a379).
 
 ## 4. Owed lanes and gaps (priority order)
+- **NEW HIGH, Windows only (S470): `g-windows-imported-alias-chain-refusal-not-emitted-s470`.** The `windows` CI job has failed on main since #1563: 10 imported-alias cases in `enum-value-member-read-s470.test.js` get no E-TYPE-004. So on Windows a field read through an imported alias chain is not refused. The job is not required, so nothing blocked it. Do this first: trace the path-key mismatch, then decide whether `windows` becomes required (owner Q).
 - **NEW HIGH (S470, pre-existing on base):** `g-impl1-null-in-expression-position-arm-not-refused-s470`. `(local(p) !{ _ :> [p].find(isOk) != null }) ? …` logs in with either password (library and fullstack). PA re-rated MED→HIGH (wrong-password login). Next security lane.
 - **HIGH carried from S469, still open:**
   - `g-unregistered-upper-tag-if-ssr-first-paint-s469`;

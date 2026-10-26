@@ -30,7 +30,7 @@
 | Severity | Open (owed by impl#1, the TS compiler) | Carried (owed by the bootstrap; xfail on impl#1) |
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 261 | 5 |
+| HIGH | 262 | 5 |
 | MED | 702 | 8 |
 | LOW | 528 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
@@ -427,6 +427,11 @@ The code comment says so: "fail closed: a `=` in a string counts too". Rare tail
 ### g-impl1-e-error-012-delete-tail-unclassified-s470 — a `delete` arm tail is not recognised by E-ERROR-012's yields / falls-through classifier, whose write rule knows only assignment and `++` / `--` — `NEW S470 (review of #1577); LOW; open`
 
 Listed as a follow-up on #1577. Not measured here. Decide whether a `delete` tail falls through (it is a write) and add it to `exprHasWrite`.
+
+<!-- @gap id=g-windows-imported-alias-chain-refusal-not-emitted-s470 sev=HIGH status=open locus=UNTRACED(cross-file enum / alias resolution added by #1563 — likely a path-key separator mismatch on Windows) prov=empirical:S470-CI-windows-job(main 5f4b01533 run 40350986599, PR #1581 run 40416129494) -->
+### g-windows-imported-alias-chain-refusal-not-emitted-s470 — on Windows, the #1563 field-read refusal (E-TYPE-004 / E-TYPE-031) is not emitted when the enum type arrives through an imported alias, an alias of an alias, a re-export, or an imported function's return type. The same 10 `compiler/tests/unit/enum-value-member-read-s470.test.js` cases fail on main and on #1581: K-ALIAS2, IMP-STRUCT, EXPORT-STAR, both DEPTH cases, I1, I2, I3, I-cross and STAR-PREC. `codesOf` returns `[]` where the test expects `E-TYPE-004` — `NEW S470; HIGH (SECURITY: fail-open on Windows builds); open`
+
+The failures were read from the CI `windows` job logs, not reproduced on a Windows machine. The job is not a required check, so the failure was not caught when #1563 landed. Linux and macOS pass. A Windows build of a multi-file program can therefore read a payload field off an imported-alias enum value without the refusal. Fix direction: find where the cross-file resolver keys files (probably a raw path with `\` against a `/`-normalised import specifier), and make the `windows` job required, or at least make failing it block a security landing.
 
 <!-- @gap id=g-promise-all-batch-await-text-disables-batching-s470 sev=LOW status=open locus=compiler/src/codegen/scheduling.ts(batch element check — `/\bawait\b/` on emitted text) prov=dispatch:s470-promise-all-batch-elements(review follow-up);review:S470-#1581-round-2(N1, ~/.cache/scrml/review/s470-lj2-probes s4.mjs E16) -->
 ### g-promise-all-batch-await-text-disables-batching-s470 — a string literal containing the word "await" (`const k = "please await"`) next to a batchable `const v = isOk(p)` sends the whole group to the sequential path, because the element check matches `/\bawait\b/` on the emitted text — `NEW S470 (review of #1581); LOW; open`
