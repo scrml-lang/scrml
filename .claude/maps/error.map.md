@@ -1,6 +1,23 @@
 # error.map.md
 # project: scrml
-# updated: 2026-10-24T21:10:17Z  commit: e0c4ad6cc
+# updated: 2026-10-26T22:39:28Z  commit: 3d17013f8
+# ⛑ **S470 STAMP — `e0c4ad6cc` -> `3d17013f8` (origin/main). 343 COMMITS, 43 first-parent (s470 PRs #1538 … #1580 + bot/facts-regen merges).
+# Incremental refresh on branch `s470-maps`; source tree = `3d17013f8`. FIGURES (ls-tree at 3d17013f8): `compiler/src` 324 files (+5 added, none deleted),
+# 1,842 test files (`compiler/tests`, grep '.test.'), `compiler/SPEC.md` 51,750 lines, 2,068 `case.scrml`. Test suites NOT re-run; diagnostic code census NOT re-audited
+# (S468 error.map figures stand; consult FACTS.md for current counts).
+# THEMES (verified in the first-parent log e0c4ad6cc..3d17013f8): security limb (impl#1) — E-VALUE-SERVER-CALL render-position refusal (#1547), E-IMPL1-ACTION-NOT-AWAITED
+# action-body await (#1554), async colouring scope (#1558), `when…changes` latest-wins (#1560), typed payload binders (#1563), host `fetch` as a waiting value (#1566, #1572),
+# bang-catch refusal E-TRY-NOT-IN-SCRML (#1568), unit-variant `.variant` tag read (#1571), nested handler-arm await (#1576), impl#1 emits E-ERROR-012 / await residue (#1577);
+# also #1551 whole-error-binder escapes, #1538 structural-else guard, #1539 server-return match await, #1557 inbox addressees, #1544 inbox-debt probe, gaps batches (#1546/1549/1550/1553/1556/1561/1564/1569/1575/1580).
+# NEW compiler/src modules: codegen/`render-waiting-calls.ts` (render-position / sync-action check for waiting-value calls, E-VALUE-SERVER-CALL), codegen/`host-promise-globals.ts` +
+# codegen/`host-promise-names.ts` (host Promise global `fetch` and its globalThis/window/self spellings as one pseudo name, SPEC §13.7/§13.8), `gate-attr-refusal.ts` (E-GATE-UNSUPPORTED-HOST:
+# `if=`/`show=` on a host that ignores it; was in-flight at S469, now on main), `stdlib-failable-errors.ts` (declared error enum per failable `scrml:` export, for `!{}` payload binders).
+# Heaviest edits (added+deleted lines): type-system.ts (~2,990), codegen/render-waiting-calls.ts (~1,750, new), ast-builder.js (~1,090), codegen/{rewrite.ts, emit-logic.ts, emit-control-flow.ts,
+# emit-library-shared.ts, arm-structure.ts, index.ts, js-async-analysis.ts, emit-expr.ts}.
+# TESTS: `compiler/tests/integration/security-failable-pack/` +101 files (77 in `shapes/`: families f1-f26, l1-l18, n27, n29, s4-s23, t1-t18; 24 top-level: pinned-class.js, r3…r20 `rN-shapes.js` / `rN-pinned.js`
+# round files); +20 `compiler/tests/unit/*` files, +1 integration, +1 browser test. `scripts/` new: inbox-debt.ts (every message on the `inbox` branch is HANDLED or OWED).
+# MAP-STAMP RULE: watermark advanced to `3d17013f8` (was e0c4ad6cc; 343 commits). Detail sections below are the S468 text + S469 stamp, CARRIED, and may omit S469/S470 specifics: grep source.
+# ━━━━━━━ BELOW IS THE PRIOR HEADER (stamp `e0c4ad6cc`), CARRIED. ━━━━━━━
 # ⛑ **S469 STAMP — `5c43c3b8e` -> `e0c4ad6cc` (origin/main). 704 COMMITS, 85 first-parent (~44 s469 PRs #1444 … #1537 + bot/facts-regen merges).
 # Incremental refresh on branch `wrap/s469`; source tree = `e0c4ad6cc`. FIGURES (git ls-tree at e0c4ad6cc): `compiler/src` 319 files (+15 added,
 # none deleted/renamed), 1,820 test files (`compiler/tests`, grep '.test.'), `compiler/SPEC.md` 51,635 lines, 2,067 `case.scrml`. Test suites NOT re-run; diagnostic
