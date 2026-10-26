@@ -6,7 +6,7 @@ import { isMetaKind } from "../types/ast.ts";
 import { emitLogicNode } from "./emit-logic.js";
 import { emitEnumVariantObjects } from "./emit-client.js";
 import { isServerOnlyNode, containsSqlOrTransaction } from "./collect.ts";
-import { rewriteNotKeyword, rewriteIsOperator } from "./rewrite.ts";
+import { rewriteNotKeyword, rewriteIsOperator, rewriteVariantTagReads } from "./rewrite.ts";
 import { lowerEqualityOps } from "./string-equality-lowering.ts";
 import type { CompileContext } from "./context.ts";
 // Seam-A colorless-async (GITI-037) — the structured async-fn emitter + its
@@ -1942,6 +1942,9 @@ export function generateLibraryJs(
           blockText = blockText.split("\n").map(line =>
             line.trimStart().startsWith("//") ? line : rewriteIsOperator(rewriteNotKeyword(line))
           ).join("\n");
+          // S470 (review F5) — over the WHOLE text, not per line: a multi-line template
+          // literal's content is masked as a literal only when the reader sees its backticks.
+          blockText = rewriteVariantTagReads(blockText);
           // §45.1 / §45.4 (S468) — this verbatim path re-printed scrml `==` / `!=`
           // as JS LOOSE `==` (`export const SAME = { a: 1 } == { a: 1 }` was
           // always false). Lower each operator from the parsed module text, the
@@ -2149,6 +2152,8 @@ export function generateLibraryJs(
         text = text.split("\n").map(line =>
           line.trimStart().startsWith("//") ? line : rewriteIsOperator(rewriteNotKeyword(line))
         ).join("\n");
+        // S470 (review F5) — whole text (a multi-line template literal stays a literal).
+        text = rewriteVariantTagReads(text);
 
         lines.push(text);
         lines.push("");

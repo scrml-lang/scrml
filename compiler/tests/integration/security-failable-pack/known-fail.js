@@ -63,6 +63,9 @@ export const UNJUDGED = {
   "l5/B imported enum + local same-name, match e": "g-library-tool-cross-file-import-source-path-s469",
   "l5/B imported enum, no local enum, match e": "g-library-tool-cross-file-import-source-path-s469",
   "l5/B imported from a third file enum + local same-name, match e": "g-library-tool-cross-file-import-source-path-s469",
+  // S470 s470-unit-variant-tag-read — r16 l14: the `.variant` read off an imported function's unit variant;
+  // the library module imports `./h.scrml` (a source path), so it cannot load. Its t14 / s19 / f22 twins PASS.
+  "l14/10 imported function": "g-library-tool-cross-file-import-source-path-s469",
   "l5/B imported from a third file enum, no local enum, match e": "g-library-tool-cross-file-import-source-path-s469",
   "t5/B imported from a third file enum + local same-name, match e": "g-library-tool-cross-file-import-source-path-s469",
   "t5/B imported from a third file enum, no local enum, match e": "g-library-tool-cross-file-import-source-path-s469",
