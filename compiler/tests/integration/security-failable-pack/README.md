@@ -38,7 +38,7 @@ SERVER function is judged end to end.
 - a shape not in `KNOWN_FAIL` / `BY_DESIGN_LOGS_IN` logs in on a wrong password;
 - a `KNOWN_FAIL` shape stops doing so (it was fixed: delete the entry);
 - a shape not in `UNJUDGED` comes out `UNJUDGED`, or an `UNJUDGED` one starts being judged;
-- the corpus stops holding exactly 4721 shapes (`EXPECTED_SHAPE_COUNT`); a list entry names no shape. Plus S469 s469-server-return-match-await (457 shapes): s4–s10 server, f1–f7 fullstack, l1–l5 library, t1–t5 tool — a failable `match` subject awaited in every position, `fail` payloads keyed per enum in every emission mode, one resolver for a callee's error enum, and the `_ e` whole-error binder allow-list.
+- the corpus stops holding exactly 4765 shapes (`EXPECTED_SHAPE_COUNT`); a list entry names no shape. Plus S469 s469-server-return-match-await (457 shapes): s4–s10 server, f1–f7 fullstack, l1–l5 library, t1–t5 tool — a failable `match` subject awaited in every position, `fail` payloads keyed per enum in every emission mode, one resolver for a callee's error enum, and the `_ e` whole-error binder allow-list.
 
 It deliberately does NOT pin each shape's class: a shape moving from `PASS-REFUSED` to `PASS` is a
 compiler improvement, not a regression.
@@ -416,6 +416,26 @@ inline handler, a render `if=` gate and a derived cell; two VALID sync-arm contr
 F3: the fullstack and library nested-lift shapes were refused on base and accepted on round 0 (the
 regression); refused again. A statement-position `lift` on the server boundary (server / library / tool)
 runs as `return` on all three trees — pre-existing, not a regression (candidate gap).
+
+### Fix round 2 (re-review of 0cd4cab0a) — comments in an arm, callbacks in an expression-position arm, +44 shapes
+
+`round2Shapes(side)`, every side: R2 — a `//` / `/* */` comment naming `grant()` (a local closure that logs in)
+inside a block arm (expression position with a tail expression / a `lift`, a `const` binding, a trailing comment,
+statement position, and a no-comment VALID control); R1 — a waiting call inside a callback, an IIFE or a local
+alias inside an expression-position arm. FAIL counts, base `55de8639c` → round 1 `0cd4cab0a` → round 2:
+
+| family | base | round 1 | round 2 |
+|---|---|---|---|
+| s21 (+11) | 3 | 4 | 0 |
+| f24 (+11) | 3 | 5 | 0 |
+| l16 (+11) | 3 | 8 | 0 |
+| t16 (+11) | 8 | 8 | 0 |
+
+The comment text was joined into the arm body (a COMMENT token's text without its opener): a commented-out
+`grant()` RAN — on base for an arm ending in a bare expression, and from round 0 also for a `lift` arm. The
+library / tool sync-callback and alias checks did not read an expression-position guard's arms. The f24 event-handler
+"several statements" shapes (4) moved PASS-REFUSED → PASS: the re-read arm text now keeps its line breaks, so the
+handler is analysable — executed, PASS.
 
 ## Running
 

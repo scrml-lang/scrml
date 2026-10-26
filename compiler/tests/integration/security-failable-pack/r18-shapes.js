@@ -319,6 +319,81 @@ export function shapesFor(side) {
         @msg = v ? "LOGGED IN" : "rejected"`), undefined]);
   }
   for (const s of exprShapes(side)) out.push(s);
+  for (const s of round2Shapes(side)) out.push(s);
+  return out;
+}
+
+// ── fix round 2 (re-review of 0cd4cab0a) ───────────────────────────────────────────────────────
+// R2 — a `//` / `/* */` comment inside a `!{}` block arm: the arm text was joined from token texts
+// with the comment's TEXT kept and its opener dropped, so a commented-out `grant()` RAN. `grant` is a
+// local closure that sets `granted`; any run of it logs in. (The tail-expression shape failed on
+// base too; the `lift` ones were refused on base and opened by round 0's lift-tail change.)
+// R1 — library / tool: a waiting call inside a callback / IIFE / function value inside an
+// expression-position arm was neither awaited nor refused.
+const GRANT_PRE = `let granted = false
+        const grant = () => { granted = true }`;
+const GRANT_POST = `return granted ? "LOGGED IN" : (v ? "LOGGED IN" : "rejected")`;
+const COMMENT_ARMS = [
+  ["expr position, line comment, tail expression", `const v = (local(p) !{ _ :> {
+            // grant()
+            false
+        } }) == true`],
+  ["expr position, line comment, lift", `const v = (local(p) !{ _ :> {
+            // grant()
+            const no = false
+            lift no
+        } }) == true`],
+  ["expr position, block comment, lift", `const v = (local(p) !{ _ :> {
+            /* grant() */
+            const no = false
+            lift no
+        } }) == true`],
+  ["const binding, line comment, lift", `const v = local(p) !{ _ :> {
+            // grant()
+            const no = false
+            lift no
+        } }`],
+  ["const binding, trailing line comment, lift", `const v = local(p) !{ _ :> {
+            const no = false // grant()
+            lift no
+        } }`],
+  ["statement position, line comment", `let v = true
+        local(p) !{ _ :> {
+            // grant()
+            v = false
+        } }`],
+  ["VALID no comment, lift", `const v = (local(p) !{ _ :> {
+            const no = false
+            lift no
+        } }) == true`],
+];
+const CALLBACK_ARMS = [
+  ["called lambda in a block arm", `return (local(p) !{ _ :> {
+            const f = (x) => isOk(x)
+            lift f(p)
+        } }) ? "LOGGED IN" : "rejected"`],
+  ["IIFE", `return (local(p) !{ _ :> ((x) => isOk(x))(p) }) ? "LOGGED IN" : "rejected"`],
+  ["alias of the async function then call", `return (local(p) !{ _ :> {
+            const f = isOk
+            lift f(p)
+        } }) ? "LOGGED IN" : "rejected"`],
+  ["const-bound parenthesised guard, called lambda", `const v = (local(p) !{ _ :> {
+            const f = (x) => isOk(x)
+            lift f(p)
+        } })
+        return v ? "LOGGED IN" : "rejected"`],
+];
+
+function round2Shapes(side) {
+  const out = [];
+  for (const [n, body] of COMMENT_ARMS) {
+    out.push([`R2 comment in an arm: ${n}`, fnPage(side, `${GRANT_PRE}
+        ${body}
+        ${GRANT_POST}`), undefined]);
+  }
+  for (const [n, body] of CALLBACK_ARMS) {
+    out.push([`R1 waiting call in a callback in an expr-position arm: ${n}`, fnPage(side, body), undefined]);
+  }
   return out;
 }
 

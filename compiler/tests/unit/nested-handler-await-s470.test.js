@@ -266,6 +266,83 @@ describe("fix round 1 — F3: only a value-position TAIL `lift` yields", () => {
   });
 });
 
+describe("fix round 2 — R2: a comment in an arm is trivia, never code", () => {
+  test("parseGuardArmsFromRaw drops `//` and `/* */` comments with their text and keeps line breaks", async () => {
+    const { parseGuardArmsFromRaw } = await import("../../src/ast-builder.js");
+    const arms = parseGuardArmsFromRaw("!{ _ :> {\n // grant()\n /* grant() */ const g = 1\n lift g\n} }", "x.scrml");
+    expect(arms).not.toBeNull();
+    expect(arms[0].handler).not.toMatch(/grant/);
+    expect(arms[0].handler).toMatch(/const g = 1\nlift g/);
+  });
+  for (const [pn, body] of [
+    ["statement guard", `const v = local(p) !{ _ :> {
+            // grant()
+            const no = false
+            lift no
+        } }
+        return v ? "LOGGED IN" : "rejected"`],
+    ["expression guard, tail expression", `const v = (local(p) !{ _ :> {
+            // grant()
+            false
+        } }) == true
+        return v ? "LOGGED IN" : "rejected"`],
+  ]) {
+    test(`${pn}: a commented-out call is not emitted`, () => {
+      const { js } = compile(fnPage(body).replace("function login(p) {", `function grant() { return 1 }
+    function login(p) {`));
+      expect(js).toMatch(/function _scrml_grant_\d+\(\) \{/);
+      // a CALL of it (the declaration aside) would be the comment's text run as code
+      expect(js).not.toMatch(/_scrml_grant_\d+\(\)(?!\s*\{)/);
+    });
+  }
+});
+
+describe("fix round 2 — R1: library mode reads an expression-position guard's arms", () => {
+  const lib = (arm) => `import { hmac } from "scrml:crypto"
+\${
+    type AuthErr:enum = { Denied(reason: string), Gone }
+    function isOk(p) {
+        const h = hmac("k", p)
+        return p == "secret" && h != ""
+    }
+    function local(p)! -> AuthErr {
+        if (p != "secret") fail AuthErr::Denied("bad")
+        return true
+    }
+    export function login(p) {
+        return (local(p) !{ _ :> ${arm} }) ? "LOGGED IN" : "rejected"
+    }
+}
+`;
+  for (const [n, arm] of [
+    ["a called lambda in a block arm", `{
+            const f = (x) => isOk(x)
+            lift f(p)
+        }`],
+    ["an IIFE", `((x) => isOk(x))(p)`],
+    ["a local alias then call", `{
+            const f = isOk
+            lift f(p)
+        }`],
+  ]) {
+    test(`${n} is refused`, () => {
+      const { codes } = compile(lib(arm), "library");
+      expect(codes.some((c) => /^E-ASYNC-/.test(c))).toBe(true);
+    });
+  }
+});
+
+describe("fix round 2 — R3: a sync-only expression guard is still batched", () => {
+  test("a guard whose arms wait on nothing does not end a Promise.all batch", () => {
+    const { js, codes } = compile(fnPage(`const a = isOk(p)
+        const b = (local(p) !{ _ :> false }) == true
+        const c = isOk("z")
+        return a && b && c ? "LOGGED IN" : "rejected"`));
+    expect(codes).toEqual([]);
+    expect(loginOf(js)).toMatch(/Promise\.all/);
+  });
+});
+
 describe("--mode library: the arm is awaited (server-boundary lowering)", () => {
   test("a nested handler and a helper in an arm", () => {
     const { js, codes } = compile(`import { hmac } from "scrml:crypto"

@@ -20,6 +20,7 @@ import { extractCalleeNames, buildCalleeImportMap } from "./scheduling.ts";
 import { splitMultiArmString, parseMatchArm } from "./emit-control-flow.ts";
 import { parseExprToNode, guardCallArmsRaw, hasLostTrailingContent } from "../expression-parser.ts";
 import { parseGuardArmsFromRaw } from "../ast-builder.js";
+import { armBlockStatementsDetailed } from "../arm-body-statements.ts";
 import { templateInterpolationPayloads } from "../interpolation-extent.ts";
 import { isPromiseReturningImportedCallee } from "../module-resolver.js";
 import { hostPromiseMemberOf, HOST_FETCH_MEMBER } from "./host-promise-names.ts";
@@ -254,6 +255,34 @@ function matchArmTextCallees(n: ASTNode, out: Set<string>, guardNestedFnValues: 
  * reader refuses are token-scanned whole (fail closed: the function stays async). Not
  * recursive — the operand is the caller's walk.
  */
+/**
+ * S470 (fix round 2, R1) — the parsed bodies of an expression-position `!{ }` handler's arms (a
+ * braced body's statements, else the arm's expression), or [] for anything else. A body the
+ * readers cannot parse is returned as an escape hatch over its text, which every walker treats as
+ * un-awaitable (fail closed).
+ */
+export function exprGuardArmBodies(n: ASTNode): unknown[] {
+  if (!n || n.kind !== "call") return [];
+  const raw = guardCallArmsRaw(n as never);
+  if (raw === null) return [];
+  const hatch = (text: string): unknown => ({ kind: "escape-hatch", raw: text, nativeKind: "Unparsed" });
+  let arms: Array<{ handler?: unknown; handlerExpr?: unknown }> | null = null;
+  try { arms = parseGuardArmsFromRaw(raw, "") as Array<{ handler?: unknown; handlerExpr?: unknown }> | null; } catch { arms = null; }
+  if (!arms) return [hatch(raw)];
+  const out: unknown[] = [];
+  for (const arm of arms) {
+    const h = typeof arm?.handler === "string" ? arm.handler.trim() : "";
+    if (!h) continue;
+    if (h.startsWith("{") && h.endsWith("}")) {
+      const r = armBlockStatementsDetailed(h);
+      out.push(r && r.ok && Array.isArray(r.stmts) ? r.stmts : hatch(h));
+    } else {
+      out.push(arm.handlerExpr && typeof arm.handlerExpr === "object" ? arm.handlerExpr : hatch(h));
+    }
+  }
+  return out;
+}
+
 export function guardArmTextCallees(n: ASTNode, out: Set<string>, guardNestedFnValues = false): void {
   if (!n || n.kind !== "call") return;
   const raw = guardCallArmsRaw(n as never);
@@ -979,6 +1008,8 @@ export function collectAliasedAsyncCalls(
       }
       if (rhs && rhs !== n.name) declToRhs.set(n.name, rhs);
     }
+    // S470 (fix round 2, R1) — an expression-position `!{ }` handler's arms (a string on the node).
+    if (n.kind === "call") for (const b of exprGuardArmBodies(n)) collectAliases(b);
     for (const key of Object.keys(n)) {
       if (key === "span") continue;
       const v = n[key];
@@ -1019,6 +1050,7 @@ export function collectAliasedAsyncCalls(
         const key = `${name}@${sp.start ?? -1}`;
         if (!seen.has(key)) { seen.add(key); out.push({ alias: name, resolved: aliasToResolved.get(name)!, span: n.span }); }
       }
+      for (const b of exprGuardArmBodies(n)) findCalls(b);
     }
     for (const key of Object.keys(n)) {
       if (key === "span") continue;
@@ -1163,6 +1195,15 @@ export function collectNonAwaitableAsyncCalls(
     const k = n.kind as string | undefined;
     const here = anchorDiagnosticSpan(n.span, anchor);
     const at = (span: unknown): unknown => anchorDiagnosticSpan(span, anchor);
+    // S470 s470-nested-handler-await (fix round 2, R1) — an EXPRESSION-position `!{ }` handler is a
+    // placeholder call whose arms are a string, so this walk never reached an arm: a waiting call
+    // inside a callback in an arm (`{ const f = (x) => isOk(x); lift f(p) }`, an IIFE, a function
+    // value) was neither awaited nor refused in library / tool mode, and the guard yielded a
+    // pending Promise. Each arm is read with the statement guard's own readers — a braced body's
+    // parsed statements, else the arm's expression — and walked like the arm of a statement guard.
+    if (k === "call") {
+      for (const armBody of exprGuardArmBodies(n)) walk(armBody, insideCallback, here);
+    }
     // Raw escape-hatch (block-body callback / raw JS) or template `.raw` — emitted
     // VERBATIM, so any async call inside is un-awaitable regardless of nesting.
     if ((k === "escape-hatch" || (k === "lit" && n.litType === "template")) && typeof n.raw === "string") {
