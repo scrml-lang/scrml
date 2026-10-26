@@ -361,3 +361,19 @@ which would be a new divergence. Not built; no code was changed in this round.
   `<timer>`; an `<onTransition>` body; the opener; a handler attribute; a server function; library mode; yielding /
   leaving / `fail` arms and statement position ACCEPTED; and the `match` half.
 - Full run after migration: unit + integration + conformance **42432 pass / 0 fail**. snippet-gate 113 / 0.
+- **Merged origin/main 8f65bb0a1** (#1571 s470-unit-variant-tag-read, r16 +199): EXPECTED_SHAPE_COUNT 3653 + f23 47
+  = **3700**. The pack's own count test passes, and the full pre-commit run with the whole pack passed: 48438 / 0.
+- **R26 with digests, the whole lane against an extracted origin/main 8f65bb0a1 (3618 files, every artifact hashed).**
+  - Code changes:
+    - `docs/changes/s441-…/repro/other-contexts.scrml` newly E-IMPL1 (the round-0 justified reset).
+    - `samples/compilation-tests/error-004-in-logic.scrml` and `samples/login.scrml` (both already refused) gain
+      E-ERROR-012.
+  - Emission changes:
+    - `conformance/cases/engine/s437-braceless-else-in-effect-bodies`: hook-body re-indentation only (diffed: the
+      async-host pass re-prints the body; no `async`, no `await`) plus the content-hashed build id.
+    - Two refused files differ from run to run on BOTH compilers.
+  - Everything else is identical (3558).
+- `docs/bootstrap-conformance.md` regenerated: the migrated cases turn one bootstrap FAIL (E-ERROR-012, which the
+  bootstrap already emits) into a PASS.
+- **CI job commands on the final tree:** all exit 0, except facts --check (STALE, WARN-only, bot-owned).
+  bootstrap-conformance was stale until the regeneration above.
