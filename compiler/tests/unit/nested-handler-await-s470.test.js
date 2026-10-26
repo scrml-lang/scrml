@@ -333,13 +333,26 @@ describe("fix round 2 — R1: library mode reads an expression-position guard's 
 });
 
 describe("fix round 2 — R3: a sync-only expression guard is still batched", () => {
+  // S470 s470-promise-all-batch-elements (merged after this lane): a decl whose initializer has a call
+  // under an operator (`(…) == true`) is never a batch ELEMENT — an independent one is emitted in place
+  // and ends the batch there, whatever its arms call. What R3 keeps is the boundary rule itself: a
+  // sync-only guard in a DEPENDENT decl (skipped, S212) does not end the batch of its neighbours, while
+  // a guard whose arms wait does (the twin below).
   test("a guard whose arms wait on nothing does not end a Promise.all batch", () => {
     const { js, codes } = compile(fnPage(`const a = isOk(p)
-        const b = (local(p) !{ _ :> false }) == true
+        const b = (local(a) !{ _ :> false }) == true
         const c = isOk("z")
         return a && b && c ? "LOGGED IN" : "rejected"`));
     expect(codes).toEqual([]);
     expect(loginOf(js)).toMatch(/Promise\.all/);
+  });
+  test("twin: a guard whose arm waits DOES end the batch", () => {
+    const { js, codes } = compile(fnPage(`const a = isOk(p)
+        const b = (local(a) !{ _ :> isOk(p) }) == true
+        const c = isOk("z")
+        return a && b && c ? "LOGGED IN" : "rejected"`));
+    expect(codes).toEqual([]);
+    expect(loginOf(js)).not.toMatch(/Promise\.all/);
   });
 });
 

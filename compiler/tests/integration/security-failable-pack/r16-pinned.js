@@ -1,6 +1,13 @@
 // R16_PINNED — the pinned class of every r16-shapes.js shape (S470 s470-unit-variant-tag-read; families
 // s19 / f22 / l14 / t14). Spread into PINNED_CLASS (pinned-class.js). Regenerate from
 // `classify.js --json <family>/` — never by hand-editing to make the suite pass.
+// Re-pinned by s470-promise-all-batch-elements (F4: a destructuring decl beside a Promise.all seed is a
+// batch boundary, emitted in place): f22 "22 H1 object pattern default" / "array pattern default" /
+// "default member of an object" PASS-REFUSED -> PASS, and "default literal key" PASS-REFUSED -> PASS-DENY.
+// They were refused only because the batch emitted the pattern as a `const [...]` name (invalid JS,
+// E-CODEGEN-INVALID-LOGIC); their no-batch twins compiled on main. The PASS-DENY one now reaches a
+// pre-existing defect its twin had on main: a quoted key in a pattern default loses its quotes
+// (`{ a = x["variant"] }` -> `x[variant]`, a ReferenceError — fail closed).
 // Round 0 (118 shapes) on base d582ae04f: 88 FAIL, 28 PASS, 1 PASS-REFUSED, 1 UNJUDGED.
 // Fix round 1 (+47) on be176f6ff: 32 FAIL (F1 each rows, F2 destructuring, F3 literal keys, F6 qualified
 // `is`), 6 PASS-REFUSED (incl. the 4 F4 swap regressions), 3 PASS-500 (F2 `let` default); base accdd5f2
@@ -86,10 +93,10 @@ export const R16_PINNED = {
   "f22/15 F2 destructure let with default": "PASS",
   "f22/15 F2 destructure nested": "PASS",
   "f22/21 G1 array element pattern": "PASS-REFUSED",
-  "f22/22 H1 object pattern default": "PASS-REFUSED",
-  "f22/22 H1 array pattern default": "PASS-REFUSED",
-  "f22/22 H1 default literal key": "PASS-REFUSED",
-  "f22/22 H1 default member of an object": "PASS-REFUSED",
+  "f22/22 H1 object pattern default": "PASS",
+  "f22/22 H1 array pattern default": "PASS",
+  "f22/22 H1 default literal key": "PASS-DENY",
+  "f22/22 H1 default member of an object": "PASS",
   "f22/22 H1 assignment pattern default": "PASS-DENY",
   "f22/16 F3 literal key": "PASS",
   "f22/16 F3 optional literal key": "PASS",

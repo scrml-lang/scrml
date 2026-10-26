@@ -8,6 +8,7 @@ import { R9_PINNED } from "./r9-pinned.js";
 import { R18_PINNED } from "./r18-pinned.js";
 import { R16_PINNED } from "./r16-pinned.js";
 import { R19_PINNED } from "./r19-pinned.js";
+import { R21_PINNED } from "./r21-pinned.js";
 import { R20_PINNED } from "./r20-pinned.js";
 
 export const PINNED_CLASS = {
@@ -1263,6 +1264,8 @@ export const PINNED_CLASS = {
   ...R9_PINNED,
   // S470 s470-render-residue-host-promises — r19-shapes.js (f25), every shape pinned (r19-pinned.js).
   ...R19_PINNED,
+  // S470 s470-promise-all-batch-elements — r21-shapes.js (s24 / f27 / l19 / t19), every shape pinned (r21-pinned.js).
+  ...R21_PINNED,
   // S470 s470-host-fetch-followups — r20-shapes.js (s23 / f26 / l18 / t18), every shape pinned (r20-pinned.js).
   ...R20_PINNED,
   // S470 s470-typed-payload-binders — r11-shapes.js (s14 / f17 / l9 / t9), from a run (fams.mjs). "1 …" FAIL on
