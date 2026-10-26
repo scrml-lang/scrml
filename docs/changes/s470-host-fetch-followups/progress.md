@@ -46,3 +46,21 @@ Non-browser sides fetch a `data:` URL: awaited → a 200 Response; un-awaited �
 Found while building it: a bare `fetch(…)` inside a SERVER function resolves to the server module's own
 exported request handler (`fetch`), returning null — candidate gap (s23 has no bare-fetch control).
 EXPECTED_SHAPE_COUNT 3094 → 3120; r20-pinned.js. Unit tests: host-fetch-followups-s470.test.js (12).
+
+## R26 with digests — 4067 files, base fcaa8b84b vs head (pre-merge)
+newly rejected 0; emitted JS changed on a file that compiles on both: 0; code changes only in stdlib/
+(harness artefact; each compiler over its OWN stdlib: 54 files, 0 code / 0 emit diffs).
+
+## Merge + CI (after merging origin/main ffbcf4432 = #1566)
+All CI job commands exit 0 (types-gate, root tests, snippet-gate, claim-gate, corpus-compile-floor,
+md-shim, conflict-marker, spec-index, delta-lint, ci-shards, s34-census, unit + conformance, pretest,
+integration + lsp + commands, todomvc, browser-baseline, lint-no-default-arm, slices, e2e-render-map,
+host-global-scan, gen-bootstrap-severity) except the WARN-only facts --check. The whole failable pack
+(3120 shapes, classify.js): FAIL=2 — exactly the two f25 G0 BY_DESIGN_LOGS_IN shapes.
+
+## Candidate gaps
+- A bare `fetch(…)` in a SERVER function calls the server module's own exported request handler
+  (`export async function fetch(request)`), not the host fetch (measured: `r` is null). Fails closed
+  here, but it is a wrong binding (the S457 host-global alias does not cover a user call of `fetch`).
+- R3 residual: a host global object handed on as a VALUE (an argument, a return, a tape / object
+  member) and called through `x.fetch(…)` there is not tracked (provenance lost; not refused).
