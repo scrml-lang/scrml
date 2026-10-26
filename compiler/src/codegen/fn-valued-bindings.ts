@@ -32,6 +32,7 @@ import { armBlockStatementsDetailed } from "../arm-body-statements.ts";
 import { parseExprToNode, parseExpression } from "../expression-parser.ts";
 import { isWholeBraceBlock } from "../brace-pair.ts";
 import { isGlobalSchedulerCallee } from "./async-combinators.ts";
+import { hostPromiseMemberOf, HOST_GLOBAL_OBJECTS, HOST_PROMISE_GLOBALS } from "./host-promise-names.ts";
 export interface FnValuedBinding {
   name: string;
   /** `const` / `let` / `var` — the binding keyword. */
@@ -486,6 +487,8 @@ function refsAsync(tree: unknown, isAsync: (n: string) => boolean, asyncNames: r
       return;
     }
     if (node.kind === "unary" && node.op === "typeof") return;
+    // S470 fix round 1 — the host `fetch` through the global object (called or read).
+    if (hostPromiseMemberOf(node, (x) => shadow.has(x)) !== null) { hit = true; return; }
     // A function's parameters shadow an outer name of the same spelling in its whole body
     // (`const v = (w, p) => w(p)` beside an async `w` calls the parameter).
     let inner = shadow;
@@ -573,6 +576,10 @@ export function mayHoldWaitingFn(
       return;
     }
     if (node.kind === "unary" && node.op === "typeof") return;
+    // S470 s470-render-residue-host-promises fix round 1 (F2 / F3) — the host `fetch` read through
+    // the global object (`globalThis.fetch`, `window["fetch"]`, `window.fetch.bind(window)`'s
+    // receiver) is the Promise-returning host function itself (SPEC §13.7 item 4).
+    if (hostPromiseMemberOf(node) !== null) { hit = true; return; }
     if (isFnLiteralNode(node)) {
       if (refsAsync(node, isAsync, asyncNames)) hit = true;
       return;
@@ -606,7 +613,8 @@ export function mayHoldWaitingFn(
       const sched = callee?.kind === "ident" && isGlobalSchedulerCallee(String(callee.name));
       // A direct call's callee name is a call, not a value; any other callee (a member, a
       // function value — an IIFE —, a call result) is walked as a value.
-      if (callee && callee.kind !== "ident") walk(callee);
+      // (S470) a CALL of the host `fetch` through the global object is a call, not a value read.
+      if (callee && callee.kind !== "ident" && hostPromiseMemberOf(callee) === null) walk(callee);
       if (sched) return; // its arguments are discarded (§13.2)
       args.forEach((a, i) => {
         if (!a || typeof a !== "object") return;
@@ -791,6 +799,22 @@ const SHADOW_TRANSPARENT_KINDS = new Set([
   "input-state-ref", "escape-hatch",
 ]);
 
+/**
+ * S470 fix round 1 (F2) — a destructuring declaration that takes the host Promise global off the
+ * global object: `const { fetch } = globalThis`, `const { fetch: g } = window`.
+ */
+function destructuresHostPromise(n: AnyNode): boolean {
+  const pat = n.name as AnyNode | undefined;
+  if (!pat || typeof pat !== "object" || pat.kind !== "destructure-object") return false;
+  const v = n.initExpr as AnyNode | undefined;
+  if (!v || v.kind !== "ident" || typeof v.name !== "string" || !HOST_GLOBAL_OBJECTS.has(v.name)) return false;
+  for (const it of (Array.isArray(pat.properties) ? pat.properties : []) as AnyNode[]) {
+    const field = typeof it?.fieldName === "string" ? it.fieldName : it?.name;
+    if (it && typeof it === "object" && typeof field === "string" && HOST_PROMISE_GLOBALS.has(field)) return true;
+  }
+  return false;
+}
+
 function bindingNameOf(n: AnyNode): string {
   const nm = n.kind === "export-decl" ? n.exportedName : n.name;
   if (typeof nm === "string" && nm) return nm;
@@ -934,7 +958,11 @@ export function waitingBindingsOf(
       return;
     }
     const node = n as AnyNode;
-    if (typeof node.kind === "string" && DECL_KINDS_F4.has(node.kind)) {
+    if (typeof node.kind === "string" && DECL_KINDS_F4.has(node.kind) && destructuresHostPromise(node)) {
+      // S470 fix round 1 (F2) — `const { fetch: g } = globalThis` binds the host Promise global.
+      const key = `${bindingNameOf(node)}@${(node.span as { start?: number } | undefined)?.start ?? "?"}`;
+      if (!reported.has(key)) { reported.add(key); out.push({ name: bindingNameOf(node), node, how: "declared", textOnly: false }); }
+    } else if (typeof node.kind === "string" && DECL_KINDS_F4.has(node.kind)) {
       // A block-nested tilde declaration of an outer name is a WRITE to it.
       check(node.initExpr, node.init, node, bindingNameOf(node), node.kind === "tilde-decl" && nested ? "written" : "declared", shadow);
     } else if (node.kind === "export-decl" && (node.exportKind === "const" || node.exportKind === "let" || node.exportKind === "var") &&
