@@ -226,3 +226,38 @@ in `~/.cache/scrml/s470/laneF/h4ae/`.
 - Pre-commit (code commit 8e18fdcda): 47626 / 0.
 - Merged origin/main 55de8639c (docs-only: #1564 / #1565). EXPECTED_SHAPE_COUNT 3063 (count test passes). R26 vs an extracted origin/main 55de8639c: the same single justified file (other-contexts.scrml); the rest the stdlib harness artefact. CI job commands on the final tree: all exit 0 except facts --check (STALE, WARN-only, bot-owned).
 - Merged origin/main again (ffbcf4432: #1566 s470-render-residue-host-promises — conflicts in RenderWaitingFacts / index.ts resolved by keeping both additions: `derivedReach` and the host-promise names; its f25 / r19 families kept). EXPECTED_SHAPE_COUNT = 3094 + f23 42 = 3136 (count test passes). Pre-commit on the merge: 47755 / 0. R26 vs an extracted origin/main ffbcf4432: the same single justified file. CI job commands on the final tree: all exit 0 except facts --check (STALE, WARN-only).
+
+## Fix round 3 (re-review of 4abccb31d, verdict FIX — F13 through a helper) — STOPPED at step 1 (SPEC check)
+
+The PA's decision was to fix the root gap `g-handled-error-arm-failure-writes-envelope-into-cell` in this lane:
+if SPEC says a cell write of a handled call whose arm yields no value leaves the target unwritten, implement that;
+if SPEC is silent or says otherwise, stop and report. SPEC §19.4.3 says otherwise: it makes that shape a COMPILE
+ERROR, not a no-write.
+
+SPEC §19.4.3 (quoted):
+
+> **Handling in a value position — every arm yields a value or leaves (S451 ruling 1a).** A `!{}` handler or a
+> `match` on a failable result is in a **value position** when its result is used: the initializer of a `let` /
+> `const` / `lin` or state declaration (`let r = f() !{ … }`, `<x> = f() !{ … }`), the right-hand side of an
+> assignment (`@x = f() !{ … }`, `x = f() !{ … }`), …
+>
+> In a value position, every arm SHALL do one of two things:
+> 1. **Yield a value** of the call's success type: the arm is an expression, or a block that … yields it with
+>    `lift <value>;` (§18.5). …
+> 2. **Leave**: the arm ends in `return` or `fail` on every path through it …
+>
+> An arm that does neither — it ends in a write (`@phase = .Missing`), a declaration, a call whose result is not a
+> value of the success type (`log(m)`), or a block … with no `lift` … — **falls through**, and in a value position
+> that SHALL be a compile error: **E-ERROR-012** …
+>
+> In a statement position an arm MAY fall through: the handler's result is not read …
+
+§19.4.4 restates it: "A `!{}` handler or a `match` on a failable result in a value position (§19.4.3) SHALL have
+every arm either yield a value of the call's success type or leave … An arm that falls through there SHALL be a
+compile error (**E-ERROR-012**)." The section notes that E-ERROR-012 is **"Nominal / not yet emitted by impl#1
+(frozen; `g-impl1-value-position-arm-fallthrough-s451`)"**, and gives the corpus measured at S451: 19 value-position
+handlers with fall-through arms in 13 files, all under `conformance/cases/`.
+
+So `@x = f() !{ | e :> { … } }` with a no-value arm is not a program whose failure leaves `@x` unchanged. It is
+E-ERROR-012. "Run the arm and don't write the target" would make impl#1 accept a program the language refuses,
+which would be a new divergence. Not built; no code was changed in this round.
