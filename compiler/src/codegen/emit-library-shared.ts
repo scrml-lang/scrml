@@ -21,6 +21,7 @@ import { splitMultiArmString, parseMatchArm } from "./emit-control-flow.ts";
 import { parseExprToNode } from "../expression-parser.ts";
 import { templateInterpolationPayloads } from "../interpolation-extent.ts";
 import { isPromiseReturningImportedCallee } from "../module-resolver.js";
+import { hostPromiseMemberOf, HOST_FETCH_MEMBER } from "./host-promise-names.ts";
 import { CGError } from "./errors.ts";
 // Phase-2 colorless-async — the clean-family combinator detector, shared with the
 // emit-expr lowering site so the fail-closed drain and the lowering agree on which
@@ -188,6 +189,9 @@ export function collectCalleeIdents(node: unknown, out: Set<string>, guardNested
     if (typeof n.name === "string") out.add(n.name);
     const callee = n.callee as ASTNode | undefined;
     if (callee && callee.kind === "ident" && typeof callee.name === "string") out.add(callee.name);
+    // S470 (s470-render-residue-host-promises F1) — the host `fetch` called through a global
+    // object (`globalThis.fetch(…)`, `window["fetch"](…)`) is recorded under its pseudo name.
+    else if (callee && hostPromiseMemberOf(callee) !== null) out.add(HOST_FETCH_MEMBER);
   }
   // g-match-arm-server-call-no-autoawait (§13.2 / §19.9.3) — a value-form match
   // arm frequently carries its RESULT as a raw expression STRING (`match-arm-inline`
@@ -271,6 +275,8 @@ export function collectFreeCalleeIdents(
       if (typeof n.name === "string") take(n.name, isBound);
       const callee = n.callee as ASTNode | undefined;
       if (callee && callee.kind === "ident" && typeof callee.name === "string") take(callee.name, isBound);
+      // S470 (F1) — the host `fetch` through an unshadowed global object.
+      else if (callee && hostPromiseMemberOf(callee, isBound) !== null) out.add(HOST_FETCH_MEMBER);
     }
     if (n.kind === "match-expr" || n.kind === "match-stmt") {
       const arm = new Set<string>();
