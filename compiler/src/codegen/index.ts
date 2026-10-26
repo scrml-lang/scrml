@@ -88,6 +88,7 @@ import { renderWaitingCallsOf } from "./render-waiting-calls.ts";
 import { failableMatchFallThroughs } from "./arm-structure.ts";
 import { _blockTailIsValueExpr } from "./emit-logic.ts";
 import { unboundHostPromiseGlobalsOf, hostPromiseReachOf, hostShadowedRefsOf, hostPromiseSeedOf } from "./host-promise-globals.ts";
+import { markHostGlobalAliases } from "./host-promise-names.ts";
 import { collectEngineVarNames } from "./emit-engine.ts";
 import { isToolProgram, isLibraryShapedFile } from "../tool-program.ts";
 import { forEachProgramWithRole, findTopLevelProgram, findTopLevelPrograms, programRoleOptionsOf, NESTED_SESSION_ATTRS, nestedProgramAttrVerdict } from "../program-role.ts";
@@ -2536,6 +2537,12 @@ export function runCG(input: CgInput): CgOutput {
   for (const fileAST of files) {
     if (fileAST && typeof fileAST === "object") (fileAST as any)[COMPILATION_TENANT_KEY] = compilationTenant;
   }
+  // S470 s470-host-fetch-followups (R3) — a binding of the host global object (`const w = window`)
+  // is that object for every reader of the host `fetch` spellings (host-promise-names.ts): marked on
+  // every file before any file's async facts are computed (an importer asks an imported file's set).
+  for (const fileAST of files) {
+    if (fileAST && typeof fileAST === "object") markHostGlobalAliases(fileAST);
+  }
   // §14.8.10 item (1) (S457, g-sql-checker-and-lowering-read-different-text-s457) — every
   // `?{}` lowering holds the SQL its driver call sends to the program-body statement allow-list,
   // over the SAME tenant set and database scope the TENANT-SCHEMA stage used.
@@ -2956,7 +2963,14 @@ export function runCG(input: CgInput): CgOutput {
         // §64.6 — fail closed if the tool imports a non-importable `.scrml` dep
         // (page-shaped / no exports → no `<base>.js` → runtime Cannot-find-module).
         checkToolImportsAreImportable(fileAST, files, filePath, errors);
-        const asyncImportedNames = computeToolAsyncImportedLocals(fileAST, files, exportRegistryInput, importGraphInput, _fileAsyncMemo);
+        // S470 s470-host-fetch-followups (R1) — plus the host Promise global the tool reaches (`fetch`,
+        // SPEC §13.7 item 4): the tool's OWN colouring awaits it like an async import. Added here, on the
+        // tool's seed only — not inside `computeToolAsyncImportedLocals`, whose emptiness routes a
+        // tool-dep library's emit (`libAsyncImports.size > 0`).
+        const asyncImportedNames = new Set([
+          ...computeToolAsyncImportedLocals(fileAST, files, exportRegistryInput, importGraphInput, _fileAsyncMemo),
+          ...hostPromiseSeedOf(fileAST),
+        ]);
         // §64 (Fork 1A, Unit 2) — a `kind="tool" serve=` program hosts its
         // `<endpoint>`/SSE routes via a compiler-emitted `Bun.serve`. Thread the
         // route-inference routeMap + the auth/middleware/protect stage results
