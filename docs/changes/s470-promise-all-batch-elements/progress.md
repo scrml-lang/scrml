@@ -140,3 +140,10 @@ in-tree stdlib. 3618 sources enumerated on both sides, same set.
   base → head: 68 FAIL→PASS, 2 FAIL→FAIL (KNOWN_FAIL h2/002), 4 PASS-REFUSED→PASS (F4), 22 PASS→PASS.
   s24, l19 and t19 are unchanged.
 - **Unit tests:** +4 (F2 ×2, F4 ×2), all 4 FAIL on base.
+- **R26 (round 1, head 9ad6d4d2f vs base ffbcf4432, 3618 sources):** identical to round 0.
+  - 0 compile or diagnostic changes; 0 syntax deltas; bare call sites 49 → 37.
+  - 214 artifact diffs: 202 are path-only `*.server.js`, and the other 12 are the same 6 gap reproducers.
+  - Taking the element from the statement's own emission is byte-identical for every other batch in the
+    corpus.
+- **WAITING** for lane s470-nested-handler-await (lane I) to land on main. Then: merge, delete the two
+  h2/002 KNOWN_FAIL entries, add F1 R1–R6 pinned PASS, and re-run f27 / r21 / R26.
