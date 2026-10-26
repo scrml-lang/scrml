@@ -133,3 +133,5 @@ Base: main `d582ae04f`.
 - [x] Merged origin/main e713ef1aa (#1566 r19): EXPECTED_SHAPE_COUNT 3293 from a run (3296 tests).
 - [x] R26 vs e713ef1aa (3618): 0 code diffs; 217 digest diffs = 202 project-root-only + 13
       lowering-only + 2 F6 census fixtures — unchanged from rounds 1–2. Fast gates pass; det identical.
+- [x] Merged origin/main 6fbef4f81 (#1568 r10): EXPECTED_SHAPE_COUNT 3653 from a run (3656 tests). R26
+      re-run vs 6fbef4f81: identical classification (0 code diffs; 202 / 13 / 2). Fast gates pass.
