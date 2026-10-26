@@ -267,3 +267,42 @@ Re-checked on the merge 8d67480b7: pre-commit hook 48911 pass / 0 fail (pack 436
 ### Merge of origin/main 10ad1cfc0 (#1568 s470-bang-catch-try-body, lane C: ast-builder / block-splitter / emit-logic, r10)
 
 Conflicts only in the pack's README and test count: EXPECTED_SHAPE_COUNT = main's 3454 + r18's 1267 = **4721**. Hook on the merge 666525f39: 49321 pass / 0 fail (the pack with every r18 pin unchanged on lane C's parser). s34-census PASS, types-gate OK, e2e-render-map 0 fail, browser-baseline PASS (8), host-global-scan 0 violations.
+
+## Fix round 2 (re-review of 0cd4cab0a, verdict FIX — two HIGH fail-opens) — 2026-10-26
+
+Reviewer material: `~/.cache/scrml/review/s470-li2/` (read-only; shapes copied to `~/.cache/scrml/s470/laneI/rev2/`).
+
+| # | sev | status | evidence |
+|---|---|---|---|
+| R2 | HIGH | FIXED (the reader) | The tokenizer emits a `//` / `/* */` comment as a COMMENT token whose text is the comment's body WITHOUT its opener; `parseErrorTokens` (ast-builder.js — the one `!{}` arm parser, reached by the statement guard via `buildBlock`, by `parseGuardArmsFromRaw`, and by the nested-handler pass) joined every token's text into the arm body, so `// grant()` became the code `grant()` and RAN. COMMENT tokens are now dropped there (trivia, as in every other token walk of ast-builder.js). Second half: the `!{` block the tokenizer synthesises when re-tokenizing (`tryEmitSyntheticErrorEffectBlock`) carried no start line / col, so every arm token sat on line NaN and the arm text was joined onto ONE line — the line breaks are kept now (`span.line` / `span.col`). `parseGuardArmsFromRaw("!{ _ :> {\n // grant()\n /* b() */ const g = 1\n lift g\n} }")` was `"{  grant()\n const g = 1 lift g }"`, now `"{\nconst g = 1\nlift g\n}"`. Removes R4 (a comment naming a waiting function no longer colours / refuses: reviewer s4 "VALID arm comment names isOk" ×5 PASS-REFUSED → PASS / PASS-DENY (boot-only hosts, the shape's own logic)). Audit: `parseErrorTokens` covers every `!{}` arm reader; a `match` arm's raw text keeps its comments as `//` (JS comments) — probed (`probe/m1`, a value block match arm with `// grant()` and `/* grant() */`: PASS on head and on base; the parenthesised form refused E-CODEGEN-INVALID-LOGIC on both). `armBodyTextCallees`' token scan still reads a match arm's comment text (over-colouring, fail closed — not changed). ast-builder.js is lane C's file: the edit is the 7-line filter at the top of `parseErrorTokens`. |
+| R1 | HIGH | FIXED | The library / tool / client drains walk a function body's TREE; an expression-position guard's arms are a string on the placeholder call. `collectNonAwaitableAsyncCalls` and `collectAliasedAsyncCalls` (emit-library-shared.ts) now read them through `exprGuardArmBodies` (the statement guard's own readers: a braced body's parsed statements, else the arm's expression; an unreadable body as an un-awaitable escape hatch), so a waiting call in a callback / IIFE / function value / alias inside an arm is E-ASYNC-STDLIB-IN-SYNC-CALLBACK / E-SERVER-FN-IN-SYNC-CALLBACK / the alias error. The tool drain lacked the library's alias check (`const f = isOk; f(p)` — reviewer h10/006): added (emit-tool.ts `drainToolAsyncSyncCallbackLeaks`). The client alias check counted only the client async set, not server functions (a new pack shape, `alias of the async function then call`, FAILed on fullstack): it now counts them (emit-functions.ts). Reviewer h8/001,002 and h10/001,002,005,006,009,010: FAIL → PASS-REFUSED. |
+| R3 | LOW | FIXED | `holdsExprGuard` (scheduling.ts) is a batch boundary only for a guard whose arms name a waiting function (read by `guardArmTextCallees`, the colouring's own reader; the waiting names are the route map's server functions, the client async set and the Promise-returning imports). probes/batch: a sync-only guard batches exactly as on base. Kept local to `holdsExprGuard` (lane J also edits scheduling.ts). |
+
+Reviewer shapes1–10 on this head: **0 FAIL**. Against the reviewer's 0cd4cab0a runs every class change is FAIL → PASS / PASS-REFUSED,
+PASS-REFUSED → PASS (R4), or PASS-REFUSED → PASS-DENY (a VALID shape in a boot-only host / a statement-position
+shape whose own logic denies both passwords).
+
+### Pack (r18 +44 = 1311 shapes)
+
+`round2Shapes(side)`, every side: 7 R2 comment shapes (incl. the base-FAIL tail-expression one, h7/001) + 4 R1
+callback shapes. FAIL counts base 55de8639c → 0cd4cab0a → head: s21 3 → 4 → 0; f24 3 → 5 → 0; l16 3 → 8 → 0; t16 8 → 8 → 0
+(the per-shape table in the README). The f24 event-handler "several statements" shapes (4) moved PASS-REFUSED →
+PASS — the arm text now keeps its line breaks, so the handler is analysable; executed, PASS. Pins regenerated from
+`h8` (the 1267, re-run on this head) + `r2h` (the 44). EXPECTED_SHAPE_COUNT 4721 → 4765. Unit tests +7 (37) — all 7
+fail on 0cd4cab0a.
+
+### R26 (round 2) — 3981 files, base = origin/main 4cefa45c2 (whole tree)
+
+Identical to round 1's result: 1 code diff (the bootstrap `server-stub` fixture, still refused, loses
+E-ASYNC-HANDLER-UNANALYZABLE — Fix 3), 2 digest diffs (`lift-guard-value` acceptance case — Fix 3, refused on both;
+`missing-required-slot-reject` — run-to-run noise), 1 file throws on both. The round-2 changes (comment filter, line
+numbers, alias / drain reads) change no corpus program.
+
+### CI job commands (round 2 head; `bin/ci.sh`, logs `ci/`)
+
+types-gate OK (181, unchanged) · root tests 2239 / 0 · snippet-gate 0 fail · claim-gate 0 fail · corpus-compile-floor PASS · facts STALE (WARN-only, bot-owned) · gen-md-shim current · bootstrap-conformance current · conflict-marker PASS · regen-spec-index OK · delta-lint PASS · ci-shards OK · s34-census PASS · unit + conformance 31911 / 0 · integration + lsp + commands 12615 / 0 (pack 4765 with pins) · todomvc OK · browser-baseline PASS (8) · lint-no-default-arm 0 · slices m1 100 / m2 612 / m1-lowered 100 / m3 60 / m4 2489 / codec 166, 0 fail · e2e-render-map 259 / 0 · host-global-scan 0 violations · bootstrap-severity current. origin/main unchanged since the last merge (4cefa45c2).
+
+### Candidate gaps (round 2)
+
+- `armBodyTextCallees`' token-scan fallback still reads a `match` arm's comment text as names (over-colouring, fail closed); the `!{}` arm path no longer does.
+- Lane J (s470-promise-all-batch-elements) also edits scheduling.ts: this lane's change is confined to `holdsExprGuard` + the `_guardArmWaits` predicate beside `isControlFlowBoundary`.
