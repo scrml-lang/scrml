@@ -25,7 +25,11 @@ Scratch: `~/.cache/scrml/s470/laneC/` (base tree = `git archive origin/main` d58
   client / library / fullstack, PASS-REFUSED on server / tool; head PASS-REFUSED ×20. Group 14's
   `! ( … )` shapes re-pinned PASS → PASS-REFUSED. r10 = 360, all PASS-REFUSED.
   EXPECTED_SHAPE_COUNT = main 3021 + 360 = 3381 (measured 3384 tests, 0 fail).
-- Merged origin/main 55de8639c (lane B r11–r15).
+- Merged origin/main 55de8639c (lane B r11–r15), then ffbcf4432 (#1566 r19/f25): EXPECTED_SHAPE_COUNT =
+  main 3094 + r10 360 = 3454 (measured 3457 tests, 0 fail).
+- R26 (3,618) vs 55de8639c and vs ffbcf4432: identical codes for every file. CI job commands green
+  (types:check 181 unchanged, s34 --check-new PASS, slices, e2e 259/0, lsp+commands, browser-baseline,
+  host-global 0 violations; facts stale = WARN only). Final hook 48024 pass / 0 fail.
 
 ## ROUND 3 — review of 3e52bcc45 (LAND-WITH-FOLLOWUPS): F1, F6, F4, F8, F9
 
