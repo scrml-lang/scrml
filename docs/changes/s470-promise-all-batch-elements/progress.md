@@ -60,10 +60,55 @@ batch). Controls 55: PASS → PASS on all four sides. No other side batches (sch
 caller is the client plain-function loop): the BAD shapes PASS on s24 / l19 / t19 on base, so they are
 fullstack only.
 
+## R26 (scripts/corpus-emit-differential.ts; roots examples,samples,conformance,stdlib,benchmarks,compiler/samples,docs)
+
+Base = `git worktree` at ffbcf4432 (~/.cache/scrml/s470/laneJ/basewt), head = 2c0957381; each tree's own
+in-tree stdlib. 3618 sources enumerated on both sides, same set.
+- Compile outcome: 0 newly failing / 0 newly passing; 0 diagnostic-code changes; 0 text-only changes.
+- Syntax (effective goggles): 0 failing on both sides; 0 load-context changes.
+- Bare client server-fn call sites: base 49 → head 37 (−12, in 6 sources — the call sites now awaited).
+- Artifact content diffs: 214 of 11068. 202 are `*.server.js` files whose only difference is the
+  absolute compiler root embedded in them (+29 bytes = the length difference of the two roots; identical
+  after replacing each root with `<ROOT>` — ~/.cache/scrml/s470/laneJ/r26check.mjs). The other 12 are
+  6 programs × (client.js + html), every one a reproducer of THIS gap:
+  - docs/changes/s441-async-escape-f4-f5/repro/blast-fnbody2.scrml — `[isOk(1) ? "t" : "f", isOk(1) && true]`
+    batch → two in-place awaited decls;
+  - docs/changes/s441-async-escape-f4-f5/review-repro/c-batch-{and,arr,not,obj,ternary}/case.scrml — the
+    review's five reproducers: `{b: isOk(2)}` / `[isOk(2)]` / `!isOk(2)` / `isOk(2) && …` / `isOk(2) ? … : …`
+    batch element → the bare `const a = await isOk(1)` then the operator decl awaited in place.
+  - Each html diff is only `data-scrml-build`, the build id derived from the client bundle's content (it
+    also changes the `_scrml_build_admit` / `_scrml_build_owns` literals in the client.js).
+  No other program in the corpus changed: no batch in examples / samples / benchmarks / stdlib held a
+  "mixed" independent decl, so the §13.2 parallelism of the corpus is unchanged.
+
 ## Status
 
 - [x] fix + unit tests (compiler/tests/unit/s470-promise-all-batch-elements.test.js — 27 tests; 21 FAIL on base)
 - [x] pack r21
-- [ ] R26 corpus diff
-- [ ] CI job commands
-- [ ] merge origin/main
+- [x] R26 corpus diff (above)
+- [x] CI job commands (on 2c0957381), all rc=0: types-gate --check (181 diagnostics, unchanged); root
+  `compiler/tests/*.test.js`; snippet-gate; claim-gate; corpus-compile-floor --check; gen-md-shim --check;
+  conflict-marker-gate; regen-spec-index --check; delta-lint; ci-shards needs; s34-census --check-new
+  --base origin/main (no new §34 rows); unit + conformance 31792 pass / 0 fail; integration + lsp +
+  commands 10969 pass / 0 fail; TodoMVC compile + node --check; browser-baseline --check (name set
+  matches, 8 asserted); slices (lint + m1 / m2 / m1-lowered / m3 / m4 / codec); e2e-render-map 259 pass;
+  host-global-scan --check (0 violations); gen-bootstrap-severity --check.
+- [x] merged origin/main 4cefa45c2 (#1568 s470-bang-catch-try-body r10 n29/s13/f16/l8/t8 +360): the pack
+  count / README conflicts resolved to 3561 shapes (3454 + 107); r21 re-classified after the merge —
+  identical (f27 50 FAIL→PASS, 2 KNOWN_FAIL, 55 controls PASS).
+
+## Candidate gaps (not filed — known-gaps.md is the PA's)
+
+- `g-value-position-bang-arm-server-call-sync-iife-s470` — an expression-position `!{}` whose subject
+  is a local `!` function and whose arm calls a server function lowers to a SYNC IIFE whose result is
+  the pending Promise (`(() => { … r = _scrml_fetch_isOk(p) … })() ? …`), so the wrong password logs in.
+  Base, no batch (review p5 shape compiled on ffbcf4432). The h2/002 shapes are KNOWN_FAIL on it.
+  Locus: the guarded-expr value lowering (emit-logic / emit-expr), not scheduling.ts.
+- The decl batch's array element is still `extractInitExpr` (a plain `{ mode: "client" }` ctx), not the
+  statement's own emit context (map / set / synth-cell / engine facts). Only bare and inert elements reach
+  it now; a bare call's argument or an inert `@m[k]` read could still lower differently from the
+  sequential path. Not measured to fail; worth a probe.
+- `scripts/corpus-emit-differential.ts` compares `*.server.js` byte-exact while the bundle embeds the
+  absolute compiler root: two checkouts at different path lengths report every server bundle as
+  differing (202 here). Normalising the compiler root in artifacts (as the stream path already does)
+  would remove the noise.
