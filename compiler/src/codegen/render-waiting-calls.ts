@@ -1394,6 +1394,19 @@ class RenderWalk {
       const w = this.exprWaits(n.guardedNode);
       if (w) return `${w}, handled with \`!{ }\` (impl#1 lowers that handler in a \`when\` body without awaiting the call)`;
     }
+    // S470 s470-nested-handler-await — a `!{ }` handler ARM in these hosts (a `when` body, the engine
+    // opener `effect=`) is lowered by the arm text lowering, which does not await what it calls: a
+    // nested handled call, a bare server call or an async helper in an arm tested a pending Promise
+    // (measured: a wrong password logged in). Its parsed `handlerExpr` must not vouch for the call
+    // (the walk below would count it as an own-level awaited call), so every arm's TEXT is read and
+    // a waiting name in it is refused, fail closed.
+    if (kind === "guarded-expr" && Array.isArray(n.arms)) {
+      for (const arm of n.arms as AnyNode[]) {
+        const text = arm && typeof arm === "object" && typeof arm.handler === "string" ? arm.handler : "";
+        const named = text ? this.textNames(text) : null;
+        if (named) return `${named}, in a \`!{ }\` handler arm (impl#1 does not await an arm's calls in this body)`;
+      }
+    }
     if (kind === "escape-hatch") {
       if (n.nativeKind === "Literal") return null;
       const text = typeof n.bodyRaw === "string" ? n.bodyRaw : typeof n.raw === "string" ? n.raw : "";

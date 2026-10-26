@@ -345,7 +345,12 @@ describe("a BLOCK `!{}` arm WITHOUT a nested `!{}` still fails closed", () => {
       "}",
       "</program>",
     ].join("\n"));
-    expect(clientJs).toMatch(/sort \( \( p , q \) => _scrml_helper_\d+ \( p \) \)/);
+    // S470 s470-nested-handler-await — in an ASYNC host (`run` is async here) a block
+    // arm that names a waiting function is lowered from its parsed statements, so the
+    // comparator is emitted structurally; the call inside the synchronous callback is
+    // still BARE (no `await` is legal there) and the diagnostic still fires.
+    expect(clientJs).toMatch(/sort\s*\(\s*\(\s*p\s*,\s*q\s*\)\s*=>\s*_scrml_helper_\d+\s*\(\s*p\s*\)\s*\)/);
+    expect(clientJs).not.toMatch(/=>\s*await\b/);
     expect(codes).toContain(CODE);
   });
 

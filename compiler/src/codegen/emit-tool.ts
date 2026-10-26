@@ -31,7 +31,7 @@ import type { CompileContext } from "./context.ts";
 import { sqlHandleRegExp, compareSqlHandles, UNRESOLVED_SQL_HANDLE } from "./sql-handle-name.ts";
 import { getNodes, containsSql, containsSqlOrTransaction, collectTopLevelStatements } from "./collect.ts";
 export { collectTopLevelStatements };
-import { bodyHasForeignOrSql, computeAsyncFnNames, emitLibraryFnMember, collectNonAwaitableAsyncCalls, syncCallbackErrorForSite, annotateNestedAsyncHelpers, asyncEscapeErrors, fileBoundNamesOf, locallyBoundOnlyCalleeNames } from "./emit-library-shared.ts";
+import { bodyHasForeignOrSql, computeAsyncFnNames, emitLibraryFnMember, collectNonAwaitableAsyncCalls, collectAliasedAsyncCalls, aliasedAsyncCallError, syncCallbackErrorForSite, annotateNestedAsyncHelpers, asyncEscapeErrors, fileBoundNamesOf, locallyBoundOnlyCalleeNames } from "./emit-library-shared.ts";
 import type { AsyncEscapeSite } from "./local-async-fns.ts";
 import { buildCalleeImportMap } from "./scheduling.ts";
 import { emitLogicNode, emitParamDefault } from "./emit-logic.js";
@@ -644,6 +644,17 @@ function drainToolAsyncSyncCallbackLeaks(
       if (seen.has(key)) continue;
       seen.add(key);
       errors.push(syncCallbackErrorForSite(site, null, filePath));
+    }
+    // S470 s470-nested-handler-await (fix round 2, R1) — the library drain's alias check, which the
+    // tool lacked: a call through a local alias of an async function (`const f = isOk; f(p)`)
+    // is emitted bare. Inside an expression-position `!{ }` arm the escape check does not see the
+    // alias (the arm is a string on the node), so a tool logged a wrong password in.
+    for (const a of collectAliasedAsyncCalls(fn.body, null, null, asyncFnNames)) {
+      const sp = (a.span ?? {}) as { start?: number };
+      const key = `alias:${a.alias}@${sp.start ?? -1}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      errors.push(aliasedAsyncCallError(a.alias, a.resolved, a.span, filePath));
     }
   }
 }

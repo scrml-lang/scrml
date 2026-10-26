@@ -1897,7 +1897,11 @@ export function emitFunctions(ctx: CompileContext): { lines: string[]; fnNameMap
     for (const site of collectNonAwaitableAsyncCalls(fn.body, _calleeMap, _exportRegistry, _clientAsyncFnNames, fn.params, fn.span, _serverFnNames)) {
       _pushClientLeak(syncCallbackErrorForSite(site, _serverFnNames, filePath));
     }
-    for (const a of collectAliasedAsyncCalls(fn.body, _calleeMap, _exportRegistry, _clientAsyncFnNames)) {
+    // S470 s470-nested-handler-await (fix round 2, R1) — a client alias of a SERVER function
+    // (`const f = isOk; f(p)`) is emitted bare too: the alias check counts the server names. At
+    // statement level the escape check already refuses the alias; inside an expression-position
+    // `!{ }` arm (a string the escape check does not read) only this check sees it.
+    for (const a of collectAliasedAsyncCalls(fn.body, _calleeMap, _exportRegistry, new Set<string>([..._clientAsyncFnNames, ..._serverFnNames]))) {
       _pushClientLeak(aliasedAsyncCallError(a.alias, a.resolved, a.span, filePath));
     }
   }

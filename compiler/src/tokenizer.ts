@@ -1242,7 +1242,11 @@ export function tokenizeLogic(content: string, baseOffset: number, baseLine: num
           const childBlock: Block = {
             type: "error-effect",
             raw: blockRaw,
-            span: { start: blockStart, end: blockEnd },
+            // S470 s470-nested-handler-await (review R2) — the start line / col, so the arm
+            // tokens re-read from this block carry real lines and the arm text keeps its line
+            // breaks as statement separators (without them every token sat on line NaN and the
+            // arm body was joined onto one line).
+            span: { start: blockStart, end: blockEnd, line: blockStartLine, col: blockStartCol },
             children: [],
           };
           // Advance the tokenizer cursor to `scan` (post matching `}`).

@@ -355,6 +355,12 @@ function walkWithScopes(
       const v = n[key];
       if (v && typeof v === "object") visit(v, scope, { parent: n, key, index: -1, anchor });
     }
+    // S470 s470-nested-handler-await (fix round 3, N1) — the `!{ }` arms the tree carries as TEXT
+    // (a braced statement arm's body, an expression-position handler's arms), parsed by the arm
+    // readers and walked in this scope like any other code of the function.
+    if (walkOpts.armBodies) {
+      for (const b of walkOpts.armBodies(n)) visit(b, scope, { parent: n, key: "armBody", index: -1, anchor });
+    }
   };
   const rootAnchor = hasRealPosition(root.span) ? root.span : undefined;
   if (walkOpts.skipRootParams !== true) visit(root.params, rootScope, { parent: root, key: "params", index: -1, anchor: rootAnchor });
@@ -409,6 +415,11 @@ export interface WalkScopedOpts {
    * marks resolve them so).
    */
   sequentialLocals?: boolean;
+  /**
+   * S470 (fix round 3) — the parsed bodies of the `!{ }` arms a node carries as text (see
+   * `LocalAsyncAnnotateOpts.armBodies`); each is walked in the node's scope.
+   */
+  armBodies?: (node: ASTNode) => unknown[];
 }
 
 export interface LocalAsyncAnnotateOpts {
@@ -450,6 +461,15 @@ export interface LocalAsyncAnnotateOpts {
   /** s441 (S440 F4) — sink for every async-colored function used as a value. */
   escapes?: AsyncEscapeSite[];
   /**
+   * S470 s470-nested-handler-await (fix round 3, N1) — the parsed bodies of the `!{ }` arms a node
+   * carries as TEXT (a braced arm of a statement guard; every arm of an expression-position guard).
+   * The escape rule read a braced arm only through its raw-fragment analysis, which cannot parse a
+   * `lift` — `{ const h = isOk; lift h(p) }` escaped unreported and logged a wrong password in. An
+   * arm the readers cannot parse comes back as an escape hatch carrying `armUnreadableNames` (the
+   * names its text mentions): an async one among them is reported (fail closed). Injected.
+   */
+  armBodies?: (node: ASTNode) => unknown[];
+  /**
    * s441 (S440 F4) — the outer names that are async-colored for the ESCAPE rule,
    * when narrower than `outerAsync` (the await facts). The server emitter awaits
    * every in-process peer, including a plain helper that route inference placed on
@@ -480,7 +500,8 @@ export function annotateLocalAsyncFns(fnNode: unknown, opts: LocalAsyncAnnotateO
 
   // Pass 1 — build every scope and collect every nested function declaration.
   const nestedFns: ASTNode[] = [];
-  walkWithScopes(fn, rootScope, scopes, () => {}, () => {}, false);
+  const _armWalk: WalkScopedOpts = opts.armBodies ? { armBodies: opts.armBodies } : {};
+  walkWithScopes(fn, rootScope, scopes, () => {}, () => {}, false, undefined, _armWalk);
   for (const [owner] of scopes) {
     if (owner !== fn && !Array.isArray(owner) && isFnDecl(owner as ASTNode)) nestedFns.push(owner as ASTNode);
   }
@@ -538,6 +559,8 @@ export function annotateLocalAsyncFns(fnNode: unknown, opts: LocalAsyncAnnotateO
       },
       () => {},
       true,
+      undefined,
+      _armWalk,
     );
     if (opts.sqlIsAsync && opts.bodyHasSql && opts.bodyHasSql(d.body)) {
       list.push({ root: { kind: "stdlib", via: "?{}" } });
@@ -655,7 +678,18 @@ export function annotateLocalAsyncFns(fnNode: unknown, opts: LocalAsyncAnnotateO
       if (link.key === "params" && typeof node.defaultValue === "string" && node.defaultValue.trim() !== "") {
         markRaw(node, node.defaultValue, scope, anchorDiagnosticSpan(node.span, link.anchor));
       }
+      // S470 (fix round 3) — a `!{ }` arm the readers could not parse: any async name its text
+      // mentions is reported as escaping (fail closed — the arm is not read).
+      const unreadable = (node as { armUnreadableNames?: unknown }).armUnreadableNames;
+      if (Array.isArray(unreadable) && escapeSink) {
+        for (const nm of unreadable) {
+          if (typeof nm !== "string") continue;
+          const asyncRes = resolveAsyncAt(nm, scope);
+          if (asyncRes) reportEscape(nm, asyncRes, "named in a `!{ }` arm the compiler cannot read", anchorDiagnosticSpan(node.span, link.anchor));
+        }
+      }
     },
+    _armWalk,
   );
   return asyncRoot.size;
 }
