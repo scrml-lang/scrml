@@ -343,6 +343,75 @@ describe("fix round 2 — R3: a sync-only expression guard is still batched", ()
   });
 });
 
+describe("fix round 3 — N1 / N3: the escape rule reads a `lift` block arm", () => {
+  const LIB = (body) => `import { hmac } from "scrml:crypto"
+\${
+    type AuthErr:enum = { Denied(reason: string), Gone }
+    function isOk(p) {
+        const h = hmac("k", p)
+        return p == "secret" && h != ""
+    }
+    function local(p)! -> AuthErr {
+        if (p != "secret") fail AuthErr::Denied("bad")
+        return true
+    }
+    export function login(p) {
+        ${body}
+    }
+}
+`;
+  for (const [n, arm] of [
+    ["alias, lift the call", `{
+            const h = isOk
+            lift h(p)
+        }`],
+    ["alias, bind the call, lift it", `{
+            const h = isOk
+            const r = h(p)
+            lift r
+        }`],
+    ["object holding it", `{
+            const o = { f: isOk }
+            lift o.f(p)
+        }`],
+  ]) {
+    test(`library, const binding: ${n} — E-ASYNC-FN-ESCAPES-AS-VALUE`, () => {
+      const { codes } = compile(LIB(`const v = local(p) !{ _ :> ${arm} }
+        return v ? "LOGGED IN" : "rejected"`), "library");
+      expect(codes).toContain("E-ASYNC-FN-ESCAPES-AS-VALUE");
+    });
+    test(`client, const binding: ${n} — refused`, () => {
+      const { codes } = compile(fnPage(`const v = local(p) !{ _ :> ${arm} }
+        return v ? "LOGGED IN" : "rejected"`));
+      expect(codes).toContain("E-ASYNC-FN-ESCAPES-AS-VALUE");
+    });
+  }
+});
+
+describe("fix round 3 — N2: a point-free async callback of an awaited collection method", () => {
+  test("library: `[p].map(isOk)` colours login async and lowers to the awaited combinator", () => {
+    const { js, codes } = compile(`import { hmac } from "scrml:crypto"
+\${
+    function isOk(p) {
+        const h = hmac("k", p)
+        return p == "secret" && h != ""
+    }
+    export function login(p) {
+        return [p].map(isOk)[0] ? "LOGGED IN" : "rejected"
+    }
+}
+`, "library");
+    expect(codes).toEqual([]);
+    expect(js).toMatch(/export async function login\(p\)/);
+    expect(js).toMatch(/await _scrml_mapAsync\(\[p\], isOk\)/);
+  });
+  test("client: `.some(isOk)` in an expression-position arm is awaited", () => {
+    const { js, codes } = compile(fnPage(`return (local(p) !{ _ :> [p].some(isOk) }) ? "LOGGED IN" : "rejected"`));
+    expect(codes).toEqual([]);
+    expect(loginOf(js)).toMatch(/await _scrml_someAsync\(/);
+  });
+});
+
 describe("--mode library: the arm is awaited (server-boundary lowering)", () => {
   test("a nested handler and a helper in an arm", () => {
     const { js, codes } = compile(`import { hmac } from "scrml:crypto"

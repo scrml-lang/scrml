@@ -320,6 +320,50 @@ export function shapesFor(side) {
   }
   for (const s of exprShapes(side)) out.push(s);
   for (const s of round2Shapes(side)) out.push(s);
+  for (const s of round3Shapes(side)) out.push(s);
+  return out;
+}
+
+// ── fix round 3 (re-review of fe3302e26) ───────────────────────────────────────────────────────
+// N1 / N3 — an async function aliased or stored inside a `!{}` BLOCK arm that yields with `lift`:
+// the escape rule read a braced arm only through its raw-fragment analysis, which cannot parse a
+// `lift`, so `const h = isOk` escaped unreported and `h(p)` was emitted un-awaited.
+// N2 — an async function passed point-free to an awaited collection method (`[p].map(isOk)`): the
+// colouring did not count it, so the enclosing function stayed sync and the native method ran.
+const ESCAPE_ARMS = [
+  ["alias, lift the call", `{
+            const h = isOk
+            lift h(p)
+        }`],
+  ["alias, bind the call, lift it", `{
+            const h = isOk
+            const r = h(p)
+            lift r
+        }`],
+  ["object holding it, lift a member call", `{
+            const o = { f: isOk }
+            lift o.f(p)
+        }`],
+];
+const POINT_FREE = [
+  ["map(isOk)", `[p].map(isOk)[0]`],
+  ["some(isOk)", `[p].some(isOk)`],
+  ["filter(allowed).length", `[p].filter(allowed).length > 0`],
+];
+
+function round3Shapes(side) {
+  const out = [];
+  for (const [n, arm] of ESCAPE_ARMS) {
+    out.push([`N1 escape in a lift block arm: const binding, ${n}`, fnPage(side, `const v = local(p) !{ _ :> ${arm} }
+        return v ? "LOGGED IN" : "rejected"`), undefined]);
+    out.push([`N1 escape in a lift block arm: expr position, ${n}`, fnPage(side, `return (local(p) !{ _ :> ${arm} }) ? "LOGGED IN" : "rejected"`), undefined]);
+  }
+  for (const [n, e] of POINT_FREE) {
+    out.push([`N2 point-free async callback: function body, ${n}`, fnPage(side, `return ${e} ? "LOGGED IN" : "rejected"`), undefined]);
+    out.push([`N2 point-free async callback: expr-position arm, ${n}`, fnPage(side, `return (local(p) !{ _ :> ${e} }) ? "LOGGED IN" : "rejected"`), undefined]);
+    out.push([`N2 point-free async callback: const-binding arm, ${n}`, fnPage(side, `const v = local(p) !{ _ :> ${e} }
+        return v ? "LOGGED IN" : "rejected"`), undefined]);
+  }
   return out;
 }
 

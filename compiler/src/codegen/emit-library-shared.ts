@@ -21,6 +21,7 @@ import { splitMultiArmString, parseMatchArm } from "./emit-control-flow.ts";
 import { parseExprToNode, guardCallArmsRaw, hasLostTrailingContent } from "../expression-parser.ts";
 import { parseGuardArmsFromRaw } from "../ast-builder.js";
 import { armBlockStatementsDetailed } from "../arm-body-statements.ts";
+import { mentionedNames } from "../failable-value-calls.ts";
 import { templateInterpolationPayloads } from "../interpolation-extent.ts";
 import { isPromiseReturningImportedCallee } from "../module-resolver.js";
 import { hostPromiseMemberOf, HOST_FETCH_MEMBER } from "./host-promise-names.ts";
@@ -176,6 +177,24 @@ function treeHasEscapeHatch(node: unknown): boolean {
   return false;
 }
 
+/**
+ * S470 s470-nested-handler-await (fix round 3, N2) — a function passed BY REFERENCE as the callback of
+ * an awaited collection method (`[p].map(isOk)`, `.some(isOk)`, `.filter(allowed)`): the method CALLS
+ * it, and the s441 F4 rule (`asyncFnArgRole`: "allowed") rests on emit-expr lifting that call to the
+ * awaited `_scrml_<m>Async` combinator — which it does only in a function the colouring made async.
+ * The colouring read only call callees, so `login` stayed sync, the native `.map` ran, and its
+ * element was a pending Promise (truthy: a wrong password logged in, library mode and `!{}` arms).
+ * The referenced name is therefore a callee of the enclosing function. Returns it, or null.
+ */
+function combinatorCallbackRefName(n: ASTNode): string | null {
+  if (n.kind !== "call" || n.optional) return null;
+  const callee = n.callee as ASTNode | undefined;
+  if (!callee || callee.kind !== "member" || callee.optional || typeof callee.property !== "string") return null;
+  if (!ASYNC_COMBINATOR_METHODS.has(callee.property)) return null;
+  const a0 = Array.isArray(n.args) ? (n.args as ASTNode[])[0] : undefined;
+  return a0 && a0.kind === "ident" && typeof a0.name === "string" ? a0.name : null;
+}
+
 export function collectCalleeIdents(node: unknown, out: Set<string>, guardNestedFnValues = false): void {
   if (!node || typeof node !== "object") return;
   if (Array.isArray(node)) { for (const c of node) collectCalleeIdents(c, out, guardNestedFnValues); return; }
@@ -196,6 +215,8 @@ export function collectCalleeIdents(node: unknown, out: Set<string>, guardNested
     // S470 (s470-render-residue-host-promises F1) — the host `fetch` called through a global
     // object (`globalThis.fetch(…)`, `window["fetch"](…)`) is recorded under its pseudo name.
     else if (callee && hostPromiseMemberOf(callee) !== null) out.add(HOST_FETCH_MEMBER);
+    const ref = combinatorCallbackRefName(n);
+    if (ref !== null) out.add(ref);
   }
   // g-match-arm-server-call-no-autoawait (§13.2 / §19.9.3) — a value-form match
   // arm frequently carries its RESULT as a raw expression STRING (`match-arm-inline`
@@ -265,7 +286,7 @@ export function exprGuardArmBodies(n: ASTNode): unknown[] {
   if (!n || n.kind !== "call") return [];
   const raw = guardCallArmsRaw(n as never);
   if (raw === null) return [];
-  const hatch = (text: string): unknown => ({ kind: "escape-hatch", raw: text, nativeKind: "Unparsed" });
+  const hatch = (text: string): unknown => unreadableArm(text);
   let arms: Array<{ handler?: unknown; handlerExpr?: unknown }> | null = null;
   try { arms = parseGuardArmsFromRaw(raw, "") as Array<{ handler?: unknown; handlerExpr?: unknown }> | null; } catch { arms = null; }
   if (!arms) return [hatch(raw)];
@@ -281,6 +302,31 @@ export function exprGuardArmBodies(n: ASTNode): unknown[] {
     }
   }
   return out;
+}
+
+/**
+ * S470 (fix round 3, N1) — the parsed bodies of every `!{ }` arm a node carries as TEXT: each arm of
+ * an expression-position handler (`exprGuardArmBodies`) and each BRACED arm of a statement guard (an
+ * unbraced one is already a parsed `handlerExpr`). An arm the reader refuses comes back as an escape
+ * hatch carrying the names its text mentions (`armUnreadableNames`), so a consumer can fail closed.
+ */
+export function guardArmBodiesOf(n: ASTNode): unknown[] {
+  if (!n || typeof n !== "object") return [];
+  if (n.kind === "call") return exprGuardArmBodies(n);
+  if (n.kind !== "guarded-expr" || !Array.isArray(n.arms)) return [];
+  const out: unknown[] = [];
+  for (const arm of n.arms as Array<{ handler?: unknown }>) {
+    const h = typeof arm?.handler === "string" ? arm.handler.trim() : "";
+    if (!(h.startsWith("{") && h.endsWith("}")) || !h.slice(1, -1).trim()) continue;
+    const r = armBlockStatementsDetailed(h);
+    out.push(r && r.ok && Array.isArray(r.stmts) ? r.stmts : unreadableArm(h));
+  }
+  return out;
+}
+
+/** An arm body no reader can parse: an escape hatch carrying the names its text mentions. */
+function unreadableArm(text: string): unknown {
+  return { kind: "escape-hatch", raw: text, nativeKind: "Unparsed", armUnreadableNames: [...mentionedNames(text)] };
 }
 
 export function guardArmTextCallees(n: ASTNode, out: Set<string>, guardNestedFnValues = false): void {
@@ -346,6 +392,8 @@ export function collectFreeCalleeIdents(
       const arm = new Set<string>();
       guardArmTextCallees(n, arm, guardNestedFnValues);
       for (const c of arm) take(c, isBound);
+      const ref = combinatorCallbackRefName(n);
+      if (ref !== null) take(ref, isBound);
     }
   }, { stopAtNestedFns: guardNestedFnValues, skipRootParams: true, sequentialLocals: true });
 }
@@ -692,6 +740,7 @@ export function annotateNestedAsyncHelpers(
         (ASYNC_COMBINATOR_METHODS.has(callee.property) || isSyncCallbackConsumerCall(call));
     },
     fnArgRole: asyncFnArgRole,
+    armBodies: guardArmBodiesOf,
     analyzeRaw: (raw, resolveFree) => analyzeRawJsFragment(raw, resolveFree) as RawAsyncUses | null,
     ...(escapes ? { escapes } : {}),
     ...(escapeFacts ? { escapeOuterAsync: (name: string) => outerAsyncRootFromFacts(name, escapeFacts) } : {}),
