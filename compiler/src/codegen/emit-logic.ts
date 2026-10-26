@@ -13,7 +13,7 @@ import { bareBlockText, bareBlockSequenceTexts, PROBE_BODY_OFFSET } from "../val
 import { armBlockStatementsDetailed } from "../arm-body-statements.ts";
 import { isWholeBraceBlock } from "../brace-pair.ts";
 import { emitIfStmt, emitForStmt, emitWhileStmt, emitDoWhileStmt, emitBreakStmt, emitContinueStmt, emitTryStmt, emitDeferScope, emitDeferRegistration, emitMatchExpr, emitMatchStmt, emitMultiScrutineeMatchInline, emitSwitchStmt, rewriteBlockBody, splitMultiArmString, parseMatchArm, matchArmInlineToMatchArm, emitVariantBindingPrelude, matchSubjectCtx, hasPayloadBindingOrTaggedVariant, getMatchSubjectVariantFields, pushWholeErrorBinder, popWholeErrorBinder, isMatchSubjectFailable, getErrorVariantFieldSchema, getEnumVariantFieldSchema, CPS_AMBIENT_ERROR_VARIANTS, planPayloadBinders, parseBindingList, emitTypedArmResultCtor, matchArmBlockToMatchArm, collectIfChainCond, isFailableOkMatch, isSqlFailableMatch, matchScrutineeHandlesSql, enterSqlErrorSchema, exitSqlErrorSchema, emitMatchTagDiscriminator, getVariantFieldSchema, armCondition, givenGuardToMatchArm, stampPropagateOperand, leaveStmtFromArmText, nestedMatchFromArmText, propagateOperandOfArmText, structureServerArm, emitArmValue, emitObjectLiteralArm, hostAsyncFacts, type MatchArm, type SubjectVariantFields } from "./emit-control-flow.ts";
-import { isDestructurePattern, nameOrPatternText } from "./emit-destructure-pattern.ts";
+import { isDestructurePattern, nameOrPatternText, topLevelVariantKeyOf, variantDestructureSource } from "./emit-destructure-pattern.ts";
 import type { DefaultLowerer } from "./emit-destructure-pattern.ts";
 import { markDeclaredImmutable, markDeclaredMutable, tildeDeclIsRebind, clearLiftScope } from "./declared-name-marks.ts";
 import { emitLiftExpr, emitCreateElementFromMarkup, emitMarkupValueExpr, forHeadKeyword, loopBodyDeclaredNames } from "./emit-lift.js";
@@ -3017,6 +3017,32 @@ function _ensureBoundary(opts: EmitLogicOpts, context: string): EmitLogicOpts {
   return opts;
 }
 
+let _variantDeclSeq = 0;
+/** Reset per compile (resetCodegenModuleState) — the temp names are part of the build identity. */
+export function resetVariantDeclSeq(): void { _variantDeclSeq = 0; }
+/**
+ * S470 (s470-unit-variant-tag-read, review F2) — `const { variant, … } = v` / `let …`: a
+ * pattern cannot read `variant` off a unit variant (its bare tag string, §51.3.2), so the
+ * declaration is split: the value is declared under a compiler temporary by the ordinary
+ * declaration lowering, then destructured from `variantDestructureSource(temp)` (a tag
+ * string read as `{ variant: tag }`). Null when the declaration has no top-level `variant` key.
+ */
+function emitVariantKeyDeclSplit(node: any, opts: EmitLogicOpts): string | null {
+  if (!node || node._variantSplitTemp || !isDestructurePattern(node.name) || !topLevelVariantKeyOf(node.name)) return null;
+  const tmp = `__scrml_dv_d${++_variantDeclSeq}`;
+  const inner = emitLogicNode({ ...node, name: tmp, _variantSplitTemp: true }, opts);
+  if (!inner || !inner.trim()) return inner;
+  if (opts.declaredNames) {
+    for (const bind of _iterDestructureBindNames(node.name)) {
+      opts.declaredNames.add(bind);
+      if (node.kind === "let-decl") markDeclaredMutable(opts.declaredNames, bind);
+    }
+  }
+  const kw = node.kind === "let-decl" ? "let" : "const";
+  const pat = nameOrPatternText(node.name, patternDefaultLowerer(opts), { topVariantSplit: true });
+  return `${inner}\n${kw} ${pat} = ${variantDestructureSource(tmp)};`;
+}
+
 export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "client" }): string {
   if (!node || typeof node !== "object") return "";
   // §14.8.10 item (1) (S457) — a `?{}` the lowering refuses is reported at the statement that
@@ -3306,6 +3332,7 @@ function _emitLogicNode(node: any, opts: EmitLogicOpts): string {
 
     case "let-decl": {
       if (node._compileTimeOnly) return "";
+      { const split = emitVariantKeyDeclSplit(node, opts); if (split !== null) return split; }
       // A5 (2026-05-17) — `node.name` may be a structured DestructurePattern.
       // For codegen purposes, render it back to JS source text. For
       // declaredNames bookkeeping, register each bound ident (the
@@ -3402,6 +3429,7 @@ function _emitLogicNode(node: any, opts: EmitLogicOpts): string {
     case "tilde-decl": {
       if (!node.name) return "";
       if (node._compileTimeOnly) return "";
+      { const split = emitVariantKeyDeclSplit(node, opts); if (split !== null) return split; }
       // A5 (2026-05-17) — same as let-decl: `node.name` may be a structured
       // DestructurePattern (const-decl only; tilde-decl never destructures).
       const _constDeclLhs = nameOrPatternText(node.name, patternDefaultLowerer(opts));

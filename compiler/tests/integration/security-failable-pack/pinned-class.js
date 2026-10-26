@@ -6,6 +6,7 @@
 // re-pin). Regenerate from `classify.js --json <family>/` — never by hand-editing to make the suite pass.
 import { R9_PINNED } from "./r9-pinned.js";
 import { R18_PINNED } from "./r18-pinned.js";
+import { R16_PINNED } from "./r16-pinned.js";
 import { R19_PINNED } from "./r19-pinned.js";
 
 export const PINNED_CLASS = {
@@ -1554,4 +1555,6 @@ export const PINNED_CLASS = {
   "t13/1 D5 a 34-deep ternary": "PASS-REFUSED",
   // S470 s470-nested-handler-await — r18-shapes.js (s21 / f24 / l16 / t16), every shape pinned (r18-pinned.js).
   ...R18_PINNED,
+  // S470 s470-unit-variant-tag-read — r16-shapes.js (s19 / f22 / l14 / t14), every shape pinned (r16-pinned.js).
+  ...R16_PINNED,
 };

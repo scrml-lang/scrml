@@ -17,6 +17,8 @@
  *   library: ES module exports JS + server JS (for stdlib / self-hosting)
  */
 
+import { resetVariantDestructureTemps } from "./emit-destructure-pattern.ts";
+import { resetVariantDeclSeq } from "./emit-logic.ts";
 import { scanClassesFromHtml, getAllUsedCSS } from "../tailwind-classes.js";
 import { setFileSqlFallback, fallbackSqlHandle } from "./sql-handle-name.ts";
 import { collectClassNamesFromAst } from "./collect-class-names.ts";
@@ -1325,6 +1327,9 @@ export function resetCodegenModuleState(): void {
   setServerAsyncClassifier(null);
   // chunk-namespace — per-unit id namespace token.
   resetChunkNamespaceState();
+  // S470 (s470-unit-variant-tag-read, review G2) — the `variant`-destructuring temporaries.
+  resetVariantDestructureTemps();
+  resetVariantDeclSeq();
 }
 
 /**
