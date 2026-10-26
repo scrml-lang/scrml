@@ -1524,6 +1524,77 @@ export function scheduleStatements(body: ASTNode[], fnNode: ASTNode, routeMap: R
     }
     return allowed;
   }
+  // S470 g-promise-all-batch-puts-unawaited-call-under-sync-operator — the
+  // ELEMENT test of the decl batch. A decl member's array element is its WHOLE
+  // initializer (`extractInitExpr`), evaluated synchronously while
+  // `Promise.all` builds the array — so a waiting call anywhere but at the top
+  // of that element is never awaited: `isOk(p) ? "a" : "r"` tests the Promise
+  // (always "a"), `!isOk(p)` is always false, `[isOk(p)]` / `{ v: isOk(p) }` /
+  // `String(isOk(p))` / `isOk(p).x` hold or read the Promise. §13.8 "The rule":
+  // a waiting value stands only at a suspension point where it is awaited; in
+  // the batch the ONLY such point is the element itself.
+  //
+  // So a decl may be a member only when its element is one of:
+  //   - "bare"  — exactly ONE call, the whole initializer: a non-optional call
+  //     of a plain name whose arguments contain no call at all. Its value IS
+  //     the binding, and `Promise.all` awaits it (a sync callee's value passes
+  //     through unchanged);
+  //   - "inert" — no call anywhere: literals, names, `@` reads and the pure
+  //     structural operators over them. Nothing in it can wait.
+  // Anything else is "mixed" and is NOT a member: it is emitted in place by
+  // the sequential path (`emitLogicNode` + `_autoAwaitFnBody`), which awaits
+  // every call site in it (U1 / S320). The test is STRUCTURAL and fails
+  // closed: it never asks whether a nested call waits (an async combinator
+  // `xs.filter(cb)`, a `globalThis.fetch`, a nested lambda, a `!{}` IIFE, a
+  // `match`, an escape hatch — none is in the inert set), so a callee the
+  // async-name facts miss cannot slip into an element un-awaited. The cost is
+  // only parallelism: a sync call under an operator next to a server call now
+  // runs in place instead of riding the batch.
+  const _INERT_KINDS = new Set(["lit", "ident", "array", "object", "prop", "shorthand", "spread", "unary", "binary", "ternary", "member", "index", "cast"]);
+  function exprIsInert(node: any): boolean {
+    if (node === null || node === undefined) return true;
+    if (Array.isArray(node)) return node.every(exprIsInert);
+    if (typeof node !== "object") return true;
+    if (typeof node.kind === "string") {
+      if (!_INERT_KINDS.has(node.kind)) return false;
+      // A template literal with `${…}` keeps its interpolations off the
+      // enumerable tree (non-enumerable structure / raw text): not provably inert.
+      if (node.kind === "lit" && (node.hasInterpolation === true || (node.litType === "template" && typeof node.raw === "string" && node.raw.includes("${")))) return false;
+    }
+    for (const [k, v] of Object.entries(node)) {
+      if (k === "span" || k === "kind") continue;
+      if (v && typeof v === "object" && !exprIsInert(v)) return false;
+    }
+    return true;
+  }
+  const _declElementShape = new Map<number, "bare" | "inert" | "mixed">();
+  function declElementShape(idx: number): "bare" | "inert" | "mixed" {
+    const memo = _declElementShape.get(idx);
+    if (memo) return memo;
+    const st = body[idx] as any;
+    let shape: "bare" | "inert" | "mixed" = "mixed";
+    const init = st ? (st.initExpr ?? st.exprNode ?? null) : null;
+    const strInit = st && ((typeof st.init === "string" && st.init.trim() !== "") || (typeof st.expr === "string" && st.expr.trim() !== ""));
+    if (!st || st.sqlNode) {
+      shape = "mixed";
+    } else if (init === null) {
+      // No structured initializer: `let x` is inert; a string-only init is unread.
+      shape = strInit ? "mixed" : "inert";
+    } else if (init.kind === "call") {
+      shape = !init.optional && init.callee && init.callee.kind === "ident" &&
+        (init.args ?? []).every((a: any) => exprIsInert(a)) ? "bare" : "mixed";
+    } else {
+      shape = exprIsInert(init) ? "inert" : "mixed";
+    }
+    _declElementShape.set(idx, shape);
+    return shape;
+  }
+  // A decl whose element would put a call under an operator / literal /
+  // argument / member read cannot be a batch member (seed or candidate).
+  function declIsMixedElement(idx: number): boolean {
+    return isDeclShapeStmt(body[idx] as ASTNode) && declElementShape(idx) === "mixed";
+  }
+
   const _readOnlyServerFns: Set<string> = readOnlyServerFnNames ?? new Set<string>();
   // May statement `idx` sit in a batch alongside a cell write?
   function memberBatchSafe(idx: number, seedIdx: number): boolean {
@@ -1561,7 +1632,9 @@ export function scheduleStatements(body: ASTNode[], fnNode: ASTNode, routeMap: R
     // also forces the group to stay size-1: a multi-member batch would const-
     // destructure it, breaking the later reassignment.
     const seedIsCellWrite = !seedIsControlFlowBoundary && cellWriteBatchInfo(i) !== null;
-    const seedIsNonDecl = !seedIsCellWrite && (!isDeclShapeStmt(body[i] as ASTNode) || declIsReassignedLater(body[i] as ASTNode));
+    // S470 — a decl whose element is "mixed" (a call under an operator) batches
+    // with nothing: it is emitted in place, every call in it awaited.
+    const seedIsNonDecl = !seedIsCellWrite && (!isDeclShapeStmt(body[i] as ASTNode) || declIsReassignedLater(body[i] as ASTNode) || declIsMixedElement(i));
     // s441 F1 -- cells written by cell-write members so far, and whether any
     // statement has been skipped (not joined) since the seed.
     const groupWrittenCells = new Set<string>(seedIsCellWrite ? [cellWriteBatchInfo(i)!.cell] : []);
@@ -1632,6 +1705,14 @@ export function scheduleStatements(body: ASTNode[], fnNode: ASTNode, routeMap: R
           break;
         }
       }
+      // S470 g-promise-all-batch-puts-unawaited-call-under-sync-operator — an
+      // INDEPENDENT "mixed" decl (see `declElementShape`) would have joined as
+      // an element with a call under an operator. It ENDS the batch instead,
+      // like a non-decl: it is emitted in place by the sequential path (every
+      // call in it awaited), and nothing after it is hoisted over it — a skip
+      // would reorder its server calls behind a later member's. (A DEPENDENT
+      // decl never joined, mixed or not; it keeps the S212 skip below.)
+      if (independent && !candIsCellWrite && declIsMixedElement(j)) break;
       if (independent) {
         group.push(j);
         visited.add(j);

@@ -38,6 +38,16 @@ export const KNOWN_FAIL = {
   // function; the value-indexed row side; a body local in a keyed row) owed to
   // g-lift-gate-placement-inherits-main-staleness-s469 are fixed: a lifted gate re-evaluates by re-running the
   // code that produced what it reads, under the runtime's read tracking (emit-lift.js emitLiftGate).
+
+  // S470 s470-promise-all-batch-elements (r21 / f27) — the review's h2/002 shape. The batch half is fixed
+  // (the `!{}` decl is no longer a Promise.all element); what remains is the SEQUENTIAL lowering of an
+  // expression-position `!{}` whose subject is a local `!` function and whose arm calls a server
+  // function: a SYNC IIFE (`(() => { … r = _scrml_fetch_isOk(p) … })() ? …`) whose arm result is the
+  // pending Promise. The same on base ffbcf4432 with no batch (the review's p5 shape); the
+  // review-of-s470-li head emits an awaited async IIFE there. Candidate gap (not filed by this lane):
+  // value-position `!{}` arm server call in a sync IIFE.
+  "f27/expression-position !{} guard (h2/002) (msg)": "candidate:g-value-position-bang-arm-server-call-sync-iife-s470",
+  "f27/expression-position !{} guard (h2/002) (gate)": "candidate:g-value-position-bang-arm-server-call-sync-iife-s470",
 };
 
 // Shapes this instrument CANNOT judge: client pages with no #wrong button (a client function calling
