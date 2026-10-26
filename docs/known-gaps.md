@@ -31,8 +31,8 @@
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 264 | 5 |
-| MED | 699 | 8 |
-| LOW | 512 | 0 |
+| MED | 703 | 8 |
+| LOW | 517 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
 
@@ -216,8 +216,11 @@ Found by the three #1547 review rounds. #1547 refuses a waiting value in a RENDE
 
 **Resolved S470 (#1554, `s470-action-body-await`).** Where impl#1 lowers a body synchronously, a waiting call is refused with the new **E-IMPL1-ACTION-NOT-AWAITED**. That covers module-init / body-top `${}`, `<request>` / `<timer>` / `<poll>` / `<timeout>` bodies, `^{}`, engine state `effect=`, `<onTransition>` bodies and guards, message arms, computed `after=`, and `<onMount>` / `<onUnmount>` tags. This is an impl#1 limit, not a language rule (ruling:user-voice-scrml.md S470 *"Mint E-IMPL1 code (Recommended)"*). In the two async hosts, `when … changes` bodies and the engine opener `effect=`, the call is awaited. An accounting invariant guards those two hosts: every waiting-name occurrence in a statement's text must be an awaited call site, otherwise the statement is refused. Two forms stay accepted in synchronous bodies: a whole-statement cell write `@c = f(args)` (the existing lift awaits it; it is not accepted inside `^{}`) and a bare call statement. Five S239 review rounds were run on frozen refs. Each blocking finding (H1, H2, N1, R1, R3) was PA-reproduced. Pack families f10–f14 add 73 shapes, each FAIL on base or on an earlier head. R26 over 3615 files: 0 newly rejected. Follow-ups are filed below.
 
-<!-- @gap id=g-markup-in-const-initializer-unwalked-s470 sev=MED status=open locus=compiler/src/codegen/render-waiting-calls.ts(the walk does not descend into markup held in a `const` initializer) prov=review:S470-#1547-round-1-#6(q04,q05) -->
-### g-markup-in-const-initializer-unwalked-s470 — markup held in a `${}` `const` initializer (`${ const m = <span if=${isOk(@pw)}>IN</span> }` then `${ m }`) is never walked by the render-position check, so its server-call gate still compiles — `NEW S470; MED; open`
+<!-- @gap id=g-markup-in-const-initializer-unwalked-s470 sev=MED status=resolved resolved-by=s470-render-residue-host-promises locus=compiler/src/codegen/render-waiting-calls.ts(the walk does not descend into markup held in a `const` initializer) prov=review:S470-#1547-round-1-#6(q04,q05) -->
+### g-markup-in-const-initializer-unwalked-s470 — markup held in a `${}` `const` initializer (`${ const m = <span if=${isOk(@pw)}>IN</span> }` then `${ m }`) is never walked by the render-position check, so its server-call gate still compiles — `NEW S470; MED; RESOLVED S470 (#1566)`
+
+> **RESOLVED S470 (#1566).** The walk did reach the markup; the markup-value reader read an unquoted attribute `${…}` as the identifier `$` (`collectTextInterpSpans`, compiler/src/ast-builder.js). So `if=${isOk(@pw)}` judged `$`, and the sync twin emitted `($)` (always open on a page with a global `$`). It now pre-splits the attribute the way `lift <tag attr=${…}>` already did; 34 attribute and holder spellings verified, base logged in on 19, head on none.
+
 
 Reproducer q04 (`~/.cache/scrml/review/s470-l2/`): compiles on #1547's branch. The reviewer's q05 also records a `($)` condition loss on the sync twin of the same shape. Fix direction: walk markup values held in a declaration with the same node walk, or refuse markup in a `const` initializer that holds a waiting call.
 
@@ -234,8 +237,11 @@ Not a fail-open (the gate throws rather than opens). Found by #1547's sweep (h03
 
 The identifier and declaration paths skip a function value (`ok = () => isOk(@pw)`, `const run = () => …`), but the member path does not. Every affected file is already refused (E-VALUE-FUNCTION-STORED / E-ASYNC-FN-ESCAPES-AS-VALUE), so the cost is an extra diagnostic. Fix: apply the declaration path's function-value skip to member assignments.
 
-<!-- @gap id=g-host-promise-global-in-render-not-refused-s470 sev=MED status=open locus=compiler/src/codegen/render-waiting-calls.ts(reads the §13.2 async facts; a host `fetch` with no stdlib import is not coloured) prov=review:S470-#1547-round-1;spec:§13.7(item 4, "a call to a Promise-returning standard-library function (`fetch`, …)") -->
-### g-host-promise-global-in-render-not-refused-s470 — a host Promise global (`fetch(…)`) written directly in a render position is not refused, because the §13.2 async facts do not colour it without a stdlib import; its Promise is always truthy — `NEW S470; MED; open`
+<!-- @gap id=g-host-promise-global-in-render-not-refused-s470 sev=MED status=resolved resolved-by=s470-render-residue-host-promises locus=compiler/src/codegen/render-waiting-calls.ts(reads the §13.2 async facts; a host `fetch` with no stdlib import is not coloured) prov=review:S470-#1547-round-1;spec:§13.7(item 4, "a call to a Promise-returning standard-library function (`fetch`, …)") -->
+### g-host-promise-global-in-render-not-refused-s470 — a host Promise global (`fetch(…)`) written directly in a render position is not refused, because the §13.2 async facts do not colour it without a stdlib import; its Promise is always truthy — `NEW S470; MED; RESOLVED S470 (#1566)`
+
+> **RESOLVED S470 (#1566).** `fetch` is in the file's §13.2 async facts through one seed (compiler/src/codegen/host-promise-globals.ts) that every colouring, await site and value-use judge reads; host-promise-names.ts reads the global-object spellings (`globalThis`/`window`/`self`/`top`/`parent`/`frames`, chains, `document.defaultView`, `["fetch"]`). In render positions it is E-VALUE-SERVER-CALL; as a value, E-ASYNC-FN-ESCAPES-AS-VALUE + E-VALUE-SERVER-CALL. SPEC names only `fetch` (§13.7 item 4, §13.8 item 3, "does not widen"), so `Promise.resolve` is not included. Residue: `g-host-fetch-residue-s470`.
+
 
 §13.7 item 4 names `fetch`. #1547 reused the existing waiting predicate rather than adding a host-global list, so the case was left out. Rated MED rather than LOW because it is the same always-truthy class, but an auth gate on a raw `fetch` is an unusual program.
 
@@ -268,7 +274,7 @@ Measured by the #1554 reviewer's race harness on base and on every lane head. `<
 
 > **NARROWED S470 (#1560, s470-when-changes-latest-wins).** SPEC §6.7.4: a run suspended at a server call when its effect re-triggers "is cancelled and never resumes", and the settled value or failure is discarded. `when … changes` is a spelling of `<effect>`. `_scrml_when_changes` (compiler/src/runtime-template.js) keeps a per-instance sequence counter, the `<request>` mechanism. `wrapOwnAwaits` (compiler/src/codegen/js-async-analysis.ts) rewrites every own-level `await X` of the body as `(C(await W(X)) ? C.value : await S())`, so the check runs synchronously at the point the run resumes, with no microtask window. A stale or disposed run awaits a fresh promise that never settles, so its catch and finally do not run. A body that cannot be gated is refused with a located E-CODEGEN-INVALID-LOGIC. The race fixtures end "rejected" (main: "LOGGED IN"), and the review's microtask sweep shows no stale writes at K=0..59. Cost: +130 B gzip in core runtime; the `<each>` row if= ratchet was raised 8,245 → 8,375 (owner ruling S470, "allow raising the budget").
 >
-> **Still open (MED):** the gate wraps only the BODY's own awaits. A helper the body calls that awaits a server call internally and writes the cell itself, `function check(p){ if (isOk(p)) { @msg = "LOGGED IN" } … }` with body `check(@pw)`, still lands its stale write: "LOGGED IN" with `@pw` = wrong (review F1, `~/.cache/scrml/review/s470-le/fx/a01-helperwrite.scrml`, executed on #1560 and main). A related question needs an owner ruling (review F2, `fx/a15-helperbeacon.scrml`): is the rest of a called helper part of the cancelled run's "continuation"? Today a stale helper still sends its outside-world call (`beacon("secret")`). PA recommendation: yes, callee frames are part of the continuation. Fix directions: thread the run's gate into async-coloured helpers called from a `when` body, or enforce §6.7.4's E-EFFECT-WRITES-STATE. The second removes F1 but not F2.
+> **Still open (MED):** the gate wraps only the BODY's own awaits. A helper the body calls that awaits a server call internally and writes the cell itself, `function check(p){ if (isOk(p)) { @msg = "LOGGED IN" } … }` with body `check(@pw)`, still lands its stale write: "LOGGED IN" with `@pw` = wrong (review F1, `~/.cache/scrml/review/s470-le/fx/a01-helperwrite.scrml`, executed on #1560 and main). A related question needs an owner ruling (review F2, `fx/a15-helperbeacon.scrml`): is the rest of a called helper part of the cancelled run's "continuation"? Today a stale helper still sends its outside-world call (`beacon("secret")`). PA recommendation: yes, callee frames are part of the continuation. Fix directions: thread the run's gate into async-coloured helpers called from a `when` body, or enforce §6.7.4's E-EFFECT-WRITES-STATE. The second removes F1 but not F2. The same class reaches engine hooks once lane s470-await-residue gives them a run guard: a helper called from an `<onTransition>` keeps running after its run is superseded (`~/.cache/scrml/review/s470-lf2/fx/s3-helper.scrml`, right-slow / idle / wrong → "LOGGED IN").
 
 <!-- @gap id=g-when-in-engine-body-dropped-s470 sev=MED status=open locus=UNTRACED(engine state/body lowering — a `${ when … changes { … } }` in an `<engine>` body is never emitted) prov=dispatch:s470-when-changes-latest-wins(candidate 1);review:S470-#1560(F5, fx/k/eng.scrml executed) -->
 ### g-when-in-engine-body-dropped-s470 — a `${ when … changes { … } }` inside an `<engine>` body is silently dropped: exit 0, no `_scrml_when_changes` in the output, no diagnostic — `NEW S470; MED; open`
@@ -331,8 +337,63 @@ A gate reading `@v` after a reset would open. Not executed end to end, so it is 
 
 Each is refused because the walk cannot prove an await at the site. The C-for head cases trace to `g-impl1-c-for-head-template-and-string-literals-mangled-s470`. Most would become awaits under `g-sync-action-body-fire-and-forget-ordering-s470`'s async-host direction.
 
-<!-- @gap id=g-host-promise-global-in-action-body-s470 sev=LOW status=open locus=compiler/src/codegen/render-waiting-calls.ts(the §13.2 async facts do not colour a host Promise global) prov=dispatch:s470-action-body-await(candidate gap) -->
-### g-host-promise-global-in-action-body-s470 — a host Promise global (`fetch(…)`, `Promise.resolve(…)`) in an action body is neither refused nor awaited (`<timer>${ if (fetch("/x")) … }` compiles) — `NEW S470; LOW; open`
+<!-- @gap id=g-impl1-same-line-trailing-tokens-dropped-s470 sev=MED status=open locus=compiler/src/ast-builder.js(collectExpr — the expression reader stops and the rest of the line is discarded) prov=review:S470-lane-C(F3; ~/.cache/scrml/review/s470-lc/sb/s21.scrml, s22, s23) -->
+### g-impl1-same-line-trailing-tokens-dropped-s470 — (security) tokens after a complete expression on the SAME line are dropped silently: `st.ok = true catch E { st.ok = false }`, `log(p) catch E { … }`, `st.ok = x foo { st.ok = false }` compile and the tail never runs, so a revoking tail is lost — `NEW S470 (review of lane s470-bang-catch-try-body); MED; open`
+
+Executed on lane C's heads and on main. Fix: refuse leftover tokens after an expression statement (E-STMT-UNEXPECTED-TOKEN), the same way lane C refuses a `!`-led line after a value.
+
+<!-- @gap id=g-impl1-each-body-unsupported-statements-dropped-s470 sev=MED status=open locus=compiler/src/codegen/emit-each.ts(~1795 — the each-body lowering skips every statement it does not support) prov=review:S470-lane-C(F5; ~/.cache/scrml/review/s470-lc/each/e3.scrml, e11, e14) -->
+### g-impl1-each-body-unsupported-statements-dropped-s470 — (security) an `<each>` body's `${ … }` silently drops statements it does not support: the `!{} catch` form, a plain `try { } catch (e) { }`, a standalone arm list, and even `${ @ok = false }`, so a revoking statement is lost — `NEW S470 (review of lane s470-bang-catch-try-body); MED; open`
+
+`class` and `switch` are still refused there. Fix: refuse any statement the each-body lowering does not emit.
+
+<!-- @gap id=g-reset-settle-no-stale-guard-s470 sev=MED status=open locus=compiler/runtime(_scrml_reset_apply settles a thenable detached, with no sequence guard) prov=dispatch:s470-await-residue(candidate);review:S470-lane-F(F6; fx/reset-race.scrml) -->
+### g-reset-settle-no-stale-guard-s470 — (security, race) a reset whose re-run initializer waits settles detached with no sequence guard, so a later write can be overwritten by the stale settle: clicks set-secret, reset, set-wrong, reset end "LOGGED IN" — `NEW S470; MED; open`
+
+Reproduced by the lane F review on head and main. The S450 sole-handler reset that lane F still accepts is exposed to it. Fix: give the reset settle the `<request>` latest-wins check.
+
+<!-- @gap id=g-impl1-onmount-one-line-statement-dropped-s470 sev=MED status=open locus=UNTRACED(`on mount` one-line body reader) prov=dispatch:s470-await-residue(candidate);review:S470-lane-F(F7; fx/med.mjs) -->
+### g-impl1-onmount-one-line-statement-dropped-s470 — a one-line `${ on mount { @ok = isOk(@pw); if (@ok) { … } else { … } } }` drops the `if`, silently; the multi-line form keeps it — `NEW S470; MED; open (pre-existing)`
+
+<!-- @gap id=g-impl1-callref-reset-handler-unbound-s470 sev=LOW status=open locus=UNTRACED(call-ref handler lowering of `reset`) prov=dispatch:s470-await-residue(candidate);review:S470-lane-F(F11) -->
+### g-impl1-callref-reset-handler-unbound-s470 — `onclick=reset(@v)` (call-ref form) emits `reset(<value>)`, a ReferenceError at run time; `onclick=${ reset(@v) }` works — `NEW S470; LOW; open (fails closed)`
+
+<!-- @gap id=g-timer-tick-no-latest-wins-s470 sev=LOW status=open locus=compiler/src/codegen/emit-reactive-wiring.ts(<timer>/<poll>/<timeout> async hosts) prov=dispatch:s470-await-residue(round 1 candidate) -->
+### g-timer-tick-no-latest-wins-s470 — `<timer>` / `<poll>` ticks, now async hosts, have no latest-wins guard (by design, so a slow tick does not starve the next), so a slow tick can briefly overwrite a newer one until the next tick re-reads — `NEW S470; LOW; open`
+
+<!-- @gap id=g-impl1-guarded-statement-in-when-body-raw-s470 sev=LOW status=open locus=UNTRACED(when body text lowering of `!{}`) prov=dispatch:s470-nested-handler-await(candidate) -->
+### g-impl1-guarded-statement-in-when-body-raw-s470 — any `!{}` statement in a `when` body, even with a sync callee and a sync arm, emits a raw `!{` (E-CODEGEN-INVALID-LOGIC) — `NEW S470; LOW; open (fails closed)`
+
+<!-- @gap id=g-host-fetch-residue-s470 sev=MED status=open locus=compiler/src/codegen/emit-expr.ts(host-member await has no library ctx.mode arm)+emit-tool.ts(no host seed on the tool path)+host-promise-names.ts(alias of a global object; numeric frames index; dynamic keys) prov=review:S470-#1566-round-2(R1–R5; ~/.cache/scrml/review/s470-lg2/) -->
+### g-host-fetch-residue-s470 — (security) after #1566 host `fetch` still escapes in five shapes: `--mode library` does not await `globalThis.fetch(…)` (bare `fetch` is awaited); `<program kind="tool">` never awaits `fetch`; a local alias of a global object (`const w = window; w.fetch(u)`); `window.frames[0].fetch`; and dynamic spellings (`window["fe"+"tch"]`, `Object.getOwnPropertyDescriptor`) — `NEW S470 (review of #1566); MED; open (follow-up lane s470-host-fetch-followups in flight for the first four)`
+
+All executed by the review, all failing on main too. In tool mode a CLI that rejects on `r.status == 401` logs a wrong password in. The dynamic spellings (LOW) defeat any static reader.
+
+<!-- @gap id=g-spec-host-promise-statics-s470 sev=LOW status=open locus=SPEC(§13.8 item 3) prov=dispatch:s470-render-residue-host-promises(candidate 3) -->
+### g-spec-host-promise-statics-s470 — `<span if=${Promise.resolve(…)}>` is accepted (always truthy) because SPEC names only `fetch` as a host waiting value — `NEW S470; LOW; open (SPEC question)`
+
+Recommendation: amend §13.8 item 3 to name the host Promise statics and constructors.
+
+<!-- @gap id=g-spec-safecallasync-thunk-awaited-position-s470 sev=LOW status=open locus=SPEC(§13.2 value-use exemptions)+stdlib/host/index.scrml:112 prov=review:S470-lane-G(F8, O2) -->
+### g-spec-safecallasync-thunk-awaited-position-s470 — `safeCallAsync(() => fetch(u))` (and its server-call twin) is refused in handlers, `on mount` and `when` (E-ASYNC-FN-ESCAPES-AS-VALUE / E-ASYNC-STDLIB-IN-SYNC-CALLBACK), although stdlib/host documents it as the way to contain an async host failure; so a failing `fetch` has no legal containing spelling — `NEW S470; LOW; open (owner ruling)`
+
+PA recommendation: rule `safeCallAsync`'s thunk an awaited position, like the collection-method exemption.
+
+<!-- @gap id=g-request-body-fetch-write-refused-s470 sev=MED status=open locus=compiler/src/codegen/emit-client.ts(reactive-set lift does not await fetch in a `<request>` body) prov=dispatch:s470-render-residue-host-promises(candidate 4);spec:§6.7.7 -->
+### g-request-body-fetch-write-refused-s470 — `<request>${ @data = fetch(url) }</>` is refused since #1566; impl#1 previously stored the pending Promise, yet §6.7.7 calls the body "the fetch expression", so this is a valid program impl#1 cannot run — `NEW S470; MED; open (fails closed)`
+
+No corpus file uses it. Fix: let the reactive-set lift await `fetch`, then accept it.
+
+<!-- @gap id=g-impl1-async-over-refusals-s470 sev=LOW status=open locus=compiler/src/codegen(render-waiting-calls.ts / fn-valued-bindings.ts) prov=review:S470-lane-G(O1, F7, F9);review:S470-#1566(O3) -->
+### g-impl1-async-over-refusals-s470 — fail-closed over-refusals around async values: a handler in markup held as a value (`onclick=${() => chk()}`) is E-ASYNC-FN-ESCAPES-AS-VALUE though the same handler compiles at top level and in `lift` (§6.15 exempts `on*=`); `setTimeout(() => X, 0)` with a waiting `X` is refused, contradicting §13.2's scheduler exemption; shadowing a `fetch` binder is invisible in bodies re-parsed from text and in `for` / catch binders — `NEW S470; LOW; open`
+
+Also noted: held markup emits a boolean attribute as `setAttribute("disabled", String(false))`, so the attribute is always present (lane G F9). `fetch(u).then(…)` in a handler is now E-ASYNC-CALL-PROMISE-METHOD, as §13.2 requires.
+
+<!-- @gap id=g-host-promise-global-in-action-body-s470 sev=LOW status=resolved resolved-by=s470-render-residue-host-promises locus=compiler/src/codegen/render-waiting-calls.ts(the §13.2 async facts do not colour a host Promise global) prov=dispatch:s470-action-body-await(candidate gap) -->
+### g-host-promise-global-in-action-body-s470 — a host Promise global (`fetch(…)`, `Promise.resolve(…)`) in an action body is neither refused nor awaited (`<timer>${ if (fetch("/x")) … }` compiles) — `NEW S470; LOW; RESOLVED S470 (#1566)`
+
+> **RESOLVED S470 (#1566).** Host `fetch` is awaited in function bodies, handlers, `on mount`, `when` and server functions, and refused (E-IMPL1-ACTION-NOT-AWAITED) in sync action bodies, the same as its server-call twin. `Promise.resolve` is not a SPEC-named waiting value (see `g-spec-host-promise-statics-s470`). Residue: `g-host-fetch-residue-s470`.
+
 
 Sibling of `g-host-promise-global-in-render-not-refused-s470`. Both need a host-global list of Promise-returning functions, which the §13.2 facts lack.
 
@@ -1684,6 +1745,8 @@ The long-standing cell-sync model: a cell is client state and its value travels 
 ### g-server-bundle-omits-helper-reached-from-nested-fn-or-lambda-s468 — a file-scope helper called from a server function only through a BLOCK-nested `function` declaration or a callback lambda is not emitted in the server bundle: `function run(p, h) { if (p) { function chk2(a, b) { return helper(a, b) } return chk2(p, h) } … }` → `ReferenceError: helper is not defined` (HTTP 500) — `NEW S468 (filed; pre-existing); LOW; open (fails closed)`
 
 <!-- @gap id=g-server-bundle-omits-helper-reached-from-nested-fn-or-lambda-s468 sev=LOW status=open locus=UNTRACED-hypothesis:compiler/src/codegen/emit-server.ts(server-fn body walk `_walk` / `_calledPeerNames` ~:4906 and planModuleBindingClosure — the server-side helper reach does not follow a call inside a block-nested function declaration or a callback lambda) prov=review:S468-rev-1434(f.mjs transitive_*);empirical:S468-await-f4-followups(gap1.mjs, gap1b.mjs, f3b.mjs) -->
+
+**S470 (lane s470-nested-handler-await candidate):** a client helper reached only from a server function's `!{}` ARM is also not shipped to the server bundle (`allowed is not defined`, the 12 PASS-500 shapes of pack family s21).
 
 **S470 (#1563 VALID control W10):** also reached from a server function through a top-level local helper that calls a local `return match` function ("mk is not defined", PASS-500 on both trees). The review could not confirm it is exactly this shape; check it here before splitting it out.
 
@@ -24996,6 +25059,8 @@ The s441-async-escape-f4-f5 branch closed F4/F5 and the #1139 false positives; i
 ### g-promise-all-batch-puts-unawaited-call-under-sync-operator — in a client function, the §13.2 parallel batch (`const [a, b] = await Promise.all([...])`) puts an un-awaited server call under `?` / `!` / `&&` / an object or array literal, so the operator tests the Promise — `NEW S441`; **HIGH** (SECURITY: accept-all); open
 Reproducers `docs/changes/s441-async-escape-f4-f5/review-repro/c-batch-ternary`, `c-batch-not`, `c-batch-and`, `c-batch-obj`, `c-batch-arr`: `const b = isOk(2) ? "accepted" : "rejected"` beside an independent `const a = isOk(1)` emits `const [a, b] = await Promise.all([_scrml_fetch_isOk(1), _scrml_fetch_isOk(2) ? "accepted" : "rejected"])` — the element is the ternary over a PROMISE, always "accepted". Compiles clean on base and on the fix round. The batch elements must be the bare calls (await the call, then apply the operator), or a statement whose server call sits under an operator must not be batched. Governing: §13.2 SHALL await every server call site. Scheduler: `compiler/src/codegen/scheduling.ts` (the Promise.all batch builder).
 <!-- @gap id=g-promise-all-batch-puts-unawaited-call-under-sync-operator sev=HIGH status=open locus=compiler/src/codegen/scheduling.ts(Promise.all batch — elements are whole initializers, not the server calls) prov=review:S441-f4f5-review -->
+
+**S470 (reviews of lane s470-unit-variant-tag-read F9/G5 and lane s470-nested-handler-await F1):** still open and still executed: a batched const whose initializer holds a server call inside a tape or object literal (`[fetch()]`, `{ e: fetch() }`, `[isOk(p)]`), and an expression-position `!{}` guard batched next to another awaited const, are emitted un-awaited inside `Promise.all([...])`, and a wrong password logs in (`~/.cache/scrml/review/s470-lh/p/a1.mjs` A18, `p/a6.mjs` I5/I10; `~/.cache/scrml/review/s470-li/runs/h2/002`). Lane s470-promise-all-batch-elements dispatched.
 
 ### g-markup-gate-tests-server-call-promise — a markup gate or attribute over a server call (`if=(isOk(1))`, `show=(isOk(1))`, `disabled=(isOk(1))`, `${isOk(1) ? … : …}`) tests / renders a Promise: the gate is always open — `NEW S441`; **HIGH** (SECURITY: a gated element always shows); RESOLVED S470 (#1547, refused)
 Reproducers `docs/changes/s441-async-escape-f4-f5/review-repro/mk-if`, `mk-show`, `mk-disabled`, `mk-interp`: `<p if=(isOk(1))>SECRET</p>` emits `if ((_scrml_fetch_isOk(1))) _scrml_if_mount…` — mounted for every answer. `${isOk(1) ? "a" : "b"}` wraps the whole ternary in `await (…)`, so the ternary still tests the Promise. Compiles clean. The display/attribute predicate lowering (`emit-event-wiring.ts` `computeDisplayToggleCondition` and the attribute effect writers) never went through §13.2. Fix direction: a gate that reads a server call awaits it (async effect with a stale-guard) or is refused with a diagnostic pointing at a cell (`<ok> = isOk(1)` then `if=@ok`).
