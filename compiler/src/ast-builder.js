@@ -20980,6 +20980,14 @@ function _nestedHandlersIn(tokens, from, to, filePath) {
 }
 
 function parseErrorTokens(tokens, filePath, errors) {
+  // S470 s470-nested-handler-await (SECURITY, review R2) — a COMMENT token carries the comment's
+  // TEXT without its `//` / `/*` opener (tokenizer.ts). The arm body is joined from token texts
+  // (`joinArmHandlerParts`), so a kept COMMENT token turned `// grant()` into the code `grant()`
+  // and a commented-out call RAN. Comments are trivia here as in every other token walk of this
+  // file: dropped with their text; the line-based join keeps the line breaks between statements.
+  if (Array.isArray(tokens) && tokens.some((t) => t && t.kind === "COMMENT")) {
+    tokens = tokens.filter((t) => !(t && t.kind === "COMMENT"));
+  }
   const arms = [];
   let i = 0;
 

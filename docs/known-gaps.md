@@ -30,9 +30,9 @@
 | Severity | Open (owed by impl#1, the TS compiler) | Carried (owed by the bootstrap; xfail on impl#1) |
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 264 | 5 |
-| MED | 703 | 8 |
-| LOW | 517 | 0 |
+| HIGH | 262 | 5 |
+| MED | 704 | 8 |
+| LOW | 519 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
 
@@ -194,8 +194,11 @@ Reported by the lane and not executed by a review. Each could make an auth check
 
 Follow-up: lift it once #1563's typed reads are confirmed to cover every shape it refuses.
 
-<!-- @gap id=g-impl1-unit-variant-dot-variant-reads-undefined-s470 sev=HIGH status=open locus=compiler/src/codegen(member access `.variant` on a unit variant, which is emitted as the bare tag string) prov=review:S470-#1563-round-3(UNIT-VARIANT, b/b12.mjs V2);dispatch:s470-unit-variant-tag-read -->
-### g-impl1-unit-variant-dot-variant-reads-undefined-s470 — (security) a unit variant value is emitted as the bare tag string (`"Gone"`), so `x.variant` reads `undefined`: `x.variant == "Gone"` is false, and a "reject when Gone" gate logs a wrong password in, on every side — `NEW S470 (review of #1563); HIGH; open (lane s470-unit-variant-tag-read in flight)`
+<!-- @gap id=g-impl1-unit-variant-dot-variant-reads-undefined-s470 sev=HIGH status=resolved resolved-by=s470-unit-variant-tag-read locus=compiler/src/codegen(member access `.variant` on a unit variant, which is emitted as the bare tag string) prov=review:S470-#1563-round-3(UNIT-VARIANT, b/b12.mjs V2);dispatch:s470-unit-variant-tag-read -->
+### g-impl1-unit-variant-dot-variant-reads-undefined-s470 — (security) a unit variant value is emitted as the bare tag string (`"Gone"`), so `x.variant` reads `undefined`: `x.variant == "Gone"` is false, and a "reject when Gone" gate logs a wrong password in, on every side — `NEW S470 (review of #1563); HIGH; RESOLVED S470 (#1571)`
+
+> **RESOLVED S470 (#1571).** Every `.variant` value read is lowered to the tag read `typeof x === "string" ? x : x.variant` on the structured path, both rewrite pipelines, the library text and `<each>` rows. Every emitter is audited in docs/changes/s470-unit-variant-tag-read/progress.md. Places stay plain. Destructuring a `variant` key is lowered or refused, and pattern defaults and computed keys are read as expressions. The qualified `is AuthErr.Denied` (a constructor compare, a fail-open on all four sides) is fixed in the shared emitBinary. 12 engine/machine samples now render the tag instead of `undefined`. Pack r16, 199 shapes; base FAILs 120. Follow-ups: `g-impl1-variant-read-residue-s470`.
+
 
 `.variant` is the one member #1563 leaves allowed on an enum value, so this is the member authors are steered to. SPEC's canonical variant test is `x is .V` (§18); SPEC defines no user-facing `.variant` member, which is a separate owner question.
 
@@ -245,8 +248,11 @@ The identifier and declaration paths skip a function value (`ok = () => isOk(@pw
 
 §13.7 item 4 names `fetch`. #1547 reused the existing waiting predicate rather than adding a host-global list, so the case was left out. Rated MED rather than LOW because it is the same always-truthy class, but an auth gate on a raw `fetch` is an unusual program.
 
-<!-- @gap id=g-impl1-bang-catch-try-body-cut-at-first-brace-s470 sev=HIGH status=open locus=compiler/src/ast-builder.js(~25940 — the `!{ tryBody } catch T as b { … }` reader ends the try body at the first `}`) prov=review:S470-s470-whole-error-binder-escapes-r3-review(F2);empirical:S470(PA re-ran ~/.cache/scrml/review/s470-l1d/F2/app.scrml on main 4058bd052) -->
-### g-impl1-bang-catch-try-body-cut-at-first-brace-s470 — (security) in the `!{ … } catch T as b { … }` form the try body is cut at its first `}`, so a nested handler inside it is dropped: `!{ @ok = check(p) !{ _ :> false } } catch AuthErr as b { @ok = false }` stores `check(p)`'s truthy failure value in `@ok` with no E-ERROR-002, and a wrong password renders "LOGGED IN" — `NEW S470; HIGH; open`
+<!-- @gap id=g-impl1-bang-catch-try-body-cut-at-first-brace-s470 sev=HIGH status=resolved resolved-by=s470-bang-catch-try-body locus=compiler/src/ast-builder.js(~25940 — the `!{ tryBody } catch T as b { … }` reader ends the try body at the first `}`) prov=review:S470-s470-whole-error-binder-escapes-r3-review(F2);empirical:S470(PA re-ran ~/.cache/scrml/review/s470-l1d/F2/app.scrml on main 4058bd052) -->
+### g-impl1-bang-catch-try-body-cut-at-first-brace-s470 — (security) in the `!{ … } catch T as b { … }` form the try body is cut at its first `}`, so a nested handler inside it is dropped: `!{ @ok = check(p) !{ _ :> false } } catch AuthErr as b { @ok = false }` stores `check(p)`'s truthy failure value in `@ok` with no E-ERROR-002, and a wrong password renders "LOGGED IN" — `NEW S470; HIGH; RESOLVED S470 (#1568, form refused)`
+
+> **RESOLVED S470 (#1568) — PA ruling, narrow class.** The statement form `!{ … } catch T [as b] { … }` is REFUSED with E-TRY-NOT-IN-SCRML. SPEC §19.1: "There is NO try/catch. There are NO exceptions." The corpus has 0 uses. Detection uses the block splitter's own brace-balanced extent (`errorEffectExtent`), and an end-of-body sweep refuses the form wherever a text reader consumed it. Related `!` statements fixed in the same PR: a gapped `! { … }` was silently DROPPED (a wrong password logged in) and is now E-ERROR-014; a standalone `!{ arms }` is E-ERROR-014; a `!`-led line after a value line with no `;` is E-STMT-UNEXPECTED-TOKEN (§7.2.2 rule 4, PA ruling in review round 3). Pack r10, 360 shapes. Follow-ups: `g-impl1-bang-statement-residue-s470`.
+
 
 Found by the lane-1 round-3 review (F2), pre-existing on base. PA-verified on main `4058bd052`: exit 0, and the emitted client JS is `_scrml_cs_reactive_set("ok", _scrml_check_3(p));`. That is the unhandled failable result, with neither the inner `!{}` nor the catch applied. Repro: `~/.cache/scrml/review/s470-l1d/F2/app.scrml`. Fix direction: read the try body with the brace-balanced block reader the other `!{}` forms use. If that reader cannot find the end, refuse.
 
@@ -364,8 +370,24 @@ Reproduced by the lane F review on head and main. The S450 sole-handler reset th
 <!-- @gap id=g-impl1-guarded-statement-in-when-body-raw-s470 sev=LOW status=open locus=UNTRACED(when body text lowering of `!{}`) prov=dispatch:s470-nested-handler-await(candidate) -->
 ### g-impl1-guarded-statement-in-when-body-raw-s470 — any `!{}` statement in a `when` body, even with a sync callee and a sync arm, emits a raw `!{` (E-CODEGEN-INVALID-LOGIC) — `NEW S470; LOW; open (fails closed)`
 
-<!-- @gap id=g-host-fetch-residue-s470 sev=MED status=open locus=compiler/src/codegen/emit-expr.ts(host-member await has no library ctx.mode arm)+emit-tool.ts(no host seed on the tool path)+host-promise-names.ts(alias of a global object; numeric frames index; dynamic keys) prov=review:S470-#1566-round-2(R1–R5; ~/.cache/scrml/review/s470-lg2/) -->
-### g-host-fetch-residue-s470 — (security) after #1566 host `fetch` still escapes in five shapes: `--mode library` does not await `globalThis.fetch(…)` (bare `fetch` is awaited); `<program kind="tool">` never awaits `fetch`; a local alias of a global object (`const w = window; w.fetch(u)`); `window.frames[0].fetch`; and dynamic spellings (`window["fe"+"tch"]`, `Object.getOwnPropertyDescriptor`) — `NEW S470 (review of #1566); MED; open (follow-up lane s470-host-fetch-followups in flight for the first four)`
+<!-- @gap id=g-server-fn-bare-fetch-calls-bundle-router-s470 sev=MED status=open locus=compiler/src/codegen/emit-server.ts(the server bundle exports `async function fetch(request)` at module scope) prov=dispatch:s470-host-fetch-followups(candidate 1);review:S470-#1572(bin/srvrun.mjs, real auth server) -->
+### g-server-fn-bare-fetch-calls-bundle-router-s470 — (security) a bare `fetch(url)` inside a server function calls the server bundle's OWN exported request router (`export async function fetch(request)`), not the network: it returns `null`; usually `r.status` throws (500, fail closed), but a null-tolerant check `if (r?.status == 401) { return "rejected" }` lets a wrong password in — `NEW S470 (review of #1572); MED; open (pre-existing)`
+
+`globalThis.fetch(…)` in a server function is correct. Fix: emit the router under a name no scrml binding can reach, or lower a bare `fetch` in server functions to `globalThis.fetch`.
+
+<!-- @gap id=g-impl1-bang-statement-residue-s470 sev=LOW status=open locus=compiler/src/ast-builder.js(collectExpr newline boundary; the `catch`-in-expression exclusion) prov=review:S470-#1568-round-4(FP-1, CX-1);dispatch:s470-bang-catch-try-body(round 4 notes) -->
+### g-impl1-bang-statement-residue-s470 — residue of #1568: a bare `{ … }` block followed by a `!`-led line is refused (FP-1, fails closed; §7.2.2 makes a block's `}` end the statement); a member named `.try` makes the `catch` exclusion skip a dropped `catch` (CX-1, pre-existing, client); a bare `!x` statement after a `;` compiles as a no-op (§7.2.2 rule 9, E-STMT-NO-EFFECT) — `NEW S470; LOW; open`
+
+Also: the §34 rows for E-ERROR-014 (written for the markup position) and E-TRY-NOT-IN-SCRML (written for the `try` keyword) are narrower than their S470 uses.
+
+<!-- @gap id=g-impl1-variant-read-residue-s470 sev=LOW status=open locus=compiler/src/codegen(emit-expr.ts / rewrite.ts / emit-library.ts) prov=review:S470-#1571(rounds 1–3) -->
+### g-impl1-variant-read-residue-s470 — residue of #1571: a dynamic key `x[k]` with `k = "variant"` keeps the plain read; a declaration default is serialized without its quotes (`{ a = x["variant"] }` → 500 "variant is not defined", fails closed); `x is Math.PI` (a non-enum dotted name) is treated as `Enum.Variant`; library multi-line templates still corrupt `is` / `not` text (lib/ml2); compile-time `^{}` meta-eval reads `.variant` as `undefined` on a unit variant; a `variant` key in a parameter or `for` head is refused; the OAuth `.scrml` storage check now gives a worse error for a bare string (still fails closed) — `NEW S470; LOW; open`
+
+<!-- @gap id=g-host-fetch-residue-s470 sev=MED status=narrowed narrowed-by=s470-host-fetch-followups locus=compiler/src/codegen/emit-expr.ts(host-member await has no library ctx.mode arm)+emit-tool.ts(no host seed on the tool path)+host-promise-names.ts(alias of a global object; numeric frames index; dynamic keys) prov=review:S470-#1566-round-2(R1–R5; ~/.cache/scrml/review/s470-lg2/) -->
+### g-host-fetch-residue-s470 — (security) after #1566 host `fetch` still escapes in five shapes: `--mode library` does not await `globalThis.fetch(…)` (bare `fetch` is awaited); `<program kind="tool">` never awaits `fetch`; a local alias of a global object (`const w = window; w.fetch(u)`); `window.frames[0].fetch`; and dynamic spellings (`window["fe"+"tch"]`, `Object.getOwnPropertyDescriptor`) — `NEW S470 (review of #1566); MED; NARROWED S470 (#1572: library, tool, window aliases, frames[n])`
+
+> **NARROWED S470 (#1572).** Library mode awaits `globalThis.fetch`, tool mode awaits `fetch`, a binding of a host global object (`const w = window`, chains, alias-of-alias) is treated as that object, and `frames[n]` is recognised. Still open: destructuring through an alias (`const { fetch: f } = w`, `const { window: w2 } = globalThis`; fix: route `destructuresHostPromise` / `holdsHostObject` through `isHostGlobalObjectExpr`) (LOW–MED); a host object passed on as a value (`go(window, u)`, `getW().fetch(u)`, `{ w: window }`) (MED); dynamic spellings (LOW).
+
 
 All executed by the review, all failing on main too. In tool mode a CLI that rejects on `r.status == 401` logs a wrong password in. The dynamic spellings (LOW) defeat any static reader.
 

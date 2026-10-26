@@ -71,6 +71,43 @@ export function lowerVariantCheck(operand: string, variantLiteral: string): stri
   return `(function(__v){return (typeof __v === "object" && __v !== null && typeof __v.variant === "string" ? __v.variant : __v) === ${variantLiteral};})(${operand})`;
 }
 
+/**
+ * `x.variant` — read the variant TAG of an enum value (S470, lane
+ * s470-unit-variant-tag-read).
+ *
+ * §51.3.2 represents a unit variant as its bare tag string (`"Gone"`) and a
+ * payload variant as `{ variant, data }`. A plain JS `x.variant` therefore read
+ * `undefined` off a unit variant, so `x.variant == "Gone"` was false where
+ * `x is .Gone` is true — a "reject when Gone" gate let the request through.
+ *
+ * The lowering reuses the representation decision `lowerVariantCheck` and the
+ * match dispatcher make (a string IS a unit variant's tag; an object carries its
+ * tag in `.variant`), but narrowed to the ONE receiver JS gets wrong: a STRING
+ * receiver yields itself; every other receiver keeps the exact JS member read —
+ * an error envelope `{ __scrml_error, variant, data }` or a struct with a
+ * `variant` field of any type reads that field, `null`/`undefined` still throws
+ * (or short-circuits under `?.`), a number still reads `undefined`. So the read
+ * agrees with `is`: `tag === "V"` holds exactly when `x is .V` does.
+ *
+ * Codegen has no static receiver type at a member site (expressions reach it
+ * without type annotations), and a unit variant arrives from every value
+ * source — a literal, a return, a cell, a tape element, a field, an import — so
+ * the read is lowered wherever `.variant` is read, not only where an enum type
+ * is written down. The test is inline (no runtime helper) so server, library
+ * and tool output need nothing in scope, as `lowerVariantCheck` does.
+ *
+ * `trivial` — `operand` is a bare name / `@cell` / literal (re-reading is
+ * unobservable), else it is bound once by an arrow IIFE (§42.2.4 discipline).
+ * `optional` — the read sits in a `?.` chain, so a nullish receiver yields
+ * `undefined` instead of throwing.
+ */
+export function lowerVariantTagRead(operand: string, trivial: boolean, optional: boolean): string {
+  const dot = optional ? "?." : ".";
+  if (trivial) return `(typeof ${operand} === "string" ? ${operand} : ${operand}${dot}variant)`;
+  const v = IS_OP_IIFE_LOCAL;
+  return `((${v}) => typeof ${v} === "string" ? ${v} : ${v}${dot}variant)(${operand})`;
+}
+
 // ---------------------------------------------------------------------------
 // The placeholder vocabulary `expression-parser.ts formatIsPredicate` writes.
 // ---------------------------------------------------------------------------

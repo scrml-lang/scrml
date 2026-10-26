@@ -96,6 +96,7 @@ const DECLS = (srv) => `${srv}function isOk(p) { return p == "secret" }
 //       (FAIL on ffbcf4432 and on round 0 03a2ef2ed). The element is now the statement's own emission.
 //   F4: a destructuring decl beside a batch seed (E-CODEGEN-INVALID-LOGIC on ffbcf4432; now a batch
 //       boundary, emitted in place — VALID).
+const GUARD = `local(p) !{ _ :> isOk(p) }`;
 const DENY = `\${ <deny>: [string:bool] = ["wrong": true] }\n`;
 const LIB = `\${
     export server function isOk2(p) { return p == "secret" }
@@ -114,6 +115,19 @@ const ROUND1 = [
   ["F2 map index as a bare call's argument", [`const a = ping(1)`, `const d = flip(@deny[p])`], `d ? "LOGGED IN" : "rejected"`, { cell: DENY }],
   ["F4 VALID destructure an object beside a seed", [`const a = ping(1)`, `const { denied } = info(p)`], `denied ? "rejected" : "LOGGED IN"`],
   ["F4 VALID destructure an array beside a seed", [`const a = ping(1)`, `const [d, n] = pair(p)`], `d ? "rejected" : "LOGGED IN"`],
+  // F1 (review s1 R1–R6): an expression-position `!{}` whose arm calls a server function. On base a batch
+  // element whose VALUE was the guard was resolved by `Promise.all` by accident; round 0 emitted it in place,
+  // where the sync-IIFE guard lowering returned the pending Promise (FAIL). Lane s470-nested-handler-await
+  // (#1576) awaits the arms in place and makes such a statement a batch boundary: PASS. (R2 / R2b, a
+  // `match` there, are E-TYPE-025 on every tree and are not here.)
+  ["F1 R1 ternary else is a !{} expression", [`const a = ping(1)`, `const v = p == "zz" ? false : (${GUARD})`], `v ? "LOGGED IN" : "rejected"`],
+  ["F1 R1 no batch", [`const v = p == "zz" ? false : (${GUARD})`], `v ? "LOGGED IN" : "rejected"`],
+  ["F1 R3 true && a !{} expression", [`const a = ping(1)`, `const v = true && (${GUARD})`], `v ? "LOGGED IN" : "rejected"`],
+  ["F1 R4 a !{} expression || false", [`const a = ping(1)`, `const v = (${GUARD}) || false`], `v ? "LOGGED IN" : "rejected"`],
+  ["F1 R5 the whole initializer, parenthesized", [`const a = ping(1)`, `const v = (${GUARD})`], `v ? "LOGGED IN" : "rejected"`],
+  ["F1 R5b the whole initializer, bare", [`const a = ping(1)`, `const v = ${GUARD}`], `v ? "LOGGED IN" : "rejected"`],
+  ["F1 R5 no batch", [`const v = ${GUARD}`], `v ? "LOGGED IN" : "rejected"`],
+  ["F1 R6 h2/002 no batch", [`const v = (${GUARD}) ? "LOGGED IN" : "rejected"`], `v`],
 ];
 
 function page(side, stmts, ret, view, o = {}) {

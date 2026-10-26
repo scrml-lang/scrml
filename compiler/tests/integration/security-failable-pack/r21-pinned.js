@@ -2,8 +2,8 @@
 // families s24 / f27 / l19 / t19). Spread into PINNED_CLASS (pinned-class.js). Regenerated from
 // `classify.js --json <family>/` — never by hand-editing to make the suite pass. Every f27 BAD shape was
 // FAIL on base ffbcf4432 (the Promise.all element tested / held the pending Promise) and is PASS after;
-// the VALID / RESOLVED controls are PASS on base and after, on every side. The two KNOWN_FAIL h2/002
-// shapes (known-fail.js) are not pinned.
+// the VALID / RESOLVED controls are PASS on base and after, on every side. The h2/002 shapes (KNOWN_FAIL until lane I, #1576) are now PASS and pinned;
+// every r21 shape is pinned.
 export const R21_PINNED = {
   "s24/VALID two bare independent calls": "PASS",
   "s24/VALID three bare independent calls": "PASS",
@@ -37,6 +37,7 @@ export const R21_PINNED = {
   "f27/index read off the call (msg)": "PASS",
   "f27/async client helper under a ternary (msg)": "PASS",
   "f27/async client helper under not (msg)": "PASS",
+  "f27/expression-position !{} guard (h2/002) (msg)": "PASS",
   "f27/the operator decl first, the bare call after (msg)": "PASS",
   "f27/between two bare calls (msg)": "PASS",
   "f27/let, under a ternary (msg)": "PASS",
@@ -63,6 +64,14 @@ export const R21_PINNED = {
   "f27/F2 map index as a bare call's argument (msg)": "PASS",
   "f27/F4 VALID destructure an object beside a seed (msg)": "PASS",
   "f27/F4 VALID destructure an array beside a seed (msg)": "PASS",
+  "f27/F1 R1 ternary else is a !{} expression (msg)": "PASS",
+  "f27/F1 R1 no batch (msg)": "PASS",
+  "f27/F1 R3 true && a !{} expression (msg)": "PASS",
+  "f27/F1 R4 a !{} expression || false (msg)": "PASS",
+  "f27/F1 R5 the whole initializer, parenthesized (msg)": "PASS",
+  "f27/F1 R5b the whole initializer, bare (msg)": "PASS",
+  "f27/F1 R5 no batch (msg)": "PASS",
+  "f27/F1 R6 h2/002 no batch (msg)": "PASS",
   "f27/ternary on the call (gate)": "PASS",
   "f27/ternary, the call tested in the else branch (gate)": "PASS",
   "f27/not (gate)": "PASS",
@@ -84,6 +93,7 @@ export const R21_PINNED = {
   "f27/index read off the call (gate)": "PASS",
   "f27/async client helper under a ternary (gate)": "PASS",
   "f27/async client helper under not (gate)": "PASS",
+  "f27/expression-position !{} guard (h2/002) (gate)": "PASS",
   "f27/the operator decl first, the bare call after (gate)": "PASS",
   "f27/between two bare calls (gate)": "PASS",
   "f27/let, under a ternary (gate)": "PASS",
@@ -110,6 +120,14 @@ export const R21_PINNED = {
   "f27/F2 map index as a bare call's argument (gate)": "PASS",
   "f27/F4 VALID destructure an object beside a seed (gate)": "PASS",
   "f27/F4 VALID destructure an array beside a seed (gate)": "PASS",
+  "f27/F1 R1 ternary else is a !{} expression (gate)": "PASS",
+  "f27/F1 R1 no batch (gate)": "PASS",
+  "f27/F1 R3 true && a !{} expression (gate)": "PASS",
+  "f27/F1 R4 a !{} expression || false (gate)": "PASS",
+  "f27/F1 R5 the whole initializer, parenthesized (gate)": "PASS",
+  "f27/F1 R5b the whole initializer, bare (gate)": "PASS",
+  "f27/F1 R5 no batch (gate)": "PASS",
+  "f27/F1 R6 h2/002 no batch (gate)": "PASS",
   "l19/VALID two bare independent calls": "PASS",
   "l19/VALID three bare independent calls": "PASS",
   "l19/VALID a bare call with an operator argument": "PASS",

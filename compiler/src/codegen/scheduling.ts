@@ -1,7 +1,7 @@
 import { parse as acornParse } from "acorn";
 import { genVar } from "./var-counter.ts";
 import { emitExpr, emitExprField, type EmitExprContext } from "./emit-expr.ts";
-import { exprNodeCollectCallees } from "../expression-parser.ts";
+import { exprNodeCollectCallees, guardCallArmsRaw } from "../expression-parser.ts";
 import { emitLogicNode, nodeListContainsTildeRef } from "./emit-logic.js";
 import { CGError } from "./errors.ts";
 import { handledSqlGuardInner } from "./sql-attempt.ts";
@@ -10,6 +10,7 @@ import { isServerOnlyNode } from "./collect.ts";
 import { resolveModulePath, isPromiseReturningImportedCallee } from "../module-resolver.js";
 import { buildBodyDG } from "../body-dg-builder.ts";
 import { asyncFnValuedBindingsOfFile } from "./file-async-fns.ts";
+import { guardArmTextCallees } from "./emit-library-shared.ts";
 
 /** A loosely-typed AST node from the pipeline. */
 type ASTNode = Record<string, unknown>;
@@ -1300,7 +1301,21 @@ export function scheduleStatements(body: ASTNode[], fnNode: ASTNode, routeMap: R
   // neighbour (the filler-separated shape the control-anchors edge, anchored
   // only to `k+1`, missed). A pure decl is NOT here, so the S212 skip of a
   // dependent pure decl to reach a later independent one is preserved.
+  // (fix round 2, R3) — only a guard whose arms name a waiting function is a boundary: a sync-only
+  // guard batches as before. The waiting names are the ones this function's emission awaits.
+  const _guardWaitServer = _clientServerFnNames(routeMap, filePath);
+  const _guardArmWaits = (name: string): boolean =>
+    (_guardWaitServer != null && _guardWaitServer.has(name)) ||
+    (clientAsyncFnNames != null && clientAsyncFnNames.has(name)) ||
+    (!!calleeMap && !!exportRegistry && isPromiseReturningImportedCallee(name, calleeMap as never, exportRegistry as never));
   function isControlFlowBoundary(stmt: ASTNode): boolean {
+    // S470 s470-nested-handler-await (SECURITY) — a statement holding an EXPRESSION-position
+    // `!{ }` handler (`const v = (local(p) !{ _ :> isOk(p) }) ? …`) is lowered by the statement
+    // emitter, whose guard lowering awaits the arms in place. As a `Promise.all` member its init
+    // was taken as TEXT (`extractInitExpr`), so the arm's server call ran un-awaited inside a
+    // synchronous IIFE and the guard yielded a pending Promise (truthy: a wrong password logged
+    // in). Such a statement is never batched.
+    if (holdsExprGuard(stmt, _guardArmWaits)) return true;
     switch ((stmt as ASTNode).kind) {
       case "if-stmt":
       case "for-stmt":
@@ -1842,4 +1857,27 @@ export function scheduleStatements(body: ASTNode[], fnNode: ASTNode, routeMap: R
   }
 
   return lines;
+}
+
+/**
+ * Does `node` hold an expression-position `!{ }` handler placeholder whose arms name a waiting
+ * function (`waits`) anywhere (S470)? The arms are read by the colouring's own reader
+ * (`guardArmTextCallees`), so this agrees with the decision that made the function async.
+ */
+function holdsExprGuard(node: unknown, waits: (name: string) => boolean, seen: WeakSet<object> = new WeakSet()): boolean {
+  if (!node || typeof node !== "object" || seen.has(node as object)) return false;
+  seen.add(node as object);
+  if (Array.isArray(node)) return node.some((c) => holdsExprGuard(c, waits, seen));
+  const n = node as Record<string, unknown>;
+  if (n.kind === "call" && guardCallArmsRaw(n as never) !== null) {
+    const names = new Set<string>();
+    guardArmTextCallees(n as never, names);
+    for (const nm of names) if (waits(nm)) return true;
+  }
+  for (const k of Object.keys(n)) {
+    if (k === "span") continue;
+    const v = n[k];
+    if (v && typeof v === "object" && holdsExprGuard(v, waits, seen)) return true;
+  }
+  return false;
 }

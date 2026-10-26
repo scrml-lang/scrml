@@ -147,3 +147,47 @@ in-tree stdlib. 3618 sources enumerated on both sides, same set.
     corpus.
 - **WAITING** for lane s470-nested-handler-await (lane I) to land on main. Then: merge, delete the two
   h2/002 KNOWN_FAIL entries, add F1 R1–R6 pinned PASS, and re-run f27 / r21 / R26.
+
+## Merge of lane I (#1576) and the F1 landing
+
+- **Merge:** origin/main at 8e6f2063f+ (#1571 r16, #1572 r20, #1575, #1576 r18). `scheduling.ts`
+  auto-merged. Lane I's `holdsExprGuard` (an expression-position `!{}` whose arms name a waiting function
+  is an `isControlFlowBoundary`) and this lane's element-shape test compose like this:
+  - The guard rule runs first and is a hard boundary for any such statement, dependent or not.
+  - The element rule then keeps every other call-under-operator decl from being an element: an
+    independent one ends the batch in place, and a dependent one keeps the S212 skip.
+  - A guard decl that slips past both (sync-only arms, a bare guard call) gets its element from its own
+    emission (F2). A multi-line or awaited guard lowering is not a clean element, so the group falls back
+    to sequential.
+- **Pack conflicts:** pinned-class.js keeps R20 and R21; README keeps both rows and sections;
+  EXPECTED_SHAPE_COUNT was re-summed from a `loadFamilies()` run: 5195 (5050 on main + r21 145).
+- **Lane I's unit test "R3: a sync-only expression guard is still batched"** asserted that
+  `const b = (local(p) !{ _ :> false }) == true` between two server calls rides the batch. Under this lane
+  that decl is "mixed" (a call under `==`): it is emitted in place and ends the batch. That loses only
+  parallelism; it is the fail-closed rule's documented cost. I restated the test to keep R3's
+  discriminating property:
+  - The guard decl is now DEPENDENT (`local(a)`). A sync-only guard there is skipped and the neighbours
+    still batch.
+  - A new twin with a waiting arm is a boundary, so there is no batch.
+  - Both pass; the twin fails if `holdsExprGuard` is removed.
+  This is the one edit to another lane's file: compiler/tests/unit/nested-handler-await-s470.test.js.
+- **KNOWN_FAIL:** both h2/002 entries deleted. They PASS now.
+- **r21 +16 (F1):** R1, R1 no batch, R3, R4, R5, R5b, R5 no batch and R6 no batch, each × msg / gate, all
+  pinned PASS. R2 / R2b are E-TYPE-025 on every tree and are not added. The F5 shapes were already in.
+- **f27 on base ffbcf4432 → head (112 shapes):** 74 FAIL→PASS, 34 PASS→PASS, 4 PASS-REFUSED→PASS; 0 FAIL
+  at head. s24, l19 and t19 are 11 PASS→PASS each.
+- **Reviewer probes at head:**
+  - s1: every R and B shape PASS or PASS-REFUSED, except B18 (`isOk(p) is not`), which logs in by the
+    probe's own logic on every tree (false is not absent).
+  - s2: M1, M2 and both nobatch twins PASS.
+  - s3: I1–I4 PASS.
+- **Re-pinned 4 r16 / f22 shapes** (lane s470-unit-variant-tag-read): "22 H1 object pattern default",
+  "array pattern default" and "default member of an object" go PASS-REFUSED → PASS; "default literal key"
+  goes PASS-REFUSED → PASS-DENY.
+  - They were refused only because the batch emitted a destructuring decl as a `const [...]` name, which
+    is invalid JS (E-CODEGEN-INVALID-LOGIC); that is exactly F4. Their no-batch twins compile on main.
+  - The PASS-DENY one now reaches a pre-existing defect that its twin also has on main: a quoted key in
+    a pattern default loses its quotes (`{ a = x["variant"] }` → `x[variant]`). That is a ReferenceError,
+    so it fails closed.
+  - Candidate gap: `g-pattern-default-quoted-key-unquoted-s470`.
+  - Full pack run before the re-pin: 5194 pass / 4 fail (exactly these 4).
