@@ -130,3 +130,6 @@ Base: main `d582ae04f`.
       pass with its outermost group as the root instead of skipping the pass. Structured path: an
       `assign` default and a computed key inside an assignment pattern are emitted with the place
       depth cleared. Pack r16 +24 (199): 7 FAIL on 46ae4c38a, 0 after.
+- [x] Merged origin/main e713ef1aa (#1566 r19): EXPECTED_SHAPE_COUNT 3293 from a run (3296 tests).
+- [x] R26 vs e713ef1aa (3618): 0 code diffs; 217 digest diffs = 202 project-root-only + 13
+      lowering-only + 2 F6 census fixtures — unchanged from rounds 1–2. Fast gates pass; det identical.
