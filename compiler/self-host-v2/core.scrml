@@ -475,9 +475,14 @@ ${
         // Sym naming THIS loop; a Break / Continue names the loop it leaves /
         // re-enters by it, and stands only inside that loop's body, in the same
         // owner (check.scrml C19 — §49.4.3: no crossing a function boundary).
-        // Every head binds per iteration (§49.3.7). A loop body holds no
-        // Suspend and no Defer (C19: the CPS split and the deferred exit do not
-        // reach loops yet).
+        // Every head binds per iteration (§49.3.7). s471: a loop body may hold a
+        // Defer (§19.16.2 "a loop body (once per iteration)"). A loop that WAITS
+        // (§49.12.7) — a Suspend in its body — stands at the tail of a
+        // continuation block, immediately after the Join of its EXIT (what
+        // follows the loop); every path through its body ends in a Continue /
+        // Break of the loop or leaves the owner (C12). The client prints it in
+        // explicit continuations, one call per iteration (print.scrml cycleJs);
+        // the server as a native loop with `await`s.
         Loop(label: Sym, head: LoopHead, body: Block),
         Break(target: Sym),
         Continue(target: Sym),

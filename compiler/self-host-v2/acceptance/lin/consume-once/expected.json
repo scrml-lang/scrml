@@ -1,0 +1,16 @@
+{
+  "id": "acceptance-lin-consume-once",
+  "description": "`lin t = mint(); return use(t);` — consumed exactly once.",
+  "language-version": "1.0",
+  "spec": "§35.2 · §35.4.1",
+  "rationale": "§35.4.1: \"A `lin` variable declared and consumed once in straight-line code is trivially valid.\"",
+  "expect": {
+    "codes": [],
+    "domAnchored": [
+      {
+        "selector": "#o",
+        "text": "used:tok"
+      }
+    ]
+  }
+}

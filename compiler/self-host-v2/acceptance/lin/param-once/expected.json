@@ -1,0 +1,16 @@
+{
+  "id": "acceptance-lin-param-once",
+  "description": "a `lin` parameter, consumed once, runs as without `lin`.",
+  "language-version": "1.0",
+  "spec": "§35.2.1",
+  "rationale": "§35.2.1: \"A `lin`-annotated parameter is bound as linear at function entry. Before the function returns on any execution path, the parameter must have been consumed exactly once.\"",
+  "expect": {
+    "codes": [],
+    "domAnchored": [
+      {
+        "selector": "#o",
+        "text": "bob:t1"
+      }
+    ]
+  }
+}

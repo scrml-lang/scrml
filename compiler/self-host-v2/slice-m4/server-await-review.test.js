@@ -27,8 +27,9 @@ const REVIEW_EXPECT = {
   "s1/mutual": ["PASS"],
   // s469 — `while` is retired (§49.4.1): refused with its own code
   "s1/whileCond": ["REFUSED", ["E-LOOP-WHILE-RETIRED"]],
-  // s469 — the loop parses; a server wait in its body is refused (a loop cannot wait yet — check.scrml C19)
-  "s1/forBody": ["REFUSED", ["E-BOOTSTRAP-UNSUPPORTED"]],
+  // s469 — the loop parses; s471 — a server wait in its body is awaited per iteration (§49.12.7):
+  // the server's native loop with `await` — wrong → REJECTED, right → WELCOME
+  "s1/forBody": ["PASS"],
   "s1/elseIf": ["PASS"],
   // a scrml string literal is not interpolated in the bootstrap: `"${check(…)}"` is the text itself, so nothing waits
   "s1/template": ["DENY"],

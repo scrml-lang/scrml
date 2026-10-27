@@ -1,0 +1,16 @@
+{
+  "id": "acceptance-loop-defer-loop-in-defer",
+  "description": "a loop in a deferred body, its `break` naming that loop: (10 + 2) + (10 + 2) = 24.",
+  "language-version": "1.0",
+  "spec": "§19.16.3 · §49.3.3",
+  "rationale": "§19.16.3 rule 1: \"A `break`/`continue` that targets a loop INSIDE the deferred body is permitted.\"",
+  "expect": {
+    "codes": [],
+    "domAnchored": [
+      {
+        "selector": "#o",
+        "text": "24"
+      }
+    ]
+  }
+}

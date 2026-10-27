@@ -197,6 +197,18 @@ const STATUS = {
   "loop/neg-while": ["PASS", ["E-LOOP-WHILE-RETIRED"]],
   "loop/range": ["PASS", []],
   "loop/sum-tape": ["PASS", []],
+  // s471 (g-bootstrap-loop-wait-and-defer-s469): a `defer` in a loop body; a loop in a deferred body
+  "loop/defer-per-iteration": ["PASS", []],
+  "loop/defer-loop-in-defer": ["PASS", []],
+  "loop/neg-defer-bound-direct": ["PASS", ["E-DEFER-UNSUPPORTED-SITE"]],
+  "loop/neg-defer-break-out": ["PASS", ["E-DEFER-CONTROL-FLOW"]],
+  // s471 (g-bootstrap-lin-not-implemented-s469): linear types (§35)
+  "lin/consume-once": ["PASS", []],
+  "lin/param-once": ["PASS", []],
+  "lin/neg-unconsumed": ["PASS", ["E-LIN-001"]],
+  "lin/neg-twice": ["PASS", ["E-LIN-002"]],
+  "lin/neg-one-branch": ["PASS", ["E-LIN-003"]],
+  "lin/neg-outer-in-loop": ["PASS", ["E-LIN-002"]],
   // s469-boot-loop-value-form — the value form (§49.6) from every head, and the Tier-0 `${ for … lift }` (§17.4)
   "loop-value/iterate": ["PASS", []],
   "loop-value/range": ["PASS", []],
@@ -348,6 +360,11 @@ describe("bootstrap acceptance cases — today's verdicts", () => {
                        "security/return-not-value", "security/return-not-stmt", "security/return-not-string", "security/return-not-enum",
                        "security/failable-fails",
                        "loop/sum-tape", "loop/range", "loop/cond-head", "loop/counted-continue", "loop/forever-break", "loop/labels", "loop/index-at"]) {
+      expect([rel, verdicts[rel].runtimeExecuted]).toEqual([rel, true]);
+    }
+  });
+  test("s471-bootstrap-lin-loop: every positive loop / defer case RAN on the bootstrap (output checked)", () => {
+    for (const rel of ["loop/defer-per-iteration", "loop/defer-loop-in-defer", "lin/consume-once", "lin/param-once"]) {
       expect([rel, verdicts[rel].runtimeExecuted]).toEqual([rel, true]);
     }
   });

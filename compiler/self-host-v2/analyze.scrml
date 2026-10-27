@@ -11821,17 +11821,38 @@ ${
     }
 
     // ---- the suspension plan -------------------------------------------------------
-    // s469 — no suspension point stands in a loop's head or body: the CPS split
-    // (a server call awaited per iteration) does not reach loops yet, and
-    // §49.3.7 requires each iteration's binding to survive the suspension,
-    // which no slice has built. Refused where it stands (check.scrml C19
-    // re-checks the Core: a Loop holds no Suspend).
-    fn planLoop(cx: PCx, f: AFor, ps0: PS) -> PS {
-        const pos: Pos = { refused: "a `for` loop — a loop cannot wait for the server yet (the suspension split does not reach loops; §49.3.7, §49.12.7). Make the call before the loop, or after it" }
+    // s471 — a loop BODY may wait (§49.12.7: "A server call in a loop body of a
+    // function is awaited once per iteration (§13)"; §13.8 (i): a function
+    // body, a handler, an effect body are action positions). The body is
+    // planned as any statement list (its `if`s get their joins, its handling
+    // forms their outcomes); a loop whose body holds a suspension point gets an
+    // EXIT continuation — a join on the `for` statement, whatever follows it:
+    // lower's continuation pass moves the rest of the block into it, and the
+    // body's every path ends in a Continue / Break of the loop (check.scrml C12).
+    // §49.3.7 ("A compiler that splits the body across a suspension (§13.2)
+    // SHALL preserve this") is the printer's: each iteration is one call whose
+    // parameters are its bindings (print.scrml cycleJs, runtime `cycle`).
+    // Still refused, by name (g-bootstrap-loop-wait-and-defer-s469, remainder):
+    // a wait in a loop HEAD (the iterable / bounds / `init` run once before the
+    // loop, the condition / step per iteration — neither is split yet), and a
+    // wait in a loop bound as a value (§49.6 — its Gather is no continuation).
+    fn planLoop(cx: PCx, s: AStmt, f: AFor, ps0: PS) -> PS {
+        const pos: Pos = { refused: "a `for` loop's head — a loop head cannot wait for the server yet (the suspension split reaches a loop's body, not its head; §49.12.7). Make the call before the loop (`const xs = load() !{ … };`), or in the body" }
         let ps: PS = ps0
         for (const e of forHeadExprs(f)) { ps = planExpr(cx, e, pos, ps).ps }
         ps = planLoopBlock(cx, forInitBlock(f), pos, ps)
-        return planLoopBlock(cx, f.body, pos, ps)
+        if (f.bound is given) {
+            const bpos: Pos = { refused: "a loop bound as a value (`const xs = for (…) { … }`, §49.6) — a bound loop cannot wait for the server yet (its value is built in one synchronous run). Use a statement loop that appends to a tape, or make the call before the loop" }
+            return planLoopBlock(cx, f.body, bpos, ps)
+        }
+        const before: int = ps.plan.at.length
+        ps = planBlock(cx, f.body, ps)
+        if (ps.plan.at.length > before) {
+            const rk: RPSym = pmint(ps, "loop_exit")
+            ps = rk.ps
+            ps = withPlan(ps, { at: ps.plan.at, temps: ps.plan.temps, joins: ps.plan.joins.concat([{ nid: s.nid, k: rk.s }]), waiting: ps.plan.waiting, rets: ps.plan.rets })
+        }
+        return ps
     }
 
     fn planLoopBlock(cx: PCx, b: ABlock, pos: Pos, ps0: PS) -> PS {
@@ -21643,7 +21664,7 @@ ${
             .Return(e: e) :> planMaybe(cx, e, ps)
             .If(cond: c, thenB: tb, elseB: eb) :> planBranches(cx, s, [tb].concat(maybeBlockList(eb)), rest, planExpr(cx, c, okPos(), ps).ps)
             .Given(name: n, subject: x, body: b) :> planBranches(cx, s, [b], rest, planExpr(cx, x, okPos(), ps).ps)
-            .For(f: lf) :> planLoop(cx, lf, ps)
+            .For(f: lf) :> planLoop(cx, s, lf, ps)
             .Break(label: x) :> ps
             .Continue(label: x) :> ps
             .Lift(what: w) :> planExprs(cx, liftExprs(w), ps)
@@ -22707,6 +22728,620 @@ ${
         return { facts: a.facts, diags: a.diags }
     }
 
+    // =========================================================================
+    // s471 — THE LINEAR PASS (SPEC §35, `lin`).
+    //
+    // §35.1: "A `lin` variable is a value with exactly-once consumption and
+    // restricted intermediate visibility. The binding is immutable, must be
+    // consumed on every execution path, and must not be referenced by any code
+    // between the declaration site and the consumption site except the
+    // consumption itself." §35.2: "Every appearance of a `lin` identifier in a
+    // position that is not a declaration SHALL count as a consumption event".
+    //
+    // One walk per body root — a function body (its `lin` parameters bound at
+    // entry, §35.2.1), an event-handler block, an effect body — over the
+    // BINDER's facts: an appearance is a Name whose name fact is a `lin`
+    // binding's Sym (a shadowing binder has its own Sym, never counted for it).
+    // The walk carries, per `lin` binding in scope, whether the path being
+    // walked has consumed it:
+    //   - a second appearance on one path                         E-LIN-002
+    //   - an appearance inside a loop body — or a loop head's
+    //     condition / step, which run per iteration — of a `lin`
+    //     declared outside that loop (§35.4.4)                    E-LIN-002
+    //   - unconsumed where a path leaves its scope: the block's
+    //     end, a `return` / `fail`, a `?` propagation (or a `?{}`
+    //     a `!` function propagates, §19.8.2), a `break` /
+    //     `continue` out of the loop it was declared in           E-LIN-001
+    //   - consumed on some paths through an `if` / `given` /
+    //     `&&` / `||` / `? :` / `match` / `!{}` and not others    E-LIN-003
+    //   - a `let` / `const` / `lin` declaration of the name of a
+    //     `lin` binding of an enclosing scope (§35.5)             E-LIN-005
+    //   - passed to a server function from the client (§35.7)     W-LIN-001
+    // A lambda that names a `lin` binding CAPTURES it (§35.6: "The closure
+    // capture is the consumption event, even if `f` is never called"): one
+    // consumption, at the lambda, whatever branches its body holds; a second
+    // appearance in the body is a second consumption (§35.2). A deferred body
+    // is counted where the `defer` stands (§19.16.9: "a reached `defer` runs
+    // its body exactly once on every exit"). A handling form the typer reported
+    // an error in — a non-exhaustive `match` (E-TYPE-020) among them — is not
+    // judged (§35.4.3: "linear type analysis is deferred on non-exhaustive
+    // matches"): its arms consume what they name, and nothing cascades.
+    // Each E-LIN-001 / -003 is reported once per binding.
+    // =========================================================================
+    type LinVar:struct = { id: int, name: string, decl: ASpan, used: boolean, at: ASpan, depth: int, scope: int }
+    type LinSt:struct = { vars: LinVar[], diags: Diag[], reported: int[], scopes: int }
+    type LinLoop:struct = { label: string, depth: int }
+    type LinCx:struct = { t: Tables, file: string, depth: int, loops: LinLoop[], scope: int, errs: ASpan[],
+                          failable: boolean, caller: int }
+    // A walk's result: the state, and whether EVERY path through what was
+    // walked left (`return`, `fail`, `break`, `continue`) — a path that left
+    // takes no part in the merge after a branch.
+    type LinR:struct = { st: LinSt, ends: boolean }
+
+    fn linPass(g: Globals, t: Tables, prior: Diag[]) -> Diag[] {
+        let st: LinSt = { vars: [], diags: [], reported: [], scopes: 0 }
+        for (const fs of g.fns) {
+            const cx: LinCx = { t: t, file: fs.info.file, depth: 0, loops: [], scope: 0, errs: errorSpansIn(prior, fs.info.file),
+                                failable: fs.info.failable, caller: fs.info.sym.id }
+            let s: LinSt = { vars: [], diags: st.diags, reported: st.reported, scopes: st.scopes }
+            for (const p of fs.f.params) {
+                if (p.lin) {
+                    const ps: Sym | not = linParamSym(bindFact(t.binds, p.nid))
+                    if (ps is given) s = linDeclare(s, { id: ps.id, name: p.name, decl: p.span, used: false, at: p.span, depth: 0, scope: 0 })
+                }
+            }
+            st = linBlockAt(cx, fs.f.body, s, 0).st
+        }
+        for (const a of actionPositions(g)) {
+            const v: AAttrValue = a.v
+            const b: ABlock | not = match v {
+                .Braced(b: bb) :> bb
+                .Bare(e: x) :> not
+                .Paren(e: x) :> not
+                .Quoted(v: x) :> not
+                .NoValue :> not
+            }
+            if (b is given) {
+                const cx2: LinCx = { t: t, file: a.file, depth: 0, loops: [], scope: 0, errs: errorSpansIn(prior, a.file), failable: false, caller: -1 }
+                const s2: LinSt = { vars: [], diags: st.diags, reported: st.reported, scopes: st.scopes }
+                st = linBlockAt(cx2, b, s2, 0).st
+            }
+        }
+        return st.diags
+    }
+
+    fn linParamSym(f: BindFact | not) -> Sym | not {
+        return match f {
+            .BParam(sym: s) :> s
+            .BBind(sym: x) :> not
+            .BGiven(sym: x) :> not
+            .BLoop(label: x) :> not
+            .BJump(target: x) :> not
+            not :> not
+        }
+    }
+
+    fn linBindSym(f: BindFact | not) -> Sym | not {
+        return match f {
+            .BBind(sym: s) :> s
+            .BParam(sym: x) :> not
+            .BGiven(sym: x) :> not
+            .BLoop(label: x) :> not
+            .BJump(target: x) :> not
+            not :> not
+        }
+    }
+
+    fn linDeclare(s: LinSt, v: LinVar) -> LinSt {
+        return { vars: s.vars.concat([v]), diags: s.diags, reported: s.reported, scopes: s.scopes }
+    }
+
+    fn linDiag(cx: LinCx, s: LinSt, code: string, span: ASpan, msg: string) -> LinSt {
+        return { vars: s.vars, diags: s.diags.concat([newDiag(code, msg, cx.file, span)]), reported: s.reported, scopes: s.scopes }
+    }
+
+    // A branch starts from `pre`'s bindings, carrying everything reported so far (`d`).
+    fn linFrom(pre: LinSt, d: LinSt) -> LinSt {
+        return { vars: pre.vars, diags: d.diags, reported: d.reported, scopes: d.scopes }
+    }
+
+    fn linGo(s: LinSt) -> LinR { return { st: s, ends: false } }
+
+    // ---- statements -----------------------------------------------------------------
+    // A block: its own scope; the bindings declared in it (from `mark` on) must
+    // be consumed when a path falls off its end (§35.5 "not consumed before
+    // scope exit"), and go out of scope after it.
+    fn linBlock(cx: LinCx, b: ABlock, s: LinSt) -> LinR {
+        return linBlockAt(cx, b, s, s.vars.length)
+    }
+
+    fn linBlockAt(cx0: LinCx, b: ABlock, s0: LinSt, mark: int) -> LinR {
+        const scope: int = s0.scopes + 1
+        const cx: LinCx = { t: cx0.t, file: cx0.file, depth: cx0.depth, loops: cx0.loops, scope: scope, errs: cx0.errs, failable: cx0.failable, caller: cx0.caller }
+        let s: LinSt = { vars: s0.vars, diags: s0.diags, reported: s0.reported, scopes: scope }
+        let ends = false
+        for (const st of b.stmts) {
+            if (!ends) {
+                const r: LinR = linStmt(cx, st, s)
+                s = r.st
+                ends = r.ends
+            }
+        }
+        if (!ends) s = linScopeExit(cx, s, mark, b.span)
+        let kept: LinVar[] = []
+        let i = 0
+        for (const v of s.vars) {
+            if (i < mark) kept = kept.concat([v])
+            i = i + 1
+        }
+        return { st: { vars: kept, diags: s.diags, reported: s.reported, scopes: s.scopes }, ends: ends }
+    }
+
+    fn linScopeExit(cx: LinCx, s0: LinSt, mark: int, span: ASpan) -> LinSt {
+        let s: LinSt = s0
+        let i = 0
+        for (const v of s0.vars) {
+            if (i >= mark && !v.used && s.reported.indexOf(v.id) < 0) {
+                s = linDiag(cx, s, "E-LIN-001", v.decl, "`lin` variable `" + v.name + "` is declared at " + offsetOf(v.decl) + " but is not consumed before scope exit. A `lin` variable must be used exactly once (§35.3, §35.5). Either consume `" + v.name + "` before the scope ends, or remove the `lin` keyword if single-use is not required")
+                s = { vars: s.vars, diags: s.diags, reported: s.reported.concat([v.id]), scopes: s.scopes }
+            }
+            i = i + 1
+        }
+        return s
+    }
+
+    // A path LEAVES here (`what`): every binding declared at loop depth
+    // `minDepth` or deeper must already be consumed on it.
+    fn linExit(cx: LinCx, s0: LinSt, minDepth: int, span: ASpan, what: string) -> LinSt {
+        let s: LinSt = s0
+        for (const v of s0.vars) {
+            if (v.depth >= minDepth && !v.used && s.reported.indexOf(v.id) < 0) {
+                s = linDiag(cx, s, "E-LIN-001", span, "`lin` variable `" + v.name + "` (declared at " + offsetOf(v.decl) + ") is not consumed on the path that leaves through " + what + " — a `lin` variable is consumed exactly once on EVERY execution path (§35.3, §35.5). Consume `" + v.name + "` before " + what)
+                s = { vars: s.vars, diags: s.diags, reported: s.reported.concat([v.id]), scopes: s.scopes }
+            }
+        }
+        return s
+    }
+
+    fn linStmt(cx: LinCx, st: AStmt, s: LinSt) -> LinR {
+        const k: AStmtK = st.k
+        return match k {
+            .Eval(e: e) :> linExpr(cx, e, s)
+            .Local(name: n, mutable: m, init: i, lin: l) :> linLocal(cx, st, n, i, l, s)
+            .Return(e: e) :> linReturn(cx, st, e, s)
+            .Fail(f: f) :> linFail(cx, st, f, s)
+            .If(cond: c, thenB: tb, elseB: eb) :> linIf(cx, st, c, tb, eb, s)
+            .Given(name: n, subject: x, body: b) :> linGiven(cx, st, x, b, s)
+            .For(f: lf) :> linFor(cx, lf, s)
+            .Break(label: l) :> linJump(cx, st, l, "`break`", s)
+            .Continue(label: l) :> linJump(cx, st, l, "`continue`", s)
+            .Lift(what: w) :> linExprs(cx, liftExprs(w), s)
+            .EffectStmt(w: w) :> linGo(s)
+            .Defer(body: b) :> linGo(linBlock(cx, b, s).st)
+        }
+    }
+
+    fn linLocal(cx: LinCx, st: AStmt, name: string, init: AExpr, isLin: boolean, s0: LinSt) -> LinR {
+        const r: LinR = linExpr(cx, init, s0)
+        let s: LinSt = r.st
+        if (r.ends) return r
+        s = linShadow(cx, s, name, st.span)
+        if (!isLin) return linGo(s)
+        const sy: Sym | not = linBindSym(bindFact(cx.t.binds, st.nid))
+        if (sy is not) return linGo(s)
+        return linGo(linDeclare(s, { id: sy.id, name: name, decl: st.span, used: false, at: st.span, depth: cx.depth, scope: cx.scope }))
+    }
+
+    // §35.5: "The compiler SHALL emit E-LIN-005 when a `let`, `const`, or
+    // `lin` declaration has the same name as an in-scope `lin` variable
+    // declared in a strictly enclosing scope. A same-scope rebinding is not
+    // shadowing in the hierarchical sense and is not covered by E-LIN-005."
+    fn linShadow(cx: LinCx, s: LinSt, name: string, span: ASpan) -> LinSt {
+        for (const v of s.vars) {
+            if (v.name == name && v.scope != cx.scope) {
+                return linDiag(cx, s, "E-LIN-005", span, "this declaration of `" + name + "` shadows an in-scope `lin` variable of the same name (declared at " + offsetOf(v.decl) + ") — shadowing a `lin` variable prevents the compiler from determining which binding a consumption refers to (§35.5). Rename the new binding, or consume the outer `lin " + name + "` before this declaration")
+            }
+        }
+        return s
+    }
+
+    fn linReturn(cx: LinCx, st: AStmt, e: AExpr | not, s0: LinSt) -> LinR {
+        let s: LinSt = s0
+        if (e is given) {
+            const r: LinR = linExpr(cx, e, s)
+            if (r.ends) return r
+            s = r.st
+        }
+        return { st: linExit(cx, s, 0, st.span, "this `return`"), ends: true }
+    }
+
+    fn linFail(cx: LinCx, st: AStmt, f: AFail, s0: LinSt) -> LinR {
+        const r: LinR = linExprs(cx, f.args, s0)
+        if (r.ends) return r
+        return { st: linExit(cx, r.st, 0, st.span, "this `fail`"), ends: true }
+    }
+
+    fn linIf(cx: LinCx, st: AStmt, c: AExpr, tb: ABlock, eb: ABlock | not, s0: LinSt) -> LinR {
+        const rc: LinR = linExpr(cx, c, s0)
+        if (rc.ends) return rc
+        const pre: LinSt = rc.st
+        const rt: LinR = linBlock(cx, tb, pre)
+        let re: LinR = linGo(linFrom(pre, rt.st))
+        if (eb is given) re = linBlock(cx, eb, linFrom(pre, rt.st))
+        return linMerge(cx, pre, [rt, re], st.span, "this `if` / `else`")
+    }
+
+    fn linGiven(cx: LinCx, st: AStmt, x: AExpr, b: ABlock, s0: LinSt) -> LinR {
+        const rx: LinR = linExpr(cx, x, s0)
+        if (rx.ends) return rx
+        const pre: LinSt = rx.st
+        const rb: LinR = linBlock(cx, b, pre)
+        return linMerge(cx, pre, [rb, linGo(linFrom(pre, rb.st))], st.span, "this `given` (its body runs only when the handle is present)")
+    }
+
+    // §35.4.4: "`lin` variables from outer scope SHALL NOT be consumed inside
+    // loop bodies"; §49.5.3: "A `lin` declared in a counted head's `init` is an
+    // outer `lin` for the body." The iterable and a range's bounds run once,
+    // before the first iteration; a condition and a step run per iteration.
+    fn linFor(cx: LinCx, f: AFor, s0: LinSt) -> LinR {
+        const inner: LinCx = { t: cx.t, file: cx.file, depth: cx.depth + 1, loops: cx.loops.concat([{ label: f.label, depth: cx.depth }]),
+                               scope: cx.scope, errs: cx.errs, failable: cx.failable, caller: cx.caller }
+        let s: LinSt = s0
+        const h: AForHead = f.head
+        const once: AExpr[] = match h {
+            .HForever :> []
+            .HCond(cond: c) :> []
+            .HCounted(init: i) :> []
+            .HIter(bind: b, src: src) :> iterSrcExprs(src)
+        }
+        const each: AExpr[] = match h {
+            .HForever :> []
+            .HCond(cond: c) :> [c]
+            .HCounted(init: i, cond: c, step: sp) :> maybeExprList(c).concat(sp)
+            .HIter(bind: b) :> []
+        }
+        const r0: LinR = linExprs(cx, once, s)
+        if (r0.ends) return r0
+        s = r0.st
+        // a counted head's `init`: its `let`s are the loop's (in the loop's scope, E-LIN-005 applies)
+        const mark: int = s.vars.length
+        const rh: LinR = linStmtsIn(cx, forInit(f), s)
+        if (rh.ends) return rh
+        s = rh.st
+        const re: LinR = linExprs(inner, each, s)
+        s = re.st
+        const rb: LinR = linBlock(inner, f.body, s)
+        let kept: LinVar[] = []
+        let i = 0
+        for (const v of rb.st.vars) {
+            if (i < mark) kept = kept.concat([v])
+            i = i + 1
+        }
+        return linGo({ vars: kept, diags: rb.st.diags, reported: rb.st.reported, scopes: rb.st.scopes })
+    }
+
+    fn linStmtsIn(cx: LinCx, ss: AStmt[], s0: LinSt) -> LinR {
+        let s: LinSt = s0
+        for (const st of ss) {
+            const r: LinR = linStmt(cx, st, s)
+            if (r.ends) return r
+            s = r.st
+        }
+        return linGo(s)
+    }
+
+    // `break` / `continue` leave the loop they name: every binding declared
+    // inside that loop must be consumed on this path (§49.5.3: "A `lin`
+    // declared inside a loop body that is not consumed before `break` or
+    // `continue` on the fast-exit path is E-LIN-001 on that path").
+    fn linJump(cx: LinCx, st: AStmt, label: string, what: string, s: LinSt) -> LinR {
+        let depth: int = -1
+        let i: int = cx.loops.length - 1
+        while (i >= 0) {
+            if (depth < 0 && (label == "" || cx.loops[i].label == label)) depth = cx.loops[i].depth
+            i = i - 1
+        }
+        if (depth < 0) return { st: s, ends: true }      // no such loop: the loop-control pass reported it
+        return { st: linExit(cx, s, depth + 1, st.span, "this " + what), ends: true }
+    }
+
+    // ---- merging the paths of a branch ------------------------------------------------
+    // Every path that did not leave must agree, per binding in scope before the
+    // branch: consumed on all of them, or on none (§35.4.2: "A `lin` variable
+    // consumed in only one branch is not consumed on the other branch's
+    // execution path — E-LIN-003").
+    fn linMerge(cx: LinCx, pre: LinSt, rs: LinR[], span: ASpan, what: string) -> LinR {
+        const last: LinSt = rs[rs.length - 1].st
+        let s: LinSt = { vars: pre.vars, diags: last.diags, reported: last.reported, scopes: last.scopes }
+        let live: LinSt[] = []
+        for (const r of rs) {
+            if (!r.ends) live = live.concat([r.st])
+        }
+        if (live.length == 0) return { st: s, ends: true }
+        let vars: LinVar[] = []
+        let i = 0
+        for (const v of pre.vars) {
+            let n = 0
+            let at: ASpan = v.at
+            for (const l of live) {
+                if (l.vars[i].used) {
+                    if (n == 0) at = l.vars[i].at
+                    n = n + 1
+                }
+            }
+            let used: boolean = n > 0
+            if (n > 0 && n < live.length && s.reported.indexOf(v.id) < 0) {
+                s = linDiag(cx, s, "E-LIN-003", span, "`lin` variable `" + v.name + "` (declared at " + offsetOf(v.decl) + ") is consumed on some paths through " + what + " (at " + offsetOf(at) + ") but not on the others — a `lin` variable is consumed exactly once on EVERY execution path (§35.4). Consume it on every path, or consume it once before the branch")
+                s = { vars: s.vars, diags: s.diags, reported: s.reported.concat([v.id]), scopes: s.scopes }
+            }
+            vars = vars.concat([{ id: v.id, name: v.name, decl: v.decl, used: used, at: at, depth: v.depth, scope: v.scope }])
+            i = i + 1
+        }
+        return linGo({ vars: vars, diags: s.diags, reported: s.reported, scopes: s.scopes })
+    }
+
+    // ---- expressions ------------------------------------------------------------------
+    fn linExprs(cx: LinCx, es: AExpr[], s0: LinSt) -> LinR {
+        let s: LinSt = s0
+        for (const e of es) {
+            const r: LinR = linExpr(cx, e, s)
+            if (r.ends) return r
+            s = r.st
+        }
+        return linGo(s)
+    }
+
+    fn linExpr(cx: LinCx, e: AExpr, s: LinSt) -> LinR {
+        const k: AExprK = e.k
+        return match k {
+            .Name(name: n) :> linGo(linUse(cx, e, s))
+            .Binary(op: o, l: l, r: r) :> linBinary(cx, e, o, l, r, s)
+            .Ternary(test: t, yes: y, no: n) :> linTernary(cx, e, t, y, n, s)
+            .Handled(h: h) :> linHandled(cx, e, h, s)
+            .Lambda(params: lp, body: b) :> linGo(linCapture(cx, e, b, s))
+            .Sql(q: q) :> linSql(cx, e, q, s)
+            .Call(callee: c, args: a) :> linCall(cx, c, a, s)
+            .Assign(target: t, value: v) :> linAssign(cx, t, v, s)
+            .Member(obj: o) :> linExpr(cx, o, s)
+            .Unary(op: o, e: x) :> linExpr(cx, x, s)
+            .ArrayLit(elems: es) :> linExprs(cx, es, s)
+            .ObjectLit(props: ps) :> linExprs(cx, propValueList(ps), s)
+            .Spread(e: x) :> linExpr(cx, x, s)
+            .Index(obj: o, idx: i) :> linExprs(cx, [o, i], s)
+            .Template(quasis: qs, slots: ss) :> linExprs(cx, ss, s)
+            .At(name: n) :> linGo(s)
+            .AtItem :> linGo(s)
+            .Num(raw: r) :> linGo(s)
+            .Str(v: x) :> linGo(s)
+            .Bool(v: b) :> linGo(s)
+            .NotLit :> linGo(s)
+            .Recovered :> linGo(s)
+            .Variant(name: n) :> linGo(s)
+        }
+    }
+
+    // The `lin` binding a Name reads, if it reads one in scope: its index in `vars`.
+    fn linIndex(cx: LinCx, e: AExpr, s: LinSt) -> int {
+        const f: NameFact | not = nameFact(cx.t.names, e.nid)
+        const id: int = match f {
+            .NLocal(sym: sy) :> sy.id
+            .NField(decl: x) :> -1
+            .NInst(decl: x) :> -1
+            .NStruct(owner: x) :> -1
+            .NFn(sym: x) :> -1
+            .NLength :> -1
+            .NSurface(of: x) :> -1
+            not :> -1
+        }
+        if (id < 0) return -1
+        let i = 0
+        for (const v of s.vars) {
+            if (v.id == id) return i
+            i = i + 1
+        }
+        return -1
+    }
+
+    fn linUse(cx: LinCx, e: AExpr, s: LinSt) -> LinSt {
+        const i: int = linIndex(cx, e, s)
+        if (i < 0) return s
+        return linConsume(cx, s, i, e.span)
+    }
+
+    fn linConsume(cx: LinCx, s0: LinSt, i: int, span: ASpan) -> LinSt {
+        const v: LinVar = s0.vars[i]
+        let s: LinSt = s0
+        if (v.depth < cx.depth) {
+            s = linDiag(cx, s, "E-LIN-002", span, "`lin` variable `" + v.name + "` (declared at " + offsetOf(v.decl) + ", outside this loop) is consumed inside a loop body — the body may run many times, or none (§35.4.4: \"`lin` variables from outer scope SHALL NOT be consumed inside loop bodies\"). Consume it once before the loop, or declare it inside the body")
+        } else if (v.used) {
+            s = linDiag(cx, s, "E-LIN-002", span, "`lin` variable `" + v.name + "` is used at " + offsetOf(v.at) + " and again here — a `lin` variable must be used exactly once (§35.2, §35.5). Remove one use, or use a regular `let` binding if the value needs to be referenced more than once")
+        }
+        let vars: LinVar[] = []
+        let j = 0
+        for (const w of s.vars) {
+            if (j == i && !w.used) {
+                vars = vars.concat([{ id: w.id, name: w.name, decl: w.decl, used: true, at: span, depth: w.depth, scope: w.scope }])
+            } else {
+                vars = vars.concat([w])
+            }
+            j = j + 1
+        }
+        return { vars: vars, diags: s.diags, reported: s.reported, scopes: s.scopes }
+    }
+
+    // `a && b` / `a || b`: `b` runs on one path only.
+    fn linBinary(cx: LinCx, e: AExpr, op: BinOp, l: AExpr, r: AExpr, s0: LinSt) -> LinR {
+        const rl: LinR = linExpr(cx, l, s0)
+        if (rl.ends) return rl
+        if (op != BinOp.And && op != BinOp.Or) return linExpr(cx, r, rl.st)
+        const pre: LinSt = rl.st
+        const rr: LinR = linExpr(cx, r, pre)
+        return linMerge(cx, pre, [rr, linGo(linFrom(pre, rr.st))], e.span, "this `&&` / `||` (its right operand runs on one path only)")
+    }
+
+    fn linTernary(cx: LinCx, e: AExpr, t: AExpr, y: AExpr, n: AExpr, s0: LinSt) -> LinR {
+        const rt: LinR = linExpr(cx, t, s0)
+        if (rt.ends) return rt
+        const pre: LinSt = rt.st
+        const ry: LinR = linExpr(cx, y, pre)
+        const rn: LinR = linExpr(cx, n, linFrom(pre, ry.st))
+        return linMerge(cx, pre, [ry, rn], e.span, "this `? :`")
+    }
+
+    // A handling form (§19.4.3): the subject runs, then one arm — or, for
+    // `!{}`, the success path (no arm). `?` leaves on the failure path.
+    fn linHandled(cx: LinCx, e: AExpr, h: AHandled, s0: LinSt) -> LinR {
+        const rs: LinR = linExpr(cx, h.subject, s0)
+        if (rs.ends) return rs
+        const pre: LinSt = rs.st
+        const how: AHow = h.how
+        return match how {
+            .Propagate :> linGo(linFrom(pre, linExit(cx, pre, 0, e.span, "this `?` (on the failure path it returns from the function)")))
+            .Guard(arms: arms) :> linArms(cx, e, arms, true, pre)
+            .MatchOn(arms: arms) :> linArms(cx, e, arms, false, pre)
+        }
+    }
+
+    fn linArms(cx: LinCx, e: AExpr, arms: AArm[], success: boolean, pre: LinSt) -> LinR {
+        if (hasErrIn(cx.errs, e.span)) return linSkim(cx, arms, pre)
+        let rs: LinR[] = []
+        let d: LinSt = pre
+        for (const a of arms) {
+            const r: LinR = linArm(cx, a, linFrom(pre, d))
+            rs = rs.concat([r])
+            d = r.st
+        }
+        if (success) rs = rs.concat([linGo(linFrom(pre, d))])
+        if (rs.length == 0) return linGo(pre)
+        let what: string = "this `match`"
+        if (success) what = "this `!{}` (its arms run only on failure)"
+        return linMerge(cx, pre, rs, e.span, what)
+    }
+
+    fn linArm(cx: LinCx, a: AArm, s: LinSt) -> LinR {
+        const b: AArmBody = a.body
+        return match b {
+            .ArmExpr(e: x) :> linExpr(cx, x, s)
+            .ArmBlock(b: blk) :> linBlock(cx, blk, s)
+        }
+    }
+
+    // A handling form the typer reported an error in: not judged — each `lin`
+    // an arm names counts as consumed (no cascade).
+    fn linSkim(cx: LinCx, arms: AArm[], pre: LinSt) -> LinR {
+        let s: LinSt = pre
+        for (const a of arms) {
+            const b: AArmBody = a.body
+            const xs: AExpr[] = match b {
+                .ArmExpr(e: x) :> [x]
+                .ArmBlock(b: blk) :> []
+            }
+            for (const x of xs) {
+                for (const i of linNamed(cx, x, s)) { s = linMark(s, i) }
+            }
+        }
+        return linGo(s)
+    }
+
+    fn linMark(s: LinSt, i: int) -> LinSt {
+        let vars: LinVar[] = []
+        let j = 0
+        for (const w of s.vars) {
+            if (j == i) {
+                vars = vars.concat([{ id: w.id, name: w.name, decl: w.decl, used: true, at: w.at, depth: w.depth, scope: w.scope }])
+            } else {
+                vars = vars.concat([w])
+            }
+            j = j + 1
+        }
+        return { vars: vars, diags: s.diags, reported: s.reported, scopes: s.scopes }
+    }
+
+    // The `vars` indices of the `lin` bindings `e` names, one per appearance,
+    // in evaluation order (a lambda body included).
+    fn linNamed(cx: LinCx, e: AExpr, s: LinSt) -> int[] {
+        const i: int = linIndex(cx, e, s)
+        if (i >= 0) return [i]
+        let out: int[] = []
+        for (const x of exprKids(e)) { out = out.concat(linNamed(cx, x, s)) }
+        return out
+    }
+
+    // §35.6: "Capturing a `lin` variable in a closure … SHALL count as one
+    // consumption of that `lin` variable" — at the lambda, whether or not it
+    // is ever called. A lambda whose body holds a statement block (an arm
+    // block) is refused when it names a `lin`: the bootstrap reads a lambda
+    // body as one expression and does not count inside such a block.
+    fn linCapture(cx: LinCx, lam: AExpr, body: AExpr, s0: LinSt) -> LinSt {
+        let s: LinSt = s0
+        const named: int[] = linNamed(cx, body, s)
+        if (named.length > 0 && allExprBlocks(body).length > 0) {
+            return linDiag(cx, s, "E-BOOTSTRAP-UNSUPPORTED", lam.span, "a lambda that captures a `lin` variable and holds a statement block (an arm block) — the bootstrap counts the consumptions of a lambda's expression body only; write the block's work in a named function and call it")
+        }
+        for (const i of named) { s = linConsume(cx, s, i, lam.span) }
+        return s
+    }
+
+    // §19.8.2: in a `!` function an unhandled `?{}` propagates its failure —
+    // a path that leaves the function.
+    fn linSql(cx: LinCx, e: AExpr, q: ASql, s0: LinSt) -> LinR {
+        const r: LinR = linExprs(cx, q.params, s0)
+        if (r.ends) return r
+        if (cx.failable && !q.handled) return linGo(linFrom(r.st, linExit(cx, r.st, 0, e.span, "this `" + sqlSigil() + "}` (in a `!` function, its failure returns from the function, §19.8.2)")))
+        return r
+    }
+
+    // §35.7 (working position): "The compiler SHALL emit W-LIN-001 when a `lin`
+    // variable is passed to a server-escalated function" — a client call of a
+    // server-placed function, an argument that is the `lin` binding itself.
+    fn linCall(cx: LinCx, callee: AExpr, args: AExpr[], s0: LinSt) -> LinR {
+        let s: LinSt = s0
+        const fsym: Sym | not = fnSymOf(nameFact(cx.t.names, callee.nid))
+        if (fsym is given && isServerPlaced(cx.t, fsym) && remoteCaller(cx.t, cx.caller)) {
+            for (const a of args) {
+                const i: int = linIndex(cx, a, s)
+                if (i >= 0) s = linDiag(cx, s, "W-LIN-001", a.span, "`lin` variable `" + s.vars[i].name + "` is passed to the server function `" + fsym.hint + "` — it is consumed here, on the client; the server receives a serialized copy, and the `lin` guarantee does not extend to that copy (§35.7)")
+            }
+        }
+        return linExprs(cx, [callee].concat(args), s)
+    }
+
+    // `x = v`: the value is evaluated; a bare-name target is a write, not an
+    // appearance (a write to a `lin` binding is refused as a write to an
+    // immutable binding, §35.2).
+    fn linAssign(cx: LinCx, target: AExpr, value: AExpr, s0: LinSt) -> LinR {
+        const r: LinR = linExpr(cx, value, s0)
+        if (r.ends) return r
+        const tk: AExprK = target.k
+        const bare: boolean = match tk {
+            .Name(name: n) :> true
+            .At(name: n) :> true
+            .AtItem :> false
+            .Num(raw: x) :> false
+            .Str(v: x) :> false
+            .Bool(v: x) :> false
+            .NotLit :> false
+            .Recovered :> false
+            .Variant(name: n) :> false
+            .Member(obj: o) :> false
+            .Call(callee: c) :> false
+            .Unary(op: o) :> false
+            .Binary(op: o) :> false
+            .Ternary(test: x) :> false
+            .Assign(target: x) :> false
+            .ArrayLit(elems: x) :> false
+            .ObjectLit(props: x) :> false
+            .Spread(e: x) :> false
+            .Index(obj: o) :> false
+            .Lambda(params: x) :> false
+            .Sql(q: x) :> false
+            .Handled(h: x) :> false
+            .Template(quasis: x) :> false
+        }
+        if (bare) return r
+        return linExpr(cx, target, r.st)
+    }
+
     export fn analyze(files: FileAst[], entry: string) -> TypedProgram {
         const st0: AS = { facts: noFacts(), diags: [], nextSym: 0, annots: [], bad: { params: [], fields: [] }, effects: [], pend: [], lifts: [] }
         const ra: RGlobals = phaseA(files, entry, st0)
@@ -22758,7 +23393,10 @@ ${
                             names: bound.names, values: bound.values, effects: bound.effects, binds: bound.binds,
                             elems: bound.elems, attrs: bound.attrs, fails: bound.fails, annots: bound.annots, unresolved: bound.unresolved, typing: typed.typing,
                             novalidate: vp.forms, resets: bound.resets, gated: vp.gated, persists: bound.persists, server: sf, css: css.facts }
-        const base: Diag[] = domScopeDropped(pl.st.diags, pp.doms).concat(scopeDiags).concat(effectDiags).concat(vp.diags).concat(sinkDiags).concat(typed.diags)
+        const base0: Diag[] = domScopeDropped(pl.st.diags, pp.doms).concat(scopeDiags).concat(effectDiags).concat(vp.diags).concat(sinkDiags).concat(typed.diags)
+        // s471: the linear pass (§35) — after the typer (§35.5: "after type resolution and
+        // route inference"; a non-exhaustive `match`'s E-TYPE-020 is in `base0`, §35.4.3)
+        const base: Diag[] = base0.concat(linPass(ra.g, typedT, base0))
         // s462 (fix round 2): the own-value type reports run LAST, over every
         // other pass's diagnostics — so an Error anywhere inside the
         // initializer, or inside the function a failed proof stands in, owns

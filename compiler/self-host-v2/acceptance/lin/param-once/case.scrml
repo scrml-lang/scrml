@@ -1,0 +1,18 @@
+// §35.2.1: a `lin` parameter consumed exactly once.
+<program>
+    function mint() -> string {
+        return "tok";
+    }
+    function use(t: string) -> string {
+        return `used:${t}`;
+    }
+    function redeem(lin ticket: string, who: string) -> string {
+        return `${who}:${ticket}`;
+    }
+    function f() -> string {
+        return redeem("t1", "bob");
+    }
+    <main>
+        <p id="o">${f()}</p>
+    </main>
+</program>

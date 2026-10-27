@@ -1,0 +1,15 @@
+{
+  "id": "acceptance-lin-neg-outer-in-loop",
+  "description": "E-LIN-002: a `lin` from an outer scope consumed inside a loop body.",
+  "language-version": "1.0",
+  "spec": "§35.4.4 · §49.5.3",
+  "rationale": "§35.4.4: \"A `lin` variable from an outer scope consumed inside any loop body (a `for` with any head, §49) SHALL be a compile error (E-LIN-002).\"",
+  "expect": {
+    "codes": [
+      "E-LIN-002"
+    ],
+    "codeCounts": {
+      "E-LIN-002": 1
+    }
+  }
+}

@@ -105,7 +105,8 @@ function nodeKinds(asts) {
       else if (typeof n.tag === "string" && Array.isArray(n.attrs) && Array.isArray(n.kids)) kind = "elem";
       else if (typeof n.name === "string" && "value" in n && (n.value === "NoValue" || ATTR_VALUE.has(tag(n.value)))) kind = "attr";
       else if (Array.isArray(n.params) && n.body) kind = "fn";
-      else if (typeof n.name === "string" && "ty" in n && Object.keys(n).length === 4) kind = "param";
+      // s471: AParam carries `lin` (§35.2.1) — { nid, span, name, ty, lin }
+      else if (typeof n.name === "string" && "ty" in n && typeof n.lin === "boolean" && Object.keys(n).length === 5) kind = "param";
       if (kind !== null) kinds.set(n.nid, kind);
     }
     Object.values(n).forEach(walk);

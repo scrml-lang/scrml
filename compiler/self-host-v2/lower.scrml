@@ -715,7 +715,7 @@ ${
             .Return(e: e) :> hoistMaybe(c, e).concat(attemptsFor(c, e)).concat([Stmt.Return(returnValue(c, e))])
             .If(cond: x, thenB: t, elseB: el) :> hoistExpr(c, x).concat(joinMark(c, s)).concat([Stmt.If(lowerExpr(c, x), lowerBlock(c, t), maybeBlock(c, el))])
             .Given(name: n, subject: sub, body: b) :> givenStmts(c, s, b)
-            .For(f: lf) :> loopStmts(c, lf)                 // s469 (§49; a bound loop, §49.6)
+            .For(f: lf) :> joinMark(c, s).concat(loopStmts(c, lf))   // s469 (§49; a bound loop, §49.6); s471: a loop that waits — its exit join
             .Break(label: x) :> jumpStmts(c, s, true)
             .Continue(label: x) :> jumpStmts(c, s, false)
             .Lift(what: w) :> liftStmts(c, s, w)            // s469 (§49.6.2)
@@ -3126,6 +3126,15 @@ ${
                     const jump: Stmt[] = [Stmt.Jump(jk)]
                     return ss.slice(0, i).concat([Stmt.Join(jk, block(body)), Stmt.If(ip.cond, block(cpsStmts(ip.thenB.stmts, jump)), block(cpsStmts(elseStmts(ip.elseB), jump)))])
                 }
+                // s471 — a loop that waits (§49.12.7): the rest of the block is its
+                // EXIT continuation; every path through the body that falls off its
+                // end continues the loop (the next iteration) — a Break of the loop
+                // leaves through the exit (print.scrml cycleJs)
+                const lp: LoopParts | not = loopParts(ss[i + 1])
+                if (lp is given) {
+                    const after: Stmt[] = cpsStmts(ss.slice(i + 2), tail)
+                    return ss.slice(0, i).concat([Stmt.Join(jk, block(after)), Stmt.Loop(lp.label, lp.head, block(cpsStmts(lp.body.stmts, [Stmt.Continue(lp.label)])))])
+                }
             }
             const ip2: IfParts | not = ifParts(s)
             if (ip2 is given && i == ss.length - 1 && holdsSuspension([s])) {
@@ -3192,6 +3201,33 @@ ${
             .Join(k: x) :> not
             .Jump(k: x) :> not
             .Loop(label: x) :> not
+            .Break(target: x) :> not
+            .Continue(target: x) :> not
+            .Gather(g: x) :> not
+            .Lift(into: x) :> not
+        }
+    }
+
+    type LoopParts:struct = { label: Sym, head: LoopHead, body: Block }
+
+    fn loopParts(s: Stmt) -> LoopParts | not {
+        return match s {
+            .Loop(label: l, head: h, body: b) :> { label: l, head: h, body: b }
+            .If(cond: x) :> not
+            .Suspend(bind: x) :> not
+            .Let(sym: x) :> not
+            .Assign(local: x) :> not
+            .Write(cap: x) :> not
+            .Commit(writes: x) :> not
+            .Return(e: x) :> not
+            .Eval(e: x) :> not
+            .ResetSurface(of: x) :> not
+            .Defer(body: x) :> not
+            .Unpersist(decl: x) :> not
+            .Attempt(result: x) :> not
+            .Fail(err: x) :> not
+            .Join(k: x) :> not
+            .Jump(k: x) :> not
             .Break(target: x) :> not
             .Continue(target: x) :> not
             .Gather(g: x) :> not

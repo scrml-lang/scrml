@@ -167,7 +167,7 @@ ${
 
     export type AStmtK:enum = {
         Eval(e: AExpr),                                     // an expression statement (incl. an assignment)
-        Local(name: string, mutable: boolean, ty: AType | not, init: AExpr), // let / const [: T]
+        Local(name: string, mutable: boolean, ty: AType | not, init: AExpr, lin: boolean), // let / const [: T]; s471: `lin` (§35.2 — immutable, linear)
         Return(e: AExpr | not),
         If(cond: AExpr, thenB: ABlock, elseB: ABlock | not),
         Given(name: string, subject: AExpr, body: ABlock),  // given c = @h :> { … }
@@ -250,7 +250,8 @@ ${
     // -------------------------------------------------------------------------
     // Functions and imports.
     // -------------------------------------------------------------------------
-    export type AParam:struct = { nid: int, span: ASpan, name: string, ty: AType | not }
+    // s471 — `lin`: written `lin name: T` (§35.2.1, a linear parameter).
+    export type AParam:struct = { nid: int, span: ASpan, name: string, ty: AType | not, lin: boolean }
     // `pure` = declared with `fn` (§48.3); `function` otherwise.
     // s451 (U1a): `server` = written with the DEPRECATED `server` modifier
     // (§12.2 Trigger 4, §52.10 — analyze warns W-DEPRECATED-SERVER-MODIFIER);
