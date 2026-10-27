@@ -286,7 +286,7 @@ export type CheckResult = {
  */
 export async function compileSource(
   entry: string,
-  opts: { overlay?: ReadonlyMap<string, string>; rebuild?: boolean; log?: (s: string) => void } = {},
+  opts: { overlay?: ReadonlyMap<string, string>; rebuild?: boolean; log?: (s: string) => void; stdlibRoot?: string } = {},
 ): Promise<CheckResult> {
   const entryAbs = resolve(entry);
   const overlay = opts.overlay;
@@ -307,8 +307,26 @@ export async function compileSource(
   const result = (ok: boolean, extra: Partial<CheckResult> = {}): CheckResult =>
     ({ ok, diagnostics, sources, files: abs, ...extra, ms: { boot: boot.ms, compile: performance.now() - t0 } });
 
-  const { frontEnd } = await import("../compiler/self-host-v2/slice-m2/lowered.js");
-  const fe = frontEnd(boot.mods, files, toRel(entryAbs));
+  // s471: the `scrml:` stdlib modules the program imports join the compile as source (lowered.js
+  // frontEndStdlib); one that does not compile on the bootstrap is withdrawn, and its import refused
+  // by name (E-BOOTSTRAP-UNSUPPORTED at the import) — with WHY reported here, at its first error.
+  const { frontEndStdlib } = await import("../compiler/self-host-v2/slice-m2/lowered.js");
+  const fe = frontEndStdlib(boot.mods, files, toRel(entryAbs), { stdlibRoot: opts.stdlibRoot });
+  const withdrawn: Diagnostic[] = [];
+  for (const r of fe.stdlib.refused as Array<{ module: string; direct: boolean; diags: any[]; sources: Array<{ path: string; src: string; abs: string }> }>) {
+    // a module only another stdlib module imports is reported through that one (its import there is the first error)
+    if (!r.direct) continue;
+    const first = r.diags[0];
+    const src = r.sources.find((s) => s.path === first?.file);
+    if (src !== undefined) sources.set(src.abs, src.src);
+    const lc = src !== undefined && first?.span ? lineCol(src.src, first.span.start) : undefined;
+    const n = r.diags.length;
+    withdrawn.push({
+      severity: "error", code: "E-BOOTSTRAP-UNSUPPORTED",
+      message: `\`scrml:${r.module}\` does not compile on the bootstrap yet, so it cannot be imported — its source has ${n} error${n === 1 ? "" : "s"} on the bootstrap; the first: [${first?.code}] ${first?.message}`,
+      file: src?.abs, line: lc?.line, col: lc?.col,
+    });
+  }
   for (const d of [...fe.diags, ...(fe.infos ?? [])]) {
     const f = relToAbs.get(d.file);
     const src = f !== undefined ? sources.get(f) : undefined;
@@ -320,6 +338,7 @@ export async function compileSource(
       line: lc?.line, col: lc?.col, endLine: ec?.line, endCol: ec?.col,
     });
   }
+  diagnostics.push(...withdrawn);
   if (diagnostics.some((d) => d.severity === "error") || fe.core == null) {
     if (!diagnostics.some((d) => d.severity === "error")) {
       diagnostics.push({ severity: "error", code: "E-BOOTSTRAP-NO-CORE", message: "the front end produced no program (no diagnostic said why — a bootstrap defect)" });
@@ -336,10 +355,10 @@ export async function compileSource(
   return result(true, { client: { html: out.html, js: out.js }, serverJs });
 }
 
-export async function compileFile(file: string, opts: { outDir?: string; rebuild?: boolean; log?: (s: string) => void } = {}): Promise<CompileResult> {
+export async function compileFile(file: string, opts: { outDir?: string; rebuild?: boolean; log?: (s: string) => void; stdlibRoot?: string } = {}): Promise<CompileResult> {
   const entryAbs = resolve(file);
   const outDir = opts.outDir ? resolve(opts.outDir) : defaultOutDir(entryAbs);
-  const c = await compileSource(entryAbs, { rebuild: opts.rebuild, log: opts.log });
+  const c = await compileSource(entryAbs, { rebuild: opts.rebuild, log: opts.log, stdlibRoot: opts.stdlibRoot });
   const result = (ok: boolean, written: string[] = [], server = false): CompileResult =>
     ({ ok, diagnostics: c.diagnostics, sources: c.sources, files: c.files, outDir, written, server, ms: c.ms });
   if (!c.ok || c.client === undefined) return result(false);

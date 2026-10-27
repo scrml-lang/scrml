@@ -260,6 +260,13 @@ const STATUS = {
   "termination/neg-split-call": ["PASS", ["E-STMT-SPLIT-CONTINUATION"]],
   "termination/neg-bare-fail": ["PASS", ["E-PARSE-EXPECTED"]],
   "termination/neg-spaced-propagate": ["PASS", ["E-PARSE-EXPR"]],
+  // s471-bootstrap-stdlib-import — every import resolves (link.scrml importTarget) or is refused by name
+  // at the import; a `scrml:` module joins as source and is withdrawn when the bootstrap cannot compile it
+  "imports/local-module-runs": ["PASS", []],
+  "imports/stdlib-format-refused": ["PASS", ["E-BOOTSTRAP-UNSUPPORTED"]],
+  "imports/neg-not-exported": ["PASS", ["E-IMPORT-004"]],
+  "imports/neg-missing-file": ["PASS", ["E-IMPORT-006"]],
+  "imports/neg-bare-specifier": ["PASS", ["E-IMPORT-005"]],
 };
 
 let verdicts;

@@ -1,0 +1,6 @@
+// s471 fixture stdlib — a file of `scrml:greet`, reached only by its relative import.
+${
+    export fn shout(s: string) -> string {
+        return s.toUpperCase();
+    }
+}

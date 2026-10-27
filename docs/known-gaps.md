@@ -30,9 +30,9 @@
 | Severity | Open (owed by impl#1, the TS compiler) | Carried (owed by the bootstrap; xfail on impl#1) |
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 262 | 5 |
-| MED | 702 | 8 |
-| LOW | 528 | 0 |
+| HIGH | 264 | 5 |
+| MED | 703 | 8 |
+| LOW | 529 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
 
@@ -433,6 +433,22 @@ The code comment says so: "fail closed: a `=` in a string counts too". Rare tail
 ### g-impl1-e-error-012-delete-tail-unclassified-s470 — a `delete` arm tail is not recognised by E-ERROR-012's yields / falls-through classifier, whose write rule knows only assignment and `++` / `--` — `NEW S470 (review of #1577); LOW; open`
 
 Listed as a follow-up on #1577. Not measured here. Decide whether a `delete` tail falls through (it is a write) and add it to `exprHasWrite`.
+
+<!-- @gap id=g-boot-stdlib-none-compiles-s471 sev=HIGH status=open locus=stdlib/*/index.scrml prov=dispatch:s471-bootstrap-stdlib-import(survey) -->
+### g-boot-stdlib-none-compiles-s471 — no stdlib module compiles on the bootstrap, so every `scrml:` import is refused by name: each `index.scrml` is wrapped in a top-level `<program>` (refused in a non-entry file), is written in the pre-§66 dialect (no `;`, untyped params, string truthiness, `while`, `.push`), 13 carry inline `~{}` test blocks, and 20 of 22 reach the host — `NEW S471; HIGH; open`
+
+Survey table: `docs/changes/s471-bootstrap-stdlib-import/progress.md`. `md` is closest (pure; Math.floor ×4, new Set/Map ×3). Owner questions pending: drop the `<program>` wrapper (§21.5), and the host bridge (below).
+
+<!-- @gap id=g-boot-no-host-bridge-s471 sev=HIGH status=open locus=compiler/self-host-v2/analyze.scrml(member-call allowlist)+SPEC(§23.2.4 _{} is server-only; §21.3.1 import:host limited to stdlib/compiler/**) prov=dispatch:s471-bootstrap-stdlib-import(survey) -->
+### g-boot-no-host-bridge-s471 — the bootstrap has no `_{}` / `import:host` / host-global surface, and SPEC gives client-capable stdlib modules (format/Intl, math, time, regex, random, router) no sanctioned host reach: §23 `_{}` is server-only and `import:host` admits only `stdlib/compiler/**` — `NEW S471; HIGH; open (owner question)`
+
+<!-- @gap id=g-boot-flat-link-namespace-s471 sev=MED status=open locus=compiler/self-host-v2/analyze.scrml(fnNamed — "the bootstrap links one namespace") prov=dispatch:s471-bootstrap-stdlib-import;review:S471-stdlib(F1,F2; ~/.cache/scrml/review/s471-stdlib/probes p2,p3,t2,s1,s6) -->
+### g-boot-flat-link-namespace-s471 — (fail-open) the export/import boundary is not enforced at use sites: any function or type of ANY linked file — exported-but-not-imported, or not exported at all — is usable without importing it (base too); with `scrml:` modules linked this reaches stdlib internals; and a user library's private name colliding with a stdlib private name withdraws the stdlib module with a stdlib-located "does not compile" error — `NEW S471; MED; open`
+
+Not reachable with the real stdlib today (all 22 withdrawn); live the moment one module compiles. Enforce visibility before the first stdlib port lands.
+
+<!-- @gap id=g-boot-import-codes-and-alias-s471 sev=LOW status=open locus=compiler/self-host-v2/analyze.scrml(importRefusal)+parse.scrml(parseImport) prov=dispatch:s471-bootstrap-stdlib-import;review:S471-stdlib(F3) -->
+### g-boot-import-codes-and-alias-s471 — `scrml:nope` (no such module) is E-BOOTSTRAP-UNSUPPORTED where §41.5 / §41.11 name E-IMPORT-006; `import { a as b }` reads `as` and `b` as imported names (E-IMPORT-004, wrong code); a printer refusal caused by stdlib code carries no file — `NEW S471; LOW; open (fails closed)`
 
 <!-- @gap id=g-windows-imported-alias-chain-refusal-not-emitted-s470 sev=HIGH status=open locus=UNTRACED(cross-file enum / alias resolution added by #1563 — likely a path-key separator mismatch on Windows) prov=empirical:S470-CI-windows-job(main 5f4b01533 run 40350986599, PR #1581 run 40416129494) -->
 ### g-windows-imported-alias-chain-refusal-not-emitted-s470 — on Windows, the #1563 field-read refusal (E-TYPE-004 / E-TYPE-031) is not emitted when the enum type arrives through an imported alias, an alias of an alias, a re-export, or an imported function's return type. The same 10 `compiler/tests/unit/enum-value-member-read-s470.test.js` cases fail on main and on #1581: K-ALIAS2, IMP-STRUCT, EXPORT-STAR, both DEPTH cases, I1, I2, I3, I-cross and STAR-PREC. `codesOf` returns `[]` where the test expects `E-TYPE-004` — `NEW S470; HIGH (SECURITY: fail-open on Windows builds); open`
@@ -2726,7 +2742,7 @@ Surfaced by the delta re-review of s462-stdlib-import-004; present on BASE. Refe
 
 ### g-bootstrap-stdlib-import-004-missing-s462 — the bootstrap (impl#2) does not check `scrml:` imports or named `scrml:` re-exports against the stdlib module's export list (E-IMPORT-004, §41.3.1 / §21.4) — `NEW S462; MED; open`
 
-<!-- @gap id=g-bootstrap-stdlib-import-004-missing-s462 sev=MED status=open locus=compiler/self-host-v2(module resolution — no stdlib export table) prov=empirical:s462-stdlib-import-004-bootstrap-conformance -->
+<!-- @gap id=g-bootstrap-stdlib-import-004-missing-s462 sev=MED status=narrowed narrowed-by=s471-bootstrap-stdlib-import locus=compiler/self-host-v2(module resolution — no stdlib export table) prov=empirical:s462-stdlib-import-004-bootstrap-conformance -->
 
 impl#1 implements the check as of S462 (`module-resolver.js` `validateStdlibImports`, fed by the STDLIB-EXPORT-SEED stage). `bun scripts/bootstrap-conformance.ts` reports three of the new cases as bootstrap FAILs: `module/e-import-004-stdlib-name-not-exported-reject` and `module/e-import-004-stdlib-submodule-only-name-reject` (missing E-IMPORT-004 — not in the bootstrap's sources), and `module/e-import-004-stdlib-name-exported-clean` (the twin emits an unasserted E-SCOPE-001 for the imported stdlib name — the bootstrap does not bind stdlib imports at all). The re-export case `module/e-import-004-stdlib-reexport-missing-name-reject` is UNSUPPORTED there (the bootstrap's slice M2 does not parse an `export { … } from` statement in a logic block). Fix direction: give the bootstrap the stdlib module's `.scrml` export list (the same one reader impl#1 uses), then judge imports and named re-exports against it.
 
@@ -26756,7 +26772,8 @@ Conformance FAILs (3), all fail-closed but with a code that does not name the ro
 **Agent-executed (S449).** Twins (the engine rewritten `<v:T=.X single>`, state-children verbatim, per §66.13.3 + O5) whose required code is in no bootstrap source, each accepted with no diagnostic: `engine/state-child-missing-pos` (E-ENGINE-STATE-CHILD-MISSING — exhaustiveness, §66.13.2 "the graph's coverage of the enum … checkable"), `engine/payload-arity-mismatch-pos` / `payload-unit-variant-pos` (E-ENGINE-PAYLOAD-*), `engine/history-no-inner-engine-pos`, `engine/internal-rule-not-composite-pos`, `lifecycle/effect-bare-not-interpolated` (E-ENGINE-EFFECT-NOT-INTERPOLATED). Recommended: implement, or refuse the attribute / state-child shape with E-BOOTSTRAP-UNSUPPORTED.
 
 ### g-bootstrap-module-import-checks-missing — bootstrap: bad imports are accepted, or answered with a generic scope / type code
-<!-- @gap id=g-bootstrap-module-import-checks-missing sev=MED status=open locus=searched:compiler/self-host-v2/analyze.scrml(import resolution) prov=empirical:S449-scrml-fix-s66-twins -->
+<!-- @gap id=g-bootstrap-module-import-checks-missing sev=MED status=narrowed narrowed-by=s471-bootstrap-stdlib-import locus=searched:compiler/self-host-v2/analyze.scrml(import resolution) prov=empirical:S449-scrml-fix-s66-twins -->
+> **NARROWED S471 (`s471-bootstrap-stdlib-import`).** E-IMPORT-004 / 005 / 006 now fire (the three conformance cases FAIL→PASS); imports inside `<program>` are checked; names are checked against the named file's export list. Still open: E-IMPORT-PINNED-INVALID and E-EXPORT-003.
 **Agent-executed (S449).** Twins: `module/e-import-004-name-not-exported-reject` → E-SCOPE-001 + E-TYPE-UNKNOWN (expected E-IMPORT-004), `e-import-005-bare-specifier-reject` → nothing (E-IMPORT-005), `e-import-006-missing-file-reject` → E-SCOPE-001 (E-IMPORT-006), `e-import-pinned-invalid-reject` → E-TYPE-UNKNOWN (E-IMPORT-PINNED-INVALID), `e-export-003-attr-conflict-reject` → nothing (E-EXPORT-003). Recommended: the §21 import codes, or E-BOOTSTRAP-UNSUPPORTED.
 
 ### g-bootstrap-opener-refinement-lifecycle-type-rejected — bootstrap: a refinement or lifecycle type in a declaration opener is a parse error, though §66.2.4 (amended S449, dialect ruling 4) makes it legal bare

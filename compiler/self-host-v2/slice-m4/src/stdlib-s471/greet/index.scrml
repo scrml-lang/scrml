@@ -1,0 +1,9 @@
+// s471 fixture stdlib — a directory-form module (`scrml:greet`) whose own
+// relative import stays inside the module (link.scrml importTarget).
+${
+    import { shout } from "./shout.scrml";
+
+    export fn greet(name: string) -> string {
+        return `Hello, ${shout(name)}!`;
+    }
+}

@@ -1,0 +1,20 @@
+{
+  "id": "acceptance-imports-local-module-runs",
+  "description": "an import inside `<program>` resolves to the aux `.scrml` module; its exported functions run in the page.",
+  "language-version": "1.0",
+  "spec": "§21.3, §41.3",
+  "rationale": "s471: the bootstrap's one import resolver (link.scrml importTarget) — the path a `scrml:` stdlib module also takes.",
+  "expect": {
+    "codes": [],
+    "domAnchored": [
+      {
+        "selector": "#s",
+        "text": "WORLD!"
+      },
+      {
+        "selector": "#t",
+        "text": "8"
+      }
+    ]
+  }
+}

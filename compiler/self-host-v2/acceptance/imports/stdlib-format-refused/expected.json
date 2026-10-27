@@ -1,0 +1,18 @@
+{
+  "id": "acceptance-imports-stdlib-format-refused",
+  "description": "E-BOOTSTRAP-UNSUPPORTED once, at the `scrml:format` import; no E-SCOPE-001 at the use.",
+  "language-version": "1.0",
+  "spec": "§41.3, §41.5",
+  "rationale": "s471: a stdlib module joins the compile as source and is importable when the bootstrap compiles it; one it does not compile is withdrawn and its import refused by name. When stdlib/format is ported to the ruled dialect this case flips to a running one.",
+  "expect": {
+    "codes": [
+      "E-BOOTSTRAP-UNSUPPORTED"
+    ],
+    "codeCounts": {
+      "E-BOOTSTRAP-UNSUPPORTED": 1
+    },
+    "notCodes": [
+      "E-SCOPE-001"
+    ]
+  }
+}
