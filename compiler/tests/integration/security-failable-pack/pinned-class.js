@@ -10,6 +10,7 @@ import { R16_PINNED } from "./r16-pinned.js";
 import { R19_PINNED } from "./r19-pinned.js";
 import { R21_PINNED } from "./r21-pinned.js";
 import { R20_PINNED } from "./r20-pinned.js";
+import { R22_PINNED } from "./r22-pinned.js";
 
 export const PINNED_CLASS = {
   "s4/return match": "PASS",
@@ -1268,6 +1269,8 @@ export const PINNED_CLASS = {
   ...R21_PINNED,
   // S470 s470-host-fetch-followups — r20-shapes.js (s23 / f26 / l18 / t18), every shape pinned (r20-pinned.js).
   ...R20_PINNED,
+  // S471 s471-null-in-arm-refused — r22-shapes.js (s25 / f28 / l20 / t20), every shape pinned (r22-pinned.js).
+  ...R22_PINNED,
   // S470 s470-typed-payload-binders — r11-shapes.js (s14 / f17 / l9 / t9), from a run (fams.mjs). "1 …" FAIL on
   // 91c1c9ca4 -> PASS-REFUSED; "VALID …" PASS on both; "VALID F4 …" PASS-REFUSED (E-TYPE-031, false) on 91c1c9ca4 ->
   // PASS-DENY: the program compiles now, but the nested `<match>` in the arm is never mounted (its buttons never
