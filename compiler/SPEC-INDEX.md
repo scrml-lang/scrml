@@ -1,7 +1,3 @@
-<<<<<<< scrml-generated-merge: REGENERATION REQUIRED — both sides changed derived content: spec-index-totals, spec-index-rows
-Run `bun scripts/git-merge-generated.ts --regen`: it regenerates this file from the MERGED tree and stages it.
-=======
->>>>>>> (the text below is provisional)
 # SPEC.md Section Index
 
 > Auto-generated line numbers. Regenerate: `bun run scripts/regen-spec-index.ts` (in-tree TS regen; updates the Sections-table line ranges + sizes AND the totals block below, in-place from SPEC.md headings, preserving summaries). The legacy `bash scripts/update-spec-index.sh` is a print-only helper that lists current heading line numbers.
