@@ -31,8 +31,8 @@
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 262 | 5 |
-| MED | 699 | 8 |
-| LOW | 532 | 0 |
+| MED | 700 | 8 |
+| LOW | 533 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
 
@@ -457,7 +457,7 @@ Proposed fix: run `sweepAbsenceTokens` over those statements from `checkEngineRa
 <!-- @gap id=g-gcp3-equality-codes-skip-text-held-bodies-s471 sev=LOW status=open defer=impl1-s471-policy locus=compiler/src/gauntlet-phase3-eq-checks.js(sweepAbsenceTokens keeps only absence codes) prov=dispatch:s471-null-in-arm-refused(audit) -->
 ### g-gcp3-equality-codes-skip-text-held-bodies-s471 — E-EQ-001 / 003 / W-EQ-001 are not checked in the newly reached text-held positions (no wrong-password shape found; the E-EQ-004 limb is the HIGH above) — `NEW S471; LOW; open — DEFERRED (S471 impl#1 policy)`
 
-<!-- @gap id=g-windows-imported-alias-chain-refusal-not-emitted-s470 sev=HIGH status=open locus=UNTRACED(cross-file enum / alias resolution added by #1563 — likely a path-key separator mismatch on Windows) prov=empirical:S470-CI-windows-job(main 5f4b01533 run 40350986599, PR #1581 run 40416129494) -->
+<!-- @gap id=g-windows-imported-alias-chain-refusal-not-emitted-s470 sev=HIGH status=resolved resolved-by=s471-windows-imported-alias-refusal locus=UNTRACED(cross-file enum / alias resolution added by #1563 — likely a path-key separator mismatch on Windows) prov=empirical:S470-CI-windows-job(main 5f4b01533 run 40350986599, PR #1581 run 40416129494) -->
 ### g-windows-imported-alias-chain-refusal-not-emitted-s470 — on Windows, the #1563 field-read refusal (E-TYPE-004 / E-TYPE-031) is not emitted when the enum type arrives through an imported alias, an alias of an alias, a re-export, or an imported function's return type. The same 10 `compiler/tests/unit/enum-value-member-read-s470.test.js` cases fail on main and on #1581: K-ALIAS2, IMP-STRUCT, EXPORT-STAR, both DEPTH cases, I1, I2, I3, I-cross and STAR-PREC. `codesOf` returns `[]` where the test expects `E-TYPE-004` — `NEW S470; HIGH (SECURITY: fail-open on Windows builds); open`
 
 The failures were read from the CI `windows` job logs, not reproduced on a Windows machine. The job is not a required check, so the failure was not caught when #1563 landed. Linux and macOS pass. A Windows build of a multi-file program can therefore read a payload field off an imported-alias enum value without the refusal. Fix direction: find where the cross-file resolver keys files (probably a raw path with `\` against a `/`-normalised import specifier), and make the `windows` job required, or at least make failing it block a security landing.
@@ -479,6 +479,17 @@ Fix: before taking the cut reading, require that the closed reading's first new 
 ### g-pattern-default-quoted-key-unquoted-s470 — a quoted key in a destructuring pattern default loses its quotes: `{ a = x["variant"] }` is emitted as `x[variant]`, a ReferenceError at run time — `NEW S470; LOW; open (pre-existing on main)`
 
 Found by lane s470-promise-all-batch-elements: a PASS-DENY pack shape and its twin on main both reach it. It fails closed, but the program crashes.
+
+<!-- @gap id=g-entry-export-star-type-import-unresolved-s471 sev=HIGH status=open defer=impl1-s471-policy locus=compiler/src/api.js(resolveTypeThroughReExport ~:2971 — follows named exports[] only) prov=dispatch:s471-windows-imported-alias-refusal(found) -->
+### g-entry-export-star-type-import-unresolved-s471 — (fail-open) an entry file importing a type straight through a dependency's `export * from` gets no type, so `x.reason` on an enum value compiles with zero diagnostics — every OS, base and head — `NEW S471; HIGH; open — DEFERRED (S471 impl#1 policy)`
+
+<!-- @gap id=g-dir-specifier-resolves-to-directory-s471 sev=MED status=open defer=impl1-s471-policy locus=compiler/src/module-resolver.js(resolveModulePathNative — existsSync(dir) is true) prov=dispatch:s471-windows-imported-alias-refusal;review:S471-win(F1; ~/.cache/scrml/review/s471-win/cases/dir_*) -->
+### g-dir-specifier-resolves-to-directory-s471 — `import … from "./d"` (or `"./d/"`) with `d/index.scrml` present resolves to the directory itself: `d/index.scrml` is never compiled and the client emits a dangling `import … from "./d"` (broken at run time, base too); since lane s471-windows-imported-alias-refusal the enum-read chain refuses it with E-TYPE-031, including legal `.name` / `.variant` reads — `NEW S471; MED; open — DEFERRED (S471 impl#1 policy)`
+
+SPEC note: §21.7 step 3 allows the extension-less fallback; no §21/§41 text names the directory → `index.scrml` form for relative imports (§41.6 gives it for `vendor:` only).
+
+<!-- @gap id=g-impl1-enum-read-misc-residue-s471 sev=LOW status=open defer=impl1-s471-policy locus=compiler/src/type-system.ts(enum-read chain) prov=review:S471-win(F2,F3,F4) -->
+### g-impl1-enum-read-misc-residue-s471 — enum-read chain residue: a cascade E-TYPE-031 on programs already failing E-IMPORT-006 / E-IMPORT-004 (noise only); `export const c2 = ic` (an imported enum const) then `c2.reason` is not refused (base too); `PathKeyedMap` folds separators but not case or drive-letter case, untested on a case-insensitive FS — `NEW S471; LOW; open — DEFERRED (S471 impl#1 policy)`
 
 <!-- @gap id=g-boot-lift-to-bound-loop-inside-defer-refused-s471 sev=LOW status=open locus=compiler/self-host-v2/analyze.scrml(deferBodyRule .Lift case) prov=review:S471-control-flow-rereview(follow-up) -->
 ### g-boot-lift-to-bound-loop-inside-defer-refused-s471 — the `.Lift` case of `deferBodyRule` refuses every `lift` in a deferred body (E-DEFER-CONTROL-FLOW, S471 ruling), including one aimed at a value-bound loop that is itself INSIDE the deferred body, which does not leave the body — `NEW S471; LOW; open (latent: that bound loop is refused today)`

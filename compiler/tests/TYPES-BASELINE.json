@@ -1,8 +1,8 @@
 {
   "//": "TypeScript diagnostic NAME->COUNT baseline. See scripts/types-gate.ts for why this is a name set and not an exit code, and why it carries counts. Regenerate with `bun scripts/types-gate.ts --write`. A NEW name or a GROWN count is a regression; a REMOVED name or a SHRUNK count means this file is stale and should be regenerated in the commit that fixed it.",
   "//never": "Entries containing \"is not assignable to type 'never'\" are LIVE EXHAUSTIVE-SWITCH DECAY — a member was added to a union and a switch over it was not updated, so it silently falls through to the default arm. They are recorded so the population does not GROW. Each is a real bug and each should be FIXED, not inherited.",
-  "totalDiagnostics": 181,
-  "distinctNames": 114,
+  "totalDiagnostics": 182,
+  "distinctNames": 115,
   "neverFallthroughOccurrences": 9,
   "diagnostics": {
     "compiler/src/codegen/collect.ts :: TS2345 :: Argument of type 'unknown' is not assignable to parameter of type 'string'.": 1,
@@ -118,6 +118,7 @@
     "compiler/src/type-system.ts :: TS2678 :: Type '\"machine\"' is not comparable to type '\"function\" | \"map\" | \"union\" | \"unknown\" | \"not\" | \"state\" | \"error\" | \"array\" | \"struct\" | \"enum\" | \"primitive\" | \"predicated\" | \"asIs\" | \"snippet\" | \"html-element\" | \"cssClass\" | \"meta-splice\" | \"ref-binding\"'.": 1,
     "compiler/src/type-system.ts :: TS2769 :: No overload matches this call.": 1,
     "compiler/src/type-system.ts :: TS7016 :: Could not find a declaration file for module './html-elements.js'. 'compiler/src/html-elements.js' implicitly has an 'any' type.": 1,
+    "compiler/src/type-system.ts :: TS7016 :: Could not find a declaration file for module './module-resolver.js'. 'compiler/src/module-resolver.js' implicitly has an 'any' type.": 1,
     "compiler/src/types/ast.ts :: TS2304 :: Cannot find name 'ReactiveDebouncedDeclNode'.": 1
   }
 }
