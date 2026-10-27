@@ -20715,7 +20715,7 @@ function enumReadImportedTypeOf(file: string, name: string, depth: number, seen:
   if (!mods) return null;
   if (depth > ENUM_READ_DEPTH_LIMIT) return ENUM_READ_LIMIT;
   const mod = mods.get(file);
-  if (!mod) { if (process.env.SCRML_S471_PROBE) require("node:fs").appendFileSync(process.env.SCRML_S471_PROBE, `NOMOD ${file} :: ${name}\n`); return null; }
+  if (!mod) return null;
   for (const imp of mod.imports) {
     if (!imp || typeof imp.source !== "string") continue;
     const spec = ((Array.isArray(imp.specifiers) ? imp.specifiers : []) as Array<{ imported?: unknown; local?: unknown }>)
@@ -20761,9 +20761,7 @@ function enumReadImportUnresolved(from: string, src: string): boolean {
   const last = src.slice(src.lastIndexOf("/") + 1);
   const dot = last.lastIndexOf(".");
   const ext = dot > 0 ? last.slice(dot) : "";
-  const unresolved = ext === "" || ext === ".scrml";
-  if (unresolved && process.env.SCRML_S471_PROBE) require("node:fs").appendFileSync(process.env.SCRML_S471_PROBE, `MISS ${from} :: ${src}\n`);
-  return unresolved;
+  return ext === "" || ext === ".scrml";
 }
 
 /**
@@ -20779,7 +20777,7 @@ function enumReadExportedTypeOf(file: string, name: string, depth: number, seen:
   if (seen.has(key)) return null;
   const s2 = new Set(seen).add(key);
   const mod = mods.get(file);
-  if (!mod) { if (process.env.SCRML_S471_PROBE) require("node:fs").appendFileSync(process.env.SCRML_S471_PROBE, `NOMOD ${file} :: ${name}\n`); return null; }
+  if (!mod) return null;
   let reg = _enumReadModuleRegs.get(file);
   if (!reg) {
     reg = buildTypeRegistry(mod.typeDecls, [], { file, start: 0, end: 0, line: 1, col: 1 });
@@ -20846,7 +20844,7 @@ function enumReadFnOwner(file: string, name: string, depth: number, seen: Set<st
   if (seen.has(key)) return null;
   seen.add(key);
   const mod = mods.get(file);
-  if (!mod) { if (process.env.SCRML_S471_PROBE) require("node:fs").appendFileSync(process.env.SCRML_S471_PROBE, `NOMOD ${file} :: ${name}\n`); return null; }
+  if (!mod) return null;
   const tops = enumReadModuleTops(mod.nodes);
   if (tops.some((x) => x && x.kind === "function-decl" && x.name === name)) return [file, name];
   for (const imp of mod.imports) {
