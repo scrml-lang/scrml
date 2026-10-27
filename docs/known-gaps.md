@@ -30,9 +30,9 @@
 | Severity | Open (owed by impl#1, the TS compiler) | Carried (owed by the bootstrap; xfail on impl#1) |
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 262 | 5 |
-| MED | 702 | 8 |
-| LOW | 528 | 0 |
+| HIGH | 264 | 5 |
+| MED | 703 | 8 |
+| LOW | 529 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
 
@@ -397,8 +397,10 @@ Also: the §34 rows for E-ERROR-014 (written for the markup position) and E-TRY-
 <!-- @gap id=g-impl1-variant-read-residue-s470 sev=LOW status=open locus=compiler/src/codegen(emit-expr.ts / rewrite.ts / emit-library.ts) prov=review:S470-#1571(rounds 1–3) -->
 ### g-impl1-variant-read-residue-s470 — residue of #1571: a dynamic key `x[k]` with `k = "variant"` keeps the plain read; a declaration default is serialized without its quotes (`{ a = x["variant"] }` → 500 "variant is not defined", fails closed); `x is Math.PI` (a non-enum dotted name) is treated as `Enum.Variant`; library multi-line templates still corrupt `is` / `not` text (lib/ml2); compile-time `^{}` meta-eval reads `.variant` as `undefined` on a unit variant; a `variant` key in a parameter or `for` head is refused; the OAuth `.scrml` storage check now gives a worse error for a bare string (still fails closed) — `NEW S470; LOW; open`
 
-<!-- @gap id=g-impl1-null-in-expression-position-arm-not-refused-s470 sev=HIGH status=open locus=UNTRACED(expression-position `!{}` arm text — no `null` refusal on that path; `!= null` lowers to `!_scrml_structural_eq(…, null)`) prov=dispatch:s470-nested-handler-await(review follow-up);review:S470-#1576-round-4(FU1; ~/.cache/scrml/review/s470-li4/runs/h16/024, 025) -->
+<!-- @gap id=g-impl1-null-in-expression-position-arm-not-refused-s470 sev=HIGH status=resolved resolved-by=s471-null-in-arm-refused locus=UNTRACED(expression-position `!{}` arm text — no `null` refusal on that path; `!= null` lowers to `!_scrml_structural_eq(…, null)`) prov=dispatch:s470-nested-handler-await(review follow-up);review:S470-#1576-round-4(FU1; ~/.cache/scrml/review/s470-li4/runs/h16/024, 025) -->
 ### g-impl1-null-in-expression-position-arm-not-refused-s470 — (security) `null` is not refused inside an expression-position `!{}` arm: `return (local(p) !{ _ :> [p].find(isOk) != null }) ? "LOGGED IN" : "rejected"` compiles, the comparison is emitted as `!_scrml_structural_eq(await _scrml_findAsync([p], isOk), null)`, and both passwords log in (library and fullstack) — `NEW S470 (review of #1576); HIGH; open (pre-existing on base)`
+
+> **RESOLVED S471 (`s471-null-in-arm-refused`, LAND-PARTIAL).** `null` / `undefined` (E-SYNTAX-042) and `== not` / `!= not` (E-EQ-002) are refused in every `!{}` arm and in eight more text-held positions (when bodies, arrow/function bodies, templates, param defaults, for-of iterables, if-as-value, enum match arms, statement guards). h16/024 and h16/025 are refused. Residue filed below as deferred (S471 impl#1 policy): strict `!==`/`===` (HIGH), a `not`-holding variable vs JS `undefined` (HIGH), engine bodies (HIGH), `?{}` slots (MED).
 
 Executed by the #1576 round-4 review on head and base (h16 / b16 rows 024, 025: FAIL on both). The server call itself is awaited (#1576's fix holds). The failure comes from the `null` comparison. SPEC §42 says absence is `not`, and the bootstrap refuses `null` with E-PARSE-NO-NULL. Fix: refuse `null` in this position (§42).
 
@@ -433,6 +435,27 @@ The code comment says so: "fail closed: a `=` in a string counts too". Rare tail
 ### g-impl1-e-error-012-delete-tail-unclassified-s470 — a `delete` arm tail is not recognised by E-ERROR-012's yields / falls-through classifier, whose write rule knows only assignment and `++` / `--` — `NEW S470 (review of #1577); LOW; open`
 
 Listed as a follow-up on #1577. Not measured here. Decide whether a `delete` tail falls through (it is a write) and add it to `exprHasWrite`.
+
+<!-- @gap id=g-impl1-strict-eq-null-in-arm-logs-in-s471 sev=HIGH status=open defer=impl1-s471-policy locus=compiler/src/gauntlet-phase3-eq-checks.js(checkEqNode returns E-EQ-004 for ===/!== before the null/not operand test; sweepAbsenceTokens keeps only E-SYNTAX-042/E-EQ-002) prov=review:S471-s471-null-in-arm-refused(F1; ~/.cache/scrml/review/s471-null/repro/y01-tool.scrml,y03,x07) -->
+### g-impl1-strict-eq-null-in-arm-logs-in-s471 — (security) `!== null` / `!== not` (and `===`) inside a `!{}` arm or a template interpolation still compiles and logs in with the wrong password (library / tool / fullstack); outside an arm the same shape is refused — `NEW S471 (review); HIGH; open — DEFERRED (S471 impl#1 policy)`
+
+PA-reproduced on the frozen head 7096b9e6c (y01 compiles, emits `[p].find(isOk) !== null`). Same on base. Fix (one line): keep E-EQ-004 in the arm sweep, or test the null/`not` operand before the strict-operator early return.
+
+<!-- @gap id=g-impl1-not-variable-vs-js-undefined-logs-in-s471 sev=HIGH status=open defer=impl1-s471-policy locus=searched:compiler/src/codegen/emit-expr.ts(== / != lowering),runtime structural_eq(undefined vs null) prov=review:S471-s471-null-in-arm-refused(F2; repro x04,x05,x13,x17) -->
+### g-impl1-not-variable-vs-js-undefined-logs-in-s471 — (security) comparing a host result against a variable / call / parameter default that holds `not` (`const N = not; [p].find(isOk) != N`) logs in: `find` returns JS `undefined`, which is never normalised to `not` (§42.9), and the comparison is strict against `null` — arm or no arm — `NEW S471 (review); HIGH; open — DEFERRED (S471 impl#1 policy)`
+
+Library and tool log in; fullstack too for x05/x13/x17. Semantic (host-boundary normalisation), not a token check.
+
+<!-- @gap id=g-impl1-null-in-engine-body-not-refused-s471 sev=HIGH status=open defer=impl1-s471-policy locus=compiler/src/type-system.ts(checkEngineRawBodies — engine message arm / effect= / onTransition bodies are read only there) prov=dispatch:s471-null-in-arm-refused(audit) -->
+### g-impl1-null-in-engine-body-not-refused-s471 — (security) `null` in an engine message arm, `effect=` or `<onTransition>` body still compiles; emitted `!_scrml_structural_eq([pw].find(isOk), null) ? "LOGGED IN" : …` (the closed gap's shape; emission checked, login not run) — `NEW S471; HIGH; open — DEFERRED (S471 impl#1 policy)`
+
+Proposed fix: run `sweepAbsenceTokens` over those statements from `checkEngineRawBodies.walk`.
+
+<!-- @gap id=g-null-in-sql-interpolation-not-refused-s471 sev=MED status=open defer=impl1-s471-policy locus=searched:compiler/src/gauntlet-phase3-eq-checks.js,type-system.ts(SQL nodes opaque to every pre-codegen walker) prov=dispatch:s471-null-in-arm-refused(audit) -->
+### g-null-in-sql-interpolation-not-refused-s471 — `?{… ${null}}` compiles; `null` inside a `?{}` slot is never inspected — `NEW S471; MED; open — DEFERRED (S471 impl#1 policy)`
+
+<!-- @gap id=g-gcp3-equality-codes-skip-text-held-bodies-s471 sev=LOW status=open defer=impl1-s471-policy locus=compiler/src/gauntlet-phase3-eq-checks.js(sweepAbsenceTokens keeps only absence codes) prov=dispatch:s471-null-in-arm-refused(audit) -->
+### g-gcp3-equality-codes-skip-text-held-bodies-s471 — E-EQ-001 / 003 / W-EQ-001 are not checked in the newly reached text-held positions (no wrong-password shape found; the E-EQ-004 limb is the HIGH above) — `NEW S471; LOW; open — DEFERRED (S471 impl#1 policy)`
 
 <!-- @gap id=g-windows-imported-alias-chain-refusal-not-emitted-s470 sev=HIGH status=open locus=UNTRACED(cross-file enum / alias resolution added by #1563 — likely a path-key separator mismatch on Windows) prov=empirical:S470-CI-windows-job(main 5f4b01533 run 40350986599, PR #1581 run 40416129494) -->
 ### g-windows-imported-alias-chain-refusal-not-emitted-s470 — on Windows, the #1563 field-read refusal (E-TYPE-004 / E-TYPE-031) is not emitted when the enum type arrives through an imported alias, an alias of an alias, a re-export, or an imported function's return type. The same 10 `compiler/tests/unit/enum-value-member-read-s470.test.js` cases fail on main and on #1581: K-ALIAS2, IMP-STRUCT, EXPORT-STAR, both DEPTH cases, I1, I2, I3, I-cross and STAR-PREC. `codesOf` returns `[]` where the test expects `E-TYPE-004` — `NEW S470; HIGH (SECURITY: fail-open on Windows builds); open`
