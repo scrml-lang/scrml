@@ -1,0 +1,16 @@
+{
+  "id": "acceptance-display-several-literals",
+  "description": "Three standalone display-text literals in one state-child body (newline- and space-separated, one interpolating; no `;` — §7.2.2 rule 2) render in order: `n is 5 and done`.",
+  "language-version": "1.0",
+  "spec": "§4.18.3 · §7.2.2 rule 2",
+  "rationale": "§4.18.3 (S444): a `\"…\"` is a display-text literal \"only when it stands alone as a body statement — the whole statement is the one `\"…\"` (a body may hold several such statements; a `:`-shorthand body is one)\".",
+  "expect": {
+    "codes": [],
+    "domAnchored": [
+      {
+        "selector": "#s",
+        "text": "n is 5 and done"
+      }
+    ]
+  }
+}

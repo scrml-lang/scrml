@@ -4888,6 +4888,12 @@ ${
     // an interpolation. A run that is not ONE valid expression is
     // E-UNQUOTED-DISPLAY-TEXT (§4.18.7), suggesting the quoted literal.
     fn parseCodeBody(mp: MP, tag: string) -> RNodes {
+        return parseCodeBodyX(mp, tag, true)
+    }
+
+    // `recover`: whether the runaway-literal reading may be taken (off inside
+    // runawayDisplayAt's own trials, which read the rest of the body as-is).
+    fn parseCodeBodyX(mp: MP, tag: string, recover: boolean) -> RNodes {
         let m: MP = mp
         let out: ANode[] = []
         let going = true
@@ -4922,33 +4928,147 @@ ${
                 const ck: RCook = cookRecovered(mAt(m, stop), open + 1, stop)
                 out = out.concat([textNode(ck.mp, open + 1, ck.text)])
                 m = mBump(ck.mp)
+            } else if (recover && runawayDisplayAt(m, tag)) {
+                // s471 — the same recovery for a RUNAWAY literal (runawayDisplayAt)
+                const stop2: int = firstBodyCloser(m.src, m.pos + 1, tag)
+                const open2: int = m.pos
+                m = mDiag(m, "E-CTX-001", "unterminated display-text literal: the `\"` opened here has no closing `\"` before the `<" + tag + ">` body's closer (§4.18.3, §4.18.7) — the next `\"` is past the closer, and reading up to it does not parse; read up to the closer", open2, open2 + 1)
+                const ck2: RCook = cookRecovered(mAt(m, stop2), open2 + 1, stop2)
+                out = out.concat([textNode(ck2.mp, open2 + 1, ck2.text)])
+                m = mBump(ck2.mp)
             } else {
-                const before: int = m.pos
-                const tp0: TP = codeRegionTP(m, LexStop.CodeBody)
-                const tp: TP = { toks: tp0.toks, i: tp0.i, nid: tp0.nid, diags: m.diags, file: tp0.file }
-                const runEnd: int = lastEnd(tp)
-                if (isStandaloneDisplay(tp)) m = displayEscapeDiags(m, tp.toks)
-                const r: RExpr = parseAssign({ toks: tp.toks, i: tp.i, nid: tp.nid, diags: m.diags, file: tp.file })
-                if (msgArmAt(tp)) {
-                    // s469: a §51.0.S.2.3 message-arm list (`.Go :> .Loading, …`,
-                    // newline- or comma-separated) — refused by name, never read
-                    // as display text
-                    m = mDiag(mAt(m, runEnd), "E-BOOTSTRAP-UNSUPPORTED", "engine message arms (`.Msg :> …` in a `<" + tag + ">` state-child body, §51.0.S.2.3) are not in the bootstrap", before, runEnd)
-                } else if (atEnd(r.tp) && diagsBesideLint(r.tp.diags) == diagsBesideLint(m.diags)) {
-                    const back: MP = backToMarkup(m, r.tp)
-                    // §4.18.4: a `${`-carrying display-text literal renders as its segments
-                    const dn: RNodes = displayNodes(back, r.e, before, tp)
-                    out = out.concat(dn.nodes)
-                    m = dn.mp
-                } else {
-                    const text: string = m.src.substring(before, runEnd).trim()
-                    m = mDiag(mAt(m, runEnd), "E-UNQUOTED-DISPLAY-TEXT", "display text in a `<" + tag + ">` state-child body must be a quoted display-text literal — did you mean `\"" + text + "\"`? (a code-default body, §4.18.1 / §4.18.7)", before, runEnd)
-                }
-                if (m.pos == before) m = mAdv(m, 1)
+                const cr: RNodes = parseCodeRun(m, tag)
+                out = out.concat(cr.nodes)
+                m = cr.mp
             }
         }
         if (mLooking(m, "</")) m = parseCloser(m, tag)
         return { nodes: out, mp: m }
+    }
+
+    // One code run of a code-default body, at a position that is not a tag,
+    // an interpolation, a keyword tag or an unterminated literal: a display
+    // item (s471), one expression, or E-UNQUOTED-DISPLAY-TEXT.
+    fn parseCodeRun(mp: MP, tag: string) -> RNodes {
+        let m: MP = mp
+        let out: ANode[] = []
+        if (displayItemAt(regionTP(m, LexStop.CodeBody))) {
+            const di: RNodes = parseDisplayItem(m, regionTP(m, LexStop.CodeBody))
+            return { nodes: di.nodes, mp: di.mp }
+        }
+        const before: int = m.pos
+        const tp0: TP = codeRegionTP(m, LexStop.CodeBody)
+        const tp: TP = { toks: tp0.toks, i: tp0.i, nid: tp0.nid, diags: m.diags, file: tp0.file }
+        const runEnd: int = lastEnd(tp)
+        if (isStandaloneDisplay(tp)) m = displayEscapeDiags(m, tp.toks)
+        const r: RExpr = parseAssign({ toks: tp.toks, i: tp.i, nid: tp.nid, diags: m.diags, file: tp.file })
+        if (msgArmAt(tp)) {
+            // s469: a §51.0.S.2.3 message-arm list (`.Go :> .Loading, …`,
+            // newline- or comma-separated) — refused by name, never read
+            // as display text
+            m = mDiag(mAt(m, runEnd), "E-BOOTSTRAP-UNSUPPORTED", "engine message arms (`.Msg :> …` in a `<" + tag + ">` state-child body, §51.0.S.2.3) are not in the bootstrap", before, runEnd)
+        } else if (atEnd(r.tp) && diagsBesideLint(r.tp.diags) == diagsBesideLint(m.diags)) {
+            const back: MP = backToMarkup(m, r.tp)
+            // §4.18.4: a `${`-carrying display-text literal renders as its segments
+            const dn: RNodes = displayNodes(back, r.e, before, tp)
+            out = out.concat(dn.nodes)
+            m = dn.mp
+        } else {
+            const text: string = m.src.substring(before, runEnd).trim()
+            m = mDiag(mAt(m, runEnd), "E-UNQUOTED-DISPLAY-TEXT", "display text in a `<" + tag + ">` state-child body must be a quoted display-text literal — did you mean `\"" + text + "\"`? (a code-default body, §4.18.1 / §4.18.7)", before, runEnd)
+        }
+        if (m.pos == before) m = mAdv(m, 1)
+        return { nodes: out, mp: m }
+    }
+
+    // s471 — a RUNAWAY display-text literal: its `"` is closed only by a `"`
+    // PAST the body's closer (a one-character typo, `"C:\"` for `"C:\\"`, with a
+    // later `"` anywhere in the file). SPEC §4.18.3: "A display-text literal
+    // that reaches end-of-file (or the body's closer) before its closing `"` is
+    // an unterminated literal — `E-CTX-001` against the opening `"`, recovered
+    // per §4.18.7"; §4.18.7: "The block splitter recovers by treating the
+    // captured text from the opening `"` through the body closer (or EOF) as the
+    // literal's content and continuing." A closed literal's content is still
+    // content (s444 r3, §4.18.1b pin 3: `"use </> here"` is a legal literal),
+    // so this reading is taken ONLY when it is STRICTLY cleaner than the closed
+    // one (s471 review F1). Two trials, both of the rest of this body:
+    //   closed — the literal closed by the later `"`, read on as-is;
+    //   cut    — E-CTX-001, the literal cut at the first body closer, then the
+    //            closer.
+    // The cut reading is taken only when (a) the closed reading never finds
+    // this body's closer (E-PARSE-UNCLOSED — the literal swallowed it), and
+    // (b) it has strictly more hard errors than the cut reading. An
+    // E-BOOTSTRAP-UNSUPPORTED is not counted: a construct the bootstrap refuses
+    // after a legal closed literal (`"x </> ${@y}" + "q"`) is an honest
+    // refusal, never a sign of a runaway literal. It never changes what a
+    // clean body means — it moves the report from the cascade
+    // (E-UNQUOTED-DISPLAY-TEXT to end of file, then E-PARSE-UNCLOSED for every
+    // open element) to the opening `"`, and parsing resumes at the closer.
+    fn runawayDisplayAt(mp: MP, tag: string) -> boolean {
+        if (chAt(mp, 0) != "\"") return false
+        const close: int = displayCloseAt(mp.src, mp.pos)
+        if (close < 0) return false
+        const stop: int = firstBodyCloser(mp.src, mp.pos + 1, tag)
+        if (stop >= close) return false
+        const closed: RNodes = parseCodeBodyX(mp, tag, false)
+        if (codeCount(closed.mp.diags, "E-PARSE-UNCLOSED") == codeCount(mp.diags, "E-PARSE-UNCLOSED")) return false
+        const closedHard: int = runawayTrigger(closed.mp.diags) - runawayTrigger(mp.diags)
+        const ck: RCook = cookRecovered(mAt(mp, stop), mp.pos + 1, stop)
+        const cut: RNodes = parseCodeBodyX(ck.mp, tag, false)
+        const cutHard: int = 1 + runawayTrigger(cut.mp.diags) - runawayTrigger(mp.diags)
+        return closedHard > cutHard
+    }
+
+    // The hard errors that can show a runaway literal: hardErrors less
+    // E-BOOTSTRAP-UNSUPPORTED (an honest refusal, s471 review F1).
+    fn runawayTrigger(ds: Diag[]) -> int {
+        let n: int = 0
+        for (const d of ds) {
+            if (d.severity == Severity.Error && !softError(d.code) && d.code != "E-BOOTSTRAP-UNSUPPORTED") n = n + 1
+        }
+        return n
+    }
+
+    fn codeCount(ds: Diag[], code: string) -> int {
+        let n: int = 0
+        for (const d of ds) {
+            if (d.code == code) n = n + 1
+        }
+        return n
+    }
+
+    // s471 — SEVERAL display-text literals in one code-default body. SPEC
+    // §4.18.3 (S444): a `"…"` is a display-text literal "only when it stands
+    // alone as a body statement — the whole statement is the one `"…"` (a body
+    // may hold several such statements; a `:`-shorthand body is one)"; §7.2.2
+    // rule 2 lists "a standalone display-text literal" under "What takes no
+    // `;`" ("an item delimited by its own closer"), and rule 4: a newline is
+    // whitespace. So a run whose display-mode lex OPENS with a `"` literal
+    // followed by ANOTHER `"` literal holds that literal as one item:
+    // `"a"⏎"b"`, `"a" "b"`. The item is read alone (the one-literal path below,
+    // so escapes, `${…}` segments and the W-lint take-back are that path's),
+    // and the loop reads what follows. Anything else after the literal is not
+    // an item and the run stays one expression — `"a" + @b`, `"x".length`, and
+    // `"a";`: no SPEC sentence licenses a `;` after a closer-delimited item in
+    // a code-default body (s471 review F2, PA: refuse — reversible), so it
+    // fails closed (E-UNQUOTED-DISPLAY-TEXT), as before s471.
+    fn displayItemAt(d: TP) -> boolean {
+        if (d.toks.length < 3) return false
+        const t0: PTok = d.toks[0]
+        if (t0.cls != TC.Str || t0.text.substring(0, 1) != "\"") return false
+        const t1: PTok = d.toks[1]
+        return t1.cls == TC.Str && t1.text.substring(0, 1) == "\""
+    }
+
+    // At a display item (displayItemAt): its literal as a one-literal region,
+    // ending where the next literal starts.
+    fn parseDisplayItem(mp: MP, d: TP) -> RNodes {
+        const t0: PTok = d.toks[0]
+        const one: TP = { toks: [t0, endTokAt(d.toks[1])], i: 0, nid: d.nid, diags: mp.diags, file: d.file }
+        const m: MP = displayEscapeDiags(mp, one.toks)
+        const r: RExpr = parseAssign({ toks: one.toks, i: 0, nid: one.nid, diags: m.diags, file: one.file })
+        const back: MP = backToMarkup(m, r.tp)
+        return displayNodes(back, r.e, t0.start, one)
     }
 
     // Does a code run start with an arm head (`.V :>`, `| .V(m) :>`, `_ :>`)?
@@ -5551,6 +5671,14 @@ ${
                 out = out.concat([ri.n])
                 m = ri.mp
                 textStart = m.pos
+            } else if (tag == "db" && dbDeclAt(m)) {
+                if (text != "") {
+                    out = out.concat([textNode(m, textStart, text)])
+                    m = mBump(m)
+                    text = ""
+                }
+                m = refuseDbDecl(m)
+                textStart = m.pos
             } else if (chAt(m, 0) == "<" && opensTag(chAt(m, 1))) {
                 if (text != "") {
                     out = out.concat([textNode(m, textStart, text)])
@@ -5650,11 +5778,56 @@ ${
         return isDeclOpener(ro.o)
     }
 
-    // ⚑ O61 (§66.2.5, not ruled): whether a `<page>` / `<theme>` body is an
-    // item position. Both elements are refused whole (E-BOOTSTRAP-UNSUPPORTED —
-    // `<theme>` here, `<page>` in analyze's structural-tag check), so their own
-    // body decides nothing and reports no keyword: one fail-closed code for both.
-    fn o61Body(tag: string) -> boolean { return tag == "page" || tag == "theme" }
+    // O61 (§66.2.5, RULED S469 — "Allowed, scoped to the block (Rec)"; "Same
+    // rule as channel/db (Rec)"): a `<db>`, `<channel>`, `<page>` or `<theme>`
+    // body is an ITEM position, so `let <x/>` / `export <x/>` there is never
+    // E-DECL-KEYWORD-NOT-ITEM. `<channel>`, `<page>` and `<theme>` are refused
+    // whole (E-BOOTSTRAP-UNSUPPORTED — `<theme>` here, `<channel>` / `<page>` in
+    // analyze's structural-tag check), so their own body decides nothing and
+    // reports no keyword: one fail-closed code each. A `<db>` is not refused
+    // whole: its declarations are refused one by one (dbDeclAt / refuseDbDecl).
+    fn o61Body(tag: string) -> boolean { return tag == "page" || tag == "theme" || tag == "channel" || tag == "db" }
+
+    // s471 — a declaration standing in a `<db>` body: `let` / `export` /
+    // `export let` before a declaration opener, or a declaration opener alone
+    // (a locked `<x:T=v/>`; §66.2.5 S469: "`let <x/>` / `export <x/>` (and a
+    // locked `<x/>` declaration) MAY stand directly in a `<db>` body or a
+    // `<channel>` body").
+    fn dbDeclAt(mp: MP) -> boolean {
+        if (keywordBeforeDeclAt(mp)) return true
+        if (chAt(mp, 0) != "<" || !opensTag(chAt(mp, 1))) return false
+        if (scriptStyleAt(mp) != "") return false
+        const ro: ROpener = parseOpener(mp)
+        return isDeclOpener(ro.o)
+    }
+
+    // The declaration is read whole (keywords, opener, body, `renders`) — as
+    // the item it is, never as text — and REFUSED by name: §66.2.5 / §8.1.1
+    // make it block-owned SERVER-SIDE state that the rest of the program reads
+    // by `@`, which the bootstrap has no model for. Reading it as a program-level
+    // (client) cell instead would move server-side state to the client, so it is
+    // not lowered at all (fail closed); no node is kept, so analyze does not
+    // report it a second time as "a declaration inside markup".
+    fn refuseDbDecl(mp: MP) -> MP {
+        const start: int = mp.pos
+        let m: MP = mp
+        let exported = false
+        let isLet = false
+        const w: RWord = readName(m)
+        if (w.w == "export") {
+            exported = true
+            m = skipSpace(w.mp)
+        }
+        const wl: RWord = readName(m)
+        if (wl.w == "let") {
+            isLet = true
+            m = skipSpace(wl.mp)
+        }
+        const ro: ROpener = parseOpener(m)
+        const od: Opener = isLet ? withLet(ro.o) : ro.o
+        const rd: RDecl = finishDecl(od, ro.mp, exported)
+        return mDiag(rd.mp, "E-BOOTSTRAP-UNSUPPORTED", "a declaration in a `<db>` body (§66.2.5 O61, §8.1.1 — owned by the block, its state server-side, readable program-wide by `@`) is not in the bootstrap", start, rd.mp.pos)
+    }
 
     // Report the keyword (its span) and resume at the tag, which then parses
     // as the markup node it is.
