@@ -48,6 +48,8 @@ Every code PR got an S239 adversarial review on a frozen ref. Review markers are
 
 **Gap rollup at wrap:** HIGH 262 · MED 700 · LOW 535 (boot: 262/702/528).
 
+**Suite at wrap (pre-commit, 4 shards):** 46,684 pass · 0 fail · 125 skip · 13 todo.
+
 ## 2. dpa-075, browser host APIs: fully ruled
 Deep-dive: `scrml-support/docs/deep-dives/browser-host-apis-dpa-075-2026-10-27.md`. Measurement: `…/dpa-075-evidence/f3-measurement-2026-10-27.md`.
 - 56.4% of 2,070 host crossings consume a typed value.

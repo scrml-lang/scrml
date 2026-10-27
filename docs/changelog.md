@@ -9,7 +9,7 @@ A rolling log of what just landed and what's actively underway in the compiler. 
 - **impl#1 (in flight before the policy):** null/undefined and `==` refused in `!{}` arms (#1587, partial). The imported-alias enum-read refusal fires on Windows (#1590, partial).
 - **SPEC:** the eight S470 owner rulings, including `Promise.resolve` and the Promise constructors refused (#1585). `lift` in a defer body is E-DEFER-CONTROL-FLOW, and an HTML comment does not break an if-chain (#1592). The dpa-075 F1 floor: `ref=`, a host-owned subtree, a mount handle, Appendix D globals (#1596).
 - **dpa-075 (browser host APIs):** deep-dive and measurement done, F0–F7 all ruled. The stdlib host bridge uses built-in host intrinsics. A typed host-binding declaration element is accepted but still undesigned. dpa-076 (the stdlib platform layer) and dpa-077 (CSP capabilities) are banked.
-- **Gap rollup:** HIGH 262 · MED 700 · LOW 535.
+- **Gap rollup:** HIGH 262 · MED 700 · LOW 535. Suite at wrap: 46,684 pass, 0 fail, 125 skip.
 - **Lesson:** leaked slice-test dirs filled the RAM-backed /tmp and the Claude temp quota twice, and tool output was lost silently. Long outputs now go to `~/.cache/`, and the leak is filed as a MED gap.
 
 ## S470 — 2026-10-24/26 (bryan · theRog) — 26 PRs: impl#1 now awaits or refuses every waiting value in render, value, action and handler-arm positions, and emits E-ERROR-012
