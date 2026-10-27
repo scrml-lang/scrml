@@ -1,0 +1,15 @@
+{
+  "id": "acceptance-imports-neg-missing-file",
+  "description": "E-IMPORT-006: the import's target file does not exist.",
+  "language-version": "1.0",
+  "spec": "§21.3, §21.6",
+  "rationale": "s471: an import that resolves to no file is refused at the import, never dropped.",
+  "expect": {
+    "codes": [
+      "E-IMPORT-006"
+    ],
+    "codeCounts": {
+      "E-IMPORT-006": 1
+    }
+  }
+}

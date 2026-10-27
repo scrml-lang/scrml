@@ -1,0 +1,5 @@
+// a name the imported module does not export, imported inside `<program>` (before s471: compiled clean).
+<program>
+    ${ import { nothere } from "./lib.scrml"; }
+    <p>hi</p>
+</program>

@@ -1,0 +1,15 @@
+{
+  "id": "acceptance-imports-neg-bare-specifier",
+  "description": "E-IMPORT-005: a bare npm-style import specifier.",
+  "language-version": "1.0",
+  "spec": "§41.4",
+  "rationale": "s471: a source must begin with `./`, `../`, `scrml:`, `vendor:`, `bun:` or `node:`.",
+  "expect": {
+    "codes": [
+      "E-IMPORT-005"
+    ],
+    "codeCounts": {
+      "E-IMPORT-005": 1
+    }
+  }
+}

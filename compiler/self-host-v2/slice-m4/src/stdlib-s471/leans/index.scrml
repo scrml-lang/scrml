@@ -1,0 +1,9 @@
+// s471 fixture stdlib — a module that compiles on its own but imports one that
+// does not (`scrml:broken`): it is withdrawn too (its import there is refused).
+${
+    import { loud } from "scrml:broken";
+
+    export fn lean(s: string) -> string {
+        return s.trim();
+    }
+}

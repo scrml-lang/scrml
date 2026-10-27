@@ -1441,7 +1441,7 @@ Notes:
 
 `signJwt` requires three arguments: `(payload, secret, expiresIn)`. Calling it with one will runtime-crash (the secret is the HMAC key).
 
-<!-- gate: spec-ahead [E-BOOTSTRAP-UNSUPPORTED, E-SCOPE-001] — the bootstrap has no auth=, <db protect=> / tables= or <schema>, cannot follow scrml:auth / scrml:process imports, and cannot type a client call's untyped ?{} rows -->
+<!-- gate: spec-ahead [E-BOOTSTRAP-UNSUPPORTED] — the bootstrap has no auth=, <db protect=> / tables= or <schema>, cannot import scrml:auth / scrml:process (their sources do not compile on the bootstrap yet; each import is refused by name), and cannot type a client call's untyped ?{} rows -->
 ```scrml
 <program db="users.db" auth="none">
 

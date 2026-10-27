@@ -1,0 +1,5 @@
+// a relative `.scrml` import whose file is not in the build.
+<program>
+    ${ import { helper } from "./missing.scrml"; }
+    <p>hi</p>
+</program>

@@ -264,7 +264,7 @@ Not directly; scrml compiles to standalone HTML/JS/CSS, not to framework-embedda
 
 If you're calling a local `.js` file, write a struct type that represents the surface you consume and annotate the binding:
 
-<!-- gate: spec-ahead [E-SCOPE-001] — the bootstrap parses import but does not bind imported names yet -->
+<!-- gate: spec-ahead [E-BOOTSTRAP-UNSUPPORTED] — the bootstrap imports `.scrml` and `scrml:` modules only; a `.js` module import is refused by name -->
 ```scrml
 <program>
   import { parseDate } from './date-helper.js';

@@ -1,0 +1,8 @@
+// s471 fixture stdlib — a module that imports another stdlib module (`scrml:greet`).
+${
+    import { greet } from "scrml:greet";
+
+    export fn welcome(name: string) -> string {
+        return `${greet(name)} Welcome.`;
+    }
+}

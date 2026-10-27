@@ -1,0 +1,7 @@
+// s471 fixture stdlib — a module the bootstrap does NOT compile (the pre-§66
+// dialect: no `;`, an untyped parameter), so it is withdrawn and its import refused.
+${
+    export function loud(s) {
+        return s.toUpperCase()
+    }
+}
