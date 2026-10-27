@@ -8569,58 +8569,89 @@ ${
     // `?` (E-DEFER-CONTROL-FLOW — "A deferred body SHALL NOT contain a
     // `return`, a `fail`, a `?` propagation"), no `defer` (E-DEFER-NESTED —
     // "A deferred body SHALL NOT contain a `defer` statement"), the arms of a
-    // handling form included (s451 Ue). The bootstrap parses no `yield` /
-    // `break` / `continue` and no nested function body (a lambda body is an
-    // expression), so a `return` here always leaves the deferred body.
+    // handling form included (s451 Ue). The bootstrap parses no `yield` and no
+    // nested function body (a lambda body is an expression), so a `return`
+    // here always leaves the deferred body.
+    // s471 — `break` / `continue`: "A `break`/`continue` that targets a loop
+    // INSIDE the deferred body is permitted" (§19.16.3 rule 1). `loops` holds
+    // the labels of the loops inside the deferred body that enclose the
+    // statement ("" for an unlabelled one); a jump is legal iff it names one
+    // of them (an unlabelled jump: the innermost, so any). check.scrml C19
+    // re-checks the Core (a Defer body is a jump boundary).
     fn deferBodyRules(file: string, b: ABlock, st0: AS) -> AS {
+        return deferBodyRulesIn(file, b, [], st0)
+    }
+
+    fn deferBodyRulesIn(file: string, b: ABlock, loops: string[], st0: AS) -> AS {
         let st: AS = st0
-        for (const s of b.stmts) { st = deferBodyRule(file, s, st) }
+        for (const s of b.stmts) { st = deferBodyRule(file, s, loops, st) }
         return st
     }
 
-    fn deferBodyRule(file: string, s: AStmt, st: AS) -> AS {
+    fn deferJumpStays(label: string, loops: string[]) -> boolean {
+        if (label == "") return loops.length > 0
+        return loops.indexOf(label) >= 0
+    }
+
+    fn deferBodyRule(file: string, s: AStmt, loops: string[], st: AS) -> AS {
         const k: AStmtK = s.k
         return match k {
             .Return(e: e) :> addDiag(st, file, s.span, "E-DEFER-CONTROL-FLOW", "a deferred statement cannot contain a `return` — it runs while its block is already exiting, after the function's return value is computed (§19.16.3 rule 1)")
             .Defer(body: d) :> addDiag(st, file, s.span, "E-DEFER-NESTED", "a deferred statement cannot contain a `defer` — there is no block to attach it to that is not already exiting (§19.16.3 rule 2)")
-            .If(cond: c, thenB: t, elseB: el) :> deferBodyElse(file, el, deferBodyRules(file, t, st))
-            .Given(name: n, body: d) :> deferBodyRules(file, d, st)
-            .For(f: lf) :> deferBodyRules(file, lf.body, st)
-            .Break(label: x) :> addDiag(st, file, s.span, "E-DEFER-CONTROL-FLOW", "a deferred statement cannot contain a `break` that leaves it — it runs while its block is already exiting (§19.16.3 rule 1)")
-            .Continue(label: x) :> addDiag(st, file, s.span, "E-DEFER-CONTROL-FLOW", "a deferred statement cannot contain a `continue` that leaves it — it runs while its block is already exiting (§19.16.3 rule 1)")
-            .Lift(what: w) :> deferLiftRules(file, liftExprs(w), st)
-            .Eval(e: e) :> deferExprRules(file, e, st)
-            .Local(name: n, init: i) :> deferExprRules(file, i, st)
+            .If(cond: c, thenB: t, elseB: el) :> deferBodyElse(file, el, loops, deferBodyRulesIn(file, t, loops, st))
+            .Given(name: n, body: d) :> deferBodyRulesIn(file, d, loops, st)
+            .For(f: lf) :> deferForRules(file, lf, loops, st)
+            .Break(label: l) :> deferJump(file, s, l, "break", loops, st)
+            .Continue(label: l) :> deferJump(file, s, l, "continue", loops, st)
+            // s471 review F2 — RULED (user-voice S471, "your recs"): §19.16.3 rule 1 gains
+            // `lift` — a deferred body SHALL NOT append to an enclosing value-bound loop
+            .Lift(what: w) :> deferLiftRules(file, liftExprs(w), loops, addDiag(st, file, s.span, "E-DEFER-CONTROL-FLOW", "a deferred statement cannot contain a `lift` (nor a `return`, a `fail`, a `?` propagation or a `break`/`continue` that leaves it) — it runs while its block is already exiting (§19.16.3 rule 1)"))
+            .Eval(e: e) :> deferExprRules(file, e, loops, st)
+            .Local(name: n, init: i) :> deferExprRules(file, i, loops, st)
             .EffectStmt(w: w) :> st
             .Fail(f: x) :> addDiag(st, file, s.span, "E-DEFER-CONTROL-FLOW", "a deferred statement cannot contain a `fail` — it runs while its block is already exiting; a failure here would replace the function's real result (§19.16.3 rule 1)")
         }
+    }
+
+    // s471 review F3: a loop in a deferred body — its head runs inside the deferred
+    // body too (its init block and head expressions are checked as the body is;
+    // a jump there names no loop of its own — the head is outside the loop).
+    fn deferForRules(file: string, lf: AFor, loops: string[], st0: AS) -> AS {
+        let st: AS = deferBodyRulesIn(file, forInitBlock(lf), loops, st0)
+        for (const e of forHeadExprs(lf)) { st = deferExprRules(file, e, loops, st) }
+        return deferBodyRulesIn(file, lf.body, loops.concat([lf.label]), st)
+    }
+
+    fn deferJump(file: string, s: AStmt, label: string, kw: string, loops: string[], st: AS) -> AS {
+        if (deferJumpStays(label, loops)) return st
+        return addDiag(st, file, s.span, "E-DEFER-CONTROL-FLOW", "a deferred statement cannot contain a `" + kw + "` that leaves it — it runs while its block is already exiting; a `" + kw + "` may target only a loop inside the deferred statement (§19.16.3 rule 1)")
     }
 
     // s451 (Ue) — rule 1 inside a deferred statement's expressions: no `?`
     // (§19.16.3 rule 1: "a `?` propagation"), and the arms of a handling form
     // obey the deferred-body rules ("The rule reaches EVERY statement position
     // inside the deferred body, including … the arms of a `!{}` handler").
-    fn deferLiftRules(file: string, es: AExpr[], st0: AS) -> AS {
+    fn deferLiftRules(file: string, es: AExpr[], loops: string[], st0: AS) -> AS {
         let st: AS = st0
-        for (const e of es) { st = deferExprRules(file, e, st) }
+        for (const e of es) { st = deferExprRules(file, e, loops, st) }
         return st
     }
 
-    fn deferExprRules(file: string, e: AExpr, st0: AS) -> AS {
+    fn deferExprRules(file: string, e: AExpr, loops: string[], st0: AS) -> AS {
         let st: AS = st0
         const h: AHandled | not = handledOf(e.k)
         if (h is given) {
             const how: AHow = h.how
             if (how == AHow.Propagate) st = addDiag(st, file, e.span, "E-DEFER-CONTROL-FLOW", "a deferred statement cannot contain a `?` propagation — it runs while its block is already exiting (§19.16.3 rule 1); handle the failure in place with `!{ … | _ :> … }`")
         }
-        for (const x of exprKids(e)) { st = deferExprRules(file, x, st) }
-        for (const b of exprBlocks(e)) { st = deferBodyRules(file, b, st) }
+        for (const x of exprKids(e)) { st = deferExprRules(file, x, loops, st) }
+        for (const b of exprBlocks(e)) { st = deferBodyRulesIn(file, b, loops, st) }
         return st
     }
 
-    fn deferBodyElse(file: string, el: ABlock | not, st: AS) -> AS {
+    fn deferBodyElse(file: string, el: ABlock | not, loops: string[], st: AS) -> AS {
         if (el is not) return st
-        return deferBodyRules(file, el, st)
+        return deferBodyRulesIn(file, el, loops, st)
     }
 
     // E-DEFER-LATER-SHADOW (§19.16.2): "If the deferred body reads a name that
@@ -11346,8 +11377,11 @@ ${
     }
 
     fn loopFor(file: string, f: AFor, stack: LoopFrame[], inDefer: boolean, st0: AS) -> AS {
-        let st: AS = st0
-        if (inDefer) st = addDiag(st, file, f.span, "E-BOOTSTRAP-UNSUPPORTED", "a loop inside a deferred body is not in the bootstrap yet — move the loop into a function and call it from the `defer`")
+        let st: AS = boundLoopDefers(file, f, st0)
+        // s471: a statement loop inside a deferred body is built (its jumps stay
+        // inside it — §19.16.3 rule 1, deferBodyRule); a loop BOUND AS A VALUE
+        // there is not yet (Core C16 has no Gather in a Defer body)
+        if (inDefer && f.bound is given) st = addDiag(st, file, f.span, "E-BOOTSTRAP-UNSUPPORTED", "a loop bound as a value inside a deferred body is not in the bootstrap yet — move the loop into a function and call it from the `defer`")
         // the head runs around the body: a `break` in it names an enclosing loop
         st = loopBlock(file, forInitBlock(f), stack, inDefer, st)
         for (const x of forHeadExprs(f)) { st = loopBlocks(file, allExprBlocks(x), stack, inDefer, st) }
@@ -11377,7 +11411,7 @@ ${
             if (stack[i].wall) crossed = true
             i = i - 1
         }
-        if (inDefer && stack.length == 0) return st
+        if (inDefer) return st          // s471: a label naming no loop inside the deferred body leaves it — E-DEFER-CONTROL-FLOW (deferJump)
         let lcode: string = "E-LOOP-004"
         if (isBreak) lcode = "E-LOOP-003"
         return addDiag(st, file, s.span, lcode, "`" + kw + " " + label + "` names no enclosing loop — " + labelsHere(stack) + "; a label names a `for` that encloses the `" + kw + "` in the same body (§49.3.3, §49.4.2)")
@@ -11392,10 +11426,49 @@ ${
         return "the labels of the loops enclosing it are " + names.join(", ")
     }
 
+    // s471 — a `defer` in a loop body is a defer site (§19.16.2: "Registration.
+    // … the innermost statement list that contains the `defer`: … a loop body
+    // (once per iteration)"). The body is its own Core Block, which the printer
+    // wraps in its own try/finally, so each iteration runs its deferred bodies
+    // at that iteration's exit — falling off the end, `continue`, `break`,
+    // `return`, `fail` (§19.16.6: "A loop body is its own block, so each
+    // iteration has its own stack instance"). Was refused (E-BOOTSTRAP-UNSUPPORTED)
+    // before s471. A `defer` DIRECTLY in the body of a loop bound as a value is
+    // E-DEFER-UNSUPPORTED-SITE (loopFor — §19.16.2).
     fn loopDefer(file: string, s: AStmt, d: ABlock, stack: LoopFrame[], st0: AS) -> AS {
+        return loopBlock(file, d, [], true, st0)
+    }
+
+    // s471 — §19.16.2 E-DEFER-UNSUPPORTED-SITE: "The same code covers a `defer`
+    // written directly in an arm of a `match` / `if` / `for` that is used for its
+    // VALUE". A bound loop's body (`const xs = for (…) { … lift e; };`) is such
+    // an arm; a `defer` in a statement block nested in it (an `if` branch) is
+    // not — that block is a defer site of its own.
+    fn boundLoopDefers(file: string, f: AFor, st0: AS) -> AS {
         let st: AS = st0
-        if (stack.length > 0) st = addDiag(st, file, s.span, "E-BOOTSTRAP-UNSUPPORTED", "a `defer` inside a loop body is not in the bootstrap yet — move the cleanup out of the loop, or into a function the loop calls")
-        return loopBlock(file, d, [], true, st)
+        if (f.bound is not) return st
+        for (const s of f.body.stmts) {
+            if (isDeferStmt(s)) st = addDiag(st, file, s.span, "E-DEFER-UNSUPPORTED-SITE", "a `defer` directly in the body of a `for` bound as a value — the body is an arm whose result is used as a value (§19.16.2). Put the `defer` in a block nested in the body (an `if` branch), move it to the enclosing block, or use the loop as a statement")
+        }
+        return st
+    }
+
+    fn isDeferStmt(s: AStmt) -> boolean {
+        const k: AStmtK = s.k
+        return match k {
+            .Defer(body: d) :> true
+            .Local(name: n) :> false
+            .Return(e: x) :> false
+            .If(cond: c) :> false
+            .Given(name: n) :> false
+            .For(f: x) :> false
+            .Break(label: x) :> false
+            .Continue(label: x) :> false
+            .EffectStmt(w: w) :> false
+            .Eval(e: x) :> false
+            .Fail(f: x) :> false
+            .Lift(what: x) :> false
+        }
     }
 
     fn loopSymIn(st: AS, nid: int) -> Sym | not {
@@ -21681,10 +21754,13 @@ ${
     }
 
     // A deferred body: no suspension point may stand in it (check.scrml C16).
+    // s471 review F1: at EVERY depth — an `if` / `given` branch, a loop's head and
+    // body inside the deferred body (loopPlanBlocks) — with the same refusal.
     fn planDeferBody(cx: PCx, b: ABlock, ps0: PS) -> PS {
         let ps: PS = ps0
         for (const s of b.stmts) {
             for (const e of stmtExprs(s)) { ps = planExpr(cx, e, { refused: "a `defer` body — a deferred body cannot wait (C16; §19.16.6 async `defer` arrives with its own slice)" }, ps).ps }
+            for (const nb of loopPlanBlocks(s)) { ps = planDeferBody(cx, nb, ps) }
         }
         return ps
     }

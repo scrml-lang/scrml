@@ -30,9 +30,9 @@
 | Severity | Open (owed by impl#1, the TS compiler) | Carried (owed by the bootstrap; xfail on impl#1) |
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 264 | 5 |
+| HIGH | 262 | 5 |
 | MED | 704 | 8 |
-| LOW | 530 | 0 |
+| LOW | 531 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
 
@@ -482,6 +482,11 @@ SPEC note: §21.7 step 3 allows the extension-less fallback; no §21/§41 text n
 
 <!-- @gap id=g-impl1-enum-read-misc-residue-s471 sev=LOW status=open defer=impl1-s471-policy locus=compiler/src/type-system.ts(enum-read chain) prov=review:S471-win(F2,F3,F4) -->
 ### g-impl1-enum-read-misc-residue-s471 — enum-read chain residue: a cascade E-TYPE-031 on programs already failing E-IMPORT-006 / E-IMPORT-004 (noise only); `export const c2 = ic` (an imported enum const) then `c2.reason` is not refused (base too); `PathKeyedMap` folds separators but not case or drive-letter case, untested on a case-insensitive FS — `NEW S471; LOW; open — DEFERRED (S471 impl#1 policy)`
+
+<!-- @gap id=g-boot-lift-to-bound-loop-inside-defer-refused-s471 sev=LOW status=open locus=compiler/self-host-v2/analyze.scrml(deferBodyRule .Lift case) prov=review:S471-control-flow-rereview(follow-up) -->
+### g-boot-lift-to-bound-loop-inside-defer-refused-s471 — the `.Lift` case of `deferBodyRule` refuses every `lift` in a deferred body (E-DEFER-CONTROL-FLOW, S471 ruling), including one aimed at a value-bound loop that is itself INSIDE the deferred body, which does not leave the body — `NEW S471; LOW; open (latent: that bound loop is refused today)`
+
+When bound loops inside deferred bodies are built, that `lift` needs the same exemption `break`/`continue` get for loops inside the body (the `loops` list).
 
 <!-- @gap id=g-cross-body-detached-ordering-s470 sev=LOW status=open locus=compiler/src/codegen/render-waiting-calls.ts(the order rule is per body)+emit-engine.ts(async hook hosts) prov=dispatch:s470-await-residue(candidate) -->
 ### g-cross-body-detached-ordering-s470 — #1577 enforces await ordering WITHIN a body, not across bodies: an async-hosted `<onTransition>` body no longer blocks the transition, so a sibling hook of the same transition can read the value from before the call — `NEW S470; LOW; open`
@@ -26774,11 +26779,13 @@ Conformance FAILs (3), all fail-closed but with a code that does not name the ro
 ## §S449-scrml-fix-s66-twins — FAIL families the §66 twins expose, and gaps found building `scrml fix` (2026-10-03; ruling:user-voice-scrml.md S449 "RULED — \"your recs.\" — corpus-dialect rulings 1–6"; counter `bun scripts/bootstrap-conformance.ts` on the change branch (main `cb26eeec6` + `wip/s449-opener-keywords-land` merged) → PASS 76 (57 non-vacuous) · FAIL 53 · NOT-TWINNED 501 · UNSUPPORTED 648 · graded 129, was PASS 34 (19) · FAIL 18 · LEGACY 951 · graded 52; agent-executed, each family re-probed with a one-file source through the bootstrap; change `docs/changes/s449-scrml-fix-s66-twins/`)
 
 ### g-bootstrap-else-if-else-attrs-ignored — bootstrap: `else-if=` and `else` on sibling elements are IGNORED — every branch of an if-chain renders
-<!-- @gap id=g-bootstrap-else-if-else-attrs-ignored sev=HIGH status=open locus=searched:compiler/self-host-v2/analyze.scrml+lower.scrml(if=/else-if=/else chain — no reader for else-if/else) prov=empirical:S449-scrml-fix-s66-twins -->
+<!-- @gap id=g-bootstrap-else-if-else-attrs-ignored sev=HIGH status=resolved resolved-by=s451-verified-s471 locus=searched:compiler/self-host-v2/analyze.scrml+lower.scrml(if=/else-if=/else chain — no reader for else-if/else) prov=empirical:S449-scrml-fix-s66-twins -->
+> **RESOLVED (verified S471, `s471-bootstrap-control-flow-high`).** NOT-REPRODUCED on main 1e2a2812f: the filed repro compiles and runs correctly (1/0/0 → 0/1/0 → 0/0/1); chain + `show=`, nested, in `<each>`, top level all correct. Fixed by s451 (#1254/#1255); this entry was stale.
 **Agent-executed (S449).** `<p id="one" if=(@step == 1)>ONE</> <p id="two" else-if=(@step == 2)>TWO</> <p id="rest" else>REST</>` with `let <step:number=1/>`, no input → `#one` 1, `#two` **1**, `#rest` **1** (expected 1/0/0); after two clicks (step 3) → `#two` **1** (expected 0). `else-if=` / `else` are read as no-ops, so each element is gated only by its own `if=`. Fail-OPEN: content the program hides is shown, with no diagnostic. Exposed by the twin of `control-flow/if-chain-inactive-branches-absent` (FAIL, runtime); the orphan-else checks fail for the same reason (`control-flow/ctrl-001-orphan-else-pos` E-CTRL-001, `ctrl-002-orphan-else-if-pos` E-CTRL-002, `ctrl-004-else-on-state-opener-pos` E-CTRL-004 — accepted silently). Recommended: implement the §17.1.1 chain, or refuse `else-if=` / `else` with E-BOOTSTRAP-UNSUPPORTED until it is built.
 
 ### g-bootstrap-defer-scope-001-and-runs-anyway — bootstrap: `defer` is reported as an undeclared name (E-SCOPE-001) and the printer still emits a runnable artifact that executes the deferred statements in place
-<!-- @gap id=g-bootstrap-defer-scope-001-and-runs-anyway sev=HIGH status=open locus=searched:compiler/self-host-v2/analyze.scrml(scope resolution — `defer` unknown)+compiler/self-host-v2/print.scrml(printProgram — not inspected for a diagnostics gate) prov=empirical:S449-scrml-fix-s66-twins -->
+<!-- @gap id=g-bootstrap-defer-scope-001-and-runs-anyway sev=HIGH status=resolved resolved-by=s451-verified-s471 locus=searched:compiler/self-host-v2/analyze.scrml(scope resolution — `defer` unknown)+compiler/self-host-v2/print.scrml(printProgram — not inspected for a diagnostics gate) prov=empirical:S449-scrml-fix-s66-twins -->
+> **RESOLVED (verified S471, `s471-bootstrap-control-flow-high`).** NOT-REPRODUCED: the return-value twin runs correctly; `fail` / `?` exits ordered; an E-SCOPE-001 program writes nothing. Fixed by s451 (#1254/#1255). S471 also BUILT `defer` in a loop body (§19.16.2/§19.16.3 rule 1).
 **Agent-executed (S449).** The twin of `defer/return-value-before-deferred` (`defer @count = 99` then `return @count`) → `E-SCOPE-001 \`defer\` is not declared` ×2, yet the printed client runs and answers `got = 99` (expected 7: the return value is evaluated first, §19.16.2). Same in `defer/not-reached-and-nested-blocks` (trace order reversed) and `defer/fn-pure-local` (`got` null). The scope study's "accepted silently" is not exact — a code fires — but it is the generic E-SCOPE-001, not a refusal, and the artifact is emitted and executes wrong. Two defects: (1) an unimplemented SPEC construct reported as a generic scope error (the family `g-bootstrap-unimplemented-construct-reported-as-generic-code`; `defer` is new evidence); (2) `print.scrml` prints an artifact for a program carrying an error diagnostic (the counter calls it whenever a case reaches the runtime half; whether the bootstrap's own driver gates printing on diagnostics was NOT checked). Recommended: E-BOOTSTRAP-UNSUPPORTED naming `defer` (§19.16); and decide whether an errored front end may print at all.
 
 ### g-bootstrap-unnamed-state-child-variant-codes — bootstrap/SPEC: the bootstrap answers E-DECL-STATE-CHILD and E-TYPE-VARIANT, which NO SPEC section names, where §66.20 retains E-ENGINE-STATE-CHILD-INVALID-VARIANT / E-ENGINE-RULE-INVALID-VARIANT / E-ENGINE-INITIAL-INVALID-VARIANT

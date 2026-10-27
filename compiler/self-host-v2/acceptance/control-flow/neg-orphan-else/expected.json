@@ -1,0 +1,11 @@
+{
+  "id": "acceptance-control-flow-neg-orphan-else",
+  "description": "E-CTRL-001: an `else` after a plain element (§17.1.1 Worked Example 2) — refused, never rendered unconditionally.",
+  "language-version": "1.0",
+  "spec": "§17.1.1",
+  "rationale": "§17.1.1: \"The compiler SHALL reject any `else` attribute that does not satisfy this condition (E-CTRL-001).\"",
+  "expect": {
+    "codes": ["E-CTRL-001"],
+    "codeCounts": { "E-CTRL-001": 1 }
+  }
+}

@@ -62,7 +62,9 @@
 //   C16 (s451) a Defer stands only in a function body (not in a declaration's
 //       initializers / renders / handlers / effects — §19.16.3 rule 4), and
 //       its body holds no Return, no Defer and no Suspend at any depth
-//       (§19.16.3 rules 1-2; a Suspend would split the block's exit)
+//       (§19.16.3 rules 1-2; a Suspend would split the block's exit), no Fail,
+//       Join, Jump, Gather or Lift; s471: a Loop and its Break / Continue may
+//       stand in it — C19 keeps every jump inside the Defer body
 //   C17 (s451) a `persist=` field is a writable field of the program whose type
 //       has a wire descriptor (no FIXED-length sequence); `Local` needs a
 //       `replace` grant and no `rule=` graph (O-061-5); an Unpersist names a
@@ -78,7 +80,9 @@
 //       stands only as a Suspend's `on`, a query only as a Suspend's `on`
 //       (checkClientCalls); a server body is a continuation owner (C12).
 //   C19 (s469) the loop (§49): a Counted head's `init` is Lets or Assigns and its
-//       `step` Assigns only; a Loop body holds no Suspend / Join / Jump / Defer;
+//       `step` Assigns only; a Loop body holds no Suspend / Join / Jump (s471: a
+//       Defer stands in a loop body — not directly in a Gather's, never in a
+//       View.Gather's);
 //       every Break / Continue names a Loop that encloses it in the same owner,
 //       never across a Suspend's `then`, a Join body or a Defer body — see checkLoop.
 //   C20 (s469) the bound loop (§49.6) and the Tier-0 loop (§17.4): a Gather is a
@@ -930,7 +934,7 @@ ${
             .Effect(deps: ds, body: b) :> checkEffect(p, encl, ds, b)
             .ResetOn(triggers: ds, reset: b) :> checkResetOn(p, encl, ds, b)
             .Errors(of: x) :> checkSurface(p, encl, x)
-            .Gather(g: g, rows: rows) :> checkLoop(g.head, g.body).concat(checkViewGather(p, g, rows))
+            .Gather(g: g, rows: rows) :> checkLoop(g.head, g.body).concat(viewGatherDefers(g.body)).concat(checkViewGather(p, g, rows))
             .El(tag: t, attrs: attrs) :> checkGates(t, attrs).concat(checkStaticSinks(t, attrs))
             .Text(text: x) :> []
             .RawText(text: x) :> []
@@ -2264,7 +2268,7 @@ ${
             .Loop(label: l, head: h, body: lb) :> checkLoop(h, lb)
             .Break(target: x) :> []
             .Continue(target: x) :> []
-            .Gather(g: g) :> checkLoop(g.head, g.body)
+            .Gather(g: g) :> checkLoop(g.head, g.body).concat(gatherDirectDefers(g.body))
             .Lift(into: x) :> []
         }
     }
@@ -2276,7 +2280,11 @@ ${
     // local bindings rebound by `step` … They are not tape writes" (§49.3.2), so
     // no Write, edit or call hides in a head. Its body holds no Suspend, Join
     // or Jump (the CPS split does not reach loops — C12 agrees: a loop body is
-    // no continuation owner) and no Defer. Every Break / Continue names a Loop
+    // no continuation owner). s471: a Defer MAY stand in a loop body (§19.16.2 "a
+    // loop body (once per iteration)") — the body is its own Block, printed in
+    // its own try/finally — but not DIRECTLY in a Gather's body (an arm used for
+    // its value, §19.16.2 E-DEFER-UNSUPPORTED-SITE) and nowhere in a
+    // View.Gather's (markup is no function body, §19.16.3 rule 4). Every Break / Continue names a Loop
     // that ENCLOSES it in the same owner — never across a Suspend's `then`, a
     // Join body or a Defer body, each of which prints as a function of its own
     // (§49.4.3: no `break` crosses a function boundary) — so the printed
@@ -2370,7 +2378,7 @@ ${
             .Suspend(bind: x) :> "a Suspend (a loop cannot wait yet)"
             .Join(k: x) :> "a Join"
             .Jump(k: x) :> "a Jump"
-            .Defer(body: x) :> "a Defer"
+            .Defer(body: x) :> ""
             .Let(sym: x) :> ""
             .Assign(local: x) :> ""
             .Write(cap: x) :> ""
@@ -2387,6 +2395,69 @@ ${
             .Continue(target: x) :> ""
             .Gather(g: x) :> ""
             .Lift(into: x) :> ""
+        }
+    }
+
+    // s471 — a Gather's body is an arm used for its value: no Defer directly in
+    // it (one in a nested If branch is that branch's).
+    fn gatherDirectDefers(body: Block) -> string[] {
+        let out: string[] = []
+        for (const s of body.stmts) {
+            if (stmtIsDefer(s)) out = out.concat(["C19: a Defer stands directly in a Gather's body — an arm used for its value (§19.16.2)"])
+        }
+        return out
+    }
+
+    // s471 — a View.Gather (a markup loop) is no function body: no Defer at any depth.
+    fn viewGatherDefers(body: Block) -> string[] {
+        let out: string[] = []
+        for (const n of allNodes(Node.NBlock(body))) {
+            if (nodeIsDefer(n)) out = out.concat(["C19: a View.Gather's body holds a Defer — markup is no function body (§19.16.3 rule 4)"])
+        }
+        return out
+    }
+
+    fn nodeIsDefer(n: Node) -> boolean {
+        return match n {
+            .NStmt(s: s) :> stmtIsDefer(s)
+            .NProgram(p: q) :> false
+            .NDecl(d: d) :> false
+            .NField(f: f) :> false
+            .NFn(f: f) :> false
+            .NServerFn(f: f) :> false
+            .NBlock(b: b) :> false
+            .NExpr(e: e) :> false
+            .NPlace(pl: pl) :> false
+            .NInst(i: i) :> false
+            .NPattern(pat: pat) :> false
+            .NEdit(k: k) :> false
+            .NView(v: v) :> false
+            .NAttr(a: a) :> false
+        }
+    }
+
+    fn stmtIsDefer(s: Stmt) -> boolean {
+        return match s {
+            .Defer(body: x) :> true
+            .Let(sym: x) :> false
+            .Assign(local: x) :> false
+            .Write(cap: x) :> false
+            .Commit(writes: x) :> false
+            .If(cond: x) :> false
+            .Return(e: x) :> false
+            .Eval(e: x) :> false
+            .Suspend(bind: x) :> false
+            .ResetSurface(of: x) :> false
+            .Unpersist(decl: x) :> false
+            .Attempt(result: x) :> false
+            .Fail(err: x) :> false
+            .Join(k: x) :> false
+            .Jump(k: x) :> false
+            .Loop(label: x) :> false
+            .Break(target: x) :> false
+            .Continue(target: x) :> false
+            .Gather(g: x) :> false
+            .Lift(into: x) :> false
         }
     }
 
@@ -2855,10 +2926,10 @@ ${
             .Fail(err: x) :> "a Fail"
             .Join(k: x) :> "a Join"
             .Jump(k: x) :> "a Jump"
-            .Loop(label: x) :> "a Loop"
-            .Break(target: x) :> "a Break"
-            .Continue(target: x) :> "a Continue"
-            .Gather(g: x) :> "a Loop"
+            .Loop(label: x) :> ""             // s471: a statement loop in a deferred body (§19.16.3 rule 1) —
+            .Break(target: x) :> ""           // its jumps are C19's: a Defer body is a jump boundary
+            .Continue(target: x) :> ""        // (jumpStmt), so a Break / Continue names a Loop inside it
+            .Gather(g: x) :> "a Gather"
             .Lift(into: x) :> "a Lift"
         }
     }
