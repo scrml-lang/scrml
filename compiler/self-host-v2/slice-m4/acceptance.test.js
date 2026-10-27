@@ -267,6 +267,12 @@ const STATUS = {
   "imports/neg-not-exported": ["PASS", ["E-IMPORT-004"]],
   "imports/neg-missing-file": ["PASS", ["E-IMPORT-006"]],
   "imports/neg-bare-specifier": ["PASS", ["E-IMPORT-005"]],
+  // s471-bootstrap-parse-batch — parser gaps (parse.scrml)
+  "display/several-literals": ["PASS", []],
+  "display/neg-runaway-literal": ["PASS", ["E-CTX-001"]],
+  // O61 (§66.2.5 S469): an item in a `<db>` body — read as the declaration, its block-owned
+  // server-side state refused by name (owed: analyze / lower / server runtime)
+  "o61/db-let-decl": ["UNSUPPORTED", ["E-BOOTSTRAP-UNSUPPORTED"]],
   // s471-bootstrap-control-flow-high — §17.1.1 chains and §19.16 `defer` (incl. a loop body, built s471)
   "control-flow/if-chain": ["PASS", []],
   "control-flow/neg-orphan-else": ["PASS", ["E-CTRL-001"]],
