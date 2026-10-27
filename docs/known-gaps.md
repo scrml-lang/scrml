@@ -166,6 +166,8 @@ Measured by the #1563 review across its five rounds, on head and main (the recor
 <!-- @gap id=g-spec-enum-payload-field-named-variant-s470 sev=LOW status=open locus=SPEC(§14.4 enum payload field names) prov=review:S470-#1563-round-0(X-VAR, b3 X4) -->
 ### g-spec-enum-payload-field-named-variant-s470 — an enum payload field named `variant` (`Bad(variant: string)`) is accepted, but `x.variant` reads the TAG, so the field is silently shadowed; SPEC says nothing about reserving the name — `NEW S470; LOW; open (owner ruling needed)`
 
+ > **S471 RULING (bryan, "yes to all the recs"):** refuse the field name. SPEC text + new code `E-ENUM-PAYLOAD-FIELD-RESERVED` (Nominal) via lane `s471-owner-rulings-spec`; impl#1 must emit it at the enum declaration. The SPEC question is closed; the impl half is open.
+
 Refusing it would be a new language rule, so it needs SPEC text and an owner ruling. PA recommendation: refuse a payload field named `variant`.
 
 <!-- @gap id=g-impl1-namespace-import-type-name-accepted-s470 sev=LOW status=open locus=UNTRACED(type resolution of a dotted name) prov=review:S470-#1563(NS-ALIAS, k/k1.mjs R5);spec:§21.3 -->
@@ -276,6 +278,8 @@ PA-verified on 07ebed34b (`~/.cache/scrml/review/s470-aw3/d/tpl2.scrml`): exit 0
 <!-- @gap id=g-when-changes-stale-response-s470 sev=MED status=narrowed narrowed-by=s470-when-changes-latest-wins locus=compiler/runtime/runtime-template.js(_scrml_when_changes ~5417 — no sequence / stale-response guard on an async body) prov=review:S470-#1554-round-1(M1, bin/race.mjs);empirical:S470(~/.cache/scrml/review/s470-aw2/race/whenhelper.scrml) -->
 ### g-when-changes-stale-response-s470 — (security, race) an async `when … changes` body has no stale-response guard: `@pw` set right then wrong in quick succession, with the right password's round trip slower, ends on "LOGGED IN" while `@pw` is "wrong" — `NEW S470; MED; NARROWED S470 (#1560: the body's own awaits; a helper that writes the cell itself remains)`
 
+ > **S471 RULING (bryan, "yes to all the recs"):** a helper's continuation called from a `when … changes` body IS part of the run and is cancelled with it (SPEC §6.7.4 text: lane `s471-owner-rulings-spec`). The remaining limb (a helper that writes the cell itself) is therefore a conformance BUG, not a SPEC question.
+
 Measured by the #1554 reviewer's race harness on base and on every lane head. `<request>`'s settle machine has a sequence guard and ends "false" on the same race; `when` has none. Fix direction: give `_scrml_when_changes` the same latest-wins sequence check.
 
 > **NARROWED S470 (#1560, s470-when-changes-latest-wins).** SPEC §6.7.4: a run suspended at a server call when its effect re-triggers "is cancelled and never resumes", and the settled value or failure is discarded. `when … changes` is a spelling of `<effect>`. `_scrml_when_changes` (compiler/src/runtime-template.js) keeps a per-instance sequence counter, the `<request>` mechanism. `wrapOwnAwaits` (compiler/src/codegen/js-async-analysis.ts) rewrites every own-level `await X` of the body as `(C(await W(X)) ? C.value : await S())`, so the check runs synchronously at the point the run resumes, with no microtask window. A stale or disposed run awaits a fresh promise that never settles, so its catch and finally do not run. A body that cannot be gated is refused with a located E-CODEGEN-INVALID-LOGIC. The race fixtures end "rejected" (main: "LOGGED IN"), and the review's microtask sweep shows no stale writes at K=0..59. Cost: +130 B gzip in core runtime; the `<each>` row if= ratchet was raised 8,245 → 8,375 (owner ruling S470, "allow raising the budget").
@@ -294,6 +298,8 @@ Reproduced by two lanes and two reviews, on main. SPEC §6.7.7 treats the body a
 
 <!-- @gap id=g-engine-effect-async-no-newest-wins-s470 sev=LOW status=narrowed narrowed-by=s470-await-residue locus=compiler/src/codegen/emit-engine.ts(opener `effect=` / transition effects emit an unguarded `(async function () {…})()`) prov=dispatch:s470-when-changes-latest-wins(candidate 3);review:S470-#1560(F7, read-only, fx/k/engopen.scrml) -->
 ### g-engine-effect-async-no-newest-wins-s470 — engine transition effects and the opener `effect=` can be async, and impl#1 emits them as an unguarded `(async function () {…})()`; SPEC §51.7.1 gives engine effects no rule for a re-trigger while one is suspended, so a stale run may land last (the `when` race class) — `NEW S470; LOW; NARROWED S470 (#1577: hook arms guarded; opener `effect=` and the SPEC question remain)`
+
+ > **S471 RULING (bryan, "yes to all the recs"):** newest-run-wins for async state `effect=` / `<onTransition>` is kept and specified, the opener `effect=` included (SPEC §51 text: lane `s471-owner-rulings-spec`). The SPEC question is closed; the unguarded opener `effect=` is a conformance bug.
 
 Read from emitted JS only; no race was built. The lane F review measured the same class on the newly async `<onTransition>` / state `effect=` hosts (F5), which lane s470-await-residue is fixing. A SPEC sentence extending §6.7.4's newest-run-wins to engine effects would settle it.
 
@@ -458,6 +464,8 @@ All executed by the review, all failing on main too. In tool mode a CLI that rej
 
 <!-- @gap id=g-spec-host-promise-statics-s470 sev=LOW status=open locus=SPEC(§13.8 item 3) prov=dispatch:s470-render-residue-host-promises(candidate 3) -->
 ### g-spec-host-promise-statics-s470 — `<span if=${Promise.resolve(…)}>` is accepted (always truthy) because SPEC names only `fetch` as a host waiting value — `NEW S470; LOW; open (SPEC question)`
+
+ > **S471 RULING (bryan, "yes to all the recs"):** §13.8 names `Promise.all/race/any/allSettled` over waiting values as waiting values (SPEC text: lane `s471-owner-rulings-spec`). The impl half (refuse `<span if=${Promise.resolve(…)}>` and the statics in value/render positions) stays open.
 
 Recommendation: amend §13.8 item 3 to name the host Promise statics and constructors.
 

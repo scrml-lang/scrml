@@ -128,6 +128,7 @@ All 20 sub-steps (rev 6 decomposition: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 11.0a-
 > `bun scripts/state.ts --write` regenerates it; `--check` gates it.
 
 <!-- @generated:recent-sessions START (do not edit — `bun scripts/state.ts --write`) -->
+- `a8bac7248` — Merge pull request #1583 from scrml-lang/wrap/s470 — **pushed**
 - `42f8a49d2` — Merge pull request #1541 from scrml-lang/wrap/s469 — **pushed**
 - `43ad24d9e` — wrap(s468): theRog first boot; 4 PRs merged, 11 in flight (all checkpointed); bootstrap U1c reviewed; eight impl#1 wrong-password paths found (#1452) — **pushed**
 - `1f1b5be4e` — wrap(s467): wrap anchor + theRog transfer note (#1438) — **pushed**
@@ -135,7 +136,6 @@ All 20 sub-steps (rev 6 decomposition: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 11.0a-
 - `980cb3001` — wrap(S461 AUTO): 7 PRs landed; 3 questions for bryan; 6 review findings filed (#1383) — **pushed**
 - `5a895f378` — wrap(s460): 8 PRs landed (#1367–#1374); one presence test ruled and built; copy-in at LAND (#1375); AUTO queue for the first unattended run (#1376) — **pushed**
 - `b4b94f3d6` — wrap(s459): 8 PRs landed (#1359 #1176 #1360–#1365); three arcs in flight; five dPA verdicts await bryan; 15 gaps filed (#1366) — **pushed**
-- `3a4a3639a` — wrap(s458): addendum — post-reset rulings, #1355–#1357, branch landing order (#1358) — **pushed**
 <!-- @generated:recent-sessions END -->
 
 ## A. Compiler core
