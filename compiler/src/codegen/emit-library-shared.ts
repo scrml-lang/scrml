@@ -20,8 +20,10 @@ import { extractCalleeNames, buildCalleeImportMap } from "./scheduling.ts";
 import { splitMultiArmString, parseMatchArm } from "./emit-control-flow.ts";
 import { parseExprToNode, guardCallArmsRaw, hasLostTrailingContent } from "../expression-parser.ts";
 import { parseGuardArmsFromRaw } from "../ast-builder.js";
-import { armBlockStatementsDetailed } from "../arm-body-statements.ts";
-import { mentionedNames } from "../failable-value-calls.ts";
+// The ONE reader of text-held `!{ }` arm bodies (moved to a neutral module S471 so the GCP3
+// E-SYNTAX-042 check reads arms with it too); re-exported so this module's callers are unchanged.
+import { exprGuardArmBodies, guardArmBodiesOf } from "../guard-arm-bodies.ts";
+export { exprGuardArmBodies, guardArmBodiesOf };
 import { templateInterpolationPayloads } from "../interpolation-extent.ts";
 import { isPromiseReturningImportedCallee } from "../module-resolver.js";
 import { hostPromiseMemberOf, HOST_FETCH_MEMBER } from "./host-promise-names.ts";
@@ -276,59 +278,6 @@ function matchArmTextCallees(n: ASTNode, out: Set<string>, guardNestedFnValues: 
  * reader refuses are token-scanned whole (fail closed: the function stays async). Not
  * recursive — the operand is the caller's walk.
  */
-/**
- * S470 (fix round 2, R1) — the parsed bodies of an expression-position `!{ }` handler's arms (a
- * braced body's statements, else the arm's expression), or [] for anything else. A body the
- * readers cannot parse is returned as an escape hatch over its text, which every walker treats as
- * un-awaitable (fail closed).
- */
-export function exprGuardArmBodies(n: ASTNode): unknown[] {
-  if (!n || n.kind !== "call") return [];
-  const raw = guardCallArmsRaw(n as never);
-  if (raw === null) return [];
-  const hatch = (text: string): unknown => unreadableArm(text);
-  let arms: Array<{ handler?: unknown; handlerExpr?: unknown }> | null = null;
-  try { arms = parseGuardArmsFromRaw(raw, "") as Array<{ handler?: unknown; handlerExpr?: unknown }> | null; } catch { arms = null; }
-  if (!arms) return [hatch(raw)];
-  const out: unknown[] = [];
-  for (const arm of arms) {
-    const h = typeof arm?.handler === "string" ? arm.handler.trim() : "";
-    if (!h) continue;
-    if (h.startsWith("{") && h.endsWith("}")) {
-      const r = armBlockStatementsDetailed(h);
-      out.push(r && r.ok && Array.isArray(r.stmts) ? r.stmts : hatch(h));
-    } else {
-      out.push(arm.handlerExpr && typeof arm.handlerExpr === "object" ? arm.handlerExpr : hatch(h));
-    }
-  }
-  return out;
-}
-
-/**
- * S470 (fix round 3, N1) — the parsed bodies of every `!{ }` arm a node carries as TEXT: each arm of
- * an expression-position handler (`exprGuardArmBodies`) and each BRACED arm of a statement guard (an
- * unbraced one is already a parsed `handlerExpr`). An arm the reader refuses comes back as an escape
- * hatch carrying the names its text mentions (`armUnreadableNames`), so a consumer can fail closed.
- */
-export function guardArmBodiesOf(n: ASTNode): unknown[] {
-  if (!n || typeof n !== "object") return [];
-  if (n.kind === "call") return exprGuardArmBodies(n);
-  if (n.kind !== "guarded-expr" || !Array.isArray(n.arms)) return [];
-  const out: unknown[] = [];
-  for (const arm of n.arms as Array<{ handler?: unknown }>) {
-    const h = typeof arm?.handler === "string" ? arm.handler.trim() : "";
-    if (!(h.startsWith("{") && h.endsWith("}")) || !h.slice(1, -1).trim()) continue;
-    const r = armBlockStatementsDetailed(h);
-    out.push(r && r.ok && Array.isArray(r.stmts) ? r.stmts : unreadableArm(h));
-  }
-  return out;
-}
-
-/** An arm body no reader can parse: an escape hatch carrying the names its text mentions. */
-function unreadableArm(text: string): unknown {
-  return { kind: "escape-hatch", raw: text, nativeKind: "Unparsed", armUnreadableNames: [...mentionedNames(text)] };
-}
-
 export function guardArmTextCallees(n: ASTNode, out: Set<string>, guardNestedFnValues = false): void {
   if (!n || n.kind !== "call") return;
   const raw = guardCallArmsRaw(n as never);
