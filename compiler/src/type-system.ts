@@ -110,7 +110,8 @@ import { impliedLiftCheckPieces } from "./implied-lift-desugar.ts";
 // `if=`/`else-if=`/`else` chain keeps its branch bodies. See `case "if-chain"`.
 import { ifChainChildNodes } from "./ast-if-chain.js";
 import { describeServerTrigger } from "./escalation-reason-text.ts";
-import { toPosix } from "./path-canonical.js";
+import { toPosix, PathKeyedMap } from "./path-canonical.js";
+import { resolveModulePath } from "./module-resolver.js";
 import type { EscalationReason } from "./route-inference.ts";
 import { ENGINE_STATE_CHILD_RESERVED_ATTRS, STATE_CHILD_STRUCTURAL_TAGS } from "./engine-statechild-grammar.ts";
 import { isToolProgram, findTopLevelProgramNode, findAllProgramNodes, getProgramKind, programHasKindAttr, collectTopLevelFunctionDecls, findToolMainFn, getToolNodes, programHasServeAttr, getToolServeConfig, resolveServePort, collectToolProgramChannels } from "./tool-program.ts";
@@ -131,7 +132,6 @@ import { _scrml_url_shape_ok } from "./runtime-url-guard.js";
 import { _SCRML_MESSAGE_SLOTS, _scrml_message_template_parse } from "./runtime-message-templates.js";
 import { rewriteFnKeyword } from "./codegen/rewrite.ts";
 import { planPayloadBinders, parseBindingList } from "./codegen/emit-control-flow.ts";
-import { dirname as pathDirname, resolve as pathResolve } from "node:path";
 import { checkValueFunctionStored, setValueFnModuleIndex } from "./value-function-stored.ts";
 import { judgeTypeOf, unjudgeableIn, wrapRefine, wrapRefineUpdate, wrapRefineMerge, paramGuardStatement, isRefineCall, structJudgeDef, type JudgeType } from "./refinement-obligations.ts";
 import * as acorn from "acorn";
@@ -11837,8 +11837,8 @@ function annotateNodes(
     const fnSelf = new Set<string>();
     let fnCounter = 0;
     let fnActive: Set<string> | null = null;
-    const fnKey = (file: string, name: string): string => `${file}\u0000${name}`;
-    const fnDeclsByFile = new Map<string, Map<string, ASTNodeLike[]>>();
+    const fnKey = (file: string, name: string): string => `${toPosix(file)}\u0000${name}`;
+    const fnDeclsByFile = new PathKeyedMap<Map<string, ASTNodeLike[]>>();
     const declsIn = (file: string): Map<string, ASTNodeLike[]> => {
       let m = fnDeclsByFile.get(file);
       if (m) return m;
@@ -11849,7 +11849,7 @@ function annotateNodes(
         a.push(d);
         m!.set(d.name, a);
       };
-      if (file === filePath) for (const d of allFnDecls) push(d);
+      if (toPosix(file) === toPosix(filePath)) for (const d of allFnDecls) push(d);
       else for (const d of enumReadModuleTops(_enumReadModules?.get(file)?.nodes ?? [])) push(d);
       fnDeclsByFile.set(file, m);
       return m;
@@ -11864,7 +11864,7 @@ function annotateNodes(
       if (ds.length !== 1) return null;
       const d = ds[0];
       const annot = d.returnTypeAnnotation;
-      if (file === filePath) return typeof annot === "string" && annot.trim() !== "" ? null : returnsOfDecl(d, env, globalLookup);
+      if (toPosix(file) === toPosix(filePath)) return typeof annot === "string" && annot.trim() !== "" ? null : returnsOfDecl(d, env, globalLookup);
       const { e, l } = depEnv(file);
       if (typeof annot === "string" && annot.trim() !== "") return enumReadAnnot(annot, e);
       return returnsOfDecl(d, e, l);
@@ -11924,13 +11924,14 @@ function annotateNodes(
     const depFnReturn = (file: string, name: string): ResolvedType | null => {
       const owner = enumReadFnOwner(file, name, 0, new Set());
       if (!owner) return null;
+      if (owner === ENUM_READ_FN_UNREAD) return ENUM_READ_LIMIT;
       const ds = declsIn(owner[0]).get(owner[1]) ?? [];
       return ds.length === 1 ? inferFn(fnKey(owner[0], owner[1])) : null;
     };
     // An IMPORTED function / value: read in the exporting file, with that file's registry (its
     // aliases seen through) — a declared `-> T`, else the type its returns / initializer yield.
-    const depRegs = new Map<string, Map<string, ResolvedType>>();
-    const depEnvs = new Map<string, { e: EnumReadEnv; l: EnumReadLookup }>();
+    const depRegs = new PathKeyedMap<Map<string, ResolvedType>>();
+    const depEnvs = new PathKeyedMap<{ e: EnumReadEnv; l: EnumReadLookup }>();
     const depEnv = (depFile: string, depTypeDecls?: ASTNodeLike[]): { e: EnumReadEnv; l: EnumReadLookup } => {
       const hit = depEnvs.get(depFile);
       if (hit) return hit;
@@ -11978,10 +11979,13 @@ function annotateNodes(
       const spec = importSpecs.get(name);
       const mods = _enumReadModules;
       if (!spec || !mods || !(spec[0].startsWith("./") || spec[0].startsWith("../"))) return null;
-      let p = pathResolve(pathDirname(filePath), spec[0]);
-      if (!mods.has(p) && mods.has(`${p}.scrml`)) p = `${p}.scrml`;
-      const mod = mods.get(p);
-      if (!mod) return null;
+      const p = enumReadModulePath(filePath, spec[0]);
+      const mod = p ? mods.get(p) : undefined;
+      if (!p || !mod) {
+        // S471: a scrml-module specifier that resolves to no module of the unit is unread — fail closed.
+        if (enumReadImportUnresolved(filePath, spec[0])) { importedVal.set(name, ENUM_READ_LIMIT); return ENUM_READ_LIMIT; }
+        return null;
+      }
       // The exporting file's top-level `export const <name> = …` (directly, or in a top-level `${ … }`).
       const tops: ASTNodeLike[] = [];
       for (const x of mod.nodes) {
@@ -20699,7 +20703,7 @@ function enumReadStructField(st: StructType, field: string): ResolvedType | null
 }
 
 /** Registries of the compilation unit's files, built from each file's own type declarations (cached per run). */
-const _enumReadModuleRegs = new Map<string, Map<string, ResolvedType>>();
+const _enumReadModuleRegs: Map<string, Map<string, ResolvedType>> = new PathKeyedMap<Map<string, ResolvedType>>();
 
 /**
  * S470 fix round 2 (K-ALIAS2) — the type a file `file` imports under the local name `name`: found in
@@ -20718,18 +20722,46 @@ function enumReadImportedTypeOf(file: string, name: string, depth: number, seen:
       .find((s) => s.local === name && typeof s.imported === "string");
     if (!spec) continue;
     const p = enumReadModulePath(file, imp.source as string);
-    return p ? enumReadExportedTypeOf(p, spec.imported as string, depth + 1, seen) : null;
+    if (p) return enumReadExportedTypeOf(p, spec.imported as string, depth + 1, seen);
+    return enumReadImportUnresolved(file, imp.source as string) ? ENUM_READ_LIMIT : null;
   }
   return null;
 }
 
-/** A relative module specifier `src` written in `from`, resolved to a module of this compilation unit, or null. */
+/**
+ * A relative module specifier `src` written in `from`, resolved to a module of this compilation unit, or null.
+ *
+ * S471 (g-windows-imported-alias-chain-refusal-not-emitted-s470) — resolved by the module resolver's own
+ * `resolveModulePath` (the producer of every graph key, posix-canonical, drive-less-fixture aware) and
+ * returned posix, against a `PathKeyedMap` of modules. `from` arrives in BOTH forms — a native AST
+ * `filePath`, or a posix `absSource` (a dependency registry's span file) — and before this a raw
+ * `node:path` resolve of a posix `from` against native keys missed on Windows, so the chain resolved
+ * to "unknown" and the refusal silently passed.
+ */
 function enumReadModulePath(from: string, src: string): string | null {
   const mods = _enumReadModules;
   if (!mods || !(src.startsWith("./") || src.startsWith("../"))) return null;
-  const p = pathResolve(pathDirname(from), src);
+  const p = toPosix(resolveModulePath(src, from));
   if (mods.has(p)) return p;
   return mods.has(`${p}.scrml`) ? `${p}.scrml` : null;
+}
+
+/**
+ * S471 — FAIL CLOSED on a lookup miss. A relative specifier the chain must follow that names a scrml
+ * module (a `.scrml` path, or one with no file extension: the resolver's `./x` → `x.scrml` /
+ * `x/index.scrml` forms) but resolves to NO module of this compilation unit is not "not an enum": the
+ * module resolver gathers every such import into the unit (or refuses it, E-IMPORT-006), so a miss is
+ * an internal inconsistency — a key-form desync like the Windows one, an unhandled specifier form — and
+ * the type is UNREAD. The caller returns ENUM_READ_LIMIT so a member read off it is refused (E-TYPE-031)
+ * instead of silently passing. A foreign specifier (`./x.js`) is not a scrml module: genuinely unknown.
+ */
+function enumReadImportUnresolved(from: string, src: string): boolean {
+  if (!_enumReadModules || !(src.startsWith("./") || src.startsWith("../"))) return false;
+  if (enumReadModulePath(from, src) !== null) return false;
+  const last = src.slice(src.lastIndexOf("/") + 1);
+  const dot = last.lastIndexOf(".");
+  const ext = dot > 0 ? last.slice(dot) : "";
+  return ext === "" || ext === ".scrml";
 }
 
 /**
@@ -20741,7 +20773,7 @@ function enumReadExportedTypeOf(file: string, name: string, depth: number, seen:
   const mods = _enumReadModules;
   if (!mods) return null;
   if (depth > ENUM_READ_DEPTH_LIMIT) return ENUM_READ_LIMIT;
-  const key = `${file}::${name}`;
+  const key = `${toPosix(file)}::${name}`;
   if (seen.has(key)) return null;
   const s2 = new Set(seen).add(key);
   const mod = mods.get(file);
@@ -20768,12 +20800,14 @@ function enumReadExportedTypeOf(file: string, name: string, depth: number, seen:
     if (srcName === null && x.exportedName === name) srcName = name;
     if (srcName === null) continue;
     const p = enumReadModulePath(file, x.reExportSource as string);
-    return p ? enumReadExportedTypeOf(p, srcName, depth + 1, s2) : null;
+    if (p) return enumReadExportedTypeOf(p, srcName, depth + 1, s2);
+    return enumReadImportUnresolved(file, x.reExportSource as string) ? ENUM_READ_LIMIT : null;
   }
   for (const x of tops) {
     if (x.isReExportAll !== true) continue;
     const p = enumReadModulePath(file, x.reExportSource as string);
-    if (!p) continue;
+    // An unread `export *` may be the one that supplies `name`: the type is unread (fail closed).
+    if (!p) { if (enumReadImportUnresolved(file, x.reExportSource as string)) return ENUM_READ_LIMIT; continue; }
     const r = enumReadExportedTypeOf(p, name, depth + 1, s2);
     if (r) return r;
   }
@@ -20799,12 +20833,14 @@ function enumReadVariantField(en: EnumType, variant: string, field: string): Res
 /**
  * S470 fix round 4 (I1–I3) — the module and name of the FUNCTION `file` knows as `name`: declared there,
  * or imported (followed to the module that declares it, through its imports and re-exports). null when
- * not found / a cycle.
+ * not found / a cycle. ENUM_READ_FN_UNREAD (S471) when the chain names a scrml module it cannot resolve
+ * (`enumReadImportUnresolved`): the function's return type is then unread, not unknown (fail closed).
  */
+const ENUM_READ_FN_UNREAD: [string, string] = ["\u0000unread", "\u0000unread"];
 function enumReadFnOwner(file: string, name: string, depth: number, seen: Set<string>): [string, string] | null {
   const mods = _enumReadModules;
   if (!mods || depth > ENUM_READ_DEPTH_LIMIT) return null;
-  const key = `${file}::${name}`;
+  const key = `${toPosix(file)}::${name}`;
   if (seen.has(key)) return null;
   seen.add(key);
   const mod = mods.get(file);
@@ -20817,7 +20853,8 @@ function enumReadFnOwner(file: string, name: string, depth: number, seen: Set<st
       .find((s) => s.local === name && typeof s.imported === "string");
     if (!spec) continue;
     const p = enumReadModulePath(file, imp.source as string);
-    return p ? enumReadFnOwner(p, spec.imported as string, depth + 1, seen) : null;
+    if (p) return enumReadFnOwner(p, spec.imported as string, depth + 1, seen);
+    return enumReadImportUnresolved(file, imp.source as string) ? ENUM_READ_FN_UNREAD : null;
   }
   // Named re-exports before `export *` (STAR-PREC, as for types).
   const reexports = tops.filter((x) => x && x.kind === "export-decl" && typeof x.reExportSource === "string");
@@ -20831,12 +20868,13 @@ function enumReadFnOwner(file: string, name: string, depth: number, seen: Set<st
     if (src === null && x.exportedName === name) src = name;
     if (src === null) continue;
     const p = enumReadModulePath(file, x.reExportSource as string);
-    return p ? enumReadFnOwner(p, src, depth + 1, seen) : null;
+    if (p) return enumReadFnOwner(p, src, depth + 1, seen);
+    return enumReadImportUnresolved(file, x.reExportSource as string) ? ENUM_READ_FN_UNREAD : null;
   }
   for (const x of reexports) {
     if (x.isReExportAll !== true) continue;
     const p = enumReadModulePath(file, x.reExportSource as string);
-    if (!p) continue;
+    if (!p) { if (enumReadImportUnresolved(file, x.reExportSource as string)) return ENUM_READ_FN_UNREAD; continue; }
     const o = enumReadFnOwner(p, name, depth + 1, seen);
     if (o) return o;
   }
@@ -21220,6 +21258,7 @@ function checkEnumReadsIn(root: unknown, span: Span, lookup: EnumReadLookup, err
     errors.push(new TSError("E-TYPE-031",
       `E-TYPE-031: \`${enumReadShow(whole)}\` reads a member off a value whose type the compiler stops reading after ` +
       `${ENUM_READ_DEPTH_LIMIT} steps — a chain of type aliases / imports / re-exports, or an expression nested that deep — ` +
+      `or reaches through an import it cannot resolve to a module of this compilation, ` +
       `so it cannot tell whether it ${ENUM_READ_TAG}whose only member is \`.variant\`): an impl#1 limitation, not a language ` +
       `rule. Name the type closer to its declaration (import the enum or struct itself), or bind part of the expression ` +
       `to a typed local (§14.3, §21.4).`,
@@ -33430,7 +33469,8 @@ export function runTS(input: {
     }
     setValueFnModuleIndex(_vfsIndex);
     // S470 lane B — the same modules, for the enum-read check's imported-value facts.
-    _enumReadModules = new Map();
+    // PathKeyedMap (S471): SET with the native AST `filePath`, GET with native or posix (`absSource`).
+    _enumReadModules = new PathKeyedMap();
     _enumReadModuleRegs.clear();
     _enumReadInferCount = 0;
     for (const f of files) {
