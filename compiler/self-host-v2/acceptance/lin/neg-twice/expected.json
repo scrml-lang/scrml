@@ -1,0 +1,15 @@
+{
+  "id": "acceptance-lin-neg-twice",
+  "description": "E-LIN-002: a `lin` variable consumed more than once.",
+  "language-version": "1.0",
+  "spec": "§35.2 · §35.5",
+  "rationale": "§35.2: \"The compiler SHALL reject any second reference — read-only or otherwise — with E-LIN-002.\"",
+  "expect": {
+    "codes": [
+      "E-LIN-002"
+    ],
+    "codeCounts": {
+      "E-LIN-002": 1
+    }
+  }
+}

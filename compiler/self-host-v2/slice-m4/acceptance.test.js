@@ -202,6 +202,13 @@ const STATUS = {
   "loop/defer-loop-in-defer": ["PASS", []],
   "loop/neg-defer-bound-direct": ["PASS", ["E-DEFER-UNSUPPORTED-SITE"]],
   "loop/neg-defer-break-out": ["PASS", ["E-DEFER-CONTROL-FLOW"]],
+  // s471 (g-bootstrap-lin-not-implemented-s469): linear types (§35)
+  "lin/consume-once": ["PASS", []],
+  "lin/param-once": ["PASS", []],
+  "lin/neg-unconsumed": ["PASS", ["E-LIN-001"]],
+  "lin/neg-twice": ["PASS", ["E-LIN-002"]],
+  "lin/neg-one-branch": ["PASS", ["E-LIN-003"]],
+  "lin/neg-outer-in-loop": ["PASS", ["E-LIN-002"]],
   // s469-boot-loop-value-form — the value form (§49.6) from every head, and the Tier-0 `${ for … lift }` (§17.4)
   "loop-value/iterate": ["PASS", []],
   "loop-value/range": ["PASS", []],
@@ -344,7 +351,7 @@ describe("bootstrap acceptance cases — today's verdicts", () => {
     }
   });
   test("s471-bootstrap-lin-loop: every positive loop / defer case RAN on the bootstrap (output checked)", () => {
-    for (const rel of ["loop/defer-per-iteration", "loop/defer-loop-in-defer"]) {
+    for (const rel of ["loop/defer-per-iteration", "loop/defer-loop-in-defer", "lin/consume-once", "lin/param-once"]) {
       expect([rel, verdicts[rel].runtimeExecuted]).toEqual([rel, true]);
     }
   });

@@ -1,0 +1,16 @@
+// §35.4.1: a `lin` declared and consumed once in straight-line code is valid.
+<program>
+    function mint() -> string {
+        return "tok";
+    }
+    function use(t: string) -> string {
+        return `used:${t}`;
+    }
+    function f() -> string {
+        lin t = mint();
+        return use(t);
+    }
+    <main>
+        <p id="o">${f()}</p>
+    </main>
+</program>

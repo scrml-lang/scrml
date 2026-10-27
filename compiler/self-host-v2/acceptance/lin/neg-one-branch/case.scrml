@@ -1,0 +1,20 @@
+// §35.4.2: E-LIN-003 — consumed in the `if` branch only.
+<program>
+    function mint() -> string {
+        return "tok";
+    }
+    function use(t: string) -> string {
+        return `used:${t}`;
+    }
+    function f(c: boolean) -> string {
+        lin t = mint();
+        let r = "";
+        if (c) {
+            r = use(t);
+        }
+        return r;
+    }
+    <main>
+        <p id="o">${f(true)}</p>
+    </main>
+</program>

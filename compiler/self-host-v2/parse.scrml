@@ -2165,6 +2165,7 @@ ${
         const t: PTok = cur(tp)
         const start: int = t.start
         if (isWord(tp, "let") || isWord(tp, "const")) return parseLocal(tp)
+        if (isWord(tp, "lin")) return parseLinLocal(tp)   // s471 (§35.2)
         if (deferAhead(tp)) return parseDefer(tp)      // s451 (§19.16.1)
         if (failAhead(tp)) return parseFail(tp)        // s451 (Ue, §19.3.1)
         if (isWord(tp, "fail")) return bareFail(tp)    // s469 (§7.2.2 rule 10: reserved here)
@@ -2656,7 +2657,7 @@ ${
         const f: AFor | not = forOfStmt(rf.s)
         if (f is not) {
             const re: RExpr = mkE(t, ft.start, AExprK.Recovered)
-            return mkS(re.tp, start, AStmtK.Local(nameTok.v, mutable, aty, re.e))
+            return mkS(re.tp, start, AStmtK.Local(nameTok.v, mutable, aty, re.e, false))
         }
         const nf: AFor = { nid: f.nid, span: f.span, label: f.label, head: f.head, body: f.body, bound: b }
         return mkS(t, start, AStmtK.For(nf))
@@ -3065,7 +3066,7 @@ ${
         }
         t = expectP(t, "=")
         const init: RExpr = parseAssign(t)
-        return mkS(init.tp, start, AStmtK.Local(nameTok.v, mutable, aty, init.e))
+        return mkS(init.tp, start, AStmtK.Local(nameTok.v, mutable, aty, init.e, false))
     }
 
     // `i = 0, j = n` — each an expression statement.
@@ -3160,7 +3161,31 @@ ${
         // s469 — a `for-binding` (§49.2.1): the value form, from any head (§49.6)
         if (isWord(t, "for") || labelAhead(t)) return parseForBinding(t, start, nameTok, mutable, aty)
         const init: RExpr = parseAssign(t)
-        return mkS(init.tp, start, AStmtK.Local(nameTok.v, mutable, aty, init.e))
+        return mkS(init.tp, start, AStmtK.Local(nameTok.v, mutable, aty, init.e, false))
+    }
+
+    // s471 — `lin name = init;` (§35.2: "`lin` is a declaration keyword. It takes
+    // the same syntactic position as `let` and `const`"; `lin-declaration ::= 'lin'
+    // identifier '=' expression ';'`). An immutable local, marked linear — the
+    // linear pass (analyze linPass) counts its consumptions. The production has no
+    // type annotation: `lin x: T = …` is a shape §35.2 does not govern — refused
+    // by name (an open question), never read silently.
+    fn parseLinLocal(tp: TP) -> RStmt {
+        const start: int = cur(tp).start
+        let t: TP = adv(tp)
+        const nameTok: PTok = cur(t)
+        if (nameTok.cls != TC.Ident) t = diagAt(t, "E-PARSE-LOCAL", "expected a name after `lin`", nameTok)
+        t = adv(t)
+        let aty: AType | not = not
+        if (isP(t, ":")) {
+            t = diagAt(t, "E-BOOTSTRAP-UNSUPPORTED", "a type annotation on a `lin` declaration — §35.2's grammar is `lin name = expression;` (no annotation); write `lin " + nameTok.v + " = …;` (the value's type is its initializer's)", cur(t))
+            const ty: RType = parseType(adv(t))
+            aty = ty.t
+            t = ty.tp
+        }
+        t = expectP(t, "=")
+        const init: RExpr = parseAssign(t)
+        return mkS(init.tp, start, AStmtK.Local(nameTok.v, false, aty, init.e, true))
     }
 
     fn parseIf(tp: TP) -> RStmt {
@@ -3757,6 +3782,13 @@ ${
         t = expectP(adv(t), "(")
         let params: AParam[] = []
         while (!isP(t, ")") && !atEnd(t)) {
+            // s471 — `lin name: T` (§35.2.1: "parameter ::= ['lin'] identifier ':' type-annotation")
+            const lt: PTok = cur(t)
+            let isLin = false
+            if (lt.cls == TC.Keyword && lt.v == "lin" && peekAt(t, 1).cls == TC.Ident) {
+                isLin = true
+                t = adv(t)
+            }
             const p: PTok = cur(t)
             t = adv(t)
             let ty: AType | not = not
@@ -3765,7 +3797,7 @@ ${
                 ty = r.t
                 t = r.tp
             }
-            params = params.concat([{ nid: t.nid, span: spanFrom(t, p.start), name: p.v, ty: ty }])
+            params = params.concat([{ nid: t.nid, span: spanFrom(t, lt.start), name: p.v, ty: ty, lin: isLin }])
             t = bumpId(t)
             if (isP(t, ",")) t = adv(t)
         }
