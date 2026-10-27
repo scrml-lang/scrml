@@ -1,0 +1,10 @@
+// g-bootstrap-md-static-owed-s462: a static `<md>` body.
+<program>
+    <main>
+        <md>
+## Title
+
+Some *text*.
+        </md>
+    </main>
+</program>

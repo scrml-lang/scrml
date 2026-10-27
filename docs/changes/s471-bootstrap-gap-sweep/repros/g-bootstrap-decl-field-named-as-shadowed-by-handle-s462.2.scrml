@@ -1,0 +1,8 @@
+// g-bootstrap-decl-field-named-as-shadowed-by-handle-s462 (quoted limb): `<card as="hello"/>`.
+<program>
+    <card as:string="x" title:string="t"/>
+    renders <div class="card">${as}</div>
+    <main>
+        <card as="hello" title="T"/>
+    </main>
+</program>

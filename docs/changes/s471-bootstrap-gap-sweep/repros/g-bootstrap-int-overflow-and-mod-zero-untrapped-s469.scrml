@@ -1,0 +1,11 @@
+// g-bootstrap-int-overflow-and-mod-zero-untrapped-s469: int overflow, `% 0`, and an out-of-range literal.
+<program>
+    function big(a: int) -> int { return a * 1000000000000; }
+    function md(a: int, b: int) -> int { return a % b; }
+    function lit() -> int { return 9007199254740993; }
+    <main>
+        <p id="ov">${big(7000000000)}</p>
+        <p id="mz">${md(5, 0)}</p>
+        <p id="lit">${lit()}</p>
+    </main>
+</program>

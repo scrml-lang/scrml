@@ -1,0 +1,8 @@
+// g-bootstrap-loop-value-form-residue-s469 limb 2: a derived declaration bound to a loop.
+<program>
+    <orders:int[]=([1, 2, 3])/>
+    const <ids> = for (o of @orders) { lift o * 10; };
+    <main>
+        <p id="o">${@ids.length}</p>
+    </main>
+</program>

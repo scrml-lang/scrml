@@ -1,0 +1,17 @@
+// g-bootstrap-loop-wait-and-defer-s469 limb 1: a server call inside a loop body.
+<program db="./app.db">
+    let <words:int=0/>
+    function wordCount(id: string) -> int {
+        const row = ?{`SELECT body FROM notes WHERE id = ${id}`}.get() !{ _ :> not };
+        return 1;
+    }
+    function go() {
+        for (let i = 0; i < 3; i = i + 1) {
+            @words = @words + (wordCount("n1") !{ .Transport(t) :> 0 });
+        }
+    }
+    <main>
+        <button onclick=go()>go</button>
+        <p>${@words}</p>
+    </main>
+</program>

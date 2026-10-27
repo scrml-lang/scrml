@@ -1,0 +1,9 @@
+// g-bootstrap-let-decl-in-db-channel-body-refused-s469: `let <x/>` inside a `<channel>` body.
+<program>
+    <channel name="room">
+        let <count:int=0/>
+    </>
+    <main>
+        <p id="o">hi</p>
+    </main>
+</program>

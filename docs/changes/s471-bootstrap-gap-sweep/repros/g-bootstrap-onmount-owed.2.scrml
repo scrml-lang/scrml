@@ -1,0 +1,10 @@
+// g-bootstrap-onmount-owed: the deprecated `on mount { }` window (§63).
+<program>
+    function beacon() -> int { return 1; }
+    function f() {
+        on mount { beacon(); }
+    }
+    <main>
+        <p>x</p>
+    </main>
+</program>

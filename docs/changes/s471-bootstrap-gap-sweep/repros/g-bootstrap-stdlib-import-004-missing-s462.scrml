@@ -1,0 +1,8 @@
+// g-bootstrap-stdlib-import-004-missing-s462: a `scrml:` import of a name the module does not export.
+// (Graded via `bun scripts/bootstrap-conformance.ts --filter module/e-import-004` — the corpus cases are the repro.)
+<program>
+    ${ import { totallyBogus } from "scrml:data"; }
+    <main>
+        <p>${totallyBogus}</p>
+    </main>
+</program>

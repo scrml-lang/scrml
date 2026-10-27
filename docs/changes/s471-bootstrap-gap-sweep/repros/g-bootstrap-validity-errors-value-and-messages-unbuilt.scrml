@@ -1,0 +1,16 @@
+// g-bootstrap-validity-errors-value-and-messages-unbuilt: (1) `errors` as a value; (4) a Level-1 inline message; (5) a cross-field validator; `oneOf`.
+<program>
+    <f:struct>
+        let <v:string="" req("Please fill")/>
+        renders <input bind:value=@v/>
+        let <w:string="" eq(@v)/>
+        renders <input bind:value=@w/>
+        let <k:string="" oneOf(["a", "b"])/>
+        renders <input bind:value=@k/>
+    </>
+    renders <form><*v/><*w/><*k/></form>
+    <main>
+        <*f/>
+        <p>${@f.v.errors}</p>
+    </main>
+</program>

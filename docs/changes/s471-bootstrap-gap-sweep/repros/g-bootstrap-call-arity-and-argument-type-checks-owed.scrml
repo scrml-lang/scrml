@@ -1,0 +1,15 @@
+// g-bootstrap-call-arity-and-argument-type-checks-owed: too many / too few args; a primitive mismatch; `T | not` into `T`.
+<program>
+    function g(a: int, b: int) -> int { return a + b; }
+    function h(s: string) -> int { return 0; }
+    function m(x: int | not) -> int { return h(x); }
+    function f() -> int {
+        const p = g(1, 2, 3);
+        const q = g(1);
+        const r = h(5);
+        return p + q + r;
+    }
+    <main>
+        <p>${f()}</p>
+    </main>
+</program>

@@ -1,0 +1,18 @@
+// g-bootstrap-gate-marker-over-names-each-row-fields: a validated field bound inside an `<each>` row (a per-row USE), the list empty.
+<program>
+    <row:struct>
+        let <v:string="" req/>
+        renders <input bind:value=@v/>
+    </>
+    renders <div><*v/></div>
+    <xs:int[free, append]=([])/>
+    let <calls:int=0/>
+    function register() { @calls = @calls + 1; }
+    <main>
+        <form id="fm" onsubmit=register()>
+            <each in=@xs as x><row/></each>
+            <button type="submit">go</button>
+        </form>
+        <p id="calls">${@calls}</p>
+    </main>
+</program>

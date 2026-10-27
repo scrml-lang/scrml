@@ -1,0 +1,10 @@
+// g-bootstrap-onmount-owed: `<onMount>` and the deprecated `on mount { }`.
+<program>
+    function beacon() -> int { return 1; }
+    <main>
+        <div>
+            <onMount>${ beacon(); }</>
+            <p>x</p>
+        </div>
+    </main>
+</program>

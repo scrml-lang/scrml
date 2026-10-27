@@ -1,0 +1,10 @@
+// g-bootstrap-unimplemented-construct-reported-as-generic-code: `cleanup(42)`; `a: any`.
+<program>
+    function f(a: any) -> int { return 0; }
+    function g() {
+        cleanup(42);
+    }
+    <main>
+        <p>x</p>
+    </main>
+</program>

@@ -1,0 +1,10 @@
+// g-bootstrap-method-on-call-result-refused-s469: a built-in method on a typed call's result.
+<program>
+    function get() -> string { return "  a  "; }
+    function t() -> string { return get().trim(); }
+    function n() -> int { return get().length; }
+    <main>
+        <p id="o">${t()}</p>
+        <p id="n">${n()}</p>
+    </main>
+</program>

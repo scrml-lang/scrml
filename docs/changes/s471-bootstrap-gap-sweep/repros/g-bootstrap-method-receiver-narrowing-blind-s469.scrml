@@ -1,0 +1,10 @@
+// g-bootstrap-method-receiver-narrowing-blind-s469: member / method on a narrowed `T | not` cell.
+<program>
+    <n:string | not=("ab")/>
+    function len() -> int { return match @n { not :> 0, else :> @n.length }; }
+    function up() -> string { return match @n { not :> "", else :> @n.toUpperCase() }; }
+    <main>
+        <p id="l">${len()}</p>
+        <p id="u">${up()}</p>
+    </main>
+</program>

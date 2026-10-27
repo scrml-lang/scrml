@@ -1,0 +1,9 @@
+// g-bootstrap-module-import-checks-missing: an import from a file that does not exist (E-IMPORT-006); a bare specifier (E-IMPORT-005).
+// (Also graded via `bun scripts/bootstrap-conformance.ts --filter module/`.)
+<program>
+    ${ import { a } from "./does-not-exist.scrml"; }
+    ${ import { b } from "lodash"; }
+    <main>
+        <p>${a()}</p>
+    </main>
+</program>

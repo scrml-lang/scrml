@@ -1,0 +1,6 @@
+// lib for g-bootstrap-value-writes-effect-suppression-global: an exported function that writes a cell.
+export let <hits:int=0/>
+export function bump() -> int {
+    @hits = @hits + 1;
+    return 1;
+}

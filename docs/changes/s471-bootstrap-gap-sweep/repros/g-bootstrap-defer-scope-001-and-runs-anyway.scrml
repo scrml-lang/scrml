@@ -1,0 +1,15 @@
+// g-bootstrap-defer-scope-001-and-runs-anyway: the return value is evaluated before the deferred statement runs (§19.16.2).
+<program>
+    let <count:int=7/>
+    let <got:int=0/>
+    function f() -> int {
+        defer @count = 99;
+        return @count;
+    }
+    function go() { @got = f(); }
+    <main>
+        <button id="go" onclick=go()>go</button>
+        <p id="got">${@got}</p>
+        <p id="count">${@count}</p>
+    </main>
+</program>

@@ -1,0 +1,18 @@
+// g-bootstrap-m2-direct-handle-refused-inside-own-given: a direct `@color.value` read / write inside `given c = @color :> { … }`.
+<program>
+    <box label:string>
+        export let <value:string="a"/>
+    </>
+    renders <span class="bx">${value}</span>
+    let <show:bool=true/>
+    let <seen:string=""/>
+    function pick() { given c = @color :> { @color.value = "b"; } }
+    function peek() { given c = @color :> { @seen = @color.value; } }
+    function ctl() { given c = @color :> { c.value = "b"; } }
+    <main>
+        <div if=@show><box as=color label="L"/></div>
+        <button id="p" onclick=pick()>p</button>
+        <button id="k" onclick=peek()>k</button>
+        <p id="s">${@seen}</p>
+    </main>
+</program>

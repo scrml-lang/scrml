@@ -1,0 +1,6 @@
+// g-bootstrap-program-attrs-ignored-fail-open: `auth=` on `<program>`.
+<program auth="required">
+    <main>
+        <p>x</p>
+    </main>
+</program>

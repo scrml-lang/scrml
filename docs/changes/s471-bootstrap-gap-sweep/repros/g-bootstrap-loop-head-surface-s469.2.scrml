@@ -1,0 +1,7 @@
+// g-bootstrap-loop-head-surface-s469 limb 2: for … else (§17.4a) in a Tier-0 loop.
+<program>
+    <xs:int[]=([])/>
+    <main>
+        <ul id="u">${ for (x of @xs) { lift <li>${x}</li>; } else { lift <li>none</li>; } }</ul>
+    </main>
+</program>

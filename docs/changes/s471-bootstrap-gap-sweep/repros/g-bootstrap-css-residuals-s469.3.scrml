@@ -1,0 +1,6 @@
+// g-bootstrap-css-residuals-s469 limb 3: an author `data-scrml` attribute on a non-root element.
+<program>
+    <main>
+        <p data-scrml="zz">x</p>
+    </main>
+</program>

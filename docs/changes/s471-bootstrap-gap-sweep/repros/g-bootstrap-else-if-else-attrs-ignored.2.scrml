@@ -1,0 +1,10 @@
+// g-bootstrap-else-if-else-attrs-ignored (after input): two clicks → step 3 → only #rest.
+<program>
+    let <step:int=1/>
+    <main>
+        <p id="one" if=(@step == 1)>ONE</p>
+        <p id="two" else-if=(@step == 2)>TWO</p>
+        <p id="rest" else>REST</p>
+        <button id="b" onclick={ @step = @step + 1; }>b</button>
+    </main>
+</program>

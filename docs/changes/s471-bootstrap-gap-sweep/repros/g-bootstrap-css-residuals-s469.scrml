@@ -1,0 +1,10 @@
+// g-bootstrap-css-residuals-s469 limb 1: `url(@c)` in a `#{}` block.
+<program>
+    let <c:string="x.png"/>
+    #{
+        p { background: url(@c); }
+    }
+    <main>
+        <p>x</p>
+    </main>
+</program>

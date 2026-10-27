@@ -1,0 +1,10 @@
+// g-bootstrap-loop-value-form-residue-s469 limb 9: a bound loop over a tape literal — the binder's `.length`.
+<program>
+    function f() -> int {
+        const xs = for (y of [1, 2]) { lift y; };
+        return xs.length;
+    }
+    <main>
+        <p id="o">${f()}</p>
+    </main>
+</program>

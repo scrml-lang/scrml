@@ -1,0 +1,7 @@
+// g-bootstrap-style-attr-bound-value-unguarded-s469: `style=(@c)` with a value that fetches a URL.
+<program>
+    let <c:string="background: url(https://evil.example/leak)"/>
+    <main>
+        <p id="p" style=(@c)>x</p>
+    </main>
+</program>

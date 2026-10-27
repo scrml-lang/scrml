@@ -1,0 +1,7 @@
+// g-bootstrap-nested-interp-string-message-says-display-literal: an interpolating string inside an expression.
+<program>
+    let <n:int=5/>
+    <main>
+        <p : @n == 5 ? "a ${@n} b" : "c">
+    </main>
+</program>

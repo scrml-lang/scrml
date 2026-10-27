@@ -1,0 +1,19 @@
+// g-bootstrap-typer-int-into-string-bool-initializer-unchecked
+<program>
+    let <n:int=5/>
+    function f() -> int {
+        let a: int = 1;
+        let s: string = a;
+        let t: boolean = a;
+        let u: string = @n;
+        return 0;
+    }
+    function ctl() -> int {
+        let a: string = "x";
+        let k: int = a;
+        return k;
+    }
+    <main>
+        <p>${f()}</p>
+    </main>
+</program>

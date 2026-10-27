@@ -1,0 +1,11 @@
+// g-bootstrap-unnamed-state-child-variant-codes: an initial value naming no variant.
+<program>
+    type Ph:enum = { A, B }
+    <ph:Ph=.Nope single>
+        <A rule=.B/>
+        <B rule=.A/>
+    </>
+    <main>
+        <p><*ph/></p>
+    </main>
+</program>

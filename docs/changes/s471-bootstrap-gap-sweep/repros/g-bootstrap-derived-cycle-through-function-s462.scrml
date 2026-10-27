@@ -1,0 +1,8 @@
+// g-bootstrap-derived-cycle-through-function-s462: a derived cycle that closes only through a function body (annotated).
+<program>
+    function g() -> int { return @a + 1; }
+    <a:int=(g())/>
+    <main>
+        <p>${@a}</p>
+    </main>
+</program>

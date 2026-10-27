@@ -1,0 +1,13 @@
+// g-bootstrap-gate-disabled-readonly-controls-still-gate: the only control binding a `req` value is `disabled`.
+<program>
+    let <email:string="" req/>
+    let <calls:int=0/>
+    function register() { @calls = @calls + 1; }
+    <main>
+        <form id="fm" onsubmit=register()>
+            <input disabled bind:value=@email/>
+            <button type="submit">go</button>
+        </form>
+        <p id="calls">${@calls}</p>
+    </main>
+</program>

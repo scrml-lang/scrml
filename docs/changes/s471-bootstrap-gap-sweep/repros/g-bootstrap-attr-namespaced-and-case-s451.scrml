@@ -1,0 +1,9 @@
+// g-bootstrap-attr-namespaced-and-case-s451: (1) `xlink:href` / `xml:lang`; (3) `onclick=${f}`.
+<program>
+    function f() { }
+    <main>
+        <svg><use xlink:href="#a"/></svg>
+        <p xml:lang="en">x</p>
+        <button onclick=${f}>b</button>
+    </main>
+</program>

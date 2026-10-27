@@ -1,0 +1,12 @@
+// g-bootstrap-local-shadows-state-accepted-s469: a local that shadows a state cell name.
+<program>
+    let <count:int=0/>
+    function f() {
+        let count = 5;
+        @count = count;
+    }
+    <main>
+        <button onclick=f()>f</button>
+        <p>${@count}</p>
+    </main>
+</program>

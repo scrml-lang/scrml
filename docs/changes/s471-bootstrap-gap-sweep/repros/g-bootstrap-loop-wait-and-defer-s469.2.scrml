@@ -1,0 +1,21 @@
+// g-bootstrap-loop-wait-and-defer-s469 limbs 2+3: `defer` inside a loop body; a loop inside a deferred body.
+<program>
+    let <log:string=""/>
+    function a() {
+        for (let i = 0; i < 2; i = i + 1) {
+            defer { @log = @log + "d"; }
+            @log = @log + "b";
+        }
+    }
+    function b() {
+        defer {
+            for (let i = 0; i < 2; i = i + 1) { @log = @log + "x"; }
+        }
+        @log = @log + "y";
+    }
+    <main>
+        <button id="a" onclick=a()>a</button>
+        <button id="b" onclick=b()>b</button>
+        <p id="o">${@log}</p>
+    </main>
+</program>

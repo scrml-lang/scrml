@@ -1,0 +1,11 @@
+// g-bootstrap-shorthand-body-keyword-before-tag-cascades: `let <b/>` in a `:`-shorthand state-child body.
+<program>
+    type Phase:enum = { Idle, Busy }
+    <phase:Phase=.Idle single>
+        <Idle rule=.Busy : let <b/>>
+        <Busy rule=.Idle/>
+    </>
+    <main>
+        <p><*phase/></p>
+    </main>
+</program>

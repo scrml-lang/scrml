@@ -1,0 +1,12 @@
+// g-bootstrap-unnamed-state-child-variant-codes: a state-child naming no variant; a rule= naming no variant.
+<program>
+    type Ph:enum = { A, B }
+    <ph:Ph=.A single>
+        <A rule=.Bogus/>
+        <B rule=.A/>
+        <Zed rule=.A/>
+    </>
+    <main>
+        <p><*ph/></p>
+    </main>
+</program>

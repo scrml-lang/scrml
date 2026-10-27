@@ -1,0 +1,8 @@
+// g-bootstrap-unknown-tags-resolved-as-html: an undeclared Capitalized tag, an undeclared lowercase tag, `<style>`.
+<program>
+    <main>
+        <Unknown/>
+        <p><x/></p>
+        <style>.a{color:red}</style>
+    </main>
+</program>

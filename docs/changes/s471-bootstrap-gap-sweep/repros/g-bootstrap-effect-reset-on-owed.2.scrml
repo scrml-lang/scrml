@@ -1,0 +1,16 @@
+// g-bootstrap-effect-reset-on-owed: REMAINS limbs — `<request>`, an effect in a function body, `reset-on=` on a declaration field.
+<program>
+    let <n:int=0/>
+    <box label:string>
+        let <v:int=0 reset-on=[@n]/>
+    </>
+    renders <span>${v}</span>
+    <request id="r" url="/x">
+    </request>
+    function f() {
+        <effect deps=[@n]>${ @n; }</>
+    }
+    <main>
+        <box label="a"/>
+    </main>
+</program>

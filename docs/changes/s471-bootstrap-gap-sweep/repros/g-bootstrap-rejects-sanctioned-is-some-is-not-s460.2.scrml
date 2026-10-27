@@ -1,0 +1,14 @@
+// g-bootstrap-rejects-sanctioned-is-some-is-not-s460 (message limb): a bare `!x` on `T | not` — does any diagnostic teach `x != not`?
+// Also the S462 note: a `given x :>` match arm.
+<program>
+    function a(u: string | not) -> string {
+        if (!u) { return ""; }
+        return "y";
+    }
+    function c(u: string | not) -> string {
+        return match u { given x :> x, not :> "" };
+    }
+    <main>
+        <p>${a("q")}</p>
+    </main>
+</program>

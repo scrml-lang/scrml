@@ -1,0 +1,17 @@
+// g-bootstrap-rejects-sanctioned-is-some-is-not-s460: `x is some` / `x is not` (and an early return on `is not`).
+<program>
+    function a(u: string | not) -> string {
+        if (u is some) { return u; }
+        return "";
+    }
+    function b(u: string | not) -> string {
+        if (u is not) { return "-"; }
+        return u;
+    }
+    let <s:string=""/>
+    function go() { @s = a("x") + b("y") + b(not); }
+    <main>
+        <button id="go" onclick=go()>go</button>
+        <p id="s">${@s}</p>
+    </main>
+</program>

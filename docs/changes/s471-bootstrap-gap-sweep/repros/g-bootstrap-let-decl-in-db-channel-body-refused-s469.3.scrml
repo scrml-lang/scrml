@@ -1,0 +1,7 @@
+// g-bootstrap-let-decl-in-db-channel-body-refused-s469 (widened): `let <x/>` inside a `<page>` body, read program-wide.
+<program>
+    <page route="/">
+        let <count:int=1/>
+        <p id="o">${@count}</p>
+    </page>
+</program>

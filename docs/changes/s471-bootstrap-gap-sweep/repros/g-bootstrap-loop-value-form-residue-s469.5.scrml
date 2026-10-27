@@ -1,0 +1,7 @@
+// g-bootstrap-loop-value-form-residue-s469 limb 5: `return` in a Tier-0 loop.
+<program>
+    <xs:int[]=([1, 2, 3])/>
+    <main>
+        <ul id="u">${ for (x of @xs) { if (x == 2) { return; } lift <li>${x}</li>; } }</ul>
+    </main>
+</program>

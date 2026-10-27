@@ -1,0 +1,17 @@
+// g-bootstrap-gate-reach-live-dom-reading P3: a USE (not a Star) inside the form whose renders binds a `req` field in a closed `if=` region.
+<program>
+    let <show:bool=false/>
+    let <calls:int=0/>
+    <f:struct>
+        let <v:string="" req/>
+    </>
+    renders <div><div if=@show><input bind:value=@f.v/></div></div>
+    function register() { @calls = @calls + 1; }
+    <main>
+        <form id="fm" onsubmit=register()>
+            <f/>
+            <button type="submit">go</button>
+        </form>
+        <p id="calls">${@calls}</p>
+    </main>
+</program>

@@ -1,0 +1,6 @@
+// g-bootstrap-text-entities-displayed-literally-s468: author entities in ordinary markup text.
+<program>
+    <main>
+        <p id="o">a &amp; b &lt;c&gt;</p>
+    </main>
+</program>

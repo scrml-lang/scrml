@@ -1,0 +1,11 @@
+// g-bootstrap-no-host-method-calls-refuses-correct-code-s460 defect 2: a condition reading a local whose initializer was refused — reported twice?
+<program>
+    function f(seg: string) -> string {
+        const optional = seg.frobnicate("?");
+        if (optional) { return "opt"; }
+        return "req";
+    }
+    <main>
+        <p>${f("a")}</p>
+    </main>
+</program>
