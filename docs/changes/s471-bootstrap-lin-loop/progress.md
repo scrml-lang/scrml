@@ -55,3 +55,11 @@ Slices (all in one commit — the pass is one walk; slicing it by commit would h
 - CI `slices` job, run by hand: lint-no-default-arm 0 violations; slice-m1 100/0; slice-m2 612/0; slice-m1 SLICE_CORE=lowered 100/0; slice-m3 60/0; slice-m4 2547/0; slice-codec 166/0.
 - `bun run types:check`: OK (181 diagnostics, unchanged).
 - bootstrap-conformance (not committed): base 1e2a2812f PASS 251 · FAIL 63 · UNSUPPORTED 814 · NOT-TWINNED 685 (1813) → after PASS 252 · FAIL 64 · UNSUPPORTED 812. Both moved cases are the DEFER half (now the control-flow lane's): `defer/loop-per-iteration` UNSUPPORTED → PASS; `defer/control-flow-neg` UNSUPPORTED → FAIL (twin-extra-error: E-DEFER-CONTROL-FLOW + an unasserted E-TYPE-001, now reached because the loop-defer refusal is gone). The wait and lin halves moved no corpus case (no corpus case reaches them on the bootstrap).
+
+## Reconciliation onto the control-flow lane (PA, after #1593)
+- New branch `s471-bootstrap-lin-loop` from `origin/s471-bootstrap-control-flow` @ 56636f8d0. Cherry-picked 97bbaf8a7 → a512acfd4, 2b0e08b21, c2b9821b7. 460e520c5 (my defer half) NOT picked; the control-flow lane's defer code is kept.
+- Conflicts: `check.scrml` only — the C19 header comment (both lanes' wording merged: my wait text + their defer text) and `loopForbiddenStmt` (my Suspend / Join / Jump → "" arms; their Defer arm kept). `analyze.scrml` merged clean (my 97bbaf8a7 change there is `planLoop` only). `progress.md` / `BRIEF.md` restored from my commits (the branch base lacked them).
+- Re-derived from 460e520c5: nothing — 97bbaf8a7 does not depend on the defer half (planLoop / lower / C12 / print / runtime are independent of loopDefer / C16).
+- Kept (all pass on their code): `slice-m4/loop-defer-s471.test.js` (12/12) and the four `acceptance/loop/` defer cases (defer-per-iteration, defer-loop-in-defer, neg-defer-bound-direct, neg-defer-break-out — their STATUS rows hold). Dropped: none. Ruling applied (a `lift` inside a deferred body is E-DEFER-CONTROL-FLOW): no kept test puts a `lift` in a deferred body.
+- `server-await-review` `s1/forBody`: PASS (wrong → REJECTED, right → WELCOME) on the reconciled branch.
+- `severity.scrml --check`: current.
