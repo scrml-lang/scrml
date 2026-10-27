@@ -1,0 +1,8 @@
+// the s471 symptom: `scrml:format` does not compile on the bootstrap yet (its source is the
+// pre-§66 dialect inside a top-level `<program>`), so the import is refused BY NAME at the import —
+// never dropped, and the use is not also "not declared".
+<program>
+    ${ import { slug } from "scrml:format"; }
+    let <title:string="Hello World"/>
+    <p>${slug(@title)}</p>
+</program>

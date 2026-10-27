@@ -2,7 +2,7 @@
 // scrml compiled by impl#1) over source files, and the LOWERED Cores of the
 // slice programs — the same programs M1 built by hand (slice-m1/*.core.scrml).
 
-import { readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
 const HERE = import.meta.dir;
@@ -86,6 +86,154 @@ export function frontEnd(mods, files, entry) {
     nodes: next,
     ms: { parse: t1 - t0, analyze: t2 - t1, lower: t3 - t2, total: t3 - t0 },
   };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// s471 — `scrml:` stdlib modules, supplied as SOURCE through the front end's
+// ordinary module path (SPEC §41.3–§41.5). A stdlib module is just another
+// `.scrml` module with a fixed location: its files join the compile set under
+// link.scrml's stdlib prefix (`stdlib/format/index.scrml` is
+// `scrml:format/index.scrml`), and link.scrml `importTarget` — the one
+// resolver — finds them. Nothing here reads source text: the imports are the
+// bootstrap parser's own (parse.scrml `parseFile`, link.scrml `importsOfItems`).
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** The compiler-bundled stdlib (§41.5 tier 1): `<repo>/stdlib`. */
+export const STDLIB_ROOT = join(HERE, "..", "..", "..", "stdlib");
+
+// A `scrml:` module name the stdlib can hold: `/`-separated lower-case segments
+// (`format`, `auth/jwt`) — never `.`, `..` or an empty segment, so a name can
+// only ever name a file under the stdlib root.
+const STDLIB_NAME = /^[a-z0-9][a-z0-9_-]*(\/[a-z0-9][a-z0-9_-]*)*$/;
+
+/** The `scrml:compiler` family is KNOWN-DEFERRED (§41.17): never supplied; analyze refuses it by name. */
+function deferredStdlib(name) {
+  return name === "compiler" || name.startsWith("compiler/");
+}
+
+function stdlibFile(root, rel) {
+  const abs = join(root, ...rel.split("/"));
+  return existsSync(abs) ? abs : null;
+}
+
+/**
+ * The stdlib sources a source set imports, transitively, as front-end inputs:
+ * `{ sources: [{ path, src, abs }], modules: Map<name, Set<path>> }` — `path` the
+ * prefixed project path the compiler sees, `abs` the file on disk (for a driver's
+ * diagnostics), and per imported module the set of stdlib paths its closure
+ * reaches. A module named in `exclude`, the deferred `scrml:compiler` family, a
+ * name that is not a stdlib name, or a module with no file under `root` is not
+ * supplied — so its import resolves to nothing and analyze refuses it by name.
+ */
+export function stdlibSources(mods, files, opts = {}) {
+  const root = opts.stdlibRoot ?? STDLIB_ROOT;
+  const exclude = opts.exclude ?? new Set();
+  const prefix = mods.link.stdlibPrefix();
+  const byPath = new Map(); // stdlib path → { path, src, abs }
+  const modules = new Map(); // module name → Set<stdlib path>
+  // the stdlib paths `file` imports (a module name per `scrml:` import; a relative one inside the prefix)
+  const importsOf = (path, src) => {
+    const ast = mods.parse.parseFile(path, src, 0).ast;
+    const out = [];
+    for (const imp of mods.link.importsOfItems(ast.items)) {
+      const from = String(imp.from);
+      if (from.startsWith(prefix)) {
+        const name = from.slice(prefix.length);
+        if (!STDLIB_NAME.test(name) || deferredStdlib(name) || exclude.has(name)) continue;
+        const rel = stdlibFile(root, `${name}/index.scrml`) ? `${name}/index.scrml` : stdlibFile(root, `${name}.scrml`) ? `${name}.scrml` : null;
+        if (rel !== null) out.push({ module: name, path: prefix + rel });
+      } else if (path.startsWith(prefix) && (from.startsWith("./") || from.startsWith("../"))) {
+        const dir = path.includes("/") ? path.slice(0, path.lastIndexOf("/")) : "";
+        const p = String(mods.link.resolveFrom(dir, from));
+        if (p.startsWith(prefix) && stdlibFile(root, p.slice(prefix.length))) out.push({ module: null, path: p });
+      }
+    }
+    return out;
+  };
+  const reach = (module, path) => {
+    const todo = [path];
+    const seen = modules.get(module) ?? new Set();
+    modules.set(module, seen);
+    while (todo.length > 0) {
+      const p = todo.pop();
+      if (seen.has(p)) continue;
+      seen.add(p);
+      let entry = byPath.get(p);
+      if (entry === undefined) {
+        const abs = join(root, ...p.slice(prefix.length).split("/"));
+        entry = { path: p, src: readFileSync(abs, "utf8"), abs };
+        byPath.set(p, entry);
+      }
+      for (const t of importsOf(entry.path, entry.src)) {
+        // a relative import is this module's own file; a `scrml:` one is another module, judged on
+        // its own — withdrawn, its import here is refused in THIS module's file, which withdraws this one
+        if (t.module === null) todo.push(t.path);
+        else if (!modules.has(t.module)) reach(t.module, t.path);
+      }
+    }
+  };
+  const direct = new Set(); // the modules a project file itself imports
+  for (const f of files) {
+    for (const t of importsOf(f.path, f.src)) {
+      if (t.module === null) continue;
+      direct.add(t.module);
+      if (!modules.has(t.module)) reach(t.module, t.path);
+    }
+  }
+  return { sources: [...byPath.values()], modules, direct };
+}
+
+const isError = (d) => String(d.severity ?? "").toLowerCase() === "error";
+
+/**
+ * `frontEnd` over `files` and the `scrml:` stdlib modules they import. A stdlib
+ * module is importable BY CONSTRUCTION when its source compiles on the bootstrap:
+ * a module whose files carry an Error diagnostic is withdrawn (with every module
+ * whose closure holds such a file) and the compile re-run without it, until no
+ * stdlib file carries one — so a withdrawn module's import is refused BY NAME at
+ * the import (analyze.scrml checkImports), never a wall of errors in a file the
+ * user did not write. Returns `frontEnd`'s result (its diagnostics the user's
+ * files' only), plus `stdlib: { supplied: [{ module, files }], sources, refused:
+ * [{ module, direct, diags, sources }] }` — `diags` the withdrawn module's own
+ * Error diagnostics (each in one of its `sources`, by `path`; `abs` is the file on
+ * disk), `direct` whether a project file imports it itself — for a driver to say why.
+ */
+export function frontEndStdlib(mods, files, entry, opts = {}) {
+  const prefix = mods.link.stdlibPrefix();
+  for (const f of files) {
+    if (String(f.path).startsWith(prefix)) throw new Error(`a project file may not be named under the stdlib prefix ${JSON.stringify(prefix)}: ${JSON.stringify(f.path)}`);
+  }
+  const exclude = new Set(opts.exclude ?? []);
+  const refused = [];
+  for (;;) {
+    const std = stdlibSources(mods, files, { stdlibRoot: opts.stdlibRoot, exclude });
+    const r = frontEnd(mods, [...files, ...std.sources.map((s) => ({ path: s.path, src: s.src }))], entry);
+    const bad = new Map(); // module → its Error diagnostics
+    for (const d of r.diags) {
+      if (!isError(d) || !String(d.file ?? "").startsWith(prefix)) continue;
+      for (const [m, paths] of std.modules) {
+        if (paths.has(d.file)) bad.set(m, [...(bad.get(m) ?? []), d]);
+      }
+    }
+    if (bad.size === 0) {
+      const mine = (d) => !String(d.file ?? "").startsWith(prefix);
+      return {
+        ...r,
+        diags: r.diags.filter(mine),
+        parseDiags: r.parseDiags.filter(mine),
+        infos: (r.infos ?? []).filter(mine),
+        stdlib: {
+          supplied: [...std.modules].map(([module, paths]) => ({ module, files: [...paths].sort() })),
+          sources: std.sources,
+          refused,
+        },
+      };
+    }
+    for (const [m, ds] of [...bad].sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0))) {
+      exclude.add(m);
+      refused.push({ module: m, direct: std.direct.has(m), diags: ds, sources: std.sources.filter((s) => std.modules.get(m)?.has(s.path)) });
+    }
+  }
 }
 
 /**

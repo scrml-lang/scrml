@@ -55,6 +55,7 @@ ${
              AHow, AHandled, AArm, APat, ABind, AArmBody, AFail, AFor, AForHead, AIterSrc, AForBound, ALift,
              ACss, ACssItem, ACssRule, ACssDecl, ACssPart, ACssRef, mkSpan, newDiag } from "./ast.scrml"
     import { Severity } from "./severity.scrml"
+    import { importTarget, importsOfItems } from "./link.scrml"
     import { WireBuild, WireTable, wireBuild, hasFixedLength } from "./codec.scrml"
     import { SqlFacts, SlotQuote, sqlFacts, slotInLiteral, txControl, txControlAware } from "./sql.scrml"
     import { FxAtom, ownAtom, closeDim, witnessOf, atomChain } from "./effects.scrml"
@@ -4786,6 +4787,8 @@ ${
                 return diagX(env, e, "E-SCOPE-001", "`" + name + "` is a cell — read it as `@" + name + "` (V5-strict: bare names are locals)", st)
             }
         }
+        // s471: a name a refused import brings is that import's failure (checkImports), not also undeclared
+        if (importRefusesName(env.g, env.file, name)) return plain(not, st)
         return diagX(env, e, "E-SCOPE-001", "`" + name + "` is not declared", st)
     }
 
@@ -13503,12 +13506,10 @@ ${
     fn importsName(files: FileAst[], file: string, name: string) -> boolean {
         for (const f of files) {
             if (f.path == file) {
-                for (const it of f.items) {
-                    const imp: AImport | not = importOf(it)
-                    if (imp is given) {
-                        for (const n of imp.names) {
-                            if (n.name == name) return true
-                        }
+                // s471: a `<program>`'s own imports included (link.scrml importsOfItems)
+                for (const imp of importsOfItems(f.items)) {
+                    for (const n of imp.names) {
+                        if (n.name == name) return true
                     }
                 }
             }
@@ -23250,17 +23251,26 @@ ${
         return out
     }
 
-    // Every imported name must be an EXPORTED type / declaration / function of a
-    // file in the link set.
+    // s471 — every import RESOLVES (link.scrml `importTarget`, the one resolver
+    // the link order also reads) to a file in the link set, and every name it
+    // brings is an EXPORTED type / declaration / function of THAT file (§21.3:
+    // "resolved by the compiler against the exporting file's export list").
+    // An import that resolves to nothing is refused BY NAME at the import —
+    // never dropped (before s471 a `scrml:` import, an import inside a
+    // `<program>`, and a name exported by some other file all passed silently).
     fn checkImports(files: FileAst[], g: Globals, st0: AS) -> AS {
         let st: AS = st0
+        const paths: string[] = filePaths(files)
         for (const f of files) {
-            for (const it of f.items) {
-                const imp: AImport | not = importOf(it)
-                if (imp is given) {
+            for (const imp of importsOfItems(f.items)) {
+                const target: string = importTarget(f.path, imp.from, paths)
+                if (target == "") {
+                    const r: ImportRefusal = importRefusal(imp.from)
+                    st = addDiag(st, f.path, imp.span, r.code, r.why)
+                } else {
                     for (const n of imp.names) {
-                        if (!exportedAnywhere(g, n.name)) {
-                            st = addDiag(st, f.path, n.span, "E-IMPORT-NOT-EXPORTED", "`" + n.name + "` is not exported by `" + imp.from + "`")
+                        if (!exportedBy(g, target, n.name)) {
+                            st = addDiag(st, f.path, n.span, "E-IMPORT-004", "`" + n.name + "` is not exported by `" + imp.from + "`")
                         }
                     }
                 }
@@ -23269,30 +23279,70 @@ ${
         return st
     }
 
-    fn importOf(it: AItem) -> AImport | not {
-        const k: AItemK = it.k
-        return match k {
-            .ImportItem(i: i) :> i
-            .TypeItem(t: t) :> not
-            .FnItem(f: f) :> not
-            .DeclItem(d: d) :> not
-            .MarkupItem(n: n) :> not
-            .ProgramItem(p: p) :> not
-        }
+    fn filePaths(files: FileAst[]) -> string[] {
+        let out: string[] = []
+        for (const f of files) { out = out.concat([f.path]) }
+        return out
     }
 
-    fn exportedAnywhere(g: Globals, name: string) -> boolean {
+    type ImportRefusal:struct = { code: string, why: string }
+
+    // Why an import that resolves to no file in the build is refused (§21.3,
+    // §21.6, §41.4, §41.5, §41.17).
+    fn importRefusal(from: string) -> ImportRefusal {
+        if (from == "scrml:compiler" || from.startsWith("scrml:compiler/")) {
+            return { code: "E-BOOTSTRAP-UNSUPPORTED", why: "`" + from + "` — the `scrml:compiler` family is KNOWN-DEFERRED (§41.17): its runtime surface is the live compiler, which the bootstrap does not expose; run the compiler as a command instead" }
+        }
+        if (from.startsWith("scrml:")) {
+            return { code: "E-BOOTSTRAP-UNSUPPORTED", why: "`" + from + "` — the bootstrap cannot import this stdlib module: the build supplied no source for it that the bootstrap compiles, so none of its names are imported (§41.5)" }
+        }
+        if (from.startsWith("./") || from.startsWith("../")) {
+            if (from.endsWith(".scrml")) {
+                return { code: "E-IMPORT-006", why: "`" + from + "` does not resolve to a `.scrml` file in this build (§21.3)" }
+            }
+            return { code: "E-BOOTSTRAP-UNSUPPORTED", why: "`" + from + "` — the bootstrap imports `.scrml` modules and `scrml:` stdlib modules only; a JavaScript (or other non-`.scrml`) module import is not in the bootstrap" }
+        }
+        if (from.startsWith("vendor:") || from.startsWith("bun:") || from.startsWith("node:")) {
+            return { code: "E-BOOTSTRAP-UNSUPPORTED", why: "`" + from + "` — a `vendor:` / `bun:` / `node:` import (§41.4) is not in the bootstrap" }
+        }
+        return { code: "E-IMPORT-005", why: "`" + from + "` is not a module scrml can import: a source begins with `./`, `../`, `scrml:`, `vendor:`, `bun:` or `node:` — a bare npm-style name is never valid (§41.4)" }
+    }
+
+    // `name` is an exported type / declaration / function of the file `path`.
+    fn exportedBy(g: Globals, path: string, name: string) -> boolean {
         for (const t of g.types) {
-            if (t.name == name && t.exported) return true
+            if (t.file == path && t.name == name && t.exported) return true
         }
         for (const d of g.decls) {
             const ad: ADecl | not = d.d
             if (ad is given) {
-                if (ad.name == name && ad.exported) return true
+                if (d.file == path && ad.name == name && ad.exported) return true
             }
         }
         for (const f of g.fns) {
-            if (f.info.name == name && f.info.exported) return true
+            if (f.info.file == path && f.info.name == name && f.info.exported) return true
+        }
+        return false
+    }
+
+    // s471 — `name` is named by an import in `file` that analyze REFUSES (it
+    // resolves to nothing, or its target does not export the name): that
+    // import's own diagnostic owns the failure, so a use of the name is not
+    // also "not declared" (no cascade). Only a refused import qualifies, so a
+    // use is never left unreported.
+    fn importRefusesName(g: Globals, file: string, name: string) -> boolean {
+        const paths: string[] = filePaths(g.files)
+        for (const f of g.files) {
+            if (f.path == file) {
+                for (const imp of importsOfItems(f.items)) {
+                    for (const n of imp.names) {
+                        if (n.name == name) {
+                            const target: string = importTarget(f.path, imp.from, paths)
+                            if (target == "" || !exportedBy(g, target, name)) return true
+                        }
+                    }
+                }
+            }
         }
         return false
     }

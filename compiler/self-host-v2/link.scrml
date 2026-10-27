@@ -22,9 +22,18 @@
 //      places the first unplaced file in path order;
 //   3. the files parsed in link order, node ids running through them — the
 //      same id numbering a driver that listed the files in link order gets.
-// An import edge is a `from` that is relative (`./`, `../`) and resolves,
-// against the importing file's directory, to a path in the set. Any other
-// `from` (a bare or `scrml:` source, a file outside the set) adds no edge.
+// An import edge is a `from` that RESOLVES to a path in the set (`importTarget`,
+// the one resolver — analyze's import check reads the same answer):
+//   - a relative source (`./`, `../`) resolved against the importing file's
+//     directory;
+//   - a `scrml:NAME` stdlib source (s471, SPEC §41.3–§41.5): the driver hands
+//     the stdlib module's files in under the STDLIB PREFIX — `scrml:NAME/index.scrml`
+//     (preferred, as §41.5's resolver prefers the directory form) or
+//     `scrml:NAME.scrml`, and the module's own relative imports resolve inside
+//     that prefix. A relative source never crosses the prefix (a user file
+//     cannot reach a stdlib file by path, nor a stdlib file a user file).
+// Any other `from` (a `vendor:` / `bun:` / bare source, a file outside the set)
+// resolves to nothing and adds no edge; analyze refuses it by name.
 //
 // Paths are the driver's project-relative names; the compiler never sees an
 // absolute path, a working directory, a clock, or an environment.
@@ -106,6 +115,27 @@ ${
         return segs.join("/")
     }
 
+    // s471 — the path prefix a driver names stdlib files under (`scrml:format/index.scrml`).
+    export fn stdlibPrefix() -> string { return "scrml:" }
+
+    fn inStdlib(p: string) -> boolean { return p.startsWith(stdlibPrefix()) }
+
+    // THE import resolver: the path in `paths` that `from`, written in the file
+    // `importer`, names — "" when it names none (see the header).
+    export fn importTarget(importer: string, from: string, paths: string[]) -> string {
+        if (inStdlib(from)) {
+            const asDir: string = from + "/index.scrml"
+            if (paths.indexOf(asDir) >= 0) return asDir
+            const asFile: string = from + ".scrml"
+            if (paths.indexOf(asFile) >= 0) return asFile
+            return ""
+        }
+        const p: string = resolveFrom(dirOf(importer), from)
+        if (p == "" || inStdlib(p) != inStdlib(importer)) return ""
+        if (paths.indexOf(p) < 0) return ""
+        return p
+    }
+
     fn importOfItem(it: AItem) -> AImport[] {
         const k: AItemK = it.k
         return match k {
@@ -118,7 +148,8 @@ ${
         }
     }
 
-    fn importsOfItems(items: AItem[]) -> AImport[] {
+    // Every import in `items`, a `<program>`'s own included.
+    export fn importsOfItems(items: AItem[]) -> AImport[] {
         let out: AImport[] = []
         for (const it of items) { out = out.concat(importOfItem(it)) }
         return out
@@ -127,10 +158,9 @@ ${
     // The paths (in the set `paths`) the file `f` imports.
     fn importedPaths(f: FileAst, paths: string[]) -> string[] {
         let out: string[] = []
-        const dir: string = dirOf(f.path)
         for (const imp of importsOfItems(f.items)) {
-            const p: string = resolveFrom(dir, imp.from)
-            if (p != "" && p != f.path && paths.indexOf(p) >= 0 && out.indexOf(p) < 0) out = out.concat([p])
+            const p: string = importTarget(f.path, imp.from, paths)
+            if (p != "" && p != f.path && out.indexOf(p) < 0) out = out.concat([p])
         }
         return out
     }

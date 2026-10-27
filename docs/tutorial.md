@@ -677,7 +677,7 @@ Validation in scrml is **declarative**, not imperative. You don't write a `valid
 
 Here is a signup form that exercises the full surface:
 
-<!-- gate: spec-ahead [E-BOOTSTRAP-UNSUPPORTED, E-SCOPE-001] — the bootstrap has no <match> block element, cannot follow scrml:auth's `export { … } from` re-export of hashPassword, and its validity surface does not evaluate eq(…) or this pattern(…) yet -->
+<!-- gate: spec-ahead [E-BOOTSTRAP-UNSUPPORTED] — the bootstrap has no <match> block element, cannot import scrml:auth (its source does not compile on the bootstrap yet, so the import is refused by name), and its validity surface does not evaluate eq(…) or this pattern(…) yet -->
 <!-- snippet: docs/tutorial-snippets/05-signup-form.scrml -->
 ```scrml
 // 05-signup-form.scrml — declarative form with auto-synth validity surface.

@@ -1,0 +1,15 @@
+{
+  "id": "acceptance-imports-neg-not-exported",
+  "description": "E-IMPORT-004: the imported name is not in the target file's exports.",
+  "language-version": "1.0",
+  "spec": "§21.3, §21.6",
+  "rationale": "s471: every import, a `<program>`'s own included, is judged against the export list of the file it names.",
+  "expect": {
+    "codes": [
+      "E-IMPORT-004"
+    ],
+    "codeCounts": {
+      "E-IMPORT-004": 1
+    }
+  }
+}

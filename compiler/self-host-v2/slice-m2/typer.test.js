@@ -300,13 +300,18 @@ const BASE_66_19 = [
   // §66.19.2: s444 — the binds are Core (Phase A) and the validators land per dpa-058 (Phase B): clean.
   [],
   ["E-PROGRAM-MISSING"],
-  ["E-BOOTSTRAP-UNSUPPORTED", "E-BOOTSTRAP-UNSUPPORTED", "E-BOOTSTRAP-UNSUPPORTED", "E-BOOTSTRAP-UNSUPPORTED", "E-IMPORT-NOT-EXPORTED", "E-IMPORT-NOT-EXPORTED", "E-SCOPE-001", "E-SCOPE-001", "E-SCOPE-001", "E-SCOPE-001", "E-SCOPE-001", "E-SCOPE-001", "E-TYPE-VARIANT"],
+  // s471: the block's `import … from "./…"` names a file the block does not supply — ONE E-IMPORT-006 at the import
+  // (link.scrml importTarget resolves nothing), where it was one E-IMPORT-NOT-EXPORTED per name (judged "exported
+  // by any file"); the bootstrap now spells §21.6's E-IMPORT-004 for a name the resolved file does not export.
+  ["E-BOOTSTRAP-UNSUPPORTED", "E-BOOTSTRAP-UNSUPPORTED", "E-BOOTSTRAP-UNSUPPORTED", "E-BOOTSTRAP-UNSUPPORTED", "E-IMPORT-006", "E-SCOPE-001", "E-SCOPE-001", "E-SCOPE-001", "E-SCOPE-001", "E-SCOPE-001", "E-SCOPE-001", "E-TYPE-VARIANT"],
   // s451: + one E-BOOTSTRAP-UNSUPPORTED — `style="background:${hex}"` (a §5.5.3 quoted-value template) used to be
   // emitted as literal text; it is refused now (parse.scrml quotedInterpDiags).
   // s451 (Ue): - two E-PARSE-EXPECTED, two E-PARSE-TRAILING — the theme's `match @mode { .Light :> …  .Dark :> … }`
   // tokens parse now (parse.scrml parseMatch); its theme refusal stands.
   ["E-BOOTSTRAP-UNSUPPORTED", "E-BOOTSTRAP-UNSUPPORTED", "E-BOOTSTRAP-UNSUPPORTED", "E-BOOTSTRAP-UNSUPPORTED", "E-BOOTSTRAP-UNSUPPORTED", "E-PROGRAM-MISSING", "E-SCOPE-001", "E-SCOPE-001", "E-SCOPE-001"],
-  ["E-DECL-STAR-PREDEFINED", "E-DECL-STAR-PREDEFINED", "E-IMPORT-NOT-EXPORTED", "E-IMPORT-NOT-EXPORTED", "E-IMPORT-NOT-EXPORTED", "E-IMPORT-NOT-EXPORTED", "E-IMPORT-NOT-EXPORTED", "E-IMPORT-NOT-EXPORTED", "E-IMPORT-NOT-EXPORTED", "E-SCOPE-001", "E-SCOPE-001", "E-SCOPE-001", "E-SCOPE-001"],
+  // s471: one E-IMPORT-006 at the unsupplied import (was seven per-name E-IMPORT-NOT-EXPORTED), and two uses of
+  // names only that refused import brings are no longer also E-SCOPE-001 (analyze.scrml importRefusesName).
+  ["E-DECL-STAR-PREDEFINED", "E-DECL-STAR-PREDEFINED", "E-IMPORT-006", "E-SCOPE-001", "E-SCOPE-001"],
   // §66.19.5: s444 Phase A — the host call and the bind are Core now: the program compiles clean.
   // s469-tape-followups (#1472): the SPEC log now appends with `@audit.append(…)` (S469 "tape methods are named
   // after their grants", §66.12.6 rule 3). The bootstrap's method allowlist still knows only `push`/`unshift`, so
