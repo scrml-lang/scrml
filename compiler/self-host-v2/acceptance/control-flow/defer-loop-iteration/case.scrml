@@ -1,0 +1,27 @@
+// §19.16.2 (s471): a `defer` in a loop body registers once per iteration and runs at THAT iteration's exit —
+// falling off the end, `continue`, `break`, `return` — last registered first.
+<program>
+    let <trace:string=""/>
+    function loopy(xs: string[]) -> string {
+        for (s of xs) {
+            defer @trace = @trace + "d" + s + ";";
+            defer @trace = @trace + "e;";
+            if (s == "b") continue;
+            if (s == "d") break;
+            @trace = @trace + "b" + s + ";";
+        }
+        for (t of xs) {
+            defer @trace = @trace + "r" + t + ";";
+            if (t == "b") return t;
+        }
+        return "z";
+    }
+    function go() {
+        const k = loopy(["a", "b", "c", "d", "e"]);
+        @trace = @trace + "k" + k + ";";
+    }
+    <main>
+        <button id="go" onclick=go()>go</button>
+        <p id="trace">${@trace}</p>
+    </main>
+</program>

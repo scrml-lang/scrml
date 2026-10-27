@@ -1,0 +1,8 @@
+// §17.1.1 E-CTRL-001: `else` not immediately preceded by an `if=` / `else-if=` sibling.
+<program>
+    let <step:int=1/>
+    <main>
+        <p>Static content</p>
+        <p else>Fallback</p>
+    </main>
+</program>
