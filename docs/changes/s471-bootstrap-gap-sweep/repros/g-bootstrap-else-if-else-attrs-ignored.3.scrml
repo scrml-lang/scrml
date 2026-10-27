@@ -1,0 +1,11 @@
+// g-bootstrap-else-if-else-attrs-ignored (orphan limbs): an `else` with no `if=` sibling; an `else-if=` with none.
+<program>
+    let <step:int=1/>
+    <main>
+        <p id="a">A</p>
+        <p id="b" else>B</p>
+        <div>
+            <p id="c" else-if=(@step == 2)>C</p>
+        </div>
+    </main>
+</program>

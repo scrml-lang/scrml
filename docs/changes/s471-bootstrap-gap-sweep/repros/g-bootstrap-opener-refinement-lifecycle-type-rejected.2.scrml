@@ -1,0 +1,9 @@
+// g-bootstrap-opener-refinement-lifecycle-type-rejected: a lifecycle type in an opener; `integer` as a type name.
+<program>
+    type K:enum = { A, B }
+    <p:(.A to .B)=.A/>
+    <n:integer=5/>
+    <main>
+        <p>${@n}</p>
+    </main>
+</program>

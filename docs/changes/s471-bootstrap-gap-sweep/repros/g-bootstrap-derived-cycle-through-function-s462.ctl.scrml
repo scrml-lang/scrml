@@ -1,0 +1,8 @@
+// g-bootstrap-derived-cycle-through-function-s462 CONTROL: a direct derived cycle.
+<program>
+    <a:int=(@b + 1)/>
+    <b:int=(@a + 1)/>
+    <main>
+        <p>${@a}</p>
+    </main>
+</program>

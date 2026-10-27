@@ -1,0 +1,12 @@
+// g-bootstrap-single-transition-graph-checks-missing: a variant with no state-child (exhaustiveness, E-ENGINE-STATE-CHILD-MISSING).
+<program>
+    type Ph:enum = { A, B, C }
+    <ph:Ph=.A single>
+        <A rule=.B/>
+        <B rule=.A/>
+    </>
+    function go() { @ph = .B; }
+    <main>
+        <button onclick=go()>go</button>
+    </main>
+</program>

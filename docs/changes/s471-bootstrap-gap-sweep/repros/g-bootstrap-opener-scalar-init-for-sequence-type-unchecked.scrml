@@ -1,0 +1,5 @@
+// g-bootstrap-opener-scalar-init-for-sequence-type-unchecked: `<n:int[append]=0/>`.
+<program>
+    <n:int[append]=0/>
+    <main>${@n}</main>
+</program>

@@ -1,0 +1,14 @@
+// g-bootstrap-call-arity-and-argument-type-checks-owed (siblings): a defaulted parameter omitted (clean); a kind mismatch (struct into int).
+<program>
+    type P:struct = { n: int }
+    function g(a: int, b: int = 2) -> int { return a + b; }
+    function k(x: int) -> int { return x; }
+    function f(p: P) -> int {
+        const q = g(1);
+        const r = k(p);
+        return q + r;
+    }
+    <main>
+        <p>${g(1)}</p>
+    </main>
+</program>

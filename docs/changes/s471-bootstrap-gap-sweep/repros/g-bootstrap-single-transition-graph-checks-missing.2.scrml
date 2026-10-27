@@ -1,0 +1,11 @@
+// g-bootstrap-single-transition-graph-checks-missing: unsupported state-child attributes (history, a payload id).
+<program>
+    type Ph:enum = { A, B }
+    <ph:Ph=.A single>
+        <A rule=.B history/>
+        <B rule=.A id="x"/>
+    </>
+    <main>
+        <p><*ph/></p>
+    </main>
+</program>

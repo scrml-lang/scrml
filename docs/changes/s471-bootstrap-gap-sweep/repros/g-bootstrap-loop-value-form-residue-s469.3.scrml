@@ -1,0 +1,12 @@
+// g-bootstrap-loop-value-form-residue-s469 limb 3: a statement-position `match` arm block `lift` inside a bound loop.
+<program>
+    type K:enum = { A, B }
+    <zs:K[]=([K.A, K.B, K.A])/>
+    function f(ys: K[]) -> int {
+        const xs = for (y of ys) { match y { .A :> { lift 1; }, .B :> { lift 2; } } };
+        return xs.length;
+    }
+    <main>
+        <p id="o">${f(@zs)}</p>
+    </main>
+</program>

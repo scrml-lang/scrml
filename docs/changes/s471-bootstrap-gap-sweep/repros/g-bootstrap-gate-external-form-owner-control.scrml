@@ -1,0 +1,16 @@
+// g-bootstrap-gate-external-form-owner-control: a `<select form="fm">` outside the form binds a `length(>=2)` value.
+<program>
+    let <v:string="" length(>=2)/>
+    let <calls:int=0/>
+    function register() { @calls = @calls + 1; }
+    <main>
+        <form id="fm" onsubmit=register()>
+            <button type="submit">go</button>
+        </form>
+        <select form="fm" bind:value=@v>
+            <option value="">-</option>
+            <option value="ab">ab</option>
+        </select>
+        <p id="calls">${@calls}</p>
+    </main>
+</program>

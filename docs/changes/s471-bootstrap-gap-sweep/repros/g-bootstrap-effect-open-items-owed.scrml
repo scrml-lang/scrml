@@ -1,0 +1,13 @@
+// g-bootstrap-effect-open-items-owed: (2) `lift` in an effect body; (3) a field-path dep (message wording).
+<program>
+    let <n:int=0/>
+    <box label:string>
+        let <k:int=0/>
+    </>
+    renders <span>${k}</span>
+    <main>
+        <box as=b label="a"/>
+        <effect deps=[@n]>${ lift 1; }</>
+        <effect deps=[@b.k]>${ @n; }</>
+    </main>
+</program>

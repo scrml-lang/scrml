@@ -1,0 +1,11 @@
+// g-bootstrap-loop-head-surface-s469 limb 1: compound assignment in a counted head.
+<program>
+    function f() -> int {
+        let s = 0;
+        for (let i = 0; i < 3; i += 1) { s = s + i; }
+        return s;
+    }
+    <main>
+        <p id="o">${f()}</p>
+    </main>
+</program>

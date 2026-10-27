@@ -1,0 +1,14 @@
+// g-bootstrap-function-values-slice-s451: a function as a value; a handler reference whose function takes the event.
+<program>
+    let <n:int=0/>
+    function bump() { @n = @n + 1; }
+    function onE(e: Event) { @n = @n + 1; }
+    function g() {
+        const h = bump;
+    }
+    <main>
+        <button id="a" onclick=bump>a</button>
+        <button id="b" onclick=onE>b</button>
+        <p>${@n}</p>
+    </main>
+</program>

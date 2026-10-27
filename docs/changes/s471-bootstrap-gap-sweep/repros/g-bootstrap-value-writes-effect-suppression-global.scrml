@@ -1,0 +1,8 @@
+// g-bootstrap-value-writes-effect-suppression-global, review limb: an IMPORTED writer called in an interpolation — reported twice?
+// (The headline — an echo hidden while an unrelated value error exists — needs `valuePositions` to MISS a position; no source program does.)
+<program>
+    ${ import { bump } from "./g-bootstrap-value-writes-effect-suppression-global.lib.scrml"; }
+    <main>
+        <p>${bump()}</p>
+    </main>
+</program>

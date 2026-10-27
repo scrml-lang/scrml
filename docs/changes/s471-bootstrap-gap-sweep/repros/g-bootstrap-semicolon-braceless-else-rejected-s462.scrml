@@ -1,0 +1,16 @@
+// g-bootstrap-semicolon-braceless-else-rejected-s462: `if (c) a; else b` (braceless, `;` before else).
+<program>
+    let <r:string=""/>
+    let <c:bool=false/>
+    function go() {
+        if (@c) @r = "a"; else @r = "b";
+    }
+    function go2() {
+        if (@c) @r = "a"; /* note */ else @r = "c";
+    }
+    <main>
+        <button id="go" onclick=go()>go</button>
+        <button id="go2" onclick=go2()>go2</button>
+        <p id="r">${@r}</p>
+    </main>
+</program>

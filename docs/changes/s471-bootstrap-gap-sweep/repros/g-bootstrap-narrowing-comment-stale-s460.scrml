@@ -1,0 +1,16 @@
+// g-bootstrap-narrowing-comment-stale-s460: behaviour behind the comment — a nested-block write drops the narrowing; `!x` on `T | not` is refused.
+<program>
+    let <n:string | not=("a")/>
+    let <c:bool=true/>
+    function f() -> string {
+        if (@n is given) {
+            if (@c) { @n = not; }
+            return @n;
+        }
+        return "";
+    }
+    function g(u: string | not) -> bool { return !u; }
+    <main>
+        <p>${f()}</p>
+    </main>
+</program>

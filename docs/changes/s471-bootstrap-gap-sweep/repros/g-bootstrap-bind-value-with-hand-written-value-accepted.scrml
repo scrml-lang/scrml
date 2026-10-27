@@ -1,0 +1,7 @@
+// g-bootstrap-bind-value-with-hand-written-value-accepted
+<program>
+    let <s:string="a"/>
+    <main>
+        <input id="i" value="z" bind:value=@s/>
+    </main>
+</program>

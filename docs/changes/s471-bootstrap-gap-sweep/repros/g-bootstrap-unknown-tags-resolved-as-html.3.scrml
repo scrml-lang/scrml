@@ -1,0 +1,7 @@
+// g-bootstrap-unknown-tags-resolved-as-html: undeclared tags only.
+<program>
+    <main>
+        <Unknown/>
+        <p id="p"><x/></p>
+    </main>
+</program>

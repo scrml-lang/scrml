@@ -1,0 +1,7 @@
+// g-bootstrap-entry-content-outside-program-dropped-silently: markup before `<program>`.
+<p>stray</p>
+<program>
+    <main>
+        <p id="o">x</p>
+    </main>
+</program>

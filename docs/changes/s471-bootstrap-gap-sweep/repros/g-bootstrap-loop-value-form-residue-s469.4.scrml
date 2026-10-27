@@ -1,0 +1,11 @@
+// g-bootstrap-loop-value-form-residue-s469 limb 4: lifted markup in a bound loop inside a function.
+<program>
+    <zs:int[]=([3, 4, 5])/>
+    function f(ys: int[]) -> int {
+        const rows = for (y of ys) { lift <li>x</li>; };
+        return rows.length;
+    }
+    <main>
+        <p id="o">${f(@zs)}</p>
+    </main>
+</program>

@@ -1,0 +1,6 @@
+// g-bootstrap-program-attrs-ignored-fail-open: an unknown attribute, `capabilities=`, `ratelimit=`, `lang=`.
+<program frobnicate="1" capabilities="bogus" ratelimit="5/fortnight" lang="cobol">
+    <main>
+        <p>x</p>
+    </main>
+</program>

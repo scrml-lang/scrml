@@ -1,0 +1,8 @@
+// g-bootstrap-no-channel-handler-checks-s462: a `<channel>` with an `onclient=` handler naming nothing.
+<program>
+    <channel name="room" onclient=nope>
+    </>
+    <main>
+        <p>x</p>
+    </main>
+</program>

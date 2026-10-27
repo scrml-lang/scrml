@@ -1,0 +1,17 @@
+// g-bootstrap-no-host-method-calls-refuses-correct-code-s460: `seg.endsWith("?")` into a condition; `s.trim()`, `s.slice(1)`, `s.length`.
+<program>
+    function f(seg: string) -> string {
+        const optional = seg.endsWith("?");
+        if (optional) { return "opt"; }
+        return "req";
+    }
+    function g(s: string) -> string { return s.trim() + s.slice(1); }
+    function h(s: string) -> int { return s.length; }
+    let <o:string=""/>
+    function go() { @o = f("a?") + "," + f("b") + "," + g(" xy ") + "," + "n"; }
+    <main>
+        <button id="go" onclick=go()>go</button>
+        <p id="o">${@o}</p>
+        <p id="h">${h("abc")}</p>
+    </main>
+</program>

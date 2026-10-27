@@ -1,0 +1,6 @@
+// g-bootstrap-diag-has-no-severity: a Warning-only program must compile (exit 0) and print `warning [W-…]`.
+<program frobnicate="1">
+    <main>
+        <p>x</p>
+    </main>
+</program>

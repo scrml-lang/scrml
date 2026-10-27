@@ -1,0 +1,9 @@
+// g-bootstrap-twin-log-unknown-s451: `log(…)` in a handler.
+<program>
+    function f() {
+        log("hello");
+    }
+    <main>
+        <button onclick=f()>b</button>
+    </main>
+</program>

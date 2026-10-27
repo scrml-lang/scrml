@@ -1,0 +1,11 @@
+// g-bootstrap-unclaimed-else-misdiagnosed-as-undeclared-s462: an `else` with no `if`.
+<program>
+    let <r:string=""/>
+    function go() {
+        @r = "a" else @r = "b";
+    }
+    <main>
+        <button id="go" onclick=go()>go</button>
+        <p id="r">${@r}</p>
+    </main>
+</program>

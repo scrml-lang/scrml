@@ -1,0 +1,7 @@
+// g-bootstrap-unterminated-shorthand-display-literal-meets-later-quote
+<program>
+    <main>
+        <p : "abc>
+        <i : "x">
+    </main>
+</program>

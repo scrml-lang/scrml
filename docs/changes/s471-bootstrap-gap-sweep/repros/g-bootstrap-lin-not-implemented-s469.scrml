@@ -1,0 +1,11 @@
+// g-bootstrap-lin-not-implemented-s469: a `lin` parameter and a `lin` declaration.
+<program>
+    function useToken(lin token: string) -> string { return token; }
+    function g() -> string {
+        lin t = "a";
+        return useToken(t);
+    }
+    <main>
+        <p id="o">${g()}</p>
+    </main>
+</program>

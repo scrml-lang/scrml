@@ -1,0 +1,8 @@
+// g-bootstrap-while-in-handler-block-not-parsed-s462: `while` inside an event-handler `{ … }` block.
+<program>
+    let <i:int=0/>
+    <main>
+        <button id="go" onclick={ while (@i < 3) { @i = @i + 1; } }>go</button>
+        <p id="i">${@i}</p>
+    </main>
+</program>

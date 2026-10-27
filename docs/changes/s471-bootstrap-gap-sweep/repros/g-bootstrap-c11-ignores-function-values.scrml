@@ -1,0 +1,10 @@
+// g-bootstrap-c11-ignores-function-values: front-end limb — `const h = peek` where peek writes, inside an effect.
+// (C11 itself is a Core check; Core has no function value outside a SeqCall lambda, so no source program reaches it.)
+<program>
+    let <n:int=0/>
+    let <a:int=0/>
+    function peek() { @a = 1; }
+    <main>
+        <effect deps=[@n]>${ const h = peek; }</>
+    </main>
+</program>

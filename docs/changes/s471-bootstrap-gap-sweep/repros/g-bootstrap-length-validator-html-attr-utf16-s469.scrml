@@ -1,0 +1,16 @@
+// g-bootstrap-length-validator-html-attr-utf16-s469: does `length(<=3)` / `length(>=3)` lower to native maxlength / minlength?
+<program>
+    <f:struct>
+        let <name:string="" length(<=3)/>
+        renders <input id="nm" type="text" bind:value=@name/>
+        let <code:string="" length(>=3)/>
+        renders <input id="cd" type="text" bind:value=@code/>
+    </>
+    renders <form>
+        <*name/>
+        <*code/>
+    </form>
+    <main>
+        <*f/>
+    </main>
+</program>

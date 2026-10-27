@@ -1,0 +1,12 @@
+// g-bootstrap-entry-content-outside-program-dropped-silently: two top-level `<program>`s; a structural element before.
+<engine for=P initial=.A></>
+<program>
+    <main>
+        <p id="one">first</p>
+    </main>
+</program>
+<program>
+    <main>
+        <p id="two">second</p>
+    </main>
+</program>

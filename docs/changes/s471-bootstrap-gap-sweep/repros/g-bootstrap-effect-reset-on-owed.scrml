@@ -1,0 +1,13 @@
+// g-bootstrap-effect-reset-on-owed: LANDED limbs (control) — `<effect deps=[…]>`, the no-write rule, `reset-on=` run clean.
+<program>
+    let <n:int=0/>
+    let <q:string=""/>
+    let <pg:int=1 reset-on=[@q]/>
+    function beacon(v: int) -> int { return v; }
+    <main>
+        <effect deps=[@n]>${ beacon(@n); }</>
+        <button id="next" onclick={ @pg = @pg + 1; }>next</button>
+        <button id="type" onclick={ @q = @q + "x"; }>type</button>
+        <p id="pg">${@pg}</p>
+    </main>
+</program>

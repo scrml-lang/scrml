@@ -1,0 +1,12 @@
+// g-bootstrap-loop-codes-owed-s469: write to a const loop binder; a non-iterable head; `for (;;)` / `for ()`.
+<program>
+    function f(xs: int[]) -> int {
+        let s = 0;
+        for (x of xs) { x = 1; s = s + x; }
+        for (y of 5) { s = s + 1; }
+        return s;
+    }
+    <main>
+        <p id="o">${f([1])}</p>
+    </main>
+</program>

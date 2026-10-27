@@ -1,0 +1,26 @@
+// g-bootstrap-loop-head-surface-s469 limbs 3-5: a field of an index read; Enum.variants iterable; narrowing past `continue`.
+<program>
+    type P:struct = { n: int }
+    type K:enum = { A, B }
+    function f(ps: P[]) -> int {
+        let s = 0;
+        for (let i = 0; i < ps.length; i = i + 1) { s = s + ps[i].n; }
+        return s;
+    }
+    function g() -> int {
+        let c = 0;
+        for (k of K.variants) { c = c + 1; }
+        return c;
+    }
+    function h(xs: (int | not)[]) -> int {
+        let s = 0;
+        for (x of xs) {
+            if (x is not) { continue; }
+            s = s + x;
+        }
+        return s;
+    }
+    <main>
+        <p id="o">${g()}</p>
+    </main>
+</program>

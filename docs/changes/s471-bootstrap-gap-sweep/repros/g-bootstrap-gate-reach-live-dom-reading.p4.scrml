@@ -1,0 +1,13 @@
+// g-bootstrap-gate-reach-live-dom-reading P4: a slot filled at the use site, the form inside the declaration's renders.
+<program>
+    let <show:bool=false/>
+    let <calls:int=0/>
+    let <email:string="" req/>
+    function register() { @calls = @calls + 1; }
+    <card label:string/>
+    renders <form id="fm" onsubmit=register()><slot/><button type="submit">go</button></form>
+    <main>
+        <card label="c"><div if=@show><input bind:value=@email/></div></card>
+        <p id="calls">${@calls}</p>
+    </main>
+</program>

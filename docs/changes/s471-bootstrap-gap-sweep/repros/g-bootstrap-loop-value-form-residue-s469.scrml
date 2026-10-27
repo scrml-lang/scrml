@@ -1,0 +1,11 @@
+// g-bootstrap-loop-value-form-residue-s469 limb 1: a union tape (lifts of different types).
+<program>
+    <zs:int[]=([3, 4, 5])/>
+    function f(ys: int[]) -> int {
+        const xs = for (y of ys) { if (y == 3) { lift "a"; } lift y; };
+        return xs.length;
+    }
+    <main>
+        <p id="o">${f(@zs)}</p>
+    </main>
+</program>

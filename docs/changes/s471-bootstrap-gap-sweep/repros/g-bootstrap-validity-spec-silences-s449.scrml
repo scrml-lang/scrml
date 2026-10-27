@@ -1,0 +1,12 @@
+// g-bootstrap-validity-spec-silences-s449 (a): reading a child field's `submitted`.
+<program>
+    <signup:struct>
+        let <email:string="" req/>
+        renders <input bind:value=@email/>
+    </>
+    renders <form><*email/></form>
+    <main>
+        <*signup/>
+        <p>${@signup.email.submitted}</p>
+    </main>
+</program>

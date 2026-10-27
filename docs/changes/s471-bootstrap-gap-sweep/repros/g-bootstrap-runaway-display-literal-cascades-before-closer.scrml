@@ -1,0 +1,13 @@
+// g-bootstrap-runaway-display-literal-cascades-before-closer: unterminated `"C:\"` body followed by a later `"`.
+<program>
+    type Ph:enum = { A, B }
+    <ph:Ph=.A single>
+        <A rule=.B>
+            "C:\"
+        </>
+        <B rule=.A : "B">
+    </>
+    <main>
+        <p><*ph/></p>
+    </main>
+</program>

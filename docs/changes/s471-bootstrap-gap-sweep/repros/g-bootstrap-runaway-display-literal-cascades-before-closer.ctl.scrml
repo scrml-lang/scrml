@@ -1,0 +1,13 @@
+// g-bootstrap-runaway-display-literal-cascades-before-closer CONTROL: the same body as the LAST state child.
+<program>
+    type Ph:enum = { A, B }
+    <ph:Ph=.A single>
+        <B rule=.A/>
+        <A rule=.B>
+            "C:\"
+        </>
+    </>
+    <main>
+        <p><*ph/></p>
+    </main>
+</program>

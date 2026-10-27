@@ -1,0 +1,8 @@
+// g-bootstrap-eq-mixed-types-silent-s462: `==` between a string and an int.
+<program>
+    let <s:string="a"/>
+    <c=(@s == 1)/>
+    <main>
+        <p>${@c}</p>
+    </main>
+</program>

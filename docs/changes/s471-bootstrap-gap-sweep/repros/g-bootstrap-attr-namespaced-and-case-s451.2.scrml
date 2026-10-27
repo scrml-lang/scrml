@@ -1,0 +1,7 @@
+// g-bootstrap-attr-namespaced-and-case-s451: (1) `xlink:href` alone; (4) a quoted `\${` escape.
+<program>
+    <main>
+        <svg><use xlink:href="#a"/></svg>
+        <p title="cost \${x}">x</p>
+    </main>
+</program>

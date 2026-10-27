@@ -1,0 +1,10 @@
+// g-bootstrap-loop-head-surface-s469 limb 6: a loop in a top-level `${ }` logic block.
+<program>
+    let <s:int=0/>
+    ${
+        for (let i = 0; i < 3; i = i + 1) { @s = @s + i; }
+    }
+    <main>
+        <p id="o">${@s}</p>
+    </main>
+</program>

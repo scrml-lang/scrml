@@ -1,0 +1,22 @@
+// g-bootstrap-code-body-several-display-literals-refused: several standalone display literals in a state-child body.
+<program>
+    type Ph:enum = { A, B, C, D }
+    <ph:Ph=.A single>
+        <A rule=.B>
+            "a"
+            "b"
+        </>
+        <B rule=.C>
+            "a";
+        </>
+        <C rule=.D>
+            "a"; "b"
+        </>
+        <D rule=.A>
+            "only"
+        </>
+    </>
+    <main>
+        <p><*ph/></p>
+    </main>
+</program>

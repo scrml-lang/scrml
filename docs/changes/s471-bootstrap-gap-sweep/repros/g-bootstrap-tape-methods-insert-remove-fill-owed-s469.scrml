@@ -1,0 +1,16 @@
+// g-bootstrap-tape-methods-insert-remove-fill-owed-s469: insert / remove / slice / includes / indexOf on a tape.
+<program>
+    <xs:int[free, append]=([1, 2, 3])/>
+    function go() {
+        @xs.insert(1, 9);
+        @xs.remove(0);
+    }
+    function has() -> bool { return @xs.includes(2); }
+    function at() -> int { return @xs.indexOf(2); }
+    <main>
+        <button id="go" onclick=go()>go</button>
+        <p id="o">${@xs.join(",")}</p>
+        <p id="h">${has()}</p>
+        <p id="i">${at()}</p>
+    </main>
+</program>
