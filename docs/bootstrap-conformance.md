@@ -11,26 +11,26 @@ Scope: **1813 of 1813 cases attempted** — every attempted case reached the pur
 
 | bucket | cases | share of attempted |
 |---|---:|---:|
-| PASS | 251 | 13.8% |
+| PASS | 252 | 13.9% |
 | CODES-ONLY | 0 | 0.0% |
-| FAIL | 63 | 3.5% |
+| FAIL | 64 | 3.5% |
 | LEGACY | 0 | 0.0% |
 | NOT-TWINNED | 685 | 37.8% |
-| UNSUPPORTED | 814 | 44.9% |
+| UNSUPPORTED | 812 | 44.8% |
 | CRASH | 0 | 0.0% |
 | INVALID | 0 | 0.0% |
 
-**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 314; of those, 251 hold (79.9%). Runtime half executed on the bootstrap for 100 case(s).
+**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 316; of those, 252 hold (79.7%). Runtime half executed on the bootstrap for 101 case(s).
 
-- **Vacuous** passes: 20 of 251 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **231**.
-- FAILs whose required code appears nowhere in the bootstrap's sources (check not implemented): 31 of 63; the other 32 are implemented checks that answered wrong.
+- **Vacuous** passes: 20 of 252 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **232**.
+- FAILs whose required code appears nowhere in the bootstrap's sources (check not implemented): 31 of 64; the other 33 are implemented checks that answered wrong.
 
 LEGACY by marker (a case may carry several): none.
-UNSUPPORTED by reason: bootstrap-unsupported 499 · parse-reject 315.
+UNSUPPORTED by reason: bootstrap-unsupported 495 · parse-reject 317.
 
 ### §66 twins (S449 dialect ruling 1 — generated at test time by the `scrml fix` §66 rules)
 
-Legacy-dialect cases graded on their generated §66 twin: **793** — PASS 151 · FAIL 48 · UNSUPPORTED 594. Twin holds 151 (non-vacuous 135). Every twin verdict above is included in the bucket table.
+Legacy-dialect cases graded on their generated §66 twin: **793** — PASS 152 · FAIL 49 · UNSUPPORTED 592. Twin holds 152 (non-vacuous 136). Every twin verdict above is included in the bucket table.
 - `dialect.s66` overrides: 0 replace a twin's expectations · 11 exclude a case.
 - Superseded-code mappings applied: 2 case(s) (E-ENGINE-VAR-DUPLICATE→E-SCOPE-010). Rows: E-ENGINE-VAR-DUPLICATE→E-SCOPE-010 [applied] · E-ENGINE-STATE-CHILD-INVALID-VARIANT→∅ [owed] · E-ENGINE-RULE-INVALID-VARIANT→∅ [owed] · E-ENGINE-INITIAL-INVALID-VARIANT→∅ [owed] · E-CELL-NO-RENDER-SPEC→∅ [owed] · E-CELL-RENDER-SPEC-NOT-BINDABLE→∅ [owed] · E-DECL-RHS-INTERP-WRAPPED→∅ [owed] · E-COMPONENT-010→∅ [owed].
 
@@ -109,7 +109,7 @@ NOT-TWINNED by reason (685 cases; a case counts once per distinct reason):
 | components | 68 | · | · | 1 | · | 65 | 2 | · | · |
 | condition | 36 | 18 | · | 5 | · | 8 | 5 | · | · |
 | control-flow | 76 | 16 | · | 2 | · | 21 | 37 | · | · |
-| defer | 51 | 13 | · | 2 | · | 4 | 32 | · | · |
+| defer | 51 | 14 | · | 3 | · | 4 | 30 | · | · |
 | derived | 6 | · | · | 1 | · | 5 | · | · | · |
 | each | 25 | · | · | · | · | 25 | · | · | · |
 | element-refusal | 34 | 7 | · | · | · | 11 | 16 | · | · |
@@ -163,7 +163,7 @@ NOT-TWINNED by reason (685 cases; a case counts once per distinct reason):
 | tenant | 23 | · | · | · | · | · | 23 | · | · |
 | type-state-codes | 32 | 3 | · | 1 | · | 3 | 25 | · | · |
 
-### FAIL (63)
+### FAIL (64)
 
 - `components/post-ce-residual-component-reject` (codes; not in the bootstrap: E-COMPONENT-035)
   - missing E-COMPONENT-035
@@ -187,6 +187,8 @@ NOT-TWINNED by reason (685 cases; a case counts once per distinct reason):
   - severity: E-CTRL-004 did not fire (expected error)
 - `control-flow/ctrl-010-else-on-for-without-lift-neg` (twin · twin-extra-error)
   - twin emitted unasserted error(s): E-LOOP-007, E-VALUE-WRITES-STATE
+- `defer/control-flow-neg` (twin · twin-extra-error)
+  - twin emitted unasserted error(s): E-TYPE-001
 - `defer/deferred-server-call-completes` (twin · codes+runtime)
   - forbidden family E-DEFER-* fired: E-DEFER-UNHANDLED-FAILABLE
   - runtime: no artifact — the compile reported an error (E-DEFER-UNHANDLED-FAILABLE)
@@ -340,7 +342,7 @@ none
 
 none
 
-### PASS / CODES-ONLY (251)
+### PASS / CODES-ONLY (252)
 
 - `attr-executable-sink/bound-svg-animation-runtime-guard` — PASS · TWIN
 - `attr-executable-sink/bound-url-runtime-guard` — PASS · TWIN
@@ -411,6 +413,7 @@ none
 - `defer/handled-failable-ok` — PASS · TWIN
 - `defer/identifier-untouched` — PASS · TWIN
 - `defer/lifo-fallthrough` — PASS · TWIN
+- `defer/loop-per-iteration` — PASS · TWIN
 - `defer/match-stmt-braced-arm` — PASS · TWIN
 - `defer/nested-neg` — PASS · TWIN
 - `defer/not-reached-and-nested-blocks` — PASS · TWIN
@@ -594,7 +597,7 @@ none
 - `type-state-codes/e-type-081-partial-match-render-neg` — PASS · TWIN · VACUOUS
 - `type-state-codes/e-type-lifecycle-on-engine-cell-neg` — PASS · TWIN · VACUOUS
 
-### UNSUPPORTED (814)
+### UNSUPPORTED (812)
 
 - `api/api-base-missing-neg` — bootstrap-unsupported: `<api>` is a scrml structural element (§60), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `api/api-clean-pos` — twin · bootstrap-unsupported: `<api>` is a scrml structural element (§60), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
@@ -760,8 +763,7 @@ none
 - `defer/ambiguous-lead-neg` — twin · bootstrap-unsupported: an index read `xs[i]` is in the bootstrap on a value of tape type (`T[…]`) — this value's type is not known to be one; annotate it
 - `defer/array-literal-lead` — twin · bootstrap-unsupported: `.forEach(…)` is not in the bootstrap — only calls of a named function, `Date.now()`, `.filter(x => …)` / `.map(x => …)` / `.sort(…)` / `.reverse()` / `.join(sep)` on a tape, and the string methods `t
 - `defer/control-flow-in-value-arms-neg` — twin · bootstrap-unsupported: an `if` used as a value (§17.6, the value form §17.6.10) is not in the bootstrap yet — use a `match` on the condition (`match c { true :> a, false :> b }`), or compute the value in a function
-- `defer/control-flow-inner-loop-ok` — twin · bootstrap-unsupported: a loop inside a deferred body is not in the bootstrap yet — move the loop into a function and call it from the `defer`
-- `defer/control-flow-neg` — twin · bootstrap-unsupported: a `defer` inside a loop body is not in the bootstrap yet — move the cleanup out of the loop, or into a function the loop calls
+- `defer/control-flow-inner-loop-ok` — twin · parse-reject: E-STMT-MISSING-SEMICOLON: Expected `;` to end the statement — insert `;` after `continue`. A `;` ends every statement that is not block-like, the last one before a `}` included (`{ @n = @n + 1; }`); a
 - `defer/cps-after-last-continuation` — twin · bootstrap-unsupported: `<schema>` is a scrml structural element (§39.2), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `defer/cps-batch0-failure` — twin · bootstrap-unsupported: `<schema>` is a scrml structural element (§39.2), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `defer/cps-batch1-failure` — twin · bootstrap-unsupported: `<schema>` is a scrml structural element (§39.2), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
@@ -772,7 +774,6 @@ none
 - `defer/hoist-structural` — twin · bootstrap-unsupported: member access `.kind` on a value that is not a struct or an instance is not in bootstrap slice M2
 - `defer/hoist-structural-twin` — twin · bootstrap-unsupported: member access `.kind` on a value that is not a struct or an instance is not in bootstrap slice M2
 - `defer/later-shadow-ok` — twin · parse-reject: E-STMT-MISSING-SEMICOLON: Expected `;` to end the statement — insert `;` after `s`. A `;` ends every statement that is not block-like, the last one before a `}` included (`{ @n = @n + 1; }`); a newlin
-- `defer/loop-per-iteration` — twin · bootstrap-unsupported: a `defer` inside a loop body is not in the bootstrap yet — move the cleanup out of the loop, or into a function the loop calls
 - `defer/nested-fn-handler-in-defer` — twin · bootstrap-unsupported: a handled failable (`?`, `!{ … }`, `match`) is in the bootstrap only as a statement's whole value (`f() !{ … }` / `match f() { … }` alone, `let x = …`, `x = …`, `@c = …`, `return …`) — inside a larger
 - `defer/nested-fn-handler-in-defer-twin` — twin · bootstrap-unsupported: a handled failable (`?`, `!{ … }`, `match`) is in the bootstrap only as a statement's whole value (`f() !{ … }` / `match f() { … }` alone, `let x = …`, `x = …`, `@c = …`, `return …`) — inside a larger
 - `defer/return-value-contents-not-frozen` — twin · bootstrap-unsupported: a write to a part of the local `o` (`o.a = …`) is not in the bootstrap yet — Core rebinds a local only as a whole; build the new value and rebind it (`o = …`), or write the cell it came from
@@ -785,7 +786,7 @@ none
 - `defer/stack-fn-calls-fn-before-defer` — twin · parse-reject: E-STMT-MISSING-SEMICOLON: Expected `;` to end the statement — insert `;` after `s`. A `;` ends every statement that is not block-like, the last one before a `}` included (`{ @n = @n + 1; }`); a newlin
 - `defer/stack-fn-calls-fn-before-defer-twin` — twin · parse-reject: E-STMT-MISSING-SEMICOLON: Expected `;` to end the statement — insert `;` after `s`. A `;` ends every statement that is not block-like, the last one before a `}` included (`{ @n = @n + 1; }`); a newlin
 - `defer/tilde-across-defer` — twin · parse-reject: E-PARSE-EXPR: expected an expression, found `~`
-- `defer/unbraced-arm-neg` — twin · bootstrap-unsupported: a `defer` inside a loop body is not in the bootstrap yet — move the cleanup out of the loop, or into a function the loop calls
+- `defer/unbraced-arm-neg` — twin · parse-reject: E-PARSE-EXPECTED: a `for` body is a block — expected `{`, found `defer` (§49.2.1 `loop-body ::= '{' loop-statement* '}'`)
 - `defer/unsupported-site-neg` — twin · parse-reject: E-PARSE-EXPECTED: expected `:`, found `D`
 - `defer/yield-in-defer-neg` — twin · bootstrap-unsupported: an unannotated parameter `gen` — bootstrap slice M2 needs `gen: Type` (Core parameters are typed)
 - `element-refusal/fn-return-script-pos` — twin · parse-reject: E-PARSE-EXPR: expected an expression, found `<`

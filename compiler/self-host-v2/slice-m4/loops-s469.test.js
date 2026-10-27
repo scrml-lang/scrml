@@ -212,7 +212,9 @@ describe("refusals — each with its §34 code", () => {
   test("what the bootstrap does not iterate, or cannot do in a loop yet, is refused (fail closed)", () => {
     expect(fnCodes(`        let s = 0;\n        for (x of 5) { s = s + 1; }\n        return s;`)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
     expect(fnCodes(`        let s = 0;\n        for ({ a } of [{ a: 1 }]) { s = s + a; }\n        return s;`)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
-    expect(fnCodes(`        let s = 0;\n        for (x of [1]) { defer { s = 0; } }\n        return s;`)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+    // s471: a `defer` in a loop body is BUILT (§19.16.2 "a loop body (once per iteration)") —
+    // slice-m4/defer-loop-s471.test.js; no longer a refusal
+    expect(fnCodes(`        let s = 0;\n        for (x of [1]) { defer { s = 0; } }\n        return s;`)).toEqual([]);
     expect(codes(prog(`    let <c:int=0/>`, `        <button onclick={ for (let i = 0; i < 2; @c = 1) { } }>b</button>`))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
     // the value form (§49.6) is BUILT now (s469-boot-loop-value-form: value-form-s469.test.js);
     // an operand-position `for` (§49.4.4: "a syntax error") is refused by name

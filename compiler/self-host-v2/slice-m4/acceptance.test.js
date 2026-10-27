@@ -266,6 +266,12 @@ const STATUS = {
   // O61 (§66.2.5 S469): an item in a `<db>` body — read as the declaration, its block-owned
   // server-side state refused by name (owed: analyze / lower / server runtime)
   "o61/db-let-decl": ["UNSUPPORTED", ["E-BOOTSTRAP-UNSUPPORTED"]],
+  // s471-bootstrap-control-flow-high — §17.1.1 chains and §19.16 `defer` (incl. a loop body, built s471)
+  "control-flow/if-chain": ["PASS", []],
+  "control-flow/neg-orphan-else": ["PASS", ["E-CTRL-001"]],
+  "control-flow/defer-return-value": ["PASS", []],
+  "control-flow/defer-loop-iteration": ["PASS", []],
+  "control-flow/neg-defer-loop-value-direct": ["PASS", ["E-DEFER-UNSUPPORTED-SITE"]],
 };
 
 let verdicts;
@@ -342,6 +348,11 @@ describe("bootstrap acceptance cases — today's verdicts", () => {
     for (const rel of ["parse/int-strict", "parse/number-finite", "parse/bool-exact", "parse/enum-parse", "parse/integer-type-name",
                        "strings/admitted-methods", "strings/index-read", "arms/lift-guard-value", "arms/single-expr-block",
                        "positions/from-end-explicit", "positions/at-negative-not", "positions/neg-slice-computed-traps"]) {
+      expect([rel, verdicts[rel].runtimeExecuted]).toEqual([rel, true]);
+    }
+  });
+  test("s471-bootstrap-control-flow-high: the chain and defer cases RAN on the bootstrap (output checked)", () => {
+    for (const rel of ["control-flow/if-chain", "control-flow/defer-return-value", "control-flow/defer-loop-iteration"]) {
       expect([rel, verdicts[rel].runtimeExecuted]).toEqual([rel, true]);
     }
   });

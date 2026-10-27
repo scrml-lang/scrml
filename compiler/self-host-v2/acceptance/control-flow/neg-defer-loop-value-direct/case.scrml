@@ -1,0 +1,15 @@
+// §19.16.2 E-DEFER-UNSUPPORTED-SITE: a `defer` directly in the body of a `for` bound as a value.
+<program>
+    let <log:string=""/>
+    function go() {
+        const ys: string[] = for (s of ["a", "b"]) {
+            defer @log = @log + "d;";
+            lift s;
+        };
+        @log = ys.join(",");
+    }
+    <main>
+        <button id="go" onclick=go()>go</button>
+        <p id="log">${@log}</p>
+    </main>
+</program>
