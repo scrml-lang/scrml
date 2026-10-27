@@ -4663,8 +4663,8 @@ onmount-body  ::= '$' '{' logic-content '}'
 #### Semantics
 
 - **Timing (S449 1c).** The body SHALL run once per mount of its owner, **after the owner's first render and after
-  every `ref=` binding in that owner has bound** (an element-reference binding `ref=@cell`, used by §6.7.9 and
-  here; this SPEC has no section of its own for `ref=` — noted, not added by S449), whether or not the body contains a server call. A DOM read
+  every `ref=` binding in that owner has bound** (an element-reference binding `ref=@cell`, §6.7.1b — ~~this SPEC
+  has no section of its own for `ref=` — noted, not added by S449~~, S471), whether or not the body contains a server call. A DOM read
   or a `ref=`-bound element in the body therefore sees the rendered DOM. *(impl#1 runs a mount body before both,
   and whether the DOM is ready flips with the first `await` — DD §2 rows 8 / 8b.)*
 - **Not reactive.** The body SHALL NOT re-run on a reactive change. It reads current values when it runs; nothing
@@ -4684,7 +4684,9 @@ onmount-body  ::= '$' '{' logic-content '}'
   §6.7.2.1), like `<effect>`. A `cleanup(fn)` call in the body — or in a function the body calls — registers `fn`
   on that owner (§6.7.3), and it fires when the owner destroys (route-leave for a route region, row removal for a
   row), in the §6.7.2 teardown order. Setup and teardown sit together in one closure:
-  `const map = createRouteMap(@mapEl); cleanup(() => map.remove())`.
+  `const map = createRouteMap(@mapEl); cleanup(() => map.remove())` (`createRouteMap` imported from a §21.3
+  relative `.js` module, as in the worked example below; a widget a later `<effect>` must reach is held in a mount
+  handle instead, §6.7.1b (c)).
 - **Server calls are allowed** — calling the outside world is the job. A body that reaches a server-inferred
   function is CPS-transformed (§13); the compiler inserts the `await` (§13.2). A failure propagates through the
   body's own error context (§19); it does NOT propagate to the enclosing scope. The call's return value cannot be
@@ -4792,23 +4794,31 @@ additive to `<onMount>`, covering only element-bound jobs.
 #### Worked example — a map widget, focus, a page view
 
 ```scrml
+${ import { createRouteMap } from './js/route-map.js' }          // §21.3 relative .js import: the widget's glue
 let <center:LatLng={ lat: 35.47, lng: -97.52 }/>
 let <mapEl:HTMLElement|not=not/>
 let <noteBox:HTMLElement|not=not/>
+${ let routeMap = not; }                                          // mount handle (§6.7.1b (c)): not a cell
 
 <onMount>${
-    const map = createRouteMap(@mapEl, @center, 9);               // third-party widget, needs the element
-    map.on("moveend", () => { @center = map.getCenter(); });       // legal: the widget writes LATER (3m)
+    routeMap = createRouteMap(@mapEl, @center, 9);                // third-party widget, needs the element
+    routeMap.on("moveend", () => { @center = routeMap.getCenter(); });   // legal: the widget writes LATER (3m)
     @noteBox.focus();                                             // the box exists: after render and ref= (1c)
     track("view", { page: "load-detail", loadId: @loadId });      // analytics page view
-    cleanup(() => map.remove());                                  // teardown beside the setup (3a)
+    cleanup(() => { routeMap.remove(); routeMap = not; });        // teardown beside the setup (3a)
 }</>
-<div ref=@mapEl class="h-64"></div>
+<div ref=@mapEl class="h-64"></div>                               <!-- childless: host-owned (§6.7.1b (b)) -->
 <textarea ref=@noteBox bind:value=@note></textarea>
 ```
 
-The body writes no cell during the mount. The `moveend` callback is handed to the widget, so its write is a later,
-local write, like a handler's. The data the page shows comes from a `<request>`, not from the mount body.
+The body writes no cell during the mount; assigning `routeMap` is a plain-variable write (§6.7.1b (c)). The
+`moveend` callback is handed to the widget, so its write is a later, local write, like a handler's. The data the
+page shows comes from a `<request>`, not from the mount body. A later `<effect>` reaches the widget through
+`routeMap` (§6.7.4 "Syntax").
+
+> **Provenance:** ruling:user-voice-scrml.md S471 "your recs on F0 and F1" (dpa-075 F1 (c); fixes DD §8 D1, the
+> widget never reaching a later `<effect>`, and D4, `createRouteMap` with no stated origin) · **supersedes:** the
+> mount-local `const map` of this example.
 
 #### Normative statements
 
@@ -4862,6 +4872,107 @@ local write, like a handler's. The data the page shows comes from a `<request>`,
 > `fetchUsers()` is called once when the program mounts. This is the canonical initial data loading pattern.~~
 > *(superseded: the write is E-MOUNT-WRITES-STATE; the load is `<request id="users" deps=[]>${ @users =
 > fetchUsers() }</>`, §6.7.7)*
+
+---
+
+### 6.7.1b `ref=` — Element References, Host-Owned Elements, and the Mount Handle
+
+> **Provenance:** ruling:user-voice-scrml.md S471 "your recs on F0 and F1" (dpa-075 F1 (a)–(c)) ·
+> dd:`scrml-support/docs/deep-dives/browser-host-apis-dpa-075-2026-10-27.md` §4.4, §7 F1, §8 D1 · **supersedes:**
+> §6.7.1a's *"this SPEC has no section of its own for `ref=` — noted, not added by S449"*. **Direction of change:**
+> clarifying for (a) and (c), which state what the SPEC's own examples already use; **newly-rejecting** for (b)
+> (E-REF-HOST-OWNED-CONTENT). **Nominal / spec-ahead:** impl#1 binds a program-level or `if=`-scope `ref=` as
+> stated in (a), but emits nothing for a `ref=` inside an `<each>` row, and implements neither (b) nor the per-row
+> handle of (c). The bootstrap builds this section.
+
+This section adds no grammar. It specifies the attribute `ref=@name` that §6.7.1a, §6.7.9 and §36.6 already use;
+what the runtime may do inside an element a host library owns; and how an `<onMount>` hands a host object (a
+widget, a context) to a later `<effect>` (§6.7.4).
+
+#### (a) `ref=@name` binds an element
+
+- `ref=@name` on an element binds the cell `@name` to that element's DOM node. If no cell `name` is declared in the
+  enclosing scope, the attribute declares one, typed `D | not`, where `D` is the element's DOM interface
+  (`HTMLCanvasElement` for `<canvas>`, `HTMLElement` when the element has no more specific one). A declared cell
+  (`let <mapEl:HTMLElement|not=not/>`) is equally valid.
+- The cell holds `not` until the element is rendered. It SHALL be bound after the element's owner first renders and
+  before any `<onMount>` of that owner runs (§6.7.1a). When the owner destroys (an `if=` scope closing, a route
+  region leaving, a row being removed, §6.7.2), the cell SHALL return to `not` if it still holds that element. A
+  later remount binds the new element.
+- Binding and unbinding are done by the runtime. They are not an author write, and are not E-MOUNT-WRITES-STATE.
+- **Row-scoped `ref=`.** `ref=@name` on an element inside an `<each>` row template is ROW-SCOPED, as `as=` is
+  (§66.7.4): each row has its own `@name`, visible within that row's template only (its markup, handlers,
+  `<onMount>` and `<effect>` bodies), holding that row's element. It is created as `not` with the row, bound when
+  the row renders, follows its row on a keyed reorder (§66.7.3), and is dropped when the row is removed. A row
+  `ref=` name that is the name of a cell declared outside the row SHALL be **E-HANDLE-REDECLARE** (§66.7.2 (ii)):
+  every row would bind one shared cell.
+
+#### (b) A childless `ref=` element is host-owned — E-REF-HOST-OWNED-CONTENT
+
+An element that carries `ref=` and has **no content** in its source is **host-owned**: a host library (a chart, a
+map, an editor, a canvas context) owns what is inside it. "No content" means no child element, no text other than
+whitespace, and no `${ }` that renders a value (§17.3). Whitespace and HTML comments are not content, and neither is
+a `${ }` block of declarations and calls that renders nothing (the §6.7.9 draw-loop shape).
+
+- The runtime SHALL write the host-owned element's own attributes and properties (bound attributes, `class:`,
+  listeners) and SHALL NOT insert, remove, reorder or replace its children.
+- Server-side rendering SHALL emit a host-owned element with no children.
+- A keyed `<each>` reorder MAY move a row that contains a host-owned element; the node and the children the host put
+  in it SHALL be preserved. The runtime SHALL NOT move a host-owned element to a different parent: when its parent
+  changes, its owner is destroyed and re-created (its `cleanup()`s run, §6.7.3).
+- Scrml content placed inside a host-owned element — a `lift` whose render position is inside it, from any body —
+  SHALL be **E-REF-HOST-OWNED-CONTENT**. The message SHALL say that the element is owned by host code, and offer
+  moving the content to a sibling element, or removing `ref=`.
+- A `ref=` element that HAS content is scrml-owned as usual (a scroll container, a list): `ref=` only names it.
+
+**Measured (S471, text scan of examples/, samples/, stdlib/, conformance/, benchmarks/, docs/, flogence, giti,
+6nz):** 7 `ref=` elements in 4 files, all in `samples/compilation-tests/`. 4 are `<div>`s with markup children
+(scrml-owned, unaffected). 3 are `<canvas>`es whose only content is a draw-loop `${ }` block with no `lift`
+(host-owned, accepted). **0 newly rejected.**
+
+#### (c) The mount handle — handing a host object from `<onMount>` to `<effect>`
+
+A **mount handle** is a plain (non-`@`) `let` declared at the top level of a `${ }` block that is a direct child of
+an `<onMount>`'s owner, initialized to `not`. It is not a cell.
+
+- **Assignment.** The owner's `<onMount>` body MAY assign it. A plain variable is not a reactive cell, so the
+  assignment is not E-MOUNT-WRITES-STATE (§6.7.4 "What counts as a write": writes to plain non-reactive variables
+  are not reactive writes). The same holds for an `<effect>` body or a `cleanup()` callback that assigns it.
+- **Reads.** The owner's `<effect>` bodies, handlers and functions MAY read it. Reading it does not make it a
+  trigger, and assigning it triggers nothing: an `<effect>` runs only on its `deps=` (§6.7.4).
+- **Before mount it is `not`.** An `<effect>` can run before the `<onMount>` has assigned the handle (a dep can
+  change first), so a body SHALL test it (`if (chart is given) { … }`) before use.
+- **Scope.** A mount handle in the `<program>` scope, an `if=` scope or a route region is a file-scope declaration
+  (§7.6): one binding, which a remount's `<onMount>` assigns again. The canonical teardown resets it:
+  `cleanup(() => { chart.destroy(); chart = not; })`.
+- **Per row.** A mount handle declared in an `<each>` row template is one binding per row, created as `not` with the
+  row, following its row on a keyed reorder, and dropped when the row is removed — the same lifetime as a row-scoped
+  `ref=` (a). The row's `<onMount>` (which runs once per row, §6.7.1a) assigns that row's handle.
+- ⚑ **Not specified here:** the static type of a host object. Typing host values is dpa-075 F3, which is not ruled.
+
+```scrml
+${ import { Chart } from './js/chart.esm.js' }            // §21.3 relative .js import
+let <series:number[]=[]/>
+${ let chart = not; }                                     // the mount handle: not a cell
+<onMount>${
+    chart = new Chart(@chartEl, { type: "line", data: { datasets: [{ data: @series }] } });
+    cleanup(() => { chart.destroy(); chart = not; });
+}</>
+<effect deps=[@series]>${ if (chart is given) { chart.data.datasets[0].data = @series; chart.update(); } }</>
+<canvas ref=@chartEl></canvas>                            // childless: host-owned (b)
+```
+
+#### Normative statements
+
+- `ref=@name` SHALL bind `@name` to the element after its owner's first render and before the owner's `<onMount>`
+  bodies run, and SHALL reset it to `not` when the owner destroys, if it still holds that element.
+- A `ref=` inside an `<each>` row template SHALL be row-scoped; one naming a cell declared outside the row SHALL be
+  E-HANDLE-REDECLARE.
+- The runtime SHALL NOT write the children of a host-owned element, and server-side rendering SHALL emit it empty;
+  scrml content inside one SHALL be E-REF-HOST-OWNED-CONTENT. A keyed reorder MAY move it; nothing SHALL re-parent
+  it.
+- A mount handle SHALL hold `not` until assigned; assigning it SHALL NOT be a reactive write, and SHALL trigger
+  nothing. Inside an `<each>` row it SHALL be one binding per row.
 
 ---
 
@@ -5130,8 +5241,14 @@ effect-body   ::= '$' '{' logic-content '}'
 ```scrml
 <effect deps=[@category]>${ track("filter", { category: @category, query: @query }); }</>
 <effect deps=[@messages]>${ scrollToBottom(@logEl); }</>
-<effect deps=[@mapCenter, @zoom]>${ leafletMap.setView([@mapCenter.lat, @mapCenter.lng], @zoom); }</>
+<effect deps=[@mapCenter, @zoom]>${ if (leafletMap is given) { leafletMap.setView([@mapCenter.lat, @mapCenter.lng], @zoom); } }</>
 ```
+
+*(S471 — `leafletMap` is a mount handle (§6.7.1b (c)): `${ let leafletMap = not; }` in the same scope, assigned by
+that scope's `<onMount>` (`leafletMap = L.map(@mapEl)`, with `L` from a §21.3 relative `.js` import); it is `not`
+until the mount runs, so the body tests it.)*
+> **Provenance:** ruling:user-voice-scrml.md S471 "your recs on F0 and F1" (dpa-075 F1 (c); fixes DD §8 D1 —
+> `leafletMap` was used here and defined nowhere).
 
 - `deps=` is REQUIRED and SHALL list at least one cell. An `<effect>` with no `deps=`, or with `deps=[]`, never
   runs (it does not run on mount) and is **E-EFFECT-NO-DEPS**. *(An empty dep-list was a syntax error under the
@@ -6507,7 +6624,7 @@ E-LIFECYCLE-017 if `animationFrame()` is called outside any element scope (as de
             const ctx = @canvasEl.getContext('2d');
             ctx.clearRect(0, 0, 800, 600);
             for (shape of @shapes) {
-                lift ctx.strokeRect(shape.x, shape.y, shape.w, shape.h);
+                ctx.strokeRect(shape.x, shape.y, shape.w, shape.h);
             }
             animationFrame(draw);
         }
@@ -6515,6 +6632,11 @@ E-LIFECYCLE-017 if `animationFrame()` is called outside any element scope (as de
     }
 </>
 ```
+
+*(S471 — the `<canvas>` has no content, so it is host-owned (§6.7.1b (b)); its `${ }` block renders nothing. The
+draw call was written `lift ctx.strokeRect(…)`, which would put scrml content inside a host-owned element
+(E-REF-HOST-OWNED-CONTENT); it is a plain call. Same fix in Example 8, §6.7.11. Provenance:
+ruling:user-voice-scrml.md S471 "your recs on F0 and F1" (dpa-075 F1 (b)).)*
 
 #### Reactive Behavior Inside `animationFrame` Callbacks
 
@@ -6841,7 +6963,7 @@ third fix text says so.
                 const ctx = @canvasEl.getContext('2d');
                 ctx.clearRect(0, 0, 800, 600);
                 for (shape of @shapes) {
-                    lift ctx.strokeRect(shape.x, shape.y, shape.w, shape.h);
+                    ctx.strokeRect(shape.x, shape.y, shape.w, shape.h);   // S471: was `lift …` (§6.7.1b (b))
                 }
                 animationFrame(draw);
             }
@@ -11270,6 +11392,11 @@ load) · §34 (E-VALUE-SERVER-CALL).
    > the combinators are inert in a value position, where an element of the argument was already a waiting value
    > (`<span if=${Promise.all([check(@pw)])}>` is E-VALUE-SERVER-CALL either way); the producers are
    > **newly-rejecting** (`<span if=${Promise.resolve(…)}>` was accepted and always truthy).
+
+   ⚑ **OPEN — a host call that returns a Promise** (an imported `.js` function, `navigator.clipboard.writeText(…)`):
+   whether it is a waiting value is not specified here. It waits on dpa-075 F3's measurement (DD
+   `browser-host-apis-dpa-075-2026-10-27.md` §7 F1 (d), F3). *(ruling:user-voice-scrml.md S471 "your recs on F0 and
+   F1" — F1 (d) "content finalized by F3".)*
 
 These are the same three forms as §13.7's items 1–4, and the same set §13.2's *async-colored* defines. This
 definition does not widen either, with one exception: the S471 sentences of item 3 (the Promise combinators and the
@@ -22859,6 +22986,16 @@ The following are explicitly out of scope for this version but noted for future 
   predicates, OUT with ambient `Math` under S440 dpa-055 R1 D7 — `scrml:math.isNaN` remains, §41.18; an
   `isFinite` there is not specified)*; `Array` (S469 *"I do not want JS style
   arrays in scrml at all"* — the sequence is the tape, §66.12; derived, not separately ruled).
+- **The browser roots `window`, `document`, `navigator` (S471):** IN in a body the compiler places on the client
+  (§12) — an event handler, an `<onMount>` or `<effect>` body, a client function; OUT everywhere else — a
+  server-placed body and a `fn` body (E-FN-004, §48.3.4). For `window` and `document`, route analysis enforces it: a
+  function whose body reads one is client-only (§12.4), so a server function reaching it is E-ROUTE-002 and one body
+  needing both sides is E-ROUTE-005. `navigator` is not in §12.4's client-only list (it has a server referent under
+  Bun), so outside `fn` its OUT is **Nominal / not yet enforced**. Their members are untyped host values (typing is
+  dpa-075 F3, not ruled).
+  > **Provenance:** ruling:user-voice-scrml.md S471 "your recs on F0 and F1" (dpa-075 F1 (e): *"Appendix D lists
+  > `window`/`document`/`navigator` (IN for client bodies, OUT elsewhere, aligned with E-ROUTE-005)"*) · **Direction of
+  > change:** clarifying — it names what §6.7.4 rule 5 and E-ROUTE-005 already treat as client-only.
 - ⚑ **OPEN (not yet decided in or out):** every other name of the struck lists (`Boolean`, `Date`, `Error`,
   `Map`, `Object`, `Promise`, `RegExp`, `Set`, `Symbol`, `TypeError`, `RangeError`, `WeakMap`, `WeakSet`, `WeakRef`,
   `JSON`, `console`, `Intl`, `encodeURI`, `decodeURI`, `encodeURIComponent`, `decodeURIComponent`, `structuredClone`,
@@ -24540,7 +24677,8 @@ The bindings `_runCG` and `_CGError` are resolved at compile time from the named
 **Normative statements:**
 
 - `import:host` SHALL appear only at file top level, OUTSIDE any `${}` logic context. An `import:host` declaration inside a `${}` block or any nested scope SHALL be a compile error (`E-IMPORT-003` — same as plain `import`).
-- The file containing an `import:host` declaration MUST match a path pattern listed in the project manifest's `[capabilities] host-import` allow-list (default in the user project manifest: `disabled`; the bootstrap stdlib's own manifest sets `self-host-only` which permits `scrml/stdlib/compiler/**`). A file outside the allow-list using `import:host` SHALL be a compile error (`E-IMPORT-008`).
+- The file containing an `import:host` declaration MUST match a path pattern listed in the project manifest's `[capabilities] host-import` allow-list (default in the user project manifest: `disabled`; the bootstrap stdlib's own manifest sets `self-host-only` which permits ~~`scrml/stdlib/compiler/**`~~ `scrml/stdlib/**` — S471). A file outside the allow-list using `import:host` SHALL be a compile error (`E-IMPORT-008`).
+  > **Provenance:** ruling:user-voice-scrml.md S471 "your rec, though I am curious about c regardless. I guess its ok to drop the <program> wrapper." (*"Host bridge: **A** — widen `import:host`'s manifest allow-list from `stdlib/compiler/**` to `stdlib/**` (stdlib modules stay scrml; host reach sits in thin TS/JS files beside them; adopter default stays `disabled`)"*) · **Direction of change: newly-accepting** for stdlib files outside `stdlib/compiler/`. **Nominal on impl#1:** `compiler/src/host-import.js` still admits only the `stdlib/compiler/` prefix.
 - The `host-tag` SHALL be `host` in v1. Any other host-tag value SHALL be a compile error (`E-IMPORT-009` — unknown host-tag; only `host` is recognized in v1).
 - Named bindings imported via `import:host` SHALL be available in the file's logic scope as if they were imported via plain `import { ... } from "..."`. They MAY be re-exported via `export const name = _binding`. A direct `export:host` re-export form is NOT defined in v1; defer until adopter friction surfaces a use case.
 - The compiler SHALL NOT inline or evaluate the host-language module's body during scrml parse. The host module is loaded and named exports are extracted at compile time only.
@@ -24757,7 +24895,7 @@ without `export`).
 | E-IMPORT-005 | Bare npm-style import specifier (must be `./`, `scrml:`, or `vendor:`) | Error |
 | E-IMPORT-006 | Import target file does not exist on disk — also a relative re-export (`export { … } from` / `export * from`) whose target file does not exist (§21.4). (Emitted at `compiler/src/module-resolver.js` `buildImportGraph`.) | Error |
 | E-IMPORT-007 | Auto-gather closure exceeded sane-limit (5000 files) — W2 §21.7 | Error |
-| E-IMPORT-008 | (S114 — §21.3.1.) `import:host` used in a file outside the manifest's `[capabilities] host-import` allow-list. Default for adopter projects is `"disabled"`; the bootstrap stdlib sets `"self-host-only"` permitting `scrml/stdlib/compiler/**`. | Error |
+| E-IMPORT-008 | (S114 — §21.3.1.) `import:host` used in a file outside the manifest's `[capabilities] host-import` allow-list. Default for adopter projects is `"disabled"`; the bootstrap stdlib sets `"self-host-only"` permitting `scrml/stdlib/**` (S471; was `scrml/stdlib/compiler/**`; emitted at `compiler/src/host-import.js`, which still admits only `stdlib/compiler/`). | Error |
 | E-IMPORT-009 | (S114 — §21.3.1.) `import:host` uses a host-tag other than `host`. v1 recognizes only `host`; future-reserved tags (`wasm` / `wat` / `c` / `zig` / etc.) require SPEC amendment. | Error |
 | E-IMPORT-011 | (S440 item 16 — §21.3.) A `.js` / `.mjs` helper imported by client code (directly or through another helper) resolves outside the project root, or its `_scrml_local/` copy path falls in a §47.13 denied class. The compiler copies client-reachable helpers into the build output and will not copy such a file. Emitted at `compiler/src/api.js` `createClientHelperRelocator`. | Error |
 | E-EXPORT-001 | A reactive state cell (plain Shape-1 `<count> = 0` OR derived `const <total> = @a + @b`) is exported (`export { count }` or `export @count`, §21.2). Reactive cells are not in the exportable set (`type` / `function` / `fn` / `const` / `let`). Keyed on the `state-decl` binding (not name-case), so component-as-const / channel / engine exports remain valid | Error |
@@ -25797,12 +25935,13 @@ host-import = "disabled"          # default for user project manifests
 **Permitted values:**
 
 - `"disabled"` (default for adopter projects) — `import:host` declarations SHALL fire `E-IMPORT-008` in every file of the project.
-- `"self-host-only"` — `import:host` declarations are permitted ONLY in files matching the project's bootstrap stdlib path pattern (canonical: `scrml/stdlib/compiler/**`; project-specific overrides via additional capability subkeys reserved for future SPEC extension).
+- `"self-host-only"` — `import:host` declarations are permitted ONLY in files matching the project's bootstrap stdlib path pattern (canonical: ~~`scrml/stdlib/compiler/**`~~ `scrml/stdlib/**` — S471, §21.3.1; project-specific overrides via additional capability subkeys reserved for future SPEC extension).
 
 **Normative statements:**
 
 - The manifest entry is read at compile-time before any parse begins. The block-splitter / native parser SHALL consult the entry before accepting `import:host` declarations.
-- If the manifest is absent, the entry defaults to `"disabled"`. An adopter who needs `import:host` (e.g. for a private host-language bridge) SHALL explicitly opt in via manifest entry.
+- If the manifest is absent, the entry defaults to `"disabled"`. ~~An adopter who needs `import:host` (e.g. for a private host-language bridge) SHALL explicitly opt in via manifest entry.~~ v1 gives an adopter no opt-in: `"self-host-only"` admits only the bootstrap stdlib's path, so in an adopter project `import:host` is E-IMPORT-008 whatever the entry says. An adopter's host reach is a §21.3 relative `.js` import.
+  > **Provenance:** dd:`scrml-support/docs/deep-dives/browser-host-apis-dpa-075-2026-10-27.md` §8 D3 — the struck sentence promised an opt-in that neither ratified value provides; a conformance correction, PA-directed S471 · ruling:user-voice-scrml.md S471 "your rec, though I am curious about c regardless. I guess its ok to drop the <program> wrapper." (item 1: *"adopter default stays `disabled`"*) · **Direction of change: inert** — no value ever admitted an adopter file.
 - The `"self-host-only"` value is the canonical bootstrap setting. Future SPEC extensions may add `"trusted-allowlist"` or per-package permissions; v1 ratifies only `"disabled"` and `"self-host-only"`.
 - Any other manifest value SHALL be a compile error (`E-MANIFEST-001` — invalid `host-import` value; only `"disabled"` and `"self-host-only"` are recognized in v1). Note: `E-MANIFEST-001` is the manifest-validation code; not registered here — manifest validation is owned by the project-config subsystem and surfaces its own error catalog.
 
@@ -26643,13 +26782,18 @@ exactly as §23.2.1 resolves against the closest ancestor `<program lang>`. Capa
 // fsp-core.scrml — imported shared lib; needs BOTH a db-context and a foreign-lang-context
 <foreign lang="ts" />
 <db src="./flogence.db" tables="fsp_task, delta_log, projects" />
-export fn dispatch(db: asIs, frame: Frame, transport: Transport) { … ?{ SELECT … FROM fsp_task }.all() … _={ /* ts */ }= … }
+export server function dispatch(db: asIs, frame: Frame, transport: Transport) { … ?{ SELECT … FROM fsp_task }.all() … const r = _={ /* ts */ }= … }
 ```
 ```scrml
 // lanes.scrml — imported shared lib; foreign-lang ONLY (no db)
 <foreign lang="ts" />
-export fn runOpen(model: string, prompt: string) { … _={ /* ts */ }= … }
+export server function runOpen(model: string, prompt: string) { … const r = _={ /* ts */ }= … }
 ```
+
+*(S471 correction — these examples were written `export fn`, but an inline `_={ … }=` is valid only in a server
+`function` body (§23.2.4 form 2; dpa-004 C2: *"NOT `fn`/pure helpers"*), bound to a value. Provenance:
+dd:`scrml-support/docs/deep-dives/browser-host-apis-dpa-075-2026-10-27.md` §8 D2 — a conformance correction (the
+example now obeys §23.2.4), PA-directed S471. Direction of change: inert.)*
 
 **Error codes** (§34 catalog rows land with the impl):
 
@@ -28015,6 +28159,7 @@ are REFUSED by impl#1, `E-IMPL1-RULED-FORM-UNSUPPORTED` (its row lands with that
 | E-REACTIVE-004 | §6.6.5 | `flush()` called inside a derived expression | Error |
 | E-REACTIVE-005 | §6.6.10 | Circular dependency in the derived reactive graph | Error |
 | E-REFINEMENT-NO-DEFAULT | §6.2, §53 | A refinement-typed state-cell declaration with no RHS (Shape 4, §6.2) whose base canonical-empty VIOLATES the refinement predicate — e.g. `<x>: number(>0)` (the canonical empty `0` fails `>0`). A refined type with no predicate-satisfying canonical empty cannot be auto-defaulted. Resolution: provide an explicit initializer (`<x>: number(>0) = 1`). Refinement types whose canonical empty SATISFIES the predicate (`number(>=0)` → `0`) get the canonical empty with no error. The check is compile-time (the §53 predicate is statically evaluated on the literal canonical-empty). (S160 — Shape 4 generalization. SUPERSEDES E-DECL-NEEDS-INITIALIZER for the refinement case, but does NOT retire it: E-DECL-NEEDS-INITIALIZER still fires for the `const`-derived no-RHS sub-case [a derived cell needs an expression — §6.2 closing parenthetical; see its own §34 row]. Every OTHER no-RHS typed decl resolves to a canonical empty or `not` per §6.2 Shape 4. S260: the earlier flat "RETIRED" wording was inaccurate.) | Error |
+| E-REF-HOST-OWNED-CONTENT | §6.7.1b | Scrml content is placed inside a host-owned element — an element that carries `ref=` and has no content in its source (whitespace, HTML comments and a `${ }` block that renders nothing are not content): a `lift` whose render position is inside it, from any body. The runtime never writes a host-owned element's children and SSR emits it empty, so the content would fight the host library that owns them. The message says the element is owned by host code and offers moving the content to a sibling element, or removing `ref=`. Newly-rejecting; corpus measured S471: 0 sites. **Provenance:** ruling:user-voice-scrml.md S471 "your recs on F0 and F1" (dpa-075 F1 (b)). **Nominal / not yet emitted** — impl pending. | Error |
 | E-LIFT-001 | §10.5.2 | Concurrent `lift` calls in same logic block | Error |
 | E-PA-001 | §11.5 | `src=` file does not exist | Error |
 | E-PA-003 | §11.5 | Bun SQLite schema introspection failed | Error |
@@ -28521,7 +28666,7 @@ are REFUSED by impl#1, `E-IMPL1-RULED-FORM-UNSUPPORTED` (its row lands with that
 | E-IMPORT-005 | §21.3 | `import` specifier uses an unrecognized protocol prefix or a bare npm-style specifier. Specifiers must begin with `scrml:`, `vendor:`, `./`, or `../` — scrml has no npm integration. (Catalog addition S78 audit; emitted at `compiler/src/module-resolver.js`.) | Error |
 | E-IMPORT-006 | §21.3, §21.4 | `scrml:` (or relative) `import` specifier does not resolve to any module on disk; also a relative re-export (`export { … } from` / `export * from`, §21.4) whose target file does not exist, reported at the re-export. (Catalog addition S78 audit; emitted at `compiler/src/module-resolver.js`, and — for a `.js` / `.mjs` helper reaching client JavaScript, which must be copied into the build output (S440 item 16) — at `compiler/src/api.js` `createClientHelperRelocator`.) | Error |
 | E-IMPORT-007 | §21.7 | Auto-gather closure exceeded the sane-limit (5000 files). The `import` resolution traversal touched too many files — likely an accidental project-root inclusion or a cycle in directory traversal. (Catalog addition S78 audit; emitted at `compiler/src/api.js`. Fire-site line corrected S297 — the row read `:506`, which is not the fire site.) | Error |
-| E-IMPORT-008 | §21.3.1 | `import:host` used in a file outside the project manifest's `[capabilities] host-import` allow-list. The default value is `"disabled"` in adopter project manifests; the bootstrap stdlib's own manifest sets `"self-host-only"` permitting only files under `scrml/stdlib/compiler/**`. Resolution: either remove the `import:host` declaration (the canonical path — adopter code uses `import` from scrml-source modules, not host-language modules); or, if a host-language bridge is genuinely required, opt into the manifest entry explicitly. (Catalog addition S114 — Approach C ratification.) | Error |
+| E-IMPORT-008 | §21.3.1 | `import:host` used in a file outside the project manifest's `[capabilities] host-import` allow-list. The default value is `"disabled"` in adopter project manifests; the bootstrap stdlib's own manifest sets `"self-host-only"` permitting only files under `scrml/stdlib/**` (S471, ruling:user-voice-scrml.md S471 "your rec, though I am curious about c regardless. I guess its ok to drop the <program> wrapper." — host bridge A; was `scrml/stdlib/compiler/**`; impl#1 still admits only `stdlib/compiler/`, `compiler/src/host-import.js`). Resolution: remove the `import:host` declaration — adopter code uses `import` from scrml-source modules, and reaches host code through a §21.3 relative `.js` import. ~~or, if a host-language bridge is genuinely required, opt into the manifest entry explicitly~~ *(struck S471: v1 has no adopter opt-in value, §22.13; dpa-075 DD §8 D3)*. (Catalog addition S114 — Approach C ratification; emitted at `compiler/src/host-import.js`.) | Error |
 | E-IMPORT-009 | §21.3.1 | `import:host` uses a host-tag other than `host`. v1 recognizes only the `host` tag (TypeScript / JavaScript named-export bridge). Future-reserved tags (`wasm` / `wat` / `c` / `zig` / etc.) require SPEC amendment + per-tag implementation. Resolution: use `import:host` for the v1 TS/JS bridge; defer other host languages until SPEC amendment. (Catalog addition S114 — Approach C ratification.) | Error |
 | E-IMPORT-011 | §21.3 | A plain `.js` / `.mjs` helper reaching CLIENT JavaScript (directly, or through a relative import of another client helper) resolves — symlinks followed — outside the project root (nearest `scrml.toml` / `.git` ancestor of the build's source root, else that source root), or its `<outputDir>/_scrml_local/` copy path is in a §47.13 denied class (`*.server.*`, a database, a dot-path, `.scrml`, `.map`). The compiler copies client-reachable helpers into the build output so the browser can load them (S440 item 16) and refuses to copy these; a build carrying the error copies no helper. Resolution: move the helper inside the project, or mark the intended root with `scrml.toml`. (E-IMPORT-010 is separately reserved for `bun:`/`node:` imports in client context.) Emitted at `compiler/src/api.js` `createClientHelperRelocator`. | Error |
 | E-META-002 | §22.4 | Invalid token inside a `^{}` meta block (existing). The meta block body is not valid scrml/JS at parse time. (Catalog addition S78 audit; emitted at `compiler/src/ast-builder.js`.) | Error |
@@ -28979,8 +29124,17 @@ lin x = fetchToken();
 `lin` is a declaration keyword. It takes the same syntactic position as `let` and `const`.
 
 ```
-lin-declaration ::= 'lin' identifier '=' expression ';'     (* S469: `;` terminates, dpa-073 F1 *)
+lin-declaration ::= 'lin' identifier (':' type-annotation)? '=' expression ';'
+                    (* S469: `;` terminates, dpa-073 F1 · S471: optional type annotation *)
 ```
+
+A `lin` declaration MAY carry a type annotation, as `let` and `const` may: `lin t: Token = fetchToken();`. The
+annotation types the binding exactly as it would a `let`'s (§7.5), and does not change the linear rules.
+
+> **Provenance:** ruling:user-voice-scrml.md S471 "your recs on the lin questions." (item 1: *"`lin x: T = …` is
+> ALLOWED — §35.2 gains an optional type annotation, like every other declaration"*) · **Direction of change:
+> newly-accepting.** **Nominal:** impl#1 refuses the annotated form (measured S471: `lin t: string = "a";` is
+> E-SCOPE-001 on `lin` and on `t` — it fails closed); the bootstrap refuses it until built.
 
 A `lin` declaration binds a name to a value and marks that binding as linear. The binding is immutable — the developer cannot assign a new value to a `lin` variable after declaration. Every reference to a `lin` identifier is counted as a consumption event (§35.3); there is no "read-only" reference that sits between declaration and consumption. A second reference — even one that would be a read-only observation in a non-linear language — is E-LIN-002.
 
@@ -29206,6 +29360,45 @@ for (const item of items) {
 - A `lin` variable declared inside a loop body and consumed within the **same iteration** SHALL be valid (loop-body carve-out, ~~§34.4.4.1~~ §35.4.4.1).
 - A `lin` variable declared inside a loop body that is NOT consumed before the iteration scope ends SHALL be a compile error (E-LIN-001).
 - The compiler SHALL verify, for each loop-local `lin` variable, that exactly one consumption appears on every path before the iteration scope exits.
+
+#### 35.4.5 Exit paths and closure bodies (S471)
+
+> **Provenance:** ruling:user-voice-scrml.md S471 "your recs on the lin questions." (items 2–4) · **Direction of
+> change:** items 2 and 4 choose between codes that both described the case (no program changes acceptance); item 3
+> is **newly-rejecting** where a `lin` is live across an implicit failure exit.
+
+**Which code an unconsumed path gets.** E-LIN-001 and E-LIN-003 can both describe a path that leaves a `lin`
+unconsumed. The code is tied to the path: a path that reaches a scope exit (a `return`, a `fail`, a `?` exit, the
+end of the scope) with the `lin` unconsumed SHALL be **E-LIN-001**, even where another path consumed it.
+**E-LIN-003** is for paths that rejoin — a branch whose arms reach the same following code with different
+consumption, as in §35.4.2's `if` without `else`.
+
+```scrml
+lin t = fetchToken();
+if (c) { return use(t); }
+return "n";                  // E-LIN-001: this path exits with t unconsumed (not E-LIN-003)
+```
+
+**Failure exits are exit paths.** A `?` propagation (§19.5) that leaves the function, and the implicit failure exit
+of a `?{}` in a `!` function (§19.8.2), are exit paths. A `lin` not yet consumed at such a point SHALL be
+**E-LIN-001**.
+
+**One closure body counts once per appearance.** Inside one closure body, two appearances of the same `lin`
+variable SHALL be **E-LIN-002**, even in mutually exclusive branches of that body. The capture is the consumption
+(§35.6), so each appearance in the body is a further reference.
+
+```scrml
+lin t = fetchToken();
+let f = (b) => { if (b) { use(t); } else { drop(t); } };   // E-LIN-002: two appearances in one closure body
+```
+
+**Normative statements:**
+
+- A path that reaches a scope exit with a `lin` variable unconsumed SHALL be E-LIN-001; E-LIN-003 SHALL be reported
+  only where paths with different consumption rejoin.
+- A `?` exit and the implicit `?{}` failure exit of a `!` function SHALL be exit paths for §35.3 and this rule.
+- Two appearances of one `lin` variable in one closure body SHALL be E-LIN-002, whatever the branching inside the
+  body.
 
 ### 35.5 Error Conditions
 
@@ -51186,7 +51379,7 @@ emitter). Every code below is Nominal on impl#1.
 | **`E-DECL-STAR-REF-ATTR-WRITE`** | Error | An attribute on a `<*x …>` reference would write the referenced instance (§66.6.7). **Nominal / spec-ahead — not yet emitted for the §66 form** (impl#1 does not implement §66; the bootstrap does). |
 | **`E-DECL-USE-ATTR`** | Error | An attribute on a plain use `<x …/>` that is not a declared attribute or child field of `x`, `as=`, or `if=` / `else-if=` / `else` — `class`, `style`, `id`, `aria-*`, `data-*`, `on…`, `bind:…`, `show=`, `key=`, a misspelled field, … (§66.6.9 rules 1, 2, 4); an attribute on a `<*x>` reference that names no field of `x`, `as=` included — except `if=` / `else-if=` / `else`, the open residue O18-r, which the bootstrap refuses as `E-BOOTSTRAP-UNSUPPORTED` for now (§66.6.9 rule 3); and a declared attribute's construction value written as a `{…}` block (a construction value is an expression). **Provenance:** ruling:user-voice-scrml.md S462 — *"I really like X so I accept your rec as a ratified path to X"* (dpa-069 item 1). **Nominal on impl#1** (impl#1 does not implement §66; its legacy component form keeps `E-COMPONENT-011`, §15.10); **the bootstrap emits it** (`compiler/self-host-v2/analyze.scrml` — `resolveUse`, `resolveStar`, `resolveConstructValue`). |
 | **`E-DECL-HANDLE-NOT-NARROWED`** | Error | A write OR a read (S437) through an `as=` handle typed `T \| not` (a conditionally-mounted instance) without a preceding narrowing (§66.7.5). **Nominal / spec-ahead — not yet emitted for the §66 form** (impl#1 does not implement §66; the bootstrap does). |
-| **`E-HANDLE-REDECLARE`** | Error | (i) Two `as=` handles of the same name in one scope; (ii) an `as=` handle named like a cell — including a row-scoped handle in an `<each>` row named like a program-level cell (§66.7.4); (iii) the same `as=` name on mutually exclusive `if=` instances — an error for now, logged as a candidate widening (§66.7.2). **Provenance:** ruling:user-voice-scrml.md S440 (#4 = (c); #2 and #5 = PA recs — item #5). **Named; impl pending — Nominal / spec-ahead — not yet emitted for the §66 form** (impl#1 does not implement §66; the bootstrap does). |
+| **`E-HANDLE-REDECLARE`** | Error | (i) Two `as=` handles of the same name in one scope; (ii) an `as=` handle named like a cell — including a row-scoped handle in an `<each>` row named like a program-level cell (§66.7.4); (iii) the same `as=` name on mutually exclusive `if=` instances — an error for now, logged as a candidate widening (§66.7.2); *(S471)* (iv) a row-scoped `ref=@name` in an `<each>` row template naming a cell declared outside the row (§6.7.1b (a); ruling:user-voice-scrml.md S471 "your recs on F0 and F1", dpa-075 F1 (a)). **Provenance:** ruling:user-voice-scrml.md S440 (#4 = (c); #2 and #5 = PA recs — item #5). **Named; impl pending — Nominal / spec-ahead — not yet emitted for the §66 form** (impl#1 does not implement §66; the bootstrap does). |
 | **`E-DECL-SINGLE-INSTANTIATED`** | Error | A plain use `<x …/>` of a `single` declaration (§66.13.3); `<*x/>` is the only way to render it. O55 RULED S442 (formerly conditional on O55). **Provenance:** ruling:user-voice-scrml.md S442 — *"1 your rec, 2 deliberate, 3 your rec"* (item 1). **Nominal / spec-ahead — not yet emitted for the §66 form** (impl#1 does not implement §66; the bootstrap does). |
 | **`E-WRITE-NOT-GRANTED`** | Error | A write whose compile-time-classified old→new transition is not granted by the target's type: a write to a locked (constant) declaration, to a fixed field, a `replace` (incl. `reset(@x)` and unclassifiable reassignment) without a `replace` grant, an un-granted sequence edit (including an in-place tape method — `.append`, `.pop`, `.prepend`, `.shift`, `.insert`, `.remove`, an index or `length =` write — on a tape in ANY position: a local, a parameter, a return value, a struct field, a tuple position, or a host / `asIs` value given no granting tape type; §66.12.6, S469), or a write off a lifecycle path — including a transition off a lifecycle path or sequence edit grant on a SUB-FIELD, written via the spread-override shape `@x = { ...@x, f: v }` (§66.11.3, S437; a genuine replace is authoritative, O58 = (b)). The message names the missing grant (for a locked scalar: `let`). A write off a `rule=` graph keeps its existing code, `E-ENGINE-INVALID-TRANSITION` (§66.11, §66.13.2). **Nominal / spec-ahead — not yet emitted for the §66 form** (impl#1 does not implement §66; the bootstrap does). |
 | **`E-WRITE-INVARIANT`** | Error | A write that provably violates a sequence invariant — a length bound or a per-position type (§66.11.2; enforcement of the unprovable case is O36). **Nominal / spec-ahead — not yet emitted for the §66 form** (impl#1 does not implement §66; the bootstrap does). |
