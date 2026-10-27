@@ -2281,3 +2281,4 @@ gets no marker yet; its body records round 2 `ce7746b9d` LAND-WITH-NITS.
 <!-- @review pr=1594 verdict=finding by=S471-bryan date=2026-10-27 probe=S239 2 rounds on frozen refs: FIX → re-review LAND-WITH-FOLLOWUPS (bootstrap parse batch) -->
 <!-- @review pr=1596 verdict=carve-out by=S471-bryan date=2026-10-27 probe=docs only: SPEC text (dpa-075 F1 floor, DD §8 corrections, lin rulings); landing re-generated SPEC-INDEX only -->
 <!-- @review pr=1597 verdict=finding by=S471-bryan date=2026-10-27 probe=S239 review on a frozen ref: LAND-WITH-FOLLOWUPS (bootstrap loop-wait + lin; follow-ups filed as 4 LOW gaps) -->
+<!-- @review pr=1599 verdict=carve-out by=S471-bryan date=2026-10-27 probe=docs only: S471 gaps consolidation (sweep verdicts, lin/loop follow-ups, dpa-075 items, review markers) -->
