@@ -253,3 +253,24 @@ describe("fail closed — what the bootstrap cannot honor is refused, never rend
         <each in=[1, 2] else><i>\${item}</i></each>`));
   });
 });
+
+// s471 — RULED (user-voice S471, "your recs"): an HTML comment between chain members
+// does NOT break the chain (§17.1.1 "no element, text node, or other syntactic construct").
+describe("s471 — an HTML comment between members does not break the chain", () => {
+  const SRC = prog(`        <p id="a" if=(@step == 1)>a</p>
+        <!-- between -->
+        <p id="b" else-if=(@step == 2)>b</p>
+        <!-- and again -->
+        <p id="c" else>c</p>`);
+  test("compiles clean (no E-CTRL-001 / E-CTRL-002)", () => {
+    expect(codes(SRC)).toEqual([]);
+  });
+  test("runs as ONE chain: exactly the first true member is in the DOM", async () => {
+    const { program } = await loadProgram(clean(SRC), "chain-comment", ["go"]);
+    expect(ids("main p")).toBe("a");
+    program.go(2);
+    expect(ids("main p")).toBe("b");
+    program.go(3);
+    expect(ids("main p")).toBe("c");
+  });
+});

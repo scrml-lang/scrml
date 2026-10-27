@@ -1,0 +1,15 @@
+{
+  "id": "acceptance-control-flow-defer-loop-iteration",
+  "description": "§19.16.2: each iteration runs its own deferred bodies (LIFO) on fall-through, `continue`, `break` and `return`.",
+  "language-version": "1.0",
+  "spec": "§19.16.2 · §19.16.6",
+  "rationale": "§19.16.2 Registration: \"… a loop body (once per iteration) …\"; §19.16.6: \"A loop body is its own block, so each iteration has its own stack instance and its deferred statements run at that iteration's exit.\"",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-BOOTSTRAP-UNSUPPORTED"],
+    "input": [{ "click": "#go" }],
+    "domAnchored": [
+      { "selector": "#trace", "text": "ba;e;da;e;db;bc;e;dc;e;dd;ra;rb;kb;" }
+    ]
+  }
+}

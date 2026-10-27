@@ -1,0 +1,17 @@
+{
+  "id": "acceptance-control-flow-defer-return-value",
+  "description": "§19.16.2: take() returns @count (7); its deferred bodies then set @count = 99 and append \"d\" — @got = 7, @count = 99.",
+  "language-version": "1.0",
+  "spec": "§19.16.2",
+  "rationale": "§19.16.2 Exit: \"`return` (after the return value has been evaluated — the deferred body cannot rebind WHICH value is returned …)\". Pins g-bootstrap-defer-scope-001-and-runs-anyway (closed s451) on the bootstrap.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-SCOPE-001"],
+    "input": [{ "click": "#go" }],
+    "domAnchored": [
+      { "selector": "#got", "text": "7" },
+      { "selector": "#count", "text": "99" },
+      { "selector": "#trace", "text": "d" }
+    ]
+  }
+}
