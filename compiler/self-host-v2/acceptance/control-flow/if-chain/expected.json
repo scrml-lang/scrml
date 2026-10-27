@@ -1,0 +1,17 @@
+{
+  "id": "acceptance-control-flow-if-chain",
+  "description": "§17.1.1 chain: @step seeds 1 (#one present); one click moves to step 2 — #two present, #one and #rest absent (not hidden).",
+  "language-version": "1.0",
+  "spec": "§17.1.1",
+  "rationale": "§17.1.1: \"An if-chain desugars to a single `${ if / else if / else }` block\"; Example 1: \"Only one span exists in the DOM at any time.\" Pins g-bootstrap-else-if-else-attrs-ignored (closed s451) on the bootstrap.",
+  "expect": {
+    "codes": [],
+    "input": [{ "click": "#go" }],
+    "domAnchored": [
+      { "selector": "#two", "count": 1 },
+      { "selector": "#two", "text": "TWO" },
+      { "selector": "#one", "count": 0 },
+      { "selector": "#rest", "count": 0 }
+    ]
+  }
+}

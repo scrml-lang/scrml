@@ -1,0 +1,18 @@
+// §19.16.2: on a `return` exit the return value is evaluated FIRST, then the deferred bodies run (LIFO).
+<program>
+    let <count:int=7/>
+    let <got:int=0/>
+    let <trace:string=""/>
+    function take() -> int {
+        defer @count = 99;
+        defer @trace = @trace + "d";
+        return @count;
+    }
+    function go() { @got = take(); }
+    <main>
+        <button id="go" onclick=go()>go</button>
+        <p id="got">${@got}</p>
+        <p id="count">${@count}</p>
+        <p id="trace">${@trace}</p>
+    </main>
+</program>
