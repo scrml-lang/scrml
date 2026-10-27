@@ -1,0 +1,20 @@
+// §19.16.3 rule 1: a `break` that targets a loop INSIDE the deferred body is permitted.
+<program>
+
+    function f() -> int {
+        let s = 0;
+        for (i of 0..2) {
+            defer {
+                for (j of 0..5) {
+                    if (j == 2) { break; }
+                    s = s + 1;
+                }
+            }
+            s = s + 10;
+        }
+        return s;
+    }
+    <main>
+        <p id="o">${f()}</p>
+    </main>
+</program>

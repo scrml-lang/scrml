@@ -30,7 +30,7 @@ ${
              HostCall, SeqFn, BindKind,
              EditKind, Check, Stmt, Block, Attr, ConstructAttr, CondArm, View, EffectDep, FieldRole, Field,
              Decl, Fn, CoreProgram, CapOwner, SurfaceProp, ValidityOf, Validator, Persist, PersistStore,
-             Failable, OkArm, ErrArm, ServerFn, SqlQuery, SqlMode, Param, LoopHead, RangeHead, CssUnit, CoreCss, CssVar,
+             Failable, OkArm, ErrArm, ServerFn, SqlQuery, SqlMode, Param, LoopHead, EachHead, RangeHead, CssUnit, CoreCss, CssVar,
              Gather, Lifted, GatherRow,
              findDecl, findTypeDef, typeDefSym, capOwner, findFn, findServerFn } from "./core.scrml"
     import { Node, allNodes, sharedRefs, boundSyms, assignedSyms } from "./walk.scrml"
@@ -83,9 +83,17 @@ ${
         // appends; a value Lift appends a text row. `not` everywhere else (a
         // Stmt.Gather's Lift appends its value).
         tier0: Tier0Rows | not,
+        // s471 (§49.12.7): the enclosing loops that WAIT, printed in explicit
+        // continuations (cycleJs) — a Break of one is `return <exit>()`, a
+        // Continue `return <next>(…)`, from anywhere inside its iteration.
+        cycles: CycleJs[],
     }
 
     type Tier0Rows:struct = { rows: JsExpr[] }
+    // s471 — a waiting loop's two ways out of an iteration: `exit` (the Join of
+    // what follows the loop) and `next` (the next iteration, its bindings
+    // carried forward — §49.3.7).
+    type CycleJs:struct = { label: int, exit: JsExpr, next: JsExpr }
 
     type Rendered:struct = { stmts: JsStmt[], templates: Template[] }
     type Hole:struct = { path: int[], v: View }
@@ -630,10 +638,223 @@ ${
         if (ctx.server) {
             out = serverStmtsJs(ctx, b.stmts, assigned)
         } else {
-            for (const s of b.stmts) { out = out.concat(stmtJs(ctx, s, assigned)) }
+            // s471: a loop that waits stands right after the Join of its exit (C12)
+            let exit: Sym | not = not
+            for (const s of b.stmts) {
+                const cp: CycleParts | not = waitingLoopOf(s)
+                const k: Sym | not = exit
+                if (cp is given && k is given) {
+                    out = out.concat(cycleJs(ctx, cp, k, assigned))
+                } else {
+                    out = out.concat(stmtJs(ctx, s, assigned))
+                }
+                exit = joinSymOf(s)
+            }
         }
         if (holdsDefer(b)) return deferBlockJs(ctx, out)    // s451
         return out
+    }
+
+    // -------------------------------------------------------------------------
+    // s471 — a loop that WAITS (§49.12.7: "A server call in a loop body of a
+    // function is awaited once per iteration (§13) … Per-iteration binding
+    // (§49.3.7) holds across every suspension"), on the client, where a wait is
+    // an explicit continuation (`rt.suspend`). Each iteration is ONE call of an
+    // arrow whose parameters are the iteration's own bindings — the iterate
+    // head's position, the range's counter, the counted head's `let`s — so a
+    // continuation that resumes after a wait reads its own iteration's values
+    // (§49.3.7). `rt.cycle(iterate)` returns the loop's `next`: a Continue (and
+    // falling off the body — lower's continuation pass ends every path in one)
+    // is `return L(…)`; a Break, and a head that is done, `return exit()` — the
+    // Join of what follows the loop. `next` never recurses (runtime `cycle`).
+    // The counted head's step runs on a COPY (`L$step`'s parameters), as
+    // JavaScript's `for (let …)` copies the bindings before the step, so an
+    // earlier iteration's closure never sees a later step. The server prints
+    // the same Core as a native loop (its waits are `await`, serverStmtsJs).
+    // -------------------------------------------------------------------------
+    type CycleParts:struct = { label: Sym, head: LoopHead, body: Block }
+
+    fn waitingLoopOf(s: Stmt) -> CycleParts | not {
+        const cp: CycleParts | not = match s {
+            .Loop(label: l, head: h, body: b) :> { label: l, head: h, body: b }
+            .Let(sym: x) :> not
+            .Assign(local: x) :> not
+            .Write(cap: x) :> not
+            .Commit(writes: x) :> not
+            .If(cond: x) :> not
+            .Return(e: x) :> not
+            .Eval(e: x) :> not
+            .Suspend(bind: x) :> not
+            .ResetSurface(of: x) :> not
+            .Defer(body: x) :> not
+            .Unpersist(decl: x) :> not
+            .Attempt(result: x) :> not
+            .Fail(err: x) :> not
+            .Join(k: x) :> not
+            .Jump(k: x) :> not
+            .Break(target: x) :> not
+            .Continue(target: x) :> not
+            .Gather(g: x) :> not
+            .Lift(into: x) :> not
+        }
+        if (cp is not) return not
+        if (!cycleWaits(cp.body)) return not
+        return cp
+    }
+
+    fn cycleWaits(b: Block) -> boolean {
+        for (const n of allNodes(Node.NBlock(b))) {
+            if (nodeSuspendParts(n) is given) return true
+        }
+        return false
+    }
+
+    fn nodeSuspendParts(n: Node) -> SuspendParts | not {
+        return match n {
+            .NStmt(s: s) :> suspendPartsOf(s)
+            .NProgram(p: x) :> not
+            .NDecl(d: x) :> not
+            .NField(f: x) :> not
+            .NFn(f: x) :> not
+            .NServerFn(f: x) :> not
+            .NBlock(b: x) :> not
+            .NExpr(e: x) :> not
+            .NPlace(pl: x) :> not
+            .NInst(i: x) :> not
+            .NPattern(pat: x) :> not
+            .NEdit(k: x) :> not
+            .NView(v: x) :> not
+            .NAttr(a: x) :> not
+        }
+    }
+
+    fn joinSymOf(s: Stmt) -> Sym | not {
+        return match s {
+            .Join(k: k) :> k
+            .Let(sym: x) :> not
+            .Assign(local: x) :> not
+            .Write(cap: x) :> not
+            .Commit(writes: x) :> not
+            .If(cond: x) :> not
+            .Return(e: x) :> not
+            .Eval(e: x) :> not
+            .Suspend(bind: x) :> not
+            .ResetSurface(of: x) :> not
+            .Defer(body: x) :> not
+            .Unpersist(decl: x) :> not
+            .Attempt(result: x) :> not
+            .Fail(err: x) :> not
+            .Jump(k: x) :> not
+            .Loop(label: x) :> not
+            .Break(target: x) :> not
+            .Continue(target: x) :> not
+            .Gather(g: x) :> not
+            .Lift(into: x) :> not
+        }
+    }
+
+    fn withCycle(ctx: Ctx, c: CycleJs) -> Ctx {
+        return { p: ctx.p, names: ctx.names, lexical: ctx.lexical, handles: ctx.handles, shared: ctx.shared,
+                 rows: ctx.rows, slot: ctx.slot, prebuilt: ctx.prebuilt, ret: ctx.ret, server: ctx.server, tier0: ctx.tier0,
+                 cycles: ctx.cycles.concat([c]) }
+    }
+
+    fn cycleOf(ctx: Ctx, t: Sym) -> CycleJs | not {
+        for (const c of ctx.cycles) {
+            if (c.label == t.id) return c
+        }
+        return not
+    }
+
+    fn breakJs(ctx: Ctx, t: Sym) -> JsStmt[] {
+        const c: CycleJs | not = cycleOf(ctx, t)
+        if (c is given) return [JsStmt.SReturn(c.exit)]
+        return [JsStmt.SBreak(symName(ctx, t))]
+    }
+
+    fn continueJs(ctx: Ctx, t: Sym) -> JsStmt[] {
+        const c: CycleJs | not = cycleOf(ctx, t)
+        if (c is given) return [JsStmt.SReturn(c.next)]
+        return [JsStmt.SContinue(symName(ctx, t))]
+    }
+
+    fn cycleJs(ctx: Ctx, cp: CycleParts, exitK: Sym, assigned: int[]) -> JsStmt[] {
+        const l: string = symName(ctx, cp.label)
+        const exit: JsExpr = jcall(jid(symName(ctx, exitK)), [])
+        const done: JsStmt = JsStmt.SReturn(exit)
+        const h: LoopHead = cp.head
+        return match h {
+            .Forever :> cycleOut(ctx, l, [], [], [], exit, jcall(jid(l), []), [], jcall(jid(l), []), cp, [])
+            .While(cond: c) :> cycleOut(ctx, l, [], [], [JsStmt.SIf(JsExpr.JUn(JsUnOp.Not, exprJs(ctx, c)), [done], [])], exit, jcall(jid(l), []), [], jcall(jid(l), []), cp, [])
+            .Each(h: eh) :> cycleEach(ctx, l, eh, exit, done, cp, assigned)
+            .Range(h: rh) :> cycleRange(ctx, l, rh, exit, done, cp)
+            .Counted(init: i, cond: c, step: sp) :> cycleCounted(ctx, l, i, c, sp, exit, done, cp, assigned)
+        }
+    }
+
+    // `pre` (before the loop) · `const L = rt.cycle((params) => { guard; binds; body });` · `post` · `start;`
+    fn cycleOut(ctx: Ctx, l: string, pre: JsStmt[], params: string[], guard: JsStmt[], exit: JsExpr, next: JsExpr,
+                binds: JsStmt[], start: JsExpr, cp: CycleParts, post: JsStmt[]) -> JsStmt[] {
+        const ictx: Ctx = withCycle(ctx, { label: cp.label.id, exit: exit, next: next })
+        const iterate: JsExpr = JsExpr.JArrow(params, guard.concat(binds).concat(blockJs(ictx, cp.body)))
+        return pre.concat([JsStmt.SConst(l, rtCall(ctx, "cycle", [iterate]))]).concat(post).concat([sexpr(start)])
+    }
+
+    // `for (x of xs)`: the iterable once, its elements (a string's code points) by position.
+    fn cycleEach(ctx: Ctx, l: string, eh: EachHead, exit: JsExpr, done: JsStmt, cp: CycleParts, assigned: int[]) -> JsStmt[] {
+        const items: string = l + "$items"
+        const i: string = l + "$i"
+        const pre: JsStmt[] = [JsStmt.SConst(items, jmcall(jid("Array"), "from", [exprJs(ctx, eh.src)]))]
+        const guard: JsStmt[] = [JsStmt.SIf(JsExpr.JBin(JsOp.Ge, jid(i), jmember(jid(items), "length")), [done], [])]
+        const elem: JsExpr = JsExpr.JIndex(jid(items), jid(i))
+        let bind: JsStmt = JsStmt.SConst(symName(ctx, eh.bind), elem)
+        if (hasInt(assigned, eh.bind.id)) bind = JsStmt.SLet(symName(ctx, eh.bind), elem)
+        const next: JsExpr = jcall(jid(l), [JsExpr.JBin(JsOp.Plus, jid(i), jnum(1))])
+        return cycleOut(ctx, l, pre, [i], guard, exit, next, [bind], jcall(jid(l), [jnum(0)]), cp, [])
+    }
+
+    // `for (i of lo..hi)`: both bounds once, `lo` first; the counter is the parameter.
+    fn cycleRange(ctx: Ctx, l: string, rh: RangeHead, exit: JsExpr, done: JsStmt, cp: CycleParts) -> JsStmt[] {
+        let iv: Sym = rh.bind
+        let binds: JsStmt[] = []
+        const counter: Sym | not = rh.counter
+        if (counter is given) {
+            iv = counter
+            binds = [JsStmt.SLet(symName(ctx, rh.bind), jid(symName(ctx, counter)))]
+        }
+        const i: string = symName(ctx, iv)
+        const e: string = symName(ctx, rh.end)
+        const lo: string = l + "$lo"
+        let op: JsOp = JsOp.Ge
+        if (rh.inclusive) op = JsOp.Gt
+        const pre: JsStmt[] = [JsStmt.SConst(lo, exprJs(ctx, rh.lo)), JsStmt.SConst(e, exprJs(ctx, rh.hi))]
+        const guard: JsStmt[] = [JsStmt.SIf(JsExpr.JBin(op, jid(i), jid(e)), [done], [])]
+        const next: JsExpr = jcall(jid(l), [JsExpr.JBin(JsOp.Plus, jid(i), jnum(1))])
+        return cycleOut(ctx, l, pre, [i], guard, exit, next, binds, jcall(jid(l), [jid(lo)]), cp, [])
+    }
+
+    // `for (init; cond; step)`: `init` once; its `let`s are the parameters; a
+    // Continue runs the step on a copy (`L$step`) and starts the next iteration.
+    fn cycleCounted(ctx: Ctx, l: string, init: Stmt[], cond: Expr | not, step: Stmt[], exit: JsExpr, done: JsStmt,
+                    cp: CycleParts, assigned: int[]) -> JsStmt[] {
+        let pre: JsStmt[] = []
+        let names: string[] = []
+        for (const s of init) {
+            pre = pre.concat(stmtJs(ctx, s, assigned))
+            for (const p of assignItem(ctx, s)) {
+                if (stmtIsLet(s)) names = names.concat([p.key])
+            }
+        }
+        let args: JsExpr[] = []
+        for (const n of names) { args = args.concat([jid(n)]) }
+        let guard: JsStmt[] = []
+        if (cond is given) guard = [JsStmt.SIf(JsExpr.JUn(JsUnOp.Not, exprJs(ctx, cond)), [done], [])]
+        const stepName: string = l + "$step"
+        let stepBody: JsStmt[] = []
+        for (const s of step) { stepBody = stepBody.concat(stmtJs(ctx, s, assigned)) }
+        stepBody = stepBody.concat([JsStmt.SReturn(jcall(jid(l), args))])
+        const post: JsStmt[] = [JsStmt.SConst(stepName, JsExpr.JArrow(names, stepBody))]
+        return cycleOut(ctx, l, pre, names, guard, exit, jcall(jid(stepName), args), [], jcall(jid(l), args), cp, post)
     }
 
     // s468 (U1c) — a block in SERVER mode: the explicit continuations of Core
@@ -816,8 +1037,8 @@ ${
             .Join(k: k, body: b) :> [JsStmt.SConst(symName(ctx, k), JsExpr.JArrow([], blockJs(ctx, b)))]
             .Jump(k: k) :> [sexpr(jcall(jid(symName(ctx, k)), []))]
             .Loop(label: l, head: h, body: lb) :> loopJs(ctx, l, h, lb, assigned)   // s469 (§49)
-            .Break(target: t) :> [JsStmt.SBreak(symName(ctx, t))]
-            .Continue(target: t) :> [JsStmt.SContinue(symName(ctx, t))]
+            .Break(target: t) :> breakJs(ctx, t)
+            .Continue(target: t) :> continueJs(ctx, t)
             .Gather(g: g) :> stmtGatherJs(ctx, g, assigned)                     // s469 (§49.6)
             .Lift(into: i, what: w) :> [liftJs(ctx, i, w)]
         }
@@ -839,7 +1060,7 @@ ${
 
     fn withTier0(ctx: Ctx, t: Tier0Rows | not) -> Ctx {
         return { p: ctx.p, names: ctx.names, lexical: ctx.lexical, handles: ctx.handles, shared: ctx.shared,
-                 rows: ctx.rows, slot: ctx.slot, prebuilt: ctx.prebuilt, ret: ctx.ret, server: ctx.server, tier0: t }
+                 rows: ctx.rows, slot: ctx.slot, prebuilt: ctx.prebuilt, ret: ctx.ret, server: ctx.server, tier0: t, cycles: ctx.cycles }
     }
 
     // `into.push(v)`; in a Tier-0 loop a value is a text row (`rt.textRow(v)`)
@@ -1417,7 +1638,7 @@ ${
     // its instances when it mounts: those are the conditional ones (§66.7.5).
     fn nested(ctx: Ctx) -> Ctx {
         return { p: ctx.p, names: ctx.names, lexical: ctx.lexical, handles: ctx.handles, shared: ctx.shared,
-                 rows: ctx.rows, slot: ctx.slot, prebuilt: false, ret: ctx.ret, server: ctx.server, tier0: ctx.tier0 }
+                 rows: ctx.rows, slot: ctx.slot, prebuilt: false, ret: ctx.ret, server: ctx.server, tier0: ctx.tier0, cycles: ctx.cycles }
     }
 
     // F16: one arm binds a field (a match over an imported payload enum).
@@ -1826,7 +2047,7 @@ ${
         }
         const rowCtx: Ctx = {
             p: ctx.p, names: ctx.names, lexical: ctx.lexical, handles: rowHandles,
-            shared: ctx.shared, rows: ctx.rows.concat([bind.id]), slot: ctx.slot, prebuilt: false, ret: ctx.ret, server: ctx.server, tier0: ctx.tier0,
+            shared: ctx.shared, rows: ctx.rows.concat([bind.id]), slot: ctx.slot, prebuilt: false, ret: ctx.ret, server: ctx.server, tier0: ctx.tier0, cycles: ctx.cycles,
         }
         const r: Rendered = renderViews(rowCtx, row, tid)
         const keyFn: JsExpr = keyJs(ctx, bindName, key)
@@ -1997,7 +2218,7 @@ ${
     // Declarations (§5.2).
     // -------------------------------------------------------------------------
     fn baseCtx(p: CoreProgram, names: NameTable) -> Ctx {
-        return { p: p, names: names, lexical: [], handles: [], shared: [], rows: [], slot: JsExpr.JNull, prebuilt: false, ret: "", server: false, tier0: not }
+        return { p: p, names: names, lexical: [], handles: [], shared: [], rows: [], slot: JsExpr.JNull, prebuilt: false, ret: "", server: false, tier0: not, cycles: [] }
     }
 
     fn instCtx(ctx: Ctx, d: Decl) -> Ctx {
@@ -2007,7 +2228,7 @@ ${
             hs = hs.concat([{ sym: h.id, js: handleSlot(jid("inst$"), k, h.hint) }])
             k = k + 1
         }
-        return { p: ctx.p, names: ctx.names, lexical: [jid("inst$")], handles: hs, shared: [], rows: [], slot: jid("slot$"), prebuilt: true, ret: "", server: false, tier0: not }
+        return { p: ctx.p, names: ctx.names, lexical: [jid("inst$")], handles: hs, shared: [], rows: [], slot: jid("slot$"), prebuilt: true, ret: "", server: false, tier0: not, cycles: [] }
     }
 
     fn declJs(ctx: Ctx, d: Decl, sharedUsed: Sym[]) -> Rendered {
@@ -2337,7 +2558,7 @@ ${
         }
         let ret: string = ""
         if (f.waits) ret = "ret$"
-        const fctx: Ctx = { p: ctx.p, names: ctx.names, lexical: [], handles: [], shared: shared, rows: [], slot: JsExpr.JNull, prebuilt: false, ret: ret, server: false, tier0: not }
+        const fctx: Ctx = { p: ctx.p, names: ctx.names, lexical: [], handles: [], shared: shared, rows: [], slot: JsExpr.JNull, prebuilt: false, ret: ret, server: false, tier0: not, cycles: [] }
         let params: string[] = []
         for (const p of f.params) { params = params.concat([symName(ctx, p.sym)]) }
         if (!f.waits) return JsStmt.SFunc(symName(ctx, f.sym), params, prologue.concat(blockJs(fctx, f.body)))
@@ -2363,7 +2584,7 @@ ${
     export fn serverCtx(p: CoreProgram) -> Ctx {
         let names: NameTable = planNames(p)
         for (const sf of p.server) { names = mint(names, NameKey.OfSym(sf.sym.id), sf.sym.hint) }
-        return { p: p, names: names, lexical: [], handles: [], shared: [], rows: [], slot: JsExpr.JNull, prebuilt: false, ret: "", server: true, tier0: not }
+        return { p: p, names: names, lexical: [], handles: [], shared: [], rows: [], slot: JsExpr.JNull, prebuilt: false, ret: "", server: true, tier0: not, cycles: [] }
     }
 
     export fn serverFnJs(ctx: Ctx, sym: Sym, params: Param[], body: Block, waits: boolean) -> JsStmt {

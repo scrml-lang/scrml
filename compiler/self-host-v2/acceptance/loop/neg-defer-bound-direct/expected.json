@@ -1,0 +1,15 @@
+{
+  "id": "acceptance-loop-neg-defer-bound-direct",
+  "description": "E-DEFER-UNSUPPORTED-SITE: a `defer` directly in the body of a loop bound as a value.",
+  "language-version": "1.0",
+  "spec": "§19.16.2 · §49.6",
+  "rationale": "§19.16.2: \"The same code covers a `defer` written directly in an arm of a `match` / `if` / `for` that is used for its VALUE\".",
+  "expect": {
+    "codes": [
+      "E-DEFER-UNSUPPORTED-SITE"
+    ],
+    "codeCounts": {
+      "E-DEFER-UNSUPPORTED-SITE": 1
+    }
+  }
+}

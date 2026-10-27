@@ -680,6 +680,41 @@ export function runDefers(stack) {
   if (failed) throw first;
 }
 
+/**
+ * s471 — a loop that WAITS (SPEC §49.12.7: "A server call in a loop body of a function is
+ * awaited once per iteration"; Core: a Loop whose body holds a Suspend, after the Join of its
+ * exit). The printer makes each iteration ONE call of `iterate`, whose parameters are that
+ * iteration's own bindings — so a continuation that resumes after a wait sees its iteration's
+ * values, never a later one (§49.3.7). Every path through an iteration ends by returning
+ * `next(…)` (the next iteration: `continue`, or falling off the body), the loop's exit
+ * continuation (`break`, or a head that is done), or a suspension whose continuation does one
+ * of those later.
+ *
+ * `next` never recurses: an iteration that completes WITHOUT waiting hands its successor back
+ * to the loop below, which runs it after the current iteration returns — so a loop of any
+ * length runs in constant stack whether its iterations wait or not. An iteration resumed by a
+ * continuation (after a wait) starts the loop again from there.
+ */
+export function cycle(iterate) {
+  let driving = false;
+  let queued = null;
+  const next = (...state) => {
+    queued = state;
+    if (driving) return;
+    driving = true;
+    try {
+      while (queued !== null) {
+        const s = queued;
+        queued = null;
+        iterate(...s);
+      }
+    } finally {
+      driving = false;
+    }
+  };
+  return next;
+}
+
 // ---------------------------------------------------------------------------
 // s451 (Ue) — the error model (SPEC §19). "There is NO try/catch. There are
 // NO exceptions. Errors are values" (§19.1): a `!` function that fails RETURNS

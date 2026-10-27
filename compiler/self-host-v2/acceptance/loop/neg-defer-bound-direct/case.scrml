@@ -1,0 +1,15 @@
+// §19.16.2: a `defer` directly in a loop used for its value is not a defer site.
+<program>
+
+    function f() -> int {
+        let s = 0;
+        const xs = for (i of 0..3) {
+            defer s = s + 1;
+            lift i;
+        };
+        return xs.length + s;
+    }
+    <main>
+        <p id="o">${f()}</p>
+    </main>
+</program>

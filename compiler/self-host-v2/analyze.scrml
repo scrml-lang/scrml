@@ -11818,17 +11818,38 @@ ${
     }
 
     // ---- the suspension plan -------------------------------------------------------
-    // s469 — no suspension point stands in a loop's head or body: the CPS split
-    // (a server call awaited per iteration) does not reach loops yet, and
-    // §49.3.7 requires each iteration's binding to survive the suspension,
-    // which no slice has built. Refused where it stands (check.scrml C19
-    // re-checks the Core: a Loop holds no Suspend).
-    fn planLoop(cx: PCx, f: AFor, ps0: PS) -> PS {
-        const pos: Pos = { refused: "a `for` loop — a loop cannot wait for the server yet (the suspension split does not reach loops; §49.3.7, §49.12.7). Make the call before the loop, or after it" }
+    // s471 — a loop BODY may wait (§49.12.7: "A server call in a loop body of a
+    // function is awaited once per iteration (§13)"; §13.8 (i): a function
+    // body, a handler, an effect body are action positions). The body is
+    // planned as any statement list (its `if`s get their joins, its handling
+    // forms their outcomes); a loop whose body holds a suspension point gets an
+    // EXIT continuation — a join on the `for` statement, whatever follows it:
+    // lower's continuation pass moves the rest of the block into it, and the
+    // body's every path ends in a Continue / Break of the loop (check.scrml C12).
+    // §49.3.7 ("A compiler that splits the body across a suspension (§13.2)
+    // SHALL preserve this") is the printer's: each iteration is one call whose
+    // parameters are its bindings (print.scrml cycleJs, runtime `cycle`).
+    // Still refused, by name (g-bootstrap-loop-wait-and-defer-s469, remainder):
+    // a wait in a loop HEAD (the iterable / bounds / `init` run once before the
+    // loop, the condition / step per iteration — neither is split yet), and a
+    // wait in a loop bound as a value (§49.6 — its Gather is no continuation).
+    fn planLoop(cx: PCx, s: AStmt, f: AFor, ps0: PS) -> PS {
+        const pos: Pos = { refused: "a `for` loop's head — a loop head cannot wait for the server yet (the suspension split reaches a loop's body, not its head; §49.12.7). Make the call before the loop (`const xs = load() !{ … };`), or in the body" }
         let ps: PS = ps0
         for (const e of forHeadExprs(f)) { ps = planExpr(cx, e, pos, ps).ps }
         ps = planLoopBlock(cx, forInitBlock(f), pos, ps)
-        return planLoopBlock(cx, f.body, pos, ps)
+        if (f.bound is given) {
+            const bpos: Pos = { refused: "a loop bound as a value (`const xs = for (…) { … }`, §49.6) — a bound loop cannot wait for the server yet (its value is built in one synchronous run). Use a statement loop that appends to a tape, or make the call before the loop" }
+            return planLoopBlock(cx, f.body, bpos, ps)
+        }
+        const before: int = ps.plan.at.length
+        ps = planBlock(cx, f.body, ps)
+        if (ps.plan.at.length > before) {
+            const rk: RPSym = pmint(ps, "loop_exit")
+            ps = rk.ps
+            ps = withPlan(ps, { at: ps.plan.at, temps: ps.plan.temps, joins: ps.plan.joins.concat([{ nid: s.nid, k: rk.s }]), waiting: ps.plan.waiting, rets: ps.plan.rets })
+        }
+        return ps
     }
 
     fn planLoopBlock(cx: PCx, b: ABlock, pos: Pos, ps0: PS) -> PS {
@@ -21642,7 +21663,7 @@ ${
             .Return(e: e) :> planMaybe(cx, e, ps)
             .If(cond: c, thenB: tb, elseB: eb) :> planBranches(cx, s, [tb].concat(maybeBlockList(eb)), rest, planExpr(cx, c, okPos(), ps).ps)
             .Given(name: n, subject: x, body: b) :> planBranches(cx, s, [b], rest, planExpr(cx, x, okPos(), ps).ps)
-            .For(f: lf) :> planLoop(cx, lf, ps)
+            .For(f: lf) :> planLoop(cx, s, lf, ps)
             .Break(label: x) :> ps
             .Continue(label: x) :> ps
             .Lift(what: w) :> planExprs(cx, liftExprs(w), ps)

@@ -1,0 +1,16 @@
+{
+  "id": "acceptance-loop-defer-per-iteration",
+  "description": "each iteration's deferred body runs at that iteration's end: 2, 21, 212, 2121, 21212, 212121.",
+  "language-version": "1.0",
+  "spec": "§19.16.2 · §19.16.6",
+  "rationale": "§19.16.2: \"the innermost statement list that contains the `defer`: … a loop body (once per iteration)\"; §19.16.6: \"each iteration has its own stack instance and its deferred statements run at that iteration's exit\".",
+  "expect": {
+    "codes": [],
+    "domAnchored": [
+      {
+        "selector": "#o",
+        "text": "212121"
+      }
+    ]
+  }
+}
