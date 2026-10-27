@@ -21,8 +21,7 @@ bryan: "go, and yes to all the recs" — all eight hand-off-470 §3 owner questi
 | `s471-owner-rulings-spec` | SPEC text for rulings 1–7 | docs-only; `compiler/SPEC.md` + SPEC-INDEX |
 
 ## Gaps touched by the rulings (this PR)
-- `g-when-changes-stale-response-s470`, `g-engine-effect-async-no-newest-wins-s470`, `g-spec-host-promise-statics-s470`: S471 ruling notes added (the SPEC questions are closed; the remaining limbs are conformance bugs).
-- NEW `g-enum-payload-field-named-variant-not-refused-s471` (MED).
+- `g-when-changes-stale-response-s470`, `g-engine-effect-async-no-newest-wins-s470`, `g-spec-host-promise-statics-s470`, `g-spec-enum-payload-field-named-variant-s470`: S471 ruling notes added (the SPEC questions are closed; the remaining limbs are conformance bugs).
 
 ## Owed after the lanes land
 - Flip `windows` to required (ruling 8).

@@ -31,7 +31,7 @@
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 262 | 5 |
-| MED | 703 | 8 |
+| MED | 702 | 8 |
 | LOW | 528 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
@@ -165,6 +165,8 @@ Measured by the #1563 review across its five rounds, on head and main (the recor
 
 <!-- @gap id=g-spec-enum-payload-field-named-variant-s470 sev=LOW status=open locus=SPEC(§14.4 enum payload field names) prov=review:S470-#1563-round-0(X-VAR, b3 X4) -->
 ### g-spec-enum-payload-field-named-variant-s470 — an enum payload field named `variant` (`Bad(variant: string)`) is accepted, but `x.variant` reads the TAG, so the field is silently shadowed; SPEC says nothing about reserving the name — `NEW S470; LOW; open (owner ruling needed)`
+
+ > **S471 RULING (bryan, "yes to all the recs"):** refuse the field name. SPEC text + new code `E-ENUM-PAYLOAD-FIELD-RESERVED` (Nominal) via lane `s471-owner-rulings-spec`; impl#1 must emit it at the enum declaration. The SPEC question is closed; the impl half is open.
 
 Refusing it would be a new language rule, so it needs SPEC text and an owner ruling. PA recommendation: refuse a payload field named `variant`.
 
@@ -431,11 +433,6 @@ The code comment says so: "fail closed: a `=` in a string counts too". Rare tail
 ### g-impl1-e-error-012-delete-tail-unclassified-s470 — a `delete` arm tail is not recognised by E-ERROR-012's yields / falls-through classifier, whose write rule knows only assignment and `++` / `--` — `NEW S470 (review of #1577); LOW; open`
 
 Listed as a follow-up on #1577. Not measured here. Decide whether a `delete` tail falls through (it is a write) and add it to `exprHasWrite`.
-
-<!-- @gap id=g-enum-payload-field-named-variant-not-refused-s471 sev=MED status=open locus=searched:compiler/src/type-system.ts(enum declaration payload parsing),ast-builder.js prov=ruling:user-voice-scrml.md S471 "go, and yes to all the recs" (hand-off-470 §3 item 5) -->
-### g-enum-payload-field-named-variant-not-refused-s471 — an enum payload field named `variant` is accepted, and collides with the `.variant` tag read (#1571): on such a value `x.variant` cannot mean both — `NEW S471; MED; open`
-
-Ruled S471: refuse the field name (code named by lane `s471-owner-rulings-spec` — `E-ENUM-PAYLOAD-FIELD-RESERVED` unless an existing §34 code fits). impl#1 must emit it at the enum declaration. Newly-rejecting; measure the corpus first.
 
 <!-- @gap id=g-windows-imported-alias-chain-refusal-not-emitted-s470 sev=HIGH status=open locus=UNTRACED(cross-file enum / alias resolution added by #1563 — likely a path-key separator mismatch on Windows) prov=empirical:S470-CI-windows-job(main 5f4b01533 run 40350986599, PR #1581 run 40416129494) -->
 ### g-windows-imported-alias-chain-refusal-not-emitted-s470 — on Windows, the #1563 field-read refusal (E-TYPE-004 / E-TYPE-031) is not emitted when the enum type arrives through an imported alias, an alias of an alias, a re-export, or an imported function's return type. The same 10 `compiler/tests/unit/enum-value-member-read-s470.test.js` cases fail on main and on #1581: K-ALIAS2, IMP-STRUCT, EXPORT-STAR, both DEPTH cases, I1, I2, I3, I-cross and STAR-PREC. `codesOf` returns `[]` where the test expects `E-TYPE-004` — `NEW S470; HIGH (SECURITY: fail-open on Windows builds); open`
