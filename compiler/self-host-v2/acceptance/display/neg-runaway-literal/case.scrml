@@ -1,0 +1,11 @@
+// §4.18.3 / §4.18.7: `"C:\"` (an escaped quote, so the literal never closes) with a later `"` in the file.
+<program>
+    type Ph:enum = { A, B }
+    <ph:Ph=.A single>
+        <A rule=.B>"C:\"</>
+        <B rule=.A : "B">
+    </>
+    <main>
+        <p id="s"><*ph/></p>
+    </main>
+</program>

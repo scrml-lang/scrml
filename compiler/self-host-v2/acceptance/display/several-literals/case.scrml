@@ -1,0 +1,15 @@
+// §4.18.3: a code-default body may hold several standalone display-text literals.
+<program>
+    type Ph:enum = { A, B }
+    let <n:int=5/>
+    <ph:Ph=.A single>
+        <A rule=.B>
+            "n is ${@n}"
+            " and " "done"
+        </>
+        <B rule=.A : "B">
+    </>
+    <main>
+        <p id="s"><*ph/></p>
+    </main>
+</program>
