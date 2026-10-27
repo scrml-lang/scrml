@@ -260,6 +260,12 @@ const STATUS = {
   "termination/neg-split-call": ["PASS", ["E-STMT-SPLIT-CONTINUATION"]],
   "termination/neg-bare-fail": ["PASS", ["E-PARSE-EXPECTED"]],
   "termination/neg-spaced-propagate": ["PASS", ["E-PARSE-EXPR"]],
+  // s471-bootstrap-parse-batch — parser gaps (parse.scrml)
+  "display/several-literals": ["PASS", []],
+  "display/neg-runaway-literal": ["PASS", ["E-CTX-001"]],
+  // O61 (§66.2.5 S469): an item in a `<db>` body — read as the declaration, its block-owned
+  // server-side state refused by name (owed: analyze / lower / server runtime)
+  "o61/db-let-decl": ["UNSUPPORTED", ["E-BOOTSTRAP-UNSUPPORTED"]],
 };
 
 let verdicts;

@@ -1,0 +1,13 @@
+{
+  "id": "acceptance-display-neg-runaway-literal",
+  "description": "An unterminated display-text literal in a state-child body is E-CTX-001 at its opening `\"`, recovered at the body's closer — even when a later `\"` in the file would close it — with no E-UNQUOTED-DISPLAY-TEXT / E-PARSE-UNCLOSED cascade.",
+  "language-version": "1.0",
+  "spec": "§4.18.3 · §4.18.7",
+  "rationale": "§4.18.3: \"A display-text literal that reaches end-of-file (or the body's closer) before its closing `\"` is an unterminated literal — `E-CTX-001` against the opening `\"`, recovered per §4.18.7.\"",
+  "expect": {
+    "codes": ["E-CTX-001"],
+    "codeCounts": { "E-CTX-001": 1 },
+    "notCodes": ["E-UNQUOTED-DISPLAY-TEXT", "E-PARSE-UNCLOSED"],
+    "severity": { "E-CTX-001": "error" }
+  }
+}

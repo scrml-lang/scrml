@@ -31,8 +31,8 @@
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 264 | 5 |
-| MED | 703 | 8 |
-| LOW | 529 | 0 |
+| MED | 699 | 8 |
+| LOW | 531 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
 
@@ -466,6 +466,14 @@ The failures were read from the CI `windows` job logs, not reproduced on a Windo
 ### g-promise-all-batch-await-text-disables-batching-s470 — a string literal containing the word "await" (`const k = "please await"`) next to a batchable `const v = isOk(p)` sends the whole group to the sequential path, because the element check matches `/\bawait\b/` on the emitted text — `NEW S470 (review of #1581); LOW; open`
 
 Correct output, but no parallelism. This fails safe. Fix direction: test the AST, or match the token outside string literals.
+
+<!-- @gap id=g-boot-runaway-reread-before-unclosed-construct-s471 sev=LOW status=open locus=compiler/self-host-v2/parse.scrml(runawayDisplayAt / runawayTrigger) prov=review:S471-parse-rereview(residue; ~/.cache/scrml/review/s471-parse/cases7.mjs) -->
+### g-boot-runaway-reread-before-unclosed-construct-s471 — a CLOSED literal containing `</>` followed by a construct that never closes (`<!-- c`, `?{ select`, `${ @n`) is re-read as runaway: E-CTX-001 + E-PARSE-DECL-BODY blames the literal instead of the real unclosed construct — `NEW S471; LOW; open (error path only)`
+
+Fix: before taking the cut reading, require that the closed reading's first new hard error does not start after the literal's closing `"`.
+
+<!-- @gap id=g-spec-stray-semicolon-after-closer-item-s471 sev=LOW status=open locus=SPEC(§7.2.2 rule 2 / rule 6; §40.8 interim) prov=dispatch:s471-bootstrap-parse-batch;review:S471-parse(F2) -->
+### g-spec-stray-semicolon-after-closer-item-s471 — SPEC is silent on a `;` directly after a closer-delimited item (display literal, markup child, `let <x/>`) in a code-default body: §7.2.2 rule 2 says such items "take no `;`" and rule 6 says `;` is never text; §40.8's body-top allowance is interim — `NEW S471; LOW; open (owner question; the bootstrap refuses, fail closed)`
 
 <!-- @gap id=g-pattern-default-quoted-key-unquoted-s470 sev=LOW status=open locus=UNTRACED(destructuring pattern default emission) prov=dispatch:s470-promise-all-batch-elements(candidate) -->
 ### g-pattern-default-quoted-key-unquoted-s470 — a quoted key in a destructuring pattern default loses its quotes: `{ a = x["variant"] }` is emitted as `x[variant]`, a ReferenceError at run time — `NEW S470; LOW; open (pre-existing on main)`
@@ -911,7 +919,8 @@ The S469 follow-up fixed the examples the fidelity review named (§18.8.1 / §53
 
 ### g-bootstrap-let-decl-in-db-channel-body-refused-s469 — the BOOTSTRAP reads a `<db>` / `<channel>` body as free text and refuses a `let <x/>` declaration there, which the S469 O61 ruling allows (scoped to the block) — widened S469: the same for `<page>` and `<theme>` bodies — `NEW S469; MED; open (owed bootstrap change)`
 
-<!-- @gap id=g-bootstrap-let-decl-in-db-channel-body-refused-s469 sev=MED status=open locus=compiler/self-host-v2/parse.scrml(body mode of `<db>` / `<channel>` — free text, not an item position) prov=ruling:user-voice-scrml.md(S469 "⭐ RULED — O61: `let <x/>` allowed inside `<db>` / `<channel>` bodies, scoped to the block" — "Allowed, scoped to the block (Rec)");spec:§66.2.5,§38.4,§8.1.1 -->
+<!-- @gap id=g-bootstrap-let-decl-in-db-channel-body-refused-s469 sev=MED status=narrowed narrowed-by=s471-bootstrap-parse-batch locus=compiler/self-host-v2/parse.scrml(body mode of `<db>` / `<channel>` — free text, not an item position) prov=ruling:user-voice-scrml.md(S469 "⭐ RULED — O61: `let <x/>` allowed inside `<db>` / `<channel>` bodies, scoped to the block" — "Allowed, scoped to the block (Rec)");spec:§66.2.5,§38.4,§8.1.1 -->
+> **NARROWED S471.** No body reports E-DECL-KEYWORD-NOT-ITEM any more (§66.2.5); `<channel>`/`<page>`/`<theme>` stay refused whole; a `<db>`-body declaration is one named E-BOOTSTRAP-UNSUPPORTED. Open: the semantics — §66.2.5 says item-position bodies parse in §40.8 default-logic mode (the bootstrap reads `<db>` as free text; switching rejects prose — owner question), and §8.1.1 does not say how a client reads server-side `<db>` state.
 
 Owed: the bootstrap parses a `<db>` body and a `<channel>` body as item positions (§66.2.5 amendment): a §66 declaration there is a declaration scoped to that block — channel state shared across the channel's clients (§38.4), db-block state server-side. Today it reads those bodies as free text, so `let <x/>` there is refused. impl#1 carries the rule (§34.0). **Widened S469** (ruling:user-voice-scrml.md S469 "O61 reach and the page/theme half" — "Same rule as channel/db (Rec)"; "Readable program-wide (Rec)"): `<page>` and `<theme>` bodies are item positions too, and block-declared state in all four is readable program-wide by `@`. Owed in the bootstrap for all four bodies; whether its `<page>` / `<theme>` paths refuse today in the same way is not separately measured.
 
@@ -2405,7 +2414,8 @@ The only grammar for a bare `if` statement is §50.2.1 `if-stmt-logic ::= 'if' '
 
 ### g-bootstrap-semicolon-braceless-else-rejected-s462 — the bootstrap refuses `if (c) a; else b` (E-SCOPE-001 "`else` is not declared"), which impl#1 accepts since S437 — `NEW S462; MED; open`
 
-<!-- @gap id=g-bootstrap-semicolon-braceless-else-rejected-s462 sev=MED status=open locus=compiler/self-host-v2/parse.scrml(parseIf — the braceless then-body's terminating `;` is consumed as a statement end, so `isWord(t, "else")` never sees the `else`) prov=empirical:s462-braceless-if-else-dropped-bootstrap-probe -->
+<!-- @gap id=g-bootstrap-semicolon-braceless-else-rejected-s462 sev=MED status=resolved resolved-by=s469-boot-semicolons-verified-s471 locus=compiler/self-host-v2/parse.scrml(parseIf — the braceless then-body's terminating `;` is consumed as a statement end, so `isWord(t, "else")` never sees the `else`) prov=empirical:s462-braceless-if-else-dropped-bootstrap-probe -->
+> **RESOLVED (verified S471, `s471-bootstrap-parse-batch`).** NOT-REPRODUCED: `if (@c) @r = "a"; else @r = "b";` compiles clean, both branches emitted — fixed by s469-boot-semicolons (deeacc180 / #1510).
 
 Probed S462 through `slice-m2/lowered.js` `frontEnd`: `if (c) @r = "a" else @r = "b"` → no diagnostics (the else is kept — the bootstrap's recursive-descent expression parser stops at `else` naturally); `if (c) @r = "a"; else @r = "b"` → E-SCOPE-001 "`else` is not declared". impl#1 accepts the `;` spelling (#1106, pinned by `control-flow/s437-braceless-else-in-failable-arm`, which `docs/bootstrap-conformance.md` lists as a bootstrap FAIL with exactly this E-SCOPE-001). Fix direction: in `parseIf`, after a braceless then-body, look past one `;` (and comments) for an `else`, braceless consequent only — as impl#1's `parseOneIfStmt` does.
 
@@ -25777,7 +25787,8 @@ Silent semantics change (the block's writes vanish). Found by the protect-egress
 **Reproduced on `29eb80c31`.** `<request id="hunt">${ @hits = suggest(@q) }</>` + `<p class="${<#hunt>.stale ? 'dim' : ''}">` → exit 1, `E-CODEGEN-INVALID-LOGIC … Unexpected token … _p_5.setAttribute("class", \`${<#hunt>.stale ? 'dim' : ''}\`);`. The plain `class="${<#hunt>.stale}"` fails identically. **Controls:** the same ternary over a cell (`class="${@hits.length > 0 ? 'dim' : ''}"`) → exit 0, and `class:dim=${<#hunt>.stale}` plus a text interpolation `${<#hunt>.stale ? "dim" : ""}` → exit 0. The workaround is `class:dim=`. This widens [[g-request-is-some-in-mixed-text-attr-template-misroute]] (filed for `is some` in MIXED text). The root looks the same: the template path never builds an ExprNode, so `<#id>` is never routed, and ANY `<#request>` read in ANY quoted-template attribute fails. Fixing that entry's root probably closes this one too.
 
 ### g-bootstrap-code-body-several-display-literals-refused — bootstrap: SPEC §4.18.3 (S444) lets a code-default body hold SEVERAL standalone display literals, but `"a"` then `"b"`, or `"a";`, is refused with E-UNQUOTED-DISPLAY-TEXT
-<!-- @gap id=g-bootstrap-code-body-several-display-literals-refused sev=MED status=open locus=compiler/self-host-v2/parse.scrml:1037(isStandaloneDisplay requires the region's display-mode lex to be EXACTLY one `"` token, `toks.length != 2` → false, so a second literal or a `;` re-lexes the region with display off) prov=review:#1195 -->
+<!-- @gap id=g-bootstrap-code-body-several-display-literals-refused sev=MED status=resolved resolved-by=s471-bootstrap-parse-batch locus=compiler/self-host-v2/parse.scrml:1037(isStandaloneDisplay requires the region's display-mode lex to be EXACTLY one `"` token, `toks.length != 2` → false, so a second literal or a `;` re-lexes the region with display off) prov=review:#1195 -->
+> **RESOLVED S471.** `"a"⏎"b"` and `"a" "b"` are accepted (§4.18.3, §7.2.2 rule 2); `"a";` stays refused (PA decision: no sentence licenses a `;` after a closer-delimited item — owner question filed below).
 **Reproduced on `29eb80c31` (bootstrap).** A state-child body (the `state()` wrapper, `<A rule=.B>…</>`): (a) `"a"` newline `"b"` → `E-UNQUOTED-DISPLAY-TEXT … did you mean \`""a"\n "b""\`?` over the whole run. (b) `"a";` → the same, suggesting `""a";"`. (c) `"a"; "b"` → the same. **Control:** a single `"a"` → no diagnostics. **Governing:** SPEC §4.18.3 (S444, SPEC.md:1447) says *"a display-text literal only when it stands alone as a body statement — the whole statement is the one `"…"` (a body may hold several such statements; a `:`-shorthand body is one)"*. The suggested fix is also wrong, because wrapping the run in another pair of quotes does not produce valid source. **Expected:** each standalone `"…"` statement becomes its own display node, and a trailing `;` is accepted as a statement terminator (or the SPEC says it is not).
 
 ### g-bootstrap-nested-interp-string-message-says-display-literal — bootstrap: a nested `"a ${@n} b"` inside an expression gets E-BOOTSTRAP-UNSUPPORTED, and the message still calls it "a display-text literal"
@@ -25785,7 +25796,8 @@ Silent semantics change (the block's writes vanish). Found by the protect-egress
 **Reproduced on `29eb80c31` (bootstrap).** `<p : @n == 5 ? "a ${@n} b" : "c">` → `E-BOOTSTRAP-UNSUPPORTED "a display-text literal carrying an interpolation (§4.18.4) inside a larger expression is not in the bootstrap — make it the whole body"`. Since the S444 "standalone only" ruling (§4.18.3), a `"…"` operand inside an expression is an **ordinary string**, not a display-text literal. The refusal itself stands (interpolation in an ordinary string is unsupported in the bootstrap), but the wording names the wrong construct. **Expected:** e.g. "an interpolating string (`\"…${…}…\"`) inside an expression is not in the bootstrap", which drops the §4.18.4 display citation.
 
 ### g-bootstrap-runaway-display-literal-cascades-before-closer — bootstrap: an unterminated display literal followed later in the file by another `"` swallows the body closer and cascades (E-UNQUOTED-DISPLAY-TEXT + three E-PARSE-UNCLOSED) instead of §4.18.3's E-CTX-001 at the body's closer
-<!-- @gap id=g-bootstrap-runaway-display-literal-cascades-before-closer sev=MED status=open locus=compiler/self-host-v2/parse.scrml:1641(displayCloseAt reports "unterminated" only when the scan reaches EOF; any later `"` in the file counts as the closer) prov=review:#1195 -->
+<!-- @gap id=g-bootstrap-runaway-display-literal-cascades-before-closer sev=MED status=resolved resolved-by=s471-bootstrap-parse-batch locus=compiler/self-host-v2/parse.scrml:1641(displayCloseAt reports "unterminated" only when the scan reaches EOF; any later `"` in the file counts as the closer) prov=review:#1195 -->
+> **RESOLVED S471.** A runaway literal gives exactly one E-CTX-001 and parsing resumes at the closer (§4.18.3 / §4.18.7); the cut reading is taken only when the closed reading never closes the body and is strictly worse. LOW residue filed below.
 **Reproduced on `29eb80c31` (bootstrap).** The `state()` wrapper with idle body `"C:\"` (an escaped quote, so the literal is unterminated), followed by `<B rule=.A : "B">`, which supplies a later `"`. The result is `E-UNQUOTED-DISPLAY-TEXT` spanning from `"C:\"</>` to EOF, then `E-PARSE-UNCLOSED` for `<A>`, `<ph>` and `<program>`, with the suggested fix quoting the rest of the file. **Control:** the same idle body as the LAST state child (`stateLast`, no later `"` in the file) → exactly `E-CTX-001 … read up to the \`<A>\` body's closer`. **Expected (§4.18.3 / §4.18.7):** E-CTX-001 at the opening `"`, recovered at the body's `</>`, whether or not a `"` occurs later in the file. The closed-literal-content rule (a closed literal's content is never searched for closers) leaves no direct way to tell the two cases apart. A recovery heuristic is needed, for example preferring the body closer when the "closed" literal would span it. Reachable by a one-character typo (`"C:\"` for `"C:\\"`).
 
 ### g-bootstrap-unterminated-shorthand-display-literal-meets-later-quote — bootstrap: an unterminated `:`-shorthand display literal that meets a later `"` cannot be told apart from a finished one (`>` is legal display text), so it cascades with no E-CTX-001
@@ -28086,7 +28098,8 @@ From dpa-070 D11. Two fixtures:
 **Shared fix:** one presence-narrowing reader serving both codes. D1 r7's `presence-narrowing.ts` is the branch-side candidate.
 
 ### G-BOOTSTRAP-REJECTS-SANCTIONED-IS-SOME-IS-NOT-S460 — the bootstrap refuses `x is some` / `x is not` with E-PARSE-EXPECTED rather than E-BOOTSTRAP-UNSUPPORTED, and its diagnostics teach `x != not`, which impl#1 and §45 reject as E-EQ-002 — `NEW S460; MED; open (bootstrap)`
-<!-- @gap id=g-bootstrap-rejects-sanctioned-is-some-is-not-s460 sev=MED status=open locus=compiler/self-host-v2/parse.scrml(`is` sits in a word list ~:1505 with no `is` operator; parseGiven ~:1572-1590 handles only the §66.7.5 rebind) prov=dd:scrml-support/docs/deep-dives/one-presence-test-dpa-070-2026-10-08.md -->
+<!-- @gap id=g-bootstrap-rejects-sanctioned-is-some-is-not-s460 sev=MED status=resolved resolved-by=s460-s462-verified-s471 locus=compiler/self-host-v2/parse.scrml(`is` sits in a word list ~:1505 with no `is` operator; parseGiven ~:1572-1590 handles only the §66.7.5 rebind) prov=dd:scrml-support/docs/deep-dives/one-presence-test-dpa-070-2026-10-08.md -->
+> **RESOLVED (verified S471, `s471-bootstrap-parse-batch`).** NOT-REPRODUCED: `is some` / `is not` / `is given` compile on a cell and a parameter, `is some` gives one W-IS-SOME-DEPRECATED, narrowing works (`slice-m2/is-some-s462.test.js`).
 
 **S462 also:** `parseGiven` (`compiler/self-host-v2/parse.scrml`) now also reads the in-place presence guard `given x[, y] :> { … }` — as `if (x is given && …) { … }`, surfacing W-GIVEN-PRESENCE-DEPRECATED — and refuses a non-identifier head with E-SYNTAX-044 (`parseGivenPresence`, s462-given-presence-deprecate). It still parses neither the `given x :>` match arm nor a markup-`${}` guard (bootstrap-conformance: UNSUPPORTED, not FAIL).
 

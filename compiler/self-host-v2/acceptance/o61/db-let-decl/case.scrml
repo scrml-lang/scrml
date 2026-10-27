@@ -1,0 +1,8 @@
+// §66.2.5 (S469 O61): `let <x/>` MAY stand directly in a `<db>` body — owned by the block, readable program-wide.
+<program>
+    <db src="./app.db">
+        let <hits:int=0/>
+        <p id="d">in the db block</p>
+    </db>
+    <main><p id="s">x</p></main>
+</program>
