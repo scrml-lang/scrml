@@ -104,7 +104,7 @@ import { driveInputs, type ConformanceHook, type InputStep } from "../conformanc
 import { FakeClock } from "../conformance/fake-clock.ts";
 import { normalizeDom, runAnchored } from "../conformance/normalize.ts";
 import { fixS66, S66_RULES } from "../compiler/src/commands/fix-s66.js";
-import { frontEnd as sharedFrontEnd } from "../compiler/self-host-v2/slice-m2/lowered.js";
+import { frontEndStdlib as sharedFrontEnd } from "../compiler/self-host-v2/slice-m2/lowered.js";
 
 /**
  * The rules a twin is generated with: the §66 dialect class — every `scrml fix` rule EXCEPT
@@ -419,6 +419,9 @@ export async function loadBootstrapModules(): Promise<Bootstrap> {
  * list's last position). The file SET goes in in any order; link.scrml canonicalizes it (path
  * order, then link order), so a verdict is a function of the case's files alone. The entry is
  * named. The PARSE-phase diagnostics are kept apart — they decide the `parse-reject` bucket.
+ * s471: `frontEndStdlib` — the same front end, with the `scrml:` stdlib modules a case imports
+ * supplied as source exactly as `scrml-boot` supplies them (a module the bootstrap does not
+ * compile is withdrawn, and its import refused by name at the import).
  */
 function frontEnd(mods: Record<string, any>, files: Array<{ path: string; src: string }>, entry: string) {
   const r = sharedFrontEnd(mods, files, entry);

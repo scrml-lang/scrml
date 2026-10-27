@@ -1,0 +1,10 @@
+// a local `.scrml` module's exported functions, imported inside `<program>`, compute in the page.
+<program>
+    ${ import { shout, twice } from "./lib.scrml"; }
+    let <name:string="world"/>
+    let <n:int=4/>
+    <main>
+        <p id="s">${shout(@name)}</p>
+        <p id="t">${twice(@n)}</p>
+    </main>
+</program>

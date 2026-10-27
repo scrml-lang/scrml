@@ -1,0 +1,5 @@
+// an npm-style bare specifier: scrml has no npm integration.
+<program>
+    ${ import { debounce } from "lodash"; }
+    <p>hi</p>
+</program>

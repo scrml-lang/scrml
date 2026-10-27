@@ -1,0 +1,6 @@
+// s471 fixture stdlib — a file-form module (`scrml:calc` → calc.scrml).
+${
+    export fn double(n: int) -> int {
+        return n * 2;
+    }
+}

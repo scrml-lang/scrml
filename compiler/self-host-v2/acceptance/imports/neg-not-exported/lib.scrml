@@ -1,0 +1,5 @@
+${
+    export fn helper() -> string {
+        return "x";
+    }
+}
