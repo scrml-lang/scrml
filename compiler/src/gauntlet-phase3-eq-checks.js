@@ -55,7 +55,14 @@
 // W3.2 (string-template-interp null sweep): re-parse `${...}` segments inside
 // markup attribute string-literal values so equality / bare-null detectors
 // see the embedded expressions. Closes F-NULL-004.
-import { parseExprToNode } from "./expression-parser.ts";
+import { parseExprToNode, guardCallArmsRaw, templateInterpolationNodesAll } from "./expression-parser.ts";
+// S471 (g-impl1-null-in-expression-position-arm-not-refused-s470) — the readers of bodies the
+// tree holds as TEXT: `!{ }` arms (the one arm reader the S470 await fixes use), arrow /
+// function block bodies (the strict statement reader the failable walk uses), and the token
+// reader every fail-closed refusal over an unreadable body uses.
+import { exprGuardArmBodies, guardArmBodiesOf } from "./guard-arm-bodies.ts";
+import { parseStatementTextDetailed } from "./validators/defer-structure.ts";
+import { mentionedNames } from "./failable-value-calls.ts";
 
 // ---------------------------------------------------------------------------
 // Error class — matches TABError shape for uniform collection in api.js
@@ -775,7 +782,7 @@ function extractTemplateInterpSegments(raw) {
 // attribute values (W3.2) so embedded expressions are not silently bypassed.
 // ---------------------------------------------------------------------------
 
-function walkAst(ast, bindings, structFnSet, filePath, errors) {
+function walkAst(ast, bindings, structFnSet, filePath, errors, seenByWalk = { eq: new WeakSet(), lit: new WeakSet() }) {
   if (!ast) return;
   const topNodes = ast.nodes ?? [];
 
@@ -789,10 +796,12 @@ function walkAst(ast, bindings, structFnSet, filePath, errors) {
     if (!exprNode) return;
     // Sub-shape (a): equality-operand null + cross-type / asIs / fn-struct.
     forEachEqualityBinary(exprNode, (eqNode) => {
+      seenByWalk.eq.add(eqNode);
       checkEqNode(eqNode, activeBindings, structFnSet, fallbackSpan, filePath, errors);
     });
     // Sub-shape (b): bare-null literal in value position (W3.1, F-NULL-003).
     forEachLitNull(exprNode, (litNode) => {
+      seenByWalk.lit.add(litNode);
       checkBareNullLit(litNode, fallbackSpan, filePath, errors);
     });
   }
@@ -853,7 +862,12 @@ function walkAst(ast, bindings, structFnSet, filePath, errors) {
             // for null tokens here.
             continue;
           }
-          if (segExpr) inspectExprNode(segExpr, fb);
+          if (segExpr) {
+            inspectExprNode(segExpr, fb);
+            // S471 — the segment is not in the tree; hand it to the absence sweep (its `!{ }`
+            // arms / text-held bodies are read there).
+            if (Array.isArray(seenByWalk.extraRoots)) seenByWalk.extraRoots.push({ node: segExpr, anchor: fb });
+          }
         }
       }
     }
@@ -907,6 +921,206 @@ function walkAst(ast, bindings, structFnSet, filePath, errors) {
     }
   }
   walk(topNodes);
+}
+
+// ---------------------------------------------------------------------------
+// S471 — E-SYNTAX-042 over the WHOLE tree, and over every body the tree holds as TEXT.
+// ---------------------------------------------------------------------------
+
+/** Node kinds whose bodies are not scrml source (SPEC §42.1 "Exclusions"): `^{}`, `_{}`. */
+const ABSENCE_EXCLUDED_KINDS = new Set(["meta", "foreign"]);
+
+/**
+ * The comparisons against absence the sweep refuses: `== null` / `== undefined` (E-SYNTAX-042, §42.3.2)
+ * and `== not` / `!= not` (E-EQ-002, §45 — `is not` / `is given`). Both lowered to a comparison
+ * against JS `null` that a JS `undefined` (`find`'s not-found result) never equals: inside a `!{ }` arm,
+ * `(local(p) !{ _ :> [p].find(isOk) != not }) ? "IN" : "no"` logged a wrong password in. The other
+ * equality codes stay `walkAst`'s alone.
+ */
+const ABSENCE_COMPARISON_CODES = new Set(["E-SYNTAX-042", "E-EQ-002"]);
+
+const isEqOp = (op) => op === "==" || op === "!=" || op === "===" || op === "!==";
+const isAbsenceOp = (op) => op === "is-not" || op === "is-some" || op === "is-not-not";
+const isForbiddenAbsenceIdent = (n) =>
+  !!n && n.kind === "ident" && (n.name === "null" || n.name === "undefined");
+
+/**
+ * S471 (g-impl1-null-in-expression-position-arm-not-refused-s470, SECURITY) — SPEC §42.1: "The
+ * token `null` is NOT a valid scrml expression, attribute value, type token, or identifier. The
+ * token `undefined` is NOT a valid scrml expression …"; §42.3.2: "Comparing against `null` or
+ * `undefined` SHALL be compile error E-SYNTAX-042."
+ *
+ * `walkAst` inspects a hand-listed set of statement fields (`condExpr`, `initExpr`, `exprNode`,
+ * `argsExpr`, …) and descends a hand-listed set of containers, and it never reads a body the tree
+ * holds as TEXT. `null` escaped through every gap: an expression-position `!{ }` arm
+ * (`(local(p) !{ _ :> [p].find(isOk) != null }) ? "IN" : "no"` compiled to a comparison against
+ * JS `null` that a not-found `undefined` never equals — both passwords logged in), a statement
+ * guard's arms and guarded statement, an `if` used as a value (`ifExpr`), a `when` body
+ * (`bodyExpr`), an arrow's block body, a template literal's `${ }`.
+ *
+ * This sweep asks the TREE, not the source: it visits every node reachable from the file's
+ * nodes (cycle-guarded; `^{}` / `_{}` bodies excluded per §42.1), and every text-held body read
+ * by the reader that already owns it —
+ *   - `!{ }` arms: `exprGuardArmBodies` / `guardArmBodiesOf` (the one arm reader);
+ *   - an unbraced statement-guard arm: its parsed `handlerExpr`;
+ *   - a template literal's interpolations: `templateInterpolationNodesAll`;
+ *   - an arrow / function block body (`escape-hatch` with `bodyRaw`): `parseStatementTextDetailed`
+ *     (the strict reader the failable walk uses).
+ * A body none of them can parse is refused when its tokens name `null` / `undefined`
+ * (`mentionedNames` — fail closed; never a guess that it is clean).
+ *
+ * E-SYNTAX-042 only: the other equality diagnostics stay `walkAst`'s. Nodes `walkAst` already
+ * reported (`seenByWalk`) are skipped, so nothing is reported twice. A diagnostic raised inside a
+ * text-held body is anchored at the enclosing statement — the body's own spans are relative to
+ * its text.
+ */
+function sweepAbsenceTokens(ast, bindings, structFnSet, filePath, errors, seenByWalk) {
+  if (!ast) return;
+  const seen = new WeakSet();
+
+  function anchorSpan(anchor) {
+    const a = anchor && typeof anchor === "object" ? anchor : {};
+    return { file: filePath, start: a.start ?? 0, end: a.end ?? 0, line: a.line ?? 1, col: a.col ?? 1 };
+  }
+
+  /** Push only the absence-comparison findings of `checkEqNode` on `eqNode` (ABSENCE_COMPARISON_CODES). */
+  function checkEqAbsence(eqNode, anchor, inText) {
+    const scratch = [];
+    checkEqNode(eqNode, bindings, structFnSet, anchor, filePath, scratch);
+    for (const e of scratch) {
+      if (!ABSENCE_COMPARISON_CODES.has(e.code)) continue;
+      errors.push(inText ? new GauntletPhase3Error(e.code, e.message, anchorSpan(anchor)) : e);
+    }
+  }
+
+  function fireBare(litNode, anchor, inText) {
+    if (!inText) { checkBareNullLit(litNode, anchor, filePath, errors); return; }
+    const scratch = [];
+    checkBareNullLit(litNode, anchor, filePath, scratch);
+    for (const e of scratch) errors.push(new GauntletPhase3Error(e.code, e.message, anchorSpan(anchor)));
+  }
+
+  /** A body no reader could parse: refuse when its tokens name an absence token (fail closed). */
+  function refuseUnreadable(text, anchor) {
+    if (typeof text !== "string" || !text) return;
+    const names = mentionedNames(text);
+    const tok = names.has("null") ? "null" : names.has("undefined") ? "undefined" : null;
+    if (!tok) return;
+    errors.push(new GauntletPhase3Error(
+      "E-SYNTAX-042",
+      `E-SYNTAX-042: \`${tok}\` is not a scrml token — scrml uses \`not\` for absence (§42.1). ` +
+      `It appears in a body the compiler could not read as scrml, so it is refused. ` +
+      `Replace \`${tok}\` with \`not\`; for absence checks use \`x is not\` / \`x is given\`.`,
+      anchorSpan(anchor),
+    ));
+  }
+
+  /** A body read from text: a statement list, an expression, or an unreadable escape hatch. */
+  function visitReadBody(body, anchor) {
+    if (Array.isArray(body)) { for (const s of body) visit(s, anchor, true, null, null); return; }
+    if (!body || typeof body !== "object") return;
+    if (body.kind === "escape-hatch" && Array.isArray(body.armUnreadableNames)) {
+      refuseUnreadable(typeof body.raw === "string" ? body.raw : body.armUnreadableNames.join(" "), anchor);
+      return;
+    }
+    visit(body, anchor, true, null, null);
+  }
+
+  function visitTextHeld(v, anchor) {
+    // An expression-position `!{ }` handler: `<operand>.__scrml_guard__("!{ … }")`.
+    if (v.kind === "call" && guardCallArmsRaw(v) !== null) {
+      for (const b of exprGuardArmBodies(v)) visitReadBody(b, anchor);
+    }
+    // A statement guard: braced arms are text (read here); an unbraced arm is its `handlerExpr`
+    // (visited by the generic descent through `arms`), or text when that did not parse.
+    if (v.kind === "guarded-expr" && Array.isArray(v.arms)) {
+      for (const b of guardArmBodiesOf(v)) visitReadBody(b, anchor);
+      for (const arm of v.arms) {
+        const h = typeof arm?.handler === "string" ? arm.handler.trim() : "";
+        if (!h || (h.startsWith("{") && h.endsWith("}"))) continue;
+        const he = arm.handlerExpr;
+        const parsed = he && typeof he === "object" &&
+          !(he.kind === "escape-hatch" && (he.nativeKind === "ParseError" || he.nativeKind === "Unparsed"));
+        if (!parsed) refuseUnreadable(h, anchor);
+      }
+    }
+    // A parameter default the parser kept as TEXT (a function declaration's params): read with the
+    // expression parser — as the type system's audit and the failable walk read it.
+    if (Array.isArray(v.params)) {
+      for (const p of v.params) {
+        const dv = p && typeof p === "object" ? p.defaultValue : undefined;
+        if (typeof dv !== "string" || dv.trim() === "") continue;
+        let dn = null;
+        try { dn = parseExprToNode(dv, filePath, 0); } catch { dn = null; }
+        if (dn && !(dn.kind === "escape-hatch" && dn.nativeKind === "ParseError")) visit(dn, anchor, true, null, null);
+        else refuseUnreadable(dv, anchor);
+      }
+    }
+    // A template literal: its `${ }` interpolations, read by the one interpolation reader.
+    const templateHatch = v.kind === "escape-hatch" && v.nativeKind === "TemplateLiteral" &&
+      typeof v.raw === "string" && v.raw.startsWith("`");
+    if (templateHatch || (v.kind === "lit" && v.litType === "template" && typeof v.raw === "string" && v.raw.includes("${"))) {
+      let interps = [];
+      try { interps = templateInterpolationNodesAll(v); } catch { interps = null; }
+      if (interps === null) refuseUnreadable(v.raw, anchor);
+      else for (const it of interps) {
+        if (it && it.kind === "escape-hatch" && it.nativeKind === "TemplateInterpFallback") refuseUnreadable(it.raw, anchor);
+        else visit(it, anchor, true, null, null);
+      }
+    }
+    // An arrow / function expression with a block body, carried as text.
+    if (v.kind === "escape-hatch" && typeof v.bodyRaw === "string" && v.bodyRaw.trim() !== "") {
+      let r = null;
+      try { r = parseStatementTextDetailed(v.bodyRaw, filePath, {}); } catch { r = null; }
+      if (r && r.ok && Array.isArray(r.stmts)) visitReadBody(r.stmts, anchor);
+      else refuseUnreadable(v.bodyRaw, anchor);
+      return;
+    }
+    // Every other hatch carries only its source text (a SequenceExpression, a ClassExpression, a
+    // tagged template, an interpolation the parser could not read): refused when its tokens name
+    // an absence token — the failable walk's treatment of the same hatches. Not a regular
+    // expression / BigInt literal (no code), not a statement's ParseError text (its reader is the
+    // statement's structured form, visited above), not a template literal (read above).
+    if (v.kind === "escape-hatch" && !templateHatch && v.nativeKind !== "Literal" && v.nativeKind !== "ParseError" &&
+        !Array.isArray(v.armUnreadableNames)) {
+      refuseUnreadable(v.raw, anchor);
+    }
+  }
+
+  function visit(v, anchor, inText, parent, key) {
+    if (!v || typeof v !== "object") return;
+    if (Array.isArray(v)) { for (const item of v) visit(item, anchor, inText, parent, key); return; }
+    if (seen.has(v)) return;
+    seen.add(v);
+    if (typeof v.kind === "string" && ABSENCE_EXCLUDED_KINDS.has(v.kind)) return;
+    // A statement node of the file's own tree carries a real source span; inside a body read from
+    // text the spans are relative to that text, so the outer anchor stays.
+    if (!inText && typeof v.id === "number" && v.span && typeof v.span === "object") anchor = v.span;
+
+    if (v.kind === "binary" && isEqOp(v.op) && !seenByWalk.eq.has(v)) checkEqAbsence(v, anchor, inText);
+    const forbidden = (v.kind === "lit" && isForbiddenAbsenceLit(v)) || isForbiddenAbsenceIdent(v);
+    if (forbidden) {
+      // A direct operand of `==` / `!=` is the comparison's (above); of `is not` / `is given` it is
+      // the parser's synthesized sentinel — the same suppression `forEachLitNull` applies.
+      const directOperand = parent && parent.kind === "binary" &&
+        (isEqOp(parent.op) || isAbsenceOp(parent.op)) && (key === "left" || key === "right");
+      if (!directOperand && !seenByWalk.lit.has(v)) fireBare(v, anchor, inText);
+      return;
+    }
+
+    visitTextHeld(v, anchor);
+
+    for (const k of Object.keys(v)) {
+      if (SKIP_KEYS.has(k)) continue;
+      if (k === "value" && v.kind === "lit") continue;
+      const child = v[k];
+      if (child && typeof child === "object") visit(child, anchor, inText, v, k);
+    }
+  }
+
+  visit(ast.nodes ?? [], null, false, null, null);
+  // Expressions the walk re-parsed from attribute string text (not in the tree).
+  for (const r of seenByWalk.extraRoots ?? []) visit(r.node, r.anchor, true, null, null);
 }
 
 
@@ -996,7 +1210,10 @@ export function runGauntletPhase3EqChecks(tabResult) {
 
   const structFnSet = collectStructTypesWithFnField(ast);
   const bindings = collectBindings(ast, structFnSet);
-  walkAst(ast, bindings, structFnSet, filePath, errors);
+  const seenByWalk = { eq: new WeakSet(), lit: new WeakSet(), extraRoots: [] };
+  walkAst(ast, bindings, structFnSet, filePath, errors, seenByWalk);
+  // S471 — E-SYNTAX-042 everywhere the walk does not reach (text-held bodies included).
+  sweepAbsenceTokens(ast, bindings, structFnSet, filePath, errors, seenByWalk);
 
   // E-EQ-005 (§45.5, S237) — reject `is <value>` (steer to `==`).
   harvestValueRhsOnIs(ast, filePath, errors);
