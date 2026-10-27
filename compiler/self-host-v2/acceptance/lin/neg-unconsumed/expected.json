@@ -1,0 +1,15 @@
+{
+  "id": "acceptance-lin-neg-unconsumed",
+  "description": "E-LIN-001: a `lin` variable not consumed before scope exit.",
+  "language-version": "1.0",
+  "spec": "§35.5",
+  "rationale": "§35.5: \"The compiler SHALL emit E-LIN-001 when a `lin` variable has zero consumption sites on any execution path from its declaration to its scope exit.\"",
+  "expect": {
+    "codes": [
+      "E-LIN-001"
+    ],
+    "codeCounts": {
+      "E-LIN-001": 1
+    }
+  }
+}

@@ -1,0 +1,17 @@
+// §35.5: E-LIN-002 — a `lin` consumed twice.
+<program>
+    function mint() -> string {
+        return "tok";
+    }
+    function use(t: string) -> string {
+        return `used:${t}`;
+    }
+    function f() -> string {
+        lin t = mint();
+        const a = use(t);
+        return use(t);
+    }
+    <main>
+        <p id="o">${f()}</p>
+    </main>
+</program>

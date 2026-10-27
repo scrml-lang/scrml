@@ -1,0 +1,20 @@
+// §35.4.4: E-LIN-002 — an outer `lin` consumed in a loop body.
+<program>
+    function mint() -> string {
+        return "tok";
+    }
+    function use(t: string) -> string {
+        return `used:${t}`;
+    }
+    function f() -> string {
+        lin t = mint();
+        let r = "";
+        for (i of 0..2) {
+            r = use(t);
+        }
+        return r;
+    }
+    <main>
+        <p id="o">${f()}</p>
+    </main>
+</program>

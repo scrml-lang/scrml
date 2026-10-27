@@ -1645,7 +1645,7 @@ ${
             .Suspend(bind: x, then: t) :> suspendTail(tail, last, where).concat(tailBlock(t, true, joins, where))
             .Join(k: k, body: jb) :> joinShape(b, i, k, tail, where).concat(tailBlock(jb, true, joins, where))
             .Jump(k: k) :> jumpTail(k, tail, last, joins, where)
-            .Loop(label: x, body: lb) :> tailBlock(lb, false, [], where)
+            .Loop(label: x, body: lb) :> tailBlock(lb, waitingLoopAt(b, i, tail, last), [], where)   // s471: a loop after its exit Join
             .Break(target: x) :> []
             .Continue(target: x) :> []
             .Gather(g: g) :> tailBlock(g.body, false, [], where)
@@ -1674,8 +1674,43 @@ ${
     // A Join stands immediately before an If that is the LAST statement of a tail block.
     fn joinShape(b: Block, i: int, k: Sym, tail: boolean, where: string) -> string[] {
         if (!tail) return ["C12: a Join in " + where + " stands outside a client owner's continuation"]
-        if (i != b.stmts.length - 2 || !isIfStmt(b.stmts[i + 1])) return ["C12: Join `" + k.hint + "` in " + where + " is not immediately followed by the If that ends its block"]
+        if (i != b.stmts.length - 2 || !(isIfStmt(b.stmts[i + 1]) || isLoopStmt(b.stmts[i + 1]))) return ["C12: Join `" + k.hint + "` in " + where + " is not immediately followed by the If or the Loop that ends its block"]
         return []
+    }
+
+    // s471 — a loop that WAITS (§49.12.7): it ends a tail block, immediately
+    // after the Join of its EXIT continuation (lower's continuation pass), so
+    // its body is a continuation owner — a Suspend may end it, and every path
+    // through it ends in a Continue / Break of the loop (or leaves the owner).
+    // Any other loop body is no continuation owner: a Suspend there is C12's.
+    fn waitingLoopAt(b: Block, i: int, tail: boolean, last: boolean) -> boolean {
+        if (!tail || !last || i == 0) return false
+        return joinSym(b.stmts[i - 1]) is given
+    }
+
+    fn isLoopStmt(s: Stmt) -> boolean {
+        return match s {
+            .Loop(label: x) :> true
+            .If(cond: x) :> false
+            .Suspend(bind: x) :> false
+            .Join(k: x) :> false
+            .Jump(k: x) :> false
+            .Break(target: x) :> false
+            .Continue(target: x) :> false
+            .Gather(g: x) :> false
+            .Lift(into: x) :> false
+            .Attempt(result: x) :> false
+            .Defer(body: x) :> false
+            .Commit(writes: x) :> false
+            .Let(sym: x) :> false
+            .Assign(local: x) :> false
+            .Write(cap: x) :> false
+            .Return(e: x) :> false
+            .Eval(e: x) :> false
+            .ResetSurface(of: x) :> false
+            .Unpersist(decl: x) :> false
+            .Fail(err: x) :> false
+        }
     }
 
     fn jumpTail(k: Sym, tail: boolean, last: boolean, joins: int[], where: string) -> string[] {
@@ -2278,9 +2313,12 @@ ${
     // head's `init` holds only Lets (its counters) or only Assigns (of outer
     // locals), and its `step` only Assigns — "A counted head's counters are
     // local bindings rebound by `step` … They are not tape writes" (§49.3.2), so
-    // no Write, edit or call hides in a head. Its body holds no Suspend, Join
-    // or Jump (the CPS split does not reach loops — C12 agrees: a loop body is
-    // no continuation owner). s471: a Defer MAY stand in a loop body (§19.16.2 "a
+    // no Write, edit or call hides in a head. s471: a loop that WAITS holds a
+    // Suspend / Join / Jump in its body — their shape is C12's (the body of a
+    // loop after its exit Join is a continuation owner; no other is), and a
+    // Break / Continue of a waiting loop may stand in a continuation inside it
+    // (a Suspend's `then`, a Join body): the printer makes them returns of the
+    // iteration (print.scrml cycleJs). s471: a Defer MAY stand in a loop body (§19.16.2 "a
     // loop body (once per iteration)") — the body is its own Block, printed in
     // its own try/finally — but not DIRECTLY in a Gather's body (an arm used for
     // its value, §19.16.2 E-DEFER-UNSUPPORTED-SITE) and nowhere in a
@@ -2375,9 +2413,11 @@ ${
 
     fn loopForbiddenStmt(s: Stmt) -> string {
         return match s {
-            .Suspend(bind: x) :> "a Suspend (a loop cannot wait yet)"
-            .Join(k: x) :> "a Join"
-            .Jump(k: x) :> "a Jump"
+            // s471: a loop that waits holds them (§49.12.7) — their shape is C12's
+            // (only the body of a loop after its exit Join is a continuation owner)
+            .Suspend(bind: x) :> ""
+            .Join(k: x) :> ""
+            .Jump(k: x) :> ""
             .Defer(body: x) :> ""
             .Let(sym: x) :> ""
             .Assign(local: x) :> ""
@@ -2585,35 +2625,43 @@ ${
     }
 
     fn jumpBlock(b: Block, loops: int[]) -> string[] {
+        return jumpBlockIn(b, loops, [])
+    }
+
+    // s471 — `cyc`: the enclosing loops that WAIT (their body holds a Suspend).
+    // A jump naming one is a return of the iteration (print.scrml cycleJs), so it
+    // may stand in a continuation inside it (a Suspend's `then`, a Join body);
+    // a native loop's label never crosses one.
+    fn jumpBlockIn(b: Block, loops: int[], cyc: int[]) -> string[] {
         let out: string[] = []
-        for (const s of b.stmts) { out = out.concat(jumpStmt(s, loops)) }
+        for (const s of b.stmts) { out = out.concat(jumpStmt(s, loops, cyc)) }
         return out
     }
 
-    fn jumpList(ss: Stmt[], loops: int[]) -> string[] {
+    fn jumpList(ss: Stmt[], loops: int[], cyc: int[]) -> string[] {
         let out: string[] = []
-        for (const s of ss) { out = out.concat(jumpStmt(s, loops)) }
+        for (const s of ss) { out = out.concat(jumpStmt(s, loops, cyc)) }
         return out
     }
 
-    fn jumpMaybe(b: Block | not, loops: int[]) -> string[] {
+    fn jumpMaybe(b: Block | not, loops: int[], cyc: int[]) -> string[] {
         if (b is not) return []
-        return jumpBlock(b, loops)
+        return jumpBlockIn(b, loops, cyc)
     }
 
-    fn jumpStmt(s: Stmt, loops: int[]) -> string[] {
+    fn jumpStmt(s: Stmt, loops: int[], cyc: int[]) -> string[] {
         return match s {
-            .Loop(label: l, body: lb) :> jumpBlock(lb, loops.concat([l.id]))
+            .Loop(label: l, body: lb) :> jumpLoop(l, lb, loops, cyc)
             .Break(target: t) :> jumpTo(t, loops, "Break")
             .Continue(target: t) :> jumpTo(t, loops, "Continue")
             .Gather(g: g) :> jumpBlock(g.body, [g.label.id])   // s469: a bound loop is a jump boundary (§49.6 rule 6, C20)
             .Lift(into: x) :> []
-            .If(thenB: t, elseB: el) :> jumpBlock(t, loops).concat(jumpMaybe(el, loops))
-            .Attempt(ok: ok, arms: arms) :> jumpAttempt(ok.body, arms, loops)
-            .Suspend(then: t) :> jumpBlock(t, [])
-            .Join(k: x, body: jb) :> jumpBlock(jb, [])
+            .If(thenB: t, elseB: el) :> jumpBlockIn(t, loops, cyc).concat(jumpMaybe(el, loops, cyc))
+            .Attempt(ok: ok, arms: arms) :> jumpAttempt(ok.body, arms, loops, cyc)
+            .Suspend(then: t) :> jumpBlockIn(t, cyc, cyc)
+            .Join(k: x, body: jb) :> jumpBlockIn(jb, cyc, cyc)
             .Defer(body: d) :> jumpBlock(d, [])
-            .Commit(writes: ws) :> jumpList(ws, loops)
+            .Commit(writes: ws) :> jumpList(ws, loops, cyc)
             .Let(sym: x) :> []
             .Assign(local: x) :> []
             .Write(cap: x) :> []
@@ -2626,9 +2674,66 @@ ${
         }
     }
 
-    fn jumpAttempt(okBody: Block, arms: ErrArm[], loops: int[]) -> string[] {
-        let out: string[] = jumpBlock(okBody, loops)
-        for (const a of arms) { out = out.concat(jumpBlock(a.body, loops)) }
+    fn jumpLoop(l: Sym, body: Block, loops: int[], cyc: int[]) -> string[] {
+        if (blockWaits(body)) return jumpBlockIn(body, loops.concat([l.id]), cyc.concat([l.id]))
+        return jumpBlockIn(body, loops.concat([l.id]), cyc)
+    }
+
+    // Does a Suspend stand anywhere in `b`?
+    fn blockWaits(b: Block) -> boolean {
+        for (const n of allNodes(Node.NBlock(b))) {
+            if (nodeIsSuspend(n)) return true
+        }
+        return false
+    }
+
+    fn nodeIsSuspend(n: Node) -> boolean {
+        return match n {
+            .NStmt(s: s) :> stmtIsSuspend(s)
+            .NProgram(p: q) :> false
+            .NDecl(d: d) :> false
+            .NField(f: f) :> false
+            .NFn(f: f) :> false
+            .NServerFn(f: f) :> false
+            .NBlock(b: b) :> false
+            .NExpr(e: e) :> false
+            .NPlace(pl: pl) :> false
+            .NInst(i: i) :> false
+            .NPattern(pat: pat) :> false
+            .NEdit(k: k) :> false
+            .NView(v: v) :> false
+            .NAttr(a: a) :> false
+        }
+    }
+
+    fn stmtIsSuspend(s: Stmt) -> boolean {
+        return match s {
+            .Suspend(bind: x) :> true
+            .If(cond: x) :> false
+            .Loop(label: x) :> false
+            .Join(k: x) :> false
+            .Jump(k: x) :> false
+            .Break(target: x) :> false
+            .Continue(target: x) :> false
+            .Gather(g: x) :> false
+            .Lift(into: x) :> false
+            .Attempt(result: x) :> false
+            .Defer(body: x) :> false
+            .Commit(writes: x) :> false
+            .Let(sym: x) :> false
+            .Assign(local: x) :> false
+            .Write(cap: x) :> false
+            .Return(e: x) :> false
+            .Eval(e: x) :> false
+            .ResetSurface(of: x) :> false
+            .Unpersist(decl: x) :> false
+            .Fail(err: x) :> false
+        }
+    }
+
+    fn jumpAttempt(okBody: Block, arms: ErrArm[], loops: int[], cyc: int[]) -> string[] {
+        let out: string[] = jumpBlockIn(okBody, loops, cyc)
+        for (const a of arms) { out = out.concat(jumpBlockIn(a.body, loops, cyc)) }
         return out
     }
 

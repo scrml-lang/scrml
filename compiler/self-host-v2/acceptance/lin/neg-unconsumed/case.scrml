@@ -1,0 +1,16 @@
+// §35.5: E-LIN-001 — a `lin` never consumed.
+<program>
+    function mint() -> string {
+        return "tok";
+    }
+    function use(t: string) -> string {
+        return `used:${t}`;
+    }
+    function f() -> string {
+        lin t = mint();
+        return "x";
+    }
+    <main>
+        <p id="o">${f()}</p>
+    </main>
+</program>

@@ -1,0 +1,15 @@
+{
+  "id": "acceptance-lin-neg-one-branch",
+  "description": "E-LIN-003: an `if` with no `else` that consumes the `lin`.",
+  "language-version": "1.0",
+  "spec": "§35.4.2",
+  "rationale": "§35.4.2: \"An `if` without an `else` that consumes the `lin` variable in the `if` body is E-LIN-003\".",
+  "expect": {
+    "codes": [
+      "E-LIN-003"
+    ],
+    "codeCounts": {
+      "E-LIN-003": 1
+    }
+  }
+}

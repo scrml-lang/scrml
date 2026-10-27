@@ -1,0 +1,15 @@
+{
+  "id": "acceptance-loop-neg-defer-break-out",
+  "description": "E-DEFER-CONTROL-FLOW: a `break` in a deferred body that leaves it (to the enclosing loop).",
+  "language-version": "1.0",
+  "spec": "§19.16.3",
+  "rationale": "§19.16.3 rule 1: \"A deferred body SHALL NOT contain … a `break` / `continue` whose target lies outside the deferred body.\"",
+  "expect": {
+    "codes": [
+      "E-DEFER-CONTROL-FLOW"
+    ],
+    "codeCounts": {
+      "E-DEFER-CONTROL-FLOW": 1
+    }
+  }
+}

@@ -1,0 +1,15 @@
+// §19.16.2: a `defer` in a loop body registers once per iteration and runs at that iteration's exit.
+<program>
+
+    function f() -> int {
+        let s = 0;
+        for (i of 0..3) {
+            defer s = s * 10 + 1;
+            s = s * 10 + 2;
+        }
+        return s;
+    }
+    <main>
+        <p id="o">${f()}</p>
+    </main>
+</program>
