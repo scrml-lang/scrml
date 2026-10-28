@@ -12,10 +12,10 @@
 import { describe, test, expect, beforeAll, afterEach } from "bun:test";
 import { loadM2 } from "./harness.js";
 import { frontEnd, readSlice } from "./lowered.js";
-import { loadProgram, click, expectNoPageErrors, takePageErrors, instancesOf } from "../slice-m1/load-program.js";
+import { loadProgram, click, expectNoPageErrors, takePageErrors, instancesOf, warmLoadProgram } from "../slice-m1/load-program.js";
 
 let mods;
-beforeAll(() => { ({ mods } = loadM2()); }, { timeout: 120000 });
+beforeAll(() => { ({ mods } = loadM2()); warmLoadProgram(); }, { timeout: 120000 });
 afterEach(() => expectNoPageErrors());
 
 const LIB = () => ({ path: "lib/dropdown.scrml", src: readSlice("src/lib/dropdown.scrml") });

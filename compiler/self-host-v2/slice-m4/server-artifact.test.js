@@ -15,9 +15,9 @@
 import { describe, test, expect, beforeAll, afterEach } from "bun:test";
 import { mods, compile, codes, check, artifacts, loadServer, realDb, spyDriver, serve, post, pathOf, bridge } from "./server-artifact-harness.js";
 import { SHAPES, program, RIGHT, WRONG } from "./server-await-probes.js";
-import { loadProgram, click, expectNoPageErrors } from "../slice-m1/load-program.js";
+import { loadProgram, click, expectNoPageErrors, warmLoadProgram } from "../slice-m1/load-program.js";
 
-beforeAll(() => { mods(); }, { timeout: 120000 });
+beforeAll(() => { mods(); warmLoadProgram(); }, { timeout: 120000 });
 
 const realFetch = globalThis.fetch;
 afterEach(() => {

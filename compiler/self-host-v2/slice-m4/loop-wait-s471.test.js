@@ -19,10 +19,10 @@
 
 import { describe, test, expect, beforeAll, afterEach } from "bun:test";
 import { mods, compile, codes, check, artifacts, realDb, serve, bridge } from "./server-artifact-harness.js";
-import { loadProgram, click, expectNoPageErrors } from "../slice-m1/load-program.js";
+import { loadProgram, click, expectNoPageErrors, warmLoadProgram } from "../slice-m1/load-program.js";
 import * as rtDirect from "../slice-m1/runtime/runtime.js";
 
-beforeAll(() => { mods(); }, { timeout: 120000 });
+beforeAll(() => { mods(); warmLoadProgram(); }, { timeout: 120000 });
 const realFetch = globalThis.fetch;
 afterEach(() => { globalThis.fetch = realFetch; });
 

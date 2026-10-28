@@ -8,10 +8,10 @@
 import { describe, test, expect, beforeAll, afterEach } from "bun:test";
 import { join } from "node:path";
 import { loadM2, frontEnd } from "./harness.js";
-import { loadProgram, expectNoPageErrors } from "../slice-m1/load-program.js";
+import { loadProgram, expectNoPageErrors, warmLoadProgram } from "../slice-m1/load-program.js";
 
 let mods;
-beforeAll(() => { ({ mods } = loadM2()); }, { timeout: 120000 });
+beforeAll(() => { ({ mods } = loadM2()); warmLoadProgram(); }, { timeout: 120000 });
 
 const realFetch = globalThis.fetch;
 const realSetTimeout = globalThis.setTimeout;

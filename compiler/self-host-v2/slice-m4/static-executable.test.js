@@ -33,12 +33,12 @@
 
 import { describe, test, expect, beforeAll, afterEach } from "bun:test";
 import { loadM2, frontEnd } from "./harness.js";
-import { loadProgram, expectNoPageErrors } from "../slice-m1/load-program.js";
+import { loadProgram, expectNoPageErrors, warmLoadProgram } from "../slice-m1/load-program.js";
 import * as guard from "../../src/runtime-url-guard.js";
 import { classifyStaticExecutableAttr, STATIC_NAV_LOAD_URL_ATTRS, IMAGE_LINK_REL_TOKENS } from "../../src/attr-injection-sink.ts";
 
 let mods;
-beforeAll(() => { ({ mods } = loadM2()); }, { timeout: 120000 });
+beforeAll(() => { ({ mods } = loadM2()); warmLoadProgram(); }, { timeout: 120000 });
 afterEach(() => expectNoPageErrors());
 
 const run = (src) => frontEnd(mods, [{ path: "s.scrml", src }]);

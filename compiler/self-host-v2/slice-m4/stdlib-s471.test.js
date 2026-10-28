@@ -16,12 +16,12 @@ import { describe, test, expect, beforeAll, afterEach } from "bun:test";
 import { join } from "node:path";
 import { mods, check, serve, post, pathOf, bridge, spyDriver } from "./server-artifact-harness.js";
 import { frontEndStdlib, stdlibSources } from "../slice-m2/lowered.js";
-import { loadProgram, click, expectNoPageErrors } from "../slice-m1/load-program.js";
+import { loadProgram, click, expectNoPageErrors, warmLoadProgram } from "../slice-m1/load-program.js";
 
 const FIXTURE = join(import.meta.dir, "src", "stdlib-s471");
 const ENTRY = "app.scrml";
 
-beforeAll(() => { mods(); }, { timeout: 120000 });
+beforeAll(() => { mods(); warmLoadProgram(); }, { timeout: 120000 });
 const realFetch = globalThis.fetch;
 afterEach(() => {
   globalThis.fetch = realFetch;

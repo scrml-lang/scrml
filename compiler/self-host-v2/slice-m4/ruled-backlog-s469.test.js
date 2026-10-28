@@ -14,12 +14,12 @@
 
 import { describe, test, expect, beforeAll, afterEach } from "bun:test";
 import { loadM2, frontEnd } from "./harness.js";
-import { loadProgram, expectNoPageErrors } from "../slice-m1/load-program.js";
+import { loadProgram, expectNoPageErrors, warmLoadProgram } from "../slice-m1/load-program.js";
 import * as rt from "../slice-m1/runtime/runtime.js";
 import * as srt from "../slice-m1/runtime/server-runtime.js";
 
 let mods;
-beforeAll(() => { ({ mods } = loadM2()); }, { timeout: 120000 });
+beforeAll(() => { ({ mods } = loadM2()); warmLoadProgram(); }, { timeout: 120000 });
 afterEach(() => expectNoPageErrors());
 
 const run = (src) => frontEnd(mods, [{ path: "t.scrml", src }]);
