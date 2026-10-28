@@ -39,7 +39,7 @@
 // absolute path, a working directory, a clock, or an environment.
 // =============================================================================
 ${
-    import { AItem, AItemK, AImport, AProgram, FileAst, Diag } from "./ast.scrml"
+    import { AItem, AItemK, AImport, AProgram, FileAst, Diag, stdlibPathPrefix } from "./ast.scrml"
     import { Parsed, parseFile } from "./parse.scrml"
 
     export type Source:struct = { path: string, src: string }
@@ -116,7 +116,7 @@ ${
     }
 
     // s471 — the path prefix a driver names stdlib files under (`scrml:format/index.scrml`).
-    export fn stdlibPrefix() -> string { return "scrml:" }
+    export fn stdlibPrefix() -> string { return stdlibPathPrefix() }
 
     fn inStdlib(p: string) -> boolean { return p.startsWith(stdlibPrefix()) }
 

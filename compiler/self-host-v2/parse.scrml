@@ -50,7 +50,7 @@ ${
              ATypeField, AVariant, ATypeBody, ATypeDecl, AParam, AFn, AImportName, AImport,
              AAttrValue, AAttr, AElem, ANode, ANodeK, ADeclAttr, AStateChild, ADeclChild, ADecl, AValArg, AValidator,
              AProgram, AItem, AItemK, FileAst, Diag, ASql, ASqlMode,
-             AHow, AHandled, AArm, APat, ABind, AArmBody, AFail, AFor, AForHead, AIterSrc, AForBound, ALift, ACss, mkSpan, newDiag } from "./ast.scrml"
+             AHow, AHandled, AArm, APat, ABind, AArmBody, AFail, AFor, AForHead, AIterSrc, AForBound, ALift, ACss, mkSpan, newDiag, stdlibPathPrefix } from "./ast.scrml"
     import { CssErr, CssParsed, parseCssBlock } from "./css-syntax.scrml"
 
     // =========================================================================
@@ -2159,6 +2159,55 @@ ${
         }
     }
 
+    // s472 (review F3) — an import written as a STATEMENT (a function body, an
+    // `if` / loop body): §41.3 "`import` SHALL be valid only inside a `${ }` logic
+    // context at file top level" and §21.3.1 "An `import:host` declaration inside
+    // a `${}` block or any nested scope SHALL be a compile error (`E-IMPORT-003`
+    // — same as plain `import`)". Read whole (parseImport), so its tokens are not
+    // a wall of parse errors; E-IMPORT-003 at it. A host import here is still
+    // held to the tag and the allow-list (impl#1 host-import.js does the same for
+    // an in-function `import:host`): E-IMPORT-009 / E-IMPORT-008 as at file top
+    // (analyze.scrml checkHostImport). The statement binds nothing.
+    fn nestedImport(tp: TP) -> RStmt {
+        const t0: PTok = cur(tp)
+        const start: int = t0.start
+        const r: RItems = parseImport(tp, start, false)
+        let t: TP = r.tp
+        for (const it of r.items) {
+            const k: AItemK = it.k
+            const imp: AImport | not = match k {
+                .ImportItem(i: i) :> i
+                .TypeItem(t: x) :> not
+                .FnItem(f: f) :> not
+                .DeclItem(d: d) :> not
+                .MarkupItem(n: n) :> not
+                .ProgramItem(p: p) :> not
+            }
+            if (imp is given) t = judgeNestedImport(t, imp)
+        }
+        const re: RExpr = mkE(t, start, AExprK.Recovered)
+        return mkS(re.tp, start, AStmtK.Eval(re.e))
+    }
+
+    fn judgeNestedImport(tp: TP, imp: AImport) -> TP {
+        const h: string | not = imp.host
+        let ds: Diag[] = []
+        if (h is given) {
+            ds = ds.concat([newDiag("E-IMPORT-003", "`import:" + h + "` is not at file top level — `import:host` SHALL appear only at file top level, outside any `${}` logic context and any nested scope such as a function body (§21.3.1); move it to the top of the file", tp.file, imp.span)])
+            if (h != "host") {
+                ds = ds.concat([newDiag("E-IMPORT-009", "`import:" + h + "` uses the host-tag `" + h + "` — v1 recognizes only `host` (§21.3.1)", tp.file, imp.span)])
+            } else if (!(imp.from.endsWith(".js") || imp.from.endsWith(".mjs") || imp.from.endsWith(".ts") || imp.from.endsWith(".mts"))) {
+                ds = ds.concat([newDiag("E-IMPORT-009", "`import:host` target `" + imp.from + "` is not a TypeScript / JavaScript module (§21.3.1)", tp.file, imp.span)])
+            }
+            if (!tp.file.startsWith(stdlibPathPrefix())) {
+                ds = ds.concat([newDiag("E-IMPORT-008", "`import:" + h + "` is used in a file outside the `[capabilities] host-import` allow-list — `import:host` is the stdlib's host bridge (§21.3.1, §22.13)", tp.file, imp.span)])
+            }
+        } else {
+            ds = ds.concat([newDiag("E-IMPORT-003", "`import` here is inside a function or block — an `import` SHALL be valid only inside a `${ }` logic context at file top level (§41.3, §21.3); move it to the top of the file", tp.file, imp.span)])
+        }
+        return { toks: tp.toks, i: tp.i, nid: tp.nid, diags: tp.diags.concat(ds), file: tp.file }
+    }
+
     // A block's statements when the region holds them WITHOUT braces (an
     // attribute handler written `{ … }` is lexed with its braces — parseBlock).
     fn parseStmt(tp: TP) -> RStmt {
@@ -2181,6 +2230,8 @@ ${
         // — and whether one encloses it — is analyze's (resolveLift). An arm
         // block's LAST `lift` is the arm's value (parseArmBlock, §18.5).
         if (isWord(tp, "lift")) return parseLift(tp)
+        // s472 (review F3): an `import` / `import:<tag>` in a statement position
+        if (isWord(tp, "import")) return nestedImport(tp)
         if (isWord(tp, "return")) {
             const nx: PTok = peekAt(tp, 1)
             if (nx.cls == TC.End || tk(nx, "}") || tk(nx, ";")) {

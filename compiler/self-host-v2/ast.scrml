@@ -421,4 +421,9 @@ ${
     }
 
     export fn mkSpan(start: int, end: int) -> ASpan { return { start: start, end: end } }
+
+    // s472 — THE path prefix a driver names stdlib files under
+    // (`scrml:format/index.scrml`); link.scrml `stdlibPrefix` and the parser's
+    // nested-import judgement both read it.
+    export fn stdlibPathPrefix() -> string { return "scrml:" }
 }

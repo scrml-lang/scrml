@@ -34,6 +34,39 @@ Branch `s472-boot-import-host-math` from `origin/s472-boot-link-visibility` (PR 
   green; pre-commit hook 50385 pass / 0 fail; types-gate --check OK; bootstrap-conformance
   regenerated (one UNSUPPORTED reason changed; counts unchanged).
 
+## S239 review of #1607 (0fc6b3aa2) — fixes (~/.cache/scrml/review/s472-hm/REVIEW.md)
+
+- F1 (MED, pre-existing, widened here): impl#1 admitted "a `stdlib/` beside the nearest
+  self-host-only manifest" — any adopter could self-declare it (probe A) and a vendored package's
+  manifest overrode the project's "disabled" (probe C), against §22.13 "in an adopter project
+  `import:host` is E-IMPORT-008 whatever the entry says". Fixed: `isHostImportPermitted` admits only
+  files whose REAL path is under `COMPILER_STDLIB_DIR` (= `<host-import.js>/../../stdlib`; the npm
+  `files` list ships `compiler/src/` and `stdlib/`, same layout; value-function-stored.ts resolves it
+  the same way). The stdlib's OWN manifest (beside `stdlib/` — the repo's `scrml.toml`) still gates it
+  ("the bootstrap stdlib's own manifest sets `self-host-only`", §21.3.1); any other manifest neither
+  widens nor narrows it — which also fixes F4 (an installed compiler ships no `scrml.toml`, so the
+  adopter's "disabled" used to refuse the compiler's own stdlib). `compileScrml({ hostImportStdlibRoot })`
+  replaces the directory for embedding callers / tests (trust level of `stageOverrides`; no CLI flag,
+  manifest key or source form). Tests: import-host.test.js "S472 F1" (5): probes A, C, a symlinked
+  project `stdlib`, own-stdlib under an adopter's "disabled" + a project symlink into it, F4 installed
+  layout. Red on 0fc6b3aa2's host-import.js (+ a stub export so the file loads): 4 / 5
+  (~/.cache/scrml-pa/s472/hostmath-f1-red.log); the symlink pin was already green on base (base
+  realpath'd) — kept as a pin.
+- F2 (LOW): the "a project file is never named `scrml:…`" invariant moves to `frontEnd` (lowered.js):
+  a prefixed path is a stdlib file only when the stdlib driver supplied it (`opts.stdlibPaths`); any
+  other is refused before any phase — E-BOOTSTRAP-UNSUPPORTED naming the file (bootstrap-local; SPEC
+  names no code) — and `frontEndStdlib`'s driver THROW (scrml-boot "internal error" on a project dir
+  `scrml:x/`) is now that diagnostic. Tests: import-host-s472 "F2" (2, red on base 2/2,
+  ~/.cache/scrml-pa/s472/hostmath-f2-red.log); stdlib-s471 throw pin → diagnostic pin.
+- F3 (LOW): an `import` / `import:<tag>` in a statement position (fn / `if` / loop body) is read
+  whole (parse.scrml `nestedImport` → `parseImport`) and judged: E-IMPORT-003 (§41.3 / §21.3.1); a
+  host form also E-IMPORT-009 (tag / target) and E-IMPORT-008 (non-stdlib file), as impl#1 does for an
+  in-function `import:host`. The prefix is THE one (`ast.scrml stdlibPathPrefix`, read by
+  link.scrml `stdlibPrefix`). Residual: names such an import would bind are not in scope, so a use
+  in the body still cascades E-SCOPE-001 (impl#1 keeps them bound) — noted, fails closed. Tests:
+  import-host-s472 "F3" (3, red on base 3/3, ~/.cache/scrml-pa/s472/hostmath-f3-red.log).
+- Upper-case `./h.JS` (bootstrap refuses, impl#1 admits): stricter, harmless — left.
+
 ## SPEC silences — STOPPED here (brief: "If SPEC is silent … STOP and report the exact question")
 
 Q1 — output location of a stdlib host module. The bootstrap inlines a stdlib module's functions into

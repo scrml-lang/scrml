@@ -55,13 +55,20 @@ export function deriveEntry(mods, files) {
  * `<program>` file; omitted, it is derived from the set (`deriveEntry`).
  * Returns every phase's output and timing.
  */
-export function frontEnd(mods, files, entry) {
+export function frontEnd(mods, files, entry, opts = {}) {
   const seen = new Set();
   for (const f of files) {
     assertProjectRelative(f.path);
     if (seen.has(f.path)) throw new Error(`the bootstrap front end was handed two files named ${JSON.stringify(f.path)} — a project names each file once`);
     seen.add(f.path);
   }
+  // s472 (review F2): a path under the stdlib prefix is a stdlib file only when
+  // the stdlib driver supplied it (`opts.stdlibPaths`, frontEndStdlib) — the
+  // compiler reads stdlib-ness off the path (link.scrml `isStdlibPath`: the
+  // `import:host` allow-list, `importTarget`), so a PROJECT file so named is
+  // refused here, at the one front door, never compiled as stdlib.
+  const refused = prefixedProjectFiles(mods, files, new Set(opts.stdlibPaths ?? []));
+  if (refused.length > 0) return refusedFrontEnd(refused);
   if (entry === undefined) entry = deriveEntry(mods, files);
   const t0 = performance.now();
   const linked = mods.link.parseProgram(files.map((f) => ({ path: f.path, src: f.src })), entry);
@@ -185,6 +192,30 @@ export function stdlibSources(mods, files, opts = {}) {
 
 const isError = (d) => String(d.severity ?? "").toLowerCase() === "error";
 
+/** The files in `files` named under the stdlib prefix that are not in `stdlibPaths`. */
+function prefixedProjectFiles(mods, files, stdlibPaths) {
+  const prefix = mods.link.stdlibPrefix();
+  return files.filter((f) => String(f.path).startsWith(prefix) && !stdlibPaths.has(f.path));
+}
+
+/**
+ * A compile refused before any phase runs: one E-BOOTSTRAP-UNSUPPORTED per
+ * project file named under the stdlib prefix (a project directory named
+ * `scrml:x/` on a filesystem that allows `:`). Bootstrap-local: the SPEC names
+ * no code for a project path that collides with the `scrml:` specifier space
+ * (§41.4); it fails closed, as a diagnostic — not a driver crash (s471 threw).
+ */
+function refusedFrontEnd(files) {
+  const diags = files.map((f) => ({
+    code: "E-BOOTSTRAP-UNSUPPORTED",
+    severity: "Error",
+    file: f.path,
+    span: { start: 0, end: 0 },
+    message: `the project file ${JSON.stringify(f.path)} is named under the stdlib prefix \`scrml:\` — that name space is the standard library's (\`scrml:NAME\` imports, §41.4), so a project file named in it would be read as a stdlib file; rename the directory`,
+  }));
+  return { asts: [], typed: null, core: null, parseDiags: [], diags, infos: [], nodes: 0, ms: { parse: 0, analyze: 0, lower: 0, total: 0 } };
+}
+
 /**
  * `frontEnd` over `files` and the `scrml:` stdlib modules they import. A stdlib
  * module is importable BY CONSTRUCTION when its source compiles on the bootstrap:
@@ -200,14 +231,14 @@ const isError = (d) => String(d.severity ?? "").toLowerCase() === "error";
  */
 export function frontEndStdlib(mods, files, entry, opts = {}) {
   const prefix = mods.link.stdlibPrefix();
-  for (const f of files) {
-    if (String(f.path).startsWith(prefix)) throw new Error(`a project file may not be named under the stdlib prefix ${JSON.stringify(prefix)}: ${JSON.stringify(f.path)}`);
-  }
+  // s472 (review F2): a project file named under the prefix is a named refusal (frontEnd), not a throw
+  const named = prefixedProjectFiles(mods, files, new Set());
+  if (named.length > 0) return { ...refusedFrontEnd(named), stdlib: { supplied: [], sources: [], refused: [] } };
   const exclude = new Set(opts.exclude ?? []);
   const refused = [];
   for (;;) {
     const std = stdlibSources(mods, files, { stdlibRoot: opts.stdlibRoot, exclude });
-    const r = frontEnd(mods, [...files, ...std.sources.map((s) => ({ path: s.path, src: s.src }))], entry);
+    const r = frontEnd(mods, [...files, ...std.sources.map((s) => ({ path: s.path, src: s.src }))], entry, { stdlibPaths: std.sources.map((s) => s.path) });
     const bad = new Map(); // module → its Error diagnostics
     for (const d of r.diags) {
       if (!isError(d) || !String(d.file ?? "").startsWith(prefix)) continue;

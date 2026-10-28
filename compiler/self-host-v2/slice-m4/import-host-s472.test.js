@@ -34,7 +34,9 @@ const ENTRY = "app.scrml";
 const STD = "scrml:hm/index.scrml"; // a stdlib file, as the driver names one (link.scrml stdlibPrefix)
 const FIXTURE = join(import.meta.dir, "src", "stdlib-s472h");
 
-const run = (files, entry = ENTRY) => frontEnd(mods, files, entry);
+// the `scrml:` files here are supplied AS STDLIB (as frontEndStdlib supplies them — s472 F2)
+const run = (files, entry = ENTRY) =>
+  frontEnd(mods, files, entry, { stdlibPaths: files.map((f) => f.path).filter((p) => p.startsWith("scrml:")) });
 const codes = (r) => r.diags.map((d) => d.code).sort();
 const user = (src) => run([{ path: ENTRY, src }]);
 // a stdlib file + an entry that imports it
@@ -123,6 +125,54 @@ describe("§21.3.1 in a stdlib file", () => {
     const r = frontEndStdlib(mods, [{ path: ENTRY, src: '<program>\n${ import { fl } from "scrml:hm"; }\n<p>${fl(2)}</p>\n</program>\n' }], ENTRY, { stdlibRoot: FIXTURE });
     expect(r.diags.map((d) => [d.code, d.file])).toEqual([["E-BOOTSTRAP-UNSUPPORTED", ENTRY]]);
     expect(r.stdlib.refused.map((x) => [x.module, x.diags.map((d) => d.code)])).toEqual([["hm", ["E-BOOTSTRAP-UNSUPPORTED"]]]);
+  });
+});
+
+describe("s472 F2 — stdlib-ness is the driver's, never a project file's name", () => {
+  test("a PROJECT file named under `scrml:` (not supplied as stdlib) is refused by name before any phase — it never reaches the admitted branch", () => {
+    const files = [
+      { path: "scrml:x/index.scrml", src: 'import:host { h } from "./h.js";\n' + LIB_BODY },
+      { path: ENTRY, src: '<program>\n${ import { fl } from "scrml:x"; }\n<p>${fl(1)}</p>\n</program>\n' },
+    ];
+    const r = frontEnd(mods, files, ENTRY);
+    expect(r.diags.map((d) => [d.code, d.file])).toEqual([["E-BOOTSTRAP-UNSUPPORTED", "scrml:x/index.scrml"]]);
+    expect(r.diags[0].message).toContain("stdlib prefix");
+    expect(r.core).toBe(null);
+  });
+
+  test("scrml-boot: a project directory named `scrml:x/` is a diagnostic, not an internal error", async () => {
+    if (process.platform === "win32") return; // `:` is not a legal path character there
+    const { mkdtempSync, mkdirSync, writeFileSync, rmSync } = await import("node:fs");
+    const { tmpdir } = await import("node:os");
+    const { compileSource } = await import("../../../scripts/scrml-boot.ts");
+    const dir = mkdtempSync(join(tmpdir(), "s472-f2-"));
+    try {
+      mkdirSync(join(dir, "scrml:x"));
+      writeFileSync(join(dir, "scrml:x", "index.scrml"), LIB_BODY);
+      writeFileSync(join(dir, "app.scrml"), '<program>\n${ import { fl } from "./scrml:x/index.scrml"; }\n<p>${fl(1)}</p>\n</program>\n');
+      const c = await compileSource(join(dir, "app.scrml"));
+      expect(c.ok).toBe(false);
+      expect(c.diagnostics.map((d) => d.code)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+      expect(c.diagnostics[0].message).toContain("stdlib prefix");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }, 120000);
+});
+
+describe("s472 F3 — an import in a statement position (a function / `if` body) is E-IMPORT-003, not a parse wall", () => {
+  const inFn = (stmt) => "${\n    export fn fl(x: int) -> int {\n        " + stmt + "\n        if (x > 0) {\n            " + stmt + "\n        }\n        return x;\n    }\n}\n";
+  test("adopter file: `import:host` in a fn body and an `if` body → E-IMPORT-003 + E-IMPORT-008 each, nothing else", () => {
+    const r = run([{ path: "lib.scrml", src: inFn('import:host { h } from "./h.js";') }, { path: ENTRY, src: '<program>\n${ import { fl } from "./lib.scrml"; }\n<p>${fl(1)}</p>\n</program>\n' }]);
+    expect(codes(r)).toEqual(["E-IMPORT-003", "E-IMPORT-003", "E-IMPORT-008", "E-IMPORT-008"]);
+  });
+  test("stdlib file: E-IMPORT-003 alone; a bad tag adds E-IMPORT-009", () => {
+    expect(codes(std(inFn('import:host { h } from "./h.js";')))).toEqual(["E-IMPORT-003", "E-IMPORT-003"]);
+    expect(codes(std(inFn('import:wasm { h } from "./h.js";')))).toEqual(["E-IMPORT-003", "E-IMPORT-003", "E-IMPORT-009", "E-IMPORT-009"]);
+  });
+  test("a plain import in a function body: E-IMPORT-003 (§41.3)", () => {
+    const r = user('<program>\n${\n    function f() -> int {\n        import { a } from "./a.scrml";\n        return 1;\n    }\n}\n<p>${f()}</p>\n</program>\n');
+    expect(codes(r)).toEqual(["E-IMPORT-003"]);
   });
 });
 
