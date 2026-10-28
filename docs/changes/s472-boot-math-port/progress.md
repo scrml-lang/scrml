@@ -78,3 +78,24 @@ Copy at ~/.cache/scrml/review/s472-mp-red (scratchpad red.sh: `git show c8070b56
   compile-floor PASS; md shim current; conflict-marker / delta-lint / ci-shards PASS; e2e-render-map
   259 / 0; host-global scan --roots stdlib 0 violations (the one stale pin, stdlib/time esm, is on base
   too); bootstrap-conformance --write: report unchanged.
+- commit 3 (fail closed): a `-> void` wrapper is E-HOST-BINDING-USE; a server-placed host-backed fn
+  is E-BOOTSTRAP-UNSUPPORTED (hostPlacedDiags); SPEC §21.3 S440-item-16 cross-ref to §21.3.1.1.
+
+## CHECKPOINT (PA wrap request) — where this stands
+
+DONE + committed (each pre-commit hook passed, SCRML_HOOK_SHARDS=1 — sharded mode timed out under
+host load): bootstrap emission + wrapper rule + decode; stdlib/math port (compiles on BOTH impls);
+impl#1 shim + 8 callers; SPEC §21.3.1.1 / §19.17 / §21.6 / §34 / §41.18; SPEC-INDEX; severity.scrml;
+gaps (2 resolved, 2 narrowed); docs (external-js, kickstarter, primer); red-proof recorded above.
+Gates run green on the pre-merge tree: full impl#1 suite, all slices (incl. SLICE_CORE=lowered m1),
+e2e-render-map, types-gate, snippet, claim, compile-floor, md shim, conflict-marker, delta-lint,
+ci-shards, s34-census --check-new (base c8070b56a), SPEC-INDEX --check, bootstrap-conformance
+(unchanged).
+
+NOT DONE (next):
+1. `git merge origin/main` (NOT rebase) — main moved (#1608 payload-variant touches the bootstrap:
+   analyze / core Expr.VariantOf / print …; #1614 #1618 docs/known-gaps). Expect conflicts in
+   analyze.scrml / core.scrml, known-gaps.md (count hunk: regen via state.ts --write), SPEC-INDEX (regen).
+2. After the merge: rerun slices + math-port-s472 + import-host-s472, s34-census --check-new --base
+   origin/main, SPEC-INDEX --check, bootstrap-conformance --check (regen if moved), full pre-commit.
+3. Flip the PR from draft after (1)–(2).
