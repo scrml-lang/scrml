@@ -789,7 +789,17 @@ ${
         // `not` when the program writes no author CSS (the reset alone is
         // `reset` above). The sheet's own `reset` agrees with `reset`.
         css: CoreCss | not,
+        // s472 — the file-scope constants (§7.6), in dependency order (an
+        // initializer reads only constants before it). A read is `Local(sym)`.
+        // Each printer emits ONE module-level `const` for every constant its
+        // artifact's code reads (transitively), and no other (constsReadIn).
+        consts: CoreConst[],
     }
+
+    // s472 — a file-scope constant: its value is fixed at compile time (analyze
+    // constPass admits only literals, variants, other constants, member reads and
+    // operators), so evaluating it once at module load is the whole of its meaning.
+    export type CoreConst:struct = { sym: Sym, init: Expr }
 
     // s469 — §25.7: a `@name` of a program cell in a `#{}` value is
     // `var(--scrml-<name>)`; at run time the cell's value is written to that
