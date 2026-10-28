@@ -1035,6 +1035,9 @@ export function rewriteStdlibImports(jsCode, bundleDir, outputDir, bundled) {
  * @param {'browser'|'library'} [options.mode] — output mode (default 'browser')
  *   'browser': emits HTML + client IIFE JS + server JS (standard browser app)
  *   'library': emits ES module exports JS + server JS (importable module, no HTML, no runtime)
+ * @param {string} [options.hostImportStdlibRoot] — S472: the stdlib directory `import:host` is admitted in
+ *   (§21.3.1 / §22.13), replacing the compiler's own `stdlib/` (host-import.js COMPILER_STDLIB_DIR). An
+ *   embedding seam for tests; the CLI never sets it.
  * @param {object|null} [options.selfHostModules] — optional self-hosted module overrides.
  *   When provided, uses compiled scrml modules instead of the JS originals for:
  *   - selfHostModules.splitBlocks — replaces block-splitter.js:splitBlocks
@@ -1742,8 +1745,12 @@ function _compileScrmlImpl(options = {}) {
   // gates `import:host` (§21.3.1) in `validateHostImports` right after TAB.
   // An unrecognised `host-import` value is E-MANIFEST-001, reported once per
   // manifest.
+  // S472 (review F1): `import:host` is admitted only in the COMPILER's own
+  // stdlib (host-import.js COMPILER_STDLIB_DIR); `hostImportStdlibRoot` replaces
+  // that directory for an embedding caller (tests) — an API seam at the trust
+  // level of `stageOverrides`; no CLI flag, manifest key or source form sets it.
   const hostImportCaps = stage("MANIFEST", () =>
-    readHostImportCapabilities(inputFiles.map((f) => resolve(f))));
+    readHostImportCapabilities(inputFiles.map((f) => resolve(f)), { stdlibRoot: options.hostImportStdlibRoot || null }));
   for (const e of hostImportCaps.errors) {
     collectErrors("MANIFEST", [e], e.filePath || null);
   }

@@ -144,7 +144,9 @@ describe("#1045 F1 — client JS relative specifiers resolve on disk, and gated 
         "<program>\n${ @n = 0 }\n" +
         '<button onclick=${@n = tokenize("a b").length}>go ${@n}</button>\n</program>\n',
     });
-    const { r, out, gated: g } = build(root, ["stdlib/compiler/page.scrml"], "out");
+    // S472 (review F1): `import:host` is admitted only in the compiler's own stdlib; the
+    // fixture's `stdlib/` plays that role through the API seam.
+    const { r, out, gated: g } = build(root, ["stdlib/compiler/page.scrml"], "out", { hostImportStdlibRoot: join(root, "stdlib") });
     expect(fatal(r)).toEqual([]);
     const file = written(out, /\/out\/page\.client\.js$/);
     const specs = expectAllImportsResolve(file);

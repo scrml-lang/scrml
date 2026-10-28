@@ -30,8 +30,8 @@
 | Severity | Open (owed by impl#1, the TS compiler) | Carried (owed by the bootstrap; xfail on impl#1) |
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 262 | 5 |
-| MED | 698 | 8 |
+| HIGH | 263 | 5 |
+| MED | 699 | 8 |
 | LOW | 542 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
@@ -441,8 +441,20 @@ Listed as a follow-up on #1577. Not measured here. Decide whether a `delete` tai
 
 Survey table: `docs/changes/s471-bootstrap-stdlib-import/progress.md`. `md` is closest (pure; Math.floor ×4, new Set/Map ×3). Owner questions pending: drop the `<program>` wrapper (§21.5), and the host bridge (below).
 
-<!-- @gap id=g-boot-no-host-bridge-s471 sev=HIGH status=open locus=compiler/self-host-v2/analyze.scrml(member-call allowlist)+SPEC(§23.2.4 _{} is server-only; §21.3.1 import:host limited to stdlib/compiler/**) prov=dispatch:s471-bootstrap-stdlib-import(survey) -->
-### g-boot-no-host-bridge-s471 — the bootstrap has no `_{}` / `import:host` / host-global surface, and SPEC gives client-capable stdlib modules (format/Intl, math, time, regex, random, router) no sanctioned host reach: §23 `_{}` is server-only and `import:host` admits only `stdlib/compiler/**` — `NEW S471; HIGH; open (owner question)`
+> **S472 status (s472-boot-import-host-math) — owner questions answered, still no module compiles.** Both questions are ruled (S471: the wrapper may be dropped; host bridge = option A, SPEC text #1596). The `scrml:math` port this lane was to land is held on three questions recorded in `docs/changes/s472-boot-import-host-math/progress.md` §"SPEC silences" — Q1 where a stdlib host file lands in the output, Q2 what scrml type a host binding has (the bootstrap's Core is typed and has no `asIs`), Q3 which `scrml:math` API (the brief's "no API diff" vs §41.18's ruled S469 API; the current API's rest / optional parameters are not writable on the bootstrap either). Filed: [[g-boot-import-host-emit-unspecified-s472]], [[g-stdlib-math-port-api-fork-s472]].
+
+<!-- @gap id=g-boot-no-host-bridge-s471 sev=HIGH status=open locus=compiler/self-host-v2/analyze.scrml(checkHostImport — admitted host imports refused E-BOOTSTRAP-UNSUPPORTED) prov=dispatch:s471-bootstrap-stdlib-import(survey) -->
+### g-boot-no-host-bridge-s471 — the bootstrap has no `_{}` / `import:host` / host-global surface, and SPEC gives client-capable stdlib modules (format/Intl, math, time, regex, random, router) no sanctioned host reach: §23 `_{}` is server-only and `import:host` admits only `stdlib/compiler/**` — `NEW S471; HIGH; open (narrowed S472: SPEC + impl#1 + the bootstrap's gate landed; emission blocked on g-boot-import-host-emit-unspecified-s472)`
+
+> **NARROWED S472 (s472-boot-import-host-math).** The owner question is answered (S471 option A; SPEC §21.3.1 / §22.13 admit `scrml/stdlib/**`, #1596). impl#1 `compiler/src/host-import.js` now admits `stdlib/` (was `stdlib/compiler/`). The bootstrap now READS `import:<tag> { a, b as c } from "…"` (parse.scrml `parseImport`; ast `AImport.host` / `.top`) and judges it with impl#1's codes: E-IMPORT-003 (not at file top level — inside `${}` or a `<program>` body), E-IMPORT-009 (tag ≠ `host`; a `host` target that is not `.js`/`.mjs`/`.ts`/`.mts`), E-IMPORT-008 (any file that is not a stdlib file of the build — link.scrml `isStdlibPath`, structural). A host import links no file and supplies no stdlib module (link.scrml `importsOfItems` = module imports only). What remains: an ADMITTED declaration (stdlib file, file top, `host`, JS/TS) is refused by name — E-BOOTSTRAP-UNSUPPORTED "does not yet load or emit a host module" — so a module using one is withdrawn as before. Tests: compiler/self-host-v2/slice-m4/import-host-s472.test.js (red on base 12/12). `_{}` and host globals are unchanged.
+
+<!-- @gap id=g-boot-import-host-emit-unspecified-s472 sev=HIGH status=open locus=SPEC(§21.3.1 — no output rule for a stdlib host file; §21.3 S440 item 16 _scrml_local + E-IMPORT-011 written for adopter helpers)+compiler/self-host-v2/analyze.scrml(checkHostImport) prov=dispatch:s472-boot-import-host-math -->
+### g-boot-import-host-emit-unspecified-s472 — the bootstrap cannot emit an admitted `import:host` because SPEC does not say (Q1) where a stdlib module's thin host `.js` lands in the output or what specifier the client / server artifact imports it by — §21.3's `_scrml_local/<project-relative path>` copy rule would make every stdlib host file E-IMPORT-011 (outside the adopter's project root), and §21.3's "server output keeps importing the source file" would bake the compiler-install path into the artifact (§58.1) — nor (Q2) what scrml type a host binding has in a typed program (the bootstrap has no `asIs`) — `NEW S472; HIGH; open (owner question — blocks every stdlib port with host reach)`
+
+Questions + recommendations: `docs/changes/s472-boot-import-host-math/progress.md` §"SPEC silences". Recommended: Q1 `<outputDir>/_scrml/<module>/<file>` for client and server; Q2 a host binding usable only as the direct callee of a `return` in a fully typed wrapper function.
+
+<!-- @gap id=g-stdlib-math-port-api-fork-s472 sev=MED status=open locus=stdlib/math/index.scrml+compiler/runtime/stdlib/math.js+SPEC(§41.18 S469 amendment — Nominal) prov=dispatch:s472-boot-import-host-math -->
+### g-stdlib-math-port-api-fork-s472 — a bootstrap port of `scrml:math` cannot keep the current API: §41.18's ruled S469 API (`round(x, mode: Rounding) -> int`, `floor`/`ceil`/`trunc -> int`, `parseInt(s, radix) -> int | not`, `parseFloat`/`toNumber -> number | not`, the `Rounding` enum) supersedes it, and the current `min(...values)` / `max(...values)` / `parseInt(str, radix?)` need rest and optional parameters the bootstrap does not have — `NEW S472; MED; open (owner question: which API the port carries; §41.18 also owes a corpus count of `round(x)` calls first)`
 
 <!-- @gap id=g-boot-flat-link-namespace-s471 sev=MED status=resolved resolved-by=s472-boot-link-visibility locus=compiler/self-host-v2/analyze.scrml(fnNamed — "the bootstrap links one namespace") prov=dispatch:s471-bootstrap-stdlib-import;review:S471-stdlib(F1,F2; ~/.cache/scrml/review/s471-stdlib/probes p2,p3,t2,s1,s6) -->
 ### g-boot-flat-link-namespace-s471 — (fail-open) the export/import boundary is not enforced at use sites: any function or type of ANY linked file — exported-but-not-imported, or not exported at all — is usable without importing it (base too); with `scrml:` modules linked this reaches stdlib internals; and a user library's private name colliding with a stdlib private name withdraws the stdlib module with a stdlib-located "does not compile" error — `NEW S471; MED; RESOLVED S472 (#1606, s472-boot-link-visibility)`
