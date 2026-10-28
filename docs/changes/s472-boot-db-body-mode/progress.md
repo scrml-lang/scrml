@@ -97,3 +97,10 @@ Ruling: scrml-support/user-voice-scrml.md "⭐ RULED — `<db>` body + client re
   non-exhaustive (E-TYPE-020 bundle build failure). Added `.ConstItem(c: c) :> -1` / `:> false` arms — a
   `const` item in a `<db>` body is therefore neither fn nor type (→ E-DB-BODY-STATEMENT if it reaches that path).
 - docs/bootstrap-conformance.md regenerated (--write).
+- Merge committed 0c45f95d8 (hook: 50644 pass / 0 fail, SCRML_HOOK_SHARDS=6 after a 1200s load timeout on the first try).
+- CI checks-job gates run locally on the merged head: types-gate, compiler/tests/*.test.js, snippet-gate, claim-gate,
+  corpus-compile-floor, md-shim, conflict-marker, spec-index, delta-lint, s34-census, bootstrap slice (lint + m1/m2/m1-lowered/m3/m4/codec),
+  bootstrap-conformance --check — all PASS.
+- PR probes (review probes in .tmp/db + a landing probe set): bare statements → E-DB-BODY-STATEMENT; prose → E-UNQUOTED-DISPLAY-TEXT;
+  ?{} binds to declaring <db> (sibling, program-db, use-before); collisions → E-SCOPE-010; fn-in-db under each / renders / engine
+  child / Tier-0 for → E-BOOTSTRAP-UNSUPPORTED; <match> arms refused upstream (no <match>/markup-lift-in-arm in the bootstrap); no page-text leak.
