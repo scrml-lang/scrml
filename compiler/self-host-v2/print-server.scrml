@@ -222,6 +222,7 @@ ${
             .Match(scrut: x) :> not
             .ArrayOf(elems: x) :> not
             .StructOf(ty: x) :> not
+            .VariantOf(enumSym: x) :> not
             .Handle(inst: x) :> not
             .InitOf(decl: x) :> not
             .Host(call: x) :> not
@@ -316,6 +317,7 @@ ${
             .Match(scrut: x) :> not
             .ArrayOf(elems: x) :> not
             .StructOf(ty: x) :> not
+            .VariantOf(enumSym: x) :> not
             .Handle(inst: x) :> not
             .InitOf(decl: x) :> not
             .Host(call: x) :> not
@@ -383,6 +385,7 @@ ${
             .Match(scrut: x) :> false
             .ArrayOf(elems: x) :> false
             .StructOf(ty: x) :> false
+            .VariantOf(enumSym: x) :> false
             .Handle(inst: x) :> false
             .InitOf(decl: x) :> false
             .Host(call: x) :> false

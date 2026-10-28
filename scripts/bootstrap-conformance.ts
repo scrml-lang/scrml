@@ -695,6 +695,49 @@ export function codesHalfFailures(ex: Record<string, any>, diags: Diag[], infos:
   return out;
 }
 
+/**
+ * s472 (s472-boot-payload-variant) — a cell's value as the CONFORMANCE CONTRACT states it.
+ * The bootstrap holds a payload-variant value as `{ variant, data: [v0, v1, …] }` — the payload
+ * POSITIONAL, in declared field order (print.scrml "THE ENUM VALUE SHAPE": no field name is ever
+ * a key, by construction). That in-memory shape is an implementation freedom (D3: codes +
+ * runtime effect). A case states an enum value in the one SPEC shape, §57.8: `{ "variant": "V",
+ * "data": { <declared field>: … } }`. So a `state` assertion is judged on the snapshot re-keyed
+ * by the cell's DECLARED type from the lowered Core — type-directed, never by guessing from the
+ * value: a payload variant's `data` takes its fields' names, recursively through structs,
+ * tapes, `T | not` and nested enums; every other value is unchanged.
+ */
+type CoreTy = { variant: string; data?: any } | string;
+function tyTag(t: CoreTy): string { return typeof t === "string" ? t : t.variant; }
+function canonValue(core: any, ty: CoreTy, v: unknown, depth = 0): unknown {
+  if (v === null || v === undefined || depth > 64) return v;
+  const tag = tyTag(ty);
+  if (tag === "Maybe") return canonValue(core, (ty as any).data.inner, v, depth + 1);
+  if (tag === "Seq") return Array.isArray(v) ? v.map((x) => canonValue(core, (ty as any).data.elem, x, depth + 1)) : v;
+  if (tag !== "Named") return v;
+  const symId = (ty as any).data.sym.id;
+  const def = (core.types ?? []).find((t: any) => t.data.sym.id === symId);
+  if (!def || typeof v !== "object") return v;
+  if (def.variant === "StructDef") {
+    const out: Record<string, unknown> = { ...(v as Record<string, unknown>) };
+    for (const f of def.data.fields) if (f.sym.hint in out) out[f.sym.hint] = canonValue(core, f.ty, out[f.sym.hint], depth + 1);
+    return out;
+  }
+  const o = v as { variant?: unknown; data?: unknown };
+  if (def.variant !== "EnumDef" || typeof o.variant !== "string" || !Array.isArray(o.data)) return v;
+  const vd = def.data.variants.find((x: any) => x.sym.hint === o.variant);
+  if (!vd || vd.fields.length !== o.data.length) return v;
+  const data: Record<string, unknown> = {};
+  vd.fields.forEach((f: any, i: number) => { data[f.sym.hint] = canonValue(core, f.ty, (o.data as unknown[])[i], depth + 1); });
+  return { variant: o.variant, data };
+}
+function canonState(core: any, r: { dom: string; state: { cells: any; derived: any }; body: any }) {
+  const prog = (core?.decls ?? []).find((d: any) => d.sym.id === core.program.id);
+  if (!prog) return r;
+  const cells: Record<string, unknown> = { ...r.state.cells };
+  for (const f of prog.fields) if (f.sym.hint in cells) cells[f.sym.hint] = canonValue(core, f.ty, cells[f.sym.hint]);
+  return { ...r, state: { ...r.state, cells } };
+}
+
 /** The runtime-half assertions over one observation, judged as conformance/run.ts `runtimeBody`. */
 function runtimeHalfFailures(ex: Record<string, any>, r: { dom: string; state: { cells: any; derived: any }; body: any }): string[] {
   const out: string[] = [];
@@ -893,7 +936,7 @@ async function gradeCase(boot: Bootstrap, c: LoadedCase, g: GradeInput): Promise
       if (so.js !== "") server = { js: so.js, serverDb: ex.serverDb as ServerDb, sqlEngine: String(ex.sqlEngine ?? "stub") };
     }
     const r = await runBootstrapArtifact(out.html, out.js, (ex.input ?? []) as InputStep[], ex.serverStub as Record<string, unknown> | undefined, (out.routes ?? []) as BootRoute[], server);
-    rtFailures = runtimeHalfFailures(ex, r);
+    rtFailures = runtimeHalfFailures(ex, canonState(fe.core, r));   // s472: enum values in the §57.8 shape
   } catch (e) {
     return v("CRASH", "runtime half threw", {
       ...base,
