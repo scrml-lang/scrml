@@ -53,3 +53,10 @@ Rulings (scrml-support/user-voice-scrml.md "⭐ RULED — five PA recs …" S472
   extra admitted function names (pass an extra set to cssValueOf; do not fork it). SPEC is silent on presentation attrs → no
   compile refusal unless ruled; a computed attributeName judged by both guards flips sink-guards s5 (`/ok?a=1` admitted today) —
   surface. Puppeteer proof: reuse ~/.cache/scrml/review/s472-st/probes/zz-st-chrome.test.js (no /leak fetch on head, fetch on main).
+
+## S473 landing-front (2026-10-28) — merge origin/main 3a7d1d223
+- Conflict: compiler/self-host-v2/severity.scrml (generated count header 207 vs 209) — took origin/main then regenerated
+  via `bun scripts/gen-bootstrap-severity.ts` (`--check` current). Regen drops E-ATTR-WRITER-CONFLICT (branch's F3 removal
+  of its only bootstrap emitter; base had it, main unchanged) and keeps E-STYLE-VALUE-NOT-STYLE.
+- analyze.scrml / parse.scrml auto-merged; resolveShow keeps the branch's F3 shape (base→branch change, main untouched).
+- docs/known-gaps.md: merge driver resolved; `state.ts --write` no change; no @gap id lost (main 2444, branch 2435, result 2449).
