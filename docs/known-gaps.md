@@ -32,7 +32,7 @@
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 265 | 5 |
 | MED | 700 | 8 |
-| LOW | 548 | 0 |
+| LOW | 547 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
 
@@ -599,8 +599,10 @@ Correct output, but no parallelism. This fails safe. Fix direction: test the AST
 
 Fix: before taking the cut reading, require that the closed reading's first new hard error does not start after the literal's closing `"`.
 
-<!-- @gap id=g-spec-stray-semicolon-after-closer-item-s471 sev=LOW status=open locus=SPEC(§7.2.2 rule 2 / rule 6; §40.8 interim) prov=dispatch:s471-bootstrap-parse-batch;review:S471-parse(F2) -->
-### g-spec-stray-semicolon-after-closer-item-s471 — SPEC is silent on a `;` directly after a closer-delimited item (display literal, markup child, `let <x/>`) in a code-default body: §7.2.2 rule 2 says such items "take no `;`" and rule 6 says `;` is never text; §40.8's body-top allowance is interim — `NEW S471; LOW; open (owner question; the bootstrap refuses, fail closed)`
+<!-- @gap id=g-spec-stray-semicolon-after-closer-item-s471 sev=LOW status=resolved resolved-by=s472-rulings-docs locus=SPEC(§7.2.2 rule 2 / rule 6; §40.8 interim) prov=dispatch:s471-bootstrap-parse-batch;review:S471-parse(F2) -->
+### g-spec-stray-semicolon-after-closer-item-s471 — SPEC is silent on a `;` directly after a closer-delimited item (display literal, markup child, `let <x/>`) in a code-default body: §7.2.2 rule 2 says such items "take no `;`" and rule 6 says `;` is never text; §40.8's body-top allowance is interim — `NEW S471; LOW; RESOLVED S472`
+
+> **RESOLVED S472 — ruling:user-voice-scrml.md S472 item 2 ("agree": keep refusing).** §7.2.2 rule 2 now states that a `;` directly after a closer-delimited item in a code-default body is a compile error; the §40.8 body-top allowance is unaffected. The bootstrap already refuses (`parse-batch-s471.test.js` F2).
 
 <!-- @gap id=g-pattern-default-quoted-key-unquoted-s470 sev=LOW status=open locus=UNTRACED(destructuring pattern default emission) prov=dispatch:s470-promise-all-batch-elements(candidate) -->
 ### g-pattern-default-quoted-key-unquoted-s470 — a quoted key in a destructuring pattern default loses its quotes: `{ a = x["variant"] }` is emitted as `x[variant]`, a ReferenceError at run time — `NEW S470; LOW; open (pre-existing on main)`
