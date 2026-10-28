@@ -7263,6 +7263,10 @@ ${
             if (!grantsAdmit(target.grants, EditKind.Replace)) {
                 return { w: not, st: addDiag(st, env.file, span, "E-BOOTSTRAP-UNSUPPORTED", "`" + label + " = …` is " + what + " of a sub-field tape, which its grants allow — but Core writes a struct field only as a whole (`replace`), so an edit of a sub-field tape is not in the bootstrap yet") }
             }
+            // s472-boot-map-grants: a map / sort / reverse written back replaces every element —
+            // the inner tapes' own grants (§66.12.6 rules 1 and 4; shapeElemTapeProblems)
+            const ed: TapeDiag[] = shapeElemTapeProblems(env.g.types, shape, target.ty, label)
+            if (ed.length > 0) return { w: not, st: addDiag(st, env.file, span, ed[0].code, ed[0].msg) }
             return { w: { cap: cap, inst: p.inst, edit: edit, check: Check.Static }, st: st }
         }
         let granted = false
@@ -7876,7 +7880,10 @@ ${
     fn localTapeProblems(types: TypeInfo[], name: string, lt: Type, value: AExpr) -> TapeDiag[] {
         const tg: GrantSet | not = tapeGrants(lt)
         if (tg is not) return structTapeProblems(types, lt, value, name, name)
-        return localTapeEdit(name, tapeTypeName(lt), tg, growsFixed(lt), value)
+        const te: TapeDiag[] = localTapeEdit(name, tapeTypeName(lt), tg, growsFixed(lt), value)
+        if (te.length > 0) return te
+        // s472-boot-map-grants: `xs = xs.map(…)` replaces every element (shapeElemTapeProblems)
+        return shapeElemTapeProblems(types, seqEditShapeKey(name, value), lt, name)
     }
 
     // The written type of the parameter `s` binds, if `s` is a parameter.
@@ -7980,6 +7987,36 @@ ${
         return [{ code: "E-WRITE-NOT-GRANTED", msg: "`" + label + " = …` replaces an element that is itself a tape (`" + tapeTypeName(elem) + "`): replacing it is a `replace` of that inner tape, which its type does not grant — a tape's grants govern it in every position, an element of another tape included (§66.12.6 rules 1 and 4); edit it in place (`" + label + "[j] = …`, `.append(…)` where granted) or add `replace` to the inner tape's grants" }]
     }
 
+    // s472-boot-map-grants (g-boot-map-position-write-bypasses-element-tape-grants-s472) —
+    // a tape written back through `map` / `sort` / `reverse` (`xs = xs.map(…)`, shape 4) is
+    // "a **position-write**" (§66.11.2; §66.12.6 rules 3 and 4) of EVERY position: each
+    // element may be replaced by another value, so the write needs, for every element, what
+    // a single position write `xs[i] = v` needs (r1 F1, elemTapeReplaceProblem /
+    // checkStructTapes): an element that is itself a tape is a `replace` of that inner tape
+    // (rule 1, "in each position that can hold one"), and a struct element replaces each tape
+    // field reached through its struct fields (rule 4, structTapeWrites). The callback is not
+    // walked — an identity map `x => x` or a spread `k => ({ ...k, f: v })` is judged the
+    // same, as the single-position twin `xs[0] = xs[0]` is: SPEC does not rule what a
+    // callback keeps, so fail closed. `tape`: the written tape's type; `label`: its spelling.
+    // Any other shape (an append, a prepend, a filter) moves no element value: [].
+    fn shapeElemTapeProblems(types: TypeInfo[], shape: int, tape: Type, label: string) -> TapeDiag[] {
+        if (shape != 4) return []
+        const el: Type | not = seqElem(unMaybe(tape))
+        if (el is not) return []
+        const what: string = "`" + label + " = …` is a position write of every position (§66.11.2: `xs = xs.map(…)`, `.sort(…)`, `.reverse()`), so it replaces each element of `" + label + "`"
+        const tg: GrantSet | not = tapeGrants(el)
+        if (tg is given) {
+            if (grantsAdmit(tg, EditKind.Replace)) return []
+            return [{ code: "E-WRITE-NOT-GRANTED", msg: what + " — and each element is itself a tape (`" + tapeTypeName(el) + "`) whose type does not grant `replace`: replacing it is a `replace` of that inner tape, judged by its own grants (§66.12.6 rules 1 and 4, as `" + label + "[i] = …` is). Edit the inner tapes in place, or add `replace` to the inner tape's grants" }]
+        }
+        for (const h of structTapeWrites(types, el, not, "", label + "[…]", [])) {
+            if (!grantsAdmit(h.grants, EditKind.Replace)) {
+                return [{ code: "E-WRITE-NOT-GRANTED", msg: what + " — and each element holds the tape field `" + h.path + "` (`" + tapeTypeName(h.ty) + "`), whose type does not grant `replace`: replacing the element is a `replace` of that field, judged by the field's own grants (§66.12.6 rule 4, as `" + label + "[i] = …` is; the callback is not walked). Write the other fields in place (`" + label + "[i].f = v`), or add `replace` to the field's tape type" }]
+            }
+        }
+        return []
+    }
+
     // s472 — a position write of a tape held by a local, or reached through one:
     // judged by the tape TYPE's grants (§66.12.3 "Permissions live on the TYPE").
     // `tyText` names the type for the message (an inferred one says so).
@@ -8005,7 +8042,7 @@ ${
     //     old → new transition it performs, not by how it is spelled"). Not through
     //     a tape position (`inTape`): an element field is judged by its own
     //     contract alone (dpa-052 Q3, RULED S440).
-    fn localFieldWriteProblem(fd: FieldDef, key: string, label: string, value: AExpr, rootLet: boolean, inTape: boolean, root: string) -> TapeDiag[] {
+    fn localFieldWriteProblem(types: TypeInfo[], fd: FieldDef, key: string, label: string, value: AExpr, rootLet: boolean, inTape: boolean, root: string) -> TapeDiag[] {
         if (seqElem(unMaybe(fd.ty)) is given) {
             const shape: int = seqEditShapeKey(key, value)
             let edit: EditKind = EditKind.Replace
@@ -8020,7 +8057,8 @@ ${
             if (growsFixed(fd.ty) && shape > 0 && shape < 4) {
                 return [{ code: "E-WRITE-INVARIANT", msg: "`" + label + "`: " + what + " changes the length of the tape, and its type fixes the length (no `free` grant, §66.12.1–§66.12.2) — the write provably breaks the length invariant (§66.11.2)" }]
             }
-            return []
+            // s472-boot-map-grants: a map / sort / reverse written back replaces every element
+            return shapeElemTapeProblems(types, shape, fd.ty, label)
         }
         if (grantsAdmit(fd.grants, EditKind.Replace)) return []
         if (rootLet && !inTape && !grantsHasEdits(fd.grants)) return []
@@ -8457,6 +8495,10 @@ ${
         }
         // r2 N2: `filter` shrinks — impossible on a fixed-length sequence
         if (shape == 3 && growsFixed(p.ty)) return addDiag(st, env.file, e.span, "E-WRITE-INVARIANT", fixedShrinkMessage(f.sym.hint, shapeWhat(shape)))
+        // s472-boot-map-grants: a map / sort / reverse written back replaces every element —
+        // the inner tapes' own grants, as a position write's (§66.12.6 rules 1 and 4)
+        const ed: TapeDiag[] = shapeElemTapeProblems(env.g.types, shape, f.ty, "@" + f.sym.hint)
+        if (ed.length > 0) return addDiag(st, env.file, e.span, ed[0].code, ed[0].msg)
         if (shape > 2) {
             // s444: `@x = @x.filter(λ)` — a RemoveAnywhere whose value is the
             // filtered sequence (C9: a filter of the field itself); `@x =
@@ -9051,7 +9093,7 @@ ${
             // a FIELD write: the deepest field's own contract (dpa-052 Q6); a
             // contract-free field is written under the local's rebinding (O57 = no,
             // §66.11.5) — only when no tape position lies between (dpa-052 Q3)
-            const fp: TapeDiag[] = localFieldWriteProblem(fd, key, label, value, l.mutable, fieldInTape, l.name)
+            const fp: TapeDiag[] = localFieldWriteProblem(env.g.types, fd, key, label, value, l.mutable, fieldInTape, l.name)
             if (fp.length > 0) return addDiag(st, env.file, e.span, fp[0].code, fp[0].msg)
             if (seqElem(unMaybe(fd.ty)) is not) {
                 const stt: AS = checkStructTapes(env, fd.ty, value, key, label, e.span, st)
