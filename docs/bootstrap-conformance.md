@@ -11,26 +11,26 @@ Scope: **1813 of 1813 cases attempted** — every attempted case reached the pur
 
 | bucket | cases | share of attempted |
 |---|---:|---:|
-| PASS | 254 | 14.0% |
+| PASS | 259 | 14.3% |
 | CODES-ONLY | 0 | 0.0% |
 | FAIL | 49 | 2.7% |
 | LEGACY | 0 | 0.0% |
 | NOT-TWINNED | 685 | 37.8% |
-| UNSUPPORTED | 825 | 45.5% |
+| UNSUPPORTED | 820 | 45.2% |
 | CRASH | 0 | 0.0% |
 | INVALID | 0 | 0.0% |
 
-**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 303; of those, 254 hold (83.8%). Runtime half executed on the bootstrap for 101 case(s).
+**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 308; of those, 259 hold (84.1%). Runtime half executed on the bootstrap for 103 case(s).
 
-- **Vacuous** passes: 19 of 254 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **235**.
+- **Vacuous** passes: 19 of 259 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **240**.
 - FAILs whose required code appears nowhere in the bootstrap's sources (check not implemented): 24 of 49; the other 25 are implemented checks that answered wrong.
 
 LEGACY by marker (a case may carry several): none.
-UNSUPPORTED by reason: bootstrap-unsupported 515 · parse-reject 310.
+UNSUPPORTED by reason: bootstrap-unsupported 506 · parse-reject 314.
 
 ### §66 twins (S449 dialect ruling 1 — generated at test time by the `scrml fix` §66 rules)
 
-Legacy-dialect cases graded on their generated §66 twin: **793** — PASS 154 · FAIL 34 · UNSUPPORTED 605. Twin holds 154 (non-vacuous 139). Every twin verdict above is included in the bucket table.
+Legacy-dialect cases graded on their generated §66 twin: **793** — PASS 159 · FAIL 34 · UNSUPPORTED 600. Twin holds 159 (non-vacuous 144). Every twin verdict above is included in the bucket table.
 - `dialect.s66` overrides: 0 replace a twin's expectations · 11 exclude a case.
 - Superseded-code mappings applied: 2 case(s) (E-ENGINE-VAR-DUPLICATE→E-SCOPE-010). Rows: E-ENGINE-VAR-DUPLICATE→E-SCOPE-010 [applied] · E-ENGINE-STATE-CHILD-INVALID-VARIANT→∅ [owed] · E-ENGINE-RULE-INVALID-VARIANT→∅ [owed] · E-ENGINE-INITIAL-INVALID-VARIANT→∅ [owed] · E-CELL-NO-RENDER-SPEC→∅ [owed] · E-CELL-RENDER-SPEC-NOT-BINDABLE→∅ [owed] · E-DECL-RHS-INTERP-WRAPPED→∅ [owed] · E-COMPONENT-010→∅ [owed].
 
@@ -109,7 +109,7 @@ NOT-TWINNED by reason (685 cases; a case counts once per distinct reason):
 | components | 68 | · | · | 1 | · | 65 | 2 | · | · |
 | condition | 36 | 18 | · | 5 | · | 8 | 5 | · | · |
 | control-flow | 76 | 16 | · | 1 | · | 21 | 38 | · | · |
-| defer | 51 | 14 | · | 2 | · | 4 | 31 | · | · |
+| defer | 51 | 15 | · | 2 | · | 4 | 30 | · | · |
 | derived | 6 | · | · | · | · | 5 | 1 | · | · |
 | each | 25 | · | · | · | · | 25 | · | · | · |
 | element-refusal | 34 | 7 | · | · | · | 11 | 16 | · | · |
@@ -117,7 +117,7 @@ NOT-TWINNED by reason (685 cases; a case counts once per distinct reason):
 | engine | 92 | 6 | · | 5 | · | 50 | 31 | · | · |
 | enum | 1 | · | · | 1 | · | · | · | · | · |
 | equality | 10 | · | · | · | · | 4 | 6 | · | · |
-| error | 73 | 24 | · | 3 | · | 5 | 41 | · | · |
+| error | 73 | 28 | · | 3 | · | 5 | 37 | · | · |
 | error-boundary | 11 | · | · | · | · | 11 | · | · | · |
 | files | 1 | 1 | · | · | · | · | · | · | · |
 | fn | 19 | 4 | · | 1 | · | 1 | 13 | · | · |
@@ -310,7 +310,7 @@ none
 
 none
 
-### PASS / CODES-ONLY (254)
+### PASS / CODES-ONLY (259)
 
 - `attr-executable-sink/bound-svg-animation-runtime-guard` — PASS · TWIN
 - `attr-executable-sink/bound-url-runtime-guard` — PASS · TWIN
@@ -375,6 +375,7 @@ none
 - `control-flow/s437-r5-braced-else-ownline-comment-fn` — PASS · TWIN
 - `control-flow/s462-braceless-else-if-chain-dangling` — PASS · TWIN
 - `control-flow/s462-braceless-if-else-same-line` — PASS · TWIN
+- `defer/ambiguous-lead-arm-payload-neg` — PASS · TWIN
 - `defer/fail-path` — PASS · TWIN
 - `defer/fn-prohibition-applies-neg` — PASS · TWIN
 - `defer/fn-pure-local` — PASS · TWIN
@@ -403,9 +404,12 @@ none
 - `engine/state-child-invalid-variant-neg` — PASS · TWIN · VACUOUS
 - `engine/state-child-missing-neg` — PASS · TWIN · VACUOUS
 - `error/arm-pipe-legacy-handler` — PASS · TWIN
+- `error/construct-variant-payload-arity-return-neg` — PASS · TWIN
 - `error/fail-bare-variant-payload-arity-neg` — PASS · TWIN
+- `error/fail-bare-variant-reaches-handler` — PASS · TWIN
 - `error/fail-bare-variant-undeclared-neg` — PASS · TWIN
 - `error/fail-imported-builtin-name-enum-neg` — PASS · TWIN
+- `error/fail-imported-builtin-name-enum-ok` — PASS · TWIN
 - `error/fail-in-failable-neg` — PASS · TWIN
 - `error/fail-non-enum-neg` — PASS · TWIN
 - `error/fail-outside-failable` — PASS · TWIN
@@ -426,6 +430,7 @@ none
 - `error/propagate-incompat-variants` — PASS · TWIN
 - `error/propagate-non-failable-callee-neg` — PASS · TWIN
 - `error/propagate-non-failable-callee-pos` — PASS · TWIN
+- `error/propagate-reaches-handler` — PASS · TWIN
 - `files/multifile-import` — PASS · TWIN
 - `fn/deterministic-call-clean` — PASS · TWIN
 - `fn/dom-mutation-pure-value-clean` — PASS · TWIN · VACUOUS
@@ -567,7 +572,7 @@ none
 - `type-state-codes/e-type-081-partial-match-render-neg` — PASS · TWIN · VACUOUS
 - `type-state-codes/e-type-lifecycle-on-engine-cell-neg` — PASS · TWIN · VACUOUS
 
-### UNSUPPORTED (825)
+### UNSUPPORTED (820)
 
 - `api/api-base-missing-neg` — bootstrap-unsupported: `<api>` is a scrml structural element (§60), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `api/api-clean-pos` — twin · bootstrap-unsupported: `<api>` is a scrml structural element (§60), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
@@ -730,7 +735,6 @@ none
 - `control-flow/s437-r5-braced-else-line-comment-top-logic` — twin · parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `if` (statements at logic-block level are not in bootstrap slice M2)
 - `control-flow/s437-r5-value-form-if-else-line-comment` — twin · bootstrap-unsupported: an `if` used as a value (§17.6, the value form §17.6.10) is not in the bootstrap yet — use a `match` on the condition (`match c { true :> a, false :> b }`), or compute the value in a function
 - `control-flow/s462-else-without-if-pos` — twin · parse-reject: E-STMT-MISSING-SEMICOLON: Expected `;` to end the statement — insert `;` after `"a"`. A `;` ends every statement that is not block-like, the last one before a `}` included (`{ @n = @n + 1; }`); a newl
-- `defer/ambiguous-lead-arm-payload-neg` — twin · bootstrap-unsupported: constructing the payload variant `M.A(…)` as a value is not in the bootstrap (only `fail` builds one) — only calls of a named function, `Date.now()`, `.filter(x => …)` / `.map(x => …)` / `.sort(…)` / 
 - `defer/ambiguous-lead-neg` — twin · bootstrap-unsupported: an index read `xs[i]` is in the bootstrap on a value of tape type (`T[…]`) — this value's type is not known to be one; annotate it
 - `defer/array-literal-lead` — twin · bootstrap-unsupported: `.forEach(…)` is not in the bootstrap — only calls of a named function, `Date.now()`, `.filter(x => …)` / `.map(x => …)` / `.sort(…)` / `.reverse()` / `.join(sep)` on a tape, and the string methods `t
 - `defer/control-flow-in-value-arms-neg` — twin · bootstrap-unsupported: an `if` used as a value (§17.6, the value form §17.6.10) is not in the bootstrap yet — use a `match` on the condition (`match c { true :> a, false :> b }`), or compute the value in a function
@@ -836,16 +840,13 @@ none
 - `error/await-not-in-scrml` — twin · parse-reject: E-STMT-MISSING-SEMICOLON: Expected `;` to end the statement — insert `;` after `1`. A `;` ends every statement that is not block-like, the last one before a `}` included (`{ @n = @n + 1; }`); a newlin
 - `error/construct-variant-payload-arity-let-neg` — twin · parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `let` (statements at logic-block level are not in bootstrap slice M2)
 - `error/construct-variant-payload-arity-ok` — twin · parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `let` (statements at logic-block level are not in bootstrap slice M2)
-- `error/construct-variant-payload-arity-return-neg` — twin · bootstrap-unsupported: constructing the payload variant `MyError.Timeout(…)` as a value is not in the bootstrap (only `fail` builds one) — only calls of a named function, `Date.now()`, `.filter(x => …)` / `.map(x => …)` / `
 - `error/construct-variant-payload-arity-trailing-comma-ok` — twin · parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `let` (statements at logic-block level are not in bootstrap slice M2)
 - `error/error-008-message-pos` — twin · parse-reject: E-PARSE-TYPE: expected `:enum` or `:struct`, found `:error`
 - `error/error-008-neg` — twin · parse-reject: E-PARSE-TYPE: expected `:enum` or `:struct`, found `:error`
-- `error/fail-bare-variant-reaches-handler` — twin · bootstrap-unsupported: constructing the payload variant `Phase.Missing(…)` as a value is not in the bootstrap (only `fail` builds one) — only calls of a named function, `Date.now()`, `.filter(x => …)` / `.map(x => …)` / `.s
-- `error/fail-imported-builtin-name-enum-ok` — twin · bootstrap-unsupported: constructing the payload variant `Phase.Bad(…)` as a value is not in the bootstrap (only `fail` builds one) — only calls of a named function, `Date.now()`, `.filter(x => …)` / `.map(x => …)` / `.sort(
 - `error/failable-fn-value-passed-handled-neg` — twin · bootstrap-unsupported: an unannotated parameter `f` — bootstrap slice M2 needs `f: Type` (Core parameters are typed)
-- `error/failable-handler-lift` — twin · bootstrap-unsupported: constructing the payload variant `Phase.Missing(…)` as a value is not in the bootstrap (only `fail` builds one) — only calls of a named function, `Date.now()`, `.filter(x => …)` / `.map(x => …)` / `.s
-- `error/failable-handler-lift-success` — twin · bootstrap-unsupported: constructing the payload variant `Phase.Missing(…)` as a value is not in the bootstrap (only `fail` builds one) — only calls of a named function, `Date.now()`, `.filter(x => …)` / `.map(x => …)` / `.s
-- `error/failable-handler-lift-timeout` — twin · bootstrap-unsupported: constructing the payload variant `Phase.Missing(…)` as a value is not in the bootstrap (only `fail` builds one) — only calls of a named function, `Date.now()`, `.filter(x => …)` / `.map(x => …)` / `.s
+- `error/failable-handler-lift` — twin · parse-reject: E-STMT-MISSING-SEMICOLON: Expected `;` to end the statement — insert `;` after `}`. A `;` ends every statement that is not block-like, the last one before a `}` included (`{ @n = @n + 1; }`); a newlin
+- `error/failable-handler-lift-success` — twin · parse-reject: E-STMT-MISSING-SEMICOLON: Expected `;` to end the statement — insert `;` after `}`. A `;` ends every statement that is not block-like, the last one before a `}` included (`{ @n = @n + 1; }`); a newlin
+- `error/failable-handler-lift-timeout` — twin · parse-reject: E-STMT-MISSING-SEMICOLON: Expected `;` to end the statement — insert `;` after `}`. A `;` ends every statement that is not block-like, the last one before a `}` included (`{ @n = @n + 1; }`); a newlin
 - `error/for-await-not-in-scrml` — twin · parse-reject: E-FOR-UNPARENTHESIZED-HEAD: a `for` head is parenthesized — write `for (x of xs) { … }` (§49.4.1, §17.4; the braceless `for x in xs` form is removed)
 - `error/handler-failable-reference-exempt-neg` — twin · bootstrap-unsupported: `scrml:data` — the bootstrap cannot import this stdlib module: the build supplied no source for it that the bootstrap compiles, so none of its names are imported (§41.5)
 - `error/handler-failable-reference-pos` — twin · bootstrap-unsupported: `<errorBoundary>` is a scrml structural element (§19 error boundary), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
@@ -855,8 +856,7 @@ none
 - `error/handler-unhandled-failable-bare-and-expr-pos` — twin · parse-reject: E-PARSE-TRAILING: unexpected `{` after the expression
 - `error/implicit-tx-explicit-begin` — twin · parse-reject: E-PARSE-EXPECTED: expected `:`, found `,`
 - `error/implicit-tx-explicit-transaction-block` — bootstrap-unsupported: `transaction { … }` (§19.10) is not in the bootstrap — it arrives with unit U1e (transactions, which need the error model's `!` functions)
-- `error/propagate-reaches-handler` — twin · bootstrap-unsupported: constructing the payload variant `Phase.Missing(…)` as a value is not in the bootstrap (only `fail` builds one) — only calls of a named function, `Date.now()`, `.filter(x => …)` / `.map(x => …)` / `.s
-- `error/propagate-success-unwrap` — twin · bootstrap-unsupported: constructing the payload variant `Phase.Missing(…)` as a value is not in the bootstrap (only `fail` builds one) — only calls of a named function, `Date.now()`, `.filter(x => …)` / `.map(x => …)` / `.s
+- `error/propagate-success-unwrap` — twin · parse-reject: E-STMT-MISSING-SEMICOLON: Expected `;` to end the statement — insert `;` after `return`. A `;` ends every statement that is not block-like, the last one before a `}` included (`{ @n = @n + 1; }`); a n
 - `error/render-no-clause-neg` — twin · bootstrap-unsupported: `<render>` is a scrml structural element (§19.15), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `error/render-no-clause-pos` — twin · bootstrap-unsupported: `<render>` is a scrml structural element (§19.15), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `error/render-no-of-neg` — twin · bootstrap-unsupported: `<render>` is a scrml structural element (§19.15), not an HTML element (§4.15, §24.4) — it is not in the bootstrap

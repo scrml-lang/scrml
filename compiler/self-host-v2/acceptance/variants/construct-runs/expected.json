@@ -1,0 +1,42 @@
+{
+  "id": "acceptance-variants-construct-runs",
+  "description": "payload-variant values constructed in expressions (qualified and bare callee) — a cell initializer, a cell write, a return, an argument, a nested bare payload argument — then matched, compared with == / != (unit and payload), and rendered.",
+  "language-version": "1.0",
+  "spec": "§14.4 · §14.10 · §18.7 · §45.2",
+  "rationale": "§14.4: \"Constructing a payload variant (`Shape.Rectangle(w, h)`, `.Circle(r)`) supplies exactly one positional argument per declared field, in declaration order\", across \"`let` / `const` / state-cell initializers, `return`, and `fail`\"; §14.10: a constructor argument resolves against the PAYLOAD field's type; §45.2: \"Payload variants compare by tag + payload fields.\"",
+  "expect": {
+    "codes": [],
+    "input": [
+      {
+        "click": "#b"
+      }
+    ],
+    "state": {
+      "sh": { "variant": "Rect", "data": { "w": 3, "h": 4 } },
+      "mode": { "variant": "Duo", "data": { "a": "ann", "b": "bo" } },
+      "first": { "variant": "Solo", "data": { "level": "Hard" } }
+    },
+    "domAnchored": [
+      {
+        "selector": "#area",
+        "text": "12"
+      },
+      {
+        "selector": "#circle",
+        "text": "27"
+      },
+      {
+        "selector": "#mode",
+        "text": "duo ann+bo"
+      },
+      {
+        "selector": "#first",
+        "text": "solo hard"
+      },
+      {
+        "selector": "#log",
+        "text": "eq ok"
+      }
+    ]
+  }
+}
