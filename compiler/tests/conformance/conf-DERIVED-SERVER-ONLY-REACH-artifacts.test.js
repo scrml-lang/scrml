@@ -151,10 +151,10 @@ const <h> = hashPassword(@pw)
 `;
 
 const NESTED_CLIENT_SAFE = `<program>
-${OPEN} import { round } from 'scrml:math' ${CLOSE}
+${OPEN} import { round, Rounding } from 'scrml:math' ${CLOSE}
 <n> = 1.5
 <items> = [1, 2]
-<div>${OPEN} for (let it of @items) { lift <div>${OPEN} const <r> = round(@n) ${CLOSE}<span>${OPEN}@r${CLOSE}</span></div> } ${CLOSE}</div>
+<div>${OPEN} for (let it of @items) { lift <div>${OPEN} const <r> = round(@n, .HalfUp) ${CLOSE}<span>${OPEN}@r${CLOSE}</span></div> } ${CLOSE}</div>
 </program>
 `;
 

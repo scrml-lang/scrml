@@ -29,7 +29,7 @@ ${
     import { Sym, Type, DeclKind, TypeDef, FieldDef, VariantDef, TransitionGraph, FieldRef, InstRef, Place, Literal, PrimOp, Pattern, Expr, MatchArm,
              HostCall, SeqFn, BindKind,
              EditKind, Check, Stmt, Block, Attr, ConstructAttr, CondArm, View, EffectDep, FieldRole, Field,
-             Decl, Fn, CoreProgram, CapOwner, SurfaceProp, ValidityOf, Validator, Persist, PersistStore,
+             Decl, Fn, HostFn, CoreProgram, CapOwner, SurfaceProp, ValidityOf, Validator, Persist, PersistStore,
              Failable, OkArm, ErrArm, ServerFn, SqlQuery, SqlMode, Param, LoopHead, EachHead, RangeHead, CssUnit, CoreCss, CssVar,
              Gather, Lifted, GatherRow, PathStep,
              findDecl, findTypeDef, typeDefSym, capOwner, findFn, findServerFn } from "./core.scrml"
@@ -2598,7 +2598,96 @@ ${
         return out
     }
 
+    // =========================================================================
+    // s472 (boot-math-port) — HOST-BACKED FUNCTIONS (core.scrml Fn.host; SPEC
+    // §21.3.1, ruling:user-voice-scrml.md S472 "stdlib host `.js` output
+    // location" + "host function type …" item 1). Each host module is imported
+    // ONCE per artifact, as a namespace, from where the driver copies it:
+    //   import * as hostmod$0 from "./_scrml/math/host.js";
+    // and a host-backed function is its signature around the host call, the
+    // value DECODED against the declared return type at that point:
+    //   function floor(x) { return rt.hostResult(hostmod$0.floor(x), { k: "int" }, "floor() — …"); }
+    // (runtime.js hostResult: the F3 §5.4 boundary decode; a mismatch is the
+    // E-HOST-VALUE-MISMATCH-RT trap). The namespace names carry `$`, so no
+    // minted name can collide with them (names.scrml). Both artifacts number
+    // the modules over the WHOLE program (`hostModules`), so one module has one
+    // name everywhere.
+    // =========================================================================
+    // The program's host modules, each once, in function order.
+    export fn hostModules(p: CoreProgram) -> HostFn[] {
+        let out: HostFn[] = []
+        for (const f of p.fns) {
+            const h: HostFn | not = f.host
+            if (h is given) {
+                if (hostModuleIndex(out, h) < 0) out = out.concat([h])
+            }
+        }
+        return out
+    }
+
+    fn hostModuleIndex(ms: HostFn[], h: HostFn) -> int {
+        let i: int = 0
+        for (const m of ms) {
+            if (m.module == h.module && m.file == h.file) return i
+            i = i + 1
+        }
+        return -1
+    }
+
+    fn hostModName(p: CoreProgram, h: HostFn) -> string {
+        return "hostmod$" + hostModuleIndex(hostModules(p), h)
+    }
+
+    // Where the driver puts a host module, relative to the artifacts (both sit in `<outputDir>`).
+    export fn hostModulePath(h: HostFn) -> string {
+        return "./_scrml/" + h.module + "/" + h.file
+    }
+
+    // The namespace imports of the host modules the functions `fs` reach (each once).
+    export fn hostImports(p: CoreProgram, fs: Fn[]) -> JsStmt[] {
+        let seen: HostFn[] = []
+        for (const f of fs) {
+            const h: HostFn | not = f.host
+            if (h is given) {
+                if (hostModuleIndex(seen, h) < 0) seen = seen.concat([h])
+            }
+        }
+        let out: JsStmt[] = []
+        for (const h of seen) { out = out.concat([JsStmt.SImportAll(hostModName(p, h), hostModulePath(h))]) }
+        return out
+    }
+
+    export fn hostFnJs(ctx: Ctx, f: Fn, h: HostFn) -> JsStmt {
+        let params: string[] = []
+        let args: JsExpr[] = []
+        for (const prm of f.params) {
+            const n: string = symName(ctx, prm.sym)
+            params = params.concat([n])
+            args = args.concat([jid(n)])
+        }
+        const call: JsExpr = jcall(jmember(jid(hostModName(ctx.p, h)), h.name), args)
+        const at: string = f.sym.hint + "() — the host function `" + h.name + "` of " + hostModulePath(h).slice(2)
+        return JsStmt.SFunc(symName(ctx, f.sym), params, [JsStmt.SReturn(rtCall(ctx, "hostResult", [call, hostTypeJs(h.ret), jstr(at)]))])
+    }
+
+    // The return-point decode's descriptor of a (scalar, or scalar `T | not`) type — check.scrml C-H2.
+    fn hostTypeJs(t: Type) -> JsExpr {
+        return match t {
+            .Int :> hostKind("int")
+            .Num :> hostKind("number")
+            .Str :> hostKind("string")
+            .Bool :> hostKind("bool")
+            .Maybe(inner: i) :> JsExpr.JObject([{ key: "k", value: jstr("maybe") }, { key: "inner", value: hostTypeJs(i) }])
+            .Named(sym: s) :> hostKind("unchecked")
+            .Seq(elem: e) :> hostKind("unchecked")
+        }
+    }
+
+    fn hostKind(k: string) -> JsExpr { return JsExpr.JObject([{ key: "k", value: jstr(k) }]) }
+
     fn fnJs(ctx: Ctx, f: Fn) -> JsStmt {
+        const hf: HostFn | not = f.host
+        if (hf is given) return hostFnJs(ctx, f, hf)
         // Prologue: one local per shared instance the body references.
         let prologue: JsStmt[] = []
         let shared: SharedLoc[] = []
@@ -2789,6 +2878,8 @@ ${
         const serverOnly: int[] = serverOnlyFns(p).concat(reachedOnlyByServer(p))
         let clientFns: Fn[] = []
         for (const f of p.fns) { if (!hasInt(serverOnly, f.sym.id)) clientFns = clientFns.concat([f]) }
+        // s472 (boot-math-port): the host modules those functions call, imported beside the runtime
+        body = body.slice(0, 2).concat(hostImports(p, clientFns)).concat(body.slice(2))
         if (clientFns.length > 0) body = body.concat([JsStmt.SBlank, JsStmt.SComment("functions")])
         for (const f of clientFns) { body = body.concat([fnJs(ctx, f)]) }
         // Boot: render the program's shared instance at the end of <body>.

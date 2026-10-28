@@ -132,7 +132,7 @@ const UPPER_LOOP = [
 ].join("\n");
 describe("(2) imports — known modules do not switch hoisting off (fix round F2)", () => {
   test("a read-only stdlib function called only in markup leaves `out.push(row.body.toUpperCase())` hoisted", () => {
-    const c = compile(withImports("        import { round } from 'scrml:math'", UPPER_LOOP.replace("BODY", "row.body.toUpperCase()"), "    <p>${round(2.5)}</p>"));
+    const c = compile(withImports("        import { round, Rounding } from 'scrml:math'", UPPER_LOOP.replace("BODY", "row.body.toUpperCase()"), "    <p>${round(2.5, .HalfUp)}</p>"));
     expect(c.hoists).toBe(1);
   });
   test("a read-only stdlib function called in the loop body is write-free", () => {

@@ -16,6 +16,7 @@ import { copyFileSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { loadBootstrap } from "./harness.js";
+import { copyHostFiles } from "./host-files.js";
 
 if (!globalThis.document) GlobalRegistrator.register();
 
@@ -88,10 +89,11 @@ export function warmLoadProgram() {
   loadBootstrap();
 }
 
-export async function loadProgram(core, name, expose = []) {
+export async function loadProgram(core, name, expose = [], opts = {}) {
   const out = printCore(core, name);
   const dir = mkdtempSync(join(tmpdir(), `slice-m1-${name}-`));
   copyFileSync(RUNTIME, join(dir, "scrml-runtime.js"));
+  copyHostFiles(core, dir, opts.stdlibRoot);
   const js = expose.length > 0 ? `${out.js}\nexport { ${expose.join(", ")} };\n` : out.js;
   writeFileSync(join(dir, `${name}.client.js`), js);
   writeFileSync(join(dir, `${name}.html`), out.html);

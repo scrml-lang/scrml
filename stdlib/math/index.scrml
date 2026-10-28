@@ -1,214 +1,143 @@
-<program>
+// ---------------------------------------------------------------------------
+// scrml:math — pure scalar / numeric vocabulary (SPEC §41.18)
+//
+// Every member is PURE: deterministic, no side effects, no capability — so
+// every member is a `fn`, callable inside a pure `fn` body. The host
+// `Math.*` / `Number.*` reach lives in ONE thin host file beside this module,
+// ./host.js, reached through `import:host` (§21.3.1; S471 option A). A host
+// binding is used only as the whole body of a fully typed wrapper — `return
+// h(params);` — whose signature IS the host function's type; the value the
+// host returns is decoded against it there (the S472 wrapper rule; a wrong
+// value is the trap E-HOST-VALUE-MISMATCH-RT). The wrappers of host functions
+// that are not part of the API (`roundHalfEven`, `roundHalfUp`) are private:
+// importing one is E-IMPORT-004.
+//
+// The API is S469's (§41.18): number → int conversions are named and lossy by
+// name (`floor` / `ceil` / `trunc`, and `round` with a REQUIRED `Rounding`
+// mode — `round(x)` alone is E-CALL-ARITY); NaN, ±∞ or a result outside
+// ±(2^53−1) is the trap E-INT-CONVERSION-RT; parses read the WHOLE string and
+// return `T | not`. `min` / `max` take two numbers; `minOf` / `maxOf` take a
+// tape and return `not` for an empty one (S472).
+//
+// NOT here (deliberately): `random()` — non-deterministic, so it lives in the
+// capability-scoped `scrml:random` (§41.20).
+//
+// Usage:
+//   ${ import { round, Rounding, floor, minOf, parseInt } from "scrml:math"; }
+//   ${ const cents: int = round(dollars * 100.0, .HalfEven); }
+// ---------------------------------------------------------------------------
+import:host { floor as hostFloor, ceil as hostCeil, trunc as hostTrunc,
+              roundHalfEven as hostRoundHalfEven, roundHalfUp as hostRoundHalfUp,
+              abs as hostAbs, min as hostMin, max as hostMax, isNaN as hostIsNaN,
+              parseInt as hostParseInt } from "./host.js";
 ${
-    // ---------------------------------------------------------------------------
-    // scrml:math — pure numeric utilities
-    //
-    // Every function here is PURE: deterministic, no side effects, no host
-    // capability. This is the sanctioned, centralized touch point for the
-    // host `Math.*` / `Number.*` surface — adopters reach these instead of
-    // raw `Math.round(...)` / `parseInt(...)`, and scrml's own stdlib routes
-    // its internal math through the same shim (closing the stdlib-ouroboros:
-    // scrml's runtime no longer leaks raw `Math` to do arithmetic).
-    //
-    // Because every member is pure, all of them are callable inside pure `fn`
-    // bodies (a pure calc — `round`/`floor`/`abs` of inputs — is the primary
-    // use). They are plain imports, so the §48.6.2 `fn` purity walker accepts
-    // them exactly as it accepts scrml:format / scrml:regex calls.
-    //
-    // NOT here (deliberately): `random()`. A random source is non-deterministic
-    // (class-C IO, like the wall clock) and so does not belong in a pure module.
-    // Its home is a separate design decision (see DD1 Fork 1 follow-on).
-    //
-    // Usage:
-    //   ${ import { round, clamp, parseInt } from 'scrml:math' }
-    // ---------------------------------------------------------------------------
+    // How `round` resolves a value exactly halfway between two integers, and
+    // the direction of the three directed modes (§41.18, S440 dpa-054 #4):
+    // `.HalfEven` the even neighbour (`2.5` → `2`, `-2.5` → `-2`, `3.5` → `4`);
+    // `.HalfUp` AWAY FROM ZERO (`2.5` → `3`, `-2.5` → `-3`); `.Floor` toward
+    // −∞, `.Ceil` toward +∞, `.Trunc` toward zero. There is no default mode.
+    export type Rounding:enum = { HalfEven, HalfUp, Floor, Ceil, Trunc }
 
-    /**
-     * Round to the nearest integer (ties round toward +Infinity).
-     *
-     * Example:
-     *   round(2.4) → 2
-     *   round(2.5) → 3
-     *   round(-2.5) → -2
-     */
-    export function round(n) {
-        return Math.round(n)
+    // number → int, toward −∞: `floor(2.9)` → `2`, `floor(-2.1)` → `-3`.
+    export fn floor(x: number) -> int {
+        return hostFloor(x);
     }
 
-    /**
-     * Round down to the nearest integer (toward -Infinity).
-     *
-     * Example:
-     *   floor(2.9) → 2
-     *   floor(-2.1) → -3
-     */
-    export function floor(n) {
-        return Math.floor(n)
+    // number → int, toward +∞: `ceil(2.1)` → `3`, `ceil(-2.9)` → `-2`.
+    export fn ceil(x: number) -> int {
+        return hostCeil(x);
     }
 
-    /**
-     * Round up to the nearest integer (toward +Infinity).
-     *
-     * Example:
-     *   ceil(2.1) → 3
-     *   ceil(-2.9) → -2
-     */
-    export function ceil(n) {
-        return Math.ceil(n)
+    // number → int, toward zero: `trunc(2.9)` → `2`, `trunc(-2.9)` → `-2`.
+    export fn trunc(x: number) -> int {
+        return hostTrunc(x);
     }
 
-    /**
-     * Absolute value.
-     *
-     * Example:
-     *   abs(-5) → 5
-     *   abs(5) → 5
-     */
-    export function abs(n) {
-        return Math.abs(n)
+    fn roundHalfEven(x: number) -> int {
+        return hostRoundHalfEven(x);
     }
 
-    /**
-     * Smallest of the given numbers. Variadic, mirroring `Math.min`:
-     * call with scalars `min(a, b)` or spread an array `min(...arr)`.
-     *
-     * Example:
-     *   min(3, 1, 2) → 1
-     *   min(...[5, 2, 8]) → 2
-     */
-    export function min(...values) {
-        return Math.min(...values)
+    fn roundHalfUp(x: number) -> int {
+        return hostRoundHalfUp(x);
     }
 
-    /**
-     * Largest of the given numbers. Variadic, mirroring `Math.max`:
-     * call with scalars `max(a, b)` or spread an array `max(...arr)`.
-     *
-     * Example:
-     *   max(3, 1, 2) → 3
-     *   max(...[5, 2, 8]) → 8
-     */
-    export function max(...values) {
-        return Math.max(...values)
+    // number → int by `mode` (REQUIRED): `round(2.5, .HalfEven)` → `2`,
+    // `round(2.5, .HalfUp)` → `3`, `round(-2.5, .HalfUp)` → `-3`.
+    export fn round(x: number, mode: Rounding) -> int {
+        return match mode {
+            .HalfEven :> roundHalfEven(x),
+            .HalfUp :> roundHalfUp(x),
+            .Floor :> floor(x),
+            .Ceil :> ceil(x),
+            .Trunc :> trunc(x)
+        };
     }
 
-    /**
-     * Constrain a value to the inclusive range [minimum, maximum].
-     *
-     * Example:
-     *   clamp(5, 0, 10) → 5
-     *   clamp(-3, 0, 10) → 0
-     *   clamp(99, 0, 10) → 10
-     */
-    export function clamp(value, minimum, maximum) {
-        return Math.min(Math.max(value, minimum), maximum)
+    // Absolute value: `abs(-5.0)` → `5`.
+    export fn abs(x: number) -> number {
+        return hostAbs(x);
     }
 
-    /**
-     * Parse the leading integer out of a string. The radix is required to
-     * be explicit (default 10) — there is no implicit-octal surprise.
-     *
-     * Example:
-     *   parseInt("42") → 42
-     *   parseInt("0xFF", 16) → 255
-     *   parseInt("  10px  ") → 10
-     *   parseInt("abc") → NaN
-     */
-    export function parseInt(str, radix) {
-        return Number.parseInt(str, radix is given ? radix : 10)
+    // The smaller of two numbers: `min(3.0, 1.0)` → `1`.
+    export fn min(a: number, b: number) -> number {
+        return hostMin(a, b);
     }
 
-    /**
-     * Parse the leading floating-point number out of a string.
-     *
-     * Example:
-     *   parseFloat("3.14") → 3.14
-     *   parseFloat("1.5kg") → 1.5
-     *   parseFloat("abc") → NaN
-     */
-    export function parseFloat(str) {
-        return Number.parseFloat(str)
+    // The larger of two numbers: `max(3.0, 1.0)` → `3`.
+    export fn max(a: number, b: number) -> number {
+        return hostMax(a, b);
     }
 
-    /**
-     * Coerce a value to a number. Unlike `parseInt`/`parseFloat` (which read a
-     * leading numeric prefix), this is whole-value coercion: a non-numeric
-     * string yields NaN, an empty string yields 0.
-     *
-     * Example:
-     *   toNumber("42") → 42
-     *   toNumber("3.14") → 3.14
-     *   toNumber("") → 0
-     *   toNumber("abc") → NaN
-     */
-    export function toNumber(value) {
-        return Number(value)
+    // `value` constrained to the inclusive range [minimum, maximum]:
+    // `clamp(-3.0, 0.0, 10.0)` → `0`, `clamp(99.0, 0.0, 10.0)` → `10`.
+    export fn clamp(value: number, minimum: number, maximum: number) -> number {
+        return min(max(value, minimum), maximum);
     }
 
-    /**
-     * True when the value is NaN (the numeric "not a number" sentinel).
-     * Uses Number.isNaN — does NOT coerce, so isNaN("foo") is false (the
-     * string "foo" is not the NaN value); coerce first with toNumber if you
-     * want "is this string non-numeric".
-     *
-     * Example:
-     *   isNaN(toNumber("abc")) → true
-     *   isNaN(42) → false
-     *   isNaN("42") → false
-     */
-    export function isNaN(value) {
-        return Number.isNaN(value)
+    // The smallest element of a tape; `not` for an empty tape (S472).
+    export fn minOf(xs: number[]) -> number | not {
+        if (xs.length == 0) {
+            return not;
+        }
+        let m: number = xs[0];
+        for (const x of xs) {
+            m = min(m, x);
+        }
+        return m;
     }
 
-    ~{
-        import { assertEqual, assertTruthy, assertFalsy } from 'scrml:test'
+    // The largest element of a tape; `not` for an empty tape (S472).
+    export fn maxOf(xs: number[]) -> number | not {
+        if (xs.length == 0) {
+            return not;
+        }
+        let m: number = xs[0];
+        for (const x of xs) {
+            m = max(m, x);
+        }
+        return m;
+    }
 
-        // round / floor / ceil
-        assertEqual(round(2.4), 2)
-        assertEqual(round(2.5), 3)
-        assertEqual(round(-2.5), -2)
-        assertEqual(floor(2.9), 2)
-        assertEqual(floor(-2.1), -3)
-        assertEqual(ceil(2.1), 3)
-        assertEqual(ceil(-2.9), -2)
+    // The WHOLE of `s` in base `radix` (2–36): an optional leading `-`, then
+    // digits of that base in either letter case, and nothing else (no
+    // trimming, no `+`, no `0x`); `not` otherwise, or outside ±(2^53−1).
+    // `parseInt("ff", 16)` → `255`; `parseInt("10px", 10)` → `not`.
+    export fn parseInt(s: string, radix: int) -> int | not {
+        return hostParseInt(s, radix);
+    }
 
-        // abs
-        assertEqual(abs(-5), 5)
-        assertEqual(abs(5), 5)
-        assertEqual(abs(0), 0)
+    // `number.parse(s)` (§14.13.4): the whole string; `not` otherwise.
+    export fn parseFloat(s: string) -> number | not {
+        return number.parse(s);
+    }
 
-        // min / max — scalar and spread forms
-        assertEqual(min(3, 1, 2), 1)
-        assertEqual(max(3, 1, 2), 3)
-        assertEqual(min(...[5, 2, 8]), 2)
-        assertEqual(max(...[5, 2, 8]), 8)
+    // `number.parse(s)` (§14.13.4): the whole string; `toNumber("")` → `not`.
+    export fn toNumber(s: string) -> number | not {
+        return number.parse(s);
+    }
 
-        // clamp
-        assertEqual(clamp(5, 0, 10), 5)
-        assertEqual(clamp(-3, 0, 10), 0)
-        assertEqual(clamp(99, 0, 10), 10)
-
-        // parseInt — radix-explicit
-        assertEqual(parseInt("42"), 42)
-        assertEqual(parseInt("0xFF", 16), 255)
-        assertEqual(parseInt("10px"), 10)
-        assertTruthy(isNaN(parseInt("abc")))
-
-        // parseFloat
-        assertEqual(parseFloat("3.14"), 3.14)
-        assertEqual(parseFloat("1.5kg"), 1.5)
-        assertTruthy(isNaN(parseFloat("abc")))
-
-        // toNumber — whole-value coercion
-        assertEqual(toNumber("42"), 42)
-        assertEqual(toNumber("3.14"), 3.14)
-        assertEqual(toNumber(""), 0)
-        assertTruthy(isNaN(toNumber("abc")))
-
-        // isNaN — no coercion
-        assertTruthy(isNaN(toNumber("abc")))
-        assertFalsy(isNaN(42))
-        assertFalsy(isNaN("42"))
+    // True when `x` is NaN (`Number.isNaN` — no coercion).
+    export fn isNaN(x: number) -> bool {
+        return hostIsNaN(x);
     }
 }
-</program>

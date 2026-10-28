@@ -1123,6 +1123,73 @@ export function atRead(xs, i) {
   return null;
 }
 
+// ---------------------------------------------------------------------------
+// s472 (boot-math-port) — the RETURN-POINT DECODE of a host-backed function
+// (SPEC §21.3.1; ruling:user-voice-scrml.md S472 "host function type, math
+// API, remaining review debt" item 1 — "the returned value is decoded against
+// [the wrapper's declared type] at that point", the boundary decode of
+// scrml-support/docs/deep-dives/typed-host-binding-f3-design-2026-10-27.md
+// §5.4). The value a host function returned must FIT the declared type; it is
+// never coerced:
+//   - `int`: a number, integral, within ±(2^53−1); `number`: a number; `string`:
+//     a string; `bool`: a boolean;
+//   - `T | not`: JS `null` / `undefined` is `not` (null); anything else is
+//     decoded as `T`;
+//   - a non-optional `T` receiving `null` / `undefined` is a mismatch ("no
+//     null" holds at the one door where JS nulls enter);
+//   - a thenable is a mismatch (a host binding is never a waiting value — a
+//     discarded host Promise would otherwise fail open).
+// A mismatch is the trap E-HOST-VALUE-MISMATCH-RT (§19.17): the DECLARATION is
+// wrong, not the call. `ty` is the printer's descriptor (print.scrml
+// hostTypeJs: `{ k: "int" | "number" | "string" | "bool" }` or
+// `{ k: "maybe", inner }`); `at` names the function and its host module.
+// ---------------------------------------------------------------------------
+const MAX_EXACT_INT = 9007199254740991; // 2^53 − 1
+
+function hostShow(v) {
+  if (v === null) return "null";
+  if (v === undefined) return "undefined";
+  if (typeof v === "string") return JSON.stringify(v);
+  if (typeof v === "number" || typeof v === "boolean") return String(v);
+  if (typeof v === "bigint") return String(v) + "n";
+  if (typeof v === "function") return "a function";
+  return "a " + (Array.isArray(v) ? "sequence" : typeof v);
+}
+
+function hostMismatch(v, want, at) {
+  throw new ScrmlTrap("E-HOST-VALUE-MISMATCH-RT", at + " returned " + hostShow(v) + " where its declared type is " + want + " — the declaration does not describe the host function", { value: hostShow(v), want, at });
+}
+
+function hostWant(ty) {
+  return ty.k === "maybe" ? hostWant(ty.inner) + " | not" : ty.k;
+}
+
+export function hostResult(v, ty, at) {
+  const isThenable = v !== null && (typeof v === "object" || typeof v === "function") && typeof v.then === "function";
+  if (isThenable) hostMismatch(v, hostWant(ty) + " (a host binding is not a waiting value)", at);
+  if (ty.k === "maybe") {
+    if (v === null || v === undefined) return null;
+    return hostResult(v, ty.inner, at);
+  }
+  switch (ty.k) {
+    case "int":
+      if (typeof v === "number" && Number.isInteger(v) && Math.abs(v) <= MAX_EXACT_INT) return v === 0 ? 0 : v;
+      break;
+    case "number":
+      if (typeof v === "number") return v;
+      break;
+    case "string":
+      if (typeof v === "string") return v;
+      break;
+    case "bool":
+      if (typeof v === "boolean") return v;
+      break;
+    default:
+      throw new Error("hostResult: unknown descriptor " + JSON.stringify(ty) + " (a compiler defect — check.scrml C-H2)");
+  }
+  return hostMismatch(v, hostWant(ty), at);
+}
+
 /** Structural equality (§45) for `==` on structs and sequences. */
 export function eq(a, b) {
   if (Object.is(a, b)) return true;

@@ -1,0 +1,26 @@
+// s472-boot-math-port fixture stdlib — `scrml:bad`: wrappers whose host file
+// (./host.js) returns values that do NOT fit the declared types, picked by `k`,
+// so the return-point decode (runtime.js hostResult, SPEC §21.3.1) is exercised
+// on each shape: a mismatch is the trap E-HOST-VALUE-MISMATCH-RT.
+import:host { anInt as hInt, maybeInt as hMaybeInt, aString as hString, aBool as hBool, aNumber as hNumber } from "./host.js";
+${
+    export fn anInt(k: int) -> int {
+        return hInt(k);
+    }
+
+    export fn maybeInt(k: int) -> int | not {
+        return hMaybeInt(k);
+    }
+
+    export fn aString(k: int) -> string {
+        return hString(k);
+    }
+
+    export fn aBool(k: int) -> bool {
+        return hBool(k);
+    }
+
+    export fn aNumber(k: int) -> number {
+        return hNumber(k);
+    }
+}

@@ -218,8 +218,8 @@ describe("#1045 F1 — client JS relative specifiers resolve on disk, and gated 
 
   test("gate sibling: a nested library artifact's stdlib import is gated as written", () => {
     const root = project({
-      "lib/top.scrml": 'import { round } from "scrml:math"\nexport fn r(x) { return round(x) }\n',
-      "lib/sub/m.scrml": 'import { round } from "scrml:math"\nexport fn r2(x) { return round(x) }\n',
+      "lib/top.scrml": 'import { round, Rounding } from "scrml:math"\nexport fn r(x) { return round(x, .HalfUp) }\n',
+      "lib/sub/m.scrml": 'import { round, Rounding } from "scrml:math"\nexport fn r2(x) { return round(x, .HalfUp) }\n',
     });
     const { r, out, gated: g } = build(root, ["lib/top.scrml", "lib/sub/m.scrml"], "dist", { mode: "library" });
     expect(fatal(r)).toEqual([]);

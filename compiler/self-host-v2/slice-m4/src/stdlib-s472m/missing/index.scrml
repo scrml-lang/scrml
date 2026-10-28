@@ -1,0 +1,8 @@
+// s472-boot-math-port fixture stdlib — `scrml:missing`: its host module does not
+// exist (the driver refuses it, E-IMPORT-006 — scripts/scrml-boot.ts hostFilesOf).
+import:host { f as hf } from "./nope.js";
+${
+    export fn f(x: int) -> int {
+        return hf(x);
+    }
+}

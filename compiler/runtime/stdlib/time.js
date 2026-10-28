@@ -27,7 +27,9 @@
 //   - formatISO(timestamp)                    → string
 //   - parseISO(str)                           → Date | null
 
-import { floor } from "./math.js";
+// S472: the raw, non-trapping host floor (math.js floorUnchecked) — the §41.18 `floor` traps on
+// NaN / ±∞ (E-INT-CONVERSION-RT); this file's clock arithmetic keeps its behaviour.
+import { floorUnchecked as floor } from "./math.js";
 
 // Current wall-clock time (Unix ms). NON-DETERMINISTIC — the sanctioned,
 // centralized wall-clock touch (the one place Date.now() is read). The

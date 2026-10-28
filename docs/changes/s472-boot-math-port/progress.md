@@ -1,0 +1,70 @@
+# progress — s472-boot-math-port
+
+Branch `s472-boot-math-port` from origin/main c8070b56a. Logs: `~/.cache/scrml-pa/s472/mp-*`.
+
+Rulings in force (scrml-support/user-voice-scrml.md S472): "stdlib host `.js` output location";
+"host function type, math API, remaining review debt" (items 1–3); S471 option A (host reach =
+`import:host`, intrinsics rejected).
+
+## Log
+
+- start: worktree clean; node_modules symlinked from main; `bun run pretest` OK; slice-m4 baseline
+  2729 pass / 0 fail (mp-base-m4.log).
+- bootstrap emission (self-host-v2):
+  - ast.scrml `AImportName.orig` (the exported name; `name` the local binding); parse.scrml sets it.
+  - link.scrml `hostLocOf(importer, from)` — the module (first segment after `scrml:`) and the file
+    inside its directory; `not` when the target climbs out, is not relative, or the importer is a
+    file-form module.
+  - core.scrml `HostFn { module, file, name, ret }`; `Fn.host: HostFn | not` (a host-backed Fn has
+    an EMPTY body).
+  - analyze.scrml: `hostWrappers` (phaseA, after fnsOf) — the wrapper rule: whole body
+    `return h(p1..pn);`, `h` an admitted binding of the file, params in order, declared return,
+    not `!`, not `server`, one wrapper per binding; non-scalar signature → E-BOOTSTRAP-UNSUPPORTED
+    at the wrapper. `resolveHostBinding` (resolveName, after locals): the admitted callee resolves
+    as `NFn(wrapper)` (the wrapper's signature IS the host type — the typer / effects / placement
+    see a call of the wrapper); every other use E-HOST-BINDING-USE. checkHostImport: the
+    E-BOOTSTRAP-UNSUPPORTED stop replaced by E-IMPORT-012 (outside the module dir) and
+    E-BOOTSTRAP-UNSUPPORTED for a `.ts` target; E-SCOPE-010 for a binding also declared in the file.
+  - lower.scrml: a host-backed FnInfo → Fn with `host` and an empty body. ingest + the M1 hand-built
+    cores carry `host: not`.
+  - check.scrml C-H1..C-H3.
+  - print.scrml `hostModules` / `hostImports` / `hostFnJs` (namespace import per host file,
+    `./_scrml/<module>/<file>`; `return rt.hostResult(hostmod$N.name(args), {k:…}, at)`);
+    print-server.scrml the same for the reached Fns.
+  - runtime.js `hostResult` (the F3 §5.4 return-point decode → ScrmlTrap E-HOST-VALUE-MISMATCH-RT);
+    server-runtime re-exports it.
+  - scripts/scrml-boot.ts: `hostFilesOf` (realpath inside the module dir else E-IMPORT-012; missing
+    file E-IMPORT-006; load the module and require each export to be a function else E-IMPORT-004);
+    compileFile clears and writes `<outDir>/_scrml/<module>/<file>`; dev serves those statically.
+  - slice-m1/host-files.js `copyHostFiles` (test harnesses: load-program, server-artifact-harness).
+- stdlib/math: index.scrml in the §66 dialect, the S469 API (+ `minOf`/`maxOf`, S472 item 3),
+  no `<program>` wrapper (S471 "ok to drop the <program> wrapper"), no `~{}` block (tests moved to
+  JS); stdlib/math/host.js the thin Math.* reach.
+- impl#1: compiler/runtime/stdlib/math.js on the same API (+ internal non-trapping
+  `floorUnchecked`/`ceilUnchecked` for auth.js/data.js/time.js — behaviour unchanged); the 8 test
+  callers of 1-arg `round` updated (`Rounding.HalfUp` where impl#1's E-VARIANT-AMBIGUOUS refuses the
+  bare `.HalfUp`); stdlib-math.test.js §A rewritten.
+- first commit attempts: pre-commit shard 0 killed (memory ceiling, then 1200 s timeout — host load 12–14
+  from sibling agents); `SCRML_HOOK_SHARDS=1` single-process run bailed on
+  unit/stdlib-shim-export-parity.test.js (the internal `floorUnchecked` / `ceilUnchecked` exports) —
+  allow-listed there with the reason.
+- SPEC: §21.3.1 "as if plain import / MAY be re-exported" struck; new §21.3.1.1 (output location,
+  E-IMPORT-012, the wrapper rule + E-HOST-BINDING-USE, the return-point decode +
+  E-HOST-VALUE-MISMATCH-RT, what crosses on the bootstrap, a trap-coded host throw, impl status);
+  §21.6 E-IMPORT-012 row; §19.17 three traps; §34 rows E-IMPORT-012, E-HOST-BINDING-USE,
+  E-HOST-VALUE-MISMATCH-RT, E-INT-CONVERSION-RT (now emitted); §41.18 min/max 2-arg + minOf/maxOf,
+  abs/clamp/isNaN typed, the Nominal note struck, the S472 amendment; §7.3 PA-reading note.
+  SPEC-INDEX regenerated (+ the §21 row); severity.scrml regenerated; s34-census --check-new PASS.
+- docs/known-gaps.md: g-boot-import-host-emit-unspecified-s472 + g-stdlib-math-port-api-fork-s472
+  RESOLVED; g-boot-no-host-bridge-s471 + g-boot-stdlib-none-compiles-s471 NARROWED; state.ts --write
+  (master-list.md already current — nothing to revert).
+
+## Red-proof (on base c8070b56a: base implementation files, the new tests + harness)
+
+Copy at ~/.cache/scrml/review/s472-mp-red (scratchpad red.sh: `git show c8070b56a:<impl file>`).
+- bootstrap (math-port-s472 + import-host-s472): 34 fail / 22 pass
+  (~/.cache/scrml-pa/s472/mp-red-boot.log). The passes on base are pins, not the PR's behaviour:
+  15 pre-existing import-host tests, the 4 host.js unit tests (a new file), the adopter E-IMPORT-008
+  pin, and two refusals base already gave as a blanket E-BOOTSTRAP-UNSUPPORTED (a non-scalar wrapper,
+  a `.ts` target).
+- impl#1 (stdlib-math.test.js): 18 fail / 16 pass (~/.cache/scrml-pa/s472/mp-red-impl1.log).

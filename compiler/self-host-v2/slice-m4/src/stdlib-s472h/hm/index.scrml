@@ -1,6 +1,6 @@
 // s472 fixture stdlib — `scrml:hm`: a module whose source holds an `import:host`
 // declaration (§21.3.1). The bootstrap admits it (a stdlib file, file top, tag
-// `host`) but does not yet emit a host module, so the module is withdrawn.
+// `host`) and, since s472-boot-math-port, emits it: `fl` is its wrapper.
 import:host { floor as hfloor } from "./h.js";
 ${
     export fn fl(x: int) -> int {

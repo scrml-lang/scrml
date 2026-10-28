@@ -44,7 +44,7 @@
 ${
     import { Sym, Type, SeqAt, LengthGrant, SeqGrants, FieldDef, VariantDef, TypeDef, FieldRef, InstRef,
              Literal, PrimOp, EditKind, Check, FieldMode, FieldRole, GrantSet, Edge, TransitionGraph,
-             DeclKind, HostCall, SeqFn, BindKind, Validator, SurfaceProp, ValidityOf, Persist, PersistStore, CoreProgram,
+             DeclKind, HostCall, HostFn, SeqFn, BindKind, Validator, SurfaceProp, ValidityOf, Persist, PersistStore, CoreProgram,
              SqlKind, SqlTables, SqlColumns, Db, Driver,
              CssPart, CssDecl, StyleRule, CssImport, ScopeSheet,
              mkSym, noGrants, replaceGrant, typeDefSym, validityInst, validityDecl } from "./core.scrml"
@@ -55,7 +55,7 @@ ${
              AHow, AHandled, AArm, APat, ABind, AArmBody, AFail, AFor, AForHead, AIterSrc, AForBound, ALift,
              ACss, ACssItem, ACssRule, ACssDecl, ACssPart, ACssRef, mkSpan, newDiag } from "./ast.scrml"
     import { Severity } from "./severity.scrml"
-    import { importTarget, importsOfItems, hostImportsOfItems, hostTagOf, isStdlibPath } from "./link.scrml"
+    import { importTarget, importsOfItems, hostImportsOfItems, hostTagOf, isStdlibPath, HostLoc, hostLocOf } from "./link.scrml"
     import { WireBuild, WireTable, wireBuild, hasFixedLength } from "./codec.scrml"
     import { SqlFacts, SlotQuote, sqlFacts, slotInLiteral, txControl, txControlAware } from "./sql.scrml"
     import { FxAtom, ownAtom, closeDim, witnessOf, atomChain } from "./effects.scrml"
@@ -175,9 +175,13 @@ ${
     // `Transport` enum for a callee not declared `!`. `not`: not serverOwn, or
     // its enum has a `Transport` variant of another shape (E-ERROR-016 at each
     // client call site), or its error type is not an enum (E-ERROR-011).
+    // s472 (boot-math-port) — `host`: the function is HOST-BACKED (fnsOf
+    // `hostWrapperOf`, the §21.3.1 wrapper rule): its body is the one host call
+    // it wraps, and Core keeps its signature and the host reference (core.scrml
+    // HostFn) instead of a body. `not`: an ordinary function.
     export type FnInfo:struct = { nid: int, span: ASpan, sym: Sym, name: string, file: string, exported: boolean,
                                   pure: boolean, arity: int, ret: Type | not, failable: boolean, err: Sym | not,
-                                  serverOwn: boolean, rerr: Sym | not }
+                                  serverOwn: boolean, rerr: Sym | not, host: HostFn | not }
 
     // A classified write (§6.2): the capability, the instance, the edit, the check.
     export type WriteFact:struct = { cap: Sym, inst: InstRef, edit: EditKind, check: Check }
@@ -738,6 +742,7 @@ ${
         sqlErrorSym: Sym,       // s451 (Ue): the built-in `SqlError` enum (§19.8.1 — every query's error type)
         sceSym: Sym,            // s454 (U1b): the built-in `ServerCallError` enum (§19.9.10)
         voids: int[],           // s469 (#1471 r3): the VOID functions (voidFns) — a call of one has type `void`
+        hostSites: HostSite[],  // s472 (boot-math-port): every wrapper-shaped host call, judged (hostWrappers)
     }
 
     type RTypeInfos:struct = { ts: TypeInfo[], st: AS }
@@ -3900,12 +3905,238 @@ ${
                 const info: FnInfo = { nid: af.nid, span: af.span, sym: r.s, name: af.name, file: f.path,
                                        exported: af.exported, pure: af.pure, arity: arity, ret: ret,
                                        failable: af.failable, err: re.err,
-                                       serverOwn: af.server || sqlsInBlock(af.body).length > 0, rerr: not }
+                                       serverOwn: af.server || sqlsInBlock(af.body).length > 0, rerr: not, host: not }
                 st = addBind(st, af.nid, BindFact.BBind(r.s))
                 out = out.concat([{ info: info, f: af }])
             }
         }
         return { fs: out, st: st }
+    }
+
+    // =========================================================================
+    // s472 (boot-math-port) — HOST-BACKED FUNCTIONS: the §21.3.1 WRAPPER RULE.
+    // ruling:user-voice-scrml.md S472 "host function type, math API, remaining
+    // review debt" item 1: "an `import:host` binding is usable ONLY as the
+    // direct callee of a `return` in a fully typed scrml function; the
+    // wrapper's signature IS the host function's type, and the returned value
+    // is decoded against it at that point". Read here (SPEC §21.3.1): the
+    // wrapper's WHOLE body is `return h(p1, …, pn);` — `h` an admitted host
+    // binding of the function's own file, `p1 … pn` the function's own
+    // parameters in declaration order (so the host function receives exactly
+    // the wrapper's arguments, and its type is the wrapper's signature and
+    // nothing else) — and the function writes its return type, is not `!` and
+    // not `server`. One wrapper per binding (a host function has one type).
+    // Every other use of a host binding is E-HOST-BINDING-USE (resolveName).
+    // The bootstrap carries scalars across the boundary: parameters `int` /
+    // `number` / `string` / `bool`, a result of one of those or its `T | not`;
+    // any other wrapper type is E-BOOTSTRAP-UNSUPPORTED at the wrapper (F3 §5.4
+    // also decodes enums, structs and tapes — not built here).
+    // =========================================================================
+    // A host binding's call site as the rule judged it: `nid` the callee name's
+    // node, `wrapper` the function it stands in. `ok`: the call IS the host call.
+    // Not ok: `why` says why it is not (E-HOST-BINDING-USE at the use), or is ""
+    // when the wrapper already carries the report (an unsupported type).
+    type HostSite:struct = { nid: int, wrapper: Sym, ok: boolean, why: string }
+    type RHostFns:struct = { fs: FnSrc[], sites: HostSite[], st: AS }
+    type CallParts:struct = { callee: AExpr, args: AExpr[] }
+
+    fn hostWrappers(files: FileAst[], te: TypeEnv, fs0: FnSrc[], st0: AS) -> RHostFns {
+        let st: AS = st0
+        let out: FnSrc[] = []
+        let sites: HostSite[] = []
+        let wrapped: string[] = []   // the bindings already wrapped, as "<file> <local>"
+        for (const fs of fs0) {
+            let next: FnSrc = fs
+            const c: CallParts | not = wholeReturnCall(fs.f.body)
+            if (c is given) {
+                const h: string = exprName(c.callee)
+                const b: AImport | not = hostImportBinding(files, fs.info.file, h)
+                if (b is given && h != "" && !paramNamed(fs.f.params, h) && hostImportAdmitted(fs.info.file, b)) {
+                    const key: string = fs.info.file + " " + h
+                    const why: string = wrapperShapeWhy(fs, c, h, wrapped.indexOf(key) >= 0)
+                    if (why != "") {
+                        sites = sites.concat([{ nid: c.callee.nid, wrapper: fs.info.sym, ok: false, why: why }])
+                    } else if (fs.info.ret is not) {
+                        // a written return type that was refused carries its own report
+                        sites = sites.concat([{ nid: c.callee.nid, wrapper: fs.info.sym, ok: false, why: "" }])
+                    } else {
+                        wrapped = wrapped.concat([key])
+                        const unsup: string = wrapperTypeWhy(teAt(te, fs.info.file), fs, st)
+                        if (unsup != "") {
+                            st = addDiag(st, fs.info.file, fs.f.span, "E-BOOTSTRAP-UNSUPPORTED", "`" + fs.info.name + "` wraps the host function `" + h + "` (§21.3.1), but " + unsup + " — the bootstrap carries only `int`, `number`, `string` and `bool` values (and a `T | not` result of one) across the host boundary")
+                            sites = sites.concat([{ nid: c.callee.nid, wrapper: fs.info.sym, ok: false, why: "" }])
+                        } else {
+                            const loc: HostLoc | not = hostLocOf(fs.info.file, b.from)
+                            const rt: Type | not = fs.info.ret
+                            if (loc is given && rt is given) {
+                                const hf: HostFn = { module: loc.module, file: loc.file, name: hostOrigOf(b, h), ret: rt }
+                                next = { info: fnWithHost(fs.info, hf), f: fs.f }
+                                sites = sites.concat([{ nid: c.callee.nid, wrapper: fs.info.sym, ok: true, why: "" }])
+                            }
+                        }
+                    }
+                }
+            }
+            out = out.concat([next])
+        }
+        return { fs: out, sites: sites, st: st }
+    }
+
+    fn fnWithHost(i: FnInfo, h: HostFn) -> FnInfo {
+        return { nid: i.nid, span: i.span, sym: i.sym, name: i.name, file: i.file, exported: i.exported,
+                 pure: i.pure, arity: i.arity, ret: i.ret, failable: i.failable, err: i.err,
+                 serverOwn: i.serverOwn, rerr: i.rerr, host: h }
+    }
+
+    // Why the function `fs` (whose whole body is `return h(…)`) is not the
+    // wrapper of `h`; "" when its SHAPE is the rule's.
+    fn wrapperShapeWhy(fs: FnSrc, c: CallParts, h: string, twice: boolean) -> string {
+        if (fs.f.ret is not) return "`" + fs.info.name + "` does not declare its return type — a host binding's wrapper is fully typed: its signature IS the host function's type"
+        if (fs.f.failable) return "`" + fs.info.name + "` is declared `!` — a host function's failure is not a scrml error value, so its wrapper cannot be failable"
+        if (fs.f.server) return "`" + fs.info.name + "` is a `server` function — a host binding's wrapper is an ordinary function, placed wherever it is called"
+        if (twice) return "`" + h + "` is already wrapped by another function in this file — a host function has one type, so it has one wrapper"
+        if (c.args.length != fs.f.params.length) return "the call passes " + c.args.length + " argument(s) and `" + fs.info.name + "` takes " + fs.f.params.length + " — the host function receives exactly its wrapper's parameters, in order"
+        let i: int = 0
+        while (i < c.args.length) {
+            if (exprName(c.args[i]) != fs.f.params[i].name) return "argument " + (i + 1) + " is not the parameter `" + fs.f.params[i].name + "` — the host function receives exactly its wrapper's parameters, in order (its type is the wrapper's signature)"
+            i = i + 1
+        }
+        return ""
+    }
+
+    // Why a wrapper's signature does not cross the host boundary in the
+    // bootstrap; "" when it does (every parameter a scalar, the result a scalar
+    // or a scalar's `T | not`).
+    fn wrapperTypeWhy(te: TypeEnv, fs: FnSrc, st: AS) -> string {
+        for (const p of fs.f.params) {
+            const at: AType | not = p.ty
+            if (at is given) {
+                const rt: RType = resolveType(te, at, st)
+                if (!rt.unresolved && !scalarType(rt.t)) return "its parameter `" + p.name + "` is a `" + typeName(rt.t) + "`"
+            }
+        }
+        const r: Type | not = fs.info.ret
+        if (r is given) {
+            const inner: Type | not = maybeInner(r)
+            if (inner is given) {
+                if (!scalarType(inner)) return "it returns a `" + typeName(r) + "`"
+            } else if (!scalarType(r)) {
+                return "it returns a `" + typeName(r) + "`"
+            }
+        }
+        return ""
+    }
+
+    fn scalarType(t: Type) -> boolean {
+        const k: int = kindOf(t)
+        return k >= 0 && k <= 3
+    }
+
+    fn paramNamed(ps: AParam[], name: string) -> boolean {
+        for (const p of ps) {
+            if (p.name == name) return true
+        }
+        return false
+    }
+
+    // The call a block consists of: its ONE statement is `return <call>;`.
+    fn wholeReturnCall(b: ABlock) -> CallParts | not {
+        if (b.stmts.length != 1) return not
+        const k: AStmtK = b.stmts[0].k
+        const e: AExpr | not = match k {
+            .Return(e: x) :> x
+            .Eval(e: x) :> not
+            .Local(name: n) :> not
+            .If(cond: x) :> not
+            .Given(name: n) :> not
+            .EffectStmt(w: w) :> not
+            .Defer(body: d) :> not
+            .Fail(f: x) :> not
+            .For(f: lf) :> not
+            .Break(label: x) :> not
+            .Continue(label: x) :> not
+            .Lift(what: w) :> not
+        }
+        if (e is not) return not
+        return callParts(e)
+    }
+
+    fn callParts(e: AExpr) -> CallParts | not {
+        const k: AExprK = e.k
+        return match k {
+            .Call(callee: c, args: xs) :> mkCallParts(c, xs)
+            .Name(name: n) :> not
+            .At(name: n) :> not
+            .AtItem :> not
+            .Num(raw: r) :> not
+            .Str(v: s) :> not
+            .Bool(v: b) :> not
+            .NotLit :> not
+            .Recovered :> not
+            .Variant(name: n) :> not
+            .Member(obj: o) :> not
+            .Unary(op: o) :> not
+            .Binary(op: o) :> not
+            .Ternary(test: t) :> not
+            .Assign(target: t) :> not
+            .ArrayLit(elems: es) :> not
+            .ObjectLit(props: ps) :> not
+            .Spread(e: sx) :> not
+            .Index(obj: ix) :> not
+            .Lambda(params: lp) :> not
+            .Sql(q: q) :> not
+            .Handled(h: x) :> not
+            .Template(quasis: qs) :> not
+        }
+    }
+
+    fn mkCallParts(c: AExpr, xs: AExpr[]) -> CallParts { return { callee: c, args: xs } }
+
+    // The `import:<tag>` declaration of `file` that binds `local` — the LAST
+    // one (§41.7: a later import of a name wins); `not` when none does.
+    fn hostImportBinding(files: FileAst[], file: string, local: string) -> AImport | not {
+        let found: AImport | not = not
+        for (const f of files) {
+            if (f.path == file) {
+                for (const h of hostImportsOfItems(f.items)) {
+                    for (const n of h.names) {
+                        if (n.name == local) found = h
+                    }
+                }
+            }
+        }
+        return found
+    }
+
+    // The host module's export name `local` binds in the declaration `h`.
+    fn hostOrigOf(h: AImport, local: string) -> string {
+        let out: string = local
+        for (const n of h.names) {
+            if (n.name == local) out = n.orig
+        }
+        return out
+    }
+
+    // A host-import declaration analyze ADMITS (checkHostImport reports
+    // nothing for it): at file top, the `host` tag, a JavaScript module
+    // (`.js` / `.mjs` — the bootstrap's artifacts are JavaScript; a `.ts`
+    // module is refused, E-BOOTSTRAP-UNSUPPORTED), in a stdlib file, and inside
+    // that file's module directory (link.scrml hostLocOf; else E-IMPORT-012).
+    fn hostImportAdmitted(file: string, h: AImport) -> boolean {
+        return h.top && hostTagOf(h) == "host" && hostEmitSource(h.from) && isStdlibPath(file) && hostLocOf(file, h.from) is given
+    }
+
+    fn hostEmitSource(from: string) -> boolean {
+        return from.endsWith(".js") || from.endsWith(".mjs")
+    }
+
+    // The judged call site of a host binding at callee node `nid`; `not` when
+    // the use is not the callee of a wrapper-shaped `return`.
+    fn hostSiteAt(g: Globals, nid: int) -> HostSite | not {
+        for (const s of g.hostSites) {
+            if (s.nid == nid) return s
+        }
+        return not
     }
 
     // s451 (Ue) — a `!` function's error type. §19.4.2 "`!` without
@@ -4012,7 +4243,7 @@ ${
     fn withRemoteErr(i: FnInfo, rerr: Sym | not) -> FnInfo {
         return { nid: i.nid, span: i.span, sym: i.sym, name: i.name, file: i.file, exported: i.exported,
                  pure: i.pure, arity: i.arity, ret: i.ret, failable: i.failable, err: i.err,
-                 serverOwn: i.serverOwn, rerr: rerr }
+                 serverOwn: i.serverOwn, rerr: rerr, host: i.host }
     }
 
     // Does enum `e` declare a variant named `Transport`: -1 none; 0 exactly
@@ -4386,8 +4617,12 @@ ${
         const te0: TypeEnv = { stubs: rs.stubs, declNames: declNames, declSyms: declSyms, declFiles: declFiles, link: lk, file: entry }
         const rt: RTypeInfos = typeInfos(rs.stubs, te0, st)
         st = rt.st
-        const rf0: RFns = fnsOf(files, te0, st)
-        st = rf0.st
+        const rf00: RFns = fnsOf(files, te0, st)
+        st = rf00.st
+        // s472 (boot-math-port): the host-backed functions (the §21.3.1 wrapper rule)
+        const rh: RHostFns = hostWrappers(files, te0, rf00.fs, st)
+        st = rh.st
+        const rf0: RFns = { fs: rh.fs, st: st }
         // s454 (U1b): the failure enum of a client call of each server-triggered function
         const rr: RRemoteEnums = remoteEnums(rf0.fs, rt.ts, builtinSym(rs.stubs, serverCallErrorName()), st)
         st = rr.st
@@ -4439,7 +4674,7 @@ ${
         decls = rc.decls
         const g: Globals = { program: program, entry: entry, te: te0, types: allTypes, decls: decls, fns: rf.fs, handles: handles, files: files,
                              errorSym: builtinSym(rs.stubs, "Error"), sqlErrorSym: builtinSym(rs.stubs, "SqlError"),
-                             sceSym: builtinSym(rs.stubs, serverCallErrorName()), voids: voidFns(rf.fs, lk) }
+                             sceSym: builtinSym(rs.stubs, serverCallErrorName()), voids: voidFns(rf.fs, lk), hostSites: rh.sites }
         return { g: g, st: st }
     }
 
@@ -4989,6 +5224,9 @@ ${
             if (l.narrowed is given) return { x: { ty: l.ty, inst: l.narrowed, iDecl: l.nDecl, maybe: false }, st: st2 }
             return plain(l.ty, st2)
         }
+        // s472 (boot-math-port): an `import:host` binding of this file (§21.3.1)
+        const hb: AImport | not = hostImportBinding(env.g.files, env.file, name)
+        if (hb is given) return resolveHostBinding(env, e, name, hb, st)
         // §66.5.2: inside a declaration's renders / initializers, its fields are
         // bare read-only projections of the current instance.
         const d: DeclSrc | not = ctxDecl(env)
@@ -5020,6 +5258,30 @@ ${
         // s471: a name a refused import brings is that import's failure (checkImports), not also undeclared
         if (importRefusesName(env.g, env.file, name)) return plain(not, st)
         return diagX(env, e, "E-SCOPE-001", "`" + name + "` is not declared" + elsewhereNote(env.g.te.link, env.file, NameKind.KFn, false, name), st)
+    }
+
+    // s472 (boot-math-port) — a use of the `import:host` binding `name` (§21.3.1,
+    // the S472 wrapper rule; hostWrappers). The callee of an admitted wrapper's
+    // `return` IS the host call: it names the wrapper itself (the wrapper's
+    // signature is the host function's type, so the call is typed, checked and
+    // placed as a call of the wrapper; lower replaces the wrapper's body by the
+    // host reference, core.scrml HostFn). Any other use — a bare reference, a
+    // call anywhere else, a call that does not pass the wrapper's parameters —
+    // is E-HOST-BINDING-USE. A declaration analyze refuses (checkHostImport)
+    // owns its failure: its names do not also report here.
+    fn resolveHostBinding(env: Env, e: AExpr, name: string, hb: AImport, st: AS) -> RX {
+        if (!hostImportAdmitted(env.file, hb)) return plain(not, st)
+        const site: HostSite | not = hostSiteAt(env.g, e.nid)
+        if (site is given) {
+            if (site.ok && env.fx.fnRef == e.nid) return plain(not, addName(st, e.nid, NameFact.NFn(site.wrapper)))
+            if (!site.ok && site.why == "") return plain(not, st)
+            if (!site.ok) return diagX(env, e, "E-HOST-BINDING-USE", hostUseText(name) + " Here " + site.why + ".", st)
+        }
+        return diagX(env, e, "E-HOST-BINDING-USE", hostUseText(name), st)
+    }
+
+    fn hostUseText(name: string) -> string {
+        return "`" + name + "` is an `import:host` binding — it is usable ONLY as the direct callee of the `return` that is the whole body of a fully typed function, passing that function's parameters in order: `fn f(x: number) -> int { return " + name + "(x); }` (§21.3.1). Call the wrapper instead."
     }
 
     // A READ through `@h`. RULED S437 (bryan: "yes, reads require narrowing"):
@@ -24770,7 +25032,7 @@ ${
                     }
                 }
             }
-            for (const h of hostImportsOfItems(f.items)) { st = checkHostImport(st, f.path, h) }
+            for (const h of hostImportsOfItems(f.items)) { st = checkHostImport(g, st, f.path, h) }
         }
         return st
     }
@@ -24794,11 +25056,13 @@ ${
     //     adopter project `import:host` is E-IMPORT-008 whatever the entry
     //     says"). Stdlib-ness is the file's path in the build (link.scrml
     //     `isStdlibPath`), never its text.
-    // A declaration that passes every rule is still refused, by name: the
-    // bootstrap does not yet load or emit a host module (where the host file
-    // lands in the output and what type a host binding has are open — see
-    // docs/changes/s472-boot-import-host-math/progress.md).
-    fn checkHostImport(st0: AS, file: string, h: AImport) -> AS {
+    // s472 (boot-math-port): a declaration that passes every rule is EMITTED —
+    // E-IMPORT-012 if its module is not inside its stdlib module's directory
+    // (the S472 output-location ruling), E-BOOTSTRAP-UNSUPPORTED for a
+    // TypeScript module; its bindings are usable only under the wrapper rule
+    // (hostWrappers / resolveHostBinding); a binding's name also declared in the
+    // file is E-SCOPE-010 (§7.6, as for a plain import — linkage).
+    fn checkHostImport(g: Globals, st0: AS, file: string, h: AImport) -> AS {
         let st: AS = st0
         const tag: string = hostTagOf(h)
         const shown: string = "import:" + tag
@@ -24818,10 +25082,32 @@ ${
             failed = true
             st = addDiag(st, file, h.span, "E-IMPORT-008", "`" + shown + "` is used in a file outside the `[capabilities] host-import` allow-list — `import:host` is the stdlib's host bridge, admitted only in stdlib files (§21.3.1, §22.13: an adopter project has no opt-in); reach host JavaScript through a relative `.js` import (§21.3)")
         }
+        // s472 (boot-math-port): an admitted declaration is emitted — its module is
+        // copied to `<outputDir>/_scrml/<module>/<file>` and imported from there by
+        // both artifacts (§21.3.1, ruling:user-voice-scrml.md S472 "stdlib host `.js`
+        // output location"): it must lie inside its stdlib module's directory, and be
+        // JavaScript (the bootstrap prints JavaScript, which cannot import TypeScript)
         if (!failed) {
-            st = addDiag(st, file, h.span, "E-BOOTSTRAP-UNSUPPORTED", "`import:host` from `" + h.from + "` — the declaration is admitted here (§21.3.1), but the bootstrap does not yet load or emit a host module, so none of its names are bound")
+            if (hostLocOf(file, h.from) is not) {
+                st = addDiag(st, file, h.span, "E-IMPORT-012", "`import:host` target `" + h.from + "` is not inside this stdlib module's directory — a stdlib module's host file is copied to `<outputDir>/_scrml/<module>/<file>`, so it SHALL lie in the module's own directory (a relative path that does not climb out of it; a file-form module `scrml:NAME.scrml` has no directory to hold one) (§21.3.1)")
+            } else if (!hostEmitSource(h.from)) {
+                st = addDiag(st, file, h.span, "E-BOOTSTRAP-UNSUPPORTED", "`import:host` target `" + h.from + "` is TypeScript — the bootstrap's artifacts are JavaScript modules, which import a `.js` / `.mjs` host module only")
+            }
+        }
+        for (const n of h.names) {
+            if (hostNameCollides(g, file, n.name)) {
+                st = addDiag(st, file, n.span, "E-SCOPE-010", "`" + n.name + "` is bound by `" + shown + "` and also declared in this file — a name is bound once in file scope (duplicate binding in file scope, §7.6); rename one with `as`")
+            }
         }
         return st
+    }
+
+    // `name` is declared in `file` (a type, a function or a user declaration).
+    fn hostNameCollides(g: Globals, file: string, name: string) -> boolean {
+        for (const o of g.te.link.own) {
+            if (o.file == file && o.name == name) return true
+        }
+        return false
     }
 
     // A `host` import's module (§21.3.1 — "a host-language module (TypeScript
@@ -24885,7 +25171,8 @@ ${
         const paths: string[] = filePaths(g.files)
         for (const f of g.files) {
             if (f.path == file) {
-                // s472: every host import is refused today (checkHostImport) — its names do not cascade
+                // s472: a host binding is resolved by resolveHostBinding (before this is reached); a
+                // name of a host import that never reaches it (a nested one) does not cascade either
                 for (const h of hostImportsOfItems(f.items)) {
                     for (const hn of h.names) {
                         if (hn.name == name) return true

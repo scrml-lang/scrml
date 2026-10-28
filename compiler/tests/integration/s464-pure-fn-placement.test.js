@@ -124,7 +124,7 @@ describe("s464 — a plain fn bound to a const inside a server function", () => 
 
 const SHOP = `<program db="./shop.db">
 \${
-  import { round } from 'scrml:math'
+  import { round, Rounding } from 'scrml:math'
   import { now } from 'scrml:time'
 
   type Line:struct = { sku: string, qty: int, cents: int }
@@ -132,7 +132,7 @@ const SHOP = `<program db="./shop.db">
 
   fn lineTotal(l: Line) -> int { return l.qty * l.cents }
   fn subtotal(lines: Line[]) -> int { return lines.reduce((a, l) => a + lineTotal(l), 0) }
-  fn tax(cents: int) -> int { return round(cents * 0.08) }
+  fn tax(cents: int) -> int { return round(cents * 0.08, Rounding.HalfUp) }
   fn total(lines: Line[]) -> int { return subtotal(lines) + tax(subtotal(lines)) }
 
   function checkout(lines: Line[])! -> CartError {
