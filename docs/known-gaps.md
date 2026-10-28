@@ -31,8 +31,8 @@
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 262 | 5 |
-| MED | 699 | 8 |
-| LOW | 535 | 0 |
+| MED | 698 | 8 |
+| LOW | 537 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
 
@@ -444,10 +444,22 @@ Survey table: `docs/changes/s471-bootstrap-stdlib-import/progress.md`. `md` is c
 <!-- @gap id=g-boot-no-host-bridge-s471 sev=HIGH status=open locus=compiler/self-host-v2/analyze.scrml(member-call allowlist)+SPEC(§23.2.4 _{} is server-only; §21.3.1 import:host limited to stdlib/compiler/**) prov=dispatch:s471-bootstrap-stdlib-import(survey) -->
 ### g-boot-no-host-bridge-s471 — the bootstrap has no `_{}` / `import:host` / host-global surface, and SPEC gives client-capable stdlib modules (format/Intl, math, time, regex, random, router) no sanctioned host reach: §23 `_{}` is server-only and `import:host` admits only `stdlib/compiler/**` — `NEW S471; HIGH; open (owner question)`
 
-<!-- @gap id=g-boot-flat-link-namespace-s471 sev=MED status=open locus=compiler/self-host-v2/analyze.scrml(fnNamed — "the bootstrap links one namespace") prov=dispatch:s471-bootstrap-stdlib-import;review:S471-stdlib(F1,F2; ~/.cache/scrml/review/s471-stdlib/probes p2,p3,t2,s1,s6) -->
-### g-boot-flat-link-namespace-s471 — (fail-open) the export/import boundary is not enforced at use sites: any function or type of ANY linked file — exported-but-not-imported, or not exported at all — is usable without importing it (base too); with `scrml:` modules linked this reaches stdlib internals; and a user library's private name colliding with a stdlib private name withdraws the stdlib module with a stdlib-located "does not compile" error — `NEW S471; MED; RESOLVED S471`
+<!-- @gap id=g-boot-flat-link-namespace-s471 sev=MED status=resolved resolved-by=s472-boot-link-visibility locus=compiler/self-host-v2/analyze.scrml(fnNamed — "the bootstrap links one namespace") prov=dispatch:s471-bootstrap-stdlib-import;review:S471-stdlib(F1,F2; ~/.cache/scrml/review/s471-stdlib/probes p2,p3,t2,s1,s6) -->
+### g-boot-flat-link-namespace-s471 — (fail-open) the export/import boundary is not enforced at use sites: any function or type of ANY linked file — exported-but-not-imported, or not exported at all — is usable without importing it (base too); with `scrml:` modules linked this reaches stdlib internals; and a user library's private name colliding with a stdlib private name withdraws the stdlib module with a stdlib-located "does not compile" error — `NEW S471; MED; RESOLVED S472 (s472-boot-link-visibility)`
 
 Not reachable with the real stdlib today (all 22 withdrawn); live the moment one module compiles. Enforce visibility before the first stdlib port lands.
+
+> **RESOLVED S472 (s472-boot-link-visibility).** analyze.scrml builds each file's SCOPE in phase A (`linkage`): the names the file declares, then each name an import brings from a file that EXPORTS it (§21.3). Every by-name lookup of a function, type or user declaration (`fnNamed`, `declNamed`, `stubNamed` / `declTypeNamed`, the return-inference `inferCall`, `voidFns`, the bare-variant search) resolves through `scopeFrom` to a (file, name) pair — never the first of that name. A name declared in another file and not imported is refused at the use, saying where it is declared: E-SCOPE-001 (a function, a user-declaration tag — never read as an unknown HTML element) / E-TYPE-UNKNOWN (a type annotation). Private names in different files no longer collide (the cross-file function and type refusals are gone; the typer's guard (ii) is retired and argument checks find THE callee by node); two server functions of one name get distinct route constants (print.scrml `routeName`). A name a file declares and imports is E-SCOPE-010 (§7.6); two imports of one name: the later wins, W-IMPORT-001 (§41.7). Kept: two USER DECLARATIONS of one name in two files are still refused — the CSS scope key is the bare name (`g-boot-component-scope-key-bare-name-s472`). Tests: compiler/self-host-v2/slice-m4/visibility-s472.test.js (21, red on base 15/21) over the review probes p2 / p3 / t2 and a fixture stdlib `scrml:vis`.
+
+<!-- @gap id=g-boot-component-scope-key-bare-name-s472 sev=LOW status=open locus=compiler/self-host-v2/analyze.scrml(dupDecls)+lower.scrml(cssRootAttrs — `data-scrml` = d.sym.hint)+SPEC(§9.1 DQ-7 `data-scrml="ConstructorName"`) prov=dispatch:s472-boot-link-visibility -->
+### g-boot-component-scope-key-bare-name-s472 — two user declarations (components) of one name in two files are still refused (E-BOOTSTRAP-UNSUPPORTED) after s472's file scoping, because a component's CSS scope key is its bare name (§9.1 DQ-7 stamps `data-scrml="ConstructorName"` and scopes `@scope ([data-scrml="<name>"])`), so two same-named components would share one style scope; the SPEC does not say how two same-named components from different modules keep apart — `NEW S472; LOW; open (fails closed; owner question)`
+
+Uses resolve per file already (`declNamed`); only the output key is shared. Fix needs a ruling: e.g. the key carries the declaring module when two components share a name.
+
+<!-- @gap id=g-boot-type-unknown-code-s472 sev=LOW status=open locus=compiler/self-host-v2/analyze.scrml(resolveTypeName — "E-TYPE-UNKNOWN") prov=dispatch:s472-boot-link-visibility;spec:§14.1.2 -->
+### g-boot-type-unknown-code-s472 — the bootstrap reports an unresolved type name as `E-TYPE-UNKNOWN` (no §34 row, fail-closed Error) where §14.1.2 / §34 name `E-TYPE-UNKNOWN-NAME` — now also the code for a type declared in another file but not imported — `NEW S472; LOW; open (right refusal, wrong code)`
+
+Renaming touches 17 test pins and conformance grading; left for its own lane.
 
 <!-- @gap id=g-boot-import-codes-and-alias-s471 sev=LOW status=open locus=compiler/self-host-v2/analyze.scrml(importRefusal)+parse.scrml(parseImport) prov=dispatch:s471-bootstrap-stdlib-import;review:S471-stdlib(F3) -->
 ### g-boot-import-codes-and-alias-s471 — `scrml:nope` (no such module) is E-BOOTSTRAP-UNSUPPORTED where §41.5 / §41.11 name E-IMPORT-006; `import { a as b }` reads `as` and `b` as imported names (E-IMPORT-004, wrong code); a printer refusal caused by stdlib code carries no file — `NEW S471; LOW; open (fails closed)`
