@@ -296,6 +296,27 @@ ${
         return []
     }
 
+    // s472 r1 C-V2 — the mirror of C-V1: a `Lit(Variant)` value names a UNIT variant
+    // of an enum of the program. A payload variant's value is a VariantOf; a
+    // unit-shaped literal of one is a value no arm of its enum matches.
+    fn checkLitVariant(p: CoreProgram, l: Literal) -> string[] {
+        return match l {
+            .Variant(enumSym: es, idx: i) :> litVariantProblem(p, es, i)
+            .Int :> []
+            .Num :> []
+            .Str :> []
+            .Bool :> []
+            .Absent :> []
+        }
+    }
+
+    fn litVariantProblem(p: CoreProgram, es: Sym, idx: int) -> string[] {
+        const n: int = variantArityOf(p, es, idx)
+        if (n < 0) return ["C-V2: a Lit(Variant) names variant #" + idx + " of `" + es.hint + "`, which has no such variant"]
+        if (n > 0) return ["C-V2: a Lit(Variant) of `" + es.hint + "` variant #" + idx + ", which carries " + n + " payload field(s) (its value is a VariantOf)"]
+        return []
+    }
+
     // The payload arity of variant `idx` of enum `es` (-1: no such enum / variant).
     fn variantArityOf(p: CoreProgram, es: Sym, idx: int) -> int {
         const t: TypeDef | not = findTypeDef(p, es)
@@ -3879,7 +3900,7 @@ ${
     fn checkExpr(p: CoreProgram, encl: Decl[], e: Expr) -> string[] {
         return match e {
             .InitOf(decl: d, inst: i, idx: x) :> checkCellRead(p, encl, d, i, [{ owner: d, idx: x }])
-            .Lit(lit: l) :> []
+            .Lit(lit: l) :> checkLitVariant(p, l)   // s472 r1 C-V2
             .Local(sym: s) :> []
             .Read(place: pl) :> []
             .Call(callee: c) :> []

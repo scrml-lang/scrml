@@ -18,6 +18,7 @@
 import { describe, test, expect, beforeAll, afterEach } from "bun:test";
 import { mods, compile, codes, check, artifacts, serve, post, pathOf, bridge, spyDriver } from "./server-artifact-harness.js";
 import { loadProgram, click, expectNoPageErrors, warmLoadProgram } from "../slice-m1/load-program.js";
+import { frontEnd } from "./harness.js";
 
 beforeAll(() => { mods(); warmLoadProgram(); }, { timeout: 120000 });
 const realFetch = globalThis.fetch;
@@ -30,6 +31,8 @@ afterEach(() => {
 const settle = async (n = 8) => { for (let i = 0; i < n; i++) await new Promise((r) => setTimeout(r, 0)); };
 const errs = (src) => codes(src).filter((c) => !c.startsWith("W-") && !c.startsWith("I-"));
 let k = 0;
+const frontEndOf = (src) => frontEnd(mods(), [{ path: "app.scrml", src }]);
+const frontEndFiles = (files, entry) => frontEnd(mods(), files, entry);
 
 const SHAPE = `    type Shape:enum = { Circle(r: int), Rect(w: int, h: int), Dot }`;
 const P = (decls, main = "") => `<program>\n${SHAPE}\n${decls}\n    <main>\n${main}\n    </main>\n</program>\n`;
@@ -189,4 +192,60 @@ describe("refusals — each at the construction, with the SPEC's code", () => {
       expect([...new Set(errs(P(decls)))]).toEqual(want);
     });
   }
+});
+
+// s472 r1 — the S239 review of #1608 (findings F1–F7). Each was red on 798d414e1.
+describe("review round 1 — refusals the first round missed", () => {
+  const PT = `    type Pt:struct = { x: int }\n    type W:enum = { At(p: Pt), Many(ps: Pt[]) }`;
+  const MODE = `    type Level:enum = { Easy, Hard }\n    type Mode:enum = { Solo(level: Level) }`;
+  const cases = [
+    // F1 — a struct-literal payload argument's FIELD values (§66.1 rule 5)
+    ["F1: a struct literal's field value in a return", `${PT}\n    function f() -> W {\n        return W.At({ x: "s" });\n    }`, ["E-TYPE-031"]],
+    ["F1: a tape of struct literals", `${PT}\n    let <w:W=(W.Many([{ x: "s" }]))/>`, ["E-TYPE-031"]],
+    ["F1: `not` into a struct literal's non-optional field", `${PT}\n    let <w:W=(W.At({ x: not }))/>`, ["E-TYPE-041"]],
+    ["F1: a write", `${PT}\n    let <w:W=(W.At({ x: 1 }))/>\n    function f() {\n        @w = W.At({ x: "s" });\n    }`, ["E-TYPE-031"]],
+    // F2 — a non-literal annotated initializer of the WRONG type (PA-directed widening)
+    ["F2: a cell annotated one enum, initialized with another's construction", `${MODE}\n    let <sh:Shape=(Mode.Solo(.Easy))/>`, ["E-TYPE-031"]],
+    ["F2: a typed local", `${MODE}\n    function f() -> int {\n        const s: Shape = Mode.Solo(.Easy);\n        return 0;\n    }`, ["E-TYPE-031"]],
+    ["F2: a `T | not` cell", `${MODE}\n    let <x:Mode | not=(Shape.Circle(1))/>`, ["E-TYPE-031"]],
+    ["F2: a unit variant of the wrong enum (base had the same hole)", `${MODE}\n    let <sh:Shape=(Level.Easy)/>`, ["E-TYPE-031"]],
+    // F3 — a payload variant named without its payload, BARE (the qualified one was refused already)
+    ["F3: a bare payload variant as a cell initializer", `    let <x:Shape=(.Circle)/>`, ["E-BOOTSTRAP-UNSUPPORTED"]],
+    ["F3: as a return", `    function f() -> Shape {\n        return .Circle;\n    }`, ["E-BOOTSTRAP-UNSUPPORTED"]],
+    ["F3: as an argument", `${AREA}\n    function f() -> int {\n        return area(.Rect);\n    }`, ["E-BOOTSTRAP-UNSUPPORTED"]],
+    // F5 — a `T | not` position expects `T`
+    ["F5: a bare construction against `T | not` takes `T` (no false E-VARIANT-AMBIGUOUS)", `    type Other:enum = { Circle(n: int) }\n    let <x:Shape | not=(.Circle(1))/>`, []],
+    ["F5: … and a variant `T` does not declare is E-TYPE-VARIANT, not another enum's", `    type Other:enum = { Square(n: int) }\n    let <x:Shape | not=(.Square(1))/>`, ["E-TYPE-VARIANT"]],
+    // F7 — a qualified enum that is not in scope / shadowed says why
+    ["F7: a local shadowing the enum name", `    function f() -> int {\n        const Shape = 3;\n        const s = Shape.Circle(1);\n        return 0;\n    }`, ["E-BOOTSTRAP-UNSUPPORTED"]],
+  ];
+  for (const [what, decls, want] of cases) {
+    test(what, () => {
+      expect([...new Set(errs(P(decls)))]).toEqual(want);
+    });
+  }
+
+  test("F3: the refusal names the constructor reading (§45.7) — bare and qualified alike", () => {
+    for (const d of [`    let <x:Shape=(.Circle)/>`, `    let <x:Shape=(Shape.Circle)/>`]) {
+      const r = frontEndOf(P(d));
+      const msg = r.diags.find((x) => x.code === "E-BOOTSTRAP-UNSUPPORTED")?.message ?? "";
+      expect(msg).toContain("carries a payload (1 field(s)); named without one it is the constructor, not a value");
+    }
+  });
+
+  test("F7: an enum another file exports but this file does not import — E-SCOPE-001 saying so", () => {
+    const lib = `\${ export type Shape2:enum = { Circle2(r: int), Dot2 } }\n`;
+    const app = `<program>\n    function f() -> int {\n        const s = Shape2.Circle2(3);\n        return 0;\n    }\n    <main></main>\n</program>\n`;
+    const r = frontEndFiles([{ path: "shapes.scrml", src: lib }, { path: "app.scrml", src: app }], "app.scrml");
+    const d = r.diags.find((x) => x.code === "E-SCOPE-001");
+    expect(d?.message).toContain("`shapes.scrml` exports it, but this file does not import it");
+  });
+
+  test("checkCore C-V2 refuses a Lit(Variant) of a payload variant (the mirror of C-V1)", () => {
+    const r = compile(P(`    let <d:Shape=(Shape.Dot)/>`));
+    expect(check(r.core)).toEqual([]);
+    const lit = findAll(r.core, "Variant").find((n) => n.data && n.data.enumSym && n.data.enumSym.hint === "Shape");
+    lit.data.idx = 0;
+    expect(check(r.core).join("\n")).toMatch(/C-V2: .*carries 1 payload field\(s\)/);
+  });
 });

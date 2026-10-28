@@ -46,3 +46,22 @@ base: origin/s472-boot-link-visibility 67bd70862 (#1606). Gap: g-boot-payload-va
 - A bare `.V(…)` with no expected type resolves against the ONE in-scope enum declaring `V` — the bootstrap's existing
   rule for a bare unit variant (resolveVariant). §14.10 says a bare variant with no type context is
   E-VARIANT-AMBIGUOUS; the bootstrap's laxer reading pre-dates this lane and is kept uniform, not widened.
+
+## Review round 1 (S239 of #1608, 798d414e1 = FIX)
+- F1 HIGH: `checkConstructArgs` runs `checkLitFields` per argument — a struct literal's field values (in a tape,
+  nested, `not` → E-TYPE-041) are checked. Was: `W.At({ x: "s" })` compiled and rendered `s1`.
+- F2 MED (PA-directed widening; contained — ONE re-pin, slice-m2/typer.test.js "SPEC-exact silent" → E-TYPE-031):
+  `checkIntInit` checks EVERY annotated non-literal initializer with `checkValue` (let/const, declaration field,
+  use-site attribute). Resolves g-bootstrap-typer-int-into-string-bool-initializer-unchecked. SPEC §7.5.1's
+  normative text is still literal-only at positions 1/2 — the SPEC widening text is owed (as for r7 A).
+- F3 MED: `resolveVariant` refuses a BARE payload variant named without its payload (`unitVariantValue`), the
+  same message as the qualified one (§45.7: "the ctor function, not a value"); checkCore C-V2: a `Lit(Variant)`
+  names a unit variant of an enum of the program (slice-m1/check.test.js F7 re-pinned: its hand-built Core with a
+  non-enum symbol now also reports C-V2).
+- F5 LOW: `ctorOf` / `resolveVariant` unwrap `T | not` (`unMaybeOpt`) before resolving a bare variant.
+- F7 LOW: `E.V(…)` with `E` declared in another file and not imported → E-SCOPE-001 with #1606's elsewhereNote;
+  a local shadowing the enum → a message saying so.
+- F4 / F6 filed: g-boot-markup-interp-non-primitive-unchecked-s472 (with the corpus-staleness note on the two
+  error/ cases), g-boot-bare-variant-no-context-resolves-s472 (owner ruling).
+- Tests: variants-s472.test.js +17 ("review round 1"); the reviewer's probes re-run — every changed verdict is an
+  intended one. bootstrap-conformance --check: current (no movement).
