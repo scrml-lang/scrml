@@ -17050,7 +17050,7 @@ ${
             if (isNumericKind(unMaybe(t))) num = true
             if (kindOf(unMaybe(t)) == 2) str = true
         }
-        if (num && str) return operandType(env, x, "one of " + oneOfName(xs) + "", "`+`", "two numbers or two strings", ts)
+        if (num && str) return report(ts, env, x.span, "E-OPERATOR-OPERAND-TYPE", "`+` takes two numbers or two strings, and this operand may be " + oneOfName(xs) + " — a choice whose branches mix a number and a string (whether `+` adds or joins would depend on the branch taken); give the branches one type (ruled S440, Gotcha Q1 / Q2)")
         return ts
     }
 
@@ -18785,7 +18785,7 @@ ${
     // a logic template this SHALL be compile error `E-TEXT-NON-PRIMITIVE`". A KNOWN
     // non-primitive (or a `T | not` of one) and every member of a choice are judged
     // here, as a template slot's are (textKnown). The unresolved-type limb is NOT
-    // applied to markup text yet (a template slot refuses it): see the gap.
+    // applied to markup text yet (a template slot refuses it): see `.Unknown` below.
     fn typeInterp(env: TEnv, x: AExpr, ts0: TypeState) -> TypeState {
         const r: RVT = typeExpr(env, x, ts0)
         if (hasErrIn(env.errs, x.span)) return r.ts          // Rule C: not judged across a parse error
@@ -18793,6 +18793,11 @@ ${
         return match v {
             .Known(t: t) :> markupTextKnown(env, x, t, r.ts)
             .Absent :> r.ts                                   // `${not}` renders nothing (§7.4.2)
+            // MEASURED s472: refusing the unresolved limb here refuses the SPEC's own
+            // §66.19 worked programs (4 interpolations) and the M2 dropdownEarlyRead
+            // fixture — `${countryValue()}` of a function with no written return type,
+            // whose type §66.3 infers and the bootstrap typer does not yet. A gap of
+            // the typer's inference, not a value it resolved: deferred (filed).
             .Unknown :> r.ts
             .OneOf(ts: xs) :> markupTextOneOf(env, x, xs, r.ts)
         }
