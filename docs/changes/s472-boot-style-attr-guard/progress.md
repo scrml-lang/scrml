@@ -23,4 +23,9 @@ both outputs; a runtime wall in `rt.attr` refuses a `style` write too (defense i
 - [x] tests: slice-m4/style-attr-guard-s472.test.js — 46 tests, 42 red on main (the 4 green: title still written, braced refused, two benign); show.test.js + sink-guards.test.js expectations flipped
 - [x] gap resolved (known-gaps marker; state.ts --write: counts already current — one MED resolved, one MED filed); bootstrap-conformance.md --write: no change
 - [x] filed g-impl1-style-attr-bound-value-unguarded-s472 (impl#1 has the same hole; S471 TS policy — not a lane)
-- [ ] merge origin/main; final gates
+- [x] merged origin/main (#1608) — no conflicts; severity / SPEC-INDEX / bootstrap-conformance / state all current after merge
+- [x] gates (logs ~/.cache/scrml-pa/s472/st-gate-*.log): slices m1 100/0, m2 613/0, SLICE_CORE=lowered m1 100/0, m3 60/0, m4 2813/0;
+  e2e-render-map 259/0; checks job: types-gate OK, root conformance 2239/0, snippet, claim, compile-floor, md-shim,
+  bootstrap-conformance --check, conflict markers, SPEC-INDEX, delta-lint, ci-shards needs, s34-census --check-new
+  --base origin/main PASS, severity --check current; facts.ts --check stale (WARN-only, bot-owned — not touched).
+  Full pre-commit on every commit (last: merge commit).
