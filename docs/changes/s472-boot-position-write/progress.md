@@ -23,3 +23,8 @@ Gaps: g-boot-position-write-s472 (HIGH), g-boot-local-part-write-s472 (MED).
 - Found (pre-existing, filed): `@ks = @ks.map(…)` bypasses element tape-field grants (fail-open).
 - TODO: conformance regen, known-gaps entries (draft ~/.cache/scrml-pa/s472/pw-gaps.md),
   merge origin/main after #1607/#1608, final gates, PR.
+- a480509fd inferred-element fix; 9b7ecefad merge origin/main (#1607). known-gaps: the two gaps
+  added RESOLVED (same ids as #1608) + 5 new (cell sub-path writes, local part-write residue, SPEC
+  past-end trap question, map-written-back fail-open HIGH). Conformance regen: no bucket movement
+  (PASS 254 / FAIL 49 / UNSUPPORTED 825); `defer/return-value-contents-not-frozen` now refused as
+  type-unknown instead of "no local part write".
