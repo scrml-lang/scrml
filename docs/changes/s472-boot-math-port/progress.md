@@ -122,3 +122,9 @@ NOT DONE (next):
   second import:host, or the same import:host twice is E-SCOPE-010 (§21.3.1.1).
 - LOW-2 + UNVERIFIED Windows `\` filed as open gaps (g-boot-host-wrappers-not-shaken-from-client-s473,
   g-boot-host-path-backslash-segment-unverified-s473).
+
+## 2026-10-28 — S473 second main merge (#1619, origin/main 416425c33) — merge c0f11ea7e
+- SPEC-INDEX: derived-only conflict, regenerated (--regen); no hand-written line lost.
+- severity.scrml regenerated (212 codes, +E-FORM-OWNER-UNRESOLVED). known-gaps: no id lost (2447).
+- No semantic break: #1619 adds no Globals/Fn/FnInfo construction; the branch adds no match over
+  the new InstRef/View variants. All CI checks + slices + the four review probes PASS on the merge.
