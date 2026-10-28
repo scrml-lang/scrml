@@ -204,16 +204,19 @@ jobs:
       # FACTS holds repo-wide totals (compiler/src lines, test files, SPEC lines …) that ~60% of
       # landings move (measured: 48 of the 78 landings 2026-10-10..22), so every landing staled every
       # other queued PR's FACTS.md and the queue kicked it. main is now regenerated after each merge by
-      # `.github/workflows/facts-regen.yml`. Exit 1 (stale) → a ::warning:: annotation, still in this
-      # log; exit 2 (degenerate zero measurement) and exit 3 (missing @generated anchor) still FAIL —
-      # those are a broken instrument / broken file, which the post-merge regen cannot repair.
+      # `.github/workflows/facts-regen.yml`. Exit 4 (stale) → a ::warning:: annotation, still in this
+      # log; EVERY other non-zero FAILS — 2 (degenerate zero measurement), 3 (missing @generated
+      # anchor), 5 (dangling symlink in a measured tree) and 1, which is bun's code for an uncaught
+      # exception. S472: stale used to be 1, so a CRASHING facts.ts was warned through here as stale
+      # (g-facts-check-crash-exit-1-warned-as-stale-s472). The mapping is tested by
+      # compiler/tests/unit/facts-check-exit-codes-s472.test.js, which runs this block verbatim.
       - name: Facts currency (WARN only — main regenerates it post-merge)
         if: ${{ !cancelled() }}
         run: |
           set +e
           bun scripts/facts.ts --check
           rc=$?
-          if [ "$rc" = "1" ]; then
+          if [ "$rc" = "4" ]; then
             echo "::warning title=docs/FACTS.md stale (non-blocking)::Figures differ from this tree. facts-regen.yml regenerates FACTS.md on main after merge; do not commit a regen in this PR."
             exit 0
           fi

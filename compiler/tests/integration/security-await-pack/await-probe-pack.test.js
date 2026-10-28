@@ -6,7 +6,21 @@
 // answered WELCOME. See pack.js for the classes and README.md for the why.
 //
 // RED when: a shape not in KNOWN_FAIL accepts a wrong password; a KNOWN_FAIL shape stops accepting
-// it (remove the entry); a shape not in UNJUDGED loses its server route; the shape count drifts.
+// it (remove the entry); a shape not in UNJUDGED loses its server route; the shape count drifts;
+// the POSITIVE CONTROL fails (below).
+//
+// POSITIVE CONTROL (S472, g-await-pack-no-positive-control-s472). The floor alone ("never FAIL")
+// accepts PASS-500 / PASS-REFUSED for every shape, so a BLIND instrument was green: with every route
+// answering 403 — a CSRF mismatch, or happy-dom's GlobalRegistrator leaked into the same bun process
+// (its Request drops the Cookie header) — the pack ran 907 pass / 0 fail with the await hole LIVE.
+// Two checks make blindness red:
+//   1. SENTINELS — pinned shapes on the imported-async path the gap is about, which must classify
+//      exactly PASS (wrong → 200 "REJECTED", right → 200 "WELCOME"). They run FIRST, so a blind
+//      instrument fails in seconds, before the corpus.
+//   2. A CLASS FLOOR over the whole corpus — at least PASS_FLOOR shapes PASS, at most PASS_500_CEILING
+//      are PASS-500. Measured on main c8070b56a: PASS 317, PASS-500 18 (of 904). Blinded: PASS 0.
+//      A legitimate shift (a ruling that refuses a family) may move these: re-measure with
+//      classify.js and change the constants in the same PR, saying why.
 
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -19,6 +33,10 @@ import {
 import { KNOWN_FAIL, UNJUDGED } from "./known-fail.js";
 
 const EXPECTED_SHAPE_COUNT = 904;
+const SENTINELS = ["s1/direct", "s1/alias", "s1/reexport", "n1/reexportAlias", "y1/reexport3"];
+const PASS_FLOOR = 250;
+const PASS_500_CEILING = 60;
+const seen = new Map(); // id -> cls, filled by the per-shape tests, read by the class floor
 const families = await loadFamilies();
 const ids = families.flatMap(({ family, shapes }) => Object.keys(shapes).map((n) => `${family}/${n}`));
 
@@ -51,6 +69,21 @@ describe("security-await-pack: the instrument", () => {
     expect(await verifyPassword(RIGHT_PASSWORD, PINNED_HASH)).toBe(true);
     expect(await verifyPassword(WRONG_PASSWORD, PINNED_HASH)).toBe(false);
   });
+
+  test("POSITIVE CONTROL: every sentinel shape classifies PASS (the instrument can see a WELCOME)", async () => {
+    const byId = new Map(families.flatMap(({ family, shapes, defaultLib }) =>
+      Object.entries(shapes).map(([n, s]) => [`${family}/${n}`, { s, defaultLib }])));
+    const got = [];
+    for (const id of SENTINELS) {
+      expect(byId.has(id) ? "ok" : `SENTINEL NOT IN CORPUS — ${id}`).toBe("ok");
+      const { s, defaultLib } = byId.get(id);
+      const r = await runShape(s, defaultLib, join(root, `sentinel-${seq++}`), templateDb);
+      got.push(`${id}: ${r.cls} — ${r.detail}`);
+    }
+    // A blind instrument (every route 403/500, or every compile refused) shows here as PASS-500 /
+    // PASS-REFUSED, with the response in the detail.
+    expect(got.filter((v) => !/: PASS — wrong=200:"REJECTED" right=200:"WELCOME/.test(v))).toEqual([]);
+  }, 120_000);
 });
 
 for (const { family, shapes, defaultLib } of families) {
@@ -59,6 +92,7 @@ for (const { family, shapes, defaultLib } of families) {
       const id = `${family}/${name}`;
       test(id, async () => {
         const r = await runShape(s, defaultLib, join(root, String(seq++)), templateDb);
+        seen.set(id, r.cls);
         const verdict = `${id}: ${r.cls} — ${r.detail}`;
         if (KNOWN_FAIL[id]) {
           // Still failing as recorded. If this goes red the shape is FIXED: delete its entry.
@@ -75,3 +109,13 @@ for (const { family, shapes, defaultLib } of families) {
     }
   });
 }
+
+describe("security-await-pack: positive control — class floor", () => {
+  test(`at least ${PASS_FLOOR} shapes PASS and at most ${PASS_500_CEILING} are PASS-500 over the full corpus`, () => {
+    // Needs the whole corpus in this process (a -t filter that skips shapes cannot pass it).
+    expect(seen.size).toBe(EXPECTED_SHAPE_COUNT);
+    const n = (c) => [...seen.values()].filter((v) => v === c).length;
+    expect({ PASS: n("PASS") >= PASS_FLOOR ? "ok" : n("PASS"), "PASS-500": n("PASS-500") <= PASS_500_CEILING ? "ok" : n("PASS-500") })
+      .toEqual({ PASS: "ok", "PASS-500": "ok" });
+  });
+});
