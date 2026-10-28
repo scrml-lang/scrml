@@ -223,7 +223,39 @@ describe("r1 LOW-1 — §18.4 rule 3 with a choice arm", () => {
     const d = run(prog(CB, `<p id="o">\${match @c { .A :> (@b ? 1 : "s"), .B :> true, }}</p>`)).diags;
     expect(d.length).toBe(1);
     expect(d[0].message).toContain("this arm (`.B`) produces `bool`");
-    expect(d[0].message).toContain("the arm(s) before it (`.A`) produce `int` or `string`");
+    expect(d[0].message).toContain("does not unify with the arm(s) `.A` (`int` or `string`)");
     expect(d[0].message).toContain("§18.4 rule 3");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// s473 r2 LOW-A (re-review of #1621): §18.4 rule 3 is judged PAIRWISE — each arm
+// against every earlier arm, never against their running join — so the verdict
+// does not depend on arm order. {`int`, `string`, `int | string`}: `int` and
+// `string` have no subtype relationship, so E-TYPE-001 in every order.
+describe("r2 LOW-A — §18.4 rule 3 is order-invariant", () => {
+  const C3 = `    type C:enum = { A, B, D }\n    let <c:C=.A/>\n    let <b:bool=true/>`;
+  const ORDERS = [
+    ["O1 (1, \"s\", choice)", `1`, `"s"`, `(@b ? 1 : "s")`],
+    ["O2 (choice, \"s\", 1)", `(@b ? 1 : "s")`, `"s"`, `1`],
+    ["O3 (1, choice, \"s\")", `1`, `(@b ? 1 : "s")`, `"s"`],
+    ["O4 (\"s\", choice, 1)", `"s"`, `(@b ? 1 : "s")`, `1`],
+  ];
+  test("the same verdict, E-TYPE-001, in all four orders", () => {
+    const verdicts = ORDERS.map(([, x, y, z]) => codes(prog(C3, `<p id="o">\${match @c { .A :> ${x}, .B :> ${y}, .D :> ${z}, }}</p>`)));
+    for (const v of verdicts) expect(v).toEqual(["E-TYPE-001"]);
+  });
+  test("the message names the earlier arm it conflicts with (O2: `1` against `.B`'s `string`)", () => {
+    const d = run(prog(C3, `<p id="o">\${match @c { .A :> (@b ? 1 : "s"), .B :> "s", .D :> 1, }}</p>`)).diags;
+    expect(d.length).toBe(1);
+    expect(d[0].message).toContain("this arm (`.D`) produces `int`");
+    expect(d[0].message).toContain("`.B` (`string`)");
+    expect(d[0].message).not.toContain("`.A` (");
+  });
+  test("legal — arms that pairwise unify stay clean in every order (`int`, `int | string`, `string | int`)", () => {
+    const xs = [`1`, `(@b ? 1 : "s")`, `(@b ? "t" : 2)`];
+    for (const [x, y, z] of [[0, 1, 2], [1, 2, 0], [2, 0, 1], [2, 1, 0]]) {
+      expect(codes(prog(C3, `<p id="o">\${match @c { .A :> ${xs[x]}, .B :> ${xs[y]}, .D :> ${xs[z]}, }}</p>`))).toEqual([]);
+    }
   });
 });

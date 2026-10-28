@@ -18336,6 +18336,7 @@ ${
         let first = true
         let conflict = false
         let prior: string[] = []                              // the value arms before this one, by pattern
+        let priorVT: VType[] = []                             // … and the type each produced
         for (const a of handledArms(h)) {
             const af: FailFact | not = failFact(env.t.fails, a.nid)
             let aenv: TEnv = env
@@ -18366,23 +18367,35 @@ ${
                 if (first) {
                     vt = r.vt
                 } else if (!conflict) {
-                    const j: VType = joinVT(vt, r.vt)
                     // s472 (g-boot-mixed-arm-type-unresolved-fail-open-s472) — §18.4
                     // rule 3: "If arms produce types `A` and `B` with no subtype
-                    // relationship, this SHALL be a compile error (E-TYPE-001) citing
-                    // the two conflicting arm types". Two arms whose KNOWN types
-                    // share no type: reported here, once; the match's value is then
+                    // relationship, this SHALL be a compile error (E-TYPE-001)", and
+                    // "If two or more arm bodies produce types that cannot be unified,
+                    // the compiler SHALL emit E-TYPE-001 identifying each conflicting
+                    // arm". s473 r2 LOW-A: judged PAIRWISE — this arm against EVERY
+                    // arm before it, not against their running join (a choice arm
+                    // widens the join, so a join-check made the verdict depend on arm
+                    // order: {1, "s", (@b ? 1 : "s")} erred in one order of four).
+                    // Reported once, at the first arm that conflicts, naming each
+                    // earlier arm it conflicts with; the match's value is then
                     // Unknown — this error accounts for it (no second report).
-                    if (armsConflict(vt, r.vt, j)) {
-                        if (!hasErrIn(env.errs, one.span)) ts = report(ts, env, one.span, "E-TYPE-001", "the arms of this `match` produce different types with no subtype relationship — this arm (`" + patLabel(a.pat) + "`) produces " + vtTypesName(r.vt) + ", and the arm(s) before it (`" + prior.join("`, `") + "`) produce " + vtTypesName(vt) + " — a `match`'s arms produce one type, or types that unify (`T` with `T | not`, `int` with `number`, a type with a choice that holds it) (§18.4 rule 3)")
+                    let clash: string[] = []
+                    let i = 0
+                    for (const pv of priorVT) {
+                        if (armsConflict(pv, r.vt, joinVT(pv, r.vt))) clash = clash.concat(["`" + prior[i] + "` (" + vtTypesName(pv) + ")"])
+                        i = i + 1
+                    }
+                    if (clash.length > 0) {
+                        if (!hasErrIn(env.errs, one.span)) ts = report(ts, env, one.span, "E-TYPE-001", "the arms of this `match` produce types with no subtype relationship — this arm (`" + patLabel(a.pat) + "`) produces " + vtTypesName(r.vt) + ", and so does not unify with the arm(s) " + clash.join(", ") + " — a `match`'s arms produce one type, or types that unify (`T` with `T | not`, `int` with `number`, a type with a choice that holds it) (§18.4 rule 3)")
                         conflict = true
                         vt = VType.Unknown
                     } else {
-                        vt = j
+                        vt = joinVT(vt, r.vt)
                     }
                 }
                 first = false
                 prior = prior.concat([patLabel(a.pat)])
+                priorVT = priorVT.concat([r.vt])
             }
         }
         if (m.stmt) return rvt(VType.Unknown, ts)
@@ -18392,8 +18405,9 @@ ${
     }
 
     // s472 — §18.4 rule 3: "If arms produce types `A` and `B` with no subtype
-    // relationship, this SHALL be a compile error (E-TYPE-001)". The join of the
-    // arms is a choice that NEITHER side already was: it has more members than
+    // relationship, this SHALL be a compile error (E-TYPE-001)" — judged for two
+    // ARMS (s473 r2), never an arm and a running join. Their join is a choice
+    // that NEITHER side already was: it has more members than
     // either side, so neither side's type holds the other's. An arm that is
     // itself a choice (a ternary, §17.6 union) is judged the same way (s473 r1
     // LOW-1): `int | string` beside `int` unifies (the choice holds it);
