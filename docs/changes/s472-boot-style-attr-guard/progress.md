@@ -16,10 +16,11 @@ SSR of bound attributes (a bound value is written only by the client), so the co
 both outputs; a runtime wall in `rt.attr` refuses a `style` write too (defense in depth).
 
 ## Steps
-- [ ] analyze.scrml: refuse `style=` from data (E-STYLE-VALUE-NOT-STYLE)
-- [ ] parse.scrml: quoted `style="…${}…"` hint no longer steers to `style=(…)`
-- [ ] runtime.js: `attr` refuses a `style` write (fail closed)
-- [ ] §34 row for E-STYLE-VALUE-NOT-STYLE; severity.scrml regen; SPEC-INDEX
-- [ ] tests (attack corpus; red on main); flip sink-guards impl#1-parity test
-- [ ] gap resolved (state.ts --write), bootstrap-conformance.md regen
-- [ ] gates
+- [x] analyze.scrml: refuse `style=` from data (E-STYLE-VALUE-NOT-STYLE); show= writer-conflict advice fixed
+- [x] parse.scrml: quoted `style="…${}…"` hint no longer steers to `style=(…)`
+- [x] runtime.js: `attr` refuses a `style` write (fail closed)
+- [x] §34 row for E-STYLE-VALUE-NOT-STYLE; severity.scrml regen (also picked up E-IMPORT-003/008/009, stale on main); SPEC-INDEX
+- [x] tests: slice-m4/style-attr-guard-s472.test.js — 46 tests, 42 red on main (the 4 green: title still written, braced refused, two benign); show.test.js + sink-guards.test.js expectations flipped
+- [x] gap resolved (known-gaps marker; state.ts --write: counts already current — one MED resolved, one MED filed); bootstrap-conformance.md --write: no change
+- [x] filed g-impl1-style-attr-bound-value-unguarded-s472 (impl#1 has the same hole; S471 TS policy — not a lane)
+- [ ] merge origin/main; final gates
