@@ -16404,6 +16404,8 @@ ${
             .Shared(decl: d) :> false
             .Lexical(depth: n) :> false
             .Narrowed(sym: s) :> false
+            .Kid(of: o) :> false
+            .HandleOf(of: o) :> true
         }
     }
 
@@ -16423,6 +16425,8 @@ ${
             .Shared(decl: x) :> Type.Named(d)
             .Lexical(depth: n) :> Type.Named(d)
             .Narrowed(sym: s) :> Type.Named(d)
+            .Kid(of: o) :> Type.Named(d)
+            .HandleOf(of: o, sym: s) :> handleType(t, d, s)
         }
     }
 
@@ -19788,6 +19792,8 @@ ${
             .Lexical(depth: n) :> not
             .Alias(sym: s) :> not
             .Narrowed(sym: s) :> not
+            .Kid(of: o) :> sharedOf(o)
+            .HandleOf(of: o) :> sharedOf(o)
         }
     }
 
@@ -25231,7 +25237,215 @@ ${
                 for (const gi of gatesIn(cx, n)) { gated = gated.concat([{ form: gi.form, values: gi.values, span: gi.span, file: ds.file }]) }
             }
         }
+        // s472 — a control outside its form that names it with `form="id"` joins
+        // that form's gate (and its `novalidate`), RULED S472 (formOwnerPass).
+        const owners: OwnerPass = formOwnerPass(g, t)
+        diags = diags.concat(owners.diags)
+        for (const x of owners.ext) {
+            let found = false
+            let next: GateInfo[] = []
+            for (const gi of gated) {
+                if (gi.form == x.form) {
+                    found = true
+                    next = next.concat([{ form: gi.form, values: addNames(gi.values, x.names), span: gi.span, file: gi.file }])
+                } else {
+                    next = next.concat([gi])
+                }
+            }
+            if (!found) next = next.concat([{ form: x.form, values: x.names, span: x.span, file: x.file }])
+            gated = next
+            if (x.carries && forms.indexOf(x.form) < 0) forms = forms.concat([x.form])
+        }
         return { diags: diags, forms: forms, gated: gated }
+    }
+
+    // ---- s472: THE HTML FORM OWNER (g-bootstrap-gate-external-form-owner-control)
+    // RULED S472 (user-voice-scrml.md "`form="id"` (HTML form owner) and the
+    // submit gate"): "a control carrying `form="id"` whose `bind:` targets a
+    // validated value JOINS THE GATE SET OF THAT ONE FORM (§55.17), and only
+    // that form, when `id` is a static literal naming exactly one `<form>` in
+    // the program; `novalidate` on that form waives it as for in-form
+    // controls. Otherwise — a computed `form=`, an id naming no form or more
+    // than one, or a non-literal — `form=` on a validated bind is a COMPILE
+    // ERROR." (SPEC §55.17.3 "The HTML form owner"; E-FORM-OWNER-UNRESOLVED.)
+    //
+    // HTML attribute names are ASCII case-insensitive (`FORM=` is `form=` to
+    // the browser), so `form` / `id` / `novalidate` are found case-blind on an
+    // HTML element (htmlAttr) — the bootstrap's existing rule for HTML names
+    // (resolveElem's repeated-attribute check compares lowercased names).
+    //
+    // What the bootstrap builds (fail closed beyond it, E-BOOTSTRAP-UNSUPPORTED):
+    // the control and its form both in the `<program>`'s own markup (Cond arms,
+    // state-view arms and slot content included), neither inside an `<each>` /
+    // Tier-0 row — the places the form's gate can name the control's value
+    // from its own render context (lower.scrml gateDecls `extFields`). An `&`
+    // in either literal (a character reference the browser decodes) is not
+    // read as a literal.
+    type IdSite:struct = { id: string, dynamic: boolean, nid: int, isForm: boolean, okLoc: boolean, novalidate: boolean, tag: string, span: ASpan, file: string }
+    type CtlSite:struct = { e: AElem, file: string, okLoc: boolean, owner: AAttr, validated: string[], surfaced: string[], carries: boolean }
+    type OwnerWalk:struct = { ids: IdSite[], ctls: CtlSite[] }
+    type ExtCtl:struct = { form: int, names: string[], carries: boolean, span: ASpan, file: string }
+    type OwnerPass:struct = { diags: Diag[], ext: ExtCtl[] }
+
+    fn formOwnerPass(g: Globals, t: Tables) -> OwnerPass {
+        let w: OwnerWalk = { ids: [], ctls: [] }
+        for (const ds of g.decls) {
+            const isProg: boolean = ds.info.sym.id == t.program.id
+            for (const n of declMarkup(ds)) { w = ownerWalkIn(t, ds.file, isProg, false, n, w) }
+        }
+        let diags: Diag[] = []
+        let ext: ExtCtl[] = []
+        let computedForm = false
+        for (const s of w.ids) {
+            if (s.isForm && s.dynamic) computedForm = true
+        }
+        for (const c of w.ctls) {
+            const r: OwnerPass = judgeOwner(w, computedForm, c)
+            diags = diags.concat(r.diags)
+            ext = ext.concat(r.ext)
+        }
+        return { diags: diags, ext: ext }
+    }
+
+    fn judgeOwner(w: OwnerWalk, computedForm: boolean, c: CtlSite) -> OwnerPass {
+        const validated: boolean = c.validated.length > 0
+        if (!validated && c.surfaced.length == 0) return { diags: [], ext: [] }
+        const what: string = "`<" + c.e.tag + " " + c.owner.name + "=…>` binds `" + c.validated.concat(c.surfaced).join("`, `") + "`"
+        const lit: string | not = htmlLiteral(c.owner.value)
+        let why: string = ""
+        let target: IdSite | not = not
+        if (lit is not) {
+            why = "its `" + c.owner.name + "=` is not a static literal (a computed, unquoted or entity-bearing value)"
+        } else if (computedForm) {
+            why = "a `<form>` in this program has a computed `id`, so it cannot be proven that \"" + lit + "\" names exactly one form"
+        } else {
+            let hits: IdSite[] = []
+            for (const s of w.ids) {
+                if (!s.dynamic && s.id == lit) hits = hits.concat([s])
+            }
+            if (hits.length == 0) {
+                why = "no element in the program has `id=\"" + lit + "\"`"
+            } else if (hits.length > 1) {
+                why = hits.length + " elements in the program have `id=\"" + lit + "\"`"
+            } else if (!hits[0].isForm) {
+                why = "`id=\"" + lit + "\"` names a `<" + hits[0].tag + ">`, not a `<form>`"
+            } else {
+                target = hits[0]
+            }
+        }
+        if (target is not) {
+            // F4 (S472 r1): only a VALIDATED bind is ruled; an unvalidated one with an
+            // unresolved owner joins no gate and is left to HTML.
+            if (!validated) return { diags: [], ext: [] }
+            return { diags: [newDiag("E-FORM-OWNER-UNRESOLVED",
+                what + " (a validated value) and names its form owner, but " + why + " — a control with `form=\"id\"` joins the submit gate of that one form only when `id` is a static literal naming exactly one `<form>` in the program (§55.17.3 \"The HTML form owner\"); write `form=\"<that form's id>\"` with a literal, or put the control inside its `<form>` and drop `form=`",
+                c.file, c.owner.span)], ext: [] }
+        }
+        if (!c.okLoc || !target.okLoc) {
+            if (!validated) return { diags: [], ext: [] }
+            return { diags: [newDiag("E-BOOTSTRAP-UNSUPPORTED",
+                what + " (a validated value) and joins the gate of `<form id=\"" + target.id + "\">` (§55.17.3 \"The HTML form owner\"), but the bootstrap builds that only when the control and the form are both in the `<program>`'s own markup and neither is inside an `<each>` or a `${ for … lift }` row — refused (fail closed); put the control inside its `<form>` and drop `form=`",
+                c.file, c.owner.span)], ext: [] }
+        }
+        let carries: boolean = c.carries
+        if (target.novalidate) carries = false
+        return { diags: [], ext: [{ form: target.nid, names: c.validated, carries: carries, span: target.span, file: target.file }] }
+    }
+
+    // A literal attribute value the browser reads as written: quoted, no
+    // `${…}`, no `&` (a character reference would decode to other text).
+    fn htmlLiteral(v: AAttrValue) -> string | not {
+        const s: string | not = staticQuotedText(v)
+        if (s is not) return not
+        if (s.indexOf("&") >= 0) return not
+        return s
+    }
+
+    // The first attribute of an HTML element named `name`, ASCII case-blind.
+    fn htmlAttr(attrs: AAttr[], name: string) -> AAttr | not {
+        for (const a of attrs) {
+            if (a.name.toLowerCase() == name) return a
+        }
+        return not
+    }
+
+    // An HTML control that names a form owner (`form=`, any case) — its binds
+    // belong to THAT form, not to the form whose subtree it sits in.
+    fn ownsOtherForm(t: Tables, e: AElem) -> boolean {
+        if (!isHtmlFact(elemFact(t.elems, e.nid))) return false
+        return htmlAttr(e.attrs, "form") is given
+    }
+
+    fn ownerWalkRows(t: Tables, file: string, isProg: boolean, rows: ANode[], w0: OwnerWalk) -> OwnerWalk {
+        let w: OwnerWalk = w0
+        for (const r of rows) { w = ownerWalkIn(t, file, isProg, true, r, w) }
+        return w
+    }
+
+    fn ownerWalkIn(t: Tables, file: string, isProg: boolean, inRow: boolean, n: ANode, w: OwnerWalk) -> OwnerWalk {
+        const k: ANodeK = n.k
+        return match k {
+            .Elem(e: e) :> ownerWalkElem(t, file, isProg, inRow, e, w)
+            .Text(text: x) :> w
+            .Interp(e: x) :> w
+            .DeclNode(d: d) :> w
+            .Css(c: c) :> w
+            .Gather(f: lf) :> ownerWalkRows(t, file, isProg, gatherRows(lf), w)
+            .Effect(w: x) :> w
+        }
+    }
+
+    fn ownerWalkElem(t: Tables, file: string, isProg: boolean, inRow: boolean, e: AElem, w0: OwnerWalk) -> OwnerWalk {
+        let w: OwnerWalk = w0
+        const f: ElemFact | not = elemFact(t.elems, e.nid)
+        const okLoc: boolean = isProg && !inRow
+        if (isHtmlFact(f)) {
+            const isForm: boolean = e.tag.toLowerCase() == "form" && !e.star
+            const ida: AAttr | not = htmlAttr(e.attrs, "id")
+            if (ida is given) {
+                const lit: string | not = htmlLiteral(ida.value)
+                let id: string = ""
+                if (lit is given) id = lit
+                w = { ids: w.ids.concat([{ id: id, dynamic: lit is not, nid: e.nid, isForm: isForm, okLoc: okLoc,
+                                          novalidate: htmlAttr(e.attrs, "novalidate") is given, tag: e.tag, span: e.span, file: file }]),
+                      ctls: w.ctls }
+            }
+            const owner: AAttr | not = htmlAttr(e.attrs, "form")
+            if (owner is given) {
+                let validated: string[] = []
+                let all: string[] = []
+                let carries = false
+                for (const a of e.attrs) {
+                    const fact: AttrKind | not = attrFact(t.attrs, a.nid)
+                    validated = addNames(validated, boundValidated(t, fact, false))
+                    all = addNames(all, boundValidated(t, fact, true))
+                    if (lowersAttrs(fact)) carries = true
+                }
+                let surfaced: string[] = []
+                for (const x of all) {
+                    if (validated.indexOf(x) < 0) surfaced = surfaced.concat([x])
+                }
+                w = { ids: w.ids, ctls: w.ctls.concat([{ e: e, file: file, okLoc: okLoc, owner: owner, validated: validated, surfaced: surfaced, carries: carries }]) }
+            }
+        }
+        const rows: boolean = inRow || isEachElemFact(f)
+        for (const c of e.kids) { w = ownerWalkIn(t, file, isProg, rows, c, w) }
+        return w
+    }
+
+    fn isEachElemFact(f: ElemFact | not) -> boolean {
+        return match f {
+            .MEach(bind: b) :> true
+            .MHtml :> false
+            .MUse(decl: d) :> false
+            .MSlot :> false
+            .MDb :> false
+            .MErrors(of: x) :> false
+            .MStateView(v: v) :> false
+            .MInline(v: v) :> false
+            .MStar(decl: d) :> false
+            not :> false
+        }
     }
 
     // ---- s449: THE GATED FORMS (§55.17.3) ------------------------------------
@@ -25279,7 +25493,10 @@ ${
     // of a user declaration), not only the validated ones.
     fn elemBound(cx: CarryCx, e: AElem, all: boolean) -> string[] {
         let out: string[] = []
-        for (const a of e.attrs) { out = addNames(out, boundValidated(cx.t, attrFact(cx.t.attrs, a.nid), all)) }
+        // s472: a control naming its form owner (`form=`) is bound in THAT form (formOwnerPass)
+        if (!ownsOtherForm(cx.t, e)) {
+            for (const a of e.attrs) { out = addNames(out, boundValidated(cx.t, attrFact(cx.t.attrs, a.nid), all)) }
+        }
         out = addNames(out, expansionBound(cx, elemFact(cx.t.elems, e.nid), all))
         return addNames(out, nodesBound(cx, e.kids, all))
     }
@@ -25298,8 +25515,22 @@ ${
             const k: ANodeK = n.k
             const el: AElem | not = elemOfNode(k)
             if (el is given) out = addNames(out, elemBound(cx, el, all))
+            // s472 r1 (F3): a Tier-0 `${ for … lift <…> }`'s rows are markup in the form too
+            out = addNames(out, nodesBound(cx, tier0Rows(k), all))
         }
         return out
+    }
+
+    fn tier0Rows(k: ANodeK) -> ANode[] {
+        return match k {
+            .Gather(f: lf) :> gatherRows(lf)
+            .Elem(e: x) :> []
+            .Text(text: x) :> []
+            .Interp(e: x) :> []
+            .DeclNode(d: d) :> []
+            .Css(c: c) :> []
+            .Effect(w: w) :> []
+        }
     }
 
     // A bind of a field's WHOLE value whose field carries validators → its name.
@@ -25504,7 +25735,7 @@ ${
 
     fn formsInElem(cx: CarryCx, e: AElem) -> int[] {
         let out: int[] = []
-        if (e.tag == "form" && !e.star && isHtmlFact(elemFact(cx.t.elems, e.nid)) && attrNamed(e.attrs, "novalidate") is not) {
+        if (e.tag == "form" && !e.star && isHtmlFact(elemFact(cx.t.elems, e.nid)) && htmlAttr(e.attrs, "novalidate") is not) {
             if (elemCarries(cx, e)) out = [e.nid]
         }
         for (const k of e.kids) { out = out.concat(formsIn(cx, k)) }
@@ -25534,6 +25765,7 @@ ${
             if (el is given) {
                 if (elemCarries(cx, el)) return true
             }
+            if (nodesCarry(cx, tier0Rows(k))) return true
         }
         return false
     }
@@ -25551,8 +25783,10 @@ ${
     }
 
     fn elemCarries(cx: CarryCx, e: AElem) -> boolean {
-        for (const a of e.attrs) {
-            if (lowersAttrs(attrFact(cx.t.attrs, a.nid))) return true
+        if (!ownsOtherForm(cx.t, e)) {
+            for (const a of e.attrs) {
+                if (lowersAttrs(attrFact(cx.t.attrs, a.nid))) return true
+            }
         }
         const f: ElemFact | not = elemFact(cx.t.elems, e.nid)
         if (expansionCarries(cx, f)) return true

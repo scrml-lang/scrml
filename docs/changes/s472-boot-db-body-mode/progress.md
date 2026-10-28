@@ -104,3 +104,10 @@ Ruling: scrml-support/user-voice-scrml.md "⭐ RULED — `<db>` body + client re
 - PR probes (review probes in .tmp/db + a landing probe set): bare statements → E-DB-BODY-STATEMENT; prose → E-UNQUOTED-DISPLAY-TEXT;
   ?{} binds to declaring <db> (sibling, program-db, use-before); collisions → E-SCOPE-010; fn-in-db under each / renders / engine
   child / Tier-0 for → E-BOOTSTRAP-UNSUPPORTED; <match> arms refused upstream (no <match>/markup-lift-in-arm in the bootstrap); no page-text leak.
+
+## S473 landing-front round 2 — 2026-10-28
+- Merged origin/main again (gained #1619, bootstrap gate fail-opens). Textual conflict only in compiler/SPEC-INDEX.md
+  (generated; resolved by `git-merge-generated.ts --regen`, `--check` OK). severity.scrml regenerated (main was stale for
+  E-FORM-OWNER-UNRESOLVED). known-gaps: no id lost. FACTS.md = origin/main (auto). bootstrap-conformance.md regenerated.
+- Semantic: the bootstrap bundle builds under impl#1 (no E-TYPE-020 from InstRef.Kid / InstRef.HandleOf / View.Reach);
+  mountedInstances moved to core.scrml, no branch-side use.
