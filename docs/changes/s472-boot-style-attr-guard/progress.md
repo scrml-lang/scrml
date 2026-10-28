@@ -72,3 +72,10 @@ Rulings (scrml-support/user-voice-scrml.md "⭐ RULED — five PA recs …" S472
   happy-dom in-process and breaks Bun.serve's Response): alone 12/0; fetches recorded only for the filed follow-on
   gaps (SVG fill/stroke/filter/mask/clip-path/marker/cursor/set-filter-css, link stylesheet) — follow-on lane, not
   started. Direct pin: style=(@c) and style=@c → [E-STYLE-VALUE-NOT-STYLE]; static style="color: red" compiles + prints.
+
+## S473 landing-front round 2 — merge origin/main (#1619 bootstrap gate fail-opens)
+- Conflict: compiler/SPEC-INDEX.md only (derived totals/rows) — `bun scripts/git-merge-generated.ts --regen`; `--check` OK.
+- analyze.scrml / core.scrml / severity.scrml / known-gaps auto-merged. severity.scrml regenerated (main was stale:
+  adds E-FORM-OWNER-UNRESOLVED; keeps E-STYLE-VALUE-NOT-STYLE, no E-ATTR-WRITER-CONFLICT) — `--check` current.
+- known-gaps: no @gap id lost (main 2445, branch 2449, result 2450); state.ts --write no change.
+- Semantic: the branch's own diff matches no InstRef / View enum and does not touch mountedInstances; no-default-arm lint 0 violations.

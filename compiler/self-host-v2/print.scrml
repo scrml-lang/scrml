@@ -32,7 +32,7 @@ ${
              Decl, Fn, CoreProgram, CapOwner, SurfaceProp, ValidityOf, Validator, Persist, PersistStore,
              Failable, OkArm, ErrArm, ServerFn, SqlQuery, SqlMode, Param, LoopHead, EachHead, RangeHead, CssUnit, CoreCss, CssVar,
              Gather, Lifted, GatherRow, PathStep, CoreConst,
-             findDecl, findTypeDef, typeDefSym, capOwner, findFn, findServerFn } from "./core.scrml"
+             findDecl, findTypeDef, typeDefSym, capOwner, findFn, findServerFn, mountedInstances } from "./core.scrml"
     import { Node, allNodes, sharedRefs, boundSyms, assignedSyms } from "./walk.scrml"
     import { JsOp, JsUnOp, JsExpr, JsProp, JsStmt, JsLoopHead, JsForInit,
              jid, jstr, jnum, jmember, jcall, jmcall, jthunk, sexpr, printModule } from "./js.scrml"
@@ -275,7 +275,21 @@ ${
             .Lexical(depth: k) :> lexicalJs(ctx, k)
             .Alias(sym: s) :> jmcall(handleJs(ctx, s), "get", [])
             .Narrowed(sym: s) :> jid(symName(ctx, s))
+            .Kid(of: o, idx: k, decl: d) :> JsExpr.JIndex(jmember(instJs(ctx, o), "kids"), JsExpr.JAnnot(jnum(k), d.hint))
+            .HandleOf(of: o, sym: s) :> jmcall(handleOfJs(ctx, instJs(ctx, o), s), "get", [])
         }
+    }
+
+    // s472 — `of`'s `as=` handle `s` (InstRef.HandleOf): its cell on `of`'s record.
+    fn handleOfJs(ctx: Ctx, of: JsExpr, s: Sym) -> JsExpr {
+        for (const d of ctx.p.decls) {
+            let k = 0
+            for (const hs of d.handles) {
+                if (hs.id == s.id) return handleSlot(of, k, hs.hint)
+                k = k + 1
+            }
+        }
+        return jid("unboundHandle$" + s.id)
     }
 
     fn lexicalJs(ctx: Ctx, k: int) -> JsExpr {
@@ -1644,6 +1658,7 @@ ${
             .Effect :> hole(HNode.HComment("effect"), path, v)
             .ResetOn :> hole(HNode.HComment("reset-on"), path, v)
             .Errors :> hole(HNode.HComment("errors"), path, v)
+            .Reach :> hole(HNode.HComment("reach"), path, v)
             .Gather :> hole(HNode.HComment("for"), path, v)       // s469 (§17.4)
         }
     }
@@ -1753,6 +1768,7 @@ ${
             .Effect :> false
             .ResetOn :> false
             .Errors :> false
+            .Reach :> false
             .Gather :> false
         }
     }
@@ -1772,37 +1788,13 @@ ${
             .Slot :> true
             .Star(decl: d) :> true
             .Errors(of: x) :> true
+            .Reach(fields: fs) :> true
             .Gather(g: x) :> true
         }
     }
 
-    // The instances a renders mounts UNCONDITIONALLY — reached through element
-    // children only, never through a conditional arm, an <each> row or slot
-    // content — in document order (the hole order of buildNodes). L12 (b): these
-    // are created with the declaration's record, before anything renders.
-    fn mountedInstances(views: View[]) -> View[] {
-        let out: View[] = []
-        for (const v of views) { out = out.concat(mountedIn(v)) }
-        return out
-    }
-
-    fn mountedIn(v: View) -> View[] {
-        return match v {
-            .El(kids: ks) :> mountedInstances(ks)
-            .Instance(decl: d) :> [v]
-            .Text :> []
-            .RawText :> []
-            .Dyn :> []
-            .Cond :> []
-            .Each :> []
-            .Slot :> []
-            .Star :> []
-            .Effect :> []
-            .ResetOn :> []
-            .Errors :> []
-            .Gather :> []
-        }
-    }
+    // mountedInstances (core.scrml): the instances a renders mounts unconditionally,
+    // in document order (the hole order of buildNodes) — L12 (b).
 
     fn wireHole(ctx: Ctx, h: Hole, tid: string, kid: int) -> Rendered {
         const node: JsExpr = jid(nodeVar(h.path))
@@ -1820,6 +1812,7 @@ ${
             .Effect(deps: ds, body: b) :> effectJs(ctx, ds, b)
             .ResetOn(triggers: ds, reset: b, rank: r) :> resetOnJs(ctx, ds, b, r)
             .Errors(of: x, all: a) :> only([sexpr(rtCall(ctx, "errors", [scopeVar(), node, jthunk(jmcall(surfaceJs(ctx, x), "messages", [])), JsExpr.JBool(a)]))])
+            .Reach(fields: fs) :> reachJs(ctx, fs, node)
             .Gather(g: g, rows: rows) :> gatherJs(ctx, g, rows, node, tid + "/" + pathText(h.path))
         }
     }
@@ -2056,7 +2049,41 @@ ${
             .Show(test: t) :> [sexpr(rtCall(ctx, "visibility", [scopeVar(), node, jthunk(exprJs(ctx, t))]))]
             .On(event: ev, body: body) :> [sexpr(rtCall(ctx, "on", [scopeVar(), node, jstr(ev), JsExpr.JArrow(handlerParams(body), blockJs(ctx, body))]))]
             .Bind(kind: k, read: r, sink: sk, write: w) :> [sexpr(rtCall(ctx, "bind", [scopeVar(), node, jstr(bindProp(k)), jthunk(exprJs(ctx, r)), JsExpr.JArrow([symName(ctx, sk)], blockJs(ctx, w))].concat(bindSurface(ctx, r))))]
-            .Gate(values: vs, fields: fs) :> [sexpr(rtCall(ctx, "gate", [scopeVar(), node, JsExpr.JArrowE([], JsExpr.JArray(surfacesJs(ctx, fs)))]))]
+            .Gate(values: vs, fields: fs) :> [sexpr(rtCall(ctx, "gate", [scopeVar(), node, JsExpr.JArrowE([], JsExpr.JArray(gateSurfacesJs(ctx, fs)))]))]
+        }
+    }
+
+    // s472 — a View.Reach marker (§55.17.3): while its markup list is mounted
+    // it registers the bound surfaced fields that list names, evaluated in the
+    // list's own context; a gated form whose subtree holds the marker gates them.
+    fn reachJs(ctx: Ctx, fs: ValidityOf[], node: JsExpr) -> Rendered {
+        return only([sexpr(rtCall(ctx, "reach", [scopeVar(), node, JsExpr.JArrowE([], JsExpr.JArray(gateSurfacesJs(ctx, fs)))]))])
+    }
+
+    // The records a gate (or a Reach) judges. A field reached through an `as=`
+    // handle is read with a presence check: an absent handle names no instance,
+    // so there is no value to gate (`validityIf` gives null, which the gate skips).
+    fn gateSurfacesJs(ctx: Ctx, fs: ValidityOf[]) -> JsExpr[] {
+        let out: JsExpr[] = []
+        for (const f of fs) { out = out.concat([gateSurfaceJs(ctx, f)]) }
+        return out
+    }
+
+    fn gateSurfaceJs(ctx: Ctx, v: ValidityOf) -> JsExpr {
+        return match v {
+            .OfField(decl: d, inst: i, idx: x) :> gateFieldJs(ctx, v, d, i, x)
+            .OfDecl(decl: d, inst: i) :> surfaceJs(ctx, v)
+        }
+    }
+
+    fn gateFieldJs(ctx: Ctx, v: ValidityOf, d: Sym, i: InstRef, x: int) -> JsExpr {
+        return match i {
+            .Alias(sym: s) :> rtCall(ctx, "validityIf", [instJs(ctx, i), JsExpr.JAnnot(jnum(x), memberName(ctx, d, x))])
+            .Shared(decl: y) :> surfaceJs(ctx, v)
+            .Lexical(depth: k) :> surfaceJs(ctx, v)
+            .Narrowed(sym: s) :> surfaceJs(ctx, v)
+            .Kid(of: o) :> surfaceJs(ctx, v)
+            .HandleOf(of: o) :> rtCall(ctx, "validityIf", [instJs(ctx, i), JsExpr.JAnnot(jnum(x), memberName(ctx, d, x))])
         }
     }
 
@@ -2247,6 +2274,7 @@ ${
             .Effect(deps: ds) :> false
             .ResetOn(triggers: ds) :> false
             .Errors(of: x) :> false
+            .Reach(fields: fs) :> false
             .Gather(g: x) :> false
         }
     }
@@ -2580,6 +2608,7 @@ ${
             .Effect :> []
             .ResetOn :> []
             .Errors :> []
+            .Reach :> []
             .Gather :> []
         }
     }
