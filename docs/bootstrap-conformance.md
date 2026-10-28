@@ -13,24 +13,24 @@ Scope: **1813 of 1813 cases attempted** — every attempted case reached the pur
 |---|---:|---:|
 | PASS | 254 | 14.0% |
 | CODES-ONLY | 0 | 0.0% |
-| FAIL | 51 | 2.8% |
+| FAIL | 49 | 2.7% |
 | LEGACY | 0 | 0.0% |
 | NOT-TWINNED | 685 | 37.8% |
-| UNSUPPORTED | 823 | 45.4% |
+| UNSUPPORTED | 825 | 45.5% |
 | CRASH | 0 | 0.0% |
 | INVALID | 0 | 0.0% |
 
-**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 305; of those, 254 hold (83.3%). Runtime half executed on the bootstrap for 101 case(s).
+**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 303; of those, 254 hold (83.8%). Runtime half executed on the bootstrap for 101 case(s).
 
 - **Vacuous** passes: 19 of 254 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **235**.
-- FAILs whose required code appears nowhere in the bootstrap's sources (check not implemented): 25 of 51; the other 26 are implemented checks that answered wrong.
+- FAILs whose required code appears nowhere in the bootstrap's sources (check not implemented): 24 of 49; the other 25 are implemented checks that answered wrong.
 
 LEGACY by marker (a case may carry several): none.
-UNSUPPORTED by reason: bootstrap-unsupported 515 · parse-reject 308.
+UNSUPPORTED by reason: bootstrap-unsupported 516 · parse-reject 309.
 
 ### §66 twins (S449 dialect ruling 1 — generated at test time by the `scrml fix` §66 rules)
 
-Legacy-dialect cases graded on their generated §66 twin: **793** — PASS 154 · FAIL 36 · UNSUPPORTED 603. Twin holds 154 (non-vacuous 139). Every twin verdict above is included in the bucket table.
+Legacy-dialect cases graded on their generated §66 twin: **793** — PASS 154 · FAIL 34 · UNSUPPORTED 605. Twin holds 154 (non-vacuous 139). Every twin verdict above is included in the bucket table.
 - `dialect.s66` overrides: 0 replace a twin's expectations · 11 exclude a case.
 - Superseded-code mappings applied: 2 case(s) (E-ENGINE-VAR-DUPLICATE→E-SCOPE-010). Rows: E-ENGINE-VAR-DUPLICATE→E-SCOPE-010 [applied] · E-ENGINE-STATE-CHILD-INVALID-VARIANT→∅ [owed] · E-ENGINE-RULE-INVALID-VARIANT→∅ [owed] · E-ENGINE-INITIAL-INVALID-VARIANT→∅ [owed] · E-CELL-NO-RENDER-SPEC→∅ [owed] · E-CELL-RENDER-SPEC-NOT-BINDABLE→∅ [owed] · E-DECL-RHS-INTERP-WRAPPED→∅ [owed] · E-COMPONENT-010→∅ [owed].
 
@@ -108,8 +108,8 @@ NOT-TWINNED by reason (685 cases; a case counts once per distinct reason):
 | codegen | 4 | · | · | · | · | 3 | 1 | · | · |
 | components | 68 | · | · | 1 | · | 65 | 2 | · | · |
 | condition | 36 | 18 | · | 5 | · | 8 | 5 | · | · |
-| control-flow | 76 | 16 | · | 2 | · | 21 | 37 | · | · |
-| defer | 51 | 14 | · | 3 | · | 4 | 30 | · | · |
+| control-flow | 76 | 16 | · | 1 | · | 21 | 38 | · | · |
+| defer | 51 | 14 | · | 2 | · | 4 | 31 | · | · |
 | derived | 6 | · | · | · | · | 5 | 1 | · | · |
 | each | 25 | · | · | · | · | 25 | · | · | · |
 | element-refusal | 34 | 7 | · | · | · | 11 | 16 | · | · |
@@ -163,7 +163,7 @@ NOT-TWINNED by reason (685 cases; a case counts once per distinct reason):
 | tenant | 23 | · | · | · | · | · | 23 | · | · |
 | type-state-codes | 32 | 3 | · | 1 | · | 3 | 25 | · | · |
 
-### FAIL (51)
+### FAIL (49)
 
 - `components/post-ce-residual-component-reject` (codes; not in the bootstrap: E-COMPONENT-035)
   - missing E-COMPONENT-035
@@ -182,16 +182,10 @@ NOT-TWINNED by reason (685 cases; a case counts once per distinct reason):
 - `condition/unresolved-ternary-arm-neg` (codes)
   - missing E-COND-NOT-BOOLEAN
   - count: E-COND-NOT-BOOLEAN fired 0 time(s), expected exactly 3
-- `control-flow/ctrl-004-else-on-state-opener-pos` (twin · codes; not in the bootstrap: E-CTRL-004)
-  - missing E-CTRL-004
-  - severity: E-CTRL-004 did not fire (expected error)
 - `control-flow/ctrl-010-else-on-for-without-lift-neg` (twin · twin-extra-error)
   - twin emitted unasserted error(s): E-LOOP-007, E-VALUE-WRITES-STATE
 - `defer/control-flow-neg` (twin · twin-extra-error)
   - twin emitted unasserted error(s): E-TYPE-001
-- `defer/deferred-server-call-completes` (twin · codes+runtime)
-  - forbidden family E-DEFER-* fired: E-DEFER-UNHANDLED-FAILABLE
-  - runtime: no artifact — the compile reported an error (E-DEFER-UNHANDLED-FAILABLE)
 - `defer/scope-redeclare-with-defer-neg` (twin · twin-extra-error)
   - twin emitted unasserted error(s): E-DEFER-LATER-SHADOW
 - `engine/initial-invalid-variant-pos` (twin · codes; not in the bootstrap: E-ENGINE-INITIAL-INVALID-VARIANT)
@@ -573,7 +567,7 @@ none
 - `type-state-codes/e-type-081-partial-match-render-neg` — PASS · TWIN · VACUOUS
 - `type-state-codes/e-type-lifecycle-on-engine-cell-neg` — PASS · TWIN · VACUOUS
 
-### UNSUPPORTED (823)
+### UNSUPPORTED (825)
 
 - `api/api-base-missing-neg` — bootstrap-unsupported: `<api>` is a scrml structural element (§60), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `api/api-clean-pos` — twin · bootstrap-unsupported: `<api>` is a scrml structural element (§60), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
@@ -703,6 +697,7 @@ none
 - `control-flow/ctrl-003-extend-past-else-neg` — parse-reject: E-PARSE-TAG: unexpected `{` in the tag `<session`
 - `control-flow/ctrl-003-extend-past-else-pos` — parse-reject: E-PARSE-TAG: unexpected `{` in the tag `<session`
 - `control-flow/ctrl-004-else-on-state-opener-neg` — parse-reject: E-PARSE-TAG: unexpected `{` in the tag `<session`
+- `control-flow/ctrl-004-else-on-state-opener-pos` — twin · parse-reject: E-PARSE-TAG: expected a tag name after `<`
 - `control-flow/ctrl-004-orphan-else-on-state-opener-pos` — parse-reject: E-PARSE-TAG: expected a tag name after `<`
 - `control-flow/ctrl-005-else-and-if-same-element-neg` — parse-reject: E-PARSE-TAG: unexpected `{` in the tag `<session`
 - `control-flow/ctrl-005-else-and-if-same-element-pos` — parse-reject: E-PARSE-TAG: unexpected `{` in the tag `<session`
@@ -744,6 +739,7 @@ none
 - `defer/cps-batch0-failure` — twin · bootstrap-unsupported: `<schema>` is a scrml structural element (§39.2), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `defer/cps-batch1-failure` — twin · bootstrap-unsupported: `<schema>` is a scrml structural element (§39.2), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `defer/deferred-host-error-runs-rest` — twin · bootstrap-unsupported: the built-in type `asIs` (§14.1.2) is not in the bootstrap — its type system has no unresolved-value type; give the value a declared type
+- `defer/deferred-server-call-completes` — twin · bootstrap-unsupported: a client call of the server function `ping` (§19.9.10) stands in a `defer` body — a deferred body cannot wait (C16; §19.16.6 async `defer` arrives with its own slice)
 - `defer/duplicate-function-neg` — twin · parse-reject: E-STMT-MISSING-SEMICOLON: Expected `;` to end the statement — insert `;` after `function`. A `;` ends every statement that is not block-like, the last one before a `}` included (`{ @n = @n + 1; }`); a
 - `defer/duplicate-function-no-defer-ok` — twin · parse-reject: E-STMT-MISSING-SEMICOLON: Expected `;` to end the statement — insert `;` after `function`. A `;` ends every statement that is not block-like, the last one before a `}` included (`{ @n = @n + 1; }`); a
 - `defer/function-hoist-across-defer` — twin · parse-reject: E-STMT-MISSING-SEMICOLON: Expected `;` to end the statement — insert `;` after `";"`. A `;` ends every statement that is not block-like, the last one before a `}` included (`{ @n = @n + 1; }`); a newl
