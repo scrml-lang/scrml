@@ -959,6 +959,8 @@ ${
             .Lexical(depth: k) :> "L" + k
             .Alias(sym: s) :> "A" + s.id
             .Narrowed(sym: s) :> "N" + s.id
+            .Kid(of: o, idx: k) :> "K(" + instIdKey(o) + "," + k + ")"
+            .HandleOf(of: o, sym: s) :> "H(" + instIdKey(o) + "," + s.id + ")"
         }
     }
 
@@ -973,6 +975,7 @@ ${
             .Effect(deps: ds, body: b) :> checkEffect(p, encl, ds, b)
             .ResetOn(triggers: ds, reset: b) :> checkResetOn(p, encl, ds, b)
             .Errors(of: x) :> checkSurface(p, encl, x)
+            .Reach(fields: fs) :> checkGateFields(p, encl, fs)
             .Gather(g: g, rows: rows) :> checkLoop(g.head, g.body).concat(viewGatherDefers(g.body)).concat(checkViewGather(p, g, rows))
             .El(tag: t, attrs: attrs) :> checkGates(t, attrs).concat(checkStaticSinks(t, attrs))
             .Text(text: x) :> []
@@ -1476,6 +1479,8 @@ ${
             .Lexical(depth: n) :> not
             .Alias(sym: s) :> not
             .Narrowed(sym: s) :> not
+            .Kid(of: o) :> sharedDeclOf(o)
+            .HandleOf(of: o) :> sharedDeclOf(o)
         }
     }
 
@@ -1512,6 +1517,7 @@ ${
             .Effect(deps: x) :> not
             .ResetOn(triggers: x) :> not
             .Errors(of: x) :> not
+            .Reach(fields: fs) :> not
             .Gather(g: x) :> not
         }
     }
@@ -1642,6 +1648,7 @@ ${
             .Effect(body: b) :> tailBlock(b, true, [], "an effect body")
             .ResetOn(reset: b) :> tailBlock(b, false, [], "a reset-on reset")
             .Errors(of: x) :> []
+            .Reach(fields: fs) :> []
             .Gather(g: g) :> tailBlock(g.body, false, [], "a Tier-0 loop")
             .El(tag: x) :> []
             .Text(text: x) :> []
@@ -2653,6 +2660,7 @@ ${
             .Effect(body: b) :> jumpBlock(b, [])
             .ResetOn(reset: b) :> jumpBlock(b, [])
             .Errors(of: x) :> []
+            .Reach(fields: fs) :> []
             .Gather(g: g) :> jumpBlock(g.body, [g.label.id])
             .El(tag: x) :> []
             .Text(text: x) :> []
@@ -2843,6 +2851,7 @@ ${
             .Effect(body: b) :> liftBlock(b, -1, -1)
             .ResetOn(reset: b) :> liftBlock(b, -1, -1)
             .Errors(of: x) :> []
+            .Reach(fields: fs) :> []
             .El(tag: x) :> []
             .Text(text: x) :> []
             .RawText(text: x) :> []
@@ -3299,6 +3308,8 @@ ${
             .Lexical(depth: k) :> "Lexical(" + k + ")"
             .Alias(sym: s) :> "Alias(" + s.hint + ")"
             .Narrowed(sym: s) :> "Narrowed(" + s.hint + ")"
+            .Kid(of: o, idx: k) :> "Kid(" + instText(o) + ", " + k + ")"
+            .HandleOf(of: o, sym: s) :> "HandleOf(" + instText(o) + ", " + s.hint + ")"
         }
     }
 
@@ -3869,6 +3880,8 @@ ${
             .Lexical(depth: k) :> lexicalDecl(encl, k)
             .Alias(sym: h) :> aliasDecl(p, h)
             .Narrowed(sym: c) :> narrowedDecl(p, encl, c)
+            .Kid(of: o, decl: d) :> findDecl(p, d)
+            .HandleOf(sym: h) :> aliasDecl(p, h)
         }
     }
 
@@ -3919,6 +3932,7 @@ ${
             .Effect(deps: ds) :> not
             .ResetOn(triggers: ds) :> not
             .Errors(of: ds) :> not
+            .Reach(fields: fs) :> not
             .Gather(g: x) :> not
         }
     }
