@@ -46,7 +46,7 @@
 // de-leak; completed S179 across auth.js, oauth.js, and store.js.
 // S472: `floor` is the raw, non-trapping host floor (math.js floorUnchecked) — the §41.18
 // `floor` traps on NaN / ±∞ (E-INT-CONVERSION-RT); the JWT / TOTP clock arithmetic keeps its behaviour.
-import { floorUnchecked as floor, max as mathMax } from "./math.js";
+import { floorUnchecked as floor, maxUnchecked as mathMax } from "./math.js";
 import { now as clockNow } from "./time.js";
 import { get as httpGet } from "./http.js";
 import { generateToken } from "./crypto.js";

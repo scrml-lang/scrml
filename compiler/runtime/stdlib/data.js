@@ -45,7 +45,7 @@
 // `Rule.Max`), and the aliases keep the names free of that history.
 // S472: `ceil` is the raw, non-trapping host ceil (math.js ceilUnchecked) — the §41.18 `ceil`
 // traps on NaN / ±∞ (E-INT-CONVERSION-RT); paginate keeps its behaviour.
-import { min as mathMin, max as mathMax, ceilUnchecked as ceil } from "./math.js";
+import { minUnchecked as mathMin, maxUnchecked as mathMax, ceilUnchecked as ceil } from "./math.js";
 
 // ---------------------------------------------------------------------------
 // transform.scrml — data transformation utilities (pure, browser-safe)

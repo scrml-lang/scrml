@@ -96,9 +96,15 @@ describe("scrml:math — min / max (two numbers), minOf / maxOf (a tape)", () =>
     expect(math.min(10, 4)).toBe(4);
     expect(math.max(10, 4)).toBe(10);
   });
-  test("M7: min / max take two numbers — a third is not read", () => {
-    expect(math.min(3, 1, -9)).toBe(1);
-    expect(math.max(3, 1, 99)).toBe(3);
+  // §41.18 S472: "a third argument to `min` / `max` is `E-CALL-ARITY`" — impl#1 does not check call
+  // arity at compile time, so the shim REFUSES at run time instead of answering (review MED-1, S473:
+  // the frozen shim returned min(3,1,0) = 1, max(1,2,9) = 2).
+  test("M7: min / max take two numbers — a third (or one, or a spread tape) is E-CALL-ARITY, never an answer", () => {
+    expect(trapCode(() => math.min(3, 1, 0))).toBe("E-CALL-ARITY");
+    expect(trapCode(() => math.max(1, 2, 9))).toBe("E-CALL-ARITY");
+    expect(trapCode(() => math.min(3))).toBe("E-CALL-ARITY");
+    expect(trapCode(() => math.max(...[1, 2, 3, 4]))).toBe("E-CALL-ARITY");
+    expect(trapCode(() => math.min("3", 1))).toBe("E-CALL-ARGUMENT");
   });
   test("M8: minOf / maxOf over a tape; `not` (null) for an empty tape", () => {
     expect(math.minOf([5, 2, 8])).toBe(2);
@@ -175,8 +181,55 @@ describe("scrml:math — isNaN (Number.isNaN, no coercion)", () => {
   test("M24: real number → false", () => {
     expect(math.isNaN(42)).toBe(false);
   });
-  test("M25: numeric string is NOT coerced → false", () => {
-    expect(math.isNaN("42")).toBe(false);
+  // §41.18 S472: `isNaN(x: number) -> bool` — a string is not a call the API defines.
+  test("M25: a non-number is refused (E-CALL-ARGUMENT), never coerced", () => {
+    expect(trapCode(() => math.isNaN("42"))).toBe("E-CALL-ARGUMENT");
+  });
+});
+
+// S473 review MED-1: impl#1 has no call-arity / argument-type check, so every public shim export
+// refuses a call shape the S469 API does not define, at run time, instead of picking an answer.
+describe("scrml:math — a call shape the S469 API does not define is refused at run time", () => {
+  // §41.18: "`radix` is REQUIRED in the S469 signature `parseInt(s: string, radix: int)`; base-10 text
+  // is `int.parse(s)` … An omitted radix is `E-CALL-ARITY`." So `parseInt("42")` is NOT 42 and NOT
+  // `not` (the frozen shim returned null) — it is refused.
+  test("M26: parseInt without a radix is E-CALL-ARITY; parseInt(\"42\", 10) is 42", () => {
+    expect(trapCode(() => math.parseInt("42"))).toBe("E-CALL-ARITY");
+    expect(math.parseInt("42", 10)).toBe(42);
+    expect(trapCode(() => math.parseInt(42, 10))).toBe("E-CALL-ARGUMENT");
+    expect(trapCode(() => math.parseInt("42", "10"))).toBe("E-CALL-ARGUMENT");
+    // a radix that is a number outside 2–36 stays a failed parse (§41.18 "PA reading": never a trap)
+    expect(math.parseInt("1", 1.5)).toBe(null);
+  });
+  // §41.18: "`toNumber(s: string) -> number | not` … Whole-string parse, as `number.parse`" (struck:
+  // "Whole-value coercion (`Number(value)`)"). `toNumber(5)` is not a call the API defines: refused
+  // (the frozen shim returned null, the pre-S469 shim returned 5).
+  test("M27: toNumber / parseFloat of a non-string is E-CALL-ARGUMENT", () => {
+    expect(trapCode(() => math.toNumber(5))).toBe("E-CALL-ARGUMENT");
+    expect(trapCode(() => math.parseFloat(5))).toBe("E-CALL-ARGUMENT");
+    expect(trapCode(() => math.toNumber())).toBe("E-CALL-ARITY");
+    expect(math.toNumber("5")).toBe(5);
+  });
+  test("M28: every one-number member refuses a wrong count and a non-number", () => {
+    for (const f of [math.floor, math.ceil, math.trunc, math.abs, math.isNaN]) {
+      expect(trapCode(() => f())).toBe("E-CALL-ARITY");
+      expect(trapCode(() => f(1, 2))).toBe("E-CALL-ARITY");
+      expect(trapCode(() => f("1"))).toBe("E-CALL-ARGUMENT");
+    }
+    expect(trapCode(() => math.round(2.5))).toBe("E-CALL-ARITY");
+    expect(trapCode(() => math.round(2.5, "HalfUp", 1))).toBe("E-CALL-ARITY");
+    expect(trapCode(() => math.clamp(1, 2))).toBe("E-CALL-ARITY");
+    expect(trapCode(() => math.clamp(1, "0", 2))).toBe("E-CALL-ARGUMENT");
+  });
+  test("M29: minOf / maxOf take one tape of numbers", () => {
+    expect(trapCode(() => math.minOf(3, 1))).toBe("E-CALL-ARITY");
+    expect(trapCode(() => math.maxOf("abc"))).toBe("E-CALL-ARGUMENT");
+    expect(trapCode(() => math.minOf(null))).toBe("E-CALL-ARGUMENT");
+    expect(trapCode(() => math.maxOf([1, "2"]))).toBe("E-CALL-ARGUMENT");
+  });
+  test("M30: the runtime's internal unchecked min / max keep their behaviour (data.js / auth.js)", () => {
+    expect(math.minUnchecked(3, 1)).toBe(1);
+    expect(math.maxUnchecked(0, -2)).toBe(0);
   });
 });
 
