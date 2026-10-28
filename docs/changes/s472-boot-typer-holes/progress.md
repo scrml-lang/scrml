@@ -63,3 +63,12 @@ Branch `s472-boot-typer-holes`, base origin/main `e8d2e38cd`. Input: the S472 ba
   `slice-m4/value-form-s469.test.js` `return for … ` into `int[]` shows `f(@zs).length` (a tape in
   markup text is now E-TEXT-NON-PRIMITIVE).
 - Tests: `slice-m4/typer-holes-s472.test.js` — 47 tests; on main 34 fail (every repro), 13 controls pass.
+
+## Checkpoint (wrap)
+
+- Done: F1, F2, O2 fixes, tests, red-proof, gaps filed/resolved, §34 row, 3 stale conformance cases, merge of origin/main (#1614).
+- CI `checks` steps run locally on the merged HEAD: types-gate, snippet-gate, claim-gate, compile-floor, md-shim,
+  bootstrap-conformance --check, conflict-marker, SPEC-INDEX, delta-lint, s34-census --check-new --base origin/main all pass.
+  gen-bootstrap-severity --check was STALE ON MAIN (E-IMPORT-003/008/009 rows from another lane), so severity.scrml is regenerated in this branch.
+- Slices (m1, m1 lowered, m2, m3, m4, codec) and the unit/integration/conformance suites passed in the pre-commit runs.
+- Not run locally yet: `bun test compiler/tests/e2e-render-map/` and `bun test compiler/tests/*.test.js` outside the hook (the hook does run the latter).
