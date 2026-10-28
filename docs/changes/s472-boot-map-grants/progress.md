@@ -20,3 +20,11 @@ Gap: g-boot-map-position-write-bypasses-element-tape-grants-s472 (HIGH, fail-ope
 - branch from origin/main c8070b56a.
 - tests: slice-m4/map-grants-s472.test.js (17). Red on base: 13 of 15 initial fail.
 - commit 1: analyze + check + tests.
+- red-proof: map-grants-s472.test.js against base c8070b56a analyze/check — 3 pass / 14 fail (the 3
+  pass: the granted control, the `write`-only control, the already-refused `@b.g = @b.g.map(…)`).
+- 768529441 analyze + check + tests; 707edc58a known-gaps narrowed (counts unchanged: still open HIGH).
+- 02194fd32 merge origin/main (#1608 payload variants: `positionalValue` gains the VariantOf arm).
+- bootstrap-conformance --write: no change (report already current).
+- slices (lint, m1, m2, m1-lowered, m3, m4, codec) + e2e-render-map: green post-merge.
+- Pre-commit hook: the default shard plan timed out twice on a loaded host (one 1655-file shard, 1200 s);
+  re-run with SCRML_HOOK_SHARDS=5 (a shard count, not a bypass) — green.
