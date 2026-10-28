@@ -33,7 +33,7 @@
 // never decides what to await (S467 §13 gate item 1).
 // =============================================================================
 
-import { encode, decode, failure, failed, runDefers, eq, indexRead, atRead, CodecDefect, CSRF_COOKIE, CSRF_HEADER,
+import { encode, decode, failure, failed, runDefers, eq, indexRead, atRead, writePath, CodecDefect, CSRF_COOKIE, CSRF_HEADER,
   strSlice, strCharAt, strSplit, strLength, strIncludes, strStartsWith, strEndsWith,
   strIndexOf, strLastIndexOf, strReplace, strReplaceAll, strPadStart, strPadEnd, strRepeat,
   parseIntText, parseNumText, parseBoolText, textOf,
@@ -43,7 +43,7 @@ import { encode, decode, failure, failed, runDefers, eq, indexRead, atRead, Code
 // both artifacts): a failure value, the test for one, the `defer` stack,
 // structural equality (§45), (s469) the tape index reads (§49.13), and (s469)
 // the typed string / tape built-ins.
-export { failure, failed, runDefers, eq, indexRead, atRead };
+export { failure, failed, runDefers, eq, indexRead, atRead, writePath };   // s472: writePath — a local part write (print.scrml assignedJs)
 export { strSlice, strCharAt, strSplit, strLength, strIncludes, strStartsWith, strEndsWith, sortNum, sortStr, sortBy, reversed, joinStr };
 // s469 — the admitted string additions (Appendix D.1) and the strict parses (§14.13.4): the SAME
 // function objects the client runtime exports (one definition, never a server copy)

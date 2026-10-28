@@ -75,3 +75,15 @@ base: origin/s472-boot-link-visibility 67bd70862 (#1606). Gap: g-boot-payload-va
 - Every `checks` step run locally: types-gate, root tests (2239/0), snippet-gate, claim-gate, compile-floor,
   facts (WARN), md shim, bootstrap-conformance --check, conflict markers, SPEC-INDEX, delta-lint, ci-shards needs,
   s34-census vs origin/main — all PASS.
+
+## Merge with #1610 (position + local-part writes)
+- Code merged with no textual conflict; impl#1 checks match exhaustiveness when building the bundle (it caught a
+  missed ValueFact arm in round 0) but NOT call arity, so by hand: #1610 added no Expr / ValueFact variant (its
+  additions are EditKind.PositionAt, PathStep, Stmt.Assign.path, EffectFact.EPosition); every Expr match carries
+  VariantOf beside StructOf (check 17/17, lower 7/7, print 7/7, print-server 3/3, walk 2/2, ingest 2/2,
+  measure 1/1) and every ValueFact match VConstruct beside VStructOf (analyze 14/14, lower 8/8); this branch
+  calls no constructor or function #1610 changed.
+- known-gaps.md: #1610 carried g-boot-position-write-s472 / g-boot-local-part-write-s472 RESOLVED; this branch's
+  OPEN copies were dropped (one entry, one marker). 2425 named gap ids in the union of both sides = 2425 merged.
+- New tests: a position write / a local part write whose value is a construction types its payload
+  (E-TYPE-031 / E-TYPE-082), and runs (26).

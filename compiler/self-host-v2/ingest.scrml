@@ -637,7 +637,7 @@ ${
         }
         const l: LocalInfo | not = findLocal(cx, name)
         if (l is not) return notYetS(cx, "stmt: assignment to a free identifier")
-        return stmtsOf(cx, [Stmt.Assign(l.sym, next.e)], why)
+        return stmtsOf(cx, [Stmt.Assign(l.sym, next.e, [])], why)
     }
 
     fn compound(op: string, cur: LE, v: LE) -> LE {

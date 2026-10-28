@@ -32,7 +32,7 @@ ${
              EditKind, Check, Stmt, Block, Attr, ConstructAttr, CondArm, View, EffectDep, FieldMode, FieldRole,
              GrantSet, TransitionGraph, Field, DeclKind, WiringAttr, Decl, Param, Fn, CoreProgram, Validator, SurfaceProp, ValidityOf, Persist,
              ServerFn, SqlMode, Db, SqlQuery, SqlKind, SqlTables, SqlColumns, Failable, OkArm, ErrArm, VariantDef,
-             LoopHead, EachHead, RangeHead, HostCall, CssUnit, CssDecl, CoreCss, CssVar, Gather, Lifted, GatherRow,
+             LoopHead, EachHead, RangeHead, HostCall, CssUnit, CssDecl, CoreCss, CssVar, Gather, Lifted, GatherRow, PathStep,
              block, litStr, mkSym, typeDefSym, readField } from "./core.scrml"
     import { partsText } from "./css.scrml"
     import { ASpan, BinOp, UnOp, AExpr, AProp, AExprK, AStmt, ABlock, AStmtK, AEffect, AType, AParam, AFn,
@@ -46,7 +46,7 @@ ${
              SqlInfo, HandledFact, FailFact, Retag, RemoteFact, SuspendPlan, SuspendAt, SuspendK, PlainMatch, PlainArm, plainFactOf,
              nameFact, valueFact, effectFact, bindFact, elemFact, attrFact, declInfo, presenceTest, sqlInfo, isServerPlaced,
              failFact, builtinFile, blockReference, suspendAtOf, tempOf, joinOf, retOf, remoteCaller, serverCallErrorName,
-             sqlParamRep, distinctSqlParams, CssFacts, CssInline, CssBridge } from "./analyze.scrml"
+             sqlParamRep, distinctSqlParams, CssFacts, CssInline, CssBridge, LStep } from "./analyze.scrml"
 
     // s451 — THE DIAGNOSTICS GATE. `core` is `not` whenever the analysis
     // reported an ERROR — a diagnostic whose §34 Severity column reads Error,
@@ -999,10 +999,11 @@ ${
             .EWrite(w: w) :> writeStmt(c, w, value)
             .ESpread(ws: ws, inst: si, snap: sn, fields: sf) :> spreadStmts(c, ws, si, sn, sf, value)
             .EReset(w: w, decl: d, idx: i) :> resetStmt(c, w, d, i)
-            .EAssignLocal(sym: s) :> assignLocal(c, s, value)
+            .EAssignLocal(sym: s, path: pa) :> assignLocal(c, s, pa, value)
             .EEdits(w: w, elems: es, tmps: ts, snap: sn) :> editStmts(c, w, es, ts, sn)
             .ERemove(w: w) :> [Stmt.Write(w.cap, instOf(c, w.inst), w.edit, Expr.Lit(Literal.Int(1)), w.check)]
             .EElemAt(cap: cap, inst: i, index: ix, path: path) :> elemAtStmt(c, cap, i, ix, path, value)
+            .EPosition(cap: cap, inst: i, index: ix, loc: lc) :> positionStmt(c, cap, i, ix, lc, value)
             not :> [Stmt.Eval(lowerExpr(c, e))]
         }
     }
@@ -1014,6 +1015,14 @@ ${
         if (value is not) return []
         return [Stmt.Write(cap, instOf(c, i), EditKind.ElemAt(lowerExpr(c, ix), path), lowerExpr(c, value), Check.Static)]
     }
+    // s472 — `@xs[i] = v` → Write(cap, inst, PositionAt(i, loc), v): a position
+    // write, judged by analyze against the tape's `write` grant (§66.12.6 rule 3)
+    // and re-checked in Core (check.scrml C3).
+    fn positionStmt(c: LC, cap: Sym, i: InstRef, ix: AExpr, loc: string, value: AExpr | not) -> Stmt[] {
+        if (value is not) return []
+        return [Stmt.Write(cap, instOf(c, i), EditKind.PositionAt(lowerExpr(c, ix), loc), lowerExpr(c, value), Check.Static)]
+    }
+
     // The value a write stores: an assignment's right side, or the element of
     // an edit method call (`@x.push(v)`).
     fn assignedValue(k: AExprK) -> AExpr | not {
@@ -1102,9 +1111,21 @@ ${
         return lets.concat([edit])
     }
 
-    fn assignLocal(c: LC, s: Sym, value: AExpr | not) -> Stmt[] {
+    // A local rebinding (`path` empty), or (s472) a write to a part of the
+    // local: Assign with the path analyze resolved — its indices lowered in
+    // order, before the value (the order they are evaluated in).
+    fn assignLocal(c: LC, s: Sym, path: LStep[], value: AExpr | not) -> Stmt[] {
         if (value is not) return []
-        return [Stmt.Assign(s, lowerExpr(c, value))]
+        let steps: PathStep[] = []
+        for (const st of path) { steps = steps.concat([lowerStep(c, st)]) }
+        return [Stmt.Assign(s, lowerExpr(c, value), steps)]
+    }
+
+    fn lowerStep(c: LC, st: LStep) -> PathStep {
+        return match st {
+            .LField(ref: r) :> PathStep.StepField(r)
+            .LIndex(index: ix, loc: lc) :> PathStep.StepIndex(lowerExpr(c, ix), lc)
+        }
     }
 
     // O58 (b): `@x = { ...@x, f: v }` → one contract-checked Write per override.
@@ -1712,6 +1733,7 @@ ${
             .RemoveFront :> []
             .RemoveAnywhere :> []
             .ElemAt(index: x) :> []
+            .PositionAt(index: x) :> []
         }
     }
 

@@ -229,6 +229,25 @@ describe("review round 1 — refusals the first round missed", () => {
     });
   }
 
+  // merge with #1610 (position + local-part writes): a payload construction as the VALUE of a
+  // position write or a local part write is typed like any other construction
+  test("a position write / a local part write of a construction: its payload is type-checked", () => {
+    const TAPE = `    type Box:struct = { s: Shape }\n    <xs:Shape[write]=([Shape.Dot])/>`;
+    expect([...new Set(errs(P(`${TAPE}\n    function f() {\n        @xs[0] = Shape.Circle("big");\n    }`)))]).toEqual(["E-TYPE-031"]);
+    expect([...new Set(errs(P(`${TAPE}\n    function f() {\n        @xs[0] = .Rect(1);\n    }`)))]).toEqual(["E-TYPE-082"]);
+    expect([...new Set(errs(P(`${TAPE}\n    function f() -> int {\n        let b: Box = { s: Shape.Dot };\n        b.s = .Rect(1, "2");\n        return 0;\n    }`)))]).toEqual(["E-TYPE-031"]);
+    expect([...new Set(errs(P(`${TAPE}\n    function f() -> int {\n        let ys: Shape[write] = [Shape.Dot];\n        ys[0] = Shape.Circle(true);\n        return 0;\n    }`)))]).toEqual(["E-TYPE-031"]);
+  });
+
+  test("compiled and RUN: a position write and a local part write of a construction", async () => {
+    const r = compile(P(`    type Box:struct = { s: Shape }\n    <xs:Shape[write]=([Shape.Dot, Shape.Dot])/>\n    let <out:int=0/>\n${AREA}\n    function step() {\n        @xs[1] = .Rect(2, 7);\n        let b: Box = { s: Shape.Dot };\n        b.s = Shape.Circle(2);\n        @out = area(@xs[1]) + area(b.s);\n    }`, `        <button id="b" onclick=step()>b</button>\n        <p id="o">\${@out}</p>`));
+    expect(check(r.core)).toEqual([]);
+    await loadProgram(r.core, "s472-pw-" + k++);
+    click(document.querySelector("#b"));
+    await settle();
+    expect(document.querySelector("#o").textContent).toBe("26");
+  });
+
   test("F3: the refusal names the constructor reading (§45.7) — bare and qualified alike", () => {
     for (const d of [`    let <x:Shape=(.Circle)/>`, `    let <x:Shape=(Shape.Circle)/>`]) {
       const r = frontEndOf(P(d));

@@ -51,7 +51,9 @@ const FORMS = [
   ["cell: `@xs = v` (replace)", [cell("int[free, append]"), "@xs = [1];", ["E-WRITE-NOT-GRANTED"]], [cell("int[replace]"), "@xs = [1];", []]],
   ["cell: `reset(@xs)` (replace)", [cell("int[free, append]"), "reset(@xs);", ["E-WRITE-NOT-GRANTED"]], [cell("int[replace]"), "reset(@xs);", []]],
   ["cell: JS `push` / `unshift` / `splice` (refused by name)", [cell("int[free, insert, remove]"), "@xs.push(1);", ["E-TAPE-JS-METHOD"]], null],
-  ["cell: `@xs[i] = v` (position write)", [cell("int[free, append]"), "@xs[0] = 1;", ["E-BOOTSTRAP-UNSUPPORTED"]], null],
+  // s472: a position write (`write`, §66.12.6 rule 3) — Core PositionAt
+  ["cell: `@xs[i] = v` (position write)", [cell("int[free, append]"), "@xs[0] = 1;", ["E-WRITE-NOT-GRANTED"]], [cell("int[write]"), "@xs[0] = 1;", []]],
+  ["cell: `@ks[i] = v` replaces the element's tape field (rule 4)", [`    type K:struct = { name: string, kids: int[free, append] }\n    <ks:K[write]=([])/>\n`, "@ks[0] = { name: \"k\", kids: [] };", ["E-WRITE-NOT-GRANTED"]], [`    type K:struct = { name: string, kids: int[free, append, replace] }\n    <ks:K[write]=([])/>\n`, "@ks[0] = { name: \"k\", kids: [] };", []]],
 
   // ---- a struct field whose type is a tape (fieldAtWrite) — its OWN grants, never the owner's `let`
   ["struct field: `@b.xs = v`", [box("int[free, append]"), "@b.xs = [1];", ["E-WRITE-NOT-GRANTED"]], [box("int[free, append, replace]"), "@b.xs = [1];", []]],
@@ -79,12 +81,20 @@ const FORMS = [
   ["local: an inferred tape from a granted cell (`let s = @xs`)", [cell("int[free, append, remove]"), "let s = @xs;\n        s = s.filter(x => x > 0);", ["E-WRITE-NOT-GRANTED"]], [cell("int[free, append, remove]"), "let s: int[free, remove] = @xs;\n        s = s.filter(x => x > 0);", []]],
   ["local: a struct local rebound whole", [box("int[free, append]"), "let q: Box = @b;\n        q = { title: \"u\", xs: [] };", ["E-WRITE-NOT-GRANTED"]], [box("int[free, append]"), "let q: Box = @b;\n        q = { title: \"u\", xs: q.xs };", []]],
   ["local: an in-place edit (`.append`)", ["", "let out: int[free, append] = [];\n        out.append(1);", ["E-BOOTSTRAP-UNSUPPORTED"]], null],
-  ["local: a part write (`q.xs = v`)", [box("int[free, append, replace]"), "let q: Box = @b;\n        q.xs = [];", ["E-BOOTSTRAP-UNSUPPORTED"]], null],
+  // s472: a part write of a local — the tape field's OWN grants (rules 1 and 4)
+  ["local: a part write (`q.xs = v`)", [box("int[free, append]"), "let q: Box = @b;\n        q.xs = [];", ["E-WRITE-NOT-GRANTED"]], [box("int[free, append, replace]"), "let q: Box = @b;\n        q.xs = [];", []]],
+  ["local: a position write of a struct local's tape field (`q.xs[i] = v`)", [box("int[free, append]"), "let q: Box = @b;\n        q.xs[0] = 1;", ["E-WRITE-NOT-GRANTED"]], [box("int[write]"), "let q: Box = @b;\n        q.xs[0] = 1;", []]],
+  ["local: a position write (`ys[i] = v`)", ["", "let ys: int[free, append] = [1];\n        ys[0] = 2;", ["E-WRITE-NOT-GRANTED"]], ["", "let ys: int[write] = [1];\n        ys[0] = 2;", []]],
+  ["local: a position write of an inferred tape (rule 1)", ["", "let ys = [1];\n        ys[0] = 2;", ["E-WRITE-NOT-GRANTED"]], null],
+  ["local: a position write of a `const` tape (the TYPE grants, not the binding)", ["", "const ys: int[] = [1];\n        ys[0] = 2;", ["E-WRITE-NOT-GRANTED"]], ["", "const ys: int[write] = [1];\n        ys[0] = 2;", []]],
   ["local: a `const` tape rebound", ["", "const out: int[replace] = [1];\n        out = [2];", ["E-ASSIGN-CONST"]], null],
   ["local: a `for … of` binder rebound (inferred: no grants)", ["", "for (let x of [[1], [2]]) {\n            x = [3];\n        }", ["E-WRITE-NOT-GRANTED"]], null],
   ["parameter: rebound — §50 refuses the rebinding; the tape write is judged by the WRITTEN type",
     ["    function h(xs: int[]) -> int {\n        xs = [1];\n        return 1;\n    }\n", "const n = h([]);", ["E-ASSIGN-CONST", "E-WRITE-NOT-GRANTED"]],
     ["    function h(xs: int[replace]) -> int {\n        xs = [1];\n        return 1;\n    }\n", "const n = h([]);", ["E-ASSIGN-CONST"]]],
+  ["parameter: a position write — the WRITTEN type's grants",
+    ["    function h(xs: int[]) -> int {\n        xs[0] = 1;\n        return 1;\n    }\n", "const n = h([1]);", ["E-WRITE-NOT-GRANTED"]],
+    ["    function h(xs: int[write]) -> int {\n        xs[0] = 1;\n        return 1;\n    }\n", "const n = h([1]);", []]],
   ["whole struct: a self-spread overridden by a later spread (not kept)", [box("int[free, append]"), "const nb: Box = { title: \"u\", xs: [] };\n        @b = { ...@b, ...nb };", ["E-WRITE-NOT-GRANTED"]], null],
 
   // ---- a call argument (checkArgTape, §66.12.3 subset) — the code is unruled: fail closed
