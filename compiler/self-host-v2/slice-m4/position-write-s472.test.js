@@ -186,6 +186,12 @@ describe("B — a write to a part of a local (value semantics; §66.11.4, §66.1
     expect(codes(prog("", `        let ys: int[free, append] = [1];\n        ys[0] = 2;`))).toEqual(["E-WRITE-NOT-GRANTED"]);
     expect(codes(prog("", `        let ys = [1];\n        ys[0] = 2;`))).toEqual(["E-WRITE-NOT-GRANTED"]);
     expect(codes(prog("    <src:int[write]=([1])/>", `        let ys = @src;\n        ys[0] = 2;`))).toEqual(["E-WRITE-NOT-GRANTED"]);
+    // a tape ELEMENT of an inferred local is part of the inferred type too — no grant (fail closed);
+    // annotated, the written type grants it
+    expect(codes(prog("    <g:int[write][write]=([[1]])/>", `        let h = @g;\n        h[0][0] = 2;`))).toEqual(["E-WRITE-NOT-GRANTED"]);
+    clean(prog("    <g:int[write][write]=([[1]])/>", `        let h: int[write][write] = @g;\n        h[0][0] = 2;`));
+    // a tape reached through a struct FIELD carries the field's declared grants, inferred holder or not
+    clean(prog(`    type Q:struct = { nxt: int[write] }\n    <q:Q=({ nxt: [0] })/>`, `        let a = @q;\n        a.nxt[0] = 1;`));
     expect(codes(prog("    fn f(xs: int[]) -> int {\n        xs[0] = 1;\n        return 1;\n    }", `        @shown = "x";`))).toEqual(["E-WRITE-NOT-GRANTED"]);
     expect(codes(prog(`    type Q:struct = { nxt: int[] }\n    fn f(q: Q) -> int {\n        q.nxt[0] = 1;\n        return 1;\n    }`, `        @shown = "x";`))).toEqual(["E-WRITE-NOT-GRANTED"]);
   });

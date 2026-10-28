@@ -8969,6 +8969,8 @@ ${
         let lastTape: Type | not = not
         let sawIndex = false
         let fieldInTape = false
+        let viaField = false          // a struct field step has been taken
+        let tapeViaField = false      // ... before the last tape position
         let at: string = l.name
         for (const s of ps) {
             if (maybeInner(t) is given) return partRefused(env, value, target.span, "E-BOOTSTRAP-UNSUPPORTED", "`" + label + " = …` writes through `" + at + "`, which is `" + typeName(t) + "` — it may be `not`, and a part write through a `T | not` value is not in the bootstrap yet; bind the present value first", st)
@@ -8978,6 +8980,7 @@ ${
                 if (el is not) return partRefused(env, value, target.span, "E-ASSIGN-TARGET", "`" + label + " = …` writes a tape position (§66.12.6 rule 3), and `" + at + "` is `" + typeName(t) + "`, not a tape", st)
                 steps = steps.concat([LStep.LIndex(ix, loc)])
                 lastTape = t
+                tapeViaField = viaField
                 lastField = not
                 sawIndex = true
                 t = el
@@ -9000,6 +9003,7 @@ ${
                 lastField = fs[k]
                 lastTape = not
                 fieldInTape = sawIndex
+                viaField = true
                 t = fs[k].ty
                 at = at + "." + s.field
             }
@@ -9009,19 +9013,17 @@ ${
         const tape: Type | not = lastTape
         const fd: FieldDef | not = lastField
         if (tape is given) {
-            // a POSITION write. The tape the local itself holds is judged by the local's
-            // WRITTEN type (an un-annotated local's carries no grant, rule 1); a tape
-            // reached through a struct field or a position by that type's grants.
+            // a POSITION write, judged by the tape's TYPE. A tape reached through a
+            // struct field carries the grants that field's declared type writes. One
+            // reached only through positions of the local (the local's own tape, or a
+            // tape element of it) is part of the local's type — its WRITTEN type (an
+            // annotation, a parameter's) when it has one; an un-annotated local's type
+            // is inferred, and "Inference never invents a grant" (§66.12.6 rule 1).
             let judged: Type = tape
             let tyText: string = tapeTypeName(tape)
-            if (ps.length == 1) {
-                const w: Type | not = writtenLocalType(st, l.s)
+            if (!tapeViaField && writtenLocalType(st, l.s) is not) {
                 judged = ungranted(tape)
-                tyText = "inferred: no grants — §66.12.6 rule 1; annotate it, `let " + l.name + ": T[write] = …`"
-                if (w is given) {
-                    judged = w
-                    tyText = tapeTypeName(w)
-                }
+                tyText = "inferred: no grants — §66.12.6 rule 1; annotate it, `let " + l.name + ": T[write…] = …`"
             }
             const pd: TapeDiag[] = tapePositionProblem(judged, label, tyText)
             if (pd.length > 0) return addDiag(st, env.file, e.span, pd[0].code, pd[0].msg)
