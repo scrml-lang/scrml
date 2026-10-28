@@ -12672,10 +12672,16 @@ ${
     }
 
     // A lifted value is typed as any expression; a lifted row as markup where
-    // it stands (§17.4).
+    // it stands (§17.4). A lifted VALUE is not judged as text here: whether it
+    // is text depends on its SINK, which the lift does not know. A lift that
+    // appends to a bound value loop is a tape element (§49.6 rule 2: "Its element
+    // type is the type of the lifted values") and a `{ lift … }` match arm is the
+    // arm's value — neither is a §14.13.1 text sink. A lift that appends to a
+    // MARKUP gather (`${ for … { lift e; } }`, §17.4) IS markup text: judged
+    // once, at the gather (typeGather). s473 r1 HIGH-1 (review of #1621).
     fn typeLift(env: TEnv, w: ALift, ts: TypeState) -> TypeState {
         return match w {
-            .LiftExpr(e: e) :> typeInterp(env, e, ts)
+            .LiftExpr(e: e) :> typeExpr(env, e, ts).ts
             .LiftNode(n: n) :> typeNode(env, n, ts)
         }
     }
@@ -19235,18 +19241,33 @@ ${
     // applied to markup text yet (a template slot refuses it): see `.Unknown` below.
     fn typeInterp(env: TEnv, x: AExpr, ts0: TypeState) -> TypeState {
         const r: RVT = typeExpr(env, x, ts0)
-        if (hasErrIn(env.errs, x.span)) return r.ts          // Rule C: not judged across a parse error
-        const v: VType = r.vt
+        return markupText(env, x, r.vt, r.ts)
+    }
+
+    // A markup gather (`${ for … { lift e; } }`, §17.4): the loop is typed as a
+    // statement loop, and every value it lifts INTO THE MARKUP (liftOperands:
+    // through `if` / `given` blocks and statement loops, not into a nested bound
+    // loop — that loop's lifts are its own tape's elements) is markup text,
+    // judged by the type it was given where it stands (exprType0).
+    fn typeGather(env: TEnv, lf: AFor, ts0: TypeState) -> TypeState {
+        let ts: TypeState = typeFor(env, forAsStmt(lf), lf, ts0).ts
+        for (const e of liftOperands(lf.body)) { ts = markupText(env, e, exprType0(ts, e.nid), ts) }
+        return ts
+    }
+
+    // The markup-text sink check (§14.13.2) of a value already typed `v`.
+    fn markupText(env: TEnv, x: AExpr, v: VType, ts: TypeState) -> TypeState {
+        if (hasErrIn(env.errs, x.span)) return ts             // Rule C: not judged across a parse error
         return match v {
-            .Known(t: t) :> markupTextKnown(env, x, t, r.ts)
-            .Absent :> r.ts                                   // `${not}` renders nothing (§7.4.2)
+            .Known(t: t) :> markupTextKnown(env, x, t, ts)
+            .Absent :> ts                                     // `${not}` renders nothing (§7.4.2)
             // MEASURED s472: refusing the unresolved limb here refuses the SPEC's own
             // §66.19 worked programs (4 interpolations) and the M2 dropdownEarlyRead
             // fixture — `${countryValue()}` of a function with no written return type,
             // whose type §66.3 infers and the bootstrap typer does not yet. A gap of
             // the typer's inference, not a value it resolved: deferred (filed).
-            .Unknown :> r.ts
-            .OneOf(ts: xs) :> markupTextOneOf(env, x, xs, r.ts)
+            .Unknown :> ts
+            .OneOf(ts: xs) :> markupTextOneOf(env, x, xs, ts)
         }
     }
 
@@ -19287,7 +19308,7 @@ ${
             .DeclNode(d: d) :> ts
             .Css(c: c) :> ts
             .Effect(w: w) :> typeEffect(env, w, ts)
-            .Gather(f: lf) :> typeFor(env, forAsStmt(lf), lf, ts).ts      // s469 (§17.4)
+            .Gather(f: lf) :> typeGather(env, lf, ts)                     // s469 (§17.4); s473 r1
         }
     }
 

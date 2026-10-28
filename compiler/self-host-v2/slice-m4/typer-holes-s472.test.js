@@ -168,3 +168,38 @@ describe("O2 — markup text is a text sink (§14.13.2): a known non-primitive i
     await shows(prog(`${P}\n    let <m:int | not=not/>\n${C}`, `<p id="o">\${@p.n}|\${@m}|\${@c}</p>`), "1||A");
   });
 });
+
+// ---------------------------------------------------------------------------
+// s473 r1 HIGH-1 (review of #1621): a lifted value is markup text ONLY when the
+// lift's sink is markup (a `${ for … { lift e; } }` gather, §17.4). A lift into
+// a BOUND value loop is a tape element (§49.6 rule 2: "Its element type is the
+// type of the lifted values"), and a `{ lift … }` match arm is the arm's value —
+// neither is a §14.13.1 text sink, so neither is E-TEXT-NON-PRIMITIVE.
+describe("r1 HIGH-1 — the text-sink check follows the lift's sink", () => {
+  const XS = `    <xs:int[]=([1, 2])/>`;
+  const B = `    let <b:bool=true/>`;
+  test("FR1 — a value loop lifting a struct into `P[]` compiles and runs", async () => {
+    await shows(prog(`${P}\n${XS}\n    fn g() -> int {\n        const ps: P[] = for (x of @xs) { lift @p; };\n        return ps.length;\n    }`, `<p id="o">\${g()}</p>`), "2");
+  });
+  test("FR3 — a value loop lifting a tape compiles and runs", async () => {
+    await shows(prog(`${XS}\n    fn g() -> int {\n        const ps = for (x of @xs) { lift @xs; };\n        return ps.length;\n    }`, `<p id="o">\${g()}</p>`), "2");
+  });
+  test("a value loop lifting a choice with a struct member compiles", () => {
+    expect(codes(prog(`${B}\n${P}\n${XS}\n    fn g() -> int {\n        const ps = for (x of @xs) { lift @b ? @p : "s"; };\n        return 1;\n    }`, `<p id="o">\${g()}</p>`))).toEqual([]);
+  });
+  test("a `{ lift … }` match arm lifting a struct is the arm's value, not text", () => {
+    expect(codes(prog(`${C}\n${P}\n    fn h(q: P) -> int { return q.n; }\n    fn g() -> int { return h(match @c { .A :> { lift @p; }, .B :> @p, }); }`, `<p id="o">\${g()}</p>`))).toEqual([]);
+  });
+  test("L1 control — a MARKUP gather lifting a struct stays E-TEXT-NON-PRIMITIVE", () => {
+    expect(codes(prog(`${P}\n${XS}`, `<p id="o">\${ for (x of @xs) { lift @p; } }</p>`))).toEqual(["E-TEXT-NON-PRIMITIVE"]);
+  });
+  test("control — a markup gather lifting a struct inside an `if` is refused too", () => {
+    expect(codes(prog(`${B}\n${P}\n${XS}`, `<p id="o">\${ for (x of @xs) { if (@b) { lift @p; } } }</p>`))).toEqual(["E-TEXT-NON-PRIMITIVE"]);
+  });
+  test("control — a value loop nested in a markup gather keeps its struct lifts; the gather's own lift is judged", () => {
+    expect(codes(prog(`${P}\n${XS}`, `<p id="o">\${ for (x of @xs) { const ps = for (y of @xs) { lift @p; }; lift ps.length; } }</p>`))).toEqual([]);
+  });
+  test("legal — a markup gather lifting primitives renders them", async () => {
+    await shows(prog(XS, `<p id="o">\${ for (x of @xs) { lift x; } }</p>`), "12");
+  });
+});
