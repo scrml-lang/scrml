@@ -214,3 +214,115 @@ describe("Core — View.Reach", () => {
     expect(walk(clean(src), (n) => n.variant === "Reach")).toEqual([]);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Behind an UNMOUNTED `<*g/>`: the instances g's renders mounts unconditionally
+// exist with g's record (L12 (b)) whether or not the Star is mounted, so their
+// bound fields are inside the form's composed subtree (InstRef.Kid).
+// ---------------------------------------------------------------------------
+const STAR_KID = (show) => `<program>
+    let <calls:int=0/>
+    let <show:bool=${show}/>
+    <f note:string="n">
+        let <v:string="" req/>
+    </>
+    renders <span><input class="v" bind:value=@f.v/></span>
+    <g note:string="n">
+        let <w:string=""/>
+    </>
+    renders <div><f/></div>
+    function save() { @calls = @calls + 1; }
+    <main>
+        <form onsubmit=save()>
+            <div if=@show><*g/></div>
+            <button type="submit">go</button>
+        </form>
+        <p class="calls">\${@calls}</p>
+    </main>
+</program>
+`;
+
+describe("a closed `<*g/>` whose renders mounts a use — the use's instance exists", () => {
+  test("its empty `req` field blocks the submit; Core names it as `.Kid` of the Star's instance", async () => {
+    const core = clean(STAR_KID(false));
+    const gate = walk(core, (n) => n.variant === "Gate")[0].data;
+    expect(gate.fields.map((f) => f.data.inst.variant)).toEqual(["Kid"]);
+    await loadProgram(core, "reach-star-kid");
+    expect(document.querySelectorAll("main input").length).toBe(0);
+    submit($("main form"));
+    expect(calls()).toBe("0");
+  });
+  test("control: the Star mounted and the field filled → the submit runs", async () => {
+    await loadProgram(clean(STAR_KID(true)), "reach-star-kid-ok");
+    type($("input.v"), "x");
+    submit($("main form"));
+    expect(calls()).toBe("1");
+  });
+  test("a bind through g's OWN `as=` handle inside the closed Star: named `.HandleOf` the Star's instance, and it blocks", async () => {
+    const src = STAR_KID(false)
+      .replace("renders <span><input class=\"v\" bind:value=@f.v/></span>", "renders <span>f</span>")
+      .replace("renders <div><f/></div>", "renders <div><f as=h/><input class=\"v\" bind:value=@h.v/></div>");
+    const core = clean(src);
+    const gate = walk(core, (n) => n.variant === "Gate")[0].data;
+    expect(gate.fields.map((f) => f.data.inst.variant)).toEqual(["HandleOf"]);
+    await loadProgram(core, "reach-star-handle");
+    submit($("main form"));
+    expect(calls()).toBe("0");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// g-bootstrap-gate-external-form-owner-control — HTML's form owner (`form=`).
+// SPEC is silent on whether the form-owner association joins the gate set, so a
+// bound control carrying `form=` whose value has a surface is refused.
+// ---------------------------------------------------------------------------
+describe("`form=` on a bound control (the HTML form owner) — refused, fail closed", () => {
+  const OWNER = (control, extra = "") => `<program>
+    let <calls:int=0/>
+    let <v:string="" length(>=2)/>
+    let <q:string=""/>
+    function save() { @calls = @calls + 1; }
+    <main>
+        <form id="f" onsubmit=save()>${extra}<button type="submit">go</button></form>
+        ${control}
+        <p class="calls">\${@calls}</p>
+    </main>
+</program>
+`;
+  const codes = (src) => run(src).diags.map((d) => d.code);
+  test("an external `<select form=\"f\" bind:value=@v>` with `length(>=2)` (the reviewer's fail-open) → E-BOOTSTRAP-UNSUPPORTED at `form=`", () => {
+    const src = OWNER(`<select form="f" bind:value=@v><option value="">-</option></select>`);
+    const d = run(src).diags;
+    expect(d.map((x) => x.code)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+    expect(src.slice(d[0].span.start, d[0].span.start + 5)).toBe("form=");
+    expect(d[0].message).toContain("`v`");
+    expect(d[0].message).toContain("§55.17.3");
+  });
+  test("an external `<input form=\"f\">` binding a validated value → refused", () => {
+    expect(codes(OWNER(`<input form="f" bind:value=@v/>`))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+  });
+  test("a control INSIDE the form naming another owner with `form=` → refused", () => {
+    expect(codes(OWNER("", `<input form="other" bind:value=@v/>`))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+  });
+  test("a field of a declaration (any field has a surface, §55.6) bound with `form=` → refused", () => {
+    const src = `<program>
+    <f note:string="n">
+        let <w:string=""/>
+    </>
+    renders <input form="x" bind:value=@f.w/>
+    <main><form id="x"></form><f/></main>
+</program>
+`;
+    expect(codes(src)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+  });
+  test("controls: `form=` on a control binding a value with NO surface is accepted; the bound control without `form=` is gated as before", async () => {
+    expect(codes(OWNER(`<input form="f" bind:value=@q/>`))).toEqual([]);
+    await loadProgram(clean(OWNER("", `<input class="v" bind:value=@v/>`)), "owner-inside-ok");
+    type($("input.v"), "a");
+    submit($("main form"));
+    expect(calls()).toBe("0");
+    type($("input.v"), "ab");
+    submit($("main form"));
+    expect(calls()).toBe("1");
+  });
+});

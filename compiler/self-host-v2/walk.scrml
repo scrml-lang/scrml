@@ -381,6 +381,8 @@ ${
             .Lexical(depth: depth) :> not
             .Alias(sym: s) :> not
             .Narrowed(sym: s) :> not
+            .Kid(of: o) :> sharedDecl(o)
+            .HandleOf(of: o) :> sharedDecl(o)
         }
     }
 

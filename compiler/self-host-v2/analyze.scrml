@@ -15691,6 +15691,8 @@ ${
             .Shared(decl: d) :> false
             .Lexical(depth: n) :> false
             .Narrowed(sym: s) :> false
+            .Kid(of: o) :> false
+            .HandleOf(of: o) :> true
         }
     }
 
@@ -15710,6 +15712,8 @@ ${
             .Shared(decl: x) :> Type.Named(d)
             .Lexical(depth: n) :> Type.Named(d)
             .Narrowed(sym: s) :> Type.Named(d)
+            .Kid(of: o) :> Type.Named(d)
+            .HandleOf(of: o, sym: s) :> handleType(t, d, s)
         }
     }
 
@@ -18953,6 +18957,8 @@ ${
             .Lexical(depth: n) :> not
             .Alias(sym: s) :> not
             .Narrowed(sym: s) :> not
+            .Kid(of: o) :> sharedOf(o)
+            .HandleOf(of: o) :> sharedOf(o)
         }
     }
 
@@ -24350,7 +24356,64 @@ ${
                 for (const gi of gatesIn(cx, n)) { gated = gated.concat([{ form: gi.form, values: gi.values, span: gi.span, file: ds.file }]) }
             }
         }
+        diags = diags.concat(formOwnerPass(g, t))
         return { diags: diags, forms: forms, gated: gated }
+    }
+
+    // ---- s472: THE HTML FORM OWNER (g-bootstrap-gate-external-form-owner-control)
+    // §55.17.3 gates "every value that carries validators … whose `bind:` is on
+    // a native control inside the form (the §55.17.2 rule 1 composed
+    // subtree)", and §55.17.2 rule 1 defines "Contains" as "the form's
+    // **composed** subtree". HTML's form owner is wider and narrower: a control
+    // ANYWHERE carrying `form="id"` belongs to form `id` (it submits with it
+    // and HTML validates it there), and a control inside one form carrying
+    // `form=` belongs to another. SPEC does not say whether the form-owner
+    // association joins the gate set (nor where `novalidate` goes for it), so
+    // neither placement can be proven right: a bound control carrying `form=`
+    // whose value has a validity surface is REFUSED (fail closed) — never left
+    // ungated. Every markup a declaration owns is checked (declMarkup), so a
+    // control a use or a Star brings in is checked where it is written.
+    fn formOwnerPass(g: Globals, t: Tables) -> Diag[] {
+        let out: Diag[] = []
+        for (const ds of g.decls) {
+            for (const n of declMarkup(ds)) { out = out.concat(formOwnerIn(t, ds.file, n)) }
+        }
+        return out
+    }
+
+    fn formOwnerRows(t: Tables, file: string, rows: ANode[]) -> Diag[] {
+        let out: Diag[] = []
+        for (const r of rows) { out = out.concat(formOwnerIn(t, file, r)) }
+        return out
+    }
+
+    fn formOwnerIn(t: Tables, file: string, n: ANode) -> Diag[] {
+        const k: ANodeK = n.k
+        return match k {
+            .Elem(e: e) :> formOwnerElem(t, file, e)
+            .Text(text: x) :> []
+            .Interp(e: x) :> []
+            .DeclNode(d: d) :> []
+            .Css(c: c) :> []
+            .Gather(f: lf) :> formOwnerRows(t, file, gatherRows(lf))
+            .Effect(w: w) :> []
+        }
+    }
+
+    fn formOwnerElem(t: Tables, file: string, e: AElem) -> Diag[] {
+        let out: Diag[] = []
+        const owner: AAttr | not = attrNamed(e.attrs, "form")
+        if (owner is given) {
+            let names: string[] = []
+            for (const a of e.attrs) { names = addNames(names, boundValidated(t, attrFact(t.attrs, a.nid), true)) }
+            if (names.length > 0) {
+                out = [newDiag("E-BOOTSTRAP-UNSUPPORTED",
+                    "this `<" + e.tag + ">` binds `" + names.join("`, `") + "` (a value with a validity surface) and carries `form=`, which in HTML makes it a control of the form it names — but the submit gate covers the values bound inside a form's composed subtree (§55.17.2 rule 1, §55.17.3) and SPEC does not say whether a `form=` control joins the gate of the form it names, so it would be validated by neither form's gate; refused (fail closed) until that is ruled — write the control inside its `<form>` and drop `form=`",
+                    file, owner.span)]
+            }
+        }
+        for (const c of e.kids) { out = out.concat(formOwnerIn(t, file, c)) }
+        return out
     }
 
     // ---- s449: THE GATED FORMS (§55.17.3) ------------------------------------

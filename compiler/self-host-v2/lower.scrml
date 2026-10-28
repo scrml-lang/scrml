@@ -33,7 +33,7 @@ ${
              GrantSet, TransitionGraph, Field, DeclKind, WiringAttr, Decl, Param, Fn, CoreProgram, Validator, SurfaceProp, ValidityOf, Persist,
              ServerFn, SqlMode, Db, SqlQuery, SqlKind, SqlTables, SqlColumns, Failable, OkArm, ErrArm, VariantDef,
              LoopHead, EachHead, RangeHead, HostCall, CssUnit, CssDecl, CoreCss, CssVar, Gather, Lifted, GatherRow, PathStep,
-             block, litStr, mkSym, typeDefSym, readField } from "./core.scrml"
+             block, litStr, mkSym, typeDefSym, readField, mountedInstances } from "./core.scrml"
     import { partsText } from "./css.scrml"
     import { ASpan, BinOp, UnOp, AExpr, AProp, AExprK, AStmt, ABlock, AStmtK, AEffect, AType, AParam, AFn,
              AAttrValue, AAttr, AElem, ANode, ANodeK, ADecl, AProgram, AItem, AItemK, FileAst, Diag, ASql, ASqlMode,
@@ -111,6 +111,8 @@ ${
             .Shared(decl: x) :> i
             .Alias(sym: x) :> i
             .Narrowed(sym: x) :> i
+            .Kid(of: x) :> i
+            .HandleOf(of: x) :> i
         }
     }
 
@@ -176,6 +178,8 @@ ${
             .Lexical(depth: k) :> "L" + k
             .Alias(sym: s) :> "A" + s.id
             .Narrowed(sym: s) :> "N" + s.id
+            .Kid(of: o, idx: k) :> "K(" + instKey(o) + "," + k + ")"
+            .HandleOf(of: o, sym: s) :> "H(" + instKey(o) + "," + s.id + ")"
         }
     }
 
@@ -417,6 +421,8 @@ ${
             .Shared(decl: d) :> not
             .Lexical(depth: n) :> not
             .Narrowed(sym: s) :> not
+            .Kid(of: o) :> not
+            .HandleOf(of: o) :> not
         }
     }
 
@@ -3567,13 +3573,55 @@ ${
         if (seen.indexOf(d.id) >= 0) return []
         const inner: InstRef | not = nameable(i, subst)
         if (inner is not) return []
-        for (const x of p.decls) {
-            if (x.sym.id == d.id) {
-                const rs: View[] | not = x.renders
-                if (rs is given) return namedFields(p, rs, inner, seen.concat([d.id]))
-            }
+        return rendersFields(p, d, inner, seen)
+    }
+
+    // s472 — the fields declaration d's renders names for instance `inner`,
+    // and (a Star may be UNMOUNTED, so its renders' own Reach never runs) the
+    // fields of every instance that renders mounts unconditionally: those
+    // exist with `inner`'s record (L12 (b)), mounted or not — `inner.kids[k]`.
+    // A use in a nested region (an arm, a row, a slot) has no instance until
+    // it mounts: nothing to name.
+    fn rendersFields(p: CoreProgram, d: Sym, inner: InstRef, seen: int[]) -> ValidityOf[] {
+        if (seen.indexOf(d.id) >= 0) return []
+        const x: Decl | not = declOf(p, d)
+        if (x is not) return []
+        const rs: View[] | not = x.renders
+        if (rs is not) return []
+        const seen2: int[] = seen.concat([d.id])
+        let out: ValidityOf[] = namedFields(p, rs, inner, seen2)
+        let k = 0
+        for (const v of mountedInstances(rs)) {
+            out = addFields(out, kidFields(p, v, inner, k, seen2))
+            k = k + 1
         }
-        return []
+        return out
+    }
+
+    fn kidFields(p: CoreProgram, v: View, inner: InstRef, k: int, seen: int[]) -> ValidityOf[] {
+        return match v {
+            .Instance(decl: kd) :> rendersFields(p, kd, InstRef.Kid(inner, k, kd), seen)
+            .El :> []
+            .Text :> []
+            .RawText :> []
+            .Dyn :> []
+            .Cond :> []
+            .Each :> []
+            .Slot :> []
+            .Star :> []
+            .Effect :> []
+            .ResetOn :> []
+            .Errors :> []
+            .Reach :> []
+            .Gather :> []
+        }
+    }
+
+    fn declOf(p: CoreProgram, d: Sym) -> Decl | not {
+        for (const x of p.decls) {
+            if (x.sym.id == d.id) return x
+        }
+        return not
     }
 
     fn attrFields(p: CoreProgram, attrs: Attr[], subst: InstRef | not) -> ValidityOf[] {
@@ -3642,9 +3690,9 @@ ${
     // shared instance, the enclosing instance, or (s472) an `as=` handle of
     // this render context — read at submit with a presence check (an absent
     // handle names no instance: nothing to gate). Inside a Star's renders,
-    // `.Lexical(0)` is the Star's own instance (`subst`); a handle there is the
-    // Star declaration's, which this context cannot address — that renders'
-    // own Reach names it when it mounts. A `given`-narrowed local is never a
+    // `.Lexical(0)` is the Star's own instance (`subst`), and an `as=` handle
+    // there is that instance's own (`.HandleOf(subst, h)`, read with the same
+    // presence check). A `given`-narrowed local is never a
     // bind target in markup (`given` is a statement and the bootstrap lifts no
     // markup from logic), so `.Narrowed` names nothing here.
     fn nameable(i: InstRef, subst: InstRef | not) -> InstRef | not {
@@ -3653,6 +3701,8 @@ ${
             .Lexical(depth: k) :> lexicalThrough(k, i, subst)
             .Alias(sym: s) :> aliasThrough(i, subst)
             .Narrowed(sym: s) :> not
+            .Kid(of: o) :> i
+            .HandleOf(of: o) :> i
         }
     }
 
@@ -3664,6 +3714,13 @@ ${
 
     fn aliasThrough(i: InstRef, subst: InstRef | not) -> InstRef | not {
         if (subst is not) return i
-        return not
+        return match i {
+            .Alias(sym: s) :> InstRef.HandleOf(subst, s)
+            .Shared(decl: d) :> not
+            .Lexical(depth: k) :> not
+            .Narrowed(sym: s) :> not
+            .Kid(of: o) :> not
+            .HandleOf(of: o) :> not
+        }
     }
 }

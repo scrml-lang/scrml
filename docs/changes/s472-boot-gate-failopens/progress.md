@@ -1,0 +1,40 @@
+# s472-boot-gate-failopens — progress
+
+Branch `s472-boot-gate-failopens` (from origin/main `c8070b56a`). Bootstrap security work (S471 policy: allowed).
+
+## Gaps
+
+1. `g-bootstrap-gate-reach-live-dom-reading` (MED, fail-open) — **resolved**.
+2. `g-bootstrap-gate-external-form-owner-control` (MED, fail-open) — **narrowed to LOW**: refused fail-closed; SPEC ruling owed.
+
+## SPEC sentences implemented
+
+- §55.17.3 step 1: "Mark `touched = true` on every **bound validated value** of the form — every value that carries
+  validators (a validated top-level value, §55.5.1, or a validated child field of a declaration) whose `bind:` is
+  on a native control inside the form (the §55.17.2 rule 1 composed subtree) — the same values that make it a
+  gated form."
+- §55.17.2 rule 1: "\"Contains\" is the form's **composed** subtree: its own markup plus markup that reaches it
+  through `<*x/>` inlines, declaration uses, `<each>` rows and state-view arms".
+- §55.17.3 (gated forms): "A **gated form** is every `<form>` whose composed subtree (§55.17.2 rule 1) contains a
+  native control whose `bind:` targets a value that carries validators".
+- SPEC is SILENT on HTML's form owner (`form="id"`) → refused, fail closed (E-BOOTSTRAP-UNSUPPORTED).
+
+## Design (reuses the existing gate reader — `lower.scrml namedFields` — and the runtime gate's walk)
+
+- Core `View.Reach(fields)` — made only by lower's gate post-pass (`gateDecls`): opens every user declaration's
+  renders, every use-site slot filler and every `<each>` / Tier-0 row whose composed subtree binds a surfaced
+  field, with `namedFields(...)` of that list, printed in the list's own context. Runtime `reach(scope, marker,
+  named)` registers on the marker comment while mounted; `gate` walks the form's comments for registered markers
+  (beside the existing `querySelectorAll` of live controls).
+- `as=` handles: `nameable(.Alias)` → named; printed `rt.validityIf(handle.get(), i)` (absent → null, skipped).
+- Behind an UNMOUNTED `<*g/>`: Core `InstRef.Kid(of, idx, decl)` / `InstRef.HandleOf(of, sym)` — the instances
+  g's renders mounts unconditionally (created with g's record, L12 (b)) and g's handles. `mountedInstances` moved
+  to core.scrml (one numbering rule for printer and gate).
+- `form=`: `analyze.scrml formOwnerPass` (validatorPass) — an element carrying `form=` that binds a value with a
+  validity surface → E-BOOTSTRAP-UNSUPPORTED at the `form=` attribute.
+
+## Log
+
+- WIP 1: View.Reach + runtime.reach + validityIf + alias naming; gate-reach.test.js P3/P4/P12 (red on main).
+- WIP 2: InstRef.Kid / HandleOf (closed-Star kids); formOwnerPass; gaps updated (state.ts --write);
+  bootstrap-conformance.md unchanged (current).

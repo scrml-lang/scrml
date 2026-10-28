@@ -98,6 +98,15 @@ ${
         Lexical(depth: int),
         Alias(sym: Sym),
         Narrowed(sym: Sym),
+        // s472 — only in a submit gate's statically named fields (lower.scrml
+        // gateDecls): the instance a renders reaches through ANOTHER instance
+        // `of` — `Kid`: the `idx`-th instance `of`'s renders mounts
+        // unconditionally (created with `of`'s record, L12 (b); a declaration
+        // `decl`); `HandleOf`: what `of`'s `as=` handle `sym` names (may be
+        // absent). How a gate names, behind an UNMOUNTED `<*x/>`, the instances
+        // x's renders would mount (§55.17.3 step 1, the composed subtree).
+        Kid(of: InstRef, idx: int, decl: Sym),
+        HandleOf(of: InstRef, sym: Sym),
     }
 
     // A read location. `Cell.path` empty = the whole instance value (a struct
@@ -915,6 +924,36 @@ ${
             .OfDecl(decl: d, inst: i) :> d
         }
     }
+    // The instances a renders mounts UNCONDITIONALLY — reached through element
+    // children only, never through a conditional arm, an <each> row or slot
+    // content — in document order. L12 (b): these are created with the
+    // declaration's record, before anything renders (`inst.kids[k]`); the
+    // printer numbers them so, and a gate names them so (InstRef.Kid).
+    export fn mountedInstances(views: View[]) -> View[] {
+        let out: View[] = []
+        for (const v of views) { out = out.concat(mountedIn(v)) }
+        return out
+    }
+
+    fn mountedIn(v: View) -> View[] {
+        return match v {
+            .El(kids: ks) :> mountedInstances(ks)
+            .Instance(decl: d) :> [v]
+            .Text :> []
+            .RawText :> []
+            .Dyn :> []
+            .Cond :> []
+            .Each :> []
+            .Slot :> []
+            .Star :> []
+            .Effect :> []
+            .ResetOn :> []
+            .Errors :> []
+            .Reach :> []
+            .Gather :> []
+        }
+    }
+
     export fn validityInst(v: ValidityOf) -> InstRef {
         return match v {
             .OfField(decl: d, inst: i, idx: x) :> i

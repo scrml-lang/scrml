@@ -32,7 +32,7 @@ ${
              Decl, Fn, CoreProgram, CapOwner, SurfaceProp, ValidityOf, Validator, Persist, PersistStore,
              Failable, OkArm, ErrArm, ServerFn, SqlQuery, SqlMode, Param, LoopHead, EachHead, RangeHead, CssUnit, CoreCss, CssVar,
              Gather, Lifted, GatherRow, PathStep,
-             findDecl, findTypeDef, typeDefSym, capOwner, findFn, findServerFn } from "./core.scrml"
+             findDecl, findTypeDef, typeDefSym, capOwner, findFn, findServerFn, mountedInstances } from "./core.scrml"
     import { Node, allNodes, sharedRefs, boundSyms, assignedSyms } from "./walk.scrml"
     import { JsOp, JsUnOp, JsExpr, JsProp, JsStmt, JsLoopHead, JsForInit,
              jid, jstr, jnum, jmember, jcall, jmcall, jthunk, sexpr, printModule } from "./js.scrml"
@@ -230,7 +230,21 @@ ${
             .Lexical(depth: k) :> lexicalJs(ctx, k)
             .Alias(sym: s) :> jmcall(handleJs(ctx, s), "get", [])
             .Narrowed(sym: s) :> jid(symName(ctx, s))
+            .Kid(of: o, idx: k, decl: d) :> JsExpr.JIndex(jmember(instJs(ctx, o), "kids"), JsExpr.JAnnot(jnum(k), d.hint))
+            .HandleOf(of: o, sym: s) :> jmcall(handleOfJs(ctx, instJs(ctx, o), s), "get", [])
         }
+    }
+
+    // s472 — `of`'s `as=` handle `s` (InstRef.HandleOf): its cell on `of`'s record.
+    fn handleOfJs(ctx: Ctx, of: JsExpr, s: Sym) -> JsExpr {
+        for (const d of ctx.p.decls) {
+            let k = 0
+            for (const hs of d.handles) {
+                if (hs.id == s.id) return handleSlot(of, k, hs.hint)
+                k = k + 1
+            }
+        }
+        return jid("unboundHandle$" + s.id)
     }
 
     fn lexicalJs(ctx: Ctx, k: int) -> JsExpr {
@@ -1733,34 +1747,8 @@ ${
         }
     }
 
-    // The instances a renders mounts UNCONDITIONALLY — reached through element
-    // children only, never through a conditional arm, an <each> row or slot
-    // content — in document order (the hole order of buildNodes). L12 (b): these
-    // are created with the declaration's record, before anything renders.
-    fn mountedInstances(views: View[]) -> View[] {
-        let out: View[] = []
-        for (const v of views) { out = out.concat(mountedIn(v)) }
-        return out
-    }
-
-    fn mountedIn(v: View) -> View[] {
-        return match v {
-            .El(kids: ks) :> mountedInstances(ks)
-            .Instance(decl: d) :> [v]
-            .Text :> []
-            .RawText :> []
-            .Dyn :> []
-            .Cond :> []
-            .Each :> []
-            .Slot :> []
-            .Star :> []
-            .Effect :> []
-            .ResetOn :> []
-            .Errors :> []
-            .Reach :> []
-            .Gather :> []
-        }
-    }
+    // mountedInstances (core.scrml): the instances a renders mounts unconditionally,
+    // in document order (the hole order of buildNodes) — L12 (b).
 
     fn wireHole(ctx: Ctx, h: Hole, tid: string, kid: int) -> Rendered {
         const node: JsExpr = jid(nodeVar(h.path))
@@ -2047,6 +2035,8 @@ ${
             .Shared(decl: y) :> surfaceJs(ctx, v)
             .Lexical(depth: k) :> surfaceJs(ctx, v)
             .Narrowed(sym: s) :> surfaceJs(ctx, v)
+            .Kid(of: o) :> surfaceJs(ctx, v)
+            .HandleOf(of: o) :> rtCall(ctx, "validityIf", [instJs(ctx, i), JsExpr.JAnnot(jnum(x), memberName(ctx, d, x))])
         }
     }
 
