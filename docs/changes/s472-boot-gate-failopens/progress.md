@@ -71,3 +71,4 @@ Branch `s472-boot-gate-failopens` (from origin/main `c8070b56a`). Bootstrap secu
 - Merged origin/main (3a7d1d223) into origin/s472-boot-gate-failopens (b3e548ed8) on land-s472-boot-gate-failopens.
 - Conflicts: compiler/self-host-v2/{lower,print}.scrml — import lists only; kept both (`CoreConst` from main + `mountedInstances` from branch).
 - docs/known-gaps.md auto-merged; @gap id union of main+branch fully present (2445 ids, none lost); state.ts --write no-op.
+- Gates (local CI `checks` + bootstrap slice): all PASS. Review probe re-run post-merge: A3/B/H blocked; FORM=/Form= joins static form gate; form=(@id)/form=@id -> E-FORM-OWNER-UNRESOLVED.
