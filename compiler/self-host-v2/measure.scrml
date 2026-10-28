@@ -112,6 +112,8 @@ ${
             .Lexical(depth: x) :> "Lexical"
             .Alias(sym: x) :> "Alias"
             .Narrowed(sym: x) :> "Narrowed"
+            .Kid(of: x) :> "Kid"
+            .HandleOf(of: x) :> "HandleOf"
         }
     }
 
@@ -154,6 +156,7 @@ ${
             .Effect(deps: x) :> "Effect"
             .ResetOn(triggers: x) :> "ResetOn"
             .Errors(of: x) :> "Errors"
+            .Reach(fields: fs) :> "Reach"
             .Gather(g: x) :> "Gather"
         }
     }
