@@ -49,7 +49,7 @@ ${
     import { ASpan, BinOp, UnOp, AExpr, AProp, AExprK, AStmt, ABlock, AStmtK, AEffect, AType, ATypeK,
              ATypeField, AVariant, ATypeBody, ATypeDecl, AParam, AFn, AImportName, AImport,
              AAttrValue, AAttr, AElem, ANode, ANodeK, ADeclAttr, AStateChild, ADeclChild, ADecl, AValArg, AValidator,
-             AProgram, AItem, AItemK, FileAst, Diag, ASql, ASqlMode,
+             AProgram, AItem, AItemK, AConst, FileAst, Diag, ASql, ASqlMode,
              AHow, AHandled, AArm, APat, ABind, AArmBody, AFail, AFor, AForHead, AIterSrc, AForBound, ALift, ACss, mkSpan, newDiag, stdlibPathPrefix } from "./ast.scrml"
     import { CssErr, CssParsed, parseCssBlock } from "./css-syntax.scrml"
 
@@ -2182,6 +2182,7 @@ ${
                 .DeclItem(d: d) :> not
                 .MarkupItem(n: n) :> not
                 .ProgramItem(p: p) :> not
+                .ConstItem(c: c) :> not
             }
             if (imp is given) t = judgeNestedImport(t, imp)
         }
@@ -3694,6 +3695,10 @@ ${
             const ds: TP = diagAt(ts, "E-PARSE-ITEM", "`server` here modifies a function declaration (`server function name(…) { … }`, deprecated — §52.10); found `" + bs.text + "`", bs)
             return { items: [], tp: skipToLineEnd(ds) }
         }
+        // s472: a file-scope constant (§7.6, §21.2) — and the `let` §7.6 also
+        // admits there, refused by name (refusedLetItem)
+        if (isWord(t, "const")) return parseConstItem(t, start, exported)
+        if (isWord(t, "let")) return refusedLetItem(t, start)
         // s449: a keyword `when` at logic-item level (a `<program>` body, a
         // program-level `${…}`) is an effect where markup stands — owned by the
         // scope it stands in, exactly as an `<effect>` element there is.
@@ -3703,8 +3708,72 @@ ${
             return mkItem(bumpId(rw.tp), start, AItemK.MarkupItem(n))
         }
         const bad: PTok = cur(t)
-        const d: TP = diagAt(t, "E-PARSE-ITEM", "expected `import`, `type`, `function` or `fn` in a logic block, found `" + bad.text + "` (statements at logic-block level are not in bootstrap slice M2)", bad)
+        const d: TP = diagAt(t, "E-PARSE-ITEM", "expected `import`, `type`, `const`, `function` or `fn` in a logic block, found `" + bad.text + "` (other statements at logic-block level are not in the bootstrap)", bad)
         return { items: [], tp: skipToLineEnd(d) }
+    }
+
+    // s472 — `[export] const NAME[: T] = init;` at the top level of a `${ }`
+    // logic block: a FILE-SCOPE constant. SPEC §7.6: "A variable declared with
+    // `let` or `const` at the top level of a file-level `${}` block SHALL be in
+    // scope for all subsequent `${}` blocks and markup interpolations in the
+    // same file"; §21.2 makes it exportable (`export const Name = ...`). It is a
+    // statement and takes its `;` (§7.2.2 rule 1) — read by the statement
+    // reader (parseLocal) and its terminator rule (termAfter), so the item and a
+    // function-body `const` cannot drift apart. What its initializer may be is
+    // analyze's (constPass); a `const xs = for …` value loop (§49.6) runs a loop
+    // at module initialization and is refused by name here.
+    fn parseConstItem(tp: TP, start: int, exported: boolean) -> RItems {
+        const kw: PTok = cur(tp)
+        const d0: int = hardErrors(tp.diags)
+        const r: RStmt = parseLocal(tp)
+        const t: TP = termAfter(r.tp, r.s, d0)
+        const c: AConst | not = constOfStmt(r.s, exported)
+        if (c is not) {
+            const dt: TP = diagAt(t, "E-BOOTSTRAP-UNSUPPORTED", "a file-scope `const` bound to a value loop (`const xs = for … { lift … };`, §49.6) — the loop would run at module initialization, which the bootstrap does not build for file-scope constants; compute the tape in a function and call it where it is needed", kw)
+            return { items: [], tp: dt }
+        }
+        return mkItem(t, start, AItemK.ConstItem(c))
+    }
+
+    fn constOfStmt(s: AStmt, exported: boolean) -> AConst | not {
+        const k: AStmtK = s.k
+        return match k {
+            .Local(name: n, mutable: m, ty: y, init: i) :> mkConst(s, exported, n, y, i)
+            .Eval(e: x) :> not
+            .Return(e: x) :> not
+            .If(cond: x) :> not
+            .Given(name: x) :> not
+            .EffectStmt(w: x) :> not
+            .Defer(body: x) :> not
+            .Fail(f: x) :> not
+            .For(f: x) :> not
+            .Break(label: x) :> not
+            .Continue(label: x) :> not
+            .Lift(what: x) :> not
+        }
+    }
+
+    fn mkConst(s: AStmt, exported: boolean, name: string, ty: AType | not, init: AExpr) -> AConst {
+        return { nid: s.nid, span: s.span, exported: exported, name: name, ty: ty, init: init }
+    }
+
+    // s472 — a `let` at the top level of a `${ }` logic block. SPEC §7.6
+    // admits it ("A variable declared with `let` or `const` at the top level of
+    // a file-level `${}` block SHALL be in scope …"; "Re-declaring a name with
+    // `let` in a later file-level `${}` block … SHALL be a compile error
+    // (E-SCOPE-010)"), but it is module-level MUTABLE state, and the SPEC does
+    // not say where that state lives: §12 places FUNCTIONS (client, server, or
+    // both), never a binding, so a module `let` written by a server function and
+    // read by a client one has no stated home (one copy per bundle? per request?
+    // per process?). Refused BY NAME — never read as a constant, never dropped.
+    // The statement is still read (and its `;` judged), so what follows parses.
+    fn refusedLetItem(tp: TP, start: int) -> RItems {
+        const kw: PTok = cur(tp)
+        const d0: int = hardErrors(tp.diags)
+        const r: RStmt = parseLocal(tp)
+        const t: TP = termAfter(r.tp, r.s, d0)
+        const d: TP = diagAt(t, "E-BOOTSTRAP-UNSUPPORTED", "a `let` at the top level of a logic block — §7.6 admits a file-scope `let`, but it is module-level mutable state, and where that state lives (the client, the server, or both; once per process or per request) is not settled (§12 places functions, not bindings), so the bootstrap does not build it. Write `const` if the value never changes, or declare a cell (`<x:T=…/>`, §66) in the `<program>`", kw)
+        return { items: [], tp: d }
     }
 
     // Skip the rest of the current token's line (error recovery).

@@ -51,7 +51,7 @@ ${
     import { ASpan, BinOp, UnOp, AExpr, AProp, AExprK, AStmt, ABlock, AStmtK, AEffect, AType, ATypeK,
              ATypeField, AVariant, ATypeBody, ATypeDecl, AParam, AFn, AImportName, AImport,
              AAttrValue, AAttr, AElem, ANode, ANodeK, ADeclAttr, AStateChild, ADeclChild, ADecl, AValArg, AValidator,
-             AProgram, AItem, AItemK, FileAst, Diag, ASql,
+             AProgram, AItem, AItemK, AConst, FileAst, Diag, ASql,
              AHow, AHandled, AArm, APat, ABind, AArmBody, AFail, AFor, AForHead, AIterSrc, AForBound, ALift,
              ACss, ACssItem, ACssRule, ACssDecl, ACssPart, ACssRef, mkSpan, newDiag } from "./ast.scrml"
     import { Severity } from "./severity.scrml"
@@ -240,6 +240,7 @@ ${
         NFn(sym: Sym),                                    // a function
         NLength,                                          // `.length` of a sequence or a string (a primitive read)
         NSurface(of: ValidityOf, prop: SurfaceProp),      // s449: a read of the validity surface (§55.5 / §55.6) — read-only
+        NConst(sym: Sym),                                 // s472: a file-scope constant (§7.6) — its value is Tables.consts' (lower inlines it)
     }
     export type ValueFact:enum = {
         VLit(lit: Literal),                               // a literal (int vs number resolved)
@@ -428,6 +429,7 @@ ${
         persists: PersistInfo[], // s451: the program cells' accepted `persist=` (§6.14)
         server: ServerFacts,    // s451 (U1a): route placement + the program's queries and databases (placePass)
         css: CssFacts,          // s469: the stylesheet the program's `#{}` blocks make (cssPass)
+        consts: ConstInfo[],    // s472: the file-scope constants (constPass) — an NConst read is its `init`, inlined by lower
     }
 
     // s451 (U1a) — what route inference and the SQL pass decided (placePass).
@@ -738,6 +740,7 @@ ${
         sqlErrorSym: Sym,       // s451 (Ue): the built-in `SqlError` enum (§19.8.1 — every query's error type)
         sceSym: Sym,            // s454 (U1b): the built-in `ServerCallError` enum (§19.9.10)
         voids: int[],           // s469 (#1471 r3): the VOID functions (voidFns) — a call of one has type `void`
+        consts: ConstInfo[],    // s472: the file-scope constants, in link order then source order (constPass)
     }
 
     type RTypeInfos:struct = { ts: TypeInfo[], st: AS }
@@ -889,6 +892,7 @@ ${
         return match k {
             .TypeItem(t: t) :> [t]
             .ProgramItem(p: p) :> typeItems(p.items)
+            .ConstItem(c: c) :> []
             .ImportItem(i: i) :> []
             .FnItem(f: f) :> []
             .DeclItem(d: d) :> []
@@ -919,7 +923,8 @@ ${
     // EXPORTED declaration(s) of the name: a private declaration of another kind
     // that shares the name stays private (before r1, importing an exported type
     // `Tag` also brought the file's private `fn Tag` into scope).
-    type NameKind:enum = { KType, KFn, KDecl }
+    // s472: KConst — a file-scope constant (§7.6; `[export] const NAME = …` in a `${ }` block).
+    type NameKind:enum = { KType, KFn, KDecl, KConst }
     type OwnName:struct = { name: string, kind: NameKind, file: string, exported: boolean }
     type ScopeName:struct = { name: string, kind: NameKind, from: string }
     type FileScope:struct = { file: string, names: ScopeName[] }
@@ -966,6 +971,7 @@ ${
         }
         for (const f of files) {
             for (const af of fnItems(f.items)) { out = out.concat([{ name: af.name, kind: NameKind.KFn, file: f.path, exported: af.exported }]) }
+            for (const ac of constItems(f.items)) { out = out.concat([{ name: ac.name, kind: NameKind.KConst, file: f.path, exported: ac.exported }]) }
         }
         return out
     }
@@ -1436,6 +1442,7 @@ ${
         return match k {
             .DeclItem(d: d) :> userDeclStub(d, file, st)
             .ProgramItem(p: p) :> withNestedStubs(programStub(p, file, entry, st), p, file)
+            .ConstItem(c: c) :> noStubs(st)
             .ImportItem(i: i) :> noStubs(st)
             .TypeItem(t: t) :> noStubs(st)
             .FnItem(f: f) :> noStubs(st)
@@ -1524,6 +1531,7 @@ ${
         const k: AItemK = it.k
         return match k {
             .ProgramItem(p: p) :> p
+            .ConstItem(c: c) :> not
             .DeclItem(d: d) :> not
             .ImportItem(i: i) :> not
             .TypeItem(t: t) :> not
@@ -1537,6 +1545,7 @@ ${
         return match k {
             .MarkupItem(n: n) :> n
             .ProgramItem(p: p) :> not
+            .ConstItem(c: c) :> not
             .DeclItem(d: d) :> not
             .ImportItem(i: i) :> not
             .TypeItem(t: t) :> not
@@ -3712,6 +3721,7 @@ ${
             .FnItem(f: f) :> []
             .MarkupItem(n: n) :> []
             .ProgramItem(p: p) :> []
+            .ConstItem(c: c) :> []
         }
     }
 
@@ -3854,6 +3864,7 @@ ${
             .FnItem(f: f) :> []
             .DeclItem(d: d) :> []
             .ProgramItem(p: p) :> []
+            .ConstItem(c: c) :> []
         }
     }
 
@@ -4144,6 +4155,27 @@ ${
         return match k {
             .FnItem(f: f) :> [f]
             .ProgramItem(p: p) :> fnItems(p.items)
+            .ConstItem(c: c) :> []
+            .ImportItem(i: i) :> []
+            .TypeItem(t: t) :> []
+            .DeclItem(d: d) :> []
+            .MarkupItem(n: n) :> []
+        }
+    }
+
+    // s472 — the file-scope constants of `items` (a `<program>`'s `${ }` included), in source order.
+    fn constItems(items: AItem[]) -> AConst[] {
+        let out: AConst[] = []
+        for (const it of items) { if (!isLaterProgram(items, it)) out = out.concat(constItemOf(it)) }
+        return out
+    }
+
+    fn constItemOf(it: AItem) -> AConst[] {
+        const k: AItemK = it.k
+        return match k {
+            .ConstItem(c: c) :> [c]
+            .ProgramItem(p: p) :> constItems(p.items)
+            .FnItem(f: f) :> []
             .ImportItem(i: i) :> []
             .TypeItem(t: t) :> []
             .DeclItem(d: d) :> []
@@ -4437,9 +4469,12 @@ ${
         const rc: RCycles = derivedCycles(decls, files, st)
         st = rc.st
         decls = rc.decls
+        // s472: the file-scope constants' Syms and written types (their values: constPass)
+        const rk: RConsts = constStubs(files, te0, st)
+        st = rk.st
         const g: Globals = { program: program, entry: entry, te: te0, types: allTypes, decls: decls, fns: rf.fs, handles: handles, files: files,
                              errorSym: builtinSym(rs.stubs, "Error"), sqlErrorSym: builtinSym(rs.stubs, "SqlError"),
-                             sceSym: builtinSym(rs.stubs, serverCallErrorName()), voids: voidFns(rf.fs, lk) }
+                             sceSym: builtinSym(rs.stubs, serverCallErrorName()), voids: voidFns(rf.fs, lk), consts: rk.cs }
         return { g: g, st: st }
     }
 
@@ -4998,6 +5033,12 @@ ${
                 if (i >= 0) return plain(d.info.fields[i].ty, addName(st, e.nid, NameFact.NField(d.info.sym, InstRef.Lexical(0), i)))
             }
         }
+        // s472: a file-scope constant (§7.6) — after the locals, which shadow it
+        const kc: ConstInfo | not = constNamed(env.g, env.file, name)
+        if (kc is given) {
+            if (!kc.ready) return diagX(env, e, "E-SCOPE-001", "`" + name + "` is read before it is initialized — a file-scope constant's initializer reads only the constants initialized before it (declared earlier in this file, or in a file this one imports)", st)
+            return plain(kc.ty, addName(st, e.nid, NameFact.NConst(kc.sym)))
+        }
         const f: FnInfo | not = fnNamed(env.g, env.file, name)
         if (f is given) {
             const st2: AS = addName(st, e.nid, NameFact.NFn(f.sym))
@@ -5019,7 +5060,14 @@ ${
         }
         // s471: a name a refused import brings is that import's failure (checkImports), not also undeclared
         if (importRefusesName(env.g, env.file, name)) return plain(not, st)
-        return diagX(env, e, "E-SCOPE-001", "`" + name + "` is not declared" + elsewhereNote(env.g.te.link, env.file, NameKind.KFn, false, name), st)
+        return diagX(env, e, "E-SCOPE-001", "`" + name + "` is not declared" + valueElsewhere(env.g.te.link, env.file, name), st)
+    }
+
+    // s472 — where a VALUE name (a function, or a file-scope constant) is declared, when not here.
+    fn valueElsewhere(lk: Linkage, file: string, name: string) -> string {
+        const n: string = elsewhereNote(lk, file, NameKind.KFn, false, name)
+        if (n != "") return n
+        return elsewhereNote(lk, file, NameKind.KConst, false, name)
     }
 
     // A READ through `@h`. RULED S437 (bryan: "yes, reads require narrowing"):
@@ -5286,6 +5334,7 @@ ${
             .NFn(sym: s) :> not
             .NLength :> not
             .NSurface(of: x) :> not
+            .NConst(sym: s) :> not
             not :> not
         }
     }
@@ -5346,6 +5395,7 @@ ${
             .NFn(sym: s) :> 0
             .NLength :> 0
             .NSurface(of: x) :> 0
+            .NConst(sym: s) :> 0
             not :> 0
         }
     }
@@ -5431,6 +5481,7 @@ ${
             .NStruct(owner: o) :> not
             .NLength :> not
             .NSurface(of: x) :> not
+            .NConst(sym: s) :> not
             not :> not
         }
     }
@@ -6870,6 +6921,11 @@ ${
                 return noPlace(addDiag(st, env.file, t.span, "E-DECL-RENDERS-BARE-WRITE", "`" + name + "` inside a `renders` is a read-only projection — write it as `@" + d.info.sym.hint + "." + name + "` (§66.5.2)"))
             }
         }
+        // s472: a file-scope constant is not assigned — §50.9: "An assignment to a
+        // `const` variable SHALL be a compile error (E-ASSIGN-004), in statement
+        // position and in expression position alike." (A function-body `const`
+        // takes the bootstrap's older E-ASSIGN-CONST, resolveAssign — not changed here.)
+        if (constNamed(env.g, env.file, name) is given) return noPlace(addDiag(st, env.file, t.span, "E-ASSIGN-004", "`" + name + "` is a file-scope `const` — an assignment to a `const` variable is a compile error (§50.9); declare a cell (`<" + name + ":T=…/>`) for a value that changes"))
         return noPlace(addDiag(st, env.file, t.span, "E-SCOPE-001", "`" + name + "` is not a writable local"))
     }
 
@@ -11191,6 +11247,7 @@ ${
             .NFn(sym: s) :> notMutableDep(env, d, name, st)
             .NLength :> notMutableDep(env, d, name, st)
             .NSurface(of: x) :> notMutableDep(env, d, name, st)
+            .NConst(sym: s) :> notMutableDep(env, d, name, st)
         }
     }
 
@@ -13125,6 +13182,7 @@ ${
             .NFn(sym: s) :> not
             .NLength :> not
             .NSurface(of: x) :> not
+            .NConst(sym: s) :> not
             not :> not
         }
     }
@@ -14071,6 +14129,255 @@ ${
         return out
     }
 
+    // =========================================================================
+    // s472 — FILE-SCOPE CONSTANTS (`[export] const NAME[: T] = init;` at the
+    // top level of a `${ }` logic block).
+    //
+    // SPEC §7.6: "A variable declared with `let` or `const` at the top level of
+    // a file-level `${}` block SHALL be in scope for all subsequent `${}` blocks
+    // and markup interpolations in the same file"; "Variables declared inside a
+    // function body within a `${}` block are scoped to that function" (so a
+    // function's own local, or a parameter, of the name SHADOWS it — §7.3.3:
+    // "Shadowing in a NESTED block … is legal"). §21.2: `export const Name = …`
+    // exports it; §21.3 imports it like any exported name (the s472 file scope:
+    // KConst entries, a private constant stays private).
+    //
+    // WHAT THE BOOTSTRAP BUILDS — a constant whose value is fixed at compile
+    // time: its initializer is literals, unit enum variants, other constants,
+    // a member read (`S.length`, `E.V`), and the operators over them (unary,
+    // binary but `|>`, the conditional, a template). §7.4.2 names exactly this
+    // class ("a literal, `const`-bound to a literal, simple arithmetic on
+    // constants") and lets the compiler inline it ("the compiler MAY inline the
+    // string value directly … observationally equivalent"): such a value does
+    // nothing when evaluated, so evaluating it once at module initialization
+    // (§7.6: "it runs ONCE, at file init") and evaluating it where it is read
+    // cannot be told apart. lower INLINES it at every read (lower.scrml
+    // constRead) — so the value reaches the client artifact only where client
+    // code reads it, and the server artifact only where server code does (no
+    // file-scope value is copied into a bundle that does not read it).
+    //
+    // REFUSED BY NAME (E-BOOTSTRAP-UNSUPPORTED, constBlocker) — an initializer
+    // that DOES something when evaluated: a call, a cell read, a query, a
+    // `match` / handling form, an index, a function value, a tape / struct
+    // literal. The SPEC is silent on where such an initializer runs for a
+    // file-scope binding (§12.2: route inference places FUNCTIONS — "an `import`
+    // is file-scoped and cannot itself be placed"; Trigger 3's S331 note: a
+    // server-only reach in a non-function position "does not escalate"), so a
+    // file-scope `const` holding a `?{}` result or a server value has no stated
+    // home. Fail closed. An initializer reads only the constants initialized
+    // BEFORE it (earlier in its file, or in a file it imports — link order), so
+    // there is no cycle and no read of an uninitialized binding.
+    // =========================================================================
+    export type ConstInfo:struct = {
+        sym: Sym, nid: int, span: ASpan, file: string, name: string, exported: boolean,
+        annot: Type | not,    // the written type, resolved (`not`: none written, or it did not resolve)
+        ty: Type | not,       // the constant's type: `annot`, else the initializer's (constPass)
+        init: AExpr,
+        ready: boolean,       // initialized at this point of constPass (a later one is not)
+        ok: boolean,          // admitted (constPass) — a refused one has no value
+    }
+    type RConsts:struct = { cs: ConstInfo[], st: AS }
+
+    // phaseA: every constant's Sym and written type, in link order then source order.
+    fn constStubs(files: FileAst[], te0: TypeEnv, st0: AS) -> RConsts {
+        let st: AS = st0
+        let out: ConstInfo[] = []
+        for (const f of files) {
+            const te: TypeEnv = teAt(te0, f.path)
+            const errs: ASpan[] = fileErrs(files, f.path)
+            for (const c of constItems(f.items)) {
+                const rs: RSym = mint(st, c.name)
+                st = rs.st
+                let annot: Type | not = not
+                const at: AType | not = c.ty
+                if (at is given) {
+                    if (!hasErrIn(errs, at.span)) {
+                        const rt: RType = resolveType(te, at, st)
+                        st = rt.st
+                        if (!rt.unresolved) annot = rt.t
+                    }
+                }
+                out = out.concat([{ sym: rs.s, nid: c.nid, span: c.span, file: f.path, name: c.name, exported: c.exported,
+                                    annot: annot, ty: annot, init: c.init, ready: true, ok: true }])
+            }
+        }
+        return { cs: out, st: st }
+    }
+
+    fn withConsts(g: Globals, cs: ConstInfo[]) -> Globals {
+        return { program: g.program, entry: g.entry, te: g.te, types: g.types, decls: g.decls, fns: g.fns, handles: g.handles, files: g.files,
+                 errorSym: g.errorSym, sqlErrorSym: g.sqlErrorSym, sceSym: g.sceSym, voids: g.voids, consts: cs }
+    }
+
+    fn constAs(c: ConstInfo, ty: Type | not, ready: boolean, ok: boolean) -> ConstInfo {
+        return { sym: c.sym, nid: c.nid, span: c.span, file: c.file, name: c.name, exported: c.exported,
+                 annot: c.annot, ty: ty, init: c.init, ready: ready, ok: ok }
+    }
+
+    // Each constant's initializer, bound in order: while the k-th is bound,
+    // the ones from k on are not initialized yet (`ready: false` — a read of
+    // one is E-SCOPE-001, resolveName).
+    fn constPass(g: Globals, st0: AS) -> RGlobals {
+        let st: AS = st0
+        let done: ConstInfo[] = []
+        let i = 0
+        while (i < g.consts.length) {
+            let rest: ConstInfo[] = []
+            let j = i
+            while (j < g.consts.length) {
+                rest = rest.concat([constAs(g.consts[j], g.consts[j].ty, false, g.consts[j].ok)])
+                j = j + 1
+            }
+            const r: RConst1 = constValue(withConsts(g, done.concat(rest)), g.consts[i], st)
+            st = r.st
+            done = done.concat([r.c])
+            i = i + 1
+        }
+        return { g: withConsts(g, done), st: st }
+    }
+
+    type RConst1:struct = { c: ConstInfo, st: AS }
+
+    fn constEnv(g: Globals, file: string) -> Env {
+        return { g: g, file: file, ctx: CtxK.InFn, locals: [], rows: [], handles: [], inRenders: false, narrows: [], present: [],
+                 host: HostCtx.HostNo, own: "", inEffect: false, fx: noFailCtx(), lift: LiftCtx.NoLift }
+    }
+
+    fn constValue(g: Globals, c: ConstInfo, st0: AS) -> RConst1 {
+        const b: AExpr | not = constBlocker(c.init)
+        if (b is given) {
+            const st1: AS = addDiag(st0, c.file, b.span, "E-BOOTSTRAP-UNSUPPORTED", "the initializer of the file-scope constant `" + c.name + "` holds " + blockerWhat(b) + " — the bootstrap builds a file-scope `const` whose value is fixed at compile time: literals, unit enum variants, other constants, a member read and the operators over them (§7.4.2: \"a literal, `const`-bound to a literal, simple arithmetic on constants\"). Anything else would run at module initialization, and where a file-scope binding's initializer runs — the client, the server, or both — is not settled (§12 places functions, not bindings). Compute the value in a function and call it where it is needed")
+            return { c: constAs(c, c.annot, true, false), st: st1 }
+        }
+        const env: Env = withWholeAt(constEnv(g, c.file), c.init.nid, "the initializer of `" + c.name + "`")
+        const ri: RX = resolveExpr(env, c.init, c.annot, st0)
+        let st: AS = addBind(ri.st, c.nid, BindFact.BBind(c.sym))
+        let ty: Type | not = c.annot
+        if (ty is not) ty = ri.x.ty
+        if (ty is not) {
+            if (!recoveredInit(c.init)) st = addDiag(st, c.file, c.span, "E-BOOTSTRAP-UNSUPPORTED", "the type of the file-scope constant `" + c.name + "` is not known from its initializer — write it: `const " + c.name + ": T = …;`")
+            return { c: constAs(c, not, true, false), st: st }
+        }
+        return { c: constAs(c, ty, true, true), st: st }
+    }
+
+    fn recoveredInit(e: AExpr) -> boolean {
+        const k: AExprK = e.k
+        return match k {
+            .Recovered :> true
+            .Name(name: n) :> false
+            .At(name: n) :> false
+            .AtItem :> false
+            .Num(raw: x) :> false
+            .Str(v: x) :> false
+            .Bool(v: x) :> false
+            .NotLit :> false
+            .Variant(name: n) :> false
+            .Member(obj: o) :> false
+            .Call(callee: c) :> false
+            .Unary(op: o) :> false
+            .Binary(op: o) :> false
+            .Ternary(test: x) :> false
+            .Assign(target: x) :> false
+            .ArrayLit(elems: x) :> false
+            .ObjectLit(props: x) :> false
+            .Spread(e: x) :> false
+            .Index(obj: o) :> false
+            .Lambda(params: x) :> false
+            .Sql(q: x) :> false
+            .Handled(h: x) :> false
+            .Template(quasis: x) :> false
+        }
+    }
+
+    // The first sub-expression of a constant's initializer that DOES something
+    // when evaluated (see the section header), else `not`. A name is left to
+    // the binder (a constant, else whatever it names is refused there: a
+    // function named without a call is E-BOOTSTRAP-UNSUPPORTED, an unknown
+    // name E-SCOPE-001); a parse-error placeholder is the parser's.
+    fn constBlocker(e: AExpr) -> AExpr | not {
+        const k: AExprK = e.k
+        return match k {
+            .Name(name: n) :> not
+            .Num(raw: r) :> not
+            .Str(v: v) :> not
+            .Bool(v: v) :> not
+            .NotLit :> not
+            .Recovered :> not
+            .Variant(name: n) :> not
+            .Member(obj: o, name: n) :> constBlocker(o)
+            .Unary(op: o, e: x) :> constBlocker(x)
+            .Binary(op: o, l: l, r: r) :> binaryBlocker(e, o, l, r)
+            .Ternary(test: t, yes: y, no: n) :> firstBlocker([t, y, n])
+            .Template(quasis: q, slots: ss) :> firstBlocker(ss)
+            .At(name: n) :> e
+            .AtItem :> e
+            .Call(callee: c) :> e
+            .Assign(target: t) :> e
+            .ArrayLit(elems: x) :> e
+            .ObjectLit(props: x) :> e
+            .Spread(e: x) :> e
+            .Index(obj: o) :> e
+            .Lambda(params: x) :> e
+            .Sql(q: x) :> e
+            .Handled(h: x) :> e
+        }
+    }
+
+    // `x |> f` is a call (§ pipe); every other operator is a value.
+    fn binaryBlocker(e: AExpr, op: BinOp, l: AExpr, r: AExpr) -> AExpr | not {
+        if (op == BinOp.Pipe) return e
+        return firstBlocker([l, r])
+    }
+
+    fn firstBlocker(es: AExpr[]) -> AExpr | not {
+        for (const x of es) {
+            const b: AExpr | not = constBlocker(x)
+            if (b is given) return b
+        }
+        return not
+    }
+
+    fn blockerWhat(e: AExpr) -> string {
+        const k: AExprK = e.k
+        return match k {
+            .At(name: n) :> "a cell read (`@" + n + "`)"
+            .AtItem :> "a read of the current `<each>` item (`@.`)"
+            .Call(callee: c) :> "a call"
+            .Assign(target: t) :> "an assignment"
+            .ArrayLit(elems: x) :> "a tape literal (a file-scope tape constant is not in the bootstrap yet)"
+            .ObjectLit(props: x) :> "a struct literal (a file-scope struct constant is not in the bootstrap yet)"
+            .Spread(e: x) :> "a spread"
+            .Index(obj: o) :> "an index read"
+            .Lambda(params: x) :> "a function value"
+            .Sql(q: x) :> "a query (`" + sqlSigil() + " … }`)"
+            .Handled(h: x) :> "a `match` or a handling form"
+            .Binary(op: o) :> "a pipe (`|>`, a call)"
+            .Name(name: n) :> "`" + n + "`"
+            .Num(raw: r) :> "a number"
+            .Str(v: v) :> "a string"
+            .Bool(v: v) :> "a boolean"
+            .NotLit :> "`not`"
+            .Recovered :> "an unparsed expression"
+            .Variant(name: n) :> "a variant"
+            .Member(obj: o) :> "a member read"
+            .Unary(op: o) :> "an operator"
+            .Ternary(test: t) :> "a conditional"
+            .Template(quasis: q) :> "a template"
+        }
+    }
+
+    // The constant `name` denotes in `file` (declared there, or imported from a
+    // file that exports it), else `not`.
+    fn constNamed(g: Globals, file: string, name: string) -> ConstInfo | not {
+        const from: string = scopeFrom(g.te.link, file, NameKind.KConst, name)
+        if (from == "") return not
+        for (const c of g.consts) {
+            if (c.file == from && c.name == name) return c
+        }
+        return not
+    }
+
     fn declEnv(g: Globals, ds: DeclSrc, inRenders: boolean) -> Env {
         return { g: g, file: ds.file, ctx: CtxK.InDecl(ds.info.sym, ds.isProgram), locals: [], rows: [],
                  handles: handlesOwnedBy(g, ds.info.nid), inRenders: inRenders, narrows: [], present: [],
@@ -14534,6 +14841,7 @@ ${
         const k: AItemK = it.k
         return match k {
             .ProgramItem(p: p) :> markupNodes(p.items)
+            .ConstItem(c: c) :> []
             .DeclItem(d: d) :> rendersOf(d)
             .ImportItem(i: i) :> []
             .TypeItem(t: t) :> []
@@ -14840,6 +15148,7 @@ ${
             .NFn(sym: s) :> ""
             .NLength :> ""
             .NSurface(of: x) :> ""
+            .NConst(sym: s) :> ""
             not :> ""
         }
     }
@@ -15650,6 +15959,7 @@ ${
             .NFn(sym: s) :> VType.Unknown
             .NLength :> known(Type.Int)
             .NSurface(of: x, prop: pr) :> surfaceType(pr)
+            .NConst(sym: s) :> constVType(env.t, s)
             not :> VType.Unknown
         }
     }
@@ -15681,6 +15991,7 @@ ${
             .NFn(sym: s) :> false
             .NLength :> false
             .NSurface(of: x) :> false
+            .NConst(sym: s) :> false
             not :> false
         }
     }
@@ -15730,6 +16041,7 @@ ${
             .NStruct(owner: o) :> not
             .NLength :> not
             .NSurface(of: x) :> not
+            .NConst(sym: s) :> not
             not :> not
         }
     }
@@ -16947,6 +17259,7 @@ ${
             .NFn(sym: s) :> false
             .NLength :> false
             .NSurface(of: x) :> false
+            .NConst(sym: s) :> false
             // a name the binder did not resolve: undeclared (reported by the
             // scope rules) or inside a construct already refused (`if=` on a
             // `<db>`, E-BOOTSTRAP-UNSUPPORTED) — not a type left unresolved
@@ -17799,6 +18112,43 @@ ${
         return keepTEnv(tWithLocal(env, sym, r.vt), contribute(r.ts, sym, r.vt))
     }
 
+    // s472 — a file-scope constant's type (constPass): its written type, else
+    // its initializer's; Unknown for a refused one (no check fires on it).
+    fn constVType(t: Tables, s: Sym) -> VType {
+        for (const c of t.consts) {
+            if (c.sym.id == s.id) {
+                const ty: Type | not = c.ty
+                if (ty is given && c.ok) return known(ty)
+                return VType.Unknown
+            }
+        }
+        return VType.Unknown
+    }
+
+    fn constByNid(t: Tables, nid: int) -> ConstInfo | not {
+        for (const c of t.consts) {
+            if (c.nid == nid) return c
+        }
+        return not
+    }
+
+    // s472 — a file-scope constant's initializer, typed where it stands (file
+    // scope: no locals), and checked against its written type exactly as a
+    // local's is (typeLocal): §7.5.1's positions include a declaration's
+    // initializer. A refused constant (constPass) is not typed.
+    fn typeConst(env0: TEnv, c: AConst, ts0: TypeState) -> TypeState {
+        const ci: ConstInfo | not = constByNid(env0.t, c.nid)
+        if (ci is not) return ts0
+        if (!ci.ok) return ts0
+        const env: TEnv = { t: env0.t, file: env0.file, errs: env0.errs, locals: [], settled: env0.settled, narrowed: [], fnw: env0.fnw, rows: [], fret: not, blame: env0.blame }
+        const r: RVT = typeExpr(env, c.init, ts0)
+        const annot: Type | not = ci.annot
+        if (annot is not) return r.ts
+        let ts: TypeState = checkInit(env, annot, literalKind(c.init), c.init.span, "`" + c.name + "`", r.ts)
+        ts = checkIntInit(env, annot, literalKind(c.init), r.vt, c.init.span, "`" + c.name + "`", ts)
+        return checkNotElems(env, c.init, annot, checkLitFields(env, c.init, ts))
+    }
+
     // The condition is checked (checkCond, ruled S440 #4 = (c)); each branch
     // is typed under the condition's narrowing (less what the condition's own
     // calls may undo); the statement leaves the join of both paths.
@@ -18504,6 +18854,7 @@ ${
         const k: AItemK = it.k
         return match k {
             .ProgramItem(p: p) :> typeProgramBody(env, p, ts)
+            .ConstItem(c: c) :> typeConst(env, c, ts)
             .DeclItem(d: d) :> typeUserDecl(env, d, ts)
             .FnItem(f: f) :> typeFn(env, f, ts)
             .ImportItem(i: i) :> ts
@@ -18575,6 +18926,7 @@ ${
             .MarkupItem(n: n) :> typeNode(env, n, ts)
             .DeclItem(d: d) :> typeUserDecl(env, d, ts)
             .ProgramItem(p: p) :> ts
+            .ConstItem(c: c) :> typeConst(env, c, ts)
             .ImportItem(i: i) :> ts
             .TypeItem(t: x) :> ts
         }
@@ -18918,6 +19270,7 @@ ${
             .NFn(sym: s) :> not
             .NLength :> not
             .NSurface(of: x) :> not
+            .NConst(sym: s) :> not
             not :> not
         }
     }
@@ -18943,6 +19296,7 @@ ${
             .NFn(sym: s) :> not
             .NLength :> not
             .NSurface(of: v) :> sharedOf(validityInst(v))
+            .NConst(sym: s) :> not
             not :> not
         }
     }
@@ -18995,6 +19349,7 @@ ${
             .NStruct(owner: o) :> not
             .NLength :> not
             .NSurface(of: x) :> not
+            .NConst(sym: s) :> not
             not :> not
         }
     }
@@ -19007,6 +19362,7 @@ ${
             .NStruct(owner: o) :> "a struct field"
             .NLength :> "a length"
             .NSurface(of: x) :> "a validity surface"
+            .NConst(sym: s) :> "a file-scope constant"
             .NFn(sym: s) :> "a function"
         }
     }
@@ -20289,11 +20645,13 @@ ${
             .FnItem(f: f) :> []
             .DeclItem(d: d) :> []
             .ProgramItem(p: p) :> []
+            .ConstItem(c: c) :> []
         }
         for (const n of ns) { st = holdInNode(file, n, declared, shadow, st) }
         for (const d of declsOfItem(it)) { st = holdInDecl(file, d, declared, shadow, st) }
         const ps: AItem[] = match k {
             .ProgramItem(p: p) :> p.items
+            .ConstItem(c: c) :> []
             .MarkupItem(n: n) :> []
             .ImportItem(i: i) :> []
             .TypeItem(t: t) :> []
@@ -20663,6 +21021,7 @@ ${
             .NField(decl: d, inst: i, idx: x) :> fieldUseLabel(t, d, x)
             .NInst(decl: d) :> "@" + d.hint
             .NSurface(of: v) :> "the validity surface of @" + validityDecl(v).hint
+            .NConst(sym: s) :> ""
             .NLocal(sym: s) :> ""
             .NStruct(owner: o) :> ""
             .NFn(sym: s) :> ""
@@ -21033,6 +21392,7 @@ ${
             .TypeItem(t: t) :> not
             .DeclItem(d: d) :> not
             .ProgramItem(p: p) :> not
+            .ConstItem(c: c) :> not
         }
     }
 
@@ -21044,6 +21404,7 @@ ${
             .ImportItem(i: i) :> not
             .TypeItem(t: t) :> not
             .ProgramItem(p: p) :> not
+            .ConstItem(c: c) :> not
         }
     }
 
@@ -21068,12 +21429,14 @@ ${
             .DeclItem(d: d) :> not
             .MarkupItem(n: n) :> not
             .ProgramItem(p: p) :> not
+            .ConstItem(c: c) :> not
         }
     }
 
     fn programOfK(k: AItemK) -> AProgram | not {
         return match k {
             .ProgramItem(p: p) :> p
+            .ConstItem(c: c) :> not
             .FnItem(f: f) :> not
             .ImportItem(i: i) :> not
             .TypeItem(t: t) :> not
@@ -23976,6 +24339,7 @@ ${
             .NFn(sym: x) :> -1
             .NLength :> -1
             .NSurface(of: x) :> -1
+            .NConst(sym: sy) :> -1
             not :> -1
         }
         if (id < 0) return -1
@@ -24201,7 +24565,9 @@ ${
 
     export fn analyze(files: FileAst[], entry: string) -> TypedProgram {
         const st0: AS = { facts: noFacts(), diags: [], nextSym: 0, annots: [], bad: { params: [], fields: [] }, effects: [], pend: [], lifts: [] }
-        const ra: RGlobals = phaseA(files, entry, st0)
+        const ra0: RGlobals = phaseA(files, entry, st0)
+        // s472: the file-scope constants' initializers, in order (before any body reads one)
+        const ra: RGlobals = constPass(ra0.g, ra0.st)
         let st: AS = checkImports(files, ra.g, ra.st)
         st = phaseB(ra.g, st)
         st = strayEffects(files, st)
@@ -24222,7 +24588,7 @@ ${
         const bound: Tables = { program: ra.g.program, types: ra.g.types, decls: decls, fns: fns, handles: ra.g.handles,
                                 names: fs.names, values: fs.values, effects: fs.effects, binds: fs.binds, elems: fs.elems,
                                 attrs: fs.attrs, fails: fs.fails, annots: st.annots, unresolved: st.bad, typing: { exprs: [], at: [], presence: [] },
-                                novalidate: [], resets: rr.infos, gated: [], persists: rp.infos, server: noServerFacts(), css: css.facts }
+                                novalidate: [], resets: rr.infos, gated: [], persists: rp.infos, server: noServerFacts(), css: css.facts, consts: ra.g.consts }
         const scopeDiags: Diag[] = checkScopes(files, bound, ra.g.te.link)
         // s452 (dpa-066): THE EFFECT SUMMARY — once, over the bound tables —
         // and the binder's decisions that read it (rulesPass, M3)
@@ -24242,14 +24608,14 @@ ${
         const typedT: Tables = { program: bound.program, types: bound.types, decls: bound.decls, fns: bound.fns, handles: bound.handles,
                                  names: bound.names, values: bound.values, effects: bound.effects, binds: bound.binds,
                                  elems: bound.elems, attrs: bound.attrs, fails: bound.fails, annots: bound.annots, unresolved: bound.unresolved, typing: typed.typing,
-                                 novalidate: vp.forms, resets: bound.resets, gated: vp.gated, persists: bound.persists, server: pp.facts, css: css.facts }
+                                 novalidate: vp.forms, resets: bound.resets, gated: vp.gated, persists: bound.persists, server: pp.facts, css: css.facts, consts: bound.consts }
         const pl: PS = planPass(ra.g, typedT, sum, pp.st)
         const sf: ServerFacts = { servers: pp.facts.servers, sqls: pp.facts.sqls, dbs: pp.facts.dbs, places: pp.facts.places,
                                   inherited: pp.facts.inherited, plan: pl.plan }
         const t: Tables = { program: bound.program, types: bound.types, decls: bound.decls, fns: bound.fns, handles: bound.handles,
                             names: bound.names, values: bound.values, effects: bound.effects, binds: bound.binds,
                             elems: bound.elems, attrs: bound.attrs, fails: bound.fails, annots: bound.annots, unresolved: bound.unresolved, typing: typed.typing,
-                            novalidate: vp.forms, resets: bound.resets, gated: vp.gated, persists: bound.persists, server: sf, css: css.facts }
+                            novalidate: vp.forms, resets: bound.resets, gated: vp.gated, persists: bound.persists, server: sf, css: css.facts, consts: bound.consts }
         const base0: Diag[] = domScopeDropped(pl.st.diags, pp.doms).concat(scopeDiags).concat(effectDiags).concat(vp.diags).concat(sinkDiags).concat(typed.diags)
         // s471: the linear pass (§35) — after the typer (§35.5: "after type resolution and
         // route inference"; a non-exhaustive `match`'s E-TYPE-020 is in `base0`, §35.4.3)
@@ -24872,6 +25238,9 @@ ${
         }
         for (const f of g.fns) {
             if (f.info.file == path && f.info.name == name && f.info.exported) return true
+        }
+        for (const c of g.consts) {
+            if (c.file == path && c.name == name && c.exported) return true
         }
         return false
     }
