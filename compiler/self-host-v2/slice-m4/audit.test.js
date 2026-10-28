@@ -11,11 +11,11 @@
 
 import { describe, test, expect, beforeAll, afterEach, afterAll } from "bun:test";
 import { loadM2, frontEnd, compileClean, replaceLine, negativeLines, readM4 } from "./harness.js";
-import { loadProgram, click, expectNoPageErrors } from "../slice-m1/load-program.js";
+import { loadProgram, click, expectNoPageErrors, warmLoadProgram } from "../slice-m1/load-program.js";
 import { auditShapesFixture } from "./fixtures.js";
 
 let mods;
-beforeAll(() => { ({ mods } = loadM2()); }, { timeout: 120000 });
+beforeAll(() => { ({ mods } = loadM2()); warmLoadProgram(); }, { timeout: 120000 });
 afterEach(() => expectNoPageErrors());
 
 const SRC = () => readM4("src/audit/audit.scrml");

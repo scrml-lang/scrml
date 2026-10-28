@@ -14,10 +14,10 @@
 
 import { describe, test, expect, beforeAll, afterEach } from "bun:test";
 import { loadM2, frontEnd } from "./harness.js";
-import { loadProgram, expectNoPageErrors } from "../slice-m1/load-program.js";
+import { loadProgram, expectNoPageErrors, warmLoadProgram } from "../slice-m1/load-program.js";
 
 let mods;
-beforeAll(() => { ({ mods } = loadM2()); }, { timeout: 120000 });
+beforeAll(() => { ({ mods } = loadM2()); warmLoadProgram(); }, { timeout: 120000 });
 afterEach(() => expectNoPageErrors());
 
 const prog = (type, body) => `<program>\n    <xs:${type}=([])/>\n    function f() { ${body}; }\n    <main><ul><each in=@xs as x><li>\${x}</li></each></ul></main>\n</program>\n`;

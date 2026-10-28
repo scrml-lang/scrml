@@ -76,6 +76,18 @@ export function printCore(core, name) {
   return mods.print.printProgram(core, `${name}.client.js`, "scrml-runtime.js");
 }
 
+/**
+ * Compile the printer's bundle (slice-m1/bundle.scrml) now. `printCore` loads it on first
+ * use, and a file that warms only the M2 bundle in `beforeAll` otherwise pays that compile
+ * inside its first `loadProgram` test — under bun's 5 s per-test default, which a cold CI
+ * runner overshoots (S471: front.test.js O58 (b) 5.3 s, typer-s460 "S460 at runtime" 5.7 s,
+ * both ~0.01–1.9 s warm). Call it in `beforeAll`, whose budget is set for a compile.
+ * Cached per process, so a warm call is free.
+ */
+export function warmLoadProgram() {
+  loadBootstrap();
+}
+
 export async function loadProgram(core, name, expose = []) {
   const out = printCore(core, name);
   const dir = mkdtempSync(join(tmpdir(), `slice-m1-${name}-`));

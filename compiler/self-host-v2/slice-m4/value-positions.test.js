@@ -16,7 +16,7 @@
 
 import { describe, test, expect, beforeAll, afterEach } from "bun:test";
 import { loadM2, frontEnd } from "./harness.js";
-import { loadProgram, expectNoPageErrors } from "../slice-m1/load-program.js";
+import { loadProgram, expectNoPageErrors, warmLoadProgram } from "../slice-m1/load-program.js";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -24,7 +24,7 @@ const CODE = "E-VALUE-WRITES-STATE";
 const UNPROVEN = "E-VALUE-WRITE-UNPROVEN";
 
 let mods;
-beforeAll(() => { ({ mods } = loadM2()); }, { timeout: 120000 });
+beforeAll(() => { ({ mods } = loadM2()); warmLoadProgram(); }, { timeout: 120000 });
 afterEach(() => expectNoPageErrors());
 
 const run = (src) => frontEnd(mods, [{ path: "t.scrml", src }]);

@@ -6,10 +6,10 @@
 import { describe, test, expect, beforeAll, afterEach } from "bun:test";
 import { loadM2, frontEnd, replaceLine } from "./harness.js";
 import { auditFixture } from "./fixtures.js";
-import { loadProgram, click, expectNoPageErrors, instancesOf } from "../slice-m1/load-program.js";
+import { loadProgram, click, expectNoPageErrors, instancesOf, warmLoadProgram } from "../slice-m1/load-program.js";
 
 let mods;
-beforeAll(() => { ({ mods } = loadM2()); }, { timeout: 120000 });
+beforeAll(() => { ({ mods } = loadM2()); warmLoadProgram(); }, { timeout: 120000 });
 afterEach(() => expectNoPageErrors());
 
 const run = (src) => frontEnd(mods, [{ path: "t.scrml", src }]);
