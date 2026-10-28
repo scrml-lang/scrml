@@ -32,7 +32,7 @@
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 264 | 5 |
 | MED | 699 | 8 |
-| LOW | 546 | 0 |
+| LOW | 548 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
 
@@ -477,6 +477,16 @@ Uses resolve per file already (`declNamed`); only the output key is shared. Fix 
 ### g-boot-type-unknown-code-s472 — the bootstrap reports an unresolved type name as `E-TYPE-UNKNOWN` (no §34 row, fail-closed Error) where §14.1.2 / §34 name `E-TYPE-UNKNOWN-NAME` — now also the code for a type declared in another file but not imported — `NEW S472; LOW; open (right refusal, wrong code)`
 
 Renaming touches 17 test pins and conformance grading; left for its own lane.
+
+<!-- @gap id=g-impl1-bootstrap-build-no-arity-check-s472 sev=LOW status=open locus=compiler/src(impl#1 compiling compiler/self-host-v2/*.scrml into the bootstrap bundle — exhaustiveness checked, call arity not) prov=dispatch:s472-boot-payload-variant(note) -->
+### g-impl1-bootstrap-build-no-arity-check-s472 — impl#1 builds the bootstrap bundle with exhaustiveness checking but does not check call arity, so a sibling lane's signature change slips through the build silently: in the S472 #1608 lane, `elsewhereNote` was still called with 3 arguments after #1606 changed it to 5, and only a behavioural test caught it — `NEW S472; LOW; open (tooling)`
+
+Fails late, not open: the wrong call compiles, and a test that runs the path catches it. A path no test runs keeps the bad call. Fix direction: give impl#1 an arity check (an argument count that differs from a known callee's parameters is an error) when it builds the bootstrap, or run the bootstrap's own typer over its sources as part of the build.
+
+<!-- @gap id=g-spec-7-5-1-annotated-initializer-typed-widening-owed-s472 sev=LOW status=open locus=SPEC(§7.5.1 — normative text covers literal initializers only)+compiler/self-host-v2(type-checks every annotated non-literal initializer since #1608 r1 F2) prov=review:S472-#1608(F2) -->
+### g-spec-7-5-1-annotated-initializer-typed-widening-owed-s472 — the bootstrap now type-checks every annotated initializer that is not a literal (#1608 round 1, F2), but SPEC §7.5.1's normative text still covers literal initializers only; the SPEC text that widens it is owed — `NEW S472; LOW; open (SPEC text owed)`
+
+The implementation is ahead of the SPEC: a program refused for an annotated non-literal initializer has no §7.5.1 sentence to point to. Fix: widen §7.5.1's initializer position to any annotated initializer whose type the compiler proves, matching the bootstrap.
 
 <!-- @gap id=g-boot-position-write-s472 sev=HIGH status=resolved resolved-by=s472-boot-position-write locus=compiler/self-host-v2/analyze.scrml(writing an element `a[i]` — "Core has no position-write place")+core.scrml(Place / EditKind.PositionWrite has no index form) prov=dispatch:s472-boot-stdlib-md(survey of stdlib/md);spec:§66.12.2 -->
 ### g-boot-position-write-s472 — the bootstrap refuses a position write `xs[i] = v` (E-BOOTSTRAP-UNSUPPORTED, "Core has no position-write place"); only an element-FIELD write `@xs[i].f = v` exists. §66.12.2 grants it (`write` — "positions may be overwritten in place (`xs[i] = v` …)"). Blocks `scrml:md` (~30 sites, its delimiter arena) and any index-updating algorithm — `NEW S472; HIGH; RESOLVED S472 (s472-boot-position-write)`
