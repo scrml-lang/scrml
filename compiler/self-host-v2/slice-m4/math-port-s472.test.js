@@ -313,6 +313,41 @@ describe("the S472 wrapper rule — a host binding is usable ONLY as the direct 
     const src = lib("    export fn f(x: int) -> int {\n        return x;\n    }\n    fn hf(x: int) -> int {\n        return x;\n    }");
     expect(codes(std(src))).toEqual(["E-SCOPE-010"]);
   });
+
+  // S473 review LOW-1: the frozen tree let a plain import or a second `import:host` bind the same
+  // name silently, and the host binding always won (resolution consults host imports first). §21.3.1.1:
+  // "A binding's local name SHALL NOT also be declared in its file (`E-SCOPE-010`, §7.6 — as for a plain
+  // import)" — refused, never §41.7's later-import-wins warning (a host binding is a typed boundary).
+  describe("a host binding's local name also bound by another import of the file is E-SCOPE-010", () => {
+    const OTHER = { path: "scrml:hb/other.scrml", src: "${\n    export fn hf(x: int) -> int {\n        return x + 100;\n    }\n}\n" };
+    const IDX = "scrml:hb/index.scrml";
+    const WRAP = "${\n    export fn f(x: int) -> int {\n        return hf(x);\n    }\n}\n";
+    const run = (heads) => frontEnd(mods(), [OTHER, { path: IDX, src: heads + WRAP },
+      { path: ENTRY, src: '<program>\n${ import { f } from "scrml:hb"; }\n<p>${f(1)}</p>\n</program>\n' }],
+      ENTRY, { stdlibPaths: [IDX, "scrml:hb/other.scrml"] });
+    const cases = [
+      ["a plain import, then the host import", 'import { hf } from "./other.scrml";\nimport:host { hf } from "./h.js";\n', 1],
+      ["the host import, then a plain import", 'import:host { hf } from "./h.js";\nimport { hf } from "./other.scrml";\n', 1],
+      ["two host imports", 'import:host { hf } from "./h.js";\nimport:host { hf } from "./h2.js";\n', 2],
+      ["one host import naming it twice", 'import:host { hf, hf } from "./h.js";\n', 2],
+    ];
+    for (const [what, heads, n] of cases) {
+      test(what, () => {
+        const r = run(heads);
+        const hits = errors(r).filter((d) => d.code === "E-SCOPE-010");
+        expect(hits.length).toBe(n);
+        for (const d of hits) {
+          expect(d.file).toBe(IDX);
+          expect(d.message).toContain("bound once in file scope");
+        }
+      });
+    }
+    test("control: two plain imports of the name stay the §41.7 W-IMPORT-001 warning", () => {
+      const r = run('import { hf } from "./other.scrml";\nimport { hf } from "./other.scrml";\n');
+      expect(errors(r)).toEqual([]);
+      expect(r.diags.map((d) => d.code)).toContain("W-IMPORT-001");
+    });
+  });
 });
 
 describe("the S472 output-location ruling — the host file stays inside its module directory", () => {

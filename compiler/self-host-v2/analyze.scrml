@@ -25893,9 +25893,42 @@ ${
         for (const n of h.names) {
             if (hostNameCollides(g, file, n.name)) {
                 st = addDiag(st, file, n.span, "E-SCOPE-010", "`" + n.name + "` is bound by `" + shown + "` and also declared in this file — a name is bound once in file scope (duplicate binding in file scope, §7.6); rename one with `as`")
+            } else {
+                const other: string = hostImportClash(g, file, h, n.name)
+                if (other != "") {
+                    st = addDiag(st, file, n.span, "E-SCOPE-010", "`" + n.name + "` is bound by `" + shown + "` and also by " + other + " in this file — a host binding's local name is bound once in file scope (§21.3.1.1, §7.6; never a later-import-wins shadow, which would let one binding silently replace the typed host boundary); rename one with `as`")
+                }
             }
         }
         return st
+    }
+
+    // s473 (review LOW-1) — another import of `file` that also binds `name`: a plain
+    // `import { … }` (§21.3), a second `import:host` declaration, or `h` itself binding
+    // it twice. "" when none does. §21.3.1.1: "A binding's local name SHALL NOT also be
+    // declared in its file (`E-SCOPE-010`)" — the §41.7 later-import-WINS +
+    // W-IMPORT-001 rule is for scrml imports; for a host binding it would let either
+    // binding silently replace the other (hostImportBinding consults host imports
+    // before file-scope imports, so the host one always won), so it is refused.
+    fn hostImportClash(g: Globals, file: string, h: AImport, name: string) -> string {
+        for (const f of g.files) {
+            if (f.path == file) {
+                for (const imp of importsOfItems(f.items)) {
+                    for (const m of imp.names) {
+                        if (m.name == name) return "`import { " + name + " } from \"" + imp.from + "\"`"
+                    }
+                }
+                for (const o of hostImportsOfItems(f.items)) {
+                    let count = 0
+                    for (const m of o.names) {
+                        if (m.name == name) count = count + 1
+                    }
+                    if (o.nid != h.nid && count > 0) return "another `import:" + hostTagOf(o) + "` from `" + o.from + "`"
+                    if (o.nid == h.nid && count > 1) return "this same `import:" + hostTagOf(o) + "` a second time"
+                }
+            }
+        }
+        return ""
     }
 
     // `name` is declared in `file` (a type, a function or a user declaration).
