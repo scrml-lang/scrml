@@ -18,9 +18,12 @@
 //   registered state cell is `E-NAME-COLLIDES-STATE`".
 //
 // The bootstrap builds the compile-time-constant class (literals, unit enum
-// variants, other constants, a member read, the operators over them) and
-// inlines each read (lower.scrml constRead) — so a value reaches only the
-// artifact whose code reads it. Every other initializer (a call, a cell read, a
+// variants, other constants, a member read, the operators over them). Core
+// carries each constant once (CoreProgram.consts, a read is `Local(sym)`); each
+// printer emits ONE module-level `const` per constant its artifact's code reads,
+// transitively (print.scrml constsReadIn) — so a value reaches only the artifact
+// whose code reads it. (Review #1617 MED-1: the first cut inlined each read,
+// re-lowering initializers recursively — exponential in constant depth.) Every other initializer (a call, a cell read, a
 // query, a tape / struct literal, …) runs at module initialization, where a
 // file-scope binding's home (client / server / both) is not settled by the
 // SPEC (§12 places functions): refused BY NAME. A file-scope `let` (§7.6
@@ -115,7 +118,7 @@ describe("§7.6 — a file-scope constant is in scope for the file's functions a
   });
 });
 
-describe("§12 — placement: a constant reaches only the artifact whose code reads it (inlined, lower constRead)", () => {
+describe("§12 — placement: a constant reaches only the artifact whose code reads it (one module-level `const` per artifact, constsReadIn)", () => {
   const SRC = `<program db="./app.db">
     type Row:struct = { name: string }
     \${
@@ -147,6 +150,19 @@ describe("§12 — placement: a constant reaches only the artifact whose code re
     expect(client.js).toContain("user:");
     expect(client.js).toContain("client-mark-3f9");
     expect(server.js).not.toContain("client-mark-3f9");
+    // each constant is ONE module-level binding in its artifact, read by name
+    expect(server.js.split("srv-tag-7c1").length - 1).toBe(1);
+    expect(server.js).toMatch(/const SERVER_TAG = "srv-tag-7c1";/);
+    expect(client.js).not.toMatch(/const SERVER_TAG/);
+    expect(client.js).toMatch(/const PREFIX = "user:";/);
+  });
+
+  test("a constant read only THROUGH another constant is carried with it (transitive), before it", () => {
+    const { core } = compile(`\${\n    const BASE = "b-77";\n    const FULL = BASE + "-x";\n    const UNUSED = "u-55";\n}\n<program>\n    <main>\n        <p>\${FULL}</p>\n    </main>\n</program>\n`);
+    const { client } = artifacts(core);
+    expect(client.js.indexOf("const BASE")).toBeGreaterThan(-1);
+    expect(client.js.indexOf("const BASE")).toBeLessThan(client.js.indexOf("const FULL"));
+    expect(client.js).not.toContain("u-55");
   });
 
   test("the server function reads the constants at run time (a real SQLite), and the client shows the result", async () => {
@@ -163,6 +179,31 @@ describe("§12 — placement: a constant reaches only the artifact whose code re
     click(document.querySelector("#go"));
     for (let i = 0; i < 50 && textOf("#out") === ""; i++) await new Promise((r) => setTimeout(r, 10));
     expect(textOf("#out")).toBe("user:bob/srv-tag-7c1");
+  });
+});
+
+describe("review #1617 MED-1 — a chain of constants is linear in output and compile time", () => {
+  test("`A0 = 1; Ak = A(k-1) + A(k-1)` to depth 20: each constant printed once, the value right, fast", async () => {
+    let consts = "    const A0 = 1;";
+    for (let k = 1; k <= 20; k++) consts += `\n    const A${k} = A${k - 1} + A${k - 1};`;
+    const t0 = performance.now();
+    const { core } = compile(P(consts, "", `<p id="v">\${A20}</p>`));
+    const { client } = artifacts(core);
+    const ms = performance.now() - t0;
+    expect(ms).toBeLessThan(20000);
+    expect(client.js.length).toBeLessThan(4000);
+    for (let k = 0; k <= 20; k++) expect(client.js.split(`const A${k} =`).length - 1).toBe(1);
+    await loadProgram(core, "lc-chain");
+    expect(textOf("#v")).toBe(String(2 ** 20));
+  });
+
+  test("two files' private constants of one name are two bindings, each file reading its own", async () => {
+    const lib = `\${\n    const K = "lib-k";\n    export fn libK() -> string { return K; }\n}\n`;
+    const app = `\${ const K = "app-k"; }\n<program>\n    \${ import { libK } from "./lib.scrml"; }\n    <main>\n        <p id="k">\${K}/\${libK()}</p>\n    </main>\n</program>\n`;
+    const r = run([{ path: "lib.scrml", src: lib }, { path: "app.scrml", src: app }]);
+    expect(codes(r)).toEqual([]);
+    await loadProgram(r.core, "lc-twok");
+    expect(textOf("#k")).toBe("app-k/lib-k");
   });
 });
 

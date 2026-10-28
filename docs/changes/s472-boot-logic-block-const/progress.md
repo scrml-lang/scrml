@@ -61,9 +61,12 @@ level of a `${ }` logic block (E-PARSE-ITEM). Branch `s472-boot-logic-block-cons
   something); `resolveName` → `NameFact.NConst` after the locals (which shadow); `placeName` →
   E-ASSIGN-004; `dupConsts` in checkScopes; typer `constVType` / `typeConst` (written type checked like
   a local's).
-- lower: `readName` `.NConst` → `constRead` lowers the initializer in place. Inlining (§7.4.2) means a
-  constant's value appears only in the artifact whose code reads it — no Core / printer / runtime
-  change, and no server-only value is copied into the client bundle.
+- lower: `readName` `.NConst` → `Local(sym)`; `coreConsts` lowers each initializer ONCE into
+  `CoreProgram.consts` (dependency order). print.scrml `constsReadIn` / `constStmts`: each artifact
+  (client: its decls + client fns; server: the fns it reaches) emits one module-level `const` per
+  constant its code reads, transitively, and no other — a server-only value never reaches the client.
+  walk `programKids` includes the initializers (checkCore sees them). (Round-1 change — the first cut
+  inlined each read: review #1617 MED-1, exponential in constant depth.)
 - severity.scrml regenerated (E-ASSIGN-004, E-NAME-COLLIDES-STATE; it also picked up E-IMPORT-003 /
   -008 / -009 that earlier lanes left unregenerated — all Error, as before by fail-closed default).
 
@@ -71,3 +74,14 @@ level of a `${ }` logic block (E-PARSE-ITEM). Branch `s472-boot-logic-block-cons
 
 - impl + tests: `slice-m4/logic-block-const-s472.test.js` — 35 tests; red on origin/main (e8d2e38cd) 35/35
   (`~/.cache/scrml-pa/s472/lc-red-main.log`), green on the branch.
+
+## Review round 1 (S239 of #1617, ~/.cache/scrml/review/s472-lc/REVIEW.md)
+
+- MED-1 fixed: module-level emission (above). Tests +3: a depth-20 chain (each `const` printed once,
+  < 4 KB, value 2^20 in the page), transitive carry (BASE before FULL, an unread constant absent),
+  two files' private `K` are two bindings. The server-only test now also asserts one binding each.
+  The reviewer's probe sets (r1 78, r2 21, r3 3) re-run: outputs identical to the reviewer's head logs
+  apart from sizes / timings — every placement probe (template, `?{}` parameter, `!{}` arm) unchanged
+  (`~/.cache/scrml-pa/s472/lc-probe-r*.log`).
+- Filed (LOW): g-boot-imported-const-like-cell-s472, g-boot-const-like-builtin-type-s472,
+  g-boot-sqlerror-variant-client-checkcore-s472 (pre-existing).

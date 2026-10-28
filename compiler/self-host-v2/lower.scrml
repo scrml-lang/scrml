@@ -33,7 +33,7 @@ ${
              GrantSet, TransitionGraph, Field, DeclKind, WiringAttr, Decl, Param, Fn, CoreProgram, Validator, SurfaceProp, ValidityOf, Persist,
              ServerFn, SqlMode, Db, SqlQuery, SqlKind, SqlTables, SqlColumns, Failable, OkArm, ErrArm, VariantDef,
              LoopHead, EachHead, RangeHead, HostCall, CssUnit, CssDecl, CoreCss, CssVar, Gather, Lifted, GatherRow, PathStep,
-             block, litStr, mkSym, typeDefSym, readField } from "./core.scrml"
+             CoreConst, block, litStr, mkSym, typeDefSym, readField } from "./core.scrml"
     import { partsText } from "./css.scrml"
     import { ASpan, BinOp, UnOp, AExpr, AProp, AExprK, AStmt, ABlock, AStmtK, AEffect, AType, AParam, AFn,
              AAttrValue, AAttr, AElem, ANode, ANodeK, ADecl, AProgram, AItem, AItemK, AConst, FileAst, Diag, ASql, ASqlMode,
@@ -554,24 +554,27 @@ ${
             .NFn(sym: s) :> missing()
             .NLength :> missing()
             .NSurface(of: x) :> missing()
-            .NConst(sym: s) :> constRead(c, s)
+            .NConst(sym: s) :> Expr.Local(s)
             not :> missing()
         }
     }
 
-    // s472 — a read of a file-scope constant (§7.6) is its initializer, lowered
-    // in place (analyze.scrml constPass: the initializer is fixed at compile
-    // time and does nothing when evaluated — §7.4.2 "the compiler MAY inline"
-    // it — so reading it here and evaluating it once at module init are one
-    // program). Lowered in its OWN file's context: an initializer reads no
-    // cell, no instance, no row, so no substitution of the reading site applies.
-    // A constant read only by server code therefore reaches only the server
-    // artifact, and one read only by the client only the client's.
-    fn constRead(c: LC, s: Sym) -> Expr {
-        for (const k of c.t.consts) {
-            if (k.sym.id == s.id) return lowerExpr({ t: c.t, file: k.file, subst: not, snap: not, rows: [] }, k.init)
+    // s472 — the file-scope constants (§7.6), in analyze's order (link order,
+    // then source order — an initializer reads only constants before it, so
+    // this is dependency order). Each initializer is lowered ONCE, in its own
+    // file's context (it reads no cell, instance or row, so no substitution of
+    // a reading site applies); a read of a constant — in an initializer or
+    // anywhere else — is `Local(sym)` (readName), never a copy of its value.
+    // Which artifact carries which constant is the printers' (constsReadIn): a
+    // constant read only by server code reaches only the server artifact.
+    // (Review #1617 MED-1: inlining each read re-lowered the initializer
+    // recursively — output and compile time exponential in constant depth.)
+    fn coreConsts(t: Tables) -> CoreConst[] {
+        let out: CoreConst[] = []
+        for (const k of t.consts) {
+            if (k.ok) out = out.concat([{ sym: k.sym, init: lowerExpr({ t: t, file: k.file, subst: not, snap: not, rows: [] }, k.init) }])
         }
-        return missing()
+        return out
     }
 
     // A constant the binder resolved: a literal, a variant, or a struct value
@@ -3434,8 +3437,9 @@ ${
         const dbs: Db[] = t.server.dbs
         const reset: boolean = resetShips(tp.files, t)
         const css: CoreCss | not = coreCss(t, reset)
-        const pre: CoreProgram = { program: t.program, decls: decls, types: types, fns: fns, server: server, dbs: dbs, reset: reset, sqlError: sqlError, serverCallError: serverCallError, css: css }
-        const core: CoreProgram = { program: t.program, decls: gateDecls(pre), types: types, fns: fns, server: server, dbs: dbs, reset: reset, sqlError: sqlError, serverCallError: serverCallError, css: css }
+        const consts: CoreConst[] = coreConsts(t)
+        const pre: CoreProgram = { program: t.program, decls: decls, types: types, fns: fns, server: server, dbs: dbs, reset: reset, sqlError: sqlError, serverCallError: serverCallError, css: css, consts: consts }
+        const core: CoreProgram = { program: t.program, decls: gateDecls(pre), types: types, fns: fns, server: server, dbs: dbs, reset: reset, sqlError: sqlError, serverCallError: serverCallError, css: css, consts: consts }
         return { core: core, diags: tp.diags }
     }
 

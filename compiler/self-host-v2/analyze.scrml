@@ -240,7 +240,7 @@ ${
         NFn(sym: Sym),                                    // a function
         NLength,                                          // `.length` of a sequence or a string (a primitive read)
         NSurface(of: ValidityOf, prop: SurfaceProp),      // s449: a read of the validity surface (§55.5 / §55.6) — read-only
-        NConst(sym: Sym),                                 // s472: a file-scope constant (§7.6) — its value is Tables.consts' (lower inlines it)
+        NConst(sym: Sym),                                 // s472: a file-scope constant (§7.6) — lowered to Core `Local(sym)` of CoreProgram.consts
     }
     export type ValueFact:enum = {
         VLit(lit: Literal),                               // a literal (int vs number resolved)
@@ -430,7 +430,7 @@ ${
         persists: PersistInfo[], // s451: the program cells' accepted `persist=` (§6.14)
         server: ServerFacts,    // s451 (U1a): route placement + the program's queries and databases (placePass)
         css: CssFacts,          // s469: the stylesheet the program's `#{}` blocks make (cssPass)
-        consts: ConstInfo[],    // s472: the file-scope constants (constPass) — an NConst read is its `init`, inlined by lower
+        consts: ConstInfo[],    // s472: the file-scope constants (constPass) — lowered once each into CoreProgram.consts
     }
 
     // s451 (U1a) — what route inference and the SQL pass decided (placePass).
@@ -14379,14 +14379,16 @@ ${
     // a member read (`S.length`, `E.V`), and the operators over them (unary,
     // binary but `|>`, the conditional, a template). §7.4.2 names exactly this
     // class ("a literal, `const`-bound to a literal, simple arithmetic on
-    // constants") and lets the compiler inline it ("the compiler MAY inline the
-    // string value directly … observationally equivalent"): such a value does
-    // nothing when evaluated, so evaluating it once at module initialization
-    // (§7.6: "it runs ONCE, at file init") and evaluating it where it is read
-    // cannot be told apart. lower INLINES it at every read (lower.scrml
-    // constRead) — so the value reaches the client artifact only where client
-    // code reads it, and the server artifact only where server code does (no
-    // file-scope value is copied into a bundle that does not read it).
+    // constants"): such a value does nothing when evaluated, so evaluating it
+    // once at module initialization (§7.6: "it runs ONCE, at file init") in
+    // each artifact that reads it is its whole meaning, wherever it is placed.
+    // lower puts each constant in Core ONCE (CoreProgram.consts — a read is
+    // `Local(sym)`); each printer emits one module-level `const` for every
+    // constant its artifact's code reads, transitively (print.scrml
+    // constsReadIn) — so the value reaches the client artifact only where
+    // client code reads it, and the server artifact only where server code
+    // does. (Review #1617 MED-1: the first cut inlined every read, re-lowering
+    // initializers recursively — exponential in constant-on-constant depth.)
     //
     // REFUSED BY NAME (E-BOOTSTRAP-UNSUPPORTED, constBlocker) — an initializer
     // that DOES something when evaluated: a call, a cell read, a query, a
@@ -21002,7 +21004,7 @@ ${
     fn typesProgram(g: Globals) -> CoreProgram {
         let defs: TypeDef[] = []
         for (const t of g.types) { defs = defs.concat([t.def]) }
-        return { program: g.program, decls: [], types: defs, fns: [], server: [], dbs: [], reset: true, sqlError: not, serverCallError: not, css: not }
+        return { program: g.program, decls: [], types: defs, fns: [], server: [], dbs: [], reset: true, sqlError: not, serverCallError: not, css: not, consts: [] }
     }
 
     fn storeOf(v: AAttrValue) -> PersistStore | not {

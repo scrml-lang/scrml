@@ -51,7 +51,7 @@ ${
     import { Node, allNodes } from "./walk.scrml"
     import { JsExpr, JsStmt, JsProp, jid, jstr, jnum, jcall, jmember, printModule } from "./js.scrml"
     import { RouteOut, Ctx, coreRefusal, serverCtx, serverFnJs, symNameOf, routeJs, routeName, routePath, calledServerFns,
-             sqlTextName, dbVarName } from "./print.scrml"
+             sqlTextName, dbVarName, constsReadIn, constStmts } from "./print.scrml"
 
     export type ServerOutput:struct = { js: string, refused: string[], routes: RouteOut[] }
 
@@ -92,6 +92,12 @@ ${
             JsStmt.SComment("each route's wire contract — the same §57 tables the client artifact encodes and decodes with"),
         ])
         for (const sf of routed) { body = body.concat([routeJs(p, sf)]) }
+
+        // s472: the constants the SERVER's code reads (the functions it reaches), once each
+        let roots: Node[] = []
+        for (const sf2 of p.server) { if (reach.indexOf(sf2.sym.id) >= 0) roots = roots.concat([Node.NServerFn(sf2)]) }
+        for (const f2 of p.fns) { if (reach.indexOf(f2.sym.id) >= 0) roots = roots.concat([Node.NFn(f2)]) }
+        body = body.concat(constStmts(ctx, constsReadIn(p, roots)))
 
         // the SQL text of every query site the server reaches, frozen once at load (§8.1:
         // a query's text is the literal runs only; every value is a bound parameter)
