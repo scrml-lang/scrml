@@ -95,3 +95,12 @@ Branch `s472-boot-typer-holes`, base origin/main `e8d2e38cd`. Input: the S472 ba
 - MED-2 unchanged (quoted value into an enum field stays E-TYPE-031). prov=pa-derivation: §21.3.2 (a quoted
   attribute value is a string literal) → §66.9 rule 8 (a use-site attribute is that field's initializer for
   that instance) → §7.5.1 position 3 (a primitive against an enum is a kind mismatch). Owner ruling owed.
+
+## 2026-10-28 — S473 final pass r2 (re-review of d0b21bad9: LAND-WITH-FOLLOWUPS)
+
+- Merged origin/main again (92673be8a; clean textual merge — main's analyze.scrml change is the
+  form-owner pass, no caller of a helper this PR changed, no new text-typing path).
+- LOW-A fixed (f478489b4): §18.4 rule 3 judged pairwise (each arm vs every earlier arm), so
+  {1, "s", (@b ? 1 : "s")} is E-TYPE-001 in all four orders.
+- §34 E-TEXT-NON-PRIMITIVE row: a `{ lift … }` match arm — the match's VALUE is judged where it stands
+  (a markup match of a struct is still refused).
