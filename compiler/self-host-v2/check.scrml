@@ -855,6 +855,7 @@ ${
             .RemoveFront :> not
             .RemoveAnywhere :> not
             .ElemAt(index: x) :> not
+            .PositionAt(index: x) :> not
         }
     }
 
@@ -3143,6 +3144,7 @@ ${
             .FieldAt(path: x) :> ""
             .Transition :> ""
             .ElemAt(index: x) :> ""
+            .PositionAt(index: x) :> ""      // s472: one element — any element value
         }
     }
 
@@ -3279,7 +3281,16 @@ ${
             .RemoveFront :> granted(f.grants.replace || hasEdit(f, EditKind.RemoveFront), "a removal at the front is not granted")
             .RemoveAnywhere :> granted(f.grants.replace || hasEdit(f, EditKind.RemoveAnywhere), "a shrink-anywhere is not granted")
             .ElemAt(index: ix, path: path) :> elemAtProblem(p, f, path)
+            // s472 — `@xs[i] = v` (§66.12.6 rule 3: "`xs[i] = v` | a position write | `write`")
+            .PositionAt(index: ix) :> positionAtProblem(f)
         }
+    }
+
+    // s472 — a position write needs a tape field whose type grants `write`
+    // (`replace` subsumes it, §66.11.3).
+    fn positionAtProblem(f: Field) -> string {
+        if (seqElemOf(f.ty) is not) return "PositionAt on a field whose value is not a sequence"
+        return granted(f.grants.replace || hasEdit(f, EditKind.PositionWrite), "a position write (`xs[i] = v`) is not granted — it needs `write`")
     }
 
     // s444 — `@xs[i].f = v` (dpa-052 Q3, RULED S440): the path walks the
@@ -3416,6 +3427,8 @@ ${
             .Replace :> structTapeKept(p, f.ty, value, d, inst, base, f.sym.hint, [])
             .FieldAt(path: path) :> fieldAtTapeKept(p, f.ty, value, d, inst, base, path, f.sym.hint)
             .ElemAt(index: ix, path: path) :> elemAtTapeKept(p, f, value, path)
+            // s472: the element is replaced whole — each tape field of it the value changes is a `replace` of that field (rule 4)
+            .PositionAt(index: ix) :> elemAtTapeKept(p, f, value, [])
             .Transition :> ""
             .Append :> ""
             .Prepend :> ""
@@ -3907,6 +3920,7 @@ ${
             .RemoveFront :> false
             .RemoveAnywhere :> false
             .ElemAt(index: x) :> false
+            .PositionAt(index: x) :> false
         }
     }
 

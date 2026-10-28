@@ -40,7 +40,10 @@ const REVIEW_EXPECT = {
   "s1/structField": ["PASS"],
   // s469 — an index read `a[0]` is §49.13's (the trap form): the wrong password takes the deny arm
   "s1/arrayLit": ["PASS"],
-  "s1/indexWrite": ["REFUSED", ["E-BOOTSTRAP-UNSUPPORTED"]],
+  // s472: Core has a position write now — `boolean[]` grants none (`write`, §66.12.6 rule 3: E-WRITE-NOT-GRANTED), and
+  // a waiting call in an indexed write's value is refused by the planner (E-BOOTSTRAP-UNSUPPORTED); the granted twin
+  // (`boolean[write]`, the call bound to a `const` first) runs in position-write-s472.test.js: wrong → REJECTED, right → WELCOME
+  "s1/indexWrite": ["REFUSED", ["E-BOOTSTRAP-UNSUPPORTED", "E-WRITE-NOT-GRANTED"]],
   "s1/queryParam": ["PASS"],
   "s1/queryParamDup": ["PASS"],
   "s1/hostMethod": ["REFUSED", ["E-SCOPE-001"]],

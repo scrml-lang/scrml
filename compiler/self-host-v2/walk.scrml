@@ -9,7 +9,7 @@
 // over Core (the TS compiler's F1 "walker misses a position" family).
 // =============================================================================
 ${
-    import { Sym, Type, Place, InstRef, Literal, Pattern, Expr, MatchArm, EditKind, Stmt, Block, Failable, OkArm, ErrArm, LoopHead, Gather, Lifted, GatherRow,
+    import { Sym, Type, Place, InstRef, Literal, Pattern, Expr, MatchArm, EditKind, Stmt, Block, PathStep, Failable, OkArm, ErrArm, LoopHead, Gather, Lifted, GatherRow,
              Attr, View, CondArm, ConstructAttr, EffectDep, Field, Decl, Fn, ServerFn, CoreProgram,
              ValidityOf, validityInst } from "./core.scrml"
 
@@ -126,7 +126,7 @@ ${
     fn stmtKids(s: Stmt) -> Node[] {
         return match s {
             .Let(sym: sym, init: init) :> [Node.NExpr(init)]
-            .Assign(local: local, value: value) :> [Node.NExpr(value)]
+            .Assign(local: local, value: value, path: path) :> pathNodes(path).concat([Node.NExpr(value)])   // s472: a part write's indices, then its value
             .Write(inst: inst, edit: edit, value: value) :>
                 [Node.NInst(inst), Node.NEdit(edit), Node.NExpr(value)]
             .Commit(writes: ws) :> stmtNodes(ws)
@@ -236,10 +236,25 @@ ${
         }
     }
 
+    // s472: a local part write's path holds its index expressions (in order).
+    fn pathNodes(path: PathStep[]) -> Node[] {
+        let out: Node[] = []
+        for (const st of path) { out = out.concat(pathStepNodes(st)) }
+        return out
+    }
+
+    fn pathStepNodes(st: PathStep) -> Node[] {
+        return match st {
+            .StepIndex(index: i) :> [Node.NExpr(i)]
+            .StepField(ref: r) :> []
+        }
+    }
+
     // s444: an ElemAt edit holds its index expression.
     fn editKids(k: EditKind) -> Node[] {
         return match k {
             .ElemAt(index: i, path: p) :> [Node.NExpr(i)]
+            .PositionAt(index: i) :> [Node.NExpr(i)]          // s472
             .Replace :> []
             .Append :> []
             .Prepend :> []

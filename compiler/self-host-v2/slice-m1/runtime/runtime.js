@@ -1031,6 +1031,46 @@ export function setAt(target, index, path, v) {
   setIn(target, [index, ...path], v);
 }
 /**
+ * s472 — a POSITION write of a cell's tape, `@xs[i] = v` (SPEC §66.12.6 rule 3,
+ * granted by `write`): a new tape with `v` at position `index`, set as the
+ * cell's ONE new value, so it notifies exactly as a whole-value write does
+ * (§66.11.7). An index outside the tape (negative, at or past the end, or not an
+ * int) is the E-INDEX-OUT-OF-RANGE-RT trap and nothing is written — a write never
+ * grows or pads a tape (§66.12.6 rule 3, §66.12.8 rule 7).
+ */
+export function setPosition(target, index, v, at) {
+  target.set(writePath(target.peek(), [index], v, at));
+}
+/**
+ * s472 — a write to a PART of a value (a local's `p.f = v`, `xs[i] = v`,
+ * `a.xs[i].f = v`): a COPY of `value` with `v` at `path`, sharing every untouched
+ * branch with the old value; the old value is never mutated (values are
+ * immutable, §66.10 — no alias sees the write). A step into a tape (an Array) is
+ * a position: it must be an int index `0 <= i < length`, else the
+ * E-INDEX-OUT-OF-RANGE-RT trap, before anything is built. A step into a struct is
+ * a field name the compiler wrote. Anything else is a compiler defect — refused,
+ * never guessed.
+ */
+export function writePath(value, path, v, at) {
+  const go = (obj, i) => {
+    if (i === path.length) return v;
+    const k = path[i];
+    if (Array.isArray(obj)) {
+      if (!Number.isInteger(k) || k < 0 || k >= obj.length) {
+        throw new ScrmlTrap("E-INDEX-OUT-OF-RANGE-RT", "index " + k + " is out of range for a tape of length " + obj.length + " (" + at + ") — nothing was written", { index: k, length: obj.length, at });
+      }
+      const copy = obj.slice();
+      copy[k] = go(obj[k], i + 1);
+      return copy;
+    }
+    if (obj === null || typeof obj !== "object" || typeof k !== "string" || !Object.prototype.hasOwnProperty.call(obj, k)) {
+      throw new Error("internal: a part write steps into `" + String(k) + "`, which is not a field of the value here (a bootstrap defect — please report it)");
+    }
+    return { ...obj, [k]: go(obj[k], i + 1) };
+  };
+  return go(value, 0);
+}
+/**
  * A write at `path` (struct property names / sequence indices): a new value
  * along the path, sharing every untouched branch with the old one.
  */
