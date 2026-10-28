@@ -28,3 +28,15 @@ Gap: g-boot-map-position-write-bypasses-element-tape-grants-s472 (HIGH, fail-ope
 - slices (lint, m1, m2, m1-lowered, m3, m4, codec) + e2e-render-map: green post-merge.
 - Pre-commit hook: the default shard plan timed out twice on a loaded host (one 1655-file shard, 1200 s);
   re-run with SCRML_HOOK_SHARDS=5 (a shard count, not a bypass) — green.
+
+## Review round 1 (S239, ~/.cache/scrml/review/s472-mg/REVIEW.md) — LAND-WITH-FOLLOWUPS; RULED S472 ("five PA recs" items 1-2)
+- F1 (MED, base too): a whole write of a tape replaces every tape its elements hold, RECURSIVELY —
+  analyze innerTapeHits / tapeWriteInnerProblems (judged by the VALUE: the place itself / a grow-shrink
+  shape / a permutation keep elements, anything else replaces them); structTapeWrites walks a replaced
+  tape's elements; C3 innerTapeKept / structTapeKept (a tape) / positionTapeProblem / fieldAtPermutation.
+- Rule 2 / F2: sort / reverse written back exempt (analyze seqPermutation, C3 permutationOperand); map judged.
+- F3: resolveSeqShape resolves the value first — two-parameter map E-BOOTSTRAP-UNSUPPORTED, `sort()` on a
+  tape of tapes E-TYPE-031 lead.
+- SPEC §66.12.6 rules 1 and 3 gain the ruled sentences (provenance); SPEC-INDEX regen. No new codes.
+- known-gaps: g-boot-map-position-write-bypasses-element-tape-grants-s472 RESOLVED (HIGH open 265 → 264).
+- Red-proof: map-grants-s472.test.js against da1ffcf81 — 11 fail / 12 pass.

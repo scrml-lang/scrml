@@ -50311,6 +50311,26 @@ write, wherever the tape is held, wherever it came from, and however the write i
    **Inference never invents a grant.** An un-annotated binding (`let xs = []`, `const ys = load()`) holds a tape
    whose inferred type carries no grants, so it is immutable. To mutate it, write the grants in its type.
 
+   **An outer `replace` does not override the grants of the tapes inside it (S472).** A `replace`, or any other
+   whole write, of a tape is a `replace` of every tape its elements hold, recursively: an element that is itself a
+   tape, every tape field reached through an element struct, and every tape their own elements hold, at any depth.
+   Each of those tapes is checked against its OWN grants. So `@g = [[]]` on `g: int[free, append][write, replace]`
+   is `E-WRITE-NOT-GRANTED`: the outer tape grants `replace`, but the inner `int[free, append]` does not. The same
+   holds whatever spelling produces the new value: a literal, `const h = @g.map(…); @g = h;`, `@g = remap(@g)`, or a
+   map one level deeper (`@d = @d.map(r => [[]])` on `int[free, append][write, replace][write]`). Two writes do not
+   replace the elements. A value that IS the place (`@g = @g`) keeps every element. A grow or shrink shape
+   (`[...@g, e]`, `@g.filter(…)`, rule 4) keeps each element it does not add or drop. A permutation written back is
+   exempt (rule 3). Anything the compiler cannot show to keep the elements is a replace of them. A map counts as such
+   a replace, whatever its callback does. *(Provenance: ruling:user-voice-scrml.md S472 "⭐ RULED — five PA recs",
+   item 1 — *"An outer `replace` does NOT override inner tapes' grants. A `replace` (or any whole write) of a tape
+   counts as a `replace` of every tape its elements hold, RECURSIVELY … So `@g = [[]]` on
+   `int[free, append][write, replace]` is refused, as are alias/helper spellings (`const h = @g.map(…); @g = h;`,
+   `@g = remap(@g)`) and deeper levels."* · **supersedes:** nothing written here; it settles the question the
+   bootstrap gap `g-boot-map-position-write-bypasses-element-tape-grants-s472` recorded as unruled. **Direction of
+   change:** newly-rejecting for a whole write of a tape whose elements hold a tape that does not grant `replace`.
+   The bootstrap checks it (`compiler/self-host-v2/analyze.scrml` `innerTapeHits` / `tapeWriteInnerProblems`,
+   Core C3 `innerTapeKept`).)*
+
    **An enum payload is a value, not a tape position (S469).** Grants do not apply inside an enum variant's payload, a struct held in a payload included: a whole write of the enum, a cross-tab sync of a `persist="local"` cell included, is not judged against a payload tape's grants. *(Provenance: ruling:user-voice-scrml.md S469 "⭐ RULED — render-position server calls, plain-`let` guards, enum-payload tapes, `<onTransition if=>`", item 3 — *"Not a tape position"*.)*
 
 2. **Values from the host.** A sequence that arrives from host JavaScript carries **no grants**. That covers the
@@ -50379,6 +50399,15 @@ write, wherever the tape is held, wherever it came from, and however the write i
    result back, `xs = xs.sort();`, is a whole-value write (rule 4). It keeps the length and changes positions, so
    it is classified as a position write, granted by `write`, like `xs = xs.map(…)` *(derived: the §66.11.2
    classifier applied to these forms)*.
+
+   **A permutation written back keeps every element (S472).** `xs = xs.sort(…)`, `xs = xs.sort()` and
+   `xs = xs.reverse()` only move the existing values, so they create no new element value. They are exempt from the
+   rule-1 requirement that the tapes the elements hold grant `replace`; the outer tape's `write` still governs them.
+   A `map` written back rebuilds its elements, so it is not a permutation: it replaces each element (rule 1), and
+   so does a map that spreads its argument (`k => ({ ...k, f: v })`). *(Provenance: ruling:user-voice-scrml.md S472
+   "⭐ RULED — five PA recs", item 2 — *"`sort` / `reverse` write-backs (permutations) are EXEMPT from inner-tape
+   `replace` — they create no new element value. A map that rebuilds elements (incl. a spreading map) is not a
+   permutation and stays judged."*)*
 
    A call of one of these four whose result is DISCARDED (`xs.sort();` as a statement) is the JavaScript in-place
    idiom. Under these rules it would do nothing, and `E-STMT-NO-EFFECT` does not catch it, because a call counts as
