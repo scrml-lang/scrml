@@ -151,16 +151,20 @@ if [ "$HAS_UPDATE" = "1" ]; then
   CURRENCY_FAILED=0
   # S469 — FACTS is WARN-only (owner ruling "Regenerate on main after merge"): main regenerates
   # docs/FACTS.md post-merge (.github/workflows/facts-regen.yml), so a stale table no longer blocks a
-  # push and a branch should not commit a regen. Exit 1 = stale → warn; any other non-zero (2 = zero
-  # measurement, 3 = missing anchor) is a broken instrument/file and still blocks.
+  # push and a branch should not commit a regen. Exit 4 = stale → warn; any other non-zero blocks:
+  # 2 = zero measurement, 3 = missing anchor, 5 = dangling symlink, and 1 = bun's uncaught-exception
+  # code — S472: stale used to be 1, so a CRASHING facts.ts was warned through as "figures differ".
+  # (The block between the BEGIN/END markers is run verbatim by facts-check-exit-codes-s472.test.js.)
+  # BEGIN facts-currency
   FACTS_RC=0
   bun scripts/facts.ts --check >/dev/null 2>&1 || FACTS_RC=$?   # `|| …` — this hook runs under set -e
-  if [ "$FACTS_RC" = "1" ]; then
+  if [ "$FACTS_RC" = "4" ]; then
     echo "  WARN   docs/FACTS.md figures differ from this tree (non-blocking; regenerated on main after merge)"
   elif [ "$FACTS_RC" != "0" ]; then
     bun scripts/facts.ts --check || true
     CURRENCY_FAILED=1
   fi
+  # END facts-currency
   if ! bun run scripts/regen-spec-index.ts --check >/dev/null 2>&1; then
     echo "  STALE  SPEC-INDEX totals (compiler/SPEC-INDEX.md)"
     CURRENCY_FAILED=1
