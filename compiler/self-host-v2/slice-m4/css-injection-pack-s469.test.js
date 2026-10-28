@@ -4,8 +4,9 @@
 // `#{}` sheet is a cell's value, through the §25.7 bridge: a `#{}` value's `@cell` prints as
 // `var(--scrml-cell)` and the runtime writes the cell's value to that custom property on `:root`
 // (`rt.cssVar`). Everything else in a sheet is the author's literal source, checked at compile time.
-// NOT covered: a bound `style=(@c)` attribute, which today writes the cell's whole value into `style`
-// with no CSS guard — docs/known-gaps.md `g-bootstrap-style-attr-bound-value-unguarded-s469`.
+// NOT covered here: a bound `style=(@c)` attribute. s472 refuses it (§65.4.2, E-STYLE-VALUE-NOT-STYLE;
+// `rt.attr` also never writes `style`) — its pack is style-attr-guard-s472.test.js (gap
+// `g-bootstrap-style-attr-bound-value-unguarded-s469`, resolved).
 // So the pack attacks the two walls of the `#{}` path:
 //
 //   WALL 1 — compile time (css-syntax.scrml): the sheet is printed inside the page's `<style>`, a

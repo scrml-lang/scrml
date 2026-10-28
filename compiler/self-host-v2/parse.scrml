@@ -4633,6 +4633,11 @@ ${
             .Braced(b: b) :> ""
         }
         if (s.indexOf("$" + "{") < 0) return mp
+        // s472 — `style=(…)` is not a way out for a style: §65.4.2 refuses an
+        // arbitrary runtime string as a style (E-STYLE-VALUE-NOT-STYLE).
+        if (name.toLowerCase() == "style") {
+            return mDiag(mp, "E-BOOTSTRAP-UNSUPPORTED", "`" + name + "=\"…\"` holds a `$" + "{…}` interpolation — a quoted value with `$" + "{…}` is a reactive template (§5.5.3), which is not in the bootstrap; it would be emitted as literal text. A style is not built from data in the bootstrap (§65.4.2): put the dynamic part in a `#" + "{…}` rule as `@cell` (§25.7), or switch a class with `class=(…)`", sp.start, sp.end)
+        }
         return mDiag(mp, "E-BOOTSTRAP-UNSUPPORTED", "`" + name + "=\"…\"` holds a `$" + "{…}` interpolation — a quoted value with `$" + "{…}` is a reactive template (§5.5.3), which is not in the bootstrap; it would be emitted as literal text. Write the value as an expression: `" + name + "=(…)`", sp.start, sp.end)
     }
 

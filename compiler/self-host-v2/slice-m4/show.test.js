@@ -167,8 +167,10 @@ describe("the condition is judged like if=", () => {
 });
 
 describe("§5.5.4 — a wholesale style=(expr) conflicts with show=", () => {
-  test("style=(expr) + show= → E-ATTR-WRITER-CONFLICT", () => {
-    expect(codes(prog(`        <p style=(@label) show=(@step == 1)>x</p>`))).toEqual(["E-ATTR-WRITER-CONFLICT"]);
+  // s472: a `style=` from data is itself refused (§65.4.2, E-STYLE-VALUE-NOT-STYLE); the writer
+  // conflict is a second, independent rule and still reported.
+  test("style=(expr) + show= → E-ATTR-WRITER-CONFLICT (and E-STYLE-VALUE-NOT-STYLE)", () => {
+    expect(codes(prog(`        <p style=(@label) show=(@step == 1)>x</p>`)).sort()).toEqual(["E-ATTR-WRITER-CONFLICT", "E-STYLE-VALUE-NOT-STYLE"]);
   });
   test("a static style= composes (no conflict)", () => {
     expect(codes(prog(`        <p style="color: red" show=(@step == 1)>x</p>`))).toEqual([]);
