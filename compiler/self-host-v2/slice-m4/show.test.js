@@ -14,8 +14,8 @@
 // element with `show=` … the element is first conditionally included in the
 // DOM by the if-chain rule and then additionally subject to the `show=`
 // visibility rule (§17.2). The two attributes compose without conflict."
-// §5.5.4 / E-ATTR-WRITER-CONFLICT: a wholesale `style=(expr)` "with
-// `if=`/`show=`" shares the display surface. §17.1 / §5.2: the condition
+// §5.5.4: a wholesale `style=(expr)` "with `if=`/`show=`" shares the display
+// surface — since s472 such a `style=` is refused on its own (§65.4.2). §17.1 / §5.2: the condition
 // rules of `if=` apply to `show=` (here: the typer's E-COND-NOT-BOOLEAN; a
 // quoted / valueless condition is refused, as for `if=`).
 
@@ -166,11 +166,11 @@ describe("the condition is judged like if=", () => {
   });
 });
 
-describe("§5.5.4 — a wholesale style=(expr) conflicts with show=", () => {
-  // s472: a `style=` from data is itself refused (§65.4.2, E-STYLE-VALUE-NOT-STYLE); the writer
-  // conflict is a second, independent rule and still reported.
-  test("style=(expr) + show= → E-ATTR-WRITER-CONFLICT (and E-STYLE-VALUE-NOT-STYLE)", () => {
-    expect(codes(prog(`        <p style=(@label) show=(@step == 1)>x</p>`)).sort()).toEqual(["E-ATTR-WRITER-CONFLICT", "E-STYLE-VALUE-NOT-STYLE"]);
+describe("§5.5.4 — a wholesale style=(expr) with show=", () => {
+  // s472: a `style=` from data is itself refused (§65.4.2, E-STYLE-VALUE-NOT-STYLE), so the §5.5.4
+  // writer conflict cannot arise in a program that builds — one diagnostic per fault.
+  test("style=(expr) + show= → E-STYLE-VALUE-NOT-STYLE only", () => {
+    expect(codes(prog(`        <p style=(@label) show=(@step == 1)>x</p>`))).toEqual(["E-STYLE-VALUE-NOT-STYLE"]);
   });
   test("a static style= composes (no conflict)", () => {
     expect(codes(prog(`        <p style="color: red" show=(@step == 1)>x</p>`))).toEqual([]);

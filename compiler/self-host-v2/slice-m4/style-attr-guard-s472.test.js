@@ -98,8 +98,9 @@ renders <span class="chip" style=st>c</span>
   test("a quoted `style=\"…${…}…\"` is refused, and its hint no longer steers to `style=(…)`", () => {
     const r = run(PROGRAM("style=\"color: ${@c}\"", "red"));
     expect(r.diags.map((d) => d.code)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
-    expect(r.diags[0].message).not.toContain("style=(…)");
-    expect(r.diags[0].message).toContain("§65.4.2");
+    expect(r.diags[0].message).not.toContain("Write the value as an expression");
+    expect(r.diags[0].message).toContain("§5.5.3");
+    expect(r.diags[0].message).toContain("E-STYLE-VALUE-NOT-STYLE");
   });
 });
 

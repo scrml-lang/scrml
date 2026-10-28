@@ -13870,10 +13870,14 @@ ${
                 // `style=@x` / `style=name` is refused. It was written into
                 // `style` unguarded (gap
                 // g-bootstrap-style-attr-bound-value-unguarded-s469:
-                // `background: url(…)` fetched on first paint). A cell's value
-                // reaches CSS only through `@name` in a `#{}` (§25.7 bridge,
-                // guarded by the runtime's cssValueOf). In a declaration's body
-                // it is reported once, at the definition.
+                // `background: url(…)` fetched on first paint). The guarded
+                // channel for a cell's value into CSS is `@name` in a `#{}`
+                // (§25.7 bridge, the runtime's cssValueOf). It is NOT the only
+                // one: a bound SVG presentation attribute (`fill=` `filter=`
+                // `mask=` `cursor=` … and SMIL `to=` animating one) still
+                // writes data as CSS — gap
+                // g-boot-svg-presentation-attr-css-url-unguarded-s472. In a
+                // declaration's body it is reported once, at the definition.
                 st = resolveValue(penv, a.value, not, st)
                 st = addDiag(st, env.file, a.span, "E-STYLE-VALUE-NOT-STYLE", "`" + a.name + "=` on `<" + e.tag + ">` takes its value from data (an expression, a variable, a call or a field), and only a quoted string literal or a `style`-typed value applies a style — an arbitrary runtime string written into `style` is CSS built from data (`url(…)` fetches, `@import`, overlays). Write the style as a static `style=\"…\"`, put the dynamic part in a `#" + "{…}` rule as `@cell` (§25.7 — the bridge admits only a plain CSS value), or switch a class with `class=(…)` (§65.4.2)")
             } else if (valueExpr(a.value) is given) {
@@ -13899,19 +13903,17 @@ ${
     // with `show=` … The two attributes compose without conflict" — the chain
     // arm decides presence, this decides visibility (lower: Attr.Show inside
     // the arm). Fail closed: a quoted / valueless / braced condition is
-    // refused (as for `if=`, #1254). §5.5.4 / E-ATTR-WRITER-CONFLICT: a
-    // WHOLESALE `style=(expr)` "with `if=`/`show=`" shares the `display`
-    // surface — its next write would erase the toggle. On any other host
+    // refused (as for `if=`, #1254). §5.5.4 / E-ATTR-WRITER-CONFLICT (a
+    // WHOLESALE `style=(expr)` "with `if=`/`show=`") is not checked here: s472
+    // refuses every non-static `style=` (§65.4.2, E-STYLE-VALUE-NOT-STYLE), so
+    // the conflict cannot arise in a program that builds — one diagnostic per
+    // fault. It returns with a `style`-typed value (Wave 2). On any other host
     // (`<each>`, a use, `<*x>`, `<errors>`, `<slot>`, a state-child) `show=`
     // is refused (showHostCheck), never ignored.
     fn resolveShow(env: Env, e: AElem, a: AAttr, st0: AS) -> AS {
         let st: AS = st0
         if (valueExpr(a.value) is not) {
             return addDiag(st, env.file, a.span, "E-BOOTSTRAP-UNSUPPORTED", "`show=` on `<" + e.tag + ">` needs a condition expression — `show=@x` or `show=(@n >= 3)`; a quoted, valueless or braced condition is not in the bootstrap (§17.2, §5.2) — it would never hide the element")
-        }
-        const sa: AAttr | not = attrNamed(e.attrs, "style")
-        if (sa is given && !isStaticAttr(sa.value)) {
-            st = addDiag(st, env.file, sa.span, "E-ATTR-WRITER-CONFLICT", "`style=(…)` on `<" + e.tag + ">` writes the whole `style` attribute, and `show=` on the same element toggles its `display` — the wholesale write would erase the toggle on its next evaluation. Keep one: make `style=` static, or drop `show=` (§5.5.4)")
         }
         st = resolveIfValue(env, a.value, st)
         return addAttr(st, a.nid, AttrKind.AShow)
