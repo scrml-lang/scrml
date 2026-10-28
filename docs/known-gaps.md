@@ -32,7 +32,7 @@
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 264 | 5 |
 | MED | 699 | 8 |
-| LOW | 554 | 0 |
+| LOW | 556 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
 
@@ -469,6 +469,22 @@ Questions + recommendations: `docs/changes/s472-boot-import-host-math/progress.m
 ### g-stdlib-math-port-api-fork-s472 — a bootstrap port of `scrml:math` cannot keep the current API: §41.18's ruled S469 API (`round(x, mode: Rounding) -> int`, `floor`/`ceil`/`trunc -> int`, `parseInt(s, radix) -> int | not`, `parseFloat`/`toNumber -> number | not`, the `Rounding` enum) supersedes it, and the current `min(...values)` / `max(...values)` / `parseInt(str, radix?)` need rest and optional parameters the bootstrap does not have — `NEW S472; MED; RESOLVED S472 (ruled: the S469 API, min/max 2-arg + minOf/maxOf; s472-boot-math-port)`
 
 > **RESOLVED S472 (s472-boot-math-port).** Ruled (S472 "host function type, math API, remaining review debt" items 2–3) after the corpus count (zero importers outside stdlib; 8 impl#1 test callers of 1-arg `round`). Both implementations ship the S469 §41.18 API: `stdlib/math/index.scrml` (+ `stdlib/math/host.js`) on the bootstrap, `compiler/runtime/stdlib/math.js` on impl#1 (its internal callers in auth.js / data.js / time.js keep a non-trapping `floorUnchecked` / `ceilUnchecked`); the 8 callers and the shim tests updated. SPEC §41.18 S472 amendment.
+
+<!-- @gap id=g-boot-host-wrappers-not-shaken-from-client-s473 sev=LOW status=open locus=compiler/self-host-v2/print.scrml(hostImports / hostFnJs — every host-backed Fn of an imported stdlib module printed)+compiler/self-host-v2/print-server.scrml(hostImports)+scripts/scrml-boot.ts(hostFilesOf) prov=review:s473-1622(LOW-2);empirical:/home/bmacs/.cache/scrml/review/s473-1622/size -->
+### g-boot-host-wrappers-not-shaken-from-client-s473 — the bootstrap prints EVERY wrapper of an imported stdlib module into `program.client.js`, and the client imports the module's host file even when only server code reaches it — `NEW S473 (review LOW-2 of #1622); LOW; open`
+
+A program that uses only `min` from `scrml:math` gets all 16 math functions in `program.client.js` (3692 B, against 681 B for an empty program) plus the 4778 B `_scrml/math/host.js`. A program that calls `floor` only inside a `server function` still gets `import * as hostmod$0 from "./_scrml/math/host.js"` and the `ceil` / `trunc` / `round` / … wrappers in the client. No wrong value results. The driver validates every wrapper's export, so a host file missing an export that only an unused wrapper names fails the whole compile (E-IMPORT-004), which is fail-closed.
+
+**Latent hazard:** the S472 output-location ruling has BOTH artifacts import the host file ("imported from there by BOTH `program.client.js` and `program.server.js`"). Once a stdlib host module imports `node:*` (or any other server-only host module), the browser page fails to load even when the client reaches none of it.
+
+**Fix direction:** print into each artifact only the wrappers its reachable code calls, and import a host file into an artifact only when one of its reached wrappers names it. That is a reading of "imported from there by BOTH" (it governs where each artifact imports it from), not a change to it. Confirm with the owner whether the import itself is meant to be unconditional.
+
+<!-- @gap id=g-boot-host-path-backslash-segment-unverified-s473 sev=LOW status=open locus=compiler/self-host-v2/link.scrml(hostLocOf / resolveFrom — the E-IMPORT-012 inside-the-module-directory check splits the target on `/` only)+scripts/scrml-boot.ts(hostFilesOf realpath check) prov=review:s473-1622(UNVERIFIED) -->
+### g-boot-host-path-backslash-segment-unverified-s473 — on Windows, a `\` inside an `import:host` path segment is not rejected by the E-IMPORT-012 inside-the-module-directory check — UNVERIFIED (no Windows host) — `NEW S473 (review of #1622); LOW; open`
+
+`hostLocOf` resolves the `import:host` target with `resolveFrom`, which splits on `/` only. So `\` is an ordinary character inside a segment, and a target such as `./x\..\..\h.js` passes that check. On POSIX the name is one file inside the module. On Windows `\` is a separator, so the same text could climb out. The driver's realpath check (scrml-boot `hostFilesOf`) should still refuse a source that resolves outside the module directory, but it has not been run on a Windows host. The surface is stdlib-author-only: `import:host` is E-IMPORT-008 outside the stdlib.
+
+**Fix direction:** refuse a `\` in any `import:host` target outright (E-IMPORT-012) on every platform, and pin that with a test. The check then reads the same on every host and does not depend on the realpath backstop.
 
 <!-- @gap id=g-boot-payload-variant-value-s472 sev=HIGH status=resolved resolved-by=s472-boot-payload-variant locus=compiler/self-host-v2/analyze.scrml(qualVariantValue / callText — "only `fail` builds one")+core.scrml(Expr — no payload-variant value) prov=dispatch:s472-boot-stdlib-md(survey of stdlib/md);spec:§14.4 -->
 ### g-boot-payload-variant-value-s472 — the bootstrap could not construct a payload-variant VALUE (`Shape.Rect(w, h)`, `.Circle(r)`) anywhere but a `fail`: every construction in an expression, return, argument or initializer was E-BOOTSTRAP-UNSUPPORTED ("only `fail` builds one"), which blocks any real stdlib module that returns an enum tree (`scrml:md` — 27 sites) — `NEW S472; HIGH; RESOLVED S472 (s472-boot-payload-variant)`

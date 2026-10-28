@@ -111,3 +111,14 @@ NOT DONE (next):
 - SPEC.md / SPEC-INDEX auto-merged; regen-spec-index --check OK.
 - Gates (local CI `checks` + slices): all PASS — see the landing report.
 - Steps (1)-(2) above are DONE; (3) flip from draft is the PA's call after review.
+
+## 2026-10-28 — S473 fix round r1 (S239 review of ae85e4492: LAND-WITH-FOLLOWUPS)
+- MED-1 (5be6af086): compiler/runtime/stdlib/math.js — every public export refuses a call shape the
+  S469 API does not define (TypeError, code E-CALL-ARITY / E-CALL-ARGUMENT) instead of answering.
+  §41.18: "An omitted radix is `E-CALL-ARITY`" — so parseInt("42") is REFUSED (not 42; the brief's
+  "must return 42" premise does not hold under §41.18); toNumber(s: string) refuses toNumber(5).
+  data.js / auth.js moved to internal minUnchecked / maxUnchecked (behaviour unchanged).
+- LOW-1: analyze.scrml hostImportClash — a host binding's name also bound by a plain import, a
+  second import:host, or the same import:host twice is E-SCOPE-010 (§21.3.1.1).
+- LOW-2 + UNVERIFIED Windows `\` filed as open gaps (g-boot-host-wrappers-not-shaken-from-client-s473,
+  g-boot-host-path-backslash-segment-unverified-s473).
