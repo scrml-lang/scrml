@@ -45,6 +45,37 @@ Ruling: scrml-support/user-voice-scrml.md "⭐ RULED — `<db>` body + client re
   0 fail, compile floor PASS, md shim current, bootstrap-conformance --check current (no movement), conflict
   markers 0, SPEC-INDEX --check OK, delta-lint PASS, ci-shards needs OK, s34-census --check-new PASS (2 rows).
 
+## Round 1 (S239 review of 4d8a33f32: LAND-WITH-FOLLOWUPS — no leak, no wrong DB)
+
+- Merged origin/main (7907231dc; SPEC-INDEX regenerated from the merged tree).
+- **Function visibility, not ruled.** A db-body function is read as PROGRAM-WIDE (it is hoisted to the program; PA lean,
+  pending bryan). SPEC §4.18.1 S472 note now says it is unruled and what the bootstrap does.
+- **MED-1.** Under that reading, a function in a `<db>` that stands inside a name-binding scope would lose those names,
+  or bind the program's names of the same spelling. So it is refused by name there: E-BOOTSTRAP-UNSUPPORTED, from
+  analyze.scrml `nameScopeHere` in resolveDb and `refuseStateChildDbFns` in phaseB. The scopes covered are:
+  - an `<each>` row (rows);
+  - a loop or arm binder (locals; a Tier-0 row);
+  - a child field's renders (own);
+  - a declaration's renders or state child (ctx not program);
+  - a program-level engine's state child, including its `:`-shorthand body.
+
+  Nesting under `<main>`, plain markup and another `<db>` is unchanged. This fails closed under either ruling.
+- **LOW-2.** A user declaration named `db` still takes db-body mode. That is the fail-closed choice: the parser cannot
+  know declarations, and a free-text guess would reopen the page-text leak for a real `<db>`. Filed
+  `g-bootstrap-user-db-decl-takes-db-body-mode-s472`.
+- **LOW-3.** Fixed:
+  - an item head is judged by its shape (`dbItemHeadAt`: `function`/`fn` NAME `(`, `type` NAME `:`/`=`), so prose
+    starting with `function` / `type` / `export` is prose;
+  - `lift <p>…</p>;` is E-DB-BODY-STATEMENT;
+  - a prose line is capped at its newline (an apostrophe no longer takes the file);
+  - the suggested literal escapes `"` and `\`.
+
+  Literal-recovery residue filed: `g-bootstrap-db-body-literal-recovery-s472`.
+- **LOW-4.** The SPEC sentence now reads "No source text of a function, a type, a declaration or a statement written in
+  a `<db>` body SHALL ship as page text; only markup elements (d) and display-text literals (e) render, as markup."
+- **LOW-5.** Filed `g-pure-fn-sql-compiles-as-server-fn-s472` (MED).
+- Tests: db-body-s472.test.js is now 44 tests. All 9 new ones are red on 4d8a33f32; the controls stay green.
+
 ## Not done / follow-ups
 
 - Lane B (db cells as server cells) — not built (ruling item 6).
