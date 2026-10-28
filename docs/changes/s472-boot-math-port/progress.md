@@ -99,3 +99,15 @@ NOT DONE (next):
 2. After the merge: rerun slices + math-port-s472 + import-host-s472, s34-census --check-new --base
    origin/main, SPEC-INDEX --check, bootstrap-conformance --check (regen if moved), full pre-commit.
 3. Flip the PR from draft after (1)–(2).
+
+## 2026-10-28T21:38Z — S473 landing-front: merged origin/main (3a7d1d223) into the branch
+- Merge commit 1677411c2 (MERGE, not rebase). Conflicts:
+  - self-host-v2/analyze.scrml — Globals carries BOTH `hostSites` (this branch) and `consts` (main #1617);
+    main's `withConsts` now also copies `hostSites`; Tables keeps `consts: bound.consts` AND base0 keeps
+    `.concat(hostPlacedDiags(...))`. Textual only, no semantic clash.
+  - self-host-v2/print-server.scrml — import list is the union (hostImports/hostFnJs + constsReadIn/constStmts).
+  - self-host-v2/severity.scrml — generated; regenerated (211 codes, E-HOST-BINDING-USE + E-IMPORT-012 kept).
+  - docs/known-gaps.md — merge driver; no `@gap id` lost (main 2444 ids ⊇ branch 2425; result 2444).
+- SPEC.md / SPEC-INDEX auto-merged; regen-spec-index --check OK.
+- Gates (local CI `checks` + slices): all PASS — see the landing report.
+- Steps (1)-(2) above are DONE; (3) flip from draft is the PA's call after review.
