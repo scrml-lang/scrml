@@ -55,7 +55,7 @@ ${
              AHow, AHandled, AArm, APat, ABind, AArmBody, AFail, AFor, AForHead, AIterSrc, AForBound, ALift,
              ACss, ACssItem, ACssRule, ACssDecl, ACssPart, ACssRef, mkSpan, newDiag } from "./ast.scrml"
     import { Severity } from "./severity.scrml"
-    import { importTarget, importsOfItems } from "./link.scrml"
+    import { importTarget, importsOfItems, hostImportsOfItems, hostTagOf, isStdlibPath } from "./link.scrml"
     import { WireBuild, WireTable, wireBuild, hasFixedLength } from "./codec.scrml"
     import { SqlFacts, SlotQuote, sqlFacts, slotInLiteral, txControl, txControlAware } from "./sql.scrml"
     import { FxAtom, ownAtom, closeDim, witnessOf, atomChain } from "./effects.scrml"
@@ -24485,8 +24485,64 @@ ${
                     }
                 }
             }
+            for (const h of hostImportsOfItems(f.items)) { st = checkHostImport(st, f.path, h) }
         }
         return st
+    }
+
+    // s472 — an `import:<tag> { … } from "…"` declaration (§21.3.1), judged in
+    // the order impl#1 (compiler/src/host-import.js validateHostImports) judges
+    // it, each failed rule its own diagnostic:
+    //   - E-IMPORT-003: "`import:host` SHALL appear only at file top level,
+    //     OUTSIDE any `${}` logic context. An `import:host` declaration inside a
+    //     `${}` block or any nested scope SHALL be a compile error (`E-IMPORT-003`
+    //     — same as plain `import`)." (a `<program>` body is a nested scope)
+    //   - E-IMPORT-009: "The `host-tag` SHALL be `host` in v1. Any other host-tag
+    //     value SHALL be a compile error (`E-IMPORT-009` — unknown host-tag; only
+    //     `host` is recognized in v1)." A `host` import of a module that is not
+    //     TypeScript / JavaScript ("a host-language module (TypeScript or
+    //     JavaScript)") is refused under the same code, as impl#1 refuses it.
+    //   - E-IMPORT-008: "A file outside the allow-list using `import:host` SHALL
+    //     be a compile error (`E-IMPORT-008`)." The allow-list is the stdlib
+    //     (§22.13 `"self-host-only"` — "canonical: … `scrml/stdlib/**` — S471");
+    //     an adopter file is outside it whatever its manifest says (§22.13: "in an
+    //     adopter project `import:host` is E-IMPORT-008 whatever the entry
+    //     says"). Stdlib-ness is the file's path in the build (link.scrml
+    //     `isStdlibPath`), never its text.
+    // A declaration that passes every rule is still refused, by name: the
+    // bootstrap does not yet load or emit a host module (where the host file
+    // lands in the output and what type a host binding has are open — see
+    // docs/changes/s472-boot-import-host-math/progress.md).
+    fn checkHostImport(st0: AS, file: string, h: AImport) -> AS {
+        let st: AS = st0
+        const tag: string = hostTagOf(h)
+        const shown: string = "import:" + tag
+        let failed = false
+        if (!h.top) {
+            failed = true
+            st = addDiag(st, file, h.span, "E-IMPORT-003", "`" + shown + "` is not at file top level — `import:host` SHALL appear only at file top level, outside any `${}` logic context and any nested scope such as a `<program>` body (§21.3.1); move it to the top of the file")
+        }
+        if (tag != "host") {
+            failed = true
+            st = addDiag(st, file, h.span, "E-IMPORT-009", "`" + shown + "` uses the host-tag `" + tag + "` — v1 recognizes only `host` (the TypeScript / JavaScript named-export bridge, §21.3.1); other host languages are reserved for a future SPEC amendment")
+        } else if (!hostModuleSource(h.from)) {
+            failed = true
+            st = addDiag(st, file, h.span, "E-IMPORT-009", "`import:host` target `" + h.from + "` is not a TypeScript / JavaScript module — the `host` tag binds named exports of a `.ts` / `.mts` / `.js` / `.mjs` module only (§21.3.1); import a scrml module with a plain `import`")
+        }
+        if (!isStdlibPath(file)) {
+            failed = true
+            st = addDiag(st, file, h.span, "E-IMPORT-008", "`" + shown + "` is used in a file outside the `[capabilities] host-import` allow-list — `import:host` is the stdlib's host bridge, admitted only in stdlib files (§21.3.1, §22.13: an adopter project has no opt-in); reach host JavaScript through a relative `.js` import (§21.3)")
+        }
+        if (!failed) {
+            st = addDiag(st, file, h.span, "E-BOOTSTRAP-UNSUPPORTED", "`import:host` from `" + h.from + "` — the declaration is admitted here (§21.3.1), but the bootstrap does not yet load or emit a host module, so none of its names are bound")
+        }
+        return st
+    }
+
+    // A `host` import's module (§21.3.1 — "a host-language module (TypeScript
+    // or JavaScript)"), by the extension impl#1 admits.
+    fn hostModuleSource(from: string) -> boolean {
+        return from.endsWith(".js") || from.endsWith(".mjs") || from.endsWith(".ts") || from.endsWith(".mts")
     }
 
     fn filePaths(files: FileAst[]) -> string[] {
@@ -24544,6 +24600,12 @@ ${
         const paths: string[] = filePaths(g.files)
         for (const f of g.files) {
             if (f.path == file) {
+                // s472: every host import is refused today (checkHostImport) — its names do not cascade
+                for (const h of hostImportsOfItems(f.items)) {
+                    for (const hn of h.names) {
+                        if (hn.name == name) return true
+                    }
+                }
                 for (const imp of importsOfItems(f.items)) {
                     for (const n of imp.names) {
                         if (n.name == name) {

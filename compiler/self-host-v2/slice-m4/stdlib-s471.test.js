@@ -134,8 +134,11 @@ describe("a stdlib module the bootstrap does not compile is withdrawn; its impor
     expect(sup("scrml:greet/../calc")).toEqual([]);
   });
 
-  test("a project file may not be named under the stdlib prefix", () => {
-    expect(() => frontEndStdlib(mods(), [{ path: "scrml:greet/index.scrml", src: "${ }" }, { path: ENTRY, src: "<program>\n</program>\n" }], ENTRY, { stdlibRoot: FIXTURE })).toThrow("stdlib prefix");
+  test("a project file may not be named under the stdlib prefix — a named refusal (s472 F2; was a driver throw)", () => {
+    const r = frontEndStdlib(mods(), [{ path: "scrml:greet/index.scrml", src: "${ }" }, { path: ENTRY, src: "<program>\n</program>\n" }], ENTRY, { stdlibRoot: FIXTURE });
+    expect(r.diags.map((d) => [d.code, d.file])).toEqual([["E-BOOTSTRAP-UNSUPPORTED", "scrml:greet/index.scrml"]]);
+    expect(r.diags[0].message).toContain("stdlib prefix");
+    expect(r.core).toBe(null);
   });
 });
 

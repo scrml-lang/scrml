@@ -16,6 +16,13 @@
  * Fixtures live under the OS temp dir, NOT the repo: the manifest lookup stops
  * at a `.git` project boundary, so a fixture inside the checkout would be
  * governed by the checkout's (absent) manifest instead of its own.
+ *
+ * S472 (review F1): `import:host` is admitted only in the COMPILER's own stdlib
+ * (host-import.js COMPILER_STDLIB_DIR), never in "the `stdlib/` beside the
+ * nearest manifest". A fixture project plays the compiler's role by passing its
+ * own `stdlib/` as `hostImportStdlibRoot` (the API seam) — the `compile` /
+ * `compileMany` / `capOf` helpers do; the F1 regressions below pass nothing,
+ * exactly as the CLI does.
  */
 
 import { describe, test, expect, afterAll } from "bun:test";
@@ -30,6 +37,7 @@ import {
   isHostImportPermitted,
   scanHostModule,
   validateHostImports,
+  COMPILER_STDLIB_DIR,
 } from "../../src/host-import.js";
 
 const PARSERS = [null]; // S449: native full-pipeline arm retired
@@ -53,16 +61,20 @@ function project(files) {
   return root;
 }
 
-function compile(root, entry, { parser = null, mode = undefined, write = false } = {}) {
+function compile(root, entry, { parser = null, mode = undefined, write = false, stdlibRoot = join(root, "stdlib") } = {}) {
   return compileScrml({
     inputFiles: [join(root, entry)],
     write,
     outputDir: join(root, "out"),
     log: () => {},
+    ...(stdlibRoot ? { hostImportStdlibRoot: stdlibRoot } : {}),
     ...(mode ? { mode } : {}),
     ...(parser ? { parser } : {}),
   });
 }
+
+/** The capability of `fp`, with the fixture's own `stdlib/` as the admitted stdlib. */
+const capOf = (fp, root) => readHostImportCapability(fp, null, join(root, "stdlib"));
 
 const errorCodes = (r) => (r.errors || []).map((e) => e.code).filter(Boolean);
 const count = (r, code) => errorCodes(r).filter((c) => c === code).length;
@@ -120,14 +132,22 @@ describe("§22.13 manifest — [capabilities] host-import", () => {
     expect(typeof entry.note).toBe("string");
   });
 
-  test("self-host-only admits stdlib/compiler/** only (relative to the manifest dir)", () => {
+  test("self-host-only admits stdlib/** only (relative to the manifest dir) — S471 widened from stdlib/compiler/**", () => {
     const root = project({ "scrml.toml": SELF_HOST_TOML });
-    const cap = readHostImportCapability(join(root, "x.scrml"));
+    const cap = capOf(join(root, "x.scrml"), root);
     expect(isHostImportPermitted(join(root, "stdlib/compiler/cg.scrml"), cap)).toBe(true);
     expect(isHostImportPermitted(join(root, "stdlib/compiler/deep/x.scrml"), cap)).toBe(true);
-    expect(isHostImportPermitted(join(root, "stdlib/other/x.scrml"), cap)).toBe(false);
+    // S471 (§21.3.1 / §22.13, host bridge option A): a stdlib module outside stdlib/compiler/
+    expect(isHostImportPermitted(join(root, "stdlib/math/index.scrml"), cap)).toBe(true);
+    expect(isHostImportPermitted(join(root, "stdlib/other/x.scrml"), cap)).toBe(true);
+    // adopter refusal intact: nothing outside stdlib/ — a nested `stdlib/`, a prefix twin, the root
     expect(isHostImportPermitted(join(root, "src/stdlib/compiler/x.scrml"), cap)).toBe(false);
+    expect(isHostImportPermitted(join(root, "src/stdlib/math/index.scrml"), cap)).toBe(false);
+    expect(isHostImportPermitted(join(root, "stdlibx/a.scrml"), cap)).toBe(false);
     expect(isHostImportPermitted(join(root, "app.scrml"), cap)).toBe(false);
+    // "disabled" admits nothing, stdlib/ included
+    const off = readHostImportCapability(join(project({ "scrml.toml": '[capabilities]\nhost-import = "disabled"\n' }), "x.scrml"));
+    expect(isHostImportPermitted(join(root, "stdlib/math/index.scrml"), off)).toBe(false);
   });
 
   test("E-MANIFEST-001 surfaces through compileScrml, once per manifest", () => {
@@ -203,6 +223,20 @@ for (const parser of PARSERS) {
       });
       const r = compile(root, "lib/tok.scrml", { parser, mode: "library" });
       expect(count(r, "E-IMPORT-008")).toBe(1);
+    });
+
+    test("S471: self-host-only admits a stdlib module outside stdlib/compiler/ (no E-IMPORT-008); src/stdlib/ stays refused", () => {
+      const root = project({
+        "scrml.toml": SELF_HOST_TOML,
+        "stdlib/math/host.js": "export function hfloor(x) { return Math.floor(x) }\n",
+        "stdlib/math/m.scrml": 'import:host { hfloor } from "./host.js"\nexport fn fl(x) { return hfloor(x) }\n',
+        "src/stdlib/math/host.js": "export function hfloor(x) { return Math.floor(x) }\n",
+        "src/stdlib/math/m.scrml": 'import:host { hfloor } from "./host.js"\nexport fn fl(x) { return hfloor(x) }\n',
+      });
+      const ok = compile(root, "stdlib/math/m.scrml", { parser, mode: "library" });
+      expect(errorCodes(ok)).toEqual([]);
+      const no = compile(root, "src/stdlib/math/m.scrml", { parser, mode: "library" });
+      expect(count(no, "E-IMPORT-008")).toBe(1);
     });
 
     test("self-host-only + stdlib/compiler/: emits a static ES import that runs under bun", () => {
@@ -346,6 +380,7 @@ function compileMany(root, entries, { parser = null, outDir = "dist" } = {}) {
     outputDir: join(root, outDir),
     mode: "library",
     log: () => {},
+    hostImportStdlibRoot: join(root, "stdlib"),
     ...(parser ? { parser } : {}),
   });
 }
@@ -599,7 +634,7 @@ describe("F9 — the allow-list is judged on REAL paths", () => {
     symlinkSync(join(root, "stdlib/compiler/real.scrml"), join(root, "stdlib/other/alias.scrml"));
     // an alias INSIDE stdlib/compiler/ of a real file outside it: not permitted
     symlinkSync(join(root, "outside.scrml"), join(root, "stdlib/compiler/fake.scrml"));
-    const cap = readHostImportCapability(join(root, "stdlib/compiler/real.scrml"));
+    const cap = capOf(join(root, "stdlib/compiler/real.scrml"), root);
     expect(isHostImportPermitted(join(root, "stdlib/other/alias.scrml"), cap)).toBe(true);
     expect(isHostImportPermitted(join(root, "stdlib/compiler/fake.scrml"), cap)).toBe(false);
     for (const parser of PARSERS) {
@@ -708,7 +743,7 @@ describe("#1045 LOW — an in-function import:host fails closed", () => {
     const root = project({ "scrml.toml": SELF_HOST_TOML, "stdlib/compiler/f.scrml": "" });
     const fp = join(root, "stdlib/compiler/f.scrml");
     const { ast, imp } = inFnAst();
-    const errs = validateHostImports(ast, fp, readHostImportCapability(fp));
+    const errs = validateHostImports(ast, fp, capOf(fp, root));
     expect(errs).toEqual([]);
     expect(imp._hostImportRejected).toBe(true);
   });
@@ -731,7 +766,7 @@ describe("#1045 LOW — an in-function import:host fails closed", () => {
     const root = disabledProject();
     const fp = join(root, "stdlib/compiler/f.scrml");
     const nat = nativeParseFile(fp, IN_FN_SRC);
-    const errs = validateHostImports(nat.ast, fp, readHostImportCapability(fp));
+    const errs = validateHostImports(nat.ast, fp, capOf(fp, root));
     expect(errs.filter((e) => e.code === "E-IMPORT-008")).toHaveLength(1);
   });
 
@@ -741,5 +776,82 @@ describe("#1045 LOW — an in-function import:host fails closed", () => {
   test("default pipeline, end to end: fails closed with E-IMPORT-003", () => {
     const r = compile(disabledProject(), "stdlib/compiler/f.scrml", { mode: "library" });
     expect(count(r, "E-IMPORT-003")).toBe(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// S472 review F1 — the allow-list is the COMPILER's stdlib, not a project's own
+// `stdlib/` (§22.13: "in an adopter project `import:host` is E-IMPORT-008
+// whatever the entry says"). These compile WITHOUT the hostImportStdlibRoot
+// seam, as the CLI does. Red on 0fc6b3aa2 (probes ~/.cache/scrml/review/s472-hm/
+// probes A, C).
+// ---------------------------------------------------------------------------
+
+describe("S472 F1 — a project cannot admit its own stdlib/ (the allow-list is the compiler's stdlib)", () => {
+  const LIB = 'import:host { boom } from "./h.js"\nexport fn run() { return boom() }\n';
+  const BOOM = "export function boom() { return 1 }\n";
+  const noSeam = (root, entry) => compile(root, entry, { stdlibRoot: null });
+
+  test("probe A: an adopter's own `self-host-only` + ./stdlib/util/ => E-IMPORT-008, no host import emitted", () => {
+    const root = project({
+      "scrml.toml": SELF_HOST_TOML,
+      "app.scrml": 'import { run } from "./stdlib/util/index.scrml"\n<program>\n<p>${run()}</p>\n</program>\n',
+      "stdlib/util/index.scrml": LIB,
+      "stdlib/util/h.js": BOOM,
+    });
+    expect(count(noSeam(root, "app.scrml"), "E-IMPORT-008")).toBe(1);
+    expect(count(noSeam(root, "stdlib/util/index.scrml"), "E-IMPORT-008")).toBe(1);
+  });
+
+  test("probe C: a vendored package's `self-host-only` manifest does not override the project's \"disabled\" (stdlib/x/ and stdlib/compiler/)", () => {
+    const root = project({
+      "scrml.toml": '[capabilities]\nhost-import = "disabled"\n',
+      "app.scrml": 'import { run } from "./vendor/pkg/stdlib/x/index.scrml"\n<program>\n<p>${run()}</p>\n</program>\n',
+      "app3.scrml": 'import { run } from "./vendor/pkg/stdlib/compiler/index.scrml"\n<program>\n<p>${run()}</p>\n</program>\n',
+      "vendor/pkg/scrml.toml": SELF_HOST_TOML,
+      "vendor/pkg/stdlib/x/index.scrml": LIB,
+      "vendor/pkg/stdlib/x/h.js": BOOM,
+      "vendor/pkg/stdlib/compiler/index.scrml": LIB,
+      "vendor/pkg/stdlib/compiler/h.js": BOOM,
+    });
+    expect(count(noSeam(root, "app.scrml"), "E-IMPORT-008")).toBe(1);
+    expect(count(noSeam(root, "app3.scrml"), "E-IMPORT-008")).toBe(1);
+  });
+
+  test("symlink variant: a project `stdlib` that is a symlink to a real project dir stays refused", () => {
+    const elsewhere = project({ "util/index.scrml": LIB, "util/h.js": BOOM });
+    const root = project({ "scrml.toml": SELF_HOST_TOML });
+    symlinkSync(elsewhere, join(root, "stdlib"), "dir");
+    expect(count(noSeam(root, "stdlib/util/index.scrml"), "E-IMPORT-008")).toBe(1);
+    const cap = readHostImportCapability(join(root, "stdlib/util/index.scrml"));
+    expect(isHostImportPermitted(join(root, "stdlib/util/index.scrml"), cap)).toBe(false);
+  });
+
+  test("the compiler's own stdlib is admitted whatever manifest is nearest (an adopter's \"disabled\" does not govern it); a project file is not", () => {
+    const own = join(COMPILER_STDLIB_DIR, "math", "index.scrml");
+    const adopter = project({ "scrml.toml": '[capabilities]\nhost-import = "disabled"\n', ".git/HEAD": "" });
+    const offCap = readHostImportCapability(join(adopter, "app.scrml"));
+    expect(isHostImportPermitted(own, offCap)).toBe(true);
+    expect(isHostImportPermitted(join(adopter, "stdlib/math/index.scrml"), offCap)).toBe(false);
+    // the repository's own capability (its scrml.toml sits beside stdlib/): admitted
+    expect(isHostImportPermitted(own, readHostImportCapability(own))).toBe(true);
+    // a project symlink that points INTO the compiler's stdlib is judged by its real path (the compiler's own file)
+    const link = join(adopter, "alias.scrml");
+    symlinkSync(own, link);
+    expect(isHostImportPermitted(link, readHostImportCapability(link))).toBe(true);
+  });
+
+  test("F4: an installed compiler (stdlib under node_modules, no scrml.toml shipped) is admitted under the adopter's \"disabled\"; the stdlib's OWN manifest can still disable it", () => {
+    const adopter = project({
+      "scrml.toml": '[capabilities]\nhost-import = "disabled"\n',
+      ".git/HEAD": "",
+      "node_modules/scrml/stdlib/m/x.scrml": "",
+    });
+    const installed = join(adopter, "node_modules/scrml/stdlib");
+    const fp = join(installed, "m/x.scrml");
+    expect(isHostImportPermitted(fp, readHostImportCapability(fp, null, installed))).toBe(true);
+    const repo = project({ "scrml.toml": '[capabilities]\nhost-import = "disabled"\n', "stdlib/m/x.scrml": "" });
+    const fp2 = join(repo, "stdlib/m/x.scrml");
+    expect(isHostImportPermitted(fp2, readHostImportCapability(fp2, null, join(repo, "stdlib")))).toBe(false);
   });
 });
