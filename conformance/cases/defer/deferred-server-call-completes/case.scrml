@@ -7,7 +7,7 @@ ${
 
     function work() {
         defer {
-            let r = ping(1);
+            let r = ping(1) !{ _ :> 0 };
             @trace = @trace + "n" + r + ";";
         }
         @trace = @trace + "a;";

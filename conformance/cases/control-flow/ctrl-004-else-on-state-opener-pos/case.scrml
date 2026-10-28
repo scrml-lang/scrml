@@ -1,8 +1,6 @@
 <program>
   <ready> = true
 
-  <div class="gate">
-    <span if=@ready>Ready</>
-    < profile else name(string)/>
-  </>
+  <span if=@ready>Ready</>
+  < profile else name(string)/>
 </program>
