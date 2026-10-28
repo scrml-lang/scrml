@@ -1,6 +1,15 @@
 # build.map.md
 # project: scrml
-# updated: 2026-10-26T22:39:28Z  commit: 3d17013f8
+# updated: 2026-10-27T21:58:43Z  commit: 546e2f4aa
+# ⛑ **S471 STAMP — `3d17013f8` -> `546e2f4aa` (origin/main). 68 COMMITS, 18 first-parent (s471 PRs #1581 … #1599 + bot/facts-regen merges). Branch `s471-maps`.
+# FIGURES (ls-tree at 546e2f4aa): `compiler/src` 325 files (+1: `guard-arm-bodies.ts`, the ONE reader of text-held `!{ }` arm bodies, moved out of codegen/emit-library-shared.ts for the
+# E-SYNTAX-042 null/undefined-in-arm refusal #1587), 1,845 test files (`compiler/tests`), `compiler/SPEC.md` 52,075 lines, 2,091 `case.scrml` (conformance + acceptance), 65 conformance category dirs.
+# THEMES: bootstrap (impl#2) — control-flow batch #1593 (defer/loop/if-chain acceptance), parse batch #1594, stdlib import #1588, lin + loop #1597; SPEC dpa-075 floor #1596 / owner rulings #1585;
+# impl#1 — nested-handler await (#1581), null-in-arm refusal (#1587), Windows imported-alias refusal (#1590); 228 `self-host-v2/acceptance/**/case.scrml`. Gap sweep: docs/changes/s471-bootstrap-gap-sweep/SWEEP.md.
+# Test suites NOT re-run, EXCEPT `bun scripts/bootstrap-conformance.ts --check` = current (docs/bootstrap-conformance.md: 1813 cases attempted, PASS 254, FAIL 51 as written).
+# MAP-STAMP RULE: watermark advanced to `546e2f4aa` (was 3d17013f8; 68 commits). Older detail below is CARRIED and may omit S471 specifics: grep source.
+# BOOTSTRAP ROUTING (S471, new): see bootstrap.map.md (NEW) — per-module roles, analyze.scrml anchors, build/test chain, task routes.
+# ━━━━━━━ BELOW IS THE PRIOR HEADER (stamp `3d17013f8`), CARRIED. ━━━━━━━
 # ⛑ **S470 STAMP — `e0c4ad6cc` -> `3d17013f8` (origin/main). 343 COMMITS, 43 first-parent (s470 PRs #1538 … #1580 + bot/facts-regen merges).
 # Incremental refresh on branch `s470-maps`; source tree = `3d17013f8`. FIGURES (ls-tree at 3d17013f8): `compiler/src` 324 files (+5 added, none deleted),
 # 1,842 test files (`compiler/tests`, grep '.test.'), `compiler/SPEC.md` 51,750 lines, 2,068 `case.scrml`. Test suites NOT re-run; diagnostic code census NOT re-audited

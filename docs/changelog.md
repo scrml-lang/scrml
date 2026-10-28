@@ -2,6 +2,16 @@
 
 A rolling log of what just landed and what's actively underway in the compiler. For the full spec and pipeline docs see `compiler/SPEC.md` and `compiler/PIPELINE.md`.
 
+## S471 — 2026-10-27 (bryan · theRog) — 16 PRs: impl#1 narrowed to "only what the bootstrap needs"; the bootstrap gained stdlib imports, defer and waiting in loops, lin, and a parser batch; dpa-075 ruled end to end
+
+- **Policy (ruled):** impl#1 work is now ONLY what building/testing the bootstrap needs, breakage blocking flogence or bryan's tools, or Peter's lane. No impl#1 security lanes; open impl#1 security gaps are tagged `defer=impl1-s471-policy`. Making `windows` a required check is dropped.
+- **Bootstrap:** `scrml:` stdlib imports resolve and unresolved imports are named refusals; the stdlib `<program>` wrapper is dropped (#1588). `defer` in a loop body (#1593). Parser batch: several display literals per body, runaway recovery, item-body `let` refusals (#1594). A loop body may wait for the server (§49.12.7), and `lin` linear types (§35) (#1597). A 67-gap sweep of bootstrap gaps: all 4 HIGHs FIXED, 45 still open (#1599).
+- **impl#1 (in flight before the policy):** null/undefined and `==` refused in `!{}` arms (#1587, partial). The imported-alias enum-read refusal fires on Windows (#1590, partial).
+- **SPEC:** the eight S470 owner rulings, including `Promise.resolve` and the Promise constructors refused (#1585). `lift` in a defer body is E-DEFER-CONTROL-FLOW, and an HTML comment does not break an if-chain (#1592). The dpa-075 F1 floor: `ref=`, a host-owned subtree, a mount handle, Appendix D globals (#1596).
+- **dpa-075 (browser host APIs):** deep-dive and measurement done, F0–F7 all ruled. The stdlib host bridge uses built-in host intrinsics. A typed host-binding declaration element is accepted but still undesigned. dpa-076 (the stdlib platform layer) and dpa-077 (CSP capabilities) are banked.
+- **Gap rollup:** HIGH 262 · MED 700 · LOW 535. Suite at wrap: 46,684 pass, 0 fail, 125 skip.
+- **Lesson:** leaked slice-test dirs filled the RAM-backed /tmp and the Claude temp quota twice, and tool output was lost silently. Long outputs now go to `~/.cache/`, and the leak is filed as a MED gap.
+
 ## S470 — 2026-10-24/26 (bryan · theRog) — 26 PRs: impl#1 now awaits or refuses every waiting value in render, value, action and handler-arm positions, and emits E-ERROR-012
 
 - **Security (impl#1, waiting values, §13.7/§13.8):** a waiting call in a render or value position is refused (E-VALUE-SERVER-CALL, #1547). An action-body server call is awaited, or refused where the body is lowered synchronously (E-IMPL1-ACTION-NOT-AWAITED, #1554). Async colouring resolves callees by scope (#1558). An async `when … changes` body: newest run wins (#1560). Host `fetch` is a waiting value on every side (#1566 #1572). `!{}` handler arms are awaited (#1576). Action bodies are ordered, waiting resets are refused, and async engine hooks get newest-run-wins (#1577).
