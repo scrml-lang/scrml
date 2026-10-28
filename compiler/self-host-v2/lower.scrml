@@ -33,7 +33,7 @@ ${
              GrantSet, TransitionGraph, Field, DeclKind, WiringAttr, Decl, Param, Fn, HostFn, CoreProgram, Validator, SurfaceProp, ValidityOf, Persist,
              ServerFn, SqlMode, Db, SqlQuery, SqlKind, SqlTables, SqlColumns, Failable, OkArm, ErrArm, VariantDef,
              LoopHead, EachHead, RangeHead, HostCall, CssUnit, CssDecl, CoreCss, CssVar, Gather, Lifted, GatherRow, PathStep,
-             CoreConst, block, litStr, mkSym, typeDefSym, readField } from "./core.scrml"
+             CoreConst, block, litStr, mkSym, typeDefSym, readField, mountedInstances } from "./core.scrml"
     import { partsText } from "./css.scrml"
     import { ASpan, BinOp, UnOp, AExpr, AProp, AExprK, AStmt, ABlock, AStmtK, AEffect, AType, AParam, AFn,
              AAttrValue, AAttr, AElem, ANode, ANodeK, ADecl, AProgram, AItem, AItemK, AConst, FileAst, Diag, ASql, ASqlMode,
@@ -111,6 +111,8 @@ ${
             .Shared(decl: x) :> i
             .Alias(sym: x) :> i
             .Narrowed(sym: x) :> i
+            .Kid(of: x) :> i
+            .HandleOf(of: x) :> i
         }
     }
 
@@ -176,6 +178,8 @@ ${
             .Lexical(depth: k) :> "L" + k
             .Alias(sym: s) :> "A" + s.id
             .Narrowed(sym: s) :> "N" + s.id
+            .Kid(of: o, idx: k) :> "K(" + instKey(o) + "," + k + ")"
+            .HandleOf(of: o, sym: s) :> "H(" + instKey(o) + "," + s.id + ")"
         }
     }
 
@@ -422,6 +426,8 @@ ${
             .Shared(decl: d) :> not
             .Lexical(depth: n) :> not
             .Narrowed(sym: s) :> not
+            .Kid(of: o) :> not
+            .HandleOf(of: o) :> not
         }
     }
 
@@ -2144,6 +2150,7 @@ ${
             .Effect(deps: ds) :> v
             .ResetOn(triggers: ds) :> v
             .Errors(of: o) :> v
+            .Reach(fields: fs) :> v
             .Gather(g: g, rows: rs) :> View.Gather(g, stampRows(rs, extra, keyed))
         }
     }
@@ -3457,16 +3464,34 @@ ${
     // step 2 is blocked by an empty step-1 field). Once the whole program is
     // lowered, each form's Gate is given the fields its subtree NAMES — its own
     // markup, Cond arms, slot content written in it, and `<*x/>` Stars (whose
-    // renders' `.Lexical(0)` is the Star's instance). An `<each>` row, a use's
-    // instance and a slot's filler instance are not nameable here; the runtime
-    // finds them on the live form (runtime.gate).
+    // renders' `.Lexical(0)` is the Star's instance).
+    //
+    // s472 (g-bootstrap-gate-reach-live-dom-reading, S239 round 2 P3 / P4 /
+    // P12) — what the form's own code cannot name is named where it CAN be:
+    //  - a declaration USE creates its own instance, which only that
+    //    declaration's render sees (`.Lexical(0)` = `inst$`): each user
+    //    declaration's renders opens with a View.Reach naming the fields its
+    //    composed subtree binds, evaluated against the instance being rendered;
+    //  - a slot filled at the use site is lowered at the use: the filler list
+    //    opens with a Reach evaluated in the use site's context;
+    //  - an `<each>` / Tier-0 row likewise, in the row's context.
+    // A Reach marker registers when its list MOUNTS (runtime.reach); a gated
+    // form gates every registered list whose marker is inside it. A use in an
+    // unmounted region has no instance yet (a nested region creates its
+    // instances as it mounts, print.scrml `nested`) — there is no value, so
+    // nothing gates. An `as=` handle is named at submit with a presence check
+    // (print.scrml gateFieldJs → runtime.validityIf). The live lookup of the
+    // rendered controls stays as the backstop.
     // =========================================================================
     fn gateDecls(p: CoreProgram) -> Decl[] {
         let out: Decl[] = []
+        const ext: ExtField[] = programExt(p)
         for (const d of p.decls) {
             const rs: View[] | not = d.renders
             if (rs is given) {
-                out = out.concat([{ sym: d.sym, kind: d.kind, single: d.single, fields: d.fields, renders: gateViews(p, rs),
+                let gated: View[] = gateViews(p, rs, ext)
+                if (!isProgramKind(d.kind)) gated = reachList(namedFields(p, rs, not, [d.sym.id]), gated)
+                out = out.concat([{ sym: d.sym, kind: d.kind, single: d.single, fields: d.fields, renders: gated,
                                     wiring: d.wiring, handles: d.handles }])
             } else {
                 out = out.concat([d])
@@ -3475,18 +3500,28 @@ ${
         return out
     }
 
-    fn gateViews(p: CoreProgram, vs: View[]) -> View[] {
+    // `vs` opened by a Reach naming `fs` — nothing when `fs` is empty.
+    fn reachList(fs: ValidityOf[], vs: View[]) -> View[] {
+        if (fs.length == 0) return vs
+        return [View.Reach(fs)].concat(vs)
+    }
+
+    fn gateList(p: CoreProgram, vs: View[], ext: ExtField[]) -> View[] {
+        return reachList(namedFields(p, vs, not, []), gateViews(p, vs, ext))
+    }
+
+    fn gateViews(p: CoreProgram, vs: View[], ext: ExtField[]) -> View[] {
         let out: View[] = []
-        for (const v of vs) { out = out.concat([gateView(p, v)]) }
+        for (const v of vs) { out = out.concat([gateView(p, v, ext)]) }
         return out
     }
 
-    fn gateView(p: CoreProgram, v: View) -> View {
+    fn gateView(p: CoreProgram, v: View, ext: ExtField[]) -> View {
         return match v {
-            .El(tag: tag, attrs: attrs, kids: ks) :> View.El(tag, gateAttrs(p, attrs, ks), gateViews(p, ks))
-            .Cond(arms: arms) :> View.Cond(gateArms(p, arms))
-            .Each(src: s, bind: b, key: k, handles: hs, row: row) :> View.Each(s, b, k, hs, gateViews(p, row))
-            .Instance(decl: d, attrs: a, slot: sl, alias: al) :> View.Instance(d, a, gateViews(p, sl), al)
+            .El(tag: tag, attrs: attrs, kids: ks) :> View.El(tag, gateAttrs(p, attrs, ks, ext), gateViews(p, ks, ext))
+            .Cond(arms: arms) :> View.Cond(gateArms(p, arms, ext))
+            .Each(src: s, bind: b, key: k, handles: hs, row: row) :> View.Each(s, b, k, hs, gateList(p, row, ext))
+            .Instance(decl: d, attrs: a, slot: sl, alias: al) :> View.Instance(d, a, gateList(p, sl, ext), al)
             .Text(text: x) :> v
             .RawText(text: x) :> v
             .Dyn(e: x) :> v
@@ -3495,31 +3530,36 @@ ${
             .Effect(deps: x) :> v
             .ResetOn(triggers: x) :> v
             .Errors(of: x) :> v
-            .Gather(g: g, rows: rs) :> View.Gather(g, gateRows(p, rs))
+            .Reach(fields: fs) :> v
+            .Gather(g: g, rows: rs) :> View.Gather(g, gateRows(p, rs, ext))
         }
     }
 
-    fn gateRows(p: CoreProgram, rs: GatherRow[]) -> GatherRow[] {
+    fn gateRows(p: CoreProgram, rs: GatherRow[], ext: ExtField[]) -> GatherRow[] {
         let out: GatherRow[] = []
-        for (const r of rs) { out = out.concat([{ views: gateViews(p, r.views) }]) }
+        for (const r of rs) { out = out.concat([{ views: gateList(p, r.views, ext) }]) }
         return out
     }
 
-    fn gateArms(p: CoreProgram, arms: CondArm[]) -> CondArm[] {
+    fn gateArms(p: CoreProgram, arms: CondArm[], ext: ExtField[]) -> CondArm[] {
         let out: CondArm[] = []
-        for (const a of arms) { out = out.concat([{ test: a.test, body: gateViews(p, a.body) }]) }
+        for (const a of arms) { out = out.concat([{ test: a.test, body: gateViews(p, a.body, ext) }]) }
         return out
     }
 
-    fn gateAttrs(p: CoreProgram, attrs: Attr[], ks: View[]) -> Attr[] {
+    fn gateAttrs(p: CoreProgram, attrs: Attr[], ks: View[], ext: ExtField[]) -> Attr[] {
         let out: Attr[] = []
-        for (const a of attrs) { out = out.concat([gateAttr(p, a, ks)]) }
+        const own: string = staticNamed(attrs, "id")
+        for (const a of attrs) { out = out.concat([gateAttr(p, a, ks, extFor(ext, own))]) }
         return out
     }
 
-    fn gateAttr(p: CoreProgram, a: Attr, ks: View[]) -> Attr {
+    // s472 — the form's gate: the fields its composed subtree names, and
+    // (RULED S472, §55.17.3 "The HTML form owner") those of the controls
+    // outside it that name it with `form="id"` (`more`).
+    fn gateAttr(p: CoreProgram, a: Attr, ks: View[], more: ValidityOf[]) -> Attr {
         return match a {
-            .Gate(values: vs) :> Attr.Gate(vs, namedFields(p, ks, not, []))
+            .Gate(values: vs) :> Attr.Gate(vs, addFields(namedFields(p, ks, not, []), more))
             .Static(name: x) :> a
             .Bound(name: x) :> a
             .Show(test: x) :> a
@@ -3529,10 +3569,20 @@ ${
     }
 
     // The bound surfaced fields `vs` names, each once, in document order.
-    // `subst`: inside a Star's renders, the Star's instance (what `.Lexical(0)`
-    // means there); `seen`: the declarations being expanded (a renders may
-    // reach itself through a Star).
-    fn namedFields(p: CoreProgram, vs: View[], subst: InstRef | not, seen: int[]) -> ValidityOf[] {
+    // `subst`: inside another declaration's renders, which instance that
+    // renders is for (what `.Lexical(0)` and its `as=` handles mean there) —
+    // `not` in the context the fields are printed in; `seen`: the declarations
+    // being expanded (a renders may reach itself).
+    //
+    // s472 r1 (F1): `live` — a Star's (or a Star kid's) instance EXISTS, so its
+    // own fields are named through it; a USE's instance may not exist yet (a
+    // use in an unmounted region is created when it mounts), so through a use
+    // only what does NOT depend on that instance is named: shared values
+    // (`.Shared`) and handles of another declaration. The instance's own
+    // fields gate through its renders' Reach once it exists.
+    type Sub:struct = { decl: Sym, inst: InstRef, live: boolean }
+
+    fn namedFields(p: CoreProgram, vs: View[], subst: Sub | not, seen: int[]) -> ValidityOf[] {
         let out: ValidityOf[] = []
         for (const v of vs) { out = addFields(out, viewFields(p, v, subst, seen)) }
         return out
@@ -3557,11 +3607,11 @@ ${
         }
     }
 
-    fn viewFields(p: CoreProgram, v: View, subst: InstRef | not, seen: int[]) -> ValidityOf[] {
+    fn viewFields(p: CoreProgram, v: View, subst: Sub | not, seen: int[]) -> ValidityOf[] {
         return match v {
-            .El(attrs: attrs, kids: ks) :> addFields(attrFields(p, attrs, subst), namedFields(p, ks, subst, seen))
+            .El(attrs: attrs, kids: ks) :> addFields(ownFields(p, attrs, subst), namedFields(p, ks, subst, seen))
             .Cond(arms: arms) :> armFields(p, arms, subst, seen)
-            .Instance(slot: sl) :> namedFields(p, sl, subst, seen)
+            .Instance(decl: d, slot: sl) :> addFields(namedFields(p, sl, subst, seen), useFields(p, d, seen))
             .Star(decl: d, inst: i) :> starFields(p, d, i, subst, seen)
             .Each(src: x) :> []
             .Text(text: x) :> []
@@ -3571,36 +3621,244 @@ ${
             .Effect(deps: x) :> []
             .ResetOn(triggers: x) :> []
             .Errors(of: x) :> []
+            .Reach(fields: fs) :> []
             .Gather(g: x) :> []
         }
     }
 
-    fn armFields(p: CoreProgram, arms: CondArm[], subst: InstRef | not, seen: int[]) -> ValidityOf[] {
+    fn armFields(p: CoreProgram, arms: CondArm[], subst: Sub | not, seen: int[]) -> ValidityOf[] {
         let out: ValidityOf[] = []
         for (const a of arms) { out = addFields(out, namedFields(p, a.body, subst, seen)) }
         return out
     }
 
-    fn starFields(p: CoreProgram, d: Sym, i: InstRef, subst: InstRef | not, seen: int[]) -> ValidityOf[] {
+    fn starFields(p: CoreProgram, d: Sym, i: InstRef, subst: Sub | not, seen: int[]) -> ValidityOf[] {
         if (seen.indexOf(d.id) >= 0) return []
-        const inner: InstRef | not = nameable(i, subst)
+        const inner: InstRef | not = nameable(p, i, subst)
         if (inner is not) return []
+        return rendersFields(p, d, { decl: d, inst: inner, live: true }, seen)
+    }
+
+    // s472 r1 (F1) — through a USE: its renders (and the uses it mounts, and
+    // so on) in the not-yet-created mode — `.Lexical(0)` / its own handles /
+    // its kids name nothing; a shared value bound there is named.
+    fn useFields(p: CoreProgram, d: Sym, seen: int[]) -> ValidityOf[] {
+        return rendersFields(p, d, { decl: d, inst: InstRef.Lexical(0), live: false }, seen)
+    }
+
+    // s472 — the fields declaration d's renders names for instance `inner`,
+    // and (a Star may be UNMOUNTED, so its renders' own Reach never runs) the
+    // fields of every instance that renders mounts unconditionally: those
+    // exist with `inner`'s record (L12 (b)), mounted or not — `inner.kids[k]`.
+    // A use in a nested region (an arm, a row, a slot) has no instance until
+    // it mounts: its own fields are not named (viewFields `.Instance` names
+    // what it binds that does not depend on it).
+    fn rendersFields(p: CoreProgram, d: Sym, sub: Sub, seen: int[]) -> ValidityOf[] {
+        if (seen.indexOf(d.id) >= 0) return []
+        const x: Decl | not = declOf(p, d)
+        if (x is not) return []
+        const rs: View[] | not = x.renders
+        if (rs is not) return []
+        const seen2: int[] = seen.concat([d.id])
+        let out: ValidityOf[] = namedFields(p, rs, sub, seen2)
+        let k = 0
+        for (const v of mountedInstances(rs)) {
+            out = addFields(out, kidFields(p, v, sub, k, seen2))
+            k = k + 1
+        }
+        return out
+    }
+
+    fn kidFields(p: CoreProgram, v: View, sub: Sub, k: int, seen: int[]) -> ValidityOf[] {
+        return match v {
+            .Instance(decl: kd) :> rendersFields(p, kd, kidSub(sub, k, kd), seen)
+            .El :> []
+            .Text :> []
+            .RawText :> []
+            .Dyn :> []
+            .Cond :> []
+            .Each :> []
+            .Slot :> []
+            .Star :> []
+            .Effect :> []
+            .ResetOn :> []
+            .Errors :> []
+            .Reach :> []
+            .Gather :> []
+        }
+    }
+
+    // A kid of a live instance exists (`inst.kids[k]`); a kid of a not-yet-created one does not.
+    fn kidSub(sub: Sub, k: int, kd: Sym) -> Sub {
+        if (sub.live) return { decl: kd, inst: InstRef.Kid(sub.inst, k, kd), live: true }
+        return { decl: kd, inst: InstRef.Lexical(0), live: false }
+    }
+
+    fn declOf(p: CoreProgram, d: Sym) -> Decl | not {
         for (const x of p.decls) {
-            if (x.sym.id == d.id) {
-                const rs: View[] | not = x.renders
-                if (rs is given) return namedFields(p, rs, inner, seen.concat([d.id]))
+            if (x.sym.id == d.id) return x
+        }
+        return not
+    }
+
+    // s472 — a control naming its form owner (`form=`, any case) is bound in
+    // THAT form (analyze formOwnerPass), not in the subtree it sits in.
+    fn ownFields(p: CoreProgram, attrs: Attr[], subst: Sub | not) -> ValidityOf[] {
+        if (staticNamed(attrs, "form") != "") return []
+        return attrFields(p, attrs, subst)
+    }
+
+    // ---- s472: the HTML form owner (RULED S472; analyze formOwnerPass) -------
+    // analyze accepted a `form="id"` control on a validated bind only when the
+    // control and its one form are in the program's own markup, outside any
+    // row; here the program's renders is walked the same way (El kids, Cond
+    // arms, a use's slot content; never a row, a Star or another renders) and
+    // each such control's fields are given to the form whose static `id` is
+    // that literal — when exactly one element of the program's renders carries it.
+    type ExtField:struct = { id: string, fields: ValidityOf[] }
+
+    fn programExt(p: CoreProgram) -> ExtField[] {
+        for (const d of p.decls) {
+            if (isProgramKind(d.kind)) {
+                const rs: View[] | not = d.renders
+                if (rs is given) return uniqueExt(rs, extIn(p, rs))
             }
         }
         return []
     }
 
-    fn attrFields(p: CoreProgram, attrs: Attr[], subst: InstRef | not) -> ValidityOf[] {
+    fn uniqueExt(rs: View[], xs: ExtField[]) -> ExtField[] {
+        let out: ExtField[] = []
+        for (const x of xs) {
+            if (idCount(rs, x.id) == 1) out = out.concat([x])
+        }
+        return out
+    }
+
+    fn extIn(p: CoreProgram, vs: View[]) -> ExtField[] {
+        let out: ExtField[] = []
+        for (const v of vs) { out = out.concat(extView(p, v)) }
+        return out
+    }
+
+    fn extView(p: CoreProgram, v: View) -> ExtField[] {
+        return match v {
+            .El(attrs: attrs, kids: ks) :> extEl(p, attrs).concat(extIn(p, ks))
+            .Cond(arms: arms) :> extArms(p, arms)
+            .Instance(slot: sl) :> extIn(p, sl)
+            .Each(src: x) :> []
+            .Gather(g: x) :> []
+            .Text(text: x) :> []
+            .RawText(text: x) :> []
+            .Dyn(e: x) :> []
+            .Slot :> []
+            .Star(decl: x) :> []
+            .Effect(deps: x) :> []
+            .ResetOn(triggers: x) :> []
+            .Errors(of: x) :> []
+            .Reach(fields: x) :> []
+        }
+    }
+
+    fn extArms(p: CoreProgram, arms: CondArm[]) -> ExtField[] {
+        let out: ExtField[] = []
+        for (const a of arms) { out = out.concat(extIn(p, a.body)) }
+        return out
+    }
+
+    fn extEl(p: CoreProgram, attrs: Attr[]) -> ExtField[] {
+        const id: string = staticNamed(attrs, "form")
+        if (id == "") return []
+        const fs: ValidityOf[] = attrFields(p, attrs, not)
+        if (fs.length == 0) return []
+        return [{ id: id, fields: fs }]
+    }
+
+    fn extFor(ext: ExtField[], id: string) -> ValidityOf[] {
+        let out: ValidityOf[] = []
+        if (id == "") return out
+        for (const x of ext) {
+            if (x.id == id) out = addFields(out, x.fields)
+        }
+        return out
+    }
+
+    // How many elements of `vs` (rows and arms included) carry the static `id` `id`.
+    fn idCount(vs: View[], id: string) -> int {
+        let n = 0
+        for (const v of vs) { n = n + idCountView(v, id) }
+        return n
+    }
+
+    fn idCountView(v: View, id: string) -> int {
+        return match v {
+            .El(attrs: attrs, kids: ks) :> idHere(attrs, id) + idCount(ks, id)
+            .Cond(arms: arms) :> idCountArms(arms, id)
+            .Instance(slot: sl) :> idCount(sl, id)
+            .Each(row: row) :> idCount(row, id)
+            .Gather(rows: rs) :> idCountRows(rs, id)
+            .Text(text: x) :> 0
+            .RawText(text: x) :> 0
+            .Dyn(e: x) :> 0
+            .Slot :> 0
+            .Star(decl: x) :> 0
+            .Effect(deps: x) :> 0
+            .ResetOn(triggers: x) :> 0
+            .Errors(of: x) :> 0
+            .Reach(fields: x) :> 0
+        }
+    }
+
+    fn idHere(attrs: Attr[], id: string) -> int {
+        if (staticNamed(attrs, "id") == id) return 1
+        return 0
+    }
+
+    fn idCountArms(arms: CondArm[], id: string) -> int {
+        let n = 0
+        for (const a of arms) { n = n + idCount(a.body, id) }
+        return n
+    }
+
+    fn idCountRows(rs: GatherRow[], id: string) -> int {
+        let n = 0
+        for (const r of rs) { n = n + idCount(r.views, id) }
+        return n
+    }
+
+    // The value of the static attribute named `name` (ASCII case-blind, as
+    // HTML reads names); "" when there is none.
+    fn staticNamed(attrs: Attr[], name: string) -> string {
+        for (const a of attrs) {
+            const v: string | not = staticNamedOne(a, name)
+            if (v is given) return v
+        }
+        return ""
+    }
+
+    fn staticNamedOne(a: Attr, name: string) -> string | not {
+        return match a {
+            .Static(name: n, value: v) :> staticIf(n, v, name)
+            .Bound(name: x) :> not
+            .Show(test: x) :> not
+            .On(event: x) :> not
+            .Bind(kind: x) :> not
+            .Gate(values: x) :> not
+        }
+    }
+
+    fn staticIf(n: string, v: string, name: string) -> string | not {
+        if (n.toLowerCase() == name) return v
+        return not
+    }
+
+    fn attrFields(p: CoreProgram, attrs: Attr[], subst: Sub | not) -> ValidityOf[] {
         let out: ValidityOf[] = []
         for (const a of attrs) { out = addFields(out, bindField(p, a, subst)) }
         return out
     }
 
-    fn bindField(p: CoreProgram, a: Attr, subst: InstRef | not) -> ValidityOf[] {
+    fn bindField(p: CoreProgram, a: Attr, subst: Sub | not) -> ValidityOf[] {
         return match a {
             .Bind(read: r) :> bindReadField(p, r, subst)
             .Static(name: x) :> []
@@ -3611,7 +3869,7 @@ ${
         }
     }
 
-    fn bindReadField(p: CoreProgram, r: Expr, subst: InstRef | not) -> ValidityOf[] {
+    fn bindReadField(p: CoreProgram, r: Expr, subst: Sub | not) -> ValidityOf[] {
         return match r {
             .Read(place: pl) :> placeField(p, pl, subst)
             .Lit(lit: x) :> []
@@ -3635,16 +3893,16 @@ ${
 
     // A bind of a field's WHOLE value, when the field has a surface (every
     // field of a user declaration; a top-level value only with validators).
-    fn placeField(p: CoreProgram, pl: Place, subst: InstRef | not) -> ValidityOf[] {
+    fn placeField(p: CoreProgram, pl: Place, subst: Sub | not) -> ValidityOf[] {
         return match pl {
             .Cell(decl: d, inst: i, path: path) :> cellField(p, d, i, path, subst)
             .LocalPath(sym: x) :> []
         }
     }
 
-    fn cellField(p: CoreProgram, d: Sym, i: InstRef, path: FieldRef[], subst: InstRef | not) -> ValidityOf[] {
+    fn cellField(p: CoreProgram, d: Sym, i: InstRef, path: FieldRef[], subst: Sub | not) -> ValidityOf[] {
         if (path.length != 1) return []
-        const inst: InstRef | not = nameable(i, subst)
+        const inst: InstRef | not = nameable(p, i, subst)
         if (inst is not) return []
         for (const x of p.decls) {
             if (x.sym.id == d.id) {
@@ -3658,22 +3916,57 @@ ${
     }
 
     // An instance reference the form's render can evaluate at submit: a
-    // shared instance, or the enclosing instance. An `as=` handle or a
-    // `given` local may name no instance by then — those binds are found on
-    // the live form instead. Inside a Star's renders, `.Lexical(0)` is the
-    // Star's own instance (`subst`).
-    fn nameable(i: InstRef, subst: InstRef | not) -> InstRef | not {
+    // shared instance, the enclosing instance, or (s472) an `as=` handle of
+    // this render context — read at submit with a presence check (an absent
+    // handle names no instance: nothing to gate). Inside a Star's renders,
+    // `.Lexical(0)` is the Star's own instance (`subst`), and an `as=` handle
+    // there is that instance's own (`.HandleOf(subst, h)`, read with the same
+    // presence check). A `given`-narrowed local is never a
+    // bind target in markup (`given` is a statement and the bootstrap lifts no
+    // markup from logic), so `.Narrowed` names nothing here.
+    fn nameable(p: CoreProgram, i: InstRef, subst: Sub | not) -> InstRef | not {
         return match i {
             .Shared(decl: d) :> i
             .Lexical(depth: k) :> lexicalThrough(k, i, subst)
-            .Alias(sym: s) :> not
+            .Alias(sym: s) :> aliasThrough(p, i, subst)
             .Narrowed(sym: s) :> not
+            .Kid(of: o) :> i
+            .HandleOf(of: o) :> i
         }
     }
 
-    fn lexicalThrough(k: int, i: InstRef, subst: InstRef | not) -> InstRef | not {
+    fn lexicalThrough(k: int, i: InstRef, subst: Sub | not) -> InstRef | not {
         if (subst is not) return i
-        if (k == 0) return subst
+        if (k == 0 && subst.live) return subst.inst
+        return not
+    }
+
+    // Inside another declaration's renders, an `as=` handle of THAT
+    // declaration belongs to the instance being rendered (`.HandleOf`, when it
+    // exists); any other handle (a `single` declaration's) is the same handle
+    // from every context.
+    fn aliasThrough(p: CoreProgram, i: InstRef, subst: Sub | not) -> InstRef | not {
+        if (subst is not) return i
+        return match i {
+            .Alias(sym: s) :> handleThrough(p, i, s, subst)
+            .Shared(decl: d) :> not
+            .Lexical(depth: k) :> not
+            .Narrowed(sym: s) :> not
+            .Kid(of: o) :> not
+            .HandleOf(of: o) :> not
+        }
+    }
+
+    fn handleThrough(p: CoreProgram, i: InstRef, s: Sym, sub: Sub) -> InstRef | not {
+        const d: Decl | not = declOf(p, sub.decl)
+        let own = false
+        if (d is given) {
+            for (const h of d.handles) {
+                if (h.id == s.id) own = true
+            }
+        }
+        if (!own) return i
+        if (sub.live) return InstRef.HandleOf(sub.inst, s)
         return not
     }
 }
