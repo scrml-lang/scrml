@@ -40,6 +40,7 @@
 
 import { existsSync, readFileSync, realpathSync } from "fs";
 import { dirname, join, relative, resolve, sep } from "path";
+import { fileURLToPath } from "url";
 import { parse as acornParse } from "acorn";
 
 // ---------------------------------------------------------------------------
@@ -53,17 +54,22 @@ export const MANIFEST_FILE_NAME = "scrml.toml";
 export const HOST_IMPORT_VALUES = Object.freeze(["disabled", "self-host-only"]);
 
 /**
- * The canonical bootstrap-stdlib path pattern `"self-host-only"` admits
- * (§22.13 — "canonical: `scrml/stdlib/**`"; S471 widened it from
- * `scrml/stdlib/compiler/**` — host bridge option A: stdlib modules stay scrml,
- * their host reach sits in thin TS/JS files beside them). Matched against the
- * importing file's path RELATIVE TO THE MANIFEST'S DIRECTORY (the project
- * root). The SPEC's leading `scrml/` names the repository directory itself,
- * which is the project root, so it is not part of the relative path. v1 has no
- * override key ("project-specific overrides via additional capability subkeys
- * reserved for future SPEC extension"), so this is the ONLY admitted pattern.
+ * The bootstrap stdlib whose files `"self-host-only"` admits (§22.13 —
+ * "canonical: `scrml/stdlib/**`"; S471 widened it from `scrml/stdlib/compiler/**`
+ * — host bridge option A: stdlib modules stay scrml, their host reach sits in
+ * thin TS/JS files beside them).
+ *
+ * S472 (review F1): the allow-list is anchored to THIS COMPILER's own stdlib
+ * directory — `<this file>/../../stdlib`, the same layout in the repository and
+ * in the npm package (`files`: `compiler/src/` + `stdlib/`; value-function-stored.ts
+ * and token-set.ts resolve it the same way) — never to "a `stdlib/` directory
+ * beside whichever manifest is nearest". Before S472 any project could admit
+ * its own `stdlib/` by writing `host-import = "self-host-only"` (and a vendored
+ * package's manifest could override the project's "disabled"), which §22.13
+ * forbids: "in an adopter project `import:host` is E-IMPORT-008 whatever the
+ * entry says".
  */
-export const SELF_HOST_PATH_PREFIX = "stdlib/";
+export const COMPILER_STDLIB_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..", "stdlib");
 
 /** The only host-tag v1 recognises (§21.3.1). */
 export const HOST_TAG = "host";
@@ -206,8 +212,9 @@ function manifestError(manifestPath, detail) {
  *   note: string|null,
  * }}
  */
-export function readHostImportCapability(filePath, cache = null) {
+export function readHostImportCapability(filePath, cache = null, stdlibRoot = null) {
   const found = findManifest(filePath);
+  const root = stdlibRoot || COMPILER_STDLIB_DIR;
   if (!found || !found.manifestPath) {
     return {
       value: "disabled",
@@ -215,6 +222,7 @@ export function readHostImportCapability(filePath, cache = null) {
       manifestPath: null,
       error: null,
       note: null,
+      stdlibRoot: root,
     };
   }
   let entry = cache ? cache.get(found.manifestPath) : undefined;
@@ -228,6 +236,7 @@ export function readHostImportCapability(filePath, cache = null) {
     manifestPath: found.manifestPath,
     error: entry.error,
     note: entry.note,
+    stdlibRoot: root,
   };
 }
 
@@ -237,15 +246,20 @@ export function readHostImportCapability(filePath, cache = null) {
  * de-duplicated so one bad manifest reports once per compile.
  *
  * @param {string[]} filePaths — absolute paths
+ * @param {{ stdlibRoot?: string }} [opts] — `stdlibRoot` replaces
+ *   COMPILER_STDLIB_DIR as the admitted stdlib (compileScrml's
+ *   `hostImportStdlibRoot`; an embedding-API seam at the trust level of
+ *   `stageOverrides` — no CLI flag, manifest key or source form reaches it)
  * @returns {{ byFile: Map<string, object>, errors: object[] }}
  */
-export function readHostImportCapabilities(filePaths) {
+export function readHostImportCapabilities(filePaths, opts = {}) {
+  const stdlibRoot = opts && opts.stdlibRoot ? resolve(opts.stdlibRoot) : null;
   const cache = new Map();
   const byFile = new Map();
   const errors = [];
   const reported = new Set();
   for (const fp of filePaths) {
-    const cap = readHostImportCapability(fp, cache);
+    const cap = readHostImportCapability(fp, cache, stdlibRoot);
     byFile.set(fp, cap);
     if (cap.error && !reported.has(cap.manifestPath)) {
       reported.add(cap.manifestPath);
@@ -265,11 +279,23 @@ export function readHostImportCapabilities(filePaths) {
  * @returns {boolean}
  */
 export function isHostImportPermitted(filePath, cap) {
-  if (!cap || cap.value !== "self-host-only" || !cap.projectRoot) return false;
-  // Both sides are REAL paths (see findManifest), so neither a symlinked
-  // directory nor a symlinked file can place a file inside the allow-list.
-  const rel = relative(realPathOf(cap.projectRoot), realPathOf(filePath)).split(sep).join("/");
-  return rel.startsWith(SELF_HOST_PATH_PREFIX);
+  if (!cap) return false;
+  // Both sides are REAL paths, so neither a symlinked directory nor a
+  // symlinked file can place a file inside the allow-list.
+  const stdlib = realPathOf(cap.stdlibRoot || COMPILER_STDLIB_DIR);
+  const rel = relative(stdlib, realPathOf(filePath)).split(sep).join("/");
+  if (rel === "" || rel === ".." || rel.startsWith("../") || rel.startsWith("/") || /^[A-Za-z]:/.test(rel)) return false;
+  // The stdlib's OWN manifest (the one beside the stdlib directory — the
+  // repository's `scrml.toml`) governs it: "the bootstrap stdlib's own manifest
+  // sets `self-host-only`" (§21.3.1), and a "disabled" there disables it. Any
+  // other manifest (an adopter's, governing an installed compiler's stdlib,
+  // which ships no `scrml.toml`) is not the stdlib's: it neither widens nor
+  // narrows it — the §22.13 values bind "every file of the project", and the
+  // compiler's stdlib is not a project file.
+  if (cap.manifestPath && realPathOf(dirname(cap.manifestPath)) === dirname(stdlib)) {
+    return cap.value === "self-host-only";
+  }
+  return true;
 }
 
 // ---------------------------------------------------------------------------
@@ -296,9 +322,9 @@ function describeCapability(cap) {
   }
   if (cap.note) return `In this project ${cap.note} (§22.13).`;
   if (cap.value === "disabled") {
-    return `\`${cap.manifestPath}\` sets (or defaults) \`[capabilities] host-import\` to "disabled" (§22.13).`;
+    return `\`${cap.manifestPath}\` sets (or defaults) \`[capabilities] host-import\` to "disabled" (§22.13); in an adopter project \`import:host\` is E-IMPORT-008 whatever the entry says.`;
   }
-  return `\`${cap.manifestPath}\` sets \`[capabilities] host-import = "self-host-only"\`, which admits only files under \`${SELF_HOST_PATH_PREFIX}**\` relative to \`${cap.projectRoot}\` (§22.13).`;
+  return `\`[capabilities] host-import = "self-host-only"\` admits only the compiler's own stdlib (\`${cap.stdlibRoot || COMPILER_STDLIB_DIR}\`), whatever a project's manifest says (§21.3.1, §22.13).`;
 }
 
 /**
