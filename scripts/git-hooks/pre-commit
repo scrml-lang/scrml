@@ -26,6 +26,10 @@ fi
 #   scripts/{scrml-boot,gen-bootstrap-severity,s34-catalog,bootstrap-conformance,hybrid,state}.ts,
 #   scripts/lint-no-default-arm.js, compiler/tests/integration/security-await-pack/,
 #   compiler/tests/helpers/tmp-root-preload.js, bunfig.toml, package.json, bun.lock, scrml.toml
+#   stdlib/                  slice-m2/lowered.js STDLIB_ROOT: the bootstrap resolves `scrml:<mod>` imports against the
+#                            REAL stdlib (acceptance case imports/stdlib-format-refused). S472: missing from this list
+#                            until then (g-hook-slice-trigger-list-misses-stdlib-s472); the literal repo-root reads in
+#                            the slice sources are asserted against this list by hook-slice-trigger-list-s472.test.js
 #   scripts/test-sharded.ts, scripts/git-hooks/pre-commit   (the runner / this hook: a change to either must
 #                            exercise the step it would otherwise skip)
 # SCRML_HOOK_SLICES=1 forces the step on (there is deliberately no off switch). See README.md.
@@ -39,7 +43,7 @@ elif [ -d compiler/self-host-v2 ]; then
       docs/known-gaps.md|scripts/scrml-boot.ts|scripts/gen-bootstrap-severity.ts|scripts/s34-catalog.ts|\
       scripts/bootstrap-conformance.ts|scripts/hybrid.ts|scripts/state.ts|scripts/lint-no-default-arm.js|\
       compiler/tests/integration/security-await-pack/*|compiler/tests/helpers/tmp-root-preload.js|\
-      bunfig.toml|package.json|bun.lock|scrml.toml|scripts/test-sharded.ts|scripts/git-hooks/pre-commit)
+      stdlib/*|bunfig.toml|package.json|bun.lock|scrml.toml|scripts/test-sharded.ts|scripts/git-hooks/pre-commit)
         RUN_SLICES=1; SLICE_TRIGGER="$path"; break ;;
     esac
   # --no-renames: a rename lists BOTH paths, so moving a file out of (or into) a watched prefix counts.

@@ -87,3 +87,13 @@ Ruling: scrml-support/user-voice-scrml.md "⭐ RULED — `<db>` body + client re
   body is markup context" — accurate for impl#1 (frozen), now contradicted for `<db>` by §4 / §4.18.1. Not edited.
 - A runaway display literal in a `<db>` body is not given the s471 runaway recovery (it is read closed, fails
   closed with a cascade); only the unterminated-to-EOF case gets E-CTX-001.
+
+## S473 landing-front — 2026-10-28
+- Merged origin/main (3a7d1d223) into origin/s472-boot-db-body-mode (c342ef178), branch land-s472-boot-db-body-mode.
+- Conflicts: analyze.scrml / parse.scrml ast import lists (union: AConst from main + ADbFn from branch);
+  severity.scrml (generated) regenerated via gen-bootstrap-severity.ts (210 codes = both sides' new rows);
+  known-gaps.md auto-resolved by the merge driver, no @gap id lost (checked main ∪ branch ⊆ result); FACTS.md = origin/main.
+- MERGE-FORCED: main's new AItemK.ConstItem made the branch's parse.scrml `fnIdOfItem` / `isTypeItem` matches
+  non-exhaustive (E-TYPE-020 bundle build failure). Added `.ConstItem(c: c) :> -1` / `:> false` arms — a
+  `const` item in a `<db>` body is therefore neither fn nor type (→ E-DB-BODY-STATEMENT if it reaches that path).
+- docs/bootstrap-conformance.md regenerated (--write).

@@ -23,10 +23,10 @@ Scope: **1813 of 1813 cases attempted** — every attempted case reached the pur
 **Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 308; of those, 259 hold (84.1%). Runtime half executed on the bootstrap for 103 case(s).
 
 - **Vacuous** passes: 19 of 259 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **240**.
-- FAILs whose required code appears nowhere in the bootstrap's sources (check not implemented): 24 of 49; the other 25 are implemented checks that answered wrong.
+- FAILs whose required code appears nowhere in the bootstrap's sources (check not implemented): 23 of 49; the other 26 are implemented checks that answered wrong.
 
 LEGACY by marker (a case may carry several): none.
-UNSUPPORTED by reason: bootstrap-unsupported 506 · parse-reject 314.
+UNSUPPORTED by reason: bootstrap-unsupported 541 · parse-reject 279.
 
 ### §66 twins (S449 dialect ruling 1 — generated at test time by the `scrml fix` §66 rules)
 
@@ -272,7 +272,7 @@ NOT-TWINNED by reason (685 cases; a case counts once per distinct reason):
 - `reactive/dg-002-no-readers-pos` (twin · codes; not in the bootstrap: E-DG-002)
   - missing E-DG-002
   - severity: E-DG-002 did not fire (expected warning)
-- `reactive/name-collides-state-pos` (twin · codes; not in the bootstrap: E-NAME-COLLIDES-STATE)
+- `reactive/name-collides-state-pos` (twin · codes)
   - missing E-NAME-COLLIDES-STATE
   - severity: E-NAME-COLLIDES-STATE did not fire (expected error)
 - `reactive/reserved-prefix-declaration-pos` (twin · codes; not in the bootstrap: E-NAME-COLLIDES-RESERVED-PREFIX)
@@ -652,7 +652,7 @@ none
 - `body-top/code-line-after-declaration-runs` — twin · parse-reject: E-PARSE-ITEM: unexpected text at program level
 - `body-top/declaration-trailing-tokens-rejected` — twin · parse-reject: E-PARSE-EXPECTED: expected `:`, found `=`
 - `body-top/declared-prose-renders` — twin · parse-reject: E-PARSE-ITEM: unexpected text at program level
-- `body-top/does-nothing-rejected` — twin · bootstrap-unsupported: an unannotated parameter `` — bootstrap slice M2 needs `: Type` (Core parameters are typed)
+- `body-top/does-nothing-rejected` — twin · bootstrap-unsupported: a `let` at the top level of a logic block — §7.6 admits a file-scope `let`, but it is module-level mutable state, and where that state lives (the client, the server, or both; once per process or per r
 - `body-top/js-construct-await` — parse-reject: E-PARSE-ITEM: unexpected text at program level
 - `body-top/js-construct-class` — parse-reject: E-PARSE-ITEM: unexpected text at program level
 - `body-top/js-construct-dynamic-import` — parse-reject: E-PARSE-EXPECTED: expected `{`, found `(`
@@ -670,7 +670,7 @@ none
 - `body-top/sql-statement-not-shipped` — parse-reject: E-PARSE-ITEM: unexpected text at program level
 - `body-top/template-cell-renders` — twin · parse-reject: E-PARSE-ITEM: unexpected text at program level
 - `body-top/template-const-renders` — parse-reject: E-PARSE-ITEM: unexpected text at program level
-- `body-top/template-const-renders-explicit-logic` — parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `const` (statements at logic-block level are not in bootstrap slice M2)
+- `body-top/template-const-renders-explicit-logic` — parse-reject: E-STMT-MISSING-SEMICOLON: Expected `;` to end the statement — insert `;` after `3`. A `;` ends every statement that is not block-like, the last one before a `}` included (`{ @n = @n + 1; }`); a newlin
 - `body-top/unknown-characters-rejected` — parse-reject: E-PARSE-ITEM: unexpected text at program level
 - `capability/inheritance-closest-wins-no-union` — bootstrap-unsupported: a nested `<program>` (§4.12 — a worker, sidecar or scoped-db execution context) is not in the bootstrap
 - `capability/inheritance-inherit-covers` — bootstrap-unsupported: a nested `<program>` (§4.12 — a worker, sidecar or scoped-db execution context) is not in the bootstrap
@@ -724,15 +724,15 @@ none
 - `control-flow/ctrl-029-value-form-sugar-markup-branch-pos` — twin · bootstrap-unsupported: an `if` used as a value (§17.6, the value form §17.6.10) is not in the bootstrap yet — use a `match` on the condition (`match c { true :> a, false :> b }`), or compute the value in a function
 - `control-flow/ctrl-switch-forbidden-attr-expr-pos` — twin · parse-reject: E-PARSE-TRAILING: unexpected `{` after the expression
 - `control-flow/ctrl-switch-forbidden-fn-body-pos` — twin · bootstrap-unsupported: member access `.Busy` on a value that is not a struct or an instance is not in bootstrap slice M2
-- `control-flow/ctrl-switch-forbidden-logic-block-pos` — twin · parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `switch` (statements at logic-block level are not in bootstrap slice M2)
-- `control-flow/if-chain-branch-declared-function-pos` — twin · bootstrap-unsupported: `<div>` at a file's top level, outside any `<program>`, is not in the bootstrap — the SPEC names no rule for what it renders as (§40.8); move it inside the `<program>`
+- `control-flow/ctrl-switch-forbidden-logic-block-pos` — twin · parse-reject: E-PARSE-ITEM: expected `import`, `type`, `const`, `function` or `fn` in a logic block, found `switch` (other statements at logic-block level are not in the bootstrap)
+- `control-flow/if-chain-branch-declared-function-pos` — twin · bootstrap-unsupported: a `let` at the top level of a logic block — §7.6 admits a file-scope `let`, but it is module-level mutable state, and where that state lives (the client, the server, or both; once per process or per r
 - `control-flow/if-in-dispatched-arm-neg` — twin · bootstrap-unsupported: `<match>` at a file's top level, outside any `<program>`, is not in the bootstrap — the SPEC names no rule for what it renders as (§40.8); move it inside the `<program>`
 - `control-flow/if-on-match-render-gate-absent-rt` — twin · bootstrap-unsupported: `<match>` is a scrml structural element (§18.0.1), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `control-flow/if-on-match-render-gate-mounts-rt` — twin · bootstrap-unsupported: `<match>` is a scrml structural element (§18.0.1), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
-- `control-flow/lift-two-in-value-arm-e-lift-002-neg` — twin · parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `const` (statements at logic-block level are not in bootstrap slice M2)
+- `control-flow/lift-two-in-value-arm-e-lift-002-neg` — twin · bootstrap-unsupported: an `if` used as a value (§17.6, the value form §17.6.10) is not in the bootstrap yet — use a `match` on the condition (`match c { true :> a, false :> b }`), or compute the value in a function
 - `control-flow/markup-if-arm-reads-rerender-pos` — twin · bootstrap-unsupported: an `if` used as a value (§17.6, the value form §17.6.10) is not in the bootstrap yet — use a `match` on the condition (`match c { true :> a, false :> b }`), or compute the value in a function
 - `control-flow/markup-statement-not-rendered-neg` — twin · bootstrap-unsupported: an `if` used as a value (§17.6, the value form §17.6.10) is not in the bootstrap yet — use a `match` on the condition (`match c { true :> a, false :> b }`), or compute the value in a function
-- `control-flow/s437-r5-braced-else-line-comment-top-logic` — twin · parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `if` (statements at logic-block level are not in bootstrap slice M2)
+- `control-flow/s437-r5-braced-else-line-comment-top-logic` — twin · parse-reject: E-PARSE-ITEM: expected `import`, `type`, `const`, `function` or `fn` in a logic block, found `if` (other statements at logic-block level are not in the bootstrap)
 - `control-flow/s437-r5-value-form-if-else-line-comment` — twin · bootstrap-unsupported: an `if` used as a value (§17.6, the value form §17.6.10) is not in the bootstrap yet — use a `match` on the condition (`match c { true :> a, false :> b }`), or compute the value in a function
 - `control-flow/s462-else-without-if-pos` — twin · parse-reject: E-STMT-MISSING-SEMICOLON: Expected `;` to end the statement — insert `;` after `"a"`. A `;` ends every statement that is not block-like, the last one before a `}` included (`{ @n = @n + 1; }`); a newl
 - `defer/ambiguous-lead-neg` — twin · bootstrap-unsupported: an index read `xs[i]` is in the bootstrap on a value of tape type (`T[…]`) — this value's type is not known to be one; annotate it
@@ -768,20 +768,20 @@ none
 - `derived/e-derived-server-only-reach-fn-path` — twin · bootstrap-unsupported: `scrml:auth` — the bootstrap cannot import this stdlib module: the build supplied no source for it that the bootstrap compiles, so none of its names are imported (§41.5)
 - `element-refusal/fn-return-script-pos` — twin · parse-reject: E-PARSE-EXPR: expected an expression, found `<`
 - `element-refusal/handler-arrow-markup-script-pos` — bootstrap-unsupported: an arrow function is in the bootstrap only as the argument of `.filter(…)` / `.map(…)` on a sequence
-- `element-refusal/implied-lift-arm-script-pos` — twin · parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `if` (statements at logic-block level are not in bootstrap slice M2)
+- `element-refusal/implied-lift-arm-script-pos` — twin · parse-reject: E-PARSE-ITEM: expected `import`, `type`, `const`, `function` or `fn` in a logic block, found `if` (other statements at logic-block level are not in the bootstrap)
 - `element-refusal/interp-markup-value-style-pos` — twin · parse-reject: E-PARSE-EXPR: expected an expression, found `<`
-- `element-refusal/lift-script-body-pos` — twin · parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `lift` (statements at logic-block level are not in bootstrap slice M2)
-- `element-refusal/lift-script-src-pos` — twin · parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `lift` (statements at logic-block level are not in bootstrap slice M2)
-- `element-refusal/lift-script-uppercase-pos` — parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `lift` (statements at logic-block level are not in bootstrap slice M2)
-- `element-refusal/lift-style-body-pos` — twin · parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `lift` (statements at logic-block level are not in bootstrap slice M2)
-- `element-refusal/lift-svg-script-pos` — parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `lift` (statements at logic-block level are not in bootstrap slice M2)
-- `element-refusal/logic-bare-markup-script-pos` — parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `<` (statements at logic-block level are not in bootstrap slice M2)
+- `element-refusal/lift-script-body-pos` — twin · parse-reject: E-PARSE-ITEM: expected `import`, `type`, `const`, `function` or `fn` in a logic block, found `lift` (other statements at logic-block level are not in the bootstrap)
+- `element-refusal/lift-script-src-pos` — twin · parse-reject: E-PARSE-ITEM: expected `import`, `type`, `const`, `function` or `fn` in a logic block, found `lift` (other statements at logic-block level are not in the bootstrap)
+- `element-refusal/lift-script-uppercase-pos` — parse-reject: E-PARSE-ITEM: expected `import`, `type`, `const`, `function` or `fn` in a logic block, found `lift` (other statements at logic-block level are not in the bootstrap)
+- `element-refusal/lift-style-body-pos` — twin · parse-reject: E-PARSE-ITEM: expected `import`, `type`, `const`, `function` or `fn` in a logic block, found `lift` (other statements at logic-block level are not in the bootstrap)
+- `element-refusal/lift-svg-script-pos` — parse-reject: E-PARSE-ITEM: expected `import`, `type`, `const`, `function` or `fn` in a logic block, found `lift` (other statements at logic-block level are not in the bootstrap)
+- `element-refusal/logic-bare-markup-script-pos` — parse-reject: E-PARSE-ITEM: expected `import`, `type`, `const`, `function` or `fn` in a logic block, found `<` (other statements at logic-block level are not in the bootstrap)
 - `element-refusal/match-arm-raw-body-pos` — twin · bootstrap-unsupported: `<match>` is a scrml structural element (§18.0.1), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `element-refusal/match-arm-script-pos` — twin · bootstrap-unsupported: `<match>` is a scrml structural element (§18.0.1), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `element-refusal/meta-emit-raw-body-pos` — parse-reject: E-PARSE-ITEM: unexpected text at program level
-- `element-refusal/near-names-neg` — parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `lift` (statements at logic-block level are not in bootstrap slice M2)
-- `element-refusal/style-attr-and-css-neg` — parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `lift` (statements at logic-block level are not in bootstrap slice M2)
-- `element-refusal/text-string-attr-comment-neg` — parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `const` (statements at logic-block level are not in bootstrap slice M2)
+- `element-refusal/near-names-neg` — parse-reject: E-PARSE-ITEM: expected `import`, `type`, `const`, `function` or `fn` in a logic block, found `lift` (other statements at logic-block level are not in the bootstrap)
+- `element-refusal/style-attr-and-css-neg` — parse-reject: E-PARSE-ITEM: expected `import`, `type`, `const`, `function` or `fn` in a logic block, found `lift` (other statements at logic-block level are not in the bootstrap)
+- `element-refusal/text-string-attr-comment-neg` — parse-reject: E-STMT-MISSING-SEMICOLON: Expected `;` to end the statement — insert `;` after `"<style>"`. A `;` ends every statement that is not block-like, the last one before a `}` included (`{ @n = @n + 1; }`); 
 - `endpoint/accepts-missing` — bootstrap-unsupported: `<endpoint>` is a scrml structural element (§61), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `endpoint/accepts-not-enum-primitive` — bootstrap-unsupported: `<endpoint>` is a scrml structural element (§61), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `endpoint/accepts-not-enum-struct` — bootstrap-unsupported: `<endpoint>` is a scrml structural element (§61), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
@@ -802,7 +802,7 @@ none
 - `engine/history-no-inner-engine-pos` — twin · bootstrap-unsupported: `history` on the state-child `<Idle>` is not in the bootstrap — a state-child reads only `rule=` (§66.13.2); the attribute would be ignored
 - `engine/internal-rule-not-composite-pos` — twin · bootstrap-unsupported: `internal:rule` on the state-child `<Idle>` is not in the bootstrap — a state-child reads only `rule=` (§66.13.2); the attribute would be ignored
 - `engine/match-in-state-child-warns` — twin · bootstrap-unsupported: `<match>` is a scrml structural element (§18.0.1), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
-- `engine/mount-not-engine-neg` — twin · parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `const` (statements at logic-block level are not in bootstrap slice M2)
+- `engine/mount-not-engine-neg` — twin · bootstrap-unsupported: a component written as a constant (`const Name = <…>`, §21.2 Form 2) — §66.15 writes a component as a declaration; neither form is in the bootstrap at logic-block level
 - `engine/msg-without-accepts-pos` — twin · bootstrap-unsupported: engine message arms (`.Msg :> …` in a `<Closed>` state-child body, §51.0.S.2.3) are not in the bootstrap
 - `engine/on-timeout` — twin · bootstrap-unsupported: `<onTimeout>` is a scrml structural element (§51.0.M), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `engine/on-timeout-no-advance` — twin · bootstrap-unsupported: `<onTimeout>` is a scrml structural element (§51.0.M), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
@@ -813,7 +813,7 @@ none
 - `engine/ontimeout-invalid-target-pos` — twin · bootstrap-unsupported: `<onTimeout>` is a scrml structural element (§51.0.M), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `engine/ontimeout-legal-neg` — twin · bootstrap-unsupported: `<onTimeout>` is a scrml structural element (§51.0.M), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `engine/ontimeout-misplaced-markup-pos` — twin · bootstrap-unsupported: `<onTimeout>` is a scrml structural element (§51.0.M), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
-- `engine/ontimeout-misplaced-pos` — twin · parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `<` (statements at logic-block level are not in bootstrap slice M2)
+- `engine/ontimeout-misplaced-pos` — twin · parse-reject: E-PARSE-ITEM: expected `import`, `type`, `const`, `function` or `fn` in a logic block, found `<` (other statements at logic-block level are not in the bootstrap)
 - `engine/ontransition-no-target-neg` — twin · bootstrap-unsupported: `<onTransition>` is a scrml structural element (§51.0.H), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `engine/ontransition-no-target-pos` — twin · bootstrap-unsupported: `<onTransition>` is a scrml structural element (§51.0.H), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `engine/payload-arity-mismatch-pos` — twin · bootstrap-unsupported: `id` on the state-child `<Dragging>` is not in the bootstrap — a state-child reads only `rule=` (§66.13.2); the attribute would be ignored
@@ -830,17 +830,17 @@ none
 - `engine/transitions-unknown-variant-pos` — twin · parse-reject: E-PARSE-TYPE: expected a variant name, found `{`
 - `engine/type-level-transitions-guard-neg` — twin · parse-reject: E-PARSE-TYPE: expected a variant name, found `{`
 - `engine/type-level-transitions-guard-pos` — twin · parse-reject: E-PARSE-TYPE: expected a variant name, found `{`
-- `equality/cross-type-primitive-reject` — twin · parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `let` (statements at logic-block level are not in bootstrap slice M2)
-- `equality/eq-not-reject` — twin · parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `let` (statements at logic-block level are not in bootstrap slice M2)
-- `equality/equality-operator-clean` — twin · parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `let` (statements at logic-block level are not in bootstrap slice M2)
-- `equality/is-not-clean` — twin · parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `let` (statements at logic-block level are not in bootstrap slice M2)
-- `equality/same-type-primitive-clean` — twin · parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `let` (statements at logic-block level are not in bootstrap slice M2)
-- `equality/strict-operator-reject` — twin · parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `let` (statements at logic-block level are not in bootstrap slice M2)
+- `equality/cross-type-primitive-reject` — twin · bootstrap-unsupported: a `let` at the top level of a logic block — §7.6 admits a file-scope `let`, but it is module-level mutable state, and where that state lives (the client, the server, or both; once per process or per r
+- `equality/eq-not-reject` — twin · bootstrap-unsupported: a `let` at the top level of a logic block — §7.6 admits a file-scope `let`, but it is module-level mutable state, and where that state lives (the client, the server, or both; once per process or per r
+- `equality/equality-operator-clean` — twin · bootstrap-unsupported: a `let` at the top level of a logic block — §7.6 admits a file-scope `let`, but it is module-level mutable state, and where that state lives (the client, the server, or both; once per process or per r
+- `equality/is-not-clean` — twin · bootstrap-unsupported: a `let` at the top level of a logic block — §7.6 admits a file-scope `let`, but it is module-level mutable state, and where that state lives (the client, the server, or both; once per process or per r
+- `equality/same-type-primitive-clean` — twin · bootstrap-unsupported: a `let` at the top level of a logic block — §7.6 admits a file-scope `let`, but it is module-level mutable state, and where that state lives (the client, the server, or both; once per process or per r
+- `equality/strict-operator-reject` — twin · bootstrap-unsupported: a `let` at the top level of a logic block — §7.6 admits a file-scope `let`, but it is module-level mutable state, and where that state lives (the client, the server, or both; once per process or per r
 - `error/async-not-in-scrml` — twin · parse-reject: E-PARSE-ITEM: unexpected text at program level
 - `error/await-not-in-scrml` — twin · parse-reject: E-STMT-MISSING-SEMICOLON: Expected `;` to end the statement — insert `;` after `1`. A `;` ends every statement that is not block-like, the last one before a `}` included (`{ @n = @n + 1; }`); a newlin
-- `error/construct-variant-payload-arity-let-neg` — twin · parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `let` (statements at logic-block level are not in bootstrap slice M2)
-- `error/construct-variant-payload-arity-ok` — twin · parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `let` (statements at logic-block level are not in bootstrap slice M2)
-- `error/construct-variant-payload-arity-trailing-comma-ok` — twin · parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `let` (statements at logic-block level are not in bootstrap slice M2)
+- `error/construct-variant-payload-arity-let-neg` — twin · bootstrap-unsupported: a `let` at the top level of a logic block — §7.6 admits a file-scope `let`, but it is module-level mutable state, and where that state lives (the client, the server, or both; once per process or per r
+- `error/construct-variant-payload-arity-ok` — twin · bootstrap-unsupported: a `let` at the top level of a logic block — §7.6 admits a file-scope `let`, but it is module-level mutable state, and where that state lives (the client, the server, or both; once per process or per r
+- `error/construct-variant-payload-arity-trailing-comma-ok` — twin · bootstrap-unsupported: a `let` at the top level of a logic block — §7.6 admits a file-scope `let`, but it is module-level mutable state, and where that state lives (the client, the server, or both; once per process or per r
 - `error/error-008-message-pos` — twin · parse-reject: E-PARSE-TYPE: expected `:enum` or `:struct`, found `:error`
 - `error/error-008-neg` — twin · parse-reject: E-PARSE-TYPE: expected `:enum` or `:struct`, found `:error`
 - `error/failable-fn-value-passed-handled-neg` — twin · bootstrap-unsupported: an unannotated parameter `f` — bootstrap slice M2 needs `f: Type` (Core parameters are typed)
@@ -913,9 +913,9 @@ none
 - `form-for/formfor-validity-bug58-clean` — twin · bootstrap-unsupported: `scrml:data` — the bootstrap cannot import this stdlib module: the build supplied no source for it that the bootstrap compiles, so none of its names are imported (§41.5)
 - `forms/derived-refinement-type-accepted` — twin · parse-reject: E-PARSE-TAG: unexpected `(` in the tag `<doubled`
 - `forms/msgchain-l2-template-fn-reject` — bootstrap-unsupported: `scrml:data` — the bootstrap cannot import this stdlib module: the build supplied no source for it that the bootstrap compiles, so none of its names are imported (§41.5)
-- `forms/validator-applies-min-on-string-reject` — twin · parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `@` (statements at logic-block level are not in bootstrap slice M2)
-- `forms/validator-applies-pattern-on-number-reject` — twin · parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `@` (statements at logic-block level are not in bootstrap slice M2)
-- `forms/validator-applies-typed-clean` — twin · parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `@` (statements at logic-block level are not in bootstrap slice M2)
+- `forms/validator-applies-min-on-string-reject` — twin · parse-reject: E-PARSE-ITEM: expected `import`, `type`, `const`, `function` or `fn` in a logic block, found `@` (other statements at logic-block level are not in the bootstrap)
+- `forms/validator-applies-pattern-on-number-reject` — twin · parse-reject: E-PARSE-ITEM: expected `import`, `type`, `const`, `function` or `fn` in a logic block, found `@` (other statements at logic-block level are not in the bootstrap)
+- `forms/validator-applies-typed-clean` — twin · parse-reject: E-PARSE-ITEM: expected `import`, `type`, `const`, `function` or `fn` in a logic block, found `@` (other statements at logic-block level are not in the bootstrap)
 - `input/input-001-neg` — bootstrap-unsupported: `<keyboard>` is a scrml structural element (§36 input state), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `input/input-001-pos` — bootstrap-unsupported: `<keyboard>` is a scrml structural element (§36 input state), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `lifecycle/cleanup-error-call-expression` — parse-reject: E-PARSE-EXPECTED: expected `}`, found `closeConnection`
@@ -926,24 +926,24 @@ none
 - `lifecycle/effect-write-unproven-pos` — twin · bootstrap-unsupported: `beacon` names a function without calling it (an alias, a returned, passed or stored function) — function values arrive with a later "function values" slice; call it directly: `beacon(…)`
 - `lifecycle/effect-writes-state-function-value-pos` — twin · bootstrap-unsupported: `bump` names a function without calling it (an alias, a returned, passed or stored function) — function values arrive with a later "function values" slice; call it directly: `bump(…)`
 - `lifecycle/on-transition-from` — twin · bootstrap-unsupported: `<onTransition>` is a scrml structural element (§51.0.H), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
-- `linear/lin-001-never-consumed-neg` — twin · parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `lin` (statements at logic-block level are not in bootstrap slice M2)
-- `linear/lin-001-never-consumed-pos` — twin · parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `lin` (statements at logic-block level are not in bootstrap slice M2)
-- `linear/lin-002-consumed-in-loop-neg` — twin · parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `let` (statements at logic-block level are not in bootstrap slice M2)
-- `linear/lin-002-consumed-in-loop-pos` — twin · parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `let` (statements at logic-block level are not in bootstrap slice M2)
-- `linear/lin-002-double-use-pos` — twin · parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `lin` (statements at logic-block level are not in bootstrap slice M2)
-- `linear/lin-003-branch-asymmetry-neg` — twin · parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `let` (statements at logic-block level are not in bootstrap slice M2)
-- `linear/lin-003-branch-asymmetry-pos` — twin · parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `let` (statements at logic-block level are not in bootstrap slice M2)
+- `linear/lin-001-never-consumed-neg` — twin · parse-reject: E-PARSE-ITEM: expected `import`, `type`, `const`, `function` or `fn` in a logic block, found `lin` (other statements at logic-block level are not in the bootstrap)
+- `linear/lin-001-never-consumed-pos` — twin · bootstrap-unsupported: a `let` at the top level of a logic block — §7.6 admits a file-scope `let`, but it is module-level mutable state, and where that state lives (the client, the server, or both; once per process or per r
+- `linear/lin-002-consumed-in-loop-neg` — twin · bootstrap-unsupported: a `let` at the top level of a logic block — §7.6 admits a file-scope `let`, but it is module-level mutable state, and where that state lives (the client, the server, or both; once per process or per r
+- `linear/lin-002-consumed-in-loop-pos` — twin · bootstrap-unsupported: a `let` at the top level of a logic block — §7.6 admits a file-scope `let`, but it is module-level mutable state, and where that state lives (the client, the server, or both; once per process or per r
+- `linear/lin-002-double-use-pos` — twin · parse-reject: E-PARSE-ITEM: expected `import`, `type`, `const`, `function` or `fn` in a logic block, found `lin` (other statements at logic-block level are not in the bootstrap)
+- `linear/lin-003-branch-asymmetry-neg` — twin · bootstrap-unsupported: a `let` at the top level of a logic block — §7.6 admits a file-scope `let`, but it is module-level mutable state, and where that state lives (the client, the server, or both; once per process or per r
+- `linear/lin-003-branch-asymmetry-pos` — twin · bootstrap-unsupported: a `let` at the top level of a logic block — §7.6 admits a file-scope `let`, but it is module-level mutable state, and where that state lives (the client, the server, or both; once per process or per r
 - `linear/lin-004-recurring-ctx-timer-neg` — twin · bootstrap-unsupported: `<timer>` is a scrml structural element (§6.7 lifecycle), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `linear/lin-004-recurring-ctx-timer-pos` — bootstrap-unsupported: `<timer>` is a scrml structural element (§6.7 lifecycle), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
-- `linear/lin-005-shadow-lin-neg` — twin · bootstrap-unsupported: an unannotated parameter `` — bootstrap slice M2 needs `: Type` (Core parameters are typed)
-- `linear/lin-005-shadow-lin-pos` — twin · bootstrap-unsupported: an unannotated parameter `` — bootstrap slice M2 needs `: Type` (Core parameters are typed)
+- `linear/lin-005-shadow-lin-neg` — twin · bootstrap-unsupported: a `let` at the top level of a logic block — §7.6 admits a file-scope `let`, but it is module-level mutable state, and where that state lives (the client, the server, or both; once per process or per r
+- `linear/lin-005-shadow-lin-pos` — twin · bootstrap-unsupported: a `let` at the top level of a logic block — §7.6 admits a file-scope `let`, but it is module-level mutable state, and where that state lives (the client, the server, or both; once per process or per r
 - `linear/lin-006-deferred-ctx-neg` — twin · bootstrap-unsupported: `<request>` is a scrml structural element (§6.7.7 async request), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `linear/lin-006-deferred-ctx-pos` — bootstrap-unsupported: `<request>` is a scrml structural element (§6.7.7 async request), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
-- `loop/loop-001-break-outside` — twin · parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `let` (statements at logic-block level are not in bootstrap slice M2)
-- `loop/loop-002-continue-outside` — twin · parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `continue` (statements at logic-block level are not in bootstrap slice M2)
-- `loop/loop-005-break-pos` — twin · parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `for` (statements at logic-block level are not in bootstrap slice M2)
-- `loop/loop-005-neg` — twin · parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `let` (statements at logic-block level are not in bootstrap slice M2)
-- `loop/loop-006-neg` — twin · parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `outer` (statements at logic-block level are not in bootstrap slice M2)
+- `loop/loop-001-break-outside` — twin · bootstrap-unsupported: a `let` at the top level of a logic block — §7.6 admits a file-scope `let`, but it is module-level mutable state, and where that state lives (the client, the server, or both; once per process or per r
+- `loop/loop-002-continue-outside` — twin · parse-reject: E-PARSE-ITEM: expected `import`, `type`, `const`, `function` or `fn` in a logic block, found `continue` (other statements at logic-block level are not in the bootstrap)
+- `loop/loop-005-break-pos` — twin · bootstrap-unsupported: an arrow function with a braced body is not in the bootstrap — write an expression body
+- `loop/loop-005-neg` — twin · bootstrap-unsupported: an arrow function with a braced body is not in the bootstrap — write an expression body
+- `loop/loop-006-neg` — twin · bootstrap-unsupported: a `let` at the top level of a logic block — §7.6 admits a file-scope `let`, but it is module-level mutable state, and where that state lives (the client, the server, or both; once per process or per r
 - `markup-handler/inline-block-handler-in-match-arm` — twin · bootstrap-unsupported: `<match>` is a scrml structural element (§18.0.1), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `markup-handler/multi-stmt-handler-assign-led-pos` — twin · parse-reject: E-PARSE-TAG: unexpected `=` in the tag `<button`
 - `markup-handler/multi-stmt-handler-attr-pos` — twin · parse-reject: E-PARSE-TRAILING: unexpected `;` after the expression
@@ -994,11 +994,11 @@ none
 - `match-codes/e-match-block-in-lift-neg` — twin · bootstrap-unsupported: `<match>` is a scrml structural element (§18.0.1), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `match-codes/e-match-block-in-lift-pos` — twin · bootstrap-unsupported: `<match>` is a scrml structural element (§18.0.1), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `match-codes/e-match-effect-forbidden-neg` — twin · bootstrap-unsupported: `<match>` at a file's top level, outside any `<program>`, is not in the bootstrap — the SPEC names no rule for what it renders as (§40.8); move it inside the `<program>`
-- `match-codes/e-match-effect-forbidden-pos` — twin · bootstrap-unsupported: `<match>` at a file's top level, outside any `<program>`, is not in the bootstrap — the SPEC names no rule for what it renders as (§40.8); move it inside the `<program>`
+- `match-codes/e-match-effect-forbidden-pos` — twin · bootstrap-unsupported: a `let` at the top level of a logic block — §7.6 admits a file-scope `let`, but it is module-level mutable state, and where that state lives (the client, the server, or both; once per process or per r
 - `match-codes/e-match-on-required-neg` — twin · bootstrap-unsupported: `<match>` at a file's top level, outside any `<program>`, is not in the bootstrap — the SPEC names no rule for what it renders as (§40.8); move it inside the `<program>`
 - `match-codes/e-match-on-required-pos` — twin · bootstrap-unsupported: `<match>` at a file's top level, outside any `<program>`, is not in the bootstrap — the SPEC names no rule for what it renders as (§40.8); move it inside the `<program>`
 - `match-codes/e-match-ontransition-forbidden-neg` — twin · bootstrap-unsupported: `<match>` at a file's top level, outside any `<program>`, is not in the bootstrap — the SPEC names no rule for what it renders as (§40.8); move it inside the `<program>`
-- `match-codes/e-match-ontransition-forbidden-pos` — twin · bootstrap-unsupported: `<match>` at a file's top level, outside any `<program>`, is not in the bootstrap — the SPEC names no rule for what it renders as (§40.8); move it inside the `<program>`
+- `match-codes/e-match-ontransition-forbidden-pos` — twin · bootstrap-unsupported: a `let` at the top level of a logic block — §7.6 admits a file-scope `let`, but it is module-level mutable state, and where that state lives (the client, the server, or both; once per process or per r
 - `match-codes/e-syntax-010-else-last-neg` — twin · parse-reject: E-PARSE-EXPECTED: expected `:`, found `}`
 - `match-codes/e-syntax-010-else-not-last-pos` — twin · parse-reject: E-PARSE-EXPECTED: expected `:`, found `}`
 - `match-codes/e-syntax-011-guard-clause-pos` — twin · parse-reject: E-PARSE-EXPECTED: expected `:`, found `,`
@@ -1022,7 +1022,7 @@ none
 - `match-leave/given-arm-lambda-param-no-false-scope-error` — twin · bootstrap-unsupported: `.join(…)` on a value whose type the compiler cannot resolve — a built-in method needs a receiver of a known type (a `string` or a tape); give it one (`: string`, `: T[…]`)
 - `match-leave/given-arm-legacy-arrow-keeps-body` — twin · parse-reject: E-PARSE-ARM: expected an arm pattern (`.Variant`, `.Variant(a, b)`, `not`, a literal, `_` or `else`), found `given`
 - `match-leave/given-arm-malformed-heads-in-assignment-match-neg` — twin · parse-reject: E-PARSE-ARM: expected an arm pattern (`.Variant`, `.Variant(a, b)`, `not`, a literal, `_` or `else`), found `given`
-- `match-leave/given-arm-undeclared-name-neg` — twin · parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `let` (statements at logic-block level are not in bootstrap slice M2)
+- `match-leave/given-arm-undeclared-name-neg` — twin · bootstrap-unsupported: a `let` at the top level of a logic block — §7.6 admits a file-scope `let`, but it is module-level mutable state, and where that state lives (the client, the server, or both; once per process or per r
 - `match-leave/multi-scrutinee-stmt-arm-braced-return-leaves-fn` — twin · parse-reject: E-PARSE-EXPECTED: expected `)`, found `,`
 - `match-leave/return-match-arm-propagate` — twin · bootstrap-unsupported: a handled failable (`?`, `!{ … }`, `match`) is in the bootstrap only as a statement's whole value (`f() !{ … }` / `match f() { … }` alone, `let x = …`, `x = …`, `@c = …`, `return …`) — inside a larger
 - `match-leave/returned-multi-match-braced-leave-and-inner-break` — twin · bootstrap-unsupported: a handled failable (`?`, `!{ … }`, `match`) is in the bootstrap only as a statement's whole value (`f() !{ … }` / `match f() { … }` alone, `let x = …`, `x = …`, `@c = …`, `return …`) — inside a larger
@@ -1096,37 +1096,37 @@ none
 - `meta/meta-nested-block-neg` — twin · parse-reject: E-PARSE-ITEM: unexpected text at program level
 - `meta/meta-proto-cell-name-pos` — twin · bootstrap-unsupported: a `^{…}` context in markup is not in the bootstrap (§3.1)
 - `meta/meta-reflect-clean-pos` — twin · parse-reject: E-PARSE-ITEM: unexpected text at program level
-- `meta/meta-reflect-outside-block-neg` — twin · parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `const` (statements at logic-block level are not in bootstrap slice M2)
+- `meta/meta-reflect-outside-block-neg` — twin · bootstrap-unsupported: the initializer of the file-scope constant `info` holds a call — the bootstrap builds a file-scope `const` whose value is fixed at compile time: literals, unit enum variants, other constants, a member
 - `meta/meta-reflect-unknown-type-neg` — twin · parse-reject: E-PARSE-ITEM: unexpected text at program level
 - `meta/meta-sql-in-runtime-block-neg` — twin · parse-reject: E-PARSE-ITEM: unexpected text at program level
 - `middleware/duplicate-handle-neg` — twin · bootstrap-unsupported: an unannotated parameter `request` — bootstrap slice M2 needs `request: Type` (Core parameters are typed)
 - `middleware/duplicate-handle-pos` — twin · bootstrap-unsupported: an unannotated parameter `request` — bootstrap slice M2 needs `request: Type` (Core parameters are typed)
 - `middleware/ratelimit-invalid-unit-neg` — bootstrap-unsupported: `<program ratelimit="100/min">` is not in the bootstrap — it emits no request pipeline (§40.2), so the limit would be dropped
-- `module/e-export-001-export-const-clean` — twin · parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `const` (statements at logic-block level are not in bootstrap slice M2)
-- `module/e-export-001-export-state-cell-reject` — twin · parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `{` (statements at logic-block level are not in bootstrap slice M2)
+- `module/e-export-001-export-const-clean` — twin · parse-reject: E-STMT-MISSING-SEMICOLON: Expected `;` to end the statement — insert `;` after `$`. A `;` ends every statement that is not block-like, the last one before a `}` included (`{ @n = @n + 1; }`); a newlin
+- `module/e-export-001-export-state-cell-reject` — twin · parse-reject: E-PARSE-ITEM: expected `import`, `type`, `const`, `function` or `fn` in a logic block, found `{` (other statements at logic-block level are not in the bootstrap)
 - `module/e-export-002-component-multiroot-reject` — twin · bootstrap-unsupported: `<Card>` at a file's top level, outside any `<program>`, is not in the bootstrap — the SPEC names no rule for what it renders as (§40.8); move it inside the `<program>`
 - `module/e-export-002-component-single-root-clean` — twin · bootstrap-unsupported: `<Card>` at a file's top level, outside any `<program>`, is not in the bootstrap — the SPEC names no rule for what it renders as (§40.8); move it inside the `<program>`
-- `module/e-import-001-export-inside-logic-clean` — twin · parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `const` (statements at logic-block level are not in bootstrap slice M2)
-- `module/e-import-002-acyclic-import-clean` — twin · parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `const` (statements at logic-block level are not in bootstrap slice M2)
-- `module/e-import-002-circular-import-reject` — twin · parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `const` (statements at logic-block level are not in bootstrap slice M2)
-- `module/e-import-002-reexport-cycle-named-reject` — twin · parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `const` (statements at logic-block level are not in bootstrap slice M2)
-- `module/e-import-002-reexport-cycle-star-reject` — twin · parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `const` (statements at logic-block level are not in bootstrap slice M2)
-- `module/e-import-002-reexport-import-cycle-mixed-reject` — twin · parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `const` (statements at logic-block level are not in bootstrap slice M2)
+- `module/e-import-001-export-inside-logic-clean` — twin · parse-reject: E-STMT-MISSING-SEMICOLON: Expected `;` to end the statement — insert `;` after `$`. A `;` ends every statement that is not block-like, the last one before a `}` included (`{ @n = @n + 1; }`); a newlin
+- `module/e-import-002-acyclic-import-clean` — twin · parse-reject: E-STMT-MISSING-SEMICOLON: Expected `;` to end the statement — insert `;` after `1`. A `;` ends every statement that is not block-like, the last one before a `}` included (`{ @n = @n + 1; }`); a newlin
+- `module/e-import-002-circular-import-reject` — twin · parse-reject: E-STMT-MISSING-SEMICOLON: Expected `;` to end the statement — insert `;` after `fromEntry`. A `;` ends every statement that is not block-like, the last one before a `}` included (`{ @n = @n + 1; }`); 
+- `module/e-import-002-reexport-cycle-named-reject` — twin · parse-reject: E-STMT-MISSING-SEMICOLON: Expected `;` to end the statement — insert `;` after `"aa"`. A `;` ends every statement that is not block-like, the last one before a `}` included (`{ @n = @n + 1; }`); a new
+- `module/e-import-002-reexport-cycle-star-reject` — twin · parse-reject: E-STMT-MISSING-SEMICOLON: Expected `;` to end the statement — insert `;` after `"aa"`. A `;` ends every statement that is not block-like, the last one before a `}` included (`{ @n = @n + 1; }`); a new
+- `module/e-import-002-reexport-import-cycle-mixed-reject` — twin · parse-reject: E-STMT-MISSING-SEMICOLON: Expected `;` to end the statement — insert `;` after `"aa"`. A `;` ends every statement that is not block-like, the last one before a `}` included (`{ @n = @n + 1; }`); a new
 - `module/e-import-003-host-import-inside-logic-reject` — twin · bootstrap-unsupported: member access `.length` on a value that is not a struct or an instance is not in bootstrap slice M2
 - `module/e-import-003-import-inside-fn-reject` — twin · parse-reject: E-STMT-MISSING-SEMICOLON: Expected `;` to end the statement — insert `;` after `'./m.scrml'`. A `;` ends every statement that is not block-like, the last one before a `}` included (`{ @n = @n + 1; }`)
-- `module/e-import-004-reexport-ambiguous-star-reject` — twin · parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `*` (statements at logic-block level are not in bootstrap slice M2)
-- `module/e-import-004-reexport-chain-clean` — twin · parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `{` (statements at logic-block level are not in bootstrap slice M2)
-- `module/e-import-004-reexport-missing-name-reject` — twin · parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `{` (statements at logic-block level are not in bootstrap slice M2)
+- `module/e-import-004-reexport-ambiguous-star-reject` — twin · parse-reject: E-PARSE-ITEM: expected `import`, `type`, `const`, `function` or `fn` in a logic block, found `*` (other statements at logic-block level are not in the bootstrap)
+- `module/e-import-004-reexport-chain-clean` — twin · parse-reject: E-PARSE-ITEM: expected `import`, `type`, `const`, `function` or `fn` in a logic block, found `{` (other statements at logic-block level are not in the bootstrap)
+- `module/e-import-004-reexport-missing-name-reject` — twin · parse-reject: E-PARSE-ITEM: expected `import`, `type`, `const`, `function` or `fn` in a logic block, found `{` (other statements at logic-block level are not in the bootstrap)
 - `module/e-import-004-stdlib-name-exported-clean` — twin · bootstrap-unsupported: `scrml:data` — the bootstrap cannot import this stdlib module: the build supplied no source for it that the bootstrap compiles, so none of its names are imported (§41.5)
 - `module/e-import-004-stdlib-name-not-exported-reject` — twin · bootstrap-unsupported: `scrml:data` — the bootstrap cannot import this stdlib module: the build supplied no source for it that the bootstrap compiles, so none of its names are imported (§41.5)
-- `module/e-import-004-stdlib-reexport-missing-name-reject` — twin · parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `{` (statements at logic-block level are not in bootstrap slice M2)
+- `module/e-import-004-stdlib-reexport-missing-name-reject` — twin · parse-reject: E-PARSE-ITEM: expected `import`, `type`, `const`, `function` or `fn` in a logic block, found `{` (other statements at logic-block level are not in the bootstrap)
 - `module/e-import-004-stdlib-submodule-only-name-reject` — twin · bootstrap-unsupported: `scrml:auth` — the bootstrap cannot import this stdlib module: the build supplied no source for it that the bootstrap compiles, so none of its names are imported (§41.5)
 - `module/e-import-004-stdlib-subpath-name-clean` — twin · bootstrap-unsupported: `scrml:auth/jwt` — the bootstrap cannot import this stdlib module: the build supplied no source for it that the bootstrap compiles, so none of its names are imported (§41.5)
-- `module/e-import-006-reexport-missing-file-reject` — twin · parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `{` (statements at logic-block level are not in bootstrap slice M2)
-- `module/e-import-006-reexport-star-missing-file-reject` — twin · parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `*` (statements at logic-block level are not in bootstrap slice M2)
-- `module/e-import-pinned-const-clean` — twin · parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `const` (statements at logic-block level are not in bootstrap slice M2)
-- `module/e-scope-010-filescope-distinct-clean` — twin · parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `const` (statements at logic-block level are not in bootstrap slice M2)
-- `module/e-scope-010-filescope-duplicate-reject` — twin · parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `const` (statements at logic-block level are not in bootstrap slice M2)
+- `module/e-import-006-reexport-missing-file-reject` — twin · parse-reject: E-PARSE-ITEM: expected `import`, `type`, `const`, `function` or `fn` in a logic block, found `{` (other statements at logic-block level are not in the bootstrap)
+- `module/e-import-006-reexport-star-missing-file-reject` — twin · parse-reject: E-PARSE-ITEM: expected `import`, `type`, `const`, `function` or `fn` in a logic block, found `*` (other statements at logic-block level are not in the bootstrap)
+- `module/e-import-pinned-const-clean` — twin · parse-reject: E-STMT-MISSING-SEMICOLON: Expected `;` to end the statement — insert `;` after `1`. A `;` ends every statement that is not block-like, the last one before a `}` included (`{ @n = @n + 1; }`); a newlin
+- `module/e-scope-010-filescope-distinct-clean` — twin · parse-reject: E-STMT-MISSING-SEMICOLON: Expected `;` to end the statement — insert `;` after `1`. A `;` ends every statement that is not block-like, the last one before a `}` included (`{ @n = @n + 1; }`); a newlin
+- `module/e-scope-010-filescope-duplicate-reject` — twin · parse-reject: E-STMT-MISSING-SEMICOLON: Expected `;` to end the statement — insert `;` after `1`. A `;` ends every statement that is not block-like, the last one before a `}` included (`{ @n = @n + 1; }`); a newlin
 - `module/e-use-001-use-inside-logic-reject` — twin · parse-reject: E-PARSE-ITEM: unexpected text at program level
 - `navigate/explicit-variants` — twin · bootstrap-unsupported: `<outlet>` is a scrml structural element (§20.8), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `navigate/no-path-error` — twin · bootstrap-unsupported: `<outlet>` is a scrml structural element (§20.8), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
@@ -1137,8 +1137,8 @@ none
 - `outlet/if-guard-false` — twin · bootstrap-unsupported: `<outlet>` is a scrml structural element (§20.8), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `outlet/logic-child` — twin · bootstrap-unsupported: `<outlet>` is a scrml structural element (§20.8), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `outlet/recognized-clean` — bootstrap-unsupported: `<outlet>` is a scrml structural element (§20.8), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
-- `parse-syntax/e-syntax-042-not-value-position-neg` — twin · parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `let` (statements at logic-block level are not in bootstrap slice M2)
-- `parse-syntax/e-syntax-042-null-value-position-pos` — twin · parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `let` (statements at logic-block level are not in bootstrap slice M2)
+- `parse-syntax/e-syntax-042-not-value-position-neg` — twin · bootstrap-unsupported: a `let` at the top level of a logic block — §7.6 admits a file-scope `let`, but it is module-level mutable state, and where that state lives (the client, the server, or both; once per process or per r
+- `parse-syntax/e-syntax-042-null-value-position-pos` — twin · bootstrap-unsupported: a `let` at the top level of a logic block — §7.6 admits a file-scope `let`, but it is module-level mutable state, and where that state lives (the client, the server, or both; once per process or per r
 - `parse-variant/error-invalid-payload` — twin · bootstrap-unsupported: `scrml:data` — the bootstrap cannot import this stdlib module: the build supplied no source for it that the bootstrap compiles, so none of its names are imported (§41.5)
 - `parse-variant/error-malformed-json` — twin · bootstrap-unsupported: `scrml:data` — the bootstrap cannot import this stdlib module: the build supplied no source for it that the bootstrap compiles, so none of its names are imported (§41.5)
 - `parse-variant/error-missing-discriminator` — twin · bootstrap-unsupported: `scrml:data` — the bootstrap cannot import this stdlib module: the build supplied no source for it that the bootstrap compiles, so none of its names are imported (§41.5)
@@ -1264,7 +1264,7 @@ none
 - `server-db/async-call-then-in-handler-neg` — twin · parse-reject: E-PARSE-TRAILING: unexpected `{` after the expression
 - `server-db/async-fn-escapes-as-value-handler-neg` — twin · bootstrap-unsupported: an unannotated parameter `f` — bootstrap slice M2 needs `f: Type` (Core parameters are typed)
 - `server-db/async-fn-escapes-handler-destructured-scheduler-neg` — twin · parse-reject: E-PARSE-TRAILING: unexpected `{` after the expression
-- `server-db/async-fn-escapes-scheduler-s09-monkeypatch-neg` — twin · parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `globalThis` (statements at logic-block level are not in bootstrap slice M2)
+- `server-db/async-fn-escapes-scheduler-s09-monkeypatch-neg` — twin · parse-reject: E-PARSE-ITEM: expected `import`, `type`, `const`, `function` or `fn` in a logic block, found `globalThis` (other statements at logic-block level are not in the bootstrap)
 - `server-db/async-fn-escapes-scheduler-s15-window-patch-neg` — twin · bootstrap-unsupported: an arrow function is in the bootstrap only as the argument of `.filter(…)` / `.map(…)` on a sequence
 - `server-db/cps-idempotency-store-driver-mismatch-neg` — twin · bootstrap-unsupported: `<program idempotency-store=…>` is not in the bootstrap — it reads no `<program>` attribute, and never ignores one it does not implement
 - `server-db/cps-idempotency-store-driver-mismatch-pos` — twin · bootstrap-unsupported: `<program idempotency-store=…>` is not in the bootstrap — it reads no `<program>` attribute, and never ignores one it does not implement
@@ -1342,7 +1342,7 @@ none
 - `sql/query-not-readable-neg` — twin · parse-reject: E-SQL-003: the content of `?{ … }` must be a backtick SQL template (`?{`SELECT …`}`) — found `SELECT` (§8.1). The SQL text is fixed at compile time; a runtime value is bound with `${…}` inside the tem
 - `sql/transactions-concurrent-postgres-pos` — twin · bootstrap-unsupported: `<program transactions=…>` is not in the bootstrap — it reads no `<program>` attribute, and never ignores one it does not implement
 - `sql/transactions-concurrent-sqlite-e-sql-010-neg` — twin · bootstrap-unsupported: `<program transactions=…>` is not in the bootstrap — it reads no `<program>` attribute, and never ignores one it does not implement
-- `style/theme-name-collision` — parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `const` (statements at logic-block level are not in bootstrap slice M2)
+- `style/theme-name-collision` — bootstrap-unsupported: a component written as a constant (`const Name = <…>`, §21.2 Form 2) — §66.15 writes a component as a declaration; neither form is in the bootstrap at logic-block level
 - `table-for/tablefor-rows-missing` — twin · bootstrap-unsupported: `scrml:data` — the bootstrap cannot import this stdlib module: the build supplied no source for it that the bootstrap compiles, so none of its names are imported (§41.5)
 - `table-for/tablefor-rows-wrong-type` — twin · bootstrap-unsupported: `scrml:data` — the bootstrap cannot import this stdlib module: the build supplied no source for it that the bootstrap compiles, so none of its names are imported (§41.5)
 - `table-for/tablefor-sortable-requires-cell-rows` — twin · bootstrap-unsupported: `scrml:data` — the bootstrap cannot import this stdlib module: the build supplied no source for it that the bootstrap compiles, so none of its names are imported (§41.5)
@@ -1369,31 +1369,31 @@ none
 - `tenant/undeclared-body-create-temp-neg` — twin · bootstrap-unsupported: `<schema>` is a scrml structural element (§39.2), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `tenant/undeclared-live-db-neg` — bootstrap-unsupported: `<db tables=…>` generates a type per table from the schema (§14.8.4), which is not in the bootstrap — it would be ignored
 - `tenant/undeclared-live-db-pos` — bootstrap-unsupported: `<db tables=…>` generates a type per table from the schema (§14.8.4), which is not in the bootstrap — it would be ignored
-- `type-state-codes/e-state-terminal-mutation-neg` — parse-reject: E-PARSE-TAG: expected a tag name after `<`
-- `type-state-codes/e-state-terminal-mutation-pos` — parse-reject: E-PARSE-TAG: expected a tag name after `<`
-- `type-state-codes/e-state-transition-illegal-neg` — parse-reject: E-PARSE-TAG: expected a tag name after `<`
-- `type-state-codes/e-state-transition-illegal-pos` — parse-reject: E-PARSE-TAG: expected a tag name after `<`
+- `type-state-codes/e-state-terminal-mutation-neg` — bootstrap-unsupported: a `let` at the top level of a logic block — §7.6 admits a file-scope `let`, but it is module-level mutable state, and where that state lives (the client, the server, or both; once per process or per r
+- `type-state-codes/e-state-terminal-mutation-pos` — bootstrap-unsupported: a `let` at the top level of a logic block — §7.6 admits a file-scope `let`, but it is module-level mutable state, and where that state lives (the client, the server, or both; once per process or per r
+- `type-state-codes/e-state-transition-illegal-neg` — bootstrap-unsupported: a `let` at the top level of a logic block — §7.6 admits a file-scope `let`, but it is module-level mutable state, and where that state lives (the client, the server, or both; once per process or per r
+- `type-state-codes/e-state-transition-illegal-pos` — bootstrap-unsupported: a `let` at the top level of a logic block — §7.6 admits a file-scope `let`, but it is module-level mutable state, and where that state lives (the client, the server, or both; once per process or per r
 - `type-state-codes/e-state-undeclared-neg` — twin · bootstrap-unsupported: `onClick` on `<p>` is a case variant of the scrml attribute `onclick` — the bootstrap reads scrml attribute names exactly, so it would be a plain HTML attribute that does nothing; write `onclick`
 - `type-state-codes/e-struct-function-field-pos` — twin · parse-reject: E-PARSE-TYPE: expected a field name, found `(`
-- `type-state-codes/e-type-004-struct-field-access-neg` — twin · parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `let` (statements at logic-block level are not in bootstrap slice M2)
-- `type-state-codes/e-type-004-struct-field-access-pos` — twin · parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `let` (statements at logic-block level are not in bootstrap slice M2)
+- `type-state-codes/e-type-004-struct-field-access-neg` — twin · bootstrap-unsupported: a `let` at the top level of a logic block — §7.6 admits a file-scope `let`, but it is module-level mutable state, and where that state lives (the client, the server, or both; once per process or per r
+- `type-state-codes/e-type-004-struct-field-access-pos` — twin · bootstrap-unsupported: a `let` at the top level of a logic block — §7.6 admits a file-scope `let`, but it is module-level mutable state, and where that state lives (the client, the server, or both; once per process or per r
 - `type-state-codes/e-type-022-engine-named-binding-neg` — twin · bootstrap-unsupported: `title` on the state-child `<Loaded>` is not in the bootstrap — a state-child reads only `rule=` (§66.13.2); the attribute would be ignored
 - `type-state-codes/e-type-022-engine-named-binding-pos` — twin · bootstrap-unsupported: `bogus` on the state-child `<Loaded>` is not in the bootstrap — a state-child reads only `rule=` (§66.13.2); the attribute would be ignored
-- `type-state-codes/e-type-041-not-assign-mismatch-neg` — twin · parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `let` (statements at logic-block level are not in bootstrap slice M2)
-- `type-state-codes/e-type-041-not-assign-mismatch-pos` — twin · parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `let` (statements at logic-block level are not in bootstrap slice M2)
-- `type-state-codes/e-type-045-prefix-not-negation-pos` — twin · parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `if` (statements at logic-block level are not in bootstrap slice M2)
-- `type-state-codes/e-type-062-is-non-enum-lhs-neg` — twin · parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `let` (statements at logic-block level are not in bootstrap slice M2)
-- `type-state-codes/e-type-062-is-non-enum-lhs-pos` — twin · parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `let` (statements at logic-block level are not in bootstrap slice M2)
+- `type-state-codes/e-type-041-not-assign-mismatch-neg` — twin · bootstrap-unsupported: a `let` at the top level of a logic block — §7.6 admits a file-scope `let`, but it is module-level mutable state, and where that state lives (the client, the server, or both; once per process or per r
+- `type-state-codes/e-type-041-not-assign-mismatch-pos` — twin · bootstrap-unsupported: a `let` at the top level of a logic block — §7.6 admits a file-scope `let`, but it is module-level mutable state, and where that state lives (the client, the server, or both; once per process or per r
+- `type-state-codes/e-type-045-prefix-not-negation-pos` — twin · parse-reject: E-PARSE-ITEM: expected `import`, `type`, `const`, `function` or `fn` in a logic block, found `if` (other statements at logic-block level are not in the bootstrap)
+- `type-state-codes/e-type-062-is-non-enum-lhs-neg` — twin · bootstrap-unsupported: a `let` at the top level of a logic block — §7.6 admits a file-scope `let`, but it is module-level mutable state, and where that state lives (the client, the server, or both; once per process or per r
+- `type-state-codes/e-type-062-is-non-enum-lhs-pos` — twin · bootstrap-unsupported: a `let` at the top level of a logic block — §7.6 admits a file-scope `let`, but it is module-level mutable state, and where that state lives (the client, the server, or both; once per process or per r
 - `type-state-codes/e-type-081-partial-match-render-pos` — twin · parse-reject: E-PARSE-EXPECTED: expected `}`, found `match`
 - `type-state-codes/e-type-any-forbidden-neg` — twin · bootstrap-unsupported: the built-in type `asIs` (§14.1.2) is not in the bootstrap — its type system has no unresolved-value type; give the value a declared type
 - `type-state-codes/e-type-lifecycle-on-engine-cell-pos` — twin · parse-reject: E-PARSE-TYPE: expected a type after `:`
 - `type-state-codes/e-type-lifecycle-variant-not-transitioned-neg` — twin · parse-reject: E-PARSE-TYPE: expected a type after `:`
 - `type-state-codes/e-type-lifecycle-variant-not-transitioned-pos` — twin · parse-reject: E-PARSE-TYPE: expected a type after `:`
-- `type-state-codes/e-value-function-stored-closure-array-pos` — twin · bootstrap-unsupported: member access `.length` on a value that is not a struct or an instance is not in bootstrap slice M2
-- `type-state-codes/e-value-function-stored-host-kept-pos` — twin · bootstrap-unsupported: `.double(…)` is not in the bootstrap — only calls of a named function, `Date.now()`, `.filter(x => …)` / `.map(x => …)` / `.sort(…)` / `.reverse()` / `.join(sep)` on a tape, and the string methods `to
-- `type-state-codes/e-value-function-stored-map-pos` — twin · bootstrap-unsupported: member access `.size` on a value that is not a struct or an instance is not in bootstrap slice M2
-- `type-state-codes/e-value-function-stored-neg` — twin · bootstrap-unsupported: member access `.size` on a value that is not a struct or an instance is not in bootstrap slice M2
-- `type-state-codes/e-value-function-stored-pos` — twin · bootstrap-unsupported: `.double(…)` is not in the bootstrap — only calls of a named function, `Date.now()`, `.filter(x => …)` / `.map(x => …)` / `.sort(…)` / `.reverse()` / `.join(sep)` on a tape, and the string methods `to
+- `type-state-codes/e-value-function-stored-closure-array-pos` — twin · bootstrap-unsupported: the initializer of the file-scope constant `items` holds a tape literal (a file-scope tape constant is not in the bootstrap yet) — the bootstrap builds a file-scope `const` whose value is fixed at com
+- `type-state-codes/e-value-function-stored-host-kept-pos` — twin · bootstrap-unsupported: the initializer of the file-scope constant `ops` holds a call or a payload-variant value (a file-scope payload-variant constant is not in the bootstrap yet) — the bootstrap builds a file-scope `const`
+- `type-state-codes/e-value-function-stored-map-pos` — twin · bootstrap-unsupported: the initializer of the file-scope constant `ops` holds a tape literal (a file-scope tape constant is not in the bootstrap yet) — the bootstrap builds a file-scope `const` whose value is fixed at compi
+- `type-state-codes/e-value-function-stored-neg` — twin · bootstrap-unsupported: the initializer of the file-scope constant `a` holds a call — the bootstrap builds a file-scope `const` whose value is fixed at compile time: literals, unit enum variants, other constants, a member re
+- `type-state-codes/e-value-function-stored-pos` — twin · bootstrap-unsupported: the initializer of the file-scope constant `ops` holds a struct literal (a file-scope struct constant is not in the bootstrap yet) — the bootstrap builds a file-scope `const` whose value is fixed at c
 
 ### NOT-TWINNED (685)
 

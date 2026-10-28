@@ -38,23 +38,80 @@ export const PUBLIC_SURFACE = [
  * A path is a file or a directory prefix (repo-relative). The floor check fails on any
  * fenced document that is neither in the surface nor here.
  */
+/**
+ * S469 "Banner + exempt": dated pieces written before the S469 rulings, in bryan's voice. Each
+ * carries a banner saying its code is the older dialect and unchecked. Listed one by one, not
+ * as `docs/articles`, so llm-kickstarter-v2 (ruled) and any NEW article stay gated.
+ *
+ * S472 (g-claim-gate-banner-exempt-unenforced): the banner is the exemption's whole justification,
+ * so it is now CHECKED — `bannerProblems()` fails the gate when a listed piece, or the site's
+ * rendered `.scrml` twin of one, has no banner before its first code sample.
+ */
+export const BANNERED_DATED = [
+  "docs/articles/i-am-jacks-engine-2026-09-07.md",
+  "docs/articles/i-am-jacks-engine-PUBLISH.md",
+  "docs/articles/i-am-jacks-match-2026-09-08.md",
+  "docs/articles/i-am-jacks-match-PUBLISH.md",
+  "docs/articles/i-am-jacks-program-2026-09-07.md",
+  "docs/articles/i-am-jacks-program-PUBLISH.md",
+  "docs/articles/if-you-give-a-dev-an-enum-2026-08-31.md",
+  "docs/articles/if-you-give-a-dev-an-enum-PUBLISH.md",
+  "docs/website/v0.2.0-announce-2026-05-05.md",
+  "docs/website/v0.3.0-announce-2026-05-14.md",
+];
+
+/**
+ * The banner, as a pattern: "… before the S469 language rulings … older dialect … not checked by
+ * the docs gate". One line of prose (the markdown blockquote, or the site page's <p>).
+ */
+export const DATED_BANNER_RE = /before the S469 language rulings[^\n]*older dialect[^\n]*not checked by the docs gate/;
+
+/** Where the site renders a dated piece: docs/website/pages/articles/<slug>.scrml (S472). */
+export const SITE_ARTICLES_DIR = "docs/website/pages/articles";
+export function siteTwinOf(rel) {
+  const slug = rel.split("/").pop().replace(/(?:-\d{4}-\d{2}-\d{2}|-PUBLISH)?\.md$/, "");
+  return `${SITE_ARTICLES_DIR}/${slug}.scrml`;
+}
+
+/**
+ * Every banner the "Banner + exempt" rule promises and the tree does not carry. FAIL-CLOSED:
+ *   - a listed piece that is absent is a problem (a stale exemption row, not a pass);
+ *   - the banner must come BEFORE the first code sample (a markdown fence in a .md, the first
+ *     `<pre` / `<code` in a site page) — a banner after the code warns nobody;
+ *   - a site page that renders a listed piece (its `.scrml` twin by slug) must carry it too:
+ *     claim-gate walks `.md` only, so the twin is otherwise outside every check while showing the
+ *     same older-dialect code to the most readers.
+ * @param {string} repoRoot
+ * @param {string[]} [list]
+ * @returns {{ file: string, why: string }[]}
+ */
+export function bannerProblems(repoRoot, list = BANNERED_DATED) {
+  const out = [];
+  const check = (rel, firstCode, kind) => {
+    const text = readFileSync(join(repoRoot, rel), "utf8");
+    const cut = text.search(firstCode);
+    const head = cut < 0 ? text : text.slice(0, cut);
+    if (!DATED_BANNER_RE.test(head)) {
+      out.push({ file: rel, why: `${kind} has no S469 dated-piece banner before its first code sample ("Written <date>, before the S469 language rulings … older dialect … not checked by the docs gate")` });
+    }
+  };
+  for (const rel of list) {
+    if (!existsSync(join(repoRoot, rel))) {
+      out.push({ file: rel, why: "listed in BANNERED_DATED (exempt from the gate) but absent — drop the row" });
+      continue;
+    }
+    check(rel, /^\s*(```|~~~)/m, "this exempt dated piece");
+    const twin = siteTwinOf(rel);
+    if (existsSync(join(repoRoot, twin))) check(twin, /<pre\b|<code\b/, `the site page rendering ${rel}`);
+  }
+  // dedupe (two .md files — dated + PUBLISH — share one twin)
+  const seen = new Set();
+  return out.filter((p) => (seen.has(p.file + p.why) ? false : (seen.add(p.file + p.why), true)));
+}
+
 export const SURFACE_UNGATED = {
   "docs/articles/archive": "superseded April–May drafts, bannered \"do not paste\" (S469 \"Archive old drafts\")",
-  // S469 "Banner + exempt": dated pieces written before the S469 rulings, in bryan's voice. Each
-  // carries a banner saying its code is the older dialect and unchecked. Listed one by one, not
-  // as `docs/articles`, so llm-kickstarter-v2 (ruled) and any NEW article stay gated.
-  ...Object.fromEntries([
-    "docs/articles/i-am-jacks-engine-2026-09-07.md",
-    "docs/articles/i-am-jacks-engine-PUBLISH.md",
-    "docs/articles/i-am-jacks-match-2026-09-08.md",
-    "docs/articles/i-am-jacks-match-PUBLISH.md",
-    "docs/articles/i-am-jacks-program-2026-09-07.md",
-    "docs/articles/i-am-jacks-program-PUBLISH.md",
-    "docs/articles/if-you-give-a-dev-an-enum-2026-08-31.md",
-    "docs/articles/if-you-give-a-dev-an-enum-PUBLISH.md",
-    "docs/website/v0.2.0-announce-2026-05-05.md",
-    "docs/website/v0.3.0-announce-2026-05-14.md",
-  ].map((p) => [p, "dated piece written before the S469 rulings; bannered: older-dialect code, not checked (S469 \"Banner + exempt\")"])),
+  ...Object.fromEntries(BANNERED_DATED.map((p) => [p, "dated piece written before the S469 rulings; bannered: older-dialect code, not checked (S469 \"Banner + exempt\"; banner enforced by bannerProblems, S472)"])),
   "docs/changes": "internal change briefs and progress logs — historical records, often quoting broken code by design",
   "docs/audits": "dated audit records — historical, they quote code as it was",
   "docs/heads-up": "dated internal heads-up notices — historical",

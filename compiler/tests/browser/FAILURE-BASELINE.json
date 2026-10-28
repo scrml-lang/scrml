@@ -1,17 +1,13 @@
 {
   "_comment": "GENERATED — the browser tier's documented failure NAME SET. Regenerate with `bun scripts/browser-baseline.ts --write`; verify with `--check`. Timings and counts are deliberately excluded (non-deterministic / uninformative). A name LEAVING this list is as much a failure as one joining it: prune it in the same commit that fixes the test.",
   "tier": "compiler/tests/browser",
-  "recordedAt": "2026-10-23",
-  "count": 8,
+  "recordedAt": "2026-10-28",
+  "count": 4,
   "failures": [
     "finding #5 — a persistent SHELL cell is NOT reset by a soft-nav rehydrate > [gap g-soft-nav-rehydrate-seed-apply-unscoped] the rehydrate seed-apply keys route cells into the chunk namespace (no phantom bare cell)",
-    "g-each-peritem-markup-value-ternary — item2 (GITI-032 follow-on) > adversarial: in-place active toggle re-renders the markup-value",
-    "g-each-peritem-markup-value-ternary — item2 (GITI-032 follow-on) > adversarial: same-key array-replace updates the markup-value label",
-    "g-each-peritem-markup-value-ternary — item2 (GITI-032 follow-on) > markup renders for active items, absent for inactive, @. refs resolve",
-    "g-emit-lift-markup-text-interp §1 — emit shape (text-child `${}` lowered, not literal) > the `${@cell}` text child lowers to a reactive interpolation (split static + emitExprField)",
-    "g-emit-lift-markup-text-interp §2 — post-mount render (real module-init order) > THE bug (item 4+5): the markup text child renders the cell VALUE, not the literal `${@cell}`",
-    "g-emit-lift-markup-text-interp §2 — post-mount render (real module-init order) > item 4 reactivity: mutating the cell updates the rendered text",
-    "g-emit-lift-markup-text-interp §2 — post-mount render (real module-init order) > item 5 ternary: renders span+value when true, empty when false, re-renders on toggle"
+    "g-each-peritem-markup-value-ternary — item2 (GITI-032 follow-on) > [gap g-ast-markup-text-interp-adjacent-space-dropped] the badge keeps the space before the interpolation",
+    "g-emit-lift-markup-text-interp §1 — emit shape (text-child `${}` lowered, not literal) > [gap g-ast-markup-text-interp-adjacent-space-dropped] the static text node keeps its trailing space",
+    "g-emit-lift-markup-text-interp §2 — post-mount render (real module-init order) > [gap g-ast-markup-text-interp-adjacent-space-dropped] the rendered text keeps the space before the interpolation"
   ],
   "envExcluded": []
 }
