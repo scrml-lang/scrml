@@ -32,7 +32,7 @@
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 265 | 5 |
 | MED | 698 | 8 |
-| LOW | 550 | 0 |
+| LOW | 552 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
 
@@ -507,6 +507,18 @@ Uses resolve per file already (`declNamed`); only the output key is shared. Fix 
 ### g-boot-type-unknown-code-s472 — the bootstrap reports an unresolved type name as `E-TYPE-UNKNOWN` (no §34 row, fail-closed Error) where §14.1.2 / §34 name `E-TYPE-UNKNOWN-NAME` — now also the code for a type declared in another file but not imported — `NEW S472; LOW; open (right refusal, wrong code)`
 
 Renaming touches 17 test pins and conformance grading; left for its own lane.
+
+### g-bootstrap-css-glued-cell-ref-bridged-in-place-s472 — a `@cell` glued after an identifier character in a `#{}` value (`color: x@k`) is bridged in place to `xvar(--scrml-k)` (an unknown function, so the declaration is silently invalid), with no diagnostic — `NEW S472; LOW; open`
+<!-- @gap id=g-bootstrap-css-glued-cell-ref-bridged-in-place-s472 sev=LOW status=open locus=compiler/self-host-v2/css-syntax.scrml(value-part @name reader);compiler/self-host-v2/css.scrml(CellVar print) prov=review:S472-backfill(#1515) -->
+- **Repro:** `~/.cache/scrml/review/s472-bf2/repro/css-glued-cell-ref.scrml`, at `c8070b56a`. It compiles clean and the sheet reads `#t { color: xvar(--scrml-k); … }`.
+- **Governing text:** §65.3.2 / §25.7. A `@name` is a value reference. The reader already refuses a stray `@` and an `@` in a selector, so a glued one should be E-CSS-SYNTAX.
+- **Not a security issue.** The `cssValueOf` runtime guard still applies.
+
+### g-bootstrap-exitless-bound-loop-render-hang-s472 — an exit-less bound loop (`const xs = for { lift 1; };`) or Tier-0 `${ for { lift 1; } }` compiles clean, and calling or rendering it never returns — `NEW S472; LOW; open`
+<!-- @gap id=g-bootstrap-exitless-bound-loop-render-hang-s472 sev=LOW status=open locus=compiler/self-host-v2/analyze.scrml(resolveForStmt/resolveTier0);compiler/self-host-v2/check.scrml(loopNeverEnds — exists, not applied to a Gather as an error) prov=review:S472-backfill(#1536) -->
+- **Repro:** `~/.cache/scrml/review/s472-bf2/repro/loop-exitless-bound.scrml`, at `c8070b56a`. It compiles with 0 diagnostics.
+- **Known since #1536:** the PR body named it as a LOW follow-up but never filed it.
+- **SPEC:** §49.6 states no rule, so this needs an owner question. My recommendation is an error for a bound or Tier-0 loop with no reachable `break` / `return` and a forever head, because a bound loop exists to produce a value it can then never produce. Statement-position `for { }` stays legal.
 
 <!-- @gap id=g-impl1-bootstrap-build-no-arity-check-s472 sev=LOW status=open locus=compiler/src(impl#1 compiling compiler/self-host-v2/*.scrml into the bootstrap bundle — exhaustiveness checked, call arity not) prov=dispatch:s472-boot-payload-variant(note) -->
 ### g-impl1-bootstrap-build-no-arity-check-s472 — impl#1 builds the bootstrap bundle with exhaustiveness checking but does not check call arity, so a sibling lane's signature change slips through the build silently: in the S472 #1608 lane, `elsewhereNote` was still called with 3 arguments after #1606 changed it to 5, and only a behavioural test caught it — `NEW S472; LOW; open (tooling)`
