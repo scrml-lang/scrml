@@ -3596,7 +3596,8 @@ ${
     }
 
     // Items until the end of the token run (or `close`, when not "").
-    export fn parseLogicItems(tp: TP, close: string) -> RItems {
+    // `top`: the run stands at file top level, outside `${}` and `<program>` (s472, §21.3.1).
+    export fn parseLogicItems(tp: TP, close: string, top: boolean) -> RItems {
         let t: TP = tp
         let out: AItem[] = []
         let going = true
@@ -3609,7 +3610,7 @@ ${
                 t = adv(t)
             } else {
                 const before: int = t.i
-                const r: RItems = parseLogicItem(t)
+                const r: RItems = parseLogicItem(t, top)
                 out = out.concat(r.items)
                 t = r.tp
                 if (t.i == before) t = adv(t)
@@ -3618,7 +3619,7 @@ ${
         return { items: out, tp: t }
     }
 
-    fn parseLogicItem(tp: TP) -> RItems {
+    fn parseLogicItem(tp: TP, top: boolean) -> RItems {
         const start: int = cur(tp).start
         let exported = false
         let t: TP = tp
@@ -3626,7 +3627,7 @@ ${
             exported = true
             t = adv(t)
         }
-        if (isWord(t, "import")) return parseImport(t, start)
+        if (isWord(t, "import")) return parseImport(t, start, top)
         if (isWord(t, "type")) return parseTypeDecl(t, start, exported)
         if (isWord(t, "function")) return parseFn(t, start, exported, false, false)
         if (isWord(t, "fn")) return parseFn(t, start, exported, true, false)
@@ -3663,14 +3664,45 @@ ${
         return t
     }
 
-    fn parseImport(tp: TP, start: int) -> RItems {
+    // `import { a, b } from "…";` (§21.3) and — s472 — the host-import
+    // declaration `import:<tag> { a, b as c } from "…"` (§21.3.1:
+    // `host-import-decl ::= 'import:' host-tag import-clause 'from'
+    // string-literal`, `host-tag ::= identifier`, `named-binding ::= identifier
+    // ('as' identifier)?`). Placement, the tag and the manifest gate are
+    // analyze's (checkImports); the parser records the tag and `top`.
+    fn parseImport(tp: TP, start: int, top: boolean) -> RItems {
         const d0: int = hardErrors(tp.diags)
-        let t: TP = expectP(adv(tp), "{")
+        let t: TP = adv(tp)
+        let host: string | not = not
+        if (isP(t, ":")) {
+            t = adv(t)
+            const tag: PTok = cur(t)
+            if (tag.cls != TC.Ident && tag.cls != TC.Keyword) {
+                const dt: TP = diagAt(t, "E-PARSE-IMPORT", "expected a host-tag after `import:` (`import:host { … } from \"…\"`, §21.3.1), found `" + tag.text + "`", tag)
+                return { items: [], tp: skipToLineEnd(dt) }
+            }
+            host = tag.v
+            t = adv(t)
+        }
+        t = expectP(t, "{")
         let names: AImportName[] = []
         while (!isP(t, "}") && !atEnd(t)) {
             const n: PTok = cur(t)
             if (n.cls == TC.Ident || n.cls == TC.Keyword) {
-                names = names.concat([{ nid: t.nid, span: mkSpan(n.start, n.end), name: n.v }])
+                let bound: PTok = n
+                const ta: TP = adv(t)
+                // a host import's `name as local` binds `local` (§21.3.1); a plain
+                // import has no `as` form in the bootstrap (g-boot-import-codes-and-alias-s471)
+                if (host is given && isWord(ta, "as")) {
+                    const loc: PTok = cur(adv(ta))
+                    if (loc.cls == TC.Ident || loc.cls == TC.Keyword) {
+                        bound = loc
+                        t = adv(ta)
+                    } else {
+                        t = diagAt(adv(ta), "E-PARSE-IMPORT", "expected the local name after `as`, found `" + loc.text + "`", loc)
+                    }
+                }
+                names = names.concat([{ nid: t.nid, span: mkSpan(n.start, bound.end), name: bound.v }])
                 t = bumpId(t)
             } else if (!tk(n, ",")) {
                 t = diagAt(t, "E-PARSE-IMPORT", "expected an imported name, found `" + n.text + "`", n)
@@ -3691,7 +3723,7 @@ ${
         } else if (hardErrors(t.diags) == d0) {
             t = missingSemi(t)
         }
-        const imp: AImport = { nid: t.nid, span: spanFrom(t, start), names: names, from: src.v }
+        const imp: AImport = { nid: t.nid, span: spanFrom(t, start), names: names, from: src.v, host: host, top: top }
         return mkItem(bumpId(t), start, AItemK.ImportItem(imp))
     }
 
@@ -6425,7 +6457,7 @@ ${
                 }
             } else {
                 const before: int = m.pos
-                const r: RMItems = parseMarkupItem(m)
+                const r: RMItems = parseMarkupItem(m, tag == "")
                 out = out.concat(r.items)
                 m = r.mp
                 if (m.pos == before) m = mAdv(m, 1)
@@ -6439,7 +6471,8 @@ ${
         return { items: [it], mp: mBump(mp) }
     }
 
-    fn parseMarkupItem(mp: MP) -> RMItems {
+    // `fileTop`: this item stands at file top level (not in a `<program>` body).
+    fn parseMarkupItem(mp: MP, fileTop: boolean) -> RMItems {
         const start: int = mp.pos
         if (atCss(mp)) {
             const rc: RCss = parseCssNode(mp)
@@ -6449,7 +6482,7 @@ ${
         if (chAt(mp, 0) == "!" && chAt(mp, 1) == "{") return { items: [], mp: skipSigil(mp) }
         if (atInterp(mp)) {
             const tp: TP = regionTP(mAdv(mp, 1), LexStop.Balanced)
-            const inner: RItems = parseLogicItems(expectP(tp, "{"), "}")
+            const inner: RItems = parseLogicItems(expectP(tp, "{"), "}", false)
             const t2: TP = expectRegionEnd(expectP(inner.tp, "}"))
             return { items: inner.items, mp: backToMarkup(mp, t2) }
         }
@@ -6470,21 +6503,21 @@ ${
                 const after2: MP = skipTrivia(wl.mp)
                 if (chAt(after2, 0) == "<") return parseTagItem(after2, true, true)
             }
-            return logicRegionItem(mp, LexStop.Statement)
+            return logicRegionItem(mp, LexStop.Statement, false)
         }
-        if (w.w == "function" || w.w == "fn" || w.w == "type") return logicRegionItem(mp, LexStop.Statement)
+        if (w.w == "function" || w.w == "fn" || w.w == "type") return logicRegionItem(mp, LexStop.Statement, false)
         // s451 (U1a): `server function …` (the deprecated modifier, §52.10)
-        if (w.w == "server") return logicRegionItem(mp, LexStop.Statement)
+        if (w.w == "server") return logicRegionItem(mp, LexStop.Statement, false)
         // s449: the keyword `when … changes { … }` at the program body top (§40.8: code)
-        if (w.w == "when") return logicRegionItem(mp, LexStop.Statement)
-        if (w.w == "import") return logicRegionItem(mp, LexStop.Line)
+        if (w.w == "when") return logicRegionItem(mp, LexStop.Statement, false)
+        if (w.w == "import") return logicRegionItem(mp, LexStop.Line, fileTop)
         const d: MP = mDiag(mp, "E-PARSE-ITEM", "unexpected text at program level", start, start + 1)
         return { items: [], mp: skipLineComment(d) }
     }
 
-    fn logicRegionItem(mp: MP, stop: LexStop) -> RMItems {
+    fn logicRegionItem(mp: MP, stop: LexStop, top: boolean) -> RMItems {
         const tp: TP = regionTP(mp, stop)
-        const r: RItems = parseLogicItems(tp, "")
+        const r: RItems = parseLogicItems(tp, "", top)
         return { items: r.items, mp: backToMarkup(mp, r.tp) }
     }
 

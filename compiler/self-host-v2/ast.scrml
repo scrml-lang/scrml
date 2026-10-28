@@ -265,7 +265,15 @@ ${
         server: boolean, failable: boolean, err: AType | not,
     }
     export type AImportName:struct = { nid: int, span: ASpan, name: string }
-    export type AImport:struct = { nid: int, span: ASpan, names: AImportName[], from: string }
+    // s472 — `host`: `not` for a plain `import { … } from "…"` (§21.3); the
+    // host-tag (an identifier) of an `import:<tag> { … } from "…"` declaration
+    // (§21.3.1). `top`: the
+    // import was written at FILE TOP LEVEL — outside every `${}` logic context
+    // and every `<program>` body (§21.3.1: "`import:host` SHALL appear only at
+    // file top level, OUTSIDE any `${}` logic context"). For a host import, a
+    // name's `name` is the binding in this file's scope (the `as` name when one
+    // is written, §21.3.1 `named-binding ::= identifier ('as' identifier)?`).
+    export type AImport:struct = { nid: int, span: ASpan, names: AImportName[], from: string, host: string | not, top: boolean }
 
     // -------------------------------------------------------------------------
     // Markup: attributes, elements, text, interpolation.

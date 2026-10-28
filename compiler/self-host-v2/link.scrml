@@ -136,6 +136,13 @@ ${
         return p
     }
 
+    // Every import statement in `items` (plain and host), a `<program>`'s own included.
+    fn allImportsOfItems(items: AItem[]) -> AImport[] {
+        let out: AImport[] = []
+        for (const it of items) { out = out.concat(importOfItem(it)) }
+        return out
+    }
+
     fn importOfItem(it: AItem) -> AImport[] {
         const k: AItemK = it.k
         return match k {
@@ -144,16 +151,44 @@ ${
             .FnItem(f: f) :> []
             .DeclItem(d: d) :> []
             .MarkupItem(n: n) :> []
-            .ProgramItem(p: p) :> importsOfItems(p.items)
+            .ProgramItem(p: p) :> allImportsOfItems(p.items)
         }
     }
 
-    // Every import in `items`, a `<program>`'s own included.
+    // Every MODULE import in `items` (`import { … } from "…"`, §21.3), a
+    // `<program>`'s own included. s472: an `import:<tag>` host-import
+    // declaration (§21.3.1) is not one — it names a host-language module, never
+    // a scrml file — so it links nothing and supplies no stdlib module
+    // (`hostImportsOfItems`; analyze checkImports judges it).
     export fn importsOfItems(items: AItem[]) -> AImport[] {
         let out: AImport[] = []
-        for (const it of items) { out = out.concat(importOfItem(it)) }
+        for (const imp of allImportsOfItems(items)) {
+            if (imp.host is not) out = out.concat([imp])
+        }
         return out
     }
+
+    // s472 — every `import:<tag>` host-import declaration in `items` (§21.3.1).
+    export fn hostImportsOfItems(items: AItem[]) -> AImport[] {
+        let out: AImport[] = []
+        for (const imp of allImportsOfItems(items)) {
+            if (imp.host is given) out = out.concat([imp])
+        }
+        return out
+    }
+
+    // The host-tag of an import ("" for a plain one).
+    export fn hostTagOf(imp: AImport) -> string {
+        const h: string | not = imp.host
+        if (h is given) return h
+        return ""
+    }
+
+    // s472 — `path` is a stdlib file: the driver names stdlib files under the
+    // prefix (slice-m2/lowered.js `stdlibSources`; `importTarget` resolves
+    // `scrml:NAME` to them), and a project file can never carry it (lowered.js
+    // `frontEndStdlib` throws on one). Structural — never a scan of the source.
+    export fn isStdlibPath(path: string) -> boolean { return inStdlib(path) }
 
     // The paths (in the set `paths`) the file `f` imports.
     fn importedPaths(f: FileAst, paths: string[]) -> string[] {
