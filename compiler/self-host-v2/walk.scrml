@@ -114,6 +114,7 @@ ${
         for (const d of p.decls) { out = out.concat([Node.NDecl(d)]) }
         for (const f of p.fns) { out = out.concat([Node.NFn(f)]) }
         for (const s of p.server) { out = out.concat([Node.NServerFn(s)]) }
+        for (const k of p.consts) { out = out.concat([Node.NExpr(k.init)]) }   // s472: file-scope constants
         return out
     }
 

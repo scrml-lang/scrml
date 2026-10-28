@@ -69,10 +69,20 @@ jobs:
           PUPPETEER_SKIP_DOWNLOAD: "true"
         run: bun install --frozen-lockfile
 
-      # Exit 2 (degenerate zero measurement) / 1 (missing anchor on --write) fail the job loudly: a
-      # broken instrument must not be committed as a fact.
+      # Any non-zero fails the job loudly — 2 (degenerate zero measurement), 3 (missing anchor),
+      # 5 (dangling symlink in a measured tree), 1 (facts.ts crashed): a broken instrument must not be
+      # committed as a fact. (--write never exits 4/stale.) Since S472 the PR-side "Facts currency"
+      # step warns ONLY on exit 4, so a crash is caught on the PR instead of first failing here, on
+      # main, in a non-required workflow nobody watches.
       - name: Regenerate docs/FACTS.md from main's tip
-        run: bun scripts/facts.ts --write
+        run: |
+          set +e
+          bun scripts/facts.ts --write
+          rc=$?
+          if [ "$rc" != "0" ]; then
+            echo "::error title=facts-regen: facts.ts --write failed (rc $rc)::docs/FACTS.md is NOT being regenerated on main until this is fixed."
+          fi
+          exit $rc
 
       - name: Land the regen through the merge queue (only if drift)
         run: |

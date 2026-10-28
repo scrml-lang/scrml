@@ -33,10 +33,10 @@ ${
              GrantSet, TransitionGraph, Field, DeclKind, WiringAttr, Decl, Param, Fn, CoreProgram, Validator, SurfaceProp, ValidityOf, Persist,
              ServerFn, SqlMode, Db, SqlQuery, SqlKind, SqlTables, SqlColumns, Failable, OkArm, ErrArm, VariantDef,
              LoopHead, EachHead, RangeHead, HostCall, CssUnit, CssDecl, CoreCss, CssVar, Gather, Lifted, GatherRow, PathStep,
-             block, litStr, mkSym, typeDefSym, readField, mountedInstances } from "./core.scrml"
+             CoreConst, block, litStr, mkSym, typeDefSym, readField, mountedInstances } from "./core.scrml"
     import { partsText } from "./css.scrml"
     import { ASpan, BinOp, UnOp, AExpr, AProp, AExprK, AStmt, ABlock, AStmtK, AEffect, AType, AParam, AFn,
-             AAttrValue, AAttr, AElem, ANode, ANodeK, ADecl, AProgram, AItem, AItemK, FileAst, Diag, ASql, ASqlMode,
+             AAttrValue, AAttr, AElem, ANode, ANodeK, ADecl, AProgram, AItem, AItemK, AConst, FileAst, Diag, ASql, ASqlMode,
              AHow, AHandled, AArm, APat, ABind, AArmBody, AFail, AFor, AForHead, AIterSrc, AForBound, ALift,
              mkSpan } from "./ast.scrml"
     import { Severity } from "./severity.scrml"
@@ -415,6 +415,7 @@ ${
             .NFn(sym: s) :> not
             .NLength :> not
             .NSurface(of: x) :> not
+            .NConst(sym: s) :> not
             not :> not
         }
     }
@@ -559,8 +560,27 @@ ${
             .NFn(sym: s) :> missing()
             .NLength :> missing()
             .NSurface(of: x) :> missing()
+            .NConst(sym: s) :> Expr.Local(s)
             not :> missing()
         }
+    }
+
+    // s472 — the file-scope constants (§7.6), in analyze's order (link order,
+    // then source order — an initializer reads only constants before it, so
+    // this is dependency order). Each initializer is lowered ONCE, in its own
+    // file's context (it reads no cell, instance or row, so no substitution of
+    // a reading site applies); a read of a constant — in an initializer or
+    // anywhere else — is `Local(sym)` (readName), never a copy of its value.
+    // Which artifact carries which constant is the printers' (constsReadIn): a
+    // constant read only by server code reaches only the server artifact.
+    // (Review #1617 MED-1: inlining each read re-lowered the initializer
+    // recursively — output and compile time exponential in constant depth.)
+    fn coreConsts(t: Tables) -> CoreConst[] {
+        let out: CoreConst[] = []
+        for (const k of t.consts) {
+            if (k.ok) out = out.concat([{ sym: k.sym, init: lowerExpr({ t: t, file: k.file, subst: not, snap: not, rows: [] }, k.init) }])
+        }
+        return out
     }
 
     // A constant the binder resolved: a literal, a variant, or a struct value
@@ -631,6 +651,7 @@ ${
         return match f {
             .NLength :> Expr.Prim(PrimOp.Length, [lowerExpr(c, obj)])
             .NSurface(of: v, prop: pr) :> Expr.Validity(validityOf(c, v), pr)
+            .NConst(sym: s) :> missing()
             .NField(decl: d, inst: i, idx: x) :> cellRead(c, d, instOf(c, i), [{ owner: d, idx: x }])
             .NStruct(owner: o, idx: x) :> stepInto(lowerExpr(c, obj), { owner: o, idx: x })
             .NLocal(sym: s) :> missing()
@@ -681,6 +702,7 @@ ${
             .NStruct(owner: o) :> missing()
             .NLength :> missing()
             .NSurface(of: x) :> missing()
+            .NConst(sym: s) :> missing()
             not :> missing()
         }
     }
@@ -1540,6 +1562,7 @@ ${
             .NFn(sym: s) :> []
             .NLength :> []
             .NSurface(of: x) :> []
+            .NConst(sym: s) :> []
             not :> []
         }
     }
@@ -1788,6 +1811,7 @@ ${
             .NStruct(owner: o) :> not
             .NLength :> not
             .NSurface(of: x) :> not
+            .NConst(sym: s) :> not
             not :> not
         }
         if (s is given) return [Stmt.Eval(Expr.Call(s, []))]
@@ -1939,6 +1963,7 @@ ${
         return match k {
             .DeclItem(d: d) :> [userSyntax(file, d)]
             .ProgramItem(p: p) :> [{ nid: p.nid, file: file, renders: programMarkup(p.items), hasRenders: true }].concat(nestedSyntaxes(file, p.items))
+            .ConstItem(c: c) :> []
             .ImportItem(i: i) :> []
             .TypeItem(t: t) :> []
             .FnItem(f: f) :> []
@@ -1973,6 +1998,7 @@ ${
             .TypeItem(t: t) :> []
             .FnItem(f: f) :> []
             .ProgramItem(p: p) :> []
+            .ConstItem(c: c) :> []
         }
     }
 
@@ -1993,6 +2019,7 @@ ${
             .FnItem(f: f) :> []
             .DeclItem(d: d) :> []
             .ProgramItem(p: p) :> []
+            .ConstItem(c: c) :> []
         }
     }
 
@@ -2157,6 +2184,7 @@ ${
         return match k {
             .FnItem(f: f) :> [f]
             .ProgramItem(p: p) :> fnsIn(p.items)
+            .ConstItem(c: c) :> []
             .ImportItem(i: i) :> []
             .TypeItem(t: t) :> []
             .DeclItem(d: d) :> []
@@ -2584,6 +2612,7 @@ ${
             .NStruct(owner: o) :> noCall()
             .NLength :> noCall()
             .NSurface(of: x) :> noCall()
+            .NConst(sym: s) :> noCall()
             not :> noCall()
         }
     }
@@ -3367,6 +3396,7 @@ ${
                 const k: AItemK = it.k
                 const p: AProgram | not = match k {
                     .ProgramItem(p: p) :> p
+                    .ConstItem(c: c) :> not
                     .DeclItem(d: d) :> not
                     .ImportItem(i: i) :> not
                     .TypeItem(t: tx) :> not
@@ -3414,8 +3444,9 @@ ${
         const dbs: Db[] = t.server.dbs
         const reset: boolean = resetShips(tp.files, t)
         const css: CoreCss | not = coreCss(t, reset)
-        const pre: CoreProgram = { program: t.program, decls: decls, types: types, fns: fns, server: server, dbs: dbs, reset: reset, sqlError: sqlError, serverCallError: serverCallError, css: css }
-        const core: CoreProgram = { program: t.program, decls: gateDecls(pre), types: types, fns: fns, server: server, dbs: dbs, reset: reset, sqlError: sqlError, serverCallError: serverCallError, css: css }
+        const consts: CoreConst[] = coreConsts(t)
+        const pre: CoreProgram = { program: t.program, decls: decls, types: types, fns: fns, server: server, dbs: dbs, reset: reset, sqlError: sqlError, serverCallError: serverCallError, css: css, consts: consts }
+        const core: CoreProgram = { program: t.program, decls: gateDecls(pre), types: types, fns: fns, server: server, dbs: dbs, reset: reset, sqlError: sqlError, serverCallError: serverCallError, css: css, consts: consts }
         return { core: core, diags: tp.diags }
     }
 

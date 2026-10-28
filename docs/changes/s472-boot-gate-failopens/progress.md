@@ -66,3 +66,8 @@ Branch `s472-boot-gate-failopens` (from origin/main `c8070b56a`). Bootstrap secu
   Residual (fail closed): `g-bootstrap-form-owner-outside-program-markup-s472` (new, LOW).
 - Red-proof: gate-reach.test.js against `4785855bc` → 13 fail / 19 pass (all 13 new F1/F2/F3/ruling tests red).
 - Found while fixing: a second `fn literalOf` in analyze.scrml silently SHADOWED the existing one (no diagnostic) and broke two slice-m2 typer tests; renamed mine `htmlLiteral`. The bootstrap accepts duplicate top-level fn names — surfaced to PA as a hazard (not fixed here).
+
+## S473 landing-front — 2026-10-28
+- Merged origin/main (3a7d1d223) into origin/s472-boot-gate-failopens (b3e548ed8) on land-s472-boot-gate-failopens.
+- Conflicts: compiler/self-host-v2/{lower,print}.scrml — import lists only; kept both (`CoreConst` from main + `mountedInstances` from branch).
+- docs/known-gaps.md auto-merged; @gap id union of main+branch fully present (2445 ids, none lost); state.ts --write no-op.
