@@ -4,7 +4,7 @@
   "language-version": "1.0",
   "spec": "§19.16.6",
   "provenance": "ruling:user-voice-S430-P3",
-  "rationale": "§19.16.6: when the host body is async the deferred closures are async and the runner awaits each one, so a deferred call to a server function completes before the function returns; §19.16.2: the deferred body runs at the block's exit, i.e. before control returns to the caller.",
+  "rationale": "§19.16.6: when the host body is async the deferred closures are async and the runner awaits each one, so a deferred call to a server function completes before the function returns; §19.16.2: the deferred body runs at the block's exit, i.e. before control returns to the caller. S472 RESTALE FIX: the deferred call was written bare (`let r = ping(1);`). Since S451/S454 a client call to a server function is a failable call (§19.4.3: 'A call evaluated on the client whose callee is server-placed (§12.2) can fail on the wire, so it is a failable call whether or not the callee is declared `!`'; failure set per §19.9.10 includes `Transport(t: ServerCallError)`), and §19.16.3 rule 3 requires a failable call inside a deferred body to be 'handled in place, with an inline `!{}` handler … or an exhaustive `match`', the handler being total ('A deferred `!{}` handler SHALL be total — it SHALL carry a catch-all `_ :> …` arm'); otherwise E-DEFER-UNHANDLED-FAILABLE. The call is now `let r = ping(1) !{ _ :> 0 };` — the success path (stub 2) is unchanged, so the observed trace is unchanged.",
   "expect": {
     "codes": [],
     "notCodePrefixes": ["E-DEFER-"],

@@ -32,7 +32,7 @@
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 262 | 5 |
 | MED | 698 | 8 |
-| LOW | 538 | 0 |
+| LOW | 542 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
 
@@ -468,6 +468,30 @@ Renaming touches 17 test pins and conformance grading; left for its own lane.
 
 <!-- @gap id=g-boot-import-codes-and-alias-s471 sev=LOW status=open locus=compiler/self-host-v2/analyze.scrml(importRefusal)+parse.scrml(parseImport) prov=dispatch:s471-bootstrap-stdlib-import;review:S471-stdlib(F3) -->
 ### g-boot-import-codes-and-alias-s471 — `scrml:nope` (no such module) is E-BOOTSTRAP-UNSUPPORTED where §41.5 / §41.11 name E-IMPORT-006; `import { a as b }` reads `as` and `b` as imported names (E-IMPORT-004, wrong code); a printer refusal caused by stdlib code carries no file — `NEW S471; LOW; open (fails closed)`
+
+### g-merge-driver-regen-banner-survives-producer-s472 — the merge driver's `REGENERATION REQUIRED` block survives a direct producer run (`regen-spec-index.ts`, `facts.ts --write`), whose own `--check` then exits 0, and pre-commit has no marker check — only CI's conflict-marker-gate catches it (the S471 #1596 incident) — `NEW S472; LOW; open`
+
+<!-- @gap id=g-merge-driver-regen-banner-survives-producer-s472 sev=LOW status=open locus=scripts/regen-spec-index.ts+scripts/facts.ts(producers keep a leading regen block; --check passes it)+scripts/git-hooks/pre-commit(no conflict-marker check) prov=review:S472-backfill(#1454) -->
+
+Repro: `~/.cache/scrml/review/s472-backfill/repros/banner-survives-producer.sh`. Steps: two-sided SPEC-INDEX merge (stop + banner), then `bun run scripts/regen-spec-index.ts`; line 1 still holds the banner, `--check` exits 0, `git add` + commit succeed, and `conflict-marker-gate.ts` exits 1, but only in CI. Main is protected because the gate is required. The cost is a red CI round trip per occurrence. Fix: the producers strip or refuse a leading regen block, or pre-commit runs `conflict-marker-gate.ts` when a generated file is staged.
+
+### g-merge-driver-union-rehomes-entry-under-new-section-s472 — the union rule appends theirs' entry (filed under the existing last section) below ours' brand-new `## §…` heading with 0 markers, silently attaching the other section's provenance to it — `NEW S472; LOW; open`
+
+<!-- @gap id=g-merge-driver-union-rehomes-entry-under-new-section-s472 sev=LOW status=open locus=scripts/git-merge-generated.ts(unionEntryAdditions — no section-heading check) prov=review:S472-backfill(#1454) -->
+
+Repro: `~/.cache/scrml/review/s472-backfill/repros/union-misfiles-entry.sh`. No entry is lost and the gap-counts are correct, but the entry's section-level provenance (date, change dir, probe claims) is wrong. Fix: refuse the union when either insertion contains a `## ` heading, which falls back to a plain conflict.
+
+### g-ci-test-dir-ownership-unchecked-s472 — CI runs hand-listed test dirs; a test file in a NEW `compiler/tests/<dir>/` or `compiler/self-host-v2/slice-<new>/` runs in no blocking job and no hook, and `ci-shards.ts reconcile` cannot see it (it enumerates only the dirs it is passed) — the class of g-e2e-render-map-tier-runs-in-no-ci-job-at-all — `NEW S472; LOW; open`
+
+<!-- @gap id=g-ci-test-dir-ownership-unchecked-s472 sev=LOW status=open locus=.github/workflows/ci.yml(checks root glob; unit/integration dir lists; slices hand list)+scripts/ci-shards.ts(reconcile/needs)+scripts/git-hooks/pre-commit(SLICE_DIRS) prov=review:S472-backfill(#1459) -->
+
+Repro: `~/.cache/scrml/review/s472-backfill/repros/test-dir-in-no-job.sh`. It maps every tracked test file to its owning blocking job. Today the only orphans are deliberate: `conformance/conformance-corpus.test.js`, which is bridged, and the playwright `e2e/`. A hypothetical new dir is orphaned. Latent. Fix: an "every tracked test file is owned" check in `ci-shards.ts needs`, with an explicit exemption list.
+
+### g-bootstrap-uppercase-pre-code-not-raw-content-s472 — the bootstrap compiles `<PRE>` / `<Code>` clean as ordinary elements (live `${}` holes, real child tags, double-encoded `&lt;`); SPEC §4.17 says pre/code match case-insensitively as raw content, impl#1 refuses the tag (E-COMPONENT-035) — `NEW S472; LOW; open`
+
+<!-- @gap id=g-bootstrap-uppercase-pre-code-not-raw-content-s472 sev=LOW status=open locus=compiler/self-host-v2/parse.scrml(isRawContentOpener skips A-Z first letter)+compiler/self-host-v2/lower.scrml(isRawContentElem) prov=review:S472-backfill(#1456) -->
+
+Repro: `~/.cache/scrml/review/s472-backfill/pr1456/repros/w05.scrml`, plus `w06.scrml` for `<Code>`, driven by `probe.js <tree> <file>`. On main the output is `<PRE>a <!----> <b>bold</b> a &amp;lt; b</PRE>` with no diagnostics. Nothing unchecked executes: `<SCRIPT>` and `<Iframe SrcDoc>` are still refused. This predates #1456 but sits next to its raw-content fix. Recommendation: refuse the tag as impl#1 does (fail closed). The SPEC-vs-impl#1 split (raw content vs PascalCase component) needs a ruling.
 
 <!-- @gap id=g-impl1-strict-eq-null-in-arm-logs-in-s471 sev=HIGH status=open defer=impl1-s471-policy locus=compiler/src/gauntlet-phase3-eq-checks.js(checkEqNode returns E-EQ-004 for ===/!== before the null/not operand test; sweepAbsenceTokens keeps only E-SYNTAX-042/E-EQ-002) prov=review:S471-s471-null-in-arm-refused(F1; ~/.cache/scrml/review/s471-null/repro/y01-tool.scrml,y03,x07) -->
 ### g-impl1-strict-eq-null-in-arm-logs-in-s471 — (security) `!== null` / `!== not` (and `===`) inside a `!{}` arm or a template interpolation still compiles and logs in with the wrong password (library / tool / fullstack); outside an arm the same shape is refused — `NEW S471 (review); HIGH; open — DEFERRED (S471 impl#1 policy)`
