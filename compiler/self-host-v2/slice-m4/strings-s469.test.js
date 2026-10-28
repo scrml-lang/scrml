@@ -297,10 +297,12 @@ describe("C — tape functions return a NEW tape; JavaScript's names are refused
   test("F/U-8: the arity message of `sort` names its two forms", () => {
     expect(diag(prog(T, `        <p>\${@xs.sort((a, b) => a - b, 1).length}</p>`), "E-CALL-ARITY")?.message).toContain("no argument (the natural order) or one comparator");
   });
-  test("F/U-8: a payload-variant construction is refused AS a construction", () => {
+  // s472-boot-payload-variant: a construction is no longer refused — it is a value (§14.4;
+  // slice-m4/variants-s472.test.js). What F/U-8 guarded stays true: it is never read as a METHOD.
+  test("F/U-8: a payload-variant construction is a construction, never a method call", () => {
     const src = `<program>\n    type E:enum = { Missing(id: string), Ok }\n    let <s:string=""/>\n    <main><p>\${match E.Missing("x") { .Missing(id) :> id, .Ok :> "ok", }}</p></main>\n</program>\n`;
-    const d = diag(src, "E-BOOTSTRAP-UNSUPPORTED");
-    expect(d?.message).toContain("constructing the payload variant `E.Missing(…)`");
+    expect(run(src).diags.filter((d) => d.severity !== "Warning" && d.severity !== "Info").map((d) => d.code)).toEqual([]);
+    expect(diag(src.replace(`E.Missing("x")`, `E.Missing()`), "E-TYPE-082")?.message).toContain("`E.Missing` carries 1 payload value(s) but this construction supplies 0");
   });
   test("a JavaScript name on a value that is not a tape is not E-TAPE-JS-METHOD (it is simply not in the bootstrap)", () => {
     // (a `push` on a reactive place is still read as a write by the value-position rule — pre-existing, by name)

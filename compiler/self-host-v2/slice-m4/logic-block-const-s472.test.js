@@ -243,6 +243,10 @@ describe("initializers: the compile-time-constant class only — everything else
     "a function value": P("    const A = f;", "    fn f() -> int { return 1; }"),
     "a value loop": P("    const xs = for (const i of 0..3) { lift i; };"),
     "an untyped `not`": P("    const A = not;"),
+    "a payload-variant value": P("    const S: Shape = Shape.Circle(1);", "    type Shape:enum = { Circle(r: int), Dot }"),
+    // not file-scope constants at all — named, not read as a malformed `const`
+    "a derived cell `const <d> = …` (§6.6)": P("    const <d> = @n * 2;"),
+    "a component `const Card = <…>` (§21.2 Form 2)": P("    export const Card = <div>hi</div>;"),
   };
   for (const [what, src] of Object.entries(refused)) {
     test(`${what}: E-BOOTSTRAP-UNSUPPORTED, and nothing else`, () => {
@@ -251,6 +255,13 @@ describe("initializers: the compile-time-constant class only — everything else
       expect(r.core).toBeFalsy();
     });
   }
+
+  test("a cell read is refused citing §6.6.2's snapshot meaning (and the derived-cell spelling), not the placement silence", () => {
+    const r = one(P("    const A = @n;", "", "<p>${A}</p>"));
+    expect(r.diags[0].message).toContain("§6.6.2");
+    const q = one(P("    const A = f();", "    fn f() -> int { return 1; }", "<p>${A}</p>"));
+    expect(q.diags[0].message).toContain("the SPEC does not say where such an initializer runs");
+  });
 
   test("a read of a constant initialized LATER (or of itself) is E-SCOPE-001 — no cycle, no uninitialized read", () => {
     expect(codes(one(P("    const A = B + 1;\n    const B = 1;", "", "<p>${A}</p>")))).toEqual(["E-SCOPE-001"]);

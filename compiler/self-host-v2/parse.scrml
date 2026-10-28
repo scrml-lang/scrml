@@ -3724,6 +3724,18 @@ ${
     // at module initialization and is refused by name here.
     fn parseConstItem(tp: TP, start: int, exported: boolean) -> RItems {
         const kw: PTok = cur(tp)
+        // `const <name> = …` — a derived cell (§6.6), and `const Name = <markup…>`
+        // — a component (§21.2 Form 2): neither is a file-scope constant, and
+        // neither is in the bootstrap (§66 spells them `<name:T = expr/>` and a
+        // declaration, §66.15). Refused by name, as E-PARSE-ITEM refused them
+        // before (and recovered the same way), not read as a malformed `const`.
+        const derived: boolean = tk(peekAt(tp, 1), "<")
+        if (derived || (tk(peekAt(tp, 2), "=") && tk(peekAt(tp, 3), "<"))) {
+            let what: string = "a component written as a constant (`const Name = <…>`, §21.2 Form 2) — §66.15 writes a component as a declaration"
+            if (derived) what = "a derived cell written `const <name> = …` (§6.6) — §66 writes it `<name:T = expr/>` in the `<program>`"
+            const dc: TP = diagAt(tp, "E-BOOTSTRAP-UNSUPPORTED", what + "; neither form is in the bootstrap at logic-block level", kw)
+            return { items: [], tp: skipToLineEnd(dc) }
+        }
         const d0: int = hardErrors(tp.diags)
         const r: RStmt = parseLocal(tp)
         const t: TP = termAfter(r.tp, r.s, d0)
