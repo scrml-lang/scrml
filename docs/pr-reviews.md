@@ -15,6 +15,20 @@ was invisible to the session that incurred it and to every session after. Same s
 **Marker form** — append one line per PR, newest at the top of the log section:
 
 ```
+<!-- @review pr=1480 verdict=clean by=S472-bryan date=2026-10-28 probe=git-only-PATH-merge-cp-fallback-plus-crlf-marker-regex-read note=cp-failure-branch-fails-closed-with-real-markers -->
+<!-- @review pr=1484 verdict=clean by=S472-bryan date=2026-10-28 probe=admission-counter-balance-and-noslot-memwait-exit-paths note=sizing-only-never-the-pass-predicate -->
+<!-- @review pr=1488 verdict=finding by=S472-bryan date=2026-10-28 probe=facts-check-uncaught-throw-exit-code-vs-warn-mapping note=crash-exits-1-and-is-warned-through-as-stale-fixed-s472-tooling-gate-fixes -->
+<!-- @review pr=1498 verdict=finding by=S472-bryan date=2026-10-28 probe=stdlib-only-staged-change-vs-slice-trigger-list-plus-acceptance-red note=stdlib-is-a-slice-input-missing-from-the-trigger-list-fixed-s472-tooling-gate-fixes -->
+<!-- @review pr=1523 verdict=clean by=S472-bryan date=2026-10-28 probe=docs-arg-sep-normalisation-vs-dialectByAbs-resolve-lookup note=both-sides-resolve-no-lookup-miss -->
+<!-- @review pr=1544 verdict=finding by=S472-bryan date=2026-10-28 probe=classify-harness-needs-vocabulary-corpus-survey-basename-reuse note=freeform-needs-not-owed-and-basename-reuse-silently-handled-fixed-s472-tooling-gate-fixes -->
+<!-- @review pr=1557 verdict=clean by=S472-bryan date=2026-10-28 probe=misdelivered-label-vs-unhandled-count-and-malformed-to note=label-never-an-exemption -->
+<!-- @review pr=1428 verdict=finding by=S472-bryan date=2026-10-28 probe=compiler-mutation-imported-async-seed-red+csrf-403-and-happydom-leak-blinds-pack note=g-await-pack-no-positive-control-s472-fixed-s472-tooling-gate-fixes -->
+<!-- @review pr=1429 verdict=clean by=S472-bryan date=2026-10-28 probe=happydom-register-without-unregister-scan-unit-integration note=balanced-registration-browser-only-leakers-isolated -->
+<!-- @review pr=1507 verdict=clean by=S472-bryan date=2026-10-28 probe=bun-beforeAll-timeout-fails-not-skips-option-honored note=hang-past-60s-still-red -->
+<!-- @review pr=1532 verdict=clean by=S472-bryan date=2026-10-28 probe=poison-first-sql-fallback-on-unprotected-files+fixed-tmp-dir-scan note=sql-root-cause-filed-open-g-sql-fallback-handle-not-reset -->
+<!-- @review pr=1511 verdict=finding by=S472-bryan date=2026-10-28 probe=synthetic-baseline-new-stale-crash-dup-plus-first-assert-abort-trace note=whitespace-red-baseline-masks-two-resolved-gaps-fixed-s472-tooling-gate-fixes -->
+<!-- @review pr=1505 verdict=finding by=S472-bryan date=2026-10-28 probe=dated-new-article-gated-banner-strip-website-scrml-twin note=exemption-banner-unenforced-site-twins-unbannered-fixed-s472-tooling-gate-fixes -->
+<!-- @review pr=1485 verdict=clean by=S472-bryan date=2026-10-28 probe=claim-gate-runs-liveness-and-added-skip-reasons note=skips-all-reasoned-no-count-ratchet -->
 <!-- @review pr=1449 verdict=carve-out by=S472-bryan date=2026-10-28 probe=landed-via-batch-#1458-reviewed-there-batch-marker-probe-bootstrap-server-client-boundary-sql-csrf-await-cps-covers-this-bootstrap-U1c-server-half note=batch-landed -->
 <!-- @review pr=1447 verdict=carve-out by=S472-bryan date=2026-10-28 probe=landed-via-batch-#1456-reviewed-there-batch-marker-probe-bootstrap-static-executable-url-schemes-raw-content-covers-this-bootstrap-fail-open-PR note=batch-landed -->
 <!-- @review pr=1612 verdict=carve-out by=S472-bryan date=2026-10-28 probe=file-set-verified-docs-FACTS-md-bot-regen-chore-facts-zero-code-paths note=facts-regen-bot -->
