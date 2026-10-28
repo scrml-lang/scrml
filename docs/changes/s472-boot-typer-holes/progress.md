@@ -6,7 +6,7 @@ Branch `s472-boot-typer-holes`, base origin/main `e8d2e38cd`. Input: the S472 ba
 ## What changed (compiler/self-host-v2/analyze.scrml, THE TYPER only)
 
 - **F1 — one initializer rule.** `checkAnnotInit` replaces the `checkInit` + `checkIntInit` pair at
-  the three initializer sites (`typeLocal`, `typeFieldInits`, `typeUse`). `not` → E-TYPE-041; a literal
+  the initializer sites (`typeLocal`, `typeFieldInits`, `typeUse`; and `typeConst` — #1617's file-scope constant, given the same call at the S473 merge: FOUR sites). `not` → E-TYPE-041; a literal
   into a primitive annotation keeps checkInit's §7.5.1 table; everything else (a literal into
   `T | not` / enum / struct / tape, every non-literal) is `checkValue` (E-TYPE-031, §66.1 rule 5).
 - **F2 — `VType.OneOf(ts)`.** `joinTypes` of two known types with no common type yields a CHOICE,
@@ -80,3 +80,18 @@ Branch `s472-boot-typer-holes`, base origin/main `e8d2e38cd`. Input: the S472 ba
 - SEMANTIC merge fix: main's #1617 `typeConst` called the retired `checkInit`+`checkIntInit` pair →
   rewritten to the branch's single `checkAnnotInit` (as typeLocal). Bootstrap bundle failed to build without it.
 - bootstrap-conformance.md regenerated (result identical to main's). Merge commit f2b1de741 (hook green: 50644 pass, 0 fail).
+
+## 2026-10-28 — S473 fix round r1 (S239 review of a14fff972: DO-NOT-LAND)
+
+- HIGH-1 fixed (f6c451c1b): `typeLift` types a lifted value only; the markup text-sink check runs once,
+  at the markup gather (`typeGather`, every `liftOperands` value). Value-loop lifts (struct, tape, choice
+  with a struct member) and `{ lift … }` match arms compile again; markup `${ for … { lift @p; } }` stays refused.
+- LOW-1 fixed (a2b1f9fdc): §18.4 rule 3 judges a choice arm (join wider than either side = no subtype
+  relationship); E-TYPE-001 message names both arms by pattern and both types.
+- LOW-4 docs: four `checkAnnotInit` sites (typeConst included); §34 E-TEXT-NON-PRIMITIVE row cites symbols,
+  not lines, and says it does not fire on value-loop lifts.
+- Filed open: g-boot-markup-text-decl-instance-unjudged-s473 (MED-1), g-boot-choice-member-read-unknown-s473
+  (LOW-2), g-boot-single-lift-loop-choice-elem-unknown-s473 (LOW-3).
+- MED-2 unchanged (quoted value into an enum field stays E-TYPE-031). prov=pa-derivation: §21.3.2 (a quoted
+  attribute value is a string literal) → §66.9 rule 8 (a use-site attribute is that field's initializer for
+  that instance) → §7.5.1 position 3 (a primitive against an enum is a kind mismatch). Owner ruling owed.
