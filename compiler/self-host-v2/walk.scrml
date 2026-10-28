@@ -225,6 +225,7 @@ ${
             .Match(scrut: scrut, arms: arms) :> [Node.NExpr(scrut)].concat(armNodes(arms))
             .ArrayOf(elems: elems) :> exprNodes(elems)
             .StructOf(ty: ty, fields: fields) :> exprNodes(fields)
+            .VariantOf(enumSym: es, args: args) :> exprNodes(args)
             .Handle(inst: inst) :> [Node.NInst(inst)]
             .InitOf(decl: d, inst: inst) :> [Node.NInst(inst)]
             .Host(call: c) :> []
@@ -425,6 +426,7 @@ ${
             .Match(scrut: x) :> []
             .ArrayOf(elems: x) :> []
             .StructOf(ty: x) :> []
+            .VariantOf(enumSym: x) :> []
             .Handle(inst: x) :> []
             .InitOf(decl: x) :> []
             .Host(call: x) :> []

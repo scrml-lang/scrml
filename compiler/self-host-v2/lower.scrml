@@ -194,6 +194,7 @@ ${
             .Match(scrut: x) :> not
             .ArrayOf(elems: x) :> not
             .StructOf(ty: x) :> not
+            .VariantOf(enumSym: x) :> not
             .Handle(inst: x) :> not
             .InitOf(decl: x) :> not
             .Host(call: x) :> not
@@ -223,6 +224,7 @@ ${
             .Match(scrut: x) :> op
             .ArrayOf(elems: x) :> op
             .StructOf(ty: x) :> op
+            .VariantOf(enumSym: x) :> op
             .Handle(inst: x) :> op
             .InitOf(decl: x) :> op
             .Host(call: x) :> op
@@ -282,6 +284,7 @@ ${
             .Match(scrut: x) :> false
             .ArrayOf(elems: x) :> false
             .StructOf(ty: x) :> false
+            .VariantOf(enumSym: x) :> false
             .Handle(inst: x) :> false
             .InitOf(decl: x) :> false
             .Host(call: x) :> false
@@ -339,6 +342,7 @@ ${
             .VVariant(enumSym: x) :> allText(n)
             .VOp(op: x) :> allText(n)
             .VStructOf(ty: x) :> allText(n)
+            .VConstruct(enumSym: x) :> allText(n)
             .VHost(call: x) :> allText(n)
             .VSeqCall(op: x) :> allText(n)
             .VLambda(params: x) :> allText(n)
@@ -466,6 +470,7 @@ ${
             .VLit(lit: l) :> callExpr(c, nameFact(c.t.names, cal.nid), args)
             .VVariant(enumSym: x) :> callExpr(c, nameFact(c.t.names, cal.nid), args)
             .VStructOf(ty: x) :> callExpr(c, nameFact(c.t.names, cal.nid), args)
+            .VConstruct(enumSym: es, idx: i) :> Expr.VariantOf(es, i, lowerExprs(c, args))   // s472 (§14.4)
             .VOp(op: x) :> callExpr(c, nameFact(c.t.names, cal.nid), args)
             .VLambda(params: x) :> callExpr(c, nameFact(c.t.names, cal.nid), args)
             .VIndex(loc: x) :> callExpr(c, nameFact(c.t.names, cal.nid), args)
@@ -536,6 +541,7 @@ ${
             .VLit(lit: l) :> missing()
             .VVariant(enumSym: x) :> missing()
             .VStructOf(ty: x) :> missing()
+            .VConstruct(enumSym: x) :> missing()
             .VOp(op: x) :> missing()
             .VHost(call: x) :> missing()
             .VSeqCall(op: x) :> missing()
@@ -565,6 +571,7 @@ ${
             .VLit(lit: l) :> Expr.Lit(l)
             .VVariant(enumSym: s, idx: i) :> Expr.Lit(Literal.Variant(s, i))
             .VStructOf(ty: t, order: order) :> Expr.StructOf(t, orderedProps(c, ps, order))
+            .VConstruct(enumSym: x) :> missing()           // s472: a construction is a CALL node (callOrBuiltin)
             .VOp(op: o) :> missing()
             .VHost(call: h) :> missing()
             .VSeqCall(op: x) :> missing()
@@ -584,6 +591,7 @@ ${
             .VLit(lit: l) :> PrimOp.Not
             .VVariant(enumSym: s) :> PrimOp.Not
             .VStructOf(ty: t) :> PrimOp.Not
+            .VConstruct(enumSym: t) :> PrimOp.Not
             .VHost(call: h) :> PrimOp.Not
             .VSeqCall(op: x) :> PrimOp.Not
             .VLambda(params: x) :> PrimOp.Not
@@ -603,6 +611,7 @@ ${
             .VVariant(enumSym: s, idx: i) :> Expr.Lit(Literal.Variant(s, i))
             .VLit(lit: l) :> memberExpr(c, nameFact(c.t.names, e.nid), o)
             .VStructOf(ty: x) :> memberExpr(c, nameFact(c.t.names, e.nid), o)
+            .VConstruct(enumSym: x) :> memberExpr(c, nameFact(c.t.names, e.nid), o)
             .VOp(op: x) :> memberExpr(c, nameFact(c.t.names, e.nid), o)
             .VHost(call: x) :> memberExpr(c, nameFact(c.t.names, e.nid), o)
             .VSeqCall(op: x) :> memberExpr(c, nameFact(c.t.names, e.nid), o)
@@ -643,6 +652,7 @@ ${
             .Match(scrut: s) :> missing()
             .ArrayOf(elems: es) :> missing()
             .StructOf(ty: t) :> missing()
+            .VariantOf(enumSym: t) :> missing()
             .Handle(inst: i) :> missing()
             .InitOf(decl: d) :> missing()
             .Host(call: x) :> missing()
@@ -926,6 +936,7 @@ ${
             .VLit(lit: x) :> ""
             .VVariant(enumSym: x) :> ""
             .VStructOf(ty: x) :> ""
+            .VConstruct(enumSym: x) :> ""
             .VOp(op: x) :> ""
             .VHost(call: x) :> ""
             .VSeqCall(op: x) :> ""
@@ -1211,6 +1222,7 @@ ${
             .Match(scrut: x) :> missing()
             .ArrayOf(elems: x) :> missing()
             .StructOf(ty: x) :> missing()
+            .VariantOf(enumSym: x) :> missing()
             .Handle(inst: x) :> missing()
             .InitOf(decl: x) :> missing()
             .Host(call: x) :> missing()
@@ -2295,6 +2307,7 @@ ${
             .VLit(lit: l) :> l
             .VVariant(enumSym: s) :> not
             .VStructOf(ty: s) :> not
+            .VConstruct(enumSym: s) :> not
             .VOp(op: o) :> not
             .VHost(call: h) :> not
             .VSeqCall(op: o) :> not
@@ -3651,6 +3664,7 @@ ${
             .Match(scrut: x) :> []
             .ArrayOf(elems: x) :> []
             .StructOf(ty: x) :> []
+            .VariantOf(enumSym: x) :> []
             .Handle(inst: x) :> []
             .InitOf(decl: x) :> []
             .Host(call: x) :> []

@@ -1,0 +1,10 @@
+// §14.4 construction arity: one positional argument per declared field — too few is E-TYPE-082.
+<program>
+    type Shape:enum = { Circle(r: int), Rect(w: int, h: int), Dot }
+    function wide(n: int) -> Shape {
+        return Shape.Rect(n);
+    }
+    <main>
+        <p>${match wide(2) { .Circle(r) :> "c", .Rect(w, h) :> "r", .Dot :> "d" }}</p>
+    </main>
+</program>

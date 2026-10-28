@@ -103,8 +103,11 @@ describe("initializers — §7.5.1 position 2, exactly", () => {
     expect(inApp("    let <n:int=\"s\"/>")).toEqual(["E-TYPE-031"]);
     expect(codes([boxLib("export <box n:int=0/>\nrenders <p>${n}</p>\n"), boxApp("<box n=(\"s\")/>")])).toEqual(["E-TYPE-031"]);
   });
-  test("stays silent (SPEC-exact) — a NON-literal use-site value is outside position 2's literal rule", () => {
-    expect(inApp("    <n:int=3/>", "<dropdown label=(@n) options=([\"a\"])/>")).toEqual([]);
+  // s472 r1 F2 (PA-directed widening, review of #1608 — as r7 A widened arguments and returns):
+  // a NON-literal initializer is checked against the annotation too; SPEC §7.5.1 text owes the widening.
+  test("a NON-literal use-site value of the wrong type is E-TYPE-031 (s472 widening; was silent, SPEC position 2 is literal-only)", () => {
+    expect(inApp("    <n:int=3/>", "<dropdown label=(@n) options=([\"a\"])/>")).toEqual(["E-TYPE-031"]);
+    expect(inApp("    <n:string=\"3\"/>", "<dropdown label=(@n) options=([\"a\"])/>")).toEqual([]);
   });
 });
 

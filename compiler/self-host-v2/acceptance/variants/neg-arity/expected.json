@@ -1,0 +1,10 @@
+{
+  "id": "acceptance-variants-neg-arity",
+  "description": "a payload-variant construction with fewer arguments than declared fields, in a `return`.",
+  "language-version": "1.0",
+  "spec": "§14.4",
+  "rationale": "§14.4: \"A construction whose argument count does not match the variant's declared payload field count — too few, too many, or any payload on a unit variant (`Shape.Point(x)`) — is a hard error (E-TYPE-082)\" — \"across every construction locus — `let` / `const` / state-cell initializers, `return`, and `fail`\".",
+  "expect": {
+    "codes": ["E-TYPE-082"]
+  }
+}
