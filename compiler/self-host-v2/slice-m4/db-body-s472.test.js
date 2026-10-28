@@ -204,6 +204,85 @@ describe("a declaration in a `<db>` body stays REFUSED by name (Lane B owed — 
 });
 
 // =============================================================================
+// r1 (S239 review MED-1): a db-body function is the PROGRAM's function (hoisted — the
+// program-wide reading, pending bryan's ruling). Inside a scope that binds names it would
+// lose them (or bind the program's of the same spelling) — refused there, fail closed.
+// =============================================================================
+describe("r1 MED-1 — a function in a `<db>` nested inside a name-binding scope is refused by name", () => {
+  const F = "function f() -> int {\n                return 1;\n            }";
+  const REFUSAL = (src) => {
+    const r = run(src);
+    const ds = r.diags.filter((d) => d.code === "E-BOOTSTRAP-UNSUPPORTED" && d.message.includes("a function in a `<db>` body that stands inside"));
+    return { ds, all: r.diags.map((d) => d.code), core: r.core };
+  };
+  test("inside an `<each>` row: refused, naming the row binder (also when the function uses the binder)", () => {
+    const plain = REFUSAL(`<program>\n    <xs:int[]=([1, 2])/>\n    <main>\n        <each in=@xs as x>\n        <db src="./app.db">\n            ${F}\n        </db>\n        </each>\n    </main>\n</program>\n`);
+    expect(plain.all).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+    expect(plain.ds[0].message).toContain("`<each>` row");
+    expect(plain.core == null).toBe(true);
+    const uses = REFUSAL(`<program>\n    <xs:int[]=([1, 2])/>\n    <main>\n        <each in=@xs as x>\n        <db src="./app.db">\n            function g() -> int {\n                return x;\n            }\n        </db>\n        </each>\n    </main>\n</program>\n`);
+    expect(uses.ds.length).toBe(1);
+  });
+  test("inside a component's `renders`: refused", () => {
+    const r = REFUSAL(`<program>\n    <card title:string="x">\n        let <n:int=0/>\n    </>\n    renders <b>\n        <db src="./app.db">\n            ${F}\n        </db>\n    </b>\n    <main><card title="t"/></main>\n</program>\n`);
+    expect(r.ds.length).toBe(1);
+    expect(r.ds[0].message).toContain("`renders`");
+    expect(r.core == null).toBe(true);
+  });
+  test("inside an engine state child: refused", () => {
+    const r = REFUSAL(`<program>\n    let <n:int=0/>\n    type Phase:enum = { Idle, Done }\n    <phase:Phase=.Idle single>\n        <Idle rule=.Done>\n            <db src="./app.db">\n                ${F}\n            </db>\n        </>\n        <Done rule=.Idle : "Done">\n    </>\n    <main><p><*phase/></p></main>\n</program>\n`);
+    expect(r.ds.length).toBe(1);
+    expect(r.core == null).toBe(true);
+  });
+  test("inside an engine state child's `:`-shorthand body: refused", () => {
+    const r = REFUSAL(`<program>\n    let <n:int=0/>\n    type Phase:enum = { Idle, Done }\n    <phase:Phase=.Idle single>\n        <Idle rule=.Done : <db src="./app.db">\n                ${F}\n            </db>>\n        <Done rule=.Idle : "Done">\n    </>\n    <main><p><*phase/></p></main>\n</program>\n`);
+    expect(r.ds.length).toBe(1);
+    expect(r.core == null).toBe(true);
+  });
+  test("inside a Tier-0 `${IV} for … lift <li>…}` row: refused (the loop binder)", () => {
+    const r = REFUSAL(`<program>\n    <xs:int[]=([1, 2])/>\n    <main><ul>${IV} for (const x of @xs) { lift <li><db src="./app.db">\n            ${F}\n        </db></li>; } }</ul></main>\n</program>\n`);
+    expect(r.ds.length).toBe(1);
+    expect(r.core == null).toBe(true);
+  });
+  test("control: a `<db>` under `<main>` / nested markup / another `<db>` keeps its functions (no refusal)", () => {
+    const src = `<program>\n    <main>\n        <div>\n            <db src="./a.db">\n                <section>\n                    <db src="./b.db">\n                        ${F}\n                    </db>\n                </section>\n            </db>\n        </div>\n    </main>\n</program>\n`;
+    expect(codes(src)).toEqual([]);
+  });
+});
+
+// =============================================================================
+// r1 (S239 review LOW-3): recovery and diagnostic quality
+// =============================================================================
+describe("r1 LOW-3 — prose that looks like an item head, `lift`, apostrophes, the suggested literal", () => {
+  test("prose starting with `function` / `type` / `export` is prose (one report), never read to end of file", () => {
+    for (const p of ["function of this block is to hold rows", "type in your name", "export the rows as CSV"]) {
+      const r = run(DB(`        ${p}\n        <p>ok</p>`));
+      expect([p, r.diags.map((d) => d.code)]).toEqual([p, ["E-UNQUOTED-DISPLAY-TEXT"]]);
+    }
+  });
+  test("`lift <p>x</p>;` is E-DB-BODY-STATEMENT, spanning the statement", () => {
+    const src = DB("        lift <p>x</p>;\n        <p>ok</p>");
+    const r = run(src);
+    expect(r.diags.map((d) => d.code)).toEqual(["E-DB-BODY-STATEMENT"]);
+    expect(src.substring(r.diags[0].span.start, r.diags[0].span.end)).toBe("lift <p>x</p>;");
+  });
+  test("`Don't do this` — the apostrophe does not swallow the rest of the file: one report on its line", () => {
+    const src = DB("        Don't do this\n        <p id=\"after\">ok</p>");
+    const r = run(src);
+    expect(r.diags.map((d) => d.code)).toEqual(["E-UNQUOTED-DISPLAY-TEXT"]);
+    expect(src.substring(r.diags[0].span.start, r.diags[0].span.end)).toBe("Don't do this");
+  });
+  test("a run holding a `\"` suggests a literal with the `\"` escaped (§4.18.3)", () => {
+    const m = msgOf(DB("        \"ok\" foo"), "E-UNQUOTED-DISPLAY-TEXT");
+    expect(m).toContain("`\"\\\"ok\\\" foo\"`");
+    expect(m).not.toContain("\"\"ok\" foo\"");
+  });
+  test("a real `function` / `export function` / `type` head is still an item", () => {
+    expect(codes(DB("        export function g() -> int {\n            return 1;\n        }\n        type T:struct = { a: int }"))).toEqual([]);
+  });
+});
+
+// =============================================================================
 // 3. The leak, end to end through the CLI: no db-body source text in ANY client file
 // =============================================================================
 describe("scrml-boot compile — no `<db>`-body source text reaches any client artifact", () => {

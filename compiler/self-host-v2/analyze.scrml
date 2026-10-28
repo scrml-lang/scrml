@@ -13057,7 +13057,70 @@ ${
             }
         }
         if (!src) st = addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "a `<db>` without `src=` names no database (§8.1.1: a database scope is a `<db src=>`) — the bootstrap has no other reading of it")
+        // s472 r1 (MED-1): a function declared in this body is the PROGRAM's
+        // function (the parser hoists it — the program-wide reading, pending
+        // bryan's ruling on db-body function visibility). Where this `<db>` stands
+        // inside a scope that binds names — an `<each>` row, a loop or arm binder,
+        // a component's `renders` / body, an engine state child, a child field's
+        // renders — the hoisted function would silently lose those names (or bind
+        // the program's of the same spelling), so it is refused, fail closed,
+        // under either reading of the ruling.
+        const where: string = nameScopeHere(env)
+        if (where != "") {
+            for (const id of dbOwnedFns(env.g, env.file, e.nid)) {
+                st = addDiag(st, env.file, id.span, "E-BOOTSTRAP-UNSUPPORTED", "a function in a `<db>` body that stands inside " + where + " is not in the bootstrap — a `<db>`-body function is the program's function (hoisted to program scope), so it would lose the names " + where + " binds (or bind the program's names of the same spelling). Declare the function in a `<db>` at the `<program>` level, or pass the values it needs as arguments")
+            }
+        }
         return addElem(resolveNodes(env, e.kids, st), e.nid, ElemFact.MDb)
+    }
+
+    // s472 r1 — the name-binding scope this position stands in ("" — the
+    // program body or plain markup under it, where a hoisted function loses nothing).
+    fn nameScopeHere(env: Env) -> string {
+        if (env.rows.length > 0) return "an `<each>` row (its row binder)"
+        if (env.locals.length > 0) return "a loop or arm body (its binders)"
+        if (env.own != "") return "a child field's `renders` (`@" + env.own + "` and the instance's fields)"
+        const k: CtxK = env.ctx
+        const inProgram: boolean = match k {
+            .InDecl(owner: o, isProgram: p) :> p
+            .InFn :> false
+        }
+        if (!inProgram) return "a declaration's `renders` or state-child body (a component's or an engine's fields)"
+        return ""
+    }
+
+    // s472 r1 — every `<db>` element in a program-level engine's state-child
+    // body (through plain markup; an `<each>` row or a Tier-0 row is judged by
+    // resolveDb itself, which sees its binders): its functions are refused.
+    fn refuseStateChildDbFns(g: Globals, file: string, nodes: ANode[], st0: AS) -> AS {
+        let st: AS = st0
+        for (const n of nodes) {
+            const e: AElem | not = elemOfANode(n)
+            if (e is given) {
+                if (!e.star && e.tag == "db") {
+                    for (const f of dbOwnedFns(g, file, e.nid)) {
+                        st = addDiag(st, file, f.span, "E-BOOTSTRAP-UNSUPPORTED", "a function in a `<db>` body that stands inside an engine state child is not in the bootstrap — a `<db>`-body function is the program's function (hoisted to program scope), so it would lose the names the state child binds (or bind the program's names of the same spelling). Declare the function in a `<db>` at the `<program>` level, or pass the values it needs as arguments")
+                    }
+                }
+                if (e.star || e.tag != "each") st = refuseStateChildDbFns(g, file, e.kids, st)
+            }
+        }
+        return st
+    }
+
+    // The functions the parser hoisted out of the `<db>` element `dbNid`'s body.
+    fn dbOwnedFns(g: Globals, file: string, dbNid: int) -> AFn[] {
+        let ids: int[] = []
+        for (const f of g.files) {
+            if (f.path == file) {
+                for (const o of f.dbFns) { if (o.db == dbNid) ids = ids.concat([o.fn]) }
+            }
+        }
+        let out: AFn[] = []
+        for (const fs of g.fns) {
+            if (ids.indexOf(fs.f.nid) >= 0) out = out.concat([fs.f])
+        }
+        return out
     }
 
     // s449 — `<errors of=expr/>` (§55.8): "`of=expr` REQUIRED — References a
@@ -14093,7 +14156,12 @@ ${
             const renv: Env = declEnv(g, ds, true)
             st = resolveNodes(renv, rendersNodes(ds), st)
             // s442: state-child bodies (O5 (1i)), in the same context
-            for (const sb of stateBodyLists(ds)) { st = resolveNodes(renv, sb, st) }   // s451: one sibling list each (if-chains)
+            for (const sb of stateBodyLists(ds)) {
+                st = resolveNodes(renv, sb, st)   // s451: one sibling list each (if-chains)
+                // s472 r1 (MED-1): a program-level engine's state child resolves in the
+                // program context, so resolveDb cannot see it — judged here
+                if (ds.isProgram) st = refuseStateChildDbFns(g, ds.file, sb, st)
+            }
             // s442: a child field's own renders (§66.4 rule 2), in the same context;
             // s444: with `@<field>` naming that field of this instance (O54 = (a))
             if (ds.p is not) {

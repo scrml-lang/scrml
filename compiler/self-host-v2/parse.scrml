@@ -6004,6 +6004,13 @@ ${
                     out = out.concat([rn.n])
                     m = rn.mp
                 }
+            } else if (dbLiftMarkupAt(m)) {
+                // s472 r1 (LOW-3): `lift <p>…</p>;` — a statement (§49.6.2), its operand markup
+                const lw: RWord = readName(m)
+                const ln: RNodeOne = parseMarkupNode(skipSpace(lw.mp))
+                let lm: MP = skipSpace(ln.mp)
+                if (chAt(lm, 0) == ";") lm = mAdv(lm, 1)
+                m = mDiag(lm, "E-DB-BODY-STATEMENT", "`lift` in a `<db>` body: " + dbStmtWhy() + " (Markup to display stands in the `<db>` body without `lift`.)", at, lm.pos)
             } else if (dbOnBlockAt(m)) {
                 // `on mount { … }` (§6.7.1a, soft-deprecated): a lifecycle statement
                 const ob: TP = regionTP(m, LexStop.Statement)
@@ -6071,11 +6078,47 @@ ${
 
     // `function`, `fn`, `type`, `server` (the deprecated `server function`,
     // §52.10) or `export` not before a tag: an item the logic parser reads.
+    // s472 r1 (LOW-3): judged by the HEAD's shape, not the word alone — prose
+    // that starts with the word (`function of this block …`, `type in your
+    // name`) is prose, never handed to the logic parser (which would read it
+    // to end of file): `function` / `fn` NAME `(`, `type` NAME `:` / `=`,
+    // `server` before one of those, `export` before any of them.
     fn dbItemWordAt(mp: MP) -> boolean {
         const w: RWord = readName(mp)
-        if (w.w == "function" || w.w == "fn" || w.w == "type" || w.w == "server") return true
-        if (w.w != "export") return false
-        return chAt(skipTrivia(w.mp), 0) != "<"
+        if (w.w == "export") {
+            const after: MP = skipTrivia(w.mp)
+            if (chAt(after, 0) == "<") return false
+            return dbItemHeadAt(after)
+        }
+        return dbItemHeadAt(mp)
+    }
+
+    fn dbItemHeadAt(mp: MP) -> boolean {
+        const tp: TP = regionTP(mp, LexStop.CodeBody)
+        if (tp.toks.length < 4) return false
+        let i: int = 0
+        if (isWord(tp, "server")) i = 1
+        const t0: PTok = tp.toks[i]
+        if (t0.cls != TC.Ident && t0.cls != TC.Keyword) return false
+        let j: int = i + 1
+        // `function* name(` — a generator
+        if ((t0.v == "function" || t0.v == "fn") && tk(tp.toks[j], "*")) j = j + 1
+        if (j + 1 >= tp.toks.length) return false
+        const t1: PTok = tp.toks[j]
+        const t2: PTok = tp.toks[j + 1]
+        if (t1.cls != TC.Ident || t1.line != t0.line) return false
+        if (t0.v == "function" || t0.v == "fn") return tk(t2, "(") || tk(t2, "<")
+        if (i == 0 && t0.v == "type") return tk(t2, ":") || tk(t2, "=") || tk(t2, "<")
+        return false
+    }
+
+    // `lift` then (on its line) a tag — `lift <li>…</li>;`.
+    fn dbLiftMarkupAt(mp: MP) -> boolean {
+        const w: RWord = readName(mp)
+        if (w.w != "lift") return false
+        let m: MP = w.mp
+        while (chAt(m, 0) == " " || chAt(m, 0) == "\t") { m = mAdv(m, 1) }
+        return chAt(m, 0) == "<" && opensTag(chAt(m, 1)) && m.pos > w.mp.pos
     }
 
     // `on <word> {` — the lifecycle-statement head (`on mount { … }`, §6.7.1a).
@@ -6142,13 +6185,20 @@ ${
         for (const t of tp.toks) {
             if (t.cls != TC.End && t.line == line) end = t.end
         }
+        // s472 r1 (LOW-3): never past the line's end — a token that starts on
+        // the line and runs on (an apostrophe read as a string: `Don't do this`)
+        // does not take the rest of the file into the run
+        const nl: int = mp.src.indexOf("\n", mp.pos)
+        if (nl > mp.pos && nl < end) return nl
         return end
     }
 
     // The report of a prose run, placed at index `at` of the diagnostics.
     fn dbProseDiag(mp: MP, start: int, end: int, at: int) -> MP {
         const text: string = mp.src.substring(start, end).trim()
-        const d: Diag = newDiag("E-UNQUOTED-DISPLAY-TEXT", "display text in a `<db>` body is declared — a markup element (`<p>" + text + "</p>`) or a quoted display-text literal (`\"" + text + "\"`): a `<db>` body is a code-default item body, never page text (S472 ruling Q3, §4.18.1 / §4.18.7)", mp.file, mkSpan(start, end))
+        // s472 r1 (LOW-3): a `"` in the run is escaped in the suggested literal (§4.18.3 `\"`)
+        const quoted: string = "\"" + text.split("\\").join("\\\\").split("\"").join("\\\"") + "\""
+        const d: Diag = newDiag("E-UNQUOTED-DISPLAY-TEXT", "display text in a `<db>` body is declared — a markup element (`<p>" + text + "</p>`) or a quoted display-text literal (`" + quoted + "`): a `<db>` body is a code-default item body, never page text (S472 ruling Q3, §4.18.1 / §4.18.7)", mp.file, mkSpan(start, end))
         const ds: Diag[] = mp.diags.slice(0, at).concat([d]).concat(mp.diags.slice(at, mp.diags.length))
         return { src: mp.src, pos: mp.pos, nid: mp.nid, diags: ds, file: mp.file, hoist: mp.hoist, dbFns: mp.dbFns }
     }
