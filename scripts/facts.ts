@@ -4,10 +4,16 @@
 //   `bun scripts/facts.ts`         PRINT  — read-only report of every derived fact.
 //   `bun scripts/facts.ts --write` WRITE  — in-place-regenerate the `@generated:*` sections of
 //                                           docs/FACTS.md from the derive functions. Idempotent.
-//   `bun scripts/facts.ts --check` CHECK  — regenerate in memory + compare to on-disk; exit 1 on
-//                                           any stale section, 3 on a missing anchor. Since S469
-//                                           CI + pre-push treat exit 1 as a WARNING: main is
-//                                           regenerated post-merge (.github/workflows/facts-regen.yml).
+//   `bun scripts/facts.ts --check` CHECK  — regenerate in memory + compare to on-disk.
+//
+// EXIT CODES (S472 — see EXIT_STALE below for why stale is NOT 1):
+//   0  current (or PRINT / --write succeeded)
+//   2  degenerate zero measurement — the instrument is not measuring the repo   (always fatal)
+//   3  missing `@generated` anchor — a broken FILE `--write` cannot repair      (always fatal)
+//   4  STALE — `--check` only: the figures moved. Since S469 CI + pre-push treat exactly this
+//      code as a WARNING: main is regenerated post-merge (.github/workflows/facts-regen.yml).
+//   5  broken tree — a dangling symlink under a measured directory               (always fatal)
+//   anything else (bun exits 1 on an uncaught exception) — the script CRASHED   (always fatal)
 //
 // WHY (S280): public content makes CLAIMS, and a number that was true when written rots silently.
 // The C2 (derived-number) half of the claim taxonomy: "745 conformance cases", "21-module standard
@@ -26,13 +32,59 @@
 //
 // House style mirrors scripts/state.ts (plain bun-run TS, readFileSync, anchor find/replace).
 
-import { readFileSync, writeFileSync, readdirSync, existsSync, statSync } from "fs";
+import { readFileSync, writeFileSync, readdirSync, existsSync, statSync, lstatSync } from "fs";
 import { join, dirname, relative, extname } from "path";
 import { fileURLToPath } from "url";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const rel = (p: string) => relative(ROOT, p) || p;
 const read = (p: string) => readFileSync(p, "utf8");
+
+/**
+ * S472 — EXIT_STALE IS A DEDICATED CODE, NOT 1. bun exits 1 for ANY uncaught exception, so when
+ * "stale" was also 1 the warn-only callers (ci.yml "Facts currency", pre-push) warned a CRASH through
+ * as "the figures moved": a PR that broke this script went green, and facts-regen.yml then failed on
+ * every push to main (a non-required workflow) while docs/FACTS.md silently stopped updating.
+ * Callers map EXACTLY this code to a warning; every other non-zero is a hard failure.
+ * (g-facts-check-crash-exit-1-warned-as-stale-s472.)
+ */
+const EXIT_STALE = 4;
+const EXIT_BROKEN_TREE = 5;
+
+process.on("uncaughtException", (err) => {
+  console.error(
+    `facts: CRASHED — ${err && (err as Error).stack ? (err as Error).stack : String(err)}\n\n` +
+      `  This is a broken instrument, not stale figures: it fails every gate (only exit ${EXIT_STALE} is a warning).`,
+  );
+  process.exit(1);
+});
+
+/**
+ * What a measured path is: "absent", "dir" or "file". A DANGLING SYMLINK refuses the whole run
+ * (exit 5) — FAIL-CLOSED by choice (S472). Skipping it would publish a figure for a different tree
+ * than the one checked out (a module/file the tree names but does not have), which is the same
+ * hollow-measurement shape the exit-2 refusal exists for; and a crash here used to be warned through
+ * as "stale". A named refusal on the PR (and in pre-push) is caught before merge, where facts-regen.yml
+ * on main would otherwise be the first thing to trip on it.
+ */
+function kind(p: string): "absent" | "dir" | "file" {
+  let l;
+  try {
+    l = lstatSync(p);
+  } catch {
+    return "absent";
+  }
+  if (!l.isSymbolicLink()) return l.isDirectory() ? "dir" : "file";
+  if (!existsSync(p)) {
+    console.error(
+      `facts: BROKEN TREE — dangling symlink ${rel(p)} (target missing).\n\n` +
+        `  A measured directory names an entry that is not there; any figure computed over it would\n` +
+        `  describe a different tree. Remove or repair the link, then re-run.`,
+    );
+    process.exit(EXIT_BROKEN_TREE);
+  }
+  return statSync(p).isDirectory() ? "dir" : "file";
+}
 
 // ---------------------------------------------------------------- derive fns
 
@@ -48,8 +100,9 @@ function specLines(): number {
 function conformanceCases(): number {
   let n = 0;
   const walk = (p: string) => {
-    if (!existsSync(p)) return;
-    if (statSync(p).isDirectory()) {
+    const k = kind(p);
+    if (k === "absent") return;
+    if (k === "dir") {
       for (const e of readdirSync(p)) walk(join(p, e));
       return;
     }
@@ -64,7 +117,7 @@ function stdlibModules(): string[] {
   const d = join(ROOT, "stdlib");
   if (!existsSync(d)) return [];
   return readdirSync(d)
-    .filter((e) => statSync(join(d, e)).isDirectory())
+    .filter((e) => kind(join(d, e)) === "dir")
     .sort();
 }
 
@@ -117,7 +170,7 @@ function editorIntegrations(): string[] {
   const d = join(ROOT, "editors");
   if (!existsSync(d)) return [];
   return readdirSync(d)
-    .filter((e) => statSync(join(d, e)).isDirectory())
+    .filter((e) => kind(join(d, e)) === "dir")
     .sort();
 }
 
@@ -135,8 +188,9 @@ function countFiles(root: string, exts: string[], suffix?: string): { files: num
   let files = 0;
   let lines = 0;
   const walk = (p: string) => {
-    if (!existsSync(p)) return;
-    if (statSync(p).isDirectory()) {
+    const k = kind(p);
+    if (k === "absent") return;
+    if (k === "dir") {
       for (const e of readdirSync(p)) walk(join(p, e));
       return;
     }
@@ -172,8 +226,9 @@ function testFiles(): number {
 function gatedSnippets(): number {
   let n = 0;
   const walk = (p: string) => {
-    if (!existsSync(p)) return;
-    if (statSync(p).isDirectory()) {
+    const k = kind(p);
+    if (k === "absent") return;
+    if (k === "dir") {
       for (const e of readdirSync(p)) walk(join(p, e));
       return;
     }
@@ -350,7 +405,7 @@ if (write) {
   for (const s of stale) console.log(`  regenerated — ${s}`);
   for (const m of missing) console.log(`  ⚠ MISSING anchor — ${m}`);
   console.log("\n--write: done.");
-  process.exit(missing.length > 0 ? 1 : 0);
+  process.exit(missing.length > 0 ? 3 : 0);
 }
 
 // --check
@@ -359,8 +414,9 @@ for (const s of stale) console.error(`  STALE ${s}`);
 for (const m of missing) console.error(`  MISSING ${m}`);
 // S469 — EXIT CODES SPLIT. A MISSING anchor is a broken FILE (a `@generated` marker deleted or
 // mangled): `--write` cannot repair it and the post-merge regen job would fail on it, so it stays a
-// hard error (exit 3) everywhere. A STALE section only means "the numbers moved": since S469 the
-// PR-side CI step and the pre-push hook treat exit 1 as a WARNING, because
+// hard error (exit 3) everywhere — `--write` exits 3 on it too. A STALE section only means "the
+// numbers moved": since S469 the PR-side CI step and the pre-push hook treat it as a WARNING —
+// exit EXIT_STALE (4), never 1, which is bun's uncaught-exception code (S472) — because
 // .github/workflows/facts-regen.yml regenerates docs/FACTS.md on main after every merge (owner
 // ruling S469: "Regenerate on main after merge"). Exit 2 (degenerate zero, above) is always fatal.
 if (missing.length > 0) {
@@ -376,7 +432,7 @@ if (stale.length > 0) {
       `every merge (.github/workflows/facts-regen.yml), so a pull request need not — and should not —\n` +
       `commit a FACTS.md regen (it only conflicts with the bot's). By hand: \`bun scripts/facts.ts --write\`.`,
   );
-  process.exit(1);
+  process.exit(EXIT_STALE);
 }
 console.log("\nPASS — all derived facts current.");
 process.exit(0);

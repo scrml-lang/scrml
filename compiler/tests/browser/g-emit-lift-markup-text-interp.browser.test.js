@@ -57,6 +57,21 @@ const TERNARY_SRC = `<program>
 </program>
 `;
 
+// --- S472: the same ternary with the interpolation GLUED to a word character. The AST splits a
+//     text child only at an interpolation preceded by a NON-word char (`Saved ${@cell}` arrives at
+//     the emitter pre-split — that split is also where the space is dropped), so TERNARY_SRC no
+//     longer reaches the fixed text-child branch at all: reverting the fix leaves every TERNARY_SRC
+//     test green (measured S472). A glued `Saved${@cell}` stays ONE text child carrying `${…}`, so
+//     it is the source that exercises — and guards — the emit-lift fix. ---
+const GLUED_SRC = `<program>
+\${
+    <cell> = "hello"
+    <show> = true
+}
+<div id="host">\${ @show ? <span>Saved\${@cell}</span> : "" }</div>
+</program>
+`;
+
 // --- adversarial (S215): multiple `${}` in one text node + nested object field. ---
 const ADVERSARIAL_SRC = `<program>
 \${
@@ -107,6 +122,16 @@ const EACH_SRC = `<program>
 
 const tmpRoot = resolve(tmpdir(), "scrml-emit-lift-markup-text-interp");
 
+// S472 (g-browser-baseline-whitespace-red-masks-resolved-guards): the assertions that guard the
+// RESOLVED fix (g-emit-lift-markup-text-interp-not-lowered) compare WHITESPACE-INSENSITIVELY, so a
+// still-open, different defect — the AST drops the space next to a split interpolation
+// (g-ast-markup-text-interp-adjacent-space-dropped: "Saved hello" renders "Savedhello") — cannot
+// abort them at their first line. Before S472 every one of these tests failed on that space first,
+// sat in FAILURE-BASELINE.json, and a regression of the resolved fix kept the failing-name set
+// unchanged (the browser gate stayed green). The space defect now has ONE dedicated test per section
+// below, tagged with its gap; only those are baselined.
+const nospace = (s) => String(s).replace(/\s+/g, "");
+
 function compileToOutputs(source, baseName) {
   const uniq = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
   const tmpDir = resolve(tmpRoot, `case-${uniq}`);
@@ -149,8 +174,25 @@ describe("g-emit-lift-markup-text-interp §1 — emit shape (text-child `${}` lo
 
   test("the `${@cell}` text child lowers to a reactive interpolation (split static + emitExprField)", () => {
     const clientJs = foldChunkNamespacing(compileToOutputs(TERNARY_SRC, "ternary").clientJs);
+    // The static half is a literal text node (its trailing space is the open gap — see the
+    // dedicated test below); the interpolation is a reactive read, not a literal string.
+    // (Pre-S472 the second assertion here expected a bare `String(` — stale since emit moved to
+    // `_scrml_g.String(` — and never ran, because the space assertion above it failed first.)
+    expect(clientJs).toMatch(/createTextNode\("Saved ?"\)/);
+    expect(clientJs).toMatch(/createTextNode\((?:_scrml_g\.)?String\(\(_scrml_reactive_get\("cell"\)\) \?\? ""\)\)/);
+  });
+
+  test("S472 glued `Saved${@cell}` (reaches the fixed text-child branch): lowered, never a literal `${`", () => {
+    const { errors, clientJs } = compileToOutputs(GLUED_SRC, "glued");
+    expect(errors).toEqual([]);
+    const js = foldChunkNamespacing(clientJs);
+    expect(js).not.toMatch(/createTextNode\("[^"]*\$\{/);
+    expect(js).toMatch(/createTextNode\((?:_scrml_g\.)?String\(\(_scrml_reactive_get\("cell"\)\) \?\? ""\)\)/);
+  });
+
+  test("[gap g-ast-markup-text-interp-adjacent-space-dropped] the static text node keeps its trailing space", () => {
+    const clientJs = foldChunkNamespacing(compileToOutputs(TERNARY_SRC, "ternary").clientJs);
     expect(clientJs).toContain('createTextNode("Saved ")');
-    expect(clientJs).toContain('createTextNode(String((_scrml_reactive_get("cell")) ?? ""))');
   });
 
   test("emitted client.js parses (no E-CODEGEN-INVALID-LOGIC)", () => {
@@ -195,25 +237,41 @@ describe("g-emit-lift-markup-text-interp §2 — post-mount render (real module-
 
   test("THE bug (item 4+5): the markup text child renders the cell VALUE, not the literal `${@cell}`", () => {
     const app = mount(TERNARY_SRC, "ternary");
-    expect(app.textOf("host")).toBe("Saved hello");
+    expect(nospace(app.textOf("host"))).toBe("Savedhello");
     expect(app.textOf("host")).not.toContain("${");
   });
 
   test("item 4 reactivity: mutating the cell updates the rendered text", () => {
     const app = mount(TERNARY_SRC, "ternary");
-    expect(app.textOf("host")).toBe("Saved hello");
+    expect(nospace(app.textOf("host"))).toBe("Savedhello");
     app.set("cell", "world");
-    expect(app.textOf("host")).toBe("Saved world");
+    expect(nospace(app.textOf("host"))).toBe("Savedworld");
   });
 
   test("item 5 ternary: renders span+value when true, empty when false, re-renders on toggle", () => {
     const app = mount(TERNARY_SRC, "ternary");
-    expect(app.textOf("host")).toBe("Saved hello");
+    expect(nospace(app.textOf("host"))).toBe("Savedhello");
     app.set("show", false);
     expect(app.textOf("host")).toBe("");
     app.set("cell", "world");      // change while hidden
     app.set("show", true);          // re-show — must pick up the new cell value
-    expect(app.textOf("host")).toBe("Saved world");
+    expect(nospace(app.textOf("host"))).toBe("Savedworld");
+  });
+
+  test("S472 glued `Saved${@cell}`: renders the VALUE, updates on change, re-renders on toggle", () => {
+    const app = mount(GLUED_SRC, "glued");
+    expect(app.textOf("host")).toBe("Savedhello");
+    app.set("cell", "world");
+    expect(app.textOf("host")).toBe("Savedworld");
+    app.set("show", false);
+    expect(app.textOf("host")).toBe("");
+    app.set("show", true);
+    expect(app.textOf("host")).toBe("Savedworld");
+  });
+
+  test("[gap g-ast-markup-text-interp-adjacent-space-dropped] the rendered text keeps the space before the interpolation", () => {
+    const app = mount(TERNARY_SRC, "ternary");
+    expect(app.textOf("host")).toBe("Saved hello");
   });
 
   // --- adversarial (S215): multiple `${}` + nested object field + late mutation. ---

@@ -81,7 +81,7 @@ import { execFileSync } from "child_process";
 import { lintGhostPatterns } from "../compiler/src/lint-ghost-patterns.js";
 import { parseDocMarkers } from "./doc-gate-markers.js";
 import { isDriftScanned, inSnippetCorpus } from "./snippet-drift.js";
-import { PUBLIC_SURFACE, SURFACE_EXCLUDE, SURFACE_UNGATED, uncoveredDocs } from "./claim-gate-surface.js";
+import { PUBLIC_SURFACE, SURFACE_EXCLUDE, SURFACE_UNGATED, uncoveredDocs, bannerProblems } from "./claim-gate-surface.js";
 
 // The declared surface, its walked-past excludes, and the FLOOR (every fenced public
 // document must be gated or excused with a reason) live in scripts/claim-gate-surface.js.
@@ -142,12 +142,16 @@ const REPO_ROOT_FLOOR = resolve(import.meta.dir, "..");
 const floorMisses = explicitPaths.length > 0
   ? []
   : uncoveredDocs(REPO_ROOT_FLOOR, new Set(files.map((f) => relative(REPO_ROOT_FLOOR, resolve(f)).split(sep).join("/"))));
+// S472 — the "Banner + exempt" rows are excused BECAUSE they are bannered; check that they are
+// (and that the site's .scrml rendering of each carries the banner too). Declared surface only.
+const bannerMisses = explicitPaths.length > 0 ? [] : bannerProblems(REPO_ROOT_FLOOR);
 
 if (args.includes("--list")) {
   console.log(`claim-gate — ${files.length} file(s) in the surface:`);
   for (const f of files) console.log(`  ${f}`);
   for (const f of floorMisses) console.log(`  UNGATED (surface floor) ${f}`);
-  process.exit(floorMisses.length > 0 ? 1 : 0);
+  for (const b of bannerMisses) console.log(`  BANNER MISSING ${b.file} — ${b.why}`);
+  process.exit(floorMisses.length > 0 || bannerMisses.length > 0 ? 1 : 0);
 }
 
 // Loaded lazily: an impl1-only run never pays for the bootstrap bundle.
@@ -185,6 +189,15 @@ const failures = [];
 const specAheadList = [];
 const staleList = [];
 const perFile = [];
+
+for (const b of bannerMisses) {
+  failures.push({
+    file: b.file, blockNum: null, startLine: 1,
+    why: `banner missing (S469 "Banner + exempt", enforced S472): ${b.why} — restore the banner, or remove the exemption row in scripts/claim-gate-surface.js and gate the piece`,
+    compileOutput: "", ghostDiags: [],
+  });
+  mode.impl1.failed++;
+}
 
 for (const miss of floorMisses) {
   failures.push({
