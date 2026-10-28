@@ -11,13 +11,19 @@
 // `replace` of that field … checked against the FIELD's grants, not the struct's" and
 // "No spelling reaches a write the grants refuse."
 //
-// A position write replaces the element (s472 r1 F1: `@g[0] = []` needs the inner tape's
-// `replace`; `@ks[0] = { … }` replaces each tape field of the element). A map written back
-// is a position write of EVERY position, so it is judged the same way, through the one grant
-// reader (analyze `mapElemTapeProblems`) and re-checked in Core (C3 `positionTapeProblem`
-// on a PositionWrite). The map's callback is not walked — an identity map `x => x` or a
-// spread `k => ({ ...k, f: v })` is refused too, exactly as the single-position twin
-// `@ks[0] = @ks[0]` is (fail closed; SPEC does not rule what a callback keeps).
+// RULED S472 (user-voice-scrml.md "five PA recs", items 1 and 2):
+//   1. "An outer `replace` does NOT override inner tapes' grants. A `replace` (or any whole
+//      write) of a tape counts as a `replace` of every tape its elements hold, RECURSIVELY"
+//      — so `@g = [[]]` on `int[free, append][write, replace]` is refused, "as are
+//      alias/helper spellings (`const h = @g.map(…); @g = h;`, `@g = remap(@g)`) and deeper
+//      levels".
+//   2. "`sort` / `reverse` write-backs (permutations) are EXEMPT from inner-tape `replace` —
+//      they create no new element value. A map that rebuilds elements (incl. a spreading map)
+//      is not a permutation and stays judged."
+// The one grant reader judges it (analyze `innerTapeHits` / `tapeWriteInnerProblems`,
+// `structTapeWrites` recursing into a tape field's elements); Core C3 mirrors it
+// (`innerTapeKept`, `structTapeKept`, `positionTapeProblem`). The map's callback is not walked:
+// an identity or spreading map is judged as rebuilding every element.
 
 import { describe, test, expect, beforeAll, afterEach } from "bun:test";
 import { loadM2, frontEnd } from "./harness.js";
@@ -63,6 +69,7 @@ describe("a cell's tape written back through map / sort / reverse", () => {
     const m = run(prog(KS("free, append"), `        @ks = @ks.map(k => mk(k));`)).diags[0].message;
     expect(m).toContain("kids");
     expect(m).toContain("§66.12.6");
+    expect(m).toContain("RULED S472");
   });
 
   test("tape of tapes: `@g = @g.map(r => [])` replaces each append-only inner tape — refused (rule 1)", () => {
@@ -74,13 +81,54 @@ describe("a cell's tape written back through map / sort / reverse", () => {
     expect(codes(prog(KS("free, append"), `        @ks = @ks.map(k => k);`))).toEqual(["E-WRITE-NOT-GRANTED"]);
   });
 
-  test("`reverse` / `sort` written back move every position — the same position write, refused alike (fail closed)", () => {
-    expect(codes(prog(G("free, append"), `        @g = @g.reverse();`))).toEqual(["E-WRITE-NOT-GRANTED"]);
-    expect(codes(prog(KS("free, append"), `        @ks = @ks.sort((a, b) => a.kids.length - b.kids.length);`))).toEqual(["E-WRITE-NOT-GRANTED"]);
+  test("`reverse` / `sort` written back are EXEMPT — a permutation creates no new element value (RULED S472 item 2); they run", async () => {
+    clean(prog(G("free, append"), `        @g = @g.reverse();`));
+    clean(prog(KS("free, append"), `        @ks = @ks.sort((a, b) => a.kids.length - b.kids.length);`));
+    clean(prog(`    <d:int[free, append][write][write]=([[[1]], [[2, 3]]])/>`, `        @d = @d.reverse();`));
+    await load(prog(`    <g:int[free, append][write]=([[1, 2], [3]])/>`, `        @g = @g.reverse();`, showG));
+    expect($("#o").textContent).toBe("2");
+    click(btn("go"));
+    expect($("#o").textContent).toBe("1");
   });
 
-  test("an outer `replace` does not waive the inner tape's grants for a classified position write (as `@g[0] = []`)", () => {
-    expect(codes(prog(G("free, append", "write, replace"), `        @g = @g.map(r => []);`))).toEqual(["E-WRITE-NOT-GRANTED"]);
+  test("a spreading map rebuilds every element — it stays judged (RULED S472 item 2)", () => {
+    // the bootstrap has no struct context for a callback's object literal, so that more basic
+    // refusal comes first; the map itself is judged whatever its callback (`mk`, `k => k` above)
+    expect(codes(prog(KS("free, append"), `        @ks = @ks.map(k => ({ ...k, name: "z" }));`))).toEqual(["E-TYPE-STRUCT-CONTEXT"]);
+    expect(codes(prog(KS("free, append"), `        @ks = @ks.map(k => k);`))).toEqual(["E-WRITE-NOT-GRANTED"]);
+  });
+
+  test("a more basic refusal of the value comes first (a two-parameter callback; a sort with no natural order)", () => {
+    expect(codes(prog(G("free, append"), `        @g = @g.map((r, i) => []);`))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+    expect(codes(prog(G("free, append"), `        @g = @g.sort();`))).toEqual(["E-TYPE-031"]);
+  });
+
+  test("an outer `replace` does NOT override the inner tapes' grants — every spelling (RULED S472 item 1)", () => {
+    const GR = G("free, append", "write, replace");
+    const helpers = `\n    fn fresh() -> int[free, append][write, replace] {\n        const r: int[free, append][write, replace] = [[]];\n        return r;\n    }\n    fn remap(g: int[free, append][write, replace]) -> int[free, append][write, replace] {\n        return g;\n    }`;
+    expect(codes(prog(GR, `        @g = @g.map(r => []);`))).toEqual(["E-WRITE-NOT-GRANTED"]);
+    expect(codes(prog(GR, `        @g = [[]];`))).toEqual(["E-WRITE-NOT-GRANTED"]);
+    expect(codes(prog(GR, `        const h = @g.map(r => []);\n        @g = h;`))).toEqual(["E-WRITE-NOT-GRANTED"]);
+    expect(codes(prog(GR + helpers, `        @g = remap(@g);`))).toEqual(["E-WRITE-NOT-GRANTED"]);
+    expect(codes(prog(GR + helpers, `        @g = fresh();`))).toEqual(["E-WRITE-NOT-GRANTED"]);
+    // the place itself keeps every element; appending a new element replaces none
+    clean(prog(GR, `        @g = @g;`));
+    clean(prog(G("free, append", "write, replace, free, append"), `        @g = [...@g, []];`));
+    // granted all the way down: the whole replace is admitted
+    clean(prog(G("free, append, replace", "write, replace"), `        @g = [[]];`));
+  });
+
+  test("deeper levels: a map whose middle tape grants `replace` still replaces the innermost append-only tapes", () => {
+    expect(codes(prog(`    <d:int[free, append][write, replace][write]=([[[1, 2]]])/>`, `        @d = @d.map(r => [[]]);`))).toEqual(["E-WRITE-NOT-GRANTED"]);
+    expect(codes(prog(`    <d:int[free, append][write, replace][write]=([[[1, 2]]])/>`, `        @d[0] = [[]];`))).toEqual(["E-WRITE-NOT-GRANTED"]);
+    clean(prog(`    <d:int[free, append, replace][write, replace][write]=([[[1, 2]]])/>`, `        @d = @d.map(r => [[]]);`));
+    // the struct twin: K2 holds `rows: R[write, replace]`, R holds `kids: int[free, append]`
+    const K2 = (kids) => `    type R:struct = { kids: int[${kids}] }\n    type K2:struct = { rows: R[write, replace] }\n    fn mk2(k: K2) -> K2 {\n        const r: K2 = { rows: [] };\n        return r;\n    }\n    <ks:K2[write]=([{ rows: [{ kids: [1] }] }])/>`;
+    expect(codes(prog(K2("free, append"), `        @ks = @ks.map(k => mk2(k));`))).toEqual(["E-WRITE-NOT-GRANTED"]);
+    clean(prog(K2("free, append, replace"), `        @ks = @ks.map(k => mk2(k));`));
+    // a whole-struct write of a struct holding a tape of structs holding a tape
+    const B2 = `    type R:struct = { kids: int[free, append] }\n    type B2:struct = { rows: R[write, replace] }\n    let <b:B2=({ rows: [{ kids: [1] }] })/>`;
+    expect(codes(prog(B2, `        @b = { rows: [] };`))).toEqual(["E-WRITE-NOT-GRANTED"]);
   });
 
   test("nested depth: a tape field inside a struct inside the element is replaced too", () => {
@@ -109,6 +157,9 @@ describe("a local, a parameter and a struct field rebound through map", () => {
     expect(codes(prog("", `        let h: int[free, append][write] = [[1]];\n        h = h.map(r => []);`))).toEqual(["E-WRITE-NOT-GRANTED"]);
     expect(codes(prog(K("free, append"), `        let ks: K[write] = [{ name: "a", kids: [] }];\n        ks = ks.map(k => mk(k));`))).toEqual(["E-WRITE-NOT-GRANTED"]);
     clean(prog("", `        let h: int[free, append, replace][write] = [[1]];\n        h = h.map(r => []);`));
+    // a whole replace of a local, its outer `replace` granted (RULED S472 item 1)
+    expect(codes(prog("", `        let h: int[free, append][write, replace] = [[1]];\n        h = [[]];`))).toEqual(["E-WRITE-NOT-GRANTED"]);
+    clean(prog("", `        let h: int[free, append][write, replace] = [[1]];\n        h = h.reverse();`));
   });
 
   test("nested depth on a local: `d = d.map(…)` on `int[free, append][write][write]` replaces each middle tape (no `replace`)", () => {
@@ -140,6 +191,30 @@ describe("a local, a parameter and a struct field rebound through map", () => {
 
 // ---------------------------------------------------------------------------
 describe("Core check C3 — a PositionWrite replaces every element (defence in depth)", () => {
+  test("a whole Replace `@g = [[]]`, its inner `replace` flipped off in Core: C3 refuses (RULED S472 item 1)", () => {
+    const r = clean(prog(G("free, append, replace", "write, replace"), `        @g = [[]];`));
+    const ws = find(r.core.fns, (n) => n.variant === "Write");
+    expect(ws.map((w) => w.data.edit.variant ?? w.data.edit)).toEqual(["Replace"]);
+    const core = structuredClone(r.core);
+    const inner = find(core.decls, (n) => n.variant === "Seq" && (n.data.elem === "Int" || n.data.elem?.variant === "Int") && n.data.grants && n.data.grants.replace === true);
+    expect(inner.length).toBeGreaterThan(0);
+    for (const t of inner) t.data.grants.replace = false;
+    expect(mods.check.checkCore(core).some((m) => m.startsWith("C3:") && m.includes("held by an element"))).toBe(true);
+  });
+
+  test("a granted map rewritten in Core to a Replace still fails C3 once the inner `replace` is off", () => {
+    const r = clean(prog(G("free, append, replace", "write, replace"), `        @g = @g.map(r => []);`));
+    const core = structuredClone(r.core);
+    for (const t of find(core.decls, (n) => n.variant === "Seq" && (n.data.elem === "Int" || n.data.elem?.variant === "Int") && n.data.grants)) t.data.grants.replace = false;
+    for (const w of find(core.fns, (n) => n.variant === "Write")) w.data.edit = typeof w.data.edit === "string" ? "Replace" : { variant: "Replace" };
+    expect(mods.check.checkCore(core).some((m) => m.startsWith("C3:"))).toBe(true);
+  });
+
+  test("a reverse written back passes C3 with the inner `replace` off (a permutation is exempt)", () => {
+    const r = clean(prog(G("free, append"), `        @g = @g.reverse();`));
+    expect(mods.check.checkCore(r.core)).toEqual([]);
+  });
+
   test("a granted map, its inner `replace` flipped off in Core: C3 refuses", () => {
     const r = clean(prog(G("free, append, replace"), `        @g = @g.map(r => []);`));
     const ws = find(r.core.fns, (n) => n.variant === "Write");
@@ -169,6 +244,6 @@ describe("Core check C3 — a PositionWrite replaces every element (defence in d
     const inner = find(core, (n) => n.variant === "Seq" && n.data.grants && n.data.grants.replace === true && (n.data.elem === "Int" || n.data.elem?.variant === "Int"));
     expect(inner.length).toBeGreaterThan(0);
     for (const t of inner) t.data.grants.replace = false;
-    expect(mods.check.checkCore(core).some((m) => m.startsWith("C3:") && m.includes("themselves tapes"))).toBe(true);
+    expect(mods.check.checkCore(core).some((m) => m.startsWith("C3:") && m.includes("held by an element"))).toBe(true);
   });
 });

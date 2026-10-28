@@ -3372,60 +3372,88 @@ ${
     // `.reverse()`; its value is a map / sort / reverse of the field, C9 positionProblem) writes
     // EVERY position, so it replaces every element and is judged per element exactly as one
     // PositionAt is (`what` names the edit in the message). The map's function is not walked:
-    // no element is "kept" (fail closed). The analyzer's twin is shapeElemTapeProblems.
+    // no element is "kept" (fail closed). RULED S472 ("five PA recs"): a PERMUTATION written
+    // back (`sort` / `reverse`) is exempt — it creates no new element value (item 2); an
+    // element that is itself a tape is replaced together with every tape ITS elements hold,
+    // at any depth (item 1, innerTapeKept). The analyzer's twin is tapeWriteInnerProblems.
     fn positionTapeProblem(p: CoreProgram, f: Field, value: Expr, what: string) -> string {
+        if (permutationValue(value)) return ""
         const et: Type | not = seqElemOf(f.ty)
         if (et is not) return ""
         const ig: boolean | not = seqReplaceOf(unMaybeC(et))
         if (ig is given) {
             if (!ig) return what + " replaces an element of `" + f.sym.hint + "` that is itself a tape, whose grants give no `replace` (§66.12.6 rule 1)"
-            return ""
+            return innerTapeKept(p, et, f.sym, f.sym.hint + "[…]", [])
         }
         return elemAtTapeKept(p, f, value, [])
     }
 
-    // s472-boot-map-grants — a FieldAt whose target is a tape and whose value is a map /
-    // sort / reverse (the analyzer's classified position write of a sub-field tape, the
-    // instance-spread override `{ ...@b, g: @b.g.map(…) }`): every element of the target
-    // tape is replaced, so each is judged as a PositionAt's element is (§66.12.6 rules 1
-    // and 4). Any other value is a `replace` of the tape field, judged by its own grants
-    // above; whether it also replaces the inner tapes is not ruled (known-gaps), so it is
-    // left as it was.
-    fn fieldAtElemProblem(p: CoreProgram, d: Sym, ty: Type, value: Expr, at: string) -> string {
-        if (!positionalValue(value)) return ""
-        const et: Type | not = seqElemOf(unMaybeC(ty))
+    // RULED S472 item 1 — every tape the ELEMENTS of tape `tape` hold, at any depth, needs
+    // `replace` when the tape is replaced whole ("A `replace` (or any whole write) of a tape
+    // counts as a `replace` of every tape its elements hold, RECURSIVELY"). "" when each
+    // does, else why. `d` only seeds structTapeKept (path [] — nothing is "kept" there).
+    fn innerTapeKept(p: CoreProgram, tape: Type, d: Sym, label: string, seen: int[]) -> string {
+        const et: Type | not = seqElemOf(unMaybeC(tape))
         if (et is not) return ""
+        const at: string = label + "[…]"
         const ig: boolean | not = seqReplaceOf(unMaybeC(et))
         if (ig is given) {
-            if (!ig) return "a map / sort / reverse written to `" + at + "` replaces each of its elements, which are themselves tapes whose grants give no `replace` (§66.12.6 rule 1)"
-            return ""
+            if (!ig) return "the write replaces the tape `" + at + "` held by an element of a replaced tape, whose type grants no `replace` — an outer `replace` does not override an inner tape's grants (§66.12.6 rule 1, RULED S472)"
+            return innerTapeKept(p, et, d, at, seen)
         }
-        // an element has no place spelling here: no tape field of it is "kept" (path [])
-        return structTapeKept(p, et, not, d, InstRef.Lexical(0), [], at + "[…]", [])
+        return structTapeKept(p, et, not, d, InstRef.Lexical(0), [], at, seen)
     }
 
-    // A value that rewrites every position of a tape: a map / comparator sort, or a
-    // natural-order sort / reverse (the C9 positionProblem shapes, of any operand).
-    fn positionalValue(v: Expr) -> boolean {
+    // s472-boot-map-grants — a FieldAt whose target is a tape writes that tape WHOLE: it is
+    // judged by structTapeKept (every tape its elements hold, RULED S472 item 1), unless the
+    // value is a PERMUTATION of that same place (`{ ...@b, g: @b.g.reverse() }` — item 2:
+    // "they create no new element value"). The analyzer's twin is fieldAtWrite's
+    // tapeWriteInnerProblems(…, whole = true).
+    fn fieldAtPermutation(p: CoreProgram, d: Sym, inst: InstRef, path: FieldRef[], value: Expr) -> boolean {
+        const op: Expr | not = permutationOperand(value)
+        if (op is not) return false
+        return keepKey(p, boundValue(p, op, 0)) == placeKeyOf(d, inst, path)
+    }
+
+    // A PERMUTATION of a tape (RULED S472 item 2): a comparator sort (SeqCall SortBy), a
+    // natural-order sort or a reverse (Prim SortNum / SortStr / Reverse) — its operand; `not`
+    // for any other value (a map rebuilds elements and is not one).
+    fn permutationOperand(v: Expr) -> Expr | not {
         return match v {
-            .SeqCall(op: op) :> op == SeqFn.Map || op == SeqFn.SortBy
-            .Prim(op: op) :> op == PrimOp.SortNum || op == PrimOp.SortStr || op == PrimOp.Reverse
-            .Lit(lit: x) :> false
-            .Local(sym: x) :> false
-            .Read(place: x) :> false
-            .Call(callee: x) :> false
-            .Match(scrut: x) :> false
-            .ArrayOf(elems: x) :> false
-            .StructOf(ty: x) :> false
-            .VariantOf(enumSym: x) :> false
-            .Handle(inst: x) :> false
-            .InitOf(decl: x) :> false
-            .Host(call: x) :> false
-            .Lambda(params: x) :> false
-            .Validity(of: x) :> false
-            .ServerCall(fn: x) :> false
-            .Query(q: x) :> false
+            .SeqCall(op: op, seq: sq) :> sortByOperand(op, sq)
+            .Prim(op: op, args: xs) :> primPermOperand(op, xs)
+            .Lit(lit: x) :> not
+            .Local(sym: x) :> not
+            .Read(place: x) :> not
+            .Call(callee: x) :> not
+            .Match(scrut: x) :> not
+            .ArrayOf(elems: x) :> not
+            .StructOf(ty: x) :> not
+            .VariantOf(enumSym: x) :> not
+            .Handle(inst: x) :> not
+            .InitOf(decl: x) :> not
+            .Host(call: x) :> not
+            .Lambda(params: x) :> not
+            .Validity(of: x) :> not
+            .ServerCall(fn: x) :> not
+            .Query(q: x) :> not
         }
+    }
+
+    fn sortByOperand(op: SeqFn, sq: Expr) -> Expr | not {
+        if (op == SeqFn.SortBy) return sq
+        return not
+    }
+
+    fn primPermOperand(op: PrimOp, xs: Expr[]) -> Expr | not {
+        if (xs.length != 1) return not
+        if (op == PrimOp.SortNum || op == PrimOp.SortStr || op == PrimOp.Reverse) return xs[0]
+        return not
+    }
+
+    // A PositionWrite's value is a permutation (C9 positionProblem pins its operand to the field).
+    fn permutationValue(v: Expr) -> boolean {
+        return permutationOperand(v) is given
     }
 
     // A tape type's own `replace` grant; `not` for a type that is not a tape.
@@ -3553,8 +3581,8 @@ ${
             .Append :> ""
             .Prepend :> ""
             .Anywhere :> ""
-            // s472-boot-map-grants: a map / sort / reverse written back replaces EVERY element
-            .PositionWrite :> positionTapeProblem(p, f, value, "a PositionWrite (a map / sort / reverse written back)")
+            // s472-boot-map-grants: a map written back replaces EVERY element (a sort / reverse is exempt, RULED S472)
+            .PositionWrite :> positionTapeProblem(p, f, value, "a PositionWrite (a map written back)")
             .RemoveEnd :> ""
             .RemoveFront :> ""
             .RemoveAnywhere :> ""
@@ -3570,8 +3598,7 @@ ${
             ty = fd.ty
             at = at + "." + fd.sym.hint
         }
-        const ep: string = fieldAtElemProblem(p, d, ty, value, at)
-        if (ep != "") return ep
+        if (isTapeType(ty) && fieldAtPermutation(p, d, inst, base.concat(path), value)) return ""
         return structTapeKept(p, ty, value, d, inst, base.concat(path), at, [])
     }
 
@@ -3604,15 +3631,18 @@ ${
     // "" when every tape field the value replaces grants `replace`, else why.
     // `path` empty: the value has no place (nothing is kept).
     fn structTapeKept(p: CoreProgram, ty: Type, v0: Expr | not, d: Sym, inst: InstRef, path: FieldRef[], label: string, seen: int[]) -> string {
-        const s: Sym | not = namedSym(unMaybeC(ty))
-        if (s is not) return ""
-        if (seen.indexOf(s.id) >= 0) return ""
         let v: Expr | not = not
         if (v0 is given) v = boundValue(p, v0, 0)
         // s469 F4: the value IS the written place — nothing in it is replaced
         if (v is given && path.length > 0) {
             if (keepKey(p, v) == placeKeyOf(d, inst, path)) return ""
         }
+        // s472-boot-map-grants (RULED S472 item 1): a tape written whole replaces every tape
+        // its elements hold, at any depth
+        if (isTapeType(ty)) return innerTapeKept(p, ty, d, label, seen)
+        const s: Sym | not = namedSym(unMaybeC(ty))
+        if (s is not) return ""
+        if (seen.indexOf(s.id) >= 0) return ""
         const td: TypeDef | not = findTypeDef(p, s)
         if (td is not) return ""
         const fs: FieldDef[] | not = structFields(td)
@@ -3633,6 +3663,8 @@ ${
             if (!kept) {
                 if (isTapeType(fd.ty)) {
                     if (!fd.grants.replace) return "the write replaces the tape field `" + label + "." + fd.sym.hint + "`, whose type grants no `replace` — a whole-struct write never gets around a tape field's grants (§66.12.6 rule 4)"
+                    const ir: string = innerTapeKept(p, fd.ty, d, label + "." + fd.sym.hint, seen.concat([s.id]))
+                    if (ir != "") return ir
                 } else {
                     const r: string = structTapeKept(p, fd.ty, fv, d, inst, sub, label + "." + fd.sym.hint, seen.concat([s.id]))
                     if (r != "") return r
