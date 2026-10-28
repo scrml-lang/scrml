@@ -31,7 +31,7 @@
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 262 | 5 |
-| MED | 700 | 8 |
+| MED | 699 | 8 |
 | LOW | 535 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
@@ -445,7 +445,7 @@ Survey table: `docs/changes/s471-bootstrap-stdlib-import/progress.md`. `md` is c
 ### g-boot-no-host-bridge-s471 — the bootstrap has no `_{}` / `import:host` / host-global surface, and SPEC gives client-capable stdlib modules (format/Intl, math, time, regex, random, router) no sanctioned host reach: §23 `_{}` is server-only and `import:host` admits only `stdlib/compiler/**` — `NEW S471; HIGH; open (owner question)`
 
 <!-- @gap id=g-boot-flat-link-namespace-s471 sev=MED status=open locus=compiler/self-host-v2/analyze.scrml(fnNamed — "the bootstrap links one namespace") prov=dispatch:s471-bootstrap-stdlib-import;review:S471-stdlib(F1,F2; ~/.cache/scrml/review/s471-stdlib/probes p2,p3,t2,s1,s6) -->
-### g-boot-flat-link-namespace-s471 — (fail-open) the export/import boundary is not enforced at use sites: any function or type of ANY linked file — exported-but-not-imported, or not exported at all — is usable without importing it (base too); with `scrml:` modules linked this reaches stdlib internals; and a user library's private name colliding with a stdlib private name withdraws the stdlib module with a stdlib-located "does not compile" error — `NEW S471; MED; open`
+### g-boot-flat-link-namespace-s471 — (fail-open) the export/import boundary is not enforced at use sites: any function or type of ANY linked file — exported-but-not-imported, or not exported at all — is usable without importing it (base too); with `scrml:` modules linked this reaches stdlib internals; and a user library's private name colliding with a stdlib private name withdraws the stdlib module with a stdlib-located "does not compile" error — `NEW S471; MED; RESOLVED S471`
 
 Not reachable with the real stdlib today (all 22 withdrawn); live the moment one module compiles. Enforce visibility before the first stdlib port lands.
 
@@ -534,7 +534,8 @@ When bound loops inside deferred bodies are built, that `lift` needs the same ex
 
 ### g-boot-slice-tests-leak-tmp-dirs-s471 — the bootstrap slice tests leak temp dirs into /tmp (`slice-m1-*`, `s469d*`, `u1c-server*`, `self-host-v2-bundle*`): about 15.7k dirs / 3G accumulated and filled the RAM-backed /tmp — `NEW S471; MED; open`
 
-<!-- @gap id=g-boot-slice-tests-leak-tmp-dirs-s471 sev=MED status=open locus=compiler/self-host-v2/slice-m1/harness.js:148(mkdtempSync self-host-v2-bundle-)+compiler/self-host-v2/slice-m1/load-program.js:81(mkdtempSync slice-m1-)+compiler/self-host-v2/slice-m4(server-artifact-harness.js and the s469d / u1c-server harnesses) prov=empirical:S471-landing-front(/tmp ~15.7k dirs / ~3G, machine-observed) -->
+<!-- @gap id=g-boot-slice-tests-leak-tmp-dirs-s471 sev=MED status=resolved resolved-by=s471-slice-tmp-leak locus=compiler/self-host-v2/slice-m1/harness.js:148(mkdtempSync self-host-v2-bundle-)+compiler/self-host-v2/slice-m1/load-program.js:81(mkdtempSync slice-m1-)+compiler/self-host-v2/slice-m4(server-artifact-harness.js and the s469d / u1c-server harnesses) prov=empirical:S471-landing-front(/tmp ~15.7k dirs / ~3G, machine-observed) -->
+> **RESOLVED S471 (`s471-slice-tmp-leak`).** A slices run from the repo root already went through the S448 tmp root and leaked nothing (measured: 0 new /tmp entries). The leak was every caller OUTSIDE it: `bun test` from another cwd (bun reads `bunfig.toml` from the cwd only) and non-test callers of the bundle builder (`scripts/scrml-boot.ts`, conformance). Fixed at the creation sites: `buildBundleChunks` (try/finally), `loadProgram` and `loadServer` (removed once imported), `lint.test.js` scratch tree copies (afterEach), `cross-impl` and `u1c-root`. Measured from `compiler/self-host-v2/` (no preload): the base leaked 40 dirs over 3 files; the fix leaks 0 over the whole slices chain. `s469d*` matched no current source (an earlier session's ad-hoc prefix).
 > **Filed S471.** The dirs are made with `mkdtempSync(join(tmpdir(), …))` and never removed, and these runs do not go through the S448 per-process temp root. Who pays: every engineer and agent on a machine whose /tmp is a tmpfs — a full /tmp kills unrelated work. Fix direction: route the slice-m1 / slice-m4 harnesses through the S448 test-tmp preload root (`compiler/tests/helpers/tmp-root-preload.js`, `~/.cache/scrml-test-tmp/<pid>-<rand>`), or remove each dir after use.
 
 ### g-impl1-underscore-slice-function-constructor-csp-s471 — impl#1 builds `_{}` slices with the `Function` constructor: harmless on the server today, disqualifying for any client form under `headers="strict"` CSP (dpa-075 D5) — `NEW S471; LOW; open — DEFERRED (S471 impl#1 policy)`

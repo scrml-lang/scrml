@@ -8,7 +8,7 @@
 // Nothing here decides what a program means: it only feeds the artifacts the
 // printers produced to the runtimes they were printed for.
 
-import { copyFileSync, mkdtempSync, writeFileSync } from "node:fs";
+import { copyFileSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { SQL } from "bun";
@@ -60,7 +60,9 @@ export async function loadServer(serverJs) {
   copyFileSync(join(RUNTIME_DIR, "runtime.js"), join(dir, "runtime.js"));
   copyFileSync(join(RUNTIME_DIR, "server-runtime.js"), join(dir, "scrml-server-runtime.js"));
   writeFileSync(join(dir, "app.server.js"), serverJs);
-  return await import(join(dir, "app.server.js"));
+  const mod = await import(join(dir, "app.server.js"));
+  rmSync(dir, { recursive: true, force: true }); // s471-slice-tmp-leak: loaded; the runtimes are static imports
+  return mod;
 }
 
 /** A fresh in-memory SQLite (Bun.SQL), set up by `ddl` statements and seeded by `rows`. */

@@ -11,7 +11,7 @@
 // `_scrml_structural_eq` (emitted for `==`), supplied here.
 
 import { compileScrml } from "../../src/api.js";
-import { appendFileSync, existsSync, mkdtempSync, readFileSync, readdirSync } from "node:fs";
+import { appendFileSync, existsSync, mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
@@ -145,21 +145,27 @@ export function bundleInputFiles(bundle, modules) {
  * cache on the inputs' content) and load them later with `evaluateChunks`.
  */
 export function buildBundleChunks(bundle, modules) {
+  // s471-slice-tmp-leak: the out dir is read back into memory and removed. Callers outside
+  // `bun test` (scripts/scrml-boot.ts, bootstrap-conformance) never get the S448 tmp root.
   const outDir = mkdtempSync(join(tmpdir(), "self-host-v2-bundle-"));
-  const inputFiles = bundleInputFiles(bundle, modules);
-  const result = compileScrml({ inputFiles, outputDir: outDir, write: true, validateEmit: true, log: () => {} });
-  const errs = (result.errors ?? []).filter((e) => e && e.code !== undefined);
-  if (errs.length > 0) {
-    throw new Error("bootstrap bundle failed to compile under impl#1:\n" + errs.map((e) => `${e.code} ${e.message ?? ""}`).join("\n"));
+  try {
+    const inputFiles = bundleInputFiles(bundle, modules);
+    const result = compileScrml({ inputFiles, outputDir: outDir, write: true, validateEmit: true, log: () => {} });
+    const errs = (result.errors ?? []).filter((e) => e && e.code !== undefined);
+    if (errs.length > 0) {
+      throw new Error("bootstrap bundle failed to compile under impl#1:\n" + errs.map((e) => `${e.code} ${e.message ?? ""}`).join("\n"));
+    }
+    // sorted: readdir order is the filesystem's; the chunks load in one order everywhere
+    const chunks = listClientJs(outDir).sort().map((file) => {
+      const src = readFileSync(file, "utf8");
+      const reg = /_scrml_modules\["([^"]+)"\]\s*=/.exec(src);
+      const deps = [...src.matchAll(/=\s*_scrml_modules\["([^"]+)"\];/g)].map((m) => m[1]);
+      return { name: reg ? reg[1] : null, deps, src };
+    });
+    return { chunks, warnings: result.warnings ?? [] };
+  } finally {
+    rmSync(outDir, { recursive: true, force: true });
   }
-  // sorted: readdir order is the filesystem's; the chunks load in one order everywhere
-  const chunks = listClientJs(outDir).sort().map((file) => {
-    const src = readFileSync(file, "utf8");
-    const reg = /_scrml_modules\["([^"]+)"\]\s*=/.exec(src);
-    const deps = [...src.matchAll(/=\s*_scrml_modules\["([^"]+)"\];/g)].map((m) => m[1]);
-    return { name: reg ? reg[1] : null, deps, src };
-  });
-  return { chunks, warnings: result.warnings ?? [] };
 }
 
 /**

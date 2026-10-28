@@ -9,7 +9,7 @@
 
 import { describe, test, expect } from "bun:test";
 import { join } from "node:path";
-import { mkdtempSync, existsSync } from "node:fs";
+import { mkdtempSync, existsSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { SQL } from "bun";
 
@@ -77,6 +77,7 @@ describe("the default host: Bun.SQL, a relative SQLite path resolved against the
     require("node:fs").mkdirSync(join(root, "sub"), { recursive: true });
     expect(await srt.query(conn, "run", srt.sqlText(["CREATE TABLE t (a INTEGER)"]), [], [])).toBe(null);
     expect(existsSync(join(root, "sub", "app.db"))).toBe(true);
+    try { rmSync(root, { recursive: true, force: true }); } catch {} // s471-slice-tmp-leak (Windows may hold the db open)
   });
 });
 
