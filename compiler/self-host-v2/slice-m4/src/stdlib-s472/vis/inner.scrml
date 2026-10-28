@@ -1,0 +1,6 @@
+// s472 fixture stdlib — a file of `scrml:vis`, reached only by its relative import.
+${
+    export fn inner(s: string) -> string {
+        return s.toUpperCase();
+    }
+}

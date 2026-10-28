@@ -135,7 +135,7 @@ ${
             i = i + 1
         }
         const call: JsExpr = jcall(jid(symNameOf(ctx, sf.sym)), args)
-        return jcall(jmember(jid("rt"), "route"), [jid(routeName(sf.sym)), JsExpr.JArrowE(["args$"], call)])
+        return jcall(jmember(jid("rt"), "route"), [jid(routeName(ctx.p, sf.sym)), JsExpr.JArrowE(["args$"], call)])
     }
 
     // `{ driver: "sqlite", target: "./app.db", file: "app.scrml" }` — §8.1.1 / §44.2.

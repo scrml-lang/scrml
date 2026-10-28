@@ -809,11 +809,18 @@ describe("#9 — `int` enforced; `/` on two ints names `div`", () => {
     // twin: an unknown ELEMENT name still makes the whole type unresolved (grant error kept, no cascade)
     expect(inApp("    function g(k: Nope[bogus]) { }\n    function f() { g(1); }")).toEqual(["E-TYPE-UNKNOWN", "E-GRANT-UNKNOWN"]);
   });
-  test("r7 A guard (ii) — a callee declared in two files (mis-linked, already refused) is untrusted: no argument / return check", () => {
+  // s472: guard (ii) is retired — a call resolves to the function its name denotes in the
+  // CALLING file (file scope), so a private `helper` in each of two files is two functions,
+  // each checked against its OWN signature (never the other's: no mis-link to guard against).
+  test("s472 (was r7 A guard (ii)) — a private callee declared in two files: each call is checked against its OWN declaration", () => {
     const a = { path: "lib/a.scrml", src: "${ function helper(k: int) -> int { return k; }\n export function useA() -> int { return helper(1); } }\n" };
     const b = { path: "lib/b.scrml", src: "${ function helper(s: string) -> string { return s; }\n export function useB() -> string { return helper(\"b\"); } }\n" };
     const main = { path: "app.scrml", src: "${ import { useA } from \"./lib/a.scrml\"; }\n${ import { useB } from \"./lib/b.scrml\"; }\n<program>\n<main><p>${useA()} ${useB()}</p></main>\n</program>\n" };
-    expect(codes([a, b, main])).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+    expect(codes([a, b, main])).toEqual([]);
+    // twin: b's call passes an int — refused against b's `helper(s: string)` (argument), and its
+    // `string` result does not return as b's `int` (return) — a's `helper(k: int)` is not consulted
+    const b2 = { path: "lib/b.scrml", src: "${ function helper(s: string) -> string { return s; }\n export function useB() -> int { return helper(2); } }\n" };
+    expect(codes([a, b2, main])).toEqual(["E-TYPE-031", "E-TYPE-031"]);
     // twin: a helper declared in ONE file is checked
     const one = { path: "lib/a.scrml", src: "${ function helper(k: int) -> int { return k; }\n export function useA() -> string { return helper(\"x\"); } }\n" };
     const main1 = { path: "app.scrml", src: "${ import { useA } from \"./lib/a.scrml\"; }\n<program>\n<main><p>${useA()}</p></main>\n</program>\n" };

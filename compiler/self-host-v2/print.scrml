@@ -325,7 +325,7 @@ ${
             .Lambda(params: ps, body: b) :> JsExpr.JArrowE(symNames(ctx, ps), exprJs(ctx, b))
             .SeqCall(op: o, seq: sq, f: f) :> seqCallJs(ctx, o, exprJs(ctx, sq), exprJs(ctx, f))
             .Validity(of: v, prop: pr) :> jmcall(surfaceJs(ctx, v), surfaceMethod(pr), [])
-            .ServerCall(fn: f, args: args) :> rtCall(ctx, "call", [jid(routeName(f)), JsExpr.JArray(exprsJs(ctx, args)), jid("task$")])
+            .ServerCall(fn: f, args: args) :> rtCall(ctx, "call", [jid(routeName(ctx.p, f)), JsExpr.JArray(exprsJs(ctx, args)), jid("task$")])
             .Query(q: q) :> queryJs(ctx, q)
         }
     }
@@ -371,7 +371,23 @@ ${
 
     // s454 (U1b) — the module constant describing server function `f`'s route
     // (path + the §57 wire tables its client call encodes / decodes with).
-    export fn routeName(f: Sym) -> string { return "route$" + f.hint.replaceAll("$", "_") }
+    // s472: two files may each declare a server function of one name (file
+    // scope — analyze.scrml scopeFrom), so the constant is `route$<name>` for
+    // the first server function of that name in `p.server` and `route$<name>$<k>`
+    // for the k-th after it — one constant per route, the same in the client and
+    // the server artifact (both print from the same Core).
+    export fn routeName(p: CoreProgram, f: Sym) -> string {
+        const base: string = "route$" + f.hint.replaceAll("$", "_")
+        let k = 0
+        for (const sf of p.server) {
+            if (sf.sym.id == f.id) {
+                if (k == 0) return base
+                return base + "$" + k
+            }
+            if (sf.sym.hint == f.hint) k = k + 1
+        }
+        return base
+    }
 
     // s449 — the validity surface (§55.5 / §55.6): `rt.validity(inst, i)` is
     // field i's record, `rt.compound(inst)` the declaration's; a property is
@@ -2797,7 +2813,7 @@ ${
         let error: JsExpr = JsExpr.JNull
         const e: Sym | not = sf.err
         if (e is given) error = wireOrNull(p, Type.Named(e))
-        return JsStmt.SConst(routeName(sf.sym), JsExpr.JObject([
+        return JsStmt.SConst(routeName(p, sf.sym), JsExpr.JObject([
             { key: "path", value: jstr(routePath(sf.sym)) },
             { key: "params", value: JsExpr.JArray(params) },
             { key: "result", value: result },

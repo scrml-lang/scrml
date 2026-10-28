@@ -886,17 +886,186 @@ ${
         }
     }
 
+    // ---- s472: FILE SCOPE — which declaration a name denotes in each file ------
+    // Before s472 the bootstrap linked every file into ONE namespace: a use
+    // resolved by bare name across all linked files, so any function, type or
+    // declaration of any file — exported-but-not-imported, or not exported at
+    // all — was usable without importing it (a `scrml:` module's internals
+    // included), and two files could not each keep a private name.
+    // §21.3: "Named imports … from `.scrml` files SHALL be resolved by the
+    // compiler against the exporting file's export list." A name is in scope in
+    // a file when the file DECLARES it (a type, a function, a user declaration),
+    // or an import of the file brings it from a file that EXPORTS it (an import
+    // of a name its target does not export is E-IMPORT-004, checkImports, and
+    // brings nothing). Every by-name lookup of a type / function / declaration
+    // goes through `scopeFrom`: it answers WHICH FILE's declaration the name
+    // denotes, and the lookup takes the one of that (file, name) — never the
+    // first of that name (no first-match mis-link). A name not in scope in a
+    // file resolves to nothing there (fail closed: E-SCOPE-001 / E-TYPE-UNKNOWN
+    // at the use, saying where the name IS declared — elsewhereNote).
+    // `own`: every declared name of every linked file (built-in types excluded).
+    type OwnName:struct = { name: string, file: string, exported: boolean }
+    type ScopeName:struct = { name: string, from: string }
+    type FileScope:struct = { file: string, names: ScopeName[] }
+    type Linkage:struct = { own: OwnName[], scopes: FileScope[] }
+
+    // The file whose declaration `name` denotes in `file`; "" when no
+    // declaration of `name` is in scope there.
+    fn scopeFrom(lk: Linkage, file: string, name: string) -> string {
+        for (const fs of lk.scopes) {
+            if (fs.file == file) {
+                for (const n of fs.names) {
+                    if (n.name == name) return n.from
+                }
+                return ""
+            }
+        }
+        return ""
+    }
+
+    // Is the declaration of `name` in `declFile` the one `name` denotes in `file`?
+    fn inScope(lk: Linkage, file: string, name: string, declFile: string) -> boolean {
+        const from: string = scopeFrom(lk, file, name)
+        return from != "" && from == declFile
+    }
+
+    fn exportsName(own: OwnName[], file: string, name: string) -> boolean {
+        for (const o of own) {
+            if (o.file == file && o.name == name && o.exported) return true
+        }
+        return false
+    }
+
+    // Every declared name of every file: its types, its functions (a
+    // `<program>`'s included — typeItems / fnItems), its user declarations
+    // (the decl stubs — the program itself is not a name).
+    fn ownNames(files: FileAst[], stubs: TypeStub[], ds: DeclStub[]) -> OwnName[] {
+        let out: OwnName[] = []
+        for (const s of stubs) {
+            if (s.file != builtinFile()) out = out.concat([{ name: s.name, file: s.file, exported: s.exported }])
+        }
+        for (const d of ds) {
+            const ad: ADecl | not = d.d
+            if (ad is given && !d.isProgram) out = out.concat([{ name: ad.name, file: d.file, exported: ad.exported }])
+        }
+        for (const f of files) {
+            for (const af of fnItems(f.items)) { out = out.concat([{ name: af.name, file: f.path, exported: af.exported }]) }
+        }
+        return out
+    }
+
+    type RLinkage:struct = { lk: Linkage, st: AS }
+
+    // Each file's scope: its own names, then each name its imports bring, in
+    // source order. §41.7: "When an `import` statement imports a name that is
+    // already in scope from another `import` statement in the same file, the
+    // later import WINS and a W-IMPORT-001 warning is emitted." A name the file
+    // declares AND imports is bound twice in file scope — §7.6: "Re-declaring a
+    // name … when that name was already declared at file scope SHALL be a
+    // compile error (E-SCOPE-010: duplicate binding in file scope)"; the file's
+    // own declaration stays in scope (the error stops the build either way).
+    fn linkage(files: FileAst[], own: OwnName[], st0: AS) -> RLinkage {
+        let st: AS = st0
+        const paths: string[] = filePaths(files)
+        let scopes: FileScope[] = []
+        for (const f of files) {
+            let names: ScopeName[] = []
+            let mine: string[] = []
+            for (const o of own) {
+                if (o.file == f.path && mine.indexOf(o.name) < 0) {
+                    names = names.concat([{ name: o.name, from: f.path }])
+                    mine = mine.concat([o.name])
+                }
+            }
+            let imported: string[] = []
+            for (const imp of importsOfItems(f.items)) {
+                const target: string = importTarget(f.path, imp.from, paths)
+                for (const n of imp.names) {
+                    if (target != "" && exportsName(own, target, n.name)) {
+                        if (mine.indexOf(n.name) >= 0) {
+                            st = addDiag(st, f.path, n.span, "E-SCOPE-010", "`" + n.name + "` is imported from `" + imp.from + "` and also declared in this file — a name is bound once in file scope (duplicate binding in file scope, §7.6); rename one, or drop the import")
+                        } else if (imported.indexOf(n.name) >= 0) {
+                            st = addDiag(st, f.path, n.span, "W-IMPORT-001", "`" + n.name + "` is already imported by an earlier import in this file — this later import wins (§41.7); remove the duplicate, or rename one")
+                            names = rebound(names, n.name, target)
+                        } else {
+                            names = names.concat([{ name: n.name, from: target }])
+                            imported = imported.concat([n.name])
+                        }
+                    }
+                }
+            }
+            scopes = scopes.concat([{ file: f.path, names: names }])
+        }
+        return { lk: { own: own, scopes: scopes }, st: st }
+    }
+
+    fn rebound(names: ScopeName[], name: string, from: string) -> ScopeName[] {
+        let out: ScopeName[] = []
+        for (const n of names) {
+            if (n.name == name) {
+                out = out.concat([{ name: name, from: from }])
+            } else {
+                out = out.concat([n])
+            }
+        }
+        return out
+    }
+
+    // Why `name` is not in scope in `file` when ANOTHER linked file declares it
+    // — appended to the use's diagnostic; "" when no other file declares it.
+    fn elsewhereNote(lk: Linkage, file: string, name: string) -> string {
+        for (const o of lk.own) {
+            if (o.name == name && o.file != file && o.exported) {
+                return " in this file — `" + o.file + "` exports it, but this file does not import it: write `import { " + name + " } from …` (§21.3)"
+            }
+        }
+        for (const o2 of lk.own) {
+            if (o2.name == name && o2.file != file) {
+                return " in this file — `" + o2.file + "` declares it but does not export it, so it is private to that file (§21.3)"
+            }
+        }
+        return ""
+    }
+
     // ---- resolving a type expression ------------------------------------------
-    type TypeEnv:struct = { stubs: TypeStub[], declNames: string[], declSyms: Sym[], file: string }
+    // s472: `link` — the file scopes (above); `declFiles` — each declaration
+    // name's defining file (parallel to `declNames` / `declSyms`). `file` — the
+    // file the type expression is written in: a name resolves in ITS scope.
+    type TypeEnv:struct = { stubs: TypeStub[], declNames: string[], declSyms: Sym[], declFiles: string[], link: Linkage, file: string }
+
+    fn teAt(te: TypeEnv, file: string) -> TypeEnv {
+        return { stubs: te.stubs, declNames: te.declNames, declSyms: te.declSyms, declFiles: te.declFiles, link: te.link, file: file }
+    }
     // `unresolved`: the TYPE itself did not resolve — a name in it is unknown
     // (E-TYPE-UNKNOWN; `t` then holds a placeholder). A diagnostic about the
     // type's GRANTS (E-GRANT-UNKNOWN) leaves the type resolved: the element type
     // is real and is checked against (S444 review, fail-closed).
     type RType:struct = { t: Type, st: AS, unresolved: boolean }
 
+    // s472: the type `name` denotes in `te.file` — the one its scope names
+    // (declared there, or imported), else a built-in of that name (`Error`,
+    // `SqlError`, `ServerCallError`: in scope everywhere, shadowed by a user
+    // type in scope).
     fn stubNamed(te: TypeEnv, name: string) -> TypeStub | not {
+        const from: string = scopeFrom(te.link, te.file, name)
+        let builtin: TypeStub | not = not
         for (const s of te.stubs) {
-            if (s.name == name) return s
+            if (s.name == name) {
+                if (from != "" && s.file == from) return s
+                if (s.file == builtinFile()) builtin = s
+            }
+        }
+        return builtin
+    }
+
+    // s472: the user declaration `name` denotes in `te.file` as a type, else not.
+    fn declTypeNamed(te: TypeEnv, name: string) -> Sym | not {
+        const from: string = scopeFrom(te.link, te.file, name)
+        if (from == "") return not
+        let i = 0
+        while (i < te.declNames.length) {
+            if (te.declNames[i] == name && te.declFiles[i] == from) return te.declSyms[i]
+            i = i + 1
         }
         return not
     }
@@ -924,14 +1093,11 @@ ${
         if (n == "bool" || n == "boolean") return { t: Type.Bool, st: st, unresolved: false }
         const s: TypeStub | not = stubNamed(te, n)
         if (s is given) return { t: Type.Named(s.sym), st: st, unresolved: false }
-        let i = 0
-        while (i < te.declNames.length) {
-            if (te.declNames[i] == n) return { t: Type.Named(te.declSyms[i]), st: st, unresolved: false }
-            i = i + 1
-        }
+        const ds: Sym | not = declTypeNamed(te, n)
+        if (ds is given) return { t: Type.Named(ds), st: st, unresolved: false }
         // s469 (review L3): `asIs` is a built-in type (§14.1.2) the bootstrap does not have — refused by name, not "unknown"
         if (n == "asIs") return { t: Type.Str, st: addDiag(st, te.file, at.span, "E-BOOTSTRAP-UNSUPPORTED", "the built-in type `asIs` (§14.1.2) is not in the bootstrap — its type system has no unresolved-value type; give the value a declared type"), unresolved: true }
-        return { t: Type.Str, st: addDiag(st, te.file, at.span, "E-TYPE-UNKNOWN", "unknown type `" + n + "`"), unresolved: true }
+        return { t: Type.Str, st: addDiag(st, te.file, at.span, "E-TYPE-UNKNOWN", "unknown type `" + n + "`" + elsewhereNote(te.link, te.file, n)), unresolved: true }
     }
 
     // ---- the grant words (the ONE place a grant SPELLING is read) -------------
@@ -1020,7 +1186,7 @@ ${
         let st: AS = st0
         let out: TypeInfo[] = []
         for (const s of stubs) {
-            const fte: TypeEnv = { stubs: te.stubs, declNames: te.declNames, declSyms: te.declSyms, file: s.file }
+            const fte: TypeEnv = teAt(te, s.file)
             const body: ATypeBody = s.src.body
             const r: RTypeDef = typeDefOf(fte, s, body, st)
             st = r.st
@@ -1175,11 +1341,24 @@ ${
         return not
     }
 
-    fn declNamed(g: Globals, name: string) -> DeclSrc | not {
+    // s472: the user declaration `name` denotes in `file` (declared there, or
+    // imported — scopeFrom), else not.
+    fn declNamed(g: Globals, file: string, name: string) -> DeclSrc | not {
+        const from: string = scopeFrom(g.te.link, file, name)
+        if (from == "") return not
         for (const d of g.decls) {
-            if (!d.isProgram && d.info.sym.hint == name) return d
+            if (!d.isProgram && d.info.sym.hint == name && d.file == from) return d
         }
         return not
+    }
+
+    // s472: a user declaration `name` in SOME linked file (scope aside) — a tag
+    // naming one that is not in scope here is refused, never read as HTML.
+    fn declAnywhere(g: Globals, name: string) -> boolean {
+        for (const d of g.decls) {
+            if (!d.isProgram && d.info.sym.hint == name) return true
+        }
+        return false
     }
 
     fn fieldIndex(d: DeclInfo, name: string) -> int {
@@ -1191,9 +1370,13 @@ ${
         return -1
     }
 
-    fn fnNamed(g: Globals, name: string) -> FnInfo | not {
+    // s472: the function `name` denotes in `file` (declared there, or
+    // imported — scopeFrom), else not. Never the first of that name.
+    fn fnNamed(g: Globals, file: string, name: string) -> FnInfo | not {
+        const from: string = scopeFrom(g.te.link, file, name)
+        if (from == "") return not
         for (const f of g.fns) {
-            if (f.info.name == name) return f.info
+            if (f.info.name == name && f.info.file == from) return f.info
         }
         return not
     }
@@ -2053,6 +2236,14 @@ ${
                             types: TypeInfo[], decls: DeclStub[], handles: HandleInfo[],
                             hscope: int, prog: int, progFile: string }
     type RInf:struct = { r: Inf, done: OwnT[] }
+
+    // s472: the same context, resolving names in `file`'s scope (`cx.te.file`
+    // is the file whose names are being read: the program's for a program
+    // cell, the function's own inside a followed function body).
+    fn cxAt(cx: InferCx, file: string) -> InferCx {
+        return { te: teAt(cx.te, file), fns: cx.fns, st: cx.st, srcs: cx.srcs, res: cx.res, types: cx.types, decls: cx.decls, handles: cx.handles,
+                 hscope: cx.hscope, prog: cx.prog, progFile: cx.progFile }
+    }
     type ROwn:struct = { t: OwnT, done: OwnT[] }
     // A `return` and the names in scope where it stands.
     type RetAt:struct = { e: AExpr | not, sc: ParamT[] }
@@ -2141,10 +2332,10 @@ ${
     // member path through a handle, `@country.value`, is a declared type).
     // The handle pass's own diagnostics are phase A's (the declaration loop);
     // this read discards them.
-    fn allHandles(ds: DeclStub[], st: AS) -> HandleInfo[] {
+    fn allHandles(ds: DeclStub[], lk: Linkage, st: AS) -> HandleInfo[] {
         let out: HandleInfo[] = []
         for (const d of ds) {
-            out = out.concat(handlesIn(ds, rendersNodes(d), { owner: d.nid, conditional: false, file: d.file }, st).hs)
+            out = out.concat(handlesIn(stubsInScope(ds, lk, d.file), rendersNodes(d), { owner: d.nid, conditional: false, file: d.file }, st).hs)
         }
         return out
     }
@@ -2315,11 +2506,8 @@ ${
                 }
             }
         }
-        let i2 = 0
-        while (i2 < cx.te.declNames.length) {
-            if (cx.te.declNames[i2] == n) return rinf(infOk(Type.Named(cx.te.declSyms[i2])), done)
-            i2 = i2 + 1
-        }
+        const sd: Sym | not = declTypeNamed(cx.te, n)     // s472: the shared instance of a declaration in scope here
+        if (sd is given) return rinf(infOk(Type.Named(sd)), done)
         // E-SCOPE-001 (the binder's) — the typer finds it inside the initializer
         return rinf(infOut("`@" + n + "`, which names no cell"), done)
     }
@@ -2556,17 +2744,13 @@ ${
             }
             return rinf(infOut("a call of a computed function"), done)
         }
+        // s472: the function `n` denotes in the file being read (declared there, or imported)
         let found: FnSrc | not = not
+        const from: string = scopeFrom(cx.te.link, cx.te.file, n)
         for (const f of cx.fns) {
-            if (f.info.name == n) {
-                if (found is not) {
-                    found = f
-                } else if (f.info.file != found.info.file) {
-                    return rinf(infBlamed(), done)     // mis-linked: refused where declared (guard (ii))
-                }
-            }
+            if (f.info.name == n && f.info.file == from) found = f
         }
-        if (found is not) return rinf(infOut("`" + n + "(…)`, which is not a function this program declares"), done)
+        if (found is not) return rinf(infOut("`" + n + "(…)`, which is not a function in scope here"), done)
         const fi: FnInfo = found.info
         const ret: Type | not = fi.ret
         if (ret is given) return rinf(infOk(baseOf(ret)), done)
@@ -2598,7 +2782,8 @@ ${
         // scope for a program-level body); a library function reads none
         let hs: int = -1
         if (cx0.progFile == fileOfFn(cx0, af)) hs = cx0.prog
-        const cx: InferCx = withHscope(withRes(cx0, true), hs)
+        // s472: the body's names resolve in the function's OWN file
+        const cx: InferCx = withHscope(withRes(cxAt(cx0, fileOfFn(cx0, af)), true), hs)
         const who: string = "`" + af.name + "(…)` declares no return type, and its return is not proven: "
         if (!exits(af.body)) return rinf(infUnres(who + "it does not end in `return` on every path"), done)
         let ps: ParamT[] = []
@@ -3578,6 +3763,16 @@ ${
         }
     }
 
+    // s472: the decl stubs a file can name — the program, and each user
+    // declaration in scope there (handlesIn's `g0`: a tag names one of these).
+    fn stubsInScope(ds: DeclStub[], lk: Linkage, file: string) -> DeclStub[] {
+        let out: DeclStub[] = []
+        for (const d of ds) {
+            if (d.isProgram || inScope(lk, file, d.sym.hint, d.file)) out = out.concat([d])
+        }
+        return out
+    }
+
     fn stubNamedDecl(g0: DeclStub[], name: string) -> DeclStub | not {
         for (const d of g0) {
             if (!d.isProgram && d.sym.hint == name) return d
@@ -3648,7 +3843,7 @@ ${
         let st: AS = st0
         let out: FnSrc[] = []
         for (const f of files) {
-            const fte: TypeEnv = { stubs: te.stubs, declNames: te.declNames, declSyms: te.declSyms, file: f.path }
+            const fte: TypeEnv = teAt(te, f.path)
             for (const af of fnItems(f.items)) {
                 const r: RSym = mint(st, af.name)
                 st = r.st
@@ -4138,6 +4333,7 @@ ${
         st = programShapeDiags(files, entry, rd.st)
         let declNames: string[] = []
         let declSyms: Sym[] = []
+        let declFiles: string[] = []
         let program: Sym = mkSym(-1, "program")
         let hasProgram = false
         for (const d of rd.ds) {
@@ -4147,11 +4343,16 @@ ${
             } else {
                 declNames = declNames.concat([d.sym.hint])
                 declSyms = declSyms.concat([d.sym])
+                declFiles = declFiles.concat([d.file])
             }
         }
+        // s472: each file's scope (the imports' bindings judged here — §41.7, §7.6)
+        const rl: RLinkage = linkage(files, ownNames(files, rs.stubs, rd.ds), st)
+        st = rl.st
+        const lk: Linkage = rl.lk
         if (!hasProgram) st = addDiag(st, entry, mkSpan(0, 0), "E-PROGRAM-MISSING", "the entry file has no `<program>`")
         st = namedInstanceDiags(rd.ds, declNames, files, st)
-        const te0: TypeEnv = { stubs: rs.stubs, declNames: declNames, declSyms: declSyms, file: entry }
+        const te0: TypeEnv = { stubs: rs.stubs, declNames: declNames, declSyms: declSyms, declFiles: declFiles, link: lk, file: entry }
         const rt: RTypeInfos = typeInfos(rs.stubs, te0, st)
         st = rt.st
         const rf0: RFns = fnsOf(files, te0, st)
@@ -4165,31 +4366,32 @@ ${
         // is written — before any field is built, since a field's `@ref` (in
         // any declaration) resolves against the program's cells
         const icx: InferCx = { te: te0, fns: rf.fs, st: st, srcs: programSrcs(rd.ds), res: false,
-                               types: allTypes, decls: rd.ds, handles: allHandles(rd.ds, st),
+                               types: allTypes, decls: rd.ds, handles: allHandles(rd.ds, lk, st),
                                hscope: programNid(rd.ds), prog: programNid(rd.ds), progFile: entry }
         const ownTab: OwnT[] = ownTable(icx)
         // fields + handles per declaration
         let decls: DeclSrc[] = []
         let handles: HandleInfo[] = []
         for (const ds of rd.ds) {
-            const te: TypeEnv = { stubs: rs.stubs, declNames: declNames, declSyms: declSyms, file: ds.file }
+            const te: TypeEnv = teAt(te0, ds.file)
+            const dcx: InferCx = cxAt(icx, ds.file)
             let fields: FieldInfo[] = []
             let single = false
             const p: AProgram | not = ds.p
             const d: ADecl | not = ds.d
             if (p is given) {
-                const r: RFields = programFields(te, rt.ts, p, icx, ownTab, st)
+                const r: RFields = programFields(te, rt.ts, p, dcx, ownTab, st)
                 fields = r.fs
                 st = r.st
                 single = true
             } else if (d is given) {
-                const r2: RFields = userFields(te, rt.ts, d, icx, ownTab, st)
+                const r2: RFields = userFields(te, rt.ts, d, dcx, ownTab, st)
                 fields = r2.fs
                 st = r2.st
                 single = hasFlag(d.mods, "single")
             }
             fields = trustFields(fields, fileErrs(files, ds.file))
-            const rh: RHandles = handlesIn(rd.ds, rendersNodes(ds), { owner: ds.nid, conditional: false, file: ds.file }, st)
+            const rh: RHandles = handlesIn(stubsInScope(rd.ds, lk, ds.file), rendersNodes(ds), { owner: ds.nid, conditional: false, file: ds.file }, st)
             st = rh.st
             handles = handles.concat(rh.hs)
             let own: Sym[] = []
@@ -4206,7 +4408,7 @@ ${
         decls = rc.decls
         const g: Globals = { program: program, entry: entry, te: te0, types: allTypes, decls: decls, fns: rf.fs, handles: handles, files: files,
                              errorSym: builtinSym(rs.stubs, "Error"), sqlErrorSym: builtinSym(rs.stubs, "SqlError"),
-                             sceSym: builtinSym(rs.stubs, serverCallErrorName()), voids: voidFns(rf.fs) }
+                             sceSym: builtinSym(rs.stubs, serverCallErrorName()), voids: voidFns(rf.fs, lk) }
         return { g: g, st: st }
     }
 
@@ -4677,10 +4879,7 @@ ${
     // A user declaration named `name` that THIS file can see: declared here, or
     // imported here (§21.3). Only such a one is `@name`'s shared instance (§66.7.1).
     fn visibleDecl(env: Env, name: string) -> DeclSrc | not {
-        const d: DeclSrc | not = declNamed(env.g, name)
-        if (d is not) return not
-        if (d.file == env.file || importsName(env.g.files, env.file, name)) return d
-        return not
+        return declNamed(env.g, env.file, name)     // s472: declared here, or imported FROM ITS FILE (was: any import of the name)
     }
 
     // ---- expression results -------------------------------------------------
@@ -4768,7 +4967,7 @@ ${
                 if (i >= 0) return plain(d.info.fields[i].ty, addName(st, e.nid, NameFact.NField(d.info.sym, InstRef.Lexical(0), i)))
             }
         }
-        const f: FnInfo | not = fnNamed(env.g, name)
+        const f: FnInfo | not = fnNamed(env.g, env.file, name)
         if (f is given) {
             const st2: AS = addName(st, e.nid, NameFact.NFn(f.sym))
             if (env.fx.fnRef == e.nid) return plain(not, st2)
@@ -4789,7 +4988,7 @@ ${
         }
         // s471: a name a refused import brings is that import's failure (checkImports), not also undeclared
         if (importRefusesName(env.g, env.file, name)) return plain(not, st)
-        return diagX(env, e, "E-SCOPE-001", "`" + name + "` is not declared", st)
+        return diagX(env, e, "E-SCOPE-001", "`" + name + "` is not declared" + elsewhereNote(env.g.te.link, env.file, name), st)
     }
 
     // A READ through `@h`. RULED S437 (bryan: "yes, reads require narrowing"):
@@ -4912,9 +5111,10 @@ ${
         let idx: int = -1
         for (const t of env.g.types) {
             // s451 (Ue): a built-in error enum's variant resolves only where its type is expected
+            // s472: and only an enum IN SCOPE in this file (declared here, or imported) is searched
             const s: Sym = typeDefSym(t.def)
             const i: int = variantIndex(env.g.types, s, name)
-            if (i >= 0 && t.file != builtinFile()) {
+            if (i >= 0 && t.file != builtinFile() && typeInScope(env, t)) {
                 found = found.concat([s])
                 idx = i
             }
@@ -5311,7 +5511,7 @@ ${
         // returns a value, every path returns one (or fails) — a bare `return` included
         // (in a `!` function it is a SUCCESS carrying nothing: `.Ok(v)` would take it)
         if (fs.info.failable || r is not) {
-            if (hasValueReturn(g, b) && (blockHasBareReturn(b) || !fallsNever(t, b, false))) return [newDiag("E-RETURN-INCOMPLETE", "`" + n + "` returns a value on some path, so it must return one on every path — a path here " + incompleteWhat(b) + " (no implicit return in scrml); end every path with `return <value>;`" + incompleteFix(fs.info.failable), file, fs.f.span)]
+            if (hasValueReturn(g, file, b) && (blockHasBareReturn(b) || !fallsNever(t, b, false))) return [newDiag("E-RETURN-INCOMPLETE", "`" + n + "` returns a value on some path, so it must return one on every path — a path here " + incompleteWhat(b) + " (no implicit return in scrml); end every path with `return <value>;`" + incompleteFix(fs.info.failable), file, fs.f.span)]
             return []
         }
         if (fs.info.ret is not || declaresVoid(r)) return []
@@ -5363,7 +5563,7 @@ ${
     // position (resolveCall for a call; noSuccessUse for a handled `!` call's success value):
     // E-TYPE-001. A declared `-> T` function is never void.
     // =========================================================================
-    fn voidFns(fs: FnSrc[]) -> int[] {
+    fn voidFns(fs: FnSrc[], lk: Linkage) -> int[] {
         let v: int[] = []
         for (const f of fs) {
             const r: AType | not = f.f.ret
@@ -5379,7 +5579,7 @@ ${
             let next: int[] = []
             for (const f of fs) {
                 if (v.indexOf(f.info.sym.id) >= 0) {
-                    if (fnDeclaredVoid(f) || !valueReturnIn(fs, v, f.f.body)) {
+                    if (fnDeclaredVoid(f) || !valueReturnIn(fnsInScope(fs, lk, f.info.file), v, f.f.body)) {
                         next = next.concat([f.info.sym.id])
                     } else {
                         changed = true
@@ -5404,8 +5604,19 @@ ${
 
     // Does `b` hold a `return <value>` anywhere (any depth, arm blocks included) — a `return`
     // whose operand is not `void` (`return f()` of a void `f` passes `void` on)?
-    fn hasValueReturn(g: Globals, b: ABlock) -> boolean {
-        return valueReturnIn(g.fns, g.voids, b)
+    fn hasValueReturn(g: Globals, file: string, b: ABlock) -> boolean {
+        return valueReturnIn(fnsInScope(g.fns, g.te.link, file), g.voids, b)
+    }
+
+    // s472: the functions whose names are in scope in `file` — one per name, so
+    // a by-name match among them (retIsValue) is THE callee, never another
+    // file's function of that name.
+    fn fnsInScope(fs: FnSrc[], lk: Linkage, file: string) -> FnSrc[] {
+        let out: FnSrc[] = []
+        for (const f of fs) {
+            if (inScope(lk, file, f.info.name, f.info.file)) out = out.concat([f])
+        }
+        return out
     }
 
     fn valueReturnIn(fs: FnSrc[], v: int[], b: ABlock) -> boolean {
@@ -8500,7 +8711,7 @@ ${
     fn deferBound(env: Env) -> boolean {
         if (lookupLocal(env, "defer") is given) return true
         if (lookupHandle(env, "defer") is given) return true
-        return fnNamed(env.g, "defer") is given
+        return fnNamed(env.g, env.file, "defer") is given
     }
 
     // A `let` / `const` written AFTER a position in a block of the function.
@@ -9098,7 +9309,7 @@ ${
         const n: string = exprName(c)
         if (n == "") return false
         if (lookupLocal(env, n) is given) return false
-        const f: FnInfo | not = fnNamed(env.g, n)
+        const f: FnInfo | not = fnNamed(env.g, env.file, n)
         if (f is not) return false
         return f.failable
     }
@@ -9176,12 +9387,18 @@ ${
         let n = 0
         for (const t of env.g.types) {
             const s: Sym = typeDefSym(t.def)
-            if (t.file != builtinFile() && variantIndex(env.g.types, s, name) >= 0) {
+            if (t.file != builtinFile() && typeInScope(env, t) && variantIndex(env.g.types, s, name) >= 0) {
                 found = s
                 n = n + 1
             }
         }
         return { es: found, n: n }
+    }
+
+    // s472: is the user type `t` the one its name denotes in `env.file`? (The
+    // enums remoteEnums mints live in the built-in file — never searched here.)
+    fn typeInScope(env: Env, t: TypeInfo) -> boolean {
+        return inScope(env.g.te.link, env.file, t.name, t.file)
     }
 
     fn isNotPat(p: APat) -> boolean {
@@ -9564,7 +9781,7 @@ ${
         const n: string = exprName(c)
         if (n == "") return not
         if (lookupLocal(env, n) is given) return not
-        const f: FnInfo | not = fnNamed(env.g, n)
+        const f: FnInfo | not = fnNamed(env.g, env.file, n)
         if (f is not) return not
         if (!f.serverOwn) return not
         return f
@@ -10412,7 +10629,7 @@ ${
     // The type a name denotes where `env` stands (user types first, so a user
     // `Error` shadows the built-in), else not.
     fn typeNamedHere(env: Env, name: string) -> Sym | not {
-        const s: TypeStub | not = stubNamed(env.g.te, name)
+        const s: TypeStub | not = stubNamed(teAt(env.g.te, env.file), name)   // s472: in THIS file's scope
         if (s is not) return not
         return s.sym
     }
@@ -10544,7 +10761,7 @@ ${
         let st: AS = st0
         let annot: Type | not = not
         if (aty is given && !hasErrIn(fileErrs(env.g.files, env.file), aty.span)) {
-            const te: TypeEnv = { stubs: env.g.te.stubs, declNames: env.g.te.declNames, declSyms: env.g.te.declSyms, file: env.file }
+            const te: TypeEnv = teAt(env.g.te, env.file)
             const rt: RType = resolveType(te, aty, st)
             // r8: an annotation that did not resolve is not the local's type
             if (!rt.unresolved) annot = rt.t
@@ -10654,7 +10871,7 @@ ${
         let annot: Type | not = not
         const aty: AType | not = b.ty
         if (aty is given && !hasErrIn(fileErrs(env.g.files, env.file), aty.span)) {
-            const te: TypeEnv = { stubs: env.g.te.stubs, declNames: env.g.te.declNames, declSyms: env.g.te.declSyms, file: env.file }
+            const te: TypeEnv = teAt(env.g.te, env.file)
             const rt: RType = resolveType(te, aty, st)
             if (!rt.unresolved) annot = rt.t
             st = rt.st
@@ -10938,7 +11155,7 @@ ${
         let st: AS = st0
         let annot: Type | not = not
         if (aty is given && !hasErrIn(fileErrs(env.g.files, env.file), aty.span)) {
-            const te: TypeEnv = { stubs: env.g.te.stubs, declNames: env.g.te.declNames, declSyms: env.g.te.declSyms, file: env.file }
+            const te: TypeEnv = teAt(env.g.te, env.file)
             const rt: RType = resolveType(te, aty, st)
             if (!rt.unresolved) annot = rt.t
             st = rt.st
@@ -12298,7 +12515,13 @@ ${
         if (e.tag == "slot") return resolveSlot(env, e, st)
         // A user declaration in scope wins over every built-in reading of the
         // tag — HTML and (r2 F2) the structural-refusal list alike.
-        const d: DeclSrc | not = declNamed(env.g, e.tag)
+        const d: DeclSrc | not = declNamed(env.g, env.file, e.tag)
+        // s472: a declaration of another file that is not in scope here is not
+        // an unknown HTML element (that would render it silently empty) — the
+        // tag names it, so it is refused by name, saying where it is declared
+        if (d is not && declAnywhere(env.g, e.tag)) {
+            return addDiag(resolveNodes(env, e.kids, st), env.file, e.span, "E-SCOPE-001", "`<" + e.tag + ">` is not declared" + elsewhereNote(env.g.te.link, env.file, e.tag))
+        }
         if (d is given) {
             // O55 RULED (bryan S442): a plain use of a `single` declaration is an
             // error; `<*x/>` is the only way to render it (§66.13.3).
@@ -12532,7 +12755,10 @@ ${
         // program's cells included, R4) — THIS instance's own field (§66.6.2).
         const sf: StarField | not = starField(env, e.tag)
         if (sf is given) return resolveStarField(env, e, sf, st)
-        const d: DeclSrc | not = declNamed(env.g, e.tag)
+        const d: DeclSrc | not = declNamed(env.g, env.file, e.tag)
+        if (d is not && declAnywhere(env.g, e.tag)) {
+            return addDiag(st, env.file, e.span, "E-SCOPE-001", "`<*" + e.tag + "/>` — `<" + e.tag + ">` is not declared" + elsewhereNote(env.g.te.link, env.file, e.tag))
+        }
         if (d is not) {
             // r1 nit: a field of SOME user declaration, named out of its scope
             const owner: string = fieldOwnerName(env.g, e.tag)
@@ -13402,7 +13628,7 @@ ${
             const fx: FailCtx = { inFn: true, fnName: fs.info.name, failable: fs.info.failable, err: fs.info.err, defer: false, subject: -1, whole: -1, fnRef: -1, wholeWhat: "",
                                   fnSym: fs.info.sym.id, serverOwn: fs.info.serverOwn, stmtCall: -1 }
             let env: Env = { g: g, file: fs.info.file, ctx: CtxK.InFn, locals: [], rows: [], handles: hs, inRenders: false, narrows: [], present: [], host: host, own: "", inEffect: false, fx: fx, lift: LiftCtx.NoLift }
-            const fte: TypeEnv = { stubs: g.te.stubs, declNames: g.te.declNames, declSyms: g.te.declSyms, file: fs.info.file }
+            const fte: TypeEnv = teAt(g.te, fs.info.file)
             for (const p of fs.f.params) {
                 const rs: RSym = mint(st, p.name)
                 st = rs.st
@@ -13473,8 +13699,8 @@ ${
         return -1
     }
 
-    fn checkScopes(files: FileAst[], t: Tables) -> Diag[] {
-        let out: Diag[] = dupFields(files, t).concat(dupDecls(t)).concat(dupTypes(t)).concat(dupFns(t)).concat(dupHandles(files, t))
+    fn checkScopes(files: FileAst[], t: Tables, lk: Linkage) -> Diag[] {
+        let out: Diag[] = dupFields(files, t, lk).concat(dupDecls(t)).concat(dupTypes(t)).concat(dupFns(t)).concat(dupHandles(files, t, lk))
         for (const f of files) {
             for (const af of fnItems(f.items)) {
                 out = out.concat(dupParams(f.path, af.params))
@@ -13487,7 +13713,7 @@ ${
 
     // Two fields of one declaration. The program's fields ARE the file-scope
     // cells (R4), so a duplicate there is E-SCOPE-010.
-    fn dupFields(files: FileAst[], t: Tables) -> Diag[] {
+    fn dupFields(files: FileAst[], t: Tables, lk: Linkage) -> Diag[] {
         let out: Diag[] = []
         for (const d of t.decls) {
             let names: string[] = []
@@ -13503,7 +13729,7 @@ ${
                     } else {
                         out = out.concat([mkDiag(d.file, f.span, "E-BOOTSTRAP-REDECLARE", "`<" + d.sym.hint + ">` already has a field `" + names[j] + "` (at " + first + ") — a declaration's fields are named once (the SPEC names no code for this; bootstrap-local)")])
                     }
-                } else if (d.sym.id == t.program.id && visibleDeclNamed(files, t, d.file, names[j])) {
+                } else if (d.sym.id == t.program.id && visibleDeclNamed(lk, t, d.file, names[j])) {
                     // `@x` would name both the cell and `<x>`'s shared instance (§66.7.1)
                     out = out.concat([mkDiag(d.file, d.fields[j].span, "E-SCOPE-010", "`" + names[j] + "` — `@" + names[j] + "` already names the shared instance of `<" + names[j] + ">` (§66.7.1); a program cell cannot take that name (a cell named like a visible declaration is E-SCOPE-010, ruled S442)")])
                 }
@@ -13515,31 +13741,18 @@ ${
 
     // Is a user declaration named `name` VISIBLE in `file` — declared there,
     // or imported into it (§21.3)? Only a visible one claims `@name` there.
-    fn visibleDeclNamed(files: FileAst[], t: Tables, file: string, name: string) -> boolean {
+    // s472: through the file's scope — declared there, or imported FROM ITS
+    // FILE (was: any import of the name, whichever file it named).
+    fn visibleDeclNamed(lk: Linkage, t: Tables, file: string, name: string) -> boolean {
         for (const d of t.decls) {
-            if (d.sym.id != t.program.id && d.sym.hint == name) {
-                if (d.file == file || importsName(files, file, name)) return true
-            }
+            if (d.sym.id != t.program.id && d.sym.hint == name && inScope(lk, file, name, d.file)) return true
         }
         return false
     }
 
-    fn importsName(files: FileAst[], file: string, name: string) -> boolean {
-        for (const f of files) {
-            if (f.path == file) {
-                // s471: a `<program>`'s own imports included (link.scrml importsOfItems)
-                for (const imp of importsOfItems(f.items)) {
-                    for (const n of imp.names) {
-                        if (n.name == name) return true
-                    }
-                }
-            }
-        }
-        return false
-    }
-
-    // Two `type` declarations of one name (SPEC-silent: bootstrap-local). In
-    // two files the bootstrap's one type namespace would silently take the first.
+    // Two `type` declarations of one name IN ONE FILE (SPEC-silent:
+    // bootstrap-local). s472: two files may each declare a type of one name —
+    // each file's annotations resolve in its own scope (stubNamed).
     fn dupTypes(t: Tables) -> Diag[] {
         let out: Diag[] = builtinRedeclares(t)
         let names: string[] = []
@@ -13558,8 +13771,6 @@ ${
                 const first: TypeInfo = users[i]
                 if (first.file == ti.file) {
                     out = out.concat([mkDiag(ti.file, ti.span, "E-BOOTSTRAP-REDECLARE", "type `" + names[j] + "` is already declared in this file (at " + offsetOf(first.span) + ") — a file declares each type name once (the SPEC names no code for this; bootstrap-local)")])
-                } else {
-                    out = out.concat([mkDiag(ti.file, ti.span, "E-BOOTSTRAP-UNSUPPORTED", "type `" + names[j] + "` is also declared in `" + first.file + "` — " + oneNamespace(names[j]))])
                 }
             }
             j = j + 1
@@ -13586,12 +13797,6 @@ ${
         return out
     }
 
-    // Why a name declared in two files is refused (measured on base
-    // b7c863235: the binder resolved every use to the FIRST one — a silent
-    // mis-link), stated as the slice limit it is.
-    fn oneNamespace(name: string) -> string {
-        return "the bootstrap links one namespace, so every use of `" + name + "` would resolve to the first one (a silent mis-link); it is refused instead (a bootstrap slice limit, not a language rule)"
-    }
 
     // Two parameters of one name (SPEC-silent: bootstrap-local).
     fn dupParams(file: string, ps: AParam[]) -> Diag[] {
@@ -13609,7 +13814,14 @@ ${
         return out
     }
 
-    // Two user declarations of one name.
+    // Two user declarations of one name. In one file: bootstrap-local. In two
+    // files (s472): every USE resolves per file (declNamed), but the program's
+    // OUTPUT still names a component by its bare name — §9.1 DQ-7 stamps a
+    // component's root `data-scrml="ConstructorName"` and scopes its CSS
+    // `@scope ([data-scrml="<name>"])` — so two components of one name would
+    // share one style scope. The SPEC does not say how two same-named
+    // components keep apart, so the pair is refused by name (a bootstrap limit
+    // pending that ruling — g-boot-component-scope-key-bare-name-s472).
     fn dupDecls(t: Tables) -> Diag[] {
         let out: Diag[] = []
         let users: DeclInfo[] = []
@@ -13627,7 +13839,7 @@ ${
                 if (first.file == d.file) {
                     out = out.concat([mkDiag(d.file, d.span, "E-BOOTSTRAP-REDECLARE", "`<" + names[j] + ">` is already declared in this file (at " + offsetOf(first.span) + ") — the SPEC names no code for this; bootstrap-local")])
                 } else {
-                    out = out.concat([mkDiag(d.file, d.span, "E-BOOTSTRAP-UNSUPPORTED", "`<" + names[j] + ">` is also declared in `" + first.file + "` — " + oneNamespace(names[j]))])
+                    out = out.concat([mkDiag(d.file, d.span, "E-BOOTSTRAP-UNSUPPORTED", "`<" + names[j] + ">` is also declared in `" + first.file + "` — a component's CSS scope key is its bare name (§9.1 DQ-7 `data-scrml=\"ConstructorName\"`), so two declarations of one name in one program would share one style scope; the SPEC does not say how they keep apart, so the bootstrap refuses it — rename one")])
                 }
             }
             j = j + 1
@@ -13650,10 +13862,9 @@ ${
             if (i >= 0) {
                 const f: FnInfo = t.fns[j]
                 const first: FnInfo = t.fns[i]
+                // s472: in two files it is two functions — each call resolves in its own file's scope
                 if (first.file == f.file) {
                     out = out.concat([mkDiag(f.file, f.span, "E-SCOPE-010", "function `" + names[j] + "` is already declared at file scope (at " + offsetOf(first.span) + ") — duplicate binding in file scope (§7.6; ruled S440 #6)")])
-                } else {
-                    out = out.concat([mkDiag(f.file, f.span, "E-BOOTSTRAP-UNSUPPORTED", "function `" + names[j] + "` is also declared in `" + first.file + "` — " + oneNamespace(names[j]))])
                 }
             }
             j = j + 1
@@ -13681,7 +13892,7 @@ ${
     // A PROGRAM-scope handle named like a visible declaration (whose `@name`
     // is its shared instance, §66.7.1) is not a cell: no ruling names it, so
     // it stays the bootstrap-local E-BOOTSTRAP-REDECLARE (owes a ruling).
-    fn dupHandles(files: FileAst[], t: Tables) -> Diag[] {
+    fn dupHandles(files: FileAst[], t: Tables, lk: Linkage) -> Diag[] {
         let out: Diag[] = []
         let prog: DeclInfo | not = declInfo(t, t.program)
         let cells: string[] = []
@@ -13713,7 +13924,7 @@ ${
             } else if (h.file == progFile && cells.indexOf(h.name) >= 0) {
                 const cellAt: string = offsetOf(cellSpans[cells.indexOf(h.name)])
                 out = out.concat([mkDiag(h.file, h.span, "E-HANDLE-REDECLARE", "the handle `as=" + h.name + "` is named like the cell `@" + h.name + "` (declared at " + cellAt + ") — a handle may not share a cell's name, in any scope (a row handle may shadow a program-level HANDLE, never a cell); rename one of them (§66.7.2, §66.7.4)")])
-            } else if (visibleDeclNamed(files, t, h.file, h.name)) {   // any scope — program, row, renders (r5 R5, ruled S442)
+            } else if (visibleDeclNamed(lk, t, h.file, h.name)) {   // any scope — program, row, renders (r5 R5, ruled S442)
                 out = out.concat([mkDiag(h.file, h.span, "E-HANDLE-REDECLARE", "`as=" + h.name + "` — `@" + h.name + "` already names the shared instance of `<" + h.name + ">` (§66.7.1); a handle cannot take that name (a handle named like a visible declaration is E-HANDLE-REDECLARE, ruled S442)")])
             }
             j = j + 1
@@ -13992,8 +14203,7 @@ ${
     // effect, validator) reported in this file; `syms`: the locals whose
     // WRITTEN type was refused (a parameter annotation that failed to parse or
     // to resolve, E-TYPE-UNKNOWN — Rule C for names, r8); `fns`: the functions
-    // (by Sym id) whose written return type was refused, or whose name is
-    // declared in two files (guard (ii), already E-BOOTSTRAP-UNSUPPORTED).
+    // (by Sym id) whose written return type was refused.
     type Blame:struct = { spans: ASpan[], syms: int[], fns: int[] }
     type RVT:struct = { vt: VType, ts: TypeState }
     type RTEnv:struct = { env: TEnv, ts: TypeState }
@@ -14307,9 +14517,12 @@ ${
     // placeKey spells them) its body writes — an assignment, `reset(@x)`, an
     // edit call `@xs.push(…)` — and, transitively, what the functions it calls
     // write. A `given c = @h` body's `c.f` is `@h.f`. Syntactic and whole
-    // program (the bootstrap links one namespace): over-approximate, so it only
-    // ever un-narrows MORE (never silences a report).
-    type FnW:struct = { name: string, keys: string[], params: int[] }   // `params`: the parameter nids (r4 (c): argument checks)
+    // program: a call `()name` takes the UNION of every linked function of
+    // that name (s472: two files may each declare a private `name` — the union
+    // over-approximates), so it only ever un-narrows MORE (never silences a report).
+    // `nid`: the function's AFn nid (s472: argument checks find THE callee's
+    // parameters by it, never by name).
+    type FnW:struct = { name: string, nid: int, keys: string[], params: int[] }   // `params`: the parameter nids (r4 (c): argument checks)
     type Alias:struct = { name: string, key: string }
 
     fn exprKids(e: AExpr) -> AExpr[] {
@@ -14608,7 +14821,7 @@ ${
             for (const af of fnItems(f.items)) {
                 let own: string[] = blockEffects(af.body, [])
                 if (af.server || sqlsInBlock(af.body).length > 0) own = own.concat(["*"])   // serverOwn (§12.2 T1), as the binder decides it
-                ws = ws.concat([{ name: af.name, keys: own, params: paramNids(af.params) }])
+                ws = ws.concat([{ name: af.name, nid: af.nid, keys: own, params: paramNids(af.params) }])
             }
         }
         let changed = true
@@ -14628,7 +14841,7 @@ ${
                         }
                     }
                 }
-                next = next.concat([{ name: w.name, keys: keys, params: w.params }])
+                next = next.concat([{ name: w.name, nid: w.nid, keys: keys, params: w.params }])
             }
             ws = next
             pass = pass + 1
@@ -16457,29 +16670,13 @@ ${
         if (n >= 0 && n != args.length) {
             ts = report(ts, env, e.span, "E-CALL-ARITY", arityMessage(fi.name, n, args.length))
         }
-        // guard (ii), r7 A: a callee whose name is declared in more than one
-        // file is mis-linked by the one-namespace bootstrap (already refused,
-        // E-BOOTSTRAP-UNSUPPORTED) — untrusted: no argument check, no return type
-        if (inManyFiles(env.t, fi.name)) return rvt(VType.Unknown, ts)
-        if (n >= 0 && n == args.length) ts = checkArgs(env, fi.name, args, ts)
+        // (s472: guard (ii) — "a callee whose name is declared in more than one
+        // file is mis-linked" — is retired: the binder resolves a call to the
+        // function its name denotes in the calling file, so `s` IS the callee)
+        if (n >= 0 && n == args.length) ts = checkArgs(env, fi, args, ts)
         const ret: Type | not = fi.ret
         if (ret is given) return rvt(known(ret), ts)
         return rvt(VType.Unknown, ts)
-    }
-
-    // Is a function name declared in more than one file (guard (ii))?
-    fn inManyFiles(t: Tables, name: string) -> boolean {
-        let first: string = ""
-        for (const f of t.fns) {
-            if (f.name == name) {
-                if (first == "") {
-                    first = f.file
-                } else if (f.file != first) {
-                    return true
-                }
-            }
-        }
-        return false
     }
 
     // ---- `int` ENFORCEMENT AT EVERY §7.5.1 POSITION (r4 (c)) -------------------
@@ -16505,11 +16702,12 @@ ${
     }
 
     // Each argument against its parameter (§7.5.1 position 3; every type since r7 A — pa-ruled widening, measured-zero corpus).
-    fn checkArgs(env: TEnv, name: string, args: AExpr[], ts0: TypeState) -> TypeState {
+    fn checkArgs(env: TEnv, fi: FnInfo, args: AExpr[], ts0: TypeState) -> TypeState {
         let ts: TypeState = ts0
+        const name: string = fi.name
         let pnids: int[] = []
         for (const w of env.fnw) {
-            if (w.name == name) pnids = w.params
+            if (w.nid == fi.nid) pnids = w.params     // s472: THE callee's parameters (by its node), never the last function of that name
         }
         if (pnids.length != args.length) return ts
         let i = 0
@@ -17673,8 +17871,9 @@ ${
     }
 
     // s460 (Blame.fns): the functions whose WRITTEN return type was refused —
-    // it failed to parse or to resolve (fnsOf leaves `ret` unset: guard (i))
-    // — or whose name is declared in two files (guard (ii)).
+    // it failed to parse or to resolve (fnsOf leaves `ret` unset: guard (i)).
+    // (s472: guard (ii), a name declared in two files, is retired — calls
+    // resolve per file.)
     fn refusedReturns(files: FileAst[], t: Tables) -> int[] {
         let out: int[] = []
         for (const f of files) {
@@ -17684,9 +17883,7 @@ ${
                     const fi: FnInfo | not = fnInfoOf(t, s)
                     if (fi is given) {
                         const at: AType | not = af.ret
-                        let refused: boolean = inManyFiles(t, fi.name)
-                        if (at is given && !isVoidType(at) && fi.ret is not) refused = true
-                        if (refused) out = out.concat([s.id])
+                        if (at is given && !isVoidType(at) && fi.ret is not) out = out.concat([s.id])
                     }
                 }
             }
@@ -20104,7 +20301,7 @@ ${
             const rd: RDb = dbOfAttr(file, a, acc.st)
             return dbsInItems(g, file, p.items, p.nid, withScope(acc, p.nid, rd.db, rd.st))
         }
-        const sup: AElem | not = supplyingDb(g, p.items)
+        const sup: AElem | not = supplyingDb(g, file, p.items)
         if (sup is given) {
             const src: AAttr | not = attrNamed(sup.attrs, "src")
             if (src is given) {
@@ -20118,14 +20315,14 @@ ${
 
     // The ONE direct-child `<db src=>` of a program body, else not (none, or
     // two or more — "NONE of them supplies").
-    fn supplyingDb(g: Globals, items: AItem[]) -> AElem | not {
+    fn supplyingDb(g: Globals, file: string, items: AItem[]) -> AElem | not {
         let found: AElem[] = []
         for (const it of items) {
             const n: ANode | not = markupOfItemK(it.k)
             if (n is given) {
                 const e: AElem | not = elemOfANode(n)
                 if (e is given) {
-                    if (isDbElem(g, e) && attrNamed(e.attrs, "src") is given) found = found.concat([e])
+                    if (isDbElem(g, file, e) && attrNamed(e.attrs, "src") is given) found = found.concat([e])
                 }
             }
         }
@@ -20136,9 +20333,9 @@ ${
     // A `<db>` state block (§4 — "`db` is a built-in state type"), unless a
     // user declaration takes the name (the binder's rule: a declaration in
     // scope wins over every built-in reading of a tag).
-    fn isDbElem(g: Globals, e: AElem) -> boolean {
+    fn isDbElem(g: Globals, file: string, e: AElem) -> boolean {
         if (e.star || e.tag != "db") return false
-        return declNamed(g, e.tag) is not
+        return declNamed(g, file, e.tag) is not
     }
 
     fn dbsInNode(g: Globals, file: string, n: ANode, scope: int, acc: RDbs) -> RDbs {
@@ -20167,7 +20364,7 @@ ${
         let acc: RDbs = acc0
         for (const a of e.attrs) { acc = withSites(acc, sqlsInValue(a.value), scope) }
         let inner: int = scope
-        if (isDbElem(g, e)) {
+        if (isDbElem(g, file, e)) {
             const src: AAttr | not = attrNamed(e.attrs, "src")
             if (src is given) {
                 if (scopeDbOf(acc.scopes, e.nid) is not) {
@@ -22722,9 +22919,10 @@ ${
                 }
             }
         }
-        // (one `data-scrml` key per component holds by construction: the linker already refuses two
-        // declarations of one name — "the bootstrap links one namespace" — so no two scopes share a key;
-        // when that slice limit lifts, the key must carry the declaring module, or two `card`s merge)
+        // (one `data-scrml` key per component holds by construction: dupDecls refuses two declarations
+        // of one name, in any two files (s472: kept for declarations only, for this key) — so no two
+        // scopes share a key; when that limit lifts, the key must carry the declaring module, or two
+        // `card`s merge — g-boot-component-scope-key-bare-name-s472)
         return { facts: a.facts, diags: a.diags }
     }
 
@@ -23366,7 +23564,7 @@ ${
                                 names: fs.names, values: fs.values, effects: fs.effects, binds: fs.binds, elems: fs.elems,
                                 attrs: fs.attrs, fails: fs.fails, annots: st.annots, unresolved: st.bad, typing: { exprs: [], at: [], presence: [] },
                                 novalidate: [], resets: rr.infos, gated: [], persists: rp.infos, server: noServerFacts(), css: css.facts }
-        const scopeDiags: Diag[] = checkScopes(files, bound)
+        const scopeDiags: Diag[] = checkScopes(files, bound, ra.g.te.link)
         // s452 (dpa-066): THE EFFECT SUMMARY — once, over the bound tables —
         // and the binder's decisions that read it (rulesPass, M3)
         const sum: Summary = summarize(ra.g, bound)

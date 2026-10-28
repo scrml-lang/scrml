@@ -1,0 +1,23 @@
+// s472 fixture stdlib — `scrml:vis`: an exported surface over private internals.
+// A page reaches ONLY what it imports from here (§21.3): not `helper` (not
+// exported), not `inner` (exported by `./inner.scrml`, imported only here).
+${
+    import { inner } from "./inner.scrml";
+
+    fn helper() -> string {
+        return "lib-helper";
+    }
+
+    export fn pub(s: string) -> string {
+        return helper() + ":" + inner(s);
+    }
+
+    export type Tone:enum = { Warm, Cool }
+
+    export fn toneName(t: Tone) -> string {
+        return match t {
+            .Warm :> "warm",
+            .Cool :> "cool"
+        };
+    }
+}

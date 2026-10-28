@@ -253,13 +253,23 @@ describe("diagnostics — ruled CSS the bootstrap refuses by name, and the use-s
     ], "app.scrml");
     expect(r.diags.filter((d) => d.code !== "E-STMT-MISSING-SEMICOLON").map((d) => [d.code, d.file])).toEqual([["E-BOOTSTRAP-UNSUPPORTED", "lib.scrml"]]);
   });
+  // s472: file scope — uses resolve per file now, but the scope KEY is still the bare name
+  // (§9.1 DQ-7), so two same-named components in two files stay refused (dupDecls;
+  // g-boot-component-scope-key-bare-name-s472). Importing the name AND declaring it is,
+  // in addition, a duplicate binding in file scope (E-SCOPE-010, §7.6).
   test("two components of one name cannot share a scope key: the linker refuses the second declaration", () => {
     const r = frontEnd(mods, [
       { path: "a.scrml", src: `export <card t:string/>\nrenders <div>#{ .x { color: red; } }\${t}</div>\n` },
-      { path: "app.scrml", src: `import { card } from "./a.scrml";\n<program>\n    <card x:string/>\n    renders <p>\${x}</p>\n    <main><p>x</p></main>\n</program>\n` },
+      { path: "app.scrml", src: `<program>\n    <card x:string/>\n    renders <p>\${x}</p>\n    <main><p>x</p></main>\n</program>\n` },
     ], "app.scrml");
     expect(r.diags.map((d) => d.code)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
     expect(r.diags[0].message).toContain("is also declared in");
+    expect(r.diags[0].message).toContain("CSS scope key");
+    const r2 = frontEnd(mods, [
+      { path: "a.scrml", src: `export <card t:string/>\nrenders <div>#{ .x { color: red; } }\${t}</div>\n` },
+      { path: "app.scrml", src: `import { card } from "./a.scrml";\n<program>\n    <card x:string/>\n    renders <p>\${x}</p>\n    <main><p>x</p></main>\n</program>\n` },
+    ], "app.scrml");
+    expect(r2.diags.map((d) => d.code).sort()).toEqual(["E-BOOTSTRAP-UNSUPPORTED", "E-SCOPE-010"]);
   });
   test("a library component's `#{}` is its scope in the consuming program's sheet", () => {
     const r = frontEnd(mods, [
