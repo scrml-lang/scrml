@@ -48,8 +48,12 @@ Ruling: scrml-support/user-voice-scrml.md "⭐ RULED — `<db>` body + client re
 ## Round 1 (S239 review of 4d8a33f32: LAND-WITH-FOLLOWUPS — no leak, no wrong DB)
 
 - Merged origin/main (7907231dc; SPEC-INDEX regenerated from the merged tree).
-- **Function visibility, not ruled.** A db-body function is read as PROGRAM-WIDE (it is hoisted to the program; PA lean,
-  pending bryan). SPEC §4.18.1 S472 note now says it is unruled and what the bootstrap does.
+- **Function visibility — RULED S472** (user-voice-scrml.md "⭐ RULED — functions in a `<db>` body: visibility",
+  *"your recs on <db> functions"*). A db-body function is a PROGRAM-LEVEL function, and its `?{}` binds to its
+  declaring `<db>`. A name collision is E-SCOPE-010, which the review verified, W01/W04. A function in a `<db>` nested
+  in an `<each>` row, a component's renders/body, an engine state child or a `<match>` arm is refused for now. This is
+  what the bootstrap builds. The SPEC sentence lands with Lane B (§8.1.2); the §4.18.1 S472 note only points at the
+  ruling.
 - **MED-1.** Under that reading, a function in a `<db>` that stands inside a name-binding scope would lose those names,
   or bind the program's names of the same spelling. So it is refused by name there: E-BOOTSTRAP-UNSUPPORTED, from
   analyze.scrml `nameScopeHere` in resolveDb and `refuseStateChildDbFns` in phaseB. The scopes covered are:

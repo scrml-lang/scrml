@@ -91,6 +91,10 @@ const STATUS = {
   "security/failable-fails": ["PASS", []],
   "toenum/neg-arg-type": ["PASS", ["E-TYPE-031"]],
   "toenum/prototype-keys": ["PASS", []],
+  // s472-boot-payload-variant — §14.4 payload-variant values built in expressions (was: refused, "only `fail` builds one")
+  "variants/construct-runs": ["PASS", []],
+  "variants/neg-arity": ["PASS", ["E-TYPE-082"]],
+  "variants/neg-payload-type": ["PASS", ["E-TYPE-031"]],
   // s469-boot-strings-1 — the typed string methods (positions are code points), bryan's guess made
   // case-insensitive (the `"typed " + …` half skipped: no int→string conversion is ruled)
   "strings/guess-ci-yes": ["PASS", []],
@@ -369,6 +373,9 @@ describe("bootstrap acceptance cases — today's verdicts", () => {
                        "loop/sum-tape", "loop/range", "loop/cond-head", "loop/counted-continue", "loop/forever-break", "loop/labels", "loop/index-at"]) {
       expect([rel, verdicts[rel].runtimeExecuted]).toEqual([rel, true]);
     }
+  });
+  test("s472-boot-payload-variant: the positive construction case RAN on the bootstrap (output checked)", () => {
+    expect(["variants/construct-runs", verdicts["variants/construct-runs"].runtimeExecuted]).toEqual(["variants/construct-runs", true]);
   });
   test("s471-bootstrap-lin-loop: every positive loop / defer case RAN on the bootstrap (output checked)", () => {
     for (const rel of ["loop/defer-per-iteration", "loop/defer-loop-in-defer", "lin/consume-once", "lin/param-once"]) {
