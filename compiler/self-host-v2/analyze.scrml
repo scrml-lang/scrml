@@ -51,7 +51,7 @@ ${
     import { ASpan, BinOp, UnOp, AExpr, AProp, AExprK, AStmt, ABlock, AStmtK, AEffect, AType, ATypeK,
              ATypeField, AVariant, ATypeBody, ATypeDecl, AParam, AFn, AImportName, AImport,
              AAttrValue, AAttr, AElem, ANode, ANodeK, ADeclAttr, AStateChild, ADeclChild, ADecl, AValArg, AValidator,
-             AProgram, AItem, AItemK, FileAst, Diag, ASql,
+             AProgram, AItem, AItemK, AConst, FileAst, Diag, ASql,
              AHow, AHandled, AArm, APat, ABind, AArmBody, AFail, AFor, AForHead, AIterSrc, AForBound, ALift,
              ACss, ACssItem, ACssRule, ACssDecl, ACssPart, ACssRef, mkSpan, newDiag } from "./ast.scrml"
     import { Severity } from "./severity.scrml"
@@ -244,12 +244,14 @@ ${
         NFn(sym: Sym),                                    // a function
         NLength,                                          // `.length` of a sequence or a string (a primitive read)
         NSurface(of: ValidityOf, prop: SurfaceProp),      // s449: a read of the validity surface (§55.5 / §55.6) — read-only
+        NConst(sym: Sym),                                 // s472: a file-scope constant (§7.6) — lowered to Core `Local(sym)` of CoreProgram.consts
     }
     export type ValueFact:enum = {
         VLit(lit: Literal),                               // a literal (int vs number resolved)
         VVariant(enumSym: Sym, idx: int),                 // a bare variant
         VOp(op: PrimOp),                                  // a unary / binary operator, resolved (§45)
         VStructOf(ty: Sym, order: int[]),                 // an object literal: prop index per declared field
+        VConstruct(enumSym: Sym, idx: int),               // s472: a payload-variant construction `E.V(…)` / `.V(…)` (§14.4) — a call node; Core VariantOf
         VHost(call: HostCall),                            // s444: a host call (`Date.now()`) — the closed HostCall set
         VSeqCall(op: SeqFn),                              // s444: `seq.filter(λ)` / `seq.map(λ)` — a call node
         VLambda(params: Sym[]),                           // s444: `x => e` as a SeqCall's argument — its parameter locals
@@ -432,6 +434,7 @@ ${
         persists: PersistInfo[], // s451: the program cells' accepted `persist=` (§6.14)
         server: ServerFacts,    // s451 (U1a): route placement + the program's queries and databases (placePass)
         css: CssFacts,          // s469: the stylesheet the program's `#{}` blocks make (cssPass)
+        consts: ConstInfo[],    // s472: the file-scope constants (constPass) — lowered once each into CoreProgram.consts
     }
 
     // s451 (U1a) — what route inference and the SQL pass decided (placePass).
@@ -743,6 +746,7 @@ ${
         sceSym: Sym,            // s454 (U1b): the built-in `ServerCallError` enum (§19.9.10)
         voids: int[],           // s469 (#1471 r3): the VOID functions (voidFns) — a call of one has type `void`
         hostSites: HostSite[],  // s472 (boot-math-port): every wrapper-shaped host call, judged (hostWrappers)
+        consts: ConstInfo[],    // s472: the file-scope constants, in link order then source order (constPass)
     }
 
     type RTypeInfos:struct = { ts: TypeInfo[], st: AS }
@@ -894,6 +898,7 @@ ${
         return match k {
             .TypeItem(t: t) :> [t]
             .ProgramItem(p: p) :> typeItems(p.items)
+            .ConstItem(c: c) :> []
             .ImportItem(i: i) :> []
             .FnItem(f: f) :> []
             .DeclItem(d: d) :> []
@@ -924,7 +929,8 @@ ${
     // EXPORTED declaration(s) of the name: a private declaration of another kind
     // that shares the name stays private (before r1, importing an exported type
     // `Tag` also brought the file's private `fn Tag` into scope).
-    type NameKind:enum = { KType, KFn, KDecl }
+    // s472: KConst — a file-scope constant (§7.6; `[export] const NAME = …` in a `${ }` block).
+    type NameKind:enum = { KType, KFn, KDecl, KConst }
     type OwnName:struct = { name: string, kind: NameKind, file: string, exported: boolean }
     type ScopeName:struct = { name: string, kind: NameKind, from: string }
     type FileScope:struct = { file: string, names: ScopeName[] }
@@ -971,6 +977,7 @@ ${
         }
         for (const f of files) {
             for (const af of fnItems(f.items)) { out = out.concat([{ name: af.name, kind: NameKind.KFn, file: f.path, exported: af.exported }]) }
+            for (const ac of constItems(f.items)) { out = out.concat([{ name: ac.name, kind: NameKind.KConst, file: f.path, exported: ac.exported }]) }
         }
         return out
     }
@@ -1441,6 +1448,7 @@ ${
         return match k {
             .DeclItem(d: d) :> userDeclStub(d, file, st)
             .ProgramItem(p: p) :> withNestedStubs(programStub(p, file, entry, st), p, file)
+            .ConstItem(c: c) :> noStubs(st)
             .ImportItem(i: i) :> noStubs(st)
             .TypeItem(t: t) :> noStubs(st)
             .FnItem(f: f) :> noStubs(st)
@@ -1529,6 +1537,7 @@ ${
         const k: AItemK = it.k
         return match k {
             .ProgramItem(p: p) :> p
+            .ConstItem(c: c) :> not
             .DeclItem(d: d) :> not
             .ImportItem(i: i) :> not
             .TypeItem(t: t) :> not
@@ -1542,6 +1551,7 @@ ${
         return match k {
             .MarkupItem(n: n) :> n
             .ProgramItem(p: p) :> not
+            .ConstItem(c: c) :> not
             .DeclItem(d: d) :> not
             .ImportItem(i: i) :> not
             .TypeItem(t: t) :> not
@@ -3717,6 +3727,7 @@ ${
             .FnItem(f: f) :> []
             .MarkupItem(n: n) :> []
             .ProgramItem(p: p) :> []
+            .ConstItem(c: c) :> []
         }
     }
 
@@ -3859,6 +3870,7 @@ ${
             .FnItem(f: f) :> []
             .DeclItem(d: d) :> []
             .ProgramItem(p: p) :> []
+            .ConstItem(c: c) :> []
         }
     }
 
@@ -4395,6 +4407,27 @@ ${
         return match k {
             .FnItem(f: f) :> [f]
             .ProgramItem(p: p) :> fnItems(p.items)
+            .ConstItem(c: c) :> []
+            .ImportItem(i: i) :> []
+            .TypeItem(t: t) :> []
+            .DeclItem(d: d) :> []
+            .MarkupItem(n: n) :> []
+        }
+    }
+
+    // s472 — the file-scope constants of `items` (a `<program>`'s `${ }` included), in source order.
+    fn constItems(items: AItem[]) -> AConst[] {
+        let out: AConst[] = []
+        for (const it of items) { if (!isLaterProgram(items, it)) out = out.concat(constItemOf(it)) }
+        return out
+    }
+
+    fn constItemOf(it: AItem) -> AConst[] {
+        const k: AItemK = it.k
+        return match k {
+            .ConstItem(c: c) :> [c]
+            .ProgramItem(p: p) :> constItems(p.items)
+            .FnItem(f: f) :> []
             .ImportItem(i: i) :> []
             .TypeItem(t: t) :> []
             .DeclItem(d: d) :> []
@@ -4692,9 +4725,12 @@ ${
         const rc: RCycles = derivedCycles(decls, files, st)
         st = rc.st
         decls = rc.decls
+        // s472: the file-scope constants' Syms and written types (their values: constPass)
+        const rk: RConsts = constStubs(files, te0, st)
+        st = rk.st
         const g: Globals = { program: program, entry: entry, te: te0, types: allTypes, decls: decls, fns: rf.fs, handles: handles, files: files,
                              errorSym: builtinSym(rs.stubs, "Error"), sqlErrorSym: builtinSym(rs.stubs, "SqlError"),
-                             sceSym: builtinSym(rs.stubs, serverCallErrorName()), voids: voidFns(rf.fs, lk), hostSites: rh.sites }
+                             sceSym: builtinSym(rs.stubs, serverCallErrorName()), voids: voidFns(rf.fs, lk), hostSites: rh.sites, consts: rk.cs }
         return { g: g, st: st }
     }
 
@@ -5213,7 +5249,7 @@ ${
             .Recovered :> plain(not, recoveredBackstop(env, e, st))   // the parser reported it: no fact, no type
             .Variant(name: n) :> resolveVariant(env, e, n, expected, st)
             .Member(obj: o, name: n) :> resolveMember(env, e, o, n, st)
-            .Call(callee: c, args: args) :> resolveCall(env, e, c, args, st)
+            .Call(callee: c, args: args) :> resolveCallOrConstruct(env, e, c, args, expected, st)
             .Unary(op: o, e: x) :> resolveUnary(env, e, o, x, st)
             .Binary(op: o, l: l, r: r) :> resolveBinary(env, e, o, l, r, st)
             .Ternary(test: t, yes: y, no: n) :> resolveTernary(env, e, t, y, n, expected, st)
@@ -5256,6 +5292,12 @@ ${
                 if (i >= 0) return plain(d.info.fields[i].ty, addName(st, e.nid, NameFact.NField(d.info.sym, InstRef.Lexical(0), i)))
             }
         }
+        // s472: a file-scope constant (§7.6) — after the locals, which shadow it
+        const kc: ConstInfo | not = constNamed(env.g, env.file, name)
+        if (kc is given) {
+            if (!kc.ready) return diagX(env, e, "E-SCOPE-001", "`" + name + "` is read before it is initialized — a file-scope constant's initializer reads only the constants initialized before it (declared earlier in this file, or in a file this one imports)", st)
+            return plain(kc.ty, addName(st, e.nid, NameFact.NConst(kc.sym)))
+        }
         const f: FnInfo | not = fnNamed(env.g, env.file, name)
         if (f is given) {
             const st2: AS = addName(st, e.nid, NameFact.NFn(f.sym))
@@ -5277,7 +5319,14 @@ ${
         }
         // s471: a name a refused import brings is that import's failure (checkImports), not also undeclared
         if (importRefusesName(env.g, env.file, name)) return plain(not, st)
-        return diagX(env, e, "E-SCOPE-001", "`" + name + "` is not declared" + elsewhereNote(env.g.te.link, env.file, NameKind.KFn, false, name), st)
+        return diagX(env, e, "E-SCOPE-001", "`" + name + "` is not declared" + valueElsewhere(env.g.te.link, env.file, name), st)
+    }
+
+    // s472 — where a VALUE name (a function, or a file-scope constant) is declared, when not here.
+    fn valueElsewhere(lk: Linkage, file: string, name: string) -> string {
+        const n: string = elsewhereNote(lk, file, NameKind.KFn, false, name)
+        if (n != "") return n
+        return elsewhereNote(lk, file, NameKind.KConst, false, name)
     }
 
     // s472 (boot-math-port) — a use of the `import:host` binding `name` (§21.3.1,
@@ -5412,11 +5461,13 @@ ${
     // A bare variant resolves against the type its position expects; with no
     // expectation, against the one enum that has it.
     fn resolveVariant(env: Env, e: AExpr, name: string, expected: Type | not, st: AS) -> RX {
-        if (expected is given) {
-            const es: Sym | not = isEnumType(env.g.types, expected)
+        // s472 r1 F5: a `T | not` position expects `T` (§14.10: the position's type)
+        const want: Type | not = unMaybeOpt(expected)
+        if (want is given) {
+            const es: Sym | not = isEnumType(env.g.types, want)
             if (es is given) {
                 const i: int = variantIndex(env.g.types, es, name)
-                if (i >= 0) return plain(expected, addValue(st, e.nid, ValueFact.VVariant(es, i)))
+                if (i >= 0) return unitVariantValue(env, e, es, i, "." + name, Type.Named(es), st)
                 return diagX(env, e, "E-TYPE-VARIANT", "`." + name + "` is not a variant of `" + es.hint + "`", st)
             }
         }
@@ -5432,9 +5483,32 @@ ${
                 idx = i
             }
         }
-        if (found.length == 1) return plain(Type.Named(found[0]), addValue(st, e.nid, ValueFact.VVariant(found[0], idx)))
+        if (found.length == 1) return unitVariantValue(env, e, found[0], idx, "." + name, Type.Named(found[0]), st)
         if (found.length == 0) return diagX(env, e, "E-TYPE-VARIANT", "`." + name + "` is not a variant of any enum in scope", st)
         return diagX(env, e, "E-VARIANT-AMBIGUOUS", "`." + name + "` is a variant of more than one enum — qualify it", st)
+    }
+
+    fn unMaybeOpt(t: Type | not) -> Type | not {
+        if (t is not) return not
+        const i: Type | not = maybeInner(t)
+        if (i is given) return i
+        return t
+    }
+
+    // s472 r1 F3 — a variant named as a VALUE without parentheses. A unit variant is
+    // its value (§14.5). A PAYLOAD variant named without its payload is not a value:
+    // §45.7 (W-EQ-PAYLOAD-VARIANT) reads `Enum.PayloadVariant` with no payload argument
+    // as "the ctor function, not a value", and the bootstrap has no function values —
+    // refused, fail closed, bare and qualified alike (was: the bare spelling lowered
+    // to a unit-shaped `Lit(Variant)` of a payload variant, which no arm matches).
+    fn unitVariantValue(env: Env, e: AExpr, es: Sym, i: int, written: string, ty: Type, st: AS) -> RX {
+        const vs: VariantDef[] = enumVariantsOf(env.g, es)
+        if (vs[i].fields.length > 0) return diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", payloadNoArgsMsg(es.hint, vs[i].sym.hint, written, vs[i].fields.length), st)
+        return plain(ty, addValue(st, e.nid, ValueFact.VVariant(es, i)))
+    }
+
+    fn payloadNoArgsMsg(en: string, vn: string, written: string, n: int) -> string {
+        return "`" + written + "` — `" + en + "." + vn + "` carries a payload (" + n + " field(s)); named without one it is the constructor, not a value (§45.7: \"the ctor function, not a value\"), and a constructor as a function value is not in the bootstrap — construct the value: `" + written + "(…)`, one argument per declared field (§14.4)"
     }
 
     fn isLengthOf(t: Type | not) -> boolean {
@@ -5568,6 +5642,7 @@ ${
             .NFn(sym: s) :> not
             .NLength :> not
             .NSurface(of: x) :> not
+            .NConst(sym: s) :> not
             not :> not
         }
     }
@@ -5628,6 +5703,7 @@ ${
             .NFn(sym: s) :> 0
             .NLength :> 0
             .NSurface(of: x) :> 0
+            .NConst(sym: s) :> 0
             not :> 0
         }
     }
@@ -5635,6 +5711,169 @@ ${
     fn declKindOf(env: Env, d: Sym) -> int {
         if (d.id == env.g.program.id) return 2
         return 1
+    }
+
+    // =========================================================================
+    // s472 — PAYLOAD-VARIANT CONSTRUCTION (g-boot-payload-variant-value-s472).
+    // SPEC §14.4 "Construction arity": "Constructing a payload variant
+    // (`Shape.Rectangle(w, h)`, `.Circle(r)`) supplies exactly one positional
+    // argument per declared field, in declaration order … A construction whose
+    // argument count does not match the variant's declared payload field count —
+    // too few, too many, or any payload on a unit variant (`Shape.Point(x)`) — is a
+    // hard error (E-TYPE-082) … The check lives at the variant-constructor site and
+    // applies uniformly across every construction locus — `let` / `const` /
+    // state-cell initializers, `return`, and `fail`."
+    // §14.10: "An enum-payload-variant CONSTRUCTOR argument is such a position" (a
+    // bare variant argument resolves against the PAYLOAD field's type); "The
+    // constructor callee may be bare (`.OnePlayer(...)`, resolved against the
+    // surrounding-declaration enum) or qualified (`Mode.OnePlayer(...)` …, resolved
+    // directly)". §66.3 rule 5 (via §14.10): "`E.V(…)` is a call whose declared type
+    // is `E`".
+    // The callee is decided from the AST alone: `E.V(…)` where `E` names an enum
+    // type here (no local shadows it), or a bare `.V(…)`. Anything else is not a
+    // construction (`not`) and goes on to resolveCall unchanged. The value is
+    // recorded as VConstruct on the CALL node; each argument is resolved against
+    // its field's type (the bare-variant position above) and TYPED against it by
+    // typeCall (E-TYPE-031, as a `fail`'s payload is — typeFail).
+    // =========================================================================
+    fn resolveCallOrConstruct(env: Env, e: AExpr, callee: AExpr, args: AExpr[], expected: Type | not, st0: AS) -> RX {
+        const rc: RX | not = resolveConstruct(env, e, callee, args, expected, st0)
+        if (rc is given) return rc
+        return resolveCall(env, e, callee, args, st0)
+    }
+
+    fn bareVariantName(e: AExpr) -> string {
+        const k: AExprK = e.k
+        return match k {
+            .Variant(name: n) :> n
+            .Name(name: n) :> ""
+            .At(name: n) :> ""
+            .AtItem :> ""
+            .Num(raw: r) :> ""
+            .Str(v: s) :> ""
+            .Bool(v: b) :> ""
+            .NotLit :> ""
+            .Recovered :> ""
+            .Member(obj: o) :> ""
+            .Call(callee: c) :> ""
+            .Unary(op: o) :> ""
+            .Binary(op: o) :> ""
+            .Ternary(test: t) :> ""
+            .Assign(target: t) :> ""
+            .ArrayLit(elems: es) :> ""
+            .ObjectLit(props: ps) :> ""
+            .Spread(e: sx) :> ""
+            .Index(obj: ix) :> ""
+            .Lambda(params: lp) :> ""
+            .Sql(q: q) :> ""
+            .Handled(h: x) :> ""
+            .Template(quasis: qs) :> ""
+        }
+    }
+
+    // The enum a construction's callee names, or not when the callee is not a
+    // variant constructor at all. `written` is the callee as the author wrote it.
+    type CtorOf:struct = { es: Sym | not, name: string, written: string, err: string, code: string }
+
+    fn ctorOf(env: Env, callee: AExpr, expected: Type | not) -> CtorOf | not {
+        const m: MethodCall | not = memberCall(callee)
+        if (m is given) {
+            const n: string = exprName(m.obj)
+            if (n == "" || atName(m.obj) != "") return not
+            // r1 F7: `E.V(…)` where `E` is not in scope here — say why, as #1606's
+            // E-SCOPE-001 does (declared in another file, not exported / not imported)
+            const nt: Sym | not = typeNamedHere(env, n)
+            if (lookupLocal(env, n) is given) {
+                if (nt is given && startsUpper(m.method)) {
+                    if (isEnumType(env.g.types, Type.Named(nt)) is given) return { es: not, name: m.method, written: n + "." + m.method, err: "`" + n + "." + m.method + "(…)` — `" + n + "` here is a local, which shadows the enum `" + n + "`; rename the local to construct the variant", code: "E-BOOTSTRAP-UNSUPPORTED" }
+                }
+                return not
+            }
+            if (nt is not && startsUpper(n) && startsUpper(m.method)) {
+                const why: string = elsewhereNote(env.g.te.link, env.file, NameKind.KType, false, n)
+                if (why != "") return { es: not, name: m.method, written: n + "." + m.method, err: "`" + n + "` is not declared" + why, code: "E-SCOPE-001" }
+            }
+            const ts: Sym | not = nt
+            if (ts is not) return not
+            const qs: Sym | not = isEnumType(env.g.types, Type.Named(ts))
+            if (qs is not) return not
+            // `E.parse(s)` / `E.toEnum(s)` are the enum's built-ins (§14.13.4, §14.4.1), not
+            // variants: a variant name begins with an uppercase letter (§14.4,
+            // E-ENUM-VARIANT-CASE), so only such a name is a constructor — one the enum
+            // does not declare is an unknown variant (ctor resolution reports it)
+            if (variantIndex(env.g.types, qs, m.method) < 0 && !startsUpper(m.method)) return not
+            return { es: qs, name: m.method, written: n + "." + m.method, err: "", code: "" }
+        }
+        const b: string = bareVariantName(callee)
+        if (b == "") return not
+        // r2 (claim gate): a lowercase bare callee is no variant name (§14.4,
+        // E-ENUM-VARIANT-CASE) — e.g. the `.send(…)` a recovered `<#w>.send(…)` leaves.
+        // Not a construction: resolveCall refuses it as it did before (no cascade)
+        if (!startsUpper(b)) return not
+        const w: string = "." + b
+        // the bare form: against the enum its position expects (§14.10) — as a
+        // bare unit variant resolves (resolveVariant), one rule for both
+        const want: Type | not = unMaybeOpt(expected)   // r1 F5: a `T | not` position expects `T`
+        if (want is given) {
+            const xs: Sym | not = isEnumType(env.g.types, want)
+            if (xs is given) {
+                if (variantIndex(env.g.types, xs, b) >= 0) return { es: xs, name: b, written: w, err: "", code: "" }
+                return { es: not, name: b, written: w, err: "`" + w + "(…)` — `" + b + "` is not a variant of `" + xs.hint + "`", code: "E-TYPE-VARIANT" }
+            }
+        }
+        let found: Sym[] = []
+        for (const t of env.g.types) {
+            const s: Sym = typeDefSym(t.def)
+            if (variantIndex(env.g.types, s, b) >= 0 && t.file != builtinFile() && typeInScope(env, t)) found = found.concat([s])
+        }
+        if (found.length == 1) return { es: found[0], name: b, written: w, err: "", code: "" }
+        if (found.length == 0) return { es: not, name: b, written: w, err: "`" + w + "(…)` — `" + b + "` is not a variant of any enum in scope", code: "E-TYPE-VARIANT" }
+        return { es: not, name: b, written: w, err: "`" + w + "(…)` — `" + b + "` is a variant of more than one enum — qualify it", code: "E-VARIANT-AMBIGUOUS" }
+    }
+
+    fn startsUpper(n: string) -> boolean {
+        if (n.length == 0) return false
+        const c: string = n.charAt(0)
+        return c >= "A" && c <= "Z"
+    }
+
+    // r2: on an arity refusal, each argument that HAS a declared field is still resolved
+    // against it (its own errors are real); a surplus one is not (nothing to resolve it
+    // against, and an object literal there would only cascade)
+    fn resolveCtorArgs(env: Env, args: AExpr[], fs: FieldDef[], st0: AS) -> AS {
+        let st: AS = st0
+        let i = 0
+        for (const a of args) {
+            if (i < fs.length) st = resolveExpr(env, a, fs[i].ty, st).st
+            i = i + 1
+        }
+        return st
+    }
+
+    fn resolveConstruct(env: Env, e: AExpr, callee: AExpr, args: AExpr[], expected: Type | not, st0: AS) -> RX | not {
+        const c: CtorOf | not = ctorOf(env, callee, expected)
+        if (c is not) return not
+        const es: Sym | not = c.es
+        // r2: a refused construction does not resolve its arguments (no field type to
+        // resolve them against — an object literal there would cascade as
+        // E-TYPE-STRUCT-CONTEXT), as resolveCall's refusals do not
+        if (es is not) return diagX(env, e, c.code, c.err, st0)
+        const idx: int = variantIndex(env.g.types, es, c.name)
+        if (idx < 0) return diagX(env, e, "E-TYPE-VARIANT", "`" + c.written + "(…)` — `" + c.name + "` is not a variant of `" + es.hint + "`", st0)
+        const fs: FieldDef[] = enumVariantsOf(env.g, es)[idx].fields
+        if (fs.length == 0 && args.length > 0) return diagX(env, e, "E-TYPE-082", "`" + es.hint + "." + c.name + "` is a unit variant — it carries no payload, and this construction supplies " + args.length + " — write `" + es.hint + "." + c.name + "` (§14.4 construction arity)", st0)
+        // `E.V()` on a unit variant: no payload, but not the unit value's spelling
+        // either (§14.5 writes it `E.V`); the SPEC does not say what `()` adds —
+        // refused, fail closed, rather than read as the unit value
+        if (fs.length == 0) return diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", "`" + c.written + "()` — `" + c.name + "` is a unit variant; its value is written without parentheses: `" + c.written + "` (§14.5)", st0)
+        if (fs.length != args.length) return diagX(env, e, "E-TYPE-082", "`" + es.hint + "." + c.name + "` carries " + fs.length + " payload value(s) but this construction supplies " + args.length + " — one argument per declared field, in order (§14.4)", resolveCtorArgs(env, args, fs, st0))
+        let st: AS = st0
+        let i = 0
+        for (const a of args) {
+            st = resolveExpr(env, a, fs[i].ty, st).st
+            i = i + 1
+        }
+        return plain(Type.Named(es), addValue(st, e.nid, ValueFact.VConstruct(es, idx)))
     }
 
     fn resolveCall(env: Env, e: AExpr, callee: AExpr, args: AExpr[], st0: AS) -> RX {
@@ -5713,6 +5952,7 @@ ${
             .NStruct(owner: o) :> not
             .NLength :> not
             .NSurface(of: x) :> not
+            .NConst(sym: s) :> not
             not :> not
         }
     }
@@ -6135,7 +6375,7 @@ ${
         const i: int = variantIndex(env.g.types, es, name)
         if (i < 0) return diagX(env, e, "E-TYPE-VARIANT", "`" + n + "." + name + "` — `" + name + "` is not a variant of `" + n + "`", st)
         const vs: VariantDef[] = enumVariantsOf(env.g, es)
-        if (vs[i].fields.length > 0) return diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", "`" + n + "." + name + "` carries a payload — constructing a payload variant value is not in the bootstrap yet (only `fail` builds one)", st)
+        if (vs[i].fields.length > 0) return diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", payloadNoArgsMsg(n, name, n + "." + name, vs[i].fields.length), st)
         return plain(Type.Named(es), addValue(st, e.nid, ValueFact.VVariant(es, i)))
     }
 
@@ -6248,7 +6488,9 @@ ${
 
     // A refused call names its method (fail closed BY NAME), when it has one.
     // s469 F/U-8: `E.V(…)` on an enum type is a payload-variant CONSTRUCTION,
-    // said as such (not as a "method").
+    // said as such (not as a "method"). s472: resolveConstruct takes every
+    // `E.V(…)` on an enum before resolveCall runs, so that branch is a
+    // fail-closed fallback only.
     fn callText(env: Env, callee: AExpr) -> string {
         const m: MethodCall | not = memberCall(callee)
         if (m is not) return ""
@@ -6256,7 +6498,7 @@ ${
         if (n != "" && atName(m.obj) == "" && lookupLocal(env, n) is not) {
             const ts: Sym | not = typeNamedHere(env, n)
             if (ts is given) {
-                if (isEnumType(env.g.types, Type.Named(ts)) is given) return "constructing the payload variant `" + n + "." + m.method + "(…)` as a value is not in the bootstrap (only `fail` builds one) — "
+                if (isEnumType(env.g.types, Type.Named(ts)) is given) return "`" + n + "." + m.method + "(…)` — "
             }
         }
         return "`." + m.method + "(…)` is not in the bootstrap — "
@@ -6854,6 +7096,44 @@ ${
         return plain(r2.x.ty, addValue(r2.st, e.nid, ValueFact.VOp(PrimOp.Neg)))
     }
 
+    // s472: a bare variant `.V`, or a bare construction `.V(…)` — an operand
+    // whose enum comes from its position (§14.10).
+    fn isBareVariantish(e: AExpr) -> boolean {
+        if (isVariantExpr(e)) return true
+        const c: AExpr | not = calleeOfCall(e)
+        if (c is not) return false
+        return bareVariantName(c) != ""
+    }
+
+    fn calleeOfCall(e: AExpr) -> AExpr | not {
+        const k: AExprK = e.k
+        return match k {
+            .Call(callee: c) :> c
+            .Variant(name: n) :> not
+            .Name(name: n) :> not
+            .At(name: n) :> not
+            .AtItem :> not
+            .Num(raw: r) :> not
+            .Str(v: s) :> not
+            .Bool(v: b) :> not
+            .NotLit :> not
+            .Recovered :> not
+            .Member(obj: o) :> not
+            .Unary(op: o) :> not
+            .Binary(op: o) :> not
+            .Ternary(test: t) :> not
+            .Assign(target: t) :> not
+            .ArrayLit(elems: es) :> not
+            .ObjectLit(props: ps) :> not
+            .Spread(e: sx) :> not
+            .Index(obj: ix) :> not
+            .Lambda(params: lp) :> not
+            .Sql(q: q) :> not
+            .Handled(h: x) :> not
+            .Template(quasis: qs) :> not
+        }
+    }
+
     fn isVariantExpr(e: AExpr) -> boolean {
         const k: AExprK = e.k
         return match k {
@@ -6914,7 +7194,8 @@ ${
         // operands: a bare variant takes the OTHER operand's type
         let rl: RX = plain(not, st0)
         let rr: RX = plain(not, st0)
-        if (isVariantExpr(l) && !isVariantExpr(r)) {
+        // s472: a bare CONSTRUCTION `.V(…)` takes the other operand's type as a bare `.V` does (§14.10)
+        if (isBareVariantish(l) && !isBareVariantish(r)) {
             rr = resolveExpr(env, r, not, st0)
             rl = resolveExpr(env, l, rr.x.ty, rr.st)
             rr = { x: rr.x, st: rl.st }
@@ -7152,6 +7433,11 @@ ${
                 return noPlace(addDiag(st, env.file, t.span, "E-DECL-RENDERS-BARE-WRITE", "`" + name + "` inside a `renders` is a read-only projection — write it as `@" + d.info.sym.hint + "." + name + "` (§66.5.2)"))
             }
         }
+        // s472: a file-scope constant is not assigned — §50.9: "An assignment to a
+        // `const` variable SHALL be a compile error (E-ASSIGN-004), in statement
+        // position and in expression position alike." (A function-body `const`
+        // takes the bootstrap's older E-ASSIGN-CONST, resolveAssign — not changed here.)
+        if (constNamed(env.g, env.file, name) is given) return noPlace(addDiag(st, env.file, t.span, "E-ASSIGN-004", "`" + name + "` is a file-scope `const` — an assignment to a `const` variable is a compile error (§50.9); declare a cell (`<" + name + ":T=…/>`) for a value that changes"))
         return noPlace(addDiag(st, env.file, t.span, "E-SCOPE-001", "`" + name + "` is not a writable local"))
     }
 
@@ -11473,6 +11759,7 @@ ${
             .NFn(sym: s) :> notMutableDep(env, d, name, st)
             .NLength :> notMutableDep(env, d, name, st)
             .NSurface(of: x) :> notMutableDep(env, d, name, st)
+            .NConst(sym: s) :> notMutableDep(env, d, name, st)
         }
     }
 
@@ -12579,6 +12866,7 @@ ${
             .VLit(lit: l) :> ""
             .VVariant(enumSym: s) :> ""
             .VStructOf(ty: s) :> ""
+            .VConstruct(enumSym: s) :> ""
             .VOp(op: o) :> ""
             .VHost(call: c) :> ""
             .VSeqCall(op: o) :> ""
@@ -12597,6 +12885,7 @@ ${
             .VLit(lit: l) :> false
             .VVariant(enumSym: s) :> false
             .VStructOf(ty: s) :> false
+            .VConstruct(enumSym: s) :> false
             .VOp(op: o) :> false
             .VHost(call: c) :> false
             .VSeqCall(op: o) :> false
@@ -13407,6 +13696,7 @@ ${
             .NFn(sym: s) :> not
             .NLength :> not
             .NSurface(of: x) :> not
+            .NConst(sym: s) :> not
             not :> not
         }
     }
@@ -14353,6 +14643,299 @@ ${
         return out
     }
 
+    // =========================================================================
+    // s472 — FILE-SCOPE CONSTANTS (`[export] const NAME[: T] = init;` at the
+    // top level of a `${ }` logic block).
+    //
+    // SPEC §7.6: "A variable declared with `let` or `const` at the top level of
+    // a file-level `${}` block SHALL be in scope for all subsequent `${}` blocks
+    // and markup interpolations in the same file"; "Variables declared inside a
+    // function body within a `${}` block are scoped to that function" (so a
+    // function's own local, or a parameter, of the name SHADOWS it — §7.3.3:
+    // "Shadowing in a NESTED block … is legal"). §21.2: `export const Name = …`
+    // exports it; §21.3 imports it like any exported name (the s472 file scope:
+    // KConst entries, a private constant stays private).
+    //
+    // WHAT THE BOOTSTRAP BUILDS — a constant whose value is fixed at compile
+    // time: its initializer is literals, unit enum variants, other constants,
+    // a member read (`S.length`, `E.V`), and the operators over them (unary,
+    // binary but `|>`, the conditional, a template). §7.4.2 names exactly this
+    // class ("a literal, `const`-bound to a literal, simple arithmetic on
+    // constants"): such a value does nothing when evaluated, so evaluating it
+    // once at module initialization (§7.6: "it runs ONCE, at file init") in
+    // each artifact that reads it is its whole meaning, wherever it is placed.
+    // lower puts each constant in Core ONCE (CoreProgram.consts — a read is
+    // `Local(sym)`); each printer emits one module-level `const` for every
+    // constant its artifact's code reads, transitively (print.scrml
+    // constsReadIn) — so the value reaches the client artifact only where
+    // client code reads it, and the server artifact only where server code
+    // does. (Review #1617 MED-1: the first cut inlined every read, re-lowering
+    // initializers recursively — exponential in constant-on-constant depth.)
+    //
+    // REFUSED BY NAME (E-BOOTSTRAP-UNSUPPORTED, constBlocker) — an initializer
+    // that DOES something when evaluated: a call, a cell read, a query, a
+    // `match` / handling form, an index, a function value, a tape / struct
+    // literal. The SPEC is silent on where such an initializer runs for a
+    // file-scope binding (§12.2: route inference places FUNCTIONS — "an `import`
+    // is file-scoped and cannot itself be placed"; Trigger 3's S331 note: a
+    // server-only reach in a non-function position "does not escalate"), so a
+    // file-scope `const` holding a `?{}` result or a server value has no stated
+    // home. Fail closed. An initializer reads only the constants initialized
+    // BEFORE it (earlier in its file, or in a file it imports — link order), so
+    // there is no cycle and no read of an uninitialized binding.
+    // =========================================================================
+    export type ConstInfo:struct = {
+        sym: Sym, nid: int, span: ASpan, file: string, name: string, exported: boolean,
+        annot: Type | not,    // the written type, resolved (`not`: none written, or it did not resolve)
+        ty: Type | not,       // the constant's type: `annot`, else the initializer's (constPass)
+        init: AExpr,
+        ready: boolean,       // initialized at this point of constPass (a later one is not)
+        ok: boolean,          // admitted (constPass) — a refused one has no value
+    }
+    type RConsts:struct = { cs: ConstInfo[], st: AS }
+
+    // phaseA: every constant's Sym and written type, in link order then source order.
+    fn constStubs(files: FileAst[], te0: TypeEnv, st0: AS) -> RConsts {
+        let st: AS = st0
+        let out: ConstInfo[] = []
+        for (const f of files) {
+            const te: TypeEnv = teAt(te0, f.path)
+            const errs: ASpan[] = fileErrs(files, f.path)
+            for (const c of constItems(f.items)) {
+                const rs: RSym = mint(st, c.name)
+                st = rs.st
+                let annot: Type | not = not
+                const at: AType | not = c.ty
+                if (at is given) {
+                    if (!hasErrIn(errs, at.span)) {
+                        const rt: RType = resolveType(te, at, st)
+                        st = rt.st
+                        if (!rt.unresolved) annot = rt.t
+                    }
+                }
+                out = out.concat([{ sym: rs.s, nid: c.nid, span: c.span, file: f.path, name: c.name, exported: c.exported,
+                                    annot: annot, ty: annot, init: c.init, ready: true, ok: true }])
+            }
+        }
+        return { cs: out, st: st }
+    }
+
+    fn withConsts(g: Globals, cs: ConstInfo[]) -> Globals {
+        return { program: g.program, entry: g.entry, te: g.te, types: g.types, decls: g.decls, fns: g.fns, handles: g.handles, files: g.files,
+                 errorSym: g.errorSym, sqlErrorSym: g.sqlErrorSym, sceSym: g.sceSym, voids: g.voids, hostSites: g.hostSites, consts: cs }
+    }
+
+    fn constAs(c: ConstInfo, ty: Type | not, ready: boolean, ok: boolean) -> ConstInfo {
+        return { sym: c.sym, nid: c.nid, span: c.span, file: c.file, name: c.name, exported: c.exported,
+                 annot: c.annot, ty: ty, init: c.init, ready: ready, ok: ok }
+    }
+
+    // Each constant's initializer, bound in order: while the k-th is bound,
+    // the ones from k on are not initialized yet (`ready: false` — a read of
+    // one is E-SCOPE-001, resolveName).
+    fn constPass(g: Globals, st0: AS) -> RGlobals {
+        let st: AS = st0
+        let done: ConstInfo[] = []
+        let i = 0
+        while (i < g.consts.length) {
+            let rest: ConstInfo[] = []
+            let j = i
+            while (j < g.consts.length) {
+                rest = rest.concat([constAs(g.consts[j], g.consts[j].ty, false, g.consts[j].ok)])
+                j = j + 1
+            }
+            const r: RConst1 = constValue(withConsts(g, done.concat(rest)), g.consts[i], st)
+            st = r.st
+            done = done.concat([r.c])
+            i = i + 1
+        }
+        return { g: withConsts(g, done), st: st }
+    }
+
+    type RConst1:struct = { c: ConstInfo, st: AS }
+
+    fn constEnv(g: Globals, file: string) -> Env {
+        return { g: g, file: file, ctx: CtxK.InFn, locals: [], rows: [], handles: [], inRenders: false, narrows: [], present: [],
+                 host: HostCtx.HostNo, own: "", inEffect: false, fx: noFailCtx(), lift: LiftCtx.NoLift }
+    }
+
+    fn constValue(g: Globals, c: ConstInfo, st0: AS) -> RConst1 {
+        const b: AExpr | not = constBlocker(c.init)
+        if (b is given) {
+            const st1: AS = addDiag(st0, c.file, b.span, "E-BOOTSTRAP-UNSUPPORTED", "the initializer of the file-scope constant `" + c.name + "` holds " + blockerWhat(b) + " — the bootstrap builds a file-scope `const` whose value is fixed at compile time: literals, unit enum variants, other constants, a member read and the operators over them (§7.4.2: \"a literal, `const`-bound to a literal, simple arithmetic on constants\"). Anything else would have to be evaluated at module initialization, which the bootstrap does not build for a file-scope binding" + blockerWhy(b) + ". Compute the value in a function and call it where it is needed")
+            return { c: constAs(c, c.annot, true, false), st: st1 }
+        }
+        const env: Env = withWholeAt(constEnv(g, c.file), c.init.nid, "the initializer of `" + c.name + "`")
+        const ri: RX = resolveExpr(env, c.init, c.annot, st0)
+        let st: AS = addBind(ri.st, c.nid, BindFact.BBind(c.sym))
+        let ty: Type | not = c.annot
+        if (ty is not) ty = ri.x.ty
+        if (ty is not) {
+            // (not when binding the initializer already failed — that report owns it: no cascade)
+            if (!recoveredInit(c.init) && ri.st.diags.length == st0.diags.length) st = addDiag(st, c.file, c.span, "E-BOOTSTRAP-UNSUPPORTED", "the type of the file-scope constant `" + c.name + "` is not known from its initializer — write it: `const " + c.name + ": T = …;`")
+            return { c: constAs(c, not, true, false), st: st }
+        }
+        return { c: constAs(c, ty, true, true), st: st }
+    }
+
+    fn recoveredInit(e: AExpr) -> boolean {
+        const k: AExprK = e.k
+        return match k {
+            .Recovered :> true
+            .Name(name: n) :> false
+            .At(name: n) :> false
+            .AtItem :> false
+            .Num(raw: x) :> false
+            .Str(v: x) :> false
+            .Bool(v: x) :> false
+            .NotLit :> false
+            .Variant(name: n) :> false
+            .Member(obj: o) :> false
+            .Call(callee: c) :> false
+            .Unary(op: o) :> false
+            .Binary(op: o) :> false
+            .Ternary(test: x) :> false
+            .Assign(target: x) :> false
+            .ArrayLit(elems: x) :> false
+            .ObjectLit(props: x) :> false
+            .Spread(e: x) :> false
+            .Index(obj: o) :> false
+            .Lambda(params: x) :> false
+            .Sql(q: x) :> false
+            .Handled(h: x) :> false
+            .Template(quasis: x) :> false
+        }
+    }
+
+    // The first sub-expression of a constant's initializer that DOES something
+    // when evaluated (see the section header), else `not`. A name is left to
+    // the binder (a constant, else whatever it names is refused there: a
+    // function named without a call is E-BOOTSTRAP-UNSUPPORTED, an unknown
+    // name E-SCOPE-001); a parse-error placeholder is the parser's.
+    fn constBlocker(e: AExpr) -> AExpr | not {
+        const k: AExprK = e.k
+        return match k {
+            .Name(name: n) :> not
+            .Num(raw: r) :> not
+            .Str(v: v) :> not
+            .Bool(v: v) :> not
+            .NotLit :> not
+            .Recovered :> not
+            .Variant(name: n) :> not
+            .Member(obj: o, name: n) :> constBlocker(o)
+            .Unary(op: o, e: x) :> constBlocker(x)
+            .Binary(op: o, l: l, r: r) :> binaryBlocker(e, o, l, r)
+            .Ternary(test: t, yes: y, no: n) :> firstBlocker([t, y, n])
+            .Template(quasis: q, slots: ss) :> firstBlocker(ss)
+            .At(name: n) :> e
+            .AtItem :> e
+            .Call(callee: c) :> e
+            .Assign(target: t) :> e
+            .ArrayLit(elems: x) :> e
+            .ObjectLit(props: x) :> e
+            .Spread(e: x) :> e
+            .Index(obj: o) :> e
+            .Lambda(params: x) :> e
+            .Sql(q: x) :> e
+            .Handled(h: x) :> e
+        }
+    }
+
+    // `x |> f` is a call (§ pipe); every other operator is a value.
+    fn binaryBlocker(e: AExpr, op: BinOp, l: AExpr, r: AExpr) -> AExpr | not {
+        if (op == BinOp.Pipe) return e
+        return firstBlocker([l, r])
+    }
+
+    fn firstBlocker(es: AExpr[]) -> AExpr | not {
+        for (const x of es) {
+            const b: AExpr | not = constBlocker(x)
+            if (b is given) return b
+        }
+        return not
+    }
+
+    fn blockerWhat(e: AExpr) -> string {
+        const k: AExprK = e.k
+        return match k {
+            .At(name: n) :> "a cell read (`@" + n + "`)"
+            .AtItem :> "a read of the current `<each>` item (`@.`)"
+            .Call(callee: c) :> callWhat(c)
+            .Assign(target: t) :> "an assignment"
+            .ArrayLit(elems: x) :> "a tape literal (a file-scope tape constant is not in the bootstrap yet)"
+            .ObjectLit(props: x) :> "a struct literal (a file-scope struct constant is not in the bootstrap yet)"
+            .Spread(e: x) :> "a spread"
+            .Index(obj: o) :> "an index read"
+            .Lambda(params: x) :> "a function value"
+            .Sql(q: x) :> "a query (`" + sqlSigil() + " … }`)"
+            .Handled(h: x) :> "a `match` or a handling form"
+            .Binary(op: o) :> "a pipe (`|>`, a call)"
+            .Name(name: n) :> "`" + n + "`"
+            .Num(raw: r) :> "a number"
+            .Str(v: v) :> "a string"
+            .Bool(v: v) :> "a boolean"
+            .NotLit :> "`not`"
+            .Recovered :> "an unparsed expression"
+            .Variant(name: n) :> "a variant"
+            .Member(obj: o) :> "a member read"
+            .Unary(op: o) :> "an operator"
+            .Ternary(test: t) :> "a conditional"
+            .Template(quasis: q) :> "a template"
+        }
+    }
+
+    // Why the blocked initializer has no file-scope evaluation: a cell read
+    // has its meaning (§6.6.2 — a snapshot at declaration time) but the
+    // bootstrap has no module-init evaluation; for the rest the SPEC does not
+    // say where a file-scope initializer runs (g-spec-file-scope-binding-placement-s472).
+    fn blockerWhy(b: AExpr) -> string {
+        if (atName(b) != "") return " (§6.6.2: `const x = @c` is a snapshot taken at declaration time; for a value that follows `@c`, declare a derived cell `<x:T = @c/>`)"
+        return " — and the SPEC does not say where such an initializer runs: the client, the server, or both (§12 places functions, not bindings)"
+    }
+
+    // s472 (after #1608): `.V(args)` / `E.V(args)` is a payload-variant VALUE, not a call.
+    fn callWhat(callee: AExpr) -> string {
+        const k: AExprK = callee.k
+        const variant: boolean = match k {
+            .Variant(name: n) :> true
+            .Member(obj: o) :> true
+            .Name(name: n) :> false
+            .At(name: n) :> false
+            .AtItem :> false
+            .Num(raw: x) :> false
+            .Str(v: x) :> false
+            .Bool(v: x) :> false
+            .NotLit :> false
+            .Recovered :> false
+            .Call(callee: c) :> false
+            .Unary(op: o) :> false
+            .Binary(op: o) :> false
+            .Ternary(test: x) :> false
+            .Assign(target: x) :> false
+            .ArrayLit(elems: x) :> false
+            .ObjectLit(props: x) :> false
+            .Spread(e: x) :> false
+            .Index(obj: o) :> false
+            .Lambda(params: x) :> false
+            .Sql(q: x) :> false
+            .Handled(h: x) :> false
+            .Template(quasis: x) :> false
+        }
+        if (variant) return "a call or a payload-variant value (a file-scope payload-variant constant is not in the bootstrap yet)"
+        return "a call"
+    }
+
+    // The constant `name` denotes in `file` (declared there, or imported from a
+    // file that exports it), else `not`.
+    fn constNamed(g: Globals, file: string, name: string) -> ConstInfo | not {
+        const from: string = scopeFrom(g.te.link, file, NameKind.KConst, name)
+        if (from == "") return not
+        for (const c of g.consts) {
+            if (c.file == from && c.name == name) return c
+        }
+        return not
+    }
+
     fn declEnv(g: Globals, ds: DeclSrc, inRenders: boolean) -> Env {
         return { g: g, file: ds.file, ctx: CtxK.InDecl(ds.info.sym, ds.isProgram), locals: [], rows: [],
                  handles: handlesOwnedBy(g, ds.info.nid), inRenders: inRenders, narrows: [], present: [],
@@ -14461,7 +15044,7 @@ ${
     }
 
     fn checkScopes(files: FileAst[], t: Tables, lk: Linkage) -> Diag[] {
-        let out: Diag[] = dupFields(files, t, lk).concat(dupDecls(t)).concat(dupTypes(t)).concat(dupFns(t)).concat(dupHandles(files, t, lk))
+        let out: Diag[] = dupFields(files, t, lk).concat(dupDecls(t)).concat(dupTypes(t)).concat(dupFns(t)).concat(dupHandles(files, t, lk)).concat(dupConsts(t))
         for (const f of files) {
             for (const af of fnItems(f.items)) {
                 out = out.concat(dupParams(f.path, af.params))
@@ -14626,6 +15209,60 @@ ${
                 // s472: in two files it is two functions — each call resolves in its own file's scope
                 if (first.file == f.file) {
                     out = out.concat([mkDiag(f.file, f.span, "E-SCOPE-010", "function `" + names[j] + "` is already declared at file scope (at " + offsetOf(first.span) + ") — duplicate binding in file scope (§7.6; ruled S440 #6)")])
+                }
+            }
+            j = j + 1
+        }
+        return out
+    }
+
+    // s472 — a file-scope constant binds its name once in its file's scope.
+    //   - another constant, or a function, of the name in the same file: §7.6
+    //     "Re-declaring a name … when that name was already declared at file
+    //     scope SHALL be a compile error (E-SCOPE-010: duplicate binding in file
+    //     scope)" (§7.6 names `let` and, S440 #6, `function`; a `const` is the
+    //     same file-scope binding). An IMPORT of the name is E-SCOPE-010 too
+    //     (linkage — the constant is one of the file's own names).
+    //   - a program cell of the name in the same file: §1.6 "Local
+    //     names cannot shadow registered state names — attempting to declare a
+    //     local variable with the same name as a registered state cell is
+    //     `E-NAME-COLLIDES-STATE`"; §7.6.1: "A V5-strict structural cell `<x>`
+    //     and a local `let x` cannot coexist in the same file scope."
+    //   - a type, or a user declaration, of the name in the same file: the SPEC
+    //     names no code (a type is not a value binding) — the bootstrap-local
+    //     E-BOOTSTRAP-REDECLARE, as for the other SPEC-silent collisions above
+    //     (`E.V` / `<Card>` beside a constant `E` / `Card` would read two ways).
+    // A function-body local or a parameter of the name SHADOWS it (§7.6 "scoped
+    // to that function"; §7.3.3 shadowing in a nested scope is legal) — no report.
+    fn dupConsts(t: Tables) -> Diag[] {
+        let out: Diag[] = []
+        let j = 0
+        while (j < t.consts.length) {
+            const c: ConstInfo = t.consts[j]
+            let i = 0
+            let dup = false
+            while (i < j) {
+                if (!dup && t.consts[i].file == c.file && t.consts[i].name == c.name) {
+                    dup = true
+                    out = out.concat([mkDiag(c.file, c.span, "E-SCOPE-010", "`" + c.name + "` is already declared at file scope (at " + offsetOf(t.consts[i].span) + ") — a file-scope name is bound once: duplicate binding in file scope (§7.6)")])
+                }
+                i = i + 1
+            }
+            for (const f of t.fns) {
+                if (f.file == c.file && f.name == c.name) out = out.concat([mkDiag(c.file, c.span, "E-SCOPE-010", "`" + c.name + "` is also a function of this file (at " + offsetOf(f.span) + ") — a file-scope name is bound once: duplicate binding in file scope (§7.6)")])
+            }
+            for (const ty of t.types) {
+                if (ty.file == c.file && ty.name == c.name) out = out.concat([mkDiag(c.file, c.span, "E-BOOTSTRAP-REDECLARE", "`" + c.name + "` is also a type of this file (at " + offsetOf(ty.span) + ") — a constant and a type of one name would read two ways (`" + c.name + ".x`); rename one (the SPEC names no code for this; bootstrap-local)")])
+            }
+            for (const d of t.decls) {
+                if (d.file == c.file) {
+                    if (d.sym.id == t.program.id) {
+                        for (const fi of d.fields) {
+                            if (fi.sym.hint == c.name) out = out.concat([mkDiag(c.file, c.span, "E-NAME-COLLIDES-STATE", "`" + c.name + "` is also a cell of the program (`@" + c.name + "`, at " + offsetOf(fi.span) + ") — a local name cannot take the name of a registered state cell (§1.6, §7.6.1); rename one")])
+                        }
+                    } else if (d.sym.hint == c.name) {
+                        out = out.concat([mkDiag(c.file, c.span, "E-BOOTSTRAP-REDECLARE", "`" + c.name + "` is also a declaration of this file (`<" + c.name + ">`, at " + offsetOf(d.span) + ") — rename one (the SPEC names no code for this; bootstrap-local)")])
+                    }
                 }
             }
             j = j + 1
@@ -14816,6 +15453,7 @@ ${
         const k: AItemK = it.k
         return match k {
             .ProgramItem(p: p) :> markupNodes(p.items)
+            .ConstItem(c: c) :> []
             .DeclItem(d: d) :> rendersOf(d)
             .ImportItem(i: i) :> []
             .TypeItem(t: t) :> []
@@ -15122,6 +15760,7 @@ ${
             .NFn(sym: s) :> ""
             .NLength :> ""
             .NSurface(of: x) :> ""
+            .NConst(sym: s) :> ""
             not :> ""
         }
     }
@@ -15932,6 +16571,7 @@ ${
             .NFn(sym: s) :> VType.Unknown
             .NLength :> known(Type.Int)
             .NSurface(of: x, prop: pr) :> surfaceType(pr)
+            .NConst(sym: s) :> constVType(env.t, s)
             not :> VType.Unknown
         }
     }
@@ -15963,6 +16603,7 @@ ${
             .NFn(sym: s) :> false
             .NLength :> false
             .NSurface(of: x) :> false
+            .NConst(sym: s) :> false
             not :> false
         }
     }
@@ -16012,6 +16653,7 @@ ${
             .NStruct(owner: o) :> not
             .NLength :> not
             .NSurface(of: x) :> not
+            .NConst(sym: s) :> not
             not :> not
         }
     }
@@ -16023,6 +16665,7 @@ ${
             .VLit(lit: l) :> litType(l)
             .VVariant(enumSym: s) :> known(Type.Named(s))
             .VStructOf(ty: s) :> known(Type.Named(s))
+            .VConstruct(enumSym: s) :> known(Type.Named(s))
             .VOp(op: o) :> VType.Unknown
             .VHost(call: c) :> known(Type.Num)
             .VSeqCall(op: o) :> VType.Unknown
@@ -16042,6 +16685,7 @@ ${
             .VLit(lit: l) :> not
             .VVariant(enumSym: s) :> not
             .VStructOf(ty: s) :> not
+            .VConstruct(enumSym: s) :> not
             .VHost(call: c) :> not
             .VSeqCall(op: x) :> not
             .VLambda(params: ps) :> not
@@ -16484,6 +17128,7 @@ ${
             .VLit(lit: l) :> []
             .VVariant(enumSym: s) :> []
             .VStructOf(ty: s) :> []
+            .VConstruct(enumSym: s) :> []
             .VOp(op: o) :> []
             .VHost(call: c) :> []
             .VSeqCall(op: o) :> []
@@ -16501,6 +17146,7 @@ ${
             .VLit(lit: l) :> VType.Unknown
             .VVariant(enumSym: s) :> VType.Unknown
             .VStructOf(ty: s) :> VType.Unknown
+            .VConstruct(enumSym: s) :> VType.Unknown
             .VOp(op: o) :> VType.Unknown
             .VLambda(params: ps) :> VType.Unknown
             .VIndex(loc: x) :> VType.Unknown
@@ -16572,6 +17218,7 @@ ${
             .VLit(lit: l) :> false
             .VVariant(enumSym: s) :> false
             .VStructOf(ty: s) :> false
+            .VConstruct(enumSym: s) :> false
             .VOp(op: o) :> false
             .VHost(call: c) :> false
             .VLambda(params: ps) :> false
@@ -16589,6 +17236,7 @@ ${
             .VLit(lit: l) :> not
             .VVariant(enumSym: s) :> not
             .VStructOf(ty: s) :> not
+            .VConstruct(enumSym: s) :> not
             .VOp(op: o) :> not
             .VHost(call: c) :> not
             .VSeqCall(op: o) :> not
@@ -16619,6 +17267,7 @@ ${
             .VMethod(op: o) :> false
             .VLit(lit: l) :> false
             .VStructOf(ty: s) :> false
+            .VConstruct(enumSym: s) :> false
             .VOp(op: o) :> false
             .VHost(call: c) :> false
             .VSeqCall(op: o) :> false
@@ -16637,6 +17286,7 @@ ${
             .VLit(lit: l) :> false
             .VVariant(enumSym: s) :> false
             .VStructOf(ty: s) :> false
+            .VConstruct(enumSym: s) :> false
             .VOp(op: o) :> false
             .VHost(call: c) :> false
             .VSeqCall(op: o) :> false
@@ -17229,6 +17879,7 @@ ${
             .NFn(sym: s) :> false
             .NLength :> false
             .NSurface(of: x) :> false
+            .NConst(sym: s) :> false
             // a name the binder did not resolve: undeclared (reported by the
             // scope rules) or inside a construct already refused (`if=` on a
             // `<db>`, E-BOOTSTRAP-UNSUPPORTED) — not a type left unresolved
@@ -17455,6 +18106,12 @@ ${
     // callee resolves statically to a function (provable-or-silent).
     fn typeCall(env: TEnv, e: AExpr, callee: AExpr, args: AExpr[], ts0: TypeState) -> RVT {
         let ts: TypeState = typeExprs(env, args, ts0)
+        // s472 — a payload-variant construction (resolveConstruct): each argument
+        // against its declared field's type, as a `fail`'s payload (typeFail); its
+        // type is the enum (§66.3 rule 5: "`E.V(…)` is a call whose declared type is
+        // `E`"). The callee names a type and a variant — never a value to type.
+        const cf: ValueFact | not = valueFact(env.t.values, e.nid)
+        if (isConstructFact(cf)) return rvt(valueType(cf), checkConstructArgs(env, cf, args, ts))
         ts = typePlace(env, callee, VType.Unknown, ts)
         const s: Sym | not = calleeFn(nameFact(env.t.names, callee.nid))
         // merge (s469 strings × loops): three independent argument checks, each keyed on its OWN
@@ -17625,9 +18282,15 @@ ${
         }
     }
 
+    // s472 r1 F2 (PA-directed widening, review of #1608): a NON-literal initializer
+    // of an annotated `let` / `const` / declaration field / use-site attribute is
+    // checked against the annotation for EVERY type — the rule a return, an argument
+    // and a write already use (§7.5.1 positions 3-4, r7 A; §66.1 rule 5). Before,
+    // only an `int`-bearing target (S442) or the `T | not` rule was checked here, so
+    // `let <sh:Shape=(Mode.Solo(.Easy))/>` compiled (g-bootstrap-typer-int-into-
+    // string-bool-initializer-unchecked). A literal initializer stays checkInit's.
     fn checkIntInit(env: TEnv, target: Type, lk: int, v: VType, span: ASpan, what: string, ts: TypeState) -> TypeState {
         if (lk >= 0) return ts
-        if (!hasInt(target)) return checkMaybeNot(env, v, target, span, what, ts)
         return checkValue(env, v, target, span, what, ts)
     }
 
@@ -17876,6 +18539,65 @@ ${
         return ts
     }
 
+    // s472 — a construction's arguments against the variant's declared fields
+    // (§14.4: one positional argument per declared field, in declaration order;
+    // the count is resolveConstruct's E-TYPE-082). An unresolved field type
+    // (already reported) is not checked, as in typeFail.
+    fn checkConstructArgs(env: TEnv, f: ValueFact | not, args: AExpr[], ts0: TypeState) -> TypeState {
+        let ts: TypeState = ts0
+        const fs: FieldDef[] = constructFields(env.t, f)
+        let i = 0
+        for (const a of args) {
+            if (i < fs.length && env.t.unresolved.fields.indexOf(fs[i].sym.id) < 0) {
+                ts = checkValue(env, exprType0(ts, a.nid), fs[i].ty, a.span, "payload value " + (i + 1) + " (`" + fs[i].sym.hint + "`) of this construction", ts)
+                // r1 F1: a struct literal's FIELD values (in a tape, a ternary, nested) against
+                // their declared fields — the literal's own type is the expected struct, so the
+                // whole-value check alone never sees `{ x: "s" }` into `{ x: int }` (§66.1 rule 5)
+                ts = checkNotElems(env, a, fs[i].ty, checkLitFields(env, a, ts))
+            }
+            i = i + 1
+        }
+        return ts
+    }
+
+    fn constructFields(t: Tables, f: ValueFact | not) -> FieldDef[] {
+        return match f {
+            .VConstruct(enumSym: s, idx: i) :> armFields(t, s, FailFact.FArm(i))
+            .VLit(lit: l) :> []
+            .VVariant(enumSym: s) :> []
+            .VStructOf(ty: s) :> []
+            .VOp(op: o) :> []
+            .VHost(call: c) :> []
+            .VSeqCall(op: o) :> []
+            .VLambda(params: ps) :> []
+            .VIndex(loc: x) :> []
+            .VAt :> []
+            .VTemplate(text: tx) :> []
+            .VToEnum(enumSym: s) :> []
+            .VMethod(op: o) :> []
+            not :> []
+        }
+    }
+
+    fn isConstructFact(f: ValueFact | not) -> boolean {
+        return match f {
+            .VConstruct(enumSym: s) :> true
+            .VLit(lit: l) :> false
+            .VVariant(enumSym: s) :> false
+            .VStructOf(ty: s) :> false
+            .VOp(op: o) :> false
+            .VHost(call: c) :> false
+            .VSeqCall(op: o) :> false
+            .VLambda(params: ps) :> false
+            .VIndex(loc: x) :> false
+            .VAt :> false
+            .VTemplate(text: tx) :> false
+            .VToEnum(enumSym: s) :> false
+            .VMethod(op: o) :> false
+            not :> false
+        }
+    }
+
     fn failFields(t: Tables, f: FailFact | not) -> FieldDef[] {
         return match f {
             .FFail(err: e, idx: i) :> armFields(t, e, FailFact.FArm(i))
@@ -18079,6 +18801,43 @@ ${
             return keepTEnv(tWithLocal(env, sym, known(annot)), ts2)
         }
         return keepTEnv(tWithLocal(env, sym, r.vt), contribute(r.ts, sym, r.vt))
+    }
+
+    // s472 — a file-scope constant's type (constPass): its written type, else
+    // its initializer's; Unknown for a refused one (no check fires on it).
+    fn constVType(t: Tables, s: Sym) -> VType {
+        for (const c of t.consts) {
+            if (c.sym.id == s.id) {
+                const ty: Type | not = c.ty
+                if (ty is given && c.ok) return known(ty)
+                return VType.Unknown
+            }
+        }
+        return VType.Unknown
+    }
+
+    fn constByNid(t: Tables, nid: int) -> ConstInfo | not {
+        for (const c of t.consts) {
+            if (c.nid == nid) return c
+        }
+        return not
+    }
+
+    // s472 — a file-scope constant's initializer, typed where it stands (file
+    // scope: no locals), and checked against its written type exactly as a
+    // local's is (typeLocal): §7.5.1's positions include a declaration's
+    // initializer. A refused constant (constPass) is not typed.
+    fn typeConst(env0: TEnv, c: AConst, ts0: TypeState) -> TypeState {
+        const ci: ConstInfo | not = constByNid(env0.t, c.nid)
+        if (ci is not) return ts0
+        if (!ci.ok) return ts0
+        const env: TEnv = { t: env0.t, file: env0.file, errs: env0.errs, locals: [], settled: env0.settled, narrowed: [], fnw: env0.fnw, rows: [], fret: not, blame: env0.blame }
+        const r: RVT = typeExpr(env, c.init, ts0)
+        const annot: Type | not = ci.annot
+        if (annot is not) return r.ts
+        let ts: TypeState = checkInit(env, annot, literalKind(c.init), c.init.span, "`" + c.name + "`", r.ts)
+        ts = checkIntInit(env, annot, literalKind(c.init), r.vt, c.init.span, "`" + c.name + "`", ts)
+        return checkNotElems(env, c.init, annot, checkLitFields(env, c.init, ts))
     }
 
     // The condition is checked (checkCond, ruled S440 #4 = (c)); each branch
@@ -18786,6 +19545,7 @@ ${
         const k: AItemK = it.k
         return match k {
             .ProgramItem(p: p) :> typeProgramBody(env, p, ts)
+            .ConstItem(c: c) :> typeConst(env, c, ts)
             .DeclItem(d: d) :> typeUserDecl(env, d, ts)
             .FnItem(f: f) :> typeFn(env, f, ts)
             .ImportItem(i: i) :> ts
@@ -18857,6 +19617,7 @@ ${
             .MarkupItem(n: n) :> typeNode(env, n, ts)
             .DeclItem(d: d) :> typeUserDecl(env, d, ts)
             .ProgramItem(p: p) :> ts
+            .ConstItem(c: c) :> typeConst(env, c, ts)
             .ImportItem(i: i) :> ts
             .TypeItem(t: x) :> ts
         }
@@ -19200,6 +19961,7 @@ ${
             .NFn(sym: s) :> not
             .NLength :> not
             .NSurface(of: x) :> not
+            .NConst(sym: s) :> not
             not :> not
         }
     }
@@ -19225,6 +19987,7 @@ ${
             .NFn(sym: s) :> not
             .NLength :> not
             .NSurface(of: v) :> sharedOf(validityInst(v))
+            .NConst(sym: s) :> not
             not :> not
         }
     }
@@ -19277,6 +20040,7 @@ ${
             .NStruct(owner: o) :> not
             .NLength :> not
             .NSurface(of: x) :> not
+            .NConst(sym: s) :> not
             not :> not
         }
     }
@@ -19289,6 +20053,7 @@ ${
             .NStruct(owner: o) :> "a struct field"
             .NLength :> "a length"
             .NSurface(of: x) :> "a validity surface"
+            .NConst(sym: s) :> "a file-scope constant"
             .NFn(sym: s) :> "a function"
         }
     }
@@ -19301,6 +20066,7 @@ ${
             .VVariant(enumSym: s) :> false
             .VOp(op: o) :> false
             .VStructOf(ty: t) :> false
+            .VConstruct(enumSym: t) :> false
             .VLambda(params: ps) :> false
             .VIndex(loc: x) :> false
             .VAt :> true
@@ -20520,7 +21286,7 @@ ${
     fn typesProgram(g: Globals) -> CoreProgram {
         let defs: TypeDef[] = []
         for (const t of g.types) { defs = defs.concat([t.def]) }
-        return { program: g.program, decls: [], types: defs, fns: [], server: [], dbs: [], reset: true, sqlError: not, serverCallError: not, css: not }
+        return { program: g.program, decls: [], types: defs, fns: [], server: [], dbs: [], reset: true, sqlError: not, serverCallError: not, css: not, consts: [] }
     }
 
     fn storeOf(v: AAttrValue) -> PersistStore | not {
@@ -20571,11 +21337,13 @@ ${
             .FnItem(f: f) :> []
             .DeclItem(d: d) :> []
             .ProgramItem(p: p) :> []
+            .ConstItem(c: c) :> []
         }
         for (const n of ns) { st = holdInNode(file, n, declared, shadow, st) }
         for (const d of declsOfItem(it)) { st = holdInDecl(file, d, declared, shadow, st) }
         const ps: AItem[] = match k {
             .ProgramItem(p: p) :> p.items
+            .ConstItem(c: c) :> []
             .MarkupItem(n: n) :> []
             .ImportItem(i: i) :> []
             .TypeItem(t: t) :> []
@@ -20945,6 +21713,7 @@ ${
             .NField(decl: d, inst: i, idx: x) :> fieldUseLabel(t, d, x)
             .NInst(decl: d) :> "@" + d.hint
             .NSurface(of: v) :> "the validity surface of @" + validityDecl(v).hint
+            .NConst(sym: s) :> ""
             .NLocal(sym: s) :> ""
             .NStruct(owner: o) :> ""
             .NFn(sym: s) :> ""
@@ -21315,6 +22084,7 @@ ${
             .TypeItem(t: t) :> not
             .DeclItem(d: d) :> not
             .ProgramItem(p: p) :> not
+            .ConstItem(c: c) :> not
         }
     }
 
@@ -21326,6 +22096,7 @@ ${
             .ImportItem(i: i) :> not
             .TypeItem(t: t) :> not
             .ProgramItem(p: p) :> not
+            .ConstItem(c: c) :> not
         }
     }
 
@@ -21350,12 +22121,14 @@ ${
             .DeclItem(d: d) :> not
             .MarkupItem(n: n) :> not
             .ProgramItem(p: p) :> not
+            .ConstItem(c: c) :> not
         }
     }
 
     fn programOfK(k: AItemK) -> AProgram | not {
         return match k {
             .ProgramItem(p: p) :> p
+            .ConstItem(c: c) :> not
             .FnItem(f: f) :> not
             .ImportItem(i: i) :> not
             .TypeItem(t: t) :> not
@@ -24258,6 +25031,7 @@ ${
             .NFn(sym: x) :> -1
             .NLength :> -1
             .NSurface(of: x) :> -1
+            .NConst(sym: sy) :> -1
             not :> -1
         }
         if (id < 0) return -1
@@ -24483,7 +25257,9 @@ ${
 
     export fn analyze(files: FileAst[], entry: string) -> TypedProgram {
         const st0: AS = { facts: noFacts(), diags: [], nextSym: 0, annots: [], bad: { params: [], fields: [] }, effects: [], pend: [], lifts: [] }
-        const ra: RGlobals = phaseA(files, entry, st0)
+        const ra0: RGlobals = phaseA(files, entry, st0)
+        // s472: the file-scope constants' initializers, in order (before any body reads one)
+        const ra: RGlobals = constPass(ra0.g, ra0.st)
         let st: AS = checkImports(files, ra.g, ra.st)
         st = phaseB(ra.g, st)
         st = strayEffects(files, st)
@@ -24504,7 +25280,7 @@ ${
         const bound: Tables = { program: ra.g.program, types: ra.g.types, decls: decls, fns: fns, handles: ra.g.handles,
                                 names: fs.names, values: fs.values, effects: fs.effects, binds: fs.binds, elems: fs.elems,
                                 attrs: fs.attrs, fails: fs.fails, annots: st.annots, unresolved: st.bad, typing: { exprs: [], at: [], presence: [] },
-                                novalidate: [], resets: rr.infos, gated: [], persists: rp.infos, server: noServerFacts(), css: css.facts }
+                                novalidate: [], resets: rr.infos, gated: [], persists: rp.infos, server: noServerFacts(), css: css.facts, consts: ra.g.consts }
         const scopeDiags: Diag[] = checkScopes(files, bound, ra.g.te.link)
         // s452 (dpa-066): THE EFFECT SUMMARY — once, over the bound tables —
         // and the binder's decisions that read it (rulesPass, M3)
@@ -24524,14 +25300,14 @@ ${
         const typedT: Tables = { program: bound.program, types: bound.types, decls: bound.decls, fns: bound.fns, handles: bound.handles,
                                  names: bound.names, values: bound.values, effects: bound.effects, binds: bound.binds,
                                  elems: bound.elems, attrs: bound.attrs, fails: bound.fails, annots: bound.annots, unresolved: bound.unresolved, typing: typed.typing,
-                                 novalidate: vp.forms, resets: bound.resets, gated: vp.gated, persists: bound.persists, server: pp.facts, css: css.facts }
+                                 novalidate: vp.forms, resets: bound.resets, gated: vp.gated, persists: bound.persists, server: pp.facts, css: css.facts, consts: bound.consts }
         const pl: PS = planPass(ra.g, typedT, sum, pp.st)
         const sf: ServerFacts = { servers: pp.facts.servers, sqls: pp.facts.sqls, dbs: pp.facts.dbs, places: pp.facts.places,
                                   inherited: pp.facts.inherited, plan: pl.plan }
         const t: Tables = { program: bound.program, types: bound.types, decls: bound.decls, fns: bound.fns, handles: bound.handles,
                             names: bound.names, values: bound.values, effects: bound.effects, binds: bound.binds,
                             elems: bound.elems, attrs: bound.attrs, fails: bound.fails, annots: bound.annots, unresolved: bound.unresolved, typing: typed.typing,
-                            novalidate: vp.forms, resets: bound.resets, gated: vp.gated, persists: bound.persists, server: sf, css: css.facts }
+                            novalidate: vp.forms, resets: bound.resets, gated: vp.gated, persists: bound.persists, server: sf, css: css.facts, consts: bound.consts }
         const base0: Diag[] = domScopeDropped(pl.st.diags, pp.doms).concat(scopeDiags).concat(effectDiags).concat(vp.diags).concat(sinkDiags).concat(typed.diags).concat(hostPlacedDiags(fns, pp.facts.servers))
         // s471: the linear pass (§35) — after the typer (§35.5: "after type resolution and
         // route inference"; a non-exhaustive `match`'s E-TYPE-020 is in `base0`, §35.4.3)
@@ -25178,6 +25954,9 @@ ${
         }
         for (const f of g.fns) {
             if (f.info.file == path && f.info.name == name && f.info.exported) return true
+        }
+        for (const c of g.consts) {
+            if (c.file == path && c.name == name && c.exported) return true
         }
         return false
     }

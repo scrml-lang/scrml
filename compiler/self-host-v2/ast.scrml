@@ -401,7 +401,16 @@ ${
         DeclItem(d: ADecl),
         MarkupItem(n: ANode),
         ProgramItem(p: AProgram),
+        ConstItem(c: AConst),       // s472: a logic-block-level `[export] const NAME[: T] = init;` (§7.6, §21.2)
     }
+
+    // s472 — a FILE-SCOPE constant: `const NAME[: T] = init;` at the top level of
+    // a `${ }` logic block (§7.6: "A variable declared with `let` or `const` at
+    // the top level of a file-level `${}` block SHALL be in scope for all
+    // subsequent `${}` blocks and markup interpolations in the same file"),
+    // optionally `export`ed (§21.2). `nid` is the declaration's own node id (its
+    // BindFact names the constant's Sym).
+    export type AConst:struct = { nid: int, span: ASpan, exported: boolean, name: string, ty: AType | not, init: AExpr }
 
     // `path` is the file's path as the driver names it (an identifier of the
     // file, used to resolve import sources).

@@ -1,0 +1,8 @@
+// A payload value is typed against its declared field: a `string` into an `int` field is E-TYPE-031.
+<program>
+    type Shape:enum = { Circle(r: int), Rect(w: int, h: int), Dot }
+    let <sh:Shape=(Shape.Circle("big"))/>
+    <main>
+        <p>${match @sh { .Circle(r) :> "c", .Rect(w, h) :> "r", .Dot :> "d" }}</p>
+    </main>
+</program>

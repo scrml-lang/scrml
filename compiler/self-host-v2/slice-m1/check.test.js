@@ -208,7 +208,8 @@ describe("F7 — `Check.Static` on a transition only when Core proves the edge (
       expect(check(bad)).toEqual(["C6: <dropdown>.open: the transition value is not a variant of `Openness`"]);
     }
     const otherEnum = withStmts(core, [C.Stmt.Write(wOpen, inst, C.EditKind.Transition, C.litVariant(C.mkSym(3, "Line"), 0), C.Check.Static)]);
-    expect(check(otherEnum)).toEqual(["C6: <dropdown>.open: the transition value is not a variant of `Openness`"]);
+    // s472 r1: C-V2 (a Lit(Variant) names a unit variant of an enum of the program) also sees it
+    expect(check(otherEnum)).toEqual(["C6: <dropdown>.open: the transition value is not a variant of `Openness`", "C-V2: a Lit(Variant) names variant #0 of `Line`, which has no such variant"]);
   });
 
   test("Static to a variant NOT reachable from every state is refused (needs RuntimeEdge)", () => {

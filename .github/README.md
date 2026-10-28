@@ -6,7 +6,7 @@ Workflows live in `workflows/`. The required check on `main` is the `gate` aggre
 
 | doc | producer | PR-side | kept current on `main` by |
 |---|---|---|---|
-| `docs/FACTS.md` | `scripts/facts.ts` | **warns** when stale (exit 1); fails only on a broken measurement (2) or a missing anchor (3) | `facts-regen.yml`, after every merge |
+| `docs/FACTS.md` | `scripts/facts.ts` | **warns** when stale (exit 4 only); every other non-zero fails — a broken measurement (2), a missing anchor (3), a dangling symlink (5), or a crash (1, bun's uncaught-exception code) | `facts-regen.yml`, after every merge |
 | `compiler/SPEC-INDEX.md` | `scripts/regen-spec-index.ts` | blocking (`checks`) and pre-push | the PR that edits `SPEC.md` |
 | `docs/bootstrap-conformance.md` | `scripts/bootstrap-conformance.ts` | blocking only when the PR touches `conformance/cases` or `compiler/self-host-v2`; `tracking` reports it otherwise | the PR that changes the corpus or the bootstrap |
 | `docs/known-gaps.md` `@generated:gap-counts` | `scripts/state.ts` | not CI-gated; derived only from the same file, so a PR's table always agrees with its own gap markers | the PR that adds or resolves gaps (`cloud-maps.yml` does not stage this file) |

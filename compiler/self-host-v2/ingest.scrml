@@ -1055,6 +1055,7 @@ ${
             .Match(scrut: x) :> false
             .ArrayOf(elems: x) :> false
             .StructOf(ty: x) :> false
+            .VariantOf(enumSym: x) :> false
             .Handle(inst: x) :> false
             .InitOf(decl: x) :> false
             .Host(call: x) :> false
@@ -1205,7 +1206,7 @@ ${
 
     export fn ingest(files: IFile[]) -> Ingested {
         const prog: Sym = mkSym(0, "program")
-        const empty: CoreProgram = { program: prog, decls: [], types: [], fns: [], server: [], dbs: [], reset: false, sqlError: not, serverCallError: not, css: not }   // the hybrid's stylesheet is css-ingest's (slice-m3)
+        const empty: CoreProgram = { program: prog, decls: [], types: [], fns: [], server: [], dbs: [], reset: false, sqlError: not, serverCallError: not, css: not, consts: [] }   // the hybrid's stylesheet is css-ingest's (slice-m3)
         if (files.length != 1) return { core: empty, why: ["file: a multi-file program (imports)"] }
         const ast: INode = files[0].ast
         // `filePath` is identity (the path arrives as IFile.path); the `has*` flags and
@@ -1263,7 +1264,7 @@ ${
             sym: prog, kind: DeclKind.Program, single: true, fields: fs.fields,
             renders: vs.views, wiring: [], handles: [],
         }
-        const core: CoreProgram = { program: prog, decls: [decl], types: [], fns: fns, server: [], dbs: [], reset: false, sqlError: not, serverCallError: not, css: not }   // the hybrid's stylesheet is css-ingest's (slice-m3)
+        const core: CoreProgram = { program: prog, decls: [decl], types: [], fns: fns, server: [], dbs: [], reset: false, sqlError: not, serverCallError: not, css: not, consts: [] }   // the hybrid's stylesheet is css-ingest's (slice-m3)
         return { core: core, why: dedupeStr(why) }
     }
 
@@ -1318,6 +1319,7 @@ ${
             .Match(scrut: x) :> "Expr.Match"
             .ArrayOf(elems: x) :> "Expr.ArrayOf"
             .StructOf(ty: x) :> "Expr.StructOf"
+            .VariantOf(enumSym: x) :> "Expr.VariantOf"
             .Handle(inst: x) :> "Expr.Handle"
             .InitOf(decl: x) :> "Expr.InitOf"
             .Host(call: x) :> "Expr.Host"

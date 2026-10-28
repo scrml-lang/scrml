@@ -31,7 +31,7 @@ ${
              EditKind, Check, Stmt, Block, Attr, ConstructAttr, CondArm, View, EffectDep, FieldRole, Field,
              Decl, Fn, HostFn, CoreProgram, CapOwner, SurfaceProp, ValidityOf, Validator, Persist, PersistStore,
              Failable, OkArm, ErrArm, ServerFn, SqlQuery, SqlMode, Param, LoopHead, EachHead, RangeHead, CssUnit, CoreCss, CssVar,
-             Gather, Lifted, GatherRow, PathStep,
+             Gather, Lifted, GatherRow, PathStep, CoreConst,
              findDecl, findTypeDef, typeDefSym, capOwner, findFn, findServerFn } from "./core.scrml"
     import { Node, allNodes, sharedRefs, boundSyms, assignedSyms } from "./walk.scrml"
     import { JsOp, JsUnOp, JsExpr, JsProp, JsStmt, JsLoopHead, JsForInit,
@@ -104,6 +104,10 @@ ${
     // -------------------------------------------------------------------------
     fn planNames(p: CoreProgram) -> NameTable {
         let t: NameTable = mint(emptyNames(), NameKey.Runtime, "rt")
+        // s472: the file-scope constants first, so each keeps its author name where it can
+        // (two files' private constants of one name get distinct names — one module-level
+        // binding each; a local of the name inside a function is minted apart, so it shadows nothing)
+        for (const k of p.consts) { t = mint(t, NameKey.OfSym(k.sym.id), k.sym.hint) }
         for (const d of p.decls) {
             const h: string = d.sym.hint
             t = mint(t, NameKey.DeclInfo(d.sym.id), "decl_" + h)
@@ -122,6 +126,47 @@ ${
     }
 
     fn symName(ctx: Ctx, s: Sym) -> string { return nameOf(ctx.names, NameKey.OfSym(s.id)) }
+
+    // s472 — the file-scope constants the code under `roots` reads, with every
+    // constant their initializers read, in Core order (dependency order: an
+    // initializer reads only earlier constants). An artifact carries exactly
+    // these — a constant no code of the artifact reads is not in it (a value
+    // read only by server code never reaches the client artifact).
+    export fn constsReadIn(p: CoreProgram, roots: Node[]) -> CoreConst[] {
+        if (p.consts.length == 0) return []
+        let want: int[] = []
+        for (const r of roots) { want = constReads(p, r, want) }
+        let i: int = p.consts.length - 1
+        while (i >= 0) {
+            if (hasInt(want, p.consts[i].sym.id)) want = constReads(p, Node.NExpr(p.consts[i].init), want)
+            i = i - 1
+        }
+        let out: CoreConst[] = []
+        for (const k of p.consts) { if (hasInt(want, k.sym.id)) out = out.concat([k]) }
+        return out
+    }
+
+    fn constReads(p: CoreProgram, root: Node, acc: int[]) -> int[] {
+        let out: int[] = acc
+        for (const n of allNodes(root)) {
+            const id: int = localReadOf(n)
+            if (id >= 0 && !hasInt(out, id) && isConstSym(p, id)) out = out.concat([id])
+        }
+        return out
+    }
+
+    fn isConstSym(p: CoreProgram, id: int) -> boolean {
+        for (const k of p.consts) { if (k.sym.id == id) return true }
+        return false
+    }
+
+    // One module-level `const` per constant, in order (printed before any code that reads one).
+    export fn constStmts(ctx: Ctx, ks: CoreConst[]) -> JsStmt[] {
+        if (ks.length == 0) return []
+        let out: JsStmt[] = [JsStmt.SBlank, JsStmt.SComment("file-scope constants (§7.6)")]
+        for (const k of ks) { out = out.concat([JsStmt.SConst(symName(ctx, k.sym), exprJs(ctx, k.init))]) }
+        return out
+    }
     export fn symNameOf(ctx: Ctx, s: Sym) -> string { return symName(ctx, s) }
     fn rtName(ctx: Ctx) -> string { return nameOf(ctx.names, NameKey.Runtime) }
     fn rtCall(ctx: Ctx, f: string, args: JsExpr[]) -> JsExpr { return jcall(jmember(jid(rtName(ctx)), f), args) }
@@ -319,6 +364,7 @@ ${
             .Match(scrut: s, arms: arms) :> matchJs(ctx, s, arms)
             .ArrayOf(elems: es) :> JsExpr.JArray(exprsJs(ctx, es))
             .StructOf(ty: ty, fields: fs) :> structJs(ctx, ty, fs)
+            .VariantOf(enumSym: es, idx: vi, args: va) :> variantValueJs(ctx, es, vi, va)   // s472: THE ENUM VALUE SHAPE, as a `fail` builds it
             .Handle(inst: i) :> instJs(ctx, i)
             .InitOf(decl: d, inst: i, idx: x) :> rtCall(ctx, "initial", [instJs(ctx, i), JsExpr.JAnnot(jnum(x), memberName(ctx, d, x))])
             .Host(call: c) :> hostJs(c)
@@ -1857,6 +1903,7 @@ ${
             .Match(scrut: x) :> -1
             .ArrayOf(elems: x) :> -1
             .StructOf(ty: x) :> -1
+            .VariantOf(enumSym: x) :> -1
             .Handle(inst: x) :> -1
             .InitOf(decl: x) :> -1
             .Host(call: x) :> -1
@@ -2027,6 +2074,7 @@ ${
             .Match(scrut: x) :> []
             .ArrayOf(elems: x) :> []
             .StructOf(ty: x) :> []
+            .VariantOf(enumSym: x) :> []
             .Handle(inst: x) :> []
             .InitOf(decl: x) :> []
             .Host(call: x) :> []
@@ -2491,6 +2539,7 @@ ${
             .Match(scrut: s) :> false
             .ArrayOf(elems: es) :> false
             .StructOf(ty: t) :> false
+            .VariantOf(enumSym: t) :> false
             .Handle(inst: i) :> false
             .Host(call: c) :> false
             .Lambda(params: ps) :> false
@@ -2796,6 +2845,7 @@ ${
             .Match(scrut: x) :> false
             .ArrayOf(elems: x) :> false
             .StructOf(ty: x) :> false
+            .VariantOf(enumSym: x) :> false
             .Handle(inst: x) :> false
             .InitOf(decl: x) :> false
             .Host(call: x) :> false
@@ -2858,6 +2908,13 @@ ${
             JsStmt.SImportAll(rt, "./" + runtimeFile),
         ]
         let templates: Template[] = []
+        // s472: the constants the CLIENT's code reads — its declarations and its functions
+        // (computed below, before any is printed: a module-level `const` precedes its readers)
+        const serverOnly0: int[] = serverOnlyFns(p).concat(reachedOnlyByServer(p))
+        let clientRoots: Node[] = []
+        for (const d0 of p.decls) { clientRoots = clientRoots.concat([Node.NDecl(d0)]) }
+        for (const f0 of p.fns) { if (!hasInt(serverOnly0, f0.sym.id)) clientRoots = clientRoots.concat([Node.NFn(f0)]) }
+        body = body.concat(constStmts(ctx, constsReadIn(p, clientRoots)))
         for (const d of p.decls) {
             const r: Rendered = declJs(ctx, d, sharedUsed)
             body = body.concat(r.stmts)
@@ -2997,6 +3054,7 @@ ${
             .Match(scrut: x) :> not
             .ArrayOf(elems: x) :> not
             .StructOf(ty: x) :> not
+            .VariantOf(enumSym: x) :> not
             .Handle(inst: x) :> not
             .InitOf(decl: x) :> not
             .Host(call: x) :> not
@@ -3113,6 +3171,7 @@ ${
             .Match(scrut: x) :> not
             .ArrayOf(elems: x) :> not
             .StructOf(ty: x) :> not
+            .VariantOf(enumSym: x) :> not
             .Handle(inst: x) :> not
             .InitOf(decl: x) :> not
             .Host(call: x) :> not

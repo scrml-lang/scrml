@@ -360,6 +360,39 @@ ${
         return []
     }
 
+    // s472 C-V1 — a payload-variant value (Expr.VariantOf) names a variant of an
+    // enum of the program that CARRIES a payload, with one value per declared
+    // field (§14.4 construction arity). A nullary variant is Lit(Variant) — one
+    // spelling per shape — so a VariantOf of one is malformed Core.
+    fn checkVariantOf(p: CoreProgram, es: Sym, idx: int, nargs: int) -> string[] {
+        const n: int = variantArityOf(p, es, idx)
+        if (n < 0) return ["C-V1: a VariantOf names variant #" + idx + " of `" + es.hint + "`, which has no such variant"]
+        if (n == 0) return ["C-V1: a VariantOf of `" + es.hint + "` variant #" + idx + ", which carries no payload (a unit variant is Lit(Variant))"]
+        if (n != nargs) return ["C-V1: a VariantOf of `" + es.hint + "` variant #" + idx + " carries " + nargs + " value(s) for " + n + " payload field(s)"]
+        return []
+    }
+
+    // s472 r1 C-V2 — the mirror of C-V1: a `Lit(Variant)` value names a UNIT variant
+    // of an enum of the program. A payload variant's value is a VariantOf; a
+    // unit-shaped literal of one is a value no arm of its enum matches.
+    fn checkLitVariant(p: CoreProgram, l: Literal) -> string[] {
+        return match l {
+            .Variant(enumSym: es, idx: i) :> litVariantProblem(p, es, i)
+            .Int :> []
+            .Num :> []
+            .Str :> []
+            .Bool :> []
+            .Absent :> []
+        }
+    }
+
+    fn litVariantProblem(p: CoreProgram, es: Sym, idx: int) -> string[] {
+        const n: int = variantArityOf(p, es, idx)
+        if (n < 0) return ["C-V2: a Lit(Variant) names variant #" + idx + " of `" + es.hint + "`, which has no such variant"]
+        if (n > 0) return ["C-V2: a Lit(Variant) of `" + es.hint + "` variant #" + idx + ", which carries " + n + " payload field(s) (its value is a VariantOf)"]
+        return []
+    }
+
     // The payload arity of variant `idx` of enum `es` (-1: no such enum / variant).
     fn variantArityOf(p: CoreProgram, es: Sym, idx: int) -> int {
         const t: TypeDef | not = findTypeDef(p, es)
@@ -694,6 +727,7 @@ ${
             .Match(scrut: x) :> ""
             .ArrayOf(elems: x) :> ""
             .StructOf(ty: x) :> ""
+            .VariantOf(enumSym: x) :> ""
             .Host(call: x) :> ""
             .Lambda(params: x) :> ""
             .SeqCall(op: x) :> ""
@@ -733,6 +767,7 @@ ${
             .Match(scrut: x) :> not
             .ArrayOf(elems: x) :> not
             .StructOf(ty: x) :> not
+            .VariantOf(enumSym: x) :> not
             .Handle(inst: x) :> not
             .InitOf(decl: x) :> not
             .Host(call: x) :> not
@@ -806,6 +841,7 @@ ${
             .Match(scrut: x) :> not
             .ArrayOf(elems: x) :> not
             .StructOf(ty: x) :> not
+            .VariantOf(enumSym: x) :> not
             .Handle(inst: x) :> not
             .InitOf(decl: x) :> not
             .Host(call: x) :> not
@@ -945,6 +981,7 @@ ${
             .Match(scrut: x) :> false
             .ArrayOf(elems: x) :> false
             .StructOf(ty: x) :> false
+            .VariantOf(enumSym: x) :> false
             .Handle(inst: x) :> false
             .InitOf(decl: x) :> false
             .Host(call: x) :> false
@@ -967,6 +1004,7 @@ ${
             .Match(scrut: x) :> "(not a cell read)"
             .ArrayOf(elems: x) :> "(not a cell read)"
             .StructOf(ty: x) :> "(not a cell read)"
+            .VariantOf(enumSym: x) :> "(not a cell read)"
             .Handle(inst: x) :> "(not a cell read)"
             .InitOf(decl: x) :> "(not a cell read)"
             .Host(call: x) :> "(not a cell read)"
@@ -1620,6 +1658,7 @@ ${
             .Match(scrut: x) :> not
             .ArrayOf(elems: x) :> not
             .StructOf(ty: x) :> not
+            .VariantOf(enumSym: x) :> not
             .Handle(inst: x) :> not
             .InitOf(decl: x) :> not
             .Host(call: x) :> not
@@ -2118,6 +2157,7 @@ ${
             .Match(scrut: x) :> false
             .ArrayOf(elems: x) :> false
             .StructOf(ty: x) :> false
+            .VariantOf(enumSym: x) :> false
             .Handle(inst: x) :> false
             .InitOf(decl: x) :> false
             .Host(call: x) :> false
@@ -2276,6 +2316,7 @@ ${
             .Match(scrut: x) :> not
             .ArrayOf(elems: x) :> not
             .StructOf(ty: x) :> not
+            .VariantOf(enumSym: x) :> not
             .Handle(inst: x) :> not
             .InitOf(decl: x) :> not
             .Host(call: x) :> not
@@ -3166,6 +3207,7 @@ ${
             .Match(scrut: x) :> "a Commit write's value is not a Local (the snapshot)"
             .ArrayOf(elems: x) :> "a Commit write's value is not a Local (the snapshot)"
             .StructOf(ty: x) :> "a Commit write's value is not a Local (the snapshot)"
+            .VariantOf(enumSym: x) :> "a Commit write's value is not a Local (the snapshot)"
             .Handle(inst: x) :> "a Commit write's value is not a Local (the snapshot)"
             .InitOf(decl: x) :> "a Commit write's value is not a Local (the snapshot)"
             .Host(call: x) :> "a Commit write's value is not a Local (the snapshot)"
@@ -3253,6 +3295,7 @@ ${
             .Match(scrut: x) :> "a shrink-anywhere's value is not a filter of the field"
             .ArrayOf(elems: x) :> "a shrink-anywhere's value is not a filter of the field"
             .StructOf(ty: x) :> "a shrink-anywhere's value is not a filter of the field"
+            .VariantOf(enumSym: x) :> "a shrink-anywhere's value is not a filter of the field"
             .Handle(inst: x) :> "a shrink-anywhere's value is not a filter of the field"
             .InitOf(decl: x) :> "a shrink-anywhere's value is not a filter of the field"
             .Host(call: x) :> "a shrink-anywhere's value is not a filter of the field"
@@ -3291,6 +3334,7 @@ ${
             .Match(scrut: x) :> bad
             .ArrayOf(elems: x) :> bad
             .StructOf(ty: x) :> bad
+            .VariantOf(enumSym: x) :> bad
             .Handle(inst: x) :> bad
             .InitOf(decl: x) :> bad
             .Host(call: x) :> bad
@@ -3663,6 +3707,7 @@ ${
             .Match(scrut: x) :> not
             .ArrayOf(elems: x) :> not
             .StructOf(ty: x) :> not
+            .VariantOf(enumSym: x) :> not
             .Handle(inst: x) :> not
             .InitOf(decl: x) :> not
             .Host(call: x) :> not
@@ -3696,6 +3741,7 @@ ${
             .Match(scrut: x) :> not
             .ArrayOf(elems: x) :> not
             .StructOf(ty: x) :> not
+            .VariantOf(enumSym: x) :> not
             .Handle(inst: x) :> not
             .InitOf(decl: x) :> not
             .Host(call: x) :> not
@@ -3787,6 +3833,7 @@ ${
     fn structOfFields(e: Expr) -> Expr[] | not {
         return match e {
             .StructOf(ty: t, fields: fs) :> fs
+            .VariantOf(enumSym: x) :> not
             .Lit(lit: x) :> not
             .Local(sym: x) :> not
             .Read(place: x) :> not
@@ -3945,6 +3992,7 @@ ${
             .Match(scrut: x) :> not
             .ArrayOf(elems: x) :> not
             .StructOf(ty: x) :> not
+            .VariantOf(enumSym: x) :> not
             .Host(call: x) :> not
             .Lambda(params: x) :> not
             .SeqCall(op: x) :> not
@@ -3968,7 +4016,7 @@ ${
     fn checkExpr(p: CoreProgram, encl: Decl[], e: Expr) -> string[] {
         return match e {
             .InitOf(decl: d, inst: i, idx: x) :> checkCellRead(p, encl, d, i, [{ owner: d, idx: x }])
-            .Lit(lit: l) :> []
+            .Lit(lit: l) :> checkLitVariant(p, l)   // s472 r1 C-V2
             .Local(sym: s) :> []
             .Read(place: pl) :> []
             .Call(callee: c) :> []
@@ -3976,6 +4024,7 @@ ${
             .Match(scrut: s) :> []
             .ArrayOf(elems: es) :> []
             .StructOf(ty: t) :> []
+            .VariantOf(enumSym: es, idx: vi, args: va) :> checkVariantOf(p, es, vi, va.length)   // s472 C-V1
             .Handle(inst: i) :> []
             .Host(call: c) :> unreadableHost(c)
             .Lambda(params: ps) :> []
@@ -4047,6 +4096,7 @@ ${
             .Match(scrut: x) :> not
             .ArrayOf(elems: x) :> not
             .StructOf(ty: x) :> not
+            .VariantOf(enumSym: x) :> not
             .Host(call: x) :> not
             .Lambda(params: x) :> not
             .SeqCall(op: x) :> not

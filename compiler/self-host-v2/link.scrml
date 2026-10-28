@@ -152,6 +152,7 @@ ${
             .DeclItem(d: d) :> []
             .MarkupItem(n: n) :> []
             .ProgramItem(p: p) :> allImportsOfItems(p.items)
+            .ConstItem(c: c) :> []
         }
     }
 
@@ -305,6 +306,7 @@ ${
                 .DeclItem(d: d) :> false
                 .MarkupItem(n: n) :> false
                 .ProgramItem(p: p) :> true
+                .ConstItem(c: c) :> false
             }
             if (isProgram) return true
         }
