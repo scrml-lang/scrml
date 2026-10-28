@@ -18331,6 +18331,7 @@ ${
         let vt: VType = VType.Unknown
         let first = true
         let conflict = false
+        let prior: string[] = []                              // the value arms before this one, by pattern
         for (const a of handledArms(h)) {
             const af: FailFact | not = failFact(env.t.fails, a.nid)
             let aenv: TEnv = env
@@ -18369,7 +18370,7 @@ ${
                     // share no type: reported here, once; the match's value is then
                     // Unknown — this error accounts for it (no second report).
                     if (armsConflict(vt, r.vt, j)) {
-                        if (!hasErrIn(env.errs, one.span)) ts = report(ts, env, one.span, "E-TYPE-001", "the arms of this `match` produce different types — this arm is `" + vtName(r.vt) + "`, and the arm(s) before it `" + vtName(vt) + "` — a `match`'s arms produce one type, or types that unify (`T` with `T | not`, `int` with `number`) (§18.4 rule 3)")
+                        if (!hasErrIn(env.errs, one.span)) ts = report(ts, env, one.span, "E-TYPE-001", "the arms of this `match` produce different types with no subtype relationship — this arm (`" + patLabel(a.pat) + "`) produces " + vtTypesName(r.vt) + ", and the arm(s) before it (`" + prior.join("`, `") + "`) produce " + vtTypesName(vt) + " — a `match`'s arms produce one type, or types that unify (`T` with `T | not`, `int` with `number`, a type with a choice that holds it) (§18.4 rule 3)")
                         conflict = true
                         vt = VType.Unknown
                     } else {
@@ -18377,6 +18378,7 @@ ${
                     }
                 }
                 first = false
+                prior = prior.concat([patLabel(a.pat)])
             }
         }
         if (m.stmt) return rvt(VType.Unknown, ts)
@@ -18385,13 +18387,35 @@ ${
         return rvt(vt, ts)
     }
 
-    // s472 — the join of two arm values made a choice that neither arm was:
-    // two known arm types with no common type (§18.4 rule 3). An arm that is
-    // itself a choice (a ternary) is carried as the match's value, not blamed.
+    // s472 — §18.4 rule 3: "If arms produce types `A` and `B` with no subtype
+    // relationship, this SHALL be a compile error (E-TYPE-001)". The join of the
+    // arms is a choice that NEITHER side already was: it has more members than
+    // either side, so neither side's type holds the other's. An arm that is
+    // itself a choice (a ternary, §17.6 union) is judged the same way (s473 r1
+    // LOW-1): `int | string` beside `int` unifies (the choice holds it);
+    // `int | string` beside `bool` does not.
     fn armsConflict(a: VType, b: VType, j: VType) -> boolean {
-        if (oneOfMembers(j).length == 0) return false
-        if (oneOfMembers(a).length > 0 || oneOfMembers(b).length > 0) return false
-        return true
+        const n: int = oneOfMembers(j).length
+        if (n == 0) return false
+        return n > vtWidth(a) && n > vtWidth(b)
+    }
+
+    // How many types a value may be: a choice's members, else one (a known
+    // type) or none (`not` joins into any type; an unresolved one is not judged).
+    fn vtWidth(v: VType) -> int {
+        return match v {
+            .Known(t: x) :> 1
+            .Absent :> 0
+            .Unknown :> 0
+            .OneOf(ts: xs) :> xs.length
+        }
+    }
+
+    // A value type as a message names it, a choice by every member.
+    fn vtTypesName(v: VType) -> string {
+        const xs: Type[] = oneOfMembers(v)
+        if (xs.length > 0) return oneOfName(xs)
+        return "`" + vtName(v) + "`"
     }
 
     // A value type as a message names it.

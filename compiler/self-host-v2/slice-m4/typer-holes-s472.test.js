@@ -203,3 +203,27 @@ describe("r1 HIGH-1 — the text-sink check follows the lift's sink", () => {
     await shows(prog(XS, `<p id="o">\${ for (x of @xs) { lift x; } }</p>`), "12");
   });
 });
+
+// ---------------------------------------------------------------------------
+// s473 r1 LOW-1 (review of #1621): §18.4 rule 3 also judges an arm that is itself
+// a choice (a ternary, §17.6 union): `int | string` beside `bool` has no subtype
+// relationship (E-TYPE-001); beside `int` the choice holds it (unifies).
+describe("r1 LOW-1 — §18.4 rule 3 with a choice arm", () => {
+  const CB = `${C}\n    let <b:bool=true/>`;
+  test("M1 — a choice arm (`int | string`) beside a `bool` arm is E-TYPE-001", () => {
+    expect(codes(prog(CB, `<p id="o">\${match @c { .A :> (@b ? 1 : "s"), .B :> true, }}</p>`))).toEqual(["E-TYPE-001"]);
+  });
+  test("two choice arms with no subtype relationship are E-TYPE-001", () => {
+    expect(codes(prog(CB, `<p id="o">\${match @c { .A :> (@b ? 1 : "s"), .B :> (@b ? true : 2), }}</p>`))).toEqual(["E-TYPE-001"]);
+  });
+  test("legal — a choice arm beside an arm whose type it holds renders the arm taken", async () => {
+    await shows(prog(CB, `<p id="o">\${match @c { .A :> (@b ? 1 : "s"), .B :> 2, }}</p>`), "1");
+  });
+  test("the message names both arms (by pattern) and both types, a choice by every member", () => {
+    const d = run(prog(CB, `<p id="o">\${match @c { .A :> (@b ? 1 : "s"), .B :> true, }}</p>`)).diags;
+    expect(d.length).toBe(1);
+    expect(d[0].message).toContain("this arm (`.B`) produces `bool`");
+    expect(d[0].message).toContain("the arm(s) before it (`.A`) produce `int` or `string`");
+    expect(d[0].message).toContain("§18.4 rule 3");
+  });
+});
