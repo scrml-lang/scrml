@@ -1,0 +1,12 @@
+// §4.18.1 (S472): a `<db>` body declares; it does not run — a bare statement is E-DB-BODY-STATEMENT.
+<program>
+    let <n:int=0/>
+    <db src="./app.db">
+        function reset() {
+            @n = 0;
+        }
+        reset();
+        <p>in the db block</p>
+    </db>
+    <main><p>${@n}</p></main>
+</program>

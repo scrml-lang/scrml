@@ -1,0 +1,9 @@
+// §4.18.1 / §4.18.7 (S472): loose prose directly in a `<db>` body is E-UNQUOTED-DISPLAY-TEXT —
+// display text there is a markup element or a quoted literal.
+<program>
+    <db src="./app.db">
+        Recent orders, newest first
+        <p>in the db block</p>
+    </db>
+    <main><p>x</p></main>
+</program>

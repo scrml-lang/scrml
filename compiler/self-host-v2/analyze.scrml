@@ -51,7 +51,7 @@ ${
     import { ASpan, BinOp, UnOp, AExpr, AProp, AExprK, AStmt, ABlock, AStmtK, AEffect, AType, ATypeK,
              ATypeField, AVariant, ATypeBody, ATypeDecl, AParam, AFn, AImportName, AImport,
              AAttrValue, AAttr, AElem, ANode, ANodeK, ADeclAttr, AStateChild, ADeclChild, ADecl, AValArg, AValidator,
-             AProgram, AItem, AItemK, FileAst, Diag, ASql,
+             AProgram, AItem, AItemK, FileAst, ADbFn, Diag, ASql,
              AHow, AHandled, AArm, APat, ABind, AArmBody, AFail, AFor, AForHead, AIterSrc, AForBound, ALift,
              ACss, ACssItem, ACssRule, ACssDecl, ACssPart, ACssRef, mkSpan, newDiag } from "./ast.scrml"
     import { Severity } from "./severity.scrml"
@@ -13027,7 +13027,11 @@ ${
     }
 
     // s452 — a `<db src=…>` state block. §4: "A state block is a first-class
-    // context. Its content is markup context"; §8.1.1: a `<db src=>` is a
+    // context" — s472 (S472 ruling Q3, §4.18.1): its body is a code-default
+    // ITEM body, read by the parser (parseDbBody): `e.kids` holds its markup
+    // and display literals; its functions and types were hoisted into the
+    // program's items (FileAst.dbFns keeps their block); its declarations and
+    // statements were refused there. §8.1.1: a `<db src=>` is a
     // database scope for the `?{}` blocks inside it (placePass's dbsPass
     // resolves which database every query runs on, and checks `src=` —
     // E-SQL-005). It is not an HTML element: its children render in place.
@@ -20857,8 +20861,9 @@ ${
     //
     // ONE walk over every file — items, markup, declarations — carrying the
     // nearest database scope. It records each function's scope (a function is
-    // an item of a `<program>` body: the bootstrap has no function declared
-    // inside an element), each MARKUP-position `?{}` site's scope (an attribute
+    // an item of a `<program>` body or the file top — s472: one declared in a
+    // `<db>` body is hoisted there by the parser and takes THAT block's scope,
+    // FileAst.dbFns), each MARKUP-position `?{}` site's scope (an attribute
     // or handler value, an interpolation, an `<effect>` body, a declaration's
     // value), and every scope's database.
     //
@@ -20870,22 +20875,34 @@ ${
     type FnDb:struct = { fnid: int, scope: int }
     // Each markup-position `?{}` site's nearest database scope (-1: none).
     type SiteDb:struct = { nid: int, scope: int }
-    type RDbs:struct = { scopes: ScopeDb[], fns: FnDb[], sites: SiteDb[], st: AS }
+    // s472: `owned` — the current file's FileAst.dbFns (each function declared in a `<db>` body)
+    type RDbs:struct = { scopes: ScopeDb[], fns: FnDb[], sites: SiteDb[], st: AS, owned: ADbFn[] }
 
     fn dbsPass(g: Globals, files: FileAst[], st0: AS) -> RDbs {
-        let acc: RDbs = { scopes: [], fns: [], sites: [], st: st0 }
-        for (const f of files) { acc = dbsInItems(g, f.path, f.items, -1, acc) }
+        let acc: RDbs = { scopes: [], fns: [], sites: [], st: st0, owned: [] }
+        for (const f of files) {
+            const withOwned: RDbs = { scopes: acc.scopes, fns: acc.fns, sites: acc.sites, st: acc.st, owned: f.dbFns }
+            acc = dbsInItems(g, f.path, f.items, -1, withOwned)
+        }
         return acc
     }
 
+    // s472 — the `<db>` whose body declares function `fnid` (its element's nid), else -1.
+    fn ownerDb(owned: ADbFn[], fnid: int) -> int {
+        for (const o of owned) {
+            if (o.fn == fnid) return o.db
+        }
+        return -1
+    }
+
     fn withScope(acc: RDbs, nid: int, db: Db | not, st: AS) -> RDbs {
-        return { scopes: acc.scopes.concat([{ nid: nid, db: db }]), fns: acc.fns, sites: acc.sites, st: st }
+        return { scopes: acc.scopes.concat([{ nid: nid, db: db }]), fns: acc.fns, sites: acc.sites, st: st, owned: acc.owned }
     }
 
     fn withSites(acc: RDbs, ss: SqlSite[], scope: int) -> RDbs {
         let sites: SiteDb[] = acc.sites
         for (const x of ss) { sites = sites.concat([{ nid: x.nid, scope: scope }]) }
-        return { scopes: acc.scopes, fns: acc.fns, sites: sites, st: acc.st }
+        return { scopes: acc.scopes, fns: acc.fns, sites: sites, st: acc.st, owned: acc.owned }
     }
 
     fn dbsInItems(g: Globals, file: string, items: AItem[], scope: int, acc0: RDbs) -> RDbs {
@@ -20893,7 +20910,9 @@ ${
         for (const it of items) {
             const k: AItemK = it.k
             const f: AFn | not = fnOfItemK(k)
-            if (f is given) acc = { scopes: acc.scopes, fns: acc.fns.concat([{ fnid: f.nid, scope: scope }]), sites: acc.sites, st: acc.st }
+            // s472: a function declared in a `<db>` body (hoisted into this item
+            // list by the parser) takes THAT block's scope — dbsInElem records it
+            if (f is given && ownerDb(acc.owned, f.nid) < 0) acc = { scopes: acc.scopes, fns: acc.fns.concat([{ fnid: f.nid, scope: scope }]), sites: acc.sites, st: acc.st, owned: acc.owned }
             const p: AProgram | not = programOfK(k)
             if (p is given) acc = dbsInProgram(g, file, p, scope, acc)
             const n: ANode | not = markupOfItemK(k)
@@ -20983,6 +21002,24 @@ ${
                     acc = withScope(acc, e.nid, rd.db, rd.st)
                 }
                 inner = e.nid
+            }
+        }
+        // s472 (S472 ruling Q3) — the functions declared in this `<db>` body:
+        // their nearest database scope is this block (§8.1.1). A `<db>` with no
+        // `src=` registers no scope (resolveDb refuses it), so their queries
+        // resolve to nothing — never to an outer database. A `<db>` a user
+        // declaration takes over is that declaration's use, not a database
+        // scope: a function in its body has no SPEC reading — refused.
+        if (!e.star && e.tag == "db") {
+            const isDb: boolean = isDbElem(g, file, e)
+            for (const o of acc.owned) {
+                if (o.db == e.nid) {
+                    if (isDb) {
+                        acc = { scopes: acc.scopes, fns: acc.fns.concat([{ fnid: o.fn, scope: e.nid }]), sites: acc.sites, st: acc.st, owned: acc.owned }
+                    } else {
+                        acc = { scopes: acc.scopes, fns: acc.fns, sites: acc.sites, st: addDiag(acc.st, file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "a function in the body of `<db>` — here a use of the declaration `db`, not the `<db>` state block (§4, §8.1.1) — is not in the bootstrap"), owned: acc.owned }
+                    }
+                }
             }
         }
         for (const c of e.kids) { acc = dbsInNode(g, file, c, inner, acc) }

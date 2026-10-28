@@ -49,7 +49,7 @@ ${
     import { ASpan, BinOp, UnOp, AExpr, AProp, AExprK, AStmt, ABlock, AStmtK, AEffect, AType, ATypeK,
              ATypeField, AVariant, ATypeBody, ATypeDecl, AParam, AFn, AImportName, AImport,
              AAttrValue, AAttr, AElem, ANode, ANodeK, ADeclAttr, AStateChild, ADeclChild, ADecl, AValArg, AValidator,
-             AProgram, AItem, AItemK, FileAst, Diag, ASql, ASqlMode,
+             AProgram, AItem, AItemK, FileAst, ADbFn, Diag, ASql, ASqlMode,
              AHow, AHandled, AArm, APat, ABind, AArmBody, AFail, AFor, AForHead, AIterSrc, AForBound, ALift, ACss, mkSpan, newDiag, stdlibPathPrefix } from "./ast.scrml"
     import { CssErr, CssParsed, parseCssBlock } from "./css-syntax.scrml"
 
@@ -2845,7 +2845,9 @@ ${
             while (!atEnd(t) && !(isP(t, "}") && atEnd(adv(t)))) { t = adv(t) }
         }
         t = expectRegionEnd(expectP(t, "}"))
-        const mb: MP = backToMarkup(mp, t)
+        // s472: from `m`, not `mp` — the rows read above may carry `<db>`-body
+        // items (MP.hoist), which must reach the item list, never be dropped
+        const mb: MP = backToMarkup(m, t)
         const f: AFor | not = forOfStmt(rs.s)
         if (f is not) {
             const re: AExpr = { nid: mb.nid, span: mkSpan(start, mb.pos), k: AExprK.Recovered }
@@ -3929,7 +3931,11 @@ ${
     // =========================================================================
     // The MARKUP scanner (char level). State threaded like TP.
     // =========================================================================
-    type MP:struct = { src: string, pos: int, nid: int, diags: Diag[], file: string }
+    // s472 (S472 ruling Q3): `hoist` — the `function` / `fn` / `type` items
+    // read in a `<db>` body (parseDbBody), waiting for the nearest item list
+    // (parseMarkupItems drains them into the program body or the file top);
+    // `dbFns` — which `<db>` each such function was declared in (FileAst.dbFns).
+    type MP:struct = { src: string, pos: int, nid: int, diags: Diag[], file: string, hoist: AItem[], dbFns: ADbFn[] }
 
     type RNodes:struct  = { nodes: ANode[], mp: MP }
     type RMItems:struct = { items: AItem[], mp: MP }
@@ -3955,7 +3961,7 @@ ${
 
     fn parseCssNode(mp: MP) -> RCss {
         const r: CssParsed = parseCssBlock(mp.src, mp.pos, mp.nid)
-        let m: MP = { src: mp.src, pos: r.end, nid: r.nid, diags: mp.diags, file: mp.file }
+        let m: MP = { src: mp.src, pos: r.end, nid: r.nid, diags: mp.diags, file: mp.file, hoist: mp.hoist, dbFns: mp.dbFns }
         for (const e of r.errs) { m = mDiag(m, e.code, e.text, e.start, e.end) }
         const n: ANode = { nid: m.nid, span: r.css.span, k: ANodeK.Css(r.css) }
         return { n: n, mp: mBump(m) }
@@ -3970,20 +3976,20 @@ ${
     fn atInterp(mp: MP) -> boolean { return chAt(mp, 0) == "$" && chAt(mp, 1) == "{" }
 
     fn mAdv(mp: MP, n: int) -> MP {
-        return { src: mp.src, pos: mp.pos + n, nid: mp.nid, diags: mp.diags, file: mp.file }
+        return { src: mp.src, pos: mp.pos + n, nid: mp.nid, diags: mp.diags, file: mp.file, hoist: mp.hoist, dbFns: mp.dbFns }
     }
 
     fn mAt(mp: MP, pos: int) -> MP {
-        return { src: mp.src, pos: pos, nid: mp.nid, diags: mp.diags, file: mp.file }
+        return { src: mp.src, pos: pos, nid: mp.nid, diags: mp.diags, file: mp.file, hoist: mp.hoist, dbFns: mp.dbFns }
     }
 
     fn mBump(mp: MP) -> MP {
-        return { src: mp.src, pos: mp.pos, nid: mp.nid + 1, diags: mp.diags, file: mp.file }
+        return { src: mp.src, pos: mp.pos, nid: mp.nid + 1, diags: mp.diags, file: mp.file, hoist: mp.hoist, dbFns: mp.dbFns }
     }
 
     fn mDiag(mp: MP, code: string, msg: string, start: int, end: int) -> MP {
         const d: Diag = newDiag(code, msg, mp.file, mkSpan(start, end))
-        return { src: mp.src, pos: mp.pos, nid: mp.nid, diags: mp.diags.concat([d]), file: mp.file }
+        return { src: mp.src, pos: mp.pos, nid: mp.nid, diags: mp.diags.concat([d]), file: mp.file, hoist: mp.hoist, dbFns: mp.dbFns }
     }
 
     fn mLooking(mp: MP, s: string) -> boolean {
@@ -4088,7 +4094,7 @@ ${
     // consumed token (the Eof sentinel's start = where the lexer stopped).
     fn backToMarkup(mp: MP, tp: TP) -> MP {
         const eof: PTok = tp.toks[tp.toks.length - 1]
-        return { src: mp.src, pos: eof.start, nid: tp.nid, diags: tp.diags, file: mp.file }
+        return { src: mp.src, pos: eof.start, nid: tp.nid, diags: tp.diags, file: mp.file, hoist: mp.hoist, dbFns: mp.dbFns }
     }
 
     // After a region's expression: anything left before the Eof is an error.
@@ -4742,7 +4748,7 @@ ${
             const inside: boolean = d.span.start >= start && d.span.end <= end
             if (d.code != "W-STRING-INTERP-LITERAL" || !inside) keep = keep.concat([d])
         }
-        return { src: mp.src, pos: mp.pos, nid: mp.nid, diags: keep, file: mp.file }
+        return { src: mp.src, pos: mp.pos, nid: mp.nid, diags: keep, file: mp.file, hoist: mp.hoist, dbFns: mp.dbFns }
     }
 
     // F9: a literal `$`+`{` in a scrml string is interpolation under impl#1 —
@@ -5488,6 +5494,8 @@ ${
         }
         if (o.selfClosing || isVoidTag(o.name)) return elemFrom(o, [], mp)
         if (isRawContentOpener(o)) return finishRaw(o, mp)
+        // s472 (S472 ruling Q3): a `<db>` body is a code-default ITEM body
+        if (isDbOpener(o)) return finishDb(o, mp)
         const kids: RNodes = parseKids(mp, o.name)
         return elemFrom(o, kids.nodes, kids.mp)
     }
@@ -5754,14 +5762,6 @@ ${
                 out = out.concat([ri.n])
                 m = ri.mp
                 textStart = m.pos
-            } else if (tag == "db" && dbDeclAt(m)) {
-                if (text != "") {
-                    out = out.concat([textNode(m, textStart, text)])
-                    m = mBump(m)
-                    text = ""
-                }
-                m = refuseDbDecl(m)
-                textStart = m.pos
             } else if (chAt(m, 0) == "<" && opensTag(chAt(m, 1))) {
                 if (text != "") {
                     out = out.concat([textNode(m, textStart, text)])
@@ -5867,9 +5867,9 @@ ${
     // E-DECL-KEYWORD-NOT-ITEM. `<channel>`, `<page>` and `<theme>` are refused
     // whole (E-BOOTSTRAP-UNSUPPORTED — `<theme>` here, `<channel>` / `<page>` in
     // analyze's structural-tag check), so their own body decides nothing and
-    // reports no keyword: one fail-closed code each. A `<db>` is not refused
-    // whole: its declarations are refused one by one (dbDeclAt / refuseDbDecl).
-    fn o61Body(tag: string) -> boolean { return tag == "page" || tag == "theme" || tag == "channel" || tag == "db" }
+    // reports no keyword: one fail-closed code each. A `<db>` body is not a
+    // free-text body at all (s472 — parseDbBody), so it never reaches here.
+    fn o61Body(tag: string) -> boolean { return tag == "page" || tag == "theme" || tag == "channel" }
 
     // s471 — a declaration standing in a `<db>` body: `let` / `export` /
     // `export let` before a declaration opener, or a declaration opener alone
@@ -5909,7 +5909,248 @@ ${
         const ro: ROpener = parseOpener(m)
         const od: Opener = isLet ? withLet(ro.o) : ro.o
         const rd: RDecl = finishDecl(od, ro.mp, exported)
-        return mDiag(rd.mp, "E-BOOTSTRAP-UNSUPPORTED", "a declaration in a `<db>` body (§66.2.5 O61, §8.1.1 — owned by the block, its state server-side, readable program-wide by `@`) is not in the bootstrap", start, rd.mp.pos)
+        return mDiag(rd.mp, "E-BOOTSTRAP-UNSUPPORTED", "a declaration in a `<db>` body declares a server-authoritative cell (§52 — S472 ruling: evaluated on the server per request, the client receives only its projection; §66.2.5 O61, §8.1.1), which is not in the bootstrap", start, rd.mp.pos)
+    }
+
+    // ---- s472: a `<db>` body (S472 ruling Q3; SPEC §4.18.1) -----------------
+    // RULED S472 ("your recs on the 6", Q3): "The `<db>` body is code-default
+    // and ITEM-ONLY (declarations, `function`/`fn`, `type`, markup, `"…"`
+    // literals); a bare statement is refused (`E-DB-BODY-STATEMENT`), loose
+    // prose is `E-UNQUOTED-DISPLAY-TEXT`." So nothing written in a `<db>` body
+    // is ever page text (the free-text reading shipped a `function` there —
+    // SQL included — verbatim into the page):
+    //   - a markup element is markup (its own body free-text, as everywhere);
+    //   - a `"…"` standing alone is a display-text literal, rendered in place;
+    //   - `function` / `fn` / `type` (and `server function`, `export …`) is an
+    //     item, read by the logic parser and HOISTED into the nearest item list
+    //     (MP.hoist → parseMarkupItems) — the program's own function, whose
+    //     `?{}` resolve to THIS `<db>` (FileAst.dbFns; analyze dbsPass, §8.1.1
+    //     the nearest database scope);
+    //   - a declaration is refused by name (refuseDbDecl — a server-authoritative
+    //     cell, ruling Q1, is not in the bootstrap);
+    //   - `#{…}` is CSS, the other sigils as in markup;
+    //   - anything else is a statement (E-DB-BODY-STATEMENT — a `<db>` body
+    //     declares, it does not run: a `${…}`, an `<effect>`, a call, a write,
+    //     control flow, `when`) or prose (E-UNQUOTED-DISPLAY-TEXT, one report
+    //     per run of consecutive prose lines).
+    type RDbBody:struct = { nodes: ANode[], items: AItem[], mp: MP }
+
+    fn isDbOpener(o: Opener) -> boolean { return !o.star && o.name == "db" }
+
+    // A `<db>` element after its opener: the item body, then the element; its
+    // functions and types join MP.hoist, each function recorded as this
+    // block's (MP.dbFns).
+    fn finishDb(o: Opener, mp: MP) -> RElem {
+        const rb: RDbBody = parseDbBody(mp, o.start)
+        const r: RElem = elemFrom(o, rb.nodes, rb.mp)
+        let fns: ADbFn[] = r.mp.dbFns
+        for (const it of rb.items) {
+            const fid: int = fnIdOfItem(it.k)
+            if (fid >= 0) fns = fns.concat([{ fn: fid, db: r.e.nid }])
+        }
+        const m: MP = { src: r.mp.src, pos: r.mp.pos, nid: r.mp.nid, diags: r.mp.diags, file: r.mp.file, hoist: r.mp.hoist.concat(rb.items), dbFns: fns }
+        return { e: r.e, mp: m }
+    }
+
+    fn fnIdOfItem(k: AItemK) -> int {
+        return match k {
+            .FnItem(f: f) :> f.nid
+            .TypeItem(t: x) :> -1
+            .ImportItem(i: i) :> -1
+            .DeclItem(d: d) :> -1
+            .MarkupItem(n: n) :> -1
+            .ProgramItem(p: p) :> -1
+        }
+    }
+
+    fn parseDbBody(mp: MP, open: int) -> RDbBody {
+        let m: MP = mp
+        let out: ANode[] = []
+        let items: AItem[] = []
+        // a pending prose run [proseStart, proseEnd), reported once
+        let proseStart: int = -1
+        let proseEnd: int = -1
+        let going = true
+        while (going) {
+            m = skipTrivia(m)
+            const at: int = m.pos
+            const nd: int = m.diags.length
+            let prose = false
+            if (mEof(m)) {
+                m = mDiag(m, "E-PARSE-UNCLOSED", "`<db>` is never closed", open, m.pos)
+                going = false
+            } else if (mLooking(m, "</")) {
+                going = false
+            } else if (atCss(m)) {
+                const rc: RCss = parseCssNode(m)
+                out = out.concat([rc.n])
+                m = rc.mp
+            } else if (atOtherSigil(m)) {
+                m = skipSigil(m)
+            } else if (atInterp(m)) {
+                const tp: TP = regionTP(mAdv(m, 1), LexStop.Balanced)
+                const end: int = lastEnd(tp)
+                m = mDiag(mAt(m, end), "E-DB-BODY-STATEMENT", "a `" + interpOpen() + "…}` in a `<db>` body: " + dbStmtWhy() + " A value to display is a display-text literal (`\"" + interpOpen() + "…}\"`) or goes inside a markup element; a function or a type is written directly in the `<db>` body, without `" + interpOpen() + "…}`", at, end)
+            } else if (dbDeclAt(m)) {
+                m = refuseDbDecl(m)
+            } else if (keywordTagAt(m) >= 0) {
+                m = dbKeywordOnMarkup(m)
+            } else if (chAt(m, 0) == "<" && opensTag(chAt(m, 1))) {
+                const ro: ROpener = parseOpener(m)
+                const rn: RNodeOne = parseMarkupNode(m)
+                if (isEffectOpener(ro.o)) {
+                    m = mDiag(rn.mp, "E-DB-BODY-STATEMENT", "an `<effect>` in a `<db>` body: " + dbStmtWhy(), at, rn.mp.pos)
+                } else {
+                    out = out.concat([rn.n])
+                    m = rn.mp
+                }
+            } else if (dbOnBlockAt(m)) {
+                // `on mount { … }` (§6.7.1a, soft-deprecated): a lifecycle statement
+                const ob: TP = regionTP(m, LexStop.Statement)
+                const oend: int = lastEnd(ob)
+                m = mDiag(mAt(m, oend), "E-DB-BODY-STATEMENT", "`on " + ob.toks[1].text + " { … }` in a `<db>` body: " + dbStmtWhy(), at, oend)
+            } else if (dbItemWordAt(m)) {
+                const ri: RMItems = logicRegionItem(m, LexStop.Statement, false)
+                m = ri.mp
+                for (const it of ri.items) {
+                    if (fnIdOfItem(it.k) >= 0 || isTypeItem(it.k)) {
+                        items = items.concat([it])
+                    } else {
+                        m = mDiag(m, "E-DB-BODY-STATEMENT", "this is not a `function`, `fn` or `type` declaration: " + dbStmtWhy(), it.span.start, it.span.end)
+                    }
+                }
+            } else if (chAt(m, 0) == "\"" && displayCloseAt(m.src, m.pos) < 0) {
+                // §4.18.3 / §4.18.7: an unterminated literal — E-CTX-001, read to the body's closer
+                const stop: int = firstBodyCloser(m.src, m.pos + 1, "db")
+                m = mDiag(m, "E-CTX-001", "unterminated display-text literal: the `\"` opened here has no closing `\"` before the end of the file (§4.18.3) — read up to " + (stop >= m.src.length ? "the end of the file" : "the `<db>` body's closer"), at, at + 1)
+                const ck: RCook = cookRecovered(mAt(m, stop), at + 1, stop)
+                out = out.concat([textNode(ck.mp, at + 1, ck.text)])
+                m = mBump(ck.mp)
+            } else if (dbDisplayAt(regionTP(m, LexStop.CodeBody))) {
+                const di: RNodes = parseDisplayItem(m, regionTP(m, LexStop.CodeBody))
+                out = out.concat(di.nodes)
+                m = di.mp
+            } else {
+                const end: int = dbStatementEnd(m)
+                if (end > at) {
+                    m = mDiag(mAt(m, end), "E-DB-BODY-STATEMENT", dbStmtWhy() + " (Display text here is a markup element, `<p>…</p>`, or a quoted display-text literal, `\"…\"`.)", at, end)
+                } else {
+                    prose = true
+                    const pe: int = dbProseLineEnd(m)
+                    if (proseStart < 0) proseStart = at
+                    proseEnd = pe
+                    m = mAt(m, pe)
+                }
+            }
+            if (!prose && proseStart >= 0) {
+                // the prose run's report goes BEFORE this item's (source order)
+                m = dbProseDiag(m, proseStart, proseEnd, nd)
+                proseStart = -1
+            }
+            if (going && m.pos == at) m = mAdv(m, 1)
+        }
+        if (proseStart >= 0) m = dbProseDiag(m, proseStart, proseEnd, m.diags.length)
+        if (mLooking(m, "</")) m = parseCloser(m, "db")
+        return { nodes: out, items: items, mp: m }
+    }
+
+    fn isTypeItem(k: AItemK) -> boolean {
+        return match k {
+            .TypeItem(t: t) :> true
+            .FnItem(f: f) :> false
+            .ImportItem(i: i) :> false
+            .DeclItem(d: d) :> false
+            .MarkupItem(n: n) :> false
+            .ProgramItem(p: p) :> false
+        }
+    }
+
+    fn dbStmtWhy() -> string {
+        return "a `<db>` body declares; it does not run (S472 ruling Q3, §4.18.1). Move this into a function, or into the `<program>` body."
+    }
+
+    // `function`, `fn`, `type`, `server` (the deprecated `server function`,
+    // §52.10) or `export` not before a tag: an item the logic parser reads.
+    fn dbItemWordAt(mp: MP) -> boolean {
+        const w: RWord = readName(mp)
+        if (w.w == "function" || w.w == "fn" || w.w == "type" || w.w == "server") return true
+        if (w.w != "export") return false
+        return chAt(skipTrivia(w.mp), 0) != "<"
+    }
+
+    // `on <word> {` — the lifecycle-statement head (`on mount { … }`, §6.7.1a).
+    fn dbOnBlockAt(mp: MP) -> boolean {
+        const w: RWord = readName(mp)
+        if (w.w != "on") return false
+        const tp: TP = regionTP(mp, LexStop.CodeBody)
+        if (tp.toks.length < 4) return false
+        const t1: PTok = tp.toks[1]
+        return (t1.cls == TC.Ident || t1.cls == TC.Keyword) && tk(tp.toks[2], "{") && t1.line == tp.toks[0].line
+    }
+
+    // `let` / `export` before a tag that declares nothing (dbDeclAt took the
+    // declarations): the program body's reports (letOnNonDecl / E-PARSE-EXPORT),
+    // then the tag is read as the markup it is.
+    fn dbKeywordOnMarkup(mp: MP) -> MP {
+        const lt: int = keywordTagAt(mp)
+        const kw: string = mp.src.substring(mp.pos, lt).trim()
+        const nw: RWord = readName(mAt(mp, lt + 1))
+        const name: string = nw.w
+        let m: MP = mp
+        if (kw.startsWith("export")) m = mDiag(m, "E-PARSE-EXPORT", "`export` applies to a declaration, not to markup", mp.pos, mp.pos + 6)
+        if (kw.endsWith("let")) m = mDiag(m, "E-PARSE-LET", "`let` applies to a declaration — `<" + name + ">` declares nothing (a declaration has an own value `=…`, a `:Type`, or a typed attribute, §66.2.2; a container is `<" + name + ":struct>`)", mp.pos, mp.pos + kw.length)
+        return mAt(m, lt)
+    }
+
+    // A display-text literal standing alone (§4.18.3, §7.2.2 rule 2 — it takes
+    // no `;`): the run's first token is a `"…"` and what follows it is the run's
+    // end, another `"…"` literal, or a later line.
+    fn dbDisplayAt(d: TP) -> boolean {
+        if (d.toks.length < 2) return false
+        const t0: PTok = d.toks[0]
+        if (t0.cls != TC.Str || t0.text.substring(0, 1) != "\"") return false
+        const t1: PTok = d.toks[1]
+        if (t1.cls == TC.End) return true
+        if (t1.cls == TC.Str && t1.text.substring(0, 1) == "\"") return true
+        return t1.line > t0.line && t0.text.indexOf("\n") < 0
+    }
+
+    // Where the ONE statement at `mp` ends, when the run there reads as a whole
+    // statement (§40.8's reading of a code-default body run): it parses with no
+    // error beyond a missing `;`, and ends at its `;`, the run's end, a block's
+    // `}` or a line break. Otherwise `mp.pos` — the run is prose.
+    fn dbStatementEnd(mp: MP) -> int {
+        const tp0: TP = codeRegionTP(mp, LexStop.CodeBody)
+        const tp: TP = { toks: tp0.toks, i: 0, nid: mp.nid, diags: [], file: mp.file }
+        if (atEnd(tp)) return mp.pos
+        const rs: RStmt = parseStmt(tp)
+        const t: TP = rs.tp
+        if (t.i == 0 || hardErrors(t.diags) > 0) return mp.pos
+        const last: PTok = t.toks[t.i - 1]
+        const nx: PTok = cur(t)
+        if (isP(t, ";")) return nx.end
+        if (nx.cls == TC.End || tk(last, "}") || nx.line > last.line) return last.end
+        return mp.pos
+    }
+
+    // A prose line: up to the end of the last token on the run's first line.
+    fn dbProseLineEnd(mp: MP) -> int {
+        const tp: TP = codeRegionTP(mp, LexStop.CodeBody)
+        if (tp.toks.length < 2) return mp.pos + 1
+        const line: int = tp.toks[0].line
+        let end: int = tp.toks[0].end
+        for (const t of tp.toks) {
+            if (t.cls != TC.End && t.line == line) end = t.end
+        }
+        return end
+    }
+
+    // The report of a prose run, placed at index `at` of the diagnostics.
+    fn dbProseDiag(mp: MP, start: int, end: int, at: int) -> MP {
+        const text: string = mp.src.substring(start, end).trim()
+        const d: Diag = newDiag("E-UNQUOTED-DISPLAY-TEXT", "display text in a `<db>` body is declared — a markup element (`<p>" + text + "</p>`) or a quoted display-text literal (`\"" + text + "\"`): a `<db>` body is a code-default item body, never page text (S472 ruling Q3, §4.18.1 / §4.18.7)", mp.file, mkSpan(start, end))
+        const ds: Diag[] = mp.diags.slice(0, at).concat([d]).concat(mp.diags.slice(at, mp.diags.length))
+        return { src: mp.src, pos: mp.pos, nid: mp.nid, diags: ds, file: mp.file, hoist: mp.hoist, dbFns: mp.dbFns }
     }
 
     // Report the keyword (its span) and resume at the tag, which then parses
@@ -6509,12 +6750,18 @@ ${
             } else {
                 const before: int = m.pos
                 const r: RMItems = parseMarkupItem(m, tag == "")
-                out = out.concat(r.items)
-                m = r.mp
+                // s472: the `<db>`-body items read inside this item (MP.hoist)
+                // join this item list, right after it
+                out = out.concat(r.items).concat(r.mp.hoist)
+                m = noHoist(r.mp)
                 if (m.pos == before) m = mAdv(m, 1)
             }
         }
         return { items: out, mp: m }
+    }
+
+    fn noHoist(mp: MP) -> MP {
+        return { src: mp.src, pos: mp.pos, nid: mp.nid, diags: mp.diags, file: mp.file, hoist: [], dbFns: mp.dbFns }
     }
 
     fn mItem(mp: MP, start: int, k: AItemK) -> RMItems {
@@ -6663,7 +6910,7 @@ ${
 
     // Parse one file. NodeIds start at `firstId`; `nextId` is the first unused.
     export fn parseFile(path: string, src: string, firstId: int) -> Parsed {
-        const m0: MP = { src: src, pos: 0, nid: firstId, diags: [], file: path }
+        const m0: MP = { src: src, pos: 0, nid: firstId, diags: [], file: path, hoist: [], dbFns: [] }
         const r: RMItems = parseMarkupItems(m0, "")
         // `errs`: the ERROR spans only (s451) — §34: Warning and Info codes "do
         // not fail the compile", so a parse warning neither untrusts a declaration
@@ -6672,7 +6919,7 @@ ${
         // (s469: not E-STMT-NO-EFFECT — a whole, well-formed statement: the body around
         // it IS what was written, so analyze still judges it, e.g. E-TYPE-043)
         for (const d of r.mp.diags) { if (d.severity == Severity.Error && d.code != "E-STMT-NO-EFFECT") errs = errs.concat([d.span]) }
-        return { ast: { path: path, items: r.items, errs: errs, lines: lineStarts(src) }, diags: r.mp.diags, nextId: r.mp.nid }
+        return { ast: { path: path, items: r.items, errs: errs, lines: lineStarts(src), dbFns: r.mp.dbFns }, diags: r.mp.diags, nextId: r.mp.nid }
     }
 
     // The offset where each line of `src` starts (s454 — FileAst.lines).

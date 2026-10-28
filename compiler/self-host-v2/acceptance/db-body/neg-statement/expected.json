@@ -1,0 +1,10 @@
+{
+  "id": "acceptance-db-body-neg-statement",
+  "description": "A bare call standing directly in a `<db>` body is refused (E-DB-BODY-STATEMENT) — it is never page text and never runs.",
+  "language-version": "1.0",
+  "spec": "§4.18.1 (S472 amendment) · §34 E-DB-BODY-STATEMENT",
+  "rationale": "RULED S472 item 3: \"a bare statement is refused (`E-DB-BODY-STATEMENT`)\".",
+  "expect": {
+    "codes": ["E-DB-BODY-STATEMENT"]
+  }
+}
