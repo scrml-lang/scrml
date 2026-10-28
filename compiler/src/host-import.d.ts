@@ -8,7 +8,8 @@
 
 export declare const MANIFEST_FILE_NAME: "scrml.toml";
 export declare const HOST_IMPORT_VALUES: readonly ["disabled", "self-host-only"];
-export declare const SELF_HOST_PATH_PREFIX: "stdlib/compiler/";
+/** The compiler's own stdlib directory — the only place `import:host` is admitted (S472). */
+export declare const COMPILER_STDLIB_DIR: string;
 export declare const HOST_TAG: "host";
 
 /** The `[capabilities] host-import` value. */
@@ -37,15 +38,19 @@ export interface HostImportCapability {
   manifestPath: string | null;
   error: object | null;
   note: string | null;
+  /** The stdlib directory `import:host` is admitted in (COMPILER_STDLIB_DIR unless overridden). */
+  stdlibRoot: string;
 }
 
 export declare function readHostImportCapability(
   filePath: string,
   cache?: Map<string, object> | null,
+  stdlibRoot?: string | null,
 ): HostImportCapability;
 
 export declare function readHostImportCapabilities(
   filePaths: Iterable<string>,
+  opts?: { stdlibRoot?: string | null },
 ): { byFile: Map<string, HostImportCapability>; errors: object[] };
 
 /** Is `filePath` inside the capability's allow-list? */

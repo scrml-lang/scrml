@@ -1,9 +1,10 @@
 # scrml project manifest (SPEC §22.13).
 #
-# This repository is the scrml bootstrap: `stdlib/compiler/**` is the
-# `scrml:compiler` family, which bridges into the host TypeScript compiler
-# with `import:host` (§21.3.1). "self-host-only" admits `import:host` ONLY in
-# files under `stdlib/compiler/` (relative to this manifest); every other file
-# in the repository still gets E-IMPORT-008 for an `import:host`.
+# This repository is the scrml bootstrap. "self-host-only" admits `import:host`
+# (§21.3.1) ONLY in files under `stdlib/` (relative to this manifest) — S471
+# host bridge option A: a stdlib module stays scrml and reaches the host through
+# a thin TS/JS file beside it; the `scrml:compiler` family (`stdlib/compiler/**`)
+# bridges into the host TypeScript compiler the same way. Every other file in
+# the repository still gets E-IMPORT-008 for an `import:host`.
 [capabilities]
 host-import = "self-host-only"
