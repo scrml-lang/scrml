@@ -153,6 +153,7 @@ ${
             .Effect(deps: x) :> "Effect"
             .ResetOn(triggers: x) :> "ResetOn"
             .Errors(of: x) :> "Errors"
+            .Reach(fields: fs) :> "Reach"
             .Gather(g: x) :> "Gather"
         }
     }

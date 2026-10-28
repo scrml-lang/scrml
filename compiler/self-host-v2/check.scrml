@@ -935,6 +935,7 @@ ${
             .Effect(deps: ds, body: b) :> checkEffect(p, encl, ds, b)
             .ResetOn(triggers: ds, reset: b) :> checkResetOn(p, encl, ds, b)
             .Errors(of: x) :> checkSurface(p, encl, x)
+            .Reach(fields: fs) :> checkGateFields(p, encl, fs)
             .Gather(g: g, rows: rows) :> checkLoop(g.head, g.body).concat(viewGatherDefers(g.body)).concat(checkViewGather(p, g, rows))
             .El(tag: t, attrs: attrs) :> checkGates(t, attrs).concat(checkStaticSinks(t, attrs))
             .Text(text: x) :> []
@@ -1474,6 +1475,7 @@ ${
             .Effect(deps: x) :> not
             .ResetOn(triggers: x) :> not
             .Errors(of: x) :> not
+            .Reach(fields: fs) :> not
             .Gather(g: x) :> not
         }
     }
@@ -1603,6 +1605,7 @@ ${
             .Effect(body: b) :> tailBlock(b, true, [], "an effect body")
             .ResetOn(reset: b) :> tailBlock(b, false, [], "a reset-on reset")
             .Errors(of: x) :> []
+            .Reach(fields: fs) :> []
             .Gather(g: g) :> tailBlock(g.body, false, [], "a Tier-0 loop")
             .El(tag: x) :> []
             .Text(text: x) :> []
@@ -2612,6 +2615,7 @@ ${
             .Effect(body: b) :> jumpBlock(b, [])
             .ResetOn(reset: b) :> jumpBlock(b, [])
             .Errors(of: x) :> []
+            .Reach(fields: fs) :> []
             .Gather(g: g) :> jumpBlock(g.body, [g.label.id])
             .El(tag: x) :> []
             .Text(text: x) :> []
@@ -2802,6 +2806,7 @@ ${
             .Effect(body: b) :> liftBlock(b, -1, -1)
             .ResetOn(reset: b) :> liftBlock(b, -1, -1)
             .Errors(of: x) :> []
+            .Reach(fields: fs) :> []
             .El(tag: x) :> []
             .Text(text: x) :> []
             .RawText(text: x) :> []
@@ -3788,6 +3793,7 @@ ${
             .Effect(deps: ds) :> not
             .ResetOn(triggers: ds) :> not
             .Errors(of: ds) :> not
+            .Reach(fields: fs) :> not
             .Gather(g: x) :> not
         }
     }

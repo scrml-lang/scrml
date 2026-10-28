@@ -291,6 +291,7 @@ ${
             .Effect(deps: ds, body: b) :> effectDepNodes(ds).concat([Node.NBlock(b)])
             .ResetOn(triggers: ds, reset: b) :> effectDepNodes(ds).concat([Node.NBlock(b)])
             .Errors(of: x, all: a) :> [Node.NInst(validityInst(x))]
+            .Reach(fields: fs) :> validityNodes(fs)
             .Gather(g: g, rows: rows) :> gatherKids(g).concat(gatherRowNodes(rows))   // s469 (§17.4)
         }
     }
@@ -507,6 +508,7 @@ ${
             .Effect(deps: ds) :> []
             .ResetOn(triggers: ds) :> []
             .Errors(of: x) :> []
+            .Reach(fields: fs) :> []
             .Gather(g: g) :> loopBinds(g.label, g.head).concat([g.bind])   // s469 (§17.4)
         }
     }

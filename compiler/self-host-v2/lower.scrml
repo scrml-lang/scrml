@@ -2105,6 +2105,7 @@ ${
             .Effect(deps: ds) :> v
             .ResetOn(triggers: ds) :> v
             .Errors(of: o) :> v
+            .Reach(fields: fs) :> v
             .Gather(g: g, rows: rs) :> View.Gather(g, stampRows(rs, extra, keyed))
         }
     }
@@ -3409,22 +3410,49 @@ ${
     // step 2 is blocked by an empty step-1 field). Once the whole program is
     // lowered, each form's Gate is given the fields its subtree NAMES — its own
     // markup, Cond arms, slot content written in it, and `<*x/>` Stars (whose
-    // renders' `.Lexical(0)` is the Star's instance). An `<each>` row, a use's
-    // instance and a slot's filler instance are not nameable here; the runtime
-    // finds them on the live form (runtime.gate).
+    // renders' `.Lexical(0)` is the Star's instance).
+    //
+    // s472 (g-bootstrap-gate-reach-live-dom-reading, S239 round 2 P3 / P4 /
+    // P12) — what the form's own code cannot name is named where it CAN be:
+    //  - a declaration USE creates its own instance, which only that
+    //    declaration's render sees (`.Lexical(0)` = `inst$`): each user
+    //    declaration's renders opens with a View.Reach naming the fields its
+    //    composed subtree binds, evaluated against the instance being rendered;
+    //  - a slot filled at the use site is lowered at the use: the filler list
+    //    opens with a Reach evaluated in the use site's context;
+    //  - an `<each>` / Tier-0 row likewise, in the row's context.
+    // A Reach marker registers when its list MOUNTS (runtime.reach); a gated
+    // form gates every registered list whose marker is inside it. A use in an
+    // unmounted region has no instance yet (a nested region creates its
+    // instances as it mounts, print.scrml `nested`) — there is no value, so
+    // nothing gates. An `as=` handle is named at submit with a presence check
+    // (print.scrml gateFieldJs → runtime.validityIf). The live lookup of the
+    // rendered controls stays as the backstop.
     // =========================================================================
     fn gateDecls(p: CoreProgram) -> Decl[] {
         let out: Decl[] = []
         for (const d of p.decls) {
             const rs: View[] | not = d.renders
             if (rs is given) {
-                out = out.concat([{ sym: d.sym, kind: d.kind, single: d.single, fields: d.fields, renders: gateViews(p, rs),
+                let gated: View[] = gateViews(p, rs)
+                if (!isProgramKind(d.kind)) gated = reachList(namedFields(p, rs, not, [d.sym.id]), gated)
+                out = out.concat([{ sym: d.sym, kind: d.kind, single: d.single, fields: d.fields, renders: gated,
                                     wiring: d.wiring, handles: d.handles }])
             } else {
                 out = out.concat([d])
             }
         }
         return out
+    }
+
+    // `vs` opened by a Reach naming `fs` — nothing when `fs` is empty.
+    fn reachList(fs: ValidityOf[], vs: View[]) -> View[] {
+        if (fs.length == 0) return vs
+        return [View.Reach(fs)].concat(vs)
+    }
+
+    fn gateList(p: CoreProgram, vs: View[]) -> View[] {
+        return reachList(namedFields(p, vs, not, []), gateViews(p, vs))
     }
 
     fn gateViews(p: CoreProgram, vs: View[]) -> View[] {
@@ -3437,8 +3465,8 @@ ${
         return match v {
             .El(tag: tag, attrs: attrs, kids: ks) :> View.El(tag, gateAttrs(p, attrs, ks), gateViews(p, ks))
             .Cond(arms: arms) :> View.Cond(gateArms(p, arms))
-            .Each(src: s, bind: b, key: k, handles: hs, row: row) :> View.Each(s, b, k, hs, gateViews(p, row))
-            .Instance(decl: d, attrs: a, slot: sl, alias: al) :> View.Instance(d, a, gateViews(p, sl), al)
+            .Each(src: s, bind: b, key: k, handles: hs, row: row) :> View.Each(s, b, k, hs, gateList(p, row))
+            .Instance(decl: d, attrs: a, slot: sl, alias: al) :> View.Instance(d, a, gateList(p, sl), al)
             .Text(text: x) :> v
             .RawText(text: x) :> v
             .Dyn(e: x) :> v
@@ -3447,13 +3475,14 @@ ${
             .Effect(deps: x) :> v
             .ResetOn(triggers: x) :> v
             .Errors(of: x) :> v
+            .Reach(fields: fs) :> v
             .Gather(g: g, rows: rs) :> View.Gather(g, gateRows(p, rs))
         }
     }
 
     fn gateRows(p: CoreProgram, rs: GatherRow[]) -> GatherRow[] {
         let out: GatherRow[] = []
-        for (const r of rs) { out = out.concat([{ views: gateViews(p, r.views) }]) }
+        for (const r of rs) { out = out.concat([{ views: gateList(p, r.views) }]) }
         return out
     }
 
@@ -3523,6 +3552,7 @@ ${
             .Effect(deps: x) :> []
             .ResetOn(triggers: x) :> []
             .Errors(of: x) :> []
+            .Reach(fields: fs) :> []
             .Gather(g: x) :> []
         }
     }
@@ -3609,15 +3639,19 @@ ${
     }
 
     // An instance reference the form's render can evaluate at submit: a
-    // shared instance, or the enclosing instance. An `as=` handle or a
-    // `given` local may name no instance by then — those binds are found on
-    // the live form instead. Inside a Star's renders, `.Lexical(0)` is the
-    // Star's own instance (`subst`).
+    // shared instance, the enclosing instance, or (s472) an `as=` handle of
+    // this render context — read at submit with a presence check (an absent
+    // handle names no instance: nothing to gate). Inside a Star's renders,
+    // `.Lexical(0)` is the Star's own instance (`subst`); a handle there is the
+    // Star declaration's, which this context cannot address — that renders'
+    // own Reach names it when it mounts. A `given`-narrowed local is never a
+    // bind target in markup (`given` is a statement and the bootstrap lifts no
+    // markup from logic), so `.Narrowed` names nothing here.
     fn nameable(i: InstRef, subst: InstRef | not) -> InstRef | not {
         return match i {
             .Shared(decl: d) :> i
             .Lexical(depth: k) :> lexicalThrough(k, i, subst)
-            .Alias(sym: s) :> not
+            .Alias(sym: s) :> aliasThrough(i, subst)
             .Narrowed(sym: s) :> not
         }
     }
@@ -3625,6 +3659,11 @@ ${
     fn lexicalThrough(k: int, i: InstRef, subst: InstRef | not) -> InstRef | not {
         if (subst is not) return i
         if (k == 0) return subst
+        return not
+    }
+
+    fn aliasThrough(i: InstRef, subst: InstRef | not) -> InstRef | not {
+        if (subst is not) return i
         return not
     }
 }
