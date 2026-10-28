@@ -26,7 +26,7 @@ Scope: **1813 of 1813 cases attempted** — every attempted case reached the pur
 - FAILs whose required code appears nowhere in the bootstrap's sources (check not implemented): 24 of 49; the other 25 are implemented checks that answered wrong.
 
 LEGACY by marker (a case may carry several): none.
-UNSUPPORTED by reason: bootstrap-unsupported 516 · parse-reject 309.
+UNSUPPORTED by reason: bootstrap-unsupported 515 · parse-reject 310.
 
 ### §66 twins (S449 dialect ruling 1 — generated at test time by the `scrml fix` §66 rules)
 
@@ -1114,7 +1114,7 @@ none
 - `module/e-import-002-reexport-import-cycle-mixed-reject` — twin · parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `const` (statements at logic-block level are not in bootstrap slice M2)
 - `module/e-import-003-host-import-inside-logic-reject` — twin · bootstrap-unsupported: `./tok.js` — the bootstrap imports `.scrml` modules and `scrml:` stdlib modules only; a JavaScript (or other non-`.scrml`) module import is not in the bootstrap
 - `module/e-import-003-import-inside-fn-reject` — twin · parse-reject: E-STMT-MISSING-SEMICOLON: Expected `;` to end the statement — insert `;` after `import`. A `;` ends every statement that is not block-like, the last one before a `}` included (`{ @n = @n + 1; }`); a n
-- `module/e-import-004-reexport-ambiguous-star-reject` — twin · bootstrap-unsupported: function `w` is also declared in `c.scrml` — the bootstrap links one namespace, so every use of `w` would resolve to the first one (a silent mis-link); it is refused instead (a bootstrap slice limit, 
+- `module/e-import-004-reexport-ambiguous-star-reject` — twin · parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `*` (statements at logic-block level are not in bootstrap slice M2)
 - `module/e-import-004-reexport-chain-clean` — twin · parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `{` (statements at logic-block level are not in bootstrap slice M2)
 - `module/e-import-004-reexport-missing-name-reject` — twin · parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `{` (statements at logic-block level are not in bootstrap slice M2)
 - `module/e-import-004-stdlib-name-exported-clean` — twin · bootstrap-unsupported: `scrml:data` — the bootstrap cannot import this stdlib module: the build supplied no source for it that the bootstrap compiles, so none of its names are imported (§41.5)

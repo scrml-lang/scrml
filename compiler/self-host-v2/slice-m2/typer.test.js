@@ -156,10 +156,15 @@ describe("a scope binds each name once", () => {
     const lib = "export <box label:string=\"\"/>\nrenders <p>${label}</p>\nexport <box label:string=\"\"/>\nrenders <p>${label}</p>\n";
     expect(codes([boxLib(lib), boxApp("<box/>")])).toEqual(["E-BOOTSTRAP-REDECLARE"]);
   });
-  test("E-BOOTSTRAP-UNSUPPORTED — one function name in two files (the bootstrap links one namespace)", () => {
+  // s472: file scope — a name a file declares AND imports is bound twice in file scope (§7.6
+  // E-SCOPE-010); one function name declared in two files is two functions (no refusal).
+  test("E-SCOPE-010 — a function name a file declares AND imports (s472; was E-BOOTSTRAP-UNSUPPORTED, one namespace)", () => {
     const lib = { path: "lib/a.scrml", src: "${ export function helper() { } }\n" };
     const main = { path: "app.scrml", src: "${ import { helper } from \"./lib/a.scrml\"; }\n<program>\nfunction helper() { }\n<main><p>x</p></main>\n</program>\n" };
-    expect(codes([lib, main])).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+    expect(codes([lib, main])).toEqual(["E-SCOPE-010"]);
+    // twin: not imported — two functions, one per file
+    const main2 = { path: "app.scrml", src: "<program>\nfunction helper() { }\n<main><p>x</p></main>\n</program>\n" };
+    expect(codes([lib, main2])).toEqual([]);
   });
 });
 
@@ -428,13 +433,15 @@ describe("D / E — names are scoped to what a file can see", () => {
   test("legal — an `as=` handle named like a declaration that is NOT visible here", () => {
     expect(codes([other, boxLib("export <box n:int=0/>\nrenders <p>x</p>\n"), boxApp("<box as=card/>")])).toEqual([]);
   });
-  test("E-BOOTSTRAP-UNSUPPORTED (kept, measured) — two PRIVATE `helper`s in two libraries: base b7c863235 resolved BOTH calls to the first (a silent mis-link)", () => {
+  // s472 (was "E-BOOTSTRAP-UNSUPPORTED (kept, measured)": base b7c863235 resolved BOTH calls to
+  // the first `helper` — a silent mis-link — so the pair was refused): with file scope each call
+  // resolves to its own file's `helper`. Clean — a mis-link would type `useB`'s return as `int`.
+  test("legal (s472) — two PRIVATE `helper`s in two libraries: each call resolves to its own file's", () => {
     const a = { path: "lib/a.scrml", src: "${ function helper() -> int { return 1; }\n export function useA() -> int { return helper(); } }\n" };
     const b = { path: "lib/b.scrml", src: "${ function helper() -> string { return \"b\"; }\n export function useB() -> string { return helper(); } }\n" };
     const main = { path: "app.scrml", src: "${ import { useA } from \"./lib/a.scrml\"; }\n${ import { useB } from \"./lib/b.scrml\"; }\n<program>\n<main><p>${useA()} ${useB()}</p></main>\n</program>\n" };
     const r = frontEnd(mods, [a, b, main]);
-    expect(r.diags.map((d) => d.code)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
-    expect(r.diags[0].message).toContain("the bootstrap links one namespace");
+    expect(r.diags.map((d) => d.code)).toEqual([]);
   });
 });
 
@@ -445,9 +452,12 @@ describe("F — SPEC-silent duplicates (bootstrap-local, owe rulings)", () => {
   test("F1 twin silent — two distinct type names", () => {
     expect(inApp("    type T:struct = { a: int }\n    type U:struct = { b: string }")).toEqual([]);
   });
-  test("F1 E-BOOTSTRAP-UNSUPPORTED — one type name in two files (one type namespace)", () => {
+  // s472: file scope — one type name in two files is two types (was E-BOOTSTRAP-UNSUPPORTED, one
+  // type namespace); each file's annotation names its own (`app`'s `T` has `b`, not `a`)
+  test("F1 legal (s472) — one type name in two files: each file's annotations resolve to its own", () => {
     const lib = { path: "lib/t.scrml", src: "${ type T:struct = { a: int } }\n" };
-    expect(codes([lib, LIB(), app("    type T:struct = { b: string }", "<p>x</p>")])).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+    expect(codes([lib, LIB(), app("    type T:struct = { b: string }\n    function f() { let v: T = { b: \"x\" }; }", "<p>x</p>")])).toEqual([]);
+    expect(codes([lib, LIB(), app("    type T:struct = { b: string }\n    function f() { let v: T = { a: 1 }; }", "<p>x</p>")])).not.toEqual([]);
   });
   test("F2 E-BOOTSTRAP-REDECLARE — `function g(a: int, a: int)`", () => {
     expect(inApp("    function g(a: int, a: int) { }")).toEqual(["E-BOOTSTRAP-REDECLARE"]);
