@@ -59,3 +59,4 @@ export/import boundary was not enforced at use sites.
 - known-gaps: g-boot-flat-link-namespace-s471 → resolved (heading fixed: was "RESOLVED S471" with
   status=open); filed g-boot-component-scope-key-bare-name-s472, g-boot-type-unknown-code-s472;
   counts regenerated (master-list recent-sessions hunk reverted).
+- pushed; PR #1606 (not merged). Local: slices job + e2e-render-map green; pre-commit hook 50371 pass / 0 fail.
