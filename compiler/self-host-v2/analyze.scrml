@@ -3982,6 +3982,22 @@ ${
         return { fs: out, sites: sites, st: st }
     }
 
+    // s472 (boot-math-port) — FAIL CLOSED: a host-backed function is an ordinary
+    // function, placed wherever it is called; route placement never makes one a
+    // server function of its own (its body is the host call — nothing server-only).
+    // Should it ever (a placement rule this did not foresee), the Core has no
+    // server-side host-backed function to print it as — refused, never printed
+    // without its body.
+    fn hostPlacedDiags(fns: FnInfo[], servers: int[]) -> Diag[] {
+        let out: Diag[] = []
+        for (const f of fns) {
+            if (f.host is given && servers.indexOf(f.sym.id) >= 0) {
+                out = out.concat([newDiag("E-BOOTSTRAP-UNSUPPORTED", "the host-backed `" + f.name + "` (§21.3.1.1) was placed on the server as a server function of its own — the bootstrap prints a host-backed function only as an ordinary function (a bootstrap defect: please report it)", f.file, f.span)])
+            }
+        }
+        return out
+    }
+
     fn fnWithHost(i: FnInfo, h: HostFn) -> FnInfo {
         return { nid: i.nid, span: i.span, sym: i.sym, name: i.name, file: i.file, exported: i.exported,
                  pure: i.pure, arity: i.arity, ret: i.ret, failable: i.failable, err: i.err,
@@ -3992,6 +4008,10 @@ ${
     // wrapper of `h`; "" when its SHAPE is the rule's.
     fn wrapperShapeWhy(fs: FnSrc, c: CallParts, h: string, twice: boolean) -> string {
         if (fs.f.ret is not) return "`" + fs.info.name + "` does not declare its return type — a host binding's wrapper is fully typed: its signature IS the host function's type"
+        const wr: AType | not = fs.f.ret
+        if (wr is given) {
+            if (isVoidType(wr)) return "`" + fs.info.name + "` declares no return value (`void`) — a host binding's wrapper returns the host function's value, decoded against its declared return type"
+        }
         if (fs.f.failable) return "`" + fs.info.name + "` is declared `!` — a host function's failure is not a scrml error value, so its wrapper cannot be failable"
         if (fs.f.server) return "`" + fs.info.name + "` is a `server` function — a host binding's wrapper is an ordinary function, placed wherever it is called"
         if (twice) return "`" + h + "` is already wrapped by another function in this file — a host function has one type, so it has one wrapper"
@@ -24512,7 +24532,7 @@ ${
                             names: bound.names, values: bound.values, effects: bound.effects, binds: bound.binds,
                             elems: bound.elems, attrs: bound.attrs, fails: bound.fails, annots: bound.annots, unresolved: bound.unresolved, typing: typed.typing,
                             novalidate: vp.forms, resets: bound.resets, gated: vp.gated, persists: bound.persists, server: sf, css: css.facts }
-        const base0: Diag[] = domScopeDropped(pl.st.diags, pp.doms).concat(scopeDiags).concat(effectDiags).concat(vp.diags).concat(sinkDiags).concat(typed.diags)
+        const base0: Diag[] = domScopeDropped(pl.st.diags, pp.doms).concat(scopeDiags).concat(effectDiags).concat(vp.diags).concat(sinkDiags).concat(typed.diags).concat(hostPlacedDiags(fns, pp.facts.servers))
         // s471: the linear pass (§35) — after the typer (§35.5: "after type resolution and
         // route inference"; a non-exhaustive `match`'s E-TYPE-020 is in `base0`, §35.4.3)
         const base: Diag[] = base0.concat(linPass(ra.g, typedT, base0))

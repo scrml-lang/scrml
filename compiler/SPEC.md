@@ -24650,7 +24650,8 @@ ${ import { helper } from './helper.js' }
   project root, or whose `_scrml_local/…` path falls in a §47.13 denied class, SHALL
   be a compile error (E-IMPORT-011); a missing one SHALL be E-IMPORT-006. A build with
   any such error SHALL copy no helper. A `.ts` / `.mts` target (`import:host`) is not
-  copied. In the classic module format, a page whose client bundles carry a top-level
+  copied. *(S472: no `import:host` target is under this rule — a stdlib module's host module
+  lands at `<outputDir>/_scrml/<module>/<file>` for both artifacts, §21.3.1.1.)* In the classic module format, a page whose client bundles carry a top-level
   ES `import` SHALL load every one of its client-bundle `<script>` tags as
   `type="module"` (the runtime stays classic and runs first); a page whose bundles
   carry none is unchanged.

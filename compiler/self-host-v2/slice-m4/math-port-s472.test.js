@@ -277,6 +277,7 @@ describe("the S472 wrapper rule — a host binding is usable ONLY as the direct 
     ["an argument that is not a parameter", "    export fn f(x: int) -> int {\n        return hf(x + 1);\n    }"],
     ["fewer arguments than parameters", "    export fn f(x: int, y: int) -> int {\n        return hf(x);\n    }"],
     ["no declared return type (not fully typed)", "    export fn f(x: int) {\n        return hf(x);\n    }"],
+    ["a `-> void` wrapper (no value to decode)", "    export fn f(x: int) -> void {\n        return hf(x);\n    }"],
     ["a `!` wrapper", "    export fn f(x: int) -> int ! {\n        return hf(x);\n    }"],
     ["a call in another function's body", "    export fn f(x: int) -> int {\n        return g(x);\n    }\n    fn g(x: int) -> int {\n        const y: int = x;\n        return hf(y) + 0;\n    }"],
   ];
