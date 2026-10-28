@@ -273,38 +273,105 @@ describe("a closed `<*g/>` whose renders mounts a use — the use's instance exi
 
 // ---------------------------------------------------------------------------
 // g-bootstrap-gate-external-form-owner-control — HTML's form owner (`form=`).
-// SPEC is silent on whether the form-owner association joins the gate set, so a
-// bound control carrying `form=` whose value has a surface is refused.
+// RULED S472 (user-voice-scrml.md "`form="id"` (HTML form owner) and the submit
+// gate"): "a control carrying `form="id"` whose `bind:` targets a validated value
+// JOINS THE GATE SET OF THAT ONE FORM (§55.17), and only that form, when `id` is a
+// static literal naming exactly one `<form>` in the program … Otherwise … `form=`
+// on a validated bind is a COMPILE ERROR." (SPEC §55.17.3, E-FORM-OWNER-UNRESOLVED.)
 // ---------------------------------------------------------------------------
-describe("`form=` on a bound control (the HTML form owner) — refused, fail closed", () => {
-  const OWNER = (control, extra = "") => `<program>
+describe("`form=\"id\"` (the HTML form owner) — the control joins that one form's gate (RULED S472)", () => {
+  const OWNER = (control, extra = "", more = "") => `<program>
     let <calls:int=0/>
+    let <show:bool=false/>
+    let <id:string="f"/>
     let <v:string="" length(>=2)/>
     let <q:string=""/>
+    <xs:string[replace]=(["a"])/>
     function save() { @calls = @calls + 1; }
     <main>
-        <form id="f" onsubmit=save()>${extra}<button type="submit">go</button></form>
+        <form id="f" onsubmit=save()>${extra}<button class="go" type="submit">go</button></form>
         ${control}
+        ${more}
         <p class="calls">\${@calls}</p>
     </main>
 </program>
 `;
   const codes = (src) => run(src).diags.map((d) => d.code);
-  test("an external `<select form=\"f\" bind:value=@v>` with `length(>=2)` (the reviewer's fail-open) → E-BOOTSTRAP-UNSUPPORTED at `form=`", () => {
-    const src = OWNER(`<select form="f" bind:value=@v><option value="">-</option></select>`);
-    const d = run(src).diags;
-    expect(d.map((x) => x.code)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
-    expect(src.slice(d[0].span.start, d[0].span.start + 5)).toBe("form=");
-    expect(d[0].message).toContain("`v`");
+  const SEL = (attr) => `<select class="s" ${attr} bind:value=@v><option value="">-</option><option value="a">a</option><option value="ab">ab</option></select>`;
+  const pick = (v) => { const s = $("select.s"); s.value = v; s.dispatchEvent(new window.Event("input", { bubbles: true })); s.dispatchEvent(new window.Event("change", { bubbles: true })); };
+
+  test("the reviewer's fail-open — an external `<select form=\"f\" bind:value=@v>` with `length(>=2)`: f's gate blocks \"a\", passes \"ab\"; f is marked", async () => {
+    const r = run(OWNER(SEL(`form="f"`)));
+    expect(r.diags).toEqual([]);
+    expect(r.infos.map((i) => i.message.split(" — ")[0])).toEqual(["this form's submit is gated by: v"]);
+    await loadProgram(r.core, "owner-ext");
+    expect($("main form").getAttribute("data-scrml-gated")).toBe("v");
+    pick("a");
+    const e = submit($("main form"));
+    expect(calls()).toBe("0");
+    expect(e.defaultPrevented).toBe(true);
+    pick("ab");
+    submit($("main form"));
+    expect(calls()).toBe("1");
+  });
+  test("F2 — the name is ASCII case-blind (`FORM=` / `Form=` are `form=` to the browser): it joins f's gate too", async () => {
+    await loadProgram(clean(OWNER(SEL(`FORM="f"`))), "owner-ext-upper");
+    pick("a");
+    submit($("main form"));
+    expect(calls()).toBe("0");
+    await loadProgram(clean(OWNER(SEL(`Form="f"`))), "owner-ext-mixed");
+    pick("a");
+    submit($("main form"));
+    expect(calls()).toBe("0");
+  });
+  test("an external control in a CLOSED region still gates f (static reach); the `<input>` carries lowered attributes, so f gets `novalidate`", async () => {
+    const r = run(OWNER(`<div if=@show><input class="v" form="f" bind:value=@v/></div>`));
+    expect(r.diags).toEqual([]);
+    await loadProgram(r.core, "owner-ext-closed");
+    expect(document.querySelectorAll("main input").length).toBe(0);
+    expect($("main form").hasAttribute("novalidate")).toBe(true);
+    submit($("main form"));
+    expect(calls()).toBe("0");   // "" fails length(>=2) (LengthFailed)
+  });
+  test("…and with `req`, the closed external control's empty value blocks f", async () => {
+    const src = OWNER(`<div if=@show><input class="v" form="f" bind:value=@v/></div>`).replace(`let <v:string="" length(>=2)/>`, `let <v:string="" req/>`);
+    await loadProgram(clean(src), "owner-ext-closed-req");
+    submit($("main form"));
+    expect(calls()).toBe("0");
+  });
+  test("a control INSIDE f that names another form `g` gates g, not f (\"only that form\")", async () => {
+    const src = OWNER("", `<input class="v" form="g" bind:value=@v/>`, `<form id="g" class="g" onsubmit=save()><button type="submit">g</button></form>`);
+    const r = run(src);
+    expect(r.diags).toEqual([]);
+    await loadProgram(r.core, "owner-inner-other");
+    expect($("form.g").getAttribute("data-scrml-gated")).toBe("v");
+    expect($("main form").hasAttribute("data-scrml-gated")).toBe(false);
+    type($("input.v"), "a");
+    submit($("main form"));
+    expect(calls()).toBe("1");   // f is not gated by v
+    submit($("form.g"));
+    expect(calls()).toBe("1");   // g is
+  });
+  test("COMPILE ERROR when the owner is not one literal-named form: computed, unquoted, no match, two matches, a non-form", () => {
+    expect(codes(OWNER(SEL(`form=(@id)`)))).toEqual(["E-FORM-OWNER-UNRESOLVED"]);
+    expect(codes(OWNER(SEL(`form=@id`)))).toEqual(["E-FORM-OWNER-UNRESOLVED"]);
+    expect(codes(OWNER(SEL(`form="nope"`)))).toEqual(["E-FORM-OWNER-UNRESOLVED"]);
+    expect(codes(OWNER(SEL(`form="f"`), "", `<form id="f"></form>`))).toEqual(["E-FORM-OWNER-UNRESOLVED"]);
+    expect(codes(OWNER(SEL(`form="d"`), "", `<div id="d"></div>`))).toEqual(["E-FORM-OWNER-UNRESOLVED"]);
+    const d = run(OWNER(SEL(`FORM="nope"`))).diags;
+    expect(d.map((x) => x.code)).toEqual(["E-FORM-OWNER-UNRESOLVED"]);
     expect(d[0].message).toContain("§55.17.3");
   });
-  test("an external `<input form=\"f\">` binding a validated value → refused", () => {
-    expect(codes(OWNER(`<input form="f" bind:value=@v/>`))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+  test("a form with a computed `id` makes every literal `form=` unprovable → E-FORM-OWNER-UNRESOLVED", () => {
+    expect(codes(OWNER(SEL(`form="f"`), "", `<form id=(@id)></form>`))).toEqual(["E-FORM-OWNER-UNRESOLVED"]);
   });
-  test("a control INSIDE the form naming another owner with `form=` → refused", () => {
-    expect(codes(OWNER("", `<input form="other" bind:value=@v/>`))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+  test("bootstrap limit (fail closed): a `form=` control inside an `<each>` or a Tier-0 row → E-BOOTSTRAP-UNSUPPORTED", () => {
+    expect(codes(OWNER(`<each in=@xs as x>${SEL(`form="f"`)}</each>`))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+    expect(codes(OWNER(`\${ for (x of @xs) { lift ${SEL(`form="f"`)}; } }`))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
   });
-  test("a field of a declaration (any field has a surface, §55.6) bound with `form=` → refused", () => {
+  test("F4 — `form=` on a control binding a value with NO validators is not refused (a declaration field included)", () => {
+    expect(codes(OWNER(`<input form="f" bind:value=@q/>`))).toEqual([]);
+    expect(codes(OWNER(`<input form="nope" bind:value=@q/>`))).toEqual([]);
     const src = `<program>
     <f note:string="n">
         let <w:string=""/>
@@ -313,15 +380,97 @@ describe("`form=` on a bound control (the HTML form owner) — refused, fail clo
     <main><form id="x"></form><f/></main>
 </program>
 `;
-    expect(codes(src)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+    expect(codes(src)).toEqual([]);
   });
-  test("controls: `form=` on a control binding a value with NO surface is accepted; the bound control without `form=` is gated as before", async () => {
-    expect(codes(OWNER(`<input form="f" bind:value=@q/>`))).toEqual([]);
-    await loadProgram(clean(OWNER("", `<input class="v" bind:value=@v/>`)), "owner-inside-ok");
-    type($("input.v"), "a");
+});
+
+// ---------------------------------------------------------------------------
+// S239 r1 F1 — a SHARED (top-level) validated value bound inside a USE's
+// renders, where the use is not mounted: the value exists, so it gates.
+// ---------------------------------------------------------------------------
+describe("F1 — a shared value bound through a use that is not mounted still gates", () => {
+  const A = (site) => `<program>
+    let <calls:int=0/>
+    let <step:int=2/>
+    let <show:bool=false/>
+    let <email:string="" req/>
+    <stepOne note:string="n">
+        let <t:string=""/>
+    </>
+    renders <input class="e" bind:value=@email/>
+    <f note:string="n">
+        let <open:bool=false/>
+    </>
+    renders <div if=open><stepOne/></div>
+    <card note:string="n">
+        let <t:string=""/>
+    </>
+    renders <form class="c" onsubmit=save()><slot/><button type="submit">go</button></form>
+    function save() { @calls = @calls + 1; }
+    <main>
+        ${site}
+        <p class="calls">\${@calls}</p>
+    </main>
+</program>
+`;
+  const F = (inner) => `<form onsubmit=save()>${inner}<button type="submit">go</button></form>`;
+  test("A3 — `<stepOne/>` in a closed step arm (the multi-step form with components)", async () => {
+    await loadProgram(clean(A(F(`<div if=(@step == 1)><stepOne/></div>`))), "f1-a3");
+    expect(document.querySelectorAll("main input").length).toBe(0);
     submit($("main form"));
     expect(calls()).toBe("0");
-    type($("input.v"), "ab");
+  });
+  test("A3 control — the field filled, then the step closed: the submit runs", async () => {
+    await loadProgram(clean(A(F(`<div if=(@step == 2)><stepOne/></div>`))), "f1-a3-ok");
+    type($("input.e"), "a@b");
+    submit($("main form"));
+    expect(calls()).toBe("1");
+  });
+  test("B — nested: a mounted `<f/>` whose renders holds `<stepOne/>` in a closed arm", async () => {
+    await loadProgram(clean(A(F(`<f/>`))), "f1-b");
+    submit($("main form"));
+    expect(calls()).toBe("0");
+  });
+  test("F — a use-site slot filler: `<card><div if=@show><stepOne/></div></card>`", async () => {
+    await loadProgram(clean(A(`<card><div if=@show><stepOne/></div></card>`)), "f1-f");
+    submit($("form.c"));
+    expect(calls()).toBe("0");
+  });
+  test("a use's OWN field is not named through it (its instance may not exist): Core names only the shared value", () => {
+    const core = clean(A(F(`<div if=(@step == 1)><stepOne/></div>`)));
+    const gate = walk(core, (n) => n.variant === "Gate")[0].data;
+    expect(gate.fields.map((x) => x.data.inst.variant)).toEqual(["Shared"]);  // the program's email, through the use: `.Shared`
+  });
+});
+
+// ---------------------------------------------------------------------------
+// S239 r1 F3 — a form whose validated binds sit only in Tier-0 rows is gated.
+// ---------------------------------------------------------------------------
+describe("F3 — Tier-0 `${ for … lift }` rows are in the form's composed subtree", () => {
+  const T0 = `<program>
+    let <calls:int=0/>
+    <xs:string[replace]=(["a"])/>
+    let <v:string="" length(>=2)/>
+    function save() { @calls = @calls + 1; }
+    <main>
+        <form onsubmit=save()>\${ for (x of @xs) { lift <select class="s" bind:value=@v><option value="">-</option><option value="a">a</option><option value="ab">ab</option></select>; } }<button type="submit">go</button></form>
+        <p class="calls">\${@calls}</p>
+    </main>
+</program>
+`;
+  test("a lifted `<select bind:value=@v>` with `length(>=2)`: the form is gated and blocks \"a\"", async () => {
+    const r = run(T0);
+    expect(r.diags).toEqual([]);
+    expect(r.infos.map((i) => i.code)).toEqual(["I-FORM-SUBMIT-GATED"]);
+    await loadProgram(r.core, "f3-t0");
+    expect($("main form").getAttribute("data-scrml-gated")).toBe("v");
+    const s = $("select.s");
+    s.value = "a";
+    s.dispatchEvent(new window.Event("input", { bubbles: true }));
+    submit($("main form"));
+    expect(calls()).toBe("0");
+    s.value = "ab";
+    s.dispatchEvent(new window.Event("input", { bubbles: true }));
     submit($("main form"));
     expect(calls()).toBe("1");
   });

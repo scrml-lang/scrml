@@ -949,7 +949,7 @@ export function reach(scope, marker, named) {
  * the records every mounted Reach marker inside the form registered (s472:
  * the static names of a use's renders, a use-site slot filler, an `<each>`
  * row — the instances the form's own code cannot name), and the records of
- * the controls rendered inside the form. A null entry (an absent `as=`
+ * the form's own live controls (`form.elements`, its HTML form owner). A null entry (an absent `as=`
  * handle) names no instance and is skipped.
  *
  * On each submit:
@@ -973,7 +973,11 @@ export function gate(scope, form, named) {
       const reached = reachedFields.get(c);
       if (reached) add(reached());
     }
-    for (const el of form.querySelectorAll("input, textarea, select")) {
+    // s472: the form's OWN controls, as HTML associates them (`form.elements`
+    // — its form owner): a control outside it carrying `form="<its id>"` is
+    // included, a control inside it that names another form is not (RULED
+    // S472, §55.17.3 "The HTML form owner").
+    for (const el of form.elements) {
       const rec = boundSurface.get(el);
       if (rec) recs.add(rec);
     }

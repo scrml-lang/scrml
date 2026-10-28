@@ -46,3 +46,23 @@ Branch `s472-boot-gate-failopens` (from origin/main `c8070b56a`). Bootstrap secu
   continue-on-error) is STALE on main `c8070b56a` too — pre-existing, not touched.
 - Red-proof: gate-reach.test.js against main `c8070b56a` → 14 fail / 8 pass (the 8 are controls, the bite,
   the no-Reach shape and the E-DECL-HANDLE-NOT-NARROWED refusal).
+
+## S239 review round 1 (of `4785855bc`, FIX) — same branch
+
+- F1 (MED): a shared value bound through a use that is not mounted → `viewFields .Instance` also walks the used
+  declaration's renders in a not-yet-created mode (`Sub { decl, inst, live }`; `live = false` names only `.Shared`
+  values and other declarations' handles — never the uncreated instance's `.Lexical(0)` / own handles / kids).
+- F2 (MED): `form=` found ASCII case-blind on HTML elements (`htmlAttr`; also `id` and `novalidate`). Lowercase-at-parse
+  was NOT the clean root: a use's attributes are declaration identifiers (case-sensitive props, §5.2 "`onClick`"), and
+  the parser cannot tell an HTML element from a use. The bootstrap's existing rule for HTML names is the lowercased
+  compare in resolveElem (repeated-attribute check), which already refuses case variants of the scrml control
+  attributes (`IF=`, `SHOW=`, `ONCLICK=(…)`) — so the bootstrap analogue of `g-lift-markup-parser-dropped-value-and-
+  case-variant-s469` was already closed; that HIGH gap's locus is impl#1 `compiler/src/codegen/emit-lift.js`, which
+  this branch does not touch (not closed by it).
+- F3 (MED): analyze `nodesBound` / `nodesCarry` walk Tier-0 Gather rows (`tier0Rows`).
+- RULED form= (user-voice-scrml.md S472, 7b64a45) implemented: SPEC §55.17.3 "The HTML form owner" + §34
+  E-FORM-OWNER-UNRESOLVED (+ §55 table row); SPEC-INDEX regenerated. analyze `formOwnerPass` / `judgeOwner`;
+  lower `programExt` / `ownFields`; runtime live lookup = `form.elements`. F4: unvalidated binds not judged.
+  Residual (fail closed): `g-bootstrap-form-owner-outside-program-markup-s472` (new, LOW).
+- Red-proof: gate-reach.test.js against `4785855bc` → 13 fail / 19 pass (all 13 new F1/F2/F3/ruling tests red).
+- Found while fixing: a second `fn literalOf` in analyze.scrml silently SHADOWED the existing one (no diagnostic) and broke two slice-m2 typer tests; renamed mine `htmlLiteral`. The bootstrap accepts duplicate top-level fn names — surfaced to PA as a hazard (not fixed here).
