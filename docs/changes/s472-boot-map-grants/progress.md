@@ -44,3 +44,5 @@ Gap: g-boot-map-position-write-bypasses-element-tape-grants-s472 (HIGH, fail-ope
 ## S473 landing front (2026-10-28T20:56Z)
 - land-s472-boot-map-grants from origin/s472-boot-map-grants b5cd8f155; `git merge origin/main` (3a7d1d223) — CLEAN, no conflicts (merge 77739586e).
 - bun install + pretest done. Next: S239 probes (round-1 ruled set) on the merged head, then CI gates.
+- 2026-10-28T21:40Z: S239 probes run on merged head 77631d61d (16 S239 + 14 reconstructed ruled-set probes + 3 C3): every ruled MUST-REFUSE refused (E-WRITE-NOT-GRANTED), every permutation (sort/reverse) compiles and runs; C3 edit-to-Replace hole now refused. No disagreement with the S472 ruling.
+- Gates (checks job + bootstrap slices + conformance report + e2e-render-map): all RC=0. known-gaps @gap id set: none lost (2445 = main's). state.ts --check PASS.
