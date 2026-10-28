@@ -14,11 +14,27 @@
  * lives on two REFS, so this probe reads exactly those two refs and nothing else:
  *
  *   MESSAGES  `git ls-tree origin/inbox -- handOffs/incoming/`, minus `read/` and `resolved/`
- *   HANDLED   the basename appears under `handOffs/incoming/read/` OR `.../resolved/` in
- *             `git ls-tree origin/main`. NEVER the working-tree filesystem: a dirty or
+ *             — PLUS any file under `read/` on the INBOX branch that main does not hold
+ *             (same name, same blob) under read/ or resolved/: `read/` on the inbox branch
+ *             is not a handled location in the messaging contract, so a file pushed straight
+ *             into it is a message nobody has filed (S472).
+ *   HANDLED   the same FILE — basename AND git blob id — appears under
+ *             `handOffs/incoming/read/` OR `.../resolved/` in `git ls-tree origin/main`, or
+ *             under `resolved/` on the inbox branch itself (messaging contract v10: `msg
+ *             resolve` files there; flobase cross-pa-notify "Status"). A message file is never
+ *             edited after it is sent, so the handled copy is byte-identical (measured S472:
+ *             13 of 13 handled top-level messages). A same-NAME, different-BLOB copy does NOT
+ *             discharge: it is a re-send under a reused name (S472 — basename-only matching
+ *             classed it HANDLED and hid it). NEVER the working-tree filesystem: a dirty or
  *             stale checkout must not be able to fake a discharge (or hide a message).
  *   UNHANDLED everything else. Printed with basename · needs · from · subject, parsed from
  *             the message's own frontmatter (`git show origin/inbox:<path>`).
+ *   OWED      an unhandled message whose `needs:` is anything but an explicit not-owing value
+ *             (`fyi` / `none` / `info` / `awareness` / `nothing`, optionally followed only by a
+ *             parenthetical or a dash comment) — and a message with no `needs:` or no
+ *             frontmatter at all. S472: the exact set {action, reply} missed the real corpus
+ *             (`ruling`, `triage`, `fix`, `triage + fix`, `ratify`, `**PRIORITY RULING …**`,
+ *             `action (urgent)`). Fail-closed: an unknown value owes.
  *
  * MISDELIVERED? A message on scrml's inbox addressed to someone other than scrml is flagged,
  * not silently counted. The addressee is read from TWO places, because the witnessed case needs
@@ -36,8 +52,8 @@
  *   - DETECTION, NOT CONTROL. Exit 0 always in default mode. NEVER wire this into CI — a
  *     red-over-backlog gate is the §8 cry-wolf shape. It runs at BOOT (scripts/boot.ts
  *     delegates to it) and reports. `--check` is for the PA's own hand: exit 1 iff any
- *     UNHANDLED message has `needs: action` or `needs: reply` (misdelivered ones included —
- *     an action owed to the wrong desk is still an action nobody has taken).
+ *     UNHANDLED message is OWED (misdelivered ones included — an action owed to the wrong
+ *     desk is still an action nobody has taken).
  *   - THE INDISTINGUISHABLE FAILURE (§8). If the fetch or ANY git call fails, the probe prints
  *     `inbox-debt: UNAVAILABLE (<reason>)` and NEVER a count. "0 unhandled" on an error path is
  *     exactly the S470 failure (an unread inbox reported empty). In `--check` mode UNAVAILABLE
@@ -54,7 +70,7 @@
  *
  * Usage:
  *   bun scripts/inbox-debt.ts                  # report (boot probe) — exit 0
- *   bun scripts/inbox-debt.ts --check          # exit 1 iff an unhandled action/reply; 2 if UNAVAILABLE
+ *   bun scripts/inbox-debt.ts --check          # exit 1 iff an unhandled message is OWED; 2 if UNAVAILABLE
  *   bun scripts/inbox-debt.ts --json           # {remote, total, unhandled:[…], handled, misdelivered}
  *   bun scripts/inbox-debt.ts --remote=nope    # bogus remote → UNAVAILABLE (bite proof for the error path)
  *   bun scripts/inbox-debt.ts --no-fetch       # use the remote-tracking refs as they are (offline)
@@ -77,16 +93,47 @@ export const SELF = "scrml";
  * MISDELIVERED?.
  */
 export const SELF_PEOPLE: readonly string[] = ["peter", "bryan"];
-/** `needs:` values that owe a response — sorted first, and the only ones `--check` fails on. */
-export const OWING = new Set(["action", "reply"]);
+/**
+ * `needs:` values that do NOT owe a response (S472). The contract vocabulary is
+ * `fyi | action` (flobase cross-pa-notify) plus `reply` (pa-scrml-overlay); the corpus also uses
+ * `none`, `info`, `awareness`, "nothing from you". Everything else OWES — the S470 exact set
+ * {action, reply} classed `ruling` / `triage` / `fix` / `ratify` / `**PRIORITY RULING …**` as
+ * "• open", left them out of the header count, and `--check` exited 0 on them.
+ */
+export const NOT_OWING: readonly string[] = ["fyi", "none", "info", "awareness", "nothing"];
+const NOT_OWING_RE = new RegExp(
+  `^(?:${NOT_OWING.join("|")})(?: from you)?\\s*(?:$|\\(.*\\)\\s*$|[—–]\\s*.*$|\\s-\\s.*$)`,
+);
+
+/**
+ * Does this message owe a response? FAIL-CLOSED: owed unless its `needs:` is an explicit
+ * not-owing value — optionally followed ONLY by a parenthetical or a dash comment
+ * (`fyi (no action)`, `fyi — no ask`). `fyi + one lane call` / `fyi / your-call` carry an ask
+ * and owe. A message with no frontmatter, or no `needs:`, owes: nobody has said it doesn't.
+ */
+export function owesResponse(m: { needs: string; hasFrontmatter: boolean }): boolean {
+  if (!m.hasFrontmatter) return true;
+  const v = m.needs.toLowerCase().replace(/[*_`]/g, "").replace(/\s+/g, " ").trim();
+  if (v === "") return true;
+  return !NOT_OWING_RE.test(v);
+}
 
 // ── the pure classifier (no git, no fs, no clock) ─────────────────────────────
 
 export type Frontmatter = Record<string, string>;
 
+/**
+ * A tree listing entry: a bare path, or a path + git blob id (`git ls-tree -r` without
+ * `--name-only`). The CLI always supplies blobs; a bare path (tests) has blob `undefined`, which
+ * matches only another `undefined`.
+ */
+export type TreeEntry = string | { path: string; blob?: string };
+const entryPath = (e: TreeEntry) => (typeof e === "string" ? e : e.path);
+const entryBlob = (e: TreeEntry) => (typeof e === "string" ? undefined : e.blob);
+
 export interface Message {
   path: string;            // full tree path on the inbox branch
-  name: string;            // basename — the identity the HANDLED test compares
+  name: string;            // basename (identity is basename + blob — see HANDLED)
   from: string;
   to: string;
   needs: string;           // lowercased; "" when absent
@@ -94,12 +141,13 @@ export interface Message {
   hasFrontmatter: boolean;
   misdelivered: boolean;
   misdeliveredWhy: string; // "" unless misdelivered
+  note: string;            // "" or why a HANDLED-looking file is still counted (S472)
 }
 
 export interface Report {
   total: number;           // messages on the inbox branch (read/ + resolved/ excluded)
   handled: number;
-  unhandled: Message[];    // sorted: owing (action/reply) first, then by name
+  unhandled: Message[];    // sorted: owed first, then by name
 }
 
 export function basename(path: string): string {
@@ -125,13 +173,40 @@ export function isMessagePath(path: string): boolean {
  * The HANDLED set: basenames of every file under `handOffs/incoming/read/` or
  * `handOffs/incoming/resolved/` (any depth) in the integration branch's tree listing.
  */
-export function handledNames(mainTree: string[]): Set<string> {
+export function handledNames(mainTree: TreeEntry[]): Set<string> {
   const out = new Set<string>();
-  for (const p of mainTree) {
+  for (const p of mainTree.map(entryPath)) {
     if (!p.startsWith(INCOMING)) continue;
     const segs = p.slice(INCOMING.length).split("/");
     if (segs.length >= 2 && (HANDLED_DIRS as readonly string[]).includes(segs[0])) out.add(segs[segs.length - 1]);
   }
+  return out;
+}
+
+/** Is `path` under `handOffs/incoming/read/` (any depth below it)? */
+export function isUnderIncomingDir(path: string, dir: string): boolean {
+  if (!path.startsWith(INCOMING)) return false;
+  const segs = path.slice(INCOMING.length).split("/");
+  return segs.length >= 2 && segs.slice(0, -1).includes(dir);
+}
+
+/**
+ * The HANDLED index (S472): basename → the set of blob ids filed as handled — every file under
+ * `read/` or `resolved/` (any depth) on main, plus `resolved/` on the inbox branch (messaging
+ * contract v10). A message is handled only when its OWN blob is in its name's set.
+ */
+export function handledIndex(mainTree: TreeEntry[], inboxTree: TreeEntry[] = []): Map<string, Set<string | undefined>> {
+  const out = new Map<string, Set<string | undefined>>();
+  const add = (e: TreeEntry) => {
+    const n = basename(entryPath(e));
+    if (!out.has(n)) out.set(n, new Set());
+    out.get(n)!.add(entryBlob(e));
+  };
+  for (const e of mainTree) {
+    const p = entryPath(e);
+    if (HANDLED_DIRS.some((d) => p.startsWith(`${INCOMING}${d}/`))) add(e);
+  }
+  for (const e of inboxTree) if (entryPath(e).startsWith(`${INCOMING}resolved/`)) add(e);
   return out;
 }
 
@@ -145,9 +220,13 @@ export function handledNames(mainTree: string[]): Set<string> {
 export function parseFrontmatter(text: string): Frontmatter | null {
   const src = text.replace(/^﻿/, "").replace(/\r\n?/g, "\n");
   const lines = src.split("\n");
-  if (lines[0]?.trim() !== "---") return null;
+  // S472: blank lines before the opening fence are tolerated (a real sender shape); anything
+  // else before it still means "no frontmatter".
+  let start = 0;
+  while (start < lines.length && lines[start].trim() === "") start++;
+  if (lines[start]?.trim() !== "---") return null;
   const fm: Frontmatter = {};
-  for (let i = 1; i < lines.length; i++) {
+  for (let i = start + 1; i < lines.length; i++) {
     const line = lines[i];
     if (line.trim() === "---") return fm;
     const m = line.match(/^([A-Za-z][A-Za-z0-9_-]*)\s*:\s*(.*)$/);
@@ -214,13 +293,14 @@ export function classifyMessage(path: string, text: string | undefined, self: st
     hasFrontmatter: fm !== null,
     misdelivered: reasons.length > 0,
     misdeliveredWhy: reasons.join("; "),
+    note: "",
   };
 }
 
-/** Owing (`needs: action` / `needs: reply`) first; then by name, which leads with the ISO date. */
+/** Owed first; then by name, which leads with the ISO date. */
 export function compareMessages(a: Message, b: Message): number {
-  const oa = OWING.has(a.needs) ? 0 : 1;
-  const ob = OWING.has(b.needs) ? 0 : 1;
+  const oa = owesResponse(a) ? 0 : 1;
+  const ob = owesResponse(b) ? 0 : 1;
   if (oa !== ob) return oa - ob;
   return a.name < b.name ? -1 : a.name > b.name ? 1 : 0;
 }
@@ -231,23 +311,37 @@ export function compareMessages(a: Message, b: Message): number {
  * missing entry parses as no-frontmatter — the CLI never leaves one missing; it fails instead).
  */
 export function classify(
-  inboxTree: string[],
-  mainTree: string[],
+  inboxTree: TreeEntry[],
+  mainTree: TreeEntry[],
   texts: Map<string, string>,
   self: string = SELF,
 ): Report {
-  const handled = handledNames(mainTree);
-  const messages = inboxTree.filter(isMessagePath);
-  const unhandled = messages
-    .filter((p) => !handled.has(basename(p)))
-    .map((p) => classifyMessage(p, texts.get(p), self))
-    .sort(compareMessages);
-  return { total: messages.length, handled: messages.length - unhandled.length, unhandled };
+  const index = handledIndex(mainTree, inboxTree);
+  const isFiled = (e: TreeEntry) => index.get(basename(entryPath(e)))?.has(entryBlob(e)) ?? false;
+  const top = inboxTree.filter((e) => isMessagePath(entryPath(e)));
+  // read/ on the INBOX branch is not a handled location: a file there that main does not hold
+  // (same name + blob) is a message pushed straight into read/ — counted, and labelled.
+  const pushedIntoRead = inboxTree.filter((e) => isUnderIncomingDir(entryPath(e), "read") && !isFiled(e));
+  const unhandled: Message[] = [];
+  for (const e of top) {
+    if (isFiled(e)) continue;
+    const m = classifyMessage(entryPath(e), texts.get(entryPath(e)), self);
+    if (index.has(m.name)) m.note = "a DIFFERENT file of this name was handled — a re-send under a reused name";
+    unhandled.push(m);
+  }
+  for (const e of pushedIntoRead) {
+    const m = classifyMessage(entryPath(e), texts.get(entryPath(e)), self);
+    m.note = "filed under read/ on the inbox branch, which is not a handled location (main's read/ or resolved/ is)";
+    unhandled.push(m);
+  }
+  unhandled.sort(compareMessages);
+  const total = top.length + pushedIntoRead.length;
+  return { total, handled: total - unhandled.length, unhandled };
 }
 
 /** `--check`'s predicate: any unhandled message owes a response. */
 export function owes(report: Report): boolean {
-  return report.unhandled.some((m) => OWING.has(m.needs));
+  return report.unhandled.some(owesResponse);
 }
 
 // ── git (the only external dependency) ────────────────────────────────────────
@@ -269,8 +363,18 @@ function git(argv: string[], timeout = 60_000): string {
   return r.stdout ?? "";
 }
 
-function lsTree(ref: string): string[] {
-  return git(["ls-tree", "-r", "--name-only", ref, "--", INCOMING]).split("\n").map((s) => s.trim()).filter(Boolean);
+/** `git ls-tree -r <ref>` → { path, blob } (S472: HANDLED compares blob ids, not names). */
+function lsTree(ref: string): { path: string; blob: string }[] {
+  const out: { path: string; blob: string }[] = [];
+  for (const line of git(["ls-tree", "-r", "--full-tree", ref, "--", INCOMING]).split("\n")) {
+    if (line.trim() === "") continue;
+    // `<mode> SP <type> SP <object> TAB <path>`; a path with odd characters is C-quoted by git.
+    const m = line.match(/^\d+ (\w+) ([0-9a-f]+)\t(.*)$/);
+    if (!m) throw new Error(`git ls-tree: unparsed line ${JSON.stringify(line)}`);
+    if (m[1] !== "blob") continue;
+    out.push({ path: m[3], blob: m[2] });
+  }
+  return out;
 }
 
 // ── CLI ───────────────────────────────────────────────────────────────────────
@@ -301,11 +405,11 @@ if (import.meta.main) {
     if (!NO_FETCH) git(["fetch", "--quiet", remote, INBOX_BRANCH, MAIN_BRANCH], 90_000);
     const inboxTree = lsTree(inboxRef);
     const mainTree = lsTree(mainRef);
+    // Classify once with no texts to learn which entries are unhandled, read only those, then
+    // classify for real (frontmatter only changes labels and order, never handled-ness).
     const texts = new Map<string, string>();
-    const handled = handledNames(mainTree);
-    for (const p of inboxTree.filter(isMessagePath)) {
-      if (handled.has(basename(p))) continue; // only unhandled messages are read
-      texts.set(p, git(["show", `${inboxRef}:${p}`]));
+    for (const m of classify(inboxTree, mainTree, texts).unhandled) {
+      texts.set(m.path, git(["show", `${inboxRef}:${m.path}`]));
     }
     report = classify(inboxTree, mainTree, texts);
   } catch (e) {
@@ -321,7 +425,7 @@ if (import.meta.main) {
   }
 
   const misdelivered = report.unhandled.filter((m) => m.misdelivered);
-  const owing = report.unhandled.filter((m) => OWING.has(m.needs));
+  const owing = report.unhandled.filter(owesResponse);
 
   if (JSON_MODE) {
     console.log(JSON.stringify({
@@ -334,24 +438,25 @@ if (import.meta.main) {
 
   const short = (s: string, n = 96) => (s.length > n ? s.slice(0, n).replace(/\s+\S*$/, "") + "…" : s);
   const extra = [
-    owing.length ? `${owing.length} owe action/reply` : "",
+    owing.length ? `${owing.length} owe a response` : "",
     misdelivered.length ? `${misdelivered.length} MISDELIVERED?` : "",
   ].filter(Boolean).join(" · ");
   console.log(`inbox-debt — ${report.unhandled.length} unhandled of ${report.total} on ${inboxRef}${extra ? ` · ${extra}` : ""}`);
-  console.log(`  (HANDLED = file name under ${INCOMING}{read,resolved}/ on ${mainRef}; ${report.handled} handled)`);
+  console.log(`  (HANDLED = the same file — name + blob — under ${INCOMING}{read,resolved}/ on ${mainRef}, or resolved/ on ${inboxRef}; ${report.handled} handled)`);
 
   if (report.unhandled.length > 0) {
     console.log("");
     for (const m of report.unhandled) {
       const needs = m.hasFrontmatter ? (m.needs || "—") : "NO FRONTMATTER";
-      const tag = OWING.has(m.needs) ? "⚠️ OWED" : "• open";
+      const tag = owesResponse(m) ? "⚠️ OWED" : "• open";
       console.log(`  ${tag}  ${m.name}${m.misdelivered ? "   ⚠️ MISDELIVERED?" : ""}`);
       console.log(`           needs: ${needs} · from: ${m.from || "—"}${m.to ? ` · to: ${m.to}` : ""}`);
       if (m.subject) console.log(`           subject: ${short(m.subject)}`);
       if (m.misdelivered) console.log(`           misdelivered? ${m.misdeliveredWhy} — route it, then move it to read/.`);
+      if (m.note) console.log(`           note: ${m.note}`);
     }
     console.log("");
-    console.log(`  A message is HANDLED once its file name exists under ${INCOMING}read/ (or resolved/) on ${MAIN_BRANCH}.`);
+    console.log(`  A message is HANDLED once the same file (name + content) exists under ${INCOMING}read/ (or resolved/) on ${MAIN_BRANCH}.`);
     console.log(`  Answer / act, then move it there in a PR. Read with: git show ${inboxRef}:<path>`);
   } else if (report.total === 0) {
     console.log(`  ✅ no messages on ${inboxRef}`);
