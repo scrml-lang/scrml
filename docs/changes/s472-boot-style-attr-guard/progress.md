@@ -29,3 +29,27 @@ both outputs; a runtime wall in `rt.attr` refuses a `style` write too (defense i
   bootstrap-conformance --check, conflict markers, SPEC-INDEX, delta-lint, ci-shards needs, s34-census --check-new
   --base origin/main PASS, severity --check current; facts.ts --check stale (WARN-only, bot-owned — not touched).
   Full pre-commit on every commit (last: merge commit).
+
+## Review round (S239 review of af5516bdb — LAND-WITH-FOLLOWUPS) — done, f3ce72247
+- F1 wording: analyze.scrml comment + gap resolution note — `#{ @cell }` is the GUARDED channel into CSS, not the only one.
+- F3: dropped resolveShow's `style=(…)` E-ATTR-WRITER-CONFLICT (one diagnostic per fault); show.test.js re-pinned; severity.scrml regen.
+- F4: quoted `style="…${}…"` hint cites §5.5.3.
+- Filed: g-boot-svg-presentation-attr-css-url-unguarded-s472 (MED), g-spec-65-4-2-quoted-style-template-contradiction-s472 (LOW),
+  g-boot-link-stylesheet-href-from-data-s472 (MED), g-boot-meta-refresh-content-from-data-s472 (LOW).
+- Merge of origin/main #1614 (docs-only) was ABORTED: the hook timed out 3x (host memory pressure → 1 shard for 1655 files,
+  1200 s cap; 0 failures in what ran). Branch is behind main by that docs PR only.
+
+## NEXT LANE (not started — PA deferred to next session): branch `s472-boot-svg-css-url-guard`
+Rulings (scrml-support/user-voice-scrml.md "⭐ RULED — five PA recs …" S472, `13e57c1`):
+- **(3)** "A data-bound `href` on a `<link>` whose `rel` contains `stylesheet` (or is computed) is REFUSED." → compile refusal in
+  analyze.scrml (new code, §5.2 bullet + §34 row + provenance; s34-census; SPEC-INDEX regen) + rt.attr runtime wall; tests red on main.
+- **(4)** "Quoted `style="…${x}…"` (§65.4.2 table): each `${}` is guarded by `cssValueOf`" → SPEC §65.4.2 text resolving the
+  table/sentence contradiction (+ provenance); bootstrap still refuses quoted style templates (§5.5.3 unsupported) — note in
+  g-spec-65-4-2-quoted-style-template-contradiction-s472 that any future lowering routes each `${}` through cssValueOf;
+  impl#1 lowers it unguarded today (note on g-impl1-style-attr-bound-value-unguarded-s472).
+- **SVG** (g-boot-svg-presentation-attr-css-url-unguarded-s472): rt.attr routes SVG-namespace `fill stroke filter mask clip-path
+  marker marker-start marker-mid marker-end cursor` (+ SMIL to/from/by/values whose attributeName names one or is computed;
+  `values` per `;` entry) through cssValueOf — reuse, no new reader. Benign `filter=blur(2px)` / `clip-path=circle(…)` need
+  extra admitted function names (pass an extra set to cssValueOf; do not fork it). SPEC is silent on presentation attrs → no
+  compile refusal unless ruled; a computed attributeName judged by both guards flips sink-guards s5 (`/ok?a=1` admitted today) —
+  surface. Puppeteer proof: reuse ~/.cache/scrml/review/s472-st/probes/zz-st-chrome.test.js (no /leak fetch on head, fetch on main).
