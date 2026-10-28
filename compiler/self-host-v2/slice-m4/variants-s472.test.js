@@ -216,6 +216,10 @@ describe("review round 1 — refusals the first round missed", () => {
     // F5 — a `T | not` position expects `T`
     ["F5: a bare construction against `T | not` takes `T` (no false E-VARIANT-AMBIGUOUS)", `    type Other:enum = { Circle(n: int) }\n    let <x:Shape | not=(.Circle(1))/>`, []],
     ["F5: … and a variant `T` does not declare is E-TYPE-VARIANT, not another enum's", `    type Other:enum = { Square(n: int) }\n    let <x:Shape | not=(.Square(1))/>`, ["E-TYPE-VARIANT"]],
+    // r2 (CI claim gate, kickstarter block #62) — a refused construction does not cascade
+    ["r2: a LOWERCASE bare callee is no variant — no E-TYPE-VARIANT / E-TYPE-STRUCT-CONTEXT cascade", `    function f() {\n        .send({ n: 1 });\n    }`, ["E-BOOTSTRAP-UNSUPPORTED"]],
+    ["r2: an unknown variant with an object-literal argument is ONE E-TYPE-VARIANT (no E-TYPE-STRUCT-CONTEXT)", `    let <x:Shape=(Shape.Square({ n: 1 }))/>`, ["E-TYPE-VARIANT"]],
+    ["r2: a surplus object-literal argument is ONE E-TYPE-082", `    let <x:Shape=(Shape.Circle(1, { n: 1 }))/>`, ["E-TYPE-082"]],
     // F7 — a qualified enum that is not in scope / shadowed says why
     ["F7: a local shadowing the enum name", `    function f() -> int {\n        const Shape = 3;\n        const s = Shape.Circle(1);\n        return 0;\n    }`, ["E-BOOTSTRAP-UNSUPPORTED"]],
   ];

@@ -65,3 +65,13 @@ base: origin/s472-boot-link-visibility 67bd70862 (#1606). Gap: g-boot-payload-va
   error/ cases), g-boot-bare-variant-no-context-resolves-s472 (owner ruling).
 - Tests: variants-s472.test.js +17 ("review round 1"); the reviewer's probes re-run — every changed verdict is an
   intended one. bootstrap-conformance --check: current (no movement).
+
+## Round 2 — CI `checks` Claim gate (kickstarter v2 block #62, line 2069 pin)
+- The two extra codes were FALSE cascades, not legitimate: the recovered `<#stats>.send({ n: @n })` leaves a bare
+  `.send(…)`, which `ctorOf` read as a construction (E-TYPE-VARIANT), then resolved the object-literal argument
+  with no type (E-TYPE-STRUCT-CONTEXT). Fixed in the compiler, pin unchanged: a lowercase bare callee is no
+  variant name (§14.4 E-ENUM-VARIANT-CASE) → not a construction; a refused construction does not resolve its
+  arguments (an arity refusal resolves those with a declared field). Block #62 now reports exactly its pin.
+- Every `checks` step run locally: types-gate, root tests (2239/0), snippet-gate, claim-gate, compile-floor,
+  facts (WARN), md shim, bootstrap-conformance --check, conflict markers, SPEC-INDEX, delta-lint, ci-shards needs,
+  s34-census vs origin/main — all PASS.

@@ -5464,6 +5464,10 @@ ${
         }
         const b: string = bareVariantName(callee)
         if (b == "") return not
+        // r2 (claim gate): a lowercase bare callee is no variant name (§14.4,
+        // E-ENUM-VARIANT-CASE) — e.g. the `.send(…)` a recovered `<#w>.send(…)` leaves.
+        // Not a construction: resolveCall refuses it as it did before (no cascade)
+        if (!startsUpper(b)) return not
         const w: string = "." + b
         // the bare form: against the enum its position expects (§14.10) — as a
         // bare unit variant resolves (resolveVariant), one rule for both
@@ -5491,20 +5495,36 @@ ${
         return c >= "A" && c <= "Z"
     }
 
+    // r2: on an arity refusal, each argument that HAS a declared field is still resolved
+    // against it (its own errors are real); a surplus one is not (nothing to resolve it
+    // against, and an object literal there would only cascade)
+    fn resolveCtorArgs(env: Env, args: AExpr[], fs: FieldDef[], st0: AS) -> AS {
+        let st: AS = st0
+        let i = 0
+        for (const a of args) {
+            if (i < fs.length) st = resolveExpr(env, a, fs[i].ty, st).st
+            i = i + 1
+        }
+        return st
+    }
+
     fn resolveConstruct(env: Env, e: AExpr, callee: AExpr, args: AExpr[], expected: Type | not, st0: AS) -> RX | not {
         const c: CtorOf | not = ctorOf(env, callee, expected)
         if (c is not) return not
         const es: Sym | not = c.es
-        if (es is not) return diagX(env, e, c.code, c.err, resolveExprs(env, args, not, st0))
+        // r2: a refused construction does not resolve its arguments (no field type to
+        // resolve them against — an object literal there would cascade as
+        // E-TYPE-STRUCT-CONTEXT), as resolveCall's refusals do not
+        if (es is not) return diagX(env, e, c.code, c.err, st0)
         const idx: int = variantIndex(env.g.types, es, c.name)
-        if (idx < 0) return diagX(env, e, "E-TYPE-VARIANT", "`" + c.written + "(…)` — `" + c.name + "` is not a variant of `" + es.hint + "`", resolveExprs(env, args, not, st0))
+        if (idx < 0) return diagX(env, e, "E-TYPE-VARIANT", "`" + c.written + "(…)` — `" + c.name + "` is not a variant of `" + es.hint + "`", st0)
         const fs: FieldDef[] = enumVariantsOf(env.g, es)[idx].fields
-        if (fs.length == 0 && args.length > 0) return diagX(env, e, "E-TYPE-082", "`" + es.hint + "." + c.name + "` is a unit variant — it carries no payload, and this construction supplies " + args.length + " — write `" + es.hint + "." + c.name + "` (§14.4 construction arity)", resolveExprs(env, args, not, st0))
+        if (fs.length == 0 && args.length > 0) return diagX(env, e, "E-TYPE-082", "`" + es.hint + "." + c.name + "` is a unit variant — it carries no payload, and this construction supplies " + args.length + " — write `" + es.hint + "." + c.name + "` (§14.4 construction arity)", st0)
         // `E.V()` on a unit variant: no payload, but not the unit value's spelling
         // either (§14.5 writes it `E.V`); the SPEC does not say what `()` adds —
         // refused, fail closed, rather than read as the unit value
         if (fs.length == 0) return diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", "`" + c.written + "()` — `" + c.name + "` is a unit variant; its value is written without parentheses: `" + c.written + "` (§14.5)", st0)
-        if (fs.length != args.length) return diagX(env, e, "E-TYPE-082", "`" + es.hint + "." + c.name + "` carries " + fs.length + " payload value(s) but this construction supplies " + args.length + " — one argument per declared field, in order (§14.4)", resolveExprs(env, args, not, st0))
+        if (fs.length != args.length) return diagX(env, e, "E-TYPE-082", "`" + es.hint + "." + c.name + "` carries " + fs.length + " payload value(s) but this construction supplies " + args.length + " — one argument per declared field, in order (§14.4)", resolveCtorArgs(env, args, fs, st0))
         let st: AS = st0
         let i = 0
         for (const a of args) {
