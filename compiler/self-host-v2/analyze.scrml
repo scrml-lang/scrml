@@ -389,9 +389,16 @@ ${
     // node the typer walked, keyed by NodeId (`at`, built once when the typer
     // settles; of two entries for one node the first answers). A value's
     // type is what the typer can PROVE: `Known(t)`, the absence literal `not`
-    // (`Absent`, §42), or `Unknown` (inference stopped — no check ever fires
-    // on an Unknown).
-    export type VType:enum = { Known(t: Type), Absent, Unknown }
+    // (`Absent`, §42), `Unknown` (inference stopped — no check ever fires
+    // on an Unknown), or `OneOf(ts)` (s472, g-boot-mixed-arm-type-unresolved-
+    // fail-open-s472): a CHOICE — a ternary, or a local joined from several
+    // values — whose branches have KNOWN types with no common type. It is one
+    // of those types, each the value when its branch is taken, so every typed
+    // position checks every member (the union rule of §17.6: "If arms lift
+    // different types, the result type is their union"). It is not Unknown: the
+    // typer resolved every branch, so it is never provable-or-silent. (A
+    // `match` whose arms disagree is §18.4 rule 3's E-TYPE-001 instead.)
+    export type VType:enum = { Known(t: Type), Absent, Unknown, OneOf(ts: Type[]) }
     export type ExprType:struct = { nid: int, vt: VType }
     // `presence`: the condition nodes (`if`, `if=`, a ternary test) whose
     // value is a `T | not` — a PRESENCE TEST (RULED S440, truthiness Q1: "a
@@ -12590,7 +12597,7 @@ ${
         let allKnown = true
         for (const e of lifts) {
             const x: VType = exprType0(ts, e.nid)
-            if (knownOf(x) is not) allKnown = false
+            if (knownOf(x) is not && oneOfMembers(x).length == 0) allKnown = false      // s472: a choice is known
             if (first) {
                 vt = x
                 first = false
@@ -15646,7 +15653,7 @@ ${
             let next: LocalT[] = []
             for (const o of out) {
                 if (o.id == c.id) {
-                    next = next.concat([{ id: o.id, vt: joinVT(o.vt, c.vt) }])
+                    next = next.concat([{ id: o.id, vt: joinContrib(o.vt, c.vt) }])
                     found = true
                 } else {
                     next = next.concat([o])
@@ -15658,12 +15665,50 @@ ${
         return out
     }
 
+    // s472 — two values a local is GIVEN (its initializer, its assignments) are
+    // joined flow-insensitively: at any one read it holds the last one given,
+    // not "any of them". So a join that makes a NEW choice (`let a = "s"; a =
+    // 1`) is unprovable — Unknown, as before — and only a choice one value
+    // already was (`let v = c ? "a" : 1`) is carried as one.
+    fn joinContrib(a: VType, b: VType) -> VType {
+        const j: VType = joinVT(a, b)
+        if (oneOfMembers(j).length == 0) return j
+        if (sameVT(j, a) || sameVT(j, b)) return j
+        return VType.Unknown
+    }
+
     fn sameVT(a: VType, b: VType) -> boolean {
         const x: Type | not = knownOf(a)
         const y: Type | not = knownOf(b)
         if (x is given && y is given) return sameType(x, y)
         if (x is given || y is given) return false
+        const xs: Type[] = oneOfMembers(a)
+        const ys: Type[] = oneOfMembers(b)
+        if (xs.length > 0 || ys.length > 0) return sameMembers(xs, ys) && sameMembers(ys, xs)
         return isAbsentVT(a) == isAbsentVT(b)
+    }
+
+    // s472 — every member of `xs` is (the same type as) a member of `ys`.
+    fn sameMembers(xs: Type[], ys: Type[]) -> boolean {
+        if (xs.length != ys.length) return false
+        for (const x of xs) {
+            let found = false
+            for (const y of ys) {
+                if (sameType(x, y)) found = true
+            }
+            if (!found) return false
+        }
+        return true
+    }
+
+    // A choice's member types ([] for any other VType).
+    fn oneOfMembers(v: VType) -> Type[] {
+        return match v {
+            .OneOf(ts: xs) :> xs
+            .Known(t: x) :> []
+            .Absent :> []
+            .Unknown :> []
+        }
     }
 
     fn isAbsentVT(v: VType) -> boolean {
@@ -15671,6 +15716,7 @@ ${
             .Absent :> true
             .Known(t: x) :> false
             .Unknown :> false
+            .OneOf(ts: xs) :> false
         }
     }
 
@@ -15802,11 +15848,14 @@ ${
     }
 
     // The type two values share (ternary arms, array elements), when provable.
+    // s472: two KNOWN types with no common type are a choice of both
+    // (`OneOf`) — never Unknown; an Unknown side keeps the join Unknown.
     fn joinVT(a: VType, b: VType) -> VType {
         return match a {
             .Known(t: x) :> joinKnown(x, b)
             .Absent :> joinAbsent(b)
             .Unknown :> VType.Unknown
+            .OneOf(ts: xs) :> joinOneOf(xs, b)
         }
     }
 
@@ -15815,6 +15864,7 @@ ${
             .Known(t: y) :> joinTypes(x, y)
             .Absent :> known(optional(x))
             .Unknown :> VType.Unknown
+            .OneOf(ts: ys) :> joinOneOf(ys, known(x))
         }
     }
 
@@ -15823,7 +15873,67 @@ ${
             .Known(t: y) :> known(optional(y))
             .Absent :> VType.Absent
             .Unknown :> VType.Unknown
+            .OneOf(ts: ys) :> VType.OneOf(optionalAll(ys))
         }
+    }
+
+    fn joinOneOf(xs: Type[], b: VType) -> VType {
+        return match b {
+            .Known(t: y) :> oneOfVT(addMember(xs, y))
+            .Absent :> VType.OneOf(optionalAll(xs))
+            .Unknown :> VType.Unknown
+            .OneOf(ts: ys) :> oneOfVT(addMembers(xs, ys))
+        }
+    }
+
+    fn addMembers(xs: Type[], ys: Type[]) -> Type[] {
+        let out: Type[] = xs
+        for (const y of ys) { out = addMember(out, y) }
+        return out
+    }
+
+    // `y` joined into the first member it shares a type with, else a new member.
+    fn addMember(xs: Type[], y: Type) -> Type[] {
+        let out: Type[] = []
+        let placed = false
+        for (const x of xs) {
+            const j: Type | not = joinType(x, y)
+            if (!placed && j is given) {
+                out = out.concat([j])
+                placed = true
+            } else {
+                out = out.concat([x])
+            }
+        }
+        if (!placed) out = out.concat([y])
+        return out
+    }
+
+    fn optionalAll(xs: Type[]) -> Type[] {
+        let out: Type[] = []
+        for (const x of xs) { out = out.concat([optional(x)]) }
+        return out
+    }
+
+    fn oneOfVT(xs: Type[]) -> VType {
+        if (xs.length == 1) return known(xs[0])
+        return VType.OneOf(xs)
+    }
+
+    // The names of a choice's members: "`string` or `int`".
+    fn oneOfName(xs: Type[]) -> string {
+        let out: string = ""
+        let i = 0
+        for (const x of xs) {
+            if (i > 0 && i == xs.length - 1) {
+                out = out + " or "
+            } else if (i > 0) {
+                out = out + ", "
+            }
+            out = out + "`" + typeName(x) + "`"
+            i = i + 1
+        }
+        return out
     }
 
     fn optional(ty: Type) -> Type {
@@ -15832,11 +15942,25 @@ ${
     }
 
     fn joinTypes(x: Type, y: Type) -> VType {
-        if (sameType(x, y)) return known(x)
-        if (isNumericKind(x) && isNumericKind(y)) return known(Type.Num)
-        if (fitsType(y, x) == Verdict.Fits) return known(x)       // T and T | not → T | not
-        if (fitsType(x, y) == Verdict.Fits) return known(y)
-        return VType.Unknown
+        const j: Type | not = joinType(x, y)
+        if (j is given) return known(j)
+        return VType.OneOf([x, y])
+    }
+
+    // The one type two known types share, when there is one.
+    fn joinType(x: Type, y: Type) -> Type | not {
+        if (sameType(x, y)) return x
+        if (isNumericKind(x) && isNumericKind(y)) return Type.Num
+        if (fitsType(y, x) == Verdict.Fits) return x       // T and T | not → T | not
+        if (fitsType(x, y) == Verdict.Fits) return y
+        // `T` and `U | not` with `T` and `U` sharing a type → that type `| not`
+        const xi: Type | not = maybeInner(x)
+        const yi: Type | not = maybeInner(y)
+        if (xi is given || yi is given) {
+            const k: Type | not = joinType(unMaybe(x), unMaybe(y))
+            if (k is given) return optional(k)
+        }
+        return not
     }
 
     // Arithmetic (§45 aside, JS semantics): int ∘ int is int, any other
@@ -15855,6 +15979,7 @@ ${
             .Known(t: x) :> x
             .Absent :> not
             .Unknown :> not
+            .OneOf(ts: xs) :> not
         }
     }
 
@@ -16192,12 +16317,30 @@ ${
     // ---- the checks ------------------------------------------------------------
     // A value into a typed position (a write): E-TYPE-031 when it provably
     // does not fit, E-TYPE-041 for `not` into a type without `| not`.
+    // s472 audit (g-boot-mixed-arm-type-unresolved-fail-open-s472): `Unknown`
+    // stays provable-or-silent here — it is a value the typer was never given a
+    // type for (a call of a function with no written return type, a host
+    // value, a `?{}` row, a `!{}` / `?` success type …). A value whose
+    // branches the typer DID resolve, to types with no common type, is a
+    // `OneOf`, never an Unknown: each member is checked (checkOneOf).
     fn checkValue(env: TEnv, v: VType, target: Type, span: ASpan, what: string, ts: TypeState) -> TypeState {
         return match v {
             .Known(t: x) :> checkKnown(env, x, target, span, what, ts)
             .Absent :> checkAbsent(env, target, span, what, ts)
             .Unknown :> ts
+            .OneOf(ts: xs) :> checkOneOf(env, xs, target, span, what, ts)
         }
+    }
+
+    // A choice into a typed position: each branch is the value when it is
+    // taken, so each must fit (§66.1 rule 5; §17.6's union rule).
+    fn checkOneOf(env: TEnv, xs: Type[], target: Type, span: ASpan, what: string, ts: TypeState) -> TypeState {
+        for (const x of xs) {
+            if (mayBeNot(x, target) || fitsType(x, target) == Verdict.Fails) {
+                return report(ts, env, span, "E-TYPE-031", what + " expects `" + typeName(target) + "`, and this value may be `" + typeName(x) + "` — it is one of " + oneOfName(xs) + " (a choice whose branches have different types: each branch is the value when it is taken, and each must fit; §66.1 rule 5: every cell and field write is type-checked against the target's declared type)" + intHint(unMaybe(x), unMaybe(target)))
+            }
+        }
+        return ts
     }
 
     fn checkKnown(env: TEnv, x: Type, target: Type, span: ASpan, what: string, ts: TypeState) -> TypeState {
@@ -16558,6 +16701,7 @@ ${
             .Absent :> true
             .Known(t: x) :> false
             .Unknown :> false
+            .OneOf(ts: xs) :> false
         }
     }
 
@@ -16768,7 +16912,17 @@ ${
             .Known(t: t) :> numKnown(env, x, t, what, ts)
             .Absent :> operandType(env, x, "not", what, "numbers", ts)
             .Unknown :> ts
+            .OneOf(ts: xs) :> numOneOf(env, x, xs, what, ts)
         }
+    }
+
+    // s472 — a choice operand: each member is the operand when its branch is taken.
+    fn numOneOf(env: TEnv, x: AExpr, xs: Type[], what: string, ts: TypeState) -> TypeState {
+        for (const t of xs) {
+            const r: TypeState = numKnown(env, x, t, what, ts)
+            if (r.diags.length > ts.diags.length) return r
+        }
+        return ts
     }
 
     fn numKnown(env: TEnv, x: AExpr, t: Type, what: string, ts: TypeState) -> TypeState {
@@ -16786,7 +16940,16 @@ ${
             .Known(t: t) :> boolKnown(env, x, t, what, ts)
             .Absent :> operandType(env, x, "not", what, "booleans", ts)
             .Unknown :> ts
+            .OneOf(ts: xs) :> boolOneOf(env, x, xs, what, ts)
         }
+    }
+
+    fn boolOneOf(env: TEnv, x: AExpr, xs: Type[], what: string, ts: TypeState) -> TypeState {
+        for (const t of xs) {
+            const r: TypeState = boolKnown(env, x, t, what, ts)
+            if (r.diags.length > ts.diags.length) return r
+        }
+        return ts
     }
 
     fn boolKnown(env: TEnv, x: AExpr, t: Type, what: string, ts: TypeState) -> TypeState {
@@ -16871,7 +17034,24 @@ ${
             .Known(t: t) :> plusKnown(env, x, t, ts)
             .Absent :> operandType(env, x, "not", "`+`", "two numbers or two strings", ts)
             .Unknown :> ts
+            .OneOf(ts: xs) :> plusOneOf(env, x, xs, ts)
         }
+    }
+
+    // s472 — a choice operand of `+`: each member must be an operand of `+`,
+    // and the members cannot mix a number with a string (which `+` it is —
+    // adding or joining — would depend on the branch taken).
+    fn plusOneOf(env: TEnv, x: AExpr, xs: Type[], ts: TypeState) -> TypeState {
+        let num = false
+        let str = false
+        for (const t of xs) {
+            const r: TypeState = plusKnown(env, x, t, ts)
+            if (r.diags.length > ts.diags.length) return r
+            if (isNumericKind(unMaybe(t))) num = true
+            if (kindOf(unMaybe(t)) == 2) str = true
+        }
+        if (num && str) return operandType(env, x, "one of " + oneOfName(xs) + "", "`+`", "two numbers or two strings", ts)
+        return ts
     }
 
     fn plusKnown(env: TEnv, x: AExpr, t: Type, ts: TypeState) -> TypeState {
@@ -16922,6 +17102,9 @@ ${
             .Known(t: t) :> condKnown(env, c, t, what, ts)
             .Absent :> markPresence(ts, c.nid)      // `not` as a condition: a presence test that is always false
             .Unknown :> condUnresolvedWhole(env, c, what, ts)
+            // s472: a choice is judged as an unresolved condition was (S460 N1's
+            // arm-by-arm rule — strict-direction: it admits nothing more)
+            .OneOf(ts: xs) :> condUnresolvedWhole(env, c, what, ts)
         }
     }
 
@@ -17086,6 +17269,7 @@ ${
             .Known(t: x) :> false
             .Absent :> false
             .Unknown :> true
+            .OneOf(ts: xs) :> true        // s472: no one type — a condition operand is refused as before
         }
     }
 
@@ -17334,7 +17518,18 @@ ${
             .Known(t: t) :> textKnown(env, s, t, ts)
             .Absent :> notText(env, s, "`not` (an absent value has no text)", ts)
             .Unknown :> textUnresolved(env, s, ts)
+            .OneOf(ts: xs) :> textOneOf(env, s, xs, ts)
         }
+    }
+
+    // s472 — a choice in a template slot: each member is the slot's value when
+    // its branch is taken, so each must have one honest text.
+    fn textOneOf(env: TEnv, s: AExpr, xs: Type[], ts: TypeState) -> TypeState {
+        for (const t of xs) {
+            const r: TypeState = textKnown(env, s, t, ts)
+            if (r.diags.length > ts.diags.length) return r
+        }
+        return ts
     }
 
     fn textUnresolved(env: TEnv, s: AExpr, ts: TypeState) -> TypeState {
@@ -17543,6 +17738,10 @@ ${
     // type is non-optional (`[not]` into `string[]`). Only when the array's
     // own type is unproven (all elements `not` / unknown) — a typed array
     // (`[1, not]`: `(int | not)[]`) is mayBeNot's, reported once there.
+    // s472 (the `.Unknown` audit): an array whose elements have KNOWN types
+    // with no common type (`[1, "a"]`) is unproven too — a tape holds one
+    // element type, and there is no union tape — so each such element is
+    // checked against the element type here, as it is written into it.
     fn checkNotElems(env: TEnv, e: AExpr, target: Type, ts: TypeState) -> TypeState {
         const es: AExpr[] = arrayElems(e)
         if (es.length == 0) return ts
@@ -17551,8 +17750,11 @@ ${
         if (te is not) return ts
         let out: TypeState = ts
         for (const x of es) {
+            const xv: VType = exprType0(out, x.nid)
             if (isNotLit(x)) {
                 out = checkAbsent(env, te, x.span, "an element of `" + typeName(target) + "`", out)
+            } else if (knownOf(xv) is given || oneOfMembers(xv).length > 0) {
+                out = checkValue(env, xv, te, x.span, "an element of `" + typeName(target) + "`", out)
             } else {
                 out = checkNotElems(env, x, te, out)
             }
@@ -17589,16 +17791,33 @@ ${
         }
     }
 
-    // s472 r1 F2 (PA-directed widening, review of #1608): a NON-literal initializer
-    // of an annotated `let` / `const` / declaration field / use-site attribute is
-    // checked against the annotation for EVERY type — the rule a return, an argument
-    // and a write already use (§7.5.1 positions 3-4, r7 A; §66.1 rule 5). Before,
-    // only an `int`-bearing target (S442) or the `T | not` rule was checked here, so
-    // `let <sh:Shape=(Mode.Solo(.Easy))/>` compiled (g-bootstrap-typer-int-into-
-    // string-bool-initializer-unchecked). A literal initializer stays checkInit's.
-    fn checkIntInit(env: TEnv, target: Type, lk: int, v: VType, span: ASpan, what: string, ts: TypeState) -> TypeState {
-        if (lk >= 0) return ts
+    // THE INITIALIZER RULE — one rule for every annotated initializer (an
+    // annotated `let` / `const` local, a declaration field or cell, a use-site
+    // attribute), LITERAL OR NOT, against EVERY annotation type: the rule a
+    // return, an argument and a write already use (§7.5.1 positions 1-4, r7 A;
+    // §66.1 rule 5; `not` into a non-optional type is E-TYPE-041, §42.3.1).
+    // s472 r1 F2 (review of #1608) widened the NON-literal limb; s472
+    // (g-boot-literal-init-non-primitive-annotation-unchecked-s472) closes the
+    // literal limb: a literal into a `T | not`, an enum, a struct or a tape was
+    // judged by neither checkInit (its §7.5.1 table covers the four primitive
+    // annotations only) nor the non-literal limb, so `let <admin:bool |
+    // not="false"/>` compiled and `if (@admin)` took the true branch. A literal
+    // into a primitive annotation keeps checkInit's §7.5.1 message.
+    fn checkAnnotInit(env: TEnv, target: Type, lk: int, v: VType, span: ASpan, what: string, ts: TypeState) -> TypeState {
+        if (lk == 3) return checkAbsent(env, target, span, what, ts)
+        if (lk >= 0 && literalFits(kindOf(target), lk) >= 0) return checkInit(env, target, lk, span, what, ts)
+        if (lk >= 0) return checkValue(env, literalVT(lk), target, span, what, ts)
         return checkValue(env, v, target, span, what, ts)
+    }
+
+    // A literal's type, by its literalKind (0 non-integer number · 4 integer ·
+    // 1 string · 2 boolean · 3 `not`).
+    fn literalVT(lk: int) -> VType {
+        if (lk == 0) return known(Type.Num)
+        if (lk == 4) return known(Type.Int)
+        if (lk == 1) return known(Type.Str)
+        if (lk == 2) return known(Type.Bool)
+        return VType.Absent
     }
 
     fn arityMessage(name: string, n: int, got: int) -> string {
@@ -17694,6 +17913,7 @@ ${
         if (subjMaybe) present = condNarrowing(env, h.subject).yes
         let vt: VType = VType.Unknown
         let first = true
+        let conflict = false
         for (const a of handledArms(h)) {
             const af: FailFact | not = failFact(env.t.fails, a.nid)
             let aenv: TEnv = env
@@ -17723,15 +17943,48 @@ ${
                 ts = r.ts
                 if (first) {
                     vt = r.vt
-                } else {
-                    vt = joinVT(vt, r.vt)
+                } else if (!conflict) {
+                    const j: VType = joinVT(vt, r.vt)
+                    // s472 (g-boot-mixed-arm-type-unresolved-fail-open-s472) — §18.4
+                    // rule 3: "If arms produce types `A` and `B` with no subtype
+                    // relationship, this SHALL be a compile error (E-TYPE-001) citing
+                    // the two conflicting arm types". Two arms whose KNOWN types
+                    // share no type: reported here, once; the match's value is then
+                    // Unknown — this error accounts for it (no second report).
+                    if (armsConflict(vt, r.vt, j)) {
+                        if (!hasErrIn(env.errs, one.span)) ts = report(ts, env, one.span, "E-TYPE-001", "the arms of this `match` produce different types — this arm is `" + vtName(r.vt) + "`, and the arm(s) before it `" + vtName(vt) + "` — a `match`'s arms produce one type, or types that unify (`T` with `T | not`, `int` with `number`) (§18.4 rule 3)")
+                        conflict = true
+                        vt = VType.Unknown
+                    } else {
+                        vt = j
+                    }
                 }
                 first = false
             }
         }
         if (m.stmt) return rvt(VType.Unknown, ts)
+        if (conflict) return rvt(VType.Unknown, ts)
         if (!m.exhaustive) vt = joinVT(vt, VType.Absent)
         return rvt(vt, ts)
+    }
+
+    // s472 — the join of two arm values made a choice that neither arm was:
+    // two known arm types with no common type (§18.4 rule 3). An arm that is
+    // itself a choice (a ternary) is carried as the match's value, not blamed.
+    fn armsConflict(a: VType, b: VType, j: VType) -> boolean {
+        if (oneOfMembers(j).length == 0) return false
+        if (oneOfMembers(a).length > 0 || oneOfMembers(b).length > 0) return false
+        return true
+    }
+
+    // A value type as a message names it.
+    fn vtName(v: VType) -> string {
+        return match v {
+            .Known(t: x) :> typeName(x)
+            .Absent :> "not"
+            .Unknown :> "unresolved"
+            .OneOf(ts: xs) :> typeName(xs[0])
+        }
     }
 
     // The one expression a value-position arm is (`e`, or `{ e }`), else not.
@@ -18102,8 +18355,7 @@ ${
         if (sym is not) return keepTEnv(env, r.ts)
         const annot: Type | not = annotOf(env.t, sym)
         if (annot is given) {
-            let ts2: TypeState = checkInit(env, annot, literalKind(init), init.span, "`" + name + "`", r.ts)
-            ts2 = checkIntInit(env, annot, literalKind(init), r.vt, init.span, "`" + name + "`", ts2)
+            let ts2: TypeState = checkAnnotInit(env, annot, literalKind(init), r.vt, init.span, "`" + name + "`", r.ts)
             ts2 = checkNotElems(env, init, annot, checkLitFields(env, init, ts2))
             return keepTEnv(tWithLocal(env, sym, known(annot)), ts2)
         }
@@ -18342,6 +18594,7 @@ ${
             .Known(t: x) :> checkIndexKnown(env, x, span, ts)
             .Absent :> report(ts, env, span, "E-TYPE-031", "a sequence index is an `int` position, and this index is `not` (§66.12.2 positions; `int` enforced, ruled S440 JS-WAT 7(a))")
             .Unknown :> ts
+            .OneOf(ts: xs) :> checkOneOf(env, xs, Type.Int, span, "a sequence index (an `int` position, §66.12.2)", ts)
         }
     }
 
@@ -18526,12 +18779,51 @@ ${
     // A markup `${x}`: typed; a `T | not` there is NOT an un-narrowed operand —
     // RULED S442: "`${@o.n}` in markup without narrowing stays SILENT (`${not}`
     // renders nothing); Q3's "use in a template" binds string templates only".
+    // s472 (g-boot-markup-interp-non-primitive-unchecked-s472, review O2) — markup
+    // text is a TEXT SINK (§14.13.2): "Refused: a struct, a tape, a tuple, a map or
+    // set, a payload enum value, a function … In markup text, a quoted attribute or
+    // a logic template this SHALL be compile error `E-TEXT-NON-PRIMITIVE`". A KNOWN
+    // non-primitive (or a `T | not` of one) and every member of a choice are judged
+    // here, as a template slot's are (textKnown). The unresolved-type limb is NOT
+    // applied to markup text yet (a template slot refuses it): see the gap.
     fn typeInterp(env: TEnv, x: AExpr, ts0: TypeState) -> TypeState {
         const r: RVT = typeExpr(env, x, ts0)
-        const t: Type | not = knownOf(r.vt)
-        if (t is not) return r.ts
-        if (maybeInner(t) is not) return r.ts
-        return r.ts                                         // (f): a `T | not` renders nothing — silent
+        if (hasErrIn(env.errs, x.span)) return r.ts          // Rule C: not judged across a parse error
+        const v: VType = r.vt
+        return match v {
+            .Known(t: t) :> markupTextKnown(env, x, t, r.ts)
+            .Absent :> r.ts                                   // `${not}` renders nothing (§7.4.2)
+            .Unknown :> r.ts
+            .OneOf(ts: xs) :> markupTextOneOf(env, x, xs, r.ts)
+        }
+    }
+
+    // (f): a `T | not` of a primitive renders nothing when `not` — silent.
+    // A DECLARATION's type (a read of a user declaration's instance or shared
+    // cell, §66.8) is not judged here, as `==` does not judge it (eqSameType):
+    // a shared cell's read can stand for its value (§66.19.4), and the
+    // declaration forms the bootstrap cannot render are refused by name
+    // where they are declared (O19).
+    fn markupTextKnown(env: TEnv, x: AExpr, t: Type, ts: TypeState) -> TypeState {
+        const inner: Type | not = maybeInner(t)
+        let u: Type = t
+        if (inner is given) u = inner
+        if (isTextPrimitive(env, u)) return ts
+        const ds: Sym | not = namedOf(u)
+        if (ds is given) {
+            if (isDeclSym(env, ds)) return ts
+        }
+        let what: string = textWhat(env, u)
+        if (inner is given) what = "a `" + typeName(t) + "`"
+        return report(ts, env, x.span, "E-TEXT-NON-PRIMITIVE", "markup text `${…}` is text, and this is " + what + " — only a `string`, `int`, `number`, `bool` or unit enum value has one honest text (§14.13.2). Interpolate a field (`p.name`), a `scrml:format` call, or show it with `log()`")
+    }
+
+    fn markupTextOneOf(env: TEnv, x: AExpr, xs: Type[], ts: TypeState) -> TypeState {
+        for (const t of xs) {
+            const r: TypeState = markupTextKnown(env, x, t, ts)
+            if (r.diags.length > ts.diags.length) return r
+        }
+        return ts
     }
 
     fn typeNode(env: TEnv, n: ANode, ts: TypeState) -> TypeState {
@@ -18647,8 +18939,7 @@ ${
                 if (f.annotated && f.trusted) {
                     const what: string = "`" + a.name + "` of `<" + e.tag + ">`"
                     const lk: int = attrLiteralKind(a.value)
-                    ts = checkInit(env, f.ty, lk, a.span, what, ts)
-                    ts = checkIntInit(env, f.ty, lk, av, a.span, what, ts)
+                    ts = checkAnnotInit(env, f.ty, lk, av, a.span, what, ts)
                     ts = checkAttrLitFields(env, a.value, f.ty, ts)
                 }
             }
@@ -18910,8 +19201,7 @@ ${
             ts = rv.ts
             if (f.annotated && f.trusted) {
                 const lk: int = attrLiteralKind(f.init)
-                ts = checkInit(env, f.ty, lk, f.span, "`" + f.sym.hint + "`", ts)
-                ts = checkIntInit(env, f.ty, lk, rv.vt, f.span, "`" + f.sym.hint + "`", ts)
+                ts = checkAnnotInit(env, f.ty, lk, rv.vt, f.span, "`" + f.sym.hint + "`", ts)
                 ts = checkAttrLitFields(env, f.init, f.ty, ts)
             }
         }
@@ -23436,6 +23726,7 @@ ${
             .Known(t: t) :> t
             .Absent :> not
             .Unknown :> not
+            .OneOf(ts: xs) :> not
         }
     }
 

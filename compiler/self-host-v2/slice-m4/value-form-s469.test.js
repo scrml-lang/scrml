@@ -44,7 +44,7 @@ const prog = (decls, body) => `<program>\n${decls}\n    <main>\n${body}\n    </m
 // one function `f(ys)` over the tape `@zs`, shown in `#o`
 const ZS = `    <zs:int[]=([3, 4, 5])/>\n    <ws:string[]=(["a", "b"])/>`;
 const fnProg = (b, ret = "int", sig = "ys: int[]", call = "f(@zs)") => prog(`${ZS}\n    function f(${sig}) -> ${ret} {\n${b}\n    }`, `        <p id="o">\${${call}}</p>`);
-const fnCodes = (b, ret = "int", sig = "ys: int[]") => codes(fnProg(b, ret, sig));
+const fnCodes = (b, ret = "int", sig = "ys: int[]", call = "f(@zs)") => codes(fnProg(b, ret, sig, call));
 const shows = async (b, want, ret = "int", sig = "ys: int[]", call = "f(@zs)") => {
   await load(fnProg(b, ret, sig, call));
   expect($("#o").textContent).toBe(want);
@@ -175,7 +175,8 @@ describe("refused by name (E-BOOTSTRAP-UNSUPPORTED) — not in the SPEC's words 
   });
   test("a `for` in an operand / argument / `return` position (§49.4.4: a syntax error the SPEC names no code for)", () => {
     expect(fnCodes(`        return 1 + for (y of ys) { lift y; };`)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
-    expect(fnCodes(`        return for (y of ys) { lift y; };`, "int[]")).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+    // s472: a tape is no text (§14.13.2, E-TEXT-NON-PRIMITIVE in markup text) — show its length
+    expect(fnCodes(`        return for (y of ys) { lift y; };`, "int[]", "ys: int[]", "f(@zs).length")).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
   });
   test("`for … else` on a bound loop (§17.4a) stays refused", () => {
     expect(fnCodes(`        const xs = for (y of ys) { lift y; } else { lift 0; };\n        return 1;`)).toContain("E-BOOTSTRAP-UNSUPPORTED");
