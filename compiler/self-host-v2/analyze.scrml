@@ -259,10 +259,20 @@ ${
         EWrite(w: WriteFact),                             // an assignment / an edit call
         ESpread(ws: SpreadWrite[], inst: Sym, snap: Sym, fields: SnapField[]), // a spread assignment: FieldAt edits (O58 (b)); the instance + snapshot locals
         EReset(w: WriteFact, decl: Sym, idx: int),        // reset(@x): a replace with x's initializer (L4)
-        EAssignLocal(sym: Sym),                           // a `let` local rebinding (§66.11.5)
+        // a local rebinding (§66.11.5) — `path` empty; s472: `path` non-empty is a
+        // write to a PART of the local (`p.f = v`, `xs[i] = v`; Core Assign with a
+        // path), `ty` the type of the part written (the typer checks the value)
+        EAssignLocal(sym: Sym, path: LStep[], ty: Type | not),
         EEdits(w: WriteFact, elems: AExpr[], tmps: Sym[], snap: SeqSnap), // s442: `@x = [...@x, a, b]` — one edit per element (§66.11.2); r1: each element evaluated into `tmps[i]` first; r2: reads of `@x` see `snap`
         ERemove(w: WriteFact),                            // s444: `@x.pop()` / `@x.shift()` — a removal of one element (RemoveEnd / RemoveFront)
         EElemAt(cap: Sym, inst: InstRef, index: AExpr, path: FieldRef[]), // s444: `@xs[i].f = v` — an element-field write (Core ElemAt; dpa-052 Q3)
+        EPosition(cap: Sym, inst: InstRef, index: AExpr, loc: string),   // s472: `@xs[i] = v` — a position write (Core PositionAt; §66.12.6 rule 3); `loc` "file:line" for the trap
+    }
+    // s472 — one step of a local part write's path (EAssignLocal): a struct field
+    // (`name` as written, for the narrowing key), or a tape position.
+    export type LStep:enum = {
+        LField(ref: FieldRef, name: string),
+        LIndex(index: AExpr, loc: string),
     }
     export type BindFact:enum = {
         BBind(sym: Sym),                                  // a binder: a local statement, a function
@@ -6822,7 +6832,7 @@ ${
             .ArrayLit(elems: es) :> noPlace(addDiag(st, env.file, t.span, "E-ASSIGN-TARGET", "not a writable place"))
             .ObjectLit(props: ps) :> noPlace(addDiag(st, env.file, t.span, "E-ASSIGN-TARGET", "not a writable place"))
             .Spread(e: x) :> noPlace(addDiag(st, env.file, t.span, "E-ASSIGN-TARGET", "not a writable place"))
-            .Index(obj: o) :> noPlace(addDiag(st, env.file, t.span, "E-BOOTSTRAP-UNSUPPORTED", "writing an element `a[i]` is in the bootstrap only as an element-FIELD write (`@xs[i].f = v`, dpa-052 Q3) — Core has no position-write place"))
+            .Index(obj: o) :> noPlace(addDiag(st, env.file, t.span, "E-BOOTSTRAP-UNSUPPORTED", "a write THROUGH a cell's tape position (`@xs[i][j] = v`, `@xs[i].a.b = v`) is not in the bootstrap yet — Core writes a cell tape's position (`@xs[i] = v`, s472) and one field of its element (`@xs[i].f = v`, dpa-052 Q3)"))
             .Lambda(params: ps2) :> noPlace(addDiag(st, env.file, t.span, "E-ASSIGN-TARGET", "not a writable place"))
             .Sql(q: q) :> noPlace(addDiag(st, env.file, t.span, "E-ASSIGN-TARGET", "not a writable place"))
             .Handled(h: x) :> noPlace(addDiag(st, env.file, t.span, "E-ASSIGN-TARGET", "not a writable place"))
@@ -7029,6 +7039,13 @@ ${
         if (ef is given) {
             if (!rootIsLocal(env, ef.seq)) return resolveElemFieldWrite(env, e, ef, value, st0)
         }
+        // s472 — a write to a PART of a local (`p.f = v`, `xs[i] = v`) — value
+        // semantics, judged by the part's own contract / its tape's grants — and a
+        // POSITION write of a cell's tape (`@xs[i] = v`, §66.12.6 rule 3)
+        const pl: LocalB | not = partLocal(env, target)
+        if (pl is given) return resolveLocalPartWrite(env, e, target, value, pl, st0)
+        const it: IndexTarget | not = indexTarget(target)
+        if (it is given) return resolvePositionWrite(env, e, it, value, st0)
         // `@inst = { ...@inst, f: v }` — the self-spread of an INSTANCE: field
         // edits of that instance (O58 (b)).
         if (isSelfSpread(target, value)) {
@@ -7049,7 +7066,7 @@ ${
             // s469-boot-tape-grants: §50 decides whether the name may be rebound (above);
             // whether the tape write the rebinding performs is granted (§66.12.6 rule 4) is
             // the typer's (typeAssign → localTapeProblems), where an inferred type is known
-            st = addEffect(st, e.nid, EffectFact.EAssignLocal(l.s))
+            st = addEffect(st, e.nid, EffectFact.EAssignLocal(l.s, [], not))
             return resolveExpr(env, value, l.ty, st).st
         }
         const p: WPlace | not = rp.place
@@ -7941,6 +7958,76 @@ ${
         return []
     }
 
+    // s472 — a POSITION write (`xs[i] = v`): granted by `write` (§66.12.2: "`write`
+    // | positions may be overwritten in place (`xs[i] = v`; …)"; §66.12.6 rule 3:
+    // "`xs[i] = v` | a position write | `write`"), or by `replace`, which subsumes
+    // the edits (§66.11.3). `gs`: the written tape's grants — a cell's field
+    // GrantSet (built from its type in fieldOf), or a tape TYPE's (below).
+    fn positionWriteProblem(gs: GrantSet, label: string, tyText: string) -> TapeDiag[] {
+        if (grantsAdmit(gs, EditKind.PositionWrite)) return []
+        return [{ code: "E-WRITE-NOT-GRANTED", msg: "`" + label + " = …` is a position write (§66.12.6 rule 3: `xs[i] = v` is granted by `write`), which the tape's type (`" + tyText + "`) does not grant — add `write` to its grants (§66.12.2)" }]
+    }
+
+    // s472 r1 F1 — a position write REPLACES the element. When the element is itself a
+    // tape (a tape of tapes), that is a `replace` of the inner tape, judged by ITS grants
+    // (§66.12.6 rule 1: "A tape's grants govern every write to it … in each position that
+    // can hold one"; rule 4's reading, as a struct element's tape fields are judged by
+    // checkStructTapes). `elem`: the element type written.
+    fn elemTapeReplaceProblem(elem: Type, label: string) -> TapeDiag[] {
+        const tg: GrantSet | not = tapeGrants(elem)
+        if (tg is not) return []
+        if (grantsAdmit(tg, EditKind.Replace)) return []
+        return [{ code: "E-WRITE-NOT-GRANTED", msg: "`" + label + " = …` replaces an element that is itself a tape (`" + tapeTypeName(elem) + "`): replacing it is a `replace` of that inner tape, which its type does not grant — a tape's grants govern it in every position, an element of another tape included (§66.12.6 rules 1 and 4); edit it in place (`" + label + "[j] = …`, `.append(…)` where granted) or add `replace` to the inner tape's grants" }]
+    }
+
+    // s472 — a position write of a tape held by a local, or reached through one:
+    // judged by the tape TYPE's grants (§66.12.3 "Permissions live on the TYPE").
+    // `tyText` names the type for the message (an inferred one says so).
+    fn tapePositionProblem(t: Type, label: string, tyText: string) -> TapeDiag[] {
+        const tg: GrantSet | not = tapeGrants(t)
+        if (tg is not) return [{ code: "E-ASSIGN-TARGET", msg: "`" + label + " = …` writes a tape position, and the value written into is not a tape" }]
+        return positionWriteProblem(tg, label, tyText)
+    }
+
+    // s472 — a write to a FIELD of a local's value (`p.f = v`, `a.b.f = v`,
+    // `xs[i].f = v`), judged by the DEEPEST field written (dpa-052 Q6, RULED S440)
+    // — its own contract (§66.11.4: "a field write is an edit — a field is writable
+    // along its own contract"; dpa-052 Q2 / O14, RULED S440: "Field and tape
+    // contracts govern local (non-cell) values too"):
+    //   - a TAPE field: the write is classified (§66.11.2) and checked against the
+    //     field's OWN grants, never the holder's (§66.12.6 rules 1 and 4);
+    //   - a `let` field: its own `replace`;
+    //   - a contract-free field: "A contract-free sub-field does not bound a
+    //     replace (O57 = no)" — it is written under the replace its root grants.
+    //     For a local that is rebinding the local (§66.11.5: "it stays under §50"):
+    //     `rootLet` — the local is a `let` — and the write is the same transition as
+    //     the rebinding `p = { ...p, f: v }` (§66.11.2: "A write is judged by the
+    //     old → new transition it performs, not by how it is spelled"). Not through
+    //     a tape position (`inTape`): an element field is judged by its own
+    //     contract alone (dpa-052 Q3, RULED S440).
+    fn localFieldWriteProblem(fd: FieldDef, key: string, label: string, value: AExpr, rootLet: boolean, inTape: boolean, root: string) -> TapeDiag[] {
+        if (seqElem(unMaybe(fd.ty)) is given) {
+            const shape: int = seqEditShapeKey(key, value)
+            let edit: EditKind = EditKind.Replace
+            let what: string = "a `replace` of it (an unclassified whole-value write, §66.11.2)"
+            if (shape > 0) {
+                edit = shapeEdit(shape)
+                what = shapeWhat(shape)
+            }
+            if (!grantsAdmit(fd.grants, edit)) {
+                return [{ code: "E-WRITE-NOT-GRANTED", msg: "`" + label + " = …` writes the tape field `" + fd.sym.hint + "` (`" + tapeTypeName(fd.ty) + "`): it is " + what + ", which the field's type does not grant — a tape field is judged by its OWN grants, whatever holds it (§66.12.6 rules 1 and 4)" }]
+            }
+            if (growsFixed(fd.ty) && shape > 0 && shape < 4) {
+                return [{ code: "E-WRITE-INVARIANT", msg: "`" + label + "`: " + what + " changes the length of the tape, and its type fixes the length (no `free` grant, §66.12.1–§66.12.2) — the write provably breaks the length invariant (§66.11.2)" }]
+            }
+            return []
+        }
+        if (grantsAdmit(fd.grants, EditKind.Replace)) return []
+        if (rootLet && !inTape && !grantsHasEdits(fd.grants)) return []
+        if (inTape) return [{ code: "E-WRITE-NOT-GRANTED", msg: "`" + label + " = …` writes the field `" + fd.sym.hint + "` of a tape element, and `" + fd.sym.hint + "` carries no contract — it is fixed (§66.11.4; an element-field write is judged by that field's own contract alone, dpa-052 Q3): declare it `let " + fd.sym.hint + "` in its struct" }]
+        return [{ code: "E-WRITE-NOT-GRANTED", msg: "`" + label + " = …` writes the field `" + fd.sym.hint + "`, which carries no contract — it is fixed (§66.11.4), and `" + root + "` cannot be rebound (a `const`, a parameter or a loop binder, §50), so nothing grants the write (dpa-052 Q2: field contracts govern local values) — declare the field `let " + fd.sym.hint + "` in its struct, or copy the value into a `let` local and write that" }]
+    }
+
     // §66.12.3: a callee can do only what its parameter type grants, so a PLACE
     // passed to a tape parameter must grant at least what the parameter does
     // (a more-permissive argument is accepted; ruled S435 "type"). "" when it
@@ -7969,6 +8056,7 @@ ${
             .FieldAt(path: p) :> "a field write"
             .Transition :> "a transition"
             .ElemAt(index: i) :> "an element-field write"
+            .PositionAt(index: i) :> "`write`"
         }
     }
     // ---- s469 MED-1: the TYPE-derived grants (a tape type's SeqGrants, its written grant words) are read here too ----
@@ -8633,6 +8721,344 @@ ${
         const cap: Sym | not = f.wcap
         if (cap is not || elemSym is not) return noCapability(env, e, st)
         return addEffect(st, e.nid, EffectFact.EElemAt(cap, p.inst, ef.index, [{ owner: elemSym, idx: targetIdx }]))
+    }
+
+    // =========================================================================
+    // s472 — POSITION writes (`@xs[i] = v`) and writes to a PART of a local
+    // (`p.f = v`, `xs[i] = v`, `a.b.c = v`, `xs[i].f = v`) — gaps
+    // g-boot-position-write-s472, g-boot-local-part-write-s472.
+    //
+    // SPEC §66.12.6 rule 3: "`xs[i] = v` | a position write | `write`"; §66.12.2:
+    // "`write` | positions may be overwritten in place (`xs[i] = v`; …)". Rule 1:
+    // a tape's grants govern every write to it in a cell, a struct field, "a local
+    // binding: `let`, `const`, or the keywordless binding", "a function parameter";
+    // "Inference never invents a grant". §66.11.4: "a field write is an edit — a
+    // field is writable along its own contract … a field with no contract is
+    // fixed". dpa-052 Q2 (O14, RULED S440): "Field and tape contracts govern local
+    // (non-cell) values too"; Q6: "a write is judged by the DEEPEST field written".
+    // Every grant decision is made by the ONE tape grant reader (`grantsAdmit`,
+    // `positionWriteProblem`, `localFieldWriteProblem` — inside its range).
+    //
+    // A local part write is VALUE semantics (§66.10): Core rebinds the local to a
+    // copy with the part replaced (Stmt.Assign with a path) — no alias of the old
+    // value sees the write. An index outside its tape is the
+    // E-INDEX-OUT-OF-RANGE-RT trap at run time (§66.12.6 rule 3: a write at or past
+    // the end "would create a position that holds no value"; §66.12.8 rule 7: "a
+    // negative index WRITE `xs[-1] = v` traps"), and nothing is written.
+    // =========================================================================
+    type IndexTarget:struct = { seq: AExpr, index: AExpr }
+
+    fn indexTarget(t: AExpr) -> IndexTarget | not {
+        const k: AExprK = t.k
+        return match k {
+            .Index(obj: o, idx: i) :> indexPair(o, i)
+            .Name(name: n) :> not
+            .At(name: n) :> not
+            .AtItem :> not
+            .Num(raw: r) :> not
+            .Str(v: x) :> not
+            .Bool(v: b) :> not
+            .NotLit :> not
+            .Recovered :> not
+            .Variant(name: n) :> not
+            .Member(obj: o) :> not
+            .Call(callee: c) :> not
+            .Unary(op: o) :> not
+            .Binary(op: o) :> not
+            .Ternary(test: x) :> not
+            .Assign(target: x) :> not
+            .ArrayLit(elems: es) :> not
+            .ObjectLit(props: ps) :> not
+            .Spread(e: x) :> not
+            .Lambda(params: ps) :> not
+            .Sql(q: q) :> not
+            .Handled(h: x) :> not
+            .Template(quasis: qs) :> not
+        }
+    }
+
+    fn indexPair(o: AExpr, i: AExpr) -> IndexTarget { return { seq: o, index: i } }
+
+    // `@xs[i] = v` — a position write of a CELL's tape (Core PositionAt).
+    fn resolvePositionWrite(env: Env, e: AExpr, it: IndexTarget, value: AExpr, st0: AS) -> AS {
+        const rp: RPlace = resolvePlace(env, it.seq, st0)
+        let st: AS = rp.st
+        const p: WPlace | not = rp.place
+        const lc: LocalB | not = rp.local
+        if (lc is given) return partRefused(env, value, e.span, "E-ASSIGN-TARGET", "`" + lc.name + "[…] = …` — `" + lc.name + "` names an instance (narrowed by `given`), which has no positions; write one of its fields", st)
+        if (p is not) return resolveExpr(env, value, not, resolveExpr(env, it.index, Type.Int, st).st).st
+        st = writeGuards(env, p, it.seq.span, st)
+        st = resolveExpr(env, it.index, Type.Int, st).st
+        const f: FieldInfo = p.decl.fields[p.idx]
+        const at: string = writtenLabel(placeKey(it.seq), f.sym.hint)
+        const label: string = at + "[…]"
+        let elem: Type | not = not
+        const pt: Type | not = p.ty
+        if (pt is given) elem = seqElem(pt)
+        if (pt is given && elem is not) {
+            if (maybeInner(pt) is given) return addDiag(resolveExpr(env, value, not, st).st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "`" + label + " = …` writes a position of `" + at + "`, which is `" + typeName(pt) + "` — it may be `not`, so it has no positions; narrow it first")
+            return addDiag(resolveExpr(env, value, not, st).st, env.file, e.span, "E-ASSIGN-TARGET", "`" + label + " = …` writes a tape position (§66.12.6 rule 3), and `" + at + "` is `" + typeName(pt) + "`, not a tape")
+        }
+        if (elem is not) return resolveExpr(env, value, not, st).st
+        st = resolveExpr(env, value, elem, st).st
+        // a tape reached through a struct field: Core writes a struct field only as a
+        // whole (`replace`), as for every other edit of a sub-field tape (fieldAtWrite)
+        if (p.path.length > 0) return addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "`" + label + " = …` is a position write of a sub-field tape — Core writes a struct field only as a whole (`replace`), so an edit of a sub-field tape is not in the bootstrap yet")
+        const pd: TapeDiag[] = positionWriteProblem(f.grants, label, tapeTypeName(f.ty))
+        if (pd.length > 0) {
+            if (f.mode == FieldMode.Derived) return addDiag(st, env.file, e.span, "E-DERIVED-VALUE-MUTATE", "`@" + f.sym.hint + "` is derived — an in-place edit of a derived value is an error (§6.6.18, §66.9)")
+            return addDiag(st, env.file, e.span, pd[0].code, pd[0].msg)
+        }
+        const ed: TapeDiag[] = elemTapeReplaceProblem(elem, label)
+        if (ed.length > 0) return addDiag(st, env.file, e.span, ed[0].code, ed[0].msg)
+        // the element is replaced whole: each tape field of it the value changes is a
+        // `replace` of that field, judged by its own grants (§66.12.6 rule 4)
+        const stt: AS = checkStructTapes(env, elem, value, "", label, e.span, st)
+        if (stt.diags.length > st.diags.length) return stt
+        const cap: Sym | not = f.wcap
+        if (cap is not) return noCapability(env, e, st)
+        return addEffect(st, e.nid, EffectFact.EPosition(cap, p.inst, it.index, env.file + ":" + lineOf(env.g, env.file, e.span.start)))
+    }
+
+    // The local a PART write writes: the root of a member / index chain
+    // (`p.f`, `xs[i]`, `a.xs[i].f`) when it is a local binding — not a bare name
+    // (a rebinding), not a `given`-narrowed instance (its fields are cell fields).
+    fn partLocal(env: Env, t: AExpr) -> LocalB | not {
+        if (exprName(t) != "") return not
+        const rn: AExpr | not = partRootName(t)
+        if (rn is not) return not
+        const l: LocalB | not = lookupLocal(env, exprName(rn))
+        if (l is not) return not
+        if (l.narrowed is given) return not
+        return l
+    }
+
+    // The root name node of a member / index chain.
+    fn partRootName(t: AExpr) -> AExpr | not {
+        const k: AExprK = t.k
+        return match k {
+            .Name(name: n) :> t
+            .Member(obj: o) :> partRootName(o)
+            .Index(obj: o) :> partRootName(o)
+            .At(name: n) :> not
+            .AtItem :> not
+            .Num(raw: r) :> not
+            .Str(v: x) :> not
+            .Bool(v: b) :> not
+            .NotLit :> not
+            .Recovered :> not
+            .Variant(name: n) :> not
+            .Call(callee: c) :> not
+            .Unary(op: o) :> not
+            .Binary(op: o) :> not
+            .Ternary(test: x) :> not
+            .Assign(target: x) :> not
+            .ArrayLit(elems: es) :> not
+            .ObjectLit(props: ps) :> not
+            .Spread(e: x) :> not
+            .Lambda(params: ps) :> not
+            .Sql(q: q) :> not
+            .Handled(h: x) :> not
+            .Template(quasis: qs) :> not
+        }
+    }
+
+    // One source step of a part write, root first: a field `.n`, or a position `[i]`.
+    type PartStep:struct = { field: string, index: AExpr | not }
+
+    fn partSteps(t: AExpr) -> PartStep[] {
+        const k: AExprK = t.k
+        return match k {
+            .Member(obj: o, name: n) :> partSteps(o).concat([fieldStep(n)])
+            .Index(obj: o, idx: i) :> partSteps(o).concat([indexStep(i)])
+            .Name(name: n) :> []
+            .At(name: n) :> []
+            .AtItem :> []
+            .Num(raw: r) :> []
+            .Str(v: x) :> []
+            .Bool(v: b) :> []
+            .NotLit :> []
+            .Recovered :> []
+            .Variant(name: n) :> []
+            .Call(callee: c) :> []
+            .Unary(op: o) :> []
+            .Binary(op: o) :> []
+            .Ternary(test: x) :> []
+            .Assign(target: x) :> []
+            .ArrayLit(elems: es) :> []
+            .ObjectLit(props: ps) :> []
+            .Spread(e: x) :> []
+            .Lambda(params: ps) :> []
+            .Sql(q: q) :> []
+            .Handled(h: x) :> []
+            .Template(quasis: qs) :> []
+        }
+    }
+
+    fn fieldStep(n: string) -> PartStep { return { field: n, index: not } }
+    fn indexStep(i: AExpr) -> PartStep { return { field: "", index: i } }
+
+    // The written part as the author spells it, the indices elided (`a.xs[…].f`).
+    fn partLabel(root: string, ps: PartStep[]) -> string {
+        let out: string = root
+        for (const s of ps) {
+            if (s.index is given) {
+                out = out + "[…]"
+            } else {
+                out = out + "." + s.field
+            }
+        }
+        return out
+    }
+
+    // A local's WRITTEN type: its annotation, or a parameter's type; `not` for an
+    // un-annotated local (its type is inferred — §66.12.6 rule 1: "Inference never
+    // invents a grant").
+    fn writtenLocalType(st: AS, s: Sym) -> Type | not {
+        for (const a of st.annots) {
+            if (a.sym.id == s.id) return a.ty
+        }
+        for (const f of st.facts.binds.facts) {
+            const bs: Sym | not = bindSym(f)
+            if (bs is given) {
+                if (bs.id == s.id) return boundParamType(f)
+            }
+        }
+        return not
+    }
+
+    // The fields of a struct type (`not` for any other type).
+    fn structFieldsOfType(env: Env, t: Type) -> FieldDef[] | not {
+        const sy: Sym | not = namedOf(t)
+        if (sy is not) return not
+        const ti: TypeInfo | not = typeInfoOf(env.g.types, sy)
+        if (ti is not) return not
+        return structFieldDefs(ti.def)
+    }
+
+    fn isRowLocal(env: Env, l: LocalB) -> boolean {
+        for (const r of env.rows) {
+            if (r.bind.id == l.s.id) return true
+        }
+        return false
+    }
+
+    fn partRefused(env: Env, value: AExpr, span: ASpan, code: string, msg: string, st: AS) -> AS {
+        return addDiag(resolveExpr(env, value, not, st).st, env.file, span, code, msg)
+    }
+
+    // A write to a PART of the local `l` (Core Assign with a path).
+    fn resolveLocalPartWrite(env: Env, e: AExpr, target: AExpr, value: AExpr, l: LocalB, st0: AS) -> AS {
+        const ps: PartStep[] = partSteps(target)
+        const label: string = partLabel(l.name, ps)
+        // an `<each>` row is a projection of its source's element: writing a copy of
+        // it would not write the source, and writing the source is not this spelling
+        if (isRowLocal(env, l)) return partRefused(env, value, target.span, "E-BOOTSTRAP-UNSUPPORTED", "a write to a part of the row `" + l.name + "` (`" + label + " = …`) is not in the bootstrap — a row is a read-only projection of its source's element; write the source cell", st0)
+        // the local's name in the target is an APPEARANCE of the binding (§35.2:
+        // "Every appearance of a `lin` identifier in a position that is not a
+        // declaration SHALL count as a consumption event") — the same fact a read has
+        let st: AS = st0
+        const rn: AExpr | not = partRootName(target)
+        if (rn is given) st = addName(st, rn.nid, NameFact.NLocal(l.s))
+        // the indices are evaluated before the value, in source order
+        for (const s of ps) {
+            const ix: AExpr | not = s.index
+            if (ix is given) st = resolveExpr(env, ix, Type.Int, st).st
+        }
+        const lt: Type | not = l.ty
+        // a position of the local's OWN tape, its type inferred: whatever that type
+        // is, inference gives it no grant (§66.12.6 rule 1) — refused as ungranted
+        if (lt is not && ps.length > 0 && writtenLocalType(st, l.s) is not) {
+            const ix0: AExpr | not = ps[0].index
+            if (ix0 is given) {
+                const pd0: TapeDiag[] = positionWriteProblem(noGrants(), label, "inferred: no grants — §66.12.6 rule 1; annotate it, `let " + l.name + ": T[write] = …`")
+                if (pd0.length > 0) return partRefused(env, value, e.span, pd0[0].code, pd0[0].msg, st)
+            }
+        }
+        if (lt is not) return partRefused(env, value, target.span, "E-BOOTSTRAP-UNSUPPORTED", "`" + label + " = …` writes a part of `" + l.name + "`, whose type is not known here — annotate it (`let " + l.name + ": T = …`)", st)
+        const loc: string = env.file + ":" + lineOf(env.g, env.file, e.span.start)
+        let t: Type = lt
+        let steps: LStep[] = []
+        let lastField: FieldDef | not = not
+        let lastTape: Type | not = not
+        let sawIndex = false
+        let fieldInTape = false
+        let viaField = false          // a struct field step has been taken
+        let tapeViaField = false      // ... before the last tape position
+        let at: string = l.name
+        for (const s of ps) {
+            if (maybeInner(t) is given) return partRefused(env, value, target.span, "E-BOOTSTRAP-UNSUPPORTED", "`" + label + " = …` writes through `" + at + "`, which is `" + typeName(t) + "` — it may be `not`, and a part write through a `T | not` value is not in the bootstrap yet; bind the present value first", st)
+            const ix: AExpr | not = s.index
+            if (ix is given) {
+                const el: Type | not = seqElem(t)
+                if (el is not) return partRefused(env, value, target.span, "E-ASSIGN-TARGET", "`" + label + " = …` writes a tape position (§66.12.6 rule 3), and `" + at + "` is `" + typeName(t) + "`, not a tape", st)
+                steps = steps.concat([LStep.LIndex(ix, loc)])
+                lastTape = t
+                tapeViaField = viaField
+                lastField = not
+                sawIndex = true
+                t = el
+                at = at + "[…]"
+            } else {
+                const sy: Sym | not = namedOf(t)
+                const fs: FieldDef[] | not = structFieldsOfType(env, t)
+                // a named type with no struct fields here (a declaration's value, an
+                // enum): not a write Core has — refused, never approximated
+                if (sy is given && fs is not) return partRefused(env, value, target.span, "E-BOOTSTRAP-UNSUPPORTED", "`" + label + " = …` writes `." + s.field + "` of `" + at + "`, a `" + sy.hint + "` — a part write of a value of this type (a declaration's value or an enum) is not in the bootstrap yet", st)
+                if (sy is not || fs is not) return partRefused(env, value, target.span, "E-ASSIGN-TARGET", "`." + s.field + "` is not a field of a struct here — `" + at + "` is `" + typeName(t) + "`", st)
+                let k: int = -1
+                let i: int = 0
+                for (const fd of fs) {
+                    if (fd.sym.hint == s.field) k = i
+                    i = i + 1
+                }
+                if (k < 0) return partRefused(env, value, target.span, "E-SCOPE-001", "`" + sy.hint + "` has no field `" + s.field + "`", st)
+                steps = steps.concat([LStep.LField({ owner: sy, idx: k }, s.field)])
+                lastField = fs[k]
+                lastTape = not
+                fieldInTape = sawIndex
+                viaField = true
+                t = fs[k].ty
+                at = at + "." + s.field
+            }
+        }
+        st = resolveExpr(env, value, t, st).st
+        const key: string = placeKey(target)
+        const tape: Type | not = lastTape
+        const fd: FieldDef | not = lastField
+        if (tape is given) {
+            // a POSITION write, judged by the tape's TYPE. A tape reached through a
+            // struct field carries the grants that field's declared type writes. One
+            // reached only through positions of the local (the local's own tape, or a
+            // tape element of it) is part of the local's type — its WRITTEN type (an
+            // annotation, a parameter's) when it has one; an un-annotated local's type
+            // is inferred, and "Inference never invents a grant" (§66.12.6 rule 1).
+            let judged: Type = tape
+            let tyText: string = tapeTypeName(tape)
+            if (!tapeViaField && writtenLocalType(st, l.s) is not) {
+                judged = ungranted(tape)
+                tyText = "inferred: no grants — §66.12.6 rule 1; annotate it, `let " + l.name + ": T[write…] = …`"
+            }
+            const pd: TapeDiag[] = tapePositionProblem(judged, label, tyText)
+            if (pd.length > 0) return addDiag(st, env.file, e.span, pd[0].code, pd[0].msg)
+            // r1 F1: an element that is itself a tape is replaced — its own grants
+            const ed: TapeDiag[] = elemTapeReplaceProblem(t, label)
+            if (ed.length > 0) return addDiag(st, env.file, e.span, ed[0].code, ed[0].msg)
+            // the element is replaced whole — its tape fields by their own grants (rule 4)
+            const stt: AS = checkStructTapes(env, t, value, "", label, e.span, st)
+            if (stt.diags.length > st.diags.length) return stt
+        } else if (fd is given) {
+            // a FIELD write: the deepest field's own contract (dpa-052 Q6); a
+            // contract-free field is written under the local's rebinding (O57 = no,
+            // §66.11.5) — only when no tape position lies between (dpa-052 Q3)
+            const fp: TapeDiag[] = localFieldWriteProblem(fd, key, label, value, l.mutable, fieldInTape, l.name)
+            if (fp.length > 0) return addDiag(st, env.file, e.span, fp[0].code, fp[0].msg)
+            if (seqElem(unMaybe(fd.ty)) is not) {
+                const stt: AS = checkStructTapes(env, fd.ty, value, key, label, e.span, st)
+                if (stt.diags.length > st.diags.length) return stt
+            }
+        }
+        return addEffect(st, e.nid, EffectFact.EAssignLocal(l.s, steps, t))
     }
 
     fn resolveBlock(env: Env, b: ABlock, st0: AS) -> AS {
@@ -11245,13 +11671,14 @@ ${
 
     fn isLocalRebind(f: EffectFact | not) -> boolean {
         return match f {
-            .EAssignLocal(sym: s) :> true
+            .EAssignLocal(sym: s, path: pa) :> pa.length == 0      // s472: a part write rebinds no counter
             .EWrite(w: w) :> false
             .ESpread(ws: ws) :> false
             .EReset(w: w) :> false
             .EEdits(w: w) :> false
             .ERemove(w: w) :> false
             .EElemAt(cap: c) :> false
+            .EPosition(cap: c) :> false
             not :> false
         }
     }
@@ -14328,6 +14755,7 @@ ${
             .EEdits(w: w) :> ""
             .ERemove(w: w) :> ""
             .EElemAt(cap: c) :> ""
+            .EPosition(cap: c) :> ""
         }
     }
 
@@ -15380,6 +15808,7 @@ ${
             .EEdits(w: w) :> [oneWrite(w)]
             .ERemove(w: w) :> [oneWrite(w)]
             .EElemAt(cap: c) :> []
+            .EPosition(cap: c) :> []
             not :> []
         }
     }
@@ -15395,6 +15824,7 @@ ${
             .EEdits(w: w) :> false
             .ERemove(w: w) :> false
             .EElemAt(cap: c) :> false
+            .EPosition(cap: c) :> false
             not :> false
         }
     }
@@ -15409,6 +15839,7 @@ ${
             .EEdits(w: w) :> not
             .ERemove(w: w) :> not
             .EElemAt(cap: c) :> not
+            .EPosition(cap: c) :> not
             not :> not
         }
     }
@@ -15514,6 +15945,7 @@ ${
             .RemoveFront :> Type.Int
             .RemoveAnywhere :> f.ty                  // s444: `@x = @x.filter(λ)` writes the whole filtered sequence
             .ElemAt(index: x, path: p) :> pathType(t, p)
+            .PositionAt(index: x) :> seqElem(f.ty)       // s472: `@xs[i] = v` writes one element
         }
     }
 
@@ -17278,7 +17710,43 @@ ${
             if (s is given) return "#" + s.id
             return ""
         }
+        // s472: a write to a part of a local drops the narrowing of that part (and
+        // under it) — up to the first tape position (a position is not a key)
+        const pk: string = localPartKey(effectFact(env.t.effects, e.nid))
+        if (pk != "") return pk
         return nKey(env, t)
+    }
+
+    fn localPartKey(f: EffectFact | not) -> string {
+        return match f {
+            .EAssignLocal(sym: s, path: pa) :> partKeyOf(s, pa)
+            .EWrite(w: w) :> ""
+            .ESpread(ws: ws) :> ""
+            .EReset(w: w) :> ""
+            .EEdits(w: w) :> ""
+            .ERemove(w: w) :> ""
+            .EElemAt(cap: c) :> ""
+            .EPosition(cap: c) :> ""
+            not :> ""
+        }
+    }
+
+    fn partKeyOf(s: Sym, pa: LStep[]) -> string {
+        if (pa.length == 0) return ""
+        let k: string = "#" + s.id
+        for (const st of pa) {
+            const n: string = lstepName(st)
+            if (n == "") return k
+            k = k + "." + n
+        }
+        return k
+    }
+
+    fn lstepName(st: LStep) -> string {
+        return match st {
+            .LField(ref: r, name: n) :> n
+            .LIndex(index: ix) :> ""
+        }
     }
 
     fn resetKey(env: TEnv, c: AExpr, a: AExpr[]) -> string {
@@ -17389,6 +17857,21 @@ ${
 
     fn typeAssign(env: TEnv, e: AExpr, target: AExpr, value: AExpr, ts0: TypeState) -> TypeState {
         const f: EffectFact | not = effectFact(env.t.effects, e.nid)
+        // s472: a write to a PART of a local — each index an `int`, the value against
+        // the part's type; `@xs[i] = v` — the index, and the value against the element
+        const lp: PartTyping | not = partTypingOf(env, f)
+        if (lp is given) {
+            let ts3: TypeState = ts0
+            for (const ix of lp.indices) {
+                const ri: RVT = typeExpr(env, ix, ts3)
+                ts3 = checkIndex(env, ri.vt, ix.span, ri.ts)
+            }
+            const r0: RVT = typeExpr(env, value, ts3)
+            ts3 = r0.ts
+            const tt: Type | not = lp.ty
+            if (tt is given) ts3 = checkNotElems(env, value, tt, checkLitFields(env, value, checkValue(env, r0.vt, tt, value.span, placeLabel(target), ts3)))
+            return record(record(ts3, target.nid, VType.Unknown), e.nid, VType.Unknown)
+        }
         // s444: `@xs[i].f = v` — the value against the element field's type
         const ea: FieldRef[] | not = elemAtPath(f)
         if (ea is given) {
@@ -17462,6 +17945,47 @@ ${
         return record(ts2, e.nid, VType.Unknown)
     }
 
+    // s472 — what the typer checks of a part write / a position write: its index
+    // expressions (in order), and the type of the part written (`not`: unchecked).
+    type PartTyping:struct = { indices: AExpr[], ty: Type | not }
+
+    fn partTypingOf(env: TEnv, f: EffectFact | not) -> PartTyping | not {
+        return match f {
+            .EAssignLocal(sym: s, path: pa, ty: ty) :> localPartTyping(pa, ty)
+            .EPosition(cap: c, index: ix) :> positionTyping(env, c, ix)
+            .EWrite(w: w) :> not
+            .ESpread(ws: ws) :> not
+            .EReset(w: w) :> not
+            .EEdits(w: w) :> not
+            .ERemove(w: w) :> not
+            .EElemAt(cap: c) :> not
+            not :> not
+        }
+    }
+
+    fn localPartTyping(pa: LStep[], ty: Type | not) -> PartTyping | not {
+        if (pa.length == 0) return not
+        let ixs: AExpr[] = []
+        for (const st of pa) { ixs = ixs.concat(lstepIndex(st)) }
+        return { indices: ixs, ty: ty }
+    }
+
+    fn lstepIndex(st: LStep) -> AExpr[] {
+        return match st {
+            .LIndex(index: ix) :> [ix]
+            .LField(ref: r) :> []
+        }
+    }
+
+    fn positionTyping(env: TEnv, cap: Sym, ix: AExpr) -> PartTyping {
+        const fi: FieldInfo | not = fieldOfCap(env.t, cap)
+        let et: Type | not = not
+        if (fi is given) {
+            if (fi.trusted) et = seqElem(fi.ty)
+        }
+        return { indices: [ix], ty: et }
+    }
+
     // s442 — `@x = [...@x, a, b]`: the array is typed as a value, then each
     // element is checked as the edit's written value (the element type).
     type EditsOf:struct = { w: WriteFact, elems: AExpr[] }
@@ -17475,6 +17999,7 @@ ${
             .EAssignLocal(sym: s) :> not
             .ERemove(w: w) :> not
             .EElemAt(cap: c) :> not
+            .EPosition(cap: c) :> not
             not :> not
         }
     }
@@ -17484,6 +18009,7 @@ ${
     fn elemAtIndex(f: EffectFact | not) -> AExpr | not {
         return match f {
             .EElemAt(cap: c, index: x) :> x
+            .EPosition(cap: c) :> not
             .EEdits(w: w) :> not
             .EWrite(w: w) :> not
             .ESpread(ws: ws) :> not
@@ -17516,6 +18042,7 @@ ${
     fn elemAtPath(f: EffectFact | not) -> FieldRef[] | not {
         return match f {
             .EElemAt(cap: c, path: p) :> p
+            .EPosition(cap: c) :> not
             .EEdits(w: w) :> not
             .EWrite(w: w) :> not
             .ESpread(ws: ws) :> not
@@ -18624,6 +19151,7 @@ ${
             .EEdits(w: w) :> w.cap
             .ERemove(w: w) :> w.cap
             .EElemAt(cap: c) :> c
+            .EPosition(cap: c) :> c
             .EAssignLocal(sym: s) :> not
             not :> not
         }
@@ -18642,6 +19170,7 @@ ${
             .EEdits(w: w) :> false
             .ERemove(w: w) :> false
             .EElemAt(cap: c) :> false
+            .EPosition(cap: c) :> false
             .EAssignLocal(sym: s) :> false
             not :> false
         }
@@ -21978,7 +22507,13 @@ ${
         if (t is given && v is given) {
             let pos: Pos = okPos()
             if (isIndexTarget(t)) pos = { refused: "the value of an indexed write (`@xs[i] = …`) — its index is evaluated in the write, after the value; it arrives with the U1b ANF follow-up. Evaluate the call into a `const` first" }
-            return planExpr(cx, v, pos, ps).ps
+            // s472: an INDEX of the target is evaluated in the write too — a waiting call
+            // there is refused the same way (never left un-awaited in the Core)
+            let ps2: PS = ps
+            for (const ix of targetIndices(t)) {
+                ps2 = planExpr(cx, ix, { refused: "an index of an indexed write (`xs[i] = …`) — it is evaluated in the write; it arrives with the U1b ANF follow-up. Evaluate the call into a `const` first" }, ps2).ps
+            }
+            return planExpr(cx, v, pos, ps2).ps
         }
         return planExpr(cx, e, okPos(), ps).ps
     }
@@ -22008,6 +22543,36 @@ ${
             .Sql(q: q) :> not
             .Handled(h: x) :> not
             .Template(quasis: qs) :> not
+        }
+    }
+
+    // s472 — the index expressions of a write target (`a.xs[i][j].f` → i, j).
+    fn targetIndices(t: AExpr) -> AExpr[] {
+        const k: AExprK = t.k
+        return match k {
+            .Index(obj: o, idx: i) :> targetIndices(o).concat([i])
+            .Member(obj: o) :> targetIndices(o)
+            .Name(name: n) :> []
+            .At(name: n) :> []
+            .AtItem :> []
+            .Num(raw: r) :> []
+            .Str(v: s) :> []
+            .Bool(v: b) :> []
+            .NotLit :> []
+            .Recovered :> []
+            .Variant(name: n) :> []
+            .Call(callee: c) :> []
+            .Unary(op: o) :> []
+            .Binary(op: o) :> []
+            .Ternary(test: x) :> []
+            .Assign(target: x) :> []
+            .ArrayLit(elems: es) :> []
+            .ObjectLit(props: ps) :> []
+            .Spread(e: x) :> []
+            .Lambda(params: lp) :> []
+            .Sql(q: q) :> []
+            .Handled(h: x) :> []
+            .Template(quasis: qs) :> []
         }
     }
 
@@ -23619,7 +24184,19 @@ ${
             .Template(quasis: x) :> false
         }
         if (bare) return r
-        return linExpr(cx, target, r.st)
+        // s472 r1 F2 — a write to a PART of a `lin` binding (`t.n = v`, `t[i] = v`)
+        // rebinds it to a copy (value semantics), and nothing may read that copy (a
+        // later read is a second use). §35.2: "The binding is immutable — the developer
+        // cannot assign a new value to a `lin` variable after declaration"; "The
+        // compiler SHALL reject any reassignment to a `lin`-declared identifier".
+        // Refused like the whole rebinding (E-ASSIGN-CONST); it still counts as the
+        // appearance it is (no cascading E-LIN-001).
+        let s1: LinSt = r.st
+        const rn: AExpr | not = partRootName(target)
+        if (rn is given) {
+            if (linIndex(cx, rn, s1) >= 0) s1 = linDiag(cx, s1, "E-ASSIGN-CONST", target.span, "`" + exprLabel(target) + " = …` writes a part of the `lin` variable `" + exprName(rn) + "` — a `lin` binding is immutable and the compiler SHALL reject any reassignment of it (§35.2); a part write rebinds it to a copy nothing may read (a later read is a second use). Build the new value where the `lin` is consumed (pass it to the function that makes it)")
+        }
+        return linExpr(cx, target, s1)
     }
 
     export fn analyze(files: FileAst[], entry: string) -> TypedProgram {

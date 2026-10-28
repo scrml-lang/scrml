@@ -31,7 +31,7 @@ ${
              EditKind, Check, Stmt, Block, Attr, ConstructAttr, CondArm, View, EffectDep, FieldRole, Field,
              Decl, Fn, CoreProgram, CapOwner, SurfaceProp, ValidityOf, Validator, Persist, PersistStore,
              Failable, OkArm, ErrArm, ServerFn, SqlQuery, SqlMode, Param, LoopHead, EachHead, RangeHead, CssUnit, CoreCss, CssVar,
-             Gather, Lifted, GatherRow,
+             Gather, Lifted, GatherRow, PathStep,
              findDecl, findTypeDef, typeDefSym, capOwner, findFn, findServerFn } from "./core.scrml"
     import { Node, allNodes, sharedRefs, boundSyms, assignedSyms } from "./walk.scrml"
     import { JsOp, JsUnOp, JsExpr, JsProp, JsStmt, JsLoopHead, JsForInit,
@@ -1038,7 +1038,7 @@ ${
     fn stmtJs(ctx: Ctx, s: Stmt, assigned: int[]) -> JsStmt[] {
         return match s {
             .Let(sym: sym, init: init) :> [letJs(ctx, sym, init, assigned)]
-            .Assign(local: l, value: v) :> [JsStmt.SAssign(jid(symName(ctx, l)), exprJs(ctx, v))]
+            .Assign(local: l, value: v, path: pa) :> [JsStmt.SAssign(jid(symName(ctx, l)), assignedJs(ctx, l, v, pa))]
             .Write(cap: cap, inst: inst, edit: edit, value: v, check: ck) :> [writeJs(ctx, cap, inst, edit, v, ck)]
             .Commit(writes: ws) :> commitJs(ctx, ws)
             .If(cond: c, thenB: t, elseB: e) :> [JsStmt.SIf(exprJs(ctx, c), blockJs(ctx, t), elseJs(ctx, e))]
@@ -1132,6 +1132,38 @@ ${
 
     fn jsProp(k: string, v: JsExpr) -> JsProp { return { key: k, value: v } }
 
+    // s472 — the value an Assign gives its local: `value` itself (a rebinding),
+    // or — a part write, `path` non-empty — a COPY of the local's value with
+    // `value` at `path` (`p = rt.writePath(p, ["head"], v, "file:line")`): a
+    // field step is the member's name, an index step the index; an index
+    // outside its tape is the E-INDEX-OUT-OF-RANGE-RT trap, and the local is
+    // then never rebound (values are immutable, §66.10 — no alias sees it).
+    fn assignedJs(ctx: Ctx, l: Sym, v: Expr, path: PathStep[]) -> JsExpr {
+        if (path.length == 0) return exprJs(ctx, v)
+        let steps: JsExpr[] = []
+        let loc: string = ""
+        for (const st of path) {
+            steps = steps.concat([pathStepJs(ctx, st)])
+            const sl: string = pathStepLoc(st)
+            if (loc == "") loc = sl
+        }
+        return rtCall(ctx, "writePath", [jid(symName(ctx, l)), JsExpr.JArray(steps), exprJs(ctx, v), jstr(loc)])
+    }
+
+    fn pathStepJs(ctx: Ctx, st: PathStep) -> JsExpr {
+        return match st {
+            .StepField(ref: r) :> jstr(memberName(ctx, r.owner, r.idx))
+            .StepIndex(index: ix) :> exprJs(ctx, ix)
+        }
+    }
+
+    fn pathStepLoc(st: PathStep) -> string {
+        return match st {
+            .StepField(ref: r) :> ""
+            .StepIndex(index: ix, loc: lc) :> lc
+        }
+    }
+
     fn forInit(isLet: boolean, items: JsProp[]) -> JsForInit { return { isLet: isLet, items: items } }
 
     // A Counted head's `init`: its Lets (`let a = v, …`) or its Assigns (`a = v, …`) — C19.
@@ -1152,7 +1184,7 @@ ${
     fn assignItem(ctx: Ctx, s: Stmt) -> JsProp[] {
         return match s {
             .Let(sym: sym, init: init) :> [jsProp(symName(ctx, sym), exprJs(ctx, init))]
-            .Assign(local: l, value: v) :> [jsProp(symName(ctx, l), exprJs(ctx, v))]
+            .Assign(local: l, value: v, path: pa) :> [jsProp(symName(ctx, l), assignedJs(ctx, l, v, pa))]
             .Write(cap: x) :> []
             .Commit(writes: x) :> []
             .If(cond: x) :> []
@@ -1481,6 +1513,7 @@ ${
             .RemoveFront :> false
             .RemoveAnywhere :> false
             .ElemAt(index: x) :> false
+            .PositionAt(index: x) :> false
         }
     }
 
@@ -1504,6 +1537,8 @@ ${
             .RemoveFront :> rtCall(ctx, "removeFront", [target, v])
             .RemoveAnywhere :> jmcall(target, "set", [v])
             .ElemAt(index: ix, path: path) :> rtCall(ctx, "setAt", [target, exprJs(ctx, ix), fieldPathJs(ctx, path), v])
+            // s472: `@xs[i] = v` — the element at `i`, or the E-INDEX-OUT-OF-RANGE-RT trap (nothing written)
+            .PositionAt(index: ix, loc: loc) :> rtCall(ctx, "setPosition", [target, exprJs(ctx, ix), v, jstr(loc)])
         }
     }
 

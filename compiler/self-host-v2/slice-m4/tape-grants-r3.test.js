@@ -125,7 +125,7 @@ describe("F3 — a spread override that keeps a nested tape: the analyzer and Co
   test("Core control: a snapshot Local that is ALSO Assigned is not a snapshot (C3)", () => {
     const { core, before } = snapCore();
     const go = core.fns.find((f) => f.sym.hint === "go");
-    go.body.stmts.splice(1, 0, { variant: "Assign", data: { local: before.data.sym, value: { variant: "Lit", data: { lit: { variant: "Absent" } } } } });
+    go.body.stmts.splice(1, 0, { variant: "Assign", data: { local: before.data.sym, value: { variant: "Lit", data: { lit: { variant: "Absent" } } }, path: [] } });
     expect(mods.check.checkCore(core).some((m) => m.startsWith("C3:") && m.includes("o.inner.ys"))).toBe(true);
   });
   test("Core control: a snapshot of ANOTHER place is not a keep (C3)", () => {

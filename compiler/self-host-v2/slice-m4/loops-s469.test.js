@@ -293,12 +293,19 @@ describe("review fixes (s469-boot-loops-1 adversarial review)", () => {
     expect(fnCodes(`        let s = 0;\n        for (x of [1] q) { s = s + x; }\n        return s;`)).toEqual(["E-PARSE-EXPECTED"]);
     expect(fnCodes(`        let s = 0;\n        for (let i = 0; i < 2; i = i + 1 q) { s = s + 1; }\n        return s;`)).toEqual(["E-PARSE-EXPECTED"]);
   });
-  test("HIGH 2: a field / element write through a local is refused, never a rebinding of the whole local", () => {
+  // s472 (g-boot-local-part-write-s472): Core now HAS a local part write (Stmt.Assign with a
+  // path — a copy of the local with the part replaced), so these compile; what HIGH 2 guarded
+  // still holds: the write is never a rebinding of the whole local to the field's value, and a
+  // loop binder / an alias is a COPY (§66.10) — the cell is not written through it.
+  test("HIGH 2 (s472): a field / element write through a local writes a COPY of the local — never the whole local, never the cell", async () => {
     const P = `    type P:struct = { name: string }\n    <ps:P[]=([{ name: "a" }])/>`;
-    expect(codes(prog(P, `        <button onclick={ for (let p of @ps) { p.name = "z"; } }>b</button>`))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
-    expect(codes(prog(P, `        <button onclick={ let p = @ps[0]; p.name = "z"; }>b</button>`))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
-    expect(codes(prog(P + `\n    function g() -> string {\n        let q: P = { name: "q" };\n        q.name = "z";\n        return q.name;\n    }`, `        <p>\${g()}</p>`))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
-    expect(codes(prog(`    function g() -> int {\n        let ys: int[] = [1];\n        ys[0] = 2;\n        return 1;\n    }`, `        <p>\${g()}</p>`))).toContain("E-BOOTSTRAP-UNSUPPORTED");
+    clean(prog(P, `        <button onclick={ for (let p of @ps) { p.name = "z"; } }>b</button>`));
+    clean(prog(P, `        <button onclick={ let p = @ps[0]; p.name = "z"; }>b</button>`));
+    await load(prog(P + `\n    function g() -> string {\n        let q: P = { name: "q" };\n        q.name = "z";\n        return q.name;\n    }\n    function h() -> string {\n        for (let p of @ps) { p.name = "z"; }\n        const p0: P = @ps[0];\n        return p0.name;\n    }`, `        <p id="g">\${g()}</p>\n        <p id="h">\${h()}</p>`));
+    expect($("#g").textContent).toBe("z");
+    expect($("#h").textContent).toBe("a");
+    // a local tape is judged by its TYPE's grants: `int[]` grants no position write
+    expect(codes(prog(`    function g() -> int {\n        let ys: int[] = [1];\n        ys[0] = 2;\n        return 1;\n    }`, `        <p>\${g()}</p>`))).toEqual(["E-WRITE-NOT-GRANTED"]);
   });
   test("LOW: `for (c < 3) (c) {` is E-CONDITION-HEAD-UNPARENTHESIZED; `0..3 q` and `1..=` at the end are plain syntax errors", () => {
     expect(fnCodes(`        let c = 0;\n        for (c < 3) (c) { c = c + 1; }\n        return c;`)).toContain("E-CONDITION-HEAD-UNPARENTHESIZED");   // §49.2.3: rejection only — what follows parses as it stands
@@ -342,15 +349,17 @@ describe("review round 3 (s469-boot-loops-1 delta review)", () => {
     expect(count(a)).toBe(1);
     expect(codes(fnProg(`        let c = 0;\n        for (c < 3) (c) { c = c + 1; }\n        return c;`))).toEqual(["E-CONDITION-HEAD-UNPARENTHESIZED"]);
   });
-  test("L2: the part-write advice names a `let` copy when the local cannot be rebound", () => {
+  // s472: the part write compiles now (Core Assign with a path); a contract-free field of a local
+  // that CANNOT be rebound is fixed — E-WRITE-NOT-GRANTED, the advice still naming a `let` copy
+  test("L2 (s472): a fixed field of a local that cannot be rebound is refused, the advice naming a `let` copy", () => {
     const P = `    type P:struct = { name: string }\n    <ps:P[]=([{ name: "a" }])/>`;
-    const binder = diag(prog(P, `        <button onclick={ for (p of @ps) { p.name = "z"; } }>b</button>`), "E-BOOTSTRAP-UNSUPPORTED");
+    const binder = diag(prog(P, `        <button onclick={ for (p of @ps) { p.name = "z"; } }>b</button>`), "E-WRITE-NOT-GRANTED");
     expect(binder.message).toContain("cannot be rebound");
     expect(binder.message).not.toContain("rebind it (`p = …`)");
-    const param = diag(prog(P + `\n    function g(q: P) { q.name = "z"; }`, `        <p>x</p>`), "E-BOOTSTRAP-UNSUPPORTED");
-    expect(param.message).toContain("copy it into a `let`");
-    const mut = diag(prog(P + `\n    function g() { let q: P = { name: "q" };\n q.name = "z"; }`, `        <p>x</p>`), "E-BOOTSTRAP-UNSUPPORTED");
-    expect(mut.message).toContain("rebind it (`q = …`)");
+    const param = diag(prog(P + `\n    function g(q: P) { q.name = "z"; }`, `        <p>x</p>`), "E-WRITE-NOT-GRANTED");
+    expect(param.message).toContain("copy the value into a `let` local");
+    // a `let` local CAN be rebound — the field write is the same transition as `q = { ...q, name: "z" }` (§66.11.2)
+    expect(codes(prog(P + `\n    function g() { let q: P = { name: "q" };\n q.name = "z"; }`, `        <p>x</p>`))).toEqual([]);
   });
   test("capture root cause: a throw planted right after the conformance adapter swaps the window is captured", async () => {
     const adapter = await import("../../../conformance/adapters/impl1-ts.ts");

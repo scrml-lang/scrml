@@ -135,6 +135,7 @@ ${
             .RemoveFront :> "RemoveFront"
             .RemoveAnywhere :> "RemoveAnywhere"
             .ElemAt(index: x) :> "ElemAt"
+            .PositionAt(index: x) :> "PositionAt"
         }
     }
 

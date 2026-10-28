@@ -388,6 +388,15 @@ ${
         RemoveFront,
         RemoveAnywhere,
         ElemAt(index: Expr, path: FieldRef[]),
+        // s472 — a POSITION write of one element, `@xs[i] = v` (§66.12.6 rule 3:
+        // "`xs[i] = v` | a position write | `write`"): the element at `index` is
+        // replaced by the Write's value. Granted by `write` (in a GrantSet:
+        // PositionWrite). `index` outside the tape is the E-INDEX-OUT-OF-RANGE-RT
+        // trap and nothing is written (§66.12.6 rule 3: a write at or past the
+        // end would create a position that holds no value; §66.12.8 rule 7: a
+        // negative index write traps); `loc` names the source location the trap
+        // reports (§19.17).
+        PositionAt(index: Expr, loc: string),
     }
     // RuntimeEdge: a `rule=` edge whose from-state is not statically known
     // (§6.3). The invariant hook (O36) is deliberately absent until O36 rules.
@@ -416,7 +425,15 @@ ${
     // on the server (no cell, no batch, nothing to cancel), so nothing is dropped.
     export type Stmt:enum = {
         Let(sym: Sym, init: Expr),
-        Assign(local: Sym, value: Expr),
+        // s472 — `path` empty: the local is rebound to `value` (§50). `path`
+        // non-empty: a write to a PART of the local (`p.f = v`, `xs[i] = v`,
+        // `a.xs[i].f = v`; §66.11.4, §66.12.6 rule 1 — judged by analyze against
+        // the deepest field's contract or the tape's grants): the local is
+        // rebound to a COPY of its value with `value` at `path` — values are
+        // immutable (§66.10), so no alias of the old value sees the write. A
+        // StepIndex outside its tape is the E-INDEX-OUT-OF-RANGE-RT trap and
+        // the local is unchanged.
+        Assign(local: Sym, value: Expr, path: PathStep[]),
         Write(cap: Sym, inst: InstRef, edit: EditKind, value: Expr, check: Check),
         Commit(writes: Stmt[]),
         If(cond: Expr, thenB: Block, elseB: Block | not),
@@ -503,6 +520,14 @@ ${
         Lift(into: Sym, what: Lifted),
     }
     export type Block:struct = { stmts: Stmt[] }
+
+    // s472 — one step of a local part write's path (Stmt.Assign): a struct
+    // field (the owner names the struct, as a Place step does), or a tape
+    // position (`index`, an int; `loc` the source location its trap reports).
+    export type PathStep:enum = {
+        StepField(ref: FieldRef),
+        StepIndex(index: Expr, loc: string),
+    }
 
     // s469 (§49.6) — the bound loop. `bind` is the tape the loop builds (a
     // Stmt.Gather's local; a View.Gather's own accumulator, which nothing reads).
