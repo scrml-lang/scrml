@@ -1,0 +1,46 @@
+// §14.4 / §14.10 / §18.7 / §45: payload-variant values built in an expression — returned,
+// passed, held in a cell (initializer and write), compared, matched, nested with a bare
+// payload argument resolved against the payload field's enum.
+<program>
+    type Level:enum = { Easy, Hard }
+    type Shape:enum = { Circle(r: int), Rect(w: int, h: int), Dot }
+    type Mode:enum = { Solo(level: Level), Duo(a: string, b: string) }
+    let <sh:Shape=(Shape.Rect(2, 5))/>
+    let <mode:Mode=(.Solo(.Hard))/>
+    let <first:Mode=(Mode.Solo(.Hard))/>
+    let <log:string=""/>
+    function area(s: Shape) -> int {
+        return match s {
+            .Circle(r) :> 3 * r * r,
+            .Rect(w, h) :> w * h,
+            .Dot :> 0
+        };
+    }
+    function grow(n: int) -> Shape {
+        if (n == 0) return Shape.Dot;
+        if (n == 1) return .Circle(3);
+        return Shape.Rect(n, n + 1);
+    }
+    function modeText(m: Mode) -> string {
+        return match m {
+            .Solo(level) :> match level { .Easy :> "solo easy", .Hard :> "solo hard" },
+            .Duo(a, b) :> "duo " + a + "+" + b
+        };
+    }
+    function step() {
+        @sh = grow(3);
+        @mode = .Duo("ann", "bo");
+        const same: bool = Shape.Rect(3, 4) == @sh;
+        const diff: bool = Shape.Rect(4, 3) != @sh;
+        const unit: bool = grow(0) == Shape.Dot;
+        @log = (same && diff && unit) ? "eq ok" : "eq bad";
+    }
+    <main>
+        <button id="b" onclick=step()>b</button>
+        <p id="area">${area(@sh)}</p>
+        <p id="circle">${area(grow(1))}</p>
+        <p id="mode">${modeText(@mode)}</p>
+        <p id="first">${modeText(@first)}</p>
+        <p id="log">${@log}</p>
+    </main>
+</program>
