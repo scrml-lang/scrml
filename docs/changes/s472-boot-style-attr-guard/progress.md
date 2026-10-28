@@ -60,3 +60,15 @@ Rulings (scrml-support/user-voice-scrml.md "⭐ RULED — five PA recs …" S472
   of its only bootstrap emitter; base had it, main unchanged) and keeps E-STYLE-VALUE-NOT-STYLE.
 - analyze.scrml / parse.scrml auto-merged; resolveShow keeps the branch's F3 shape (base→branch change, main untouched).
 - docs/known-gaps.md: merge driver resolved; `state.ts --write` no change; no @gap id lost (main 2444, branch 2435, result 2449).
+- Merge commit c9eecdb8d (full pre-commit hook, 6 shards: 50642 pass / 0 fail). First attempt failed only because
+  `bun run pretest` had not populated samples/compilation-tests/dist in this worktree — rerun after pretest green.
+- CI checks job locally: types-gate --check, root tests 2239/0, snippet, claim, compile-floor --check, md-shim --check,
+  conflict markers, SPEC-INDEX --check, delta-lint, s34-census --check-new --base origin/main, bootstrap-conformance
+  --check, severity --check — all PASS. Bootstrap slice: no-default-arm lint PASS, m1 100/0, m2 613/0,
+  SLICE_CORE=lowered m1 100/0, m3 60/0, m4 2851/0, codec 166/0. PR tests (style-attr-guard-s472, show, sink-guards,
+  css-injection-pack-s469) 208/0.
+- Review probes (~/.cache/scrml/review/s472-st/probes, copied to .tmp/, deleted after): st-probe + st2 pass, every
+  data-bound style= refused with E-STYLE-VALUE-NOT-STYLE. zz-st-chrome must run ALONE (st-probe's import registers
+  happy-dom in-process and breaks Bun.serve's Response): alone 12/0; fetches recorded only for the filed follow-on
+  gaps (SVG fill/stroke/filter/mask/clip-path/marker/cursor/set-filter-css, link stylesheet) — follow-on lane, not
+  started. Direct pin: style=(@c) and style=@c → [E-STYLE-VALUE-NOT-STYLE]; static style="color: red" compiles + prints.
