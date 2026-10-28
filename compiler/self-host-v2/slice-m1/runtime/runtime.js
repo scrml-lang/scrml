@@ -911,9 +911,32 @@ export function errors(scope, marker, messages, all) {
   scope.own(() => { for (const p of shown) p.remove(); end.remove(); });
 }
 
+/**
+ * Field `i`'s validity record through an `as=` handle the gate reads at submit
+ * (s472): an absent handle (`not`) names no instance — there is no value to
+ * gate — so this gives null, which the gate skips.
+ */
+export function validityIf(inst, i) {
+  return inst === null || inst === undefined ? null : validity(inst, i);
+}
+
 // The validity record a bound control writes to (set by `bind`): the gate
 // finds a form's bound validated values through its live controls.
 const boundSurface = new WeakMap();
+
+// s472 — the fields a mounted markup list names statically (a View.Reach: a
+// declaration's renders, a use's slot filler, an `<each>` row), keyed by the
+// list's marker comment. A gated form gates the ones whose marker is inside it
+// — how it reaches the values bound in an UNMOUNTED region of an instance a
+// use, a slot filler or a row creates (§55.17.3 step 1, the composed subtree).
+const reachedFields = new WeakMap();
+
+/** Register `named()` — a markup list's statically bound surfaced fields — at its marker while it is mounted. */
+export function reach(scope, marker, named) {
+  requireScope(scope, "a gate reach");
+  reachedFields.set(marker, named);
+  scope.own(() => { if (reachedFields.get(marker) === named) reachedFields.delete(marker); });
+}
 
 /**
  * The form's surface listener (§55.7) and, when a bound value carries
@@ -922,9 +945,12 @@ const boundSurface = new WeakMap();
  *
  * The bound values are the union of `named()` — the records of the fields the
  * form's composed subtree names statically, mounted or not (§55.17.3: the
- * values bound "inside the form (the §55.17.2 rule 1 composed subtree)") —
- * and the records of the controls rendered inside the form, which is how an
- * instance a use, an `<each>` row or a slot creates is reached.
+ * values bound "inside the form (the §55.17.2 rule 1 composed subtree)") —,
+ * the records every mounted Reach marker inside the form registered (s472:
+ * the static names of a use's renders, a use-site slot filler, an `<each>`
+ * row — the instances the form's own code cannot name), and the records of
+ * the form's own live controls (`form.elements`, its HTML form owner). A null entry (an absent `as=`
+ * handle) names no instance and is skipped.
  *
  * On each submit:
  *   1. touch — `touched` on every bound VALIDATED value;
@@ -939,8 +965,19 @@ const boundSurface = new WeakMap();
 export function gate(scope, form, named) {
   requireScope(scope, "a submit gate");
   const h = (e) => batch(() => {
-    const recs = new Set(named());
-    for (const el of form.querySelectorAll("input, textarea, select")) {
+    const recs = new Set();
+    const add = (rs) => { for (const r of rs) if (r !== null) recs.add(r); };
+    add(named());
+    const marks = form.ownerDocument.createTreeWalker(form, 0x80 /* NodeFilter.SHOW_COMMENT */);
+    for (let c = marks.nextNode(); c !== null; c = marks.nextNode()) {
+      const reached = reachedFields.get(c);
+      if (reached) add(reached());
+    }
+    // s472: the form's OWN controls, as HTML associates them (`form.elements`
+    // — its form owner): a control outside it carrying `form="<its id>"` is
+    // included, a control inside it that names another form is not (RULED
+    // S472, §55.17.3 "The HTML form owner").
+    for (const el of form.elements) {
       const rec = boundSurface.get(el);
       if (rec) recs.add(rec);
     }
