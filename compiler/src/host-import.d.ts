@@ -8,7 +8,7 @@
 
 export declare const MANIFEST_FILE_NAME: "scrml.toml";
 export declare const HOST_IMPORT_VALUES: readonly ["disabled", "self-host-only"];
-export declare const SELF_HOST_PATH_PREFIX: "stdlib/compiler/";
+export declare const SELF_HOST_PATH_PREFIX: "stdlib/";
 export declare const HOST_TAG: "host";
 
 /** The `[capabilities] host-import` value. */

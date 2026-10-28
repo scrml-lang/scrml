@@ -120,14 +120,22 @@ describe("§22.13 manifest — [capabilities] host-import", () => {
     expect(typeof entry.note).toBe("string");
   });
 
-  test("self-host-only admits stdlib/compiler/** only (relative to the manifest dir)", () => {
+  test("self-host-only admits stdlib/** only (relative to the manifest dir) — S471 widened from stdlib/compiler/**", () => {
     const root = project({ "scrml.toml": SELF_HOST_TOML });
     const cap = readHostImportCapability(join(root, "x.scrml"));
     expect(isHostImportPermitted(join(root, "stdlib/compiler/cg.scrml"), cap)).toBe(true);
     expect(isHostImportPermitted(join(root, "stdlib/compiler/deep/x.scrml"), cap)).toBe(true);
-    expect(isHostImportPermitted(join(root, "stdlib/other/x.scrml"), cap)).toBe(false);
+    // S471 (§21.3.1 / §22.13, host bridge option A): a stdlib module outside stdlib/compiler/
+    expect(isHostImportPermitted(join(root, "stdlib/math/index.scrml"), cap)).toBe(true);
+    expect(isHostImportPermitted(join(root, "stdlib/other/x.scrml"), cap)).toBe(true);
+    // adopter refusal intact: nothing outside stdlib/ — a nested `stdlib/`, a prefix twin, the root
     expect(isHostImportPermitted(join(root, "src/stdlib/compiler/x.scrml"), cap)).toBe(false);
+    expect(isHostImportPermitted(join(root, "src/stdlib/math/index.scrml"), cap)).toBe(false);
+    expect(isHostImportPermitted(join(root, "stdlibx/a.scrml"), cap)).toBe(false);
     expect(isHostImportPermitted(join(root, "app.scrml"), cap)).toBe(false);
+    // "disabled" admits nothing, stdlib/ included
+    const off = readHostImportCapability(join(project({ "scrml.toml": '[capabilities]\nhost-import = "disabled"\n' }), "x.scrml"));
+    expect(isHostImportPermitted(join(root, "stdlib/math/index.scrml"), off)).toBe(false);
   });
 
   test("E-MANIFEST-001 surfaces through compileScrml, once per manifest", () => {
@@ -203,6 +211,20 @@ for (const parser of PARSERS) {
       });
       const r = compile(root, "lib/tok.scrml", { parser, mode: "library" });
       expect(count(r, "E-IMPORT-008")).toBe(1);
+    });
+
+    test("S471: self-host-only admits a stdlib module outside stdlib/compiler/ (no E-IMPORT-008); src/stdlib/ stays refused", () => {
+      const root = project({
+        "scrml.toml": SELF_HOST_TOML,
+        "stdlib/math/host.js": "export function hfloor(x) { return Math.floor(x) }\n",
+        "stdlib/math/m.scrml": 'import:host { hfloor } from "./host.js"\nexport fn fl(x) { return hfloor(x) }\n',
+        "src/stdlib/math/host.js": "export function hfloor(x) { return Math.floor(x) }\n",
+        "src/stdlib/math/m.scrml": 'import:host { hfloor } from "./host.js"\nexport fn fl(x) { return hfloor(x) }\n',
+      });
+      const ok = compile(root, "stdlib/math/m.scrml", { parser, mode: "library" });
+      expect(errorCodes(ok)).toEqual([]);
+      const no = compile(root, "src/stdlib/math/m.scrml", { parser, mode: "library" });
+      expect(count(no, "E-IMPORT-008")).toBe(1);
     });
 
     test("self-host-only + stdlib/compiler/: emits a static ES import that runs under bun", () => {

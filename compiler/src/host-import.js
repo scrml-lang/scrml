@@ -54,14 +54,16 @@ export const HOST_IMPORT_VALUES = Object.freeze(["disabled", "self-host-only"]);
 
 /**
  * The canonical bootstrap-stdlib path pattern `"self-host-only"` admits
- * (§22.13 — "canonical: `scrml/stdlib/compiler/**`"). Matched against the
+ * (§22.13 — "canonical: `scrml/stdlib/**`"; S471 widened it from
+ * `scrml/stdlib/compiler/**` — host bridge option A: stdlib modules stay scrml,
+ * their host reach sits in thin TS/JS files beside them). Matched against the
  * importing file's path RELATIVE TO THE MANIFEST'S DIRECTORY (the project
  * root). The SPEC's leading `scrml/` names the repository directory itself,
  * which is the project root, so it is not part of the relative path. v1 has no
  * override key ("project-specific overrides via additional capability subkeys
  * reserved for future SPEC extension"), so this is the ONLY admitted pattern.
  */
-export const SELF_HOST_PATH_PREFIX = "stdlib/compiler/";
+export const SELF_HOST_PATH_PREFIX = "stdlib/";
 
 /** The only host-tag v1 recognises (§21.3.1). */
 export const HOST_TAG = "host";
@@ -110,7 +112,7 @@ function extensionOf(p) {
  *
  * The walk starts from the file's REAL path (symlinks resolved): the
  * capability is a property of the file itself, so a symlinked alias is judged
- * where it really lives, and a symlink planted at `stdlib/compiler` that points
+ * where it really lives, and a symlink planted at `stdlib` that points
  * elsewhere does not make the files behind it bootstrap files.
  *
  * @param {string} filePath
