@@ -29,7 +29,7 @@
 import:host { floor as hostFloor, ceil as hostCeil, trunc as hostTrunc,
               roundHalfEven as hostRoundHalfEven, roundHalfUp as hostRoundHalfUp,
               abs as hostAbs, min as hostMin, max as hostMax, isNaN as hostIsNaN,
-              parseInt as hostParseInt } from "./host.js";
+              parseInt as hostParseInt, parseFloat as hostParseFloat, toNumber as hostToNumber } from "./host.js";
 ${
     // How `round` resolves a value exactly halfway between two integers, and
     // the direction of the three directed modes (§41.18, S440 dpa-054 #4):
@@ -126,14 +126,18 @@ ${
         return hostParseInt(s, radix);
     }
 
-    // `number.parse(s)` (§14.13.4): the whole string; `not` otherwise.
+    // The same operation as `number.parse(s)` (§14.13.4): the whole string — an
+    // optional `-`, digits with an optional `.` fraction, an optional exponent —
+    // a FINITE result; `not` otherwise. (Host-backed, not `number.parse` itself:
+    // impl#1 compiles this module too and does not implement `number.parse` —
+    // E-IMPL1-RULED-FORM-UNSUPPORTED.)
     export fn parseFloat(s: string) -> number | not {
-        return number.parse(s);
+        return hostParseFloat(s);
     }
 
-    // `number.parse(s)` (§14.13.4): the whole string; `toNumber("")` → `not`.
+    // As `parseFloat` (§41.18); `toNumber("")` → `not`.
     export fn toNumber(s: string) -> number | not {
-        return number.parse(s);
+        return hostToNumber(s);
     }
 
     // True when `x` is NaN (`Number.isNaN` — no coercion).

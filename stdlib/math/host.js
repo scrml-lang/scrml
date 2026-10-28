@@ -107,3 +107,24 @@ export function parseInt(s, radix) {
   if (negative) n = -n;
   return n === 0 ? 0 : n;
 }
+
+// `parseFloat` / `toNumber` (§41.18) are the same operation as `number.parse(s)`
+// (§14.13.4) — an optional `-`, digits with an optional `.` fraction, an optional
+// exponent; the WHOLE string; a FINITE result only (NaN, ±∞ and an overflow are
+// `not`); `-0` reads as 0 — the bootstrap runtime's `parseNumText`, byte for byte.
+const NUMBER_TEXT = /^-?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?$/;
+
+function parseNumber(s) {
+  if (typeof s !== "string" || !NUMBER_TEXT.test(s)) return null;
+  const n = Number(s);
+  if (!Number.isFinite(n)) return null;
+  return n === 0 ? 0 : n;
+}
+
+export function parseFloat(s) {
+  return parseNumber(s);
+}
+
+export function toNumber(s) {
+  return parseNumber(s);
+}

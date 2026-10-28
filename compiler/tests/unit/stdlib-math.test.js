@@ -279,3 +279,25 @@ describe("§B: scrml:math compile-level", () => {
     expect(missing).toEqual([]);
   });
 });
+
+// ---------------------------------------------------------------------------
+// §C — impl#1 keeps compiling the stdlib module itself (S472: the port must compile on BOTH
+// implementations). stdlib/math/index.scrml — the §66 dialect, `import:host`, the S469 API —
+// compiles clean on impl#1 in place (its `import:host` is admitted: the file is the compiler's own
+// stdlib, compiler/src/host-import.js), in the default and the library mode.
+// ---------------------------------------------------------------------------
+describe("§C: impl#1 compiles stdlib/math/index.scrml itself", () => {
+  const SRC = join(import.meta.dir, "..", "..", "..", "stdlib", "math", "index.scrml");
+  for (const mode of [undefined, "library"]) {
+    test(`M29: ${mode ?? "default"} mode — no error`, () => {
+      const result = compileScrml({
+        inputFiles: [SRC],
+        outputDir: join(TMP, `m29-${mode ?? "default"}`, "dist"),
+        write: true,
+        log: () => {},
+        ...(mode ? { mode } : {}),
+      });
+      expect((result.errors || []).map((e) => e.code)).toEqual([]);
+    });
+  }
+});

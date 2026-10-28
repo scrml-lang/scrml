@@ -110,7 +110,8 @@ describe("scrml:math on the bootstrap — compiled and RUN, client and server", 
       ["floor", "math", "host.js", "floor"], ["ceil", "math", "host.js", "ceil"], ["trunc", "math", "host.js", "trunc"],
       ["roundHalfEven", "math", "host.js", "roundHalfEven"], ["roundHalfUp", "math", "host.js", "roundHalfUp"],
       ["abs", "math", "host.js", "abs"], ["min", "math", "host.js", "min"], ["max", "math", "host.js", "max"],
-      ["parseInt", "math", "host.js", "parseInt"], ["isNaN", "math", "host.js", "isNaN"],
+      ["parseInt", "math", "host.js", "parseInt"], ["parseFloat", "math", "host.js", "parseFloat"],
+      ["toNumber", "math", "host.js", "toNumber"], ["isNaN", "math", "host.js", "isNaN"],
     ]);
     // a host-backed function is a signature, no body (check.scrml C-H1)
     for (const f of r.core.fns.filter((x) => x.host != null)) expect(f.body.stmts).toEqual([]);
@@ -214,6 +215,12 @@ describe("the host file itself (stdlib/math/host.js) — the §41.18 semantics",
       expect(host.parseInt(s, r)).toBe(null);
     }
     expect(host.parseInt("9007199254740991", 10)).toBe(9007199254740991);
+  });
+  test("parseFloat / toNumber: the whole string, as number.parse — finite only, `-0` reads 0; `not` otherwise", () => {
+    expect([host.parseFloat("3.14"), host.parseFloat("-1e3"), host.parseFloat(".5"), host.parseFloat("5."), host.toNumber("42"), Object.is(host.toNumber("-0"), 0)]).toEqual([3.14, -1000, 0.5, 5, 42, true]);
+    for (const s of ["", "1.5kg", " 1", "+1", "abc", "1e400", "NaN", "Infinity", "0x10"]) {
+      expect([s, host.parseFloat(s), host.toNumber(s)]).toEqual([s, null, null]);
+    }
   });
   test("min / max are two-argument; abs; isNaN does not coerce", () => {
     expect([host.min(3, 1), host.max(3, 1), host.abs(-5), host.isNaN(NaN), host.isNaN(1)]).toEqual([1, 3, 5, true, false]);

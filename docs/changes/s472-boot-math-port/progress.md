@@ -68,3 +68,13 @@ Copy at ~/.cache/scrml/review/s472-mp-red (scratchpad red.sh: `git show c8070b56
   pin, and two refusals base already gave as a blanket E-BOOTSTRAP-UNSUPPORTED (a non-scalar wrapper,
   a `.ts` target).
 - impl#1 (stdlib-math.test.js): 18 fail / 16 pass (~/.cache/scrml-pa/s472/mp-red-impl1.log).
+- commit 5d7ebf055 landed (SCRML_HOOK_SHARDS=1; full impl#1 suite 46698 pass / 0 fail before it,
+  mp-full-1.log; slices green, mp-slices-2.log).
+- impl#1 full compile of stdlib/math/index.scrml (the host-global scan compiles every stdlib file):
+  `number.parse(s)` is E-IMPL1-RULED-FORM-UNSUPPORTED on impl#1, so parseFloat / toNumber are now
+  host-backed (stdlib/math/host.js — the bootstrap runtime's parseNumText semantics); impl#1 compiles
+  the module clean in the default and library modes (stdlib-math.test.js §C M29 — base library mode
+  failed E-CODEGEN-INVALID-LOGIC). Gates: types-gate OK; snippet-gate 0 fail; claim-gate 0 fail;
+  compile-floor PASS; md shim current; conflict-marker / delta-lint / ci-shards PASS; e2e-render-map
+  259 / 0; host-global scan --roots stdlib 0 violations (the one stale pin, stdlib/time esm, is on base
+  too); bootstrap-conformance --write: report unchanged.
