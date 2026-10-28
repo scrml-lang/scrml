@@ -40,3 +40,7 @@ Gap: g-boot-map-position-write-bypasses-element-tape-grants-s472 (HIGH, fail-ope
 - SPEC §66.12.6 rules 1 and 3 gain the ruled sentences (provenance); SPEC-INDEX regen. No new codes.
 - known-gaps: g-boot-map-position-write-bypasses-element-tape-grants-s472 RESOLVED (HIGH open 265 → 264).
 - Red-proof: map-grants-s472.test.js against da1ffcf81 — 11 fail / 12 pass.
+
+## S473 landing front (2026-10-28T20:56Z)
+- land-s472-boot-map-grants from origin/s472-boot-map-grants b5cd8f155; `git merge origin/main` (3a7d1d223) — CLEAN, no conflicts (merge 77739586e).
+- bun install + pretest done. Next: S239 probes (round-1 ruled set) on the merged head, then CI gates.
