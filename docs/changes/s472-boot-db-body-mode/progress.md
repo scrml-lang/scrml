@@ -31,7 +31,24 @@ Ruling: scrml-support/user-voice-scrml.md "⭐ RULED — `<db>` body + client re
       fail-closed Error already, same answer).
 - [x] Tests: slice-m4/db-body-s472.test.js (33), parse-batch-s471 prose test updated, acceptance db-body/* (3).
 
+- [x] known-gaps: `g-bootstrap-fn-in-db-body-ships-as-page-text-s472` filed + resolved; the s469 db/channel gap's
+      "Open: the semantics" sentence now cites the S472 ruling (db: Lane A landed, Lane B owed).
+
 ## Verified
 
 - Probe (two sibling-level dbs): `fa` (program's direct-child `<db src=a>`) queries a.db, `fb` (`<db src=b>` in
   `<main>`) queries b.db; client artifacts carry no SQL / connection string.
+- Red-proof: with origin/main's ast/parse/analyze/severity in the tree, db-body-s472.test.js is 1 pass / 32 fail
+  (the one pass is the control: prose inside a `<p>`); the PA probe verbatim compiles at exit 0 on main.
+- Pre-commit hook (full, sharded): 50490 pass / 0 fail. CI `slices`: m1 100, m2 613, m1 lowered 100, m3 60,
+  m4 2761 — 0 fail. e2e-render-map 259 / 0. `checks`: types-gate OK (unchanged), claim gate 0 fail, snippet gate
+  0 fail, compile floor PASS, md shim current, bootstrap-conformance --check current (no movement), conflict
+  markers 0, SPEC-INDEX --check OK, delta-lint PASS, ci-shards needs OK, s34-census --check-new PASS (2 rows).
+
+## Not done / follow-ups
+
+- Lane B (db cells as server cells) — not built (ruling item 6).
+- The impl#1 §34 rows `W-STATE-BLOCK-BARE-WRITE-DECL` / `E-STATE-BLOCK-STATEMENT-FORM` still say "a state-block
+  body is markup context" — accurate for impl#1 (frozen), now contradicted for `<db>` by §4 / §4.18.1. Not edited.
+- A runaway display literal in a `<db>` body is not given the s471 runaway recovery (it is read closed, fails
+  closed with a cascade); only the unterminated-to-EOF case gets E-CTX-001.
