@@ -368,3 +368,179 @@ describe("a `scrml:` module's internals are not reachable (fixture stdlib, src/s
     expect(codes(r)).toContain("E-TYPE-UNKNOWN");
   });
 });
+
+// ---------------------------------------------------------------------------
+// s472 review round 1 (S239 review of 67bd70862, ~/.cache/scrml/review/s472-l1/).
+// ---------------------------------------------------------------------------
+const PICK = {
+  path: "pick.scrml",
+  src: `\${
+    export type Color:enum = { Red, Blue }
+    export fn pick() -> Color {
+        return Color.Blue;
+    }
+    export fn pickRed() -> Color {
+        return Color.Red;
+    }
+    export fn name(c: Color) -> string {
+        return match c {
+            .Red :> "red",
+            .Blue :> "blue"
+        };
+    }
+}
+`,
+};
+
+describe("r1 F1 — §18.13 shorthand arms over a call whose enum type is not imported", () => {
+  test("match-nonimported-enum: `match pick() { .Red, .Blue }` with only `pick` imported — clean, and it runs (the call's declared enum, by identity)", async () => {
+    const src = `<program>
+    \${ import { pick } from "./pick.scrml"; }
+    function g() -> string {
+        return match pick() {
+            .Red :> "R",
+            .Blue :> "B"
+        };
+    }
+    <p id="o">\${g()}</p>
+</program>
+`;
+    const r = clean(run(src, [PICK]));
+    await loadProgram(r.core, "s472-r1-m-" + k++);
+    expect(text("#o")).toBe("B");
+  });
+
+  test("an unannotated local holding the call's result: the search widens past the file's scope — clean, and it runs", async () => {
+    const src = `<program>
+    \${ import { pickRed } from "./pick.scrml"; }
+    function g() -> string {
+        const c = pickRed();
+        return match c {
+            .Red :> "R",
+            .Blue :> "B"
+        };
+    }
+    <p id="o">\${g()}</p>
+</program>
+`;
+    const r = clean(run(src, [PICK]));
+    await loadProgram(r.core, "s472-r1-l-" + k++);
+    expect(text("#o")).toBe("R");
+  });
+
+  test("match-mislink-private-enum: arms naming the page's OWN enum over the call's enum are refused (the subject is `Color`), call and local alike", () => {
+    for (const subj of ["pickRed()", "c"]) {
+      const src = `<program>
+    \${ import { pick, pickRed } from "./pick.scrml"; }
+    type Light:enum = { Blue, Green }
+    function g() -> string {
+        const c = pickRed();
+        return match ${subj} {
+            .Blue :> "B",
+            .Green :> "G"
+        };
+    }
+    <p id="o">\${g()}</p>
+</program>
+`;
+      const r = run(src, [PICK]);
+      expect(errs(r).map((d) => d.code)).toContain("E-TYPE-VARIANT");
+    }
+  });
+
+  test("a bare variant with NO context is still refused when its enum is not in scope", () => {
+    const src = `<program>
+    \${ import { name } from "./pick.scrml"; }
+    function g() -> string {
+        const c = .Blue;
+        return name(c);
+    }
+    <p>\${g()}</p>
+</program>
+`;
+    expect(codes(run(src, [PICK]))).toContain("E-TYPE-VARIANT");
+  });
+});
+
+describe("r1 F2 — an import brings only the EXPORTED declaration(s) of a name (scope by kind)", () => {
+  test("kind-collapse-fn2: exported `type Tag` + private `fn Tag` — importing `Tag` does not bring the function", () => {
+    const K = { path: "k.scrml", src: `\${\n    export type Tag:struct = { v: string }\n    fn Tag() -> string {\n        return "private-fn";\n    }\n    export fn mk() -> string {\n        return "m";\n    }\n}\n` };
+    const r = run(`<program>\n    \${ import { Tag, mk } from "./k.scrml"; }\n    <p id="o">\${Tag()} \${mk()}</p>\n</program>\n`, [K]);
+    expect(codes(r)).toEqual(["E-SCOPE-001"]);
+    expect(r.diags[0].message).toContain("does not export");
+  });
+
+  test("kind-collapse-type: exported `fn box` + private `type box` — importing `box` does not bring the type", () => {
+    const K = { path: "k2.scrml", src: `\${\n    type box:struct = { v: string }\n    export fn box() -> string {\n        return "fn";\n    }\n}\n` };
+    const r = run(`<program>\n    \${ import { box } from "./k2.scrml"; }\n    function g() -> string {\n        const b: box = { v: "leak" };\n        return b.v;\n    }\n    <p id="o">\${g()} \${box()}</p>\n</program>\n`, [K]);
+    expect(codes(r)).toContain("E-TYPE-UNKNOWN");
+  });
+
+  test("kind-collapse-decl: exported `<card>` + private `fn card` — importing `card` does not bring the function", () => {
+    const C = { path: "c.scrml", src: `export <card:struct>\n    let <label:string="x"/>\n</>\nrenders <b class="card">\${label}</b>\n\n\${\n    fn card() -> string {\n        return "private-card-fn";\n    }\n}\n` };
+    const r = run(`<program>\n    \${ import { card } from "./c.scrml"; }\n    <main><card label="hi"/><p id="o">\${card()}</p></main>\n</program>\n`, [C]);
+    expect(codes(r)).toEqual(["E-SCOPE-001"]);
+  });
+
+  test("twin: both kinds exported — importing the name brings both", () => {
+    const K = { path: "k.scrml", src: `\${\n    export type Tag:struct = { v: string }\n    export fn Tag() -> string {\n        return "fn";\n    }\n}\n` };
+    clean(run(`<program>\n    \${ import { Tag } from "./k.scrml"; }\n    function g() -> string {\n        const t: Tag = { v: "x" };\n        return t.v + Tag();\n    }\n    <p>\${g()}</p>\n</program>\n`, [K]));
+  });
+});
+
+describe("r1 F3 — a call's write set is THE callee's in the calling file's scope", () => {
+  const W = { path: "w.scrml", src: `\${\n    server function bump() -> int {\n        return 1;\n    }\n    export function wv() -> int {\n        const v: int = bump() !{ .Transport(t) :> { return 0; } };\n        return v;\n    }\n}\n` };
+  test("writeset-overrefuse: another file's private server `bump` does not end the page's narrowing across its own pure `bump()` — clean, and it runs", async () => {
+    const src = `<program>
+    \${ import { wv } from "./w.scrml"; }
+    let <n:int | not=(3)/>
+    function bump() -> int {
+        return 2;
+    }
+    function f() -> int {
+        if (@n is given) {
+            bump();
+            return @n;
+        }
+        return 0;
+    }
+    <p id="o">\${f()}</p>
+</program>
+`;
+    const r = clean(run(src, [W]));
+    await loadProgram(r.core, "s472-r1-w-" + k++);
+    expect(text("#o")).toBe("3");
+  });
+
+  test("writeset-converse: the page's own `bump` that writes `@n` still ends the narrowing (another file's pure `bump` does not hide it)", () => {
+    const W2 = { path: "w.scrml", src: `\${\n    fn bump() -> int {\n        return 1;\n    }\n    export fn wv() -> int {\n        return bump();\n    }\n}\n` };
+    const src = `<program>
+    \${ import { wv } from "./w.scrml"; }
+    let <n:int | not=(3)/>
+    function bump() {
+        @n = not;
+    }
+    function f() -> int {
+        if (@n is given) {
+            bump();
+            return @n;
+        }
+        return 0;
+    }
+    <p id="o">\${f()}</p>
+</program>
+`;
+    expect(codes(run(src, [W2]))).toContain("E-TYPE-031");
+  });
+});
+
+describe("r1 F4 — two types of one name are told apart by declaring file", () => {
+  test("reimport-type-mismatch: the message names both declaring files", () => {
+    const C2 = { path: "colors2.scrml", src: `\${\n    export type Color:enum = { Green, Red }\n    export fn name2(c: Color) -> string {\n        return "x";\n    }\n}\n` };
+    const r = run(`<program>\n    \${ import { Color, name } from "./pick.scrml"; import { Color, name2 } from "./colors2.scrml"; }\n    <p id="o">\${name(Color.Red)}</p>\n</program>\n`, [PICK, C2]);
+    const m = r.diags.find((d) => d.code === "E-TYPE-031");
+    expect(m.message).toContain("two different types named `Color`");
+    expect(m.message).toContain("`pick.scrml`");
+    expect(m.message).toContain("`colors2.scrml`");
+  });
+});

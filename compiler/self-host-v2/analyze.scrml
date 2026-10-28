@@ -905,18 +905,24 @@ ${
     // file resolves to nothing there (fail closed: E-SCOPE-001 / E-TYPE-UNKNOWN
     // at the use, saying where the name IS declared — elsewhereNote).
     // `own`: every declared name of every linked file (built-in types excluded).
-    type OwnName:struct = { name: string, file: string, exported: boolean }
-    type ScopeName:struct = { name: string, from: string }
+    // s472 r1 (F2): a name is scoped BY KIND — a type, a function and a user
+    // declaration of one name are three entries. An import brings in only the
+    // EXPORTED declaration(s) of the name: a private declaration of another kind
+    // that shares the name stays private (before r1, importing an exported type
+    // `Tag` also brought the file's private `fn Tag` into scope).
+    type NameKind:enum = { KType, KFn, KDecl }
+    type OwnName:struct = { name: string, kind: NameKind, file: string, exported: boolean }
+    type ScopeName:struct = { name: string, kind: NameKind, from: string }
     type FileScope:struct = { file: string, names: ScopeName[] }
     type Linkage:struct = { own: OwnName[], scopes: FileScope[] }
 
-    // The file whose declaration `name` denotes in `file`; "" when no
-    // declaration of `name` is in scope there.
-    fn scopeFrom(lk: Linkage, file: string, name: string) -> string {
+    // The file whose declaration of KIND `k` named `name` is in scope in
+    // `file`; "" when none is.
+    fn scopeFrom(lk: Linkage, file: string, k: NameKind, name: string) -> string {
         for (const fs of lk.scopes) {
             if (fs.file == file) {
                 for (const n of fs.names) {
-                    if (n.name == name) return n.from
+                    if (n.name == name && n.kind == k) return n.from
                 }
                 return ""
             }
@@ -924,9 +930,9 @@ ${
         return ""
     }
 
-    // Is the declaration of `name` in `declFile` the one `name` denotes in `file`?
-    fn inScope(lk: Linkage, file: string, name: string, declFile: string) -> boolean {
-        const from: string = scopeFrom(lk, file, name)
+    // Is the `k` declaration of `name` in `declFile` the one `name` denotes in `file`?
+    fn inScope(lk: Linkage, file: string, k: NameKind, name: string, declFile: string) -> boolean {
+        const from: string = scopeFrom(lk, file, k, name)
         return from != "" && from == declFile
     }
 
@@ -943,14 +949,14 @@ ${
     fn ownNames(files: FileAst[], stubs: TypeStub[], ds: DeclStub[]) -> OwnName[] {
         let out: OwnName[] = []
         for (const s of stubs) {
-            if (s.file != builtinFile()) out = out.concat([{ name: s.name, file: s.file, exported: s.exported }])
+            if (s.file != builtinFile()) out = out.concat([{ name: s.name, kind: NameKind.KType, file: s.file, exported: s.exported }])
         }
         for (const d of ds) {
             const ad: ADecl | not = d.d
-            if (ad is given && !d.isProgram) out = out.concat([{ name: ad.name, file: d.file, exported: ad.exported }])
+            if (ad is given && !d.isProgram) out = out.concat([{ name: ad.name, kind: NameKind.KDecl, file: d.file, exported: ad.exported }])
         }
         for (const f of files) {
-            for (const af of fnItems(f.items)) { out = out.concat([{ name: af.name, file: f.path, exported: af.exported }]) }
+            for (const af of fnItems(f.items)) { out = out.concat([{ name: af.name, kind: NameKind.KFn, file: f.path, exported: af.exported }]) }
         }
         return out
     }
@@ -958,13 +964,14 @@ ${
     type RLinkage:struct = { lk: Linkage, st: AS }
 
     // Each file's scope: its own names, then each name its imports bring, in
-    // source order. §41.7: "When an `import` statement imports a name that is
-    // already in scope from another `import` statement in the same file, the
-    // later import WINS and a W-IMPORT-001 warning is emitted." A name the file
-    // declares AND imports is bound twice in file scope — §7.6: "Re-declaring a
-    // name … when that name was already declared at file scope SHALL be a
-    // compile error (E-SCOPE-010: duplicate binding in file scope)"; the file's
-    // own declaration stays in scope (the error stops the build either way).
+    // source order — one entry per EXPORTED declaration of the name in the
+    // target (s472 r1, F2). §41.7: "When an `import` statement imports a name
+    // that is already in scope from another `import` statement in the same
+    // file, the later import WINS and a W-IMPORT-001 warning is emitted." A
+    // name the file declares AND imports is bound twice in file scope — §7.6:
+    // "Re-declaring a name … when that name was already declared at file scope
+    // SHALL be a compile error (E-SCOPE-010: duplicate binding in file scope)";
+    // the file's own declaration stays in scope (the error stops the build).
     fn linkage(files: FileAst[], own: OwnName[], st0: AS) -> RLinkage {
         let st: AS = st0
         const paths: string[] = filePaths(files)
@@ -973,9 +980,9 @@ ${
             let names: ScopeName[] = []
             let mine: string[] = []
             for (const o of own) {
-                if (o.file == f.path && mine.indexOf(o.name) < 0) {
-                    names = names.concat([{ name: o.name, from: f.path }])
-                    mine = mine.concat([o.name])
+                if (o.file == f.path) {
+                    names = names.concat([{ name: o.name, kind: o.kind, from: f.path }])
+                    if (mine.indexOf(o.name) < 0) mine = mine.concat([o.name])
                 }
             }
             let imported: string[] = []
@@ -985,12 +992,14 @@ ${
                     if (target != "" && exportsName(own, target, n.name)) {
                         if (mine.indexOf(n.name) >= 0) {
                             st = addDiag(st, f.path, n.span, "E-SCOPE-010", "`" + n.name + "` is imported from `" + imp.from + "` and also declared in this file — a name is bound once in file scope (duplicate binding in file scope, §7.6); rename one, or drop the import")
-                        } else if (imported.indexOf(n.name) >= 0) {
-                            st = addDiag(st, f.path, n.span, "W-IMPORT-001", "`" + n.name + "` is already imported by an earlier import in this file — this later import wins (§41.7); remove the duplicate, or rename one")
-                            names = rebound(names, n.name, target)
                         } else {
-                            names = names.concat([{ name: n.name, from: target }])
-                            imported = imported.concat([n.name])
+                            if (imported.indexOf(n.name) >= 0) {
+                                st = addDiag(st, f.path, n.span, "W-IMPORT-001", "`" + n.name + "` is already imported by an earlier import in this file — this later import wins (§41.7); remove the duplicate, or rename one")
+                                names = unbound(names, n.name)
+                            } else {
+                                imported = imported.concat([n.name])
+                            }
+                            names = names.concat(exportedEntries(own, target, n.name))
                         }
                     }
                 }
@@ -1000,32 +1009,44 @@ ${
         return { lk: { own: own, scopes: scopes }, st: st }
     }
 
-    fn rebound(names: ScopeName[], name: string, from: string) -> ScopeName[] {
+    // The scope entries an import of `name` from `target` brings: one per
+    // EXPORTED declaration of that name there (never a private one).
+    fn exportedEntries(own: OwnName[], target: string, name: string) -> ScopeName[] {
         let out: ScopeName[] = []
-        for (const n of names) {
-            if (n.name == name) {
-                out = out.concat([{ name: name, from: from }])
-            } else {
-                out = out.concat([n])
-            }
+        for (const o of own) {
+            if (o.file == target && o.name == name && o.exported) out = out.concat([{ name: name, kind: o.kind, from: target }])
         }
         return out
     }
 
-    // Why `name` is not in scope in `file` when ANOTHER linked file declares it
-    // — appended to the use's diagnostic; "" when no other file declares it.
-    fn elsewhereNote(lk: Linkage, file: string, name: string) -> string {
+    fn unbound(names: ScopeName[], name: string) -> ScopeName[] {
+        let out: ScopeName[] = []
+        for (const n of names) {
+            if (n.name != name) out = out.concat([n])
+        }
+        return out
+    }
+
+    // Why the `k` declaration `name` is not in scope in `file` when ANOTHER
+    // linked file declares one — appended to the use's diagnostic; "" when no
+    // other file declares it. `alsoDecl`: a type position, where a user
+    // declaration names a type too.
+    fn elsewhereNote(lk: Linkage, file: string, k: NameKind, alsoDecl: boolean, name: string) -> string {
         for (const o of lk.own) {
-            if (o.name == name && o.file != file && o.exported) {
+            if (o.name == name && o.file != file && o.exported && kindFits(o.kind, k, alsoDecl)) {
                 return " in this file — `" + o.file + "` exports it, but this file does not import it: write `import { " + name + " } from …` (§21.3)"
             }
         }
         for (const o2 of lk.own) {
-            if (o2.name == name && o2.file != file) {
+            if (o2.name == name && o2.file != file && kindFits(o2.kind, k, alsoDecl)) {
                 return " in this file — `" + o2.file + "` declares it but does not export it, so it is private to that file (§21.3)"
             }
         }
         return ""
+    }
+
+    fn kindFits(have: NameKind, k: NameKind, alsoDecl: boolean) -> boolean {
+        return have == k || (alsoDecl && have == NameKind.KDecl)
     }
 
     // ---- resolving a type expression ------------------------------------------
@@ -1048,7 +1069,7 @@ ${
     // `SqlError`, `ServerCallError`: in scope everywhere, shadowed by a user
     // type in scope).
     fn stubNamed(te: TypeEnv, name: string) -> TypeStub | not {
-        const from: string = scopeFrom(te.link, te.file, name)
+        const from: string = scopeFrom(te.link, te.file, NameKind.KType, name)
         let builtin: TypeStub | not = not
         for (const s of te.stubs) {
             if (s.name == name) {
@@ -1061,7 +1082,7 @@ ${
 
     // s472: the user declaration `name` denotes in `te.file` as a type, else not.
     fn declTypeNamed(te: TypeEnv, name: string) -> Sym | not {
-        const from: string = scopeFrom(te.link, te.file, name)
+        const from: string = scopeFrom(te.link, te.file, NameKind.KDecl, name)
         if (from == "") return not
         let i = 0
         while (i < te.declNames.length) {
@@ -1098,7 +1119,7 @@ ${
         if (ds is given) return { t: Type.Named(ds), st: st, unresolved: false }
         // s469 (review L3): `asIs` is a built-in type (§14.1.2) the bootstrap does not have — refused by name, not "unknown"
         if (n == "asIs") return { t: Type.Str, st: addDiag(st, te.file, at.span, "E-BOOTSTRAP-UNSUPPORTED", "the built-in type `asIs` (§14.1.2) is not in the bootstrap — its type system has no unresolved-value type; give the value a declared type"), unresolved: true }
-        return { t: Type.Str, st: addDiag(st, te.file, at.span, "E-TYPE-UNKNOWN", "unknown type `" + n + "`" + elsewhereNote(te.link, te.file, n)), unresolved: true }
+        return { t: Type.Str, st: addDiag(st, te.file, at.span, "E-TYPE-UNKNOWN", "unknown type `" + n + "`" + elsewhereNote(te.link, te.file, NameKind.KType, true, n)), unresolved: true }
     }
 
     // ---- the grant words (the ONE place a grant SPELLING is read) -------------
@@ -1345,7 +1366,7 @@ ${
     // s472: the user declaration `name` denotes in `file` (declared there, or
     // imported — scopeFrom), else not.
     fn declNamed(g: Globals, file: string, name: string) -> DeclSrc | not {
-        const from: string = scopeFrom(g.te.link, file, name)
+        const from: string = scopeFrom(g.te.link, file, NameKind.KDecl, name)
         if (from == "") return not
         for (const d of g.decls) {
             if (!d.isProgram && d.info.sym.hint == name && d.file == from) return d
@@ -1374,7 +1395,7 @@ ${
     // s472: the function `name` denotes in `file` (declared there, or
     // imported — scopeFrom), else not. Never the first of that name.
     fn fnNamed(g: Globals, file: string, name: string) -> FnInfo | not {
-        const from: string = scopeFrom(g.te.link, file, name)
+        const from: string = scopeFrom(g.te.link, file, NameKind.KFn, name)
         if (from == "") return not
         for (const f of g.fns) {
             if (f.info.name == name && f.info.file == from) return f.info
@@ -2747,7 +2768,7 @@ ${
         }
         // s472: the function `n` denotes in the file being read (declared there, or imported)
         let found: FnSrc | not = not
-        const from: string = scopeFrom(cx.te.link, cx.te.file, n)
+        const from: string = scopeFrom(cx.te.link, cx.te.file, NameKind.KFn, n)
         for (const f of cx.fns) {
             if (f.info.name == n && f.info.file == from) found = f
         }
@@ -3769,7 +3790,7 @@ ${
     fn stubsInScope(ds: DeclStub[], lk: Linkage, file: string) -> DeclStub[] {
         let out: DeclStub[] = []
         for (const d of ds) {
-            if (d.isProgram || inScope(lk, file, d.sym.hint, d.file)) out = out.concat([d])
+            if (d.isProgram || inScope(lk, file, NameKind.KDecl, d.sym.hint, d.file)) out = out.concat([d])
         }
         return out
     }
@@ -4989,7 +5010,7 @@ ${
         }
         // s471: a name a refused import brings is that import's failure (checkImports), not also undeclared
         if (importRefusesName(env.g, env.file, name)) return plain(not, st)
-        return diagX(env, e, "E-SCOPE-001", "`" + name + "` is not declared" + elsewhereNote(env.g.te.link, env.file, name), st)
+        return diagX(env, e, "E-SCOPE-001", "`" + name + "` is not declared" + elsewhereNote(env.g.te.link, env.file, NameKind.KFn, false, name), st)
     }
 
     // A READ through `@h`. RULED S437 (bryan: "yes, reads require narrowing"):
@@ -5427,7 +5448,7 @@ ${
                 return not
             }
             if (nt is not && startsUpper(n) && startsUpper(m.method)) {
-                const why: string = elsewhereNote(env.g.te.link, env.file, n)
+                const why: string = elsewhereNote(env.g.te.link, env.file, NameKind.KType, false, n)
                 if (why != "") return { es: not, name: m.method, written: n + "." + m.method, err: "`" + n + "` is not declared" + why, code: "E-SCOPE-001" }
             }
             const ts: Sym | not = nt
@@ -5783,7 +5804,7 @@ ${
     fn fnsInScope(fs: FnSrc[], lk: Linkage, file: string) -> FnSrc[] {
         let out: FnSrc[] = []
         for (const f of fs) {
-            if (inScope(lk, file, f.info.name, f.info.file)) out = out.concat([f])
+            if (inScope(lk, file, NameKind.KFn, f.info.name, f.info.file)) out = out.concat([f])
         }
         return out
     }
@@ -9537,8 +9558,8 @@ ${
     // What the subject is, from its type — or, when the binder does not know
     // it (a call's result, an unannotated local), from the arms (§18.13: a
     // shorthand variant resolves against the one enum that has it).
-    fn plainSubject(env: Env, ty: Type | not, arms: AArm[]) -> PSubj {
-        if (ty is not) return armsSubject(env, arms)
+    fn plainSubject(env: Env, subj: AExpr, ty: Type | not, arms: AArm[]) -> PSubj {
+        if (ty is not) return armsSubject(env, callEnumOf(env, subj), arms)
         const inner: Type = unMaybe(ty)
         const maybe: boolean = maybeInner(ty) is given
         const k: int = kindOf(inner)
@@ -9553,7 +9574,33 @@ ${
         return psubjBad("E-TYPE-024", "a `match` over `" + typeName(inner) + "`, which is not an enum — a `match` is valid over an enum, a `T | not` and the literal types, not over a struct (§18.8.2)")
     }
 
-    fn armsSubject(env: Env, arms: AArm[]) -> PSubj {
+    // s472 r1 (F1) — §18.13: "`.VariantName` (shorthand) SHALL be valid when the
+    // matched value's type can be inferred by the compiler from context." A call
+    // of a function in scope whose DECLARED return type is an enum names that
+    // enum by identity — whether or not the enum's NAME is in scope here (the
+    // page may import `pick() -> Color` without `Color`). `not` otherwise.
+    fn callEnumOf(env: Env, subj: AExpr) -> Sym | not {
+        const c: AExpr | not = calleeOf(subj.k)
+        if (c is not) return not
+        const n: string = exprName(c)
+        if (n == "") return not
+        if (lookupLocal(env, n) is given) return not
+        const f: FnInfo | not = fnNamed(env.g, env.file, n)
+        if (f is not) return not
+        const r: Type | not = f.ret
+        if (r is not) return not
+        return isEnumType(env.g.types, unMaybe(r))
+    }
+
+    // `pref`: the subject's enum when it is known by identity (callEnumOf) —
+    // a shorthand arm that names one of its variants resolves to it. Else the
+    // enums in scope in this file; else (s472 r1, F1: the subject's type may be
+    // an enum whose name is not imported — an unannotated local holding a
+    // call's result) every user enum of the program. A pick that is not the
+    // subject's type is caught by the typer's subject-vs-arms check
+    // (plainSubjectCheck: "the arms are variants of `E`, but the subject is
+    // `F`", by Sym identity), so the widened search cannot mis-link silently.
+    fn armsSubject(env: Env, pref: Sym | not, arms: AArm[]) -> PSubj {
         let maybe = false
         for (const a of arms) {
             if (isNotPat(a.pat)) maybe = true
@@ -9569,7 +9616,11 @@ ${
                     }
                     return psubjBad("E-TYPE-VARIANT", "`" + pn.qual + "." + pn.name + "` — `" + pn.qual + "` is not an enum type in scope (§18.13)")
                 }
-                const r: EnumOf = enumHaving(env, pn.name)
+                if (pref is given) {
+                    if (variantIndex(env.g.types, pref, pn.name) >= 0) return psubj(0, pref, maybe, false)
+                }
+                let r: EnumOf = enumHaving(env, pn.name, true)
+                if (r.n == 0) r = enumHaving(env, pn.name, false)
                 if (r.n == 1) return psubj(0, r.es, maybe, false)
                 if (r.n == 0) return psubjBad("E-TYPE-VARIANT", "`." + pn.name + "` is not a variant of any enum in scope")
                 return psubjBad("E-VARIANT-AMBIGUOUS", "`." + pn.name + "` is a variant of more than one enum, and the subject's type is not known here — give the subject a declared type (§18.13)")
@@ -9592,12 +9643,13 @@ ${
         return variantIndex(env.g.types, qs, name) >= 0
     }
 
-    fn enumHaving(env: Env, name: string) -> EnumOf {
+    // `scoped`: only the enums in scope in this file; else every user enum.
+    fn enumHaving(env: Env, name: string, scoped: boolean) -> EnumOf {
         let found: Sym | not = not
         let n = 0
         for (const t of env.g.types) {
             const s: Sym = typeDefSym(t.def)
-            if (t.file != builtinFile() && typeInScope(env, t) && variantIndex(env.g.types, s, name) >= 0) {
+            if (t.file != builtinFile() && (!scoped || typeInScope(env, t)) && variantIndex(env.g.types, s, name) >= 0) {
                 found = s
                 n = n + 1
             }
@@ -9608,7 +9660,7 @@ ${
     // s472: is the user type `t` the one its name denotes in `env.file`? (The
     // enums remoteEnums mints live in the built-in file — never searched here.)
     fn typeInScope(env: Env, t: TypeInfo) -> boolean {
-        return inScope(env.g.te.link, env.file, t.name, t.file)
+        return inScope(env.g.te.link, env.file, NameKind.KType, t.name, t.file)
     }
 
     fn isNotPat(p: APat) -> boolean {
@@ -9774,7 +9826,7 @@ ${
         let st: AS = plainMatchBinderDiags(env, arms, st0)
         const rs: RX = resolveExpr(withWhole(env, -1), subj, not, st)
         st = rs.st
-        const sk: PSubj = plainSubject(env, rs.x.ty, arms)
+        const sk: PSubj = plainSubject(env, subj, rs.x.ty, arms)
         if (sk.code != "") st = addDiag(st, env.file, subj.span, sk.code, sk.msg)
         let vs: VariantDef[] = []
         const es0: Sym | not = sk.es
@@ -12732,7 +12784,7 @@ ${
         // an unknown HTML element (that would render it silently empty) — the
         // tag names it, so it is refused by name, saying where it is declared
         if (d is not && declAnywhere(env.g, e.tag)) {
-            return addDiag(resolveNodes(env, e.kids, st), env.file, e.span, "E-SCOPE-001", "`<" + e.tag + ">` is not declared" + elsewhereNote(env.g.te.link, env.file, e.tag))
+            return addDiag(resolveNodes(env, e.kids, st), env.file, e.span, "E-SCOPE-001", "`<" + e.tag + ">` is not declared" + elsewhereNote(env.g.te.link, env.file, NameKind.KDecl, false, e.tag))
         }
         if (d is given) {
             // O55 RULED (bryan S442): a plain use of a `single` declaration is an
@@ -12969,7 +13021,7 @@ ${
         if (sf is given) return resolveStarField(env, e, sf, st)
         const d: DeclSrc | not = declNamed(env.g, env.file, e.tag)
         if (d is not && declAnywhere(env.g, e.tag)) {
-            return addDiag(st, env.file, e.span, "E-SCOPE-001", "`<*" + e.tag + "/>` — `<" + e.tag + ">` is not declared" + elsewhereNote(env.g.te.link, env.file, e.tag))
+            return addDiag(st, env.file, e.span, "E-SCOPE-001", "`<*" + e.tag + "/>` — `<" + e.tag + ">` is not declared" + elsewhereNote(env.g.te.link, env.file, NameKind.KDecl, false, e.tag))
         }
         if (d is not) {
             // r1 nit: a field of SOME user declaration, named out of its scope
@@ -13957,7 +14009,7 @@ ${
     // FILE (was: any import of the name, whichever file it named).
     fn visibleDeclNamed(lk: Linkage, t: Tables, file: string, name: string) -> boolean {
         for (const d of t.decls) {
-            if (d.sym.id != t.program.id && d.sym.hint == name && inScope(lk, file, name, d.file)) return true
+            if (d.sym.id != t.program.id && d.sym.hint == name && inScope(lk, file, NameKind.KDecl, name, d.file)) return true
         }
         return false
     }
@@ -14729,12 +14781,14 @@ ${
     // placeKey spells them) its body writes — an assignment, `reset(@x)`, an
     // edit call `@xs.push(…)` — and, transitively, what the functions it calls
     // write. A `given c = @h` body's `c.f` is `@h.f`. Syntactic and whole
-    // program: a call `()name` takes the UNION of every linked function of
-    // that name (s472: two files may each declare a private `name` — the union
-    // over-approximates), so it only ever un-narrows MORE (never silences a report).
+    // program: over-approximate, so it only ever un-narrows MORE (never
+    // silences a report). s472 r1 (F3): a call `()name` resolves in the CALLING
+    // file's scope (the function the name denotes there — file scope), not to
+    // every linked function of that name: another file's private `name` writing
+    // a cell (or a server one, "*") no longer ends a narrowing it cannot reach.
     // `nid`: the function's AFn nid (s472: argument checks find THE callee's
-    // parameters by it, never by name).
-    type FnW:struct = { name: string, nid: int, keys: string[], params: int[] }   // `params`: the parameter nids (r4 (c): argument checks)
+    // parameters by it, never by name). `file`: its declaring file.
+    type FnW:struct = { name: string, nid: int, file: string, keys: string[], params: int[] }   // `params`: the parameter nids (r4 (c): argument checks)
     type Alias:struct = { name: string, key: string }
 
     fn exprKids(e: AExpr) -> AExpr[] {
@@ -14949,6 +15003,16 @@ ${
     }
 
     // The write keys of a call of `name`: its function's write set, or UNKNOWN.
+    // s472 r1 (F3): the write sets of the functions in scope in `file` — one per
+    // name, so `callKeys` over them answers for THE callee a name denotes there.
+    fn fnwIn(ws: FnW[], lk: Linkage, file: string) -> FnW[] {
+        let out: FnW[] = []
+        for (const w of ws) {
+            if (inScope(lk, file, NameKind.KFn, w.name, w.file)) out = out.concat([w])
+        }
+        return out
+    }
+
     export fn callKeys(ws: FnW[], name: string) -> string[] {
         if (!hasFnNamed(ws, name)) return ["*"]
         return fnKeysNamed(ws, name)
@@ -15023,7 +15087,7 @@ ${
 
     // Every function's write set, closed over its calls (a fixpoint: each pass
     // adds keys, a key set is finite; bounded by the function count + 2).
-    fn fnWrites(files: FileAst[]) -> FnW[] {
+    fn fnWrites(files: FileAst[], lk: Linkage) -> FnW[] {
         let ws: FnW[] = []
         for (const f of files) {
             // s462 Q11 (ruling:user-voice-scrml.md S462 "a"): a SERVER function's call is a
@@ -15033,7 +15097,7 @@ ${
             for (const af of fnItems(f.items)) {
                 let own: string[] = blockEffects(af.body, [])
                 if (af.server || sqlsInBlock(af.body).length > 0) own = own.concat(["*"])   // serverOwn (§12.2 T1), as the binder decides it
-                ws = ws.concat([{ name: af.name, nid: af.nid, keys: own, params: paramNids(af.params) }])
+                ws = ws.concat([{ name: af.name, nid: af.nid, file: f.path, keys: own, params: paramNids(af.params) }])
             }
         }
         let changed = true
@@ -15045,15 +15109,17 @@ ${
                 let keys: string[] = w.keys
                 for (const k of w.keys) {
                     if (k.indexOf("()") == 0) {
-                        for (const c of callKeys(ws, k.substring(2))) {
-                            if (keys.indexOf(c) < 0) {
+                        // the callee's own `()` keys name functions in ITS file's scope — they reach
+                        // this set already resolved (the callee's closure), never re-read here
+                        for (const c of callKeys(fnwIn(ws, lk, w.file), k.substring(2))) {
+                            if (keys.indexOf(c) < 0 && c.indexOf("()") != 0) {
                                 keys = keys.concat([c])
                                 changed = true
                             }
                         }
                     }
                 }
-                next = next.concat([{ name: w.name, nid: w.nid, keys: keys, params: w.params }])
+                next = next.concat([{ name: w.name, nid: w.nid, file: w.file, keys: keys, params: w.params }])
             }
             ws = next
             pass = pass + 1
@@ -15687,7 +15753,23 @@ ${
             return report(ts, env, span, "E-TYPE-031", what + " expects `" + typeName(target) + "`, and this value is `" + typeName(x) + "` — a `T | not` is not a `T`: it may be `not`; narrow it first (`if (x is given) { … }`) (§34 E-TYPE-031; ruled S442: \"`T | not` into `T` is an error for all types\")")
         }
         if (fitsType(x, target) != Verdict.Fails) return ts
-        return report(ts, env, span, "E-TYPE-031", what + " expects `" + typeName(target) + "`, and this value is `" + typeName(x) + "` (§66.1 rule 5: every cell and field write is type-checked against the target's declared type)" + intHint(unMaybe(x), unMaybe(target)))
+        return report(ts, env, span, "E-TYPE-031", what + " expects `" + typeName(target) + "`, and this value is `" + typeName(x) + "` (§66.1 rule 5: every cell and field write is type-checked against the target's declared type)" + intHint(unMaybe(x), unMaybe(target)) + sameNameNote(env, target, x))
+    }
+
+    // s472 r1 (F4): two different types that print alike (`Color` from two files —
+    // file scope lets each file declare its own) are told apart by declaring file.
+    fn sameNameNote(env: TEnv, target: Type, x: Type) -> string {
+        if (typeName(target) != typeName(x)) return ""
+        const a: Sym | not = namedOf(unMaybe(target))
+        const b: Sym | not = namedOf(unMaybe(x))
+        if (a is not) return ""
+        if (b is not) return ""
+        if (a.id == b.id) return ""
+        const ta: TypeInfo | not = typeInfoOf(env.t.types, a)
+        if (ta is not) return ""
+        const tb: TypeInfo | not = typeInfoOf(env.t.types, b)
+        if (tb is not) return ""
+        return " — these are two different types named `" + ta.name + "`: the expected one is declared in `" + ta.file + "`, this value's in `" + tb.file + "`"
     }
 
     // An UN-NARROWED `T | not` into a non-optional `T` position — at any depth
@@ -18107,13 +18189,13 @@ ${
     // (silent — provable-or-silent); settled ones keep their type.
     // `prior`: the diagnostics the passes before the typer reported — read only
     // to keep the condition rule from reporting a second time (Blame, s460).
-    fn typeProgram(files: FileAst[], t: Tables, prior: Diag[]) -> RTyping {
+    fn typeProgram(files: FileAst[], t: Tables, prior: Diag[], lk: Linkage) -> RTyping {
         let settled: LocalT[] = []
         let prev: LocalT[] = []
         let pass = 0
         let bound = 2
         while (pass < bound) {
-            const ts: TypeState = typePass(files, t, settled, prior)
+            const ts: TypeState = typePass(files, t, settled, prior, lk)
             const next: LocalT[] = joinContribs(ts.contribs)
             if (pass == 0) bound = 3 * next.length + 2
             if (sameLocals(next, settled)) return { typing: typingOf(ts.exprs, ts.presence), diags: ts.diags }
@@ -18121,7 +18203,7 @@ ${
             settled = next
             pass = pass + 1
         }
-        const last: TypeState = typePass(files, t, unknownWhereChanged(prev, settled), prior)
+        const last: TypeState = typePass(files, t, unknownWhereChanged(prev, settled), prior, lk)
         return { typing: typingOf(last.exprs, last.presence), diags: last.diags }
     }
 
@@ -18140,13 +18222,13 @@ ${
         return out
     }
 
-    fn typePass(files: FileAst[], t: Tables, settled: LocalT[], prior: Diag[]) -> TypeState {
+    fn typePass(files: FileAst[], t: Tables, settled: LocalT[], prior: Diag[], lk: Linkage) -> TypeState {
         let ts: TypeState = { exprs: [], diags: [], contribs: [], presence: [] }
-        const fnw: FnW[] = fnWrites(files)
+        const fnw: FnW[] = fnWrites(files, lk)
         const fns: int[] = refusedReturns(files, t)
         for (const f of files) {
             const blame: Blame = { spans: errorSpansIn(prior, f.path), syms: [], fns: fns }
-            const env: TEnv = { t: t, file: f.path, errs: f.errs, locals: [], settled: settled, narrowed: [], fnw: fnw, rows: [], fret: not, blame: blame }
+            const env: TEnv = { t: t, file: f.path, errs: f.errs, locals: [], settled: settled, narrowed: [], fnw: fnwIn(fnw, lk, f.path), rows: [], fret: not, blame: blame }
             for (const it of f.items) { ts = typeItem(env, it, ts) }
         }
         return ts
@@ -23867,7 +23949,7 @@ ${
         const vp: ValPass = validatorPass(ra.g, bound)
         // s468: static executable attribute values (§5.2 S464) and impure `fn` bodies (§48.3.3)
         const sinkDiags: Diag[] = staticExecPass(ra.g, bound).concat(fnWritePass(ra.g, sum)).concat(fallOffPass(ra.g, bound)).concat(css.diags)
-        const typed: RTyping = typeProgram(files, bound, st.diags.concat(scopeDiags).concat(effectDiags).concat(vp.diags).concat(sinkDiags))
+        const typed: RTyping = typeProgram(files, bound, st.diags.concat(scopeDiags).concat(effectDiags).concat(vp.diags).concat(sinkDiags), ra.g.te.link)
         // s451 (U1a): route placement, the queries and the databases
         const pp: RPlaced = placePass(ra.g, bound, st, sum)
         // s454 (U1b): the suspension plan — per client site, after placement (it
