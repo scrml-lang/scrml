@@ -14255,7 +14255,8 @@ ${
         let ty: Type | not = c.annot
         if (ty is not) ty = ri.x.ty
         if (ty is not) {
-            if (!recoveredInit(c.init)) st = addDiag(st, c.file, c.span, "E-BOOTSTRAP-UNSUPPORTED", "the type of the file-scope constant `" + c.name + "` is not known from its initializer — write it: `const " + c.name + ": T = …;`")
+            // (not when binding the initializer already failed — that report owns it: no cascade)
+            if (!recoveredInit(c.init) && ri.st.diags.length == st0.diags.length) st = addDiag(st, c.file, c.span, "E-BOOTSTRAP-UNSUPPORTED", "the type of the file-scope constant `" + c.name + "` is not known from its initializer — write it: `const " + c.name + ": T = …;`")
             return { c: constAs(c, not, true, false), st: st }
         }
         return { c: constAs(c, ty, true, true), st: st }
@@ -14486,7 +14487,7 @@ ${
     }
 
     fn checkScopes(files: FileAst[], t: Tables, lk: Linkage) -> Diag[] {
-        let out: Diag[] = dupFields(files, t, lk).concat(dupDecls(t)).concat(dupTypes(t)).concat(dupFns(t)).concat(dupHandles(files, t, lk))
+        let out: Diag[] = dupFields(files, t, lk).concat(dupDecls(t)).concat(dupTypes(t)).concat(dupFns(t)).concat(dupHandles(files, t, lk)).concat(dupConsts(t))
         for (const f of files) {
             for (const af of fnItems(f.items)) {
                 out = out.concat(dupParams(f.path, af.params))
@@ -14651,6 +14652,60 @@ ${
                 // s472: in two files it is two functions — each call resolves in its own file's scope
                 if (first.file == f.file) {
                     out = out.concat([mkDiag(f.file, f.span, "E-SCOPE-010", "function `" + names[j] + "` is already declared at file scope (at " + offsetOf(first.span) + ") — duplicate binding in file scope (§7.6; ruled S440 #6)")])
+                }
+            }
+            j = j + 1
+        }
+        return out
+    }
+
+    // s472 — a file-scope constant binds its name once in its file's scope.
+    //   - another constant, or a function, of the name in the same file: §7.6
+    //     "Re-declaring a name … when that name was already declared at file
+    //     scope SHALL be a compile error (E-SCOPE-010: duplicate binding in file
+    //     scope)" (§7.6 names `let` and, S440 #6, `function`; a `const` is the
+    //     same file-scope binding). An IMPORT of the name is E-SCOPE-010 too
+    //     (linkage — the constant is one of the file's own names).
+    //   - a program cell of the name in the same file: §1.6 "Local
+    //     names cannot shadow registered state names — attempting to declare a
+    //     local variable with the same name as a registered state cell is
+    //     `E-NAME-COLLIDES-STATE`"; §7.6.1: "A V5-strict structural cell `<x>`
+    //     and a local `let x` cannot coexist in the same file scope."
+    //   - a type, or a user declaration, of the name in the same file: the SPEC
+    //     names no code (a type is not a value binding) — the bootstrap-local
+    //     E-BOOTSTRAP-REDECLARE, as for the other SPEC-silent collisions above
+    //     (`E.V` / `<Card>` beside a constant `E` / `Card` would read two ways).
+    // A function-body local or a parameter of the name SHADOWS it (§7.6 "scoped
+    // to that function"; §7.3.3 shadowing in a nested scope is legal) — no report.
+    fn dupConsts(t: Tables) -> Diag[] {
+        let out: Diag[] = []
+        let j = 0
+        while (j < t.consts.length) {
+            const c: ConstInfo = t.consts[j]
+            let i = 0
+            let dup = false
+            while (i < j) {
+                if (!dup && t.consts[i].file == c.file && t.consts[i].name == c.name) {
+                    dup = true
+                    out = out.concat([mkDiag(c.file, c.span, "E-SCOPE-010", "`" + c.name + "` is already declared at file scope (at " + offsetOf(t.consts[i].span) + ") — a file-scope name is bound once: duplicate binding in file scope (§7.6)")])
+                }
+                i = i + 1
+            }
+            for (const f of t.fns) {
+                if (f.file == c.file && f.name == c.name) out = out.concat([mkDiag(c.file, c.span, "E-SCOPE-010", "`" + c.name + "` is also a function of this file (at " + offsetOf(f.span) + ") — a file-scope name is bound once: duplicate binding in file scope (§7.6)")])
+            }
+            for (const ty of t.types) {
+                if (ty.file == c.file && ty.name == c.name) out = out.concat([mkDiag(c.file, c.span, "E-BOOTSTRAP-REDECLARE", "`" + c.name + "` is also a type of this file (at " + offsetOf(ty.span) + ") — a constant and a type of one name would read two ways (`" + c.name + ".x`); rename one (the SPEC names no code for this; bootstrap-local)")])
+            }
+            for (const d of t.decls) {
+                if (d.file == c.file) {
+                    if (d.sym.id == t.program.id) {
+                        for (const fi of d.fields) {
+                            if (fi.sym.hint == c.name) out = out.concat([mkDiag(c.file, c.span, "E-NAME-COLLIDES-STATE", "`" + c.name + "` is also a cell of the program (`@" + c.name + "`, at " + offsetOf(fi.span) + ") — a local name cannot take the name of a registered state cell (§1.6, §7.6.1); rename one")])
+                        }
+                    } else if (d.sym.hint == c.name) {
+                        out = out.concat([mkDiag(c.file, c.span, "E-BOOTSTRAP-REDECLARE", "`" + c.name + "` is also a declaration of this file (`<" + c.name + ">`, at " + offsetOf(d.span) + ") — rename one (the SPEC names no code for this; bootstrap-local)")])
+                    }
                 }
             }
             j = j + 1
