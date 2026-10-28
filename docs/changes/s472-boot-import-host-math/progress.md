@@ -30,6 +30,9 @@ Branch `s472-boot-import-host-math` from `origin/s472-boot-link-visibility` (PR 
     import's names never cascade E-SCOPE-001.
   - tests: slice-m4/import-host-s472.test.js (13) + fixture src/stdlib-s472h/hm. Red on base 0/12 (the 13th, `import:` with no tag, added after)
     (~/.cache/scrml-pa/s472/hostmath-boot-red.log).
+- pushed; PR #1607 (base s472-boot-link-visibility; not merged). Local: slices job + e2e-render-map
+  green; pre-commit hook 50385 pass / 0 fail; types-gate --check OK; bootstrap-conformance
+  regenerated (one UNSUPPORTED reason changed; counts unchanged).
 
 ## SPEC silences — STOPPED here (brief: "If SPEC is silent … STOP and report the exact question")
 
