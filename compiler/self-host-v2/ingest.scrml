@@ -1055,6 +1055,7 @@ ${
             .Match(scrut: x) :> false
             .ArrayOf(elems: x) :> false
             .StructOf(ty: x) :> false
+            .VariantOf(enumSym: x) :> false
             .Handle(inst: x) :> false
             .InitOf(decl: x) :> false
             .Host(call: x) :> false
@@ -1318,6 +1319,7 @@ ${
             .Match(scrut: x) :> "Expr.Match"
             .ArrayOf(elems: x) :> "Expr.ArrayOf"
             .StructOf(ty: x) :> "Expr.StructOf"
+            .VariantOf(enumSym: x) :> "Expr.VariantOf"
             .Handle(inst: x) :> "Expr.Handle"
             .InitOf(decl: x) :> "Expr.InitOf"
             .Host(call: x) :> "Expr.Host"
