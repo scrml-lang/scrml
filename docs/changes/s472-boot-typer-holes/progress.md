@@ -72,3 +72,11 @@ Branch `s472-boot-typer-holes`, base origin/main `e8d2e38cd`. Input: the S472 ba
   gen-bootstrap-severity --check was STALE ON MAIN (E-IMPORT-003/008/009 rows from another lane), so severity.scrml is regenerated in this branch.
 - Slices (m1, m1 lowered, m2, m3, m4, codec) and the unit/integration/conformance suites passed in the pre-commit runs.
 - Not run locally yet: `bun test compiler/tests/e2e-render-map/` and `bun test compiler/tests/*.test.js` outside the hook (the hook does run the latter).
+
+## 2026-10-28T21:15Z — S473 landing-front: merge origin/main (22 behind)
+
+- Merged origin/main (no rebase). Conflict: severity.scrml generated count line → regenerated (== main).
+  known-gaps.md driver-resolved; @gap id set == union(main, branch) (2448, none lost). FACTS.md = main's.
+- SEMANTIC merge fix: main's #1617 `typeConst` called the retired `checkInit`+`checkIntInit` pair →
+  rewritten to the branch's single `checkAnnotInit` (as typeLocal). Bootstrap bundle failed to build without it.
+- bootstrap-conformance.md regenerated (result identical to main's). Merge commit f2b1de741 (hook green: 50644 pass, 0 fail).
