@@ -87,6 +87,7 @@ ${
             .Match(scrut: x) :> "Match"
             .ArrayOf(elems: x) :> "ArrayOf"
             .StructOf(ty: x) :> "StructOf"
+            .VariantOf(enumSym: x) :> "VariantOf"
             .Handle(inst: x) :> "Handle"
             .InitOf(decl: x) :> "InitOf"
             .Host(call: x) :> "Host"

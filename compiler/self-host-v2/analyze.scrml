@@ -246,6 +246,7 @@ ${
         VVariant(enumSym: Sym, idx: int),                 // a bare variant
         VOp(op: PrimOp),                                  // a unary / binary operator, resolved (§45)
         VStructOf(ty: Sym, order: int[]),                 // an object literal: prop index per declared field
+        VConstruct(enumSym: Sym, idx: int),               // s472: a payload-variant construction `E.V(…)` / `.V(…)` (§14.4) — a call node; Core VariantOf
         VHost(call: HostCall),                            // s444: a host call (`Date.now()`) — the closed HostCall set
         VSeqCall(op: SeqFn),                              // s444: `seq.filter(λ)` / `seq.map(λ)` — a call node
         VLambda(params: Sym[]),                           // s444: `x => e` as a SeqCall's argument — its parameter locals
@@ -4927,7 +4928,7 @@ ${
             .Recovered :> plain(not, recoveredBackstop(env, e, st))   // the parser reported it: no fact, no type
             .Variant(name: n) :> resolveVariant(env, e, n, expected, st)
             .Member(obj: o, name: n) :> resolveMember(env, e, o, n, st)
-            .Call(callee: c, args: args) :> resolveCall(env, e, c, args, st)
+            .Call(callee: c, args: args) :> resolveCallOrConstruct(env, e, c, args, expected, st)
             .Unary(op: o, e: x) :> resolveUnary(env, e, o, x, st)
             .Binary(op: o, l: l, r: r) :> resolveBinary(env, e, o, l, r, st)
             .Ternary(test: t, yes: y, no: n) :> resolveTernary(env, e, t, y, n, expected, st)
@@ -5322,6 +5323,135 @@ ${
     fn declKindOf(env: Env, d: Sym) -> int {
         if (d.id == env.g.program.id) return 2
         return 1
+    }
+
+    // =========================================================================
+    // s472 — PAYLOAD-VARIANT CONSTRUCTION (g-boot-payload-variant-value-s472).
+    // SPEC §14.4 "Construction arity": "Constructing a payload variant
+    // (`Shape.Rectangle(w, h)`, `.Circle(r)`) supplies exactly one positional
+    // argument per declared field, in declaration order … A construction whose
+    // argument count does not match the variant's declared payload field count —
+    // too few, too many, or any payload on a unit variant (`Shape.Point(x)`) — is a
+    // hard error (E-TYPE-082) … The check lives at the variant-constructor site and
+    // applies uniformly across every construction locus — `let` / `const` /
+    // state-cell initializers, `return`, and `fail`."
+    // §14.10: "An enum-payload-variant CONSTRUCTOR argument is such a position" (a
+    // bare variant argument resolves against the PAYLOAD field's type); "The
+    // constructor callee may be bare (`.OnePlayer(...)`, resolved against the
+    // surrounding-declaration enum) or qualified (`Mode.OnePlayer(...)` …, resolved
+    // directly)". §66.3 rule 5 (via §14.10): "`E.V(…)` is a call whose declared type
+    // is `E`".
+    // The callee is decided from the AST alone: `E.V(…)` where `E` names an enum
+    // type here (no local shadows it), or a bare `.V(…)`. Anything else is not a
+    // construction (`not`) and goes on to resolveCall unchanged. The value is
+    // recorded as VConstruct on the CALL node; each argument is resolved against
+    // its field's type (the bare-variant position above) and TYPED against it by
+    // typeCall (E-TYPE-031, as a `fail`'s payload is — typeFail).
+    // =========================================================================
+    fn resolveCallOrConstruct(env: Env, e: AExpr, callee: AExpr, args: AExpr[], expected: Type | not, st0: AS) -> RX {
+        const rc: RX | not = resolveConstruct(env, e, callee, args, expected, st0)
+        if (rc is given) return rc
+        return resolveCall(env, e, callee, args, st0)
+    }
+
+    fn bareVariantName(e: AExpr) -> string {
+        const k: AExprK = e.k
+        return match k {
+            .Variant(name: n) :> n
+            .Name(name: n) :> ""
+            .At(name: n) :> ""
+            .AtItem :> ""
+            .Num(raw: r) :> ""
+            .Str(v: s) :> ""
+            .Bool(v: b) :> ""
+            .NotLit :> ""
+            .Recovered :> ""
+            .Member(obj: o) :> ""
+            .Call(callee: c) :> ""
+            .Unary(op: o) :> ""
+            .Binary(op: o) :> ""
+            .Ternary(test: t) :> ""
+            .Assign(target: t) :> ""
+            .ArrayLit(elems: es) :> ""
+            .ObjectLit(props: ps) :> ""
+            .Spread(e: sx) :> ""
+            .Index(obj: ix) :> ""
+            .Lambda(params: lp) :> ""
+            .Sql(q: q) :> ""
+            .Handled(h: x) :> ""
+            .Template(quasis: qs) :> ""
+        }
+    }
+
+    // The enum a construction's callee names, or not when the callee is not a
+    // variant constructor at all. `written` is the callee as the author wrote it.
+    type CtorOf:struct = { es: Sym | not, name: string, written: string, err: string, code: string }
+
+    fn ctorOf(env: Env, callee: AExpr, expected: Type | not) -> CtorOf | not {
+        const m: MethodCall | not = memberCall(callee)
+        if (m is given) {
+            const n: string = exprName(m.obj)
+            if (n == "" || atName(m.obj) != "" || lookupLocal(env, n) is given) return not
+            const ts: Sym | not = typeNamedHere(env, n)
+            if (ts is not) return not
+            const qs: Sym | not = isEnumType(env.g.types, Type.Named(ts))
+            if (qs is not) return not
+            // `E.parse(s)` / `E.toEnum(s)` are the enum's built-ins (§14.13.4, §14.4.1), not
+            // variants: a variant name begins with an uppercase letter (§14.4,
+            // E-ENUM-VARIANT-CASE), so only such a name is a constructor — one the enum
+            // does not declare is an unknown variant (ctor resolution reports it)
+            if (variantIndex(env.g.types, qs, m.method) < 0 && !startsUpper(m.method)) return not
+            return { es: qs, name: m.method, written: n + "." + m.method, err: "", code: "" }
+        }
+        const b: string = bareVariantName(callee)
+        if (b == "") return not
+        const w: string = "." + b
+        // the bare form: against the enum its position expects (§14.10) — as a
+        // bare unit variant resolves (resolveVariant), one rule for both
+        if (expected is given) {
+            const xs: Sym | not = isEnumType(env.g.types, expected)
+            if (xs is given) {
+                if (variantIndex(env.g.types, xs, b) >= 0) return { es: xs, name: b, written: w, err: "", code: "" }
+                return { es: not, name: b, written: w, err: "`" + w + "(…)` — `" + b + "` is not a variant of `" + xs.hint + "`", code: "E-TYPE-VARIANT" }
+            }
+        }
+        let found: Sym[] = []
+        for (const t of env.g.types) {
+            const s: Sym = typeDefSym(t.def)
+            if (variantIndex(env.g.types, s, b) >= 0 && t.file != builtinFile() && typeInScope(env, t)) found = found.concat([s])
+        }
+        if (found.length == 1) return { es: found[0], name: b, written: w, err: "", code: "" }
+        if (found.length == 0) return { es: not, name: b, written: w, err: "`" + w + "(…)` — `" + b + "` is not a variant of any enum in scope", code: "E-TYPE-VARIANT" }
+        return { es: not, name: b, written: w, err: "`" + w + "(…)` — `" + b + "` is a variant of more than one enum — qualify it", code: "E-VARIANT-AMBIGUOUS" }
+    }
+
+    fn startsUpper(n: string) -> boolean {
+        if (n.length == 0) return false
+        const c: string = n.charAt(0)
+        return c >= "A" && c <= "Z"
+    }
+
+    fn resolveConstruct(env: Env, e: AExpr, callee: AExpr, args: AExpr[], expected: Type | not, st0: AS) -> RX | not {
+        const c: CtorOf | not = ctorOf(env, callee, expected)
+        if (c is not) return not
+        const es: Sym | not = c.es
+        if (es is not) return diagX(env, e, c.code, c.err, resolveExprs(env, args, not, st0))
+        const idx: int = variantIndex(env.g.types, es, c.name)
+        if (idx < 0) return diagX(env, e, "E-TYPE-VARIANT", "`" + c.written + "(…)` — `" + c.name + "` is not a variant of `" + es.hint + "`", resolveExprs(env, args, not, st0))
+        const fs: FieldDef[] = enumVariantsOf(env.g, es)[idx].fields
+        if (fs.length == 0 && args.length > 0) return diagX(env, e, "E-TYPE-082", "`" + es.hint + "." + c.name + "` is a unit variant — it carries no payload, and this construction supplies " + args.length + " — write `" + es.hint + "." + c.name + "` (§14.4 construction arity)", resolveExprs(env, args, not, st0))
+        // `E.V()` on a unit variant: no payload, but not the unit value's spelling
+        // either (§14.5 writes it `E.V`); the SPEC does not say what `()` adds —
+        // refused, fail closed, rather than read as the unit value
+        if (fs.length == 0) return diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", "`" + c.written + "()` — `" + c.name + "` is a unit variant; its value is written without parentheses: `" + c.written + "` (§14.5)", st0)
+        if (fs.length != args.length) return diagX(env, e, "E-TYPE-082", "`" + es.hint + "." + c.name + "` carries " + fs.length + " payload value(s) but this construction supplies " + args.length + " — one argument per declared field, in order (§14.4)", resolveExprs(env, args, not, st0))
+        let st: AS = st0
+        let i = 0
+        for (const a of args) {
+            st = resolveExpr(env, a, fs[i].ty, st).st
+            i = i + 1
+        }
+        return plain(Type.Named(es), addValue(st, e.nid, ValueFact.VConstruct(es, idx)))
     }
 
     fn resolveCall(env: Env, e: AExpr, callee: AExpr, args: AExpr[], st0: AS) -> RX {
@@ -5822,7 +5952,7 @@ ${
         const i: int = variantIndex(env.g.types, es, name)
         if (i < 0) return diagX(env, e, "E-TYPE-VARIANT", "`" + n + "." + name + "` — `" + name + "` is not a variant of `" + n + "`", st)
         const vs: VariantDef[] = enumVariantsOf(env.g, es)
-        if (vs[i].fields.length > 0) return diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", "`" + n + "." + name + "` carries a payload — constructing a payload variant value is not in the bootstrap yet (only `fail` builds one)", st)
+        if (vs[i].fields.length > 0) return diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", "`" + n + "." + name + "` carries a payload — named without one it is the constructor, not a value (a constructor as a function value is not in the bootstrap); construct the value: `" + n + "." + name + "(…)`, one argument per declared field (§14.4)", st)
         return plain(Type.Named(es), addValue(st, e.nid, ValueFact.VVariant(es, i)))
     }
 
@@ -5935,7 +6065,9 @@ ${
 
     // A refused call names its method (fail closed BY NAME), when it has one.
     // s469 F/U-8: `E.V(…)` on an enum type is a payload-variant CONSTRUCTION,
-    // said as such (not as a "method").
+    // said as such (not as a "method"). s472: resolveConstruct takes every
+    // `E.V(…)` on an enum before resolveCall runs, so that branch is a
+    // fail-closed fallback only.
     fn callText(env: Env, callee: AExpr) -> string {
         const m: MethodCall | not = memberCall(callee)
         if (m is not) return ""
@@ -5943,7 +6075,7 @@ ${
         if (n != "" && atName(m.obj) == "" && lookupLocal(env, n) is not) {
             const ts: Sym | not = typeNamedHere(env, n)
             if (ts is given) {
-                if (isEnumType(env.g.types, Type.Named(ts)) is given) return "constructing the payload variant `" + n + "." + m.method + "(…)` as a value is not in the bootstrap (only `fail` builds one) — "
+                if (isEnumType(env.g.types, Type.Named(ts)) is given) return "`" + n + "." + m.method + "(…)` — "
             }
         }
         return "`." + m.method + "(…)` is not in the bootstrap — "
@@ -6541,6 +6673,44 @@ ${
         return plain(r2.x.ty, addValue(r2.st, e.nid, ValueFact.VOp(PrimOp.Neg)))
     }
 
+    // s472: a bare variant `.V`, or a bare construction `.V(…)` — an operand
+    // whose enum comes from its position (§14.10).
+    fn isBareVariantish(e: AExpr) -> boolean {
+        if (isVariantExpr(e)) return true
+        const c: AExpr | not = calleeOfCall(e)
+        if (c is not) return false
+        return bareVariantName(c) != ""
+    }
+
+    fn calleeOfCall(e: AExpr) -> AExpr | not {
+        const k: AExprK = e.k
+        return match k {
+            .Call(callee: c) :> c
+            .Variant(name: n) :> not
+            .Name(name: n) :> not
+            .At(name: n) :> not
+            .AtItem :> not
+            .Num(raw: r) :> not
+            .Str(v: s) :> not
+            .Bool(v: b) :> not
+            .NotLit :> not
+            .Recovered :> not
+            .Member(obj: o) :> not
+            .Unary(op: o) :> not
+            .Binary(op: o) :> not
+            .Ternary(test: t) :> not
+            .Assign(target: t) :> not
+            .ArrayLit(elems: es) :> not
+            .ObjectLit(props: ps) :> not
+            .Spread(e: sx) :> not
+            .Index(obj: ix) :> not
+            .Lambda(params: lp) :> not
+            .Sql(q: q) :> not
+            .Handled(h: x) :> not
+            .Template(quasis: qs) :> not
+        }
+    }
+
     fn isVariantExpr(e: AExpr) -> boolean {
         const k: AExprK = e.k
         return match k {
@@ -6601,7 +6771,8 @@ ${
         // operands: a bare variant takes the OTHER operand's type
         let rl: RX = plain(not, st0)
         let rr: RX = plain(not, st0)
-        if (isVariantExpr(l) && !isVariantExpr(r)) {
+        // s472: a bare CONSTRUCTION `.V(…)` takes the other operand's type as a bare `.V` does (§14.10)
+        if (isBareVariantish(l) && !isBareVariantish(r)) {
             rr = resolveExpr(env, r, not, st0)
             rl = resolveExpr(env, l, rr.x.ty, rr.st)
             rr = { x: rr.x, st: rl.st }
@@ -11818,6 +11989,7 @@ ${
             .VLit(lit: l) :> ""
             .VVariant(enumSym: s) :> ""
             .VStructOf(ty: s) :> ""
+            .VConstruct(enumSym: s) :> ""
             .VOp(op: o) :> ""
             .VHost(call: c) :> ""
             .VSeqCall(op: o) :> ""
@@ -11836,6 +12008,7 @@ ${
             .VLit(lit: l) :> false
             .VVariant(enumSym: s) :> false
             .VStructOf(ty: s) :> false
+            .VConstruct(enumSym: s) :> false
             .VOp(op: o) :> false
             .VHost(call: c) :> false
             .VSeqCall(op: o) :> false
@@ -15247,6 +15420,7 @@ ${
             .VLit(lit: l) :> litType(l)
             .VVariant(enumSym: s) :> known(Type.Named(s))
             .VStructOf(ty: s) :> known(Type.Named(s))
+            .VConstruct(enumSym: s) :> known(Type.Named(s))
             .VOp(op: o) :> VType.Unknown
             .VHost(call: c) :> known(Type.Num)
             .VSeqCall(op: o) :> VType.Unknown
@@ -15266,6 +15440,7 @@ ${
             .VLit(lit: l) :> not
             .VVariant(enumSym: s) :> not
             .VStructOf(ty: s) :> not
+            .VConstruct(enumSym: s) :> not
             .VHost(call: c) :> not
             .VSeqCall(op: x) :> not
             .VLambda(params: ps) :> not
@@ -15688,6 +15863,7 @@ ${
             .VLit(lit: l) :> []
             .VVariant(enumSym: s) :> []
             .VStructOf(ty: s) :> []
+            .VConstruct(enumSym: s) :> []
             .VOp(op: o) :> []
             .VHost(call: c) :> []
             .VSeqCall(op: o) :> []
@@ -15705,6 +15881,7 @@ ${
             .VLit(lit: l) :> VType.Unknown
             .VVariant(enumSym: s) :> VType.Unknown
             .VStructOf(ty: s) :> VType.Unknown
+            .VConstruct(enumSym: s) :> VType.Unknown
             .VOp(op: o) :> VType.Unknown
             .VLambda(params: ps) :> VType.Unknown
             .VIndex(loc: x) :> VType.Unknown
@@ -15776,6 +15953,7 @@ ${
             .VLit(lit: l) :> false
             .VVariant(enumSym: s) :> false
             .VStructOf(ty: s) :> false
+            .VConstruct(enumSym: s) :> false
             .VOp(op: o) :> false
             .VHost(call: c) :> false
             .VLambda(params: ps) :> false
@@ -15793,6 +15971,7 @@ ${
             .VLit(lit: l) :> not
             .VVariant(enumSym: s) :> not
             .VStructOf(ty: s) :> not
+            .VConstruct(enumSym: s) :> not
             .VOp(op: o) :> not
             .VHost(call: c) :> not
             .VSeqCall(op: o) :> not
@@ -15823,6 +16002,7 @@ ${
             .VMethod(op: o) :> false
             .VLit(lit: l) :> false
             .VStructOf(ty: s) :> false
+            .VConstruct(enumSym: s) :> false
             .VOp(op: o) :> false
             .VHost(call: c) :> false
             .VSeqCall(op: o) :> false
@@ -15841,6 +16021,7 @@ ${
             .VLit(lit: l) :> false
             .VVariant(enumSym: s) :> false
             .VStructOf(ty: s) :> false
+            .VConstruct(enumSym: s) :> false
             .VOp(op: o) :> false
             .VHost(call: c) :> false
             .VSeqCall(op: o) :> false
@@ -16659,6 +16840,12 @@ ${
     // callee resolves statically to a function (provable-or-silent).
     fn typeCall(env: TEnv, e: AExpr, callee: AExpr, args: AExpr[], ts0: TypeState) -> RVT {
         let ts: TypeState = typeExprs(env, args, ts0)
+        // s472 — a payload-variant construction (resolveConstruct): each argument
+        // against its declared field's type, as a `fail`'s payload (typeFail); its
+        // type is the enum (§66.3 rule 5: "`E.V(…)` is a call whose declared type is
+        // `E`"). The callee names a type and a variant — never a value to type.
+        const cf: ValueFact | not = valueFact(env.t.values, e.nid)
+        if (isConstructFact(cf)) return rvt(valueType(cf), checkConstructArgs(env, cf, args, ts))
         ts = typePlace(env, callee, VType.Unknown, ts)
         const s: Sym | not = calleeFn(nameFact(env.t.names, callee.nid))
         // merge (s469 strings × loops): three independent argument checks, each keyed on its OWN
@@ -17078,6 +17265,62 @@ ${
             i = i + 1
         }
         return ts
+    }
+
+    // s472 — a construction's arguments against the variant's declared fields
+    // (§14.4: one positional argument per declared field, in declaration order;
+    // the count is resolveConstruct's E-TYPE-082). An unresolved field type
+    // (already reported) is not checked, as in typeFail.
+    fn checkConstructArgs(env: TEnv, f: ValueFact | not, args: AExpr[], ts0: TypeState) -> TypeState {
+        let ts: TypeState = ts0
+        const fs: FieldDef[] = constructFields(env.t, f)
+        let i = 0
+        for (const a of args) {
+            if (i < fs.length && env.t.unresolved.fields.indexOf(fs[i].sym.id) < 0) {
+                ts = checkValue(env, exprType0(ts, a.nid), fs[i].ty, a.span, "payload value " + (i + 1) + " (`" + fs[i].sym.hint + "`) of this construction", ts)
+                ts = checkNotElems(env, a, fs[i].ty, ts)
+            }
+            i = i + 1
+        }
+        return ts
+    }
+
+    fn constructFields(t: Tables, f: ValueFact | not) -> FieldDef[] {
+        return match f {
+            .VConstruct(enumSym: s, idx: i) :> armFields(t, s, FailFact.FArm(i))
+            .VLit(lit: l) :> []
+            .VVariant(enumSym: s) :> []
+            .VStructOf(ty: s) :> []
+            .VOp(op: o) :> []
+            .VHost(call: c) :> []
+            .VSeqCall(op: o) :> []
+            .VLambda(params: ps) :> []
+            .VIndex(loc: x) :> []
+            .VAt :> []
+            .VTemplate(text: tx) :> []
+            .VToEnum(enumSym: s) :> []
+            .VMethod(op: o) :> []
+            not :> []
+        }
+    }
+
+    fn isConstructFact(f: ValueFact | not) -> boolean {
+        return match f {
+            .VConstruct(enumSym: s) :> true
+            .VLit(lit: l) :> false
+            .VVariant(enumSym: s) :> false
+            .VStructOf(ty: s) :> false
+            .VOp(op: o) :> false
+            .VHost(call: c) :> false
+            .VSeqCall(op: o) :> false
+            .VLambda(params: ps) :> false
+            .VIndex(loc: x) :> false
+            .VAt :> false
+            .VTemplate(text: tx) :> false
+            .VToEnum(enumSym: s) :> false
+            .VMethod(op: o) :> false
+            not :> false
+        }
     }
 
     fn failFields(t: Tables, f: FailFact | not) -> FieldDef[] {
@@ -18410,6 +18653,7 @@ ${
             .VVariant(enumSym: s) :> false
             .VOp(op: o) :> false
             .VStructOf(ty: t) :> false
+            .VConstruct(enumSym: t) :> false
             .VLambda(params: ps) :> false
             .VIndex(loc: x) :> false
             .VAt :> true

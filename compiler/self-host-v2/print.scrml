@@ -319,6 +319,7 @@ ${
             .Match(scrut: s, arms: arms) :> matchJs(ctx, s, arms)
             .ArrayOf(elems: es) :> JsExpr.JArray(exprsJs(ctx, es))
             .StructOf(ty: ty, fields: fs) :> structJs(ctx, ty, fs)
+            .VariantOf(enumSym: es, idx: vi, args: va) :> variantValueJs(ctx, es, vi, va)   // s472: THE ENUM VALUE SHAPE, as a `fail` builds it
             .Handle(inst: i) :> instJs(ctx, i)
             .InitOf(decl: d, inst: i, idx: x) :> rtCall(ctx, "initial", [instJs(ctx, i), JsExpr.JAnnot(jnum(x), memberName(ctx, d, x))])
             .Host(call: c) :> hostJs(c)
@@ -1822,6 +1823,7 @@ ${
             .Match(scrut: x) :> -1
             .ArrayOf(elems: x) :> -1
             .StructOf(ty: x) :> -1
+            .VariantOf(enumSym: x) :> -1
             .Handle(inst: x) :> -1
             .InitOf(decl: x) :> -1
             .Host(call: x) :> -1
@@ -1992,6 +1994,7 @@ ${
             .Match(scrut: x) :> []
             .ArrayOf(elems: x) :> []
             .StructOf(ty: x) :> []
+            .VariantOf(enumSym: x) :> []
             .Handle(inst: x) :> []
             .InitOf(decl: x) :> []
             .Host(call: x) :> []
@@ -2456,6 +2459,7 @@ ${
             .Match(scrut: s) :> false
             .ArrayOf(elems: es) :> false
             .StructOf(ty: t) :> false
+            .VariantOf(enumSym: t) :> false
             .Handle(inst: i) :> false
             .Host(call: c) :> false
             .Lambda(params: ps) :> false
@@ -2672,6 +2676,7 @@ ${
             .Match(scrut: x) :> false
             .ArrayOf(elems: x) :> false
             .StructOf(ty: x) :> false
+            .VariantOf(enumSym: x) :> false
             .Handle(inst: x) :> false
             .InitOf(decl: x) :> false
             .Host(call: x) :> false
@@ -2871,6 +2876,7 @@ ${
             .Match(scrut: x) :> not
             .ArrayOf(elems: x) :> not
             .StructOf(ty: x) :> not
+            .VariantOf(enumSym: x) :> not
             .Handle(inst: x) :> not
             .InitOf(decl: x) :> not
             .Host(call: x) :> not
@@ -2987,6 +2993,7 @@ ${
             .Match(scrut: x) :> not
             .ArrayOf(elems: x) :> not
             .StructOf(ty: x) :> not
+            .VariantOf(enumSym: x) :> not
             .Handle(inst: x) :> not
             .InitOf(decl: x) :> not
             .Host(call: x) :> not

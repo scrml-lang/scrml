@@ -234,6 +234,14 @@ ${
         Match(scrut: Expr, arms: MatchArm[]),
         ArrayOf(elems: Expr[]),
         StructOf(ty: Sym, fields: Expr[]),
+        // s472 — a PAYLOAD variant value `E.V(a, b)` / `.V(a, b)` (§14.4
+        // "Construction arity": one positional argument per declared field, in
+        // declaration order). `args.length` is the variant's field count, ≥ 1
+        // (analyze refuses any other arity, E-TYPE-082). A NULLARY variant stays
+        // `Lit(Literal.Variant)` — one spelling per shape. The runtime value is
+        // THE ENUM VALUE SHAPE (print.scrml variantValueJs), the same value a
+        // `fail` builds.
+        VariantOf(enumSym: Sym, idx: int, args: Expr[]),
         Handle(inst: InstRef),
         // D15 (M2 fix round, F-B): the value field `idx` of `inst` was
         // CONSTRUCTED with — that instance's own initializer (a use-site value,
