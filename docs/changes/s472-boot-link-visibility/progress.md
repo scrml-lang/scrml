@@ -60,3 +60,26 @@ export/import boundary was not enforced at use sites.
   status=open); filed g-boot-component-scope-key-bare-name-s472, g-boot-type-unknown-code-s472;
   counts regenerated (master-list recent-sessions hunk reverted).
 - pushed; PR #1606 (not merged). Local: slices job + e2e-render-map green; pre-commit hook 50371 pass / 0 fail.
+
+## Review round 1 (S239 review of 67bd70862 — LAND-WITH-FOLLOWUPS; ~/.cache/scrml/review/s472-l1/REVIEW.md)
+
+- F1 (MED, head-only over-refusal): `match pick() { .Red, .Blue }` with only `pick` imported was
+  E-TYPE-VARIANT. §18.13: "`.VariantName` (shorthand) SHALL be valid when the matched value's type
+  can be inferred by the compiler from context." Fix: `callEnumOf` — a call of a function in scope
+  whose declared return is an enum names that enum BY IDENTITY (armsSubject `pref`); otherwise the
+  in-scope search, then (an unannotated local) every user enum. A wrong pick is caught by the
+  typer's `plainSubjectCheck` ("the arms are variants of `E`, but the subject is `F`", Sym identity)
+  — pinned by match-mislink-private-enum (call and local).
+- F2 (MED, fail-open, base too): scope keyed (file, name) → importing exported `type Tag` brought a
+  private `fn Tag`. Fix: `NameKind { KType, KFn, KDecl }` on OwnName / ScopeName; an import adds one
+  entry per EXPORTED declaration of the name (`exportedEntries`); every lookup passes its kind;
+  `elsewhereNote` is kind-aware. decl-fn-same-name-onefile: SPEC silent (§7.6 names `let` /
+  `function` duplicates; E-NAME-COLLIDES-STATE is local-vs-cell) → filed
+  g-boot-decl-fn-same-name-one-file-s472, no refusal invented.
+- F3 (LOW/MED, head-only): FnW gains `file`; a `()name` key resolves in the calling function's file
+  (`fnwIn`), a callee's own `()` keys are not re-read in the caller's scope; each file's TEnv gets
+  the write sets in scope there. writeset-overrefuse clean and runs "3"; writeset-converse still
+  reports.
+- F4 (LOW): `sameNameNote` — "two different types named `Color`: the expected one is declared in
+  `pick.scrml`, this value's in `colors2.scrml`".
+- tests: +11 in visibility-s472.test.js (32 total).
