@@ -8,7 +8,7 @@
 // §57 are pinned as divergences (so a fix on either side is noticed).
 
 import { describe, expect, test } from "bun:test";
-import { mkdtempSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { compileScrml } from "../../src/api.js";
@@ -61,6 +61,7 @@ const files = readdirSync(out);
 const serverJs = readFileSync(join(out, "app.server.js"), "utf8");
 const clientJs = readFileSync(join(out, "app.client.js"), "utf8");
 const runtimeJs = readFileSync(join(out, files.find((f) => /^scrml-runtime.*\.js$/.test(f))), "utf8");
+rmSync(dir, { recursive: true, force: true }); // s471-slice-tmp-leak: everything used below is read into memory
 
 function extractFn(src, name) {
   const start = src.indexOf(`function ${name}(`);

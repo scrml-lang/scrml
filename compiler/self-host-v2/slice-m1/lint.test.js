@@ -6,13 +6,20 @@
 // red at the exact line, removes it, asserts green; plus unit cases for every
 // pattern shape the lint classifies.
 
-import { describe, test, expect } from "bun:test";
-import { cpSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { describe, test, expect, afterEach } from "bun:test";
+import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { lintText, lintTree } from "../../../scripts/lint-no-default-arm.js";
 
 const TREE = join(import.meta.dir, "..");
+
+// s471-slice-tmp-leak: each scratch copy of the bootstrap tree is removed after its test,
+// pass or fail — outside the S448 tmp root (a `bun test` not run from the repo root) they
+// piled up in /tmp.
+const scratches = [];
+const afterThis = (dir) => scratches.push(dir);
+afterEach(() => { for (const d of scratches.splice(0)) rmSync(d, { recursive: true, force: true }); });
 
 const PLANT = `
     export fn isScalar(t: Type) -> boolean {
@@ -33,6 +40,7 @@ describe("lint-no-default-arm — bite on the real tree", () => {
 
   test("RED on a planted `_ :>` over the Core `Type` enum; GREEN once removed", () => {
     const scratch = mkdtempSync(join(tmpdir(), "no-default-arm-"));
+    afterThis(scratch);
     cpSync(TREE, scratch, { recursive: true });
     const corePath = join(scratch, "core.scrml");
     const clean = readFileSync(corePath, "utf8");
@@ -100,6 +108,7 @@ describe("lint-no-default-arm — pattern classification", () => {
   });
   test("F8 bite on the real tree: plant a wildcard inside a later alternation in core.scrml → RED; remove → GREEN", () => {
     const scratch = mkdtempSync(join(tmpdir(), "no-default-arm-alt-"));
+    afterThis(scratch);
     cpSync(TREE, scratch, { recursive: true });
     const corePath = join(scratch, "core.scrml");
     const clean = readFileSync(corePath, "utf8");

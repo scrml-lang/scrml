@@ -12,7 +12,7 @@
 // is test scaffolding over a copy of the output — the printer never reads it.
 
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { copyFileSync, mkdtempSync, writeFileSync } from "node:fs";
+import { copyFileSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { loadBootstrap } from "./harness.js";
@@ -103,6 +103,9 @@ export async function loadProgram(core, name, expose = []) {
 
   const rt = await import(join(dir, "scrml-runtime.js"));
   const program = await import(join(dir, `${name}.client.js`));
+  // s471-slice-tmp-leak: both modules are loaded (the program's import of the runtime is
+  // static), so the files are not needed again.
+  rmSync(dir, { recursive: true, force: true });
   return { rt, program, out, dir };
 }
 
