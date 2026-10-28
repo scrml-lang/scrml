@@ -3321,6 +3321,33 @@ ${
         return "the target element field grants no write (its own contract, dpa-052 Q3)"
     }
 
+    // s472 r1 F1 — a PositionAt replaces the ELEMENT: a tape element is a `replace` of
+    // that inner tape, judged by ITS grants (§66.12.6 rule 1); a struct element replaces
+    // each tape field it changes (rule 4, elemAtTapeKept).
+    fn positionTapeProblem(p: CoreProgram, f: Field, value: Expr) -> string {
+        const et: Type | not = seqElemOf(f.ty)
+        if (et is not) return ""
+        const ig: boolean | not = seqReplaceOf(unMaybeC(et))
+        if (ig is given) {
+            if (!ig) return "a PositionAt replaces an element of `" + f.sym.hint + "` that is itself a tape, whose grants give no `replace` (§66.12.6 rule 1)"
+            return ""
+        }
+        return elemAtTapeKept(p, f, value, [])
+    }
+
+    // A tape type's own `replace` grant; `not` for a type that is not a tape.
+    fn seqReplaceOf(t: Type) -> boolean | not {
+        return match t {
+            .Seq(elem: e, grants: g) :> g.replace
+            .Named(sym: s) :> not
+            .Maybe(inner: i) :> not
+            .Int :> not
+            .Num :> not
+            .Str :> not
+            .Bool :> not
+        }
+    }
+
     fn seqElemOf(t: Type) -> Type | not {
         return match t {
             .Seq(elem: e) :> e
@@ -3428,7 +3455,7 @@ ${
             .FieldAt(path: path) :> fieldAtTapeKept(p, f.ty, value, d, inst, base, path, f.sym.hint)
             .ElemAt(index: ix, path: path) :> elemAtTapeKept(p, f, value, path)
             // s472: the element is replaced whole — each tape field of it the value changes is a `replace` of that field (rule 4)
-            .PositionAt(index: ix) :> elemAtTapeKept(p, f, value, [])
+            .PositionAt(index: ix) :> positionTapeProblem(p, f, value)
             .Transition :> ""
             .Append :> ""
             .Prepend :> ""

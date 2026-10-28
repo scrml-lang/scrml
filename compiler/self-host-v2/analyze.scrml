@@ -7968,6 +7968,18 @@ ${
         return [{ code: "E-WRITE-NOT-GRANTED", msg: "`" + label + " = …` is a position write (§66.12.6 rule 3: `xs[i] = v` is granted by `write`), which the tape's type (`" + tyText + "`) does not grant — add `write` to its grants (§66.12.2)" }]
     }
 
+    // s472 r1 F1 — a position write REPLACES the element. When the element is itself a
+    // tape (a tape of tapes), that is a `replace` of the inner tape, judged by ITS grants
+    // (§66.12.6 rule 1: "A tape's grants govern every write to it … in each position that
+    // can hold one"; rule 4's reading, as a struct element's tape fields are judged by
+    // checkStructTapes). `elem`: the element type written.
+    fn elemTapeReplaceProblem(elem: Type, label: string) -> TapeDiag[] {
+        const tg: GrantSet | not = tapeGrants(elem)
+        if (tg is not) return []
+        if (grantsAdmit(tg, EditKind.Replace)) return []
+        return [{ code: "E-WRITE-NOT-GRANTED", msg: "`" + label + " = …` replaces an element that is itself a tape (`" + tapeTypeName(elem) + "`): replacing it is a `replace` of that inner tape, which its type does not grant — a tape's grants govern it in every position, an element of another tape included (§66.12.6 rules 1 and 4); edit it in place (`" + label + "[j] = …`, `.append(…)` where granted) or add `replace` to the inner tape's grants" }]
+    }
+
     // s472 — a position write of a tape held by a local, or reached through one:
     // judged by the tape TYPE's grants (§66.12.3 "Permissions live on the TYPE").
     // `tyText` names the type for the message (an inferred one says so).
@@ -8797,6 +8809,8 @@ ${
             if (f.mode == FieldMode.Derived) return addDiag(st, env.file, e.span, "E-DERIVED-VALUE-MUTATE", "`@" + f.sym.hint + "` is derived — an in-place edit of a derived value is an error (§6.6.18, §66.9)")
             return addDiag(st, env.file, e.span, pd[0].code, pd[0].msg)
         }
+        const ed: TapeDiag[] = elemTapeReplaceProblem(elem, label)
+        if (ed.length > 0) return addDiag(st, env.file, e.span, ed[0].code, ed[0].msg)
         // the element is replaced whole: each tape field of it the value changes is a
         // `replace` of that field, judged by its own grants (§66.12.6 rule 4)
         const stt: AS = checkStructTapes(env, elem, value, "", label, e.span, st)
@@ -9027,6 +9041,9 @@ ${
             }
             const pd: TapeDiag[] = tapePositionProblem(judged, label, tyText)
             if (pd.length > 0) return addDiag(st, env.file, e.span, pd[0].code, pd[0].msg)
+            // r1 F1: an element that is itself a tape is replaced — its own grants
+            const ed: TapeDiag[] = elemTapeReplaceProblem(t, label)
+            if (ed.length > 0) return addDiag(st, env.file, e.span, ed[0].code, ed[0].msg)
             // the element is replaced whole — its tape fields by their own grants (rule 4)
             const stt: AS = checkStructTapes(env, t, value, "", label, e.span, st)
             if (stt.diags.length > st.diags.length) return stt
@@ -24167,7 +24184,19 @@ ${
             .Template(quasis: x) :> false
         }
         if (bare) return r
-        return linExpr(cx, target, r.st)
+        // s472 r1 F2 — a write to a PART of a `lin` binding (`t.n = v`, `t[i] = v`)
+        // rebinds it to a copy (value semantics), and nothing may read that copy (a
+        // later read is a second use). §35.2: "The binding is immutable — the developer
+        // cannot assign a new value to a `lin` variable after declaration"; "The
+        // compiler SHALL reject any reassignment to a `lin`-declared identifier".
+        // Refused like the whole rebinding (E-ASSIGN-CONST); it still counts as the
+        // appearance it is (no cascading E-LIN-001).
+        let s1: LinSt = r.st
+        const rn: AExpr | not = partRootName(target)
+        if (rn is given) {
+            if (linIndex(cx, rn, s1) >= 0) s1 = linDiag(cx, s1, "E-ASSIGN-CONST", target.span, "`" + exprLabel(target) + " = …` writes a part of the `lin` variable `" + exprName(rn) + "` — a `lin` binding is immutable and the compiler SHALL reject any reassignment of it (§35.2); a part write rebinds it to a copy nothing may read (a later read is a second use). Build the new value where the `lin` is consumed (pass it to the function that makes it)")
+        }
+        return linExpr(cx, target, s1)
     }
 
     export fn analyze(files: FileAst[], entry: string) -> TypedProgram {

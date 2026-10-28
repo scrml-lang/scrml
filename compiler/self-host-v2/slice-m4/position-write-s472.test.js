@@ -239,11 +239,39 @@ describe("B — a write to a part of a local (value semantics; §66.11.4, §66.1
     expect(codes(prog(decls, `        @shown = "x";`))).toContain("E-TYPE-031");
   });
 
-  test("a part write of a `lin` is an appearance — a consumption (§35.2): after a use, or followed by one, E-LIN-002", () => {
+  // review r1 F2: §35.2 — "The binding is immutable … The compiler SHALL reject any reassignment to a
+  // `lin`-declared identifier": a part write rebinds it to a copy nothing may read — refused like `t = …`
+  test("a part write of a `lin` binding is refused like its reassignment — E-ASSIGN-CONST (§35.2)", () => {
     const decls = `    type T:struct = { let n: int }\n    <c:T=({ n: 1 })/>\n    function use(t: T) -> int {\n        return t.n;\n    }`;
-    expect(codes(prog(decls, `        lin t = @c;\n        const a: int = use(t);\n        t.n = 2;`))).toEqual(["E-LIN-002"]);
-    expect(codes(prog(decls, `        lin t = @c;\n        t.n = 2;\n        const a: int = use(t);`))).toEqual(["E-LIN-002"]);
-    clean(prog(decls, `        lin t = @c;\n        t.n = 2;`));
+    expect(codes(prog(decls, `        lin t = @c;\n        t.n = 2;`))).toEqual(["E-ASSIGN-CONST"]);
+    expect(codes(prog(decls + `\n    function f(lin t: T) -> int {\n        t.n = 2;\n        return 1;\n    }`, `        @shown = "x";`))).toEqual(["E-ASSIGN-CONST"]);
+    // after a use it is ALSO a second use
+    expect(codes(prog(decls, `        lin t = @c;\n        const a: int = use(t);\n        t.n = 2;`))).toEqual(["E-ASSIGN-CONST", "E-LIN-002"]);
+  });
+
+  // review r1 F1: an element that is itself a tape — replacing it is a `replace` of the INNER tape,
+  // judged by its own grants (§66.12.6 rules 1 and 4) — cell, local, parameter, nested depth, and C3
+  test("an element that is itself a tape: replacing it needs the INNER tape's `replace` — cell, local, parameter, nested", () => {
+    const G = (inner) => `    <g:int[${inner}][write]=([[1, 2]])/>`;
+    expect(codes(prog(G("free, append"), `        @g[0] = [];`))).toEqual(["E-WRITE-NOT-GRANTED"]);
+    clean(prog(G("free, append, replace"), `        @g[0] = [];`));
+    expect(codes(prog(G("free, append"), `        let h: int[free, append][write] = @g;\n        h[0] = [];`))).toEqual(["E-WRITE-NOT-GRANTED"]);
+    expect(codes(prog("    fn f(h: int[free, append][write]) -> int {\n        h[0] = [];\n        return h[0].length;\n    }", `        @shown = "x";`))).toEqual(["E-WRITE-NOT-GRANTED"]);
+    expect(codes(prog("", `        let d: int[free, append][write][write] = [[[1]]];\n        d[0][0] = [];`))).toEqual(["E-WRITE-NOT-GRANTED"]);
+    clean(prog("", `        let d: int[free, append, replace][write][write] = [[[1]]];\n        d[0][0] = [];`));
+    // the middle tape grants `write` but not `replace`: replacing ITS element-tape is refused too
+    expect(codes(prog("", `        let d: int[free, append, replace][write][write] = [[[1]]];\n        d[0] = [[2]];`))).toEqual(["E-WRITE-NOT-GRANTED"]);
+    // in place, the inner tape is judged by its own grants (unchanged)
+    clean(prog(G("write"), `        @g[0][0] = 9;`.replace("@g[0][0] = 9;", "let h: int[write][write] = @g;\n        h[0][0] = 9;")));
+  });
+
+  test("Core check C3 refuses a PositionAt that replaces an inner tape without `replace` (defence in depth)", () => {
+    const r = clean(prog(`    <g:int[free, append, replace][write]=([[1, 2]])/>`, `        @g[0] = [];`));
+    const core = structuredClone(r.core);
+    const inner = find(core.decls, (n) => n.variant === "Seq" && (n.data.elem === "Int" || n.data.elem?.variant === "Int") && n.data.grants && n.data.grants.replace === true);
+    expect(inner.length).toBeGreaterThan(0);
+    for (const t of inner) t.data.grants.replace = false;
+    expect(mods.check.checkCore(core).some((m) => m.startsWith("C3:") && m.includes("itself a tape"))).toBe(true);
   });
 });
 

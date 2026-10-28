@@ -28,3 +28,17 @@ Gaps: g-boot-position-write-s472 (HIGH), g-boot-local-part-write-s472 (MED).
   past-end trap question, map-written-back fail-open HIGH). Conformance regen: no bucket movement
   (PASS 254 / FAIL 49 / UNSUPPORTED 825); `defer/return-value-contents-not-frozen` now refused as
   type-unknown instead of "no local part write".
+
+## Review round 1 (S239, ~/.cache/scrml/review/s472-pw/REVIEW.md) — FIX
+- F1 HIGH: a position write of an element that is itself a tape now needs the INNER tape's
+  `replace` (analyze `elemTapeReplaceProblem` in the reader range; C3 `positionTapeProblem`);
+  cell / local / parameter / nested depth tested. Map gap extended to `@g = @g.map(r => [])`.
+- F2 MED: a part write of a `lin` root is E-ASSIGN-CONST (§35.2), in the linear pass (linAssign).
+- F3 LOW: filed g-boot-derived-cell-with-grants-takes-writes-s472 (not fixed here).
+- F4 LOW: filed g-loop-copy-part-write-no-op-s472 (recommend a W- lint).
+  **PA-derived reading, pending bryan's veto:** a contract-free field reached through a `let`
+  local is writable — the same transition as `p = { ...p, f: v }` (§66.11.2, §66.11.5, O57 = no);
+  through a `const` / parameter / loop binder it is refused.
+- F5 info: asymmetry noted — a local ANNOTATION may widen a copy's grants (`let a: string[write] =
+  @xs`), while widening through an ARGUMENT is refused (argTapeProblem); no cell bypass (writing
+  the copy back is a refused `replace`). Recorded in g-boot-local-part-write-residue-s472.
