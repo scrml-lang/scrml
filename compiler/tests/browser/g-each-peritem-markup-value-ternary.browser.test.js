@@ -43,6 +43,15 @@ type Row:struct = { id: string, label: string, active: bool }
 
 const tmpRoot = resolve(tmpdir(), "scrml-each-markup-value-item2");
 
+// S472 (g-browser-baseline-whitespace-red-masks-resolved-guards): the badge text is compared
+// WHITESPACE-INSENSITIVELY in the tests that guard the RESOLVED fix (g-each-peritem-markup-value-
+// ternary), so the still-open, different space defect (g-ast-markup-text-interp-adjacent-space-
+// dropped: "ON alpha" renders "ONalpha") cannot abort them at their first assertion. Before S472
+// all three failed on that space first, sat in FAILURE-BASELINE.json, and the toggle / array-replace
+// / badgeCount assertions after it never ran — a regression of the fix kept the browser gate green.
+// The space defect has ONE dedicated, baselined test at the end of this file.
+const nospace = (s) => String(s).replace(/\s+/g, "");
+
 function compileToOutputs(source, baseName) {
   const uniq = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
   const tmpDir = resolve(tmpRoot, `case-${uniq}`);
@@ -95,7 +104,8 @@ describe("g-each-peritem-markup-value-ternary — item2 (GITI-032 follow-on)", (
     return {
       set: (name, val) => globalThis.__scrml_set__(cellKey(name), val),
       get: (name) => globalThis.__scrml_get__(cellKey(name)),
-      badges: () => [...document.querySelectorAll("span.badge")].map((n) => n.textContent.trim()),
+      badges: () => [...document.querySelectorAll("span.badge")].map((n) => nospace(n.textContent)),
+      rawBadges: () => [...document.querySelectorAll("span.badge")].map((n) => n.textContent.trim()),
       badgeCount: () => document.querySelectorAll("span.badge").length,
     };
   }
@@ -108,7 +118,7 @@ describe("g-each-peritem-markup-value-ternary — item2 (GITI-032 follow-on)", (
       { id: "c", label: "gamma", active: true },
     ]);
     // Only the two active rows render a badge, and the @.label interpolation resolves.
-    expect(app.badges()).toEqual(["ON alpha", "ON gamma"]);
+    expect(app.badges()).toEqual(["ONalpha", "ONgamma"]);
     expect(app.badgeCount()).toBe(2);
   });
 
@@ -118,25 +128,31 @@ describe("g-each-peritem-markup-value-ternary — item2 (GITI-032 follow-on)", (
       { id: "a", label: "alpha", active: false },
       { id: "b", label: "beta", active: true },
     ]);
-    expect(app.badges()).toEqual(["ON beta"]);
+    expect(app.badges()).toEqual(["ONbeta"]);
     const live = app.get("rows");
     // Activate "a" in place — its badge should appear.
     live[0].active = true;
-    expect(app.badges()).toEqual(["ON alpha", "ON beta"]);
+    expect(app.badges()).toEqual(["ONalpha", "ONbeta"]);
     // Deactivate "b" in place — its badge should disappear.
     live[1].active = false;
-    expect(app.badges()).toEqual(["ON alpha"]);
+    expect(app.badges()).toEqual(["ONalpha"]);
   });
 
   test("adversarial: same-key array-replace updates the markup-value label", () => {
     const app = mount(SRC, "replace");
     app.set("rows", [{ id: "a", label: "alpha", active: true }]);
-    expect(app.badges()).toEqual(["ON alpha"]);
+    expect(app.badges()).toEqual(["ONalpha"]);
     // SAME id, NEW label (forces same-key node reuse) — the badge follows live data.
     app.set("rows", [{ id: "a", label: "OMEGA", active: true }]);
-    expect(app.badges()).toEqual(["ON OMEGA"]);
+    expect(app.badges()).toEqual(["ONOMEGA"]);
     // SAME id, now inactive — the badge disappears on the reused node.
     app.set("rows", [{ id: "a", label: "OMEGA", active: false }]);
     expect(app.badgeCount()).toBe(0);
+  });
+
+  test("[gap g-ast-markup-text-interp-adjacent-space-dropped] the badge keeps the space before the interpolation", () => {
+    const app = mount(SRC, "spacing");
+    app.set("rows", [{ id: "a", label: "alpha", active: true }]);
+    expect(app.rawBadges()).toEqual(["ON alpha"]);
   });
 });
