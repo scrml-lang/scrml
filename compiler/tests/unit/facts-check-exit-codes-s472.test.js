@@ -109,19 +109,19 @@ describe("facts.ts --check — exit codes (S472)", () => {
 
 // ------------------------------------------------------------- caller mapping
 
-/** A dir holding a stub `bun` that exits $FAKE_RC (and prints which code it returned). */
+/** A dir holding a stub `bun` that prints $FAKE_OUT (or which code it returns) and exits $FAKE_RC. */
 let stubDir;
 beforeAll(() => {
   stubDir = mkdtempSync(join(tmpdir(), "facts-s472-stub-"));
-  writeFileSync(join(stubDir, "bun"), `#!/bin/sh\necho "stub bun rc=$FAKE_RC"\nexit "$FAKE_RC"\n`);
+  writeFileSync(join(stubDir, "bun"), `#!/bin/sh\nprintf '%s\\n' "\${FAKE_OUT:-stub bun rc=$FAKE_RC}"\nexit "$FAKE_RC"\n`);
   chmodSync(join(stubDir, "bun"), 0o755);
 });
 afterAll(() => rmSync(stubDir, { recursive: true, force: true }));
 
-function runShell(script, rc) {
+function runShell(script, rc, out = "") {
   const r = spawnSync("bash", ["-c", script], {
     encoding: "utf8",
-    env: { ...process.env, PATH: `${stubDir}:${process.env.PATH}`, FAKE_RC: String(rc) },
+    env: { ...process.env, PATH: `${stubDir}:${process.env.PATH}`, FAKE_RC: String(rc), FAKE_OUT: out },
   });
   return { rc: r.status, out: (r.stdout ?? "") + (r.stderr ?? "") };
 }
@@ -181,4 +181,24 @@ describe("pre-push facts block — only exit 4 is a warning", () => {
       expect(r.out).not.toContain("WARN");
     });
   }
+  // VERSION SKEW: the hook runs from the main checkout against the PUSHED tree's facts.ts, and a
+  // branch cut before S472 still exits 1 for stale. rc 1 is stale only with facts.ts's own verdict.
+  const LEGACY_STALE = "  STALE @generated:facts-table (docs/FACTS.md)\n\nSTALE — docs/FACTS.md is out of date with this tree. main is regenerated automatically after";
+  test("rc 1 WITH the legacy facts.ts stale verdict → WARN, not failed (a pre-S472 branch)", () => {
+    const r = runShell(prePushFactsBlock(), 1, LEGACY_STALE);
+    expect(r.out).toContain("WARN");
+    expect(r.out).toContain("CURRENCY_FAILED=0");
+  });
+  test("rc 1 with a stack trace and no verdict → blocked", () => {
+    const r = runShell(prePushFactsBlock(), 1, "TypeError: x is not a function\n    at scripts/facts.ts:311");
+    expect(r.out).toContain("CURRENCY_FAILED=1");
+  });
+  test("rc 1 with the verdict text AND a CRASHED line → blocked (a crash never passes as stale)", () => {
+    const r = runShell(prePushFactsBlock(), 1, `${LEGACY_STALE}\nfacts: CRASHED — boom`);
+    expect(r.out).toContain("CURRENCY_FAILED=1");
+  });
+  test("the verdict line mid-line (not facts.ts's own line) does not count", () => {
+    const r = runShell(prePushFactsBlock(), 1, "error: expected STALE — docs/FACTS.md is out of date");
+    expect(r.out).toContain("CURRENCY_FAILED=1");
+  });
 });

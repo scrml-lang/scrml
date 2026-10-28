@@ -154,11 +154,21 @@ if [ "$HAS_UPDATE" = "1" ]; then
   # push and a branch should not commit a regen. Exit 4 = stale → warn; any other non-zero blocks:
   # 2 = zero measurement, 3 = missing anchor, 5 = dangling symlink, and 1 = bun's uncaught-exception
   # code — S472: stale used to be 1, so a CRASHING facts.ts was warned through as "figures differ".
+  # VERSION SKEW: this hook runs from the MAIN checkout (core.hooksPath is absolute), but it runs the
+  # PUSHED worktree's facts.ts — which, on a branch cut before S472, still exits 1 for stale. So rc 1
+  # is read as stale ONLY when facts.ts's own stale verdict line ("STALE — docs/FACTS.md is out of
+  # date") is in the output and no "facts: CRASHED" line is; a bare rc 1 (a throw, a syntax error, a
+  # failed import) still blocks.
   # (The block between the BEGIN/END markers is run verbatim by facts-check-exit-codes-s472.test.js.)
   # BEGIN facts-currency
   FACTS_RC=0
-  bun scripts/facts.ts --check >/dev/null 2>&1 || FACTS_RC=$?   # `|| …` — this hook runs under set -e
-  if [ "$FACTS_RC" = "4" ]; then
+  FACTS_OUT=$(bun scripts/facts.ts --check 2>&1) || FACTS_RC=$?   # `|| …` — this hook runs under set -e
+  FACTS_LEGACY_STALE=0
+  if [ "$FACTS_RC" = "1" ] && printf '%s\n' "$FACTS_OUT" | grep -q '^STALE — docs/FACTS.md is out of date' \
+     && ! printf '%s\n' "$FACTS_OUT" | grep -q '^facts: CRASHED'; then
+    FACTS_LEGACY_STALE=1
+  fi
+  if [ "$FACTS_RC" = "4" ] || [ "$FACTS_LEGACY_STALE" = "1" ]; then
     echo "  WARN   docs/FACTS.md figures differ from this tree (non-blocking; regenerated on main after merge)"
   elif [ "$FACTS_RC" != "0" ]; then
     bun scripts/facts.ts --check || true
