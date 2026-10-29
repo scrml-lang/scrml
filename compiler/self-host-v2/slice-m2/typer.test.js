@@ -489,8 +489,14 @@ describe("G — `<each in=>` literals, row-scoped handles, exclusive arms", () =
     expect(inApp("    let <b:bool=false/>", "<div if=@b><dropdown as=x label=\"1\" options=([\"a\"])/></div><div if=(!@b)><dropdown as=x label=\"2\" options=([\"a\"])/></div>"))
       .toEqual(["E-HANDLE-REDECLARE"]);
   });
-  test("silent — a mixed-arm ternary (`@b ? 1 : \"s\"`) into an int cell: unprovable", () => {
-    expect(inApp("    let <b:bool=false/>\n    let <x:int=0/>\n    function f() { @x = @b ? 1 : \"s\"; }")).toEqual([]);
+  // FLIPPED (s472) — g-boot-mixed-arm-type-unresolved-fail-open-s472: the arms are KNOWN (`int`,
+  // `string`), so the ternary is a choice of both, and each arm must fit the write (§66.1 rule 5) —
+  // the `"s"` arm does not. Was: silent ("unprovable"), and `@x` held a string at run time.
+  test("E-TYPE-031 (s472) — a mixed-arm ternary (`@b ? 1 : \"s\"`) into an int cell: the `string` arm does not fit", () => {
+    expect(inApp("    let <b:bool=false/>\n    let <x:int=0/>\n    function f() { @x = @b ? 1 : \"s\"; }")).toEqual(["E-TYPE-031"]);
+  });
+  test("twin (s472) — a ternary whose arms share a type (`@b ? 1 : 2.5`, `number`) into a number cell is silent", () => {
+    expect(inApp("    let <b:bool=false/>\n    let <x:number=0/>\n    function f() { @x = @b ? 1 : 2.5; }")).toEqual([]);
   });
 });
 

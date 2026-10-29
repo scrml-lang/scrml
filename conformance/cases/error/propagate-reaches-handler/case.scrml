@@ -37,4 +37,4 @@ ${
 }
 
 <button id="btn-missing" onclick=handleMissing()>missing</>
-<div id="out">${@phase}</>
+<div id="out">phase</>

@@ -29,4 +29,4 @@ ${
 }
 
 <button id="btn-empty" onclick=handleEmpty()>empty</>
-<div id="out">${@phase}</>
+<div id="out">phase</>
