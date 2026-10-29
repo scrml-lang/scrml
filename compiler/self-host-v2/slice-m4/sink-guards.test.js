@@ -150,12 +150,18 @@ describe("§5.2 rule 3 — every bound URL attribute is judged at runtime (one g
   test("a value a declaration's field supplies is judged where the body writes it", () => {
     expect($$("a.lnk").map((a) => a.getAttribute("href"))).toEqual(["about:blank", "/fine"]);
   });
-  test("SVG animation values: a static URL target, a non-URL target, `values` per entry, a computed target", () => {
+  // s473: s2 and s5 were "a non-URL target is written unchanged" (`javascript:alert(1)`) and "a computed
+  // target admits a relative URL" (`/ok?a=1`). `fill` is read as CSS, and its `url(…)` is a fetch
+  // (gap g-boot-svg-presentation-attr-css-url-unguarded-s472), so a value animating it — and one
+  // animating an attribute named at runtime, which may be `fill` — is also judged by `cssValueOf`;
+  // neither value is a plain CSS value, so the attribute is removed (reported by the css-guard, not
+  // here). The pack for that guard is css-url-guard-s473.test.js.
+  test("SVG animation values: a static URL target, a CSS target, `values` per entry, a computed target", () => {
     expect($("#s1").getAttribute("to")).toBe("about:blank");
-    expect($("#s2").getAttribute("to")).toBe("javascript:alert(1)");
+    expect($("#s2").hasAttribute("to")).toBe(false);
     expect($("#s3").getAttribute("values")).toBe("about:blank");
     expect($("#s4").getAttribute("to")).toBe("about:blank");
-    expect($("#s5").getAttribute("to")).toBe("/ok?a=1");
+    expect($("#s5").hasAttribute("to")).toBe(false);
   });
   test("every refusal reports once, naming the attribute — never the value", () => {
     // e, h, d (initial `/start` admitted; the re-write refused), sp, up, ss, f, ob, row 1, lnk 1, s1, s3, s4

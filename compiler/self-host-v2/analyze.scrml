@@ -14249,6 +14249,31 @@ ${
         }
     }
 
+    // s473 — does this `<link>`'s `rel` load (or may it load) a stylesheet? Ruled
+    // S472 (user-voice-scrml.md "five PA recs" item 3): "A data-bound `href` on a
+    // `<link>` whose `rel` contains `stylesheet` (or is computed) is REFUSED." A
+    // `rel` that is not a static quoted string (`rel=@r`, `rel=(…)`, `{…}`) is
+    // computed. A static one is matched ASCII case-insensitively for the text
+    // `stylesheet` anywhere (a superset of the HTML token test — `alternate
+    // stylesheet`, any whitespace — fail closed). A `&` (a character reference
+    // the browser decodes: `style&#115;heet`) or a `$` + `{` (a template) makes
+    // the static text unprovable: treated as computed.
+    fn linkRelLoadsSheet(attrs: AAttr[]) -> boolean {
+        for (const a of attrs) {
+            if (a.name.toLowerCase() == "rel") {
+                const sheet: boolean = match a.value {
+                    .Quoted(v: s) :> s.toLowerCase().indexOf("stylesheet") >= 0 || s.indexOf("&") >= 0 || s.indexOf("$" + "{") >= 0
+                    .NoValue :> false
+                    .Bare(e: x) :> true
+                    .Paren(e: x) :> true
+                    .Braced(b: b) :> true
+                }
+                if (sheet) return true
+            }
+        }
+        return false
+    }
+
     // s462 — an attribute's parenthesized expression value `name=(…)`.
     fn parenValue(v: AAttrValue) -> boolean {
         return match v {
@@ -14387,12 +14412,23 @@ ${
                 // channel for a cell's value into CSS is `@name` in a `#{}`
                 // (§25.7 bridge, the runtime's cssValueOf). It is NOT the only
                 // one: a bound SVG presentation attribute (`fill=` `filter=`
-                // `mask=` `cursor=` … and SMIL `to=` animating one) still
-                // writes data as CSS — gap
-                // g-boot-svg-presentation-attr-css-url-unguarded-s472. In a
+                // `mask=` `cursor=` … and SMIL `to=` animating one) writes data
+                // as CSS — judged at runtime by the same cssValueOf (s473, gap
+                // g-boot-svg-presentation-attr-css-url-unguarded-s472). In a
                 // declaration's body it is reported once, at the definition.
                 st = resolveValue(penv, a.value, not, st)
                 st = addDiag(st, env.file, a.span, "E-STYLE-VALUE-NOT-STYLE", "`" + a.name + "=` on `<" + e.tag + ">` takes its value from data (an expression, a variable, a call or a field), and only a quoted string literal or a `style`-typed value applies a style — an arbitrary runtime string written into `style` is CSS built from data (`url(…)` fetches, `@import`, overlays). Write the style as a static `style=\"…\"`, put the dynamic part in a `#" + "{…}` rule as `@cell` (§25.7 — the bridge admits only a plain CSS value), or switch a class with `class=(…)` (§65.4.2)")
+            } else if (valueExpr(a.value) is given && a.name.toLowerCase() == "href" && e.tag.toLowerCase() == "link" && linkRelLoadsSheet(e.attrs)) {
+                // s473 — §5.2 "Data-supplied stylesheets (S472)": "A `<link>`
+                // whose `href` is not a static string … and whose `rel` contains
+                // the text `stylesheet` … or is not a static string SHALL
+                // be a compile error (E-ATTR-STYLESHEET-HREF)". A whole sheet a
+                // cell chooses can do more than inline `style` (attribute-
+                // selector exfiltration, page-wide overlays); the §5.2 URL guard
+                // admits it (https). Gap g-boot-link-stylesheet-href-from-data-s472.
+                // In a declaration's body it is reported once, at the definition.
+                st = resolveValue(penv, a.value, not, st)
+                st = addDiag(st, env.file, a.span, "E-ATTR-STYLESHEET-HREF", "`" + a.name + "=` on `<" + e.tag + ">` takes its value from data (an expression, a variable, a call or a field), and this `<link>`'s `rel` loads a stylesheet (it contains `stylesheet`, or is computed) — data never chooses a stylesheet: a whole sheet can read the page (attribute-selector `url(…)` fetches) and cover it. Write the `href` as a static string (`href=\"/theme.css\"`), switch between static `<link>`s with `if=`, or put the dynamic part in a `#" + "{…}` rule as `@cell` (§25.7) (§5.2)")
             } else if (valueExpr(a.value) is given) {
                 st = resolveValue(penv, a.value, not, st)
                 st = addAttr(st, a.nid, AttrKind.ABound)
