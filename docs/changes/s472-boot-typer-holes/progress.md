@@ -104,3 +104,13 @@ Branch `s472-boot-typer-holes`, base origin/main `e8d2e38cd`. Input: the S472 ba
   {1, "s", (@b ? 1 : "s")} is E-TYPE-001 in all four orders.
 - §34 E-TEXT-NON-PRIMITIVE row: a `{ lift … }` match arm — the match's VALUE is judged where it stands
   (a markup match of a struct is still refused).
+
+## 2026-10-28 — S473 re-merge r3 (#1616, #1624 landed; PR was DIRTY)
+
+- Merged origin/main (80a1edf12, 15 commits; clean textual merge). Main's analyze.scrml change is the
+  map/tape grants work (grant checks), outside the typer — no caller of a helper this PR changed.
+- Regenerated: SPEC-INDEX (`git-merge-generated.ts --regen`: nothing pending), severity.scrml (unchanged),
+  known-gaps counts (`state.ts --write`: unchanged). Gap ids: union(main 2445, branch 2452) = 2452 = result.
+- state.ts also regenerated master-list.md recent-sessions (git-history driven, stale on main, not a CI gate,
+  cloud-maps bot owns it) — discarded, not this PR's change.
+- Hook run on the merged tree: 46752 pass, 0 fail. CI checks + bootstrap slices green.
