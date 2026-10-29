@@ -59,7 +59,7 @@ ${
     import { WireBuild, WireTable, wireBuild, hasFixedLength } from "./codec.scrml"
     import { SqlFacts, SlotQuote, sqlFacts, slotInLiteral, txControl, txControlAware } from "./sql.scrml"
     import { FxAtom, ownAtom, closeDim, witnessOf, atomChain } from "./effects.scrml"
-    import { UrlAttr, StaticSink, classifyStatic, staticExecMessage } from "./url.scrml"
+    import { UrlAttr, StaticSink, classifyStatic, staticExecMessage, logicWriteSink, logicCallSink, attrNameArgIndex, executableAttrName } from "./url.scrml"
 
     // =========================================================================
     // THE TABLES (exported — `lower` consumes them).
@@ -5880,6 +5880,9 @@ ${
     // typeCall (E-TYPE-031, as a `fail`'s payload is — typeFail).
     // =========================================================================
     fn resolveCallOrConstruct(env: Env, e: AExpr, callee: AExpr, args: AExpr[], expected: Type | not, st0: AS) -> RX {
+        // s473 — §5.2 "Executable sinks in plain logic (S473)": judged first
+        const sinkC: string = sinkCallWhy(env, callee, args)
+        if (sinkC != "") return diagX(env, e, "E-LOGIC-EXECUTABLE-SINK", sinkMessage(sinkC), st0)
         const rc: RX | not = resolveConstruct(env, e, callee, args, expected, st0)
         if (rc is given) return rc
         return resolveCall(env, e, callee, args, st0)
@@ -8026,8 +8029,282 @@ ${
         return false
     }
 
+    // =========================================================================
+    // s473 — EXECUTABLE SINKS IN PLAIN LOGIC (s473-boot-plain-logic-dom-sinks).
+    // SPEC §5.2 "Executable sinks in plain logic (S473)" — ruling:user-voice-scrml.md
+    // S473 "⭐ RULED — S473 PA recs: host allowlist Q1–Q4, plain-logic DOM sinks,
+    // impl#1 transport routing" item 2: "Plain client logic: data written to a known
+    // executable sink is a compile ERROR … The set is `innerHTML`, `outerHTML`,
+    // `insertAdjacentHTML`, `srcdoc`, `on*` properties and attributes,
+    // `document.write`/`writeln`, and `eval`/`Function`/string
+    // `setTimeout`/`setInterval`. Every other DOM member stays open".
+    //
+    // The table is url.scrml's (logicWriteSink / logicCallSink — ONE table). The
+    // judgment runs on the typer's own path, FIRST in resolveAssign / resolveCallStmt
+    // / resolveCallOrConstruct, so it holds whatever else the bootstrap does or does
+    // not yet support at that site (a host root, a member call), and a refused site
+    // gets this one report (no cascade). It is syntactic and judges ANY value: a
+    // struct field named `innerHTML` is refused too (fail closed; no type decides it).
+    // "" — not a sink; otherwise the reason, for the message.
+    // =========================================================================
+    type SinkView:struct = { kind: int, name: string, obj: AExpr | not, idx: AExpr | not, elems: AExpr[], props: AProp[] }
+    // kind: 0 other · 1 Name · 2 Member · 3 Index · 4 Str · 5 ArrayLit · 6 ObjectLit · 7 Lambda · 8 Spread · 9 Call
+
+    fn sinkV(kind: int, name: string, obj: AExpr | not, idx: AExpr | not) -> SinkView {
+        return { kind: kind, name: name, obj: obj, idx: idx, elems: [], props: [] }
+    }
+
+    fn sinkElems(es: AExpr[]) -> SinkView {
+        return { kind: 5, name: "", obj: not, idx: not, elems: es, props: [] }
+    }
+
+    fn sinkProps(ps: AProp[]) -> SinkView {
+        return { kind: 6, name: "", obj: not, idx: not, elems: [], props: ps }
+    }
+
+    fn sinkView(e: AExpr) -> SinkView {
+        const k: AExprK = e.k
+        return match k {
+            .Name(name: n) :> sinkV(1, n, not, not)
+            .Member(obj: o, name: n) :> sinkV(2, n, o, not)
+            .Index(obj: o, idx: ix) :> sinkV(3, "", o, ix)
+            .Str(v: s) :> sinkV(4, s, not, not)
+            .ArrayLit(elems: es) :> sinkElems(es)
+            .ObjectLit(props: ps) :> sinkProps(ps)
+            .Lambda(params: lp) :> sinkV(7, "", not, not)
+            .Spread(e: x) :> sinkV(8, "", x, not)
+            .Call(callee: c) :> sinkV(9, "", c, not)
+            .At(name: n) :> sinkV(0, "", not, not)
+            .AtItem :> sinkV(0, "", not, not)
+            .Num(raw: r) :> sinkV(0, "", not, not)
+            .Bool(v: b) :> sinkV(0, "", not, not)
+            .NotLit :> sinkV(0, "", not, not)
+            .Recovered :> sinkV(0, "", not, not)
+            .Variant(name: n) :> sinkV(0, "", not, not)
+            .Unary(op: o) :> sinkV(0, "", not, not)
+            .Binary(op: o) :> sinkV(0, "", not, not)
+            .Ternary(test: t) :> sinkV(0, "", not, not)
+            .Assign(target: t) :> sinkV(0, "", not, not)
+            .Sql(q: q) :> sinkV(0, "", not, not)
+            .Handled(h: x) :> sinkV(0, "", not, not)
+            .Template(quasis: qs) :> sinkV(0, "", not, not)
+            .Foreign(f: fb0) :> sinkV(0, "", not, not)
+        }
+    }
+
+    // A value that is the author's own text: a quoted string literal (§5.2 S473's
+    // "static" — "a value is *static* only when it is a quoted string literal").
+    fn sinkStatic(v: AExpr | not) -> boolean {
+        if (v is not) return false
+        return sinkView(v).kind == 4
+    }
+
+    // Is `e` rooted in a HOST value — a bare name that is no local, function or
+    // constant of the program (`document`, `window`, `globalThis`, an undeclared
+    // name)? A cell (`@x`), a local, a literal or a fresh object is scrml data.
+    // A call's result is judged by its callee. Fail closed on anything else.
+    fn sinkHostRooted(env: Env, e: AExpr) -> boolean {
+        const v: SinkView = sinkView(e)
+        if (v.kind == 1) {
+            if (lookupLocal(env, v.name) is given) return false
+            if (fnNamed(env.g, env.file, v.name) is given) return false
+            if (constNamed(env.g, env.file, v.name) is given) return false
+            return true
+        }
+        if (v.kind == 2 || v.kind == 3 || v.kind == 9) {
+            const o: AExpr | not = v.obj
+            if (o is given) return sinkHostRooted(env, o)
+            return true
+        }
+        return false
+    }
+
+    // A write of member `name` (a property or a literal bracket key) with `value`
+    // (`not` — a destructured value: data).
+    fn sinkWriteWhy(name: string, value: AExpr | not) -> string {
+        const kind: string = logicWriteSink(name)
+        if (kind == "html" && !sinkStatic(value)) return "writes `" + name + "` from data — HTML parsed from data can carry script"
+        if (kind == "exec") {
+            if (name.toLowerCase() == "srcdoc") return "writes `" + name + "` — an inline HTML document the browser runs, script included (a static `srcdoc` is refused too, §5.2 S464)"
+            return "writes the event-handler member `" + name + "` — handlers are scrml logic, written as `" + name.toLowerCase() + "=fn()` on the element, never a value written into the page (§5.2 S464)"
+        }
+        return ""
+    }
+
+    // An assignment target (an element of a destructuring target included).
+    fn sinkTargetWhy(env: Env, t: AExpr, value: AExpr | not) -> string {
+        const v: SinkView = sinkView(t)
+        if (v.kind == 2) return sinkWriteWhy(v.name, value)
+        if (v.kind == 3) {
+            const ix: AExpr | not = v.idx
+            const o: AExpr | not = v.obj
+            if (ix is given && o is given) {
+                const iv: SinkView = sinkView(ix)
+                if (iv.kind == 4) return sinkWriteWhy(iv.name, value)
+                if (sinkHostRooted(env, o)) return "writes a member of a host value by a computed key — the key could name `innerHTML`, `srcdoc` or an `on…` handler, so it is refused (fail closed)"
+            }
+            return ""
+        }
+        if (v.kind == 5) {
+            for (const x of v.elems) {
+                const w: string = sinkTargetWhy(env, x, not)
+                if (w != "") return w
+            }
+            return ""
+        }
+        if (v.kind == 6) {
+            for (const p of v.props) {
+                const w2: string = sinkTargetWhy(env, p.value, not)
+                if (w2 != "") return w2
+            }
+            return ""
+        }
+        if (v.kind == 8) {
+            const inner: AExpr | not = v.obj
+            if (inner is given) return sinkTargetWhy(env, inner, not)
+        }
+        return ""
+    }
+
+    // The member names of a callee chain, root first: `window.document.write` →
+    // [window, document, write]; `eval.call` → [eval, call]. A root that is not a
+    // name (`@el`, a call, a literal) is the placeholder "" — so `@el.setAttribute`
+    // is [ "", setAttribute ], a receiver like any other.
+    fn calleeChain(c: AExpr) -> string[] {
+        const v: SinkView = sinkView(c)
+        if (v.kind == 1) return [v.name]
+        if (v.kind == 2) {
+            const o: AExpr | not = v.obj
+            if (o is given) return calleeChain(o).concat([v.name])
+            return [v.name]
+        }
+        if (v.kind == 3) {
+            const o2: AExpr | not = v.obj
+            const ix: AExpr | not = v.idx
+            if (o2 is given && ix is given) {
+                const iv: SinkView = sinkView(ix)
+                if (iv.kind == 4) return calleeChain(o2).concat([iv.name])
+                return calleeChain(o2).concat(["[computed]"])
+            }
+        }
+        return [""]
+    }
+
+    fn sinkArg(args: AExpr[], i: int) -> AExpr | not {
+        if (i < 0 || i >= args.length) return not
+        return args[i]
+    }
+
+    // A timer's first argument is a function: an arrow, or a name of a declared
+    // function (no local shadows it). Anything else is source text (fail closed).
+    fn sinkIsFunction(env: Env, a: AExpr | not) -> boolean {
+        if (a is not) return true
+        const v: SinkView = sinkView(a)
+        if (v.kind == 7) return true
+        if (v.kind == 1) return lookupLocal(env, v.name) is not && fnNamed(env.g, env.file, v.name) is given
+        return false
+    }
+
+    // An object literal's keys written onto a value (`Object.assign`'s sources).
+    // `fresh`: the target is a fresh object literal (no host value receives the keys).
+    fn sinkPropsWhy(props: AProp[], fresh: boolean) -> string {
+        for (const p of props) {
+            if (p.spread) {
+                if (!fresh) return "copies the keys of a spread `...` onto a value — a key could name a sink, so it is refused (fail closed)"
+            } else {
+                const w: string = sinkWriteWhy(p.name, p.value)
+                if (w != "") return w
+            }
+        }
+        return ""
+    }
+
+    fn sinkCallWhy(env: Env, callee: AExpr, args: AExpr[]) -> string {
+        const ch: string[] = calleeChain(callee)
+        if (ch.length == 0) return ""
+        const last: int = ch.length - 1
+        let i = 0
+        while (i < ch.length) {
+            const s: string = ch[i]
+            const kind: string = logicCallSink(s)
+            const isLast: boolean = i == last
+            if (s == "[computed]" && sinkHostRooted(env, callee)) return "calls a member of a host value by a computed key — the key could name `eval`, `insertAdjacentHTML` or `setAttribute`, so it is refused (fail closed)"
+            if (kind == "exec") return "calls `" + s + "` — it runs source text as JavaScript, a literal included; scrml never builds or runs code from a string"
+            if (kind == "html" && i > 0) {
+                if (!isLast) return "reaches `" + s + "` through `." + ch[last] + "` — an alias of an HTML sink is refused (fail closed)"
+                if (!sinkStatic(sinkArg(args, 1))) return "calls `" + s + "` with data — HTML parsed from data can carry script"
+            }
+            if (kind == "doc" && i > 0 && ch[i - 1] == "document") {
+                if (!isLast) return "reaches `document." + s + "` through `." + ch[last] + "` — an alias of an HTML sink is refused (fail closed)"
+                for (const a of args) {
+                    if (!sinkStatic(a)) return "calls `document." + s + "` with data — HTML parsed from data can carry script"
+                }
+            }
+            if (kind == "timer") {
+                if (!isLast) return "reaches `" + s + "` through `." + ch[last] + "` — a timer reached by an alias may be handed source text (fail closed)"
+                if (!sinkIsFunction(env, sinkArg(args, 0))) return "calls `" + s + "` with a first argument that is not a function — a string there is run as JavaScript. Pass a function: `" + s + "(tick, ms)` or `" + s + "(() => tick(), ms)`"
+            }
+            if (kind == "attr" && i > 0) {
+                if (!isLast) return "reaches `" + s + "` through `." + ch[last] + "` — an alias of an attribute writer is refused (fail closed)"
+                const na: AExpr | not = sinkArg(args, attrNameArgIndex(s))
+                if (na is given) {
+                    const nv: SinkView = sinkView(na)
+                    if (nv.kind != 4) return "calls `" + s + "` with a computed attribute name — it could name `srcdoc` or an `on…` handler, so it is refused (fail closed); write the name as a string literal"
+                    if (executableAttrName(nv.name)) return "calls `" + s + "` on the attribute `" + nv.name + "` — an inline document or handler text the browser runs (§5.2 S464)"
+                }
+            }
+            i = i + 1
+        }
+        // `Object.assign(target, …sources)` / `Reflect.set(target, key, value)` /
+        // `Object.defineProperty` / `Reflect.defineProperty(target, key, desc)`: a
+        // sink member written through the reflection API
+        if (ch.length == 2 && ch[0] == "Object" && ch[1] == "assign") {
+            const t: AExpr | not = sinkArg(args, 0)
+            if (t is given) {
+                const fresh: boolean = sinkView(t).kind == 6
+                let j = 1
+                while (j < args.length) {
+                    const sv: SinkView = sinkView(args[j])
+                    if (sv.kind == 6) {
+                        const w: string = sinkPropsWhy(sv.props, fresh)
+                        if (w != "") return "`Object.assign` " + w
+                    } else if (!fresh && sinkHostRooted(env, t)) {
+                        return "`Object.assign` copies keys that are not written out onto a host value — a key could name a sink, so it is refused (fail closed)"
+                    }
+                    j = j + 1
+                }
+            }
+            return ""
+        }
+        const reflectSet: boolean = ch.length == 2 && ch[0] == "Reflect" && ch[1] == "set"
+        const defProp: boolean = ch.length == 2 && (ch[0] == "Reflect" || ch[0] == "Object") && ch[1] == "defineProperty"
+        if (reflectSet || defProp) {
+            const t2: AExpr | not = sinkArg(args, 0)
+            const key: AExpr | not = sinkArg(args, 1)
+            if (t2 is given && key is given) {
+                const kv: SinkView = sinkView(key)
+                let val: AExpr | not = not
+                if (reflectSet) val = sinkArg(args, 2)
+                if (kv.kind == 4) {
+                    const w3: string = sinkWriteWhy(kv.name, val)
+                    if (w3 != "") return "`" + ch[0] + "." + ch[1] + "` " + w3
+                } else if (sinkHostRooted(env, t2)) {
+                    return "`" + ch[0] + "." + ch[1] + "` writes a member of a host value by a computed key — the key could name a sink, so it is refused (fail closed)"
+                }
+            }
+        }
+        return ""
+    }
+
+    fn sinkMessage(why: string) -> string {
+        return "this " + why + ". `innerHTML`, `outerHTML`, `insertAdjacentHTML`, `srcdoc`, `on…` members and attributes, `document.write` / `writeln`, `eval` / `Function` and a string `setTimeout` / `setInterval` are executable sinks: the browser parses or runs what reaches them without scrml checking it, and data is never written into one (§5.2, S473). Render the content as markup, write plain text with `textContent`, and attach behaviour with an event attribute (`onclick=fn()`)."
+    }
+
     // `target = value` (statement position).
     fn resolveAssign(env: Env, e: AExpr, target: AExpr, value: AExpr, st0: AS) -> AS {
+        // s473 — §5.2 "Executable sinks in plain logic (S473)": judged first
+        const sinkW: string = sinkTargetWhy(env, target, value)
+        if (sinkW != "") return addDiag(st0, env.file, e.span, "E-LOGIC-EXECUTABLE-SINK", sinkMessage(sinkW))
         // s442: the recognized sequence reassignment shapes (§66.11.2) and an
         // element-field write (dpa-052 Q3).
         // r1 F1: only a CELL / field place — a local (or a place rooted in one)
@@ -8524,6 +8801,10 @@ ${
     }
 
     fn resolveCallStmt(env: Env, e: AExpr, callee: AExpr, args: AExpr[], st: AS) -> AS {
+        // s473 — §5.2 "Executable sinks in plain logic (S473)": judged first (the
+        // edit-call paths below would otherwise take a member call before it)
+        const sinkS: string = sinkCallWhy(env, callee, args)
+        if (sinkS != "") return addDiag(st, env.file, e.span, "E-LOGIC-EXECUTABLE-SINK", sinkMessage(sinkS))
         if (exprName(callee) == "reset") return resolveReset(env, e, args, st)
         // s469: a JavaScript tape method name, or a discarded `sort` / `reverse` (E-TAPE-JS-METHOD)
         const jm: MethodCall | not = memberCall(callee)

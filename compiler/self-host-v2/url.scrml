@@ -419,4 +419,61 @@ ${
         if (lower.length <= 2 || lower.substring(0, 2) != "on") return false
         return lower != "one" && lower != "online" && lower != "onboarding"
     }
+
+    // =========================================================================
+    // THE EXECUTABLE-SINK TABLE (s473-boot-plain-logic-dom-sinks) — SPEC §5.2
+    // "Executable sinks in plain logic (S473)", ruling:user-voice-scrml.md S473
+    // "⭐ RULED — S473 PA recs: host allowlist Q1–Q4, plain-logic DOM sinks, …"
+    // item 2: "The set is `innerHTML`, `outerHTML`, `insertAdjacentHTML`,
+    // `srcdoc`, `on*` properties and attributes, `document.write`/`writeln`,
+    // and `eval`/`Function`/string `setTimeout`/`setInterval`. Every other DOM
+    // member stays open". ONE table, strings only: analyze.scrml (the plain-logic
+    // judgment, E-LOGIC-EXECUTABLE-SINK) and parse.scrml (a compound assignment)
+    // ask it, and #1659's §21.3.3 rule 8 (`hostSinkWhy`) is meant to adopt it
+    // rather than keep a second list. The `on*` test is §5.2 rule 1's name test
+    // (isEventHandlerName, above — one test, not a second list).
+    //
+    // A member WRITE's sink kind ("" — open):
+    //   "html" — the value is parsed as HTML (`innerHTML`, `outerHTML`); a
+    //            quoted string literal is admitted (the author's own markup);
+    //   "exec" — the value runs or installs code whatever it is (`srcdoc`, an
+    //            `on…` member): §5.2 S464 refuses a static `srcdoc` and a quoted
+    //            handler too, so a literal is not admitted.
+    // Compared ASCII case-insensitively (fail closed: `SRCDOC`, `ONCLICK`).
+    export fn logicWriteSink(name: string) -> string {
+        const lower: string = name.toLowerCase()
+        if (lower == "innerhtml" || lower == "outerhtml") return "html"
+        if (lower == "srcdoc" || isEventHandlerName(name)) return "exec"
+        return ""
+    }
+
+    // A CALL's sink kind, by a member name on its callee chain ("" — open):
+    //   "exec"  — `eval`, `Function`: runs source text, a literal included;
+    //   "html"  — `insertAdjacentHTML`: its second argument is parsed as HTML;
+    //   "doc"   — `write` / `writeln`, a sink only on a receiver named
+    //             `document` (`document.write`, `window.document.write`);
+    //   "timer" — `setTimeout` / `setInterval`: a first argument that is not a
+    //             function is source text;
+    //   "attr"  — `setAttribute` / `setAttributeNS` / `toggleAttribute`: judged
+    //             by the attribute NAME (an `on…` / `srcdoc` / non-literal name).
+    export fn logicCallSink(name: string) -> string {
+        if (name == "eval" || name == "Function") return "exec"
+        if (name == "insertAdjacentHTML") return "html"
+        if (name == "write" || name == "writeln") return "doc"
+        if (name == "setTimeout" || name == "setInterval") return "timer"
+        if (name == "setAttribute" || name == "setAttributeNS" || name == "toggleAttribute") return "attr"
+        return ""
+    }
+
+    // Which argument of an "attr" call is the attribute name (-1 — none).
+    export fn attrNameArgIndex(name: string) -> int {
+        if (name == "setAttribute" || name == "toggleAttribute") return 0
+        if (name == "setAttributeNS") return 1
+        return -1
+    }
+
+    // An attribute NAME that is an executable sink (§5.2: `srcdoc`, an `on…` handler).
+    export fn executableAttrName(name: string) -> boolean {
+        return name.toLowerCase() == "srcdoc" || isEventHandlerName(name)
+    }
 }
