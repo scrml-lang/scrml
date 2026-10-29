@@ -76,3 +76,30 @@ bootstrap errors sat inside `_={ in:{…} … }=` blocks (the bootstrap read `_ 
    closer is never "mismatched" — the block runs on (E-FOREIGN-002 at EOF).
 3. A bare tool-form block with a non-ts/js language is E-BOOTSTRAP-UNSUPPORTED (E-FOREIGN-005 names
    only the inline value-returning form).
+
+## 2026-10-29 — slice 2: one extent reader; gaps; measurement; gates
+
+- **One reader.** `lex.scrml` `foreignOpenAt` / `foreignExtentAt` (string positions) is the only
+  spelling of the §23.2 opener/closer grammar in the bootstrap; the logic lexer's `scanForeign` and
+  parse.scrml's markup-body `foreignLevel` / `skipForeign` both call it (the markup copy is deleted —
+  the drift surface `g-foreign-opener-grammar-hand-spelled-five-places` describes for impl#1 does not
+  open in the bootstrap).
+- **Tests** — 33 in `slice-m4/foreign-blocks-s473.test.js` (28 red on base, see slice 1; the two
+  added here — the shared reader and a fail-closed sweep of ten other positions — are new behaviour).
+  `program-shape.test.js` updated: `<program lang="ts">` is read now (a `lang="go"` is still refused).
+- **Gaps** — filed `g-boot-foreign-block-emission-unbuilt-s473` (MED), `g-conformance-foreign-cases-use-fn-bodies-s473`
+  (LOW), `g-impl1-foreign-block-spec-divergences-s473` (LOW, impl#1 frozen); narrowed `g-boot-no-host-bridge-s471`.
+- **Measurement** (raw bootstrap, the 31 flogence files, `~/.cache/scrml/review/s473-boot-foreign-blocks/`):
+  9,620 → 3,889 errors; 3,219 excluding this lane's 670 named emission refusals. Parse-phase
+  7,155 → 1,782. E-PARSE-ITEM 2,749 → 35, E-PARSE-EXPECTED 1,729 → 90, E-PARSE-EXPR 705 → 38,
+  E-PARSE-IMPORT 509 → 0, E-SCOPE-010 288 → 7. Still 0 / 31 clean. Next wall: E-STMT-MISSING-SEMICOLON
+  1,455 (M1, newline-terminated source), E-BOOTSTRAP-UNSUPPORTED 900 (432 member access on an untyped
+  value — mostly foreign-block outputs used unannotated; 160 unannotated parameters; 101 string/tape
+  methods; 93 `${}` in a quoted attribute), E-ERROR-002 330 (M2), E-COND-NOT-BOOLEAN 68 (untyped
+  foreign outputs in conditions), E-FOREIGN-004 58 (38 `fn` bodies — a flogence migration to
+  `function`; 20 cascade from `function main(…): number`, a legacy `:` return type).
+- **Gates (local)** — types-gate, snippet-gate, claim-gate, corpus-compile-floor, gen-md-shim,
+  conflict-marker-gate, regen-spec-index, delta-lint, s34-census --check-new: PASS. Bootstrap slice:
+  lint-no-default-arm, lint-duplicate-fn, m1, m2, m1 lowered, m3, m4 (3,128), codec: PASS.
+  bootstrap-conformance --check: PASS (regenerated: PASS 259 → 260, `foreign/foreign-lang-in-program-neg`).
+  e2e-render-map: PASS. Full suite (pre-commit hook, 6 shards): 50,958 pass, 0 fail.
