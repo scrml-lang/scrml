@@ -75,3 +75,20 @@ litKey's call, (c) the four deleted, never-called duplicate bodies. Every other 
   unproven control); litBoolKey pin (`@open = false` over `<open:bool=false/>` → reset-on=, `= true` → not).
   The four pins pass on base and after — they hold the "no observable change" verdict.
 - Red on base (base analyze.scrml, this branch's tests): 2 (real-tree lint, emitted-bundle oracle).
+
+## 2026-10-28 — gates (all PASS)
+
+- pre-commit hook on 06747ea66 (slices ON: the analyze.scrml change): 50891 pass, 0 fail — includes every
+  slice dir (m1, m2, m3, m4, codec) and slice-m1 again with SLICE_CORE=lowered (the CI slices step), and
+  compiler/tests/unit/hook-slice-trigger-list-s472.test.js. Hook on c90b00647 (wiring + gap): PASS.
+  (The hook runs from the main checkout's hooksPath, so it does not yet run lint-duplicate-fn itself; run by hand.)
+- lint-no-default-arm 0 violations; lint-duplicate-fn 33 files, 0 violations.
+- types-gate --check OK (unchanged); compiler/tests/*.test.js 2239/0; snippet-gate, claim-gate PASS;
+  corpus-compile-floor --check PASS; gen-md-shim --check current; conflict-marker-gate PASS;
+  regen-spec-index --check OK; delta-lint PASS; s34-census --check-new PASS (no §34 change);
+  bootstrap-conformance --check current; e2e-render-map 259/0.
+- state.ts --check: gap-counts PASS; recent-sessions (master-list.md) STALE — the brief says not to stage
+  that churn, left alone.
+- Slice outputs: unchanged. The renames change only names inside analyze.client.js (impl#1 mangles them);
+  the deleted duplicates were never called; the two call sites whose callee changed have no observable
+  effect (see the table). No slice snapshot or acceptance output moved.
