@@ -46,3 +46,10 @@ base: s473-boot-exitless-loop; retarget to main after #1631 lands.
   0 E-LOOP-008, 0 crashes. bootstrap-conformance --check current, same counts (308 graded, 259 hold).
   corpus-compile-floor --check PASS (it compiles with impl#1, which this lane does not touch).
 - Tests: the new file and #1631's file together, 60 pass, 0 fail.
+
+## 2026-10-29T13:10Z — gates + PR
+- Commit fc1d6db5f; pre-commit hook 51,071 pass / 0 fail.
+- CI `checks` + `slices` steps run locally: all PASS (types, compiler/tests 2,239, snippet, claim, corpus-floor,
+  md-shim, conflict-marker, spec-index, delta-lint, s34-census vs origin/main and vs #1631, lint-no-default-arm,
+  m1 100 / m2 614 / m1 lowered 100 / m3 60 / m4 3,121 / codec 166, conformance current, e2e-render-map 259).
+- Draft PR #1638, base s473-boot-exitless-loop (stacked on #1631).
