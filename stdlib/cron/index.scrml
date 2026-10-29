@@ -1,4 +1,3 @@
-<program>
 ${
     // ---------------------------------------------------------------------------
     // scrml:cron — In-process cron scheduling (Bun.cron wrapper)
@@ -57,7 +56,7 @@ ${
     //   // Later — stop the job:
     //   job.stop()
     export function schedule(pattern, handler) {
-        return Bun.cron(pattern, handler)
+        return Bun.cron(pattern, handler);
     }
 
     /**
@@ -70,7 +69,7 @@ ${
      * @returns Date — the next time the pattern fires; `not` if no future occurrence
      */
     export function nextOccurrence(pattern, relativeDate) {
-        return Bun.cron.parse(pattern, relativeDate)
+        return Bun.cron.parse(pattern, relativeDate);
     }
 
     /**
@@ -85,4 +84,3 @@ ${
         }
     }
 }
-</program>
