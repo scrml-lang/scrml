@@ -5,7 +5,7 @@ import { SQL_HANDLE_PATTERN } from "./sql-handle-name.ts";
 import { relative, basename } from "path";
 import { toPosix } from "../path-canonical.js";
 import { localReExportEdges, resolveExportedBinding, isReExportedByAnother } from "../module-resolver.js";
-import { exprNodeContainsCall, parseExprToNode, forEachIdentInExprNode, splitTopLevelCommas } from "../expression-parser.ts";
+import { exprNodeContainsCall, parseExprToNode, forEachIdentInExprNode, splitTopLevelCommas, blankLiteralTextInSource } from "../expression-parser.ts";
 // F8 / v0.6 — dual-mode meta-block kind test (live `"meta"` / native `"Meta"`).
 import { isMetaKind } from "../types/ast.ts";
 import { assembleRuntime, RUNTIME_CHUNK_ORDER, applyChunkDependencies, hasStdlibClientChunk, stdlibClientChunkMembers, chunksForEmittedHelpers } from "./runtime-chunks.ts";
@@ -167,22 +167,9 @@ const POST_EMIT_HELPER_CHUNK_GATES: ReadonlyArray<readonly [string, string]> = [
 ];
 
 /**
- * Seed every runtime chunk the given emitted CLIENT text names (the table above, the
- * `reconciliation` gate, the `errors` gate). Returns true when it added a chunk. The
- * caller closes CHUNK_DEPENDENCIES afterwards. Pure over its inputs; idempotent.
- *
- * Called TWICE by generateClientJs (S461): over the emitted `lines`, and again over the
- * FINAL client body — several stages rewrite the body after the runtime is assembled
- * (the auto-await IIFE lift wraps a reactive-server assignment in
- * `.catch(… _scrml_error_boundary_log …)`, the async-combinator footer, …), and a
- * reference those stages introduce is invisible to the first scan. The corpus sweep
- * measured exactly that: 25 pages calling `_scrml_error_boundary_log` with no 'errors'
- * chunk until the second scan existed.
- */
-/**
  * s473-lift-cell-ref-scope (g-impl1-cell-handler-eager-write-envelope-visible-to-arms-s473) — the
- * SYNCHRONOUS twin of the s441 reactive-set rewrite above it. emit-logic lowers a guarded cell write
- * `@cell = f() !{…}` to
+ * SYNCHRONOUS twin of the s441 reactive-set rewrite in `generateClientJs` (the `fnNameMap` loop that
+ * calls this right after it). emit-logic lowers a guarded cell write `@cell = f() !{…}` to
  *
  *     let R = _scrml_reactive_set("cell", f());
  *     if (R && R.__scrml_error) { …arms…; _scrml_reactive_set("cell", R); }
@@ -201,23 +188,28 @@ const POST_EMIT_HELPER_CHUNK_GATES: ReadonlyArray<readonly [string, string]> = [
  *
  * Only that exact emitted shape is touched (the `let`, the guard on the same binding right after it
  * — a module-init `_scrml_init_set(…)` line may sit between — and the arms' own write-back of `R`);
- * anything else is left as emitted.
+ * anything else is left as emitted. Every site is found, a site nested in another site's arm block
+ * included (s473 fix round 1, MED-1). The scan reads a same-length MASK of the code in which the
+ * text of every string, template and regex literal and every comment is blanked
+ * (`blankLiteralTextInSource`, the parser's own acorn tokenizer), so text inside a literal is never
+ * matched or rewritten (MED-2) and a quote inside a regex never derails the brace match (LOW-3). If
+ * the mask cannot be built, nothing is rewritten (fail closed: the eager write stays).
  */
 function deferSyncGuardedCellWrites(code: string, findMatchingBrace: (s: string, open: number) => number): string {
   const SET = "_scrml_reactive_set(";
-  // The index of the `)` closing the call whose `(` is at `open`, and its depth-1 commas; string-aware.
+  if (!code.includes(SET)) return code;
+  const mask = blankLiteralTextInSource(code, { blankRegex: true });
+  // A mask that is not the same length, or that came back untouched although the code has literal
+  // text (the tokenizer threw), cannot be trusted: rewrite nothing.
+  if (typeof mask !== "string" || mask.length !== code.length) return code;
+  if (mask === code && /"[^"\n]|'[^'\n]|`[^`]|\/\/|\/\*/.test(code)) return code;
+  // The index of the `)` closing the call whose `(` is at `open`, and its depth-1 commas — read on
+  // the mask, where every literal's text is blank.
   const scanCall = (open: number): { close: number; commas: number[] } | null => {
     let depth = 1;
     const commas: number[] = [];
-    let q: string | null = null;
-    for (let k = open + 1; k < code.length; k++) {
-      const c = code[k];
-      if (q) {
-        if (c === "\\") { k++; continue; }
-        if (c === q) q = null;
-        continue;
-      }
-      if (c === '"' || c === "'" || c === "`") { q = c; continue; }
+    for (let k = open + 1; k < mask.length; k++) {
+      const c = mask[k];
       if (c === "(" || c === "[" || c === "{") depth++;
       else if (c === ")" || c === "]" || c === "}") {
         depth--;
@@ -226,41 +218,59 @@ function deferSyncGuardedCellWrites(code: string, findMatchingBrace: (s: string,
     }
     return null;
   };
-  const out: string[] = [];
-  let i = 0;
-  while (i < code.length) {
-    const at = code.indexOf(SET, i);
-    if (at < 0) break;
+  const edits: Array<{ start: number; end: number; text: string }> = [];
+  let at = mask.indexOf(SET);
+  while (at >= 0) {
     const next = at + SET.length;
-    const head = /\blet\s+([A-Za-z_$][\w$]*)\s*=\s*$/.exec(code.slice(Math.max(0, at - 120), at));
-    const call = head && (at === 0 || !/[\w$]/.test(code[at - 1])) ? scanCall(next - 1) : null;
-    if (!head || !call || call.commas.length !== 1 || code[call.close + 1] !== ";") {
-      out.push(code.slice(i, next));
-      i = next;
-      continue;
+    const head = /\blet\s+([A-Za-z_$][\w$]*)\s*=\s*$/.exec(mask.slice(Math.max(0, at - 120), at));
+    const call = head && (at === 0 || !/[\w$]/.test(mask[at - 1])) ? scanCall(next - 1) : null;
+    if (head && call && call.commas.length === 1 && mask[call.close + 1] === ";") {
+      const R = head[1];
+      const nameArg = code.slice(next, call.commas[0]).trim();
+      const stmtEnd = call.close + 2;
+      const needle = `if (${R} && ${R}.__scrml_error) {`;
+      const ifAt = mask.indexOf(needle, stmtEnd);
+      const between = ifAt >= 0 ? mask.slice(stmtEnd, ifAt) : "";
+      const betweenOk = ifAt >= 0 && between.split("\n").every((l) => l.trim() === "" || /^\s*_scrml_init_set\(/.test(l));
+      const closeIdx = betweenOk ? findMatchingBrace(mask, ifAt + needle.length - 1) : -1;
+      const writeBack = `${SET}${nameArg}, ${R});`;
+      // The arms' write-back of `R` into the SAME cell: found on the mask (outside literals), then
+      // confirmed on the code (the mask blanks the cell-name string).
+      const maskWriteBack = `${SET}${mask.slice(next, call.commas[0]).trim()}, ${R});`;
+      let hasWriteBack = false;
+      for (let w = closeIdx >= 0 ? mask.indexOf(maskWriteBack, ifAt) : -1; w >= 0 && w < closeIdx; w = mask.indexOf(maskWriteBack, w + 1)) {
+        if (code.startsWith(writeBack, w)) { hasWriteBack = true; break; }
+      }
+      if (closeIdx >= 0 && hasWriteBack && !/^\s*else\b/.test(mask.slice(closeIdx + 1))) {
+        // `let R = _scrml_reactive_set(NAME, VALUE);` → `let R = VALUE;`, and the success write after the arms.
+        edits.push({ start: at, end: call.close + 1, text: code.slice(call.commas[0] + 1, call.close).trim() });
+        edits.push({ start: closeIdx + 1, end: closeIdx + 1, text: ` else {\n  ${writeBack}\n}` });
+      }
     }
-    const R = head[1];
-    const nameArg = code.slice(next, call.commas[0]).trim();
-    const value = code.slice(call.commas[0] + 1, call.close).trim();
-    const stmtEnd = call.close + 2;
-    const needle = `if (${R} && ${R}.__scrml_error) {`;
-    const ifAt = code.indexOf(needle, stmtEnd);
-    const between = ifAt >= 0 ? code.slice(stmtEnd, ifAt) : "";
-    const betweenOk = ifAt >= 0 && between.split("\n").every((l) => l.trim() === "" || /^\s*_scrml_init_set\(/.test(l));
-    const closeIdx = betweenOk ? findMatchingBrace(code, ifAt + needle.length - 1) : -1;
-    const writeBack = `${SET}${nameArg}, ${R});`;
-    if (closeIdx < 0 || !code.slice(ifAt, closeIdx).includes(writeBack) || /^\s*else\b/.test(code.slice(closeIdx + 1))) {
-      out.push(code.slice(i, next));
-      i = next;
-      continue;
-    }
-    out.push(code.slice(i, at), value, ";", between, code.slice(ifAt, closeIdx + 1), ` else {\n  ${writeBack}\n}`);
-    i = closeIdx + 1;
+    at = mask.indexOf(SET, next);
   }
-  out.push(code.slice(i));
-  return out.join("");
+  if (edits.length === 0) return code;
+  // The edits never overlap (a site's call ends before its own guard; a nested site lies inside an
+  // outer arm block, after the outer call and before the outer insertion point). Apply from the end.
+  edits.sort((a, b) => b.start - a.start || b.end - a.end);
+  let out = code;
+  for (const e of edits) out = out.slice(0, e.start) + e.text + out.slice(e.end);
+  return out;
 }
 
+/**
+ * Seed every runtime chunk the given emitted CLIENT text names (the table above, the
+ * `reconciliation` gate, the `errors` gate). Returns true when it added a chunk. The
+ * caller closes CHUNK_DEPENDENCIES afterwards. Pure over its inputs; idempotent.
+ *
+ * Called TWICE by generateClientJs (S461): over the emitted `lines`, and again over the
+ * FINAL client body — several stages rewrite the body after the runtime is assembled
+ * (the auto-await IIFE lift wraps a reactive-server assignment in
+ * `.catch(… _scrml_error_boundary_log …)`, the async-combinator footer, …), and a
+ * reference those stages introduce is invisible to the first scan. The corpus sweep
+ * measured exactly that: 25 pages calling `_scrml_error_boundary_log` with no 'errors'
+ * chunk until the second scan existed.
+ */
 function gateChunksByEmittedReference(texts: Iterable<unknown>, chunks: Set<string>): boolean {
   const strs: string[] = [];
   for (const t of texts) if (typeof t === "string") strs.push(t);

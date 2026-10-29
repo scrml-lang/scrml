@@ -215,3 +215,81 @@ describe("E — `@cell = f() !{…}`: the arms never see the error envelope in t
     expect(r.clientJs).not.toMatch(/_reactive_set\(\s*"ok"\s*,\s*(?:await\s+)?_scrml_fetch_check/);
   });
 });
+
+// ---------------------------------------------------------------------------
+// F — fix round 1 (S239 review of #1645).
+// ---------------------------------------------------------------------------
+/** PAGE with a second cell `@y` (4) shown in `#y`, for the nested and literal cases. */
+const PAGE2 = (body) => PAGE(body).replace("<x> = 7", "<x> = 7\n<y> = 4").replace(`<p id="sn">`, `<p id="y">\${@y}</p>\n<p id="sn">`);
+
+describe("F — fix round 1", () => {
+  test("MED-1: a guarded cell write NESTED in another guard's arm is deferred too — `#y` keeps its value (executed)", async () => {
+    const page = await boot(PAGE2(`@x = load(id) !{ _ e :> { @y = load("bad") !{ _ f :> { lift @y } }
+            lift @x } }`));
+    await page.click("#bad");
+    expect(page.text("#y")).toBe("4");
+    expect(page.text("#out")).toBe("7");
+    await page.click("#ok");
+    expect(page.text("#out")).toBe("5");
+  });
+  test("MED-2: text inside a template literal that looks like the guarded shape is never rewritten (`t.length` unchanged, executed)", async () => {
+    const lit = "let q = _scrml_reactive_set('x', 1);\nif (q && q.__scrml_error) { _scrml_reactive_set('x', q); }";
+    const page = await boot(PAGE2("const t = `" + lit + "`\n        @y = t.length"));
+    await page.click("#ok");
+    expect(page.text("#y")).toBe(String(lit.length));
+  });
+  test("MED-2: the same text in a double-quoted string compiles (never an unterminated string)", () => {
+    const r = compileSource(PAGE2(`const t = "let q = _scrml_reactive_set('x', 1); if (q && q.__scrml_error) { _scrml_reactive_set('x', q); }"
+        @y = t.length`));
+    expect(r.codes).toEqual([]);
+  });
+  test("LOW-3: a regex literal holding a quote in the arm does not derail the rewrite — the cell keeps its value (executed)", async () => {
+    const page = await boot(PAGE(`@x = load(id) !{ _ e :> { const ok = /'/.test("a"); lift @x } }`));
+    await page.click("#bad");
+    expect(page.text("#out")).toBe("7");
+  });
+  test("LOW-4: a `lift` operand continued on the next line by an operator is one statement — `{ lift @x⏎ + 1 }` → 8 (executed)", async () => {
+    const page = await boot(PAGE(`@x = load(id) !{ _ e :> { lift @x
+            + 1 } }`));
+    await page.click("#bad");
+    expect(page.text("#out")).toBe("8");
+  });
+  test("LOW-4: two `lift` lines stay two statements (never merged into one operand)", () => {
+    const r = compileSource(PAGE(`@x = load(id) !{ _ e :> { lift 1
+            lift 2 } }`));
+    expect(r.codes.length).toBeGreaterThan(0);
+  });
+});
+
+// INFO-5 — route inference reads `handlerExpr` (`guardArmsAreValues`, the S455 split allow-list): an
+// arm now read as its `lift` operand is admitted when the operand is a value the server side can
+// produce, and still refused (E-RI-002) when it reads client state.
+describe("F — INFO-5: route inference on a `lift` arm of a handled query in a client function", () => {
+  const SCHEMA = `
+    <schema>
+        notes {
+            id: integer primary key
+            body: text
+        }
+    </>`;
+  const split = (arm, params = "") => `<program db="./app.db">${SCHEMA}
+    <rC> = "init"
+    <s> = "init"
+    function fC(${params}) {
+        const fallback = "fb"
+        @rC = ?{\`SELECT id, body FROM notes\`}.get() !{ _ :> ${arm} }
+        @s = "after"
+    }
+    <button onclick={ fC(${params ? '"p"' : ""}) !{ .Transport(_) :> { return } } }>c</button>
+    <p>\${@rC} \${@s}</p>
+</program>`;
+  test("admitted: `{ lift \"x\" }` and `{ lift p }` (a parameter)", () => {
+    expect(compileSource(split('{ lift "x" }')).codes).not.toContain("E-RI-002");
+    expect(compileSource(split("{ lift p }", "p")).codes).not.toContain("E-RI-002");
+  });
+  test("refused (E-RI-002): `{ lift fallback }` (a client local), `{ lift @s }` (a cell), `{ lift mark() }` (a call)", () => {
+    expect(compileSource(split("{ lift fallback }")).codes).toContain("E-RI-002");
+    expect(compileSource(split("{ lift @s }")).codes).toContain("E-RI-002");
+    expect(compileSource(split("{ lift mark() }")).codes).toContain("E-RI-002");
+  });
+});

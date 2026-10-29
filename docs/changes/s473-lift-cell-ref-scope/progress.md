@@ -44,3 +44,27 @@ Tests:
 Tests: unit file 40 tests, 37 red on base (3 green neighbours). Bootstrap file 13, green on base (bootstrap had no bug).
 Gaps: filed+resolved g-impl1-handler-arm-lift-operand-read-as-ident-s473, g-impl1-cell-handler-eager-write-envelope-visible-to-arms-s473;
 filed open g-impl1-match-into-cell-block-arm-lift-unlowered-s473.
+
+## 2026-10-29 — fix round 1 (S239 review of #1645, verdict LAND-W-F/U)
+
+Merged origin/main (#1630 landed; clean merge). Finding → fix:
+- MED-1 (nested guarded write left eager): `deferSyncGuardedCellWrites` no longer copies an arm block past;
+  it collects non-overlapping edits over the whole text, so a site inside another site's arm is rewritten.
+  Executed test: `#y` keeps 4.
+- MED-2 (literal-blind scan): the scan reads `blankLiteralTextInSource(code, { blankRegex: true })` — the
+  parser's acorn tokenizer, the existing literal blanker (no new reader) — and confirms the arms' write-back
+  on the original text (the mask blanks the cell-name string). Fail closed (no rewrite) if the mask is not
+  same-length or the tokenizer threw. Tests: template-literal `t.length` unchanged (executed); the
+  double-quoted twin compiles.
+- LOW-3 (regex with a quote): covered by the same mask (regex bodies blanked). Executed test.
+- LOW-4 (`{ lift @x⏎ + 1 }`): `_liftLineContinues` — a depth-0 line break continues the operand when the line
+  before ends in a binary operator or the next starts with one (`++`/`--` excluded). Executed → 8, so the arm
+  emitter reads it the same way. `lift 1⏎ lift 2` is still two statements (test).
+- INFO-5: tests pin route inference: `{ lift "x" }`, `{ lift p }` admitted; `{ lift fallback }`, `{ lift @s }`,
+  `{ lift mark() }` E-RI-002.
+- NITs: the new JSDoc moved above the gateChunksByEmittedReference JSDoc (no orphan); "above it" wording fixed;
+  the dead `handler.indexOf(liftOperand)` offset dropped.
+- Gaps filed (pre-existing): g-impl1-braced-arm-scope-check-first-statement-only-s473 (HIGH),
+  g-impl1-member-target-handler-block-arm-unlowered-s473 (MED, related= the match-into-cell gap).
+
+Unit file: 48 tests.

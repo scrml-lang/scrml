@@ -21606,7 +21606,7 @@ function _parseHandlerExpr(handler, filePath, startOffset) {
     // undeclared, E-SCOPE-001 — for `lift @x`, `lift (@x)` (a call `lift(@x)`), `lift 9`, `lift x`.
     const liftOperand = _singleLiftOperand(inner);
     if (liftOperand !== null) {
-      return safeParseExprToNodeGlobal(liftOperand, filePath, startOffset + (handler.indexOf(liftOperand) >= 0 ? handler.indexOf(liftOperand) : 0));
+      return safeParseExprToNodeGlobal(liftOperand, filePath, startOffset);
     }
     return safeParseExprToNodeGlobal(inner, filePath, startOffset);
   }
@@ -21636,9 +21636,20 @@ function _singleLiftOperand(inner) {
     if (c === "(" || c === "[" || c === "{") depth++;
     else if (c === ")" || c === "]" || c === "}") depth--;
     else if (c === ";" && depth === 0) return null;
-    else if (c === "\n" && depth === 0) return null;
+    else if (c === "\n" && depth === 0 && !_liftLineContinues(operand, k)) return null;
   }
   return operand;
+}
+
+// s473 fix round 1 (LOW-4) — a depth-0 line break inside a `lift` operand continues the operand
+// (one statement) when the line before ends in a binary operator, or the next line starts with one
+// (`lift @x⏎ + 1`), as the arm emitter reads it. `++` / `--` start a new statement.
+const _LIFT_CONT_TAIL = /(?:[+\-*/%&|^?:.,<>=!]|&&|\|\||\?\?)$/;
+const _LIFT_CONT_HEAD = /^(?:\+(?!\+)|-(?!-)|[*/%&|^?:.,<>=]|!=)/;
+function _liftLineContinues(text, nl) {
+  const before = text.slice(0, nl).replace(/\/\/[^\n]*$/, "").trimEnd();
+  const after = text.slice(nl + 1).trimStart();
+  return _LIFT_CONT_TAIL.test(before) || _LIFT_CONT_HEAD.test(after);
 }
 
 // ---------------------------------------------------------------------------
