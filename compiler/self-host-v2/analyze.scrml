@@ -4154,6 +4154,11 @@ ${
                         if (bind is given) {
                             const hf: HostFn = { module: "", file: "", name: fs.info.name, ret: fs.info.ret, bind: bind }
                             next = { info: fnWithHost(fs.info, hf), f: fs.f }
+                        } else if (hb.src == "") {
+                            // (a `src=` binding has no target to convert: its opener is refused, parse.scrml hostSrcDiags)
+                            // FAIL CLOSED: a binding the parser accepted always converts; should one not,
+                            // it is refused here — never left an ordinary function with an empty body
+                            st = addDiag(st, fs.info.file, fs.f.span, "E-BOOTSTRAP-UNSUPPORTED", "the `<host>` binding `" + fs.info.name + "`'s target could not be carried into Core (a bootstrap defect: please report it)")
                         }
                     }
                 }

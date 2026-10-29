@@ -6597,6 +6597,22 @@ ${
         return ["eval", "Function", "setTimeout", "setInterval", "insertAdjacentHTML", "createContextualFragment", "setHTMLUnsafe", "execCommand"]
     }
 
+    // The names a document / a window is reached by along a chain: `document.write`
+    // and `window.open` are the same call through `el.ownerDocument.write` or
+    // `window.self.open` (rule 8 judges the CALL, so its aliases are judged too).
+    fn hostDocWord(s: string) -> boolean { return s == "document" || s == "ownerDocument" || s == "contentDocument" }
+    fn hostWinWord(s: string) -> boolean {
+        return s == "window" || s == "self" || s == "top" || s == "parent" || s == "frames" || s == "opener" || s == "defaultView" || s == "contentWindow"
+    }
+
+    // A call that writes a property NAMED BY DATA (`Reflect.set(o, "innerHTML", s)`,
+    // `Object.assign(o, { innerHTML: s })`, `Object.defineProperty`) reaches any rule 8
+    // write sink while naming none of them as a member: refused by name (fail closed,
+    // PA reading — rule 8 is judged by member name, which these defeat).
+    fn hostReflectWord(s: string) -> boolean {
+        return s == "Reflect" || s == "assign" || s == "defineProperty" || s == "defineProperties" || s == "__defineSetter__" || s == "__defineGetter__" || s == "setPrototypeOf"
+    }
+
     fn hostTargetDiags(file: string, name: string, ps: AParam[], target0: AExpr | not, isNew: boolean, isFn: boolean, src: string, line: ASpan) -> Diag[] {
         let out: Diag[] = []
         for (const p of ps) {
@@ -6659,7 +6675,12 @@ ${
             }
         }
         const sink: string = hostSinkWhy(parts)
-        if (sink != "") out = out.concat([newDiag("E-HOST-TARGET-SINK", "the target of `" + name + "` " + sink + " — a target SHALL NOT reach a sink that runs source text or navigates the page (§21.3.3 rule 8, the §5.2 principle)", file, sp)])
+        if (sink != "") return out.concat([newDiag("E-HOST-TARGET-SINK", "the target of `" + name + "` " + sink + " — a target SHALL NOT reach a sink that runs source text or navigates the page (§21.3.3 rule 8, the §5.2 principle)", file, sp)])
+        if (parts.shape <= 1) {
+            for (const seg of [ch.root].concat(ch.members)) {
+                if (hostReflectWord(seg)) return out.concat([newDiag("E-BOOTSTRAP-UNSUPPORTED", "the target of `" + name + "` calls through `" + seg + "`, which writes a property named by data — that reaches a rule 8 sink (`innerHTML`, `srcdoc`, `location` …) without naming it as a member, and the bootstrap refuses it (§21.3.3 rule 8 judges member names; a reflective write is not ruled)", file, sp)])
+            }
+        }
         return out
     }
 
@@ -6677,9 +6698,9 @@ ${
             if (i > 0) prev = segs[i - 1]
             const callish: boolean = parts.shape <= 1 || i < last
             if (callish && hostSinkWords().indexOf(s) >= 0) return "reaches `" + s + "`"
-            if (callish && prev == "document" && (s == "write" || s == "writeln")) return "calls `document." + s + "`"
+            if (callish && hostDocWord(prev) && (s == "write" || s == "writeln")) return "calls `document." + s + "` (through `" + prev + "`)"
             if (callish && prev == "location" && (s == "assign" || s == "replace")) return "calls `location." + s + "`"
-            if (callish && prev == "window" && s == "open") return "calls `open` on `window`"
+            if (callish && hostWinWord(prev) && s == "open") return "calls `open` on `window` (through `" + prev + "`)"
             if (s == "setAttribute" || s == "setAttributeNS" || s == "toggleAttribute") {
                 if (i < last || parts.shape > 1) return "reaches `" + s + "` other than as the called member"
                 let at: int = 0

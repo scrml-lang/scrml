@@ -11,7 +11,7 @@
 // ast.scrml `newDiag` is the one Diag constructor and reads `severityOf`. The
 // code's prefix is not the severity (§34 makes E-DG-002 a Warning, many W- Info).
 //
-// 223 codes with a §34 severity; 0 PROVISIONAL (no row yet, severity from the
+// 236 codes with a §34 severity; 0 PROVISIONAL (no row yet, severity from the
 // generator's PROVISIONAL table: none); 36 without one (FAIL-CLOSED Error):
 //   E-ASSIGN-CONST — no §34 row
 //   E-ASSIGN-POSITION — no §34 row
@@ -129,6 +129,7 @@ ${
             "E-EFFECT-WRITES-STATE" :> Severity.Error
             "E-EQ-001" :> Severity.Error
             "E-EQ-002" :> Severity.Error
+            "E-EQ-003" :> Severity.Error
             "E-ERROR-001" :> Severity.Error
             "E-ERROR-002" :> Severity.Error
             "E-ERROR-003" :> Severity.Error
@@ -152,7 +153,19 @@ ${
             "E-FORM-OWNER-UNRESOLVED" :> Severity.Error
             "E-GRANT-UNKNOWN" :> Severity.Error
             "E-HOLD-WITHOUT-PERSIST" :> Severity.Error
+            "E-HOST-BINDING-MALFORMED" :> Severity.Error
+            "E-HOST-BINDING-PLACEMENT" :> Severity.Error
             "E-HOST-BINDING-USE" :> Severity.Error
+            "E-HOST-ERROR-TYPE" :> Severity.Error
+            "E-HOST-HANDLE-MEMBER" :> Severity.Error
+            "E-HOST-HANDLE-NOT-DATA" :> Severity.Error
+            "E-HOST-NO-TARGET" :> Severity.Error
+            "E-HOST-PARAM-USE" :> Severity.Error
+            "E-HOST-SRC-INVALID" :> Severity.Error
+            "E-HOST-TARGET-SHAPE" :> Severity.Error
+            "E-HOST-TARGET-SINK" :> Severity.Error
+            "E-HOST-TARGET-UNBOUND" :> Severity.Error
+            "E-HOST-TYPE-OUTSIDE" :> Severity.Error
             "E-IMPORT-003" :> Severity.Error
             "E-IMPORT-004" :> Severity.Error
             "E-IMPORT-005" :> Severity.Error

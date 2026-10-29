@@ -187,8 +187,23 @@ describe("rules 4 / 5 / 6 / 8 / 11 — the target's shape, roots, parameters and
       "f(u: string) = window.location.assign(u)",
       "f(u: string) = window.location.replace(u)",
       "f(u: string) = window.open(u)",
+      // the same calls through their aliases along a chain
+      "f(h: H, s: string) = h.ownerDocument.write(s)",
+      "f(u: string) = window.self.open(u)",
+      "f(h: H, u: string) = h.ownerDocument.defaultView.open(u)",
+      "f(h: H, u: string) = h.contentWindow.location.href = u",
     ]) {
       expect([line, codes(P("  type H:host\n  " + line))]).toEqual([line, S]);
+    }
+  });
+
+  test("a write of a property NAMED BY DATA (Reflect, Object.assign, defineProperty) reaches a sink unnamed: refused by name", () => {
+    for (const line of [
+      "f(h: H, s: string) -> bool = window.Reflect.set(h, \"innerHTML\", s)",
+      "f(h: H, s: string) = window.Object.assign(h, { innerHTML: s })",
+      "f(h: H, s: string) = window.Object.defineProperty(h, \"srcdoc\", { value: s })",
+    ]) {
+      expect([line, codes(P("  type H:host\n  " + line))]).toEqual([line, ["E-BOOTSTRAP-UNSUPPORTED"]]);
     }
   });
 
@@ -339,9 +354,11 @@ const HOSTS = [
   "  echo(s: string, n: int, f: bool, o: string) -> string = window.probe.echo(s, n, f, \"lit\", { k: o, n: 2 })",
   "  made(s: string) -> Box = new window.probe.Made(s)",
   "  label(b: Box) -> string = b.label",
+  "  fn fix(x: number, d: int) -> string = x.toFixed(d)",
 ].join("\n");
-const EXPOSE = ["title", "setTitle", "num", "anInt", "str", "maybeStr", "rect", "opt", "langs", "nodes", "mk", "val", "fire", "echo", "made", "label"];
-const PROG = P(HOSTS, "<p id=\"t\">${title()}</p>", STRUCTS);
+const EXPOSE = ["title", "setTitle", "num", "anInt", "str", "maybeStr", "rect", "opt", "langs", "nodes", "mk", "val", "fire", "echo", "made", "label", "fix", "fixed"];
+// rule 11: a `fn` may call a binding declared `fn`
+const PROG = P(HOSTS, "<p id=\"t\">${title()}</p><p id=\"f\">${fixed()}</p>", STRUCTS + "\n    fn fixed() -> string {\n        return fix(3.14159, 2);\n    }");
 
 describe("emission — the target as literal JavaScript, the result checked (rules 7, 13, 18)", () => {
   let program;
@@ -358,6 +375,11 @@ describe("emission — the target as literal JavaScript, the result checked (rul
     expect(out.js).toContain("hostRoot(\"document\").title");
     expect(out.js).not.toMatch(/new Function|\beval\(/);
     expect(out.js).toContain("new (");
+  });
+
+  test("rule 11: a `fn` binding rooted at a parameter runs, from a `fn` too", () => {
+    expect(document.querySelector("#f").textContent).toBe("3.14");
+    expect(program.fix(2.5, 0)).toBe("3");
   });
 
   test("a read, a write, scalars, literal arguments and a one-level object literal cross", () => {

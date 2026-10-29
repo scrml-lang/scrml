@@ -32,3 +32,21 @@ The import:host loader is never reached for a binding (scrml-boot.ts hostFilesOf
 Tests: `compiler/self-host-v2/slice-m4/host-block-f3-s473.test.js` — 50 tests. Red on base: all (the file
 imports `hostCall` / `hostThrownParts`, absent on base; and on base `<host>` at file top is
 E-BOOTSTRAP-UNSUPPORTED, inside `<program>` it silently compiled as an HTML element with page text).
+
+## 2026-10-29T21:10Z — commit 1 landed (cbb872a02); slice 2: SPEC status, §34 rows, gaps, hardening
+
+- SPEC §21.3.3: status banner + an "Implementation status (S473)" paragraph (built / refused by name / not
+  expressible / not emitted). §34: the 12 codes the bootstrap now emits name their emitter (parse.scrml /
+  analyze.scrml / runtime.js), E-HOST-HANDLE-NOT-DATA as partial, the E-HOST-VALUE-MISMATCH-RT, E-EQ-003 (both
+  rows) and E-SCOPE-010 `<host>` clauses updated. No new code minted (s34-census PASS).
+- severity.scrml regenerated (13 codes gained rows); SPEC-INDEX regenerated; known-gaps counts by state.ts.
+- Gap `g-boot-host-block-f3-unbuilt-s473` NARROWED (remaining list (a)–(k)). Filed:
+  `g-spec-host-tape-array-proto-pollution-s473`, `g-spec-host-decode-throw-code-s473`,
+  `g-spec-host-sink-aliases-reflect-s473`, `g-boot-host-result-then-getter-raw-s473`.
+- Hardening (fail closed, PA readings): rule 8 judged over every chain segment with `document` / `window` aliases
+  (`ownerDocument`, `self`, `top`, `parent`, `defaultView`, `contentWindow` …); `Reflect` / `Object.assign` /
+  `defineProperty` calls refused by name; a binding the parser accepted that does not convert into Core is
+  refused (defect guard), never left an empty-bodied function.
+- Gates (local): s34-census, claim-gate, snippet-gate, SPEC-INDEX, delta-lint, conflict-marker, md-shim, severity
+  --check, types-gate, corpus-compile-floor: PASS. Slices: no-default-arm, dup-fn, m1 (109), m2 (619), m1
+  lowered (109), m3 (60), m4 (3679), codec (166), e2e-render-map (259), bootstrap-conformance --check: PASS.
