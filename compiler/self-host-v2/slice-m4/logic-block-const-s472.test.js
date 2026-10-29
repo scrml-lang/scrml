@@ -197,13 +197,13 @@ describe("review #1617 MED-1 — a chain of constants is linear in output and co
     expect(textOf("#v")).toBe(String(2 ** 20));
   });
 
-  test("two files' private constants of one name are two bindings, each file reading its own", async () => {
+  // s473 r2 #5 ("One name per program for every user declaration"): was two bindings, each file
+  // reading its own; now the second is E-SCOPE-010 (§7.6, one name per program)
+  test("two files' private constants of one name: E-SCOPE-010 (one name per program, S473 r2 #5)", () => {
     const lib = `\${\n    const K = "lib-k";\n    export fn libK() -> string { return K; }\n}\n`;
     const app = `\${ const K = "app-k"; }\n<program>\n    \${ import { libK } from "./lib.scrml"; }\n    <main>\n        <p id="k">\${K}/\${libK()}</p>\n    </main>\n</program>\n`;
     const r = run([{ path: "lib.scrml", src: lib }, { path: "app.scrml", src: app }]);
-    expect(codes(r)).toEqual([]);
-    await loadProgram(r.core, "lc-twok");
-    expect(textOf("#k")).toBe("app-k/lib-k");
+    expect(codes(r)).toEqual(["E-SCOPE-010"]);
   });
 });
 

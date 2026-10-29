@@ -144,11 +144,15 @@ describe("a function is usable only where it is declared or imported (§21.3, E-
   });
 });
 
-describe("private names in two files do not collide; each use resolves to its own (§21.3)", () => {
+// s473 r2 #5 ("One name per program for every user declaration (extends the §7.6 uniform
+// E-SCOPE-010 ruling past file scope)"): two USER files may no longer each keep a private name —
+// the s472 pins below that compiled such pairs are now the refusals. Scoping stays per file
+// (scopeFrom), which still keeps a stdlib module's private names apart from the page's.
+describe("private names in two user files: one name per program — E-SCOPE-010 (§7.6, S473 r2 #5)", () => {
   const A = { path: "a.scrml", src: `\${\n    fn helper() -> string {\n        return "A";\n    }\n    export fn fromA() -> string {\n        return helper();\n    }\n}\n` };
   const B = { path: "b.scrml", src: `\${\n    fn helper() -> string {\n        return "B";\n    }\n    export fn fromB() -> string {\n        return helper();\n    }\n}\n` };
 
-  test("three private `helper`s (two libraries and the page): clean, and each call reaches its own", async () => {
+  test("three private `helper`s (two libraries and the page): one report per later binding", () => {
     const src = `<program>
     \${ import { fromA } from "./a.scrml"; import { fromB } from "./b.scrml"; }
     function helper() -> string {
@@ -159,18 +163,16 @@ describe("private names in two files do not collide; each use resolves to its ow
     </main>
 </program>
 `;
-    const r = clean(run(src, [A, B]));
-    await loadProgram(r.core, "s472-priv-" + k++);
-    expect(text("#h")).toBe("A B APP");
+    const r = run(src, [A, B]);
+    expect(errs(r).map((d) => d.code)).toEqual(["E-SCOPE-010", "E-SCOPE-010"]);
+    expect(errs(r).map((d) => d.file).sort()).toEqual([ENTRY, "b.scrml"].sort());
   });
 
-  test("two private types of one name: each file's annotations name its own", async () => {
+  test("two private types of one name: E-SCOPE-010 in the later file", () => {
     const TA = { path: "ta.scrml", src: `\${\n    type Box:struct = { v: string }\n    export fn boxA() -> string {\n        const b: Box = { v: "a" };\n        return b.v;\n    }\n}\n` };
     const TB = { path: "tb.scrml", src: `\${\n    type Box:struct = { n: int }\n    export fn boxB() -> int {\n        const b: Box = { n: 7 };\n        return b.n;\n    }\n}\n` };
     const src = `<program>\n    \${ import { boxA } from "./ta.scrml"; import { boxB } from "./tb.scrml"; }\n    <p id="b">\${boxA()} \${boxB()}</p>\n</program>\n`;
-    const r = clean(run(src, [TA, TB]));
-    await loadProgram(r.core, "s472-box-" + k++);
-    expect(text("#b")).toBe("a 7");
+    expect(errs(run(src, [TA, TB])).map((d) => [d.code, d.file])).toEqual([["E-SCOPE-010", "tb.scrml"]]);
   });
 
   test("a bare variant with no expected type sees only the enums in scope in its file", () => {
@@ -190,10 +192,8 @@ describe("private names in two files do not collide; each use resolves to its ow
     clean(run(src, [L]));
   });
 
-  test("two server functions of one name in two files: two routes, each answering with its own function — server and client", async () => {
-    const SQ = "?" + "{";
-    // sa.scrml: a private server function `load` (the deprecated modifier — a `?{}` in an
-    // imported file is not in the bootstrap), called from the client by the exported `viaA`
+
+  test("two server functions of one name in two files: E-SCOPE-010 (was: two routes)", () => {
     const SA = { path: "sa.scrml", src: `\${
     server function load(id: string) -> string {
         return "a:" + id;
@@ -204,43 +204,15 @@ describe("private names in two files do not collide; each use resolves to its ow
     }
 }
 ` };
-    const src = `<program db="./app.db">
+    const src = `<program>
     \${ import { viaA } from "./sa.scrml"; }
-    type Row:struct = { name: string }
-    let <out:string=""/>
     function load(id: int) -> string {
-        const r: Row = ${SQ}\`SELECT name FROM b WHERE id = \${id}\`}.get() !{ _ :> { return "none"; } };
-        return "b:" + r.name;
+        return "b";
     }
-    <main>
-        <button id="a" onclick={ @out = viaA("1"); }>a</button>
-        <button id="b" onclick={ @out = load(1) !{ .Transport(t) :> return }; }>b</button>
-        <p id="out">\${@out}</p>
-    </main>
+    <p>\${load(1)}</p>
 </program>
 `;
-    const r = clean(run(src, [SA]));
-    const { srv, routes, js } = await serve(r.core, spyDriver(() => [{ name: "bo" }]).fn);
-    const loads = routes.filter((x) => x.fn === "load");
-    expect(loads.length).toBe(2);
-    expect(new Set(loads.map((x) => x.path)).size).toBe(2);
-    // one route constant per route (print.scrml routeName): `route$load` and `route$load$1`
-    expect(js).toContain("route$load$1");
-    const answers = [];
-    // each route decodes its own parameter type strictly (§57): sa.scrml's takes a string, the page's an int
-    for (const x of loads) {
-      const s = await post(srv, x.path, ["1"]);
-      answers.push(s.status === 200 ? s.json : (await post(srv, x.path, [1])).json);
-    }
-    expect(answers.sort()).toEqual(["a:1", "b:bo"].sort());
-    await loadProgram(r.core, "s472-srv-" + k++);
-    globalThis.fetch = bridge(srv);
-    click(document.querySelector("#a"));
-    await settle();
-    expect(text("#out")).toBe("a:1");
-    click(document.querySelector("#b"));
-    await settle();
-    expect(text("#out")).toBe("b:bo");
+    expect(errs(run(src, [SA])).map((d) => [d.code, d.file])).toEqual([["E-SCOPE-010", ENTRY]]);
   });
 });
 
@@ -307,7 +279,9 @@ describe("an import binds a name in file scope", () => {
     expect(src.slice(r.diags[0].span.start, r.diags[0].span.end)).toBe("twice");
   });
 
-  test("two imports of one name: the later wins, with W-IMPORT-001 (§41.7)", async () => {
+  // s473 r2 #5: two user files exporting one name are already one name too many (E-SCOPE-010 at
+  // the later file); the §41.7 W-IMPORT-001 still reports the second import beside it.
+  test("two imports of one name from two user files: E-SCOPE-010 (one name per program), with W-IMPORT-001 (§41.7)", () => {
     const L2 = { path: "lib2.scrml", src: `\${\n    export fn twice(n: int) -> int {\n        return n * 20;\n    }\n}\n` };
     const src = `<program>
     \${ import { twice } from "./lib.scrml"; import { twice } from "./lib2.scrml"; }
@@ -315,10 +289,20 @@ describe("an import binds a name in file scope", () => {
 </program>
 `;
     const r = run(src, [LIB, L2]);
+    expect(r.diags.map((d) => [d.code, d.file]).sort()).toEqual([["E-SCOPE-010", "lib2.scrml"], ["W-IMPORT-001", ENTRY]].sort());
+  });
+
+  test("the same name imported twice from ONE file: one declaration — W-IMPORT-001 only, and it runs", async () => {
+    const src = `<program>
+    \${ import { twice } from "./lib.scrml"; import { twice } from "./lib.scrml"; }
+    <p id="t">\${twice(1)}</p>
+</program>
+`;
+    const r = run(src, [LIB]);
     expect(r.diags.map((d) => [d.code, d.severity])).toEqual([["W-IMPORT-001", "Warning"]]);
     clean(r);
     await loadProgram(r.core, "s472-later-" + k++);
-    expect(text("#t")).toBe("20");
+    expect(text("#t")).toBe("2");
   });
 });
 
@@ -499,7 +483,9 @@ describe("r1 F2 — an import brings only the EXPORTED declaration(s) of a name 
 
 describe("r1 F3 — a call's write set is THE callee's in the calling file's scope", () => {
   const W = { path: "w.scrml", src: `\${\n    server function bump() -> int {\n        return 1;\n    }\n    export function wv() -> int {\n        const v: int = bump() !{ .Transport(t) :> { return 0; } };\n        return v;\n    }\n}\n` };
-  test("writeset-overrefuse: another file's private server `bump` does not end the page's narrowing across its own pure `bump()` — clean, and it runs", async () => {
+  // s473 r2 #5: a page `bump` beside another user file's private `bump` is now E-SCOPE-010 (one name
+  // per program), so the mis-link this pinned cannot arise between user files; the pin is the refusal.
+  test("writeset-overrefuse: another file's private server `bump` beside the page's `bump`: E-SCOPE-010 (S473 r2 #5)", () => {
     const src = `<program>
     \${ import { wv } from "./w.scrml"; }
     let <n:int | not=(3)/>
@@ -516,9 +502,7 @@ describe("r1 F3 — a call's write set is THE callee's in the calling file's sco
     <p id="o">\${f()}</p>
 </program>
 `;
-    const r = clean(run(src, [W]));
-    await loadProgram(r.core, "s472-r1-w-" + k++);
-    expect(text("#o")).toBe("3");
+    expect(errs(run(src, [W])).map((d) => [d.code, d.file])).toEqual([["E-SCOPE-010", ENTRY]]);
   });
 
   test("writeset-converse: the page's own `bump` that writes `@n` still ends the narrowing (another file's pure `bump` does not hide it)", () => {
