@@ -110,6 +110,27 @@ describe("a declaration in a `<db>` body is a per-request server cell (S472 ruli
     expect(errCodes(src)).toContain("E-SCOPE-001");
   });
 
+  test("r1 F1 — a cell `@rows` beside an author function `load_rows()`: distinct route constants, both artifacts load and answer", async () => {
+    const src = P(`${ROW}\n${ROWS}\n        function load_rows() -> string[] {\n            const xs: Row[] = ${SQ}\`SELECT id, name FROM people\`}.all() !{ _ :> [] };\n            return xs.map(x => x.name);\n        }\n        <rows_db:int=(7)/>`,
+      `    function g() {\n        const s: string[] = load_rows() !{ _ :> [] };\n    }\n    <main><p id="n">${IV}@rows.length} ${IV}@rows_db}</p><button onclick=g()>"g"</button></main>`);
+    const r = compile(src);
+    const { client, server } = artifacts(r.core);
+    const decls = (js) => [...js.matchAll(/const (route\$[A-Za-z0-9_$]+) =/g)].map((m) => m[1]);
+    for (const js of [client.js, server.js]) {
+      const ds = decls(js);
+      expect(ds.length).toBe(3);
+      expect(new Set(ds).size).toBe(ds.length);
+    }
+    const sql = await realDb(PEOPLE, SEED);
+    const { srv, routes } = await serve(r.core, sql);
+    expect(routes.length).toBe(3);
+    for (const x of routes) expect((await post(srv, x.path, [])).status).toBe(200);
+    globalThis.fetch = bridge(srv);
+    await loadProgram(r.core, uniq("dbcell-f1"));
+    await settle();
+    expect(document.querySelector("#n").textContent).toBe("2 7");
+  });
+
   test("a `let` db cell with a literal value is a server cell too (one route), and the client reads it", () => {
     const src = P("        let <draft:string=\"hello\"/>", `    <main><p id="d">${IV}@draft}</p></main>`);
     const r = compile(src);
@@ -263,8 +284,17 @@ describe("writes: only code inside the `<db>` writes a db cell; a locked one is 
     const scalar = P("        <n:int=(1)/>\n        function bump() {\n            @n = 2;\n        }", "    <main><button onclick=bump()>\"c\"</button></main>");
     expect(errCodes(scalar)).toEqual(["E-WRITE-NOT-GRANTED"]);
     const edits = P(`${ROW}\n        <rows:Row[free, append]=(${SQ}\`SELECT id, name FROM people\`}.all() !{ _ :> [] })/>\n        function more() {\n            @rows = [...@rows, { id: 9, name: "Zed" }];\n        }`, "    <main><button onclick=more()>\"c\"</button></main>");
-    expect(errCodes(edits)).toEqual(["E-WRITE-NOT-GRANTED"]);
+    expect(errCodes(edits).sort()).toEqual(["E-DB-CELL-EDIT-GRANT", "E-WRITE-NOT-GRANTED"]);
     expect(msgOf(edits, "E-WRITE-NOT-GRANTED")).toContain("locked `<db>` cell");
+  });
+
+  test("r1 F4 — a locked db cell whose type grants edits but not `replace` is refused AT THE DECLARATION (E-DB-CELL-EDIT-GRANT), written or not", () => {
+    const decl = P(`${ROW}\n        <rows:Row[free, append]=(${SQ}\`SELECT id, name FROM people\`}.all() !{ _ :> [] })/>`, `    <main><p>${IV}@rows.length}</p></main>`);
+    expect(errCodes(decl)).toEqual(["E-DB-CELL-EDIT-GRANT"]);
+    expect(msgOf(decl, "E-DB-CELL-EDIT-GRANT")).toContain("@rows");
+    // controls: no grant (read-only), and `replace` (writable in-block) are not refused
+    expect(errCodes(BASIC)).toEqual([]);
+    expect(errCodes(P(`${ROW}\n        <rows:Row[replace]=(${SQ}\`SELECT id, name FROM people\`}.all() !{ _ :> [] })/>`, "    <main><p>x</p></main>"))).toEqual([]);
   });
 
   test("a tape db cell whose type grants `replace` (the sequence spelling of `let`, O3) is written by in-block code, and from nowhere else", () => {

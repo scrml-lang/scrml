@@ -52,3 +52,19 @@ PA recs" items 1, 2, 4, 5; S472 "⭐ RULED — functions in a `<db>` body: visib
   SPEC-INDEX --check OK · delta-lint PASS · s34-census --check-new PASS (4 rows) · bootstrap-conformance --check
   current (no movement) · severity --check current · lint-no-default-arm 0 · slice m1 100/0, m2 614/0,
   m1 lowered 100/0, m3 60/0, m4 3102/0, codec 166/0 · e2e-render-map 259/0. Pre-commit hook: 50909 pass / 0 fail.
+
+## 2026-10-28 — fix round 1 (S239 review of 051034e09: LAND-WITH-FOLLOWUPS — no leak, no write bypass, no server-read bypass)
+- F1 (MED): print.scrml `routeName` dedupes on the `$`→`_`-normalized hint (a cell `@rows`'s `load$rows` and an author
+  `load_rows()` both printed `const route$load_rows`; neither module loaded). Test: the p10 shape — distinct route
+  constants in both artifacts, every route answers 200, the page mounts.
+- F3: SPEC §8.1.3 item 5 states normatively that a locked `<db>` cell is read-only on the client whatever other grant it
+  carries (overriding §66.9 rule 1 for a `<db>` cell; only `replace` makes one client-writable) — "PA reading of the
+  S472 ruling, S473"; §66.9 rule 1 added to the provenance "supersedes". Gap g-bootstrap-db-cell-locked-reading-s473 resolved.
+- F4: E-DB-CELL-EDIT-GRANT (new §34 row; analyze.scrml `dbLoads`) — a locked cell whose type grants an edit but not
+  `replace` is refused at the declaration. Tests + acceptance db-cells/neg-edit-grant; neg-locked-write now a scalar.
+- F5: "inside" (incl. a `<db>` nested in the cell's `<db>`) stated in item 5; the bootstrap note's nested-scope list
+  gains loop/arm binders, the `<match>` arm, and the component-body hole (F2). Item 4's own-value clause labelled a derivation.
+- F2: filed g-bootstrap-db-in-component-decl-body-dropped-s473 (LOW, pre-existing). Not fixed (as directed).
+- Gates: slices m1 100, m2 614, m1 lowered 100, m3 60, m4 3105, codec 166 (0 fail); e2e-render-map 259/0; lint 0;
+  types-gate OK; compiler/tests/*.test.js 2239/0; snippet, claim, floor, md-shim, conflict, SPEC-INDEX, delta-lint,
+  s34-census (5 rows), bootstrap-conformance current, severity current — all PASS.

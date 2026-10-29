@@ -23065,6 +23065,12 @@ ${
                     for (const f of pd.info.fields) {
                         if (f.nid == loadCellNid(g, fs.f.nid)) {
                             found = true
+                            // s473 r1 (F4): a locked cell's other grants never apply on the client
+                            // (§8.1.3 item 5), so an edit grant without `replace` is dead weight — refused
+                            // at the declaration, not discovered at the first write
+                            if (grantsAny(f.grants) && !grantsAdmit(f.grants, EditKind.Replace)) {
+                                st = addDiag(st, fs.info.file, f.span, "E-DB-CELL-EDIT-GRANT", "`@" + f.sym.hint + "` is a locked `<db>` cell whose type grants edits but not `replace` — a locked `<db>` cell is read-only on the client, so those grants can never be used (§8.1.3 item 5). Drop them (a read-only cell), or grant `replace` (a tape written by code inside its `<db>`, landing locally)")
+                            }
                             const rv: RSym = mint(st, f.sym.hint + "$db")
                             st = rv.st
                             out = out.concat([{ cell: f.sym, fn: fs.info.sym, val: rv.s }])

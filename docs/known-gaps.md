@@ -31,8 +31,8 @@
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 263 | 5 |
-| MED | 703 | 8 |
-| LOW | 565 | 0 |
+| MED | 702 | 8 |
+| LOW | 566 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
 
@@ -1276,11 +1276,19 @@ The S469 follow-up fixed the examples the fidelity review named (§18.8.1 / §53
 
 Owed: the bootstrap parses a `<db>` body and a `<channel>` body as item positions (§66.2.5 amendment): a §66 declaration there is a declaration scoped to that block — channel state shared across the channel's clients (§38.4), db-block state server-side. Today it reads those bodies as free text, so `let <x/>` there is refused. impl#1 carries the rule (§34.0). **Widened S469** (ruling:user-voice-scrml.md S469 "O61 reach and the page/theme half" — "Same rule as channel/db (Rec)"; "Readable program-wide (Rec)"): `<page>` and `<theme>` bodies are item positions too, and block-declared state in all four is readable program-wide by `@`. Owed in the bootstrap for all four bodies; whether its `<page>` / `<theme>` paths refuse today in the same way is not separately measured.
 
-### g-bootstrap-db-cell-locked-reading-s473 — what "locked" means for a `<db>` cell whose type carries grants: the bootstrap reads S472 item 5's "locked cells are read-only on the client" as §66.9 rule 1's "no `replace` grant", so a tape `<db>` cell with only edit grants (`Row[free, append]`) is never written on the client — `NEW S473; MED; open (owner question)`
+### g-bootstrap-db-cell-locked-reading-s473 — what "locked" means for a `<db>` cell whose type carries grants: the bootstrap reads S472 item 5's "locked cells are read-only on the client" as §66.9 rule 1's "no `replace` grant", so a tape `<db>` cell with only edit grants (`Row[free, append]`) is never written on the client — `NEW S473; MED; RESOLVED S473 (PA ruling; s473-boot-db-cells r1)`
 
-<!-- @gap id=g-bootstrap-db-cell-locked-reading-s473 sev=MED status=open locus=compiler/self-host-v2/analyze.scrml(dbCellWriteGuard) prov=ruling:user-voice-scrml.md(S472 "⭐ RULED — `<db>` body + client reads, Q1–Q6 = PA recs" item 5 — "locked cells are read-only on the client; `let` stays local");spec:§8.1.3,§66.9 -->
+<!-- @gap id=g-bootstrap-db-cell-locked-reading-s473 sev=MED status=resolved resolved-by=s473-boot-db-cells locus=compiler/self-host-v2/analyze.scrml(dbCellWriteGuard) prov=ruling:user-voice-scrml.md(S472 "⭐ RULED — `<db>` body + client reads, Q1–Q6 = PA recs" item 5 — "locked cells are read-only on the client; `let` stays local");spec:§8.1.3,§66.9 -->
 
 S472 item 5 says "locked cells are read-only on the client; `let` stays local". §66.9 rule 1 defines locked as "no `replace` grant" and adds "Any OTHER grant its type or field contract carries still applies", and `let` is refused on a sequence (O3: write `replace` in the type's grants). The bootstrap takes the narrow, reversible reading: a `<db>` cell is client-writable (by code inside its block) iff it has a `replace` grant (`let` on a scalar, `[replace]` in a tape type), and a locked cell's other grants (`append`, a lifecycle) do not apply on the client. The alternative, that a locked cell keeps its other grants on the client, would let in-block code `append` to a server cell's client copy. **PA rec:** keep the narrow reading (it matches "read-only" literally and the design's Livewire "locked by default" lesson) and state it in §8.1.3 item 5 as normative once ruled. Either answer only widens later.
+
+**RESOLVED S473 (s473-boot-db-cells, fix round 1 of #1633).** The PA ruled the narrow reading (the S239 review endorsed it): "read-only on the client" is categorical. SPEC §8.1.3 item 5 now says so normatively — a locked `<db>` cell is read-only on the client whatever other grant it carries, overriding §66.9 rule 1's "Any OTHER grant … still applies" for a `<db>` cell, and only a `replace` grant makes one client-writable from inside its block — marked "PA reading of the S472 ruling, S473". A locked cell whose type grants an edit but not `replace` is refused at its declaration: `E-DB-CELL-EDIT-GRANT` (new §34 row; `analyze.scrml` `dbLoads`).
+
+### g-bootstrap-db-in-component-decl-body-dropped-s473 — a `<db>` written in a component DECLARATION body (`<card …> <db src=…> <c:T=(…)/> </db> </>`) is read as a state child: its cell and its `?{}` are dropped with no diagnostic (no field, no load, no server function) — `NEW S473; LOW; open (pre-existing)`
+
+<!-- @gap id=g-bootstrap-db-in-component-decl-body-dropped-s473 sev=LOW status=open locus=compiler/self-host-v2/parse.scrml(parseDeclBody — a tag with neither an own value nor a typed attribute is a state child) prov=review:S239-#1633-F2(~/.cache/scrml/review/s473-1633/p9-inspect.js, p9-base.js);ruling:user-voice-scrml.md(S472 "⭐ RULED — functions in a `<db>` body: visibility" — a component's "renders/body" is REFUSED);spec:§8.1.3 -->
+
+Found by the S239 review of #1633 (F2), and the same on base (543791e75), so not introduced by Lane B. No SQL reaches the client, so it is not a leak, but source is silently dropped where the S472 visibility ruling (extended to cells by §8.1.3) expects a refusal. Owed: refuse a `<db>` in a declaration body by name (E-BOOTSTRAP-UNSUPPORTED, the `dbNestedWhy` message), at the parser's state-child read or in analyze's state-child check.
 
 ### g-bootstrap-db-cell-load-failure-surface-s473 — when a `<db>` cell's load fails (a transport failure — the server is unreachable, answers 5xx, or its answer does not decode against the cell's type), the bootstrap's page mounts NOTHING and reports the failure's variant; the design's `@x.error` surface (§52.6.8) is not built — `NEW S473; MED; open`
 

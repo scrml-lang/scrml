@@ -446,7 +446,9 @@ ${
                 if (k == 0) return base
                 return base + "$" + k
             }
-            if (sf.sym.hint == f.hint) k = k + 1
+            // s473 r1 (F1): compared AFTER `$` becomes `_` — `load$rows` (a `<db>` cell's load) and an
+            // author's `load_rows` would otherwise share one index and declare `route$load_rows` twice
+            if (sf.sym.hint.replaceAll("$", "_") == f.hint.replaceAll("$", "_")) k = k + 1
         }
         return base
     }

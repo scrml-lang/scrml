@@ -292,6 +292,7 @@ const STATUS = {
   "db-cells/neg-write-outside": ["PASS", ["E-DB-CELL-WRITE-OUTSIDE-BLOCK"]],
   "db-cells/neg-server-read": ["PASS", ["E-DB-CELL-SERVER-READ"]],
   "db-cells/neg-locked-write": ["PASS", ["E-WRITE-NOT-GRANTED"]],
+  "db-cells/neg-edit-grant": ["PASS", ["E-DB-CELL-EDIT-GRANT"]],
   // s472-boot-db-body-mode (S472 ruling Q3, §4.18.1): a `<db>` body is a code-default ITEM body
   "db-body/fn-and-markup": ["PASS", []],
   "db-body/neg-statement": ["PASS", ["E-DB-BODY-STATEMENT"]],
