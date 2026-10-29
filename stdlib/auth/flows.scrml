@@ -1,4 +1,3 @@
-<program>
 ${
     // ---------------------------------------------------------------------------
     // scrml:auth/flows — magic-link / email-verify / password-reset flows
@@ -33,9 +32,9 @@ ${
     //     AND passes ttl to the store; verify* rejects an expired record.
     // ---------------------------------------------------------------------------
 
-    import { generateToken } from 'scrml:crypto'
-    import { hashPassword } from './password.scrml'
-    import { safeCallAsync } from 'scrml:host'
+    import { generateToken } from 'scrml:crypto';
+    import { hashPassword } from './password.scrml';
+    import { safeCallAsync } from 'scrml:host';
     import { get as kvGet, set as kvSet, del as kvDel } from 'scrml:store'
 
     /**
@@ -50,7 +49,7 @@ ${
         if (typeof opts == "function") {
             throw new Error(`[scrml:auth] ${fnName}: the options object came where the function belongs — the signature is ${signature}`)
         }
-        const options = opts is given ? opts : {}
+        const options = opts is given ? opts : {};
         if (options[legacyField] is given) {
             throw new Error(`[scrml:auth] ${fnName}: \`${legacyField}\` is no longer an options field (S462) — pass it positionally: ${signature}`)
         }
@@ -278,4 +277,3 @@ ${
         assertTruthy(stillGood.valid)
     }
 }
-</program>

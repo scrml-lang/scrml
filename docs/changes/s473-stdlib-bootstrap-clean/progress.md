@@ -1,0 +1,89 @@
+# progress — s473-stdlib-bootstrap-clean
+
+Branch from origin/main 4d5b9a15d. Contract: the S473 lane brief + the dispatch (make the stdlib
+compile clean on the bootstrap, keep impl#1 compiling it).
+
+## Log (append-only, UTC)
+
+- 2026-10-29T14:30Z start: worktree verified, bun install + pretest OK. Baseline measured
+  (baseline.md + baseline-table.md): 1 clean (math) / 36 errors / 0 crash / 16 not-supplied
+  (scrml:compiler*).
+- 2026-10-29T15:20Z mechanical pass (mechanical.ts, reproducible): `--unwrap` dropped the top-level
+  `<program>` wrapper from 31 stdlib files (S471 ruling "I guess its ok to drop the <program> wrapper";
+  §21.5 library form). NOT unwrapped: random, regex, data/validate, data/transform — their `~{}` test
+  blocks hold an `import`, and impl#1 in library form emits that import into the module body
+  (E-CODEGEN-INVALID-LOGIC "Unexpected keyword 'import'" — impl#1's existing library-mode defect,
+  already on base in `--mode library`). `--semis` inserted the statement `;` the bootstrap reports
+  (E-STMT-MISSING-SEMICOLON) at LINE ENDS only and never before a continuation line — a first
+  version also took positions mid-expression after an earlier parse error (`typeof x != "s";)`) and
+  impl1-check caught it (reverted, rule tightened). md and scrml:compiler* untouched.
+- impl1-check.ts (impl#1 compiles every stdlib file in place, default + library mode, codes compared
+  with a base run made with base's stdlib checked out in place): 0 regressed; host/index improved
+  (E-CODEGEN-INVALID-LOGIC gone in default mode). NB impl#1 compiles most stdlib files standalone
+  with errors on base already (E-SCOPE-001 / E-THROW-NOT-IN-SCRML …): it consumes the hand-written
+  shims at compiler/runtime/stdlib/*.js, the .scrml is the export/async/type reference.
+- 2026-10-29T15:55Z scrml:random → CLEAN on the bootstrap. Ported on the math pattern: `<program>`
+  wrapper and the `~{}` block dropped (its assertions are already impl#1 stdlib-random-capability
+  §C R10–R13, and moved to the new slice-m4 test against host.js); new stdlib/random/host.js
+  (`Math.random()` — the one host RNG touch); `random() -> number` / `randomInt(min: number, max:
+  number) -> int` are the fully typed wrappers (§21.3.1.1). Param types read from the doc: "Fractional
+  bounds are floored/ceiled" ⇒ `number`; the result is an integer ⇒ `int`. impl#1: compiles clean in
+  default AND library mode (library was E-CODEGEN-INVALID-LOGIC on base); random/parity/no-logic-leak/
+  canonical-form tests pass. New test compiler/self-host-v2/slice-m4/stdlib-boot-clean-s473.test.js
+  (5 tests: math + random pinned clean; random compiled and RUN; host.js assertions).
+- 2026-10-29T16:40Z format / path / fs: parameters annotated (annotate.ts + signatures.json, exact
+  head replacement). Types read from each function's doc and body; an OPTIONAL parameter takes its
+  §7.3.2 default (`locale: string = "en-US"`, `decimals: int = 1`) or `T | not = not` where absent
+  means `not` — the SPEC form, which impl#1 compiles. NOT annotated (no writable scrml type yet):
+  open host option records (`formatNumberAdvanced(options)`, `mkdirSync/rmSync(options)`), and
+  every function-valued / any-valued parameter elsewhere. format: string truthiness rewritten to
+  the S440 form (`str == ""`, `plural is given ? …`, `currency is given ? …`), the `locale ||`
+  fallbacks dropped (the default carries them). Bootstrap: format 128 → 118 errors — the remaining
+  are host reach (`new Intl.*`, regex `.replace`), §7.3.2 defaults and rest params NOT PARSED
+  (E-BOOTSTRAP-REDECLARE "parameter `` is already declared" / missing-`;` cascades — new gap
+  g-boot-param-default-and-rest-s473), the `~{}` block. impl1-check: same codes (0 regressed);
+  stdlib-format/path/fs/parity unit tests pass. NB impl#1 reads a stdlib `.scrml` only for its
+  export list, async-ness and type declarations (api.js STDLIB-EXPORT-SEED) — parameter
+  annotations do not reach adopter call checking.
+- 2026-10-29T17:20Z re-measured (after.md + after-table.md): 2 clean (math, random) / 35 errors;
+  2,775 → 2,219 Error diagnostics (baseline.md's first total "2,868" was a hand figure — corrected to
+  the measured 2,775). Ranked blocker list with sizes in after.md. Gaps: NEW
+  g-boot-param-default-and-rest-s473, g-boot-async-stdlib-function-s473, g-boot-reexport-from-s473,
+  g-boot-test-block-s473, g-impl1-library-test-block-import-emitted-s473 (defer=impl1-s471-policy),
+  g-boot-stdlib-intrinsic-fns-s473; NARROWED g-boot-stdlib-none-compiles-s471 (S473 note) and a S473
+  measurement note on g-boot-no-host-bridge-s471. state.ts --write (counts only; master-list.md
+  recent-sessions churn reverted, not staged).
+- Red-on-base for the new slice-m4 test: with base's stdlib/random/index.scrml (and the new host.js
+  present) 3 of 5 fail (the random pin, host-backed members, the page run); the math pin and the
+  host.js unit test pass. On pure base the file does not load (stdlib/random/host.js absent).
+- Hook note: the format/path/fs commit's FIRST hook run failed one shard (shard 3; my `tail` cut the
+  name — not identified); the immediate rerun passed the full suite. Treat as a possible flake; the
+  reviewer may want to rerun shard-3's files.
+- 2026-10-29T18:10Z local CI gates: host-global-scan leg 1 FAILED — R3 "top-level binding
+  `startMcpServer` / `shutdownMcpServer` in a classic script" for stdlib/mcp/index.scrml (default and
+  embed modes): without the `<program>` wrapper impl#1 emits mcp as a classic client script. Fix: mcp
+  restored to base (wrapper kept; it is bootstrap-blocked on `async` anyway). Rerun leg 1: 0
+  violations. after.md / gap note updated (30 files unwrapped; total 2,220). All other gates PASS
+  (types-gate, root tests, snippet, claim, compile-floor, md-shim, conflict-marker, spec-index,
+  delta-lint, ci-shards, s34-census, severity, both lints, slices m1 / m2 / m1-lowered / m3 / m4 /
+  codec, e2e-render-map, bootstrap-conformance --check, host-global leg 2).
+- 2026-10-29T20:00Z FIX ROUND 1 (review ~/.cache/scrml/review/s473-1648/REVIEW.md, LAND-W-F/U):
+  - MED-1 → format's `.scrml` bodies restored to the shim's logic (the a55fd8e73 bodies: `||`
+    fallbacks for locale / currency / plural / char / type, `!str` tolerance, `String(str)`), the
+    §7.3.2 default heads kept; string helpers retyped `str: string | not` (the shim tolerates null);
+    padLeft / padRight `str` left unannotated (the shim coerces ANY value with `String()`). fs / path /
+    random audited: their bodies were never changed (heads only; random's host.js = the shim's code).
+    NEW compiler/tests/unit/stdlib-scrml-shim-parity-s473.test.js: format / path / fs functions lifted
+    from the .scrml source by an explicit translation and run side by side with the shim on normal,
+    `""`, `not` and omitted args (fs statSync checked structurally — scrml:host safeCall); random's
+    host.js vs the shim under a stubbed Math.random. 29 tests; on the previous head 13 fail (every
+    format function whose fallback / tolerance had changed). slice-m4 stdlib-boot-clean-s473 +1 test:
+    the COMPILED random program vs the shim, Math.random stubbed.
+  - LOW-1 → wording: the wrapper is kept where unwrapping would add a NEW impl#1 error code (regex,
+    data/validate, data/transform, mcp); the 13 unwrapped files whose `~{}` holds an import are
+    listed in g-impl1-library-test-block-import-emitted-s473.
+  - LOW-2 → with the shim bodies back, every remaining fallback is one the shim has (none removed).
+  - merged origin/main (MERGE ff2823f00; no conflicts; no gap id lost — ids diffed); state.ts --write
+    (no count change; master-list churn reverted).
+  - re-measured: 2 clean (math, random); 2,775 → 2,243 (format 118 → 141: the shim's string
+    truthiness is refused by the bootstrap, S440).

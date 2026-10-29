@@ -1,4 +1,3 @@
-<program>
 ${
     // ---------------------------------------------------------------------------
     // scrml:auth — authentication utilities
@@ -263,4 +262,3 @@ ${
         assertEqual(peek(limiter, "user@example.com").count, 1)
     }
 }
-</program>

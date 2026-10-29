@@ -1,4 +1,3 @@
-<program>
 ${
     // ---------------------------------------------------------------------------
     // scrml:test — assertion utilities for ~{} inline test blocks
@@ -18,11 +17,11 @@ ${
      * Throws TestError with a human-readable message if they differ.
      */
     export function assertEqual(actual, expected, message) {
-        const a = JSON.stringify(actual)
-        const e = JSON.stringify(expected)
+        const a = JSON.stringify(actual);
+        const e = JSON.stringify(expected);
         if (a != e) {
-            const msg = message ? `${message}: expected ${e}, got ${a}` : `Expected ${e}, got ${a}`
-            throw new Error(`[scrml:test] assertEqual failed — ${msg}`)
+            const msg = message ? `${message}: expected ${e}, got ${a}` : `Expected ${e}, got ${a}`;
+            throw new Error(`[scrml:test] assertEqual failed — ${msg}`);
         }
     }
 
@@ -30,11 +29,11 @@ ${
      * Assert two values are NOT equal (JSON comparison).
      */
     export function assertNotEqual(actual, expected, message) {
-        const a = JSON.stringify(actual)
-        const e = JSON.stringify(expected)
+        const a = JSON.stringify(actual);
+        const e = JSON.stringify(expected);
         if (a == e) {
-            const msg = message ? `${message}: expected values to differ, both are ${a}` : `Expected values to differ, both are ${a}`
-            throw new Error(`[scrml:test] assertNotEqual failed — ${msg}`)
+            const msg = message ? `${message}: expected values to differ, both are ${a}` : `Expected values to differ, both are ${a}`;
+            throw new Error(`[scrml:test] assertNotEqual failed — ${msg}`);
         }
     }
 
@@ -43,8 +42,8 @@ ${
      */
     export function assertTruthy(value, message) {
         if (!value) {
-            const msg = message || `Expected truthy value, got ${JSON.stringify(value)}`
-            throw new Error(`[scrml:test] assertTruthy failed — ${msg}`)
+            const msg = message || `Expected truthy value, got ${JSON.stringify(value)}`;
+            throw new Error(`[scrml:test] assertTruthy failed — ${msg}`);
         }
     }
 
@@ -53,8 +52,8 @@ ${
      */
     export function assertFalsy(value, message) {
         if (value) {
-            const msg = message || `Expected falsy value, got ${JSON.stringify(value)}`
-            throw new Error(`[scrml:test] assertFalsy failed — ${msg}`)
+            const msg = message || `Expected falsy value, got ${JSON.stringify(value)}`;
+            throw new Error(`[scrml:test] assertFalsy failed — ${msg}`);
         }
     }
 
@@ -64,8 +63,8 @@ ${
      */
     export function assertNull(value, message) {
         if (value is given) {
-            const msg = message || `Expected absent value, got ${JSON.stringify(value)}`
-            throw new Error(`[scrml:test] assertNull failed — ${msg}`)
+            const msg = message || `Expected absent value, got ${JSON.stringify(value)}`;
+            throw new Error(`[scrml:test] assertNull failed — ${msg}`);
         }
     }
 
@@ -74,8 +73,8 @@ ${
      */
     export function assertDefined(value, message) {
         if (value is not) {
-            const msg = message || `Expected a defined value, got ${JSON.stringify(value)}`
-            throw new Error(`[scrml:test] assertDefined failed — ${msg}`)
+            const msg = message || `Expected a defined value, got ${JSON.stringify(value)}`;
+            throw new Error(`[scrml:test] assertDefined failed — ${msg}`);
         }
     }
 
@@ -86,8 +85,8 @@ ${
      * Example: assertThrows(() => myFn(), "invalid input")
      */
     export function assertThrows(fn, expectedMessageSubstring) {
-        let threw = false
-        let caughtMessage = not
+        let threw = false;
+        let caughtMessage = not;
         try {
             fn()
         } catch (e) {
@@ -199,4 +198,3 @@ ${
         assertDefined(false)
     }
 }
-</program>

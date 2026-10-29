@@ -1,4 +1,3 @@
-<program>
 ${
     // ---------------------------------------------------------------------------
     // scrml:path — file path manipulation utilities
@@ -32,9 +31,9 @@ ${
      * (no backslashes to replace). Mirrors the `\`→`/` idiom used across the
      * compiler (module-resolver.js #26 carve-out, emit-server.ts).
      */
-    function toPosixSep(p) {
-        if (p is not) return p
-        return p.split("\\").join("/")
+    function toPosixSep(p: string | not) {
+        if (p is not) return p;
+        return p.split("\\").join("/");
     }
 
     /**
@@ -46,10 +45,10 @@ ${
      *   join("/usr", "local", "bin")        → "/usr/local/bin"
      *   join("a", "..", "b")                → "b"
      */
-    export function join(...segments) {
-        const path = require("node:path")
-        const filtered = segments.filter(s => s is given)
-        if (filtered.length == 0) return "."
+    export function join(...segments: string[]) {
+        const path = require("node:path");
+        const filtered = segments.filter(s => s is given);
+        if (filtered.length == 0) return ".";
         return toPosixSep(path.join(...filtered))
     }
 
@@ -63,16 +62,16 @@ ${
      *   resolve("src", "index.js")         → "/cwd/src/index.js"
      *   resolve("/a", "/b", "c")           → "/b/c"
      */
-    export function resolve(...segments) {
+    export function resolve(...segments: string[]) {
         // POSIX resolver on every host: native path.resolve() drive-roots a
         // `/`-leading path on Windows (`/usr` → `C:\usr`), breaking the
         // documented contract `resolve("/usr","local","bin") → "/usr/local/bin"`.
         // path.posix.resolve keeps `/`-rooted paths `/`-rooted deterministically;
         // on POSIX it is identical to path.resolve. toPosixSep flips the native
         // separators the captured cwd carries when no absolute segment is given.
-        const path = require("node:path")
-        const filtered = segments.filter(s => s is given)
-        if (filtered.length == 0) return toPosixSep(path.posix.resolve())
+        const path = require("node:path");
+        const filtered = segments.filter(s => s is given);
+        if (filtered.length == 0) return toPosixSep(path.posix.resolve());
         return toPosixSep(path.posix.resolve(...filtered))
     }
 
@@ -85,10 +84,10 @@ ${
      *   dirname("src/index.js")         → "src"
      *   dirname("/")                    → "/"
      */
-    export function dirname(filePath) {
-        const path = require("node:path")
-        if (filePath is not) return "."
-        return toPosixSep(path.dirname(filePath))
+    export function dirname(filePath: string | not) {
+        const path = require("node:path");
+        if (filePath is not) return ".";
+        return toPosixSep(path.dirname(filePath));
     }
 
     /**
@@ -101,11 +100,11 @@ ${
      *   basename("src/index.ts", ".ts")     → "index"
      *   basename("archive.tar.gz", ".gz")   → "archive.tar"
      */
-    export function basename(filePath, ext) {
-        const path = require("node:path")
-        if (filePath is not) return ""
-        if (ext is given) return path.basename(filePath, ext)
-        return path.basename(filePath)
+    export function basename(filePath: string | not, ext: string | not = not) {
+        const path = require("node:path");
+        if (filePath is not) return "";
+        if (ext is given) return path.basename(filePath, ext);
+        return path.basename(filePath);
     }
 
     /**
@@ -118,10 +117,10 @@ ${
      *   extname("README")         → ""
      *   extname(".gitignore")     → ""
      */
-    export function extname(filePath) {
-        const path = require("node:path")
-        if (filePath is not) return ""
-        return path.extname(filePath)
+    export function extname(filePath: string | not) {
+        const path = require("node:path");
+        if (filePath is not) return "";
+        return path.extname(filePath);
     }
 
     /**
@@ -133,11 +132,11 @@ ${
      *   relative("/a/b", "/a/b")                      → ""
      *   relative("/a/b/c", "/a/d/e")                  → "../../d/e"
      */
-    export function relative(from, to) {
-        const path = require("node:path")
-        if (from is not) from = "."
-        if (to is not) to = "."
-        return toPosixSep(path.relative(from, to))
+    export function relative(from: string | not, to: string | not) {
+        const path = require("node:path");
+        if (from is not) from = ".";
+        if (to is not) to = ".";
+        return toPosixSep(path.relative(from, to));
     }
 
     /**
@@ -150,10 +149,10 @@ ${
      *   normalize("a//b///c")           → "a/b/c"
      *   normalize("a/./b/../c")         → "a/c"
      */
-    export function normalize(filePath) {
-        const path = require("node:path")
-        if (filePath is not) return "."
-        return toPosixSep(path.normalize(filePath))
+    export function normalize(filePath: string | not) {
+        const path = require("node:path");
+        if (filePath is not) return ".";
+        return toPosixSep(path.normalize(filePath));
     }
 
     /**
@@ -161,7 +160,7 @@ ${
      * (see toPosixSep), so the separator is ALWAYS "/" — including on Windows.
      * This is deliberate: scrml:path output is host-independent by contract.
      */
-    export const sep = "/"
+    export const sep = "/";
 
     ~{
         // Note: ~{} runs at compile time, not server-side, and cannot exercise
@@ -169,10 +168,9 @@ ${
         // validate structural expectations only. Server-side behavior is
         // validated by the unit tests in compiler/tests/unit/stdlib-path.test.js.
 
-        import { assertEqual } from 'scrml:test'
+        import { assertEqual } from 'scrml:test';
 
         // The sep constant is not server-gated — verify it directly
         assertEqual(sep, "/")
     }
 }
-</program>
