@@ -5,8 +5,8 @@
 //   B3 — `<program>` attributes the bootstrap refused by a generic message:
 //     • the five documentary attributes (`title=`, `description=`, `version=`,
 //       `author=`, `license=`, §40.7) are READ: each emits its head tag;
-//     • `lang=` (§23.2.1) is READ and carried on the Core program — it is the
-//       language a `_{}` block resolves against, and changes nothing else;
+//     • `lang=` (§23.2.1) is READ — the language a `_{}` block resolves against
+//       (one reader: analyze foreignLangOf), and changes nothing else printed;
 //     • `mcp` stays refused, now by name: the bootstrap builds no MCP server.
 //   B9 — small gaps:
 //     • `timestamp` (a registered string-shaped primitive: §2959 "`date` /
@@ -100,16 +100,21 @@ describe("B3 — §40.7 documentary attributes are read", () => {
 });
 
 // ---------------------------------------------------------------------------
-describe("B3 — §23.2.1 `lang=` is read and carried", () => {
-  test("FLOGENCE view.scrml:1 shape — `<program lang=\"ts\">` compiles; the Core program carries `ts`", () => {
-    const r = clean(prog(`lang="ts"`));
-    expect(r.core.lang).toBe("ts");
+describe("B3 — §23.2.1 `lang=` is read (its one reader: analyze foreignLangOf)", () => {
+  // A foreign block whose language the program's `lang=` decides (§23.2.1). The
+  // bootstrap checks it and refuses only its emission (s473-boot-foreign-blocks).
+  const FB = `function f() -> int {\n        const x: int = _={ return 1 }=;\n        return x;\n    }\n    <p>x</p>`;
+  const fcodes = (attrs) => [...new Set(codes(prog(attrs, FB)))].sort();
+  test("FLOGENCE view.scrml:1 shape — `<program lang=\"ts\">` compiles", () => {
+    clean(prog(`lang="ts"`));
   });
-  test("no `lang=` → the Core program carries none", () => {
-    expect(clean(prog("")).core.lang == null).toBe(true);
+  test("`lang=\"ts\"` is the language of the file's foreign blocks (no E-FOREIGN-003)", () => {
+    expect(fcodes(`lang="ts"`)).not.toContain("E-FOREIGN-003");
+    expect(fcodes("")).toContain("E-FOREIGN-003");
   });
-  test("fix round F6: `lang=\"\"` is as if absent (the §40.7 empty-value rule)", () => {
-    expect(clean(prog(`lang=""`)).core.lang == null).toBe(true);
+  test("fix round F6: `lang=\"\"` is as if absent (the §40.7 empty-value rule) — accepted, and a foreign block sees no language", () => {
+    clean(prog(`lang=""`));
+    expect(fcodes(`lang=""`)).toEqual(fcodes(""));
   });
   test("`lang=` changes nothing the bootstrap prints", () => {
     const a = clean(prog(`lang="ts"`)).core, b = clean(prog("")).core;
@@ -118,15 +123,15 @@ describe("B3 — §23.2.1 `lang=` is read and carried", () => {
     expect(pa.html).toBe(pb.html);
     expect(pa.js).toBe(pb.js);
   });
-  for (const [label, attr] of [["a bare `lang`", "lang"], ["a non-literal", "lang=(1)"]]) {
-    test(`${label} → one E-BOOTSTRAP-UNSUPPORTED naming \`lang=\``, () => {
+  for (const [label, attr] of [["a bare `lang`", "lang"], ["a non-literal", "lang=(1)"], ["a sidecar language", `lang="go"`]]) {
+    test(`${label} → one E-BOOTSTRAP-UNSUPPORTED naming \`<program lang=…>\``, () => {
       const d = run(prog(attr)).diags;
       expect(d.map((x) => x.code)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
-      expect(d[0].message).toContain("`lang=`");
+      expect(d[0].message).toContain("`<program lang=…>`");
       expect(d[0].message).toContain("§23.2.1");
     });
   }
-  test("unchanged: `<foreign lang>` beside a `<program lang>` is E-FOREIGN-LANG-IN-PROGRAM, and the program's `lang=` is now read", () => {
+  test("unchanged: `<foreign lang>` beside a `<program lang>` is E-FOREIGN-LANG-IN-PROGRAM, and the program's `lang=` is read", () => {
     expect(codes(`<foreign lang="ts" />\n<program lang="ts">\n  <p>hi</p>\n</program>\n`)).toEqual(["E-FOREIGN-LANG-IN-PROGRAM"]);
   });
 });

@@ -845,10 +845,10 @@ ${
         // answered (check.scrml C-DB1).
         loads: DbLoad[],
         // s473 — the page's `<head>` metadata (§40.7, the top-level program's
-        // documentary attributes) and the program's `lang=` (§23.2.1: the
-        // language a `_{}` block resolves against; nothing else reads it).
+        // documentary attributes). (`lang=` is not carried here: its one
+        // reader is analyze foreignLangOf, the language of a file's `_{}`
+        // blocks, §23.2.1.)
         head: CoreHead,
-        lang: string | not,
     }
 
     // s473 — §40.7. `title`: which `<title>` the page's `<head>` holds —

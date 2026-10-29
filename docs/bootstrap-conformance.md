@@ -26,7 +26,7 @@ Scope: **1813 of 1813 cases attempted** — every attempted case reached the pur
 - FAILs whose required code appears nowhere in the bootstrap's sources (check not implemented): 23 of 49; the other 26 are implemented checks that answered wrong.
 
 LEGACY by marker (a case may carry several): none.
-UNSUPPORTED by reason: bootstrap-unsupported 534 · parse-reject 282.
+UNSUPPORTED by reason: bootstrap-unsupported 535 · parse-reject 281.
 
 ### §66 twins (S449 dialect ruling 1 — generated at test time by the `scrml fix` §66 rules)
 
@@ -678,8 +678,8 @@ none
 - `body-top/unknown-characters-rejected` — parse-reject: E-PARSE-ITEM: unexpected text at program level
 - `capability/inheritance-closest-wins-no-union` — bootstrap-unsupported: a nested `<program>` (§4.12 — a worker, sidecar or scoped-db execution context) is not in the bootstrap
 - `capability/inheritance-inherit-covers` — bootstrap-unsupported: a nested `<program>` (§4.12 — a worker, sidecar or scoped-db execution context) is not in the bootstrap
-- `capability/inline-block-covered` — bootstrap-unsupported: `.then(…)` is not in the bootstrap — only calls of a named function, `Date.now()`, `.filter(x => …)` / `.map(x => …)` / `.sort(…)` / `.reverse()` / `.join(sep)` on a tape, and the string methods `toUp
-- `capability/inline-block-undeclared` — bootstrap-unsupported: `.then(…)` is not in the bootstrap — only calls of a named function, `Date.now()`, `.filter(x => …)` / `.map(x => …)` / `.sort(…)` / `.reverse()` / `.join(sep)` on a tape, and the string methods `toUp
+- `capability/inline-block-covered` — bootstrap-unsupported: a foreign code block — read and checked (§23.2.4), but its emission (a sealed, server-side slice of its `in:{}` crossings, awaited at the boundary, §23.2.3 / §23.2.4a) is not in the bootstrap yet
+- `capability/inline-block-undeclared` — bootstrap-unsupported: a foreign code block — read and checked (§23.2.4), but its emission (a sealed, server-side slice of its `in:{}` crossings, awaited at the boundary, §23.2.3 / §23.2.4a) is not in the bootstrap yet
 - `capability/undeclared-with-foreign` — parse-reject: E-PARSE-ITEM: unexpected text at program level
 - `channel/onchange-misplaced` — bootstrap-unsupported: `<schema>` is a scrml structural element (§39.2), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `channel/onchange-not-exhaustive` — bootstrap-unsupported: `<schema>` is a scrml structural element (§39.2), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
@@ -891,13 +891,13 @@ none
 - `fn/sql-access-in-function-clean` — twin · bootstrap-unsupported: member access `.name` on a value that is not a struct or an instance is not in bootstrap slice M2
 - `fn/sql-access-reject` — twin · bootstrap-unsupported: member access `.name` on a value that is not a struct or an instance is not in bootstrap slice M2
 - `foreign/foreign-crossing-shadow-in-block-neg` — bootstrap-unsupported: `<program kind=…>` is not in the bootstrap — it reads no `<program>` attribute, and never ignores one it does not implement
-- `foreign/foreign-inline-no-lang-neg` — twin · parse-reject: E-PARSE-OBJECT: expected a field name, found `1`
+- `foreign/foreign-inline-no-lang-neg` — twin · parse-reject: E-STMT-MISSING-SEMICOLON: Expected `;` to end the statement — insert `;` after `_={ 1 + 1 }=`. A `;` ends every statement that is not block-like, the last one before a `}` included (`{ @n = @n + 1; }`
 - `foreign/foreign-slice-await-regex-pos` — bootstrap-unsupported: `<program kind=…>` is not in the bootstrap — it reads no `<program>` attribute, and never ignores one it does not implement
 - `foreign/foreign-slice-lexing-regex-quote-pos` — bootstrap-unsupported: `<program kind=…>` is not in the bootstrap — it reads no `<program>` attribute, and never ignores one it does not implement
 - `foreign/foreign-slice-no-free-capture-neg` — bootstrap-unsupported: `<program kind=…>` is not in the bootstrap — it reads no `<program>` attribute, and never ignores one it does not implement
 - `foreign/foreign-slice-sealed-crossings-pos` — bootstrap-unsupported: `<program kind=…>` is not in the bootstrap — it reads no `<program>` attribute, and never ignores one it does not implement
 - `foreign/foreign-slice-unparseable-in-block-neg` — bootstrap-unsupported: `<program kind=…>` is not in the bootstrap — it reads no `<program>` attribute, and never ignores one it does not implement
-- `foreign/foreign-slice-unparseable-neg` — twin · parse-reject: E-PARSE-EXPECTED: expected `:`, found `}`
+- `foreign/foreign-slice-unparseable-neg` — twin · bootstrap-unsupported: a foreign code block — read and checked (§23.2.4), but its emission (a sealed, server-side slice of its `in:{}` crossings, awaited at the boundary, §23.2.3 / §23.2.4a) is not in the bootstrap yet
 - `form-for/formfor-error-strategy-invalid` — twin · bootstrap-unsupported: `scrml:data` — the bootstrap cannot import this stdlib module: the build supplied no source for it that the bootstrap compiles, so none of its names are imported (§41.5)
 - `form-for/formfor-nested-struct-no-slot` — twin · bootstrap-unsupported: `scrml:data` — the bootstrap cannot import this stdlib module: the build supplied no source for it that the bootstrap compiles, so none of its names are imported (§41.5)
 - `form-for/formfor-nested-struct-with-slot-clean` — twin · bootstrap-unsupported: `scrml:data` — the bootstrap cannot import this stdlib module: the build supplied no source for it that the bootstrap compiles, so none of its names are imported (§41.5)

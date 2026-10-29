@@ -88,6 +88,15 @@ ${
         Ident(name: string),
         Keyword(name: string),
         Unknown(ch: string),
+        // s473 — a §23.2 foreign code block `_{ … }` / `_={ … }=` / `_=={ … }==`,
+        // ONE token: the interior is opaque (§23.2: "The compiler SHALL NOT
+        // parse, tokenize, or type-check the content"), so it is bounded by
+        // characters, never by tokens. `level` the opener's `=` count, `body`
+        // the verbatim interior (between the opener and the closer), `closer`
+        // the `=` count glued after the closing `}` (-1: no closer before the
+        // end of input). The parser reports E-FOREIGN-002 (unclosed) and
+        // E-FOREIGN-001 (`closer` != `level`).
+        Foreign(level: int, body: string, closer: int),
         // end of input
         Eof,
     }
@@ -197,6 +206,8 @@ ${
         // `.x` a member, as in JavaScript. (Inside a template no token is
         // classified; after a `${` the last token is TemplateInterpStart.)
         if (last is .TemplateChunk) return false
+        // s473: a foreign block (§23.2) is a value — `/` after it divides
+        if (last is .Foreign) return false
         // Unknown stands in for chars this lexer does not tokenize yet — several
         // (`@` the reactive/each sigil, `~`, `#`) are VALUE-producing in real
         // scrml, so a following `.`/`/` is member-access / division, NOT a bare
@@ -361,6 +372,7 @@ ${
             .BareVariant         :> ""
             .Ident               :> ""
             .Unknown             :> ""
+            .Foreign             :> ""
         }
     }
 
@@ -991,6 +1003,7 @@ ${
         SawRegexSlash,
         SawBareVariant,
         SawInterpClose,
+        SawForeign,
         Ordinary,
         SawEof,
     }
@@ -1094,7 +1107,76 @@ ${
         // `.` stays a plain Dot. A `.` before a digit / `.` / anything-else also
         // falls through to Ordinary (number / Dot handling, unchanged).
         if (c0 == 46 && isIdentStart(c1) && regexAllowedAfter(last)) return .SawBareVariant
+        if (c0 == 95 && foreignOpenLevel(cur) >= 0) return .SawForeign
         return .Ordinary
+    }
+
+    // -------------------------------------------------------------------------
+    // s473 — §23.2 foreign code blocks: THE ONE READER of a foreign block's
+    // extent (the logic lexer below and parse.scrml's markup-body reader both
+    // call it — no second spelling of the grammar). "The block splitter SHALL
+    // recognize `_` followed by zero or more `=` followed by `{` as a foreign
+    // code block opener" — except a `_` "immediately preceded by an identifier
+    // character (a letter, digit, `_` or `$`)", which is "the tail of that
+    // identifier" (S444).
+    // -------------------------------------------------------------------------
+
+    // The opener's level (its `=` count) at `pos` in `src`, else -1.
+    export fn foreignOpenAt(src: string, pos: int) -> int {
+        if (pos >= src.length || src.charCodeAt(pos) != 95) return -1
+        if (pos > 0 && isIdentCont(src.charCodeAt(pos - 1))) return -1
+        let k: int = pos + 1
+        while (k < src.length && src.charCodeAt(k) == 61) { k = k + 1 }
+        if (k >= src.length || src.charCodeAt(k) != 123) return -1
+        return k - pos - 1
+    }
+
+    // A foreign block's extent from its `_` at `pos`: `level` (-1: no opener
+    // there), the interior's end `bodyEnd`, the block's end `end`, and `closer`
+    // — the `=` count glued after the closing `}` (-1: none before the end of
+    // the input). "The block splitter SHALL scan for the matching closer: `}`
+    // followed by the same number of `=` characters as the opener. No other
+    // character sequence closes the foreign code block." Level 0 "uses the same
+    // brace-depth counting as all other scrml sigils" — raw `{` / `}`, nothing
+    // else (§23.2: it "FAILS if the foreign code contains `}` inside a string
+    // literal"). At level >= 1 a `}` followed by FEWER `=` than the level is
+    // content; one followed by MORE (`}==` closing `_={`) is the mismatched
+    // closer of E-FOREIGN-001, taken whole so its `=` do not spill into the
+    // code after it.
+    export type ForeignExtent:struct = { level: int, bodyEnd: int, end: int, closer: int }
+
+    export fn foreignExtentAt(src: string, pos: int) -> ForeignExtent {
+        const lvl: int = foreignOpenAt(src, pos)
+        if (lvl < 0) return { level: -1, bodyEnd: pos, end: pos, closer: -1 }
+        let i: int = pos + lvl + 2
+        let depth: int = 0
+        while (i < src.length) {
+            const code: int = src.charCodeAt(i)
+            if (code == 125 && depth == 0) {
+                let k: int = i + 1
+                while (k < src.length && src.charCodeAt(k) == 61) { k = k + 1 }
+                if (k - i - 1 >= lvl) return { level: lvl, bodyEnd: i, end: k, closer: k - i - 1 }
+            }
+            if (lvl == 0 && code == 123) depth = depth + 1
+            if (lvl == 0 && code == 125) depth = depth - 1
+            i = i + 1
+        }
+        return { level: lvl, bodyEnd: src.length, end: src.length, closer: -1 }
+    }
+
+    fn foreignOpenLevel(cur: Cursor) -> int { return foreignOpenAt(cur.source, cur.pos) }
+
+    // One foreign block, as ONE token (the interior never tokenized).
+    fn scanForeign(cur: Cursor) -> Scan {
+        const x: ForeignExtent = foreignExtentAt(cur.source, cur.pos)
+        const to: Cursor = advance(cur, x.end - cur.pos)
+        const k: TokenKind = .Foreign(x.level, cur.source.substring(cur.pos + x.level + 2, x.bodyEnd), x.closer)
+        return { tok: mkTok(k, sliceText(cur, to), cur, to), cur: to }
+    }
+
+    fn scanForeignStep(st: LexState) -> LexState {
+        const scan: Scan = scanForeign(st.cur)
+        return mkState(scan.cur, st.mode, st.tokens.concat([scan.tok]), st.bracketStack, st.interps, st.display)
     }
 
     // The state-aware classifier used in InCode: an interp-closing `}` takes
@@ -1132,6 +1214,7 @@ ${
             .SawBareVariant    :> scanBareVariantStep(st)
             .SawBacktick       :> enterTemplateStep(st)
             .SawInterpClose    :> closeInterpStep(st)
+            .SawForeign        :> scanForeignStep(st)
             .SawEof            :> st                  // cursor already at EOF; settle
         }
     }
@@ -1141,7 +1224,7 @@ ${
     fn dispatchOffMode(st: LexState, ev: LexEvent) -> LexState {
         return match ev {
             .Ordinary | .SawLineComment | .SawBlockComment | .SawRegexSlash |
-                  .SawBareVariant | .SawBacktick | .SawInterpClose :> deferAdvance(st)
+                  .SawBareVariant | .SawBacktick | .SawInterpClose | .SawForeign :> deferAdvance(st)
             .SawQuote(kind: q) :> deferAdvance(st)
             .SawEof            :> st
         }
