@@ -1,0 +1,10 @@
+{
+  "id": "acceptance-db-cells-neg-server-read",
+  "description": "A server function (it runs a `?{}`) reading `@rows`, a `<db>` cell, is refused (E-DB-CELL-SERVER-READ): on the server `@rows` would be the browser's copy.",
+  "language-version": "1.0",
+  "spec": "§8.1.3 (S472) · §34 E-DB-CELL-SERVER-READ",
+  "rationale": "RULED S472 (`<db>` body + client reads) item 4: \"Server code reading `@x` of a db cell is REFUSED for now (`E-DB-CELL-SERVER-READ`).\"",
+  "expect": {
+    "codes": ["E-DB-CELL-SERVER-READ"]
+  }
+}

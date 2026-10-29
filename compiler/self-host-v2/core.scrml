@@ -832,7 +832,21 @@ ${
         // Each printer emits ONE module-level `const` for every constant its
         // artifact's code reads (transitively), and no other (constsReadIn).
         consts: CoreConst[],
+        // s473 (Lane B — RULED S472 "`<db>` body + client reads", items 1, 2) —
+        // the program's `<db>` cells: each a field of the program declaration
+        // (`cell`) whose value is the answer of its LOAD, the parameterless
+        // ServerFn `fn` (run on the server, per request, against its `<db>`), and
+        // whose client copy is that answer — the projection, the value encoded
+        // against `fn.ret` (the cell's declared type, an allow-list: §57 refuses
+        // an undeclared key). The page WAITS: the client artifact awaits every
+        // load before it builds the program instance and mounts (item 2 — the
+        // cell's type is `T`, never `T | not`); a failed load mounts nothing. The
+        // cell's `init` is `Local(val)`: the module-level value its load
+        // answered (check.scrml C-DB1).
+        loads: DbLoad[],
     }
+
+    export type DbLoad:struct = { cell: Sym, fn: Sym, val: Sym }
 
     // s472 — a file-scope constant: its value is fixed at compile time (analyze
     // constPass admits only literals, variants, other constants, member reads and
