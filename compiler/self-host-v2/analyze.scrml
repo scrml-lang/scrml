@@ -15012,6 +15012,17 @@ ${
                 // declaration's body it is reported once, at the definition.
                 st = resolveValue(penv, a.value, not, st)
                 st = addDiag(st, env.file, a.span, "E-STYLE-VALUE-NOT-STYLE", "`" + a.name + "=` on `<" + e.tag + ">` takes its value from data (an expression, a variable, a call or a field), and only a quoted string literal or a `style`-typed value applies a style — an arbitrary runtime string written into `style` is CSS built from data (`url(…)` fetches, `@import`, overlays). Write the style as a static `style=\"…\"`, put the dynamic part in a `#" + "{…}` rule as `@cell` (§25.7 — the bridge admits only a plain CSS value), or switch a class with `class=(…)` (§65.4.2)")
+            } else if (valueExpr(a.value) is given && a.name.toLowerCase() == "href" && e.tag.toLowerCase() == "base") {
+                // s473 — §5.2 "Data never moves the document base (S473)": "A
+                // `<base>` … whose `href` (any case) is not a static string …
+                // SHALL be a compile error (E-ATTR-BASE-HREF)." The base URL
+                // resolves every relative URL on the page, and the §5.2 URL
+                // guard admits it (https): a data base moved `document.baseURI`
+                // to another origin and the runtime's server call followed it
+                // (gap g-boot-base-href-from-data-retargets-server-calls-s473, Chromium).
+                // In a declaration's body it is reported once, at the definition.
+                st = resolveValue(penv, a.value, not, st)
+                st = addDiag(st, env.file, a.span, "E-ATTR-BASE-HREF", "`" + a.name + "=` on `<" + e.tag + ">` takes its value from data (an expression, a variable, a call or a field) — data never chooses the document's base URL: it resolves every relative URL on the page (links, forms, fetches), so a data base moves them to another origin. Write the `href` as a static string (`href=\"/app/\"`), or build the URLs that need a varying prefix where they are used (§5.2)")
             } else if (valueExpr(a.value) is given && a.name.toLowerCase() == "href" && e.tag.toLowerCase() == "link" && linkRelLoadsSheet(e.attrs)) {
                 // s473 — §5.2 "Data-supplied stylesheets (S472)": "A `<link>`
                 // whose `href` is not a static string … and whose `rel` contains
