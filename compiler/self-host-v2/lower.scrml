@@ -33,7 +33,7 @@ ${
              GrantSet, TransitionGraph, Field, DeclKind, WiringAttr, Decl, Param, Fn, HostFn, CoreProgram, Validator, SurfaceProp, ValidityOf, Persist,
              ServerFn, SqlMode, Db, SqlQuery, SqlKind, SqlTables, SqlColumns, Failable, OkArm, ErrArm, VariantDef,
              LoopHead, EachHead, RangeHead, HostCall, CssUnit, CssDecl, CoreCss, CssVar, Gather, Lifted, GatherRow, PathStep,
-             CoreConst, block, litStr, mkSym, typeDefSym, readField, mountedInstances } from "./core.scrml"
+             CoreConst, CoreHead, CoreMeta, HeadTitle, block, litStr, mkSym, typeDefSym, readField, mountedInstances } from "./core.scrml"
     import { partsText } from "./css.scrml"
     import { ASpan, BinOp, UnOp, AExpr, AProp, AExprK, AStmt, ABlock, AStmtK, AEffect, AType, AParam, AFn,
              AAttrValue, AAttr, AElem, ANode, ANodeK, ADecl, AProgram, AItem, AItemK, AConst, FileAst, Diag, ASql, ASqlMode,
@@ -3409,6 +3409,16 @@ ${
     // `reset` layer." analyze accepts `reset="none"` and refuses any other value,
     // so here the program's opener has either no `reset=` or exactly that one.
     fn resetShips(files: FileAst[], t: Tables) -> boolean {
+        const p: AProgram | not = topProgramOf(files, t)
+        if (p is given) {
+            for (const a of p.attrs) { if (a.name == "reset") return false }
+        }
+        return true
+    }
+
+    // s473 — the top-level `<program>` (the one whose declaration is the
+    // program's), else not.
+    fn topProgramOf(files: FileAst[], t: Tables) -> AProgram | not {
         let nid = -1
         for (const d of t.decls) { if (d.sym.id == t.program.id) nid = d.nid }
         for (const f of files) {
@@ -3423,12 +3433,100 @@ ${
                     .FnItem(f: fx) :> not
                     .MarkupItem(n: n) :> not
                 }
-                if (p is given && p.nid == nid) {
-                    for (const a of p.attrs) { if (a.name == "reset") return false }
+                if (p is given && p.nid == nid) return p
+            }
+        }
+        return not
+    }
+
+    // A quoted attribute's text, "" for any other value (§40.7: a non-literal
+    // documentary value is ignored; an empty one is as if absent).
+    fn literalAttr(p: AProgram, name: string) -> string {
+        for (const a of p.attrs) {
+            if (a.name == name) {
+                const v: AAttrValue = a.value
+                return match v {
+                    .Quoted(v: s) :> s
+                    .NoValue :> ""
+                    .Bare(e: x) :> ""
+                    .Paren(e: x) :> ""
+                    .Braced(b: b) :> ""
                 }
             }
         }
-        return true
+        return ""
+    }
+
+    // s473 — §40.7: "`title=` SHALL emit a `<title>` element in the document
+    // `<head>` if and only if the source markup does not already contain an
+    // explicit `<title>` element." The search is the program's markup tree
+    // (elements and their children). Markup a declaration renders, or a loop
+    // lifts, is not searched — a `<title>` there leaves the head's own
+    // (g-bootstrap-title-elem-in-renders-not-seen-s473).
+    fn hasTitleElem(ns: ANode[]) -> boolean {
+        for (const n of ns) {
+            const k: ANodeK = n.k
+            const found: boolean = match k {
+                .Elem(e: e) :> isDocTitleTag(e.tag) || (!hidesTitle(e.tag) && hasTitleElem(e.kids))
+                .Text(text: tx) :> false
+                .Interp(e: x) :> false
+                .DeclNode(d: d) :> false
+                .Effect(w: w) :> false
+                .Css(c: c) :> false
+                .Gather(f: g) :> false
+            }
+            if (found) return true
+        }
+        return false
+    }
+
+    // s473 fix round (F2) — HTML tag names are case-insensitive (`<TITLE>`).
+    fn isDocTitleTag(tag: string) -> boolean {
+        return tag.toLowerCase() == "title"
+    }
+
+    // A `<title>` below these is not the document's: in `<svg>` it is an SVG
+    // tooltip; `<textarea>` content is RCDATA and `<noscript>` content is raw
+    // text when scripts run (the page is a scripted render); `<template>`
+    // content is inert.
+    fn hidesTitle(tag: string) -> boolean {
+        const t: string = tag.toLowerCase()
+        return t == "svg" || t == "textarea" || t == "noscript" || t == "template"
+    }
+
+    fn programHasTitle(p: AProgram) -> boolean {
+        for (const it of p.items) {
+            const k: AItemK = it.k
+            const found: boolean = match k {
+                .MarkupItem(n: n) :> hasTitleElem([n])
+                .ProgramItem(p: q) :> false
+                .ConstItem(c: c) :> false
+                .DeclItem(d: d) :> false
+                .ImportItem(i: i) :> false
+                .TypeItem(t: tx) :> false
+                .FnItem(f: fx) :> false
+            }
+            if (found) return true
+        }
+        return false
+    }
+
+    // s473 — §40.7: the head's `<title>` and `<meta>`s, in the SPEC's fixed order.
+    fn headOf(p: AProgram | not) -> CoreHead {
+        if (p is not) return { title: HeadTitle.Default, metas: [] }
+        let title: HeadTitle = HeadTitle.Default
+        const tt: string = literalAttr(p, "title")
+        if (tt != "") title = HeadTitle.Documentary(tt)
+        if (programHasTitle(p)) title = HeadTitle.Author
+        let metas: CoreMeta[] = []
+        const pairs: string[] = ["description", "description", "version", "application-version", "author", "author", "license", "license"]
+        let i = 0
+        while (i < pairs.length) {
+            const v: string = literalAttr(p, pairs[i])
+            if (v != "") metas = metas.concat([{ name: pairs[i + 1], content: v }])
+            i = i + 2
+        }
+        return { title: title, metas: metas }
     }
 
     export fn lower(tp: TypedProgram) -> Lowered {
@@ -3465,8 +3563,10 @@ ${
         const reset: boolean = resetShips(tp.files, t)
         const css: CoreCss | not = coreCss(t, reset)
         const consts: CoreConst[] = coreConsts(t)
-        const pre: CoreProgram = { program: t.program, decls: decls, types: types, fns: fns, server: server, dbs: dbs, reset: reset, sqlError: sqlError, serverCallError: serverCallError, css: css, consts: consts, loads: t.server.loads }
-        const core: CoreProgram = { program: t.program, decls: gateDecls(pre), types: types, fns: fns, server: server, dbs: dbs, reset: reset, sqlError: sqlError, serverCallError: serverCallError, css: css, consts: consts, loads: t.server.loads }
+        const top: AProgram | not = topProgramOf(tp.files, t)
+        const head: CoreHead = headOf(top)
+        const pre: CoreProgram = { program: t.program, decls: decls, types: types, fns: fns, server: server, dbs: dbs, reset: reset, sqlError: sqlError, serverCallError: serverCallError, css: css, consts: consts, loads: t.server.loads, head: head }
+        const core: CoreProgram = { program: t.program, decls: gateDecls(pre), types: types, fns: fns, server: server, dbs: dbs, reset: reset, sqlError: sqlError, serverCallError: serverCallError, css: css, consts: consts, loads: t.server.loads, head: head }
         return { core: core, diags: tp.diags }
     }
 

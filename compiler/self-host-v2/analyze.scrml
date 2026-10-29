@@ -47,7 +47,7 @@ ${
              DeclKind, HostCall, HostFn, SeqFn, BindKind, Validator, SurfaceProp, ValidityOf, Persist, PersistStore, CoreProgram,
              SqlKind, SqlTables, SqlColumns, Db, Driver, DbLoad,
              CssPart, CssDecl, StyleRule, CssImport, ScopeSheet,
-             mkSym, noGrants, replaceGrant, typeDefSym, validityInst, validityDecl } from "./core.scrml"
+             mkSym, noGrants, replaceGrant, typeDefSym, validityInst, validityDecl, plainHead } from "./core.scrml"
     import { ASpan, BinOp, UnOp, AExpr, AProp, AExprK, AStmt, ABlock, AStmtK, AEffect, AType, ATypeK,
              ATypeField, AVariant, ATypeBody, ATypeDecl, AParam, AFn, AImportName, AImport,
              AAttrValue, AAttr, AElem, ANode, ANodeK, ADeclAttr, AStateChild, ADeclChild, ADecl, AValArg, AValidator,
@@ -1139,6 +1139,20 @@ ${
         return { t: Type.Maybe(r.t), st: r.st, unresolved: r.unresolved }
     }
 
+    // s473 fix round 2 — `n` names no user type in `te.file`'s scope (declared
+    // there or imported), so it means the built-in of that name
+    // (resolveTypeName's order: a user type wins).
+    fn isBuiltinTypeName(te: TypeEnv, n: string) -> boolean {
+        const s: TypeStub | not = stubNamed(te, n)
+        if (s is given) return s.file == builtinFile()
+        const ds: Sym | not = declTypeNamed(te, n)
+        return ds is not
+    }
+
+    fn isNamedShape(n: string) -> boolean {
+        return n == "email" || n == "url" || n == "uuid" || n == "phone" || n == "date" || n == "time" || n == "color"
+    }
+
     fn resolveTypeName(te: TypeEnv, at: AType, n: string, st: AS) -> RType {
         // s469 — `integer` / `boolean` are `int` / `bool` in type position (§14.13.6; the §63 window,
         // W-TYPE-NAME-DEPRECATED, is not open yet — so no warning). Never namespaces (resolvePrimParse).
@@ -1152,6 +1166,22 @@ ${
         if (ds is given) return { t: Type.Named(ds), st: st, unresolved: false }
         // s469 (review L3): `asIs` is a built-in type (§14.1.2) the bootstrap does not have — refused by name, not "unknown"
         if (n == "asIs") return { t: Type.Str, st: addDiag(st, te.file, at.span, "E-BOOTSTRAP-UNSUPPORTED", "the built-in type `asIs` (§14.1.2) is not in the bootstrap — its type system has no unresolved-value type; give the value a declared type"), unresolved: true }
+        // s473 (B9) — `timestamp` is a "registered string-shaped primitive"
+        // (§66.3's canonical-empty list; §53's union-member rule: "tested as
+        // strings"), and the bootstrap types it as `string`. That is NOT all of
+        // it: §66.3 gives a bare `timestamp` cell no canonical empty — it starts
+        // as `not` with an implicit `(not to T)` lifecycle, where `string`
+        // starts as `""` — so a `timestamp` cell with no value is refused
+        // (stampNoDefaultDiag). With a value, as a parameter or as a field, it is
+        // a string. (SPEC conflict: §51.11.4 calls a timestamp a Number —
+        // g-spec-timestamp-number-vs-string-s473.) (A user type of that name, in
+        // scope, wins — above.)
+        if (n == "timestamp") return { t: Type.Str, st: st, unresolved: false }
+        // s473 (B9) — the §53 named-shape vocabulary (§14's canonical rule: "the
+        // named-shape vocabulary `email`/`url`/`uuid`/`phone`/`date`/`time`/
+        // `color`") is built in — not unknown — but a named shape is a string
+        // with a format predicate the bootstrap does not check: refused by name.
+        if (isNamedShape(n)) return { t: Type.Str, st: addDiag(st, te.file, at.span, "E-BOOTSTRAP-UNSUPPORTED", "the named-shape type `" + n + "` (§53 — a string with a built-in format predicate) is not in the bootstrap — it checks no named shape; declare the value a `string`"), unresolved: true }
         return { t: Type.Str, st: addDiag(st, te.file, at.span, "E-TYPE-UNKNOWN", "unknown type `" + n + "`" + elsewhereNote(te.link, te.file, NameKind.KType, true, n)), unresolved: true }
     }
 
@@ -1773,6 +1803,12 @@ ${
                 st = langAttrDiag(file, a, st)
             } else if (a.name == "name") {
                 st = addDiag(st, file, a.span, "E-BOOTSTRAP-UNSUPPORTED", "`name=` on the top-level `<program>` — \"The top-level `<program>` MUST NOT have a `name=` attribute\" (§4.12.2), and the SPEC names no code for it; remove it")
+            } else if (isDocumentaryAttr(a.name)) {
+                // s473 (B3): read — §40.7 head metadata (lower headOf; print).
+                // "A non-string-literal value … is silently ignored" and an
+                // empty one is "as if the attribute were absent" (§40.7).
+            } else if (a.name == "mcp") {
+                st = addDiag(st, file, a.span, "E-BOOTSTRAP-UNSUPPORTED", "`<program mcp>` is not in the bootstrap — it asks for the MCP dev-telemetry server (a stdio MCP server, booted beside the program's server, that exposes the running program's state over read-only tools), and the bootstrap builds no MCP server; remove `mcp` to compile here (the SPEC registers the attribute, §4.12.2, but no section says what it emits)")
             } else if (isProgramAttrName(a.name)) {
                 st = addDiag(st, file, a.span, "E-BOOTSTRAP-UNSUPPORTED", "`<program " + a.name + "=…>` is not in the bootstrap — it reads no `<program>` attribute, and never ignores one it does not implement")
             } else {
@@ -1790,7 +1826,9 @@ ${
     fn langAttrDiag(file: string, a: AAttr, st: AS) -> AS {
         const v: string | not = quotedAttrText(a.value)
         if (v is given) {
-            if (v == "ts" || v == "js") return st
+            // s473-boot-program-attrs-small (S239 review F6): `lang=""` is as
+            // if absent (the §40.7 empty-value rule) — foreignLangOf reads none
+            if (v == "ts" || v == "js" || v == "") return st
         }
         return addDiag(st, file, a.span, "E-BOOTSTRAP-UNSUPPORTED", "`<program lang=…>` is " + attrValueText(a.value) + " — the bootstrap runs foreign code only in-process, for `lang=\"ts\"` / `\"js\"` (§23.2.4a); another language's toolchain (§23.2.1, a sidecar) is not in the bootstrap")
     }
@@ -4481,7 +4519,7 @@ ${
     // names a DECLARATION is a named shared instance (§66.8.2; `:Decl` is a
     // typed own value, #16). Not in the bootstrap: it is reported where it is
     // written, instead of reading as a field-less declaration named `accent`.
-    fn namedInstanceDiags(ds: DeclStub[], declNames: string[], files: FileAst[], st0: AS) -> AS {
+    fn namedInstanceDiags(te: TypeEnv, ds: DeclStub[], declNames: string[], files: FileAst[], st0: AS) -> AS {
         let st: AS = st0
         for (const s of ds) {
             const d: ADecl | not = s.d
@@ -4491,7 +4529,7 @@ ${
                     st = addDiag(st, s.file, d.span, "E-BOOTSTRAP-UNSUPPORTED", "`<" + d.name + ":" + n + " …/>` is a named shared instance of `<" + n + ">` (§66.8.2) — not in the bootstrap")
                 } else {
                     st = o19Diags(s.file, d, st)
-                    st = openerWordDiags(s.file, fileErrs(files, s.file), d, false, st)
+                    st = openerWordDiags(teAt(te, s.file), s.file, fileErrs(files, s.file), d, false, st)
                     // s444 Phase B: a user declaration's OWN validators, and a field's below depth 1
                     if (d.validators.length > 0) st = addDiag(st, s.file, d.validators[0].span, "E-BOOTSTRAP-UNSUPPORTED", "validators on `<" + d.name + ">`'s own opener bind its own value (§66.4 rule 3) — a user declaration's own value is not bindable in the bootstrap; put them on a child field")
                     for (const c of childFields(d.body)) { st = deepValidatorDiags(s.file, c.body, st) }
@@ -4502,7 +4540,7 @@ ${
                 // the program's cells (a nested user declaration is its own stub)
                 for (const it of p.items) {
                     for (const c of declsOfItem(it)) {
-                        if (!isNestedUserDecl(c) && declNames.indexOf(ownTypeName(c)) < 0) st = openerWordDiags(s.file, fileErrs(files, s.file), c, s.isProgram, st)
+                        if (!isNestedUserDecl(c) && declNames.indexOf(ownTypeName(c)) < 0) st = openerWordDiags(teAt(te, s.file), s.file, fileErrs(files, s.file), c, s.isProgram, st)
                         if (!isNestedUserDecl(c)) st = deepValidatorDiags(s.file, c.body, st)
                     }
                 }
@@ -4531,10 +4569,11 @@ ${
     // A declaration holding a parse error is recovery debris there (Rule C).
     // `cell`: `d` is a program cell (the only place the bootstrap reads
     // `reset-on=`, s449 — resetOnPass).
-    fn openerWordDiags(file: string, errs: ASpan[], d: ADecl, cell: boolean, st0: AS) -> AS {
+    fn openerWordDiags(te: TypeEnv, file: string, errs: ASpan[], d: ADecl, cell: boolean, st0: AS) -> AS {
         let st: AS = st0
         if (hasErrIn(errs, d.span)) return st
         st = repeatedWordDiags(file, d, st)
+        st = stampNoDefaultDiag(te, file, d, st)
         for (const a of d.mods) {
             // s473 (#1646 review F1): a foreign block in an opener word's value
             // is no admitted position (§23.2.4) — whatever reads the word
@@ -4556,8 +4595,40 @@ ${
                 st = addDiag(st, file, a.span, "E-BOOTSTRAP-UNSUPPORTED", unknownOpenerMessage(a.name))
             }
         }
-        for (const c of childFields(d.body)) { st = openerWordDiags(file, errs, c, false, st) }
+        for (const c of childFields(d.body)) { st = openerWordDiags(te, file, errs, c, false, st) }
         return st
+    }
+
+    // s473 fix round (F1) — §66.3: "**`date` / `timestamp`** (registered
+    // string-shaped primitives) have no meaningful canonical empty → `not`", and
+    // such a bare cell "initializes to **`not`** and the cell acquires an
+    // **implicit `(not to T)` lifecycle** (§14.12)". The bootstrap types
+    // `timestamp` as `string` (resolveTypeName), whose canonical empty is `""`,
+    // and has no implicit lifecycle — so a `timestamp` cell with no own value is
+    // refused by name rather than given `string`'s meaning
+    // (g-bootstrap-timestamp-canonical-empty-s473). Only the BUILT-IN
+    // `timestamp`: a user type of that name in scope wins (resolveTypeName),
+    // and its cell is judged as any user type's (fix round 2).
+    fn stampNoDefaultDiag(te: TypeEnv, file: string, d: ADecl, st: AS) -> AS {
+        const ty: AType | not = d.ty
+        if (ty is not) return st
+        const k: ATypeK = ty.k
+        const isStamp: boolean = match k {
+            .TName(name: n) :> n == "timestamp" && isBuiltinTypeName(te, n)
+            .TSeq(elem: e) :> false
+            .TMaybe(inner: i) :> false
+        }
+        if (!isStamp) return st
+        const own: AAttrValue = d.own
+        const none: boolean = match own {
+            .NoValue :> true
+            .Quoted(v: s) :> false
+            .Bare(e: x) :> false
+            .Paren(e: x) :> false
+            .Braced(b: b) :> false
+        }
+        if (!none) return st
+        return addDiag(st, file, d.span, "E-BOOTSTRAP-UNSUPPORTED", "`<" + d.name + ":timestamp/>` with no value is not in the bootstrap — a bare `timestamp` cell starts as `not` with an implicit `(not to T)` lifecycle (§66.3, §14.12), which the bootstrap does not build (it types `timestamp` as `string`); give it a value: `<" + d.name + ":timestamp=\"…\"/>`")
     }
 
     // The declaration-opener words the bootstrap reads (besides the typed
@@ -4735,8 +4806,8 @@ ${
         st = rl.st
         const lk: Linkage = rl.lk
         if (!hasProgram) st = addDiag(st, entry, mkSpan(0, 0), "E-PROGRAM-MISSING", "the entry file has no `<program>`")
-        st = namedInstanceDiags(rd.ds, declNames, files, st)
         const te0: TypeEnv = { stubs: rs.stubs, declNames: declNames, declSyms: declSyms, declFiles: declFiles, link: lk, file: entry }
+        st = namedInstanceDiags(te0, rd.ds, declNames, files, st)
         const rt: RTypeInfos = typeInfos(rs.stubs, te0, st)
         st = rt.st
         const rf00: RFns = fnsOf(files, te0, st)
@@ -7451,11 +7522,11 @@ ${
     fn itemsLang(items: AItem[]) -> string | not {
         for (const it of items) {
             const p: AProgram | not = programOfItem(it)
-            if (p is given) return quotedAttr(p.attrs, "lang")
+            if (p is given) return langAttr(p.attrs)
         }
         for (const it of items) {
             const fe: AElem | not = foreignElemOf(it)
-            if (fe is given) return quotedAttr(fe.attrs, "lang")
+            if (fe is given) return langAttr(fe.attrs)
         }
         return not
     }
@@ -7464,6 +7535,16 @@ ${
         const a: AAttr | not = attrNamed(attrs, name)
         if (a is not) return not
         return quotedAttrText(a.value)
+    }
+
+    // s473-boot-program-attrs-small (S239 review F6): an empty `lang=""` is as
+    // if absent (the §40.7 empty-value rule) — so no foreign block sees "".
+    fn langAttr(attrs: AAttr[]) -> string | not {
+        const v: string | not = quotedAttr(attrs, "lang")
+        if (v is given) {
+            if (v == "") return not
+        }
+        return v
     }
 
     // Is `file`'s top-level `<program>` a `kind="tool"` program (§64)?
@@ -7658,6 +7739,20 @@ ${
         }
     }
 
+    // s473 — does `@name` name an INSTANCE here (resolveAt's instance arms)?
+    fn namesInstance(env: Env, name: string) -> boolean {
+        const nb: NarrowB | not = lookupNarrow(env, name)
+        if (nb is given) return true
+        const h: HandleInfo | not = lookupHandle(env, name)
+        if (h is given) return true
+        const d: DeclSrc | not = ctxDecl(env)
+        if (d is given) {
+            if (!d.isProgram && d.info.sym.hint == name) return true
+        }
+        const ud: DeclSrc | not = visibleDecl(env, name)
+        return ud is given
+    }
+
     fn placeAt(env: Env, t: AExpr, name: string, st: AS) -> RPlace {
         // s444 — O54 (a): `@f` in f's own renders is this instance's field `f`
         const oi: int = ownFieldIndex(env, name)
@@ -7676,6 +7771,13 @@ ${
                          local: not, st: st }
             }
         }
+        // s473 (B9) — a name that is no instance in scope (no narrowing, no
+        // handle, not the current instance, no visible declaration) is no cell
+        // either: §6.1.1 "Bare `@x = expr` writes … without a prior `<x>`
+        // declaration in scope are **`E-STATE-UNDECLARED`**" — not a "whole
+        // instance" write. (The read side still reports E-SCOPE-001:
+        // g-bootstrap-undeclared-cell-read-code-s473.)
+        if (!namesInstance(env, name)) return noPlace(addDiag(st, env.file, t.span, "E-STATE-UNDECLARED", "`@" + name + "` is written here, but it is not declared — no cell, declaration or `as=` handle named `" + name + "` is in scope (§6.1.1: a write is not a declaration; declare it, e.g. `let <" + name + ":T=(…)/>`)"))
         return noPlace(addDiag(st, env.file, t.span, "E-BOOTSTRAP-UNSUPPORTED", "`@" + name + " = …` — writing a whole instance is not in bootstrap slice M2 (write a field: `@" + name + ".f = …`)"))
     }
 
@@ -23055,7 +23157,7 @@ ${
     fn typesProgram(g: Globals) -> CoreProgram {
         let defs: TypeDef[] = []
         for (const t of g.types) { defs = defs.concat([t.def]) }
-        return { program: g.program, decls: [], types: defs, fns: [], server: [], dbs: [], reset: true, sqlError: not, serverCallError: not, css: not, consts: [] }
+        return { program: g.program, decls: [], types: defs, fns: [], server: [], dbs: [], reset: true, sqlError: not, serverCallError: not, css: not, consts: [], loads: [], head: plainHead() }
     }
 
     fn storeOf(v: AAttrValue) -> PersistStore | not {

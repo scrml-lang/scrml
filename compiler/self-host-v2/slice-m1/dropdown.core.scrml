@@ -62,7 +62,7 @@ ${
              Field, Decl, Fn, CoreProgram,
              mkSym, block, noGrants, replaceGrant, litStr, litBool, litVariant, litInt,
              readField, readLocalField, prim1, prim2, call0,
-             el, textView, dyn, staticAttr, onEvent, construct } from "../core.scrml"
+             el, textView, dyn, staticAttr, onEvent, construct, plainHead } from "../core.scrml"
 
     // A sequence type with no grants is fully constrained (§66.12.1).
     fn fixedSeq(elem: Type) -> Type {
@@ -401,6 +401,7 @@ ${
             css: not,
             consts: [],
             loads: [],
+            head: plainHead(),
         }
     }
 
