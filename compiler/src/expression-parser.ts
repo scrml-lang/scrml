@@ -4173,14 +4173,20 @@ function blankRange(chars: string[], start: number, end: number): void {
  * and flags stay). Opt-in so the existing callers are unchanged; the `@`-reference
  * reader (at-refs.ts) and the server bundle's module-scope reads turn it on, because a
  * regex body is literal text, not a cell read or a declaration (SPEC §6.6.9).
+ *
+ * `opts.jsOnly` (s473 #1645 fix round 2, NEW-1): the text is EMITTED JavaScript, which never
+ * holds a real `?{ … }` block — skip the `?{}` placeholder pass, so the result is always the
+ * same length as `raw` (that pass reads strings / templates but not comments, so a compiler
+ * comment naming `?{…}` was collapsed and shortened the text). Opt-in; other callers unchanged.
  */
-export function blankLiteralTextInSource(raw: string, opts?: { blankRegex?: boolean }): string {
+export function blankLiteralTextInSource(raw: string, opts?: { blankRegex?: boolean; jsOnly?: boolean }): string {
   if (!raw || typeof raw !== "string") return raw;
   const blankRegex = opts?.blankRegex === true;
   // Fast path: no quote / backtick / comment opener (and, when regex bodies are
   // blanked, no `/` at all) → nothing to blank.
   if (blankRegex ? !/["'`/]/.test(raw) : !/["'`]|\/\/|\/\*/.test(raw)) return raw;
-  const sqlScan = replaceSqlBlockPlaceholder(raw);
+  const jsOnly = opts?.jsOnly === true;
+  const sqlScan = jsOnly ? { unbalanced: false, result: raw } : replaceSqlBlockPlaceholder(raw);
   if (sqlScan.unbalanced) return raw;
   const processed = sqlScan.result;
   const chars = processed.split("");
@@ -4214,7 +4220,7 @@ export function blankLiteralTextInSource(raw: string, opts?: { blankRegex?: bool
   } catch {
     return raw;
   }
-  return chars.join("").split(PH_SQL_PLACEHOLDER()).join("?{}");
+  return jsOnly ? chars.join("") : chars.join("").split(PH_SQL_PLACEHOLDER()).join("?{}");
 }
 
 /** Deep-copy an ExprNode with every literal's text blanked (see section header). */

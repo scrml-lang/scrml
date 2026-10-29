@@ -353,8 +353,10 @@ describe("`form=\"id\"` (the HTML form owner) — the control joins that one for
     expect(calls()).toBe("1");   // g is
   });
   test("COMPILE ERROR when the owner is not one literal-named form: computed, unquoted, no match, two matches, a non-form", () => {
-    expect(codes(OWNER(SEL(`form=(@id)`)))).toEqual(["E-FORM-OWNER-UNRESOLVED"]);
-    expect(codes(OWNER(SEL(`form=@id`)))).toEqual(["E-FORM-OWNER-UNRESOLVED"]);
+    // s473: a data `form=` is refused on its own — data never chooses which form a control posts
+    // with (E-ATTR-FORM-ACTION, §5.2; form-action-meta-refresh-guard-s473.test.js); one diagnostic per fault
+    expect(codes(OWNER(SEL(`form=(@id)`)))).toEqual(["E-ATTR-FORM-ACTION"]);
+    expect(codes(OWNER(SEL(`form=@id`)))).toEqual(["E-ATTR-FORM-ACTION"]);
     expect(codes(OWNER(SEL(`form="nope"`)))).toEqual(["E-FORM-OWNER-UNRESOLVED"]);
     expect(codes(OWNER(SEL(`form="f"`), "", `<form id="f"></form>`))).toEqual(["E-FORM-OWNER-UNRESOLVED"]);
     expect(codes(OWNER(SEL(`form="d"`), "", `<div id="d"></div>`))).toEqual(["E-FORM-OWNER-UNRESOLVED"]);

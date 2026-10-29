@@ -14882,6 +14882,61 @@ ${
         }
     }
 
+    // s473 — §5.2 "Data never chooses where a form posts or where the page
+    // goes (S473)". Ruled (user-voice-scrml.md "S473 owner questions round 2"
+    // items 1 and 2): "Form `action` / `formaction` from data: REFUSED unless
+    // static." and "`<meta http-equiv=\"refresh\">` from data: REFUSED." The
+    // code a data-bound value of `a` on `e` is refused with, or "" when none:
+    //   - `action` (any case) on a `<form>` (any case) — the element scope
+    //     §5.2 rule 3 gives `action`; `formaction` (any case) on ANY element
+    //     (it is inert off `<button>` / `<input>`; refusing it there loses
+    //     nothing — fail closed): E-ATTR-FORM-ACTION;
+    //   - `form` (any case) on ANY element — the form owner: data never
+    //     chooses which form a control is submitted with (S473 PA ruling,
+    //     extends round 2 item 1; review of #1641 F1, Chromium: a data
+    //     `form=` moved a password into an author-written off-origin form):
+    //     E-ATTR-FORM-ACTION;
+    //   - on a `<meta>`: `http-equiv` (data never chooses a pragma — it could
+    //     become `refresh`), and `content` when the `http-equiv` refreshes or
+    //     is computed (`metaEquivRefreshes`): E-ATTR-META-REFRESH.
+    fn navSinkCode(e: AElem, a: AAttr) -> string {
+        const n: string = a.name.toLowerCase()
+        const t: string = e.tag.toLowerCase()
+        if (n == "formaction" || n == "form" || (n == "action" && t == "form")) return "E-ATTR-FORM-ACTION"
+        if (t == "meta" && (n == "http-equiv" || (n == "content" && metaEquivRefreshes(e.attrs)))) return "E-ATTR-META-REFRESH"
+        return ""
+    }
+
+    // s473 — does this `<meta>`'s `http-equiv` refresh (or may it)? A value
+    // that is not a static quoted string is computed. A static one is matched
+    // ASCII case-insensitively for the text `refresh` anywhere (a superset of
+    // the browser's keyword test — surrounding whitespace included, fail
+    // closed). A `&` (a character reference the browser decodes:
+    // `ref&#114;esh`) or a `$` + `{` (a template) makes the text unprovable:
+    // treated as computed. (The shape of #1635's `linkRelLoadsSheet`.)
+    fn metaEquivRefreshes(attrs: AAttr[]) -> boolean {
+        for (const a of attrs) {
+            if (a.name.toLowerCase() == "http-equiv") {
+                const r: boolean = match a.value {
+                    .Quoted(v: s) :> s.toLowerCase().indexOf("refresh") >= 0 || s.indexOf("&") >= 0 || s.indexOf("$" + "{") >= 0
+                    .NoValue :> false
+                    .Bare(e: x) :> true
+                    .Paren(e: x) :> true
+                    .Braced(b: b) :> true
+                }
+                if (r) return true
+            }
+        }
+        return false
+    }
+
+    fn navSinkMessage(code: string, a: AAttr, e: AElem) -> string {
+        const head: string = "`" + a.name + "=` on `<" + e.tag + ">` takes its value from data (an expression, a variable, a call or a field)"
+        if (code == "E-ATTR-FORM-ACTION" && a.name.toLowerCase() == "form") return head + " — data never chooses where a form posts: `form=` picks the form this control is submitted with, so data would send its value (a password included) to another form's URL. Write `form=` as a static string naming one form (`form=\"login\"`), or put the control inside its `<form>` (§5.2)"
+        if (code == "E-ATTR-FORM-ACTION") return head + " — data never chooses where a form is sent: the submission carries every field of the form, a password included, to whatever URL the value names (§5.2 rule 3 admits any `https:` origin). Write the `" + a.name + "` as a static string (`" + a.name + "=\"/login\"`), or switch between static forms with `if=` (§5.2)"
+        return head + " — data never navigates the page: a `<meta http-equiv=\"refresh\">` sends the whole page to the URL in its `content`, and `http-equiv` chooses that pragma. Write `http-equiv` and a refresh's `content` as static strings (`content=\"30;url=/next\"`) (§5.2)"
+    }
+
     // s462 — a quoted value holding `${…}` (the parser refuses it).
     fn quotedHasInterp(v: AAttrValue) -> boolean {
         return match v {
@@ -14993,6 +15048,18 @@ ${
                 // at the definition (a field supplies the value).
                 st = resolveValue(penv, a.value, not, st)
                 st = addDiag(st, env.file, a.span, "E-ATTR-INTERP-EXECUTABLE", "the `" + a.name + "=` attribute on `<" + e.tag + ">` takes its value from data (an expression, a variable, a call or a field), and `srcdoc` is an HTML document — data written there can carry script. A `srcdoc` value is a static string only (no `$" + "{…}`). Build the frame from a URL (`src=`) or render the content as markup in the page (§5.2).")
+            } else if (valueExpr(a.value) is given && navSinkCode(e, a) != "") {
+                // s473 — §5.2 "Data never chooses where a form posts or where
+                // the page goes (S473)": a data `action` on a `<form>`, a data
+                // `formaction`, a data `http-equiv` on a `<meta>`, or a data
+                // `content` on a refresh `<meta>` "SHALL be a compile error"
+                // (E-ATTR-FORM-ACTION / E-ATTR-META-REFRESH). Chromium-proven:
+                // the form posts its fields (password included) off-origin; the
+                // meta navigates the page off-origin. In a declaration's body it
+                // is reported once, at the definition.
+                const code: string = navSinkCode(e, a)
+                st = resolveValue(penv, a.value, not, st)
+                st = addDiag(st, env.file, a.span, code, navSinkMessage(code, a, e))
             } else if (valueExpr(a.value) is given && a.name.toLowerCase() == "style") {
                 // s472 — §65.4.2: "`style=<expr>` where `<expr>` is neither a
                 // quoted string literal nor a `style`-typed value/list SHALL
@@ -15015,6 +15082,17 @@ ${
                 // declaration's body it is reported once, at the definition.
                 st = resolveValue(penv, a.value, not, st)
                 st = addDiag(st, env.file, a.span, "E-STYLE-VALUE-NOT-STYLE", "`" + a.name + "=` on `<" + e.tag + ">` takes its value from data (an expression, a variable, a call or a field), and only a quoted string literal or a `style`-typed value applies a style — an arbitrary runtime string written into `style` is CSS built from data (`url(…)` fetches, `@import`, overlays). Write the style as a static `style=\"…\"`, put the dynamic part in a `#" + "{…}` rule as `@cell` (§25.7 — the bridge admits only a plain CSS value), or switch a class with `class=(…)` (§65.4.2)")
+            } else if (valueExpr(a.value) is given && a.name.toLowerCase() == "href" && e.tag.toLowerCase() == "base") {
+                // s473 — §5.2 "Data never moves the document base (S473)": "A
+                // `<base>` … whose `href` (any case) is not a static string …
+                // SHALL be a compile error (E-ATTR-BASE-HREF)." The base URL
+                // resolves every relative URL on the page, and the §5.2 URL
+                // guard admits it (https): a data base moved `document.baseURI`
+                // to another origin and the runtime's server call followed it
+                // (gap g-boot-base-href-from-data-retargets-server-calls-s473, Chromium).
+                // In a declaration's body it is reported once, at the definition.
+                st = resolveValue(penv, a.value, not, st)
+                st = addDiag(st, env.file, a.span, "E-ATTR-BASE-HREF", "`" + a.name + "=` on `<" + e.tag + ">` takes its value from data (an expression, a variable, a call or a field) — data never chooses the document's base URL: it resolves every relative URL on the page (links, forms, fetches), so a data base moves them to another origin. Write the `href` as a static string (`href=\"/app/\"`), or build the URLs that need a varying prefix where they are used (§5.2)")
             } else if (valueExpr(a.value) is given && a.name.toLowerCase() == "href" && e.tag.toLowerCase() == "link" && linkRelLoadsSheet(e.attrs)) {
                 // s473 — §5.2 "Data-supplied stylesheets (S472)": "A `<link>`
                 // whose `href` is not a static string … and whose `rel` contains
@@ -26944,6 +27022,9 @@ ${
         const validated: boolean = c.validated.length > 0
         if (!validated && c.surfaced.length == 0) return { diags: [], ext: [] }
         const what: string = "`<" + c.e.tag + " " + c.owner.name + "=…>` binds `" + c.validated.concat(c.surfaced).join("`, `") + "`"
+        // s473 — a data `form=` is refused on its own (E-ATTR-FORM-ACTION, §5.2
+        // "Data never chooses where a form posts …"); one diagnostic per fault.
+        if (valueExpr(c.owner.value) is given) return { diags: [], ext: [] }
         const lit: string | not = htmlLiteral(c.owner.value)
         let why: string = ""
         let target: IdSite | not = not
