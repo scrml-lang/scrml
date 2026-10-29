@@ -128,7 +128,109 @@ ${
         for (const s of p.server) {
             for (const n of allNodes(Node.NServerFn(s))) { out = out.concat(checkNode(p, [], n)) }
         }
-        return out.concat(checkSuspends(p)).concat(checkServer(p)).concat(checkFailures(p)).concat(checkClientCalls(p)).concat(checkJumps(p)).concat(checkGathers(p)).concat(checkHostFns(p))
+        return out.concat(checkSuspends(p)).concat(checkServer(p)).concat(checkFailures(p)).concat(checkClientCalls(p)).concat(checkJumps(p)).concat(checkGathers(p)).concat(checkHostFns(p)).concat(checkDbLoads(p))
+    }
+
+    // =========================================================================
+    // s473 (Lane B — SPEC §8.1.3) — THE `<db>` CELLS (CoreProgram.loads). Each:
+    //   C-DB1 `fn` is a ServerFn with NO parameters, a declared `ret` (the
+    //         cell's type — the wire table, the projection's allow-list) and no
+    //         error type: the client calls it at boot with nothing to send
+    //   C-DB2 `cell` is a field of the PROGRAM declaration (its type and `ret`
+    //         are resolved from the one written type — parse readDbCell)
+    //         and whose init is exactly `Local(val)` — the loaded value, never
+    //         a client-evaluated initializer
+    //   C-DB3 a cell and a load appear in one entry each; `val` is read by
+    //         nothing but that init (no other node names it)
+    // =========================================================================
+    fn checkDbLoads(p: CoreProgram) -> string[] {
+        let out: string[] = []
+        let cells: int[] = []
+        let fns: int[] = []
+        let vals: int[] = []
+        for (const ld of p.loads) {
+            const who: string = "the `<db>` cell load " + ld.fn.hint + "()"
+            if (cells.indexOf(ld.cell.id) >= 0 || fns.indexOf(ld.fn.id) >= 0) out = out.concat(["C-DB3: " + who + " is listed twice"])
+            cells = cells.concat([ld.cell.id])
+            fns = fns.concat([ld.fn.id])
+            vals = vals.concat([ld.val.id])
+            let sf: ServerFn | not = not
+            for (const s of p.server) { if (s.sym.id == ld.fn.id) sf = s }
+            let fty: Type | not = not
+            if (sf is not) {
+                out = out.concat(["C-DB1: " + who + " is not a server function"])
+            } else {
+                if (sf.params.length > 0) out = out.concat(["C-DB1: " + who + " takes parameters"])
+                if (sf.err is given) out = out.concat(["C-DB1: " + who + " declares an error type"])
+                fty = sf.ret
+                if (fty is not) out = out.concat(["C-DB1: " + who + " has no declared return type (the projection's wire table)"])
+            }
+            let found = false
+            for (const d of p.decls) {
+                if (d.sym.id == p.program.id) {
+                    for (const f of d.fields) {
+                        if (f.sym.id == ld.cell.id) {
+                            found = true
+                            const fi: Expr | not = f.init
+                            let isVal = false
+                            if (fi is given) isVal = exprLocalId(fi) == ld.val.id
+                            if (!isVal) out = out.concat(["C-DB2: the `<db>` cell " + f.sym.hint + "'s init is not its loaded value"])
+                        }
+                    }
+                }
+            }
+            if (!found) out = out.concat(["C-DB2: " + who + " names no field of the program"])
+        }
+        if (vals.length == 0) return out
+        // C-DB3: a loaded value is read only by its cell's init
+        let reads: int = 0
+        for (const n of allNodes(Node.NProgram(p))) {
+            const id: int = nodeLocalId(n)
+            if (id >= 0 && vals.indexOf(id) >= 0) reads = reads + 1
+        }
+        if (reads != vals.length) out = out.concat(["C-DB3: a `<db>` cell's loaded value is read outside its cell's init (" + reads + " reads, " + vals.length + " cells)"])
+        return out
+    }
+
+    fn nodeLocalId(n: Node) -> int {
+        return match n {
+            .NExpr(e: e) :> exprLocalId(e)
+            .NStmt(s: x) :> -1
+            .NProgram(p: x) :> -1
+            .NDecl(d: x) :> -1
+            .NField(f: x) :> -1
+            .NFn(f: x) :> -1
+            .NServerFn(f: x) :> -1
+            .NBlock(b: x) :> -1
+            .NPlace(pl: x) :> -1
+            .NInst(i: x) :> -1
+            .NPattern(pat: x) :> -1
+            .NEdit(k: x) :> -1
+            .NView(v: x) :> -1
+            .NAttr(a: x) :> -1
+        }
+    }
+
+    fn exprLocalId(e: Expr) -> int {
+        return match e {
+            .Local(sym: s) :> s.id
+            .Lit(lit: x) :> -1
+            .Read(place: x) :> -1
+            .Call(callee: x) :> -1
+            .Prim(op: x) :> -1
+            .Match(scrut: x) :> -1
+            .ArrayOf(elems: x) :> -1
+            .StructOf(ty: x) :> -1
+            .VariantOf(enumSym: x) :> -1
+            .Handle(inst: x) :> -1
+            .InitOf(decl: x) :> -1
+            .Host(call: x) :> -1
+            .Lambda(params: x) :> -1
+            .SeqCall(op: x) :> -1
+            .Validity(of: x) :> -1
+            .ServerCall(fn: x) :> -1
+            .Query(q: x) :> -1
+        }
     }
 
     // =========================================================================

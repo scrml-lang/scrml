@@ -21,3 +21,25 @@ PA recs" items 1, 2, 4, 5; S472 "⭐ RULED — functions in a `<db>` body: visib
   E-REACTIVE-003's site → E-DB-CELL-SERVER-READ for a db cell.
 - Core: CoreProgram.loads (cell, fn, val); the cell's init is Local(val).
 - print: client awaits the loads before it mounts (no mount on failure); server routes the load fns.
+
+## 2026-10-28 — implementation (one commit, after the slices are green)
+- parse.scrml `readDbCell` / `dbCellShapeWhy` (replaces `refuseDbDecl`): the desugar; ast.scrml `ADbFn` gains
+  `cell` / `start` / `end`.
+- analyze.scrml: `isLoadName` (load `@name` in no file scope; Sym hint `load$name`; no W-DEPRECATED-SERVER-MODIFIER;
+  no second E-SCOPE-010); `dbCellWriteGuard` (from `writeGuards` — every write place); `resolveReset` refusal;
+  `serverBodyDiags` → E-DB-CELL-SERVER-READ; `dbNestedWhy` (Lane A refusal, cell message); `dbLoads` (mints the
+  client value Sym; fails closed for an unplaced load or a cell outside the top-level program).
+- core.scrml `CoreProgram.loads` / `DbLoad`; lower.scrml field init `Local(val)`; check.scrml C-DB1..3;
+  print.scrml `dbLoadBoot` + `calledServerFns` includes loads; runtime.js `loadDbCells`.
+- Reading taken (surfaced as g-bootstrap-db-cell-locked-reading-s473): "locked" = no `replace` grant (§66.9 rule 1);
+  a tape with `[replace]` is the writable form (O3), so the design's refresh shape runs.
+- SPEC: new §8.1.3 (the S472 function-visibility sentence + ruling items 1, 2, 4, 5 + an informative bootstrap
+  note); §4.18.1's Lane A pointer now names §8.1.3 (the brief's "§8.1.2" is taken by S456's one-statement rule);
+  §34 rows E-DB-CELL-SERVER-READ, E-DB-CELL-WRITE-OUTSIDE-BLOCK; E-DB-BODY-STATEMENT / E-UNQUOTED-DISPLAY-TEXT
+  bootstrap citations moved from drifted line numbers to symbols. SPEC-INDEX + severity.scrml regenerated.
+- known-gaps: s469 db/channel gap narrowed (db half closed); filed g-bootstrap-db-cell-locked-reading-s473 (MED,
+  owner q), g-bootstrap-db-cell-load-failure-surface-s473 (MED), g-bootstrap-db-cell-loads-uncoalesced-s473 (LOW),
+  g-bootstrap-db-cell-shapes-refused-s473 (LOW).
+- Tests: db-cells-s473.test.js 38 (26 of the original 34 red on base; the 4 added later are also red on base —
+  db cells did not compile); acceptance db-cells/* (3 new), o61/db-let-decl UNSUPPORTED → PASS; db-body-s472 /
+  parse-batch-s471 expectations moved from "refused" to "compiles" (export still refused).

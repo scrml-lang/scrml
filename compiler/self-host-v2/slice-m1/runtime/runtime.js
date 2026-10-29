@@ -3130,6 +3130,43 @@ export function call(route, args, task) {
   });
 }
 
+// s473 (Lane B) — the page's `<db>` cells (SPEC §8.1.3; RULED S472 "`<db>` body +
+// client reads", items 1–2): each cell's value is loaded on the SERVER, per
+// request, by its parameterless load route, and the page WAITS for every one
+// before the program instance is built (so a cell's type stays `T`). One call
+// at a time, in program order (each is an ordinary `call` — the CSRF pair, the
+// deadline, the strict decode against the cell's declared type). The answer is
+// `{ ok, values }`: `values[i]` the decoded value of `routes[i]`. When a load
+// fails the page is NOT mounted (ok = false) and the failure is reported by its
+// ServerCallError variant only — never a reason text, which is the only part
+// that could quote anything the server sent.
+export async function loadDbCells(routes) {
+  const values = [];
+  for (const r of routes) {
+    const v = await call(r, [], null);
+    if (failed(v)) {
+      reportHostError(new Error(`scrml: a <db> cell's server load failed (${loadFailureName(v)}) — the page is not mounted`));
+      return { ok: false, values: [] };
+    }
+    values.push(v);
+  }
+  return { ok: true, values };
+}
+
+// `Transport(Unreachable)`, `Transport(ServerFault(500))`, `Transport(Malformed)` — names and a status only.
+function loadFailureName(f) {
+  const e = f.error;
+  if (e === null || typeof e !== "object" || e.variant !== "Transport" || !Array.isArray(e.data)) return "a failure";
+  const t = e.data[0];
+  if (typeof t === "string") return `Transport(${t === "Unreachable" ? t : "?"})`;
+  if (t === null || typeof t !== "object") return "Transport";
+  if (t.variant === "Refused" || t.variant === "ServerFault") {
+    const s = Array.isArray(t.data) ? t.data[0] : undefined;
+    return `Transport(${t.variant}(${Number.isInteger(s) ? s : "?"}))`;
+  }
+  return t.variant === "Malformed" ? "Transport(Malformed)" : "Transport";
+}
+
 // s468 (U1c): the double-submit pair (server-runtime.js checks it).
 export const CSRF_COOKIE = "scrml_csrf";
 export const CSRF_HEADER = "X-CSRF-Token";

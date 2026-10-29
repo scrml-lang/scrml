@@ -286,9 +286,12 @@ const STATUS = {
   // s471-bootstrap-parse-batch — parser gaps (parse.scrml)
   "display/several-literals": ["PASS", []],
   "display/neg-runaway-literal": ["PASS", ["E-CTX-001"]],
-  // O61 (§66.2.5 S469): an item in a `<db>` body — read as the declaration, its block-owned
-  // server-side state refused by name (owed: analyze / lower / server runtime)
-  "o61/db-let-decl": ["UNSUPPORTED", ["E-BOOTSTRAP-UNSUPPORTED"]],
+  // O61 (§66.2.5 S469): an item in a `<db>` body — s473 (Lane B, §8.1.3): a per-request server
+  // cell, its client copy the projection (slice-m4/db-cells-s473.test.js)
+  "o61/db-let-decl": ["PASS", []],
+  "db-cells/neg-write-outside": ["PASS", ["E-DB-CELL-WRITE-OUTSIDE-BLOCK"]],
+  "db-cells/neg-server-read": ["PASS", ["E-DB-CELL-SERVER-READ"]],
+  "db-cells/neg-locked-write": ["PASS", ["E-WRITE-NOT-GRANTED"]],
   // s472-boot-db-body-mode (S472 ruling Q3, §4.18.1): a `<db>` body is a code-default ITEM body
   "db-body/fn-and-markup": ["PASS", []],
   "db-body/neg-statement": ["PASS", ["E-DB-BODY-STATEMENT"]],
