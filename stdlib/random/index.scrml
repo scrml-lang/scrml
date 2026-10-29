@@ -32,7 +32,7 @@ ${
      *   // fn noisy(x) { return x + random() }                // E-FN-004 — non-det in fn
      */
     export function random() {
-        return Math.random()
+        return Math.random();
     }
 
     /**
@@ -52,27 +52,27 @@ ${
      *   function rollDie() { return randomInt(1, 6) }
      */
     export function randomInt(min, max) {
-        let lo = Math.ceil(min)
-        let hi = Math.floor(max)
+        let lo = Math.ceil(min);
+        let hi = Math.floor(max);
         if (lo > hi) {
-            const t = lo
-            lo = hi
-            hi = t
+            const t = lo;
+            lo = hi;
+            hi = t;
         }
-        return lo + Math.floor(Math.random() * (hi - lo + 1))
+        return lo + Math.floor(Math.random() * (hi - lo + 1));
     }
 
     ~{
-        import { assertTruthy, assertInRange } from 'scrml:test'
+        import { assertTruthy, assertInRange } from 'scrml:test';
 
         // random() — a float in [0, 1): 0 inclusive, 1 exclusive.
-        const r = random()
+        const r = random();
         assertTruthy(typeof r == "number")
         assertTruthy(r >= 0 && r < 1)
 
         // randomInt — INCLUSIVE of both bounds; many draws stay in range.
         for (let i = 0; i < 200; i++) {
-            const n = randomInt(1, 6)
+            const n = randomInt(1, 6);
             assertTruthy(n >= 1 && n <= 6)
             assertTruthy(n == Math.floor(n))  // integer
         }

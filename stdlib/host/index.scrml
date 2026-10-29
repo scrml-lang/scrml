@@ -1,4 +1,3 @@
-<program>
 ${
     // ---------------------------------------------------------------------------
     // scrml:host — JS-host-throw containment primitive
@@ -89,7 +88,7 @@ ${
         // Stub body — runtime is provided by compiler/runtime/stdlib/host.js.
         // This body is never executed directly; the bundler replaces it with the
         // hand-authored shim that contains the actual try/catch.
-        return thunk()
+        return thunk();
     }
 
     // ---------------------------------------------------------------------------
@@ -134,4 +133,3 @@ ${
         return await thunk()
     }
 }
-</program>

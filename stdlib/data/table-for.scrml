@@ -1,4 +1,3 @@
-<program>
 ${
     // ---------------------------------------------------------------------------
     // scrml:data/table-for — type-driven `<table>` rendering (L22 family member #4)
@@ -142,4 +141,3 @@ ${
         // resolves at MOD stage.
     }
 }
-</program>

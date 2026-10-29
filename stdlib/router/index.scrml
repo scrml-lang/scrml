@@ -1,4 +1,3 @@
-<program>
 ${
     // ---------------------------------------------------------------------------
     // scrml:router — client-side routing helpers
@@ -30,33 +29,33 @@ ${
      *   match("/users/:id", "/users/99?tab=x") → { params: { id: "99" }, query: { tab: "x" } }
      */
     export function match(pattern, path) {
-        if (!path) return not
+        if (!path) return not;
 
-        const qIdx = path.indexOf("?")
-        const rawPath = qIdx >= 0 ? path.slice(0, qIdx) : path
-        const rawQuery = qIdx >= 0 ? path.slice(qIdx + 1) : ""
-        const query = rawQuery ? parseQuery(rawQuery) : {}
+        const qIdx = path.indexOf("?");
+        const rawPath = qIdx >= 0 ? path.slice(0, qIdx) : path;
+        const rawQuery = qIdx >= 0 ? path.slice(qIdx + 1) : "";
+        const query = rawQuery ? parseQuery(rawQuery) : {};
 
         // Build regex: strip leading slash, reconstruct cleanly
-        const normalized = pattern.startsWith("/") ? pattern.slice(1) : pattern
-        const segments = normalized.split("/")
-        const keys = []
-        let regexStr = "^/"
+        const normalized = pattern.startsWith("/") ? pattern.slice(1) : pattern;
+        const segments = normalized.split("/");
+        const keys = [];
+        let regexStr = "^/";
 
         for (let i = 0; i < segments.length; i++) {
-            const seg = segments[i]
+            const seg = segments[i];
             if (i > 0) regexStr += "/"
 
             if (seg == "*") {
-                keys.push("*")
+                keys.push("*");
                 regexStr += "(.*)"
             } else if (seg.startsWith(":")) {
-                const optional = seg.endsWith("?")
-                const name = optional ? seg.slice(1, -1) : seg.slice(1)
-                keys.push(name)
+                const optional = seg.endsWith("?");
+                const name = optional ? seg.slice(1, -1) : seg.slice(1);
+                keys.push(name);
                 if (optional) {
                     // Remove the "/" we just added, wrap entire segment as optional
-                    regexStr = regexStr.slice(0, -1)
+                    regexStr = regexStr.slice(0, -1);
                     regexStr += "(?:/([^/]+))?"
                 } else {
                     regexStr += "([^/]+)"
@@ -69,12 +68,12 @@ ${
 
         const regex = new RegExp(regexStr)
         const m = rawPath.match(regex)
-        if (!m) return not
+        if (!m) return not;
 
         const params = {}
         keys.forEach((key, idx) => {
             if (m[idx + 1] is given) {
-                params[key] = m[idx + 1]
+                params[key] = m[idx + 1];
             }
         })
 
@@ -225,4 +224,3 @@ ${
         assertEqual(m3.query.tab, "settings")
     }
 }
-</program>

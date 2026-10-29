@@ -1,4 +1,3 @@
-<program>
 ${
     // ---------------------------------------------------------------------------
     // scrml:time — date formatting and timing utilities
@@ -30,7 +29,7 @@ ${
      *   // fn elapsed(then) { return now() - then }   // E-FN-004 — non-det in fn
      */
     export function now() {
-        return Date.now()
+        return Date.now();
     }
 
     /**
@@ -46,9 +45,9 @@ ${
      *   formatDate(ts, { year: "numeric", month: "2-digit", day: "2-digit" }) → "04/01/2026"
      */
     export function formatDate(timestamp, options, locale) {
-        const date = timestamp instanceof Date ? timestamp : new Date(timestamp)
-        const defaults = { year: "numeric", month: "short", day: "numeric" }
-        return new Intl.DateTimeFormat(locale || "en-US", options || defaults).format(date)
+        const date = timestamp instanceof Date ? timestamp : new Date(timestamp);
+        const defaults = { year: "numeric", month: "short", day: "numeric" };
+        return new Intl.DateTimeFormat(locale || "en-US", options || defaults).format(date);
     }
 
     /**
@@ -63,9 +62,9 @@ ${
      *   formatTime(ts, { hour12: false }) → "14:34"
      */
     export function formatTime(timestamp, options, locale) {
-        const date = timestamp instanceof Date ? timestamp : new Date(timestamp)
-        const defaults = { hour: "numeric", minute: "2-digit", hour12: true }
-        return new Intl.DateTimeFormat(locale || "en-US", options || defaults).format(date)
+        const date = timestamp instanceof Date ? timestamp : new Date(timestamp);
+        const defaults = { hour: "numeric", minute: "2-digit", hour12: true };
+        return new Intl.DateTimeFormat(locale || "en-US", options || defaults).format(date);
     }
 
     /**
@@ -75,9 +74,9 @@ ${
      *   formatDateTime(Date.now()) → "Apr 1, 2026, 2:34 PM"
      */
     export function formatDateTime(timestamp, options, locale) {
-        const date = timestamp instanceof Date ? timestamp : new Date(timestamp)
-        const defaults = { year: "numeric", month: "short", day: "numeric", hour: "numeric", minute: "2-digit", hour12: true }
-        return new Intl.DateTimeFormat(locale || "en-US", options || defaults).format(date)
+        const date = timestamp instanceof Date ? timestamp : new Date(timestamp);
+        const defaults = { year: "numeric", month: "short", day: "numeric", hour: "numeric", minute: "2-digit", hour12: true };
+        return new Intl.DateTimeFormat(locale || "en-US", options || defaults).format(date);
     }
 
     /**
@@ -94,21 +93,21 @@ ${
      * Example: formatRelative(Date.now() - 120000) → "2m ago"
      */
     export function formatRelative(timestamp, now) {
-        const base = now || Date.now()
-        const ts = timestamp instanceof Date ? timestamp.getTime() : timestamp
-        const diff = base - ts
-        const seconds = Math.floor(diff / 1000)
+        const base = now || Date.now();
+        const ts = timestamp instanceof Date ? timestamp.getTime() : timestamp;
+        const diff = base - ts;
+        const seconds = Math.floor(diff / 1000);
 
-        if (seconds < 60) return "just now"
-        const minutes = Math.floor(seconds / 60)
-        if (minutes < 60) return `${minutes}m ago`
-        const hours = Math.floor(minutes / 60)
-        if (hours < 24) return `${hours}h ago`
-        const days = Math.floor(hours / 24)
-        if (days < 30) return `${days}d ago`
-        const months = Math.floor(days / 30)
-        if (months < 12) return `${months} ${months == 1 ? "month" : "months"} ago`
-        return formatDate(timestamp)
+        if (seconds < 60) return "just now";
+        const minutes = Math.floor(seconds / 60);
+        if (minutes < 60) return `${minutes}m ago`;
+        const hours = Math.floor(minutes / 60);
+        if (hours < 24) return `${hours}h ago`;
+        const days = Math.floor(hours / 24);
+        if (days < 30) return `${days}d ago`;
+        const months = Math.floor(days / 30);
+        if (months < 12) return `${months} ${months == 1 ? "month" : "months"} ago`;
+        return formatDate(timestamp);
     }
 
     /**
@@ -121,17 +120,17 @@ ${
      *   formatDuration(3700000) → "1h 1m"
      */
     export function formatDuration(ms) {
-        if (ms < 1000) return `${ms}ms`
-        const seconds = Math.floor(ms / 1000)
-        if (seconds < 60) return `${seconds}s`
-        const minutes = Math.floor(seconds / 60)
-        const remainingSecs = seconds % 60
+        if (ms < 1000) return `${ms}ms`;
+        const seconds = Math.floor(ms / 1000);
+        if (seconds < 60) return `${seconds}s`;
+        const minutes = Math.floor(seconds / 60);
+        const remainingSecs = seconds % 60;
         if (minutes < 60) {
-            return remainingSecs > 0 ? `${minutes}m ${remainingSecs}s` : `${minutes}m`
+            return remainingSecs > 0 ? `${minutes}m ${remainingSecs}s` : `${minutes}m`;
         }
-        const hours = Math.floor(minutes / 60)
-        const remainingMins = minutes % 60
-        return remainingMins > 0 ? `${hours}h ${remainingMins}m` : `${hours}h`
+        const hours = Math.floor(minutes / 60);
+        const remainingMins = minutes % 60;
+        return remainingMins > 0 ? `${hours}h ${remainingMins}m` : `${hours}h`;
     }
 
     /**
@@ -145,9 +144,9 @@ ${
      *   parseDate("04/01/2026") → Date object
      */
     export function parseDate(str) {
-        if (!str) return not
-        const d = new Date(str)
-        return isNaN(d.getTime()) ? not : d
+        if (!str) return not;
+        const d = new Date(str);
+        return isNaN(d.getTime()) ? not : d;
     }
 
     /**
@@ -159,9 +158,9 @@ ${
      *          isValidDate(not) → false
      */
     export function isValidDate(value) {
-        if (value is not) return false
+        if (value is not) return false;
         if (value instanceof Date) return !isNaN(value.getTime())
-        if (value == "") return false
+        if (value == "") return false;
         const d = new Date(value)
         return !isNaN(d.getTime())
     }
@@ -177,19 +176,19 @@ ${
     export function startOf(timestamp, unit) {
         const d = new Date(timestamp instanceof Date ? timestamp.getTime() : timestamp)
         if (unit == "day") {
-            d.setHours(0, 0, 0, 0)
+            d.setHours(0, 0, 0, 0);
         } else if (unit == "month") {
-            d.setDate(1)
-            d.setHours(0, 0, 0, 0)
+            d.setDate(1);
+            d.setHours(0, 0, 0, 0);
         } else if (unit == "year") {
-            d.setMonth(0, 1)
-            d.setHours(0, 0, 0, 0)
+            d.setMonth(0, 1);
+            d.setHours(0, 0, 0, 0);
         } else if (unit == "hour") {
-            d.setMinutes(0, 0, 0)
+            d.setMinutes(0, 0, 0);
         } else if (unit == "week") {
-            const day = d.getDay()
-            d.setDate(d.getDate() - day)
-            d.setHours(0, 0, 0, 0)
+            const day = d.getDay();
+            d.setDate(d.getDate() - day);
+            d.setHours(0, 0, 0, 0);
         }
         return d
     }
@@ -204,14 +203,14 @@ ${
     export function addTime(timestamp, amount, unit) {
         const d = new Date(timestamp instanceof Date ? timestamp.getTime() : timestamp)
         const u = unit.replace(/s$/, "") // normalize "days" → "day"
-        if (u == "millisecond") d.setMilliseconds(d.getMilliseconds() + amount)
-        else if (u == "second") d.setSeconds(d.getSeconds() + amount)
-        else if (u == "minute") d.setMinutes(d.getMinutes() + amount)
-        else if (u == "hour") d.setHours(d.getHours() + amount)
-        else if (u == "day") d.setDate(d.getDate() + amount)
-        else if (u == "week") d.setDate(d.getDate() + amount * 7)
-        else if (u == "month") d.setMonth(d.getMonth() + amount)
-        else if (u == "year") d.setFullYear(d.getFullYear() + amount)
+        if (u == "millisecond") d.setMilliseconds(d.getMilliseconds() + amount);
+        else if (u == "second") d.setSeconds(d.getSeconds() + amount);
+        else if (u == "minute") d.setMinutes(d.getMinutes() + amount);
+        else if (u == "hour") d.setHours(d.getHours() + amount);
+        else if (u == "day") d.setDate(d.getDate() + amount);
+        else if (u == "week") d.setDate(d.getDate() + amount * 7);
+        else if (u == "month") d.setMonth(d.getMonth() + amount);
+        else if (u == "year") d.setFullYear(d.getFullYear() + amount);
         return d
     }
 
@@ -222,18 +221,18 @@ ${
      *   diffTime(Date.now(), yesterday, "hours") → 24
      */
     export function diffTime(a, b, unit) {
-        const ta = a instanceof Date ? a.getTime() : a
-        const tb = b instanceof Date ? b.getTime() : b
-        const diffMs = ta - tb
+        const ta = a instanceof Date ? a.getTime() : a;
+        const tb = b instanceof Date ? b.getTime() : b;
+        const diffMs = ta - tb;
         const u = unit.replace(/s$/, "") // normalize "days" → "day"
-        if (u == "millisecond") return diffMs
-        if (u == "second") return Math.floor(diffMs / 1000)
-        if (u == "minute") return Math.floor(diffMs / 60000)
-        if (u == "hour") return Math.floor(diffMs / 3600000)
-        if (u == "day") return Math.floor(diffMs / 86400000)
-        if (u == "week") return Math.floor(diffMs / 604800000)
-        if (u == "month") return Math.floor(diffMs / 2592000000)
-        if (u == "year") return Math.floor(diffMs / 31536000000)
+        if (u == "millisecond") return diffMs;
+        if (u == "second") return Math.floor(diffMs / 1000);
+        if (u == "minute") return Math.floor(diffMs / 60000);
+        if (u == "hour") return Math.floor(diffMs / 3600000);
+        if (u == "day") return Math.floor(diffMs / 86400000);
+        if (u == "week") return Math.floor(diffMs / 604800000);
+        if (u == "month") return Math.floor(diffMs / 2592000000);
+        if (u == "year") return Math.floor(diffMs / 31536000000);
         return diffMs
     }
 
@@ -256,7 +255,7 @@ ${
     // struct -> { kind, fn, timer, pendingArgs, cooling }
     const timerState = new WeakMap()
     // id source: distinguishes two debouncers with the same wait under `==`.
-    const timerIds = { next: 0 }
+    const timerIds = { next: 0 };
     // A timer struct is built on its OWN prototype (a plain object one level above
     // Object.prototype). The client runtime's deep-reactive wrapper wraps only arrays
     // and plain objects, so a timer held in a state cell, a field or a collection is
@@ -265,7 +264,7 @@ ${
     // The prototype carries the timer BRAND (a registry symbol, non-enumerable, not
     // an own field): a path write (`@d.delay = 10`) reaches a branded struct IN PLACE
     // — the runtime refuses every other non-plain prototype — since a copy is a dead timer.
-    const timerProto = Object.create(Object.prototype)
+    const timerProto = Object.create(Object.prototype);
     Object.defineProperty(timerProto, Symbol.for("scrml:time.timer"), { value: true })
 
     export type Debouncer:struct = {
@@ -292,10 +291,10 @@ ${
      *   // cancel(searchLater) — drop the pending call; flush(searchLater) — run it now
      */
     export function debounce(fn, delay) -> Debouncer {
-        timerIds.next = timerIds.next + 1
-        const d = Object.assign(Object.create(timerProto), { id: timerIds.next, delay: delay })
-        timerState.set(d, { kind: "debounce", fn: fn, timer: not, pendingArgs: not, cooling: false })
-        return d
+        timerIds.next = timerIds.next + 1;
+        const d = Object.assign(Object.create(timerProto), { id: timerIds.next, delay: delay });
+        timerState.set(d, { kind: "debounce", fn: fn, timer: not, pendingArgs: not, cooling: false });
+        return d;
     }
 
     /**
@@ -309,10 +308,10 @@ ${
      *   // later: cancel(onScrollLimited)
      */
     export function throttle(fn, limit) -> Throttler {
-        timerIds.next = timerIds.next + 1
-        const t = Object.assign(Object.create(timerProto), { id: timerIds.next, limit: limit })
-        timerState.set(t, { kind: "throttle", fn: fn, timer: not, pendingArgs: not, cooling: false })
-        return t
+        timerIds.next = timerIds.next + 1;
+        const t = Object.assign(Object.create(timerProto), { id: timerIds.next, limit: limit });
+        timerState.set(t, { kind: "throttle", fn: fn, timer: not, pendingArgs: not, cooling: false });
+        return t;
     }
 
     /**
@@ -320,15 +319,15 @@ ${
      * A value that debounce / throttle did not return drives nothing.
      */
     export function run(t, ...args) {
-        const st = timerState.get(t)
-        if (st is not) return
+        const st = timerState.get(t);
+        if (st is not) return;
         if (st.kind == "debounce") {
-            if (st.timer is given) clearTimeout(st.timer)
-            st.pendingArgs = args
+            if (st.timer is given) clearTimeout(st.timer);
+            st.pendingArgs = args;
             st.timer = setTimeout(() => {
-                st.timer = not
-                const pending = st.pendingArgs
-                st.pendingArgs = not
+                st.timer = not;
+                const pending = st.pendingArgs;
+                st.pendingArgs = not;
                 st.fn(...pending)
             }, t.delay)
             return
@@ -337,16 +336,16 @@ ${
             st.fn(...args)
             st.cooling = true
             st.timer = setTimeout(() => {
-                st.cooling = false
-                st.timer = not
+                st.cooling = false;
+                st.timer = not;
                 if (st.pendingArgs is given) {
-                    const pending = st.pendingArgs
-                    st.pendingArgs = not
+                    const pending = st.pendingArgs;
+                    st.pendingArgs = not;
                     st.fn(...pending)
                 }
             }, t.limit)
         } else {
-            st.pendingArgs = args
+            st.pendingArgs = args;
         }
     }
 
@@ -355,12 +354,12 @@ ${
      * throttle: the trailing call, and the window).
      */
     export function cancel(t) {
-        const st = timerState.get(t)
-        if (st is not) return
-        if (st.timer is given) clearTimeout(st.timer)
-        st.timer = not
-        st.pendingArgs = not
-        st.cooling = false
+        const st = timerState.get(t);
+        if (st is not) return;
+        if (st.timer is given) clearTimeout(st.timer);
+        st.timer = not;
+        st.pendingArgs = not;
+        st.cooling = false;
     }
 
     /**
@@ -368,14 +367,14 @@ ${
      * Nothing pending → nothing runs.
      */
     export function flush(t) {
-        const st = timerState.get(t)
-        if (st is not) return
-        if (st.timer is given) clearTimeout(st.timer)
-        st.timer = not
-        st.cooling = false
+        const st = timerState.get(t);
+        if (st is not) return;
+        if (st.timer is given) clearTimeout(st.timer);
+        st.timer = not;
+        st.cooling = false;
         if (st.pendingArgs is given) {
-            const pending = st.pendingArgs
-            st.pendingArgs = not
+            const pending = st.pendingArgs;
+            st.pendingArgs = not;
             st.fn(...pending)
         }
     }
@@ -627,4 +626,3 @@ ${
         assertTruthy(typeof nowTokyo == "string" && nowTokyo.length > 0)
     }
 }
-</program>

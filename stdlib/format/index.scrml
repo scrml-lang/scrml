@@ -1,4 +1,3 @@
-<program>
 ${
     // ---------------------------------------------------------------------------
     // scrml:format — string and number formatting utilities
@@ -23,7 +22,7 @@ ${
         return new Intl.NumberFormat(locale || "en-US", {
             style: "currency",
             currency: currency || "USD"
-        }).format(amount)
+        }).format(amount);
     }
 
     /**
@@ -35,12 +34,12 @@ ${
      *   formatNumber(0.4567, 2)       → "0.46"
      */
     export function formatNumber(n, decimals, locale) {
-        const opts = {}
+        const opts = {};
         if (decimals is given) {
-            opts.minimumFractionDigits = decimals
-            opts.maximumFractionDigits = decimals
+            opts.minimumFractionDigits = decimals;
+            opts.maximumFractionDigits = decimals;
         }
-        return new Intl.NumberFormat(locale || "en-US", opts).format(n)
+        return new Intl.NumberFormat(locale || "en-US", opts).format(n);
     }
 
     /**
@@ -53,8 +52,8 @@ ${
      *   pluralize(3, "child", "children") → "3 children"
      */
     export function pluralize(count, singular, plural) {
-        const word = count == 1 ? singular : (plural || singular + "s")
-        return `${count} ${word}`
+        const word = count == 1 ? singular : (plural || singular + "s");
+        return `${count} ${word}`;
     }
 
     /**
@@ -69,10 +68,10 @@ ${
      *   truncate("Hello world this is long", 10, " →") → "Hello wo →"
      */
     export function truncate(str, maxLength, suffix) {
-        if (!str) return str
-        const sfx = suffix is given ? suffix : "..."
-        if (str.length <= maxLength) return str
-        return str.slice(0, maxLength - sfx.length) + sfx
+        if (!str) return str;
+        const sfx = suffix is given ? suffix : "...";
+        if (str.length <= maxLength) return str;
+        return str.slice(0, maxLength - sfx.length) + sfx;
     }
 
     /**
@@ -84,7 +83,7 @@ ${
      *   slug("Héllo Wörld")                 → "hello-world"
      */
     export function slug(str) {
-        if (!str) return ""
+        if (!str) return "";
         return str
             .normalize("NFD")
             .replace(/[\u0300-\u036f]/g, "")
@@ -98,8 +97,8 @@ ${
      * Example: capitalize("hello world") → "Hello world"
      */
     export function capitalize(str) {
-        if (!str) return str
-        return str.charAt(0).toUpperCase() + str.slice(1)
+        if (!str) return str;
+        return str.charAt(0).toUpperCase() + str.slice(1);
     }
 
     /**
@@ -107,7 +106,7 @@ ${
      * Example: titleCase("hello world") → "Hello World"
      */
     export function titleCase(str) {
-        if (!str) return str
+        if (!str) return str;
         return str.replace(/\b\w/g, c => c.toUpperCase())
     }
 
@@ -116,7 +115,7 @@ ${
      * Example: toWords("helloWorld") → "hello World"
      */
     export function toWords(str) {
-        if (!str) return str
+        if (!str) return str;
         return str
             .replace(/([A-Z]+)([A-Z][a-z])/g, "$1 $2")
             .replace(/([a-z\d])([A-Z])/g, "$1 $2")
@@ -128,7 +127,7 @@ ${
      * Example: padLeft("42", 5, "0") → "00042"
      */
     export function padLeft(str, length, char) {
-        return String(str).padStart(length, char || " ")
+        return String(str).padStart(length, char || " ");
     }
 
     /**
@@ -136,7 +135,7 @@ ${
      * Example: padRight("hi", 5, "-") → "hi---"
      */
     export function padRight(str, length, char) {
-        return String(str).padEnd(length, char || " ")
+        return String(str).padEnd(length, char || " ");
     }
 
     /**
@@ -149,14 +148,14 @@ ${
      *   formatBytes(1073741824) → "1 GB"
      */
     export function formatBytes(bytes, decimals) {
-        if (bytes == 0) return "0 Bytes"
-        const k = 1024
-        const dm = decimals is given ? decimals : 1
-        const sizes = ["Bytes", "KB", "MB", "GB", "TB", "PB"]
-        const i = Math.floor(Math.log(bytes) / Math.log(k))
-        const value = bytes / Math.pow(k, i)
-        const formatted = dm == 0 ? Math.round(value) : parseFloat(value.toFixed(dm))
-        return `${formatted} ${sizes[i]}`
+        if (bytes == 0) return "0 Bytes";
+        const k = 1024;
+        const dm = decimals is given ? decimals : 1;
+        const sizes = ["Bytes", "KB", "MB", "GB", "TB", "PB"];
+        const i = Math.floor(Math.log(bytes) / Math.log(k));
+        const value = bytes / Math.pow(k, i);
+        const formatted = dm == 0 ? Math.round(value) : parseFloat(value.toFixed(dm));
+        return `${formatted} ${sizes[i]}`;
     }
 
     /**
@@ -167,8 +166,8 @@ ${
      *   formatPercent(0.4256, 1) → "42.6%"
      */
     export function formatPercent(value, decimals) {
-        const dm = decimals is given ? decimals : 0
-        return `${(value * 100).toFixed(dm)}%`
+        const dm = decimals is given ? decimals : 0;
+        return `${(value * 100).toFixed(dm)}%`;
     }
 
     // -- Locale-aware Intl.NumberFormat / ListFormat extensions ---------------
@@ -187,7 +186,7 @@ ${
      * @param locale — BCP 47 language tag (default "en-US")
      */
     export function compactNumber(n, locale) {
-        return new Intl.NumberFormat(locale || "en-US", { notation: "compact" }).format(n)
+        return new Intl.NumberFormat(locale || "en-US", { notation: "compact" }).format(n);
     }
 
     /**
@@ -203,8 +202,8 @@ ${
      * @param locale — BCP 47 language tag (default "en-US")
      */
     export function formatList(items, type, locale) {
-        const t = type || "conjunction"
-        return new Intl.ListFormat(locale || "en-US", { style: "long", type: t }).format(items)
+        const t = type || "conjunction";
+        return new Intl.ListFormat(locale || "en-US", { style: "long", type: t }).format(items);
     }
 
     /**
@@ -221,8 +220,8 @@ ${
      * @param locale   — BCP 47 language tag (default "en-US")
      */
     export function formatRange(start, end, currency, locale) {
-        const opts = currency ? { style: "currency", currency: currency } : {}
-        return new Intl.NumberFormat(locale || "en-US", opts).formatRange(start, end)
+        const opts = currency ? { style: "currency", currency: currency } : {};
+        return new Intl.NumberFormat(locale || "en-US", opts).formatRange(start, end);
     }
 
     /**
@@ -244,11 +243,11 @@ ${
      * @param locale  — BCP 47 language tag (default "en-US")
      */
     export function formatNumberAdvanced(n, options, locale) {
-        return new Intl.NumberFormat(locale || "en-US", options || {}).format(n)
+        return new Intl.NumberFormat(locale || "en-US", options || {}).format(n);
     }
 
     ~{
-        import { assertEqual, assertTruthy, assertFalsy } from 'scrml:test'
+        import { assertEqual, assertTruthy, assertFalsy } from 'scrml:test';
 
         assertEqual(formatNumber(1234567.89), "1,234,567.89")
         assertEqual(formatNumber(1234567.89, 0), "1,234,568")
@@ -282,17 +281,17 @@ ${
         assertTruthy(compactNumber(1500000).indexOf("M") >= 0)
 
         // formatList — locale-aware. en-US default = conjunction = "a, b, and c"
-        const conjunctionList = formatList(["a", "b", "c"])
+        const conjunctionList = formatList(["a", "b", "c"]);
         assertTruthy(conjunctionList.indexOf("a") >= 0 && conjunctionList.indexOf("b") >= 0 && conjunctionList.indexOf("c") >= 0)
         assertTruthy(conjunctionList.indexOf("and") >= 0)
-        const disjunctionList = formatList(["x", "y"], "disjunction")
+        const disjunctionList = formatList(["x", "y"], "disjunction");
         assertTruthy(disjunctionList.indexOf("or") >= 0)
 
         // formatRange — without currency, plain numeric range
-        const plainRange = formatRange(1, 10)
+        const plainRange = formatRange(1, 10);
         assertTruthy(plainRange.indexOf("1") >= 0 && plainRange.indexOf("10") >= 0)
         // formatRange — with currency, formats as currency
-        const usdRange = formatRange(100, 1000, "USD")
+        const usdRange = formatRange(100, 1000, "USD");
         assertTruthy(usdRange.indexOf("$") >= 0)
 
         // formatNumberAdvanced — pass-through to Intl.NumberFormat
@@ -300,4 +299,3 @@ ${
         assertTruthy(formatNumberAdvanced(123, { signDisplay: "always" }).indexOf("+") >= 0)
     }
 }
-</program>

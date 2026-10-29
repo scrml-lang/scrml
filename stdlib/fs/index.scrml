@@ -1,4 +1,3 @@
-<program>
 ${
     // ---------------------------------------------------------------------------
     // scrml:fs — file system utilities for scrml applications
@@ -31,8 +30,8 @@ ${
      *   readFileSync("/tmp/data.bin", "base64")   → "base64encoded..."
      */
     export function readFileSync(path, encoding) {
-        const fs = require("node:fs")
-        return fs.readFileSync(path, { encoding: encoding || "utf-8" })
+        const fs = require("node:fs");
+        return fs.readFileSync(path, { encoding: encoding || "utf-8" });
     }
 
     /**
@@ -46,8 +45,8 @@ ${
      *   writeFileSync("/tmp/out.txt", data, "base64")
      */
     export function writeFileSync(path, content, encoding) {
-        const fs = require("node:fs")
-        fs.writeFileSync(path, content, { encoding: encoding || "utf-8" })
+        const fs = require("node:fs");
+        fs.writeFileSync(path, content, { encoding: encoding || "utf-8" });
     }
 
     /**
@@ -61,8 +60,8 @@ ${
      *   existsSync("/tmp/nope")        → false
      */
     export function existsSync(path) {
-        const fs = require("node:fs")
-        return fs.existsSync(path)
+        const fs = require("node:fs");
+        return fs.existsSync(path);
     }
 
     /**
@@ -76,9 +75,9 @@ ${
      *   mkdirSync("/tmp/flat", { recursive: false }) — single level only
      */
     export function mkdirSync(dir, options) {
-        const fs = require("node:fs")
-        const opts = options || { recursive: true }
-        fs.mkdirSync(dir, opts)
+        const fs = require("node:fs");
+        const opts = options || { recursive: true };
+        fs.mkdirSync(dir, opts);
     }
 
     /**
@@ -91,8 +90,8 @@ ${
      *   readdirSync("/tmp/mydir") → ["file1.txt", "file2.txt"]
      */
     export function readdirSync(dir) {
-        const fs = require("node:fs")
-        return fs.readdirSync(dir)
+        const fs = require("node:fs");
+        return fs.readdirSync(dir);
     }
 
     /**
@@ -111,18 +110,18 @@ ${
      *     → { isFile: true, isDirectory: false, size: 42, mtime: Date }
      */
     export function statSync(path) {
-        const fs = require("node:fs")
+        const fs = require("node:fs");
         // fs.statSync throws on a missing path; safeCall turns that host throw
         // into HostError::Thrown, and the arm maps it to `not`.
         const s = safeCall(() => fs.statSync(path)) !{
             ::Thrown(message, name) :> { return not }
-        }
+        };
         return {
             isFile: s.isFile(),
             isDirectory: s.isDirectory(),
             size: s.size,
             mtime: s.mtime
-        }
+        };
     }
 
     /**
@@ -137,9 +136,9 @@ ${
      *   rmSync("/tmp/olddir", { recursive: true, force: true })
      */
     export function rmSync(path, options) {
-        const fs = require("node:fs")
-        const opts = options || { recursive: false, force: false }
-        fs.rmSync(path, opts)
+        const fs = require("node:fs");
+        const opts = options || { recursive: false, force: false };
+        fs.rmSync(path, opts);
     }
 
     ~{
@@ -148,7 +147,7 @@ ${
         // structural expectations only. Server-side behavior is validated by
         // the unit tests in compiler/tests/unit/stdlib-fs.test.js.
 
-        import { assertTruthy } from 'scrml:test'
+        import { assertTruthy } from 'scrml:test';
 
         // Verify all exports are functions
         assertTruthy(typeof readFileSync == "function")
@@ -160,4 +159,3 @@ ${
         assertTruthy(typeof rmSync == "function")
     }
 }
-</program>

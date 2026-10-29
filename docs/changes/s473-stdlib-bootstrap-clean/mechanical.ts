@@ -38,7 +38,18 @@ if (mode === "--unwrap") {
       const src = readFileSync(f, "utf8");
       // the file alone, as the entry (parse diagnostics do not depend on the closure)
       const r = frontEnd(B.mods, [{ path: "m.scrml", src }], "m.scrml");
-      const at = [...new Set(r.parseDiags.filter((d: any) => d.code === "E-STMT-MISSING-SEMICOLON" && d.file === "m.scrml" && d.span.start === d.span.end && /insert `;` after/.test(d.message)).map((d: any) => d.span.start as number))].sort((a, b) => b - a);
+      // Only at a LINE END (the rest of the line blank or a `//` comment): a diagnostic after an
+      // earlier parse error in the same construct can point mid-expression (`if (typeof x != "s"␣)`),
+      // where a `;` would change what impl#1 reads.
+      // And never before a line that CONTINUES the expression (starts with an operator, `.`, `?`,
+      // `:`, `,`, `)` or `]`) — a `;` there would split one impl#1 statement in two.
+      const atEol = (o: number) => {
+        const m = /^[ \t]*(\/\/[^\n]*)?(\r?\n|$)/.exec(src.slice(o, o + 400));
+        if (!m) return false;
+        const next = /^\s*(\S)/.exec(src.slice(o + m[0].length).replace(/^(\s*\/\/[^\n]*\n)+/, ""));
+        return !next || !/[.+\-*/%&|?:,)\]=<>]/.test(next[1]);
+      };
+      const at = [...new Set(r.parseDiags.filter((d: any) => d.code === "E-STMT-MISSING-SEMICOLON" && d.file === "m.scrml" && d.span.start === d.span.end && /insert `;` after/.test(d.message) && atEol(d.span.start)).map((d: any) => d.span.start as number))].sort((a, b) => b - a);
       if (at.length === 0) break;
       let out = src;
       for (const o of at) out = out.slice(0, o) + ";" + out.slice(o);

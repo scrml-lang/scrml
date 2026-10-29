@@ -80,8 +80,8 @@ ${
     export function match(pattern, str) {
         if (typeof str != "string") return not
         const m = pattern.exec(str)
-        if (!m) return not
-        if (m.groups) return m.groups
+        if (!m) return not;
+        if (m.groups) return m.groups;
         return m
     }
 

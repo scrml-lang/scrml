@@ -1,4 +1,3 @@
-<program>
 ${
     // ---------------------------------------------------------------------------
     // scrml:mcp — V0 MCP DevTools surface (11 read-only tools over MCP stdio)
@@ -72,4 +71,3 @@ ${
         return handle
     }
 }
-</program>
