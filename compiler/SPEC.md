@@ -24924,8 +24924,8 @@ type Sighting:struct = { isIntersecting: bool, intersectionRatio: number }
 1. `<host>` SHALL appear at file top level or as a direct child of `<program>`. A `<host>` anywhere else SHALL be
    `E-HOST-BINDING-PLACEMENT`. It emits no HTML. In an adopter file it emits no server code (rule 10; for a stdlib
    module file see the ⚑ after the wrapper-form relation).
-2. Each body line SHALL be a `//` comment, a `host-type` line, a `host-binding` line, or a continuation line
-   beginning with `=`. Any other line SHALL be `E-HOST-BINDING-MALFORMED`. (A binding spelled with the deprecated
+2. Each body line SHALL be a blank line, a `//` comment, a `host-type` line, a `host-binding` line, or a
+   continuation line beginning with `=`. Any other line SHALL be `E-HOST-BINDING-MALFORMED`. (A binding spelled with the deprecated
    `pure` modifier is such a line; a pure binding is spelled `fn`, §33.)
 3. **`src=`.** When present, `src=` SHALL be a relative `.js` or `.mjs` path: a string that begins with `./` or
    `../`, uses `/` as its only separator, contains no `?`, `#` or `\`, and ends exactly in `.js` or `.mjs` (case
@@ -24944,8 +24944,8 @@ type Sighting:struct = { isIntersecting: bool, intersectionRatio: number }
    only through a form the parse cannot resolve, SHALL be `E-IMPORT-004`. Whether the export is callable is not
    checked at build time: calling a non-callable export throws at run time, which rule 18 handles. *(Contrast
    §21.3.1.1: the `import:host` loader loads a host module at compile time, which is admitted only because that
-   module is compiler-owned stdlib behind the §22.13 manifest gate. A stdlib module's `<host src=>` MAY use that
-   loader; an adopter's `<host src=>` SHALL NOT.)*
+   module is compiler-owned stdlib behind the §22.13 manifest gate. A `<host src=>` in a compiler-bundled stdlib module file (one shipped with the compiler and inside the §22.13 `host-import` allow-list; NOT a module under `vendor/scrml/`, though `scrml:` also resolves there) MAY use that
+   loader. Any other `<host src=>`, a `vendor/scrml/` module's included, SHALL NOT.)*
 
 *The target.*
 
@@ -24970,6 +24970,8 @@ type Sighting:struct = { isIntersecting: bool, intersectionRatio: number }
    - a call of `document.write`, `document.writeln`, `insertAdjacentHTML`, `createContextualFragment`,
      `setHTMLUnsafe` or `execCommand`;
    - a property write of `innerHTML`, `outerHTML` or `srcdoc`;
+   - a call of `setAttribute`, `setAttributeNS` or `toggleAttribute` whose attribute-name argument is not a string
+     literal, or is a literal that is `srcdoc` or begins with `on` (any case);
    - a write to `location` or to any member of it, and a call of `location.assign`, `location.replace` or
      `window.open`.
    This applies the §5.2 principle that scrml does not hand the browser source text it never checks, the one
@@ -24996,8 +24998,9 @@ type Sighting:struct = { isIntersecting: bool, intersectionRatio: number }
 *What crosses.*
 
 12. **Into the host.** Every argument SHALL cross as a deep, fresh copy in its runtime representation, except a
-    value of a `:host` type, a DOM element type (rule 16), `asIs`, or a function (rule 19), which crosses as
-    itself. So a struct crosses as a fresh plain object, and a tape as a fresh host sequence, each at every depth,
+    value of a `:host` type, a DOM element type (rule 16) or `asIs`, which crosses as itself, and a function, which
+    crosses as a compiler-generated wrapper that decodes the host's arguments (rule 13) and shapes the result
+    (rule 19). The host never receives the scrml lambda itself. So a struct crosses as a fresh plain object, and a tape as a fresh host sequence, each at every depth,
     and the host cannot mutate scrml data. `not` crosses as JS `null` (§42.8). An optional parameter (`p?: T`, §7.5)
     whose argument is omitted, or is `not`, crosses as JS `undefined`.
 13. **Checked results.** A binding's result, and every argument the host passes to a scrml callback (rule 19),
@@ -25009,12 +25012,18 @@ type Sighting:struct = { isIntersecting: bool, intersectionRatio: number }
     - for `T | not`, JS `null` or `undefined` is `not`, and any other value is decoded as `T`;
     - for any type without `not`, JS `null` or `undefined` is a mismatch;
     - an enum is decoded by the §41.13 `parseVariant` shape;
-    - a struct SHALL be decoded by reading each declared field ONCE, as an OWN DATA property (through its property
-      descriptor, so no getter runs). An inherited property, a missing own property, or an accessor property is
-      absent: `not` for a field whose type admits `not`, otherwise a mismatch. Each value read is decoded, and
-      members not declared are dropped. A Proxy's traps may run, but at most once for each field;
-    - a tape SHALL be a value for which `Array.isArray` is true. Its `length` and each element are read once, as
-      own data properties (a hole is absent, as for a struct field), and each element is decoded;
+    - a struct SHALL be decoded by reading each declared field ONCE, by ordinary property access, so a getter (a
+      WebIDL attribute such as `IntersectionObserverEntry.isIntersecting` or `DOMRect.width`, which is an accessor on
+      the interface prototype) runs at most once per field. A field is ABSENT when the object's prototype chain
+      does not have it, or has it only on `Object.prototype` (the chain is searched up to, and not including,
+      `Object.prototype`, so a polluted `Object.prototype` cannot supply a field). An absent field is `not` when its
+      type admits `not`, and a mismatch otherwise. The value read is decoded, and members not declared are dropped.
+      This is the same read-once ordinary access rule 18 uses for `HostError`'s `message` and `name`;
+    - a tape SHALL be a value for which `Array.isArray` is true. Its `length` and each element are read once by
+      ordinary access (an index that is absent by the struct rule above is absent), and each element is decoded.
+      `Array.isArray` is false for array-like platform collections (`NodeList`, `HTMLCollection`, `FileList`,
+      `DOMTokenList`), so a binding returning one is a mismatch: convert it with `Array.from` in the `src=` glue,
+      or declare the result `asIs`;
     - a `:host` type (rule 15) and a DOM element type (rule 16) are not decoded, but a non-optional one SHALL NOT be
       `null` or `undefined`;
     - `asIs` (§7.5.2) is not decoded;
@@ -25122,7 +25131,7 @@ module's host functions move to it as follows, and the wrapper form is supersede
   file, with the wrapper's signature (its name, parameters and return type; `fn` if the wrapper is a `fn`). The
   `import:host` declaration and the wrapper are deleted. Client callers are unchanged, because they called the
   wrapper by that name and now call the binding by it. Server callers are unchanged only under the ⚑ below.
-- In a stdlib module file, `src=` resolves and lands as §21.3.1.1 states for that module's host module
+- In a compiler-bundled stdlib module file (one shipped with the compiler and inside the §22.13 `host-import` allow-list; NOT a module under `vendor/scrml/`, though `scrml:` also resolves there), `src=` resolves and lands as §21.3.1.1 states for that module's host module
   (`<outputDir>/_scrml/<module>/<file>`, `E-IMPORT-012` outside the module directory), not under §21.3's
   `_scrml_local/` copy rule. It may use the compile-time loader (rule 3).
 - A stdlib host module that throws an error carrying a §19.17 trap code (§21.3.1.1) still raises that trap. It is
@@ -25134,7 +25143,8 @@ through `<host>` (F3/F7), wrappers rewritten mechanically"*. But the design's Q6
 taken by rule 10, would stop any stdlib module whose host functions are called from server code (`scrml:math`
 runs on the server) from making that move. `<host src=>` also admits `.js` / `.mjs` only, while `import:host`
 admits `.ts` / `.mts`. Until the owner rules, such a module keeps the wrapper form, and rule 10 is stated for
-adopter files only. **Recommendation:** a `<host src=…>` inside a stdlib module file is isomorphic. Its host
+adopter files only. **Recommendation:** a `<host src=…>` inside a compiler-bundled stdlib module file (rule 3's sense; not
+`vendor/scrml/`) is isomorphic. Its host
 module is emitted into BOTH artifacts at `<outputDir>/_scrml/<module>/<file>`, as §21.3.1.1 already lands it, and
 its bindings are not client-only. An adopter `<host>` stays client-only (rule 10). A `.ts` host module stays on
 `import:host`. Admitting these is a widening.
@@ -25178,7 +25188,7 @@ position codes. The design's `E-HOST-DUPLICATE` is not minted: rule 9 reports a 
 - §12.4: the client-only list adds "calls a `<host>` binding (adopter file)".
 - §19.17: the trap table adds `E-HOST-THROW-RT` and widens `E-HOST-VALUE-MISMATCH-RT` to `<host>` bindings.
 - §45.2: a bullet says a type containing a declared `:host` type is NOT comparable (`E-EQ-003`, as functions are).
-  The `E-EQ-003` §34 row gains that trigger.
+  (The `E-EQ-003` rows in §34 and §45.7 already carry that trigger, marked Nominal.)
 
 ### 21.4 Re-export
 
@@ -28831,7 +28841,7 @@ are REFUSED by impl#1, `E-IMPL1-RULED-FORM-UNSUPPORTED` (its row lands with that
 | E-HOST-SRC-INVALID | §21.3.3 | Raised when `<host src=>` is not a relative `.js` / `.mjs` path as rule 3 defines one (begins `./` or `../`, `/` separators only, no `?` / `#` / `\`, ends exactly `.js` / `.mjs`). A bare specifier, a missing file and a file outside the project root keep `E-IMPORT-005` / `-006` / `-011`. **Nominal / spec-ahead — not yet emitted** (DRAFT §21.3.3; the bootstrap builds it, `g-boot-host-block-f3-unbuilt-s473`). Provenance: ruling:user-voice-scrml.md S473 "⭐ RULED — S473 PA recs, all" item 4; design `scrml-support/docs/deep-dives/typed-host-binding-f3-design-2026-10-27.md` §7. Direction of change: newly-rejecting within a newly-accepting element. | Error |
 | E-HOST-TARGET-SHAPE | §21.3.3 | Raised when a binding's target is not exactly one call, `new` construction, property read or property write whose arguments are parameters, literals or a one-level object literal of those (an operator, lambda, computed member, spread or nested call); when the chain names `constructor`, `prototype` or `__proto__`, or an object-literal key is `__proto__`; and when a `fn` binding's target is rooted at `window` / `document` / `navigator` (rules 4, 11). **Nominal / spec-ahead — not yet emitted** (DRAFT §21.3.3; the bootstrap builds it, `g-boot-host-block-f3-unbuilt-s473`). Provenance: ruling:user-voice-scrml.md S473 "⭐ RULED — S473 PA recs, all" item 4; design `scrml-support/docs/deep-dives/typed-host-binding-f3-design-2026-10-27.md` §7. Direction of change: newly-rejecting within a newly-accepting element. | Error |
 | E-HOST-TARGET-UNBOUND | §21.3.3 | Raised when a target's callee root is not a parameter of the binding, an export of `src`, or `window` / `document` / `navigator` (`globalThis` included) (rule 4). **Nominal / spec-ahead — not yet emitted** (DRAFT §21.3.3; the bootstrap builds it, `g-boot-host-block-f3-unbuilt-s473`). Provenance: ruling:user-voice-scrml.md S473 "⭐ RULED — S473 PA recs, all" item 4; design `scrml-support/docs/deep-dives/typed-host-binding-f3-design-2026-10-27.md` §7. Direction of change: newly-rejecting within a newly-accepting element. | Error |
-| E-HOST-TARGET-SINK | §21.3.3, §5.2 | Raised when a binding's target reaches a sink that runs source text or navigates (rule 8): a call or construction whose last member is `eval` or `Function`, or `setTimeout` / `setInterval` with a first argument not of a function type; a call of `document.write`, `document.writeln`, `insertAdjacentHTML`, `createContextualFragment`, `setHTMLUnsafe` or `execCommand`; a property write of `innerHTML`, `outerHTML` or `srcdoc`; a write to `location` or a member of it, or a call of `location.assign`, `location.replace` or `window.open`. Applies the §5.2 S464 principle (no unchecked source text handed to the browser). **Nominal / spec-ahead — not yet emitted** (DRAFT §21.3.3; the bootstrap builds it, `g-boot-host-block-f3-unbuilt-s473`). Provenance: PA addition on the S239 review of #1630 (M10), within the element ruled by ruling:user-voice-scrml.md S473 "⭐ RULED — S473 PA recs, all" item 4. Direction of change: newly-rejecting within a newly-accepting element. | Error |
+| E-HOST-TARGET-SINK | §21.3.3, §5.2 | Raised when a binding's target reaches a sink that runs source text or navigates (rule 8): a call or construction whose last member is `eval` or `Function`, or `setTimeout` / `setInterval` with a first argument not of a function type; a call of `document.write`, `document.writeln`, `insertAdjacentHTML`, `createContextualFragment`, `setHTMLUnsafe` or `execCommand`; a property write of `innerHTML`, `outerHTML` or `srcdoc`; a `setAttribute` / `setAttributeNS` / `toggleAttribute` call whose name argument is non-literal, `srcdoc`, or `on…`; a write to `location` or a member of it, or a call of `location.assign`, `location.replace` or `window.open`. Applies the §5.2 S464 principle (no unchecked source text handed to the browser). **Nominal / spec-ahead — not yet emitted** (DRAFT §21.3.3; the bootstrap builds it, `g-boot-host-block-f3-unbuilt-s473`). Provenance: PA addition on the S239 review of #1630 (M10), within the element ruled by ruling:user-voice-scrml.md S473 "⭐ RULED — S473 PA recs, all" item 4. Direction of change: newly-rejecting within a newly-accepting element. | Error |
 | E-HOST-PARAM-USE | §21.3.3 | Raised when a declared parameter of a binding does not appear in its target, or appears more than once (rule 5). **Nominal / spec-ahead — not yet emitted** (DRAFT §21.3.3; the bootstrap builds it, `g-boot-host-block-f3-unbuilt-s473`). Provenance: ruling:user-voice-scrml.md S473 "⭐ RULED — S473 PA recs, all" item 4; design `scrml-support/docs/deep-dives/typed-host-binding-f3-design-2026-10-27.md` §7. Direction of change: newly-rejecting within a newly-accepting element. | Error |
 | E-HOST-NO-TARGET | §21.3.3 | Raised when a binding without `= target` stands in a `<host>` that has no `src=` (rule 6). **Nominal / spec-ahead — not yet emitted** (DRAFT §21.3.3; the bootstrap builds it, `g-boot-host-block-f3-unbuilt-s473`). Provenance: ruling:user-voice-scrml.md S473 "⭐ RULED — S473 PA recs, all" item 4; design `scrml-support/docs/deep-dives/typed-host-binding-f3-design-2026-10-27.md` §7. Direction of change: newly-rejecting within a newly-accepting element. | Error |
 | E-HOST-TYPE-NOT-CROSSABLE | §21.3.3 | Raised when a binding declares a type that cannot cross the host boundary: a function-typed result, a callback parameter of a waiting function type, a `lin` result, or a map / set / tuple type at any depth (rule 14). **Nominal / spec-ahead — not yet emitted** (DRAFT §21.3.3; the bootstrap builds it, `g-boot-host-block-f3-unbuilt-s473`). Provenance: ruling:user-voice-scrml.md S473 "⭐ RULED — S473 PA recs, all" item 4; design `scrml-support/docs/deep-dives/typed-host-binding-f3-design-2026-10-27.md` §7. Direction of change: newly-rejecting within a newly-accepting element. | Error |
@@ -29196,7 +29206,7 @@ are REFUSED by impl#1, `E-IMPL1-RULED-FORM-UNSUPPORTED` (its row lands with that
 | E-USE-005 | §41 | `use` specifier uses an unrecognized protocol prefix (must begin with `scrml:`, `vendor:`, `./`, or `../`). Bare npm-style specifiers are not valid in scrml. (Catalog addition S78 audit; emitted at `compiler/src/gauntlet-phase1-checks.js`.) | Error |
 | E-EQ-001 | §45, §18.6.1 | `==` applied to incompatible types. The type system prevents cross-type comparison before the operator is evaluated. (Catalog addition S78 audit; emitted at `compiler/src/gauntlet-phase3-eq-checks.js`. S469: also `==` / `!=` between a `!{}` whole-error binder `_ err :>` and a primitive, §18.6.1 — any `==` / `!=` with the binder as an operand; emitted at `compiler/src/type-system.ts` `auditWholeErrorBinderText`.) | Error |
 | E-EQ-002 | §45 | `== not` used instead of `is not`. The absence check uses the keyword form `x is not`, not equality against the `not` sentinel. (Catalog addition S78 audit; emitted at `compiler/src/gauntlet-phase3-eq-checks.js`; also `compiler/src/ast-builder.js`.) | Error |
-| E-EQ-003 | §45 | `==` applied to a type containing function fields. Functions are not comparable for value-equality in scrml. (Catalog addition S78 audit; emitted at `compiler/src/gauntlet-phase3-eq-checks.js`.) | Error |
+| E-EQ-003 | §45 | `==` applied to a type containing function fields. Functions are not comparable for value-equality in scrml. (Catalog addition S78 audit; emitted at `compiler/src/gauntlet-phase3-eq-checks.js`.) ALSO (DRAFT §21.3.3 rule 15, S473): `==` / `!=` on a type containing a user-declared `:host` type, which is not comparable (§45.6 stands) — **Nominal / not yet emitted** for that trigger (`g-boot-host-block-f3-unbuilt-s473`). | Error |
 | E-EQ-004 | §45 | `===` operator used in scrml source. scrml has a single equality operator `==` (with strict type-matching); the `===` triple-equals form is not valid. (Catalog addition S78 audit; emitted at `compiler/src/gauntlet-phase3-eq-checks.js`; also `compiler/src/ast-builder.js`.) | Error |
 | E-EQ-005 | §45.5 | `is <value>` — a literal (`x is 0`, `x is "text"`, `x is true`) or value-expression (`x is @other`) RHS on the `is` keyword, used where `==` is meant. `is` is the absence / variant-discrimination keyword (`is not` / `is given` / `is .Variant`), NOT a value-equality operator (limit-the-primitive, §14.1.1). Mirror of E-EQ-002 (`x == not` → `x is not`). Before this rule `x is 0` mis-lowered silently to a misleading `E-DG-002` / internal `E-CODEGEN-INVALID-LOGIC`. Resolution: use `==` (`x == 0`). (S237 — ruling `docs/known-gaps.md` `g-is-literal-rhs-if-condition-drop`; wired S237; emitted at `compiler/src/gauntlet-phase3-eq-checks.js:951` `harvestValueRhsOnIs`.) | Error |
 | W-EQ-001 | §45 | `==` applied to `asIs`-typed values. Equality on `asIs` defers to runtime `===` semantics in JS output; the warning surfaces the loss of compile-time guarantees. (Catalog addition S78 audit; emitted at `compiler/src/gauntlet-phase3-eq-checks.js`.) | Warning |
@@ -35067,7 +35077,7 @@ There is no identity comparison operator in scrml. The reactive runtime handles 
 |---|---|---|
 | E-EQ-001 | `==` applied to incompatible types | Error |
 | E-EQ-002 | `== not` used instead of `is not` | Error |
-| E-EQ-003 | `==` applied to type containing function fields | Error |
+| E-EQ-003 | `==` applied to type containing function fields. ALSO (DRAFT §21.3.3 rule 15, S473; Nominal): a type containing a user-declared `:host` type | Error |
 | E-EQ-004 | `===` operator used (not valid in scrml) | Error |
 | E-EQ-005 | `is <value>` — a literal (`x is 0`) or value-expression (`x is @other`) RHS on `is` used instead of `==`. `is` is for absence (`is not`/`is given`) + variant (`is .Variant`), not value equality. Mirror of E-EQ-002. (§45.5, S237; emitted at `compiler/src/gauntlet-phase3-eq-checks.js:951` `harvestValueRhsOnIs`.) | Error |
 | W-EQ-001 | `==` on `asIs`-typed values | Warning |

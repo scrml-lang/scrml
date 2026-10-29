@@ -42,3 +42,13 @@
 - L3: relative `src=` defined; E-IMPORT-011 denied-class half added; symlink resolution.
 - Follow-ups NOT done (review LOW): L4 blank lines / `/* */` in the body; L5 target edge cases (negative literals, template literals, `?.`, shorthand, `default` export, a parameter named `window`); L6 exporting `:host` types; L7 `HostError` import requirement; L8 worker / tool / `<db>` contexts; L9 F4 lint narrower than the ruling (localStorage, location); L10 the Q7 3m setTimeout bypass; L11 a cheap `nodeType` check for DOM results; L12 code naming (E-HOST-BINDING-* vs E-HOST-BINDING-USE); L13 the W-HOST-UNTYPED-CALL row's split provenance; L14 folded into the M1 wording.
 - Gates: regen-spec-index --check PASS, s34-census --check-new PASS (35 rows), snippet-gate PASS, claim-gate PASS, severity --check current, conflict-marker PASS, delta-lint PASS; hook on commit.
+
+## 2026-10-28 — fix round 2 (r1 re-review FIX-FIRST on N1; ~/.cache/scrml/review/s473-1630/r1/REVIEW.md)
+- N1 (HIGH): rule 13 struct fields are read ONCE by ordinary property access (a WebIDL prototype getter runs at most once); absent = not on the chain, or found only on `Object.prototype` (chain searched up to, not including, Object.prototype). Same read-once access as rule 18's message/name. Tape length/elements read the same way.
+- NodeList / HTMLCollection / FileList / DOMTokenList: `Array.isArray` is false, so a mismatch; convert with `Array.from` in glue or declare `asIs`.
+- N3: "a compiler-bundled stdlib module file (… inside the §22.13 allow-list; NOT a module under `vendor/scrml/`)" in rule 3, the Relation bullet, and the M9 ⚑ rec.
+- N4: rule 12 — a function crosses as a compiler-generated wrapper (rules 13, 19), never the lambda itself.
+- M2: the E-EQ-003 rows (§34 and §45.7) carry "ALSO (DRAFT §21.3.3 rule 15 …; Nominal)"; the edits-list line updated.
+- L4: rule 2 admits blank lines.
+- N2: rule 8 + the E-HOST-TARGET-SINK row add setAttribute / setAttributeNS / toggleAttribute with a non-literal, `srcdoc` or `on…` name; URL-valued literal names noted in g-spec-host-target-url-sinks-unjudged-s473.
+- Gates: regen-spec-index --check, s34-census --check-new (37 rows), snippet-gate, claim-gate, severity --check, delta-lint, conflict-marker: PASS; hook on commit.
