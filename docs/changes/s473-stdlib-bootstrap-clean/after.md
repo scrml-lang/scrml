@@ -4,7 +4,7 @@ Same driver and method as `baseline.md` (`measure.ts`; per-module table with cod
 raw JSON `~/.cache/scrml-agent-tmp/s473-stdlib-bootstrap-clean/after.json`).
 
 **Headline: 2 clean (math, random) / 35 errors / 0 crash / 16 not-supplied (scrml:compiler*).**
-Error diagnostics (closure counts, all 37 measured modules): **2,775 → 2,219** (−556, −20%).
+Error diagnostics (closure counts, all 37 measured modules): **2,775 → 2,220** (−556, −20%).
 md is untouched (709 → 709; dual-compiler constraints, see below).
 
 ## Before / after per module
@@ -30,7 +30,7 @@ md is untouched (709 → 709; dual-compiler constraints, see below).
 | host | 6 | 4 | wrapper, `;` |
 | http | 21 | 13 | wrapper, `;` |
 | **math** | clean | **clean** | — |
-| mcp | 4 | 3 | wrapper |
+| mcp | 4 | 4 | none (wrapper KEPT — unwrapped, impl#1 emits it as a classic script with top-level bindings: host-global R3) |
 | md | 709 | 709 | untouched |
 | oauth | 89 | 67 | wrapper, `;` |
 | oauth/discord | 23 | 18 | wrapper, `;` |

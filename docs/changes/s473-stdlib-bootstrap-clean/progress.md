@@ -59,3 +59,11 @@ compile clean on the bootstrap, keep impl#1 compiling it).
 - Hook note: the format/path/fs commit's FIRST hook run failed one shard (shard 3; my `tail` cut the
   name — not identified); the immediate rerun passed the full suite. Treat as a possible flake; the
   reviewer may want to rerun shard-3's files.
+- 2026-10-29T18:10Z local CI gates: host-global-scan leg 1 FAILED — R3 "top-level binding
+  `startMcpServer` / `shutdownMcpServer` in a classic script" for stdlib/mcp/index.scrml (default and
+  embed modes): without the `<program>` wrapper impl#1 emits mcp as a classic client script. Fix: mcp
+  restored to base (wrapper kept; it is bootstrap-blocked on `async` anyway). Rerun leg 1: 0
+  violations. after.md / gap note updated (30 files unwrapped; total 2,220). All other gates PASS
+  (types-gate, root tests, snippet, claim, compile-floor, md-shim, conflict-marker, spec-index,
+  delta-lint, ci-shards, s34-census, severity, both lints, slices m1 / m2 / m1-lowered / m3 / m4 /
+  codec, e2e-render-map, bootstrap-conformance --check, host-global leg 2).
