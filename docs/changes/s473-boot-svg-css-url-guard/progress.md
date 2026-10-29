@@ -75,3 +75,20 @@ path — `cssValueOf` (the §25.7 bridge's reader) and the existing `rt.attr` si
   --check-new --base origin/main PASS (1 new row); severity --check current; bootstrap-conformance --check
   current; lint-no-default-arm 0; slices m1 100/0, m2 614/0, lowered m1 100/0, m3 60/0, m4 3346/0, codec 166/0;
   e2e-render-map 259/0; conformance 2693/0; integration 0 fail.
+
+## 2026-10-29 — fix round 1 (S239 review of d065ad2b3: LAND-WITH-FOLLOWUPS; ~/.cache/scrml/review/s473-1635/REVIEW.md)
+- F1 (MED, SPEC falsehood): §65.4.2 no longer claims a guarded `${}` cannot add a fetch (`url(${@v})` with
+  `//evil.example/x.png` passes `cssValueOf` and Chromium fetches). Added the PA ruling S473 paragraph
+  "A `${…}` in a URL, string or comment context of a quoted `style="…"` is refused": E-STYLE-INTERP-IN-URL-CONTEXT
+  when the literal context is inside `url(` `image(` `image-set(` `-webkit-image-set(` `cross-fade(` `element(`
+  `src(` (any depth, any vendor prefix, whitespace before `(` included), a CSS string, a comment, after a `\`, or
+  part of a function name. §34 row + §65.10 row, both spec-ahead (no implementation lowers the form; no code change).
+- F3 (LOW): §5.2 "Data-supplied CSS-url attributes — runtime guard (S473)": the list and its sources, the
+  every-element match, SMIL targets incl. `style` and prefixed names, both guards on a computed target, the
+  removal on refusal, `url(#local)` refused (owner question g-boot-css-url-attr-local-fragment-refused-s473),
+  direction of change (s2/s5, custom-element attrs — F4). Marked unruled (PA reading of §25.7).
+- F2: filed g-boot-base-href-from-data-retargets-server-calls-s473 (MED, security; pre-existing): refuse a data
+  `href` on `<base>` AND build absolute same-origin route URLs.
+- F4: noted in the §5.2 sentence and the PR body as a known fail-closed regression.
+- Gates: s34-census --check-new PASS (3 rows), SPEC-INDEX regen + --check OK, severity current, delta-lint, markers,
+  snippet, claim, types-gate, root 2239/0. state.ts --write: MED 700 → 701 (master-list churn discarded).
