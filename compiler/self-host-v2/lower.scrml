@@ -458,6 +458,7 @@ ${
             .Sql(q: q) :> handledRead(c, e)        // s451 (Ue): a query is an Attempt's call; its value, the Attempt's result
             .Handled(h: h) :> handledRead(c, e)
             .Template(quasis: qs, slots: ss) :> templateExpr(c, e, qs, ss)   // s469 (§14.13.3)
+            .Foreign(f: fb0) :> Expr.Host(HostCall.Unreadable)   // s473: unreachable — analyze refuses every foreign block (foreignEmitMsg); C-R1 refuses it if one ever got here
         }
     }
 
@@ -528,6 +529,7 @@ ${
             .Sql(q: q) :> not
             .Handled(h: x) :> not
             .Template(quasis: qs) :> not
+            .Foreign(f: fb0) :> not
         }
     }
 
@@ -1078,6 +1080,7 @@ ${
             .Sql(q: q) :> not
             .Handled(h: x) :> not
             .Template(quasis: qs) :> not
+            .Foreign(f: fb0) :> not
         }
     }
 
@@ -1266,6 +1269,7 @@ ${
             .Sql(q: q) :> []
             .Handled(h: x) :> []
             .Template(quasis: qs) :> []
+            .Foreign(f: fb0) :> []
             .Name(name: n) :> []
             .At(name: n) :> []
             .AtItem :> []
@@ -2599,6 +2603,7 @@ ${
             .Sql(q: x) :> noCall()
             .Handled(h: x) :> noCall()
             .Template(quasis: qs) :> noCall()
+            .Foreign(f: fb0) :> noCall()
         }
     }
 
@@ -2836,6 +2841,7 @@ ${
             .Sql(q: q) :> not
             .Handled(h: x) :> not
             .Template(quasis: qs) :> not
+            .Foreign(f: fb0) :> not
         }
     }
 
@@ -2843,6 +2849,7 @@ ${
         return match k {
             .Handled(h: h) :> h
             .Template(quasis: qs) :> not
+            .Foreign(f: fb0) :> not
             .Name(name: n) :> not
             .At(name: n) :> not
             .AtItem :> not
@@ -2872,6 +2879,7 @@ ${
             .Sql(q: q) :> q
             .Handled(h: x) :> not
             .Template(quasis: qs) :> not
+            .Foreign(f: fb0) :> not
             .Name(name: n) :> not
             .At(name: n) :> not
             .AtItem :> not
@@ -3069,6 +3077,7 @@ ${
             .Lambda(params: lp) :> []
             .Handled(h: h) :> [h.subject]
             .Template(quasis: qs, slots: ss) :> ss
+            .Foreign(f: fb0) :> fb0.crossings
             .Member(obj: o) :> [o]
             .Call(callee: x, args: a) :> a
             .Unary(op: o, e: x) :> [x]
@@ -3129,6 +3138,7 @@ ${
             .Sql(q: q) :> distinctSqlParams(q.params)     // s468 (U1c): a query's distinct values (§8.2), evaluated before it waits
             .Handled(h: x) :> []
             .Template(quasis: qs) :> []
+            .Foreign(f: fb0) :> []
         }
     }
 

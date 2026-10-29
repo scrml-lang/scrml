@@ -81,7 +81,15 @@ ${
         // `slots`; `slots` the `${…}` expressions, each a TEXT SINK (§14.13.1).
         // A `string`. What each slot may hold (a primitive) is analyze's.
         Template(quasis: string[], slots: AExpr[]),
+        Foreign(f: AForeign),                        // s473: a §23.2 `_={ … }=` foreign code block
     }
+
+    // s473 — a §23.2 foreign code block (§23.2.2 ForeignBlock). `body` is the
+    // verbatim slice with the `in:{}` header stripped (§23.2.2 "what CG
+    // splices"); `crossings` the header's names, each a Name read at its own
+    // span (§23.2.4a: "The named values are the ONLY things that cross");
+    // `level` the opener's `=` count. Nothing reads `body` but the printer.
+    export type AForeign:struct = { level: int, crossings: AExpr[], body: string }
 
     // s451 (Ue) — the handling forms. `subject` is the failable (a call of a
     // `!` function, or a `?{}` query).
