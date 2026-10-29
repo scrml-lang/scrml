@@ -15,7 +15,7 @@ fi
 
 # S469 (s469-hook-slices) — the native bootstrap's own slice suite (compiler/self-host-v2/slice-m1..m4 +
 # slice-codec, incl. slice-m4's acceptance cases, + slice-m1 again on the LOWERED programs, + the no-default-arm
-# lint): exactly CI's `slices` bootstrap step. It runs HERE only when the staged diff touches something the
+# and duplicate-fn lints): exactly CI's `slices` bootstrap step. It runs HERE only when the staged diff touches something the
 # slices read. The list below is the set of tracked files a full slice run OPENS (measured with inotify, S469),
 # by prefix, plus the gate's own code:
 #   compiler/self-host-v2/   the bootstrap + its tests + compiler/self-host-v2/acceptance
@@ -24,7 +24,7 @@ fi
 #   conformance/             the adapter, run.ts / driver / normalize, and the case corpus the gate tests grade
 #   docs/known-gaps.md       conformance/run.ts's carried-gap ledger (xfail status)
 #   scripts/{scrml-boot,gen-bootstrap-severity,s34-catalog,bootstrap-conformance,hybrid,state}.ts,
-#   scripts/lint-no-default-arm.js, compiler/tests/integration/security-await-pack/,
+#   scripts/lint-no-default-arm.js, scripts/lint-duplicate-fn.js, compiler/tests/integration/security-await-pack/,
 #   compiler/tests/helpers/tmp-root-preload.js, bunfig.toml, package.json, bun.lock, scrml.toml
 #   stdlib/                  slice-m2/lowered.js STDLIB_ROOT: the bootstrap resolves `scrml:<mod>` imports against the
 #                            REAL stdlib (acceptance case imports/stdlib-format-refused). S472: missing from this list
@@ -41,7 +41,7 @@ elif [ -d compiler/self-host-v2 ]; then
     case "$path" in
       compiler/self-host-v2/*|compiler/SPEC.md|compiler/src/*|compiler/runtime/*|compiler/native-parser/*|conformance/*|\
       docs/known-gaps.md|scripts/scrml-boot.ts|scripts/gen-bootstrap-severity.ts|scripts/s34-catalog.ts|\
-      scripts/bootstrap-conformance.ts|scripts/hybrid.ts|scripts/state.ts|scripts/lint-no-default-arm.js|\
+      scripts/bootstrap-conformance.ts|scripts/hybrid.ts|scripts/state.ts|scripts/lint-no-default-arm.js|scripts/lint-duplicate-fn.js|\
       compiler/tests/integration/security-await-pack/*|compiler/tests/helpers/tmp-root-preload.js|\
       stdlib/*|bunfig.toml|package.json|bun.lock|scrml.toml|scripts/test-sharded.ts|scripts/git-hooks/pre-commit)
         RUN_SLICES=1; SLICE_TRIGGER="$path"; break ;;
@@ -51,9 +51,13 @@ elif [ -d compiler/self-host-v2 ]; then
 fi
 SLICE_DIRS="./compiler/self-host-v2/slice-m1 ./compiler/self-host-v2/slice-m2 ./compiler/self-host-v2/slice-m3 ./compiler/self-host-v2/slice-m4 ./compiler/self-host-v2/slice-codec"
 if [ "$RUN_SLICES" = "1" ]; then
-  echo "Bootstrap slices: ON (staged: ${SLICE_TRIGGER:-SCRML_HOOK_SLICES=1}) — no-default-arm lint..."
+  echo "Bootstrap slices: ON (staged: ${SLICE_TRIGGER:-SCRML_HOOK_SLICES=1}) — no-default-arm + duplicate-fn lints..."
   if ! bun scripts/lint-no-default-arm.js 2>&1; then
     echo "✗ no-default-arm lint failed (compiler/self-host-v2). Fix before committing." >&2
+    exit 1
+  fi
+  if ! bun scripts/lint-duplicate-fn.js 2>&1; then
+    echo "✗ duplicate-fn lint failed (compiler/self-host-v2): impl#1 binds every call of a duplicated name to the LAST definition. Rename one before committing." >&2
     exit 1
   fi
 else
