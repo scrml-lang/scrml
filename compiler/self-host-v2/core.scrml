@@ -829,6 +829,26 @@ ${
         // Each printer emits ONE module-level `const` for every constant its
         // artifact's code reads (transitively), and no other (constsReadIn).
         consts: CoreConst[],
+        // s473 — the page's `<head>` metadata (§40.7, the top-level program's
+        // documentary attributes) and the program's `lang=` (§23.2.1: the
+        // language a `_{}` block resolves against; nothing else reads it).
+        head: CoreHead,
+        lang: string | not,
+    }
+
+    // s473 — §40.7. `title`: which `<title>` the page's `<head>` holds —
+    // `Default` (the compiler's own), `Documentary` (`title="…"`), or `Author`
+    // (the program's markup writes a `<title>`, which wins: the head holds
+    // none). `metas`: `<meta name content>` in the SPEC's fixed order
+    // (description, application-version, author, license); a value is the
+    // attribute's literal text, unescaped (the printer escapes it).
+    export type HeadTitle:enum = { Default, Documentary(text: string), Author }
+    export type CoreMeta:struct = { name: string, content: string }
+    export type CoreHead:struct = { title: HeadTitle, metas: CoreMeta[] }
+
+    // A program with no documentary attribute and no `<title>` of its own.
+    export fn plainHead() -> CoreHead {
+        return { title: HeadTitle.Default, metas: [] }
     }
 
     // s472 — a file-scope constant: its value is fixed at compile time (analyze

@@ -32,7 +32,7 @@
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 263 | 5 |
 | MED | 701 | 8 |
-| LOW | 563 | 0 |
+| LOW | 567 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
 
@@ -29361,3 +29361,21 @@ An S469 lane reported this file by name only. No failure output was kept. s469-h
 - 16 concurrent copies × 5 under 128 busy loops: 0/80. The slowest test took at most 2.32 s (mean 1.95 s, 0.3 s idle) against bun's 5 s default. That test spawns `bun compiler/src/cli.js compile` twice.
 
 The file uses `mkdtempSync` fixtures, so it shares no paths. One mechanism is left: the two cold subprocess starts run past 5 s under memory or I/O pressure that busy loops do not create. The margin measured here is about 2×. No change was made, because it could not be shown to be the cause. Fix direction: the next time it fails, keep the `(fail)` line. If it says "timed out after 5000ms", give the third test an explicit budget (`{ timeout: 30_000 }`) with a comment.
+
+## §S473-program-attrs — gaps found by s473-boot-program-attrs-small (2026-10-29)
+
+### g-spec-program-mcp-attr-unspecified-s473 — `<program mcp>` is a registered `<program>` attribute with no SPEC section saying what it does — `NEW S473; LOW; open`
+§4.12.2 lists `mcp` among the application-level `<program>` attributes (E-PROGRAM-NESTED-ATTR fires for it on a nested program), and impl#1 implements it (`compiler/src/compute-program-config.ts` McpConfig: bare / `""` / `"dev-only"` boot a stdio MCP server from `_server.js` unless `NODE_ENV=production`; `"always"` boots it unconditionally; it also turns on `--emit-per-route`). No SPEC section states any of that: the values, the dev-only gate, what the server exposes, or what an unrecognized value does. The bootstrap refuses `mcp` by name (E-BOOTSTRAP-UNSUPPORTED, s473), so nothing compiles wrongly, but there is no normative text for a second implementation to build to. Fix direction: a §40-family section for `mcp` written from the MCP V0 SCOPING (`docs/changes/mcp-v0-devtools-scoping/SCOPING.md` §3) — an owner decision, since it fixes the value set.
+<!-- @gap id=g-spec-program-mcp-attr-unspecified-s473 sev=LOW status=open locus=compiler/SPEC.md(§4.12.2 lists `mcp`; no section defines it)+compiler/src/compute-program-config.ts(McpConfig) prov=empirical:s473-flogence-port-REPORT(B3);dispatch:s473-boot-program-attrs-small -->
+
+### g-spec-timestamp-missing-from-canonical-type-list-s473 — §14's canonical type-name rule omits `timestamp`, which two other sections call a registered primitive — `NEW S473; LOW; open`
+The canonical rule ("Every type name in a type-annotation position SHALL resolve to a *defined* type: a built-in (`string`, `number`, `boolean`, `int`, the named-shape vocabulary `email`/`url`/`uuid`/`phone`/`date`/`time`/`color`, …)") does not list `timestamp`. Read alone, it makes `at: timestamp` E-TYPE-UNKNOWN-NAME. But the §66.3 canonical-empty list says "**`date` / `timestamp`** (registered string-shaped primitives)", and the E-CONTRACT-002 union-member rule says "the primitives, including `date` and `timestamp` (registered string-shaped primitives, tested as strings)". impl#1 registers `timestamp` as a primitive (`type-system.ts` BUILTIN_TYPES, S109). The bootstrap reported `timestamp` unknown until s473, which now types it as `string` (the SPEC gives it a string's runtime representation and test, and no rule that sets it apart from `string`). Also unstated anywhere: whether `string` and `timestamp` are mutually assignable. Fix direction: add `timestamp` to the canonical rule's built-in list, and state its assignability with `string`.
+<!-- @gap id=g-spec-timestamp-missing-from-canonical-type-list-s473 sev=LOW status=open locus=compiler/SPEC.md(§14 canonical type-name rule, "Canonical rule (S174 follow-on — hard line)") prov=empirical:s473-flogence-port-REPORT(B9;flogence src/models/delta-log.scrml:62);dispatch:s473-boot-program-attrs-small -->
+
+### g-bootstrap-title-elem-in-renders-not-seen-s473 — the bootstrap finds an author-written `<title>` only in the program's own markup tree — `NEW S473; LOW; open`
+§40.7: "`title=` SHALL emit a `<title>` element in the document `<head>` if and only if the source markup does not already contain an explicit `<title>` element … neither the documentary `title=` nor the compiler's default basename-derived `<title>` is emitted." s473 implements this for a `<title>` anywhere in the top-level program's element tree (lower.scrml `programHasTitle`). A `<title>` that a declaration's `renders` holds, or that a Tier-0 loop lifts, is not searched: the head keeps its own `<title>` (the documentary or the default), so the page has two and the head's wins `document.title`. Fix direction: search the declarations a program mounts and the lifted markup too, or refuse a `<title>` in those positions.
+<!-- @gap id=g-bootstrap-title-elem-in-renders-not-seen-s473 sev=LOW status=open locus=compiler/self-host-v2/lower.scrml(programHasTitle / hasTitleElem) prov=dispatch:s473-boot-program-attrs-small -->
+
+### g-bootstrap-undeclared-cell-read-code-s473 — the bootstrap reports a read of an undeclared `@x` as E-SCOPE-001; the SPEC's code is E-STATE-UNDECLARED — `NEW S473; LOW; open`
+§6.1.1: "**The read side is symmetric (S192):** a bare `@x` READ that resolves to no cell in scope is also `E-STATE-UNDECLARED`". The bootstrap's read (analyze.scrml `resolveAt`) reports E-SCOPE-001 "`@x` names no cell, declaration or `as=` handle in scope". s473 made the WRITE side report E-STATE-UNDECLARED (it was mislabeled "writing a whole instance", E-BOOTSTRAP-UNSUPPORTED), so the two sides now differ in code. Both fail the compile; only the code differs. Fix direction: report E-STATE-UNDECLARED at `resolveAt`'s last arm too, and re-pin the bootstrap tests and conformance cases that expect E-SCOPE-001 there.
+<!-- @gap id=g-bootstrap-undeclared-cell-read-code-s473 sev=LOW status=open locus=compiler/self-host-v2/analyze.scrml(resolveAt — last arm) prov=spec:§6.1.1(S192 read-side sentence);dispatch:s473-boot-program-attrs-small -->

@@ -25,7 +25,7 @@ ${
     import { Sym, InstRef, PrimOp, Expr, EditKind, Check, Stmt, View, FieldMode, FieldRole,
              DeclKind, Type, LengthGrant, SeqAt, Field, Decl, Fn, CoreProgram,
              mkSym, block, replaceGrant, litInt, litStr, readField, prim1, call0,
-             el, textView, dyn, onEvent } from "../core.scrml"
+             el, textView, dyn, onEvent, plainHead } from "../core.scrml"
 
     export fn valuesemCore() -> CoreProgram {
         const sProgram: Sym = mkSym(0, "program")
@@ -82,6 +82,6 @@ ${
             sym: sProgram, kind: DeclKind.Program, single: true,
             fields: [fAudit, fSeen], renders: [main], wiring: [], handles: [],
         }
-        return { program: sProgram, decls: [program], types: [], fns: [log], server: [], dbs: [], reset: true, sqlError: not, serverCallError: not, css: not, consts: [] }
+        return { program: sProgram, decls: [program], types: [], fns: [log], server: [], dbs: [], reset: true, sqlError: not, serverCallError: not, css: not, consts: [], head: plainHead(), lang: not }
     }
 }

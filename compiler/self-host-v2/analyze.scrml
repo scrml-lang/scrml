@@ -47,7 +47,7 @@ ${
              DeclKind, HostCall, HostFn, SeqFn, BindKind, Validator, SurfaceProp, ValidityOf, Persist, PersistStore, CoreProgram,
              SqlKind, SqlTables, SqlColumns, Db, Driver,
              CssPart, CssDecl, StyleRule, CssImport, ScopeSheet,
-             mkSym, noGrants, replaceGrant, typeDefSym, validityInst, validityDecl } from "./core.scrml"
+             mkSym, noGrants, replaceGrant, typeDefSym, validityInst, validityDecl, plainHead } from "./core.scrml"
     import { ASpan, BinOp, UnOp, AExpr, AProp, AExprK, AStmt, ABlock, AStmtK, AEffect, AType, ATypeK,
              ATypeField, AVariant, ATypeBody, ATypeDecl, AParam, AFn, AImportName, AImport,
              AAttrValue, AAttr, AElem, ANode, ANodeK, ADeclAttr, AStateChild, ADeclChild, ADecl, AValArg, AValidator,
@@ -1134,6 +1134,10 @@ ${
         return { t: Type.Maybe(r.t), st: r.st, unresolved: r.unresolved }
     }
 
+    fn isNamedShape(n: string) -> boolean {
+        return n == "email" || n == "url" || n == "uuid" || n == "phone" || n == "date" || n == "time" || n == "color"
+    }
+
     fn resolveTypeName(te: TypeEnv, at: AType, n: string, st: AS) -> RType {
         // s469 — `integer` / `boolean` are `int` / `bool` in type position (§14.13.6; the §63 window,
         // W-TYPE-NAME-DEPRECATED, is not open yet — so no warning). Never namespaces (resolvePrimParse).
@@ -1147,6 +1151,17 @@ ${
         if (ds is given) return { t: Type.Named(ds), st: st, unresolved: false }
         // s469 (review L3): `asIs` is a built-in type (§14.1.2) the bootstrap does not have — refused by name, not "unknown"
         if (n == "asIs") return { t: Type.Str, st: addDiag(st, te.file, at.span, "E-BOOTSTRAP-UNSUPPORTED", "the built-in type `asIs` (§14.1.2) is not in the bootstrap — its type system has no unresolved-value type; give the value a declared type"), unresolved: true }
+        // s473 (B9) — `timestamp` is a "registered string-shaped primitive"
+        // (§66.3's canonical-empty list; §53's union-member rule: "tested as
+        // strings"). The SPEC gives it a string's representation and runtime
+        // test and no rule that sets it apart from `string`, so the bootstrap
+        // types it as `string`. (A user type of that name, in scope, wins — above.)
+        if (n == "timestamp") return { t: Type.Str, st: st, unresolved: false }
+        // s473 (B9) — the §53 named-shape vocabulary (§14's canonical rule: "the
+        // named-shape vocabulary `email`/`url`/`uuid`/`phone`/`date`/`time`/
+        // `color`") is built in — not unknown — but a named shape is a string
+        // with a format predicate the bootstrap does not check: refused by name.
+        if (isNamedShape(n)) return { t: Type.Str, st: addDiag(st, te.file, at.span, "E-BOOTSTRAP-UNSUPPORTED", "the named-shape type `" + n + "` (§53 — a string with a built-in format predicate) is not in the bootstrap — it checks no named shape; declare the value a `string`"), unresolved: true }
         return { t: Type.Str, st: addDiag(st, te.file, at.span, "E-TYPE-UNKNOWN", "unknown type `" + n + "`" + elsewhereNote(te.link, te.file, NameKind.KType, true, n)), unresolved: true }
     }
 
@@ -1766,6 +1781,14 @@ ${
                 // placePass's dbsPass checks it (E-SQL-005) and makes it a Core Db
             } else if (a.name == "name") {
                 st = addDiag(st, file, a.span, "E-BOOTSTRAP-UNSUPPORTED", "`name=` on the top-level `<program>` — \"The top-level `<program>` MUST NOT have a `name=` attribute\" (§4.12.2), and the SPEC names no code for it; remove it")
+            } else if (isDocumentaryAttr(a.name)) {
+                // s473 (B3): read — §40.7 head metadata (lower headOf; print).
+                // "A non-string-literal value … is silently ignored" and an
+                // empty one is "as if the attribute were absent" (§40.7).
+            } else if (a.name == "lang") {
+                st = langAttrDiag(file, a, st)
+            } else if (a.name == "mcp") {
+                st = addDiag(st, file, a.span, "E-BOOTSTRAP-UNSUPPORTED", "`<program mcp>` is not in the bootstrap — it asks for the MCP dev-telemetry server (a stdio MCP server, booted beside the program's server, that exposes the running program's state over read-only tools), and the bootstrap builds no MCP server; remove `mcp` to compile here (the SPEC registers the attribute, §4.12.2, but no section says what it emits)")
             } else if (isProgramAttrName(a.name)) {
                 st = addDiag(st, file, a.span, "E-BOOTSTRAP-UNSUPPORTED", "`<program " + a.name + "=…>` is not in the bootstrap — it reads no `<program>` attribute, and never ignores one it does not implement")
             } else {
@@ -1773,6 +1796,16 @@ ${
             }
         }
         return st
+    }
+
+    // s473 (B3) — §23.2.1: `lang=` names the language a `_{}` block resolves
+    // against; a quoted value is read (lower langOf → CoreProgram.lang) and
+    // changes nothing else the bootstrap builds. The SPEC gives a non-literal
+    // or bare `lang` no meaning, so it is refused rather than guessed at.
+    fn langAttrDiag(file: string, a: AAttr, st: AS) -> AS {
+        const v: string | not = quotedAttrText(a.value)
+        if (v is given) return st
+        return addDiag(st, file, a.span, "E-BOOTSTRAP-UNSUPPORTED", "`lang=` is " + attrValueText(a.value) + " — §23.2.1 resolves a `_{}` block's language from the attribute's quoted value (`lang=\"ts\"`); the bootstrap reads only that")
     }
 
     // §65.3.4: "Opt out via `<program reset=\"none\">` — drops the whole `reset`
@@ -7410,6 +7443,20 @@ ${
         }
     }
 
+    // s473 — does `@name` name an INSTANCE here (resolveAt's instance arms)?
+    fn namesInstance(env: Env, name: string) -> boolean {
+        const nb: NarrowB | not = lookupNarrow(env, name)
+        if (nb is given) return true
+        const h: HandleInfo | not = lookupHandle(env, name)
+        if (h is given) return true
+        const d: DeclSrc | not = ctxDecl(env)
+        if (d is given) {
+            if (!d.isProgram && d.info.sym.hint == name) return true
+        }
+        const ud: DeclSrc | not = visibleDecl(env, name)
+        return ud is given
+    }
+
     fn placeAt(env: Env, t: AExpr, name: string, st: AS) -> RPlace {
         // s444 — O54 (a): `@f` in f's own renders is this instance's field `f`
         const oi: int = ownFieldIndex(env, name)
@@ -7428,6 +7475,13 @@ ${
                          local: not, st: st }
             }
         }
+        // s473 (B9) — a name that is no instance in scope (no narrowing, no
+        // handle, not the current instance, no visible declaration) is no cell
+        // either: §6.1.1 "Bare `@x = expr` writes … without a prior `<x>`
+        // declaration in scope are **`E-STATE-UNDECLARED`**" — not a "whole
+        // instance" write. (The read side still reports E-SCOPE-001:
+        // g-bootstrap-undeclared-cell-read-code-s473.)
+        if (!namesInstance(env, name)) return noPlace(addDiag(st, env.file, t.span, "E-STATE-UNDECLARED", "`@" + name + " = …` writes a cell that is not declared — no cell, declaration or `as=` handle named `" + name + "` is in scope (§6.1.1: a write is not a declaration; declare it, e.g. `let <" + name + ":T=(…)/>`)"))
         return noPlace(addDiag(st, env.file, t.span, "E-BOOTSTRAP-UNSUPPORTED", "`@" + name + " = …` — writing a whole instance is not in bootstrap slice M2 (write a field: `@" + name + ".f = …`)"))
     }
 
@@ -22008,7 +22062,7 @@ ${
     fn typesProgram(g: Globals) -> CoreProgram {
         let defs: TypeDef[] = []
         for (const t of g.types) { defs = defs.concat([t.def]) }
-        return { program: g.program, decls: [], types: defs, fns: [], server: [], dbs: [], reset: true, sqlError: not, serverCallError: not, css: not, consts: [] }
+        return { program: g.program, decls: [], types: defs, fns: [], server: [], dbs: [], reset: true, sqlError: not, serverCallError: not, css: not, consts: [], head: plainHead(), lang: not }
     }
 
     fn storeOf(v: AAttrValue) -> PersistStore | not {

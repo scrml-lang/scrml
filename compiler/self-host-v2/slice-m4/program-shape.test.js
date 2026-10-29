@@ -106,8 +106,9 @@ describe("(A) every other top-level attribute: its code, or a refusal — never 
     expect(codes(prog(`name="n"`))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
   });
   // (`db=` is read since s451 U1a — the program's database, §8.1.1: server.test.js)
-  for (const a of ["title", "description", "tables", "cors", "log", "headers", "csrf", "loginRedirect",
-                   "sessionExpiry", "session-secure", "lang", "kind", "mcp", "idempotency-store", "transactions"]) {
+  // (s473: `title=` / `description=` / `lang=` are read and `mcp` has its own refusal — program-attrs-s473.test.js)
+  for (const a of ["tables", "cors", "log", "headers", "csrf", "loginRedirect",
+                   "sessionExpiry", "session-secure", "kind", "idempotency-store", "transactions"]) {
     test(`\`${a}=\` is not read by the bootstrap → one E-BOOTSTRAP-UNSUPPORTED naming it`, () => {
       const d = run(prog(`${a}="v"`)).diags;
       expect(d.map((x) => x.code)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
@@ -196,8 +197,8 @@ describe("(B) markup at a file's top level, outside any `<program>`", () => {
   test("`<outlet>` outside a `<program>` shell → E-OUTLET-OUTSIDE-SHELL (§20.8.1)", () => {
     expect(codes(`<outlet/>\n<program><p>x</p></program>\n`)).toEqual(["E-OUTLET-OUTSIDE-SHELL"]);
   });
-  test("`<foreign lang>` in a file with a `<program>` → E-FOREIGN-LANG-IN-PROGRAM (§23.6); the program's `lang=` is refused", () => {
-    expect(codes(`<foreign lang="ts" />\n<program lang="ts">\n  <p>hi</p>\n</program>\n`)).toEqual(["E-FOREIGN-LANG-IN-PROGRAM", "E-BOOTSTRAP-UNSUPPORTED"]);
+  test("`<foreign lang>` in a file with a `<program>` → E-FOREIGN-LANG-IN-PROGRAM (§23.6); the program's `lang=` is read (s473)", () => {
+    expect(codes(`<foreign lang="ts" />\n<program lang="ts">\n  <p>hi</p>\n</program>\n`)).toEqual(["E-FOREIGN-LANG-IN-PROGRAM"]);
   });
   test("in a library file (no `<program>`) a `<channel>` is not E-CHANNEL-OUTSIDE-PROGRAM — it is refused; other markup is refused too", () => {
     const lib = { path: "lib.scrml", src: `export fn one() -> int { return 1; }\n<channel name="c"></>\n<p>stray</p>\n` };

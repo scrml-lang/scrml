@@ -1,0 +1,83 @@
+# s473-boot-program-attrs-small — progress (append-only)
+
+Lane: B3 + B9 of the flogence-on-bootstrap measurement
+(`~/.cache/scrml/review/s473-flogence-port/REPORT.md`). Bootstrap only (`compiler/self-host-v2/`).
+
+## 2026-10-29T14:12Z — start; tests first
+
+Base `origin/main` 4d5b9a15d. Rulings read verbatim (user-voice-scrml.md S472/S473): none governs
+these items; each follows a SPEC sentence quoted below.
+
+What the measurement's sites actually are (read from `results.json`, checked against flogence source):
+
+- **B3** `<program>` attrs refused by the generic "reads no `<program>` attribute": `lang` (21 files),
+  `mcp` (2), `title` (1). `db=` is ALREADY read (s451 U1a). `kind=` / `serve=` / `cors=` belong to B2.
+- **B9 (a)** `timestamp` → E-TYPE-UNKNOWN (delta-log.scrml:62). A real bootstrap false positive.
+- **B9 (b)** "`if` used as a value": all 7 sites (capture-tool 1408/1482, graph-read-tool 36/54/77,
+  graph-ingest-tool 54/784, dispatch-tool 81) are the line AFTER a `const x = _={ … }=`; the bootstrap
+  reads the `}=` closer as `}` then `=`, so the next statement's `if` lands as an assignment's RHS.
+  flogence holds no `= if (…)` / `return if (…)` (grep). It is a B1 cascade, not a feature use:
+  NOT built here (the value form §17.6.10 stays refused by name, unchanged).
+- **B9 (c)** "writing a whole instance": view.scrml:57-60 writes `@status` etc., declared by the
+  legacy `<status> = …` form inside `${ }` (unparsed → undeclared); sample.scrml:115 writes
+  `@reportPhase`, the legacy `<engine for=>` implicit cell (retired in §66). Both are writes to a
+  name that is not in scope; the bootstrap's place fallback mislabels them "whole instance". Fix:
+  E-SCOPE-001, the same code a read of the name gets. A genuine whole-instance write is unchanged.
+
+Governing SPEC sentences:
+
+- §40.7: "Each attribute, when present, generates a standard HTML head tag in the emitted output."
+  "A non-string-literal value (e.g., a `${...}` expression, an `@variable` reference) is silently
+  ignored — these are static document metadata, not reactive content." "An empty-string value
+  (e.g., `title=""`) SHALL be treated as if the attribute were absent — no head tag is emitted."
+  "`title=` SHALL emit a `<title>` element in the document `<head>` if and only if the source
+  markup does not already contain an explicit `<title>` element. … When an author-written
+  `<title>` is present, neither the documentary `title=` nor the compiler's default
+  basename-derived `<title>` is emitted." "Documentary attribute values SHALL be HTML-escaped on
+  emission" and the fixed order "`<title>`, then the four `<meta>` tags in the order
+  `description`, `application-version`, `author`, `license`".
+- §23.2.1: "The compiler SHALL determine the language of a `_{}` block by resolving the `lang=`
+  attribute of the closest ancestor `<program>` with that attribute set."
+- §2959 (§66.3 neighbourhood): "**`date` / `timestamp`** (registered string-shaped primitives)";
+  §53.x (E-CONTRACT-002): "Members with a runtime test are: the primitives, including `date` and
+  `timestamp` (registered string-shaped primitives, tested as strings)".
+- `mcp`: §4.12.2 lists it as an application-level `<program>` attribute; NO SPEC section says what
+  it emits (gap filed).
+
+Tests: `compiler/self-host-v2/slice-m4/program-attrs-s473.test.js` — 30 tests, **26 red on base** (29 / 25 measured; the 30th, the s437-r4 handler shape, was added with the E-STATE-UNDECLARED correction and is red on base by construction — base said "whole instance")
+(the 4 green are twins: nested `title=` warning, no-`lang` carries none, unknown type still
+E-TYPE-UNKNOWN, a real whole-instance write still refused).
+
+## 2026-10-29T15:10Z — implementation
+
+Note: the pre-commit hook runs the bootstrap slices when `compiler/self-host-v2/` is touched, so the
+red-first tests could not be committed alone; the red count above was measured on base (4d5b9a15d)
+before any source change, and the tests landed with the implementation.
+
+- **core.scrml** — `CoreProgram` gains `head: CoreHead` (`HeadTitle` = Default | Documentary(text) |
+  Author, plus `metas: CoreMeta[]`) and `lang: string | not`. `plainHead()` for hand-built Cores.
+- **analyze.scrml** — `topProgramAttrDiags`: the five documentary attributes are read (no diag);
+  `lang=` quoted → read, anything else → E-BOOTSTRAP-UNSUPPORTED (`langAttrDiag`); `mcp` → its own
+  E-BOOTSTRAP-UNSUPPORTED naming the MCP server it needs. `resolveTypeName`: `timestamp` → `string`;
+  the §53 named shapes → E-BOOTSTRAP-UNSUPPORTED by name (was E-TYPE-UNKNOWN). `placeAt`: a write to
+  an `@name` that names no instance in scope → **E-STATE-UNDECLARED** (§6.1.1: "Bare `@x = expr`
+  writes … without a prior `<x>` declaration in scope are **`E-STATE-UNDECLARED`**"), not the
+  "whole instance" refusal. (First cut used E-SCOPE-001 to match the read; the conformance report
+  showed the SPEC code is E-STATE-UNDECLARED — 3 s437-r4 cases went FAIL — so it was corrected; they
+  now PASS. The read side's E-SCOPE-001 is filed: g-bootstrap-undeclared-cell-read-code-s473.)
+- **lower.scrml** — `topProgramOf` (shared with `resetShips`), `headOf` (§40.7: literal non-empty
+  values; `<title>` in the program's element tree → `Author`), `langOf`.
+- **print.scrml / html.scrml** — the head's `<title>` from `CoreProgram.head` (none for `Author`);
+  the metas lead the head after it. `Page.title` is `string | not`.
+- **severity.scrml** regenerated (E-STATE-UNDECLARED is now used).
+- **slice-m2/typer.test.js** — two §66.19 pinned lists re-pinned (the two "whole instance" writes
+  there are writes to names not in scope → E-STATE-UNDECLARED). **slice-m4/program-shape.test.js** —
+  `title`/`description`/`lang`/`mcp` left the generic-refusal loop; `<foreign lang>` beside
+  `<program lang>` is now one code.
+
+Gates so far: lint-no-default-arm, lint-duplicate-fn, slice m1 / m2 / m1-lowered / m3 / m4 / codec
+all green. Conformance report regenerated: PASS 259 → 263 (+`foreign-lang-in-program-neg`, +3
+`s437-r4-undeclared-cell-*` twins), FAIL 49 → 49, UNSUPPORTED 820 → 816.
+
+Gaps filed: g-spec-program-mcp-attr-unspecified-s473, g-spec-timestamp-missing-from-canonical-type-list-s473,
+g-bootstrap-title-elem-in-renders-not-seen-s473, g-bootstrap-undeclared-cell-read-code-s473.
