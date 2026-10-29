@@ -1937,6 +1937,18 @@ export function text(scope, marker, fn) {
  * string first, exactly as the write converts it (§5.2 rule 3 "The test").
  */
 export function attr(scope, el, name, fn) {
+  // s472 — §65.4.2: "you cannot apply an arbitrary runtime string as a
+  // style-value (that would reopen the injection surface)". The compiler
+  // refuses `style=` from data (E-STYLE-VALUE-NOT-STYLE), so no compiled
+  // program asks for this; a `style` write from data is still never made
+  // (fail closed): the attribute is removed and the refusal reported — never
+  // the value; `fn` is never run). A static `style="…"` is in the template and
+  // is not written here.
+  if (String(name).toLowerCase() === "style") {
+    el.removeAttribute(name);
+    console.warn("[scrml css-guard] refused a data-supplied `style` write: a style is never built from data (SPEC §65.4.2). The attribute was removed.");
+    return;
+  }
   const guard = urlGuardOf(el, name);
   effect(scope, () => {
     const v = fn();

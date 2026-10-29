@@ -169,15 +169,19 @@ describe("§5.2 rule 3 — every bound URL attribute is judged at runtime (one g
   });
 });
 
-describe("the guard is not a style rule: `style=@s` is written as bound (impl#1 parity — §5.2 names no style sink)", () => {
-  test("style=@cell is written unchanged", async () => {
+// s472: this was "the guard is not a style rule: `style=@s` is written as bound (impl#1 parity — §5.2
+// names no style sink)". §65.4.2 does name it: "you cannot apply an arbitrary runtime string as a
+// style-value (that would reopen the injection surface)" — a `style=` from data is
+// E-STYLE-VALUE-NOT-STYLE (gap g-bootstrap-style-attr-bound-value-unguarded-s469; the attack pack is
+// style-attr-guard-s472.test.js).
+describe("the URL guard is not a style rule: `style=@s` is refused by §65.4.2 instead", () => {
+  test("style=@cell → E-STYLE-VALUE-NOT-STYLE", () => {
     const src = `<program>
     let <s:string="color: red"/>
     <p id="st" style=@s>x</p>
 </program>
 `;
-    await loadProgram(clean(src), "sink-style", []);
-    expect($("#st").getAttribute("style")).toBe("color: red");
+    expect(codes(src)).toEqual(["E-STYLE-VALUE-NOT-STYLE"]);
   });
 });
 
