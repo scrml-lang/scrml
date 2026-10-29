@@ -1954,6 +1954,25 @@ export function attr(scope, el, name, fn) {
     console.warn("[scrml css-guard] refused a data-supplied `style` write: a style is never built from data (SPEC §65.4.2). The attribute was removed.");
     return;
   }
+  // s473 — §5.2 "Data never moves the document base (S473)": a `<base>`'s
+  // `href` is never written from data. The compiler refuses it
+  // (E-ATTR-BASE-HREF); this is the wall behind it (fail closed — no compiled
+  // program asks for this write; `fn` is never run, and an `href` already on
+  // the element is removed rather than left standing).
+  if (isBaseElement(el) && isHrefName(name)) {
+    el.removeAttribute(name);
+    console.warn("[scrml url-guard] refused a data-supplied `href` on a <base>: the document's base URL is never chosen by data (SPEC §5.2). The attribute was removed.");
+    return;
+  }
+  // s473 — §5.2 rule 2 "`srcdoc` in every form": a `srcdoc` whose value is
+  // not a static string is a compile error (E-ATTR-INTERP-EXECUTABLE), so no
+  // compiled program asks for this write either; the wall behind it, on any
+  // element (fail closed).
+  if (String(name).toLowerCase() === "srcdoc") {
+    el.removeAttribute(name);
+    console.warn("[scrml url-guard] refused a data-supplied `srcdoc`: an HTML document is never written from data (SPEC §5.2). The attribute was removed.");
+    return;
+  }
   // s473 — user-voice-scrml.md S472 "five PA recs" item 3: "A data-bound
   // `href` on a `<link>` whose `rel` contains `stylesheet` (or is computed) is
   // REFUSED." The compiler refuses it (E-ATTR-STYLESHEET-HREF); this is the
@@ -1980,6 +1999,13 @@ export function attr(scope, el, name, fn) {
     if (w === null) { el.removeAttribute(name); return; }
     el.setAttribute(name, w);
   });
+}
+
+// s473 — the `<base>` element (tag compared case-insensitively; HTML reads
+// `<BASE>` as `<base>`). The names that would set its URL are `isHrefName`'s
+// (`href` in any case, any prefixed spelling — fail closed).
+function isBaseElement(el) {
+  return String(el.tagName || "").toLowerCase() === "base";
 }
 
 // ---------------------------------------------------------------------------
@@ -3207,6 +3233,49 @@ const malformed = (reason) => transportFailure({ variant: "Malformed", data: [re
 // the client's own check (the codec bounds anything it quotes).
 const codecReason = (what, err) => `${what}: malformed at ${err.path}: ${err.reason}`;
 
+/**
+ * s473 — §5.2 "Data never moves the document base (S473)": the URL scrml's own
+ * server-function call is sent to. A path-absolute route path given to `fetch`
+ * is resolved against `document.baseURI`, which a `<base href>` moves — a
+ * static one as much as a data one — so the call (its POST body and its
+ * `X-CSRF-Token`) would go wherever the base points (Chromium-verified, gap
+ * g-boot-base-href-from-data-retargets-server-calls-s473). The path is resolved
+ * against the document's EFFECTIVE origin instead, never its base URL:
+ *   - an `http:` / `https:` document: its own URL (`location.href`);
+ *   - an `about:` document (`about:srcdoc` — an app inside `<iframe srcdoc>` —
+ *     or an `about:blank` its creator opened): the origin it inherits
+ *     (`globalThis.origin`), when that is not opaque (`"null"`) — #1637 review F1;
+ *   - anything else (an opaque origin, `file:`, `data:`, a sandboxed `about:`
+ *     document) has no http(s) origin to send to.
+ * The result must be `http:` / `https:` and keep that origin (a `//host/…`,
+ * `data:` or `javascript:` path does not — "null" never equals "null" here,
+ * #1637 review F2). Throws — the caller settles the call as Unreachable, no
+ * request made — when it does not. With no document at all (`location` absent,
+ * no `document`) nothing resolves against a `<base>`, and the path is used as
+ * given.
+ */
+function ownOriginUrl(path) {
+  const loc = globalThis.location;
+  if (loc === undefined || loc === null) {
+    if (globalThis.document) throw new Error("scrml: a document with no location — the call has no origin to go to");
+    return path;
+  }
+  let here = new URL(String(loc.href));
+  if (here.protocol === "about:") {
+    const inherited = typeof globalThis.origin === "string" ? globalThis.origin : "null";
+    if (inherited === "null") throw new Error("scrml: the document has no origin a server call can go to");
+    here = new URL(inherited + "/");
+  }
+  if (!isHttpUrl(here) || here.origin === "null") throw new Error("scrml: the document has no http(s) origin a server call can go to");
+  const u = new URL(String(path), here);
+  if (!isHttpUrl(u) || u.origin !== here.origin) throw new Error("scrml: a server call's route leaves the document's origin");
+  return u.href;
+}
+
+function isHttpUrl(u) {
+  return u.protocol === "http:" || u.protocol === "https:";
+}
+
 export function call(route, args, task) {
   return new Promise((resolve) => {
     let settled = false;
@@ -3262,7 +3331,7 @@ export function call(route, args, task) {
       try {
         const init = { method: "POST", headers, body };
         if (controller) init.signal = controller.signal;
-        pending = globalThis.fetch(route.path, init);
+        pending = globalThis.fetch(ownOriginUrl(route.path), init);
       } catch {
         settle(unreachable());
         return;
