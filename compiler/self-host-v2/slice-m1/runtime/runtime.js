@@ -1933,6 +1933,49 @@ export function text(scope, marker, fn) {
   effect(scope, () => { t.data = display(fn()); });
 }
 
+// ---------------------------------------------------------------------------
+// s473 — §5.2 "Data never chooses where a form posts or where the page goes
+// (S473)". Ruled (user-voice-scrml.md "S473 owner questions round 2" items 1
+// and 2): "Form `action` / `formaction` from data: REFUSED unless static." and
+// "`<meta http-equiv=\"refresh\">` from data: REFUSED." Refused data writes,
+// names and tags compared ASCII case-insensitively:
+//   - `action` on a `<form>`, and `formaction` on any element (inert off
+//     `<button>` / `<input>` — fail closed);
+//   - `form` (the form owner) on any element — data never chooses which form
+//     a control is submitted with (S473 PA ruling, extends round 2 item 1);
+//   - `http-equiv` on a `<meta>` (data never chooses a pragma; such a
+//     `<meta>` is recorded as computed), and `content` on a `<meta>` whose
+//     `http-equiv` holds the text `refresh` anywhere (a superset of the
+//     browser's keyword test) or is computed.
+// `rt.attr` is the bootstrap's only data attribute writer; a static value is in
+// the template and never reaches it.
+// ---------------------------------------------------------------------------
+const computedMetaEquivs = new WeakSet();
+
+function refusedNavigationWrite(el, name) {
+  const tag = String(el.tagName || "").toLowerCase();
+  const lower = String(name).toLowerCase();
+  let report = null;
+  if (lower === "formaction" || (lower === "action" && tag === "form")) {
+    report = "[scrml url-guard] refused a data-supplied form submission target (`action` on a <form>, or `formaction`): where a form's fields are sent is never chosen by data (SPEC §5.2). The attribute was removed.";
+  } else if (lower === "form") {
+    report = "[scrml url-guard] refused a data-supplied `form` owner: which form a control is submitted with is never chosen by data (SPEC §5.2). The attribute was removed.";
+  } else if (tag === "meta" && (lower === "http-equiv" || (lower === "content" && metaRefreshes(el)))) {
+    if (lower === "http-equiv") computedMetaEquivs.add(el);
+    report = "[scrml url-guard] refused a data-supplied `http-equiv`, or `content` on a refresh <meta>: data never navigates the page (SPEC §5.2). The attribute was removed.";
+  }
+  if (report === null) return false;
+  el.removeAttribute(name);
+  console.error(report);
+  return true;
+}
+
+function metaRefreshes(el) {
+  if (computedMetaEquivs.has(el)) return true;
+  const v = el.getAttribute("http-equiv");
+  return v !== null && v.toLowerCase().includes("refresh");
+}
+
 /**
  * A bound attribute. Every value written here comes from data (a static
  * attribute is in the template, never written here), so a URL-valued name is
@@ -1942,6 +1985,11 @@ export function text(scope, marker, fn) {
  * string first, exactly as the write converts it (§5.2 rule 3 "The test").
  */
 export function attr(scope, el, name, fn) {
+  // s473 — §5.2 "Data never chooses where a form posts or where the page goes
+  // (S473)": the compiler refuses these writes (E-ATTR-FORM-ACTION /
+  // E-ATTR-META-REFRESH); this is the wall behind it (fail closed — `fn` is
+  // never run, and a value already on the element is removed).
+  if (refusedNavigationWrite(el, name)) return;
   // s472 — §65.4.2: "you cannot apply an arbitrary runtime string as a
   // style-value (that would reopen the injection surface)". The compiler
   // refuses `style=` from data (E-STYLE-VALUE-NOT-STYLE), so no compiled
