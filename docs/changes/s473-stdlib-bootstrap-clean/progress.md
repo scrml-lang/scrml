@@ -22,3 +22,12 @@ compile clean on the bootstrap, keep impl#1 compiling it).
   (E-CODEGEN-INVALID-LOGIC gone in default mode). NB impl#1 compiles most stdlib files standalone
   with errors on base already (E-SCOPE-001 / E-THROW-NOT-IN-SCRML …): it consumes the hand-written
   shims at compiler/runtime/stdlib/*.js, the .scrml is the export/async/type reference.
+- 2026-10-29T15:55Z scrml:random → CLEAN on the bootstrap. Ported on the math pattern: `<program>`
+  wrapper and the `~{}` block dropped (its assertions are already impl#1 stdlib-random-capability
+  §C R10–R13, and moved to the new slice-m4 test against host.js); new stdlib/random/host.js
+  (`Math.random()` — the one host RNG touch); `random() -> number` / `randomInt(min: number, max:
+  number) -> int` are the fully typed wrappers (§21.3.1.1). Param types read from the doc: "Fractional
+  bounds are floored/ceiled" ⇒ `number`; the result is an integer ⇒ `int`. impl#1: compiles clean in
+  default AND library mode (library was E-CODEGEN-INVALID-LOGIC on base); random/parity/no-logic-leak/
+  canonical-form tests pass. New test compiler/self-host-v2/slice-m4/stdlib-boot-clean-s473.test.js
+  (5 tests: math + random pinned clean; random compiled and RUN; host.js assertions).
