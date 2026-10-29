@@ -271,7 +271,7 @@ ${
         EAssignLocal(sym: Sym, path: LStep[], ty: Type | not),
         EEdits(w: WriteFact, elems: AExpr[], tmps: Sym[], snap: SeqSnap), // s442: `@x = [...@x, a, b]` — one edit per element (§66.11.2); r1: each element evaluated into `tmps[i]` first; r2: reads of `@x` see `snap`
         ERemove(w: WriteFact),                            // s444: `@x.pop()` / `@x.shift()` — a removal of one element (RemoveEnd / RemoveFront)
-        EElemAt(cap: Sym, inst: InstRef, index: AExpr, path: FieldRef[]), // s444: `@xs[i].f = v` — an element-field write (Core ElemAt; dpa-052 Q3)
+        EElemAt(cap: Sym, inst: InstRef, index: AExpr, path: FieldRef[], loc: string), // s444: `@xs[i].f = v` — an element-field write (Core ElemAt; dpa-052 Q3); s473: `loc` "file:line" for the trap
         EPosition(cap: Sym, inst: InstRef, index: AExpr, loc: string),   // s472: `@xs[i] = v` — a position write (Core PositionAt; §66.12.6 rule 3); `loc` "file:line" for the trap
     }
     // s472 — one step of a local part write's path (EAssignLocal): a struct field
@@ -3029,7 +3029,7 @@ ${
 
     fn retsInExpr(cx: InferCx, e: AExpr, sc: ParamT[], stack: string[], done0: OwnT[]) -> RRets {
         const k: AExprK = e.k
-        if (isLambda(k)) return { rs: [], done: done0 }
+        if (isLambdaK(k)) return { rs: [], done: done0 }
         let done: OwnT[] = done0
         let out: RetAt[] = []
         const h: AHandled | not = handledOf(k)
@@ -3057,7 +3057,7 @@ ${
         return { rs: out, done: done }
     }
 
-    fn isLambda(k: AExprK) -> boolean {
+    fn isLambdaK(k: AExprK) -> boolean {
         return match k {
             .Lambda(params: lp) :> true
             .Name(name: n) :> false
@@ -9388,7 +9388,7 @@ ${
         if (stt.diags.length > st.diags.length) return stt
         const cap: Sym | not = f.wcap
         if (cap is not || elemSym is not) return noCapability(env, e, st)
-        return addEffect(st, e.nid, EffectFact.EElemAt(cap, p.inst, ef.index, [{ owner: elemSym, idx: targetIdx }]))
+        return addEffect(st, e.nid, EffectFact.EElemAt(cap, p.inst, ef.index, [{ owner: elemSym, idx: targetIdx }], env.file + ":" + lineOf(env.g, env.file, e.span.start)))
     }
 
     // =========================================================================
@@ -12030,6 +12030,7 @@ ${
         st = resolveFor(withLift(env, LiftCtx.LiftTo(rs.s, false)), s, f, st)
         const lr: LiftsOf = liftsInto(st, n0, rs.s)
         if (lr.count == 0 || !liftReachable(f.body)) st = addDiag(st, env.file, f.span, "E-LOOP-007", "The loop bound to `" + b.name + "` lifts nothing on any path, so its value is always an empty tape. Add `lift <value>;` where the loop produces an element, or write the loop as a statement (§49.4.4, §49.6)")
+        if (boundLoopExitless(f)) st = addDiag(st, env.file, f.span, "E-LOOP-008", "The loop bound to `" + b.name + "` never ends: its head never stops it, and no path in its body reaches a `break` that leaves it, a `return`, a `fail` or a `?` — so its value is never produced and this code never continues (a `break` inside an inner loop leaves only that loop). Add `if (<done>) { break; }` where the loop has lifted its last element, or give it a head that ends (`for (x of xs)`, `for (cond)`) (§49.6 rule 10)")
         let lty: Type | not = lr.elem
         if (lty is given) lty = Type.Seq(lty, fixedSeq())
         if (annot is given) lty = annot
@@ -12084,12 +12085,85 @@ ${
             .If(cond: c, thenB: tb, elseB: el) :> blockEndsPath(tb) && blockEndsPathMaybe(el)
             .For(f: lf) :> loopNeverCompletes(lf)
             .Given(name: n) :> false
-            .Eval(e: x) :> false
+            .Eval(e: x) :> matchEndsPath(x)
             .Local(name: n) :> false
             .EffectStmt(w: x) :> false
             .Defer(body: x) :> false
             .Lift(what: x) :> false
         }
+    }
+
+    // s473 (review #1631 F1) — a statement `match` ends the path when every arm
+    // is a block that ends it and the arms take every value. Exhaustiveness is
+    // read from the arms, because the tables are not built yet: a wildcard arm;
+    // or no literal arm and at least one variant arm (a variant match, whose
+    // exhaustiveness is enforced, E-TYPE-020); or literal arms that include both `true` and
+    // `false`. A literal match without a wildcard may fall through (W-MATCH-002),
+    // so it does not end the path. A `!{}` guard never ends it, because its
+    // subject may succeed.
+    fn matchEndsPath(e: AExpr) -> boolean {
+        const h: AHandled | not = handledOf(e.k)
+        if (h is not) return false
+        const arms: AArm[] | not = matchArmsOf(h.how)
+        if (arms is not) return false
+        if (arms.length == 0) return false
+        for (const a of arms) {
+            const body: AArmBody = a.body
+            const ends: boolean = match body {
+                .ArmBlock(b: b) :> blockEndsPath(b)
+                .ArmExpr(e: x) :> false
+            }
+            if (!ends) return false
+        }
+        return armsExhaustive(arms)
+    }
+
+    // Reads the arm PATTERNS only. Re-check this when arm guards land: a
+    // guarded arm does not take every value its pattern names.
+    // No literal arm counts as exhaustive only with at least one VARIANT arm
+    // (E-TYPE-020 enforces a variant match); a lone `not :>` arm over
+    // `T | not` falls through for a value (W-MATCH-002) — review #1631 r1 R1-1.
+    fn armsExhaustive(arms: AArm[]) -> boolean {
+        let lits: int = 0
+        let variants: int = 0
+        let sawTrue: boolean = false
+        let sawFalse: boolean = false
+        for (const a of arms) {
+            const p: APat = a.pat
+            const wild: boolean = match p {
+                .PWild :> true
+                .PWhole(bind: b) :> true
+                .PBare(bind: b) :> false
+                .PName(name: n) :> false
+                .PNot :> false
+                .PLit(e: x) :> false
+            }
+            if (wild) return true
+            const isVariant: boolean = match p {
+                .PName(name: n) :> true
+                .PWild :> false
+                .PWhole(bind: b) :> false
+                .PBare(bind: b) :> false
+                .PNot :> false
+                .PLit(e: x) :> false
+            }
+            if (isVariant) variants = variants + 1
+            const lit: AExpr | not = match p {
+                .PLit(e: x) :> x
+                .PWild :> not
+                .PWhole(bind: b) :> not
+                .PBare(bind: b) :> not
+                .PName(name: n) :> not
+                .PNot :> not
+            }
+            if (lit is given) {
+                lits = lits + 1
+                if (exprIsTrueLit(lit)) sawTrue = true
+                if (exprIsFalseLit(lit)) sawFalse = true
+            }
+        }
+        if (lits == 0) return variants > 0
+        return sawTrue && sawFalse
     }
 
     fn blockEndsPath(b: ABlock) -> boolean {
@@ -12222,6 +12296,7 @@ ${
         const n0: int = st.lifts.length
         st = resolveFor(withLift(env, LiftCtx.LiftTo(rs.s, true)), fs, f, st)
         if (liftsInto(st, n0, rs.s).count == 0 || !liftReachable(f.body)) st = addDiag(st, env.file, f.span, "E-LOOP-007", "This `" + "$" + "{ for … }` loop lifts nothing, so it always renders nothing. Add `lift <li>…</li>;` (or `lift <value>;`) where the loop produces a row, or compute the loop in a function (§17.4, §49.4.4)")
+        if (boundLoopExitless(f)) st = addDiag(st, env.file, f.span, "E-LOOP-008", "This `" + "$" + "{ for … }` loop never ends: its head never stops it, and no path in its body reaches a `break` that leaves it — so the page never finishes rendering (a `break` inside an inner loop leaves only that loop). Add `if (<done>) { break; }` after the last row, or give it a head that ends (`for (x of xs)`, `for (cond)`) (§49.6 rule 10, §17.4)")
         for (const rsite of returnSites(f.body)) {
             st = addDiag(st, env.file, f.span, "E-BOOTSTRAP-UNSUPPORTED", "a `return` inside a `" + "$" + "{ for … }` in markup has no function to leave (§49.6 rule 6 names a function's exits; a render position has none) — compute the loop in a function and render its result")
         }
@@ -12593,13 +12668,10 @@ ${
         return !blockBreaksTo(f.body, f.label, true)
     }
 
+    // One definition of a head that never ends the loop (review #1631 F2):
+    // E-LOOP-008's `headNeverEnds` (`for { }`, no condition, a literal `true`).
     fn headAlwaysTrue(h: AForHead) -> boolean {
-        return match h {
-            .HForever :> true
-            .HCounted(init: i, cond: c) :> c is not
-            .HCond(cond: c) :> false
-            .HIter(bind: b) :> false
-        }
+        return headNeverEnds(h)
     }
 
     // Does `b` hold a `break` that leaves the loop labelled `label` — an
@@ -12637,6 +12709,174 @@ ${
     }
 
     // =========================================================================
+    // s473 — AN EXIT-LESS BOUND LOOP (SPEC §49.6 rule 10, RULED S472 "five PA
+    // recs" item 5: "An exit-less bound or Tier-0 loop is a compile error …
+    // with no reachable `break`/`return`; a statement-position `for { }` stays
+    // legal"). A loop bound as a value (a `for-binding`, a Tier-0 `${ for … }`)
+    // whose head never ends it can produce its value only by leaving its body:
+    // a `break` that leaves THIS loop, or a `return`, a `fail` or a `?` (the
+    // ways out of an infinite head, §49.3.6). With none that a path reaches, its
+    // value is never produced — a call never returns, a render never finishes:
+    // E-LOOP-008.
+    //
+    // "Reachable", for the forever heads named below (a SYNTACTIC guard — a
+    // non-literal always-true head such as `for (true && true)` is not read):
+    //   - an unlabelled `break` inside an inner loop leaves that loop only; a
+    //     `break label` counts only when the label is this loop's;
+    //   - a statement after one that always leaves its block is not reached
+    //     (stmtEndsPath, shared with E-LOOP-007: an `if` both of whose
+    //     branches leave, a `match` that takes every value and every arm of
+    //     which leaves (matchEndsPath, review #1631 F1), a loop whose head
+    //     never ends it — the same headNeverEnds, review #1631 F2);
+    //   - a `defer` body runs as its scope ends, so it is no way out;
+    //   - an arrow function's body is another function (§49.4.3): a `?` in it
+    //     leaves that function, not this loop;
+    //   - a nested `fn` / `function` declaration has no source form in a body.
+    // The bootstrap folds no constants: `if (false) { break; }` counts (the
+    // condition is not read). A head that never ends is `for { }`, a counted
+    // head with no condition, and a condition that is the literal `true` (read
+    // as written — a literal, not a fold).
+    // =========================================================================
+    fn boundLoopExitless(f: AFor) -> boolean {
+        if (!headNeverEnds(f.head)) return false
+        return !blockWayOut(f.body, f.label, true)
+    }
+
+    fn headNeverEnds(h: AForHead) -> boolean {
+        return match h {
+            .HForever :> true
+            .HCounted(init: i, cond: c) :> condNeverEnds(c)
+            .HCond(cond: c) :> exprIsTrueLit(c)
+            .HIter(bind: b) :> false
+        }
+    }
+
+    fn condNeverEnds(c: AExpr | not) -> boolean {
+        if (c is not) return true
+        return exprIsTrueLit(c)
+    }
+
+    fn exprIsFalseLit(e: AExpr) -> boolean {
+        const k: AExprK = e.k
+        return match k {
+            .Bool(v: v) :> !v
+            .Name(name: n) :> false
+            .At(name: n) :> false
+            .AtItem :> false
+            .Num(raw: r) :> false
+            .Str(v: s) :> false
+            .NotLit :> false
+            .Recovered :> false
+            .Variant(name: n) :> false
+            .Member(obj: o) :> false
+            .Call(callee: c) :> false
+            .Unary(op: o) :> false
+            .Binary(op: o) :> false
+            .Ternary(test: t) :> false
+            .Assign(target: t) :> false
+            .ArrayLit(elems: es) :> false
+            .ObjectLit(props: ps) :> false
+            .Spread(e: x) :> false
+            .Index(obj: o) :> false
+            .Lambda(params: lp) :> false
+            .Sql(q: q) :> false
+            .Handled(h: h) :> false
+            .Template(quasis: qs) :> false
+        }
+    }
+
+    fn exprIsTrueLit(e: AExpr) -> boolean {
+        const k: AExprK = e.k
+        return match k {
+            .Bool(v: v) :> v
+            .Name(name: n) :> false
+            .At(name: n) :> false
+            .AtItem :> false
+            .Num(raw: r) :> false
+            .Str(v: s) :> false
+            .NotLit :> false
+            .Recovered :> false
+            .Variant(name: n) :> false
+            .Member(obj: o) :> false
+            .Call(callee: c) :> false
+            .Unary(op: o) :> false
+            .Binary(op: o) :> false
+            .Ternary(test: t) :> false
+            .Assign(target: t) :> false
+            .ArrayLit(elems: es) :> false
+            .ObjectLit(props: ps) :> false
+            .Spread(e: x) :> false
+            .Index(obj: o) :> false
+            .Lambda(params: lp) :> false
+            .Sql(q: q) :> false
+            .Handled(h: h) :> false
+            .Template(quasis: qs) :> false
+        }
+    }
+
+    // Does a path through `b` reach a way out of the loop labelled `label`
+    // (`direct`: `b` is that loop's own body, not an inner loop's)?
+    fn blockWayOut(b: ABlock, label: string, direct: boolean) -> boolean {
+        for (const s of b.stmts) {
+            if (stmtWayOut(s, label, direct)) return true
+            if (stmtEndsPath(s)) return false
+        }
+        return false
+    }
+
+    fn blockWayOutMaybe(b: ABlock | not, label: string, direct: boolean) -> boolean {
+        if (b is not) return false
+        return blockWayOut(b, label, direct)
+    }
+
+    fn stmtWayOut(s: AStmt, label: string, direct: boolean) -> boolean {
+        const k: AStmtK = s.k
+        return match k {
+            .Break(label: l) :> (l == "" && direct) || (l != "" && l == label)
+            .Continue(label: l) :> false
+            .Return(e: x) :> true
+            .Fail(f: x) :> true
+            .Eval(e: e) :> exprWayOut(e, label, direct)
+            .Local(name: n, init: i) :> exprWayOut(i, label, direct)
+            .Lift(what: w) :> exprsWayOut(liftExprs(w), label, direct)
+            .If(cond: c, thenB: t, elseB: el) :> exprWayOut(c, label, direct) || blockWayOut(t, label, direct) || blockWayOutMaybe(el, label, direct)
+            .Given(name: n, subject: x, body: gb) :> exprWayOut(x, label, direct) || blockWayOut(gb, label, direct)
+            .For(f: lf) :> exprsWayOut(forExprs(lf), label, false) || blockWayOut(lf.body, label, false)
+            .EffectStmt(w: w) :> false
+            .Defer(body: d) :> false
+        }
+    }
+
+    // A `?` reached in the expression (it leaves the function), or a way out
+    // in one of its handling arms' blocks — never through an arrow function.
+    fn exprWayOut(e: AExpr, label: string, direct: boolean) -> boolean {
+        if (lambdaBody(e) is given) return false
+        const h: AHandled | not = handledOf(e.k)
+        if (h is given) {
+            if (howPropagates(h.how)) return true
+            for (const b of exprBlocks(e)) {
+                if (blockWayOut(b, label, direct)) return true
+            }
+        }
+        return exprsWayOut(exprKids(e), label, direct)
+    }
+
+    fn exprsWayOut(es: AExpr[], label: string, direct: boolean) -> boolean {
+        for (const x of es) {
+            if (exprWayOut(x, label, direct)) return true
+        }
+        return false
+    }
+
+    fn howPropagates(how: AHow) -> boolean {
+        return match how {
+            .Propagate :> true
+            .Guard(arms: a) :> false
+            .MatchOn(arms: a) :> false
+        }
+    }
+
+    // =========================================================================
     // s469 — THE LOOP-CONTROL PASS (§49.4; §49.10: "reported after AST
     // construction and scope resolution, in the loop control-flow validation
     // pass"). One walk per body ROOT — a function body, an event-handler
@@ -12663,7 +12903,214 @@ ${
 
     fn loopChecks(file: string, b: ABlock, st0: AS) -> AS {
         const st: AS = loopDupLabels(file, loopLabelsIn(b), st0)
-        return loopBlock(file, b, [], false, st)
+        return loopCopyStmts(file, b.stmts, loopBlock(file, b, [], false, st))
+    }
+
+    // =========================================================================
+    // s473 — THE LOOP-COPY LINT (SPEC §66.10, ruled S473 "A write to a loop
+    // copy that changes nothing: W- lint"). A `for … of` binder is a COPY of
+    // the element (§66.10: "a loop binder … is a copy"), so a part write to it
+    // (`p.name = v`, accepted by resolveLocalPartWrite — Core Assign with a
+    // path) changes the copy only. When no later read of the binder can see
+    // the write, it changes nothing: W-LOOP-COPY-WRITE-UNREAD, at the write.
+    // A read "can see" it when it is outside the write's own expression (the
+    // value and the indices are evaluated BEFORE the write) and either follows
+    // the write in source order or — the write sitting inside a loop nested in
+    // the body, which re-runs earlier statements — anywhere in the body. A body
+    // whose reads the walk cannot enumerate (a lifted markup row, an effect, a
+    // `defer`) silences the lint for that loop: a lint never guesses. Facts are
+    // read by Sym (the binder's BBind; each Name's NLocal), so shadowing by an
+    // inner binder of the name is exact.
+    // =========================================================================
+    type CopyWrite:struct = { root: int, span: ASpan, deep: boolean, label: string }
+    type CopyRead:struct = { nid: int, start: int }
+    type CopyWalk:struct = { writes: CopyWrite[], reads: CopyRead[], opaque: boolean }
+
+    fn loopCopyStmts(file: string, ss: AStmt[], st0: AS) -> AS {
+        let st: AS = st0
+        for (const s of ss) {
+            const k: AStmtK = s.k
+            const f: AFor | not = forOf(k)
+            if (f is given) st = loopCopyFor(file, f, st)
+            for (const nb of nestedBlocks(s)) { st = loopCopyStmts(file, nb.stmts, st) }
+        }
+        return st
+    }
+
+    fn loopCopyFor(file: string, f: AFor, st0: AS) -> AS {
+        const h: AForHead = f.head
+        const bnd: ABind | not = match h {
+            .HIter(bind: b) :> b
+            .HForever :> not
+            .HCond(cond: c) :> not
+            .HCounted(init: i) :> not
+        }
+        if (bnd is not) return st0
+        const bi: int = st0.facts.binds.nids.indexOf(bnd.nid)
+        if (bi < 0) return st0
+        const bf: BindFact = st0.facts.binds.facts[bi]
+        const sym: Sym | not = match bf {
+            .BBind(sym: s) :> s
+            .BParam(sym: s) :> not
+            .BGiven(sym: s) :> not
+            .BLoop(label: l) :> not
+            .BJump(target: t) :> not
+        }
+        if (sym is not) return st0
+        // s473 review LOW-2: a body that already holds an error is skipped — a refused
+        // statement records no Name facts, so its reads of the binder would vanish and the
+        // lint would claim "nothing reads" beside the error
+        if (errorWithin(st0, file, f.span)) return st0
+        const w: CopyWalk = copyWalkStmts(st0, sym, f.body.stmts, false, { writes: [], reads: [], opaque: false })
+        if (w.opaque) return st0
+        let roots: int[] = []
+        for (const cw of w.writes) { roots = roots.concat([cw.root]) }
+        const src: string = iterSrcLabel(h)
+        let st: AS = st0
+        for (const cw of w.writes) {
+            let seen = false
+            for (const r of w.reads) {
+                if (roots.indexOf(r.nid) < 0 && (r.start < cw.span.start || r.start >= cw.span.end)) {
+                    if (cw.deep || r.start >= cw.span.end) seen = true
+                }
+            }
+            if (!seen) {
+                st = addDiag(st, file, cw.span, "W-LOOP-COPY-WRITE-UNREAD", "`" + cw.label + " = …` writes `" + bnd.name + "`, the loop's COPY of an element of " + src + " (a loop binder is a copy, §66.10), and nothing reads `" + bnd.name + "` after it — the write changes nothing. To change the source, write it (`@xs[i].f = …` in a counted loop, or rebuild it with `.map(…)`); to keep the changed copy, read it (`lift " + bnd.name + "`, or pass it on)")
+            }
+        }
+        return st
+    }
+
+    fn errorWithin(st: AS, file: string, sp: ASpan) -> boolean {
+        for (const d of st.diags) {
+            if (d.file == file && d.span.start >= sp.start && d.span.start < sp.end) {
+                const sev: Severity = d.severity
+                const isErr: boolean = match sev {
+                    .Error :> true
+                    .Warning :> false
+                    .Info :> false
+                }
+                if (isErr) return true
+            }
+        }
+        return false
+    }
+
+    fn iterSrcLabel(h: AForHead) -> string {
+        return match h {
+            .HIter(src: src) :> iterOfLabel(src)
+            .HForever :> "the iterable"
+            .HCond(cond: c) :> "the iterable"
+            .HCounted(init: i) :> "the iterable"
+        }
+    }
+
+    fn iterOfLabel(src: AIterSrc) -> string {
+        return match src {
+            .IterOf(e: x) :> atLabelOr(x)
+            .IterRange(lo: lo) :> "the range"
+        }
+    }
+
+    fn atLabelOr(e: AExpr) -> string {
+        const a: string = atName(e)
+        if (a != "") return "`@" + a + "`"
+        const n: string = exprName(e)
+        if (n != "") return "`" + n + "`"
+        return "the iterable"
+    }
+
+    // A statement whose reads this walk cannot see: a lifted markup row (its
+    // interpolations read names), an effect body, a deferred body.
+    fn copyOpaque(s: AStmt) -> boolean {
+        const k: AStmtK = s.k
+        return match k {
+            .Lift(what: w) :> liftExprs(w).length == 0
+            .EffectStmt(w: w) :> true
+            .Defer(body: d) :> true
+            .For(f: lf) :> false
+            .Break(label: x) :> false
+            .Continue(label: x) :> false
+            .Eval(e: x) :> false
+            .Local(name: n) :> false
+            .Return(e: x) :> false
+            .If(cond: c) :> false
+            .Given(name: n) :> false
+            .Fail(f: x) :> false
+        }
+    }
+
+    fn copyWalkStmts(st: AS, sym: Sym, ss: AStmt[], deep: boolean, acc0: CopyWalk) -> CopyWalk {
+        let acc: CopyWalk = acc0
+        for (const s of ss) {
+            if (copyOpaque(s)) acc = { writes: acc.writes, reads: acc.reads, opaque: true }
+            const k: AStmtK = s.k
+            const ev: AExpr | not = match k {
+                .Eval(e: e) :> e
+                .For(f: lf) :> not
+                .Break(label: x) :> not
+                .Continue(label: x) :> not
+                .Lift(what: w) :> not
+                .Local(name: n) :> not
+                .Return(e: x) :> not
+                .If(cond: c) :> not
+                .Given(name: n) :> not
+                .EffectStmt(w: w) :> not
+                .Defer(body: d) :> not
+                .Fail(f: x) :> not
+            }
+            if (ev is given) acc = copyWriteOf(st, sym, ev, deep, acc)
+            for (const x of stmtExprs(s)) { acc = copyReadsIn(st, sym, x, acc) }
+            const inner: boolean = deep || forOf(k) is given
+            for (const nb of nestedBlocks(s)) { acc = copyWalkStmts(st, sym, nb.stmts, inner, acc) }
+        }
+        return acc
+    }
+
+    // `e` a part write of the binder that the binder ACCEPTED (its effect is a
+    // local Assign of `sym` with a path) — a refused write has its error only.
+    fn copyWriteOf(st: AS, sym: Sym, e: AExpr, deep: boolean, acc: CopyWalk) -> CopyWalk {
+        const t: AExpr | not = assignedTarget(e)
+        if (t is not) return acc
+        const rn: AExpr | not = partRootName(t)
+        if (rn is not) return acc
+        const ef: EffectFact | not = effectFactIn(st, e.nid)
+        const ok: boolean = match ef {
+            .EAssignLocal(sym: s, path: pa) :> s.id == sym.id && pa.length > 0
+            .EWrite(w: x) :> false
+            .ESpread(ws: x) :> false
+            .EReset(w: x) :> false
+            .EEdits(w: x) :> false
+            .ERemove(w: x) :> false
+            .EElemAt(cap: c) :> false
+            .EPosition(cap: c) :> false
+            not :> false
+        }
+        if (!ok) return acc
+        const cw: CopyWrite = { root: rn.nid, span: e.span, deep: deep, label: partLabel(exprName(rn), partSteps(t)) }
+        return { writes: acc.writes.concat([cw]), reads: acc.reads, opaque: acc.opaque }
+    }
+
+    // Every Name in `e` (at any depth) that names the binder `sym`.
+    fn copyReadsIn(st: AS, sym: Sym, e: AExpr, acc0: CopyWalk) -> CopyWalk {
+        let acc: CopyWalk = acc0
+        if (exprName(e) != "") {
+            const nf: NameFact | not = nameFactIn(st, e.nid)
+            const hit: boolean = match nf {
+                .NLocal(sym: s) :> s.id == sym.id
+                .NField(decl: d) :> false
+                .NInst(decl: d) :> false
+                .NStruct(owner: o) :> false
+                .NFn(sym: s) :> false
+                .NLength :> false
+                .NSurface(of: o) :> false
+                .NConst(sym: s) :> false
+                not :> false
+            }
+            if (hit) acc = { writes: acc.writes, reads: acc.reads.concat([{ nid: e.nid, start: e.span.start }]), opaque: acc.opaque }
+        }
+        for (const x of exprKids(e)) { acc = copyReadsIn(st, sym, x, acc) }
+        return acc
     }
 
     fn loopLabelsIn(b: ABlock) -> LabelAt[] {
@@ -13556,20 +14003,6 @@ ${
         return match f {
             .MUse(decl: d) :> true
             .MHtml :> false
-            .MEach(bind: b) :> false
-            .MErrors(of: x) :> false
-            .MSlot :> false
-            .MDb :> false
-            .MStateView(v: v) :> false
-            .MInline(v: v) :> false
-            .MStar(decl: d) :> false
-        }
-    }
-
-    fn isHtmlFact(f: ElemFact) -> boolean {
-        return match f {
-            .MHtml :> true
-            .MUse(decl: d) :> false
             .MEach(bind: b) :> false
             .MErrors(of: x) :> false
             .MSlot :> false
@@ -15216,14 +15649,21 @@ ${
     //     E-HANDLE-REDECLARE (ruled S440 #5 / #7; SPEC §66.7.2) — dupHandles;
     //   - a duplicate top-level `function`: E-SCOPE-010 (ruled S440 #6; SPEC
     //     §7.6) — dupFns;
+    //   - s473: one file-scope name bound twice in one file, WHATEVER the two
+    //     name — a user declaration, a type, a function, a constant, in any
+    //     pairing (`<card>` beside `fn card`, `type T` beside `fn T`, two
+    //     declarations, two types): E-SCOPE-010 (§7.6, ruled S473 "`<card>`
+    //     beside `fn card`: REFUSED") — fileNameClashes, dupConsts;
+    //   - s473: two COMPONENTS (declarations with `renders`) of one name in two
+    //     files of one program: E-COMPONENT-NAME-DUPLICATE (§9.1 DQ-7, §21.2;
+    //     ruled S473 "Same-name components across files … REFUSED") — dupDecls.
+    //     Two same-named declarations that are not both components stay the
+    //     bootstrap limit E-BOOTSTRAP-UNSUPPORTED (unruled);
     //   - where no ruling / SPEC sentence names one — a handle or a program
     //     cell named like a visible declaration, two fields of one
-    //     declaration, two declarations or types of one name in one file, two
-    //     parameters of one name, a redeclaration inside an inline handler
-    //     block — the bootstrap-local E-BOOTSTRAP-REDECLARE (each owes a ruling);
-    //   - one name declared in two FILES (a declaration, a function): the
-    //     bootstrap links ONE namespace, so it cannot tell them apart —
-    //     E-BOOTSTRAP-UNSUPPORTED.
+    //     declaration, two parameters of one name, a redeclaration inside an
+    //     inline handler block — the bootstrap-local E-BOOTSTRAP-REDECLARE
+    //     (each owes a ruling).
     // =========================================================================
     fn mkDiag(file: string, span: ASpan, code: string, msg: string) -> Diag {
         return newDiag(code, msg, file, span)
@@ -15242,7 +15682,7 @@ ${
     }
 
     fn checkScopes(files: FileAst[], t: Tables, lk: Linkage) -> Diag[] {
-        let out: Diag[] = dupFields(files, t, lk).concat(dupDecls(t)).concat(dupTypes(t)).concat(dupFns(t)).concat(dupHandles(files, t, lk)).concat(dupConsts(t))
+        let out: Diag[] = dupFields(files, t, lk).concat(dupDecls(files, t)).concat(builtinRedeclares(t)).concat(fileNameClashes(t)).concat(dupFns(t)).concat(dupHandles(files, t, lk)).concat(dupConsts(t))
         for (const f of files) {
             for (const af of fnItems(f.items)) {
                 out = out.concat(dupParams(f.path, af.params))
@@ -15292,30 +15732,58 @@ ${
         return false
     }
 
-    // Two `type` declarations of one name IN ONE FILE (SPEC-silent:
-    // bootstrap-local). s472: two files may each declare a type of one name —
-    // each file's annotations resolve in its own scope (stubNamed).
-    fn dupTypes(t: Tables) -> Diag[] {
-        let out: Diag[] = builtinRedeclares(t)
-        let names: string[] = []
-        let users: TypeInfo[] = []
-        for (const ti of t.types) {
-            if (ti.file != builtinFile()) {
-                names = names.concat([ti.name])
-                users = users.concat([ti])
-            }
+    // s473 — ONE file-scope name, ONE binding, whatever it names. §7.6 (S473):
+    // "A name bound at file scope SHALL be bound once in its file, whatever it
+    // names — a `let` / `const`, a `function`, a `type`, a user declaration
+    // (`<card>`): a second binding of the name in the same file, of the same
+    // kind or another, SHALL be a compile error (E-SCOPE-010: duplicate binding
+    // in file scope)." Ruled S473 ("`<card>` beside `fn card`: REFUSED"). Each
+    // binding after the FIRST of its name in its file is reported once, naming
+    // the first. Two functions are dupFns' (the S440 #6 sentence); a constant is
+    // folded in too (s473 review LOW-1). A host binding's local name is linkage's
+    // (§21.3.1.1 — never a `function` here). s472: two FILES may each bind a
+    // name — each file resolves in its own scope (a component pair is dupDecls').
+    type FileName:struct = { name: string, file: string, span: ASpan, what: string, isFn: boolean }
+
+    fn fileNames(t: Tables) -> FileName[] {
+        let out: FileName[] = []
+        for (const d of t.decls) {
+            if (d.sym.id != t.program.id) out = out.concat([{ name: d.sym.hint, file: d.file, span: d.span, what: "the declaration `<" + d.sym.hint + ">`", isFn: false }])
         }
-        let j = 0
-        while (j < names.length) {
-            const i: int = earlierSame(names, j)
-            if (i >= 0) {
-                const ti: TypeInfo = users[j]
-                const first: TypeInfo = users[i]
-                if (first.file == ti.file) {
-                    out = out.concat([mkDiag(ti.file, ti.span, "E-BOOTSTRAP-REDECLARE", "type `" + names[j] + "` is already declared in this file (at " + offsetOf(first.span) + ") — a file declares each type name once (the SPEC names no code for this; bootstrap-local)")])
+        for (const ti of t.types) {
+            if (ti.file != builtinFile()) out = out.concat([{ name: ti.name, file: ti.file, span: ti.span, what: "the type `" + ti.name + "`", isFn: false }])
+        }
+        for (const f of t.fns) {
+            if (f.host is not) out = out.concat([{ name: f.name, file: f.file, span: f.span, what: "the function `" + f.name + "`", isFn: true }])
+        }
+        // s473 review LOW-1: a constant is one more file-scope binding — folded in here, so a
+        // clash gets exactly one report per LATER binding, whichever kind came first
+        for (const c of t.consts) {
+            out = out.concat([{ name: c.name, file: c.file, span: c.span, what: "the constant `" + c.name + "`", isFn: false }])
+        }
+        return out
+    }
+
+    fn fileNameClashes(t: Tables) -> Diag[] {
+        const ns: FileName[] = fileNames(t)
+        let out: Diag[] = []
+        for (const n of ns) {
+            // the first binding of the name in its file, before `n`
+            let first: FileName | not = not
+            let earlierFn = false
+            for (const m of ns) {
+                if (m.file == n.file && m.name == n.name && m.span.start < n.span.start) {
+                    const cur: FileName | not = first
+                    if (cur is not || m.span.start < cur.span.start) first = m
+                    if (m.isFn) earlierFn = true
                 }
             }
-            j = j + 1
+            if (first is given) {
+                // a function after another function of its name: dupFns reports it (the S440 #6 sentence)
+                if (!(n.isFn && earlierFn)) {
+                    out = out.concat([mkDiag(n.file, n.span, "E-SCOPE-010", "`" + n.name + "` is already bound in this file by " + first.what + " (at " + offsetOf(first.span) + ") — a file-scope name is bound once, whatever it names (a declaration, a type, a function, a constant): duplicate binding in file scope (§7.6; ruled S473); rename one")])
+                }
+            }
         }
         return out
     }
@@ -15356,15 +15824,18 @@ ${
         return out
     }
 
-    // Two user declarations of one name. In one file: bootstrap-local. In two
-    // files (s472): every USE resolves per file (declNamed), but the program's
-    // OUTPUT still names a component by its bare name — §9.1 DQ-7 stamps a
+    // Two user declarations of one name in two FILES (one file: fileNameClashes,
+    // E-SCOPE-010). Every USE resolves per file (s472, declNamed), but the
+    // program's OUTPUT names a component by its bare name — §9.1 DQ-7 stamps a
     // component's root `data-scrml="ConstructorName"` and scopes its CSS
-    // `@scope ([data-scrml="<name>"])` — so two components of one name would
-    // share one style scope. The SPEC does not say how two same-named
-    // components keep apart, so the pair is refused by name (a bootstrap limit
-    // pending that ruling — g-boot-component-scope-key-bare-name-s472).
-    fn dupDecls(t: Tables) -> Diag[] {
+    // `@scope ([data-scrml="<name>"])`. s473: two COMPONENTS of one name in one
+    // program are refused by the language — §9.1 DQ-7 (S473): "Two components of
+    // one name in one program SHALL be a compile error (E-COMPONENT-NAME-DUPLICATE),
+    // whichever files declare them" (ruled S473 "Same-name components across
+    // files … REFUSED"). A pair that is not two components (a declaration
+    // without `renders` carries no scope key) is not ruled: it stays refused by
+    // the bootstrap (E-BOOTSTRAP-UNSUPPORTED), fail closed.
+    fn dupDecls(files: FileAst[], t: Tables) -> Diag[] {
         let out: Diag[] = []
         let users: DeclInfo[] = []
         for (const d of t.decls) {
@@ -15378,15 +15849,39 @@ ${
             if (i >= 0) {
                 const d: DeclInfo = users[j]
                 const first: DeclInfo = users[i]
-                if (first.file == d.file) {
-                    out = out.concat([mkDiag(d.file, d.span, "E-BOOTSTRAP-REDECLARE", "`<" + names[j] + ">` is already declared in this file (at " + offsetOf(first.span) + ") — the SPEC names no code for this; bootstrap-local")])
-                } else {
-                    out = out.concat([mkDiag(d.file, d.span, "E-BOOTSTRAP-UNSUPPORTED", "`<" + names[j] + ">` is also declared in `" + first.file + "` — a component's CSS scope key is its bare name (§9.1 DQ-7 `data-scrml=\"ConstructorName\"`), so two declarations of one name in one program would share one style scope; the SPEC does not say how they keep apart, so the bootstrap refuses it — rename one")])
+                if (first.file != d.file) {
+                    if (declRenders(files, first.nid) && declRenders(files, d.nid)) {
+                        out = out.concat([mkDiag(d.file, d.span, "E-COMPONENT-NAME-DUPLICATE", "the component `<" + names[j] + ">` is also declared in `" + first.file + "` — a component's name is its CSS scope key (`data-scrml=\"" + names[j] + "\"`, §9.1 DQ-7), so two components of one name in one program would share one style scope; a program has one component of each name, whichever files declare them (§9.1, §21.2; ruled S473) — rename one")])
+                    } else {
+                        out = out.concat([mkDiag(d.file, d.span, "E-BOOTSTRAP-UNSUPPORTED", "`<" + names[j] + ">` is also declared in `" + first.file + "` — two user declarations of one name in one program are not in the bootstrap: the language refuses two COMPONENTS of one name (E-COMPONENT-NAME-DUPLICATE, §9.1), and a pair that is not two components is not ruled, so the bootstrap refuses it too — rename one")])
+                    }
                 }
             }
             j = j + 1
         }
         return out
+    }
+
+    // s473 — is the user declaration `nid` a COMPONENT (written with `renders`,
+    // §66.15.1) — the declarations that carry a CSS scope key (§9.1 DQ-7)? A
+    // declaration is a top-level item of its file or an item of its `<program>`.
+    fn declRenders(files: FileAst[], nid: int) -> boolean {
+        for (const f of files) {
+            for (const it of f.items) {
+                for (const d of declsOfItem(it)) {
+                    if (d.nid == nid) return d.renders is given
+                }
+                const p: AProgram | not = programOfItem(it)
+                if (p is given) {
+                    for (const pit of p.items) {
+                        for (const d of declsOfItem(pit)) {
+                            if (d.nid == nid) return d.renders is given
+                        }
+                    }
+                }
+            }
+        }
+        return false
     }
 
     // Two functions of one name. In one file that is a file-scope duplicate:
@@ -15414,56 +15909,26 @@ ${
         return out
     }
 
-    // s472 — a file-scope constant binds its name once in its file's scope.
-    //   - another constant, or a function, of the name in the same file: §7.6
-    //     "Re-declaring a name … when that name was already declared at file
-    //     scope SHALL be a compile error (E-SCOPE-010: duplicate binding in file
-    //     scope)" (§7.6 names `let` and, S440 #6, `function`; a `const` is the
-    //     same file-scope binding). An IMPORT of the name is E-SCOPE-010 too
-    //     (linkage — the constant is one of the file's own names).
-    //   - a program cell of the name in the same file: §1.6 "Local
-    //     names cannot shadow registered state names — attempting to declare a
-    //     local variable with the same name as a registered state cell is
-    //     `E-NAME-COLLIDES-STATE`"; §7.6.1: "A V5-strict structural cell `<x>`
-    //     and a local `let x` cannot coexist in the same file scope."
-    //   - a type, or a user declaration, of the name in the same file: the SPEC
-    //     names no code (a type is not a value binding) — the bootstrap-local
-    //     E-BOOTSTRAP-REDECLARE, as for the other SPEC-silent collisions above
-    //     (`E.V` / `<Card>` beside a constant `E` / `Card` would read two ways).
-    // A function-body local or a parameter of the name SHADOWS it (§7.6 "scoped
-    // to that function"; §7.3.3 shadowing in a nested scope is legal) — no report.
+    // s472 — a file-scope constant beside a program cell of its name in the same
+    // file: §1.6 "Local names cannot shadow registered state names — attempting
+    // to declare a local variable with the same name as a registered state cell
+    // is `E-NAME-COLLIDES-STATE`"; §7.6.1: "A V5-strict structural cell `<x>` and
+    // a local `let x` cannot coexist in the same file scope." Every other
+    // file-scope collision of a constant (another constant, a function, a type, a
+    // user declaration) is E-SCOPE-010 in fileNameClashes, once per later binding
+    // (§7.6, S473; s473 review LOW-1); an IMPORT of the name is linkage's. A
+    // function-body local or a parameter of the name SHADOWS it (§7.6 "scoped to
+    // that function"; §7.3.3 shadowing in a nested scope is legal) — no report.
     fn dupConsts(t: Tables) -> Diag[] {
         let out: Diag[] = []
-        let j = 0
-        while (j < t.consts.length) {
-            const c: ConstInfo = t.consts[j]
-            let i = 0
-            let dup = false
-            while (i < j) {
-                if (!dup && t.consts[i].file == c.file && t.consts[i].name == c.name) {
-                    dup = true
-                    out = out.concat([mkDiag(c.file, c.span, "E-SCOPE-010", "`" + c.name + "` is already declared at file scope (at " + offsetOf(t.consts[i].span) + ") — a file-scope name is bound once: duplicate binding in file scope (§7.6)")])
-                }
-                i = i + 1
-            }
-            for (const f of t.fns) {
-                if (f.file == c.file && f.name == c.name) out = out.concat([mkDiag(c.file, c.span, "E-SCOPE-010", "`" + c.name + "` is also a function of this file (at " + offsetOf(f.span) + ") — a file-scope name is bound once: duplicate binding in file scope (§7.6)")])
-            }
-            for (const ty of t.types) {
-                if (ty.file == c.file && ty.name == c.name) out = out.concat([mkDiag(c.file, c.span, "E-BOOTSTRAP-REDECLARE", "`" + c.name + "` is also a type of this file (at " + offsetOf(ty.span) + ") — a constant and a type of one name would read two ways (`" + c.name + ".x`); rename one (the SPEC names no code for this; bootstrap-local)")])
-            }
+        for (const c of t.consts) {
             for (const d of t.decls) {
-                if (d.file == c.file) {
-                    if (d.sym.id == t.program.id) {
-                        for (const fi of d.fields) {
-                            if (fi.sym.hint == c.name) out = out.concat([mkDiag(c.file, c.span, "E-NAME-COLLIDES-STATE", "`" + c.name + "` is also a cell of the program (`@" + c.name + "`, at " + offsetOf(fi.span) + ") — a local name cannot take the name of a registered state cell (§1.6, §7.6.1); rename one")])
-                        }
-                    } else if (d.sym.hint == c.name) {
-                        out = out.concat([mkDiag(c.file, c.span, "E-BOOTSTRAP-REDECLARE", "`" + c.name + "` is also a declaration of this file (`<" + c.name + ">`, at " + offsetOf(d.span) + ") — rename one (the SPEC names no code for this; bootstrap-local)")])
+                if (d.file == c.file && d.sym.id == t.program.id) {
+                    for (const fi of d.fields) {
+                        if (fi.sym.hint == c.name) out = out.concat([mkDiag(c.file, c.span, "E-NAME-COLLIDES-STATE", "`" + c.name + "` is also a cell of the program (`@" + c.name + "`, at " + offsetOf(fi.span) + ") — a local name cannot take the name of a registered state cell (§1.6, §7.6.1); rename one")])
                     }
                 }
             }
-            j = j + 1
         }
         return out
     }
@@ -17583,15 +18048,6 @@ ${
         }
     }
 
-    fn isAbsentVT(v: VType) -> boolean {
-        return match v {
-            .Absent :> true
-            .Known(t: x) :> false
-            .Unknown :> false
-            .OneOf(ts: xs) :> false
-        }
-    }
-
     // s469 — `E.toEnum(s)`'s signature is `string -> E | not` (§14.4.1).
     fn toEnumArgCheck(env: TEnv, e: AExpr, args: AExpr[], ts: TypeState) -> TypeState {
         if (args.length != 1) return ts
@@ -18648,35 +19104,6 @@ ${
             }
         }
         return out
-    }
-
-    fn arrayElems(e: AExpr) -> AExpr[] {
-        const k: AExprK = e.k
-        return match k {
-            .ArrayLit(elems: es) :> es
-            .Name(name: n) :> []
-            .At(name: n) :> []
-            .AtItem :> []
-            .Num(raw: r) :> []
-            .Str(v: s) :> []
-            .Bool(v: b) :> []
-            .NotLit :> []
-            .Recovered :> []
-            .Variant(name: n) :> []
-            .Member(obj: o) :> []
-            .Call(callee: c) :> []
-            .Unary(op: o) :> []
-            .Binary(op: o) :> []
-            .Ternary(test: x) :> []
-            .Assign(target: x) :> []
-            .ObjectLit(props: ps) :> []
-            .Spread(e: sx) :> []
-            .Index(obj: ix) :> []
-            .Lambda(params: lp) :> []
-            .Sql(q: q) :> []
-            .Handled(h: x) :> []
-            .Template(quasis: qs) :> []
-        }
     }
 
     // THE INITIALIZER RULE — one rule for every annotated initializer (an
@@ -20783,16 +21210,6 @@ ${
         return "`" + cap.hint + "`"
     }
 
-    fn fieldOfCap(t: Tables, cap: Sym) -> FieldInfo | not {
-        for (const d of t.decls) {
-            for (const f of d.fields) {
-                const w: Sym | not = f.wcap
-                if (w is given && w.id == cap.id) return f
-            }
-        }
-        return not
-    }
-
     fn factFix(t: Tables, e: AExpr, f: EffectFact | not, cap: Sym) -> FixShape {
         if (isResetFact(f)) return FixShape.ResetFix
         let init: string = ""
@@ -20884,7 +21301,7 @@ ${
         return match k {
             .Num(raw: r) :> "n:" + r
             .Str(v: s) :> "s:" + s
-            .Bool(v: b) :> boolKey(b)
+            .Bool(v: b) :> litBoolKey(b)
             .NotLit :> "not"
             .Variant(name: n) :> "v:" + n
             .Unary(op: o, e: x) :> negKey(o, x)
@@ -20908,7 +21325,7 @@ ${
         }
     }
 
-    fn boolKey(b: boolean) -> string {
+    fn litBoolKey(b: boolean) -> string {
         if (b) return "b:true"
         return "b:false"
     }
