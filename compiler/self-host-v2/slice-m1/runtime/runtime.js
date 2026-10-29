@@ -2100,7 +2100,8 @@ function animatedCssTarget(el) {
   if (computedAnimationTargets.has(el)) return true;
   for (const a of el.attributes) {
     if (a.name.toLowerCase() === "attributename") {
-      const t = a.value.trim().toLowerCase();
+      // a prefixed name (`x:fill`) is judged by its local part — fail closed
+      const t = a.value.trim().toLowerCase().replace(/^.*:/, "");
       return CSS_URL_ATTRS.has(t) || t === "style";
     }
   }

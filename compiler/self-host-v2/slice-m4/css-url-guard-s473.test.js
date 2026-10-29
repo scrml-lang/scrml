@@ -233,6 +233,13 @@ describe("runtime — SMIL values animating a CSS-url attribute (`to` / `from` /
     expect(errors.length).toBe(1);
     scope.dispose?.();
   });
+  test("a prefixed or padded target is judged by its local part (`attributeName=\" svg:Fill \"`)", () => {
+    const el = anim(`<set id="a" attributeName=" svg:Fill "></set>`);
+    const scope = new rt.Scope(rt.root);
+    captured(() => rt.attr(scope, el, "to", () => "url(https://evil.example/x.svg#p)"));
+    expect(el.hasAttribute("to")).toBe(false);
+    scope.dispose?.();
+  });
   test("a static non-CSS target is not judged (`attributeName=\"width\"`)", () => {
     const el = anim(`<set id="a" attributeName="width"></set>`);
     const scope = new rt.Scope(rt.root);
