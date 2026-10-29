@@ -20,10 +20,11 @@
 // collision unless one file imports the other's `foo` (or two files' `foo`) — checked here.
 //
 // WHAT IS LINTED. The bootstrap's own sources: every `.scrml` directly in the root
-// (default `compiler/self-host-v2`), every `slice-*/bundle.scrml` (the compile entries the slices
-// build), and every file those import, transitively (relative imports only). Test INPUT programs
-// (acceptance cases, slice `src/` programs) are not bootstrap source and are not linted — a
-// negative case may declare a duplicate on purpose.
+// (default `compiler/self-host-v2`), every `.scrml` directly in a `slice-*` directory (the compile
+// entries the slices build — `bundle.scrml`, `css-bundle.scrml` — and the hand-built Core modules
+// they link, `*.core.scrml`), and every file those import, transitively (relative imports only).
+// Test INPUT programs (acceptance cases, slice `src/` / `fixtures/` / `bench/` programs) are not
+// bootstrap source and are not linted — a negative case may declare a duplicate on purpose.
 //
 // WHAT COUNTS AS TOP LEVEL. A `fn` / `function` declaration that is not inside another function's
 // body. (`export`, `pure`, `server` … prefixes don't matter: the name is the next token.)
@@ -133,13 +134,15 @@ export function lintText(src) {
 
 const RELATIVE_IMPORT = /^\.\.?\//;
 
-/** The bootstrap source files under `root`: top-level `.scrml`, `slice-*\/bundle.scrml`, and their relative imports. */
+/** The bootstrap source files under `root`: top-level `.scrml`, the `.scrml` directly in each `slice-*` dir, and their relative imports. */
 export function bootstrapFiles(root) {
   const seeds = [];
   for (const name of readdirSync(root)) {
     const p = join(root, name);
     if (name.endsWith(".scrml") && statSync(p).isFile()) seeds.push(p);
-    else if (name.startsWith("slice-") && statSync(p).isDirectory() && existsSync(join(p, "bundle.scrml"))) seeds.push(join(p, "bundle.scrml"));
+    else if (name.startsWith("slice-") && statSync(p).isDirectory()) {
+      for (const inner of readdirSync(p)) if (inner.endsWith(".scrml") && statSync(join(p, inner)).isFile()) seeds.push(join(p, inner));
+    }
   }
   const seen = new Set();
   const queue = [...seeds];

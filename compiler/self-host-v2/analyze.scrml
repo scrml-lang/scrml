@@ -3029,7 +3029,7 @@ ${
 
     fn retsInExpr(cx: InferCx, e: AExpr, sc: ParamT[], stack: string[], done0: OwnT[]) -> RRets {
         const k: AExprK = e.k
-        if (isLambda(k)) return { rs: [], done: done0 }
+        if (isLambdaK(k)) return { rs: [], done: done0 }
         let done: OwnT[] = done0
         let out: RetAt[] = []
         const h: AHandled | not = handledOf(k)
@@ -3057,7 +3057,7 @@ ${
         return { rs: out, done: done }
     }
 
-    fn isLambda(k: AExprK) -> boolean {
+    fn isLambdaK(k: AExprK) -> boolean {
         return match k {
             .Lambda(params: lp) :> true
             .Name(name: n) :> false
@@ -13566,20 +13566,6 @@ ${
         }
     }
 
-    fn isHtmlFact(f: ElemFact) -> boolean {
-        return match f {
-            .MHtml :> true
-            .MUse(decl: d) :> false
-            .MEach(bind: b) :> false
-            .MErrors(of: x) :> false
-            .MSlot :> false
-            .MDb :> false
-            .MStateView(v: v) :> false
-            .MInline(v: v) :> false
-            .MStar(decl: d) :> false
-        }
-    }
-
     fn showRefusedOn(f: ElemFact) -> boolean {
         return match f {
             .MHtml :> false
@@ -17583,15 +17569,6 @@ ${
         }
     }
 
-    fn isAbsentVT(v: VType) -> boolean {
-        return match v {
-            .Absent :> true
-            .Known(t: x) :> false
-            .Unknown :> false
-            .OneOf(ts: xs) :> false
-        }
-    }
-
     // s469 — `E.toEnum(s)`'s signature is `string -> E | not` (§14.4.1).
     fn toEnumArgCheck(env: TEnv, e: AExpr, args: AExpr[], ts: TypeState) -> TypeState {
         if (args.length != 1) return ts
@@ -18648,35 +18625,6 @@ ${
             }
         }
         return out
-    }
-
-    fn arrayElems(e: AExpr) -> AExpr[] {
-        const k: AExprK = e.k
-        return match k {
-            .ArrayLit(elems: es) :> es
-            .Name(name: n) :> []
-            .At(name: n) :> []
-            .AtItem :> []
-            .Num(raw: r) :> []
-            .Str(v: s) :> []
-            .Bool(v: b) :> []
-            .NotLit :> []
-            .Recovered :> []
-            .Variant(name: n) :> []
-            .Member(obj: o) :> []
-            .Call(callee: c) :> []
-            .Unary(op: o) :> []
-            .Binary(op: o) :> []
-            .Ternary(test: x) :> []
-            .Assign(target: x) :> []
-            .ObjectLit(props: ps) :> []
-            .Spread(e: sx) :> []
-            .Index(obj: ix) :> []
-            .Lambda(params: lp) :> []
-            .Sql(q: q) :> []
-            .Handled(h: x) :> []
-            .Template(quasis: qs) :> []
-        }
     }
 
     // THE INITIALIZER RULE — one rule for every annotated initializer (an
@@ -20783,16 +20731,6 @@ ${
         return "`" + cap.hint + "`"
     }
 
-    fn fieldOfCap(t: Tables, cap: Sym) -> FieldInfo | not {
-        for (const d of t.decls) {
-            for (const f of d.fields) {
-                const w: Sym | not = f.wcap
-                if (w is given && w.id == cap.id) return f
-            }
-        }
-        return not
-    }
-
     fn factFix(t: Tables, e: AExpr, f: EffectFact | not, cap: Sym) -> FixShape {
         if (isResetFact(f)) return FixShape.ResetFix
         let init: string = ""
@@ -20884,7 +20822,7 @@ ${
         return match k {
             .Num(raw: r) :> "n:" + r
             .Str(v: s) :> "s:" + s
-            .Bool(v: b) :> boolKey(b)
+            .Bool(v: b) :> litBoolKey(b)
             .NotLit :> "not"
             .Variant(name: n) :> "v:" + n
             .Unary(op: o, e: x) :> negKey(o, x)
@@ -20908,7 +20846,7 @@ ${
         }
     }
 
-    fn boolKey(b: boolean) -> string {
+    fn litBoolKey(b: boolean) -> string {
         if (b) return "b:true"
         return "b:false"
     }
