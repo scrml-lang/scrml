@@ -1030,7 +1030,7 @@ ${
             .EAssignLocal(sym: s, path: pa) :> assignLocal(c, s, pa, value)
             .EEdits(w: w, elems: es, tmps: ts, snap: sn) :> editStmts(c, w, es, ts, sn)
             .ERemove(w: w) :> [Stmt.Write(w.cap, instOf(c, w.inst), w.edit, Expr.Lit(Literal.Int(1)), w.check)]
-            .EElemAt(cap: cap, inst: i, index: ix, path: path) :> elemAtStmt(c, cap, i, ix, path, value)
+            .EElemAt(cap: cap, inst: i, index: ix, path: path, loc: loc) :> elemAtStmt(c, cap, i, ix, path, loc, value)
             .EPosition(cap: cap, inst: i, index: ix, loc: lc) :> positionStmt(c, cap, i, ix, lc, value)
             not :> [Stmt.Eval(lowerExpr(c, e))]
         }
@@ -1039,9 +1039,10 @@ ${
     // s444 — `@xs[i].f = v` → Write(cap, inst, ElemAt(i, path), v): the index
     // and the value are lowered here; the element field's contract was judged
     // by analyze (dpa-052 Q3) and is re-checked in Core (check.scrml C3).
-    fn elemAtStmt(c: LC, cap: Sym, i: InstRef, ix: AExpr, path: FieldRef[], value: AExpr | not) -> Stmt[] {
+    // s473: `loc` is the trap's source location (an index outside the tape traps).
+    fn elemAtStmt(c: LC, cap: Sym, i: InstRef, ix: AExpr, path: FieldRef[], loc: string, value: AExpr | not) -> Stmt[] {
         if (value is not) return []
-        return [Stmt.Write(cap, instOf(c, i), EditKind.ElemAt(lowerExpr(c, ix), path), lowerExpr(c, value), Check.Static)]
+        return [Stmt.Write(cap, instOf(c, i), EditKind.ElemAt(lowerExpr(c, ix), path, loc), lowerExpr(c, value), Check.Static)]
     }
     // s472 — `@xs[i] = v` → Write(cap, inst, PositionAt(i, loc), v): a position
     // write, judged by analyze against the tape's `write` grant (§66.12.6 rule 3)
@@ -1915,8 +1916,13 @@ ${
     // Declarations, types, functions — the linked program (L15).
     // =========================================================================
     fn lowerField(c: LC, f: FieldInfo) -> Field {
+        // s473: a `<db>` cell's value is its load's answer (CoreProgram.loads — analyze dbLoads)
+        let init: Expr | not = lowerValue(c, f.init)
+        for (const ld of c.t.server.loads) {
+            if (ld.cell.id == f.sym.id) init = Expr.Local(ld.val)
+        }
         return {
-            sym: f.sym, ty: f.ty, init: lowerValue(c, f.init), mode: f.mode, role: f.role,
+            sym: f.sym, ty: f.ty, init: init, mode: f.mode, role: f.role,
             grants: f.grants, graph: f.graph, exported: f.exported, wcap: f.wcap, vals: valCores(f.vals),
             persist: persistOf(c.t, f.sym),
         }
@@ -3449,8 +3455,8 @@ ${
         const reset: boolean = resetShips(tp.files, t)
         const css: CoreCss | not = coreCss(t, reset)
         const consts: CoreConst[] = coreConsts(t)
-        const pre: CoreProgram = { program: t.program, decls: decls, types: types, fns: fns, server: server, dbs: dbs, reset: reset, sqlError: sqlError, serverCallError: serverCallError, css: css, consts: consts }
-        const core: CoreProgram = { program: t.program, decls: gateDecls(pre), types: types, fns: fns, server: server, dbs: dbs, reset: reset, sqlError: sqlError, serverCallError: serverCallError, css: css, consts: consts }
+        const pre: CoreProgram = { program: t.program, decls: decls, types: types, fns: fns, server: server, dbs: dbs, reset: reset, sqlError: sqlError, serverCallError: serverCallError, css: css, consts: consts, loads: t.server.loads }
+        const core: CoreProgram = { program: t.program, decls: gateDecls(pre), types: types, fns: fns, server: server, dbs: dbs, reset: reset, sqlError: sqlError, serverCallError: serverCallError, css: css, consts: consts, loads: t.server.loads }
         return { core: core, diags: tp.diags }
     }
 

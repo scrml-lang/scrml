@@ -155,9 +155,9 @@ describe("a scope binds each name once", () => {
     expect(codes([boxLib("export <box label:string=\"\" label:string=\"x\"/>\nrenders <p>${label}</p>\n"), boxApp("<box/>")]))
       .toEqual(["E-BOOTSTRAP-REDECLARE"]);
   });
-  test("E-BOOTSTRAP-REDECLARE — two declarations of one name in one file", () => {
+  test("E-SCOPE-010 — two declarations of one name in one file (§7.6, ruled S473)", () => {
     const lib = "export <box label:string=\"\"/>\nrenders <p>${label}</p>\nexport <box label:string=\"\"/>\nrenders <p>${label}</p>\n";
-    expect(codes([boxLib(lib), boxApp("<box/>")])).toEqual(["E-BOOTSTRAP-REDECLARE"]);
+    expect(codes([boxLib(lib), boxApp("<box/>")])).toEqual(["E-SCOPE-010"]);
   });
   // s472: file scope — a name a file declares AND imports is bound twice in file scope (§7.6
   // E-SCOPE-010); one function name declared in two files is two functions (no refusal).
@@ -449,8 +449,8 @@ describe("D / E — names are scoped to what a file can see", () => {
 });
 
 describe("F — SPEC-silent duplicates (bootstrap-local, owe rulings)", () => {
-  test("F1 E-BOOTSTRAP-REDECLARE — two `type T` in one file", () => {
-    expect(inApp("    type T:struct = { a: int }\n    type T:struct = { b: string }")).toEqual(["E-BOOTSTRAP-REDECLARE"]);
+  test("F1 E-SCOPE-010 — two `type T` in one file (§7.6, ruled S473; was bootstrap-local)", () => {
+    expect(inApp("    type T:struct = { a: int }\n    type T:struct = { b: string }")).toEqual(["E-SCOPE-010"]);
   });
   test("F1 twin silent — two distinct type names", () => {
     expect(inApp("    type T:struct = { a: int }\n    type U:struct = { b: string }")).toEqual([]);
@@ -460,7 +460,8 @@ describe("F — SPEC-silent duplicates (bootstrap-local, owe rulings)", () => {
   test("F1 legal (s472) — one type name in two files: each file's annotations resolve to its own", () => {
     const lib = { path: "lib/t.scrml", src: "${ type T:struct = { a: int } }\n" };
     expect(codes([lib, LIB(), app("    type T:struct = { b: string }\n    function f() { let v: T = { b: \"x\" }; }", "<p>x</p>")])).toEqual([]);
-    expect(codes([lib, LIB(), app("    type T:struct = { b: string }\n    function f() { let v: T = { a: 1 }; }", "<p>x</p>")])).not.toEqual([]);
+    // s473 r2 review LOW-4: the exact list — the page's `T` is its own `{ b }` (no E-SCOPE-010: both private)
+    expect(codes([lib, LIB(), app("    type T:struct = { b: string }\n    function f() { let v: T = { a: 1 }; }", "<p>x</p>")])).toEqual(["E-TYPE-STRUCT-FIELD", "E-TYPE-STRUCT-FIELD"]);
   });
   test("F2 E-BOOTSTRAP-REDECLARE — `function g(a: int, a: int)`", () => {
     expect(inApp("    function g(a: int, a: int) { }")).toEqual(["E-BOOTSTRAP-REDECLARE"]);
