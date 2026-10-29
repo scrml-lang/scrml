@@ -92,3 +92,14 @@ path — `cssValueOf` (the §25.7 bridge's reader) and the existing `rt.attr` si
 - F4: noted in the §5.2 sentence and the PR body as a known fail-closed regression.
 - Gates: s34-census --check-new PASS (3 rows), SPEC-INDEX regen + --check OK, severity current, delta-lint, markers,
   snippet, claim, types-gate, root 2239/0. state.ts --write: MED 700 → 701 (master-list churn discarded).
+
+## 2026-10-29 — merge origin/main (#1630 #1631 #1632 #1634 #1636) → 10ea05d87
+- Conflicts: SPEC-INDEX.md (git-merge-generated --regen; --check OK, 52,788 lines) and severity.scrml (took main,
+  regenerated; keeps E-ATTR-STYLESHEET-HREF; --check current). known-gaps auto-merged; state.ts --write no change;
+  @gap ids main 2477 + branch 2467 → 2480, none lost. g-boot-base-href-from-data-retargets-server-calls-s473 kept
+  as is (PA reconciles with #1637).
+- Merge commit: full hook, 6 shards, 0 fail.
+- Gates: lint-no-default-arm 0; lint-duplicate-fn 0; types-gate OK; claim 0 fail; snippet 0 fail; s34-census
+  --check-new --base origin/main PASS; SPEC-INDEX --check OK; severity current; delta-lint PASS; markers 0;
+  md-shim current; bootstrap-conformance --check current; e2e-render-map 259/0; root 2239/0; compile-floor PASS;
+  slices m1 109/0, m2 619/0, lowered m1 109/0, m3 60/0, m4 3416/0, codec 166/0.
