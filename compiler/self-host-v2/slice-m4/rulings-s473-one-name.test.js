@@ -65,6 +65,12 @@ describe("2a — two user files EXPORTING one name: E-SCOPE-010 (§7.6, S473 nar
     const B = { path: "b.scrml", src: `export <card u:string/>\n` };
     expect(at(prog(P(`    <p>x</p>`), [A, B]))).toEqual([["E-SCOPE-010", "b.scrml"]]);
   });
+  test("r2 LOW-A: a private `<card>` first, then two files EXPORTING `<card>` — the exported pair is E-SCOPE-010", () => {
+    const r = prog(P(`    <p>x</p>`), [{ path: "a.scrml", src: `<card t:string/>\n` }, { path: "b.scrml", src: `export <card u:string/>\n` }, { path: "c.scrml", src: `export <card v:string/>\n` }]);
+    // b vs the private a: legal by the ruling, the bootstrap limit (fail closed); c vs the exported b: E-SCOPE-010
+    expect(at(r)).toEqual([["E-BOOTSTRAP-UNSUPPORTED", "b.scrml"], ["E-SCOPE-010", "c.scrml"]]);
+    expect(errs(r)[1].message).toContain("b.scrml:1:");
+  });
   test("three files exporting one name: one report per later binding (two)", () => {
     const A = lib("a.scrml", FN("helper", "export "));
     const B = lib("b.scrml", FN("helper", "export "));
@@ -138,6 +144,15 @@ describe("2c — one file: the §7.6 file scope (cells included) and the import-
     const A = { path: "a.scrml", src: `export <card t:string/>\n` };
     const r = prog(P(`    \${ import { card } from "./a.scrml"; }\n    <card x:string/>`), [A]);
     expect(at(r)).toEqual([["E-SCOPE-010", ENTRY]]);
+  });
+  test("r2 LOW-B: importing a COMPONENT `<card>` and declaring one: one report (linkage's), not two", () => {
+    const A = { path: "a.scrml", src: `export <card t:string/>\nrenders <div>\${t}</div>\n` };
+    const r = prog(P(`    \${ import { card } from "./a.scrml"; }\n    <card x:string/>\n    renders <p>\${x}</p>`), [A]);
+    expect(at(r)).toEqual([["E-SCOPE-010", ENTRY]]);
+  });
+  test("nit: E-NAME-COLLIDES-STATE names the cell by file:line:col", () => {
+    const r = prog(P(`    let <count:int=0/>\n    \${ const count = 1; }`));
+    expect(errs(r)[0].message).toContain("app.scrml:2:");
   });
   test("review LOW-1: a cell beside a `<card>` of its file and another file's private `fn card` — one report, not two at one span", () => {
     const X = lib("x.scrml", `    fn card() -> int {\n        return 1;\n    }\n${USE("x")}`);

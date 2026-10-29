@@ -269,7 +269,8 @@ describe("diagnostics — ruled CSS the bootstrap refuses by name, and the use-s
       { path: "a.scrml", src: `export <card t:string/>\nrenders <div>#{ .x { color: red; } }\${t}</div>\n` },
       { path: "app.scrml", src: `import { card } from "./a.scrml";\n<program>\n    <card x:string/>\n    renders <p>\${x}</p>\n    <main><p>x</p></main>\n</program>\n` },
     ], "app.scrml");
-    expect(r2.diags.map((d) => d.code).sort()).toEqual(["E-COMPONENT-NAME-DUPLICATE", "E-SCOPE-010"]);
+    // s473 r2 LOW-B: an imported component re-declared is ONE report (linkage E-SCOPE-010, at the import)
+    expect(r2.diags.map((d) => d.code).sort()).toEqual(["E-SCOPE-010"]);
   });
   test("a library component's `#{}` is its scope in the consuming program's sheet", () => {
     const r = frontEnd(mods, [
