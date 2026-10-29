@@ -196,8 +196,11 @@ describe("(B) markup at a file's top level, outside any `<program>`", () => {
   test("`<outlet>` outside a `<program>` shell → E-OUTLET-OUTSIDE-SHELL (§20.8.1)", () => {
     expect(codes(`<outlet/>\n<program><p>x</p></program>\n`)).toEqual(["E-OUTLET-OUTSIDE-SHELL"]);
   });
-  test("`<foreign lang>` in a file with a `<program>` → E-FOREIGN-LANG-IN-PROGRAM (§23.6); the program's `lang=` is refused", () => {
-    expect(codes(`<foreign lang="ts" />\n<program lang="ts">\n  <p>hi</p>\n</program>\n`)).toEqual(["E-FOREIGN-LANG-IN-PROGRAM", "E-BOOTSTRAP-UNSUPPORTED"]);
+  // s473-boot-foreign-blocks: `lang="ts"` / `"js"` is READ now (§23.2.1 — the language of the
+  // file's foreign blocks); another language is still refused at the attribute
+  test("`<foreign lang>` in a file with a `<program>` → E-FOREIGN-LANG-IN-PROGRAM (§23.6); the program's `lang=\"ts\"` is read", () => {
+    expect(codes(`<foreign lang="ts" />\n<program lang="ts">\n  <p>hi</p>\n</program>\n`)).toEqual(["E-FOREIGN-LANG-IN-PROGRAM"]);
+    expect(codes(`<foreign lang="ts" />\n<program lang="go">\n  <p>hi</p>\n</program>\n`)).toEqual(["E-FOREIGN-LANG-IN-PROGRAM", "E-BOOTSTRAP-UNSUPPORTED"]);
   });
   test("in a library file (no `<program>`) a `<channel>` is not E-CHANNEL-OUTSIDE-PROGRAM — it is refused; other markup is refused too", () => {
     const lib = { path: "lib.scrml", src: `export fn one() -> int { return 1; }\n<channel name="c"></>\n<p>stray</p>\n` };

@@ -5,7 +5,7 @@
 // and run in happy-dom with a stubbed `fetch` answering every design Item-3.2
 // row (SPEC §19.9.10 "Classification").
 
-import { describe, test, expect, beforeAll, afterEach } from "bun:test";
+import { describe, test, expect, beforeAll, beforeEach, afterEach } from "bun:test";
 import { join } from "node:path";
 import { loadM2, frontEnd } from "./harness.js";
 import { loadProgram, expectNoPageErrors, warmLoadProgram } from "../slice-m1/load-program.js";
@@ -15,6 +15,13 @@ beforeAll(() => { ({ mods } = loadM2()); warmLoadProgram(); }, { timeout: 120000
 
 const realFetch = globalThis.fetch;
 const realSetTimeout = globalThis.setTimeout;
+// s473 — the runtime sends a call to the DOCUMENT's own origin (an absolute URL resolved against
+// `location.href`, never the `<base>`; §5.2 "Data never moves the document base"), and a document
+// whose URL cannot be a base (happy-dom's initial about:blank) makes no request. These runs are a
+// page served from an origin, as a browser's would be.
+beforeEach(() => {
+  if (globalThis.location && globalThis.location.protocol === "about:") globalThis.happyDOM.setURL("http://localhost/");
+});
 afterEach(() => {
   globalThis.fetch = realFetch;
   globalThis.setTimeout = realSetTimeout;
@@ -98,7 +105,7 @@ describe("S4 — `call`: never rejects; the request; the deadline", () => {
     globalThis.fetch = (path, init) => { seen = { path, init }; return answer(200, "2")(); };
     const v = await rtUnit.call(SAVE_ROUTE, ["n1", "draft", 1], null);
     expect(v).toBe(2);
-    expect(seen.path).toBe("/_scrml/call/24");
+    expect(seen.path).toBe("http://localhost/_scrml/call/24");   // s473: absolute, same-origin
     expect(seen.init.method).toBe("POST");
     expect(JSON.parse(seen.init.body)).toEqual(["n1", "draft", 1]);
   });
