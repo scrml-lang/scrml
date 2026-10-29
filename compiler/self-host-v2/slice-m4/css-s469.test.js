@@ -262,14 +262,15 @@ describe("diagnostics — ruled CSS the bootstrap refuses by name, and the use-s
       { path: "a.scrml", src: `export <card t:string/>\nrenders <div>#{ .x { color: red; } }\${t}</div>\n` },
       { path: "app.scrml", src: `<program>\n    <card x:string/>\n    renders <p>\${x}</p>\n    <main><p>x</p></main>\n</program>\n` },
     ], "app.scrml");
-    expect(r.diags.map((d) => d.code)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+    expect(r.diags.map((d) => d.code)).toEqual(["E-COMPONENT-NAME-DUPLICATE"]);   // s473: the language rule (§9.1)
     expect(r.diags[0].message).toContain("is also declared in");
     expect(r.diags[0].message).toContain("CSS scope key");
     const r2 = frontEnd(mods, [
       { path: "a.scrml", src: `export <card t:string/>\nrenders <div>#{ .x { color: red; } }\${t}</div>\n` },
       { path: "app.scrml", src: `import { card } from "./a.scrml";\n<program>\n    <card x:string/>\n    renders <p>\${x}</p>\n    <main><p>x</p></main>\n</program>\n` },
     ], "app.scrml");
-    expect(r2.diags.map((d) => d.code).sort()).toEqual(["E-BOOTSTRAP-UNSUPPORTED", "E-SCOPE-010"]);
+    // s473 r2 LOW-B: an imported component re-declared is ONE report (linkage E-SCOPE-010, at the import)
+    expect(r2.diags.map((d) => d.code).sort()).toEqual(["E-SCOPE-010"]);
   });
   test("a library component's `#{}` is its scope in the consuming program's sheet", () => {
     const r = frontEnd(mods, [
