@@ -131,7 +131,7 @@ export async function loadBoot(opts: { rebuild?: boolean; log?: (s: string) => v
     }
   }
   const mods = h1.evaluateChunks(chunks);
-  for (const m of ["link", "analyze", "lower", "check", "print", "print-server"]) {
+  for (const m of ["parse", "link", "analyze", "lower", "check", "print", "print-server"]) {
     if (!mods[m]) throw new Error(`bootstrap module '${m}' missing from the slice-m2 bundle`);
   }
   loadedBoot = { mods, cached, key, ms: performance.now() - t0 };
@@ -150,18 +150,35 @@ function pruneCache(dir: string, keep: number) {
 // The source set: the entry + the `.scrml` files it imports (relative imports, transitively).
 // ─────────────────────────────────────────────────────────────────────────────
 
-const IMPORT_RE = /\bfrom\s*"(\.\.?\/[^"]*\.scrml)"/g;
-
 function readSource(f: string, overlay?: ReadonlyMap<string, string>): string {
   const o = overlay?.get(f);
   return o !== undefined ? o : readFileSync(f, "utf8");
 }
 
 /**
+ * The relative `.scrml` modules `src` imports, read by the BOOTSTRAP PARSER (parse.scrml
+ * `parseFile` + link.scrml `importsOfItems` — the same reading `frontEndStdlib` and the linker use),
+ * never by a text scan. S473 (flogence S60): the regex that stood here accepted only double-quoted
+ * specifiers, so `from '../graph-read.scrml'` left its file out of the build — a false E-IMPORT-006
+ * — and it followed an import written inside a comment or a string.
+ */
+function relativeScrmlImports(mods: Record<string, any>, path: string, src: string): string[] {
+  const ast = mods.parse.parseFile(path, src, 0).ast;
+  const out: string[] = [];
+  for (const imp of mods.link.importsOfItems(ast.items)) {
+    const from = String(imp.from);
+    if ((from.startsWith("./") || from.startsWith("../")) && from.endsWith(".scrml")) out.push(from);
+  }
+  return out;
+}
+
+/**
+ * The entry and the `.scrml` files it imports (relative imports, transitively), each file's
+ * imports read by the bootstrap parser (`mods`, the loaded bundle's modules — relativeScrmlImports).
  * `overlay` (absolute path → text) stands in for the disk: an editor's unsaved buffers. A path in
  * the overlay is read from it (and need not exist on disk); every other path is read from disk.
  */
-export function sourceClosure(entryAbs: string, overlay?: ReadonlyMap<string, string>): string[] {
+export function sourceClosure(mods: Record<string, any>, entryAbs: string, overlay?: ReadonlyMap<string, string>): string[] {
   const seen = new Set<string>();
   const todo = [entryAbs];
   while (todo.length > 0) {
@@ -169,7 +186,7 @@ export function sourceClosure(entryAbs: string, overlay?: ReadonlyMap<string, st
     if (seen.has(f) || !(overlay?.has(f) || existsSync(f))) continue;
     seen.add(f);
     const src = readSource(f, overlay);
-    for (const m of src.matchAll(IMPORT_RE)) todo.push(resolve(dirname(f), m[1]));
+    for (const from of relativeScrmlImports(mods, f, src)) todo.push(resolve(dirname(f), from));
   }
   return [...seen];
 }
@@ -354,7 +371,7 @@ export async function compileSource(
   const overlay = opts.overlay;
   const boot = await loadBoot({ rebuild: opts.rebuild, log: opts.log });
   const t0 = performance.now();
-  const abs = sourceClosure(entryAbs, overlay);
+  const abs = sourceClosure(boot.mods, entryAbs, overlay);
   if (abs.length === 0) throw new Error(`no such file: ${entryAbs}`);
   const root = commonDir(abs);
   const toRel = (f: string) => relative(root, f).split(sep).join("/");
