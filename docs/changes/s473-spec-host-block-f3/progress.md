@@ -65,3 +65,8 @@
 - severity.scrml regenerated (current); state.ts --write produced only recent-sessions churn (master-list.md not staged).
 - E-SCOPE-010 row: the `<host>` clause relabelled "ratified" (round-2 item 8), matching rule 9.
 - Gates: regen-spec-index --check, s34-census --check-new (41 rows), claim-gate, snippet-gate, lint-duplicate-fn: PASS.
+
+## 2026-10-29 — merge origin/main dd373f8aa (#1636)
+- One content conflict: the E-SCOPE-010 §34 row (#1636 rewrote it). Resolved as #1636's text verbatim + this branch's host-import / `<host>` ALSO clause; Section column `§7.6, §20.4, §21.3.1.1, §21.3.3`.
+- SPEC-INDEX regenerated; severity.scrml regenerated (current); state.ts --write gave recent-sessions churn only (not staged). Gap ids: none lost (2466 distinct).
+- Gates: regen-spec-index --check, s34-census --check-new (42 rows), claim-gate, snippet-gate, lint-duplicate-fn, severity --check: PASS.

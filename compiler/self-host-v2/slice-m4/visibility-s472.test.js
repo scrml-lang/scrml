@@ -462,29 +462,38 @@ describe("r1 F1 — §18.13 shorthand arms over a call whose enum type is not im
   });
 });
 
+// s473: one file binding a type (or a declaration) AND a function of one name is now itself
+// E-SCOPE-010 (§7.6, ruled S473 "`<card>` beside `fn card`: REFUSED"), reported in the library
+// file. The import still brings only the exported kind — the E-SCOPE-001 below stands beside it.
+const s473 = (r) => r.diags.filter((d) => d.code === "E-SCOPE-010").map((d) => d.file);
 describe("r1 F2 — an import brings only the EXPORTED declaration(s) of a name (scope by kind)", () => {
   test("kind-collapse-fn2: exported `type Tag` + private `fn Tag` — importing `Tag` does not bring the function", () => {
     const K = { path: "k.scrml", src: `\${\n    export type Tag:struct = { v: string }\n    fn Tag() -> string {\n        return "private-fn";\n    }\n    export fn mk() -> string {\n        return "m";\n    }\n}\n` };
     const r = run(`<program>\n    \${ import { Tag, mk } from "./k.scrml"; }\n    <p id="o">\${Tag()} \${mk()}</p>\n</program>\n`, [K]);
-    expect(codes(r)).toEqual(["E-SCOPE-001"]);
-    expect(r.diags[0].message).toContain("does not export");
+    expect(codes(r).sort()).toEqual(["E-SCOPE-001", "E-SCOPE-010"]);
+    expect(s473(r)).toEqual(["k.scrml"]);
+    expect(r.diags.find((d) => d.code === "E-SCOPE-001").message).toContain("does not export");
   });
 
   test("kind-collapse-type: exported `fn box` + private `type box` — importing `box` does not bring the type", () => {
     const K = { path: "k2.scrml", src: `\${\n    type box:struct = { v: string }\n    export fn box() -> string {\n        return "fn";\n    }\n}\n` };
     const r = run(`<program>\n    \${ import { box } from "./k2.scrml"; }\n    function g() -> string {\n        const b: box = { v: "leak" };\n        return b.v;\n    }\n    <p id="o">\${g()} \${box()}</p>\n</program>\n`, [K]);
     expect(codes(r)).toContain("E-TYPE-UNKNOWN");
+    expect(s473(r)).toEqual(["k2.scrml"]);
   });
 
   test("kind-collapse-decl: exported `<card>` + private `fn card` — importing `card` does not bring the function", () => {
     const C = { path: "c.scrml", src: `export <card:struct>\n    let <label:string="x"/>\n</>\nrenders <b class="card">\${label}</b>\n\n\${\n    fn card() -> string {\n        return "private-card-fn";\n    }\n}\n` };
     const r = run(`<program>\n    \${ import { card } from "./c.scrml"; }\n    <main><card label="hi"/><p id="o">\${card()}</p></main>\n</program>\n`, [C]);
-    expect(codes(r)).toEqual(["E-SCOPE-001"]);
+    expect(codes(r).sort()).toEqual(["E-SCOPE-001", "E-SCOPE-010"]);
+    expect(s473(r)).toEqual(["c.scrml"]);
   });
 
-  test("twin: both kinds exported — importing the name brings both", () => {
+  // s473: the twin is no longer a legal library — a type and a function of one name in one file
+  // are E-SCOPE-010 (§7.6). The pin is kept as the refusal.
+  test("twin: both kinds exported — the library itself is E-SCOPE-010 (S473)", () => {
     const K = { path: "k.scrml", src: `\${\n    export type Tag:struct = { v: string }\n    export fn Tag() -> string {\n        return "fn";\n    }\n}\n` };
-    clean(run(`<program>\n    \${ import { Tag } from "./k.scrml"; }\n    function g() -> string {\n        const t: Tag = { v: "x" };\n        return t.v + Tag();\n    }\n    <p>\${g()}</p>\n</program>\n`, [K]));
+    expect(s473(run(`<program>\n    \${ import { Tag } from "./k.scrml"; }\n    function g() -> string {\n        const t: Tag = { v: "x" };\n        return t.v + Tag();\n    }\n    <p>\${g()}</p>\n</program>\n`, [K]))).toEqual(["k.scrml"]);
   });
 });
 
