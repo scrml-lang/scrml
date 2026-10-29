@@ -28547,7 +28547,7 @@ are REFUSED by impl#1, `E-IMPL1-RULED-FORM-UNSUPPORTED` (its row lands with that
 | E-SERVICE-SOURCE-PLACEMENT | §68.4, §68.9 | An event source (`<stdin>`, `<watch>`, `<onSignal>`, or the `scrml:process` child-process source) outside a `kind="service"` program, or an `<onSignal>` below the program's top level. A source delivers events to a running program. (S473 DRAFT.) Provenance: ruling:user-voice-scrml.md S473 "⭐ RULED — long-running program kind, owner questions Q1–Q4 (PA recs)" — *"your recs"* — and "⭐ RULED — scrml gets a long-running program kind" — *"of course we need a long-running program kind. your recs"*; design: `scrml-support/docs/deep-dives/long-running-program-kind-design-2026-10-29.md` §7. Direction of change: newly-accepting (a new kind; the code fires only on new surface). **Nominal / spec-ahead — not yet emitted by any compiler; lands with the impl** (`g-boot-kind-service-unbuilt-s473`). | Error |
 | E-SERVICE-SOURCE-DUPLICATE | §68.4 | A second `<stdin>` or a second `<onSignal>` in one program. A program reads stdin through one `<stdin>`; merge the arms. (S473 DRAFT.) Provenance: ruling:user-voice-scrml.md S473 "⭐ RULED — long-running program kind, owner questions Q1–Q4 (PA recs)" — *"your recs"* — and "⭐ RULED — scrml gets a long-running program kind" — *"of course we need a long-running program kind. your recs"*; design: `scrml-support/docs/deep-dives/long-running-program-kind-design-2026-10-29.md` §7. Direction of change: newly-accepting (a new kind; the code fires only on new surface). **Nominal / spec-ahead — not yet emitted by any compiler; lands with the impl** (`g-boot-kind-service-unbuilt-s473`). | Error |
 | E-SERVICE-MAIN-RETURNS | §68.3 | `main` declares a return type in a `kind="service"` program. In a service `main` is setup and returns nothing; end the program with `stop(code)`. (S473 DRAFT.) Provenance: ruling:user-voice-scrml.md S473 "⭐ RULED — long-running program kind, owner questions Q1–Q4 (PA recs)" — *"your recs"* — and "⭐ RULED — scrml gets a long-running program kind" — *"of course we need a long-running program kind. your recs"*; design: `scrml-support/docs/deep-dives/long-running-program-kind-design-2026-10-29.md` §7. Direction of change: newly-accepting (a new kind; the code fires only on new surface). **Nominal / spec-ahead — not yet emitted by any compiler; lands with the impl** (`g-boot-kind-service-unbuilt-s473`). | Error |
-| E-SERVICE-STOP-PLACEMENT | §68.7 | A `stop` call outside a `kind="service"` program that resolves to no user binding, or a `stop` reached (over the call graph) from an `<effect>` body, a `cleanup()` callback, a derived cell or a cell initializer. `stop` ends a turn: call it from an event arm, from `main`, or from a function only they reach. (S473 DRAFT.) Provenance: ruling:user-voice-scrml.md S473 "⭐ RULED — long-running program kind, owner questions Q1–Q4 (PA recs)" — *"your recs"* — and "⭐ RULED — scrml gets a long-running program kind" — *"of course we need a long-running program kind. your recs"*; design: `scrml-support/docs/deep-dives/long-running-program-kind-design-2026-10-29.md` §7. Direction of change: newly-accepting (a new kind; the code fires only on new surface). **Nominal / spec-ahead — not yet emitted by any compiler; lands with the impl** (`g-boot-kind-service-unbuilt-s473`). | Error |
+| E-SERVICE-STOP-PLACEMENT | §68.7 | A `stop` call outside a `kind="service"` program that resolves to no user binding, or a `stop` reached (over the call graph) from an `<effect>` body, a `cleanup()` callback, a derived cell or a cell initializer. `stop` ends a turn: call it from an event arm, from `main`, from an `<onMount>` body (§68.3 statement 6a), or from a function only they reach. (S473 DRAFT.) Provenance: ruling:user-voice-scrml.md S473 "⭐ RULED — long-running program kind, owner questions Q1–Q4 (PA recs)" — *"your recs"* — and "⭐ RULED — scrml gets a long-running program kind" — *"of course we need a long-running program kind. your recs"*; design: `scrml-support/docs/deep-dives/long-running-program-kind-design-2026-10-29.md` §7. Direction of change: newly-accepting (a new kind; the code fires only on new surface). **Nominal / spec-ahead — not yet emitted by any compiler; lands with the impl** (`g-boot-kind-service-unbuilt-s473`). | Error |
 | E-SERVICE-STOP-CODE | §68.7 | A literal `stop` code outside 0–255. (S473 DRAFT.) Provenance: ruling:user-voice-scrml.md S473 "⭐ RULED — long-running program kind, owner questions Q1–Q4 (PA recs)" — *"your recs"* — and "⭐ RULED — scrml gets a long-running program kind" — *"of course we need a long-running program kind. your recs"*; design: `scrml-support/docs/deep-dives/long-running-program-kind-design-2026-10-29.md` §7. Direction of change: newly-accepting (a new kind; the code fires only on new surface). **Nominal / spec-ahead — not yet emitted by any compiler; lands with the impl** (`g-boot-kind-service-unbuilt-s473`). | Error |
 | E-SERVICE-RAW-EXIT | §68.7 | `scrml:process`'s `exit()` called in a `kind="service"` program. `exit()` skips teardown (`cleanup()`, closing sources); use `stop(code)`. A `process.exit` inside an opaque `_{}` is not seen. (S473 DRAFT.) Provenance: ruling:user-voice-scrml.md S473 "⭐ RULED — long-running program kind, owner questions Q1–Q4 (PA recs)" — *"your recs"* — and "⭐ RULED — scrml gets a long-running program kind" — *"of course we need a long-running program kind. your recs"*; design: `scrml-support/docs/deep-dives/long-running-program-kind-design-2026-10-29.md` §7. Direction of change: newly-accepting (a new kind; the code fires only on new surface). **Nominal / spec-ahead — not yet emitted by any compiler; lands with the impl** (`g-boot-kind-service-unbuilt-s473`). | Error |
 | E-SERVICE-STDIN-SHARED | §68.9 | A whole-stdin read (`scrml:process`) in a `kind="service"` program that declares `<stdin>`: two readers would split the stream. (S473 DRAFT.) Provenance: ruling:user-voice-scrml.md S473 "⭐ RULED — long-running program kind, owner questions Q1–Q4 (PA recs)" — *"your recs"* — and "⭐ RULED — scrml gets a long-running program kind" — *"of course we need a long-running program kind. your recs"*; design: `scrml-support/docs/deep-dives/long-running-program-kind-design-2026-10-29.md` §7. Direction of change: newly-accepting (a new kind; the code fires only on new surface). **Nominal / spec-ahead — not yet emitted by any compiler; lands with the impl** (`g-boot-kind-service-unbuilt-s473`). | Error |
@@ -52891,9 +52891,11 @@ events (statement 7). Calling them event sources here does not make them service
 6a. **`stop` in `<onMount>`** is legal (an `<onMount>` body may not write cells, §6.7.1a, but it may stop). At
    start-up, a `stop` in an `<onMount>` body lets the rest of the mount (step (c)) complete, then the turn loop
    SHALL NOT be entered: teardown runs (which disarms the sources step (c) armed) and the process exits with the
-   code. An `<onMount>` that runs later, when an `if=` scope mounts at the end of a turn (statement 13a), is part
-   of that turn's end: its `stop` stops the program after that turn-end step completes, as a `stop` in the turn
-   would. Start-up is steps (a)–(c) only.
+   code. If more than one `<onMount>` body of the same mount calls `stop`, the **first** `stop` in mount order
+   sets the exit code; later ones change nothing. An `<onMount>` that runs later, when an `if=` scope mounts at
+   the end of a turn (statement 13a), is part of that turn's end: its `stop` lets that turn-end step (2) finish
+   mounting, then steps (3) onward do not run and teardown follows, as for a `stop` in the turn. Start-up is
+   steps (a)–(c) only.
 
 ### 68.4 Event sources
 
@@ -52907,7 +52909,8 @@ events (statement 7). Calling them event sources here does not make them service
    child of the program or of an `if=` scope; `<stdin>` and `<watch>` also take `if=` themselves (§68.1). It is
    armed when its scope mounts and torn down when it is destroyed, at the times statement 13a gives. `<onSignal>` SHALL be at the program's top level (`E-SERVICE-SOURCE-PLACEMENT`). A
    second `<stdin>` or a second `<onSignal>` in one program is `E-SERVICE-SOURCE-DUPLICATE`.
-9. A source's arms SHALL be exhaustive over its event enum. A `_` arm is legal. A missing variant is the existing
+9. A service-only source's arms (`<stdin>`, `<watch>`, `<onSignal>`, the child-process source; `<timer>`,
+   `<timeout>`, `<poll>` and `<request>` have bodies, not arms) SHALL be exhaustive over its event enum. A `_` arm is legal. A missing variant is the existing
    `E-MATCH-NOT-EXHAUSTIVE` class, as for `<onchange>` (§38.13.3); no new code. Each arm body is a code-default
    body (§4.18) and an action position (§13.8 (i)).
 10. **`<stdin>`** reads lines. On a terminal it provides line editing and echo; in a pipe it does neither, except
@@ -52942,13 +52945,17 @@ events (statement 7). Calling them event sources here does not make them service
     (1)), every `if=` scope whose condition changed is destroyed (depth-first, §6.7.2) or mounted (arming its
     sources, running its `<request>` mount fetches and `<onMount>` bodies). Events already queued from a source
     whose scope was destroyed SHALL be discarded, delivered to nothing, with one exception: **`<stdin>` events**
-    (lines and `End`) are held, in order, for the next `<stdin>` to arm, so that no line is dropped. Held
+    (lines and `End`) are held, in order, for the next `<stdin>` to arm, so that no line is dropped. While no
+    `<stdin>` is armed, the runtime SHALL pause reading stdin (the OS pipe buffer is then the bound). Held
     `<stdin>` events are not "queued" for statement 21; a program that quiesces while holding them exits 0 and
     they are not read. A remounted `<stdin>` continues the same input stream (it does not re-read from the start);
-    `End` is delivered once per stream, so a `<stdin>` that arms after `End` was delivered is not live.
+    `End` is delivered once per stream, so a `<stdin>` that arms after `End` was delivered is not live. A scope
+    mounted at turn end runs its `<effect>`s once for the mount (§6.7.4) at the **next** effect flush (the end of
+    the next turn), not in the flush that has just run.
 14. **State.** State lives in program-scope cells. Every reactive write after start-up (§68.3 steps (a)–(c):
     cell initializers and `main`, with `<onMount>` writing none) SHALL occur in a turn. A `<request>` / `<poll>`
-    settle SHALL be applied as a queued event, never within another turn. Locals do not survive a turn; cells do.
+    settle, and a pending cell's arrival (a `(not to T)` cell, §13.9, whose load completes), SHALL be applied as
+    a queued event, never within another turn. Locals do not survive a turn; cells do.
     Effects still cannot write cells (§6.7.4).
 15. **A waiting turn holds the queue.** While a turn waits, no other event runs; input that arrives meanwhile
     queues and is delivered in order afterwards. A program that wants input to keep flowing during a slow load
@@ -52956,7 +52963,9 @@ events (statement 7). Calling them event sources here does not make them service
     `(not to T)` pending cell, §13.9) fetch it, so the turn ends at once and the settle comes back as an event.
 16. **Back-pressure.** A source SHALL NOT grow the queue without bound. `<stdin>` (and a child-process source,
     §68.9) SHALL pause reading while its queued events exceed an implementation-defined bound (recommended:
-    1,024 events per source), and SHALL NOT drop a line. A timer tick that comes due while that timer's previous
+    1,024 events per source), and SHALL NOT drop a line while the program runs (lines held for a `<stdin>` that
+    is not armed, statement 13a, are not read if the program exits first: at exit, unread input is left unread,
+    as for any process). A timer tick that comes due while that timer's previous
     tick is queued or running SHALL be coalesced (at most one pending); so SHALL a `<poll>` tick, and a `<poll>`
     has at most one settle queued. Watch events SHALL be coalesced per path, and bounded per `<watch>`: when one
     `<watch>` would hold more pending events than the bound, its pending events SHALL be replaced by a single
@@ -52982,7 +52991,8 @@ events (statement 7). Calling them event sources here does not make them service
     turn has ended, been reported and flushed as in statement 17, stop with exit code **70** (EX_SOFTWARE),
     through teardown (§68.8). `on-trap="continue"` spells the default. Any other value, a non-literal value, or
     `on-trap=` on a program that is not `kind="service"` is `E-SERVICE-ON-TRAP-INVALID`.
-19. **Traps outside a turn** *(PA defaults, derived from the ruling; not separately ruled)*:
+19. **Traps outside a turn** *(PA defaults, derived from the ruling — ruling:user-voice-scrml.md "PA rulings S473
+    (recorded for bryan's veto; each newly-rejecting or within a ruled scope)" item 3)*:
     - in an `<effect>` run: that run ends, the trap is reported as in statement 17, the other effects of the same
       flush still run, and the program carries on (or, under `on-trap="stop"`, stops with 70 after the flush);
     - during start-up (§68.3 steps (a)–(c): a cell initializer, `main`, a request mount fetch or an `<onMount>` body
@@ -53021,9 +53031,12 @@ state; a program for which that is worse than stopping (and being restarted by a
     - a mounted `<timeout>` that has not fired;
     - a mounted `<poll>`;
     - a `<request>` with a fetch in flight;
-    - a live owned child process (§68.9 statement 27, until its exit event is delivered);
-    - a turn running, an event queued (held `<stdin>` events, statement 13a, are not queued), or an effect run in
-      progress.
+    - a pending `(not to T)` cell (§13.9) whose load is in flight;
+    - an owned child process that has not yet exited (§68.9 statement 27): it stops counting once it has exited,
+      whether or not its exit event is delivered (a child of a destroyed scope is signalled, statement 27(a), and
+      its queued events are discarded, statement 13a);
+    - a turn running, an event queued (held `<stdin>` events, statement 13a, are not queued), or an effect run
+      pending or in progress.
 
     `<onSignal>` is never live (statement 12). When the program is not live, it SHALL stop with code 0
     (**quiescence**). `W-SERVICE-NO-SOURCE` (§68.13) uses this same definition: it fires when no element that
@@ -53035,12 +53048,23 @@ state; a program for which that is worse than stopping (and being restarted by a
     ahead of all other events (it does not preempt a running turn) and handled by its arm as a turn; an arm that
     does not call `stop` keeps the program running. A second signal of the same kind before that arm's turn
     starts SHALL take the default.
-22a. **A second signal exits at once** *(PA ruling S473, within the ruled Q3 lifecycle; vetoable)*. While a
-    default stop for a signal is pending (the program is waiting for the in-flight turn to reach a suspension
-    point), a further signal of the **same kind** SHALL end the process at once with 128 + its signal number,
-    even mid-turn with no suspension point: no continuation, no effect flush and no teardown runs. This applies
-    with or without `<onSignal>` (with it, the default became pending through statement 22's second signal), so
-    pressing Ctrl-C twice always ends a program, including one stuck in a turn that never waits.
+22a. **A second signal exits at once.** A default stop for a signal kind is **pending** from the moment it is
+    taken (statement 22) until teardown starts: while the program waits for the in-flight turn to reach a
+    suspension point, and while the abandoned turn's effects flush. While it is pending, a further signal of the
+    **same kind** SHALL end the process at once with 128 + its signal number, even mid-turn with no suspension
+    point or mid-flush: no continuation, no further effect run and no teardown runs. A signal of a **different
+    kind** while a stop is pending is handled as its own kind: its default applies (a stop of that kind becomes
+    pending too; the exit code stays that of the first pending stop), and if a stop of that kind is already
+    pending, it exits at once with 128 + its own number.
+    - Without `<onSignal>`: Ctrl-C twice always ends the program, including one stuck in a turn that never waits.
+      *(Provenance: ruling:user-voice-scrml.md "PA rulings S473 (recorded for bryan's veto; each newly-rejecting
+      or within a ruled scope)" item 2 — *"with no `<onSignal>`, while a default stop is pending, a second signal
+      of the same kind exits at once with 128+n, even mid-turn, with no flush and no teardown. This is within the
+      ruled Q3 lifecycle; bryan was told."*)*
+    - With `<onSignal>`: Ctrl-C twice does NOT end the program by itself. The first signal is queued for the arm;
+      a second of the same kind, before that arm's turn starts, takes the default (statement 22), which makes the
+      default stop pending; only a **third** exits at once under this statement. *(PA reading: the same rule,
+      applied once a default stop is pending; the ruled item 2 names only the no-`<onSignal>` case.)*
 22b. **Signals during teardown.** A signal (of any of the three kinds) that arrives while teardown (§68.8) is
     running SHALL end the process at once with 128 + its signal number. When the teardown was started by a
     signal, this is that signal kind's second signal or a different signal; when it was started by `stop`,
@@ -53056,7 +53080,8 @@ state; a program for which that is worse than stopping (and being restarted by a
 | `Terminate` (SIGTERM), no `<onSignal>` | `143` | abandoned at its next suspension point; its effects flush, then teardown |
 | `Hangup` (SIGHUP), no `<onSignal>` | `129` | abandoned at its next suspension point; its effects flush, then teardown |
 | A signal with `<onSignal>` declared | whatever the arm does | the arm runs as the next turn; a second signal of the same kind before that turn starts takes the default (the rows above) |
-| A second same-kind signal while a default stop is pending (statement 22a) | `128 + signo` | ends at once, even with no suspension point; no flush, no teardown |
+| A second same-kind signal while a default stop is pending, including during the abandoned turn's flush (statement 22a) | `128 + signo` | ends at once, even with no suspension point; no further flush, no teardown |
+| A different-kind signal while a default stop is pending (statement 22a) | the first pending stop's code; or `128 + signo` if a stop of that kind is already pending | its default applies alongside the pending one |
 | A trap in a turn (default, `on-trap="continue"`) | **none: the program carries on** | ends at the trap; reported to stderr with code and location (§68.6) |
 | A trap in a turn with `on-trap="stop"` | `70` (EX_SOFTWARE) | ends at the trap; reported, effects flush, then teardown |
 | A trap in an `<effect>` run (default) | **none: the program carries on** | (after the turn) that run ends; reported; the rest of the flush runs |
@@ -53076,7 +53101,8 @@ state; a program for which that is worse than stopping (and being restarted by a
     callbacks run in LIFO order, each MAY wait and SHALL be awaited; (4) database connections close; (5) the
     process exits with the stop code (§68.7).
 24. **The grace is split.** `stop-grace=` is G milliseconds (default `5000`), measured from the start of step 2.
-    Step 2 sends SIGTERM to every owned child and waits for them to exit for **at most G / 2** ms; every child
+    Step 2 sends SIGTERM to every owned child and waits for them to exit for **at most ⌊G / 2⌋** ms (G / 2
+    rounded down to whole milliseconds; "G / 2" below means this value); every child
     still running at G / 2 SHALL be sent SIGKILL, and step 2 then ends (it does not wait further). Step 3 gets the
     **remainder**: its `cleanup()` callbacks SHALL complete by G (so they get at least G / 2, and all of G minus
     whatever the children took when they exit sooner). A slow child therefore cannot eat the callbacks' time.
@@ -53241,7 +53267,7 @@ build (§68.14). Rows in §34.
 | `E-SERVICE-SOURCE-PLACEMENT` | Error | `<stdin>`, `<watch>`, `<onSignal>` or the child-process source outside a `kind="service"` program; `<onSignal>` below the program's top level (statement 8) — Nominal / spec-ahead, not yet emitted |
 | `E-SERVICE-SOURCE-DUPLICATE` | Error | a second `<stdin>` or `<onSignal>` in one program (statement 8) — Nominal / spec-ahead, not yet emitted |
 | `E-SERVICE-MAIN-RETURNS` | Error | `main` declares a return type in a service (statement 6) — Nominal / spec-ahead, not yet emitted |
-| `E-SERVICE-STOP-PLACEMENT` | Error | an unresolved `stop` call outside a service; `stop` reached from an `<effect>` body, a `cleanup()` callback, a derived cell or a cell initializer (statement 20) — Nominal / spec-ahead, not yet emitted |
+| `E-SERVICE-STOP-PLACEMENT` | Error | an unresolved `stop` call outside a service; `stop` reached from an `<effect>` body, a `cleanup()` callback, a derived cell or a cell initializer (statement 20). Legal: an event arm, `main`, an `<onMount>` body (statement 6a), a function only they reach — Nominal / spec-ahead, not yet emitted |
 | `E-SERVICE-STOP-CODE` | Error | a literal `stop` code outside 0–255 (statement 20) — Nominal / spec-ahead, not yet emitted |
 | `E-SERVICE-RAW-EXIT` | Error | `scrml:process`'s `exit()` called in a service (statement 20) — Nominal / spec-ahead, not yet emitted |
 | `E-SERVICE-STDIN-SHARED` | Error | a whole-stdin read in a service that declares `<stdin>` (statement 26) — Nominal / spec-ahead, not yet emitted |

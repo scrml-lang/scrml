@@ -23,3 +23,7 @@ F1 liveness defined (st. 21) + "event source" term reconciled (§68.1 Terms, st.
 ## 2026-10-29 — cross-PR: #1630 merged; main merged in
 
 Merged origin/main (merge, not rebase); SPEC-INDEX regenerated from the merged tree (git-merge-generated --regen, then regen-spec-index). §19.17 trap table gains `E-HOST-THROW-RT` (#1630's §21.3.3 rule 18), count four → five. known-gaps gap ids diffed: 0 lost. Not done here (still #1630's owed list): widening `E-HOST-VALUE-MISMATCH-RT` in §19.17 to `<host>` bindings.
+
+## 2026-10-29 — round 2 (LAND-W-F/U, ~/.cache/scrml/review/s473-1644/r1/REVIEW.md)
+
+N1 pending-cell load in flight is live (st. 21); its arrival is a queued event (st. 14). N2 a child is live until it has exited, delivered or not (st. 21). N3 st. 22a rewritten: pending window = from the default being taken until teardown (covers the post-abandon flush); different-kind signal handled as its own kind; with `<onSignal>` it takes three signals; provenance cites user-voice "PA rulings S473 …" item 2. N4 st. 16 cross-refs held stdin / unread at exit; runtime pauses stdin reading while no `<stdin>` is armed (13a); st. 9 narrowed to service-only sources. N5 `<onMount>` added to E-SERVICE-STOP-PLACEMENT rows; first `stop` in mount order wins (6a); scope mounted at turn end runs its effects at the next flush (13a); G/2 rounded down (24); st. 19 cites PA rulings item 3.
