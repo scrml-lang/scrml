@@ -28459,7 +28459,7 @@ are REFUSED by impl#1, `E-IMPL1-RULED-FORM-UNSUPPORTED` (its row lands with that
 | E-LOOP-005 | §49.9 | `break`/`continue` crosses function scope boundary; ALSO (S469) a `break`/`continue` inside a loop bound as a value (§49.6, rule 6) that targets a loop outside it — that limb, by the bootstrap, emitted at `compiler/self-host-v2/analyze.scrml:11374` (s469-boot-loop-value-form; check.scrml C20 re-checks it over Core); Nominal on impl#1 (frozen, §49.8). Provenance: ruling:user-voice-scrml.md S469 "⭐ RULED — loops: one `for`" F5 *"Yes, specify it (Recommended)"*; the boundary is a PA reading (fails closed). | Error |
 | E-LOOP-006 | §49.9 | Duplicate label identifier within function scope | Error |
 | E-LOOP-007 | §49.9, §49.6 | **Rewritten S469.** A loop bound as a value (`const xs = for (…) { … };`, §49.6) whose body contains no `lift` on any path — its value could only be the empty tape. **S473:** a `lift` after a statement that always leaves its block — including a `match` that takes every value and every arm of which leaves, and an inner loop whose head never ends it (`for (true) { }` as well as `for { }`) — is not on any path (§49.6 rule 10's reachability). Binding a loop is otherwise legal from every head. The former meaning (*"`while` bound as a value (`let x = while(...)`); the §49.6.1 statement-`while` + `let result = ~` accumulator is the sole exception"*) retires with `while` and the `~` pattern. In the rewritten meaning, by the bootstrap, emitted at `compiler/self-host-v2/analyze.scrml:10634` (a `for-binding`) and `compiler/self-host-v2/analyze.scrml:10826` (a Tier-0 `${ for … }`, §49.4.4) — s469-boot-loop-value-form; Nominal on impl#1 (frozen, §49.8). Provenance: ruling:user-voice-scrml.md S469 "⭐ RULED — loops: one `for`" F5 *"Yes, specify it (Recommended)"* (*"E-LOOP-007 is rewritten"*). | Error |
-| E-LOOP-008 | §49.9, §49.6 | **New S473.** A loop bound as a value (`const xs = for { lift 1; };`) or a Tier-0 `${ for { lift 1; } }` whose head never ends it (`for { … }`, `for (;;)`, a literal `for (true)`; a syntactic guard for those forms, so a non-literal always-true head such as `for (true && true)` is not caught) and whose body holds no reachable way out — a `break` that leaves THIS loop (one inside an inner loop leaves only that loop), a `return`, or (PA reading; the ruling names `break` / `return`) a `fail` or a `?` (§49.6 rule 10). Its value is never produced: a call never returns, a render never finishes. A statement-position `for { }` stays legal. By the bootstrap, emitted at `compiler/self-host-v2/analyze.scrml:12033` (a `for-binding`) and `compiler/self-host-v2/analyze.scrml:12299` (a Tier-0 `${ for … }`) — s473-boot-exitless-loop; Nominal on impl#1 (frozen, §49.8). Provenance: ruling:user-voice-scrml.md S472 "⭐ RULED — five PA recs" item 5 (*"An exit-less bound or Tier-0 loop is a compile error"*). | Error |
+| E-LOOP-008 | §49.9, §49.6 | **New S473.** A loop bound as a value (`const xs = for { lift 1; };`) or a Tier-0 `${ for { lift 1; } }` whose head never ends it (`for { … }`, `for (;;)`, a literal `for (true)`; a syntactic guard for those forms, so a non-literal always-true head such as `for (true && true)` is not caught) and whose body holds no reachable way out — a `break` that leaves THIS loop (one inside an inner loop leaves only that loop), a `return`, or (PA reading; the ruling names `break` / `return`) a `fail` or a `?` (§49.6 rule 10). Its value is never produced: a call never returns, a render never finishes. A statement-position `for { }` stays legal. **Widened S473:** a bound or Tier-0 loop whose head DOES end it is also E-LOOP-008 when an inner forever loop strands every path through its body — no path reaches the body's end, a `continue` of this loop, or a way out (`const xs = for (y of ys) { lift y; for { } };`). By the bootstrap, emitted at `compiler/self-host-v2/analyze.scrml:12033` (a `for-binding`) and `compiler/self-host-v2/analyze.scrml:12300` (a Tier-0 `${ for … }`) — s473-boot-exitless-loop; the inner-forever strand at `:12034` / `:12301` (`boundLoopStranded`) — s473-boot-loop-inner-forever; Nominal on impl#1 (frozen, §49.8). Provenance: ruling:user-voice-scrml.md S472 "⭐ RULED — five PA recs" item 5 (*"An exit-less bound or Tier-0 loop is a compile error"*); S473 "owner questions round 2, PA recs" item 4 (*"The exit-less loop rule (E-LOOP-008) widens to catch an inner forever loop."*). | Error |
 | E-LOOP-WHILE-RETIRED | §49.4.1, §49.9 | A `while (cond) { … }` statement — `while` retired S469; fix-it `for (cond) { … }` (`scrml fix` rewrites it). `while` stays reserved. **Nominal / spec-ahead — not yet emitted** (impl#1 accepts `while` as a carried legacy divergence, §49.8). Provenance: ruling:user-voice-scrml.md S469 "⭐ RULED — loops: one `for`" F1 *"One `for` (Recommended)"*. | Error |
 | E-LOOP-DO-WHILE-RETIRED | §49.4.1, §49.9 | A `do { … } while (cond)` statement — `do...while` retired S469; fix-it the body-first `for { …; if (done) { break; } }`, or `for (let first = true; first \|\| cond; first = false) { … }` when the body uses `continue` (§49.3.6). `do` stays reserved. **Nominal / spec-ahead — not yet emitted** (impl#1 accepts it, §49.8). Provenance: ruling:user-voice-scrml.md S469 "⭐ RULED — loops: one `for`" F1 *"One `for` (Recommended)"*. | Error |
 | E-RANGE-OUTSIDE-LOOP-HEAD | §49.2.5, §49.9 | A range `a..b` / `a..=b` anywhere other than the whole iterable of a `for` iterate head or the bounded-length token of a tape type (§66.12.2) — a range is not a value. **Nominal / spec-ahead — not yet emitted.** Provenance: ruling:user-voice-scrml.md S469 "⭐ RULED — loops: one `for`" F3 *"`..` and `..=` (Recommended)"* (*"loop-head only"*). | Error |
@@ -36739,7 +36739,8 @@ suspension (§13.2) SHALL preserve this.
   §17.4; §49.6.2).
 - A bound or Tier-0 `for` whose head never ends it SHALL hold a reachable `break` that leaves it, `return`,
   `fail` or `?`, or the compiler SHALL reject it with **E-LOOP-008** (§49.6, rule 10). A statement `for { }`
-  needs none.
+  needs none. A bound or Tier-0 `for` whose head does end it is also rejected with E-LOOP-008 when an inner
+  forever loop strands every path through its body (§49.6, rule 10, *S473 ruling*).
 - A `for` in any other expression position (an operand, an argument, a `return` operand) is neither and is a
   syntax error. *(PA reading, matching §49.2.1's single binding site; the binding site
   can be widened later.)*
@@ -36864,6 +36865,17 @@ const polled = for (let tries = 0; tries < 3; tries += 1) { lift probe(); };
       arrow function belongs to that function (§49.4.3);
     - an implementation is not required to evaluate conditions, so a `break` under any condition counts as
       reachable.
+
+    **An inner forever loop.** The exit-less loop rule (E-LOOP-008) widens to catch an inner forever loop.
+    *(Ruling S473 "owner questions round 2, PA recs", item 4.)* A bound or Tier-0 loop whose head does end it
+    SHALL have a path through its body that finishes an iteration — one that reaches the end of the body, a
+    `continue` of this loop, or a way out of it (above) — or the compiler SHALL reject it with **E-LOOP-008**.
+    With none, every path runs into an inner loop that never completes (a head that never ends it, and no
+    `break` that leaves it), so the loop's value is never produced (`const xs = for (y of ys) { lift y; for { } };`).
+    The reading of "reached" and "a way out" is the one above; a `continue label` or `break label` naming this
+    loop from the inner loop finishes the iteration or leaves the loop. An inner loop whose head does end it
+    (`for (z of zs) { for { } }`) may run zero times, so it strands nothing. The inner forever loop on its own
+    stays legal: the bound loop it strands is what is refused.
 
 ### 49.6.1 The `let result = ~` accumulator pattern is retired
 
@@ -37092,9 +37104,17 @@ A `for` bound as a value, or a Tier-0 `${ for … }`, whose head never ends it (
 `for (true)`) and whose body holds no `break` leaving it, `return`, `fail` or `?` that some path reaches
 (§49.6, rule 10). Its value is never produced.
 
+*(S473 ruling — "The exit-less loop rule (E-LOOP-008) widens to catch an inner forever loop.")* A bound or
+Tier-0 loop whose head does end it is also E-LOOP-008 when no path through its body finishes an iteration
+(reaches the body's end, a `continue` of this loop, or a way out of it), because every path runs into an
+inner loop that never completes (§49.6, rule 10). **Direction of change:** newly-rejecting (such a loop
+compiled, and calling or rendering it never returned).
+
 ```scrml
 const xs = for { lift 1; };                        // Error E-LOOP-008 — nothing ends the loop
 const ys = for { lift 1; for { break; } };         // Error E-LOOP-008 — the `break` leaves the inner loop only
+const zs = for (y of ws) { lift y; for { } };      // Error E-LOOP-008 — the inner forever loop strands it (S473)
+const vs = o: for (y of ws) { lift y; for { continue o; } };  // valid — `continue o` finishes the iteration
 for { tick(); }                                    // valid — a statement loop
 ```
 
@@ -37171,7 +37191,7 @@ for (i of 0..1.5) { log(i); }     // Error E-RANGE-BOUND-NOT-INT
 | E-LOOP-005 | `break`/`continue` crosses a function boundary, or leaves a bound loop for a loop outside it | Error | S469 — the bound-loop limb, by the bootstrap, emitted at `compiler/self-host-v2/analyze.scrml:11374`; Nominal on impl#1 |
 | E-LOOP-006 | Duplicate label identifier within the same function scope | Error | rule unchanged; for the S469 heads Nominal / spec-ahead |
 | E-LOOP-007 | A loop bound as a value lifts nothing on any path (rewritten S469) | Error | S469 — by the bootstrap, emitted at `compiler/self-host-v2/analyze.scrml:10634` (and `:10826`, a Tier-0 loop); Nominal on impl#1 |
-| E-LOOP-008 | A bound or Tier-0 loop whose head never ends it holds no reachable way out (§49.6 rule 10) | Error | S473 — by the bootstrap, emitted at `compiler/self-host-v2/analyze.scrml:12033` (and `:12299`, a Tier-0 loop); Nominal on impl#1 |
+| E-LOOP-008 | A bound or Tier-0 loop whose head never ends it holds no reachable way out; or, whose head ends it, an inner forever loop strands every path through its body (§49.6 rule 10) | Error | S473 — by the bootstrap, emitted at `compiler/self-host-v2/analyze.scrml:12033` (and `:12300`, a Tier-0 loop); the inner-forever strand at `:12034` (and `:12301`); Nominal on impl#1 |
 | E-LOOP-WHILE-RETIRED | A `while` statement (retired S469) | Error | S469 — Nominal / spec-ahead, not yet emitted |
 | E-LOOP-DO-WHILE-RETIRED | A `do...while` statement (retired S469) | Error | S469 — Nominal / spec-ahead, not yet emitted |
 | E-RANGE-OUTSIDE-LOOP-HEAD | A range outside a loop head or a tape type's length token | Error | S469 — Nominal / spec-ahead, not yet emitted |
