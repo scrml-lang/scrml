@@ -44,13 +44,13 @@
 // again, S440.)
 // =============================================================================
 ${
-    import { Token, TokenKind, LexStop, LexRun, LexPause, lexFrom, lexFromMode, lexTier0 } from "./lex.scrml"
+    import { Token, TokenKind, LexStop, LexRun, LexPause, lexFrom, lexFromMode, lexTier0, ForeignExtent, foreignOpenAt, foreignExtentAt } from "./lex.scrml"
     import { Severity } from "./severity.scrml"
     import { ASpan, BinOp, UnOp, AExpr, AProp, AExprK, AStmt, ABlock, AStmtK, AEffect, AType, ATypeK,
              ATypeField, AVariant, ATypeBody, ATypeDecl, AParam, AFn, AImportName, AImport,
              AAttrValue, AAttr, AElem, ANode, ANodeK, ADeclAttr, AStateChild, ADeclChild, ADecl, AValArg, AValidator,
              AProgram, AItem, AItemK, AConst, FileAst, ADbFn, Diag, ASql, ASqlMode,
-             AHow, AHandled, AArm, APat, ABind, AArmBody, AFail, AFor, AForHead, AIterSrc, AForBound, ALift, ACss, mkSpan, newDiag, stdlibPathPrefix } from "./ast.scrml"
+             AHow, AHandled, AArm, APat, ABind, AArmBody, AFail, AFor, AForHead, AIterSrc, AForBound, ALift, ACss, AForeign, mkSpan, newDiag, stdlibPathPrefix } from "./ast.scrml"
     import { CssErr, CssParsed, parseCssBlock } from "./css-syntax.scrml"
 
     // =========================================================================
@@ -60,7 +60,7 @@ ${
     // s451 (U1a): the three template token kinds get their own classes — a
     // `?{}` SQL template is read from them (TChunk = a literal run, TIStart /
     // TIEnd = a `${` / its `}`); everywhere else they are still not an expression.
-    type TC:enum = { Punct, Ident, Keyword, Num, Str, Variant, At, Other, End, TChunk, TIStart, TIEnd }
+    type TC:enum = { Punct, Ident, Keyword, Num, Str, Variant, At, Other, End, TChunk, TIStart, TIEnd, Foreign }
 
     // `v` = the payload the parser needs: a name, a cooked string, a raw number.
     // s469 (templates): `bad` — a template chunk's malformed escape (lex.scrml
@@ -88,6 +88,7 @@ ${
             .Ident(name: n) :> TC.Ident
             .Keyword(name: n) :> TC.Keyword
             .Unknown(ch: c) :> unknownClass(c)
+            .Foreign(level: l) :> TC.Foreign
         }
     }
 
@@ -115,6 +116,7 @@ ${
             .Unknown(ch: c) :> c
             .RegexLit(pattern: p) :> p
             .TemplateChunk(cooked: c) :> c
+            .Foreign(level: l, body: b) :> b
         }
     }
 
@@ -137,7 +139,18 @@ ${
             .Keyword(name: n) :> ""
             .Unknown(ch: c) :> ""
             .RegexLit(pattern: p) :> ""
+            .Foreign(level: l, body: b, closer: k) :> foreignBad(l, k)
         }
+    }
+
+    // s473 — a foreign block's closer, judged where the token is made: "A
+    // mismatched level (opener `_={` with closer `}==`) SHALL be a compile
+    // error (E-FOREIGN-001)"; "A `_{}` block that reaches end-of-file without
+    // a matching closer SHALL be a compile error (E-FOREIGN-002)" (§23.2).
+    fn foreignBad(level: int, closer: int) -> string {
+        if (closer < 0) return "E-FOREIGN-002"
+        if (closer != level) return "E-FOREIGN-001"
+        return ""
     }
 
     fn toPTok(t: Token) -> PTok {
@@ -234,7 +247,7 @@ ${
 
     // Can token `t` begin an expression?
     fn exprStartTok(t: PTok) -> boolean {
-        if (t.cls == TC.Ident || t.cls == TC.Num || t.cls == TC.Str || t.cls == TC.At || t.cls == TC.Variant || t.cls == TC.TChunk) return true
+        if (t.cls == TC.Ident || t.cls == TC.Num || t.cls == TC.Str || t.cls == TC.At || t.cls == TC.Variant || t.cls == TC.TChunk || t.cls == TC.Foreign) return true
         if (t.cls == TC.Keyword) return t.v == "true" || t.v == "false" || t.v == "not" || t.v == "match"
         if (t.cls != TC.Punct) return false
         return tk(t, "(") || tk(t, "[") || tk(t, "{") || tk(t, "!") || tk(t, "-")
@@ -1151,6 +1164,7 @@ ${
             .Sql(q: q) :> q
             .Handled(h: x) :> not
             .Template(quasis: qs) :> not
+            .Foreign(f: fb0) :> not
             .Name(name: n) :> not
             .At(name: n) :> not
             .AtItem :> not
@@ -1450,8 +1464,128 @@ ${
         if (isP(tp, "{")) return parseObject(tp)
         if (isSqlOpen(tp)) return parseSql(tp)          // s451 (U1a): `?{ `…` }` (§8.1)
         if (t.cls == TC.TChunk) return parseTemplate(tp)  // s469: a logic backtick template (§14.13.3)
+        if (t.cls == TC.Foreign) return parseForeign(tp)  // s473: a `_={ … }=` foreign code block (§23.2)
         const bad: TP = diagAt(tp, "E-PARSE-EXPR", "expected an expression, found `" + t.text + "`", t)
         return mkE(adv(bad), start, AExprK.Recovered)
+    }
+
+    // =========================================================================
+    // s473 — a §23.2 foreign code block. The lexer bounded it by characters
+    // (lex.scrml scanForeign — one token; its interior never tokenized). Here:
+    // its closer (E-FOREIGN-001 / -002), the level-0 lint (W-FOREIGN-001), and
+    // the optional `in: { name, name }` crossing header (§23.2.4a: "declared
+    // ONCE, at the top of the block, inside the braces"; "The header is
+    // optional (`in: {}` or omitted = no crossings)"). Each crossing is a Name
+    // read at its own span, so scope resolution judges it like any read.
+    // A header that is not that shape leaves `in:` at the head of the slice,
+    // which is not JavaScript (`in` is a reserved word) — E-FOREIGN-007, the
+    // unbuildable slice (§23.2.4a), named at the header. Where the block may
+    // stand (§23.2.4) is judged by analyze, which knows the enclosing function.
+    // =========================================================================
+    type FHeader:struct = { names: string[], starts: int[], bodyAt: int, ok: boolean }
+
+    fn parseForeign(tp: TP) -> RExpr {
+        const t: PTok = cur(tp)
+        const start: int = t.start
+        let tp1: TP = adv(tp)
+        if (t.bad == "E-FOREIGN-002") {
+            const d: TP = diagAt(tp1, "E-FOREIGN-002", "unclosed foreign code block — this `" + foreignOpener(t.text) + "` reaches the end of the file without its closer `}" + foreignEq(t.text) + "` (§23.2: the closer is `}` followed by the same number of `=` as the opener)", t)
+            return mkE(d, start, AExprK.Recovered)
+        }
+        const level: int = foreignEq(t.text).length
+        if (t.bad == "E-FOREIGN-001") {
+            const d1: TP = diagAt(tp1, "E-FOREIGN-001", "foreign code block level mismatch — opened with `" + foreignOpener(t.text) + "` but closed by a `}` followed by more `=` than the opener has (§23.2: the opener and closer MUST have the same number of `=` characters). Close it with `}" + foreignEq(t.text) + "`, or raise the opener's level", t)
+            return mkE(d1, start, AExprK.Recovered)
+        }
+        if (level == 0) tp1 = diagAt(tp1, "W-FOREIGN-001", "a level-0 `_{ … }` foreign block closes at the first unbalanced `}` — a `}` in a string or a comment in the foreign code ends it early; write `_={ … }=` (§23.2)", t)
+        const bodyAt: int = start + level + 2
+        const h: FHeader = foreignHeader(t.v)
+        if (!h.ok) {
+            const d2: TP = diagAt(tp1, "E-FOREIGN-007", "this foreign block's `in:` header is not `in: { name, name, … }` — the crossing header names bare identifiers only, separated by commas (§23.2.4a). Anything else leaves `in:` at the head of the slice, which is not JavaScript (`in` is a reserved word), so the slice cannot be built. Bind the value to a local first, then cross the local", t)
+            return mkE(d2, start, AExprK.Recovered)
+        }
+        let crossings: AExpr[] = []
+        let i: int = 0
+        let tpn: TP = tp1
+        while (i < h.names.length) {
+            const at: int = bodyAt + h.starts[i]
+            const x: AExpr = { nid: tpn.nid, span: mkSpan(at, at + h.names[i].length), k: AExprK.Name(h.names[i]) }
+            crossings = crossings.concat([x])
+            tpn = bumpId(tpn)
+            i = i + 1
+        }
+        const f: AForeign = { level: level, crossings: crossings, body: t.v.substring(h.bodyAt, t.v.length) }
+        return mkE(tpn, start, AExprK.Foreign(f))
+    }
+
+    // The opener's `=` run, as written.
+    fn foreignEq(text: string) -> string {
+        let k: int = 1
+        while (text.substring(k, k + 1) == "=") { k = k + 1 }
+        return text.substring(1, k)
+    }
+
+    fn foreignOpener(text: string) -> string { return "_" + foreignEq(text) + "{" }
+
+    // The `in: { a, b }` header at the head of a foreign body (after
+    // whitespace). No header (the body does not start with the word `in` then
+    // `:`): no crossings, the body whole. `starts` are offsets into `body`;
+    // `bodyAt` is where the slice begins.
+    fn foreignHeader(body: string) -> FHeader {
+        const none: FHeader = { names: [], starts: [], bodyAt: 0, ok: true }
+        const i: int = skipBlankChars(body, 0)
+        if (body.substring(i, i + 2) != "in" || isIdentCh(body.substring(i + 2, i + 3))) return none
+        let j: int = skipBlankChars(body, i + 2)
+        if (body.substring(j, j + 1) != ":") return none
+        const bad: FHeader = { names: [], starts: [], bodyAt: 0, ok: false }
+        j = skipBlankChars(body, j + 1)
+        if (body.substring(j, j + 1) != "{") return bad
+        j = skipBlankChars(body, j + 1)
+        let names: string[] = []
+        let starts: int[] = []
+        let ok: boolean = true
+        let done: boolean = body.substring(j, j + 1) == "}"
+        while (ok && !done) {
+            const n0: int = j
+            if (!isIdentStartCh(body.substring(j, j + 1))) {
+                ok = false
+            } else {
+                while (isIdentCh(body.substring(j, j + 1))) { j = j + 1 }
+                names = names.concat([body.substring(n0, j)])
+                starts = starts.concat([n0])
+                j = skipBlankChars(body, j)
+                const c: string = body.substring(j, j + 1)
+                if (c == ",") {
+                    j = skipBlankChars(body, j + 1)
+                    if (body.substring(j, j + 1) == "}") done = true
+                } else if (c == "}") {
+                    done = true
+                } else {
+                    ok = false
+                }
+            }
+        }
+        if (!ok) return bad
+        return { names: names, starts: starts, bodyAt: j + 1, ok: true }
+    }
+
+    fn skipBlankChars(s: string, from: int) -> int {
+        let i: int = from
+        while (i < s.length && s.substring(i, i + 1).trim() == "") { i = i + 1 }
+        return i
+    }
+
+    fn isIdentStartCh(c: string) -> boolean {
+        if (c == "") return false
+        if (c >= "a" && c <= "z") return true
+        if (c >= "A" && c <= "Z") return true
+        return c == "_" || c == "$"
+    }
+
+    fn isIdentCh(c: string) -> boolean {
+        if (c == "") return false
+        if (c >= "0" && c <= "9") return true
+        return isIdentStartCh(c)
     }
 
     // =========================================================================
@@ -1925,6 +2059,7 @@ ${
             .Recovered :> none
             .Sql(q: q) :> none
             .Template(quasis: qs) :> none
+            .Foreign(f: fb0) :> none
             .Name(name: n) :> none
             .At(name: n) :> none
             .AtItem :> none
@@ -2004,6 +2139,7 @@ ${
             .Spread(e: x) :> exprHasEffect(x)
             .Index(obj: o, idx: i) :> exprHasEffect(o) || exprHasEffect(i)
             .Template(quasis: qs, slots: ss) :> anyEffect(ss)
+            .Foreign(f: fb0) :> true      // s473: host code — the compiler cannot see what it does (§23.2.3)
         }
     }
 
@@ -2129,6 +2265,7 @@ ${
             .Recovered :> true
             .Sql(q: q) :> false
             .Template(quasis: qs) :> false
+            .Foreign(f: fb0) :> false
             .Name(name: n) :> false
             .At(name: n) :> false
             .AtItem :> false
@@ -2437,6 +2574,7 @@ ${
             .Sql(q: q) :> false
             .Handled(h: x) :> false
             .Template(quasis: qs) :> false
+            .Foreign(f: fb0) :> false
         }
     }
 
@@ -4238,6 +4376,7 @@ ${
             .Recovered :> false
             .Sql(q: q) :> false
             .Template(quasis: qs) :> false
+            .Foreign(f: fb0) :> false
             .At(name: n) :> false
             .AtItem :> false
             .Num(raw: r) :> false
@@ -4877,6 +5016,7 @@ ${
             .Sql(q: q) :> ""
             .Handled(h: x) :> ""
             .Template(quasis: qs) :> ""
+            .Foreign(f: fb0) :> ""
         }
     }
 
@@ -6414,22 +6554,8 @@ ${
 
     // `_` + zero or more `=` + `{` (§23.2) whose `_` does not end an
     // identifier (`my_{x}` is content): the level (count of `=`), else -1.
-    fn foreignLevel(mp: MP) -> int {
-        if (chAt(mp, 0) != "_") return -1
-        if (isIdentTail(chAt(mp, -1))) return -1
-        let k: int = 1
-        while (chAt(mp, k) == "=") { k = k + 1 }
-        if (chAt(mp, k) != "{") return -1
-        return k - 1
-    }
-
-    fn isIdentTail(c: string) -> boolean {
-        if (c == "") return false
-        if (c >= "a" && c <= "z") return true
-        if (c >= "A" && c <= "Z") return true
-        if (c >= "0" && c <= "9") return true
-        return c == "_" || c == "$"
-    }
+    // s473: lex.scrml's reader (the one spelling of the grammar).
+    fn foreignLevel(mp: MP) -> int { return foreignOpenAt(mp.src, mp.pos) }
 
     // SPEC §4.18.1b (PA reading S442): `_{` in a markup body is NEITHER an exit
     // NOR content — it stays an ERROR, E-FOREIGN-004 (§23.2.4: a markup element
@@ -6438,34 +6564,12 @@ ${
     // Unclosed → E-FOREIGN-002 (§23.2).
     fn skipForeign(mp: MP) -> MP {
         const start: int = mp.pos
-        const lvl: int = foreignLevel(mp)
-        let m: MP = mAdv(mp, lvl + 2)
-        let depth: int = 0
-        let closed = false
-        while (!closed && !mEof(m)) {
-            const c: string = chAt(m, 0)
-            if (c == "}" && depth == 0 && closesForeign(m, lvl)) {
-                m = mAdv(m, lvl + 1)
-                closed = true
-            } else {
-                if (lvl == 0 && c == "{") depth = depth + 1
-                if (lvl == 0 && c == "}") depth = depth - 1
-                m = mAdv(m, 1)
-            }
-        }
-        if (!closed) {
+        const x: ForeignExtent = foreignExtentAt(mp.src, mp.pos)    // s473: lex.scrml's reader
+        const m: MP = mAt(mp, x.end)
+        if (x.closer < 0) {
             return mDiag(m, "E-FOREIGN-002", "unclosed foreign code block — a `_{` / `_={` opener needs its matching `}` / `}=` closer (§23.2)", start, m.pos)
         }
         return mDiag(m, "E-FOREIGN-004", "a `_{…}` foreign code block is not valid in a markup body (§23.2.4) — bind its value with `const x = _={ … }=` in a server `function` body, or use a `use foreign:` sidecar (§23.4)", start, m.pos)
-    }
-
-    fn closesForeign(mp: MP, lvl: int) -> boolean {
-        let k: int = 1
-        while (k <= lvl) {
-            if (chAt(mp, k) != "=") return false
-            k = k + 1
-        }
-        return true
     }
 
     fn skipSigil(mp: MP) -> MP {
@@ -6711,6 +6815,7 @@ ${
             .Sql(q: q) :> not
             .Handled(h: x) :> not
             .Template(quasis: qs) :> not
+            .Foreign(f: fb0) :> not
         }
     }
 
@@ -6858,6 +6963,7 @@ ${
             .Sql(q: q) :> false
             .Handled(h: x) :> false
             .Template(quasis: qs) :> false
+            .Foreign(f: fb0) :> false
         }
     }
 
@@ -6888,6 +6994,7 @@ ${
             .Sql(q: q) :> false
             .Handled(h: x) :> false
             .Template(quasis: qs) :> false
+            .Foreign(f: fb0) :> false
         }
     }
 
