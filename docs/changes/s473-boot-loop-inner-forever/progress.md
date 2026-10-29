@@ -62,3 +62,18 @@ base: s473-boot-exitless-loop; retarget to main after #1631 lands.
   m1 lowered 100 / m3 60 / m4 3,121 / codec 166, bootstrap-conformance --check current — all PASS.
 - PA ruling on the two open questions: keep both legal (the "some path leaves" reading; an inner loop with an
   ending head is not a forever loop).
+
+## 2026-10-29T15:30Z — review round 1 (#1638, LAND-W-F/U)
+- F2 (LOW, new cascade): a labelled `break o` / `continue o` crossing the bound loop to an OUTER statement loop
+  got E-LOOP-008 beside its E-LOOP-005, with a message naming an inner loop that may not exist (O24/O25/O26).
+  Fix: `boundLoopStranded` stays quiet when the body holds a labelled exit naming no loop it owns
+  (`blockCrossesOut`: this loop's label + every loop label inside it, any depth, reachability not read — every
+  such exit is already E-LOOP-005 / -003, so quiet never lets a program compile). Base behaviour (E-LOOP-005
+  alone) restored. Code comment and SPEC (rule 10 closing paragraph, E-LOOP-008 entry) no longer say the only
+  stranding statement is an inner forever loop; they name the crossing exit and say it is E-LOOP-005 alone.
+- Tests: +4 (O24, O25, O26 pinned to `["E-LOOP-005"]`, red before the fix; plus a guard that a label owned by an
+  inner loop is not a crossing exit). File now 30; with #1631's file 64 pass, 0 fail.
+- F1 (LOW, pre-existing): filed g-bootstrap-loop-never-completes-dead-break-s473 — `loopNeverCompletes` /
+  `blockBreaksTo` count an unreachable `break` (`for (y of ys) { lift y; for { for { } break; } }` compiles and
+  hangs). Needs its own lane (shared with fall-off, divergence, check.scrml).
+- New helper names checked unique (blockCrossesOut, stmtCrossesOut, blocksCrossOut, labelOwned).

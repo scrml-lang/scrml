@@ -36871,7 +36871,10 @@ const polled = for (let tries = 0; tries < 3; tries += 1) { lift probe(); };
     SHALL have a path through its body that finishes an iteration — one that reaches the end of the body, a
     `continue` of this loop, or a way out of it (above) — or the compiler SHALL reject it with **E-LOOP-008**.
     With none, every path runs into an inner loop that never completes (a head that never ends it, and no
-    `break` that leaves it), so the loop's value is never produced (`const xs = for (y of ys) { lift y; for { } };`).
+    `break` that leaves it), so the loop's value is never produced (`const xs = for (y of ys) { lift y; for { } };`),
+    or into a `break label` / `continue label` that crosses this loop to a loop outside it. That crossing exit
+    is already **E-LOOP-005** (§49.6 rule 6), and a body that holds one SHALL NOT also be reported with
+    E-LOOP-008 under this paragraph.
     The reading of "reached" and "a way out" is the one above; a `continue label` or `break label` naming this
     loop from the inner loop finishes the iteration or leaves the loop. An inner loop whose head does end it
     (`for (z of zs) { for { } }`) may run zero times, so it strands nothing. The inner forever loop on its own
@@ -37106,8 +37109,9 @@ A `for` bound as a value, or a Tier-0 `${ for … }`, whose head never ends it (
 
 *(S473 ruling — "The exit-less loop rule (E-LOOP-008) widens to catch an inner forever loop.")* A bound or
 Tier-0 loop whose head does end it is also E-LOOP-008 when no path through its body finishes an iteration
-(reaches the body's end, a `continue` of this loop, or a way out of it), because every path runs into an
-inner loop that never completes (§49.6, rule 10). **Direction of change:** newly-rejecting (such a loop
+(reaches the body's end, a `continue` of this loop, or a way out of it) because every path runs into an
+inner loop that never completes (§49.6, rule 10). A body that instead holds a `break label` / `continue label`
+crossing the loop to an outer one gets E-LOOP-005 alone, not this code. **Direction of change:** newly-rejecting (such a loop
 compiled, and calling or rendering it never returned).
 
 ```scrml

@@ -165,3 +165,24 @@ describe("legal: an inner forever loop that does exit, or a path that gets past 
     expect(bound(`for (y of ys) { lift y; }`)).toEqual([]);
   });
 });
+
+// ---------------------------------------------------------------------------
+describe("review #1638 F2: a labelled exit that crosses the bound loop to an outer loop is E-LOOP-005 alone", () => {
+  // A bound loop is a wall (§49.6 rule 6). `break o` / `continue o` naming a
+  // statement loop outside it is E-LOOP-005; the strand check must not add an
+  // E-LOOP-008 that names an inner loop that is not there. (Base: E-LOOP-005 only.)
+  const outer = (inner) => fnCodes(`        o: for (a of ys) {\n            const xs = ${inner};\n        }\n        return 1;`);
+  test("O24: `continue o` in the bound body", () => {
+    expect(outer(`for (y of ys) { lift y; continue o; }`)).toEqual(["E-LOOP-005"]);
+  });
+  test("O25: `break o` in the bound body", () => {
+    expect(outer(`for (y of ys) { lift y; break o; }`)).toEqual(["E-LOOP-005"]);
+  });
+  test("O26: `break o` inside an inner forever loop", () => {
+    expect(outer(`for (y of ys) { lift y; for { break o; } }`)).toEqual(["E-LOOP-005"]);
+  });
+  test("a label owned by a loop INSIDE the bound loop is not a crossing exit: the strand is still caught", () => {
+    expect(bound(`for (y of ys) { lift y; p: for { for { continue p; } } }`)).toEqual(["E-LOOP-008"]);
+    expect(bound(`for (y of ys) { lift y; p: for { q: for { break q; } } }`)).toEqual(["E-LOOP-008"]);
+  });
+});

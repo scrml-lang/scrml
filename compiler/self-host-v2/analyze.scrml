@@ -12750,15 +12750,64 @@ ${
     // counted head with a condition) still never produces its value when no
     // path through its body finishes an iteration: every path runs into a
     // statement that ends it (stmtEndsPath) and none reaches a `continue` of
-    // this loop or a way out of it. The only such statement that is neither
-    // of those is an inner loop that never completes (loopNeverCompletes: a
-    // forever head no `break` leaves), so this is the inner-forever strand
-    // (review #1631 F3: `for (y of ys) { lift y; for { } }` hung). A forever
-    // head is boundLoopExitless's, so the two never both fire.
+    // this loop or a way out of it. Such a statement is either an inner loop
+    // that never completes (loopNeverCompletes: a forever head no `break`
+    // leaves) — the inner-forever strand (review #1631 F3: `for (y of ys) {
+    // lift y; for { } }` hung) — or a labelled `break` / `continue` that
+    // crosses this loop to a loop outside it, which is already E-LOOP-005
+    // (or E-LOOP-003): a bound loop is a wall (§49.6 rule 6). With such a
+    // crossing exit anywhere in the body this check stays quiet, so the
+    // refused program gets that one error, not a second one naming an inner
+    // loop that may not exist (review #1638 F2). A forever head is
+    // boundLoopExitless's, so the two never both fire.
     fn boundLoopStranded(f: AFor) -> boolean {
         if (headNeverEnds(f.head)) return false
         if (!blockEndsPath(f.body)) return false
+        if (blockCrossesOut(f.body, [f.label])) return false
         return !blockWayOut(f.body, f.label, true, true)
+    }
+
+    // Does `b` hold a labelled `break` / `continue` naming no loop in `owned`
+    // (this loop and the loops inside it, at any depth)? Reachability is not
+    // read: every such exit is an error of its own (E-LOOP-005 / -003), so
+    // staying quiet here never lets a program compile.
+    fn blockCrossesOut(b: ABlock, owned: string[]) -> boolean {
+        for (const s of b.stmts) {
+            if (stmtCrossesOut(s, owned)) return true
+        }
+        return false
+    }
+
+    fn stmtCrossesOut(s: AStmt, owned: string[]) -> boolean {
+        const k: AStmtK = s.k
+        return match k {
+            .Break(label: l) :> l != "" && !labelOwned(l, owned)
+            .Continue(label: l) :> l != "" && !labelOwned(l, owned)
+            .For(f: lf) :> blockCrossesOut(lf.body, owned.concat([lf.label]))
+            .Lift(what: w) :> blocksCrossOut(nestedBlocks(s), owned)
+            .Eval(e: x) :> blocksCrossOut(nestedBlocks(s), owned)
+            .Local(name: n) :> blocksCrossOut(nestedBlocks(s), owned)
+            .Return(e: x) :> blocksCrossOut(nestedBlocks(s), owned)
+            .If(cond: c) :> blocksCrossOut(nestedBlocks(s), owned)
+            .Given(name: n) :> blocksCrossOut(nestedBlocks(s), owned)
+            .Defer(body: d) :> blockCrossesOut(d, owned)
+            .EffectStmt(w: w) :> false
+            .Fail(f: x) :> false
+        }
+    }
+
+    fn blocksCrossOut(bs: ABlock[], owned: string[]) -> boolean {
+        for (const b of bs) {
+            if (blockCrossesOut(b, owned)) return true
+        }
+        return false
+    }
+
+    fn labelOwned(l: string, owned: string[]) -> boolean {
+        for (const o of owned) {
+            if (o == l) return true
+        }
+        return false
     }
 
     fn headNeverEnds(h: AForHead) -> boolean {
