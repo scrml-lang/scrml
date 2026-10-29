@@ -307,7 +307,9 @@ describe("an import binds a name in file scope", () => {
     expect(src.slice(r.diags[0].span.start, r.diags[0].span.end)).toBe("twice");
   });
 
-  test("two imports of one name: the later wins, with W-IMPORT-001 (§41.7)", async () => {
+  // s473 r2 #5 (narrowed to exported names): two user files EXPORTING one name are E-SCOPE-010 at
+  // the later file; the §41.7 W-IMPORT-001 still reports the second import beside it.
+  test("two imports of one name from two user files that both export it: E-SCOPE-010 (§7.6, S473), with W-IMPORT-001 (§41.7)", () => {
     const L2 = { path: "lib2.scrml", src: `\${\n    export fn twice(n: int) -> int {\n        return n * 20;\n    }\n}\n` };
     const src = `<program>
     \${ import { twice } from "./lib.scrml"; import { twice } from "./lib2.scrml"; }
@@ -315,10 +317,37 @@ describe("an import binds a name in file scope", () => {
 </program>
 `;
     const r = run(src, [LIB, L2]);
+    expect(r.diags.map((d) => [d.code, d.file]).sort()).toEqual([["E-SCOPE-010", "lib2.scrml"], ["W-IMPORT-001", ENTRY]].sort());
+  });
+
+  // s473 r2 LOW-C: later-import-wins can still happen between a USER import and a STDLIB import of one
+  // name (stdlib names are not user declarations, so the pair is legal). The runtime proves which won.
+  test("a user import and a stdlib import of one name: the later wins, with W-IMPORT-001 (§41.7) — either order, and it runs", async () => {
+    const U = { path: "u.scrml", src: `\${\n    export fn pub(s: string) -> string {\n        return "user:" + s;\n    }\n}\n` };
+    const stdU = (src) => frontEndStdlib(mods(), [U, { path: ENTRY, src }], ENTRY, { stdlibRoot: FIXTURE });
+    const r1 = stdU(`<program>\n    \${ import { pub } from "./u.scrml"; import { pub } from "scrml:vis"; }\n    <p id="w">\${pub("x")}</p>\n</program>\n`);
+    expect(r1.diags.map((d) => [d.code, d.severity])).toEqual([["W-IMPORT-001", "Warning"]]);
+    clean(r1);
+    await loadProgram(r1.core, "s473-later-std-" + k++);
+    expect(text("#w")).toBe("lib-helper:X");
+    const r2 = stdU(`<program>\n    \${ import { pub } from "scrml:vis"; import { pub } from "./u.scrml"; }\n    <p id="w">\${pub("x")}</p>\n</program>\n`);
+    expect(r2.diags.map((d) => [d.code, d.severity])).toEqual([["W-IMPORT-001", "Warning"]]);
+    clean(r2);
+    await loadProgram(r2.core, "s473-later-user-" + k++);
+    expect(text("#w")).toBe("user:x");
+  });
+
+  test("the same name imported twice from ONE file: one declaration — W-IMPORT-001 only, and it runs", async () => {
+    const src = `<program>
+    \${ import { twice } from "./lib.scrml"; import { twice } from "./lib.scrml"; }
+    <p id="t">\${twice(1)}</p>
+</program>
+`;
+    const r = run(src, [LIB]);
     expect(r.diags.map((d) => [d.code, d.severity])).toEqual([["W-IMPORT-001", "Warning"]]);
     clean(r);
     await loadProgram(r.core, "s472-later-" + k++);
-    expect(text("#t")).toBe("20");
+    expect(text("#t")).toBe("2");
   });
 });
 

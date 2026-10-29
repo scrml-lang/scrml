@@ -36,12 +36,17 @@ describe("bootstrap runtime carries impl#1's §5.2 URL guard verbatim", () => {
     const { before, after } = currentBlock(runtime);
     const outside = before + after;
     // `attr` asks the guard; the only URL-attribute table is the verbatim one.
-    expect(outside).toContain("const guard = urlGuardOf(el, name);");
+    // s473: `attr` asks `writeGuardOf`, which adds the CSS-url attribute guard
+    // (cssValueOf) and asks `urlGuardOf` for every URL write.
+    expect(outside).toContain("const guard = writeGuardOf(el, name);");
+    expect(outside).toContain("return urlGuardOf(el, name);");
+    expect(outside).toContain("const url = urlGuardOf(el, name);");
     expect(outside).toContain("_scrml_is_url_attr(tag, lower)");
     expect(outside).not.toMatch(/new Set\(\[\s*"action"/);
     expect(outside).not.toMatch(/"javascript"/);
     // exactly one setAttribute in the runtime — the guarded one
     expect(outside.match(/\.setAttribute\(/g)?.length).toBe(1);
-    expect(outside).toContain("el.setAttribute(name, guard === null ? s : guard(s));");
+    expect(outside).toContain("const w = guard === null ? s : guard(s);");
+    expect(outside).toContain("el.setAttribute(name, w);");
   });
 });
