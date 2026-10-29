@@ -1606,6 +1606,31 @@ const PARSE_VARIANT_FAILURE = "scrml:data/ParseError";
 const COMPILER_ERROR_TYPE_NAMES: ReadonlySet<string> = new Set(["Error", "SqlError", "ServerCallError"]);
 
 /**
+ * S473 — §19.9.10 (S454) "For an `f` not declared `!`, the failure set is `Transport(t:
+ * ServerCallError)` alone": the type of a `_ e :>` whole-error binder (§18.6.1) on a CLIENT call to
+ * a server-placed function that is not declared `!` (server-placed by a `?{}`, by inheritance, by
+ * the `server` keyword — local or imported). Read ONLY by the whole-error binder audit
+ * (`wholeBinderCalleeEnum`): `e.variant`, `e is .Transport` and `match e { .Transport :> … }` are
+ * checkable against it; a payload read is E-TYPE-004, as on any enum value (§18.17.1).
+ *
+ * The payload `t` is typed `asIs` (impl#1 does not build `ServerCallError`), so its canonical key is
+ * unknown: a `.Transport(t)` binder and passing `e` whole to a function stay refused (fail closed).
+ * One frozen object, never registered in a type registry, so no program name can denote it.
+ *
+ * impl#1 does not build §19.9.10 at run time (`g-impl1-client-server-call-not-failable-s451`): a
+ * failed call to such a function throws past the `!{}` (the stub raises `HTTP <status>`), so the
+ * arm is not entered there; the typing is the SPEC's, for the code the arm holds.
+ */
+const CLIENT_SERVER_CALL_FAILURE_SET: EnumType = Object.freeze({
+  kind: "enum" as const,
+  name: "Transport(t: ServerCallError)",
+  variants: Object.freeze([
+    Object.freeze({ name: "Transport", payload: new Map<string, ResolvedType>([["t", tAsIs()]]), renders: null }),
+  ]) as unknown as VariantDef[],
+  transitionRules: null,
+}) as EnumType;
+
+/**
  * The VARIANT SET an error-type name denotes, for the checks that read one
  * (exhaustiveness, `?` propagation, qualifier mismatch): the file's registry (declared,
  * imported under its LOCAL name, or a BUILTIN_TYPES entry), or — for the parseVariant
@@ -11675,14 +11700,44 @@ function annotateNodes(
     const res = wholeBinderResolveFn(name, scope);
     if (res) {
       const errName = typeof res.decl.errorType === "string" ? res.decl.errorType.trim() : "";
-      return errName ? resolveErrorEnumThroughAliases(errName, typeRegistry, _fileTypeDeclsForErrors) : null;
+      if (errName) return resolveErrorEnumThroughAliases(errName, typeRegistry, _fileTypeDeclsForErrors);
+      // S473 — a server-placed callee not declared `!`, called on the client (§19.9.10).
+      return wholeBinderPlainServerCallee(res.decl, filePath) && wholeBinderCallIsClient(scope) ? CLIENT_SERVER_CALL_FAILURE_SET : null;
     }
-    // Nothing in this file binds the name: an IMPORTED failable function.
+    // Nothing in this file binds the name: an IMPORTED function.
     const r = resolveFnBinding(name, scope, true);
-    if (r.k === "unknown" && importedFnErrorEnums.has(name) && wholeBinderTopLevelDeclCount(name) === 1 && !allFnDecls.some((d) => d.name === name)) {
-      return importedFnErrorEnums.get(name) ?? null;
+    if (r.k === "unknown" && wholeBinderTopLevelDeclCount(name) === 1 && !allFnDecls.some((d) => d.name === name)) {
+      if (importedFnErrorEnums.has(name)) return importedFnErrorEnums.get(name) ?? null;
+      // S473 — an imported server-placed function not declared `!`, called on the client
+      // (§19.9.10: "A call to a function imported from another file is judged by the callee's
+      // placement, exactly as a same-file call").
+      const d = importedFnDecls?.get(name);
+      if (d && wholeBinderPlainServerCallee(d.fnNode, d.depFilePath) && wholeBinderCallIsClient(scope)) return CLIENT_SERVER_CALL_FAILURE_SET;
     }
     return null;
+  }
+  /**
+   * S473 — `decl` (declared in `declFile`) is server-placed and NOT declared `!`, and route
+   * inference did not body-split it (a CPS split sends impl#1's own `CpsError` variants, which the
+   * failure set does not name — that callee stays untyped, fail closed).
+   */
+  function wholeBinderPlainServerCallee(decl: ASTNodeLike, declFile: string): boolean {
+    if (decl.canFail === true) return false;
+    const entry = routeMap?.functions?.get(`${declFile}::${(decl.span as Span | undefined)?.start}`);
+    if (entry && entry.cpsSplit) return false;
+    return (decl as { isServer?: boolean }).isServer === true || (!!entry && entry.boundary === "server");
+  }
+  /**
+   * S473 — the `!{}` runs on the CLIENT: the innermost function scope around it (labelled
+   * `fn:<name>:<boundary>` by the function-decl visit) is client-placed, or there is none (a body-top
+   * statement or an event-handler value — §19.9.10 scope item 2). A server→server call has no
+   * failure set (§19.9.10 "Not affected").
+   */
+  function wholeBinderCallIsClient(scope: Scope): boolean {
+    for (let s: Scope | null = scope; s !== null; s = s.parent) {
+      if (s.label.startsWith("fn:")) return s.label.endsWith(":client");
+    }
+    return true;
   }
   function auditWholeBinderArms(arms: unknown, en: EnumType | null, scope: Scope, frames: unknown[], fallbackSpan: Span): void {
     if (!Array.isArray(arms)) return;
