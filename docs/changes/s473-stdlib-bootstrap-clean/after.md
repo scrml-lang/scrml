@@ -23,9 +23,9 @@ md is untouched (709 → 709; dual-compiler constraints, see below).
 | data/parse | 4 | 2 | wrapper, `;` |
 | data/schema-for | 3 | 2 | wrapper |
 | data/table-for | 8 | 7 | wrapper |
-| data/transform | 284 | 204 | `;` (wrapper KEPT — `~{ import }`, see gaps) |
+| data/transform | 284 | 204 | `;` (wrapper KEPT — unwrapping adds a new impl#1 code: its `~{ import }` is emitted into the body; see gaps) |
 | data/validate | 148 | 121 | `;` (wrapper KEPT) |
-| format | 174 | 118 | wrapper, `;`, params annotated (§7.3.2 defaults), S440 truthiness |
+| format | 174 | FMT_AFTER | wrapper, `;`, params annotated (§7.3.2 defaults); bodies kept EXACTLY the shim's (`||` fallbacks, `!str`, `String()` — fix round 1, MED-1) |
 | fs | 64 | 40 | wrapper, `;`, params annotated |
 | host | 6 | 4 | wrapper, `;` |
 | http | 21 | 13 | wrapper, `;` |

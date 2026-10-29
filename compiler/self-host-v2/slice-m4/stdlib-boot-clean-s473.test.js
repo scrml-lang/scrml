@@ -85,6 +85,23 @@ describe("scrml:random on the bootstrap — host-backed wrappers, compiled and R
     expect(Number.isInteger(n("s")) && n("s") >= 1 && n("s") <= 6).toBe(true);
   });
 
+  test("side by side with the shipped shim (compiler/runtime/stdlib/random.js): the COMPILED .scrml draws exactly what the shim draws, Math.random stubbed (#1648 review MED-1)", async () => {
+    const shim = await import("../../runtime/stdlib/random.js");
+    const real = Math.random;
+    try {
+      for (const r of [0, 0.5, 0.999999]) {
+        Math.random = () => r;
+        const want = [shim.randomInt(1, 6), shim.random(), shim.randomInt(7, 7), shim.randomInt(6, 1)].map(String);
+        const r2 = clean(USER);
+        await loadProgram(r2.core, "s473-rnd-shim-" + k++);
+        const got = ["d", "u", "p", "s"].map((id) => document.querySelector("#" + id).textContent);
+        expect({ r, got }).toEqual({ r, got: want });
+      }
+    } finally {
+      Math.random = real;
+    }
+  });
+
   test("the host file itself: the moved ~{} assertions (closed interval, both endpoints reachable, swapped bounds)", () => {
     const seen = new Set();
     for (let i = 0; i < 2000; i++) {

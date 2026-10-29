@@ -19,9 +19,9 @@ ${
      *   formatCurrency(1234.56, "EUR", "de-DE") → "1.234,56 €"
      */
     export function formatCurrency(amount: number, currency: string = "USD", locale: string = "en-US") {
-        return new Intl.NumberFormat(locale, {
+        return new Intl.NumberFormat(locale || "en-US", {
             style: "currency",
-            currency: currency
+            currency: currency || "USD"
         }).format(amount);
     }
 
@@ -39,7 +39,7 @@ ${
             opts.minimumFractionDigits = decimals;
             opts.maximumFractionDigits = decimals;
         }
-        return new Intl.NumberFormat(locale, opts).format(n);
+        return new Intl.NumberFormat(locale || "en-US", opts).format(n);
     }
 
     /**
@@ -52,7 +52,7 @@ ${
      *   pluralize(3, "child", "children") → "3 children"
      */
     export function pluralize(count: number, singular: string, plural: string | not = not) {
-        const word = count == 1 ? singular : (plural is given ? plural : singular + "s");
+        const word = count == 1 ? singular : (plural || singular + "s");
         return `${count} ${word}`;
     }
 
@@ -67,8 +67,8 @@ ${
      *   truncate("Hello world", 20)                    → "Hello world"
      *   truncate("Hello world this is long", 10, " →") → "Hello wo →"
      */
-    export function truncate(str: string, maxLength: int, suffix: string = "...") {
-        if (str == "") return str;
+    export function truncate(str: string | not, maxLength: int, suffix: string = "...") {
+        if (!str) return str;
         const sfx = suffix is given ? suffix : "...";
         if (str.length <= maxLength) return str;
         return str.slice(0, maxLength - sfx.length) + sfx;
@@ -82,8 +82,8 @@ ${
      *   slug("Hello World! This is a Test") → "hello-world-this-is-a-test"
      *   slug("Héllo Wörld")                 → "hello-world"
      */
-    export function slug(str: string) {
-        if (str == "") return "";
+    export function slug(str: string | not) {
+        if (!str) return "";
         return str
             .normalize("NFD")
             .replace(/[\u0300-\u036f]/g, "")
@@ -96,8 +96,8 @@ ${
      * Capitalize the first letter of a string.
      * Example: capitalize("hello world") → "Hello world"
      */
-    export function capitalize(str: string) {
-        if (str == "") return str;
+    export function capitalize(str: string | not) {
+        if (!str) return str;
         return str.charAt(0).toUpperCase() + str.slice(1);
     }
 
@@ -105,8 +105,8 @@ ${
      * Convert a string to title case.
      * Example: titleCase("hello world") → "Hello World"
      */
-    export function titleCase(str: string) {
-        if (str == "") return str;
+    export function titleCase(str: string | not) {
+        if (!str) return str;
         return str.replace(/\b\w/g, c => c.toUpperCase())
     }
 
@@ -114,8 +114,8 @@ ${
      * Split camelCase or PascalCase into space-separated words.
      * Example: toWords("helloWorld") → "hello World"
      */
-    export function toWords(str: string) {
-        if (str == "") return str;
+    export function toWords(str: string | not) {
+        if (!str) return str;
         return str
             .replace(/([A-Z]+)([A-Z][a-z])/g, "$1 $2")
             .replace(/([a-z\d])([A-Z])/g, "$1 $2")
@@ -126,16 +126,16 @@ ${
      * Pad a string on the left to a given length.
      * Example: padLeft("42", 5, "0") → "00042"
      */
-    export function padLeft(str: string, length: int, char: string = " ") {
-        return str.padStart(length, char);
+    export function padLeft(str, length: int, char: string = " ") {
+        return String(str).padStart(length, char || " ");
     }
 
     /**
      * Pad a string on the right to a given length.
      * Example: padRight("hi", 5, "-") → "hi---"
      */
-    export function padRight(str: string, length: int, char: string = " ") {
-        return str.padEnd(length, char);
+    export function padRight(str, length: int, char: string = " ") {
+        return String(str).padEnd(length, char || " ");
     }
 
     /**
@@ -186,7 +186,7 @@ ${
      * @param locale — BCP 47 language tag (default "en-US")
      */
     export function compactNumber(n: number, locale: string = "en-US") {
-        return new Intl.NumberFormat(locale, { notation: "compact" }).format(n);
+        return new Intl.NumberFormat(locale || "en-US", { notation: "compact" }).format(n);
     }
 
     /**
@@ -202,8 +202,8 @@ ${
      * @param locale — BCP 47 language tag (default "en-US")
      */
     export function formatList(items: string[], type: string = "conjunction", locale: string = "en-US") {
-        const t = type;
-        return new Intl.ListFormat(locale, { style: "long", type: t }).format(items);
+        const t = type || "conjunction";
+        return new Intl.ListFormat(locale || "en-US", { style: "long", type: t }).format(items);
     }
 
     /**
@@ -220,8 +220,8 @@ ${
      * @param locale   — BCP 47 language tag (default "en-US")
      */
     export function formatRange(start: number, end: number, currency: string | not = not, locale: string = "en-US") {
-        const opts = currency is given ? { style: "currency", currency: currency } : {};
-        return new Intl.NumberFormat(locale, opts).formatRange(start, end);
+        const opts = currency ? { style: "currency", currency: currency } : {};
+        return new Intl.NumberFormat(locale || "en-US", opts).formatRange(start, end);
     }
 
     /**

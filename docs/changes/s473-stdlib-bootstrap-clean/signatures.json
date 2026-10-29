@@ -1,36 +1,120 @@
 {
   "stdlib/format/index.scrml": [
-    ["export function formatCurrency(amount, currency, locale) {", "export function formatCurrency(amount: number, currency: string = \"USD\", locale: string = \"en-US\") {"],
-    ["export function formatNumber(n, decimals, locale) {", "export function formatNumber(n: number, decimals: int | not = not, locale: string = \"en-US\") {"],
-    ["export function pluralize(count, singular, plural) {", "export function pluralize(count: number, singular: string, plural: string | not = not) {"],
-    ["export function truncate(str, maxLength, suffix) {", "export function truncate(str: string, maxLength: int, suffix: string = \"...\") {"],
-    ["export function slug(str) {", "export function slug(str: string) {"],
-    ["export function capitalize(str) {", "export function capitalize(str: string) {"],
-    ["export function titleCase(str) {", "export function titleCase(str: string) {"],
-    ["export function toWords(str) {", "export function toWords(str: string) {"],
-    ["export function padLeft(str, length, char) {", "export function padLeft(str: string, length: int, char: string = \" \") {"],
-    ["export function padRight(str, length, char) {", "export function padRight(str: string, length: int, char: string = \" \") {"],
-    ["export function formatBytes(bytes, decimals) {", "export function formatBytes(bytes: number, decimals: int = 1) {"],
-    ["export function formatPercent(value, decimals) {", "export function formatPercent(value: number, decimals: int = 0) {"],
-    ["export function compactNumber(n, locale) {", "export function compactNumber(n: number, locale: string = \"en-US\") {"],
-    ["export function formatList(items, type, locale) {", "export function formatList(items: string[], type: string = \"conjunction\", locale: string = \"en-US\") {"],
-    ["export function formatRange(start, end, currency, locale) {", "export function formatRange(start: number, end: number, currency: string | not = not, locale: string = \"en-US\") {"]
+    [
+      "export function formatCurrency(amount, currency, locale) {",
+      "export function formatCurrency(amount: number, currency: string = \"USD\", locale: string = \"en-US\") {"
+    ],
+    [
+      "export function formatNumber(n, decimals, locale) {",
+      "export function formatNumber(n: number, decimals: int | not = not, locale: string = \"en-US\") {"
+    ],
+    [
+      "export function pluralize(count, singular, plural) {",
+      "export function pluralize(count: number, singular: string, plural: string | not = not) {"
+    ],
+    [
+      "export function truncate(str, maxLength, suffix) {",
+      "export function truncate(str: string | not, maxLength: int, suffix: string = \"...\") {"
+    ],
+    [
+      "export function slug(str) {",
+      "export function slug(str: string | not) {"
+    ],
+    [
+      "export function capitalize(str) {",
+      "export function capitalize(str: string | not) {"
+    ],
+    [
+      "export function titleCase(str) {",
+      "export function titleCase(str: string | not) {"
+    ],
+    [
+      "export function toWords(str) {",
+      "export function toWords(str: string | not) {"
+    ],
+    [
+      "export function padLeft(str, length, char) {",
+      "export function padLeft(str, length: int, char: string = \" \") {"
+    ],
+    [
+      "export function padRight(str, length, char) {",
+      "export function padRight(str, length: int, char: string = \" \") {"
+    ],
+    [
+      "export function formatBytes(bytes, decimals) {",
+      "export function formatBytes(bytes: number, decimals: int = 1) {"
+    ],
+    [
+      "export function formatPercent(value, decimals) {",
+      "export function formatPercent(value: number, decimals: int = 0) {"
+    ],
+    [
+      "export function compactNumber(n, locale) {",
+      "export function compactNumber(n: number, locale: string = \"en-US\") {"
+    ],
+    [
+      "export function formatList(items, type, locale) {",
+      "export function formatList(items: string[], type: string = \"conjunction\", locale: string = \"en-US\") {"
+    ],
+    [
+      "export function formatRange(start, end, currency, locale) {",
+      "export function formatRange(start: number, end: number, currency: string | not = not, locale: string = \"en-US\") {"
+    ]
   ],
   "stdlib/path/index.scrml": [
-    ["function toPosixSep(p) {", "function toPosixSep(p: string | not) {"],
-    ["export function join(...segments) {", "export function join(...segments: string[]) {"],
-    ["export function resolve(...segments) {", "export function resolve(...segments: string[]) {"],
-    ["export function dirname(filePath) {", "export function dirname(filePath: string | not) {"],
-    ["export function basename(filePath, ext) {", "export function basename(filePath: string | not, ext: string | not = not) {"],
-    ["export function extname(filePath) {", "export function extname(filePath: string | not) {"],
-    ["export function relative(from, to) {", "export function relative(from: string | not, to: string | not) {"],
-    ["export function normalize(filePath) {", "export function normalize(filePath: string | not) {"]
+    [
+      "function toPosixSep(p) {",
+      "function toPosixSep(p: string | not) {"
+    ],
+    [
+      "export function join(...segments) {",
+      "export function join(...segments: string[]) {"
+    ],
+    [
+      "export function resolve(...segments) {",
+      "export function resolve(...segments: string[]) {"
+    ],
+    [
+      "export function dirname(filePath) {",
+      "export function dirname(filePath: string | not) {"
+    ],
+    [
+      "export function basename(filePath, ext) {",
+      "export function basename(filePath: string | not, ext: string | not = not) {"
+    ],
+    [
+      "export function extname(filePath) {",
+      "export function extname(filePath: string | not) {"
+    ],
+    [
+      "export function relative(from, to) {",
+      "export function relative(from: string | not, to: string | not) {"
+    ],
+    [
+      "export function normalize(filePath) {",
+      "export function normalize(filePath: string | not) {"
+    ]
   ],
   "stdlib/fs/index.scrml": [
-    ["export function readFileSync(path, encoding) {", "export function readFileSync(path: string, encoding: string = \"utf-8\") {"],
-    ["export function writeFileSync(path, content, encoding) {", "export function writeFileSync(path: string, content: string, encoding: string = \"utf-8\") {"],
-    ["export function existsSync(path) {", "export function existsSync(path: string) {"],
-    ["export function readdirSync(dir) {", "export function readdirSync(dir: string) {"],
-    ["export function statSync(path) {", "export function statSync(path: string) {"]
+    [
+      "export function readFileSync(path, encoding) {",
+      "export function readFileSync(path: string, encoding: string = \"utf-8\") {"
+    ],
+    [
+      "export function writeFileSync(path, content, encoding) {",
+      "export function writeFileSync(path: string, content: string, encoding: string = \"utf-8\") {"
+    ],
+    [
+      "export function existsSync(path) {",
+      "export function existsSync(path: string) {"
+    ],
+    [
+      "export function readdirSync(dir) {",
+      "export function readdirSync(dir: string) {"
+    ],
+    [
+      "export function statSync(path) {",
+      "export function statSync(path: string) {"
+    ]
   ]
 }
