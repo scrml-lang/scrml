@@ -158,3 +158,46 @@ describe("S473 — where there is no client→server failure set, the binder sta
     expect(compileFiles({ "app.scrml": src }, "app.scrml").codes).toContain("E-TYPE-031");
   });
 });
+
+// #1658 review F1 — the client test FAILS CLOSED: only a client function scope, a DOM event-handler
+// scope, or the value of a DOM event-handler attribute is client. A channel `onserver:*` handler runs
+// on the server (§38.6.1 "Invoked server-side"): a server→server call has no failure set (§19.9.10).
+const LOCAL_ONLY = (markup) => `<program db="./g.db">
+  \${
+    <status> = ""
+    <rows> = []
+    function fetchLocal() {
+      return ?{\`SELECT id, title FROM gnode WHERE kind = 'arc'\`}.all()
+    }
+  }
+  ${markup}
+  <p>\${@status}</p>
+</program>
+`;
+const codesAt = (markup) => compileFiles({ "app.scrml": LOCAL_ONLY(markup) }, "app.scrml").codes;
+
+describe("S473 fix round 1 (F1) — which contexts are the client", () => {
+  test("review ch1: an inline channel `onserver:message` arrow is a SERVER context — `e.variant` stays refused", () => {
+    expect(codesAt(`<channel name="chat" onserver:message=\${(msg) => { const r = fetchLocal() !{ _ e :> { log(e.variant); return [] } } }}>
+    \${ <note> = "" }
+  </channel>`)).toEqual(["E-TYPE-031", "E-TYPE-031"]);
+  });
+
+  test("review ch3: an inline channel `onserver:message` call is a SERVER context — `e.variant` stays refused", () => {
+    expect(codesAt(`<channel name="chat" onserver:message=\${fetchLocal() !{ _ e :> e.variant }}>
+    \${ <note> = "" }
+  </channel>`)).toEqual(["E-TYPE-031", "E-TYPE-031"]);
+  });
+
+  test("an inline DOM handler arrow `onclick=${() => …}` is the client — `e.variant` compiles", () => {
+    expect(codesAt(`<button onclick=\${() => { @rows = fetchLocal() !{ _ e :> { @status = e.variant; return [] } } }}>x</button>`)).toEqual([]);
+  });
+
+  test("an inline DOM handler expression `onclick=${ … }` is the client — `e.variant` compiles", () => {
+    expect(codesAt(`<button onclick=\${ @rows = fetchLocal() !{ _ e :> { @status = e.variant; return [] } } }>x</button>`)).toEqual([]);
+  });
+
+  test("a multi-statement DOM handler (its own handler scope) is the client — `e.variant` compiles", () => {
+    expect(codesAt(`<button onclick=\${ @status = "go"; @rows = fetchLocal() !{ _ e :> { @status = e.variant; return [] } } }>x</button>`)).toEqual([]);
+  });
+});

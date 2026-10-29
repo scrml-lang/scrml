@@ -11728,16 +11728,23 @@ function annotateNodes(
     return (decl as { isServer?: boolean }).isServer === true || (!!entry && entry.boundary === "server");
   }
   /**
-   * S473 — the `!{}` runs on the CLIENT: the innermost function scope around it (labelled
-   * `fn:<name>:<boundary>` by the function-decl visit) is client-placed, or there is none (a body-top
-   * statement or an event-handler value — §19.9.10 scope item 2). A server→server call has no
-   * failure set (§19.9.10 "Not affected").
+   * S473 — the `!{}` provably runs on the CLIENT. FAIL CLOSED (#1658 review F1): only a KNOWN client
+   * context counts — the innermost function scope around it (labelled `fn:<name>:<boundary>` by the
+   * function-decl visit) is client-placed, or, with no function scope in between, a DOM event-handler
+   * attribute's scope (`handler:` / `handler-check:` / `handler-stamp:` + `on<event>`), or, with
+   * neither, the value of a DOM event-handler attribute the post-walk audit is inside
+   * (`_wholeBinderDomHandlerDepth`: an inline `onclick=${ … }` / arrow, walked with no handler scope).
+   * Anything else is not client: no function and no handler scope elsewhere (a body-top statement), a channel `onserver:*` handler (§38.6.1 "Invoked server-side" — a server→server
+   * call has no failure set, §19.9.10 "Not affected"), `onclient:*` and `on:*` (not modelled here).
    */
   function wholeBinderCallIsClient(scope: Scope): boolean {
     for (let s: Scope | null = scope; s !== null; s = s.parent) {
       if (s.label.startsWith("fn:")) return s.label.endsWith(":client");
+      const h = /^handler(?:-check|-stamp)?:(.*)$/.exec(s.label);
+      if (h) return /^on[a-z]+$/i.test(h[1]);
     }
-    return true;
+    // No function or handler scope: client only inside a DOM event-handler attribute's value.
+    return _wholeBinderDomHandlerDepth > 0;
   }
   function auditWholeBinderArms(arms: unknown, en: EnumType | null, scope: Scope, frames: unknown[], fallbackSpan: Span): void {
     if (!Array.isArray(arms)) return;
@@ -11778,6 +11785,10 @@ function annotateNodes(
   // whole-error binder audit runs after the walk (`_checkExpressionPositionHandlers`), keyed on
   // the `!{}` node itself wherever it sits, and reads these.
   const _wholeBinderNodeScope = new WeakMap<object, Scope>();
+  // S473 (#1658 review F1) — > 0 while the post-walk audit is inside the value of a DOM event-handler
+  // attribute (`on<event>=…`, no `:`): an inline handler expression or arrow there is checked with no
+  // handler scope, and this is how `wholeBinderCallIsClient` knows it runs on the client.
+  let _wholeBinderDomHandlerDepth = 0;
   // S470 fix round 3 — the engine bodies the checker parsed from TEXT (`readEngineBody`: the opener
   // `effect=`, a state-child `effect=`, an `<onTransition>` body, a guard, a delay, a message arm)
   // and visited: the post-walk walks these statements too (the file's tree does not reach them).
@@ -20539,9 +20550,18 @@ function annotateNodes(
           }
         }
       }
-      for (const k of Object.keys(o)) {
-        if (k === "span" || k === "parent") continue;
-        walk(o[k], here, scope, frames, inText);
+      // S473 (#1658 review F1) — a markup attribute node (`{ name, value, span }`, no `kind`) of a DOM
+      // event handler: its value runs on the client.
+      const domHandlerAttr = o.kind === undefined && typeof o.name === "string" && /^on[a-z]+$/i.test(o.name)
+        && !!o.value && typeof o.value === "object";
+      if (domHandlerAttr) _wholeBinderDomHandlerDepth++;
+      try {
+        for (const k of Object.keys(o)) {
+          if (k === "span" || k === "parent") continue;
+          walk(o[k], here, scope, frames, inText);
+        }
+      } finally {
+        if (domHandlerAttr) _wholeBinderDomHandlerDepth--;
       }
     };
     walk(roots, null);
