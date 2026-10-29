@@ -179,6 +179,88 @@ const POST_EMIT_HELPER_CHUNK_GATES: ReadonlyArray<readonly [string, string]> = [
  * measured exactly that: 25 pages calling `_scrml_error_boundary_log` with no 'errors'
  * chunk until the second scan existed.
  */
+/**
+ * s473-lift-cell-ref-scope (g-impl1-cell-handler-eager-write-envelope-visible-to-arms-s473) — the
+ * SYNCHRONOUS twin of the s441 reactive-set rewrite above it. emit-logic lowers a guarded cell write
+ * `@cell = f() !{…}` to
+ *
+ *     let R = _scrml_reactive_set("cell", f());
+ *     if (R && R.__scrml_error) { …arms…; _scrml_reactive_set("cell", R); }
+ *
+ * — the cell holds the error ENVELOPE while the arms run, so an arm that keeps the cell's prior
+ * value (`{ lift @cell }`, §18.5; `{ const p = @cell; lift p }`) reads the envelope and writes it
+ * back, an arm that leaves (`return`) leaves it in the cell, and the cell's subscribers see it. The
+ * s441 pass rewrites the ASYNC sites (a server / CPS stub, an async client fn) to
+ * `let R = await stub(…); if (…) {…} else { set(R) }`; whatever eager site is left after it is a
+ * synchronous call, rewritten here to the same shape without the `await`:
+ *
+ *     let R = f();
+ *     if (R && R.__scrml_error) { …arms…; _scrml_reactive_set("cell", R); } else {
+ *       _scrml_reactive_set("cell", R);
+ *     }
+ *
+ * Only that exact emitted shape is touched (the `let`, the guard on the same binding right after it
+ * — a module-init `_scrml_init_set(…)` line may sit between — and the arms' own write-back of `R`);
+ * anything else is left as emitted.
+ */
+function deferSyncGuardedCellWrites(code: string, findMatchingBrace: (s: string, open: number) => number): string {
+  const SET = "_scrml_reactive_set(";
+  // The index of the `)` closing the call whose `(` is at `open`, and its depth-1 commas; string-aware.
+  const scanCall = (open: number): { close: number; commas: number[] } | null => {
+    let depth = 1;
+    const commas: number[] = [];
+    let q: string | null = null;
+    for (let k = open + 1; k < code.length; k++) {
+      const c = code[k];
+      if (q) {
+        if (c === "\\") { k++; continue; }
+        if (c === q) q = null;
+        continue;
+      }
+      if (c === '"' || c === "'" || c === "`") { q = c; continue; }
+      if (c === "(" || c === "[" || c === "{") depth++;
+      else if (c === ")" || c === "]" || c === "}") {
+        depth--;
+        if (depth === 0) return c === ")" ? { close: k, commas } : null;
+      } else if (c === "," && depth === 1) commas.push(k);
+    }
+    return null;
+  };
+  const out: string[] = [];
+  let i = 0;
+  while (i < code.length) {
+    const at = code.indexOf(SET, i);
+    if (at < 0) break;
+    const next = at + SET.length;
+    const head = /\blet\s+([A-Za-z_$][\w$]*)\s*=\s*$/.exec(code.slice(Math.max(0, at - 120), at));
+    const call = head && (at === 0 || !/[\w$]/.test(code[at - 1])) ? scanCall(next - 1) : null;
+    if (!head || !call || call.commas.length !== 1 || code[call.close + 1] !== ";") {
+      out.push(code.slice(i, next));
+      i = next;
+      continue;
+    }
+    const R = head[1];
+    const nameArg = code.slice(next, call.commas[0]).trim();
+    const value = code.slice(call.commas[0] + 1, call.close).trim();
+    const stmtEnd = call.close + 2;
+    const needle = `if (${R} && ${R}.__scrml_error) {`;
+    const ifAt = code.indexOf(needle, stmtEnd);
+    const between = ifAt >= 0 ? code.slice(stmtEnd, ifAt) : "";
+    const betweenOk = ifAt >= 0 && between.split("\n").every((l) => l.trim() === "" || /^\s*_scrml_init_set\(/.test(l));
+    const closeIdx = betweenOk ? findMatchingBrace(code, ifAt + needle.length - 1) : -1;
+    const writeBack = `${SET}${nameArg}, ${R});`;
+    if (closeIdx < 0 || !code.slice(ifAt, closeIdx).includes(writeBack) || /^\s*else\b/.test(code.slice(closeIdx + 1))) {
+      out.push(code.slice(i, next));
+      i = next;
+      continue;
+    }
+    out.push(code.slice(i, at), value, ";", between, code.slice(ifAt, closeIdx + 1), ` else {\n  ${writeBack}\n}`);
+    i = closeIdx + 1;
+  }
+  out.push(code.slice(i));
+  return out.join("");
+}
+
 function gateChunksByEmittedReference(texts: Iterable<unknown>, chunks: Set<string>): boolean {
   const strs: string[] = [];
   for (const t of texts) if (typeof t === "string") strs.push(t);
@@ -3998,6 +4080,7 @@ function generateClientJsImpl(ctx: CompileContext): string {
       }
       clientCode = parts.join("");
     }
+    clientCode = deferSyncGuardedCellWrites(clientCode, findMatchingBrace);
     });
 
     // GITI-026 (giti inbound 2026-05-30): SSE reactive binding `@cell = gen()`.
