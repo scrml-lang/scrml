@@ -1,4 +1,4 @@
-<program>
+import:host { random as hostRandom, randomInt as hostRandomInt } from "./host.js";
 ${
     // ---------------------------------------------------------------------------
     // scrml:random — capability-scoped non-deterministic random source
@@ -12,10 +12,17 @@ ${
     // This module is the sanctioned, centralized touch of the host
     // `Math.random()` surface — the one place randomness is read — so it also
     // closes the stdlib-ouroboros (scrml's own stdlib routes its jitter through
-    // here instead of reaching `Math.random()` directly).
+    // here instead of reaching `Math.random()` directly). The host reach itself
+    // lives in ONE thin host file beside this module, ./host.js, reached through
+    // `import:host` (§21.3.1; S471 option A); each member is the fully typed
+    // wrapper of its host function (the S472 wrapper rule, §21.3.1.1).
     //
     // Usage:
     //   ${ import { random, randomInt } from 'scrml:random' }
+    //
+    // (The module's behaviour tests live in compiler/tests/unit/
+    // stdlib-random-capability.test.js §C and, on the bootstrap, in
+    // compiler/self-host-v2/slice-m4/stdlib-boot-clean-s473.test.js.)
     // ---------------------------------------------------------------------------
 
     /**
@@ -31,8 +38,8 @@ ${
      *   server function pickJitter() { return random() * 50 } // OK in server fn
      *   // fn noisy(x) { return x + random() }                // E-FN-004 — non-det in fn
      */
-    export function random() {
-        return Math.random()
+    export function random() -> number {
+        return hostRandom();
     }
 
     /**
@@ -51,38 +58,7 @@ ${
      *   function mintToken(id) { return `tok_${id}_${randomInt(0, 100000)}` }
      *   function rollDie() { return randomInt(1, 6) }
      */
-    export function randomInt(min, max) {
-        let lo = Math.ceil(min)
-        let hi = Math.floor(max)
-        if (lo > hi) {
-            const t = lo
-            lo = hi
-            hi = t
-        }
-        return lo + Math.floor(Math.random() * (hi - lo + 1))
-    }
-
-    ~{
-        import { assertTruthy, assertInRange } from 'scrml:test'
-
-        // random() — a float in [0, 1): 0 inclusive, 1 exclusive.
-        const r = random()
-        assertTruthy(typeof r == "number")
-        assertTruthy(r >= 0 && r < 1)
-
-        // randomInt — INCLUSIVE of both bounds; many draws stay in range.
-        for (let i = 0; i < 200; i++) {
-            const n = randomInt(1, 6)
-            assertTruthy(n >= 1 && n <= 6)
-            assertTruthy(n == Math.floor(n))  // integer
-        }
-
-        // A single-value closed interval always returns that value.
-        assertTruthy(randomInt(7, 7) == 7)
-
-        // Swapped bounds never produce `not` — they are normalized.
-        const swapped = randomInt(6, 1)
-        assertTruthy(swapped >= 1 && swapped <= 6)
+    export function randomInt(min: number, max: number) -> int {
+        return hostRandomInt(min, max);
     }
 }
-</program>

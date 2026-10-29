@@ -83,22 +83,22 @@ ${
      * @returns { [fieldName]: string[] } — empty object if all valid
      */
     export function validate(data, schema, check) {
-        const errors = {}
+        const errors = {};
         for (const field of Object.keys(schema)) {
-            const value = data[field]
-            const rules = schema[field]
+            const value = data[field];
+            const rules = schema[field];
             if (!Array.isArray(rules)) {
-                errors[field] = [`The schema entry for ${field} must be a list of Rule values`]
-                continue
+                errors[field] = [`The schema entry for ${field} must be a list of Rule values`];
+                continue;
             }
             for (const rule of rules) {
-                const message = ruleFailure(rule, value, data, check)
+                const message = ruleFailure(rule, value, data, check);
                 if (message is not) { continue }
-                errors[field] = errors[field] || []
-                errors[field].push(message)
+                errors[field] = errors[field] || [];
+                errors[field].push(message);
             }
         }
-        return errors
+        return errors;
     }
 
     /**
@@ -106,7 +106,7 @@ ${
      * Useful as a guard before form submission.
      */
     export function isValid(result) {
-        return Object.keys(result).length == 0
+        return Object.keys(result).length == 0;
     }
 
     /**
@@ -114,8 +114,8 @@ ${
      * Convenient for displaying single-error UIs.
      */
     export function firstError(result, field) {
-        const errs = result[field]
-        return errs && errs.length > 0 ? errs[0] : not
+        const errs = result[field];
+        return errs && errs.length > 0 ? errs[0] : not;
     }
 
     // ---------------------------------------------------------------------------
@@ -123,7 +123,7 @@ ${
     // ---------------------------------------------------------------------------
 
     function isEmpty(value) {
-        return value is not || value == ""
+        return value is not || value == "";
     }
 
     // A schema entry that is not a Rule value (e.g. a pre-S462 `{ check }`
@@ -131,8 +131,8 @@ ${
     // test sits before the match because the match is exhaustive over Rule.
     function isRule(rule) {
         if (rule is not) { return false }
-        const tag = typeof rule == "object" ? rule.variant : rule
-        return Rule.variants.includes(tag)
+        const tag = typeof rule == "object" ? rule.variant : rule;
+        return Rule.variants.includes(tag);
     }
 
     function ruleFailure(rule: Rule, value, data, check) {
@@ -160,7 +160,7 @@ ${
 
     function messageUnless(passes, message) {
         if (passes) { return not }
-        return message
+        return message;
     }
 
     function customFailure(tag, value, data, check) {
@@ -175,7 +175,7 @@ ${
     function overrideMessage(failure, message) {
         if (failure is not) { return not }
         // Old `message || default` semantics: only a non-empty string replaces.
-        return typeof message == "string" && message != "" ? message : failure
+        return typeof message == "string" && message != "" ? message : failure;
     }
 
     // ---------------------------------------------------------------------------
@@ -251,25 +251,25 @@ ${
      * Standard email field rules: required + email format.
      */
     export function emailField() {
-        return [Rule.Req, Rule.Email]
+        return [Rule.Req, Rule.Email];
     }
 
     /**
      * Standard password field rules: required + minimum 8 chars.
      */
     export function passwordField(minLen) {
-        return [Rule.Req, Rule.MinLength(minLen || 8)]
+        return [Rule.Req, Rule.MinLength(minLen || 8)];
     }
 
     /**
      * Standard password confirmation rules: required + matches "password" field.
      */
     export function passwordConfirmField(fieldName) {
-        return [Rule.Req, Rule.WithMessage(Rule.Matches(fieldName || "password"), "Passwords must match")]
+        return [Rule.Req, Rule.WithMessage(Rule.Matches(fieldName || "password"), "Passwords must match")];
     }
 
     ~{
-        import { assertEqual, assertTruthy } from 'scrml:test'
+        import { assertEqual, assertTruthy } from 'scrml:test';
 
         // Req
         assertEqual(validate({ a: "" }, { a: [Rule.Req] }), { a: ["This field is required"] })
@@ -289,18 +289,18 @@ ${
         const errors = validate(
             { email: "", password: "ab" },
             { email: [Rule.Req, Rule.Email], password: [Rule.Req, Rule.MinLength(8)] }
-        )
+        );
         assertEqual(errors.email, ["This field is required"])
         assertEqual(errors.password, ["Must be at least 8 characters"])
 
         const clean = validate(
             { email: "a@b.com", password: "secure123" },
             { email: [Rule.Req, Rule.Email], password: [Rule.Req, Rule.MinLength(8)] }
-        )
+        );
         assertTruthy(isValid(clean))
 
         // Matches + WithMessage
-        const confirm = [Rule.WithMessage(Rule.Matches("password"), "Passwords must match")]
+        const confirm = [Rule.WithMessage(Rule.Matches("password"), "Passwords must match")];
         assertEqual(validate({ password: "x", confirm: "x" }, { confirm: confirm }), {})
         assertEqual(validate({ password: "x", confirm: "y" }, { confirm: confirm }), { confirm: ["Passwords must match"] })
 
@@ -310,13 +310,13 @@ ${
 
         // Custom — the check function is passed at the call, never stored
         function checkSku(tag, value) {
-            return value == "SKU-1" ? true : "Not a known SKU"
+            return value == "SKU-1" ? true : "Not a known SKU";
         }
         assertEqual(validate({ sku: "SKU-1" }, { sku: [Rule.Custom("sku")] }, checkSku), {})
         assertEqual(validate({ sku: "nope" }, { sku: [Rule.Custom("sku")] }, checkSku), { sku: ["Not a known SKU"] })
 
         // firstError helper
-        const res = validate({ name: "" }, { name: [Rule.Req] })
+        const res = validate({ name: "" }, { name: [Rule.Req] });
         assertEqual(firstError(res, "name"), "This field is required")
         assertEqual(firstError(res, "email"), not)
     }

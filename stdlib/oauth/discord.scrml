@@ -1,4 +1,3 @@
-<program>
 ${
     // ---------------------------------------------------------------------------
     // scrml:oauth/discord — Discord OAuth 2.0 preset
@@ -37,9 +36,9 @@ ${
      * }
      */
     export function discordConfig(opts) {
-        if (!opts) throw new Error("[scrml:oauth/discord] opts required")
-        const extra = {}
-        if (opts.prompt) extra.prompt = opts.prompt
+        if (!opts) throw new Error("[scrml:oauth/discord] opts required");
+        const extra = {};
+        if (opts.prompt) extra.prompt = opts.prompt;
 
         return {
             clientId:        opts.clientId,
@@ -53,7 +52,6 @@ ${
             usePKCE:         true,
             extraAuthParams: extra,
             storage:         opts.storage,
-        }
+        };
     }
 }
-</program>

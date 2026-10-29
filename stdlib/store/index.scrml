@@ -1,4 +1,3 @@
-<program>
 ${
     // ---------------------------------------------------------------------------
     // scrml:store — SQLite-backed key-value store and counters
@@ -22,4 +21,3 @@ ${
     export { get, set, del, has, keys, clear, close, purgeExpired } from './kv.scrml'
     export { increment, decrement, count, resetCount } from './kv.scrml'
 }
-</program>
