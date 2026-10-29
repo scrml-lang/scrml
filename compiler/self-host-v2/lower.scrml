@@ -3004,6 +3004,7 @@ ${
         return match td {
             .EnumDef(variants: vs) :> vs
             .StructDef(sym: x) :> []
+            .HostDef(sym: x) :> []
         }
     }
 

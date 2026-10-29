@@ -49,8 +49,9 @@ ${
     import { ASpan, BinOp, UnOp, AExpr, AProp, AExprK, AStmt, ABlock, AStmtK, AEffect, AType, ATypeK,
              ATypeField, AVariant, ATypeBody, ATypeDecl, AParam, AFn, AImportName, AImport,
              AAttrValue, AAttr, AElem, ANode, ANodeK, ADeclAttr, AStateChild, ADeclChild, ADecl, AValArg, AValidator,
-             AProgram, AItem, AItemK, AConst, FileAst, ADbFn, Diag, ASql, ASqlMode,
-             AHow, AHandled, AArm, APat, ABind, AArmBody, AFail, AFor, AForHead, AIterSrc, AForBound, ALift, ACss, mkSpan, newDiag, stdlibPathPrefix } from "./ast.scrml"
+             AProgram, AItem, AItemK, AConst, FileAst, ADbFn, AHostBind, Diag, ASql, ASqlMode,
+             AHow, AHandled, AArm, APat, ABind, AArmBody, AFail, AFor, AForHead, AIterSrc, AForBound, ALift, ACss, mkSpan, newDiag, stdlibPathPrefix,
+             HView, HChain, HTargetParts, hostView, hostChainOf, hostRootGlobal, hostTargetParts } from "./ast.scrml"
     import { CssErr, CssParsed, parseCssBlock } from "./css-syntax.scrml"
 
     // =========================================================================
@@ -3868,6 +3869,12 @@ ${
         t = expectP(adv(t), ":")
         const kind: PTok = cur(t)
         t = adv(t)
+        if (kind.v == "host") {
+            // s473 (§21.3.3 rule 15): "It SHALL appear only inside a `<host>`; anywhere else it SHALL be `E-HOST-TYPE-OUTSIDE`."
+            t = diagAt(t, "E-HOST-TYPE-OUTSIDE", "`type " + nameTok.v + ":host` is written outside a `<host>` block — a host handle type is declared only inside one (§21.3.3 rule 15)", kind)
+            const hd: ATypeDecl = { nid: t.nid, span: spanFrom(t, start), exported: exported, name: nameTok.v, body: ATypeBody.HostBody }
+            return mkItem(bumpId(t), start, AItemK.TypeItem(hd))
+        }
         t = expectP(t, "=")
         let body: ATypeBody = ATypeBody.StructBody([])
         if (kind.v == "enum") {
@@ -3938,14 +3945,13 @@ ${
         return { fs: fs, tp: t }
     }
 
-    // `function name(p, q: T) { … }` / `fn name(p: T) -> T { … }`
-    // s451 (U1a): `server` = written with the deprecated modifier; (Ue) a `!`
-    // after the parameter list is a failable function, its error type `err`.
-    fn parseFn(tp: TP, start: int, exported: boolean, pure: boolean, server: boolean) -> RItems {
-        let t: TP = adv(tp)
-        const nameTok: PTok = cur(t)
-        if (nameTok.cls != TC.Ident) t = diagAt(t, "E-PARSE-FN", "expected a function name", nameTok)
-        t = expectP(adv(t), "(")
+    // A parameter list, up to (not including) its `)` — shared by `function` /
+    // `fn` declarations and `<host>` binding lines (s473, §21.3.3: "param-list
+    // … (* §7.5 param-decl, unchanged *)").
+    type RParams:struct = { ps: AParam[], tp: TP }
+
+    fn parseParamList(tp: TP) -> RParams {
+        let t: TP = tp
         let params: AParam[] = []
         while (!isP(t, ")") && !atEnd(t)) {
             // s471 — `lin name: T` (§35.2.1: "parameter ::= ['lin'] identifier ':' type-annotation")
@@ -3967,7 +3973,19 @@ ${
             t = bumpId(t)
             if (isP(t, ",")) t = adv(t)
         }
-        t = expectP(t, ")")
+        return { ps: params, tp: t }
+    }
+
+    // `function name(p, q: T) { … }` / `fn name(p: T) -> T { … }`
+    // s451 (U1a): `server` = written with the deprecated modifier; (Ue) a `!`
+    // after the parameter list is a failable function, its error type `err`.
+    fn parseFn(tp: TP, start: int, exported: boolean, pure: boolean, server: boolean) -> RItems {
+        let t: TP = adv(tp)
+        const nameTok: PTok = cur(t)
+        if (nameTok.cls != TC.Ident) t = diagAt(t, "E-PARSE-FN", "expected a function name", nameTok)
+        const rp: RParams = parseParamList(expectP(adv(t), "("))
+        const params: AParam[] = rp.ps
+        t = expectP(rp.tp, ")")
         // s451 (Ue) — §19.4.1 `failable-fn ::= 'function' identifier '('
         // param-list ')' '!' (('->' error-type) | error-type)? block`: after a
         // `!` an arrow names the ERROR type (there is no success-type slot).
@@ -4016,7 +4034,7 @@ ${
     // read in a `<db>` body (parseDbBody), waiting for the nearest item list
     // (parseMarkupItems drains them into the program body or the file top);
     // `dbFns` — which `<db>` each such function was declared in (FileAst.dbFns).
-    type MP:struct = { src: string, pos: int, nid: int, diags: Diag[], file: string, hoist: AItem[], dbFns: ADbFn[] }
+    type MP:struct = { src: string, pos: int, nid: int, diags: Diag[], file: string, hoist: AItem[], dbFns: ADbFn[], hosts: AHostBind[] }
 
     type RNodes:struct  = { nodes: ANode[], mp: MP }
     type RMItems:struct = { items: AItem[], mp: MP }
@@ -4042,7 +4060,7 @@ ${
 
     fn parseCssNode(mp: MP) -> RCss {
         const r: CssParsed = parseCssBlock(mp.src, mp.pos, mp.nid)
-        let m: MP = { src: mp.src, pos: r.end, nid: r.nid, diags: mp.diags, file: mp.file, hoist: mp.hoist, dbFns: mp.dbFns }
+        let m: MP = { src: mp.src, pos: r.end, nid: r.nid, diags: mp.diags, file: mp.file, hoist: mp.hoist, dbFns: mp.dbFns, hosts: mp.hosts }
         for (const e of r.errs) { m = mDiag(m, e.code, e.text, e.start, e.end) }
         const n: ANode = { nid: m.nid, span: r.css.span, k: ANodeK.Css(r.css) }
         return { n: n, mp: mBump(m) }
@@ -4057,20 +4075,20 @@ ${
     fn atInterp(mp: MP) -> boolean { return chAt(mp, 0) == "$" && chAt(mp, 1) == "{" }
 
     fn mAdv(mp: MP, n: int) -> MP {
-        return { src: mp.src, pos: mp.pos + n, nid: mp.nid, diags: mp.diags, file: mp.file, hoist: mp.hoist, dbFns: mp.dbFns }
+        return { src: mp.src, pos: mp.pos + n, nid: mp.nid, diags: mp.diags, file: mp.file, hoist: mp.hoist, dbFns: mp.dbFns, hosts: mp.hosts }
     }
 
     fn mAt(mp: MP, pos: int) -> MP {
-        return { src: mp.src, pos: pos, nid: mp.nid, diags: mp.diags, file: mp.file, hoist: mp.hoist, dbFns: mp.dbFns }
+        return { src: mp.src, pos: pos, nid: mp.nid, diags: mp.diags, file: mp.file, hoist: mp.hoist, dbFns: mp.dbFns, hosts: mp.hosts }
     }
 
     fn mBump(mp: MP) -> MP {
-        return { src: mp.src, pos: mp.pos, nid: mp.nid + 1, diags: mp.diags, file: mp.file, hoist: mp.hoist, dbFns: mp.dbFns }
+        return { src: mp.src, pos: mp.pos, nid: mp.nid + 1, diags: mp.diags, file: mp.file, hoist: mp.hoist, dbFns: mp.dbFns, hosts: mp.hosts }
     }
 
     fn mDiag(mp: MP, code: string, msg: string, start: int, end: int) -> MP {
         const d: Diag = newDiag(code, msg, mp.file, mkSpan(start, end))
-        return { src: mp.src, pos: mp.pos, nid: mp.nid, diags: mp.diags.concat([d]), file: mp.file, hoist: mp.hoist, dbFns: mp.dbFns }
+        return { src: mp.src, pos: mp.pos, nid: mp.nid, diags: mp.diags.concat([d]), file: mp.file, hoist: mp.hoist, dbFns: mp.dbFns, hosts: mp.hosts }
     }
 
     fn mLooking(mp: MP, s: string) -> boolean {
@@ -4175,7 +4193,7 @@ ${
     // consumed token (the Eof sentinel's start = where the lexer stopped).
     fn backToMarkup(mp: MP, tp: TP) -> MP {
         const eof: PTok = tp.toks[tp.toks.length - 1]
-        return { src: mp.src, pos: eof.start, nid: tp.nid, diags: tp.diags, file: mp.file, hoist: mp.hoist, dbFns: mp.dbFns }
+        return { src: mp.src, pos: eof.start, nid: tp.nid, diags: tp.diags, file: mp.file, hoist: mp.hoist, dbFns: mp.dbFns, hosts: mp.hosts }
     }
 
     // After a region's expression: anything left before the Eof is an error.
@@ -4838,7 +4856,7 @@ ${
             const inside: boolean = d.span.start >= start && d.span.end <= end
             if (d.code != "W-STRING-INTERP-LITERAL" || !inside) keep = keep.concat([d])
         }
-        return { src: mp.src, pos: mp.pos, nid: mp.nid, diags: keep, file: mp.file, hoist: mp.hoist, dbFns: mp.dbFns }
+        return { src: mp.src, pos: mp.pos, nid: mp.nid, diags: keep, file: mp.file, hoist: mp.hoist, dbFns: mp.dbFns, hosts: mp.hosts }
     }
 
     // F9: a literal `$`+`{` in a scrml string is interpolation under impl#1 —
@@ -5566,6 +5584,8 @@ ${
 
     // An element after its opener: children until its closer.
     fn finishElem(o: Opener, mp: MP) -> RElem {
+        // s473 (§21.3.3 rule 1): a `<host>` is read at an item position only (parseTagItem)
+        if (isHostOpener(o)) return refuseHostPlacement(o, mp)
         if (o.vals.length > 0) {
             // s444 Phase B: a validator binds a DECLARATION's own value (§66.4 rule 3) — an element has none
             return finishElem(noVals(o), mDiag(mp, "E-PARSE-ATTR", "the validator `" + o.vals[0].name + "(…)` is on the element `<" + o.name + ">` — a validator belongs in a declaration's opener, binding its own value (§66.4 rule 3, §55.2)", o.vals[0].span.start, o.vals[0].span.end))
@@ -6128,7 +6148,7 @@ ${
             const fid: int = fnIdOfItem(it.k)
             if (fid >= 0) fns = fns.concat([{ fn: fid, db: r.e.nid, cell: cellOfLoad(rb.cells, fid), start: r.e.span.start, end: r.e.span.end }])
         }
-        const m: MP = { src: r.mp.src, pos: r.mp.pos, nid: r.mp.nid, diags: r.mp.diags, file: r.mp.file, hoist: r.mp.hoist.concat(rb.items), dbFns: fns }
+        const m: MP = { src: r.mp.src, pos: r.mp.pos, nid: r.mp.nid, diags: r.mp.diags, file: r.mp.file, hoist: r.mp.hoist.concat(rb.items), dbFns: fns, hosts: r.mp.hosts }
         return { e: r.e, mp: m }
     }
 
@@ -6244,6 +6264,436 @@ ${
         if (proseStart >= 0) m = dbProseDiag(m, proseStart, proseEnd, m.diags.length)
         if (mLooking(m, "</")) m = parseCloser(m, "db")
         return { nodes: out, items: items, cells: cells, mp: m }
+    }
+
+    // =========================================================================
+    // s473 (boot-host-block-f3) — THE `<host>` ELEMENT (DRAFT SPEC §21.3.3).
+    // ruling:user-voice-scrml.md S473 "⭐ RULED — S473 PA recs, all" item 4 —
+    // "F3 typed host binding Q1–Q5: a `<host>` block; `-> waiting T`; `!
+    // HostError`; closed `:host` handles; checked results."
+    //
+    // Rule 1: "`<host>` SHALL appear at file top level or as a direct child of
+    // `<program>`. A `<host>` anywhere else SHALL be `E-HOST-BINDING-PLACEMENT`.
+    // It emits no HTML." An item position (parseTagItem) reads it here; any
+    // other position (finishElem — an element's child, a `<db>` body, a
+    // declaration body) refuses it (refuseHostPlacement).
+    //
+    // Rule 2: "Each body line SHALL be a blank line, a `//` comment, a
+    // `host-type` line, a `host-binding` line, or a continuation line beginning
+    // with `=`. Any other line SHALL be `E-HOST-BINDING-MALFORMED`."
+    //
+    // A line is read by THE SCRML LEXER (lexFrom, LexStop.Line) over the source
+    // CUT at the line's end — no new reader, and no token of a line can run
+    // past it (an unbalanced bracket ends at the cut, never in the next line or
+    // past `</host>`). Its tokens are parsed by the logic parser's own pieces:
+    // parseParamList (the §7.5 param-decl, as a `function`'s), parseType, and
+    // parseAssign for the target (§21.3.3 "host-target ::= expression (* the
+    // universal expression grammar; shapes checked, rule 4 *)").
+    //
+    // A binding is DESUGARED into a function item of the file (rule 9: "A
+    // binding is a function bound in file scope (§7.6)") with an EMPTY body; its
+    // host half is recorded in MP.hosts (FileAst.hosts). The target is never
+    // resolved as scrml: it names host roots (`window`, `document`,
+    // `navigator`) that are not scrml values; analyze turns the checked target
+    // into Core's HostBind, which the printer emits as literal JavaScript (rule
+    // 7: "SHALL NOT be built with the `Function` constructor or any other
+    // run-time evaluation of source text").
+    // =========================================================================
+    fn isHostOpener(o: Opener) -> boolean { return !o.star && o.name == "host" }
+
+    // Rule 1 — a `<host>` NOT at an item position: refused whole (opener to
+    // `</host>`), its body never read as markup (it would render as page text).
+    fn refuseHostPlacement(o: Opener, mp: MP) -> RElem {
+        let end: int = mp.pos
+        if (!o.selfClosing) {
+            const close: int = mp.src.indexOf("</host>", mp.pos)
+            if (close < 0) {
+                end = mp.src.length
+            } else {
+                end = close + 7
+            }
+        }
+        const m: MP = mDiag(mAt(mp, end), "E-HOST-BINDING-PLACEMENT", "`<host>` stands here inside another element — a `<host>` block SHALL appear at file top level or as a direct child of `<program>` (§21.3.3 rule 1); move it there", o.start, end)
+        return elemFrom(noVals(o), [], m)
+    }
+
+    // A `<host>` at an item position: its binding lines as hoisted items.
+    fn finishHost(o: Opener, mp: MP, exported: boolean) -> RMItems {
+        let m: MP = mp
+        if (exported) m = mDiag(m, "E-PARSE-EXPORT", "`export` applies to a declaration, not to a `<host>` block (§21.3.3 rule 9: a binding is exported by name, §21.2)", o.start, o.start + 5)
+        m = hostOpenerDiags(o, m)
+        const src: string = hostSrcOf(o)
+        if (o.selfClosing) return { items: [], mp: m }
+        let items: AItem[] = []
+        let going = true
+        while (going) {
+            m = skipHostBlank(m)
+            if (mEof(m)) {
+                m = mDiag(m, "E-PARSE-UNCLOSED", "`<host>` is never closed", o.start, m.pos)
+                going = false
+            } else if (mLooking(m, "</")) {
+                going = false
+            } else {
+                const before: int = m.pos
+                const r: RMItems = hostLine(m, src)
+                items = items.concat(r.items)
+                m = r.mp
+                if (m.pos <= before) m = mAdv(m, 1)
+            }
+        }
+        if (mLooking(m, "</")) m = parseCloser(m, "host")
+        return { items: items, mp: m }
+    }
+
+    // The opener carries `src="…"` and nothing else.
+    fn hostOpenerDiags(o: Opener, mp: MP) -> MP {
+        let m: MP = mp
+        const why: string = " on `<host>` is not in the bootstrap — a `<host>` opener carries at most `src=\"./file.js\"` (§21.3.3 host-decl)"
+        if (o.ty is given) m = mDiag(m, "E-BOOTSTRAP-UNSUPPORTED", "an own type `<host:…>`" + why, o.start, o.start + 5)
+        if (!isNoValue(o.own)) m = mDiag(m, "E-BOOTSTRAP-UNSUPPORTED", "an own value `<host=…>`" + why, o.start, o.start + 5)
+        for (const ta of o.typed) { m = mDiag(m, "E-BOOTSTRAP-UNSUPPORTED", "the typed attribute `" + ta.name + ":…`" + why, ta.span.start, ta.span.end) }
+        for (const v of o.vals) { m = mDiag(m, "E-BOOTSTRAP-UNSUPPORTED", "the validator `" + v.name + "(…)`" + why, v.span.start, v.span.end) }
+        if (o.short is given) m = mDiag(m, "E-BOOTSTRAP-UNSUPPORTED", "a `:`-shorthand body" + why, o.start, o.start + 5)
+        for (const a of o.attrs) {
+            if (a.name != "src") {
+                m = mDiag(m, "E-BOOTSTRAP-UNSUPPORTED", "the attribute `" + a.name + "`" + why, a.span.start, a.span.end)
+            } else {
+                m = hostSrcDiags(a, m)
+            }
+        }
+        return m
+    }
+
+    fn hostSrcOf(o: Opener) -> string {
+        for (const a of o.attrs) {
+            if (a.name == "src") {
+                const v: AAttrValue = a.value
+                const q: string | not = quotedOf(v)
+                if (q is given) return q
+                return "?"
+            }
+        }
+        return ""
+    }
+
+    fn quotedOf(v: AAttrValue) -> string | not {
+        return match v {
+            .Quoted(v: s) :> s
+            .NoValue :> not
+            .Bare(e: x) :> not
+            .Paren(e: x) :> not
+            .Braced(b: x) :> not
+        }
+    }
+
+    // Rule 3: "`src=` SHALL be a relative `.js` or `.mjs` path: a string that
+    // begins with `./` or `../`, uses `/` as its only separator, contains no
+    // `?`, `#` or `\`, and ends exactly in `.js` or `.mjs` (case included). Any
+    // other value (… a non-string) SHALL be `E-HOST-SRC-INVALID`; a specifier
+    // that names no relative path at all (`x.js`) is the §21.3 bare-specifier
+    // `E-IMPORT-005`." A valid one needs the static export read (rule 3
+    // "Exports are read statically"), which the bootstrap does not build:
+    // refused by name.
+    fn hostSrcDiags(a: AAttr, mp: MP) -> MP {
+        const q: string | not = quotedOf(a.value)
+        if (q is not) return mDiag(mp, "E-HOST-SRC-INVALID", "`<host src=…>` is not a string — `src=` is a quoted relative `.js` / `.mjs` path (§21.3.3 rule 3)", a.span.start, a.span.end)
+        const rel: boolean = q.startsWith("./") || q.startsWith("../")
+        const looksAbs: boolean = q.startsWith("/") || q.indexOf(":") >= 0 || q.indexOf("\\") >= 0
+        if (!rel && !looksAbs) return mDiag(mp, "E-IMPORT-005", "`<host src=\"" + q + "\">` names no relative path — a bare specifier; write `./" + q + "` (§21.3.3 rule 3, §21.3)", a.span.start, a.span.end)
+        const extOk: boolean = q.endsWith(".js") || q.endsWith(".mjs")
+        if (!rel || looksAbs || q.indexOf("?") >= 0 || q.indexOf("#") >= 0 || !extOk) {
+            return mDiag(mp, "E-HOST-SRC-INVALID", "`<host src=\"" + q + "\">` is not a relative `.js` / `.mjs` path — it SHALL begin with `./` or `../`, use `/` as its only separator, contain no `?`, `#` or `\\`, and end exactly in `.js` or `.mjs` (§21.3.3 rule 3)", a.span.start, a.span.end)
+        }
+        return mDiag(mp, "E-BOOTSTRAP-UNSUPPORTED", "`<host src=\"" + q + "\">` is not in the bootstrap — a `src=` file's exports are read statically (§21.3.3 rule 3: \"The exports of a `src=` file SHALL be determined by parsing its ES module export declarations … The compiler SHALL NOT load, import, or evaluate a `src=` file\"), and that static export read and the file's copy are not built; a binding rooted at `window`, `document`, `navigator` or a parameter needs no `src=`", a.span.start, a.span.end)
+    }
+
+    // Rule 2's skippable lines: blank space and `//` comments.
+    fn skipHostBlank(mp: MP) -> MP {
+        let m: MP = mp
+        let going = true
+        while (going && !mEof(m)) {
+            if (isSpaceCh(chAt(m, 0))) {
+                m = mAdv(m, 1)
+            } else if (mLooking(m, "//")) {
+                m = skipLineComment(m)
+            } else {
+                going = false
+            }
+        }
+        return m
+    }
+
+    fn hostLineEnd(src: string, pos: int) -> int {
+        const i: int = src.indexOf("\n", pos)
+        if (i < 0) return src.length
+        return i
+    }
+
+    // The `=` that begins the line after the one ending at `end` (a
+    // continuation, rule 2); -1 when that line does not begin with `=`.
+    fn hostContAt(src: string, end: int) -> int {
+        if (end >= src.length) return -1
+        let i: int = end + 1
+        while (i < src.length && (src.charAt(i) == " " || src.charAt(i) == "\t" || src.charAt(i) == "\r")) { i = i + 1 }
+        if (src.charAt(i) == "=" && src.charAt(i + 1) != "=") return i
+        return -1
+    }
+
+    // One physical line [start, end), lexed by the scrml lexer over the source cut at `end`.
+    fn hostLineToks(src: string, start: int, end: int) -> PTok[] {
+        const run: LexRun = lexFrom(src.substring(0, end), start, LexStop.Line)
+        return toPToks(run.tokens)
+    }
+
+    fn withoutLast(ts: PTok[]) -> PTok[] { return ts.slice(0, ts.length - 1) }
+
+    fn hostMalformed(mp: MP, start: int, end: int, why: string) -> RMItems {
+        const m: MP = mDiag(mAt(mp, end), "E-HOST-BINDING-MALFORMED", why + " — a `<host>` body line is a blank line, a `//` comment, `type Name:host`, a binding `name(params) -> Result = target`, or a continuation line beginning with `=` (§21.3.3 rule 2)", start, end)
+        return { items: [], mp: m }
+    }
+
+    fn hostLine(mp: MP, src: string) -> RMItems {
+        const at: int = mp.pos
+        let end: int = hostLineEnd(mp.src, at)
+        const c0: string = chAt(mp, 0)
+        if (c0 == "<" || c0 == "$" || c0 == "#" || c0 == "\"" || c0 == "'" || c0 == "`" || c0 == "/" || c0 == "=") {
+            return hostMalformed(mp, at, end, "this line is not a binding")
+        }
+        let lexed: PTok[] = hostLineToks(mp.src, at, end)
+        let toks: PTok[] = withoutLast(lexed)
+        let going = true
+        while (going) {
+            const nx: int = hostContAt(mp.src, end)
+            if (nx < 0) {
+                going = false
+            } else {
+                const e2: int = hostLineEnd(mp.src, nx)
+                lexed = hostLineToks(mp.src, nx, e2)
+                toks = toks.concat(withoutLast(lexed))
+                end = e2
+            }
+        }
+        toks = toks.concat([lexed[lexed.length - 1]])
+        const t0: TP = { toks: toks, i: 0, nid: mp.nid, diags: mp.diags, file: mp.file }
+        if (isWord(t0, "type")) return hostTypeLine(mp, t0, at, end)
+        return hostBindLine(mp, t0, at, end, src)
+    }
+
+    // `type Name:host` (rule 15: "`type Name:host` declares a nominal, opaque host type").
+    fn hostTypeLine(mp: MP, t0: TP, at: int, end: int) -> RMItems {
+        const n: PTok = peekAt(t0, 1)
+        const c: PTok = peekAt(t0, 2)
+        const h: PTok = peekAt(t0, 3)
+        const e: PTok = peekAt(t0, 4)
+        if (n.cls != TC.Ident || !tk(c, ":") || h.cls != TC.Ident || h.v != "host" || e.cls != TC.End) {
+            return hostMalformed(mp, at, end, "a type line in a `<host>` is exactly `type Name:host`")
+        }
+        const td: ATypeDecl = { nid: mp.nid, span: mkSpan(at, end), exported: false, name: n.v, body: ATypeBody.HostBody }
+        const m1: MP = mBump(mp)
+        const it: AItem = { nid: m1.nid, span: mkSpan(at, end), k: AItemK.TypeItem(td) }
+        return { items: [it], mp: mAt(mBump(m1), end) }
+    }
+
+    // `[fn] name(params) [-> [waiting] T] [! E] [= target]` (§21.3.3 host-binding).
+    fn hostBindLine(mp: MP, t0: TP, at: int, end: int, src: string) -> RMItems {
+        let t: TP = t0
+        let isFn = false
+        if (isWord(t, "pure")) return hostMalformed(mp, at, end, "a binding spelled with the deprecated `pure` (a pure binding is spelled `fn`, §33)")
+        if (isWord(t, "fn")) {
+            isFn = true
+            t = adv(t)
+        }
+        const nameTok: PTok = cur(t)
+        if (nameTok.cls != TC.Ident || !tk(peekAt(t, 1), "(")) return hostMalformed(mp, at, end, "this line is not a binding")
+        const rp: RParams = parseParamList(adv(adv(t)))
+        if (!isP(rp.tp, ")")) return hostMalformed(mp, at, end, "a binding's parameter list does not close on its line")
+        t = adv(rp.tp)
+        let ret: AType | not = not
+        let waiting = false
+        let hasResult = false
+        let failable = false
+        let errTok: PTok = cur(t)
+        let errName: string = ""
+        const a: PTok = cur(t)
+        const b: PTok = peekAt(t, 1)
+        if (tk(a, "-") && tk(b, ">") && touching(a, b)) {
+            hasResult = true
+            t = adv(adv(t))
+            if (isWord(t, "waiting")) {
+                waiting = true
+                t = adv(t)
+            }
+            const rr: RType = parseType(t)
+            ret = rr.t
+            t = rr.tp
+        }
+        if (isP(t, "!")) {
+            failable = true
+            t = adv(t)
+            errTok = cur(t)
+            const re: RType = parseType(t)
+            errName = typeNameText(re.t)
+            t = re.tp
+        }
+        let target: AExpr | not = not
+        let isNew = false
+        if (isP(t, "=")) {
+            t = adv(t)
+            if (isWord(t, "new")) {
+                isNew = true
+                t = adv(t)
+            }
+            const rx: RExpr = parseAssign(t)
+            target = rx.e
+            t = rx.tp
+        }
+        if (!atEnd(t)) {
+            const rest: PTok = cur(t)
+            return hostMalformed(mp, at, end, "unexpected `" + rest.text + "` in a binding line")
+        }
+        const fnNid: int = t.nid
+        t = bumpId(t)
+        const body: ABlock = { nid: t.nid, span: mkSpan(at, end), stmts: [] }
+        t = bumpId(t)
+        const f: AFn = { nid: fnNid, span: mkSpan(at, end), exported: false, pure: isFn, name: nameTok.v, params: rp.ps,
+                         ret: ret, body: body, server: false, failable: false, err: not }
+        const it: AItem = { nid: t.nid, span: mkSpan(at, end), k: AItemK.FnItem(f) }
+        t = bumpId(t)
+        const hb: AHostBind = { fn: fnNid, span: mkSpan(at, end), target: target, isNew: isNew, waiting: waiting,
+                                failable: failable, hasResult: hasResult, src: src, isFn: isFn }
+        let ds: Diag[] = t.diags
+        if (waiting) ds = ds.concat([newDiag("E-BOOTSTRAP-UNSUPPORTED", "`" + nameTok.v + "` is declared `-> waiting …` — a waiting `<host>` binding (§21.3.3 rule 17: \"A call of a binding declared `-> waiting T` is a waiting value (§13.8)\") is not in the bootstrap yet; its settled-value decode and §13.8 placement are not built", mp.file, mkSpan(at, end))])
+        if (failable) {
+            if (errName != "HostError") {
+                ds = ds.concat([newDiag("E-HOST-ERROR-TYPE", "`" + nameTok.v + "` is declared `! " + errName + "` — a `<host>` binding's `!` names `HostError` (`scrml:host`) and no other type (§21.3.3 rule 18)", mp.file, mkSpan(errTok.start, errTok.end))])
+            } else {
+                ds = ds.concat([newDiag("E-BOOTSTRAP-UNSUPPORTED", "`" + nameTok.v + "` is declared `! HostError` — a failable `<host>` binding (§21.3.3 rule 18: a throw or rejection \"SHALL produce `HostError::Thrown(message, name)`\") is not in the bootstrap yet; `scrml:host`'s `HostError` is not built. Without `!`, a throwing target is the trap `E-HOST-THROW-RT`", mp.file, mkSpan(at, end))])
+            }
+        }
+        ds = ds.concat(hostTargetDiags(mp.file, nameTok.v, rp.ps, target, isNew, isFn, src, mkSpan(at, end)))
+        const m: MP = { src: mp.src, pos: end, nid: t.nid, diags: ds, file: mp.file, hoist: mp.hoist, dbFns: mp.dbFns, hosts: mp.hosts.concat([hb]) }
+        return { items: [it], mp: m }
+    }
+
+    fn typeNameText(t: AType) -> string {
+        return match t.k {
+            .TName(name: n) :> n
+            .TSeq(elem: e) :> typeNameText(e) + "[]"
+            .TMaybe(inner: i) :> typeNameText(i) + " | not"
+        }
+    }
+
+    // ---- the target checks (rules 4, 5, 6, 8, 11) — the target's view is ast.scrml hostView / hostTargetParts ----
+    fn hostParamIndex(ps: AParam[], n: string) -> int {
+        let i: int = 0
+        for (const p of ps) {
+            if (p.name == n) return i
+            i = i + 1
+        }
+        return -1
+    }
+
+    fn hostSinkWords() -> string[] {
+        return ["eval", "Function", "setTimeout", "setInterval", "insertAdjacentHTML", "createContextualFragment", "setHTMLUnsafe", "execCommand"]
+    }
+
+    fn hostTargetDiags(file: string, name: string, ps: AParam[], target0: AExpr | not, isNew: boolean, isFn: boolean, src: string, line: ASpan) -> Diag[] {
+        let out: Diag[] = []
+        for (const p of ps) {
+            if (hostRootGlobal(p.name) || p.name == "globalThis") {
+                out = out.concat([newDiag("E-BOOTSTRAP-UNSUPPORTED", "the parameter `" + p.name + "` of the binding `" + name + "` is named like a host root — which one a target's `" + p.name + "` names is not ruled (§21.3.3 rule 4); rename the parameter", file, p.span)])
+            }
+        }
+        if (target0 is not) {
+            if (src == "") out = out.concat([newDiag("E-HOST-NO-TARGET", "the binding `" + name + "` has no `= target`, and its `<host>` has no `src=` — in a `<host>` without `src=`, every binding SHALL have a target (§21.3.3 rule 6): `" + name + "(…) -> T = window.…`", file, line)])
+            return out
+        }
+        const target: AExpr = target0
+        const sp: ASpan = target.span
+        const parts: HTargetParts = hostTargetParts(target, isNew)
+        const shapeWhy: string = " — a target SHALL be exactly one call, `new` construction, property read or property write, its callee a dotted member chain rooted at a parameter, `window`, `document` or `navigator`, each argument a parameter, a string / number / bool literal, or a one-level object literal of those (§21.3.3 rule 4)"
+        if (!parts.ok) return out.concat([newDiag("E-HOST-TARGET-SHAPE", "the target of `" + name + "` is not a call, `new`, property read or property write" + shapeWhy, file, sp)])
+        const ch: HChain = parts.chain
+        if (!ch.ok) return out.concat([newDiag("E-HOST-TARGET-SHAPE", "the target of `" + name + "` does not name a dotted member chain (a computed member `a[k]`, a call inside the chain, or another expression)" + shapeWhy, file, sp)])
+        if (parts.shape >= 2 && ch.members.length == 0) return out.concat([newDiag("E-HOST-TARGET-SHAPE", "the target of `" + name + "` reads or writes `" + ch.root + "` itself, not a property of it" + shapeWhy, file, sp)])
+        for (const mb of ch.members) {
+            if (mb == "constructor" || mb == "prototype" || mb == "__proto__") return out.concat([newDiag("E-HOST-TARGET-SHAPE", "the target of `" + name + "` names `" + mb + "` — a member named `constructor`, `prototype` or `__proto__` SHALL NOT appear in a target's chain (§21.3.3 rule 4)", file, sp)])
+        }
+        const rootParam: int = hostParamIndex(ps, ch.root)
+        if (rootParam < 0 && !hostRootGlobal(ch.root)) return out.concat([newDiag("E-HOST-TARGET-UNBOUND", "the target of `" + name + "` is rooted at `" + ch.root + "`, which is not a parameter of the binding, an export of `src`, or `window` / `document` / `navigator` (§21.3.3 rule 4; `globalThis` and other globals are not roots)", file, sp)])
+        if (isFn && rootParam < 0) return out.concat([newDiag("E-HOST-TARGET-SHAPE", "`" + name + "` is declared `fn` (deterministic, no effect — §21.3.3 rule 11) but its target is rooted at `" + ch.root + "`: those reads are the `E-FN-004` class; drop `fn`", file, sp)])
+        // the arguments (rule 4)
+        let uses: string[] = []
+        if (rootParam >= 0) uses = uses.concat([ch.root])
+        for (const x of parts.args) {
+            const av: HView = hostView(x)
+            if (av.k == 0) {
+                if (hostParamIndex(ps, av.name) < 0) return out.concat([newDiag("E-HOST-TARGET-SHAPE", "an argument of `" + name + "`'s target is `" + av.name + "`, which is not a parameter of the binding" + shapeWhy, file, x.span)])
+                uses = uses.concat([av.name])
+            } else if (av.k == 7) {
+                for (const pr of av.props) {
+                    if (pr.spread) return out.concat([newDiag("E-HOST-TARGET-SHAPE", "a spread in an object-literal argument of `" + name + "`'s target" + shapeWhy, file, pr.span)])
+                    if (pr.name == "__proto__") return out.concat([newDiag("E-HOST-TARGET-SHAPE", "an object-literal key `__proto__` in `" + name + "`'s target (§21.3.3 rule 4)", file, pr.span)])
+                    const pv: HView = hostView(pr.value)
+                    if (pv.k == 0) {
+                        if (hostParamIndex(ps, pv.name) < 0) return out.concat([newDiag("E-HOST-TARGET-SHAPE", "an object-literal value in `" + name + "`'s target is `" + pv.name + "`, which is not a parameter of the binding" + shapeWhy, file, pr.value.span)])
+                        uses = uses.concat([pv.name])
+                    } else if (pv.k < 4 || pv.k > 6) {
+                        return out.concat([newDiag("E-HOST-TARGET-SHAPE", "an object-literal value in `" + name + "`'s target is not a parameter or a literal (one level only)" + shapeWhy, file, pr.value.span)])
+                    }
+                }
+            } else if (av.k < 4 || av.k > 6) {
+                return out.concat([newDiag("E-HOST-TARGET-SHAPE", "an argument of `" + name + "`'s target is not a parameter, a literal, or a one-level object literal (an operator, a lambda, a nested call, a spread, a template …)" + shapeWhy, file, x.span)])
+            }
+        }
+        // rule 5 — each declared parameter exactly once
+        for (const p of ps) {
+            let n: int = 0
+            for (const u of uses) {
+                if (u == p.name) n = n + 1
+            }
+            if (n != 1) {
+                let how: string = "does not use it"
+                if (n > 1) how = "uses it " + n + " times"
+                out = out.concat([newDiag("E-HOST-PARAM-USE", "the parameter `" + p.name + "` of `" + name + "` SHALL appear exactly once in its target, and the target " + how + " (§21.3.3 rule 5)", file, p.span)])
+            }
+        }
+        const sink: string = hostSinkWhy(parts)
+        if (sink != "") out = out.concat([newDiag("E-HOST-TARGET-SINK", "the target of `" + name + "` " + sink + " — a target SHALL NOT reach a sink that runs source text or navigates the page (§21.3.3 rule 8, the §5.2 principle)", file, sp)])
+        return out
+    }
+
+    // Rule 8: why the target reaches a sink ("" — it does not). Judged by
+    // member NAME over every segment of the chain (root included), so a sink
+    // reached through `.call` / `.apply` / `.bind` (`window.eval.call(…)`) is
+    // refused too — fail closed.
+    fn hostSinkWhy(parts: HTargetParts) -> string {
+        const segs: string[] = [parts.chain.root].concat(parts.chain.members)
+        const last: int = segs.length - 1
+        let i: int = 0
+        while (i < segs.length) {
+            const s: string = segs[i]
+            let prev: string = ""
+            if (i > 0) prev = segs[i - 1]
+            const callish: boolean = parts.shape <= 1 || i < last
+            if (callish && hostSinkWords().indexOf(s) >= 0) return "reaches `" + s + "`"
+            if (callish && prev == "document" && (s == "write" || s == "writeln")) return "calls `document." + s + "`"
+            if (callish && prev == "location" && (s == "assign" || s == "replace")) return "calls `location." + s + "`"
+            if (callish && prev == "window" && s == "open") return "calls `open` on `window`"
+            if (s == "setAttribute" || s == "setAttributeNS" || s == "toggleAttribute") {
+                if (i < last || parts.shape > 1) return "reaches `" + s + "` other than as the called member"
+                let at: int = 0
+                if (s == "setAttributeNS") at = 1
+                if (at >= parts.args.length) return "calls `" + s + "` without a literal attribute name"
+                const nv: HView = hostView(parts.args[at])
+                if (nv.k != 4) return "calls `" + s + "` with an attribute name that is not a string literal"
+                const low: string = nv.name.toLowerCase()
+                if (low == "srcdoc" || low.startsWith("on")) return "calls `" + s + "` on the attribute `" + nv.name + "`"
+            }
+            if (parts.shape == 3 && (s == "location" || (i == last && (s == "innerHTML" || s == "outerHTML" || s == "srcdoc")))) return "writes `" + s + "`"
+            i = i + 1
+        }
+        return ""
     }
 
     fn isTypeItem(k: AItemK) -> boolean {
@@ -6386,7 +6836,7 @@ ${
         const quoted: string = "\"" + text.split("\\").join("\\\\").split("\"").join("\\\"") + "\""
         const d: Diag = newDiag("E-UNQUOTED-DISPLAY-TEXT", "display text in a `<db>` body is declared — a markup element (`<p>" + text + "</p>`) or a quoted display-text literal (`" + quoted + "`): a `<db>` body is a code-default item body, never page text (S472 ruling Q3, §4.18.1 / §4.18.7)", mp.file, mkSpan(start, end))
         const ds: Diag[] = mp.diags.slice(0, at).concat([d]).concat(mp.diags.slice(at, mp.diags.length))
-        return { src: mp.src, pos: mp.pos, nid: mp.nid, diags: ds, file: mp.file, hoist: mp.hoist, dbFns: mp.dbFns }
+        return { src: mp.src, pos: mp.pos, nid: mp.nid, diags: ds, file: mp.file, hoist: mp.hoist, dbFns: mp.dbFns, hosts: mp.hosts }
     }
 
     // Report the keyword (its span) and resume at the tag, which then parses
@@ -6997,7 +7447,7 @@ ${
     }
 
     fn noHoist(mp: MP) -> MP {
-        return { src: mp.src, pos: mp.pos, nid: mp.nid, diags: mp.diags, file: mp.file, hoist: [], dbFns: mp.dbFns }
+        return { src: mp.src, pos: mp.pos, nid: mp.nid, diags: mp.diags, file: mp.file, hoist: [], dbFns: mp.dbFns, hosts: mp.hosts }
     }
 
     fn mItem(mp: MP, start: int, k: AItemK) -> RMItems {
@@ -7061,6 +7511,8 @@ ${
         const ro: ROpener = parseOpener(mp)
         const o: Opener = ro.o
         if (isThemeOpener(o)) return { items: [], mp: refuseTheme(o, ro.mp) }
+        // s473 (§21.3.3 rule 1): a `<host>` at file top or a direct child of `<program>`
+        if (isHostOpener(o)) return finishHost(o, letOnNonDecl(ro.mp, o, isLet), exported)
         if (isEffectOpener(o)) {
             // s449: an `<effect>` at the program body top — owned by the program scope
             const re: REffectNode = finishEffect(o, letOnNonDecl(ro.mp, o, isLet))
@@ -7146,7 +7598,7 @@ ${
 
     // Parse one file. NodeIds start at `firstId`; `nextId` is the first unused.
     export fn parseFile(path: string, src: string, firstId: int) -> Parsed {
-        const m0: MP = { src: src, pos: 0, nid: firstId, diags: [], file: path, hoist: [], dbFns: [] }
+        const m0: MP = { src: src, pos: 0, nid: firstId, diags: [], file: path, hoist: [], dbFns: [], hosts: [] }
         const r: RMItems = parseMarkupItems(m0, "")
         // `errs`: the ERROR spans only (s451) — §34: Warning and Info codes "do
         // not fail the compile", so a parse warning neither untrusts a declaration
@@ -7155,7 +7607,7 @@ ${
         // (s469: not E-STMT-NO-EFFECT — a whole, well-formed statement: the body around
         // it IS what was written, so analyze still judges it, e.g. E-TYPE-043)
         for (const d of r.mp.diags) { if (d.severity == Severity.Error && d.code != "E-STMT-NO-EFFECT") errs = errs.concat([d.span]) }
-        return { ast: { path: path, items: r.items, errs: errs, lines: lineStarts(src), dbFns: r.mp.dbFns }, diags: r.mp.diags, nextId: r.mp.nid }
+        return { ast: { path: path, items: r.items, errs: errs, lines: lineStarts(src), dbFns: r.mp.dbFns, hosts: r.mp.hosts }, diags: r.mp.diags, nextId: r.mp.nid }
     }
 
     // The offset where each line of `src` starts (s454 — FileAst.lines).

@@ -129,6 +129,7 @@ ${
         return match td {
             .StructDef(fields: fs) :> reachFields(p, fs, acc)
             .EnumDef(variants: vs) :> reachVariants(p, vs, acc)
+            .HostDef(sym: hs) :> acc
         }
     }
 
@@ -197,7 +198,15 @@ ${
         return match td {
             .StructDef(sym: ts, fields: fs) :> structDef(syms, ts, fs)
             .EnumDef(sym: es, variants: vs) :> enumDef(syms, es, vs)
+            .HostDef(sym: hs) :> hostNoWire(hs)
         }
+    }
+
+    // s473: a declared `:host` handle type (DRAFT §21.3.3 rule 15) has NO wire
+    // form — a handle is not data (analyze refuses it at every boundary it
+    // builds: E-HOST-HANDLE-NOT-DATA); should one reach the codec, it is refused here.
+    fn hostNoWire(hs: Sym) -> DefBuild {
+        return { def: not, why: ["Named(" + hs.hint + ") is a declared `:host` handle type — a host handle has no wire form (§21.3.3 rule 15)"] }
     }
 
     fn structDef(syms: Sym[], ts: Sym, fs: FieldDef[]) -> DefBuild {
