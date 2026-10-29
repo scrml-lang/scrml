@@ -22,3 +22,23 @@
 ## 2026-10-28 — r2: rule 13 thenable fix + gates
 - §21.3.3 rule 13: a no-`->` binding still treats a thenable as a mismatch (design §5.4: the discarded-host-Promise fail-open stays closed).
 - Gates (CI checks job steps run locally): types-gate, compiler/tests/*.test.js, snippet-gate, claim-gate, corpus-compile-floor, gen-md-shim, conflict-marker, delta-lint, s34-census --check-new, severity --check, bootstrap-conformance --check, slices m1/m2/m1-lowered/m3/m4/codec, e2e-render-map: all PASS. SPEC-INDEX regenerated after the rule-13 edit (check PASS). Pre-commit hook: 50868 pass, 0 fail.
+
+## 2026-10-28 — fix round 1 (S239 review of 2529feedc: FIX-FIRST; ~/.cache/scrml/review/s473-1630/REVIEW.md)
+§21.3.3 rules renumbered: new rule 8 (sinks); old 8+9 merged as rule 9; HostError is now 18, callbacks 19.
+- H1: rule 15 (closed handles, E-HOST-HANDLE-MEMBER) applies to USER-DECLARED `type X:host` only; rule 16 keeps DOM member access untyped as in §6.7.1b; Q10 recorded as ⚑ OPEN, rec keep DOM members open.
+- H2: rule 3 — exports read by static parse of ES export declarations; "The compiler SHALL NOT load, import, or evaluate a `src=` file … at build time"; the §21.3.1.1 loader is admitted only for compiler-owned stdlib behind the §22.13 gate.
+- M1: rule 17 adds waiting values and removes none; §13.8 items 1 and 3 (fetch, Promise statics/producers) are unaffected; §13.8 ⚑ pointer reworded to match.
+- M2: handles are NOT comparable — `==` on a type containing a declared `:host` type is E-EQ-003 (as functions, §45.2); §45.6 stands; §45.2 + the E-EQ-003 row are in the leave-DRAFT edits list.
+- M3: E-HOST-HANDLE-NOT-DATA by depth across §57.1 sinks + server / worker / `<api>` boundaries, map keys, struct fields.
+- M4: decode reads own data properties once via descriptors (accessor/inherited/missing = absent); Array.isArray for tapes; typeof for scalars; thenable test reads `then` once by ordinary access.
+- M5: HostError payload built without host conversions: string message/name read once, primitive → String, otherwise fixed text / "UnknownThrow"; departs from normalizeThrown for objects without string message.
+- M6: deep fresh copy in; map/set/tuple types E-HOST-TYPE-NOT-CROSSABLE in v1 (widening later).
+- M7: void callback with a waiting body runs fire-and-forget, wrapped so the host gets `undefined`; reconciled with E-ASYNC-FN-ESCAPES-AS-VALUE (design §5.4 default).
+- M8: "target does not exist" = evaluating the target throws; an absent final member is decoded `undefined`; a waiting binding's non-thenable result is treated as settled.
+- M9: ⚑ names the S472-destination vs Q6-default conflict, gives the rec (isomorphic stdlib `<host src>`, both artifacts at `_scrml/<module>/<file>`; adopter stays client-only); filed g-spec-host-block-server-side-bindings-s473 (ruling-gated).
+- M10: rule 8 + new code E-HOST-TARGET-SINK (eval / Function / string timers / document.write / HTML-string APIs / innerHTML|outerHTML|srcdoc writes / location writes + navigation calls), modelled on §5.2 S464; rule 4 refuses constructor/prototype/__proto__; URL-valued writes filed as g-spec-host-target-url-sinks-unjudged-s473.
+- L1 (a): labelled a PA reading; E-SCOPE-010 row aligned with rule 9; host-type names follow the type rules (§14).
+- L2 (c): labelled a PA reading; cost named (`v.play()` traps until `-> waiting void`); rejection handler attached before the trap; the trap message names the fix.
+- L3: relative `src=` defined; E-IMPORT-011 denied-class half added; symlink resolution.
+- Follow-ups NOT done (review LOW): L4 blank lines / `/* */` in the body; L5 target edge cases (negative literals, template literals, `?.`, shorthand, `default` export, a parameter named `window`); L6 exporting `:host` types; L7 `HostError` import requirement; L8 worker / tool / `<db>` contexts; L9 F4 lint narrower than the ruling (localStorage, location); L10 the Q7 3m setTimeout bypass; L11 a cheap `nodeType` check for DOM results; L12 code naming (E-HOST-BINDING-* vs E-HOST-BINDING-USE); L13 the W-HOST-UNTYPED-CALL row's split provenance; L14 folded into the M1 wording.
+- Gates: regen-spec-index --check PASS, s34-census --check-new PASS (35 rows), snippet-gate PASS, claim-gate PASS, severity --check current, conflict-marker PASS, delta-lint PASS; hook on commit.

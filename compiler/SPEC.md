@@ -4958,7 +4958,7 @@ an `<onMount>`'s owner, initialized to `not`. It is not a cell.
 - **Per row.** A mount handle declared in an `<each>` row template is one binding per row, created as `not` with the
   row, following its row on a keyed reorder, and dropped when the row is removed — the same lifetime as a row-scoped
   `ref=` (a). The row's `<onMount>` (which runs once per row, §6.7.1a) assigns that row's handle.
-- ⚑ **Not specified here:** the static type of a host object. Typing host values is dpa-075 F3, which is not ruled. *(S473: ruled; drafted as §21.3.3 — a mount handle is typed `H | not` with `H` a `:host` handle type, rule 15. This ⚑ is replaced when §21.3.3 leaves DRAFT.)*
+- ⚑ **Not specified here:** the static type of a host object. Typing host values is dpa-075 F3, which is not ruled. *(S473: ruled; drafted as §21.3.3 — a mount handle is typed `H | not` with `H` a user-declared `:host` handle type, rule 15; member access on a `ref=` DOM element is unchanged, rule 16. This ⚑ is replaced when §21.3.3 leaves DRAFT.)*
 
 ```scrml
 ${ import { Chart } from './js/chart.esm.js' }            // §21.3 relative .js import
@@ -11409,7 +11409,8 @@ load) · §34 (E-VALUE-SERVER-CALL).
    whether it is a waiting value is not specified here. It waits on dpa-075 F3's measurement (DD
    `browser-host-apis-dpa-075-2026-10-27.md` §7 F1 (d), F3). *(ruling:user-voice-scrml.md S471 "your recs on F0 and
    F1" — F1 (d) "content finalized by F3".)* *(S473: ruled; drafted as §21.3.3 rule 17 — a call of a `<host>` binding
-   declared `-> waiting T` is a waiting value, and a host call through any other door is not. This ⚑ is replaced
+   declared `-> waiting T` is a waiting value. It adds to this list and removes nothing: items 1 and 3 above are
+   unchanged, and an untyped §21.3 import or a bare platform member is not made waiting by it. This ⚑ is replaced
    when §21.3.3 leaves DRAFT.)*
 
 These are the same three forms as §13.7's items 1–4, and the same set §13.2's *async-colored* defines. This
@@ -24857,22 +24858,24 @@ A module's bindings reach scrml source through exactly two forms: the static `im
 > **Provenance:** ruling:user-voice-scrml.md S473 "⭐ RULED — S473 PA recs, all" item 4 — *"F3 typed host binding
 > Q1–Q5: a `<host>` block; `-> waiting T`; `! HostError`; closed `:host` handles; checked results."* ·
 > ruling:user-voice-scrml.md S473 same entry item 2 — *"Host-import name collision is E-SCOPE-010 (§21.3.1.1), not
-> W-IMPORT-001 (§41.7)."* · ruling:user-voice-scrml.md S471 "⭐ RULED — dpa-075 F3 = B" — *"B"* (*"host call sites
-> are typed by a **typed host-binding declaration element** over the existing §21.3 `.js` import door (pole B, the
-> `<api>` §60 shape for host functions) … a host call DECLARED `waiting` is a waiting value."*) ·
-> ruling:user-voice-scrml.md S471 "⭐ RULED — dpa-075 F4" — *"your rec"* (*"Once the F3 typed host-binding
-> declaration exists, a reversible LINT flags a bare platform global outside a typed door."*) ·
-> ruling:user-voice-scrml.md S472 "⭐ RULED — host function type, math API, remaining review debt" item 1 (the
-> wrapper form; *"Destination (not now): stdlib host files declared through `<host>` (F3/F7), wrappers rewritten
-> mechanically."*) and its closing note (`pure` is deprecated, §33; a pure binding is spelled `fn`) ·
-> ruling:user-voice-scrml.md S472 "⭐ RULED — stdlib host `.js` output location". Design and rationale:
+> W-IMPORT-001 (§41.7)."* (rule 9 extends it to `<host>` bindings — a PA reading) · ruling:user-voice-scrml.md S471
+> "⭐ RULED — dpa-075 F3 = B" — *"B"* (*"host call sites are typed by a **typed host-binding declaration element**
+> over the existing §21.3 `.js` import door (pole B, the `<api>` §60 shape for host functions) … a host call
+> DECLARED `waiting` is a waiting value."*) · ruling:user-voice-scrml.md S471 "⭐ RULED — dpa-075 F4" — *"your
+> rec"* (*"Once the F3 typed host-binding declaration exists, a reversible LINT flags a bare platform global outside
+> a typed door."*) · ruling:user-voice-scrml.md S472 "⭐ RULED — host function type, math API, remaining review
+> debt" item 1 (the wrapper form; *"Destination (not now): stdlib host files declared through `<host>` (F3/F7),
+> wrappers rewritten mechanically."*) and its closing note (`pure` is deprecated, §33; a pure binding is spelled
+> `fn`) · ruling:user-voice-scrml.md S472 "⭐ RULED — stdlib host `.js` output location". Design and rationale:
 > dd:`scrml-support/docs/deep-dives/typed-host-binding-f3-design-2026-10-27.md` (§5 the shape, §7 the codes, §10 the
-> owner questions; Q6–Q12 are the design's defaults, taken here). **Closes:**
-> `g-spec-typed-host-binding-declaration-undesigned-s471` (SPEC drafted; the build is
+> owner questions). Of the design's unruled defaults, Q7, Q8, Q9, Q11 and Q12 are taken here; Q6 (client-only) is
+> taken for adopter files and left ⚑ OPEN for stdlib files; Q10 (DOM types as closed handles) is NOT taken (rule
+> 16). **Closes:** `g-spec-typed-host-binding-declaration-undesigned-s471` (SPEC drafted; the build is
 > `g-boot-host-block-f3-unbuilt-s473`). **Direction of change:** newly-accepting (the element `<host>` and the type
 > kind `:host`); `W-HOST-UNTYPED-CALL` is newly-warning and reversible. A program that writes no `<host>` changes
-> meaning in no way. **Supersedes:** nothing written. The ⚑ notes of §6.7.1b, §13.8 item 3 and Appendix D that wait
-> on dpa-075 F3 are answered by this section and are replaced when it leaves DRAFT.
+> meaning in no way: no rule here applies to a value whose type is not a user-declared `:host` type or a `<host>`
+> binding. **Supersedes:** nothing written. The ⚑ notes of §6.7.1b, §13.8 item 3 and Appendix D that wait on
+> dpa-075 F3 are answered by this section and are replaced when it leaves DRAFT.
 
 `<host>` declares typed bindings for calls from client code into JavaScript: an export of a §21.3 relative `.js`
 or `.mjs` file, or a path under the browser roots `window`, `document` and `navigator` (Appendix D). It adds no
@@ -24919,15 +24922,30 @@ type Sighting:struct = { isIntersecting: bool, intersectionRatio: number }
 *The element.*
 
 1. `<host>` SHALL appear at file top level or as a direct child of `<program>`. A `<host>` anywhere else SHALL be
-   `E-HOST-BINDING-PLACEMENT`. It emits no HTML and no server code.
+   `E-HOST-BINDING-PLACEMENT`. It emits no HTML. In an adopter file it emits no server code (rule 10; for a stdlib
+   module file see the ⚑ after the wrapper-form relation).
 2. Each body line SHALL be a `//` comment, a `host-type` line, a `host-binding` line, or a continuation line
    beginning with `=`. Any other line SHALL be `E-HOST-BINDING-MALFORMED`. (A binding spelled with the deprecated
    `pure` modifier is such a line; a pure binding is spelled `fn`, §33.)
-3. `src=`, when present, SHALL be a relative `.js` or `.mjs` path. Any other value (a `.ts` / `.mts` file, an
-   absolute path, a non-string) SHALL be `E-HOST-SRC-INVALID`. A bare specifier, a missing file, and a file outside
-   the project root keep their §21.3 codes (`E-IMPORT-005`, `E-IMPORT-006`, `E-IMPORT-011`), and the file is copied
-   exactly as a §21.3 client import is. A binding without a target calls the `src` export of its own name with its
-   parameters in order; a name the file does not export SHALL be `E-IMPORT-004`.
+3. **`src=`.** When present, `src=` SHALL be a relative `.js` or `.mjs` path: a string that begins with `./` or
+   `../`, uses `/` as its only separator, contains no `?`, `#` or `\`, and ends exactly in `.js` or `.mjs` (case
+   included). Any other value (a `.ts` / `.mts` file, an absolute path, a scheme such as `https:` / `data:` /
+   `file:`, a `scrml:` / `vendor:` specifier, a non-string) SHALL be `E-HOST-SRC-INVALID`; a specifier that names no
+   relative path at all (`x.js`) is the §21.3 bare-specifier `E-IMPORT-005`. The path is resolved with symlinks
+   followed, and then checked as §21.3 checks a client helper: a file that does not exist is `E-IMPORT-006`; a file
+   that resolves outside the project root, or whose `_scrml_local/` copy path falls in a §47.13 denied class, is
+   `E-IMPORT-011`. The file is copied exactly as a §21.3 client import is. *(PA reading of the review's src=
+   finding: the design says only "a relative `.js`/`.mjs` path".)*
+   **Exports are read statically.** The exports of a `src=` file SHALL be determined by parsing its ES module
+   export declarations (`export function` / `class` / `const` / `let` / `var`, `export { … }`, `export default`,
+   and `export … from` / `export * from` followed through the §21.3 copy closure). The compiler SHALL NOT load,
+   import, or evaluate a `src=` file, or any file it reaches, at build time. A binding without a target calls the
+   export of its own name with its parameters in order. A name that the file does not export, or that it reaches
+   only through a form the parse cannot resolve, SHALL be `E-IMPORT-004`. Whether the export is callable is not
+   checked at build time: calling a non-callable export throws at run time, which rule 18 handles. *(Contrast
+   §21.3.1.1: the `import:host` loader loads a host module at compile time, which is admitted only because that
+   module is compiler-owned stdlib behind the §22.13 manifest gate. A stdlib module's `<host src=>` MAY use that
+   loader; an adopter's `<host src=>` SHALL NOT.)*
 
 *The target.*
 
@@ -24936,88 +24954,155 @@ type Sighting:struct = { isIntersecting: bool, intersectionRatio: number }
    an export of `src` (when `src=` is present), or `window`, `document` or `navigator`. Any other root (including
    `globalThis` and any other global) SHALL be `E-HOST-TARGET-UNBOUND`. Each argument SHALL be a parameter, a
    string, number or bool literal, or a one-level object literal whose values are parameters or literals. An
-   operator, a lambda, a computed member (`a[k]`), a spread, a nested call, or more than one of the four shapes
-   SHALL be `E-HOST-TARGET-SHAPE`.
+   operator, a lambda, a computed member (`a[k]`), a spread, a nested call, a member named `constructor`,
+   `prototype` or `__proto__` anywhere in the chain, an object-literal key `__proto__`, or more than one of the four
+   shapes SHALL be `E-HOST-TARGET-SHAPE`.
 5. Each declared parameter SHALL appear exactly once in the target. A parameter the target does not use, or uses
    twice, SHALL be `E-HOST-PARAM-USE`. (An omitted target uses each parameter once by construction.)
 6. In a `<host>` without `src=`, every binding SHALL have a target. A binding without one SHALL be
    `E-HOST-NO-TARGET`.
 7. A target SHALL be emitted as literal JavaScript at the call site. It SHALL NOT be built with the `Function`
    constructor or any other run-time evaluation of source text.
+8. **No execution or navigation sinks.** A target SHALL NOT reach a sink that runs source text or navigates the
+   page. Each of these SHALL be `E-HOST-TARGET-SINK`:
+   - a call or construction whose callee's last member is `eval` or `Function`, or is `setTimeout` / `setInterval`
+     with a first argument that is not of a function type;
+   - a call of `document.write`, `document.writeln`, `insertAdjacentHTML`, `createContextualFragment`,
+     `setHTMLUnsafe` or `execCommand`;
+   - a property write of `innerHTML`, `outerHTML` or `srcdoc`;
+   - a write to `location` or to any member of it, and a call of `location.assign`, `location.replace` or
+     `window.open`.
+   This applies the §5.2 principle that scrml does not hand the browser source text it never checks, the one
+   `srcdoc` and the `javascript:` scheme rules state for markup (S464). A URL-valued property write (`href`, `src`,
+   `action`) is not judged by this rule. ⚑ Whether it should be is `g-spec-host-target-url-sinks-unjudged-s473`.
 
 *A binding is a function.*
 
-8. A binding is a function bound in file scope (§7.6). It MAY be exported by name (§21.2). Its calls are checked
+9. A binding is a function bound in file scope (§7.6). It MAY be exported by name (§21.2). Its calls are checked
    like any call: wrong arity is `E-CALL-ARITY`, a wrong argument type is `E-TYPE-031`. It is NOT an `import:host`
-   binding: the §21.3.1.1 wrapper rule and `E-HOST-BINDING-USE` do not apply to it.
-9. A binding name that is also bound in its file — by another binding, a `host-type` line, a declaration, a plain
-   `import`, or an `import:host` — SHALL be `E-SCOPE-010` (§7.6; the S473 ruling that a host-import name collision
-   is `E-SCOPE-010`, §21.3.1.1). It is not `W-IMPORT-001` (§41.7).
-10. A binding is client-only. A function whose body calls a binding is client-only for route analysis (§12.4), as
-    a body that reads `document` or `window` is: a server-placed function reaching one SHALL be `E-ROUTE-002`, and
-    a body that also needs the server SHALL be `E-ROUTE-005`.
+   binding: the §21.3.1.1 wrapper rule and `E-HOST-BINDING-USE` do not apply to it. A binding name that is also
+   bound in its file as a value (by another binding, a declaration, a plain `import`, or an `import:host`) SHALL be
+   `E-SCOPE-010` (§7.6), not `W-IMPORT-001` (§41.7). *(PA reading, extending S473 item 2 from `import:host` to
+   `<host>` bindings; the design's `E-HOST-DUPLICATE` is not minted.)* A `host-type` name is a type name, and a
+   type-name collision follows the type-declaration rules (§14), not this rule.
+10. In an adopter file, a binding is client-only. A function whose body calls one is client-only for route
+    analysis (§12.4), as a body that reads `document` or `window` is: a server-placed function reaching one SHALL
+    be `E-ROUTE-002`, and a body that also needs the server SHALL be `E-ROUTE-005`. (For a stdlib module file, see
+    the ⚑ OPEN below.)
 11. A binding declared `fn` is a claim that the call is deterministic and has no effect, so a `fn` (§48) MAY call
     it. Calling a binding not declared `fn` from a `fn` SHALL be `E-FN-003`. A `fn` binding whose target is rooted
     at `window`, `document` or `navigator` SHALL be `E-HOST-TARGET-SHAPE` (those reads are the `E-FN-004` class).
 
 *What crosses.*
 
-12. Arguments cross into the host in their runtime representation: `not` as JS `null` (§42.8). An optional
-    parameter (`p?: T`, §7.5) whose argument is omitted, or is `not`, crosses as JS `undefined`. A struct crosses
-    as a fresh plain object and a tape as a fresh host sequence, so the host cannot mutate scrml data.
-13. **Checked results.** A binding's result, and every argument the host passes to a scrml callback (rule 18),
-    SHALL be decoded against its declared type and full declared contract, as §6.14.2 rule 3 decodes a restored
-    value, and SHALL NOT be coerced:
-    - `string`, `number` and `bool` by kind; `int` as a number that is integral and within ±(2^53−1);
+12. **Into the host.** Every argument SHALL cross as a deep, fresh copy in its runtime representation, except a
+    value of a `:host` type, a DOM element type (rule 16), `asIs`, or a function (rule 19), which crosses as
+    itself. So a struct crosses as a fresh plain object, and a tape as a fresh host sequence, each at every depth,
+    and the host cannot mutate scrml data. `not` crosses as JS `null` (§42.8). An optional parameter (`p?: T`, §7.5)
+    whose argument is omitted, or is `not`, crosses as JS `undefined`.
+13. **Checked results.** A binding's result, and every argument the host passes to a scrml callback (rule 19),
+    SHALL be decoded against its declared type and full declared contract, in the manner of §6.14.2 rule 3, and
+    SHALL NOT be coerced. The decode reads host data, not wire data, so it SHALL read only what it inspects, and
+    only once:
+    - `string`, `number` and `bool` are checked by `typeof` (a boxed `new String("x")` is a mismatch); `int` is a
+      `typeof` number that is integral and within ±(2^53−1);
     - for `T | not`, JS `null` or `undefined` is `not`, and any other value is decoded as `T`;
     - for any type without `not`, JS `null` or `undefined` is a mismatch;
-    - an enum by the §41.13 `parseVariant` shape;
-    - a struct by copying out its declared fields, each decoded; members not declared are dropped;
-    - a tape element by element;
+    - an enum is decoded by the §41.13 `parseVariant` shape;
+    - a struct SHALL be decoded by reading each declared field ONCE, as an OWN DATA property (through its property
+      descriptor, so no getter runs). An inherited property, a missing own property, or an accessor property is
+      absent: `not` for a field whose type admits `not`, otherwise a mismatch. Each value read is decoded, and
+      members not declared are dropped. A Proxy's traps may run, but at most once for each field;
+    - a tape SHALL be a value for which `Array.isArray` is true. Its `length` and each element are read once, as
+      own data properties (a hole is absent, as for a struct field), and each element is decoded;
     - a `:host` type (rule 15) and a DOM element type (rule 16) are not decoded, but a non-optional one SHALL NOT be
       `null` or `undefined`;
     - `asIs` (§7.5.2) is not decoded;
-    - a Promise or other thenable returned by a binding not declared `waiting` is a mismatch.
+    - for a binding not declared `waiting`, a result that is a thenable (an object or function whose `then`, read
+      once by ordinary property access, is a function) is a mismatch.
 
     A binding with no `->` discards the host's result without decoding it, except that a thenable is still a
-    mismatch (a host Promise is never silently dropped). A mismatch SHALL be the trap
+    mismatch. Before it traps on a thenable, the runtime SHALL attach a rejection handler to it, so the same fault
+    is not reported a second time as an unhandled rejection, and the trap message SHALL name the fix
+    (`-> waiting void`). *(PA reading: the design says both "the host result is discarded" (§5.2) and "a
+    non-waiting binding whose result is a thenable is a mismatch" (§5.4). This text takes the fail-closed §5.4
+    reading. Its cost: a binding such as `play(v: HTMLVideoElement) = v.play()`, and any thenable-shaped library
+    result, traps until it is written `-> waiting void`.)* A mismatch SHALL be the trap
     `E-HOST-VALUE-MISMATCH-RT` (§19.17), on a `!` binding too: it means the declaration is wrong, not that the
     host failed. For the scalar types this is the same decode §21.3.1.1 applies at a wrapper's `return`.
-14. A parameter or result type that cannot cross SHALL be `E-HOST-TYPE-NOT-CROSSABLE`: a function type as a
-    result, a callback parameter (rule 18) of a waiting function type, or a `lin` result.
+14. A parameter or result type that cannot cross SHALL be `E-HOST-TYPE-NOT-CROSSABLE`. In v1 that is: a function
+    type as a result; a callback parameter (rule 19) of a waiting function type; a `lin` result; and a map, set or
+    tuple type (§59) at any depth of a parameter or a result. Admitting map, set and tuple types later is a widening.
 
 *Handles.*
 
 15. **Closed handles.** `type Name:host` declares a nominal, opaque host type. It SHALL appear only inside a
-    `<host>`; anywhere else it SHALL be `E-HOST-TYPE-OUTSIDE`. A value of a `:host` type MAY be held in a local,
-    a mount handle (§6.7.1b (c)) or a client cell, passed to a binding, tested with `is given` / `is not`, and
-    compared by identity with `==`. A member access or method call on it SHALL be `E-HOST-HANDLE-MEMBER`, whose
-    message names the binding to declare instead. A `:host` type SHALL NOT be a struct field, the type of a
-    `persist=` or `server` cell, a server-function parameter or result, a channel payload, or a map key; each of
-    those SHALL be `E-HOST-HANDLE-NOT-DATA`.
-16. The DOM interface types that `ref=` binds (§6.7.1b (a): `HTMLElement`, `HTMLCanvasElement`, …) are built-in
-    `:host` types, assignable along their WebIDL inheritance (`HTMLCanvasElement` to `HTMLElement` to `Element`).
-    v1 names the HTML element interfaces `ref=` produces.
+    `<host>`; anywhere else it SHALL be `E-HOST-TYPE-OUTSIDE`. A value of a declared `:host` type MAY be held in a
+    local, a mount handle (§6.7.1b (c)) or a client cell, passed to a binding, and tested with `is given` /
+    `is not`. A member access or method call on it SHALL be `E-HOST-HANDLE-MEMBER`, whose message names the binding
+    to declare instead. It is not comparable: `==` or `!=` on a type that contains a declared `:host` type SHALL be
+    `E-EQ-003`, as for a function (§45.2), so §45.6 (*"There is no identity comparison operator in scrml"*) stands
+    without an exception. A struct field SHALL NOT be of a type that contains a declared `:host` type. A value whose
+    type contains one at any depth (a tape, an enum payload, a `T | not`, a map value) SHALL NOT cross a §57.1 sink
+    or be sent where one sends: a `persist=` or `server` cell, a server-function parameter or result, a channel or
+    server-sent-event payload, a worker message, or an `<api>` request body. Nor SHALL it be a map key. Each of
+    these SHALL be `E-HOST-HANDLE-NOT-DATA`. Laundering through `asIs` does not escape the rule: an `asIs` value
+    built from a `:host` value is still refused at those positions where the compiler can see its origin. *(The
+    review's §57.1 finding: the list is stated by depth, not by top-level type.)*
+16. **DOM element types.** The DOM interface types that `ref=` binds (§6.7.1b (a): `HTMLElement`,
+    `HTMLCanvasElement`, …) are built-in host types for this section's purposes: a value of one MAY be passed to a
+    binding parameter of that type or of a supertype along WebIDL inheritance (`HTMLCanvasElement` to `HTMLElement`
+    to `Element`), and may be declared as a binding's result (rule 13). Rule 15 does NOT apply to them: member
+    access on a DOM element type (`@canvasEl.getContext('2d')`, `@noteBox.focus()`) is unchanged from §6.7.1b and
+    stays untyped. Rule 22 does not lint it.
+    ⚑ **OPEN (design Q10, unruled): should the DOM element types become closed handles?** That would make member
+    access on every `ref=` cell `E-HOST-HANDLE-MEMBER`. It would reject existing SPEC examples (§6.7.1a, §6.7.9,
+    §6.7.1b (c)) and adopter programs that write no `<host>`, so it would be newly-rejecting. **Recommendation:
+    keep DOM members open.** Typed DOM access is F7's WebIDL stdlib (a separate item, S471), declared through
+    `<host>`, and that is the right place to type it.
 
 *Waiting, failure and callbacks.*
 
-17. **`-> waiting T`.** A call of a binding declared `-> waiting T` is a waiting value (§13.8). It is awaited
-    where §13.8 (i) allows one and MAY initialize a `(not to T)` cell under §13.8 (ii); in any other position it
-    takes the code §13.8 gives that position (`E-VALUE-SERVER-CALL`, `E-ASYNC-STDLIB-IN-SYNC-CALLBACK`,
-    `E-PARAM-DEFAULT-AWAIT`, `E-ASYNC-FN-ESCAPES-AS-VALUE`). Its settled value is decoded as `T` (rule 13);
-    `-> waiting void` discards it. A function that calls a waiting binding is async-colored (§13.2). A host call
-    that does not go through a `<host>` binding is not a waiting value. The spelling `waiting` is the waiting mark
-    of a function type (S469 R3′), so the same word marks a waiting function type elsewhere.
-18. **Callbacks.** A parameter of function type `(x: T) => U` accepts a lambda whose parameters are inferred
+17. **`-> waiting T`.** A call of a binding declared `-> waiting T` is a waiting value (§13.8). This adds a kind
+    of waiting value to §13.8's list and removes none. It is awaited where §13.8 (i) allows one and MAY initialize a
+    `(not to T)` cell under §13.8 (ii); in any other position it takes the code §13.8 gives that position
+    (`E-VALUE-SERVER-CALL`, `E-ASYNC-STDLIB-IN-SYNC-CALLBACK`, `E-PARAM-DEFAULT-AWAIT`,
+    `E-ASYNC-FN-ESCAPES-AS-VALUE`). Its settled value is decoded as `T` (rule 13); `-> waiting void` discards it. If
+    the host returns a value that is not a thenable, that value is treated as already settled and decoded as `T`. A
+    function that calls a waiting binding is async-colored (§13.2). A call of an untyped §21.3 import, or of a bare
+    platform member, is not made a waiting value by this section; the standard-library functions of §13.8 item 1
+    (`fetch` included), and the Promise statics and producers of §13.8 item 3, are unaffected and remain waiting
+    values. The spelling `waiting` is the waiting mark of a function type (S469 R3′), so the same word marks a
+    waiting function type elsewhere.
+18. **`! HostError`.** A binding declared `! HostError` is failable (§19.4) with the `HostError` enum of
+    `scrml:host`. When EVALUATING THE TARGET THROWS (a synchronous throw, including a missing intermediate member
+    such as `navigator.clipboard` being `undefined`, or a call of a non-callable export), or the returned Promise
+    rejects, the call SHALL produce `HostError::Thrown(message, name)`, and a call left unhandled is `E-ERROR-002`.
+    A property read whose final member is absent does not throw: it reads `undefined`, which rule 13 decodes (`not`
+    for a type that admits it, otherwise the trap `E-HOST-VALUE-MISMATCH-RT`). The payload SHALL be built without
+    running a conversion of a host object:
+    - `message`: when the thrown value is an object whose `message`, read once, is a string, that string. When it
+      is a primitive, its `String` form (a primitive runs no host code). Otherwise, the fixed text
+      `a non-Error value was thrown`;
+    - `name`: when the thrown value is an object whose `name`, read once, is a non-empty string, that string.
+      Otherwise `UnknownThrow`, or `Error` for an object whose `message` was a string;
+    - no `toString`, `valueOf` or `Symbol.toPrimitive` of a thrown object is called.
+
+    This follows `scrml:host`'s `normalizeThrown` (`compiler/runtime/stdlib/host.js`). It departs in one place:
+    an object without a string `message` gives the fixed text, not `String(thrown)`. A `!` naming any other type
+    SHALL be `E-HOST-ERROR-TYPE`. A binding not declared `!` whose target throws, or whose Promise rejects, SHALL
+    raise the trap `E-HOST-THROW-RT` (§19.17).
+19. **Callbacks.** A parameter of function type `(x: T) => U` accepts a lambda whose parameters are inferred
     (§7.5, position 3). Host arguments beyond the declared parameters are ignored; a missing one decodes as `not`,
-    which is a mismatch unless that parameter's type admits `not`. When `U` is `void` the host receives nothing
-    back. When `U` is not `void`, a lambda that contains a waiting value SHALL be `E-HOST-CALLBACK-WAITS`. A lambda
-    passed to a binding counts as handed to outside code (§6.7.1a rule 3m), not as handed to a scheduler.
-19. **`! HostError`.** A binding declared `! HostError` is failable (§19.4) with the `HostError` enum of
-    `scrml:host`. A synchronous throw, a rejected Promise, and a target that does not exist at run time SHALL each
-    produce `HostError::Thrown(message, name)`, and a call left unhandled is `E-ERROR-002`. A `!` naming any other
-    type SHALL be `E-HOST-ERROR-TYPE`. A binding not declared `!` that throws or rejects SHALL raise the trap
-    `E-HOST-THROW-RT` (§19.17).
+    which is a mismatch unless that parameter's type admits `not`. A lambda passed to a binding counts as handed to
+    outside code (§6.7.1a rule 3m), not as handed to a scheduler.
+    - When `U` is `void`, the host receives nothing back. A lambda body that contains a waiting value is allowed and
+      runs fire-and-forget, as a scheduler argument's body does (§13.2). The compiler wraps the lambda so the host
+      receives `undefined`, not a Promise. A trap inside the body stops that unit of execution (§19.17), as in an
+      event handler. This is not `E-ASYNC-FN-ESCAPES-AS-VALUE`: the lambda is not a function value escaping to an
+      unknown callee, but an argument to a parameter whose declared type the compiler wraps. *(The design's §5.4
+      default.)*
+    - When `U` is not `void`, a lambda that contains a waiting value SHALL be `E-HOST-CALLBACK-WAITS`.
 20. A parameter MAY be `lin` (§35.2.1); the argument is consumed at the call.
 
 *Boundaries.*
@@ -25035,18 +25120,24 @@ module's host functions move to it as follows, and the wrapper form is supersede
 
 - Each `import:host` binding and its one wrapper become one binding line in a `<host src="…">` naming the same host
   file, with the wrapper's signature (its name, parameters and return type; `fn` if the wrapper is a `fn`). The
-  `import:host` declaration and the wrapper are deleted. Callers are unchanged, because they called the wrapper by
-  that name and now call the binding by it.
+  `import:host` declaration and the wrapper are deleted. Client callers are unchanged, because they called the
+  wrapper by that name and now call the binding by it. Server callers are unchanged only under the ⚑ below.
 - In a stdlib module file, `src=` resolves and lands as §21.3.1.1 states for that module's host module
   (`<outputDir>/_scrml/<module>/<file>`, `E-IMPORT-012` outside the module directory), not under §21.3's
-  `_scrml_local/` copy rule.
+  `_scrml_local/` copy rule. It may use the compile-time loader (rule 3).
 - A stdlib host module that throws an error carrying a §19.17 trap code (§21.3.1.1) still raises that trap. It is
   not `HostError` and not `E-HOST-THROW-RT`.
 
-⚑ **OPEN — server-side bindings.** Rule 10 makes a binding client-only, and `<host src=>` admits `.js` / `.mjs`
-only (rule 3). A stdlib wrapper serves both artifacts (`scrml:math` runs on the server), and `import:host` also
-admits `.ts` / `.mts`. A module whose host functions are called from server code, or whose host module is
-TypeScript, therefore keeps the wrapper form until a ruling admits such bindings. Admitting them is a widening.
+⚑ **OPEN — server-side bindings in stdlib module files (owner question; `g-spec-host-block-server-side-bindings-s473`).**
+The ruled destination conflicts with an unruled default. S472 rules the destination *"stdlib host files declared
+through `<host>` (F3/F7), wrappers rewritten mechanically"*. But the design's Q6 default (*"client-only in v1"*),
+taken by rule 10, would stop any stdlib module whose host functions are called from server code (`scrml:math`
+runs on the server) from making that move. `<host src=>` also admits `.js` / `.mjs` only, while `import:host`
+admits `.ts` / `.mts`. Until the owner rules, such a module keeps the wrapper form, and rule 10 is stated for
+adopter files only. **Recommendation:** a `<host src=…>` inside a stdlib module file is isomorphic. Its host
+module is emitted into BOTH artifacts at `<outputDir>/_scrml/<module>/<file>`, as §21.3.1.1 already lands it, and
+its bindings are not client-only. An adopter `<host>` stays client-only (rule 10). A `.ts` host module stays on
+`import:host`. Admitting these is a widening.
 
 **Error codes:**
 
@@ -25054,31 +25145,40 @@ TypeScript, therefore keeps the wrapper form until a ruling admits such bindings
 |---|---|---|
 | `E-HOST-BINDING-PLACEMENT` | a `<host>` is written anywhere other than file top level or a direct child of `<program>` (rule 1) | Error (Nominal) |
 | `E-HOST-BINDING-MALFORMED` | a `<host>` body line is not a comment, a `type Name:host` line, a binding, or an `=` continuation (rule 2) | Error (Nominal) |
-| `E-HOST-SRC-INVALID` | `<host src=>` is not a relative `.js` / `.mjs` path (rule 3) | Error (Nominal) |
-| `E-HOST-TARGET-SHAPE` | a target is not one call, `new`, property read or property write over parameters, literals and a one-level object literal; or a `fn` binding's target is rooted at `window` / `document` / `navigator` (rules 4, 11) | Error (Nominal) |
+| `E-HOST-SRC-INVALID` | `<host src=>` is not a relative `.js` / `.mjs` path as rule 3 defines one | Error (Nominal) |
+| `E-HOST-TARGET-SHAPE` | a target is not one call, `new`, property read or property write over parameters, literals and a one-level object literal; or its chain names `constructor` / `prototype` / `__proto__`; or a `fn` binding's target is rooted at `window` / `document` / `navigator` (rules 4, 11) | Error (Nominal) |
 | `E-HOST-TARGET-UNBOUND` | a target's callee root is not a parameter, a `src` export, or `window` / `document` / `navigator` (rule 4) | Error (Nominal) |
+| `E-HOST-TARGET-SINK` | a target reaches a source-evaluating or navigation sink: `eval`, `Function`, a string timer, `document.write`, an HTML-string API, an `innerHTML` / `outerHTML` / `srcdoc` write, or a `location` write or navigation call (rule 8) | Error (Nominal) |
 | `E-HOST-PARAM-USE` | a declared parameter does not appear in the target, or appears more than once (rule 5) | Error (Nominal) |
 | `E-HOST-NO-TARGET` | a binding without `= target` stands in a `<host>` that has no `src=` (rule 6) | Error (Nominal) |
-| `E-HOST-TYPE-NOT-CROSSABLE` | a binding declares a function-typed result, a waiting callback parameter, or a `lin` result (rule 14) | Error (Nominal) |
+| `E-HOST-TYPE-NOT-CROSSABLE` | a binding declares a function-typed result, a waiting callback parameter, a `lin` result, or a map / set / tuple type at any depth (rule 14) | Error (Nominal) |
 | `E-HOST-TYPE-OUTSIDE` | `type Name:host` is written outside a `<host>` (rule 15) | Error (Nominal) |
-| `E-HOST-HANDLE-MEMBER` | a member access or method call is written on a `:host`-typed value (rule 15) | Error (Nominal) |
-| `E-HOST-HANDLE-NOT-DATA` | a `:host` type is used as a struct field, a `persist=` / `server` cell type, a server-function parameter or result, a channel payload, or a map key (rule 15) | Error (Nominal) |
-| `E-HOST-CALLBACK-WAITS` | a lambda passed for a callback parameter whose declared result is not `void` contains a waiting value (rule 18) | Error (Nominal) |
-| `E-HOST-ERROR-TYPE` | a binding's `!` names a type other than `HostError` (rule 19) | Error (Nominal) |
+| `E-HOST-HANDLE-MEMBER` | a member access or method call is written on a value of a user-declared `:host` type (rule 15; not a DOM element type, rule 16) | Error (Nominal) |
+| `E-HOST-HANDLE-NOT-DATA` | a type containing a declared `:host` type, at any depth, is a struct field, crosses a §57.1 sink or a server / worker / `<api>` boundary, or is a map key (rule 15) | Error (Nominal) |
+| `E-HOST-CALLBACK-WAITS` | a lambda passed for a callback parameter whose declared result is not `void` contains a waiting value (rule 19) | Error (Nominal) |
+| `E-HOST-ERROR-TYPE` | a binding's `!` names a type other than `HostError` (rule 18) | Error (Nominal) |
 | `W-HOST-UNTYPED-CALL` | client logic calls or reads through a bare `window` / `document` / `navigator` path, or calls a §21.3 `.js` / `.mjs` import, outside a `<host>` binding (rule 22) | Warning (Nominal) |
 | `E-HOST-VALUE-MISMATCH-RT` | at run time, a binding's result or a callback argument does not fit its declared type (rule 13; the trap §21.3.1.1 already raises for a wrapper) | Runtime trap (Nominal) |
-| `E-HOST-THROW-RT` | at run time, a binding not declared `! HostError` throws or rejects (rule 19) | Runtime trap (Nominal) |
+| `E-HOST-THROW-RT` | at run time, a binding not declared `! HostError` has a target that throws, or a Promise that rejects (rule 18) | Runtime trap (Nominal) |
 
-Reused, with the meaning their own sections give them: `E-SCOPE-010`, `E-IMPORT-004` / `-005` / `-006` / `-011`
-/ `-012`, `E-CALL-ARITY`, `E-TYPE-031`, `E-ROUTE-002` / `-005`, `E-FN-003`, `E-ERROR-002`, and the §13.8 position
-codes. The design's `E-HOST-DUPLICATE` is not minted: rule 9 reports a collision as `E-SCOPE-010`.
+Reused, with the meaning their own sections give them: `E-SCOPE-010`, `E-EQ-003`, `E-IMPORT-004` / `-005` / `-006`
+/ `-011` / `-012`, `E-CALL-ARITY`, `E-TYPE-031`, `E-ROUTE-002` / `-005`, `E-FN-003`, `E-ERROR-002`, and the §13.8
+position codes. The design's `E-HOST-DUPLICATE` is not minted: rule 9 reports a collision as `E-SCOPE-010`.
 
-**Edits made when this section leaves DRAFT:** §13.8 item 3's ⚑ OPEN becomes the item *"a call of a `<host>`
-binding declared `-> waiting T` (§21.3.3)"*; §6.7.1b (c)'s ⚑ points at rule 15, and its example handle becomes
-`let chart: ChartHandle | not = not;`; Appendix D's *"untyped host values"* sentence points at this section and
-`W-HOST-UNTYPED-CALL`; §7.5's lambda positions name a binding's function-typed parameter (rule 18); §12.4's
-client-only list adds "calls a `<host>` binding"; §19.17's trap table adds `E-HOST-THROW-RT` and widens
-`E-HOST-VALUE-MISMATCH-RT` to `<host>` bindings.
+**Edits made when this section leaves DRAFT:**
+- §13.8: item 3's ⚑ OPEN becomes a new item, *"a call of a `<host>` binding declared `-> waiting T`
+  (§21.3.3)"*. Items 1 and 3 are kept unchanged.
+- §6.7.1b (c):
+  - its ⚑ points at rule 15;
+  - its example handle becomes `let chart: ChartHandle | not = not;`;
+  - its `chart.destroy()` becomes a call of a `destroy(c: ChartHandle)` binding, since a member call on a declared
+    handle is `E-HOST-HANDLE-MEMBER`.
+- Appendix D: the *"untyped host values"* sentence points at this section and `W-HOST-UNTYPED-CALL`.
+- §7.5: the lambda positions name a binding's function-typed parameter (rule 19).
+- §12.4: the client-only list adds "calls a `<host>` binding (adopter file)".
+- §19.17: the trap table adds `E-HOST-THROW-RT` and widens `E-HOST-VALUE-MISMATCH-RT` to `<host>` bindings.
+- §45.2: a bullet says a type containing a declared `:host` type is NOT comparable (`E-EQ-003`, as functions are).
+  The `E-EQ-003` §34 row gains that trigger.
 
 ### 21.4 Re-export
 
@@ -28516,7 +28616,7 @@ are REFUSED by impl#1, `E-IMPL1-RULED-FORM-UNSUPPORTED` (its row lands with that
 | E-SCOPE-001 | §5.2, §15.10.1 | Unquoted identifier not resolvable in scope. Includes a component prop referenced in component-body text the compiler cannot parse: the prop cannot be substituted there (§15.10.1), so it would reach the page unbound (emitted at `compiler/src/component-expander.ts`, `expandComponentNode`). Provenance: ruling:user-voice-scrml.md S458 "your recs on both D1 codes". | Error |
 | E-SCOPE-REDECLARE | §7.3.3 | Inside a function body, a `let` / `const` / `lin` / `function` declaration redeclares a name already bound in the SAME block (another such declaration, or — in the function's top-level block — a parameter). Nested-block shadowing is legal; so are two `function` declarations of one name and a `function` declaration named like a parameter (S432). Before this code the program failed at codegen ("Identifier already declared"); a `defer` in the block made it compile. Direction: newly-rejecting in name only (every rejected program already failed at codegen). (S430 round 5; emitted at `compiler/src/validators/lint-redeclare.ts`.) | Error |
 | E-CALL-ARITY | §7.3 | A call passes more arguments than the function declares parameters, or fewer — unless each omitted parameter has a default (§7.3.2). Reopen condition (ruled): the callback case. **Provenance:** ruling:user-voice-scrml.md S440 (#4 = (c); #2 and #5 = PA recs — item #2). **Named; impl pending — Nominal / not yet emitted** (measured S440: impl#1 compiles both at exit 0); impl#1 carries it (§34.0). **S447:** the call-site check is restated with the argument-type check in §7.3.4 (plain calls); same Nominal status. **Provenance:** ruling:user-voice-scrml.md S447 (*"RULED — UFCS PARKED; keep only the argument checks"* — call 9 kept). | Error |
-| E-SCOPE-010 | §20.4, §7.6, §21.3.1.1, §21.3.3 | Developer declares variable with reserved binding name (`route`, `session`) **(reserved-binding trigger spec-ahead, S265 — not fired; E-SCOPE-010 currently fires only for a DUPLICATE file-scope `let`/`const`)**. ALSO (S440 ruling #6, §7.6): two top-level `function` declarations of one name. **Provenance:** ruling:user-voice-scrml.md S440 (the S440 22-item queue, item 6). **Named; impl pending — Nominal / not yet emitted for the `function` case** (measured S440: exit 0); impl#1 carries it (§34.0). ALSO (S473, §21.3.1.1, §41.7): a host-import name collision — an `import:host` binding name also bound by a plain `import`, another `import:host`, the same `import:host` twice, or a declaration of its file (emitted by the bootstrap at `compiler/self-host-v2/analyze.scrml` hostImportClash; Nominal on impl#1); and a `<host>` binding name bound twice in its file (DRAFT §21.3.3 rule 9 — Nominal / not yet emitted). Provenance: ruling:user-voice-scrml.md S473 "⭐ RULED — S473 PA recs, all" item 2. | Error |
+| E-SCOPE-010 | §20.4, §7.6, §21.3.1.1, §21.3.3 | Developer declares variable with reserved binding name (`route`, `session`) **(reserved-binding trigger spec-ahead, S265 — not fired; E-SCOPE-010 currently fires only for a DUPLICATE file-scope `let`/`const`)**. ALSO (S440 ruling #6, §7.6): two top-level `function` declarations of one name. **Provenance:** ruling:user-voice-scrml.md S440 (the S440 22-item queue, item 6). **Named; impl pending — Nominal / not yet emitted for the `function` case** (measured S440: exit 0); impl#1 carries it (§34.0). ALSO (S473, §21.3.1.1, §41.7): a host-import name collision — an `import:host` binding name also bound by a plain `import`, another `import:host`, the same `import:host` twice, or a declaration of its file (emitted by the bootstrap at `compiler/self-host-v2/analyze.scrml` hostImportClash; Nominal on impl#1); and a `<host>` binding name also bound in its file as a value — by another binding, a declaration, a plain `import` or an `import:host` (DRAFT §21.3.3 rule 9 — Nominal / not yet emitted; a PA reading extending item 2 to `<host>`). Provenance: ruling:user-voice-scrml.md S473 "⭐ RULED — S473 PA recs, all" item 2. | Error |
 | E-SCOPE-011 | §20.4 | Access to undeclared route parameter name **(Reserved / spec-ahead, S263 — no fire site: the undeclared-route-param check is spec-ahead — `route.params` is not typer-supported for pages and no param-name allow-list exists. Excluded from the freeze fireable set.)** | Error |
 | E-SCOPE-012 | §20.5 | `session` accessed outside a server-escalated function body **(LIVE, S265 (i29e) — the §20.5 server `session` establishment builtin is built; bare `session` is bound into server-escalated scopes and auto-escalates its enclosing function, so a `session` reference that is NOT server-escalated (e.g. top-level `${ }` logic) fires this. Distinct from the `@session` client projection.)** | Error |
 | E-SESSION-CONTEXT | §20.5.1 | `session.*` used outside a web-app server route handler — an SSE `server function*`, an `<endpoint>` arm, a `<machine>` method, a serverLoad cell, an in-process server-fn helper called by another server function, or a headless `kind="tool"` program. Those contexts have no cookie-session request/response context. **(LIVE, S265/S239 i29e.)** | Error |
@@ -28728,19 +28828,20 @@ are REFUSED by impl#1, `E-IMPL1-RULED-FORM-UNSUPPORTED` (its row lands with that
 | E-HOST-BINDING-USE | §21.3.1.1 | An `import:host` binding used other than as the direct callee of the whole-body `return h(p1, …, pn);` of its one fully typed wrapper (a bare reference, a call elsewhere, arguments that are not the wrapper's parameters in order, a re-export, a second wrapper, a wrapper without a declared return type, a `!` or `server` wrapper). **Code name PA's (S472)** — the ruling says "Any other use of a host binding is refused" and names no code. Emitted by the bootstrap at `compiler/self-host-v2/analyze.scrml` (resolveHostBinding); **Nominal on impl#1** (carried, §34.0 — its own `stdlib/compiler/**` re-exports bindings, §41.17 deferred). Provenance: ruling:user-voice-scrml.md S472 "⭐ RULED — host function type, math API, remaining review debt" item 1. Direction of change: newly-rejecting. | Error |
 | E-HOST-BINDING-PLACEMENT | §21.3.3 | Raised when a `<host>` is written anywhere other than file top level or a direct child of `<program>` (rule 1). **Nominal / spec-ahead — not yet emitted** (DRAFT §21.3.3; the bootstrap builds it, `g-boot-host-block-f3-unbuilt-s473`). Provenance: ruling:user-voice-scrml.md S473 "⭐ RULED — S473 PA recs, all" item 4; design `scrml-support/docs/deep-dives/typed-host-binding-f3-design-2026-10-27.md` §7. Direction of change: newly-rejecting within a newly-accepting element. | Error |
 | E-HOST-BINDING-MALFORMED | §21.3.3 | Raised when a `<host>` body line is not a `//` comment, a `type Name:host` line, a binding `name(params) -> Result = target`, or an `=` continuation line (rule 2) — including a binding spelled with the deprecated `pure`. **Nominal / spec-ahead — not yet emitted** (DRAFT §21.3.3; the bootstrap builds it, `g-boot-host-block-f3-unbuilt-s473`). Provenance: ruling:user-voice-scrml.md S473 "⭐ RULED — S473 PA recs, all" item 4; design `scrml-support/docs/deep-dives/typed-host-binding-f3-design-2026-10-27.md` §7. Direction of change: newly-rejecting within a newly-accepting element. | Error |
-| E-HOST-SRC-INVALID | §21.3.3 | Raised when `<host src=>` is not a relative `.js` / `.mjs` path (rule 3). A bare specifier, a missing file and a file outside the project root keep `E-IMPORT-005` / `-006` / `-011`. **Nominal / spec-ahead — not yet emitted** (DRAFT §21.3.3; the bootstrap builds it, `g-boot-host-block-f3-unbuilt-s473`). Provenance: ruling:user-voice-scrml.md S473 "⭐ RULED — S473 PA recs, all" item 4; design `scrml-support/docs/deep-dives/typed-host-binding-f3-design-2026-10-27.md` §7. Direction of change: newly-rejecting within a newly-accepting element. | Error |
-| E-HOST-TARGET-SHAPE | §21.3.3 | Raised when a binding's target is not exactly one call, `new` construction, property read or property write whose arguments are parameters, literals or a one-level object literal of those (an operator, lambda, computed member, spread or nested call), and when a `fn` binding's target is rooted at `window` / `document` / `navigator` (rules 4, 11). **Nominal / spec-ahead — not yet emitted** (DRAFT §21.3.3; the bootstrap builds it, `g-boot-host-block-f3-unbuilt-s473`). Provenance: ruling:user-voice-scrml.md S473 "⭐ RULED — S473 PA recs, all" item 4; design `scrml-support/docs/deep-dives/typed-host-binding-f3-design-2026-10-27.md` §7. Direction of change: newly-rejecting within a newly-accepting element. | Error |
+| E-HOST-SRC-INVALID | §21.3.3 | Raised when `<host src=>` is not a relative `.js` / `.mjs` path as rule 3 defines one (begins `./` or `../`, `/` separators only, no `?` / `#` / `\`, ends exactly `.js` / `.mjs`). A bare specifier, a missing file and a file outside the project root keep `E-IMPORT-005` / `-006` / `-011`. **Nominal / spec-ahead — not yet emitted** (DRAFT §21.3.3; the bootstrap builds it, `g-boot-host-block-f3-unbuilt-s473`). Provenance: ruling:user-voice-scrml.md S473 "⭐ RULED — S473 PA recs, all" item 4; design `scrml-support/docs/deep-dives/typed-host-binding-f3-design-2026-10-27.md` §7. Direction of change: newly-rejecting within a newly-accepting element. | Error |
+| E-HOST-TARGET-SHAPE | §21.3.3 | Raised when a binding's target is not exactly one call, `new` construction, property read or property write whose arguments are parameters, literals or a one-level object literal of those (an operator, lambda, computed member, spread or nested call); when the chain names `constructor`, `prototype` or `__proto__`, or an object-literal key is `__proto__`; and when a `fn` binding's target is rooted at `window` / `document` / `navigator` (rules 4, 11). **Nominal / spec-ahead — not yet emitted** (DRAFT §21.3.3; the bootstrap builds it, `g-boot-host-block-f3-unbuilt-s473`). Provenance: ruling:user-voice-scrml.md S473 "⭐ RULED — S473 PA recs, all" item 4; design `scrml-support/docs/deep-dives/typed-host-binding-f3-design-2026-10-27.md` §7. Direction of change: newly-rejecting within a newly-accepting element. | Error |
 | E-HOST-TARGET-UNBOUND | §21.3.3 | Raised when a target's callee root is not a parameter of the binding, an export of `src`, or `window` / `document` / `navigator` (`globalThis` included) (rule 4). **Nominal / spec-ahead — not yet emitted** (DRAFT §21.3.3; the bootstrap builds it, `g-boot-host-block-f3-unbuilt-s473`). Provenance: ruling:user-voice-scrml.md S473 "⭐ RULED — S473 PA recs, all" item 4; design `scrml-support/docs/deep-dives/typed-host-binding-f3-design-2026-10-27.md` §7. Direction of change: newly-rejecting within a newly-accepting element. | Error |
+| E-HOST-TARGET-SINK | §21.3.3, §5.2 | Raised when a binding's target reaches a sink that runs source text or navigates (rule 8): a call or construction whose last member is `eval` or `Function`, or `setTimeout` / `setInterval` with a first argument not of a function type; a call of `document.write`, `document.writeln`, `insertAdjacentHTML`, `createContextualFragment`, `setHTMLUnsafe` or `execCommand`; a property write of `innerHTML`, `outerHTML` or `srcdoc`; a write to `location` or a member of it, or a call of `location.assign`, `location.replace` or `window.open`. Applies the §5.2 S464 principle (no unchecked source text handed to the browser). **Nominal / spec-ahead — not yet emitted** (DRAFT §21.3.3; the bootstrap builds it, `g-boot-host-block-f3-unbuilt-s473`). Provenance: PA addition on the S239 review of #1630 (M10), within the element ruled by ruling:user-voice-scrml.md S473 "⭐ RULED — S473 PA recs, all" item 4. Direction of change: newly-rejecting within a newly-accepting element. | Error |
 | E-HOST-PARAM-USE | §21.3.3 | Raised when a declared parameter of a binding does not appear in its target, or appears more than once (rule 5). **Nominal / spec-ahead — not yet emitted** (DRAFT §21.3.3; the bootstrap builds it, `g-boot-host-block-f3-unbuilt-s473`). Provenance: ruling:user-voice-scrml.md S473 "⭐ RULED — S473 PA recs, all" item 4; design `scrml-support/docs/deep-dives/typed-host-binding-f3-design-2026-10-27.md` §7. Direction of change: newly-rejecting within a newly-accepting element. | Error |
 | E-HOST-NO-TARGET | §21.3.3 | Raised when a binding without `= target` stands in a `<host>` that has no `src=` (rule 6). **Nominal / spec-ahead — not yet emitted** (DRAFT §21.3.3; the bootstrap builds it, `g-boot-host-block-f3-unbuilt-s473`). Provenance: ruling:user-voice-scrml.md S473 "⭐ RULED — S473 PA recs, all" item 4; design `scrml-support/docs/deep-dives/typed-host-binding-f3-design-2026-10-27.md` §7. Direction of change: newly-rejecting within a newly-accepting element. | Error |
-| E-HOST-TYPE-NOT-CROSSABLE | §21.3.3 | Raised when a binding declares a type that cannot cross the host boundary: a function-typed result, a callback parameter of a waiting function type, or a `lin` result (rule 14). **Nominal / spec-ahead — not yet emitted** (DRAFT §21.3.3; the bootstrap builds it, `g-boot-host-block-f3-unbuilt-s473`). Provenance: ruling:user-voice-scrml.md S473 "⭐ RULED — S473 PA recs, all" item 4; design `scrml-support/docs/deep-dives/typed-host-binding-f3-design-2026-10-27.md` §7. Direction of change: newly-rejecting within a newly-accepting element. | Error |
+| E-HOST-TYPE-NOT-CROSSABLE | §21.3.3 | Raised when a binding declares a type that cannot cross the host boundary: a function-typed result, a callback parameter of a waiting function type, a `lin` result, or a map / set / tuple type at any depth (rule 14). **Nominal / spec-ahead — not yet emitted** (DRAFT §21.3.3; the bootstrap builds it, `g-boot-host-block-f3-unbuilt-s473`). Provenance: ruling:user-voice-scrml.md S473 "⭐ RULED — S473 PA recs, all" item 4; design `scrml-support/docs/deep-dives/typed-host-binding-f3-design-2026-10-27.md` §7. Direction of change: newly-rejecting within a newly-accepting element. | Error |
 | E-HOST-TYPE-OUTSIDE | §21.3.3 | Raised when `type Name:host` is written outside a `<host>` (rule 15). **Nominal / spec-ahead — not yet emitted** (DRAFT §21.3.3; the bootstrap builds it, `g-boot-host-block-f3-unbuilt-s473`). Provenance: ruling:user-voice-scrml.md S473 "⭐ RULED — S473 PA recs, all" item 4; design `scrml-support/docs/deep-dives/typed-host-binding-f3-design-2026-10-27.md` §7. Direction of change: newly-rejecting within a newly-accepting element. | Error |
-| E-HOST-HANDLE-MEMBER | §21.3.3 | Raised when a member access or method call is written on a value of a `:host` type (rule 15). The message names the binding to declare instead. **Nominal / spec-ahead — not yet emitted** (DRAFT §21.3.3; the bootstrap builds it, `g-boot-host-block-f3-unbuilt-s473`). Provenance: ruling:user-voice-scrml.md S473 "⭐ RULED — S473 PA recs, all" item 4; design `scrml-support/docs/deep-dives/typed-host-binding-f3-design-2026-10-27.md` §7. Direction of change: newly-rejecting within a newly-accepting element. | Error |
-| E-HOST-HANDLE-NOT-DATA | §21.3.3 | Raised when a `:host` type is used as a struct field, the type of a `persist=` or `server` cell, a server-function parameter or result, a channel payload, or a map key (rule 15). **Nominal / spec-ahead — not yet emitted** (DRAFT §21.3.3; the bootstrap builds it, `g-boot-host-block-f3-unbuilt-s473`). Provenance: ruling:user-voice-scrml.md S473 "⭐ RULED — S473 PA recs, all" item 4; design `scrml-support/docs/deep-dives/typed-host-binding-f3-design-2026-10-27.md` §7. Direction of change: newly-rejecting within a newly-accepting element. | Error |
-| E-HOST-CALLBACK-WAITS | §21.3.3 | Raised when a lambda passed for a binding's callback parameter whose declared result is not `void` contains a waiting value (rule 18). **Nominal / spec-ahead — not yet emitted** (DRAFT §21.3.3; the bootstrap builds it, `g-boot-host-block-f3-unbuilt-s473`). Provenance: ruling:user-voice-scrml.md S473 "⭐ RULED — S473 PA recs, all" item 4; design `scrml-support/docs/deep-dives/typed-host-binding-f3-design-2026-10-27.md` §7. Direction of change: newly-rejecting within a newly-accepting element. | Error |
-| E-HOST-ERROR-TYPE | §21.3.3 | Raised when a binding's `!` names a type other than `HostError` (`scrml:host`) (rule 19). **Nominal / spec-ahead — not yet emitted** (DRAFT §21.3.3; the bootstrap builds it, `g-boot-host-block-f3-unbuilt-s473`). Provenance: ruling:user-voice-scrml.md S473 "⭐ RULED — S473 PA recs, all" item 4; design `scrml-support/docs/deep-dives/typed-host-binding-f3-design-2026-10-27.md` §7. Direction of change: newly-rejecting within a newly-accepting element. | Error |
+| E-HOST-HANDLE-MEMBER | §21.3.3 | Raised when a member access or method call is written on a value of a USER-DECLARED `:host` type (rule 15). Not raised for the DOM element types `ref=` binds (rule 16: their members stay untyped, as in §6.7.1b). The message names the binding to declare instead. **Nominal / spec-ahead — not yet emitted** (DRAFT §21.3.3; the bootstrap builds it, `g-boot-host-block-f3-unbuilt-s473`). Provenance: ruling:user-voice-scrml.md S473 "⭐ RULED — S473 PA recs, all" item 4; design `scrml-support/docs/deep-dives/typed-host-binding-f3-design-2026-10-27.md` §7. Direction of change: newly-rejecting within a newly-accepting element. | Error |
+| E-HOST-HANDLE-NOT-DATA | §21.3.3 | Raised when a type that contains a declared `:host` type at any depth (a tape, an enum payload, a `T | not`, a map value) is a struct field's type, crosses a §57.1 sink or a boundary that sends (a `persist=` or `server` cell, a server-function parameter or result, a channel or server-sent-event payload, a worker message, an `<api>` request body), or is a map key (rule 15). **Nominal / spec-ahead — not yet emitted** (DRAFT §21.3.3; the bootstrap builds it, `g-boot-host-block-f3-unbuilt-s473`). Provenance: ruling:user-voice-scrml.md S473 "⭐ RULED — S473 PA recs, all" item 4; design `scrml-support/docs/deep-dives/typed-host-binding-f3-design-2026-10-27.md` §7. Direction of change: newly-rejecting within a newly-accepting element. | Error |
+| E-HOST-CALLBACK-WAITS | §21.3.3 | Raised when a lambda passed for a binding's callback parameter whose declared result is not `void` contains a waiting value (rule 19). **Nominal / spec-ahead — not yet emitted** (DRAFT §21.3.3; the bootstrap builds it, `g-boot-host-block-f3-unbuilt-s473`). Provenance: ruling:user-voice-scrml.md S473 "⭐ RULED — S473 PA recs, all" item 4; design `scrml-support/docs/deep-dives/typed-host-binding-f3-design-2026-10-27.md` §7. Direction of change: newly-rejecting within a newly-accepting element. | Error |
+| E-HOST-ERROR-TYPE | §21.3.3 | Raised when a binding's `!` names a type other than `HostError` (`scrml:host`) (rule 18). **Nominal / spec-ahead — not yet emitted** (DRAFT §21.3.3; the bootstrap builds it, `g-boot-host-block-f3-unbuilt-s473`). Provenance: ruling:user-voice-scrml.md S473 "⭐ RULED — S473 PA recs, all" item 4; design `scrml-support/docs/deep-dives/typed-host-binding-f3-design-2026-10-27.md` §7. Direction of change: newly-rejecting within a newly-accepting element. | Error |
 | W-HOST-UNTYPED-CALL | §21.3.3, App. D | Raised when client logic calls or reads through a bare `window` / `document` / `navigator` path, or calls a §21.3 `.js` / `.mjs` import, outside a `<host>` binding (rule 22; the dpa-075 F4 lint). Reversible; any escalation goes through §63. Also ruling:user-voice-scrml.md S471 "⭐ RULED — dpa-075 F4" — *"your rec"*. **Nominal / spec-ahead — not yet emitted** (DRAFT §21.3.3; the bootstrap builds it, `g-boot-host-block-f3-unbuilt-s473`). Provenance: ruling:user-voice-scrml.md S473 "⭐ RULED — S473 PA recs, all" item 4; design `scrml-support/docs/deep-dives/typed-host-binding-f3-design-2026-10-27.md` §7. Direction of change: newly-warning. | Warning |
-| E-HOST-THROW-RT | §21.3.3, §19.17 | Runtime trap, raised when a `<host>` binding not declared `! HostError` throws synchronously or returns a Promise that rejects (rule 19). A binding declared `! HostError` turns the same events into `HostError::Thrown(message, name)` instead. **Nominal / spec-ahead — not yet emitted** (DRAFT §21.3.3; the bootstrap builds it, `g-boot-host-block-f3-unbuilt-s473`). Provenance: ruling:user-voice-scrml.md S473 "⭐ RULED — S473 PA recs, all" item 4; design `scrml-support/docs/deep-dives/typed-host-binding-f3-design-2026-10-27.md` §7. Direction of change: semantics-defined. | Runtime |
+| E-HOST-THROW-RT | §21.3.3, §19.17 | Runtime trap, raised when a `<host>` binding not declared `! HostError` has a target whose evaluation throws (including a missing intermediate member or a non-callable export), or returns a Promise that rejects (rule 18). An absent FINAL member of a property read does not throw; it is decoded (`E-HOST-VALUE-MISMATCH-RT` when the type has no `not`). A binding declared `! HostError` turns the same events into `HostError::Thrown(message, name)` instead. **Nominal / spec-ahead — not yet emitted** (DRAFT §21.3.3; the bootstrap builds it, `g-boot-host-block-f3-unbuilt-s473`). Provenance: ruling:user-voice-scrml.md S473 "⭐ RULED — S473 PA recs, all" item 4; design `scrml-support/docs/deep-dives/typed-host-binding-f3-design-2026-10-27.md` §7. Direction of change: semantics-defined. | Runtime |
 | W-TOENUM-DEPRECATED | §14.4.1, §63.7 | `E.toEnum(s)` — the soft-deprecated spelling of `E.parse(s)` (§14.4.1); parses identically. One lint per call, naming `E.parse` and `scrml fix`. **Reserved — not yet emitted:** the §63 window opens only when this lint, `E-TOENUM-DEPRECATED` and a `scrml fix` rule co-land (§63.2). **Code name provisional (PA, S469).** Provenance: ruling:user-voice-scrml.md S469 "⭐ RULED — conversions: parse spelling `T.parse(s)`" — *"T.parse(s) (Recommended)"*. | Info |
 | E-TOENUM-DEPRECATED | §14.4.1, §63.7 | **Reserved** (§63.2) end-of-window code for the `toEnum` spelling. Not scheduled; never fires before a §62 MAJOR event schedules it. **Code name provisional (PA, S469).** Provenance: ruling:user-voice-scrml.md S469 "⭐ RULED — conversions: parse spelling `T.parse(s)`". | Error |
 | W-TYPE-NAME-DEPRECATED | §14.13.6, §63.7 | The type name `integer` or `boolean` in type position — the soft-deprecated synonyms of `int` / `bool`; they mean exactly the same. One lint per use, naming the canonical name and `scrml fix`. **Reserved — not yet emitted:** the §63 window opens when this lint, `E-TYPE-NAME-DEPRECATED` and a `scrml fix` rule co-land (§63.2). **Code name provisional (PA, S469).** Provenance: ruling:user-voice-scrml.md S469 "⭐ RULED — three spec-follow-up opens" — *"Deprecation window (Rec)"*. Direction of change: inert. | Info |
@@ -33096,7 +33197,7 @@ When names are brought into scope from multiple `use` declarations or `import` s
 - When two `use` declarations bring the same component name into markup scope, the later declaration WINS and a W-USE-001 warning is emitted.
 - When a `use` declaration brings a name into scope that collides with a built-in HTML element name (e.g., `use scrml:ui { button }`), this SHALL be a compile error (E-USE-006). User-defined components that shadow HTML element names are never valid (existing rule from §15.6 / E-NAME-001).
 - When an `import` statement imports a name that is already in scope from another `import` statement in the same file, the later import WINS and a W-IMPORT-001 warning is emitted.
-- This rule does not cover host imports. An `import:host` binding whose name is also bound by a plain `import`, another `import:host`, or a declaration in its file is `E-SCOPE-010` (§21.3.1.1), and so is a `<host>` binding name bound twice in its file (DRAFT §21.3.3 rule 9). *(ruling:user-voice-scrml.md S473 "⭐ RULED — S473 PA recs, all" item 2 — *"Host-import name collision is E-SCOPE-010 (§21.3.1.1), not W-IMPORT-001 (§41.7)."*)*
+- This rule does not cover host imports. An `import:host` binding whose name is also bound by a plain `import`, another `import:host`, or a declaration in its file is `E-SCOPE-010` (§21.3.1.1), and so is a `<host>` binding name also bound as a value in its file (DRAFT §21.3.3 rule 9 — a PA reading extending the ruling to `<host>`). *(ruling:user-voice-scrml.md S473 "⭐ RULED — S473 PA recs, all" item 2 — *"Host-import name collision is E-SCOPE-010 (§21.3.1.1), not W-IMPORT-001 (§41.7)."*)*
 
 ### 41.8 `use` Declarations in Worker Programs
 
