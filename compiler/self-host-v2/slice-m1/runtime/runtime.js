@@ -3085,14 +3085,20 @@ const codecReason = (what, err) => `${what}: malformed at ${err.path}: ${err.rea
  * is resolved against `document.baseURI`, which a `<base href>` moves — a
  * static one as much as a data one — so the call (its POST body and its
  * `X-CSRF-Token`) would go wherever the base points (Chromium-verified, gap
- * g-boot-base-href-from-data-retargets-server-calls-s473). The path is resolved against
- * the DOCUMENT's own URL (`location.href`) instead, and the result must keep
- * the document's origin (a `//host/…` path would not). Throws — the caller
- * settles the call as Unreachable, no request made — when it does not, or when
- * the document URL cannot be a base (`about:blank`: there a relative `fetch`
- * fails anyway unless a `<base>` supplies the base — fail closed). With no
- * document at all (`location` absent, no `document`) nothing resolves against
- * a `<base>`, and the path is used as given.
+ * g-boot-base-href-from-data-retargets-server-calls-s473). The path is resolved
+ * against the document's EFFECTIVE origin instead, never its base URL:
+ *   - an `http:` / `https:` document: its own URL (`location.href`);
+ *   - an `about:` document (`about:srcdoc` — an app inside `<iframe srcdoc>` —
+ *     or an `about:blank` its creator opened): the origin it inherits
+ *     (`globalThis.origin`), when that is not opaque (`"null"`) — #1637 review F1;
+ *   - anything else (an opaque origin, `file:`, `data:`, a sandboxed `about:`
+ *     document) has no http(s) origin to send to.
+ * The result must be `http:` / `https:` and keep that origin (a `//host/…`,
+ * `data:` or `javascript:` path does not — "null" never equals "null" here,
+ * #1637 review F2). Throws — the caller settles the call as Unreachable, no
+ * request made — when it does not. With no document at all (`location` absent,
+ * no `document`) nothing resolves against a `<base>`, and the path is used as
+ * given.
  */
 function ownOriginUrl(path) {
   const loc = globalThis.location;
@@ -3100,10 +3106,20 @@ function ownOriginUrl(path) {
     if (globalThis.document) throw new Error("scrml: a document with no location — the call has no origin to go to");
     return path;
   }
-  const here = new URL(String(loc.href));
+  let here = new URL(String(loc.href));
+  if (here.protocol === "about:") {
+    const inherited = typeof globalThis.origin === "string" ? globalThis.origin : "null";
+    if (inherited === "null") throw new Error("scrml: the document has no origin a server call can go to");
+    here = new URL(inherited + "/");
+  }
+  if (!isHttpUrl(here) || here.origin === "null") throw new Error("scrml: the document has no http(s) origin a server call can go to");
   const u = new URL(String(path), here);
-  if (u.origin !== here.origin) throw new Error("scrml: a server call's route leaves the document's origin");
+  if (!isHttpUrl(u) || u.origin !== here.origin) throw new Error("scrml: a server call's route leaves the document's origin");
   return u.href;
+}
+
+function isHttpUrl(u) {
+  return u.protocol === "http:" || u.protocol === "https:";
 }
 
 export function call(route, args, task) {

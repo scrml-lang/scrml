@@ -98,13 +98,23 @@ renders <span class="shell"><base href=root/></span>
 });
 
 describe("compile — the other spellings do not compile either (never written from data)", () => {
-  const notClean = (tag) => expect(codes(BASE(tag)).length).toBeGreaterThan(0);
-  test("a spread `{...@x}`", () => notClean(`<base {...@u}/>`));
-  test("a braced `href={@u}`", () => notClean(`<base href={@u}/>`));
-  test("a quoted template `href=\"${@u}\"`", () => notClean(`<base href="\${@u}"/>`));
-  test("`xlink:href=` / `xml:base=`", () => { notClean(`<base xlink:href=@u/>`); notClean(`<base xml:base=@u/>`); });
-  test("an entity in the attribute name (`h&#114;ef=`)", () => notClean(`<base h&#114;ef=@u/>`));
-  test("an entity in the tag name (`<b&#97;se>`)", () => notClean(`<b&#97;se href=@u/>`));
+  // #1637 review F6: each spelling is pinned to the exact codes that stop it today, all Errors —
+  // so the pin goes red when the bootstrap learns the form (it must then meet E-ATTR-BASE-HREF).
+  const refusedAs = (tag, expected) => {
+    const ds = run(BASE(tag)).diags;
+    expect([...new Set(ds.map((d) => d.code))]).toEqual(expected);
+    for (const d of ds) expect(d.severity).toBe("Error");
+  };
+  test("a spread `{...@x}`", () => refusedAs(`<base {...@u}/>`, ["E-PARSE-TAG"]));
+  test("a braced `href={@u}`", () => refusedAs(`<base href={@u}/>`, ["E-STMT-MISSING-SEMICOLON", "E-BOOTSTRAP-UNSUPPORTED"]));
+  test("a quoted template `href=\"${@u}\"`", () => refusedAs(`<base href="\${@u}"/>`, ["E-BOOTSTRAP-UNSUPPORTED"]));
+  test("`xlink:href=` / `xml:base=`", () => { refusedAs(`<base xlink:href=@u/>`, ["E-BOOTSTRAP-UNSUPPORTED"]); refusedAs(`<base xml:base=@u/>`, ["E-BOOTSTRAP-UNSUPPORTED"]); });
+  test("an entity in the attribute name (`h&#114;ef=`)", () => refusedAs(`<base h&#114;ef=@u/>`, ["E-PARSE-TAG"]));
+  test("an entity in the tag name (`<b&#97;se>`)", () => refusedAs(`<b&#97;se href=@u/>`, ["E-PARSE-TAG"]));
+  test("a `<base>` inside SVG / MathML is refused too (no base-URL effect there; harmless over-reach, #1637 review F7)", () => {
+    expect(codes(BASE(`<svg><base href=@u/></svg>`))).toEqual(["E-ATTR-BASE-HREF"]);
+    expect(codes(BASE(`<math><base href=@u/></math>`))).toEqual(["E-ATTR-BASE-HREF"]);
+  });
 });
 
 describe("compile — benign <base> forms and data hrefs elsewhere still build", () => {
@@ -210,6 +220,12 @@ function withDocumentUrl(url, body) {
   return Promise.resolve().then(body).finally(() => { globalThis.happyDOM.setURL(prev); });
 }
 
+// An `about:` document's inherited origin (`window.origin`; happy-dom has none, so it is set here).
+function withInheritedOrigin(origin, body) {
+  Object.defineProperty(globalThis, "origin", { value: origin, configurable: true, writable: true });
+  return Promise.resolve().then(body).finally(() => { delete globalThis.origin; });
+}
+
 describe("runtime — `rt.call` addresses the document's own origin (a <base> cannot redirect it)", () => {
   test("the fetch target is the absolute same-origin URL of the route path", () => withDocumentUrl("https://app.example/notes/edit.html", async () => {
     document.head.innerHTML = "";
@@ -243,6 +259,49 @@ describe("runtime — `rt.call` addresses the document's own origin (a <base> ca
     expect(fetched).toBe(0);
     expect(v).toEqual({ error: { variant: "Transport", data: ["Unreachable"] } });
   }));
+  // #1637 review F1 — an app inside `<iframe srcdoc>` (about:srcdoc), or in an about:blank its
+  // creator opened, inherits its creator's origin and reaches its own server there.
+  for (const url of ["about:srcdoc", "about:blank"]) {
+    test(`an ${url} document with an inherited http(s) origin sends to that origin`, () => withDocumentUrl(url, () => withInheritedOrigin("https://app.example", async () => {
+      document.head.innerHTML = `<base href="https://evil.example/">`;
+      let seen = null;
+      globalThis.fetch = (u) => { seen = u; return ok204(); };
+      const v = await rt.call(VOID_ROUTE, [], null);
+      expect(rt.failed(v)).toBe(false);
+      expect(seen).toBe("https://app.example/_scrml/call/9");
+      document.head.innerHTML = "";
+    })));
+    test(`an ${url} document with an opaque inherited origin ("null") makes no request`, () => withDocumentUrl(url, () => withInheritedOrigin("null", async () => {
+      let fetched = 0;
+      globalThis.fetch = () => { fetched++; return ok204(); };
+      const v = await rt.call(VOID_ROUTE, [], null);
+      expect(fetched).toBe(0);
+      expect(v).toEqual({ error: { variant: "Transport", data: ["Unreachable"] } });
+    })));
+  }
+  // #1637 review F2 — "null" never equals "null": only an http(s) URL on the document's http(s)
+  // origin is sent (Chromium fetched a `data:` route from about:srcdoc before this).
+  const refusedRoute = (docUrl, origin, path) => withDocumentUrl(docUrl, () => withInheritedOrigin(origin, async () => {
+    let fetched = 0;
+    globalThis.fetch = () => { fetched++; return ok204(); };
+    const v = await rt.call({ ...VOID_ROUTE, path }, [], null);
+    expect(fetched).toBe(0);
+    expect(v).toEqual({ error: { variant: "Transport", data: ["Unreachable"] } });
+  }));
+  test("about:srcdoc + a `data:` route (the review's Chromium case) — refused", () => refusedRoute("about:srcdoc", "null", "data:application/json,7"));
+  test("about:srcdoc with an http(s) origin + a `data:` / `javascript:` route — refused", async () => {
+    await refusedRoute("about:srcdoc", "https://app.example", "data:application/json,7");
+    await refusedRoute("about:srcdoc", "https://app.example", "javascript:1");
+  });
+  test("an https document + a `data:` / `javascript:` / `blob:` route — refused", async () => {
+    await refusedRoute("https://app.example/", "https://app.example", "data:application/json,7");
+    await refusedRoute("https://app.example/", "https://app.example", "javascript:1");
+    await refusedRoute("https://app.example/", "https://app.example", "blob:https://app.example/x");
+  });
+  test("a `file:` document (an opaque origin) — refused, whatever the route", async () => {
+    await refusedRoute("file:///home/u/app.html", "null", "/_scrml/call/9");
+    await refusedRoute("file:///home/u/app.html", "null", "//otherhost/_scrml/call/9");
+  });
   test("a document whose URL cannot be a base (about:blank) makes no request — Unreachable (fail closed)", () => withDocumentUrl("about:blank", async () => {
     let fetched = 0;
     globalThis.fetch = () => { fetched++; return ok204(); };

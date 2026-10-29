@@ -85,3 +85,17 @@ review F2, Chromium-proven). Constrained to the #1635 shape (E-ATTR-STYLESHEET-H
   `http://localhost/`, and the stub and the server seam read the request PATH of a same-origin
   absolute URL (`requestPath`, another origin refused). `bootstrap-conformance.ts --check`: current
   (no case moved).
+
+## 2026-10-29T07:30Z — fix round 1 (S239 review of 51d4fd0de: LAND-WITH-FOLLOWUPS)
+
+| Finding | Fix |
+|---|---|
+| F1 LOW — an app in `<iframe srcdoc>` / an opened `about:blank` could no longer reach its server | `ownOriginUrl`: on an `about:` document, resolve against the inherited `globalThis.origin` when it is not `"null"`. Tests: about:srcdoc and about:blank with an inherited https origin (a cross-origin `<base>` present) → `https://app.example/_scrml/call/9`; with `"null"` → no request. Chromium (`probe/chrome-review-r1.test.js`, the review's probe on this head): `srcdoc-embed/head` → `self:POST /_scrml/call/1`. |
+| F2 LOW — `"null" === "null"` admitted `data:` / `javascript:` / `file://other/` on an opaque document | Only an `http:`/`https:` URL on an `http:`/`https:` effective origin is sent; an opaque origin never matches. SPEC bullet now states the http(s)-only rule (so "SHALL NOT send … to any other origin" holds). Tests: about:srcdoc + `data:` route (the review case), `data:`/`javascript:`/`blob:` routes on https, a `file:` document. Chromium: `opaque-null-eq/head` → Unreachable, `fetched=[]`. |
+| F5 merge hazard | Exactly ONE marker for g-boot-base-href-from-data-retargets-server-calls-s473 on this branch (resolved). Entry text now says: at merge keep ONLY this entry (resolved text + marker); #1635's open copy is dropped. |
+| F6 test strength | "Other spellings" pins name the exact code set and require every diagnostic to be an Error. |
+| F7 INFO | §34 row says a `<base>` in `<svg>`/`<math>` is refused too (harmless over-reach); a test pins it. |
+| F3/F4 | Unchanged: meta refresh and form action stay open gaps, with bryan for a ruling. Re-confirmed in Chromium on this head. |
+| F8 process | Not a code change: the PA ruling S473 should be surfaced to bryan and recorded in user-voice (PA-side). |
+
+Tests: 51 in `base-href-guard-s473.test.js` (was 42).
