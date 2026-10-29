@@ -1,0 +1,16 @@
+// §4.18.1 (S472): a `<db>` body is a code-default ITEM body — a function, a type, markup and a
+// display-text literal. The function is the program's; nothing in the body is page text.
+<program>
+    let <n:int=0/>
+    <db src="./app.db">
+        type Step:struct = { by: int }
+        function bump() {
+            const s: Step = { by: 2 };
+            @n = @n + s.by;
+        }
+        <p id="lit">in the db block</p>
+        "count: ${@n}"
+        <button id="b" onclick=bump()>bump</button>
+    </db>
+    <main><p id="s">${@n}</p></main>
+</program>

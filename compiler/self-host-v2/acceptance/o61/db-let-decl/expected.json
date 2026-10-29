@@ -1,6 +1,6 @@
 {
   "id": "acceptance-o61-db-let-decl",
-  "description": "A `let <x/>` declaration standing in a `<db>` body is a declaration (an item position), not E-DECL-KEYWORD-NOT-ITEM. Target: compiles clean. Today the bootstrap refuses the block-owned server-side state by name (E-BOOTSTRAP-UNSUPPORTED).",
+  "description": "A `let <x/>` declaration standing in a `<db>` body is a declaration (an item position), not E-DECL-KEYWORD-NOT-ITEM. Target: compiles clean. Today the bootstrap refuses it by name (E-BOOTSTRAP-UNSUPPORTED): under the S472 ruling (items 1, 6) a `<db>`-body declaration is a server-authoritative cell (§52), Lane B — not in the bootstrap. The body itself is the S472 code-default item body (Lane A, s472-boot-db-body-mode).",
   "language-version": "1.0",
   "spec": "§66.2.5 (S469 O61) · §8.1.1",
   "rationale": "§66.2.5 Amendment (S469): \"`let <x/>` / `export <x/>` (and a locked `<x/>` declaration) MAY stand directly in a `<db>` body or a `<channel>` body.\"",

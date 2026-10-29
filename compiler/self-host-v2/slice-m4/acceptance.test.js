@@ -289,6 +289,10 @@ const STATUS = {
   // O61 (§66.2.5 S469): an item in a `<db>` body — read as the declaration, its block-owned
   // server-side state refused by name (owed: analyze / lower / server runtime)
   "o61/db-let-decl": ["UNSUPPORTED", ["E-BOOTSTRAP-UNSUPPORTED"]],
+  // s472-boot-db-body-mode (S472 ruling Q3, §4.18.1): a `<db>` body is a code-default ITEM body
+  "db-body/fn-and-markup": ["PASS", []],
+  "db-body/neg-statement": ["PASS", ["E-DB-BODY-STATEMENT"]],
+  "db-body/neg-prose": ["PASS", ["E-UNQUOTED-DISPLAY-TEXT"]],
   // s471-bootstrap-control-flow-high — §17.1.1 chains and §19.16 `defer` (incl. a loop body, built s471)
   "control-flow/if-chain": ["PASS", []],
   "control-flow/neg-orphan-else": ["PASS", ["E-CTRL-001"]],
@@ -322,6 +326,9 @@ describe("bootstrap acceptance cases — today's verdicts", () => {
       if (bucket === "PASS" && v.reason.includes("runtime")) expect(v.runtimeExecuted).toBe(true);
     });
   }
+  test("s472: the `<db>`-body item case RAN on the bootstrap (the block's function, called from the block's button)", () => {
+    expect(["db-body/fn-and-markup", verdicts["db-body/fn-and-markup"].runtimeExecuted]).toEqual(["db-body/fn-and-markup", true]);
+  });
   test("the runtime halves executed where the case has one", () => {
     for (const rel of ["arms/comma-guard", "arms/comma-match", "opener/union-maybe", "termination/guard-next-line", "termination/fail-next-line", "termination/defer-next-line"]) {
       expect([rel, verdicts[rel].runtimeExecuted]).toEqual([rel, true]);

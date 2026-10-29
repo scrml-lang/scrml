@@ -418,7 +418,15 @@ ${
     // signature containing one is not trusted by the typer (no check against it).
     // s454 (U1b): `lines` — the offset where each line starts (lines[0] = 0), so a
     // diagnostic can name "file and line" (§19.9.10 the client-caller cause).
-    export type FileAst:struct = { path: string, items: AItem[], errs: ASpan[], lines: int[] }
+    // s472 (S472 ruling Q3, §4.18.1): `dbFns` — each `function` / `fn` declared
+    // in a `<db>` body. A `<db>` body is an ITEM body; its function and type
+    // items are hoisted by the parser into the enclosing item list (a program
+    // body, or the file top) — so every pass sees them as the program's own
+    // functions — and this table keeps which `<db>` each function was declared
+    // in: its `?{}` resolve to THAT block's database (§8.1.1, the nearest
+    // database scope), never to the program's.
+    export type ADbFn:struct = { fn: int, db: int }
+    export type FileAst:struct = { path: string, items: AItem[], errs: ASpan[], lines: int[], dbFns: ADbFn[] }
 
     // A diagnostic: a code, its §34 severity, a message, where. (§4 permits
     // message text.)
