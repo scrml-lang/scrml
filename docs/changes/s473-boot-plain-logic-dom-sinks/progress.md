@@ -19,7 +19,7 @@ Newly refused legitimate uses: 0. (The one refused use, the spreadsheet sample's
 On the bootstrap today every listed form is already refused, by an unrelated code (E-BOOTSTRAP-UNSUPPORTED for host member calls, E-SCOPE-001 for `document` / `eval` / `setTimeout`), EXCEPT a write to a struct field named `innerHTML` / `on*`, which compiles clean. The new code pins the ruled refusal so it holds when those forms land.
 
 ## Tests first
-compiler/self-host-v2/slice-m4/plain-logic-dom-sinks-s473.test.js: 62 tests, 47 red on base (all the refusals + message/severity), 15 green (the open cases).
+compiler/self-host-v2/slice-m4/plain-logic-dom-sinks-s473.test.js: 62 tests, 47 red on base (all the refusals + message/severity), 15 green (the open cases). (+3 refusal tests added after the first green run: quoted key, a cell target, a computed host method — 65 total, 50 refusal-shaped.)
 
 ## 2026-10-29 — implementation
 - Table: `compiler/self-host-v2/url.scrml` `logicWriteSink` / `logicCallSink` / `attrNameArgIndex` / `executableAttrName` (reuses the existing `isEventHandlerName`, §5.2 rule 1's name test). parse.scrml's private `executableByName` now delegates to it (one test).
