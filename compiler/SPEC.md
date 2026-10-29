@@ -28626,7 +28626,7 @@ are REFUSED by impl#1, `E-IMPL1-RULED-FORM-UNSUPPORTED` (its row lands with that
 | E-SCOPE-001 | §5.2, §15.10.1 | Unquoted identifier not resolvable in scope. Includes a component prop referenced in component-body text the compiler cannot parse: the prop cannot be substituted there (§15.10.1), so it would reach the page unbound (emitted at `compiler/src/component-expander.ts`, `expandComponentNode`). Provenance: ruling:user-voice-scrml.md S458 "your recs on both D1 codes". | Error |
 | E-SCOPE-REDECLARE | §7.3.3 | Inside a function body, a `let` / `const` / `lin` / `function` declaration redeclares a name already bound in the SAME block (another such declaration, or — in the function's top-level block — a parameter). Nested-block shadowing is legal; so are two `function` declarations of one name and a `function` declaration named like a parameter (S432). Before this code the program failed at codegen ("Identifier already declared"); a `defer` in the block made it compile. Direction: newly-rejecting in name only (every rejected program already failed at codegen). (S430 round 5; emitted at `compiler/src/validators/lint-redeclare.ts`.) | Error |
 | E-CALL-ARITY | §7.3 | A call passes more arguments than the function declares parameters, or fewer — unless each omitted parameter has a default (§7.3.2). Reopen condition (ruled): the callback case. **Provenance:** ruling:user-voice-scrml.md S440 (#4 = (c); #2 and #5 = PA recs — item #2). **Named; impl pending — Nominal / not yet emitted** (measured S440: impl#1 compiles both at exit 0); impl#1 carries it (§34.0). **S447:** the call-site check is restated with the argument-type check in §7.3.4 (plain calls); same Nominal status. **Provenance:** ruling:user-voice-scrml.md S447 (*"RULED — UFCS PARKED; keep only the argument checks"* — call 9 kept). | Error |
-| E-SCOPE-010 | §20.4, §7.6, §21.3.1.1, §21.3.3 | Developer declares variable with reserved binding name (`route`, `session`) **(reserved-binding trigger spec-ahead, S265 — not fired; E-SCOPE-010 currently fires only for a DUPLICATE file-scope `let`/`const`)**. ALSO (S440 ruling #6, §7.6): two top-level `function` declarations of one name. **Provenance:** ruling:user-voice-scrml.md S440 (the S440 22-item queue, item 6). **Named; impl pending — Nominal / not yet emitted for the `function` case** (measured S440: exit 0); impl#1 carries it (§34.0). ALSO (S473, §21.3.1.1, §41.7): a host-import name collision — an `import:host` binding name also bound by a plain `import`, another `import:host`, the same `import:host` twice, or a declaration of its file (emitted by the bootstrap at `compiler/self-host-v2/analyze.scrml` hostImportClash; Nominal on impl#1); and a `<host>` binding name also bound in its file as a value — by another binding, a declaration, a plain `import` or an `import:host` (DRAFT §21.3.3 rule 9 — Nominal / not yet emitted; a PA reading extending item 2 to `<host>`). Provenance: ruling:user-voice-scrml.md S473 "⭐ RULED — S473 PA recs, all" item 2. | Error |
+| E-SCOPE-010 | §20.4, §7.6, §21.3.1.1, §21.3.3 | Developer declares variable with reserved binding name (`route`, `session`) **(reserved-binding trigger spec-ahead, S265 — not fired; E-SCOPE-010 currently fires only for a DUPLICATE file-scope `let`/`const`)**. ALSO (S440 ruling #6, §7.6): two top-level `function` declarations of one name. **Provenance:** ruling:user-voice-scrml.md S440 (the S440 22-item queue, item 6). **Named; impl pending — Nominal / not yet emitted for the `function` case** (measured S440: exit 0); impl#1 carries it (§34.0). ALSO (S473, §21.3.1.1, §41.7): a host-import name collision — an `import:host` binding name also bound by a plain `import`, another `import:host`, the same `import:host` twice, or a declaration of its file (emitted by the bootstrap at `compiler/self-host-v2/analyze.scrml` hostImportClash; Nominal on impl#1); and a `<host>` binding name also bound in its file as a value — by another binding, a declaration, a plain `import` or an `import:host` (DRAFT §21.3.3 rule 9 — Nominal / not yet emitted; extends item 2 to `<host>`, ratified by ruling:user-voice-scrml.md S473 "⭐ RULED — S473 owner questions round 2, PA recs" item 8). Provenance: ruling:user-voice-scrml.md S473 "⭐ RULED — S473 PA recs, all" item 2. | Error |
 | E-SCOPE-011 | §20.4 | Access to undeclared route parameter name **(Reserved / spec-ahead, S263 — no fire site: the undeclared-route-param check is spec-ahead — `route.params` is not typer-supported for pages and no param-name allow-list exists. Excluded from the freeze fireable set.)** | Error |
 | E-SCOPE-012 | §20.5 | `session` accessed outside a server-escalated function body **(LIVE, S265 (i29e) — the §20.5 server `session` establishment builtin is built; bare `session` is bound into server-escalated scopes and auto-escalates its enclosing function, so a `session` reference that is NOT server-escalated (e.g. top-level `${ }` logic) fires this. Distinct from the `@session` client projection.)** | Error |
 | E-SESSION-CONTEXT | §20.5.1 | `session.*` used outside a web-app server route handler — an SSE `server function*`, an `<endpoint>` arm, a `<machine>` method, a serverLoad cell, an in-process server-fn helper called by another server function, or a headless `kind="tool"` program. Those contexts have no cookie-session request/response context. **(LIVE, S265/S239 i29e.)** | Error |
@@ -28821,7 +28821,8 @@ are REFUSED by impl#1, `E-IMPL1-RULED-FORM-UNSUPPORTED` (its row lands with that
 | E-LOOP-004 | §49.9 | `continue label` — label not found or not a loop | Error |
 | E-LOOP-005 | §49.9 | `break`/`continue` crosses function scope boundary; ALSO (S469) a `break`/`continue` inside a loop bound as a value (§49.6, rule 6) that targets a loop outside it — that limb, by the bootstrap, emitted at `compiler/self-host-v2/analyze.scrml:11374` (s469-boot-loop-value-form; check.scrml C20 re-checks it over Core); Nominal on impl#1 (frozen, §49.8). Provenance: ruling:user-voice-scrml.md S469 "⭐ RULED — loops: one `for`" F5 *"Yes, specify it (Recommended)"*; the boundary is a PA reading (fails closed). | Error |
 | E-LOOP-006 | §49.9 | Duplicate label identifier within function scope | Error |
-| E-LOOP-007 | §49.9, §49.6 | **Rewritten S469.** A loop bound as a value (`const xs = for (…) { … };`, §49.6) whose body contains no `lift` on any path — its value could only be the empty tape. Binding a loop is otherwise legal from every head. The former meaning (*"`while` bound as a value (`let x = while(...)`); the §49.6.1 statement-`while` + `let result = ~` accumulator is the sole exception"*) retires with `while` and the `~` pattern. In the rewritten meaning, by the bootstrap, emitted at `compiler/self-host-v2/analyze.scrml:10634` (a `for-binding`) and `compiler/self-host-v2/analyze.scrml:10826` (a Tier-0 `${ for … }`, §49.4.4) — s469-boot-loop-value-form; Nominal on impl#1 (frozen, §49.8). Provenance: ruling:user-voice-scrml.md S469 "⭐ RULED — loops: one `for`" F5 *"Yes, specify it (Recommended)"* (*"E-LOOP-007 is rewritten"*). | Error |
+| E-LOOP-007 | §49.9, §49.6 | **Rewritten S469.** A loop bound as a value (`const xs = for (…) { … };`, §49.6) whose body contains no `lift` on any path — its value could only be the empty tape. **S473:** a `lift` after a statement that always leaves its block — including a `match` that takes every value and every arm of which leaves, and an inner loop whose head never ends it (`for (true) { }` as well as `for { }`) — is not on any path (§49.6 rule 10's reachability). Binding a loop is otherwise legal from every head. The former meaning (*"`while` bound as a value (`let x = while(...)`); the §49.6.1 statement-`while` + `let result = ~` accumulator is the sole exception"*) retires with `while` and the `~` pattern. In the rewritten meaning, by the bootstrap, emitted at `compiler/self-host-v2/analyze.scrml:10634` (a `for-binding`) and `compiler/self-host-v2/analyze.scrml:10826` (a Tier-0 `${ for … }`, §49.4.4) — s469-boot-loop-value-form; Nominal on impl#1 (frozen, §49.8). Provenance: ruling:user-voice-scrml.md S469 "⭐ RULED — loops: one `for`" F5 *"Yes, specify it (Recommended)"* (*"E-LOOP-007 is rewritten"*). | Error |
+| E-LOOP-008 | §49.9, §49.6 | **New S473.** A loop bound as a value (`const xs = for { lift 1; };`) or a Tier-0 `${ for { lift 1; } }` whose head never ends it (`for { … }`, `for (;;)`, a literal `for (true)`; a syntactic guard for those forms, so a non-literal always-true head such as `for (true && true)` is not caught) and whose body holds no reachable way out — a `break` that leaves THIS loop (one inside an inner loop leaves only that loop), a `return`, or (PA reading; the ruling names `break` / `return`) a `fail` or a `?` (§49.6 rule 10). Its value is never produced: a call never returns, a render never finishes. A statement-position `for { }` stays legal. By the bootstrap, emitted at `compiler/self-host-v2/analyze.scrml:12033` (a `for-binding`) and `compiler/self-host-v2/analyze.scrml:12299` (a Tier-0 `${ for … }`) — s473-boot-exitless-loop; Nominal on impl#1 (frozen, §49.8). Provenance: ruling:user-voice-scrml.md S472 "⭐ RULED — five PA recs" item 5 (*"An exit-less bound or Tier-0 loop is a compile error"*). | Error |
 | E-LOOP-WHILE-RETIRED | §49.4.1, §49.9 | A `while (cond) { … }` statement — `while` retired S469; fix-it `for (cond) { … }` (`scrml fix` rewrites it). `while` stays reserved. **Nominal / spec-ahead — not yet emitted** (impl#1 accepts `while` as a carried legacy divergence, §49.8). Provenance: ruling:user-voice-scrml.md S469 "⭐ RULED — loops: one `for`" F1 *"One `for` (Recommended)"*. | Error |
 | E-LOOP-DO-WHILE-RETIRED | §49.4.1, §49.9 | A `do { … } while (cond)` statement — `do...while` retired S469; fix-it the body-first `for { …; if (done) { break; } }`, or `for (let first = true; first \|\| cond; first = false) { … }` when the body uses `continue` (§49.3.6). `do` stays reserved. **Nominal / spec-ahead — not yet emitted** (impl#1 accepts it, §49.8). Provenance: ruling:user-voice-scrml.md S469 "⭐ RULED — loops: one `for`" F1 *"One `for` (Recommended)"*. | Error |
 | E-RANGE-OUTSIDE-LOOP-HEAD | §49.2.5, §49.9 | A range `a..b` / `a..=b` anywhere other than the whole iterable of a `for` iterate head or the bounded-length token of a tape type (§66.12.2) — a range is not a value. **Nominal / spec-ahead — not yet emitted.** Provenance: ruling:user-voice-scrml.md S469 "⭐ RULED — loops: one `for`" F3 *"`..` and `..=` (Recommended)"* (*"loop-head only"*). | Error |
@@ -37116,6 +37117,9 @@ suspension (§13.2) SHALL preserve this.
   some path, or the compiler SHALL reject it with **E-LOOP-007**.
 - A `for` that is the sole content of a markup `${ }` interpolation is the same value form, rendered (Tier 0,
   §17.4; §49.6.2).
+- A bound or Tier-0 `for` whose head never ends it SHALL hold a reachable `break` that leaves it, `return`,
+  `fail` or `?`, or the compiler SHALL reject it with **E-LOOP-008** (§49.6, rule 10). A statement `for { }`
+  needs none.
 - A `for` in any other expression position (an operand, an argument, a `return` operand) is neither and is a
   syntax error. *(PA reading, matching §49.2.1's single binding site; the binding site
   can be widened later.)*
@@ -37217,6 +37221,29 @@ const polled = for (let tries = 0; tries < 3; tries += 1) { lift probe(); };
 9. **Reactivity.** A bound loop runs once, where its declaration runs. As the initializer of a derived
    declaration (`const <ids> = for (o of @orders) { … };`, §6.6) it re-runs when a cell it reads changes, as
    any derived initializer does *(derived from §6.6; not separately ruled)*.
+10. **An exit-less bound loop is a compile error.** An exit-less bound or Tier-0 loop is a compile error
+    (`const xs = for { lift 1; };`, `${ for { lift 1; } }` with no reachable `break`/`return`); a
+    statement-position `for { }` stays legal. *(Ruling S472 "five PA recs", item 5.)* A loop bound as a value —
+    a `for-binding`, or the Tier-0 `${ for … }` (§49.4.4) — whose head never ends it SHALL contain a way out
+    that some path reaches, or the compiler SHALL reject it with **E-LOOP-008**: its value is never produced,
+    so a call never returns and a render never finishes. *(PA reading of the ruling:)*
+    - a head that never ends the loop is the infinite head `for { … }`, a counted head with no condition
+      (`for (;;)`), or a condition that is the literal `true`, read as written. This is a syntactic guard for
+      those forms, not a guarantee that no bound loop hangs: a head that is always true but is not the literal
+      (`for (true && true)`, `for (!false)`) is not required to be recognised;
+    - a way out is a `break` that leaves this loop, or a `return`, a `fail` or a `?` (the ways out of an
+      infinite head, §49.3.6; the ruling names `break` / `return`, and `fail` / `?` are added by this reading);
+    - an unlabelled `break` inside an inner loop — a statement loop or a nested bound loop — leaves only that
+      loop; `break label` leaves this loop only when `label` is its own;
+    - a statement after one that always leaves its block is not reached (as for a reachable `lift`, §49.4.4).
+      Such a statement is a `break`, `continue`, `return` or `fail`; an `if` both of whose branches leave; a
+      `match` statement that takes every value and every arm of which leaves; or a loop whose head never ends
+      it and that no `break` leaves. The same reading applies to E-LOOP-007's reachable `lift` (§49.4.4): a
+      `lift` after such a `match` is not reached *(S473, tightened with this rule)*;
+    - a `defer` body (§19.16) is not a way out; a `break`, `return` or `?` inside a nested function or an
+      arrow function belongs to that function (§49.4.3);
+    - an implementation is not required to evaluate conditions, so a `break` under any condition counts as
+      reachable.
 
 ### 49.6.1 The `let result = ~` accumulator pattern is retired
 
@@ -37434,6 +37461,29 @@ const xs = for (o of orders) { log(o.id); };   // Error E-LOOP-007 — nothing i
 
 ---
 
+### E-LOOP-008: A Bound Loop That Never Ends
+
+> **Added S473.** **Provenance:** ruling:user-voice-scrml.md S472 "⭐ RULED — five PA recs", item 5 — *"An
+> exit-less bound or Tier-0 loop is a compile error (`const xs = for { lift 1; };`, `${ for { lift 1; } }` with
+> no reachable `break`/`return`); a statement-position `for { }` stays legal."* **Direction of change:**
+> newly-rejecting (such a loop compiled, and calling or rendering it never returned).
+
+A `for` bound as a value, or a Tier-0 `${ for … }`, whose head never ends it (`for { … }`, `for (;;)`,
+`for (true)`) and whose body holds no `break` leaving it, `return`, `fail` or `?` that some path reaches
+(§49.6, rule 10). Its value is never produced.
+
+```scrml
+const xs = for { lift 1; };                        // Error E-LOOP-008 — nothing ends the loop
+const ys = for { lift 1; for { break; } };         // Error E-LOOP-008 — the `break` leaves the inner loop only
+for { tick(); }                                    // valid — a statement loop
+```
+
+> E-LOOP-008: The loop bound to `xs` at line N never ends: its head never stops it, and no path in its body
+> reaches a `break` that leaves it, a `return`, a `fail` or a `?`. Add `if (<done>) { break; }` where the loop
+> has lifted its last element, or give it a head that ends.
+
+---
+
 ### E-LOOP-WHILE-RETIRED: `while` Is Not scrml
 
 A `while (cond) { … }` statement. `while` is a reserved word with no meaning in scrml (§49.1).
@@ -37501,6 +37551,7 @@ for (i of 0..1.5) { log(i); }     // Error E-RANGE-BOUND-NOT-INT
 | E-LOOP-005 | `break`/`continue` crosses a function boundary, or leaves a bound loop for a loop outside it | Error | S469 — the bound-loop limb, by the bootstrap, emitted at `compiler/self-host-v2/analyze.scrml:11374`; Nominal on impl#1 |
 | E-LOOP-006 | Duplicate label identifier within the same function scope | Error | rule unchanged; for the S469 heads Nominal / spec-ahead |
 | E-LOOP-007 | A loop bound as a value lifts nothing on any path (rewritten S469) | Error | S469 — by the bootstrap, emitted at `compiler/self-host-v2/analyze.scrml:10634` (and `:10826`, a Tier-0 loop); Nominal on impl#1 |
+| E-LOOP-008 | A bound or Tier-0 loop whose head never ends it holds no reachable way out (§49.6 rule 10) | Error | S473 — by the bootstrap, emitted at `compiler/self-host-v2/analyze.scrml:12033` (and `:12299`, a Tier-0 loop); Nominal on impl#1 |
 | E-LOOP-WHILE-RETIRED | A `while` statement (retired S469) | Error | S469 — Nominal / spec-ahead, not yet emitted |
 | E-LOOP-DO-WHILE-RETIRED | A `do...while` statement (retired S469) | Error | S469 — Nominal / spec-ahead, not yet emitted |
 | E-RANGE-OUTSIDE-LOOP-HEAD | A range outside a loop head or a tape type's length token | Error | S469 — Nominal / spec-ahead, not yet emitted |

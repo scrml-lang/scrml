@@ -59,3 +59,9 @@
 - Item 8 -> rule 9's E-HOST-DUPLICATE fold relabelled "ratified".
 - Gap g-spec-host-block-server-side-bindings-s473 RESOLVED.
 - Gates: regen-spec-index --check (index unchanged), s34-census --check-new (38 rows) PASS, claim-gate PASS, snippet drift PASS.
+
+## 2026-10-29 — merge origin/main 4d5b9a15d (#1631, #1634)
+- Only SPEC-INDEX conflicted (derived); regenerated via git-merge-generated --regen. SPEC.md and known-gaps.md merged clean; §34 rows from both sides kept. Gap ids: union of both sides present (2464 distinct ids), none lost.
+- severity.scrml regenerated (current); state.ts --write produced only recent-sessions churn (master-list.md not staged).
+- E-SCOPE-010 row: the `<host>` clause relabelled "ratified" (round-2 item 8), matching rule 9.
+- Gates: regen-spec-index --check, s34-census --check-new (41 rows), claim-gate, snippet-gate, lint-duplicate-fn: PASS.
