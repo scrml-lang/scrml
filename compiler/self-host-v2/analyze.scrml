@@ -15748,11 +15748,15 @@ ${
     //     pairing (`<card>` beside `fn card`, `type T` beside `fn T`, two
     //     declarations, two types): E-SCOPE-010 (§7.6, ruled S473 "`<card>`
     //     beside `fn card`: REFUSED") — fileNameClashes, dupConsts;
+    //   - s473 r2 #5 (narrowed to exported names): one name EXPORTED by two USER
+    //     files of one program, whatever the two name: E-SCOPE-010 (§7.6) —
+    //     fileNameClashes; a private name never collides across files;
     //   - s473: two COMPONENTS (declarations with `renders`) of one name in two
     //     files of one program: E-COMPONENT-NAME-DUPLICATE (§9.1 DQ-7, §21.2;
     //     ruled S473 "Same-name components across files … REFUSED") — dupDecls.
-    //     Two same-named declarations that are not both components stay the
-    //     bootstrap limit E-BOOTSTRAP-UNSUPPORTED (unruled);
+    //     Two declarations of one name in two files that are not both components
+    //     and not both exported user declarations stay the bootstrap limit
+    //     E-BOOTSTRAP-UNSUPPORTED (legal by the ruling when private);
     //   - where no ruling / SPEC sentence names one — a handle or a program
     //     cell named like a visible declaration, two fields of one
     //     declaration, two parameters of one name, a redeclaration inside an
@@ -15776,7 +15780,7 @@ ${
     }
 
     fn checkScopes(files: FileAst[], t: Tables, lk: Linkage) -> Diag[] {
-        let out: Diag[] = dupFields(files, t, lk).concat(dupDecls(files, t)).concat(builtinRedeclares(t)).concat(fileNameClashes(t)).concat(dupFns(t)).concat(dupHandles(files, t, lk)).concat(dupConsts(t))
+        let out: Diag[] = dupFields(files, t, lk).concat(dupDecls(files, t, lk)).concat(builtinRedeclares(t)).concat(fileNameClashes(files, t, lk)).concat(dupFns(t)).concat(dupHandles(files, t, lk)).concat(dupConsts(files, t))
         for (const f of files) {
             for (const af of fnItems(f.items)) {
                 out = out.concat(dupParams(f.path, af.params))
@@ -15826,56 +15830,207 @@ ${
         return false
     }
 
-    // s473 — ONE file-scope name, ONE binding, whatever it names. §7.6 (S473):
-    // "A name bound at file scope SHALL be bound once in its file, whatever it
-    // names — a `let` / `const`, a `function`, a `type`, a user declaration
-    // (`<card>`): a second binding of the name in the same file, of the same
-    // kind or another, SHALL be a compile error (E-SCOPE-010: duplicate binding
-    // in file scope)." Ruled S473 ("`<card>` beside `fn card`: REFUSED"). Each
-    // binding after the FIRST of its name in its file is reported once, naming
-    // the first. Two functions are dupFns' (the S440 #6 sentence); a constant is
-    // folded in too (s473 review LOW-1). A host binding's local name is linkage's
-    // (§21.3.1.1 — never a `function` here). s472: two FILES may each bind a
-    // name — each file resolves in its own scope (a component pair is dupDecls').
-    type FileName:struct = { name: string, file: string, span: ASpan, what: string, isFn: boolean }
+    // s473 — ONE name, ONE binding: in a file, whatever it names; across the
+    // program, for EXPORTED names. §7.6 (S473): "A file-scope name is bound once
+    // in its file, whatever it names". S473 round 2 #5, narrowed (ruled S473
+    // "'one name per program' narrowed to exported names": "The program-wide
+    // one-name rule covers only names a file exports: two user files exporting
+    // the same name is E-SCOPE-010. A non-exported (private) name never collides
+    // with a name in another file"). The bindings: a user declaration, a type, a
+    // function, a file-scope constant, a program cell (never exported). Two
+    // bindings CLASH when they share a name and sit in one file, or are both
+    // EXPORTED from two USER files (a stdlib file's names are not user
+    // declarations; a stdlib file still binds each name once IN its file).
+    // Each binding after the first of a clash gets ONE report, here, unless:
+    //   - another pass already reports AT it (s473 r2 review LOW-1: no two reports
+    //     at one span): dupFns (a later function in one file), dupDecls (two
+    //     components, or another cross-file declaration pair, in two files),
+    //     dupFields (a later cell, or a cell named like a visible declaration),
+    //     dupConsts (a constant beside a cell of its file, E-NAME-COLLIDES-STATE);
+    //   - its file imports the name (from a user or a stdlib file) and it is a
+    //     kind linkage knows: linkage's report at the import is the one ("an
+    //     imported name colliding with a local declaration stays E-SCOPE-010").
+    //     A program cell is not such a kind, so a cell beside an import of its
+    //     name, from ANY source, is reported here, at the cell (review MED-1);
+    //   - every earlier binding it clashes with is a pair another pass reports
+    //     (an OWNED pair): a cell and a visible declaration (dupFields, at the
+    //     cell), a constant and a cell of one file (dupConsts, at the constant),
+    //     or a binding whose file imports the name from `n`'s file (linkage).
+    // One owned pair never hides an unowned one (review LOW-1). The report names
+    // the first binding it clashes with, by file:line:col (review LOW-5). A local,
+    // a parameter, a loop binder shadow (§7.3.3) and are never compared; a host
+    // binding's local name is stdlib-only (§21.3.1 — linkage).
+    type FileName:struct = { name: string, file: string, span: ASpan, what: string, kind: string, nid: int, exported: boolean }
 
-    fn fileNames(t: Tables) -> FileName[] {
+    // Is the declaration `<name>` of `file` exported (§21.2)?
+    fn declExported(lk: Linkage, file: string, name: string) -> boolean {
+        for (const o of lk.own) {
+            if (o.file == file && o.name == name && o.kind == NameKind.KDecl) return o.exported
+        }
+        return false
+    }
+
+    fn fileNames(t: Tables, lk: Linkage) -> FileName[] {
         let out: FileName[] = []
         for (const d of t.decls) {
-            if (d.sym.id != t.program.id) out = out.concat([{ name: d.sym.hint, file: d.file, span: d.span, what: "the declaration `<" + d.sym.hint + ">`", isFn: false }])
+            if (d.sym.id != t.program.id) out = out.concat([{ name: d.sym.hint, file: d.file, span: d.span, what: "the declaration `<" + d.sym.hint + ">`", kind: "decl", nid: d.nid, exported: declExported(lk, d.file, d.sym.hint) }])
         }
         for (const ti of t.types) {
-            if (ti.file != builtinFile()) out = out.concat([{ name: ti.name, file: ti.file, span: ti.span, what: "the type `" + ti.name + "`", isFn: false }])
+            if (ti.file != builtinFile()) out = out.concat([{ name: ti.name, file: ti.file, span: ti.span, what: "the type `" + ti.name + "`", kind: "type", nid: ti.nid, exported: ti.exported }])
         }
         for (const f of t.fns) {
-            if (f.host is not) out = out.concat([{ name: f.name, file: f.file, span: f.span, what: "the function `" + f.name + "`", isFn: true }])
+            if (f.host is not) out = out.concat([{ name: f.name, file: f.file, span: f.span, what: "the function `" + f.name + "`", kind: "fn", nid: f.nid, exported: f.exported }])
         }
-        // s473 review LOW-1: a constant is one more file-scope binding — folded in here, so a
-        // clash gets exactly one report per LATER binding, whichever kind came first
+        // s473 review LOW-1: a constant is one more file-scope binding
         for (const c of t.consts) {
-            out = out.concat([{ name: c.name, file: c.file, span: c.span, what: "the constant `" + c.name + "`", isFn: false }])
+            out = out.concat([{ name: c.name, file: c.file, span: c.span, what: "the constant `" + c.name + "`", kind: "const", nid: c.nid, exported: c.exported }])
+        }
+        // a program cell (`<count:int=0/>`) — a file-scope binding (§7.6.1), never exported
+        for (const d of t.decls) {
+            if (d.sym.id == t.program.id) {
+                for (const fi of d.fields) {
+                    out = out.concat([{ name: fi.sym.hint, file: d.file, span: fi.span, what: "the cell `@" + fi.sym.hint + "`", kind: "cell", nid: fi.nid, exported: false }])
+                }
+            }
         }
         return out
     }
 
-    fn fileNameClashes(t: Tables) -> Diag[] {
-        const ns: FileName[] = fileNames(t)
-        let out: Diag[] = []
-        for (const n of ns) {
-            // the first binding of the name in its file, before `n`
-            let first: FileName | not = not
-            let earlierFn = false
-            for (const m of ns) {
-                if (m.file == n.file && m.name == n.name && m.span.start < n.span.start) {
-                    const cur: FileName | not = first
-                    if (cur is not || m.span.start < cur.span.start) first = m
-                    if (m.isFn) earlierFn = true
+    // The position of `file` in link order (`files`); an unknown file sorts last.
+    fn fileRank(files: FileAst[], file: string) -> int {
+        let i = 0
+        while (i < files.length) {
+            if (files[i].path == file) return i
+            i = i + 1
+        }
+        return files.length
+    }
+
+    // Does `m` come before `n` (link order, then source order in one file)?
+    fn bindsBefore(files: FileAst[], m: FileName, n: FileName) -> boolean {
+        if (m.file == n.file) return m.span.start < n.span.start
+        return fileRank(files, m.file) < fileRank(files, n.file)
+    }
+
+    // Do `m` and `n` (one name) clash: one file, or both EXPORTED from two USER files?
+    fn bindingsClash(m: FileName, n: FileName) -> boolean {
+        if (m.file == n.file) return true
+        return m.exported && n.exported && !isStdlibPath(m.file) && !isStdlibPath(n.file)
+    }
+
+    // "file:line:col" of `offset` in `file` (parse.scrml records each file's line starts).
+    fn placeIn(files: FileAst[], file: string, offset: int) -> string {
+        for (const f of files) {
+            if (f.path == file) {
+                let line: int = 0
+                let start: int = 0
+                for (const st of f.lines) {
+                    if (st <= offset) {
+                        line = line + 1
+                        start = st
+                    }
+                }
+                if (line == 0) return file + " (offset " + offset + ")"
+                return file + ":" + line + ":" + (offset - start + 1)
+            }
+        }
+        return file + " (offset " + offset + ")"
+    }
+
+    // Does `file` import `name` from the file `from` (a plain `import { … }`, §21.3)?
+    fn importsNameFrom(files: FileAst[], file: string, name: string, from: string) -> boolean {
+        const paths: string[] = filePaths(files)
+        for (const f of files) {
+            if (f.path == file) {
+                for (const imp of importsOfItems(f.items)) {
+                    if (importTarget(f.path, imp.from, paths) == from) {
+                        for (const x of imp.names) {
+                            if (x.name == name) return true
+                        }
+                    }
                 }
             }
-            if (first is given) {
-                // a function after another function of its name: dupFns reports it (the S440 #6 sentence)
-                if (!(n.isFn && earlierFn)) {
-                    out = out.concat([mkDiag(n.file, n.span, "E-SCOPE-010", "`" + n.name + "` is already bound in this file by " + first.what + " (at " + offsetOf(first.span) + ") — a file-scope name is bound once, whatever it names (a declaration, a type, a function, a constant): duplicate binding in file scope (§7.6; ruled S473); rename one")])
+        }
+        return false
+    }
+
+    // The `from` of an import in `file` that brings `name` into its scope — a
+    // plain `import` whose target (a user OR a stdlib file) exports it — else "".
+    fn importBringing(files: FileAst[], lk: Linkage, file: string, name: string) -> string {
+        const paths: string[] = filePaths(files)
+        for (const f of files) {
+            if (f.path == file) {
+                for (const imp of importsOfItems(f.items)) {
+                    const target: string = importTarget(f.path, imp.from, paths)
+                    if (target != "" && exportsName(lk.own, target, name)) {
+                        for (const x of imp.names) {
+                            if (x.name == name) return imp.from
+                        }
+                    }
+                }
+            }
+        }
+        return ""
+    }
+
+    // Does another pass report AT the binding `n` (see the header)?
+    fn reportedElsewhereAt(files: FileAst[], lk: Linkage, t: Tables, ns: FileName[], n: FileName) -> boolean {
+        if (n.kind == "fn") {
+            for (const m of ns) {
+                if (m.kind == "fn" && m.file == n.file && m.name == n.name && m.span.start < n.span.start) return true
+            }
+            return false
+        }
+        if (n.kind == "decl") return dupDeclReportsAt(files, lk, t, n.nid)
+        if (n.kind == "const") {
+            for (const m of ns) {
+                if (m.kind == "cell" && m.file == n.file && m.name == n.name) return true
+            }
+            return false
+        }
+        if (n.kind == "cell") {
+            for (const m of ns) {
+                if (m.kind == "cell" && m.file == n.file && m.name == n.name && m.span.start < n.span.start) return true
+            }
+            return visibleDeclNamed(lk, t, n.file, n.name)
+        }
+        return false
+    }
+
+    // Is the clash of the earlier `m` with `n` reported by another pass (an OWNED pair)?
+    fn pairOwned(files: FileAst[], lk: Linkage, t: Tables, m: FileName, n: FileName) -> boolean {
+        if (m.kind == "cell" && n.kind == "decl" && visibleDeclNamed(lk, t, m.file, m.name)) return true
+        if (m.kind == "const" && n.kind == "cell" && m.file == n.file) return true
+        if (m.file != n.file && m.kind != "cell" && importsNameFrom(files, m.file, m.name, n.file)) return true
+        return false
+    }
+
+    fn fileNameClashes(files: FileAst[], t: Tables, lk: Linkage) -> Diag[] {
+        const ns: FileName[] = fileNames(t, lk)
+        let out: Diag[] = []
+        for (const n of ns) {
+            if (!reportedElsewhereAt(files, lk, t, ns, n)) {
+                const imported: string = importBringing(files, lk, n.file, n.name)
+                // linkage reports a known kind beside an import of its name, at the import
+                if (n.kind == "cell" || imported == "") {
+                    // the first earlier binding `n` clashes with, in a pair no other pass reports
+                    let first: FileName | not = not
+                    for (const m of ns) {
+                        if (m.name == n.name && bindsBefore(files, m, n) && bindingsClash(m, n) && !pairOwned(files, lk, t, m, n)) {
+                            const cur: FileName | not = first
+                            if (cur is not || bindsBefore(files, m, cur)) first = m
+                        }
+                    }
+                    if (first is given) {
+                        if (first.file == n.file) {
+                            out = out.concat([mkDiag(n.file, n.span, "E-SCOPE-010", "`" + n.name + "` is already bound in this file by " + first.what + " (at " + placeIn(files, first.file, first.span.start) + ") — a file-scope name is bound once, whatever it names (a declaration, a type, a function, a constant, a cell): duplicate binding in file scope (§7.6; ruled S473); rename one")])
+                        } else {
+                            out = out.concat([mkDiag(n.file, n.span, "E-SCOPE-010", "`" + n.name + "` is also exported by " + first.what + " (at " + placeIn(files, first.file, first.span.start) + ") — two files of a program SHALL NOT export one name (§7.6; ruled S473 \"one name per program\" narrowed to exported names); rename one, or stop exporting it")])
+                        }
+                    } else if (n.kind == "cell" && imported != "") {
+                        // s473 r2 review MED-1: a cell beside an import of its name, whatever the source
+                        out = out.concat([mkDiag(n.file, n.span, "E-SCOPE-010", "`" + n.name + "` is imported from `" + imported + "` and also bound in this file by " + n.what + " — a name is bound once in file scope, an import included (§7.6); rename the cell, or drop the import")])
+                    }
                 }
             }
         }
@@ -15926,11 +16081,33 @@ ${
     // program are refused by the language — §9.1 DQ-7 (S473): "Two components of
     // one name in one program SHALL be a compile error (E-COMPONENT-NAME-DUPLICATE),
     // whichever files declare them" (ruled S473 "Same-name components across
-    // files … REFUSED"). A pair that is not two components (a declaration
-    // without `renders` carries no scope key) is not ruled: it stays refused by
-    // the bootstrap (E-BOOTSTRAP-UNSUPPORTED), fail closed.
-    fn dupDecls(files: FileAst[], t: Tables) -> Diag[] {
+    // files … REFUSED"). Any other cross-file pair (dupDeclKind):
+    //   - both EXPORTED from user files: E-SCOPE-010 in fileNameClashes (§7.6,
+    //     S473 r2 #5 narrowed to exported names);
+    //   - its file imports the name: linkage's E-SCOPE-010, at the import (review LOW-2);
+    //   - else (a private one, or a stdlib file in the pair): the bootstrap limit
+    //     E-BOOTSTRAP-UNSUPPORTED, fail closed — the ruling makes a private pair
+    //     legal, but two non-component declarations of one name in one output are
+    //     not in the bootstrap (g-boot-decl-same-name-noncomponent-s473).
+    fn dupDecls(files: FileAst[], t: Tables, lk: Linkage) -> Diag[] {
         let out: Diag[] = []
+        for (const d of t.decls) {
+            const k: string = dupDeclKind(files, lk, t, d.nid)
+            if (k != "") {
+                const first: DeclInfo = dupDeclFirst(t, d.nid)
+                if (k == "component") {
+                    out = out.concat([mkDiag(d.file, d.span, "E-COMPONENT-NAME-DUPLICATE", "the component `<" + d.sym.hint + ">` is also declared in `" + first.file + "` — a component's name is its CSS scope key (`data-scrml=\"" + d.sym.hint + "\"`, §9.1 DQ-7), so two components of one name in one program would share one style scope; a program has one component of each name, whichever files declare them (§9.1, §21.2; ruled S473) — rename one")])
+                } else {
+                    out = out.concat([mkDiag(d.file, d.span, "E-BOOTSTRAP-UNSUPPORTED", "`<" + d.sym.hint + ">` is also declared in `" + first.file + "` — two declarations of one name in one program, not both components and not both exported user declarations, are not in the bootstrap (the output names a declaration by its bare name); the language allows a private pair (§7.6, S473) — rename one")])
+                }
+            }
+        }
+        return out
+    }
+
+    // The first earlier user declaration with the name of the declaration `nid`
+    // (t.decls order); the declaration itself when there is none.
+    fn dupDeclFirst(t: Tables, nid: int) -> DeclInfo {
         let users: DeclInfo[] = []
         for (const d of t.decls) {
             if (d.sym.id != t.program.id) users = users.concat([d])
@@ -15938,22 +16115,53 @@ ${
         let names: string[] = []
         for (const d of users) { names = names.concat([d.sym.hint]) }
         let j = 0
-        while (j < names.length) {
-            const i: int = earlierSame(names, j)
-            if (i >= 0) {
-                const d: DeclInfo = users[j]
-                const first: DeclInfo = users[i]
-                if (first.file != d.file) {
-                    if (declRenders(files, first.nid) && declRenders(files, d.nid)) {
-                        out = out.concat([mkDiag(d.file, d.span, "E-COMPONENT-NAME-DUPLICATE", "the component `<" + names[j] + ">` is also declared in `" + first.file + "` — a component's name is its CSS scope key (`data-scrml=\"" + names[j] + "\"`, §9.1 DQ-7), so two components of one name in one program would share one style scope; a program has one component of each name, whichever files declare them (§9.1, §21.2; ruled S473) — rename one")])
-                    } else {
-                        out = out.concat([mkDiag(d.file, d.span, "E-BOOTSTRAP-UNSUPPORTED", "`<" + names[j] + ">` is also declared in `" + first.file + "` — two user declarations of one name in one program are not in the bootstrap: the language refuses two COMPONENTS of one name (E-COMPONENT-NAME-DUPLICATE, §9.1), and a pair that is not two components is not ruled, so the bootstrap refuses it too — rename one")])
-                    }
-                }
+        while (j < users.length) {
+            if (users[j].nid == nid) {
+                const i: int = earlierSame(names, j)
+                if (i >= 0) return users[i]
+                return users[j]
             }
             j = j + 1
         }
-        return out
+        return t.decls[0]
+    }
+
+    // What dupDecls reports AT the declaration `nid`: "component", "limit", or ""
+    // (nothing — no earlier declaration of its name in another file, or the pair
+    // is fileNameClashes' / linkage's).
+    fn dupDeclKind(files: FileAst[], lk: Linkage, t: Tables, nid: int) -> string {
+        let d: DeclInfo | not = not
+        for (const x of t.decls) {
+            if (x.nid == nid && x.sym.id != t.program.id) d = x
+        }
+        if (d is not) return ""
+        const first: DeclInfo = dupDeclFirst(t, nid)
+        if (first.nid == nid || first.file == d.file) return ""
+        // r2 LOW-B: a declaration its file also imports is linkage's (one report), a component included
+        if (importBringing(files, lk, d.file, d.sym.hint) != "") return ""
+        if (declRenders(files, first.nid) && declRenders(files, d.nid)) return "component"
+        if (isStdlibPath(first.file) || isStdlibPath(d.file)) return "limit"
+        // r2 LOW-A: an EXPORTED declaration with an earlier exported user declaration of its name in
+        // another file is fileNameClashes' E-SCOPE-010 — whatever private declaration came first
+        if (declExported(lk, d.file, d.sym.hint)) {
+            for (const x of t.decls) {
+                if (x.sym.id != t.program.id && x.sym.hint == d.sym.hint && x.file != d.file && !isStdlibPath(x.file) && fileOrderBefore(t, x.nid, nid) && declExported(lk, x.file, x.sym.hint)) return ""
+            }
+        }
+        return "limit"
+    }
+
+    // Does the declaration `a` come before the declaration `b` in t.decls (link) order?
+    fn fileOrderBefore(t: Tables, a: int, b: int) -> boolean {
+        for (const x of t.decls) {
+            if (x.nid == a) return true
+            if (x.nid == b) return false
+        }
+        return false
+    }
+
+    fn dupDeclReportsAt(files: FileAst[], lk: Linkage, t: Tables, nid: int) -> boolean {
+        return dupDeclKind(files, lk, t, nid) != ""
     }
 
     // s473 — is the user declaration `nid` a COMPONENT (written with `renders`,
@@ -16014,13 +16222,13 @@ ${
     // (§7.6, S473; s473 review LOW-1); an IMPORT of the name is linkage's. A
     // function-body local or a parameter of the name SHADOWS it (§7.6 "scoped to
     // that function"; §7.3.3 shadowing in a nested scope is legal) — no report.
-    fn dupConsts(t: Tables) -> Diag[] {
+    fn dupConsts(files: FileAst[], t: Tables) -> Diag[] {
         let out: Diag[] = []
         for (const c of t.consts) {
             for (const d of t.decls) {
                 if (d.file == c.file && d.sym.id == t.program.id) {
                     for (const fi of d.fields) {
-                        if (fi.sym.hint == c.name) out = out.concat([mkDiag(c.file, c.span, "E-NAME-COLLIDES-STATE", "`" + c.name + "` is also a cell of the program (`@" + c.name + "`, at " + offsetOf(fi.span) + ") — a local name cannot take the name of a registered state cell (§1.6, §7.6.1); rename one")])
+                        if (fi.sym.hint == c.name) out = out.concat([mkDiag(c.file, c.span, "E-NAME-COLLIDES-STATE", "`" + c.name + "` is also a cell of the program (`@" + c.name + "`, at " + placeIn(files, c.file, fi.span.start) + ") — a local name cannot take the name of a registered state cell (§1.6, §7.6.1); rename one")])
                     }
                 }
             }

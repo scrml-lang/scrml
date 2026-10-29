@@ -201,14 +201,14 @@ describe("a server function whose loop waits — the server's native loop with `
     const src = P(`    type LoadError:enum = { Db, Transport(t: ServerCallError) }
     type Cnt:struct = { n: int }
     let <total:int=-1/>
-    function total(n: int)! LoadError {
+    function totalOf(n: int)! LoadError {
         let t = 0;
         for (i of 0..n) {
             const r: Cnt = ${SQ}\`SELECT \${i} * 10 AS n\`}.get() !{ _ :> { fail .Db; } };
             t = t + r.n;
         }
         return t;
-    }`, `        <button id="go" onclick={ @total = total(4) !{ _ :> -2 }; }>go</button>`);
+    }`, `        <button id="go" onclick={ @total = totalOf(4) !{ _ :> -2 }; }>go</button>`);
     const { server } = artifacts(compile(src).core);
     expect(server.js).toMatch(/for \(let i = 0, end = n; i < end; i = i \+ 1\) \{/);
     expect(server.js).toMatch(/await rt\.query/);
