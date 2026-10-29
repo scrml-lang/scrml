@@ -1,0 +1,10 @@
+{
+  "id": "acceptance-db-cells-neg-edit-grant",
+  "description": "A locked `<db>` cell whose tape type grants `append` but not `replace` is refused at its declaration (E-DB-CELL-EDIT-GRANT): a locked `<db>` cell is read-only on the client, so the edit grant could never be used.",
+  "language-version": "1.0",
+  "spec": "§8.1.3 item 5 (S473) · §34 E-DB-CELL-EDIT-GRANT",
+  "rationale": "RULED S472 (`<db>` body + client reads) item 5: \"locked cells are read-only on the client\" — read categorically (PA reading of the S472 ruling, S473).",
+  "expect": {
+    "codes": ["E-DB-CELL-EDIT-GRANT"]
+  }
+}

@@ -1916,8 +1916,13 @@ ${
     // Declarations, types, functions — the linked program (L15).
     // =========================================================================
     fn lowerField(c: LC, f: FieldInfo) -> Field {
+        // s473: a `<db>` cell's value is its load's answer (CoreProgram.loads — analyze dbLoads)
+        let init: Expr | not = lowerValue(c, f.init)
+        for (const ld of c.t.server.loads) {
+            if (ld.cell.id == f.sym.id) init = Expr.Local(ld.val)
+        }
         return {
-            sym: f.sym, ty: f.ty, init: lowerValue(c, f.init), mode: f.mode, role: f.role,
+            sym: f.sym, ty: f.ty, init: init, mode: f.mode, role: f.role,
             grants: f.grants, graph: f.graph, exported: f.exported, wcap: f.wcap, vals: valCores(f.vals),
             persist: persistOf(c.t, f.sym),
         }
@@ -3561,8 +3566,8 @@ ${
         const top: AProgram | not = topProgramOf(tp.files, t)
         const head: CoreHead = headOf(top)
         const lang: string | not = langOf(top)
-        const pre: CoreProgram = { program: t.program, decls: decls, types: types, fns: fns, server: server, dbs: dbs, reset: reset, sqlError: sqlError, serverCallError: serverCallError, css: css, consts: consts, head: head, lang: lang }
-        const core: CoreProgram = { program: t.program, decls: gateDecls(pre), types: types, fns: fns, server: server, dbs: dbs, reset: reset, sqlError: sqlError, serverCallError: serverCallError, css: css, consts: consts, head: head, lang: lang }
+        const pre: CoreProgram = { program: t.program, decls: decls, types: types, fns: fns, server: server, dbs: dbs, reset: reset, sqlError: sqlError, serverCallError: serverCallError, css: css, consts: consts, loads: t.server.loads, head: head, lang: lang }
+        const core: CoreProgram = { program: t.program, decls: gateDecls(pre), types: types, fns: fns, server: server, dbs: dbs, reset: reset, sqlError: sqlError, serverCallError: serverCallError, css: css, consts: consts, loads: t.server.loads, head: head, lang: lang }
         return { core: core, diags: tp.diags }
     }
 

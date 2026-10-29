@@ -464,7 +464,8 @@ describe("F — SPEC-silent duplicates (bootstrap-local, owe rulings)", () => {
   test("F1 legal (s472) — one type name in two files: each file's annotations resolve to its own", () => {
     const lib = { path: "lib/t.scrml", src: "${ type T:struct = { a: int } }\n" };
     expect(codes([lib, LIB(), app("    type T:struct = { b: string }\n    function f() { let v: T = { b: \"x\" }; }", "<p>x</p>")])).toEqual([]);
-    expect(codes([lib, LIB(), app("    type T:struct = { b: string }\n    function f() { let v: T = { a: 1 }; }", "<p>x</p>")])).not.toEqual([]);
+    // s473 r2 review LOW-4: the exact list — the page's `T` is its own `{ b }` (no E-SCOPE-010: both private)
+    expect(codes([lib, LIB(), app("    type T:struct = { b: string }\n    function f() { let v: T = { a: 1 }; }", "<p>x</p>")])).toEqual(["E-TYPE-STRUCT-FIELD", "E-TYPE-STRUCT-FIELD"]);
   });
   test("F2 E-BOOTSTRAP-REDECLARE — `function g(a: int, a: int)`", () => {
     expect(inApp("    function g(a: int, a: int) { }")).toEqual(["E-BOOTSTRAP-REDECLARE"]);
