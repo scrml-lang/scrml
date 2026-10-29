@@ -1153,9 +1153,14 @@ ${
         if (n == "asIs") return { t: Type.Str, st: addDiag(st, te.file, at.span, "E-BOOTSTRAP-UNSUPPORTED", "the built-in type `asIs` (§14.1.2) is not in the bootstrap — its type system has no unresolved-value type; give the value a declared type"), unresolved: true }
         // s473 (B9) — `timestamp` is a "registered string-shaped primitive"
         // (§66.3's canonical-empty list; §53's union-member rule: "tested as
-        // strings"). The SPEC gives it a string's representation and runtime
-        // test and no rule that sets it apart from `string`, so the bootstrap
-        // types it as `string`. (A user type of that name, in scope, wins — above.)
+        // strings"), and the bootstrap types it as `string`. That is NOT all of
+        // it: §66.3 gives a bare `timestamp` cell no canonical empty — it starts
+        // as `not` with an implicit `(not to T)` lifecycle, where `string`
+        // starts as `""` — so a `timestamp` cell with no value is refused
+        // (stampNoDefaultDiag). With a value, as a parameter or as a field, it is
+        // a string. (SPEC conflict: §51.11.4 calls a timestamp a Number —
+        // g-spec-timestamp-number-vs-string-s473.) (A user type of that name, in
+        // scope, wins — above.)
         if (n == "timestamp") return { t: Type.Str, st: st, unresolved: false }
         // s473 (B9) — the §53 named-shape vocabulary (§14's canonical rule: "the
         // named-shape vocabulary `email`/`url`/`uuid`/`phone`/`date`/`time`/
@@ -4533,6 +4538,7 @@ ${
         let st: AS = st0
         if (hasErrIn(errs, d.span)) return st
         st = repeatedWordDiags(file, d, st)
+        st = stampNoDefaultDiag(file, d, st)
         for (const a of d.mods) {
             if (a.name == "reset-on" && !cell) {
                 st = addDiag(st, file, a.span, "E-BOOTSTRAP-UNSUPPORTED", "`reset-on=` on `<" + d.name + ">`, a field of a declaration, is not in the bootstrap — whether a field's `reset-on=` may name a sibling field of the same instance (a per-instance reset) is OPEN (§6.8.4); it is read on a program cell")
@@ -4545,6 +4551,37 @@ ${
         }
         for (const c of childFields(d.body)) { st = openerWordDiags(file, errs, c, false, st) }
         return st
+    }
+
+    // s473 fix round (F1) — §66.3: "**`date` / `timestamp`** (registered
+    // string-shaped primitives) have no meaningful canonical empty → `not`", and
+    // such a bare cell "initializes to **`not`** and the cell acquires an
+    // **implicit `(not to T)` lifecycle** (§14.12)". The bootstrap types
+    // `timestamp` as `string` (resolveTypeName), whose canonical empty is `""`,
+    // and has no implicit lifecycle — so a `timestamp` cell with no own value is
+    // refused by name rather than given `string`'s meaning
+    // (g-bootstrap-timestamp-canonical-empty-s473). Fail closed: a user type
+    // named `timestamp` is refused here too.
+    fn stampNoDefaultDiag(file: string, d: ADecl, st: AS) -> AS {
+        const ty: AType | not = d.ty
+        if (ty is not) return st
+        const k: ATypeK = ty.k
+        const isStamp: boolean = match k {
+            .TName(name: n) :> n == "timestamp"
+            .TSeq(elem: e) :> false
+            .TMaybe(inner: i) :> false
+        }
+        if (!isStamp) return st
+        const own: AAttrValue = d.own
+        const none: boolean = match own {
+            .NoValue :> true
+            .Quoted(v: s) :> false
+            .Bare(e: x) :> false
+            .Paren(e: x) :> false
+            .Braced(b: b) :> false
+        }
+        if (!none) return st
+        return addDiag(st, file, d.span, "E-BOOTSTRAP-UNSUPPORTED", "`<" + d.name + ":timestamp/>` with no value is not in the bootstrap — a bare `timestamp` cell starts as `not` with an implicit `(not to T)` lifecycle (§66.3, §14.12), which the bootstrap does not build (it types `timestamp` as `string`); give it a value: `<" + d.name + ":timestamp=\"…\"/>`")
     }
 
     // The declaration-opener words the bootstrap reads (besides the typed
@@ -7481,7 +7518,7 @@ ${
         // declaration in scope are **`E-STATE-UNDECLARED`**" — not a "whole
         // instance" write. (The read side still reports E-SCOPE-001:
         // g-bootstrap-undeclared-cell-read-code-s473.)
-        if (!namesInstance(env, name)) return noPlace(addDiag(st, env.file, t.span, "E-STATE-UNDECLARED", "`@" + name + " = …` writes a cell that is not declared — no cell, declaration or `as=` handle named `" + name + "` is in scope (§6.1.1: a write is not a declaration; declare it, e.g. `let <" + name + ":T=(…)/>`)"))
+        if (!namesInstance(env, name)) return noPlace(addDiag(st, env.file, t.span, "E-STATE-UNDECLARED", "`@" + name + "` is written here, but it is not declared — no cell, declaration or `as=` handle named `" + name + "` is in scope (§6.1.1: a write is not a declaration; declare it, e.g. `let <" + name + ":T=(…)/>`)"))
         return noPlace(addDiag(st, env.file, t.span, "E-BOOTSTRAP-UNSUPPORTED", "`@" + name + " = …` — writing a whole instance is not in bootstrap slice M2 (write a field: `@" + name + ".f = …`)"))
     }
 

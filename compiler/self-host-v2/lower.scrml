@@ -3452,7 +3452,7 @@ ${
         for (const n of ns) {
             const k: ANodeK = n.k
             const found: boolean = match k {
-                .Elem(e: e) :> e.tag == "title" || hasTitleElem(e.kids)
+                .Elem(e: e) :> isDocTitleTag(e.tag) || (!hidesTitle(e.tag) && hasTitleElem(e.kids))
                 .Text(text: tx) :> false
                 .Interp(e: x) :> false
                 .DeclNode(d: d) :> false
@@ -3463,6 +3463,20 @@ ${
             if (found) return true
         }
         return false
+    }
+
+    // s473 fix round (F2) — HTML tag names are case-insensitive (`<TITLE>`).
+    fn isDocTitleTag(tag: string) -> boolean {
+        return tag.toLowerCase() == "title"
+    }
+
+    // A `<title>` below these is not the document's: in `<svg>` it is an SVG
+    // tooltip; `<textarea>` content is RCDATA and `<noscript>` content is raw
+    // text when scripts run (the page is a scripted render); `<template>`
+    // content is inert.
+    fn hidesTitle(tag: string) -> boolean {
+        const t: string = tag.toLowerCase()
+        return t == "svg" || t == "textarea" || t == "noscript" || t == "template"
     }
 
     fn programHasTitle(p: AProgram) -> boolean {
@@ -3501,21 +3515,13 @@ ${
     }
 
     // s473 — §23.2.1: the program's `lang=` (analyze admits only a quoted one).
+    // Fix round (F6): `lang=""` is as if absent — the documentary attributes'
+    // rule (§40.7), so a `_{}` reader never sees an empty language.
     fn langOf(p: AProgram | not) -> string | not {
         if (p is not) return not
-        for (const a of p.attrs) {
-            if (a.name == "lang") {
-                const v: AAttrValue = a.value
-                return match v {
-                    .Quoted(v: s) :> s
-                    .NoValue :> not
-                    .Bare(e: x) :> not
-                    .Paren(e: x) :> not
-                    .Braced(b: b) :> not
-                }
-            }
-        }
-        return not
+        const v: string = literalAttr(p, "lang")
+        if (v == "") return not
+        return v
     }
 
     export fn lower(tp: TypedProgram) -> Lowered {

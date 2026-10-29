@@ -79,6 +79,20 @@ describe("B3 — §40.7 documentary attributes are read", () => {
     expect(h).toContain(`<meta name="description" content="d">`);   // the metas still emit
     expect(h).toContain("AuthorWritten");
   });
+  test("fix round F2: an author `<TITLE>` (any case) wins too", () => {
+    const h = html(prog(`title="D"`, `<TITLE>T</TITLE>\n    <p>x</p>`));
+    expect(h).not.toContain("<title>D</title>");
+    expect(h.slice(0, h.indexOf("<template"))).not.toContain("<title>");
+  });
+  for (const [label, body] of [
+    ["an SVG tooltip `<svg><title>`", `<svg><title>tooltip</title></svg>`],
+    ["`<textarea>` content", `<textarea><title>x</title></textarea>`],
+    ["`<noscript>` content", `<noscript><title>x</title></noscript>`],
+  ]) {
+    test(`fix round F2: a \`<title>\` in ${label} is not the document's — the documentary title stays`, () => {
+      expect(html(prog(`title="D"`, `${body}\n    <p>x</p>`))).toContain("<title>D</title>\n");
+    });
+  }
   test("unchanged: a documentary attribute on a NESTED `<program>` is W-PROGRAM-TITLE-NESTED", () => {
     const c = codes(`<program>\n    <program name="w" title="InnerOops">\n        <p>w</p>\n    </program>\n    <p>home</p>\n</program>\n`);
     expect(c).toContain("W-PROGRAM-TITLE-NESTED");
@@ -93,6 +107,9 @@ describe("B3 — §23.2.1 `lang=` is read and carried", () => {
   });
   test("no `lang=` → the Core program carries none", () => {
     expect(clean(prog("")).core.lang == null).toBe(true);
+  });
+  test("fix round F6: `lang=\"\"` is as if absent (the §40.7 empty-value rule)", () => {
+    expect(clean(prog(`lang=""`)).core.lang == null).toBe(true);
   });
   test("`lang=` changes nothing the bootstrap prints", () => {
     const a = clean(prog(`lang="ts"`)).core, b = clean(prog("")).core;
@@ -161,6 +178,20 @@ describe("B9 — `timestamp` is a type", () => {
     await loadProgram(clean(src).core, "s473pa-ts", []);
     expect(document.querySelector("#o").textContent).toBe("2026-10-29T00:00:00Z!");
   });
+  // fix round F1 — §66.3: a bare `timestamp` cell starts as `not` with an implicit
+  // `(not to T)` lifecycle (`string` starts as `""`): refused by name.
+  for (const [label, decl] of [["a `let` cell", `let <when:timestamp/>`], ["a locked cell", `<when:timestamp/>`]]) {
+    test(`fix round F1: ${label} of type \`timestamp\` with no value is refused, naming the lifecycle`, () => {
+      const d = run(prog("", `${decl}\n    <p>x</p>`)).diags;
+      expect(d.map((x) => x.code)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+      expect(d[0].message).toContain("(not to T)");
+      expect(d[0].message).toContain("§66.3");
+    });
+  }
+  test("fix round F1: the reviewer's shape — `@when = not` on a bare timestamp cell is the refusal, not a string typing error", () => {
+    const c = codes(prog("", `let <when:timestamp/>\n    <button onclick={ @when = not; }>x</button>`));
+    expect(c).toContain("E-BOOTSTRAP-UNSUPPORTED");
+  });
   for (const shape of ["date", "email", "url", "uuid", "phone", "time", "color"]) {
     test(`the named-shape type \`${shape}\` (§53) is refused by name, not reported unknown`, () => {
       const d = run(prog("", `type R:struct = { f: ${shape} }\n    <p>x</p>`)).diags;
@@ -182,24 +213,35 @@ describe("B9 — a write to an `@name` that names nothing", () => {
     }
     <p>x</p>`)).diags;
     expect(d.map((x) => x.code)).toEqual(["E-STATE-UNDECLARED"]);
-    expect(d[0].message).toContain("`@status = …`");
+    expect(d[0].message).toContain("`@status` is written here");
     expect(d[0].message).not.toContain("whole instance");
   });
   test("conformance s437-r4-undeclared-cell-2nd-top-neg shape — a handler writing an undeclared cell", () => {
     const d = run(prog("", `let <n:int=0/>
     <button onclick={ @n = 1; @zz = 3; }>x</button>`)).diags;
     expect(d.map((x) => x.code)).toEqual(["E-STATE-UNDECLARED"]);
-    expect(d[0].message).toContain("`@zz = …`");
+    expect(d[0].message).toContain("`@zz` is written here");
   });
-  test("a write to a real declaration's whole instance is still refused as one", () => {
-    const d = run(prog("", `<card title:string="t">
-        renders <p>\${@title}</p>
-    </card>
+  test("a write to a real declaration's whole instance is still refused as one (fix round F5: valid fixture, exact list)", () => {
+    const d = run(prog("", `<card k:string="t"/>
+    renders <p>\${k}</p>
     function f() {
         @card = 1;
     }
-    <*card/>`)).diags;
-    expect(d.some((x) => x.code === "E-BOOTSTRAP-UNSUPPORTED" && x.message.includes("whole instance"))).toBe(true);
-    expect(d.some((x) => x.code === "E-STATE-UNDECLARED")).toBe(false);
+    <main><card/></main>`)).diags;
+    expect(d.map((x) => x.code)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+    expect(d[0].message).toContain("whole instance");
   });
+  // fix round F4: the message names what was written, never an invented `@x = …`
+  for (const [label, body] of [
+    ["a field write", `function f() {\n        @nope.a = 1;\n    }\n    <p>x</p>`],
+    ["a `bind:value=`", `<input bind:value=@nope/>`],
+  ]) {
+    test(`${label} to an undeclared cell → E-STATE-UNDECLARED naming \`@nope\`, no invented \`= …\``, () => {
+      const d = run(prog("", body)).diags.filter((x) => x.code === "E-STATE-UNDECLARED");
+      expect(d.length).toBe(1);
+      expect(d[0].message).toContain("`@nope` is written here");
+      expect(d[0].message).not.toContain("@nope = …");
+    });
+  }
 });

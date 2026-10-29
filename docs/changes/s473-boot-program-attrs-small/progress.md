@@ -102,3 +102,22 @@ precise `<program mcp>` refusal 0 → 2; `timestamp` E-TYPE-UNKNOWN 1 → 0; "wh
 E-STATE-UNDECLARED 0 → 6 (the same six sites, now named correctly); `if`-as-value 19 → 19 (B1
 cascade, untouched). 23 of 31 files drop by one error; none becomes clean (each still holds B1/B2/
 M1-class debt).
+
+## 2026-10-29T17:30Z — fix round 1 (S239 review of ee6f18ebb, LAND-W-F/U)
+
+Merged origin/main first (be9c783cb; severity.scrml conflict resolved by regenerating with
+`gen-bootstrap-severity.ts`; known-gaps ids diffed: none lost; counts regenerated).
+
+| finding | fix |
+|---|---|
+| F1 `timestamp` ≠ `string` (§66.3: a bare `timestamp` cell starts `not`, implicit `(not to T)`) | analyze `stampNoDefaultDiag`: a `timestamp` cell with no own value → E-BOOTSTRAP-UNSUPPORTED naming the lifecycle (§66.3, §14.12). With a value / as a param / as a field it stays a string. Comment in `resolveTypeName` corrected. Gaps: g-bootstrap-timestamp-canonical-empty-s473, g-spec-timestamp-number-vs-string-s473 (§51.11.4 "Number"). |
+| F2 title detection | lower `isDocTitleTag` (case-insensitive) and `hidesTitle` (no recursion below `svg` / `textarea` / `noscript` / `template`). The title gap's text widened. |
+| F3 author `<title>` only in the inert template until mount | gap g-bootstrap-author-title-only-in-template-s473 |
+| F4 invented `@x = …` in the message | message now "`@x` is written here, but it is not declared …" (covers `@x.a = 1`, `bind:value=@x`) |
+| F5 malformed twin fixture | `<card k:string="t"/>` + `renders …`, exact `toEqual(["E-BOOTSTRAP-UNSUPPORTED"])` |
+| F6 `lang=""` carried as `""` | lower `langOf`: `""` is as if absent |
+
+Tests: program-attrs-s473.test.js now 40 (10 new; 9 red against ee6f18ebb — the F5 fixture swap is a
+twin). Gates: the bootstrap slice step, conformance --check (unchanged: PASS 263 / FAIL 49 /
+UNSUPPORTED 816), types-gate, root tests, snippet, claim, corpus floor, md-shim, conflict-marker,
+SPEC-INDEX, delta-lint, s34-census, severity --check, e2e-render-map — all PASS.
