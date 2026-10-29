@@ -14269,13 +14269,18 @@ ${
     //     §5.2 rule 3 gives `action`; `formaction` (any case) on ANY element
     //     (it is inert off `<button>` / `<input>`; refusing it there loses
     //     nothing — fail closed): E-ATTR-FORM-ACTION;
+    //   - `form` (any case) on ANY element — the form owner: data never
+    //     chooses which form a control is submitted with (S473 PA ruling,
+    //     extends round 2 item 1; review of #1641 F1, Chromium: a data
+    //     `form=` moved a password into an author-written off-origin form):
+    //     E-ATTR-FORM-ACTION;
     //   - on a `<meta>`: `http-equiv` (data never chooses a pragma — it could
     //     become `refresh`), and `content` when the `http-equiv` refreshes or
     //     is computed (`metaEquivRefreshes`): E-ATTR-META-REFRESH.
     fn navSinkCode(e: AElem, a: AAttr) -> string {
         const n: string = a.name.toLowerCase()
         const t: string = e.tag.toLowerCase()
-        if (n == "formaction" || (n == "action" && t == "form")) return "E-ATTR-FORM-ACTION"
+        if (n == "formaction" || n == "form" || (n == "action" && t == "form")) return "E-ATTR-FORM-ACTION"
         if (t == "meta" && (n == "http-equiv" || (n == "content" && metaEquivRefreshes(e.attrs)))) return "E-ATTR-META-REFRESH"
         return ""
     }
@@ -14305,6 +14310,7 @@ ${
 
     fn navSinkMessage(code: string, a: AAttr, e: AElem) -> string {
         const head: string = "`" + a.name + "=` on `<" + e.tag + ">` takes its value from data (an expression, a variable, a call or a field)"
+        if (code == "E-ATTR-FORM-ACTION" && a.name.toLowerCase() == "form") return head + " — data never chooses where a form posts: `form=` picks the form this control is submitted with, so data would send its value (a password included) to another form's URL. Write `form=` as a static string naming one form (`form=\"login\"`), or put the control inside its `<form>` (§5.2)"
         if (code == "E-ATTR-FORM-ACTION") return head + " — data never chooses where a form is sent: the submission carries every field of the form, a password included, to whatever URL the value names (§5.2 rule 3 admits any `https:` origin). Write the `" + a.name + "` as a static string (`" + a.name + "=\"/login\"`), or switch between static forms with `if=` (§5.2)"
         return head + " — data never navigates the page: a `<meta http-equiv=\"refresh\">` sends the whole page to the URL in its `content`, and `http-equiv` chooses that pragma. Write `http-equiv` and a refresh's `content` as static strings (`content=\"30;url=/next\"`) (§5.2)"
     }
@@ -26121,6 +26127,9 @@ ${
         const validated: boolean = c.validated.length > 0
         if (!validated && c.surfaced.length == 0) return { diags: [], ext: [] }
         const what: string = "`<" + c.e.tag + " " + c.owner.name + "=…>` binds `" + c.validated.concat(c.surfaced).join("`, `") + "`"
+        // s473 — a data `form=` is refused on its own (E-ATTR-FORM-ACTION, §5.2
+        // "Data never chooses where a form posts …"); one diagnostic per fault.
+        if (valueExpr(c.owner.value) is given) return { diags: [], ext: [] }
         const lit: string | not = htmlLiteral(c.owner.value)
         let why: string = ""
         let target: IdSite | not = not

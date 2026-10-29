@@ -21,3 +21,10 @@ Pattern: mirror #1637 (E-ATTR-BASE-HREF) — analyze.scrml attribute walk + runt
 - New test file: 72 pass after implementation.
 - sink-guards.test.js held `<form id="f" action=@bad>` as a rule-3 runtime write; removed that row (now E-ATTR-FORM-ACTION), refusal count 13 → 12. Slices m1/m2/m1-lowered/m3/m4/codec, e2e-render-map, root tests: all green after that.
 - First commit attempt: hook failed in compiler/tests/integration/s466-server-param-defaults.test.js (12 fails, impl#1, untouched by this lane); the file passes alone (90/0) — load flake; retried.
+
+## 2026-10-29 — fix round 1 (#1641 review LAND-W-F/U)
+- F1 (S473 PA ruling, extends round 2 item 1): a non-static `form=` (form owner, any element, any case) is E-ATTR-FORM-ACTION (own message: "data never chooses where a form posts …"); `rt.attr` refuses it (thunk never run). `judgeOwner` skips a data owner (already refused — one diagnostic per fault); gate-reach.test.js's two data-`form=` expectations move from E-FORM-OWNER-UNRESOLVED to E-ATTR-FORM-ACTION. SPEC §5.2 item 1 extended with a "Form owner (S473 PA ruling, extends round 2 item 1)" sentence quoting item 1 verbatim; §34 row extended.
+- Corpus impact measured: zero data `form=` in conformance/examples/samples/stdlib/benchmarks (only static `form="fm"` in a docs repro); corpus-compile-floor PASS; bootstrap-conformance report current (unchanged). ZERO newly-rejected files.
+- F3: note added to g-impl1-form-action-meta-refresh-from-data-s473 (restore the removed `#f action=(@bad)` row as an impl#1 conformance case when impl#1 is fixed).
+- F4: refusals now log via `console.error` (the url-guard channel). The pack now reads the error channel.
+- Tests: pack is 89 tests; 38 red on 597ddc35c (form-owner compile + runtime, and the warn→error channel). All gates + slices green.

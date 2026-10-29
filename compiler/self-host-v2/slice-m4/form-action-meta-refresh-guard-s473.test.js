@@ -153,6 +153,53 @@ renders <span class="b"><meta http-equiv="refresh" content=go/></span>
   });
 });
 
+// ---------------------------------------------------------------------------
+// 1c. compile — a data `form=` (the form owner) is E-ATTR-FORM-ACTION (S473 PA ruling, extends
+// round 2 item 1; review of #1641 F1 / chrome-probe D1: a data `form=` moved a password into an
+// author-written off-origin form, and submitting it POSTed `q=cats&pw=hunter2` there)
+// ---------------------------------------------------------------------------
+describe("compile — a data-bound `form=` owner is E-ATTR-FORM-ACTION", () => {
+  const TWO_FORMS = `<form id="login" method="post" action="/go-self"></form><form id="search" method="post" action="https://third-party.example/go-search"><input name="q" value="cats"/></form>`;
+  const refused = (tag, extra) => expect(codes(PROG(TWO_FORMS + tag, extra))).toEqual(["E-ATTR-FORM-ACTION"]);
+  test("D1: `<input form=(@u) name=\"pw\">` beside an author-written off-origin form", () => refused(`<input form=(@u) name="pw" value="hunter2"/>`));
+  test("`form=@u` on an input", () => refused(`<input form=@u name="pw" type="password"/>`));
+  test("`<button form=@u>` (data would choose which form is submitted)", () => refused(`<button form=@u>go</button>`));
+  test("case variants: `FORM=`, `Form=`", () => { refused(`<input FORM=@u name="pw"/>`); refused(`<select Form=(@u) name="s"></select>`); });
+  test("a call", () => refused(`<input form=pick(@u) name="pw"/>`, `    function pick(v: string) -> string { return v; }\n`));
+  test("any element (fail closed)", () => refused(`<div form=@u></div>`));
+  test("an <each> row's field", () => {
+    expect(codes(`type Row:struct = { id: int, owner: string }
+<program>
+    <rows:Row[]=([{ id: 1, owner: "search" }])/>
+    <main><form id="search" action="https://third-party.example/"></form><each in=@rows key=@.id as row><input form=row.owner name="pw"/></each></main>
+</program>
+`)).toEqual(["E-ATTR-FORM-ACTION"]);
+  });
+  test("a declaration's field (reported once, at the definition)", () => {
+    expect(codes(`<pw owner:string>
+</>
+renders <input class="pw" form=owner name="pw" type="password"/>
+
+<program>
+    <main>
+        <form id="login" action="/login"></form>
+        <pw owner="login"/>
+        <pw owner="search"/>
+    </main>
+</program>
+`)).toEqual(["E-ATTR-FORM-ACTION"]);
+  });
+  test("the diagnostic says where a form posts and names the safe form", () => {
+    const d = run(PROG(TWO_FORMS + `<input form=@u name="pw"/>`)).diags[0];
+    expect(d.code).toBe("E-ATTR-FORM-ACTION");
+    expect(d.message).toContain("where a form posts");
+    expect(d.message).toContain("§5.2");
+    expect(d.message).toContain("static");
+    expect(d.severity).toBe("Error");
+  });
+  test("control: a static `form=\"f1\"` naming a form stays legal", () => expect(codes(PROG(`<form id="f1" action="/save"></form><input form="f1" name="pw" type="password"/><button form="f1">save</button>`))).toEqual([]));
+});
+
 describe("compile — the other spellings do not compile either (never written from data)", () => {
   // Each spelling is pinned to the exact codes that stop it today, all Errors — so the pin goes
   // red when the bootstrap learns the form (it must then meet E-ATTR-FORM-ACTION / -META-REFRESH).
@@ -203,7 +250,7 @@ function refusedWrite(markup, sel, name, report) {
   const before = el.getAttributeNames().filter((n) => n.toLowerCase() !== name.toLowerCase());
   const scope = new rt.Scope(rt.root);
   let ran = 0;
-  const { warns } = captured(() => rt.attr(scope, el, name, () => { ran++; return "https://evil.example/"; }));
+  const { errors: warns } = captured(() => rt.attr(scope, el, name, () => { ran++; return "https://evil.example/"; }));
   expect(el.getAttributeNames()).toEqual(before);
   expect(ran).toBe(0);
   expect(warns).toEqual([report]);
@@ -214,7 +261,7 @@ function refusedWrite(markup, sel, name, report) {
 function writtenAs(markup, sel, name, value) {
   const el = elementOf(markup, sel);
   const scope = new rt.Scope(rt.root);
-  const { warns } = captured(() => rt.attr(scope, el, name, () => value));
+  const { errors: warns } = captured(() => rt.attr(scope, el, name, () => value));
   expect(el.getAttribute(name)).toBe(value);
   expect(warns).toEqual([]);
   scope.dispose?.();
@@ -237,7 +284,7 @@ describe("runtime — `rt.attr` never writes a form's submission target", () => 
   test("a template-supplied `action` is removed, never left standing beside a refused data write", () => {
     const el = elementOf(`<form id="f" action="https://evil.example/"></form>`, "#f");
     const scope = new rt.Scope(rt.root);
-    const { warns } = captured(() => rt.attr(scope, el, "action", () => "https://evil.example/"));
+    const { errors: warns } = captured(() => rt.attr(scope, el, "action", () => "https://evil.example/"));
     expect(el.hasAttribute("action")).toBe(false);
     expect(warns).toEqual([FORM_REPORT]);
     scope.dispose?.();
@@ -245,7 +292,7 @@ describe("runtime — `rt.attr` never writes a form's submission target", () => 
   test("the report never carries the value", () => {
     const el = elementOf(`<form id="f"></form>`, "#f");
     const scope = new rt.Scope(rt.root);
-    const { warns } = captured(() => rt.attr(scope, el, "action", () => "https://secret.example/token123"));
+    const { errors: warns } = captured(() => rt.attr(scope, el, "action", () => "https://secret.example/token123"));
     for (const w of warns) { expect(w).not.toContain("secret"); expect(w).not.toContain("token123"); }
     scope.dispose?.();
   });
@@ -253,6 +300,36 @@ describe("runtime — `rt.attr` never writes a form's submission target", () => 
   test("a data `method` / `target` on <form> is still written (no off-origin choice; not ruled)", () => {
     writtenAs(`<form id="f"></form>`, "#f", "method", "post");
     writtenAs(`<form id="f"></form>`, "#f", "target", "_self");
+  });
+});
+
+const OWNER_REPORT = "[scrml url-guard] refused a data-supplied `form` owner: which form a control is submitted with is never chosen by data (SPEC §5.2). The attribute was removed.";
+
+describe("runtime — `rt.attr` never writes a control's form owner from data", () => {
+  for (const [markup, name] of [
+    [`<input id="x" name="pw">`, "form"],
+    [`<input id="x" name="pw">`, "FORM"],
+    [`<button id="x">go</button>`, "Form"],
+    [`<select id="x"></select>`, "form"],
+    [`<div id="x"></div>`, "form"],
+  ]) {
+    test(`${name}= on ${markup}`, () => refusedWrite(markup, "#x", name, OWNER_REPORT));
+  }
+  test("a template-supplied `form` is removed, never left standing beside a refused data write", () => {
+    const el = elementOf(`<input id="x" form="search" name="pw">`, "#x");
+    const scope = new rt.Scope(rt.root);
+    const { errors } = captured(() => rt.attr(scope, el, "form", () => "search"));
+    expect(el.hasAttribute("form")).toBe(false);
+    expect(errors).toEqual([OWNER_REPORT]);
+    scope.dispose?.();
+  });
+  test("the refusal is logged on the url-guard error channel, never as a warning (review F4)", () => {
+    const el = elementOf(`<input id="x" name="pw">`, "#x");
+    const scope = new rt.Scope(rt.root);
+    const { warns, errors } = captured(() => rt.attr(scope, el, "form", () => "search"));
+    expect(warns).toEqual([]);
+    expect(errors).toEqual([OWNER_REPORT]);
+    scope.dispose?.();
   });
 });
 
@@ -268,7 +345,7 @@ describe("runtime — `rt.attr` never writes a page-navigating <meta> from data"
   test("a template-supplied `content` on a refresh <meta> is removed", () => {
     const el = elementOf(`<meta id="m" http-equiv="refresh" content="0;url=https://evil.example/">`, "#m");
     const scope = new rt.Scope(rt.root);
-    const { warns } = captured(() => rt.attr(scope, el, "content", () => "5"));
+    const { errors: warns } = captured(() => rt.attr(scope, el, "content", () => "5"));
     expect(el.hasAttribute("content")).toBe(false);
     expect(warns).toEqual([META_REPORT]);
     scope.dispose?.();
@@ -276,7 +353,7 @@ describe("runtime — `rt.attr` never writes a page-navigating <meta> from data"
   test("a `content` after a refused data `http-equiv` on the same <meta> is refused too (computed — fail closed)", () => {
     const el = elementOf(`<meta id="m">`, "#m");
     const scope = new rt.Scope(rt.root);
-    const { warns } = captured(() => {
+    const { errors: warns } = captured(() => {
       rt.attr(scope, el, "http-equiv", () => "refresh");
       rt.attr(scope, el, "content", () => "0;url=https://evil.example/");
     });

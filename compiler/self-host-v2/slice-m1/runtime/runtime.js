@@ -1936,6 +1936,8 @@ export function text(scope, marker, fn) {
 // names and tags compared ASCII case-insensitively:
 //   - `action` on a `<form>`, and `formaction` on any element (inert off
 //     `<button>` / `<input>` — fail closed);
+//   - `form` (the form owner) on any element — data never chooses which form
+//     a control is submitted with (S473 PA ruling, extends round 2 item 1);
 //   - `http-equiv` on a `<meta>` (data never chooses a pragma; such a
 //     `<meta>` is recorded as computed), and `content` on a `<meta>` whose
 //     `http-equiv` holds the text `refresh` anywhere (a superset of the
@@ -1951,13 +1953,15 @@ function refusedNavigationWrite(el, name) {
   let report = null;
   if (lower === "formaction" || (lower === "action" && tag === "form")) {
     report = "[scrml url-guard] refused a data-supplied form submission target (`action` on a <form>, or `formaction`): where a form's fields are sent is never chosen by data (SPEC §5.2). The attribute was removed.";
+  } else if (lower === "form") {
+    report = "[scrml url-guard] refused a data-supplied `form` owner: which form a control is submitted with is never chosen by data (SPEC §5.2). The attribute was removed.";
   } else if (tag === "meta" && (lower === "http-equiv" || (lower === "content" && metaRefreshes(el)))) {
     if (lower === "http-equiv") computedMetaEquivs.add(el);
     report = "[scrml url-guard] refused a data-supplied `http-equiv`, or `content` on a refresh <meta>: data never navigates the page (SPEC §5.2). The attribute was removed.";
   }
   if (report === null) return false;
   el.removeAttribute(name);
-  console.warn(report);
+  console.error(report);
   return true;
 }
 
