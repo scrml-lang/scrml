@@ -1,0 +1,9 @@
+// §8.1.3 item 5 (PA reading of the S472 ruling, S473): a locked `<db>` cell's edit grants never apply on the
+// client, so a type that grants edits but not `replace` is refused at the declaration.
+<program>
+    <db src="./app.db">
+        type Row:struct = { id: int, name: string }
+        <rows:Row[free, append]=(?{`SELECT id, name FROM people`}.all() !{ _ :> [] })/>
+    </db>
+    <main><p>${@rows.length}</p></main>
+</program>
