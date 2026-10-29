@@ -52,7 +52,7 @@ ${
              ATypeField, AVariant, ATypeBody, ATypeDecl, AParam, AFn, AImportName, AImport,
              AAttrValue, AAttr, AElem, ANode, ANodeK, ADeclAttr, AStateChild, ADeclChild, ADecl, AValArg, AValidator,
              AProgram, AItem, AItemK, AConst, FileAst, ADbFn, Diag, ASql,
-             AHow, AHandled, AArm, APat, ABind, AArmBody, AFail, AFor, AForHead, AIterSrc, AForBound, ALift,
+             AHow, AHandled, AArm, APat, ABind, AArmBody, AFail, AFor, AForHead, AIterSrc, AForBound, ALift, AForeign,
              ACss, ACssItem, ACssRule, ACssDecl, ACssPart, ACssRef, mkSpan, newDiag } from "./ast.scrml"
     import { Severity } from "./severity.scrml"
     import { importTarget, importsOfItems, hostImportsOfItems, hostTagOf, isStdlibPath, HostLoc, hostLocOf } from "./link.scrml"
@@ -1769,6 +1769,8 @@ ${
             } else if (a.name == "db") {
                 // s451 (U1a): read — the program's database (§8.1.1, §44.2);
                 // placePass's dbsPass checks it (E-SQL-005) and makes it a Core Db
+            } else if (a.name == "lang") {
+                st = langAttrDiag(file, a, st)
             } else if (a.name == "name") {
                 st = addDiag(st, file, a.span, "E-BOOTSTRAP-UNSUPPORTED", "`name=` on the top-level `<program>` — \"The top-level `<program>` MUST NOT have a `name=` attribute\" (§4.12.2), and the SPEC names no code for it; remove it")
             } else if (isProgramAttrName(a.name)) {
@@ -1778,6 +1780,19 @@ ${
             }
         }
         return st
+    }
+
+    // s473 — `lang=` (§4.12 table: "Declares the foreign language toolchain for
+    // `_{}` blocks in this scope"; §23.2.1). Read: it is the language of the
+    // file's foreign blocks (foreignLangOf). The bootstrap runs only the
+    // in-process ts/js form (§23.2.4a), so any other language — a sidecar
+    // toolchain — is refused here rather than ignored.
+    fn langAttrDiag(file: string, a: AAttr, st: AS) -> AS {
+        const v: string | not = quotedAttrText(a.value)
+        if (v is given) {
+            if (v == "ts" || v == "js") return st
+        }
+        return addDiag(st, file, a.span, "E-BOOTSTRAP-UNSUPPORTED", "`<program lang=…>` is " + attrValueText(a.value) + " — the bootstrap runs foreign code only in-process, for `lang=\"ts\"` / `\"js\"` (§23.2.4a); another language's toolchain (§23.2.1, a sidecar) is not in the bootstrap")
     }
 
     // §65.3.4: "Opt out via `<program reset=\"none\">` — drops the whole `reset`
@@ -1880,6 +1895,7 @@ ${
             .Sql(q: q) :> not
             .Handled(h: x) :> not
             .Template(quasis: qs) :> not
+            .Foreign(f: fb0) :> not
         }
     }
 
@@ -1917,6 +1933,7 @@ ${
             .Sql(q: q) :> { name: "", ok: false }
             .Handled(h: x) :> { name: "", ok: false }
             .Template(quasis: qs) :> { name: "", ok: false }
+            .Foreign(f: fb0) :> { name: "", ok: false }
         }
     }
 
@@ -1956,6 +1973,7 @@ ${
             .Sql(q: q) :> ""
             .Handled(h: x) :> ""
             .Template(quasis: qs) :> ""
+            .Foreign(f: fb0) :> ""
         }
     }
 
@@ -2000,6 +2018,7 @@ ${
             .Sql(q: q) :> false
             .Handled(h: x) :> false
             .Template(quasis: qs) :> false
+            .Foreign(f: fb0) :> false
         }
     }
 
@@ -2030,6 +2049,7 @@ ${
             .Sql(q: q) :> false
             .Handled(h: x) :> false
             .Template(quasis: qs) :> false
+            .Foreign(f: fb0) :> false
         }
     }
 
@@ -2108,6 +2128,7 @@ ${
             .Sql(q: q) :> ["" + sqlSigil() + "}"].concat(listReads(q.params))      // s451: a query reads (like a call)
             .Handled(h: h) :> listReads(handledKids(h))      // s451 (Ue): the subject and the arms' values
             .Template(quasis: qs, slots: ss) :> listReads(ss)      // s469: a template reads what its slots read
+            .Foreign(f: fb0) :> listReads(fb0.crossings)            // s473: a foreign block reads its crossings (§23.2.4a)
             .Name(name: n) :> []
             .Num(raw: r) :> []
             .Str(v: s) :> []
@@ -2174,6 +2195,7 @@ ${
             .Sql(q: q) :> not
             .Handled(h: x) :> not
             .Template(quasis: qs) :> not
+            .Foreign(f: fb0) :> not
         }
     }
 
@@ -2495,6 +2517,7 @@ ${
             .Sql(q: q) :> rinf(infOut("a query"), done)
             .Handled(h: x) :> rinf(infOut("a handled failable value"), done)
             .Template(quasis: qs) :> rinf(infOk(Type.Str), done)      // s469: a template is a `string` (§14.13.3); its slots are typed where it is resolved
+            .Foreign(f: fb0) :> rinf(infOut("a foreign code block (its value is an untyped JavaScript-boundary value, §23.2.4a)"), done)
         }
     }
 
@@ -3087,6 +3110,7 @@ ${
             .Sql(q: q) :> false
             .Handled(h: x) :> false
             .Template(quasis: qs) :> false
+            .Foreign(f: fb0) :> false
         }
     }
 
@@ -3417,6 +3441,7 @@ ${
             .Sql(q: q) :> -1
             .Handled(h: x) :> -1
             .Template(quasis: qs) :> -1
+            .Foreign(f: fb0) :> -1
         }
     }
 
@@ -3454,6 +3479,7 @@ ${
             .Sql(q: q) :> ""
             .Handled(h: x) :> ""
             .Template(quasis: qs) :> ""
+            .Foreign(f: fb0) :> ""
         }
     }
 
@@ -3673,6 +3699,7 @@ ${
             .Sql(q: q) :> []
             .Handled(h: x) :> []
             .Template(quasis: qs) :> []
+            .Foreign(f: fb0) :> []
         }
     }
 
@@ -3819,6 +3846,7 @@ ${
             .Sql(q: q) :> ""
             .Handled(h: x) :> ""
             .Template(quasis: qs) :> ""
+            .Foreign(f: fb0) :> ""
         }
     }
 
@@ -4132,6 +4160,7 @@ ${
             .Sql(q: q) :> not
             .Handled(h: x) :> not
             .Template(quasis: qs) :> not
+            .Foreign(f: fb0) :> not
         }
     }
 
@@ -4507,7 +4536,18 @@ ${
         if (hasErrIn(errs, d.span)) return st
         st = repeatedWordDiags(file, d, st)
         for (const a of d.mods) {
-            if (a.name == "reset-on" && !cell) {
+            // s473 (#1646 review F1): a foreign block in an opener word's value
+            // is no admitted position (§23.2.4) — whatever reads the word
+            for (const fs of foreignsInAttrValue(a.value)) {
+                st = addDiag(st, file, fs, "E-FOREIGN-004", "a foreign code block is not valid in a declaration opener's `" + a.name + "=` (§23.2.4) — its value is bound WHOLE: `const x = _={ … }=` or `return _={ … }=` in a `function` body")
+            }
+            if (isKnownOpenerWord(a.name) && a.name != "reset-on" && !isNoValue(a.value)) {
+                // s473 (#1646 review F1): `single` (§66.13.3) and the validator
+                // words (§55.1) take no `=value` — a validator's argument is its
+                // call `min(18)`; this value was read by nothing, so the bound was
+                // silently not enforced. §34 names no code for the `=` spelling.
+                st = addDiag(st, file, a.span, "E-BOOTSTRAP-UNSUPPORTED", valuedWordMessage(a.name))
+            } else if (a.name == "reset-on" && !cell) {
                 st = addDiag(st, file, a.span, "E-BOOTSTRAP-UNSUPPORTED", "`reset-on=` on `<" + d.name + ">`, a field of a declaration, is not in the bootstrap — whether a field's `reset-on=` may name a sibling field of the same instance (a per-instance reset) is OPEN (§6.8.4); it is read on a program cell")
             } else if (isPersistWord(a.name)) {
                 // s451: on a program cell, persistPass reads them (§6.14)
@@ -4604,6 +4644,22 @@ ${
             return addDiag(st, file, a.span, "E-PREPAINT-WITHOUT-PERSIST", "`prepaint` on `<" + d.name + ">`, which has no `persist=` — REFLECT pre-paints a STORED value, so it needs `persist=\"local\"` or `\"" + sessionWord() + "\"` + `key=` on the same cell (§6.14.4.2 rule 2)")
         }
         return addDiag(st, file, a.span, "E-BOOTSTRAP-UNSUPPORTED", "`" + a.name + "` on `<" + d.name + ">`, a declaration or a field of one, is not in the bootstrap — on a §66 declaration `persist=` governs the shared instance only (§6.14.1 rule 3), and its position there and per-instance keys are OPEN (O-061-9); the bootstrap persists a program cell, `let <x:T=v persist=\"local\" key=\"app.x\"/>`")
+    }
+
+    fn valuedWordMessage(w: string) -> string {
+        if (w == "single") return "`single=` — `single` is a bare modifier and takes no value (§66.13.3); the value would be ignored. Write `single`"
+        return "`" + w + "=` — the validator `" + w + "` takes its argument as a call, `" + w + "(…)` (§55.1), or none (`req`); a `=` value is no validator spelling, and the bootstrap never ignores it (the bound would silently not be enforced)"
+    }
+
+    // s473 — the foreign blocks in an attribute value, at any depth.
+    fn foreignsInAttrValue(v: AAttrValue) -> ASpan[] {
+        return match v {
+            .Bare(e: e) :> foreignsInExpr(e)
+            .Paren(e: e) :> foreignsInExpr(e)
+            .Braced(b: b) :> foreignsInBlock(b)
+            .Quoted(v: s) :> []
+            .NoValue :> []
+        }
     }
 
     fn unknownOpenerMessage(w: string) -> string {
@@ -4949,6 +5005,7 @@ ${
             .Sql(q: q) :> not
             .Handled(h: x) :> not
             .Template(quasis: qs) :> not
+            .Foreign(f: fb0) :> not
         }
     }
 
@@ -5275,6 +5332,7 @@ ${
             .Sql(q: q) :> resolveSql(env, e, q, false, st)   // s451: a query's values are bound like any expression; its facts are placePass's; (Ue) its failable rule here
             .Handled(h: h) :> resolveHandled(env, e, h, false, expected, st)   // s451 (Ue); s469 the plain-value match
             .Template(quasis: qs, slots: ss) :> resolveTemplate(env, e, ss, st)   // s469 (§14.13.3)
+            .Foreign(f: fb0) :> resolveForeign(env, e, fb0, st)                 // s473 (§23.2.4a)
         }
     }
 
@@ -5415,6 +5473,7 @@ ${
             .Sql(q: q) :> ""
             .Handled(h: x) :> ""
             .Template(quasis: qs) :> ""
+            .Foreign(f: fb0) :> ""
         }
     }
 
@@ -5781,6 +5840,7 @@ ${
             .Sql(q: q) :> ""
             .Handled(h: x) :> ""
             .Template(quasis: qs) :> ""
+            .Foreign(f: fb0) :> ""
         }
     }
 
@@ -6786,6 +6846,7 @@ ${
             .Sql(q: q) :> false
             .Handled(h: x) :> false
             .Template(quasis: qs) :> false
+            .Foreign(f: fb0) :> false
         }
     }
 
@@ -6815,6 +6876,7 @@ ${
             .Sql(q: q) :> false
             .Handled(h: x) :> false
             .Template(quasis: qs) :> false
+            .Foreign(f: fb0) :> false
         }
     }
 
@@ -6978,6 +7040,7 @@ ${
             .Sql(q: q) :> []
             .Handled(h: x) :> []
             .Template(quasis: qs) :> []
+            .Foreign(f: fb0) :> []
         }
     }
 
@@ -7037,6 +7100,7 @@ ${
             .Sql(q: q) :> []
             .Handled(h: x) :> []
             .Template(quasis: qs) :> []
+            .Foreign(f: fb0) :> []
             .Name(name: n) :> []
             .At(name: n) :> []
             .AtItem :> []
@@ -7066,6 +7130,7 @@ ${
             .Sql(q: q) :> not
             .Handled(h: x) :> not
             .Template(quasis: qs) :> not
+            .Foreign(f: fb0) :> not
             .Name(name: n) :> not
             .At(name: n) :> not
             .AtItem :> not
@@ -7144,6 +7209,7 @@ ${
             .Sql(q: q) :> not
             .Handled(h: x) :> not
             .Template(quasis: qs) :> not
+            .Foreign(f: fb0) :> not
         }
     }
 
@@ -7173,6 +7239,7 @@ ${
             .Sql(q: q) :> false
             .Handled(h: x) :> false
             .Template(quasis: qs) :> false
+            .Foreign(f: fb0) :> false
         }
     }
 
@@ -7271,6 +7338,180 @@ ${
         let t: Type | not = ry.x.ty
         if (t is not) t = rn.x.ty
         return plain(t, rn.st)
+    }
+
+    // =========================================================================
+    // s473 — §23.2 foreign code blocks: the binder's half (SPEC §23.2.4).
+    //
+    // "A `_{}` foreign code block is valid in EXACTLY THREE forms": (1) the
+    // sidecar form, a direct child of a `<program>` (a markup position —
+    // parse.scrml skipForeign); (2) "Inline value-returning form — `const x =
+    // _={ … }=` (or `let x = …` / `return _={ … }=`) in a server `function`
+    // body, with `lang="ts"`/`"js"` only"; (3) "Tool host-I/O form (S238) — a
+    // bare non-value-returning `_{}` (as well as the inline value-returning
+    // form) in the body of a top-level `function` — including `main` — of a
+    // `kind="tool"` program". "A `_{}` block in any OTHER context … SHALL be a
+    // compile error (E-FOREIGN-004)" — and dpa-004 C2, quoted there:
+    // "host-driving `_{}` is permitted ONLY in server `function` bodies — NOT
+    // `fn`/pure helpers, NOT `<cell>` initializers, NOT reactive bindings".
+    // The language (§23.2.1, §23.6): the file's `<program lang=>`, or a library
+    // file's `<foreign lang=>`; none is E-FOREIGN-003; an inline value-returning
+    // block whose language is not ts/js is E-FOREIGN-005.
+    // The block's value (§23.2.4a): "The block's OUT value is an UNOWNED foreign
+    // value. It is typed `asIs` … by DEFAULT — the compiler does NOT infer the
+    // OUT type from the opaque slice" — the resolver gives it no type; the typer
+    // gives it VType.Unknown (the bootstrap's untyped value), and a call-site
+    // annotation "STATES the intended type and overrides the default".
+    // The crossings are reads of the same-named enclosing bindings.
+    // =========================================================================
+
+    // Anywhere but the three positions below: a foreign block inside another
+    // expression (an operand, an argument, an initializer's part), or one in a
+    // position that holds no statement at all.
+    fn resolveForeign(env: Env, e: AExpr, f: AForeign, st: AS) -> RX {
+        const st1: AS = addDiag(st, env.file, e.span, "E-FOREIGN-004", "a foreign code block is not valid here — its value is bound WHOLE: `const x = _={ … }=`, `let x = _={ … }=` or `return _={ … }=` in a `function` body (§23.2.4). Bind it to a local first, then use the local")
+        return plain(not, resolveExprs(env, f.crossings, not, st1))
+    }
+
+    // `const x = _={ … }=` / `let x = …` / `return _={ … }=` (bare: false), or
+    // a foreign block that is a whole statement (bare: true).
+    fn resolveForeignAt(env: Env, e: AExpr, f: AForeign, bare: boolean, st0: AS) -> RX {
+        const st: AS = resolveExprs(env, f.crossings, not, st0)
+        const tool: boolean = fileIsTool(env.g, env.file)
+        if (!env.fx.inFn || env.inEffect) {
+            return plain(not, addDiag(st, env.file, e.span, "E-FOREIGN-004", "a foreign code block stands only in a `function` body (§23.2.4: the inline value-returning form is \"in a server `function` body\") — not in a handler, an effect, a cell initializer or a reactive binding. Move the host work into a `function` and call it"))
+        }
+        if (env.host == HostCtx.HostPure) {
+            return plain(not, addDiag(st, env.file, e.span, "E-FOREIGN-004", "a foreign code block in a `fn` body — a `fn` is pure (§48), and host-driving foreign code is permitted \"ONLY in server `function` bodies — NOT `fn`/pure helpers\" (§23.2.4, dpa-004 C2). Declare it `function`"))
+        }
+        if (bare && !tool) {
+            return plain(not, addDiag(st, env.file, e.span, "E-FOREIGN-004", "a bare foreign code block (one whose value is not bound) is valid only in a top-level `function` of a `kind=\"tool\"` program (§23.2.4 form 3, §64). Here bind its value — `const x = _={ … }=` or `return _={ … }=` (§23.2.4a) — or use a `use foreign:` sidecar (§23.4)"))
+        }
+        const lang: string | not = foreignLangOf(env.g, env.file)
+        if (lang is not) {
+            return plain(not, addDiag(st, env.file, e.span, "E-FOREIGN-003", "this foreign code block has no language — no `lang=` on the file's `<program>` (§23.2.1), and no `<foreign lang=\"…\">` in a library file (§23.6). Add `lang=\"ts\"` (or `\"js\"`) to the `<program>`"))
+        }
+        if (lang != "ts" && lang != "js") {
+            if (bare) return plain(not, addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "a `lang=\"" + lang + "\"` foreign block in a tool function — the bootstrap runs only ts/js foreign code in-process"))
+            return plain(not, addDiag(st, env.file, e.span, "E-FOREIGN-005", "an inline value-returning foreign block is supported only for `lang=\"ts\"` / `\"js\"`, and this one's language is `" + lang + "` (§23.2.4a: arbitrary-language inline value-flow has no runtime model yet) — use a `use foreign:` sidecar for an out-of-process `" + lang + "` service (§23.4)"))
+        }
+        // Admitted, checked — and not emitted: the bootstrap has no lowering
+        // for the §23.2.3 CG contract (the slice built once as an async
+        // function in a SEALED scope of its crossings, called with their
+        // values behind a codegen-injected `await`, server-side only), nor the
+        // pre-emit checks that ride on it (E-FOREIGN-006 / E-FOREIGN-007).
+        // Refused by name, never printed wrong.
+        return plain(not, addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", foreignEmitMsg()))
+    }
+
+    fn foreignEmitMsg() -> string {
+        return "a foreign code block — read and checked (§23.2.4), but its emission (a sealed, server-side slice of its `in:{}` crossings, awaited at the boundary, §23.2.3 / §23.2.4a) is not in the bootstrap yet"
+    }
+
+    fn foreignOf(e: AExpr) -> AForeign | not {
+        const k: AExprK = e.k
+        return match k {
+            .Foreign(f: f) :> f
+            .Name(name: n) :> not
+            .At(name: n) :> not
+            .AtItem :> not
+            .Num(raw: r) :> not
+            .Str(v: s) :> not
+            .Bool(v: b) :> not
+            .NotLit :> not
+            .Recovered :> not
+            .Variant(name: n) :> not
+            .Member(obj: o) :> not
+            .Call(callee: c) :> not
+            .Unary(op: o) :> not
+            .Binary(op: o) :> not
+            .Ternary(test: t) :> not
+            .Assign(target: t) :> not
+            .ArrayLit(elems: es) :> not
+            .ObjectLit(props: ps) :> not
+            .Spread(e: x) :> not
+            .Index(obj: o) :> not
+            .Lambda(params: ps) :> not
+            .Sql(q: q) :> not
+            .Handled(h: x) :> not
+            .Template(quasis: qs) :> not
+        }
+    }
+
+    // §23.2.1 / §23.6: the language a file's foreign blocks resolve to — its
+    // top-level `<program lang=>`, else (a library file) its top-level
+    // `<foreign lang=>`. A non-literal `lang=` resolves nothing.
+    fn foreignLangOf(g: Globals, file: string) -> string | not {
+        for (const fa of g.files) {
+            if (fa.path == file) return itemsLang(fa.items)
+        }
+        return not
+    }
+
+    fn itemsLang(items: AItem[]) -> string | not {
+        for (const it of items) {
+            const p: AProgram | not = programOfItem(it)
+            if (p is given) return quotedAttr(p.attrs, "lang")
+        }
+        for (const it of items) {
+            const fe: AElem | not = foreignElemOf(it)
+            if (fe is given) return quotedAttr(fe.attrs, "lang")
+        }
+        return not
+    }
+
+    fn quotedAttr(attrs: AAttr[], name: string) -> string | not {
+        const a: AAttr | not = attrNamed(attrs, name)
+        if (a is not) return not
+        return quotedAttrText(a.value)
+    }
+
+    // Is `file`'s top-level `<program>` a `kind="tool"` program (§64)?
+    fn fileIsTool(g: Globals, file: string) -> boolean {
+        for (const fa of g.files) {
+            if (fa.path == file) {
+                for (const it of fa.items) {
+                    const p: AProgram | not = programOfItem(it)
+                    if (p is given) {
+                        const k: string | not = quotedAttr(p.attrs, "kind")
+                        if (k is given) return k == "tool"
+                        return false
+                    }
+                }
+            }
+        }
+        return false
+    }
+
+    fn foreignElemOf(it: AItem) -> AElem | not {
+        const k: AItemK = it.k
+        return match k {
+            .MarkupItem(n: n) :> foreignElemNode(n)
+            .ProgramItem(p: x) :> not
+            .ImportItem(i: x) :> not
+            .TypeItem(t: x) :> not
+            .FnItem(f: x) :> not
+            .DeclItem(d: x) :> not
+            .ConstItem(c: x) :> not
+        }
+    }
+
+    fn foreignElemNode(n: ANode) -> AElem | not {
+        const k: ANodeK = n.k
+        return match k {
+            .Elem(e: e) :> foreignTagged(e)
+            .Text(text: t) :> not
+            .Interp(e: x) :> not
+            .DeclNode(d: x) :> not
+            .Effect(w: x) :> not
+            .Css(c: x) :> not
+            .Gather(f: x) :> not
+        }
+    }
+
+    fn foreignTagged(e: AElem) -> AElem | not {
+        if (e.tag == "foreign") return e
+        return not
     }
 
     // s469 — a logic backtick template (SPEC §14.13.3): "an expression of type
@@ -7413,6 +7654,7 @@ ${
             .Sql(q: q) :> noPlace(addDiag(st, env.file, t.span, "E-ASSIGN-TARGET", "not a writable place"))
             .Handled(h: x) :> noPlace(addDiag(st, env.file, t.span, "E-ASSIGN-TARGET", "not a writable place"))
             .Template(quasis: qs) :> noPlace(addDiag(st, env.file, t.span, "E-ASSIGN-TARGET", "not a writable place"))
+            .Foreign(f: fb0) :> noPlace(addDiag(st, env.file, t.span, "E-ASSIGN-TARGET", "not a writable place"))
         }
     }
 
@@ -7573,6 +7815,7 @@ ${
             .Sql(q: q) :> ""
             .Handled(h: x) :> ""
             .Template(quasis: qs) :> ""
+            .Foreign(f: fb0) :> ""
         }
     }
 
@@ -7948,6 +8191,7 @@ ${
             .Sql(q: q) :> false
             .Handled(h: x) :> false
             .Template(quasis: qs) :> false
+            .Foreign(f: fb0) :> false
             .Name(name: n) :> false
             .At(name: n) :> false
             .AtItem :> false
@@ -8009,6 +8253,7 @@ ${
             .Sql(q: q) :> ""
             .Handled(h: x) :> ""
             .Template(quasis: qs) :> ""
+            .Foreign(f: fb0) :> ""
         }
     }
 
@@ -8090,6 +8335,7 @@ ${
             .Sql(q: q) :> []
             .Handled(h: x) :> []
             .Template(quasis: qs) :> []
+            .Foreign(f: fb0) :> []
             .Name(name: n) :> []
             .At(name: n) :> []
             .AtItem :> []
@@ -8171,6 +8417,7 @@ ${
             .Sql(q: q) :> resolveSql(withWhole(env, e.nid), e, q, true, st).st
             .Handled(h: h) :> resolveHandled(withWhole(env, e.nid), e, h, true, not, st).st   // s451 (Ue)
             .Template(quasis: qs) :> resolveExpr(env, e, not, st).st
+            .Foreign(f: fb0) :> resolveForeignAt(env, e, fb0, true, st).st      // s473: a bare foreign block (§23.2.4 form 3)
         }
     }
 
@@ -8228,6 +8475,7 @@ ${
             .Sql(q: q) :> not
             .Handled(h: x) :> not
             .Template(quasis: qs) :> not
+            .Foreign(f: fb0) :> not
         }
     }
 
@@ -8680,6 +8928,7 @@ ${
             .Sql(q: q) :> false
             .Handled(h: x) :> false
             .Template(quasis: qs) :> false
+            .Foreign(f: fb0) :> false
         }
     }
 
@@ -9066,6 +9315,7 @@ ${
             .Sql(q: q) :> []
             .Handled(h: x) :> []
             .Template(quasis: qs) :> []
+            .Foreign(f: fb0) :> []
         }
     }
 
@@ -9095,6 +9345,7 @@ ${
             .Sql(q: q) :> not
             .Handled(h: x) :> not
             .Template(quasis: qs) :> not
+            .Foreign(f: fb0) :> not
         }
     }
 
@@ -9125,6 +9376,7 @@ ${
             .Sql(q: q) :> not
             .Handled(h: x) :> not
             .Template(quasis: qs) :> not
+            .Foreign(f: fb0) :> not
         }
     }
 
@@ -9154,6 +9406,7 @@ ${
             .Sql(q: q) :> not
             .Handled(h: x) :> not
             .Template(quasis: qs) :> not
+            .Foreign(f: fb0) :> not
         }
     }
 
@@ -9275,6 +9528,7 @@ ${
             .Sql(q: q) :> false
             .Handled(h: x) :> false
             .Template(quasis: qs) :> false
+            .Foreign(f: fb0) :> false
         }
     }
 
@@ -9386,6 +9640,7 @@ ${
             .Sql(q: q) :> not
             .Handled(h: x) :> not
             .Template(quasis: qs) :> not
+            .Foreign(f: fb0) :> not
         }
     }
 
@@ -9415,6 +9670,7 @@ ${
             .Sql(q: q) :> not
             .Handled(h: x) :> not
             .Template(quasis: qs) :> not
+            .Foreign(f: fb0) :> not
         }
     }
 
@@ -9526,6 +9782,7 @@ ${
             .Sql(q: q) :> not
             .Handled(h: x) :> not
             .Template(quasis: qs) :> not
+            .Foreign(f: fb0) :> not
         }
     }
 
@@ -9612,6 +9869,7 @@ ${
             .Sql(q: q) :> not
             .Handled(h: x) :> not
             .Template(quasis: qs) :> not
+            .Foreign(f: fb0) :> not
         }
     }
 
@@ -9644,6 +9902,7 @@ ${
             .Sql(q: q) :> []
             .Handled(h: x) :> []
             .Template(quasis: qs) :> []
+            .Foreign(f: fb0) :> []
         }
     }
 
@@ -9829,7 +10088,7 @@ ${
         return match k {
             .Eval(e: e) :> keepEnv(env, resolveStmtExpr(env, e, st))
             .Local(name: n, mutable: m, ty: y, init: i) :> resolveLocal(env, s, n, m, y, i, st)
-            .Return(e: e) :> keepEnv(env, resolveMaybeExpr(env, e, st))
+            .Return(e: e) :> keepEnv(env, resolveReturnExpr(env, e, st))
             .Fail(f: f) :> keepEnv(env, resolveFail(env, s, f, st))       // s451 (Ue, §19.3)
             .If(cond: c, thenB: t, elseB: el) :> keepEnv(env, resolveIf(env, c, t, el, st))
             .Given(name: n, subject: sub, body: b) :> keepEnv(env, resolveGiven(env, s, n, sub, b, st))
@@ -10685,6 +10944,7 @@ ${
             .Sql(q: q) :> litOf(0, "")
             .Handled(h: hx) :> litOf(0, "")
             .Template(quasis: qs) :> litOf(0, "")
+            .Foreign(f: fb0) :> litOf(0, "")
         }
     }
 
@@ -11231,6 +11491,7 @@ ${
             .Sql(q: q) :> ""
             .Handled(h: x) :> ""
             .Template(quasis: qs) :> ""
+            .Foreign(f: fb0) :> ""
         }
         if (lit != "") return lit
         const pk: string = placeKey(e)
@@ -11988,6 +12249,15 @@ ${
 
     // `let a[: T] = init`. An annotation is the local's type (and the
     // initializer's expected type); it is recorded in `Tables.annots`.
+    // s473: `return _={ … }=` is a foreign block's bound form (§23.2.4)
+    fn resolveReturnExpr(env: Env, e: AExpr | not, st: AS) -> AS {
+        if (e is given) {
+            const f: AForeign | not = foreignOf(e)
+            if (f is given) return resolveForeignAt(env, e, f, false, st).st
+        }
+        return resolveMaybeExpr(env, e, st)
+    }
+
     fn resolveLocal(env: Env, s: AStmt, name: string, mutable: boolean, aty: AType | not, init: AExpr, st0: AS) -> RB {
         let st: AS = st0
         let annot: Type | not = not
@@ -11998,7 +12268,13 @@ ${
             if (!rt.unresolved) annot = rt.t
             st = rt.st
         }
-        const ri: RX = resolveExpr(withWholeAt(env, init.nid, "the initializer of `" + name + "`"), init, annot, st)
+        let ri: RX = plain(not, st)
+        const fi: AForeign | not = foreignOf(init)
+        if (fi is given) {
+            ri = resolveForeignAt(env, init, fi, false, st)      // s473: `const x = _={ … }=` (§23.2.4)
+        } else {
+            ri = resolveExpr(withWholeAt(env, init.nid, "the initializer of `" + name + "`"), init, annot, st)
+        }
         const rs: RSym = mint(ri.st, name)
         st = addBind(rs.st, s.nid, BindFact.BBind(rs.s))
         let lty: Type | not = ri.x.ty
@@ -12115,6 +12391,7 @@ ${
         const lr: LiftsOf = liftsInto(st, n0, rs.s)
         if (lr.count == 0 || !liftReachable(f.body)) st = addDiag(st, env.file, f.span, "E-LOOP-007", "The loop bound to `" + b.name + "` lifts nothing on any path, so its value is always an empty tape. Add `lift <value>;` where the loop produces an element, or write the loop as a statement (§49.4.4, §49.6)")
         if (boundLoopExitless(f)) st = addDiag(st, env.file, f.span, "E-LOOP-008", "The loop bound to `" + b.name + "` never ends: its head never stops it, and no path in its body reaches a `break` that leaves it, a `return`, a `fail` or a `?` — so its value is never produced and this code never continues (a `break` inside an inner loop leaves only that loop). Add `if (<done>) { break; }` where the loop has lifted its last element, or give it a head that ends (`for (x of xs)`, `for (cond)`) (§49.6 rule 10)")
+        if (boundLoopStranded(f)) st = addDiag(st, env.file, f.span, "E-LOOP-008", "The loop bound to `" + b.name + "` never finishes an iteration: every path through its body runs into an inner loop that never ends (`for { }`, `for (;;)`, `for (true)` with no `break` of its own), and no path reaches a `continue` of this loop, a `break` that leaves it, a `return`, a `fail` or a `?` — so its value is never produced and this code never continues. Give the inner loop a `break` (`if (<done>) { break; }`), or leave this loop from it (`break <label>`, `continue <label>`) (§49.6 rule 10, S473)")
         let lty: Type | not = lr.elem
         if (lty is given) lty = Type.Seq(lty, fixedSeq())
         if (annot is given) lty = annot
@@ -12381,6 +12658,7 @@ ${
         st = resolveFor(withLift(env, LiftCtx.LiftTo(rs.s, true)), fs, f, st)
         if (liftsInto(st, n0, rs.s).count == 0 || !liftReachable(f.body)) st = addDiag(st, env.file, f.span, "E-LOOP-007", "This `" + "$" + "{ for … }` loop lifts nothing, so it always renders nothing. Add `lift <li>…</li>;` (or `lift <value>;`) where the loop produces a row, or compute the loop in a function (§17.4, §49.4.4)")
         if (boundLoopExitless(f)) st = addDiag(st, env.file, f.span, "E-LOOP-008", "This `" + "$" + "{ for … }` loop never ends: its head never stops it, and no path in its body reaches a `break` that leaves it — so the page never finishes rendering (a `break` inside an inner loop leaves only that loop). Add `if (<done>) { break; }` after the last row, or give it a head that ends (`for (x of xs)`, `for (cond)`) (§49.6 rule 10, §17.4)")
+        if (boundLoopStranded(f)) st = addDiag(st, env.file, f.span, "E-LOOP-008", "This `" + "$" + "{ for … }` loop never finishes a row: every path through its body runs into an inner loop that never ends (`for { }`, `for (;;)`, `for (true)` with no `break` of its own), and no path reaches a `continue` of this loop or a `break` that leaves it — so the page never finishes rendering. Give the inner loop a `break` (`if (<done>) { break; }`), or leave this loop from it (`break <label>`, `continue <label>`) (§49.6 rule 10, §17.4, S473)")
         for (const rsite of returnSites(f.body)) {
             st = addDiag(st, env.file, f.span, "E-BOOTSTRAP-UNSUPPORTED", "a `return` inside a `" + "$" + "{ for … }` in markup has no function to leave (§49.6 rule 6 names a function's exits; a render position has none) — compute the loop in a function and render its result")
         }
@@ -12823,7 +13101,73 @@ ${
     // =========================================================================
     fn boundLoopExitless(f: AFor) -> boolean {
         if (!headNeverEnds(f.head)) return false
-        return !blockWayOut(f.body, f.label, true)
+        return !blockWayOut(f.body, f.label, true, false)
+    }
+
+    // s473 — RULED S473 "owner questions round 2, PA recs" item 4: "The
+    // exit-less loop rule (E-LOOP-008) widens to catch an inner forever loop."
+    // A bound loop whose head DOES end it (`for (x of xs)`, `for (cond)`, a
+    // counted head with a condition) still never produces its value when no
+    // path through its body finishes an iteration: every path runs into a
+    // statement that ends it (stmtEndsPath) and none reaches a `continue` of
+    // this loop or a way out of it. Such a statement is either an inner loop
+    // that never completes (loopNeverCompletes: a forever head no `break`
+    // leaves) — the inner-forever strand (review #1631 F3: `for (y of ys) {
+    // lift y; for { } }` hung) — or a labelled `break` / `continue` that
+    // crosses this loop to a loop outside it, which is already E-LOOP-005
+    // (or E-LOOP-003): a bound loop is a wall (§49.6 rule 6). With such a
+    // crossing exit anywhere in the body this check stays quiet, so the
+    // refused program gets that one error, not a second one naming an inner
+    // loop that may not exist (review #1638 F2). A forever head is
+    // boundLoopExitless's, so the two never both fire.
+    fn boundLoopStranded(f: AFor) -> boolean {
+        if (headNeverEnds(f.head)) return false
+        if (!blockEndsPath(f.body)) return false
+        if (blockCrossesOut(f.body, [f.label])) return false
+        return !blockWayOut(f.body, f.label, true, true)
+    }
+
+    // Does `b` hold a labelled `break` / `continue` naming no loop in `owned`
+    // (this loop and the loops inside it, at any depth)? Reachability is not
+    // read: every such exit is an error of its own (E-LOOP-005 / -003), so
+    // staying quiet here never lets a program compile.
+    fn blockCrossesOut(b: ABlock, owned: string[]) -> boolean {
+        for (const s of b.stmts) {
+            if (stmtCrossesOut(s, owned)) return true
+        }
+        return false
+    }
+
+    fn stmtCrossesOut(s: AStmt, owned: string[]) -> boolean {
+        const k: AStmtK = s.k
+        return match k {
+            .Break(label: l) :> l != "" && !labelOwned(l, owned)
+            .Continue(label: l) :> l != "" && !labelOwned(l, owned)
+            .For(f: lf) :> blockCrossesOut(lf.body, owned.concat([lf.label]))
+            .Lift(what: w) :> blocksCrossOut(nestedBlocks(s), owned)
+            .Eval(e: x) :> blocksCrossOut(nestedBlocks(s), owned)
+            .Local(name: n) :> blocksCrossOut(nestedBlocks(s), owned)
+            .Return(e: x) :> blocksCrossOut(nestedBlocks(s), owned)
+            .If(cond: c) :> blocksCrossOut(nestedBlocks(s), owned)
+            .Given(name: n) :> blocksCrossOut(nestedBlocks(s), owned)
+            .Defer(body: d) :> blockCrossesOut(d, owned)
+            .EffectStmt(w: w) :> false
+            .Fail(f: x) :> false
+        }
+    }
+
+    fn blocksCrossOut(bs: ABlock[], owned: string[]) -> boolean {
+        for (const b of bs) {
+            if (blockCrossesOut(b, owned)) return true
+        }
+        return false
+    }
+
+    fn labelOwned(l: string, owned: string[]) -> boolean {
+        for (const o of owned) {
+            if (o == l) return true
+        }
+        return false
     }
 
     fn headNeverEnds(h: AForHead) -> boolean {
@@ -12866,6 +13210,7 @@ ${
             .Sql(q: q) :> false
             .Handled(h: h) :> false
             .Template(quasis: qs) :> false
+            .Foreign(f: fb0) :> false
         }
     }
 
@@ -12895,37 +13240,40 @@ ${
             .Sql(q: q) :> false
             .Handled(h: h) :> false
             .Template(quasis: qs) :> false
+            .Foreign(f: fb0) :> false
         }
     }
 
     // Does a path through `b` reach a way out of the loop labelled `label`
-    // (`direct`: `b` is that loop's own body, not an inner loop's)?
-    fn blockWayOut(b: ABlock, label: string, direct: boolean) -> boolean {
+    // (`direct`: `b` is that loop's own body, not an inner loop's)? With
+    // `cont`, a `continue` of that loop counts too: it finishes the iteration
+    // (boundLoopStranded — an ending head then gets to stop the loop).
+    fn blockWayOut(b: ABlock, label: string, direct: boolean, cont: boolean) -> boolean {
         for (const s of b.stmts) {
-            if (stmtWayOut(s, label, direct)) return true
+            if (stmtWayOut(s, label, direct, cont)) return true
             if (stmtEndsPath(s)) return false
         }
         return false
     }
 
-    fn blockWayOutMaybe(b: ABlock | not, label: string, direct: boolean) -> boolean {
+    fn blockWayOutMaybe(b: ABlock | not, label: string, direct: boolean, cont: boolean) -> boolean {
         if (b is not) return false
-        return blockWayOut(b, label, direct)
+        return blockWayOut(b, label, direct, cont)
     }
 
-    fn stmtWayOut(s: AStmt, label: string, direct: boolean) -> boolean {
+    fn stmtWayOut(s: AStmt, label: string, direct: boolean, cont: boolean) -> boolean {
         const k: AStmtK = s.k
         return match k {
             .Break(label: l) :> (l == "" && direct) || (l != "" && l == label)
-            .Continue(label: l) :> false
+            .Continue(label: l) :> cont && ((l == "" && direct) || (l != "" && l == label))
             .Return(e: x) :> true
             .Fail(f: x) :> true
-            .Eval(e: e) :> exprWayOut(e, label, direct)
-            .Local(name: n, init: i) :> exprWayOut(i, label, direct)
-            .Lift(what: w) :> exprsWayOut(liftExprs(w), label, direct)
-            .If(cond: c, thenB: t, elseB: el) :> exprWayOut(c, label, direct) || blockWayOut(t, label, direct) || blockWayOutMaybe(el, label, direct)
-            .Given(name: n, subject: x, body: gb) :> exprWayOut(x, label, direct) || blockWayOut(gb, label, direct)
-            .For(f: lf) :> exprsWayOut(forExprs(lf), label, false) || blockWayOut(lf.body, label, false)
+            .Eval(e: e) :> exprWayOut(e, label, direct, cont)
+            .Local(name: n, init: i) :> exprWayOut(i, label, direct, cont)
+            .Lift(what: w) :> exprsWayOut(liftExprs(w), label, direct, cont)
+            .If(cond: c, thenB: t, elseB: el) :> exprWayOut(c, label, direct, cont) || blockWayOut(t, label, direct, cont) || blockWayOutMaybe(el, label, direct, cont)
+            .Given(name: n, subject: x, body: gb) :> exprWayOut(x, label, direct, cont) || blockWayOut(gb, label, direct, cont)
+            .For(f: lf) :> exprsWayOut(forExprs(lf), label, false, cont) || blockWayOut(lf.body, label, false, cont)
             .EffectStmt(w: w) :> false
             .Defer(body: d) :> false
         }
@@ -12933,21 +13281,21 @@ ${
 
     // A `?` reached in the expression (it leaves the function), or a way out
     // in one of its handling arms' blocks — never through an arrow function.
-    fn exprWayOut(e: AExpr, label: string, direct: boolean) -> boolean {
+    fn exprWayOut(e: AExpr, label: string, direct: boolean, cont: boolean) -> boolean {
         if (lambdaBody(e) is given) return false
         const h: AHandled | not = handledOf(e.k)
         if (h is given) {
             if (howPropagates(h.how)) return true
             for (const b of exprBlocks(e)) {
-                if (blockWayOut(b, label, direct)) return true
+                if (blockWayOut(b, label, direct, cont)) return true
             }
         }
-        return exprsWayOut(exprKids(e), label, direct)
+        return exprsWayOut(exprKids(e), label, direct, cont)
     }
 
-    fn exprsWayOut(es: AExpr[], label: string, direct: boolean) -> boolean {
+    fn exprsWayOut(es: AExpr[], label: string, direct: boolean, cont: boolean) -> boolean {
         for (const x of es) {
-            if (exprWayOut(x, label, direct)) return true
+            if (exprWayOut(x, label, direct, cont)) return true
         }
         return false
     }
@@ -13450,6 +13798,7 @@ ${
             .Sql(q: q) :> false
             .Handled(h: x) :> false
             .Template(quasis: qs) :> false
+            .Foreign(f: fb0) :> false
         }
     }
 
@@ -15330,6 +15679,7 @@ ${
             .Sql(q: q) :> false
             .Handled(h: x) :> false
             .Template(quasis: qs) :> false
+            .Foreign(f: fb0) :> false
         }
     }
 
@@ -15638,6 +15988,7 @@ ${
             .Sql(q: x) :> false
             .Handled(h: x) :> false
             .Template(quasis: x) :> false
+            .Foreign(f: fb0) :> false
         }
     }
 
@@ -15661,6 +16012,7 @@ ${
             .Binary(op: o, l: l, r: r) :> binaryBlocker(e, o, l, r)
             .Ternary(test: t, yes: y, no: n) :> firstBlocker([t, y, n])
             .Template(quasis: q, slots: ss) :> firstBlocker(ss)
+            .Foreign(f: fb0) :> not      // s473: the binder's E-FOREIGN-004 (§23.2.4), not this refusal
             .At(name: n) :> e
             .AtItem :> e
             .Call(callee: c) :> e
@@ -15715,6 +16067,7 @@ ${
             .Unary(op: o) :> "an operator"
             .Ternary(test: t) :> "a conditional"
             .Template(quasis: q) :> "a template"
+            .Foreign(f: fb0) :> "a foreign code block"
         }
     }
 
@@ -15754,6 +16107,7 @@ ${
             .Sql(q: x) :> false
             .Handled(h: x) :> false
             .Template(quasis: x) :> false
+            .Foreign(f: fb0) :> false
         }
         if (variant) return "a call or a payload-variant value (a file-scope payload-variant constant is not in the bootstrap yet)"
         return "a call"
@@ -16828,6 +17182,7 @@ ${
             .Sql(q: q) :> ""
             .Handled(h: x) :> ""
             .Template(quasis: qs) :> ""
+            .Foreign(f: fb0) :> ""
         }
     }
 
@@ -16871,6 +17226,7 @@ ${
             .Sql(q: q) :> false
             .Handled(h: x) :> false
             .Template(quasis: qs) :> false
+            .Foreign(f: fb0) :> false
         }
     }
 
@@ -16901,6 +17257,7 @@ ${
             .Sql(q: q) :> noNarrowing()
             .Handled(h: x) :> noNarrowing()
             .Template(quasis: qs) :> noNarrowing()
+            .Foreign(f: fb0) :> noNarrowing()
         }
     }
 
@@ -17025,6 +17382,7 @@ ${
             .Sql(q: q) :> q.params
             .Handled(h: h) :> handledKids(h)      // s451 (Ue): the subject, then each expression arm (block arms: exprBlocks)
             .Template(quasis: qs, slots: ss) :> ss      // s469: the slots, left to right
+            .Foreign(f: fb0) :> fb0.crossings           // s473: the crossings, left to right
             .Name(name: n) :> []
             .At(name: n) :> []
             .AtItem :> []
@@ -17131,6 +17489,7 @@ ${
             .Sql(q: q) :> []
             .Handled(h: x) :> []
             .Template(quasis: qs) :> []
+            .Foreign(f: fb0) :> []
         }
     }
 
@@ -18206,6 +18565,7 @@ ${
             .Sql(q: q) :> -1
             .Handled(h: x) :> -1
             .Template(quasis: qs) :> -1
+            .Foreign(f: fb0) :> -1
         }
     }
 
@@ -18320,6 +18680,7 @@ ${
             .Lambda(params: ps2, body: b) :> typeLambda(env, e, b, ts)
             .Handled(h: h) :> typeHandled(env, e, h, ts)   // s451 (Ue)
             .Template(quasis: qs, slots: ss) :> typeTemplate(env, ss, ts)   // s469 (§14.13.3)
+            .Foreign(f: fb0) :> typeForeign(env, fb0, ts)                  // s473 (§23.2.4a)
             .Sql(q: q) :> rvt(VType.Unknown, typeExprList(env, q.params, ts))   // s451: no row type yet (§14.8 schema types are not in the bootstrap)
         }
     }
@@ -18924,6 +19285,7 @@ ${
             .Sql(q: q) :> []
             .Handled(h: x2) :> []
             .Template(quasis: qs) :> []
+            .Foreign(f: fb0) :> []
         }
     }
 
@@ -18972,6 +19334,7 @@ ${
             .Sql(q: q) :> ts
             .Handled(h: x) :> ts
             .Template(quasis: qs) :> ts
+            .Foreign(f: fb0) :> ts
         }
     }
 
@@ -19059,6 +19422,7 @@ ${
             .Sql(q: q) :> false
             .Handled(h: x2) :> false
             .Template(quasis: qs) :> false
+            .Foreign(f: fb0) :> false
         }
     }
 
@@ -19111,6 +19475,7 @@ ${
             .Sql(q: q) :> false
             .Handled(h: x) :> false
             .Template(quasis: qs) :> false
+            .Foreign(f: fb0) :> false
         }
     }
 
@@ -19271,6 +19636,20 @@ ${
             ts = textSlot(env, s, r.vt, r.ts)
         }
         return rvt(known(Type.Str), ts)
+    }
+
+    // s473 — a §23.2 foreign block (§23.2.4a): "The block's OUT value is an
+    // UNOWNED foreign value. It is typed `asIs` … by DEFAULT — the compiler
+    // does NOT infer the OUT type from the opaque slice". The bootstrap has no
+    // `asIs`; its untyped value is VType.Unknown, which every rule that judges
+    // an unresolved value already refuses — a condition (E-COND-NOT-BOOLEAN,
+    // §42.4 statement 5: "a value that crosses the JavaScript boundary with no
+    // scrml type"), a text sink (E-TEXT-NON-PRIMITIVE), an operator. Only the
+    // crossings are typed: each is a read like any other.
+    fn typeForeign(env: TEnv, f: AForeign, ts0: TypeState) -> RVT {
+        let ts: TypeState = ts0
+        for (const x of f.crossings) { ts = typeExpr(env, x, ts).ts }
+        return rvt(VType.Unknown, ts)
     }
 
     fn textSlot(env: TEnv, s: AExpr, v: VType, ts: TypeState) -> TypeState {
@@ -20003,6 +20382,7 @@ ${
             .Sql(q: q) :> not
             .Handled(h: x) :> not
             .Template(quasis: qs) :> not
+            .Foreign(f: fb0) :> not
         }
     }
 
@@ -20033,6 +20413,7 @@ ${
             .Sql(q: q) :> ""
             .Handled(h: x) :> ""
             .Template(quasis: qs) :> ""
+            .Foreign(f: fb0) :> ""
         }
     }
 
@@ -20221,6 +20602,7 @@ ${
             .Sql(q: q) :> typeExpr(env, e, ts).ts
             .Handled(h: x) :> typeExpr(env, e, ts).ts
             .Template(quasis: qs) :> typeExpr(env, e, ts).ts
+            .Foreign(f: fb0) :> typeExpr(env, e, ts).ts
         }
     }
 
@@ -20466,6 +20848,7 @@ ${
             .Sql(q: q) :> not
             .Handled(h: x) :> not
             .Template(quasis: qs) :> not
+            .Foreign(f: fb0) :> not
         }
     }
 
@@ -20520,6 +20903,7 @@ ${
             .Sql(q: q) :> ts
             .Handled(h: x) :> ts
             .Template(quasis: qs) :> ts
+            .Foreign(f: fb0) :> ts
             .ArrayLit(elems: es) :> checkLitList(env, es, ts)
             .Ternary(test: x, yes: y, no: n) :> checkLitFields(env, n, checkLitFields(env, y, ts))
             .Name(name: n) :> ts
@@ -21501,6 +21885,7 @@ ${
             .Sql(q: q) :> ""
             .Handled(h: x) :> ""
             .Template(quasis: qs) :> ""
+            .Foreign(f: fb0) :> ""
         }
     }
 
@@ -21531,6 +21916,7 @@ ${
             .Sql(q: q) :> []
             .Handled(h: x) :> []
             .Template(quasis: qs) :> []
+            .Foreign(f: fb0) :> []
         }
     }
 
@@ -21562,6 +21948,7 @@ ${
             .Sql(q: q) :> ""
             .Handled(h: x) :> ""
             .Template(quasis: qs) :> ""
+            .Foreign(f: fb0) :> ""
         }
     }
 
@@ -21679,6 +22066,7 @@ ${
             .Sql(q: q) :> not
             .Handled(h: x) :> not
             .Template(quasis: qs) :> not
+            .Foreign(f: fb0) :> not
         }
     }
 
@@ -21708,6 +22096,7 @@ ${
             .Sql(q: q) :> not
             .Handled(h: x) :> not
             .Template(quasis: qs) :> not
+            .Foreign(f: fb0) :> not
         }
     }
 
@@ -21739,6 +22128,7 @@ ${
             .Sql(q: q) :> ""
             .Handled(h: x) :> ""
             .Template(quasis: qs) :> ""
+            .Foreign(f: fb0) :> ""
         }
     }
 
@@ -22340,6 +22730,7 @@ ${
             .Sql(q: q) :> not
             .Handled(h: x) :> not
             .Template(quasis: qs) :> not
+            .Foreign(f: fb0) :> not
         }
     }
 
@@ -22896,6 +23287,7 @@ ${
         sym: int, name: string, file: string, span: ASpan, nid: int,
         modifier: boolean, failable: boolean,
         sqls: SqlSite[], reads: CellUse[], doms: CellUse[], scan: BodyScan,
+        foreigns: ASpan[],      // s473: its foreign blocks (§23.2.4: "an inline `_{}` escalates its enclosing function to the server boundary")
     }
     // A chain from a function down to a site (display labels, outermost first).
     type Reach:struct = { chain: string[], what: string }
@@ -22928,6 +23320,57 @@ ${
             .Defer(body: b) :> sqlsInBlock(b)
             .Fail(f: f) :> sqlsInExprs(failExprs(f))
         }
+    }
+
+    // s473 — every foreign block in a body, at any depth (§23.2.4: a foreign
+    // block makes its function a server function). One walk over the body's
+    // expressions; exprKids / exprBlocks descend.
+    fn foreignsInBlock(b: ABlock) -> ASpan[] {
+        let out: ASpan[] = []
+        for (const s of b.stmts) { out = out.concat(foreignsInStmt(s)) }
+        return out
+    }
+
+    fn foreignsInStmt(s: AStmt) -> ASpan[] {
+        const k: AStmtK = s.k
+        return match k {
+            .Eval(e: e) :> foreignsInExpr(e)
+            .Local(name: n, init: i) :> foreignsInExpr(i)
+            .Return(e: e) :> foreignsInMaybe(e)
+            .If(cond: c, thenB: tb, elseB: eb) :> foreignsInExpr(c).concat(foreignsInBlock(tb)).concat(foreignsInMaybeBlock(eb))
+            .Given(name: n, subject: x, body: b) :> foreignsInExpr(x).concat(foreignsInBlock(b))
+            .For(f: lf) :> foreignsInExprs(forExprs(lf)).concat(foreignsInBlock(lf.body))
+            .Break(label: x) :> []
+            .Continue(label: x) :> []
+            .Lift(what: w) :> foreignsInExprs(liftExprs(w))
+            .EffectStmt(w: w) :> foreignsInBlock(w.body)
+            .Defer(body: b) :> foreignsInBlock(b)
+            .Fail(f: f) :> foreignsInExprs(failExprs(f))
+        }
+    }
+
+    fn foreignsInMaybe(e: AExpr | not) -> ASpan[] {
+        if (e is not) return []
+        return foreignsInExpr(e)
+    }
+
+    fn foreignsInMaybeBlock(b: ABlock | not) -> ASpan[] {
+        if (b is not) return []
+        return foreignsInBlock(b)
+    }
+
+    fn foreignsInExpr(e: AExpr) -> ASpan[] {
+        let out: ASpan[] = []
+        if (foreignOf(e) is given) out = [e.span]
+        for (const x of exprKids(e)) { out = out.concat(foreignsInExpr(x)) }
+        for (const b of exprBlocks(e)) { out = out.concat(foreignsInBlock(b)) }
+        return out
+    }
+
+    fn foreignsInExprs(es: AExpr[]) -> ASpan[] {
+        let out: ASpan[] = []
+        for (const x of es) { out = out.concat(foreignsInExpr(x)) }
+        return out
     }
 
     fn sqlsInMaybe(e: AExpr | not) -> SqlSite[] {
@@ -22970,6 +23413,7 @@ ${
             .Sql(q: q) :> q
             .Handled(h: x) :> not
             .Template(quasis: qs) :> not
+            .Foreign(f: fb0) :> not
             .Name(name: n) :> not
             .At(name: n) :> not
             .AtItem :> not
@@ -22999,6 +23443,7 @@ ${
             .Sql(q: q) :> not
             .Handled(h: h) :> h
             .Template(quasis: qs) :> not
+            .Foreign(f: fb0) :> not
             .Name(name: n) :> not
             .At(name: n) :> not
             .AtItem :> not
@@ -23167,11 +23612,12 @@ ${
         const scan: BodyScan = scanBlock({ t: cx.t, file: fs.info.file }, fs.f.body, emptyScan())
         return { sym: fs.info.sym.id, name: fs.info.name, file: fs.info.file, span: fs.info.span, nid: fs.info.nid,
                  modifier: fs.f.server, failable: fs.f.failable,
-                 sqls: sqlsInBlock(fs.f.body), reads: readsInBlock(cx.t, fs.f.body), doms: domsInBlock(cx.t, fs.f.body), scan: scan }
+                 sqls: sqlsInBlock(fs.f.body), reads: readsInBlock(cx.t, fs.f.body), doms: domsInBlock(cx.t, fs.f.body), scan: scan,
+                 foreigns: foreignsInBlock(fs.f.body) }
     }
 
     // ---- placement -------------------------------------------------------------
-    fn serverTriggered(f: FnFacts) -> boolean { return f.sqls.length > 0 || f.modifier }
+    fn serverTriggered(f: FnFacts) -> boolean { return f.sqls.length > 0 || f.foreigns.length > 0 || f.modifier }
     fn clientDirect(f: FnFacts) -> boolean { return f.reads.length > 0 || f.scan.writes.length > 0 || f.doms.length > 0 }
 
     // §12.2 + §19.9.5 / §6.6.9, by the function's OWN body. Calling a server
@@ -23186,7 +23632,7 @@ ${
             // unless the deprecated `server` modifier declares the WHOLE body
             // server (§52.10: "historically forced server-side execution"); a
             // DOM access makes it unplaceable (E-ROUTE-005, judged first)
-            if (f.sqls.length > 0 && f.scan.writes.length > 0 && !f.modifier && f.doms.length == 0) return PlaceK.Split
+            if ((f.sqls.length > 0 || f.foreigns.length > 0) && f.scan.writes.length > 0 && !f.modifier && f.doms.length == 0) return PlaceK.Split
             return PlaceK.Server
         }
         if (clientDirect(f)) return PlaceK.Client
@@ -23832,6 +24278,7 @@ ${
 
     fn serverTrigger(f: FnFacts) -> string {
         if (f.sqls.length > 0) return "a `" + sqlSigil() + "}` query"
+        if (f.foreigns.length > 0) return "a `_={ … }=` foreign code block"
         // s473: a `<db>` cell's load (`@name`) is server code by its placement (§8.1.3)
         if (isLoadName(f.name)) return "being a `<db>` cell's value (evaluated on the server per request, §8.1.3)"
         return "the `server` modifier"
@@ -24250,7 +24697,7 @@ ${
         for (const c of nodes) {
             // s468 (U1c): a server-side wait — its own `?{}` (closed over CALLS below)
             let q: FxAtom[] = []
-            if (c.kind == CallableK.KFn && c.f.sqls.length > 0) q = [ownAtom("q", i, 0)]
+            if (c.kind == CallableK.KFn && (c.f.sqls.length > 0 || c.f.foreigns.length > 0)) q = [ownAtom("q", i, 0)]   // s473: a foreign block's value is awaited (§23.2.4a)
             ownQ = ownQ.concat([q])
             if (c.kind == CallableK.KFn) {
                 const pk: PlaceK = placeOf(places, c.f.sym)
@@ -24474,7 +24921,7 @@ ${
     // The own facts of a construction / a formula: its scan only.
     fn valueFacts(sym: int, label: string, file: string, span: ASpan, nid: int, scan: BodyScan) -> FnFacts {
         return { sym: sym, name: label, file: file, span: span, nid: nid, modifier: false, failable: false,
-                 sqls: [], reads: [], doms: [], scan: scan }
+                 sqls: [], reads: [], doms: [], scan: scan, foreigns: [] }
     }
 
     // The callable a Sym names (-1: none — a reference with no summary).
@@ -25067,6 +25514,7 @@ ${
             .Sql(q: q) :> not
             .Handled(h: x) :> not
             .Template(quasis: qs) :> not
+            .Foreign(f: fb0) :> not
         }
     }
 
@@ -25097,6 +25545,7 @@ ${
             .Sql(q: q) :> []
             .Handled(h: x) :> []
             .Template(quasis: qs) :> []
+            .Foreign(f: fb0) :> []
         }
     }
 
@@ -25126,6 +25575,7 @@ ${
             .Sql(q: q) :> false
             .Handled(h: x) :> false
             .Template(quasis: qs) :> false
+            .Foreign(f: fb0) :> false
         }
     }
 
@@ -25235,6 +25685,7 @@ ${
             .Lambda(params: lp, body: b) :> planExpr(cx, b, { refused: "a lambda (`xs.map(x => …)`) — an awaited combinator (§13.2) is not in the bootstrap; it arrives with the §13.2 awaited-combinator slice. Call it in a statement" }, ps)
             .Handled(h: h) :> planHandledArms(cx, h, pos, ps)
             .Template(quasis: qs, slots: ss) :> planKids(cx, ss, pos, ps)
+            .Foreign(f: fb0) :> planKids(cx, fb0.crossings, pos, ps)
             .Member(obj: o) :> planKids(cx, [o], pos, ps)
             .Call(callee: c, args: a) :> planKids(cx, a, pos, ps)
             .Unary(op: o, e: x) :> planKids(cx, [x], pos, ps)
@@ -25308,6 +25759,7 @@ ${
             .Sql(q: q) :> false
             .Handled(h: x) :> false
             .Template(quasis: qs) :> false
+            .Foreign(f: fb0) :> false
         }
     }
 
@@ -25475,6 +25927,7 @@ ${
             .Sql(q: q) :> ""
             .Handled(h: x) :> ""
             .Template(quasis: qs, slots: ss) :> keyOfList("tpl(" + JSON.stringify(qs) + "|", ss)
+            .Foreign(f: fb0) :> ""      // s473 (#1646 review F3): an awaited host effect, never deduplicated — like a nested query
             .Recovered :> ""
         }
     }
@@ -25578,6 +26031,7 @@ ${
             .Sql(q: q) :> distinctSqlParams(q.params)
             .Handled(h: x) :> []
             .Template(quasis: qs) :> []
+            .Foreign(f: fb0) :> []
         }
     }
 
@@ -26479,6 +26933,7 @@ ${
             .Spread(e: x) :> linExpr(cx, x, s)
             .Index(obj: o, idx: i) :> linExprs(cx, [o, i], s)
             .Template(quasis: qs, slots: ss) :> linExprs(cx, ss, s)
+            .Foreign(f: fb0) :> linExprs(cx, fb0.crossings, s)
             .At(name: n) :> linGo(s)
             .AtItem :> linGo(s)
             .Num(raw: r) :> linGo(s)
@@ -26708,6 +27163,7 @@ ${
             .Sql(q: x) :> false
             .Handled(h: x) :> false
             .Template(quasis: x) :> false
+            .Foreign(f: fb0) :> false
         }
         if (bare) return r
         // s472 r1 F2 — a write to a PART of a `lin` binding (`t.n = v`, `t[i] = v`)
