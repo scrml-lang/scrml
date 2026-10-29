@@ -1,4 +1,3 @@
-<program>
 ${
     // ---------------------------------------------------------------------------
     // scrml:auth/jwt — JWT signing and verification (HS256)
@@ -12,7 +11,7 @@ ${
     // is required. decodeJwt is pure and safe in any context.
     // ---------------------------------------------------------------------------
 
-    import { safeCall, safeCallAsync, HostError } from 'scrml:host'
+    import { safeCall, safeCallAsync, HostError } from 'scrml:host';
     import { get } from 'scrml:http'
 
     /**
@@ -31,8 +30,8 @@ ${
 
     function base64urlEncode(buffer) {
         // buffer is ArrayBuffer or Uint8Array
-        const bytes = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer)
-        let str = ""
+        const bytes = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer);
+        let str = "";
         for (const b of bytes) {
             str += String.fromCharCode(b)
         }
@@ -49,7 +48,7 @@ ${
         const binary = atob(s)
         const bytes = new Uint8Array(binary.length)
         for (let i = 0; i < binary.length; i++) {
-            bytes[i] = binary.charCodeAt(i)
+            bytes[i] = binary.charCodeAt(i);
         }
         return bytes
     }
@@ -68,15 +67,15 @@ ${
      *   const token = await signJwt({ userId: 42, role: "admin" }, process.env.JWT_SECRET)
      */
     export async function signJwt(payload, secret, expiresIn) {
-        const now = Math.floor(Date.now() / 1000)
-        const exp = now + (expiresIn is given ? expiresIn : 3600)
+        const now = Math.floor(Date.now() / 1000);
+        const exp = now + (expiresIn is given ? expiresIn : 3600);
 
-        const header = { alg: "HS256", typ: "JWT" }
+        const header = { alg: "HS256", typ: "JWT" };
         const claims = { ...payload, iat: now, exp }
 
         const headerStr = base64urlEncode(new TextEncoder().encode(JSON.stringify(header)))
         const payloadStr = base64urlEncode(new TextEncoder().encode(JSON.stringify(claims)))
-        const signingInput = `${headerStr}.${payloadStr}`
+        const signingInput = `${headerStr}.${payloadStr}`;
 
         const keyData = new TextEncoder().encode(secret)
         const cryptoKey = await crypto.subtle.importKey(
@@ -91,7 +90,7 @@ ${
             cryptoKey,
             new TextEncoder().encode(signingInput)
         )
-        const signature = base64urlEncode(signatureBuffer)
+        const signature = base64urlEncode(signatureBuffer);
         return `${signingInput}.${signature}`
     }
 
@@ -467,4 +466,3 @@ ${
         assertEqual(rNone.reason, "alg-not-allowed")
     }
 }
-</program>

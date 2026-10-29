@@ -1,4 +1,3 @@
-<program>
 ${
     // ---------------------------------------------------------------------------
     // scrml:oauth — OAuth 2.0 / OpenID Connect client (auth code + PKCE)
@@ -47,11 +46,11 @@ ${
     //   import { googleConfig } from 'scrml:oauth'
     // ---------------------------------------------------------------------------
 
-    import { post, get as httpGet } from "scrml:http"
-    import { setex, get as redisGet, del as redisDel, createClient } from "scrml:redis"
-    import { get as kvGet, set as kvSet, del as kvDel } from "scrml:store"
-    import { generateToken } from "scrml:crypto"
-    import { generateVerifier, deriveChallenge, PKCE_METHOD } from "./pkce.scrml"
+    import { post, get as httpGet } from "scrml:http";
+    import { setex, get as redisGet, del as redisDel, createClient } from "scrml:redis";
+    import { get as kvGet, set as kvSet, del as kvDel } from "scrml:store";
+    import { generateToken } from "scrml:crypto";
+    import { generateVerifier, deriveChallenge, PKCE_METHOD } from "./pkce.scrml";
 
     // Convenience re-exports — callers can import preset configs from the
     // top-level `scrml:oauth` module if they prefer one import line.
@@ -100,12 +99,12 @@ ${
     // One dedicated Redis client per URL for OAuthStore.Redis(url).
     const _redisClients = new Map()
     function _redisClientFor(url) {
-        let client = _redisClients.get(url)
+        let client = _redisClients.get(url);
         if (client is not) {
-            client = createClient(url)
-            _redisClients.set(url, client)
+            client = createClient(url);
+            _redisClients.set(url, client);
         }
-        return client
+        return client;
     }
 
     async function _storePut(storage: OAuthStore, key, value, ttlSeconds) {
@@ -113,7 +112,7 @@ ${
             .Memory(entries) :> {
                 const expiresAt = ttlSeconds && ttlSeconds > 0
                     ? Date.now() + ttlSeconds * 1000
-                    : not
+                    : not;
                 entries.set(key, { value, expiresAt })
             }
             .Redis(url) :> {
@@ -525,4 +524,3 @@ ${
     function _stateKey(sessionKey)    { return "scrml:oauth:state:"    + sessionKey }
     function _verifierKey(sessionKey) { return "scrml:oauth:verifier:" + sessionKey }
 }
-</program>

@@ -1,4 +1,3 @@
-<program>
 ${
     // ---------------------------------------------------------------------------
     // scrml:data/form-for — type-driven form generation (L22 family member #2)
@@ -70,7 +69,7 @@ ${
      * today against registerLabels work unchanged when Level-2 lookup lands.
      */
     export function registerLabels(map) {
-        _scrml_labels_register(map)
+        _scrml_labels_register(map);
     }
 
     /**
@@ -104,4 +103,3 @@ ${
         // `import { formFor }` resolves.
     }
 }
-</program>
