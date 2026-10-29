@@ -21,6 +21,7 @@ import { tmpdir } from "os";
 import { writeFileSync, readFileSync, rmSync, existsSync, mkdirSync, readdirSync } from "fs";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { compileScrml } from "../../src/api.js";
+import { parse as acornParse } from "acorn";
 
 const DIRS = [];
 afterAll(async () => {
@@ -65,10 +66,32 @@ const LIB = `\${
         if (id == "bad") fail E::Bad
         return 5
     }
+    export server function plainS(id: string) {
+        return id
+    }
 }
 `;
 
 const CALLEES = ["syncF", "srvF", "syncL", "srvL"];
+
+/**
+ * #1661 review INFO-3 / MED-1 — guarded VALUES that are not a bare call. The s441 rewrite owns only a
+ * value that IS `[await] stub(args)`; every other async value (a ternary, `||`, `??`, a sync failable
+ * callee over an async argument), imported or local, is deferred by `deferSyncGuardedCellWrites`.
+ * `pow*`: the added `await` must wrap the WHOLE value — a bare `await 2 ** 2 > 3 ? …` is a V8
+ * SyntaxError (JSC accepts it, so a bun-only run would miss it; the emitted JS is parsed with acorn).
+ * Each: "bad" fails (arm runs, sees the old 7), "ok" succeeds with `ok`.
+ */
+const VALUE_SHAPES = [
+  ["ternImp", `id != "zz" ? srvF(id) : 9`, "5"],
+  ["ternLoc", `id != "zz" ? srvL(id) : 9`, "5"],
+  ["orImp", `srvF(id) || 3`, "5"],
+  ["nullishImp", `srvF(id) ?? 4`, "5"],
+  ["orLoc", `srvL(id) || 3`, "5"],
+  ["powImp", `2 ** 2 > 3 ? srvF(id) : 0`, "5"],
+  ["powLoc", `2 ** 2 > 3 ? srvL(id) : 0`, "5"],
+  ["syncOverAsync", `syncF(plainS(id))`, "5"],
+];
 
 /**
  * Per callee `c`: `a_c(id)` — a statement arm that records the cell as the arm sees it, then writes
@@ -80,7 +103,7 @@ const CALLEES = ["syncF", "srvF", "syncL", "srvL"];
 const APP = `<x> = 7
 <seen> = "none"
 \${
-    import { syncF, srvF } from "./lib.scrml"
+    import { syncF, srvF, plainS } from "./lib.scrml"
     type L:enum = { Bad }
     function syncL(id: string)! -> L {
         if (id == "bad") fail L::Bad
@@ -92,11 +115,14 @@ const APP = `<x> = 7
     }
 ${CALLEES.map((c) => `    function a_${c}(id: string) { @x = ${c}(id) !{ _ :> { @seen = @x; @x = -1; return } } }
     function b_${c}(id: string) { @x = ${c}(id) !{ _ :> { lift @x } } }`).join("\n")}
+${VALUE_SHAPES.map(([k, v]) => `    function v_${k}(id: string) { @x = ${v} !{ _ :> { @seen = @x; @x = -1; return } } }`).join("\n")}
 }
 ${CALLEES.map((c) => `<button id="a-${c}-bad" onclick=a_${c}("bad")>a</button>
 <button id="a-${c}-ok" onclick=a_${c}("ok")>a</button>
 <button id="b-${c}-bad" onclick=b_${c}("bad")>b</button>
 <button id="b-${c}-ok" onclick=b_${c}("ok")>b</button>`).join("\n")}
+${VALUE_SHAPES.map(([k]) => `<button id="v-${k}-bad" onclick=v_${k}("bad")>v</button>
+<button id="v-${k}-ok" onclick=v_${k}("ok")>v</button>`).join("\n")}
 <p id="x">\${@x}</p>
 <p id="seen">\${@seen}</p>
 `;
@@ -176,6 +202,25 @@ describe("executed: `@x = f(id) !{ … }` — imported and local callees behave 
       expect(page.text("#x")).toBe("5");
     });
   }
+});
+
+describe("executed: guarded values that are not a bare call (imported and local)", () => {
+  for (const [k, v, okText] of VALUE_SHAPES) {
+    test(`\`@x = ${v} !{…}\`: failure runs the arm with the old value; success writes`, async () => {
+      const page = await boot(built());
+      await page.click(`#v-${k}-bad`);
+      expect(page.text("#seen")).toBe("7");
+      expect(page.text("#x")).toBe("-1");
+      await page.click(`#v-${k}-ok`);
+      expect(page.text("#x")).toBe(okText);
+    });
+  }
+  test("the emitted client JS parses under a spec parser (acorn), not only JSC", () => {
+    const js = built().clientJs;
+    expect(() => acornParse(js, { ecmaVersion: "latest", sourceType: "script" })).not.toThrow();
+    expect(js).not.toMatch(/await\s+2\s*\*\*/);
+    expect(js).toMatch(/await \(2 \*\* 2 > 3 \?/);
+  });
 });
 
 describe("emitted: the imported server call is not written into the cell before the guard", () => {

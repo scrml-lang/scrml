@@ -271,11 +271,15 @@ export function deferSyncGuardedCellWrites(code: string, findMatchingBrace: (s: 
       }
       if (closeIdx >= 0 && hasWriteBack && !/^\s*else\b/.test(mask.slice(closeIdx + 1))) {
         // `let R = _scrml_reactive_set(NAME, VALUE);` → `let R = VALUE;`, and the success write after the arms.
-        // An `await` before the set moves onto the value (`let R = await VALUE;`), once: the
-        // emitter already awaited the call in place (`await f(…)`), and a second is never added.
+        // An `await` before the set moves onto the WHOLE value, parenthesized: `let R = await (VALUE);`
+        // (#1661 review MED-1 — a bare `await 2 ** 2 > 3 ? …` binds to the leftmost operand, and a
+        // unary operand of `**` is a V8 SyntaxError). A value that already starts with `await`
+        // (the emitter awaited the call in place, `await f(…)`) is kept as is. A value that only
+        // starts with a paren holding an await (`(await f())`, which no emitter produces) gets one
+        // more `await`: harmless, one extra tick.
         const value = code.slice(call.commas[0] + 1, call.close).trim();
         const awaitHead = head[2] ?? "";
-        const valueText = awaitHead && !/^await\s/.test(value) ? `await ${value}` : value;
+        const valueText = awaitHead && !/^await\s/.test(value) ? `await (${value})` : value;
         edits.push({ start: at - awaitHead.length, end: call.close + 1, text: valueText });
         edits.push({ start: closeIdx + 1, end: closeIdx + 1, text: ` else {\n  ${writeBack}\n}` });
       }
