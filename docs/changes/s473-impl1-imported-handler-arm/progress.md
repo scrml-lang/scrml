@@ -60,3 +60,29 @@ e2e-render-map 259/0; bootstrap-conformance current.
 Gaps: resolved g-impl1-imported-callee-cell-write-handler-skipped-s473 (entry copied from #1658's
 branch — keep this copy when #1658 merges); filed g-impl1-imported-async-module-init-cell-handler-refused-s473
 (LOW), g-impl1-server-imports-unexported-enum-s473 (MED).
+
+## 2026-10-29 — Part 2 (g-impl1-client-server-call-not-failable-s451): measured, STOPPED per brief
+
+Brief rule: "If this is more than a contained change to the client call wrapper and the handler
+lowering, STOP after Part 1 and report the design question with a recommendation." Measured on
+`15e4439d7` — it is more:
+- A handled client server call reaches its guard through at least four emitters, each emitting its
+  own `await stub(args)` text: emit-logic guarded-expr (let / const / statement / return / imported
+  cell / handler attr); emit-client's s441 rewrite, which RE-EMITS `await ${mangledName}(${args})`
+  for a local cell write (in-place and module-init IIFE branches — a wrapper added in emit-logic is
+  dropped there); the `?` lowering (emit-logic + cps-cell-writes.ts); the failable `match` lowering.
+- Codegen has no "imported callee is server-placed" fact: an imported server function is known only
+  as an async imported local (`asyncImportedLocals`), the same set as an imported async CLIENT
+  function, whose rejection must NOT become a Transport value. A new routeMap-by-source-file
+  classifier is needed (PR #1658 built one in the typer, not in codegen).
+- A CPS-split callee already turns failures into impl#1's `CpsError` envelopes (a third shape).
+- Runtime: a new helper (+ a runtime-chunk gate entry) and a stub change so the thrown error
+  carries its status (emit-functions.ts:1256; the two `<request>` fetchers in emit-reactive-wiring.ts
+  throw the same text).
+- Unruled semantics for impl#1: (a) a `!{}` that does NOT cover `Transport` (named arms only) —
+  converting would turn today's loud throw into the no-wildcard `else { return R }` escalation
+  (silent); (b) `?` — impl#1 has no E-ERROR-010 Transport-compatibility check, so a converted
+  Transport would propagate into enums that do not declare it; (c) declared-`!` server callees
+  (SPEC: their failure set includes Transport too); (d) the envelope `type` tag and `t`'s shape
+  (impl#1 builds no `ServerCallError`; #1658 types `t` asIs).
+Recommendation: see the PR body / report.
