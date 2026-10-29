@@ -51,7 +51,7 @@ ${
     import { ASpan, BinOp, UnOp, AExpr, AProp, AExprK, AStmt, ABlock, AStmtK, AEffect, AType, ATypeK,
              ATypeField, AVariant, ATypeBody, ATypeDecl, AParam, AFn, AImportName, AImport,
              AAttrValue, AAttr, AElem, ANode, ANodeK, ADeclAttr, AStateChild, ADeclChild, ADecl, AValArg, AValidator,
-             AProgram, AItem, AItemK, AConst, FileAst, Diag, ASql,
+             AProgram, AItem, AItemK, AConst, FileAst, ADbFn, Diag, ASql,
              AHow, AHandled, AArm, APat, ABind, AArmBody, AFail, AFor, AForHead, AIterSrc, AForBound, ALift,
              ACss, ACssItem, ACssRule, ACssDecl, ACssPart, ACssRef, mkSpan, newDiag } from "./ast.scrml"
     import { Severity } from "./severity.scrml"
@@ -13409,7 +13409,11 @@ ${
     }
 
     // s452 — a `<db src=…>` state block. §4: "A state block is a first-class
-    // context. Its content is markup context"; §8.1.1: a `<db src=>` is a
+    // context" — s472 (S472 ruling Q3, §4.18.1): its body is a code-default
+    // ITEM body, read by the parser (parseDbBody): `e.kids` holds its markup
+    // and display literals; its functions and types were hoisted into the
+    // program's items (FileAst.dbFns keeps their block); its declarations and
+    // statements were refused there. §8.1.1: a `<db src=>` is a
     // database scope for the `?{}` blocks inside it (placePass's dbsPass
     // resolves which database every query runs on, and checks `src=` —
     // E-SQL-005). It is not an HTML element: its children render in place.
@@ -13435,7 +13439,70 @@ ${
             }
         }
         if (!src) st = addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "a `<db>` without `src=` names no database (§8.1.1: a database scope is a `<db src=>`) — the bootstrap has no other reading of it")
+        // s472 r1 (MED-1): a function declared in this body is the PROGRAM's
+        // function (the parser hoists it — the program-wide reading, pending
+        // bryan's ruling on db-body function visibility). Where this `<db>` stands
+        // inside a scope that binds names — an `<each>` row, a loop or arm binder,
+        // a component's `renders` / body, an engine state child, a child field's
+        // renders — the hoisted function would silently lose those names (or bind
+        // the program's of the same spelling), so it is refused, fail closed,
+        // under either reading of the ruling.
+        const where: string = nameScopeHere(env)
+        if (where != "") {
+            for (const id of dbOwnedFns(env.g, env.file, e.nid)) {
+                st = addDiag(st, env.file, id.span, "E-BOOTSTRAP-UNSUPPORTED", "a function in a `<db>` body that stands inside " + where + " is not in the bootstrap — a `<db>`-body function is the program's function (hoisted to program scope), so it would lose the names " + where + " binds (or bind the program's names of the same spelling). Declare the function in a `<db>` at the `<program>` level, or pass the values it needs as arguments")
+            }
+        }
         return addElem(resolveNodes(env, e.kids, st), e.nid, ElemFact.MDb)
+    }
+
+    // s472 r1 — the name-binding scope this position stands in ("" — the
+    // program body or plain markup under it, where a hoisted function loses nothing).
+    fn nameScopeHere(env: Env) -> string {
+        if (env.rows.length > 0) return "an `<each>` row (its row binder)"
+        if (env.locals.length > 0) return "a loop or arm body (its binders)"
+        if (env.own != "") return "a child field's `renders` (`@" + env.own + "` and the instance's fields)"
+        const k: CtxK = env.ctx
+        const inProgram: boolean = match k {
+            .InDecl(owner: o, isProgram: p) :> p
+            .InFn :> false
+        }
+        if (!inProgram) return "a declaration's `renders` or state-child body (a component's or an engine's fields)"
+        return ""
+    }
+
+    // s472 r1 — every `<db>` element in a program-level engine's state-child
+    // body (through plain markup; an `<each>` row or a Tier-0 row is judged by
+    // resolveDb itself, which sees its binders): its functions are refused.
+    fn refuseStateChildDbFns(g: Globals, file: string, nodes: ANode[], st0: AS) -> AS {
+        let st: AS = st0
+        for (const n of nodes) {
+            const e: AElem | not = elemOfANode(n)
+            if (e is given) {
+                if (!e.star && e.tag == "db") {
+                    for (const f of dbOwnedFns(g, file, e.nid)) {
+                        st = addDiag(st, file, f.span, "E-BOOTSTRAP-UNSUPPORTED", "a function in a `<db>` body that stands inside an engine state child is not in the bootstrap — a `<db>`-body function is the program's function (hoisted to program scope), so it would lose the names the state child binds (or bind the program's names of the same spelling). Declare the function in a `<db>` at the `<program>` level, or pass the values it needs as arguments")
+                    }
+                }
+                if (e.star || e.tag != "each") st = refuseStateChildDbFns(g, file, e.kids, st)
+            }
+        }
+        return st
+    }
+
+    // The functions the parser hoisted out of the `<db>` element `dbNid`'s body.
+    fn dbOwnedFns(g: Globals, file: string, dbNid: int) -> AFn[] {
+        let ids: int[] = []
+        for (const f of g.files) {
+            if (f.path == file) {
+                for (const o of f.dbFns) { if (o.db == dbNid) ids = ids.concat([o.fn]) }
+            }
+        }
+        let out: AFn[] = []
+        for (const fs of g.fns) {
+            if (ids.indexOf(fs.f.nid) >= 0) out = out.concat([fs.f])
+        }
+        return out
     }
 
     // s449 — `<errors of=expr/>` (§55.8): "`of=expr` REQUIRED — References a
@@ -14765,7 +14832,12 @@ ${
             const renv: Env = declEnv(g, ds, true)
             st = resolveNodes(renv, rendersNodes(ds), st)
             // s442: state-child bodies (O5 (1i)), in the same context
-            for (const sb of stateBodyLists(ds)) { st = resolveNodes(renv, sb, st) }   // s451: one sibling list each (if-chains)
+            for (const sb of stateBodyLists(ds)) {
+                st = resolveNodes(renv, sb, st)   // s451: one sibling list each (if-chains)
+                // s472 r1 (MED-1): a program-level engine's state child resolves in the
+                // program context, so resolveDb cannot see it — judged here
+                if (ds.isProgram) st = refuseStateChildDbFns(g, ds.file, sb, st)
+            }
             // s442: a child field's own renders (§66.4 rule 2), in the same context;
             // s444: with `@<field>` naming that field of this instance (O54 = (a))
             if (ds.p is not) {
@@ -21725,8 +21797,9 @@ ${
     //
     // ONE walk over every file — items, markup, declarations — carrying the
     // nearest database scope. It records each function's scope (a function is
-    // an item of a `<program>` body: the bootstrap has no function declared
-    // inside an element), each MARKUP-position `?{}` site's scope (an attribute
+    // an item of a `<program>` body or the file top — s472: one declared in a
+    // `<db>` body is hoisted there by the parser and takes THAT block's scope,
+    // FileAst.dbFns), each MARKUP-position `?{}` site's scope (an attribute
     // or handler value, an interpolation, an `<effect>` body, a declaration's
     // value), and every scope's database.
     //
@@ -21738,22 +21811,34 @@ ${
     type FnDb:struct = { fnid: int, scope: int }
     // Each markup-position `?{}` site's nearest database scope (-1: none).
     type SiteDb:struct = { nid: int, scope: int }
-    type RDbs:struct = { scopes: ScopeDb[], fns: FnDb[], sites: SiteDb[], st: AS }
+    // s472: `owned` — the current file's FileAst.dbFns (each function declared in a `<db>` body)
+    type RDbs:struct = { scopes: ScopeDb[], fns: FnDb[], sites: SiteDb[], st: AS, owned: ADbFn[] }
 
     fn dbsPass(g: Globals, files: FileAst[], st0: AS) -> RDbs {
-        let acc: RDbs = { scopes: [], fns: [], sites: [], st: st0 }
-        for (const f of files) { acc = dbsInItems(g, f.path, f.items, -1, acc) }
+        let acc: RDbs = { scopes: [], fns: [], sites: [], st: st0, owned: [] }
+        for (const f of files) {
+            const withOwned: RDbs = { scopes: acc.scopes, fns: acc.fns, sites: acc.sites, st: acc.st, owned: f.dbFns }
+            acc = dbsInItems(g, f.path, f.items, -1, withOwned)
+        }
         return acc
     }
 
+    // s472 — the `<db>` whose body declares function `fnid` (its element's nid), else -1.
+    fn ownerDb(owned: ADbFn[], fnid: int) -> int {
+        for (const o of owned) {
+            if (o.fn == fnid) return o.db
+        }
+        return -1
+    }
+
     fn withScope(acc: RDbs, nid: int, db: Db | not, st: AS) -> RDbs {
-        return { scopes: acc.scopes.concat([{ nid: nid, db: db }]), fns: acc.fns, sites: acc.sites, st: st }
+        return { scopes: acc.scopes.concat([{ nid: nid, db: db }]), fns: acc.fns, sites: acc.sites, st: st, owned: acc.owned }
     }
 
     fn withSites(acc: RDbs, ss: SqlSite[], scope: int) -> RDbs {
         let sites: SiteDb[] = acc.sites
         for (const x of ss) { sites = sites.concat([{ nid: x.nid, scope: scope }]) }
-        return { scopes: acc.scopes, fns: acc.fns, sites: sites, st: acc.st }
+        return { scopes: acc.scopes, fns: acc.fns, sites: sites, st: acc.st, owned: acc.owned }
     }
 
     fn dbsInItems(g: Globals, file: string, items: AItem[], scope: int, acc0: RDbs) -> RDbs {
@@ -21761,7 +21846,9 @@ ${
         for (const it of items) {
             const k: AItemK = it.k
             const f: AFn | not = fnOfItemK(k)
-            if (f is given) acc = { scopes: acc.scopes, fns: acc.fns.concat([{ fnid: f.nid, scope: scope }]), sites: acc.sites, st: acc.st }
+            // s472: a function declared in a `<db>` body (hoisted into this item
+            // list by the parser) takes THAT block's scope — dbsInElem records it
+            if (f is given && ownerDb(acc.owned, f.nid) < 0) acc = { scopes: acc.scopes, fns: acc.fns.concat([{ fnid: f.nid, scope: scope }]), sites: acc.sites, st: acc.st, owned: acc.owned }
             const p: AProgram | not = programOfK(k)
             if (p is given) acc = dbsInProgram(g, file, p, scope, acc)
             const n: ANode | not = markupOfItemK(k)
@@ -21851,6 +21938,24 @@ ${
                     acc = withScope(acc, e.nid, rd.db, rd.st)
                 }
                 inner = e.nid
+            }
+        }
+        // s472 (S472 ruling Q3) — the functions declared in this `<db>` body:
+        // their nearest database scope is this block (§8.1.1). A `<db>` with no
+        // `src=` registers no scope (resolveDb refuses it), so their queries
+        // resolve to nothing — never to an outer database. A `<db>` a user
+        // declaration takes over is that declaration's use, not a database
+        // scope: a function in its body has no SPEC reading — refused.
+        if (!e.star && e.tag == "db") {
+            const isDb: boolean = isDbElem(g, file, e)
+            for (const o of acc.owned) {
+                if (o.db == e.nid) {
+                    if (isDb) {
+                        acc = { scopes: acc.scopes, fns: acc.fns.concat([{ fnid: o.fn, scope: e.nid }]), sites: acc.sites, st: acc.st, owned: acc.owned }
+                    } else {
+                        acc = { scopes: acc.scopes, fns: acc.fns, sites: acc.sites, st: addDiag(acc.st, file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "a function in the body of `<db>` — here a use of the declaration `db`, not the `<db>` state block (§4, §8.1.1) — is not in the bootstrap"), owned: acc.owned }
+                    }
+                }
             }
         }
         for (const c of e.kids) { acc = dbsInNode(g, file, c, inner, acc) }
