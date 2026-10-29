@@ -113,8 +113,10 @@ describe("impl#1 emitted wire shapes (pinned)", () => {
     expect(serverJs).toContain("JSON.stringify(_scrml_result ?? null)");
   });
   test("client: the T | not stub decodes through _scrml_wire_decode; the pure-T stub does not", () => {
-    expect(clientJs).toContain("_scrml_wire_decode(await _scrml_resp.json())");
-    expect(clientJs).toContain("const _scrml_body_json = await _scrml_resp.json();");
+    // S473 (impl#1 transport routing): the parse is `.json().catch(…)` — a body that does not parse
+    // is tagged for `_scrml_server_attempt` and re-thrown unchanged; a parsed value is untouched.
+    expect(clientJs).toContain("_scrml_wire_decode(await _scrml_resp.json().catch(");
+    expect(clientJs).toContain("const _scrml_body_json = await _scrml_resp.json().catch(");
   });
 });
 

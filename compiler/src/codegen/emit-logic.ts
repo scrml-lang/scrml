@@ -1,5 +1,5 @@
 import { commentText } from "./comment-text.ts";
-import { genVar } from "./var-counter.ts";
+import { genVar, markTransportGuard } from "./var-counter.ts";
 import { fallbackSqlHandle } from "./sql-handle-name.ts";
 import { paramName, paramSignature, type ParamLike } from "./utils.ts";
 import { nsId } from "./chunk-namespace.ts";
@@ -5245,6 +5245,12 @@ function _emitLogicNode(node: any, opts: EmitLogicOpts): string {
       if (handledSqlPre) lines.push(handledSqlPre);
       lines.push(`let ${resultVar} = ${_autoAwait && !_initHasAwait ? "await " : ""}${initExpr};`);
       lines.push(`if (${resultVar} && ${resultVar}.__scrml_error) {`);
+      // S473 (impl#1 transport routing) — a client guard the type checker stamped (a covered
+      // `!{}` on a call to a server function not declared `!`): emit-client wraps its call.
+      {
+        const _tr = (node as { __transportRoutable?: unknown }).__transportRoutable;
+        if (typeof _tr === "string" && opts.boundary !== "server" && !_guardHandlesSql) markTransportGuard(resultVar, _tr);
+      }
 
       // R24-BUG-2 (S136 / known-gaps Bug 29) — split a joined arm body on
       // top-level `;` (depth-0). Mirrors rewriteBlockBody's separator pass so

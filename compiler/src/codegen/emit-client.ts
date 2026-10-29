@@ -1,4 +1,5 @@
 import { tokenizer as acornTokenizer, parse as acornParse } from "acorn";
+import { transportGuards } from "./var-counter.ts";
 import { fnValuedBindingsOf } from "./fn-valued-bindings.ts";
 import { SCRML_RUNTIME } from "../runtime-template.js";
 import { SQL_HANDLE_PATTERN } from "./sql-handle-name.ts";
@@ -55,7 +56,7 @@ import { setLiftGateFileScopes, resetLiftGateScopes } from "./lift-gate-scope.js
  * corpus sweep (docs/changes/s461-runtime-tree-shake) is the proof it is.
  */
 const ERRORS_CHUNK_REFERENCE =
-  /(?<![\w$.'"`])(?:_ScrmlError|NetworkError|ValidationError|SQLError|AuthError|TimeoutError|ParseError|NotFoundError|ConflictError|_scrml_error_boundary_log|_scrml_error_boundary_uncaught)(?![\w$'"`])/;
+  /(?<![\w$.'"`])(?:_ScrmlError|NetworkError|ValidationError|SQLError|AuthError|TimeoutError|ParseError|NotFoundError|ConflictError|_scrml_error_boundary_log|_scrml_error_boundary_uncaught|_scrml_server_attempt)(?![\w$'"`])/;
 
 const POST_EMIT_HELPER_CHUNK_GATES: ReadonlyArray<readonly [string, string]> = [
   ["_scrml_structural_eq(", "equality"],
@@ -296,6 +297,74 @@ export function deferSyncGuardedCellWrites(code: string, findMatchingBrace: (s: 
   }
   let out = code;
   for (const e of edits) out = out.slice(0, e.start) + e.text + out.slice(e.end);
+  return out;
+}
+
+/**
+ * S473 (ruling:user-voice-scrml.md S473 "impl#1 transport routing" item 3, SPEC §19.9.10) — "only
+ * a `!{}` that already covers the failure (a `_` or `.Transport` arm) gets a failed call to a
+ * NON-`!` server function as a `Transport` error value. Declared-`!` callees, `?`, `match` and
+ * CPS-split callees are out of scope … Unhandled call sites are unchanged."
+ *
+ * Runs after the s441 rewrite and `deferSyncGuardedCellWrites`, when every guarded client call has
+ * its final shape `let R = await CALLEE(ARGS);` (+ any `_scrml_init_set(…)` lines) followed by
+ * `if (R && R.__scrml_error) {`. Only a guard emit-logic recorded (`transportGuards()`: the type
+ * checker's `__transportRoutable` stamp — a covered `!{}` on a call to a server function not
+ * declared `!`) is touched, and only when CALLEE is that function's client stub: the source name
+ * for an import, or its `_scrml_fetch_*` stub (`fnNameMap`) for a same-file function. The call
+ * becomes `await _scrml_server_attempt(CALLEE(ARGS))` (runtime-template.js), so a failed call
+ * reaches the arms as `{ __scrml_error: true, type: "ServerCallError", variant: "Transport",
+ * data: { t } }` instead of rejecting past them. Anything else is left as emitted. The scan
+ * reads the literal-blanked mask (`blankLiteralTextInSource`), as the twin does; no mask, no
+ * rewrite (fail closed: the call still rejects, as before).
+ */
+export function routeTransportGuards(
+  code: string,
+  guards: ReadonlyMap<string, string>,
+  fnNameMap: ReadonlyMap<string, string>,
+): string {
+  if (guards.size === 0 || !code.includes(".__scrml_error) {")) return code;
+  const mask = blankLiteralTextInSource(code, { blankRegex: true, jsOnly: true });
+  if (typeof mask !== "string" || mask.length !== code.length) return code;
+  const edits: Array<{ at: number; close: number }> = [];
+  for (const [R, source] of guards) {
+    const stub = fnNameMap.get(source);
+    const callees = new Set<string>([source]);
+    if (stub && /^_scrml_fetch_/.test(stub)) callees.add(stub);
+    const head = new RegExp(`\\blet\\s+${R.replace(/\$/g, "\\$")}\\s*=\\s*await\\s+([A-Za-z_$][\\w$]*)\\s*\\(`, "g");
+    for (let m = head.exec(mask); m; m = head.exec(mask)) {
+      if (!callees.has(m[1])) continue;
+      // The callee's own source name is a stub only when it is NOT a same-file function
+      // (a same-file server function is always called through its `_scrml_fetch_*` stub).
+      if (m[1] === source && stub) continue;
+      const open = m.index + m[0].length - 1;
+      let depth = 1;
+      let close = -1;
+      for (let k = open + 1; k < mask.length; k++) {
+        const c = mask[k];
+        if (c === "(" || c === "[" || c === "{") depth++;
+        else if (c === ")" || c === "]" || c === "}") {
+          depth--;
+          if (depth === 0) { close = c === ")" ? k : -1; break; }
+        }
+      }
+      if (close < 0 || mask[close + 1] !== ";") continue;
+      const needle = `if (${R} && ${R}.__scrml_error) {`;
+      const ifAt = mask.indexOf(needle, close + 2);
+      if (ifAt < 0) continue;
+      const between = mask.slice(close + 2, ifAt);
+      if (!between.split("\n").every((l) => l.trim() === "" || /^\s*_scrml_init_set\(/.test(l))) continue;
+      const calleeStart = m.index + m[0].lastIndexOf(m[1]);
+      edits.push({ at: calleeStart, close });
+    }
+  }
+  if (edits.length === 0) return code;
+  edits.sort((a, b) => b.at - a.at);
+  for (let k = 1; k < edits.length; k++) if (edits[k].close >= edits[k - 1].at) return code;
+  let out = code;
+  for (const e of edits) {
+    out = out.slice(0, e.at) + "_scrml_server_attempt(" + out.slice(e.at, e.close + 1) + ")" + out.slice(e.close + 1);
+  }
   return out;
 }
 
@@ -4132,6 +4201,7 @@ function generateClientJsImpl(ctx: CompileContext): string {
       clientCode = parts.join("");
     }
     clientCode = deferSyncGuardedCellWrites(clientCode, findMatchingBrace);
+    clientCode = routeTransportGuards(clientCode, transportGuards(), fnNameMap);
     });
 
     // GITI-026 (giti inbound 2026-05-30): SSE reactive binding `@cell = gen()`.
