@@ -15216,14 +15216,21 @@ ${
     //     E-HANDLE-REDECLARE (ruled S440 #5 / #7; SPEC §66.7.2) — dupHandles;
     //   - a duplicate top-level `function`: E-SCOPE-010 (ruled S440 #6; SPEC
     //     §7.6) — dupFns;
+    //   - s473: one file-scope name bound twice in one file, WHATEVER the two
+    //     name — a user declaration, a type, a function, a constant, in any
+    //     pairing (`<card>` beside `fn card`, `type T` beside `fn T`, two
+    //     declarations, two types): E-SCOPE-010 (§7.6, ruled S473 "`<card>`
+    //     beside `fn card`: REFUSED") — fileNameClashes, dupConsts;
+    //   - s473: two COMPONENTS (declarations with `renders`) of one name in two
+    //     files of one program: E-COMPONENT-NAME-DUPLICATE (§9.1 DQ-7, §21.2;
+    //     ruled S473 "Same-name components across files … REFUSED") — dupDecls.
+    //     Two same-named declarations that are not both components stay the
+    //     bootstrap limit E-BOOTSTRAP-UNSUPPORTED (unruled);
     //   - where no ruling / SPEC sentence names one — a handle or a program
     //     cell named like a visible declaration, two fields of one
-    //     declaration, two declarations or types of one name in one file, two
-    //     parameters of one name, a redeclaration inside an inline handler
-    //     block — the bootstrap-local E-BOOTSTRAP-REDECLARE (each owes a ruling);
-    //   - one name declared in two FILES (a declaration, a function): the
-    //     bootstrap links ONE namespace, so it cannot tell them apart —
-    //     E-BOOTSTRAP-UNSUPPORTED.
+    //     declaration, two parameters of one name, a redeclaration inside an
+    //     inline handler block — the bootstrap-local E-BOOTSTRAP-REDECLARE
+    //     (each owes a ruling).
     // =========================================================================
     fn mkDiag(file: string, span: ASpan, code: string, msg: string) -> Diag {
         return newDiag(code, msg, file, span)
@@ -15242,7 +15249,7 @@ ${
     }
 
     fn checkScopes(files: FileAst[], t: Tables, lk: Linkage) -> Diag[] {
-        let out: Diag[] = dupFields(files, t, lk).concat(dupDecls(t)).concat(dupTypes(t)).concat(dupFns(t)).concat(dupHandles(files, t, lk)).concat(dupConsts(t))
+        let out: Diag[] = dupFields(files, t, lk).concat(dupDecls(files, t)).concat(builtinRedeclares(t)).concat(fileNameClashes(t)).concat(dupFns(t)).concat(dupHandles(files, t, lk)).concat(dupConsts(t))
         for (const f of files) {
             for (const af of fnItems(f.items)) {
                 out = out.concat(dupParams(f.path, af.params))
@@ -15292,30 +15299,53 @@ ${
         return false
     }
 
-    // Two `type` declarations of one name IN ONE FILE (SPEC-silent:
-    // bootstrap-local). s472: two files may each declare a type of one name —
-    // each file's annotations resolve in its own scope (stubNamed).
-    fn dupTypes(t: Tables) -> Diag[] {
-        let out: Diag[] = builtinRedeclares(t)
-        let names: string[] = []
-        let users: TypeInfo[] = []
-        for (const ti of t.types) {
-            if (ti.file != builtinFile()) {
-                names = names.concat([ti.name])
-                users = users.concat([ti])
-            }
+    // s473 — ONE file-scope name, ONE binding, whatever it names. §7.6 (S473):
+    // "A name bound at file scope SHALL be bound once in its file, whatever it
+    // names — a `let` / `const`, a `function`, a `type`, a user declaration
+    // (`<card>`): a second binding of the name in the same file, of the same
+    // kind or another, SHALL be a compile error (E-SCOPE-010: duplicate binding
+    // in file scope)." Ruled S473 ("`<card>` beside `fn card`: REFUSED"). Each
+    // binding after the FIRST of its name in its file is reported once, naming
+    // the first. Two functions are dupFns' (the S440 #6 sentence); a constant's
+    // collisions are dupConsts'. A host binding's local name is linkage's
+    // (§21.3.1.1 — never a `function` here). s472: two FILES may each bind a
+    // name — each file resolves in its own scope (a component pair is dupDecls').
+    type FileName:struct = { name: string, file: string, span: ASpan, what: string, isFn: boolean }
+
+    fn fileNames(t: Tables) -> FileName[] {
+        let out: FileName[] = []
+        for (const d of t.decls) {
+            if (d.sym.id != t.program.id) out = out.concat([{ name: d.sym.hint, file: d.file, span: d.span, what: "the declaration `<" + d.sym.hint + ">`", isFn: false }])
         }
-        let j = 0
-        while (j < names.length) {
-            const i: int = earlierSame(names, j)
-            if (i >= 0) {
-                const ti: TypeInfo = users[j]
-                const first: TypeInfo = users[i]
-                if (first.file == ti.file) {
-                    out = out.concat([mkDiag(ti.file, ti.span, "E-BOOTSTRAP-REDECLARE", "type `" + names[j] + "` is already declared in this file (at " + offsetOf(first.span) + ") — a file declares each type name once (the SPEC names no code for this; bootstrap-local)")])
+        for (const ti of t.types) {
+            if (ti.file != builtinFile()) out = out.concat([{ name: ti.name, file: ti.file, span: ti.span, what: "the type `" + ti.name + "`", isFn: false }])
+        }
+        for (const f of t.fns) {
+            if (f.host is not) out = out.concat([{ name: f.name, file: f.file, span: f.span, what: "the function `" + f.name + "`", isFn: true }])
+        }
+        return out
+    }
+
+    fn fileNameClashes(t: Tables) -> Diag[] {
+        const ns: FileName[] = fileNames(t)
+        let out: Diag[] = []
+        for (const n of ns) {
+            // the first binding of the name in its file, before `n`
+            let first: FileName | not = not
+            let earlierFn = false
+            for (const m of ns) {
+                if (m.file == n.file && m.name == n.name && m.span.start < n.span.start) {
+                    const cur: FileName | not = first
+                    if (cur is not || m.span.start < cur.span.start) first = m
+                    if (m.isFn) earlierFn = true
                 }
             }
-            j = j + 1
+            if (first is given) {
+                // a function after another function of its name: dupFns reports it (the S440 #6 sentence)
+                if (!(n.isFn && earlierFn)) {
+                    out = out.concat([mkDiag(n.file, n.span, "E-SCOPE-010", "`" + n.name + "` is already bound in this file by " + first.what + " (at " + offsetOf(first.span) + ") — a file-scope name is bound once, whatever it names (a declaration, a type, a function, a constant): duplicate binding in file scope (§7.6; ruled S473); rename one")])
+                }
+            }
         }
         return out
     }
@@ -15356,15 +15386,18 @@ ${
         return out
     }
 
-    // Two user declarations of one name. In one file: bootstrap-local. In two
-    // files (s472): every USE resolves per file (declNamed), but the program's
-    // OUTPUT still names a component by its bare name — §9.1 DQ-7 stamps a
+    // Two user declarations of one name in two FILES (one file: fileNameClashes,
+    // E-SCOPE-010). Every USE resolves per file (s472, declNamed), but the
+    // program's OUTPUT names a component by its bare name — §9.1 DQ-7 stamps a
     // component's root `data-scrml="ConstructorName"` and scopes its CSS
-    // `@scope ([data-scrml="<name>"])` — so two components of one name would
-    // share one style scope. The SPEC does not say how two same-named
-    // components keep apart, so the pair is refused by name (a bootstrap limit
-    // pending that ruling — g-boot-component-scope-key-bare-name-s472).
-    fn dupDecls(t: Tables) -> Diag[] {
+    // `@scope ([data-scrml="<name>"])`. s473: two COMPONENTS of one name in one
+    // program are refused by the language — §9.1 DQ-7 (S473): "Two components of
+    // one name in one program SHALL be a compile error (E-COMPONENT-NAME-DUPLICATE),
+    // whichever files declare them" (ruled S473 "Same-name components across
+    // files … REFUSED"). A pair that is not two components (a declaration
+    // without `renders` carries no scope key) is not ruled: it stays refused by
+    // the bootstrap (E-BOOTSTRAP-UNSUPPORTED), fail closed.
+    fn dupDecls(files: FileAst[], t: Tables) -> Diag[] {
         let out: Diag[] = []
         let users: DeclInfo[] = []
         for (const d of t.decls) {
@@ -15378,15 +15411,39 @@ ${
             if (i >= 0) {
                 const d: DeclInfo = users[j]
                 const first: DeclInfo = users[i]
-                if (first.file == d.file) {
-                    out = out.concat([mkDiag(d.file, d.span, "E-BOOTSTRAP-REDECLARE", "`<" + names[j] + ">` is already declared in this file (at " + offsetOf(first.span) + ") — the SPEC names no code for this; bootstrap-local")])
-                } else {
-                    out = out.concat([mkDiag(d.file, d.span, "E-BOOTSTRAP-UNSUPPORTED", "`<" + names[j] + ">` is also declared in `" + first.file + "` — a component's CSS scope key is its bare name (§9.1 DQ-7 `data-scrml=\"ConstructorName\"`), so two declarations of one name in one program would share one style scope; the SPEC does not say how they keep apart, so the bootstrap refuses it — rename one")])
+                if (first.file != d.file) {
+                    if (declRenders(files, first.nid) && declRenders(files, d.nid)) {
+                        out = out.concat([mkDiag(d.file, d.span, "E-COMPONENT-NAME-DUPLICATE", "the component `<" + names[j] + ">` is also declared in `" + first.file + "` — a component's name is its CSS scope key (`data-scrml=\"" + names[j] + "\"`, §9.1 DQ-7), so two components of one name in one program would share one style scope; a program has one component of each name, whichever files declare them (§9.1, §21.2; ruled S473) — rename one")])
+                    } else {
+                        out = out.concat([mkDiag(d.file, d.span, "E-BOOTSTRAP-UNSUPPORTED", "`<" + names[j] + ">` is also declared in `" + first.file + "` — two user declarations of one name in one program are not in the bootstrap: the language refuses two COMPONENTS of one name (E-COMPONENT-NAME-DUPLICATE, §9.1), and a pair that is not two components is not ruled, so the bootstrap refuses it too — rename one")])
+                    }
                 }
             }
             j = j + 1
         }
         return out
+    }
+
+    // s473 — is the user declaration `nid` a COMPONENT (written with `renders`,
+    // §66.15.1) — the declarations that carry a CSS scope key (§9.1 DQ-7)? A
+    // declaration is a top-level item of its file or an item of its `<program>`.
+    fn declRenders(files: FileAst[], nid: int) -> boolean {
+        for (const f of files) {
+            for (const it of f.items) {
+                for (const d of declsOfItem(it)) {
+                    if (d.nid == nid) return d.renders is given
+                }
+                const p: AProgram | not = programOfItem(it)
+                if (p is given) {
+                    for (const pit of p.items) {
+                        for (const d of declsOfItem(pit)) {
+                            if (d.nid == nid) return d.renders is given
+                        }
+                    }
+                }
+            }
+        }
+        return false
     }
 
     // Two functions of one name. In one file that is a file-scope duplicate:
@@ -15426,10 +15483,10 @@ ${
     //     local variable with the same name as a registered state cell is
     //     `E-NAME-COLLIDES-STATE`"; §7.6.1: "A V5-strict structural cell `<x>`
     //     and a local `let x` cannot coexist in the same file scope."
-    //   - a type, or a user declaration, of the name in the same file: the SPEC
-    //     names no code (a type is not a value binding) — the bootstrap-local
-    //     E-BOOTSTRAP-REDECLARE, as for the other SPEC-silent collisions above
-    //     (`E.V` / `<Card>` beside a constant `E` / `Card` would read two ways).
+    //   - a type, or a user declaration, of the name in the same file: s473 —
+    //     E-SCOPE-010 too (§7.6, S473: a file-scope name is bound once "whatever
+    //     it names"; ruled S473 "`<card>` beside `fn card`: REFUSED"; was the
+    //     bootstrap-local E-BOOTSTRAP-REDECLARE).
     // A function-body local or a parameter of the name SHADOWS it (§7.6 "scoped
     // to that function"; §7.3.3 shadowing in a nested scope is legal) — no report.
     fn dupConsts(t: Tables) -> Diag[] {
@@ -15450,7 +15507,7 @@ ${
                 if (f.file == c.file && f.name == c.name) out = out.concat([mkDiag(c.file, c.span, "E-SCOPE-010", "`" + c.name + "` is also a function of this file (at " + offsetOf(f.span) + ") — a file-scope name is bound once: duplicate binding in file scope (§7.6)")])
             }
             for (const ty of t.types) {
-                if (ty.file == c.file && ty.name == c.name) out = out.concat([mkDiag(c.file, c.span, "E-BOOTSTRAP-REDECLARE", "`" + c.name + "` is also a type of this file (at " + offsetOf(ty.span) + ") — a constant and a type of one name would read two ways (`" + c.name + ".x`); rename one (the SPEC names no code for this; bootstrap-local)")])
+                if (ty.file == c.file && ty.name == c.name) out = out.concat([mkDiag(c.file, c.span, "E-SCOPE-010", "`" + c.name + "` is also a type of this file (at " + offsetOf(ty.span) + ") — a file-scope name is bound once, whatever it names: duplicate binding in file scope (§7.6; ruled S473); rename one")])
             }
             for (const d of t.decls) {
                 if (d.file == c.file) {
@@ -15459,7 +15516,7 @@ ${
                             if (fi.sym.hint == c.name) out = out.concat([mkDiag(c.file, c.span, "E-NAME-COLLIDES-STATE", "`" + c.name + "` is also a cell of the program (`@" + c.name + "`, at " + offsetOf(fi.span) + ") — a local name cannot take the name of a registered state cell (§1.6, §7.6.1); rename one")])
                         }
                     } else if (d.sym.hint == c.name) {
-                        out = out.concat([mkDiag(c.file, c.span, "E-BOOTSTRAP-REDECLARE", "`" + c.name + "` is also a declaration of this file (`<" + c.name + ">`, at " + offsetOf(d.span) + ") — rename one (the SPEC names no code for this; bootstrap-local)")])
+                        out = out.concat([mkDiag(c.file, c.span, "E-SCOPE-010", "`" + c.name + "` is also a declaration of this file (`<" + c.name + ">`, at " + offsetOf(d.span) + ") — a file-scope name is bound once, whatever it names: duplicate binding in file scope (§7.6; ruled S473); rename one")])
                     }
                 }
             }
