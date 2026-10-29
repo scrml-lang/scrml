@@ -177,6 +177,12 @@ describe("`match` arms and labels", () => {
   test("review #1631 F1: a literal `match` with no wildcard may fall through, so the `break` after it is reached", () => {
     expect(fnCodes(`        let n = 0;\n        const xs = for { n = n + 1; lift n; match n { 1 :> { continue; }, 2 :> { continue; } } break; };\n        return xs.length;`)).toEqual(["W-MATCH-002"]);
   });
+  test("review #1631 r1 R1-1: a lone `not :>` arm over `T | not` falls through for a value, so what follows it is reached", () => {
+    // c1: the `break` after it is reachable — only W-MATCH-002, as on base
+    expect(codes(prog(`${ERR}\n    function f(m: int | not) -> int {\n        const xs = for { lift 1; match m { not :> { continue; } } break; };\n        return xs.length;\n    }`, `        <p id="o">\${f(1)}</p>`))).toEqual(["W-MATCH-002"]);
+    // c8: the `lift` after it is reachable — no E-LOOP-007
+    expect(codes(prog(`${ERR}\n    function f(m: int | not) -> int {\n        const xs = for (i of 0..3) { match m { not :> { continue; } } lift i; };\n        return xs.length;\n    }`, `        <p id="o">\${f(1)}</p>`))).toEqual(["W-MATCH-002"]);
+  });
   test("review #1631 F1: a `!{}` guard whose arms all leave does not end the path (its subject may succeed)", () => {
     expect(codes(prog(`${ERR}\n    function f() -> int {\n        let i = 0;\n        const xs = for { i = i + 1; lift i; h(i) !{ _ :> { continue; } }; break; };\n        return xs.length;\n    }`, `        <p id="o">\${f()}</p>`))).toEqual([]);
   });

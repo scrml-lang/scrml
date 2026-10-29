@@ -26,3 +26,9 @@ Ruling (S472 "five PA recs", item 5, `scrml-support/user-voice-scrml.md`, verbat
 - Measured: the corpus (2,858 files, the reviewer's list) was run at 717e6c2 and again with the fix, comparing every diagnostic code per file. 0 files changed, 0 crashes.
 - SPEC: rule 10 no longer says "fails closed". It is now a syntactic guard for the named forever heads, and F4 (`for (true && true)`) is named as not caught. The `if (false)` bullet is now "an implementation is not required to evaluate conditions, so a `break` under any condition counts as reachable". The `fail` / `?` addition is marked as a PA reading in rule 10 and in the §34 row. The ended-path statements are listed. The Tier-0 emit line ref is now :12284.
 - Tests: 33 (8 new). The file finishes standalone in about 46 s wall, of which about 40 s is the impl#1 bundle build.
+
+## 2026-10-29T05:45Z — review round 2 (r1 re-review, FIX-FIRST trivial)
+- R1-1: `armsExhaustive` now treats "no literal arms" as exhaustive only when at least one VARIANT arm is present. A lone `not :>` arm over `T | not` falls through. Repros c1 (`break` after it) and c8 (`lift` after it) are both now W-MATCH-002 only, as on base, and are pinned as tests.
+- Added a comment at `armsExhaustive`: it reads patterns only, so re-check it when arm guards land.
+- SPEC: the E-LOOP-007 tightening is named in §49.6 rule 10's reachability bullet and in the E-LOOP-007 §34 row. The Tier-0 emit ref is now :12299.
+- Tests: 34 pass. Corpus vs 717e6c2: 0 per-file changes.

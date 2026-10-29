@@ -12096,8 +12096,8 @@ ${
     // s473 (review #1631 F1) — a statement `match` ends the path when every arm
     // is a block that ends it and the arms take every value. Exhaustiveness is
     // read from the arms, because the tables are not built yet: a wildcard arm;
-    // or no literal arm (variant and `not` arms, whose exhaustiveness is
-    // enforced, E-TYPE-020); or literal arms that include both `true` and
+    // or no literal arm and at least one variant arm (a variant match, whose
+    // exhaustiveness is enforced, E-TYPE-020); or literal arms that include both `true` and
     // `false`. A literal match without a wildcard may fall through (W-MATCH-002),
     // so it does not end the path. A `!{}` guard never ends it, because its
     // subject may succeed.
@@ -12118,8 +12118,14 @@ ${
         return armsExhaustive(arms)
     }
 
+    // Reads the arm PATTERNS only. Re-check this when arm guards land: a
+    // guarded arm does not take every value its pattern names.
+    // No literal arm counts as exhaustive only with at least one VARIANT arm
+    // (E-TYPE-020 enforces a variant match); a lone `not :>` arm over
+    // `T | not` falls through for a value (W-MATCH-002) — review #1631 r1 R1-1.
     fn armsExhaustive(arms: AArm[]) -> boolean {
         let lits: int = 0
+        let variants: int = 0
         let sawTrue: boolean = false
         let sawFalse: boolean = false
         for (const a of arms) {
@@ -12133,6 +12139,15 @@ ${
                 .PLit(e: x) :> false
             }
             if (wild) return true
+            const isVariant: boolean = match p {
+                .PName(name: n) :> true
+                .PWild :> false
+                .PWhole(bind: b) :> false
+                .PBare(bind: b) :> false
+                .PNot :> false
+                .PLit(e: x) :> false
+            }
+            if (isVariant) variants = variants + 1
             const lit: AExpr | not = match p {
                 .PLit(e: x) :> x
                 .PWild :> not
@@ -12147,7 +12162,7 @@ ${
                 if (exprIsFalseLit(lit)) sawFalse = true
             }
         }
-        if (lits == 0) return true
+        if (lits == 0) return variants > 0
         return sawTrue && sawFalse
     }
 
