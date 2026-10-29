@@ -3029,7 +3029,7 @@ ${
 
     fn retsInExpr(cx: InferCx, e: AExpr, sc: ParamT[], stack: string[], done0: OwnT[]) -> RRets {
         const k: AExprK = e.k
-        if (isLambda(k)) return { rs: [], done: done0 }
+        if (isLambdaK(k)) return { rs: [], done: done0 }
         let done: OwnT[] = done0
         let out: RetAt[] = []
         const h: AHandled | not = handledOf(k)
@@ -3057,7 +3057,7 @@ ${
         return { rs: out, done: done }
     }
 
-    fn isLambda(k: AExprK) -> boolean {
+    fn isLambdaK(k: AExprK) -> boolean {
         return match k {
             .Lambda(params: lp) :> true
             .Name(name: n) :> false
@@ -12030,6 +12030,7 @@ ${
         st = resolveFor(withLift(env, LiftCtx.LiftTo(rs.s, false)), s, f, st)
         const lr: LiftsOf = liftsInto(st, n0, rs.s)
         if (lr.count == 0 || !liftReachable(f.body)) st = addDiag(st, env.file, f.span, "E-LOOP-007", "The loop bound to `" + b.name + "` lifts nothing on any path, so its value is always an empty tape. Add `lift <value>;` where the loop produces an element, or write the loop as a statement (§49.4.4, §49.6)")
+        if (boundLoopExitless(f)) st = addDiag(st, env.file, f.span, "E-LOOP-008", "The loop bound to `" + b.name + "` never ends: its head never stops it, and no path in its body reaches a `break` that leaves it, a `return`, a `fail` or a `?` — so its value is never produced and this code never continues (a `break` inside an inner loop leaves only that loop). Add `if (<done>) { break; }` where the loop has lifted its last element, or give it a head that ends (`for (x of xs)`, `for (cond)`) (§49.6 rule 10)")
         let lty: Type | not = lr.elem
         if (lty is given) lty = Type.Seq(lty, fixedSeq())
         if (annot is given) lty = annot
@@ -12084,12 +12085,85 @@ ${
             .If(cond: c, thenB: tb, elseB: el) :> blockEndsPath(tb) && blockEndsPathMaybe(el)
             .For(f: lf) :> loopNeverCompletes(lf)
             .Given(name: n) :> false
-            .Eval(e: x) :> false
+            .Eval(e: x) :> matchEndsPath(x)
             .Local(name: n) :> false
             .EffectStmt(w: x) :> false
             .Defer(body: x) :> false
             .Lift(what: x) :> false
         }
+    }
+
+    // s473 (review #1631 F1) — a statement `match` ends the path when every arm
+    // is a block that ends it and the arms take every value. Exhaustiveness is
+    // read from the arms, because the tables are not built yet: a wildcard arm;
+    // or no literal arm and at least one variant arm (a variant match, whose
+    // exhaustiveness is enforced, E-TYPE-020); or literal arms that include both `true` and
+    // `false`. A literal match without a wildcard may fall through (W-MATCH-002),
+    // so it does not end the path. A `!{}` guard never ends it, because its
+    // subject may succeed.
+    fn matchEndsPath(e: AExpr) -> boolean {
+        const h: AHandled | not = handledOf(e.k)
+        if (h is not) return false
+        const arms: AArm[] | not = matchArmsOf(h.how)
+        if (arms is not) return false
+        if (arms.length == 0) return false
+        for (const a of arms) {
+            const body: AArmBody = a.body
+            const ends: boolean = match body {
+                .ArmBlock(b: b) :> blockEndsPath(b)
+                .ArmExpr(e: x) :> false
+            }
+            if (!ends) return false
+        }
+        return armsExhaustive(arms)
+    }
+
+    // Reads the arm PATTERNS only. Re-check this when arm guards land: a
+    // guarded arm does not take every value its pattern names.
+    // No literal arm counts as exhaustive only with at least one VARIANT arm
+    // (E-TYPE-020 enforces a variant match); a lone `not :>` arm over
+    // `T | not` falls through for a value (W-MATCH-002) — review #1631 r1 R1-1.
+    fn armsExhaustive(arms: AArm[]) -> boolean {
+        let lits: int = 0
+        let variants: int = 0
+        let sawTrue: boolean = false
+        let sawFalse: boolean = false
+        for (const a of arms) {
+            const p: APat = a.pat
+            const wild: boolean = match p {
+                .PWild :> true
+                .PWhole(bind: b) :> true
+                .PBare(bind: b) :> false
+                .PName(name: n) :> false
+                .PNot :> false
+                .PLit(e: x) :> false
+            }
+            if (wild) return true
+            const isVariant: boolean = match p {
+                .PName(name: n) :> true
+                .PWild :> false
+                .PWhole(bind: b) :> false
+                .PBare(bind: b) :> false
+                .PNot :> false
+                .PLit(e: x) :> false
+            }
+            if (isVariant) variants = variants + 1
+            const lit: AExpr | not = match p {
+                .PLit(e: x) :> x
+                .PWild :> not
+                .PWhole(bind: b) :> not
+                .PBare(bind: b) :> not
+                .PName(name: n) :> not
+                .PNot :> not
+            }
+            if (lit is given) {
+                lits = lits + 1
+                if (exprIsTrueLit(lit)) sawTrue = true
+                if (exprIsFalseLit(lit)) sawFalse = true
+            }
+        }
+        if (lits == 0) return variants > 0
+        return sawTrue && sawFalse
     }
 
     fn blockEndsPath(b: ABlock) -> boolean {
@@ -12222,6 +12296,7 @@ ${
         const n0: int = st.lifts.length
         st = resolveFor(withLift(env, LiftCtx.LiftTo(rs.s, true)), fs, f, st)
         if (liftsInto(st, n0, rs.s).count == 0 || !liftReachable(f.body)) st = addDiag(st, env.file, f.span, "E-LOOP-007", "This `" + "$" + "{ for … }` loop lifts nothing, so it always renders nothing. Add `lift <li>…</li>;` (or `lift <value>;`) where the loop produces a row, or compute the loop in a function (§17.4, §49.4.4)")
+        if (boundLoopExitless(f)) st = addDiag(st, env.file, f.span, "E-LOOP-008", "This `" + "$" + "{ for … }` loop never ends: its head never stops it, and no path in its body reaches a `break` that leaves it — so the page never finishes rendering (a `break` inside an inner loop leaves only that loop). Add `if (<done>) { break; }` after the last row, or give it a head that ends (`for (x of xs)`, `for (cond)`) (§49.6 rule 10, §17.4)")
         for (const rsite of returnSites(f.body)) {
             st = addDiag(st, env.file, f.span, "E-BOOTSTRAP-UNSUPPORTED", "a `return` inside a `" + "$" + "{ for … }` in markup has no function to leave (§49.6 rule 6 names a function's exits; a render position has none) — compute the loop in a function and render its result")
         }
@@ -12593,13 +12668,10 @@ ${
         return !blockBreaksTo(f.body, f.label, true)
     }
 
+    // One definition of a head that never ends the loop (review #1631 F2):
+    // E-LOOP-008's `headNeverEnds` (`for { }`, no condition, a literal `true`).
     fn headAlwaysTrue(h: AForHead) -> boolean {
-        return match h {
-            .HForever :> true
-            .HCounted(init: i, cond: c) :> c is not
-            .HCond(cond: c) :> false
-            .HIter(bind: b) :> false
-        }
+        return headNeverEnds(h)
     }
 
     // Does `b` hold a `break` that leaves the loop labelled `label` — an
@@ -12634,6 +12706,174 @@ ${
             if (blockBreaksTo(b, label, direct)) return true
         }
         return false
+    }
+
+    // =========================================================================
+    // s473 — AN EXIT-LESS BOUND LOOP (SPEC §49.6 rule 10, RULED S472 "five PA
+    // recs" item 5: "An exit-less bound or Tier-0 loop is a compile error …
+    // with no reachable `break`/`return`; a statement-position `for { }` stays
+    // legal"). A loop bound as a value (a `for-binding`, a Tier-0 `${ for … }`)
+    // whose head never ends it can produce its value only by leaving its body:
+    // a `break` that leaves THIS loop, or a `return`, a `fail` or a `?` (the
+    // ways out of an infinite head, §49.3.6). With none that a path reaches, its
+    // value is never produced — a call never returns, a render never finishes:
+    // E-LOOP-008.
+    //
+    // "Reachable", for the forever heads named below (a SYNTACTIC guard — a
+    // non-literal always-true head such as `for (true && true)` is not read):
+    //   - an unlabelled `break` inside an inner loop leaves that loop only; a
+    //     `break label` counts only when the label is this loop's;
+    //   - a statement after one that always leaves its block is not reached
+    //     (stmtEndsPath, shared with E-LOOP-007: an `if` both of whose
+    //     branches leave, a `match` that takes every value and every arm of
+    //     which leaves (matchEndsPath, review #1631 F1), a loop whose head
+    //     never ends it — the same headNeverEnds, review #1631 F2);
+    //   - a `defer` body runs as its scope ends, so it is no way out;
+    //   - an arrow function's body is another function (§49.4.3): a `?` in it
+    //     leaves that function, not this loop;
+    //   - a nested `fn` / `function` declaration has no source form in a body.
+    // The bootstrap folds no constants: `if (false) { break; }` counts (the
+    // condition is not read). A head that never ends is `for { }`, a counted
+    // head with no condition, and a condition that is the literal `true` (read
+    // as written — a literal, not a fold).
+    // =========================================================================
+    fn boundLoopExitless(f: AFor) -> boolean {
+        if (!headNeverEnds(f.head)) return false
+        return !blockWayOut(f.body, f.label, true)
+    }
+
+    fn headNeverEnds(h: AForHead) -> boolean {
+        return match h {
+            .HForever :> true
+            .HCounted(init: i, cond: c) :> condNeverEnds(c)
+            .HCond(cond: c) :> exprIsTrueLit(c)
+            .HIter(bind: b) :> false
+        }
+    }
+
+    fn condNeverEnds(c: AExpr | not) -> boolean {
+        if (c is not) return true
+        return exprIsTrueLit(c)
+    }
+
+    fn exprIsFalseLit(e: AExpr) -> boolean {
+        const k: AExprK = e.k
+        return match k {
+            .Bool(v: v) :> !v
+            .Name(name: n) :> false
+            .At(name: n) :> false
+            .AtItem :> false
+            .Num(raw: r) :> false
+            .Str(v: s) :> false
+            .NotLit :> false
+            .Recovered :> false
+            .Variant(name: n) :> false
+            .Member(obj: o) :> false
+            .Call(callee: c) :> false
+            .Unary(op: o) :> false
+            .Binary(op: o) :> false
+            .Ternary(test: t) :> false
+            .Assign(target: t) :> false
+            .ArrayLit(elems: es) :> false
+            .ObjectLit(props: ps) :> false
+            .Spread(e: x) :> false
+            .Index(obj: o) :> false
+            .Lambda(params: lp) :> false
+            .Sql(q: q) :> false
+            .Handled(h: h) :> false
+            .Template(quasis: qs) :> false
+        }
+    }
+
+    fn exprIsTrueLit(e: AExpr) -> boolean {
+        const k: AExprK = e.k
+        return match k {
+            .Bool(v: v) :> v
+            .Name(name: n) :> false
+            .At(name: n) :> false
+            .AtItem :> false
+            .Num(raw: r) :> false
+            .Str(v: s) :> false
+            .NotLit :> false
+            .Recovered :> false
+            .Variant(name: n) :> false
+            .Member(obj: o) :> false
+            .Call(callee: c) :> false
+            .Unary(op: o) :> false
+            .Binary(op: o) :> false
+            .Ternary(test: t) :> false
+            .Assign(target: t) :> false
+            .ArrayLit(elems: es) :> false
+            .ObjectLit(props: ps) :> false
+            .Spread(e: x) :> false
+            .Index(obj: o) :> false
+            .Lambda(params: lp) :> false
+            .Sql(q: q) :> false
+            .Handled(h: h) :> false
+            .Template(quasis: qs) :> false
+        }
+    }
+
+    // Does a path through `b` reach a way out of the loop labelled `label`
+    // (`direct`: `b` is that loop's own body, not an inner loop's)?
+    fn blockWayOut(b: ABlock, label: string, direct: boolean) -> boolean {
+        for (const s of b.stmts) {
+            if (stmtWayOut(s, label, direct)) return true
+            if (stmtEndsPath(s)) return false
+        }
+        return false
+    }
+
+    fn blockWayOutMaybe(b: ABlock | not, label: string, direct: boolean) -> boolean {
+        if (b is not) return false
+        return blockWayOut(b, label, direct)
+    }
+
+    fn stmtWayOut(s: AStmt, label: string, direct: boolean) -> boolean {
+        const k: AStmtK = s.k
+        return match k {
+            .Break(label: l) :> (l == "" && direct) || (l != "" && l == label)
+            .Continue(label: l) :> false
+            .Return(e: x) :> true
+            .Fail(f: x) :> true
+            .Eval(e: e) :> exprWayOut(e, label, direct)
+            .Local(name: n, init: i) :> exprWayOut(i, label, direct)
+            .Lift(what: w) :> exprsWayOut(liftExprs(w), label, direct)
+            .If(cond: c, thenB: t, elseB: el) :> exprWayOut(c, label, direct) || blockWayOut(t, label, direct) || blockWayOutMaybe(el, label, direct)
+            .Given(name: n, subject: x, body: gb) :> exprWayOut(x, label, direct) || blockWayOut(gb, label, direct)
+            .For(f: lf) :> exprsWayOut(forExprs(lf), label, false) || blockWayOut(lf.body, label, false)
+            .EffectStmt(w: w) :> false
+            .Defer(body: d) :> false
+        }
+    }
+
+    // A `?` reached in the expression (it leaves the function), or a way out
+    // in one of its handling arms' blocks — never through an arrow function.
+    fn exprWayOut(e: AExpr, label: string, direct: boolean) -> boolean {
+        if (lambdaBody(e) is given) return false
+        const h: AHandled | not = handledOf(e.k)
+        if (h is given) {
+            if (howPropagates(h.how)) return true
+            for (const b of exprBlocks(e)) {
+                if (blockWayOut(b, label, direct)) return true
+            }
+        }
+        return exprsWayOut(exprKids(e), label, direct)
+    }
+
+    fn exprsWayOut(es: AExpr[], label: string, direct: boolean) -> boolean {
+        for (const x of es) {
+            if (exprWayOut(x, label, direct)) return true
+        }
+        return false
+    }
+
+    fn howPropagates(how: AHow) -> boolean {
+        return match how {
+            .Propagate :> true
+            .Guard(arms: a) :> false
+            .MatchOn(arms: a) :> false
+        }
     }
 
     // =========================================================================
@@ -13763,20 +14003,6 @@ ${
         return match f {
             .MUse(decl: d) :> true
             .MHtml :> false
-            .MEach(bind: b) :> false
-            .MErrors(of: x) :> false
-            .MSlot :> false
-            .MDb :> false
-            .MStateView(v: v) :> false
-            .MInline(v: v) :> false
-            .MStar(decl: d) :> false
-        }
-    }
-
-    fn isHtmlFact(f: ElemFact) -> boolean {
-        return match f {
-            .MHtml :> true
-            .MUse(decl: d) :> false
             .MEach(bind: b) :> false
             .MErrors(of: x) :> false
             .MSlot :> false
@@ -18014,15 +18240,6 @@ ${
         }
     }
 
-    fn isAbsentVT(v: VType) -> boolean {
-        return match v {
-            .Absent :> true
-            .Known(t: x) :> false
-            .Unknown :> false
-            .OneOf(ts: xs) :> false
-        }
-    }
-
     // s469 — `E.toEnum(s)`'s signature is `string -> E | not` (§14.4.1).
     fn toEnumArgCheck(env: TEnv, e: AExpr, args: AExpr[], ts: TypeState) -> TypeState {
         if (args.length != 1) return ts
@@ -19079,35 +19296,6 @@ ${
             }
         }
         return out
-    }
-
-    fn arrayElems(e: AExpr) -> AExpr[] {
-        const k: AExprK = e.k
-        return match k {
-            .ArrayLit(elems: es) :> es
-            .Name(name: n) :> []
-            .At(name: n) :> []
-            .AtItem :> []
-            .Num(raw: r) :> []
-            .Str(v: s) :> []
-            .Bool(v: b) :> []
-            .NotLit :> []
-            .Recovered :> []
-            .Variant(name: n) :> []
-            .Member(obj: o) :> []
-            .Call(callee: c) :> []
-            .Unary(op: o) :> []
-            .Binary(op: o) :> []
-            .Ternary(test: x) :> []
-            .Assign(target: x) :> []
-            .ObjectLit(props: ps) :> []
-            .Spread(e: sx) :> []
-            .Index(obj: ix) :> []
-            .Lambda(params: lp) :> []
-            .Sql(q: q) :> []
-            .Handled(h: x) :> []
-            .Template(quasis: qs) :> []
-        }
     }
 
     // THE INITIALIZER RULE — one rule for every annotated initializer (an
@@ -21214,16 +21402,6 @@ ${
         return "`" + cap.hint + "`"
     }
 
-    fn fieldOfCap(t: Tables, cap: Sym) -> FieldInfo | not {
-        for (const d of t.decls) {
-            for (const f of d.fields) {
-                const w: Sym | not = f.wcap
-                if (w is given && w.id == cap.id) return f
-            }
-        }
-        return not
-    }
-
     fn factFix(t: Tables, e: AExpr, f: EffectFact | not, cap: Sym) -> FixShape {
         if (isResetFact(f)) return FixShape.ResetFix
         let init: string = ""
@@ -21315,7 +21493,7 @@ ${
         return match k {
             .Num(raw: r) :> "n:" + r
             .Str(v: s) :> "s:" + s
-            .Bool(v: b) :> boolKey(b)
+            .Bool(v: b) :> litBoolKey(b)
             .NotLit :> "not"
             .Variant(name: n) :> "v:" + n
             .Unary(op: o, e: x) :> negKey(o, x)
@@ -21339,7 +21517,7 @@ ${
         }
     }
 
-    fn boolKey(b: boolean) -> string {
+    fn litBoolKey(b: boolean) -> string {
         if (b) return "b:true"
         return "b:false"
     }
