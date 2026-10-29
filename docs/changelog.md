@@ -2,6 +2,16 @@
 
 A rolling log of what just landed and what's actively underway in the compiler. For the full spec and pipeline docs see `compiler/SPEC.md` and `compiler/PIPELINE.md`.
 
+## S472 — 2026-10-27/28 (bryan · theRog) — 14 PRs: the bootstrap gained import/export visibility, `import:host` (gated to the compiler's own stdlib), payload-variant values, position and part writes, and file-scope `const`; six tooling gate fail-opens closed; ~115 review markers recorded
+
+- **Bootstrap:** visibility at every use, by (file, kind, name) (#1606). `import:host` parse + gate, anchored to the compiler's own `stdlib/` realpath so no adopter manifest can admit it (#1607). Payload-variant values `E.V(…)` (#1608). `a[i] = v` and `x.f = v` through the one tape-grant reader (#1610). File-scope `const`, emitted once per artifact (#1617). Conformance PASS 254 → 259, FAIL 51 → 49.
+- **Tooling (#1620):** a facts.ts crash no longer passes as "stale"; the browser baseline stopped masking two resolved guards; the await probe pack has a positive control; pre-commit runs the slices on `stdlib/` changes; the claim-gate banner exemption is enforced; inbox-debt counts every `needs:` as owed.
+- **Rulings (user-voice S472):** stray `;` after a closer item is an error (§7.2.2); `<db>` body is item-only, db cells are per-request server cells, db-body functions are program-level; host function type = typed wrapper + return-point decode; `scrml:math` ships the S469 API with `minOf`/`maxOf`; outer `replace` never overrides inner tapes (recursive), permutations exempt; `<link rel=stylesheet>` data-bound href refused; quoted-style `${}` through `cssValueOf`; exit-less bound loop is an error; `form="id"` joins that form's gate.
+- **Review debt:** boot probe actually read ~139 owed (not 12). 68 + 19 + ~30 markers recorded; ~22 mixed PRs remain.
+- **In flight at wrap (reviewed or drafted, not landed):** #1613 #1615 #1616 #1619 #1621 #1622 — see hand-off §4.
+- **Gap rollup:** HIGH 265 · MED 700 · LOW 554.
+- **Lessons:** brief rulings from user-voice, not the hand-off paraphrase (S471's F0 line was inverted); compile before briefing a port (md was far from "closest"); the claim gate is CI-only; 9+ lanes on theRog push the host to load ~17 and time out the hook.
+
 ## S471 — 2026-10-27 (bryan · theRog) — 16 PRs: impl#1 narrowed to "only what the bootstrap needs"; the bootstrap gained stdlib imports, defer and waiting in loops, lin, and a parser batch; dpa-075 ruled end to end
 
 - **Policy (ruled):** impl#1 work is now ONLY what building/testing the bootstrap needs, breakage blocking flogence or bryan's tools, or Peter's lane. No impl#1 security lanes; open impl#1 security gaps are tagged `defer=impl1-s471-policy`. Making `windows` a required check is dropped.

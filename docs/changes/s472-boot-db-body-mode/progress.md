@@ -111,3 +111,8 @@ Ruling: scrml-support/user-voice-scrml.md "⭐ RULED — `<db>` body + client re
   E-FORM-OWNER-UNRESOLVED). known-gaps: no id lost. FACTS.md = origin/main (auto). bootstrap-conformance.md regenerated.
 - Semantic: the bootstrap bundle builds under impl#1 (no E-TYPE-020 from InstRef.Kid / InstRef.HandleOf / View.Reach);
   mountedInstances moved to core.scrml, no branch-side use.
+
+## S473 landing-front round 3 — 2026-10-28
+- Merged origin/main 521d06c4f (#1616, #1624). Conflicts: SPEC-INDEX.md (generated; `git-merge-generated.ts --regen`, --check OK),
+  severity.scrml (generated; regenerated, 211 codes, --check current). known-gaps ids: main 2445, branch 2449, result 2449, none lost.
+  bootstrap bundle builds; bootstrap-conformance.md unchanged (current).
