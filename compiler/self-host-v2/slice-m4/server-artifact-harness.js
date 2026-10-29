@@ -151,7 +151,15 @@ export function pathOf(routes, fn) {
 export function bridge(srv) {
   // a page served from an origin (happy-dom starts at about:blank, where a document has no cookies)
   if (globalThis.happyDOM && globalThis.location && globalThis.location.protocol === "about:") globalThis.happyDOM.setURL("http://localhost/");
-  return async (path, init) => {
+  return async (target, init) => {
+    // s473 — the runtime addresses its own origin with an ABSOLUTE URL
+    // (`ownOriginUrl`); the server artifact is reached by path. A request for
+    // any other origin is not this server's: a browser would send it elsewhere.
+    const u = new URL(String(target), globalThis.location ? String(globalThis.location.href) : "http://localhost/");
+    if (globalThis.location && u.origin !== new URL(String(globalThis.location.href)).origin) {
+      throw new TypeError("bridge: a request for another origin (" + u.origin + ")");
+    }
+    const path = u.pathname + u.search;
     const headers = { ...(init.headers ?? {}) };
     const jar = globalThis.document ? globalThis.document.cookie : "";
     if (jar) headers.Cookie = jar;

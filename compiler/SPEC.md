@@ -113,6 +113,7 @@
 65. [The scrml-native CSS Model](#65-the-scrml-native-css-model--predictable-cascade-free-styling)
 66. [Declarations, Instances, and Value Contracts](#66-declarations-instances-and-value-contracts)
 67. [The `<md>` Element — Markdown as Declared Prose](#67-the-md-element--markdown-as-declared-prose)
+68. [Long-Running Programs — `<program kind="service">` (DRAFT)](#68-long-running-programs--program-kindservice-draft)
 
 ---
 
@@ -1895,6 +1896,11 @@ An event-handler attribute additionally admits the `${…}` expression form (§5
      - *Event-handler text from data (S457).* The unquoted event forms `onclick=f(x)` and `onclick=${() => f(x)}` are wired as listeners and never write the attribute. In `<each>` rows and `lift` markup every attribute rule 1's name test makes an event handler (any case, `on:x` included) is wired as a listener for the lowercased event name, an undeclared call-site attribute written onto an expanded component root included (`lift <Btn onClick=it.code/>` with `const Btn = <button>b</button>`, no `props` block, registers a `click` listener; it never writes handler text). A DECLARED prop never reaches the root (§15.10, S458 "D1"). (The undeclared fall-through is the legacy `const X = <…>` form's only; in the §66 dialect it is `E-DECL-USE-ATTR`, §66.6.9.) Where an emitter would instead WRITE an `on…` attribute from data — a spelling it does not wire as a listener, such as `ONCLICK=${…}` at top level — the write SHALL be a compile error (E-ATTR-INTERP-EXECUTABLE) naming the lowercase spelling that is wired; the refusal applies wherever such a write is emitted. JavaScript is never built from data.
   > **Provenance (S457 additions — SVG animation values, `srcdoc` in every form, event-handler text from data):** ruling:user-voice-scrml.md S456 "your recs on 1 and 2" (purpose: "JavaScript is never built from interpolated text"; "so a `javascript:` URL cannot be built from data"; `srcdoc` named) and S457 "a now with c discussed for later" (runtime guard on data-supplied URL attribute writes) — PA reading recorded with dispatch `s457-executable-sinks-srcdoc-svg`: an animation value that writes a URL attribute is a URL attribute write; every data form into `srcdoc` is the same sink as the quoted one; an emitter's text write of an event attribute is handler text built from data. Chromium-confirmed sinks (`<set attributeName="href" to=…>` runs on click; `<iframe srcdoc=${…}>` runs the data). **Direction of change:** newly-rejecting (the three bullets above; measured corpus impact recorded with the dispatch) and semantics-changed for rule 3 (an animation value with a non-admitted scheme now becomes `about:blank`); the expression form `to=${…}` on `<set>` / `<animate>`, previously DROPPED silently from the emitted program, is now lowered (newly-accepting, guarded).
   > **Provenance:** ruling:user-voice-scrml.md S456 "your recs on 1 and 2" — refuse `${…}` in quoted event attributes everywhere, and in URL attributes whose value begins with a scheme, plus `srcdoc` · **supersedes:** nothing ruled — the §3 table, §4.18 and §5.5.3 sanction `${…}` in quoted attributes generally; this carves event attributes and scheme-led URL attributes out of that sanction. The safe-scheme set (`http` / `https` / `ftp` / `mailto` / `tel` / `sms`, plus raster `data:image/…` on image sources), the event-attribute test (any `on…` name except the exact words `one` / `online` / `onboarding` — S239 round 2 inverted a browser-handler name list that missed SVG `onbegin` and 18 other Chromium handlers), and the post-substitution / post-`^{}` scope were fixed in the S456 S239 review round (F1–F3); the safe-scheme set is the implementation's reading of "begins with a scheme" against the ruling's stated purpose ("so a `javascript:` URL cannot be built from data").
+- **Data never chooses where a form posts or where the page goes (S473).** Names and tags compared ASCII case-insensitively; a value is *static* only when it is a quoted string literal — `name=@x`, `name=(…)`, `name=ident`, a call, an `<each>` row's field and a value a declaration's field supplies (reported once, at the definition) are data.
+  1. *Form submission targets.* An `action` on a `<form>` whose value is not static, and a `formaction` (on a `<button>` / `<input>`, and on any other element — fail closed) whose value is not static, SHALL each be a compile error (E-ATTR-FORM-ACTION). A form's submission carries every field of the form — a password included — to the URL its `action` (or the submitting button's `formaction`) names, and rule 3's scheme guard admits any `https:` origin. A static `action` / `formaction`, an off-origin one included, stays legal: the author wrote it (its scheme is judged by E-ATTR-STATIC-EXECUTABLE as before). An `action` on any other element is not a submission target and is not judged here. *Form owner (S473 PA ruling, extends round 2 item 1).* Governing ruling: *"Form `action` / `formaction` from data: REFUSED unless static."* Data never chooses which form a control submits with: a `form` attribute (the HTML form owner, any element) whose value is not static SHALL be a compile error (E-ATTR-FORM-ACTION). A data form owner moves the control — a password included — into another form, and that form's submission sends it to that form's URL (an author-written off-origin form counts). A static `form="f1"` stays legal and is judged by §55.17.3 as before.
+  2. *Refresh pragmas.* On a `<meta>`, an `http-equiv` whose value is not static, and a `content` whose value is not static while the element's `http-equiv` refreshes or is computed, SHALL each be a compile error (E-ATTR-META-REFRESH). An `http-equiv` *refreshes* when its static text holds `refresh` anywhere, ASCII case-insensitive (a superset of the browser's keyword test); a static text holding `&` (a character reference) or `${` is unprovable and counts as computed. A refresh `<meta>` navigates the whole page to the URL in its `content`. A static refresh (`<meta http-equiv="refresh" content="30;url=/next">`) and a data `content` on a `<meta name=…>` or beside a static non-refresh `http-equiv` stay legal.
+  Every runtime path that writes one of these attributes (`form` included) from data SHALL refuse the write (fail closed): the attribute is removed, and the refusal reports once to scrml's logging surface (§19.6.8 B5) without the value.
+  > **Provenance:** ruling:user-voice-scrml.md "S473 owner questions round 2" item 1 — *"Form `action` / `formaction` from data: REFUSED unless static."* — and item 2 — *"`<meta http-equiv="refresh">` from data: REFUSED."* (S473 ruling; both proven in Chromium per the ruling). The form-owner sentence is a PA ruling (S473, fix round 1 of #1641; review F1, Chromium-proven: a data `form=` moved a password into an author-written off-origin form, and submitting it POSTed the password there), extending item 1. Readings recorded with the dispatch (`s473-boot-form-action-meta-refresh-guard`): `formaction` is refused on every element (it is inert off `<button>` / `<input>`); a data `http-equiv` is refused whatever the `content` (it could become `refresh`); the code names are lane-chosen. Closes gap g-boot-meta-refresh-content-from-data-s472. **Direction of change: newly-rejecting** — before, the bootstrap compiled `<form action=@u>`, `<button formaction=@u>` and `<meta http-equiv="refresh" content=@u>`, and its runtime wrote them (rule 3 admits `https:`; `content` is not a URL attribute). Emitted by the bootstrap (`compiler/self-host-v2/analyze.scrml`; the runtime wall is `slice-m1/runtime/runtime.js` `attr`); impl#1 does not implement it yet (S471 TS policy — g-impl1-form-action-meta-refresh-from-data-s473).
 - **Data-supplied URL schemes — runtime guard (rule 3, S457).** Where the scheme of a URL-valued attribute comes from data, the compiler cannot judge it, so the emitted program SHALL judge it on every write. This is a runtime rule: no diagnostic code, no compile refusal.
   - *Covered writes.* Every write of a URL-valued attribute (the rule 2 list, scoped to its element as below) onto an element, in every markup position rule 2 names — top level, component bodies after expansion, slot content, `<each>` rows, engine state-children, `<match>` arms, `lift` markup — whose value the compiler cannot prove safe: (i) a quoted value containing `${…}` whose LITERAL text before the first `${` commits to no scheme (it is empty, or has no complete scheme and no `/`, `?` or `#` — `href="${url}"`, `src="java${x}"`); (ii) every non-literal value — `href=${expr}`, `href=@cell` where it binds, a call-ref value, a component-substituted value, an `<each>` row's `src=@.img`. The write is judged when the element is built AND on every reactive re-write when a dependency changes. A server-rendered first paint (§52.8 rows) that writes such an attribute SHALL apply the same judgment before the HTML leaves the server. A quoted value whose literal prefix already proves a relative URL or a safe scheme is admitted by rule 2 and is not re-judged.
   - *SVG animation values (S457).* A write of `to` / `from` / `by` / `values` on an SVG animation element that rule 2 makes a URL-valued attribute (its `attributeName` names a URL-valued attribute, or is not a static string) is a covered write, in every form above. The judgment is made against the animated attribute (`"about:blank"` replaces the whole value); `values` judges every `;`-separated entry, and its quoted form is judged whenever it interpolates (any entry may be data-led). When `attributeName` is not a static string, the value is judged as a URL on an unknown attribute (no raster `data:image` admission).
@@ -1903,6 +1909,8 @@ An event-handler attribute additionally admits the `${…}` expression form (§5
   - *Blocked.* Any other value SHALL be written as `about:blank` instead, and the write SHALL report once to scrml's logging surface (§19.6.8 B5) naming the attribute and the element. The report SHALL NOT contain the blocked value (it is data, and may be sensitive).
   - *`<md>` (S462).* The `a href` and `img src` that an `<md>` builds (§67.6) are URL-valued attribute writes under these rules: a literal destination in a static body is judged by rule 2's test at compile time (an unadmitted scheme is `E-MD-URL-SCHEME`, §67.6); a destination holding a `${…}` atom (§67.4) and every `<md of=…/>` destination (§67.7) is a covered write of this rule. The same test and safe sets — one definition. *(Provenance: ruling:user-voice-scrml.md S462 `<md>` F2 "yes a." — "same §5.2 URL guard as static `<md>`".)*
   > **Provenance:** ruling:user-voice-scrml.md S457 "a now with c discussed for later" (option (c), a `url` refinement type, was then dropped — S457 "ok we can drop c": this runtime guard is the permanent floor) · supersedes: §5.2 rule 2's sentence *"A value whose literal prefix commits to no scheme (`href="${url}"`) is not covered by this rule; the scheme there comes from the data."* (the data-supplied case is now guarded at runtime) · The safe set is the PA reading recorded with the ruling ("one set, one reader"). The element scope is the PA's S457 addendum to the dispatch (a component prop or a non-URL use of `data` / `icon` / `cite` / `action` / `background` / `profile` must not be rewritten); rule 2's compile-time refusal stays element-insensitive. **Direction of change: semantics-changed** — only for a covered write whose value carries a non-admitted scheme (`javascript:`, `vbscript:`, `data:text/html`, …), which now becomes `about:blank` plus a log line; every admitted value is written unchanged, and every proven-safe or non-URL write is byte-identical in the emitted program.
+- **Data never moves the document base (S473).** A `<base>` (tag compared case-insensitively) whose `href` (any case) is not a static string — `href=@u`, `href=(…)`, `href=name`, a call, an `<each>` row's field, a value a declaration's field supplies (reported once, at the definition) — SHALL be a compile error (E-ATTR-BASE-HREF). The document's base URL resolves every relative URL on the page — links, form actions, and scrml's own requests — and rule 3's scheme guard admits `https:`, so a base that data chooses moves them all to another origin. A static `href` (`<base href="/app/">`) stays legal. Every runtime path that writes a `<base>`'s `href` from data SHALL refuse the write (fail closed). Whatever the source of a `<base>` — a static one included — the runtime SHALL address its own requests (a server-function call, §12.3) by an absolute URL resolved against the document's effective origin, never against its base URL: an `http:` / `https:` document's own URL, or, for an `about:` document (`about:srcdoc`, an `about:blank` its creator opened), the `http:` / `https:` origin it inherits. Such a request SHALL be sent only to an `http:` / `https:` URL of that same origin, and to no other origin or scheme (a `data:`, `javascript:`, `blob:` or `file:` URL is never sent, and two opaque origins are never the same origin); where the document has no such origin — an opaque origin (`file:`, `data:`, a sandboxed document) or an `about:` document whose inherited origin is opaque — it SHALL make no request (the call fails as `Transport(Unreachable)`, §19.9.10).
+  > **Provenance:** PA ruling S473 (dispatch `s473-boot-base-href-guard`; no user-voice entry of its own) — the governing reason is the S472 `<link>` stylesheet ruling's (ruling:user-voice-scrml.md S472 "⭐ RULED — five PA recs" item 3, *"A data-bound `href` on a `<link>` whose `rel` contains `stylesheet` (or is computed) is REFUSED."*): data never chooses what governs the whole page; the document base is that class. Corpus measured before the change: 0 `<base>` elements (data-bound or static) in stdlib, examples, samples and conformance. The code name `E-ATTR-BASE-HREF` is PA-chosen. (gap g-boot-base-href-from-data-retargets-server-calls-s473; #1635 review F2, Chromium-proven: `<base href=(@c)>` moved `document.baseURI`, and the runtime's `fetch("/_scrml/call/N")` went to the data's origin with its body and its `X-CSRF-Token`.) · **Direction of change: newly-rejecting** — before, the bootstrap compiled `<base href=(@u)>` and its runtime wrote it; and **semantics-changed** for the runtime's request URL (a path-absolute route path is now sent as the absolute same-origin URL; a document with no http(s) origin of its own or inherited makes no request — before, a `file:` or opaque-origin document sent the path-relative request wherever its base pointed; review of #1637 F1/F2). Emitted by the bootstrap (`compiler/self-host-v2/analyze.scrml`; the runtime half is `slice-m1/runtime/runtime.js` `attr` / `call`); impl#1 does not implement it yet (S471 TS policy — g-impl1-runtime-fetch-follows-base-href-s473).
 - **Data-supplied stylesheets (S472).** A `<link>` (tag compared case-insensitively) whose `href` (any case) is not a static string — `href=@u`, `href=(…)`, `href=name`, a call, an `<each>` row's field, a value a declaration's field supplies (reported once, at the definition) — and whose `rel` contains the text `stylesheet` (ASCII case-insensitive, anywhere in the value: `rel="stylesheet"`, `rel="alternate stylesheet"`) or is not a static string (`rel=@r`, `rel=(…)`) SHALL be a compile error (E-ATTR-STYLESHEET-HREF). A whole stylesheet that data chooses does more than an inline `style` can (an attribute selector's `url(…)` reads the page's input values out; one rule covers the page), and rule 3's scheme guard admits it (`https:`). A static `rel` whose text holds a `&` (a character reference: `style&#115;heet` is `stylesheet` to the browser) is not provably free of the text and is judged as not static. Not refused: a static `href` (`<link rel="stylesheet" href="/app.css">`), and a data `href` on a `<link>` whose static `rel` holds no `stylesheet` (an icon — rule 3 still judges its scheme). Every runtime path that writes a `<link>`'s `href` from data SHALL refuse the write when the element's `rel` contains `stylesheet` or was itself written from data (fail closed). To switch sheets, choose between static `<link>`s with `if=`, or carry the dynamic part as a `#{}` rule's `@cell` (§25.7).
   > **Provenance:** ruling:user-voice-scrml.md S472 "⭐ RULED — five PA recs" item 3: *"A data-bound `href` on a `<link>` whose `rel` contains `stylesheet` (or is computed) is REFUSED."* (g-boot-link-stylesheet-href-from-data-s472) · PA readings (s473-boot-svg-css-url-guard): "contains" is the substring test, a superset of HTML's token test (fail closed); a `&` in a static `rel` makes it computed; the code name `E-ATTR-STYLESHEET-HREF` is PA-chosen · **Direction of change: newly-rejecting** — before, the bootstrap and impl#1 compiled `<link rel="stylesheet" href=(@u)>` and Chromium fetched the sheet (S239 review of #1615, F2). Emitted by the bootstrap (`compiler/self-host-v2/analyze.scrml`); impl#1 does not emit it yet (S471 TS policy).
 - **Data-supplied CSS-url attributes — runtime guard (S473).** Some attributes the browser reads as a CSS value whose grammar admits a `<url>` or an `<image>`, and a `url(…)` there is a network fetch (Chromium-verified: `fill="url(https://…)"` fetches on first paint). These are the *CSS-url attributes*: `fill`, `stroke`, `marker`, `marker-start`, `marker-mid`, `marker-end`, `clip-path`, `mask`, `filter`, `cursor`, `color-profile`. The list is the SVG presentation attributes whose CSS value grammar admits `<url>` / `<image>`: SVG 2 §13 Painting (`fill` / `stroke` `<paint>`; `marker-start` / `marker-mid` / `marker-end` `none | <url>`; the `marker` shorthand); CSS Masking 1 (`clip-path` `<clip-source>`; `mask`, whose `<mask-reference>` is `<image> | <mask-source>`); Filter Effects 1 (`filter`); CSS Basic UI 4 §5.1 and SVG 2's presentation-attribute table (`cursor`); SVG 1.1 ch. 12 (`color-profile`, obsolete). `marker`, `mask`, `cursor` and `color-profile` are kept although a Chromium sweep did not fetch through them as attributes (fail closed). Like rule 3, this is a runtime rule with no diagnostic code and no compile refusal:
@@ -23670,13 +23678,15 @@ host-JS precedent the lowering follows); §19.9.3 / §19.9.5 / §19.9.9 (body-sp
 A **trap** is a defined runtime error: a condition the language defines as an error, that the compiler cannot
 always rule out before the program runs, and that is **not a value of any `!` error type**.
 
-**The kinds.** v1 has ~~one general trap~~ ~~two traps~~ three traps *(S472: `E-HOST-VALUE-MISMATCH-RT` added — ruling:user-voice-scrml.md S472 "host function type, math API, remaining review debt" item 1; direction of change: semantics-defined)* *(S469: `E-INT-CONVERSION-RT` added — ruling:user-voice-scrml.md S469 "⭐ RULED — conversions: lossy number → int is named, round needs a mode" — "NaN, ±∞ or a value beyond exact-int range is a defined runtime error"; direction of change: semantics-defined)*:
+**The kinds.** v1 has ~~one general trap~~ ~~two traps~~ ~~three traps~~ ~~four traps~~ five traps *(S473, DRAFT: `E-HOST-THROW-RT` added with §21.3.3 — ruling:user-voice-scrml.md S473 "⭐ RULED — S473 PA recs, all" item 4; landed in §21.3.3 and §34 by #1630, row added here by #1644; direction of change: semantics-defined; Nominal / spec-ahead)* *(S473, DRAFT: `E-SERVICE-STOP-CODE-RT` added with §68 — ruling:user-voice-scrml.md S473 "⭐ RULED — long-running program kind, owner questions Q1–Q4 (PA recs)"; direction of change: newly-accepting (a new kind); Nominal / spec-ahead)* *(S472: `E-HOST-VALUE-MISMATCH-RT` added — ruling:user-voice-scrml.md S472 "host function type, math API, remaining review debt" item 1; direction of change: semantics-defined)* *(S469: `E-INT-CONVERSION-RT` added — ruling:user-voice-scrml.md S469 "⭐ RULED — conversions: lossy number → int is named, round needs a mode" — "NaN, ±∞ or a value beyond exact-int range is a defined runtime error"; direction of change: semantics-defined)*:
 
 | Code | Raised by | Section |
 |---|---|---|
 | `E-INDEX-OUT-OF-RANGE-RT` | an index read `xs[i]` with `i < 0` or `i >= xs.length`; `s[i]` out of range; a negative computed `slice` position, `repeat` count or `padStart` / `padEnd` width; a negative `xs.insert` position or index write (S469; the last three derived); an index write at or past the end — `xs[i] = v`, `xs[i].f = v` (S473, §66.12.6 rule 3) (emitted by the bootstrap's runtime; Nominal on impl#1) | §66.12.8 (moved from §49.13), §66.12.6, Appendix D.1 |
 | `E-INT-CONVERSION-RT` | `floor` / `ceil` / `trunc` / `round` of NaN, ±∞, or a value that rounds outside ±(2^53−1) (S469; ~~Nominal / spec-ahead — not yet emitted~~ emitted since S472 by `scrml:math` on both implementations — stdlib/math/host.js, compiler/runtime/stdlib/math.js) | §41.18 |
 | `E-HOST-VALUE-MISMATCH-RT` | the value a host function returned does not fit its wrapper's declared return type (S472 — the return-point decode; emitted at `compiler/self-host-v2/slice-m1/runtime/runtime.js`, the bootstrap's runtimes; Nominal on impl#1) | §21.3.1.1 |
+| `E-HOST-THROW-RT` | a `<host>` binding not declared `! HostError` whose target throws, or returns a Promise that rejects (S473 DRAFT; Nominal / spec-ahead — not yet emitted) | §21.3.3 rule 18 |
+| `E-SERVICE-STOP-CODE-RT` | `stop(code)` in a `kind="service"` program with a run-time code outside 0–255 (S473 DRAFT; Nominal / spec-ahead — not yet emitted) | §68.6 |
 
 (`E-CONTRACT-001-RT`, §53.4.5, and the loud error past 2^53 for an `int8` column, ruling:user-voice-scrml.md
 S440, are earlier runtime errors at a value boundary. They keep their own sections.)
@@ -23698,6 +23708,9 @@ S440, are earlier runtime errors at a value boundary. They keep their own sectio
   §19.10.3 names `fail`, a SQL error and the exits, not a non-`!` runtime error; this fails closed)*.
 - Every trap SHALL be reported to scrml's logging surface (§19.6.8 B5) with its code, the source location and,
   for `E-INDEX-OUT-OF-RANGE-RT`, the index and the length. It SHALL NOT be swallowed silently.
+- *(S473, DRAFT.)* In a `kind="service"` program (§68) the unit of execution is the **turn**: a trap ends its turn
+  only, is reported to stderr with its code and location, and the program carries on with its next event, unless
+  the program declares `on-trap="stop"` (then it stops with exit code 70). §68.6 is the full rule.
 
 ---
 
@@ -28608,16 +28621,29 @@ are REFUSED by impl#1, `E-IMPL1-RULED-FORM-UNSUPPORTED` (its row lands with that
 | E-FOREIGN-LANG-DUPLICATE | §23.6 | More than one top-level `<foreign lang=…>` block in a file. A file has ONE foreign-language context (the `lang=` sibling of the §44.7.1 module-with-db-context — like ONE `<db src>`) — keep a single `<foreign lang=…>` and remove the others. (S238 — Library Foreign-Language Declaration, §23.6.) | Error |
 | E-FOREIGN-LANG-IN-PROGRAM | §23.6 | A `<foreign lang=…>` block in a file that ALSO declares a top-level `<program>`. The two do not stack (§23.6.1): a program file declares the foreign-code language on the `<program lang=…>` attribute (§23.2.1). `<foreign lang>` is the library-file surface (§21.5 — a file with `export` fns and NO `<program>`). Resolution: remove the `<foreign lang=…>` block and set `lang=` on the `<program>`. (S238 — Library Foreign-Language Declaration, §23.6.) | Error |
 | E-TOOL-001 | §64.2 | A `<program kind="tool">` declares no top-level `function main` entry. A standalone tool SHALL declare exactly one `function main(args: string[])` (optionally `: number` for the process exit code; §64.3) — the emitted module runs `main(process.argv.slice(2))`. (S238 — Standalone Tool Target, §64.) | Error |
-| E-TOOL-002 | §64 | A `kind=` value other than `"tool"` (closed vocabulary v1 — `"tool"` is the only legal value; a long-running server is a `kind="tool"` whose `function main` does not return, so there is no `kind="service"`), OR a `kind=` attribute on a NESTED `<program>` (`kind=` is a TOP-LEVEL output-shape selector; nested execution-context kinds are INFERRED from attribute combinations per §43). (S238 — Standalone Tool Target, §64.) | Error |
+| E-TOOL-002 | §64, §68 | A `kind=` value other than `"tool"` or `"service"` (closed vocabulary — ~~`"tool"` is the only legal value; a long-running server is a `kind="tool"` whose `function main` does not return, so there is no `kind="service"`~~ `"tool" \| "service"`, S473), OR a `kind=` attribute on a NESTED `<program>` (`kind=` is a TOP-LEVEL output-shape selector; nested execution-context kinds are INFERRED from attribute combinations per §43). (S238 — Standalone Tool Target, §64.) Emitted at `compiler/src/type-system.ts` (impl#1, value and placement limbs). **S473:** `"service"` joins the vocabulary (§68, DRAFT) — ruling:user-voice-scrml.md S473 "⭐ RULED — long-running program kind, owner questions Q1–Q4 (PA recs)" item 1, *"This reverses S238's "no separate `kind="service"`""*; newly-accepting. The widening is **Nominal / spec-ahead — not yet emitted** by any compiler: impl#1 still reports `kind="service"` as E-TOOL-002 (carried, §34.0), and the bootstrap has no `kind=` emit yet. | Error |
 | E-TOOL-003 | §64.4 | A `<page>` route, markup body content, or client-reactive UI state appears inside a `kind="tool"` program. A tool emits a plain runnable module with no html/client to host them (§64.1). The tool body is logic + `fn`/`function`/`type` declarations + `_{}` + `?{}` + `main` only. (S238 — Standalone Tool Target, §64.) | Error |
-| E-TOOL-004 | §64.2 | `fn main` in a `kind="tool"` program. `main` is the program's IMPURE entry point (it reads argv, calls `process.exit`, and does `_{}` host I/O), and `fn` (§48.11) is the canonical PURE form which cannot hold those side effects — declare it `function main(args: string[])`. (S238 — Standalone Tool Target, §64.) | Error |
-| E-TOOL-005 | §64.6 | A `kind="tool"` module references an `_scrml_*` runtime helper the v1 tool-emit path does not yet inline. v1 inlines `_scrml_structural_eq` (§45 `==`), `_scrml_log` (§20.6), `_scrml_print` (§20.7 clean-stdout — S241), and §14 enum backing objects; NOT yet inlined → this code: value-native map/set (§59), `!{}`/`fail` error helpers, wire/protect. FAIL-CLOSED (§49 no-silent-bad-output): a loud compile error naming the missing helper instead of a silent runtime `ReferenceError` in the emitted module. Marks the v1 tool-emit helper-coverage boundary; closing a helper removes its E-TOOL-005. (S238 — ratified after the Surface-1 impl surfaced the value-native-map case.) | Error |
-| E-TOOL-006 | §64.6 | A `kind="tool"` program imports a local `.scrml` module that is NOT an importable library (§21.5 library-shaped: exports-bearing, no top-level `<program>` / page markup). Such a dep emits no runnable `<base>.js`, so the tool's emitted `import … from "./x.js"` would fail at runtime (Cannot find module) — FAIL-CLOSED (§49 no-silent-bad-output) at compile time. A tool imports only library-shaped `.scrml` or `scrml:`/vendor modules (§64.5.1). (S239 fix-round — the §64 tool-import surface.) | Error |
+| E-TOOL-004 | §64.2 | `fn main` in a `kind="tool"` program. `main` is the program's IMPURE entry point (it reads argv, calls `process.exit`, and does `_{}` host I/O), and `fn` (§48.11) is the canonical PURE form which cannot hold those side effects — declare it `function main(args: string[])`. (S238 — Standalone Tool Target, §64.) **S473:** also fires in a `kind="service"` program (§68 statements 1, 6; DRAFT) — ruling:user-voice-scrml.md S473 "⭐ RULED — long-running program kind, owner questions Q1–Q4 (PA recs)" item 1; the service trigger is **Nominal / spec-ahead — not yet emitted**. | Error |
+| E-TOOL-005 | §64.6 | A `kind="tool"` module references an `_scrml_*` runtime helper the v1 tool-emit path does not yet inline. v1 inlines `_scrml_structural_eq` (§45 `==`), `_scrml_log` (§20.6), `_scrml_print` (§20.7 clean-stdout — S241), and §14 enum backing objects; NOT yet inlined → this code: value-native map/set (§59), `!{}`/`fail` error helpers, wire/protect. FAIL-CLOSED (§49 no-silent-bad-output): a loud compile error naming the missing helper instead of a silent runtime `ReferenceError` in the emitted module. Marks the v1 tool-emit helper-coverage boundary; closing a helper removes its E-TOOL-005. (S238 — ratified after the Surface-1 impl surfaced the value-native-map case.) **S473:** also fires in a `kind="service"` program (§68 statements 1, 6; DRAFT) — ruling:user-voice-scrml.md S473 "⭐ RULED — long-running program kind, owner questions Q1–Q4 (PA recs)" item 1; the service trigger is **Nominal / spec-ahead — not yet emitted**. | Error |
+| E-TOOL-006 | §64.6 | A `kind="tool"` program imports a local `.scrml` module that is NOT an importable library (§21.5 library-shaped: exports-bearing, no top-level `<program>` / page markup). Such a dep emits no runnable `<base>.js`, so the tool's emitted `import … from "./x.js"` would fail at runtime (Cannot find module) — FAIL-CLOSED (§49 no-silent-bad-output) at compile time. A tool imports only library-shaped `.scrml` or `scrml:`/vendor modules (§64.5.1). (S239 fix-round — the §64 tool-import surface.) **S473:** also fires in a `kind="service"` program (§68 statements 1, 6; DRAFT) — ruling:user-voice-scrml.md S473 "⭐ RULED — long-running program kind, owner questions Q1–Q4 (PA recs)" item 1; the service trigger is **Nominal / spec-ahead — not yet emitted**. | Error |
 | E-TOOL-SERVE-MISPLACED | §64.9 | `serve=` on a non-`kind="tool"` top-level `<program>` (serve= selects the headless serve-target output shape, which only `kind="tool"` names), OR `serve=` on a NESTED `<program>` (a §43 worker/sidecar execution context is not a listener-owning target). Add `kind="tool"`, or remove `serve=`. (S255 — server-program-shape Fork 1A, §64.9.) | Error |
 | E-TOOL-SERVE-PORT-INVALID | §64.9 | A `serve=` value that is neither an integer literal (`serve=7878`, 0–65535 — 0 = the OS-assigned ephemeral port) nor a `${expr}` runtime port (a bare identifier / non-numeric string is neither). The serve-harness needs a concrete listen port. (S255 — server-program-shape Fork 1A, §64.9.) | Error |
 | E-TOOL-SERVE-AUTH-UNSUPPORTED | §64.9 | A `serve=` tool carries cookie-session auth at ANY locus — the program `auth="required"`/`auth="optional"` (§52.13) OR a per-channel `<channel auth="required"/"optional">` (§38.5). The headless serve-target has NO cookie session, so the routes / the §38 WS upgrade would emit with NO auth guard — FAIL-CLOSED (§49 no-silent-bad-output) rather than a silent unguarded server. Fires per offending locus. Bearer-token auth on a headless serve-target is a later unit. (S255 — server-program-shape Fork 1A, §64.9.) | Error |
 | E-TOOL-SERVE-MAIN-EXITS | §64.9 | A `serve=` tool's `function main` declares a return type. The §64.3 exit-harness (`process.exit(code)`) would kill the live serve-harness the moment `main` returns; a composing `main` MUST be no-return setup that runs BEFORE the serve-harness holds the process. Drop `main`'s return type. (S255 — server-program-shape Fork 1A, §64.9.) | Error |
 | E-TOOL-ROUTE-NEEDS-SERVE | §64.1 | An `<endpoint>` (§61) or SSE `server function* route=` (§37) appears in a `kind="tool"` program with NO `serve=` listener to host it. A non-serve tool emits no `Bun.serve`, so the route would be silently un-hosted (the tool appears to define an API but serves nothing) — FAIL-CLOSED (§49 no-silent-bad-output). Add `serve=PORT` (§64.9), or remove the route. (S255 — server-program-shape Fork 1A.) | Error |
+| E-SERVICE-RENDER | §68.2 | In a `kind="service"` program: markup that renders, a `<page>`, an `<endpoint>`, an SSE route, a nested `<program>`, or a §36 input state type. A service has no page to render into; drive the outside world from an `<effect>`, or move the markup to a web `<program>`. (S473 DRAFT.) Provenance: ruling:user-voice-scrml.md S473 "⭐ RULED — long-running program kind, owner questions Q1–Q4 (PA recs)" — *"your recs"* — and "⭐ RULED — scrml gets a long-running program kind" — *"of course we need a long-running program kind. your recs"*; design: `scrml-support/docs/deep-dives/long-running-program-kind-design-2026-10-29.md` §7. Direction of change: newly-accepting (a new kind; the code fires only on new surface). **Nominal / spec-ahead — not yet emitted by any compiler; lands with the impl** (`g-boot-kind-service-unbuilt-s473`). | Error |
+| E-SERVICE-SOURCE-PLACEMENT | §68.4, §68.9 | An event source (`<stdin>`, `<watch>`, `<onSignal>`, or the `scrml:process` child-process source) outside a `kind="service"` program, or an `<onSignal>` below the program's top level. A source delivers events to a running program. (S473 DRAFT.) Provenance: ruling:user-voice-scrml.md S473 "⭐ RULED — long-running program kind, owner questions Q1–Q4 (PA recs)" — *"your recs"* — and "⭐ RULED — scrml gets a long-running program kind" — *"of course we need a long-running program kind. your recs"*; design: `scrml-support/docs/deep-dives/long-running-program-kind-design-2026-10-29.md` §7. Direction of change: newly-accepting (a new kind; the code fires only on new surface). **Nominal / spec-ahead — not yet emitted by any compiler; lands with the impl** (`g-boot-kind-service-unbuilt-s473`). | Error |
+| E-SERVICE-SOURCE-DUPLICATE | §68.4 | A second `<stdin>` or a second `<onSignal>` in one program. A program reads stdin through one `<stdin>`; merge the arms. (S473 DRAFT.) Provenance: ruling:user-voice-scrml.md S473 "⭐ RULED — long-running program kind, owner questions Q1–Q4 (PA recs)" — *"your recs"* — and "⭐ RULED — scrml gets a long-running program kind" — *"of course we need a long-running program kind. your recs"*; design: `scrml-support/docs/deep-dives/long-running-program-kind-design-2026-10-29.md` §7. Direction of change: newly-accepting (a new kind; the code fires only on new surface). **Nominal / spec-ahead — not yet emitted by any compiler; lands with the impl** (`g-boot-kind-service-unbuilt-s473`). | Error |
+| E-SERVICE-MAIN-RETURNS | §68.3 | `main` declares a return type in a `kind="service"` program. In a service `main` is setup and returns nothing; end the program with `stop(code)`. (S473 DRAFT.) Provenance: ruling:user-voice-scrml.md S473 "⭐ RULED — long-running program kind, owner questions Q1–Q4 (PA recs)" — *"your recs"* — and "⭐ RULED — scrml gets a long-running program kind" — *"of course we need a long-running program kind. your recs"*; design: `scrml-support/docs/deep-dives/long-running-program-kind-design-2026-10-29.md` §7. Direction of change: newly-accepting (a new kind; the code fires only on new surface). **Nominal / spec-ahead — not yet emitted by any compiler; lands with the impl** (`g-boot-kind-service-unbuilt-s473`). | Error |
+| E-SERVICE-STOP-PLACEMENT | §68.7 | A `stop` call outside a `kind="service"` program that resolves to no user binding, or a `stop` reached (over the call graph) from an `<effect>` body, a `cleanup()` callback, a derived cell or a cell initializer. `stop` ends a turn: call it from an event arm, from `main`, from an `<onMount>` body (§68.3 statement 6a), or from a function only they reach. (S473 DRAFT.) Provenance: ruling:user-voice-scrml.md S473 "⭐ RULED — long-running program kind, owner questions Q1–Q4 (PA recs)" — *"your recs"* — and "⭐ RULED — scrml gets a long-running program kind" — *"of course we need a long-running program kind. your recs"*; design: `scrml-support/docs/deep-dives/long-running-program-kind-design-2026-10-29.md` §7. Direction of change: newly-accepting (a new kind; the code fires only on new surface). **Nominal / spec-ahead — not yet emitted by any compiler; lands with the impl** (`g-boot-kind-service-unbuilt-s473`). | Error |
+| E-SERVICE-STOP-CODE | §68.7 | A literal `stop` code outside 0–255. (S473 DRAFT.) Provenance: ruling:user-voice-scrml.md S473 "⭐ RULED — long-running program kind, owner questions Q1–Q4 (PA recs)" — *"your recs"* — and "⭐ RULED — scrml gets a long-running program kind" — *"of course we need a long-running program kind. your recs"*; design: `scrml-support/docs/deep-dives/long-running-program-kind-design-2026-10-29.md` §7. Direction of change: newly-accepting (a new kind; the code fires only on new surface). **Nominal / spec-ahead — not yet emitted by any compiler; lands with the impl** (`g-boot-kind-service-unbuilt-s473`). | Error |
+| E-SERVICE-RAW-EXIT | §68.7 | `scrml:process`'s `exit()` called in a `kind="service"` program. `exit()` skips teardown (`cleanup()`, closing sources); use `stop(code)`. A `process.exit` inside an opaque `_{}` is not seen. (S473 DRAFT.) Provenance: ruling:user-voice-scrml.md S473 "⭐ RULED — long-running program kind, owner questions Q1–Q4 (PA recs)" — *"your recs"* — and "⭐ RULED — scrml gets a long-running program kind" — *"of course we need a long-running program kind. your recs"*; design: `scrml-support/docs/deep-dives/long-running-program-kind-design-2026-10-29.md` §7. Direction of change: newly-accepting (a new kind; the code fires only on new surface). **Nominal / spec-ahead — not yet emitted by any compiler; lands with the impl** (`g-boot-kind-service-unbuilt-s473`). | Error |
+| E-SERVICE-STDIN-SHARED | §68.9 | A whole-stdin read (`scrml:process`) in a `kind="service"` program that declares `<stdin>`: two readers would split the stream. (S473 DRAFT.) Provenance: ruling:user-voice-scrml.md S473 "⭐ RULED — long-running program kind, owner questions Q1–Q4 (PA recs)" — *"your recs"* — and "⭐ RULED — scrml gets a long-running program kind" — *"of course we need a long-running program kind. your recs"*; design: `scrml-support/docs/deep-dives/long-running-program-kind-design-2026-10-29.md` §7. Direction of change: newly-accepting (a new kind; the code fires only on new surface). **Nominal / spec-ahead — not yet emitted by any compiler; lands with the impl** (`g-boot-kind-service-unbuilt-s473`). | Error |
+| E-SERVICE-CELL-UNSUPPORTED | §68.2 | `persist=` or `authority="server"` on a cell in a `kind="service"` program. A service cell lives in this process only. (S473 DRAFT.) Provenance: ruling:user-voice-scrml.md S473 "⭐ RULED — long-running program kind, owner questions Q1–Q4 (PA recs)" — *"your recs"* — and "⭐ RULED — scrml gets a long-running program kind" — *"of course we need a long-running program kind. your recs"*; design: `scrml-support/docs/deep-dives/long-running-program-kind-design-2026-10-29.md` §7. Direction of change: newly-accepting (a new kind; the code fires only on new surface). **Nominal / spec-ahead — not yet emitted by any compiler; lands with the impl** (`g-boot-kind-service-unbuilt-s473`). | Error |
+| E-SERVICE-STOP-GRACE-INVALID | §68.8 | `stop-grace=` that is not a positive integer literal (milliseconds), or `stop-grace=` on a `<program>` that is not `kind="service"`. (S473 DRAFT.) Provenance: ruling:user-voice-scrml.md S473 "⭐ RULED — long-running program kind, owner questions Q1–Q4 (PA recs)" — *"your recs"* — and "⭐ RULED — scrml gets a long-running program kind" — *"of course we need a long-running program kind. your recs"*; design: `scrml-support/docs/deep-dives/long-running-program-kind-design-2026-10-29.md` §7. Direction of change: newly-accepting (a new kind; the code fires only on new surface). **Nominal / spec-ahead — not yet emitted by any compiler; lands with the impl** (`g-boot-kind-service-unbuilt-s473`). | Error |
+| E-SERVICE-ON-TRAP-INVALID | §68.6 | `on-trap=` that is not the literal `"continue"` or `"stop"`, or `on-trap=` on a `<program>` that is not `kind="service"`. (S473 DRAFT; the attribute is the ruled Q3 CHANGE — *"A program opts into stop-on-trap (exit 70) with `on-trap="stop"`"*; this code is its derived validity check; the design's §7 has no such code, since the design predates the CHANGE.) Provenance: ruling:user-voice-scrml.md S473 "⭐ RULED — long-running program kind, owner questions Q1–Q4 (PA recs)" — *"your recs"* — and "⭐ RULED — scrml gets a long-running program kind" — *"of course we need a long-running program kind. your recs"*; design: `scrml-support/docs/deep-dives/long-running-program-kind-design-2026-10-29.md` §5.5 / §10 Q3 (the lifecycle the CHANGE amends). Direction of change: newly-accepting (a new kind; the code fires only on new surface). **Nominal / spec-ahead — not yet emitted by any compiler; lands with the impl** (`g-boot-kind-service-unbuilt-s473`). | Error |
+| W-SERVICE-NO-SOURCE | §68.13 | A `kind="service"` program declares no event source that can keep it live (no `<stdin>`, `<watch>`, child-process source, `<timer>`, `<timeout>`, `<poll>` or `<request>`; `<onSignal>` does not count): it quiesces right after setup, which a `kind="tool"` says better. (S473 DRAFT.) Provenance: ruling:user-voice-scrml.md S473 "⭐ RULED — long-running program kind, owner questions Q1–Q4 (PA recs)" — *"your recs"* — and "⭐ RULED — scrml gets a long-running program kind" — *"of course we need a long-running program kind. your recs"*; design: `scrml-support/docs/deep-dives/long-running-program-kind-design-2026-10-29.md` §7. Direction of change: newly-accepting (a new kind; the code fires only on new surface). **Nominal / spec-ahead — not yet emitted by any compiler; lands with the impl** (`g-boot-kind-service-unbuilt-s473`). | Warning |
+| E-SERVICE-STOP-CODE-RT | §68.7, §68.6, §19.17 | Runtime trap: `stop(code)` with a run-time code outside 0–255. Reported to stderr with its code and location; the turn asked to stop, so the program stops with exit code 70 whatever `on-trap=` says. (S473 DRAFT.) Provenance: ruling:user-voice-scrml.md S473 "⭐ RULED — long-running program kind, owner questions Q1–Q4 (PA recs)" — *"your recs"* — and "⭐ RULED — scrml gets a long-running program kind" — *"of course we need a long-running program kind. your recs"*; design: `scrml-support/docs/deep-dives/long-running-program-kind-design-2026-10-29.md` §7. Direction of change: newly-accepting (a new kind; the code fires only on new surface). **Nominal / spec-ahead — not yet emitted by any compiler; lands with the impl** (`g-boot-kind-service-unbuilt-s473`). | Runtime |
 | E-PROGRAM-001 | §4.12 | Circular `<program>` nesting detected **(Reserved / spec-ahead, S263 — no fire site: circular `<program>` nesting is unconstructable-by-construction — a lexical tree cannot contain itself and there is no include/inline mechanism; defensive guard, condition unreachable. Excluded from the freeze fireable set.)** | Error |
 | W-PROGRAM-TITLE-NESTED | §40.7 | A documentary attribute (`title=`, `description=`, `version=`, `author=`, `license=`) appears on a nested `<program>`. Documentary attributes are meaningful only at the top level (HTML `<head>` semantics); workers have no DOM `<head>`. Move the attribute to the top-level `<program>` or remove it. (Phase A1a) | Warning |
 | E-PROGRAM-002 | §40.8, §20.5.1, §4.12 | Two or more top-level `<program>` elements in ONE file (S443, same-file case only — the §40.8 cross-file case stays reserved). A `<program>` is top-level when it has no `<program>` or `<page>` ancestor, WHATEVER MARKUP WRAPS IT (§4.12, S445): a `<div>`/`<main>`-wrapped `<program>` at the file root counts; a `<program>` inside another `<program>` or a `<page>` (worker / sidecar / scoped-db, §4.12) is nested and is not counted, however much markup sits between. A file declares its top-level `<program>` exactly once; the compiler cannot tell which program's `auth=`, session and middleware settings govern the file, so the file does not compile and the build writes no output (§40.8). Before S443 a second direct top-level program was silently mis-read — `auth=` and middleware read from the FIRST program (a `<program auth="required">` after a plain one served its routes anonymously), session attributes from the LAST (a silent cookie downgrade, `g-two-programs-one-file-session-attr-last-wins`); before S445 a markup-wrapped second program was not counted at all (`g-wrapped-program-auth-silently-dropped`). Resolution: merge them into one `<program>` carrying one set of those settings, or build the second as a separate application; a second program meant as a worker, sidecar or scoped-db context goes INSIDE the first without `auth=` or session attributes (a nested `<program>` takes neither — `E-PROGRAM-NESTED-AUTH` / `E-PROGRAM-NESTED-SESSION`). In a route file of a build with an application program every `<program>` is nested (§4.12), so none of them counts here. Emitted at `compiler/src/codegen/index.ts` (the one `forEachProgramWithRole` walk shared with `E-PROGRAM-NESTED-AUTH`; the role definition is `compiler/src/program-role.ts`). Provenance: ruling:user-voice-scrml.md S443 item 3 · ruling:user-voice-scrml.md S445 (option b). | Error |
@@ -28706,6 +28732,9 @@ are REFUSED by impl#1, `E-IMPL1-RULED-FORM-UNSUPPORTED` (its row lands with that
 | E-SELECT-OPTION-NOT-VARIANT | §5.4 | A `<select>` with `bind:value` on an enum cell whose type does NOT admit `not`: a static `<option value="…">` literal names no variant of the enum. **Provenance:** ruling:user-voice-scrml.md S440 (coercion follow-ups, #4; the two-limbed PA reading, flagged for veto). **Named; impl pending — Nominal / not yet emitted**; impl#1 carries it (§34.0). | Error |
 | ~~E-ATTR-012~~ | §5.4 | **Retired (S249-drop, SPEC-cleaned S274)** — `bind:`+same-event-handler is composable by design; see `bind-value.test.js` §12/§13. | Error |
 | E-ATTR-WRITER-CONFLICT | §5.5.3, §5.5.4 | A WHOLESALE reactive value writer — `class=(expr)` / `style=(expr)` (the whole attribute) or `value=(expr)` on a form control (the `.value` property) — shares a physical DOM surface with ANOTHER writer on the SAME element, so the wholesale write would silently erase the other's work on its next reactive evaluation. Detected pairs: `class=(expr)` with `class:name=` or transition classes (`className` surface); `style=(expr)` with `if=`/`show=` or transitions (`style`/`display` surface); `value=(expr)` with `bind:value` (`.value` surface). Axiom ① (bryan's #81 ruling): each physical DOM surface has at most one wholesale owner — the diagnostic names BOTH sites and the author picks one. The conflicting attribute is NOT emitted (byte-identical to pre-#81), so an ignored error degrades to the old behavior rather than a broken one. Generic string attributes (`title=`, `id=`, `alt=`, `data-*`) have no per-token composer form and are always sole writers. (Catalog addition S268 — #81 writer-ownership Axiom ①; emitted at `compiler/src/codegen/emit-html.ts` `analyzeWriterConflict`.) | Error |
+| E-ATTR-BASE-HREF | §5.2 | A `<base>` (any tag case) whose `href` (any case) is not a static string — `href=@u`, `href=(…)`, `href=name`, a call, an `<each>` row's field, a declaration's field (reported once, at the definition). Data never chooses the document's base URL: it resolves every relative URL on the page (links, forms, scrml's own requests), so a data base moves them to another origin. Write a static `href`, or build the URLs that need a varying prefix where they are used. Judged by tag name in every namespace: a `<base>` inside `<svg>` or `<math>` (which sets no base URL there) is refused too — a harmless over-reach, fail closed. Emitted today by the bootstrap (`compiler/self-host-v2/analyze.scrml`, the attribute walk; its runtime `rt.attr` also never writes a `<base>`'s `href` from data, and `rt.call` addresses the document's own origin whatever the base). impl#1 does not emit it yet (S471 TS policy). (Added S473 — `s473-boot-base-href-guard`; PA ruling S473, the same class as ruling:user-voice-scrml.md S472 "five PA recs" item 3; code name PA-chosen.) | Error |
+| E-ATTR-FORM-ACTION | §5.2 | An `action` on a `<form>` (any tag case), or a `formaction` or `form` (the form owner) on any element, whose value (any name case) is not a static string — `action=@u`, `=(…)`, `=name`, a call, an `<each>` row's field, a declaration's field (reported once, at the definition). Data never chooses where a form is sent: the submission carries every field (a password included) to that URL, and the §5.2 rule 3 guard admits any `https:` origin; a data `form=` moves a control into another form, which posts it to that form's URL. Write a static `action` / `formaction` / `form` (an off-origin static one stays legal), or switch between static forms with `if=`. Emitted today by the bootstrap (`compiler/self-host-v2/analyze.scrml`, the attribute walk; its runtime `rt.attr` also never writes these from data). impl#1 does not emit it yet (S471 TS policy). (Added S473 — `s473-boot-form-action-meta-refresh-guard`; ruling:user-voice-scrml.md "S473 owner questions round 2" item 1, "Form `action` / `formaction` from data: REFUSED unless static."; `form=` by S473 PA ruling extending it (#1641 review F1); code name lane-chosen.) | Error |
+| E-ATTR-META-REFRESH | §5.2 | On a `<meta>` (any tag case): an `http-equiv` whose value is not a static string, or a `content` whose value is not a static string while the `http-equiv` holds `refresh` (any case, anywhere; a `&` or `${` in it is unprovable) or is not static. Data never navigates the page: a refresh `<meta>` sends the whole page to the URL in its `content`. A static refresh, and a data `content` on a `<meta name=…>` or beside a static non-refresh `http-equiv`, stay legal. Emitted today by the bootstrap (`compiler/self-host-v2/analyze.scrml`; its runtime `rt.attr` also never writes these from data). impl#1 does not emit it yet (S471 TS policy). (Added S473 — `s473-boot-form-action-meta-refresh-guard`; ruling:user-voice-scrml.md "S473 owner questions round 2" item 2, "`<meta http-equiv="refresh">` from data: REFUSED."; code name lane-chosen.) | Error |
 | E-ATTR-INTERP-EXECUTABLE | §5.2, §5.5.3, §4.18 | A quoted attribute value's `${…}` would land in text the browser EXECUTES: a quoted event-handler attribute (any `on…` name, any case, `on:`/`onserver:`/`onclient:` included, except the exact words `one` / `online` / `onboarding`) containing `${…}`; a URL-valued attribute whose literal value begins with a scheme other than `http:` / `https:` / `ftp:` / `mailto:` / `tel:` / `sms:` (`javascript:`, `vbscript:`, `data:`, … — tab/LF/CR removed, leading whitespace ignored, case-insensitive; a `\` or `&` before the scheme ends is unprovable and refused; a complete raster `data:image/…` type on an image-source attribute is admitted) and contains `${…}`; or `srcdoc` containing `${…}`. S457 additions (§5.2 rule 2 bullets): a `srcdoc` whose value is data in ANY form (`srcdoc=${…}`, `=@cell`, `=f()`, a row field, a component prop reaching it); an SVG animation value (`to` / `from` / `by` / `values` on `<set>` / `<animate>` / …) whose `attributeName` names a URL attribute (or is computed) and whose literal scheme is unsafe; an `on…` attribute an emitter would write as text from data (`ONCLICK=${…}` at top level; `<each>` and `lift` wire every `on…` name as a listener). Every position — component bodies (judged after prop substitution, every depth), `^{ emit(…) }` markup included; once per emitted attribute. Use `onclick=f(x)` / `onclick=${() => f(x)}` for handlers. **Provenance:** ruling:user-voice-scrml.md S456 "your recs on 1 and 2"; S457 additions per dispatch `s457-executable-sinks-srcdoc-svg` (data writes refused at the emitters by `codegen/url-attr-guard.ts` `refuseExecutableDataWrite`). Emitted at `compiler/src/validators/attribute-interpolation.ts` (VP-3 and the post-ME re-run in `compiler/src/api.js`, `collectExecutableSinkErrors`) and `compiler/src/component-expander.ts` (`parseComponentDef`); the `<each>` row backstop at `compiler/src/codegen/emit-each.ts`; the decision is `compiler/src/attr-injection-sink.ts`. | Error |
 | E-ATTR-QUOTED-HANDLER | §5.2 | A QUOTED value with no `${…}` on an event-handler attribute (any `on…` name, any case, `on:`/`onserver:`/`onclient:` included, except the exact words `one` / `online` / `onboarding` — rule 1's name test): `onclick="alert(1)"`. An event attribute takes logic, unquoted — `onclick=fn()`, `onclick={ … }`, `onclick=${…}`; no raw-JavaScript escape hatch. Every position §5.2 rule 2 names, an undeclared call-site attribute on an expanded component root included; once per emitted attribute. Not judged: a declared component prop, §4.17 raw-content display text. **Provenance:** ruling:user-voice-scrml.md S464 "(a) Compile error". Emitted at `compiler/src/validators/attribute-interpolation.ts` (`collectExecutableSinkErrors`, VP-3 + post-ME re-run) and `compiler/src/component-expander.ts` (`parseComponentDef`), plus markup held by an unparsed attribute expression (`collectEscapeHatchQuotedHandlerErrors`); the codegen backstop every attribute writer asks is `compiler/src/codegen/refused-lowering-errors.ts` `refuseQuotedHandlerWrite` (emit-html, emit-each, emit-lift, emit-ssr-render); the decision is `compiler/src/attr-injection-sink.ts` `isQuotedStaticHandler`. | Error |
 | E-ATTR-STATIC-EXECUTABLE | §5.2 | A STATIC attribute value (no `${…}`) the browser runs without scrml checking it: any `srcdoc` with a value (any case — point `src=` at a page; a bare `<iframe srcdoc>` stays legal), or a navigate / load attribute — ONLY `href`, `src`, `action`, `formaction`, `data` (on `<object>`), `poster`, `srcset`, `imagesrcset`, `ping`, `xlink:href`, `background`, `archive`, `codebase`, `classid`, `dynsrc`, `lowsrc`, `manifest`, `icon` (not `usemap`, a same-document reference), element-scoped as rule 3 scopes it, and SVG animation `to`/`from`/`by`/`values` when `attributeName` names one of them or is not static — whose scheme rule 2's allow-list does not admit (`href="javascript:…"`, `vbscript:`, `src="data:text/html,…"`, `webcal:`, `geo:`). Relative URLs and `http`/`https`/`ftp`/`mailto`/`tel`/`sms` stay legal, plus a raster `data:image/…` on every image-loading attribute (incl. `<link rel=icon href>` and SVG `<image href>`). Metadata URL attributes (`itemid`, `itemtype`, `cite`, `longdesc`, `profile`, …) are not judged by this static rule. Every position, every attribute writer (fail closed); once per emitted attribute. Not judged: a component prop; an `<md>`-built destination (E-MD-URL-SCHEME). **Provenance:** ruling:user-voice-scrml.md S464 "(a) Refuse both"; narrowed by S464 "(a) Narrow attrs, allow-list" (attribute list: PA reading recorded in user-voice §S464). The decision is `compiler/src/attr-injection-sink.ts` `classifyStaticExecutableAttr` (`STATIC_NAV_LOAD_URL_ATTRS`; the runtime guard's `_scrml_url_value_admitted` / `_scrml_animation_value_admitted` on the literal — one scheme definition); emitted at `compiler/src/validators/attribute-interpolation.ts` (`collectExecutableSinkErrors`, the markup-in-expression scanner) and `compiler/src/component-expander.ts` (`parseComponentDef`); codegen backstop `compiler/src/codegen/refused-lowering-errors.ts` `refuseStaticAttrWrite` (emit-html, emit-each, emit-lift, emit-ssr-render). | Error |
@@ -48627,9 +48656,14 @@ changes only the emit shape, not context resolution.
 
 `kind=` is a **top-level output-shape selector**, orthogonal to §43's nested-execution-context
 inference (worker/sidecar/wasm/server-endpoint stay inferred from attribute combinations) and unrelated
-to the §47.1.2 name-encoding "kind markers." `kind="tool"` is the ONLY value in v1 (closed vocabulary,
-mirroring §23.5.3); other values → `E-TOOL-002`. `kind=` on a NESTED `<program>` → `E-TOOL-002` (§43
-infers nested kinds).
+to the §47.1.2 name-encoding "kind markers." ~~`kind="tool"` is the ONLY value in v1~~ The vocabulary is
+`"tool" | "service"` (closed vocabulary, mirroring §23.5.3); other values → `E-TOOL-002`. `kind=` on a NESTED
+`<program>` → `E-TOOL-002` (§43 infers nested kinds). A program that keeps running and reacts to input is a
+`kind="service"` (§68, DRAFT). *(S473: `"service"` added — ruling:user-voice-scrml.md S473 "⭐ RULED —
+long-running program kind, owner questions Q1–Q4 (PA recs)" item 1, *"Q1 spelling: one kind, `<program
+kind="service">`. … This reverses S238's "no separate `kind="service"`". `kind="tool"`'s invoke-only harness and
+`serve=` stay unchanged."* Direction of change: newly-accepting. **Nominal / spec-ahead** — impl#1 still reports
+`kind="service"` as `E-TOOL-002` (a carried divergence, §34.0); the bootstrap builds §68.)*
 
 ### 64.1 Emit shape
 
@@ -48694,9 +48728,18 @@ through.
 NOT force the process to stay up — it **declines to force it down**. Natural Bun/Node event-loop
 liveness then decides: the process stays alive while there is an active handle (a `Bun.serve` server, a
 `Bun.stdin.stream()` reader) and exits 0 when the loop drains. A no-return main that holds no active
-handle after its setup exits 0 (nothing to do = done). This makes ONE `kind="tool"` cover both
+handle after its setup exits 0 (nothing to do = done). ~~This makes ONE `kind="tool"` cover both
 run-and-exit and long-running with no separate `kind="service"` and no park-boilerplate: a long-running
-server's `Bun.serve` handle keeps the process alive on its own.
+server's `Bun.serve` handle keeps the process alive on its own.~~ A long-running server's `Bun.serve` handle
+(or any other active handle a tool's setup opens) keeps the process alive on its own, with no
+park-boilerplate. This invoke-only arm is unchanged. A program whose own code keeps running and reacts to input
+(a stdin loop holding state across turns, a daemon or watcher) is a `kind="service"` (§68, DRAFT).
+*(S473: the struck sentence's "no separate `kind="service"`" claim is reversed — ruling:user-voice-scrml.md S473
+"⭐ RULED — scrml gets a long-running program kind" (*"of course we need a long-running program kind. your
+recs"*; item 1: *"`kind="tool"` stays run-to-completion"*) and "⭐ RULED — long-running program kind, owner
+questions Q1–Q4 (PA recs)" item 1 (*"This reverses S238's "no separate `kind="service"`". `kind="tool"`'s
+invoke-only harness and `serve=` stay unchanged."*). The invoke-only harness above and §64.9 `serve=` are NOT
+changed.)*
 
 The only theoretical mis-fire is a tool that starts a server AND declares `: number` and returns a code
 (the exit-harness would kill the live server). This is not guarded in v1: "you returned → you meant to
@@ -48740,11 +48783,11 @@ await-coloring). This is the tool half of the D5-GENERALIZE consumer-shaped emit
 | Code | Trigger | Severity |
 |---|---|---|
 | `E-TOOL-001` | `<program kind="tool">` with no top-level `function main` entry | Error |
-| `E-TOOL-002` | `kind=` value other than `"tool"` (closed vocab v1), OR `kind=` on a nested `<program>` (top-level only; §43 infers nested) | Error |
+| `E-TOOL-002` | `kind=` value other than `"tool"` or `"service"` (closed vocab; `"service"` added S473, §68 DRAFT, Nominal), OR `kind=` on a nested `<program>` (top-level only; §43 infers nested) | Error |
 | `E-TOOL-003` | `<page>` / markup body / client-reactive UI inside a `kind="tool"` program (no html/client emit) | Error |
-| `E-TOOL-004` | `fn main` in a `kind="tool"` program — `main` is impure; use `function main` (§64.2) | Error |
-| `E-TOOL-005` | a `kind="tool"` module references an `_scrml_*` runtime helper the v1 tool-emit does not yet inline (value-native maps/sets §59, `!{}`/`fail` error helpers, wire/protect) — FAIL-CLOSED: a loud compile error naming the missing helper, instead of a silent runtime `ReferenceError`. v1 inlines `_scrml_structural_eq` (§45 `==`), `_scrml_log` (§20.6), `_scrml_print` (§20.7 clean-stdout — S241), and §14 enum backing objects; this code marks the v1 tool-emit helper-coverage boundary — closing a helper removes its E-TOOL-005. Ratified S238. | Error |
-| `E-TOOL-006` | a `kind="tool"` program imports a local `.scrml` module that is NOT an importable library (§21.5 — it has a top-level `<program>` / page markup or no `export`s), so no runnable `<base>.js` is emitted and the tool's `import … from "./x.js"` would fail at runtime (Cannot find module) — FAIL-CLOSED: a loud compile error instead of a silent runtime module-not-found. A tool imports only library-shaped `.scrml` or `scrml:`/vendor modules (§64.5.1). Ratified S239 (fix-round). | Error |
+| `E-TOOL-004` | `fn main` in a `kind="tool"` program — `main` is impure; use `function main` (§64.2) **S473:** also fires in a `kind="service"` program (§68 statements 1, 6; DRAFT) — ruling:user-voice-scrml.md S473 "⭐ RULED — long-running program kind, owner questions Q1–Q4 (PA recs)" item 1; the service trigger is **Nominal / spec-ahead — not yet emitted**. | Error |
+| `E-TOOL-005` | a `kind="tool"` module references an `_scrml_*` runtime helper the v1 tool-emit does not yet inline (value-native maps/sets §59, `!{}`/`fail` error helpers, wire/protect) — FAIL-CLOSED: a loud compile error naming the missing helper, instead of a silent runtime `ReferenceError`. v1 inlines `_scrml_structural_eq` (§45 `==`), `_scrml_log` (§20.6), `_scrml_print` (§20.7 clean-stdout — S241), and §14 enum backing objects; this code marks the v1 tool-emit helper-coverage boundary — closing a helper removes its E-TOOL-005. Ratified S238. **S473:** also fires in a `kind="service"` program (§68 statements 1, 6; DRAFT) — ruling:user-voice-scrml.md S473 "⭐ RULED — long-running program kind, owner questions Q1–Q4 (PA recs)" item 1; the service trigger is **Nominal / spec-ahead — not yet emitted**. | Error |
+| `E-TOOL-006` | a `kind="tool"` program imports a local `.scrml` module that is NOT an importable library (§21.5 — it has a top-level `<program>` / page markup or no `export`s), so no runnable `<base>.js` is emitted and the tool's `import … from "./x.js"` would fail at runtime (Cannot find module) — FAIL-CLOSED: a loud compile error instead of a silent runtime module-not-found. A tool imports only library-shaped `.scrml` or `scrml:`/vendor modules (§64.5.1). Ratified S239 (fix-round). **S473:** also fires in a `kind="service"` program (§68 statements 1, 6; DRAFT) — ruling:user-voice-scrml.md S473 "⭐ RULED — long-running program kind, owner questions Q1–Q4 (PA recs)" item 1; the service trigger is **Nominal / spec-ahead — not yet emitted**. | Error |
 | `E-TOOL-SERVE-MISPLACED` | `serve=` on a non-`kind="tool"` top-level `<program>` (serve requires the tool output shape), OR `serve=` on a nested `<program>` (a §43 worker/sidecar, not a listener-owning target) — §64.9 (Fork 1A). | Error |
 | `E-TOOL-SERVE-PORT-INVALID` | `serve=` value is neither an integer literal (`serve=7878`, 0–65535; 0 = ephemeral) nor a `${expr}` runtime port — §64.9 (Fork 1A). | Error |
 | `E-TOOL-SERVE-AUTH-UNSUPPORTED` | a `serve=` tool carries cookie-session auth at ANY locus — program `auth="required"`/`"optional"` (§52.13) OR a per-channel `<channel auth=…>` (§38.5); the headless serve-target has no cookie session, so the routes / WS upgrade would emit with NO auth guard; bearer auth is a later unit — §64.9 (Fork 1A). FAIL-CLOSED, per locus. | Error |
@@ -52863,3 +52906,543 @@ guard) · §7.4.2 (how a `${…}` value renders) · §21.5 (library mode — the
 `meta.emit` HTML-string gate; `<md>` never goes through it) · §25.6 / §26.6 / §65.4 / §65.12 OQ-6
 (styling) · §34 (the codes) · §41 (stdlib modules) · §52.8 (server first paint) · §66 (declarations —
 `<md>` is an element, not a declaration).
+
+---
+
+## 68. Long-Running Programs — `<program kind="service">` (DRAFT)
+
+> **Status: DRAFT (S473). Nominal / spec-ahead — no implementation; no compiler emits any code of this section.**
+> The bootstrap builds it after its own `kind="tool"` emit, the §21.3.3 `<host>` block (DRAFT, PR #1630) and the
+> `scrml:process` subprocess primitive, in the ruled S473 order. impl#1 is not changed for it (S471): on impl#1,
+> `kind="service"` stays `E-TOOL-002`, a carried divergence (§34.0).
+>
+> **Provenance:**
+> - ruling:user-voice-scrml.md S473 "⭐ RULED — scrml gets a long-running program kind" — PA: *"Programs that keep
+>   running … needs a program kind for interactive or long-lived programs, and it's yours to decide."* — bryan:
+>   *"of course we need a long-running program kind. your recs"*. Item 1: *"**scrml gets a long-running program
+>   kind**: interactive (a stdin/terminal loop holding state across turns, e.g. flogence omega) and long-lived (a
+>   daemon or watcher, e.g. the flogence doorbell). `kind="tool"` stays run-to-completion."*
+> - ruling:user-voice-scrml.md S473 "⭐ RULED — long-running program kind, owner questions Q1–Q4 (PA recs)" —
+>   *"your recs"* (on the PA's exposition of Q1–Q4 from `docs/deep-dives/long-running-program-kind-design-2026-10-29.md`):
+>   1. *"**Q1 spelling: one kind, `<program kind="service">`.** Interactive vs long-lived is only which sources a
+>      program declares; detaching is the caller's spawn option. This reverses S238's "no separate
+>      `kind="service"`". `kind="tool"`'s invoke-only harness and `serve=` stay unchanged."*
+>   2. *"**Q2 state: reactive.** State lives in cells. Sources deliver typed events to exhaustive variant arms;
+>      events run one at a time from one FIFO queue as "turns"; effects flush once at turn end. The in-turn `ask()`
+>      pull (Option C) is BANKED, not in v1."*
+>   3. *"**Q3 lifecycle, as designed with ONE CHANGE:** `stop(code)` ends its turn and runs teardown. Quiescence
+>      exits 0. SIGINT/SIGTERM/SIGHUP exit 130/143/129 by default, and abandon the in-flight turn at its next wait.
+>      `<onSignal>` overrides; a second signal of the same kind forces the default. Teardown is the page's §6.7.2
+>      destroy order (`cleanup()` is the finally), with a 5 s grace (`stop-grace=`). **CHANGE: a runtime trap
+>      aborts only its turn.** It is reported to stderr with its code and location, and the program carries on.
+>      A program opts into stop-on-trap (exit 70) with `on-trap="stop"`."*
+>   4. *"**Q4 input spelling: built-in source elements** (`<stdin>`, `<watch>`, `<onSignal>`, plus the existing
+>      `<timer>`/`<timeout>`/`<poll>`/`<request>`), with exhaustive variant arms. The source set is closed in v1.
+>      A graceful `stop()` is separate from `scrml:process`'s raw `exit()`."*
+>   5. *"Minor PA defaults stand (vetoable): `eprint`/`eprintln` for stderr; a user-written `<host>` is not
+>      callable in a tool/service (it follows from S473 round 2 item 3)."*
+> - ruling:user-voice-scrml.md S473 round 2 item 3 — *"Server-side `<host>` bindings: allowed only in
+>   compiler-bundled stdlib modules"* (§21.3.3 rule 10, DRAFT, PR #1630): why the sources are built-ins.
+> - design: `scrml-support/docs/deep-dives/long-running-program-kind-design-2026-10-29.md` §5 and §8, with the
+>   Q3 CHANGE applied (§68.6).
+>
+> **Supersedes:** §64.3 *"This makes ONE `kind="tool"` cover both run-and-exit and long-running with no separate
+> `kind="service"` and no park-boilerplate"* and the E-TOOL-002 parenthetical *"a long-running server is a
+> `kind="tool"` whose `function main` does not return, so there is no `kind="service"`"* (both S238; struck in
+> place). §64.3's invoke-only harness and §64.9 `serve=` are NOT changed.
+>
+> **Direction of change:** newly-accepting (a new `kind=` value, the event-source elements, `stop`,
+> `eprint`/`eprintln`, `stop-grace=`, `on-trap=`). No existing program changes meaning. Two narrow
+> newly-rejecting consequences: (i) `on-trap=` or `stop-grace=` on a `<program>` that is not `kind="service"`
+> was an unknown `<program>` attribute (`W-ATTR-001`, §52.13.3) and becomes an Error
+> (`E-SERVICE-ON-TRAP-INVALID` / `E-SERVICE-STOP-GRACE-INVALID`); (ii) owed with the §4.15 registry rows
+> (§68.14): `stdin`, `watch` and `onSignal` become reserved structural-element names.
+
+A `kind="service"` program keeps running and reacts to input. It is a scrml program with no view: it holds state
+in cells, and built-in **event sources** deliver typed events to it one at a time. It ends when it calls `stop`,
+when a signal ends it, or when nothing is left that could deliver an event. It covers both interactive programs
+(a terminal loop that holds state across turns) and long-lived ones (a daemon or a watcher): the difference is
+only which sources the program declares. Detaching from a terminal is a spawn option of whoever starts the
+program (§68.9), not a property of the program.
+
+`kind="tool"` (§64) stays run-to-completion for everything a tool's own code does.
+
+### 68.1 Syntax
+
+```
+service-program ::= '<program' 'kind="service"' service-attr* '>' service-item* '</program>'
+service-attr    ::= program-attr | 'stop-grace=' integer-literal | 'on-trap=' ('"continue"' | '"stop"')
+service-item    ::= declaration | cell-decl | function-decl | lifecycle-element | event-source | import
+event-source    ::= '<stdin' stdin-attr* '>' source-arm+ '</stdin>'
+                  | '<watch' watch-attr+ '>' source-arm+ '</watch>'
+                  | '<onSignal>' source-arm+ '</onSignal>'
+source-arm      ::= (* the §38.13.3 arm, with §51.0.B.1 payload binding *)
+stdin-attr      ::= 'prompt=' (string-literal | '${' expression '}') | 'echo' | if-attr
+watch-attr      ::= 'path=' (string-literal | '${' expression '}') | 'recursive' | 'interval=' integer-literal | if-attr
+```
+
+`lifecycle-element` is the §6.7 family (`<effect>`, `<request>`, `<poll>`, `<timer>`, `<timeout>`, `<onMount>`,
+`<engine>`). The child-process source of §68.9 is not in this grammar; it is defined with `scrml:process`.
+
+**Terms.** In this section an **event source** is any element that, in a service, delivers events to the turn
+queue (§68.5): the **service-only sources** `<stdin>`, `<watch>`, `<onSignal>` and the child-process source
+(§68.9), which this section adds and which are legal only in a service (statement 8); and the existing §6.7
+elements `<timer>`, `<timeout>`, `<poll>` and `<request>`, which keep their own sections, are legal in every
+program, and are event sources only in the sense that, inside a service, their ticks and settles are queued
+events (statement 7). Calling them event sources here does not make them services-only.
+
+### 68.2 The kind and its body
+
+1. `kind="service"` SHALL be legal only on the top-level `<program>` (else `E-TOOL-002`). It selects §64.1's emit
+   shape: a plain runnable ES module with no html, client bundle or CSRF scaffold. §64.5 composition (`lang=`,
+   `db=`, `capabilities=`), §64.5.1 imports (`E-TOOL-006`), §64.6's helper boundary (`E-TOOL-005`) and the
+   §23.2.4 bare-`_{}` admission in function bodies apply as for a tool.
+2. A service body MAY contain cells, derived cells, `<engine>`, `<effect>`, `<request>`, `<poll>`, `<timer>`,
+   `<timeout>`, `<onMount>`, `cleanup()`, functions, types, imports and event sources. It SHALL NOT contain
+   markup that renders, `<page>`, `<endpoint>`, an SSE route, a nested `<program>` or a §36 input state type
+   (`E-SERVICE-RENDER`). `serve=` is `E-TOOL-SERVE-MISPLACED` (§64.9; a listener on a service is banked,
+   §68.11). `persist=` and `authority="server"` on a cell are `E-SERVICE-CELL-UNSUPPORTED`: a service cell is
+   host memory of this process only.
+3. Every §64 "no client boundary" carve-out applies: `E-DERIVED-SERVER-ONLY-REACH` is not emitted, `print`
+   writes stdout directly, `?{}` runs in process, and `session.*` is `E-SESSION-CONTEXT`.
+4. **No user `<host>`.** A user-file `<host>` binding is client-only (§21.3.3 rule 10, DRAFT, PR #1630), and a
+   service has no client, so a user-written `<host>` binding is not callable in a service (ruling item 5 above).
+   A service reaches the host through compiler-bundled stdlib (`scrml:process` and the sources' own host side),
+   the built-in sources, and `_{}`.
+
+### 68.3 Start
+
+5. The program SHALL (a) evaluate cell initializers; (b) call `function main(args: string[])`, if declared, with
+   `process.argv.slice(2)`, awaiting it; (c) mount the root scope (§6.7.2): arm the sources, run `<request>`
+   mount fetches and `<onMount>` bodies in source order; (d) enter the turn loop (§68.5).
+6. `main` is optional. It is setup, and an action position (§13.8 (i)): it may write cells, wait, and call
+   `stop`. A `main` that declares a return type is `E-SERVICE-MAIN-RETURNS`; `fn main` is `E-TOOL-004`. If
+   `main` calls `stop`, steps (c) and (d) SHALL NOT run: teardown runs and the process exits with the code. This
+   is how run-to-completion verbs share one program with long-lived ones (§68.12, example 2).
+6a. **`stop` in `<onMount>`** is legal (an `<onMount>` body may not write cells, §6.7.1a, but it may stop). At
+   start-up, a `stop` in an `<onMount>` body lets the rest of the mount (step (c)) complete, then the turn loop
+   SHALL NOT be entered: teardown runs (which disarms the sources step (c) armed) and the process exits with the
+   code. If more than one `<onMount>` body of the same mount calls `stop`, the **first** `stop` in mount order
+   sets the exit code; later ones change nothing. An `<onMount>` that runs later, when an `if=` scope mounts at
+   the end of a turn (statement 13a), is part of that turn's end: its `stop` lets that turn-end step (2) finish
+   mounting, then steps (3) onward do not run and teardown follows, as for a `stop` in the turn. Start-up is
+   steps (a)–(c) only.
+
+### 68.4 Event sources
+
+7. `<stdin>` delivers `StdinEvent:enum = { Line(text: string), End }`; `<watch>` delivers
+   `WatchEvent:enum = { Changed(path: string), Removed(path: string) }`; `<onSignal>` delivers
+   `Signal:enum = { Interrupt, Terminate, Hangup }`. In a service, a `<timer>` / `<timeout>` tick and a
+   `<request>` / `<poll>` settle are events too; their bodies are unchanged (§6.7.5, §6.7.7, §6.7.8).
+8. A service-only source (`<stdin>`, `<watch>`, `<onSignal>`, the child-process source) SHALL appear only in a
+   `kind="service"` program (`E-SERVICE-SOURCE-PLACEMENT`); `<timer>`, `<timeout>`, `<poll>` and `<request>`
+   keep their existing placement in every program. A service-only source is placed as a `<timer>` is (§6.7.5): a
+   child of the program or of an `if=` scope; `<stdin>` and `<watch>` also take `if=` themselves (§68.1). It is
+   armed when its scope mounts and torn down when it is destroyed, at the times statement 13a gives. `<onSignal>` SHALL be at the program's top level (`E-SERVICE-SOURCE-PLACEMENT`). A
+   second `<stdin>` or a second `<onSignal>` in one program is `E-SERVICE-SOURCE-DUPLICATE`.
+9. A service-only source's arms (`<stdin>`, `<watch>`, `<onSignal>`, the child-process source; `<timer>`,
+   `<timeout>`, `<poll>` and `<request>` have bodies, not arms) SHALL be exhaustive over its event enum. A `_` arm is legal. A missing variant is the existing
+   `E-MATCH-NOT-EXHAUSTIVE` class, as for `<onchange>` (§38.13.3); no new code. Each arm body is a code-default
+   body (§4.18) and an action position (§13.8 (i)).
+10. **`<stdin>`** reads lines. On a terminal it provides line editing and echo; in a pipe it does neither, except
+    that `echo` writes each line read after the prompt. The prompt, and an `echo`ed line, SHALL be written to
+    **stdout** (the stream `print` writes; on a terminal, the line editor's prompt on that stream). The prompt
+    SHALL be written each time the source is ready for its next line, re-evaluating an expression prompt: the
+    **first** prompt after start-up's mount (§68.3 step (c)) completes, once the queue is empty, before the first
+    turn waits for input; then after each turn as statement 13 gives. `End` SHALL be delivered once per input
+    stream, at end of input; the source is then not live.
+11. **`<watch>`** events are hints: coalesced per path, possibly spurious, never a diff. A program SHALL NOT
+    assume an event describes a change exactly; it re-reads what it cares about. `interval=` selects polling at
+    that period, as a fallback or by choice. A reactive `path=` that changes value during a turn re-arms the
+    watch on the new path at that turn's end (statement 13a); events already queued for the old path are
+    discarded.
+12. **`<onSignal>`** is optional. Without it, the defaults of §68.7 apply. It does not keep a program live: it is
+    not counted for quiescence (§68.7 statement 21). A platform that does not deliver a signal kind delivers no
+    event for it (on Windows only `Interrupt` is delivered).
+
+### 68.5 The turn loop, state and back-pressure
+
+13. **Turns.** Events SHALL be delivered from one FIFO queue shared by all sources, one at a time. Running an
+    event's arm body (or a tick's or settle's body) to its end, including every waiting value awaited inside it,
+    is a **turn**. A turn SHALL NOT start while another is running. After each turn, however it ended (its last
+    statement, a `return` out of the arm, `stop`, a trap, or abandonment by a signal, statement 22), the program
+    SHALL (1) run, once each, the `<effect>`s whose listed cells changed during the turn (a trap in one effect run
+    ends that run only; the other effects of the flush still run, §68.6 statement 19); then (2) apply the scope
+    changes of statement 13a; then (3) write the `<stdin>` prompt (to stdout, statement 10) if that source is live
+    and no event is queued. When the turn ended by `stop`, by abandonment, or by a trap under `on-trap="stop"`,
+    step (1) runs and steps (2)–(3) do not: teardown (§68.8) follows.
+13a. **`if=` scopes mount and destroy at turn end.** A cell write inside a turn that changes an `if=` condition
+    SHALL NOT mount or destroy the scope mid-turn. At the turn's end, after the effect flush (statement 13 step
+    (1)), every `if=` scope whose condition changed is destroyed (depth-first, §6.7.2) or mounted (arming its
+    sources, running its `<request>` mount fetches and `<onMount>` bodies). Events already queued from a source
+    whose scope was destroyed SHALL be discarded, delivered to nothing, with one exception: **`<stdin>` events**
+    (lines and `End`) are held, in order, for the next `<stdin>` to arm, so that no line is dropped. While no
+    `<stdin>` is armed, the runtime SHALL pause reading stdin (the OS pipe buffer is then the bound). Held
+    `<stdin>` events are not "queued" for statement 21; a program that quiesces while holding them exits 0 and
+    they are not read. A remounted `<stdin>` continues the same input stream (it does not re-read from the start);
+    `End` is delivered once per stream, so a `<stdin>` that arms after `End` was delivered is not live. A scope
+    mounted at turn end runs its `<effect>`s once for the mount (§6.7.4) at the **next** effect flush (the end of
+    the next turn), not in the flush that has just run.
+14. **State.** State lives in program-scope cells. Every reactive write after start-up (§68.3 steps (a)–(c):
+    cell initializers and `main`, with `<onMount>` writing none) SHALL occur in a turn. A `<request>` / `<poll>`
+    settle, and a pending cell's arrival (a `(not to T)` cell, §13.9, whose load completes), SHALL be applied as
+    a queued event, never within another turn. Locals do not survive a turn; cells do.
+    Effects still cannot write cells (§6.7.4).
+15. **A waiting turn holds the queue.** While a turn waits, no other event runs; input that arrives meanwhile
+    queues and is delivered in order afterwards. A program that wants input to keep flowing during a slow load
+    does not wait in the turn: it writes the load's input to a cell and lets a `<request deps=[…]>` (or a
+    `(not to T)` pending cell, §13.9) fetch it, so the turn ends at once and the settle comes back as an event.
+16. **Back-pressure.** A source SHALL NOT grow the queue without bound. `<stdin>` (and a child-process source,
+    §68.9) SHALL pause reading while its queued events exceed an implementation-defined bound (recommended:
+    1,024 events per source), and SHALL NOT drop a line while the program runs (lines held for a `<stdin>` that
+    is not armed, statement 13a, are not read if the program exits first: at exit, unread input is left unread,
+    as for any process). A timer tick that comes due while that timer's previous
+    tick is queued or running SHALL be coalesced (at most one pending); so SHALL a `<poll>` tick, and a `<poll>`
+    has at most one settle queued. Watch events SHALL be coalesced per path, and bounded per `<watch>`: when one
+    `<watch>` would hold more pending events than the bound, its pending events SHALL be replaced by a single
+    `Changed(path)` for the watch's own `path=` (a level-triggered hint that "something under here changed",
+    statement 11), so a `recursive` watch over many files cannot grow the queue without bound. Signals are
+    coalesced per kind. A `<request>` has at most one settle queued (§6.7.7's supersede rule).
+
+### 68.6 Traps — a trap aborts only its turn (S473 Q3 CHANGE)
+
+> **Provenance:** ruling:user-voice-scrml.md S473 "⭐ RULED — long-running program kind, owner questions Q1–Q4
+> (PA recs)" item 3 — *"**CHANGE: a runtime trap aborts only its turn.** It is reported to stderr with its code and
+> location, and the program carries on. A program opts into stop-on-trap (exit 70) with `on-trap="stop"`."*
+> **supersedes:** the design document's §8 statement 12 (*"SHALL then stop the program with code 70"*), never
+> SPEC text.
+
+17. **A trap ends only its turn.** A trap (§19.17) raised in a turn SHALL end that turn at the trapping
+    expression: no later statement of the turn runs, `defer`s registered in blocks it passes through run
+    (§19.16), and a `transaction { }` it is inside rolls back (§19.17). Writes the turn made before the trap
+    stand. The trap SHALL be reported to stderr with its code and its source location (§19.17's report; in a
+    service, scrml's logging surface, §19.6.8 B5, is stderr). The turn's effects flush (statement 13), and the
+    program SHALL then carry on with its next event.
+18. **`on-trap="stop"`.** A program that declares `on-trap="stop"` on its `<program>` SHALL, after the trapped
+    turn has ended, been reported and flushed as in statement 17, stop with exit code **70** (EX_SOFTWARE),
+    through teardown (§68.8). `on-trap="continue"` spells the default. Any other value, a non-literal value, or
+    `on-trap=` on a program that is not `kind="service"` is `E-SERVICE-ON-TRAP-INVALID`.
+19. **Traps outside a turn** *(PA defaults, derived from the ruling — ruling:user-voice-scrml.md "PA rulings S473
+    (recorded for bryan's veto; each newly-rejecting or within a ruled scope)" item 3)*:
+    - in an `<effect>` run: that run ends, the trap is reported as in statement 17, the other effects of the same
+      flush still run, and the program carries on (or, under `on-trap="stop"`, stops with 70 after the flush);
+    - during start-up (§68.3 steps (a)–(c): a cell initializer, `main`, a request mount fetch or an `<onMount>` body
+      of the root mount): there is no turn to abort, so the program SHALL stop with 70, whatever `on-trap=` says;
+    - in an `<onMount>` body or mount fetch of an `if=` scope mounting at a turn's end (statement 13a): it is
+      treated as a trap in that turn (statements 17–18): that body ends, the trap is reported, and the program
+      carries on (or stops with 70 under `on-trap="stop"`);
+    - in a `cleanup()` callback during teardown: that callback ends, the trap is reported, teardown continues
+      with the next callback, and the exit code is unchanged;
+    - `E-SERVICE-STOP-CODE-RT` (statement 20): the turn asked to stop, so the program SHALL stop with 70,
+      whatever `on-trap=` says.
+
+A turn cut short by a trap leaves its writes half applied. Under the default, the program goes on running on that
+state; a program for which that is worse than stopping (and being restarted by a supervisor) declares
+`on-trap="stop"`.
+
+### 68.7 Stopping — `stop`, quiescence, signals, exit codes
+
+20. **`stop(code: int)`** is a built-in, bound only in a `kind="service"` program. It is legal in a turn, in
+    `main`, in an `<onMount>` body (statement 6a), and in a function reached only from them. A call of `stop`
+    outside a service that resolves to no user binding is `E-SERVICE-STOP-PLACEMENT`; so is a call reached from
+    an `<effect>` body, a `cleanup()` callback, a derived cell or a cell initializer (checked over the call graph,
+    as the §6.7.4 effect-write check is). `stop` SHALL end the code that called it: no later statement of the
+    turn, of `main` or of the `<onMount>` body runs, and `defer`s run (§19.16). In a turn, the turn's effects then
+    flush (statement 13). In `main`, no effect has been registered yet, so nothing flushes and the root scope is
+    never mounted (statement 6). Then no further event is delivered and teardown runs (§68.8). It counts as a loop
+    exit for §49.6 rule 10, as `fail` / `?` do. A literal code outside 0–255 is `E-SERVICE-STOP-CODE`; a run-time
+    code outside it is the trap `E-SERVICE-STOP-CODE-RT` (statement 19). A call of `scrml:process`'s `exit()` in
+    a service is `E-SERVICE-RAW-EXIT`: `exit()` skips teardown. (A `process.exit` inside an opaque `_{}` cannot
+    be seen; that is the honest limit of the check.)
+21. **Liveness and quiescence.** A program is **live** while any of these holds, and only then:
+    - an armed `<stdin>` that has not delivered `End`;
+    - an armed `<watch>`;
+    - a mounted `<timer>` that is **running** (a `<timer>` whose `running=` is false, §6.7.5, is paused and is
+      not live: only a turn could resume it, and no turn can come from it);
+    - a mounted `<timeout>` that has not fired;
+    - a mounted `<poll>`;
+    - a `<request>` with a fetch in flight;
+    - a pending `(not to T)` cell (§13.9) whose load is in flight;
+    - an owned child process that has not yet exited (§68.9 statement 27): it stops counting once it has exited,
+      whether or not its exit event is delivered (a child of a destroyed scope is signalled, statement 27(a), and
+      its queued events are discarded, statement 13a);
+    - a turn running, an event queued (held `<stdin>` events, statement 13a, are not queued), or an effect run
+      pending or in progress.
+
+    `<onSignal>` is never live (statement 12). When the program is not live, it SHALL stop with code 0
+    (**quiescence**). `W-SERVICE-NO-SOURCE` (§68.13) uses this same definition: it fires when no element that
+    can make a program live is declared anywhere in it (an `<onSignal>` alone does not count).
+22. **Signals.** Without `<onSignal>`, `Interrupt` (SIGINT), `Terminate` (SIGTERM) and `Hangup` (SIGHUP) SHALL stop
+    the program with 130, 143 and 129. An in-flight turn is abandoned at its next suspension point: its
+    continuation does not run, writes already made stand, an in-flight READ transport is aborted (§6.7.7.1), and
+    the effects of its writes flush (statement 13) before teardown. With `<onSignal>`, the signal SHALL be queued
+    ahead of all other events (it does not preempt a running turn) and handled by its arm as a turn; an arm that
+    does not call `stop` keeps the program running. A second signal of the same kind before that arm's turn
+    starts SHALL take the default.
+22a. **A second signal exits at once.** A default stop for a signal kind is **pending** from the moment it is
+    taken (statement 22) until teardown starts: while the program waits for the in-flight turn to reach a
+    suspension point, and while the abandoned turn's effects flush. While it is pending, a further signal of the
+    **same kind** SHALL end the process at once with 128 + its signal number, even mid-turn with no suspension
+    point or mid-flush: no continuation, no further effect run and no teardown runs. A signal of a **different
+    kind** while a stop is pending is handled as its own kind: its default applies (a stop of that kind becomes
+    pending too; the exit code stays that of the first pending stop), and if a stop of that kind is already
+    pending, it exits at once with 128 + its own number.
+    - Without `<onSignal>`: Ctrl-C twice always ends the program, including one stuck in a turn that never waits.
+      *(Provenance: ruling:user-voice-scrml.md "PA rulings S473 (recorded for bryan's veto; each newly-rejecting
+      or within a ruled scope)" item 2 — *"with no `<onSignal>`, while a default stop is pending, a second signal
+      of the same kind exits at once with 128+n, even mid-turn, with no flush and no teardown. This is within the
+      ruled Q3 lifecycle; bryan was told."*)*
+    - With `<onSignal>`: Ctrl-C twice does NOT end the program by itself. The first signal is queued for the arm;
+      a second of the same kind, before that arm's turn starts, takes the default (statement 22), which makes the
+      default stop pending; only a **third** exits at once under this statement. *(PA reading: the same rule,
+      applied once a default stop is pending; the ruled item 2 names only the no-`<onSignal>` case.)*
+22b. **Signals during teardown.** A signal (of any of the three kinds) that arrives while teardown (§68.8) is
+    running SHALL end the process at once with 128 + its signal number. When the teardown was started by a
+    signal, this is that signal kind's second signal or a different signal; when it was started by `stop`,
+    quiescence or a trap, it is the first signal the program sees in teardown.
+
+**Exit codes:**
+
+| Cause | Exit code | The in-flight turn |
+|---|---|---|
+| `stop(c)` in a turn, in `main` or in `<onMount>` | `c` (0–255) | ends at the `stop` (statements 6a, 20) |
+| Quiescence (statement 21) | `0` | none in flight |
+| `Interrupt` (SIGINT), no `<onSignal>` | `130` | abandoned at its next suspension point; its effects flush, then teardown |
+| `Terminate` (SIGTERM), no `<onSignal>` | `143` | abandoned at its next suspension point; its effects flush, then teardown |
+| `Hangup` (SIGHUP), no `<onSignal>` | `129` | abandoned at its next suspension point; its effects flush, then teardown |
+| A signal with `<onSignal>` declared | whatever the arm does | the arm runs as the next turn; a second signal of the same kind before that turn starts takes the default (the rows above) |
+| A second same-kind signal while a default stop is pending, including during the abandoned turn's flush (statement 22a) | `128 + signo` | ends at once, even with no suspension point; no further flush, no teardown |
+| A different-kind signal while a default stop is pending (statement 22a) | the first pending stop's code; or `128 + signo` if a stop of that kind is already pending | its default applies alongside the pending one |
+| A trap in a turn (default, `on-trap="continue"`) | **none: the program carries on** | ends at the trap; reported to stderr with code and location (§68.6) |
+| A trap in a turn with `on-trap="stop"` | `70` (EX_SOFTWARE) | ends at the trap; reported, effects flush, then teardown |
+| A trap in an `<effect>` run (default) | **none: the program carries on** | (after the turn) that run ends; reported; the rest of the flush runs |
+| A trap in an `<effect>` run with `on-trap="stop"` | `70` | (after the turn) reported; the rest of the flush runs, then teardown |
+| A trap in a `cleanup()` callback | **unchanged**: the code teardown was already exiting with | (teardown) that callback ends; reported; teardown continues |
+| A trap during start-up, or `E-SERVICE-STOP-CODE-RT` | `70` | (start-up: no turn) / ends at the `stop` |
+| A signal during teardown (statement 22b) | `128 + signo` | teardown is cut short |
+
+### 68.8 Teardown
+
+23. Stopping SHALL destroy the root scope in **§6.7.2's order, adapted for a service**. §6.7.2's step 2 is
+    widened to every event source, and its step 4 (cancel animation frames: a service has none) is replaced by
+    closing database connections. Child `if=` scopes are destroyed depth-first, as in §6.7.2. The steps are:
+    (1) effects are unregistered and suspended effect runs cancelled; (2) `<stdin>` is closed, watches closed,
+    timers, timeouts and polls cleared, owned child processes (§68.9) sent SIGTERM (statement 24 gives when they
+    are sent SIGKILL), and requests in flight handled per §6.7.7.1 (reads aborted, writes discarded); (3) `cleanup()`
+    callbacks run in LIFO order, each MAY wait and SHALL be awaited; (4) database connections close; (5) the
+    process exits with the stop code (§68.7).
+24. **The grace is split.** `stop-grace=` is G milliseconds (default `5000`), measured from the start of step 2.
+    Step 2 sends SIGTERM to every owned child and waits for them to exit for **at most ⌊G / 2⌋** ms (G / 2
+    rounded down to whole milliseconds; "G / 2" below means this value); every child
+    still running at G / 2 SHALL be sent SIGKILL, and step 2 then ends (it does not wait further). Step 3 gets the
+    **remainder**: its `cleanup()` callbacks SHALL complete by G (so they get at least G / 2, and all of G minus
+    whatever the children took when they exit sooner). A slow child therefore cannot eat the callbacks' time.
+    When G elapses, the remaining callbacks are skipped and stderr says so; the exit code is unchanged. A
+    `stop-grace=` that is not a
+    positive integer literal, or `stop-grace=` on a program that is not `kind="service"`, is
+    `E-SERVICE-STOP-GRACE-INVALID`.
+
+### 68.9 Output, and the `scrml:process` seam
+
+25. **Output.** `print` / `println` write stdout and `eprint` / `eprintln` write stderr. `eprint` / `eprintln`
+    follow §20.7's rules (a primitive argument, `E-PRINT-NON-PRIMITIVE`; a user declaration wins,
+    `W-PRINT-SHADOWED`) and are valid in a `kind="tool"` too. The `<stdin>` prompt is written by the runtime,
+    to stdout (statements 10, 13), not by the program.
+26. **The `scrml:process` seam.** `scrml:process` (the existing server-only module, `stdlib/process/index.scrml`,
+    §12.2 Trigger 3) is extended, ahead of this kind, with the subprocess primitive. Only the seam is fixed here:
+    - **One-shot runs** (a tool or a service, any action position): an ordinary waiting call. In a service it
+      holds its turn.
+    - **Detached spawns** (a tool or a service): the child is NOT owned. Teardown does not touch it and it
+      outlives the program. Daemonizing is this spawn option of the caller, not a property of a service.
+    - **Program identity** for self-restart (the running script's path and the runtime's path).
+    - **Whole-stdin read** for hook protocols: valid in a tool, or in a service that declares no `<stdin>`. In a
+      service that declares `<stdin>` it is `E-SERVICE-STDIN-SHARED` (two readers would split the stream).
+27. **The child-process source — SEAM ONLY.** A long-lived child process owned by a service is an event source
+    defined by `scrml:process`. Whatever it is named, it SHALL meet this contract, and this section fixes
+    nothing else about it:
+    - (a) it is owned by the scope it sits in; at that scope's destroy or at program stop it is sent SIGTERM, then
+      SIGKILL if it has not exited by half the grace (§68.8 statement 24);
+    - (b) its output lines and its exit arrive as events in the program's one queue (§68.5), typed by a closed
+      enum, and its arms are exhaustive (statement 9);
+    - (c) reading pauses its pipes while its queued events exceed the bound (statement 16);
+    - (d) in test mode it is replaceable by a scripted feed (§68.10 statement 29);
+    - (e) writing to its stdin is a call, not an event;
+    - (f) it is subject to `E-SERVICE-SOURCE-PLACEMENT` (statement 8).
+
+    **Owed, not specified here:** its element name and attributes, its event enum (a sketch is
+    `{ Out(line: string), Err(line: string), Exit(code: int) }`), the write call's name and signature, the
+    `scrml:process` function names and signatures of statement 26, and their error type. They land with the
+    `scrml:process` subprocess design.
+
+### 68.10 Determinism and testing
+
+28. **Determinism.** Given the same arguments, environment, ordered event script, clock and results of waiting
+    host calls, a service SHALL produce the same stdout, stderr and exit code. A bare `_{}` block is outside this
+    guarantee.
+29. **Test mode.** In test mode (§19.12.7) the compiler SHALL emit a driver that replaces each source with a
+    scripted feed and the clock with a virtual one, and `test-bind` (§19.12.6) MAY bind `scrml:process` waiting
+    functions and compiler-bundled `<host>` bindings. The driver's observable contract is: start the program
+    with arguments and environment; feed an event to a named source; advance the virtual clock; settle (run
+    until no event is queued and nothing is in flight); read stdout, stderr and the exit code (`not` while
+    running); read a cell, for assertions. Its exact API is owed with the build.
+
+### 68.11 Banked, not in v1
+
+Each of these is a reversible widening, not adopted:
+- the in-turn pull `ask(prompt)` (design Option C; ruling item 2: *"BANKED, not in v1"*);
+- cancelling an in-flight turn from `<onSignal>` (a REPL's "Ctrl-C cancels the current request");
+- user-defined event sources (opening the closed set; ruling item 4: *"The source set is closed in v1"*);
+- `serve=` on a service (a listener; it needs a ruling on whether endpoint handlers are turns);
+- raw-mode keystroke input and full-screen terminal UIs;
+- persisting service cells to disk (`persist=` on a service).
+
+### 68.12 Examples
+
+*Illustrative, not compile-verified: no compiler implements this section yet. Helper functions (`classify`,
+`assemble`, `pollOnce`, …) stand for ordinary imported scrml functions.*
+
+**Example 1 — an interactive loop (stdin, state across turns, an effect as the "render").**
+
+```scrml
+<program kind="service">
+import { classify, assemble, showReading, HELP } from "./core.scrml";
+
+type Mode:enum = { Asking, Confirming };
+
+let <mode:Mode=.Asking/>
+let <question:string=""/>
+let <reading:string=""/>
+
+function main(args: string[]) {
+    println("ask a question. ? for help, :q to quit.");
+}
+
+<stdin prompt=${@mode == .Confirming ? "  confirm › " : "you › "}>
+    <Line(text) : { onLine(text.trim()); }>
+    <End : { stop(0); }>
+</stdin>
+
+// runs once per turn in which @reading changed (§68.5 statement 13)
+<effect deps=[@reading]>${
+    if (@mode == .Confirming) { showReading(@question, @reading); }
+}</>
+
+function onLine(cmd: string) {
+    if (cmd == ":q") { stop(0); }
+    if (cmd == "?") { println(HELP); return; }
+    if (@mode == .Asking) {
+        @question = cmd;
+        @reading = assemble(cmd, classify(cmd));    // waits; lines typed meanwhile queue
+        @mode = .Confirming;
+        return;
+    }
+    @mode = .Asking;
+}
+</program>
+```
+
+If `assemble` traps (a bug, say an out-of-range index), the turn ends there and the trap is reported to stderr
+with its code and location. `@question` keeps the value the turn wrote before the trap; `@reading` and `@mode` keep
+their old values. The prompt is written again and the program waits for the next line. Under
+`<program kind="service" on-trap="stop">`, the same trap would instead stop the program with exit code 70.
+
+**Example 2 — a watcher with run-to-completion verbs in the same program.**
+
+```scrml
+<program kind="service" stop-grace=3000>
+import { pollOnce, loadConfig, fresh, banner, spoolDir, USAGE } from "./msg-core.scrml";
+
+type Mode:enum = { Poll, Wait, Idle };
+let <mode:Mode=.Idle/>
+let <repo:string=""/>
+let <polling:bool=false/>
+
+function main(args: string[]) {
+    const verb = args.length > 0 ? args[0] : "";
+    if (verb == "poll") { @mode = .Poll; @polling = true; return; }
+    if (verb == "wait" && args.length > 1) { @repo = args[1]; @mode = .Wait; return; }
+    println(USAGE);
+    stop(verb == "" ? 0 : 1);
+}
+
+// running=@polling (§6.7.5): paused, so not live (statement 21), unless the verb is `poll`
+<timer interval=20000 running=@polling>${ pollOnce(loadConfig()); }</>
+
+<watch path=${spoolDir(@repo)} interval=2000 if=${@mode == .Wait}>
+    <Changed(p) : {
+        const rs = fresh(@repo);
+        if (rs.length > 0) { eprintln(banner(rs)); stop(2); }
+    }>
+    <_ : { }>
+</watch>
+</program>
+```
+
+`main` stops before any source arms for the usage path; the `poll` and `wait` verbs keep running. Under
+statement 21, `poll` stays live because its `<timer>` is running, and `wait` because its `<watch>` is armed; in
+any other mode the timer is paused and the watch unmounted, so nothing is live. (`<timer>` takes no `if=`,
+§17.1.2, so it is gated by `running=`; `<watch>` takes `if=` itself, §68.1.) An error
+**value** a pass returns (`! E`) is handled inside `pollOnce`. A **trap** in a pass (a bug) ends that tick's turn,
+is reported to stderr, and polling carries on at the next tick, so one bad pass never ends detection. A
+`<timer>` does not fire at mount (§6.7.5): a poller that must run its first pass at once also calls `pollOnce` from
+an `<onMount>` body, or uses `<poll>`.
+
+### 68.13 Diagnostics
+
+Every code below is **Nominal / spec-ahead — not yet emitted by any compiler**; each lands with the bootstrap
+build (§68.14). Rows in §34.
+
+| Code | Severity | Fires |
+|---|---|---|
+| `E-SERVICE-RENDER` | Error | in a `kind="service"` program: markup that renders, `<page>`, `<endpoint>`, an SSE route, a nested `<program>`, or a §36 input state type (statement 2) — Nominal / spec-ahead, not yet emitted |
+| `E-SERVICE-SOURCE-PLACEMENT` | Error | `<stdin>`, `<watch>`, `<onSignal>` or the child-process source outside a `kind="service"` program; `<onSignal>` below the program's top level (statement 8) — Nominal / spec-ahead, not yet emitted |
+| `E-SERVICE-SOURCE-DUPLICATE` | Error | a second `<stdin>` or `<onSignal>` in one program (statement 8) — Nominal / spec-ahead, not yet emitted |
+| `E-SERVICE-MAIN-RETURNS` | Error | `main` declares a return type in a service (statement 6) — Nominal / spec-ahead, not yet emitted |
+| `E-SERVICE-STOP-PLACEMENT` | Error | an unresolved `stop` call outside a service; `stop` reached from an `<effect>` body, a `cleanup()` callback, a derived cell or a cell initializer (statement 20). Legal: an event arm, `main`, an `<onMount>` body (statement 6a), a function only they reach — Nominal / spec-ahead, not yet emitted |
+| `E-SERVICE-STOP-CODE` | Error | a literal `stop` code outside 0–255 (statement 20) — Nominal / spec-ahead, not yet emitted |
+| `E-SERVICE-RAW-EXIT` | Error | `scrml:process`'s `exit()` called in a service (statement 20) — Nominal / spec-ahead, not yet emitted |
+| `E-SERVICE-STDIN-SHARED` | Error | a whole-stdin read in a service that declares `<stdin>` (statement 26) — Nominal / spec-ahead, not yet emitted |
+| `E-SERVICE-CELL-UNSUPPORTED` | Error | `persist=` or `authority="server"` on a cell in a service (statement 2) — Nominal / spec-ahead, not yet emitted |
+| `E-SERVICE-STOP-GRACE-INVALID` | Error | `stop-grace=` not a positive integer literal, or on a program that is not `kind="service"` (statement 24) — Nominal / spec-ahead, not yet emitted |
+| `E-SERVICE-ON-TRAP-INVALID` | Error | `on-trap=` not the literal `"continue"` or `"stop"`, or on a program that is not `kind="service"` (statement 18) — Nominal / spec-ahead, not yet emitted |
+| `W-SERVICE-NO-SOURCE` | Warning | a service declares no element that can make it live under statement 21 (no `<stdin>`, `<watch>`, child-process source, `<timer>`, `<timeout>`, `<poll>` or `<request>`; an `<onSignal>` alone does not count): it quiesces right after setup, which a `kind="tool"` says better — Nominal / spec-ahead, not yet emitted |
+| `E-SERVICE-STOP-CODE-RT` | Runtime | trap (§19.17): a run-time `stop` code outside 0–255; the program stops with 70 (statement 19) — Nominal / spec-ahead, not yet emitted |
+
+**Amended:** `E-TOOL-002` (the vocabulary is `"tool" | "service"`); `E-TOOL-004`, `E-TOOL-005` and
+`E-TOOL-006` (each also fires in a `kind="service"` program, statements 1 and 6; their §34 and §64.6 rows say so,
+Nominal). **Reused, not re-minted:** `E-TOOL-SERVE-MISPLACED`, `E-SESSION-CONTEXT`, the `E-MATCH-NOT-EXHAUSTIVE` class,
+`E-PRINT-NON-PRIMITIVE`, `W-PRINT-SHADOWED`.
+
+### 68.14 Owed work
+
+**The build** (`g-boot-kind-service-unbuilt-s473`): about six bootstrap units (surface, typing, the service
+runtime, emit, test mode, the flogence acceptance ports), after the bootstrap's `kind="tool"` emit
+(`g-boot-kind-tool-emit-unbuilt-s473`), §21.3.3 `<host>` and the `scrml:process` subprocess primitive.
+
+**Consequential SPEC edits, owed when this section leaves DRAFT** (not made by the S473 DRAFT landing beyond
+§64, the E-TOOL-002 / E-TOOL-004 / E-TOOL-005 / E-TOOL-006 rows and the §19.17 trap table):
+- §52.13.3 `<program>` attribute set and the attribute registry: `stop-grace=` and `on-trap=` (service only;
+  elsewhere the Errors of statements 18 and 24 replace `W-ATTR-001`);
+- §6.7.2: the service adaptation of statement 23 (step 2 widened to every event source; step 4 is the database
+  close, a service having no animation frames);
+- §4.15 / §24.4 registry: `<stdin>`, `<watch>`, `<onSignal>` (owning locus: a service program), which reserves the
+  three names (`E-NAME-COLLIDES-RESERVED` for a user component of that name: newly-rejecting);
+- §6.7.1 table: a row for the event sources; §6.7.2 step 2: *"and, in a `kind="service"`, every event source
+  (§68.8)"*; §6.7.5: in a service, ticks are queued events and coalesce (statement 16);
+- §13.8 (i): an event-source arm body and `main` in a service are action positions;
+- §12.2 Trigger 3, `E-DERIVED-SERVER-ONLY-REACH`, §20.7: each "`kind="tool"` (no client boundary)" carve-out reads
+  "`kind="tool"` or `kind="service"`"; §20.7 gains `eprint` / `eprintln`;
+- §19.12.6 / §19.12.7 and the `E-TEST-006` row: the `test-bind` widening and the service driver (statement 29);
+- §21.3.3 rule 10: a note that a tool or service has no client, so a user-file binding cannot be called there;
+- the shadowing rule for a user declaration named `stop` (not specified by this DRAFT).
+
+### 68.15 Cross-references
+
+§4.18 (code-default bodies) · §6.7.1a (`<onMount>`) · §6.7.2 (scope lifecycle; the teardown order) · §6.7.4
+(`<effect>`) · §6.7.5 / §6.7.8 (`<timer>`, `<timeout>`) · §6.7.7 / §6.7.7.1 (`<request>`; abort reads, discard
+writes) · §12.2 Trigger 3 (`scrml:process` is server-only) · §13.8 (action positions) · §13.9 (pending cells) ·
+§19.6.8 B5 (the trap report surface) · §19.12.6 / §19.12.7 (`test-bind`, test mode) · §19.16 (`defer`) · §19.17
+(traps) · §20.7 (`print`) · §21.3.3 rule 10 (DRAFT, PR #1630: server-side `<host>` only in compiler-bundled stdlib)
+· §23.2.4 (bare `_{}`) · §34 (the codes) · §36 (built-in input state types; the closed-set precedent) · §38.13.3
+(`<onchange>` arms) · §41 / `scrml:process` (`stdlib/process/index.scrml`) · §49.6 rule 10 (loop exits) ·
+§51.0.B.1 (payload binding) · §64 (`kind="tool"`; §64.3 invoke-only harness and §64.9 `serve=` unchanged).
