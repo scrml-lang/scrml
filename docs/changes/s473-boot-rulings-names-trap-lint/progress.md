@@ -52,3 +52,21 @@ Bootstrap: `setPosition` / `writePath` already raised the ScrmlTrap (s472). The 
 {index, length, at}. Core `EditKind.ElemAt` gains `loc` (analyze EElemAt → lower → print), as
 PositionAt has. Trap tests: 4, 2 red on base (ElemAt trap code + loc), 2 pin the s472 paths.
 Gap closed: g-spec-index-write-past-end-enforcement-s472.
+
+## 2026-10-29T04:50Z — part 3 (loop-copy lint) implemented
+
+Code picked: `W-LOOP-COPY-WRITE-UNREAD` (Warning) — §34's W-<AREA>-<WHAT> naming (cf. W-MATCH-ARROW-LEGACY,
+W-DB-PATH-RESOLVES-ELSEWHERE); "unread" is the observable criterion the PA rec named ("a write to a loop copy
+that is never read").
+
+Governing sentence written (SPEC §66.10): "When no read of the binder after the write can observe it — in
+source order, or anywhere in the loop body when the write sits inside a loop nested in that body — the
+compiler SHALL report **`W-LOOP-COPY-WRITE-UNREAD`** (a Warning) at the write. A read inside the write's own
+value or indices does not count (they are evaluated before the write)." §34 row added.
+
+analyze.scrml `loopCopyFor` (called from `loopChecks`, after binding — every body root): accepted part writes
+of the binder (EAssignLocal with a path) vs. Name reads of the binder's Sym. A body with a lifted markup row,
+an effect or a `defer` is skipped (no false positive). Lint tests: 13, 7 red on base. loops-s469 HIGH 2 pin
+moved (its first program IS the linted shape). Gap closed: g-loop-copy-part-write-no-op-s472.
+
+Base red totals: names 8/14, trap 2/4, lint 7/13 → 17 of 31.

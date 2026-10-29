@@ -28367,6 +28367,7 @@ are REFUSED by impl#1, `E-IMPL1-RULED-FORM-UNSUPPORTED` (its row lands with that
 | W-NAME-001 | §15.6 | Component name misleadingly matches a different HTML element type | Warning |
 | W-LIN-001 | §35.7 | `lin` variable passed to server-escalated function; guarantee does not extend to server copy | Warning |
 | W-MATCH-001 | §18.6 | Unreachable default `else` arm (all variants already covered) | Warning |
+| W-LOOP-COPY-WRITE-UNREAD | §66.10 | A part write to a `for … of` binder (`p.name = v` — the binder is a copy of the element, §66.10) that no later read of the binder observes: the write changes nothing, and the iterated cell or tape is unchanged. Write the source (`@ps[i].name = …`, or rebuild it with `.map(…)`), or read the changed copy. Provenance: ruling:user-voice-scrml.md S473 "⭐ RULED — S473 PA recs, all" item 4. Emitted by the bootstrap at `compiler/self-host-v2/analyze.scrml` (`loopCopyFor`); Nominal on impl#1 (§34.0). | Warning |
 | W-MATCH-002 | §18.16 | Non-exhaustive literal match (string/number/boolean without `_` arm) | Warning |
 | W-DERIVED-001 | §6.6.11 | `const <name> = expr` has no `@variable` references; value never re-evaluates | Warning |
 | E-ERROR-001 | §19.3.3, §19.10.4 | `fail` used in non-`!` function; ALSO a `transaction { }` block **outside a `!` function** — inside a function not declared `!` (S450), or **at the top level of a `${}` logic block, outside any function (S453/B1b)**. §19.10.4: *"`transaction { }` SHALL be valid only inside `!` functions"* — outside one, a failure inside the block has nowhere to go, so its commit-or-rollback promise has no failure path to keep (the same reason manual transaction control there is E-ERROR-015, §19.10.4 S451). One code for one condition; B1b mints no new code. Fires once per block — a NESTED block's placement is reported by E-ERROR-007 on the inner block, not by a second E-ERROR-001 per nesting level. Direction of change: **newly-rejecting** for the top-level case; **migration MEASURED at 0 pre-existing sources** across 2,321 corpus `.scrml` files (the one top-level occurrence is `conformance/cases/error/transaction-top-level-neg`, added by the change). ⛑ **Not reached** for a `transaction` inside a LAMBDA arrow body: the parser never builds a `transaction-block` there (a lambda body is an EXPRESSION, and `parseTransactionBlock()` is called from the top-level loop and `parseOneStatement` only), so no §19.10.4 check sees it. ⛑ **THAT SHAPE IS NOT ACCEPTED SILENTLY, AND AN EARLIER REVISION OF THIS ROW SAID IT WAS.** It claimed the block "degrades to a `bare-expr` at exit 0". That is true only of the AST and of this §19.10.4 checker; through the FULL pipeline the shape is **LOUD** — **E-CODEGEN-INVALID-LOGIC**, measured on both `origin/main` and the S453 head, with a control proving the `transaction` is the cause (the same lambda body without it compiles clean). A codegen refusal is a far smaller problem than the silent-wrong-data exception the struck wording implied, and the distinction matters to anyone triaging it: **loud at the pipeline level; the missing `transaction-block` node is the AST-level fact.** ⚠ A `write: false` compile cannot surface it, because E-CODEGEN-INVALID-LOGIC is a codegen-stage code — which is how the struck claim survived its first measurement. The AST-level fact is pinned by `compiler/tests/unit/transaction-in-function-body.test.js`; a pre-existing parse gap of the class S450 closed for function bodies, not something B1b changes. Provenance: ruling:user-voice-scrml.md S449 (B1b) — *"a top-level `transaction` is rejected (§19.10.4 already says `!` functions only)"* (emitted at `compiler/src/type-system.ts` for `fail`, and `compiler/src/validators/lint-transaction.ts` for `transaction`.) | Error |
@@ -49996,6 +49997,20 @@ library is therefore **declarations + named instances — no new construct** (§
 **impl#1 divergence (CARRIED).** impl#1 today leaks JavaScript reference semantics: a `let b = @a` alias compiles
 to a shared object reference, and an in-place `@a.push(3)` is observable through `b` (PA-verified by emission,
 S435). Per P7 this is carried as a conformance case expected-to-fail on impl#1.
+
+**A write to a loop copy that changes nothing is linted (S473).** A `for … of` binder holds a snapshot of the
+element (item 1), so a write to a part of it (`for (let p of @ps) { p.name = "z"; }`) changes the binder only,
+never the iterated cell or tape. When no read of the binder after the write can observe it — in source order, or
+anywhere in the loop body when the write sits inside a loop nested in that body — the compiler SHALL report
+**`W-LOOP-COPY-WRITE-UNREAD`** (a Warning) at the write. A read inside the write's own value or indices does not
+count (they are evaluated before the write). The program still compiles; the write is legal, and its meaning is
+unchanged. To change the source, write the source (`@ps[i].name = …`, or rebuild it with `.map(…)`); to keep the
+changed copy, read it (`lift p`, or pass it on). An implementation MAY stay silent where it cannot enumerate the
+body's reads (a lifted markup row, an effect, a `defer`): the lint never guesses. Emitted by the bootstrap
+(`compiler/self-host-v2/analyze.scrml` `loopCopyFor`); Nominal on impl#1 (§34.0).
+> **Provenance:** ruling:user-voice-scrml.md S473 "⭐ RULED — S473 PA recs, all" item 4 — *"A write to a loop copy that changes nothing: W- lint."* The PA recommendation it adopts (`g-loop-copy-part-write-no-op-s472`): *"a `W-`
+> lint 'a write to a loop copy that is never read'"*. **Direction of change:** inert (a new Warning; no program's
+> acceptance or meaning changes).
 
 ### 66.11 Write contracts — the one transition axis
 

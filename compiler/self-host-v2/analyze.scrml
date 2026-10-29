@@ -12663,7 +12663,195 @@ ${
 
     fn loopChecks(file: string, b: ABlock, st0: AS) -> AS {
         const st: AS = loopDupLabels(file, loopLabelsIn(b), st0)
-        return loopBlock(file, b, [], false, st)
+        return loopCopyStmts(file, b.stmts, loopBlock(file, b, [], false, st))
+    }
+
+    // =========================================================================
+    // s473 — THE LOOP-COPY LINT (SPEC §66.10, ruled S473 "A write to a loop
+    // copy that changes nothing: W- lint"). A `for … of` binder is a COPY of
+    // the element (§66.10: "a loop binder … is a copy"), so a part write to it
+    // (`p.name = v`, accepted by resolveLocalPartWrite — Core Assign with a
+    // path) changes the copy only. When no later read of the binder can see
+    // the write, it changes nothing: W-LOOP-COPY-WRITE-UNREAD, at the write.
+    // A read "can see" it when it is outside the write's own expression (the
+    // value and the indices are evaluated BEFORE the write) and either follows
+    // the write in source order or — the write sitting inside a loop nested in
+    // the body, which re-runs earlier statements — anywhere in the body. A body
+    // whose reads the walk cannot enumerate (a lifted markup row, an effect, a
+    // `defer`) silences the lint for that loop: a lint never guesses. Facts are
+    // read by Sym (the binder's BBind; each Name's NLocal), so shadowing by an
+    // inner binder of the name is exact.
+    // =========================================================================
+    type CopyWrite:struct = { root: int, span: ASpan, deep: boolean, label: string }
+    type CopyRead:struct = { nid: int, start: int }
+    type CopyWalk:struct = { writes: CopyWrite[], reads: CopyRead[], opaque: boolean }
+
+    fn loopCopyStmts(file: string, ss: AStmt[], st0: AS) -> AS {
+        let st: AS = st0
+        for (const s of ss) {
+            const k: AStmtK = s.k
+            const f: AFor | not = forOf(k)
+            if (f is given) st = loopCopyFor(file, f, st)
+            for (const nb of nestedBlocks(s)) { st = loopCopyStmts(file, nb.stmts, st) }
+        }
+        return st
+    }
+
+    fn loopCopyFor(file: string, f: AFor, st0: AS) -> AS {
+        const h: AForHead = f.head
+        const bnd: ABind | not = match h {
+            .HIter(bind: b) :> b
+            .HForever :> not
+            .HCond(cond: c) :> not
+            .HCounted(init: i) :> not
+        }
+        if (bnd is not) return st0
+        const bi: int = st0.facts.binds.nids.indexOf(bnd.nid)
+        if (bi < 0) return st0
+        const bf: BindFact = st0.facts.binds.facts[bi]
+        const sym: Sym | not = match bf {
+            .BBind(sym: s) :> s
+            .BParam(sym: s) :> not
+            .BGiven(sym: s) :> not
+            .BLoop(label: l) :> not
+            .BJump(target: t) :> not
+        }
+        if (sym is not) return st0
+        const w: CopyWalk = copyWalkStmts(st0, sym, f.body.stmts, false, { writes: [], reads: [], opaque: false })
+        if (w.opaque) return st0
+        let roots: int[] = []
+        for (const cw of w.writes) { roots = roots.concat([cw.root]) }
+        const src: string = iterSrcLabel(h)
+        let st: AS = st0
+        for (const cw of w.writes) {
+            let seen = false
+            for (const r of w.reads) {
+                if (roots.indexOf(r.nid) < 0 && (r.start < cw.span.start || r.start >= cw.span.end)) {
+                    if (cw.deep || r.start >= cw.span.end) seen = true
+                }
+            }
+            if (!seen) {
+                st = addDiag(st, file, cw.span, "W-LOOP-COPY-WRITE-UNREAD", "`" + cw.label + " = …` writes `" + bnd.name + "`, the loop's COPY of an element of " + src + " (a loop binder is a copy, §66.10), and nothing reads `" + bnd.name + "` after it — the write changes nothing. To change the source, write it (`@xs[i].f = …` in a counted loop, or rebuild it with `.map(…)`); to keep the changed copy, read it (`lift " + bnd.name + "`, or pass it on)")
+            }
+        }
+        return st
+    }
+
+    fn iterSrcLabel(h: AForHead) -> string {
+        return match h {
+            .HIter(src: src) :> iterOfLabel(src)
+            .HForever :> "the iterable"
+            .HCond(cond: c) :> "the iterable"
+            .HCounted(init: i) :> "the iterable"
+        }
+    }
+
+    fn iterOfLabel(src: AIterSrc) -> string {
+        return match src {
+            .IterOf(e: x) :> atLabelOr(x)
+            .IterRange(lo: lo) :> "the range"
+        }
+    }
+
+    fn atLabelOr(e: AExpr) -> string {
+        const a: string = atName(e)
+        if (a != "") return "`@" + a + "`"
+        const n: string = exprName(e)
+        if (n != "") return "`" + n + "`"
+        return "the iterable"
+    }
+
+    // A statement whose reads this walk cannot see: a lifted markup row (its
+    // interpolations read names), an effect body, a deferred body.
+    fn copyOpaque(s: AStmt) -> boolean {
+        const k: AStmtK = s.k
+        return match k {
+            .Lift(what: w) :> liftExprs(w).length == 0
+            .EffectStmt(w: w) :> true
+            .Defer(body: d) :> true
+            .For(f: lf) :> false
+            .Break(label: x) :> false
+            .Continue(label: x) :> false
+            .Eval(e: x) :> false
+            .Local(name: n) :> false
+            .Return(e: x) :> false
+            .If(cond: c) :> false
+            .Given(name: n) :> false
+            .Fail(f: x) :> false
+        }
+    }
+
+    fn copyWalkStmts(st: AS, sym: Sym, ss: AStmt[], deep: boolean, acc0: CopyWalk) -> CopyWalk {
+        let acc: CopyWalk = acc0
+        for (const s of ss) {
+            if (copyOpaque(s)) acc = { writes: acc.writes, reads: acc.reads, opaque: true }
+            const k: AStmtK = s.k
+            const ev: AExpr | not = match k {
+                .Eval(e: e) :> e
+                .For(f: lf) :> not
+                .Break(label: x) :> not
+                .Continue(label: x) :> not
+                .Lift(what: w) :> not
+                .Local(name: n) :> not
+                .Return(e: x) :> not
+                .If(cond: c) :> not
+                .Given(name: n) :> not
+                .EffectStmt(w: w) :> not
+                .Defer(body: d) :> not
+                .Fail(f: x) :> not
+            }
+            if (ev is given) acc = copyWriteOf(st, sym, ev, deep, acc)
+            for (const x of stmtExprs(s)) { acc = copyReadsIn(st, sym, x, acc) }
+            const inner: boolean = deep || forOf(k) is given
+            for (const nb of nestedBlocks(s)) { acc = copyWalkStmts(st, sym, nb.stmts, inner, acc) }
+        }
+        return acc
+    }
+
+    // `e` a part write of the binder that the binder ACCEPTED (its effect is a
+    // local Assign of `sym` with a path) — a refused write has its error only.
+    fn copyWriteOf(st: AS, sym: Sym, e: AExpr, deep: boolean, acc: CopyWalk) -> CopyWalk {
+        const t: AExpr | not = assignedTarget(e)
+        if (t is not) return acc
+        const rn: AExpr | not = partRootName(t)
+        if (rn is not) return acc
+        const ef: EffectFact | not = effectFactIn(st, e.nid)
+        const ok: boolean = match ef {
+            .EAssignLocal(sym: s, path: pa) :> s.id == sym.id && pa.length > 0
+            .EWrite(w: x) :> false
+            .ESpread(ws: x) :> false
+            .EReset(w: x) :> false
+            .EEdits(w: x) :> false
+            .ERemove(w: x) :> false
+            .EElemAt(cap: c) :> false
+            .EPosition(cap: c) :> false
+            not :> false
+        }
+        if (!ok) return acc
+        const cw: CopyWrite = { root: rn.nid, span: e.span, deep: deep, label: partLabel(exprName(rn), partSteps(t)) }
+        return { writes: acc.writes.concat([cw]), reads: acc.reads, opaque: acc.opaque }
+    }
+
+    // Every Name in `e` (at any depth) that names the binder `sym`.
+    fn copyReadsIn(st: AS, sym: Sym, e: AExpr, acc0: CopyWalk) -> CopyWalk {
+        let acc: CopyWalk = acc0
+        if (exprName(e) != "") {
+            const nf: NameFact | not = nameFactIn(st, e.nid)
+            const hit: boolean = match nf {
+                .NLocal(sym: s) :> s.id == sym.id
+                .NField(decl: d) :> false
+                .NInst(decl: d) :> false
+                .NStruct(owner: o) :> false
+                .NFn(sym: s) :> false
+                .NLength :> false
+                .NSurface(of: o) :> false
+                .NConst(sym: s) :> false
+                not :> false
+            }
+            if (hit) acc = { writes: acc.writes, reads: acc.reads.concat([{ nid: e.nid, start: e.span.start }]), opaque: acc.opaque }
+        }
+        for (const x of exprKids(e)) { acc = copyReadsIn(st, sym, x, acc) }
+        return acc
     }
 
     fn loopLabelsIn(b: ABlock) -> LabelAt[] {
