@@ -77,3 +77,13 @@ base: s473-boot-exitless-loop; retarget to main after #1631 lands.
   `blockBreaksTo` count an unreachable `break` (`for (y of ys) { lift y; for { for { } break; } }` compiles and
   hangs). Needs its own lane (shared with fall-off, divergence, check.scrml).
 - New helper names checked unique (blockCrossesOut, stmtCrossesOut, blocksCrossOut, labelOwned).
+
+## 2026-10-29T16:20Z — merged origin/main again (#1638 was BEHIND)
+- Merge efff6d09d. One conflict in docs/known-gaps.md: kept this lane's RESOLVED block + the new F1 gap, and
+  main's version of g-impl1-bootstrap-duplicate-fn-last-wins-s473 (resolved there by s473-boot-dup-fn-lint).
+  Counts, SPEC-INDEX and severity re-run by script. Gap ids: none lost (2,466 = main's 2,465 + the F1 gap).
+  E-LOOP-008 line refs (:12033/:12034, :12300/:12301) still match. lint-duplicate-fn: 0 violations.
+- Gates, all PASS: types, compiler/tests 2,239, snippet, claim, corpus-floor, md-shim, conflict-marker,
+  spec-index, delta-lint, s34-census --check-new --base origin/main, lint-no-default-arm, lint-duplicate-fn,
+  m1 109 / m2 619 / m1 lowered 109 / m3 60 / m4 3,125 / codec 166, conformance current, e2e-render-map 259.
+- Corpus (2,858 files, bootstrap front end): 0 files differ from the pre-lane baseline; 0 E-LOOP-008, 0 crashes.
