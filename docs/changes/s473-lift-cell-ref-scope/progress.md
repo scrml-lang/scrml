@@ -68,3 +68,18 @@ Merged origin/main (#1630 landed; clean merge). Finding → fix:
   g-impl1-member-target-handler-block-arm-unlowered-s473 (MED, related= the match-into-cell gap).
 
 Unit file: 48 tests.
+
+## 2026-10-29 — fix round 2 (S239 re-review of #1645 @ aeba6b064, LAND-W-F/U)
+
+- NEW-1 (a compiler comment `// <widgets server> = ?{…}` (§52.6.5 Pattern C) shortened the mask through
+  `blankLiteralTextInSource`'s `?{}` placeholder pass, so the whole page fell back to eager writes):
+  `blankLiteralTextInSource` gains opt-in `jsOnly` (skip the placeholder pass; emitted JS never holds a
+  real `?{}` block); `deferSyncGuardedCellWrites` uses it. Other callers unchanged. Tests: Pattern C page
+  emitted shape + executed (fetch stubbed) — `@x` keeps 7 on failure, 5 on success.
+- NEW-2 (overlap asserted, not enforced): every `_scrml_reactive_set(` call range is collected; a site
+  whose call contains another call, or that lies inside another call's arguments, is left eager; a final
+  overlap check on the sorted edits returns the code unchanged if any remain. The function is exported;
+  the review's synth.ts is a unit test (output parses, both sites eager, output === input) plus a sibling
+  control (both rewritten).
+
+Unit file: 52 tests.

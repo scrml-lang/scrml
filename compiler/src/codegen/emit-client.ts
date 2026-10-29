@@ -195,10 +195,12 @@ const POST_EMIT_HELPER_CHUNK_GATES: ReadonlyArray<readonly [string, string]> = [
  * matched or rewritten (MED-2) and a quote inside a regex never derails the brace match (LOW-3). If
  * the mask cannot be built, nothing is rewritten (fail closed: the eager write stays).
  */
-function deferSyncGuardedCellWrites(code: string, findMatchingBrace: (s: string, open: number) => number): string {
+export function deferSyncGuardedCellWrites(code: string, findMatchingBrace: (s: string, open: number) => number): string {
   const SET = "_scrml_reactive_set(";
   if (!code.includes(SET)) return code;
-  const mask = blankLiteralTextInSource(code, { blankRegex: true });
+  // `jsOnly` (fix round 2, NEW-1): this is emitted JS — no `?{}` placeholder pass, so a compiler
+  // comment naming `?{…}` (§52.6.5 Pattern C) no longer shortens the mask and disables the page.
+  const mask = blankLiteralTextInSource(code, { blankRegex: true, jsOnly: true });
   // A mask that is not the same length, or that came back untouched although the code has literal
   // text (the tokenizer threw), cannot be trusted: rewrite nothing.
   if (typeof mask !== "string" || mask.length !== code.length) return code;
@@ -218,13 +220,26 @@ function deferSyncGuardedCellWrites(code: string, findMatchingBrace: (s: string,
     }
     return null;
   };
+  // Every `_scrml_reactive_set(` call on the mask, with the range of its argument list.
+  const calls: Array<{ at: number; close: number }> = [];
+  for (let a = mask.indexOf(SET); a >= 0; a = mask.indexOf(SET, a + SET.length)) {
+    const c = scanCall(a + SET.length - 1);
+    if (c) calls.push({ at: a, close: c.close });
+  }
+  // Fix round 2 (NEW-2) — non-overlap is ENFORCED, not assumed: a site whose call's arguments
+  // CONTAIN another `_scrml_reactive_set(` call (a guarded write inside the VALUE of another,
+  // `let A = _scrml_reactive_set("x", run(() => { let B = _scrml_reactive_set("y", f()); … }))`),
+  // and a site CONTAINED in another call's arguments, are both left eager: their edits would
+  // overlap, and applying overlapping splices with original offsets corrupts the JS.
+  const overlapsAnotherCall = (a: number, close: number): boolean =>
+    calls.some((o) => o.at !== a && ((o.at > a && o.at <= close) || (a > o.at && a <= o.close)));
   const edits: Array<{ start: number; end: number; text: string }> = [];
   let at = mask.indexOf(SET);
   while (at >= 0) {
     const next = at + SET.length;
     const head = /\blet\s+([A-Za-z_$][\w$]*)\s*=\s*$/.exec(mask.slice(Math.max(0, at - 120), at));
     const call = head && (at === 0 || !/[\w$]/.test(mask[at - 1])) ? scanCall(next - 1) : null;
-    if (head && call && call.commas.length === 1 && mask[call.close + 1] === ";") {
+    if (head && call && call.commas.length === 1 && mask[call.close + 1] === ";" && !overlapsAnotherCall(at, call.close)) {
       const R = head[1];
       const nameArg = code.slice(next, call.commas[0]).trim();
       const stmtEnd = call.close + 2;
@@ -250,9 +265,13 @@ function deferSyncGuardedCellWrites(code: string, findMatchingBrace: (s: string,
     at = mask.indexOf(SET, next);
   }
   if (edits.length === 0) return code;
-  // The edits never overlap (a site's call ends before its own guard; a nested site lies inside an
-  // outer arm block, after the outer call and before the outer insertion point). Apply from the end.
+  // A site's call ends before its own guard; a site nested in an outer ARM block lies after the
+  // outer call and before the outer insertion point; a site in another call's arguments was skipped
+  // above. Checked anyway: any overlap left means rewrite nothing (fail closed). Apply from the end.
   edits.sort((a, b) => b.start - a.start || b.end - a.end);
+  for (let k = 1; k < edits.length; k++) {
+    if (edits[k].end > edits[k - 1].start) return code;
+  }
   let out = code;
   for (const e of edits) out = out.slice(0, e.start) + e.text + out.slice(e.end);
   return out;

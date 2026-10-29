@@ -22,6 +22,8 @@ import { writeFileSync, readFileSync, rmSync, existsSync, mkdirSync } from "fs";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { compileScrml } from "../../src/api.js";
 import { SCRML_RUNTIME } from "../../src/runtime-template.js";
+import { deferSyncGuardedCellWrites } from "../../src/codegen/emit-client.ts";
+import { closingBraceIndex } from "../../src/brace-pair.ts";
 
 afterAll(async () => {
   if (GlobalRegistrator.isRegistered) await GlobalRegistrator.unregister();
@@ -66,9 +68,10 @@ ${extra}
 <p id="sn">\${@s.n}</p>
 `;
 
-async function boot(source) {
+async function boot(source, { fetchStub } = {}) {
   if (GlobalRegistrator.isRegistered) await GlobalRegistrator.unregister();
   GlobalRegistrator.register();
+  if (fetchStub) { globalThis.fetch = fetchStub; window.fetch = fetchStub; }
   const out = compileSource(source);
   if (out.errors.length > 0) throw new Error(`compile errors: ${out.codes.join(", ")}\n${out.messages.join("\n")}`);
   const bodyMatch = out.html.match(/<body[^>]*>([\s\S]*)<\/body>/i);
@@ -291,5 +294,83 @@ describe("F — INFO-5: route inference on a `lift` arm of a handled query in a 
     expect(compileSource(split("{ lift fallback }")).codes).toContain("E-RI-002");
     expect(compileSource(split("{ lift @s }")).codes).toContain("E-RI-002");
     expect(compileSource(split("{ lift mark() }")).codes).toContain("E-RI-002");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// G — fix round 2 (S239 re-review of #1645).
+// ---------------------------------------------------------------------------
+describe("G — fix round 2", () => {
+  // NEW-1: emit-client writes `// <widgets server> = ?{…} — …` for a §52.6.5 Pattern C inline server
+  // cell; the mask's `?{}` placeholder pass collapsed it, the mask came out shorter, and every sync
+  // guarded write on the page stayed eager.
+  const PATTERN_C = `<program db="sqlite:./app.db" auth="required">
+<schema>
+  ?{\`CREATE TABLE widgets (id INTEGER PRIMARY KEY, label TEXT)\`}
+</schema>
+<db src="app.db" tables="widgets"></db>
+\${
+  type E:enum = { Bad }
+  <x> = 7
+  <widgets server auth="none"> = ?{\`SELECT * FROM widgets\`}.all()
+  function load(id: string)! E {
+      if (id == "bad") fail E.Bad;
+      return 5;
+  }
+  function go(id: string) {
+      @x = load(id) !{ _ e :> { lift @x } }
+  }
+}
+<main>
+  <button id="bad" onclick=go("bad")>b</button>
+  <button id="ok" onclick=go("ok")>o</button>
+  <p id="out">\${@x}</p>
+  <ul><each in=@widgets key=@.id as w><li class="wid">\${w.label}</li></each></ul>
+</main>
+</program>`;
+  test("NEW-1: a page with a Pattern C inline `?{}` server cell still defers the sync guarded write (emitted)", () => {
+    const r = compileSource(PATTERN_C);
+    expect(r.codes).toEqual([]);
+    expect(r.clientJs).toMatch(/\?\{/); // the compiler's own Pattern C comment is on the page
+    expect(r.clientJs).not.toMatch(/let \w+ = _scrml(?:_cs)?_reactive_set\("x", _scrml_load/);
+    expect(r.clientJs).toMatch(/let (\w+) = _scrml_load_\d+\(id\);\s*if \(\1 && \1\.__scrml_error\) \{[\s\S]*?\} else \{\s*_scrml(?:_cs)?_reactive_set\("x", \1\);\s*\}/);
+  });
+  test("NEW-1: executed — the cell keeps its old value on failure, then takes the success value", async () => {
+    const page = await boot(PATTERN_C, { fetchStub: async () => new Response("[]", { status: 200, headers: { "Content-Type": "application/json" } }) });
+    expect(page.text("#out")).toBe("7");
+    await page.click("#bad");
+    expect(page.text("#out")).toBe("7");
+    await page.click("#ok");
+    expect(page.text("#out")).toBe("5");
+  });
+
+  // NEW-2: a guarded write inside the VALUE of another guarded write — the edits would overlap.
+  test("NEW-2: a site containing another site's call, and the contained one, are left eager — the output still parses", () => {
+    const code = `function go() {
+  let A = _scrml_reactive_set("x", run(() => {
+    let B = _scrml_reactive_set("y", f());
+    if (B && B.__scrml_error) { B = 1; _scrml_reactive_set("y", B); }
+    return 2;
+  }));
+  if (A && A.__scrml_error) { A = 3; _scrml_reactive_set("x", A); }
+}`;
+    const out = deferSyncGuardedCellWrites(code, closingBraceIndex);
+    expect(() => new Function(out)).not.toThrow();
+    expect(out).toContain(`let A = _scrml_reactive_set("x", run(`);
+    expect(out).toContain(`let B = _scrml_reactive_set("y", f());`);
+    expect(out).toBe(code);
+  });
+  test("NEW-2 control: two sibling sites are both rewritten, and the output parses", () => {
+    const code = `function go() {
+  let A = _scrml_reactive_set("x", f());
+  if (A && A.__scrml_error) { A = 3; _scrml_reactive_set("x", A); }
+  let B = _scrml_reactive_set("y", g());
+  if (B && B.__scrml_error) { B = 1; _scrml_reactive_set("y", B); }
+}`;
+    const out = deferSyncGuardedCellWrites(code, closingBraceIndex);
+    expect(() => new Function(out)).not.toThrow();
+    expect(out).toContain("let A = f();");
+    expect(out).toContain("let B = g();");
+    expect((out.match(/\} else \{/g) ?? []).length).toBe(2);
   });
 });
