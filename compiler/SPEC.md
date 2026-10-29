@@ -25081,6 +25081,29 @@ type Sighting:struct = { isIntersecting: bool, intersectionRatio: number }
    `srcdoc` and the `javascript:` scheme rules state for markup (S464). A URL-valued property write (`href`, `src`,
    `action`) is not judged by this rule. ⚑ Whether it should be is `g-spec-host-target-url-sinks-unjudged-s473`.
 
+   **(S473 PA ruling — fail-closed tightening of rule 8, from the #1659 adversarial review.)** Rule 8 is judged
+   over EVERY segment of a target's chain, in EVERY shape, a property READ included, because a binding may read a
+   sink-valued member and return it as a `:host` handle, and a second binding then reach the sink through that
+   handle's parameter, whose chain names only the parameter. Accordingly, each of these is also
+   `E-HOST-TARGET-SINK`:
+   - an execution, HTML-string, navigation, attribute-node or realm-crossing member — `eval`, `Function`,
+     `setTimeout`, `setInterval`, `insertAdjacentHTML`, `createContextualFragment`, `setHTMLUnsafe`, `execCommand`,
+     `write`, `writeln`, `open`, `Reflect`, `assign`, `defineProperty`, `defineProperties`, `__defineSetter__`,
+     `__defineGetter__`, `setPrototypeOf`, `Worker`, `SharedWorker`, `serviceWorker`, `register`, `navigation`,
+     `navigate`, `setAttributeNode`, `setAttributeNodeNS`, `setNamedItem`, `setNamedItemNS`, `createAttribute`,
+     `getAttributeNode`, `getNamedItem`, `attributes`, `contentWindow`, `contentDocument` or `defaultView` —
+     appearing ANYWHERE as a chain member, in any shape (an alias through `.call` / `.apply` / `.bind`, and a
+     return of it as a handle, included);
+   - a property read whose LAST member is a realm / handle-exposing name — `document`, `location`, `window`,
+     `self`, `top`, `parent`, `frames`, `opener`, `ownerDocument` or `globalThis` — so the handle is never handed
+     out (`window.location.href` still reads, since `location` is not the read's last member, `href` is);
+   - a write (shape 4) of `text`, `textContent`, `value` or `nodeValue` (a `<script>`'s body, or an `Attr`'s
+     value), and any write or call that passes through `location`.
+   The sink list is ONE table, shared by reads and writes. A binding whose callee is a bare parameter or bare
+   global with no member (`f(…)`, a callable `:host` handle) is `E-HOST-TARGET-SHAPE` (rule 4 requires a dotted
+   member chain). *(A `value` / `textContent` write on an ordinary element is refused too — the bootstrap has no
+   DOM element types to tell it from a `<script>` or an `Attr`; fail closed, `g-spec-host-sink-aliases-reflect-s473`.)*
+
 *A binding is a function.*
 
 9. A binding is a function bound in file scope (§7.6). It MAY be exported by name (§21.2). Its calls are checked
@@ -25121,18 +25144,23 @@ type Sighting:struct = { isIntersecting: bool, intersectionRatio: number }
     - for `T | not`, JS `null` or `undefined` is `not`, and any other value is decoded as `T`;
     - for any type without `not`, JS `null` or `undefined` is a mismatch;
     - an enum is decoded by the §41.13 `parseVariant` shape;
-    - a struct SHALL be decoded by reading each declared field ONCE, by ordinary property access, so a getter (a
-      WebIDL attribute such as `IntersectionObserverEntry.isIntersecting` or `DOMRect.width`, which is an accessor on
-      the interface prototype) runs at most once per field. A field is ABSENT when the object's prototype chain
-      does not have it, or has it only on `Object.prototype` (the chain is searched up to, and not including,
-      `Object.prototype`, so a polluted `Object.prototype` cannot supply a field). An absent field is `not` when its
-      type admits `not`, and a mismatch otherwise. The value read is decoded, and members not declared are dropped.
-      This is the same read-once ordinary access rule 18 uses for `HostError`'s `message` and `name`;
-    - a tape SHALL be a value for which `Array.isArray` is true. Its `length` and each element are read once by
-      ordinary access (an index that is absent by the struct rule above is absent), and each element is decoded.
-      `Array.isArray` is false for array-like platform collections (`NodeList`, `HTMLCollection`, `FileList`,
-      `DOMTokenList`), so a binding returning one is a mismatch: convert it with `Array.from` in the `src=` glue,
-      or declare the result `asIs`;
+    - a struct SHALL be a NON-ARRAY, non-function ordinary object (`typeof` object, not `null`, and `Array.isArray`
+      false — **S473 PA ruling, from the #1659 review**, so `Array.prototype` / `Function.prototype` can never be
+      in a struct value's chain). It is decoded by reading each declared field ONCE, by ordinary property access, so
+      a getter (a WebIDL attribute such as `IntersectionObserverEntry.isIntersecting` or `DOMRect.width`, which is
+      an accessor on the interface prototype) runs at most once per field. A field is ABSENT when it is found only on
+      a CHAIN-TERMINAL object — one whose own prototype is `null`, which is the `Object.prototype` of whatever realm
+      the value came from (the search stops before every chain-terminal, so a polluted `Object.prototype`, this
+      realm's or a cross-realm iframe's, cannot supply a field — **S473 PA ruling**). An absent field is `not` when
+      its type admits `not`, and a mismatch otherwise. The value read is decoded, and members not declared are
+      dropped. This is the same read-once ordinary access rule 18 uses for `HostError`'s `message` and `name`;
+    - a tape SHALL be a value for which `Array.isArray` is true. Its `length` and each OWN index are read once by
+      ordinary access, and each element is decoded; an index that is NOT an own property of the array (a hole, or an
+      index supplied only by a polluted `Array.prototype`, cross-realm included) is absent — **S473 PA ruling, from
+      the #1659 review** (the earlier "absent by the struct rule" is narrowed to own indices). An absent element is
+      `not` when the element type admits `not`, and a mismatch otherwise. `Array.isArray` is false for array-like
+      platform collections (`NodeList`, `HTMLCollection`, `FileList`, `DOMTokenList`), so a binding returning one is
+      a mismatch: convert it with `Array.from` in the `src=` glue, or declare the result `asIs`;
     - a `:host` type (rule 15) and a DOM element type (rule 16) are not decoded, but a non-optional one SHALL NOT be
       `null` or `undefined`;
     - `asIs` (§7.5.2) is not decoded;
@@ -25208,7 +25236,10 @@ type Sighting:struct = { isIntersecting: bool, intersectionRatio: number }
     This follows `scrml:host`'s `normalizeThrown` (`compiler/runtime/stdlib/host.js`). It departs in one place:
     an object without a string `message` gives the fixed text, not `String(thrown)`. A `!` naming any other type
     SHALL be `E-HOST-ERROR-TYPE`. A binding not declared `!` whose target throws, or whose Promise rejects, SHALL
-    raise the trap `E-HOST-THROW-RT` (§19.17).
+    raise the trap `E-HOST-THROW-RT` (§19.17). **A throw DURING the result decode (a getter or a Proxy trap that
+    throws as rule 13 reads a field or an element) SHALL likewise be `E-HOST-THROW-RT`** — the host threw, so the
+    value is never admitted (**S473 PA ruling, from the #1659 review**; a `! HostError` binding turns it into
+    `HostError::Thrown` as it does a target throw).
 19. **Callbacks.** A parameter of function type `(x: T) => U` accepts a lambda whose parameters are inferred
     (§7.5, position 3). Host arguments beyond the declared parameters are ignored; a missing one decodes as `not`,
     which is a mismatch unless that parameter's type admits `not`. A lambda passed to a binding counts as handed to
@@ -25240,15 +25271,21 @@ its root read through the runtime (`rt.hostRoot("window")`) so no program name c
 (`E-BOOTSTRAP-UNSUPPORTED`): a valid `src=` (rule 3's static export read is not built, and nothing is loaded), `->
 waiting T` (rule 17), `! HostError` (rule 18), a `<host>` in a stdlib module file (rule 10's server side), a struct
 or tape argument (rule 12's deep copy), an enum result (rule 13), a cell or an enum payload holding a handle (rule
-15), a parameter named `window` / `document` / `navigator` / `globalThis` (rule 4 does not say which root such
-a name is), and a call through `Reflect`, `Object.assign` or `defineProperty` (a write of a property named by data
-reaches a rule 8 sink without naming it). Rule 8 is judged over every segment of the chain, so a sink reached
-through `.call` / `.apply` / `.bind`, `document.write` through `ownerDocument`, and `window.open` through `self` /
-`top` / `parent` / `defaultView` / `contentWindow` are `E-HOST-TARGET-SINK` too *(PA readings, fail closed:
-`g-spec-host-sink-aliases-reflect-s473`)*. It cannot express, so never accepts: a DOM element type (rule 16; an unknown type in the bootstrap), a
-callback parameter (rule 19), or a function, map, set or tuple type (rule 14), since it parses none of these types.
-A throw while a result is decoded (a getter, a Proxy trap) is `E-HOST-THROW-RT` *(PA reading; the rules are silent,
-`g-spec-host-decode-throw-code-s473`)*. Not emitted: `E-HOST-TYPE-NOT-CROSSABLE`, `E-HOST-CALLBACK-WAITS`, and
+15), and a parameter named `window` / `document` / `navigator` / `globalThis` (rule 4 does not say which root such
+a name is). **Rule 8 is built fail-closed (the #1659 review H1, S473 PA ruling):** it is one shared sink table
+judged over every chain segment in every shape, a READ included, so a binding cannot read a sink-valued member
+(`window.Function`, `window.eval`, `window.Reflect`, `document.defaultView`, an element's `.contentWindow`, …) and
+return it as a handle; a realm / handle name as a read's last member (`document`, `location`, `window`, `self`,
+`top`, …) is refused; a write of `innerHTML` / `outerHTML` / `srcdoc` / `text` / `textContent` / `value` /
+`nodeValue`, or anything through `location`, is refused; a `Reflect` / `Object.assign` / `defineProperty` call,
+`setAttributeNode` / `createAttribute` / `attributes`, and an alias of a sink through `.call` / `.apply` / `.bind`
+are all `E-HOST-TARGET-SINK`; and a bare-parameter or bare-global callee (a callable handle) is
+`E-HOST-TARGET-SHAPE`. The struct decode requires a non-array ordinary object and stops the field search at every
+chain-terminal (`Object.prototype` of any realm), and a tape counts own indices only, so cross-realm and
+`Array.prototype` / `Function.prototype` pollution cannot supply a field or an element (review M1); a throw during
+the decode is `E-HOST-THROW-RT` (review Q3); `then` is read once (review M2). It cannot express, so never accepts: a
+DOM element type (rule 16; an unknown type in the bootstrap), a callback parameter (rule 19), or a function, map,
+set or tuple type (rule 14), since it parses none of these types. Not emitted: `E-HOST-TYPE-NOT-CROSSABLE`, `E-HOST-CALLBACK-WAITS`, and
 `W-HOST-UNTYPED-CALL` (the bootstrap refuses a bare `window` / `document` read and an untyped `.js` import outright,
 so there is no untyped door to lint). The rest of the build is `g-boot-host-block-f3-unbuilt-s473`.
 

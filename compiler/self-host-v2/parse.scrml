@@ -6452,12 +6452,30 @@ ${
         return { items: [], mp: m }
     }
 
+    // s473 (#1659 review L1): the line-terminators the scrml lexer stops at that `hostLineEnd`
+    // (which cuts at `\n`) does NOT — U+2028, U+2029, and a lone CR not part of a CRLF. Their
+    // presence would silently drop the text after them, so a binding line containing one is
+    // refused, never read as a shorter line.
+    fn hostLineTermIn(src: string, start: int, end: int) -> boolean {
+        let i: int = start
+        while (i < end) {
+            const c: string = src.charAt(i)
+            if (c == " " || c == " ") return true
+            if (c == "\r" && src.charAt(i + 1) != "\n") return true
+            i = i + 1
+        }
+        return false
+    }
+
     fn hostLine(mp: MP, src: string) -> RMItems {
         const at: int = mp.pos
         let end: int = hostLineEnd(mp.src, at)
         const c0: string = chAt(mp, 0)
         if (c0 == "<" || c0 == "$" || c0 == "#" || c0 == "\"" || c0 == "'" || c0 == "`" || c0 == "/" || c0 == "=") {
             return hostMalformed(mp, at, end, "this line is not a binding")
+        }
+        if (hostLineTermIn(mp.src, at, end)) {
+            return hostMalformed(mp, at, end, "this line contains a U+2028 / U+2029 line separator or a lone CR — a binding stands on one line (its text would otherwise be silently cut there)")
         }
         let lexed: PTok[] = hostLineToks(mp.src, at, end)
         let toks: PTok[] = withoutLast(lexed)
@@ -6468,6 +6486,9 @@ ${
                 going = false
             } else {
                 const e2: int = hostLineEnd(mp.src, nx)
+                if (hostLineTermIn(mp.src, nx, e2)) {
+                    return hostMalformed(mp, at, e2, "a continuation line contains a U+2028 / U+2029 line separator or a lone CR")
+                }
                 lexed = hostLineToks(mp.src, nx, e2)
                 toks = toks.concat(withoutLast(lexed))
                 end = e2
@@ -6479,14 +6500,29 @@ ${
         return hostBindLine(mp, t0, at, end, src)
     }
 
+    // A built-in type name, or a built-in declaration's name, a `:host` handle may not reuse.
+    fn hostReservedTypeName(n: string) -> boolean {
+        return n == "int" || n == "number" || n == "bool" || n == "string" || n == "integer" || n == "boolean"
+            || n == "void" || n == "not" || n == "struct" || n == "enum" || n == "any" || n == "asIs"
+            || n == "Object" || n == "Array" || n == "Function" || n == "Error" || n == "SqlError" || n == "ServerCallError"
+            || n == "map" || n == "set" || n == "Line" || n == "Openness"
+    }
+
     // `type Name:host` (rule 15: "`type Name:host` declares a nominal, opaque host type").
     fn hostTypeLine(mp: MP, t0: TP, at: int, end: int) -> RMItems {
         const n: PTok = peekAt(t0, 1)
         const c: PTok = peekAt(t0, 2)
         const h: PTok = peekAt(t0, 3)
         const e: PTok = peekAt(t0, 4)
-        if (n.cls != TC.Ident || !tk(c, ":") || h.cls != TC.Ident || h.v != "host" || e.cls != TC.End) {
+        const nameOk: boolean = n.cls == TC.Ident || n.cls == TC.Keyword
+        if (!nameOk || !tk(c, ":") || h.cls != TC.Ident || h.v != "host" || e.cls != TC.End) {
             return hostMalformed(mp, at, end, "a type line in a `<host>` is exactly `type Name:host`")
+        }
+        // s473 (#1659 review L2): a `:host` handle may not take a built-in type name
+        // (`type string:host`, `type Object:host`, `type void:host`) — the built-in wins in
+        // decode, so the declaration would be a dead, confusing shadow. A keyword name is reserved.
+        if (hostReservedTypeName(n.v) || n.cls == TC.Keyword) {
+            return { items: [], mp: mAt(mDiag(mp, "E-SCOPE-010", "`type " + n.v + ":host` names the built-in type `" + n.v + "` — a `:host` handle type SHALL have a fresh name (§21.3.3 rule 15, §7.6)", at, end), end) }
         }
         const td: ATypeDecl = { nid: mp.nid, span: mkSpan(at, end), exported: false, name: n.v, body: ATypeBody.HostBody }
         const m1: MP = mBump(mp)
@@ -6593,24 +6629,51 @@ ${
         return -1
     }
 
-    fn hostSinkWords() -> string[] {
-        return ["eval", "Function", "setTimeout", "setInterval", "insertAdjacentHTML", "createContextualFragment", "setHTMLUnsafe", "execCommand"]
+    // s473 (boot-host-block-f3, #1659 review H1 — FAIL-CLOSED tightening of rule 8,
+    // S473 PA ruling): rule 8 is one shared sink table, judged over EVERY segment of a
+    // target's chain in EVERY shape, a property READ included — because a binding may read
+    // a sink-valued member and return it as a `:host` handle, and a second binding then
+    // calls, constructs or writes through the handle's parameter, where its chain names only
+    // the parameter. The #1659 Chromium probes reached `Function`, `document.write`,
+    // `Reflect.set(…, "innerHTML", …)`, a `location` navigation and an `on…` attribute
+    // (through `setAttributeNode`) by exactly two clean bindings. So:
+    //
+    // TIER 1 — an EXECUTION / HTML / NAVIGATION / ATTRIBUTE-NODE / REALM-CROSSING name is
+    // refused WHEREVER it appears as a chain member, in any shape (a read of it as a result
+    // included). Returning `window.eval` / `window.Function` / `window.Reflect` /
+    // `document.defaultView` / an element's `.contentWindow` as a handle is refused here.
+    fn hostExecSink(s: string) -> boolean {
+        return s == "eval" || s == "Function" || s == "setTimeout" || s == "setInterval"
+            || s == "insertAdjacentHTML" || s == "createContextualFragment" || s == "setHTMLUnsafe" || s == "execCommand"
+            || s == "write" || s == "writeln" || s == "open"
+            || s == "Reflect" || s == "assign" || s == "defineProperty" || s == "defineProperties"
+            || s == "__defineSetter__" || s == "__defineGetter__" || s == "setPrototypeOf"
+            || s == "Worker" || s == "SharedWorker" || s == "serviceWorker" || s == "register"
+            || s == "navigation" || s == "navigate"
+            || s == "setAttributeNode" || s == "setAttributeNodeNS" || s == "setNamedItem" || s == "setNamedItemNS"
+            || s == "createAttribute" || s == "getAttributeNode" || s == "getNamedItem" || s == "attributes"
+            || s == "contentWindow" || s == "contentDocument" || s == "defaultView"
     }
 
-    // The names a document / a window is reached by along a chain: `document.write`
-    // and `window.open` are the same call through `el.ownerDocument.write` or
-    // `window.self.open` (rule 8 judges the CALL, so its aliases are judged too).
-    fn hostDocWord(s: string) -> boolean { return s == "document" || s == "ownerDocument" || s == "contentDocument" }
-    fn hostWinWord(s: string) -> boolean {
-        return s == "window" || s == "self" || s == "top" || s == "parent" || s == "frames" || s == "opener" || s == "defaultView" || s == "contentWindow"
+    // TIER 2 — a REALM / HANDLE-exposing name (`document`, `location`, `window`, `self`,
+    // `top`, `parent`, `frames`, `opener`, `ownerDocument`, `globalThis`) refused as the LAST
+    // member of a property READ — i.e. returned as a `:host` handle. Mid-chain it is fine, so
+    // `window.location.href` (a URL read, §21.3.3 "A URL-valued property … is not judged")
+    // still compiles: `location` is not the read's last member, `href` is.
+    fn hostRealmResultWord(s: string) -> boolean {
+        return s == "document" || s == "location" || s == "window" || s == "self" || s == "top"
+            || s == "parent" || s == "frames" || s == "opener" || s == "ownerDocument" || s == "globalThis"
     }
 
-    // A call that writes a property NAMED BY DATA (`Reflect.set(o, "innerHTML", s)`,
-    // `Object.assign(o, { innerHTML: s })`, `Object.defineProperty`) reaches any rule 8
-    // write sink while naming none of them as a member: refused by name (fail closed,
-    // PA reading — rule 8 is judged by member name, which these defeat).
-    fn hostReflectWord(s: string) -> boolean {
-        return s == "Reflect" || s == "assign" || s == "defineProperty" || s == "defineProperties" || s == "__defineSetter__" || s == "__defineGetter__" || s == "setPrototypeOf"
+    // A WRITE sink: a property whose write runs source text or installs a handler. `location`
+    // is a navigation; `innerHTML` / `outerHTML` / `srcdoc` are markup; `text` / `textContent`
+    // are a `<script>`'s body; `value` / `nodeValue` are an `Attr`'s. Refused as the written
+    // member (shape 3's last member). *(value / textContent writes on an ordinary element are
+    // refused too — the bootstrap has no DOM element types to tell them apart; fail closed,
+    // `g-spec-host-sink-aliases-reflect-s473`.)*
+    fn hostWriteSinkWord(s: string) -> boolean {
+        return s == "innerHTML" || s == "outerHTML" || s == "srcdoc" || s == "location"
+            || s == "text" || s == "textContent" || s == "value" || s == "nodeValue"
     }
 
     fn hostTargetDiags(file: string, name: string, ps: AParam[], target0: AExpr | not, isNew: boolean, isFn: boolean, src: string, line: ASpan) -> Diag[] {
@@ -6632,6 +6695,10 @@ ${
         const ch: HChain = parts.chain
         if (!ch.ok) return out.concat([newDiag("E-HOST-TARGET-SHAPE", "the target of `" + name + "` does not name a dotted member chain (a computed member `a[k]`, a call inside the chain, or another expression)" + shapeWhy, file, sp)])
         if (parts.shape >= 2 && ch.members.length == 0) return out.concat([newDiag("E-HOST-TARGET-SHAPE", "the target of `" + name + "` reads or writes `" + ch.root + "` itself, not a property of it" + shapeWhy, file, sp)])
+        // s473 (#1659 review H1 (b)): a call / `new` whose callee is a bare root (a parameter,
+        // so a `:host` handle, or a global) with no members — rule 4 says the callee is a dotted
+        // member chain, and a callable handle is the whole fail-open. Refuse it.
+        if (parts.shape <= 1 && ch.members.length == 0) return out.concat([newDiag("E-HOST-TARGET-SHAPE", "the target of `" + name + "` calls `" + ch.root + "` directly, with no member — a binding's callee SHALL be a dotted member chain (§21.3.3 rule 4), never a bare parameter or a bare global (a callable `:host` handle is a rule 8 fail-open, S473 #1659)" + shapeWhy, file, sp)])
         for (const mb of ch.members) {
             if (mb == "constructor" || mb == "prototype" || mb == "__proto__") return out.concat([newDiag("E-HOST-TARGET-SHAPE", "the target of `" + name + "` names `" + mb + "` — a member named `constructor`, `prototype` or `__proto__` SHALL NOT appear in a target's chain (§21.3.3 rule 4)", file, sp)])
         }
@@ -6675,32 +6742,26 @@ ${
             }
         }
         const sink: string = hostSinkWhy(parts)
-        if (sink != "") return out.concat([newDiag("E-HOST-TARGET-SINK", "the target of `" + name + "` " + sink + " — a target SHALL NOT reach a sink that runs source text or navigates the page (§21.3.3 rule 8, the §5.2 principle)", file, sp)])
-        if (parts.shape <= 1) {
-            for (const seg of [ch.root].concat(ch.members)) {
-                if (hostReflectWord(seg)) return out.concat([newDiag("E-BOOTSTRAP-UNSUPPORTED", "the target of `" + name + "` calls through `" + seg + "`, which writes a property named by data — that reaches a rule 8 sink (`innerHTML`, `srcdoc`, `location` …) without naming it as a member, and the bootstrap refuses it (§21.3.3 rule 8 judges member names; a reflective write is not ruled)", file, sp)])
-            }
-        }
+        if (sink != "") return out.concat([newDiag("E-HOST-TARGET-SINK", "the target of `" + name + "` " + sink + " — a target SHALL NOT reach a sink that runs source text, navigates the page, installs a handler or hands out a realm (§21.3.3 rule 8, the §5.2 principle; S473 #1659 fail-closed tightening)", file, sp)])
         return out
     }
 
-    // Rule 8: why the target reaches a sink ("" — it does not). Judged by
-    // member NAME over every segment of the chain (root included), so a sink
-    // reached through `.call` / `.apply` / `.bind` (`window.eval.call(…)`) is
-    // refused too — fail closed.
+    // Rule 8 (S473 #1659, fail-closed): one shared sink table judged over EVERY chain segment
+    // (the root is an allowed global or a parameter, so only members i>=1 name a member) in
+    // EVERY shape, a read included. An exec / html / nav / attribute-node / realm-crossing
+    // member (`hostExecSink`) anywhere is refused — a `.call` / `.apply` alias of it included,
+    // since it is the same member name. A realm name returned as a handle (`hostRealmResultWord`
+    // as a read's last member) is refused. A write sink (`hostWriteSinkWord` as a shape-3 last
+    // member) is refused. `setAttribute` / `setAttributeNS` / `toggleAttribute` keep the
+    // literal-name rule (an `on…` / `srcdoc` / non-literal name is a sink).
     fn hostSinkWhy(parts: HTargetParts) -> string {
         const segs: string[] = [parts.chain.root].concat(parts.chain.members)
         const last: int = segs.length - 1
-        let i: int = 0
+        let i: int = 1
         while (i < segs.length) {
             const s: string = segs[i]
-            let prev: string = ""
-            if (i > 0) prev = segs[i - 1]
-            const callish: boolean = parts.shape <= 1 || i < last
-            if (callish && hostSinkWords().indexOf(s) >= 0) return "reaches `" + s + "`"
-            if (callish && hostDocWord(prev) && (s == "write" || s == "writeln")) return "calls `document." + s + "` (through `" + prev + "`)"
-            if (callish && prev == "location" && (s == "assign" || s == "replace")) return "calls `location." + s + "`"
-            if (callish && hostWinWord(prev) && s == "open") return "calls `open` on `window` (through `" + prev + "`)"
+            if (hostExecSink(s)) return "reaches `" + s + "`"
+            if (parts.shape == 2 && i == last && hostRealmResultWord(s)) return "returns `" + s + "` as a handle (a realm / window / document / location object)"
             if (s == "setAttribute" || s == "setAttributeNS" || s == "toggleAttribute") {
                 if (i < last || parts.shape > 1) return "reaches `" + s + "` other than as the called member"
                 let at: int = 0
@@ -6711,7 +6772,9 @@ ${
                 const low: string = nv.name.toLowerCase()
                 if (low == "srcdoc" || low.startsWith("on")) return "calls `" + s + "` on the attribute `" + nv.name + "`"
             }
-            if (parts.shape == 3 && (s == "location" || (i == last && (s == "innerHTML" || s == "outerHTML" || s == "srcdoc")))) return "writes `" + s + "`"
+            if (parts.shape <= 1 && s == "location") return "calls through `location` (a navigation)"
+            if (parts.shape == 3 && s == "location") return "writes through `location` (a navigation)"
+            if (parts.shape == 3 && i == last && hostWriteSinkWord(s)) return "writes `" + s + "`"
             i = i + 1
         }
         return ""

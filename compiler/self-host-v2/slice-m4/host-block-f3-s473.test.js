@@ -88,6 +88,19 @@ describe("rule 2 — each body line is blank, a `//` comment, `type Name:host`, 
     expect(codes(P("  <p>hi</p>"))).toEqual(["E-HOST-BINDING-MALFORMED"]);
   });
 
+  test("L1 — a binding line with U+2028 / U+2029 / a lone CR is E-HOST-BINDING-MALFORMED, never a silently cut line", () => {
+    expect(codes("<host>\n  t() -> string = document.title  u() -> string = document.title\n</host>\n<program>\n<p>x</p>\n</program>\n")).toContain("E-HOST-BINDING-MALFORMED");
+    expect(codes("<host>\n  t() -> string = document.title\r  u() -> string = document.title\n</host>\n<program>\n<p>x</p>\n</program>\n")).toContain("E-HOST-BINDING-MALFORMED");
+    // a normal CRLF line is fine
+    clean("<host>\r\n  t() -> string = document.title\r\n</host>\r\n<program>\r\n<p>${t()}</p>\r\n</program>\r\n");
+  });
+
+  test("L2 — `type Name:host` naming a built-in type (string, int, Object) is refused (E-SCOPE-010)", () => {
+    for (const n of ["string", "int", "number", "bool", "Object", "Array", "Function", "void"]) {
+      expect([n, codes(P("  type " + n + ":host\n  f() -> string = document.title", "<p>${f()}</p>"))]).toEqual([n, ["E-SCOPE-010"]]);
+    }
+  });
+
   test("the deprecated `pure` spelling: E-HOST-BINDING-MALFORMED (a pure binding is spelled `fn`)", () => {
     const src = P("  pure f(x: int) -> int = x.valueOf()");
     expect(codes(src)).toEqual(["E-HOST-BINDING-MALFORMED"]);
@@ -203,12 +216,60 @@ describe("rules 4 / 5 / 6 / 8 / 11 — the target's shape, roots, parameters and
       "f(h: H, s: string) = window.Object.assign(h, { innerHTML: s })",
       "f(h: H, s: string) = window.Object.defineProperty(h, \"srcdoc\", { value: s })",
     ]) {
-      expect([line, codes(P("  type H:host\n  " + line))]).toEqual([line, ["E-BOOTSTRAP-UNSUPPORTED"]]);
+      expect([line, codes(P("  type H:host\n  " + line))]).toEqual([line, ["E-HOST-TARGET-SINK"]]);
     }
   });
 
-  test("not sinks: a literal non-event attribute, a URL READ, a plain call", () => {
+  test("not sinks: a literal non-event attribute, a URL READ (location mid-chain), a plain call", () => {
     clean(P("  type H:host\n  setTitle(h: H, s: string) = h.setAttribute(\"title\", s)\n  href() -> string = window.location.href\n  vibrate(ms: int) -> bool = navigator.vibrate(ms)"));
+  });
+
+  // #1659 review H1: the two-binding fail-open — a binding READS a sink-valued member and
+  // returns it as a handle, a second binding calls / constructs / writes through the handle.
+  // The SOURCE binding is refused, so the chain never forms. Every chrome-probe source is here
+  // as a refused-at-compile case. The target expressions are inert member reads.
+  test("H1 — a sink read as a result is refused (E-HOST-TARGET-SINK), so no handle can carry it", () => {
+    const S = ["E-HOST-TARGET-SINK"];
+    for (const line of [
+      "getF() -> Fn = window.Function",
+      "getE() -> Fn = window.eval",
+      "getT() -> Fn = window.setTimeout",
+      "getR() -> Fn = window.Reflect",
+      "doc() -> Fn = window.document",
+      "loc() -> Fn = document.location",
+      "win() -> Fn = document.defaultView",
+      "frameWin(e: Fn) -> Fn = e.contentWindow",
+      "frameDoc(e: Fn) -> Fn = e.contentDocument",
+      "mkAttr(n: string) -> Fn = document.createAttribute(n)",
+      "getAttr(e: Fn, n: string) -> Fn = e.getAttributeNode(n)",
+      "attrs(e: Fn) -> Fn = e.attributes",
+      "setNode(e: Fn, a: Fn) = e.setAttributeNode(a)",
+      "mkWorker(u: string) -> Fn = new window.Worker(u)",
+      "reg(u: string) = navigator.serviceWorker.register(u)",
+      "docOpen(u: string, n: string, f: string) = document.open(u, n, f)",
+      "navTo(u: string) = window.navigation.navigate(u)",
+    ]) {
+      expect([line, codes(P("  type Fn:host\n  " + line))]).toEqual([line, S]);
+    }
+  });
+
+  test("H1(c) — attribute-node write path and an Attr value / nodeValue / script text write are refused", () => {
+    const S = ["E-HOST-TARGET-SINK"];
+    for (const line of [
+      "setVal(a: H, s: string) = a.value = s",
+      "setNodeVal(a: H, s: string) = a.nodeValue = s",
+      "setText(e: H, s: string) = e.text = s",
+      "setTC(e: H, s: string) = e.textContent = s",
+      "setNamed(m: H, a: H) = m.setNamedItem(a)",
+    ]) {
+      expect([line, codes(P("  type H:host\n  " + line))]).toEqual([line, S]);
+    }
+  });
+
+  test("H1(b) — a call / new whose callee is a bare parameter or bare global (no member) is E-HOST-TARGET-SHAPE", () => {
+    expect(codes(P("  type Fn:host\n  call0(f: Fn) = f()"))).toEqual(["E-HOST-TARGET-SHAPE"]);
+    expect(codes(P("  type Fn:host\n  mk(f: Fn, s: string) -> Fn = new f(s)"))).toEqual(["E-HOST-TARGET-SHAPE"]);
+    expect(codes(P("  callw() = window()"))).toEqual(["E-HOST-TARGET-SHAPE"]);
   });
 });
 
@@ -435,6 +496,19 @@ describe("emission — the target as literal JavaScript, the result checked (rul
     }
   });
 
+  test("M1 — a tape counts only OWN indices: a hole and a polluted Array.prototype index are absent", () => {
+    Array.prototype[1] = "proto-polluted";
+    try {
+      const sparse = ["en"];
+      sparse[2] = "de"; // index 1 is a hole
+      window.probe.langs = () => sparse;
+      // index 1 is absent (a hole) → a required string element is a mismatch, never the polluted value
+      expect(trapOf(() => program.langs())).toBe("E-HOST-VALUE-MISMATCH-RT");
+    } finally {
+      delete Array.prototype[1];
+    }
+  });
+
   test("a field named `__proto__` / a `constructor` field cannot reshape the decoded value", () => {
     window.probe.opt = () => JSON.parse('{"name":"n","admin":false,"__proto__":{"polluted":1}}');
     const v = program.opt();
@@ -516,5 +590,46 @@ describe("runtime.js — hostThrownParts (rule 18's payload rules) and hostCall 
     const p = new Proxy({}, { getPrototypeOf() { throw new Error("trap"); }, getOwnPropertyDescriptor() { throw new Error("trap"); } });
     const ty = { k: "struct", name: "S", fields: [{ name: "a", ty: { k: "int" } }] };
     expect(trapOf(() => hostCall(() => p, ty, "t()"))).toBe("E-HOST-THROW-RT");
+  });
+
+  test("M2 — a struct field named `then` reads the `then` getter exactly ONCE (reused from the thenable check)", () => {
+    let reads = 0;
+    const seq = ["first", "second", "third"];
+    const v = { get then() { return seq[reads++]; }, name: "n" };
+    const ty = { k: "struct", name: "S", fields: [{ name: "then", ty: { k: "string" } }, { name: "name", ty: { k: "string" } }] };
+    const out = hostCall(() => v, ty, "t()");
+    // one read total — the thenable check — reused for the field; value is that one read ("first")
+    expect([reads, out.then, out.name]).toEqual([1, "first", "n"]);
+  });
+
+  test("M1 (direct) — Array.prototype / Function.prototype pollution cannot supply a struct field; a tape hole is own-only", () => {
+    const structTy = { k: "struct", name: "Opt", fields: [{ name: "name", ty: { k: "string" } }, { name: "admin", ty: { k: "maybe", inner: { k: "bool" } } }] };
+    const tapeTy = { k: "tape", elem: { k: "string" } };
+    Array.prototype.admin = true;
+    Array.prototype[1] = "proto-polluted";
+    try {
+      // an array for a struct type is a mismatch regardless of Array.prototype.admin
+      expect(trapOf(() => hostCall(() => Object.assign([], { name: "n" }), structTy, "t()"))).toBe("E-HOST-VALUE-MISMATCH-RT");
+      // a sparse tape: index 1 is a hole → absent (own-only), never the polluted value → a required string element is a mismatch
+      const sparse = ["a"]; sparse[2] = "c";
+      expect(trapOf(() => hostCall(() => sparse, tapeTy, "t()"))).toBe("E-HOST-VALUE-MISMATCH-RT");
+      // an optional element tape keeps the hole as `not`, never the polluted value
+      const optTape = { k: "tape", elem: { k: "maybe", inner: { k: "string" } } };
+      expect(hostCall(() => sparse, optTape, "t()")).toEqual(["a", null, "c"]);
+    } finally {
+      delete Array.prototype.admin;
+      delete Array.prototype[1];
+    }
+  });
+
+  test("M1 (direct) — a cross-realm-style terminal (null-prototype object) is the Object.prototype boundary: pollution on it is absent", () => {
+    // a null-prototype object standing in for another realm's Object.prototype, with a field on it
+    const foreignProto = Object.create(null);
+    foreignProto.isAdmin = true;
+    const v = Object.create(foreignProto); // v -> foreignProto(terminal) -> null
+    v.name = "n";
+    const ty = { k: "struct", name: "S", fields: [{ name: "name", ty: { k: "string" } }, { name: "isAdmin", ty: { k: "maybe", inner: { k: "bool" } } }] };
+    // isAdmin sits only on the terminal → absent → `not`, never the polluted `true`
+    expect(hostCall(() => v, ty, "t()")).toEqual({ name: "n", isAdmin: null });
   });
 });

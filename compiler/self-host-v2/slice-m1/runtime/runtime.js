@@ -1322,18 +1322,31 @@ function hostDescWant(ty) {
   }
 }
 
-/** Is `key` on `o`'s prototype chain BELOW `Object.prototype` (rule 13's struct rule)? */
+const hostOwn = Object.prototype.hasOwnProperty;
+
+/**
+ * s473 (#1659 review M1) — a STRUCT field's chain search (rule 13). A field is present when it
+ * is an own property of `o` or of an intermediate prototype (a WebIDL interface prototype, whose
+ * accessors carry the field), and ABSENT when it is found only on a chain-TERMINAL object — one
+ * whose own prototype is `null`. That terminal is `Object.prototype` of WHATEVER realm `o` came
+ * from (this realm's, or a cross-realm iframe's), so a polluted `Object.prototype` can never
+ * supply a field, cross-realm included. A struct value is required to be a non-array, non-function
+ * ordinary object (hostDecode), so `Array.prototype` / `Function.prototype` are never in its
+ * chain; only the Object.prototype terminal is excluded.
+ */
 function hostHasField(o, key, at) {
   let p = o;
   for (let n = 0; n < 4096; n++) {
-    if (p === null || p === undefined || p === Object.prototype) return false;
-    if (Object.prototype.hasOwnProperty.call(p, key)) return true;
-    p = Object.getPrototypeOf(p);
+    if (p === null || p === undefined) return false;
+    const proto = Object.getPrototypeOf(p);
+    if (proto === null) return false; // p is a chain terminal (an Object.prototype of some realm) — excluded
+    if (hostOwn.call(p, key)) return true;
+    p = proto;
   }
   return hostBindMismatch(o, "an object whose prototype chain ends", at, "a value");
 }
 
-function hostDecode(v, ty, at, where) {
+function hostDecode(v, ty, at, where, topThen) {
   switch (ty.k) {
     case "maybe":
       if (v === null || v === undefined) return null;
@@ -1354,11 +1367,18 @@ function hostDecode(v, ty, at, where) {
       if (v !== null && v !== undefined) return v;
       break;
     case "struct": {
-      if (v === null || (typeof v !== "object" && typeof v !== "function")) break;
+      // s473 (#1659 review M1): a struct must be a NON-ARRAY, non-function ordinary object, so
+      // its chain cannot be `Array.prototype` / `Function.prototype`; only `Object.prototype`
+      // (any realm, hostHasField) is the excluded terminal.
+      if (v === null || typeof v !== "object" || Array.isArray(v)) break;
       const out = {};
       for (const f of ty.fields) {
         let fv = null;
-        if (hostHasField(v, f.name, at)) {
+        // s473 (#1659 review M2): the top object's `then` was read once in hostCall; reuse it for a
+        // field named `then` so no getter runs twice.
+        if (topThen !== undefined && f.name === "then") {
+          fv = hostDecode(topThen.value, f.ty, at, where + "'s field `then`");
+        } else if (hostHasField(v, f.name, at)) {
           fv = hostDecode(v[f.name], f.ty, at, where + "'s field `" + f.name + "`");
         } else if (f.ty.k === "maybe") {
           fv = null;
@@ -1375,8 +1395,9 @@ function hostDecode(v, ty, at, where) {
       if (!(typeof n === "number" && Number.isInteger(n) && n >= 0 && n <= 4294967295)) break;
       const out = [];
       for (let i = 0; i < n; i++) {
-        const key = String(i);
-        if (hostHasField(v, key, at)) {
+        // s473 (#1659 review M1 / open Q2): a tape element counts only when it is an OWN index of
+        // the array — a hole, and a polluted `Array.prototype[i]` (cross-realm included), is absent.
+        if (hostOwn.call(v, String(i))) {
           out.push(hostDecode(v[i], ty.elem, at, where + "'s element " + i));
         } else if (ty.elem.k === "maybe") {
           out.push(null);
@@ -1401,15 +1422,19 @@ export function hostCall(thunk, ty, at) {
     hostThrew(e, at, "evaluating its target");
   }
   try {
+    // s473 (#1659 review M2): read `then` ONCE. The value is reused for the decode of a struct
+    // field named `then`, so no getter runs twice.
+    let topThen;
     if (v !== null && (typeof v === "object" || typeof v === "function")) {
       const then = v.then;
+      topThen = { value: then };
       if (typeof then === "function") {
         try { then.call(v, undefined, () => {}); } catch { /* no handler could be attached */ }
         return hostBindMismatch(v, (ty.k === "void" ? "nothing (no `->`)" : hostDescWant(ty)) + " and it is a thenable — the binding is not declared waiting; declare it `-> waiting void` (or `-> waiting T`)", at, "its result");
       }
     }
     if (ty.k === "void") return undefined;
-    return hostDecode(v, ty, at, "its result");
+    return hostDecode(v, ty, at, "its result", topThen);
   } catch (e) {
     if (e instanceof ScrmlTrap) throw e;
     return hostThrew(e, at, "while its result was decoded");

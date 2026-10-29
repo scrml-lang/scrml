@@ -58,3 +58,31 @@ E-BOOTSTRAP-UNSUPPORTED, inside `<program>` it silently compiled as an HTML elem
 - Merged origin/main (merge, not rebase): SPEC-INDEX regenerated (`git-merge-generated.ts --regen`); gap ids
   diffed vs origin/main — none lost, four added; severity --check, SPEC-INDEX --check, s34-census PASS.
 - Draft PR opened; not merged / queued (PA adversarial review first).
+
+## 2026-10-29T23:40Z — #1659 fix round 1 (FIX-FIRST → addressed)
+
+Review: /home/bmacs/.cache/scrml/review/s473-1659/REVIEW.md (verdict FIX-FIRST). Finding → fix:
+- **H1 (HIGH, rule 8 fail-open through handles):** rule 8 rebuilt fail-closed as ONE shared table
+  (`hostExecSink` / `hostRealmResultWord` / `hostWriteSinkWord`), judged over EVERY chain segment in EVERY shape,
+  a READ included — so a sink read as a result (`window.Function`, `window.Reflect`, `document.defaultView`, an
+  element's `.contentWindow`, …) is `E-HOST-TARGET-SINK` and no handle can carry it. (b) a bare-parameter / bare-
+  global callee is `E-HOST-TARGET-SHAPE`. (c) `setAttributeNode` / `setNamedItem` / `createAttribute` / `attributes`
+  and `value` / `nodeValue` / `text` / `textContent` writes refused. (d) one shared list, all `E-HOST-TARGET-SINK`
+  (the old `E-BOOTSTRAP-UNSUPPORTED` reflective-write branch folded in). (e) SPEC rule 8 amended, marked "S473 PA
+  ruling — fail-closed tightening"; gap `g-spec-host-sink-aliases-reflect-s473` narrowed. Every Chromium repro from
+  the review is a refused-at-compile test (benign target expressions).
+- **M1 (struct / tape pollution, cross-realm):** a struct must be a non-array ordinary object; the field walk stops
+  at every chain-TERMINAL (`Object.prototype` of any realm), and a tape counts OWN indices only. SPEC rule 13
+  amended (two "S473 PA ruling" sentences). `g-spec-host-tape-array-proto-pollution-s473` resolved; cross-realm and
+  Array/Function.prototype tests added (direct hostCall; happy-dom isolates the pollution).
+- **M2 (`then` read twice):** `then` is read once in `hostCall` and reused for a struct field named `then`. Test added.
+- **Q3 (throw during decode):** SPEC rule 18 amended; `E-HOST-THROW-RT`. `g-spec-host-decode-throw-code-s473` resolved.
+- **L1:** a binding line with U+2028 / U+2029 / a lone CR is `E-HOST-BINDING-MALFORMED` (continuation lines too).
+- **L2:** `type <builtin>:host` refused (`E-SCOPE-010`); a keyword name too.
+- **L3:** `Worker`, `serviceWorker`, `register`, `navigation` / `navigate`, 3-arg `document.open`, and script-text
+  writes (`text` / `textContent`) added to the sink table.
+- **L4:** filed `g-boot-host-tape-sparse-length-dos-s473`.
+
+Tests: host-block-f3-s473.test.js now 61 tests. Gates (local): m4 (3702), m2 (619), m1 (109), m1 lowered (109),
+codec (166), bootstrap-conformance --check, claim-gate, snippet-gate, SPEC-INDEX --check, delta-lint, types-gate,
+severity --check, s34-census --check-new: all PASS.
