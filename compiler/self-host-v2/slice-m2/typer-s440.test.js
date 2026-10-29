@@ -180,8 +180,7 @@ describe("#5 / #7 — handle names (E-HANDLE-REDECLARE)", () => {
   test("r4 (d) twins — a name no visible declaration holds; a declaration visible only in ANOTHER file", () => {
     expect(inApp("    let <dropdownOpen:bool=false/>", DD("picker"))).toEqual([]);
     const other = { path: "lib/other.scrml", src: "<card title:string=\"\"/>\nrenders <p>x</p>\n" };
-    // s473 r2 #5 ("One name per program for every user declaration"): the pair is now E-SCOPE-010 (§7.6); not a handle report
-    expect(codes([other, { path: "app.scrml", src: "<program>\n    let <card:int=0/>\n<main><p>x</p></main>\n</program>\n" }])).toEqual(["E-SCOPE-010"]);
+    expect(codes([other, { path: "app.scrml", src: "<program>\n    let <card:int=0/>\n<main><p>x</p></main>\n</program>\n" }])).toEqual([]);
   });
 });
 
@@ -670,6 +669,7 @@ describe("#9 — `int` enforced; `/` on two ints names `div`", () => {
     // twins: an int; `not` into `int | not`
     expect(inApp(CELLS + "    function h() -> int { return @n + 1; }\n    function k() -> int | not { return not; }")).toEqual([]);
     // FLIPPED (r7 A) — prov=pa-ruled:§7.5.1 widening, positions 3-4, measured-zero corpus (s442 r7 A). Was: silent ("a non-int return type is not widened").
+    // s473: `function s` beside the CELLS `<s>` is one file-scope name bound twice (§7.6) — renamed
     expect(inApp(CELLS + "    function sOf() -> string { return 5; }")).toEqual(["E-TYPE-031"]);
   });
   test("r4 (c) — `int` enforced at ARGUMENTS into an `int` parameter", () => {
@@ -817,12 +817,11 @@ describe("#9 — `int` enforced; `/` on two ints names `div`", () => {
     const a = { path: "lib/a.scrml", src: "${ function helper(k: int) -> int { return k; }\n export function useA() -> int { return helper(1); } }\n" };
     const b = { path: "lib/b.scrml", src: "${ function helper(s: string) -> string { return s; }\n export function useB() -> string { return helper(\"b\"); } }\n" };
     const main = { path: "app.scrml", src: "${ import { useA } from \"./lib/a.scrml\"; }\n${ import { useB } from \"./lib/b.scrml\"; }\n<program>\n<main><p>${useA()} ${useB()}</p></main>\n</program>\n" };
-    // s473 r2 #5 ("One name per program for every user declaration"): the pair is now E-SCOPE-010 (§7.6); each call is still checked against its own file's declaration (the twin below)
-    expect(codes([a, b, main])).toEqual(["E-SCOPE-010"]);
+    expect(codes([a, b, main])).toEqual([]);
     // twin: b's call passes an int — refused against b's `helper(s: string)` (argument), and its
     // `string` result does not return as b's `int` (return) — a's `helper(k: int)` is not consulted
     const b2 = { path: "lib/b.scrml", src: "${ function helper(s: string) -> string { return s; }\n export function useB() -> int { return helper(2); } }\n" };
-    expect(codes([a, b2, main])).toEqual(["E-SCOPE-010", "E-TYPE-031", "E-TYPE-031"]);
+    expect(codes([a, b2, main])).toEqual(["E-TYPE-031", "E-TYPE-031"]);
     // twin: a helper declared in ONE file is checked
     const one = { path: "lib/a.scrml", src: "${ function helper(k: int) -> int { return k; }\n export function useA() -> string { return helper(\"x\"); } }\n" };
     const main1 = { path: "app.scrml", src: "${ import { useA } from \"./lib/a.scrml\"; }\n<program>\n<main><p>${useA()}</p></main>\n</program>\n" };

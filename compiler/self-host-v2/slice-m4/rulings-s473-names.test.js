@@ -97,9 +97,8 @@ describe("1a — one file-scope name, one binding: E-SCOPE-010 across kinds (§7
     expect(codes(P(`${CARD}\n    function cardOf() -> int { return 1; }`))).toEqual([]);
     expect(codes(P(`    type Card:enum = { A, B }\n${CARD}`))).toEqual([]);
   });
-  // s473 r2 #5 ("One name per program for every user declaration"): was silent (two files, two scopes)
-  test("a function in ANOTHER file named like a declaration here: E-SCOPE-010 (one name per program)", () => {
-    expect(two(`export function card() -> int { return 1; }\n`, P(`    <card x:string/>\n    renders <p>\${x}</p>`))).toEqual([["E-SCOPE-010", "app.scrml"]]);
+  test("a function in ANOTHER file named like a declaration here: two files, two scopes — silent", () => {
+    expect(two(`export function card() -> int { return 1; }\n`, P(`    <card x:string/>\n    renders <p>\${x}</p>`))).toEqual([]);
   });
 });
 
@@ -116,9 +115,8 @@ describe("1b — two components of one name in one program: E-COMPONENT-NAME-DUP
     expect(r.diags[0].message).toContain("a.scrml");
     expect(r.diags[0].message).toContain("data-scrml");
   });
-  // s473 r2 #5: was E-BOOTSTRAP-UNSUPPORTED (unruled); now ruled — one name per program
-  test("two same-named declarations that are NOT both components: E-SCOPE-010 (one name per program)", () => {
-    expect(two(`export <card t:string/>\n`, P(`    <card x:string/>\n    renders <p>\${x}</p>`))).toEqual([["E-SCOPE-010", "app.scrml"]]);
+  test("two same-named declarations that are NOT both components: unruled — still refused by the bootstrap (fail closed)", () => {
+    expect(two(`export <card t:string/>\n`, P(`    <card x:string/>\n    renders <p>\${x}</p>`))).toEqual([["E-BOOTSTRAP-UNSUPPORTED", "app.scrml"]]);
   });
   test("fails closed: no runnable Core is trusted — the code is an Error (§34)", () => {
     expect(mods.severity.severityOf("E-COMPONENT-NAME-DUPLICATE")).toBe("Error");

@@ -67,3 +67,32 @@ Heuristic source scan (scratchpad scan.ts / scan2.ts, not a compile):
   (showAddForm), and 8 conformance/cases/server-db/sql-*hoisted-loop*-rt cases. Neither the bootstrap
   (it does not get that far on these legacy-dialect files) nor impl#1 (frozen, the rule is Nominal there) rejects them today. A
   compiler that implements the cell half WILL reject them. This is the latent cost of including cells, flagged for the PA.
+
+## 2026-10-29T09:30Z — review round 1 (LAND-W-F/U) + RULING NARROWED
+
+Ruling (verbatim, user-voice-scrml.md "⭐ RULED — 'one name per program' narrowed to exported names", S473, scrml-support 2bf30c5):
+> Round 2 item 5 is narrowed. The program-wide one-name rule covers only **names a file exports**: two user files exporting the same name is E-SCOPE-010. A non-exported (private) name never collides with a name in another file, so two libraries may each keep a private `helper`. Unchanged: within one file, §7.6 file scope stays uniform (one name per file, #1636), and an imported name colliding with a local declaration stays E-SCOPE-010.
+
+Rework (analyze.scrml):
+- `fileNameClashes`: two bindings clash when they share a file, or are both EXPORTED from two user files (`bindingsClash`;
+  FileName gains `exported`, decls via `declExported`). A program cell is never exported.
+- MED-1: a cell beside an import of its name from ANY source (stdlib included, `importBringing`) is E-SCOPE-010 at the cell.
+- LOW-1: the decision is per binding. A binding another pass reports at (`reportedElsewhereAt`) gets no second report. Otherwise it is
+  reported against the first earlier clashing binding whose pair is not owned elsewhere (`pairOwned`), so one owned pair never hides an unowned one.
+- LOW-2: `dupDecls` rewritten around `dupDeclKind` ("component" / "limit" / ""). It leaves a declaration whose file imports the name to
+  linkage, and an exported user pair to fileNameClashes. A private pair (now legal by the ruling) or a stdlib pair stays the bootstrap
+  limit E-BOOTSTRAP-UNSUPPORTED.
+- LOW-5: messages name the first binding by file:line:col (`placeIn`, from FileAst.lines).
+- LOW-3: with private pairs legal again, every moved s472 pin (visibility-s472 three helpers / two types / two routes `route$load$1` /
+  writeset-overrefuse, logic-block-const "app-k/lib-k", rulings-s473-names, slice-m2 typer and typer-s440) is RESTORED to base from
+  6cfdcd991, unchanged. Kept moves: typer-s440 `function s` → `sOf` and loop-wait `total` → `totalOf` (same-file cell + fn,
+  file scope), plus visibility-s472's two-imports test (both files export `twice`, so it is still E-SCOPE-010), with a ONE-file W-IMPORT-001 runtime twin.
+- LOW-4: typer.test.js F1 twin pins the exact list ["E-TYPE-STRUCT-FIELD", "E-TYPE-STRUCT-FIELD"].
+
+SPEC §7.6: the program-wide bullet was rewritten to the narrowed scope ("**One name per program, for exported names (S473 ruling).** Two user
+files of one program SHALL NOT export the same name: … A non-exported (private) name never collides with a name in another file …"),
+citing both rulings. The file-scope bullet now names program cells (§7.6.1). The §34 row and the §21.2 note were narrowed.
+
+Tests: rulings-s473-one-name.test.js rewritten, 23 tests, 10 red on base 6cfdcd991.
+Gaps: g-boot-imported-const-like-cell-s472 resolved (any-source import); g-boot-decl-same-name-noncomponent-s473 REOPENED, narrowed (private
+pair legal, bootstrap limit); filed g-corpus-cell-fn-same-name-migration-s473 (the 10 files).
