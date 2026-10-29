@@ -161,6 +161,43 @@ describe("`match` arms and labels", () => {
   test("`break inner` names the inner loop only: E-LOOP-008", () => {
     expect(fnCodes(`        const xs = outer: for { lift 1; inner: for { break inner; } };\n        return xs.length;`)).toEqual(["E-LOOP-008"]);
   });
+  test("review #1631 F1: a `break` after a `match` every arm of which leaves is not reached", () => {
+    // every arm `continue`s: E-LOOP-008 (this hung at run time before the fix)
+    expect(codes(kProg(`        const xs = for { lift 1; match k { .A :> { continue; }, .B :> { continue; } } break; };\n        return xs.length;`))).toEqual(["E-LOOP-008"]);
+    expect(codes(kProg(`        const xs = for { lift 1; match k { .A :> { continue; }, _ :> { continue; } } break; };\n        return xs.length;`))).toEqual(["E-LOOP-008"]);
+    expect(fnCodes(`        let b = true;\n        const xs = for { lift 1; match b { true :> { continue; }, false :> { continue; } } break; };\n        return xs.length;`)).toEqual(["E-LOOP-008"]);
+    expect(codes(t0Prog(`\${ for { lift 1; match @n { 0 :> { continue; }, _ :> { continue; } } break; } }`))).toEqual(["E-LOOP-008"]);
+  });
+  test("review #1631 F1: a `match` whose arms `return` leaves the loop (legal); one arm that falls through keeps the `break` reachable", async () => {
+    await load(kProg(`        const xs = for { lift 1; match k { .A :> { return 5; }, .B :> { return 6; } } break; };\n        return xs.length;`));
+    expect($("#o").textContent).toBe("5");
+    expect(codes(kProg(`        const xs = for { lift 1; match k { .A :> { continue; }, .B :> { return 2; } } break; };\n        return xs.length;`))).toEqual([]);
+    expect(codes(kProg(`        let n = 0;\n        const xs = for { lift 1; match k { .A :> { continue; }, .B :> { n = 1; } } break; };\n        return xs.length;`))).toEqual([]);
+  });
+  test("review #1631 F1: a literal `match` with no wildcard may fall through, so the `break` after it is reached", () => {
+    expect(fnCodes(`        let n = 0;\n        const xs = for { n = n + 1; lift n; match n { 1 :> { continue; }, 2 :> { continue; } } break; };\n        return xs.length;`)).toEqual(["W-MATCH-002"]);
+  });
+  test("review #1631 F1: a `!{}` guard whose arms all leave does not end the path (its subject may succeed)", () => {
+    expect(codes(prog(`${ERR}\n    function f() -> int {\n        let i = 0;\n        const xs = for { i = i + 1; lift i; h(i) !{ _ :> { continue; } }; break; };\n        return xs.length;\n    }`, `        <p id="o">\${f()}</p>`))).toEqual([]);
+  });
+  test("review #1631 F1, shared walk: a `lift` after a `match` every arm of which leaves is not reached (E-LOOP-007)", () => {
+    expect(codes(kProg(`        const xs = for (i of 0..3) { match k { .A :> { continue; }, .B :> { break; } } lift i; };\n        return xs.length;`))).toEqual(["E-LOOP-007"]);
+  });
+  test("review #1631 F2: an inner `for (true) { }` / `for (;true;) { }` ends the path as `for { }` does", () => {
+    expect(fnCodes(`        const xs = for { lift 1; for (true) { } break; };\n        return xs.length;`)).toEqual(["E-LOOP-008"]);
+    expect(fnCodes(`        const xs = for { lift 1; for (;true;) { } break; };\n        return xs.length;`)).toEqual(["E-LOOP-008"]);
+    expect(fnCodes(`        const xs = for { lift 1; for { } break; };\n        return xs.length;`)).toEqual(["E-LOOP-008"]);
+    expect(codes(t0Prog(`\${ for { lift 1; for (true) { } break; } }`))).toEqual(["E-LOOP-008"]);
+  });
+  test("review #1631 F2, one definition: a function that ends in `for (true) { }` no longer falls off its end (as with `for { }`)", () => {
+    expect(fnCodes(`        for { }`)).toEqual([]);
+    expect(fnCodes(`        for (true) { }`)).toEqual([]);
+    expect(fnCodes(`        for (;true;) { }`)).toEqual([]);
+    expect(fnCodes(`        let n = 0;\n        for (n < 3) { n = n + 1; }`)).toEqual(["E-TYPE-043"]);
+  });
+  test("F4 (documented): only the literal forms are read — `for (true && true)` is not caught", () => {
+    expect(fnCodes(`        const xs = for (true && true) { lift 1; };\n        return xs.length;`)).toEqual([]);
+  });
   test("a `defer` body is not a way out (it runs when the scope ends)", () => {
     // `defer` directly in a bound body is refused anyway; inside an inner block it still runs only at exit
     expect(fnCodes(`        const xs = for { lift 1; defer { break; } };\n        return xs.length;`)).toContain("E-LOOP-008");
