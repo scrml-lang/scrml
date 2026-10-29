@@ -70,3 +70,11 @@ an effect or a `defer` is skipped (no false positive). Lint tests: 13, 7 red on 
 moved (its first program IS the linted shape). Gap closed: g-loop-copy-part-write-no-op-s472.
 
 Base red totals: names 8/14, trap 2/4, lint 7/13 → 17 of 31.
+
+## 2026-10-29T05:30Z — CI gates
+
+Ran every `checks` + `slices` step locally. Two failed on first run, both fixed:
+- s34-census `--check-new`: the E-SCOPE-010 row named `fileNameClashes` right after the `.scrml` path; the
+  resolver only scans JS/TS identifiers, so it read as stale. Reworded to the `(its … passes)` form.
+- claim-gate: docs/external-js.md:205 pinned E-BOOTSTRAP-REDECLARE for the sidecar block (the inner
+  `type Features` redeclares the outer) — now E-SCOPE-010 by the §7.6 rule; pin updated.

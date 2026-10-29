@@ -554,7 +554,7 @@ Pre-existing for unit variants (`resolveVariant`); #1608 kept construction unifo
 Not unsafe — `@count` and `count` are syntactically distinct and resolve apart. Matches the imported-function behavior; sits beside `g-boot-decl-fn-same-name-one-file-s472`.
 
 <!-- @gap id=g-boot-const-like-builtin-type-s472 sev=LOW status=open locus=compiler/self-host-v2/analyze.scrml(dupConsts — the type check reads t.types of the constant's own file only) prov=review:S239-#1617(LOW-2) -->
-### g-boot-const-like-builtin-type-s472 — a constant named like a BUILT-IN type (`const SqlError = "s"`, `const Error = 1`, `const int = 3`) is accepted, while one named like a type of its own file is E-BOOTSTRAP-REDECLARE (the stated reason: `E.V` would read two ways) — `NEW S472 (review of #1617); LOW; open`
+### g-boot-const-like-builtin-type-s472 — a constant named like a BUILT-IN type (`const SqlError = "s"`, `const Error = 1`, `const int = 3`) is accepted, while one named like a type of its own file is E-BOOTSTRAP-REDECLARE (the stated reason: `E.V` would read two ways; S473: that collision is now E-SCOPE-010, §7.6 — `g-boot-decl-fn-same-name-one-file-s472`) — `NEW S472 (review of #1617); LOW; open`
 
 No misresolution observed (`SqlError.ConnectionLost` still resolves to the type). Either extend the REDECLARE to built-in type names (newly-rejecting on the bootstrap only) or record the asymmetry as deliberate.
 
