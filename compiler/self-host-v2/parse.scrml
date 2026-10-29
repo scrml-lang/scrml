@@ -4720,6 +4720,14 @@ ${
             .Braced(b: b) :> ""
         }
         if (s.indexOf("$" + "{") < 0) return mp
+        // s472 — `style=(…)` is not a way out for a style: §65.4.2 refuses an
+        // expression value of `style=` (E-STYLE-VALUE-NOT-STYLE). The quoted
+        // template itself is refused as §5.5.3 (not in the bootstrap); how its
+        // `$` + `{…}` would be guarded is an open SPEC question (gap
+        // g-spec-65-4-2-quoted-style-template-contradiction-s472).
+        if (name.toLowerCase() == "style") {
+            return mDiag(mp, "E-BOOTSTRAP-UNSUPPORTED", "`" + name + "=\"…\"` holds a `$" + "{…}` interpolation — a quoted value with `$" + "{…}` is a reactive template (§5.5.3), which is not in the bootstrap; it would be emitted as literal text. `" + name + "=(…)` is no way out (an expression value of `style=` is E-STYLE-VALUE-NOT-STYLE): put the dynamic part in a `#" + "{…}` rule as `@cell` (§25.7), or switch a class with `class=(…)`", sp.start, sp.end)
+        }
         return mDiag(mp, "E-BOOTSTRAP-UNSUPPORTED", "`" + name + "=\"…\"` holds a `$" + "{…}` interpolation — a quoted value with `$" + "{…}` is a reactive template (§5.5.3), which is not in the bootstrap; it would be emitted as literal text. Write the value as an expression: `" + name + "=(…)`", sp.start, sp.end)
     }
 
