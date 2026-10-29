@@ -34,11 +34,12 @@
 // needs only tokens (`compiler/native-parser/lex.js`), which also makes it immune to `fn` inside
 // strings and comments.
 //
-// USAGE:  bun scripts/lint-duplicate-fn.js [--root <dir>] [--json]
+// USAGE:  bun (or node) scripts/lint-duplicate-fn.js [--root <dir>] [--json]
 //         exit 0 = clean, 1 = violations, 2 = usage error.
 
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { lex } from "../compiler/native-parser/lex.js";
 
 const OPEN = { LParen: "RParen", LBracket: "RBracket", LBrace: "RBrace" };
@@ -169,7 +170,8 @@ export function lintTree(root) {
 
 if (import.meta.main) {
   const args = process.argv.slice(2);
-  let root = resolve(import.meta.dir, "..", "compiler", "self-host-v2");
+  // `import.meta.dir` is bun-only; derive the script dir from the URL so `node` runs it too
+  let root = resolve(dirname(fileURLToPath(import.meta.url)), "..", "compiler", "self-host-v2");
   let json = false;
   for (let i = 0; i < args.length; i++) {
     if (args[i] === "--root") root = resolve(args[++i] ?? "");

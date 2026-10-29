@@ -92,3 +92,15 @@ litKey's call, (c) the four deleted, never-called duplicate bodies. Every other 
 - Slice outputs: unchanged. The renames change only names inside analyze.client.js (impl#1 mangles them);
   the deleted duplicates were never called; the two call sites whose callee changed have no observable
   effect (see the table). No slice snapshot or acceptance output moved.
+
+## 2026-10-29 — merged origin/main (#1631 landed)
+
+- `git merge origin/main` (no rebase). One conflict: docs/known-gaps.md, the hunk where #1631 filed
+  `g-impl1-bootstrap-duplicate-fn-last-wins-s473` as OPEN. Kept main's other content (the exitless-loop
+  RESOLVED note, `g-spec-bound-loop-inner-forever-hang-s473`) and this branch's RESOLVED dup-fn entry;
+  dropped main's open copy of the same id. `state.ts --write`: gap-counts PASS; master-list churn not staged.
+  Gap ids: merged set == union(ours, main), 2466 ids, none lost.
+- Merged tree: lint-duplicate-fn 0 violations (#1631's analyze.scrml added no colliding name);
+  hook with slices ON: 50925 pass / 0 fail; types-gate --check OK (unchanged).
+- `node scripts/lint-duplicate-fn.js` crashed (`import.meta.dir` is bun-only); the script dir now comes from
+  `import.meta.url`, so it runs under node and bun alike (0 violations both).
