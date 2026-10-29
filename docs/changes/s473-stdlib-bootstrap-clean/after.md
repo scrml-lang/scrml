@@ -4,7 +4,7 @@ Same driver and method as `baseline.md` (`measure.ts`; per-module table with cod
 raw JSON `~/.cache/scrml-agent-tmp/s473-stdlib-bootstrap-clean/after.json`).
 
 **Headline: 2 clean (math, random) / 35 errors / 0 crash / 16 not-supplied (scrml:compiler*).**
-Error diagnostics (closure counts, all 37 measured modules): **2,775 → 2,220** (−556, −20%).
+Error diagnostics (closure counts, all 37 measured modules): **2,775 → 2,243** (−532, −19%; fix round 1 restored format's shim-exact bodies, whose string truthiness the bootstrap refuses under S440 — 118 → 141).
 md is untouched (709 → 709; dual-compiler constraints, see below).
 
 ## Before / after per module
@@ -25,7 +25,7 @@ md is untouched (709 → 709; dual-compiler constraints, see below).
 | data/table-for | 8 | 7 | wrapper |
 | data/transform | 284 | 204 | `;` (wrapper KEPT — unwrapping adds a new impl#1 code: its `~{ import }` is emitted into the body; see gaps) |
 | data/validate | 148 | 121 | `;` (wrapper KEPT) |
-| format | 174 | FMT_AFTER | wrapper, `;`, params annotated (§7.3.2 defaults); bodies kept EXACTLY the shim's (`||` fallbacks, `!str`, `String()` — fix round 1, MED-1) |
+| format | 174 | 141 | wrapper, `;`, params annotated (§7.3.2 defaults); bodies kept EXACTLY the shim's (`||` fallbacks, `!str`, `String()` — fix round 1, MED-1) |
 | fs | 64 | 40 | wrapper, `;`, params annotated |
 | host | 6 | 4 | wrapper, `;` |
 | http | 21 | 13 | wrapper, `;` |
@@ -52,6 +52,19 @@ md is untouched (709 → 709; dual-compiler constraints, see below).
 impl#1: every stdlib file compiles with the same or fewer error codes than on base, in the default
 and the library mode (`impl1-check.ts`, base run with base's stdlib checked out in place); random
 and host improved. The stdlib unit tests and the full impl#1 suite pass (pre-commit hook).
+
+## Reference semantics = the shim (fix round 1, review of #1648 MED-1)
+
+The shipped shim (compiler/runtime/stdlib/<name>.js) is the canonical behaviour. format's `.scrml` bodies are
+the shim's, byte for byte in logic: `locale || "en-US"`, `currency || "USD"`, `plural || singular + "s"`,
+`char || " "`, `!str` null / `""` tolerance, `String(str)` in padLeft / padRight. The §7.3.2 default
+annotations stay (they fire only on an OMITTED argument; the body's fallback still covers `""` and `not`).
+Pinned by compiler/tests/unit/stdlib-scrml-shim-parity-s473.test.js (format / path / fs run from source
+side by side with the shim on normal, `""`, `not` and omitted arguments — red on the previous head: 13 of
+29) and slice-m4/stdlib-boot-clean-s473.test.js (random COMPILED on the bootstrap vs the shim, Math.random
+stubbed). Consequence: to compile on the bootstrap, format's string-truthiness tests must later be
+rewritten to explicit forms that keep these semantics (`locale is not || locale == "" ? "en-US" : locale`),
+not to the `""`-is-a-value reading.
 
 ## What still blocks the stdlib on the bootstrap — ranked by modules blocked
 

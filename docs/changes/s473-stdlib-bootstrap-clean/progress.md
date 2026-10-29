@@ -67,3 +67,23 @@ compile clean on the bootstrap, keep impl#1 compiling it).
   (types-gate, root tests, snippet, claim, compile-floor, md-shim, conflict-marker, spec-index,
   delta-lint, ci-shards, s34-census, severity, both lints, slices m1 / m2 / m1-lowered / m3 / m4 /
   codec, e2e-render-map, bootstrap-conformance --check, host-global leg 2).
+- 2026-10-29T20:00Z FIX ROUND 1 (review ~/.cache/scrml/review/s473-1648/REVIEW.md, LAND-W-F/U):
+  - MED-1 → format's `.scrml` bodies restored to the shim's logic (the a55fd8e73 bodies: `||`
+    fallbacks for locale / currency / plural / char / type, `!str` tolerance, `String(str)`), the
+    §7.3.2 default heads kept; string helpers retyped `str: string | not` (the shim tolerates null);
+    padLeft / padRight `str` left unannotated (the shim coerces ANY value with `String()`). fs / path /
+    random audited: their bodies were never changed (heads only; random's host.js = the shim's code).
+    NEW compiler/tests/unit/stdlib-scrml-shim-parity-s473.test.js: format / path / fs functions lifted
+    from the .scrml source by an explicit translation and run side by side with the shim on normal,
+    `""`, `not` and omitted args (fs statSync checked structurally — scrml:host safeCall); random's
+    host.js vs the shim under a stubbed Math.random. 29 tests; on the previous head 13 fail (every
+    format function whose fallback / tolerance had changed). slice-m4 stdlib-boot-clean-s473 +1 test:
+    the COMPILED random program vs the shim, Math.random stubbed.
+  - LOW-1 → wording: the wrapper is kept where unwrapping would add a NEW impl#1 error code (regex,
+    data/validate, data/transform, mcp); the 13 unwrapped files whose `~{}` holds an import are
+    listed in g-impl1-library-test-block-import-emitted-s473.
+  - LOW-2 → with the shim bodies back, every remaining fallback is one the shim has (none removed).
+  - merged origin/main (MERGE ff2823f00; no conflicts; no gap id lost — ids diffed); state.ts --write
+    (no count change; master-list churn reverted).
+  - re-measured: 2 clean (math, random); 2,775 → 2,243 (format 118 → 141: the shim's string
+    truthiness is refused by the bootstrap, S440).
