@@ -179,6 +179,16 @@ describe("P — the foreign node and its header", () => {
   test("a markup-body foreign block stays E-FOREIGN-004 (unchanged)", () => {
     expect(codes('<program lang="ts">\n    <main><p>_={ 1 }=</p></main>\n</program>\n')).toContain("E-FOREIGN-004");
   });
+
+  test("the markup-body reader and the logic lexer share ONE extent reader (lex.scrml foreignExtentAt)", () => {
+    // level 2 holds `}=`; the block ends at `}==` in markup exactly as in logic — one report, no stray text
+    const src = '<program lang="ts">\n    <main><p>_=={ a }= "}" }==</p></main>\n</program>\n';
+    expect(diagsOf(src, "E-FOREIGN-004").length).toBe(1);
+    expect(errs(src).map((d) => d.code)).toEqual(["E-FOREIGN-004"]);
+    const x = mods.lex.foreignExtentAt("x _=={ a }= }== y", 2);
+    expect([x.level, x.closer, "x _=={ a }= }== y".slice(x.end)]).toEqual([2, 2, " y"]);
+    expect(mods.lex.foreignOpenAt("my_={", 2)).toBe(-1);
+  });
 });
 
 // =============================================================================
@@ -223,6 +233,27 @@ describe("C — positions and language", () => {
     expect(diagsOf(prog("    function a() {\n        let n = 0;\n        n = _={ 1 }=;\n    }"), "E-FOREIGN-004").length).toBe(1);
     expect(codes(prog('    let <n:int=0/>\n    <button onclick={ const x = _={ 1 }=; @n = 1; }>"b"</button>'))).toContain("E-FOREIGN-004");
     expect(codes('${\n    const T = _={ 1 }=;\n}\n<program lang="ts">\n    <main><p>"x"</p></main>\n</program>\n')).toContain("E-FOREIGN-004");
+  });
+
+  test("fail closed: in EVERY other position a foreign block is an Error (it is never silently dropped or printed)", () => {
+    const F = "_={ 1 }=";
+    const sites = [
+      `    <main><p>\${${F}}</p></main>`,                                              // a markup interpolation
+      `    let <n:int=0/>\n    <p if=(${F})>"x"</p>`,                                  // an if= condition
+      `    let <n:int=0/>\n    <input value=(${F})/>`,                                // an attribute value
+      `    function a() -> int {\n        return f2(${F});\n    }\n    function f2(x: int) -> int { return x; }`, // a call argument
+      `    function a(b: bool) -> int {\n        const v = b ? ${F} : 2;\n        return v;\n    }`,              // a ternary arm
+      `    function a(xs: int[]) -> int[] {\n        return xs.map((x) => ${F});\n    }`,                         // a lambda body
+      `    function a() -> int {\n        if (${F}) { return 1; }\n        return 0;\n    }`,                      // an if condition
+      `    function a() -> int[] {\n        const xs = for (const i of [1, 2]) { lift ${F}; };\n        return xs;\n    }`, // a lift
+      `    function a() -> int {\n        for (const i of ${F}) { }\n        return 0;\n    }`,                    // a for head
+      `    let <n:int=${F}/>`,                                                         // a cell initializer
+    ];
+    for (const s of sites) {
+      const es = errs(prog(s));
+      expect(es.length).toBeGreaterThan(0);
+      expect(es.some((d) => String(d.code).startsWith("E-FOREIGN-") || d.message.includes(EMIT))).toBe(true);
+    }
   });
 
   test("E-FOREIGN-003: no `lang=` on the `<program>`", () => {

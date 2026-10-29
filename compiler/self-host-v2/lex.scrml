@@ -1112,63 +1112,66 @@ ${
     }
 
     // -------------------------------------------------------------------------
-    // s473 — §23.2 foreign code blocks. "The block splitter SHALL recognize `_`
-    // followed by zero or more `=` followed by `{` as a foreign code block
-    // opener" — except a `_` "immediately preceded by an identifier character
-    // (a letter, digit, `_` or `$`)", which is "the tail of that identifier"
-    // (S444). The same rule as parse.scrml `foreignLevel` (the markup-body
-    // reader); here it is the one place logic sees a foreign block.
+    // s473 — §23.2 foreign code blocks: THE ONE READER of a foreign block's
+    // extent (the logic lexer below and parse.scrml's markup-body reader both
+    // call it — no second spelling of the grammar). "The block splitter SHALL
+    // recognize `_` followed by zero or more `=` followed by `{` as a foreign
+    // code block opener" — except a `_` "immediately preceded by an identifier
+    // character (a letter, digit, `_` or `$`)", which is "the tail of that
+    // identifier" (S444).
     // -------------------------------------------------------------------------
 
-    // The opener's level (its `=` count) at `cur`, else -1.
-    fn foreignOpenLevel(cur: Cursor) -> int {
-        if (peekCode(cur, 0) != 95) return -1
-        if (cur.pos > 0 && isIdentCont(cur.source.charCodeAt(cur.pos - 1))) return -1
-        let k: int = 1
-        while (peekCode(cur, k) == 61) { k = k + 1 }
-        if (peekCode(cur, k) != 123) return -1
-        return k - 1
+    // The opener's level (its `=` count) at `pos` in `src`, else -1.
+    export fn foreignOpenAt(src: string, pos: int) -> int {
+        if (pos >= src.length || src.charCodeAt(pos) != 95) return -1
+        if (pos > 0 && isIdentCont(src.charCodeAt(pos - 1))) return -1
+        let k: int = pos + 1
+        while (k < src.length && src.charCodeAt(k) == 61) { k = k + 1 }
+        if (k >= src.length || src.charCodeAt(k) != 123) return -1
+        return k - pos - 1
     }
 
-    // The run of `=` glued after the `}` at `cur`.
-    fn eqRunAfter(cur: Cursor) -> int {
-        let k: int = 1
-        while (peekCode(cur, k) == 61) { k = k + 1 }
-        return k - 1
-    }
-
-    // Scan one foreign block from its `_` to its closer, opaquely. "The block
-    // splitter SHALL scan for the matching closer: `}` followed by the same
-    // number of `=` characters as the opener. No other character sequence
-    // closes the foreign code block." Level 0 "uses the same brace-depth
-    // counting as all other scrml sigils" — raw `{` / `}`, nothing else
-    // (§23.2: it "FAILS if the foreign code contains `}` inside a string
-    // literal"). At level >= 1 a `}` followed by fewer `=` than the level is
+    // A foreign block's extent from its `_` at `pos`: `level` (-1: no opener
+    // there), the interior's end `bodyEnd`, the block's end `end`, and `closer`
+    // — the `=` count glued after the closing `}` (-1: none before the end of
+    // the input). "The block splitter SHALL scan for the matching closer: `}`
+    // followed by the same number of `=` characters as the opener. No other
+    // character sequence closes the foreign code block." Level 0 "uses the same
+    // brace-depth counting as all other scrml sigils" — raw `{` / `}`, nothing
+    // else (§23.2: it "FAILS if the foreign code contains `}` inside a string
+    // literal"). At level >= 1 a `}` followed by FEWER `=` than the level is
     // content; one followed by MORE (`}==` closing `_={`) is the mismatched
-    // closer of E-FOREIGN-001, consumed whole so its `=` do not spill into
-    // the code after it.
-    fn scanForeign(cur: Cursor) -> Scan {
-        const lvl: int = foreignOpenLevel(cur)
-        const bodyStart: Cursor = advance(cur, lvl + 2)
-        let c: Cursor = bodyStart
+    // closer of E-FOREIGN-001, taken whole so its `=` do not spill into the
+    // code after it.
+    export type ForeignExtent:struct = { level: int, bodyEnd: int, end: int, closer: int }
+
+    export fn foreignExtentAt(src: string, pos: int) -> ForeignExtent {
+        const lvl: int = foreignOpenAt(src, pos)
+        if (lvl < 0) return { level: -1, bodyEnd: pos, end: pos, closer: -1 }
+        let i: int = pos + lvl + 2
         let depth: int = 0
-        let closer: int = -1
-        let bodyEnd: Cursor = bodyStart
-        while (closer < 0 && !isEof(c)) {
-            const code: int = peekCode(c, 0)
-            if (code == 125 && depth == 0 && eqRunAfter(c) >= lvl) {
-                bodyEnd = c
-                closer = eqRunAfter(c)
-                c = advance(c, closer + 1)
-            } else {
-                if (lvl == 0 && code == 123) depth = depth + 1
-                if (lvl == 0 && code == 125) depth = depth - 1
-                c = advance(c, 1)
+        while (i < src.length) {
+            const code: int = src.charCodeAt(i)
+            if (code == 125 && depth == 0) {
+                let k: int = i + 1
+                while (k < src.length && src.charCodeAt(k) == 61) { k = k + 1 }
+                if (k - i - 1 >= lvl) return { level: lvl, bodyEnd: i, end: k, closer: k - i - 1 }
             }
+            if (lvl == 0 && code == 123) depth = depth + 1
+            if (lvl == 0 && code == 125) depth = depth - 1
+            i = i + 1
         }
-        if (closer < 0) bodyEnd = c
-        const k: TokenKind = .Foreign(lvl, sliceText(bodyStart, bodyEnd), closer)
-        return { tok: mkTok(k, sliceText(cur, c), cur, c), cur: c }
+        return { level: lvl, bodyEnd: src.length, end: src.length, closer: -1 }
+    }
+
+    fn foreignOpenLevel(cur: Cursor) -> int { return foreignOpenAt(cur.source, cur.pos) }
+
+    // One foreign block, as ONE token (the interior never tokenized).
+    fn scanForeign(cur: Cursor) -> Scan {
+        const x: ForeignExtent = foreignExtentAt(cur.source, cur.pos)
+        const to: Cursor = advance(cur, x.end - cur.pos)
+        const k: TokenKind = .Foreign(x.level, cur.source.substring(cur.pos + x.level + 2, x.bodyEnd), x.closer)
+        return { tok: mkTok(k, sliceText(cur, to), cur, to), cur: to }
     }
 
     fn scanForeignStep(st: LexState) -> LexState {

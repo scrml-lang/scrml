@@ -44,7 +44,7 @@
 // again, S440.)
 // =============================================================================
 ${
-    import { Token, TokenKind, LexStop, LexRun, LexPause, lexFrom, lexFromMode, lexTier0 } from "./lex.scrml"
+    import { Token, TokenKind, LexStop, LexRun, LexPause, lexFrom, lexFromMode, lexTier0, ForeignExtent, foreignOpenAt, foreignExtentAt } from "./lex.scrml"
     import { Severity } from "./severity.scrml"
     import { ASpan, BinOp, UnOp, AExpr, AProp, AExprK, AStmt, ABlock, AStmtK, AEffect, AType, ATypeK,
              ATypeField, AVariant, ATypeBody, ATypeDecl, AParam, AFn, AImportName, AImport,
@@ -6459,22 +6459,8 @@ ${
 
     // `_` + zero or more `=` + `{` (§23.2) whose `_` does not end an
     // identifier (`my_{x}` is content): the level (count of `=`), else -1.
-    fn foreignLevel(mp: MP) -> int {
-        if (chAt(mp, 0) != "_") return -1
-        if (isIdentTail(chAt(mp, -1))) return -1
-        let k: int = 1
-        while (chAt(mp, k) == "=") { k = k + 1 }
-        if (chAt(mp, k) != "{") return -1
-        return k - 1
-    }
-
-    fn isIdentTail(c: string) -> boolean {
-        if (c == "") return false
-        if (c >= "a" && c <= "z") return true
-        if (c >= "A" && c <= "Z") return true
-        if (c >= "0" && c <= "9") return true
-        return c == "_" || c == "$"
-    }
+    // s473: lex.scrml's reader (the one spelling of the grammar).
+    fn foreignLevel(mp: MP) -> int { return foreignOpenAt(mp.src, mp.pos) }
 
     // SPEC §4.18.1b (PA reading S442): `_{` in a markup body is NEITHER an exit
     // NOR content — it stays an ERROR, E-FOREIGN-004 (§23.2.4: a markup element
@@ -6483,34 +6469,12 @@ ${
     // Unclosed → E-FOREIGN-002 (§23.2).
     fn skipForeign(mp: MP) -> MP {
         const start: int = mp.pos
-        const lvl: int = foreignLevel(mp)
-        let m: MP = mAdv(mp, lvl + 2)
-        let depth: int = 0
-        let closed = false
-        while (!closed && !mEof(m)) {
-            const c: string = chAt(m, 0)
-            if (c == "}" && depth == 0 && closesForeign(m, lvl)) {
-                m = mAdv(m, lvl + 1)
-                closed = true
-            } else {
-                if (lvl == 0 && c == "{") depth = depth + 1
-                if (lvl == 0 && c == "}") depth = depth - 1
-                m = mAdv(m, 1)
-            }
-        }
-        if (!closed) {
+        const x: ForeignExtent = foreignExtentAt(mp.src, mp.pos)    // s473: lex.scrml's reader
+        const m: MP = mAt(mp, x.end)
+        if (x.closer < 0) {
             return mDiag(m, "E-FOREIGN-002", "unclosed foreign code block — a `_{` / `_={` opener needs its matching `}` / `}=` closer (§23.2)", start, m.pos)
         }
         return mDiag(m, "E-FOREIGN-004", "a `_{…}` foreign code block is not valid in a markup body (§23.2.4) — bind its value with `const x = _={ … }=` in a server `function` body, or use a `use foreign:` sidecar (§23.4)", start, m.pos)
-    }
-
-    fn closesForeign(mp: MP, lvl: int) -> boolean {
-        let k: int = 1
-        while (k <= lvl) {
-            if (chAt(mp, k) != "=") return false
-            k = k + 1
-        }
-        return true
     }
 
     fn skipSigil(mp: MP) -> MP {
