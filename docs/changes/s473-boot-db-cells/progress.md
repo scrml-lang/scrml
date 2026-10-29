@@ -43,3 +43,12 @@ PA recs" items 1, 2, 4, 5; S472 "⭐ RULED — functions in a `<db>` body: visib
 - Tests: db-cells-s473.test.js 38 (26 of the original 34 red on base; the 4 added later are also red on base —
   db cells did not compile); acceptance db-cells/* (3 new), o61/db-let-decl UNSUPPORTED → PASS; db-body-s472 /
   parse-batch-s471 expectations moved from "refused" to "compiles" (export still refused).
+
+## 2026-10-28 — verified (commit 2)
+- Red-proof: with origin/main's implementation files in the tree (tests from this branch), db-cells-s473.test.js is
+  8 pass / 30 fail (the 8 are refusals that already held — a db-body declaration was refused whole). Restored.
+- Gates (local, the CI `checks` + `slices` steps): types-gate OK (unchanged) · compiler/tests/*.test.js 2239/0 ·
+  snippet-gate 0 fail · claim-gate 0 fail · corpus-compile-floor PASS · gen-md-shim current · conflict markers 0 ·
+  SPEC-INDEX --check OK · delta-lint PASS · s34-census --check-new PASS (4 rows) · bootstrap-conformance --check
+  current (no movement) · severity --check current · lint-no-default-arm 0 · slice m1 100/0, m2 614/0,
+  m1 lowered 100/0, m3 60/0, m4 3102/0, codec 166/0 · e2e-render-map 259/0. Pre-commit hook: 50909 pass / 0 fail.
