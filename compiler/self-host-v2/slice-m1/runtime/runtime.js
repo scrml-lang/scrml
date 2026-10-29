@@ -1053,17 +1053,20 @@ export function removeEnd(target, n) { const xs = target.peek(); target.set(xs.s
 export function removeFront(target, n) { target.set(target.peek().slice(n)); }
 /**
  * A write of struct path `path` inside the element at position `index`
- * (`@xs[i].f = v`, dpa-052 Q3). A position outside the sequence is refused —
- * nothing is written (a write never grows or pads a sequence).
+ * (`@xs[i].f = v`, dpa-052 Q3). s473 — a position outside the sequence
+ * (negative, at or past the end, or not an int) is the E-INDEX-OUT-OF-RANGE-RT
+ * trap, as every position write's is (SPEC §66.12.6 rule 3, ruled S473 "A write
+ * past the end of a tape position: runtime TRAP"; §19.17): nothing is written —
+ * a write never grows or pads a sequence. `at` is the source location.
  */
-export function setAt(target, index, path, v) {
+export function setAt(target, index, path, v, at) {
   const xs = target.peek();
   if (!Number.isInteger(index)) {
-    throw new Error(`index ${JSON.stringify(index)} is not a sequence position (an int) — nothing was written`);
+    throw new ScrmlTrap("E-INDEX-OUT-OF-RANGE-RT", `index ${JSON.stringify(index)} is not a sequence position (an int) (${at}) — nothing was written`, { index, length: xs.length, at });
   }
   if (index < 0 || index >= xs.length) {
     const has = xs.length === 0 ? "the sequence is empty" : `its positions are 0..${xs.length - 1}`;
-    throw new Error(`position ${index} is outside the sequence (${has}) — nothing was written`);
+    throw new ScrmlTrap("E-INDEX-OUT-OF-RANGE-RT", `position ${index} is outside the sequence (${has}) (${at}) — nothing was written`, { index, length: xs.length, at });
   }
   setIn(target, [index, ...path], v);
 }

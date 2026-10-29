@@ -271,7 +271,7 @@ ${
         EAssignLocal(sym: Sym, path: LStep[], ty: Type | not),
         EEdits(w: WriteFact, elems: AExpr[], tmps: Sym[], snap: SeqSnap), // s442: `@x = [...@x, a, b]` — one edit per element (§66.11.2); r1: each element evaluated into `tmps[i]` first; r2: reads of `@x` see `snap`
         ERemove(w: WriteFact),                            // s444: `@x.pop()` / `@x.shift()` — a removal of one element (RemoveEnd / RemoveFront)
-        EElemAt(cap: Sym, inst: InstRef, index: AExpr, path: FieldRef[]), // s444: `@xs[i].f = v` — an element-field write (Core ElemAt; dpa-052 Q3)
+        EElemAt(cap: Sym, inst: InstRef, index: AExpr, path: FieldRef[], loc: string), // s444: `@xs[i].f = v` — an element-field write (Core ElemAt; dpa-052 Q3); s473: `loc` "file:line" for the trap
         EPosition(cap: Sym, inst: InstRef, index: AExpr, loc: string),   // s472: `@xs[i] = v` — a position write (Core PositionAt; §66.12.6 rule 3); `loc` "file:line" for the trap
     }
     // s472 — one step of a local part write's path (EAssignLocal): a struct field
@@ -9388,7 +9388,7 @@ ${
         if (stt.diags.length > st.diags.length) return stt
         const cap: Sym | not = f.wcap
         if (cap is not || elemSym is not) return noCapability(env, e, st)
-        return addEffect(st, e.nid, EffectFact.EElemAt(cap, p.inst, ef.index, [{ owner: elemSym, idx: targetIdx }]))
+        return addEffect(st, e.nid, EffectFact.EElemAt(cap, p.inst, ef.index, [{ owner: elemSym, idx: targetIdx }], env.file + ":" + lineOf(env.g, env.file, e.span.start)))
     }
 
     // =========================================================================

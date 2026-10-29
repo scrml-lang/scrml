@@ -37,3 +37,18 @@ component pair → E-COMPONENT-NAME-DUPLICATE, other pair stays E-BOOTSTRAP-UNSU
 (type / decl → E-SCOPE-010). Gaps closed: g-boot-decl-fn-same-name-one-file-s472,
 g-boot-component-scope-key-bare-name-s472. Filed: g-boot-decl-same-name-noncomponent-s473 (unruled
 residue: a same-named pair that is not two components).
+
+## 2026-10-29T04:20Z — part 2 (past-end write trap) implemented
+
+Governing sentence written (SPEC §66.12.6 rule 3): "A position write — `xs[i] = v`, or a write through
+a position (`xs[i].f = v`, `xs[i][j] = v`) — whose index is at or past the end of the tape SHALL raise
+the `E-INDEX-OUT-OF-RANGE-RT` trap (§19.17) when it runs, as a negative index does (§66.12.8 rule 7),
+and nothing is written: a write never grows or pads a tape. A trap is not a `!` failure, so a position
+write is not failable." Index-write `E-WRITE-INVARIANT` struck; §66.12.8 x-ref, §19.17 table, §66.11.7
+O36 note, §34 row (touched) follow. Not a new code.
+
+Bootstrap: `setPosition` / `writePath` already raised the ScrmlTrap (s472). The element-field write
+`@xs[i].f = v` (Core ElemAt → runtime `setAt`) threw a plain Error: now the same ScrmlTrap with
+{index, length, at}. Core `EditKind.ElemAt` gains `loc` (analyze EElemAt → lower → print), as
+PositionAt has. Trap tests: 4, 2 red on base (ElemAt trap code + loc), 2 pin the s472 paths.
+Gap closed: g-spec-index-write-past-end-enforcement-s472.
