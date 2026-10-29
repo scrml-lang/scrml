@@ -81,3 +81,24 @@ all green. Conformance report regenerated: PASS 259 → 263 (+`foreign-lang-in-p
 
 Gaps filed: g-spec-program-mcp-attr-unspecified-s473, g-spec-timestamp-missing-from-canonical-type-list-s473,
 g-bootstrap-title-elem-in-renders-not-seen-s473, g-bootstrap-undeclared-cell-read-code-s473.
+
+## 2026-10-29T15:55Z — gates; flogence re-measured
+
+snippet-gate caught two spec-ahead pins (README.md:27 tasks.scrml, docs/tutorial.md:1106
+10-all-together.scrml) whose code list gained E-STATE-UNDECLARED: a write to a cell the refused
+construct would have declared is now E-STATE-UNDECLARED instead of the "whole instance" refusal.
+Pins updated.
+
+Gates (CI `checks` steps, run locally): types-gate PASS · `bun test compiler/tests/*.test.js` PASS ·
+snippet-gate PASS (after the pins) · claim-gate PASS · corpus-compile-floor PASS · md-shim PASS ·
+conflict-marker PASS · SPEC-INDEX PASS · delta-lint PASS · s34-census --check-new PASS (no §34 row
+changed) · severity --check PASS · bootstrap-conformance --check PASS · e2e-render-map PASS ·
+bootstrap slice step (no-default-arm, duplicate-fn, m1, m2, m1 lowered, m3, m4, codec) PASS.
+
+flogence measurement re-run (driver copied with S = this worktree; flogence untouched), vs the
+REPORT's results.json: raw errors 9620 → 9597 (−23), twin 9608 → 9585; clean files 0 → 0. Every
+changed diagnostic is one of this lane's: generic `<program lang/title/mcp=…>` refusal 24 → 0;
+precise `<program mcp>` refusal 0 → 2; `timestamp` E-TYPE-UNKNOWN 1 → 0; "whole instance" 6 → 0;
+E-STATE-UNDECLARED 0 → 6 (the same six sites, now named correctly); `if`-as-value 19 → 19 (B1
+cascade, untouched). 23 of 31 files drop by one error; none becomes clean (each still holds B1/B2/
+M1-class debt).

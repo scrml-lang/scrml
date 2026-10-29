@@ -24,7 +24,7 @@ Here is a small app: a task list that saves to SQLite, stays in sync across ever
 
 ### 1 — the data and the server
 
-<!-- gate: spec-ahead [E-BOOTSTRAP-UNSUPPORTED, E-PARSE-TAG, E-PARSE-TRAILING, E-SCOPE-001] — the bootstrap has no <schema>, <channel>, <match> block element, class: binding, <empty>, <onTimeout> or duration literal, no engine opener effect=, cannot replace a whole tape, and cannot construct a payload variant (Phase.Rejected(…)) yet -->
+<!-- gate: spec-ahead [E-BOOTSTRAP-UNSUPPORTED, E-PARSE-TAG, E-PARSE-TRAILING, E-SCOPE-001, E-STATE-UNDECLARED] — the bootstrap has no <schema>, <channel>, <match> block element, class: binding, <empty>, <onTimeout> or duration literal, no engine opener effect=, cannot replace a whole tape, and cannot construct a payload variant (Phase.Rejected(…)) yet -->
 <!-- snippet: docs/readme-snippets/tasks.scrml#L7-L53 -->
 ```scrml
 <program db="tasks.db">
