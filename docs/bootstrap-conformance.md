@@ -11,26 +11,26 @@ Scope: **1813 of 1813 cases attempted** — every attempted case reached the pur
 
 | bucket | cases | share of attempted |
 |---|---:|---:|
-| PASS | 260 | 14.3% |
+| PASS | 263 | 14.5% |
 | CODES-ONLY | 0 | 0.0% |
 | FAIL | 49 | 2.7% |
 | LEGACY | 0 | 0.0% |
 | NOT-TWINNED | 685 | 37.8% |
-| UNSUPPORTED | 819 | 45.2% |
+| UNSUPPORTED | 816 | 45.0% |
 | CRASH | 0 | 0.0% |
 | INVALID | 0 | 0.0% |
 
-**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 309; of those, 260 hold (84.1%). Runtime half executed on the bootstrap for 103 case(s).
+**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 312; of those, 263 hold (84.3%). Runtime half executed on the bootstrap for 103 case(s).
 
-- **Vacuous** passes: 19 of 260 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **241**.
+- **Vacuous** passes: 19 of 263 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **244**.
 - FAILs whose required code appears nowhere in the bootstrap's sources (check not implemented): 23 of 49; the other 26 are implemented checks that answered wrong.
 
 LEGACY by marker (a case may carry several): none.
-UNSUPPORTED by reason: bootstrap-unsupported 539 · parse-reject 280.
+UNSUPPORTED by reason: bootstrap-unsupported 535 · parse-reject 281.
 
 ### §66 twins (S449 dialect ruling 1 — generated at test time by the `scrml fix` §66 rules)
 
-Legacy-dialect cases graded on their generated §66 twin: **793** — PASS 159 · FAIL 34 · UNSUPPORTED 600. Twin holds 159 (non-vacuous 144). Every twin verdict above is included in the bucket table.
+Legacy-dialect cases graded on their generated §66 twin: **793** — PASS 162 · FAIL 34 · UNSUPPORTED 597. Twin holds 162 (non-vacuous 147). Every twin verdict above is included in the bucket table.
 - `dialect.s66` overrides: 0 replace a twin's expectations · 11 exclude a case.
 - Superseded-code mappings applied: 2 case(s) (E-ENGINE-VAR-DUPLICATE→E-SCOPE-010). Rows: E-ENGINE-VAR-DUPLICATE→E-SCOPE-010 [applied] · E-ENGINE-STATE-CHILD-INVALID-VARIANT→∅ [owed] · E-ENGINE-RULE-INVALID-VARIANT→∅ [owed] · E-ENGINE-INITIAL-INVALID-VARIANT→∅ [owed] · E-CELL-NO-RENDER-SPEC→∅ [owed] · E-CELL-RENDER-SPEC-NOT-BINDABLE→∅ [owed] · E-DECL-RHS-INTERP-WRAPPED→∅ [owed] · E-COMPONENT-010→∅ [owed].
 
@@ -130,7 +130,7 @@ NOT-TWINNED by reason (685 cases; a case counts once per distinct reason):
 | linear | 15 | · | · | 2 | · | · | 13 | · | · |
 | loop | 8 | · | · | · | · | 3 | 5 | · | · |
 | maps | 13 | · | · | · | · | 13 | · | · | · |
-| markup-handler | 89 | 13 | · | · | · | 40 | 36 | · | · |
+| markup-handler | 89 | 16 | · | · | · | 40 | 33 | · | · |
 | match-block | 18 | · | · | · | · | 9 | 9 | · | · |
 | match-codes | 25 | 4 | · | 2 | · | · | 19 | · | · |
 | match-identifier | 1 | · | · | · | · | 1 | · | · | · |
@@ -310,7 +310,7 @@ none
 
 none
 
-### PASS / CODES-ONLY (260)
+### PASS / CODES-ONLY (263)
 
 - `attr-executable-sink/bound-svg-animation-runtime-guard` — PASS · TWIN
 - `attr-executable-sink/bound-url-runtime-guard` — PASS · TWIN
@@ -472,6 +472,9 @@ none
 - `markup-handler/inline-block-handler-runs-every-statement` — PASS · TWIN
 - `markup-handler/multi-stmt-handler-attr-neg` — PASS · TWIN · VACUOUS
 - `markup-handler/multi-stmt-handler-colon-shorthand-neg` — PASS · TWIN · VACUOUS
+- `markup-handler/s437-r4-undeclared-cell-2nd-each-neg` — PASS · TWIN
+- `markup-handler/s437-r4-undeclared-cell-2nd-engine-neg` — PASS · TWIN
+- `markup-handler/s437-r4-undeclared-cell-2nd-top-neg` — PASS · TWIN
 - `markup-handler/s437-r4-undeclared-fn-2nd-each-neg` — PASS · TWIN
 - `markup-handler/s437-r4-undeclared-fn-2nd-engine-neg` — PASS · TWIN
 - `markup-handler/s437-r4-undeclared-fn-2nd-top-neg` — PASS · TWIN
@@ -573,7 +576,7 @@ none
 - `type-state-codes/e-type-081-partial-match-render-neg` — PASS · TWIN · VACUOUS
 - `type-state-codes/e-type-lifecycle-on-engine-cell-neg` — PASS · TWIN · VACUOUS
 
-### UNSUPPORTED (819)
+### UNSUPPORTED (816)
 
 - `api/api-base-missing-neg` — bootstrap-unsupported: `<api>` is a scrml structural element (§60), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `api/api-clean-pos` — twin · bootstrap-unsupported: `<api>` is a scrml structural element (§60), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
@@ -613,17 +616,17 @@ none
 - `auth/auth-004-neg` — bootstrap-unsupported: `<>` at a file's top level, outside any `<program>`, is not in the bootstrap — the SPEC names no rule for what it renders as (§40.8); move it inside the `<program>`
 - `auth/auth-004-pos` — bootstrap-unsupported: `<>` at a file's top level, outside any `<program>`, is not in the bootstrap — the SPEC names no rule for what it renders as (§40.8); move it inside the `<program>`
 - `auth/auth-005-neg` — twin · bootstrap-unsupported: `server` in a declaration opener is not in the bootstrap — it reads only typed attributes, the own value, `single` and validators there, and never ignores a word it does not implement
-- `auth/auth-005-pos` — twin · bootstrap-unsupported: `<program title=…>` is not in the bootstrap — it reads no `<program>` attribute, and never ignores one it does not implement
+- `auth/auth-005-pos` — twin · bootstrap-unsupported: `server` in a declaration opener is not in the bootstrap — it reads only typed attributes, the own value, `single` and validators there, and never ignores a word it does not implement
 - `auth/auth-attr-legal-values-neg` — bootstrap-unsupported: `<program auth="optional">` is not in the bootstrap — it emits no server and no login gate (§52.13, §40.2), so the program is refused rather than compiled ungated
 - `auth/auth-attr-nested-program-one-code-pos` — bootstrap-unsupported: `<program auth="required">` is not in the bootstrap — it emits no server and no login gate (§52.13, §40.2), so the program is refused rather than compiled ungated
 - `auth/auth-attr-nonliteral-page-pos` — twin · bootstrap-unsupported: `<page>` is a scrml structural element (§40), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `auth/auth-attr-role-page-pos` — bootstrap-unsupported: `<page>` is a scrml structural element (§40), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
-- `auth/auth-graph-002-neg` — bootstrap-unsupported: `<program title=…>` is not in the bootstrap — it reads no `<program>` attribute, and never ignores one it does not implement
-- `auth/auth-graph-002-pos` — bootstrap-unsupported: `<program title=…>` is not in the bootstrap — it reads no `<program>` attribute, and never ignores one it does not implement
-- `auth/auth-graph-003-neg` — bootstrap-unsupported: `<program title=…>` is not in the bootstrap — it reads no `<program>` attribute, and never ignores one it does not implement
-- `auth/auth-graph-003-pos` — bootstrap-unsupported: `<program title=…>` is not in the bootstrap — it reads no `<program>` attribute, and never ignores one it does not implement
-- `auth/auth-graph-004-neg` — bootstrap-unsupported: `<program title=…>` is not in the bootstrap — it reads no `<program>` attribute, and never ignores one it does not implement
-- `auth/auth-graph-004-pos` — bootstrap-unsupported: `<program title=…>` is not in the bootstrap — it reads no `<program>` attribute, and never ignores one it does not implement
+- `auth/auth-graph-002-neg` — bootstrap-unsupported: `<program auth="required">` is not in the bootstrap — it emits no server and no login gate (§52.13, §40.2), so the program is refused rather than compiled ungated
+- `auth/auth-graph-002-pos` — bootstrap-unsupported: `<program auth="required">` is not in the bootstrap — it emits no server and no login gate (§52.13, §40.2), so the program is refused rather than compiled ungated
+- `auth/auth-graph-003-neg` — bootstrap-unsupported: `<program auth="required">` is not in the bootstrap — it emits no server and no login gate (§52.13, §40.2), so the program is refused rather than compiled ungated
+- `auth/auth-graph-003-pos` — bootstrap-unsupported: `<program auth="required">` is not in the bootstrap — it emits no server and no login gate (§52.13, §40.2), so the program is refused rather than compiled ungated
+- `auth/auth-graph-004-neg` — bootstrap-unsupported: `<program auth="required">` is not in the bootstrap — it emits no server and no login gate (§52.13, §40.2), so the program is refused rather than compiled ungated
+- `auth/auth-graph-004-pos` — bootstrap-unsupported: `<program auth="required">` is not in the bootstrap — it emits no server and no login gate (§52.13, §40.2), so the program is refused rather than compiled ungated
 - `auth/i-auth-redirect-unresolved-pos` — bootstrap-unsupported: `<program auth="required">` is not in the bootstrap — it emits no server and no login gate (§52.13, §40.2), so the program is refused rather than compiled ungated
 - `auth/nested-helper-block-shadowed-import-sort-neg` — twin · bootstrap-unsupported: `scrml:auth` — the bootstrap cannot import this stdlib module: the build supplied no source for it that the bootstrap compiles, so none of its names are imported (§41.5)
 - `auth/nested-helper-server-block-body-callback-neg` — twin · bootstrap-unsupported: an arrow function with a braced body is not in the bootstrap — write an expression body
@@ -881,7 +884,7 @@ none
 - `fn/lift-outer-accumulator-reject` — bootstrap-unsupported: `lift` appends to a loop BOUND AS A VALUE (`const xs = for (…) { … lift e; … };`, §49.6) or to a Tier-0 `${ for … }` in markup (§17.4) — this one stands in neither (lifting into a render target or a `
 - `fn/nondeterministic-call-reject` — twin · bootstrap-unsupported: `build()` reads the clock (`Date.now()`, directly or through a function it calls) — here (an initializer, markup, or an attribute value) that is not in the bootstrap; its host-call surface is a `funct
 - `fn/reactive-read-clean` — twin · parse-reject: E-PARSE-ITEM: unexpected text at program level
-- `fn/reactive-write-reject` — twin · bootstrap-unsupported: `@counter = …` — writing a whole instance is not in bootstrap slice M2 (write a field: `@counter.f = …`)
+- `fn/reactive-write-reject` — twin · parse-reject: E-PARSE-ITEM: unexpected text at program level
 - `fn/scope-redeclare-fn-over-param-ok` — twin · parse-reject: E-STMT-MISSING-SEMICOLON: Expected `;` to end the statement — insert `;` after `function`. A `;` ends every statement that is not block-like, the last one before a `}` included (`{ @n = @n + 1; }`); a
 - `fn/scope-redeclare-neg` — twin · parse-reject: E-STMT-MISSING-SEMICOLON: Expected `;` to end the statement — insert `;` after `"inner"`. A `;` ends every statement that is not block-like, the last one before a `}` included (`{ @n = @n + 1; }`); a 
 - `fn/sql-access-handled-reject` — twin · bootstrap-unsupported: member access `.length` on a value that is not a struct or an instance is not in bootstrap slice M2
@@ -966,10 +969,7 @@ none
 - `markup-handler/s437-r4-try-braced-engine-neg` — twin · parse-reject: E-STMT-MISSING-SEMICOLON: Expected `;` to end the statement — insert `;` after `9`. A `;` ends every statement that is not block-like, the last one before a `}` included (`{ @n = @n + 1; }`); a newlin
 - `markup-handler/s437-r4-try-braced-match-neg` — twin · bootstrap-unsupported: `<match>` is a scrml structural element (§18.0.1), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `markup-handler/s437-r4-try-braced-top-neg` — twin · parse-reject: E-STMT-MISSING-SEMICOLON: Expected `;` to end the statement — insert `;` after `9`. A `;` ends every statement that is not block-like, the last one before a `}` included (`{ @n = @n + 1; }`); a newlin
-- `markup-handler/s437-r4-undeclared-cell-2nd-each-neg` — twin · bootstrap-unsupported: `@zz = …` — writing a whole instance is not in bootstrap slice M2 (write a field: `@zz.f = …`)
-- `markup-handler/s437-r4-undeclared-cell-2nd-engine-neg` — twin · bootstrap-unsupported: `@zz = …` — writing a whole instance is not in bootstrap slice M2 (write a field: `@zz.f = …`)
 - `markup-handler/s437-r4-undeclared-cell-2nd-match-neg` — twin · bootstrap-unsupported: `<match>` is a scrml structural element (§18.0.1), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
-- `markup-handler/s437-r4-undeclared-cell-2nd-top-neg` — twin · bootstrap-unsupported: `@zz = …` — writing a whole instance is not in bootstrap slice M2 (write a field: `@zz.f = …`)
 - `markup-handler/s437-r4-undeclared-fn-2nd-match-neg` — twin · bootstrap-unsupported: `<match>` is a scrml structural element (§18.0.1), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `markup-handler/s450-attr-multi-statement-neg` — twin · bootstrap-unsupported: an arrow function with a braced body is not in the bootstrap — write an expression body
 - `markup-handler/s450-attr-multi-statement-pos` — twin · parse-reject: E-PARSE-EXPECTED: expected `)`, found `;`

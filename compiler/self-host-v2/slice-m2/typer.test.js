@@ -311,7 +311,9 @@ const BASE_66_19 = [
   // s471: the block's `import … from "./…"` names a file the block does not supply — ONE E-IMPORT-006 at the import
   // (link.scrml importTarget resolves nothing), where it was one E-IMPORT-NOT-EXPORTED per name (judged "exported
   // by any file"); the bootstrap now spells §21.6's E-IMPORT-004 for a name the resolved file does not export.
-  ["E-BOOTSTRAP-UNSUPPORTED", "E-BOOTSTRAP-UNSUPPORTED", "E-BOOTSTRAP-UNSUPPORTED", "E-BOOTSTRAP-UNSUPPORTED", "E-IMPORT-006", "E-SCOPE-001", "E-SCOPE-001", "E-SCOPE-001", "E-SCOPE-001", "E-SCOPE-001", "E-SCOPE-001", "E-TYPE-VARIANT"],
+  // s473: `@country.open = …` (`country` names no handle in scope — its cross-file `as=` is unresolved) is
+  // E-STATE-UNDECLARED (§6.1.1), as its read is E-SCOPE-001; it was mislabeled "writing a whole instance".
+  ["E-BOOTSTRAP-UNSUPPORTED", "E-BOOTSTRAP-UNSUPPORTED", "E-BOOTSTRAP-UNSUPPORTED", "E-IMPORT-006", "E-SCOPE-001", "E-SCOPE-001", "E-SCOPE-001", "E-SCOPE-001", "E-SCOPE-001", "E-SCOPE-001", "E-STATE-UNDECLARED", "E-TYPE-VARIANT"],
   // s451: + one E-BOOTSTRAP-UNSUPPORTED — `style="background:${hex}"` (a §5.5.3 quoted-value template) used to be
   // emitted as literal text; it is refused now (parse.scrml quotedInterpDiags).
   // s451 (Ue): - two E-PARSE-EXPECTED, two E-PARSE-TRAILING — the theme's `match @mode { .Light :> …  .Dark :> … }`
@@ -328,7 +330,9 @@ const BASE_66_19 = [
   [],
   // §66.19.6 Before (the retired `<engine>`): s444 (PA) — `<engine>` is a scrml structural element and is refused
   // WHOLE (it used to fall through as an HTML element, its state-children then failing one by one).
-  ["E-BOOTSTRAP-UNSUPPORTED", "E-BOOTSTRAP-UNSUPPORTED"],
+  // s473: `@phase = …` — the retired form's implicit cell is no cell in the ruled dialect — is E-STATE-UNDECLARED
+  // (§6.1.1), not "writing a whole instance".
+  ["E-BOOTSTRAP-UNSUPPORTED", "E-STATE-UNDECLARED"],
   [],
 ];
 

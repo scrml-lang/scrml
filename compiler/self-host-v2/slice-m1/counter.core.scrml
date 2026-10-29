@@ -30,7 +30,7 @@ ${
     import { Sym, InstRef, Literal, PrimOp, Expr, EditKind, Check, Stmt, Block, Attr, View,
              FieldMode, FieldRole, DeclKind, Type, Field, Decl, Fn, CoreProgram,
              mkSym, block, noGrants, replaceGrant, litInt, readField, prim2, call0,
-             el, textView, dyn, onEvent } from "../core.scrml"
+             el, textView, dyn, onEvent, plainHead } from "../core.scrml"
 
     export fn counterCore() -> CoreProgram {
         // ---- symbols (dense ids, as the binder mints them) ----
@@ -114,6 +114,6 @@ ${
             fields: [fCount, fStep, fDoubled],
             renders: [main], wiring: [], handles: [],
         }
-        return { program: sProgram, decls: [program], types: [], fns: [bump, restart], server: [], dbs: [], reset: true, sqlError: not, serverCallError: not, css: not, consts: [], loads: [] }
+        return { program: sProgram, decls: [program], types: [], fns: [bump, restart], server: [], dbs: [], reset: true, sqlError: not, serverCallError: not, css: not, consts: [], loads: [], head: plainHead() }
     }
 }
