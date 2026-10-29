@@ -24979,7 +24979,8 @@ type Sighting:struct = { isIntersecting: bool, intersectionRatio: number }
     - `asIs` (§7.5.2) is not decoded;
     - a Promise or other thenable returned by a binding not declared `waiting` is a mismatch.
 
-    A binding with no `->` discards the host's result, and the result is not decoded. A mismatch SHALL be the trap
+    A binding with no `->` discards the host's result without decoding it, except that a thenable is still a
+    mismatch (a host Promise is never silently dropped). A mismatch SHALL be the trap
     `E-HOST-VALUE-MISMATCH-RT` (§19.17), on a `!` binding too: it means the declaration is wrong, not that the
     host failed. For the scalar types this is the same decode §21.3.1.1 applies at a wrapper's `return`.
 14. A parameter or result type that cannot cross SHALL be `E-HOST-TYPE-NOT-CROSSABLE`: a function type as a
