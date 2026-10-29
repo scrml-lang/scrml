@@ -50,3 +50,11 @@ E-BOOTSTRAP-UNSUPPORTED, inside `<program>` it silently compiled as an HTML elem
 - Gates (local): s34-census, claim-gate, snippet-gate, SPEC-INDEX, delta-lint, conflict-marker, md-shim, severity
   --check, types-gate, corpus-compile-floor: PASS. Slices: no-default-arm, dup-fn, m1 (109), m2 (619), m1
   lowered (109), m3 (60), m4 (3679), codec (166), e2e-render-map (259), bootstrap-conformance --check: PASS.
+
+## 2026-10-29T22:05Z — commit 2 (1d153c3f1), merge of origin/main (65fe665b1), PR
+
+- After commit 2: `bun test compiler/tests/*.test.js` 2239 pass; slice-m4 3680 pass; slice-m2 619 pass;
+  bootstrap-conformance --check, claim-gate, snippet-gate PASS.
+- Merged origin/main (merge, not rebase): SPEC-INDEX regenerated (`git-merge-generated.ts --regen`); gap ids
+  diffed vs origin/main — none lost, four added; severity --check, SPEC-INDEX --check, s34-census PASS.
+- Draft PR opened; not merged / queued (PA adversarial review first).
