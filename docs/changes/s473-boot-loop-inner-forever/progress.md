@@ -53,3 +53,12 @@ base: s473-boot-exitless-loop; retarget to main after #1631 lands.
   md-shim, conflict-marker, spec-index, delta-lint, s34-census vs origin/main and vs #1631, lint-no-default-arm,
   m1 100 / m2 614 / m1 lowered 100 / m3 60 / m4 3,121 / codec 166, conformance current, e2e-render-map 259).
 - Draft PR #1638, base s473-boot-exitless-loop (stacked on #1631).
+
+## 2026-10-29T14:00Z — merged origin/main after #1631 landed (PR retargeted to main by the PA)
+- Merge 05d5e1398, clean (no conflicts; only docs/FACTS.md came in, main's bot-owned copy). SPEC-INDEX,
+  severity and known-gaps counts re-run by script: no change. Gap ids: 2,465 before and after, none lost.
+  E-LOOP-008 line refs (:12033/:12034, :12300/:12301) still match.
+- Re-run: types-gate, s34-census --check-new --base origin/main, lint-no-default-arm, m1 100 / m2 614 /
+  m1 lowered 100 / m3 60 / m4 3,121 / codec 166, bootstrap-conformance --check current — all PASS.
+- PA ruling on the two open questions: keep both legal (the "some path leaves" reading; an inner loop with an
+  ending head is not a forever loop).
