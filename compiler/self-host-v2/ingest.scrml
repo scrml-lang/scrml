@@ -1251,7 +1251,7 @@ ${
             }
             const body: LS = lowerStmts(fcx, nodesAt(f.n, "body"))
             why = why.concat(pi.why).concat(body.why)
-            fns = fns.concat([{ sym: fnInfos[j].sym, params: pi.params, body: block(body.stmts), pure: strAt(f.n, "fnKind") == "fn", err: not, waits: false }])
+            fns = fns.concat([{ sym: fnInfos[j].sym, params: pi.params, body: block(body.stmts), pure: strAt(f.n, "fnKind") == "fn", err: not, waits: false, host: not }])
             j = j + 1
         }
 

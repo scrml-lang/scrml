@@ -8406,7 +8406,7 @@ Inside a logic context, two lazy function declaration forms are supported in add
 - A bare expression in a logic context (not wrapped in a function declaration) SHALL execute at initial render.
 - The compiler SHALL treat calls to server-inferred functions as async call sites and insert `await` automatically (see Section 13).
 - **Call arity (S440 ruling #2).** A call that passes MORE arguments than the function declares parameters is a compile error, **`E-CALL-ARITY`**. A call that passes FEWER is a compile error too, **unless** each omitted parameter has a default (§7.3.2). **Named; impl pending — Nominal / not yet emitted** (measured S440: impl#1 compiles `add(1, 2, 3)` and `add(1)` against `function add(a, b)` at exit 0); impl#1 carries it (§34.0). **Reopen condition (recorded as ruled):** the callback case is *"the one reason that would reopen"* the extra-arguments rule.
-  **PA reading, S440 — flagged for veto** (the ruling did not address these; the code name `E-CALL-ARITY` is also the PA's choice): a rest parameter (`...xs`) absorbs any number of extra arguments; a spread argument at the call site is not counted (arity is unchecked for that call); a `?`-optional parameter counts as defaulted; and the check applies only when the callee is statically resolved (provable-or-silent). Reason: the language already ships variadic functions — §41.18 `scrml:math` `min(...values)` / `max(...values)` ("Variadic — `min(a, b)` or `min(...arr)`").
+  **PA reading, S440 — flagged for veto** (the ruling did not address these; the code name `E-CALL-ARITY` is also the PA's choice): a rest parameter (`...xs`) absorbs any number of extra arguments; a spread argument at the call site is not counted (arity is unchecked for that call); a `?`-optional parameter counts as defaulted; and the check applies only when the callee is statically resolved (provable-or-silent). Reason: the language already ships variadic functions — §41.18 `scrml:math` `min(...values)` / `max(...values)` ("Variadic — `min(a, b)` or `min(...arr)`"). *(S472: `scrml:math` `min` / `max` are now two-argument and `minOf` / `maxOf` take a tape (§41.18 S472 amendment); the rest-parameter reading stands on §7's own rest parameters.)*
   > **Provenance:** ruling:user-voice-scrml.md S440 (#4 = (c); #2 and #5 = PA recs — item #2) — *"make extra arguments an error now, and write the callback case down as the one reason that would reopen it"*; *"too few arguments is an error unless the parameter has a default (§7.3.2)"*.
 
 #### 7.3.1 Nested Function Declarations
@@ -23581,12 +23581,13 @@ host-JS precedent the lowering follows); §19.9.3 / §19.9.5 / §19.9.9 (body-sp
 A **trap** is a defined runtime error: a condition the language defines as an error, that the compiler cannot
 always rule out before the program runs, and that is **not a value of any `!` error type**.
 
-**The kinds.** v1 has ~~one general trap~~ two traps *(S469: `E-INT-CONVERSION-RT` added — ruling:user-voice-scrml.md S469 "⭐ RULED — conversions: lossy number → int is named, round needs a mode" — "NaN, ±∞ or a value beyond exact-int range is a defined runtime error"; direction of change: semantics-defined)*:
+**The kinds.** v1 has ~~one general trap~~ ~~two traps~~ three traps *(S472: `E-HOST-VALUE-MISMATCH-RT` added — ruling:user-voice-scrml.md S472 "host function type, math API, remaining review debt" item 1; direction of change: semantics-defined)* *(S469: `E-INT-CONVERSION-RT` added — ruling:user-voice-scrml.md S469 "⭐ RULED — conversions: lossy number → int is named, round needs a mode" — "NaN, ±∞ or a value beyond exact-int range is a defined runtime error"; direction of change: semantics-defined)*:
 
 | Code | Raised by | Section |
 |---|---|---|
 | `E-INDEX-OUT-OF-RANGE-RT` | an index read `xs[i]` with `i < 0` or `i >= xs.length`; `s[i]` out of range; a negative computed `slice` position, `repeat` count or `padStart` / `padEnd` width; a negative `xs.insert` position or index write (S469; the last three derived) (Nominal / spec-ahead — not yet emitted) | §66.12.8 (moved from §49.13), Appendix D.1 |
-| `E-INT-CONVERSION-RT` | `floor` / `ceil` / `trunc` / `round` of NaN, ±∞, or a value that rounds outside ±(2^53−1) (S469; Nominal / spec-ahead — not yet emitted) | §41.18 |
+| `E-INT-CONVERSION-RT` | `floor` / `ceil` / `trunc` / `round` of NaN, ±∞, or a value that rounds outside ±(2^53−1) (S469; ~~Nominal / spec-ahead — not yet emitted~~ emitted since S472 by `scrml:math` on both implementations — stdlib/math/host.js, compiler/runtime/stdlib/math.js) | §41.18 |
+| `E-HOST-VALUE-MISMATCH-RT` | the value a host function returned does not fit its wrapper's declared return type (S472 — the return-point decode; emitted at `compiler/self-host-v2/slice-m1/runtime/runtime.js`, the bootstrap's runtimes; Nominal on impl#1) | §21.3.1.1 |
 
 (`E-CONTRACT-001-RT`, §53.4.5, and the loud error past 2^53 for an `int8` column, ruling:user-voice-scrml.md
 S440, are earlier runtime errors at a value boundary. They keep their own sections.)
@@ -24659,7 +24660,8 @@ ${ import { helper } from './helper.js' }
   project root, or whose `_scrml_local/…` path falls in a §47.13 denied class, SHALL
   be a compile error (E-IMPORT-011); a missing one SHALL be E-IMPORT-006. A build with
   any such error SHALL copy no helper. A `.ts` / `.mts` target (`import:host`) is not
-  copied. In the classic module format, a page whose client bundles carry a top-level
+  copied. *(S472: no `import:host` target is under this rule — a stdlib module's host module
+  lands at `<outputDir>/_scrml/<module>/<file>` for both artifacts, §21.3.1.1.)* In the classic module format, a page whose client bundles carry a top-level
   ES `import` SHALL load every one of its client-bundle `<script>` tags as
   `type="module"` (the runtime stays classic and runs first); a page whose bundles
   carry none is unchanged.
@@ -24700,7 +24702,7 @@ The bindings `_runCG` and `_CGError` are resolved at compile time from the named
 - The file containing an `import:host` declaration MUST match a path pattern listed in the project manifest's `[capabilities] host-import` allow-list (default in the user project manifest: `disabled`; the bootstrap stdlib's own manifest sets `self-host-only` which permits ~~`scrml/stdlib/compiler/**`~~ `scrml/stdlib/**` — S471). A file outside the allow-list using `import:host` SHALL be a compile error (`E-IMPORT-008`).
   > **Provenance:** ruling:user-voice-scrml.md S471 "your rec, though I am curious about c regardless. I guess its ok to drop the <program> wrapper." (*"Host bridge: **A** — widen `import:host`'s manifest allow-list from `stdlib/compiler/**` to `stdlib/**` (stdlib modules stay scrml; host reach sits in thin TS/JS files beside them; adopter default stays `disabled`)"*) · **Direction of change: newly-accepting** for stdlib files outside `stdlib/compiler/`. *(impl#1 `compiler/src/host-import.js` admits the `stdlib/` prefix since S472.)*
 - The `host-tag` SHALL be `host` in v1. Any other host-tag value SHALL be a compile error (`E-IMPORT-009` — unknown host-tag; only `host` is recognized in v1).
-- Named bindings imported via `import:host` SHALL be available in the file's logic scope as if they were imported via plain `import { ... } from "..."`. They MAY be re-exported via `export const name = _binding`. A direct `export:host` re-export form is NOT defined in v1; defer until adopter friction surfaces a use case.
+- ~~Named bindings imported via `import:host` SHALL be available in the file's logic scope as if they were imported via plain `import { ... } from "..."`. They MAY be re-exported via `export const name = _binding`.~~ *(struck S472 — the wrapper rule, §21.3.1.1: a binding is usable ONLY as the direct callee of its wrapper's `return`; any other use, a re-export included, is `E-HOST-BINDING-USE`.)* A direct `export:host` re-export form is NOT defined in v1; defer until adopter friction surfaces a use case.
 - The compiler SHALL NOT inline or evaluate the host-language module's body during scrml parse. The host module is loaded and named exports are extracted at compile time only.
 - Cyclic `import:host` (host module imports a scrml file that uses `import:host` back into the same host module) SHALL be a compile error (`E-IMPORT-002` — same code as plain import cycles). The cycle detector operates on the scrml file graph plus the host-side named-export records; it does NOT traverse into TS/JS module internals.
 - `as` rename is OPTIONAL. If a stdlib file imports for internal use only (no re-export), the rename may be omitted. If re-exporting under a different identifier, the `as` rename is the canonical mechanism.
@@ -24716,6 +24718,101 @@ Files that use `import:host` MAY also use `^{}` blocks. `import:host` replaces t
 **Interaction with §29 (vanilla-interop) / §23 (`use foreign:`):**
 
 `import:host` is distinct from `use foreign:` (§23 — runtime-evaluated foreign-code block) and from §29 vanilla-interop (Nominal/spec-ahead — disposition: defer per S131 Q-W3-4 / reframed S132; not yet implemented). `import:host` is compile-time named-bindings; `use foreign:` is runtime opaque-block. The three mechanisms compose without overlap.
+
+#### 21.3.1.1 Emission, the wrapper rule, and the return-point decode (S472)
+
+**Added 2026-10-28 (S472) — DRAFT text, PA-written from the S472 rulings.**
+
+> **Provenance:** ruling:user-voice-scrml.md S472 "⭐ RULED — stdlib host `.js` output location" — *"your rec on
+> where. expound the host function type"* (*"a stdlib module's host `.js` file (reached via the widened
+> `import:host`, S471 option A) is copied to `<outputDir>/_scrml/<module>/<file>` and imported from there by BOTH
+> `program.client.js` and `program.server.js`; a host file that climbs out of its module directory is
+> refused"*) · ruling:user-voice-scrml.md S472 "⭐ RULED — host function type, math API, remaining review debt"
+> item 1 — *"your recs"* (*"Host function type … = option A: an `import:host` binding is usable ONLY as the
+> direct callee of a `return` in a fully typed scrml function; the wrapper's signature IS the host function's
+> type, and the returned value is decoded against it at that point (the F3 §5.4 boundary decode; mismatch =
+> `E-HOST-VALUE-MISMATCH-RT`). Newly restricting, reversible."*) · ruling:user-voice-scrml.md S471 option A
+> (stdlib host reach is `import:host`; intrinsics REJECTED). Decode authority:
+> `scrml-support/docs/deep-dives/typed-host-binding-f3-design-2026-10-27.md` §5.4.
+> **supersedes:** the §21.3.1 statement *"Named bindings imported via `import:host` SHALL be available in the
+> file's logic scope as if they were imported via plain `import { ... } from "..."`. They MAY be re-exported via
+> `export const name = _binding`"* (struck above), for every use the wrapper rule does not admit.
+> **Direction of change:** newly-restricting (any use of a host binding other than the wrapper's `return`;
+> `export const name = _binding`), newly-accepting on the bootstrap (an admitted `import:host` is emitted — before
+> S472 the bootstrap refused it as `E-BOOTSTRAP-UNSUPPORTED`), semantics-defined (where the host module lands;
+> what a host function's result is checked against).
+> **Reversible:** the ruling names the destination (not now): stdlib host files declared through the F3 typed
+> `<host>` element, the wrappers rewritten mechanically.
+
+**Where the host module lands.** A stdlib module's host module is copied to
+**`<outputDir>/_scrml/<module>/<file>`** — `<module>` the stdlib module the importing file belongs to (the first
+path segment under `stdlib/`: `stdlib/math/index.scrml` belongs to `math`), `<file>` the host module's path
+inside that module's directory — and BOTH artifacts, `program.client.js` and `program.server.js`, import it from
+there (one copy; `./_scrml/math/host.js` from either). The host module SHALL lie inside its module's directory:
+an `import:host` target that resolves outside it — a path that climbs out (`../other/h.js`), a path that is not
+relative, a file reached through a link that leaves the directory — and any `import:host` in a FILE-form module
+(`stdlib/NAME.scrml`, which has no module directory) SHALL be a compile error, **`E-IMPORT-012`**. The compiler
+loads the host module at compile time (§21.3.1: "The host module is loaded and named exports are extracted at
+compile time only"): a host module that does not exist is `E-IMPORT-006`; a binding naming something the module
+does not export as a function is `E-IMPORT-004`.
+
+**The wrapper rule.** An `import:host` binding is usable ONLY as the direct callee of a `return` in a fully
+typed scrml function, and that function — the binding's **wrapper** — has the host function's type: the
+wrapper's signature IS the host function's type. Normatively:
+
+- The wrapper's WHOLE body SHALL be the one statement `return h(p1, …, pn);` — `h` an `import:host` binding of
+  the wrapper's own file, `p1 … pn` the wrapper's own parameters in declaration order, nothing else — so the host
+  function receives exactly the wrapper's arguments and its type is the wrapper's signature *(PA reading of
+  "the direct callee of a `return` … the wrapper's signature IS the host function's type": a `return` among other
+  statements, or an argument that is not the parameter in its position, would give the host function a type the
+  signature does not state; it is refused, which is the narrower reading and reversible)*.
+- The wrapper SHALL declare every parameter's type and its return type ("fully typed"); it SHALL NOT be failable
+  (`!`, §19.4 — a host function's failure is not a scrml error value) and SHALL NOT be a `server` function (a
+  wrapper is placed wherever it is called).
+- A binding SHALL have at most ONE wrapper (a host function has one type) *(PA reading)*.
+- Any other use of a host binding — a bare reference, a call anywhere else, a call that does not pass the
+  wrapper's parameters in order, a re-export (`export const name = _binding`), a use in a second wrapper — SHALL
+  be a compile error, **`E-HOST-BINDING-USE`**. A binding whose `import:host` is itself refused (`E-IMPORT-003` /
+  `-008` / `-009` / `-012`) reports only that refusal.
+- A binding's local name SHALL NOT also be declared in its file (`E-SCOPE-010`, §7.6 — as for a plain import).
+
+Callers call the wrapper, an ordinary scrml function of the module (exported or not, §21.3 export rules apply —
+importing a non-exported wrapper is `E-IMPORT-004`). The binding itself is never in any other file's scope.
+
+**The return-point decode.** The value the host function returns is DECODED against the wrapper's declared
+return type at the wrapper's `return` (the F3 §5.4 boundary decode). It must fit the type; it is never coerced:
+
+- `string` / `number` / `int` / `bool` are checked — `int`: a number, integral, within ±(2^53−1);
+- `T | not`: JS `null` or `undefined` is `not`; any other value is decoded as `T`;
+- a non-optional `T` receiving `null` / `undefined` is a mismatch;
+- a thenable is a mismatch (a host binding is never a waiting value, §13.8).
+
+A mismatch SHALL be the runtime trap **`E-HOST-VALUE-MISMATCH-RT`** (§19.17): it means the declaration does not
+describe the host function, not that the call failed, so it is a trap and not a `!` error value; raised in
+server code it fails the request (HTTP 500, the fixed text, §19.17). Arguments pass into the host function in
+their runtime representation (`not` is JS `null`).
+
+**What crosses (bootstrap).** The bootstrap carries the scalar types across the boundary — parameters `int`,
+`number`, `string`, `bool`; a result of one of those or its `T | not`. A wrapper with any other parameter or
+result type is `E-BOOTSTRAP-UNSUPPORTED` at the wrapper (F3 §5.4 also decodes enums, structs and tapes — a
+later bootstrap slice).
+
+**A host function may raise a §19.17 trap.** A stdlib host module MAY raise a §19.17 trap by throwing an error
+that carries the trap's code (scrml:math's host module raises `E-INT-CONVERSION-RT` this way, §41.18); scrml
+source cannot catch it (§19.17). *(PA reading — what any other host THROW is, F3's `E-HOST-THROW-RT`, is not
+ruled; on the bootstrap it propagates as a non-`!` runtime error, as a trap does.)*
+
+**Implementation status.** Emitted by the bootstrap: the wrapper rule and `E-HOST-BINDING-USE` at
+`compiler/self-host-v2/analyze.scrml` (hostWrappers, resolveHostBinding), `E-IMPORT-012` there (checkHostImport)
+and at `scripts/scrml-boot.ts` (hostFilesOf — a link out of the module), the output location at
+`scripts/scrml-boot.ts` (compileFile) with the imports printed at `compiler/self-host-v2/print.scrml` (hostImports,
+hostFnJs) and `compiler/self-host-v2/print-server.scrml`, the decode at
+`compiler/self-host-v2/slice-m1/runtime/runtime.js` (hostResult — client and server; the server runtime
+re-exports it). **Nominal on impl#1:** impl#1 does not compile a stdlib module's host wrappers — it ships the
+hand-written runtime shim `compiler/runtime/stdlib/<name>.js` for each module (§47.11), so the wrapper rule, the
+decode and `E-IMPORT-012` are carried (§34.0); impl#1's own `stdlib/compiler/**` sources still re-export host
+bindings (`export const runCG = _runCG`, the §21.3.1 worked example above) — impl#1-only, the `scrml:compiler`
+family is KNOWN-DEFERRED (§41.17), and that form is migration backlog, not a sanctioned shape.
 
 ### 21.3.2 Dynamic `import(...)` is not scrml
 
@@ -24918,6 +25015,7 @@ without `export`).
 | E-IMPORT-008 | (S114 — §21.3.1.) `import:host` used in a file outside the manifest's `[capabilities] host-import` allow-list. Default for adopter projects is `"disabled"`; the bootstrap stdlib sets `"self-host-only"` permitting `scrml/stdlib/**` (S471; was `scrml/stdlib/compiler/**`; emitted at `compiler/src/host-import.js`, which admits `stdlib/` since S472). | Error |
 | E-IMPORT-009 | (S114 — §21.3.1.) `import:host` uses a host-tag other than `host`. v1 recognizes only `host`; future-reserved tags (`wasm` / `wat` / `c` / `zig` / etc.) require SPEC amendment. | Error |
 | E-IMPORT-011 | (S440 item 16 — §21.3.) A `.js` / `.mjs` helper imported by client code (directly or through another helper) resolves outside the project root, or its `_scrml_local/` copy path falls in a §47.13 denied class. The compiler copies client-reachable helpers into the build output and will not copy such a file. Emitted at `compiler/src/api.js` `createClientHelperRelocator`. | Error |
+| E-IMPORT-012 | (S472 — §21.3.1.1.) An `import:host` target that does not lie inside its stdlib module's directory — a path that climbs out, a non-relative path, a link that leaves the directory — or an `import:host` in a file-form stdlib module (no module directory). The host module is copied to `<outputDir>/_scrml/<module>/<file>`. Emitted by the bootstrap at `compiler/self-host-v2/analyze.scrml` and `scripts/scrml-boot.ts`; **Nominal on impl#1** (it carries the rule, §34.0). | Error |
 | E-EXPORT-001 | A reactive state cell (plain Shape-1 `<count> = 0` OR derived `const <total> = @a + @b`) is exported (`export { count }` or `export @count`, §21.2). Reactive cells are not in the exportable set (`type` / `function` / `fn` / `const` / `let`). Keyed on the `state-decl` binding (not name-case), so component-as-const / channel / engine exports remain valid | Error |
 | E-EXPORT-002 | Form 1 (§21.2) component body is empty, contains only text, or has more than one top-level markup root — body MUST be single-rooted markup | Error |
 | E-EXPORT-003 | Form 1 (§21.2) outer attribute name collides with the body-root's attribute name (other than `class`, which merges per §15.5) | Error |
@@ -28372,7 +28470,9 @@ are REFUSED by impl#1, `E-IMPL1-RULED-FORM-UNSUPPORTED` (its row lands with that
 | E-STRING-METHOD-UNKNOWN | Appendix D.1 | A call on a `string` of a method that is not in Appendix D.1's table (`codePointAt`, `normalize`, `localeCompare`, `match`, `search`, `substring`, `at`, …). The message names the nearest admitted form where there is one. **Code name provisional (PA, S469).** ~~**Nominal / spec-ahead — not yet emitted** (impl#1 passes host methods through; the bootstrap refuses them as `E-BOOTSTRAP-UNSUPPORTED`).~~ Emitted by the bootstrap at `compiler/self-host-v2/analyze.scrml` (`refuseMethod`, with the nearest-form fix-it — s469-boot-ruled-backlog); **Nominal on impl#1** (impl#1 passes host methods through; it carries the rule, §34.0). Provenance: ruling:user-voice-scrml.md S469 "⭐ RULED — more string methods admitted" — *"Anything not admitted is refused."* Direction of change: newly-rejecting. | Error |
 | E-TEXT-NON-PRIMITIVE | §14.13.2, §7.4.2, §5.5.3 | A value that is not a primitive (`string`, `int`, `number`, `bool`, unit enum value) in a text sink other than `print` / `println`: markup text `${e}`, a `${e}` in a quoted attribute value, or a `${e}` slot of a logic backtick template — a struct, tape, tuple, map or set, payload enum value, function, or a value of unresolved type. The message names a field read, a `scrml:format` call (§41.22) or `log()`. A markup value is not text (it renders as markup). `print` keeps E-PRINT-NON-PRIMITIVE. **Code name provisional (PA, S469).** **impl#1: Nominal / not yet emitted** (it renders JavaScript `String()`). **The bootstrap emits it** (S472 status update, `g-spec-e-text-non-primitive-row-stale-s472`): for a logic template slot since #1497 — every limb, the unresolved type included — emitted at `compiler/self-host-v2/analyze.scrml` (`notText`; the unresolved limb `textUnresolved`); for MARKUP TEXT since S472 — a known non-primitive, a `T | not` of one, and each member of a choice — emitted at `compiler/self-host-v2/analyze.scrml` (`markupTextKnown`, reached from `markupText` for a markup `${e}` and for each value a markup `${ for … { lift e; } }` gather lifts, §17.4 — `typeGather`). It does NOT fire on a `lift` into a loop bound as a value (§49.6 rule 2: a tape element, not a text sink). A `{ lift … }` match arm is not judged as text by itself: the match's VALUE is judged where it stands — a markup `${match … { .A :> { lift @p; }, … }}` of a struct is still refused, a match bound to a local or returned is not text. Still owed on the bootstrap: markup text's unresolved-type limb (a value whose type the bootstrap typer does not infer — measured S472: refusing it would refuse four interpolations in the §66.19 worked programs, whose types §66.3 infers) filed `g-boot-markup-text-unresolved-limb-s472`. (A quoted attribute value holding `${…}` is refused whole on the bootstrap — E-BOOTSTRAP-UNSUPPORTED, §5.5.3's reactive template is not in it — so that limb has nothing to admit.) Provenance: ruling:user-voice-scrml.md S469 "⭐ RULED — conversions: what MUST be spelled out" — *"yeah, I like that better"*. Direction of change: newly-rejecting. | Error |
 | W-STRING-INTERP-LITERAL | §14.13.3 | A QUOTED string literal in logic (`"…"` / `'…'`) whose raw text holds an unescaped `${ … }`. A quoted string is not a template: the `${` is plain text, which a JavaScript reader does not expect. Not reported: an escaped `\${`; a `${` with no closing `}`; a code-default body's display-text literal (§4.18.4), which interpolates. Fix: a backtick template (§14.13.3), or interpolate in markup. **Code name provisional** (named by the bootstrap, S469). Emitted by the bootstrap at `compiler/self-host-v2/parse.scrml` (`interpLiteralLint`); **Nominal on impl#1**. Provenance: dispatch:s469-boot-strings-1 — a PA / bootstrap addition, **not owner-ruled** (the S469 "provisional diagnostic codes confirmed" entry does not name this code). Direction of change: inert (a warning). | Warning |
-| E-INT-CONVERSION-RT | §41.18, §19.17 | Runtime trap: `floor`, `ceil`, `trunc` or `round` of NaN, ±∞, or a value that rounds outside ±(2^53−1). Stops the current unit of execution; not a `!` error (§19.17). **Code name provisional (PA, S469).** **Nominal / spec-ahead — not yet emitted.** Provenance: ruling:user-voice-scrml.md S469 "⭐ RULED — conversions: lossy number → int is named, round needs a mode" — *"Named, mode required (Recommended)"*. | Runtime |
+| E-INT-CONVERSION-RT | §41.18, §19.17 | Runtime trap: `floor`, `ceil`, `trunc` or `round` of NaN, ±∞, or a value that rounds outside ±(2^53−1). Stops the current unit of execution; not a `!` error (§19.17). **Code name provisional (PA, S469).** ~~**Nominal / spec-ahead — not yet emitted.**~~ Emitted since S472 at `stdlib/math/host.js` (the bootstrap's `scrml:math` host module) and `compiler/runtime/stdlib/math.js` (impl#1's shim). Provenance: ruling:user-voice-scrml.md S469 "⭐ RULED — conversions: lossy number → int is named, round needs a mode" — *"Named, mode required (Recommended)"*. | Runtime |
+| E-HOST-VALUE-MISMATCH-RT | §21.3.1.1, §19.17 | Runtime trap: the value a host function returned does not fit its wrapper's declared return type — the return-point decode (`int` integral within ±(2^53−1); `string` / `number` / `bool` by kind; `T \| not` admits `null` / `undefined`; a non-optional type receiving `null` / `undefined` and a thenable are mismatches). It means the declaration is wrong, not that the call failed. Emitted at `compiler/self-host-v2/slice-m1/runtime/runtime.js` (hostResult — the bootstrap's client and server runtimes); **Nominal on impl#1** (it ships hand-written shims, no wrappers; carried, §34.0). Provenance: ruling:user-voice-scrml.md S472 "⭐ RULED — host function type, math API, remaining review debt" item 1 — *"your recs"*; decode: `scrml-support/docs/deep-dives/typed-host-binding-f3-design-2026-10-27.md` §5.4. Direction of change: semantics-defined. | Runtime |
+| E-HOST-BINDING-USE | §21.3.1.1 | An `import:host` binding used other than as the direct callee of the whole-body `return h(p1, …, pn);` of its one fully typed wrapper (a bare reference, a call elsewhere, arguments that are not the wrapper's parameters in order, a re-export, a second wrapper, a wrapper without a declared return type, a `!` or `server` wrapper). **Code name PA's (S472)** — the ruling says "Any other use of a host binding is refused" and names no code. Emitted by the bootstrap at `compiler/self-host-v2/analyze.scrml` (resolveHostBinding); **Nominal on impl#1** (carried, §34.0 — its own `stdlib/compiler/**` re-exports bindings, §41.17 deferred). Provenance: ruling:user-voice-scrml.md S472 "⭐ RULED — host function type, math API, remaining review debt" item 1. Direction of change: newly-rejecting. | Error |
 | W-TOENUM-DEPRECATED | §14.4.1, §63.7 | `E.toEnum(s)` — the soft-deprecated spelling of `E.parse(s)` (§14.4.1); parses identically. One lint per call, naming `E.parse` and `scrml fix`. **Reserved — not yet emitted:** the §63 window opens only when this lint, `E-TOENUM-DEPRECATED` and a `scrml fix` rule co-land (§63.2). **Code name provisional (PA, S469).** Provenance: ruling:user-voice-scrml.md S469 "⭐ RULED — conversions: parse spelling `T.parse(s)`" — *"T.parse(s) (Recommended)"*. | Info |
 | E-TOENUM-DEPRECATED | §14.4.1, §63.7 | **Reserved** (§63.2) end-of-window code for the `toEnum` spelling. Not scheduled; never fires before a §62 MAJOR event schedules it. **Code name provisional (PA, S469).** Provenance: ruling:user-voice-scrml.md S469 "⭐ RULED — conversions: parse spelling `T.parse(s)`". | Error |
 | W-TYPE-NAME-DEPRECATED | §14.13.6, §63.7 | The type name `integer` or `boolean` in type position — the soft-deprecated synonyms of `int` / `bool`; they mean exactly the same. One lint per use, naming the canonical name and `scrml fix`. **Reserved — not yet emitted:** the §63 window opens when this lint, `E-TYPE-NAME-DEPRECATED` and a `scrml fix` rule co-land (§63.2). **Code name provisional (PA, S469).** Provenance: ruling:user-voice-scrml.md S469 "⭐ RULED — three spec-follow-up opens" — *"Deprecation window (Rec)"*. Direction of change: inert. | Info |
@@ -28692,6 +28792,7 @@ are REFUSED by impl#1, `E-IMPL1-RULED-FORM-UNSUPPORTED` (its row lands with that
 | E-IMPORT-008 | §21.3.1 | `import:host` used in a file outside the project manifest's `[capabilities] host-import` allow-list. The default value is `"disabled"` in adopter project manifests; the bootstrap stdlib's own manifest sets `"self-host-only"` permitting only files under `scrml/stdlib/**` (S471, ruling:user-voice-scrml.md S471 "your rec, though I am curious about c regardless. I guess its ok to drop the <program> wrapper." — host bridge A; was `scrml/stdlib/compiler/**`; impl#1 `compiler/src/host-import.js` admits `stdlib/` since S472). Resolution: remove the `import:host` declaration — adopter code uses `import` from scrml-source modules, and reaches host code through a §21.3 relative `.js` import. ~~or, if a host-language bridge is genuinely required, opt into the manifest entry explicitly~~ *(struck S471: v1 has no adopter opt-in value, §22.13; dpa-075 DD §8 D3)*. (Catalog addition S114 — Approach C ratification; emitted at `compiler/src/host-import.js`.) | Error |
 | E-IMPORT-009 | §21.3.1 | `import:host` uses a host-tag other than `host`. v1 recognizes only the `host` tag (TypeScript / JavaScript named-export bridge). Future-reserved tags (`wasm` / `wat` / `c` / `zig` / etc.) require SPEC amendment + per-tag implementation. Resolution: use `import:host` for the v1 TS/JS bridge; defer other host languages until SPEC amendment. (Catalog addition S114 — Approach C ratification.) | Error |
 | E-IMPORT-011 | §21.3 | A plain `.js` / `.mjs` helper reaching CLIENT JavaScript (directly, or through a relative import of another client helper) resolves — symlinks followed — outside the project root (nearest `scrml.toml` / `.git` ancestor of the build's source root, else that source root), or its `<outputDir>/_scrml_local/` copy path is in a §47.13 denied class (`*.server.*`, a database, a dot-path, `.scrml`, `.map`). The compiler copies client-reachable helpers into the build output so the browser can load them (S440 item 16) and refuses to copy these; a build carrying the error copies no helper. Resolution: move the helper inside the project, or mark the intended root with `scrml.toml`. (E-IMPORT-010 is separately reserved for `bun:`/`node:` imports in client context.) Emitted at `compiler/src/api.js` `createClientHelperRelocator`. | Error |
+| E-IMPORT-012 | §21.3.1.1 | An `import:host` target that does not lie inside its stdlib module's directory — a path that climbs out (`../x.js`), a non-relative path, a link that leaves the directory — or an `import:host` in a FILE-form stdlib module (`scrml:NAME.scrml`, no module directory to hold a host file). A stdlib module's host module is copied to `<outputDir>/_scrml/<module>/<file>` and imported from there by both artifacts. Emitted by the bootstrap at `compiler/self-host-v2/analyze.scrml` (checkHostImport) and `scripts/scrml-boot.ts` (hostFilesOf — a link out of the module); **Nominal on impl#1** (it ships hand-written shims; carried, §34.0). Provenance: ruling:user-voice-scrml.md S472 "⭐ RULED — stdlib host `.js` output location" — *"a host file that climbs out of its module directory is refused"*; **code name PA's** (the ruling names none). Direction of change: newly-rejecting. | Error |
 | E-META-002 | §22.4 | Invalid token inside a `^{}` meta block (existing). The meta block body is not valid scrml/JS at parse time. (Catalog addition S78 audit; emitted at `compiler/src/ast-builder.js`.) | Error |
 | E-META-003 | §22.4 | `reflect()` called on an unknown type identifier inside a compile-time `^{}` meta block. Resolution: ensure the type is declared and in scope at the meta-block's lexical position. (Catalog addition S78 audit; emitted at `compiler/src/meta-checker.ts`.) | Error |
 | E-META-005 | §22.6 | A `^{}` meta block mixes compile-time API patterns (`reflect()`, etc.) with runtime-only values. A meta block must be entirely compile-time or entirely runtime; the modes don't compose. (Catalog addition S78 audit; emitted at `compiler/src/meta-checker.ts`.) | Error |
@@ -33518,7 +33619,7 @@ The `scrml:compiler` family — the umbrella `scrml:compiler` plus 13 per-stage 
 
 **Added:** S176 — DD1 Fork 1 (1A), ratified by the S176 AskUserQuestion. Authority: `scrml-support/docs/deep-dives/js-host-boundary-foundation-2026-06-07.md` Fork 1. Closes the corpus scalar gap (adopters reaching raw `Math.*` / `parseInt` / `Number`) and the stdlib-ouroboros (scrml's own runtime had no value-native math target, so it leaked raw `Math`).
 
-`scrml:math` is a PURE stdlib module: every member is deterministic, side-effect-free, and capability-free. The runtime shim (`compiler/runtime/stdlib/math.js`) is the sanctioned, centralized touch of the host `Math.*` / `Number.*` surface — instead of scattering `Math.round(...)` across application and stdlib code, the host-math reach is funneled through this one module.
+`scrml:math` is a PURE stdlib module: every member is deterministic, side-effect-free, and capability-free. Its host reach is ONE thin host module beside the scrml source, `stdlib/math/host.js`, reached through `import:host` under the §21.3.1.1 wrapper rule (S471 option A, S472) on the bootstrap; impl#1 ships the hand-written runtime shim `compiler/runtime/stdlib/math.js` with the same surface. Either is the sanctioned, centralized touch of the host `Math.*` / `Number.*` surface — instead of scattering `Math.round(...)` across application and stdlib code, the host-math reach is funneled through this one module.
 
 **Catalog (the function surface):**
 
@@ -33528,14 +33629,16 @@ The `scrml:compiler` family — the umbrella `scrml:compiler` plus 13 per-stage 
 | `floor` | `floor(n)` *(S469: `floor(x: number) -> int`)* | Round toward -Infinity. |
 | `ceil` | `ceil(n)` *(S469: `ceil(x: number) -> int`)* | Round toward +Infinity. |
 | `trunc` *(S469)* | `trunc(x: number) -> int` | Round toward zero. |
-| `abs` | `abs(n)` | Absolute value. |
-| `min` | `min(...values)` | Smallest argument. Variadic — `min(a, b)` or `min(...arr)`. |
-| `max` | `max(...values)` | Largest argument. Variadic — `max(a, b)` or `max(...arr)`. |
-| `clamp` | `clamp(value, minimum, maximum)` | Constrain to the inclusive range `[minimum, maximum]`. |
+| `abs` | `abs(n)` *(S472: `abs(x: number) -> number`)* | Absolute value. |
+| `min` | ~~`min(...values)`~~ `min(a: number, b: number) -> number` *(S472)* | ~~Smallest argument. Variadic — `min(a, b)` or `min(...arr)`.~~ The smaller of two numbers. |
+| `max` | ~~`max(...values)`~~ `max(a: number, b: number) -> number` *(S472)* | ~~Largest argument. Variadic — `max(a, b)` or `max(...arr)`.~~ The larger of two numbers. |
+| `minOf` *(S472)* | `minOf(xs: number[]) -> number \| not` | The smallest element of a tape; `not` for an empty tape. |
+| `maxOf` *(S472)* | `maxOf(xs: number[]) -> number \| not` | The largest element of a tape; `not` for an empty tape. |
+| `clamp` | `clamp(value, minimum, maximum)` *(S472: all `number`, `-> number`)* | Constrain to the inclusive range `[minimum, maximum]`. |
 | `parseInt` | `parseInt(str, radix?)` *(S469: `parseInt(s: string, radix: int) -> int \| not`)* | ~~Leading-integer parse; `radix` defaults to **10** (no implicit-octal surprise).~~ *(struck S469)* Whole-string parse in base `radix`; `not` on any other text (below). |
 | `parseFloat` | `parseFloat(str)` *(S469: `-> number \| not`)* | ~~Leading-float parse.~~ *(struck S469)* Whole-string parse, as `number.parse` (§14.13.4). |
 | `toNumber` | `toNumber(value)` *(S469: `toNumber(s: string) -> number \| not`)* | ~~Whole-value coercion (`Number(value)`); `""` → `0`, non-numeric → `NaN`.~~ *(struck S469, applying S440 dpa-037 Call 4)* Whole-string parse, as `number.parse`; `toNumber("")` → `not`. |
-| `isNaN` | `isNaN(value)` | `Number.isNaN` — does NOT coerce. |
+| `isNaN` | `isNaN(value)` *(S472: `isNaN(x: number) -> bool`)* | `Number.isNaN` — does NOT coerce. |
 
 **Normative statements:**
 
@@ -33555,8 +33658,9 @@ The `scrml:compiler` family — the umbrella `scrml:compiler` plus 13 per-stage 
 > `-3`"*). **supersedes:** the struck rows below. **Direction of change:** newly-rejecting (`round(x)` without a
 > mode; a leading-prefix parse now `not`); semantics-changed (`round`'s ties; the result type of the four rounding
 > members is `int`, with a runtime error where JavaScript returned a non-integer); newly-accepting (`trunc`).
-> **Nominal / spec-ahead:** `stdlib/math/index.scrml` and `compiler/runtime/stdlib/math.js` still implement the
-> struck rows; the corpus count of `round(x)` calls is owed before either compiler enforces the mode.
+> ~~**Nominal / spec-ahead:** `stdlib/math/index.scrml` and `compiler/runtime/stdlib/math.js` still implement the
+> struck rows; the corpus count of `round(x)` calls is owed before either compiler enforces the mode.~~
+> *(S472: implemented — see the S472 amendment below; the corpus count was taken, S472.)*
 
 **The `Rounding` enum (S440 dpa-054 #4).** `scrml:math` exports `type Rounding:enum = { HalfEven | HalfUp | Floor |
 Ceil | Trunc }`. For a value `x` exactly halfway between two integers: `.HalfEven` picks the even one (`2.5` → `2`,
@@ -33584,10 +33688,39 @@ outside ±(2^53−1). With `radix` 10 it agrees with `int.parse` (§14.13.4); th
 are retained as names only until `number.parse` lands *(PA reading: the ruling makes `T.parse` the parse spelling;
 whether these two names then enter a §63 window is not ruled)*.
 
+> **Amendment S472 — the API ships; `min` / `max` take two numbers; `minOf` / `maxOf` take a tape.**
+> **Provenance:** ruling:user-voice-scrml.md S472 "⭐ RULED — host function type, math API, remaining review debt" —
+> *"your recs"*: item 2 (*"`scrml:math` port ships the S469 §41.18 API directly, no transitional shim (corpus count
+> done: zero importers outside stdlib; 8 impl#1 test callers updated in the port PR)"*), item 3 (*"`min`/`max` are
+> 2-arg; `minOf(xs)` / `maxOf(xs)` take a tape and return `number | not` (`not` for an empty tape)"*).
+> **supersedes:** the struck variadic `min` / `max` rows above. **Direction of change:** newly-rejecting (a third
+> argument to `min` / `max` is `E-CALL-ARITY`, §7.3 — a tape's minimum is `minOf(xs)`);
+> newly-accepting (`minOf`, `maxOf`).
+> **Status:** IMPLEMENTED on both implementations — the bootstrap compiles `stdlib/math/index.scrml` (its host
+> reach `stdlib/math/host.js`, §21.3.1.1), impl#1 ships `compiler/runtime/stdlib/math.js`; `round(x)` without a mode
+> is `E-CALL-ARITY` on the bootstrap (impl#1 does not check call arity — it carries `E-CALL-ARITY`, §7.3; its shim
+> refuses a call with no mode at run time rather than pick one).
+
+**Types the S469 table left unstated (PA choice, S472 dispatch:s472-boot-math-port — not owner-ruled):**
+`abs(x: number) -> number`, `clamp(value: number, minimum: number, maximum: number) -> number`,
+`isNaN(x: number) -> bool`. An `int` argument widens to `number` (§7.5.1); the result is a `number` — `trunc` /
+`floor` / … name the conversion back to `int`.
+
+**`parseInt`'s radix outside 2–36** returns `not` *(PA reading — the S469 text says "base `radix` (2–36)" and names
+no error; a radix is an ordinary value, so a bad one is a failed parse, never a trap)*.
+
+**The runtime's own callers.** impl#1's runtime shims for other modules (`compiler/runtime/stdlib/auth.js`,
+`data.js`, `time.js`) route their internal clock / length arithmetic through `scrml:math`'s shim; they call its
+internal, NON-trapping `floorUnchecked` / `ceilUnchecked` (not part of the API — `stdlib/math/index.scrml` does
+not export them, so importing one is `E-IMPORT-004`), so the S469 trap does not change their behaviour on a NaN
+clock or length *(dispatch:s472-boot-math-port — a PA instruction, not an owner ruling: "The runtime's own internal
+callers of floor/ceil (auth.js, data.js, time.js) keep a non-trapping internal version — do not change their
+behaviour")*.
+
 - `scrml:math` is import-only (§41.5). There is no ambient `Math` global in scrml (DD1 Fork 1, 1B ambient builtins DEFERRED). Reach a member via `import { round } from 'scrml:math'`.
 - `scrml:math` deliberately EXCLUDES `random()`. A random source is non-deterministic (the same capability class as the wall clock, §41.19) and so does not belong in a pure module; its home was decided: the capability-scoped `scrml:random` module (§41.20).
 
-**Cross-references:** §33 (`pure`) · §48 / §48.6.2 (`fn` purity, E-FN-003) · §41.5 (resolution) · §42.1 (the parallel "what scrml is NOT" rule shape). Shim: `compiler/runtime/stdlib/math.js`; source: `stdlib/math/index.scrml`.
+**Cross-references:** §33 (`pure`) · §48 / §48.6.2 (`fn` purity, E-FN-003) · §41.5 (resolution) · §42.1 (the parallel "what scrml is NOT" rule shape) · §21.3.1.1 (`import:host` emission, the wrapper rule, the return-point decode). Source: `stdlib/math/index.scrml`; host module (bootstrap): `stdlib/math/host.js`; shim (impl#1): `compiler/runtime/stdlib/math.js`.
 
 ### 41.19 `scrml:time.now()` — capability-scoped wall clock
 

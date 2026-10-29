@@ -37,7 +37,7 @@ import { encode, decode, failure, failed, runDefers, eq, indexRead, atRead, writ
   strSlice, strCharAt, strSplit, strLength, strIncludes, strStartsWith, strEndsWith,
   strIndexOf, strLastIndexOf, strReplace, strReplaceAll, strPadStart, strPadEnd, strRepeat,
   parseIntText, parseNumText, parseBoolText, textOf,
-  sortNum, sortStr, sortBy, reversed, joinStr } from "./runtime.js";
+  sortNum, sortStr, sortBy, reversed, joinStr, hostResult } from "./runtime.js";
 
 // What printed server bodies call through `rt.` (print.scrml prints them for
 // both artifacts): a failure value, the test for one, the `defer` stack,
@@ -51,6 +51,8 @@ export { strIndexOf, strLastIndexOf, strReplace, strReplaceAll, strPadStart, str
 export { parseIntText, parseNumText, parseBoolText };
 // s469 — a logic template slot's text (§14.13.3, §20.7.2)
 export { textOf };
+// s472 (boot-math-port) — a host-backed function's return-point decode (§21.3.1; print.scrml hostFnJs)
+export { hostResult };
 
 // ---------------------------------------------------------------------------
 // SQL text. A query site's literal runs, frozen once at module load, in the

@@ -56,7 +56,7 @@ ${
         }
 
         const log: Fn = {
-            sym: sLog, params: [], pure: false, err: not, waits: false,
+            sym: sLog, params: [], pure: false, err: not, waits: false, host: not,
             body: block([
                 Stmt.Let(sBefore, readField(sProgram, shared, AUDIT)),
                 Stmt.Write(wAudit, shared, EditKind.Append, litStr("x"), Check.Static),

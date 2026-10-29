@@ -1,0 +1,9 @@
+// s472-boot-math-port fixture stdlib — `scrml:noexport`: its host module does not
+// export the name a wrapper calls (the driver refuses it, E-IMPORT-004 —
+// scripts/scrml-boot.ts hostFilesOf).
+import:host { g as hg } from "./host.js";
+${
+    export fn g(x: int) -> int {
+        return hg(x);
+    }
+}

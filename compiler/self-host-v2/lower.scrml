@@ -30,7 +30,7 @@
 ${
     import { Sym, Type, TypeDef, FieldRef, InstRef, Place, Literal, PrimOp, Pattern, Expr, MatchArm, SeqFn, BindKind,
              EditKind, Check, Stmt, Block, Attr, ConstructAttr, CondArm, View, EffectDep, FieldMode, FieldRole,
-             GrantSet, TransitionGraph, Field, DeclKind, WiringAttr, Decl, Param, Fn, CoreProgram, Validator, SurfaceProp, ValidityOf, Persist,
+             GrantSet, TransitionGraph, Field, DeclKind, WiringAttr, Decl, Param, Fn, HostFn, CoreProgram, Validator, SurfaceProp, ValidityOf, Persist,
              ServerFn, SqlMode, Db, SqlQuery, SqlKind, SqlTables, SqlColumns, Failable, OkArm, ErrArm, VariantDef,
              LoopHead, EachHead, RangeHead, HostCall, CssUnit, CssDecl, CoreCss, CssVar, Gather, Lifted, GatherRow, PathStep,
              CoreConst, block, litStr, mkSym, typeDefSym, readField, mountedInstances } from "./core.scrml"
@@ -2208,6 +2208,10 @@ ${
                 const c: LC = { t: t, file: info.file, subst: not, snap: not, rows: [] }
                 let params: Param[] = []
                 for (const p of s.f.params) { params = params.concat(paramOf(bindFact(t.binds, p.nid))) }
+                // s472 (boot-math-port): a HOST-BACKED function (analyze fnsOf, the §21.3.1
+                // wrapper rule) keeps its signature and no body — its body WAS the host call
+                const hf: HostFn | not = info.host
+                if (hf is given) return { sym: info.sym, params: params, body: { stmts: [] }, pure: info.pure, err: not, waits: false, host: hf }
                 // s454 (U1b): a WAITING function (the suspension plan's `waiting`) — its
                 // body in explicit continuations, every path ending in a Return (its
                 // Promise settles on every exit, print.scrml waiting functions)
@@ -2223,7 +2227,7 @@ ${
                         body = cpsBody(body, [Stmt.Return(Expr.Lit(Literal.Absent))])
                     }
                 }
-                return { sym: info.sym, params: params, body: body, pure: info.pure, err: info.err, waits: waits }
+                return { sym: info.sym, params: params, body: body, pure: info.pure, err: info.err, waits: waits, host: not }
             }
         }
         return not

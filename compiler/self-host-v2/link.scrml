@@ -185,6 +185,32 @@ ${
         return ""
     }
 
+    // s472 (boot-math-port) — WHERE A STDLIB FILE'S HOST MODULE LANDS (§21.3.1,
+    // ruling:user-voice-scrml.md S472 "stdlib host `.js` output location": "a
+    // stdlib module's host `.js` file … is copied to
+    // `<outputDir>/_scrml/<module>/<file>` and imported from there by BOTH
+    // `program.client.js` and `program.server.js`; a host file that climbs out
+    // of its module directory is refused"). `module` is the stdlib module the
+    // importing file belongs to — the first segment after the prefix
+    // (`scrml:math/index.scrml` → `math`) — and `file` the host module's path
+    // inside that module's directory. `not` when the host module is not inside
+    // it: `from` climbs out (`../x.js`), is not a relative path, or the
+    // importer is a FILE-form module (`scrml:calc.scrml` — it has no module
+    // directory to hold a host file). Structural: paths only, never a disk read.
+    export type HostLoc:struct = { module: string, file: string }
+
+    export fn hostLocOf(importer: string, from: string) -> HostLoc | not {
+        if (!inStdlib(importer)) return not
+        const rest: string = importer.slice(stdlibPrefix().length)
+        const slash: int = rest.indexOf("/")
+        if (slash <= 0) return not
+        const module: string = rest.slice(0, slash)
+        const p: string = resolveFrom(dirOf(importer), from)
+        const base: string = stdlibPrefix() + module + "/"
+        if (!p.startsWith(base) || p.length == base.length) return not
+        return { module: module, file: p.slice(base.length) }
+    }
+
     // s472 — `path` is a stdlib file: the driver names stdlib files under the
     // prefix (slice-m2/lowered.js `stdlibSources`; `importTarget` resolves
     // `scrml:NAME` to them), and a project file can never carry it (lowered.js

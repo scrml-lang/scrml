@@ -16,11 +16,11 @@
 // Before s472 the bootstrap read `import:host …` as a malformed plain import (a
 // wall of E-PARSE-* plus "a JavaScript module import is not in the bootstrap").
 //
-// An admitted declaration (a stdlib file, file top, tag `host`, a JS/TS module)
-// is still refused BY NAME: the bootstrap does not yet load or emit a host
-// module — where the host file lands in the output and what scrml type a host
-// binding has are not said by the SPEC (docs/changes/s472-boot-import-host-math/
-// progress.md, "SPEC silences").
+// s472-boot-math-port: an admitted declaration (a stdlib file, file top, tag
+// `host`, a `.js` / `.mjs` module inside its module's directory) is EMITTED —
+// its bindings usable only under the S472 wrapper rule; the wrapper rule, the
+// return-point decode and the output location are pinned in
+// math-port-s472.test.js.
 
 import { describe, test, expect, beforeAll } from "bun:test";
 import { join } from "node:path";
@@ -106,25 +106,25 @@ describe("§21.3.1 in a stdlib file", () => {
     expect(r.diags.map((d) => [d.code, d.file])).toEqual([["E-IMPORT-003", STD]]);
   });
 
-  test("admitted (file top, `host`, a .js module): refused BY NAME — the bootstrap does not yet emit a host module; no E-IMPORT-003/008/009", () => {
+  test("admitted (file top, `host`, a .js module inside the module): no diagnostic — s472-boot-math-port emits it (before: E-BOOTSTRAP-UNSUPPORTED by name)", () => {
     const r = std('import:host { hfloor } from "./h.js";\n' + LIB_BODY);
-    expect(r.diags.map((d) => [d.code, d.file])).toEqual([["E-BOOTSTRAP-UNSUPPORTED", STD]]);
-    expect(r.diags[0].message).toContain("does not yet load or emit a host module");
+    expect(r.diags.map((d) => [d.code, d.file])).toEqual([]);
   });
 
-  test("`name as local` binds `local` (§21.3.1 named-binding): a use of `local` does not cascade; the host-side name is not in scope", () => {
+  test("`name as local` binds `local` (§21.3.1 named-binding): a use of `local` outside the wrapper rule is E-HOST-BINDING-USE; the host-side name is not in scope", () => {
     const lib = 'import:host { floor as hfloor } from "./h.js";\n${\n    export fn fl(x: int) -> int {\n        return hfloor(x) + floor(x);\n    }\n}\n';
     const r = std(lib);
     const at = (d) => lib.slice(d.span.start, d.span.end);
-    expect(r.diags.map((d) => [d.code, d.code === "E-SCOPE-001" ? at(d) : ""]).sort()).toEqual([["E-BOOTSTRAP-UNSUPPORTED", ""], ["E-SCOPE-001", "floor"]]);
+    expect(r.diags.map((d) => [d.code, at(d)]).sort()).toEqual([["E-HOST-BINDING-USE", "hfloor"], ["E-SCOPE-001", "floor"]]);
     const imp = mods.link.hostImportsOfItems(mods.parse.parseFile(STD, lib, 0).ast.items)[0];
-    expect([imp.host, imp.top, imp.from, imp.names.map((n) => n.name)]).toEqual(["host", true, "./h.js", ["hfloor"]]);
+    expect([imp.host, imp.top, imp.from, imp.names.map((n) => n.name), imp.names.map((n) => n.orig)]).toEqual(["host", true, "./h.js", ["hfloor"], ["floor"]]);
   });
 
-  test("through the stdlib driver: a module whose source holds a host import is withdrawn; the user's import of it is refused by name", () => {
+  test("through the stdlib driver: a module whose host import is admitted and wrapped is supplied, not withdrawn (before s472-boot-math-port: withdrawn)", () => {
     const r = frontEndStdlib(mods, [{ path: ENTRY, src: '<program>\n${ import { fl } from "scrml:hm"; }\n<p>${fl(2)}</p>\n</program>\n' }], ENTRY, { stdlibRoot: FIXTURE });
-    expect(r.diags.map((d) => [d.code, d.file])).toEqual([["E-BOOTSTRAP-UNSUPPORTED", ENTRY]]);
-    expect(r.stdlib.refused.map((x) => [x.module, x.diags.map((d) => d.code)])).toEqual([["hm", ["E-BOOTSTRAP-UNSUPPORTED"]]]);
+    expect(r.diags.map((d) => [d.code, d.file])).toEqual([]);
+    expect(r.stdlib.refused).toEqual([]);
+    expect(r.core.fns.filter((f) => f.host != null).map((f) => [f.sym.hint, f.host.module, f.host.file, f.host.name])).toEqual([["fl", "hm", "h.js", "floor"]]);
   });
 });
 

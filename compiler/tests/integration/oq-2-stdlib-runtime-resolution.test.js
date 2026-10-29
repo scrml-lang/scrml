@@ -94,8 +94,8 @@ h1 "OQ-2 smoke"
 // (`scrml:auth` has no client chunk since S462; FIXTURE_SCRML above is now the
 // refused shape.)
 const FIXTURE_SCRML_CLIENT_SAFE = `\${
-    import { round } from 'scrml:math'
-    <n> = round(2.6)
+    import { round, Rounding } from 'scrml:math'
+    <n> = round(2.6, Rounding.HalfUp)
 }
 p "\${@n}"
 `;

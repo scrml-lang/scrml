@@ -98,7 +98,7 @@
 // =============================================================================
 ${
     import { Sym, Type, TypeDef, FieldDef, VariantDef, FieldRef, InstRef, Place, Literal, Expr, SeqFn, PrimOp, Attr, Block, LoopHead,
-             EditKind, Check, Stmt, View, EffectDep, Field, Decl, Fn, CoreProgram, CapOwner, TransitionGraph,
+             EditKind, Check, Stmt, View, EffectDep, Field, Decl, Fn, HostFn, CoreProgram, CapOwner, TransitionGraph,
              DeclKind, SurfaceProp, ValidityOf, Persist, PersistStore, ServerFn, SqlQuery, Db,
              Pattern, Failable, OkArm, ErrArm, HostCall, Gather, Lifted, GatherRow,
              capOwner, grantsAnyWrite, findDecl, findTypeDef, findFn, findServerFn, findDb } from "./core.scrml"
@@ -128,7 +128,83 @@ ${
         for (const s of p.server) {
             for (const n of allNodes(Node.NServerFn(s))) { out = out.concat(checkNode(p, [], n)) }
         }
-        return out.concat(checkSuspends(p)).concat(checkServer(p)).concat(checkFailures(p)).concat(checkClientCalls(p)).concat(checkJumps(p)).concat(checkGathers(p))
+        return out.concat(checkSuspends(p)).concat(checkServer(p)).concat(checkFailures(p)).concat(checkClientCalls(p)).concat(checkJumps(p)).concat(checkGathers(p)).concat(checkHostFns(p))
+    }
+
+    // =========================================================================
+    // s472 (boot-math-port) — HOST-BACKED FUNCTIONS (core.scrml Fn.host; SPEC
+    // §21.3.1, the S472 wrapper rule). A host-backed Fn is a signature and a
+    // host reference, nothing else:
+    //   C-H1 its body is EMPTY (the host call is the function), it is not `!`
+    //        (`err` not) and does not wait (`waits` false)
+    //   C-H2 every parameter is a scalar (`int` / `number` / `string` / `bool`)
+    //        and `ret` is a scalar or a scalar's `T | not` — the values the
+    //        printer's return-point decode (runtime.js hostResult) checks
+    //   C-H3 the host module stays inside its module directory: `module` is one
+    //        non-empty segment and `file` a relative path of non-empty segments
+    //        with no `.` / `..` (the driver copies it to
+    //        `<outputDir>/_scrml/<module>/<file>`), and `name` is non-empty
+    // =========================================================================
+    fn checkHostFns(p: CoreProgram) -> string[] {
+        let out: string[] = []
+        for (const f of p.fns) {
+            const h: HostFn | not = f.host
+            if (h is given) {
+                const who: string = f.sym.hint + "()"
+                if (f.body.stmts.length > 0) out = out.concat(["C-H1: the host-backed " + who + " has a body — a host-backed function is its signature and the host call only"])
+                if (f.err is given) out = out.concat(["C-H1: the host-backed " + who + " is declared `!`"])
+                if (f.waits) out = out.concat(["C-H1: the host-backed " + who + " waits — a host binding is not a waiting value"])
+                for (const prm of f.params) {
+                    if (!hostScalar(prm.ty)) out = out.concat(["C-H2: a parameter of the host-backed " + who + " is not a scalar (int, number, string, bool)"])
+                }
+                if (!hostScalar(h.ret)) {
+                    const inner: Type | not = hostMaybeInner(h.ret)
+                    if (inner is not) {
+                        out = out.concat(["C-H2: the host-backed " + who + " returns a type the return-point decode does not check"])
+                    } else if (!hostScalar(inner)) {
+                        out = out.concat(["C-H2: the host-backed " + who + " returns a type the return-point decode does not check"])
+                    }
+                }
+                if (h.name == "" || !hostSegment(h.module) || !hostRelPath(h.file)) out = out.concat(["C-H3: the host module of " + who + " (`" + h.module + "/" + h.file + "`) is not a path inside its module directory"])
+            }
+        }
+        return out
+    }
+
+    fn hostScalar(t: Type) -> boolean {
+        return match t {
+            .Int :> true
+            .Num :> true
+            .Str :> true
+            .Bool :> true
+            .Named(sym: s) :> false
+            .Seq(elem: e) :> false
+            .Maybe(inner: i) :> false
+        }
+    }
+
+    fn hostMaybeInner(t: Type) -> Type | not {
+        return match t {
+            .Maybe(inner: i) :> i
+            .Int :> not
+            .Num :> not
+            .Str :> not
+            .Bool :> not
+            .Named(sym: s) :> not
+            .Seq(elem: e) :> not
+        }
+    }
+
+    fn hostSegment(s: string) -> boolean {
+        return s != "" && s != "." && s != ".." && s.indexOf("/") < 0
+    }
+
+    fn hostRelPath(path: string) -> boolean {
+        if (path == "") return false
+        for (const seg of path.split("/")) {
+            if (!hostSegment(seg)) return false
+        }
+        return true
     }
 
     // =========================================================================

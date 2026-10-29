@@ -13,6 +13,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { SQL } from "bun";
 import { loadM2, frontEnd } from "./harness.js";
+import { copyHostFiles } from "../slice-m1/host-files.js";
 
 const RUNTIME_DIR = join(import.meta.dir, "..", "slice-m1", "runtime");
 
@@ -55,10 +56,11 @@ export function artifacts(core) {
  * Write the server artifact (+ the runtimes it imports) into a fresh directory and import it.
  * Returns the module (`createServer`, `manifest`).
  */
-export async function loadServer(serverJs) {
+export async function loadServer(serverJs, core = null, stdlibRoot = undefined) {
   const dir = mkdtempSync(join(tmpdir(), "u1c-server-"));
   copyFileSync(join(RUNTIME_DIR, "runtime.js"), join(dir, "runtime.js"));
   copyFileSync(join(RUNTIME_DIR, "server-runtime.js"), join(dir, "scrml-server-runtime.js"));
+  if (core !== null) copyHostFiles(core, dir, stdlibRoot); // s472: the stdlib host modules (SPEC §21.3.1)
   writeFileSync(join(dir, "app.server.js"), serverJs);
   const mod = await import(join(dir, "app.server.js"));
   rmSync(dir, { recursive: true, force: true }); // s471-slice-tmp-leak: loaded; the runtimes are static imports
@@ -110,10 +112,10 @@ export function plainRespond(status, headers, body) {
 }
 
 /** A server over `driver` (a Bun.SQL or a spy) — the host injects the connection and builds responses. */
-export async function serve(core, driver, logs = []) {
+export async function serve(core, driver, logs = [], opts = {}) {
   const { server } = artifacts(core);
   if (server.refused.length > 0) throw new Error("the server printer refused: " + server.refused.join("; "));
-  const mod = await loadServer(server.js);
+  const mod = await loadServer(server.js, core, opts.stdlibRoot);
   const srv = mod.createServer({ connect: () => driver, log: (l) => logs.push(l), respond: plainRespond });
   return { srv, mod, js: server.js, routes: server.routes, logs };
 }

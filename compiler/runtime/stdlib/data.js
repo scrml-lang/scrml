@@ -43,7 +43,9 @@
 // `min`/`max` arithmetic are ALIASED (mathMin/mathMax) — data.js once exported
 // its own `min`/`max` validator factories (retired S462 for `Rule.Min` /
 // `Rule.Max`), and the aliases keep the names free of that history.
-import { min as mathMin, max as mathMax, ceil } from "./math.js";
+// S472: `ceil` is the raw, non-trapping host ceil (math.js ceilUnchecked) — the §41.18 `ceil`
+// traps on NaN / ±∞ (E-INT-CONVERSION-RT); paginate keeps its behaviour.
+import { minUnchecked as mathMin, maxUnchecked as mathMax, ceilUnchecked as ceil } from "./math.js";
 
 // ---------------------------------------------------------------------------
 // transform.scrml — data transformation utilities (pure, browser-safe)

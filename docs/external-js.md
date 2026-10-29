@@ -131,7 +131,7 @@ A value's methods are its type's, not the host's. A string has the typed table i
 </program>
 ```
 
-For numbers and randomness the stdlib has sanctioned wrappers — `scrml:math` (pure: `round(x, .Mode)` and `trunc` (specified S469; not yet in the module), `floor`, `clamp`, `parseInt(s, radix)`, …) and `scrml:random` (`random`, `randomInt`) — which keep pure `fn` bodies pure. impl#1 still lets the old host globals through. That is an impl#1 divergence, not the language.
+For numbers and randomness the stdlib has sanctioned wrappers — `scrml:math` (pure: `round(x, .Mode)`, `floor` / `ceil` / `trunc`, `min(a, b)` / `minOf(xs)`, `clamp`, `parseInt(s, radix)`, … — the S469 §41.18 API, shipped S472) and `scrml:random` (`random`, `randomInt`) — which keep pure `fn` bodies pure. impl#1 still lets the old host globals through. That is an impl#1 divergence, not the language.
 
 ---
 

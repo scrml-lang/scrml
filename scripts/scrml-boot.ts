@@ -23,6 +23,8 @@
  *   — and, only when the program has server functions the client calls:
  *   program.server.js        the server artifact (print-server.scrml printServer): `createServer(host)`
  *   scrml-server-runtime.js  its runtime, which imports ./runtime.js (a second copy of the runtime)
+ *   — and, only when an imported stdlib module reaches the host through `import:host` (SPEC §21.3.1):
+ *   _scrml/<module>/<file>   that module's host file, copied from the stdlib (both artifacts import it)
  * The page loads ES modules, so open it over http (`scrml-boot dev`, or any static server), not file://.
  *
  * DIAGNOSTICS print as impl#1's CLI prints them — `error [CODE]: message` then `  --> file:line:col`
@@ -40,7 +42,7 @@
 
 import { createHash } from "node:crypto";
 import {
-  copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, watch, writeFileSync,
+  copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, watch, writeFileSync,
 } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from "node:path";
@@ -276,8 +278,68 @@ export type CheckResult = {
   files: string[]; // absolute source paths compiled
   client?: { html: string; js: string }; // present when ok
   serverJs?: string; // present when ok and the program has a server half the client calls
+  // s472 (boot-math-port): the stdlib host modules the artifacts import (SPEC §21.3.1) — `src` the
+  // file in the stdlib, `out` its path under the output directory (`_scrml/<module>/<file>`)
+  hostFiles?: Array<{ src: string; out: string }>; // present when ok
   ms: { boot: number; compile: number };
 };
+
+/**
+ * s472 (boot-math-port) — the host modules a checked Core's host-backed functions call (core.scrml
+ * Fn.host; SPEC §21.3.1, ruling:user-voice-scrml.md S472 "stdlib host `.js` output location": copied to
+ * `<outputDir>/_scrml/<module>/<file>`, imported from there by both artifacts). Each must be a file
+ * INSIDE its stdlib module's directory — symlinks followed (the compiler refused a path that climbs out,
+ * E-IMPORT-012; this keeps a link from doing it) — and export every name a wrapper calls as a function:
+ * §21.3.1 "The host module is loaded and named exports are extracted at compile time only". A missing
+ * file is E-IMPORT-006, a missing export E-IMPORT-004 (the §21.3 codes for a module / a name that is
+ * not there), each a diagnostic at the import — never a page that fails when it loads.
+ */
+async function hostFilesOf(core: any, stdlibRoot: string, diagnostics: Diagnostic[]): Promise<Array<{ src: string; out: string }>> {
+  const byOut = new Map<string, { src: string; out: string; module: string; file: string; names: Set<string> }>();
+  for (const f of core.fns ?? []) {
+    const h = f.host;
+    if (h === null || h === undefined) continue;
+    const out = `_scrml/${h.module}/${h.file}`;
+    let e = byOut.get(out);
+    if (e === undefined) {
+      e = { src: join(stdlibRoot, h.module, ...String(h.file).split("/")), out, module: String(h.module), file: String(h.file), names: new Set() };
+      byOut.set(out, e);
+    }
+    e.names.add(String(h.name));
+  }
+  const found: Array<{ src: string; out: string }> = [];
+  for (const e of [...byOut.values()].sort((a, b) => (a.out < b.out ? -1 : a.out > b.out ? 1 : 0))) {
+    const shownAt = `scrml:${e.module}/${e.file}`;
+    let real = "";
+    try {
+      real = realpathSync(e.src);
+    } catch {
+      diagnostics.push({ severity: "error", code: "E-IMPORT-006", message: `the host module \`${shownAt}\` (an \`import:host\` of \`scrml:${e.module}\`) does not exist in the stdlib (§21.3.1)`, file: e.src });
+      continue;
+    }
+    const moduleDir = realpathSync(join(stdlibRoot, e.module));
+    if (!real.startsWith(moduleDir + sep) || !statSync(real).isFile()) {
+      diagnostics.push({ severity: "error", code: "E-IMPORT-012", message: `the host module \`${shownAt}\` resolves outside the module's directory (a link) — a stdlib module's host file SHALL lie in its own directory (§21.3.1)`, file: e.src });
+      continue;
+    }
+    let ns: Record<string, unknown>;
+    try {
+      ns = await import(pathToFileURL(real).href);
+    } catch (err) {
+      diagnostics.push({ severity: "error", code: "E-IMPORT-006", message: `the host module \`${shownAt}\` does not load as a JavaScript module: ${String((err as Error)?.message ?? err)}`, file: e.src });
+      continue;
+    }
+    let ok = true;
+    for (const name of [...e.names].sort()) {
+      if (typeof ns[name] !== "function") {
+        ok = false;
+        diagnostics.push({ severity: "error", code: "E-IMPORT-004", message: `\`${name}\` is not a function exported by the host module \`${shownAt}\` (§21.3.1: an \`import:host\` binding names a named export of the host module)`, file: e.src });
+      }
+    }
+    if (ok) found.push({ src: real, out: e.out });
+  }
+  return found;
+}
 
 /**
  * Compile `entry` and the `.scrml` files it imports IN MEMORY — nothing is written. `overlay`
@@ -310,7 +372,7 @@ export async function compileSource(
   // s471: the `scrml:` stdlib modules the program imports join the compile as source (lowered.js
   // frontEndStdlib); one that does not compile on the bootstrap is withdrawn, and its import refused
   // by name (E-BOOTSTRAP-UNSUPPORTED at the import) — with WHY reported here, at its first error.
-  const { frontEndStdlib } = await import("../compiler/self-host-v2/slice-m2/lowered.js");
+  const { frontEndStdlib, STDLIB_ROOT } = await import("../compiler/self-host-v2/slice-m2/lowered.js");
   const fe = frontEndStdlib(boot.mods, files, toRel(entryAbs), { stdlibRoot: opts.stdlibRoot });
   const withdrawn: Diagnostic[] = [];
   for (const r of fe.stdlib.refused as Array<{ module: string; direct: boolean; diags: any[]; sources: Array<{ path: string; src: string; abs: string }> }>) {
@@ -352,7 +414,9 @@ export async function compileSource(
   for (const r of so.refused ?? []) if (!(out.refused ?? []).includes(r)) diagnostics.push(refusalDiag(String(r)));
   if (diagnostics.some((d) => d.severity === "error")) return result(false);
   const serverJs = typeof so.js === "string" && so.js !== "" ? (so.js as string) : undefined;
-  return result(true, { client: { html: out.html, js: out.js }, serverJs });
+  const hostFiles = await hostFilesOf(fe.core, opts.stdlibRoot ?? STDLIB_ROOT, diagnostics);
+  if (diagnostics.some((d) => d.severity === "error")) return result(false);
+  return result(true, { client: { html: out.html, js: out.js }, serverJs, hostFiles });
 }
 
 export async function compileFile(file: string, opts: { outDir?: string; rebuild?: boolean; log?: (s: string) => void; stdlibRoot?: string } = {}): Promise<CompileResult> {
@@ -377,6 +441,15 @@ export async function compileFile(file: string, opts: { outDir?: string; rebuild
   } else {
     // a previous compile of this program may have had a server half
     for (const f of ["program.server.js", "scrml-server-runtime.js", "runtime.js"]) rmSync(join(outDir, f), { force: true });
+  }
+  // s472 (boot-math-port): the stdlib host modules, at `_scrml/<module>/<file>` (SPEC §21.3.1). The
+  // `_scrml/` directory is the compiler's: what a previous compile left there goes first.
+  rmSync(join(outDir, "_scrml"), { recursive: true, force: true });
+  for (const h of c.hostFiles ?? []) {
+    const dst = join(outDir, ...h.out.split("/"));
+    mkdirSync(dirname(dst), { recursive: true });
+    copyFileSync(h.src, dst);
+    written.push(h.out);
   }
   return result(true, written, server);
 }
@@ -468,6 +541,12 @@ async function dev(file: string, opts: { outDir?: string; port: number; format: 
         return new Response(stream, { headers: { "Content-Type": "text/event-stream", "Cache-Control": "no-store" } });
       }
       if (url.pathname.startsWith("/_scrml/")) {
+        // s472 (boot-math-port): a stdlib host module the build copied there is a static file
+        // (SPEC §21.3.1); everything else under `/_scrml/` is a server-function route
+        const host = current?.written.includes(decodeURIComponent(url.pathname.slice(1))) ? resolve(current.outDir, decodeURIComponent(url.pathname.slice(1))) : null;
+        if (host !== null && current !== null && host.startsWith(current.outDir + sep) && existsSync(host)) {
+          return new Response(readFileSync(host), { headers: { "Content-Type": MIME[".js"] ?? "text/javascript", "Cache-Control": "no-store" } });
+        }
         if (server === null) return new Response("this program has no server functions", { status: 404 });
         return server.fetch(req);
       }

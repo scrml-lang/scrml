@@ -264,7 +264,11 @@ ${
         name: string, params: AParam[], ret: AType | not, body: ABlock,
         server: boolean, failable: boolean, err: AType | not,
     }
-    export type AImportName:struct = { nid: int, span: ASpan, name: string }
+    // s472 (boot-math-port) — `orig`: the name the imported module EXPORTS
+    // (`floor` in `import:host { floor as hfloor } …`); `name` the binding in
+    // this file's scope. Equal when no `as` is written (a plain import has no
+    // `as` form in the bootstrap, so they are always equal there).
+    export type AImportName:struct = { nid: int, span: ASpan, name: string, orig: string }
     // s472 — `host`: `not` for a plain `import { … } from "…"` (§21.3); the
     // host-tag (an identifier) of an `import:<tag> { … } from "…"` declaration
     // (§21.3.1). `top`: the

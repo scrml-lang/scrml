@@ -772,7 +772,20 @@ ${
     // Suspend at some depth (check.scrml C-S8), so a call of it is itself a
     // suspension point (a caller's Suspend `on: Call(fn, …)`). Attached by
     // lower from the effect summary's `waits` (design §2.5); check re-verifies.
-    export type Fn:struct       = { sym: Sym, params: Param[], body: Block, pure: boolean, err: Sym | not, waits: boolean }
+    // s472 (boot-math-port) — `host`: the function is HOST-BACKED (§21.3.1, the
+    // S472 wrapper rule — ruling:user-voice-scrml.md S472 "host function type,
+    // math API, remaining review debt" item 1): a stdlib function whose whole
+    // body was `return h(p1, …, pn);`, `h` an `import:host` binding of its file
+    // and `p1 … pn` its own parameters in order. Its signature IS the host
+    // function's type, so Core keeps the signature and NO body (`body` is
+    // empty, check.scrml C-H1): calling it calls the host export `name` of the
+    // module file `file` (relative to the stdlib module directory `module`,
+    // which the driver copies to `<outputDir>/_scrml/<module>/<file>`), and the
+    // value the host returns is DECODED against `ret` at that point (the F3
+    // §5.4 boundary decode — a mismatch is the E-HOST-VALUE-MISMATCH-RT trap).
+    // `not`: an ordinary scrml function.
+    export type HostFn:struct   = { module: string, file: string, name: string, ret: Type }
+    export type Fn:struct       = { sym: Sym, params: Param[], body: Block, pure: boolean, err: Sym | not, waits: boolean, host: HostFn | not }
     // s451 (U1a): a function route inference placed on the SERVER (§12.2) — its
     // body holds the program's SQL and no client state (check.scrml C-S1/C-S2);
     // `ret` is its declared return type (`not`: none written). Placement lives

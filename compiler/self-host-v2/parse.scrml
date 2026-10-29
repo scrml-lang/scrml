@@ -3836,7 +3836,7 @@ ${
                         t = diagAt(adv(ta), "E-PARSE-IMPORT", "expected the local name after `as`, found `" + loc.text + "`", loc)
                     }
                 }
-                names = names.concat([{ nid: t.nid, span: mkSpan(n.start, bound.end), name: bound.v }])
+                names = names.concat([{ nid: t.nid, span: mkSpan(n.start, bound.end), name: bound.v, orig: n.v }])
                 t = bumpId(t)
             } else if (!tk(n, ",")) {
                 t = diagAt(t, "E-PARSE-IMPORT", "expected an imported name, found `" + n.text + "`", n)

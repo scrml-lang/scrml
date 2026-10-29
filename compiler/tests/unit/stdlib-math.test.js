@@ -1,15 +1,22 @@
 /**
- * stdlib-math — unit tests for scrml:math (DD1 Fork 1, 1A)
+ * stdlib-math — unit tests for scrml:math (DD1 Fork 1, 1A; the S469 §41.18 API, shipped S472)
  *
  * Two surfaces:
  *   §A  Behavioral — import the real runtime shim (compiler/runtime/stdlib/math.js)
- *       and exercise every exported function. The shim is the sanctioned host
- *       Math.* / Number.* touch; these tests pin its behavior.
+ *       and exercise every exported function. The shim is impl#1's sanctioned host
+ *       Math.* / Number.* touch; these tests pin its behavior to SPEC §41.18.
  *   §B  Compile-level — an adopter `import { round } from 'scrml:math'` used in a
  *       pure `fn` AND a `function` compiles clean (no E-FN-003 / E-FN-004) and
  *       the server-side output rewrites `scrml:math` → `./_scrml/math.js`.
  *
- * The §A function set mirrors stdlib/math/index.scrml exports exactly.
+ * S472 (ruling:user-voice-scrml.md S472 "host function type, math API, remaining
+ * review debt" items 2–3): the API is S469's — `round(x, mode: Rounding)` with a
+ * REQUIRED mode, `floor` / `ceil` / `trunc` → int with the E-INT-CONVERSION-RT trap,
+ * whole-string `parseInt(s, radix)` / `parseFloat` / `toNumber` → `T | not`,
+ * two-argument `min` / `max`, and `minOf` / `maxOf` over a tape (`not` for an
+ * empty one). The §A function set mirrors stdlib/math/index.scrml exports exactly
+ * (the bootstrap's stdlib/math/host.js is pinned in
+ * compiler/self-host-v2/slice-m4/math-port-s472.test.js).
  */
 
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
@@ -23,19 +30,54 @@ import * as math from "../../runtime/stdlib/math.js";
 // §A — behavioral (against the real shim)
 // ---------------------------------------------------------------------------
 
-describe("scrml:math — round / floor / ceil", () => {
-  test("M1: round ties toward +Infinity", () => {
-    expect(math.round(2.4)).toBe(2);
-    expect(math.round(2.5)).toBe(3);
-    expect(math.round(-2.5)).toBe(-2);
+const trapCode = (f) => {
+  try {
+    f();
+    return null;
+  } catch (e) {
+    return e.code;
+  }
+};
+
+describe("scrml:math — Rounding + round(x, mode)", () => {
+  test("M1: the Rounding enum's unit variants are their names (impl#1's compiled enum shape)", () => {
+    expect([math.Rounding.HalfEven, math.Rounding.HalfUp, math.Rounding.Floor, math.Rounding.Ceil, math.Rounding.Trunc])
+      .toEqual(["HalfEven", "HalfUp", "Floor", "Ceil", "Trunc"]);
   });
+  test("M1b: .HalfEven picks the even neighbour of a tie", () => {
+    expect([math.round(2.5, "HalfEven"), math.round(-2.5, "HalfEven"), math.round(3.5, "HalfEven"), math.round(2.4, "HalfEven")]).toEqual([2, -2, 4, 2]);
+  });
+  test("M1c: .HalfUp goes away from zero (-2.5 → -3)", () => {
+    expect([math.round(2.5, "HalfUp"), math.round(-2.5, "HalfUp"), math.round(2.4, "HalfUp")]).toEqual([3, -3, 2]);
+  });
+  test("M1d: the directed modes", () => {
+    expect([math.round(-2.5, "Floor"), math.round(-2.5, "Ceil"), math.round(-2.5, "Trunc")]).toEqual([-3, -2, -2]);
+  });
+  test("M1e: the mode is REQUIRED — `round(x)` fails loudly, never a default", () => {
+    expect(() => math.round(2.5)).toThrow(/mode is required/);
+  });
+});
+
+describe("scrml:math — floor / ceil / trunc → int", () => {
   test("M2: floor toward -Infinity", () => {
     expect(math.floor(2.9)).toBe(2);
     expect(math.floor(-2.1)).toBe(-3);
   });
-  test("M3: ceil toward +Infinity", () => {
+  test("M3: ceil toward +Infinity; trunc toward zero; -0 is the int 0", () => {
     expect(math.ceil(2.1)).toBe(3);
     expect(math.ceil(-2.9)).toBe(-2);
+    expect(math.trunc(-2.9)).toBe(-2);
+    expect(Object.is(math.trunc(-0.5), 0)).toBe(true);
+  });
+  test("M3b: NaN, ±Infinity or a result outside ±(2^53−1) is the E-INT-CONVERSION-RT trap", () => {
+    for (const f of [math.floor, math.ceil, math.trunc, (x) => math.round(x, "HalfEven"), (x) => math.round(x, "HalfUp")]) {
+      for (const x of [NaN, Infinity, -Infinity, 2 ** 53, 1e300]) expect(trapCode(() => f(x))).toBe("E-INT-CONVERSION-RT");
+    }
+  });
+  test("M3c: the runtime shims' internal floor / ceil do NOT trap (auth.js / data.js / time.js keep their behaviour)", () => {
+    expect(math.floorUnchecked(NaN)).toBeNaN();
+    expect(math.ceilUnchecked(Infinity)).toBe(Infinity);
+    expect(math.floorUnchecked(2.9)).toBe(2);
   });
 });
 
@@ -49,18 +91,26 @@ describe("scrml:math — abs", () => {
   });
 });
 
-describe("scrml:math — min / max", () => {
-  test("M6: scalar args", () => {
-    expect(math.min(3, 1, 2)).toBe(1);
-    expect(math.max(3, 1, 2)).toBe(3);
-  });
-  test("M7: spread array (mirrors Math.min/max ...arr)", () => {
-    expect(math.min(...[5, 2, 8])).toBe(2);
-    expect(math.max(...[5, 2, 8])).toBe(8);
-  });
-  test("M8: two-arg pairwise (the common corpus shape)", () => {
+describe("scrml:math — min / max (two numbers), minOf / maxOf (a tape)", () => {
+  test("M6: two-arg pairwise", () => {
     expect(math.min(10, 4)).toBe(4);
     expect(math.max(10, 4)).toBe(10);
+  });
+  // §41.18 S472: "a third argument to `min` / `max` is `E-CALL-ARITY`" — impl#1 does not check call
+  // arity at compile time, so the shim REFUSES at run time instead of answering (review MED-1, S473:
+  // the frozen shim returned min(3,1,0) = 1, max(1,2,9) = 2).
+  test("M7: min / max take two numbers — a third (or one, or a spread tape) is E-CALL-ARITY, never an answer", () => {
+    expect(trapCode(() => math.min(3, 1, 0))).toBe("E-CALL-ARITY");
+    expect(trapCode(() => math.max(1, 2, 9))).toBe("E-CALL-ARITY");
+    expect(trapCode(() => math.min(3))).toBe("E-CALL-ARITY");
+    expect(trapCode(() => math.max(...[1, 2, 3, 4]))).toBe("E-CALL-ARITY");
+    expect(trapCode(() => math.min("3", 1))).toBe("E-CALL-ARGUMENT");
+  });
+  test("M8: minOf / maxOf over a tape; `not` (null) for an empty tape", () => {
+    expect(math.minOf([5, 2, 8])).toBe(2);
+    expect(math.maxOf([5, 2, 8])).toBe(8);
+    expect(math.minOf([])).toBe(null);
+    expect(math.maxOf([])).toBe(null);
   });
 });
 
@@ -76,58 +126,110 @@ describe("scrml:math — clamp", () => {
   });
 });
 
-describe("scrml:math — parseInt", () => {
-  test("M12: default radix 10", () => {
-    expect(math.parseInt("42")).toBe(42);
+describe("scrml:math — parseInt(s, radix): the WHOLE string → int | not", () => {
+  test("M12: base 10 and base 16, either letter case", () => {
+    expect(math.parseInt("42", 10)).toBe(42);
+    expect(math.parseInt("ff", 16)).toBe(255);
+    expect(math.parseInt("FF", 16)).toBe(255);
+    expect(math.parseInt("-1010", 2)).toBe(-10);
   });
-  test("M13: explicit radix 16", () => {
-    expect(math.parseInt("0xFF", 16)).toBe(255);
+  test("M13: no `0x` prefix, no trimming, no `+`, no trailing text", () => {
+    for (const s of ["0xFF", " 10", "+1", "10px", "", "-"]) expect(math.parseInt(s, 16)).toBe(null);
   });
-  test("M14: leading-numeric prefix", () => {
-    expect(math.parseInt("10px")).toBe(10);
+  test("M14: a digit outside the radix, a radix outside 2–36, a value past 2^53−1 → not", () => {
+    expect(math.parseInt("2", 2)).toBe(null);
+    expect(math.parseInt("1", 37)).toBe(null);
+    expect(math.parseInt("9007199254740992", 10)).toBe(null);
+    expect(math.parseInt("9007199254740991", 10)).toBe(9007199254740991);
   });
-  test("M15: non-numeric → NaN", () => {
-    expect(math.isNaN(math.parseInt("abc"))).toBe(true);
+  test("M15: ASCII digits only (no case-mapped look-alike)", () => {
+    expect(math.parseInt("K", 36)).toBe(null);
   });
   test("M16: no implicit-octal surprise on leading zero", () => {
-    expect(math.parseInt("010")).toBe(10);
+    expect(math.parseInt("010", 10)).toBe(10);
   });
 });
 
-describe("scrml:math — parseFloat", () => {
-  test("M17: decimal", () => {
+describe("scrml:math — parseFloat / toNumber: the whole string → number | not (as number.parse)", () => {
+  test("M17: decimal and exponent", () => {
     expect(math.parseFloat("3.14")).toBe(3.14);
+    expect(math.parseFloat("-1e3")).toBe(-1000);
   });
-  test("M18: trailing unit", () => {
-    expect(math.parseFloat("1.5kg")).toBe(1.5);
+  test("M18: a trailing unit is `not` (no leading-prefix parse)", () => {
+    expect(math.parseFloat("1.5kg")).toBe(null);
   });
-  test("M19: non-numeric → NaN", () => {
-    expect(math.isNaN(math.parseFloat("abc"))).toBe(true);
+  test("M19: non-numeric → not", () => {
+    expect(math.parseFloat("abc")).toBe(null);
   });
-});
-
-describe("scrml:math — toNumber", () => {
-  test("M20: numeric string", () => {
+  test("M20: toNumber reads the same way", () => {
     expect(math.toNumber("42")).toBe(42);
     expect(math.toNumber("3.14")).toBe(3.14);
   });
-  test("M21: empty string → 0 (whole-value coercion, unlike parseInt)", () => {
-    expect(math.toNumber("")).toBe(0);
+  test("M21: `toNumber(\"\")` is not (S440 dpa-037 Call 4)", () => {
+    expect(math.toNumber("")).toBe(null);
   });
-  test("M22: non-numeric → NaN", () => {
-    expect(math.isNaN(math.toNumber("abc"))).toBe(true);
+  test("M22: non-numeric / non-finite → not", () => {
+    expect(math.toNumber("abc")).toBe(null);
+    expect(math.toNumber("1e400")).toBe(null);
   });
 });
 
 describe("scrml:math — isNaN (Number.isNaN, no coercion)", () => {
   test("M23: NaN value → true", () => {
-    expect(math.isNaN(math.toNumber("abc"))).toBe(true);
+    expect(math.isNaN(NaN)).toBe(true);
   });
   test("M24: real number → false", () => {
     expect(math.isNaN(42)).toBe(false);
   });
-  test("M25: numeric string is NOT coerced → false", () => {
-    expect(math.isNaN("42")).toBe(false);
+  // §41.18 S472: `isNaN(x: number) -> bool` — a string is not a call the API defines.
+  test("M25: a non-number is refused (E-CALL-ARGUMENT), never coerced", () => {
+    expect(trapCode(() => math.isNaN("42"))).toBe("E-CALL-ARGUMENT");
+  });
+});
+
+// S473 review MED-1: impl#1 has no call-arity / argument-type check, so every public shim export
+// refuses a call shape the S469 API does not define, at run time, instead of picking an answer.
+describe("scrml:math — a call shape the S469 API does not define is refused at run time", () => {
+  // §41.18: "`radix` is REQUIRED in the S469 signature `parseInt(s: string, radix: int)`; base-10 text
+  // is `int.parse(s)` … An omitted radix is `E-CALL-ARITY`." So `parseInt("42")` is NOT 42 and NOT
+  // `not` (the frozen shim returned null) — it is refused.
+  test("M26: parseInt without a radix is E-CALL-ARITY; parseInt(\"42\", 10) is 42", () => {
+    expect(trapCode(() => math.parseInt("42"))).toBe("E-CALL-ARITY");
+    expect(math.parseInt("42", 10)).toBe(42);
+    expect(trapCode(() => math.parseInt(42, 10))).toBe("E-CALL-ARGUMENT");
+    expect(trapCode(() => math.parseInt("42", "10"))).toBe("E-CALL-ARGUMENT");
+    // a radix that is a number outside 2–36 stays a failed parse (§41.18 "PA reading": never a trap)
+    expect(math.parseInt("1", 1.5)).toBe(null);
+  });
+  // §41.18: "`toNumber(s: string) -> number | not` … Whole-string parse, as `number.parse`" (struck:
+  // "Whole-value coercion (`Number(value)`)"). `toNumber(5)` is not a call the API defines: refused
+  // (the frozen shim returned null, the pre-S469 shim returned 5).
+  test("M27: toNumber / parseFloat of a non-string is E-CALL-ARGUMENT", () => {
+    expect(trapCode(() => math.toNumber(5))).toBe("E-CALL-ARGUMENT");
+    expect(trapCode(() => math.parseFloat(5))).toBe("E-CALL-ARGUMENT");
+    expect(trapCode(() => math.toNumber())).toBe("E-CALL-ARITY");
+    expect(math.toNumber("5")).toBe(5);
+  });
+  test("M28: every one-number member refuses a wrong count and a non-number", () => {
+    for (const f of [math.floor, math.ceil, math.trunc, math.abs, math.isNaN]) {
+      expect(trapCode(() => f())).toBe("E-CALL-ARITY");
+      expect(trapCode(() => f(1, 2))).toBe("E-CALL-ARITY");
+      expect(trapCode(() => f("1"))).toBe("E-CALL-ARGUMENT");
+    }
+    expect(trapCode(() => math.round(2.5))).toBe("E-CALL-ARITY");
+    expect(trapCode(() => math.round(2.5, "HalfUp", 1))).toBe("E-CALL-ARITY");
+    expect(trapCode(() => math.clamp(1, 2))).toBe("E-CALL-ARITY");
+    expect(trapCode(() => math.clamp(1, "0", 2))).toBe("E-CALL-ARGUMENT");
+  });
+  test("M29: minOf / maxOf take one tape of numbers", () => {
+    expect(trapCode(() => math.minOf(3, 1))).toBe("E-CALL-ARITY");
+    expect(trapCode(() => math.maxOf("abc"))).toBe("E-CALL-ARGUMENT");
+    expect(trapCode(() => math.minOf(null))).toBe("E-CALL-ARGUMENT");
+    expect(trapCode(() => math.maxOf([1, "2"]))).toBe("E-CALL-ARGUMENT");
+  });
+  test("M30: the runtime's internal unchecked min / max keep their behaviour (data.js / auth.js)", () => {
+    expect(math.minUnchecked(3, 1)).toBe(1);
+    expect(math.maxUnchecked(0, -2)).toBe(0);
   });
 });
 
@@ -154,9 +256,9 @@ describe("§B: scrml:math compile-level", () => {
   test("M26: round() inside a pure `fn` body compiles clean — no E-FN-003 / E-FN-004", () => {
     const src = fx("m26/app.scrml", [
       "${",
-      "    import { round, abs } from 'scrml:math'",
+      "    import { round, Rounding, abs } from 'scrml:math'",
       "    fn netCents(dollars) {",
-      "        return round(abs(dollars) * 100)",
+      "        return round(abs(dollars) * 100, .HalfUp)",
       "    }",
       "    server function _use() { return netCents(1.255) }",
       "}",
@@ -229,4 +331,26 @@ describe("§B: scrml:math compile-level", () => {
     );
     expect(missing).toEqual([]);
   });
+});
+
+// ---------------------------------------------------------------------------
+// §C — impl#1 keeps compiling the stdlib module itself (S472: the port must compile on BOTH
+// implementations). stdlib/math/index.scrml — the §66 dialect, `import:host`, the S469 API —
+// compiles clean on impl#1 in place (its `import:host` is admitted: the file is the compiler's own
+// stdlib, compiler/src/host-import.js), in the default and the library mode.
+// ---------------------------------------------------------------------------
+describe("§C: impl#1 compiles stdlib/math/index.scrml itself", () => {
+  const SRC = join(import.meta.dir, "..", "..", "..", "stdlib", "math", "index.scrml");
+  for (const mode of [undefined, "library"]) {
+    test(`M29: ${mode ?? "default"} mode — no error`, () => {
+      const result = compileScrml({
+        inputFiles: [SRC],
+        outputDir: join(TMP, `m29-${mode ?? "default"}`, "dist"),
+        write: true,
+        log: () => {},
+        ...(mode ? { mode } : {}),
+      });
+      expect((result.errors || []).map((e) => e.code)).toEqual([]);
+    });
+  }
 });

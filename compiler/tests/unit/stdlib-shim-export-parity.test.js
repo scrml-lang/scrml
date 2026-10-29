@@ -56,6 +56,13 @@ const SHIM_ROOT = resolve(here, "../../runtime/stdlib");
 // the MCP sidecar, not by scrml source. Each entry is a named exception, never a
 // pattern: a new shim export must be declared in the `.scrml` source or listed here.
 const SHIM_ONLY_EXPORTS = {
+  // S472 (s472-boot-math-port): the runtime shims' INTERNAL non-trapping host floor / ceil —
+  // auth.js / data.js / time.js import them; the §41.18 `floor` / `ceil` trap (E-INT-CONVERSION-RT)
+  // and those callers' behaviour is unchanged. Not part of the scrml:math API (not in index.scrml),
+  // so an adopter import of either is E-IMPORT-004. S473 (review MED-1): `minUnchecked` /
+  // `maxUnchecked` likewise — the public `min` / `max` now refuse a call shape the S469 API does not
+  // define, and data.js / auth.js keep the raw host min / max.
+  "scrml:math": ["floorUnchecked", "ceilUnchecked", "minUnchecked", "maxUnchecked"],
   "scrml:mcp": [
     "install", "uninstall", "loadSidecars", "stopWatchers", "getCurrentVariant",
     "getFormStatus", "getChannelState", "_stateForTests", "_resetForTests",

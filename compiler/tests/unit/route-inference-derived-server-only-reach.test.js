@@ -592,10 +592,10 @@ ${IMPORT}
 
   test("NEGATIVE — a client-safe module in the SAME nested position does not fire", () => {
     const source = `<program>
-\${ import { round } from 'scrml:math' }
+\${ import { round, Rounding } from 'scrml:math' }
 <pw> = 1.5
 <items> = [1, 2]
-<div>\${ for (let it of @items) { lift <div>\${ const <h> = round(@pw) }<span>\${@h}</span></div> } }</div>
+<div>\${ for (let it of @items) { lift <div>\${ const <h> = round(@pw, .HalfUp) }<span>\${@h}</span></div> } }</div>
 </program>`;
     expect(errorsWithCode(runRIOn(source).out, CODE).length).toBe(0);
   });
