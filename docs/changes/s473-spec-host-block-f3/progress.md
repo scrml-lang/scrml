@@ -52,3 +52,10 @@
 - L4: rule 2 admits blank lines.
 - N2: rule 8 + the E-HOST-TARGET-SINK row add setAttribute / setAttributeNS / toggleAttribute with a non-literal, `srcdoc` or `on…` name; URL-valued literal names noted in g-spec-host-target-url-sinks-unjudged-s473.
 - Gates: regen-spec-index --check, s34-census --check-new (37 rows), snippet-gate, claim-gate, severity --check, delta-lint, conflict-marker: PASS; hook on commit.
+
+## 2026-10-29 — round 3: owner rulings (S473 "owner questions round 2, PA recs", items 3, 7, 8)
+- Item 3 ("Server-side `<host>` bindings: allowed only in compiler-bundled stdlib modules") -> §21.3.3 rule 10 rewritten as a normative rule marked (S473 ruling); refusal reuses E-ROUTE-002 / E-ROUTE-005 (no new code); E-ROUTE-002 §34 row gains a Nominal ALSO clause. The server-side ⚑ OPEN is replaced by a ruled paragraph; rule 1, the Relation bullet, the provenance and the §21.3.1.1 supersession pointer updated.
+- Item 7 (Q10) -> rule 16: "DOM members stay open (S473 ruling, design Q10). The DOM element types SHALL NOT become closed `:host` handles".
+- Item 8 -> rule 9's E-HOST-DUPLICATE fold relabelled "ratified".
+- Gap g-spec-host-block-server-side-bindings-s473 RESOLVED.
+- Gates: regen-spec-index --check (index unchanged), s34-census --check-new (38 rows) PASS, claim-gate PASS, snippet drift PASS.

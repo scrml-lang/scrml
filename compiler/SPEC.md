@@ -24818,8 +24818,9 @@ ruled; on the bootstrap it propagates as a non-`!` runtime error, as a trap does
 **Superseded by `<host>` when it is built.** The DRAFT §21.3.3 `<host>` block is the ruled destination of this
 form. §21.3.3 "Relation to the `import:host` wrapper form" states the mechanical rewrite (one wrapper becomes one
 `<host src=>` binding line with the wrapper's signature), what a stdlib `<host src=>` keeps from this section (the
-output location, `E-IMPORT-012`, a trap-coded throw), and which modules keep this form until server-side bindings
-are ruled.
+output location, `E-IMPORT-012`, a trap-coded throw). Server-side bindings are allowed in compiler-bundled stdlib
+modules (§21.3.3 rule 10, S473 ruling), so a server-reached module can move too. A `.ts` / `.mts` host module keeps
+this form.
 
 **Implementation status.** Emitted by the bootstrap: the wrapper rule and `E-HOST-BINDING-USE` at
 `compiler/self-host-v2/analyze.scrml` (hostWrappers, resolveHostBinding), `E-IMPORT-012` there (checkHostImport)
@@ -24868,9 +24869,10 @@ A module's bindings reach scrml source through exactly two forms: the static `im
 > wrappers rewritten mechanically."*) and its closing note (`pure` is deprecated, §33; a pure binding is spelled
 > `fn`) · ruling:user-voice-scrml.md S472 "⭐ RULED — stdlib host `.js` output location". Design and rationale:
 > dd:`scrml-support/docs/deep-dives/typed-host-binding-f3-design-2026-10-27.md` (§5 the shape, §7 the codes, §10 the
-> owner questions). Of the design's unruled defaults, Q7, Q8, Q9, Q11 and Q12 are taken here; Q6 (client-only) is
-> taken for adopter files and left ⚑ OPEN for stdlib files; Q10 (DOM types as closed handles) is NOT taken (rule
-> 16). **Closes:** `g-spec-typed-host-binding-declaration-undesigned-s471` (SPEC drafted; the build is
+> owner questions). Of the design's unruled defaults, Q7, Q8, Q9, Q11 and Q12 are taken here. Q6 and Q10 are
+> ruled: ruling:user-voice-scrml.md S473 "⭐ RULED — S473 owner questions round 2, PA recs" — *"your recs"* — item 3 (*"Server-side `<host>` bindings: allowed only in compiler-bundled
+> stdlib modules"*, rule 10) and item 7 (*"DOM members stay open (Q10 — DOM types do NOT become closed `:host`
+> handles)"*, rule 16); item 8 ratifies *"E-HOST-DUPLICATE folded into E-SCOPE-010"* (rule 9). **Closes:** `g-spec-typed-host-binding-declaration-undesigned-s471` (SPEC drafted; the build is
 > `g-boot-host-block-f3-unbuilt-s473`). **Direction of change:** newly-accepting (the element `<host>` and the type
 > kind `:host`); `W-HOST-UNTYPED-CALL` is newly-warning and reversible. A program that writes no `<host>` changes
 > meaning in no way: no rule here applies to a value whose type is not a user-declared `:host` type or a `<host>`
@@ -24922,8 +24924,8 @@ type Sighting:struct = { isIntersecting: bool, intersectionRatio: number }
 *The element.*
 
 1. `<host>` SHALL appear at file top level or as a direct child of `<program>`. A `<host>` anywhere else SHALL be
-   `E-HOST-BINDING-PLACEMENT`. It emits no HTML. In an adopter file it emits no server code (rule 10; for a stdlib
-   module file see the ⚑ after the wrapper-form relation).
+   `E-HOST-BINDING-PLACEMENT`. It emits no HTML. It emits server code only in a compiler-bundled stdlib module
+   file (rule 10).
 2. Each body line SHALL be a blank line, a `//` comment, a `host-type` line, a `host-binding` line, or a
    continuation line beginning with `=`. Any other line SHALL be `E-HOST-BINDING-MALFORMED`. (A binding spelled with the deprecated
    `pure` modifier is such a line; a pure binding is spelled `fn`, §33.)
@@ -24984,13 +24986,19 @@ type Sighting:struct = { isIntersecting: bool, intersectionRatio: number }
    like any call: wrong arity is `E-CALL-ARITY`, a wrong argument type is `E-TYPE-031`. It is NOT an `import:host`
    binding: the §21.3.1.1 wrapper rule and `E-HOST-BINDING-USE` do not apply to it. A binding name that is also
    bound in its file as a value (by another binding, a declaration, a plain `import`, or an `import:host`) SHALL be
-   `E-SCOPE-010` (§7.6), not `W-IMPORT-001` (§41.7). *(PA reading, extending S473 item 2 from `import:host` to
-   `<host>` bindings; the design's `E-HOST-DUPLICATE` is not minted.)* A `host-type` name is a type name, and a
+   `E-SCOPE-010` (§7.6), not `W-IMPORT-001` (§41.7). *(Extends S473 item 2 from `import:host` to `<host>`
+   bindings; the design's `E-HOST-DUPLICATE` is not minted — ratified, ruling:user-voice-scrml.md S473 "⭐ RULED — S473 owner questions round 2, PA recs" item 8.)* A `host-type` name is a type name, and a
    type-name collision follows the type-declaration rules (§14), not this rule.
-10. In an adopter file, a binding is client-only. A function whose body calls one is client-only for route
-    analysis (§12.4), as a body that reads `document` or `window` is: a server-placed function reaching one SHALL
-    be `E-ROUTE-002`, and a body that also needs the server SHALL be `E-ROUTE-005`. (For a stdlib module file, see
-    the ⚑ OPEN below.)
+10. **Side (S473 ruling).** Server-side `<host>` bindings SHALL be allowed only in a compiler-bundled stdlib
+    module file (rule 3's sense: shipped with the compiler and inside the §22.13 `host-import` allow-list, not a
+    module under `vendor/scrml/`). In any other file, a binding is client-only: a function whose body calls one is
+    client-only for route analysis (§12.4), as a body that reads `document` or `window` is, so a server-placed
+    function reaching one SHALL be `E-ROUTE-002`, and a single body that also needs the server SHALL be
+    `E-ROUTE-005`. In a compiler-bundled stdlib module file, a binding MAY be reached from client and server code
+    alike; its `src=` host module is imported by both artifacts from `<outputDir>/_scrml/<module>/<file>`, where
+    §21.3.1.1 lands a stdlib host module. *(ruling:user-voice-scrml.md S473 "⭐ RULED — S473 owner questions round 2, PA recs" item 3 — *"Server-side `<host>` bindings: allowed only
+    in compiler-bundled stdlib modules"*. Direction of change: newly-accepting for compiler-bundled stdlib files;
+    no change elsewhere.)*
 11. A binding declared `fn` is a claim that the call is deterministic and has no effect, so a `fn` (§48) MAY call
     it. Calling a binding not declared `fn` from a `fn` SHALL be `E-FN-003`. A `fn` binding whose target is rooted
     at `window`, `document` or `navigator` SHALL be `E-HOST-TARGET-SHAPE` (those reads are the `E-FN-004` class).
@@ -25064,11 +25072,10 @@ type Sighting:struct = { isIntersecting: bool, intersectionRatio: number }
     to `Element`), and may be declared as a binding's result (rule 13). Rule 15 does NOT apply to them: member
     access on a DOM element type (`@canvasEl.getContext('2d')`, `@noteBox.focus()`) is unchanged from §6.7.1b and
     stays untyped. Rule 22 does not lint it.
-    ⚑ **OPEN (design Q10, unruled): should the DOM element types become closed handles?** That would make member
-    access on every `ref=` cell `E-HOST-HANDLE-MEMBER`. It would reject existing SPEC examples (§6.7.1a, §6.7.9,
-    §6.7.1b (c)) and adopter programs that write no `<host>`, so it would be newly-rejecting. **Recommendation:
-    keep DOM members open.** Typed DOM access is F7's WebIDL stdlib (a separate item, S471), declared through
-    `<host>`, and that is the right place to type it.
+    **DOM members stay open (S473 ruling, design Q10).** The DOM element types SHALL NOT become closed `:host`
+    handles: `E-HOST-HANDLE-MEMBER` never applies to them. Typed DOM access is F7's WebIDL stdlib (a separate
+    item, S471), declared through `<host>`. *(ruling:user-voice-scrml.md S473 "⭐ RULED — S473 owner questions round 2, PA recs" item 7 — *"DOM members stay open (Q10 — DOM types do
+    NOT become closed `:host` handles)"*.)*
 
 *Waiting, failure and callbacks.*
 
@@ -25130,24 +25137,17 @@ module's host functions move to it as follows, and the wrapper form is supersede
 - Each `import:host` binding and its one wrapper become one binding line in a `<host src="…">` naming the same host
   file, with the wrapper's signature (its name, parameters and return type; `fn` if the wrapper is a `fn`). The
   `import:host` declaration and the wrapper are deleted. Client callers are unchanged, because they called the
-  wrapper by that name and now call the binding by it. Server callers are unchanged only under the ⚑ below.
+  wrapper by that name and now call the binding by it. Server callers are unchanged too, because a compiler-bundled stdlib binding may be reached from server code (rule 10).
 - In a compiler-bundled stdlib module file (one shipped with the compiler and inside the §22.13 `host-import` allow-list; NOT a module under `vendor/scrml/`, though `scrml:` also resolves there), `src=` resolves and lands as §21.3.1.1 states for that module's host module
   (`<outputDir>/_scrml/<module>/<file>`, `E-IMPORT-012` outside the module directory), not under §21.3's
   `_scrml_local/` copy rule. It may use the compile-time loader (rule 3).
 - A stdlib host module that throws an error carrying a §19.17 trap code (§21.3.1.1) still raises that trap. It is
   not `HostError` and not `E-HOST-THROW-RT`.
 
-⚑ **OPEN — server-side bindings in stdlib module files (owner question; `g-spec-host-block-server-side-bindings-s473`).**
-The ruled destination conflicts with an unruled default. S472 rules the destination *"stdlib host files declared
-through `<host>` (F3/F7), wrappers rewritten mechanically"*. But the design's Q6 default (*"client-only in v1"*),
-taken by rule 10, would stop any stdlib module whose host functions are called from server code (`scrml:math`
-runs on the server) from making that move. `<host src=>` also admits `.js` / `.mjs` only, while `import:host`
-admits `.ts` / `.mts`. Until the owner rules, such a module keeps the wrapper form, and rule 10 is stated for
-adopter files only. **Recommendation:** a `<host src=…>` inside a compiler-bundled stdlib module file (rule 3's sense; not
-`vendor/scrml/`) is isomorphic. Its host
-module is emitted into BOTH artifacts at `<outputDir>/_scrml/<module>/<file>`, as §21.3.1.1 already lands it, and
-its bindings are not client-only. An adopter `<host>` stays client-only (rule 10). A `.ts` host module stays on
-`import:host`. Admitting these is a widening.
+**Server-side bindings (S473 ruling — closes `g-spec-host-block-server-side-bindings-s473`).** Rule 10 states
+the ruling: a compiler-bundled stdlib module may move its server-reached host functions from the wrapper form to
+`<host src=>`, as the S472 destination says; an adopter `<host>`, and a `vendor/scrml/` module's, stays client-only.
+A `.ts` / `.mts` host module still has only `import:host`, because `<host src=>` admits `.js` / `.mjs` (rule 3).
 
 **Error codes:**
 
@@ -29344,7 +29344,7 @@ are REFUSED by impl#1, `E-IMPL1-RULED-FORM-UNSUPPORTED` (its row lands with that
 | E-CG-016 | §47 | A page-local `type X:enum` is referenced inside a server-boundary function body (so it needs a runtime `const X = Object.freeze({...})` in the server bundle, per §14.4 / Bug-51), but the chosen name `X` collides with another top-level binding the compiler injects into the server bundle — most commonly the `import { SQL } from "bun"` runtime handle (and its `_scrml_sql*` DB handles) emitted for a page that uses a `<db>` / `<program db=>` scope and a `?{}` query. The generated server bundle cannot declare `X` twice; without this guard the duplicate declaration surfaces downstream as a cryptic `E-CODEGEN-INVALID-LOGIC` (`Identifier 'X' has already been declared`) on otherwise-valid scrml. Resolution: rename the enum to a name that does not clash with a compiler-reserved server binding (e.g. `SQL` is reserved when the page uses a `<db>` / `?{}` query). The sibling of E-CG-012 (author identifier vs the compiler-reserved `_`-prefix pattern), in the server-bundle-injected-binding direction. (Catalog addition giti-bug51-server-bundle-enum-emission-2026-06-23; emitted by codegen at `compiler/src/codegen/emit-server.ts:generateServerJs`.) | Error |
 | E-CG-018 | §22.10 | Two distinct source files in one compilation hash to the SAME chunk-namespace token (the §22.10 `scopeId` contract — deterministic + document-unique). The token map is required to be INJECTIVE over the build: a shared token silently reinstates the cross-chunk clobber the namespace exists to prevent — two units' emitted node ids, `<each>`-mount fences and reactive cell keys collide at runtime. FNV-1a is 32-bit (~1.2e-4 birthday probability near a thousand units), so this is a rare-but-real backstop, not dead code; §47.1.5's E-CG-010 is documented as not covering this call site, so codegen asserts token-distinctness separately here. The sibling of E-CG-015 (output-path collision) in the id/cell-namespace direction. Resolution: rename one of the colliding source files. (Catalog addition chunk-namespacing BUG-6 S283; emitted by codegen at `compiler/src/codegen/index.ts` via `assertChunkTokensDistinct`.) | Error |
 | E-CG-TILDE-UNRESOLVED | §32, §32.2, §47 | `provenance: ruling:user-voice-scrml.md S397 "mint the code"` **Codegen: a `~` read reached code generation with no accumulator slot to resolve it to.** §32's `~` names the value produced by the immediately preceding statement of the same logic body; reaching the emitter with no slot means no such producer was found, so there is no value to emit. Resolution: give `~` a producer in the SAME body immediately before the read, or capture the value in a named binding (`let v = <expr>`) and read that name instead. ⚑ **THIS IS A CODEGEN-STAGE CODE AND IT IS DELIBERATELY NOT `E-TILDE-001`.** E-TILDE-001 (§32.5) is a TYPE-SYSTEM diagnostic whose fire site lands with the §32 enforcement work; firing it from codegen would give one §34 row two fire stages and make *which stage owns this condition* unanswerable from this catalog — the §34.0 defect one level up. The two are also not the same claim: E-TILDE-001 asserts a PROVEN-uninitialized read, this code asserts only that codegen had no slot at this read, which is strictly weaker and stage-local. The emitted message states that distinction explicitly and claims nothing about what the type system checked, because it checked nothing. ⚑ **WHAT IT REPLACED, AND WHY THE DIRECTION IS THE REVERSIBLE ONE.** Until S397 this condition emitted `null /* ~ orphaned — codegen-fallback */` and the build stayed GREEN — fail-OPEN by construction, since a `~` reaching that point is by construction one the analysis could not resolve, so emitting a value asserted the opposite of what the compiler had just discovered. The change is **newly-REJECTING** (base §8): programs that compiled now fail, which is the point — they were compiling to a silent `null`. It owes a MEASURED migration and got one: an output-side census over all 2,383 corpus `.scrml` files, counting the marker in every emitted artifact, returned **two** source files and four sites, both migrated with the landing. ⚑ **A code with zero `-neg` cases has never been proven to fire — which is exactly how E-TILDE-001/002 sat dead while two normative sections contradicted each other.** This one lands with `conformance/cases/control-flow/ctrl-028-arm-body-tilde-read-orphan-neg`, which pins the code, its severity AND its exact cardinality, verified by flipping the emitter off and watching the case go red. Does NOT fire when the read resolves — an in-arm `~` whose enclosing body mentions `~` elsewhere DOES reach the enclosing slot and is silent. ⚑ **S457: the guarantee is now filesystem-level too.** A compile carrying this (or any) Error writes no artifact at all (§2.2.1, ruling S457 "1a"); until S457 the artifacts were written with the placeholder in them while the compile exited 1. The placeholder is emitted as syntactically valid JS on purpose, so this diagnostic is never buried under the acorn gate's generic `E-CODEGEN-INVALID-LOGIC` "compiler defect" framing. ⚑ **DIAGNOSTIC POSITION IS PARTIAL.** `spanFromEstree` hard-codes `line: 1, col: 1`, so line/col is recovered from the span's byte offset against the §20.6 per-file source registry. MEASURED on a three-orphan file: 1 of 3 points at the exact offending statement and 2 at a real-but-wrong line, where before all 3 reported `1:1`. The residual 2 carry an ENCLOSING node's offset, an upstream span defect no line/col resolution can repair. *(Catalog addition S397 — the fail-closed `~` codegen floor, dpa-040 step 1; emitted at `compiler/src/codegen/emit-expr.ts` `emitIdent`, drained into the run's error list by `compiler/src/codegen/index.ts` `runCG`.)* | Error |
-| E-ROUTE-002 | §12.4 | A server-classified function's static call graph contains a direct or transitive call to a client-only function — one route analysis places exclusively on the client because it accesses a DOM-only global (`document` / `window`), **or (S451 R2) because it reads or writes a reactive cell** (`@var`, derived, §52 cell, compound / engine cell; not `@currentUser` / `@session`, not a channel cell). The R2 limb: ruling:user-voice-scrml.md S451 "yes on all seven" — supersedes this row's DOM-globals-only narrowing; newly-rejecting; **Nominal / not yet emitted by impl#1** (frozen, `g-impl1-route-002-reactive-cell-chain-s451`); lands with the bootstrap. The message identifies the server fn, the client-only callee, and the call chain. The DOM limb is ENFORCED S263 (was SPEC-only; wired in route-inference as the mirror of the §12.2 server-escalation triggers — a client-pin classification + call-graph reject). Detection is deliberately conservative: DOM roots `document`/`window` only (not `navigator`/`localStorage`/`sessionStorage`, which a host may provide), ExprNode-only (string-literal-safe), scope-aware (a local/param/import of the name is a domain object, not the global). (Catalog addition S84 Wave 2 #5; full prose at §12.4.) | Error |
+| E-ROUTE-002 | §12.4 | A server-classified function's static call graph contains a direct or transitive call to a client-only function — one route analysis places exclusively on the client because it accesses a DOM-only global (`document` / `window`), **or (S451 R2) because it reads or writes a reactive cell** (`@var`, derived, §52 cell, compound / engine cell; not `@currentUser` / `@session`, not a channel cell). The R2 limb: ruling:user-voice-scrml.md S451 "yes on all seven" — supersedes this row's DOM-globals-only narrowing; newly-rejecting; **Nominal / not yet emitted by impl#1** (frozen, `g-impl1-route-002-reactive-cell-chain-s451`); lands with the bootstrap. The message identifies the server fn, the client-only callee, and the call chain. The DOM limb is ENFORCED S263 (was SPEC-only; wired in route-inference as the mirror of the §12.2 server-escalation triggers — a client-pin classification + call-graph reject). Detection is deliberately conservative: DOM roots `document`/`window` only (not `navigator`/`localStorage`/`sessionStorage`, which a host may provide), ExprNode-only (string-literal-safe), scope-aware (a local/param/import of the name is a domain object, not the global). (Catalog addition S84 Wave 2 #5; full prose at §12.4.) ALSO (DRAFT §21.3.3 rule 10, S473 ruling): a server-classified function reaching a `<host>` binding declared outside a compiler-bundled stdlib module file — **Nominal / not yet emitted** for that trigger (`g-boot-host-block-f3-unbuilt-s473`). Provenance: ruling:user-voice-scrml.md S473 "⭐ RULED — S473 owner questions round 2, PA recs" item 3. | Error |
 | E-ROUTE-003 | §12.5 | A server function's return type is not JSON-serializable (functions, markup / DOM nodes, snippets, engines, state objects). Server-function return values cross the network boundary; only JSON-shaped values can be transmitted. ENFORCED S179 (was SPEC-only; now wired in the type pass). (Catalog addition S84 Wave 2 #5; full prose at §12.5.3.) | Error |
 | E-ROUTE-004 | §12.5 | A server function's PARAMETER type is not JSON-serializable (a function, markup / `html-element`, snippet, engine / machine, or live state object — possibly nested in a struct field, array element, union member, or map value). Arguments to a server function cross the client→server network boundary and are serialized as JSON (§12.3); a non-serializable value cannot be transmitted. The companion of E-ROUTE-003 in the parameter direction. (Catalog addition S179; full prose at §12.5.3.) | Error |
 | E-ROUTE-005 | §12.4 | A SINGLE function's own body accesses BOTH a server-only resource (a §12.2 escalation trigger — `?{}` SQL, a protected field, a server-only import) AND a client-only DOM global (`document` / `window`), making it *unplaceable*: route analysis can assign it to neither side (a server context has no DOM global; a client context cannot reach the server-only resource). Distinct from E-ROUTE-002 (a server fn *calling* a separate client-only fn) — the contradiction is inside one function body. The message identifies the fn, the server trigger, and the client access, and suggests splitting it (server-only work in a server fn; DOM access in a client fn that calls the server one). Without this the DOM code silently shipped server-side (runtime `ReferenceError`). (Catalog addition S263; full prose at §12.4.) | Error |
