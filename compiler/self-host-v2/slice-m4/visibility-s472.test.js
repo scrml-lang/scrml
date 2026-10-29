@@ -307,7 +307,9 @@ describe("an import binds a name in file scope", () => {
     expect(src.slice(r.diags[0].span.start, r.diags[0].span.end)).toBe("twice");
   });
 
-  test("two imports of one name: the later wins, with W-IMPORT-001 (§41.7)", async () => {
+  // s473 r2 #5 (narrowed to exported names): two user files EXPORTING one name are E-SCOPE-010 at
+  // the later file; the §41.7 W-IMPORT-001 still reports the second import beside it.
+  test("two imports of one name from two user files that both export it: E-SCOPE-010 (§7.6, S473), with W-IMPORT-001 (§41.7)", () => {
     const L2 = { path: "lib2.scrml", src: `\${\n    export fn twice(n: int) -> int {\n        return n * 20;\n    }\n}\n` };
     const src = `<program>
     \${ import { twice } from "./lib.scrml"; import { twice } from "./lib2.scrml"; }
@@ -315,10 +317,37 @@ describe("an import binds a name in file scope", () => {
 </program>
 `;
     const r = run(src, [LIB, L2]);
+    expect(r.diags.map((d) => [d.code, d.file]).sort()).toEqual([["E-SCOPE-010", "lib2.scrml"], ["W-IMPORT-001", ENTRY]].sort());
+  });
+
+  // s473 r2 LOW-C: later-import-wins can still happen between a USER import and a STDLIB import of one
+  // name (stdlib names are not user declarations, so the pair is legal). The runtime proves which won.
+  test("a user import and a stdlib import of one name: the later wins, with W-IMPORT-001 (§41.7) — either order, and it runs", async () => {
+    const U = { path: "u.scrml", src: `\${\n    export fn pub(s: string) -> string {\n        return "user:" + s;\n    }\n}\n` };
+    const stdU = (src) => frontEndStdlib(mods(), [U, { path: ENTRY, src }], ENTRY, { stdlibRoot: FIXTURE });
+    const r1 = stdU(`<program>\n    \${ import { pub } from "./u.scrml"; import { pub } from "scrml:vis"; }\n    <p id="w">\${pub("x")}</p>\n</program>\n`);
+    expect(r1.diags.map((d) => [d.code, d.severity])).toEqual([["W-IMPORT-001", "Warning"]]);
+    clean(r1);
+    await loadProgram(r1.core, "s473-later-std-" + k++);
+    expect(text("#w")).toBe("lib-helper:X");
+    const r2 = stdU(`<program>\n    \${ import { pub } from "scrml:vis"; import { pub } from "./u.scrml"; }\n    <p id="w">\${pub("x")}</p>\n</program>\n`);
+    expect(r2.diags.map((d) => [d.code, d.severity])).toEqual([["W-IMPORT-001", "Warning"]]);
+    clean(r2);
+    await loadProgram(r2.core, "s473-later-user-" + k++);
+    expect(text("#w")).toBe("user:x");
+  });
+
+  test("the same name imported twice from ONE file: one declaration — W-IMPORT-001 only, and it runs", async () => {
+    const src = `<program>
+    \${ import { twice } from "./lib.scrml"; import { twice } from "./lib.scrml"; }
+    <p id="t">\${twice(1)}</p>
+</program>
+`;
+    const r = run(src, [LIB]);
     expect(r.diags.map((d) => [d.code, d.severity])).toEqual([["W-IMPORT-001", "Warning"]]);
     clean(r);
     await loadProgram(r.core, "s472-later-" + k++);
-    expect(text("#t")).toBe("20");
+    expect(text("#t")).toBe("2");
   });
 });
 
@@ -462,29 +491,38 @@ describe("r1 F1 — §18.13 shorthand arms over a call whose enum type is not im
   });
 });
 
+// s473: one file binding a type (or a declaration) AND a function of one name is now itself
+// E-SCOPE-010 (§7.6, ruled S473 "`<card>` beside `fn card`: REFUSED"), reported in the library
+// file. The import still brings only the exported kind — the E-SCOPE-001 below stands beside it.
+const s473 = (r) => r.diags.filter((d) => d.code === "E-SCOPE-010").map((d) => d.file);
 describe("r1 F2 — an import brings only the EXPORTED declaration(s) of a name (scope by kind)", () => {
   test("kind-collapse-fn2: exported `type Tag` + private `fn Tag` — importing `Tag` does not bring the function", () => {
     const K = { path: "k.scrml", src: `\${\n    export type Tag:struct = { v: string }\n    fn Tag() -> string {\n        return "private-fn";\n    }\n    export fn mk() -> string {\n        return "m";\n    }\n}\n` };
     const r = run(`<program>\n    \${ import { Tag, mk } from "./k.scrml"; }\n    <p id="o">\${Tag()} \${mk()}</p>\n</program>\n`, [K]);
-    expect(codes(r)).toEqual(["E-SCOPE-001"]);
-    expect(r.diags[0].message).toContain("does not export");
+    expect(codes(r).sort()).toEqual(["E-SCOPE-001", "E-SCOPE-010"]);
+    expect(s473(r)).toEqual(["k.scrml"]);
+    expect(r.diags.find((d) => d.code === "E-SCOPE-001").message).toContain("does not export");
   });
 
   test("kind-collapse-type: exported `fn box` + private `type box` — importing `box` does not bring the type", () => {
     const K = { path: "k2.scrml", src: `\${\n    type box:struct = { v: string }\n    export fn box() -> string {\n        return "fn";\n    }\n}\n` };
     const r = run(`<program>\n    \${ import { box } from "./k2.scrml"; }\n    function g() -> string {\n        const b: box = { v: "leak" };\n        return b.v;\n    }\n    <p id="o">\${g()} \${box()}</p>\n</program>\n`, [K]);
     expect(codes(r)).toContain("E-TYPE-UNKNOWN");
+    expect(s473(r)).toEqual(["k2.scrml"]);
   });
 
   test("kind-collapse-decl: exported `<card>` + private `fn card` — importing `card` does not bring the function", () => {
     const C = { path: "c.scrml", src: `export <card:struct>\n    let <label:string="x"/>\n</>\nrenders <b class="card">\${label}</b>\n\n\${\n    fn card() -> string {\n        return "private-card-fn";\n    }\n}\n` };
     const r = run(`<program>\n    \${ import { card } from "./c.scrml"; }\n    <main><card label="hi"/><p id="o">\${card()}</p></main>\n</program>\n`, [C]);
-    expect(codes(r)).toEqual(["E-SCOPE-001"]);
+    expect(codes(r).sort()).toEqual(["E-SCOPE-001", "E-SCOPE-010"]);
+    expect(s473(r)).toEqual(["c.scrml"]);
   });
 
-  test("twin: both kinds exported — importing the name brings both", () => {
+  // s473: the twin is no longer a legal library — a type and a function of one name in one file
+  // are E-SCOPE-010 (§7.6). The pin is kept as the refusal.
+  test("twin: both kinds exported — the library itself is E-SCOPE-010 (S473)", () => {
     const K = { path: "k.scrml", src: `\${\n    export type Tag:struct = { v: string }\n    export fn Tag() -> string {\n        return "fn";\n    }\n}\n` };
-    clean(run(`<program>\n    \${ import { Tag } from "./k.scrml"; }\n    function g() -> string {\n        const t: Tag = { v: "x" };\n        return t.v + Tag();\n    }\n    <p>\${g()}</p>\n</program>\n`, [K]));
+    expect(s473(run(`<program>\n    \${ import { Tag } from "./k.scrml"; }\n    function g() -> string {\n        const t: Tag = { v: "x" };\n        return t.v + Tag();\n    }\n    <p>\${g()}</p>\n</program>\n`, [K]))).toEqual(["k.scrml"]);
   });
 });
 

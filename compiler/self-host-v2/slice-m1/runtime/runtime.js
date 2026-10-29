@@ -1053,19 +1053,24 @@ export function removeEnd(target, n) { const xs = target.peek(); target.set(xs.s
 export function removeFront(target, n) { target.set(target.peek().slice(n)); }
 /**
  * A write of struct path `path` inside the element at position `index`
- * (`@xs[i].f = v`, dpa-052 Q3). A position outside the sequence is refused —
- * nothing is written (a write never grows or pads a sequence).
+ * (`@xs[i].f = v`, dpa-052 Q3). s473 — a position outside the sequence
+ * (negative, at or past the end, or not an int) is the E-INDEX-OUT-OF-RANGE-RT
+ * trap, as every position write's is (SPEC §66.12.6 rule 3, ruled S473 "A write
+ * past the end of a tape position: runtime TRAP"; §19.17): nothing is written —
+ * a write never grows or pads a sequence. `at` is the source location.
  */
-export function setAt(target, index, path, v) {
+export function setAt(target, index, path, v, at) {
   const xs = target.peek();
   if (!Number.isInteger(index)) {
-    throw new Error(`index ${JSON.stringify(index)} is not a sequence position (an int) — nothing was written`);
+    throw new ScrmlTrap("E-INDEX-OUT-OF-RANGE-RT", `index ${JSON.stringify(index)} is not a sequence position (an int) (${at}) — nothing was written`, { index, length: xs.length, at });
   }
   if (index < 0 || index >= xs.length) {
     const has = xs.length === 0 ? "the sequence is empty" : `its positions are 0..${xs.length - 1}`;
-    throw new Error(`position ${index} is outside the sequence (${has}) — nothing was written`);
+    throw new ScrmlTrap("E-INDEX-OUT-OF-RANGE-RT", `position ${index} is outside the sequence (${has}) (${at}) — nothing was written`, { index, length: xs.length, at });
   }
-  setIn(target, [index, ...path], v);
+  // the rest of the path through the CHECKED writer (s473 review LOW-3): a position step
+  // inside `path` is range-checked too — never padded, as the unchecked setIn would
+  target.set(writePath(xs, [index, ...path], v, at));
 }
 /**
  * s472 — a POSITION write of a cell's tape, `@xs[i] = v` (SPEC §66.12.6 rule 3,
@@ -1997,13 +2002,163 @@ export function attr(scope, el, name, fn) {
     console.warn("[scrml css-guard] refused a data-supplied `style` write: a style is never built from data (SPEC §65.4.2). The attribute was removed.");
     return;
   }
-  const guard = urlGuardOf(el, name);
+  // s473 — user-voice-scrml.md S472 "five PA recs" item 3: "A data-bound
+  // `href` on a `<link>` whose `rel` contains `stylesheet` (or is computed) is
+  // REFUSED." The compiler refuses it (E-ATTR-STYLESHEET-HREF); this is the
+  // wall behind it (fail closed — no compiled program asks for this write).
+  if (isLinkElement(el)) {
+    if (isHrefName(name)) {
+      if (linkLoadsSheet(el)) { refuseLinkHref(el, name); return; }
+      dataHrefLinks.add(el);
+    } else if (String(name).toLowerCase() === "rel") {
+      computedLinkRels.add(el);
+      for (const a of [...el.attributes]) {
+        if (dataHrefLinks.has(el) && isHrefName(a.name)) refuseLinkHref(el, a.name);
+      }
+    }
+  }
+  const guard = writeGuardOf(el, name);
+  const sheetHref = isLinkElement(el) && isHrefName(name);
   effect(scope, () => {
+    if (sheetHref && linkLoadsSheet(el)) { refuseLinkHref(el, name); return; }
     const v = fn();
     if (v === null || v === undefined || v === false) { el.removeAttribute(name); return; }
     const s = v === true ? "" : String(v);
-    el.setAttribute(name, guard === null ? s : guard(s));
+    const w = guard === null ? s : guard(s);
+    if (w === null) { el.removeAttribute(name); return; }
+    el.setAttribute(name, w);
   });
+}
+
+// ---------------------------------------------------------------------------
+// s473 — a stylesheet `<link>`'s `href` is never written from data (ruled S472,
+// see `attr`). A `<link>` whose `rel` is bound (computed) is recorded when that
+// `attr` runs; a data `href` is recorded when its own runs — so either order is
+// caught: an href written first is removed when a bound `rel` arrives, and every
+// later write of it is refused (`linkLoadsSheet` holds from then on).
+// ---------------------------------------------------------------------------
+const computedLinkRels = new WeakSet();
+const dataHrefLinks = new WeakSet();
+
+function isLinkElement(el) {
+  return String(el.tagName || "").toLowerCase() === "link";
+}
+
+// `href` in any case, and any prefixed spelling of it (`xlink:href`) — fail closed.
+function isHrefName(name) {
+  const lower = String(name).toLowerCase();
+  return lower === "href" || lower.endsWith(":href");
+}
+
+// The `rel` loads (or may load) a stylesheet: it is computed, or its text holds
+// `stylesheet` anywhere (ASCII case-insensitive — a token list such as
+// `alternate stylesheet` included; the substring test is a superset of the
+// token test, fail closed).
+function linkLoadsSheet(el) {
+  if (computedLinkRels.has(el)) return true;
+  const rel = el.getAttribute("rel");
+  return rel !== null && rel.toLowerCase().includes("stylesheet");
+}
+
+function refuseLinkHref(el, name) {
+  el.removeAttribute(name);
+  console.warn("[scrml css-guard] refused a data-supplied `href` on a <link> whose `rel` loads a stylesheet or is computed: a stylesheet is never chosen by data (SPEC §5.2). The attribute was removed.");
+}
+
+// ---------------------------------------------------------------------------
+// s473 (gap g-boot-svg-presentation-attr-css-url-unguarded-s472) — attributes
+// the browser reads as a CSS value whose grammar takes a `<url>` or an
+// `<image>`. A data `fill="url(https://…)"` is a network fetch (Chromium-
+// verified for fill, stroke, filter, mask, clip-path, marker-start, cursor and
+// a SMIL `<set attributeName="filter">`), so each such write is judged by
+// `cssValueOf` — the §25.7 bridge's guard, the one CSS-value reader (it
+// refuses `url(`, `image-set(`, `var(`, quotes, escapes, `;` and `!`).
+// Matched by lowercased name on every element (SVG or not — fail closed).
+//
+// The list (one entry per property whose value grammar admits `<url>` /
+// `<image>`, among the SVG presentation attributes):
+//   - SVG 2 §13 Painting: `fill`, `stroke` (`<paint>` includes `<url>`);
+//     `marker-start`, `marker-mid`, `marker-end` (`none | <url>`) and the
+//     `marker` shorthand (not a presentation attribute in SVG 2, one in some
+//     engines — listed, fail closed);
+//   - CSS Masking 1: `clip-path` (`<clip-source>` = `<url>`), `mask` (the
+//     shorthand: `<mask-reference>` = `<image> | <mask-source>`);
+//   - Filter Effects 1: `filter` (`<url>` in `<filter-value-list>`);
+//   - CSS Basic UI 4 §5.1 / SVG 2's presentation attribute table: `cursor`
+//     (`[<url> [<x> <y>]?]#`);
+//   - SVG 1.1 ch. 12 Color: `color-profile` (`<iri>` — obsolete, still listed).
+// Every other presentation attribute (colours, lengths, keywords, `d`'s
+// `path()`, `transform`) takes no URL and is written unchanged.
+// ---------------------------------------------------------------------------
+const CSS_URL_ATTRS = new Set([
+  "fill", "stroke", "marker", "marker-start", "marker-mid", "marker-end",
+  "clip-path", "mask", "filter", "cursor", "color-profile",
+]);
+
+// The CSS functions these attributes need beyond the bridge's colour / math
+// set, none of which takes a URL: the Filter Effects 1 §11 filter functions
+// and the CSS Shapes 1 basic shapes (`path()` is not here — it takes a string,
+// which `cssValueOf` refuses anyway).
+const CSS_ATTR_FUNCTIONS = new Set([
+  "blur", "brightness", "contrast", "drop-shadow", "grayscale", "hue-rotate",
+  "invert", "opacity", "saturate", "sepia",
+  "inset", "circle", "ellipse", "polygon",
+]);
+
+/** The value text for a CSS-url attribute write, or null when `cssValueOf` refuses an entry. */
+function cssAttrValue(el, name, text, perEntry) {
+  const entries = perEntry ? text.split(";") : [text];
+  for (const e of entries) {
+    if (cssValueOf(e, CSS_ATTR_FUNCTIONS) === null) {
+      const tag = el && typeof el.tagName === "string" ? "<" + el.tagName.toLowerCase() + "> " : "";
+      console.warn("[scrml css-guard] refused a data-supplied value for " + tag + String(name) + "=: the browser reads this attribute as CSS, and only a finite number or a plain CSS value (no url(), image-set(), var(), quotes, escapes, ; { } < or !) is written there from data. The attribute was removed.");
+      return null;
+    }
+  }
+  return text;
+}
+
+/**
+ * The judgment a bound write of `name` on `el` needs, or null when none: a
+ * URL write (§5.2 rule 3, `urlGuardOf`), a CSS-url attribute (`cssAttrValue`),
+ * or — for an SVG animation value — whichever the animated attribute needs
+ * (both when it is computed). The guard returns the text to write, or null to
+ * remove the attribute (a CSS refusal; a URL refusal writes `about:blank`).
+ */
+function writeGuardOf(el, name) {
+  const tag = String(el.tagName || "").toLowerCase();
+  const lower = String(name).toLowerCase();
+  if (_SCRML_SVG_ANIMATION_ELEMENTS.has(tag) && _SCRML_SVG_ANIMATION_VALUE_ATTRS.has(lower)) {
+    const url = urlGuardOf(el, name);
+    const css = animatedCssTarget(el);
+    const perEntry = lower === "values";
+    if (!css) return url;
+    if (url === null) return (s) => cssAttrValue(el, name, s, perEntry);
+    return (s) => {
+      const u = url(s);
+      return u === s ? cssAttrValue(el, name, s, perEntry) : u;
+    };
+  }
+  if (CSS_URL_ATTRS.has(lower)) return (s) => cssAttrValue(el, name, s, false);
+  return urlGuardOf(el, name);
+}
+
+/**
+ * Does an SVG animation element animate an attribute read as CSS with a URL?
+ * True when its static `attributeName` names a CSS-url attribute or `style`,
+ * and when it is computed or absent (any attribute may be animated — fail
+ * closed, as `animatedUrlTarget`).
+ */
+function animatedCssTarget(el) {
+  if (computedAnimationTargets.has(el)) return true;
+  for (const a of el.attributes) {
+    if (a.name.toLowerCase() === "attributename") {
+      // a prefixed name (`x:fill`) is judged by its local part — fail closed
+      const t = a.value.trim().toLowerCase().replace(/^.*:/, "");
+      return CSS_URL_ATTRS.has(t) || t === "style";
+    }
+  }
+  return true;
 }
 
 // SVG animation elements whose `attributeName` is written from data (a bound
@@ -2092,8 +2247,12 @@ const CSS_VALUE_FUNCTIONS = new Set([
 ]);
 const CSS_VALUE_MAX = 256;
 
-/** The CSS text a cell's value is written as, or null when it is refused (fail closed). */
-export function cssValueOf(v) {
+/**
+ * The CSS text a cell's value is written as, or null when it is refused (fail closed).
+ * `extraFunctions` (s473) admits more function names for one caller — the CSS-url
+ * attributes' filter functions and basic shapes; the §25.7 bridge passes none.
+ */
+export function cssValueOf(v, extraFunctions) {
   if (typeof v === "number") return Number.isFinite(v) ? String(v) : null;
   if (typeof v !== "string") return null;
   if (v.length > CSS_VALUE_MAX || !CSS_VALUE_ALPHABET.test(v)) return null;
@@ -2106,7 +2265,7 @@ export function cssValueOf(v) {
       while (j > 0 && /[A-Za-z0-9_-]/.test(v[j - 1])) j--;
       const name = v.slice(j, i).toLowerCase();
       // a bare `(` is a grouping only inside a function (`calc((1px + 2px) * 2)`)
-      if (name === "" ? depth === 0 : !CSS_VALUE_FUNCTIONS.has(name)) return null;
+      if (name === "" ? depth === 0 : !(CSS_VALUE_FUNCTIONS.has(name) || (extraFunctions !== undefined && extraFunctions.has(name)))) return null;
       depth++;
     } else if (c === ")") {
       depth--;
@@ -3176,6 +3335,43 @@ export function call(route, args, task) {
     };
     send(0);
   });
+}
+
+// s473 (Lane B) — the page's `<db>` cells (SPEC §8.1.3; RULED S472 "`<db>` body +
+// client reads", items 1–2): each cell's value is loaded on the SERVER, per
+// request, by its parameterless load route, and the page WAITS for every one
+// before the program instance is built (so a cell's type stays `T`). One call
+// at a time, in program order (each is an ordinary `call` — the CSRF pair, the
+// deadline, the strict decode against the cell's declared type). The answer is
+// `{ ok, values }`: `values[i]` the decoded value of `routes[i]`. When a load
+// fails the page is NOT mounted (ok = false) and the failure is reported by its
+// ServerCallError variant only — never a reason text, which is the only part
+// that could quote anything the server sent.
+export async function loadDbCells(routes) {
+  const values = [];
+  for (const r of routes) {
+    const v = await call(r, [], null);
+    if (failed(v)) {
+      reportHostError(new Error(`scrml: a <db> cell's server load failed (${loadFailureName(v)}) — the page is not mounted`));
+      return { ok: false, values: [] };
+    }
+    values.push(v);
+  }
+  return { ok: true, values };
+}
+
+// `Transport(Unreachable)`, `Transport(ServerFault(500))`, `Transport(Malformed)` — names and a status only.
+function loadFailureName(f) {
+  const e = f.error;
+  if (e === null || typeof e !== "object" || e.variant !== "Transport" || !Array.isArray(e.data)) return "a failure";
+  const t = e.data[0];
+  if (typeof t === "string") return `Transport(${t === "Unreachable" ? t : "?"})`;
+  if (t === null || typeof t !== "object") return "Transport";
+  if (t.variant === "Refused" || t.variant === "ServerFault") {
+    const s = Array.isArray(t.data) ? t.data[0] : undefined;
+    return `Transport(${t.variant}(${Number.isInteger(s) ? s : "?"}))`;
+  }
+  return t.variant === "Malformed" ? "Transport(Malformed)" : "Transport";
 }
 
 // s468 (U1c): the double-submit pair (server-runtime.js checks it).
