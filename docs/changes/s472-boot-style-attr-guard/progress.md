@@ -79,3 +79,8 @@ Rulings (scrml-support/user-voice-scrml.md "⭐ RULED — five PA recs …" S472
   adds E-FORM-OWNER-UNRESOLVED; keeps E-STYLE-VALUE-NOT-STYLE, no E-ATTR-WRITER-CONFLICT) — `--check` current.
 - known-gaps: no @gap id lost (main 2445, branch 2449, result 2450); state.ts --write no change.
 - Semantic: the branch's own diff matches no InstRef / View enum and does not touch mountedInstances; no-default-arm lint 0 violations.
+
+## S473 landing-front round 3 — merge origin/main (#1616, #1624)
+- Conflict: compiler/SPEC-INDEX.md only — `git-merge-generated.ts --regen`; `--check` OK (52,129 lines, 73/73).
+- SPEC.md / analyze.scrml / severity.scrml / known-gaps auto-merged; severity regenerated (`--check` current);
+  state.ts --write no change; 0 markers. @gap ids: main 2445, branch 2450, result 2450, none lost.
