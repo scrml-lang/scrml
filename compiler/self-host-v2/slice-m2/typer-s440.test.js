@@ -669,7 +669,8 @@ describe("#9 — `int` enforced; `/` on two ints names `div`", () => {
     // twins: an int; `not` into `int | not`
     expect(inApp(CELLS + "    function h() -> int { return @n + 1; }\n    function k() -> int | not { return not; }")).toEqual([]);
     // FLIPPED (r7 A) — prov=pa-ruled:§7.5.1 widening, positions 3-4, measured-zero corpus (s442 r7 A). Was: silent ("a non-int return type is not widened").
-    expect(inApp(CELLS + "    function s() -> string { return 5; }")).toEqual(["E-TYPE-031"]);
+    // s473: `function s` beside the CELLS `<s>` is one file-scope name bound twice (§7.6) — renamed
+    expect(inApp(CELLS + "    function sOf() -> string { return 5; }")).toEqual(["E-TYPE-031"]);
   });
   test("r4 (c) — `int` enforced at ARGUMENTS into an `int` parameter", () => {
     expect(inApp(CELLS + "    function g(k: int) { }\n    function f() { g(@r); }")).toEqual(["E-TYPE-031"]);
