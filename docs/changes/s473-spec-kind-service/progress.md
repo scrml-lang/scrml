@@ -15,3 +15,7 @@ Design-doc places that assumed trap → stop, each changed in §68: §5.4 step 3
 Derived (not separately ruled; flagged in the PR): E-SERVICE-ON-TRAP-INVALID (validity of on-trap=); traps outside a turn (§68.6 statement 19); `<onSignal>` does not count for quiescence; reserved names stdin/watch/onSignal owed with §4.15.
 
 Gates: s34-census --check-new PASS (29 rows); regen-spec-index done.
+
+## 2026-10-29 — review fix round 1 (FIX-FIRST, ~/.cache/scrml/review/s473-1644/REVIEW.md)
+
+F1 liveness defined (st. 21) + "event source" term reconciled (§68.1 Terms, st. 8) + W-SERVICE-NO-SOURCE on the same definition; example 2 timer gated by `running=@polling` (no `if=` on `<timer>`, §17.1.2) so `poll` stays live. F2 prompt → stdout, first prompt after mount when the queue is empty (st. 10). F3 st. 13a: `if=` scopes mount/destroy at turn end after the effect flush; queued events of destroyed sources discarded except `<stdin>` events (held); remount continues the stream; End once per stream. F4 st. 24: SIGTERM, SIGKILL at G/2, cleanup gets the remainder. F5 st. 22a (PA ruling): a second same-kind signal while a default stop is pending exits at once 128+n. F6: E-TOOL-004/005/006 rows amended (Nominal for services), §68.14 owed list, Direction of change declares the W-ATTR-001 → Error narrowing. LOWs L1–L10 fixed (st. 22b, exit table rows, st. 6a, st. 14, st. 13 abandonment, st. 23 "adapted", example 2, st. 16 watch/poll bounds, ON-TRAP row provenance, st. 20 for `main`). Cross-PR (#1630 E-HOST-THROW-RT in §19.17) waits on #1630 (still OPEN).
