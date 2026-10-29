@@ -1,4 +1,3 @@
-<program>
 ${
     // ---------------------------------------------------------------------------
     // scrml:data/schema-for — type-driven SQL DDL generation (L22 family member #3)
@@ -113,4 +112,3 @@ ${
         //   `import { schemaFor }` resolves at MOD stage.
     }
 }
-</program>

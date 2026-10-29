@@ -1,4 +1,3 @@
-<program>
 ${
     // ---------------------------------------------------------------------------
     // scrml:data — data utilities index
@@ -28,4 +27,3 @@ ${
 
     export { tableFor, TableSort } from './table-for.scrml'
 }
-</program>

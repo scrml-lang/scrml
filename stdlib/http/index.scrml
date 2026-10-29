@@ -1,4 +1,3 @@
-<program>
 ${
     // ---------------------------------------------------------------------------
     // scrml:http — HTTP client utilities
@@ -39,19 +38,19 @@ ${
 
     // De-leak the retry-jitter through scrml:random — the sanctioned
     // non-deterministic source (closes the stdlib-ouroboros, §41.20).
-    import { random } from 'scrml:random'
+    import { random } from 'scrml:random';
 
     async function _request(url, options) {
-        const opts = options || {}
-        const timeout = opts.timeout is given ? opts.timeout : 10000
-        const retryCount = opts.retry || 0
-        const retryDelay = opts.retryDelay is given ? opts.retryDelay : 1000
-        const extraHeaders = opts.headers || {}
+        const opts = options || {};
+        const timeout = opts.timeout is given ? opts.timeout : 10000;
+        const retryCount = opts.retry || 0;
+        const retryDelay = opts.retryDelay is given ? opts.retryDelay : 1000;
+        const extraHeaders = opts.headers || {};
 
         const fetchOptions = {
             method: opts.method || "GET",
             headers: {}
-        }
+        };
         for (const [k, v] of Object.entries(extraHeaders)) {
             fetchOptions.headers[k] = v
         }
@@ -462,4 +461,3 @@ ${
         assertTruthy(fd instanceof FormData)
     }
 }
-</program>

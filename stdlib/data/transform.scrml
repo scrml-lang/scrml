@@ -16,13 +16,13 @@ ${
      * Example: pick({ a: 1, b: 2, c: 3 }, ["a", "c"]) → { a: 1, c: 3 }
      */
     export function pick(obj, keys) {
-        const result = {}
+        const result = {};
         for (const key of keys) {
             if (Object.prototype.hasOwnProperty.call(obj, key)) {
-                result[key] = obj[key]
+                result[key] = obj[key];
             }
         }
-        return result
+        return result;
     }
 
     /**
@@ -32,14 +32,14 @@ ${
      * Example: omit({ a: 1, b: 2, c: 3 }, ["b"]) → { a: 1, c: 3 }
      */
     export function omit(obj, keys) {
-        const keySet = new Set(keys)
-        const result = {}
+        const keySet = new Set(keys);
+        const result = {};
         for (const key of Object.keys(obj)) {
             if (!keySet.has(key)) {
-                result[key] = obj[key]
+                result[key] = obj[key];
             }
         }
-        return result
+        return result;
     }
 
     /**
@@ -49,12 +49,12 @@ ${
      *          → { firstName: "Alice" }
      */
     export function mapKeys(obj, keyMap) {
-        const result = {}
+        const result = {};
         for (const key of Object.keys(obj)) {
-            const newKey = keyMap[key] || key
-            result[newKey] = obj[key]
+            const newKey = keyMap[key] || key;
+            result[newKey] = obj[key];
         }
-        return result
+        return result;
     }
 
     /**
@@ -63,9 +63,9 @@ ${
      * Example: mapValues({ a: 1, b: 2 }, x => x * 2) → { a: 2, b: 4 }
      */
     export function mapValues(obj, fn) {
-        const result = {}
+        const result = {};
         for (const [key, value] of Object.entries(obj)) {
-            result[key] = fn(value, key)
+            result[key] = fn(value, key);
         }
         return result
     }
@@ -80,9 +80,9 @@ ${
         const fn = typeof keyOrFn == "function" ? keyOrFn : (item) => item[keyOrFn]
         const result = {}
         for (const item of array) {
-            const key = String(fn(item))
-            result[key] = result[key] || []
-            result[key].push(item)
+            const key = String(fn(item));
+            result[key] = result[key] || [];
+            result[key].push(item);
         }
         return result
     }
@@ -97,7 +97,7 @@ ${
         const fn = typeof keyOrFn == "function" ? keyOrFn : (item) => item[keyOrFn]
         const result = new Map()
         for (const item of array) {
-            result.set(fn(item), item)
+            result.set(fn(item), item);
         }
         return result
     }
@@ -112,11 +112,11 @@ ${
         const fn = typeof keyOrFn == "function" ? keyOrFn : (item) => item[keyOrFn]
         const dir = direction == "desc" ? -1 : 1
         return [...array].sort((a, b) => {
-            const va = fn(a)
-            const vb = fn(b)
-            if (va < vb) return -1 * dir
-            if (va > vb) return 1 * dir
-            return 0
+            const va = fn(a);
+            const vb = fn(b);
+            if (va < vb) return -1 * dir;
+            if (va > vb) return 1 * dir;
+            return 0;
         })
     }
 
@@ -144,36 +144,36 @@ ${
      * cycle-guard is needed.
      */
     function _data_value_canonical(v) {
-        if (v is not) return "0:"
-        const t = typeof v
-        if (t == "boolean") return v ? "b1" : "b0"
+        if (v is not) return "0:";
+        const t = typeof v;
+        if (t == "boolean") return v ? "b1" : "b0";
         if (t == "number") {
-            const n = v == 0 ? 0 : v
-            return "n" + String(n)
+            const n = v == 0 ? 0 : v;
+            return "n" + String(n);
         }
         if (t == "string") {
-            return "s" + v.length + ":" + v
+            return "s" + v.length + ":" + v;
         }
         if (Array.isArray(v)) {
-            let out = "a" + v.length + "["
+            let out = "a" + v.length + "[";
             for (let i = 0; i < v.length; i++) out += _data_value_canonical(v[i])
             return out + "]"
         }
         if (v is given && v.__scrml_map == true) {
-            const mkeys = Object.keys(v.entries).sort()
-            let mout = "M{"
+            const mkeys = Object.keys(v.entries).sort();
+            let mout = "M{";
             for (let mi = 0; mi < mkeys.length; mi++) {
-                const ck = mkeys[mi]
+                const ck = mkeys[mi];
                 mout += ck.length + ":" + ck + _data_value_canonical(v.entries[ck].v)
             }
             return mout + "}"
         }
         if (v is given && v._tag is given) {
-            const tag = String(v._tag)
-            let eout = "E" + tag.length + ":" + tag + "("
-            const eKeys = Object.keys(v).filter((k) => k != "_tag").sort()
+            const tag = String(v._tag);
+            let eout = "E" + tag.length + ":" + tag + "(";
+            const eKeys = Object.keys(v).filter((k) => k != "_tag").sort();
             for (let ei = 0; ei < eKeys.length; ei++) {
-                const ek = eKeys[ei]
+                const ek = eKeys[ei];
                 eout += ek.length + ":" + ek + _data_value_canonical(v[ek])
             }
             return eout + ")"
@@ -181,7 +181,7 @@ ${
         const sKeys = Object.keys(v).sort()
         let sout = "S{"
         for (let si = 0; si < sKeys.length; si++) {
-            const sk = sKeys[si]
+            const sk = sKeys[si];
             sout += sk.length + ":" + sk + _data_value_canonical(v[sk])
         }
         return sout + "}"
@@ -191,25 +191,25 @@ ${
         // No-key path: dedup by the value-canonical key (§59.5), NOT JS Set
         // reference identity — so value-equal structs collapse to one element.
         if (!keyOrFn) {
-            const seen = new Set()
-            const result = []
+            const seen = new Set();
+            const result = [];
             for (const item of array) {
-                const key = _data_value_canonical(item)
+                const key = _data_value_canonical(item);
                 if (!seen.has(key)) {
-                    seen.add(key)
-                    result.push(item)
+                    seen.add(key);
+                    result.push(item);
                 }
             }
-            return result
+            return result;
         }
         const fn = typeof keyOrFn == "function" ? keyOrFn : (item) => item[keyOrFn]
         const seen = new Set()
         const result = []
         for (const item of array) {
-            const key = _data_value_canonical(fn(item))
+            const key = _data_value_canonical(fn(item));
             if (!seen.has(key)) {
-                seen.add(key)
-                result.push(item)
+                seen.add(key);
+                result.push(item);
             }
         }
         return result
@@ -220,7 +220,7 @@ ${
      * value-canonical comparison key. Default = the full value-canonical string.
      */
     function _data_key_fn(keyOrFn) {
-        if (!keyOrFn) return _data_value_canonical
+        if (!keyOrFn) return _data_value_canonical;
         if (typeof keyOrFn == "function") {
             return (item) => _data_value_canonical(keyOrFn(item))
         }
@@ -236,24 +236,24 @@ ${
      *          union([{id:1}], [{id:1},{id:2}]) → [{id:1},{id:2}]
      */
     export function union(a, b, keyOrFn) {
-        const key = _data_key_fn(keyOrFn)
-        const seen = new Set()
-        const result = []
+        const key = _data_key_fn(keyOrFn);
+        const seen = new Set();
+        const result = [];
         for (const item of a) {
-            const k = key(item)
+            const k = key(item);
             if (!seen.has(k)) {
-                seen.add(k)
-                result.push(item)
+                seen.add(k);
+                result.push(item);
             }
         }
         for (const item of b) {
-            const k = key(item)
+            const k = key(item);
             if (!seen.has(k)) {
-                seen.add(k)
-                result.push(item)
+                seen.add(k);
+                result.push(item);
             }
         }
-        return result
+        return result;
     }
 
     /**
@@ -263,16 +263,16 @@ ${
      *          intersection([{id:1},{id:2}], [{id:2}]) → [{id:2}]
      */
     export function intersection(a, b, keyOrFn) {
-        const key = _data_key_fn(keyOrFn)
-        const inB = new Set()
-        for (const item of b) inB.add(key(item))
+        const key = _data_key_fn(keyOrFn);
+        const inB = new Set();
+        for (const item of b) inB.add(key(item));
         const seen = new Set()
         const result = []
         for (const item of a) {
-            const k = key(item)
+            const k = key(item);
             if (inB.has(k) && !seen.has(k)) {
-                seen.add(k)
-                result.push(item)
+                seen.add(k);
+                result.push(item);
             }
         }
         return result
@@ -285,16 +285,16 @@ ${
      *          difference([{id:1},{id:2}], [{id:2}]) → [{id:1}]
      */
     export function difference(a, b, keyOrFn) {
-        const key = _data_key_fn(keyOrFn)
-        const inB = new Set()
-        for (const item of b) inB.add(key(item))
+        const key = _data_key_fn(keyOrFn);
+        const inB = new Set();
+        for (const item of b) inB.add(key(item));
         const seen = new Set()
         const result = []
         for (const item of a) {
-            const k = key(item)
+            const k = key(item);
             if (!inB.has(k) && !seen.has(k)) {
-                seen.add(k)
-                result.push(item)
+                seen.add(k);
+                result.push(item);
             }
         }
         return result
@@ -308,12 +308,12 @@ ${
      *          member([{id:1},{id:2}], {id:2}) → true  (.includes would be false)
      */
     export function member(arr, x, keyOrFn) {
-        const key = _data_key_fn(keyOrFn)
-        const target = key(x)
+        const key = _data_key_fn(keyOrFn);
+        const target = key(x);
         for (const item of arr) {
-            if (key(item) == target) return true
+            if (key(item) == target) return true;
         }
-        return false
+        return false;
     }
 
     /**
@@ -322,7 +322,7 @@ ${
      * Example: flatten([[1, 2], [3, 4]]) → [1, 2, 3, 4]
      */
     export function flatten(array) {
-        return array.flat()
+        return array.flat();
     }
 
     /**
@@ -331,7 +331,7 @@ ${
      * Example: flattenDeep([[[1]], [2, 3]]) → [1, 2, 3]
      */
     export function flattenDeep(array) {
-        return array.flat(Infinity)
+        return array.flat(Infinity);
     }
 
     /**
@@ -340,10 +340,10 @@ ${
      * Example: chunk([1,2,3,4,5], 2) → [[1,2],[3,4],[5]]
      */
     export function chunk(array, size) {
-        if (size < 1) return []
-        const result = []
+        if (size < 1) return [];
+        const result = [];
         for (let i = 0; i < array.length; i += size) {
-            result.push(array.slice(i, i + size))
+            result.push(array.slice(i, i + size));
         }
         return result
     }
@@ -378,12 +378,12 @@ ${
      */
     export function camelizeKeys(obj) {
         if (Array.isArray(obj)) {
-            return obj.map(camelizeKeys)
+            return obj.map(camelizeKeys);
         }
         if (obj is given && typeof obj == "object") {
             const result = {}
             for (const [key, value] of Object.entries(obj)) {
-                result[toCamelCase(key)] = camelizeKeys(value)
+                result[toCamelCase(key)] = camelizeKeys(value);
             }
             return result
         }

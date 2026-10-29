@@ -1,4 +1,3 @@
-<program>
 ${
     // ---------------------------------------------------------------------------
     // scrml:crypto — cryptographic utilities for scrml applications
@@ -190,4 +189,3 @@ ${
         // These are structural checks, not execution checks
     }
 }
-</program>
