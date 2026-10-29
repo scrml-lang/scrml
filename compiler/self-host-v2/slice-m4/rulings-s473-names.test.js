@@ -76,6 +76,23 @@ describe("1a — one file-scope name, one binding: E-SCOPE-010 across kinds (§7
     // each report sits at a binding after the first (`type card` itself is never the one reported)
     for (const d of r.diags) expect(d.span.start).toBeGreaterThan(src.indexOf("type card"));
   });
+  // s473 review LOW-1: a constant is one more binding — never reported when it comes FIRST,
+  // and never twice in a three-way clash
+  test("a constant first, then a type and a function of its name: one report at each LATER binding", () => {
+    const src = P(`    \${ const X = 1; }\n    type X:enum = { A, B }\n    function X() -> int { return 1; }`);
+    const r = run(src);
+    expect(r.diags.map((d) => d.code)).toEqual(["E-SCOPE-010", "E-SCOPE-010"]);
+    const at = r.diags.map((d) => d.span.start).sort((a, b) => a - b);
+    expect(at[0]).toBe(src.indexOf("type X"));
+    expect(at[1]).toBe(src.indexOf("function X"));
+    for (const x of r.diags) expect(x.message).toContain("the constant `X`");
+  });
+  test("a type first, then a constant of its name: the report is at the constant", () => {
+    const src = P(`    type X:enum = { A, B }\n    \${ const X = 1; }`);
+    const r = run(src);
+    expect(r.diags.map((d) => d.code)).toEqual(["E-SCOPE-010"]);
+    expect(r.diags[0].span.start).toBeGreaterThan(src.indexOf("type X"));
+  });
   test("distinct names stay silent; a different case is a different name", () => {
     expect(codes(P(`${CARD}\n    function cardOf() -> int { return 1; }`))).toEqual([]);
     expect(codes(P(`    type Card:enum = { A, B }\n${CARD}`))).toEqual([]);

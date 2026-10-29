@@ -78,3 +78,15 @@ Ran every `checks` + `slices` step locally. Two failed on first run, both fixed:
   resolver only scans JS/TS identifiers, so it read as stale. Reworded to the `(its … passes)` form.
 - claim-gate: docs/external-js.md:205 pinned E-BOOTSTRAP-REDECLARE for the sidecar block (the inner
   `type Features` redeclares the outer) — now E-SCOPE-010 by the §7.6 rule; pin updated.
+
+## 2026-10-29T06:30Z — S239 review follow-ups (LAND-WITH-FOLLOWUPS; no HIGH / MED)
+
+- LOW-1: constants folded into `fileNames`; dupConsts keeps only the cell collision (E-NAME-COLLIDES-STATE).
+  `const X` + `type X` + `function X` → 2 reports (at `type X`, `function X`). Tests added (names).
+- LOW-2: `loopCopyFor` skips a loop whose span already holds an Error diag (a refused reading statement
+  records no Name fact). Test added (lint).
+- LOW-3: runtime `setAt` ends with `writePath` (checked), not `setIn`. Direct runtime tests added (trap).
+- Filed g-loop-copy-lint-closure-read-order-s473 (latent FP once closures land).
+- NIT-1: E-SCOPE-010 §34 row rewritten coherently. NIT-2: inline strikethrough in §66.12.6 / §66.12.8 moved
+  to a `supersedes:` note. NIT-3: §7.6 provenance quotes the g-boot-decl-fn-same-name-one-file-s472 title.
+  g-boot-const-like-builtin-type-s472 retitled.

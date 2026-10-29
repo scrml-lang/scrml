@@ -99,4 +99,12 @@ describe("3 — a part write to a loop copy that nothing reads: W-LOOP-COPY-WRIT
     const src = P(`${LETR}`, `        <ul>\${ for (p of @ps) {\n            p.name = "z";\n            lift <li>\${p.name}</li>;\n        } }</ul>`);
     expect(lint(src)).toEqual([]);
   });
+  // s473 review LOW-2: a refused statement that READS the binder records no Name fact — the
+  // lint must not then claim "nothing reads" beside the error
+  test("a loop body that already holds an error gets the error only", () => {
+    const src = fn(`${LETR}\n    <out:R[append]=([])/>`, `        for (p of @ps) {\n            p.name = "z";\n            @out = [...@out, p];\n        }`);
+    const cs = codes(src);
+    expect(cs.length).toBeGreaterThan(0);
+    expect(cs).not.toContain("W-LOOP-COPY-WRITE-UNREAD");
+  });
 });

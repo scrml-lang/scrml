@@ -19,6 +19,7 @@
 //      (g-loop-copy-part-write-no-op-s472).
 
 import { describe, test, expect, beforeAll, afterEach } from "bun:test";
+import { setAt, ScrmlTrap } from "../slice-m1/runtime/runtime.js";
 import { loadM2, frontEnd } from "./harness.js";
 import { loadProgram, click, expectNoPageErrors, takePageErrors, warmLoadProgram } from "../slice-m1/load-program.js";
 
@@ -101,5 +102,27 @@ describe("2 — a write past the end of a tape position is the E-INDEX-OUT-OF-RA
     expect(errs.length).toBe(1);
     expect(errs[0].code).toBe("E-INDEX-OUT-OF-RANGE-RT");
     expect($("#o").textContent).toBe("");
+  });
+});
+
+// s473 review LOW-3: setAt's path tail goes through the CHECKED writer — a position step inside
+// the path (no source form reaches one today: an ElemAt path is fields only) traps, never pads.
+describe("2b — runtime setAt checks every step of its path (s473 review LOW-3)", () => {
+  const cell = (v) => ({ v, peek() { return this.v; }, set(x) { this.v = x; } });
+  test("an inner position past the end traps, and nothing is written", () => {
+    const c = cell([{ items: ["x"] }]);
+    let err = null;
+    try { setAt(c, 0, ["items", 5], "z", "t.scrml:1"); } catch (e) { err = e; }
+    expect(err).toBeInstanceOf(ScrmlTrap);
+    expect(err.code).toBe("E-INDEX-OUT-OF-RANGE-RT");
+    expect(err.detail).toEqual({ index: 5, length: 1, at: "t.scrml:1" });
+    expect(c.v).toEqual([{ items: ["x"] }]);
+  });
+  test("an in-range path writes a copy (the old value is untouched)", () => {
+    const old = [{ items: ["x"] }];
+    const c = cell(old);
+    setAt(c, 0, ["items", 0], "z", "t.scrml:1");
+    expect(c.v).toEqual([{ items: ["z"] }]);
+    expect(old).toEqual([{ items: ["x"] }]);
   });
 });

@@ -12717,6 +12717,10 @@ ${
             .BJump(target: t) :> not
         }
         if (sym is not) return st0
+        // s473 review LOW-2: a body that already holds an error is skipped — a refused
+        // statement records no Name facts, so its reads of the binder would vanish and the
+        // lint would claim "nothing reads" beside the error
+        if (errorWithin(st0, file, f.span)) return st0
         const w: CopyWalk = copyWalkStmts(st0, sym, f.body.stmts, false, { writes: [], reads: [], opaque: false })
         if (w.opaque) return st0
         let roots: int[] = []
@@ -12735,6 +12739,21 @@ ${
             }
         }
         return st
+    }
+
+    fn errorWithin(st: AS, file: string, sp: ASpan) -> boolean {
+        for (const d of st.diags) {
+            if (d.file == file && d.span.start >= sp.start && d.span.start < sp.end) {
+                const sev: Severity = d.severity
+                const isErr: boolean = match sev {
+                    .Error :> true
+                    .Warning :> false
+                    .Info :> false
+                }
+                if (isErr) return true
+            }
+        }
+        return false
     }
 
     fn iterSrcLabel(h: AForHead) -> string {
@@ -15494,8 +15513,8 @@ ${
     // kind or another, SHALL be a compile error (E-SCOPE-010: duplicate binding
     // in file scope)." Ruled S473 ("`<card>` beside `fn card`: REFUSED"). Each
     // binding after the FIRST of its name in its file is reported once, naming
-    // the first. Two functions are dupFns' (the S440 #6 sentence); a constant's
-    // collisions are dupConsts'. A host binding's local name is linkage's
+    // the first. Two functions are dupFns' (the S440 #6 sentence); a constant is
+    // folded in too (s473 review LOW-1). A host binding's local name is linkage's
     // (§21.3.1.1 — never a `function` here). s472: two FILES may each bind a
     // name — each file resolves in its own scope (a component pair is dupDecls').
     type FileName:struct = { name: string, file: string, span: ASpan, what: string, isFn: boolean }
@@ -15510,6 +15529,11 @@ ${
         }
         for (const f of t.fns) {
             if (f.host is not) out = out.concat([{ name: f.name, file: f.file, span: f.span, what: "the function `" + f.name + "`", isFn: true }])
+        }
+        // s473 review LOW-1: a constant is one more file-scope binding — folded in here, so a
+        // clash gets exactly one report per LATER binding, whichever kind came first
+        for (const c of t.consts) {
+            out = out.concat([{ name: c.name, file: c.file, span: c.span, what: "the constant `" + c.name + "`", isFn: false }])
         }
         return out
     }
@@ -15659,56 +15683,26 @@ ${
         return out
     }
 
-    // s472 — a file-scope constant binds its name once in its file's scope.
-    //   - another constant, or a function, of the name in the same file: §7.6
-    //     "Re-declaring a name … when that name was already declared at file
-    //     scope SHALL be a compile error (E-SCOPE-010: duplicate binding in file
-    //     scope)" (§7.6 names `let` and, S440 #6, `function`; a `const` is the
-    //     same file-scope binding). An IMPORT of the name is E-SCOPE-010 too
-    //     (linkage — the constant is one of the file's own names).
-    //   - a program cell of the name in the same file: §1.6 "Local
-    //     names cannot shadow registered state names — attempting to declare a
-    //     local variable with the same name as a registered state cell is
-    //     `E-NAME-COLLIDES-STATE`"; §7.6.1: "A V5-strict structural cell `<x>`
-    //     and a local `let x` cannot coexist in the same file scope."
-    //   - a type, or a user declaration, of the name in the same file: s473 —
-    //     E-SCOPE-010 too (§7.6, S473: a file-scope name is bound once "whatever
-    //     it names"; ruled S473 "`<card>` beside `fn card`: REFUSED"; was the
-    //     bootstrap-local E-BOOTSTRAP-REDECLARE).
-    // A function-body local or a parameter of the name SHADOWS it (§7.6 "scoped
-    // to that function"; §7.3.3 shadowing in a nested scope is legal) — no report.
+    // s472 — a file-scope constant beside a program cell of its name in the same
+    // file: §1.6 "Local names cannot shadow registered state names — attempting
+    // to declare a local variable with the same name as a registered state cell
+    // is `E-NAME-COLLIDES-STATE`"; §7.6.1: "A V5-strict structural cell `<x>` and
+    // a local `let x` cannot coexist in the same file scope." Every other
+    // file-scope collision of a constant (another constant, a function, a type, a
+    // user declaration) is E-SCOPE-010 in fileNameClashes, once per later binding
+    // (§7.6, S473; s473 review LOW-1); an IMPORT of the name is linkage's. A
+    // function-body local or a parameter of the name SHADOWS it (§7.6 "scoped to
+    // that function"; §7.3.3 shadowing in a nested scope is legal) — no report.
     fn dupConsts(t: Tables) -> Diag[] {
         let out: Diag[] = []
-        let j = 0
-        while (j < t.consts.length) {
-            const c: ConstInfo = t.consts[j]
-            let i = 0
-            let dup = false
-            while (i < j) {
-                if (!dup && t.consts[i].file == c.file && t.consts[i].name == c.name) {
-                    dup = true
-                    out = out.concat([mkDiag(c.file, c.span, "E-SCOPE-010", "`" + c.name + "` is already declared at file scope (at " + offsetOf(t.consts[i].span) + ") — a file-scope name is bound once: duplicate binding in file scope (§7.6)")])
-                }
-                i = i + 1
-            }
-            for (const f of t.fns) {
-                if (f.file == c.file && f.name == c.name) out = out.concat([mkDiag(c.file, c.span, "E-SCOPE-010", "`" + c.name + "` is also a function of this file (at " + offsetOf(f.span) + ") — a file-scope name is bound once: duplicate binding in file scope (§7.6)")])
-            }
-            for (const ty of t.types) {
-                if (ty.file == c.file && ty.name == c.name) out = out.concat([mkDiag(c.file, c.span, "E-SCOPE-010", "`" + c.name + "` is also a type of this file (at " + offsetOf(ty.span) + ") — a file-scope name is bound once, whatever it names: duplicate binding in file scope (§7.6; ruled S473); rename one")])
-            }
+        for (const c of t.consts) {
             for (const d of t.decls) {
-                if (d.file == c.file) {
-                    if (d.sym.id == t.program.id) {
-                        for (const fi of d.fields) {
-                            if (fi.sym.hint == c.name) out = out.concat([mkDiag(c.file, c.span, "E-NAME-COLLIDES-STATE", "`" + c.name + "` is also a cell of the program (`@" + c.name + "`, at " + offsetOf(fi.span) + ") — a local name cannot take the name of a registered state cell (§1.6, §7.6.1); rename one")])
-                        }
-                    } else if (d.sym.hint == c.name) {
-                        out = out.concat([mkDiag(c.file, c.span, "E-SCOPE-010", "`" + c.name + "` is also a declaration of this file (`<" + c.name + ">`, at " + offsetOf(d.span) + ") — a file-scope name is bound once, whatever it names: duplicate binding in file scope (§7.6; ruled S473); rename one")])
+                if (d.file == c.file && d.sym.id == t.program.id) {
+                    for (const fi of d.fields) {
+                        if (fi.sym.hint == c.name) out = out.concat([mkDiag(c.file, c.span, "E-NAME-COLLIDES-STATE", "`" + c.name + "` is also a cell of the program (`@" + c.name + "`, at " + offsetOf(fi.span) + ") — a local name cannot take the name of a registered state cell (§1.6, §7.6.1); rename one")])
                     }
                 }
             }
-            j = j + 1
         }
         return out
     }

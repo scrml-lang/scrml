@@ -1068,7 +1068,9 @@ export function setAt(target, index, path, v, at) {
     const has = xs.length === 0 ? "the sequence is empty" : `its positions are 0..${xs.length - 1}`;
     throw new ScrmlTrap("E-INDEX-OUT-OF-RANGE-RT", `position ${index} is outside the sequence (${has}) (${at}) — nothing was written`, { index, length: xs.length, at });
   }
-  setIn(target, [index, ...path], v);
+  // the rest of the path through the CHECKED writer (s473 review LOW-3): a position step
+  // inside `path` is range-checked too — never padded, as the unchecked setIn would
+  target.set(writePath(xs, [index, ...path], v, at));
 }
 /**
  * s472 — a POSITION write of a cell's tape, `@xs[i] = v` (SPEC §66.12.6 rule 3,
