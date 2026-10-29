@@ -21598,9 +21598,58 @@ function _parseHandlerExpr(handler, filePath, startOffset) {
   if (handler.startsWith("{") && handler.endsWith("}")) {
     const inner = handler.slice(1, -1).trim();
     if (!inner) return undefined;
+    // s473-lift-cell-ref-scope — §18.5 (S469): a value-position block arm "yields its value with
+    // `lift <expr>;`", and a brace holding one expression is that expression. So the expression
+    // reading of a body that IS one `lift` statement is its OPERAND. Read whole as an expression,
+    // `lift @x` was the identifier `lift` with the operand dropped (acorn reads `lift` as a name;
+    // `_s441Trailing`), and the arm scope check (type-system.ts `guarded-expr`) reported `lift`
+    // undeclared, E-SCOPE-001 — for `lift @x`, `lift (@x)` (a call `lift(@x)`), `lift 9`, `lift x`.
+    const liftOperand = _singleLiftOperand(inner);
+    if (liftOperand !== null) {
+      return safeParseExprToNodeGlobal(liftOperand, filePath, startOffset);
+    }
     return safeParseExprToNodeGlobal(inner, filePath, startOffset);
   }
   return safeParseExprToNodeGlobal(handler, filePath, startOffset);
+}
+
+// The operand text of a braced arm body that is exactly one `lift <expr>` statement (an optional
+// trailing `;`), or null. `lift` must be the keyword: followed by whitespace or `(` — never a name
+// that merely starts with it (`lifted`, `liftAll(…)`), a member (`lift.x`), or an assignment.
+function _singleLiftOperand(inner) {
+  const m = /^lift(?=[\s(])\s*([\s\S]*?)\s*;?\s*$/.exec(inner);
+  if (!m) return null;
+  const operand = m[1].trim();
+  if (!operand || operand.startsWith("=") && !operand.startsWith("==")) return null;
+  // One statement only: a depth-0 `;` (outside strings / brackets) means more follow — keep the
+  // whole-text reading (the statement reader owns a multi-statement block).
+  let depth = 0;
+  let quote = null;
+  for (let k = 0; k < operand.length; k++) {
+    const c = operand[k];
+    if (quote) {
+      if (c === "\\") { k++; continue; }
+      if (c === quote) quote = null;
+      continue;
+    }
+    if (c === '"' || c === "'" || c === "`") { quote = c; continue; }
+    if (c === "(" || c === "[" || c === "{") depth++;
+    else if (c === ")" || c === "]" || c === "}") depth--;
+    else if (c === ";" && depth === 0) return null;
+    else if (c === "\n" && depth === 0 && !_liftLineContinues(operand, k)) return null;
+  }
+  return operand;
+}
+
+// s473 fix round 1 (LOW-4) — a depth-0 line break inside a `lift` operand continues the operand
+// (one statement) when the line before ends in a binary operator, or the next line starts with one
+// (`lift @x⏎ + 1`), as the arm emitter reads it. `++` / `--` start a new statement.
+const _LIFT_CONT_TAIL = /(?:[+\-*/%&|^?:.,<>=!]|&&|\|\||\?\?)$/;
+const _LIFT_CONT_HEAD = /^(?:\+(?!\+)|-(?!-)|[*/%&|^?:.,<>=]|!=)/;
+function _liftLineContinues(text, nl) {
+  const before = text.slice(0, nl).replace(/\/\/[^\n]*$/, "").trimEnd();
+  const after = text.slice(nl + 1).trimStart();
+  return _LIFT_CONT_TAIL.test(before) || _LIFT_CONT_HEAD.test(after);
 }
 
 // ---------------------------------------------------------------------------
