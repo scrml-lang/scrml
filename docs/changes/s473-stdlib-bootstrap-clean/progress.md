@@ -31,3 +31,17 @@ compile clean on the bootstrap, keep impl#1 compiling it).
   default AND library mode (library was E-CODEGEN-INVALID-LOGIC on base); random/parity/no-logic-leak/
   canonical-form tests pass. New test compiler/self-host-v2/slice-m4/stdlib-boot-clean-s473.test.js
   (5 tests: math + random pinned clean; random compiled and RUN; host.js assertions).
+- 2026-10-29T16:40Z format / path / fs: parameters annotated (annotate.ts + signatures.json, exact
+  head replacement). Types read from each function's doc and body; an OPTIONAL parameter takes its
+  §7.3.2 default (`locale: string = "en-US"`, `decimals: int = 1`) or `T | not = not` where absent
+  means `not` — the SPEC form, which impl#1 compiles. NOT annotated (no writable scrml type yet):
+  open host option records (`formatNumberAdvanced(options)`, `mkdirSync/rmSync(options)`), and
+  every function-valued / any-valued parameter elsewhere. format: string truthiness rewritten to
+  the S440 form (`str == ""`, `plural is given ? …`, `currency is given ? …`), the `locale ||`
+  fallbacks dropped (the default carries them). Bootstrap: format 128 → 118 errors — the remaining
+  are host reach (`new Intl.*`, regex `.replace`), §7.3.2 defaults and rest params NOT PARSED
+  (E-BOOTSTRAP-REDECLARE "parameter `` is already declared" / missing-`;` cascades — new gap
+  g-boot-param-default-and-rest-s473), the `~{}` block. impl1-check: same codes (0 regressed);
+  stdlib-format/path/fs/parity unit tests pass. NB impl#1 reads a stdlib `.scrml` only for its
+  export list, async-ness and type declarations (api.js STDLIB-EXPORT-SEED) — parameter
+  annotations do not reach adopter call checking.

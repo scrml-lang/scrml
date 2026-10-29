@@ -29,7 +29,7 @@ ${
      *   readFileSync("/tmp/data.txt")             → "file contents..."
      *   readFileSync("/tmp/data.bin", "base64")   → "base64encoded..."
      */
-    export function readFileSync(path, encoding) {
+    export function readFileSync(path: string, encoding: string = "utf-8") {
         const fs = require("node:fs");
         return fs.readFileSync(path, { encoding: encoding || "utf-8" });
     }
@@ -44,7 +44,7 @@ ${
      *   writeFileSync("/tmp/out.txt", "hello world")
      *   writeFileSync("/tmp/out.txt", data, "base64")
      */
-    export function writeFileSync(path, content, encoding) {
+    export function writeFileSync(path: string, content: string, encoding: string = "utf-8") {
         const fs = require("node:fs");
         fs.writeFileSync(path, content, { encoding: encoding || "utf-8" });
     }
@@ -59,7 +59,7 @@ ${
      *   existsSync("/tmp/config.json") → true
      *   existsSync("/tmp/nope")        → false
      */
-    export function existsSync(path) {
+    export function existsSync(path: string) {
         const fs = require("node:fs");
         return fs.existsSync(path);
     }
@@ -89,7 +89,7 @@ ${
      * Example:
      *   readdirSync("/tmp/mydir") → ["file1.txt", "file2.txt"]
      */
-    export function readdirSync(dir) {
+    export function readdirSync(dir: string) {
         const fs = require("node:fs");
         return fs.readdirSync(dir);
     }
@@ -109,7 +109,7 @@ ${
      *   statSync("/tmp/data.txt")
      *     → { isFile: true, isDirectory: false, size: 42, mtime: Date }
      */
-    export function statSync(path) {
+    export function statSync(path: string) {
         const fs = require("node:fs");
         // fs.statSync throws on a missing path; safeCall turns that host throw
         // into HostError::Thrown, and the arm maps it to `not`.
