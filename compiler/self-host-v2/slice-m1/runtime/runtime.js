@@ -1949,6 +1949,25 @@ export function attr(scope, el, name, fn) {
     console.warn("[scrml css-guard] refused a data-supplied `style` write: a style is never built from data (SPEC §65.4.2). The attribute was removed.");
     return;
   }
+  // s473 — §5.2 "Data never moves the document base (S473)": a `<base>`'s
+  // `href` is never written from data. The compiler refuses it
+  // (E-ATTR-BASE-HREF); this is the wall behind it (fail closed — no compiled
+  // program asks for this write; `fn` is never run, and an `href` already on
+  // the element is removed rather than left standing).
+  if (isBaseElement(el) && isBaseHrefName(name)) {
+    el.removeAttribute(name);
+    console.warn("[scrml url-guard] refused a data-supplied `href` on a <base>: the document's base URL is never chosen by data (SPEC §5.2). The attribute was removed.");
+    return;
+  }
+  // s473 — §5.2 rule 2 "`srcdoc` in every form": a `srcdoc` whose value is
+  // not a static string is a compile error (E-ATTR-INTERP-EXECUTABLE), so no
+  // compiled program asks for this write either; the wall behind it, on any
+  // element (fail closed).
+  if (String(name).toLowerCase() === "srcdoc") {
+    el.removeAttribute(name);
+    console.warn("[scrml url-guard] refused a data-supplied `srcdoc`: an HTML document is never written from data (SPEC §5.2). The attribute was removed.");
+    return;
+  }
   const guard = urlGuardOf(el, name);
   effect(scope, () => {
     const v = fn();
@@ -1956,6 +1975,18 @@ export function attr(scope, el, name, fn) {
     const s = v === true ? "" : String(v);
     el.setAttribute(name, guard === null ? s : guard(s));
   });
+}
+
+// s473 — the `<base>` element (tag compared case-insensitively; HTML reads
+// `<BASE>` as `<base>`), and the names that would set its URL: `href` in any
+// case and any prefixed spelling of it (`xlink:href`) — fail closed.
+function isBaseElement(el) {
+  return String(el.tagName || "").toLowerCase() === "base";
+}
+
+function isBaseHrefName(name) {
+  const lower = String(name).toLowerCase();
+  return lower === "href" || lower.endsWith(":href");
 }
 
 // SVG animation elements whose `attributeName` is written from data (a bound
@@ -3048,6 +3079,33 @@ const malformed = (reason) => transportFailure({ variant: "Malformed", data: [re
 // the client's own check (the codec bounds anything it quotes).
 const codecReason = (what, err) => `${what}: malformed at ${err.path}: ${err.reason}`;
 
+/**
+ * s473 — §5.2 "Data never moves the document base (S473)": the URL scrml's own
+ * server-function call is sent to. A path-absolute route path given to `fetch`
+ * is resolved against `document.baseURI`, which a `<base href>` moves — a
+ * static one as much as a data one — so the call (its POST body and its
+ * `X-CSRF-Token`) would go wherever the base points (Chromium-verified, gap
+ * g-boot-base-href-from-data-retargets-server-calls-s473). The path is resolved against
+ * the DOCUMENT's own URL (`location.href`) instead, and the result must keep
+ * the document's origin (a `//host/…` path would not). Throws — the caller
+ * settles the call as Unreachable, no request made — when it does not, or when
+ * the document URL cannot be a base (`about:blank`: there a relative `fetch`
+ * fails anyway unless a `<base>` supplies the base — fail closed). With no
+ * document at all (`location` absent, no `document`) nothing resolves against
+ * a `<base>`, and the path is used as given.
+ */
+function ownOriginUrl(path) {
+  const loc = globalThis.location;
+  if (loc === undefined || loc === null) {
+    if (globalThis.document) throw new Error("scrml: a document with no location — the call has no origin to go to");
+    return path;
+  }
+  const here = new URL(String(loc.href));
+  const u = new URL(String(path), here);
+  if (u.origin !== here.origin) throw new Error("scrml: a server call's route leaves the document's origin");
+  return u.href;
+}
+
 export function call(route, args, task) {
   return new Promise((resolve) => {
     let settled = false;
@@ -3103,7 +3161,7 @@ export function call(route, args, task) {
       try {
         const init = { method: "POST", headers, body };
         if (controller) init.signal = controller.signal;
-        pending = globalThis.fetch(route.path, init);
+        pending = globalThis.fetch(ownOriginUrl(route.path), init);
       } catch {
         settle(unreachable());
         return;

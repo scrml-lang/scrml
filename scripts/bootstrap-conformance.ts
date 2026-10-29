@@ -467,10 +467,24 @@ const own = (v: Record<string, unknown>, k: string) => Object.prototype.hasOwnPr
  * An impl#1-shaped error stub (`type: "CpsError"`) answering a function with another declared enum
  * is therefore `Transport(Malformed)` on the bootstrap — the case's `_` arm still catches it.
  */
+/**
+ * s473 — the client runtime sends a call to an ABSOLUTE same-origin URL (runtime.js `ownOriginUrl`:
+ * resolved against `location.href`, never the `<base>`, SPEC §5.2 "Data never moves the document
+ * base"). The stub and the server seam are reached by path; a request for another origin is not
+ * the page's server, and is refused as a network failure would be.
+ */
+function requestPath(input: unknown): string {
+  const raw = typeof input === "string" ? input : String((input as { url?: string })?.url ?? input);
+  const here = String((globalThis as any).location?.href ?? "http://localhost/");
+  const u = new URL(raw, here);
+  if (u.origin !== new URL(here).origin) throw new TypeError("a request for another origin (" + u.origin + ")");
+  return u.pathname + u.search;
+}
+
 export function stubFetch(stub: Record<string, unknown>, routes: BootRoute[]) {
   const response = (status: number, text: string) => ({ status, text: () => Promise.resolve(text) });
   return async (input: unknown): Promise<unknown> => {
-    const url = typeof input === "string" ? input : String((input as { url?: string })?.url ?? input);
+    const url = requestPath(input);
     const r = routes.find((x) => x.path === url);
     let body: unknown = r && own(stub, r.fn) ? stub[r.fn] : undefined;
     if (isObj(body) && Array.isArray(body.__batches)) body = (body.__batches as unknown[])[0];
@@ -570,7 +584,7 @@ async function serverFetch(dir: string, server: BootServer) {
       const headers: Record<string, unknown> = { ...(init?.headers ?? {}) };
       if (doc && doc.cookie) headers.Cookie = doc.cookie;
       const body = init?.body ?? "";
-      const req = { url: "http://localhost" + String(path), method: init?.method ?? "GET", headers: headerBag(headers), text: () => Promise.resolve(body) };
+      const req = { url: "http://localhost" + requestPath(path), method: init?.method ?? "GET", headers: headerBag(headers), text: () => Promise.resolve(body) };
       const res = await srv.fetch(req);
       const set = res.headers.get("Set-Cookie");
       if (set && doc) doc.cookie = String(set).split(";")[0] + "; Path=/";
@@ -597,8 +611,10 @@ function between(html: string, open: string, close: string): string {
  */
 async function runBootstrapArtifact(html: string, js: string, input: InputStep[], serverStub: Record<string, unknown> | undefined, routes: BootRoute[], server?: BootServer) {
   if (GlobalRegistrator.isRegistered) await GlobalRegistrator.unregister();
-  // s468 (U1c): a page served from an origin, so `document.cookie` holds the CSRF cookie
-  GlobalRegistrator.register(server ? { url: "http://localhost/" } : undefined);
+  // s468 (U1c): a page served from an origin, so `document.cookie` holds the CSRF cookie;
+  // s473: every case — the runtime makes no request from a document whose URL cannot be a base
+  // (about:blank), as a browser's relative fetch there fails too
+  GlobalRegistrator.register({ url: "http://localhost/" });
   // s454 (U1b): the client artifact's server calls are answered by the case's stub (none: every call 501-free empty)
   // s468 (U1c): or, for a `serverDb` case, by the bootstrap's own server artifact
   const realFetch = (globalThis as any).fetch;
