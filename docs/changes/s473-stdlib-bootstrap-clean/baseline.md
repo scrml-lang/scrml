@@ -14,7 +14,7 @@ recorded. "own" = in the module's own file; "closure" = including the stdlib fil
 (KNOWN-DEFERRED, §41.17).
 
 **Headline: 1 clean (math) / 36 errors / 0 crash / 16 not-supplied (scrml:compiler*).**
-Total Error diagnostics across the 36: 2,868 (md 709, time 333, data/transform 284, store/kv 175,
+Total Error diagnostics across the 36 (closure counts): 2,775 (md 709, time 333, data/transform 284, store/kv 175,
 format 174, data/validate 148, test 105 — the rest < 100 each).
 
 ## E-BOOTSTRAP-UNSUPPORTED reasons (own files; sites / modules)

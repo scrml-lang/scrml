@@ -45,3 +45,17 @@ compile clean on the bootstrap, keep impl#1 compiling it).
   stdlib-format/path/fs/parity unit tests pass. NB impl#1 reads a stdlib `.scrml` only for its
   export list, async-ness and type declarations (api.js STDLIB-EXPORT-SEED) — parameter
   annotations do not reach adopter call checking.
+- 2026-10-29T17:20Z re-measured (after.md + after-table.md): 2 clean (math, random) / 35 errors;
+  2,775 → 2,219 Error diagnostics (baseline.md's first total "2,868" was a hand figure — corrected to
+  the measured 2,775). Ranked blocker list with sizes in after.md. Gaps: NEW
+  g-boot-param-default-and-rest-s473, g-boot-async-stdlib-function-s473, g-boot-reexport-from-s473,
+  g-boot-test-block-s473, g-impl1-library-test-block-import-emitted-s473 (defer=impl1-s471-policy),
+  g-boot-stdlib-intrinsic-fns-s473; NARROWED g-boot-stdlib-none-compiles-s471 (S473 note) and a S473
+  measurement note on g-boot-no-host-bridge-s471. state.ts --write (counts only; master-list.md
+  recent-sessions churn reverted, not staged).
+- Red-on-base for the new slice-m4 test: with base's stdlib/random/index.scrml (and the new host.js
+  present) 3 of 5 fail (the random pin, host-backed members, the page run); the math pin and the
+  host.js unit test pass. On pure base the file does not load (stdlib/random/host.js absent).
+- Hook note: the format/path/fs commit's FIRST hook run failed one shard (shard 3; my `tail` cut the
+  name — not identified); the immediate rerun passed the full suite. Treat as a possible flake; the
+  reviewer may want to rerun shard-3's files.
