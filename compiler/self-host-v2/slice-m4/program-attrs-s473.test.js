@@ -188,6 +188,16 @@ describe("B9 — `timestamp` is a type", () => {
       expect(d[0].message).toContain("§66.3");
     });
   }
+  // fix round 2: only the BUILT-IN `timestamp` — a user type of that name wins, and
+  // its default-less cell compiles exactly as any user type's does.
+  for (const [label, tdecl] of [["a struct", ":struct = { a: int }"], ["an enum", ":enum = { A, B }"]]) {
+    test(`fix round 2: a user \`type timestamp${tdecl}\` (${label}) — its default-less cell is judged as any user type's`, () => {
+      const src = (n) => prog("", `type ${n}${tdecl}\n    let <when:${n}/>\n    <p>x</p>`);
+      const mine = run(src("timestamp")).diags.map((x) => x.code);
+      expect(mine).toEqual(run(src("Stamp")).diags.map((x) => x.code));
+      expect(mine).toEqual([]);
+    });
+  }
   test("fix round F1: the reviewer's shape — `@when = not` on a bare timestamp cell is the refusal, not a string typing error", () => {
     const c = codes(prog("", `let <when:timestamp/>\n    <button onclick={ @when = not; }>x</button>`));
     expect(c).toContain("E-BOOTSTRAP-UNSUPPORTED");

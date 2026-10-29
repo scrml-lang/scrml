@@ -121,3 +121,14 @@ Tests: program-attrs-s473.test.js now 40 (10 new; 9 red against ee6f18ebb — th
 twin). Gates: the bootstrap slice step, conformance --check (unchanged: PASS 263 / FAIL 49 /
 UNSUPPORTED 816), types-gate, root tests, snippet, claim, corpus floor, md-shim, conflict-marker,
 SPEC-INDEX, delta-lint, s34-census, severity --check, e2e-render-map — all PASS.
+
+## 2026-10-29T19:00Z — fix round 2 (coordinator: F1 over-refusal)
+
+The F1 refusal checked the type NAME, so a user type named `timestamp` (which wins in
+`resolveTypeName`) had its default-less cell refused too. `stampNoDefaultDiag` now fires only when
+the name resolves to the BUILT-IN (`isBuiltinTypeName`: no user type stub / declaration of that
+name in the file's scope). The type env is threaded into `namedInstanceDiags` → `openerWordDiags`
+(te0 is now built one line earlier; no diagnostic order changes). Tests: +2 (a user
+`type timestamp:struct` / `:enum` cell compiles exactly as the same program with `Stamp` — red
+before this round). program-attrs-s473.test.js 42 pass. Slices (lints, m1, m2, m1 lowered, m3,
+m4 3168, codec) PASS; conformance --check current.

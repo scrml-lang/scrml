@@ -1134,6 +1134,16 @@ ${
         return { t: Type.Maybe(r.t), st: r.st, unresolved: r.unresolved }
     }
 
+    // s473 fix round 2 — `n` names no user type in `te.file`'s scope (declared
+    // there or imported), so it means the built-in of that name
+    // (resolveTypeName's order: a user type wins).
+    fn isBuiltinTypeName(te: TypeEnv, n: string) -> boolean {
+        const s: TypeStub | not = stubNamed(te, n)
+        if (s is given) return s.file == builtinFile()
+        const ds: Sym | not = declTypeNamed(te, n)
+        return ds is not
+    }
+
     fn isNamedShape(n: string) -> boolean {
         return n == "email" || n == "url" || n == "uuid" || n == "phone" || n == "date" || n == "time" || n == "color"
     }
@@ -4484,7 +4494,7 @@ ${
     // names a DECLARATION is a named shared instance (§66.8.2; `:Decl` is a
     // typed own value, #16). Not in the bootstrap: it is reported where it is
     // written, instead of reading as a field-less declaration named `accent`.
-    fn namedInstanceDiags(ds: DeclStub[], declNames: string[], files: FileAst[], st0: AS) -> AS {
+    fn namedInstanceDiags(te: TypeEnv, ds: DeclStub[], declNames: string[], files: FileAst[], st0: AS) -> AS {
         let st: AS = st0
         for (const s of ds) {
             const d: ADecl | not = s.d
@@ -4494,7 +4504,7 @@ ${
                     st = addDiag(st, s.file, d.span, "E-BOOTSTRAP-UNSUPPORTED", "`<" + d.name + ":" + n + " …/>` is a named shared instance of `<" + n + ">` (§66.8.2) — not in the bootstrap")
                 } else {
                     st = o19Diags(s.file, d, st)
-                    st = openerWordDiags(s.file, fileErrs(files, s.file), d, false, st)
+                    st = openerWordDiags(teAt(te, s.file), s.file, fileErrs(files, s.file), d, false, st)
                     // s444 Phase B: a user declaration's OWN validators, and a field's below depth 1
                     if (d.validators.length > 0) st = addDiag(st, s.file, d.validators[0].span, "E-BOOTSTRAP-UNSUPPORTED", "validators on `<" + d.name + ">`'s own opener bind its own value (§66.4 rule 3) — a user declaration's own value is not bindable in the bootstrap; put them on a child field")
                     for (const c of childFields(d.body)) { st = deepValidatorDiags(s.file, c.body, st) }
@@ -4505,7 +4515,7 @@ ${
                 // the program's cells (a nested user declaration is its own stub)
                 for (const it of p.items) {
                     for (const c of declsOfItem(it)) {
-                        if (!isNestedUserDecl(c) && declNames.indexOf(ownTypeName(c)) < 0) st = openerWordDiags(s.file, fileErrs(files, s.file), c, s.isProgram, st)
+                        if (!isNestedUserDecl(c) && declNames.indexOf(ownTypeName(c)) < 0) st = openerWordDiags(teAt(te, s.file), s.file, fileErrs(files, s.file), c, s.isProgram, st)
                         if (!isNestedUserDecl(c)) st = deepValidatorDiags(s.file, c.body, st)
                     }
                 }
@@ -4534,11 +4544,11 @@ ${
     // A declaration holding a parse error is recovery debris there (Rule C).
     // `cell`: `d` is a program cell (the only place the bootstrap reads
     // `reset-on=`, s449 — resetOnPass).
-    fn openerWordDiags(file: string, errs: ASpan[], d: ADecl, cell: boolean, st0: AS) -> AS {
+    fn openerWordDiags(te: TypeEnv, file: string, errs: ASpan[], d: ADecl, cell: boolean, st0: AS) -> AS {
         let st: AS = st0
         if (hasErrIn(errs, d.span)) return st
         st = repeatedWordDiags(file, d, st)
-        st = stampNoDefaultDiag(file, d, st)
+        st = stampNoDefaultDiag(te, file, d, st)
         for (const a of d.mods) {
             if (a.name == "reset-on" && !cell) {
                 st = addDiag(st, file, a.span, "E-BOOTSTRAP-UNSUPPORTED", "`reset-on=` on `<" + d.name + ">`, a field of a declaration, is not in the bootstrap — whether a field's `reset-on=` may name a sibling field of the same instance (a per-instance reset) is OPEN (§6.8.4); it is read on a program cell")
@@ -4549,7 +4559,7 @@ ${
                 st = addDiag(st, file, a.span, "E-BOOTSTRAP-UNSUPPORTED", unknownOpenerMessage(a.name))
             }
         }
-        for (const c of childFields(d.body)) { st = openerWordDiags(file, errs, c, false, st) }
+        for (const c of childFields(d.body)) { st = openerWordDiags(te, file, errs, c, false, st) }
         return st
     }
 
@@ -4560,14 +4570,15 @@ ${
     // `timestamp` as `string` (resolveTypeName), whose canonical empty is `""`,
     // and has no implicit lifecycle — so a `timestamp` cell with no own value is
     // refused by name rather than given `string`'s meaning
-    // (g-bootstrap-timestamp-canonical-empty-s473). Fail closed: a user type
-    // named `timestamp` is refused here too.
-    fn stampNoDefaultDiag(file: string, d: ADecl, st: AS) -> AS {
+    // (g-bootstrap-timestamp-canonical-empty-s473). Only the BUILT-IN
+    // `timestamp`: a user type of that name in scope wins (resolveTypeName),
+    // and its cell is judged as any user type's (fix round 2).
+    fn stampNoDefaultDiag(te: TypeEnv, file: string, d: ADecl, st: AS) -> AS {
         const ty: AType | not = d.ty
         if (ty is not) return st
         const k: ATypeK = ty.k
         const isStamp: boolean = match k {
-            .TName(name: n) :> n == "timestamp"
+            .TName(name: n) :> n == "timestamp" && isBuiltinTypeName(te, n)
             .TSeq(elem: e) :> false
             .TMaybe(inner: i) :> false
         }
@@ -4743,8 +4754,8 @@ ${
         st = rl.st
         const lk: Linkage = rl.lk
         if (!hasProgram) st = addDiag(st, entry, mkSpan(0, 0), "E-PROGRAM-MISSING", "the entry file has no `<program>`")
-        st = namedInstanceDiags(rd.ds, declNames, files, st)
         const te0: TypeEnv = { stubs: rs.stubs, declNames: declNames, declSyms: declSyms, declFiles: declFiles, link: lk, file: entry }
+        st = namedInstanceDiags(te0, rd.ds, declNames, files, st)
         const rt: RTypeInfos = typeInfos(rs.stubs, te0, st)
         st = rt.st
         const rf00: RFns = fnsOf(files, te0, st)
