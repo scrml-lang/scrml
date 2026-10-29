@@ -103,3 +103,29 @@ bootstrap errors sat inside `_={ in:{…} … }=` blocks (the bootstrap read `_ 
   lint-no-default-arm, lint-duplicate-fn, m1, m2, m1 lowered, m3, m4 (3,128), codec: PASS.
   bootstrap-conformance --check: PASS (regenerated: PASS 259 → 260, `foreign/foreign-lang-in-program-neg`).
   e2e-render-map: PASS. Full suite (pre-commit hook, 6 shards): 50,958 pass, 0 fail.
+
+## 2026-10-29 — fix round 1 (review of #1646: FIX-FIRST) + merge of origin/main
+
+Merged origin/main (merge, not rebase; #1630 in). `severity.scrml` conflict resolved by
+regeneration (`bun scripts/gen-bootstrap-severity.ts`); known-gaps auto-merged, gap ids diffed
+(HEAD ∪ main ⊆ merged: none lost).
+
+| finding | fix |
+|---|---|
+| F1 (MED, fail-open) — `let <n:int=0 min=_={ … }=/>` (and `max=` / `req=` / `single=` / `min=(…)`) compiled clean; root cause on base: a validator word or `single` with `=value` was "known" and its value read by nothing (`min=zzz`, `pattern=whatever.x()` too) | `openerWordDiags`: a foreign block in ANY opener word's value is E-FOREIGN-004; a validator word or `single` with a value is E-BOOTSTRAP-UNSUPPORTED naming the word (§55.1: a validator's argument is its call `min(…)` or none; §66.13.3: `single` takes none; §34 names no code for the `=` spelling). Tests: three sites added to the fail-closed sweep; `min=zzz`, `max=3`, `req=1`, `pattern=whatever.x()`, `single=1`, `min="5"` refused; `min(1)` untouched. Gap `g-boot-valued-validator-word-ignored-s473` filed RESOLVED. |
+| F2 (LOW, latent) — planner has no foreign SuspendK | noted on `g-boot-foreign-block-emission-unbuilt-s473` |
+| F3 (LOW, latent) — `sqlParamKey` dedup key for a foreign block | `""` (never deduplicated), like a nested `?{}` |
+| F4 (INFO) — `_{ 1 }==2` is E-FOREIGN-001 | gap `g-boot-foreign-level0-glued-eq-read-as-closer-s473` (LOW) |
+| F9 (INFO) — header: duplicate / reserved / comment-led crossings | gap `g-boot-foreign-header-checks-unbuilt-s473` (LOW) |
+| F10 (INFO) — §23.2.4a examples lack the S469 `;` | gap `g-spec-23-2-4a-examples-lack-semicolons-s473` (LOW) |
+
+Impact of F1: the bootstrap front end over samples / examples / conformance/cases / stdlib /
+benchmarks (2,865 files, the reviewer's `corpus.test.js`): **no file newly refused** vs base or vs
+the PR head (the one file that changed vs the PR head, `gauntlet-r10-odin-filebrowser`, changed by
+the merge of main — E-BOOTSTRAP-REDECLARE gone). `bootstrap-conformance --check`: current (no case
+moved). flogence: 3,889 → 3,881 (the merge), emission refusals 670.
+
+Gates re-run (all PASS): types-gate, snippet-gate, claim-gate, corpus-compile-floor, gen-md-shim,
+conflict-marker-gate, regen-spec-index, delta-lint, s34-census --check-new; lint-no-default-arm,
+lint-duplicate-fn, slice m1 (109), m2 (619), m1 lowered (109), m3 (60), m4 (3,164), codec (166);
+bootstrap-conformance --check; e2e-render-map (259).

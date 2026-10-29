@@ -248,12 +248,28 @@ describe("C — positions and language", () => {
       `    function a() -> int[] {\n        const xs = for (const i of [1, 2]) { lift ${F}; };\n        return xs;\n    }`, // a lift
       `    function a() -> int {\n        for (const i of ${F}) { }\n        return 0;\n    }`,                    // a for head
       `    let <n:int=${F}/>`,                                                         // a cell initializer
+      `    let <n:int=0 min=${F}/>`,                                                   // #1646 F1: a validator word's value
+      `    let <n:int=0 single=${F}/>`,                                                // #1646 F1: `single`'s value
+      `    let <n:int=0 req=(${F})/>`,                                                 // #1646 F1: a parenthesized value
     ];
     for (const s of sites) {
       const es = errs(prog(s));
       expect(es.length).toBeGreaterThan(0);
       expect(es.some((d) => String(d.code).startsWith("E-FOREIGN-") || d.message.includes(EMIT))).toBe(true);
     }
+  });
+
+  // #1646 review F1 (pre-existing on base): a validator word or `single` written `=value` was
+  // accepted and its value read by nothing — the bound silently not enforced. §55.1 / §66.13.3
+  // give neither a `=` value; refused by name (§34 names no code for the spelling).
+  test("a validator word or `single` with a `=value` is refused, never silently ignored", () => {
+    for (const s of ["min=zzz", "max=3", "req=1", "pattern=whatever.x()", "single=1", 'min="5"']) {
+      const d = diagsOf(prog(`    let <n:int=0 ${s}/>\n    <p>\${@n}</p>`), "E-BOOTSTRAP-UNSUPPORTED");
+      expect(d.length).toBe(1);
+      expect(d[0].message).toContain(s.slice(0, s.indexOf("=") + 1));
+    }
+    // the call form and a bare word are untouched
+    expect(diagsOf(prog("    let <n:int=0 min(1)/>\n    <p>\${@n}</p>"), "E-BOOTSTRAP-UNSUPPORTED").filter((d) => d.message.includes("min="))).toEqual([]);
   });
 
   test("E-FOREIGN-003: no `lang=` on the `<program>`", () => {

@@ -299,9 +299,10 @@ describe("review fixes (s469-boot-loops-1 adversarial review)", () => {
   // loop binder / an alias is a COPY (§66.10) — the cell is not written through it.
   test("HIGH 2 (s472): a field / element write through a local writes a COPY of the local — never the whole local, never the cell", async () => {
     const P = `    type P:struct = { name: string }\n    <ps:P[]=([{ name: "a" }])/>`;
-    clean(prog(P, `        <button onclick={ for (let p of @ps) { p.name = "z"; } }>b</button>`));
+    // s473: that write is never read, so it changes nothing — W-LOOP-COPY-WRITE-UNREAD (§66.10, a Warning)
+    expect(codes(prog(P, `        <button onclick={ for (let p of @ps) { p.name = "z"; } }>b</button>`))).toEqual(["W-LOOP-COPY-WRITE-UNREAD"]);
     clean(prog(P, `        <button onclick={ let p = @ps[0]; p.name = "z"; }>b</button>`));
-    await load(prog(P + `\n    function g() -> string {\n        let q: P = { name: "q" };\n        q.name = "z";\n        return q.name;\n    }\n    function h() -> string {\n        for (let p of @ps) { p.name = "z"; }\n        const p0: P = @ps[0];\n        return p0.name;\n    }`, `        <p id="g">\${g()}</p>\n        <p id="h">\${h()}</p>`));
+    await load(prog(P + `\n    function g() -> string {\n        let q: P = { name: "q" };\n        q.name = "z";\n        return q.name;\n    }\n    function h() -> string {\n        let seen: string = "";\n        for (let p of @ps) {\n            p.name = "z";\n            seen = p.name;\n        }\n        const p0: P = @ps[0];\n        return p0.name;\n    }`, `        <p id="g">\${g()}</p>\n        <p id="h">\${h()}</p>`));
     expect($("#g").textContent).toBe("z");
     expect($("#h").textContent).toBe("a");
     // a local tape is judged by its TYPE's grants: `int[]` grants no position write
