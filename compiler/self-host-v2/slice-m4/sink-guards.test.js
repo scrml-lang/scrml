@@ -85,7 +85,6 @@ renders <a class="lnk" href=u>l</a>
         <a id="sp" href=@spaced>leading space, mixed case</a>
         <a id="up" HREF=@bad>upper-case name</a>
         <img id="ss" srcset=@set/>
-        <form id="f" action=@bad></form>
         <object id="ob" data=@bad></object>
         <div id="dv" data=@bad></div>
         <button id="flip" onclick=flip()>flip</button>
@@ -139,8 +138,9 @@ describe("§5.2 rule 3 — every bound URL attribute is judged at runtime (one g
   test("srcset judges every candidate URL", () => {
     expect($("#ss").getAttribute("srcset")).toBe("about:blank");
   });
-  test("element scope: `action` on <form> and `data` on <object> are URLs; `data` on <div> is not", () => {
-    expect($("#f").getAttribute("action")).toBe("about:blank");
+  // s473: a data `action` on <form> is no longer a rule-3 runtime write — it is E-ATTR-FORM-ACTION
+  // (§5.2 "Data never chooses where a form posts …", form-action-meta-refresh-guard-s473.test.js).
+  test("element scope: `data` on <object> is a URL; `data` on <div> is not", () => {
     expect($("#ob").getAttribute("data")).toBe("about:blank");
     expect($("#dv").getAttribute("data")).toBe("javascript:alert(1)");
   });
@@ -158,8 +158,8 @@ describe("§5.2 rule 3 — every bound URL attribute is judged at runtime (one g
     expect($("#s5").getAttribute("to")).toBe("/ok?a=1");
   });
   test("every refusal reports once, naming the attribute — never the value", () => {
-    // e, h, d (initial `/start` admitted; the re-write refused), sp, up, ss, f, ob, row 1, lnk 1, s1, s3, s4
-    expect(errors.length).toBe(13);
+    // e, h, d (initial `/start` admitted; the re-write refused), sp, up, ss, ob, row 1, lnk 1, s1, s3, s4
+    expect(errors.length).toBe(12);
     for (const line of errors) {
       expect(line).toContain("[scrml url-guard]");
       expect(line).toContain("about:blank");

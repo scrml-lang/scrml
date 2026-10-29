@@ -14260,6 +14260,55 @@ ${
         }
     }
 
+    // s473 — §5.2 "Data never chooses where a form posts or where the page
+    // goes (S473)". Ruled (user-voice-scrml.md "S473 owner questions round 2"
+    // items 1 and 2): "Form `action` / `formaction` from data: REFUSED unless
+    // static." and "`<meta http-equiv=\"refresh\">` from data: REFUSED." The
+    // code a data-bound value of `a` on `e` is refused with, or "" when none:
+    //   - `action` (any case) on a `<form>` (any case) — the element scope
+    //     §5.2 rule 3 gives `action`; `formaction` (any case) on ANY element
+    //     (it is inert off `<button>` / `<input>`; refusing it there loses
+    //     nothing — fail closed): E-ATTR-FORM-ACTION;
+    //   - on a `<meta>`: `http-equiv` (data never chooses a pragma — it could
+    //     become `refresh`), and `content` when the `http-equiv` refreshes or
+    //     is computed (`metaEquivRefreshes`): E-ATTR-META-REFRESH.
+    fn navSinkCode(e: AElem, a: AAttr) -> string {
+        const n: string = a.name.toLowerCase()
+        const t: string = e.tag.toLowerCase()
+        if (n == "formaction" || (n == "action" && t == "form")) return "E-ATTR-FORM-ACTION"
+        if (t == "meta" && (n == "http-equiv" || (n == "content" && metaEquivRefreshes(e.attrs)))) return "E-ATTR-META-REFRESH"
+        return ""
+    }
+
+    // s473 — does this `<meta>`'s `http-equiv` refresh (or may it)? A value
+    // that is not a static quoted string is computed. A static one is matched
+    // ASCII case-insensitively for the text `refresh` anywhere (a superset of
+    // the browser's keyword test — surrounding whitespace included, fail
+    // closed). A `&` (a character reference the browser decodes:
+    // `ref&#114;esh`) or a `$` + `{` (a template) makes the text unprovable:
+    // treated as computed. (The shape of #1635's `linkRelLoadsSheet`.)
+    fn metaEquivRefreshes(attrs: AAttr[]) -> boolean {
+        for (const a of attrs) {
+            if (a.name.toLowerCase() == "http-equiv") {
+                const r: boolean = match a.value {
+                    .Quoted(v: s) :> s.toLowerCase().indexOf("refresh") >= 0 || s.indexOf("&") >= 0 || s.indexOf("$" + "{") >= 0
+                    .NoValue :> false
+                    .Bare(e: x) :> true
+                    .Paren(e: x) :> true
+                    .Braced(b: b) :> true
+                }
+                if (r) return true
+            }
+        }
+        return false
+    }
+
+    fn navSinkMessage(code: string, a: AAttr, e: AElem) -> string {
+        const head: string = "`" + a.name + "=` on `<" + e.tag + ">` takes its value from data (an expression, a variable, a call or a field)"
+        if (code == "E-ATTR-FORM-ACTION") return head + " — data never chooses where a form is sent: the submission carries every field of the form, a password included, to whatever URL the value names (§5.2 rule 3 admits any `https:` origin). Write the `" + a.name + "` as a static string (`" + a.name + "=\"/login\"`), or switch between static forms with `if=` (§5.2)"
+        return head + " — data never navigates the page: a `<meta http-equiv=\"refresh\">` sends the whole page to the URL in its `content`, and `http-equiv` chooses that pragma. Write `http-equiv` and a refresh's `content` as static strings (`content=\"30;url=/next\"`) (§5.2)"
+    }
+
     // s462 — a quoted value holding `${…}` (the parser refuses it).
     fn quotedHasInterp(v: AAttrValue) -> boolean {
         return match v {
@@ -14371,6 +14420,18 @@ ${
                 // at the definition (a field supplies the value).
                 st = resolveValue(penv, a.value, not, st)
                 st = addDiag(st, env.file, a.span, "E-ATTR-INTERP-EXECUTABLE", "the `" + a.name + "=` attribute on `<" + e.tag + ">` takes its value from data (an expression, a variable, a call or a field), and `srcdoc` is an HTML document — data written there can carry script. A `srcdoc` value is a static string only (no `$" + "{…}`). Build the frame from a URL (`src=`) or render the content as markup in the page (§5.2).")
+            } else if (valueExpr(a.value) is given && navSinkCode(e, a) != "") {
+                // s473 — §5.2 "Data never chooses where a form posts or where
+                // the page goes (S473)": a data `action` on a `<form>`, a data
+                // `formaction`, a data `http-equiv` on a `<meta>`, or a data
+                // `content` on a refresh `<meta>` "SHALL be a compile error"
+                // (E-ATTR-FORM-ACTION / E-ATTR-META-REFRESH). Chromium-proven:
+                // the form posts its fields (password included) off-origin; the
+                // meta navigates the page off-origin. In a declaration's body it
+                // is reported once, at the definition.
+                const code: string = navSinkCode(e, a)
+                st = resolveValue(penv, a.value, not, st)
+                st = addDiag(st, env.file, a.span, code, navSinkMessage(code, a, e))
             } else if (valueExpr(a.value) is given && a.name.toLowerCase() == "style") {
                 // s472 — §65.4.2: "`style=<expr>` where `<expr>` is neither a
                 // quoted string literal nor a `style`-typed value/list SHALL
