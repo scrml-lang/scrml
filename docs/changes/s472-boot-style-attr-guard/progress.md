@@ -84,3 +84,9 @@ Rulings (scrml-support/user-voice-scrml.md "⭐ RULED — five PA recs …" S472
 - Conflict: compiler/SPEC-INDEX.md only — `git-merge-generated.ts --regen`; `--check` OK (52,129 lines, 73/73).
 - SPEC.md / analyze.scrml / severity.scrml / known-gaps auto-merged; severity regenerated (`--check` current);
   state.ts --write no change; 0 markers. @gap ids: main 2445, branch 2450, result 2450, none lost.
+
+## S473 landing-front round 4 — merge origin/main (#1613)
+- Conflict: compiler/SPEC-INDEX.md only — `git-merge-generated.ts --regen`; `--check` OK (52,140 lines, 73/73).
+- SPEC.md / analyze.scrml / parse.scrml / severity.scrml / known-gaps auto-merged; severity regenerated (`--check`
+  current); state.ts --write only churned master-list.md recent-sessions — discarded, not staged; 0 markers.
+- @gap ids: main 2449, branch 2450, result 2454, none lost.

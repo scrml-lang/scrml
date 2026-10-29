@@ -1,0 +1,18 @@
+{
+  "id": "acceptance-db-body-fn-and-markup",
+  "description": "A `<db>` body holding a type, a function, markup and a display-text literal: the button in the block calls the block's function; the literal renders in place. Nothing in the body ships as page text.",
+  "language-version": "1.0",
+  "spec": "§4.18.1 (S472 amendment) · §4 · §8.1.1",
+  "rationale": "RULED S472 item 3: \"The `<db>` body is code-default and ITEM-ONLY (declarations, `function`/`fn`, `type`, markup, `\"…\"` literals)\".",
+  "expect": {
+    "codes": [],
+    "input": [
+      { "click": "#b" },
+      { "wait": "settle" }
+    ],
+    "domAnchored": [
+      { "selector": "#s", "text": "2" },
+      { "selector": "#lit", "text": "in the db block" }
+    ]
+  }
+}

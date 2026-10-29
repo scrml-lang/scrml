@@ -1,0 +1,10 @@
+{
+  "id": "acceptance-db-body-neg-prose",
+  "description": "Loose prose standing directly in a `<db>` body is refused (E-UNQUOTED-DISPLAY-TEXT) — it is never page text.",
+  "language-version": "1.0",
+  "spec": "§4.18.1 (S472 amendment) · §4.18.7",
+  "rationale": "RULED S472 item 3: \"loose prose is `E-UNQUOTED-DISPLAY-TEXT`\".",
+  "expect": {
+    "codes": ["E-UNQUOTED-DISPLAY-TEXT"]
+  }
+}

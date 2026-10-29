@@ -127,9 +127,13 @@ describe("a declaration in a `<db>` / `<channel>` body is an item, not a misplac
     const d = run(src).diags[0];
     expect(src.substring(d.span.start, d.span.end)).toBe("let <hits:int=0/>");
   });
-  test("prose in a <db> body is still text: `<p>Please let <b>me</b> know</p>` and a bare `let <b>x</b>`", () => {
+  // s472 (S472 ruling Q3): a <db> body is a code-default ITEM body, no longer free text —
+  // prose inside a markup element is that element's text; a bare `let <b>x</b> be` is
+  // E-PARSE-LET (as in a program body), and its trailing lone word `be` is code (S441: a
+  // lone identifier is code) — E-DB-BODY-STATEMENT (slice-m4/db-body-s472.test.js).
+  test("prose in a markup element in a <db> body is text: `<p>Please let <b>me</b> know</p>`; a bare `let <b>x</b> be` is refused", () => {
     expect(codes(DB("<p>Please let <b>me</b> know</p>"))).toEqual([]);
-    expect(codes(DB("let <b>x</b> be"))).toEqual([]);
+    expect(codes(DB("let <b>x</b> be"))).toEqual(["E-PARSE-LET", "E-DB-BODY-STATEMENT"]);
   });
   test("a <db> body with no declaration is unchanged (clean)", () => {
     expect(codes(DB(""))).toEqual([]);
