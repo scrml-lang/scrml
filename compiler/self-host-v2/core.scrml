@@ -404,7 +404,10 @@ ${
         RemoveEnd,
         RemoveFront,
         RemoveAnywhere,
-        ElemAt(index: Expr, path: FieldRef[]),
+        // s473: `loc` — the source location the E-INDEX-OUT-OF-RANGE-RT trap reports
+        // when `index` is outside the tape (§66.12.6 rule 3, ruled S473 "A write past
+        // the end of a tape position: runtime TRAP"; §19.17).
+        ElemAt(index: Expr, path: FieldRef[], loc: string),
         // s472 — a POSITION write of one element, `@xs[i] = v` (§66.12.6 rule 3:
         // "`xs[i] = v` | a position write | `write`"): the element at `index` is
         // replaced by the Write's value. Granted by `write` (in a GrantSet:

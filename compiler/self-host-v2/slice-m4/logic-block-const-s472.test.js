@@ -265,8 +265,8 @@ describe("collisions and writes", () => {
   test("a constant named like a program cell: E-NAME-COLLIDES-STATE (§1.6)", () => {
     expect(codes(one(P("    const n = 1;", "", "<p>${@n}</p>")))).toEqual(["E-NAME-COLLIDES-STATE"]);
   });
-  test("a constant named like a type of its file: E-BOOTSTRAP-REDECLARE (SPEC-silent; bootstrap-local, as the other such collisions)", () => {
-    expect(codes(one(P("    const T = 1;", "    type T:enum = { A, B }")))).toEqual(["E-BOOTSTRAP-REDECLARE"]);
+  test("a constant named like a type of its file: E-SCOPE-010 (§7.6, ruled S473; was bootstrap-local)", () => {
+    expect(codes(one(P("    const T = 1;", "    type T:enum = { A, B }")))).toEqual(["E-SCOPE-010"]);
   });
   test("an assignment to a constant: E-ASSIGN-004 (§50.9)", () => {
     expect(codes(one(P("    const A = 1;", "    function f() -> int { A = 2; return A; }", "<p>${f()}</p>")))).toEqual(["E-ASSIGN-004"]);
