@@ -1600,7 +1600,8 @@ ${
             .RemoveEnd :> rtCall(ctx, "removeEnd", [target, v])
             .RemoveFront :> rtCall(ctx, "removeFront", [target, v])
             .RemoveAnywhere :> jmcall(target, "set", [v])
-            .ElemAt(index: ix, path: path) :> rtCall(ctx, "setAt", [target, exprJs(ctx, ix), fieldPathJs(ctx, path), v])
+            // s473: `@xs[i].f = v` — the element field, or the E-INDEX-OUT-OF-RANGE-RT trap (nothing written)
+            .ElemAt(index: ix, path: path, loc: loc) :> rtCall(ctx, "setAt", [target, exprJs(ctx, ix), fieldPathJs(ctx, path), v, jstr(loc)])
             // s472: `@xs[i] = v` — the element at `i`, or the E-INDEX-OUT-OF-RANGE-RT trap (nothing written)
             .PositionAt(index: ix, loc: loc) :> rtCall(ctx, "setPosition", [target, exprJs(ctx, ix), v, jstr(loc)])
         }

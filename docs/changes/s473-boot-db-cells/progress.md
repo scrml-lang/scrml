@@ -68,3 +68,14 @@ PA recs" items 1, 2, 4, 5; S472 "⭐ RULED — functions in a `<db>` body: visib
 - Gates: slices m1 100, m2 614, m1 lowered 100, m3 60, m4 3105, codec 166 (0 fail); e2e-render-map 259/0; lint 0;
   types-gate OK; compiler/tests/*.test.js 2239/0; snippet, claim, floor, md-shim, conflict, SPEC-INDEX, delta-lint,
   s34-census (5 rows), bootstrap-conformance current, severity current — all PASS.
+
+## 2026-10-29 — merged origin/main (#1631, #1634, #1636, #1630, #1632)
+- Conflicts: compiler/SPEC.md — (a) §4.18.1 db paragraph: main's text (gains the S473 `const` sentence) with this
+  branch's two §8.1.3 pointers re-applied; (b) §34: main's E-DB-BODY-STATEMENT row (gains `const`) with this branch's
+  symbol citation re-applied, plus this branch's E-DB-CELL-EDIT-GRANT / -SERVER-READ / -WRITE-OUTSIDE-BLOCK rows.
+  SPEC-INDEX: `git-merge-generated.ts --regen`. severity.scrml regenerated; known-gaps counts `state.ts --write`
+  (master-list.md not staged). known-gaps auto-merged: gap ids main 2476 ∪ branch 2468 = 2481 = merged, none lost.
+- Gates: lint-no-default-arm 0; lint-duplicate-fn 0 violations; slices m1 109, m2 619, m1 lowered 109, m3 60,
+  m4 3174, codec 166 (0 fail); e2e-render-map 259/0; types-gate OK; compiler/tests/*.test.js 2239/0; snippet,
+  claim, floor, md-shim, conflict, SPEC-INDEX --check, delta-lint, s34-census --check-new --base origin/main
+  (50 rows PASS), bootstrap-conformance --check current, severity current — all PASS.

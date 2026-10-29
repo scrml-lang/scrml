@@ -2731,11 +2731,13 @@ ${
     // A Loop that never completes normally (an infinite head with no Break
     // naming it) ends every path through its block, as analyze's
     // loopNeverCompletes reads the source.
+    // s473 (review #1631 F2): the same heads as analyze's headNeverEnds —
+    // a condition that is the literal `true` never ends the loop either.
     fn loopNeverEnds(label: Sym, h: LoopHead, body: Block) -> boolean {
         const forever: boolean = match h {
             .Forever :> true
-            .Counted(init: i, cond: c) :> c is not
-            .While(cond: c) :> false
+            .Counted(init: i, cond: c) :> c is not || condIsTrueLit(c)
+            .While(cond: c) :> condIsTrueLit(c)
             .Each(h: eh) :> false
             .Range(h: rh) :> false
         }
@@ -2744,6 +2746,24 @@ ${
             if (breakTargetOf(n) == label.id) return false
         }
         return true
+    }
+
+    fn condIsTrueLit(c: Expr | not) -> boolean {
+        if (c is not) return false
+        const l: Literal | not = exprLiteral(c)
+        if (l is not) return false
+        return litIsTrue(l)
+    }
+
+    fn litIsTrue(l: Literal) -> boolean {
+        return match l {
+            .Bool(v: v) :> v
+            .Int(v: x) :> false
+            .Num(v: x) :> false
+            .Str(v: x) :> false
+            .Variant(enumSym: x) :> false
+            .Absent :> false
+        }
     }
 
     fn breakTargetOf(n: Node) -> int {
