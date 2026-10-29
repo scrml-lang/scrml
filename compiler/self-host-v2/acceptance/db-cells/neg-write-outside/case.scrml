@@ -1,0 +1,10 @@
+// §8.1.3 (S472 ruling item 5): only code inside the block writes a `<db>` cell.
+<program>
+    <db src="./app.db">
+        let <draft:string=""/>
+    </db>
+    function clear() {
+        @draft = "";
+    }
+    <main><button onclick=clear()>"clear"</button><p>${@draft}</p></main>
+</program>

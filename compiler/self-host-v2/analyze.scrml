@@ -45,7 +45,7 @@ ${
     import { Sym, Type, SeqAt, LengthGrant, SeqGrants, FieldDef, VariantDef, TypeDef, FieldRef, InstRef,
              Literal, PrimOp, EditKind, Check, FieldMode, FieldRole, GrantSet, Edge, TransitionGraph,
              DeclKind, HostCall, HostFn, SeqFn, BindKind, Validator, SurfaceProp, ValidityOf, Persist, PersistStore, CoreProgram,
-             SqlKind, SqlTables, SqlColumns, Db, Driver,
+             SqlKind, SqlTables, SqlColumns, Db, Driver, DbLoad,
              CssPart, CssDecl, StyleRule, CssImport, ScopeSheet,
              mkSym, noGrants, replaceGrant, typeDefSym, validityInst, validityDecl } from "./core.scrml"
     import { ASpan, BinOp, UnOp, AExpr, AProp, AExprK, AStmt, ABlock, AStmtK, AEffect, AType, ATypeK,
@@ -464,9 +464,9 @@ ${
     // s454 (U1b): `inherited` — the functions server-placed by inheritance
     // (§12.2 Trigger 5): their calls of server functions are made in place;
     // `plan` — the suspension plan (planPass) lower reads.
-    export type ServerFacts:struct = { servers: int[], sqls: SqlInfo[], dbs: Db[], places: PlaceFact[], inherited: int[], plan: SuspendPlan }
+    export type ServerFacts:struct = { servers: int[], sqls: SqlInfo[], dbs: Db[], places: PlaceFact[], inherited: int[], plan: SuspendPlan, loads: DbLoad[] }
 
-    export fn noServerFacts() -> ServerFacts { return { servers: [], sqls: [], dbs: [], places: [], inherited: [], plan: noPlan() } }
+    export fn noServerFacts() -> ServerFacts { return { servers: [], sqls: [], dbs: [], places: [], inherited: [], plan: noPlan(), loads: [] } }
 
     // s454 (U1b): is a call made in function `caller` (-1: a handler / effect body)
     // a CLIENT call — the caller is not server-placed, by its own body or by
@@ -973,6 +973,10 @@ ${
     // Every declared name of every file: its types, its functions (a
     // `<program>`'s included — typeItems / fnItems), its user declarations
     // (the decl stubs — the program itself is not a name).
+    // s473 — a db cell's LOAD function is named `@name` (parse readDbCell): a
+    // spelling no identifier has, so no program code can name or call it.
+    fn isLoadName(n: string) -> boolean { return n.substring(0, 1) == "@" }
+
     fn ownNames(files: FileAst[], stubs: TypeStub[], ds: DeclStub[]) -> OwnName[] {
         let out: OwnName[] = []
         for (const s of stubs) {
@@ -983,7 +987,8 @@ ${
             if (ad is given && !d.isProgram) out = out.concat([{ name: ad.name, kind: NameKind.KDecl, file: d.file, exported: ad.exported }])
         }
         for (const f of files) {
-            for (const af of fnItems(f.items)) { out = out.concat([{ name: af.name, kind: NameKind.KFn, file: f.path, exported: af.exported }]) }
+            // s473: a db cell's load (`@name`, parse readDbCell) is in no file scope — no program code names it
+            for (const af of fnItems(f.items)) { if (!isLoadName(af.name)) out = out.concat([{ name: af.name, kind: NameKind.KFn, file: f.path, exported: af.exported }]) }
             for (const ac of constItems(f.items)) { out = out.concat([{ name: ac.name, kind: NameKind.KConst, file: f.path, exported: ac.exported }]) }
         }
         return out
@@ -3900,7 +3905,8 @@ ${
         for (const f of files) {
             const fte: TypeEnv = teAt(te, f.path)
             for (const af of fnItems(f.items)) {
-                const r: RSym = mint(st, af.name)
+                // s473: a db cell's load `@rows` is minted as `load$rows` (its Sym hint names generated code)
+                const r: RSym = mint(st, isLoadName(af.name) ? "load$" + af.name.substring(1) : af.name)
                 st = r.st
                 // each signature component is judged by its own type
                 // expression: the return type alone, the parameter list as a
@@ -7599,7 +7605,80 @@ ${
         if (p.decl.file != env.file && !f.exported) {
             st = addDiag(st, env.file, span, "E-FIELD-PRIVATE-WRITE", "`" + f.sym.hint + "` of `<" + p.decl.sym.hint + ">` is not exported — it is writable only inside its defining file (§66.14)")
         }
-        return st
+        return dbCellWriteGuard(env, p, f, span, st)
+    }
+
+    // =========================================================================
+    // s473 (Lane B) — THE DB CELL'S WRITE RULE. RULED S472 ("`<db>` body + client
+    // reads", item 5): "Only code inside the block writes; locked cells are
+    // read-only on the client; `let` stays local." SPEC §8.1.3 items 5–6. Judged
+    // here, at the one guard every write place passes (writeGuards — an
+    // assignment, an edit call, a removal, an element / position write, a
+    // `bind:`, a `reset`):
+    //   - a LOCKED db cell — one with no `replace` grant (§66.9 rule 1) — is never
+    //     written on the client, whatever other grant its type carries
+    //     (E-WRITE-NOT-GRANTED; a locked cell whose type grants nothing is already
+    //     refused by its contract, so it is not reported twice);
+    //   - a writable db cell (`let`, or a tape whose type grants `replace`) is
+    //     written only by code INSIDE its `<db>` element — lexically: a function
+    //     declared in the `<db>` body, or a handler in its markup — else
+    //     E-DB-CELL-WRITE-OUTSIDE-BLOCK. The write lands locally (no server write).
+    // =========================================================================
+    fn dbCellWriteGuard(env: Env, p: WPlace, f: FieldInfo, span: ASpan, st: AS) -> AS {
+        if (p.decl.sym.id != env.g.program.id) return st
+        const c: ADbFn | not = dbCellRecord(env.g, f.nid)
+        if (c is not) return st
+        // LOCKED = no `replace` grant (§66.9 rule 1) — `let` on a scalar, `[replace]` in a
+        // sequence type's grants (O3: the sequence spelling of `let`). A locked db cell's
+        // other grants (a tape's `append`, a lifecycle) do not apply on the client.
+        if (!grantsAdmit(f.grants, EditKind.Replace)) {
+            if (!grantsAny(f.grants)) return st
+            return addDiag(st, env.file, span, "E-WRITE-NOT-GRANTED", "`@" + f.sym.hint + "` is a locked `<db>` cell (no `replace` grant) — read-only on the client, whatever else its type grants (S472 ruling item 5, §8.1.3): its value is the server's, loaded per request. Make it writable — `let` on a scalar, `replace` in a tape type's grants — and write it only from code inside its `<db>` (the write lands locally), or change the data on the server with a function and load the page again")
+        }
+        if (dbFileOf(env.g, c) == env.file && span.start >= c.start && span.end <= c.end) return st
+        return addDiag(st, env.file, span, "E-DB-CELL-WRITE-OUTSIDE-BLOCK", "`@" + f.sym.hint + "` is declared in a `<db>` body, and only code inside that `<db>` writes it (S472 ruling item 5, §8.1.3: the block owns its cells). Move this write into a function declared in that `<db>` body and call the function from here")
+    }
+
+    // s473 — the FileAst.dbFns record of the db cell whose declaration is `declNid` (`not`: not a db cell).
+    fn dbCellRecord(g: Globals, declNid: int) -> ADbFn | not {
+        for (const fa of g.files) {
+            for (const o of fa.dbFns) { if (o.cell >= 0 && o.cell == declNid) return o }
+        }
+        return not
+    }
+
+    // s473 — the file whose `<db>` the record `c` was read in.
+    fn dbFileOf(g: Globals, c: ADbFn) -> string {
+        for (const fa of g.files) {
+            for (const o of fa.dbFns) { if (o.fn == c.fn) return fa.path }
+        }
+        return ""
+    }
+
+    // s473 — the cell declaration nid of the load function `fnNid` (-1: not a load).
+    fn loadCellNid(g: Globals, fnNid: int) -> int {
+        for (const fa of g.files) {
+            for (const o of fa.dbFns) { if (o.cell >= 0 && o.fn == fnNid) return o.cell }
+        }
+        return -1
+    }
+
+    // s473 — is `nid` a db cell's LOAD function (parse readDbCell)?
+    fn isDbLoad(g: Globals, nid: int) -> boolean {
+        for (const fa of g.files) {
+            for (const o of fa.dbFns) { if (o.cell >= 0 && o.fn == nid) return true }
+        }
+        return false
+    }
+
+    // s473 — is `@name` a program field declared in a `<db>` body?
+    fn isDbCellName(g: Globals, name: string) -> boolean {
+        const d: DeclSrc | not = findDeclSrc(g, g.program)
+        if (d is not) return false
+        for (const f of d.info.fields) {
+            if (f.sym.hint == name && dbCellRecord(g, f.nid) is given) return true
+        }
+        return false
     }
 
     // `target = value` (statement position).
@@ -8043,6 +8122,11 @@ ${
         const f: FieldInfo = p.decl.fields[p.idx]
         const cap: Sym | not = f.wcap
         if (p.path.length > 0) return addDiag(st, env.file, e.span, "E-RESET-ARG", "`reset` takes a whole cell, not a sub-field")
+        // s473: a db cell's initializer is its server load (§8.1.3) — what a reset of it
+        // means on the client (the loaded value again, or a new load) is not built: refused
+        if (p.decl.sym.id == env.g.program.id && dbCellRecord(env.g, f.nid) is given) {
+            return addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "`reset(@" + f.sym.hint + ")` of a `<db>` cell is not in the bootstrap — its initializer is its server load, evaluated per request (§8.1.3), and whether a reset re-applies the loaded value or loads again is not built. Write the value you want with a function declared in its `<db>` body")
+        }
         if (!grantsAdmit(f.grants, EditKind.Replace) || cap is not) {
             return addDiag(st, env.file, e.span, "E-WRITE-NOT-GRANTED", "`reset(@" + f.sym.hint + ")` is a replace (§66.11.2) and `" + f.sym.hint + "` does not grant `replace` — declare it `let`")
         }
@@ -14178,7 +14262,7 @@ ${
         const where: string = nameScopeHere(env)
         if (where != "") {
             for (const id of dbOwnedFns(env.g, env.file, e.nid)) {
-                st = addDiag(st, env.file, id.span, "E-BOOTSTRAP-UNSUPPORTED", "a function in a `<db>` body that stands inside " + where + " is not in the bootstrap — a `<db>`-body function is the program's function (hoisted to program scope), so it would lose the names " + where + " binds (or bind the program's names of the same spelling). Declare the function in a `<db>` at the `<program>` level, or pass the values it needs as arguments")
+                st = addDiag(st, env.file, id.span, "E-BOOTSTRAP-UNSUPPORTED", dbNestedWhy(id, where))
             }
         }
         return addElem(resolveNodes(env, e.kids, st), e.nid, ElemFact.MDb)
@@ -14209,13 +14293,23 @@ ${
             if (e is given) {
                 if (!e.star && e.tag == "db") {
                     for (const f of dbOwnedFns(g, file, e.nid)) {
-                        st = addDiag(st, file, f.span, "E-BOOTSTRAP-UNSUPPORTED", "a function in a `<db>` body that stands inside an engine state child is not in the bootstrap — a `<db>`-body function is the program's function (hoisted to program scope), so it would lose the names the state child binds (or bind the program's names of the same spelling). Declare the function in a `<db>` at the `<program>` level, or pass the values it needs as arguments")
+                        st = addDiag(st, file, f.span, "E-BOOTSTRAP-UNSUPPORTED", dbNestedWhy(f, "an engine state child"))
                     }
                 }
                 if (e.star || e.tag != "each") st = refuseStateChildDbFns(g, file, e.kids, st)
             }
         }
         return st
+    }
+
+    // Why a db-body function (or s473: a db cell, by its load `@name`) in a `<db>`
+    // nested inside the name-binding scope `where` is refused. A db cell is the
+    // PROGRAM's cell (hoisted, as a db-body function is): one for the whole program,
+    // not one per row / instance / state, and its value would lose the scope's names
+    // — the Lane A pattern (S472 "functions in a `<db>` body: visibility").
+    fn dbNestedWhy(f: AFn, where: string) -> string {
+        if (isLoadName(f.name)) return "a `<db>` cell (`" + f.name + "`) declared in a `<db>` that stands inside " + where + " is not in the bootstrap — a `<db>` cell is the program's cell (hoisted to program scope, §8.1.3), so there would be ONE for the whole program, not one per row or instance, and its value would lose the names " + where + " binds. Declare the cell in a `<db>` at the `<program>` level"
+        return "a function in a `<db>` body that stands inside " + where + " is not in the bootstrap — a `<db>`-body function is the program's function (hoisted to program scope), so it would lose the names " + where + " binds (or bind the program's names of the same spelling). Declare the function in a `<db>` at the `<program>` level, or pass the values it needs as arguments"
     }
 
     // The functions the parser hoisted out of the `<db>` element `dbNid`'s body.
@@ -14682,6 +14776,31 @@ ${
         }
     }
 
+    // s473 — does this `<link>`'s `rel` load (or may it load) a stylesheet? Ruled
+    // S472 (user-voice-scrml.md "five PA recs" item 3): "A data-bound `href` on a
+    // `<link>` whose `rel` contains `stylesheet` (or is computed) is REFUSED." A
+    // `rel` that is not a static quoted string (`rel=@r`, `rel=(…)`, `{…}`) is
+    // computed. A static one is matched ASCII case-insensitively for the text
+    // `stylesheet` anywhere (a superset of the HTML token test — `alternate
+    // stylesheet`, any whitespace — fail closed). A `&` (a character reference
+    // the browser decodes: `style&#115;heet`) or a `$` + `{` (a template) makes
+    // the static text unprovable: treated as computed.
+    fn linkRelLoadsSheet(attrs: AAttr[]) -> boolean {
+        for (const a of attrs) {
+            if (a.name.toLowerCase() == "rel") {
+                const sheet: boolean = match a.value {
+                    .Quoted(v: s) :> s.toLowerCase().indexOf("stylesheet") >= 0 || s.indexOf("&") >= 0 || s.indexOf("$" + "{") >= 0
+                    .NoValue :> false
+                    .Bare(e: x) :> true
+                    .Paren(e: x) :> true
+                    .Braced(b: b) :> true
+                }
+                if (sheet) return true
+            }
+        }
+        return false
+    }
+
     // s462 — an attribute's parenthesized expression value `name=(…)`.
     fn parenValue(v: AAttrValue) -> boolean {
         return match v {
@@ -14820,9 +14939,9 @@ ${
                 // channel for a cell's value into CSS is `@name` in a `#{}`
                 // (§25.7 bridge, the runtime's cssValueOf). It is NOT the only
                 // one: a bound SVG presentation attribute (`fill=` `filter=`
-                // `mask=` `cursor=` … and SMIL `to=` animating one) still
-                // writes data as CSS — gap
-                // g-boot-svg-presentation-attr-css-url-unguarded-s472. In a
+                // `mask=` `cursor=` … and SMIL `to=` animating one) writes data
+                // as CSS — judged at runtime by the same cssValueOf (s473, gap
+                // g-boot-svg-presentation-attr-css-url-unguarded-s472). In a
                 // declaration's body it is reported once, at the definition.
                 st = resolveValue(penv, a.value, not, st)
                 st = addDiag(st, env.file, a.span, "E-STYLE-VALUE-NOT-STYLE", "`" + a.name + "=` on `<" + e.tag + ">` takes its value from data (an expression, a variable, a call or a field), and only a quoted string literal or a `style`-typed value applies a style — an arbitrary runtime string written into `style` is CSS built from data (`url(…)` fetches, `@import`, overlays). Write the style as a static `style=\"…\"`, put the dynamic part in a `#" + "{…}` rule as `@cell` (§25.7 — the bridge admits only a plain CSS value), or switch a class with `class=(…)` (§65.4.2)")
@@ -14837,6 +14956,17 @@ ${
                 // In a declaration's body it is reported once, at the definition.
                 st = resolveValue(penv, a.value, not, st)
                 st = addDiag(st, env.file, a.span, "E-ATTR-BASE-HREF", "`" + a.name + "=` on `<" + e.tag + ">` takes its value from data (an expression, a variable, a call or a field) — data never chooses the document's base URL: it resolves every relative URL on the page (links, forms, fetches), so a data base moves them to another origin. Write the `href` as a static string (`href=\"/app/\"`), or build the URLs that need a varying prefix where they are used (§5.2)")
+            } else if (valueExpr(a.value) is given && a.name.toLowerCase() == "href" && e.tag.toLowerCase() == "link" && linkRelLoadsSheet(e.attrs)) {
+                // s473 — §5.2 "Data-supplied stylesheets (S472)": "A `<link>`
+                // whose `href` is not a static string … and whose `rel` contains
+                // the text `stylesheet` … or is not a static string SHALL
+                // be a compile error (E-ATTR-STYLESHEET-HREF)". A whole sheet a
+                // cell chooses can do more than inline `style` (attribute-
+                // selector exfiltration, page-wide overlays); the §5.2 URL guard
+                // admits it (https). Gap g-boot-link-stylesheet-href-from-data-s472.
+                // In a declaration's body it is reported once, at the definition.
+                st = resolveValue(penv, a.value, not, st)
+                st = addDiag(st, env.file, a.span, "E-ATTR-STYLESHEET-HREF", "`" + a.name + "=` on `<" + e.tag + ">` takes its value from data (an expression, a variable, a call or a field), and this `<link>`'s `rel` loads a stylesheet (it contains `stylesheet`, or is computed) — data never chooses a stylesheet: a whole sheet can read the page (attribute-selector `url(…)` fetches) and cover it. Write the `href` as a static string (`href=\"/theme.css\"`), switch between static `<link>`s with `if=`, or put the dynamic part in a `#" + "{…}` rule as `@cell` (§25.7) (§5.2)")
             } else if (valueExpr(a.value) is given) {
                 st = resolveValue(penv, a.value, not, st)
                 st = addAttr(st, a.nid, AttrKind.ABound)
@@ -16119,7 +16249,8 @@ ${
                 const f: FnInfo = t.fns[j]
                 const first: FnInfo = t.fns[i]
                 // s472: in two files it is two functions — each call resolves in its own file's scope
-                if (first.file == f.file) {
+                // s473: two `<db>` cells of one name are reported once, as the cells (their loads `@c` follow)
+                if (first.file == f.file && !isLoadName(f.name)) {
                     out = out.concat([mkDiag(f.file, f.span, "E-SCOPE-010", "function `" + names[j] + "` is already declared at file scope (at " + offsetOf(first.span) + ") — duplicate binding in file scope (§7.6; ruled S440 #6)")])
                 }
             }
@@ -23541,7 +23672,7 @@ ${
         let doms: int[] = []
         for (const f of all) {
             const pk: PlaceK = placeOf(places, f.sym)
-            if (f.modifier) st = addDiag(st, f.file, f.span, "W-DEPRECATED-SERVER-MODIFIER", "`server function " + f.name + "` — the `server` modifier is deprecated (§52.10, Insight 26): write `function " + f.name + "(…)` and let route inference place it (§12.2 — a `" + sqlSigil() + "}` in its body places it on the server)")
+            if (f.modifier && !isLoadName(f.name)) st = addDiag(st, f.file, f.span, "W-DEPRECATED-SERVER-MODIFIER", "`server function " + f.name + "` — the `server` modifier is deprecated (§52.10, Insight 26): write `function " + f.name + "(…)` and let route inference place it (§12.2 — a `" + sqlSigil() + "}` in its body places it on the server)")
             if (f.doms.length > 0 && serverTriggered(f)) {
                 for (const du of f.doms) { doms = doms.concat([du.span.start]) }
                 st = addDiag(st, f.file, f.span, "E-ROUTE-005", "`" + f.name + "()` cannot be placed: its own body uses " + serverTrigger(f) + " (server-only) AND " + f.doms[0].what + " (client-only, no server referent) — route analysis can put it on neither side (§12.4). Split it: keep the server work in a server function, move the DOM access into a client function, and have the client function call the server one")
@@ -23580,11 +23711,62 @@ ${
         // value positions (§13.7) and action positions
         st = valueServerDiags(g, t, all, places, sum, rd, st)
         st = actionServerDiags(g, t, all, places, rd, st)
-        return { facts: { servers: servers, sqls: sqls, dbs: owned, places: places, inherited: sum.inherited, plan: noPlan() }, doms: doms, st: st }
+        const rl: RLoads = dbLoads(g, servers, st)
+        st = rl.st
+        return { facts: { servers: servers, sqls: sqls, dbs: owned, places: places, inherited: sum.inherited, plan: noPlan(), loads: rl.loads }, doms: doms, st: st }
+    }
+
+    // s473 (Lane B) — the program's `<db>` cells, each with its load (a server
+    // function by construction) and the Sym of the client's module-level value
+    // its load answered (CoreProgram.loads; the cell's init is `Local(val)`).
+    // A load that is not server-placed (only an erroring program has one) is
+    // refused here, fail closed: its value would otherwise be evaluated on the client.
+    type RLoads:struct = { loads: DbLoad[], st: AS }
+
+    fn dbLoads(g: Globals, servers: int[], st0: AS) -> RLoads {
+        let st: AS = st0
+        let out: DbLoad[] = []
+        const pd: DeclSrc | not = findDeclSrc(g, g.program)
+        if (pd is not) return { loads: out, st: st }
+        for (const fs of g.fns) {
+            if (isDbLoad(g, fs.f.nid)) {
+                if (servers.indexOf(fs.info.sym.id) < 0) {
+                    st = addDiag(st, fs.info.file, fs.info.span, "E-BOOTSTRAP-UNSUPPORTED", "the `<db>` cell `" + fs.f.name + "` could not be placed on the server (§8.1.3: its value is evaluated on the server, per request) — refused rather than evaluated on the client")
+                } else {
+                    let found = false
+                    for (const f of pd.info.fields) {
+                        if (f.nid == loadCellNid(g, fs.f.nid)) {
+                            found = true
+                            // s473 r1 (F4): a locked cell's other grants never apply on the client
+                            // (§8.1.3 item 5), so an edit grant without `replace` is dead weight — refused
+                            // at the declaration, not discovered at the first write
+                            if (grantsAny(f.grants) && !grantsAdmit(f.grants, EditKind.Replace)) {
+                                st = addDiag(st, fs.info.file, f.span, "E-DB-CELL-EDIT-GRANT", "`@" + f.sym.hint + "` is a locked `<db>` cell whose type grants edits but not `replace` — a locked `<db>` cell is read-only on the client, so those grants can never be used (§8.1.3 item 5). Drop them (a read-only cell), or grant `replace` (a tape written by code inside its `<db>`, landing locally)")
+                            }
+                            const rv: RSym = mint(st, f.sym.hint + "$db")
+                            st = rv.st
+                            out = out.concat([{ cell: f.sym, fn: fs.info.sym, val: rv.s }])
+                        }
+                    }
+                    // a cell that is not the top-level program's field (only a `<db>` refused
+                    // upstream — at file top level, in a nested `<program>` — has one): fail closed
+                    if (!found) st = addDiag(st, fs.info.file, fs.info.span, "E-BOOTSTRAP-UNSUPPORTED", "the `<db>` cell `" + fs.f.name + "` is not a cell of the top-level `<program>` — a `<db>` cell elsewhere is not in the bootstrap (§8.1.3)")
+                }
+            }
+        }
+        return { loads: out, st: st }
+    }
+
+    // s473: how a server-placed function is named in a message (a `<db>` cell's load by its cell)
+    fn serverFnLabel(f: FnFacts) -> string {
+        if (isLoadName(f.name)) return "the value of the `<db>` cell `" + f.name + "`"
+        return "server function `" + f.name + "()`"
     }
 
     fn serverTrigger(f: FnFacts) -> string {
         if (f.sqls.length > 0) return "a `" + sqlSigil() + "}` query"
+        // s473: a `<db>` cell's load (`@name`) is server code by its placement (§8.1.3)
+        if (isLoadName(f.name)) return "being a `<db>` cell's value (evaluated on the server per request, §8.1.3)"
         return "the `server` modifier"
     }
 
@@ -23628,9 +23810,16 @@ ${
         let st: AS = st0
         let seen: string[] = []
         for (const r of f.reads) {
-            if (seen.indexOf(r.what) < 0) {
+            if (seen.indexOf(r.what) < 0 && r.what.substring(0, 1) == "@" && isDbCellName(cx.g, r.what.substring(1))) {
+                // s473 — RULED S472 ("`<db>` body + client reads", item 4): "Server code
+                // reading `@x` of a db cell is REFUSED for now (`E-DB-CELL-SERVER-READ`)."
+                // §8.1.3 item 6. (A db cell's own value is server code too — its load.)
                 seen = seen.concat([r.what])
-                st = addDiag(st, f.file, r.span, "E-REACTIVE-003", "server function `" + f.name + "()` (placed on the server by " + serverTrigger(f) + ") reads `" + r.what + "` — a reactive cell lives in the browser (§6.6.9) and is not sent with the call, so on the server it would be `undefined`. Pass the value as an argument (`" + f.name + "(" + r.what + ")` at the call site, a parameter here), or have the server compute it itself inside the query")
+                const who: string = isLoadName(f.name) ? "the value of the `<db>` cell `" + f.name + "` (its load, run on the server per request)" : "server function `" + f.name + "()`"
+                st = addDiag(st, f.file, r.span, "E-DB-CELL-SERVER-READ", who + " reads `" + r.what + "`, a `<db>` cell — on the server `" + r.what + "` would be the browser's copy, which server code never reads (S472 ruling item 4, §8.1.3). Run the query that loads it here instead, or call a function that does")
+            } else if (seen.indexOf(r.what) < 0) {
+                seen = seen.concat([r.what])
+                st = addDiag(st, f.file, r.span, "E-REACTIVE-003", serverFnLabel(f) + " (placed on the server by " + serverTrigger(f) + ") reads `" + r.what + "` — a reactive cell lives in the browser (§6.6.9) and is not sent with the call, so on the server it would be `undefined`. Pass the value as an argument (`" + f.name + "(" + r.what + ")` at the call site, a parameter here), or have the server compute it itself inside the query")
             }
         }
         for (const w of f.scan.writes) {
@@ -26517,7 +26706,7 @@ ${
                                  novalidate: vp.forms, resets: bound.resets, gated: vp.gated, persists: bound.persists, server: pp.facts, css: css.facts, consts: bound.consts }
         const pl: PS = planPass(ra.g, typedT, sum, pp.st)
         const sf: ServerFacts = { servers: pp.facts.servers, sqls: pp.facts.sqls, dbs: pp.facts.dbs, places: pp.facts.places,
-                                  inherited: pp.facts.inherited, plan: pl.plan }
+                                  inherited: pp.facts.inherited, plan: pl.plan, loads: pp.facts.loads }
         const t: Tables = { program: bound.program, types: bound.types, decls: bound.decls, fns: bound.fns, handles: bound.handles,
                             names: bound.names, values: bound.values, effects: bound.effects, binds: bound.binds,
                             elems: bound.elems, attrs: bound.attrs, fails: bound.fails, annots: bound.annots, unresolved: bound.unresolved, typing: typed.typing,

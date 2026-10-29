@@ -114,8 +114,15 @@ describe("a runaway display-text literal recovers at the body's closer (§4.18.3
 // ---------------------------------------------------------------------------
 describe("a declaration in a `<db>` / `<channel>` body is an item, not a misplaced keyword (§66.2.5 O61)", () => {
   const DB = (body) => `<program>\n    <db src="./app.db">\n        ${body}\n        <p>in the db block</p>\n    </db>\n    <main><p>x</p></main>\n</program>\n`;
-  const DBMSG = "a declaration in a `<db>` body";
-  for (const decl of ["let <hits:int=0/>", "export let <hits:int=0/>", "export <hits:int=0/>", "<hits:int=0/>"]) {
+  // s473 (Lane B): the block-owned state is built — a `<db>` cell (slice-m4/db-cells-s473.test.js);
+  // `export` of one is not, and is refused by name
+  const DBMSG = "a `<db>` cell is `[let] <name:Type=value/>`";
+  for (const decl of ["let <hits:int=0/>", "<hits:int=0/>"]) {
+    test(`\`${decl}\` in a <db> body → a \`<db>\` cell, no E-DECL-KEYWORD-NOT-ITEM`, () => {
+      expect(run(DB(decl)).diags.map((d) => d.code)).toEqual([]);
+    });
+  }
+  for (const decl of ["export let <hits:int=0/>", "export <hits:int=0/>"]) {
     test(`\`${decl}\` in a <db> body → one named E-BOOTSTRAP-UNSUPPORTED, no E-DECL-KEYWORD-NOT-ITEM`, () => {
       const r = run(DB(decl));
       expect(r.diags.map((d) => d.code)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
@@ -123,9 +130,9 @@ describe("a declaration in a `<db>` / `<channel>` body is an item, not a misplac
     });
   }
   test("the refusal spans the whole declaration, keyword included", () => {
-    const src = DB("let <hits:int=0/>");
+    const src = DB("export let <hits:int=0/>");
     const d = run(src).diags[0];
-    expect(src.substring(d.span.start, d.span.end)).toBe("let <hits:int=0/>");
+    expect(src.substring(d.span.start, d.span.end)).toBe("export let <hits:int=0/>");
   });
   // s472 (S472 ruling Q3): a <db> body is a code-default ITEM body, no longer free text —
   // prose inside a markup element is that element's text; a bare `let <b>x</b> be` is

@@ -188,16 +188,23 @@ describe("loose prose in a `<db>` body is E-UNQUOTED-DISPLAY-TEXT — one report
   });
 });
 
-describe("a declaration in a `<db>` body stays REFUSED by name (Lane B owed — ruling item 6)", () => {
-  for (const decl of ["let <hits:int=0/>", "<hits:int=0/>", "export let <hits:int=0/>"]) {
-    test(`\`${decl}\` → one E-BOOTSTRAP-UNSUPPORTED naming the server-authoritative cell`, () => {
+// s473 (Lane B landed — slice-m4/db-cells-s473.test.js): a declaration in a `<db>` body is a
+// per-request server cell; only the built shape `[let] <name:Type=value/>` compiles, every other
+// shape (here `export`) is refused by name.
+describe("a declaration in a `<db>` body is a server cell (Lane B, s473); a shape outside the built set is refused by name", () => {
+  for (const decl of ["let <hits:int=0/>", "<hits:int=0/>"]) {
+    test(`\`${decl}\` → compiles clean (a \`<db>\` cell)`, () => {
       const r = run(DB(`        ${decl}`));
-      expect(r.diags.map((d) => d.code)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
-      expect(r.diags[0].message).toContain("a declaration in a `<db>` body");
-      expect(r.diags[0].message).toContain("server-authoritative cell");
-      expect(r.core == null).toBe(true);
+      expect(r.diags.map((d) => d.code)).toEqual([]);
+      expect(r.core.loads.length).toBe(1);
     });
   }
+  test("`export let <hits:int=0/>` → one E-BOOTSTRAP-UNSUPPORTED naming the `<db>` cell shape", () => {
+    const r = run(DB("        export let <hits:int=0/>"));
+    expect(r.diags.map((d) => d.code)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+    expect(r.diags[0].message).toContain("a `<db>` cell is `[let] <name:Type=value/>`");
+    expect(r.core == null).toBe(true);
+  });
   test("`let` before a tag that declares nothing: E-PARSE-LET, as in a program body", () => {
     expect(codes(DB("        let <b>x</b>"))).toEqual(["E-PARSE-LET"]);
   });

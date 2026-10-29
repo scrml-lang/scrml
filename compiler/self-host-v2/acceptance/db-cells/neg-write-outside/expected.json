@@ -1,0 +1,10 @@
+{
+  "id": "acceptance-db-cells-neg-write-outside",
+  "description": "A program-body function writing a `let` cell declared in a `<db>` body is refused (E-DB-CELL-WRITE-OUTSIDE-BLOCK): the block owns its cells.",
+  "language-version": "1.0",
+  "spec": "§8.1.3 (S472) · §34 E-DB-CELL-WRITE-OUTSIDE-BLOCK",
+  "rationale": "RULED S472 (`<db>` body + client reads) item 5: \"Only code inside the block writes; locked cells are read-only on the client; `let` stays local.\"",
+  "expect": {
+    "codes": ["E-DB-CELL-WRITE-OUTSIDE-BLOCK"]
+  }
+}
