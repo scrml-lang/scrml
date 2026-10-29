@@ -433,7 +433,19 @@ ${
     // functions — and this table keeps which `<db>` each function was declared
     // in: its `?{}` resolve to THAT block's database (§8.1.1, the nearest
     // database scope), never to the program's.
-    export type ADbFn:struct = { fn: int, db: int }
+    // s473 (S472 ruling items 1, 2, 4, 5 — Lane B): a DECLARATION in a `<db>`
+    // body is a per-request SERVER cell whose client copy is its projection.
+    // The parser desugars `[let] <name:Type=value/>` into two hoisted items: the
+    // program cell `[let] <name:Type/>` (no value of its own — the client's copy
+    // is the load's answer) and its LOAD, a function whose whole body is
+    // `return value;`, server-placed by construction and recorded here as this
+    // `<db>`'s function (so its `?{}` binds to THIS `<db>`, as any db-body
+    // function's). `cell` is the cell declaration's nid for a load (-1: an
+    // author's function); `start` / `end` is the `<db>` element's source span —
+    // the "inside the block" of ruling item 5 ("only code inside the block
+    // writes"). A load's name is `@name`, which no identifier can spell, so no
+    // program code can call it (it is not in any file scope).
+    export type ADbFn:struct = { fn: int, db: int, cell: int, start: int, end: int }
     export type FileAst:struct = { path: string, items: AItem[], errs: ASpan[], lines: int[], dbFns: ADbFn[] }
 
     // A diagnostic: a code, its §34 severity, a message, where. (§4 permits

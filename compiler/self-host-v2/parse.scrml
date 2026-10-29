@@ -4861,9 +4861,10 @@ ${
         if (s.indexOf("$" + "{") < 0) return mp
         // s472 — `style=(…)` is not a way out for a style: §65.4.2 refuses an
         // expression value of `style=` (E-STYLE-VALUE-NOT-STYLE). The quoted
-        // template itself is refused as §5.5.3 (not in the bootstrap); how its
-        // `$` + `{…}` would be guarded is an open SPEC question (gap
-        // g-spec-65-4-2-quoted-style-template-contradiction-s472).
+        // template itself is refused as §5.5.3 (not in the bootstrap). Ruled
+        // S472 (§65.4.2 "A `$` + `{…}` in a quoted `style="…"` is a guarded
+        // value"): if the bootstrap ever lowers it, each `$` + `{…}` goes
+        // through the runtime's cssValueOf — never written unguarded.
         if (name.toLowerCase() == "style") {
             return mDiag(mp, "E-BOOTSTRAP-UNSUPPORTED", "`" + name + "=\"…\"` holds a `$" + "{…}` interpolation — a quoted value with `$" + "{…}` is a reactive template (§5.5.3), which is not in the bootstrap; it would be emitted as literal text. `" + name + "=(…)` is no way out (an expression value of `style=` is E-STYLE-VALUE-NOT-STYLE): put the dynamic part in a `#" + "{…}` rule as `@cell` (§25.7), or switch a class with `class=(…)`", sp.start, sp.end)
         }
@@ -6113,14 +6114,31 @@ ${
         return isDeclOpener(ro.o)
     }
 
-    // The declaration is read whole (keywords, opener, body, `renders`) — as
-    // the item it is, never as text — and REFUSED by name: §66.2.5 / §8.1.1
-    // make it block-owned SERVER-SIDE state that the rest of the program reads
-    // by `@`, which the bootstrap has no model for. Reading it as a program-level
-    // (client) cell instead would move server-side state to the client, so it is
-    // not lowered at all (fail closed); no node is kept, so analyze does not
-    // report it a second time as "a declaration inside markup".
-    fn refuseDbDecl(mp: MP) -> MP {
+    // s473 (Lane B — RULED S472 "`<db>` body + client reads", items 1, 2, 4, 5):
+    // a declaration in a `<db>` body declares a per-request SERVER cell; the
+    // client receives only its projection. It is read whole (keywords, opener,
+    // body, `renders`) — never as text — and, in the one shape the bootstrap
+    // builds, `[let] <name:Type=value/>`, DESUGARED into two hoisted items:
+    //   - the program cell `[let] <name:Type/>`, with no value of its own (its
+    //     client copy is the load's answer — CoreProgram.loads);
+    //   - its LOAD: a parameterless function `@name` whose whole body is
+    //     `return value;`, with the cell's declared type as its return type.
+    //     It is recorded as this `<db>`'s function (finishDb → FileAst.dbFns,
+    //     `cell` set), so its `?{}` binds to THIS `<db>` (§8.1.1) through the
+    //     existing dbsPass, and it is a server function by construction (the
+    //     `server` flag; analyze never warns on it) — the existing route, §57
+    //     codec and CSRF path carry it. Its name `@name` is spelled by no
+    //     identifier, so no program code can call it.
+    // The declared type is REQUIRED: it is the wire table the server encodes the
+    // value against — the allow-list of what reaches the client (§57: a key the
+    // type does not declare is refused, never dropped). Every other shape — no
+    // type, no value, a `{…}` value, `export`, an attribute or modifier
+    // (`persist=`, `single`, …), a validator, a body or `renders` — is refused by
+    // name (E-BOOTSTRAP-UNSUPPORTED, one report, fail closed); no node is kept, so
+    // analyze does not report it again.
+    type RDbCell:struct = { items: AItem[], cells: RDbCellPair[], mp: MP }
+
+    fn readDbCell(mp: MP) -> RDbCell {
         const start: int = mp.pos
         let m: MP = mp
         let exported = false
@@ -6138,7 +6156,73 @@ ${
         const ro: ROpener = parseOpener(m)
         const od: Opener = isLet ? withLet(ro.o) : ro.o
         const rd: RDecl = finishDecl(od, ro.mp, exported)
-        return mDiag(rd.mp, "E-BOOTSTRAP-UNSUPPORTED", "a declaration in a `<db>` body declares a server-authoritative cell (§52 — S472 ruling: evaluated on the server per request, the client receives only its projection; §66.2.5 O61, §8.1.1), which is not in the bootstrap", start, rd.mp.pos)
+        const d: ADecl = rd.d
+        const why: string = dbCellShapeWhy(d)
+        if (why != "") {
+            return { items: [], cells: [], mp: mDiag(rd.mp, "E-BOOTSTRAP-UNSUPPORTED", "a `<db>` cell is `[let] <name:Type=value/>` (§8.1.3 — a per-request server cell, S472 ruling): " + why + " is not in the bootstrap", start, rd.mp.pos) }
+        }
+        let k: MP = rd.mp
+        let value: AExpr = { nid: k.nid, span: d.span, k: AExprK.Recovered }
+        const own: AAttrValue = d.own
+        const vb: AExpr | not = match own {
+            .Bare(e: e) :> e
+            .Paren(e: e) :> e
+            .Quoted(v: x) :> not
+            .NoValue :> not
+            .Braced(b: x) :> not
+        }
+        if (vb is given) {
+            value = vb
+        } else {
+            value = { nid: k.nid, span: d.span, k: AExprK.Str(quotedOwn(own)) }
+            k = mBump(k)
+        }
+        const ret: AStmt = { nid: k.nid, span: value.span, k: AStmtK.Return(value) }
+        k = mBump(k)
+        const body: ABlock = { nid: k.nid, span: value.span, stmts: [ret] }
+        k = mBump(k)
+        const load: AFn = { nid: k.nid, span: d.span, exported: false, pure: false, name: "@" + d.name, params: [], ret: d.ty,
+                            body: body, server: true, failable: false, err: not }
+        k = mBump(k)
+        const cell: ADecl = { nid: d.nid, span: d.span, exported: false, isLet: d.isLet, name: d.name, ty: d.ty, own: AAttrValue.NoValue,
+                              attrs: [], mods: [], body: [], renders: not, validators: [] }
+        const ci: AItem = { nid: k.nid, span: d.span, k: AItemK.DeclItem(cell) }
+        k = mBump(k)
+        const fi: AItem = { nid: k.nid, span: d.span, k: AItemK.FnItem(load) }
+        k = mBump(k)
+        return { items: [ci, fi], cells: [{ decl: cell.nid, fn: load.nid }], mp: k }
+    }
+
+    fn quotedOwn(v: AAttrValue) -> string {
+        return match v {
+            .Quoted(v: s) :> s
+            .Bare(e: x) :> ""
+            .Paren(e: x) :> ""
+            .NoValue :> ""
+            .Braced(b: x) :> ""
+        }
+    }
+
+    // "" when `d` is the built shape `[let] <name:Type=value/>`; else what is not.
+    fn dbCellShapeWhy(d: ADecl) -> string {
+        if (d.exported) return "`export` of a `<db>` cell"
+        if (d.ty is not) return "a `<db>` cell with no written type (its declared type is what the server sends — the allow-list of its projection)"
+        const own: AAttrValue = d.own
+        const vk: int = match own {
+            .NoValue :> 0
+            .Braced(b: x) :> 1
+            .Bare(e: x) :> 2
+            .Paren(e: x) :> 2
+            .Quoted(v: x) :> 2
+        }
+        if (vk == 0) return "a `<db>` cell with no value (its value is its load, evaluated on the server per request)"
+        if (vk == 1) return "a `{…}` value on a `<db>` cell"
+        if (d.attrs.length > 0) return "a typed attribute on a `<db>` cell"
+        if (d.mods.length > 0) return "`" + d.mods[0].name + "` on a `<db>` cell"
+        if (d.validators.length > 0) return "a validator on a `<db>` cell"
+        if (d.body.length > 0) return "a body on a `<db>` cell"
+        if (d.renders is given) return "`renders` on a `<db>` cell"
+        return ""
     }
 
     // ---- s472: a `<db>` body (S472 ruling Q3; SPEC §4.18.1) -----------------
@@ -6155,14 +6239,21 @@ ${
     //     (MP.hoist → parseMarkupItems) — the program's own function, whose
     //     `?{}` resolve to THIS `<db>` (FileAst.dbFns; analyze dbsPass, §8.1.1
     //     the nearest database scope);
-    //   - a declaration is refused by name (refuseDbDecl — a server-authoritative
-    //     cell, ruling Q1, is not in the bootstrap);
+    //   - a declaration is a per-request server cell (s473, readDbCell — ruling
+    //     Q1): desugared into a hoisted program cell and its hoisted load;
     //   - `#{…}` is CSS, the other sigils as in markup;
     //   - anything else is a statement (E-DB-BODY-STATEMENT — a `<db>` body
     //     declares, it does not run: a `${…}`, an `<effect>`, a call, a write,
     //     control flow, `when`) or prose (E-UNQUOTED-DISPLAY-TEXT, one report
     //     per run of consecutive prose lines).
-    type RDbBody:struct = { nodes: ANode[], items: AItem[], mp: MP }
+    // s473: `cells` — each db cell's (declaration nid, load function nid) pair (readDbCell).
+    type RDbCellPair:struct = { decl: int, fn: int }
+    type RDbBody:struct = { nodes: ANode[], items: AItem[], cells: RDbCellPair[], mp: MP }
+
+    fn cellOfLoad(cs: RDbCellPair[], fid: int) -> int {
+        for (const c of cs) { if (c.fn == fid) return c.decl }
+        return -1
+    }
 
     fn isDbOpener(o: Opener) -> boolean { return !o.star && o.name == "db" }
 
@@ -6175,7 +6266,7 @@ ${
         let fns: ADbFn[] = r.mp.dbFns
         for (const it of rb.items) {
             const fid: int = fnIdOfItem(it.k)
-            if (fid >= 0) fns = fns.concat([{ fn: fid, db: r.e.nid }])
+            if (fid >= 0) fns = fns.concat([{ fn: fid, db: r.e.nid, cell: cellOfLoad(rb.cells, fid), start: r.e.span.start, end: r.e.span.end }])
         }
         const m: MP = { src: r.mp.src, pos: r.mp.pos, nid: r.mp.nid, diags: r.mp.diags, file: r.mp.file, hoist: r.mp.hoist.concat(rb.items), dbFns: fns }
         return { e: r.e, mp: m }
@@ -6197,6 +6288,7 @@ ${
         let m: MP = mp
         let out: ANode[] = []
         let items: AItem[] = []
+        let cells: RDbCellPair[] = []
         // a pending prose run [proseStart, proseEnd), reported once
         let proseStart: int = -1
         let proseEnd: int = -1
@@ -6222,7 +6314,10 @@ ${
                 const end: int = lastEnd(tp)
                 m = mDiag(mAt(m, end), "E-DB-BODY-STATEMENT", "a `" + interpOpen() + "…}` in a `<db>` body: " + dbStmtWhy() + " A value to display is a display-text literal (`\"" + interpOpen() + "…}\"`) or goes inside a markup element; a function or a type is written directly in the `<db>` body, without `" + interpOpen() + "…}`", at, end)
             } else if (dbDeclAt(m)) {
-                m = refuseDbDecl(m)
+                const rc: RDbCell = readDbCell(m)
+                m = rc.mp
+                items = items.concat(rc.items)
+                cells = cells.concat(rc.cells)
             } else if (keywordTagAt(m) >= 0) {
                 m = dbKeywordOnMarkup(m)
             } else if (chAt(m, 0) == "<" && opensTag(chAt(m, 1))) {
@@ -6288,7 +6383,7 @@ ${
         }
         if (proseStart >= 0) m = dbProseDiag(m, proseStart, proseEnd, m.diags.length)
         if (mLooking(m, "</")) m = parseCloser(m, "db")
-        return { nodes: out, items: items, mp: m }
+        return { nodes: out, items: items, cells: cells, mp: m }
     }
 
     fn isTypeItem(k: AItemK) -> boolean {
