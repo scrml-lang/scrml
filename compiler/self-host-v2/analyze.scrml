@@ -12115,6 +12115,7 @@ ${
         const lr: LiftsOf = liftsInto(st, n0, rs.s)
         if (lr.count == 0 || !liftReachable(f.body)) st = addDiag(st, env.file, f.span, "E-LOOP-007", "The loop bound to `" + b.name + "` lifts nothing on any path, so its value is always an empty tape. Add `lift <value>;` where the loop produces an element, or write the loop as a statement (§49.4.4, §49.6)")
         if (boundLoopExitless(f)) st = addDiag(st, env.file, f.span, "E-LOOP-008", "The loop bound to `" + b.name + "` never ends: its head never stops it, and no path in its body reaches a `break` that leaves it, a `return`, a `fail` or a `?` — so its value is never produced and this code never continues (a `break` inside an inner loop leaves only that loop). Add `if (<done>) { break; }` where the loop has lifted its last element, or give it a head that ends (`for (x of xs)`, `for (cond)`) (§49.6 rule 10)")
+        if (boundLoopStranded(f)) st = addDiag(st, env.file, f.span, "E-LOOP-008", "The loop bound to `" + b.name + "` never finishes an iteration: every path through its body runs into an inner loop that never ends (`for { }`, `for (;;)`, `for (true)` with no `break` of its own), and no path reaches a `continue` of this loop, a `break` that leaves it, a `return`, a `fail` or a `?` — so its value is never produced and this code never continues. Give the inner loop a `break` (`if (<done>) { break; }`), or leave this loop from it (`break <label>`, `continue <label>`) (§49.6 rule 10, S473)")
         let lty: Type | not = lr.elem
         if (lty is given) lty = Type.Seq(lty, fixedSeq())
         if (annot is given) lty = annot
@@ -12381,6 +12382,7 @@ ${
         st = resolveFor(withLift(env, LiftCtx.LiftTo(rs.s, true)), fs, f, st)
         if (liftsInto(st, n0, rs.s).count == 0 || !liftReachable(f.body)) st = addDiag(st, env.file, f.span, "E-LOOP-007", "This `" + "$" + "{ for … }` loop lifts nothing, so it always renders nothing. Add `lift <li>…</li>;` (or `lift <value>;`) where the loop produces a row, or compute the loop in a function (§17.4, §49.4.4)")
         if (boundLoopExitless(f)) st = addDiag(st, env.file, f.span, "E-LOOP-008", "This `" + "$" + "{ for … }` loop never ends: its head never stops it, and no path in its body reaches a `break` that leaves it — so the page never finishes rendering (a `break` inside an inner loop leaves only that loop). Add `if (<done>) { break; }` after the last row, or give it a head that ends (`for (x of xs)`, `for (cond)`) (§49.6 rule 10, §17.4)")
+        if (boundLoopStranded(f)) st = addDiag(st, env.file, f.span, "E-LOOP-008", "This `" + "$" + "{ for … }` loop never finishes a row: every path through its body runs into an inner loop that never ends (`for { }`, `for (;;)`, `for (true)` with no `break` of its own), and no path reaches a `continue` of this loop or a `break` that leaves it — so the page never finishes rendering. Give the inner loop a `break` (`if (<done>) { break; }`), or leave this loop from it (`break <label>`, `continue <label>`) (§49.6 rule 10, §17.4, S473)")
         for (const rsite of returnSites(f.body)) {
             st = addDiag(st, env.file, f.span, "E-BOOTSTRAP-UNSUPPORTED", "a `return` inside a `" + "$" + "{ for … }` in markup has no function to leave (§49.6 rule 6 names a function's exits; a render position has none) — compute the loop in a function and render its result")
         }
@@ -12823,7 +12825,73 @@ ${
     // =========================================================================
     fn boundLoopExitless(f: AFor) -> boolean {
         if (!headNeverEnds(f.head)) return false
-        return !blockWayOut(f.body, f.label, true)
+        return !blockWayOut(f.body, f.label, true, false)
+    }
+
+    // s473 — RULED S473 "owner questions round 2, PA recs" item 4: "The
+    // exit-less loop rule (E-LOOP-008) widens to catch an inner forever loop."
+    // A bound loop whose head DOES end it (`for (x of xs)`, `for (cond)`, a
+    // counted head with a condition) still never produces its value when no
+    // path through its body finishes an iteration: every path runs into a
+    // statement that ends it (stmtEndsPath) and none reaches a `continue` of
+    // this loop or a way out of it. Such a statement is either an inner loop
+    // that never completes (loopNeverCompletes: a forever head no `break`
+    // leaves) — the inner-forever strand (review #1631 F3: `for (y of ys) {
+    // lift y; for { } }` hung) — or a labelled `break` / `continue` that
+    // crosses this loop to a loop outside it, which is already E-LOOP-005
+    // (or E-LOOP-003): a bound loop is a wall (§49.6 rule 6). With such a
+    // crossing exit anywhere in the body this check stays quiet, so the
+    // refused program gets that one error, not a second one naming an inner
+    // loop that may not exist (review #1638 F2). A forever head is
+    // boundLoopExitless's, so the two never both fire.
+    fn boundLoopStranded(f: AFor) -> boolean {
+        if (headNeverEnds(f.head)) return false
+        if (!blockEndsPath(f.body)) return false
+        if (blockCrossesOut(f.body, [f.label])) return false
+        return !blockWayOut(f.body, f.label, true, true)
+    }
+
+    // Does `b` hold a labelled `break` / `continue` naming no loop in `owned`
+    // (this loop and the loops inside it, at any depth)? Reachability is not
+    // read: every such exit is an error of its own (E-LOOP-005 / -003), so
+    // staying quiet here never lets a program compile.
+    fn blockCrossesOut(b: ABlock, owned: string[]) -> boolean {
+        for (const s of b.stmts) {
+            if (stmtCrossesOut(s, owned)) return true
+        }
+        return false
+    }
+
+    fn stmtCrossesOut(s: AStmt, owned: string[]) -> boolean {
+        const k: AStmtK = s.k
+        return match k {
+            .Break(label: l) :> l != "" && !labelOwned(l, owned)
+            .Continue(label: l) :> l != "" && !labelOwned(l, owned)
+            .For(f: lf) :> blockCrossesOut(lf.body, owned.concat([lf.label]))
+            .Lift(what: w) :> blocksCrossOut(nestedBlocks(s), owned)
+            .Eval(e: x) :> blocksCrossOut(nestedBlocks(s), owned)
+            .Local(name: n) :> blocksCrossOut(nestedBlocks(s), owned)
+            .Return(e: x) :> blocksCrossOut(nestedBlocks(s), owned)
+            .If(cond: c) :> blocksCrossOut(nestedBlocks(s), owned)
+            .Given(name: n) :> blocksCrossOut(nestedBlocks(s), owned)
+            .Defer(body: d) :> blockCrossesOut(d, owned)
+            .EffectStmt(w: w) :> false
+            .Fail(f: x) :> false
+        }
+    }
+
+    fn blocksCrossOut(bs: ABlock[], owned: string[]) -> boolean {
+        for (const b of bs) {
+            if (blockCrossesOut(b, owned)) return true
+        }
+        return false
+    }
+
+    fn labelOwned(l: string, owned: string[]) -> boolean {
+        for (const o of owned) {
+            if (o == l) return true
+        }
+        return false
     }
 
     fn headNeverEnds(h: AForHead) -> boolean {
@@ -12899,33 +12967,35 @@ ${
     }
 
     // Does a path through `b` reach a way out of the loop labelled `label`
-    // (`direct`: `b` is that loop's own body, not an inner loop's)?
-    fn blockWayOut(b: ABlock, label: string, direct: boolean) -> boolean {
+    // (`direct`: `b` is that loop's own body, not an inner loop's)? With
+    // `cont`, a `continue` of that loop counts too: it finishes the iteration
+    // (boundLoopStranded — an ending head then gets to stop the loop).
+    fn blockWayOut(b: ABlock, label: string, direct: boolean, cont: boolean) -> boolean {
         for (const s of b.stmts) {
-            if (stmtWayOut(s, label, direct)) return true
+            if (stmtWayOut(s, label, direct, cont)) return true
             if (stmtEndsPath(s)) return false
         }
         return false
     }
 
-    fn blockWayOutMaybe(b: ABlock | not, label: string, direct: boolean) -> boolean {
+    fn blockWayOutMaybe(b: ABlock | not, label: string, direct: boolean, cont: boolean) -> boolean {
         if (b is not) return false
-        return blockWayOut(b, label, direct)
+        return blockWayOut(b, label, direct, cont)
     }
 
-    fn stmtWayOut(s: AStmt, label: string, direct: boolean) -> boolean {
+    fn stmtWayOut(s: AStmt, label: string, direct: boolean, cont: boolean) -> boolean {
         const k: AStmtK = s.k
         return match k {
             .Break(label: l) :> (l == "" && direct) || (l != "" && l == label)
-            .Continue(label: l) :> false
+            .Continue(label: l) :> cont && ((l == "" && direct) || (l != "" && l == label))
             .Return(e: x) :> true
             .Fail(f: x) :> true
-            .Eval(e: e) :> exprWayOut(e, label, direct)
-            .Local(name: n, init: i) :> exprWayOut(i, label, direct)
-            .Lift(what: w) :> exprsWayOut(liftExprs(w), label, direct)
-            .If(cond: c, thenB: t, elseB: el) :> exprWayOut(c, label, direct) || blockWayOut(t, label, direct) || blockWayOutMaybe(el, label, direct)
-            .Given(name: n, subject: x, body: gb) :> exprWayOut(x, label, direct) || blockWayOut(gb, label, direct)
-            .For(f: lf) :> exprsWayOut(forExprs(lf), label, false) || blockWayOut(lf.body, label, false)
+            .Eval(e: e) :> exprWayOut(e, label, direct, cont)
+            .Local(name: n, init: i) :> exprWayOut(i, label, direct, cont)
+            .Lift(what: w) :> exprsWayOut(liftExprs(w), label, direct, cont)
+            .If(cond: c, thenB: t, elseB: el) :> exprWayOut(c, label, direct, cont) || blockWayOut(t, label, direct, cont) || blockWayOutMaybe(el, label, direct, cont)
+            .Given(name: n, subject: x, body: gb) :> exprWayOut(x, label, direct, cont) || blockWayOut(gb, label, direct, cont)
+            .For(f: lf) :> exprsWayOut(forExprs(lf), label, false, cont) || blockWayOut(lf.body, label, false, cont)
             .EffectStmt(w: w) :> false
             .Defer(body: d) :> false
         }
@@ -12933,21 +13003,21 @@ ${
 
     // A `?` reached in the expression (it leaves the function), or a way out
     // in one of its handling arms' blocks — never through an arrow function.
-    fn exprWayOut(e: AExpr, label: string, direct: boolean) -> boolean {
+    fn exprWayOut(e: AExpr, label: string, direct: boolean, cont: boolean) -> boolean {
         if (lambdaBody(e) is given) return false
         const h: AHandled | not = handledOf(e.k)
         if (h is given) {
             if (howPropagates(h.how)) return true
             for (const b of exprBlocks(e)) {
-                if (blockWayOut(b, label, direct)) return true
+                if (blockWayOut(b, label, direct, cont)) return true
             }
         }
-        return exprsWayOut(exprKids(e), label, direct)
+        return exprsWayOut(exprKids(e), label, direct, cont)
     }
 
-    fn exprsWayOut(es: AExpr[], label: string, direct: boolean) -> boolean {
+    fn exprsWayOut(es: AExpr[], label: string, direct: boolean, cont: boolean) -> boolean {
         for (const x of es) {
-            if (exprWayOut(x, label, direct)) return true
+            if (exprWayOut(x, label, direct, cont)) return true
         }
         return false
     }
