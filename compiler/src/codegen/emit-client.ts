@@ -186,6 +186,12 @@ const POST_EMIT_HELPER_CHUNK_GATES: ReadonlyArray<readonly [string, string]> = [
  *       _scrml_reactive_set("cell", R);
  *     }
  *
+ * It is also the pass for every ASYNC callee the s441 loop does not own — an IMPORTED server
+ * function or async export (s473-impl1-imported-handler-arm): emit-logic's auto-await emits that
+ * site as `let R = await _scrml_reactive_set("cell", await f());`, rewritten here to
+ * `let R = await f(); if (…) {…} else { set(R) }` — the shape the s441 pass gives a same-file
+ * server function, so an imported and a local callee lower identically (§19.9.10).
+ *
  * Only that exact emitted shape is touched (the `let`, the guard on the same binding right after it
  * — a module-init `_scrml_init_set(…)` line may sit between — and the arms' own write-back of `R`);
  * anything else is left as emitted. Every site is found, a site nested in another site's arm block
@@ -237,7 +243,14 @@ export function deferSyncGuardedCellWrites(code: string, findMatchingBrace: (s: 
   let at = mask.indexOf(SET);
   while (at >= 0) {
     const next = at + SET.length;
-    const head = /\blet\s+([A-Za-z_$][\w$]*)\s*=\s*$/.exec(mask.slice(Math.max(0, at - 120), at));
+    // s473-impl1-imported-handler-arm — `(await\s+)?`: the guarded-expr auto-await
+    // (`isPromiseReturningCallExpr`, which classifies an IMPORTED async callee through the export
+    // registry) prefixes `await` to the whole statement, `let R = await _scrml_reactive_set(N,
+    // await f(…));`. The s441 rewrite above owns only the file's own server stubs and async
+    // client functions, so for an imported async callee this was the only pass left — and it
+    // skipped the site: the arms never ran (`_scrml_reactive_set` returns undefined) and the
+    // error envelope stayed in the cell (g-impl1-imported-callee-cell-write-handler-skipped-s473).
+    const head = /\blet\s+([A-Za-z_$][\w$]*)\s*=\s*(await\s+)?$/.exec(mask.slice(Math.max(0, at - 120), at));
     const call = head && (at === 0 || !/[\w$]/.test(mask[at - 1])) ? scanCall(next - 1) : null;
     if (head && call && call.commas.length === 1 && mask[call.close + 1] === ";" && !overlapsAnotherCall(at, call.close)) {
       const R = head[1];
@@ -258,7 +271,12 @@ export function deferSyncGuardedCellWrites(code: string, findMatchingBrace: (s: 
       }
       if (closeIdx >= 0 && hasWriteBack && !/^\s*else\b/.test(mask.slice(closeIdx + 1))) {
         // `let R = _scrml_reactive_set(NAME, VALUE);` → `let R = VALUE;`, and the success write after the arms.
-        edits.push({ start: at, end: call.close + 1, text: code.slice(call.commas[0] + 1, call.close).trim() });
+        // An `await` before the set moves onto the value (`let R = await VALUE;`), once: the
+        // emitter already awaited the call in place (`await f(…)`), and a second is never added.
+        const value = code.slice(call.commas[0] + 1, call.close).trim();
+        const awaitHead = head[2] ?? "";
+        const valueText = awaitHead && !/^await\s/.test(value) ? `await ${value}` : value;
+        edits.push({ start: at - awaitHead.length, end: call.close + 1, text: valueText });
         edits.push({ start: closeIdx + 1, end: closeIdx + 1, text: ` else {\n  ${writeBack}\n}` });
       }
     }
