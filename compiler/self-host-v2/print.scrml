@@ -31,7 +31,7 @@ ${
              EditKind, Check, Stmt, Block, Attr, ConstructAttr, CondArm, View, EffectDep, FieldRole, Field,
              Decl, Fn, HostFn, HostBind, HostArg, HostProp, CoreProgram, CapOwner, SurfaceProp, ValidityOf, Validator, Persist, PersistStore,
              Failable, OkArm, ErrArm, ServerFn, SqlQuery, SqlMode, Param, LoopHead, EachHead, RangeHead, CssUnit, CoreCss, CssVar,
-             Gather, Lifted, GatherRow, PathStep, CoreConst,
+             Gather, Lifted, GatherRow, PathStep, CoreConst, HeadTitle, CoreMeta,
              findDecl, findTypeDef, typeDefSym, capOwner, findFn, findServerFn, mountedInstances } from "./core.scrml"
     import { Node, allNodes, sharedRefs, boundSyms, assignedSyms } from "./walk.scrml"
     import { JsOp, JsUnOp, JsExpr, JsProp, JsStmt, JsLoopHead, JsForInit,
@@ -3086,8 +3086,24 @@ ${
         for (const t of templates) {
             head = head.concat([HNode.HElem("template", [{ name: "id", value: t.id }], t.nodes)])
         }
-        const page: Page = { title: p.program.hint, head: head, body: [] }
+        // s473 — §40.7: the documentary `<meta>`s lead the head, after its `<title>`.
+        let metas: HNode[] = []
+        for (const m of p.head.metas) {
+            metas = metas.concat([HNode.HElem("meta", [{ name: "name", value: m.name }, { name: "content", value: m.content }], [])])
+        }
+        const page: Page = { title: headTitle(p), head: metas.concat(head), body: [] }
         return { js: printModule(body), html: printPage(page), refused: [], routes: routes }
+    }
+
+    // s473 — §40.7: the head's `<title>` text — the documentary `title=`, the
+    // compiler's default, or none (the program's markup writes its own).
+    fn headTitle(p: CoreProgram) -> string | not {
+        const t: HeadTitle = p.head.title
+        return match t {
+            .Default :> p.program.hint
+            .Documentary(text: s) :> s
+            .Author :> not
+        }
     }
 
     // s473 (Lane B — SPEC §8.1.3; RULED S472 "`<db>` body + client reads", items

@@ -1,4 +1,6 @@
 import { tokenizer as acornTokenizer, parse as acornParse } from "acorn";
+import { transportGuards } from "./var-counter.ts";
+import { FETCH_NETWORK_FAILURE_TAG } from "./emit-functions.ts";
 import { fnValuedBindingsOf } from "./fn-valued-bindings.ts";
 import { SCRML_RUNTIME } from "../runtime-template.js";
 import { SQL_HANDLE_PATTERN } from "./sql-handle-name.ts";
@@ -55,7 +57,7 @@ import { setLiftGateFileScopes, resetLiftGateScopes } from "./lift-gate-scope.js
  * corpus sweep (docs/changes/s461-runtime-tree-shake) is the proof it is.
  */
 const ERRORS_CHUNK_REFERENCE =
-  /(?<![\w$.'"`])(?:_ScrmlError|NetworkError|ValidationError|SQLError|AuthError|TimeoutError|ParseError|NotFoundError|ConflictError|_scrml_error_boundary_log|_scrml_error_boundary_uncaught)(?![\w$'"`])/;
+  /(?<![\w$.'"`])(?:_ScrmlError|NetworkError|ValidationError|SQLError|AuthError|TimeoutError|ParseError|NotFoundError|ConflictError|_scrml_error_boundary_log|_scrml_error_boundary_uncaught|_scrml_server_attempt)(?![\w$'"`])/;
 
 const POST_EMIT_HELPER_CHUNK_GATES: ReadonlyArray<readonly [string, string]> = [
   ["_scrml_structural_eq(", "equality"],
@@ -186,6 +188,12 @@ const POST_EMIT_HELPER_CHUNK_GATES: ReadonlyArray<readonly [string, string]> = [
  *       _scrml_reactive_set("cell", R);
  *     }
  *
+ * It is also the pass for every ASYNC callee the s441 loop does not own — an IMPORTED server
+ * function or async export (s473-impl1-imported-handler-arm): emit-logic's auto-await emits that
+ * site as `let R = await _scrml_reactive_set("cell", await f());`, rewritten here to
+ * `let R = await f(); if (…) {…} else { set(R) }` — the shape the s441 pass gives a same-file
+ * server function, so an imported and a local callee lower identically (§19.9.10).
+ *
  * Only that exact emitted shape is touched (the `let`, the guard on the same binding right after it
  * — a module-init `_scrml_init_set(…)` line may sit between — and the arms' own write-back of `R`);
  * anything else is left as emitted. Every site is found, a site nested in another site's arm block
@@ -237,7 +245,14 @@ export function deferSyncGuardedCellWrites(code: string, findMatchingBrace: (s: 
   let at = mask.indexOf(SET);
   while (at >= 0) {
     const next = at + SET.length;
-    const head = /\blet\s+([A-Za-z_$][\w$]*)\s*=\s*$/.exec(mask.slice(Math.max(0, at - 120), at));
+    // s473-impl1-imported-handler-arm — `(await\s+)?`: the guarded-expr auto-await
+    // (`isPromiseReturningCallExpr`, which classifies an IMPORTED async callee through the export
+    // registry) prefixes `await` to the whole statement, `let R = await _scrml_reactive_set(N,
+    // await f(…));`. The s441 rewrite above owns only the file's own server stubs and async
+    // client functions, so for an imported async callee this was the only pass left — and it
+    // skipped the site: the arms never ran (`_scrml_reactive_set` returns undefined) and the
+    // error envelope stayed in the cell (g-impl1-imported-callee-cell-write-handler-skipped-s473).
+    const head = /\blet\s+([A-Za-z_$][\w$]*)\s*=\s*(await\s+)?$/.exec(mask.slice(Math.max(0, at - 120), at));
     const call = head && (at === 0 || !/[\w$]/.test(mask[at - 1])) ? scanCall(next - 1) : null;
     if (head && call && call.commas.length === 1 && mask[call.close + 1] === ";" && !overlapsAnotherCall(at, call.close)) {
       const R = head[1];
@@ -258,7 +273,16 @@ export function deferSyncGuardedCellWrites(code: string, findMatchingBrace: (s: 
       }
       if (closeIdx >= 0 && hasWriteBack && !/^\s*else\b/.test(mask.slice(closeIdx + 1))) {
         // `let R = _scrml_reactive_set(NAME, VALUE);` → `let R = VALUE;`, and the success write after the arms.
-        edits.push({ start: at, end: call.close + 1, text: code.slice(call.commas[0] + 1, call.close).trim() });
+        // An `await` before the set moves onto the WHOLE value, parenthesized: `let R = await (VALUE);`
+        // (#1661 review MED-1 — a bare `await 2 ** 2 > 3 ? …` binds to the leftmost operand, and a
+        // unary operand of `**` is a V8 SyntaxError). A value that already starts with `await`
+        // (the emitter awaited the call in place, `await f(…)`) is kept as is. A value that only
+        // starts with a paren holding an await (`(await f())`, which no emitter produces) gets one
+        // more `await`: harmless, one extra tick.
+        const value = code.slice(call.commas[0] + 1, call.close).trim();
+        const awaitHead = head[2] ?? "";
+        const valueText = awaitHead && !/^await\s/.test(value) ? `await (${value})` : value;
+        edits.push({ start: at - awaitHead.length, end: call.close + 1, text: valueText });
         edits.push({ start: closeIdx + 1, end: closeIdx + 1, text: ` else {\n  ${writeBack}\n}` });
       }
     }
@@ -274,6 +298,83 @@ export function deferSyncGuardedCellWrites(code: string, findMatchingBrace: (s: 
   }
   let out = code;
   for (const e of edits) out = out.slice(0, e.start) + e.text + out.slice(e.end);
+  return out;
+}
+
+/**
+ * S473 (ruling:user-voice-scrml.md S473 "impl#1 transport routing" item 3, SPEC §19.9.10) — "only
+ * a `!{}` that already covers the failure (a `_` or `.Transport` arm) gets a failed call to a
+ * NON-`!` server function as a `Transport` error value. Declared-`!` callees, `?`, `match` and
+ * CPS-split callees are out of scope … Unhandled call sites are unchanged."
+ *
+ * Runs after the s441 rewrite and `deferSyncGuardedCellWrites`, when every guarded client call has
+ * its final shape `let R = await CALLEE(ARGS);` (+ any `_scrml_init_set(…)` lines) followed by
+ * `if (R && R.__scrml_error) {`. Only a guard emit-logic recorded (`transportGuards()`: the type
+ * checker's `__transportRoutable` stamp — a covered `!{}` on a call to a server function not
+ * declared `!`) is touched, and only when CALLEE is that function's client stub: the source name
+ * for an import, or its `_scrml_fetch_*` stub (`fnNameMap`) for a same-file function. The call
+ * becomes `await _scrml_server_attempt(CALLEE(ARGS))` (runtime-template.js), so a failed call
+ * reaches the arms as `{ __scrml_error: true, type: "ServerCallError", variant: "Transport",
+ * data: { t } }` instead of rejecting past them. Anything else is left as emitted. The scan
+ * reads the literal-blanked mask (`blankLiteralTextInSource`), as the twin does; no mask, no
+ * rewrite (fail closed: the call still rejects, as before).
+ */
+export function routeTransportGuards(
+  code: string,
+  guards: ReadonlyMap<string, string>,
+  fnNameMap: ReadonlyMap<string, string>,
+): string {
+  if (guards.size === 0 || !code.includes(".__scrml_error) {")) return code;
+  const mask = blankLiteralTextInSource(code, { blankRegex: true, jsOnly: true });
+  if (typeof mask !== "string" || mask.length !== code.length) return code;
+  const edits: Array<{ at: number; close: number }> = [];
+  for (const [R, source] of guards) {
+    // #1664 fix round 1 (LOW-4) — the registry is compile-wide; only this file's guards are
+    // scanned (a guard's result binding is a unique `genVar` name, so its text names its file).
+    if (!code.includes(R)) continue;
+    const stub = fnNameMap.get(source);
+    const callees = new Set<string>([source]);
+    if (stub && /^_scrml_fetch_/.test(stub)) callees.add(stub);
+    const head = new RegExp(`\\blet\\s+${R.replace(/\$/g, "\\$")}\\s*=\\s*await\\s+([A-Za-z_$][\\w$]*)\\s*\\(`, "g");
+    for (let m = head.exec(mask); m; m = head.exec(mask)) {
+      if (!callees.has(m[1])) continue;
+      // The callee's own source name is a stub only when it is NOT a same-file function
+      // (a same-file server function is always called through its `_scrml_fetch_*` stub).
+      if (m[1] === source && stub) continue;
+      const open = m.index + m[0].length - 1;
+      let depth = 1;
+      let close = -1;
+      for (let k = open + 1; k < mask.length; k++) {
+        const c = mask[k];
+        if (c === "(" || c === "[" || c === "{") depth++;
+        else if (c === ")" || c === "]" || c === "}") {
+          depth--;
+          if (depth === 0) { close = c === ")" ? k : -1; break; }
+        }
+      }
+      if (close < 0 || mask[close + 1] !== ";") continue;
+      const needle = `if (${R} && ${R}.__scrml_error) {`;
+      const ifAt = mask.indexOf(needle, close + 2);
+      if (ifAt < 0) continue;
+      const between = mask.slice(close + 2, ifAt);
+      if (!between.split("\n").every((l) => l.trim() === "" || /^\s*_scrml_init_set\(/.test(l))) continue;
+      const calleeStart = m.index + m[0].lastIndexOf(m[1]);
+      edits.push({ at: calleeStart, close });
+    }
+  }
+  if (edits.length === 0) return code;
+  // #1664 fix round 1 (LOW-4) — two sites whose ranges overlap (one call inside the other's
+  // arguments) are BOTH left as emitted (fail closed: their failure still rejects); every other
+  // site is still routed. (Before, one overlap left the whole file unrouted.)
+  const overlaps = (a: { at: number; close: number }, b: { at: number; close: number }): boolean =>
+    a !== b && a.at <= b.close && b.at <= a.close;
+  const kept = edits.filter((e) => !edits.some((o) => overlaps(e, o)));
+  if (kept.length === 0) return code;
+  kept.sort((a, b) => b.at - a.at);
+  let out = code;
+  for (const e of kept) {
+    out = out.slice(0, e.at) + "_scrml_server_attempt(" + out.slice(e.at, e.close + 1) + ")" + out.slice(e.close + 1);
+  }
   return out;
 }
 
@@ -3073,14 +3174,15 @@ function generateClientJsImpl(ctx: CompileContext): string {
       lines.push("    method,");
       lines.push('    headers: { "Content-Type": "application/json", "X-CSRF-Token": _scrml_get_csrf_token() },');
       lines.push("    body,");
-      lines.push("  });");
+      // #1664 fix round 1 (MED-1) — tag a network failure at its source (emit-functions.ts).
+      lines.push(`  })${FETCH_NETWORK_FAILURE_TAG};`);
       lines.push("  if (_scrml_resp.status === 403) {");
       if (_csrfMetaPresent) lines.push("    _scrml_csrf_sync_meta_from_cookie();");
       lines.push("    _scrml_resp = await _scrml_g.fetch(path, {");
       lines.push("      method,");
       lines.push('      headers: { "Content-Type": "application/json", "X-CSRF-Token": _scrml_get_csrf_token() },');
       lines.push("      body,");
-      lines.push("    });");
+      lines.push(`    })${FETCH_NETWORK_FAILURE_TAG};`);
       lines.push("  }");
       lines.push("  return _scrml_resp;");
       lines.push("}");
@@ -4110,6 +4212,7 @@ function generateClientJsImpl(ctx: CompileContext): string {
       clientCode = parts.join("");
     }
     clientCode = deferSyncGuardedCellWrites(clientCode, findMatchingBrace);
+    clientCode = routeTransportGuards(clientCode, transportGuards(), fnNameMap);
     });
 
     // GITI-026 (giti inbound 2026-05-30): SSE reactive binding `@cell = gen()`.

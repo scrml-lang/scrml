@@ -22,6 +22,20 @@ export function genVar(baseName: string): string {
 
 export function resetVarCounter(): void {
   _varCounter = 0;
+  _transportGuards.clear();
+}
+
+// S473 (ruling:user-voice-scrml.md S473 "impl#1 transport routing" item 3) — the client `!{}`
+// guards whose failure a `_` / `.Transport` arm covers and whose handled call is a call to a
+// server function NOT declared `!` (the type checker's `__transportRoutable` stamp). Keyed by the
+// guard's result binding (a `genVar` name, unique per compile) → the callee's source name.
+// emit-logic records; emit-client's `routeTransportGuards` reads. Reset with the counter.
+const _transportGuards = new Map<string, string>();
+export function markTransportGuard(resultVar: string, calleeName: string): void {
+  _transportGuards.set(resultVar, calleeName);
+}
+export function transportGuards(): ReadonlyMap<string, string> {
+  return _transportGuards;
 }
 
 // ss1 — save/restore the per-compile counter around an ADDITIVE emit pass that

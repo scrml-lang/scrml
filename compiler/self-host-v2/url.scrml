@@ -419,4 +419,145 @@ ${
         if (lower.length <= 2 || lower.substring(0, 2) != "on") return false
         return lower != "one" && lower != "online" && lower != "onboarding"
     }
+
+    // =========================================================================
+    // THE EXECUTABLE-SINK TABLE (s473-boot-plain-logic-dom-sinks) — SPEC §5.2
+    // "Executable sinks in plain logic (S473)", ruling:user-voice-scrml.md S473
+    // "⭐ RULED — S473 PA recs: host allowlist Q1–Q4, plain-logic DOM sinks, …"
+    // item 2: "The set is `innerHTML`, `outerHTML`, `insertAdjacentHTML`,
+    // `srcdoc`, `on*` properties and attributes, `document.write`/`writeln`,
+    // and `eval`/`Function`/string `setTimeout`/`setInterval`. Every other DOM
+    // member stays open" — extended by the S473 PA ruling on the #1663 review
+    // (the obvious executable sinks): `setHTMLUnsafe`,
+    // `Range.createContextualFragment`, `DOMParser.parseFromString`,
+    // `document.execCommand("insertHTML", …)`, and a navigation (`location`,
+    // `href`, `location.assign` / `replace`) whose URL is not judged.
+    //
+    // ONE table, strings only: analyze.scrml (the plain-logic judgment,
+    // E-LOGIC-EXECUTABLE-SINK) and parse.scrml (a compound assignment) ask it,
+    // and #1659's §21.3.3 rule 8 (`hostSinkWhy`) is meant to adopt it rather than
+    // keep a second list.
+    //
+    // MEMBER names are compared CASE-SENSITIVELY, as the platform does (a DOM IDL
+    // attribute is case-sensitive: `el.innerHtml` / `el.INNERHTML` / `el.ONCLICK`
+    // only make an expando). ATTRIBUTE names (setAttribute & co.) are compared
+    // ASCII case-insensitively, as HTML does (§5.2 rule 1's name test).
+    // =========================================================================
+
+    // An event-handler MEMBER name, the platform pattern `on[a-z]+` (an IDL
+    // EventHandler attribute is all lowercase), §5.2 rule 1's three exempt words
+    // (`one`, `online`, `onboarding`) excepted.
+    export fn isHandlerMember(name: string) -> boolean {
+        if (name.length <= 2 || name.substring(0, 2) != "on") return false
+        let i = 2
+        while (i < name.length) {
+            const c: string = name.charAt(i)
+            if (c < "a" || c > "z") return false
+            i = i + 1
+        }
+        return name != "one" && name != "online" && name != "onboarding"
+    }
+
+    // A member WRITE's sink kind ("" — open):
+    //   "html" — the value is parsed as HTML (`innerHTML`, `outerHTML`); a
+    //            quoted string literal is admitted (the author's own markup);
+    //   "exec" — `srcdoc`: an inline document the browser runs, a literal
+    //            included (§5.2 S464 refuses a static `srcdoc`);
+    //   "on"   — an event-handler member (isHandlerMember): installs code,
+    //            a literal included (§5.2 S464 refuses a quoted handler);
+    //   "nav"  — `location`, or a member whose lowercased name is one of §5.2 rule
+    //            3's URL-valued attributes (urlValuedAttrs: `href`, `src`,
+    //            `action`, `formAction`, `data`, `poster`, …; the S473 PA ruling on
+    //            the #1663 re-review, N2): navigates to / loads the URL written
+    //            (judged by rule 3's scheme guard, urlValueAdmitted). The element is
+    //            not known in logic, so the attribute is judged on every element,
+    //            and the name lowercased (fail closed — `el.SRC` is only an expando).
+    export fn logicWriteSink(name: string) -> string {
+        if (name == "innerHTML" || name == "outerHTML") return "html"
+        if (name == "srcdoc") return "exec"
+        if (isHandlerMember(name)) return "on"
+        if (name == "location" || isUrlAttrName(name)) return "nav"
+        return ""
+    }
+
+    // §5.2 rule 3's URL-valued attribute list, by name on any element (ASCII
+    // case-insensitive) — the list itself is urlValuedAttrs, not a copy.
+    export fn isUrlAttrName(name: string) -> boolean {
+        return urlValuedAttrs().indexOf(name.toLowerCase()) >= 0
+    }
+
+    // A CALL's sink kind, by a member name on its callee chain ("" — open):
+    //   "exec"     — `eval`, `Function`, `constructor` (`f.constructor` is
+    //                `Function`): runs source text, a literal included;
+    //   "html"     — the argument htmlArgIndex names is parsed as HTML
+    //                (`insertAdjacentHTML`, `setHTMLUnsafe`, `parseHTMLUnsafe`,
+    //                `createContextualFragment`, `parseFromString`), and
+    //                `write` / `writeln` on any receiver (every argument);
+    //   "execcmd"  — `execCommand`: `insertHTML` (or a computed command) with data;
+    //   "timer"    — `setTimeout` / `setInterval`: a first argument that is not a
+    //                function is source text;
+    //   "attr"     — `setAttribute` / `setAttributeNS` / `toggleAttribute` /
+    //                `createAttribute` / `createAttributeNS` / `getAttributeNode`
+    //                / `getAttributeNodeNS` / `getNamedItem` / `getNamedItemNS`:
+    //                judged by the attribute NAME (an `on…` / `srcdoc` /
+    //                non-literal name); a URL attribute's VALUE as a navigation;
+    //   "attrnode" — `setAttributeNode` / `setAttributeNodeNS` / `setNamedItem` /
+    //                `setNamedItemNS`: installs an Attr whose name is not seen
+    //                here (fail closed);
+    //   "nav"      — `assign` / `replace` on a receiver chain through `location`;
+    //   "open"     — `open(url, …)` (`window.open`; a legacy three-argument
+    //                `document.open` navigates too): its first argument, if any,
+    //                is a URL (the S473 PA ruling on the #1663 re-review, N2).
+    export fn logicCallSink(name: string) -> string {
+        if (name == "eval" || name == "Function" || name == "constructor") return "exec"
+        if (htmlArgIndex(name) != -1) return "html"
+        if (name == "execCommand") return "execcmd"
+        if (name == "setTimeout" || name == "setInterval") return "timer"
+        if (attrNameArgIndex(name) >= 0) return "attr"
+        if (name == "setAttributeNode" || name == "setAttributeNodeNS" || name == "setNamedItem" || name == "setNamedItemNS") return "attrnode"
+        if (name == "assign" || name == "replace") return "nav"
+        if (name == "open") return "open"
+        return ""
+    }
+
+    // Which argument of an "html" call is parsed as HTML (-1 — not one; -2 — every
+    // argument, `write` / `writeln`).
+    export fn htmlArgIndex(name: string) -> int {
+        if (name == "insertAdjacentHTML") return 1
+        if (name == "setHTMLUnsafe" || name == "parseHTMLUnsafe" || name == "createContextualFragment" || name == "parseFromString") return 0
+        if (name == "write" || name == "writeln") return -2
+        return -1
+    }
+
+    // Which argument of an "attr" call is the attribute name (-1 — not one).
+    export fn attrNameArgIndex(name: string) -> int {
+        if (name == "setAttribute" || name == "toggleAttribute" || name == "createAttribute" || name == "getAttributeNode" || name == "getNamedItem") return 0
+        if (name == "setAttributeNS" || name == "createAttributeNS" || name == "getAttributeNodeNS" || name == "getNamedItemNS") return 1
+        return -1
+    }
+
+    // Which argument of an "attr" call is the attribute VALUE (-1 — none): a URL
+    // attribute's value is judged like a navigation (N2).
+    export fn attrValueArgIndex(name: string) -> int {
+        if (name == "setAttribute") return 1
+        if (name == "setAttributeNS") return 2
+        return -1
+    }
+
+    // An attribute NAME that is an executable sink (§5.2: `srcdoc`, an `on…`
+    // handler), ASCII case-insensitive (HTML attribute names are).
+    export fn executableAttrName(name: string) -> boolean {
+        return name.toLowerCase() == "srcdoc" || isEventHandlerName(name)
+    }
+
+    // A member through which an Attr node is reached (`el.attributes[…]`,
+    // `attributes.getNamedItem(…)`, `getAttributeNode(…)`): a later `.value` /
+    // `.nodeValue` / `.textContent` write sets that attribute (fail closed).
+    export fn attrNodeMember(name: string) -> boolean {
+        return name == "attributes" || name == "getNamedItem" || name == "getNamedItemNS" || name == "getAttributeNode" || name == "getAttributeNodeNS"
+    }
+
+    export fn attrNodeValueMember(name: string) -> boolean {
+        return name == "value" || name == "nodeValue" || name == "textContent" || name == "data"
+    }
 }

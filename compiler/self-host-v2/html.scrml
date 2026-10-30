@@ -117,11 +117,13 @@ ${
 
     // A page: head lines + body lines, one element per line (the SHELL is
     // printed readably; template content inside it stays compact).
-    export type Page:struct = { title: string, head: HNode[], body: HNode[] }
+    // `title`: not — the page's markup writes its own `<title>` (§40.7).
+    export type Page:struct = { title: string | not, head: HNode[], body: HNode[] }
 
     export fn printPage(pg: Page) -> string {
         let out = "<!doctype html>\n<html>\n<head>\n<meta charset=\"utf-8\">\n"
-        out = out + "<title>" + escText(pg.title) + "</title>\n"
+        const t: string | not = pg.title
+        if (t is given) out = out + "<title>" + escText(t) + "</title>\n"
         for (const n of pg.head) { out = out + printNode(n) + "\n" }
         out = out + "</head>\n<body>\n"
         for (const n of pg.body) { out = out + printNode(n) + "\n" }

@@ -4465,6 +4465,41 @@ function _scrml_error_boundary_log(boundaryId, err) {
   }
 }
 
+// §19.9.10 (S473, ruling:user-voice-scrml.md S473 "impl#1 transport routing" item 3 — narrow):
+// "only a '!{}' that already covers the failure (a '_' or '.Transport' arm) gets a failed call to a
+// NON-'!' server function as a 'Transport' error value." The compiler wraps exactly that call
+// (emit-client.ts 'routeTransportGuards'); every other call site still sees the rejection. The
+// value is §19.9.10's 'Transport(t: ServerCallError)': 't' is 'Unreachable' (no response),
+// 'Refused(status)' (a 4xx), 'ServerFault(status)' (a 5xx) or 'Malformed(reason)' (a 2xx body
+// that does not parse). Only a rejection the stub tagged is routed; any other re-throws.
+function _scrml_server_attempt(p) {
+  return Promise.resolve(p).then(function (v) { return v; }, function (e) {
+    // #1664 fix round 1 (MED-1) — ONLY a rejection the stub TAGGED at its source is a transport
+    // failure: '__scrml_unreachable' (the fetch, or the body read, failed on the network),
+    // '__scrml_status' (a non-2xx that is not the function's envelope), '__scrml_malformed' (a 2xx
+    // body that does not parse). Anything else — an abort or timeout (impl#1 never aborts a server
+    // call today; the case is defensive), an error the stub raised itself (JSON.stringify on a
+    // BigInt or a cycle) — re-throws unchanged, reported as before.
+    if (e === null || typeof e !== "object") throw e;
+    var t;
+    if (typeof e.__scrml_status === "number") {
+      var s = e.__scrml_status;
+      // §19.9.10 names 4xx -> Refused and 5xx -> ServerFault. Status 0 (an opaque / network-level
+      // answer) had no response: Unreachable. A 1xx / 3xx cannot reach here (fetch follows
+      // redirects; the stub sets no 'redirect: manual'): Refused(status), documented.
+      if (s === 0) t = "Unreachable";
+      else t = { variant: s >= 500 ? "ServerFault" : "Refused", data: { status: s } };
+    } else if (typeof e.__scrml_malformed === "string") {
+      t = { variant: "Malformed", data: { reason: e.__scrml_malformed } };
+    } else if (e.__scrml_unreachable === true) {
+      t = "Unreachable";
+    } else {
+      throw e;
+    }
+    return { __scrml_error: true, type: "ServerCallError", variant: "Transport", data: { t: t } };
+  });
+}
+
 // §19.6.8 B3 — wrap an uncaught typed error variant (no 'renders', no
 // 'fallback') into a host Error so the throw propagates to the nearest
 // enclosing boundary's host-JS backstop (inner-catches-first, §19.6.4). The

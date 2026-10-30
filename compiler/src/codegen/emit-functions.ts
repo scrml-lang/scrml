@@ -680,6 +680,18 @@ export function clientAsyncFactsOf(ctx: CompileContext): AsyncNameFacts {
 }
 
 /**
+ * #1664 fix round 1 (MED-1) — appended to every `_scrml_g.fetch(…)` a plain server-function stub
+ * makes (here and in emit-client's `_scrml_fetch_with_csrf_retry`). A fetch that REJECTS with a
+ * `TypeError` is the platform's network error — no response arrived — so it is tagged
+ * `__scrml_unreachable` and re-thrown unchanged. `_scrml_server_attempt` (runtime-template.js)
+ * routes ONLY a tagged rejection to a covering `!{}`; an untagged one (an abort, a timeout, an
+ * error the stub raised itself — `JSON.stringify` on a BigInt or a cycle) re-throws, logged as
+ * before. An unhandled call site sees the same rejection it always did.
+ */
+export const FETCH_NETWORK_FAILURE_TAG =
+  `.catch((_scrml_e) => { if (_scrml_e !== null && typeof _scrml_e === "object" && _scrml_e.name === "TypeError") _scrml_e.__scrml_unreachable = true; throw _scrml_e; })`;
+
+/**
  * Emit fetch stubs, CPS wrappers, and client-boundary function bodies.
  *
  * Returns both the emitted JS lines and the fnNameMap so event wiring
@@ -1217,7 +1229,8 @@ export function emitFunctions(ctx: CompileContext): { lines: string[]; fnNameMap
       // §6.6.9 CPS free-client-cell marshal (see the csrf-retry branch above).
       for (const _ml of _emitMarshalBodyLines("      ", paramNames, _sb.batchIndex)) lines.push(_ml);
       lines.push(`    }),`);
-      lines.push(`  });`);
+      // #1664 fix round 1 (MED-1) — a fetch that rejects is "no response" (§19.9.10 Unreachable).
+      lines.push(`  })${FETCH_NETWORK_FAILURE_TAG};`);
     }
     // M-7C-D-12 Track 2 (§57 Wire Format) — dual-decoder consumption.
     //
@@ -1239,10 +1252,20 @@ export function emitFunctions(ctx: CompileContext): { lines: string[]; fnNameMap
     // batch stubs return their own cell value (a forwarded intermediate),
     // which is not the declared return type — they take the raw `.json()`.
     const _isLastStub = !_isMultiStub || _sb.batchIndex === _stubBatches.length - 1;
+    // S473 (ruling item 3, impl#1 transport routing) — a body that does not parse is tagged
+    // with what the client knows about it, and re-thrown unchanged: `__scrml_status` for a
+    // non-2xx response, `__scrml_malformed` for a 2xx one. Only `_scrml_server_attempt` (the
+    // runtime's §19.9.10 classifier, used where a `!{}` covers the failure) reads the tags; an
+    // unhandled call site sees the same rejection as before.
+    // #1664 fix round 1: LOW-1 — read through an async arrow (`(async () => json())()`), so a `json()` that returns a plain value
+    // (a fetch shim, a test mock) behaves as `await json()` always did. LOW-3 — on a 2xx only a
+    // PARSE failure (`SyntaxError`) is `Malformed`; a body read that fails on the network
+    // (`TypeError`) had no response to decode: `Unreachable`. Anything else stays untagged.
+    const _jsonRead = `(async () => _scrml_resp.json())().catch((_scrml_e) => { if (_scrml_e !== null && typeof _scrml_e === "object") { if (!_scrml_resp.ok) _scrml_e.__scrml_status = _scrml_resp.status; else if (_scrml_e.name === "SyntaxError") _scrml_e.__scrml_malformed = "the response body is not JSON"; else if (_scrml_e.name === "TypeError") _scrml_e.__scrml_unreachable = true; } throw _scrml_e; })`;
     if (_isLastStub && returnTypeAllowsAbsence(_retAnnot)) {
-      lines.push(`  const _scrml_body_json = _scrml_wire_decode(await _scrml_resp.json());`);
+      lines.push(`  const _scrml_body_json = _scrml_wire_decode(await ${_jsonRead});`);
     } else {
-      lines.push(`  const _scrml_body_json = await _scrml_resp.json();`);
+      lines.push(`  const _scrml_body_json = await ${_jsonRead};`);
     }
     // §6.7.7 / §19.9.2 (Peter #20) — a non-2xx response that is NOT a typed scrml
     // error envelope is a transport / host / upstream failure. Surface it as a
@@ -1253,7 +1276,8 @@ export function emitFunctions(ctx: CompileContext): { lines: string[]; fnNameMap
     // 500 per §19.9.2) is a RETURNED value the match / `?` / `!{}` / errorBoundary
     // dispatch consumes via `.__scrml_error` — it is NEVER thrown here.
     lines.push(`  if (!_scrml_resp.ok && !(_scrml_body_json !== null && typeof _scrml_body_json === "object" && _scrml_body_json.__scrml_error === true)) {`);
-    lines.push(`    throw new _scrml_g.Error("HTTP " + _scrml_resp.status);`);
+    // S473 — the same Error as before, carrying the status for `_scrml_server_attempt`.
+    lines.push(`    throw _scrml_g.Object.assign(new _scrml_g.Error("HTTP " + _scrml_resp.status), { __scrml_status: _scrml_resp.status });`);
     lines.push(`  }`);
     lines.push(`  return _scrml_body_json;`);
     lines.push(`}`);

@@ -128,7 +128,8 @@ describe("§A: the per-route stub surfaces a non-2xx (non-envelope) as a rejecti
     const { clientJs } = compile(REQ_SRC, "req-stub-okcheck");
     // §19.9.2 — a non-2xx WITHOUT the scrml fail envelope throws (routes to .error).
     expect(clientJs).toContain('if (!_scrml_resp.ok && !(_scrml_body_json !== null && typeof _scrml_body_json === "object" && _scrml_body_json.__scrml_error === true)) {');
-    expect(clientJs).toContain('throw new _scrml_g.Error("HTTP " + _scrml_resp.status);');
+    // S473 (impl#1 transport routing) — the same Error, carrying its status for `_scrml_server_attempt`.
+    expect(clientJs).toContain('throw _scrml_g.Object.assign(new _scrml_g.Error("HTTP " + _scrml_resp.status), { __scrml_status: _scrml_resp.status });');
     // A scrml-fail envelope (HTTP 500) is NOT thrown — it is a returned value.
     expect(clientJs).toContain("return _scrml_body_json;");
   });
