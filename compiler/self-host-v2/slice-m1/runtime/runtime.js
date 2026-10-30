@@ -1317,7 +1317,7 @@ function hostDescWant(ty) {
   switch (ty.k) {
     case "maybe": return hostDescWant(ty.inner) + " | not";
     case "tape": return hostDescWant(ty.elem) + "[]";
-    case "struct": case "handle": return ty.name;
+    case "struct": case "handle": case "iface": return ty.name;
     default: return ty.k;
   }
 }
@@ -1365,6 +1365,11 @@ function hostDecode(v, ty, at, where, topThen) {
       break;
     case "handle":
       if (v !== null && v !== undefined) return v;
+      break;
+    case "iface":
+      // s473 (allowlist lane A) — an Appendix H interface result (DRAFT §21.3.3 r8.4 / r8.7): not
+      // decoded, brand-checked (hostBrand). A failure is E-HOST-VALUE-MISMATCH-RT.
+      if (hostBranded(v, ty.name)) return v;
       break;
     case "struct": {
       // s473 (#1659 review M1): a struct must be a NON-ARRAY, non-function ordinary object, so
@@ -1439,6 +1444,255 @@ export function hostCall(thunk, ty, at) {
     if (e instanceof ScrmlTrap) throw e;
     return hostThrew(e, at, "while its result was decoded");
   }
+}
+
+// ---------------------------------------------------------------------------
+// s473 (allowlist lane A; design scrml-support/docs/deep-dives/host-binding-allowlist-design-
+// 2026-10-29.md §5.3, §5.5, §10 step 4) — the RUN-TIME half of the `<host>` allowlist (DRAFT
+// §21.3.3 rule 8; ruling:user-voice-scrml.md S473 "⭐ RULED — `<host>` rule 8 moves from a sink
+// denylist to an allowlist"). The compiler (the typed chain walk) chooses WHICH of these a target
+// goes through. Each is a check from the closed set the design names, and each reuses an oracle
+// that already exists (design C3):
+//
+//   - guarded(url)            hostUrl / hostAttrValue: the §5.2 rule 3 data-supplied URL guard,
+//                             `_scrml_safe_url` below (the verbatim impl#1 copy). Same scheme test,
+//                             same admitted set, `about:blank` plus one report on refusal. Never a
+//                             second list.
+//   - guarded(inert-receiver) hostInert: the receiver's local name and namespace, read through the
+//                             `Element.prototype` getters CAPTURED at runtime start (never the
+//                             instance's own `localName`), SHALL be HTML and on the inert element
+//                             list (HOST_INERT_ELEMENTS). Otherwise the trap E-HOST-RECEIVER-RT.
+//   - guarded(attr-name)      hostSetAttrName: the run-time wall behind the compile-time
+//                             literal-name rule (§5.2's event-handler test and `srcdoc`).
+//   - brand checks (r8.7)     hostBrand / descriptor `{ k: "iface", name }`: `instanceof` the
+//                             interface object CAPTURED at runtime start (another realm's object
+//                             fails), plus, for a Node interface, the captured
+//                             `Node.prototype.nodeType` getter, which throws for an object that only
+//                             borrows the prototype. A failure is E-HOST-VALUE-MISMATCH-RT.
+//   - callback wrappers       hostCallback: a scrml function in a callback slot crosses as a
+//                             wrapper, MEMOIZED per (function, signature), so
+//                             `removeEventListener(t, cb)` removes what `addEventListener(t, cb)`
+//                             added. Each argument the host passes is decoded (rule 13).
+//
+// Interface for the compiler (lane B's chain walk and the printer; recorded in
+// docs/changes/s473-host-allowlist-a/progress.md "Interface"):
+//   rt.hostInert(el, at)                    -> el             trap E-HOST-RECEIVER-RT
+//   rt.hostUrl(el, name, value, at)         -> string         guarded(url), a property write
+//   rt.hostAttrValue(el, name, value, at)   -> value | string setAttribute's value: the URL guard iff
+//                                                             `name` is URL-valued on el's element
+//   rt.hostSetAttrName(name, at)            -> name           guarded(attr-name), run-time wall
+//   rt.hostBrand(v, iface, at, optional)    -> v | null       trap E-HOST-VALUE-MISMATCH-RT
+//   rt.hostCallback(fn, argDescs, at)       -> function       memoized wrapper
+//   result descriptor { k: "iface", name: "HTMLCanvasElement" } in rt.hostCall's decode.
+// ---------------------------------------------------------------------------
+
+/**
+ * DRAFT Appendix H §H.4 — the INERT ELEMENT LIST: the HTML elements whose children and attributes a
+ * `guarded(inert-receiver)` entry may change. An ALLOWLIST of tags (design §5.5): a new element is
+ * refused until someone adds it. Deliberately NOT on it: `script`, `style`, `base`, `meta`, `link`,
+ * `iframe`, `frame`, `frameset`, `object`, `embed`, `template`, `slot`, `form` (its `action` and
+ * submission navigate), `noscript`, `title`, `head`, `html`, `body`, every non-HTML element (SVG,
+ * MathML — the namespace test) and every custom element (a hyphenated name runs author callbacks on
+ * attribute change). Lane B's host-surface.scrml mirrors Appendix H; its diff test reads this export,
+ * so there is one list.
+ */
+export const HOST_INERT_ELEMENTS = Object.freeze([
+  "a", "abbr", "article", "aside", "audio", "b", "blockquote", "br", "button", "canvas", "caption",
+  "cite", "code", "col", "colgroup", "dd", "del", "details", "dfn", "div", "dl", "dt", "em",
+  "fieldset", "figcaption", "figure", "footer", "h1", "h2", "h3", "h4", "h5", "h6", "header", "hr",
+  "i", "img", "input", "ins", "kbd", "label", "legend", "li", "main", "mark", "meter", "nav", "ol",
+  "optgroup", "option", "output", "p", "pre", "progress", "q", "s", "samp", "section", "select",
+  "small", "span", "strong", "sub", "summary", "sup", "table", "tbody", "td", "textarea", "tfoot",
+  "th", "thead", "time", "tr", "u", "ul", "var", "video", "wbr",
+]);
+const hostInertSet = new Set(HOST_INERT_ELEMENTS);
+const HOST_HTML_NS = "http://www.w3.org/1999/xhtml";
+
+/**
+ * The platform pieces the guards read, CAPTURED ONCE when this module is evaluated (design §5.3 and
+ * §5.5: "read through the `Element.prototype` getter captured at runtime start"). A later own
+ * property or shadowing getter on an instance is never consulted. With no DOM at start (a server
+ * realm), every guard fails closed.
+ */
+const hostCaps = (() => {
+  const g = globalThis;
+  const getter = (C, name) => {
+    try {
+      const d = C && C.prototype ? Object.getOwnPropertyDescriptor(C.prototype, name) : undefined;
+      return d && typeof d.get === "function" ? d.get : null;
+    } catch { return null; }
+  };
+  const Elem = typeof g.Element === "function" ? g.Element : null;
+  const NodeC = typeof g.Node === "function" ? g.Node : null;
+  // every interface object the realm has at start: an own global whose value is a constructor with a
+  // prototype object. The compiler names only Appendix H interfaces, so a JS built-in is never asked for.
+  const ifaces = new Map();
+  let names = [];
+  try { names = Object.getOwnPropertyNames(g); } catch { names = []; }
+  for (const n of names) {
+    if (!/^[A-Z]/.test(n)) continue;
+    let v;
+    try {
+      const d = Object.getOwnPropertyDescriptor(g, n);
+      v = d && "value" in d ? d.value : undefined;
+    } catch { v = undefined; }
+    if (typeof v === "function" && v.prototype !== null && typeof v.prototype === "object") ifaces.set(n, v);
+  }
+  return {
+    localName: getter(Elem, "localName"),
+    namespaceURI: getter(Elem, "namespaceURI"),
+    nodeType: getter(NodeC, "nodeType"),
+    NodeProto: NodeC ? NodeC.prototype : null,
+    ElementProto: Elem ? Elem.prototype : null,
+    ifaces,
+    instanceOf: Function.prototype[Symbol.hasInstance],
+    isPrototypeOf: Object.prototype.isPrototypeOf,
+  };
+})();
+
+function hostReceiverTrap(at, what) {
+  throw new ScrmlTrap("E-HOST-RECEIVER-RT", at + " — its receiver is " + what + ", which a `<host>` binding SHALL NOT mutate: a `guarded(inert-receiver)` entry changes only an HTML element on the inert element list (§21.3.3 rule 8.5, Appendix H §H.4); a <script>, <iframe>, <base>, <meta>, <link>, <style>, <object>, <embed>, <form>, a custom element and a non-HTML element are refused", { at, receiver: what });
+}
+
+/** The receiver's local name through the captured getters; null when it is not an HTML-namespace Element. */
+function hostLocalName(el) {
+  if (el === null || typeof el !== "object") return null;
+  if (hostCaps.localName === null || hostCaps.namespaceURI === null) return null;
+  let ns;
+  let ln;
+  try {
+    // the captured WebIDL getters BRAND-CHECK their receiver: a non-Element (a plain object, a Proxy,
+    // an object that only borrows Element.prototype) throws, and is refused
+    ns = hostCaps.namespaceURI.call(el);
+    ln = hostCaps.localName.call(el);
+  } catch { return null; }
+  if (ns !== HOST_HTML_NS || typeof ln !== "string") return null;
+  return ln;
+}
+
+/** guarded(inert-receiver): `el` is an inert HTML element, or the trap E-HOST-RECEIVER-RT. */
+export function hostInert(el, at) {
+  const ln = hostLocalName(el);
+  if (ln === null) return hostReceiverTrap(at, el === null || el === undefined ? String(el) : "not an HTML element");
+  if (!hostInertSet.has(ln)) return hostReceiverTrap(at, "a <" + ln + ">");
+  return el;
+}
+
+/**
+ * guarded(url) on a URL-valued PROPERTY write (`a.href = v`, `img.src = v`): the §5.2 rule 3 guard,
+ * unchanged. `_scrml_safe_url` returns the value as the write converts it (`String(value)`) when its
+ * scheme is admitted, else `about:blank` plus one report (never the value). `name` is the property's
+ * attribute name (`href`, `src`).
+ */
+export function hostUrl(el, name, value, at) {
+  return _scrml_safe_url(el, name, value);
+}
+
+/**
+ * guarded(url) for `setAttribute(name, value)`'s VALUE: judged by the §5.2 rule 3 guard exactly when
+ * `name` is a URL-valued attribute of the receiver's element (`_scrml_is_url_attr`, element-scoped as
+ * §5.2 scopes it; an element whose name cannot be read counts every URL-valued name, fail closed).
+ * Any other value is returned unchanged (setAttribute converts it).
+ */
+export function hostAttrValue(el, name, value, at) {
+  const ln = hostLocalName(el);
+  if (_scrml_is_url_attr(ln === null ? "" : ln, name)) return _scrml_safe_url(el, name, value);
+  return value;
+}
+
+/**
+ * guarded(attr-name), the run-time wall behind the compile-time rule (the name SHALL be a string
+ * literal; §5.2's event-handler test and `srcdoc` refuse it). The compiler never emits a refused
+ * name, so reaching the throw is a compiler defect; it fails closed all the same. The event-handler
+ * test is §5.2's: a lowercased name beginning `on`, except `one`, `online` and `onboarding`.
+ */
+export function hostSetAttrName(name, at) {
+  const low = typeof name === "string" ? name.toLowerCase() : "";
+  const handler = low.startsWith("on") && low !== "one" && low !== "online" && low !== "onboarding";
+  if (typeof name !== "string" || handler || low === "srcdoc" || low === "") {
+    throw new Error("hostSetAttrName: " + at + " — the attribute name " + JSON.stringify(String(name)) + " is an event handler, `srcdoc`, or not a string (a compiler defect: §21.3.3 rule 8.5 guarded(attr-name) refuses it at compile time)");
+  }
+  return name;
+}
+
+/**
+ * The brand check (r8.7): `v` is a platform object of the Appendix H interface `iface` in THIS realm.
+ * `instanceof` the interface object captured at start (another realm's object fails: its chain holds
+ * that realm's prototypes), and, for a Node interface, the captured `Node.prototype.nodeType` getter
+ * must accept `v`; it throws for `Object.create(HTMLElement.prototype)`, which is not a platform
+ * object. An interface the realm did not have at start fails closed.
+ */
+function hostBranded(v, iface) {
+  if (v === null || (typeof v !== "object" && typeof v !== "function")) return false;
+  const C = hostCaps.ifaces.get(iface);
+  if (C === undefined) return false;
+  let ok = false;
+  try { ok = hostCaps.instanceOf.call(C, v) === true; } catch { ok = false; }
+  if (!ok) return false;
+  const under = (P) => {
+    if (P === null) return false;
+    try { return C.prototype === P || hostCaps.isPrototypeOf.call(P, C.prototype); } catch { return true; }
+  };
+  if (hostCaps.nodeType !== null && under(hostCaps.NodeProto)) {
+    let t;
+    try { t = hostCaps.nodeType.call(v); } catch { return false; }
+    if (typeof t !== "number") return false;
+  }
+  // an Element interface: the captured `localName` getter yields the element's name (a real platform
+  // object's getter brand-checks; an emulated DOM's getter at least finds no name on a fake)
+  if (hostCaps.localName !== null && under(hostCaps.ElementProto)) {
+    let ln;
+    try { ln = hostCaps.localName.call(v); } catch { return false; }
+    if (typeof ln !== "string" || ln === "") return false;
+  }
+  return true;
+}
+
+/** The brand check as a call: `v`, or E-HOST-VALUE-MISMATCH-RT. `optional`: `null` / `undefined` is `not` (null). */
+export function hostBrand(v, iface, at, optional) {
+  if (optional === true && (v === null || v === undefined)) return null;
+  if (hostBranded(v, iface)) return v;
+  return hostBindMismatch(v, String(iface) + (optional === true ? " | not" : "") + " (a platform object of this page)", at, "a host value");
+}
+
+/**
+ * A scrml function crossing into a callback slot (design Lemma 3: "A callback crosses as a compiler
+ * wrapper around a scrml function, never as a host value"). MEMOIZED per function and signature (the
+ * descriptors' text), so the same function handed to `addEventListener` and then to
+ * `removeEventListener` is the same wrapper and the listener is removed. Each argument the host
+ * passes is decoded against its declared type (rule 13: a callback argument that does not fit is
+ * E-HOST-VALUE-MISMATCH-RT; a host throw while decoding is E-HOST-THROW-RT). An argument beyond the
+ * declared ones is dropped, `this` is never passed on, and the wrapper returns nothing to the host.
+ */
+const hostCallbackMemo = new WeakMap();
+export function hostCallback(fn, argDescs, at) {
+  if (typeof fn !== "function") throw new Error("hostCallback: " + at + " — not a function (a compiler defect: §21.3.3 rule 8.4 refuses a non-function in a callback slot, E-HOST-ARG-TYPE)");
+  const descs = Array.isArray(argDescs) ? argDescs : [];
+  const key = JSON.stringify(descs);
+  let bySig = hostCallbackMemo.get(fn);
+  if (bySig === undefined) {
+    bySig = new Map();
+    hostCallbackMemo.set(fn, bySig);
+  }
+  const have = bySig.get(key);
+  if (have !== undefined) return have;
+  const wrapper = function (...xs) {
+    const args = [];
+    for (let i = 0; i < descs.length; i++) {
+      let a;
+      try {
+        a = hostDecode(xs[i], descs[i], at, "its callback's argument " + (i + 1));
+      } catch (e) {
+        if (e instanceof ScrmlTrap) throw e;
+        return hostThrew(e, at, "while its callback's argument " + (i + 1) + " was decoded");
+      }
+      args.push(a);
+    }
+    fn(...args);
+    return undefined;
+  };
+  bySig.set(key, wrapper);
+  return wrapper;
 }
 
 /** Structural equality (§45) for `==` on structs and sequences. */
