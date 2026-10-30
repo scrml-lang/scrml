@@ -11,19 +11,19 @@ Scope: **1813 of 1813 cases attempted** — every attempted case reached the pur
 
 | bucket | cases | share of attempted |
 |---|---:|---:|
-| PASS | 263 | 14.5% |
+| PASS | 264 | 14.6% |
 | CODES-ONLY | 0 | 0.0% |
-| FAIL | 42 | 2.3% |
+| FAIL | 41 | 2.3% |
 | LEGACY | 0 | 0.0% |
 | NOT-TWINNED | 685 | 37.8% |
 | UNSUPPORTED | 823 | 45.4% |
 | CRASH | 0 | 0.0% |
 | INVALID | 0 | 0.0% |
 
-**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 305; of those, 263 hold (86.2%). Runtime half executed on the bootstrap for 100 case(s).
+**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 305; of those, 264 hold (86.6%). Runtime half executed on the bootstrap for 100 case(s).
 
-- **Vacuous** passes: 19 of 263 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **244**.
-- FAILs whose required code appears nowhere in the bootstrap's sources (check not implemented): 17 of 42; the other 25 are implemented checks that answered wrong.
+- **Vacuous** passes: 19 of 264 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **245**.
+- FAILs whose required code appears nowhere in the bootstrap's sources (check not implemented): 17 of 41; the other 24 are implemented checks that answered wrong.
 
 LEGACY by marker (a case may carry several): none.
 UNSUPPORTED by reason: bootstrap-unsupported 549 · parse-reject 274.
@@ -106,7 +106,7 @@ NOT-TWINNED by reason (685 cases; a case counts once per distinct reason):
 | capability | 12 | 7 | · | · | · | · | 5 | · | · |
 | channel | 49 | · | · | · | · | 37 | 12 | · | · |
 | codegen | 4 | · | · | · | · | 3 | 1 | · | · |
-| components | 68 | · | · | 1 | · | 65 | 2 | · | · |
+| components | 68 | 1 | · | · | · | 65 | 2 | · | · |
 | condition | 36 | 18 | · | 5 | · | 8 | 5 | · | · |
 | control-flow | 76 | 16 | · | 1 | · | 21 | 38 | · | · |
 | defer | 51 | 15 | · | 2 | · | 4 | 30 | · | · |
@@ -163,10 +163,8 @@ NOT-TWINNED by reason (685 cases; a case counts once per distinct reason):
 | tenant | 23 | · | · | · | · | · | 23 | · | · |
 | type-state-codes | 32 | 3 | · | 1 | · | 3 | 25 | · | · |
 
-### FAIL (42)
+### FAIL (41)
 
-- `components/post-ce-residual-component-reject` (codes)
-  - missing E-COMPONENT-035
 - `condition/unresolved-call-markup-neg` (codes)
   - missing E-COND-NOT-BOOLEAN
   - count: E-COND-NOT-BOOLEAN fired 0 time(s), expected exactly 1
@@ -277,7 +275,7 @@ none
 
 none
 
-### PASS / CODES-ONLY (263)
+### PASS / CODES-ONLY (264)
 
 - `attr-executable-sink/bound-svg-animation-runtime-guard` — PASS · TWIN
 - `attr-executable-sink/bound-url-runtime-guard` — PASS · TWIN
@@ -308,6 +306,7 @@ none
 - `capability/unknown-token` — PASS
 - `capability/unknown-token-mixed-with-valid` — PASS
 - `capability/valid-clean` — PASS
+- `components/post-ce-residual-component-reject` — PASS
 - `condition/bang-on-optional-neg` — PASS
 - `condition/bool-condition-pos` — PASS
 - `condition/bool-or-not-bare-neg` — PASS

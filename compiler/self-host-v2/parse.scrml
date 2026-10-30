@@ -51,7 +51,7 @@ ${
              AAttrValue, AAttr, AElem, ANode, ANodeK, ADeclAttr, AStateChild, ADeclChild, ADecl, AValArg, AValidator,
              AProgram, AItem, AItemK, AConst, FileAst, ADbFn, AHostBind, Diag, ASql, ASqlMode,
              AHow, AHandled, AArm, APat, ABind, AArmBody, AFail, AFor, AForHead, AIterSrc, AForBound, ALift, ACss, AForeign, mkSpan, newDiag, stdlibPathPrefix,
-             HView, HChain, HTargetParts, hostView, hostChainOf, hostRootGlobal, hostTargetParts } from "./ast.scrml"
+             HView, HChain, HTargetParts, hostView, hostChainOf, hostRootGlobal, hostTargetParts, isHyphenWordExpr } from "./ast.scrml"
     import { CssErr, CssParsed, parseCssBlock } from "./css-syntax.scrml"
     import { logicWriteSink, executableAttrName } from "./url.scrml"
 
@@ -5687,7 +5687,7 @@ ${
             .Lambda(params: ps) :> false
             .Handled(h: h) :> false
         }
-        if (!op) return mp
+        if (!op || isHyphenWordExpr(x)) return mp   // a hyphenated word: analyze decides (review F9)
         const text: string = mp.src.substring(start, mp.pos)
         return mDiag(mp, "E-ATTR-UNQUOTED-OPERATOR", "`" + name + "=" + text + "` — an unquoted attribute value holds no operator: it is an identifier, a member chain or a call (§5.1, §5.2). Parenthesize the expression — `" + name + "=(" + text + ")` — or quote it", start, mp.pos)
     }

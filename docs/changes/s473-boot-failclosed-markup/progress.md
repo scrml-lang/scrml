@@ -33,3 +33,15 @@ Branch: `s473-boot-failclosed-markup` off origin/main 741a2b51c.
 - Merged origin/main (#1673). Gaps RESOLVED/NARROWED in place (no new gaps); coverage rows updated.
 - Final corpus delta: clean 69 → 62; newly failing 7 (6 md/* refused, engine/mount-not-engine-pos E-MARKUP-001).
   bootstrap-conformance: FAIL 49 → 42, PASS 263 → 263.
+
+## Review fix round (#1678 LAND-W-F/U)
+- F1: capitalised tag passes only if its lowercase form is an HTML name (`markupElementName`,
+  elements `isHtmlElementName`) — `<Unknown/>`/`<Set/>`/`<View/>` are E-COMPONENT-035; gap text corrected.
+- F3: g-boot-program-field-bare-tag-renders-inert-s473 → NARROWED; ruling owed (element-named cells).
+- F4: control-flow recognizer finds the braced statement anywhere in a run; else / else if / switch /
+  match / do; interpolation between `)` and `{`. "Tap if (and only if) ready" pinned clean.
+- F6: `<slot>` refuses protect= / authority= / fixed. F7 header cite. F8 `selectedcontent`.
+  F9 hyphen-word values: E-ATTR-UNQUOTED-OPERATOR only when the names resolve (no double report).
+- F5 noted in the gap. Conformance: PASS 264, FAIL 41. Corpus: +31 E-CONTROL-FLOW-IN-MARKUP on
+  already-failing files; post-ce-residual-component-reject now fails to compile as its case expects.
+- F2 (merge with #1675) pending its landing.

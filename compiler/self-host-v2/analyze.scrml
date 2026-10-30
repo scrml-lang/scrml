@@ -54,9 +54,9 @@ ${
              AProgram, AItem, AItemK, AConst, FileAst, ADbFn, AHostBind, Diag, ASql,
              AHow, AHandled, AArm, APat, ABind, AArmBody, AFail, AFor, AForHead, AIterSrc, AForBound, ALift, AForeign,
              ACss, ACssItem, ACssRule, ACssDecl, ACssPart, ACssRef, mkSpan, newDiag,
-             HView, HTargetParts, hostView, hostTargetParts, hostRootGlobal } from "./ast.scrml"
+             HView, HTargetParts, hostView, hostTargetParts, hostRootGlobal, isHyphenWordExpr } from "./ast.scrml"
     import { Severity } from "./severity.scrml"
-    import { isKnownElementName } from "./elements.scrml"
+    import { isKnownElementName, isHtmlElementName } from "./elements.scrml"
     import { importTarget, importsOfItems, hostImportsOfItems, hostTagOf, isStdlibPath, HostLoc, hostLocOf } from "./link.scrml"
     import { WireBuild, WireTable, wireBuild, hasFixedLength } from "./codec.scrml"
     import { SqlFacts, SlotQuote, sqlFacts, slotInLiteral, txControl, txControlAware } from "./sql.scrml"
@@ -15698,12 +15698,77 @@ ${
         // and a name imported from a module that resolves to nothing (that
         // import's refusal). Each of those is an error already, so the compile
         // is refused either way: never fail-open.
-        if (!isKnownElementName(e.tag) && !namesOwnField(env, e.tag)) {
+        // A CAPITALISED tag is an element only when its lowercase form is an HTML
+        // element name (`<DIV>` is `<div>`, §4.3) — never by folding onto an
+        // SVG / MathML name: `<Unknown/>` (SVG legacy `unknown`), `<Set/>`,
+        // `<View/>`, `<Filter/>` are undeclared components, E-COMPONENT-035
+        // (S473 #1678 review F1; #1675's isCapitalTag rule).
+        if (!markupElementName(e.tag) && !namesOwnField(env, e.tag)) {
             const excused: boolean = e.tag == "" || hasErrIn(fileErrs(env.g.files, env.file), e.span) || importsNameUnresolved(env.g.files, env.file, e.tag)
             if (excused) return resolveHtml(env, e, st)
             return unknownElement(env, e, st)
         }
         return resolveHtml(env, e, st)
+    }
+
+    // s473 (#1678 review F9) — an unquoted value that reads as a hyphenated word
+    // (`class=foo-bar`) is a subtraction of names; the parser left it here
+    // (ast isHyphenWordExpr). Its names resolving to nothing is already
+    // E-SCOPE-001; when they all resolve, it is E-ATTR-UNQUOTED-OPERATOR (§5.2:
+    // an unquoted value holds no operator) — one report per fault.
+    fn hyphenWordValue(env: Env, a: AAttr, before: int, st: AS) -> AS {
+        const v: AAttrValue = a.value
+        const x: AExpr | not = match v {
+            .Bare(e: e) :> e
+            .NoValue :> not
+            .Paren(e: e) :> not
+            .Quoted(v: s) :> not
+            .Braced(b: b) :> not
+        }
+        if (x is not || !isHyphenWordExpr(x)) return st
+        const k: AExprK = x.k
+        const binary: boolean = match k {
+            .Name(name: n) :> false
+            .Binary(op: o) :> true
+            .Recovered :> false
+            .Sql(q: q) :> false
+            .Template(quasis: qs) :> false
+            .Foreign(f: fb0) :> false
+            .At(name: n) :> false
+            .AtItem :> false
+            .Num(raw: r) :> false
+            .Str(v: s) :> false
+            .Bool(v: b) :> false
+            .NotLit :> false
+            .Variant(name: n) :> false
+            .Member(obj: o) :> false
+            .Call(callee: c) :> false
+            .Unary(op: o) :> false
+            .Ternary(test: t) :> false
+            .Assign(target: t) :> false
+            .ArrayLit(elems: es) :> false
+            .ObjectLit(props: ps) :> false
+            .Spread(e: s) :> false
+            .Index(obj: o) :> false
+            .Lambda(params: ps) :> false
+            .Handled(h: h) :> false
+        }
+        if (!binary) return st
+        let i: int = before
+        while (i < st.diags.length) {
+            if (st.diags[i].code == "E-SCOPE-001") return st
+            i = i + 1
+        }
+        return addDiag(st, env.file, a.span, "E-ATTR-UNQUOTED-OPERATOR", "`" + a.name + "=…` — this unquoted value is a subtraction (`-` between names), and an unquoted attribute value holds no operator: it is an identifier, a member chain or a call (§5.1, §5.2). Quote a literal (`" + a.name + "=\"a-b\"`) or parenthesize an expression")
+    }
+
+    // s473 — a tag that names a registry element (§4.1, §24.1): lowercase-initial
+    // → any HTML / SVG / MathML / custom element name; capitalised → only an
+    // HTML element name, case-folded (review F1).
+    fn markupElementName(tag: string) -> boolean {
+        const first: string = tag.substring(0, 1)
+        if (first != "" && first != first.toLowerCase()) return isHtmlElementName(tag)
+        return isKnownElementName(tag)
     }
 
     // s473 — an element attribute that is a scrml directive the bootstrap does
@@ -15734,7 +15799,7 @@ ${
         if (cd is not) return false
         const i: int = fieldIndex(cd.info, tag)
         if (i < 0 || !isChildRole(cd.info.fields[i].role)) return false
-        return !cd.isProgram || !isKnownElementName(tag)
+        return !cd.isProgram || !markupElementName(tag)
     }
 
     // s473 — an element name that resolves to nothing (§4.1, §24.1). §34's
@@ -15790,7 +15855,7 @@ ${
                 run = run + piece
             } else if (inRun) {
                 const kw: string = controlFlowHead(run)
-                if (kw != "") st = addDiag(st, env.file, runSpan, "E-CONTROL-FLOW-IN-MARKUP", "a bare `" + kw + " (…) { … }` in a markup body is not logic — it would be written into the page as text, and the markup inside its braces would render unconditionally. Control flow in markup lives in a `$" + "{ … }` logic block (§17.4, §7) — `$" + "{ for (x of @items) { lift <li>$" + "{x}</li>; } }` — or is an `if=` on the element (§17.1), or `<each in=@items>` (§17.7)")
+                if (kw != "") st = addDiag(st, env.file, runSpan, "E-CONTROL-FLOW-IN-MARKUP", "a bare `" + kw + " … { … }` statement in a markup body is not logic — it would be written into the page as text, and the markup inside its braces would render unconditionally. Control flow in markup lives in a `$" + "{ … }` logic block (§17.4, §7) — `$" + "{ for (x of @items) { lift <li>$" + "{x}</li>; } }` — or is an `if=` on the element (§17.1), or `<each in=@items>` (§17.7)")
                 inRun = false
             }
             i = i + 1
@@ -15803,7 +15868,7 @@ ${
     fn textRunPiece(k: ANodeK) -> string | not {
         return match k {
             .Text(text: t) :> t
-            .Interp(e: x) :> "x"
+            .Interp(e: x) :> ""
             .Elem(e: x) :> not
             .DeclNode(d: d) :> not
             .Css(c: c) :> not
@@ -15812,29 +15877,68 @@ ${
         }
     }
 
-    // The keyword when `s`, after leading whitespace, is `for` / `while` / `if`
-    // at a word boundary, optional whitespace, `(`, and later a `)` followed by
-    // optional whitespace and `{` — impl#1's BARE_CONTROL_FLOW_IN_MARKUP_RE
-    // `^\s*(for|while|if)\b\s*\([^]*?\)\s*\{`. "" otherwise.
-    fn controlFlowHead(s: string) -> string {
-        const t: string = s.trimStart()
-        let kw = ""
-        if (t.startsWith("for")) kw = "for"
-        if (t.startsWith("while")) kw = "while"
-        if (t.startsWith("if")) kw = "if"
-        if (kw == "") return ""
-        let j: int = kw.length
-        if (j < t.length && isWordChar(t.substring(j, j + 1))) return ""
-        while (j < t.length && t.substring(j, j + 1).trim() == "") { j = j + 1 }
-        if (j >= t.length || t.substring(j, j + 1) != "(") return ""
-        let k: int = t.indexOf(")", j + 1)
-        while (k >= 0) {
-            let m: int = k + 1
-            while (m < t.length && t.substring(m, m + 1).trim() == "") { m = m + 1 }
-            if (m < t.length && t.substring(m, m + 1) == "{") return kw
-            k = t.indexOf(")", k + 1)
+    // The control-flow statement a markup text run holds, by its keyword ("" =
+    // none). §17.4 / §34 E-CONTROL-FLOW-IN-MARKUP: control flow in a markup body
+    // is logic; S383: the `{` is the whole discriminator between code and prose,
+    // so every form here needs its brace. impl#1's recognizer
+    // (BARE_CONTROL_FLOW_IN_MARKUP_RE) anchors at the run start; this one finds
+    // the statement ANYWHERE in the run (#1678 review F4: `Hello. if (@f) {
+    // <p>secret</p> }` rendered `<p>` unconditionally), at a word boundary:
+    //   `for` / `while` / `if` / `switch` `(…)` then `{` after a `)`;
+    //   `else {`, `else if (…) {`, `do {`;
+    //   `match @x … {` / `match (…) … {` (§18 — a subject, then its arms' brace).
+    // An interpolation stands for nothing in the run (textRunPiece), so
+    // `if (@a) ${…} {` is caught too. Prose with no brace after the head —
+    // "Tap if (and only if) ready" — is never refused.
+    fn controlFlowHead(t: string) -> string {
+        let i: int = 0
+        while (i < t.length) {
+            if (i == 0 || !isWordChar(t.substring(i - 1, i))) {
+                const kw: string = cfKeywordAt(t, i)
+                if (kw != "" && cfStatementAt(t, i + kw.length, kw)) return kw
+            }
+            i = i + 1
         }
         return ""
+    }
+
+    fn cfKeywordAt(t: string, i: int) -> string {
+        for (const kw of ["switch", "while", "match", "else", "for", "if", "do"]) {
+            const j: int = i + kw.length
+            if (t.substring(i, j) == kw && (j >= t.length || !isWordChar(t.substring(j, j + 1)))) return kw
+        }
+        return ""
+    }
+
+    // After the keyword `kw` (ending at `j0`): does its braced statement follow?
+    fn cfStatementAt(t: string, j0: int, kw: string) -> boolean {
+        const j: int = skipBlank(t, j0)
+        if (j >= t.length) return false
+        const c: string = t.substring(j, j + 1)
+        if (kw == "else") {
+            if (c == "{") return true
+            if (cfKeywordAt(t, j) == "if") return cfStatementAt(t, j + 2, "if")
+            return false
+        }
+        if (kw == "do") return c == "{"
+        if (kw == "match") {
+            if (c != "@" && c != "(") return false
+            return t.indexOf("{", j) >= 0
+        }
+        if (c != "(") return false
+        let k: int = t.indexOf(")", j + 1)
+        while (k >= 0) {
+            const m: int = skipBlank(t, k + 1)
+            if (m < t.length && t.substring(m, m + 1) == "{") return true
+            k = t.indexOf(")", k + 1)
+        }
+        return false
+    }
+
+    fn skipBlank(t: string, from: int) -> int {
+        let m: int = from
+        while (m < t.length && t.substring(m, m + 1).trim() == "") { m = m + 1 }
+        return m
     }
 
     // A regex `\w` character.
@@ -16034,7 +16138,14 @@ ${
     // carries no fallback. It used to be dropped unvisited — an effect there
     // never ran, an unresolved `${@nope}` raised nothing. Fail closed: any
     // content other than whitespace is refused.
-    fn resolveSlot(env: Env, e: AElem, st: AS) -> AS {
+    fn resolveSlot(env: Env, e: AElem, st0: AS) -> AS {
+        // s473 (#1678 review F6) — S473 D1 / D2 / D26 hold on `<slot>` too: a
+        // `protect=` / `authority=` / `fixed` here was dropped silently.
+        let st: AS = st0
+        for (const a of e.attrs) {
+            const directive: string = refusedDirectiveAttr(a.name, e.tag)
+            if (directive != "") st = addDiag(st, env.file, a.span, "E-BOOTSTRAP-UNSUPPORTED", directive)
+        }
         for (const k of e.kids) {
             if (!blankNode(k)) {
                 return addElem(addDiag(st, env.file, k.span, "E-BOOTSTRAP-UNSUPPORTED", "content inside `<slot>…</slot>` (fallback content for a use with no children) is not in the bootstrap — SPEC §66.15.2 rules only `<slot/>`; the content would be dropped silently. Write `<slot/>` and render a default outside it"), e.nid, ElemFact.MSlot)
@@ -16670,7 +16781,9 @@ ${
                 st = resolveValue(penv, a.value, not, st)
                 st = addDiag(st, env.file, a.span, "E-ATTR-STYLESHEET-HREF", "`" + a.name + "=` on `<" + e.tag + ">` takes its value from data (an expression, a variable, a call or a field), and this `<link>`'s `rel` loads a stylesheet (it contains `stylesheet`, or is computed) — data never chooses a stylesheet: a whole sheet can read the page (attribute-selector `url(…)` fetches) and cover it. Write the `href` as a static string (`href=\"/theme.css\"`), switch between static `<link>`s with `if=`, or put the dynamic part in a `#" + "{…}` rule as `@cell` (§25.7) (§5.2)")
             } else if (valueExpr(a.value) is given) {
+                const before: int = st.diags.length
                 st = resolveValue(penv, a.value, not, st)
+                st = hyphenWordValue(env, a, before, st)
                 st = addAttr(st, a.nid, AttrKind.ABound)
             } else {
                 st = addAttr(st, a.nid, AttrKind.AStatic)

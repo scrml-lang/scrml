@@ -57,7 +57,9 @@ ${main}
 // answer is impl#1's minus those forms — asserted below, and the forms are pinned.
 const STD = new Set(standardMarkupElementNamesLowercase());
 const IMPL1_SCRML_FORMS = getAllElementNames().filter((k) => !STD.has(k.toLowerCase())).sort();
-const impl1Markup = (n) => isKnownElementName(n) && !IMPL1_SCRML_FORMS.includes(n.toLowerCase());
+// The one deliberate addition over impl#1's list (review F8): WHATWG's `selectedcontent`.
+const BOOT_ONLY = ["selectedcontent"];
+const impl1Markup = (n) => BOOT_ONLY.includes(n.toLowerCase()) || (isKnownElementName(n) && !IMPL1_SCRML_FORMS.includes(n.toLowerCase()));
 
 describe("elements.scrml is impl#1's element list (one definition)", () => {
   test("impl#1's registry adds only scrml structural forms to the standard lists", () => {
@@ -88,6 +90,19 @@ describe("§4.1 — an unknown element is a compile error, never an inert elemen
   });
   test("capitalised unknown → E-COMPONENT-035", () => {
     expect(codes(P(`        <Widget/>`))).toEqual(["E-COMPONENT-035"]);
+  });
+  test("review F1 — a capitalised tag never folds onto an SVG / MathML name (`<Unknown/>` is SVG legacy `unknown`)", () => {
+    for (const t of ["Unknown", "Set", "View", "Filter", "Symbol", "Mask", "Marker", "Mrow", "Semantics"]) {
+      expect([t, codes(P(`        <${t}/>`))]).toEqual([t, ["E-COMPONENT-035"]]);
+    }
+    // at the <program> body-top too (review probe c05)
+    expect(codes(`<program>\n<Unknown/>\n</program>\n`)).toEqual(["E-COMPONENT-035"]);
+  });
+  test("review F1 — a capitalised HTML name is that element (§4.3: casing is irrelevant)", () => {
+    clean(P(`        <Div>x</Div><SECTION>y</SECTION><Svg><g/></Svg>`));
+  });
+  test("review F8 — `<selectedcontent>` (WHATWG) is an element", () => {
+    clean(P(`        <select><button><selectedcontent></selectedcontent></button><option>a</option></select>`));
   });
   test("§52 type-level `<User protect=…>` is refused, not emitted with protect= dropped (§14.8.9)", () => {
     const src = `<program>
@@ -172,13 +187,40 @@ describe("§17.4 — E-CONTROL-FLOW-IN-MARKUP", () => {
     expect(codes(P(`        <ul><b>x</b> for (m of @ms) { <li>a</li> }</ul>`))).toEqual(["E-CONTROL-FLOW-IN-MARKUP"]);
     expect(codes(P(`        <p>while (true) { x }</p>`))).toEqual(["E-CONTROL-FLOW-IN-MARKUP"]);
   });
+  test("review F4 — mid-run, after an interpolation, else / else if / switch / match / do", () => {
+    const L = `    let <flag:bool=false/>\n    let <n:int=0/>`;
+    for (const m of [
+      `<div>Hello. if (@flag) { <p>secret</p> }</div>`,
+      `<div>if (@flag) \${"x"} { <p>secret</p> }</div>`,
+      `<div><b>a</b> else { <p>b</p> }</div>`,
+      `<div><b>a</b> } else if (@flag) { <p>b</p> }</div>`,
+      `<div>switch (@n) { <p>a</p> }</div>`,
+      `<div>match @n { <p>a</p> }</div>`,
+      `<div>do { <p>a</p> } while (@flag)</div>`,
+    ]) expect([m, codes(P(`        ${m}`, L))]).toEqual([m, ["E-CONTROL-FLOW-IN-MARKUP"]]);
+  });
   test("prose and braceless forms are not refused (the `{` is the discriminator, S383)", () => {
+    clean(P(`        <p>Tap if (and only if) ready</p>`));
+    clean(P(`        <p>for (more) see the docs, or else ask. I do. A match is lit.</p>`));
     clean(P(`        <p>if (you ask) we deliver. for (all) of us.</p>`));
     clean(P(`        <p>Notify if (and only if) asked.</p>`));
     clean(P(`        <p>iffy (x) { y }</p>`));
   });
   test("`<pre>` / `<code>` are display text (§4.17)", () => {
     clean(P(`        <pre>if (x) { y }</pre>`));
+  });
+});
+
+describe("review F6 — S473 D1 / D2 on `<slot>`", () => {
+  test("`protect=` on a `<slot>` is refused, not dropped", () => {
+    const src = P(`        <card/>`, `    <card title:string="t"/>\n    renders <div><slot protect="x"/></div>`);
+    expect(codes(src)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+  });
+});
+
+describe("review F9 — a hyphenated word value", () => {
+  test("`class=foo-bar` with undeclared names: E-SCOPE-001 only, not also E-ATTR-UNQUOTED-OPERATOR", () => {
+    expect(codes(P(`        <p class=foo-bar>x</p>`))).toEqual(["E-SCOPE-001", "E-SCOPE-001"]);
   });
 });
 

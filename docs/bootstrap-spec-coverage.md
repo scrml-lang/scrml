@@ -34,8 +34,8 @@ SPEC §47 (Output Name Encoding) was found unimplemented in the bootstrap with n
 | status | rows |
 |---|---:|
 | BUILT | 281 |
-| PARTIAL | 148 |
-| REFUSED-LOUD | 330 |
+| PARTIAL | 149 |
+| REFUSED-LOUD | 329 |
 | DEFERRED-RULED | 66 |
 | N/A | 189 |
 | SILENT-ACCEPT | 36 |
@@ -160,7 +160,7 @@ SILENT rows carrying a gap id: 83 of 83.
 | §6.3.3 | Tier-3 positional construction | REFUSED-LOUD | `s6-3-positional` gives E-PARSE-EXPECTED plus E-TYPE-031 | — | (P1) Retired by S435 #14; a §66.18 code would be cleaner |
 | §6.3.4 | Engine-typed | N/A | belongs to §51 | — | (P1) |
 | §6.3.5 | Bare `formRes.name` is a scope error | BUILT | E-SCOPE-001 "is a cell" (probe `s6-1-shorthand` shows the message) | — | (P1) |
-| §6.4 / §6.4.1 | Bare `<count/>` naming a program cell | REFUSED-LOUD | `s6-4-plain-tag-cell.scrml` compiles at exit 0, and index.html holds a literal `<main><count></count></main>`. analyze.scrml:16345 `resolveHtml` skips E-DECL-FIELD-TAG-NEEDS-STAR when `cd.isProgram`. | g-boot-program-field-bare-tag-renders-inert-s473 | (P1) The legacy render-by-tag `<x/>` now silently renders an inert unknown element. §66.6.6 says: "there is NO deprecation window in which `<x/>` silently changes meaning". Also found by the §4 and §5 sub-auditors. — **S473 lane s473-boot-failclosed-markup: E-DECL-FIELD-TAG-NEEDS-STAR (refused, not built)** |
+| §6.4 / §6.4.1 | Bare `<count/>` naming a program cell | PARTIAL | `s6-4-plain-tag-cell.scrml` compiles at exit 0, and index.html holds a literal `<main><count></count></main>`. analyze.scrml:16345 `resolveHtml` skips E-DECL-FIELD-TAG-NEEDS-STAR when `cd.isProgram`. | g-boot-program-field-bare-tag-renders-inert-s473 | (P1) The legacy render-by-tag `<x/>` now silently renders an inert unknown element. §66.6.6 says: "there is NO deprecation window in which `<x/>` silently changes meaning". Also found by the §4 and §5 sub-auditors. — **S473 lane s473-boot-failclosed-markup: E-DECL-FIELD-TAG-NEEDS-STAR (refused, not built)** — **review F3: a cell spelled like an element (`filter`, `title`, `data`, …) keeps the element reading — gap narrowed, ruling owed** |
 | §6.4.2 | Shape-2 expansion via `<*x/>` | REFUSED-LOUD | `s6-4-star-norender` gives E-BOOTSTRAP-UNSUPPORTED (only a `rule=` graph field with bodied state-children, O5 (1i); otherwise O51 OPEN) | — | (P1) |
 | §6.4.3 | Markup-typed derived | DEFERRED-RULED | OPEN §66.22 O24; markup is not a value in the bootstrap's logic | — | (P1) |
 | §6.4.4 | No runtime override | N/A | follows from the rows above | — | (P1) |
@@ -473,7 +473,7 @@ SILENT rows carrying a gap id: 83 of 83.
 | §15.13.1–15.13.4 | Component reactive scope | BUILT | `@cell` in renders, per-instance state: dropdown.browser.test.js, valuesem.browser.test.js; probe p15-reactive | — | (P3) non-`bind` props captured once is superseded by §66.9 L6 (a live initializer is derived) |
 | §15.13.5 | Components vs engines, E-COMPONENT-ENGINE-SCOPE | BUILT | analyze.scrml:3778; engine.test.js | — | (P3) |
 | §15.13.6 | V5-strict note | N/A | composition note | — | (P3) |
-| §15.14 / 15.14.2 | Post-CE invariant, no residual component (E-COMPONENT-035) | PARTIAL | probe p15-unknown: `<Widget title="x"/>` and `<frobnicate/>` compile at exit 0 and are emitted as DOM elements (the phantom-element pattern §15.14.1 describes) | g-bootstrap-unknown-tags-resolved-as-html | (P3) gap **g-bootstrap-unknown-tags-resolved-as-html** (MED, narrowed, still open) |
+| §15.14 / 15.14.2 | Post-CE invariant, no residual component (E-COMPONENT-035) | BUILT | probe p15-unknown: `<Widget title="x"/>` and `<frobnicate/>` compile at exit 0 and are emitted as DOM elements (the phantom-element pattern §15.14.1 describes) | g-bootstrap-unknown-tags-resolved-as-html | (P3) gap **g-bootstrap-unknown-tags-resolved-as-html** (MED, narrowed, still open) — **S473 lane s473-boot-failclosed-markup: an undeclared capitalised tag is E-COMPONENT-035 unless its lowercase form is an HTML name (review F1); post-ce-residual-component-reject passes** |
 | §15.14.1 / .3 / .4 / .5 | Rationale; E-COMPONENT-020; CE test discipline; W2 cross-file | N/A | impl#1 CE pipeline | — | (P3) |
 | §15.15.1–15.15.3 | Registry, lookup order, casing | N/A | impl#1 NR architecture; the bootstrap's own order (declaration > structural refusal > HTML) is in resolveElem | — | (P3) the unknown step is the 15.14 gap |
 | §15.15.4 | W-CASE-001 (user declaration shadows an HTML element) | SILENT-ABSENT | probe p15-shadow: `<button label:string/>` compiles with no warning, and every `<button>` in scope becomes the user declaration; no W-CASE-001 anywhere in self-host-v2 | g-boot-w-case-001-absent-s473 | (P3) |
@@ -1439,7 +1439,7 @@ SILENT rows carrying a gap id: 83 of 83.
 | §66.6.3 | Self-reference inside `renders` (O54) | BUILT | A `own` field: "`@own` is this instance (O54 = (a), RULED S442)"; dropdown Core `.Lexical(0)` | — | (P6) The SPEC still says OPEN (see Questionable). |
 | §66.6.4 | The shared instance (lazy) | BUILT | print `shared_<decl>()` is memoized and emitted only when referenced (dpa-051 §(4)); probe `star-shared`; m1/runtime.test.js | — | (P6) |
 | §66.6.5 | Predefined declarations have no shared instance | BUILT | A E-DECL-STAR-PREDEFINED; m2/front.test.js, m2/typer.test.js; probe `star-div` | — | (P6) |
-| §66.6.6 | A bare own-field tag is an error; same-arc migration | BUILT | A E-DECL-FIELD-TAG-NEEDS-STAR inside a declaration; m2/front.test.js, m4/form.test.js; probe `field-tag` | g-boot-program-field-bare-tag-renders-inert-s473 | (P6) The top-level `<x/>` of a cell changes meaning silently, which the same-arc rule forbids (SILENT #1). — **S473 lane s473-boot-failclosed-markup: program cells included (one carve-out: a cell spelled like an HTML element keeps the element reading — SPEC-silent)** |
+| §66.6.6 | A bare own-field tag is an error; same-arc migration | PARTIAL | A E-DECL-FIELD-TAG-NEEDS-STAR inside a declaration; m2/front.test.js, m4/form.test.js; probe `field-tag` | g-boot-program-field-bare-tag-renders-inert-s473 | (P6) The top-level `<x/>` of a cell changes meaning silently, which the same-arc rule forbids (SILENT #1). — **S473 lane s473-boot-failclosed-markup: program cells included (one carve-out: a cell spelled like an HTML element keeps the element reading — SPEC-silent)** — **review F3: the element-named-cell carve-out is open (gap narrowed)** |
 | §66.6.7 | Attributes on a `<*x>` are read-only | BUILT | A E-DECL-STAR-REF-ATTR-WRITE / resolveStar; m4/use-attr.test.js, m4/review-r1.test.js; probe `star-attr` | — | (P6) O18-r: `if=` on `<*x>` is E-BOOTSTRAP-UNSUPPORTED, as the SPEC states. |
 | §66.6.8 | A use of a declaration with no `renders` (O51) | PARTIAL | `<*x/>` is refused, A:16083 | — | (P6) A plain `<sig/>` / `<counter as=c …/>` compiles as a data-only instance (option (b)) with no diagnostic (probe `norender-use`). That takes a side on an OPEN item; see Questionable. |
 | §66.6.9 | A use carries only what its declaration declares (O18) | BUILT | A resolveUse / resolveStar / resolveConstructValue E-DECL-USE-ATTR; m4/use-attr.test.js; probe `use-attr` | — | (P6) Rule 7: m4/sink-guards.test.js; the script/style gap is §4.17, out of range. |

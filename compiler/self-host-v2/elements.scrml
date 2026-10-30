@@ -14,8 +14,14 @@
 // (MDN, with the legacy names), and the custom-element grammar. impl#1's curated
 // REGISTRY adds nothing a markup page writes (its extra keys are scrml
 // structural forms, which analyze reads before it asks here).
-// compiler/self-host-v2/slice-m4/element-registry-s473.test.js runs both over
-// the same names and requires the same answer: a drift is a failing test.
+// compiler/self-host-v2/slice-m4/markup-failclosed-s473.test.js ("elements.scrml
+// is impl#1's element list") runs both over the same names and requires the
+// same answer: a drift is a failing test. One deliberate addition, pinned there:
+// WHATWG's `selectedcontent` (customizable `<select>`), which impl#1's list lacks.
+//
+// A CAPITALISED tag is matched against the HTML list only
+// (isHtmlElementName): `<DIV>` is `<div>`, but `<Unknown/>` / `<Set/>` /
+// `<View/>` never fold onto an SVG or MathML name (analyze markupElementName).
 //
 // Matching is case-insensitive (§4.3 / §15.15.3: "Casing is irrelevant to
 // resolution"), as impl#1's predicate is. A custom element (§22.4.1 /
@@ -43,7 +49,7 @@ ${
                 "thead", "tr",
                 "button", "datalist", "fieldset", "form", "input", "label", "legend",
                 "meter", "optgroup", "option", "output", "progress", "select", "textarea",
-                "details", "dialog", "summary",
+                "details", "dialog", "summary", "selectedcontent",
                 "svg", "math",
                 "acronym", "applet", "basefont", "bgsound", "big", "blink", "center",
                 "content", "dir", "font", "frame", "frameset", "image", "isindex", "keygen",
@@ -114,6 +120,12 @@ ${
             i = i + 1
         }
         return hyphen
+    }
+
+    // `name`, case-folded, is a WHATWG HTML element name (no SVG / MathML, no
+    // custom element) — the only registry a capitalised tag may fold onto.
+    export fn isHtmlElementName(name: string) -> boolean {
+        return name != "" && htmlElementNames().indexOf(name.toLowerCase()) >= 0
     }
 
     // SPEC §4.1 / §24.1: `name` is an element of the built-in registry — an HTML,
