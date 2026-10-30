@@ -399,9 +399,9 @@ async function main(argv: string[]): Promise<number> {
     if (!f.junit?.length) { console.error("windows-ratchet judge: at least one --junit <name>=<xml>[:<rc>]"); return 2; }
     if (validateCmd(baselinePath, gapsPath) !== 0) return 1;
     const suites: Suite[] = f.junit.map((spec) => {
-      const m = /^([^=]+)=(.+?)(?::(-?\d+))?$/.exec(spec);
+      const m = /^([^=]+)=(.+?)(?::(-?\d*))?$/.exec(spec);
       if (!m) throw new Error(`bad --junit ${spec}`);
-      return { name: m[1], path: m[2], rc: m[3] === undefined ? null : Number(m[3]), report: readReport(m[2]) };
+      return { name: m[1], path: m[2], rc: m[3] === undefined || m[3] === "" ? null : Number(m[3]), report: readReport(m[2]) };
     });
     const retry = f.retry?.[0] ? readReport(f.retry[0]) : null;
     if (f.retry?.[0] && !retry) console.log(`windows-ratchet: the retry report ${f.retry[0]} is missing — judging on the first run alone`);
