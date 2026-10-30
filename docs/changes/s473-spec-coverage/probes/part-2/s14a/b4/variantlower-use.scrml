@@ -1,0 +1,7 @@
+<program>
+    type St:enum = { pending, active }
+    let <s:St=.pending/>
+    function f() { @s = .active; }
+    function g() -> string { return match @s { .pending :> "p", .active :> "a" }; }
+    <button onclick=f()>${g()}</button>
+</program>

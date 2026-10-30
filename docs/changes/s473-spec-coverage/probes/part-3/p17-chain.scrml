@@ -1,0 +1,14 @@
+<program>
+    let <a:bool=false/>
+    let <b:bool=false/>
+    <main>
+        <p>static</p>
+        <span else>x</span>
+        <span if=@a>A</span>
+        <!-- c -->
+        <span else-if=@b>B</span>
+        <span else>C</span>
+        <span else>D</span>
+        <span if=@a else>E</span>
+    </main>
+</program>

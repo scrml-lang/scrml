@@ -1,0 +1,6 @@
+<program>
+<program name="compute">
+${ export function add(a: number, b: number) -> number { return a + b; } }
+</program>
+<main><p>x</p></main>
+</program>

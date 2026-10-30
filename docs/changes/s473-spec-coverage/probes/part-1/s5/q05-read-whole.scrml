@@ -1,0 +1,4 @@
+<program>
+let <count:int=0/>
+<button onclick=@count = @count + 1>${@count}</button>
+</program>

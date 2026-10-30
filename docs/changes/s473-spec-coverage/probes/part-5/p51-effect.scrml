@@ -1,0 +1,10 @@
+<program>
+    type Phase:enum = { Idle, Loading, Done }
+    let <n:int=0/>
+    <phase:Phase=.Idle single>
+        <Idle rule=.Loading effect=${ @n = @n + 1 } : "i">
+        <Loading rule=.Done : "l">
+        <Done rule=.Idle : "d">
+    </>
+    <main><p><*phase/></p></main>
+</program>

@@ -1,0 +1,7 @@
+<host>
+  f(a: string) -> string = window["foo"].bar(a)
+</host>
+<program>
+
+<p>${f("q")}</p>
+</program>

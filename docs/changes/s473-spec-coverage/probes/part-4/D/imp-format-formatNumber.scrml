@@ -1,0 +1,4 @@
+<program>
+${ import { formatNumber } from 'scrml:format' }
+<main><p>x</p></main>
+</program>

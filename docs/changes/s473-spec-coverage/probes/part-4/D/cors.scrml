@@ -1,0 +1,3 @@
+<program cors="*" log="structured" headers="strict" csrf="auto" idempotency-store="auto">
+<main><p>hi</p></main>
+</program>

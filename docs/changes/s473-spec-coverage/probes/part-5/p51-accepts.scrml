@@ -1,0 +1,10 @@
+<program>
+    type Phase:enum = { Idle, Loading, Done }
+    type Msg:enum = { Start, Finish }
+    <phase:Phase=.Idle single accepts=Msg>
+        <Idle rule=.Loading : "i">
+        <Loading rule=.Done : "l">
+        <Done rule=.Idle : "d">
+    </>
+    <main><p><*phase/></p></main>
+</program>

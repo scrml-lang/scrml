@@ -1,0 +1,7 @@
+<host>
+  w() -> waiting string = window.foo.w()
+</host>
+<program>
+
+<p>x</p>
+</program>

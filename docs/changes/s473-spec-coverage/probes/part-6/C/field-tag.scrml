@@ -1,0 +1,8 @@
+<program>
+    <signup:struct>
+        let <email:string=""/>
+        renders <input bind:value=@email/>
+    </>
+    renders <form><email/></form>
+    <main><*signup/></main>
+</program>

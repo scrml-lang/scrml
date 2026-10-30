@@ -1,0 +1,4 @@
+<program>
+function f() { if (true) { </> } }
+<p>x</p>
+</program>

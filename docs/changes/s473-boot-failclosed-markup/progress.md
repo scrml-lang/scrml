@@ -22,3 +22,14 @@ Branch: `s473-boot-failclosed-markup` off origin/main 741a2b51c.
 
 ## Next
 - tests, gaps, regen (severity, conformance report, known-gaps), gates, PR.
+
+## Done (commits 2–3)
+- S473 D2/D26/D1 (bryan's rulings): `fixed` refused by name (D26); `protect=` / `authority=` on any
+  element refused (D1/D2); unknown names emitted only when hyphenated (D2).
+- Excusal for an unknown element that the parser already refused (parse error in its span) or that
+  names an import whose module does not resolve — each already an error, never fail-open.
+- Conformance fixtures fixed (both were §4.1-invalid): block-grammar/script-style-exact-name-neg
+  (`<scripts>` → `<script-x>`), block-grammar/block-029-leading-equals-quote-prose-pos (`<note>`/`<cell>` → `<span>`).
+- Merged origin/main (#1673). Gaps RESOLVED/NARROWED in place (no new gaps); coverage rows updated.
+- Final corpus delta: clean 69 → 62; newly failing 7 (6 md/* refused, engine/mount-not-engine-pos E-MARKUP-001).
+  bootstrap-conformance: FAIL 49 → 42, PASS 263 → 263.

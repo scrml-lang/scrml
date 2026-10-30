@@ -1,0 +1,5 @@
+<program>
+    let <out:int=0/>
+    function f() -> int { try { return 1; } catch (e) { return 2; } }
+    <p>${@out}</p>
+</program>

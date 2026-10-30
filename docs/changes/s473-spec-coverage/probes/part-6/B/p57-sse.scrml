@@ -1,0 +1,4 @@
+<program>
+${ server function* s() { yield 1; } }
+<p>x</p>
+</program>

@@ -1,0 +1,4 @@
+<program>
+    let <x:int=0 req/>
+    <main><p>${@x.isValid}</p></main>
+</program>

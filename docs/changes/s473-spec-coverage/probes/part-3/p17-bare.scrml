@@ -1,0 +1,6 @@
+<program>
+    let <n:int=0/>
+    function load() { @n = 5; }
+    ${ load(); }
+    <main><p>${@n}</p></main>
+</program>

@@ -1,0 +1,5 @@
+<program>
+    <card title:string/>
+    renders <p>${title}</p>
+    <main><card title="a" class="x"/><card titel="b"/><card title="c" key="k"/></main>
+</program>

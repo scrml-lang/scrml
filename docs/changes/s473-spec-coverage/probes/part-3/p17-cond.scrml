@@ -1,0 +1,8 @@
+<program>
+    let <msg:string=""/>
+    let <n:int=0/>
+    <main>
+        <p if=@msg>m</p>
+        <p if=@n >= 3>big</p>
+    </main>
+</program>

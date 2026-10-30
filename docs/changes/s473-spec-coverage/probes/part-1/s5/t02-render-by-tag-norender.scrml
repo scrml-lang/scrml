@@ -1,0 +1,4 @@
+<program>
+let <count:int=0/>
+<count/>
+</program>

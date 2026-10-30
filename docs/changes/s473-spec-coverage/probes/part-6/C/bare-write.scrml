@@ -1,0 +1,7 @@
+<program>
+    <card title:string>
+        let <n:int=0/>
+    </>
+    renders <button onclick=(n = 1)>${title}</button>
+    <main><card title="a"/></main>
+</program>

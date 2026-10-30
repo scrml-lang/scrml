@@ -1,0 +1,5 @@
+<program>
+    type R:enum = { Bad(variant: string), Ok }
+    let <s:R=.Ok/>
+    <p>hi</p>
+</program>

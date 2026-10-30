@@ -1,0 +1,6 @@
+<program>
+    let <xs:int[]=[1, 2]/>
+    function f() -> int { const fs = [x => x + 1]; return 1; }
+    function g() -> int { const o = { n: 1, h: x => x }; return 1; }
+    <p>${f()}${g()}</p>
+</program>

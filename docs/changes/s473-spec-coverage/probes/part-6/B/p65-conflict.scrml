@@ -1,0 +1,7 @@
+<program>
+#{
+  p { color: red; }
+  .x { color: blue; }
+}
+<p class="x">hi</p>
+</program>

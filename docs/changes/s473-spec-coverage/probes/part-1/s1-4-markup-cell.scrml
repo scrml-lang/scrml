@@ -1,0 +1,4 @@
+<program>
+    let <thing=<span>hi</span>/>
+    <main><p>${@thing}</p></main>
+</program>

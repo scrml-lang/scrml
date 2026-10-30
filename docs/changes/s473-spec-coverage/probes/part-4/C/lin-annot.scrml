@@ -1,0 +1,7 @@
+<program>
+    function f() -> string {
+        lin t: string = "a";
+        return t;
+    }
+    <main><p>${f()}</p></main>
+</program>

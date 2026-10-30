@@ -1,0 +1,5 @@
+<program>
+    type G:struct = { name: string, items: string[] }
+    <gs:G[]=([{ name: "a", items: ["x", "y"] }])/>
+    <ul>${ for (g of @gs) { lift <li>${ for (it of g.items) { lift <span>${it}</span>; } }</li>; } }</ul>
+</program>

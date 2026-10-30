@@ -1,0 +1,4 @@
+<program>
+    function g() -> int { throw 1; }
+    <main><p>${g()}</p></main>
+</program>

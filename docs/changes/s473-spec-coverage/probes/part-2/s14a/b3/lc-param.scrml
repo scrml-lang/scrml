@@ -1,0 +1,5 @@
+<program>
+    type User:struct = { id: int }
+    function f(u: (not to User)) -> int { return u.id; }
+    <p>hi</p>
+</program>

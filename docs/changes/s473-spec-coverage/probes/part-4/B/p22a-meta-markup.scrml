@@ -1,0 +1,6 @@
+<program>
+    let <count:int=0/>
+    <main>
+        <p>^{ emit("<b>x</b>") }</p>
+    </main>
+</program>

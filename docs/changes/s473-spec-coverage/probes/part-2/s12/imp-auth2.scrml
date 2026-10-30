@@ -1,0 +1,6 @@
+<program>
+    ${ import { hashPassword } from "scrml:auth"; }
+    <n:string=""/>
+    function go() { @n = hashPassword("pw"); }
+    <main><button onclick=go()>${@n}</button></main>
+</program>

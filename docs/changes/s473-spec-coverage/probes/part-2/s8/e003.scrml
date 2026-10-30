@@ -1,0 +1,6 @@
+<program db="./app.db">
+    type R:struct = { id: int }
+    function f(a: int) -> int { const s: string = "SELECT 1"; ?{`${s}`}.run() !{ _ :> { return 0; } }; return 1; }
+    function go() { const r: int = f(1) !{ .Transport(t) :> return }; }
+    <main><button onclick=go()>a</button></main>
+</program>

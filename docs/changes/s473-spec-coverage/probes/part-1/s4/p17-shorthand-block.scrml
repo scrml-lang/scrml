@@ -1,0 +1,4 @@
+<program>
+function a() -> string { return "a" }
+<span : { a() }>
+</program>

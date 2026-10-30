@@ -1,0 +1,4 @@
+<program>
+let <x:string=""/>
+<link rel="stylesheet" href=@x>
+</program>

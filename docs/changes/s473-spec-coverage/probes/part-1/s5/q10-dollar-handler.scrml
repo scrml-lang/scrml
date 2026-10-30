@@ -1,0 +1,5 @@
+<program>
+let <n:int=0/>
+function f(k:int) { @n = k; }
+<button onclick=${() => f(1)}>x</button>
+</program>

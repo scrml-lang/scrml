@@ -1,0 +1,9 @@
+<program>
+    <card title:string="t">
+        let <n:int=0/>
+    </>
+    renders <p>${title}</p>
+    function getN(c: card) -> int { return c.n; }
+    <cards:card[]=([])/>
+    <main><card as=h title="a"/><p>${getN(@h)}</p></main>
+</program>

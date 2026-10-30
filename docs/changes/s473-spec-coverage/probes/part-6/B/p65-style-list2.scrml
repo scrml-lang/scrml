@@ -1,0 +1,4 @@
+<program>
+${ const a = "color: red"; const b = "color: blue"; }
+<p style=[a, b]>hi</p>
+</program>

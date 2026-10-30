@@ -1,0 +1,8 @@
+<program>
+let <x:string | not=not/>
+let <n:int=0/>
+let <y:string="z"/>
+function f() { const v: string | not = @x; if (v) { @y = v; } }
+function g() { if (@n) { @y = "q"; } }
+<main><button onclick=f()>go</button><button onclick=g()>g</button></main>
+</program>

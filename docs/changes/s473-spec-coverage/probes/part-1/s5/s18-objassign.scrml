@@ -1,0 +1,5 @@
+<program>
+let <x:string=""/>
+function f() { Object.assign(document.body, { innerHTML: @x }); }
+<button onclick=f()>x</button>
+</program>

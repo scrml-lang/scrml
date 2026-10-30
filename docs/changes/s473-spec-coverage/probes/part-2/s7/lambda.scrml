@@ -1,0 +1,5 @@
+<program>
+    let <n:int=3/>
+    function f() -> int { const g = (x) => x + 1; return g(1); }
+    <p>${@n}</p>
+</program>

@@ -1,0 +1,4 @@
+<program>
+function h(e: Event) { }
+<button onclick=h>x</button>
+</program>

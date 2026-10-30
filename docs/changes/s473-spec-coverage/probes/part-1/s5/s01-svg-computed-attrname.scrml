@@ -1,0 +1,4 @@
+<program>
+let <n:string="href"/>
+<svg><a><set attributeName=@n to="javascript:alert(1)"/><text>x</text></a></svg>
+</program>

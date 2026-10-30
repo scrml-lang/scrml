@@ -1,0 +1,4 @@
+<program>
+${ fn f(x: integer) -> integer { return x; } }
+<p>${f(1)}</p>
+</program>

@@ -1,0 +1,8 @@
+<host>
+  type O:host
+  mk() -> O = window.foo.make()
+</host>
+<program>
+let <os:O[]=[]/>
+<p>x</p>
+</program>

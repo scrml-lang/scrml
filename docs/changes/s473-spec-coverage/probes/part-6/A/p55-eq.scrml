@@ -1,0 +1,5 @@
+<program>
+    let <pw:string="" req/>
+    let <confirm:string="" eq(@pw)/>
+    <main><form><input bind:value=@pw/><input bind:value=@confirm/></form></main>
+</program>

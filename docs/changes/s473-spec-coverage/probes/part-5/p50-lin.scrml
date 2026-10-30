@@ -1,0 +1,5 @@
+<program>
+    let <n:int=0/>
+    function g() { lin t: int = 1; t = 2; @n = t; }
+    <main><p>x</p></main>
+</program>

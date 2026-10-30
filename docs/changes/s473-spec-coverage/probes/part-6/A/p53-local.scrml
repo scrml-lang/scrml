@@ -1,0 +1,5 @@
+<program>
+    let <n:number=0/>
+    function go() { const x: number(>0) = @n - 5; @n = x; }
+    <main><button onclick=go()>go</button><p>${@n}</p></main>
+</program>

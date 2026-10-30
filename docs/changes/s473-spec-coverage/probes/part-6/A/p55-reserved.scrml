@@ -1,0 +1,7 @@
+<program>
+    <signup note:string="n">
+        let <errors:string="" req/>
+        renders <input bind:value=@errors/>
+    </>
+    <main><*signup/></main>
+</program>

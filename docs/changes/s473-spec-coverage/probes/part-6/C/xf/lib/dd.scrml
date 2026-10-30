@@ -1,0 +1,6 @@
+export type Openness:enum = { Closed, Opened }
+export <dd label:string>
+    export let <value:string=""/>
+    let <secret:string=""/>
+</>
+renders <div>${label}: ${value}</div>

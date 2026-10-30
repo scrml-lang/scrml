@@ -1,0 +1,5 @@
+<program>
+    let <n:int=0/>
+    function g() { const x: int = (@n = 4); }
+    <main><p>${@n}</p><button onclick=g()>g</button></main>
+</program>

@@ -1,0 +1,4 @@
+<program>
+<xs:int[]=[1,2]/>
+<ul><each in=@xs foo="1"><li>${@.}</li></each></ul>
+</program>

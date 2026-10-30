@@ -1,0 +1,2 @@
+${ export server function f(x: int) -> int { return x; } }
+<program><main><p>x</p></main></program>

@@ -1,0 +1,4 @@
+${ import:host { readFileSync } from "node:fs.js"; }
+<program>
+    <main><p>"x"</p></main>
+</program>

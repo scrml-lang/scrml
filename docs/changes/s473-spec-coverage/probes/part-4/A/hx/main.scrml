@@ -1,0 +1,4 @@
+${ import { t } from "./b.scrml"; }
+<program>
+<main><p>${t()}</p></main>
+</program>

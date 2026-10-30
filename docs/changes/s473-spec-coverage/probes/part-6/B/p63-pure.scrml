@@ -1,0 +1,4 @@
+<program>
+${ pure function f(a: int) -> int { return a; } }
+<p>${f(1)}</p>
+</program>

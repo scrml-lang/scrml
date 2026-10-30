@@ -1,0 +1,9 @@
+<program>
+    let <a:bool=false/>
+    let <b:bool=false/>
+    let <n:int=0/>
+    <main>
+        <p if=@a&&@b>both</p>
+        <p show=@n==3>eq</p>
+    </main>
+</program>

@@ -1,0 +1,10 @@
+<program db="./app.db">
+    function move(a: int)! SqlError {
+        ?{`BEGIN`}.run();
+        ?{`UPDATE acct SET bal = bal - 1 WHERE id = ${a}`}.run();
+        ?{`COMMIT`}.run();
+        return 1;
+    }
+    let <r:int=0/>
+    <main><button onclick={ @r = move(1) !{ _ :> 0, }; }>go</button></main>
+</program>

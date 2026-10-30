@@ -1,0 +1,5 @@
+<program>
+    type Role:enum = { Admin, Editor }
+    function f(j: string) -> int { const r = parseVariant(j, Role); return 1; }
+    <main><p>${f("x")}</p></main>
+</program>

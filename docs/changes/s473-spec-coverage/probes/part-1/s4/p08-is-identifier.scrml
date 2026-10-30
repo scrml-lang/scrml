@@ -1,0 +1,4 @@
+<program>
+function f() -> int { const is = 1; return is }
+<p>${f()}</p>
+</program>

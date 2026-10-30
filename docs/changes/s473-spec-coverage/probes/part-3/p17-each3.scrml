@@ -1,0 +1,8 @@
+<program>
+    let <n:int=0/>
+    <main>
+        <ul><each><li>x</li></each></ul>
+        <ul><each in=@n><li>x</li></each></ul>
+        <p>${@.name}</p>
+    </main>
+</program>

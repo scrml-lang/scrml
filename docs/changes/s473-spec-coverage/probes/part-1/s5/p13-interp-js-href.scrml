@@ -1,0 +1,4 @@
+<program>
+let <x:string=""/>
+<a href="javascript:${@x}">x</a>
+</program>

@@ -1,0 +1,7 @@
+<program db="./app.db">
+    function who() -> string ! DbError {
+        ?{`INSERT INTO t (a) VALUES (${@session.userId})`}.run();
+        return "x";
+    }
+    <main><p>x</p></main>
+</program>

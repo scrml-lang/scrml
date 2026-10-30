@@ -1,0 +1,7 @@
+<host>
+  on(cb: (x: int) => void) = window.foo.on(cb)
+</host>
+<program>
+
+<p>x</p>
+</program>

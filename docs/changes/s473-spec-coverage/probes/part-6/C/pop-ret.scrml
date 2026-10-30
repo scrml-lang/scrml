@@ -1,0 +1,5 @@
+<program>
+    <xs:int[free, append, pop]=([1, 2])/>
+    function f() -> int { const v = @xs.pop(); if (v is given) { return v; } return 0; }
+    <main><p>${f()}</p></main>
+</program>

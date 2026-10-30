@@ -1,0 +1,9 @@
+<program>
+${
+  fn f() -> int {
+    const m = [:]
+    return 1
+  }
+}
+<p>${f()}</p>
+</program>

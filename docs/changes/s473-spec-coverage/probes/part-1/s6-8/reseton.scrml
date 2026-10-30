@@ -1,0 +1,6 @@
+<program>
+    let <query:string=""/>
+    let <page:int=1 reset-on=[@query]/>
+    function nx() { @page = @page + 1; }
+    <main><input bind:value=@query/><button onclick=nx()>${@page}</button></main>
+</program>

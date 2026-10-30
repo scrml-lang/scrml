@@ -1,0 +1,4 @@
+<program>
+let <x:string=""/>
+<meta http-equiv="refresh" content=@x>
+</program>

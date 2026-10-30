@@ -1,0 +1,9 @@
+<program>
+    type C:enum = { Red, Green, Blue(n: int) }
+    function f(c: C) -> int { return match c { .Red :> 1, .Green :> 2, .Blue(n) :> n, }; }
+    function g(c: C) -> int { return match c { .Red :> 1, .Green :> 2, }; }
+    function h(c: C) -> int { return match c { .Red :> 1, .Red :> 3, else :> 2, }; }
+    function k(c: C) -> int { return match c { .Red :> 1, .Green :> 2, .Blue(n) :> n, else :> 9, }; }
+    function m(c: C) -> int { return match c { .Red :> 1, .Green :> "x", .Blue(n) :> n, }; }
+    <main><p>${f(.Red)} ${g(.Red)} ${h(.Red)} ${k(.Red)} ${m(.Red)}</p></main>
+</program>

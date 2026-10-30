@@ -1,0 +1,3 @@
+<program>
+    <main><div class="p-4 md:hover:bg-blue-500 weird:p-4 notaclass">"x"</div></main>
+</program>

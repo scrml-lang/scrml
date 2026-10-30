@@ -1,0 +1,6 @@
+<program>
+    let <n:int=0/>
+    function h(x: int) -> int { return x; }
+    function g() { @n = h(let q = 2); }
+    <main><p>${@n}</p><button onclick=g()>g</button></main>
+</program>

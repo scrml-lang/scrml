@@ -1,0 +1,8 @@
+<foreign lang="ts" />
+<foreign lang="js" />
+${
+    export function f() -> string {
+        const v: string = _={ return "x" }=;
+        return v;
+    }
+}

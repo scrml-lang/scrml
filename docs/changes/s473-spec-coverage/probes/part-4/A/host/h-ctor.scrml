@@ -1,0 +1,7 @@
+<host>
+  f() -> string = document.constructor.name
+</host>
+<program>
+
+<p>${f()}</p>
+</program>
