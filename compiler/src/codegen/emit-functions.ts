@@ -3,6 +3,7 @@ import { routePath, paramName, paramSignature } from "./utils.ts";
 import { emitLogicNode, emitLogicBody, emitFnShortcutBody, emitParamDefault } from "./emit-logic.js";
 import { deferStackRunnerLines, type DeferStackCtx } from "./emit-control-flow.ts";
 import { CGError } from "./errors.ts";
+import { NAV_REQUEST_HEADER, NAV_RESPONSE_HEADER, CLIENT_FOLLOW_NAV_FN } from "./server-navigate.ts";
 import { handledSqlGuardInner } from "./sql-attempt.ts";
 import { planBatchCellReturn, cpsCellsApplyLines, multiBatchReturnCell, cpsCarriedLocals } from "./cps-cell-writes.ts";
 import { isServerOnlyNode, collectFunctions, collectTopLevelStatements } from "./collect.ts";
@@ -1139,6 +1140,9 @@ export function emitFunctions(ctx: CompileContext): { lines: string[]; fnNameMap
 
     lines.push(`async function ${stubName}(${paramNames.join(", ")}) {`);
     const usesCsrfRetry = csrfEnabled && httpMethod !== "GET" && httpMethod !== "HEAD";
+    // §20.1 (S473) — when this file's server bundle has a server-side navigate(), every stub
+    // asks for it as the X-Scrml-Navigate header instead of a 302 (server-navigate.ts).
+    const _navReqHeader = (ctx as { serverNavigateOrigins?: string[] | null }).serverNavigateOrigins != null ? `, "${NAV_REQUEST_HEADER}": "1"` : "";
     // A9 Ext 5 (§19.9.6): non-monotone CPS batches receive a per-invocation
     // UUIDv4 idempotency key transmitted via the `Idempotency-Key` header
     // (IETF-draft standard). Server stub (emit-server.ts) consults the
@@ -1194,7 +1198,7 @@ export function emitFunctions(ctx: CompileContext): { lines: string[]; fnNameMap
         lines.push(`  const _scrml_csrf_token = ${_csrfTokenExpr};`);
         lines.push(`  const _scrml_resp_initial = await _scrml_g.fetch(${JSON.stringify(batchPath)}, {`);
         lines.push(`    method: ${JSON.stringify(httpMethod)},`);
-        lines.push(`    headers: { "Content-Type": "application/json", "X-CSRF-Token": _scrml_csrf_token, "Idempotency-Key": _scrml_idempotency_key },`);
+        lines.push(`    headers: { "Content-Type": "application/json", "X-CSRF-Token": _scrml_csrf_token, "Idempotency-Key": _scrml_idempotency_key${_navReqHeader} },`);
         lines.push(`    body: _scrml_body,`);
         lines.push(`  });`);
         lines.push(`  let _scrml_resp;`);
@@ -1205,7 +1209,7 @@ export function emitFunctions(ctx: CompileContext): { lines: string[]; fnNameMap
         lines.push(`    const _scrml_csrf_retry_token = ${_csrfTokenExpr};`);
         lines.push(`    _scrml_resp = await _scrml_g.fetch(${JSON.stringify(batchPath)}, {`);
         lines.push(`      method: ${JSON.stringify(httpMethod)},`);
-        lines.push(`      headers: { "Content-Type": "application/json", "X-CSRF-Token": _scrml_csrf_retry_token, "Idempotency-Key": _scrml_idempotency_key },`);
+        lines.push(`      headers: { "Content-Type": "application/json", "X-CSRF-Token": _scrml_csrf_retry_token, "Idempotency-Key": _scrml_idempotency_key${_navReqHeader} },`);
         lines.push(`      body: _scrml_body,`);
         lines.push(`    });`);
         lines.push(`  } else {`);
@@ -1218,9 +1222,9 @@ export function emitFunctions(ctx: CompileContext): { lines: string[]; fnNameMap
       lines.push(`  const _scrml_resp = await _scrml_g.fetch(${JSON.stringify(batchPath)}, {`);
       lines.push(`    method: ${JSON.stringify(httpMethod)},`);
       if (emitIdempotencyKey) {
-        lines.push(`    headers: { "Content-Type": "application/json", "Idempotency-Key": _scrml_idempotency_key },`);
+        lines.push(`    headers: { "Content-Type": "application/json", "Idempotency-Key": _scrml_idempotency_key${_navReqHeader} },`);
       } else {
-        lines.push(`    headers: { "Content-Type": "application/json" },`);
+        lines.push(`    headers: { "Content-Type": "application/json"${_navReqHeader} },`);
       }
       lines.push(`    body: _scrml_g.JSON.stringify({`);
       for (const p of paramNames) {
@@ -1252,6 +1256,12 @@ export function emitFunctions(ctx: CompileContext): { lines: string[]; fnNameMap
     // batch stubs return their own cell value (a forwarded intermediate),
     // which is not the declared return type — they take the raw `.json()`.
     const _isLastStub = !_isMultiStub || _sb.batchIndex === _stubBatches.length - 1;
+    // §20.1 (S473) — the server function ended with navigate(): perform the hard navigation and
+    // never settle, so the caller's following statements (and a CPS wrapper's later batches) do
+    // not run. Checked before the body is read: the navigation response has none.
+    if (_navReqHeader !== "") {
+      lines.push(`  if (_scrml_resp.headers.get("${NAV_RESPONSE_HEADER}") !== null) return ${CLIENT_FOLLOW_NAV_FN}(_scrml_resp);`);
+    }
     // S473 (ruling item 3, impl#1 transport routing) — a body that does not parse is tagged
     // with what the client knows about it, and re-thrown unchanged: `__scrml_status` for a
     // non-2xx response, `__scrml_malformed` for a 2xx one. Only `_scrml_server_attempt` (the

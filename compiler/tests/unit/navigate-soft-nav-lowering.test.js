@@ -162,7 +162,10 @@ describe("§5 — navigate() variant parsing (findings #5/#7)", () => {
       `  \${ go() }\n` +
       `</program>`;
     const { serverJs } = compileToClient(src, "nav-srvsoft");
-    expect(serverJs).toContain('_scrml_navigate("/x")');
+    // S473 — the server hard navigation is `_scrml_server_navigate` (§20.1 302), never the
+    // client runtime's `_scrml_navigate` (absent from the server bundle: ReferenceError).
+    expect(serverJs).toContain('_scrml_server_navigate("/x", null)');
+    expect(serverJs).not.toContain('_scrml_navigate("/x")');
     expect(serverJs).not.toContain("_scrml_navigate_soft");
   });
 });
