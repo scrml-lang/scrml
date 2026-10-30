@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuites name="bun test" tests="7" assertions="7" failures="3" skipped="1" time="0.01">
+  <testsuite name="compiler\tests\unit\a.test.js" file="compiler\tests\unit\a.test.js" tests="6" assertions="6" failures="3" skipped="1" time="0.01" hostname="runner">
+    <testsuite name="outer &lt;x&gt;" file="compiler\tests\unit\a.test.js" line="2" tests="5" assertions="5" failures="2" skipped="1" time="0" hostname="runner">
+      <testcase name="known &amp; still failing" classname="outer &lt;x&gt;" time="0.001" file="compiler\tests\unit\a.test.js" line="3" assertions="1">
+        <failure type="AssertionError" message="expected / got \">AssertionError</failure>
+      </testcase>
+      <testcase name="flaky" classname="outer &lt;x&gt;" time="0.001" file="compiler\tests\unit\a.test.js" line="4" assertions="1">
+        <failure type="Error" message="timeout">Error: timeout</failure>
+      </testcase>
+      <testcase name="ok" classname="outer &lt;x&gt;" time="0.001" file="compiler\tests\unit\a.test.js" line="5" assertions="1" />
+      <testcase name="was known, passes now" classname="outer &lt;x&gt;" time="0.001" file="compiler\tests\unit\a.test.js" line="6" assertions="1" />
+      <testcase name="skipped one" classname="outer &lt;x&gt;" time="0" file="compiler\tests\unit\a.test.js" line="7" assertions="0">
+        <skipped />
+      </testcase>
+    </testsuite>
+    <testcase name="new &quot;regression&quot;" classname="" time="0.001" file="compiler\tests\unit\a.test.js" line="9" assertions="1">
+      <failure type="AssertionError" message="nope">AssertionError</failure>
+    </testcase>
+  </testsuite>
+  <testsuite name="compiler\tests\unit\b.test.js" file="compiler\tests\unit\b.test.js" tests="1" assertions="1" failures="0" skipped="0" time="0.01" hostname="runner">
+    <testcase name="fine" classname="" time="0.001" file="compiler\tests\unit\b.test.js" line="2" assertions="1" />
+  </testsuite>
+</testsuites>
