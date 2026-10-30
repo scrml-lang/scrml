@@ -17,8 +17,8 @@ Intermittents seen once each (not families): S27 §51.11 timer audit (4092853370
 ## Steps
 - [x] bisect windows status over last 30 main runs
 - [x] diagnose each family
-- [ ] fix facts.ts rel()
-- [ ] fix hook-slice test stub
-- [ ] fix spec-coverage-check CRLF + test
-- [ ] known-gaps entry for the impl#1 routeMap key miss
-- [ ] PR, windows job green
+- [x] fix facts.ts rel()
+- [x] fix hook-slice test stub
+- [x] fix spec-coverage-check CRLF + test (new CRLF cases: 2 red with the normalization removed)
+- [x] known-gaps: g-windows-facts-dangling-… and g-windows-hook-trigger-… resolved; filed g-windows-impl1-routemap-native-key-miss-s473 (MED, defer=impl1-s471-policy)
+- [ ] PR, windows job green on the three fixed families (the impl#1 family stays red until compiler/src is ruled)
