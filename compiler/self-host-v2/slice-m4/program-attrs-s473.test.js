@@ -200,7 +200,8 @@ describe("B9 — `timestamp` is a type", () => {
       const src = (n) => prog("", `type ${n}${tdecl}\n    let <when:${n}/>\n    <p>x</p>`);
       const mine = run(src("timestamp")).diags.map((x) => x.code);
       expect(mine).toEqual(run(src("Stamp")).diags.map((x) => x.code));
-      expect(mine).toEqual([]);
+      // s473 (O33): a `<program>` cell with no value is refused by name for every type (it threw at boot)
+      expect(mine).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
     });
   }
   test("fix round F1: the reviewer's shape — `@when = not` on a bare timestamp cell is the refusal, not a string typing error", () => {

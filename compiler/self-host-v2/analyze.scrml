@@ -642,6 +642,24 @@ ${
         }
     }
 
+    // s473 (p5 hole 4, g-boot-reserved-prefix-unchecked-s473) — §47.1.1: "A
+    // user-authored scrml program SHALL NOT **declare** a binding whose name begins
+    // with `_scrml_`" (S439 #7) and "SHALL NOT **declare** or **reference** a name
+    // that begins with `__scrml_`" (S457): E-NAME-COLLIDES-RESERVED-PREFIX.
+    // "Standard-library source is exempt by path" (S440 #9). Called at each binder
+    // site that mints a USER-written name (a type, a declaration and its fields, a
+    // function and its parameters, a local, a pattern / loop / `given` / `<each>` /
+    // `as=` binder, a lambda parameter, a file-scope constant), and at every bare
+    // name / `@name` reference (resolveName / resolveAt — "declares or references",
+    // §34). Member names and object-literal keys are not inspected (§34: "object-
+    // literal keys in parsed logic … are not inspected"; a member name is not ruled
+    // either way for the bootstrap).
+    fn reservedName(st: AS, file: string, span: ASpan, name: string) -> AS {
+        if (!(name.indexOf("_scrml_") == 0 || name.indexOf("__scrml_") == 0)) return st
+        if (isStdlibPath(file)) return st
+        return addDiag(st, file, span, "E-NAME-COLLIDES-RESERVED-PREFIX", "`" + name + "` begins with a reserved prefix — `_scrml_` and `__scrml_` name the compiler's and runtime's own identifiers, and a program SHALL NOT declare or reference one (§47.1.1; S439 #7, S440 #9, S457); rename it")
+    }
+
     fn mint(st: AS, hint: string) -> RSym {
         return { s: mkSym(st.nextSym, hint), st: { facts: st.facts, diags: st.diags, nextSym: st.nextSym + 1, annots: st.annots, bad: st.bad, effects: st.effects, pend: st.pend, lifts: st.lifts } }
     }
@@ -772,7 +790,7 @@ ${
         let out: TypeStub[] = []
         for (const f of files) {
             for (const td of typeItems(f.items)) {
-                const rs: RSym = mint(st, td.name)
+                const rs: RSym = mint(reservedName(st, f.path, td.span, td.name), td.name)
                 st = rs.st
                 let members: Sym[] = []
                 let isEnum = false
@@ -1517,7 +1535,7 @@ ${
     }
 
     fn userDeclStub(d: ADecl, file: string, st: AS) -> RDeclStubs {
-        const r: RSym = mint(st, d.name)
+        const r: RSym = mint(reservedName(st, file, d.span, d.name), d.name)
         return { ds: [{ sym: r.s, file: file, isProgram: false, d: d, p: not, nid: d.nid }], st: r.st }
     }
 
@@ -3244,7 +3262,7 @@ ${
                aty: AType | not, init: AAttrValue, body: ADeclChild[], role: FieldRole, vals: AValidator[], where: int,
                ix: InferCx, tab: OwnT[], bnd: string, st0: AS) -> RField {
         let st: AS = st0
-        const rs: RSym = mint(st, name)
+        const rs: RSym = mint(reservedName(st, te.file, span, name), name)
         st = rs.st
         let ty: Type = Type.Str
         let seqRep = false
@@ -3280,8 +3298,12 @@ ${
         }
         const rg: RGraph = graphOf(te, g, ty, body, st)
         st = rg.st
+        const reads: string[] = valueReads(init)
         let edits: EditKind[] = typeEdits(ty)
-        if (rg.graph is given) edits = edits.concat([EditKind.Transition])
+        // s473: a DERIVED value's state-children carry no transition grant (§51.0.J
+        // "Direct writes … REJECTED"; derivedRules below) — so it gets no write
+        // capability and is printed as a Derived that recomputes, never seeded
+        if (rg.graph is given && (isLet || reads.length == 0)) edits = edits.concat([EditKind.Transition])
         // s444: a sequence of structs whose element fields carry their own
         // `let` grants an ELEMENT-field write (`@xs[i].f = v`, dpa-052 Q3) —
         // listed as FieldAt(path) over the element struct (Core EditKind note)
@@ -3290,7 +3312,6 @@ ${
         if (et is given) elemEdits = subFieldEdits(g, et)
         const grantRep: boolean = isLet || seqRep
         const grantEdits: EditKind[] = edits.concat(subFieldEdits(g, ty)).concat(elemEdits)
-        const reads: string[] = valueReads(init)
         let mode: FieldMode = FieldMode.Locked
         if (isLet) {
             if (reads.length > 0) {
@@ -3298,9 +3319,20 @@ ${
             } else {
                 mode = FieldMode.Let
             }
-        } else if (rg.graph is not && reads.length > 0) {
+        } else if (reads.length > 0) {
+            // s473 (p5 hole 2, g-boot-derived-single-with-state-children-seeded-s473):
+            // §66.9 rule 3 "A locked declaration whose initializer reads cells is
+            // DERIVED" — state-children do not change that (O5, RULED S435:
+            // "`derived=` RETIRES (a locked declaration with a reactive initializer
+            // is derived, §66.9)"; §51.0.J: a derived engine keeps its
+            // state-children). Before this, state-children made it SEEDED — read
+            // once, stale after. A `rule=` on such a state-child is §51.0.J's
+            // E-DERIVED-ENGINE-NO-RULES ("Transitions are determined by the
+            // source, not authored"); `let` is the seeded, writable form.
             mode = FieldMode.Derived
+            if (rg.graph is given) st = derivedRules(te.file, body, st)
         }
+
         let wcap: Sym | not = not
         if (grantsAny(fieldGrantSet(grantRep, grantEdits))) {
             const rw: RSym = mint(st, name)
@@ -3700,6 +3732,19 @@ ${
         return { graph: { enumSym: es, edges: edges }, st: st }
     }
 
+    // §51.0.J: every `rule=` on a state-child of a DERIVED value.
+    fn derivedRules(file: string, body: ADeclChild[], st0: AS) -> AS {
+        let st: AS = st0
+        for (const c of body) {
+            for (const sc of stateChildOf(c)) {
+                for (const a of sc.attrs) {
+                    if (a.name == "rule") st = addDiag(st, file, a.span, "E-DERIVED-ENGINE-NO-RULES", "`rule=` on the state-child `<" + sc.name + ">` of a derived value — a locked declaration whose initializer reads cells is derived (§66.9 rule 3), and a derived value's transitions are determined by its source, not authored (§51.0.J). Remove `rule=`, or write `let` before the `<` for a value seeded once from its initializer and then moved along its rules")
+                }
+            }
+        }
+        return st
+    }
+
     fn stateChildOf(c: ADeclChild) -> AStateChild[] {
         return match c {
             .StateChild(s: s) :> [s]
@@ -3929,7 +3974,7 @@ ${
                 if (name == "") {
                     st = addDiag(st, w.file, as.span, "E-DECL-AS", "`as=` takes a name")
                 } else {
-                    const rs: RSym = mint(st, name)
+                    const rs: RSym = mint(reservedName(st, w.file, as.span, name), name)
                     st = rs.st
                     out = out.concat([{ sym: rs.s, name: name, target: target.sym, owner: w.owner, conditional: cond,
                                         span: as.span, file: w.file }])
@@ -3979,7 +4024,7 @@ ${
             const fte: TypeEnv = teAt(te, f.path)
             for (const af of fnItems(f.items)) {
                 // s473: a db cell's load `@rows` is minted as `load$rows` (its Sym hint names generated code)
-                const r: RSym = mint(st, isLoadName(af.name) ? "load$" + af.name.substring(1) : af.name)
+                const r: RSym = mint(reservedName(st, f.path, af.span, af.name), isLoadName(af.name) ? "load$" + af.name.substring(1) : af.name)
                 st = r.st
                 // each signature component is judged by its own type
                 // expression: the return type alone, the parameter list as a
@@ -5732,7 +5777,13 @@ ${
         return plain(t, addValue(st, e.nid, ValueFact.VLit(Literal.Num(n))))
     }
 
+    // s473 (§47.1.1): a REFERENCE to a reserved-prefix name is refused too
+    // (S440 #9, S457 — reservedName); then resolved as any name is.
     fn resolveName(env: Env, e: AExpr, name: string, st: AS) -> RX {
+        return resolveNameOf(env, e, name, reservedName(st, env.file, e.span, name))
+    }
+
+    fn resolveNameOf(env: Env, e: AExpr, name: string, st: AS) -> RX {
         const l: LocalB | not = lookupLocal(env, name)
         // s473 — §5.2 "Executable sinks in plain logic (S473)" (the #1663 review F3):
         // `eval` / `Function` as a VALUE (`const f = eval`, `.map(Function)`)
@@ -5868,7 +5919,13 @@ ${
         }
     }
 
+    // s473 (§47.1.1): a REFERENCE to a reserved-prefix name is refused too
+    // (S440 #9, S457 — reservedName); then resolved as any name is.
     fn resolveAt(env: Env, e: AExpr, name: string, st: AS) -> RX {
+        return resolveAtOf(env, e, name, reservedName(st, env.file, e.span, name))
+    }
+
+    fn resolveAtOf(env: Env, e: AExpr, name: string, st: AS) -> RX {
         // §66.7.5: inside `given c = @name :> { … }`, `@name` is the narrowed `c`.
         const nb: NarrowB | not = lookupNarrow(env, name)
         if (nb is given) {
@@ -7488,7 +7545,7 @@ ${
         let env2: Env = env
         let syms: Sym[] = []
         for (const pn of ps) {
-            const rs: RSym = mint(st, pn)
+            const rs: RSym = mint(reservedName(st, env.file, lam.span, pn), pn)
             st = rs.st
             syms = syms.concat([rs.s])
             if (ty is given) st = addAnnot(st, rs.s, ty)
@@ -12151,7 +12208,7 @@ ${
             let inner: Sym[] = []
             if (stmt) {
                 for (const b of patBindsOf(a.pat)) {
-                    const rb: RSym = mint(st, b.name)
+                    const rb: RSym = mint(reservedName(st, env.file, b.span, b.name), b.name)
                     st = rb.st
                     inner = inner.concat([rb.s])
                 }
@@ -12671,7 +12728,7 @@ ${
     // The whole-error binder's local: typed as the failure's error enum
     // (§18.6.1 "The binder's type is the type of the failure being handled").
     fn bindWhole(env: Env, b: ABind, err: Sym, st0: AS) -> RBinds {
-        const rb: RSym = mint(st0, b.name)
+        const rb: RSym = mint(reservedName(st0, env.file, b.span, b.name), b.name)
         const st: AS = addBind(rb.st, b.nid, BindFact.BBind(rb.s))
         if (b.name == "_") return { env: env, st: st }
         return { env: withLocal(env, { name: b.name, s: rb.s, ty: Type.Named(err), mutable: false, narrowed: not, nDecl: not, fresh: false }), st: st }
@@ -12747,7 +12804,7 @@ ${
         let st: AS = st0
         let i = 0
         for (const b of bs) {
-            const rb: RSym = mint(st, b.name)
+            const rb: RSym = mint(reservedName(st, env.file, b.span, b.name), b.name)
             st = addBind(rb.st, b.nid, BindFact.BBind(rb.s))
             let ty: Type | not = not
             if (i < fs.length) ty = fs[i].ty
@@ -13338,7 +13395,7 @@ ${
         } else {
             ri = resolveExpr(withWholeAt(env, init.nid, "the initializer of `" + name + "`"), init, annot, st)
         }
-        const rs: RSym = mint(ri.st, name)
+        const rs: RSym = mint(reservedName(ri.st, env.file, s.span, name), name)
         st = addBind(rs.st, s.nid, BindFact.BBind(rs.s))
         let lty: Type | not = ri.x.ty
         if (annot is given) {
@@ -13365,7 +13422,7 @@ ${
         if (inst is not || iDecl is not) {
             return addDiag(st, env.file, s.span, "E-BOOTSTRAP-UNSUPPORTED", "`given` over a value that is not an instance handle is not in bootstrap slice M2 (O56: writes through it would be errors)")
         }
-        const rs: RSym = mint(st, name)
+        const rs: RSym = mint(reservedName(st, env.file, s.span, name), name)
         st = addBind(rs.st, s.nid, BindFact.BGiven(rs.s, inst))
         const narrowed: InstRef = InstRef.Narrowed(rs.s)
         const l: LocalB = { name: name, s: rs.s, ty: rs0.x.ty, mutable: false, narrowed: narrowed, nDecl: iDecl, fresh: false }
@@ -13446,7 +13503,7 @@ ${
             if (!rt.unresolved) annot = rt.t
             st = rt.st
         }
-        const rs: RSym = mint(st, b.name)
+        const rs: RSym = mint(reservedName(st, env.file, b.span, b.name), b.name)
         st = addBind(rs.st, b.nid, BindFact.BBind(rs.s))
         if (annot is given) st = addAnnot(st, rs.s, annot)
         const n0: int = st.lifts.length
@@ -13808,7 +13865,7 @@ ${
             st = rt.st
         }
         const ri: RX = resolveExpr(env, init, annot, st)
-        const rs: RSym = mint(ri.st, name)
+        const rs: RSym = mint(reservedName(ri.st, env.file, s.span, name), name)
         st = addBind(rs.st, s.nid, BindFact.BBind(rs.s))
         let lty: Type | not = ri.x.ty
         if (annot is given) {
@@ -13867,7 +13924,7 @@ ${
                 counter = rc.s
             }
         }
-        const rb: RSym = mint(st, b.name)
+        const rb: RSym = mint(reservedName(st, env.file, b.span, b.name), b.name)
         st = addBind(rb.st, b.nid, BindFact.BBind(rb.s))
         st = addBind(st, f.nid, BindFact.BLoop(label, end, counter))
         const l: LocalB = { name: b.name, s: rb.s, ty: rx.x.ty, mutable: mutable, narrowed: not, nDecl: not, fresh: false }
@@ -16094,6 +16151,13 @@ ${
         return addElem(st, e.nid, ElemFact.MStar(d.info.sym, InstRef.Shared(d.info.sym)))
     }
 
+    fn useSets(attrs: AAttr[], name: string) -> boolean {
+        for (const a of attrs) {
+            if (a.name == name) return true
+        }
+        return false
+    }
+
     fn isAttributeRole(r: FieldRole) -> boolean {
         return match r {
             .Attribute :> true
@@ -16817,6 +16881,19 @@ ${
                 }
             }
         }
+        // s473 (g-boot-no-value-cell-runtime-throw-s473, the use-site limb): an attribute
+        // declared with no default that this use does not set has no value when the
+        // instance is constructed — it compiled clean and threw at construction (the
+        // printer's `noDefault`). Whether such an attribute is REQUIRED at every use (the
+        // §15.10 E-COMPONENT-010 analog) or takes a canonical empty is ⚑ O33 (OPEN, §66.3):
+        // refused at compile time, by name, as resolveStarShared does for `<*x/>`.
+        // (a declaration that did not parse whole is its parse error's — not judged here)
+        const declErrs: boolean = hasErrIn(fileErrs(env.g.files, d.file), d.info.span)
+        for (const f of d.info.fields) {
+            if (!declErrs && isAttributeRole(f.role) && !hasOwnValue(f.init) && !useSets(e.attrs, f.sym.hint)) {
+                st = addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "`<" + e.tag + ">`'s attribute `" + f.sym.hint + "` has no default, and this use does not set it — whether an attribute without a default is required at every use or takes a canonical empty is ⚑ O33 (OPEN, §66.3); set it here (`" + f.sym.hint + "=…`) or give it a default")
+            }
+        }
         st = addElem(st, e.nid, ElemFact.MUse(d.info.sym, alias))
         // s449 (from U0 review F1): an effect in USE-SITE SLOT CONTENT (§66.15.2)
         // is rendered wherever the declaration's `renders` places `<slot/>` —
@@ -16861,7 +16938,7 @@ ${
         if (asName == "") asName = "item"
         let elemTy: Type | not = not
         if (srcTy is given) elemTy = seqElem(unMaybe(srcTy))    // `S | not` iterates `S` (§17.7.2)
-        const rs: RSym = mint(st, asName)
+        const rs: RSym = mint(reservedName(st, env.file, e.span, asName), asName)
         st = rs.st
         let rowHandles: HandleInfo[] = []
         let hsyms: Sym[] = []
@@ -16960,7 +17037,7 @@ ${
             const te: TypeEnv = teAt(te0, f.path)
             const errs: ASpan[] = fileErrs(files, f.path)
             for (const c of constItems(f.items)) {
-                const rs: RSym = mint(st, c.name)
+                const rs: RSym = mint(reservedName(st, f.path, c.span, c.name), c.name)
                 st = rs.st
                 let annot: Type | not = not
                 const at: AType | not = c.ty
@@ -17241,7 +17318,7 @@ ${
             let env: Env = { g: g, file: fs.info.file, ctx: CtxK.InFn, locals: [], rows: [], handles: hs, inRenders: false, narrows: [], present: [], host: host, own: "", inEffect: false, fx: fx, lift: LiftCtx.NoLift }
             const fte: TypeEnv = teAt(g.te, fs.info.file)
             for (const p of fs.f.params) {
-                const rs: RSym = mint(st, p.name)
+                const rs: RSym = mint(reservedName(st, fs.info.file, p.span, p.name), p.name)
                 st = rs.st
                 let pty: Type = Type.Str
                 let proven: boolean = false
@@ -20858,6 +20935,9 @@ ${
         if (n >= 0 && n == args.length) ts = checkArgs(env, fi, args, ts)
         const ret: Type | not = fi.ret
         if (ret is given) return rvt(known(ret), ts)
+        // s473 (§48.8): an unannotated function's INFERRED return (inferReturn)
+        const inf: VType | not = findLocalT(env.settled, retKey(s).id)
+        if (inf is given) return rvt(inf, ts)
         return rvt(VType.Unknown, ts)
     }
 
@@ -22496,15 +22576,37 @@ ${
         if (di is not) return ts0
         let ts: TypeState = ts0
         for (const f of di.fields) {
+            const before: Diag[] = ts.diags
             const rv: RVT = typeAttrValue(env, f.init, ts)
             ts = rv.ts
-            if (f.annotated && f.trusted) {
+            // s473: rule 10 (E-DECL-TYPE-UNPROVEN, originReport) is the initializer's one
+            // report — what the typer now knows of an unproven callee's returns (a
+            // `function`'s `int | string`, inferReturn) is not reported inside it again
+            if (f.annotated && f.trusted && isWrittenUnproven(f.origin)) ts = { exprs: ts.exprs, diags: before, contribs: ts.contribs, presence: ts.presence }
+            // s473: an initializer whose value §66.3 rule 10 reports unproven
+            // (E-DECL-TYPE-UNPROVEN, originReport) is not ALSO checked against
+            // the annotation — the typer may know it as a choice (a `function`'s
+            // inferred `int | string`, inferReturn), and one report is the rule's
+            if (f.annotated && f.trusted && !isWrittenUnproven(f.origin)) {
                 const lk: int = attrLiteralKind(f.init)
                 ts = checkAnnotInit(env, f.ty, lk, rv.vt, f.span, "`" + f.sym.hint + "`", ts)
                 ts = checkAttrLitFields(env, f.init, f.ty, ts)
             }
         }
         return ts
+    }
+
+    fn isWrittenUnproven(o: TypeOrigin) -> boolean {
+        return match o {
+            .WrittenUnproven(why: w) :> true
+            .Written :> false
+            .Literal :> false
+            .Inferred :> false
+            .Blamed :> false
+            .Failed(why: w) :> false
+            .Cyclic(names: ns) :> false
+            .Boundary(where: b) :> false
+        }
     }
 
     // ---- s462 — OWN-VALUE TYPE REPORTS (§66.3 rules 7–10) -----------------------
@@ -22606,7 +22708,69 @@ ${
                 if (!trusted && p.ty is given) fenv = tWithRefused(fenv, s)
             }
         }
-        return typeBlock(withRet(fenv, fnRet(env.t, af)), af.body, ts)
+        return inferReturn(env, af, typeBlock(withRet(fenv, fnRet(env.t, af)), af.body, ts))
+    }
+
+    // s473 (p5 hole 1, g-boot-unannotated-return-type-not-inferred-s473) — §48.8
+    // "When a return type annotation is absent: … The compiler infers the return
+    // type from the `return` statements. … If `return` statements produce
+    // different types, E-FN-007 fires." §48.11: "Returns are the same in every
+    // form (S469)" — so `fn` AND `function`. Before this a call of an unannotated
+    // function was Unknown, and `@n = f()` put a `string` in an `int` cell with no
+    // diagnostic.
+    // The join of the typer's own types of every `return <expr>` in the body is
+    // CONTRIBUTED under the function's return key (retKey) — the typeProgram
+    // fixed point carries it to the next pass's `settled`, where typeCall reads
+    // it (a callee typed after its caller settles a pass later). Nothing is
+    // contributed — the call stays Unknown, as before — for a written return type
+    // (a declared one is FnInfo.ret; `-> void` / a refused one are not inferred),
+    // a failable function (no success-type slot, §19.4.1), a body with no value
+    // `return` or a bare one (E-RETURN-INCOMPLETE's), or a returned value whose
+    // type is not proven (Unknown joins to Unknown — provable-or-silent).
+    // Two return sites of different types that join to a NEW choice: a `fn` is
+    // E-FN-007 (§48.4.1 / §48.8; the call stays Unknown, so the mismatch is not
+    // reported twice); a `function`'s call is that choice (`int | string` reads
+    // "one of"), checked at every write as any choice is.
+    fn inferReturn(env: TEnv, af: AFn, ts: TypeState) -> TypeState {
+        if (af.ret is given || af.failable) return ts
+        const s: Sym | not = bindSym(bindFact(env.t.binds, af.nid))
+        if (s is not) return ts
+        const rs: ReturnSite[] = returnSites(af.body)
+        if (rs.length == 0) return ts
+        let acc: VType = VType.Unknown
+        let first = true
+        let fresh = false
+        for (const r of rs) {
+            const x: AExpr | not = r.e
+            if (x is not) return ts
+            const vt: VType = exprType0(ts, x.nid)
+            if (first) {
+                acc = vt
+                first = false
+            } else {
+                const j: VType = joinVT(acc, vt)
+                if (oneOfMembers(j).length > 0 && !sameVT(j, acc) && !sameVT(j, vt)) fresh = true
+                acc = j
+            }
+        }
+        if (fresh && af.pure) {
+            const ms: Type[] = oneOfMembers(acc)
+            let names: string[] = []
+            let bare: string[] = []
+            for (const m of ms) {
+                names = names.concat(["`" + typeName(m) + "`"])
+                bare = bare.concat([typeName(m)])
+            }
+            const ts1: TypeState = report(ts, env, af.span, "E-FN-007", "`fn " + af.name + "` returns " + names.join(" and ") + " from different `return` statements, and declares no return type (§48.4.1, §48.8: an unannotated `fn`'s return type is inferred from its returns, and they must agree). Make every `return` carry the same type, or declare the union: `fn " + af.name + "(…) -> " + bare.join(" | ") + "`")
+            return contribute(ts1, retKey(s), VType.Unknown)
+        }
+        return contribute(ts, retKey(s), acc)
+    }
+
+    // The settled-table key of a function's INFERRED return (inferReturn): a
+    // negative id, so it never meets a local's Sym id (every Sym id is >= 0).
+    fn retKey(s: Sym) -> Sym {
+        return { id: -1 - s.id, hint: s.hint }
     }
 
     // The declared return type of a function (`not`: none, or untrusted).
@@ -23975,6 +24139,36 @@ ${
     // =========================================================================
     type RPersists:struct = { infos: PersistInfo[], st: AS }
     type RPersist:struct = { info: PersistInfo | not, st: AS }
+
+    // s473 (p5 hole 5, g-boot-engine-no-initial-compiles-unbootable-s473): a
+    // `<program>` declaration with NO value (`<phase:Phase single>` over its
+    // state-children, `<count:int/>`, `let <u:User/>`) — the program's instance is
+    // built when the page boots and no use site ever supplies one, so the page
+    // compiled clean and then threw at boot (the printer's `noDefault` thunk:
+    // "has no default and no use-site value (SPEC §66.3 O33 is OPEN)"). §51.0.E's
+    // `W-ENGINE-INITIAL-MISSING` + "DEFAULTS to the FIRST state-child's variant" is
+    // the `<engine initial=>` spelling's lint; under §66 `initial=` IS the
+    // declaration's own value (§66.13.3), and what a declaration without one holds
+    // is ⚑ O33 (OPEN, §66.3: "what such an attribute holds in the declaration's
+    // shared instance … where no use supplies it"; §6.2 Shape 4's canonical empty
+    // is not carried into §66 by any ruling). Refused at compile time, by name —
+    // never a boot throw. A `<db>` cell is loaded by the server (its own record,
+    // dbCellRecord), and a field whose declaration already carries an error (a
+    // refused `timestamp`, a `server` cell) is not reported twice.
+    fn programNoValue(g: Globals, st0: AS) -> AS {
+        let st: AS = st0
+        const prog: DeclSrc | not = findDeclSrc(g, g.program)
+        if (prog is not) return st
+        const perrs: ASpan[] = fileErrs(g.files, prog.file)
+        for (const f of prog.info.fields) {
+            if (!hasOwnValue(f.init) && dbCellRecord(g, f.nid) is not && !errorWithin(st, prog.file, f.span) && !hasErrIn(perrs, f.span)) {
+                let what: string = "a value"
+                if (f.graph is given) what = "an initial state — §51.0.E's `initial=` is the declaration's own value under §66 (§66.13.3): `<" + f.sym.hint + ":T=.Variant single>`"
+                st = addDiag(st, prog.file, f.span, "E-BOOTSTRAP-UNSUPPORTED", "`" + f.sym.hint + "` is declared in `<program>` with no value, and no use site ever supplies one — the program's instance is built when the page boots. What a declaration without a default holds is ⚑ O33 (OPEN, §66.3); §51.0.E's default-to-the-first-variant and §6.2's canonical empty are not ruled for the §66 form. Give it " + what)
+            }
+        }
+        return st
+    }
 
     fn persistPass(g: Globals, files: FileAst[], st0: AS) -> RPersists {
         let st: AS = st0
@@ -27270,6 +27464,8 @@ ${
 
     fn returnSitesIn(e: AExpr | not) -> ReturnSite[] {
         if (e is not) return []
+        // s473: a lambda's `return` is the lambda's, not the function's (as retsInExpr)
+        if (isLambdaK(e.k)) return []
         let out: ReturnSite[] = []
         for (const b of exprBlocks(e)) { out = out.concat(returnSites(b)) }
         for (const x of exprKids(e)) { out = out.concat(returnSitesIn(x)) }
@@ -28317,7 +28513,7 @@ ${
         const rr: RResets = resetOnPass(ra.g, st)
         st = rr.st
         const rp: RPersists = persistPass(ra.g, files, st)
-        st = rp.st
+        st = programNoValue(ra.g, rp.st)
         // s469: the stylesheet (§9.1, §65) — placed by position, its `@name` references resolved
         const css: CssPassR = cssPass(ra.g)
         let decls: DeclInfo[] = []
