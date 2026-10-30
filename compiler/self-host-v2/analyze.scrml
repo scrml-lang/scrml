@@ -4462,7 +4462,7 @@ ${
                 j = j + 1
             }
             // a URL-valued attribute's value literal (`setAttribute("href", "…")`): judged below
-            if (attrUrl) {
+            if (attrUrl && parts.args.length > 1) {   // #1674 r1 N1: removeAttribute has one argument
                 const vv: HView = hostView(parts.args[1])
                 urlLit = ""
                 if (vv.k == 4) urlLit = vv.name
@@ -4546,7 +4546,7 @@ ${
                 // own predicate (dataAttrRefusal), whatever the value: a binding is a data path
                 for (const it of inertElements()) {
                     const mc: string = dataAttrRefusal(it.tag, v.name, [])
-                    if (mc != "") return haBad("E-HOST-TARGET-NOT-ALLOWED", "the target of `" + name + "` names the attribute `" + v.name + "`, which §5.2 / §65.4.2 never write from data (markup refuses a data `" + v.name + "=` on `<" + it.tag + ">` as " + mc + ": data never chooses where a form posts, which form a control submits with, or a style) — a `guarded(attr-name)` entry refuses it too (§21.3.3 rule 8.5); write it as a static attribute in markup")
+                    if (mc != "") return haBad("E-HOST-TARGET-NOT-ALLOWED", "the target of `" + name + "` names the attribute `" + v.name + "`, which §5.2 / §65.4.2 never write from data (markup refuses a data `" + v.name + "=` on an element the receiver may be as " + mc + ": data never chooses where a form posts, which form a control submits with, or a style) — a `guarded(attr-name)` entry refuses it too (§21.3.3 rule 8.5); write it as a static attribute in markup")
                 }
                 if (av == "url") return { w: hwOk(), tag: "", url: true, urlLit: v.name }
                 return haOk()

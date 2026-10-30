@@ -112,21 +112,21 @@ const errsOf = (r) => r.diags.filter((d) => d.severity !== "Warning" && d.severi
 const P = (host) => `<host>\n${host}\n</host>\n<program>\n<p>x</p>\n</program>\n`;
 const jsOf = (r) => mods().print.printProgram(r.core, "t.client.js", "scrml-runtime.js").js;
 // a parameter or literal filling one slot of an entry (the walk's own notation, Appendix H.1)
-const fill = (slot, k) => {
-  if (slot === "attr-name") return { lit: "\"title\"" };
+const fill = (slot, k, attr = "title") => {
+  if (slot === "attr-name") return { lit: "\"" + attr + "\"" };
   if (slot === "inert-tag") return { lit: "\"div\"" };
   if (slot.startsWith("\"")) return { lit: slot };
   const alt = S.slotAlternatives(slot)[0];
   return { param: "v" + k + ": " + (S.slotAdmitsNot(slot) ? alt + " | not" : alt), name: "v" + k };
 };
 // a binding that reaches entry `e` with its receiver a parameter typed by e's interface
-const bindingFor = (e) => {
+const bindingFor = (e, attr = "title") => {
   const ps = ["r: " + e.iface];
   let tgt;
   if (e.access === "read") tgt = "r." + e.member;
   else if (e.access === "write") { const f = fill(S.writeSlot(e), 0); ps.push(f.param); tgt = "r." + e.member + " = " + f.name; }
   else {
-    const as = S.sigParams(e).filter((p) => !S.slotOptional(p)).map((p, k) => fill(S.slotType(p), k));
+    const as = S.sigParams(e).filter((p) => !S.slotOptional(p)).map((p, k) => fill(S.slotType(p), k, attr));
     for (const a of as) if (a.param) ps.push(a.param);
     tgt = (e.access === "construct" ? "new " : "") + "r." + e.member + "(" + as.map((a) => a.lit ?? a.name).join(", ") + ")";
   }
@@ -134,6 +134,24 @@ const bindingFor = (e) => {
 };
 
 describe("inertness is never read off a static type (rule 8.5)", () => {
+  // #1674 r1 N1: every guarded(attr-name) entry with a URL-VALUED name too (`removeAttribute("href")` crashed the
+  // walk: it read a second argument removeAttribute does not have) — it compiles, and a setAttribute value goes
+  // through rt.hostAttrValue (the URL guard)
+  test("EVERY guarded(attr-name) entry compiles with a URL-valued name (href, src) and routes through the guards", () => {
+    const named = S.surfaceEntries().filter((e) => S.hasGuard(e, "attr-name"));
+    expect(named.length).toBeGreaterThan(1);
+    for (const e of named) {
+      for (const attr of ["href", "src", "HREF"]) {
+        const line = bindingFor(e, attr);
+        const r = run(P("  " + line));
+        expect([e.id, line, errsOf(r)]).toEqual([e.id, line, []]);
+        const js = jsOf(r);
+        expect([e.id, attr, js.includes("hostSetAttrName("), js.includes("hostInert(")]).toEqual([e.id, attr, true, true]);
+        if (e.member === "setAttribute") expect([e.id, attr, js.includes("hostAttrValue(")]).toEqual([e.id, attr, true]);
+      }
+    }
+  });
+
   test("EVERY guarded(inert-receiver) entry of host-surface.scrml compiles only with its receiver routed through rt.hostInert", () => {
     const guarded = S.surfaceEntries().filter((e) => S.hasGuard(e, "inert-receiver"));
     expect(guarded.length).toBeGreaterThan(15);
