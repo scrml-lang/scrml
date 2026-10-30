@@ -311,9 +311,9 @@ describe("§8.1 — a value interpolated in SQL never appears in the SQL text se
         const r: Cnt = ${SQ}\`${sql}\`}.get() !{ _ :> { return 0; } };
         return r.n;
     }`, `        <button id="go" onclick={ @n = q("a") !{ .Transport(t) :> return }; }>go</button>`));
-    expect(at("SELECT COUNT(*) AS n FROM users WHERE name LIKE '%\${t}%'")).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
-    expect(at("SELECT COUNT(*) AS n FROM users WHERE \"\${t}\" = 1")).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
-    expect(at("SELECT COUNT(*) AS n FROM users -- \${t}\n")).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+    expect(at("SELECT COUNT(*) AS n FROM users WHERE name LIKE '%\${t}%'")).toEqual(["E-SQL-SLOT-IN-LITERAL"]);   // s473: the S468 code (§8.1)
+    expect(at("SELECT COUNT(*) AS n FROM users WHERE \"\${t}\" = 1")).toEqual(["E-SQL-SLOT-IN-LITERAL"]);
+    expect(at("SELECT COUNT(*) AS n FROM users -- \${t}\n")).toEqual(["E-SQL-SLOT-IN-LITERAL"]);
     expect(at("SELECT COUNT(*) AS n FROM users WHERE name = 'it''s' AND x = \${t}")).toEqual([]);
     expect(at("SELECT COUNT(*) AS n FROM users WHERE name LIKE \${\"%\" + t + \"%\"}")).toEqual([]);
   });

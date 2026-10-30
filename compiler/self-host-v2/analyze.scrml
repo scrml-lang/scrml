@@ -59,7 +59,7 @@ ${
     import { isKnownElementName, isHtmlElementName } from "./elements.scrml"
     import { importTarget, importsOfItems, hostImportsOfItems, hostTagOf, isStdlibPath, HostLoc, hostLocOf } from "./link.scrml"
     import { WireBuild, WireTable, wireBuild, hasFixedLength } from "./codec.scrml"
-    import { SqlFacts, SlotQuote, MultiStmt, StmtVerdict, sqlFacts, slotInLiteral, txControl, txControlAware, multiStatement, programStatement } from "./sql.scrml"
+    import { SqlFacts, SlotQuote, MultiStmt, StmtVerdict, sqlFacts, slotInLiteral, txControl, txControlAware, multiStatement, programStatement, journalOff } from "./sql.scrml"
     import { FxAtom, ownAtom, closeDim, witnessOf, atomChain, sccOrder } from "./effects.scrml"
     import { UrlAttr, StaticSink, classifyStatic, staticExecMessage, logicWriteSink, logicCallSink, attrNameArgIndex, executableAttrName, htmlArgIndex, attrNodeMember, attrNodeValueMember, urlValueAdmitted, schemeOfUrl, isUrlAttrName, attrValueArgIndex } from "./url.scrml"
     import { HEntry, surfaceInterfaces, isSurfaceIface, isDomElementIface, ifaceInherits, findEntry, accessesOf, sigParams, sigResult,
@@ -13879,8 +13879,33 @@ ${
         return resolveMaybeExpr(env, e, st)
     }
 
+
+    // s473 (ruled refusals) — §7.6 (S473 D14): "a LOCAL — a `let` / `const` /
+    // `lin` declared inside a function body (at any nesting depth) — with the
+    // name of a reactive cell in scope is `E-NAME-COLLIDES-STATE` (§6.1.3),
+    // exactly as at file scope. (Parameters and nested `function` declarations
+    // are not decided by this ruling.)" The cells in scope of a function body:
+    // its file's program cells (programInfo — §7.6.1 "in the same file").
+    fn localCellClash(env: Env, span: ASpan, name: string, st: AS) -> AS {
+        if (!isFnCtx(env)) return st
+        const pi: DeclInfo | not = programInfo(env)
+        if (pi is not) return st
+        for (const f of pi.fields) {
+            if (f.sym.hint == name) return addDiag(st, env.file, span, "E-NAME-COLLIDES-STATE", "the local `" + name + "` takes the name of the cell `@" + name + "` — a local declared in a function body cannot take the name of a cell in scope (§7.6, §6.1.3; ruled S473 D14: function scoping does not license it). Rename the local")
+        }
+        return st
+    }
+
+    fn isFnCtx(env: Env) -> boolean {
+        const c: CtxK = env.ctx
+        return match c {
+            .InDecl(owner: o) :> false
+            .InFn :> true
+        }
+    }
+
     fn resolveLocal(env: Env, s: AStmt, name: string, mutable: boolean, aty: AType | not, init: AExpr, st0: AS) -> RB {
-        let st: AS = st0
+        let st: AS = localCellClash(env, s.span, name, st0)
         let annot: Type | not = not
         if (aty is given && !hasErrIn(fileErrs(env.g.files, env.file), aty.span)) {
             const te: TypeEnv = teAt(env.g.te, env.file)
@@ -14359,8 +14384,24 @@ ${
     // initializer is NOT a statement's whole value: a handling form there would
     // lower to an Attempt before the loop's `init`, which Core's Counted head
     // cannot hold (check.scrml C19), so it is refused where it stands (ue2).
+    // A parameter name as the author writes one (a letter or `_`, then letters,
+    // digits, `_`) — anything else is the parser's recovery from a form it does
+    // not read (a default value, a rest parameter), not a missing type.
+    fn plainParamName(n: string) -> boolean {
+        if (n == "") return false
+        let i: int = 0
+        while (i < n.length) {
+            const c: string = n.substring(i, i + 1)
+            const letter: boolean = (c >= "a" && c <= "z") || (c >= "A" && c <= "Z") || c == "_"
+            const digit: boolean = c >= "0" && c <= "9"
+            if (!letter && !(digit && i > 0)) return false
+            i = i + 1
+        }
+        return true
+    }
+
     fn resolveForLocal(env: Env, s: AStmt, name: string, mutable: boolean, aty: AType | not, init: AExpr, st0: AS) -> RB {
-        let st: AS = st0
+        let st: AS = localCellClash(env, s.span, name, st0)
         let annot: Type | not = not
         if (aty is given && !hasErrIn(fileErrs(env.g.files, env.file), aty.span)) {
             const te: TypeEnv = teAt(env.g.te, env.file)
@@ -16701,13 +16742,38 @@ ${
     // carries no fallback. It used to be dropped unvisited — an effect there
     // never ran, an unresolved `${@nope}` raised nothing. Fail closed: any
     // content other than whitespace is refused.
+    // s473 (ruled refusals) — §66.15.2 slot multiplicity (S473 D11), rules 2
+    // and 3 (rule 1 is the use's — resolveUse): "More than one unnamed slot — a
+    // declaration's `renders` holds more than one unnamed `<slot/>`:
+    // E-COMPONENT-020" (reported at each slot after the first); "A slot outside
+    // `renders` — a `<slot/>` anywhere but inside a declaration's `renders` (a
+    // program or page body, a plain markup body, a declaration body outside
+    // `renders`): E-DECL-SLOT-OUTSIDE-RENDERS". A slot is inside a renders when
+    // it is one of the `<slot/>`s of the enclosing declaration's own `renders`
+    // element (slotsIn) — the program has none, and a state-child body or a
+    // child field's renders is not the declaration's. A NAMED slot
+    // (`<slot name=…>`) is ⚑ O9 (§66.15.2, not ruled): refused, never read as
+    // the unnamed one.
     fn resolveSlot(env: Env, e: AElem, st0: AS) -> AS {
         // s473 (#1678 review F6) — S473 D1 / D2 / D26 hold on `<slot>` too: a
         // `protect=` / `authority=` / `fixed` here was dropped silently.
         let st: AS = st0
         for (const a of e.attrs) {
             const directive: string = refusedDirectiveAttr(a.name, e.tag)
-            if (directive != "") st = addDiag(st, env.file, a.span, "E-BOOTSTRAP-UNSUPPORTED", directive)
+            if (directive != "") {
+                st = addDiag(st, env.file, a.span, "E-BOOTSTRAP-UNSUPPORTED", directive)
+            } else if (a.name == "name") {
+                st = addDiag(st, env.file, a.span, "E-BOOTSTRAP-UNSUPPORTED", "a named slot (`<slot name=…>`) is ⚑ O9 (§66.15.2: named and parametric slots are not ruled) — not in the bootstrap; it would be read as the unnamed `<slot/>`. Use one unnamed `<slot/>`")
+            }
+        }
+        let own: int[] = []
+        const cd: DeclSrc | not = ctxDecl(env)
+        if (cd is given && !cd.isProgram) own = slotsIn(rendersNodes(cd))
+        const at: int = own.indexOf(e.nid)
+        if (at < 0) {
+            st = addDiag(st, env.file, e.span, "E-DECL-SLOT-OUTSIDE-RENDERS", "`<slot/>` stands outside a declaration's `renders` — it names no use, so it would render nothing (§66.15.2 rule 3, S473 D11). A slot marks where a USE's content goes; put it inside the `renders` of the declaration whose uses carry content")
+        } else if (at > 0) {
+            st = addDiag(st, env.file, e.span, "E-COMPONENT-020", "a second unnamed `<slot/>` in this `renders` — a use's content would render once per slot (§66.15.2 rule 2, S473 D11). Keep one `<slot/>`")
         }
         for (const k of e.kids) {
             if (!blankNode(k)) {
@@ -16715,6 +16781,44 @@ ${
             }
         }
         return addElem(st, e.nid, ElemFact.MSlot)
+    }
+
+    // The unnamed `<slot/>` elements of a markup tree, in document order
+    // (s473: §66.15.2 multiplicity). A slot with a `name=` is not counted (O9 — refused).
+    fn slotsIn(ns: ANode[]) -> int[] {
+        let out: int[] = []
+        for (const n of ns) {
+            const k: ANodeK = n.k
+            const kids: int[] = match k {
+                .Elem(e: el) :> slotsInElem(el)
+                .Text(text: t) :> []
+                .Interp(e: x) :> []
+                .DeclNode(d: dd) :> []
+                .Effect(w: w) :> []
+                .Css(c: c) :> []
+                .Gather(f: f) :> []
+            }
+            out = out.concat(kids)
+        }
+        return out
+    }
+
+    fn slotsInElem(el: AElem) -> int[] {
+        if (el.tag == "slot") {
+            for (const a of el.attrs) {
+                if (a.name == "name") return []
+            }
+            return [el.nid]
+        }
+        return slotsIn(el.kids)
+    }
+
+    // Does a use carry content between its tags (anything but whitespace)?
+    fn hasContentKids(ns: ANode[]) -> boolean {
+        for (const n of ns) {
+            if (!blankNode(n)) return true
+        }
+        return false
     }
 
     // s469 — a `#{…}` block renders nothing where it stands: it does not break
@@ -17248,6 +17352,168 @@ ${
         return withPresent(env, presenceHandle(env, x))
     }
 
+    // s473 (ruled refusals) — §26.2 amendment (S473 D13): "When a static
+    // `class=` token of a compiled program matches the Tailwind utility grammar
+    // (§26.3–§26.4), the bootstrap SHALL report one Info diagnostic for the
+    // compile, I-TAILWIND-NOT-BUILT (§34), saying that utility classes are
+    // passed through unstyled and naming the first matching class. The class
+    // token is still written to the element unchanged and the compile does not
+    // fail." Once per compile: the first match reports, later ones see it.
+    fn tailwindInfo(env: Env, a: AAttr, st: AS) -> AS {
+        const v: AAttrValue = a.value
+        const text: string = match v {
+            .Quoted(v: q) :> q
+            .NoValue :> ""
+            .Bare(e: x) :> ""
+            .Paren(e: x) :> ""
+            .Braced(b: b) :> ""
+        }
+        if (text == "") return st
+        for (const d of st.diags) {
+            if (d.code == "I-TAILWIND-NOT-BUILT") return st
+        }
+        for (const tok of classTokens(text)) {
+            if (tok.indexOf("$" + "{") < 0 && isTailwindClass(tok)) {
+                return addDiag(st, env.file, a.span, "I-TAILWIND-NOT-BUILT", "`" + tok + "` is a Tailwind utility class, and the bootstrap does not build Tailwind (§26): utility classes are passed through unstyled — written to the element unchanged, with no CSS (§26.2, S473 D13). Style with a `#{…}` block (§9.1) for the bootstrap. (Reported once per compile.)")
+            }
+        }
+        return st
+    }
+
+    // The whitespace-separated tokens of a static `class=` value.
+    fn classTokens(text: string) -> string[] {
+        let out: string[] = []
+        let cur: string = ""
+        let i: int = 0
+        while (i < text.length) {
+            const c: string = text.substring(i, i + 1)
+            if (c == " " || c == "\t" || c == "\n" || c == "\r") {
+                if (cur != "") out = out.concat([cur])
+                cur = ""
+            } else {
+                cur = cur + c
+            }
+            i = i + 1
+        }
+        if (cur != "") out = out.concat([cur])
+        return out
+    }
+
+    // s473 — the Tailwind utility grammar, as far as the D13 Info needs it
+    // (§26.3 variant prefixes, §26.4 arbitrary values, and the common utility
+    // families with a Tailwind value): `md:hover:bg-blue-500`, `p-4`,
+    // `w-[37px]`, `flex`, `-mt-2`, `text-sm`, `items-center`. A token whose
+    // variant prefix is not one §26.3 lists does not match (impl#1 reports it as
+    // W-TAILWIND-001); an author class such as `card` or `btn-primary` does not.
+    fn isTailwindClass(tok0: string) -> boolean {
+        if (tok0 == "") return false
+        const parts: string[] = tok0.split(":")
+        let i: int = 0
+        while (i < parts.length - 1) {
+            if (!isTwVariant(parts[i])) return false
+            i = i + 1
+        }
+        let base: string = parts[parts.length - 1]
+        if (base.substring(0, 1) == "!") base = base.substring(1)
+        if (base.substring(0, 1) == "-") base = base.substring(1)
+        if (base == "") return false
+        if (twWords().indexOf(base) >= 0) return true
+        // arbitrary value: `<prefix>-[<value>]` (§26.4)
+        const lb: int = base.indexOf("-[")
+        if (lb > 0 && base.substring(base.length - 1) == "]") return twArbitraryPrefixes().indexOf(base.substring(0, lb)) >= 0
+        // `<prefix>-<value>`, the longest listed prefix first
+        for (const pre of twPrefixes()) {
+            if (base.length > pre.length + 1 && base.substring(0, pre.length + 1) == pre + "-") {
+                if (isTwValue(base.substring(pre.length + 1))) return true
+            }
+        }
+        return false
+    }
+
+    fn isTwVariant(v: string) -> boolean {
+        const states: string[] = ["hover", "focus", "active", "disabled", "visited", "first", "last", "odd", "even", "focus-within", "focus-visible"]
+        if (["sm", "md", "lg", "xl", "2xl", "dark", "print", "motion-safe", "motion-reduce"].indexOf(v) >= 0) return true
+        if (states.indexOf(v) >= 0) return true
+        if (v.substring(0, 6) == "group-") return states.indexOf(v.substring(6)) >= 0
+        return false
+    }
+
+    fn twWords() -> string[] {
+        return ["flex", "grid", "block", "inline", "inline-block", "inline-flex", "inline-grid", "hidden", "contents", "table", "flow-root",
+                "container", "relative", "absolute", "fixed", "sticky", "static", "italic", "not-italic", "underline", "line-through", "no-underline",
+                "uppercase", "lowercase", "capitalize", "normal-case", "truncate", "grow", "shrink", "border", "rounded", "shadow", "transition",
+                "prose", "group", "sr-only", "not-sr-only", "visible", "invisible", "antialiased", "subpixel-antialiased", "isolate", "outline",
+                "ring", "blur", "filter", "transform", "flex-row", "flex-col", "flex-wrap", "flex-nowrap", "flex-1", "flex-auto", "flex-none",
+                "mx-auto", "my-auto", "m-auto", "w-full", "h-full", "w-screen", "h-screen", "min-h-screen", "select-none", "cursor-pointer",
+                "pointer-events-none", "overflow-hidden", "overflow-auto", "overflow-scroll", "whitespace-nowrap", "break-words", "list-none",
+                "object-cover", "object-contain", "aspect-square", "aspect-video", "shadow-none", "rounded-full", "rounded-none", "resize", "resize-none"]
+    }
+
+    fn twArbitraryPrefixes() -> string[] {
+        return ["p", "px", "py", "pt", "pr", "pb", "pl", "m", "mx", "my", "mt", "mr", "mb", "ml", "gap", "gap-x", "gap-y", "w", "h", "min-w",
+                "max-w", "min-h", "max-h", "top", "right", "bottom", "left", "inset", "text", "leading", "tracking", "bg", "border", "rounded",
+                "opacity", "shadow", "z", "grid-cols", "grid-rows", "col-span", "row-span", "col-start", "col-end", "row-start", "row-end", "flex",
+                "grow", "shrink", "order", "basis", "aspect", "content", "font"]
+    }
+
+    // the utility families (longest first, so `gap-x` is tried before `gap`)
+    fn twPrefixes() -> string[] {
+        return ["underline-offset", "pointer-events", "grid-cols", "grid-rows", "col-start", "row-start", "col-span", "row-span", "col-end",
+                "row-end", "space-x", "space-y", "divide-x", "divide-y", "translate-x", "translate-y", "min-w", "max-w", "min-h", "max-h",
+                "gap-x", "gap-y", "inset-x", "inset-y", "rounded-t", "rounded-b", "rounded-l", "rounded-r", "border-t", "border-b", "border-l",
+                "border-r", "border-x", "border-y", "line-clamp", "decoration", "whitespace", "transition", "placeholder", "duration", "tracking",
+                "leading", "overflow", "opacity", "justify", "content", "rounded", "outline", "shadow", "scale", "rotate", "origin", "object",
+                "cursor", "select", "items", "inset", "order", "basis", "break", "delay", "ease", "flex", "font", "from", "grow", "list", "ring",
+                "self", "skew", "text", "bg", "border", "place", "shrink", "stroke", "fill", "via", "to", "top", "right", "bottom", "left", "gap",
+                "px", "py", "pt", "pr", "pb", "pl", "mx", "my", "mt", "mr", "mb", "ml", "p", "m", "w", "h", "z", "columns", "aspect", "animate",
+                "blur", "align"]
+    }
+
+    fn isTwValue(v: string) -> boolean {
+        if (isTwNumber(v)) return true
+        const words: string[] = ["px", "xs", "sm", "md", "lg", "xl", "2xl", "3xl", "4xl", "5xl", "6xl", "7xl", "8xl", "9xl", "base", "full",
+                                 "screen", "auto", "min", "max", "fit", "none", "prose", "left", "center", "right", "justify", "start", "end",
+                                 "between", "around", "evenly", "stretch", "baseline", "thin", "extralight", "light", "normal", "medium", "semibold",
+                                 "bold", "extrabold", "black", "white", "transparent", "current", "inherit", "wrap", "nowrap", "row", "col",
+                                 "row-reverse", "col-reverse", "hidden", "visible", "scroll", "x", "y", "pointer", "default", "not-allowed", "text",
+                                 "all", "colors", "transform", "in", "out", "in-out", "linear", "spin", "ping", "pulse", "bounce", "tight", "snug",
+                                 "relaxed", "loose", "wide", "wider", "widest", "tighter", "cover", "contain", "sans", "serif", "mono", "inner",
+                                 "dashed", "dotted", "solid", "double", "top", "bottom", "middle", "words", "all", "disc", "decimal", "square",
+                                 "video", "clip", "ellipsis", "lg", "offset", "dvh", "svh", "lvh", "first", "last"]
+        if (words.indexOf(v) >= 0) return true
+        // a palette colour with a shade: `blue-500`, `slate-50`, `red-500/50`
+        const slash: int = v.indexOf("/")
+        let c: string = v
+        if (slash > 0) c = v.substring(0, slash)
+        const dash: int = c.lastIndexOf("-")
+        if (dash > 0) {
+            const palette: string[] = ["slate", "gray", "zinc", "neutral", "stone", "red", "orange", "amber", "yellow", "lime", "green", "emerald",
+                                       "teal", "cyan", "sky", "blue", "indigo", "violet", "purple", "fuchsia", "pink", "rose"]
+            const shades: string[] = ["50", "100", "200", "300", "400", "500", "600", "700", "800", "900", "950"]
+            if (palette.indexOf(c.substring(0, dash)) >= 0 && shades.indexOf(c.substring(dash + 1)) >= 0) return true
+        }
+        // a size step with an edge (`rounded-t-lg`, `border-b-2`): its last segment
+        if (dash > 0) return isTwNumber(c.substring(dash + 1))
+        return false
+    }
+
+    // `4`, `0.5`, `1/2`, `px`-free digits only
+    fn isTwNumber(v: string) -> boolean {
+        if (v == "") return false
+        let i: int = 0
+        let digits: int = 0
+        while (i < v.length) {
+            const c: string = v.substring(i, i + 1)
+            if ("0123456789".indexOf(c) >= 0) {
+                digits = digits + 1
+            } else if (c != "." && c != "/") {
+                return false
+            }
+            i = i + 1
+        }
+        return digits > 0
+    }
+
     fn resolveHtml(env: Env, e: AElem, st0: AS) -> AS {
         const penv: Env = elemPresentEnv(env, e)
         let st: AS = addElem(st0, e.nid, ElemFact.MHtml)
@@ -17268,9 +17534,16 @@ ${
         for (const a of e.attrs) {
             const ev: string = eventName(a.name)
             const directive: string = refusedDirectiveAttr(a.name, e.tag)
+            if (a.name.toLowerCase() == "class") st = tailwindInfo(env, a, st)
             if (directive != "") {
                 // s473 — S473 D26 (`fixed`), S473 D1 / D2 (`protect=` / `authority=`)
                 st = addDiag(st, env.file, a.span, "E-BOOTSTRAP-UNSUPPORTED", directive)
+            } else if (a.name.toLowerCase() == "key") {
+                // s473 (ruled refusals) — §6.5.3 / §17.4b (S473 review-surfaced 5): "`key=` on the
+                // lifted element (§6.5.3) is the LEGACY spelling: an implementation that speaks the
+                // ruled dialect (the bootstrap) refuses it with a hint naming the header form". It
+                // was written as a DOM attribute (g-boot-lift-key-attr-silently-emitted-s473).
+                st = addDiag(st, env.file, a.span, "E-BOOTSTRAP-UNSUPPORTED", "`key=` on `<" + e.tag + ">` is the legacy keyed-iteration spelling (§6.5.3), refused (ruled S473: the loop-header `key` is canonical, §17.4b) — it would be written as a DOM attribute, with no keyed reconciliation. Write the key in the loop header instead: `for (const it of @items key it.id) { lift <" + e.tag + ">…</" + e.tag + ">; }`. (The bootstrap does not build the header `key` yet either — the list renders unkeyed (positional) without one.)")
             } else if (isChainAttr(a.name)) {
                 // s451: `if=` / `else-if=` / `else` (§17.1.1) — chain attributes (chainCheck)
                 st = resolveIfValue(env, a.value, st)
@@ -17756,6 +18029,19 @@ ${
                 st = addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "`<" + e.tag + ">`'s attribute `" + f.sym.hint + "` has no default, and this use does not set it — whether an attribute without a default is required at every use or takes a canonical empty is ⚑ O33 (OPEN, §66.3); set it here (`" + f.sym.hint + "=…`) or give it a default")
             }
         }
+        // s473 (ruled refusals) — §66.6.8 interim (S473 D12): "Until O51 is
+        // ruled, an implementation of the §66 dialect SHALL refuse BOTH a plain
+        // use `<x/>` and a reference `<*x/>` of a declaration that has no
+        // `renders`, with a named refusal that cites O51 … An `as=`-bound use is
+        // the same plain use and is refused with it". (`<*x/>`: resolveStarShared.)
+        // (a declaration file that did not parse whole — its `renders` may be what was dropped — is its errors')
+        const rn: ANode[] = rendersNodes(d)
+        if (rn.length == 0 && fileErrs(env.g.files, d.file).length == 0) {
+            st = addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "`<" + e.tag + "/>` — `<" + e.tag + ">` has no `renders`, and a use of a declaration with no `renders` is ⚑ O51 (§66.6.8, not ruled: an error, or a data-only instance). Until O51 is ruled it is refused, `as=`-bound uses included (S473 D12); give `<" + e.tag + ">` a `renders`, or keep its state in program cells")
+        } else if (hasContentKids(e.kids) && slotsIn(rn).length == 0) {
+            // §66.15.2 rule 1 (S473 D11): children with no slot
+            st = addDiag(st, env.file, e.span, "E-COMPONENT-021", "`<" + e.tag + ">` is given content between its tags, but its `renders` holds no `<slot/>` — the content would have nowhere to go (§66.15.2 rule 1, S473 D11). Add `<slot/>` to `<" + e.tag + ">`'s `renders` where the content belongs, or remove the content")
+        }
         st = addElem(st, e.nid, ElemFact.MUse(d.info.sym, alias))
         // s449 (from U0 review F1): an effect in USE-SITE SLOT CONTENT (§66.15.2)
         // is rendered wherever the declaration's `renders` places `<slot/>` —
@@ -18229,7 +18515,12 @@ ${
                         if (!unresolved) proven = true
                     }
                 } else {
-                    st = addDiag(st, fs.info.file, p.span, "E-BOOTSTRAP-UNSUPPORTED", "an unannotated parameter `" + p.name + "` — bootstrap slice M2 needs `" + p.name + ": Type` (Core parameters are typed)")
+                    // s473 (ruled refusals): §7.5 (S469) — the SPEC's code, not E-BOOTSTRAP-UNSUPPORTED.
+                    // A NAMELESS parameter is the parser's reading of a form it does not read (a default
+                    // value or a rest parameter — g-boot-param-default-and-rest-s473), not a missing type.
+                    if (!plainParamName(p.name)) {
+                        st = addDiag(st, fs.info.file, p.span, "E-BOOTSTRAP-UNSUPPORTED", "a parameter the bootstrap cannot read (a default value `b: int = 1` or a rest parameter `...xs: T[]` is not in the bootstrap) — write a plain `name: Type` parameter")
+                    } else st = addDiag(st, fs.info.file, p.span, "E-PARAM-TYPE-REQUIRED", "the parameter `" + p.name + "` has no type — every function parameter carries `: T` (§7.5, S469): write `" + p.name + ": Type`. A default does not stand in for the type (`n = 1` → `n: int = 1`)")
                 }
                 st = addBind(st, p.nid, BindFact.BParam(rs.s, pty))
                 // s473 (#1663 F1): a parameter whose type is unwritten or did not resolve
@@ -26505,6 +26796,8 @@ ${
         let creates: int[] = []
         let doms: int[] = []
         const tq: TxQ = txQuerySets(sum.nodes)     // s473: the transitive query sets (§8.9.2 amendment)
+        let jOff: JournalOff[] = []                 // s473: `PRAGMA journal_mode = OFF` sites (journalDiags)
+        let bangWrites: int[] = []                  // s473: the databases a `!` function writes
         for (const f of all) {
             const pk: PlaceK = placeOf(places, f.sym)
             if (f.modifier && !isLoadName(f.name)) st = addDiag(st, f.file, f.span, "W-DEPRECATED-SERVER-MODIFIER", "`server function " + f.name + "` — the `server` modifier is deprecated (§52.10, Insight 26): write `function " + f.name + "(…)` and let route inference place it (§12.2 — a `" + sqlSigil() + "}` in its body places it on the server)")
@@ -26535,9 +26828,12 @@ ${
                 if (si is given) {
                     sqls = sqls.concat([si])
                     if (sr.creates) creates = creates.concat([si.db.id])
+                    if (f.failable && si.kind == SqlKind.SqlWrite) bangWrites = bangWrites.concat([si.db.id])
+                    if (journalOff(s.q.chunks)) jOff = jOff.concat([{ file: f.file, span: s.span, fname: f.name, bang: f.failable, db: si.db.id }])
                 }
             }
         }
+        st = journalDiags(jOff, bangWrites, st)
         // §8.1.1 Ownership: a file owns a SQLite database when a query in it creates a table there
         let owned: Db[] = []
         for (const d of dbs) {
@@ -26550,6 +26846,30 @@ ${
         const rl: RLoads = dbLoads(g, servers, st)
         st = rl.st
         return { facts: { servers: servers, sqls: sqls, dbs: owned, places: places, inherited: sum.inherited, plan: noPlan(), loads: rl.loads }, doms: doms, st: st }
+    }
+
+    // s473 (ruled refusals) — §8.9.2 amendment (S473 review-surfaced 2): "A
+    // `?{PRAGMA journal_mode = OFF}` (any case or spacing) inside a `!` function
+    // SHALL be a compile error, E-SQL-JOURNAL-OFF (§34). So SHALL one anywhere
+    // else whose connection a `!` function's envelope uses — a program-body
+    // statement or a non-`!` function on a database that some `!` function in
+    // the compilation writes — because the setting is per connection and
+    // disables the journal the rollback needs." A `?{}` in a value or action
+    // position is refused already (E-VALUE-SERVER-CALL / the U1d split), so the
+    // sites here are the functions'.
+    type JournalOff:struct = { file: string, span: ASpan, fname: string, bang: boolean, db: int }
+
+    fn journalDiags(js: JournalOff[], bangWrites: int[], st0: AS) -> AS {
+        let st: AS = st0
+        for (const j of js) {
+            const why: string = "`PRAGMA journal_mode = OFF` turns off the rollback journal for the whole connection, and a `!` function's all-or-nothing guarantee (§8.9.2, §19.10) needs that journal to roll back"
+            if (j.bang) {
+                st = addDiag(st, j.file, j.span, "E-SQL-JOURNAL-OFF", "'" + j.fname + "' is declared '!' and runs `PRAGMA journal_mode = OFF` — " + why + " (§8.9.2, S473). Remove it, or use another `journal_mode` (`WAL`, `DELETE`, … stay admitted, §14.8.10)")
+            } else if (bangWrites.indexOf(j.db) >= 0) {
+                st = addDiag(st, j.file, j.span, "E-SQL-JOURNAL-OFF", "`PRAGMA journal_mode = OFF` in '" + j.fname + "' sets the connection a `!` function of this program writes through — " + why + " (§8.9.2, S473). Remove it, or use another `journal_mode` (`WAL`, `DELETE`, … stay admitted, §14.8.10)")
+            }
+        }
+        return st
     }
 
     // s473 (Lane B) — the program's `<db>` cells, each with its load (a server
@@ -26774,7 +27094,8 @@ ${
         // text: `LIKE '%?%'` matches a literal `?`, and the value is silently lost)
         const sq: SlotQuote = slotInLiteral(s.q.chunks)
         if (sq.slot >= 0) {
-            st = addDiag(st, file, s.span, "E-BOOTSTRAP-UNSUPPORTED", "`" + slotSigil() + "…}` #" + (sq.slot + 1) + " of this `" + sqlSigil() + "}` stands inside " + sq.what + " — there it cannot be a bound parameter (§8.1: every `" + slotSigil() + "…}` SHALL be one): the driver would read it as text and the value would be lost. Build the whole value outside the quotes and bind it — `LIKE " + slotSigil() + "\"%\" + q + \"%\"}`, not `LIKE '%" + slotSigil() + "q}%'`")
+            // s473 (ruled refusals): the S468 code, §8.1 / §34 (was E-BOOTSTRAP-UNSUPPORTED)
+            st = addDiag(st, file, s.span, "E-SQL-SLOT-IN-LITERAL", "`" + slotSigil() + "…}` #" + (sq.slot + 1) + " of this `" + sqlSigil() + "}` stands inside " + sq.what + " — there it cannot be a bound parameter (§8.1: every `" + slotSigil() + "…}` SHALL be one): the driver would read it as text and the value would be lost. Build the whole value outside the quotes and bind it — `LIKE " + slotSigil() + "\"%\" + q + \"%\"}`, not `LIKE '%" + slotSigil() + "q}%'`")
             return { info: not, creates: false, st: st }
         }
         st = statementDiags(file, s, st)

@@ -146,7 +146,7 @@ describe("more §66.20 diagnostics the subset reaches", () => {
     expect(f.params.map((p) => [p.sym.hint, p.ty])).toEqual([["v", "Str"]]);
     expect(f.body.stmts[0].data.value).toEqual({ variant: "Local", data: { sym: f.params[0].sym } });
     const bad = appWith("<p>x</p>", "    function g(v) { }");
-    expect(codes(run([LIB(), bad]))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+    expect(codes(run([LIB(), bad]))).toEqual(["E-PARAM-TYPE-REQUIRED"]);   // s473: §7.5's code
   });
 
   test("E-WRITE-NOT-GRANTED — `reset` of a field without `replace` (L4: reset IS a replace)", () => {

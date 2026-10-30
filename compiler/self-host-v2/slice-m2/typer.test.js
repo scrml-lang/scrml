@@ -634,7 +634,7 @@ describe("R2-5 — Rule C: only a component's OWN type expression failing to par
     expect(box("export <box n:string&not=\"\"/>", "<box n=(not)/>")).toEqual(["E-PARSE-TAG"]);
   });
   test("an untyped parameter is unproven, never a placeholder type (`function h(a) { @x = a }`)", () => {
-    expect(inApp("    let <x:int=0/>\n    function h(a) { @x = a; }")).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+    expect(inApp("    let <x:int=0/>\n    function h(a) { @x = a; }")).toEqual(["E-PARAM-TYPE-REQUIRED"]);   // s473: §7.5's code
   });
 });
 

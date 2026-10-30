@@ -195,6 +195,26 @@ ${
         return { end: -1 }
     }
 
+    // ---- `PRAGMA journal_mode = OFF` (s473 ruled refusals) ---------------------
+    // §8.9.2 amendment (S473 review-surfaced 2): "A `?{PRAGMA journal_mode = OFF}`
+    // (any case or spacing) inside a `!` function SHALL be a compile error,
+    // E-SQL-JOURNAL-OFF". Read on the plain text, fail closed: whitespace and
+    // quote characters dropped and the case folded, the statement is a PRAGMA
+    // whose text holds `journal_mode=off` or `journal_mode(off)` (a schema
+    // prefix — `main.journal_mode` — included).
+    export fn journalOff(chunks: string[]) -> boolean {
+        const raw: string = chunks.join(" ? ").toLowerCase()
+        let t: string = ""
+        let i: int = 0
+        while (i < raw.length) {
+            const c: string = ch(raw, i)
+            if (" \t\n\r'\"`".indexOf(c) < 0) t = t + c
+            i = i + 1
+        }
+        if (t.substring(0, 6) != "pragma") return false
+        return t.indexOf("journal_mode=off") >= 0 || t.indexOf("journal_mode(off)") >= 0
+    }
+
     // ---- a `${…}` that cannot be a bound parameter (s468 U1c fix round 1, F4) ----
     // §8.1: "`${}` inside a SQL template SHALL be compiled to a positional bound
     // parameter in the generated database driver call." A `${…}` written INSIDE a

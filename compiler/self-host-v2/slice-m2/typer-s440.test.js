@@ -46,7 +46,7 @@ describe("#1 — cell and field writes are type-checked (E-TYPE-031)", () => {
   });
   test("provable-or-silent — an unannotated parameter's value (untyped → Unknown) is never checked", () => {
     // the slice refuses the unannotated parameter itself; the write is not a second report
-    expect(inApp("    let <x:int=0/>\n    function f(a) { @x = a; }")).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+    expect(inApp("    let <x:int=0/>\n    function f(a) { @x = a; }")).toEqual(["E-PARAM-TYPE-REQUIRED"]);   // s473: §7.5's code
   });
   test("the message names the target's declared type and the value's", () => {
     const d = diagsIn(P + "    function f() { @pt.x = \"oops\"; }");
