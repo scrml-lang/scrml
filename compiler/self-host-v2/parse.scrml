@@ -374,7 +374,10 @@ ${
             .Template(quasis: qs) :> ""
             .Foreign(f: fb0) :> ""
         }
-        if (name != "" && logicWriteSink(name) != "") return name
+        // by name only (the type-judged kinds — `on…`, a navigation — are left to the
+        // unsupported-form refusal below: the parser sees no types)
+        const kind: string = logicWriteSink(name)
+        if (name != "" && (kind == "html" || kind == "exec")) return name
         return ""
     }
 
