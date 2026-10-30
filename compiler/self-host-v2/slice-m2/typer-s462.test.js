@@ -251,7 +251,7 @@ describe("rule 10 — an unproven annotation is an error", () => {
     expect(codes(pre + "    <r:int=(g(1))/>")).toEqual(["E-DECL-TYPE-UNPROVEN"]);
   });
   test("fix round 1, F5 — a proof failing inside an already-refused function is not a second report", () => {
-    expect(codes("    function g(x) { return x; }\n    <r=(g(1))/>")).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+    expect(codes("    function g(x) { return x; }\n    <r=(g(1))/>")).toEqual(["E-PARAM-TYPE-REQUIRED"]);   // s473: §7.5's code
   });
   test("recursion stays unproven (the ruled fail-closed core)", () => {
     expect(codes("    function rec(n: int) { if (n > 0) { return rec(n - 1); } else { return 0; } }\n    <v:int=(rec(2))/>")).toEqual(["E-DECL-TYPE-UNPROVEN"]);

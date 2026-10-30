@@ -293,7 +293,7 @@ describe("§19.4.3 ruling 1a — E-ERROR-012: in a value position every arm yiel
 
 describe("§19.4.3 ruling 3 — E-ERROR-013: a `!{}` on something that cannot fail", () => {
   test("a call of an ordinary function — the SPEC's message, no Core", () => {
-    const src = P(`    fn parseCount(src: string) -> int { return src.length; }\n    function show(src: string) {\n        let n = parseCount(src) !{ _ :> 0 };\n    }`);
+    const src = P(`    fn parseCount(src: string) -> int { return src.length; }\n    function show(src: string) {\n        let k = parseCount(src) !{ _ :> 0 };\n    }`);   // s473: \`k\`, not the cell's name \`n\` (§7.6, D14)
     expect(codes(src)).toEqual(["E-ERROR-013"]);
     expect(msg(src, "E-ERROR-013")).toBe("'!{}' handler on 'parseCount(…)', which cannot fail: 'parseCount' is not a failable function, so none of its arms can run. Remove the '!{ … }' handler, or declare 'parseCount' with '!' if it can fail.");
     rejected(src, "E-ERROR-013");

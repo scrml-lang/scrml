@@ -96,7 +96,7 @@ describe("S460 NEW — a condition whose type the compiler cannot resolve is E-C
   });
   test("an unannotated parameter — the slice refuses the parameter, and the condition is still reported", () => {
     const cs = codes("    let <m:int=0/>\n    function f(a) { if (a) { @m = 1; } }");
-    expect(cs).toContain("E-BOOTSTRAP-UNSUPPORTED");
+    expect(cs).toContain("E-PARAM-TYPE-REQUIRED");   // s473: §7.5's code
     expect(cs).toContain("E-COND-NOT-BOOLEAN");
   });
   test("a value from the SQL boundary (no row type in the bootstrap, §42.9) — and its explicit twin is legal", () => {

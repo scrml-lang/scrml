@@ -479,10 +479,12 @@ describe("fail closed — forms the bootstrap does not lower are refused, never 
   const slotProg = (renders) => `<program>\n${D}\n    <card title:string/>\n    renders ${renders}\n    <main>\n        <card title="a"><b>x</b>${E}</card>\n    </main>\n</program>\n`;
 
   test("an effect in use-site slot content — renders with NO <slot/> (would be dropped), with TWO (would run twice)", () => {
-    for (const renders of ["<div>card</div>", "<div><slot/><slot/></div>"]) {
+    // s473 (ruled refusals): and the slot multiplicity itself is E-COMPONENT-021 / -020 (§66.15.2, D11)
+    for (const [renders, slotCode] of [["<div>card</div>", "E-COMPONENT-021"], ["<div><slot/><slot/></div>", "E-COMPONENT-020"]]) {
       const r = run(slotProg(renders));
-      expect(r.diags.map((d) => d.code)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
-      expect(r.diags[0].message).toMatch(/slot content/);
+      expect(r.diags.map((d) => d.code).filter((c) => c !== slotCode)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+      expect(r.diags.map((d) => d.code)).toContain(slotCode);
+      expect(r.diags.find((d) => d.code === "E-BOOTSTRAP-UNSUPPORTED").message).toMatch(/slot content/);
     }
   });
 

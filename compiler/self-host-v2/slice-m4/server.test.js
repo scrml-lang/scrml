@@ -447,7 +447,7 @@ describe("the query's facts (design §1) — recorded once, fail closed", () => 
     expect(v(f.kind)).toBe("SqlWrite");
     expect(v(f.reads)).toBe("TablesUnknown");
     // s468 (U1c fix round 1, F4): and such a query is now REFUSED — the value cannot be a bound parameter there
-    expect(codes(P(DB, fnQ("f", "SELECT a FROM t WHERE a LIKE '%${id}%'")))).toContain("E-BOOTSTRAP-UNSUPPORTED");
+    expect(codes(P(DB, fnQ("f", "SELECT a FROM t WHERE a LIKE '%${id}%'")))).toContain("E-SQL-SLOT-IN-LITERAL");   // s473: the S468 code (§8.1)
   });
 
   test("columns: `*` → ColsAll; an aliased expression → its name; an unnamed expression → ColsUnknown", () => {

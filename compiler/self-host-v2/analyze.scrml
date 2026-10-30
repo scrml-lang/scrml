@@ -59,8 +59,8 @@ ${
     import { isKnownElementName, isHtmlElementName } from "./elements.scrml"
     import { importTarget, importsOfItems, hostImportsOfItems, hostTagOf, isStdlibPath, stdlibPrefix, HostLoc, hostLocOf } from "./link.scrml"
     import { WireBuild, WireTable, wireBuild, hasFixedLength } from "./codec.scrml"
-    import { SqlFacts, SlotQuote, MultiStmt, StmtVerdict, sqlFacts, slotInLiteral, txControl, txControlAware, multiStatement, programStatement } from "./sql.scrml"
-    import { FxAtom, ownAtom, closeDim, witnessOf, atomChain } from "./effects.scrml"
+    import { SqlFacts, SlotQuote, MultiStmt, StmtVerdict, sqlFacts, slotInLiteral, txControl, txControlAware, multiStatement, programStatement, journalOff } from "./sql.scrml"
+    import { FxAtom, ownAtom, closeDim, witnessOf, atomChain, sccOrder } from "./effects.scrml"
     import { UrlAttr, StaticSink, classifyStatic, staticExecMessage, logicWriteSink, logicCallSink, attrNameArgIndex, executableAttrName, htmlArgIndex, attrNodeMember, attrNodeValueMember, urlValueAdmitted, schemeOfUrl, isUrlAttrName, attrValueArgIndex } from "./url.scrml"
     import { HEntry, surfaceInterfaces, isSurfaceIface, isDomElementIface, ifaceInherits, findEntry, accessesOf, sigParams, sigResult,
              slotType, slotOptional, isCallbackSlot, slotAlternatives, slotAdmitsNot, unWaiting, entryGuards, inertTagIface,
@@ -13894,8 +13894,33 @@ ${
         return resolveMaybeExpr(env, e, st)
     }
 
+
+    // s473 (ruled refusals) — §7.6 (S473 D14): "a LOCAL — a `let` / `const` /
+    // `lin` declared inside a function body (at any nesting depth) — with the
+    // name of a reactive cell in scope is `E-NAME-COLLIDES-STATE` (§6.1.3),
+    // exactly as at file scope. (Parameters and nested `function` declarations
+    // are not decided by this ruling.)" The cells in scope of a function body:
+    // its file's program cells (programInfo — §7.6.1 "in the same file").
+    fn localCellClash(env: Env, span: ASpan, name: string, st: AS) -> AS {
+        if (!isFnCtx(env)) return st
+        const pi: DeclInfo | not = programInfo(env)
+        if (pi is not) return st
+        for (const f of pi.fields) {
+            if (f.sym.hint == name) return addDiag(st, env.file, span, "E-NAME-COLLIDES-STATE", "the local `" + name + "` takes the name of the cell `@" + name + "` — a local declared in a function body cannot take the name of a cell in scope (§7.6, §6.1.3; ruled S473 D14: function scoping does not license it). Rename the local")
+        }
+        return st
+    }
+
+    fn isFnCtx(env: Env) -> boolean {
+        const c: CtxK = env.ctx
+        return match c {
+            .InDecl(owner: o) :> false
+            .InFn :> true
+        }
+    }
+
     fn resolveLocal(env: Env, s: AStmt, name: string, mutable: boolean, aty: AType | not, init: AExpr, st0: AS) -> RB {
-        let st: AS = st0
+        let st: AS = localCellClash(env, s.span, name, st0)
         let annot: Type | not = not
         if (aty is given && !hasErrIn(fileErrs(env.g.files, env.file), aty.span)) {
             const te: TypeEnv = teAt(env.g.te, env.file)
@@ -14273,7 +14298,34 @@ ${
     // its offset) is a defect, refused.
     fn resolveRow(env: Env, n: ANode, st: AS) -> AS {
         if (n.nid < 0) return addDiag(st, env.file, n.span, "E-BOOTSTRAP-UNSUPPORTED", "internal: a lifted element was not read (a bootstrap defect — please report it)")
-        return resolveNodes(withLift(env, LiftCtx.NoLift), [n], st)
+        return resolveNodes(withLift(env, LiftCtx.NoLift), [n], liftedKeyDiag(env, n, st))
+    }
+
+    // s473 (ruled refusals) — §6.5.3 / §17.4b (S473 review-surfaced 5): "`key=`
+    // on the lifted element (§6.5.3) is the LEGACY spelling: an implementation
+    // that speaks the ruled dialect (the bootstrap) refuses it with a hint naming
+    // the header form". The ruling's scope is the LIFTED element (#1690 review
+    // F8): `key=` elsewhere is not judged here. It was written as a DOM
+    // attribute (g-boot-lift-key-attr-silently-emitted-s473). The header form
+    // is not parsed by the bootstrap yet (#1690 review F9) — the message says so.
+    fn liftedKeyDiag(env: Env, n: ANode, st: AS) -> AS {
+        const k: ANodeK = n.k
+        const el: AElem | not = match k {
+            .Elem(e: x) :> x
+            .Text(text: t) :> not
+            .Interp(e: x) :> not
+            .DeclNode(d: d) :> not
+            .Effect(w: w) :> not
+            .Css(c: c) :> not
+            .Gather(f: f) :> not
+        }
+        if (el is not) return st
+        for (const a of el.attrs) {
+            if (a.name.toLowerCase() == "key") {
+                return addDiag(st, env.file, a.span, "E-BOOTSTRAP-UNSUPPORTED", "`key=` on the lifted `<" + el.tag + ">` is the legacy keyed-iteration spelling (§6.5.3), refused (ruled S473: the loop-header `key` is canonical, §17.4b — `for (const it of @items key it.id)`). The bootstrap does not parse the header `key` yet either, so for now drop the `key=`: the list renders unkeyed (positional), and `key=` would only have been written as a DOM attribute")
+            }
+        }
+        return st
     }
 
     fn liftsMarkup(w: ALift) -> boolean {
@@ -14374,8 +14426,24 @@ ${
     // initializer is NOT a statement's whole value: a handling form there would
     // lower to an Attempt before the loop's `init`, which Core's Counted head
     // cannot hold (check.scrml C19), so it is refused where it stands (ue2).
+    // A parameter name as the author writes one (a letter or `_`, then letters,
+    // digits, `_`) — anything else is the parser's recovery from a form it does
+    // not read (a default value, a rest parameter), not a missing type.
+    fn plainParamName(n: string) -> boolean {
+        if (n == "") return false
+        let i: int = 0
+        while (i < n.length) {
+            const c: string = n.substring(i, i + 1)
+            const letter: boolean = (c >= "a" && c <= "z") || (c >= "A" && c <= "Z") || c == "_"
+            const digit: boolean = c >= "0" && c <= "9"
+            if (!letter && !(digit && i > 0)) return false
+            i = i + 1
+        }
+        return true
+    }
+
     fn resolveForLocal(env: Env, s: AStmt, name: string, mutable: boolean, aty: AType | not, init: AExpr, st0: AS) -> RB {
-        let st: AS = st0
+        let st: AS = localCellClash(env, s.span, name, st0)
         let annot: Type | not = not
         if (aty is given && !hasErrIn(fileErrs(env.g.files, env.file), aty.span)) {
             const te: TypeEnv = teAt(env.g.te, env.file)
@@ -14443,6 +14511,7 @@ ${
                 counter = rc.s
             }
         }
+        st = localCellClash(env, b.span, b.name, st)     // #1690 review F12: a for-of binder is a function-body const/let (§7.6, D14)
         const rb: RSym = mint(reservedName(st, env.file, b.span, b.name), b.name)
         st = addBind(rb.st, b.nid, BindFact.BBind(rb.s))
         st = addBind(st, f.nid, BindFact.BLoop(label, end, counter))
@@ -16716,13 +16785,47 @@ ${
     // carries no fallback. It used to be dropped unvisited — an effect there
     // never ran, an unresolved `${@nope}` raised nothing. Fail closed: any
     // content other than whitespace is refused.
+    // s473 (ruled refusals) — §66.15.2 slot multiplicity (S473 D11), rules 2
+    // and 3 (rule 1 is the use's — resolveUse): "More than one unnamed slot — a
+    // declaration's `renders` holds more than one unnamed `<slot/>`:
+    // E-COMPONENT-020" (reported at each slot after the first); "A slot outside
+    // `renders` — a `<slot/>` anywhere but inside a declaration's `renders` (a
+    // program or page body, a plain markup body, a declaration body outside
+    // `renders`): E-DECL-SLOT-OUTSIDE-RENDERS". A slot is inside a renders when
+    // it is one of the `<slot/>`s of the enclosing declaration's own `renders`
+    // element (slotsIn) — the program has none, and a state-child body or a
+    // child field's renders is not the declaration's. A NAMED slot
+    // (`<slot name=…>`) is ⚑ O9 (§66.15.2, not ruled): refused, never read as
+    // the unnamed one.
     fn resolveSlot(env: Env, e: AElem, st0: AS) -> AS {
         // s473 (#1678 review F6) — S473 D1 / D2 / D26 hold on `<slot>` too: a
         // `protect=` / `authority=` / `fixed` here was dropped silently.
         let st: AS = st0
         for (const a of e.attrs) {
             const directive: string = refusedDirectiveAttr(a.name, e.tag)
-            if (directive != "") st = addDiag(st, env.file, a.span, "E-BOOTSTRAP-UNSUPPORTED", directive)
+            if (directive != "") {
+                st = addDiag(st, env.file, a.span, "E-BOOTSTRAP-UNSUPPORTED", directive)
+            } else if (a.name.toLowerCase() == "name") {
+                st = addDiag(st, env.file, a.span, "E-BOOTSTRAP-UNSUPPORTED", "a named slot (`<slot name=…>`) is ⚑ O9 (§66.15.2: named and parametric slots are not ruled) — not in the bootstrap; it would be read as the unnamed `<slot/>`. Use one unnamed `<slot/>`")
+            }
+        }
+        // a named slot is refused above (O9) — one code for it, not a second (#1690 review F6)
+        if (namedSlot(e)) return addElem(st, e.nid, ElemFact.MSlot)
+        let own: int[] = []
+        let looped: int[] = []
+        const cd: DeclSrc | not = ctxDecl(env)
+        if (cd is given && !cd.isProgram) {
+            own = slotsIn(rendersNodes(cd))
+            looped = loopSlotsIn(rendersNodes(cd))
+        }
+        const at: int = own.indexOf(e.nid)
+        if (looped.indexOf(e.nid) >= 0) {
+            // #1690 review F6: a `<slot/>` lifted in a loop of the renders is inside it — and renders once per row
+            st = addDiag(st, env.file, e.span, "E-COMPONENT-020", "a `<slot/>` lifted inside a loop of this `renders` — a use's content would render once per row (§66.15.2 rule 2, S473 D11). Place the `<slot/>` outside the loop")
+        } else if (at < 0) {
+            st = addDiag(st, env.file, e.span, "E-DECL-SLOT-OUTSIDE-RENDERS", "`<slot/>` stands outside a declaration's `renders` — it names no use, so it would render nothing (§66.15.2 rule 3, S473 D11). A slot marks where a USE's content goes; put it inside the `renders` of the declaration whose uses carry content")
+        } else if (at > 0) {
+            st = addDiag(st, env.file, e.span, "E-COMPONENT-020", "a second unnamed `<slot/>` in this `renders` — a use's content would render once per slot (§66.15.2 rule 2, S473 D11). Keep one `<slot/>`")
         }
         for (const k of e.kids) {
             if (!blankNode(k)) {
@@ -16730,6 +16833,55 @@ ${
             }
         }
         return addElem(st, e.nid, ElemFact.MSlot)
+    }
+
+    // The unnamed `<slot/>` elements of a markup tree, in document order
+    // (s473: §66.15.2 multiplicity). A slot with a `name=` is not counted (O9 — refused).
+    fn slotsIn(ns: ANode[]) -> int[] { return slotsWalk(ns, false, false) }
+
+    // The unnamed `<slot/>`s lifted inside a Tier-0 loop (they render once per row).
+    fn loopSlotsIn(ns: ANode[]) -> int[] { return slotsWalk(ns, true, false) }
+
+    // `wantLooped`: collect the slots under a loop (true) or the ones outside every loop (false).
+    fn slotsWalk(ns: ANode[], wantLooped: boolean, inLoop: boolean) -> int[] {
+        let out: int[] = []
+        for (const n of ns) {
+            const k: ANodeK = n.k
+            const kids: int[] = match k {
+                .Elem(e: el) :> slotsInElem(el, wantLooped, inLoop)
+                .Text(text: t) :> []
+                .Interp(e: x) :> []
+                .DeclNode(d: dd) :> []
+                .Effect(w: w) :> []
+                .Css(c: c) :> []
+                .Gather(f: f) :> slotsWalk(gatherRows(f), wantLooped, true)
+            }
+            out = out.concat(kids)
+        }
+        return out
+    }
+
+    fn slotsInElem(el: AElem, wantLooped: boolean, inLoop: boolean) -> int[] {
+        if (el.tag == "slot") {
+            if (namedSlot(el) || inLoop != wantLooped) return []
+            return [el.nid]
+        }
+        return slotsWalk(el.kids, wantLooped, inLoop)
+    }
+
+    fn namedSlot(el: AElem) -> boolean {
+        for (const a of el.attrs) {
+            if (a.name.toLowerCase() == "name") return true
+        }
+        return false
+    }
+
+    // Does a use carry content between its tags (anything but whitespace)?
+    fn hasContentKids(ns: ANode[]) -> boolean {
+        for (const n of ns) {
+            if (!blankNode(n)) return true
+        }
+        return false
     }
 
     // s469 — a `#{…}` block renders nothing where it stands: it does not break
@@ -17263,6 +17415,168 @@ ${
         return withPresent(env, presenceHandle(env, x))
     }
 
+    // s473 (ruled refusals) — §26.2 amendment (S473 D13): "When a static
+    // `class=` token of a compiled program matches the Tailwind utility grammar
+    // (§26.3–§26.4), the bootstrap SHALL report one Info diagnostic for the
+    // compile, I-TAILWIND-NOT-BUILT (§34), saying that utility classes are
+    // passed through unstyled and naming the first matching class. The class
+    // token is still written to the element unchanged and the compile does not
+    // fail." Once per compile: the first match reports, later ones see it.
+    fn tailwindInfo(env: Env, a: AAttr, st: AS) -> AS {
+        const v: AAttrValue = a.value
+        const text: string = match v {
+            .Quoted(v: q) :> q
+            .NoValue :> ""
+            .Bare(e: x) :> ""
+            .Paren(e: x) :> ""
+            .Braced(b: b) :> ""
+        }
+        if (text == "") return st
+        for (const d of st.diags) {
+            if (d.code == "I-TAILWIND-NOT-BUILT") return st
+        }
+        for (const tok of classTokens(text)) {
+            if (tok.indexOf("$" + "{") < 0 && isTailwindClass(tok)) {
+                return addDiag(st, env.file, a.span, "I-TAILWIND-NOT-BUILT", "`" + tok + "` is a Tailwind utility class, and the bootstrap does not build Tailwind (§26): utility classes are passed through unstyled — written to the element unchanged, with no CSS (§26.2, S473 D13). Style with a `#{…}` block (§9.1) for the bootstrap. (Reported once per compile.)")
+            }
+        }
+        return st
+    }
+
+    // The whitespace-separated tokens of a static `class=` value.
+    fn classTokens(text: string) -> string[] {
+        let out: string[] = []
+        let cur: string = ""
+        let i: int = 0
+        while (i < text.length) {
+            const c: string = text.substring(i, i + 1)
+            if (c == " " || c == "\t" || c == "\n" || c == "\r") {
+                if (cur != "") out = out.concat([cur])
+                cur = ""
+            } else {
+                cur = cur + c
+            }
+            i = i + 1
+        }
+        if (cur != "") out = out.concat([cur])
+        return out
+    }
+
+    // s473 — the Tailwind utility grammar, as far as the D13 Info needs it
+    // (§26.3 variant prefixes, §26.4 arbitrary values, and the common utility
+    // families with a Tailwind value): `md:hover:bg-blue-500`, `p-4`,
+    // `w-[37px]`, `flex`, `-mt-2`, `text-sm`, `items-center`. A token whose
+    // variant prefix is not one §26.3 lists does not match (impl#1 reports it as
+    // W-TAILWIND-001); an author class such as `card` or `btn-primary` does not.
+    fn isTailwindClass(tok0: string) -> boolean {
+        if (tok0 == "") return false
+        const parts: string[] = tok0.split(":")
+        let i: int = 0
+        while (i < parts.length - 1) {
+            if (!isTwVariant(parts[i])) return false
+            i = i + 1
+        }
+        let base: string = parts[parts.length - 1]
+        if (base.substring(0, 1) == "!") base = base.substring(1)
+        if (base.substring(0, 1) == "-") base = base.substring(1)
+        if (base == "") return false
+        if (twWords().indexOf(base) >= 0) return true
+        // arbitrary value: `<prefix>-[<value>]` (§26.4)
+        const lb: int = base.indexOf("-[")
+        if (lb > 0 && base.substring(base.length - 1) == "]") return twArbitraryPrefixes().indexOf(base.substring(0, lb)) >= 0
+        // `<prefix>-<value>`, the longest listed prefix first
+        for (const pre of twPrefixes()) {
+            if (base.length > pre.length + 1 && base.substring(0, pre.length + 1) == pre + "-") {
+                if (isTwValue(base.substring(pre.length + 1))) return true
+            }
+        }
+        return false
+    }
+
+    fn isTwVariant(v: string) -> boolean {
+        const states: string[] = ["hover", "focus", "active", "disabled", "visited", "first", "last", "odd", "even", "focus-within", "focus-visible"]
+        if (["sm", "md", "lg", "xl", "2xl", "dark", "print", "motion-safe", "motion-reduce"].indexOf(v) >= 0) return true
+        if (states.indexOf(v) >= 0) return true
+        if (v.substring(0, 6) == "group-") return states.indexOf(v.substring(6)) >= 0
+        return false
+    }
+
+    fn twWords() -> string[] {
+        return ["flex", "grid", "block", "inline", "inline-block", "inline-flex", "inline-grid", "hidden", "contents", "table", "flow-root",
+                "container", "relative", "absolute", "fixed", "sticky", "static", "italic", "not-italic", "underline", "line-through", "no-underline",
+                "uppercase", "lowercase", "capitalize", "normal-case", "truncate", "grow", "shrink", "border", "rounded", "shadow", "transition",
+                "prose", "group", "sr-only", "not-sr-only", "visible", "invisible", "antialiased", "subpixel-antialiased", "isolate", "outline",
+                "ring", "blur", "filter", "transform", "flex-row", "flex-col", "flex-wrap", "flex-nowrap", "flex-1", "flex-auto", "flex-none",
+                "mx-auto", "my-auto", "m-auto", "w-full", "h-full", "w-screen", "h-screen", "min-h-screen", "select-none", "cursor-pointer",
+                "pointer-events-none", "overflow-hidden", "overflow-auto", "overflow-scroll", "whitespace-nowrap", "break-words", "list-none",
+                "object-cover", "object-contain", "aspect-square", "aspect-video", "shadow-none", "rounded-full", "rounded-none", "resize", "resize-none"]
+    }
+
+    fn twArbitraryPrefixes() -> string[] {
+        return ["p", "px", "py", "pt", "pr", "pb", "pl", "m", "mx", "my", "mt", "mr", "mb", "ml", "gap", "gap-x", "gap-y", "w", "h", "min-w",
+                "max-w", "min-h", "max-h", "top", "right", "bottom", "left", "inset", "text", "leading", "tracking", "bg", "border", "rounded",
+                "opacity", "shadow", "z", "grid-cols", "grid-rows", "col-span", "row-span", "col-start", "col-end", "row-start", "row-end", "flex",
+                "grow", "shrink", "order", "basis", "aspect", "content", "font"]
+    }
+
+    // the utility families (longest first, so `gap-x` is tried before `gap`)
+    fn twPrefixes() -> string[] {
+        return ["underline-offset", "pointer-events", "grid-cols", "grid-rows", "col-start", "row-start", "col-span", "row-span", "col-end",
+                "row-end", "space-x", "space-y", "divide-x", "divide-y", "translate-x", "translate-y", "min-w", "max-w", "min-h", "max-h",
+                "gap-x", "gap-y", "inset-x", "inset-y", "rounded-t", "rounded-b", "rounded-l", "rounded-r", "border-t", "border-b", "border-l",
+                "border-r", "border-x", "border-y", "line-clamp", "decoration", "whitespace", "transition", "placeholder", "duration", "tracking",
+                "leading", "overflow", "opacity", "justify", "content", "rounded", "outline", "shadow", "scale", "rotate", "origin", "object",
+                "cursor", "select", "items", "inset", "order", "basis", "break", "delay", "ease", "flex", "font", "from", "grow", "list", "ring",
+                "self", "skew", "text", "bg", "border", "place", "shrink", "stroke", "fill", "via", "to", "top", "right", "bottom", "left", "gap",
+                "px", "py", "pt", "pr", "pb", "pl", "mx", "my", "mt", "mr", "mb", "ml", "p", "m", "w", "h", "z", "columns", "aspect", "animate",
+                "blur", "align"]
+    }
+
+    fn isTwValue(v: string) -> boolean {
+        if (isTwNumber(v)) return true
+        const words: string[] = ["px", "xs", "sm", "md", "lg", "xl", "2xl", "3xl", "4xl", "5xl", "6xl", "7xl", "8xl", "9xl", "base", "full",
+                                 "screen", "auto", "min", "max", "fit", "none", "prose", "left", "center", "right", "justify", "start", "end",
+                                 "between", "around", "evenly", "stretch", "baseline", "thin", "extralight", "light", "normal", "medium", "semibold",
+                                 "bold", "extrabold", "black", "white", "transparent", "current", "inherit", "wrap", "nowrap", "row", "col",
+                                 "row-reverse", "col-reverse", "hidden", "visible", "scroll", "x", "y", "pointer", "default", "not-allowed", "text",
+                                 "all", "colors", "transform", "in", "out", "in-out", "linear", "spin", "ping", "pulse", "bounce", "tight", "snug",
+                                 "relaxed", "loose", "wide", "wider", "widest", "tighter", "cover", "contain", "sans", "serif", "mono", "inner",
+                                 "dashed", "dotted", "solid", "double", "top", "bottom", "middle", "words", "all", "disc", "decimal", "square",
+                                 "video", "clip", "ellipsis", "lg", "offset", "dvh", "svh", "lvh", "first", "last"]
+        if (words.indexOf(v) >= 0) return true
+        // a palette colour with a shade: `blue-500`, `slate-50`, `red-500/50`
+        const slash: int = v.indexOf("/")
+        let c: string = v
+        if (slash > 0) c = v.substring(0, slash)
+        const dash: int = c.lastIndexOf("-")
+        if (dash > 0) {
+            const palette: string[] = ["slate", "gray", "zinc", "neutral", "stone", "red", "orange", "amber", "yellow", "lime", "green", "emerald",
+                                       "teal", "cyan", "sky", "blue", "indigo", "violet", "purple", "fuchsia", "pink", "rose"]
+            const shades: string[] = ["50", "100", "200", "300", "400", "500", "600", "700", "800", "900", "950"]
+            if (palette.indexOf(c.substring(0, dash)) >= 0 && shades.indexOf(c.substring(dash + 1)) >= 0) return true
+        }
+        // a size step with an edge (`rounded-t-lg`, `border-b-2`): its last segment
+        if (dash > 0) return isTwNumber(c.substring(dash + 1))
+        return false
+    }
+
+    // `4`, `0.5`, `1/2`, `px`-free digits only
+    fn isTwNumber(v: string) -> boolean {
+        if (v == "") return false
+        let i: int = 0
+        let digits: int = 0
+        while (i < v.length) {
+            const c: string = v.substring(i, i + 1)
+            if ("0123456789".indexOf(c) >= 0) {
+                digits = digits + 1
+            } else if (c != "." && c != "/") {
+                return false
+            }
+            i = i + 1
+        }
+        return digits > 0
+    }
+
     fn resolveHtml(env: Env, e: AElem, st0: AS) -> AS {
         const penv: Env = elemPresentEnv(env, e)
         let st: AS = addElem(st0, e.nid, ElemFact.MHtml)
@@ -17283,6 +17597,7 @@ ${
         for (const a of e.attrs) {
             const ev: string = eventName(a.name)
             const directive: string = refusedDirectiveAttr(a.name, e.tag)
+            if (a.name.toLowerCase() == "class") st = tailwindInfo(env, a, st)
             if (directive != "") {
                 // s473 — S473 D26 (`fixed`), S473 D1 / D2 (`protect=` / `authority=`)
                 st = addDiag(st, env.file, a.span, "E-BOOTSTRAP-UNSUPPORTED", directive)
@@ -17771,6 +18086,19 @@ ${
                 st = addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "`<" + e.tag + ">`'s attribute `" + f.sym.hint + "` has no default, and this use does not set it — whether an attribute without a default is required at every use or takes a canonical empty is ⚑ O33 (OPEN, §66.3); set it here (`" + f.sym.hint + "=…`) or give it a default")
             }
         }
+        // s473 (ruled refusals) — §66.6.8 interim (S473 D12): "Until O51 is
+        // ruled, an implementation of the §66 dialect SHALL refuse BOTH a plain
+        // use `<x/>` and a reference `<*x/>` of a declaration that has no
+        // `renders`, with a named refusal that cites O51 … An `as=`-bound use is
+        // the same plain use and is refused with it". (`<*x/>`: resolveStarShared.)
+        // (a declaration file that did not parse whole — its `renders` may be what was dropped — is its errors')
+        const rn: ANode[] = rendersNodes(d)
+        if (rn.length == 0 && fileErrs(env.g.files, d.file).length == 0) {
+            st = addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "`<" + e.tag + "/>` — `<" + e.tag + ">` has no `renders`, and a use of a declaration with no `renders` is ⚑ O51 (§66.6.8, not ruled: an error, or a data-only instance). Until O51 is ruled it is refused, `as=`-bound uses included (S473 D12); give `<" + e.tag + ">` a `renders`, or keep its state in program cells")
+        } else if (hasContentKids(e.kids) && slotsIn(rn).length == 0 && loopSlotsIn(rn).length == 0) {
+            // §66.15.2 rule 1 (S473 D11): children with no slot
+            st = addDiag(st, env.file, e.span, "E-COMPONENT-021", "`<" + e.tag + ">` is given content between its tags, but its `renders` holds no `<slot/>` — the content would have nowhere to go (§66.15.2 rule 1, S473 D11). Add `<slot/>` to `<" + e.tag + ">`'s `renders` where the content belongs, or remove the content")
+        }
         st = addElem(st, e.nid, ElemFact.MUse(d.info.sym, alias))
         // s449 (from U0 review F1): an effect in USE-SITE SLOT CONTENT (§66.15.2)
         // is rendered wherever the declaration's `renders` places `<slot/>` —
@@ -18244,7 +18572,12 @@ ${
                         if (!unresolved) proven = true
                     }
                 } else {
-                    st = addDiag(st, fs.info.file, p.span, "E-BOOTSTRAP-UNSUPPORTED", "an unannotated parameter `" + p.name + "` — bootstrap slice M2 needs `" + p.name + ": Type` (Core parameters are typed)")
+                    // s473 (ruled refusals): §7.5 (S469) — the SPEC's code, not E-BOOTSTRAP-UNSUPPORTED.
+                    // A NAMELESS parameter is the parser's reading of a form it does not read (a default
+                    // value or a rest parameter — g-boot-param-default-and-rest-s473), not a missing type.
+                    if (!plainParamName(p.name)) {
+                        st = addDiag(st, fs.info.file, p.span, "E-BOOTSTRAP-UNSUPPORTED", "a parameter the bootstrap cannot read (a default value `b: int = 1` or a rest parameter `...xs: T[]` is not in the bootstrap) — write a plain `name: Type` parameter")
+                    } else st = addDiag(st, fs.info.file, p.span, "E-PARAM-TYPE-REQUIRED", "the parameter `" + p.name + "` has no type — every function parameter carries `: T` (§7.5, S469): write `" + p.name + ": Type`. A default does not stand in for the type (`n = 1` → `n: int = 1`)")
                 }
                 st = addBind(st, p.nid, BindFact.BParam(rs.s, pty))
                 // s473 (#1663 F1): a parameter whose type is unwritten or did not resolve
@@ -25516,6 +25849,7 @@ ${
         modifier: boolean, failable: boolean,
         sqls: SqlSite[], reads: CellUse[], doms: CellUse[], scan: BodyScan,
         foreigns: ASpan[],      // s473: its foreign blocks (§23.2.4: "an inline `_{}` escalates its enclosing function to the server boundary")
+        repeats: ASpan[],       // s473 (ruled refusals): the regions of its body that may run more than once (repeatsInBlock)
     }
     // A chain from a function down to a site (display labels, outermost first).
     type Reach:struct = { chain: string[], what: string }
@@ -25575,6 +25909,81 @@ ${
             .Defer(body: b) :> foreignsInBlock(b)
             .Fail(f: f) :> foreignsInExprs(failExprs(f))
         }
+    }
+
+    // s473 (ruled refusals, §8.9.2 interim) — the regions of a body that may
+    // run MORE THAN ONCE per call: a loop's body, the condition of a `for (c)`
+    // head and the condition and step of a counted head (each evaluated per
+    // iteration — an iterable and an `init` are evaluated once), and a
+    // lambda (a tape method calls it per element). A `?{}` or a call whose
+    // span starts inside one is "inside a loop" for the interim refusal.
+    fn repeatsInBlock(b: ABlock) -> ASpan[] {
+        let out: ASpan[] = []
+        for (const s of b.stmts) { out = out.concat(repeatsInStmt(s)) }
+        return out
+    }
+
+    fn repeatsInStmt(s: AStmt) -> ASpan[] {
+        const k: AStmtK = s.k
+        return match k {
+            .Eval(e: e) :> repeatsInExpr(e)
+            .Local(name: n, init: i) :> repeatsInExpr(i)
+            .Return(e: e) :> repeatsInMaybe(e)
+            .If(cond: c, thenB: tb, elseB: eb) :> repeatsInExpr(c).concat(repeatsInBlock(tb)).concat(repeatsInMaybeBlock(eb))
+            .Given(name: n, subject: x, body: b) :> repeatsInExpr(x).concat(repeatsInBlock(b))
+            .For(f: lf) :> repeatsInFor(lf)
+            .Break(label: x) :> []
+            .Continue(label: x) :> []
+            .Lift(what: w) :> repeatsInExprs(liftExprs(w))
+            .EffectStmt(w: w) :> repeatsInBlock(w.body)
+            .Defer(body: b) :> repeatsInBlock(b)
+            .Fail(f: f) :> repeatsInExprs(failExprs(f))
+        }
+    }
+
+    fn repeatsInFor(lf: AFor) -> ASpan[] {
+        let out: ASpan[] = [lf.body.span]
+        const h: AForHead = lf.head
+        const per: AExpr[] = match h {
+            .HForever :> []
+            .HCond(cond: c) :> [c]
+            .HCounted(init: i, cond: c, step: sp) :> maybeExprList(c).concat(sp)
+            .HIter(bind: b, src: src) :> []
+        }
+        for (const x of per) { out = out.concat([x.span]) }
+        return out.concat(repeatsInExprs(forExprs(lf)))
+    }
+
+    fn repeatsInMaybe(e: AExpr | not) -> ASpan[] {
+        if (e is not) return []
+        return repeatsInExpr(e)
+    }
+
+    fn repeatsInMaybeBlock(b: ABlock | not) -> ASpan[] {
+        if (b is not) return []
+        return repeatsInBlock(b)
+    }
+
+    fn repeatsInExpr(e: AExpr) -> ASpan[] {
+        let out: ASpan[] = []
+        if (isLambdaK(e.k)) out = [e.span]
+        for (const x of exprKids(e)) { out = out.concat(repeatsInExpr(x)) }
+        for (const b of exprBlocks(e)) { out = out.concat(repeatsInBlock(b)) }
+        return out
+    }
+
+    fn repeatsInExprs(es: AExpr[]) -> ASpan[] {
+        let out: ASpan[] = []
+        for (const x of es) { out = out.concat(repeatsInExpr(x)) }
+        return out
+    }
+
+    // Does `sp` start inside one of `rs`?
+    fn inRepeat(rs: ASpan[], sp: ASpan) -> boolean {
+        for (const r of rs) {
+            if (sp.start >= r.start && sp.start < r.end) return true
+        }
+        return false
     }
 
     fn foreignsInMaybe(e: AExpr | not) -> ASpan[] {
@@ -25877,7 +26286,7 @@ ${
         return { sym: fs.info.sym.id, name: fs.info.name, file: fs.info.file, span: fs.info.span, nid: fs.info.nid,
                  modifier: fs.f.server, failable: fs.f.failable,
                  sqls: sqlsInBlock(fs.f.body), reads: readsInBlock(cx.t, fs.f.body), doms: domsInBlock(cx.t, fs.f.body), scan: scan,
-                 foreigns: foreignsInBlock(fs.f.body) }
+                 foreigns: foreignsInBlock(fs.f.body), repeats: repeatsInBlock(fs.f.body) }
     }
 
     // ---- placement -------------------------------------------------------------
@@ -26447,6 +26856,9 @@ ${
         let sqls: SqlInfo[] = []
         let creates: int[] = []
         let doms: int[] = []
+        const tq: TxQ = txQuerySets(sum.nodes, places)     // s473: the transitive query sets (§8.9.2 amendment)
+        let jOff: JournalOff[] = []                 // s473: `PRAGMA journal_mode = OFF` sites (journalDiags)
+        let bangWrites: int[] = []                  // s473: the databases a `!` function writes
         for (const f of all) {
             const pk: PlaceK = placeOf(places, f.sym)
             if (f.modifier && !isLoadName(f.name)) st = addDiag(st, f.file, f.span, "W-DEPRECATED-SERVER-MODIFIER", "`server function " + f.name + "` — the `server` modifier is deprecated (§52.10, Insight 26): write `function " + f.name + "(…)` and let route inference place it (§12.2 — a `" + sqlSigil() + "}` in its body places it on the server)")
@@ -26468,7 +26880,7 @@ ${
             // binder — §19.9.10, remoteHandled / remoteUnhandled — and lowered by
             // the suspension plan; the U1a refusal is gone)
             // the queries in its body: database, facts, the failable rule
-            if (f.failable) st = envelopeDiags(f, st)
+            if (f.failable) st = envelopeDiags(sum, tq, f, st)
             for (const s of f.sqls) {
                 if (!f.failable) st = manualTxDiag(f.file, s, "'" + f.name + "', which is not declared '!'", f.name, st)
                 const sr: RSqlSite = sqlSiteFacts(g, rd, f.file, fnScope(rd.fns, f.nid), s, f.failable, st)
@@ -26477,9 +26889,12 @@ ${
                 if (si is given) {
                     sqls = sqls.concat([si])
                     if (sr.creates) creates = creates.concat([si.db.id])
+                    if (f.failable && si.kind == SqlKind.SqlWrite) bangWrites = bangWrites.concat([si.db.id])
+                    if (journalOff(s.q.chunks)) jOff = jOff.concat([{ file: f.file, span: s.span, fname: f.name, bang: f.failable, db: si.db.id, sym: f.sym }])
                 }
             }
         }
+        st = journalDiags(sum.nodes, tq, sqls, jOff, bangWrites, st)
         // §8.1.1 Ownership: a file owns a SQLite database when a query in it creates a table there
         let owned: Db[] = []
         for (const d of dbs) {
@@ -26492,6 +26907,51 @@ ${
         const rl: RLoads = dbLoads(g, servers, st)
         st = rl.st
         return { facts: { servers: servers, sqls: sqls, dbs: owned, places: places, inherited: sum.inherited, plan: noPlan(), loads: rl.loads }, doms: doms, st: st }
+    }
+
+    // s473 (ruled refusals) — §8.9.2 amendment (S473 review-surfaced 2): "A
+    // `?{PRAGMA journal_mode = OFF}` (any case or spacing) inside a `!` function
+    // SHALL be a compile error, E-SQL-JOURNAL-OFF (§34). So SHALL one anywhere
+    // else whose connection a `!` function's envelope uses — a program-body
+    // statement or a non-`!` function on a database that some `!` function in
+    // the compilation writes — because the setting is per connection and
+    // disables the journal the rollback needs." A `?{}` in a value or action
+    // position is refused already (E-VALUE-SERVER-CALL / the U1d split), so the
+    // sites here are the functions'.
+    // #1690 review F3: both halves read the transitive reach — a site in a
+    // non-`!` function a `!` function calls IS on that `!` function's
+    // connection, and a `!` function writes a database through the non-`!`
+    // functions it calls too.
+    type JournalOff:struct = { file: string, span: ASpan, fname: string, bang: boolean, db: int, sym: int }
+
+    fn journalDiags(nodes: Callable[], tq: TxQ, sqls: SqlInfo[], js: JournalOff[], ownWrites: int[], st0: AS) -> AS {
+        let st: AS = st0
+        const reach: boolean[] = bangReach(nodes, tq)
+        let bangWrites: int[] = ownWrites
+        let i: int = 0
+        while (i < nodes.length) {
+            if (nodes[i].kind == CallableK.KFn && nodes[i].f.failable) {
+                for (const a of tq.qs[i]) {
+                    const site: SqlSite = nodes[a.root].f.sqls[a.pos]
+                    for (const si of sqls) {
+                        if (si.nid == site.nid && si.kind == SqlKind.SqlWrite) bangWrites = bangWrites.concat([si.db.id])
+                    }
+                }
+            }
+            i = i + 1
+        }
+        for (const j0 of js) {
+            const k: int = nodeIdx(nodes, j0.sym)
+            let j: JournalOff = j0
+            if (k >= 0 && reach[k]) j = { file: j0.file, span: j0.span, fname: j0.fname, bang: true, db: j0.db, sym: j0.sym }
+            const why: string = "`PRAGMA journal_mode = OFF` turns off the rollback journal for the whole connection, and a `!` function's all-or-nothing guarantee (§8.9.2, §19.10) needs that journal to roll back"
+            if (j.bang) {
+                st = addDiag(st, j.file, j.span, "E-SQL-JOURNAL-OFF", "'" + j.fname + "' is declared '!' (or is called by a function declared '!') and runs `PRAGMA journal_mode = OFF` — " + why + " (§8.9.2, S473). Remove it, or use another `journal_mode` (`WAL`, `DELETE`, … stay admitted, §14.8.10)")
+            } else if (bangWrites.indexOf(j.db) >= 0) {
+                st = addDiag(st, j.file, j.span, "E-SQL-JOURNAL-OFF", "`PRAGMA journal_mode = OFF` in '" + j.fname + "' sets the connection a `!` function of this program writes through — " + why + " (§8.9.2, S473). Remove it, or use another `journal_mode` (`WAL`, `DELETE`, … stay admitted, §14.8.10)")
+            }
+        }
+        return st
     }
 
     // s473 (Lane B) — the program's `<db>` cells, each with its load (a server
@@ -26732,7 +27192,8 @@ ${
         // text: `LIKE '%?%'` matches a literal `?`, and the value is silently lost)
         const sq: SlotQuote = slotInLiteral(s.q.chunks)
         if (sq.slot >= 0) {
-            st = addDiag(st, file, s.span, "E-BOOTSTRAP-UNSUPPORTED", "`" + slotSigil() + "…}` #" + (sq.slot + 1) + " of this `" + sqlSigil() + "}` stands inside " + sq.what + " — there it cannot be a bound parameter (§8.1: every `" + slotSigil() + "…}` SHALL be one): the driver would read it as text and the value would be lost. Build the whole value outside the quotes and bind it — `LIKE " + slotSigil() + "\"%\" + q + \"%\"}`, not `LIKE '%" + slotSigil() + "q}%'`")
+            // s473 (ruled refusals): the S468 code, §8.1 / §34 (was E-BOOTSTRAP-UNSUPPORTED)
+            st = addDiag(st, file, s.span, "E-SQL-SLOT-IN-LITERAL", "`" + slotSigil() + "…}` #" + (sq.slot + 1) + " of this `" + sqlSigil() + "}` stands inside " + sq.what + " — there it cannot be a bound parameter (§8.1: every `" + slotSigil() + "…}` SHALL be one): the driver would read it as text and the value would be lost. Build the whole value outside the quotes and bind it — `LIKE " + slotSigil() + "\"%\" + q + \"%\"}`, not `LIKE '%" + slotSigil() + "q}%'`")
             return { info: not, creates: false, st: st }
         }
         st = statementDiags(file, s, st)
@@ -26815,7 +27276,31 @@ ${
     //        E-ERROR-015 (manualTxDiag) — so manual transaction control is
     //        refused in EVERY server function.
     // No §8 / §19 code names "not built", so both are E-BOOTSTRAP-UNSUPPORTED.
-    fn envelopeDiags(f: FnFacts, st0: AS) -> AS {
+    //
+    // s473 (ruled refusals) — THE TRIGGER IS THE TRANSITIVE QUERY SET. §8.9.2
+    // amendment (S473 review-surfaced 1, refined): "The implicit-envelope
+    // trigger above is therefore read over the function's transitive query
+    // set: every `?{}` reached from the `!` body — its own and those of every
+    // non-`!` function it reaches — reads included … Interim (bootstrap):
+    // until the bootstrap builds the envelope, it SHALL refuse —
+    // `E-BOOTSTRAP-UNSUPPORTED`, naming this section — a `!` function whose
+    // transitive query set has two or more queries, or one inside a loop; it
+    // SHALL NOT compile it without the guarantee (S473 D1)." The set is
+    // txQuerySets' (one closure over the call graph, effects.scrml closeDim):
+    // a `!` callee is not followed (its own envelope is its own); a call is
+    // followed whatever the callee's placement (a remote call included — the
+    // ruling counts every `?{}` reached, and the bootstrap builds no envelope
+    // either way). "Inside a loop" (repeatsInBlock): a query, or a call
+    // reaching one, in a region that may run more than once — and a query
+    // reached through a recursive non-`!` function.
+    //
+    // F11 (ruled S473, #1690 review — a PERMANENT refusal, §19.10.5): "a
+    // client-placed `!` function that calls two or more server functions is a
+    // PERMANENT named refusal, not an interim one: no transaction can span two
+    // requests." Counted: each call of a server function (a remote call — one
+    // request) the client-placed body makes, directly or through client-side
+    // callees, and one in a repeated region counts twice (remoteRuns).
+    fn envelopeDiags(sum: Summary, tq: TxQ, f: FnFacts, st0: AS) -> AS {
         let st: AS = st0
         let manual = false
         for (const s of f.sqls) {
@@ -26826,14 +27311,187 @@ ${
             }
         }
         if (manual) return st
-        let n: int = 0
-        for (const s of f.sqls) {
-            if (!s.q.nobatch) n = n + 1
+        const i: int = nodeIdx(sum.nodes, f.sym)
+        if (i < 0) return st
+        if (tq.remote[i] >= 2) {
+            return addDiag(st, f.file, f.span, "E-TX-CLIENT-MULTI-CALL", "'" + f.name + "' is declared '!' and runs on the client, and it makes more than one server call (" + tq.remoteWhy[i] + ") — each call is its own request, and no transaction can span two requests, so its all-or-nothing guarantee cannot hold (§19.10.5, S473). Compose the calls in one server `!` function and call that once")
         }
-        if (n >= 2) {
-            st = addDiag(st, f.file, f.span, "E-BOOTSTRAP-UNSUPPORTED", "'" + f.name + "' is declared '!' and runs " + n + " `" + sqlSigil() + "}` queries, so it needs the implicit per-handler transaction (§8.9.2, §19.10.5): its body wrapped in `BEGIN` / `COMMIT`, rolled back on an error or a `fail` exit. The bootstrap does not build it yet (unit U1e), and without it a `fail` after a write leaves that write committed — refused, never compiled non-atomic. Until then: put the queries in separate functions, or mark each that need not be atomic with `.nobatch()` (§8.9.5)")
+        const qs: FxAtom[] = tq.qs[i]
+        const tail: string = " The bootstrap does not build the envelope yet (unit U1e), and without it a `fail` after a write leaves that write committed — refused, never compiled non-atomic. Until then: split the work so no `!` function reaches more than one query (a `!` callee's queries count too — it would run as a nested savepoint, §19.10.6), or mark each query that need not be atomic with `.nobatch()` (§8.9.5)"
+        if (qs.length >= 2) {
+            return addDiag(st, f.file, f.span, "E-BOOTSTRAP-UNSUPPORTED", "'" + f.name + "' is declared '!' and its transitive query set (§8.9.2, S473: every `" + sqlSigil() + "}` reached from its body — its own and those of the functions it calls, `!` ones included) holds " + qs.length + " queries — " + txWhere(sum, tq.qs, i, qs[0]) + " and " + txWhere(sum, tq.qs, i, qs[1]) + " — so it needs the implicit per-handler transaction (§8.9.2, §19.10.5): its body wrapped in `BEGIN` / `COMMIT`, rolled back on an error or a `fail` exit, every one of those queries inside." + tail)
+        }
+        if (qs.length == 1 && tq.runs[i] >= 2) {
+            // #1690 review F1: one query, reached more than once (two calls of one helper, a diamond)
+            return addDiag(st, f.file, f.span, "E-BOOTSTRAP-UNSUPPORTED", "'" + f.name + "' is declared '!' and its transitive query set (§8.9.2, S473) runs one query more than once — " + txWhere(sum, tq.qs, i, qs[0]) + ", reached through more than one call — so it needs the implicit per-handler transaction (§8.9.2, §19.10.5) around every run of it." + tail)
+        }
+        const lw: FxAtom | not = witnessOf(tq.loops[i])
+        if (lw is given) {
+            let via: string = ""
+            const ch: string[] = fxChain(sum, tq.loops, i, lw)
+            if (ch.length > 1) via = " (through `" + ch.join(" → ") + "`)"
+            return addDiag(st, f.file, f.span, "E-BOOTSTRAP-UNSUPPORTED", "'" + f.name + "' is declared '!' and its transitive query set (§8.9.2, S473) runs a query more than once: " + tq.loopWhy[lw.root] + via + " — so it needs the implicit per-handler transaction (§8.9.2, §19.10.5) around every run of it." + tail)
         }
         return st
+    }
+
+    // Where a query of a transitive query set stands, for a message.
+    fn txWhere(sum: Summary, dim: FxAtom[][], i: int, a: FxAtom) -> string {
+        const ch: string[] = fxChain(sum, dim, i, a)
+        if (ch.length <= 1) return "one in its own body"
+        return "one through `" + ch.join(" → ") + "`"
+    }
+
+    // s473 — the TRANSITIVE QUERY SETS of the §8.9.2 amendment, per callable:
+    // `qs[i]` — every `?{}` (none `.nobatch()`) callable i runs or reaches
+    // through calls of non-`!` functions; `loops[i]` — a witness that one of
+    // them may run more than once (`loopWhy[root]` says how).
+    // `runs[i]` — how many query RUNS callable i reaches along its calls (a
+    // query reached through two calls counts twice — #1690 review F1), capped at
+    // 2; `edges` — the non-`!` call edges the sets are closed over (journalDiags
+    // reads them: what a `!` function reaches).
+    // `remote[i]` — the server calls (requests) client-placed callable i makes, capped at 2; `remoteWhy[i]` names them.
+    type TxQ:struct = { qs: FxAtom[][], loops: FxAtom[][], loopWhy: string[], runs: int[], edges: int[][], remote: int[], remoteWhy: string[] }
+
+    fn txQuerySets(nodes: Callable[], places: PlaceFact[]) -> TxQ {
+        let own: FxAtom[][] = []
+        let edges: int[][] = []
+        let i: int = 0
+        for (const c of nodes) {
+            let q: FxAtom[] = []
+            let e: int[] = []
+            if (c.kind == CallableK.KFn) {
+                let p: int = 0
+                for (const s of c.f.sqls) {
+                    if (!s.q.nobatch) q = q.concat([ownAtom("q" + i + "." + p, i, p)])
+                    p = p + 1
+                }
+                // F10 (ruled S473, #1690 review): `!` callees count too — an inner `!` runs
+                // as a nested savepoint inside the outer envelope (§19.10.6)
+                for (const r of c.f.scan.refs) {
+                    const j: int = nodeIdx(nodes, r.sym)
+                    if (isFnNode(nodes, j)) e = e.concat([j])
+                }
+            }
+            own = own.concat([q])
+            edges = edges.concat([e])
+            i = i + 1
+        }
+        const qs: FxAtom[][] = closeDim(own, edges)
+        // recursion: a callable in a cycle of calls runs its queries any number of times
+        let cyc: boolean[] = []
+        for (const c of nodes) { cyc = cyc.concat([false]) }
+        for (const scc of sccOrder(edges)) {
+            for (const m of scc) {
+                if (scc.length > 1 || edges[m].indexOf(m) >= 0) cyc = setBoolAt(cyc, m, true)
+            }
+        }
+        let ownL: FxAtom[][] = []
+        let why: string[] = []
+        i = 0
+        for (const c of nodes) {
+            let w: string = ""
+            if (c.kind == CallableK.KFn) {
+                for (const s of c.f.sqls) {
+                    if (w == "" && !s.q.nobatch && inRepeat(c.f.repeats, s.span)) w = "a `" + sqlSigil() + "}` inside a loop (or a lambda) in `" + c.label + "`"
+                }
+                for (const r of c.f.scan.refs) {
+                    const j: int = nodeIdx(nodes, r.sym)
+                    if (w == "" && isFnNode(nodes, j) && qs[j].length > 0 && inRepeat(c.f.repeats, r.span)) w = "a call of `" + nodes[j].label + "`, which runs a query, inside a loop (or a lambda) in `" + c.label + "`"
+                }
+                if (w == "" && cyc[i] && qs[i].length > 0) w = "`" + c.label + "` runs a query and is recursive (it calls itself, directly or through other functions)"
+            }
+            let l: FxAtom[] = []
+            if (w != "") l = [ownAtom("L" + i, i, 0)]
+            ownL = ownL.concat([l])
+            why = why.concat([w])
+            i = i + 1
+        }
+        // the runs: own queries plus each call's runs, callees first (a cycle is the loop clause's)
+        let runs: int[] = []
+        for (const c of nodes) {
+            let n: int = 0
+            if (c.kind == CallableK.KFn) {
+                for (const q of c.f.sqls) {
+                    if (!q.q.nobatch) n = n + 1
+                }
+            }
+            runs = runs.concat([n])
+        }
+        let own2: int[] = runs
+        for (const scc of sccOrder(edges)) {
+            for (const m of scc) {
+                let n: int = own2[m]
+                for (const j of edges[m]) { n = n + runs[j] }
+                if (n > 2) n = 2
+                runs = runs.slice(0, m).concat([n]).concat(runs.slice(m + 1))
+            }
+        }
+        // the remote calls of client-placed callables, callees first
+        let remote: int[] = []
+        let rwhy: string[] = []
+        for (const c of nodes) {
+            remote = remote.concat([0])
+            rwhy = rwhy.concat([""])
+        }
+        for (const scc of sccOrder(edges)) {
+            for (const m of scc) {
+                const c: Callable = nodes[m]
+                if (c.kind == CallableK.KFn && !isServerPlace(placeOf(places, c.f.sym))) {
+                    let n: int = 0
+                    let names: string[] = []
+                    for (const r of c.f.scan.refs) {
+                        const j: int = nodeIdx(nodes, r.sym)
+                        if (isFnNode(nodes, j)) {
+                            let k: int = 0
+                            if (isServerPlace(placeOf(places, nodes[j].f.sym))) {
+                                k = 1
+                            } else {
+                                k = remote[j]
+                            }
+                            if (k > 0 && inRepeat(c.f.repeats, r.span)) k = 2
+                            if (k > 0) names = names.concat(["`" + nodes[j].label + "`"])
+                            n = n + k
+                        }
+                    }
+                    if (n > 2) n = 2
+                    remote = remote.slice(0, m).concat([n]).concat(remote.slice(m + 1))
+                    rwhy = rwhy.slice(0, m).concat([names.join(", ")]).concat(rwhy.slice(m + 1))
+                }
+            }
+        }
+        return { qs: qs, loops: closeDim(ownL, edges), loopWhy: why, runs: runs, edges: edges, remote: remote, remoteWhy: rwhy }
+    }
+
+    fn isServerPlace(pk: PlaceK) -> boolean {
+        return pk == PlaceK.Server || pk == PlaceK.Split
+    }
+
+    // The callables a `!` function reaches along non-`!` calls — itself included.
+    fn bangReach(nodes: Callable[], tq: TxQ) -> boolean[] {
+        let r: boolean[] = []
+        for (const c of nodes) { r = r.concat([c.kind == CallableK.KFn && c.f.failable]) }
+        let changed = true
+        while (changed) {
+            changed = false
+            let i: int = 0
+            while (i < nodes.length) {
+                if (r[i]) {
+                    for (const j of tq.edges[i]) {
+                        if (!r[j]) {
+                            r = setBoolAt(r, j, true)
+                            changed = true
+                        }
+                    }
+                }
+                i = i + 1
+            }
+        }
+        return r
+    }
+
+    fn setBoolAt(xs: boolean[], i: int, v: boolean) -> boolean[] {
+        return xs.slice(0, i).concat([v]).concat(xs.slice(i + 1))
     }
 
     fn manualTxDiag(file: string, s: SqlSite, where: string, fname: string, st: AS) -> AS {
@@ -27275,7 +27933,7 @@ ${
     // The own facts of a construction / a formula: its scan only.
     fn valueFacts(sym: int, label: string, file: string, span: ASpan, nid: int, scan: BodyScan) -> FnFacts {
         return { sym: sym, name: label, file: file, span: span, nid: nid, modifier: false, failable: false,
-                 sqls: [], reads: [], doms: [], scan: scan, foreigns: [] }
+                 sqls: [], reads: [], doms: [], scan: scan, foreigns: [], repeats: [] }
     }
 
     // The callable a Sym names (-1: none — a reference with no summary).
