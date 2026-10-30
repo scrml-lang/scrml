@@ -10998,6 +10998,37 @@ function annotateNodes(
   const nodeTypes = new Map<string, ResolvedType>();
   const filePath = fileAST.filePath;
 
+  /**
+   * The routeMap entry for the function declared at `start` in `file`. Route
+   * inference keys `routeMap.functions` by each file's NATIVE path
+   * (`${fileAST.filePath}::${span.start}` — `\` on Windows), while an imported
+   * callee's or handler's file comes from the module graph (`ImportedFnDecl.depFilePath`),
+   * which is canonical POSIX (path-canonical.js). A raw `get` therefore misses
+   * every imported function on Windows. Try the exact key first, then a
+   * canonical (`toPosix`) index built once per file.
+   *
+   * S473 windows-red (g-windows-impl1-routemap-native-key-miss-s473): declared HERE, at the
+   * top of annotateNodes, because its readers include setup-time code (the imported-failable
+   * scan, transportRoutableCallee, wholeBinderPlainServerCallee). Declared later, the `let`
+   * cache below would be in its temporal dead zone when they call it.
+   */
+  let _routeByCanonicalKey: Map<string, RouteMap["functions"] extends Map<string, infer V> ? V : never> | undefined;
+  function routeEntryAt(file: string, start: number | undefined) {
+    const fns = routeMap?.functions;
+    if (!fns) return undefined;
+    const exact = fns.get(`${file}::${start}`);
+    if (exact) return exact;
+    if (!_routeByCanonicalKey) {
+      _routeByCanonicalKey = new Map();
+      for (const [k, v] of fns) {
+        const cut = k.lastIndexOf("::");
+        if (cut < 0) continue;
+        _routeByCanonicalKey.set(`${toPosix(k.slice(0, cut))}::${k.slice(cut + 2)}`, v);
+      }
+    }
+    return _routeByCanonicalKey.get(`${toPosix(file)}::${start}`);
+  }
+
   // §65.6 (css-wave1-theme-tokens) — `<theme for=@cell>` variant-set ownership.
   // Built once, consulted at the `state-decl` case so a `<mode> = .Light` cell
   // bound by a `<theme for=@mode>` infers its variant type from the theme (the
@@ -11563,7 +11594,7 @@ function annotateNodes(
       if (d) { decl = d.fnNode; declFile = d.depFilePath; }
     }
     if (!decl || decl.canFail === true) return false;
-    const entry = routeMap?.functions?.get(`${declFile}::${(decl.span as Span | undefined)?.start}`);
+    const entry = routeEntryAt(declFile, (decl.span as Span | undefined)?.start);
     if (!entry || entry.boundary !== "server" || entry.cpsSplit) return false;
     // The type-system's RouteMap view types only `boundary` / `cpsSplit`; the rest is the full
     // route record (route-inference.ts FunctionRoute).
@@ -11748,7 +11779,7 @@ function annotateNodes(
    */
   function wholeBinderPlainServerCallee(decl: ASTNodeLike, declFile: string): boolean {
     if (decl.canFail === true) return false;
-    const entry = routeMap?.functions?.get(`${declFile}::${(decl.span as Span | undefined)?.start}`);
+    const entry = routeEntryAt(declFile, (decl.span as Span | undefined)?.start);
     if (entry && entry.cpsSplit) return false;
     return (decl as { isServer?: boolean }).isServer === true || (!!entry && entry.boundary === "server");
   }
@@ -11856,7 +11887,7 @@ function annotateNodes(
     let failable = fnNode.canFail === true;
     let cpsImplicit = false;
     if (!failable) {
-      const entry = routeMap?.functions?.get(`${d.depFilePath}::${(fnNode.span as Span | undefined)?.start}`);
+      const entry = routeEntryAt(d.depFilePath, (fnNode.span as Span | undefined)?.start);
       if (entry && entry.cpsSplit) { failable = true; cpsImplicit = true; }
     }
     if (!failable) continue;
@@ -18849,31 +18880,8 @@ function annotateNodes(
     }
   }
 
-  /**
-   * The routeMap entry for the function declared at `start` in `file`. Route
-   * inference keys `routeMap.functions` by each file's NATIVE path
-   * (`${fileAST.filePath}::${span.start}` — `\` on Windows), while an imported
-   * handler's file comes from the module graph (`ImportedFnDecl.depFilePath`),
-   * which is canonical POSIX (path-canonical.js). A raw `get` therefore misses
-   * every imported handler on Windows. Try the exact key first, then a
-   * canonical (`toPosix`) index built once per file.
-   */
-  let _routeByCanonicalKey: Map<string, { boundary: "server" | "client"; escalationReasons?: EscalationReason[] }> | undefined;
-  function routeEntryAt(file: string, start: number | undefined) {
-    const fns = routeMap?.functions;
-    if (!fns) return undefined;
-    const exact = fns.get(`${file}::${start}`);
-    if (exact) return exact;
-    if (!_routeByCanonicalKey) {
-      _routeByCanonicalKey = new Map();
-      for (const [k, v] of fns) {
-        const cut = k.lastIndexOf("::");
-        if (cut < 0) continue;
-        _routeByCanonicalKey.set(`${toPosix(k.slice(0, cut))}::${k.slice(cut + 2)}`, v);
-      }
-    }
-    return _routeByCanonicalKey.get(`${toPosix(file)}::${start}`);
-  }
+  // `routeEntryAt` (the native/posix-tolerant routeMap reader) is declared at the top of
+  // annotateNodes: the S473 helpers that read it run during setup, long before this point.
 
   function checkClientHandlerNotServer(channel: ASTNodeLike, attr: ASTNodeLike, attrName: string, value: ASTNodeLike): void {
     if (value.kind !== "call-ref" && value.kind !== "call" && value.kind !== "variable-ref") return;

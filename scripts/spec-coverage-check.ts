@@ -128,7 +128,15 @@ export function renderTotals(rows: CoverageRow[]): string {
 
 export type Result = { errors: string[]; warnings: string[]; fatal: string | null; rows: CoverageRow[]; totals: string; totalsCurrent: boolean };
 
+/** CRLF → LF. A Windows checkout (`core.autocrlf`, the windows-latest default) hands every input over with `\r\n`. */
+export const lf = (s: string): string => s.replace(/\r\n/g, "\n");
+
 export function checkCoverage(indexText: string, coverageText: string, gapsText: string): Result {
+  // S473 windows-red: the rules split on "\n" and the totals check is a substring match against a
+  // "\n"-joined render, so a CRLF checkout read every totals block as stale. Read all three as LF.
+  indexText = lf(indexText);
+  coverageText = lf(coverageText);
+  gapsText = lf(gapsText);
   const errors: string[] = [];
   const warnings: string[] = [];
   const tops = indexTops(indexText);
@@ -186,10 +194,14 @@ export function main(argv: string[]): number {
   const r = checkCoverage(indexText, covText, gapsText);
   if (r.fatal) { console.error(`spec-coverage-check: ${r.fatal}`); return 2; }
   if (argv.includes("--write")) {
-    const s = covText.indexOf(TOTALS_START.slice(0, 40));
-    const e = covText.indexOf(TOTALS_END);
+    // Splice into the LF text, then write back in the file's own line ending (a CRLF checkout stays CRLF).
+    const crlf = covText.includes("\r\n");
+    const lfText = lf(covText);
+    const s = lfText.indexOf(TOTALS_START.slice(0, 40));
+    const e = lfText.indexOf(TOTALS_END);
     if (s < 0 || e < 0) { console.error("spec-coverage-check: --write needs the @generated:coverage-totals anchors in the coverage doc"); return 2; }
-    const next = covText.slice(0, s) + r.totals + covText.slice(e + TOTALS_END.length);
+    const spliced = lfText.slice(0, s) + r.totals + lfText.slice(e + TOTALS_END.length);
+    const next = crlf ? spliced.replace(/\n/g, "\r\n") : spliced;
     if (next !== covText) writeFileSync(covPath, next);
     console.log("spec-coverage-check: totals block regenerated");
     return main(argv.filter((a) => a !== "--write"));
