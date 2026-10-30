@@ -46,3 +46,13 @@ Finding → fix:
 Corpus (re-measured by COMPILING every .scrml in conformance, examples, samples, stdlib, benchmarks and flogence/src with the bootstrap; 2893 files): 3 files report the code, 0 newly refused (each already fails on 100+ other errors). The 3: `eval` in samples/gauntlet-r10-solid-spreadsheet (the hole); `bun.eval` in samples/gauntlet-r10-zig-buildconfig (§30: not permitted in user logic); `a.dnx[a.dlast] = id` in stdlib/md on an unannotated `let` bound from a call (annotating it admits it). The first by-type draft also flagged `result[key] = …` on `const result = {}` (stdlib/data ×8), `parts[parts.length - 1]`, `@mm[1].push`, `parts[i].trim()` and braced-arrow timers. Fresh-literal consts, numeric keys and computed keys judged at their own receiver admit them now; a braced-arrow argument the parser already reported is not re-judged.
 The PA ruling's additions contributed 0 hits.
 Tests: 124 (all green); slice-m4 3870 pass.
+
+## 2026-10-29 — fix round 2 (#1663 re-review r1: LAND-W-F/U, F1–F7 fixed; N1–N6)
+- N1: `getNamedItem(NS)` names judged like `getAttributeNode`. An attribute node (a chain through `attributes` / `getNamedItem` / `getAttributeNode` ending there or in an element access, not a scalar member) bound to a local, by an assignment, to a `for … of` variable, or as a call argument is refused (`sinkYieldsAttr`). A function RETURN is not judged (gap entry).
+- N2 (S473 PA ruling): a write of any §5.2 rule 3 URL-valued attribute member (url.scrml `isUrlAttrName` over `urlValuedAttrs` — the list reused, not copied), and `setAttribute` / `setAttributeNS` naming one, are judged like navigation: a literal goes through `urlValueAdmitted`, a data URL is refused. `open(url)` bare or on a window/document receiver is judged the same way; `indexedDB.open` is not.
+- N3: the invariant's second clause (a host value never binds to a scrml-typed place) is in the resolved gap and in a comment above `sinkTypeOf`. `const w: W = document.body` is already refused today (E-SCOPE-001), so no extra typer check yet.
+- N4: filed g-boot-compound-write-sink-desugar-s473.
+- N5: `Document.parseHTMLUnsafe` added (argument 0).
+- N6: the PR body says the corpus result does not measure over-refusal (no corpus file compiles single-file on the bootstrap).
+- Corpus re-measured (compiled, 2893 files): unchanged — 3 files report the code, 0 newly refused; N2 adds 0 hits.
+- Tests: 153 green.

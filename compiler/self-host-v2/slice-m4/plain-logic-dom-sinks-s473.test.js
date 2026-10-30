@@ -270,6 +270,52 @@ describe("S473 PA ruling on #1663 — HTML parsers, execCommand, navigation", ()
   ]);
 });
 
+describe("#1663 re-review N1 — an attribute node bound away from the chain", () => {
+  refusedAll([
+    ["`attributes` bound to a local", "const a = document.body.attributes;\n        a[0].value = @s;"],
+    ["an attribute node bound to a local", "const n = document.body.attributes[0];\n        n.value = @s;"],
+    ["`getNamedItem(…)` bound to a local", "const n = document.body.attributes.getNamedItem(\"title\");"],
+    ["`getAttributeNode(…)` bound to a local", "const n = document.body.getAttributeNode(\"title\");"],
+    ["`getNamedItem(\"onclick\")` — its name is judged", "document.body.attributes.getNamedItem(\"onclick\");"],
+    ["`getNamedItem` with a computed name", "document.body.attributes.getNamedItem(@s);"],
+    ["iterating `attributes`", "for (const at of document.body.attributes) {\n            at.value = @s;\n        }"],
+    ["an attribute node passed as an argument", "tick(document.body.attributes[0]);"],
+  ]);
+  notJudgedAll([
+    ["`attributes.length` is a number", "const c: int = document.body.attributes.length;\n        @n = c;", "E-SCOPE-001"],
+  ]);
+});
+
+describe("#1663 re-review N2 (S473 PA ruling) — URL attributes in logic, `window.open`", () => {
+  refusedAll([
+    ["`src` from data", "document.body.src = @s;"],
+    ["`action` from data", "document.body.action = @s;"],
+    ["`formAction` from data", "document.body.formAction = @s;"],
+    ["`poster` from data", "document.body.poster = @s;"],
+    ["a `javascript:` `src` literal", "document.body.src = \"javascript:alert(1)\";"],
+    ["`setAttribute(\"href\", data)`", "document.body.setAttribute(\"href\", @s);"],
+    ["`setAttribute(\"SRC\", \"javascript:…\")`", "document.body.setAttribute(\"SRC\", \"javascript:1\");"],
+    ["`setAttributeNS(ns, \"href\", data)`", "document.body.setAttributeNS(\"x\", \"href\", @s);"],
+    ["`window.open(data)`", "window.open(@s);"],
+    ["a bare `open(data)`", "open(@s);"],
+    ["`window.open(\"javascript:…\")`", "window.open(\"javascript:alert(1)\");"],
+  ]);
+  cleanAll([
+    ["a struct field named `src`-like (`href`) is that field", "@w.href = @s;"],
+  ]);
+  notJudgedAll([
+    ["`window.open(\"https:…\")` (rule 3 admits it)", "window.open(\"https://example.com/\");", "E-BOOTSTRAP-UNSUPPORTED"],
+    ["`setAttribute(\"href\", \"/a\")` (a relative URL)", "document.body.setAttribute(\"href\", \"/a\");", "E-BOOTSTRAP-UNSUPPORTED"],
+    ["`document.open()` with no URL", "document.open();", "E-BOOTSTRAP-UNSUPPORTED"],
+    ["`indexedDB.open(name)` is not a window's", "indexedDB.open(@s);", "E-BOOTSTRAP-UNSUPPORTED"],
+  ]);
+});
+
+describe("#1663 re-review N5 — `Document.parseHTMLUnsafe`", () => {
+  refusedAll([["`Document.parseHTMLUnsafe(data)`", "Document.parseHTMLUnsafe(@s);"]]);
+  notJudgedAll([["`Document.parseHTMLUnsafe(literal)`", "Document.parseHTMLUnsafe(\"<b>x</b>\");", "E-BOOTSTRAP-UNSUPPORTED"]]);
+});
+
 describe("#1663 F6 — client logic only; eval / Function everywhere", () => {
   const SRV = (body) => `    server function sv(x: string) -> string {\n        ${body}\n        return x;\n    }\n`;
   test("a server function's DOM-member write is not judged (a server has no DOM)", () => {

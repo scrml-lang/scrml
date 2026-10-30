@@ -465,21 +465,32 @@ ${
     //            included (§5.2 S464 refuses a static `srcdoc`);
     //   "on"   — an event-handler member (isHandlerMember): installs code,
     //            a literal included (§5.2 S464 refuses a quoted handler);
-    //   "nav"  — `location` / `href`: navigates to the URL written (judged by
-    //            §5.2 rule 3's scheme guard, url.scrml urlValueAdmitted).
+    //   "nav"  — `location`, or a member whose lowercased name is one of §5.2 rule
+    //            3's URL-valued attributes (urlValuedAttrs: `href`, `src`,
+    //            `action`, `formAction`, `data`, `poster`, …; the S473 PA ruling on
+    //            the #1663 re-review, N2): navigates to / loads the URL written
+    //            (judged by rule 3's scheme guard, urlValueAdmitted). The element is
+    //            not known in logic, so the attribute is judged on every element,
+    //            and the name lowercased (fail closed — `el.SRC` is only an expando).
     export fn logicWriteSink(name: string) -> string {
         if (name == "innerHTML" || name == "outerHTML") return "html"
         if (name == "srcdoc") return "exec"
         if (isHandlerMember(name)) return "on"
-        if (name == "location" || name == "href") return "nav"
+        if (name == "location" || isUrlAttrName(name)) return "nav"
         return ""
+    }
+
+    // §5.2 rule 3's URL-valued attribute list, by name on any element (ASCII
+    // case-insensitive) — the list itself is urlValuedAttrs, not a copy.
+    export fn isUrlAttrName(name: string) -> boolean {
+        return urlValuedAttrs().indexOf(name.toLowerCase()) >= 0
     }
 
     // A CALL's sink kind, by a member name on its callee chain ("" — open):
     //   "exec"     — `eval`, `Function`, `constructor` (`f.constructor` is
     //                `Function`): runs source text, a literal included;
     //   "html"     — the argument htmlArgIndex names is parsed as HTML
-    //                (`insertAdjacentHTML`, `setHTMLUnsafe`,
+    //                (`insertAdjacentHTML`, `setHTMLUnsafe`, `parseHTMLUnsafe`,
     //                `createContextualFragment`, `parseFromString`), and
     //                `write` / `writeln` on any receiver (every argument);
     //   "execcmd"  — `execCommand`: `insertHTML` (or a computed command) with data;
@@ -487,12 +498,16 @@ ${
     //                function is source text;
     //   "attr"     — `setAttribute` / `setAttributeNS` / `toggleAttribute` /
     //                `createAttribute` / `createAttributeNS` / `getAttributeNode`
-    //                / `getAttributeNodeNS`: judged by the attribute NAME (an
-    //                `on…` / `srcdoc` / non-literal name);
+    //                / `getAttributeNodeNS` / `getNamedItem` / `getNamedItemNS`:
+    //                judged by the attribute NAME (an `on…` / `srcdoc` /
+    //                non-literal name); a URL attribute's VALUE as a navigation;
     //   "attrnode" — `setAttributeNode` / `setAttributeNodeNS` / `setNamedItem` /
     //                `setNamedItemNS`: installs an Attr whose name is not seen
     //                here (fail closed);
-    //   "nav"      — `assign` / `replace` on a receiver chain through `location`.
+    //   "nav"      — `assign` / `replace` on a receiver chain through `location`;
+    //   "open"     — `open(url, …)` (`window.open`; a legacy three-argument
+    //                `document.open` navigates too): its first argument, if any,
+    //                is a URL (the S473 PA ruling on the #1663 re-review, N2).
     export fn logicCallSink(name: string) -> string {
         if (name == "eval" || name == "Function" || name == "constructor") return "exec"
         if (htmlArgIndex(name) != -1) return "html"
@@ -501,6 +516,7 @@ ${
         if (attrNameArgIndex(name) >= 0) return "attr"
         if (name == "setAttributeNode" || name == "setAttributeNodeNS" || name == "setNamedItem" || name == "setNamedItemNS") return "attrnode"
         if (name == "assign" || name == "replace") return "nav"
+        if (name == "open") return "open"
         return ""
     }
 
@@ -508,15 +524,23 @@ ${
     // argument, `write` / `writeln`).
     export fn htmlArgIndex(name: string) -> int {
         if (name == "insertAdjacentHTML") return 1
-        if (name == "setHTMLUnsafe" || name == "createContextualFragment" || name == "parseFromString") return 0
+        if (name == "setHTMLUnsafe" || name == "parseHTMLUnsafe" || name == "createContextualFragment" || name == "parseFromString") return 0
         if (name == "write" || name == "writeln") return -2
         return -1
     }
 
     // Which argument of an "attr" call is the attribute name (-1 — not one).
     export fn attrNameArgIndex(name: string) -> int {
-        if (name == "setAttribute" || name == "toggleAttribute" || name == "createAttribute" || name == "getAttributeNode") return 0
-        if (name == "setAttributeNS" || name == "createAttributeNS" || name == "getAttributeNodeNS") return 1
+        if (name == "setAttribute" || name == "toggleAttribute" || name == "createAttribute" || name == "getAttributeNode" || name == "getNamedItem") return 0
+        if (name == "setAttributeNS" || name == "createAttributeNS" || name == "getAttributeNodeNS" || name == "getNamedItemNS") return 1
+        return -1
+    }
+
+    // Which argument of an "attr" call is the attribute VALUE (-1 — none): a URL
+    // attribute's value is judged like a navigation (N2).
+    export fn attrValueArgIndex(name: string) -> int {
+        if (name == "setAttribute") return 1
+        if (name == "setAttributeNS") return 2
         return -1
     }
 

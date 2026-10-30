@@ -59,7 +59,7 @@ ${
     import { WireBuild, WireTable, wireBuild, hasFixedLength } from "./codec.scrml"
     import { SqlFacts, SlotQuote, sqlFacts, slotInLiteral, txControl, txControlAware } from "./sql.scrml"
     import { FxAtom, ownAtom, closeDim, witnessOf, atomChain } from "./effects.scrml"
-    import { UrlAttr, StaticSink, classifyStatic, staticExecMessage, logicWriteSink, logicCallSink, attrNameArgIndex, executableAttrName, htmlArgIndex, attrNodeMember, attrNodeValueMember, urlValueAdmitted, schemeOfUrl } from "./url.scrml"
+    import { UrlAttr, StaticSink, classifyStatic, staticExecMessage, logicWriteSink, logicCallSink, attrNameArgIndex, executableAttrName, htmlArgIndex, attrNodeMember, attrNodeValueMember, urlValueAdmitted, schemeOfUrl, isUrlAttrName, attrValueArgIndex } from "./url.scrml"
 
     // =========================================================================
     // THE TABLES (exported — `lower` consumes them).
@@ -8169,6 +8169,14 @@ ${
         }
     }
 
+    // INVARIANT (the #1663 reviews, F1 / N3) — the by-type half is sound only while
+    // BOTH hold: (1) a host value's type is never a `core.scrml` `Type` that
+    // sinkKnown accepts; (2) a host value never BINDS to a scrml-typed place — a
+    // local or parameter annotated with a scrml type, a cell, a tape element — the
+    // annotation refusing it rather than casting it. Today (2) holds because every
+    // host root is E-SCOPE-001, `ref=` is E-BOOTSTRAP-UNSUPPORTED and a foreign
+    // block is server-placed, so `const w: W = document.body` is already refused;
+    // a host-value lowering MUST keep it (g-spec-plain-logic-dom-sinks-unlinted).
     // The static type of a receiver, as far as the sink judgment trusts one: a
     // cell (`@x`, the program's or this instance's own field), a local, and a
     // field or tape element of one. Anything else is `not` (fail closed).
@@ -8422,6 +8430,44 @@ ${
         return false
     }
 
+    // Is segment `i` of `ch` (`open`) a window's / document's `open`: a bare
+    // `open` (no local or declared function shadows it), or one on a receiver
+    // that names a window or a document? (`indexedDB.open(name)` is not.)
+    fn sinkWindowish(ch: string[], i: int, env: Env) -> boolean {
+        if (i == 0) return lookupLocal(env, ch[0]) is not && fnNamed(env.g, env.file, ch[0]) is not
+        const r: string = ch[i - 1]
+        return r == "window" || r == "globalThis" || r == "self" || r == "top" || r == "parent" || r == "opener"
+            || r == "frames" || r == "document" || r == "contentWindow" || r == "defaultView" || r == "ownerDocument"
+            || r == "contentDocument" || r == "[computed]"
+    }
+
+    // N1 (#1663 re-review): does `e` yield an Attr node (or a collection of them) —
+    // a chain through `attributes` / `getNamedItem` / `getAttributeNode` that ends
+    // there or in an element access (`[i]`, `.item(i)`), not in a scalar member
+    // (`.length`, `.value`, `.name`, …)? Bound to a local, a loop variable or an
+    // argument, it would leave the chain the write judgment reads (fail closed).
+    fn sinkYieldsAttr(e: AExpr) -> boolean {
+        const ch: string[] = deepChain(e)
+        let j: int = -1
+        let i = 0
+        while (i < ch.length) {
+            if (attrNodeMember(ch[i])) j = i
+            i = i + 1
+        }
+        if (j < 0) return false
+        let k: int = j + 1
+        while (k < ch.length) {
+            const r: string = ch[k]
+            if (r == "length" || r == "name" || r == "localName" || r == "namespaceURI" || r == "prefix" || r == "specified" || attrNodeValueMember(r)) return false
+            k = k + 1
+        }
+        return true
+    }
+
+    fn sinkAttrBindWhy(what: string) -> string {
+        return "binds an attribute node (reached through `attributes`, `getNamedItem` or `getAttributeNode`) to " + what + " — a later `.value` write there could set `srcdoc` or an `on…` handler unseen, so it is refused (fail closed); write the attribute with `setAttribute(\"name\", …)`"
+    }
+
     fn sinkArg(args: AExpr[], i: int) -> AExpr | not {
         if (i < 0 || i >= args.length) return not
         return args[i]
@@ -8490,6 +8536,7 @@ ${
         for (const a of args) {
             const r: string = sinkExecRef(env, a)
             if (r != "") return "passes `" + r + "` as a value — a function that runs source text, refused wherever it is called (`Reflect.apply`, `.map`, a timer)"
+            if (!env.fx.serverOwn && sinkYieldsAttr(a)) return sinkAttrBindWhy("an argument")
         }
         const ch: string[] = calleeChain(callee)
         const last: int = ch.length - 1
@@ -8536,7 +8583,21 @@ ${
                         const nv: SinkView = sinkView(na)
                         if (nv.kind != 4) return "calls `" + s + "` with a computed attribute name — it could name `srcdoc` or an `on…` handler, so it is refused (fail closed); write the name as a string literal"
                         if (executableAttrName(nv.name)) return "calls `" + s + "` on the attribute `" + nv.name + "` — an inline document or handler text the browser runs (§5.2 S464)"
+                        // N2 (S473 PA ruling on the #1663 re-review): a §5.2 rule 3 URL
+                        // attribute's value is judged like a navigation
+                        if (isUrlAttrName(nv.name)) {
+                            const vx: int = attrValueArgIndex(s)
+                            if (vx >= 0) {
+                                const uw: string = sinkNavWhy("`" + s + "(\"" + nv.name + "\", …)`", sinkArg(args, vx))
+                                if (uw != "") return uw
+                            }
+                        }
                     }
+                }
+                if (kind == "open" && args.length > 0 && sinkWindowish(ch, i, env)) {
+                    if (!isLast) return "reaches `open` through `." + ch[last] + "` — an alias of a navigation is refused (fail closed)"
+                    const ow: string = sinkNavWhy("`open(…)`", sinkArg(args, 0))
+                    if (ow != "") return ow
                 }
                 if (kind == "attrnode" && i > 0) return "calls `" + s + "` — it installs an attribute node whose name is not seen here; it could be `srcdoc` or an `on…` handler, so it is refused (fail closed); write the attribute with `setAttribute(\"name\", …)`"
                 if (kind == "nav" && i > 0 && sinkChainHas(ch, i, "location")) {
@@ -8601,6 +8662,7 @@ ${
         // (client logic only — a server function has no DOM, §5.2)
         let sinkW: string = ""
         if (!env.fx.serverOwn) sinkW = sinkTargetWhy(env, target, value)
+        if (sinkW == "" && !env.fx.serverOwn && sinkYieldsAttr(value)) sinkW = sinkAttrBindWhy("a variable")
         if (sinkW != "") return addDiag(st0, env.file, e.span, "E-LOGIC-EXECUTABLE-SINK", sinkMessage(sinkW))
         // s442: the recognized sequence reassignment shapes (§66.11.2) and an
         // element-field write (dpa-052 Q3).
@@ -12948,6 +13010,9 @@ ${
             if (!rt.unresolved) annot = rt.t
             st = rt.st
         }
+        // s473 N1 (#1663 re-review): an attribute node bound to a local leaves the
+        // chain the sink judgment reads (fail closed)
+        if (!env.fx.serverOwn && sinkYieldsAttr(init)) st = addDiag(st, env.file, s.span, "E-LOGIC-EXECUTABLE-SINK", sinkMessage(sinkAttrBindWhy("the local `" + name + "`")))
         let ri: RX = plain(not, st)
         const fi: AForeign | not = foreignOf(init)
         if (fi is given) {
@@ -13495,9 +13560,20 @@ ${
     // string's code point (a string), a range's int. (Whether it is iterable at
     // all is the typer's — iterElemOf — on the settled type.)
     fn resolveIterSrc(env: Env, src: AIterSrc, st: AS) -> RX {
+        // s473 N1 (#1663 re-review): `for (const at of el.attributes)` binds each
+        // attribute node to the loop variable (fail closed)
+        const ia: AExpr | not = iterOfExpr(src)
+        if (ia is given && !env.fx.serverOwn && sinkYieldsAttr(ia)) return diagX(env, ia, "E-LOGIC-EXECUTABLE-SINK", sinkMessage(sinkAttrBindWhy("a loop variable")), st)
         return match src {
             .IterOf(e: x) :> iterElemType(resolveExpr(env, x, not, st))
             .IterRange(lo: lo, hi: hi) :> plain(Type.Int, resolveExpr(env, hi, Type.Int, resolveExpr(env, lo, Type.Int, st).st).st)
+        }
+    }
+
+    fn iterOfExpr(src: AIterSrc) -> AExpr | not {
+        return match src {
+            .IterOf(e: x) :> x
+            .IterRange(lo: lo) :> not
         }
     }
 
