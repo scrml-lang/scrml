@@ -50,7 +50,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 // s473 (p5 hole 3, g-boot-dev-static-serve-not-allowlisted-s473) — SPEC §47.13: the ONE static-serving
 // policy both impl#1 servers use (`scrml dev` imports it, `_server.js` embeds its text). Imported,
 // never copied, so the bootstrap's dev server cannot drift from it.
-import { _scrml_static_request_path, _scrml_static_servable, collectClientAssets } from "../compiler/src/static-serve-policy.js";
+import { _scrml_static_denied, _scrml_static_request_path, _scrml_static_servable, collectClientAssets } from "../compiler/src/static-serve-policy.js";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const SHV2 = join(ROOT, "compiler", "self-host-v2");
@@ -515,6 +515,10 @@ export function devStaticTarget(outDir: string, assets: Set<string>, pathname: s
     return null;
   }
   if (!real.startsWith(realRoot + sep)) return null;
+  // #1676 review F1: a symlink INSIDE the output dir naming a denied file there (`inner.png -> app.db`)
+  // — the RESOLVED path's class is judged too, not only the requested name's. (A hardlink cannot be
+  // told apart from its target's name and is not caught: g-boot-dev-static-serve-not-allowlisted-s473.)
+  if (_scrml_static_denied(relative(realRoot, real).split(sep).join("/"))) return null;
   try {
     if (!statSync(real).isFile()) return null;
   } catch {

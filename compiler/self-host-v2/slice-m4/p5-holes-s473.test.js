@@ -143,6 +143,9 @@ describe("5 — §51.0.E / ⚑ O33: a `<program>` declaration with no value is r
     expect(codes(src("<card/>"))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
     expect(diag(src("<card/>"), "E-BOOTSTRAP-UNSUPPORTED").message).toContain("O33");
     expect(codes(src(`<card title="a"/>`))).toEqual([]);
+    // #1676 review F5: a misspelled / `bind:` attribute is E-DECL-USE-ATTR's alone — no second O33 report
+    expect(codes(src(`<card titel="a"/>`))).toEqual(["E-DECL-USE-ATTR"]);
+    expect(codes(src(`<card bind:title=@t/>`)).filter((c) => c === "E-BOOTSTRAP-UNSUPPORTED")).toEqual([]);
   });
   test("twin: with an initial value it compiles", () => {
     expect(codes(P("    type Phase:enum = { Idle, Loading, Done }\n    <phase:Phase=.Idle single>\n        <Idle rule=.Loading : \"i\">\n        <Loading rule=.Done : \"l\">\n        <Done rule=.Idle : \"d\">\n    </>", "<p><*phase/></p>"))).toEqual([]);
@@ -165,6 +168,7 @@ describe("3 — §47.13: `scrml-boot dev` serves through the shared static allow
     writeFileSync(join(out, ".git", "config"), "x");
     writeFileSync(join(tmp, "outside", "secret.png"), "SECRET");
     symlinkSync(join(tmp, "outside", "secret.png"), join(out, "leak.png"));
+    symlinkSync(join(out, "app.db"), join(out, "inner.png"));            // #1676 review F1: a link to a denied file INSIDE the root
     const assets = new Set(["index.html", "program.client.js", "scrml-runtime.js"]);
     const ok = (p) => devStaticTarget(out, assets, p);
     expect(ok("/")).toBe(join(out, "index.html"));
@@ -172,7 +176,7 @@ describe("3 — §47.13: `scrml-boot dev` serves through the shared static allow
     expect(ok("/logo.png")).toBe(join(out, "logo.png"));                 // passive media
     for (const p of ["/.env", "/%2eenv", "/%2Eenv", "/app.db", "/APP.DB", "/app.scrml", "/program.client.js.map",
                      "/.git/config", "/%2e%2e/outside/secret.png", "/..%2foutside%2fsecret.png", "/x%5c..%5capp.db",
-                     "/%00index.html", "/leak.png", "/notes.txt", "/program.server.js", "/%zz"]) {
+                     "/%00index.html", "/leak.png", "/inner.png", "/notes.txt", "/program.server.js", "/%zz"]) {
       expect([p, ok(p)]).toEqual([p, null]);
     }
   });

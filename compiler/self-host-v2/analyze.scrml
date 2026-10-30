@@ -16887,8 +16887,10 @@ ${
         // printer's `noDefault`). Whether such an attribute is REQUIRED at every use (the
         // §15.10 E-COMPONENT-010 analog) or takes a canonical empty is ⚑ O33 (OPEN, §66.3):
         // refused at compile time, by name, as resolveStarShared does for `<*x/>`.
-        // (a declaration that did not parse whole is its parse error's — not judged here)
-        const declErrs: boolean = hasErrIn(fileErrs(env.g.files, d.file), d.info.span)
+        // (a declaration that did not parse whole is its parse error's — not judged here; nor
+        // is a use whose attributes were just refused — a misspelled or `bind:` attribute is
+        // E-DECL-USE-ATTR's, #1676 review F5)
+        const declErrs: boolean = hasErrIn(fileErrs(env.g.files, d.file), d.info.span) || errorWithin(st, env.file, e.span)
         for (const f of d.info.fields) {
             if (!declErrs && isAttributeRole(f.role) && !hasOwnValue(f.init) && !useSets(e.attrs, f.sym.hint)) {
                 st = addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "`<" + e.tag + ">`'s attribute `" + f.sym.hint + "` has no default, and this use does not set it — whether an attribute without a default is required at every use or takes a canonical empty is ⚑ O33 (OPEN, §66.3); set it here (`" + f.sym.hint + "=…`) or give it a default")
