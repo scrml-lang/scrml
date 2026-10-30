@@ -1927,7 +1927,7 @@ An event-handler attribute additionally admits the `${…}` expression form (§5
   3. *Calls.* `eval`, `Function` and `constructor` (`f.constructor` is `Function`) on any receiver, a literal argument included, and `eval` / `Function` referred to as a VALUE anywhere (`const f = eval`, `[s].map(Function)`, `Reflect.apply(eval, …)`). A call whose callee is not a name / member / index chain (`(c ? eval : f)(s)`, `(a && eval)(s)`, `f()(s)`). `setTimeout` / `setInterval` whose first argument is not a function (an arrow, or the name of a declared function). An HTML parser fed data: `insertAdjacentHTML` (its second argument), `setHTMLUnsafe`, `Document.parseHTMLUnsafe`, `createContextualFragment` and `parseFromString` (the first), `write` / `writeln` on ANY receiver (a Document is reached as `document`, `ownerDocument`, `contentDocument`, `open()`, …; every argument), and `execCommand("insertHTML", _, v)` with `v` data or a computed command. `setAttribute` / `setAttributeNS` / `toggleAttribute` / `createAttribute` / `createAttributeNS` / `getAttributeNode` / `getAttributeNodeNS` / `getNamedItem` / `getNamedItemNS` whose attribute-name argument is `srcdoc`, an `on…` name, or not a string literal; `setAttributeNode` / `setAttributeNodeNS` / `setNamedItem` / `setNamedItemNS` (the Attr's name is not seen); a write of `value` / `nodeValue` / `textContent` / `data` on an attribute node reached through `attributes`, `getNamedItem` or `getAttributeNode`; and such an attribute node (or `attributes` itself, or an element of it) bound away from that chain — to a local, by an assignment, to a `for … of` variable, or as a call argument (fail closed: the later write would not be seen). A sink reached through an alias on the callee (`eval.call(…)`, `el.insertAdjacentHTML.apply(…)`) is the sink.
   4. *Navigation and URL attributes.* On a value not of a scrml type: a write of `location` (bare, or as a member) or of a member whose lowercased name is one of rule 3's URL-valued attributes (`href`, `src`, `action`, `formAction`, `data`, `poster`, `srcset`, … — rule 3's list itself, judged on every element because logic does not know the element); a `setAttribute` / `setAttributeNS` naming one of those attributes (ASCII case-insensitive); a call of `assign` / `replace` on a chain through `location`; and `open(url, …)` — bare, or on a window or document (`window.open`, `top.open`, `document.open`), not `indexedDB.open`. A quoted URL literal is judged by rule 3's scheme reader (`urlValueAdmitted`) — `https:`, a relative URL and the other admitted schemes compile, `javascript:` is refused; a URL from data is refused until a navigation or URL write in logic is wrapped in rule 3's runtime guard (no such lowering exists yet, `g-boot-logic-navigation-runtime-guard-s473`).
   *Static literals.* A value is static only when it is a quoted string literal. A static value is the author's own text and stays legal on the HTML-string sinks — `el.innerHTML = "<b>hi</b>"`, `insertAdjacentHTML("beforeend", "<b>x</b>")`, `document.write("<p>x</p>")`, `setHTMLUnsafe("<b>x</b>")`. It is refused on the others, by this section's S464 rules: a static `srcdoc` and a quoted handler are refused in markup ("Static executable values", "Quoted event-handler attributes"), and `eval` / `Function` / a string timer take JavaScript source text, for which there is no raw-JavaScript escape hatch. Every other DOM member stays open (`textContent`, `value`, `setAttribute("title", …)`).
-  > **Provenance:** ruling:user-voice-scrml.md S473 "⭐ RULED — S473 PA recs: host allowlist Q1–Q4, plain-logic DOM sinks, impl#1 transport routing" item 2 — *"Plain client logic: data written to a known executable sink is a compile ERROR (narrows S473 round 2 item 7, "DOM members stay open", for this set only). The set is `innerHTML`, `outerHTML`, `insertAdjacentHTML`, `srcdoc`, `on*` properties and attributes, `document.write`/`writeln`, and `eval`/`Function`/string `setTimeout`/`setInterval`. Every other DOM member stays open; off-surface members get a warning. The corpus is measured before landing."* · **S473 PA ruling on the #1663 review** (dispatch `s473-boot-plain-logic-dom-sinks` fix round 1; no user-voice entry of its own; extends item 2 to the obvious executable sinks): `setHTMLUnsafe`, `Range.createContextualFragment`, `DOMParser.parseFromString`, `document.execCommand` (insertHTML), and a `location` / `href` / `assign` / `replace` write of a data value whose scheme is not judged — reusing rule 3's URL guard rather than refusing outright. · **S473 PA ruling on the #1663 re-review** (N2; a fail-closed extension of item 2 — rule 3 already judges URL attributes in markup): in client logic a write to any rule 3 URL attribute (`src`, `action`, `formAction`, `href`, …) by property or by `setAttribute` / `setAttributeNS`, and `window.open(s)`, are judged exactly like the navigation sinks — a quoted URL through `urlValueAdmitted`, a data URL refused until the runtime-guard lowering exists; rule 3's attribute list is reused, not copied. `Document.parseHTMLUnsafe` and the Attr-node binding rule are the re-review's N5 / N1. The by-type fail-closed half, client-only scope, case-sensitive member names, the struct-field reading of `on…` members and `write` on any receiver are the #1663 review's findings F1–F6, fixed as the PA directed. The static-literal reading is the lane's, from this section's S464 rules. The ruling's "off-surface members get a warning" waits on Appendix H (the `<host>` surface), which is not yet in this SPEC: `g-spec-plain-logic-off-surface-warning-s473`. Corpus measured before the change and again after the fix round (every `.scrml` in conformance, examples, samples, stdlib, benchmarks and flogence compiled by the bootstrap; `docs/changes/s473-boot-plain-logic-dom-sinks/progress.md`): no file is newly refused (every file reporting the code already fails on 100+ other errors); the reports are `eval` in two gauntlet samples (one evaluating cell text — the hole itself; one `bun.eval`, which §30 keeps out of user logic) and one computed-key write in `stdlib/md` on an unannotated local (annotating it admits it). The code name `E-LOGIC-EXECUTABLE-SINK` is lane-chosen (provisional). · **Direction of change: newly-rejecting.** Emitted by the bootstrap; impl#1 does not emit it (S471 TS policy: `g-impl1-plain-logic-dom-sinks-s473`).
+  > **Provenance:** ruling:user-voice-scrml.md S473 "⭐ RULED — S473 PA recs: host allowlist Q1–Q4, plain-logic DOM sinks, impl#1 transport routing" item 2 — *"Plain client logic: data written to a known executable sink is a compile ERROR (narrows S473 round 2 item 7, "DOM members stay open", for this set only). The set is `innerHTML`, `outerHTML`, `insertAdjacentHTML`, `srcdoc`, `on*` properties and attributes, `document.write`/`writeln`, and `eval`/`Function`/string `setTimeout`/`setInterval`. Every other DOM member stays open; off-surface members get a warning. The corpus is measured before landing."* · **S473 PA ruling on the #1663 review** (dispatch `s473-boot-plain-logic-dom-sinks` fix round 1; no user-voice entry of its own; extends item 2 to the obvious executable sinks): `setHTMLUnsafe`, `Range.createContextualFragment`, `DOMParser.parseFromString`, `document.execCommand` (insertHTML), and a `location` / `href` / `assign` / `replace` write of a data value whose scheme is not judged — reusing rule 3's URL guard rather than refusing outright. · **S473 PA ruling on the #1663 re-review** (N2; a fail-closed extension of item 2 — rule 3 already judges URL attributes in markup): in client logic a write to any rule 3 URL attribute (`src`, `action`, `formAction`, `href`, …) by property or by `setAttribute` / `setAttributeNS`, and `window.open(s)`, are judged exactly like the navigation sinks — a quoted URL through `urlValueAdmitted`, a data URL refused until the runtime-guard lowering exists; rule 3's attribute list is reused, not copied. `Document.parseHTMLUnsafe` and the Attr-node binding rule are the re-review's N5 / N1. The by-type fail-closed half, client-only scope, case-sensitive member names, the struct-field reading of `on…` members and `write` on any receiver are the #1663 review's findings F1–F6, fixed as the PA directed. The static-literal reading is the lane's, from this section's S464 rules. The ruling's "off-surface members get a warning" waits on Appendix H (the `<host>` surface), which is now in this SPEC as DRAFT (S473 allowlist; §21.3.3 rules 16 and 22 state the lint), not yet built: `g-spec-plain-logic-off-surface-warning-s473`. Corpus measured before the change and again after the fix round (every `.scrml` in conformance, examples, samples, stdlib, benchmarks and flogence compiled by the bootstrap; `docs/changes/s473-boot-plain-logic-dom-sinks/progress.md`): no file is newly refused (every file reporting the code already fails on 100+ other errors); the reports are `eval` in two gauntlet samples (one evaluating cell text — the hole itself; one `bun.eval`, which §30 keeps out of user logic) and one computed-key write in `stdlib/md` on an unannotated local (annotating it admits it). The code name `E-LOGIC-EXECUTABLE-SINK` is lane-chosen (provisional). · **Direction of change: newly-rejecting.** Emitted by the bootstrap; impl#1 does not emit it (S471 TS policy: `g-impl1-plain-logic-dom-sinks-s473`).
 - **Data-supplied stylesheets (S472).** A `<link>` (tag compared case-insensitively) whose `href` (any case) is not a static string — `href=@u`, `href=(…)`, `href=name`, a call, an `<each>` row's field, a value a declaration's field supplies (reported once, at the definition) — and whose `rel` contains the text `stylesheet` (ASCII case-insensitive, anywhere in the value: `rel="stylesheet"`, `rel="alternate stylesheet"`) or is not a static string (`rel=@r`, `rel=(…)`) SHALL be a compile error (E-ATTR-STYLESHEET-HREF). A whole stylesheet that data chooses does more than an inline `style` can (an attribute selector's `url(…)` reads the page's input values out; one rule covers the page), and rule 3's scheme guard admits it (`https:`). A static `rel` whose text holds a `&` (a character reference: `style&#115;heet` is `stylesheet` to the browser) is not provably free of the text and is judged as not static. Not refused: a static `href` (`<link rel="stylesheet" href="/app.css">`), and a data `href` on a `<link>` whose static `rel` holds no `stylesheet` (an icon — rule 3 still judges its scheme). Every runtime path that writes a `<link>`'s `href` from data SHALL refuse the write when the element's `rel` contains `stylesheet` or was itself written from data (fail closed). To switch sheets, choose between static `<link>`s with `if=`, or carry the dynamic part as a `#{}` rule's `@cell` (§25.7).
   > **Provenance:** ruling:user-voice-scrml.md S472 "⭐ RULED — five PA recs" item 3: *"A data-bound `href` on a `<link>` whose `rel` contains `stylesheet` (or is computed) is REFUSED."* (g-boot-link-stylesheet-href-from-data-s472) · PA readings (s473-boot-svg-css-url-guard): "contains" is the substring test, a superset of HTML's token test (fail closed); a `&` in a static `rel` makes it computed; the code name `E-ATTR-STYLESHEET-HREF` is PA-chosen · **Direction of change: newly-rejecting** — before, the bootstrap and impl#1 compiled `<link rel="stylesheet" href=(@u)>` and Chromium fetched the sheet (S239 review of #1615, F2). Emitted by the bootstrap (`compiler/self-host-v2/analyze.scrml`); impl#1 does not emit it yet (S471 TS policy).
 - **Data-supplied CSS-url attributes — runtime guard (S473).** Some attributes the browser reads as a CSS value whose grammar admits a `<url>` or an `<image>`, and a `url(…)` there is a network fetch (Chromium-verified: `fill="url(https://…)"` fetches on first paint). These are the *CSS-url attributes*: `fill`, `stroke`, `marker`, `marker-start`, `marker-mid`, `marker-end`, `clip-path`, `mask`, `filter`, `cursor`, `color-profile`. The list is the SVG presentation attributes whose CSS value grammar admits `<url>` / `<image>`: SVG 2 §13 Painting (`fill` / `stroke` `<paint>`; `marker-start` / `marker-mid` / `marker-end` `none | <url>`; the `marker` shorthand); CSS Masking 1 (`clip-path` `<clip-source>`; `mask`, whose `<mask-reference>` is `<image> | <mask-source>`); Filter Effects 1 (`filter`); CSS Basic UI 4 §5.1 and SVG 2's presentation-attribute table (`cursor`); SVG 1.1 ch. 12 (`color-profile`, obsolete). `marker`, `mask`, `cursor` and `color-profile` are kept although a Chromium sweep did not fetch through them as attributes (fail closed). Like rule 3, this is a runtime rule with no diagnostic code and no compile refusal:
@@ -23866,7 +23866,7 @@ host-JS precedent the lowering follows); §19.9.3 / §19.9.5 / §19.9.9 (body-sp
 A **trap** is a defined runtime error: a condition the language defines as an error, that the compiler cannot
 always rule out before the program runs, and that is **not a value of any `!` error type**.
 
-**The kinds.** v1 has ~~one general trap~~ ~~two traps~~ ~~three traps~~ ~~four traps~~ five traps *(S473, DRAFT: `E-HOST-THROW-RT` added with §21.3.3 — ruling:user-voice-scrml.md S473 "⭐ RULED — S473 PA recs, all" item 4; landed in §21.3.3 and §34 by #1630, row added here by #1644; direction of change: semantics-defined; Nominal / spec-ahead)* *(S473, DRAFT: `E-SERVICE-STOP-CODE-RT` added with §68 — ruling:user-voice-scrml.md S473 "⭐ RULED — long-running program kind, owner questions Q1–Q4 (PA recs)"; direction of change: newly-accepting (a new kind); Nominal / spec-ahead)* *(S472: `E-HOST-VALUE-MISMATCH-RT` added — ruling:user-voice-scrml.md S472 "host function type, math API, remaining review debt" item 1; direction of change: semantics-defined)* *(S469: `E-INT-CONVERSION-RT` added — ruling:user-voice-scrml.md S469 "⭐ RULED — conversions: lossy number → int is named, round needs a mode" — "NaN, ±∞ or a value beyond exact-int range is a defined runtime error"; direction of change: semantics-defined)*:
+**The kinds.** v1 has ~~one general trap~~ ~~two traps~~ ~~three traps~~ ~~four traps~~ ~~five traps~~ six traps *(S473, DRAFT: `E-HOST-RECEIVER-RT` added with §21.3.3 rule 8.5 — ruling:user-voice-scrml.md S473 "⭐ RULED — `<host>` rule 8 moves from a sink denylist to an allowlist"; direction of change: semantics-defined; Nominal / spec-ahead)* *(S473, DRAFT: `E-HOST-THROW-RT` added with §21.3.3 — ruling:user-voice-scrml.md S473 "⭐ RULED — S473 PA recs, all" item 4; landed in §21.3.3 and §34 by #1630, row added here by #1644; direction of change: semantics-defined; Nominal / spec-ahead)* *(S473, DRAFT: `E-SERVICE-STOP-CODE-RT` added with §68 — ruling:user-voice-scrml.md S473 "⭐ RULED — long-running program kind, owner questions Q1–Q4 (PA recs)"; direction of change: newly-accepting (a new kind); Nominal / spec-ahead)* *(S472: `E-HOST-VALUE-MISMATCH-RT` added — ruling:user-voice-scrml.md S472 "host function type, math API, remaining review debt" item 1; direction of change: semantics-defined)* *(S469: `E-INT-CONVERSION-RT` added — ruling:user-voice-scrml.md S469 "⭐ RULED — conversions: lossy number → int is named, round needs a mode" — "NaN, ±∞ or a value beyond exact-int range is a defined runtime error"; direction of change: semantics-defined)*:
 
 | Code | Raised by | Section |
 |---|---|---|
@@ -23874,6 +23874,7 @@ always rule out before the program runs, and that is **not a value of any `!` er
 | `E-INT-CONVERSION-RT` | `floor` / `ceil` / `trunc` / `round` of NaN, ±∞, or a value that rounds outside ±(2^53−1) (S469; ~~Nominal / spec-ahead — not yet emitted~~ emitted since S472 by `scrml:math` on both implementations — stdlib/math/host.js, compiler/runtime/stdlib/math.js) | §41.18 |
 | `E-HOST-VALUE-MISMATCH-RT` | the value a host function returned does not fit its wrapper's declared return type (S472 — the return-point decode; emitted at `compiler/self-host-v2/slice-m1/runtime/runtime.js`, the bootstrap's runtimes; Nominal on impl#1) | §21.3.1.1 |
 | `E-HOST-THROW-RT` | a `<host>` binding not declared `! HostError` whose target throws, or returns a Promise that rejects (S473 DRAFT; Nominal / spec-ahead — not yet emitted) | §21.3.3 rule 18 |
+| `E-HOST-RECEIVER-RT` | a `guarded(inert-receiver)` host-surface entry run on a receiver that is not an HTML element whose local name is on Appendix H.4's inert element list and whose prototype is exactly the realm's own for that tag (a customized built-in, another realm's element, a re-prototyped element fail) (S473 DRAFT; emitted by the bootstrap at `compiler/self-host-v2/slice-m1/runtime/runtime.js` hostInert; Nominal on impl#1) | §21.3.3 rule 8.5 |
 | `E-SERVICE-STOP-CODE-RT` | `stop(code)` in a `kind="service"` program with a run-time code outside 0–255 (S473 DRAFT; Nominal / spec-ahead — not yet emitted) | §68.6 |
 
 (`E-CONTRACT-001-RT`, §53.4.5, and the loud error past 2^53 for an `int8` column, ruling:user-voice-scrml.md
@@ -23899,6 +23900,356 @@ S440, are earlier runtime errors at a value boundary. They keep their own sectio
 - *(S473, DRAFT.)* In a `kind="service"` program (§68) the unit of execution is the **turn**: a trap ends its turn
   only, is reported to stderr with its code and location, and the program carries on with its next event, unless
   the program declares `on-trap="stop"` (then it stops with exit code 70). §68.6 is the full rule.
+
+---
+
+## Appendix H: The Host Surface (DRAFT)
+
+> **Status: DRAFT (S473).** The allowlist that §21.3.3 rule 8 walks a `<host>` binding's target over. **Provenance:**
+> ruling:user-voice-scrml.md S473 "⭐ RULED — `<host>` rule 8 moves from a sink denylist to an allowlist" — *"I like
+> the sturdier design"* · ruling:user-voice-scrml.md S473 "⭐ RULED — S473 PA recs: host allowlist Q1–Q4, plain-logic
+> DOM sinks, impl#1 transport routing" item 1 — *"Q1: the unit is option (d), a curated surface typed by interface
+> (SPEC Appendix H: interface · member · access · signature · safety class) … Q3: … There is no project-local
+> surface."* · dd:`scrml-support/docs/deep-dives/host-binding-allowlist-design-2026-10-29.md` §6 (the seed) and §8
+> (the format). **Direction of change:** newly-accepting (each entry admits a target rule 8 would otherwise refuse).
+> **Changes only by SPEC amendment** (rule 8.8): each new entry states its WebIDL source and its class and meets the
+> property P. The bootstrap mirrors this appendix one-to-one in `compiler/self-host-v2/host-surface.scrml`, and
+> `compiler/self-host-v2/slice-m4/host-surface-appendix-h.test.js` fails on any difference.
+
+#### H.1 The entry format
+
+An entry is `(interface, member, access) → signature, class`.
+
+- **access** is `read`, `write`, `call` or `construct`. Each is separate: a `read` entry admits no write.
+- **signature.** For `read` and `write`, the property's type. For `call` and `construct`, `(name: T, …) -> R`; a
+  parameter written `name?: T` may be omitted. A type is a scrml data type (`string`, `number`, `int`, `bool`,
+  `T[]`, `T | not`), an H.2 interface, two alternatives `A | B` (either fits), a callback `(…) => U`, an H.5
+  dictionary, or one of three literal-only slots: a quoted string (`"2d"`: that literal only), `inert-tag` (a string
+  literal on H.4; the entry's result is that tag's interface) and `attr-name` (a string literal attribute name,
+  judged by `guarded(attr-name)`). A result may be `waiting T` (a binding of it is declared `-> waiting T`, rule 17).
+  IDL `DOMString` is `string`; `double` / `unrestricted double` is `number`; `long` / `unsigned long` is `int`;
+  `T?` is `T | not`; `FrozenArray<T>` / `sequence<T>` is `T[]`; a WebIDL `Promise<T>` is `waiting T`.
+- **class** is `open` or `guarded(…)`, naming one or more of `url`, `attr-name`, `inert-receiver` (rule 8.5).
+- **WebIDL source** names the specification and the interface or mixin that defines the member.
+- **One sink table.** No entry is one that the §5.2 plain-logic executable-sink set names (rule 8, last paragraph);
+  the bootstrap checks every row against that table (`host-surface.scrml` entryConflict).
+- An entry's id is stable: a removed entry's id is not reused.
+
+**Deliberately absent** (examples, not a list — they are absent because no entry admits them): `eval`, `Function`,
+`Reflect`, `Object`, `Proxy`, ambient `Math` (Appendix D's OUT names; `scrml:math` is the door),
+`Function.prototype.call` / `apply` / `bind`, `innerHTML`, `outerHTML`, `insertAdjacentHTML`, `document.write`,
+`srcdoc`, every `location` write and navigation call, `window.open`, `Worker`, `serviceWorker`, `navigation`,
+`contentWindow`, `defaultView`, `ownerDocument`, `self` / `top` / `parent` / `opener`, `createAttribute`,
+`setAttributeNode`, `appendChild` / `insertBefore`, `history`, `localStorage` (`persist=` is the door), `fetch`,
+`postMessage`, `CSSStyleSheet.insertRule`, `DOMParser`, `URL.createObjectURL`, `CSSStyleDeclaration.setProperty` (H-094, removed by the #1674 review F1: a CSS value from data, §65.4.2 — the door is the §25.7 bridge). **Not seeded from the design's §6,
+with the reason:** `HTMLElement.click()` (activating an anchor or a submit button navigates — it fails P);
+`Window.Intl` and `Intl.NumberFormat` / `DateTimeFormat` (ECMAScript built-ins, not WebIDL interfaces, and an
+`Intl.X` name is not a scrml type name); `Navigator.storage` / `StorageManager.estimate()` (a dictionary RESULT —
+rule 8.4 states how a struct fits an interface result, not a dictionary one: ⚑ `g-spec-host-dictionary-result-s473`);
+`Crypto.getRandomValues` (a typed-array crossing, which rule 12 does not define).
+
+#### H.2 Interfaces and their inheritance
+
+| interface | inherits from | DOM element type |
+|---|---|---|
+| `EventTarget` | — | no |
+| `Window` | `EventTarget` | no |
+| `Node` | `EventTarget` | no |
+| `Document` | `Node` | no |
+| `CharacterData` | `Node` | no |
+| `Text` | `CharacterData` | no |
+| `Element` | `Node` | yes |
+| `HTMLElement` | `Element` | yes |
+| `HTMLInputElement` | `HTMLElement` | yes |
+| `HTMLMediaElement` | `HTMLElement` | yes |
+| `HTMLVideoElement` | `HTMLMediaElement` | yes |
+| `HTMLAudioElement` | `HTMLMediaElement` | yes |
+| `HTMLCanvasElement` | `HTMLElement` | yes |
+| `HTMLImageElement` | `HTMLElement` | yes |
+| `HTMLAnchorElement` | `HTMLElement` | yes |
+| `Navigator` | — | no |
+| `Clipboard` | `EventTarget` | no |
+| `Performance` | `EventTarget` | no |
+| `Crypto` | — | no |
+| `Location` | — | no |
+| `Event` | — | no |
+| `UIEvent` | `Event` | no |
+| `MouseEvent` | `UIEvent` | no |
+| `KeyboardEvent` | `UIEvent` | no |
+| `DOMTokenList` | — | no |
+| `CSSStyleDeclaration` | — | no |
+| `CanvasRenderingContext2D` | — | no |
+| `TextMetrics` | — | no |
+| `IntersectionObserver` | — | no |
+| `IntersectionObserverEntry` | — | no |
+| `ResizeObserver` | — | no |
+| `ResizeObserverEntry` | — | no |
+| `MediaQueryList` | `EventTarget` | no |
+| `DOMRectReadOnly` | — | no |
+| `DOMRect` | `DOMRectReadOnly` | no |
+
+#### H.3 The entries
+
+**Inertness is never read off a static type.** Every entry that changes an element's children or attributes — a reflected-attribute write (`id`, `hidden`, `title`, a canvas `width` / `height`, an input `value`, whose "default" value mode writes the `value` attribute), `textContent`, `append` / `prepend` / `replaceChildren`, `remove`, `setAttribute` / `removeAttribute`, a URL write — and every read that hands out an element's attribute-backed sub-object (`classList`, `style`, whose mutators then change the `class` / `style` attribute) is `guarded(inert-receiver)`: the receiver passes rule 8.5's run-time check at each such step of a chain, whatever its static interface (*S473 PA ruling on the lane B report: "no admitted entry treats a static element TYPE as proof of inertness"*). The one child-changing entry without an element receiver is `Document.title` write, which replaces the text of the document's `<title>` (RCDATA: its text never runs).
+
+| id | interface | member | access | signature | class | WebIDL source |
+|---|---|---|---|---|---|---|
+| H-001 | `Window` | `document` | read | `Document` | open | HTML Window |
+| H-002 | `Window` | `navigator` | read | `Navigator` | open | HTML Window |
+| H-003 | `Window` | `performance` | read | `Performance` | open | HR-Time WindowOrWorkerGlobalScope |
+| H-004 | `Window` | `crypto` | read | `Crypto` | open | WebCrypto WindowOrWorkerGlobalScope |
+| H-005 | `Window` | `location` | read | `Location` | open | HTML Window |
+| H-006 | `Window` | `innerWidth` | read | `int` | open | CSSOM View Window |
+| H-007 | `Window` | `innerHeight` | read | `int` | open | CSSOM View Window |
+| H-008 | `Window` | `devicePixelRatio` | read | `number` | open | CSSOM View Window |
+| H-009 | `Window` | `scrollX` | read | `number` | open | CSSOM View Window |
+| H-010 | `Window` | `scrollY` | read | `number` | open | CSSOM View Window |
+| H-011 | `Window` | `matchMedia` | call | `(query: string) -> MediaQueryList` | open | CSSOM View Window |
+| H-012 | `Window` | `requestAnimationFrame` | call | `(callback: (time: number) => void) -> int` | open | HTML AnimationFrameProvider |
+| H-013 | `Window` | `cancelAnimationFrame` | call | `(handle: int) -> void` | open | HTML AnimationFrameProvider |
+| H-014 | `Window` | `setTimeout` | call | `(handler: () => void, timeout: int) -> int` | open | HTML WindowOrWorkerGlobalScope |
+| H-015 | `Window` | `clearTimeout` | call | `(id: int) -> void` | open | HTML WindowOrWorkerGlobalScope |
+| H-016 | `Window` | `scrollTo` | call | `(x: number, y: number) -> void` | open | CSSOM View Window |
+| H-017 | `Window` | `IntersectionObserver` | construct | `(callback: (entries: IntersectionObserverEntry[]) => void, options?: IntersectionObserverInit) -> IntersectionObserver` | open | IntersectionObserver |
+| H-018 | `Window` | `ResizeObserver` | construct | `(callback: (entries: ResizeObserverEntry[]) => void) -> ResizeObserver` | open | ResizeObserver |
+| H-019 | `Document` | `title` | read | `string` | open | HTML Document |
+| H-020 | `Document` | `title` | write | `string` | open | HTML Document |
+| H-021 | `Document` | `body` | read | `HTMLElement \| not` | open | HTML Document |
+| H-022 | `Document` | `documentElement` | read | `Element \| not` | open | DOM Document |
+| H-023 | `Document` | `activeElement` | read | `Element \| not` | open | HTML DocumentOrShadowRoot |
+| H-024 | `Document` | `visibilityState` | read | `string` | open | HTML Document |
+| H-025 | `Document` | `hidden` | read | `bool` | open | HTML Document |
+| H-026 | `Document` | `getElementById` | call | `(elementId: string) -> Element \| not` | open | DOM NonElementParentNode |
+| H-027 | `Document` | `querySelector` | call | `(selectors: string) -> Element \| not` | open | DOM ParentNode |
+| H-028 | `Document` | `createElement` | call | `(localName: inert-tag) -> HTMLElement` | open | DOM Document |
+| H-029 | `Document` | `createTextNode` | call | `(data: string) -> Text` | open | DOM Document |
+| H-030 | `Navigator` | `clipboard` | read | `Clipboard` | open | Clipboard API Navigator |
+| H-031 | `Navigator` | `language` | read | `string` | open | HTML NavigatorLanguage |
+| H-032 | `Navigator` | `languages` | read | `string[]` | open | HTML NavigatorLanguage |
+| H-033 | `Navigator` | `onLine` | read | `bool` | open | HTML NavigatorOnLine |
+| H-034 | `Navigator` | `userAgent` | read | `string` | open | HTML NavigatorID |
+| H-035 | `Navigator` | `vibrate` | call | `(pattern: int) -> bool` | open | Vibration Navigator |
+| H-036 | `Clipboard` | `writeText` | call | `(data: string) -> waiting void` | open | Clipboard API Clipboard |
+| H-037 | `Clipboard` | `readText` | call | `() -> waiting string` | open | Clipboard API Clipboard |
+| H-038 | `Performance` | `now` | call | `() -> number` | open | HR-Time Performance |
+| H-039 | `Crypto` | `randomUUID` | call | `() -> string` | open | WebCrypto Crypto |
+| H-040 | `Location` | `href` | read | `string` | open | HTML Location |
+| H-041 | `Location` | `pathname` | read | `string` | open | HTML Location |
+| H-042 | `Location` | `search` | read | `string` | open | HTML Location |
+| H-043 | `Location` | `hash` | read | `string` | open | HTML Location |
+| H-044 | `Location` | `origin` | read | `string` | open | HTML Location |
+| H-045 | `EventTarget` | `addEventListener` | call | `(type: string, callback: (event: Event) => void) -> void` | open | DOM EventTarget |
+| H-046 | `EventTarget` | `removeEventListener` | call | `(type: string, callback: (event: Event) => void) -> void` | open | DOM EventTarget |
+| H-047 | `Event` | `type` | read | `string` | open | DOM Event |
+| H-048 | `Event` | `timeStamp` | read | `number` | open | DOM Event |
+| H-049 | `Event` | `target` | read | `EventTarget \| not` | open | DOM Event |
+| H-050 | `Event` | `preventDefault` | call | `() -> void` | open | DOM Event |
+| H-051 | `Event` | `stopPropagation` | call | `() -> void` | open | DOM Event |
+| H-052 | `MouseEvent` | `clientX` | read | `number` | open | UI Events MouseEvent |
+| H-053 | `MouseEvent` | `clientY` | read | `number` | open | UI Events MouseEvent |
+| H-054 | `MouseEvent` | `button` | read | `int` | open | UI Events MouseEvent |
+| H-055 | `KeyboardEvent` | `key` | read | `string` | open | UI Events KeyboardEvent |
+| H-056 | `KeyboardEvent` | `code` | read | `string` | open | UI Events KeyboardEvent |
+| H-057 | `KeyboardEvent` | `shiftKey` | read | `bool` | open | UI Events KeyboardEvent |
+| H-058 | `KeyboardEvent` | `ctrlKey` | read | `bool` | open | UI Events KeyboardEvent |
+| H-059 | `KeyboardEvent` | `altKey` | read | `bool` | open | UI Events KeyboardEvent |
+| H-060 | `KeyboardEvent` | `metaKey` | read | `bool` | open | UI Events KeyboardEvent |
+| H-061 | `Node` | `textContent` | read | `string \| not` | open | DOM Node |
+| H-062 | `Node` | `textContent` | write | `string` | guarded(inert-receiver) | DOM Node |
+| H-063 | `Node` | `parentElement` | read | `Element \| not` | open | DOM Node |
+| H-064 | `Node` | `contains` | call | `(other: Node) -> bool` | open | DOM Node |
+| H-065 | `Element` | `id` | read | `string` | open | DOM Element |
+| H-066 | `Element` | `id` | write | `string` | guarded(inert-receiver) | DOM Element |
+| H-067 | `Element` | `className` | read | `string` | open | DOM Element |
+| H-068 | `Element` | `localName` | read | `string` | open | DOM Element |
+| H-069 | `Element` | `classList` | read | `DOMTokenList` | guarded(inert-receiver) | DOM Element |
+| H-070 | `Element` | `getAttribute` | call | `(qualifiedName: string) -> string \| not` | open | DOM Element |
+| H-071 | `Element` | `hasAttribute` | call | `(qualifiedName: string) -> bool` | open | DOM Element |
+| H-072 | `Element` | `setAttribute` | call | `(qualifiedName: attr-name, value: string) -> void` | guarded(attr-name, inert-receiver) | DOM Element |
+| H-073 | `Element` | `removeAttribute` | call | `(qualifiedName: attr-name) -> void` | guarded(attr-name, inert-receiver) | DOM Element |
+| H-074 | `Element` | `append` | call | `(node: Node \| string) -> void` | guarded(inert-receiver) | DOM ParentNode |
+| H-075 | `Element` | `prepend` | call | `(node: Node \| string) -> void` | guarded(inert-receiver) | DOM ParentNode |
+| H-076 | `Element` | `replaceChildren` | call | `(node: Node \| string) -> void` | guarded(inert-receiver) | DOM ParentNode |
+| H-077 | `Element` | `remove` | call | `() -> void` | guarded(inert-receiver) | DOM ChildNode |
+| H-078 | `Element` | `querySelector` | call | `(selectors: string) -> Element \| not` | open | DOM ParentNode |
+| H-079 | `Element` | `getBoundingClientRect` | call | `() -> DOMRect` | open | CSSOM View Element |
+| H-080 | `Element` | `scrollIntoView` | call | `() -> void` | open | CSSOM View Element |
+| H-081 | `HTMLElement` | `hidden` | read | `bool` | open | HTML HTMLElement |
+| H-082 | `HTMLElement` | `hidden` | write | `bool` | guarded(inert-receiver) | HTML HTMLElement |
+| H-083 | `HTMLElement` | `title` | read | `string` | open | HTML HTMLElement |
+| H-084 | `HTMLElement` | `title` | write | `string` | guarded(inert-receiver) | HTML HTMLElement |
+| H-085 | `HTMLElement` | `offsetWidth` | read | `int` | open | CSSOM View HTMLElement |
+| H-086 | `HTMLElement` | `offsetHeight` | read | `int` | open | CSSOM View HTMLElement |
+| H-087 | `HTMLElement` | `style` | read | `CSSStyleDeclaration` | guarded(inert-receiver) | CSSOM ElementCSSInlineStyle |
+| H-088 | `HTMLElement` | `focus` | call | `() -> void` | open | HTML HTMLOrSVGElement |
+| H-089 | `HTMLElement` | `blur` | call | `() -> void` | open | HTML HTMLOrSVGElement |
+| H-090 | `DOMTokenList` | `add` | call | `(token: string) -> void` | open | DOM DOMTokenList |
+| H-091 | `DOMTokenList` | `remove` | call | `(token: string) -> void` | open | DOM DOMTokenList |
+| H-092 | `DOMTokenList` | `toggle` | call | `(token: string) -> bool` | open | DOM DOMTokenList |
+| H-093 | `DOMTokenList` | `contains` | call | `(token: string) -> bool` | open | DOM DOMTokenList |
+| H-095 | `CSSStyleDeclaration` | `removeProperty` | call | `(property: string) -> string` | open | CSSOM CSSStyleDeclaration |
+| H-096 | `HTMLInputElement` | `value` | read | `string` | open | HTML HTMLInputElement |
+| H-097 | `HTMLInputElement` | `value` | write | `string` | guarded(inert-receiver) | HTML HTMLInputElement |
+| H-098 | `HTMLInputElement` | `checked` | read | `bool` | open | HTML HTMLInputElement |
+| H-099 | `HTMLInputElement` | `checked` | write | `bool` | open | HTML HTMLInputElement |
+| H-100 | `HTMLInputElement` | `select` | call | `() -> void` | open | HTML HTMLInputElement |
+| H-101 | `HTMLInputElement` | `setSelectionRange` | call | `(start: int, end: int) -> void` | open | HTML HTMLInputElement |
+| H-102 | `HTMLMediaElement` | `paused` | read | `bool` | open | HTML HTMLMediaElement |
+| H-103 | `HTMLMediaElement` | `duration` | read | `number` | open | HTML HTMLMediaElement |
+| H-104 | `HTMLMediaElement` | `currentTime` | read | `number` | open | HTML HTMLMediaElement |
+| H-105 | `HTMLMediaElement` | `currentTime` | write | `number` | open | HTML HTMLMediaElement |
+| H-106 | `HTMLMediaElement` | `volume` | read | `number` | open | HTML HTMLMediaElement |
+| H-107 | `HTMLMediaElement` | `volume` | write | `number` | open | HTML HTMLMediaElement |
+| H-108 | `HTMLMediaElement` | `muted` | read | `bool` | open | HTML HTMLMediaElement |
+| H-109 | `HTMLMediaElement` | `muted` | write | `bool` | open | HTML HTMLMediaElement |
+| H-110 | `HTMLMediaElement` | `play` | call | `() -> waiting void` | open | HTML HTMLMediaElement |
+| H-111 | `HTMLMediaElement` | `pause` | call | `() -> void` | open | HTML HTMLMediaElement |
+| H-112 | `HTMLCanvasElement` | `width` | read | `int` | open | HTML HTMLCanvasElement |
+| H-113 | `HTMLCanvasElement` | `width` | write | `int` | guarded(inert-receiver) | HTML HTMLCanvasElement |
+| H-114 | `HTMLCanvasElement` | `height` | read | `int` | open | HTML HTMLCanvasElement |
+| H-115 | `HTMLCanvasElement` | `height` | write | `int` | guarded(inert-receiver) | HTML HTMLCanvasElement |
+| H-116 | `HTMLCanvasElement` | `getContext` | call | `(contextId: "2d") -> CanvasRenderingContext2D \| not` | open | HTML HTMLCanvasElement |
+| H-117 | `CanvasRenderingContext2D` | `fillStyle` | write | `string` | open | HTML CanvasFillStrokeStyles |
+| H-118 | `CanvasRenderingContext2D` | `strokeStyle` | write | `string` | open | HTML CanvasFillStrokeStyles |
+| H-119 | `CanvasRenderingContext2D` | `lineWidth` | write | `number` | open | HTML CanvasPathDrawingStyles |
+| H-120 | `CanvasRenderingContext2D` | `font` | write | `string` | open | HTML CanvasTextDrawingStyles |
+| H-121 | `CanvasRenderingContext2D` | `fillRect` | call | `(x: number, y: number, w: number, h: number) -> void` | open | HTML CanvasRect |
+| H-122 | `CanvasRenderingContext2D` | `clearRect` | call | `(x: number, y: number, w: number, h: number) -> void` | open | HTML CanvasRect |
+| H-123 | `CanvasRenderingContext2D` | `strokeRect` | call | `(x: number, y: number, w: number, h: number) -> void` | open | HTML CanvasRect |
+| H-124 | `CanvasRenderingContext2D` | `beginPath` | call | `() -> void` | open | HTML CanvasDrawPath |
+| H-125 | `CanvasRenderingContext2D` | `moveTo` | call | `(x: number, y: number) -> void` | open | HTML CanvasPath |
+| H-126 | `CanvasRenderingContext2D` | `lineTo` | call | `(x: number, y: number) -> void` | open | HTML CanvasPath |
+| H-127 | `CanvasRenderingContext2D` | `arc` | call | `(x: number, y: number, radius: number, startAngle: number, endAngle: number) -> void` | open | HTML CanvasPath |
+| H-128 | `CanvasRenderingContext2D` | `stroke` | call | `() -> void` | open | HTML CanvasDrawPath |
+| H-129 | `CanvasRenderingContext2D` | `fill` | call | `() -> void` | open | HTML CanvasDrawPath |
+| H-130 | `CanvasRenderingContext2D` | `fillText` | call | `(text: string, x: number, y: number) -> void` | open | HTML CanvasText |
+| H-131 | `CanvasRenderingContext2D` | `measureText` | call | `(text: string) -> TextMetrics` | open | HTML CanvasText |
+| H-132 | `CanvasRenderingContext2D` | `save` | call | `() -> void` | open | HTML CanvasState |
+| H-133 | `CanvasRenderingContext2D` | `restore` | call | `() -> void` | open | HTML CanvasState |
+| H-134 | `CanvasRenderingContext2D` | `translate` | call | `(x: number, y: number) -> void` | open | HTML CanvasTransform |
+| H-135 | `CanvasRenderingContext2D` | `scale` | call | `(x: number, y: number) -> void` | open | HTML CanvasTransform |
+| H-136 | `CanvasRenderingContext2D` | `rotate` | call | `(angle: number) -> void` | open | HTML CanvasTransform |
+| H-137 | `CanvasRenderingContext2D` | `drawImage` | call | `(image: HTMLImageElement \| HTMLCanvasElement, dx: number, dy: number) -> void` | open | HTML CanvasDrawImage |
+| H-138 | `TextMetrics` | `width` | read | `number` | open | HTML TextMetrics |
+| H-139 | `HTMLImageElement` | `src` | write | `string` | guarded(url, inert-receiver) | HTML HTMLImageElement |
+| H-140 | `HTMLImageElement` | `naturalWidth` | read | `int` | open | HTML HTMLImageElement |
+| H-141 | `HTMLImageElement` | `naturalHeight` | read | `int` | open | HTML HTMLImageElement |
+| H-142 | `HTMLImageElement` | `complete` | read | `bool` | open | HTML HTMLImageElement |
+| H-143 | `HTMLAnchorElement` | `href` | write | `string` | guarded(url, inert-receiver) | HTML HTMLHyperlinkElementUtils |
+| H-144 | `IntersectionObserver` | `observe` | call | `(target: Element) -> void` | open | IntersectionObserver |
+| H-145 | `IntersectionObserver` | `unobserve` | call | `(target: Element) -> void` | open | IntersectionObserver |
+| H-146 | `IntersectionObserver` | `disconnect` | call | `() -> void` | open | IntersectionObserver |
+| H-147 | `IntersectionObserverEntry` | `isIntersecting` | read | `bool` | open | IntersectionObserver |
+| H-148 | `IntersectionObserverEntry` | `intersectionRatio` | read | `number` | open | IntersectionObserver |
+| H-149 | `IntersectionObserverEntry` | `target` | read | `Element` | open | IntersectionObserver |
+| H-150 | `IntersectionObserverEntry` | `boundingClientRect` | read | `DOMRectReadOnly` | open | IntersectionObserver |
+| H-151 | `ResizeObserver` | `observe` | call | `(target: Element) -> void` | open | ResizeObserver |
+| H-152 | `ResizeObserver` | `unobserve` | call | `(target: Element) -> void` | open | ResizeObserver |
+| H-153 | `ResizeObserver` | `disconnect` | call | `() -> void` | open | ResizeObserver |
+| H-154 | `ResizeObserverEntry` | `target` | read | `Element` | open | ResizeObserver |
+| H-155 | `ResizeObserverEntry` | `contentRect` | read | `DOMRectReadOnly` | open | ResizeObserver |
+| H-156 | `MediaQueryList` | `matches` | read | `bool` | open | CSSOM View MediaQueryList |
+| H-157 | `MediaQueryList` | `media` | read | `string` | open | CSSOM View MediaQueryList |
+| H-158 | `DOMRectReadOnly` | `x` | read | `number` | open | Geometry DOMRectReadOnly |
+| H-159 | `DOMRectReadOnly` | `y` | read | `number` | open | Geometry DOMRectReadOnly |
+| H-160 | `DOMRectReadOnly` | `width` | read | `number` | open | Geometry DOMRectReadOnly |
+| H-161 | `DOMRectReadOnly` | `height` | read | `number` | open | Geometry DOMRectReadOnly |
+| H-162 | `DOMRectReadOnly` | `top` | read | `number` | open | Geometry DOMRectReadOnly |
+| H-163 | `DOMRectReadOnly` | `right` | read | `number` | open | Geometry DOMRectReadOnly |
+| H-164 | `DOMRectReadOnly` | `bottom` | read | `number` | open | Geometry DOMRectReadOnly |
+| H-165 | `DOMRectReadOnly` | `left` | read | `number` | open | Geometry DOMRectReadOnly |
+
+#### H.4 The inert element list
+
+The tags a `guarded(inert-receiver)` entry may mutate, and `createElement` may make, each with the interface its literal yields. This is the run-time list too: `compiler/self-host-v2/slice-m1/runtime/runtime.js` `HOST_INERT_ELEMENTS` (one list — the diff test compares it with this table). Not on it, by design: `script`, `style`, `base`, `meta`, `link`, `iframe`, `frame`, `frameset`, `object`, `embed`, `template`, `slot`, `form` (its `action` / submit navigates), `noscript`, `title`, `head`, `body`, `html`, `source` / `track` (they load media URLs), every custom element (a hyphenated name runs author callbacks on attribute change) and every non-HTML element (SVG `script`, MathML).
+
+| tag | interface |
+|---|---|
+| `a` | `HTMLAnchorElement` |
+| `abbr` | `HTMLElement` |
+| `article` | `HTMLElement` |
+| `aside` | `HTMLElement` |
+| `audio` | `HTMLAudioElement` |
+| `b` | `HTMLElement` |
+| `blockquote` | `HTMLElement` |
+| `br` | `HTMLElement` |
+| `button` | `HTMLElement` |
+| `canvas` | `HTMLCanvasElement` |
+| `caption` | `HTMLElement` |
+| `cite` | `HTMLElement` |
+| `code` | `HTMLElement` |
+| `col` | `HTMLElement` |
+| `colgroup` | `HTMLElement` |
+| `dd` | `HTMLElement` |
+| `del` | `HTMLElement` |
+| `details` | `HTMLElement` |
+| `dfn` | `HTMLElement` |
+| `div` | `HTMLElement` |
+| `dl` | `HTMLElement` |
+| `dt` | `HTMLElement` |
+| `em` | `HTMLElement` |
+| `fieldset` | `HTMLElement` |
+| `figcaption` | `HTMLElement` |
+| `figure` | `HTMLElement` |
+| `footer` | `HTMLElement` |
+| `h1` | `HTMLElement` |
+| `h2` | `HTMLElement` |
+| `h3` | `HTMLElement` |
+| `h4` | `HTMLElement` |
+| `h5` | `HTMLElement` |
+| `h6` | `HTMLElement` |
+| `header` | `HTMLElement` |
+| `hr` | `HTMLElement` |
+| `i` | `HTMLElement` |
+| `img` | `HTMLImageElement` |
+| `input` | `HTMLInputElement` |
+| `ins` | `HTMLElement` |
+| `kbd` | `HTMLElement` |
+| `label` | `HTMLElement` |
+| `legend` | `HTMLElement` |
+| `li` | `HTMLElement` |
+| `main` | `HTMLElement` |
+| `mark` | `HTMLElement` |
+| `meter` | `HTMLElement` |
+| `nav` | `HTMLElement` |
+| `ol` | `HTMLElement` |
+| `optgroup` | `HTMLElement` |
+| `option` | `HTMLElement` |
+| `output` | `HTMLElement` |
+| `p` | `HTMLElement` |
+| `pre` | `HTMLElement` |
+| `progress` | `HTMLElement` |
+| `q` | `HTMLElement` |
+| `s` | `HTMLElement` |
+| `samp` | `HTMLElement` |
+| `section` | `HTMLElement` |
+| `select` | `HTMLElement` |
+| `small` | `HTMLElement` |
+| `span` | `HTMLElement` |
+| `strong` | `HTMLElement` |
+| `sub` | `HTMLElement` |
+| `summary` | `HTMLElement` |
+| `sup` | `HTMLElement` |
+| `table` | `HTMLElement` |
+| `tbody` | `HTMLElement` |
+| `td` | `HTMLElement` |
+| `textarea` | `HTMLElement` |
+| `tfoot` | `HTMLElement` |
+| `th` | `HTMLElement` |
+| `thead` | `HTMLElement` |
+| `time` | `HTMLElement` |
+| `tr` | `HTMLElement` |
+| `u` | `HTMLElement` |
+| `ul` | `HTMLElement` |
+| `var` | `HTMLElement` |
+| `video` | `HTMLVideoElement` |
+| `wbr` | `HTMLElement` |
+
+#### H.5 The dictionaries
+
+| dictionary | keys |
+|---|---|
+| `IntersectionObserverInit` | `rootMargin?: string`, `threshold?: number` |
 
 ---
 
@@ -25204,11 +25555,10 @@ type Sighting:struct = { isIntersecting: bool, intersectionRatio: number }
 
 <host>
   writeText(text: string) -> waiting void ! HostError = navigator.clipboard.writeText(text)
-  type Observer:host
-  watch(onChange: (seen: Sighting[]) => void, margin: string) -> Observer
+  watch(onChange: (seen: Sighting[]) => void, margin: string) -> IntersectionObserver
       = new window.IntersectionObserver(onChange, { rootMargin: margin })
-  observe(o: Observer, el: HTMLElement) = o.observe(el)
-  disconnect(o: Observer) = o.disconnect()
+  observe(o: IntersectionObserver, el: HTMLElement) = o.observe(el)
+  disconnect(o: IntersectionObserver) = o.disconnect()
   paused(v: HTMLVideoElement) -> bool = v.paused
 </host>
 
@@ -25243,7 +25593,9 @@ type Sighting:struct = { isIntersecting: bool, intersectionRatio: number }
    and `export … from` / `export * from` followed through the §21.3 copy closure). The compiler SHALL NOT load,
    import, or evaluate a `src=` file, or any file it reaches, at build time. A binding without a target calls the
    export of its own name with its parameters in order. A name that the file does not export, or that it reaches
-   only through a form the parse cannot resolve, SHALL be `E-IMPORT-004`. Whether the export is callable is not
+   only through a form the parse cannot resolve, SHALL be `E-IMPORT-004`. An `export … from` that does not resolve
+   (its source lacks the name, or the source is not followed) makes the whole file `E-IMPORT-004`, since the browser
+   would not link the module at all *(S473 PA reading, ratifying the allowlist lane A build)*. Whether the export is callable is not
    checked at build time: calling a non-callable export throws at run time, which rule 18 handles. *(Contrast
    §21.3.1.1: the `import:host` loader loads a host module at compile time, which is admitted only because that
    module is compiler-owned stdlib behind the §22.13 manifest gate. A `<host src=>` in a compiler-bundled stdlib module file (one shipped with the compiler and inside the §22.13 `host-import` allow-list; NOT a module under `vendor/scrml/`, though `scrml:` also resolves there) MAY use that
@@ -25258,50 +25610,140 @@ type Sighting:struct = { isIntersecting: bool, intersectionRatio: number }
    string, number or bool literal, or a one-level object literal whose values are parameters or literals. An
    operator, a lambda, a computed member (`a[k]`), a spread, a nested call, a member named `constructor`,
    `prototype` or `__proto__` anywhere in the chain, an object-literal key `__proto__`, or more than one of the four
-   shapes SHALL be `E-HOST-TARGET-SHAPE`.
+   shapes SHALL be `E-HOST-TARGET-SHAPE`. A target whose shape passes this rule is then checked by rule 8 (the
+   host surface).
 5. Each declared parameter SHALL appear exactly once in the target. A parameter the target does not use, or uses
    twice, SHALL be `E-HOST-PARAM-USE`. (An omitted target uses each parameter once by construction.)
 6. In a `<host>` without `src=`, every binding SHALL have a target. A binding without one SHALL be
    `E-HOST-NO-TARGET`.
 7. A target SHALL be emitted as literal JavaScript at the call site. It SHALL NOT be built with the `Function`
    constructor or any other run-time evaluation of source text.
-8. **No execution or navigation sinks.** A target SHALL NOT reach a sink that runs source text or navigates the
-   page. Each of these SHALL be `E-HOST-TARGET-SINK`:
-   - a call or construction whose callee's last member is `eval` or `Function`, or is `setTimeout` / `setInterval`
-     with a first argument that is not of a function type;
-   - a call of `document.write`, `document.writeln`, `insertAdjacentHTML`, `createContextualFragment`,
-     `setHTMLUnsafe` or `execCommand`;
-   - a property write of `innerHTML`, `outerHTML` or `srcdoc`;
-   - a call of `setAttribute`, `setAttributeNS` or `toggleAttribute` whose attribute-name argument is not a string
-     literal, or is a literal that is `srcdoc` or begins with `on` (any case);
-   - a write to `location` or to any member of it, and a call of `location.assign`, `location.replace` or
-     `window.open`.
-   This applies the §5.2 principle that scrml does not hand the browser source text it never checks, the one
-   `srcdoc` and the `javascript:` scheme rules state for markup (S464). A URL-valued property write (`href`, `src`,
-   `action`) is not judged by this rule. ⚑ Whether it should be is `g-spec-host-target-url-sinks-unjudged-s473`.
+8. **The host surface (allowlist).** *(DRAFT, S473 — replaces "No execution or navigation sinks", the S473
+   interim fail-closed denylist of #1659.)*
 
-   **(S473 PA ruling — fail-closed tightening of rule 8, from the #1659 adversarial review.)** Rule 8 is judged
-   over EVERY segment of a target's chain, in EVERY shape, a property READ included, because a binding may read a
-   sink-valued member and return it as a `:host` handle, and a second binding then reach the sink through that
-   handle's parameter, whose chain names only the parameter. Accordingly, each of these is also
-   `E-HOST-TARGET-SINK`:
-   - an execution, HTML-string, navigation, attribute-node or realm-crossing member — `eval`, `Function`,
-     `setTimeout`, `setInterval`, `insertAdjacentHTML`, `createContextualFragment`, `setHTMLUnsafe`, `execCommand`,
-     `write`, `writeln`, `open`, `Reflect`, `assign`, `defineProperty`, `defineProperties`, `__defineSetter__`,
-     `__defineGetter__`, `setPrototypeOf`, `Worker`, `SharedWorker`, `serviceWorker`, `register`, `navigation`,
-     `navigate`, `setAttributeNode`, `setAttributeNodeNS`, `setNamedItem`, `setNamedItemNS`, `createAttribute`,
-     `getAttributeNode`, `getNamedItem`, `attributes`, `contentWindow`, `contentDocument` or `defaultView` —
-     appearing ANYWHERE as a chain member, in any shape (an alias through `.call` / `.apply` / `.bind`, and a
-     return of it as a handle, included);
-   - a property read whose LAST member is a realm / handle-exposing name — `document`, `location`, `window`,
-     `self`, `top`, `parent`, `frames`, `opener`, `ownerDocument` or `globalThis` — so the handle is never handed
-     out (`window.location.href` still reads, since `location` is not the read's last member, `href` is);
-   - a write (shape 4) of `text`, `textContent`, `value` or `nodeValue` (a `<script>`'s body, or an `Attr`'s
-     value), and any write or call that passes through `location`.
-   The sink list is ONE table, shared by reads and writes. A binding whose callee is a bare parameter or bare
-   global with no member (`f(…)`, a callable `:host` handle) is `E-HOST-TARGET-SHAPE` (rule 4 requires a dotted
-   member chain). *(A `value` / `textContent` write on an ordinary element is refused too — the bootstrap has no
-   DOM element types to tell it from a `<script>` or an `Attr`; fail closed, `g-spec-host-sink-aliases-reflect-s473`.)*
+   > **Provenance:** ruling:user-voice-scrml.md S473 "⭐ RULED — `<host>` rule 8 moves from a sink denylist to an
+   > allowlist" — *"I like the sturdier design"* (item 1: *"A binding may call or read only what the allowlist admits;
+   > everything else is refused at compile time."*) · ruling:user-voice-scrml.md S473 "⭐ RULED — S473 PA recs: host
+   > allowlist Q1–Q4, plain-logic DOM sinks, impl#1 transport routing" — *"your recs"* — item 1 (*"Q1: the unit is
+   > option (d), a curated surface typed by interface (SPEC Appendix H: interface · member · access · signature ·
+   > safety class), with `src=` as the explicit, audited escape. Q2: WebIDL interface names are built-in scrml types,
+   > replacing user-named handles. Q3: adopters extend it with a `src=` glue file, or with a compiler PR amending
+   > Appendix H after security review. There is no project-local surface. Q4: existing bindings get a hard error now,
+   > with no deprecation window (none ship)."*) · dd:`scrml-support/docs/deep-dives/host-binding-allowlist-design-2026-10-29.md`
+   > (§5, §8, §9) · review:S239-of-#1659 (H1, L3; r1 R1, R2) · review:S239-of-#1630 (M10, N2). **Closes:**
+   > `g-spec-host-target-url-sinks-unjudged-s473` (re-titled code execution, HIGH: a `<script>` / `<iframe>` `src`
+   > write runs remote code) and `g-spec-host-sink-aliases-reflect-s473`. **Supersedes:** rule 8 "No execution or
+   > navigation sinks", its S473 fail-closed tightening, and `E-HOST-TARGET-SINK` (DRAFT; emitted only by the
+   > bootstrap build of #1659, which this rule replaces). **Direction of change:** newly-rejecting for every target
+   > off the surface, against zero shipped `<host>` uses (measured, design §7). **Nominal on impl#1** (S471 policy);
+   > built in the bootstrap (Implementation status below).
+
+   8.1 **The surface.** Appendix H defines the *host surface*: a set of entries, each one an interface, a member and
+   an access (`call`, `construct`, `read` or `write`), with a signature and a class (`open`, or `guarded(…)` naming
+   one or more of `url`, `attr-name` and `inert-receiver`). Interfaces inherit as WebIDL states: an entry on an
+   interface applies to each interface that inherits from it. The interface names of Appendix H are built-in host
+   types (§14). A `type Name:host` line SHALL NOT reuse one, or a built-in scalar type name (`E-SCOPE-010`). A user
+   struct or enum declaration of such a name shadows the built-in host type in its scope, as a user `Error` shadows
+   the built-in enum (§19.4.2); a parameter of that user type is then not a host root (8.2), so it fails closed. *(ruling:
+   user-voice-scrml.md S473 D34 — "⭐ RULED — S473 SPEC-coverage audit decisions D1–D34, all PA recs", *"your recs on all"*:
+   *"a user struct or enum named like an Appendix H interface (e.g. the codec's `type Node:struct`) SHADOWS the built-in,
+   as a user `Error` does. A parameter of that type is not a host root (fails closed). Only a `type X:host` line reusing
+   an Appendix H name is E-SCOPE-010. This replaces the design's 'SHALL NOT reuse a name' rule 8.1."* Closes
+   `g-spec-host-surface-name-shadowing-s473`.)*
+
+   8.2 **Roots.** A target's root is resolved to an interface:
+   - `window` is `Window`, `document` is `Document` and `navigator` is `Navigator`;
+   - a parameter whose declared type is an Appendix H interface, or that interface `| not`, is that interface.
+
+   A target rooted at a parameter of any other type (a data type, `asIs`, a callback type, a user struct or enum)
+   SHALL be `E-HOST-ROOT-OPAQUE`. A target rooted at a parameter of a user-declared `:host` type SHALL be
+   `E-HOST-ROOT-OPAQUE` unless rule 8.6 admits it.
+
+   8.3 **The walk.** Each member of the chain except the last SHALL be a `read` entry of the current interface whose
+   result is an interface (not `I | not`), and the walk continues at that result. The last member SHALL be an entry
+   of the current interface whose access is the target's shape: call, `new`, read, or write. Any member that is not
+   such an entry SHALL be `E-HOST-TARGET-NOT-ALLOWED`. The diagnostic SHALL name the interface, the member and the
+   access, and SHALL offer a `src=` binding as the fix.
+
+   8.4 **Arguments and results.**
+   - Each argument SHALL be assignable to the entry's parameter type (Appendix H.1), and the argument count SHALL be
+     between the entry's required and total parameter counts. A parameter's declared type is used; a literal is
+     checked against its slot. An object literal SHALL fit the entry's dictionary type (H.5), with no unknown key
+     and each value of its key's type. A slot that admits only a literal (`inert-tag`, `attr-name`, `"2d"`) is filled
+     only by such a literal.
+   - Any argument that does not fit is `E-HOST-ARG-TYPE`: a value of type `asIs`, a data type, or a user-declared
+     `:host` type in an interface-typed parameter; anything that is not a scrml function in a callback-typed
+     parameter; a parameter, or a literal outside the admitted set, in a literal-only slot (*PA reading: the design
+     names no code for a literal-only slot; `E-HOST-ARG-TYPE` is its "does not fit the entry's parameter"*).
+   - The binding's declared result SHALL be one of:
+     - the entry's result type;
+     - a supertype of it (an interface it inherits from, `number` for `int`, or `T | not` for `T`);
+     - for an interface, a subinterface of it, which is checked at run time (8.7);
+     - for data, a type rule 13 decodes from the entry's result (`int` for an entry typed `number`, checked).
+
+     Any other result SHALL be `E-HOST-RESULT-TYPE` — a result that admits `not` declared without it, a declared
+     result on a write, a user `:host` type (8.6), and a non-waiting binding of an entry whose result is `waiting T`
+     (declare `-> waiting T`, rule 17) included. A struct declared as the result of an entry whose result is an
+     interface SHALL declare only fields that are `read` entries of that interface, of compatible types
+     (`E-HOST-RESULT-TYPE`). For `createElement`, the entry's result is the interface H.4 gives the literal tag, exactly: a declared subinterface of it is `E-HOST-RESULT-TYPE` (it could never pass the brand check) *(S473 PA ruling on the #1674 review)*.
+
+   8.5 **Guarded entries.**
+   - **`guarded(url)`:** the value written is judged on every write by §5.2 rule 3's data-supplied URL guard: the
+     same scheme test, the same admitted set, `about:blank` on refusal, and one report. A literal value is judged at
+     compile time by §5.2 rule 2's test (`E-ATTR-STATIC-EXECUTABLE`).
+   - **`guarded(attr-name)`:** the attribute-name argument SHALL be a string literal. A name §5.2 refuses from data
+     SHALL be `E-HOST-TARGET-NOT-ALLOWED`, whatever the value (a binding is a data path): an event handler (§5.2's
+     event-handler test), `srcdoc`, `form`, `formaction` (and `action` / the `<meta>` pragma names on the elements
+     §5.2 names), and `style` (§65.4.2) — exactly the names the markup attribute walk refuses from data on an element
+     the receiver may be (H.4), judged by the same predicate, not a second list. At run time the value goes through the
+     same walls a bound markup attribute does (`rt.attr`'s data-attribute walls, then its value guard: §5.2 rule 3's
+     URL guard for a URL-valued name, the §25.7 `cssValueOf` check for an attribute the browser reads as CSS) — one
+     write path *(S473 PA ruling on the #1674 review)*.
+   - **`guarded(inert-receiver)`:** before the member runs, the receiver SHALL be an element in the HTML namespace
+     whose local name is on Appendix H's inert element list (H.4), and whose prototype is EXACTLY this realm's own
+     prototype for that tag — so a customized built-in (`<button is="…">`), another realm's element and a
+     re-prototyped element are refused. The local name and namespace are read through the `Element.prototype`
+     accessors captured at start, not the instance. Otherwise the call SHALL raise the trap `E-HOST-RECEIVER-RT`
+     (§19.17) *(S473 PA ruling on the #1674 review)*.
+
+   8.6 **The `src=` world.** A chain rooted at an export of `src`, or at a parameter of a `type Name:host` declared
+   in the **same** `<host src=>`, is not looked up on the surface. Rules 4, 5 and 7 still apply to it. A target that
+   calls an export of `src` directly, with no member (`= mountChart(el, data)`), is admitted there: it is the targetless
+   form of rule 3 written out, and the call is author JavaScript *(S473 PA reading, ratifying the allowlist lane A
+   build; rule 4's "dotted member chain" and the bare-callee `E-HOST-TARGET-SHAPE` still hold for every other root)*.
+   - A `type Name:host` in a `<host>` without `src=` SHALL be `E-HOST-TYPE-NO-SRC`.
+   - A user-declared `:host` type SHALL NOT be the result of a surface entry (`E-HOST-RESULT-TYPE`).
+   - *Note:* the compiler judges nothing inside a `src=` file or a `src=` chain. Every host operation that rule 8
+     does not judge is written in, or named by, a `src=` file.
+
+   8.7 **Brand checks.** A value that a `src=` export or a `src=` chain returns, declared as an Appendix H interface,
+   and a subinterface result admitted by 8.4, SHALL be checked at run time to be a platform object of that
+   interface in the page realm. The same applies to an interface-typed field of a struct decoded from such a value.
+   A failure SHALL be the trap `E-HOST-VALUE-MISMATCH-RT`. The check is a WebIDL brand test, never `instanceof`
+   alone: a prototype-borrowing object (`Object.create(DOMRect.prototype)`) or a Proxy fails. `Window` and
+   `Location` are per-realm singletons and brand by identity with the page's own `window` and `location`. An
+   element's prototype SHALL be exactly the realm's own for its tag, so a customized built-in fails even its base
+   interface's brand (`<button is="…">` as `HTMLElement`) — custom elements are not on the surface (S473 D2) *(S473 PA ruling on the #1674 review)*.
+   *(The build brands every interface result, a non-downcast surface result included — stricter than this rule.)*
+
+   8.8 **Adding to the surface.** Appendix H changes only by SPEC amendment. An entry SHALL state its WebIDL source
+   and its class. It SHALL meet this property (P): *for every argument of its parameter types and every receiver
+   inheriting from its interface, under its class's check, the entry neither evaluates source text, nor navigates
+   or loads a document or a script, nor yields a value outside its result type.* No project file, manifest or
+   `vendor/` module extends the surface.
+
+   This applies the §5.2 principle that scrml does not hand the browser source text it never checks. **Composition
+   is closed by types, not by names** (design §5.4): a value of an interface type is produced only by a root, a
+   surface result, a host callback argument, a `ref=` cell or a brand-checked `src=` result, so no sequence of
+   bindings hands a target an object with a member that is not an entry. Every executing or navigating sink a
+   `<host>` binding reaches lies in a file named by `src=`. **One sink table:** an entry that the plain-logic
+   executable-sink set of §5.2 (S473) names — an HTML / source / handler write, a source-text call, an attribute-node
+   call, a navigation call — is never on the surface; a URL write only as `guarded(url)`, an attribute-name call
+   only as `guarded(attr-name)`, a timer only with a callback first parameter. **The markup attribute rules too:**
+   an attribute §5.2 or §65.4.2 refuses from data in markup (`form`, `formaction`, `style`, `srcdoc`, an event
+   handler) is refused on a `guarded(attr-name)` entry, and no entry writes a CSS value from data
+   (`CSSStyleDeclaration` has no write or value-taking call on the surface; the door is the §25.7 bridge)
+   *(S473 PA ruling on the #1674 review)*.
 
 *A binding is a function.*
 
@@ -25362,6 +25804,8 @@ type Sighting:struct = { isIntersecting: bool, intersectionRatio: number }
       a mismatch: convert it with `Array.from` in the `src=` glue, or declare the result `asIs`;
     - a `:host` type (rule 15) and a DOM element type (rule 16) are not decoded, but a non-optional one SHALL NOT be
       `null` or `undefined`;
+    - an Appendix H interface type (rule 8.1): not decoded; a non-optional one SHALL NOT be `null` or `undefined`;
+      rule 8.7's brand check applies where 8.7 says *(S473 allowlist, DRAFT)*;
     - `asIs` (§7.5.2) is not decoded;
     - for a binding not declared `waiting`, a result that is a thenable (an object or function whose `then`, read
       once by ordinary property access, is a function) is a mismatch.
@@ -25382,7 +25826,8 @@ type Sighting:struct = { isIntersecting: bool, intersectionRatio: number }
 *Handles.*
 
 15. **Closed handles.** `type Name:host` declares a nominal, opaque host type. It SHALL appear only inside a
-    `<host>`; anywhere else it SHALL be `E-HOST-TYPE-OUTSIDE`. A value of a declared `:host` type MAY be held in a
+    `<host>`; anywhere else it SHALL be `E-HOST-TYPE-OUTSIDE`. A value of a declared `:host` type — a user-declared `:host` type, or an Appendix H interface type other than a
+    DOM element type (rule 8.1; S473 allowlist, DRAFT) — MAY be held in a
     local, a mount handle (§6.7.1b (c)) or a client cell, passed to a binding, and tested with `is given` /
     `is not`. A member access or method call on it SHALL be `E-HOST-HANDLE-MEMBER`, whose message names the binding
     to declare instead. It is not comparable: `==` or `!=` on a type that contains a declared `:host` type SHALL be
@@ -25394,12 +25839,14 @@ type Sighting:struct = { isIntersecting: bool, intersectionRatio: number }
     these SHALL be `E-HOST-HANDLE-NOT-DATA`. Laundering through `asIs` does not escape the rule: an `asIs` value
     built from a `:host` value is still refused at those positions where the compiler can see its origin. *(The
     review's §57.1 finding: the list is stated by depth, not by top-level type.)*
-16. **DOM element types.** The DOM interface types that `ref=` binds (§6.7.1b (a): `HTMLElement`,
-    `HTMLCanvasElement`, …) are built-in host types for this section's purposes: a value of one MAY be passed to a
+16. **DOM element types.** The DOM element types are the Appendix H interfaces that inherit from `Element` (rule
+    8.1) — the types `ref=` binds (§6.7.1b (a): `HTMLElement`, `HTMLCanvasElement`, …). In a target they are judged
+    by rule 8 like any interface. They are built-in host types for this section's purposes: a value of one MAY be passed to a
     binding parameter of that type or of a supertype along WebIDL inheritance (`HTMLCanvasElement` to `HTMLElement`
     to `Element`), and may be declared as a binding's result (rule 13). Rule 15 does NOT apply to them: member
     access on a DOM element type (`@canvasEl.getContext('2d')`, `@noteBox.focus()`) is unchanged from §6.7.1b and
-    stays untyped. Rule 22 does not lint it.
+    stays untyped. Rule 22 lints such an access only when its interface, member and access is not an Appendix H entry
+    *(S473 allowlist, design §5.9 — a PA default, reversible; it replaces the sentence "Rule 22 does not lint it")*.
     **DOM members stay open (S473 ruling, design Q10).** The DOM element types SHALL NOT become closed `:host`
     handles: `E-HOST-HANDLE-MEMBER` never applies to them. Typed DOM access is F7's WebIDL stdlib (a separate
     item, S471), declared through `<host>`. *(ruling:user-voice-scrml.md S473 "⭐ RULED — S473 owner questions round 2, PA recs" item 7 — *"DOM members stay open (Q10 — DOM types do
@@ -25458,32 +25905,37 @@ type Sighting:struct = { isIntersecting: bool, intersectionRatio: number }
     is `ref=`, `<onMount>`, `<effect>` and `cleanup()` (§6.7).
 22. **The untyped-door lint.** In client logic, a call or member read through a bare `window`, `document` or
     `navigator` path, or a call of a §21.3 `.js` / `.mjs` import, outside a `<host>` binding, SHALL draw
-    `W-HOST-UNTYPED-CALL` (Warning). It is reversible; any escalation goes through §63.
+    `W-HOST-UNTYPED-CALL` (Warning). So does, in client logic, a member access on a DOM element type (rule 16) whose
+    interface, member and access is not an Appendix H entry (S473 allowlist, DRAFT). It is reversible; any escalation
+    goes through §63.
 
-**Implementation status (S473, `s473-boot-host-block-f3`).** The bootstrap (`compiler/self-host-v2/`) builds, for an
-adopter file: rules 1, 2, 4 to 9 and 11; rule 3's `src=` syntax; rule 10's client-only half; rule 12 for `int` /
+**Implementation status (S473, `s473-boot-host-block-f3`, `s473-host-allowlist-b`).** The bootstrap (`compiler/self-host-v2/`) builds, for an
+adopter file: rules 1, 2, 4 to 9 and 11; rule 3 (its `src=` syntax, and — s473-host-allowlist-a — the static export read and copy closure); rule 10's client-only half; rule 12 for `int` /
 `number` / `string` / `bool`, a declared handle and the `T | not` of one; rule 13 for a binding's result (those, a
 struct of those, a tape of those, the thenable rule); rule 15 (`E-HOST-TYPE-OUTSIDE`, `E-HOST-HANDLE-MEMBER`,
 `E-EQ-003`, `E-HOST-HANDLE-NOT-DATA` at a struct field and a server function); and rule 18's `E-HOST-THROW-RT`. A
 binding is emitted as `rt.hostCall(() => <target>, <type descriptor>, …)`, the target literal JavaScript (rule 7),
 its root read through the runtime (`rt.hostRoot("window")`) so no program name can shadow it. It refuses by name
-(`E-BOOTSTRAP-UNSUPPORTED`): a valid `src=` (rule 3's static export read is not built, and nothing is loaded), `->
+(`E-BOOTSTRAP-UNSUPPORTED`): `->
 waiting T` (rule 17), `! HostError` (rule 18), a `<host>` in a stdlib module file (rule 10's server side), a struct
 or tape argument (rule 12's deep copy), an enum result (rule 13), a cell or an enum payload holding a handle (rule
 15), and a parameter named `window` / `document` / `navigator` / `globalThis` (rule 4 does not say which root such
-a name is). **Rule 8 is built fail-closed (the #1659 review H1, S473 PA ruling):** it is one shared sink table
-judged over every chain segment in every shape, a READ included, so a binding cannot read a sink-valued member
-(`window.Function`, `window.eval`, `window.Reflect`, `document.defaultView`, an element's `.contentWindow`, …) and
-return it as a handle; a realm / handle name as a read's last member (`document`, `location`, `window`, `self`,
-`top`, …) is refused; a write of `innerHTML` / `outerHTML` / `srcdoc` / `text` / `textContent` / `value` /
-`nodeValue`, or anything through `location`, is refused; a `Reflect` / `Object.assign` / `defineProperty` call,
-`setAttributeNode` / `createAttribute` / `attributes`, and an alias of a sink through `.call` / `.apply` / `.bind`
-are all `E-HOST-TARGET-SINK`; and a bare-parameter or bare-global callee (a callable handle) is
-`E-HOST-TARGET-SHAPE`. The struct decode requires a non-array ordinary object and stops the field search at every
+a name is). **Rule 8 is built as the allowlist (S473, `s473-host-allowlist-b`):** the surface is
+`compiler/self-host-v2/host-surface.scrml`, Appendix H as data, diffed against this SPEC by
+`slice-m4/host-surface-appendix-h.test.js`; the typed chain walk is `analyze.scrml` hostWalk (rules 8.2–8.6:
+`E-HOST-ROOT-OPAQUE`, `E-HOST-TARGET-NOT-ALLOWED`, `E-HOST-ARG-TYPE`, `E-HOST-RESULT-TYPE`, a literal URL's
+`E-ATTR-STATIC-EXECUTABLE`), and `E-HOST-TYPE-NO-SRC` is parse.scrml's. The Appendix H names are built-in host
+types (a user struct of such a name shadows one, 8.1). #1659's interim denylist is deleted; a test proves the walk
+refuses every line it refused, at every Appendix H typing. The run-time halves are built (`s473-host-allowlist-a`,
+merged): a guarded entry is emitted through `runtime.js` `hostInert` (rule 8.5 inert-receiver, trap
+`E-HOST-RECEIVER-RT`), `hostUrl` / `hostAttrValue` (§5.2 rule 3's guard) and `hostSetAttrName`; an interface result
+— a downcast included — decodes as the rule 8.7 brand check (`E-HOST-VALUE-MISMATCH-RT`). Rule 3's static `src=`
+export read and copy closure are built (`slice-m1/host-src.js`); a callback parameter (rule 19) is still not
+expressible, so no callback entry is reachable. A bare-parameter or bare-global callee (a callable handle) is `E-HOST-TARGET-SHAPE`. The struct decode requires a non-array ordinary object and stops the field search at every
 chain-terminal (`Object.prototype` of any realm), and a tape counts own indices only, so cross-realm and
 `Array.prototype` / `Function.prototype` pollution cannot supply a field or an element (review M1); a throw during
 the decode is `E-HOST-THROW-RT` (review Q3); `then` is read once (review M2). It cannot express, so never accepts: a
-DOM element type (rule 16; an unknown type in the bootstrap), a callback parameter (rule 19), or a function, map,
+callback parameter (rule 19), or a function, map,
 set or tuple type (rule 14), since it parses none of these types. Not emitted: `E-HOST-TYPE-NOT-CROSSABLE`, `E-HOST-CALLBACK-WAITS`, and
 `W-HOST-UNTYPED-CALL` (the bootstrap refuses a bare `window` / `document` read and an untyped `.js` import outright,
 so there is no untyped door to lint). The rest of the build is `g-boot-host-block-f3-unbuilt-s473`.
@@ -25517,7 +25969,13 @@ A `.ts` / `.mts` host module still has only `import:host`, because `<host src=>`
 | `E-HOST-SRC-INVALID` | `<host src=>` is not a relative `.js` / `.mjs` path as rule 3 defines one | Error (Nominal) |
 | `E-HOST-TARGET-SHAPE` | a target is not one call, `new`, property read or property write over parameters, literals and a one-level object literal; or its chain names `constructor` / `prototype` / `__proto__`; or a `fn` binding's target is rooted at `window` / `document` / `navigator` (rules 4, 11) | Error (Nominal) |
 | `E-HOST-TARGET-UNBOUND` | a target's callee root is not a parameter, a `src` export, or `window` / `document` / `navigator` (rule 4) | Error (Nominal) |
-| `E-HOST-TARGET-SINK` | a target reaches a source-evaluating or navigation sink: `eval`, `Function`, a string timer, `document.write`, an HTML-string API, an `innerHTML` / `outerHTML` / `srcdoc` write, or a `location` write or navigation call (rule 8) | Error (Nominal) |
+| ~~`E-HOST-TARGET-SINK`~~ | **Retired (S473 allowlist):** rule 8 is the host surface; what this code refused is `E-HOST-TARGET-NOT-ALLOWED` (or `E-HOST-ROOT-OPAQUE` / `E-HOST-ARG-TYPE`) | — |
+| `E-HOST-TARGET-NOT-ALLOWED` | a target's member is not an Appendix H entry of its receiver's interface with that access, or a mid-chain read's result is not an interface (rule 8.3); a `guarded(attr-name)` name is an event-handler name or `srcdoc` (rule 8.5) | Error (Nominal) |
+| `E-HOST-ROOT-OPAQUE` | a target is rooted at a parameter whose type is not an Appendix H interface — a data type, `asIs`, a callback, a user struct or enum, or a user `:host` type outside its own `<host src=>` (rules 8.2, 8.6) | Error (Nominal) |
+| `E-HOST-ARG-TYPE` | an argument does not fit the entry's parameter: arity; `asIs`, data or an opaque value in an interface slot; a non-function in a callback slot; a non-literal or an unadmitted literal in a literal-only slot; an object literal outside the dictionary (rule 8.4) | Error (Nominal) |
+| `E-HOST-RESULT-TYPE` | a declared result does not fit the entry's result: a user `:host` result; `T | not` declared without `not`; a result on a write; a non-waiting binding of a waiting entry; a struct field that is not a `read` entry (rules 8.4, 8.6) | Error (Nominal) |
+| `E-HOST-TYPE-NO-SRC` | `type Name:host` stands in a `<host>` without `src=` (rule 8.6) | Error (Nominal) |
+| `E-HOST-RECEIVER-RT` | at run time, a `guarded(inert-receiver)` entry's receiver is not an HTML element on the inert element list with the realm's own prototype for its tag (rule 8.5) | Runtime trap (Nominal) |
 | `E-HOST-PARAM-USE` | a declared parameter does not appear in the target, or appears more than once (rule 5) | Error (Nominal) |
 | `E-HOST-NO-TARGET` | a binding without `= target` stands in a `<host>` that has no `src=` (rule 6) | Error (Nominal) |
 | `E-HOST-TYPE-NOT-CROSSABLE` | a binding declares a function-typed result, a waiting callback parameter, a `lin` result, or a map / set / tuple type at any depth (rule 14) | Error (Nominal) |
@@ -29019,7 +29477,7 @@ are REFUSED by impl#1, `E-IMPL1-RULED-FORM-UNSUPPORTED` (its row lands with that
 | E-SCOPE-001 | §5.2, §15.10.1 | Unquoted identifier not resolvable in scope. Includes a component prop referenced in component-body text the compiler cannot parse: the prop cannot be substituted there (§15.10.1), so it would reach the page unbound (emitted at `compiler/src/component-expander.ts`, `expandComponentNode`). Provenance: ruling:user-voice-scrml.md S458 "your recs on both D1 codes". | Error |
 | E-SCOPE-REDECLARE | §7.3.3 | Inside a function body, a `let` / `const` / `lin` / `function` declaration redeclares a name already bound in the SAME block (another such declaration, or — in the function's top-level block — a parameter). Nested-block shadowing is legal; so are two `function` declarations of one name and a `function` declaration named like a parameter (S432). Before this code the program failed at codegen ("Identifier already declared"); a `defer` in the block made it compile. Direction: newly-rejecting in name only (every rejected program already failed at codegen). (S430 round 5; emitted at `compiler/src/validators/lint-redeclare.ts`.) | Error |
 | E-CALL-ARITY | §7.3 | A call passes more arguments than the function declares parameters, or fewer — unless each omitted parameter has a default (§7.3.2). Reopen condition (ruled): the callback case. **Provenance:** ruling:user-voice-scrml.md S440 (#4 = (c); #2 and #5 = PA recs — item #2). **Named; impl pending — Nominal / not yet emitted** (measured S440: impl#1 compiles both at exit 0); impl#1 carries it (§34.0). **S447:** the call-site check is restated with the argument-type check in §7.3.4 (plain calls); same Nominal status. **Provenance:** ruling:user-voice-scrml.md S447 (*"RULED — UFCS PARKED; keep only the argument checks"* — call 9 kept). | Error |
-| E-SCOPE-010 | §7.6, §20.4, §21.3.1.1, §21.3.3 | **Duplicate binding in file scope.** A name already bound at file scope is bound again in the same file, whatever the two bindings name — a `let` / `const`, a `function`, a `type`, a user declaration (`<card>`), or an import of the name — in any pairing (S440 ruling #6: two top-level `function`s; S473: across kinds, `<card>` beside `function card`, a type beside a function of its name). ALSO (S473 round 2, narrowed, §7.6): one name EXPORTED by two user files of one program; a private name never collides across files. Provenance: ruling:user-voice-scrml.md S440 (the S440 22-item queue, item 6); ruling:user-voice-scrml.md S473 "⭐ RULED — S473 PA recs, all" item 4; ruling:user-voice-scrml.md "⭐ RULED — S473 owner questions round 2, PA recs" item 5; ruling:user-voice-scrml.md "⭐ RULED — 'one name per program' narrowed to exported names". Emitted by the bootstrap at `compiler/self-host-v2/analyze.scrml` (its `fileNameClashes`, `dupDecls`, `dupFns`, `dupFields` and `linkage` passes). impl#1 emits it for a duplicate file-scope `let` / `const` only and carries the S440 / S473 cases (Nominal, §34.0). ALSO (§20.4): a variable named with a reserved binding name (`route`, `session`) — that trigger is spec-ahead (S265), not emitted by either compiler. ALSO (S473, §21.3.1.1, §41.7): a host-import name collision — an `import:host` binding name also bound by a plain `import`, another `import:host`, the same `import:host` twice, or a declaration of its file (emitted by the bootstrap at `compiler/self-host-v2/analyze.scrml` hostImportClash; Nominal on impl#1); and a `<host>` binding name also bound in its file as a value — by another binding, a declaration, a plain `import` or an `import:host` (DRAFT §21.3.3 rule 9 — emitted by the bootstrap, where a binding is an ordinary file-scope function item, s473-boot-host-block-f3; Nominal on impl#1; extends item 2 to `<host>`, ratified by ruling:user-voice-scrml.md S473 "⭐ RULED — S473 owner questions round 2, PA recs" item 8). Provenance: ruling:user-voice-scrml.md S473 "⭐ RULED — S473 PA recs, all" item 2. | Error |
+| E-SCOPE-010 | §7.6, §20.4, §21.3.1.1, §21.3.3 | **Duplicate binding in file scope.** A name already bound at file scope is bound again in the same file, whatever the two bindings name — a `let` / `const`, a `function`, a `type`, a user declaration (`<card>`), or an import of the name — in any pairing (S440 ruling #6: two top-level `function`s; S473: across kinds, `<card>` beside `function card`, a type beside a function of its name). ALSO (S473 round 2, narrowed, §7.6): one name EXPORTED by two user files of one program; a private name never collides across files. Provenance: ruling:user-voice-scrml.md S440 (the S440 22-item queue, item 6); ruling:user-voice-scrml.md S473 "⭐ RULED — S473 PA recs, all" item 4; ruling:user-voice-scrml.md "⭐ RULED — S473 owner questions round 2, PA recs" item 5; ruling:user-voice-scrml.md "⭐ RULED — 'one name per program' narrowed to exported names". Emitted by the bootstrap at `compiler/self-host-v2/analyze.scrml` (its `fileNameClashes`, `dupDecls`, `dupFns`, `dupFields` and `linkage` passes). impl#1 emits it for a duplicate file-scope `let` / `const` only and carries the S440 / S473 cases (Nominal, §34.0). ALSO (§20.4): a variable named with a reserved binding name (`route`, `session`) — that trigger is spec-ahead (S265), not emitted by either compiler. ALSO (S473, §21.3.1.1, §41.7): a host-import name collision — an `import:host` binding name also bound by a plain `import`, another `import:host`, the same `import:host` twice, or a declaration of its file (emitted by the bootstrap at `compiler/self-host-v2/analyze.scrml` hostImportClash; Nominal on impl#1); and a `<host>` binding name also bound in its file as a value — by another binding, a declaration, a plain `import` or an `import:host` (DRAFT §21.3.3 rule 9 — emitted by the bootstrap, where a binding is an ordinary file-scope function item, s473-boot-host-block-f3; Nominal on impl#1; extends item 2 to `<host>`, ratified by ruling:user-voice-scrml.md S473 "⭐ RULED — S473 owner questions round 2, PA recs" item 8). Provenance: ruling:user-voice-scrml.md S473 "⭐ RULED — S473 PA recs, all" item 2. ALSO (S473 allowlist, DRAFT §21.3.3 rule 8.1): a `type Name:host` line naming an Appendix H interface (a built-in host type) — emitted by the bootstrap at `compiler/self-host-v2/parse.scrml` (hostTypeLine; s473-host-allowlist-b); a user struct or enum of such a name shadows the built-in instead (ruling: user-voice-scrml.md S473 D34). | Error |
 | E-SCOPE-011 | §20.4 | Access to undeclared route parameter name **(Reserved / spec-ahead, S263 — no fire site: the undeclared-route-param check is spec-ahead — `route.params` is not typer-supported for pages and no param-name allow-list exists. Excluded from the freeze fireable set.)** | Error |
 | E-SCOPE-012 | §20.5 | `session` accessed outside a server-escalated function body **(LIVE, S265 (i29e) — the §20.5 server `session` establishment builtin is built; bare `session` is bound into server-escalated scopes and auto-escalates its enclosing function, so a `session` reference that is NOT server-escalated (e.g. top-level `${ }` logic) fires this. Distinct from the `@session` client projection.)** | Error |
 | E-SESSION-CONTEXT | §20.5.1 | `session.*` used outside a web-app server route handler — an SSE `server function*`, an `<endpoint>` arm, a `<machine>` method, a serverLoad cell, an in-process server-fn helper called by another server function, or a headless `kind="tool"` program. Those contexts have no cookie-session request/response context. **(LIVE, S265/S239 i29e.)** | Error |
@@ -29232,19 +29690,25 @@ are REFUSED by impl#1, `E-IMPL1-RULED-FORM-UNSUPPORTED` (its row lands with that
 | E-TEXT-NON-PRIMITIVE | §14.13.2, §7.4.2, §5.5.3 | A value that is not a primitive (`string`, `int`, `number`, `bool`, unit enum value) in a text sink other than `print` / `println`: markup text `${e}`, a `${e}` in a quoted attribute value, or a `${e}` slot of a logic backtick template — a struct, tape, tuple, map or set, payload enum value, function, or a value of unresolved type. The message names a field read, a `scrml:format` call (§41.22) or `log()`. A markup value is not text (it renders as markup). `print` keeps E-PRINT-NON-PRIMITIVE. **Code name provisional (PA, S469).** **impl#1: Nominal / not yet emitted** (it renders JavaScript `String()`). **The bootstrap emits it** (S472 status update, `g-spec-e-text-non-primitive-row-stale-s472`): for a logic template slot since #1497 — every limb, the unresolved type included — emitted at `compiler/self-host-v2/analyze.scrml` (`notText`; the unresolved limb `textUnresolved`); for MARKUP TEXT since S472 — a known non-primitive, a `T | not` of one, and each member of a choice — emitted at `compiler/self-host-v2/analyze.scrml` (`markupTextKnown`, reached from `markupText` for a markup `${e}` and for each value a markup `${ for … { lift e; } }` gather lifts, §17.4 — `typeGather`). It does NOT fire on a `lift` into a loop bound as a value (§49.6 rule 2: a tape element, not a text sink). A `{ lift … }` match arm is not judged as text by itself: the match's VALUE is judged where it stands — a markup `${match … { .A :> { lift @p; }, … }}` of a struct is still refused, a match bound to a local or returned is not text. Still owed on the bootstrap: markup text's unresolved-type limb (a value whose type the bootstrap typer does not infer — measured S472: refusing it would refuse four interpolations in the §66.19 worked programs, whose types §66.3 infers) filed `g-boot-markup-text-unresolved-limb-s472`. (A quoted attribute value holding `${…}` is refused whole on the bootstrap — E-BOOTSTRAP-UNSUPPORTED, §5.5.3's reactive template is not in it — so that limb has nothing to admit.) Provenance: ruling:user-voice-scrml.md S469 "⭐ RULED — conversions: what MUST be spelled out" — *"yeah, I like that better"*. Direction of change: newly-rejecting. | Error |
 | W-STRING-INTERP-LITERAL | §14.13.3 | A QUOTED string literal in logic (`"…"` / `'…'`) whose raw text holds an unescaped `${ … }`. A quoted string is not a template: the `${` is plain text, which a JavaScript reader does not expect. Not reported: an escaped `\${`; a `${` with no closing `}`; a code-default body's display-text literal (§4.18.4), which interpolates. Fix: a backtick template (§14.13.3), or interpolate in markup. **Code name provisional** (named by the bootstrap, S469). Emitted by the bootstrap at `compiler/self-host-v2/parse.scrml` (`interpLiteralLint`); **Nominal on impl#1**. Provenance: dispatch:s469-boot-strings-1 — a PA / bootstrap addition, **not owner-ruled** (the S469 "provisional diagnostic codes confirmed" entry does not name this code). Direction of change: inert (a warning). | Warning |
 | E-INT-CONVERSION-RT | §41.18, §19.17 | Runtime trap: `floor`, `ceil`, `trunc` or `round` of NaN, ±∞, or a value that rounds outside ±(2^53−1). Stops the current unit of execution; not a `!` error (§19.17). **Code name provisional (PA, S469).** ~~**Nominal / spec-ahead — not yet emitted.**~~ Emitted since S472 at `stdlib/math/host.js` (the bootstrap's `scrml:math` host module) and `compiler/runtime/stdlib/math.js` (impl#1's shim). Provenance: ruling:user-voice-scrml.md S469 "⭐ RULED — conversions: lossy number → int is named, round needs a mode" — *"Named, mode required (Recommended)"*. | Runtime |
-| E-HOST-VALUE-MISMATCH-RT | §21.3.1.1, §19.17 | Runtime trap: the value a host function returned does not fit its wrapper's declared return type — the return-point decode (`int` integral within ±(2^53−1); `string` / `number` / `bool` by kind; `T \| not` admits `null` / `undefined`; a non-optional type receiving `null` / `undefined` and a thenable are mismatches). It means the declaration is wrong, not that the call failed. Emitted at `compiler/self-host-v2/slice-m1/runtime/runtime.js` (hostResult — the bootstrap's client and server runtimes); **Nominal on impl#1** (it ships hand-written shims, no wrappers; carried, §34.0). Provenance: ruling:user-voice-scrml.md S472 "⭐ RULED — host function type, math API, remaining review debt" item 1 — *"your recs"*; decode: `scrml-support/docs/deep-dives/typed-host-binding-f3-design-2026-10-27.md` §5.4. Direction of change: semantics-defined. ALSO (DRAFT §21.3.3 rule 13, S473 "⭐ RULED — S473 PA recs, all" item 4 — *"checked results"*): a `<host>` binding's result or a callback argument the host passes does not fit its declared type (also enums, structs, tapes; a thenable from a binding not declared `waiting`) — **emitted by the bootstrap for a binding's RESULT** at `compiler/self-host-v2/slice-m1/runtime/runtime.js` (hostCall / hostDecode — scalars, `T | not`, structs, tapes, handles, thenables; s473-boot-host-block-f3); a callback argument and an enum are not built there (refused at the binding, `E-BOOTSTRAP-UNSUPPORTED`). | Runtime |
+| E-HOST-VALUE-MISMATCH-RT | §21.3.1.1, §19.17 | Runtime trap: the value a host function returned does not fit its wrapper's declared return type — the return-point decode (`int` integral within ±(2^53−1); `string` / `number` / `bool` by kind; `T \| not` admits `null` / `undefined`; a non-optional type receiving `null` / `undefined` and a thenable are mismatches). It means the declaration is wrong, not that the call failed. Emitted at `compiler/self-host-v2/slice-m1/runtime/runtime.js` (hostResult — the bootstrap's client and server runtimes); **Nominal on impl#1** (it ships hand-written shims, no wrappers; carried, §34.0). Provenance: ruling:user-voice-scrml.md S472 "⭐ RULED — host function type, math API, remaining review debt" item 1 — *"your recs"*; decode: `scrml-support/docs/deep-dives/typed-host-binding-f3-design-2026-10-27.md` §5.4. Direction of change: semantics-defined. ALSO (DRAFT §21.3.3 rule 13, S473 "⭐ RULED — S473 PA recs, all" item 4 — *"checked results"*): a `<host>` binding's result or a callback argument the host passes does not fit its declared type (also enums, structs, tapes; a thenable from a binding not declared `waiting`) — **emitted by the bootstrap for a binding's RESULT** at `compiler/self-host-v2/slice-m1/runtime/runtime.js` (hostCall / hostDecode — scalars, `T | not`, structs, tapes, handles, thenables; s473-boot-host-block-f3); a callback argument and an enum are not built there (refused at the binding, `E-BOOTSTRAP-UNSUPPORTED`). ALSO (S473 allowlist, DRAFT §21.3.3 rule 8.7): the brand check — a `src=` result declared as an Appendix H interface, or a downcast result, that is not a platform object of that interface in the page realm. Emitted by the bootstrap at `compiler/self-host-v2/slice-m1/runtime/runtime.js` (hostBranded / the `iface` descriptor, s473-host-allowlist-a), for a downcast result and a `src=` result declared as an interface (`compiler/self-host-v2/print.scrml` hostHandleKind, s473-host-allowlist-b). | Runtime |
 | E-HOST-BINDING-USE | §21.3.1.1 | An `import:host` binding used other than as the direct callee of the whole-body `return h(p1, …, pn);` of its one fully typed wrapper (a bare reference, a call elsewhere, arguments that are not the wrapper's parameters in order, a re-export, a second wrapper, a wrapper without a declared return type, a `!` or `server` wrapper). **Code name PA's (S472)** — the ruling says "Any other use of a host binding is refused" and names no code. Emitted by the bootstrap at `compiler/self-host-v2/analyze.scrml` (resolveHostBinding); **Nominal on impl#1** (carried, §34.0 — its own `stdlib/compiler/**` re-exports bindings, §41.17 deferred). Provenance: ruling:user-voice-scrml.md S472 "⭐ RULED — host function type, math API, remaining review debt" item 1. Direction of change: newly-rejecting. | Error |
 | E-HOST-BINDING-PLACEMENT | §21.3.3 | Raised when a `<host>` is written anywhere other than file top level or a direct child of `<program>` (rule 1). **Emitted by the bootstrap** at `compiler/self-host-v2/parse.scrml` (refuseHostPlacement) (s473-boot-host-block-f3); **Nominal on impl#1** (S471 policy: impl#1 does not build §21.3.3; carried, §34.0). Provenance: ruling:user-voice-scrml.md S473 "⭐ RULED — S473 PA recs, all" item 4; design `scrml-support/docs/deep-dives/typed-host-binding-f3-design-2026-10-27.md` §7. Direction of change: newly-rejecting within a newly-accepting element. | Error |
 | E-HOST-BINDING-MALFORMED | §21.3.3 | Raised when a `<host>` body line is not a `//` comment, a `type Name:host` line, a binding `name(params) -> Result = target`, or an `=` continuation line (rule 2) — including a binding spelled with the deprecated `pure`. **Emitted by the bootstrap** at `compiler/self-host-v2/parse.scrml` (hostLine / hostMalformed) (s473-boot-host-block-f3); **Nominal on impl#1** (S471 policy: impl#1 does not build §21.3.3; carried, §34.0). Provenance: ruling:user-voice-scrml.md S473 "⭐ RULED — S473 PA recs, all" item 4; design `scrml-support/docs/deep-dives/typed-host-binding-f3-design-2026-10-27.md` §7. Direction of change: newly-rejecting within a newly-accepting element. | Error |
-| E-HOST-SRC-INVALID | §21.3.3 | Raised when `<host src=>` is not a relative `.js` / `.mjs` path as rule 3 defines one (begins `./` or `../`, `/` separators only, no `?` / `#` / `\`, ends exactly `.js` / `.mjs`). A bare specifier, a missing file and a file outside the project root keep `E-IMPORT-005` / `-006` / `-011`. **Emitted by the bootstrap** at `compiler/self-host-v2/parse.scrml` (hostSrcDiags; a VALID `src=` is refused there as `E-BOOTSTRAP-UNSUPPORTED` — the rule 3 static export read is not built) (s473-boot-host-block-f3); **Nominal on impl#1** (S471 policy: impl#1 does not build §21.3.3; carried, §34.0). Provenance: ruling:user-voice-scrml.md S473 "⭐ RULED — S473 PA recs, all" item 4; design `scrml-support/docs/deep-dives/typed-host-binding-f3-design-2026-10-27.md` §7. Direction of change: newly-rejecting within a newly-accepting element. | Error |
+| E-HOST-SRC-INVALID | §21.3.3 | Raised when `<host src=>` is not a relative `.js` / `.mjs` path as rule 3 defines one (begins `./` or `../`, `/` separators only, no `?` / `#` / `\`, ends exactly `.js` / `.mjs`). A bare specifier, a missing file and a file outside the project root keep `E-IMPORT-005` / `-006` / `-011`. **Emitted by the bootstrap** at `compiler/self-host-v2/parse.scrml` (hostSrcDiags; a valid `src=`'s file and exports are judged by the driver, `slice-m1/host-src.js`) (s473-boot-host-block-f3); **Nominal on impl#1** (S471 policy: impl#1 does not build §21.3.3; carried, §34.0). Provenance: ruling:user-voice-scrml.md S473 "⭐ RULED — S473 PA recs, all" item 4; design `scrml-support/docs/deep-dives/typed-host-binding-f3-design-2026-10-27.md` §7. Direction of change: newly-rejecting within a newly-accepting element. | Error |
 | E-HOST-TARGET-SHAPE | §21.3.3 | Raised when a binding's target is not exactly one call, `new` construction, property read or property write whose arguments are parameters, literals or a one-level object literal of those (an operator, lambda, computed member, spread or nested call); when the chain names `constructor`, `prototype` or `__proto__`, or an object-literal key is `__proto__`; and when a `fn` binding's target is rooted at `window` / `document` / `navigator` (rules 4, 11). **Emitted by the bootstrap** at `compiler/self-host-v2/parse.scrml` (hostTargetDiags) (s473-boot-host-block-f3); **Nominal on impl#1** (S471 policy: impl#1 does not build §21.3.3; carried, §34.0). Provenance: ruling:user-voice-scrml.md S473 "⭐ RULED — S473 PA recs, all" item 4; design `scrml-support/docs/deep-dives/typed-host-binding-f3-design-2026-10-27.md` §7. Direction of change: newly-rejecting within a newly-accepting element. | Error |
 | E-HOST-TARGET-UNBOUND | §21.3.3 | Raised when a target's callee root is not a parameter of the binding, an export of `src`, or `window` / `document` / `navigator` (`globalThis` included) (rule 4). **Emitted by the bootstrap** at `compiler/self-host-v2/parse.scrml` (hostTargetDiags) (s473-boot-host-block-f3); **Nominal on impl#1** (S471 policy: impl#1 does not build §21.3.3; carried, §34.0). Provenance: ruling:user-voice-scrml.md S473 "⭐ RULED — S473 PA recs, all" item 4; design `scrml-support/docs/deep-dives/typed-host-binding-f3-design-2026-10-27.md` §7. Direction of change: newly-rejecting within a newly-accepting element. | Error |
-| E-HOST-TARGET-SINK | §21.3.3, §5.2 | Raised when a binding's target reaches a sink that runs source text or navigates (rule 8): a call or construction whose last member is `eval` or `Function`, or `setTimeout` / `setInterval` with a first argument not of a function type; a call of `document.write`, `document.writeln`, `insertAdjacentHTML`, `createContextualFragment`, `setHTMLUnsafe` or `execCommand`; a property write of `innerHTML`, `outerHTML` or `srcdoc`; a `setAttribute` / `setAttributeNS` / `toggleAttribute` call whose name argument is non-literal, `srcdoc`, or `on…`; a write to `location` or a member of it, or a call of `location.assign`, `location.replace` or `window.open`. Applies the §5.2 S464 principle (no unchecked source text handed to the browser). **Emitted by the bootstrap** at `compiler/self-host-v2/parse.scrml` (hostSinkWhy — judged over every chain segment, so a sink reached through `.call` / `.apply` / `.bind` is refused too) (s473-boot-host-block-f3); **Nominal on impl#1** (S471 policy: impl#1 does not build §21.3.3; carried, §34.0). Provenance: PA addition on the S239 review of #1630 (M10), within the element ruled by ruling:user-voice-scrml.md S473 "⭐ RULED — S473 PA recs, all" item 4. Direction of change: newly-rejecting within a newly-accepting element. | Error |
+| ~~E-HOST-TARGET-SINK~~ | §21.3.3 | **Retired (S473 allowlist, `s473-host-allowlist-b`).** It named the DRAFT rule 8 sink denylist, emitted only by the bootstrap build of #1659 and never by a merged release. Rule 8 is now the host surface (Appendix H): what this code refused is `E-HOST-TARGET-NOT-ALLOWED` (or `E-HOST-ROOT-OPAQUE` / `E-HOST-ARG-TYPE`). Provenance: ruling:user-voice-scrml.md S473 "⭐ RULED — `<host>` rule 8 moves from a sink denylist to an allowlist" (item 1: *"A binding may call or read only what the allowlist admits; everything else is refused at compile time."*) and "⭐ RULED — S473 PA recs: host allowlist Q1–Q4, plain-logic DOM sinks, impl#1 transport routing" item 1 (Q1–Q4, *"your recs"*); design `scrml-support/docs/deep-dives/host-binding-allowlist-design-2026-10-29.md` §9. | — |
+| E-HOST-TARGET-NOT-ALLOWED | §21.3.3 r8.3, r8.5, App. H | Raised when a `<host>` binding's target names a member that is not an Appendix H entry of its receiver's interface with the target's access (call / construct / read / write), when a member other than the last reads a value that is not an interface, when the entry conflicts with the §5.2 plain-logic executable-sink set, or when a `guarded(attr-name)` attribute name is one §5.2 / §65.4.2 refuses from data — an event-handler name, `srcdoc`, `form`, `formaction`, `style` (the markup walk's own predicate, analyze.scrml dataAttrRefusal; #1674 review F1). The message names the interface, the member and the access, and offers a `src=` binding. **Emitted by the bootstrap** at `compiler/self-host-v2/analyze.scrml` (hostWalk, hostArgFit) (s473-host-allowlist-b); **Nominal on impl#1** (S471 policy: impl#1 does not build §21.3.3; carried, §34.0). Provenance: ruling:user-voice-scrml.md S473 "⭐ RULED — `<host>` rule 8 moves from a sink denylist to an allowlist" (item 1: *"A binding may call or read only what the allowlist admits; everything else is refused at compile time."*) and "⭐ RULED — S473 PA recs: host allowlist Q1–Q4, plain-logic DOM sinks, impl#1 transport routing" item 1 (Q1–Q4, *"your recs"*); design `scrml-support/docs/deep-dives/host-binding-allowlist-design-2026-10-29.md` §9. Direction of change: newly-rejecting. | Error |
+| E-HOST-ROOT-OPAQUE | §21.3.3 r8.2, r8.6 | Raised when a `<host>` binding's target is rooted at a parameter whose type is not an Appendix H interface: a data type, `asIs`, a callback, a user struct or enum, or a user `:host` type outside the `<host src=>` that declares it. **Emitted by the bootstrap** at `compiler/self-host-v2/analyze.scrml` (hostWalk) (s473-host-allowlist-b); **Nominal on impl#1** (S471 policy: impl#1 does not build §21.3.3; carried, §34.0). Provenance: ruling:user-voice-scrml.md S473 "⭐ RULED — `<host>` rule 8 moves from a sink denylist to an allowlist" (item 1: *"A binding may call or read only what the allowlist admits; everything else is refused at compile time."*) and "⭐ RULED — S473 PA recs: host allowlist Q1–Q4, plain-logic DOM sinks, impl#1 transport routing" item 1 (Q1–Q4, *"your recs"*); design `scrml-support/docs/deep-dives/host-binding-allowlist-design-2026-10-29.md` §9. Direction of change: newly-rejecting. | Error |
+| E-HOST-ARG-TYPE | §21.3.3 r8.4 | Raised when an argument of a `<host>` binding's target does not fit the entry's parameter: the argument count; `asIs`, a data value or an opaque value in an interface slot; a non-function in a callback slot; a non-literal, or a literal outside the admitted set (`inert-tag`: Appendix H.4), in a literal-only slot (a PA reading — the design names no code for that slot); an object literal outside the H.5 dictionary. **Emitted by the bootstrap** at `compiler/self-host-v2/analyze.scrml` (hostWalk, hostArgFit) (s473-host-allowlist-b); **Nominal on impl#1** (S471 policy: impl#1 does not build §21.3.3; carried, §34.0). Provenance: ruling:user-voice-scrml.md S473 "⭐ RULED — `<host>` rule 8 moves from a sink denylist to an allowlist" (item 1: *"A binding may call or read only what the allowlist admits; everything else is refused at compile time."*) and "⭐ RULED — S473 PA recs: host allowlist Q1–Q4, plain-logic DOM sinks, impl#1 transport routing" item 1 (Q1–Q4, *"your recs"*); design `scrml-support/docs/deep-dives/host-binding-allowlist-design-2026-10-29.md` §9. Direction of change: newly-rejecting. | Error |
+| E-HOST-RESULT-TYPE | §21.3.3 r8.4, r8.6 | Raised when a `<host>` binding's declared result does not fit its entry's result: a user `:host` result of a surface entry; `T | not` declared without `not`; a result declared on a write; a binding not declared `waiting` of an entry whose result is `waiting T`; a struct declaring a field that is not a `read` entry of the interface, or of an incompatible type. **Emitted by the bootstrap** at `compiler/self-host-v2/analyze.scrml` (hostWalk, hostStructFromIface) (s473-host-allowlist-b); **Nominal on impl#1** (S471 policy: impl#1 does not build §21.3.3; carried, §34.0). Provenance: ruling:user-voice-scrml.md S473 "⭐ RULED — `<host>` rule 8 moves from a sink denylist to an allowlist" (item 1: *"A binding may call or read only what the allowlist admits; everything else is refused at compile time."*) and "⭐ RULED — S473 PA recs: host allowlist Q1–Q4, plain-logic DOM sinks, impl#1 transport routing" item 1 (Q1–Q4, *"your recs"*); design `scrml-support/docs/deep-dives/host-binding-allowlist-design-2026-10-29.md` §9. Direction of change: newly-rejecting. | Error |
+| E-HOST-TYPE-NO-SRC | §21.3.3 r8.6 | Raised when `type Name:host` stands in a `<host>` without `src=` — no surface entry produces a user-named handle, so the message names the Appendix H interface to use. **Emitted by the bootstrap** at `compiler/self-host-v2/parse.scrml` (hostTypeLine) (s473-host-allowlist-b); **Nominal on impl#1** (S471 policy: impl#1 does not build §21.3.3; carried, §34.0). Provenance: ruling:user-voice-scrml.md S473 "⭐ RULED — `<host>` rule 8 moves from a sink denylist to an allowlist" (item 1: *"A binding may call or read only what the allowlist admits; everything else is refused at compile time."*) and "⭐ RULED — S473 PA recs: host allowlist Q1–Q4, plain-logic DOM sinks, impl#1 transport routing" item 1 (Q1–Q4, *"your recs"*); design `scrml-support/docs/deep-dives/host-binding-allowlist-design-2026-10-29.md` §9. Direction of change: newly-rejecting (the S473 §21.3.3 example's `type Observer:host` is rewritten to `IntersectionObserver`). | Error |
+| E-HOST-RECEIVER-RT | §21.3.3 r8.5, §19.17 | Runtime trap, raised when a `guarded(inert-receiver)` host-surface entry (a children or attribute mutation: `textContent` write, `append` / `prepend` / `replaceChildren`, `setAttribute` / `removeAttribute`, a URL write) runs on a receiver that is not an HTML-namespace element whose local name, read through the captured `Element.prototype` accessor, is on Appendix H.4 — and whose prototype is exactly this realm's own prototype for that tag, so a customized built-in (`<button is=…>`), another realm's element and a re-prototyped element are refused (#1670 review M1; SPEC text per the #1674 review F3). **Emitted by the bootstrap** at `compiler/self-host-v2/slice-m1/runtime/runtime.js` (hostInert, s473-host-allowlist-a), reached from a compiled binding through `compiler/self-host-v2/print.scrml` (hostBindJs, s473-host-allowlist-b); **Nominal on impl#1** (S471 policy; carried, §34.0). Provenance: ruling:user-voice-scrml.md S473 "⭐ RULED — `<host>` rule 8 moves from a sink denylist to an allowlist" (item 1: *"A binding may call or read only what the allowlist admits; everything else is refused at compile time."*) and "⭐ RULED — S473 PA recs: host allowlist Q1–Q4, plain-logic DOM sinks, impl#1 transport routing" item 1 (Q1–Q4, *"your recs"*); design `scrml-support/docs/deep-dives/host-binding-allowlist-design-2026-10-29.md` §9. Direction of change: semantics-defined. | Runtime |
 | E-HOST-PARAM-USE | §21.3.3 | Raised when a declared parameter of a binding does not appear in its target, or appears more than once (rule 5). **Emitted by the bootstrap** at `compiler/self-host-v2/parse.scrml` (hostTargetDiags) (s473-boot-host-block-f3); **Nominal on impl#1** (S471 policy: impl#1 does not build §21.3.3; carried, §34.0). Provenance: ruling:user-voice-scrml.md S473 "⭐ RULED — S473 PA recs, all" item 4; design `scrml-support/docs/deep-dives/typed-host-binding-f3-design-2026-10-27.md` §7. Direction of change: newly-rejecting within a newly-accepting element. | Error |
 | E-HOST-NO-TARGET | §21.3.3 | Raised when a binding without `= target` stands in a `<host>` that has no `src=` (rule 6). **Emitted by the bootstrap** at `compiler/self-host-v2/parse.scrml` (hostTargetDiags) (s473-boot-host-block-f3); **Nominal on impl#1** (S471 policy: impl#1 does not build §21.3.3; carried, §34.0). Provenance: ruling:user-voice-scrml.md S473 "⭐ RULED — S473 PA recs, all" item 4; design `scrml-support/docs/deep-dives/typed-host-binding-f3-design-2026-10-27.md` §7. Direction of change: newly-rejecting within a newly-accepting element. | Error |
 | E-HOST-TYPE-NOT-CROSSABLE | §21.3.3 | Raised when a binding declares a type that cannot cross the host boundary: a function-typed result, a callback parameter of a waiting function type, a `lin` result, or a map / set / tuple type at any depth (rule 14). **Nominal / spec-ahead — not yet emitted** (DRAFT §21.3.3; the bootstrap builds it, `g-boot-host-block-f3-unbuilt-s473`). Provenance: ruling:user-voice-scrml.md S473 "⭐ RULED — S473 PA recs, all" item 4; design `scrml-support/docs/deep-dives/typed-host-binding-f3-design-2026-10-27.md` §7. Direction of change: newly-rejecting within a newly-accepting element. | Error |
 | E-HOST-TYPE-OUTSIDE | §21.3.3 | Raised when `type Name:host` is written outside a `<host>` (rule 15). **Emitted by the bootstrap** at `compiler/self-host-v2/parse.scrml` (parseTypeDecl) (s473-boot-host-block-f3); **Nominal on impl#1** (S471 policy: impl#1 does not build §21.3.3; carried, §34.0). Provenance: ruling:user-voice-scrml.md S473 "⭐ RULED — S473 PA recs, all" item 4; design `scrml-support/docs/deep-dives/typed-host-binding-f3-design-2026-10-27.md` §7. Direction of change: newly-rejecting within a newly-accepting element. | Error |
-| E-HOST-HANDLE-MEMBER | §21.3.3 | Raised when a member access or method call is written on a value of a USER-DECLARED `:host` type (rule 15). Not raised for the DOM element types `ref=` binds (rule 16: their members stay untyped, as in §6.7.1b). The message names the binding to declare instead. **Emitted by the bootstrap** at `compiler/self-host-v2/analyze.scrml` (resolveMember / resolveCall) (s473-boot-host-block-f3); **Nominal on impl#1** (S471 policy: impl#1 does not build §21.3.3; carried, §34.0). Provenance: ruling:user-voice-scrml.md S473 "⭐ RULED — S473 PA recs, all" item 4; design `scrml-support/docs/deep-dives/typed-host-binding-f3-design-2026-10-27.md` §7. Direction of change: newly-rejecting within a newly-accepting element. | Error |
+| E-HOST-HANDLE-MEMBER | §21.3.3 | Raised when a member access or method call is written on a value of a USER-DECLARED `:host` type (rule 15). Not raised for the DOM element types `ref=` binds (rule 16: their members stay untyped, as in §6.7.1b). The message names the binding to declare instead. **Emitted by the bootstrap** at `compiler/self-host-v2/analyze.scrml` (resolveMember / resolveCall) (s473-boot-host-block-f3); **Nominal on impl#1** (S471 policy: impl#1 does not build §21.3.3; carried, §34.0). Provenance: ruling:user-voice-scrml.md S473 "⭐ RULED — S473 PA recs, all" item 4; design `scrml-support/docs/deep-dives/typed-host-binding-f3-design-2026-10-27.md` §7. Direction of change: newly-rejecting within a newly-accepting element. ALSO (S473 allowlist, rule 15 as amended): a member access or method call on a value of an Appendix H interface type other than a DOM element type (`MediaQueryList`, `DOMRect`, …) — emitted by the bootstrap at the same sites (s473-host-allowlist-b); on a DOM element type the bootstrap refuses open member access by name (`E-BOOTSTRAP-UNSUPPORTED`). | Error |
 | E-HOST-HANDLE-NOT-DATA | §21.3.3 | Raised when a type that contains a declared `:host` type at any depth (a tape, an enum payload, a `T | not`, a map value) is a struct field's type, crosses a §57.1 sink or a boundary that sends (a `persist=` or `server` cell, a server-function parameter or result, a channel or server-sent-event payload, a worker message, an `<api>` request body), or is a map key (rule 15). **Emitted by the bootstrap** for a struct field and a server-function parameter or result at `compiler/self-host-v2/analyze.scrml` (hostTypeDataDiags, hostServerDiags; s473-boot-host-block-f3) — a CELL or an enum payload holding a handle is refused there by name (`E-BOOTSTRAP-UNSUPPORTED`), and the bootstrap has no map, channel, worker or `<api>` boundary to judge; **Nominal on impl#1** (S471 policy: impl#1 does not build §21.3.3; carried, §34.0). Provenance: ruling:user-voice-scrml.md S473 "⭐ RULED — S473 PA recs, all" item 4; design `scrml-support/docs/deep-dives/typed-host-binding-f3-design-2026-10-27.md` §7. Direction of change: newly-rejecting within a newly-accepting element. | Error |
 | E-HOST-CALLBACK-WAITS | §21.3.3 | Raised when a lambda passed for a binding's callback parameter whose declared result is not `void` contains a waiting value (rule 19). **Nominal / spec-ahead — not yet emitted** (DRAFT §21.3.3; the bootstrap builds it, `g-boot-host-block-f3-unbuilt-s473`). Provenance: ruling:user-voice-scrml.md S473 "⭐ RULED — S473 PA recs, all" item 4; design `scrml-support/docs/deep-dives/typed-host-binding-f3-design-2026-10-27.md` §7. Direction of change: newly-rejecting within a newly-accepting element. | Error |
 | E-HOST-ERROR-TYPE | §21.3.3 | Raised when a binding's `!` names a type other than `HostError` (`scrml:host`) (rule 18). **Emitted by the bootstrap** at `compiler/self-host-v2/parse.scrml` (hostBindLine; `! HostError` itself is refused there as `E-BOOTSTRAP-UNSUPPORTED` — `scrml:host` is not built) (s473-boot-host-block-f3); **Nominal on impl#1** (S471 policy: impl#1 does not build §21.3.3; carried, §34.0). Provenance: ruling:user-voice-scrml.md S473 "⭐ RULED — S473 PA recs, all" item 4; design `scrml-support/docs/deep-dives/typed-host-binding-f3-design-2026-10-27.md` §7. Direction of change: newly-rejecting within a newly-accepting element. | Error |

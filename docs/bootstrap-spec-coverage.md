@@ -33,15 +33,15 @@ SPEC §47 (Output Name Encoding) was found unimplemented in the bootstrap with n
 <!-- @generated:coverage-totals START (do not edit — `bun scripts/spec-coverage-check.ts --write`) -->
 | status | rows |
 |---|---:|
-| BUILT | 278 |
-| PARTIAL | 155 |
+| BUILT | 281 |
+| PARTIAL | 154 |
 | REFUSED-LOUD | 309 |
-| DEFERRED-RULED | 65 |
+| DEFERRED-RULED | 64 |
 | N/A | 220 |
 | SILENT-ACCEPT | 37 |
 | SILENT-ABSENT | 33 |
 | UNVERIFIED | 9 |
-| **total** | **1106** |
+| **total** | **1107** |
 
 SILENT rows carrying a gap id: 70 of 70.
 <!-- @generated:coverage-totals END -->
@@ -622,6 +622,12 @@ SILENT rows carrying a gap id: 70 of 70.
 |---|---|---|---|---|---|
 | App. E | `</>` closer migration | PARTIAL | `</>` BUILT (pE-closer). Bare `/` and trailing-`content/` closers are rejected only as a side effect of closer mismatch (E-PARSE-CLOSER, pE-slash, pE-slash2); the SHALL hint "Did you mean `</>`?" is missing | — | (P3) LOW |
 
+## Appendix H — Appendix H: The Host Surface (DRAFT)
+
+| § | title | status | evidence | gap ids | note |
+|---|---|---|---|---|---|
+| App. H | The host surface (H.1 format, H.2 interfaces, H.3 entries, H.4 inert list, H.5 dictionaries) | BUILT | mirrored one-to-one by compiler/self-host-v2/host-surface.scrml; H.4 = runtime.js HOST_INERT_ELEMENTS; diff test host-surface-appendix-h.test.js (SPEC ⇄ scrml ⇄ runtime) | — | Added by #1674 (S473 allowlist). Callback-slot entries are unreachable in the bootstrap (no callback parameter type; I5). |
+
 ## §20 — Navigation API
 
 | § | title | status | evidence | gap ids | note |
@@ -670,12 +676,12 @@ SILENT rows carrying a gap id: 70 of 70.
 | §21.3.2 | Dynamic `import(...)` → E-DYNAMIC-IMPORT-NOT-IN-SCRML | REFUSED-LOUD | probe `dynimp.scrml` → `E-SCOPE-001 import is not declared` | g-boot-not-in-scrml-codes-unbuilt-s473 | (P4) Fails closed, but not with the named code. 0 hits for E-DYNAMIC-IMPORT-NOT-IN-SCRML in self-host-v2. NO GAP. |
 | §21.3.3 r1 | `<host>` placement, E-HOST-BINDING-PLACEMENT, no HTML | BUILT | parse.scrml (host block reader). host-block-f3-s473.test.js "rule 1" | — | (P4) |
 | §21.3.3 r2 | Body lines, E-HOST-BINDING-MALFORMED (incl. `pure`) | BUILT | probes `h-pure`, `h-optchain`, `h-cb`. test "rule 2" | — | (P4) |
-| §21.3.3 r3 | `src=` (E-HOST-SRC-INVALID / E-IMPORT-005 / static export read) | PARTIAL | probe `h-srcok` → E-BOOTSTRAP-UNSUPPORTED (parse.scrml:6623). parse.scrml:6618 E-IMPORT-005. Gap `g-boot-host-block-f3-unbuilt-s473` (a) | g-boot-host-block-f3-unbuilt-s473 | (P4) A valid `src=` is refused by name. E-IMPORT-006/011 for `src=` are not reached. |
+| §21.3.3 r3 | `src=` (E-HOST-SRC-INVALID / E-IMPORT-005 / static export read) | BUILT | parse.scrml hostSrcDiags (syntax, E-IMPORT-005); the static export read + copy closure, E-IMPORT-004 / -006 / -011, are the driver's: slice-m1/host-src.js planHostSrcs (s473-host-allowlist-a, merged in #1674). test host-src-s473.test.js | — | (P4) Updated by #1674: a valid `src=` is built (no longer refused by name). |
 | §21.3.3 r4 | Target shapes, E-HOST-TARGET-SHAPE / -UNBOUND | BUILT | probes `h-objnest`, `h-ctor`, `h-proto`, `h-bracket`, `h-tmpl`, `h-newnomember` all → SHAPE. test "rule 4" (15 SHAPE asserts) | — | (P4) |
 | §21.3.3 r5 | E-HOST-PARAM-USE | BUILT | test "rule 5" | — | (P4) |
 | §21.3.3 r6 | E-HOST-NO-TARGET | BUILT | test "rule 6" | — | (P4) |
 | §21.3.3 r7 | Target emitted as literal JS, no `Function` | BUILT | probe `out-h-handlelocal/program.client.js:25`: `rt.hostCall(() => rt.hostRoot("window").foo.make(), …)`. No `Function(` / `eval(` | — | (P4) |
-| §21.3.3 r8 | No execution / navigation sinks | DEFERRED-RULED | per dispatch: being rewritten as an allowlist now (branch s473-host-allowlist-a). Open gap `g-spec-host-target-url-sinks-unjudged-s473` | g-spec-host-target-url-sinks-unjudged-s473 | (P4) Not audited. FYI, probe `h-hrefwrite` (`document.body.href = u`) compiles. The current text leaves URL-valued writes unjudged. |
+| §21.3.3 r8 | The host surface (allowlist; Appendix H) — E-HOST-TARGET-NOT-ALLOWED / -ROOT-OPAQUE / -ARG-TYPE / -RESULT-TYPE / -TYPE-NO-SRC / -RECEIVER-RT | BUILT | analyze.scrml hostWalk + host-surface.scrml (Appendix H as data); runtime.js hostInert / hostUrl / hostAttrValue / hostBrand. tests host-block-f3-s473, host-surface-appendix-h, host-allowlist-parity-s473, host-allowlist-runtime-s473, host-allowlist-chromium-s473 (opt-in) | — | (P4) Updated by #1674: rule 8 rewritten as the allowlist; `g-spec-host-target-url-sinks-unjudged-s473` resolved. Probe `h-hrefwrite` (`document.body.href = u`) is now E-HOST-TARGET-NOT-ALLOWED. |
 | §21.3.3 r9 | Binding is a file-scope fn, E-CALL-ARITY / E-TYPE-031 / E-SCOPE-010; MAY be exported | PARTIAL | arity/type/E-SCOPE-010 tested (test lines 98, 280–287). Export: probe `hx/` → E-IMPORT-004, and `export t()` in the block → MALFORMED (probe `h-export`). Gap `g-boot-host-block-f3-unbuilt-s473` (i) | g-boot-host-block-f3-unbuilt-s473 | (P4) Export fails closed. |
 | §21.3.3 r10 | Client-only outside stdlib (E-ROUTE-002/005); stdlib server side | PARTIAL | E-ROUTE-002/-005 tested. A stdlib `<host>` → E-BOOTSTRAP-UNSUPPORTED (analyze.scrml:4213). Gap (d) | — | (P4) |
 | §21.3.3 r11 | `fn` bindings, E-FN-003, `fn` rooted at window → SHAPE | BUILT | probes `h-fnnonfn` → E-FN-003, `h-fnwin` → SHAPE | — | (P4) |
