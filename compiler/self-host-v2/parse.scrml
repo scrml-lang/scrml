@@ -6625,9 +6625,8 @@ ${
     // `?`, `#` or `\`, and ends exactly in `.js` or `.mjs` (case included). Any
     // other value (… a non-string) SHALL be `E-HOST-SRC-INVALID`; a specifier
     // that names no relative path at all (`x.js`) is the §21.3 bare-specifier
-    // `E-IMPORT-005`." A valid one needs the static export read (rule 3
-    // "Exports are read statically"), which the bootstrap does not build:
-    // refused by name.
+    // `E-IMPORT-005`." A valid one is read by the driver (rule 3 "Exports are
+    // read statically" — slice-m1/host-src.js, s473 allowlist lane A).
     fn hostSrcDiags(a: AAttr, mp: MP) -> MP {
         const q: string | not = quotedOf(a.value)
         if (q is not) return mDiag(mp, "E-HOST-SRC-INVALID", "`<host src=…>` is not a string — `src=` is a quoted relative `.js` / `.mjs` path (§21.3.3 rule 3)", a.span.start, a.span.end)
@@ -6638,7 +6637,10 @@ ${
         if (!rel || looksAbs || q.indexOf("?") >= 0 || q.indexOf("#") >= 0 || !extOk) {
             return mDiag(mp, "E-HOST-SRC-INVALID", "`<host src=\"" + q + "\">` is not a relative `.js` / `.mjs` path — it SHALL begin with `./` or `../`, use `/` as its only separator, contain no `?`, `#` or `\\`, and end exactly in `.js` or `.mjs` (§21.3.3 rule 3)", a.span.start, a.span.end)
         }
-        return mDiag(mp, "E-BOOTSTRAP-UNSUPPORTED", "`<host src=\"" + q + "\">` is not in the bootstrap — a `src=` file's exports are read statically (§21.3.3 rule 3: \"The exports of a `src=` file SHALL be determined by parsing its ES module export declarations … The compiler SHALL NOT load, import, or evaluate a `src=` file\"), and that static export read and the file's copy are not built; a binding rooted at `window`, `document`, `navigator` or a parameter needs no `src=`", a.span.start, a.span.end)
+        // s473 (allowlist lane A): a valid `src=` is built — the file's existence, project-root and
+        // copy-class checks, its static export read and its copy are the driver's (slice-m1/host-src.js,
+        // over the checked Core: E-IMPORT-006 / -011 / -004), since only the driver reads files
+        return mp
     }
 
     // Rule 2's skippable lines: blank space and `//` comments.
@@ -6901,13 +6903,18 @@ ${
         // s473 (#1659 review H1 (b)): a call / `new` whose callee is a bare root (a parameter,
         // so a `:host` handle, or a global) with no members — rule 4 says the callee is a dotted
         // member chain, and a callable handle is the whole fail-open. Refuse it.
-        if (parts.shape <= 1 && ch.members.length == 0) return out.concat([newDiag("E-HOST-TARGET-SHAPE", "the target of `" + name + "` calls `" + ch.root + "` directly, with no member — a binding's callee SHALL be a dotted member chain (§21.3.3 rule 4), never a bare parameter or a bare global (a callable `:host` handle is a rule 8 fail-open, S473 #1659)" + shapeWhy, file, sp)])
+        // s473 (allowlist lane A, rule 4 "an export of `src` (when `src=` is present)"): in a `<host src=>`
+        // a root that is not a parameter or a host root names an export of the file — the driver reads the
+        // exports statically and refuses one the file does not export (E-HOST-TARGET-UNBOUND). Calling the
+        // export itself (`= mountChart(el)`) is the A-world (design §5.2 step 5): the author's JavaScript.
+        const srcRoot: boolean = src != "" && hostParamIndex(ps, ch.root) < 0 && !hostRootGlobal(ch.root) && ch.root != "globalThis"
+        if (parts.shape <= 1 && ch.members.length == 0 && !srcRoot) return out.concat([newDiag("E-HOST-TARGET-SHAPE", "the target of `" + name + "` calls `" + ch.root + "` directly, with no member — a binding's callee SHALL be a dotted member chain (§21.3.3 rule 4), never a bare parameter or a bare global (a callable `:host` handle is a rule 8 fail-open, S473 #1659)" + shapeWhy, file, sp)])
         for (const mb of ch.members) {
             if (mb == "constructor" || mb == "prototype" || mb == "__proto__") return out.concat([newDiag("E-HOST-TARGET-SHAPE", "the target of `" + name + "` names `" + mb + "` — a member named `constructor`, `prototype` or `__proto__` SHALL NOT appear in a target's chain (§21.3.3 rule 4)", file, sp)])
         }
         const rootParam: int = hostParamIndex(ps, ch.root)
-        if (rootParam < 0 && !hostRootGlobal(ch.root)) return out.concat([newDiag("E-HOST-TARGET-UNBOUND", "the target of `" + name + "` is rooted at `" + ch.root + "`, which is not a parameter of the binding, an export of `src`, or `window` / `document` / `navigator` (§21.3.3 rule 4; `globalThis` and other globals are not roots)", file, sp)])
-        if (isFn && rootParam < 0) return out.concat([newDiag("E-HOST-TARGET-SHAPE", "`" + name + "` is declared `fn` (deterministic, no effect — §21.3.3 rule 11) but its target is rooted at `" + ch.root + "`: those reads are the `E-FN-004` class; drop `fn`", file, sp)])
+        if (rootParam < 0 && !hostRootGlobal(ch.root) && !srcRoot) return out.concat([newDiag("E-HOST-TARGET-UNBOUND", "the target of `" + name + "` is rooted at `" + ch.root + "`, which is not a parameter of the binding, an export of `src`, or `window` / `document` / `navigator` (§21.3.3 rule 4; `globalThis` and other globals are not roots)", file, sp)])
+        if (isFn && rootParam < 0 && !srcRoot) return out.concat([newDiag("E-HOST-TARGET-SHAPE", "`" + name + "` is declared `fn` (deterministic, no effect — §21.3.3 rule 11) but its target is rooted at `" + ch.root + "`: those reads are the `E-FN-004` class; drop `fn`", file, sp)])
         // the arguments (rule 4)
         let uses: string[] = []
         if (rootParam >= 0) uses = uses.concat([ch.root])

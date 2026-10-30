@@ -21,7 +21,16 @@ Lane A (s473-host-allowlist-a) owns slice-m1/runtime/runtime.js and the `src=` s
 - [x] gates: slices m1–m4 + codec, lane tests, types-gate, s34-census, SPEC-INDEX, claim, snippet,
       bootstrap-conformance --check, delta-lint, conflict markers, e2e-render-map, compiler/tests/*.test.js
 
-## Merge step with lane A (design §10 step 6)
-- flip host-surface.scrml `runtimeGuardsBuilt` / `brandChecksBuilt`;
-- emit the guard calls from print.scrml hostBindJs (descriptor for an interface is `{ k: "handle", name: "<Interface>" }`);
-- add the now-admitted guarded typings to the parity test's ADMITTED_BY_DESIGN list.
+## Merge step with lane A (design §10 step 6) — DONE (merged origin/s473-host-allowlist-a @ 752e6861b, #1670)
+- known-gaps.md conflict: kept both sides of the url-sink entry (ours resolved, lane A's narrowed note kept below);
+  gap ids diffed — none lost.
+- host-surface.scrml `runtimeGuardsBuilt` / `brandChecksBuilt` on; analyze hostWalk → `HostBind.guards`;
+  print.scrml hostBindJs routes through rt.hostInert / hostUrl / hostSetAttrName + hostAttrValue; interface results
+  decode as `{ k: "iface", name }` (brand check).
+- runtime.js (lane A's file, minimal merge fix): hostCall passed a guard's E-HOST-RECEIVER-RT through as
+  E-HOST-THROW-RT; now guard traps (module-private WeakSet) pass through as themselves.
+- H.4 = lane A's HOST_INERT_ELEMENTS (ratified); the diff test reads the runtime export (one list).
+- Ratified lane A readings into SPEC: bare src export call is A-world (8.6); broken `export…from` = whole-file
+  E-IMPORT-004 (rule 3).
+- parity test: the 26 `textContent`-write typings are admitted only because their emitted JS goes through hostInert
+  (checked per case).

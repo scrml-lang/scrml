@@ -44,7 +44,7 @@
 ${
     import { Sym, Type, SeqAt, LengthGrant, SeqGrants, FieldDef, VariantDef, TypeDef, FieldRef, InstRef,
              Literal, PrimOp, EditKind, Check, FieldMode, FieldRole, GrantSet, Edge, TransitionGraph,
-             DeclKind, HostCall, HostFn, HostBind, HostArg, HostProp, SeqFn, BindKind, Validator, SurfaceProp, ValidityOf, Persist, PersistStore, CoreProgram,
+             DeclKind, HostCall, HostFn, HostBind, HostSrc, HostArg, HostProp, SeqFn, BindKind, Validator, SurfaceProp, ValidityOf, Persist, PersistStore, CoreProgram,
              SqlKind, SqlTables, SqlColumns, Db, Driver, DbLoad,
              CssPart, CssDecl, StyleRule, CssImport, ScopeSheet,
              mkSym, noGrants, replaceGrant, typeDefSym, validityInst, validityDecl, plainHead } from "./core.scrml"
@@ -4234,12 +4234,11 @@ ${
                     } else if (why != "") {
                         st = addDiag(st, fs.info.file, fs.f.span, "E-BOOTSTRAP-UNSUPPORTED", "the `<host>` binding `" + fs.info.name + "` " + why)
                     } else {
-                        const bind: HostBind | not = hostBindCore(fs.f.params, hb)
+                        const bind: HostBind | not = hostBindCore(fs.f.params, hb, fs.info.name, fs.info.file, hwk.hguards)
                         if (bind is given) {
                             const hf: HostFn = { module: "", file: "", name: fs.info.name, ret: fs.info.ret, bind: bind }
                             next = { info: fnWithHost(fs.info, hf), f: fs.f }
-                        } else if (hb.src == "") {
-                            // (a `src=` binding has no target to convert: its opener is refused, parse.scrml hostSrcDiags)
+                        } else {
                             // FAIL CLOSED: a binding the parser accepted always converts; should one not,
                             // it is refused here — never left an ordinary function with an empty body
                             st = addDiag(st, fs.info.file, fs.f.span, "E-BOOTSTRAP-UNSUPPORTED", "the `<host>` binding `" + fs.info.name + "`'s target could not be carried into Core (a bootstrap defect: please report it)")
@@ -4282,11 +4281,11 @@ ${
     //       needing one is refused by name (host-surface.scrml runtimeGuardsBuilt).
     // The walk runs only on a target whose shape parse.scrml accepted (rule 4).
     // =========================================================================
-    type HSurfWalk:struct = { hcode: string, hmsg: string }
+    type HSurfWalk:struct = { hcode: string, hmsg: string, hguards: string[] }
     type HArgFit:struct = { w: HSurfWalk, tag: string, url: boolean, urlLit: string }
 
-    fn hwOk() -> HSurfWalk { return { hcode: "", hmsg: "" } }
-    fn hw(code: string, msg: string) -> HSurfWalk { return { hcode: code, hmsg: msg } }
+    fn hwOk() -> HSurfWalk { return { hcode: "", hmsg: "", hguards: [] } }
+    fn hw(code: string, msg: string) -> HSurfWalk { return { hcode: code, hmsg: msg, hguards: [] } }
     fn haOk() -> HArgFit { return { w: hwOk(), tag: "", url: false, urlLit: "" } }
     fn haBad(code: string, msg: string) -> HArgFit { return { w: hw(code, msg), tag: "", url: false, urlLit: "" } }
 
@@ -4504,7 +4503,9 @@ ${
             guards = rest
         }
         if (guards.length > 0 && !runtimeGuardsBuilt()) return hw("E-BOOTSTRAP-UNSUPPORTED", "`" + name + "` reaches `" + cur + "." + last + "` (" + access + "), a `guarded(" + guards.join(", ") + ")` entry (Appendix H " + e.id + ") — its run-time check (§21.3.3 rule 8.5) is not in this build yet, so the entry is refused rather than run unguarded")
-        return hwOk()
+        // the run-time checks the printer emits (print.scrml hostBindJs): every guard of the entry,
+        // a statically admitted literal URL included (the guard is cheap and the emission one shape)
+        return { hcode: "", hmsg: "", hguards: entryGuards(e) }
     }
 
     // One argument `x` of a target against the slot type `slot` (8.4, 8.5).
@@ -4635,17 +4636,34 @@ ${
 
     // The checked target as Core's HostBind (parse.scrml already judged its
     // shape — rules 4, 5, 8; a shape it refused carries its report, so `not`).
-    fn hostBindCore(ps: AParam[], hb: AHostBind) -> HostBind | not {
+    // s473 (allowlist lane A, §21.3.3 rule 3/4): in a `<host src=>`, a binding WITHOUT a target calls
+    // the export of its own name with its parameters in order, and a target whose root is neither a
+    // parameter nor `window` / `document` / `navigator` is rooted at an export of `src` (the driver
+    // reads the exports statically — slice-m1/host-src.js — and refuses a name the file does not
+    // export: E-IMPORT-004 / E-HOST-TARGET-UNBOUND).
+    fn hostBindCore(ps: AParam[], hb: AHostBind, name: string, file: string, guards: string[]) -> HostBind | not {
         const tg: AExpr | not = hb.target
-        if (tg is not) return not
+        if (tg is not) {
+            if (hb.src == "") return not
+            let all: HostArg[] = []
+            let i: int = 0
+            while (i < ps.length) {
+                all = all.concat([HostArg.HParam(i)])
+                i = i + 1
+            }
+            const hs0: HostSrc = { path: hostSrcPath(file, hb.src), file: file, at: hb.span.start, targetless: true }
+            return { shape: 0, root: name, rootParam: -1, chain: [], args: all, src: hs0, guards: [] }
+        }
         const parts: HTargetParts = hostTargetParts(tg, hb.isNew)
         if (!parts.ok || !parts.chain.ok) return not
         let root: string = parts.chain.root
+        let src: HostSrc | not = not
         const rp: int = paramIndexOf(ps, root)
         if (rp >= 0) {
             root = ""
         } else if (!hostRootGlobal(root)) {
-            return not
+            if (hb.src == "") return not
+            src = { path: hostSrcPath(file, hb.src), file: file, at: hb.span.start, targetless: false }
         }
         let args: HostArg[] = []
         for (const x of parts.args) {
@@ -4653,7 +4671,29 @@ ${
             if (a is not) return not
             args = args.concat([a])
         }
-        return { shape: parts.shape, root: root, rootParam: rp, chain: parts.chain.members, args: args }
+        return { shape: parts.shape, root: root, rootParam: rp, chain: parts.chain.members, args: args, src: src, guards: guards }
+    }
+
+    // A `src=` value (`./x.js`, `../lib/x.js`), resolved against the directory of the file `file` that
+    // declares it, as a path relative to the build's source root — `..` segments the root cannot absorb
+    // are kept (the file may lie above the source root and inside the project root; the driver judges
+    // that, E-IMPORT-011).
+    fn hostSrcPath(file: string, src: string) -> string {
+        let segs: string[] = []
+        const cut: int = file.lastIndexOf("/")
+        if (cut >= 0) segs = file.substring(0, cut).split("/")
+        for (const s of src.split("/")) {
+            if (s == "..") {
+                if (segs.length > 0 && segs[segs.length - 1] != "..") {
+                    segs = segs.slice(0, segs.length - 1)
+                } else {
+                    segs = segs.concat([".."])
+                }
+            } else if (s != "." && s != "") {
+                segs = segs.concat([s])
+            }
+        }
+        return segs.join("/")
     }
 
     fn paramIndexOf(ps: AParam[], n: string) -> int {

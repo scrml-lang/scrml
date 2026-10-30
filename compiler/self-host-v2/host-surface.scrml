@@ -221,12 +221,14 @@ ${
     // ---- what the RUNTIME carries (lane A, s473-host-allowlist-a) -------------
     // The run-time halves of rule 8 are lane A's (slice-m1/runtime/runtime.js):
     // the guarded(url) / guarded(inert-receiver) checks (rule 8.5) and the brand
-    // check (rule 8.7). Until they are in this build, an entry that needs one —
-    // and a downcast result, which needs the brand check — is refused BY NAME
-    // (E-BOOTSTRAP-UNSUPPORTED), never emitted unguarded (fail closed). The lane
-    // merge (design §10 step 6) turns these on together with the emission.
-    export fn runtimeGuardsBuilt() -> boolean { return false }
-    export fn brandChecksBuilt() -> boolean { return false }
+    // check (rule 8.7). They are in this build since the lane merge (design §10
+    // step 6, lane A #1670 merged into lane B): print.scrml hostBindJs routes a
+    // guarded entry through rt.hostInert / hostUrl / hostSetAttrName /
+    // hostAttrValue, and an interface result decodes as `{ k: "iface" }` (the
+    // brand check). Set either to false and every entry needing it is refused BY
+    // NAME again (E-BOOTSTRAP-UNSUPPORTED), never emitted unguarded.
+    export fn runtimeGuardsBuilt() -> boolean { return true }
+    export fn brandChecksBuilt() -> boolean { return true }
 
     // ---- classes (rule 8.5) ---------------------------------------------------
 
@@ -503,51 +505,85 @@ ${
 
     export fn inertElements() -> HTag[] {
         return [
+            tag("a", "HTMLAnchorElement"),
+            tag("abbr", "HTMLElement"),
+            tag("article", "HTMLElement"),
+            tag("aside", "HTMLElement"),
+            tag("audio", "HTMLAudioElement"),
+            tag("b", "HTMLElement"),
+            tag("blockquote", "HTMLElement"),
+            tag("br", "HTMLElement"),
+            tag("button", "HTMLElement"),
+            tag("canvas", "HTMLCanvasElement"),
+            tag("caption", "HTMLElement"),
+            tag("cite", "HTMLElement"),
+            tag("code", "HTMLElement"),
+            tag("col", "HTMLElement"),
+            tag("colgroup", "HTMLElement"),
+            tag("dd", "HTMLElement"),
+            tag("del", "HTMLElement"),
+            tag("details", "HTMLElement"),
+            tag("dfn", "HTMLElement"),
             tag("div", "HTMLElement"),
-            tag("span", "HTMLElement"),
-            tag("p", "HTMLElement"),
+            tag("dl", "HTMLElement"),
+            tag("dt", "HTMLElement"),
+            tag("em", "HTMLElement"),
+            tag("fieldset", "HTMLElement"),
+            tag("figcaption", "HTMLElement"),
+            tag("figure", "HTMLElement"),
+            tag("footer", "HTMLElement"),
             tag("h1", "HTMLElement"),
             tag("h2", "HTMLElement"),
             tag("h3", "HTMLElement"),
             tag("h4", "HTMLElement"),
             tag("h5", "HTMLElement"),
             tag("h6", "HTMLElement"),
-            tag("ul", "HTMLElement"),
-            tag("ol", "HTMLElement"),
-            tag("li", "HTMLElement"),
-            tag("section", "HTMLElement"),
-            tag("article", "HTMLElement"),
             tag("header", "HTMLElement"),
-            tag("footer", "HTMLElement"),
-            tag("nav", "HTMLElement"),
-            tag("main", "HTMLElement"),
-            tag("aside", "HTMLElement"),
-            tag("strong", "HTMLElement"),
-            tag("em", "HTMLElement"),
-            tag("b", "HTMLElement"),
+            tag("hr", "HTMLElement"),
             tag("i", "HTMLElement"),
-            tag("small", "HTMLElement"),
-            tag("code", "HTMLElement"),
-            tag("pre", "HTMLElement"),
-            tag("blockquote", "HTMLElement"),
-            tag("label", "HTMLElement"),
-            tag("button", "HTMLElement"),
-            tag("table", "HTMLElement"),
-            tag("caption", "HTMLElement"),
-            tag("thead", "HTMLElement"),
-            tag("tbody", "HTMLElement"),
-            tag("tfoot", "HTMLElement"),
-            tag("tr", "HTMLElement"),
-            tag("td", "HTMLElement"),
-            tag("th", "HTMLElement"),
-            tag("figure", "HTMLElement"),
-            tag("figcaption", "HTMLElement"),
-            tag("input", "HTMLInputElement"),
-            tag("canvas", "HTMLCanvasElement"),
             tag("img", "HTMLImageElement"),
-            tag("a", "HTMLAnchorElement"),
+            tag("input", "HTMLInputElement"),
+            tag("ins", "HTMLElement"),
+            tag("kbd", "HTMLElement"),
+            tag("label", "HTMLElement"),
+            tag("legend", "HTMLElement"),
+            tag("li", "HTMLElement"),
+            tag("main", "HTMLElement"),
+            tag("mark", "HTMLElement"),
+            tag("meter", "HTMLElement"),
+            tag("nav", "HTMLElement"),
+            tag("ol", "HTMLElement"),
+            tag("optgroup", "HTMLElement"),
+            tag("option", "HTMLElement"),
+            tag("output", "HTMLElement"),
+            tag("p", "HTMLElement"),
+            tag("pre", "HTMLElement"),
+            tag("progress", "HTMLElement"),
+            tag("q", "HTMLElement"),
+            tag("s", "HTMLElement"),
+            tag("samp", "HTMLElement"),
+            tag("section", "HTMLElement"),
+            tag("select", "HTMLElement"),
+            tag("small", "HTMLElement"),
+            tag("span", "HTMLElement"),
+            tag("strong", "HTMLElement"),
+            tag("sub", "HTMLElement"),
+            tag("summary", "HTMLElement"),
+            tag("sup", "HTMLElement"),
+            tag("table", "HTMLElement"),
+            tag("tbody", "HTMLElement"),
+            tag("td", "HTMLElement"),
+            tag("textarea", "HTMLElement"),
+            tag("tfoot", "HTMLElement"),
+            tag("th", "HTMLElement"),
+            tag("thead", "HTMLElement"),
+            tag("time", "HTMLElement"),
+            tag("tr", "HTMLElement"),
+            tag("u", "HTMLElement"),
+            tag("ul", "HTMLElement"),
+            tag("var", "HTMLElement"),
             tag("video", "HTMLVideoElement"),
-            tag("audio", "HTMLAudioElement"),
+            tag("wbr", "HTMLElement"),
         ]
     }
 

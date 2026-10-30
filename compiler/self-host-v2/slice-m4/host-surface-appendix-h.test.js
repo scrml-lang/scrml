@@ -10,6 +10,7 @@ import { describe, test, expect, beforeAll } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { mods } from "./server-artifact-harness.js";
+import { HOST_INERT_ELEMENTS } from "../slice-m1/runtime/runtime.js";
 
 let S;
 beforeAll(() => { S = mods()["host-surface"]; }, { timeout: 120000 });
@@ -48,8 +49,10 @@ describe("Appendix H ⇄ host-surface.scrml (one-to-one)", () => {
     expect(new Set(mine.map((r) => r[1] + "." + r[2] + ":" + r[3])).size).toBe(mine.length); // one entry per (I, m, access)
   });
 
-  test("H.4 the inert element list", () => {
+  test("H.4 the inert element list — Appendix H ⇄ host-surface.scrml ⇄ runtime.js HOST_INERT_ELEMENTS (ONE list)", () => {
     expect(S.inertElements().map((t) => [t.tag, t.iface])).toEqual(rows(section("H.4")));
+    // the run-time guard (lane A, guarded(inert-receiver)) checks exactly these tags
+    expect([...HOST_INERT_ELEMENTS]).toEqual(S.inertElements().map((t) => t.tag));
   });
 
   test("H.5 the dictionaries", () => {

@@ -127,11 +127,11 @@ describe("rule 3 — `src=`", () => {
     expect(codes(`<host src="x.js">\n  f() -> int\n</host>\n<program>\n<p>x</p>\n</program>\n`)).toEqual(["E-IMPORT-005"]);
   });
 
-  test("a valid relative .js path: refused BY NAME — the static export read (H2) is not built, and no host JS is loaded", () => {
+  test("a valid relative .js path: the front end is clean and carries the export root into Core — the driver reads the exports statically (s473 allowlist lane A; host-src-s473.test.js), no host JS is loaded", () => {
     const src = `<host src="./glue.js">\n  f() -> int\n</host>\n<program>\n<p>x</p>\n</program>\n`;
-    const r = run(src);
-    expect(errs(r).map((d) => d.code)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
-    expect(errs(r)[0].message).toContain("read statically");
+    const r = clean(src);
+    const b = r.core.fns.find((f) => f.host && f.host.bind).host.bind;
+    expect([b.root, b.rootParam, b.chain, b.src.path, b.src.targetless]).toEqual(["f", -1, [], "glue.js", true]);
   });
 });
 
@@ -252,15 +252,13 @@ describe("rules 4 / 5 / 6 / 8 / 11 — the target's shape, roots, parameters and
     expect(walk("f(s: string) = document.body.append(s)")).toEqual([NA]);
   });
 
-  test("8.4 — results: a supertype widens; `T | not` declared without `not` is E-HOST-RESULT-TYPE; a data mismatch is E-HOST-RESULT-TYPE; a downcast waits for the brand check (refused by name)", () => {
+  test("8.4 — results: a supertype widens; `T | not` declared without `not` is E-HOST-RESULT-TYPE; a data mismatch is E-HOST-RESULT-TYPE; a downcast is admitted, brand-checked at run time (8.7)", () => {
     clean(P("  el(id: string) -> Element | not = document.getElementById(id)\n  n(id: string) -> Node | not = document.getElementById(id)"));
     expect(walk("el(id: string) -> Element = document.getElementById(id)")).toEqual([RES]);
     expect(walk("t() -> int = document.title")).toEqual([RES]);
     expect(walk("t() -> Element = document.title")).toEqual([RES]);
     expect(walk("t(s: string) -> string = document.title = s")).toEqual([RES]);
-    const r = run(P("  el(id: string) -> HTMLElement | not = document.getElementById(id)"));
-    expect(errs(r).map((d) => d.code)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
-    expect(errs(r)[0].message).toContain("brand check");
+    clean(P("  el(id: string) -> HTMLElement | not = document.getElementById(id)"));
   });
 
   test("8.4 — a struct result of an interface-valued entry declares only `read` entries of that interface", () => {
@@ -294,19 +292,22 @@ describe("rules 4 / 5 / 6 / 8 / 11 — the target's shape, roots, parameters and
     ].join("\n")));
   });
 
-  test("a guarded entry waits for its run-time check (lane A): refused BY NAME, never emitted unguarded", () => {
-    for (const line of [
-      "setTitle(h: Element, s: string) = h.setAttribute(\"title\", s)",
-      "setText(e: HTMLElement, s: string) = e.textContent = s",
-      "add(e: Element, s: string) = e.append(s)",
-      "src(i: HTMLImageElement, u: string) = i.src = u",
-      "go(a: HTMLAnchorElement, u: string) = a.href = u",
+  test("a guarded entry compiles, and is EMITTED through its run-time check (rule 8.5; runtime.js, lane A)", () => {
+    for (const [line, guard] of [
+      ["setTitle(h: Element, s: string) = h.setAttribute(\"title\", s)", "hostSetAttrName("],
+      ["setHref(h: Element, s: string) = h.setAttribute(\"href\", s)", "hostAttrValue("],
+      ["rmAttr(h: Element) = h.removeAttribute(\"title\")", "hostSetAttrName("],
+      ["setText(e: HTMLElement, s: string) = e.textContent = s", "hostInert("],
+      ["add(e: Element, s: string) = e.append(s)", "hostInert("],
+      ["src(i: HTMLImageElement, u: string) = i.src = u", "hostUrl("],
+      ["go(a: HTMLAnchorElement, u: string) = a.href = u", "hostUrl("],
     ]) {
-      const r = run(P("  " + line));
-      expect([line, errs(r).map((d) => d.code)]).toEqual([line, ["E-BOOTSTRAP-UNSUPPORTED"]]);
-      expect(errs(r)[0].message).toContain("guarded(");
+      const r = clean(P("  " + line));
+      const js = mods().print.printProgram(r.core, "t.client.js", "scrml-runtime.js").js;
+      expect([line, js.includes(guard), js.includes("hostInert(")]).toEqual([line, true, true]);
     }
   });
+
 
   test("8.5 guarded(url) — a literal URL is judged at compile time by §5.2 rule 2's test (E-ATTR-STATIC-EXECUTABLE)", () => {
     expect(walk("go(a: HTMLAnchorElement) = a.href = \"javascript:alert(1)\"")).toEqual(["E-ATTR-STATIC-EXECUTABLE"]);
@@ -532,8 +533,13 @@ const HOSTS = [
   "  matches(m: MediaQueryList) -> bool = m.matches",
   "  byId(id: string) -> Element | not = document.getElementById(id)",
   "  idOf(e: Element) -> string = e.id",
+  "  byIdH(id: string) -> HTMLElement | not = document.getElementById(id)",
+  "  anchor(id: string) -> HTMLAnchorElement | not = document.getElementById(id)",
+  "  setText(e: HTMLElement, s: string) = e.textContent = s",
+  "  go(a: HTMLAnchorElement, u: string) = a.href = u",
+  "  setAttr(e: Element, s: string) = e.setAttribute(\"title\", s)",
 ].join("\n");
-const EXPOSE = ["title", "setTitle", "lang", "langs", "mq", "matches", "byId", "idOf"];
+const EXPOSE = ["title", "setTitle", "lang", "langs", "mq", "matches", "byId", "idOf", "byIdH", "anchor", "setText", "go", "setAttr"];
 const PROG = P(HOSTS, "<p id=\"t\">${title()}</p>");
 
 describe("emission — the target as literal JavaScript, the result checked (rules 7, 13, 18)", () => {
@@ -558,10 +564,30 @@ describe("emission — the target as literal JavaScript, the result checked (rul
     expect(document.title).toBe("bye");
     expect(typeof program.lang()).toBe("string");
     expect(Array.isArray(program.langs())).toBe(true);
-    if (typeof window.matchMedia === "function") expect(typeof program.matches(program.mq("(min-width: 1px)"))).toBe("boolean");
+    // (matchMedia is not run: happy-dom's result is not a platform MediaQueryList, so the r8.7 brand check refuses it)
     expect(program.byId("t")).not.toBe(null);
     expect(program.idOf(program.byId("t"))).toBe("t");
     expect(program.byId("nope")).toBe(null);
+  });
+
+  // s473-host-allowlist-b, the lane merge: a COMPILED guarded binding runs through runtime.js's guards
+  test("rule 8.5 / 8.7 end to end: a downcast is brand-checked; textContent on a <script> traps E-HOST-RECEIVER-RT; a javascript: href is written as about:blank", () => {
+    const sx = document.createElement("script"); sx.id = "sx"; document.body.appendChild(sx);
+    const px = document.createElement("p"); px.id = "px"; document.body.appendChild(px);
+    const ax = document.createElement("a"); ax.id = "ax"; document.body.appendChild(ax);
+    try {
+      expect(trapOf(() => program.setText(program.byIdH("sx"), "window.__pwn = 1"))).toBe("E-HOST-RECEIVER-RT");
+      expect(sx.textContent).toBe("");
+      program.setText(program.byIdH("px"), "ok");
+      expect(px.textContent).toBe("ok");
+      expect(trapOf(() => program.anchor("px"))).toBe("E-HOST-VALUE-MISMATCH-RT");   // a <p> is not an HTMLAnchorElement
+      program.go(program.anchor("ax"), "javascript:alert(1)");
+      expect(ax.getAttribute("href")).toBe("about:blank");
+      program.go(program.anchor("ax"), "https://example.com/");
+      expect(ax.getAttribute("href")).toBe("https://example.com/");
+      program.setAttr(program.byIdH("px"), "hi");
+      expect(px.getAttribute("title")).toBe("hi");
+    } finally { sx.remove(); px.remove(); ax.remove(); }
   });
 });
 

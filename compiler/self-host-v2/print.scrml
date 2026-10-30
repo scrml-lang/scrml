@@ -29,7 +29,7 @@ ${
     import { Sym, Type, DeclKind, TypeDef, FieldDef, VariantDef, TransitionGraph, FieldRef, InstRef, Place, Literal, PrimOp, Pattern, Expr, MatchArm,
              HostCall, SeqFn, BindKind,
              EditKind, Check, Stmt, Block, Attr, ConstructAttr, CondArm, View, EffectDep, FieldRole, Field,
-             Decl, Fn, HostFn, HostBind, HostArg, HostProp, CoreProgram, CapOwner, SurfaceProp, ValidityOf, Validator, Persist, PersistStore,
+             Decl, Fn, HostFn, HostBind, HostSrc, HostArg, HostProp, CoreProgram, CapOwner, SurfaceProp, ValidityOf, Validator, Persist, PersistStore,
              Failable, OkArm, ErrArm, ServerFn, SqlQuery, SqlMode, Param, LoopHead, EachHead, RangeHead, CssUnit, CoreCss, CssVar,
              Gather, Lifted, GatherRow, PathStep, CoreConst, HeadTitle, CoreMeta,
              findDecl, findTypeDef, typeDefSym, capOwner, findFn, findServerFn, mountedInstances } from "./core.scrml"
@@ -41,6 +41,7 @@ ${
     import { WireTable, wireBuild, wireTableJs } from "./codec.scrml"
     import { emitCss } from "./css.scrml"
     import { checkCore } from "./check.scrml"
+    import { isSurfaceIface } from "./host-surface.scrml"
 
     export type Template:struct = { id: string, nodes: HNode[] }
     // s451 (U1a): `refused` — why the printer emitted NOTHING (empty `js` /
@@ -2744,6 +2745,39 @@ ${
         }
         let out: JsStmt[] = []
         for (const h of seen) { out = out.concat([JsStmt.SImportAll(hostModName(p, h), hostModulePath(h))]) }
+        // s473 (allowlist lane A, §21.3.3 rule 3): each `<host src=>` file the functions reach, once —
+        // through the shim the driver writes (slice-m1/host-src.js), which re-exports the file's copy
+        let srcs: string[] = []
+        for (const f of fs) {
+            const sp: string = hostSrcPathOf(f)
+            if (sp != "" && srcs.indexOf(sp) < 0) srcs = srcs.concat([sp])
+        }
+        for (const sp of srcs) {
+            const k: int = hostSrcs(p).indexOf(sp)
+            out = out.concat([JsStmt.SImportAll("hostsrc$" + k, "./_scrml/host-src/" + k + ".js")])
+        }
+        return out
+    }
+
+    // The `<host src=>` path a function's binding is rooted at ("" — none).
+    fn hostSrcPathOf(f: Fn) -> string {
+        const h: HostFn | not = f.host
+        if (h is not) return ""
+        const b: HostBind | not = h.bind
+        if (b is not) return ""
+        const s: HostSrc | not = b.src
+        if (s is not) return ""
+        return s.path
+    }
+
+    // The program's `<host src=>` files, each once, in function order — the driver numbers its shims
+    // `_scrml/host-src/<K>.js` in this same order (slice-m1/host-src.js planHostSrcs).
+    export fn hostSrcs(p: CoreProgram) -> string[] {
+        let out: string[] = []
+        for (const f of p.fns) {
+            const sp: string = hostSrcPathOf(f)
+            if (sp != "" && out.indexOf(sp) < 0) out = out.concat([sp])
+        }
         return out
     }
 
@@ -2776,9 +2810,37 @@ ${
     fn hostBindJs(ctx: Ctx, f: Fn, b: HostBind, ret: Type | not, params: string[]) -> JsStmt {
         let base: JsExpr = rtCall(ctx, "hostRoot", [jstr(b.root)])
         if (b.rootParam >= 0) base = jid(params[b.rootParam])
-        for (const m of b.chain) { base = jmember(base, m) }
+        const hs: HostSrc | not = b.src
+        if (hs is given) base = jmember(jid("hostsrc$" + hostSrcs(ctx.p).indexOf(hs.path)), b.root)
+        const at0: string = f.sym.hint + "() — the `<host>` binding"
+        // s473-host-allowlist-b (DRAFT §21.3.3 rule 8.5): a guarded entry's target is routed through
+        // runtime.js's checks — guarded(inert-receiver): the receiver through `rt.hostInert`;
+        // guarded(url) on a write: the value through `rt.hostUrl` (§5.2 rule 3's guard);
+        // guarded(attr-name): the name through `rt.hostSetAttrName` and a `setAttribute` value through
+        // `rt.hostAttrValue` (URL-valued names judged by the same guard). Still literal JS (rule 7).
+        let recv: JsExpr = base
+        let i: int = 0
+        while (i < b.chain.length - 1) {
+            recv = jmember(recv, b.chain[i])
+            i = i + 1
+        }
         let args: JsExpr[] = []
         for (const a of b.args) { args = args.concat([hostArgJs(a, params)]) }
+        if (b.chain.length > 0 && b.guards.length > 0) {
+            const last: string = b.chain[b.chain.length - 1]
+            let recvG: JsExpr = recv
+            if (b.guards.indexOf("inert-receiver") >= 0) recvG = rtCall(ctx, "hostInert", [recv, jstr(at0)])
+            if (b.shape == 3 && b.guards.indexOf("url") >= 0) args = [rtCall(ctx, "hostUrl", [recv, jstr(last), args[0], jstr(at0)])]
+            if (b.guards.indexOf("attr-name") >= 0 && args.length > 0) {
+                const nameArg: JsExpr = args[0]
+                let next: JsExpr[] = [rtCall(ctx, "hostSetAttrName", [nameArg, jstr(at0)])]
+                if (last == "setAttribute" && args.length > 1) next = next.concat([rtCall(ctx, "hostAttrValue", [recv, nameArg, args[1], jstr(at0)])])
+                args = next
+            }
+            base = jmember(recvG, last)
+        } else {
+            for (const m of b.chain) { base = jmember(base, m) }
+        }
         let thunk: JsExpr = JsExpr.JArrowE([], jcall(base, args))
         if (b.shape == 1) thunk = JsExpr.JArrowE([], JsExpr.JNew(base, args))
         if (b.shape == 2) thunk = JsExpr.JArrowE([], base)
@@ -2825,9 +2887,17 @@ ${
         return hostDefDesc(ctx, s, td, depth)
     }
 
+    // s473-host-allowlist-b (DRAFT §21.3.3 rules 8.4, 8.7): an Appendix H interface result is decoded
+    // by the brand check (`{ k: "iface", name }`, runtime.js hostBranded) — a downcast and a `src=`
+    // result included; a user-named `:host` handle (the `src=` world) only by non-null (`handle`).
+    fn hostHandleKind(name: string) -> string {
+        if (isSurfaceIface(name)) return "iface"
+        return "handle"
+    }
+
     fn hostDefDesc(ctx: Ctx, s: Sym, td: TypeDef, depth: int) -> JsExpr {
         return match td {
-            .HostDef(sym: x) :> JsExpr.JObject([{ key: "k", value: jstr("handle") }, { key: "name", value: jstr(s.hint) }])
+            .HostDef(sym: x) :> JsExpr.JObject([{ key: "k", value: jstr(hostHandleKind(s.hint)) }, { key: "name", value: jstr(s.hint) }])
             .StructDef(fields: fs) :> hostStructDesc(ctx, s, fs, depth)
             .EnumDef(sym: x) :> hostKind("unchecked")
         }

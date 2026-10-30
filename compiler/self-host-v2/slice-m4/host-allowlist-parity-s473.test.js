@@ -21,6 +21,8 @@ beforeAll(() => { mods(); }, { timeout: 120000 });
 const run = (src) => frontEnd(mods(), [{ path: "app.scrml", src }], "app.scrml");
 const codes = (src) => run(src).diags.filter((d) => d.severity !== "Warning" && d.severity !== "Info").map((d) => d.code);
 const P = (host) => `<host>\n${host}\n</host>\n<program>\n<p>x</p>\n</program>\n`;
+// the target as EMITTED goes through runtime.js hostInert (guarded(inert-receiver))
+const guardedInert = (line) => { const r = run(P("  " + line)); return r.core != null && mods().print.printProgram(r.core, "t.client.js", "scrml-runtime.js").js.includes("hostInert("); };
 
 export const DENYLIST_REFUSED = [
   "attrs(e: Fn) -> Fn = e.attributes",
@@ -146,6 +148,7 @@ describe("parity — every line the #1659 INTERIM denylist refused is refused by
 
   test("refused under every Appendix H typing (or listed above with its P argument)", () => {
     const admitted = [];
+    let underGuard = 0;
     for (const line of DENYLIST_REFUSED) {
       const names = userTypes(line);
       const typings = names.length === 0 ? [{}] : INTERFACES.flatMap((a) => (names.length === 1 ? [{ [names[0]]: a }] : INTERFACES.map((b) => ({ [names[0]]: a, [names[1]]: b }))));
@@ -153,10 +156,15 @@ describe("parity — every line the #1659 INTERIM denylist refused is refused by
         const l = subst(line, map);
         const key = line + "|" + Object.entries(map).map(([k, v]) => k + "=" + v).join(",");
         const cs = codes(P("  " + l));
+        // a guarded(inert-receiver) entry (a `textContent` write) compiles since the lane merge: it is
+        // admitted only because the EMITTED target routes its receiver through runtime.js hostInert,
+        // which traps (E-HOST-RECEIVER-RT) on a <script> / <style> / a non-element — checked here
+        if (cs.length === 0 && !ADMITTED_BY_DESIGN.has(key) && guardedInert(l)) { underGuard++; continue; }
         if (cs.length === 0 && !ADMITTED_BY_DESIGN.has(key)) admitted.push(key);
         if (cs.length > 0 && ADMITTED_BY_DESIGN.has(key)) admitted.push("LISTED BUT REFUSED: " + key + " " + cs);
       }
     }
     expect(admitted).toEqual([]);
+    expect(underGuard).toBe(26);   // the two `textContent` write lines × 13 Node-derived typings
   }, 600000);
 });
