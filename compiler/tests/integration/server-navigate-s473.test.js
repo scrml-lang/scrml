@@ -232,11 +232,12 @@ const PLACEMENTS = `<program db="./app.db">
         navigate("/soft", .Soft)
     }
 
-    server function inTxn(t: string)! -> SqlError {
+    server function afterTxn(t: string)! -> SqlError {
         transaction {
-            ?{\`INSERT INTO posts (title) VALUES (\${t})\`}.run()
-            navigate("/txn")
+            ?{\`INSERT INTO posts (title) VALUES (\${t + "-1"})\`}.run()
+            ?{\`INSERT INTO posts (title) VALUES (\${t + "-2"})\`}.run()
         }
+        navigate("/txn")
     }
 
     function toData(t: string) {
@@ -356,13 +357,62 @@ describe("S473 — navigate() ends the server function at every placement", () =
     expect(rows(app.dbPath)).toEqual(["s"]);
   }, EXECUTED_DB_TIMEOUT_MS);
 
-  test("leaving a transaction {} block by navigate rolls it back, as a return does (§19.10.3)", async () => {
+  test("near-miss of the transaction refusal: navigate AFTER the block redirects with the writes committed", async () => {
     fresh();
-    const r = await call(mod, "inTxn", { t: "t" });
+    const r = await call(mod, "afterTxn", { t: "t" });
     expect(r.status).toBe(302);
     expect(r.location).toBe("/txn");
-    expect(rows(app.dbPath)).toEqual([]);
+    expect(rows(app.dbPath)).toEqual(["t-1", "t-2"]);
   }, EXECUTED_DB_TIMEOUT_MS);
+});
+
+// S473 (RULED, user-voice S473 "review-surfaced decisions" item 4): navigate() inside a
+// `transaction { }` block is a compile error — it would leave the block, roll it back, and
+// still send the browser to the new page.
+const TXN_REFUSED = {
+  "directly in the block": `transaction {
+            ?{\`INSERT INTO posts (title) VALUES (\${t})\`}.run()
+            navigate("/txn")
+        }`,
+  "under an if in the block": `transaction {
+            ?{\`INSERT INTO posts (title) VALUES (\${t})\`}.run()
+            if (t == "go") {
+                navigate("/txn")
+            }
+        }`,
+  "in a !{} handler arm in the block": `transaction {
+            ?{\`INSERT INTO posts (title) VALUES (\${t})\`}.run() !{
+                .ConstraintViolation(_) :> navigate("/dup")
+                _ :> { return }
+            }
+        }`,
+  "with .Hard, in a loop in the block": `transaction {
+            for (const x of [1, 2]) {
+                ?{\`INSERT INTO posts (title) VALUES (\${t + x})\`}.run()
+                navigate("/txn", .Hard)
+            }
+        }`,
+};
+
+describe("S473 — navigate() inside a transaction {} block is refused at compile time", () => {
+  for (const [label, block] of Object.entries(TXN_REFUSED)) {
+    test(label, () => {
+      const app = compileApp(`<program db="./app.db">
+<db src="./app.db" tables="posts">
+\${
+    server function save(t: string)! -> SqlError {
+        ${block}
+    }
+}
+</>
+</program>
+`, "txn-refused");
+      const codes = app.errors.map((e) => e.code);
+      expect(codes).toContain("E-TRANSACTION-CONTROL-FLOW");
+      const msg = app.errors.find((e) => e.code === "E-TRANSACTION-CONTROL-FLOW").message;
+      expect(msg).toContain("`navigate()` cannot be called inside a `transaction` block");
+    });
+  }
 });
 
 describe("S473 — path safety: no open redirect, no header injection", () => {
