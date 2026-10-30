@@ -70,11 +70,11 @@ Code names for D11 / D13 / D26 are PA readings for bryan's veto.
 1. §8.9.2 + §19.10.5: implicit-envelope trigger = TRANSITIVE write set; interim bootstrap refusal (E-BOOTSTRAP-UNSUPPORTED).
 2. §8.9.2 + §14.8.10 allow-list: `PRAGMA journal_mode = OFF` reaching a `!` connection → E-SQL-JOURNAL-OFF (new; name is a PA reading).
 3. §66.6.6: element-named program cell colliding with a tag use → E-DECL-ELEMENT-NAME-COLLIDES at the declaration (new; reading).
-4. §20.3 + §19.10.3: `navigate()` inside `transaction {}` → E-NAVIGATE-IN-TRANSACTION (new; reading).
+4. §20.3 + §19.10.3: `navigate()` inside `transaction {}` → E-TRANSACTION-CONTROL-FLOW (reused existing code — reconciled with impl#1 lane #1679; PA reading).
 5. §6.5.3 / §17.4b: loop-header `key` canonical; `key=` legacy (bootstrap refuses with a hint, owed); W-KEY-001 takes the header meaning. The "pending" markers are replaced; g-spec-key-canonical-form-s473 marked RULED (bootstrap refusal still owed).
 
 ## Follow-ups outside this lane (no SPEC text)
-- Bootstrap: build E-SQL-JOURNAL-OFF, E-DECL-ELEMENT-NAME-COLLIDES, E-NAVIGATE-IN-TRANSACTION, the transitive-write-set refusal, and the legacy `key=` refusal with a hint.
+- Bootstrap: build E-SQL-JOURNAL-OFF, E-DECL-ELEMENT-NAME-COLLIDES, the transitive-write-set refusal, and the legacy `key=` refusal with a hint.
 - D15: the owed re-pin — a clean §66 twin conformance case (`export let <x/>`, E-EXPORT-001 absent).
 - D29 bootstrap re-codes: E-AUTH-001, E-STATE-UNDECLARED, E-TYPE-043, E-FN-004 (compiler work).
 - D30: fix the module conformance cases' semicolons (case edits — not done here); grader change in scripts/bootstrap-conformance.ts.
