@@ -1,4 +1,6 @@
 import { tokenizer as acornTokenizer, parse as acornParse } from "acorn";
+import { transportGuards } from "./var-counter.ts";
+import { FETCH_NETWORK_FAILURE_TAG } from "./emit-functions.ts";
 import { fnValuedBindingsOf } from "./fn-valued-bindings.ts";
 import { SCRML_RUNTIME } from "../runtime-template.js";
 import { SQL_HANDLE_PATTERN } from "./sql-handle-name.ts";
@@ -55,7 +57,7 @@ import { setLiftGateFileScopes, resetLiftGateScopes } from "./lift-gate-scope.js
  * corpus sweep (docs/changes/s461-runtime-tree-shake) is the proof it is.
  */
 const ERRORS_CHUNK_REFERENCE =
-  /(?<![\w$.'"`])(?:_ScrmlError|NetworkError|ValidationError|SQLError|AuthError|TimeoutError|ParseError|NotFoundError|ConflictError|_scrml_error_boundary_log|_scrml_error_boundary_uncaught)(?![\w$'"`])/;
+  /(?<![\w$.'"`])(?:_ScrmlError|NetworkError|ValidationError|SQLError|AuthError|TimeoutError|ParseError|NotFoundError|ConflictError|_scrml_error_boundary_log|_scrml_error_boundary_uncaught|_scrml_server_attempt)(?![\w$'"`])/;
 
 const POST_EMIT_HELPER_CHUNK_GATES: ReadonlyArray<readonly [string, string]> = [
   ["_scrml_structural_eq(", "equality"],
@@ -296,6 +298,83 @@ export function deferSyncGuardedCellWrites(code: string, findMatchingBrace: (s: 
   }
   let out = code;
   for (const e of edits) out = out.slice(0, e.start) + e.text + out.slice(e.end);
+  return out;
+}
+
+/**
+ * S473 (ruling:user-voice-scrml.md S473 "impl#1 transport routing" item 3, SPEC §19.9.10) — "only
+ * a `!{}` that already covers the failure (a `_` or `.Transport` arm) gets a failed call to a
+ * NON-`!` server function as a `Transport` error value. Declared-`!` callees, `?`, `match` and
+ * CPS-split callees are out of scope … Unhandled call sites are unchanged."
+ *
+ * Runs after the s441 rewrite and `deferSyncGuardedCellWrites`, when every guarded client call has
+ * its final shape `let R = await CALLEE(ARGS);` (+ any `_scrml_init_set(…)` lines) followed by
+ * `if (R && R.__scrml_error) {`. Only a guard emit-logic recorded (`transportGuards()`: the type
+ * checker's `__transportRoutable` stamp — a covered `!{}` on a call to a server function not
+ * declared `!`) is touched, and only when CALLEE is that function's client stub: the source name
+ * for an import, or its `_scrml_fetch_*` stub (`fnNameMap`) for a same-file function. The call
+ * becomes `await _scrml_server_attempt(CALLEE(ARGS))` (runtime-template.js), so a failed call
+ * reaches the arms as `{ __scrml_error: true, type: "ServerCallError", variant: "Transport",
+ * data: { t } }` instead of rejecting past them. Anything else is left as emitted. The scan
+ * reads the literal-blanked mask (`blankLiteralTextInSource`), as the twin does; no mask, no
+ * rewrite (fail closed: the call still rejects, as before).
+ */
+export function routeTransportGuards(
+  code: string,
+  guards: ReadonlyMap<string, string>,
+  fnNameMap: ReadonlyMap<string, string>,
+): string {
+  if (guards.size === 0 || !code.includes(".__scrml_error) {")) return code;
+  const mask = blankLiteralTextInSource(code, { blankRegex: true, jsOnly: true });
+  if (typeof mask !== "string" || mask.length !== code.length) return code;
+  const edits: Array<{ at: number; close: number }> = [];
+  for (const [R, source] of guards) {
+    // #1664 fix round 1 (LOW-4) — the registry is compile-wide; only this file's guards are
+    // scanned (a guard's result binding is a unique `genVar` name, so its text names its file).
+    if (!code.includes(R)) continue;
+    const stub = fnNameMap.get(source);
+    const callees = new Set<string>([source]);
+    if (stub && /^_scrml_fetch_/.test(stub)) callees.add(stub);
+    const head = new RegExp(`\\blet\\s+${R.replace(/\$/g, "\\$")}\\s*=\\s*await\\s+([A-Za-z_$][\\w$]*)\\s*\\(`, "g");
+    for (let m = head.exec(mask); m; m = head.exec(mask)) {
+      if (!callees.has(m[1])) continue;
+      // The callee's own source name is a stub only when it is NOT a same-file function
+      // (a same-file server function is always called through its `_scrml_fetch_*` stub).
+      if (m[1] === source && stub) continue;
+      const open = m.index + m[0].length - 1;
+      let depth = 1;
+      let close = -1;
+      for (let k = open + 1; k < mask.length; k++) {
+        const c = mask[k];
+        if (c === "(" || c === "[" || c === "{") depth++;
+        else if (c === ")" || c === "]" || c === "}") {
+          depth--;
+          if (depth === 0) { close = c === ")" ? k : -1; break; }
+        }
+      }
+      if (close < 0 || mask[close + 1] !== ";") continue;
+      const needle = `if (${R} && ${R}.__scrml_error) {`;
+      const ifAt = mask.indexOf(needle, close + 2);
+      if (ifAt < 0) continue;
+      const between = mask.slice(close + 2, ifAt);
+      if (!between.split("\n").every((l) => l.trim() === "" || /^\s*_scrml_init_set\(/.test(l))) continue;
+      const calleeStart = m.index + m[0].lastIndexOf(m[1]);
+      edits.push({ at: calleeStart, close });
+    }
+  }
+  if (edits.length === 0) return code;
+  // #1664 fix round 1 (LOW-4) — two sites whose ranges overlap (one call inside the other's
+  // arguments) are BOTH left as emitted (fail closed: their failure still rejects); every other
+  // site is still routed. (Before, one overlap left the whole file unrouted.)
+  const overlaps = (a: { at: number; close: number }, b: { at: number; close: number }): boolean =>
+    a !== b && a.at <= b.close && b.at <= a.close;
+  const kept = edits.filter((e) => !edits.some((o) => overlaps(e, o)));
+  if (kept.length === 0) return code;
+  kept.sort((a, b) => b.at - a.at);
+  let out = code;
+  for (const e of kept) {
+    out = out.slice(0, e.at) + "_scrml_server_attempt(" + out.slice(e.at, e.close + 1) + ")" + out.slice(e.close + 1);
+  }
   return out;
 }
 
@@ -3095,14 +3174,15 @@ function generateClientJsImpl(ctx: CompileContext): string {
       lines.push("    method,");
       lines.push('    headers: { "Content-Type": "application/json", "X-CSRF-Token": _scrml_get_csrf_token() },');
       lines.push("    body,");
-      lines.push("  });");
+      // #1664 fix round 1 (MED-1) — tag a network failure at its source (emit-functions.ts).
+      lines.push(`  })${FETCH_NETWORK_FAILURE_TAG};`);
       lines.push("  if (_scrml_resp.status === 403) {");
       if (_csrfMetaPresent) lines.push("    _scrml_csrf_sync_meta_from_cookie();");
       lines.push("    _scrml_resp = await _scrml_g.fetch(path, {");
       lines.push("      method,");
       lines.push('      headers: { "Content-Type": "application/json", "X-CSRF-Token": _scrml_get_csrf_token() },');
       lines.push("      body,");
-      lines.push("    });");
+      lines.push(`    })${FETCH_NETWORK_FAILURE_TAG};`);
       lines.push("  }");
       lines.push("  return _scrml_resp;");
       lines.push("}");
@@ -4132,6 +4212,7 @@ function generateClientJsImpl(ctx: CompileContext): string {
       clientCode = parts.join("");
     }
     clientCode = deferSyncGuardedCellWrites(clientCode, findMatchingBrace);
+    clientCode = routeTransportGuards(clientCode, transportGuards(), fnNameMap);
     });
 
     // GITI-026 (giti inbound 2026-05-30): SSE reactive binding `@cell = gen()`.

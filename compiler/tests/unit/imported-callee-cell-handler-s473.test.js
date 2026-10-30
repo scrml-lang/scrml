@@ -24,9 +24,17 @@ import { compileScrml } from "../../src/api.js";
 import { parse as acornParse } from "acorn";
 
 const DIRS = [];
+// The pages are evaluated as classic scripts in the global scope (the runtime, the lib's client
+// module, the page), so their `_scrml_*` declarations become globals. Remove the ones this file
+// added: a later file in the same process must not see e.g. `_scrml_error_boundary_log` (the
+// url-guard test reads its absence).
+const GLOBALS_BEFORE = new Set(Object.getOwnPropertyNames(globalThis));
 afterAll(async () => {
   if (GlobalRegistrator.isRegistered) await GlobalRegistrator.unregister();
   for (const d of DIRS) rmSync(d, { recursive: true, force: true });
+  for (const k of Object.getOwnPropertyNames(globalThis)) {
+    if (/^_scrml/.test(k) && !GLOBALS_BEFORE.has(k)) { try { delete globalThis[k]; } catch { /* non-configurable */ } }
+  }
 });
 
 /** Compile a project (`files`: name -> source; the entry is `app.scrml`). The out dir is kept until afterAll. */

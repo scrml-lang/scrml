@@ -11546,6 +11546,31 @@ function annotateNodes(
   // binder binds by THAT enum's field order (the order the producer keys the payload by), so
   // `go(k) !{ .Boom(m) :> … }` reads `data.msg` without this file importing `E`.
   const importedFnErrorEnums = new Map<string, EnumType>();
+  /**
+   * S473 (impl#1 transport routing) — `name` is ONE function, declared in this file or imported
+   * (through `importedFnDecls`), that route inference server-places with an HTTP route and a
+   * client fetch stub, that is NOT declared `!`, and that is not body-split (a CPS split sends
+   * impl#1's own `CpsError` envelopes — out of the ruled scope). Mirrors #1658's
+   * `wholeBinderPlainServerCallee` (route-map entry by the declaring file + span start).
+   */
+  function transportRoutableCallee(name: string): boolean {
+    const locals = allFnDecls.filter((d) => d.name === name);
+    let decl: ASTNodeLike | null = null;
+    let declFile = filePath;
+    if (locals.length === 1) decl = locals[0];
+    else if (locals.length === 0) {
+      const d = importedFnDecls?.get(name);
+      if (d) { decl = d.fnNode; declFile = d.depFilePath; }
+    }
+    if (!decl || decl.canFail === true) return false;
+    const entry = routeMap?.functions?.get(`${declFile}::${(decl.span as Span | undefined)?.start}`);
+    if (!entry || entry.boundary !== "server" || entry.cpsSplit) return false;
+    // The type-system's RouteMap view types only `boundary` / `cpsSplit`; the rest is the full
+    // route record (route-inference.ts FunctionRoute).
+    const full = entry as { isSSE?: boolean; isChannelWsHandler?: boolean; serverCallersOnly?: boolean };
+    if (full.isSSE || full.isChannelWsHandler || full.serverCallersOnly) return false;
+    return true;
+  }
   // S469 r2 — and a STANDARD-LIBRARY failable import's declared error enum (stdlib-failable-errors.ts:
   // an import from `scrml:<module>` reaches no parsed declaration here), by local name.
   const stdlibFnErrorVariants = new Map<string, Array<{ name: string; fields: string[] }>>();
@@ -15705,6 +15730,19 @@ function annotateNodes(
           else if (calleeName && importedFailableUnreadableErr.has(calleeName) && !fnCpsImplicitFailable.has(calleeName)) {
             (n as Record<string, unknown>).__guardErrorUnknown = true;
           }
+        }
+
+        // S473 (ruling:user-voice-scrml.md S473 "impl#1 transport routing" item 3): "only a `!{}`
+        // that already covers the failure (a `_` or `.Transport` arm) gets a failed call to a
+        // NON-`!` server function as a `Transport` error value. Declared-`!` callees, `?`, `match`
+        // and CPS-split callees are out of scope". Stamp the guard when both hold; codegen routes
+        // the CLIENT call through `_scrml_server_attempt` (a server-side guard is never wrapped:
+        // only the client text is rewritten).
+        if (calleeName && errorArms.some((a) => {
+          const p = String(a.pattern ?? "").trim().replace(/^::/, "").replace(/^\./, "");
+          return p === "_" || p === "Transport";
+        }) && transportRoutableCallee(calleeName)) {
+          (n as Record<string, unknown>).__transportRoutable = calleeName;
         }
 
         // S469 r5 — §18.6.1 (ruling:user-voice-scrml.md S469 "SPEC: whole error + refuse
