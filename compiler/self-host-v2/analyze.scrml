@@ -54,8 +54,9 @@ ${
              AProgram, AItem, AItemK, AConst, FileAst, ADbFn, AHostBind, Diag, ASql,
              AHow, AHandled, AArm, APat, ABind, AArmBody, AFail, AFor, AForHead, AIterSrc, AForBound, ALift, AForeign,
              ACss, ACssItem, ACssRule, ACssDecl, ACssPart, ACssRef, mkSpan, newDiag,
-             HView, HTargetParts, hostView, hostTargetParts, hostRootGlobal } from "./ast.scrml"
+             HView, HTargetParts, hostView, hostTargetParts, hostRootGlobal, isHyphenWordExpr } from "./ast.scrml"
     import { Severity } from "./severity.scrml"
+    import { isKnownElementName, isHtmlElementName } from "./elements.scrml"
     import { importTarget, importsOfItems, hostImportsOfItems, hostTagOf, isStdlibPath, HostLoc, hostLocOf } from "./link.scrml"
     import { WireBuild, WireTable, wireBuild, hasFixedLength } from "./codec.scrml"
     import { SqlFacts, SlotQuote, MultiStmt, StmtVerdict, sqlFacts, slotInLiteral, txControl, txControlAware, multiStatement, programStatement } from "./sql.scrml"
@@ -1548,9 +1549,42 @@ ${
         return mkSpan(0, 0)
     }
 
-    fn userDeclStub(d: ADecl, file: string, st: AS) -> RDeclStubs {
+    fn userDeclStub(d: ADecl, file: string, st0: AS) -> RDeclStubs {
+        let st: AS = st0
+        if (reservedElementName(d.name)) {
+            st = addDiag(st, file, d.span, "E-NAME-COLLIDES-RESERVED", "`<" + d.name + ">` is a reserved scrml structural-element name (§4.15, §24.4: a user declaration named `engine`, `match`, `each`, `errors`, `render`, `page`, `onMount`, `md`, … is E-NAME-COLLIDES-RESERVED) — a use `<" + d.name + ">` names the structural element, not this declaration. Rename the declaration")
+        }
         const r: RSym = mint(reservedName(st, file, d.span, d.name), d.name)
         return { ds: [{ sym: r.s, file: file, isProgram: false, d: d, p: not, nid: d.nid }], st: r.st }
+    }
+
+    // s473 — the reserved scrml structural-element identifiers a user
+    // declaration may not take: §4.15's list ("registering a user component
+    // named `engine`, `match`, `each`, `errors`, `onTransition`, `onTimeout`,
+    // `onIdle`, `onMount` (S449), `render`, `page`, `endpoint`, `onchange`,
+    // `theme`, `defaults`, or `md` (S462, §67) is `E-NAME-COLLIDES-RESERVED`").
+    // Compared lowercase: §24.4 extends it to the capitalised spellings
+    // (`const Engine = <div>`, `OnMount`, `Page`, `Theme`, …).
+    fn reservedElementName(name: string) -> boolean {
+        const t: string = name.toLowerCase()
+        return match t {
+            "engine"       :> true
+            "match"        :> true
+            "each"         :> true
+            "errors"       :> true
+            "ontransition" :> true
+            "ontimeout"    :> true
+            "onidle"       :> true
+            "onmount"      :> true
+            "render"       :> true
+            "page"         :> true
+            "endpoint"     :> true
+            "onchange"     :> true
+            "theme"        :> true
+            "defaults"     :> true
+            "md"           :> true
+            _              :> false
+        }
     }
 
     // s442: a declaration with typed attributes or a `renders` written inside
@@ -1625,6 +1659,27 @@ ${
             .FnItem(f: f) :> not
             .MarkupItem(n: n) :> not
         }
+    }
+
+    // s473 — does the program body's markup write `<tag>` (a plain tag, any
+    // depth; not a `<*x>` reference, not inside a user declaration's renders)?
+    fn programUsesTag(p: AProgram, tag: string) -> boolean {
+        for (const it of p.items) {
+            const n: ANode | not = markupOfItem(it)
+            if (n is given && nodesUseTag([n], tag)) return true
+        }
+        return false
+    }
+
+    fn nodesUseTag(ns: ANode[], tag: string) -> boolean {
+        for (const n of ns) {
+            const e: AElem | not = elemOfANode(n)
+            if (e is given) {
+                if (!e.star && e.tag == tag) return true
+                if (nodesUseTag(e.kids, tag)) return true
+            }
+        }
+        return false
     }
 
     fn markupOfItem(it: AItem) -> ANode | not {
@@ -5304,6 +5359,25 @@ ${
                 // the program's cells (a nested user declaration is its own stub)
                 for (const it of p.items) {
                     for (const c of declsOfItem(it)) {
+                        // s473 — §66.8.2: a named shared instance in a `<program>`
+                        // body is refused as it is at file scope (above). It
+                        // compiled clean: its attributes were dropped and `@name`
+                        // read `rt.noDefault`, which throws.
+                        // s473 — RULED (bryan, user-voice S473 "review-surfaced
+                        // decisions" item 3): a program cell named like a markup
+                        // element is refused WHERE IT IS DECLARED when the same
+                        // program body also writes that name as a tag — `let
+                        // <filter:string=""/>` + `<filter/>` (that tag used to be
+                        // the inert element, §66.6.6's "silently changes
+                        // meaning"). With no colliding tag the cell is fine.
+                        // Code: the one #1682 (S473 SPEC rulings) names for this rule —
+                        // E-DECL-ELEMENT-NAME-COLLIDES.
+                        if (!isNestedUserDecl(c) && markupElementName(c.name) && programUsesTag(p, c.name)) {
+                            st = addDiag(st, s.file, c.span, "E-DECL-ELEMENT-NAME-COLLIDES", "the program cell `" + c.name + "` is named like the markup element `<" + c.name + ">`, and this program also writes `<" + c.name + ">` as a tag — the tag would be the element, not the cell (§66.6.6: a tag never silently changes meaning; ruled S473). Rename the cell, or drop the tag (show the value with `$" + "{@" + c.name + "}`)")
+                        }
+                        if (!isNestedUserDecl(c) && ownTypeName(c) != "" && declNames.indexOf(ownTypeName(c)) >= 0) {
+                            st = addDiag(st, s.file, c.span, "E-BOOTSTRAP-UNSUPPORTED", "`<" + c.name + ":" + ownTypeName(c) + " …/>` is a named shared instance of `<" + ownTypeName(c) + ">` (§66.8.2) — not in the bootstrap")
+                        }
                         if (!isNestedUserDecl(c) && declNames.indexOf(ownTypeName(c)) < 0) st = openerWordDiags(teAt(te, s.file), s.file, fileErrs(files, s.file), c, s.isProgram, st)
                         if (!isNestedUserDecl(c)) st = deepValidatorDiags(s.file, c.body, st)
                     }
@@ -16092,7 +16166,12 @@ ${
         }
     }
 
-    fn resolveElem(env: Env, e: AElem, st: AS) -> AS {
+    fn resolveElem(env: Env, e: AElem, st0: AS) -> AS {
+        // s473 — §17.4: a bare control-flow statement in a markup body
+        // (E-CONTROL-FLOW-IN-MARKUP). `<pre>` / `<code>` bodies are display
+        // text (§4.17); a `<db>` body is a code-default body (§4.18.1).
+        let st: AS = st0
+        if (!e.star && e.tag != "pre" && e.tag != "code" && e.tag != "db") st = controlFlowInMarkup(env, e.kids, st)
         if (e.star) return resolveStar(env, e, st)
         if (e.tag == "each") return resolveEach(env, e, st)
         if (e.tag == "slot") return resolveSlot(env, e, st)
@@ -16127,45 +16206,106 @@ ${
         if (owner != "") {
             return addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "`<" + e.tag + ">` is a scrml structural element (" + owner + "), not an HTML element (§4.15, §24.4) — it is not in the bootstrap")
         }
-        // s473 (boot-failclosed-sql-protect) — a CAPITALIZED tag that names no
-        // declaration is never HTML (gap g-bootstrap-unknown-tags-resolved-as-html).
-        // Its worst reading: a §52.3 state type declaration — `<User
-        // authority="server" table="users" protect="passwordHash">` + a field list
-        // — which the bootstrap does not model. Rendered as an HTML element, its
-        // `protect=` was DROPPED and the protected column served to the client
-        // (§14.8.9: "each §52 type-level `protect=`" covers every `?{}`; audit S473
-        // probe s148/t10 — the route answered `passwordHash:"SECRET"`). Refused,
-        // never rendered: with a §52 attribute it is named as that declaration
-        // (E-BOOTSTRAP-UNSUPPORTED); without one, as an undeclared component
-        // (§15.14.2 E-COMPONENT-035 — "SHALL NOT produce code outputs").
-        if (isCapitalTag(e.tag)) return addDiag(resolveNodes(env, e.kids, st), env.file, e.span, capitalTagCode(e), capitalTagWhy(e))
+        // s473 — §4.1: "A name that is not a known HTML element and not a
+        // defined component SHALL be a compile error (E-MARKUP-001)". It used to
+        // be emitted as an inert unknown element, with no diagnostic (gap
+        // g-bootstrap-unknown-tags-resolved-as-html). A bare tag naming a field
+        // of the enclosing declaration is E-DECL-FIELD-TAG-NEEDS-STAR instead
+        // (resolveHtml) — one report per fault. So is an element the PARSER has
+        // already refused (a parse error inside its span: the nameless recovery
+        // after E-PARSE-TAG "expected a tag name", `<program>` inside markup —
+        // E-PARSE-PROGRAM —, a misplaced `<host>` — E-HOST-BINDING-PLACEMENT),
+        // and a name imported from a module that resolves to nothing (that
+        // import's refusal). Each of those is an error already, so the compile
+        // is refused either way: never fail-open.
+        // A CAPITALISED tag is an element only when its lowercase form is an HTML
+        // element name (`<DIV>` is `<div>`, §4.3) — never by folding onto an
+        // SVG / MathML name: `<Unknown/>` (SVG legacy `unknown`), `<Set/>`,
+        // `<View/>`, `<Filter/>` are undeclared components, E-COMPONENT-035
+        // (S473 #1678 review F1; #1675's isCapitalTag rule).
+        // s473 (boot-failclosed-sql-protect, #1675) — a CAPITALIZED tag that names no
+        // declaration is never HTML. Its worst reading: a §52.3 state type
+        // declaration — `<User authority="server" table="users" protect="passwordHash">`
+        // + a field list — which the bootstrap does not model; rendered as an HTML
+        // element its `protect=` was DROPPED and the protected column served to the
+        // client (§14.8.9; audit S473 probe s148/t10). Refused, never rendered: with a
+        // §52 attribute it is named as that declaration (E-BOOTSTRAP-UNSUPPORTED);
+        // without one, as an undeclared component (E-COMPONENT-035). Its attributes
+        // are not judged again (one report per fault). A field tag / parser-refused /
+        // unresolved-import tag keeps its own report (below).
+        if (isCapitalTag(e.tag) && !namesOwnField(env, e.tag) && !unknownExcused(env, e)) return addDiag(resolveNodes(env, e.kids, st), env.file, e.span, capitalTagCode(e), capitalTagWhy(e))
+        if (!markupElementName(e.tag) && !namesOwnField(env, e.tag)) {
+            if (unknownExcused(env, e)) return resolveHtml(env, e, st)
+            return unknownElement(env, e, st)
+        }
         return resolveHtml(env, e, st)
     }
 
-    // A capitalized tag that is not a case variant of an HTML element (HTML tag
-    // names are case-insensitive: `<FORM>` is `<form>`, and the URL/attribute
-    // rules already judge it as one).
+    // s473 (#1678 review F9) — an unquoted value that reads as a hyphenated word
+    // (`class=foo-bar`) is a subtraction of names; the parser left it here
+    // (ast isHyphenWordExpr). Its names resolving to nothing is already
+    // E-SCOPE-001; when they all resolve, it is E-ATTR-UNQUOTED-OPERATOR (§5.2:
+    // an unquoted value holds no operator) — one report per fault.
+    fn hyphenWordValue(env: Env, a: AAttr, before: int, st: AS) -> AS {
+        const v: AAttrValue = a.value
+        const x: AExpr | not = match v {
+            .Bare(e: e) :> e
+            .NoValue :> not
+            .Paren(e: e) :> not
+            .Quoted(v: s) :> not
+            .Braced(b: b) :> not
+        }
+        if (x is not || !isHyphenWordExpr(x)) return st
+        const k: AExprK = x.k
+        const binary: boolean = match k {
+            .Name(name: n) :> false
+            .Binary(op: o) :> true
+            .Recovered :> false
+            .Sql(q: q) :> false
+            .Template(quasis: qs) :> false
+            .Foreign(f: fb0) :> false
+            .At(name: n) :> false
+            .AtItem :> false
+            .Num(raw: r) :> false
+            .Str(v: s) :> false
+            .Bool(v: b) :> false
+            .NotLit :> false
+            .Variant(name: n) :> false
+            .Member(obj: o) :> false
+            .Call(callee: c) :> false
+            .Unary(op: o) :> false
+            .Ternary(test: t) :> false
+            .Assign(target: t) :> false
+            .ArrayLit(elems: es) :> false
+            .ObjectLit(props: ps) :> false
+            .Spread(e: s) :> false
+            .Index(obj: o) :> false
+            .Lambda(params: ps) :> false
+            .Handled(h: h) :> false
+        }
+        if (!binary) return st
+        let i: int = before
+        while (i < st.diags.length) {
+            if (st.diags[i].code == "E-SCOPE-001") return st
+            i = i + 1
+        }
+        return addDiag(st, env.file, a.span, "E-ATTR-UNQUOTED-OPERATOR", "`" + a.name + "=…` — this unquoted value is a subtraction (`-` between names), and an unquoted attribute value holds no operator: it is an identifier, a member chain or a call (§5.1, §5.2). Quote a literal (`" + a.name + "=\"a-b\"`) or parenthesize an expression")
+    }
+
+    // s473 — an unknown element whose fault is already reported elsewhere (see resolveElem).
+    fn unknownExcused(env: Env, e: AElem) -> boolean {
+        return e.tag == "" || hasErrIn(fileErrs(env.g.files, env.file), e.span) || importsNameUnresolved(env.g.files, env.file, e.tag)
+    }
+
+    // #1675 — a capitalized tag that is not a case variant of an HTML element
+    // (HTML tag names are case-insensitive: `<FORM>` is `<form>`). The HTML list is
+    // elements.scrml's (one list, #1678 F2).
     fn isCapitalTag(tag: string) -> boolean {
         const c: string = tag.substring(0, 1)
-        return c != "" && "ABCDEFGHIJKLMNOPQRSTUVWXYZ".indexOf(c) >= 0 && !isHtmlElementName(tag.toLowerCase())
+        return c != "" && "ABCDEFGHIJKLMNOPQRSTUVWXYZ".indexOf(c) >= 0 && !isHtmlElementName(tag)
     }
 
-    // The HTML Living Standard's element names (§4 of the WHATWG HTML standard),
-    // plus the obsolete ones browsers still parse as elements.
-    fn isHtmlElementName(t: string) -> boolean {
-        return ["a", "abbr", "address", "area", "article", "aside", "audio", "b", "base", "bdi", "bdo", "blockquote", "body", "br", "button",
-                "canvas", "caption", "cite", "code", "col", "colgroup", "data", "datalist", "dd", "del", "details", "dfn", "dialog", "div", "dl",
-                "dt", "em", "embed", "fieldset", "figcaption", "figure", "footer", "form", "h1", "h2", "h3", "h4", "h5", "h6", "head", "header",
-                "hgroup", "hr", "html", "i", "iframe", "img", "input", "ins", "kbd", "label", "legend", "li", "link", "main", "map", "mark",
-                "menu", "meta", "meter", "nav", "noscript", "object", "ol", "optgroup", "option", "output", "p", "picture", "pre", "progress",
-                "q", "rp", "rt", "ruby", "s", "samp", "script", "search", "section", "select", "slot", "small", "source", "span", "strong",
-                "style", "sub", "summary", "sup", "table", "tbody", "td", "template", "textarea", "tfoot", "th", "thead", "time", "title", "tr",
-                "track", "u", "ul", "var", "video", "wbr", "svg", "math",
-                "acronym", "applet", "basefont", "big", "blink", "center", "dir", "font", "frame", "frameset", "marquee", "nobr", "noembed",
-                "noframes", "param", "plaintext", "rb", "rtc", "strike", "tt", "xmp"].indexOf(t) >= 0
-    }
-
-    // `protect=` / `authority=` / `table=` — the §52.3.1 state-type attributes
+    // #1675 — `protect=` / `authority=` / `table=`: the §52.3.1 state-type attributes
     fn stateTypeAttr(e: AElem) -> string {
         for (const a of e.attrs) {
             const n: string = a.name.toLowerCase()
@@ -16183,6 +16323,190 @@ ${
         const a: string = stateTypeAttr(e)
         if (a != "") return "`<" + e.tag + " " + a + "=…>` is a §52.3 state type declaration (`authority=` / `table=` / `protect=` and a field list), which is not in the bootstrap — refused, never rendered as an HTML element: its `protect=` would be dropped and the protected fields served to the client (§14.8.9). Keep secret columns out of the `SELECT` list of every query that answers the client"
         return "`<" + e.tag + ">` names no declaration in scope — a capitalized tag is a component or a §52.3 state type declaration, never an HTML element (§15.14.2: an unresolved component is E-COMPONENT-035). Declare `" + e.tag + "`, import it, or write the HTML element in lower case"
+    }
+
+    // s473 — a tag that names a registry element (§4.1, §24.1): lowercase-initial
+    // → any HTML / SVG / MathML / custom element name; capitalised → only an
+    // HTML element name, case-folded (review F1).
+    fn markupElementName(tag: string) -> boolean {
+        const first: string = tag.substring(0, 1)
+        if (first != "" && first != first.toLowerCase()) return isHtmlElementName(tag)
+        return isKnownElementName(tag)
+    }
+
+    // s473 — an element attribute that is a scrml directive the bootstrap does
+    // not carry: refused by name, never written to the DOM ("" = not one).
+    //  - `fixed` — RETIRED (ruling S473 D26): it used to leak as `fixed=""`.
+    //  - `protect=` / `authority=` — §14.8.9 / §52 confidentiality and authority
+    //    controls the bootstrap does not enforce (ruling S473 D2: "so is any
+    //    element carrying protect= / authority= that the bootstrap doesn't
+    //    enforce"; S473 D1: refuse rather than drop a guarantee). On an HTML or
+    //    custom element they would be written out as plain attributes, the
+    //    guarantee silently gone.
+    fn refusedDirectiveAttr(name: string, tag: string) -> string {
+        const n: string = name.toLowerCase()
+        if (n == "fixed") return "`fixed` on `<" + tag + ">` is retired (ruling S473 D26 — §15.7's non-overridable subtree has no meaning under §66, where a use cannot override a `renders` element, §66.6.9); remove it. It is not an HTML attribute and is never written to the page"
+        if (n == "protect" || n == "authority") return "`" + name + "=` on `<" + tag + ">` is a scrml " + (n == "protect" ? "confidentiality" : "authority") + " control (§14.8.9, §52) that the bootstrap does not enforce — refused, never dropped (ruling S473 D1 / D2): written out as a plain attribute it would guarantee nothing"
+        return ""
+    }
+
+    // s473 — a bare tag that names a child field of the enclosing declaration —
+    // the program's cells included (R4: they are the program's fields), except a
+    // program cell spelled like a markup element. RULED (bryan, user-voice S473
+    // "review-surfaced decisions" item 3): that collision is refused at the
+    // CELL (E-DECL-ELEMENT-NAME-COLLIDES, namedInstanceDiags), so the tag is not
+    // reported a second time here — one report per fault. Inside a user
+    // declaration the field reading has always won (and still does).
+    fn namesOwnField(env: Env, tag: string) -> boolean {
+        const cd: DeclSrc | not = ctxDecl(env)
+        if (cd is not) return false
+        const i: int = fieldIndex(cd.info, tag)
+        if (i < 0 || !isChildRole(cd.info.fields[i].role)) return false
+        return !cd.isProgram || !markupElementName(tag)
+    }
+
+    // s473 — an element name that resolves to nothing (§4.1, §24.1). §34's
+    // retired E-STATE-001 row: "a PascalCase name surfaces as E-COMPONENT-035,
+    // a lowercase-HTML name as E-MARKUP-001". Its attributes and children are
+    // still resolved (as an element's), so their own faults are reported too.
+    fn unknownElement(env: Env, e: AElem, st0: AS) -> AS {
+        const first: string = e.tag.substring(0, 1)
+        let st: AS = st0
+        if (first != first.toLowerCase()) {
+            st = addDiag(st, env.file, e.span, "E-COMPONENT-035", "`<" + e.tag + ">` names no declaration in scope — nothing of that name is declared or imported here, so it would be emitted as an inert, unknown element (§15.14, §4.1). Declare it (`<" + e.tag + " …/>` with a `renders` clause) or import it")
+        } else {
+            st = addDiag(st, env.file, e.span, "E-MARKUP-001", "`<" + e.tag + ">` is not an HTML, SVG or MathML element, a custom element (a lowercase name holding a hyphen, `<my-widget>`), or a declaration in scope (§4.1, §24.1) — it would be emitted as an inert, unknown element. Check the spelling, or declare it")
+        }
+        return resolveHtml(env, e, st)
+    }
+
+    // s473 — §17.4 "The `${ ... }` wrapper is mandatory (S203)": "A bare
+    // control-flow statement written directly in a markup body (no surrounding
+    // `${ ... }`) … is E-CONTROL-FLOW-IN-MARKUP". §34's row: "`for (...) { ... }`,
+    // `if (...) { ... }`, or `while (...) { ... }`" — the BRACED forms (S383: the
+    // `{` is the whole discriminator between code and prose; the braceless
+    // hole stays open, as on impl#1). The bootstrap shipped the statement as
+    // page text and rendered the markup it gated UNCONDITIONALLY (probe
+    // p17-cfmarkup2: `<div> if (@flag) { <p>secret</p> } </div>`). impl#1's
+    // recognizer (ast-builder.js BARE_CONTROL_FLOW_IN_MARKUP_RE) is applied to
+    // each text run of the body: a run starts at a text node that opens the body
+    // or follows an element, and runs through text and `${…}` interpolations up
+    // to the next element. One report per run.
+    fn controlFlowInMarkup(env: Env, kids: ANode[], st0: AS) -> AS {
+        let st: AS = st0
+        let run = ""
+        let runSpan: ASpan = mkSpan(0, 0)
+        let inRun = false
+        let i: int = 0
+        while (i <= kids.length) {
+            let piece = ""
+            let isText = false
+            if (i < kids.length) {
+                const k: ANodeK = kids[i].k
+                const t: string | not = textRunPiece(k)
+                if (t is given) {
+                    isText = true
+                    piece = t
+                }
+            }
+            if (isText) {
+                if (!inRun) {
+                    inRun = true
+                    run = ""
+                    runSpan = kids[i].span
+                }
+                run = run + piece
+            } else if (inRun) {
+                const kw: string = controlFlowHead(run)
+                if (kw != "") st = addDiag(st, env.file, runSpan, "E-CONTROL-FLOW-IN-MARKUP", "a bare `" + kw + " … { … }` statement in a markup body is not logic — it would be written into the page as text, and the markup inside its braces would render unconditionally. Control flow in markup lives in a `$" + "{ … }` logic block (§17.4, §7) — `$" + "{ for (x of @items) { lift <li>$" + "{x}</li>; } }` — or is an `if=` on the element (§17.1), or `<each in=@items>` (§17.7)")
+                inRun = false
+            }
+            i = i + 1
+        }
+        return st
+    }
+
+    // A node's text in a markup text run: a text node's text; an interpolation
+    // stands for a value. `not` for a node that ends the run (an element, …).
+    fn textRunPiece(k: ANodeK) -> string | not {
+        return match k {
+            .Text(text: t) :> t
+            .Interp(e: x) :> ""
+            .Elem(e: x) :> not
+            .DeclNode(d: d) :> not
+            .Css(c: c) :> not
+            .Effect(w: w) :> not
+            .Gather(f: f) :> not
+        }
+    }
+
+    // The control-flow statement a markup text run holds, by its keyword ("" =
+    // none). §17.4 / §34 E-CONTROL-FLOW-IN-MARKUP: control flow in a markup body
+    // is logic; S383: the `{` is the whole discriminator between code and prose,
+    // so every form here needs its brace. impl#1's recognizer
+    // (BARE_CONTROL_FLOW_IN_MARKUP_RE) anchors at the run start; this one finds
+    // the statement ANYWHERE in the run (#1678 review F4: `Hello. if (@f) {
+    // <p>secret</p> }` rendered `<p>` unconditionally), at a word boundary:
+    //   `for` / `while` / `if` / `switch` `(…)` then `{` after a `)`;
+    //   `else {`, `else if (…) {`, `do {`;
+    //   `match @x … {` / `match (…) … {` (§18 — a subject, then its arms' brace).
+    // An interpolation stands for nothing in the run (textRunPiece), so
+    // `if (@a) ${…} {` is caught too. Prose with no brace after the head —
+    // "Tap if (and only if) ready" — is never refused.
+    fn controlFlowHead(t: string) -> string {
+        let i: int = 0
+        while (i < t.length) {
+            if (i == 0 || !isWordChar(t.substring(i - 1, i))) {
+                const kw: string = cfKeywordAt(t, i)
+                if (kw != "" && cfStatementAt(t, i + kw.length, kw)) return kw
+            }
+            i = i + 1
+        }
+        return ""
+    }
+
+    fn cfKeywordAt(t: string, i: int) -> string {
+        for (const kw of ["switch", "while", "match", "else", "for", "if", "do"]) {
+            const j: int = i + kw.length
+            if (t.substring(i, j) == kw && (j >= t.length || !isWordChar(t.substring(j, j + 1)))) return kw
+        }
+        return ""
+    }
+
+    // After the keyword `kw` (ending at `j0`): does its braced statement follow?
+    fn cfStatementAt(t: string, j0: int, kw: string) -> boolean {
+        const j: int = skipBlank(t, j0)
+        if (j >= t.length) return false
+        const c: string = t.substring(j, j + 1)
+        if (kw == "else") {
+            if (c == "{") return true
+            if (cfKeywordAt(t, j) == "if") return cfStatementAt(t, j + 2, "if")
+            return false
+        }
+        if (kw == "do") return c == "{"
+        if (kw == "match") {
+            if (c != "@" && c != "(") return false
+            return t.indexOf("{", j) >= 0
+        }
+        if (c != "(") return false
+        let k: int = t.indexOf(")", j + 1)
+        while (k >= 0) {
+            const m: int = skipBlank(t, k + 1)
+            if (m < t.length && t.substring(m, m + 1) == "{") return true
+            k = t.indexOf(")", k + 1)
+        }
+        return false
+    }
+
+    fn skipBlank(t: string, from: int) -> int {
+        let m: int = from
+        while (m < t.length && t.substring(m, m + 1).trim() == "") { m = m + 1 }
+        return m
+    }
+
+    // A regex `\w` character.
+    fn isWordChar(c: string) -> boolean {
+        return (c >= "a" && c <= "z") || (c >= "A" && c <= "Z") || (c >= "0" && c <= "9") || c == "_"
     }
 
     // s452 — a `<db src=…>` state block. §4: "A state block is a first-class
@@ -16377,7 +16701,14 @@ ${
     // carries no fallback. It used to be dropped unvisited — an effect there
     // never ran, an unresolved `${@nope}` raised nothing. Fail closed: any
     // content other than whitespace is refused.
-    fn resolveSlot(env: Env, e: AElem, st: AS) -> AS {
+    fn resolveSlot(env: Env, e: AElem, st0: AS) -> AS {
+        // s473 (#1678 review F6) — S473 D1 / D2 / D26 hold on `<slot>` too: a
+        // `protect=` / `authority=` / `fixed` here was dropped silently.
+        let st: AS = st0
+        for (const a of e.attrs) {
+            const directive: string = refusedDirectiveAttr(a.name, e.tag)
+            if (directive != "") st = addDiag(st, env.file, a.span, "E-BOOTSTRAP-UNSUPPORTED", directive)
+        }
         for (const k of e.kids) {
             if (!blankNode(k)) {
                 return addElem(addDiag(st, env.file, k.span, "E-BOOTSTRAP-UNSUPPORTED", "content inside `<slot>…</slot>` (fallback content for a use with no children) is not in the bootstrap — SPEC §66.15.2 rules only `<slot/>`; the content would be dropped silently. Write `<slot/>` and render a default outside it"), e.nid, ElemFact.MSlot)
@@ -16457,6 +16788,12 @@ ${
             "api"           :> "§60"
             "markup"        :> "a legacy document root"
             "defaults"      :> "§65.3.3"
+            // s473 — §4.15 registers these two (Nominal), and the bootstrap
+            // has neither: `<onMount>` rendered as an element and its body ran
+            // as a render interpolation (gap g-bootstrap-onmount-owed); `<md>`
+            // showed its markdown as page text (g-bootstrap-md-static-owed-s462)
+            "onmount"       :> "§6.7.1a lifecycle"
+            "md"            :> "§67 markdown"
             "keyboard"      :> "§36 input state"
             "mouse"         :> "§36 input state"
             "gamepad"       :> "§36 input state"
@@ -16916,21 +17253,24 @@ ${
         let st: AS = addElem(st0, e.nid, ElemFact.MHtml)
         // E-DECL-FIELD-TAG-NEEDS-STAR: a bare tag naming a CHILD field of the
         // enclosing declaration (§66.6.6).
+        // s473: the program's cells too (R4 — they are the program's fields).
+        // §66.6.6: the render-by-tag uses (`<count/>` as a view of a shared
+        // cell) migrate to `<*count/>` "in the SAME arc … there is NO
+        // deprecation window in which `<x/>` silently changes meaning". The
+        // program was exempt, and `<count/>` rendered an inert `<count>` element.
+        // (namesOwnField: a program cell spelled like an element does not take
+        // the element's tag — `let <p:P/>` beside `<p>…</p>`.)
         const cd: DeclSrc | not = ctxDecl(env)
-        if (cd is given) {
-            if (!cd.isProgram) {
-                const i: int = fieldIndex(cd.info, e.tag)
-                if (i >= 0 && isChildRole(cd.info.fields[i].role)) {
-                    st = addDiag(st, env.file, e.span, "E-DECL-FIELD-TAG-NEEDS-STAR", "`<" + e.tag + "/>` names a field of `<" + cd.info.sym.hint + ">` — did you mean `<*" + e.tag + "/>`? A plain tag makes a new instance (§66.6.6)")
-                }
-            }
+        if (cd is given && namesOwnField(env, e.tag)) {
+            const owner: string = cd.isProgram ? "the program (the cell `@" + e.tag + "`)" : "`<" + cd.info.sym.hint + ">`"
+            st = addDiag(st, env.file, e.span, "E-DECL-FIELD-TAG-NEEDS-STAR", "`<" + e.tag + "/>` names a field of " + owner + " — did you mean `<*" + e.tag + "/>`? A plain tag makes a new instance (§66.6.6); to show the value, interpolate it: `$" + "{@" + e.tag + "}`")
         }
         for (const a of e.attrs) {
             const ev: string = eventName(a.name)
-            if (a.name.toLowerCase() == "protect" || a.name.toLowerCase() == "authority") {
-                // s473: a confidentiality / authority control is refused, never
-                // written out as an inert HTML attribute (§14.8.9, §52.3)
-                st = addDiag(st, env.file, a.span, "E-BOOTSTRAP-UNSUPPORTED", "`" + a.name + "=` on `<" + e.tag + ">` is a scrml " + a.name.toLowerCase() + " control (§14.8.9 / §52.3), which the bootstrap does not enforce on any element — a confidentiality control is refused, never ignored")
+            const directive: string = refusedDirectiveAttr(a.name, e.tag)
+            if (directive != "") {
+                // s473 — S473 D26 (`fixed`), S473 D1 / D2 (`protect=` / `authority=`)
+                st = addDiag(st, env.file, a.span, "E-BOOTSTRAP-UNSUPPORTED", directive)
             } else if (isChainAttr(a.name)) {
                 // s451: `if=` / `else-if=` / `else` (§17.1.1) — chain attributes (chainCheck)
                 st = resolveIfValue(env, a.value, st)
@@ -17038,7 +17378,9 @@ ${
                 st = resolveValue(penv, a.value, not, st)
                 st = addDiag(st, env.file, a.span, "E-ATTR-STYLESHEET-HREF", "`" + a.name + "=` on `<" + e.tag + ">` takes its value from data (an expression, a variable, a call or a field), and this `<link>`'s `rel` loads a stylesheet (it contains `stylesheet`, or is computed) — data never chooses a stylesheet: a whole sheet can read the page (attribute-selector `url(…)` fetches) and cover it. Write the `href` as a static string (`href=\"/theme.css\"`), switch between static `<link>`s with `if=`, or put the dynamic part in a `#" + "{…}` rule as `@cell` (§25.7) (§5.2)")
             } else if (valueExpr(a.value) is given) {
+                const before: int = st.diags.length
                 st = resolveValue(penv, a.value, not, st)
+                st = hyphenWordValue(env, a, before, st)
                 st = addAttr(st, a.nid, AttrKind.ABound)
             } else {
                 st = addAttr(st, a.nid, AttrKind.AStatic)
@@ -17052,8 +17394,10 @@ ${
     // hidden. The compiler generates a CSS `display: none` toggle." It is a
     // condition like `if=` (the typer's checkCond: a `bool` or a `T | not`
     // presence test; §5.2's atomic-only-when-bare rule is shared with `if=` —
-    // a bare operator fails in the parser, E-PARSE-TAG, for both, not yet as
-    // E-ATTR-UNQUOTED-OPERATOR), resolved
+    // a bare operator is refused in the parser for both: a spaced one
+    // (`show=@n == 3`) ends the value and the rest of the tag is E-PARSE-TAG; an
+    // unspaced one (`show=@n==3`, `if=@a&&@b`) is read whole and refused as
+    // E-ATTR-UNQUOTED-OPERATOR (s473, parse.scrml unquotedOperatorDiag)), resolved
     // in the env the element's other attributes see (inside its `if=`). It
     // does NOT narrow the children — they exist while it is false.
     // §17.1.1: "`if=`, `else-if=`, and `else` MAY coexist on the same element
@@ -17481,8 +17825,40 @@ ${
                 st = addDiag(st, env.file, a.span, "E-BOOTSTRAP-UNSUPPORTED", "`<each " + a.name + "=>` is not in bootstrap slice M2")
             }
         }
+        st = eachShapeDiags(env, e, st)
         st = addElem(st, e.nid, ElemFact.MEach(rs.s, hsyms))
         return resolveNodes(renv, e.kids, st)
+    }
+
+    // s473 — §17.7.2: "An `<each>` opener SHALL carry exactly one of `in=expr`
+    // or `of=expr` (`E-EACH-ITER-SHAPE`)", and "An `<each>` with no body
+    // content is `E-EACH-EMPTY-BODY`". Neither was checked: `<each>` with no
+    // `in=` compiled to `rt.each(() => null, …)` and threw at mount; an empty
+    // body rendered nothing. `of=` itself is refused above (not in the
+    // bootstrap); an `in=` without an expression (quoted, valueless, braced)
+    // names no sequence, so it is the same fault.
+    fn eachShapeDiags(env: Env, e: AElem, st0: AS) -> AS {
+        let st: AS = st0
+        let ins: int = 0
+        let ofs: int = 0
+        let inExpr = false
+        for (const a of e.attrs) {
+            if (a.name == "in") {
+                ins = ins + 1
+                // a quoted `in="…"` is a string, judged by the typer (E-EACH-NOT-SEQUENCE)
+                if (valueExpr(a.value) is given || quotedValue(a.value) is given) inExpr = true
+            }
+            if (a.name == "of") ofs = ofs + 1
+        }
+        if (ins + ofs != 1) {
+            st = addDiag(st, env.file, e.span, "E-EACH-ITER-SHAPE", "`<each>` carries exactly one of `in=expr` (a sequence) or `of=expr` (a count) (§17.7.2) — this one has " + (ins + ofs == 0 ? "neither" : "more than one") + ": `<each in=@items>…</each>`")
+        } else if (ins == 1 && !inExpr) {
+            st = addDiag(st, env.file, e.span, "E-EACH-ITER-SHAPE", "`<each in=…>` takes an expression — `in=@items` or `in=(…)`; a valueless or braced `in=` names no sequence (§17.7.2)")
+        }
+        let body = false
+        for (const k of e.kids) { if (!blankNode(k)) body = true }
+        if (!body) st = addDiag(st, env.file, e.span, "E-EACH-EMPTY-BODY", "`<each>` has no body — it needs a per-item template (`<li>…</li>`) to render for each item (§17.7.2)")
+        return st
     }
 
     // =========================================================================
@@ -18079,6 +18455,28 @@ ${
             }
         }
         return file + " (offset " + offset + ")"
+    }
+
+    // s473 — does `file` import `name` through an import whose module resolves to
+    // no file in the build? That import is refused where it is written
+    // (importRefusal: E-IMPORT-006, …), so a tag naming it is not reported again
+    // as an unknown element (one report per fault). An import that DOES resolve
+    // is not excused here: a tag naming a non-declaration it brings in (a
+    // function) stays E-MARKUP-001.
+    fn importsNameUnresolved(files: FileAst[], file: string, name: string) -> boolean {
+        const paths: string[] = filePaths(files)
+        for (const f of files) {
+            if (f.path == file) {
+                for (const imp of importsOfItems(f.items)) {
+                    if (importTarget(f.path, imp.from, paths) == "") {
+                        for (const x of imp.names) {
+                            if (x.name == name) return true
+                        }
+                    }
+                }
+            }
+        }
+        return false
     }
 
     // Does `file` import `name` from the file `from` (a plain `import { … }`, §21.3)?

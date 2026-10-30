@@ -44,12 +44,25 @@ describe("(1) a scrml structural element is never an HTML element", () => {
   });
   // r2 F2 (S239 review): a USER declaration of that name wins over the refusal
   // list, exactly as a declaration wins over an HTML element of the same name.
-  for (const name of [...STRUCTURAL, "errors", "db", "Page", "Timer"]) {
+  // s473: EXCEPT the names §4.15 / §24.4 RESERVE — "registering a user component named
+  // `engine`, `match`, `each`, `errors`, `onTransition`, `onTimeout`, `onIdle`, `onMount`,
+  // `render`, `page`, `endpoint`, `onchange`, `theme`, `defaults`, or `md` is
+  // `E-NAME-COLLIDES-RESERVED`" (§24.4: the capitalised spellings too). Those are refused at
+  // the declaration (markup-failclosed-s473.test.js); the rest keep r2 F2.
+  const RESERVED = ["engine", "match", "each", "errors", "ontransition", "ontimeout", "onidle", "onmount",
+    "render", "page", "endpoint", "onchange", "theme", "defaults", "md"];
+  const reserved = (n) => RESERVED.includes(n.toLowerCase());
+  const declSrc = (name) => `<program>\n    <${name} label:string="x">\n    </>\n    renders <p>\${label}</p>\n    <main>\n        <${name} label="y"/>\n    </main>\n</program>\n`;
+  for (const name of [...STRUCTURAL, "errors", "db", "Page", "Timer"].filter((n) => !reserved(n))) {
     test(`a user declaration named \`${name}\` is used as the declaration, not refused`, () => {
-      const src = `<program>\n    <${name} label:string="x">\n    </>\n    renders <p>\${label}</p>\n    <main>\n        <${name} label="y"/>\n    </main>\n</program>\n`;
-      const r = run(src);
+      const r = run(declSrc(name));
       expect(r.diags.map((x) => `${x.code}: ${x.message}`)).toEqual([]);
       expect(mods.check.checkCore(r.core)).toEqual([]);
+    });
+  }
+  for (const name of [...STRUCTURAL, "errors", "Page"].filter(reserved)) {
+    test(`a user declaration named \`${name}\` is E-NAME-COLLIDES-RESERVED (§4.15, §24.4)`, () => {
+      expect(run(declSrc(name)).diags.map((x) => x.code)).toEqual(["E-NAME-COLLIDES-RESERVED"]);
     });
   }
   test("a `single` program cell named `page` is E-DECL-SINGLE-INSTANTIATED at `<page/>`, not a structural refusal", () => {

@@ -1,0 +1,4 @@
+{
+  "$comment": "Known Windows-failing tests (S473 ratchet; read by scripts/windows-ratchet.ts, documented in .github/CI.md). Each entry: file (repo-relative POSIX), test (describe chain > name, exactly as bun prints it after `(fail)`), gap (an OPEN gap id in docs/known-gaps.md), reason. The windows job FAILS on a failure not listed here AND on an entry that no longer fails, so this list only shrinks. Add an entry only with an open gap.",
+  "entries": []
+}

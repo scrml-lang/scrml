@@ -97,7 +97,9 @@ describe("§4.17 — what stays legal", () => {
   test("`<noscript>` and a longer name (`<style-x>`) are ordinary elements", () => {
     expect(codes(program(`    <noscript>hi</noscript>`))).toEqual([]);
     expect(codes(program(`    <style-x>hi</style-x>`))).toEqual([]);
-    expect(codes(program(`    <scripts>hi</scripts>`))).toEqual([]);
+    // s473: `<scripts>` is not `<script>` (no E-SCRIPT-001) — and, being no HTML element and
+    // no custom element (no hyphen), it is E-MARKUP-001 (§4.1); it used to render as an inert element
+    expect(codes(program(`    <scripts>hi</scripts>`))).toEqual(["E-MARKUP-001"]);
   });
   test("a `style=` attribute is not a `<style>` element", () => {
     expect(codes(program(`    <p style="color:red">x</p>`))).toEqual([]);

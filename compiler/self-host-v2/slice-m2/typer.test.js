@@ -44,11 +44,11 @@ describe("writes are type-checked against the target (§66.1 rule 5)", () => {
       bad: ["    <audit:string[free, append]=([])/>\n    function f() { @audit.append(5); }"],
       ok: ["    <audit:string[free, append]=([])/>\n    function f() { @audit.append(\"x\"); }"] },
     { name: "a spread override of a struct cell (O58 (b) field edit)", want: ["E-TYPE-031"],
-      bad: ["    type P:struct = { let x: int, let y: int }\n    let <p:P=({ x: 1, y: 2 })/>\n    function f() { @p = { ...@p, y: \"s\" }; }"],
-      ok: ["    type P:struct = { let x: int, let y: int }\n    let <p:P=({ x: 1, y: 2 })/>\n    function f() { @p = { ...@p, y: 5 }; }"] },
-    { name: "a field-at write `@p.y = …`", want: ["E-TYPE-031"],
-      bad: ["    type P:struct = { let x: int, let y: int }\n    let <p:P=({ x: 1, y: 2 })/>\n    function f() { @p.y = true; }"],
-      ok: ["    type P:struct = { let x: int, let y: int }\n    let <p:P=({ x: 1, y: 2 })/>\n    function f() { @p.y = 3; }"] },
+      bad: ["    type P:struct = { let x: int, let y: int }\n    let <pt:P=({ x: 1, y: 2 })/>\n    function f() { @pt = { ...@pt, y: \"s\" }; }"],
+      ok: ["    type P:struct = { let x: int, let y: int }\n    let <pt:P=({ x: 1, y: 2 })/>\n    function f() { @pt = { ...@pt, y: 5 }; }"] },
+    { name: "a field-at write `@pt.y = …`", want: ["E-TYPE-031"],
+      bad: ["    type P:struct = { let x: int, let y: int }\n    let <pt:P=({ x: 1, y: 2 })/>\n    function f() { @pt.y = true; }"],
+      ok: ["    type P:struct = { let x: int, let y: int }\n    let <pt:P=({ x: 1, y: 2 })/>\n    function f() { @pt.y = 3; }"] },
     { name: "a spread override of an INSTANCE", want: ["E-TYPE-031"],
       bad: ["    function f() { @country = { ...@country, value: 5 }; }", "<dropdown as=country label=\"1\" options=([\"a\"])/>"],
       ok: ["    function f() { @country = { ...@country, value: \"CA\" }; }", "<dropdown as=country label=\"1\" options=([\"a\"])/>"] },
@@ -187,7 +187,7 @@ describe("calls and `<each in=…>`", () => {
   });
   test("E-EACH-NOT-SEQUENCE — a string, a struct", () => {
     expect(inApp("    <s=\"abc\"/>", "<each in=@s as c><p>${c}</p></each>")).toEqual(["E-EACH-NOT-SEQUENCE"]);
-    expect(inApp("    type P:struct = { x: int }\n    <p:P=({ x: 1 })/>", "<each in=@p as c><p>x</p></each>")).toEqual(["E-EACH-NOT-SEQUENCE"]);
+    expect(inApp("    type P:struct = { x: int }\n    <pt:P=({ x: 1 })/>", "<each in=@pt as c><p>x</p></each>")).toEqual(["E-EACH-NOT-SEQUENCE"]);
   });
   test("twin silent — a sequence field read bare inside a declaration's renders (the library's `<each in=options>`)", () => {
     expect(codes([LIB(), app("", "<dropdown label=\"1\" options=([\"a\"])/>")])).toEqual([]);
@@ -387,15 +387,15 @@ describe("A — a local's type: its annotation, else the join of everything it i
 });
 
 describe("B — a whole-struct replace by a literal checks every field (spelling-independent, §66.1 rule 5)", () => {
-  const P = "    type P:struct = { let x: int, let y: int }\n    let <p:P=({ x: 1, y: 2 })/>\n";
-  test("E-TYPE-031 — `@p = { x: 1, y: \"s\" }`", () => {
-    expect(inApp(P + "    function f() { @p = { x: 1, y: \"s\" }; }")).toEqual(["E-TYPE-031"]);
+  const P = "    type P:struct = { let x: int, let y: int }\n    let <pt:P=({ x: 1, y: 2 })/>\n";
+  test("E-TYPE-031 — `@pt = { x: 1, y: \"s\" }`", () => {
+    expect(inApp(P + "    function f() { @pt = { x: 1, y: \"s\" }; }")).toEqual(["E-TYPE-031"]);
   });
-  test("E-TYPE-041 — `@p = { x: 1, y: not }`", () => {
-    expect(inApp(P + "    function f() { @p = { x: 1, y: not }; }")).toEqual(["E-TYPE-041"]);
+  test("E-TYPE-041 — `@pt = { x: 1, y: not }`", () => {
+    expect(inApp(P + "    function f() { @pt = { x: 1, y: not }; }")).toEqual(["E-TYPE-041"]);
   });
-  test("twin silent — `@p = { x: 1, y: 2 }`", () => {
-    expect(inApp(P + "    function f() { @p = { x: 1, y: 2 }; }")).toEqual([]);
+  test("twin silent — `@pt = { x: 1, y: 2 }`", () => {
+    expect(inApp(P + "    function f() { @pt = { x: 1, y: 2 }; }")).toEqual([]);
   });
   test("E-TYPE-031 — a struct literal inside an appended element", () => {
     const L = "    type L:struct = { id: int, name: string }\n    <ls:L[free, append]=([])/>\n";

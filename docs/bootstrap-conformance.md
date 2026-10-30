@@ -13,24 +13,24 @@ Scope: **1813 of 1813 cases attempted** — every attempted case reached the pur
 |---|---:|---:|
 | PASS | 265 | 14.6% |
 | CODES-ONLY | 0 | 0.0% |
-| FAIL | 47 | 2.6% |
+| FAIL | 40 | 2.2% |
 | LEGACY | 0 | 0.0% |
 | NOT-TWINNED | 685 | 37.8% |
-| UNSUPPORTED | 816 | 45.0% |
+| UNSUPPORTED | 823 | 45.4% |
 | CRASH | 0 | 0.0% |
 | INVALID | 0 | 0.0% |
 
-**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 312; of those, 265 hold (84.9%). Runtime half executed on the bootstrap for 103 case(s).
+**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 305; of those, 265 hold (86.9%). Runtime half executed on the bootstrap for 100 case(s).
 
 - **Vacuous** passes: 19 of 265 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **246**.
-- FAILs whose required code appears nowhere in the bootstrap's sources (check not implemented): 21 of 47; the other 26 are implemented checks that answered wrong.
+- FAILs whose required code appears nowhere in the bootstrap's sources (check not implemented): 16 of 40; the other 24 are implemented checks that answered wrong.
 
 LEGACY by marker (a case may carry several): none.
-UNSUPPORTED by reason: bootstrap-unsupported 536 · parse-reject 280.
+UNSUPPORTED by reason: bootstrap-unsupported 550 · parse-reject 273.
 
 ### §66 twins (S449 dialect ruling 1 — generated at test time by the `scrml fix` §66 rules)
 
-Legacy-dialect cases graded on their generated §66 twin: **793** — PASS 163 · FAIL 33 · UNSUPPORTED 597. Twin holds 163 (non-vacuous 148). Every twin verdict above is included in the bucket table.
+Legacy-dialect cases graded on their generated §66 twin: **793** — PASS 163 · FAIL 32 · UNSUPPORTED 598. Twin holds 163 (non-vacuous 148). Every twin verdict above is included in the bucket table.
 - `dialect.s66` overrides: 0 replace a twin's expectations · 11 exclude a case.
 - Superseded-code mappings applied: 2 case(s) (E-ENGINE-VAR-DUPLICATE→E-SCOPE-010). Rows: E-ENGINE-VAR-DUPLICATE→E-SCOPE-010 [applied] · E-ENGINE-STATE-CHILD-INVALID-VARIANT→∅ [owed] · E-ENGINE-RULE-INVALID-VARIANT→∅ [owed] · E-ENGINE-INITIAL-INVALID-VARIANT→∅ [owed] · E-CELL-NO-RENDER-SPEC→∅ [owed] · E-CELL-RENDER-SPEC-NOT-BINDABLE→∅ [owed] · E-DECL-RHS-INTERP-WRAPPED→∅ [owed] · E-COMPONENT-010→∅ [owed].
 
@@ -135,7 +135,7 @@ NOT-TWINNED by reason (685 cases; a case counts once per distinct reason):
 | match-codes | 25 | 4 | · | 2 | · | · | 19 | · | · |
 | match-identifier | 1 | · | · | · | · | 1 | · | · | · |
 | match-leave | 46 | 16 | · | · | · | 12 | 18 | · | · |
-| md | 18 | · | · | 7 | · | 3 | 8 | · | · |
+| md | 18 | · | · | · | · | 3 | 15 | · | · |
 | meta | 66 | · | · | · | · | 1 | 65 | · | · |
 | middleware | 4 | 1 | · | · | · | · | 3 | · | · |
 | module | 45 | 8 | · | 3 | · | 8 | 26 | · | · |
@@ -163,7 +163,7 @@ NOT-TWINNED by reason (685 cases; a case counts once per distinct reason):
 | tenant | 23 | · | · | · | · | · | 23 | · | · |
 | type-state-codes | 32 | 3 | · | 1 | · | 3 | 25 | · | · |
 
-### FAIL (47)
+### FAIL (40)
 
 - `condition/unresolved-call-markup-neg` (codes)
   - missing E-COND-NOT-BOOLEAN
@@ -225,39 +225,6 @@ NOT-TWINNED by reason (685 cases; a case counts once per distinct reason):
   - twin emitted unasserted error(s): E-TYPE-031
 - `match-codes/e-type-026-match-in-markup-pos` (twin · codes; not in the bootstrap: E-TYPE-026)
   - missing E-TYPE-026
-- `md/heading-ids-page-wide` (runtime)
-  - dom (whole-tree) mismatch: expected "<section id=\"setup\">Author-owned id.</section><div id=\"a\"><div><h1 id=\"setup-1\">Setup</h1><h2 id=\"setup-2\">Setup</h2><h2 id=\"快速入门\">快速入门</h2></div></div><div id=\"b\"><div><h2 id=\"setup-3\">Setup</h2></div></div>" got "<section id=\"setup\">Author-owned…
-  - domAnchored: selector #a h1: no match
-  - domAnchored: selector #b h2: no match
-- `md/in-phrasing-refused` (codes; not in the bootstrap: E-MD-IN-PHRASING)
-  - missing E-MD-IN-PHRASING
-  - severity: E-MD-IN-PHRASING did not fire (expected error)
-- `md/indent-mixed` (codes; not in the bootstrap: E-MD-INDENT-MIXED)
-  - missing E-MD-INDENT-MIXED
-  - severity: E-MD-INDENT-MIXED did not fire (expected error)
-- `md/of-body-refused` (twin · codes; not in the bootstrap: E-MD-OF-BODY)
-  - missing E-MD-OF-BODY
-  - severity: E-MD-OF-BODY did not fire (expected error)
-- `md/second-spelling-strict` (codes+runtime; not in the bootstrap: W-MD-BULLET-MARKER, W-MD-EMPHASIS-UNDERSCORE)
-  - missing W-MD-EMPHASIS-UNDERSCORE
-  - missing W-MD-BULLET-MARKER
-  - severity: W-MD-EMPHASIS-UNDERSCORE did not fire (expected warning)
-  - severity: W-MD-BULLET-MARKER did not fire (expected warning)
-  - dom (whole-tree) mismatch: expected "<div id=\"w\"><div><p>This is __not strong__ and _not em_.</p><p>* not a list item</p></div></div>" got "<div id=\"w\"><md> This is __not strong__ and _not em_. * not a list item </md></div>"
-  - domAnchored: selector #w p: no match
-- `md/static-tree` (runtime)
-  - dom (whole-tree) mismatch: expected "<article id=\"post\"><div class=\"prose\"><h2 id=\"filing-a-good-bug-report\">Filing a good bug report</h2><p>Before you file, <strong>search the board</strong>. Duplicates get <em>closed</em>.</p><ul><li>Say what you <em>expected</em> and what <del>broke</del> h…
-  - domAnchored: selector #post > div: expected count 1, got 0
-  - domAnchored: selector #post > div: no match
-  - domAnchored: selector #post h2: no match
-  - domAnchored: selector #post ol: no match
-  - domAnchored: selector #post a: no match
-  - domAnchored: selector #post td + td: no match
-  - domAnchored: selector #post img: no match
-- `md/url-scheme-literal-refused` (codes; not in the bootstrap: E-MD-URL-SCHEME)
-  - missing E-MD-URL-SCHEME
-  - severity: E-MD-URL-SCHEME did not fire (expected error)
-  - count: E-MD-URL-SCHEME fired 0 time(s), expected exactly 2
 - `module/e-export-003-attr-conflict-reject` (twin · codes; not in the bootstrap: E-EXPORT-003)
   - missing E-EXPORT-003
 - `module/e-export-003-attr-distinct-clean` (twin · twin-extra-error)
@@ -573,7 +540,7 @@ none
 - `type-state-codes/e-type-081-partial-match-render-neg` — PASS · TWIN · VACUOUS
 - `type-state-codes/e-type-lifecycle-on-engine-cell-neg` — PASS · TWIN · VACUOUS
 
-### UNSUPPORTED (816)
+### UNSUPPORTED (823)
 
 - `api/api-base-missing-neg` — bootstrap-unsupported: `<api>` is a scrml structural element (§60), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `api/api-clean-pos` — twin · bootstrap-unsupported: `<api>` is a scrml structural element (§60), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
@@ -1023,14 +990,21 @@ none
 - `match-leave/multi-scrutinee-stmt-arm-braced-return-leaves-fn` — twin · parse-reject: E-PARSE-EXPECTED: expected `)`, found `,`
 - `match-leave/return-match-arm-propagate` — twin · bootstrap-unsupported: a handled failable (`?`, `!{ … }`, `match`) is in the bootstrap only as a statement's whole value (`f() !{ … }` / `match f() { … }` alone, `let x = …`, `x = …`, `@c = …`, `return …`) — inside a larger
 - `match-leave/returned-multi-match-braced-leave-and-inner-break` — twin · bootstrap-unsupported: a handled failable (`?`, `!{ … }`, `match`) is in the bootstrap only as a statement's whole value (`f() !{ … }` / `match f() { … }` alone, `let x = …`, `x = …`, `@c = …`, `return …`) — inside a larger
-- `md/data-led-href-guarded` — twin · parse-reject: E-PARSE-TRAILING: unexpected `{` after the expression
-- `md/fence-shell-interp-inert` — parse-reject: E-PARSE-EXPECTED: expected `}`, found `:`
+- `md/data-led-href-guarded` — twin · bootstrap-unsupported: `<md>` is a scrml structural element (§67 markdown), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
+- `md/fence-shell-interp-inert` — bootstrap-unsupported: `<md>` is a scrml structural element (§67 markdown), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
+- `md/heading-ids-page-wide` — bootstrap-unsupported: `<md>` is a scrml structural element (§67 markdown), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `md/in-logic-markup-refused` — twin · parse-reject: E-DECL-ILLEGAL-FIELD-NAME: `on` cannot name a declaration or field — it is reserved for namespaced attributes (`on:…`, §66.2.3)
-- `md/interp-unclosed` — parse-reject: E-PARSE-TEMPLATE: this template is not closed — end it with a backtick (§14.13.3)
-- `md/interp-unclosed-quote-in-code-span` — parse-reject: E-PARSE-EXPECTED: expected `}`, found ``
-- `md/slot-hostile-values-are-text` — twin · parse-reject: E-PARSE-TRAILING: unexpected `{` after the expression
-- `md/slot-regex-literal-quote` — twin · parse-reject: E-PARSE-EXPR: expected an expression, found `/'/g`
-- `md/slot-text-reactive` — twin · parse-reject: E-PARSE-TRAILING: unexpected `{` after the expression
+- `md/in-phrasing-refused` — bootstrap-unsupported: `<md>` is a scrml structural element (§67 markdown), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
+- `md/indent-mixed` — bootstrap-unsupported: `<md>` is a scrml structural element (§67 markdown), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
+- `md/interp-unclosed` — bootstrap-unsupported: `<md>` is a scrml structural element (§67 markdown), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
+- `md/interp-unclosed-quote-in-code-span` — bootstrap-unsupported: `<md>` is a scrml structural element (§67 markdown), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
+- `md/of-body-refused` — twin · bootstrap-unsupported: `<md>` is a scrml structural element (§67 markdown), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
+- `md/second-spelling-strict` — bootstrap-unsupported: `<md>` is a scrml structural element (§67 markdown), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
+- `md/slot-hostile-values-are-text` — twin · bootstrap-unsupported: `<md>` is a scrml structural element (§67 markdown), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
+- `md/slot-regex-literal-quote` — twin · bootstrap-unsupported: `<md>` is a scrml structural element (§67 markdown), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
+- `md/slot-text-reactive` — twin · bootstrap-unsupported: `<md>` is a scrml structural element (§67 markdown), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
+- `md/static-tree` — bootstrap-unsupported: `<md>` is a scrml structural element (§67 markdown), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
+- `md/url-scheme-literal-refused` — bootstrap-unsupported: `<md>` is a scrml structural element (§67 markdown), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `meta/emit-single-quote-inside-attr-clean` — parse-reject: E-PARSE-ITEM: unexpected text at program level
 - `meta/emit-single-quoted-attr-reject` — parse-reject: E-PARSE-ITEM: unexpected text at program level
 - `meta/meta-allow-list-clean-pos` — twin · parse-reject: E-PARSE-ITEM: unexpected text at program level

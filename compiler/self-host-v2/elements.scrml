@@ -1,0 +1,143 @@
+// =============================================================================
+// self-host-v2 / elements.scrml — the markup element registry (SPEC §4.1, §24.1).
+//
+// SPEC §4.1: "The compiler SHALL validate the element name against the
+// built-in HTML element registry … A name that is not a known HTML element
+// and not a defined component SHALL be a compile error (E-MARKUP-001)."
+// §24.1 names the registry; §24.4: the scrml structural elements are NOT in
+// it. The bootstrap had no registry: every tag it did not otherwise read was
+// emitted as an HTML element (gap g-bootstrap-unknown-tags-resolved-as-html).
+//
+// This module is impl#1's ONE list (compiler/src/html-elements.js
+// `isKnownElementName`, the E-MARKUP-001 gate since S264), ported as data:
+// WHATWG HTML (with the legacy names, which still parse), SVG and MathML
+// (MDN, with the legacy names), and the custom-element grammar. impl#1's curated
+// REGISTRY adds nothing a markup page writes (its extra keys are scrml
+// structural forms, which analyze reads before it asks here).
+// compiler/self-host-v2/slice-m4/markup-failclosed-s473.test.js ("elements.scrml
+// is impl#1's element list") runs both over the same names and requires the
+// same answer: a drift is a failing test. One deliberate addition, pinned there:
+// WHATWG's `selectedcontent` (customizable `<select>`), which impl#1's list lacks.
+//
+// A CAPITALISED tag is matched against the HTML list only
+// (isHtmlElementName): `<DIV>` is `<div>`, but `<Unknown/>` / `<Set/>` /
+// `<View/>` never fold onto an SVG or MathML name (analyze markupElementName).
+//
+// Matching is case-insensitive (§4.3 / §15.15.3: "Casing is irrelevant to
+// resolution"), as impl#1's predicate is. A custom element (§22.4.1 /
+// §5.2 treat it as an element; the SPEC states no grammar, impl#1's is
+// `^[a-z][a-z0-9._]*-[a-z0-9._-]*$`) is a lowercase-initial name holding a
+// hyphen, case-sensitive.
+// =============================================================================
+${
+    // WHATWG HTML Living Standard element names, with the legacy / obsolete
+    // names (lowercase). impl#1 html-elements.js STANDARD_HTML_ELEMENTS.
+    export fn htmlElementNames() -> string[] {
+        return ["html", "head", "body", "base", "link", "meta", "style", "title",
+                "script", "noscript", "template", "slot", "canvas",
+                "address", "article", "aside", "footer", "header",
+                "h1", "h2", "h3", "h4", "h5", "h6", "hgroup", "main", "nav", "section", "search",
+                "blockquote", "dd", "div", "dl", "dt", "figcaption", "figure", "hr",
+                "li", "menu", "ol", "p", "pre", "ul",
+                "a", "abbr", "b", "bdi", "bdo", "br", "cite", "code", "data", "dfn", "em",
+                "i", "kbd", "mark", "q", "rp", "rt", "ruby", "s", "samp", "small", "span",
+                "strong", "sub", "sup", "time", "u", "var", "wbr",
+                "area", "audio", "img", "map", "track", "video", "picture", "source",
+                "embed", "iframe", "object", "param", "portal", "fencedframe",
+                "del", "ins",
+                "caption", "col", "colgroup", "table", "tbody", "td", "tfoot", "th",
+                "thead", "tr",
+                "button", "datalist", "fieldset", "form", "input", "label", "legend",
+                "meter", "optgroup", "option", "output", "progress", "select", "textarea",
+                "details", "dialog", "summary", "selectedcontent",
+                "svg", "math",
+                "acronym", "applet", "basefont", "bgsound", "big", "blink", "center",
+                "content", "dir", "font", "frame", "frameset", "image", "isindex", "keygen",
+                "listing", "marquee", "menuitem", "multicol", "nextid", "nobr", "noembed",
+                "noframes", "plaintext", "rb", "rtc", "shadow", "spacer", "strike", "tt",
+                "xmp"]
+    }
+
+    // SVG element names, canonical case (MDN, with the legacy names).
+    // impl#1 html-elements.js SVG_ELEMENTS.
+    export fn svgElementNames() -> string[] {
+        return ["a", "animate", "animateMotion", "animateTransform", "circle", "clipPath",
+                "defs", "desc", "ellipse",
+                "feBlend", "feColorMatrix", "feComponentTransfer", "feComposite",
+                "feConvolveMatrix", "feDiffuseLighting", "feDisplacementMap", "feDistantLight",
+                "feDropShadow", "feFlood", "feFuncA", "feFuncB", "feFuncG", "feFuncR",
+                "feGaussianBlur", "feImage", "feMerge", "feMergeNode", "feMorphology",
+                "feOffset", "fePointLight", "feSpecularLighting", "feSpotLight", "feTile",
+                "feTurbulence",
+                "filter", "foreignObject", "g", "image", "line", "linearGradient", "marker",
+                "mask", "metadata", "mpath", "path", "pattern", "polygon", "polyline",
+                "radialGradient", "rect", "set", "stop", "svg", "switch", "symbol", "text",
+                "textPath", "tspan", "use", "view",
+                "altGlyph", "altGlyphDef", "altGlyphItem", "animateColor", "color-profile",
+                "cursor", "discard", "font", "font-face", "font-face-format",
+                "font-face-name", "font-face-src", "font-face-uri", "glyph", "glyphRef",
+                "hatch", "hatchpath", "hkern", "mesh", "meshgradient", "meshpatch",
+                "meshrow", "missing-glyph", "solidcolor", "tref", "unknown", "vkern",
+                "script", "style", "title"]
+    }
+
+    // MathML element names (MDN, with the legacy names; lowercase).
+    // impl#1 html-elements.js MATHML_ELEMENTS.
+    export fn mathmlElementNames() -> string[] {
+        return ["math", "annotation", "annotation-xml", "maction", "menclose", "merror",
+                "mfenced", "mfrac", "mi", "mmultiscripts", "mn", "mo", "mover", "mpadded",
+                "mphantom", "mprescripts", "mroot", "mrow", "ms", "mspace", "msqrt",
+                "mstyle", "msub", "msubsup", "msup", "mtable", "mtd", "mtext", "mtr",
+                "munder", "munderover", "none", "semantics",
+                "maligngroup", "malignmark", "mglyph", "mlabeledtr", "mlongdiv",
+                "mscarries", "mscarry", "msgroup", "msline", "msrow", "mstack"]
+    }
+
+    fn lowerAll(xs: string[]) -> string[] {
+        let out: string[] = []
+        for (const x of xs) { out = out.concat([x.toLowerCase()]) }
+        return out
+    }
+
+    fn isLowerAlpha(c: string) -> boolean { return c >= "a" && c <= "z" }
+    fn isDigit(c: string) -> boolean { return c >= "0" && c <= "9" }
+
+    // The custom-element name grammar — impl#1 html-elements.js
+    // CUSTOM_ELEMENT_NAME_PATTERN `^[a-z][a-z0-9._]*-[a-z0-9._-]*$`: a
+    // lowercase letter first, then lowercase letters, digits, `.`, `_` and `-`,
+    // holding at least one `-`.
+    export fn isCustomElementName(name: string) -> boolean {
+        if (name.length < 2 || !isLowerAlpha(name.substring(0, 1))) return false
+        let hyphen = false
+        let i: int = 1
+        while (i < name.length) {
+            const c: string = name.substring(i, i + 1)
+            if (c == "-") {
+                hyphen = true
+            } else if (!(isLowerAlpha(c) || isDigit(c) || c == "." || c == "_")) {
+                return false
+            }
+            i = i + 1
+        }
+        return hyphen
+    }
+
+    // `name`, case-folded, is a WHATWG HTML element name (no SVG / MathML, no
+    // custom element) — the only registry a capitalised tag may fold onto.
+    export fn isHtmlElementName(name: string) -> boolean {
+        return name != "" && htmlElementNames().indexOf(name.toLowerCase()) >= 0
+    }
+
+    // SPEC §4.1 / §24.1: `name` is an element of the built-in registry — an HTML,
+    // SVG or MathML element name (any case), or a custom element name. impl#1
+    // html-elements.js `isKnownElementName`.
+    export fn isKnownElementName(name: string) -> boolean {
+        if (name == "") return false
+        if (isCustomElementName(name)) return true
+        const lower: string = name.toLowerCase()
+        if (htmlElementNames().indexOf(lower) >= 0) return true
+        if (lowerAll(svgElementNames()).indexOf(lower) >= 0) return true
+        if (mathmlElementNames().indexOf(lower) >= 0) return true
+        return false
+    }
+}

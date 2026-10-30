@@ -187,8 +187,8 @@ describe("the plain-value match — §18", () => {
     expect(codes(prog(F + `\n    function m() -> Color | not { return not; }`, `        <p>\${match m() { .Red :> 1, .Green :> 2, }}</p>`))).toEqual(["E-MATCH-012"]);
   });
   test("a struct subject is E-TYPE-024; a `S | not` presence match is admitted", () => {
-    expect(codes(prog(`    type P:struct = { x: int }\n    let <p:P=({ x: 1 })/>`, `        <p>\${match @p { else :> 1, }}</p>`))).toEqual(["E-TYPE-024"]);
-    expect(codes(prog(`    type P:struct = { x: int }\n    let <p:P | not=not/>`, `        <p>\${match @p { not :> 0, else :> 1, }}</p>`))).toEqual([]);
+    expect(codes(prog(`    type P:struct = { x: int }\n    let <pt:P=({ x: 1 })/>`, `        <p>\${match @pt { else :> 1, }}</p>`))).toEqual(["E-TYPE-024"]);
+    expect(codes(prog(`    type P:struct = { x: int }\n    let <pt:P | not=not/>`, `        <p>\${match @pt { not :> 0, else :> 1, }}</p>`))).toEqual([]);
   });
   test("qualified patterns and values (§18.13): `Color.Red :>`, `Color::Green :>`, `@c = Color.Blue` (runtime); a wrong qualifier is E-TYPE-VARIANT", async () => {
     const src = prog(COLOR, `        <button onclick={ @c = Color.Blue; }>b</button>\n        <p id="q">\${match @c { Color.Red :> "r", Color::Green :> "g", .Blue :> "b", }}</p>`);

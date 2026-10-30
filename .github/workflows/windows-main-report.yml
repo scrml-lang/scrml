@@ -1,0 +1,54 @@
+# windows-main-report — is `windows` green on main, and if not, since when? (S473)
+#
+# OWNER RULING (scrml-support user-voice-scrml.md, "RULED — S473 Windows … CI ratchet guard", item 2):
+#   "a nightly (or tracking-job) report of main's latest windows conclusion and its first red SHA, because
+#   path-filtered PRs skip the job."
+#
+# WHY: the `windows` job is required (through `gate`) since S473, but on a pull request it only runs the
+#   suites when the diff touches path-handling code (ci.yml, the windows header). A PR outside that filter
+#   can still break Windows; the break first shows on the push to main, or the nightly. Before S473 nobody
+#   saw that: main's windows sat red from #1620 (2026-10-28) on, unnoticed. This job turns main's state
+#   into one red check per day, with the SHA to bisect from.
+#
+# WHAT RUNS WINDOWS ON MAIN: ci.yml itself — every push to main and its nightly `schedule` (06:41 UTC) run
+#   the full windows job (never path-filtered off main). This workflow does not run the suites again; it
+#   READS main's CI runs (`scripts/windows-ratchet.ts report`): the latest concluded `windows` job, and when
+#   that is red, walks back to the last green and prints the FIRST red run and SHA. It fails (red X on the
+#   Actions tab + an annotation) while main is red. It opens nothing (no issue, no PR) — the red run is
+#   the signal, and it repeats daily until main is green.
+#
+# Scheduled at 07:47 UTC: after the 06:41 nightly CI's ~20-minute windows job has usually concluded.
+# If it has not, the report reads the previous run, which is still the latest concluded one.
+
+name: windows-main-report
+
+on:
+  schedule:
+    - cron: "47 7 * * *"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  actions: read                    # list CI runs + their jobs (gh api, GITHUB_TOKEN)
+
+concurrency:
+  group: windows-main-report
+  cancel-in-progress: true
+
+jobs:
+  report:
+    if: ${{ github.repository == 'scrml-lang/scrml' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4.3"   # PINNED — same as ci.yml (see its header note on bun)
+      # No `bun install`: the report imports only node built-ins and shells out to `gh`.
+      - name: main's latest windows conclusion and first red SHA
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bun scripts/windows-ratchet.ts report --repo "${{ github.repository }}" --branch main --limit 60
