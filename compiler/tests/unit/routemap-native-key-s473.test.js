@@ -34,14 +34,17 @@ const { compileScrml } = await import("../../src/api.js");
 const { runTS } = await import("../../src/type-system.ts");
 const { toPosix } = await import("../../src/path-canonical.js");
 
-/** The TS stage, fed native (backslash) routeMap keys for every file whose path ends with `depSuffix`. */
-function tsWithNativeKeysFor(depSuffix, seen) {
+/**
+ * The TS stage, fed native (backslash) routeMap keys for every file named `depName`. Matched on
+ * either separator: on a real Windows run the keys are already native and pass through as they are.
+ */
+function tsWithNativeKeysFor(depName, seen) {
   return (input) => {
     const functions = new Map();
     for (const [k, v] of input.routeMap.functions) {
       const cut = k.lastIndexOf("::");
       const file = k.slice(0, cut);
-      if (file.endsWith(depSuffix)) {
+      if (/[\\/]/.test(file.slice(-depName.length - 1, -depName.length)) && file.endsWith(depName)) {
         const nk = `${file.replaceAll("/", "\\")}${k.slice(cut)}`;
         seen.push(nk);
         functions.set(nk, v);
@@ -75,7 +78,7 @@ function compile(files, entry, depSuffix, { write = false } = {}) {
 describe("the harness reproduces the Windows key shape (else every case below is vacuous)", () => {
   test("toPosix folds `\\` (sep mocked) and the imported file's keys reach TS in backslash form", () => {
     expect(toPosix("C:\\a\\lib.scrml")).toBe("C:/a/lib.scrml");
-    const r = compile({ "lib.scrml": LIB, "app.scrml": APP }, "app.scrml", "/lib.scrml");
+    const r = compile({ "lib.scrml": LIB, "app.scrml": APP }, "app.scrml", "lib.scrml");
     expect(r.seen.length).toBeGreaterThan(0);
     expect(r.seen.every((k) => k.includes("\\") && !k.includes("/"))).toBe(true);
   });
@@ -102,7 +105,7 @@ const APP = `<x> = 7
 
 describe("#1664 transport routing reads the imported callee's native-keyed route", () => {
   test("a covered `!{}` on an IMPORTED plain server call is routed through _scrml_server_attempt", () => {
-    const r = compile({ "lib.scrml": LIB, "app.scrml": APP }, "app.scrml", "/lib.scrml", { write: true });
+    const r = compile({ "lib.scrml": LIB, "app.scrml": APP }, "app.scrml", "lib.scrml", { write: true });
     expect(r.codes).toEqual([]);
     expect(r.clientJs).toContain("await _scrml_server_attempt(plainS(id))");
   });
@@ -136,12 +139,12 @@ const VIEW = (arm) => `<program db="../g.db">
 
 describe("#1658 `_ e :>` typing reads the imported callee's native-keyed route", () => {
   test("`e.variant` on the IMPORTED call compiles (was E-TYPE-031 with the key missed)", () => {
-    const r = compile({ "graph-read.scrml": GRAPH_READ, "viewapp/view.scrml": VIEW(`_ e :> { @status = "failed: " + e.variant; return }`) }, "viewapp/view.scrml", "/graph-read.scrml");
+    const r = compile({ "graph-read.scrml": GRAPH_READ, "viewapp/view.scrml": VIEW(`_ e :> { @status = "failed: " + e.variant; return }`) }, "viewapp/view.scrml", "graph-read.scrml");
     expect(r.seen.length).toBeGreaterThan(0);
     expect(r.codes).toEqual([]);
   });
   test("`e.message` is E-TYPE-004 (a payload read off the whole error), not E-TYPE-031", () => {
-    const r = compile({ "graph-read.scrml": GRAPH_READ, "viewapp/view.scrml": VIEW(`_ e :> { @status = e.message; return }`) }, "viewapp/view.scrml", "/graph-read.scrml");
+    const r = compile({ "graph-read.scrml": GRAPH_READ, "viewapp/view.scrml": VIEW(`_ e :> { @status = e.message; return }`) }, "viewapp/view.scrml", "graph-read.scrml");
     expect(r.codes).toEqual(["E-TYPE-004"]);
   });
 });
