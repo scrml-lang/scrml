@@ -1,5 +1,6 @@
 import { tokenizer as acornTokenizer, parse as acornParse } from "acorn";
 import { transportGuards } from "./var-counter.ts";
+import { FETCH_NETWORK_FAILURE_TAG } from "./emit-functions.ts";
 import { fnValuedBindingsOf } from "./fn-valued-bindings.ts";
 import { SCRML_RUNTIME } from "../runtime-template.js";
 import { SQL_HANDLE_PATTERN } from "./sql-handle-name.ts";
@@ -328,6 +329,9 @@ export function routeTransportGuards(
   if (typeof mask !== "string" || mask.length !== code.length) return code;
   const edits: Array<{ at: number; close: number }> = [];
   for (const [R, source] of guards) {
+    // #1664 fix round 1 (LOW-4) — the registry is compile-wide; only this file's guards are
+    // scanned (a guard's result binding is a unique `genVar` name, so its text names its file).
+    if (!code.includes(R)) continue;
     const stub = fnNameMap.get(source);
     const callees = new Set<string>([source]);
     if (stub && /^_scrml_fetch_/.test(stub)) callees.add(stub);
@@ -359,10 +363,16 @@ export function routeTransportGuards(
     }
   }
   if (edits.length === 0) return code;
-  edits.sort((a, b) => b.at - a.at);
-  for (let k = 1; k < edits.length; k++) if (edits[k].close >= edits[k - 1].at) return code;
+  // #1664 fix round 1 (LOW-4) — two sites whose ranges overlap (one call inside the other's
+  // arguments) are BOTH left as emitted (fail closed: their failure still rejects); every other
+  // site is still routed. (Before, one overlap left the whole file unrouted.)
+  const overlaps = (a: { at: number; close: number }, b: { at: number; close: number }): boolean =>
+    a !== b && a.at <= b.close && b.at <= a.close;
+  const kept = edits.filter((e) => !edits.some((o) => overlaps(e, o)));
+  if (kept.length === 0) return code;
+  kept.sort((a, b) => b.at - a.at);
   let out = code;
-  for (const e of edits) {
+  for (const e of kept) {
     out = out.slice(0, e.at) + "_scrml_server_attempt(" + out.slice(e.at, e.close + 1) + ")" + out.slice(e.close + 1);
   }
   return out;
@@ -3164,14 +3174,15 @@ function generateClientJsImpl(ctx: CompileContext): string {
       lines.push("    method,");
       lines.push('    headers: { "Content-Type": "application/json", "X-CSRF-Token": _scrml_get_csrf_token() },');
       lines.push("    body,");
-      lines.push("  });");
+      // #1664 fix round 1 (MED-1) — tag a network failure at its source (emit-functions.ts).
+      lines.push(`  })${FETCH_NETWORK_FAILURE_TAG};`);
       lines.push("  if (_scrml_resp.status === 403) {");
       if (_csrfMetaPresent) lines.push("    _scrml_csrf_sync_meta_from_cookie();");
       lines.push("    _scrml_resp = await _scrml_g.fetch(path, {");
       lines.push("      method,");
       lines.push('      headers: { "Content-Type": "application/json", "X-CSRF-Token": _scrml_get_csrf_token() },');
       lines.push("      body,");
-      lines.push("    });");
+      lines.push(`    })${FETCH_NETWORK_FAILURE_TAG};`);
       lines.push("  }");
       lines.push("  return _scrml_resp;");
       lines.push("}");

@@ -123,6 +123,16 @@ async function makeFetch(out) {
     switch (MODE) {
       case "unreachable": throw new TypeError("Failed to fetch");
       case "abort": { const e = new Error("The operation was aborted."); e.name = "AbortError"; throw e; }
+      // #1664 fix round 1 — an abort with a custom reason rejects with the reason itself; a
+      // timeout signal rejects with a TimeoutError. Neither is "no response": re-thrown.
+      case "customAbort": throw new Error("superseded");
+      case "timeout": { const e = new Error("The operation timed out."); e.name = "TimeoutError"; throw e; }
+      // LOW-3 — status 0, a 3xx, a 2xx whose body read drops on the network.
+      case "status0": return { ok: false, status: 0, json: async () => { throw new SyntaxError("Unexpected end of JSON input"); } };
+      case "r304": return { ok: false, status: 304, json: async () => ({}) };
+      case "bodyDrop": return { ok: true, status: 200, json: async () => { throw new TypeError("terminated"); } };
+      // LOW-1 — a fetch shim whose json() returns a plain value (no Promise).
+      case "syncJson": return { ok: true, status: 200, json: () => 5 };
       case "r404": return json({ error: "not found" }, 404);
       case "r500html": return new Response("<html>oops</html>", { status: 500, headers: { "Content-Type": "text/html" } });
       case "r500json": return json({ error: "boom" }, 500);
@@ -221,6 +231,50 @@ describe("a covered `!{}` on a plain server call: a failed call runs the arm (im
   }
 });
 
+describe("#1664 fix round 1 — only a TAGGED rejection is a Transport value; anything else re-throws", () => {
+  for (const c of PLAIN) {
+    for (const mode of ["customAbort", "timeout", "abort"]) {
+      test(`${c}, \`_ :>\`, ${mode}: no arm, the cell untouched, the rejection reported`, async () => {
+        const r = await run(mode, `#u-${c}`);
+        expect(r.seen).toBe("none");
+        expect(r.x).toBe("7");
+        expect(r.logged).toMatch(/superseded|timed out|aborted/);
+      });
+    }
+    // MED-1 — an error the stub raises ITSELF (its `JSON.stringify` of the arguments throws on a
+    // BigInt or a cycle; scrml source cannot write either, so the throw is injected at that call)
+    // is a client bug, not "no response": it re-throws past the `_` arm and is reported. (The real
+    // BigInt / cycle arguments are run against the real stub in the runtime block below.)
+    for (const [label, msg] of [["a BigInt argument", "Do not know how to serialize a BigInt"], ["a circular argument", "Converting circular structure to JSON"]]) {
+      test(`${c}, \`_ :>\`, ${label}: the stub's own TypeError re-throws and is reported; no arm runs`, async () => {
+        const page = await boot(built());
+        const realStringify = JSON.stringify;
+        try {
+          JSON.stringify = () => { throw new TypeError(msg); };
+          document.querySelector(`#u-${c}`).click();
+          for (let i = 0; i < 12; i++) await new Promise((r) => setTimeout(r, 0));
+        } finally {
+          JSON.stringify = realStringify;
+        }
+        try {
+          expect(page.text("#seen")).toBe("none");
+          expect(page.text("#x")).toBe("7");
+          expect(page.logged.join("\n")).toContain(msg);
+        } finally {
+          page.restore();
+        }
+      });
+    }
+    test(`${c}: a json() that returns a plain value (fetch shim) behaves as before, routed or not`, async () => {
+      for (const k of ["u", "h"]) {
+        const r = await run("syncJson", `#${k}-${c}`);
+        expect(r.x).toBe("5");
+        expect(r.seen).toBe("none");
+      }
+    });
+  }
+});
+
 describe("out of the ruled scope — unchanged: the failure still rejects past the site", () => {
   for (const c of PLAIN) {
     test(`${c}: a named-only arm (\`.Bad :>\`) does not cover Transport — the rejection is reported, no arm`, async () => {
@@ -276,6 +330,9 @@ describe("the ServerCallError value (`t`), read off the runtime directly", () =>
     ["r500html", { variant: "ServerFault", data: { status: 500 } }],
     ["r500json", { variant: "ServerFault", data: { status: 500 } }],
     ["malformed", { variant: "Malformed", data: { reason: "the response body is not JSON" } }],
+    ["status0", "Unreachable"],
+    ["r304", { variant: "Refused", data: { status: 304 } }],
+    ["bodyDrop", "Unreachable"],
   ];
   for (const [mode, t] of cases) {
     test(mode, async () => {
@@ -290,12 +347,20 @@ describe("the ServerCallError value (`t`), read off the runtime directly", () =>
       }
     });
   }
-  test("success passes through; an abort re-throws", async () => {
+  test("success passes through; an abort / custom-reason abort / timeout / the stub's own TypeError re-throw; a plain json() value is read", async () => {
     const page = await boot(built());
     try {
       expect(await globalThis._scrml_server_attempt(globalThis._scrml_modules["lib.client.js"].plainS("ok"))).toBe(5);
-      MODE = "abort";
-      await expect(globalThis._scrml_server_attempt(globalThis._scrml_modules["lib.client.js"].plainS("ok"))).rejects.toThrow(/aborted/);
+      for (const [mode, re] of [["abort", /aborted/], ["customAbort", /superseded/], ["timeout", /timed out/]]) {
+        MODE = mode;
+        await expect(globalThis._scrml_server_attempt(globalThis._scrml_modules["lib.client.js"].plainS("ok"))).rejects.toThrow(re);
+      }
+      MODE = "real";
+      await expect(globalThis._scrml_server_attempt(globalThis._scrml_modules["lib.client.js"].plainS(10n))).rejects.toThrow(TypeError);
+      const cyc = {}; cyc.self = cyc;
+      await expect(globalThis._scrml_server_attempt(globalThis._scrml_modules["lib.client.js"].plainS(cyc))).rejects.toThrow(TypeError);
+      MODE = "syncJson";
+      expect(await globalThis._scrml_modules["lib.client.js"].plainS("ok")).toBe(5);
     } finally {
       MODE = "real";
       page.restore();

@@ -680,6 +680,18 @@ export function clientAsyncFactsOf(ctx: CompileContext): AsyncNameFacts {
 }
 
 /**
+ * #1664 fix round 1 (MED-1) — appended to every `_scrml_g.fetch(…)` a plain server-function stub
+ * makes (here and in emit-client's `_scrml_fetch_with_csrf_retry`). A fetch that REJECTS with a
+ * `TypeError` is the platform's network error — no response arrived — so it is tagged
+ * `__scrml_unreachable` and re-thrown unchanged. `_scrml_server_attempt` (runtime-template.js)
+ * routes ONLY a tagged rejection to a covering `!{}`; an untagged one (an abort, a timeout, an
+ * error the stub raised itself — `JSON.stringify` on a BigInt or a cycle) re-throws, logged as
+ * before. An unhandled call site sees the same rejection it always did.
+ */
+export const FETCH_NETWORK_FAILURE_TAG =
+  `.catch((_scrml_e) => { if (_scrml_e !== null && typeof _scrml_e === "object" && _scrml_e.name === "TypeError") _scrml_e.__scrml_unreachable = true; throw _scrml_e; })`;
+
+/**
  * Emit fetch stubs, CPS wrappers, and client-boundary function bodies.
  *
  * Returns both the emitted JS lines and the fnNameMap so event wiring
@@ -1217,7 +1229,8 @@ export function emitFunctions(ctx: CompileContext): { lines: string[]; fnNameMap
       // §6.6.9 CPS free-client-cell marshal (see the csrf-retry branch above).
       for (const _ml of _emitMarshalBodyLines("      ", paramNames, _sb.batchIndex)) lines.push(_ml);
       lines.push(`    }),`);
-      lines.push(`  });`);
+      // #1664 fix round 1 (MED-1) — a fetch that rejects is "no response" (§19.9.10 Unreachable).
+      lines.push(`  })${FETCH_NETWORK_FAILURE_TAG};`);
     }
     // M-7C-D-12 Track 2 (§57 Wire Format) — dual-decoder consumption.
     //
@@ -1244,7 +1257,11 @@ export function emitFunctions(ctx: CompileContext): { lines: string[]; fnNameMap
     // non-2xx response, `__scrml_malformed` for a 2xx one. Only `_scrml_server_attempt` (the
     // runtime's §19.9.10 classifier, used where a `!{}` covers the failure) reads the tags; an
     // unhandled call site sees the same rejection as before.
-    const _jsonRead = `_scrml_resp.json().catch((_scrml_e) => { if (_scrml_e !== null && typeof _scrml_e === "object") { if (_scrml_resp.ok) _scrml_e.__scrml_malformed = "the response body is not JSON"; else _scrml_e.__scrml_status = _scrml_resp.status; } throw _scrml_e; })`;
+    // #1664 fix round 1: LOW-1 — read through an async arrow (`(async () => json())()`), so a `json()` that returns a plain value
+    // (a fetch shim, a test mock) behaves as `await json()` always did. LOW-3 — on a 2xx only a
+    // PARSE failure (`SyntaxError`) is `Malformed`; a body read that fails on the network
+    // (`TypeError`) had no response to decode: `Unreachable`. Anything else stays untagged.
+    const _jsonRead = `(async () => _scrml_resp.json())().catch((_scrml_e) => { if (_scrml_e !== null && typeof _scrml_e === "object") { if (!_scrml_resp.ok) _scrml_e.__scrml_status = _scrml_resp.status; else if (_scrml_e.name === "SyntaxError") _scrml_e.__scrml_malformed = "the response body is not JSON"; else if (_scrml_e.name === "TypeError") _scrml_e.__scrml_unreachable = true; } throw _scrml_e; })`;
     if (_isLastStub && returnTypeAllowsAbsence(_retAnnot)) {
       lines.push(`  const _scrml_body_json = _scrml_wire_decode(await ${_jsonRead});`);
     } else {

@@ -157,7 +157,7 @@ describe("§57 wire encoder — type-gating on `T | not` (non-CSRF idempotency p
 describe("§57 wire dual-decoder — type-gating on client fetch stub", () => {
   test("declared `string | not` return wraps client fetch in `_scrml_wire_decode`", () => {
     const { clientJs } = makeServerFn("loadName", "string | not");
-    expect(clientJs).toContain("_scrml_wire_decode(await _scrml_resp.json().catch(");
+    expect(clientJs).toContain("_scrml_wire_decode(await (async () => _scrml_resp.json())().catch(");
   });
 
   test("declared `string` return does NOT wrap in decoder", () => {
@@ -169,13 +169,13 @@ describe("§57 wire dual-decoder — type-gating on client fetch stub", () => {
     // Pure-`T` still takes the RAW `.json()` (no decoder wrap).
     // S473 (impl#1 transport routing) — the parse is `.json().catch(…)`: a body that does not
     // parse is tagged (`__scrml_status` / `__scrml_malformed`) and re-thrown unchanged.
-    expect(clientJs).toContain("const _scrml_body_json = await _scrml_resp.json().catch(");
+    expect(clientJs).toContain("const _scrml_body_json = await (async () => _scrml_resp.json())().catch(");
     expect(clientJs).toContain("return _scrml_body_json;");
   });
 
   test("postfix `User?` sugar triggers decoder wrap", () => {
     const { clientJs } = makeServerFn("loadUser", "User?");
-    expect(clientJs).toContain("_scrml_wire_decode(await _scrml_resp.json().catch(");
+    expect(clientJs).toContain("_scrml_wire_decode(await (async () => _scrml_resp.json())().catch(");
   });
 
   test("`_scrml_wire_decode` helper is present in client runtime (core chunk)", () => {

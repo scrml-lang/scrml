@@ -60,3 +60,32 @@ Hook run 3 found a cross-file leak: the executed tests evaluate pages in the glo
 errors chunk (now shipped with `_scrml_server_attempt`) left a global `_scrml_error_boundary_log` that
 the url-guard test (s457, same shard) reads the absence of. Both S473 executed files now delete the
 `_scrml_*` globals they added in afterAll.
+
+## 2026-10-29 — fix round 1 (S239 review of #1664, FIX-FIRST)
+
+- MED-1 → tag at the SOURCE. `FETCH_NETWORK_FAILURE_TAG` (emit-functions.ts) is appended to every
+  plain-stub `_scrml_g.fetch(…)` (the non-CSRF stub, both fetches of `_scrml_fetch_with_csrf_retry`):
+  a `TypeError` rejection (the platform's network error) gets `__scrml_unreachable`.
+  `_scrml_server_attempt` routes ONLY a tagged rejection; anything else (an abort, a custom-reason
+  abort, a TimeoutError, the stub's own `JSON.stringify` TypeError on a BigInt / a cycle) re-throws and
+  is reported as before. The AbortError special case is gone (comment: impl#1 never aborts a server
+  call today).
+- LOW-1 → `(async () => _scrml_resp.json())().catch(…)` (not `Promise.resolve`: foreign-inline-codegen uses that text as its leak marker); test: a fetch shim whose json()
+  returns a plain value reads 5, routed and unhandled.
+- LOW-3 → status 0 → Unreachable; 1xx/3xx (unreachable through fetch's redirect following) →
+  Refused(status), documented; on a 2xx only a SyntaxError is Malformed, a TypeError body read is
+  Unreachable.
+- LOW-2 → filed g-impl1-transport-routing-nested-arm-guard-unrouted-s473 (a nested guard is re-parsed
+  at codegen; the type checker never sees it — not cheap; fails closed).
+- LOW-4 → overlap now drops only the overlapping sites (was: the whole file); the per-file scan skips
+  guards whose binding is not in the file. Residual (silent, per-site) filed as
+  g-impl1-transport-routing-overlap-site-silently-unrouted-s473.
+- Gap note: the wrapper-client-function exclusion is written into
+  g-impl1-client-server-call-not-failable-s451's narrowing.
+
+Tests: the file is 62 (13 red on round 0 `72b637a45`). Pinned stub text updated (wire-format
+integration, slice-codec cross-impl).
+Corpus sweep (the reviewer's 421-file `!{` list, base `df1e9422c` vs this tree): error codes identical on
+all 421; 156 routed sites in 83 files; after normalising the intended edits, 0 other byte differences;
+every changed JS parses (acorn); every routed page's runtime defines `_scrml_server_attempt`.
+flogence copy: view 2 sites routed, app 132 routed, `node --check` OK.

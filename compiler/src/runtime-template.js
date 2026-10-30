@@ -4471,18 +4471,30 @@ function _scrml_error_boundary_log(boundaryId, err) {
 // (emit-client.ts 'routeTransportGuards'); every other call site still sees the rejection. The
 // value is §19.9.10's 'Transport(t: ServerCallError)': 't' is 'Unreachable' (no response),
 // 'Refused(status)' (a 4xx), 'ServerFault(status)' (a 5xx) or 'Malformed(reason)' (a 2xx body
-// that does not parse). A request the client itself aborts is not a failure: re-thrown.
+// that does not parse). Only a rejection the stub tagged is routed; any other re-throws.
 function _scrml_server_attempt(p) {
   return Promise.resolve(p).then(function (v) { return v; }, function (e) {
-    if (e && e.name === "AbortError") throw e;
+    // #1664 fix round 1 (MED-1) — ONLY a rejection the stub TAGGED at its source is a transport
+    // failure: '__scrml_unreachable' (the fetch, or the body read, failed on the network),
+    // '__scrml_status' (a non-2xx that is not the function's envelope), '__scrml_malformed' (a 2xx
+    // body that does not parse). Anything else — an abort or timeout (impl#1 never aborts a server
+    // call today; the case is defensive), an error the stub raised itself (JSON.stringify on a
+    // BigInt or a cycle) — re-throws unchanged, reported as before.
+    if (e === null || typeof e !== "object") throw e;
     var t;
-    if (e && typeof e.__scrml_status === "number") {
+    if (typeof e.__scrml_status === "number") {
       var s = e.__scrml_status;
-      t = { variant: s >= 500 ? "ServerFault" : "Refused", data: { status: s } };
-    } else if (e && typeof e.__scrml_malformed === "string") {
+      // §19.9.10 names 4xx -> Refused and 5xx -> ServerFault. Status 0 (an opaque / network-level
+      // answer) had no response: Unreachable. A 1xx / 3xx cannot reach here (fetch follows
+      // redirects; the stub sets no 'redirect: manual'): Refused(status), documented.
+      if (s === 0) t = "Unreachable";
+      else t = { variant: s >= 500 ? "ServerFault" : "Refused", data: { status: s } };
+    } else if (typeof e.__scrml_malformed === "string") {
       t = { variant: "Malformed", data: { reason: e.__scrml_malformed } };
-    } else {
+    } else if (e.__scrml_unreachable === true) {
       t = "Unreachable";
+    } else {
+      throw e;
     }
     return { __scrml_error: true, type: "ServerCallError", variant: "Transport", data: { t: t } };
   });
