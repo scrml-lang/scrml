@@ -60,7 +60,7 @@ ${
     import { importTarget, importsOfItems, hostImportsOfItems, hostTagOf, isStdlibPath, HostLoc, hostLocOf } from "./link.scrml"
     import { WireBuild, WireTable, wireBuild, hasFixedLength } from "./codec.scrml"
     import { SqlFacts, SlotQuote, MultiStmt, StmtVerdict, sqlFacts, slotInLiteral, txControl, txControlAware, multiStatement, programStatement } from "./sql.scrml"
-    import { FxAtom, ownAtom, closeDim, witnessOf, atomChain } from "./effects.scrml"
+    import { FxAtom, ownAtom, closeDim, witnessOf, atomChain, sccOrder } from "./effects.scrml"
     import { UrlAttr, StaticSink, classifyStatic, staticExecMessage, logicWriteSink, logicCallSink, attrNameArgIndex, executableAttrName, htmlArgIndex, attrNodeMember, attrNodeValueMember, urlValueAdmitted, schemeOfUrl, isUrlAttrName, attrValueArgIndex } from "./url.scrml"
     import { HEntry, surfaceInterfaces, isSurfaceIface, isDomElementIface, ifaceInherits, findEntry, accessesOf, sigParams, sigResult,
              slotType, slotOptional, isCallbackSlot, slotAlternatives, slotAdmitsNot, unWaiting, entryGuards, inertTagIface,
@@ -25497,6 +25497,7 @@ ${
         modifier: boolean, failable: boolean,
         sqls: SqlSite[], reads: CellUse[], doms: CellUse[], scan: BodyScan,
         foreigns: ASpan[],      // s473: its foreign blocks (§23.2.4: "an inline `_{}` escalates its enclosing function to the server boundary")
+        repeats: ASpan[],       // s473 (ruled refusals): the regions of its body that may run more than once (repeatsInBlock)
     }
     // A chain from a function down to a site (display labels, outermost first).
     type Reach:struct = { chain: string[], what: string }
@@ -25556,6 +25557,81 @@ ${
             .Defer(body: b) :> foreignsInBlock(b)
             .Fail(f: f) :> foreignsInExprs(failExprs(f))
         }
+    }
+
+    // s473 (ruled refusals, §8.9.2 interim) — the regions of a body that may
+    // run MORE THAN ONCE per call: a loop's body, the condition of a `for (c)`
+    // head and the condition and step of a counted head (each evaluated per
+    // iteration — an iterable and an `init` are evaluated once), and a
+    // lambda (a tape method calls it per element). A `?{}` or a call whose
+    // span starts inside one is "inside a loop" for the interim refusal.
+    fn repeatsInBlock(b: ABlock) -> ASpan[] {
+        let out: ASpan[] = []
+        for (const s of b.stmts) { out = out.concat(repeatsInStmt(s)) }
+        return out
+    }
+
+    fn repeatsInStmt(s: AStmt) -> ASpan[] {
+        const k: AStmtK = s.k
+        return match k {
+            .Eval(e: e) :> repeatsInExpr(e)
+            .Local(name: n, init: i) :> repeatsInExpr(i)
+            .Return(e: e) :> repeatsInMaybe(e)
+            .If(cond: c, thenB: tb, elseB: eb) :> repeatsInExpr(c).concat(repeatsInBlock(tb)).concat(repeatsInMaybeBlock(eb))
+            .Given(name: n, subject: x, body: b) :> repeatsInExpr(x).concat(repeatsInBlock(b))
+            .For(f: lf) :> repeatsInFor(lf)
+            .Break(label: x) :> []
+            .Continue(label: x) :> []
+            .Lift(what: w) :> repeatsInExprs(liftExprs(w))
+            .EffectStmt(w: w) :> repeatsInBlock(w.body)
+            .Defer(body: b) :> repeatsInBlock(b)
+            .Fail(f: f) :> repeatsInExprs(failExprs(f))
+        }
+    }
+
+    fn repeatsInFor(lf: AFor) -> ASpan[] {
+        let out: ASpan[] = [lf.body.span]
+        const h: AForHead = lf.head
+        const per: AExpr[] = match h {
+            .HForever :> []
+            .HCond(cond: c) :> [c]
+            .HCounted(init: i, cond: c, step: sp) :> maybeExprList(c).concat(sp)
+            .HIter(bind: b, src: src) :> []
+        }
+        for (const x of per) { out = out.concat([x.span]) }
+        return out.concat(repeatsInExprs(forExprs(lf)))
+    }
+
+    fn repeatsInMaybe(e: AExpr | not) -> ASpan[] {
+        if (e is not) return []
+        return repeatsInExpr(e)
+    }
+
+    fn repeatsInMaybeBlock(b: ABlock | not) -> ASpan[] {
+        if (b is not) return []
+        return repeatsInBlock(b)
+    }
+
+    fn repeatsInExpr(e: AExpr) -> ASpan[] {
+        let out: ASpan[] = []
+        if (isLambdaK(e.k)) out = [e.span]
+        for (const x of exprKids(e)) { out = out.concat(repeatsInExpr(x)) }
+        for (const b of exprBlocks(e)) { out = out.concat(repeatsInBlock(b)) }
+        return out
+    }
+
+    fn repeatsInExprs(es: AExpr[]) -> ASpan[] {
+        let out: ASpan[] = []
+        for (const x of es) { out = out.concat(repeatsInExpr(x)) }
+        return out
+    }
+
+    // Does `sp` start inside one of `rs`?
+    fn inRepeat(rs: ASpan[], sp: ASpan) -> boolean {
+        for (const r of rs) {
+            if (sp.start >= r.start && sp.start < r.end) return true
+        }
+        return false
     }
 
     fn foreignsInMaybe(e: AExpr | not) -> ASpan[] {
@@ -25858,7 +25934,7 @@ ${
         return { sym: fs.info.sym.id, name: fs.info.name, file: fs.info.file, span: fs.info.span, nid: fs.info.nid,
                  modifier: fs.f.server, failable: fs.f.failable,
                  sqls: sqlsInBlock(fs.f.body), reads: readsInBlock(cx.t, fs.f.body), doms: domsInBlock(cx.t, fs.f.body), scan: scan,
-                 foreigns: foreignsInBlock(fs.f.body) }
+                 foreigns: foreignsInBlock(fs.f.body), repeats: repeatsInBlock(fs.f.body) }
     }
 
     // ---- placement -------------------------------------------------------------
@@ -26428,6 +26504,7 @@ ${
         let sqls: SqlInfo[] = []
         let creates: int[] = []
         let doms: int[] = []
+        const tq: TxQ = txQuerySets(sum.nodes)     // s473: the transitive query sets (§8.9.2 amendment)
         for (const f of all) {
             const pk: PlaceK = placeOf(places, f.sym)
             if (f.modifier && !isLoadName(f.name)) st = addDiag(st, f.file, f.span, "W-DEPRECATED-SERVER-MODIFIER", "`server function " + f.name + "` — the `server` modifier is deprecated (§52.10, Insight 26): write `function " + f.name + "(…)` and let route inference place it (§12.2 — a `" + sqlSigil() + "}` in its body places it on the server)")
@@ -26449,7 +26526,7 @@ ${
             // binder — §19.9.10, remoteHandled / remoteUnhandled — and lowered by
             // the suspension plan; the U1a refusal is gone)
             // the queries in its body: database, facts, the failable rule
-            if (f.failable) st = envelopeDiags(f, st)
+            if (f.failable) st = envelopeDiags(sum, tq, f, st)
             for (const s of f.sqls) {
                 if (!f.failable) st = manualTxDiag(f.file, s, "'" + f.name + "', which is not declared '!'", f.name, st)
                 const sr: RSqlSite = sqlSiteFacts(g, rd, f.file, fnScope(rd.fns, f.nid), s, f.failable, st)
@@ -26780,7 +26857,24 @@ ${
     //        E-ERROR-015 (manualTxDiag) — so manual transaction control is
     //        refused in EVERY server function.
     // No §8 / §19 code names "not built", so both are E-BOOTSTRAP-UNSUPPORTED.
-    fn envelopeDiags(f: FnFacts, st0: AS) -> AS {
+    //
+    // s473 (ruled refusals) — THE TRIGGER IS THE TRANSITIVE QUERY SET. §8.9.2
+    // amendment (S473 review-surfaced 1, refined): "The implicit-envelope
+    // trigger above is therefore read over the function's transitive query
+    // set: every `?{}` reached from the `!` body — its own and those of every
+    // non-`!` function it reaches — reads included … Interim (bootstrap):
+    // until the bootstrap builds the envelope, it SHALL refuse —
+    // `E-BOOTSTRAP-UNSUPPORTED`, naming this section — a `!` function whose
+    // transitive query set has two or more queries, or one inside a loop; it
+    // SHALL NOT compile it without the guarantee (S473 D1)." The set is
+    // txQuerySets' (one closure over the call graph, effects.scrml closeDim):
+    // a `!` callee is not followed (its own envelope is its own); a call is
+    // followed whatever the callee's placement (a remote call included — the
+    // ruling counts every `?{}` reached, and the bootstrap builds no envelope
+    // either way). "Inside a loop" (repeatsInBlock): a query, or a call
+    // reaching one, in a region that may run more than once — and a query
+    // reached through a recursive non-`!` function.
+    fn envelopeDiags(sum: Summary, tq: TxQ, f: FnFacts, st0: AS) -> AS {
         let st: AS = st0
         let manual = false
         for (const s of f.sqls) {
@@ -26791,14 +26885,93 @@ ${
             }
         }
         if (manual) return st
-        let n: int = 0
-        for (const s of f.sqls) {
-            if (!s.q.nobatch) n = n + 1
+        const i: int = nodeIdx(sum.nodes, f.sym)
+        if (i < 0) return st
+        const qs: FxAtom[] = tq.qs[i]
+        const tail: string = " The bootstrap does not build the envelope yet (unit U1e), and without it a `fail` after a write leaves that write committed — refused, never compiled non-atomic. Until then: split the work so no `!` function reaches more than one query (a `!` callee keeps its own envelope), or mark each query that need not be atomic with `.nobatch()` (§8.9.5)"
+        if (qs.length >= 2) {
+            return addDiag(st, f.file, f.span, "E-BOOTSTRAP-UNSUPPORTED", "'" + f.name + "' is declared '!' and its transitive query set (§8.9.2, S473: every `" + sqlSigil() + "}` reached from its body — its own and those of the non-'!' functions it calls) holds " + qs.length + " queries — " + txWhere(sum, tq.qs, i, qs[0]) + " and " + txWhere(sum, tq.qs, i, qs[1]) + " — so it needs the implicit per-handler transaction (§8.9.2, §19.10.5): its body wrapped in `BEGIN` / `COMMIT`, rolled back on an error or a `fail` exit, every one of those queries inside." + tail)
         }
-        if (n >= 2) {
-            st = addDiag(st, f.file, f.span, "E-BOOTSTRAP-UNSUPPORTED", "'" + f.name + "' is declared '!' and runs " + n + " `" + sqlSigil() + "}` queries, so it needs the implicit per-handler transaction (§8.9.2, §19.10.5): its body wrapped in `BEGIN` / `COMMIT`, rolled back on an error or a `fail` exit. The bootstrap does not build it yet (unit U1e), and without it a `fail` after a write leaves that write committed — refused, never compiled non-atomic. Until then: put the queries in separate functions, or mark each that need not be atomic with `.nobatch()` (§8.9.5)")
+        const lw: FxAtom | not = witnessOf(tq.loops[i])
+        if (lw is given) {
+            let via: string = ""
+            const ch: string[] = fxChain(sum, tq.loops, i, lw)
+            if (ch.length > 1) via = " (through `" + ch.join(" → ") + "`)"
+            return addDiag(st, f.file, f.span, "E-BOOTSTRAP-UNSUPPORTED", "'" + f.name + "' is declared '!' and its transitive query set (§8.9.2, S473) runs a query more than once: " + tq.loopWhy[lw.root] + via + " — so it needs the implicit per-handler transaction (§8.9.2, §19.10.5) around every run of it." + tail)
         }
         return st
+    }
+
+    // Where a query of a transitive query set stands, for a message.
+    fn txWhere(sum: Summary, dim: FxAtom[][], i: int, a: FxAtom) -> string {
+        const ch: string[] = fxChain(sum, dim, i, a)
+        if (ch.length <= 1) return "one in its own body"
+        return "one through `" + ch.join(" → ") + "`"
+    }
+
+    // s473 — the TRANSITIVE QUERY SETS of the §8.9.2 amendment, per callable:
+    // `qs[i]` — every `?{}` (none `.nobatch()`) callable i runs or reaches
+    // through calls of non-`!` functions; `loops[i]` — a witness that one of
+    // them may run more than once (`loopWhy[root]` says how).
+    type TxQ:struct = { qs: FxAtom[][], loops: FxAtom[][], loopWhy: string[] }
+
+    fn txQuerySets(nodes: Callable[]) -> TxQ {
+        let own: FxAtom[][] = []
+        let edges: int[][] = []
+        let i: int = 0
+        for (const c of nodes) {
+            let q: FxAtom[] = []
+            let e: int[] = []
+            if (c.kind == CallableK.KFn) {
+                let p: int = 0
+                for (const s of c.f.sqls) {
+                    if (!s.q.nobatch) q = q.concat([ownAtom("q" + i + "." + p, i, p)])
+                    p = p + 1
+                }
+                for (const r of c.f.scan.refs) {
+                    const j: int = nodeIdx(nodes, r.sym)
+                    if (isFnNode(nodes, j) && !nodes[j].f.failable) e = e.concat([j])
+                }
+            }
+            own = own.concat([q])
+            edges = edges.concat([e])
+            i = i + 1
+        }
+        const qs: FxAtom[][] = closeDim(own, edges)
+        // recursion: a callable in a cycle of non-`!` calls runs its queries any number of times
+        let cyc: boolean[] = []
+        for (const c of nodes) { cyc = cyc.concat([false]) }
+        for (const scc of sccOrder(edges)) {
+            for (const m of scc) {
+                if (scc.length > 1 || edges[m].indexOf(m) >= 0) cyc = setBoolAt(cyc, m, true)
+            }
+        }
+        let ownL: FxAtom[][] = []
+        let why: string[] = []
+        i = 0
+        for (const c of nodes) {
+            let w: string = ""
+            if (c.kind == CallableK.KFn) {
+                for (const s of c.f.sqls) {
+                    if (w == "" && !s.q.nobatch && inRepeat(c.f.repeats, s.span)) w = "a `" + sqlSigil() + "}` inside a loop (or a lambda) in `" + c.label + "`"
+                }
+                for (const r of c.f.scan.refs) {
+                    const j: int = nodeIdx(nodes, r.sym)
+                    if (w == "" && isFnNode(nodes, j) && !nodes[j].f.failable && qs[j].length > 0 && inRepeat(c.f.repeats, r.span)) w = "a call of `" + nodes[j].label + "`, which runs a query, inside a loop (or a lambda) in `" + c.label + "`"
+                }
+                if (w == "" && cyc[i] && qs[i].length > 0) w = "`" + c.label + "` runs a query and is recursive (it calls itself, directly or through other functions)"
+            }
+            let l: FxAtom[] = []
+            if (w != "") l = [ownAtom("L" + i, i, 0)]
+            ownL = ownL.concat([l])
+            why = why.concat([w])
+            i = i + 1
+        }
+        return { qs: qs, loops: closeDim(ownL, edges), loopWhy: why }
+    }
+
+    fn setBoolAt(xs: boolean[], i: int, v: boolean) -> boolean[] {
+        return xs.slice(0, i).concat([v]).concat(xs.slice(i + 1))
     }
 
     fn manualTxDiag(file: string, s: SqlSite, where: string, fname: string, st: AS) -> AS {
@@ -27240,7 +27413,7 @@ ${
     // The own facts of a construction / a formula: its scan only.
     fn valueFacts(sym: int, label: string, file: string, span: ASpan, nid: int, scan: BodyScan) -> FnFacts {
         return { sym: sym, name: label, file: file, span: span, nid: nid, modifier: false, failable: false,
-                 sqls: [], reads: [], doms: [], scan: scan, foreigns: [] }
+                 sqls: [], reads: [], doms: [], scan: scan, foreigns: [], repeats: [] }
     }
 
     // The callable a Sym names (-1: none — a reference with no summary).

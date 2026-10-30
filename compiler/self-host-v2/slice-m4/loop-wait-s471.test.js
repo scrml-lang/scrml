@@ -204,7 +204,9 @@ describe("a server function whose loop waits — the server's native loop with `
     function totalOf(n: int)! LoadError {
         let t = 0;
         for (i of 0..n) {
-            const r: Cnt = ${SQ}\`SELECT \${i} * 10 AS n\`}.get() !{ _ :> { fail .Db; } };
+            // s473 (ruled refusals): .nobatch() - a query inside a loop of a ! function needs the
+            // implicit envelope (SPEC 8.9.2 amendment, interim refusal); this test is about the loop's await
+            const r: Cnt = ${SQ}\`SELECT \${i} * 10 AS n\`}.nobatch().get() !{ _ :> { fail .Db; } };
             t = t + r.n;
         }
         return t;
