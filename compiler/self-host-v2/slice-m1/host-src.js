@@ -150,8 +150,11 @@ function makeReader(projectRoot, fail) {
    */
   const exportsOf = (real, stack = []) => {
     if (exportsMemo.has(real)) return exportsMemo.get(real);
-    const empty = { names: new Map(), unresolved: [], broken: [], err: "" };
-    if (stack.includes(real)) return empty; // a star cycle adds nothing new
+    const empty = { names: new Map(), unresolved: [], broken: [], err: "", cuts: new Set() };
+    // a star cycle adds nothing new HERE — but the caller's result is then PARTIAL until `real` (still on
+    // the stack) completes, so it carries the cut and is not memoized (#1670 review L3: a partial result
+    // memoized for the cycle partner gave a false E-IMPORT-004 that depended on binding order)
+    if (stack.includes(real)) return { ...empty, cuts: new Set([real]) };
     let code;
     try { code = readFileSync(real, "utf8"); } catch (e) { return { ...empty, err: "it cannot be read" }; }
     const parsed = parseModule(code);
@@ -164,6 +167,8 @@ function makeReader(projectRoot, fail) {
     const unresolved = [];
     const broken = [];
     const starNames = new Map(); // name -> origin | "\0ambiguous"
+    const cuts = new Set(); // cycle cuts below this file that point at a file still on the stack above it
+    const absorb = (te) => { for (const c of te.cuts) if (c !== real) cuts.add(c); };
     const sourceOf = (spec) => {
       if (!((spec.startsWith("./") || spec.startsWith("../")) && HELPER_EXT_RE.test(spec))) return null;
       const p = plan(resolve(dirname(real), spec), real);
@@ -190,6 +195,7 @@ function makeReader(projectRoot, fail) {
             continue;
           }
           const te = exportsOf(target, stack.concat([real]));
+          absorb(te);
           for (const sp of node.specifiers) {
             const local = nameOf(sp.local);
             if (te.names.has(local)) names.set(nameOf(sp.exported), te.names.get(local));
@@ -208,6 +214,7 @@ function makeReader(projectRoot, fail) {
           continue;
         }
         const te = exportsOf(target, stack.concat([real]));
+        absorb(te);
         for (const [n, origin] of te.names) {
           if (n === "default") continue;
           const had = starNames.get(n);
@@ -221,8 +228,8 @@ function makeReader(projectRoot, fail) {
       if (names.has(n) || origin === "\0ambiguous") continue; // a local export shadows a star; an ambiguous one is excluded
       names.set(n, origin);
     }
-    const r = { names, unresolved, broken, err: "" };
-    exportsMemo.set(real, r);
+    const r = { names, unresolved, broken, err: "", cuts };
+    if (cuts.size === 0) exportsMemo.set(real, r); // computed under an open cycle: partial, not memoized
     return r;
   };
 
@@ -276,7 +283,11 @@ export function planHostSrcs(core, sourceRoot, projectRoot = projectRootOf(sourc
         fail(u.bare ? "E-IMPORT-004" : "E-HOST-TARGET-UNBOUND", "`" + u.name + "` is not exported by `" + src + "`" + why + " — " + how + " (§21.3.3 rule 3: exports are read statically, never by loading the file)");
       }
     }
-    shims.push({ out: `_scrml/host-src/${k}.js`, text: `// the <host src="${src}"> module (§21.3.3 rule 3) — written by the compiler\nexport * from "../../${p.out}";\n` });
+    // #1670 review L1: the specifier is percent-encoded segment by segment (a real name `%2e%2e`, `#` or
+    // `?` stays a literal name in the URL) and written as a JSON string literal (a `"` or a newline cannot
+    // end it); no path is written into the comment
+    const spec = "../../" + p.out.split("/").map((seg) => encodeURIComponent(seg)).join("/");
+    shims.push({ out: `_scrml/host-src/${k}.js`, text: "// a <host src=> module (§21.3.3 rule 3), re-exported from its copy (written by the compiler)\nexport * from " + JSON.stringify(spec) + ";\n" });
   });
   for (const [out, src] of reader.copies) copies.push({ src, out });
   copies.sort((a, b) => (a.out < b.out ? -1 : a.out > b.out ? 1 : 0));

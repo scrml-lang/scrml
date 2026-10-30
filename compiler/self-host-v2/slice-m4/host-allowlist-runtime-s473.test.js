@@ -150,6 +150,25 @@ describe("guarded(url) — the §5.2 rule 3 guard, reused (hostUrl / hostAttrVal
   });
 });
 
+describe("#1670 fix round 1 (happy-dom half; the Chromium file proves the platform half)", () => {
+  test("M1: a re-prototyped element is not an inert receiver; M2: an element whose tag does not match its interface fails the brand check", () => {
+    const s = el("span");
+    Object.setPrototypeOf(s, HTMLDivElement.prototype);
+    expect(trapOf(() => rt.hostInert(s, AT))).toBe("E-HOST-RECEIVER-RT");
+    const d = el("div");
+    Object.setPrototypeOf(d, HTMLCanvasElement.prototype);
+    expect(trapOf(() => rt.hostBrand(d, "HTMLCanvasElement", AT))).toBe("E-HOST-VALUE-MISMATCH-RT");
+    expect(rt.hostBrand(el("script"), "HTMLElement", AT).localName).toBe("script");
+  });
+
+  test("L2: hostAttrValue refuses a non-string name (a flipping toString is never consulted)", () => {
+    let k = 0;
+    const flip = { toString: () => (k++ === 0 ? "title" : "href") };
+    expect(() => rt.hostAttrValue(el("a"), flip, "javascript:1", AT)).toThrow(/a compiler defect/);
+    expect(k).toBe(0);
+  });
+});
+
 describe("guarded(attr-name) — the run-time wall (hostSetAttrName)", () => {
   test("an event-handler name, `srcdoc` or a non-string is refused; `one` / `online` / `onboarding` and ordinary names pass", () => {
     for (const n of ["onclick", "OnLoad", "onerror", "srcdoc", "SRCDOC", "", 7, null]) {
