@@ -31,8 +31,8 @@
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 270 | 5 |
-| MED | 738 | 8 |
-| LOW | 651 | 0 |
+| MED | 741 | 8 |
+| LOW | 658 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
 
@@ -30349,3 +30349,58 @@ parse.scrml:7277 `refuseTheme` says "it has no CSS emission in this slice", but 
 scripts/bootstrap-conformance.ts reports a case expecting E-CTX-003 / E-CTX-001 / E-SYNTAX-003 / E-PARSE-001 that the bootstrap answers with E-PARSE-UNCLOSED / E-PARSE-CLOSER / E-SCOPE-001 as "unsupported", not a tier-1 code divergence. The module cases (`e-import-002-*`, `e-export-001-*`) are all parse-rejects on semicolons, so the import-cycle hole was never graded. The §3.2 / §4.4 / §4.16 / §4.14 / §5.2 / §6.1.2 drift has no counter. Audit source: P1 Q2; P4 §21 (conformance).
 <!-- @gap id=g-boot-conformance-parse-reject-hides-code-drift-s473 sev=LOW status=resolved resolved-by=s473-boot-named-refusals locus=scripts/bootstrap-conformance.ts(parse-reject bucketing) prov=audit:s473-spec-coverage(P1_Q2+_P4_§21_(conformance)) -->
 > **RESOLVED (S473 D30, `s473-boot-named-refusals`; SPEC §62.2 "Grading an implementation against a case").** scripts/bootstrap-conformance.ts: an unexpected Error-severity parse-phase diagnostic is FAIL (`parse-reject`), UNSUPPORTED is only E-BOOTSTRAP-UNSUPPORTED, and the §34.2 parser spellings (E-PARSE-NO-NULL, E-PARSE-STRICT-EQ) are graded as E-SYNTAX-042 / E-EQ-004 (`PARSER_SPELLINGS`). The module cases `e-import-002-*` / `e-export-001-*` carry their dpa-073 `;` now; `e-import-002-circular-import-reject` FAILs on the real hole (g-boot-import-cycle-unreported-s473). Counter: PASS 265 · FAIL 40 · UNSUPPORTED 823 → PASS 281 · FAIL 241 · UNSUPPORTED 606 (with D28 / D29).
+
+## §S473-wrap — gaps filed at the S473 wrap (2026-10-30; sources: the S473 lanes' reports, the S239 reviews of #1670 / #1674 (`~/.cache/scrml/review/s473-1670/REVIEW.md`, `~/.cache/scrml/review/s473-1674/REVIEW.md` + `r1/REVIEW.md`) and PA probes. Each probe was re-run on main d139f747c before filing. FILED, not fixed)
+
+### g-impl1-match-on-failable-call-not-exhaustive-s473 — a value `match` over a failable call compiles with an error variant missing; the same call under `!{}` is E-TYPE-080 — `NEW S473; MED; open`
+`@msg = match loadTitle(id, "me") { .Ok(t) :> t  .NotFound(mid) :> …  .Transport(_) :> … }` where `loadTitle` is `! LoadError` and `LoadError = { NotFound(id: string), Forbidden }` compiles exit 0 with no diagnostic: `.Forbidden` is unhandled. The `!{}` form of the same call (arms `.NotFound`, `.Transport`) is refused: `E-TYPE-080: Non-exhaustive error handler for LoadError. Missing variant(s): Forbidden`. The two forms disagree on the one guarantee (§19 every error handled). Repro: `~/.cache/scrml-agent-tmp/pa-s473/dhh/missing.scrml` (compiles) vs `bang.scrml` (E-TYPE-080). Surfaced writing the type-gymnastics article.
+<!-- @gap id=g-impl1-match-on-failable-call-not-exhaustive-s473 sev=MED status=open locus=searched:compiler/src/type-system.ts(checkMatchDiagnostics — the failable-subject path; the §19.7 E-TYPE-080 check covers guarded-expr only) prov=empirical:pa-s473-dhh-missing.scrml -->
+
+### g-impl1-sqlerror-escapes-into-declared-error-set-s473 — a bare `?{}.get()` inside a `function … ! LoadError` compiles, so a SqlError leaves a function whose declared error set does not contain it — `NEW S473; MED; open`
+`function loadTitle(id, viewer) ! LoadError { let row = ?{`SELECT …`}.get() … }` with no `!{}` on the query compiles exit 0. The query's SqlError is neither handled nor in `LoadError`, so a caller's exhaustive `!{}` over LoadError + Transport (which impl#1 accepts as complete) cannot see it. Expected: E-ERROR-010 (an unhandled failure whose type is not in the enclosing declared set), or a compile error naming SqlError. Repro: `~/.cache/scrml-agent-tmp/pa-s473/dhh/app.scrml` (compiles); the article's verified block adds `!{ _ :> { fail .Unavailable } }` on the query.
+<!-- @gap id=g-impl1-sqlerror-escapes-into-declared-error-set-s473 sev=MED status=open locus=searched:compiler/src/type-system.ts(E-ERROR-010 site — the declared-set check does not count a `?{}` query's SqlError) prov=empirical:pa-s473-dhh-app.scrml -->
+
+### g-impl1-bootstrap-build-rewrites-string-literals-s473 — impl#1, compiling `compiler/self-host-v2/*.scrml`, rewrites `fn` → `function`, `X.y` → `X_y` and `is .V` inside string literals — `NEW S473; MED; open`
+Found by lane `s473-boot-named-refusals` (#1691): its refusal table had to build the words `fn`, `X.y` and `is .V` from pieces (`FN` / `DOT` / `IS`) because impl#1 rewrote them inside the bootstrap's own string literals. It also text-scans `fn` bodies for `T =`. Same root as g-match-arm-string-literal-fn-rewritten-to-function and g-match-arm-string-literal-paren-dot-capital-rewritten-as-enum-variant (text-level rewrites, not literal-aware), but this one corrupts the bootstrap build itself: any message, table or test string in the bootstrap source holding those words is silently changed. Workaround in tree: `refusals.scrml` piece-built words.
+<!-- @gap id=g-impl1-bootstrap-build-rewrites-string-literals-s473 sev=MED status=open locus=compiler/src/codegen/rewrite.ts(rewriteFnKeyword ~2003 + rewriteEnumVariantAccess ~2247 + the is-predicate pass) prov=dispatch:s473-boot-named-refusals(pr.md) -->
+
+### g-boot-named-refusal-drops-unrelated-generic-errors-s473 — when a named-refusal row fires, generic errors elsewhere in the file are dropped too, not only the construct's cascade — `NEW S473; LOW; open`
+A file with `try { … } catch (e) { }` on line 3 and `${undefinedThing}` on line 6 reports the two E-TRY-NOT-IN-SCRML and the E-STATE-UNDECLARED, but not the line-6 `E-SCOPE-001: undefinedThing is not declared` (the same file without the `try` reports it). D28 says a row "drops the cascade the construct caused"; the drop is file-wide. Fail-closed is kept (the file still refuses), so this is diagnostic loss only: the author fixes the `try` and then meets the next error. Repro: `~/.cache/scrml-agent-tmp/pa-s473/nr/both.scrml` vs `generic.scrml`.
+<!-- @gap id=g-boot-named-refusal-drops-unrelated-generic-errors-s473 sev=LOW status=open locus=compiler/self-host-v2/slice-m2/lowered.js(frontEnd — the refusal-table re-label filter) prov=empirical:pa-s473-nr-both.scrml -->
+
+### g-boot-each-of-attr-refused-s473 — `<each of=…>` is refused loud; §17.7.2 `of=` is not built — `NEW S473; LOW; open`
+Split from g-boot-each-missing-source-accepted-s473 (resolved) so the §17.7.2 coverage row keeps a live gap for the part not built. `in=`, `as`, `key=`, multi-root rows and disposal are BUILT; `of=` is refused (probe p17-each2). Fail-closed; build owed.
+<!-- @gap id=g-boot-each-of-attr-refused-s473 sev=LOW status=open locus=compiler/self-host-v2/analyze.scrml(eachShapeDiags) prov=audit:s473-spec-coverage(P3_§17.7.2) -->
+
+### g-boot-mount-not-engine-generic-code-s473 — mounting an imported non-engine name (`<helper/>`) is refused as E-MARKUP-001, not E-ENGINE-MOUNT-NOT-ENGINE — `NEW S473; LOW; open`
+Split from g-bootstrap-unknown-tags-resolved-as-html (resolved) for the §51.0.D coverage row. `conformance/cases/engine/mount-not-engine-pos` now refuses loud (`E-MARKUP-001: <helper> is not an HTML, SVG or MathML element … or a declaration in scope`) but the case expects E-ENGINE-MOUNT-NOT-ENGINE, so it FAILs on the code. Under D29 the specific code wins: an imported name that is in scope but is not an engine should get the §51 code.
+<!-- @gap id=g-boot-mount-not-engine-generic-code-s473 sev=LOW status=open locus=compiler/self-host-v2/analyze.scrml(unknownElement — imported non-engine names) prov=conformance:engine/mount-not-engine-pos -->
+
+### g-host-allowlist-review-info-s473 — INFO items from the S239 reviews of the `<host>` allowlist lanes (#1670 closed into #1674), not fixed — `NEW S473; LOW; open`
+All fail closed or are by design; recorded so the next host-surface lane starts from them. From #1674 (`~/.cache/scrml/review/s473-1674/REVIEW.md`, `r1/REVIEW.md`):
+- **I-a** a run-time CSS-guard refusal (`fill="url(…)"`) surfaces as E-HOST-THROW-RT "the host threw"; it is a scrml guard refusal decided by data and should be its own trap (or a `hostGuardTraps` entry).
+- **I-c** `removeAttribute("style" | "form" | "formaction")` is refused; removing is harmless (over-refusal, usability).
+- **I2** logic has no interface subtyping: an `HTMLAnchorElement` cannot pass to an `e: Element` binding (E-TYPE-031), so one `getElementById` binding per type.
+- **I3** DOM clobbering: a data `name` on an inert `<img>` shadows `document.title` / `getElementById`; later bindings trap (DoS only). Markup `name=` from data has the same property.
+- **I4** data `https:` URL through `img.src` / `a.href`, and a hidden `<input>.value` write — by design, matches markup.
+- **I5** callback slots (H-012/014/017/018/045/046) are on the surface but unreachable; `hostCallback` is dead code.
+- **I6** a guarded target evaluates a mid-chain receiver twice; no TOCTOU today (platform getters only). Hoist to a temp if a non-platform step is ever admitted mid-chain.
+- **I7** in a `<host src=>` block an opaque handle is an unchecked receiver (by design §8.6); the §5.6 host-reach audit artifact is unbuilt.
+From #1670 (`~/.cache/scrml/review/s473-1670/REVIEW.md`):
+- **I1** the hostCallback memo key is JSON text (key order matters; the first `at` is reused).
+- **I3** E-HOST-TARGET-UNBOUND for a src root moved to the scrml-boot driver; other drivers (load-program.js, the harness) accept an unexported root (fails closed at module link).
+- **I4** admitted attr names `style` / `id` / `name` are gadget-adjacent (data, not script). `style`/`form`/`formaction` from data were closed by #1674 F1; `id` / `name` remain.
+- **I5** = #1674 I7 (non-relative imports in a src file go unreported).
+<!-- @gap id=g-host-allowlist-review-info-s473 sev=LOW status=open locus=compiler/self-host-v2/host-surface.scrml+compiler/self-host-v2/slice-m1/runtime/runtime.js(hostCallback/hostInert/hostBrand) prov=review:s473-1670+s473-1674 -->
+
+### g-host-src-copy-symlink-and-toctou-s473 — the `<host src=>` / client-helper copy follows a symlinked `.js` to a non-JS target and serves it; plan-then-copy is TOCTOU — `NEW S473; LOW; open`
+#1670 review L4 / L5, pre-existing and shared with impl#1 `createClientHelperRelocator`. L4: `import "./x.js"` where `x.js → secret.txt` (inside the root) copies `_scrml_local/secret.txt`, lists it in `written`, and `dev` serves it (also `c.js → config/prod.json`). L5: the file can change between plan and `copyFileSync`. Both need the author to create the symlink or have local write access during the build. Fix both impls together: require the realpath to end in `.js` / `.mjs`; copy from the bytes already read through one fd.
+<!-- @gap id=g-host-src-copy-symlink-and-toctou-s473 sev=LOW status=open locus=scripts/scrml-boot.ts(host-src copy plan)+compiler/src/api.js(createClientHelperRelocator) prov=review:s473-1670(L4_L5) -->
+
+### g-dev-watches-copied-client-helper-flaky-s473 — `dev-watches-copied-client-helper.test.js` timed out at 20s once in the merge queue — `NEW S473; LOW; open`
+"scrml dev — an edited client helper is re-copied" failed on #1658's first merge-queue run (20s timeout), unrelated to the PR; the retry passed. Likely watch-timing under CI load, the same family as g-dev-server-tests-expire-their-wait-budgets-in-cloud-ci-only. Not reproduced locally.
+<!-- @gap id=g-dev-watches-copied-client-helper-flaky-s473 sev=LOW status=open locus=compiler/tests/commands/dev-watches-copied-client-helper.test.js(20s wait budget) prov=ci:merge-queue-run-on-#1658 -->
+
+### g-conformance-async-fn-escapes-case-stale-s473 — `server-db/async-fn-escapes-as-value-handler-neg` uses an unannotated parameter, which is SPEC-invalid since S469 — `NEW S473; LOW; open`
+`function decide(f) { return f(1) ? … }` leaves `f` unannotated (SPEC-invalid since S469), and the handler is written `onclick=${ @verdict = decide(isOk) }`. The bootstrap parse-rejects the file (`E-PARSE-TRAILING: unexpected { after the expression` at 6:26, then a closer cascade), so under strict D30 grading it is a FAIL that never reaches the §13.2 E-ASYNC-FN-ESCAPES-AS-VALUE rule it was written for. Rewrite it with a typed function parameter and the current handler form, re-capture `expected.json` on impl#1, or retire it. Found re-grading #1690.
+<!-- @gap id=g-conformance-async-fn-escapes-case-stale-s473 sev=LOW status=open locus=conformance/cases/server-db/async-fn-escapes-as-value-handler-neg/case.scrml prov=review:s473-1690 -->

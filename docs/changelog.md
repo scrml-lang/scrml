@@ -2,6 +2,18 @@
 
 A rolling log of what just landed and what's actively underway in the compiler. For the full spec and pipeline docs see `compiler/SPEC.md` and `compiler/PIPELINE.md`.
 
+## S473 — 2026-10-28/30 (bryan · theRog) — 34 PRs: a SPEC-coverage audit of the bootstrap (every SPEC § has a row; silent items 91 → 49, each gapped, CI-gated); the bootstrap fails closed on SQL / `protect=` / unknown markup; `<host>` typed bindings with an allowlist; impl#1 server `navigate()` and Windows fixed
+
+- **SPEC coverage:** `docs/bootstrap-spec-coverage.md` (1,107 rows) + `scripts/spec-coverage-check.ts` gate (#1673); rulings D4–D31 written into the SPEC, §47 moved to an impl#1 annex (#1682); one named-refusal table, specific codes, strict conformance grading (#1691); the ruled refusals incl. the transitive `!` envelope (#1690). Conformance under strict grading: PASS 283 · FAIL 241 · UNSUPPORTED 604 (FAIL rose from honest grading of 202 parse-rejects; no PASS lost).
+- **Bootstrap fail-closed and security:** SQL / `protect=` / tenant (#1675); unknown and unbuilt markup (#1678); executable DOM sinks from data (#1663); data-bound form action / formaction / meta refresh / `<base href>` (#1641, #1637); CSS-url SVG attrs and stylesheet `<link>` href (#1635); dev-server static allowlist (#1676).
+- **Bootstrap language:** `<host>` client bindings (#1659) and the Appendix H allowlist (#1674); `<db>` cells as per-request server cells (#1633); E-LOOP-008 exit-less loops (#1631, #1638); one name per file / per program for exports (#1636, #1640); `<program>` attrs, `timestamp`, E-STATE-UNDECLARED (#1643); foreign blocks read (#1646); return-type inference and derived engines (#1676); every stdlib module measured (#1648).
+- **impl#1 (bootstrap/flogence needs + ruled exceptions):** handler arms (#1645, #1661, #1664); scrml-boot imports (#1658); server-side `navigate()` redirects (#1679); Windows red fixed (#1681).
+- **SPEC drafts:** §21.3.3 `<host>` (#1630); §68 `<program kind="service">` (#1644).
+- **CI/docs:** README visible on GitHub again (#1671); claim gate C2 for derived figures (#1672); Windows ratchet, required (#1685).
+- **Rulings (user-voice §S473):** S472 owner questions; round 2; long-running `kind="service"`; `<host>` allowlist; SPEC-coverage D1–D34; navigate / Windows exceptions; transitive `!` envelope counts queries, callees count (F10), client multi-call `!` refused (F11).
+- **Gap rollup:** HIGH 270 · MED 741 · LOW 658. Ten gaps filed at wrap (§S473-wrap).
+- **Lessons:** a policy without a check decays (the coverage gate); `gh pr merge` on pending checks does not queue; generated-file conflicts forced ~8–10 re-merge rounds (post-merge bot rec raised).
+
 ## S472 — 2026-10-27/28 (bryan · theRog) — 14 PRs: the bootstrap gained import/export visibility, `import:host` (gated to the compiler's own stdlib), payload-variant values, position and part writes, and file-scope `const`; six tooling gate fail-opens closed; ~115 review markers recorded
 
 - **Bootstrap:** visibility at every use, by (file, kind, name) (#1606). `import:host` parse + gate, anchored to the compiler's own `stdlib/` realpath so no adopter manifest can admit it (#1607). Payload-variant values `E.V(…)` (#1608). `a[i] = v` and `x.f = v` through the one tape-grant reader (#1610). File-scope `const`, emitted once per artifact (#1617). Conformance PASS 254 → 259, FAIL 51 → 49.

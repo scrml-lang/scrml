@@ -1,7 +1,14 @@
 # primary.map.md
 # project: scrml
-# updated: 2026-10-27T21:58:43Z  commit: 546e2f4aa
+# updated: 2026-10-30T00:00:00Z  commit: d139f747c
 # 🧭 **BOOTSTRAP (impl#2, `compiler/self-host-v2/`) work → start at `bootstrap.map.md`** (module roles, analyze/parse anchors, build, slice tests, conformance, task routes). `bootstrap.map.md` is gitignored-but-tracked: `git add -f` new map files.
+# ⛑ **S473 STAMP — `546e2f4aa` -> `d139f747c` (origin/main). 492 COMMITS, 89 first-parent (S472 + S473 PRs #1600 … #1691 + bot/facts-regen merges). Branch `wrap/s473`.
+# FIGURES (at d139f747c): `compiler/src` 326 files (git ls-tree; +1 `codegen/server-navigate.ts`), `compiler/SPEC.md` 54,489 lines, `compiler/self-host-v2` 27 top-level `.scrml` = 65,054 lines (analyze 31,232 / parse 7,900), 238 `acceptance/**/case.scrml` (25 categories), 112 slice-m4 tests.
+# THEMES: bootstrap (impl#2) — NEW modules refusals.scrml (named-refusal table, D28), elements.scrml (element registry), host-surface.scrml (`<host>` allowlist, Appendix H); fail-closed markup/CSS/URL/SQL guards, db cells, exitless loops, ruled refusals (#1690/#1691); docs/bootstrap-spec-coverage.md + scripts/spec-coverage-check.ts gate (#1673);
+# tooling — Windows ratchet required through `gate` (#1685), claim-gate C2 (#1672), lint-duplicate-fn.js, .github/CI.md replaces .github/README.md; impl#1 — server-side navigate (#1679), handler-arm transport routing (#1661/#1664), routeEntryAt Windows fix; SPEC rulings #1682 (transitive `!` envelope counts queries; navigate-in-transaction reuses E-TRANSACTION-CONTROL-FLOW).
+# Test suites NOT re-run, EXCEPT `bun scripts/bootstrap-conformance.ts --check` = current (1813 attempted, PASS 283, FAIL 241). See bootstrap.map.md for details.
+# MAP-STAMP RULE: watermark advanced to `d139f747c` (was 546e2f4aa; 492 commits). Older detail below is CARRIED and may omit S472/S473 specifics: grep source.
+# ━━━━━━━ BELOW IS THE PRIOR HEADER (stamp `546e2f4aa`), CARRIED. ━━━━━━━
 # ⛑ **S471 STAMP — `3d17013f8` -> `546e2f4aa` (origin/main). 68 COMMITS, 18 first-parent (s471 PRs #1581 … #1599 + bot/facts-regen merges). Branch `s471-maps`.
 # FIGURES (ls-tree at 546e2f4aa): `compiler/src` 325 files (+1: `guard-arm-bodies.ts`, the ONE reader of text-held `!{ }` arm bodies, moved out of codegen/emit-library-shared.ts for the
 # E-SYNTAX-042 null/undefined-in-arm refusal #1587), 1,845 test files (`compiler/tests`), `compiler/SPEC.md` 52,075 lines, 2,091 `case.scrml` (conformance + acceptance), 65 conformance category dirs.
