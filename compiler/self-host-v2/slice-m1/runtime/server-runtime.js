@@ -280,6 +280,7 @@ const FIXED = {
   404: { error: "Not Found" },
   405: { error: "Method Not Allowed" },
   500: { error: "Internal Server Error" },
+  503: { error: "Service Unavailable" },
 };
 
 // A route: its wire descriptor (the SAME table the client artifact's
@@ -289,18 +290,120 @@ export function route(desc, run) {
   return { path: desc.path, desc, run };
 }
 
+// ---------------------------------------------------------------------------
+// s473 (boot-failclosed-sql-protect) — SPEC §14.8.10 "An undeclared `tenant_id`
+// table is refused (S456)", item (3): "A database not readable at compile time
+// … is checked when the BUILT SERVER starts … asks each database which relations
+// (tables, views, materialized and foreign tables; not a partition …) carry a
+// `tenant_id` column — generated and hidden columns included … While any is
+// outside the set, or a database cannot be inspected, the server SHALL NOT
+// serve: every request answers `503`, each finding is printed once to the server
+// log as E-DEPLOY-DB-TENANT-UNDECLARED naming the database, the relation and the
+// fix, and `/_scrml/health` answers `503` naming only a count (the route is
+// public) and re-runs the check … on ordinary requests at most one check at a
+// time under a bounded backoff (1 s doubling to 30 s) … a database that does not
+// answer, or whose catalogue cannot be read, stays refused and is logged as
+// *could not be checked*, distinct from *undeclared table found*."
+//
+// The bootstrap's tenant set is ALWAYS EMPTY (`<schema>` / `<db tables=>` are
+// refused at compile), so every `tenant_id` relation is undeclared. Before s473
+// the built server served every tenant's rows to every request. The check runs
+// lazily, before the first request is answered (the factory is synchronous), and
+// once it passes it is not repeated (the SPEC's Limit: a relation created later
+// is seen at the next startup). A host that injects its own driver may answer the
+// catalogue question itself (`host.tenantRelations(desc)` → the relation names);
+// otherwise the question is put to the database through its own connection.
+// ---------------------------------------------------------------------------
+const TENANT_CATALOGUE = {
+  sqlite: "SELECT m.name AS name FROM sqlite_master m JOIN pragma_table_xinfo(m.name) p WHERE m.type IN ('table', 'view') AND lower(p.name) = 'tenant_id'",
+  postgres: "SELECT c.relname AS name FROM pg_attribute a JOIN pg_class c ON c.oid = a.attrelid JOIN pg_namespace n ON n.oid = c.relnamespace WHERE a.attnum > 0 AND NOT a.attisdropped AND lower(a.attname) = 'tenant_id' AND c.relkind IN ('r', 'v', 'm', 'f', 'p') AND NOT c.relispartition AND n.nspname NOT IN ('pg_catalog', 'information_schema')",
+  mysql: "SELECT table_name AS name FROM information_schema.columns WHERE table_schema = DATABASE() AND lower(column_name) = 'tenant_id'",
+};
+
+async function tenantRelations(host, conn) {
+  if (host && typeof host.tenantRelations === "function") return [...(await host.tenantRelations(conn.desc))].map(String);
+  const text = TENANT_CATALOGUE[conn.desc.driver];
+  if (text === undefined) throw new Error(`no catalogue query for the ${conn.desc.driver} driver`);
+  const rows = await conn.open()(sqlText([text]));
+  const out = [];
+  for (const r of rows ?? []) {
+    const name = r && typeof r === "object" ? (r.name ?? r.NAME ?? r.relname ?? r.table_name ?? r.TABLE_NAME) : undefined;
+    // a row the catalogue query did not shape is unknown — and unknown is not clean
+    out.push(name === undefined || name === null ? "(unreadable catalogue row)" : String(name));
+  }
+  return out;
+}
+
+export function tenantGate(host, conns) {
+  let ok = conns.length === 0;
+  let pending = null;
+  let delay = 0;
+  let nextAt = 0;
+  let count = 0;
+  const logged = new Set();
+  const once = (key, line) => { if (!logged.has(key)) { logged.add(key); logLine(host, line); } };
+  async function check() {
+    let found = 0;
+    for (const c of conns) {
+      const where = `${c.desc.driver}:${c.desc.target} (declared in ${c.desc.file})`;
+      let names;
+      try {
+        names = await tenantRelations(host, c);
+      } catch (e) {
+        found++;
+        once(`x:${where}`, `scrml server: E-DEPLOY-DB-TENANT-UNDECLARED — the database ${where} could not be checked for an undeclared tenant relation (${messageOf(e)}); the server answers 503 until it can be (§14.8.10 item (3))`);
+        continue;
+      }
+      for (const n of names) {
+        found++;
+        once(`t:${where}:${n}`, `scrml server: E-DEPLOY-DB-TENANT-UNDECLARED — the database ${where} has the relation \`${n}\` carrying a \`tenant_id\` column outside the compilation's tenant set (empty on the bootstrap: <schema> / <db tables=> are not in it), so its rows would reach every request. The server answers 503 until it is fixed: declare it in <schema> so the tenant floor scopes it, or rename the column (§14.8.10 item (3))`);
+      }
+    }
+    count = found;
+    if (found === 0) {
+      ok = true;
+    } else {
+      delay = delay === 0 ? 1000 : Math.min(delay * 2, 30000);
+      nextAt = Date.now() + delay;
+    }
+    return ok;
+  }
+  return {
+    get count() { return count; },
+    async admit(force) {
+      if (ok) return true;
+      if (pending !== null) return pending;
+      if (!force && Date.now() < nextAt) return false;
+      pending = check().finally(() => { pending = null; });
+      return pending;
+    },
+  };
+}
+
 // The server a `createServer(host)` returns: its routes, and `fetch(request)`
 // — a WinterCG handler (Bun.serve's `fetch`, or a test calling it directly).
 // The request is read through `url`, `method`, `headers.get(name)` and `text()`
-// only.
-export function server(host, routes) {
+// only. `conns` (s473): the program's database connections — the tenant gate's.
+export function server(host, routes, conns = []) {
   const byPath = new Map();
   for (const r of routes) byPath.set(r.path, r);
+  const gate = tenantGate(host, conns);
   return {
     routes: routes.map((r) => ({ path: r.path, method: "POST" })),
     async fetch(request) {
       let path;
       try { path = new URL(request.url, "http://localhost").pathname; } catch { return jsonResponse(host, 400, FIXED[400]); }
+      if (conns.length > 0) {
+        let admitted;
+        try { admitted = await gate.admit(path === "/_scrml/health"); } catch (e) {
+          logLine(host, `scrml server: the tenant check failed — ${messageOf(e)}`);
+          admitted = false;
+        }
+        if (path === "/_scrml/health") {
+          return admitted ? jsonResponse(host, 200, { status: "ok" }) : jsonResponse(host, 503, { error: "Service Unavailable", undeclared: gate.count });
+        }
+        if (!admitted) return jsonResponse(host, 503, FIXED[503]);
+      }
       const r = byPath.get(path);
       if (r === undefined) return jsonResponse(host, 404, FIXED[404]);
       try {

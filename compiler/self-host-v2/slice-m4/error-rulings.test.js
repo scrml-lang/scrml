@@ -364,7 +364,9 @@ describe("§19.10.4 — E-ERROR-015: manual transaction control outside a `!` fu
 
   test("every transaction-control statement, in any form, after leading comments and whitespace", () => {
     for (const sql of ["BEGIN", "begin transaction", "BEGIN IMMEDIATE", "COMMIT", "END", "ROLLBACK", "ROLLBACK TO sp1", "SAVEPOINT sp1", "RELEASE sp1", "  -- start\n  BEGIN", "/* x */ COMMIT"]) {
-      expect([sql, codes(DBP(`    function plain() -> int {\n        ${H(sql)}\n        return 1;\n    }`))]).toEqual([sql, ["E-ERROR-015"]]);
+      // s473: `END` is not on the §14.8.10 item (1) allow-list (transaction control there is BEGIN / COMMIT / ROLLBACK / SAVEPOINT / RELEASE)
+      const also = sql === "END" ? ["E-SQL-PROGRAM-STATEMENT-NOT-ADMITTED"] : [];
+      expect([sql, codes(DBP(`    function plain() -> int {\n        ${H(sql)}\n        return 1;\n    }`))]).toEqual([sql, ["E-ERROR-015", ...also]]);
     }
   });
 
@@ -372,8 +374,8 @@ describe("§19.10.4 — E-ERROR-015: manual transaction control outside a `!` fu
     expect(codes(DBP(`    function plain() {\n        ${SQ}\`COMMIT\`}.run();\n    }`)).slice().sort()).toEqual(["E-ERROR-002", "E-ERROR-015"]);
   });
 
-  test("near-miss: inside a `!` function it stays valid; an ordinary statement is not transaction control", () => {
-    expect(codes(DBP(`    function tx()! SqlError {\n        ${SQ}\`BEGIN\`}.run();\n        ${SQ}\`COMMIT\`}.run();\n    }`))).toEqual([]);
+  test("near-miss: inside a `!` function it is not E-ERROR-015 (s473: it is REFUSED there until U1e builds the §19.10.6 gate); an ordinary statement is not transaction control", () => {
+    expect(codes(DBP(`    function tx()! SqlError {\n        ${SQ}\`BEGIN\`}.run();\n        ${SQ}\`COMMIT\`}.run();\n    }`))).toEqual(["E-BOOTSTRAP-UNSUPPORTED", "E-BOOTSTRAP-UNSUPPORTED"]);
     expect(codes(DBP(`    function plain() -> int {\n        ${H("UPDATE t SET a = 1")}\n        ${H("SELECT ending FROM t")}\n        return 1;\n    }`))).toEqual([]);
   });
 });
@@ -607,24 +609,27 @@ describe("fix round r2 — E-ERROR-015 statement list, LOW-3 arm order, DB-LOW-1
   const fnWith = (sql) => DBP(`    function plain() -> int {\n        ${SQ}\`${sql}\`}.run() !{ _ :> { return 0; } };\n        return 1;\n    }`);
 
   test("r2 MED-1: EVERY statement is read — `?{;BEGIN}`, `?{SELECT 1; BEGIN}`", () => {
+    // s473: each is also two statements in one `?{}` (§8.1.2)
     for (const sql of [";BEGIN", "SELECT 1; BEGIN", "SELECT 1;\n  -- c\n  COMMIT", "UPDATE t SET a = 1;;ROLLBACK"]) {
-      expect([sql, codes(fnWith(sql))]).toEqual([sql, ["E-ERROR-015"]]);
+      expect([sql, codes(fnWith(sql))]).toEqual([sql, ["E-ERROR-015", "E-SQL-MULTIPLE-STATEMENTS"]]);
     }
   });
 
   test("r2 MED-1 near-miss (r4: a keyword after a `;` in a string / comment is an ACCEPTED false positive — the plain split always runs)", () => {
-    expect(codes(fnWith("UPDATE t SET a = 1; SELECT 2"))).toEqual([]);
+    expect(codes(fnWith("UPDATE t SET a = 1; SELECT 2"))).toEqual(["E-SQL-MULTIPLE-STATEMENTS"]);   // s473 (§8.1.2)
     for (const sql of ["SELECT ';BEGIN' AS a", "SELECT 1 /* ; COMMIT */", "SELECT 1 -- ; BEGIN"]) {
       expect([sql, codes(fnWith(sql))]).toEqual([sql, ["E-ERROR-015"]]);
     }
   });
 
   test("r2 LOW-1: START TRANSACTION, ABORT, RELEASE SAVEPOINT, PREPARE TRANSACTION, COMMIT PREPARED", () => {
+    // s473: off the §14.8.10 item (1) allow-list too, except `RELEASE …` (followed only by words)
     for (const sql of ["START TRANSACTION", "ABORT", "RELEASE SAVEPOINT s", "PREPARE TRANSACTION 'x'", "COMMIT PREPARED 'x'", "ROLLBACK PREPARED 'x'"]) {
-      expect([sql, codes(fnWith(sql))]).toEqual([sql, ["E-ERROR-015"]]);
+      const also = sql === "RELEASE SAVEPOINT s" ? [] : ["E-SQL-PROGRAM-STATEMENT-NOT-ADMITTED"];
+      expect([sql, codes(fnWith(sql))]).toEqual([sql, ["E-ERROR-015", ...also]]);
     }
     expect(msg(fnWith("START TRANSACTION"), "E-ERROR-015")).toContain("'START TRANSACTION'");
-    expect(codes(fnWith("PREPARE q AS SELECT 1"))).toEqual([]);
+    expect(codes(fnWith("PREPARE q AS SELECT 1"))).toEqual(["E-SQL-PROGRAM-STATEMENT-NOT-ADMITTED"]);   // not transaction control; not admitted (s473)
   });
 
   test("r2 LOW-3: an arm after `_ err` is E-SYNTAX-010 (§18.6.1: `_ err` is the wildcard for the last-arm position) — with a true message", () => {
@@ -657,8 +662,9 @@ describe("fix round r3 — fail-closed tx scan, every-path yield, no echoed conn
   const go = (body) => P(`${TYPES}\n${LOAD}\n${body}`, ["go"]);
 
   test("r3 MED-A: dialect-dependent quoting / commenting cannot hide transaction control (fail closed)", () => {
+    // s473: the same fail-closed plain reading makes each E-SQL-MULTIPLE-STATEMENTS too (§8.1.2)
     for (const sql of ["$$'$$; BEGIN; SELECT '1'", "E'\\\\''; BEGIN", "'a\\\\''; BEGIN", "SELECT 1--1; BEGIN", "/*! ; BEGIN */", "SELECT 1 # x'\n; COMMIT"]) {
-      expect([sql, codes(fnWith(sql))]).toEqual([sql, ["E-ERROR-015"]]);
+      expect([sql, codes(fnWith(sql))]).toEqual([sql, ["E-ERROR-015", "E-SQL-MULTIPLE-STATEMENTS"]]);
     }
   });
 
@@ -668,14 +674,15 @@ describe("fix round r3 — fail-closed tx scan, every-path yield, no echoed conn
     expect(m).toContain("`${…}`");
     expect(m).toContain("function declared '!'");
     // accepted false positive: a `$$ … BEGIN … END $$` body in a non-`!` function
-    expect(codes(fnWith("CREATE FUNCTION f() RETURNS int AS $$ BEGIN; RETURN 1; END $$ LANGUAGE plpgsql"))).toEqual(["E-ERROR-015"]);
-    // the way out: a `!` function
-    expect(codes(DBP(`    function tx()! SqlError {\n        ${SQ}\`'a\\\\''; BEGIN\`}.run();\n    }`))).toEqual([]);
+    expect(codes(fnWith("CREATE FUNCTION f() RETURNS int AS $$ BEGIN; RETURN 1; END $$ LANGUAGE plpgsql"))).toEqual(["E-ERROR-015", "E-SQL-MULTIPLE-STATEMENTS"]);
+    // s473: a `!` function is no longer a way out — manual transaction control is refused there until U1e,
+    // and the query reads as two statements (§8.1.2)
+    expect(codes(DBP(`    function tx()! SqlError {\n        ${SQ}\`'a\\\\''; BEGIN\`}.run();\n    }`))).toEqual(["E-BOOTSTRAP-UNSUPPORTED", "E-SQL-MULTIPLE-STATEMENTS"]);
   });
 
   test("r4 MED-A: the plain split ALWAYS runs — bracketed identifiers, \\f / \\v whitespace, a lone \\r ending a `--` comment", () => {
     for (const sql of ["SELECT 1 AS [it's]; BEGIN; SELECT 'x'", "SELECT 1 AS [a\"b]; BEGIN; SELECT \"x\"", "SELECT 1;\fBEGIN", "SELECT 1;\vBEGIN", "SELECT 1 -- x\r; BEGIN"]) {
-      expect([JSON.stringify(sql), codes(fnWith(sql))]).toEqual([JSON.stringify(sql), ["E-ERROR-015"]]);
+      expect([JSON.stringify(sql), codes(fnWith(sql))]).toEqual([JSON.stringify(sql), ["E-ERROR-015", "E-SQL-MULTIPLE-STATEMENTS"]]);   // s473: + §8.1.2
     }
   });
 

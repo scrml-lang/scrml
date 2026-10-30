@@ -116,7 +116,9 @@ export async function serve(core, driver, logs = [], opts = {}) {
   const { server } = artifacts(core);
   if (server.refused.length > 0) throw new Error("the server printer refused: " + server.refused.join("; "));
   const mod = await loadServer(server.js, core, opts.stdlibRoot);
-  const srv = mod.createServer({ connect: () => driver, log: (l) => logs.push(l), respond: plainRespond });
+  // s473: a spy / test driver has no catalogue — the host answers the tenant gate's question itself
+  // (server-runtime.js tenantGate; `opts.tenantRelations` to exercise it)
+  const srv = mod.createServer({ connect: () => driver, log: (l) => logs.push(l), respond: plainRespond, tenantRelations: opts.tenantRelations ?? (async () => []) });
   return { srv, mod, js: server.js, routes: server.routes, logs };
 }
 

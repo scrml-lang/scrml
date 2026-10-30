@@ -1,0 +1,8 @@
+// s473 fixture stdlib — a module NAMED `scrml:auth` (a §12.2 Trigger-3 server-only module) whose
+// stand-in source compiles on the bootstrap. Before s473 importing it compiled clean and its caller
+// was placed on the CLIENT (no Trigger-3 escalation): the latent fail-open this fixture pins.
+${
+    export fn sign(s: string) -> string {
+        return "signed:" + s;
+    }
+}

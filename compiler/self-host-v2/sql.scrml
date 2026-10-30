@@ -763,4 +763,502 @@ ${
         }
         return { name: "", star: false }
     }
+
+    // =========================================================================
+    // s473 (boot-failclosed-sql-protect) — what a program-body `?{}` may HOLD.
+    // Both rules read the ONE whitelist scanner above (scanSql); neither adds a
+    // reader of its own.
+    //
+    // §8.1.2 (S456): "a program-body `?{}` … SHALL hold exactly one SQL
+    // statement … A `;` outside a string literal, a quoted identifier, a comment
+    // and a `${…}` slot that is followed by ANY further token … begins a second
+    // statement, and the `?{}` is E-SQL-MULTIPLE-STATEMENTS … A single trailing
+    // `;` followed only by whitespace and comments is allowed."
+    //
+    // How it is read, fail closed, in three tiers:
+    //   1. when scanSql reads the whole text (not broken), its tokens decide: a
+    //      string literal and a quoted identifier are ONE token each, so a `;`
+    //      inside one is never a boundary;
+    //   2. scanSql reads no comment at all (its kind facts must not trust one).
+    //      The SPEC's closed lexical subset (§14.8.10 item (1)) DOES admit two
+    //      comment forms — `-- ` (then whitespace, to LF) and a closing,
+    //      non-nesting, non-executable `/* … */` — because every database reads
+    //      them the same way. subsetRead reads exactly that subset and
+    //      nothing more: anything outside it (a backslash, a prefixed string, a
+    //      `$`, `#`, `[`, backtick, `--x`, `/*!`, a nested `/*`, a lone CR, a
+    //      non-ASCII character outside a literal) makes it give up;
+    //   3. when it gives up, the PLAIN reading decides: EVERY `;` is a boundary,
+    //      and anything but whitespace after one is a second statement (the
+    //      txControl precedent). The price is a false positive for text no
+    //      reader here can read exactly; the message says so.
+    // =========================================================================
+    export type MultiStmt:struct = { multi: boolean, plain: boolean }
+
+    export fn multiStatement(chunks: string[]) -> MultiStmt {
+        const sc: SScan = scanSql(chunks)
+        const ts: STok[] = sc.toks
+        let i: int = 0
+        while (i < ts.length) {
+            if (isP(ts[i], ";") && i + 1 < ts.length) return { multi: true, plain: false }
+            i = i + 1
+        }
+        if (!sc.broken) return { multi: false, plain: false }
+        const sr: SubsetRead = subsetRead(chunks)
+        if (sr.state == 1) return { multi: true, plain: false }
+        if (sr.state == 0) return { multi: false, plain: false }
+        let n: int = 0
+        for (const part of chunks.join(" ? ").split(";")) {
+            if (n > 0) {
+                let j: int = 0
+                while (j < part.length) {
+                    if (!isCtlSpace(ch(part, j))) return { multi: true, plain: true }
+                    j = j + 1
+                }
+            }
+            n = n + 1
+        }
+        return { multi: false, plain: false }
+    }
+
+    // The closed lexical subset (§14.8.10 item (1), S456 round 4): "outside a
+    // literal or a comment it may hold ONLY: whitespace (space, tab, LF, CR LF);
+    // ASCII identifiers; double-quoted identifiers of printable ASCII with no
+    // escape but `""`; standard single-quoted strings (`''` the only escape, no
+    // backslash, no prefix …); unsigned numbers; `-- ` comments (`--` then
+    // whitespace, ending at LF, no lone carriage return inside); `/* … */`
+    // comments that close, do not nest and are not executable (`/*!`, `/*M!`);
+    // `${…}` slots [here: ` ? `, between the literal runs]; and the punctuation
+    // `( ) , ; . * + - / % = < > ! | & ~ ^` and the cast `::`. ANYTHING ELSE
+    // makes the statement UNREADABLE".
+    type SubsetRun:struct = { state: int, semi: boolean, text: string }
+
+    // One literal run read in the subset (runs begin and end in code — a slot
+    // inside a literal or a comment is refused before this, slotInLiteral).
+    // `semi0`: a `;` was seen before this run with no token after it yet.
+    // state 1: a `;` followed by a further token (a second statement); 0: no
+    // such boundary; -1: outside the subset. `text`: the run with each comment
+    // replaced by one space (what scanSql can then read).
+    fn subsetRun(s: string, semi0: boolean) -> SubsetRun {
+        let i: int = 0
+        let semi: boolean = semi0
+        let out: string = ""
+        while (i < s.length) {
+            const c: string = ch(s, i)
+            let next: int = i + 1
+            let comment = false
+            if (c == " " || c == "\t" || c == "\n") {
+                next = i + 1
+            } else if (c == "\r") {
+                if (ch(s, i + 1) != "\n") return { state: -1, semi: semi, text: "" }
+            } else if (c == "-" && ch(s, i + 1) == "-") {
+                const w: string = ch(s, i + 2)
+                if (!(w == " " || w == "\t" || w == "\n")) return { state: -1, semi: semi, text: "" }
+                let j: int = i + 2
+                while (j < s.length && ch(s, j) != "\n") {
+                    if (ch(s, j) == "\r" && ch(s, j + 1) != "\n") return { state: -1, semi: semi, text: "" }
+                    j = j + 1
+                }
+                next = j
+                comment = true
+            } else if (c == "/" && ch(s, i + 1) == "*") {
+                if (ch(s, i + 2) == "!" || (ch(s, i + 2) == "M" && ch(s, i + 3) == "!")) return { state: -1, semi: semi, text: "" }
+                const close: int = s.indexOf("*/", i + 2)
+                if (close < 0) return { state: -1, semi: semi, text: "" }
+                if (s.substring(i + 2, close).indexOf("/*") >= 0) return { state: -1, semi: semi, text: "" }
+                next = close + 2
+                comment = true
+            } else {
+                // a token: a `;` seen before it begins a second statement
+                if (semi) return { state: 1, semi: semi, text: "" }
+                if (c == ";") {
+                    semi = true
+                } else if (c == "'" || c == "\"") {
+                    if (i > 0 && isWordCh(ch(s, i - 1))) return { state: -1, semi: semi, text: "" }
+                    const r: StrEnd = quotedEnd(s, i, c)
+                    if (r.end < 0) return { state: -1, semi: semi, text: "" }
+                    let k: int = i + 1
+                    while (k < r.end - 1) {
+                        const kc: int = ch(s, k).charCodeAt(0)
+                        if (ch(s, k) == "\\") return { state: -1, semi: semi, text: "" }
+                        if (c == "\"" && (kc < 32 || kc > 126)) return { state: -1, semi: semi, text: "" }
+                        k = k + 1
+                    }
+                    next = r.end
+                } else if (isWordStart(c) || isDigit(c)) {
+                    let j2: int = i + 1
+                    while (j2 < s.length && (isWordCh(ch(s, j2)) || ch(s, j2) == ".")) { j2 = j2 + 1 }
+                    next = j2
+                } else if (c == ":") {
+                    if (ch(s, i + 1) != ":") return { state: -1, semi: semi, text: "" }
+                    next = i + 2
+                } else if (c == "?" || "(),.*+-/%=<>!|&~^".indexOf(c) >= 0) {
+                    // (a literal `?` — a driver parameter — is refused by the allow-list)
+                    next = i + 1
+                } else {
+                    return { state: -1, semi: semi, text: "" }
+                }
+            }
+            if (comment) {
+                out = out + " "
+            } else {
+                out = out + s.substring(i, next)
+            }
+            i = next
+        }
+        return { state: 0, semi: semi, text: out }
+    }
+
+    // Every run read in the subset, the slot between two runs a token.
+    type SubsetRead:struct = { state: int, chunks: string[] }
+
+    fn subsetRead(chunks: string[]) -> SubsetRead {
+        let semi = false
+        let out: string[] = []
+        let ci: int = 0
+        for (const c of chunks) {
+            if (ci > 0 && semi) return { state: 1, chunks: [] }
+            const r: SubsetRun = subsetRun(c, semi)
+            if (r.state != 0) return { state: r.state, chunks: [] }
+            semi = r.semi
+            out = out.concat([r.text])
+            ci = ci + 1
+        }
+        return { state: 0, chunks: out }
+    }
+
+    // =========================================================================
+    // s473 — §14.8.10 item (1) (S456 round 3): "In a compilation with a
+    // database, every statement of a program-body `?{}` … SHALL be one of:" DML
+    // (`SELECT` / `WITH` / `INSERT` / `UPDATE` / `DELETE` / `REPLACE`, "with no
+    // `INTO` at any depth other than the statement's own `INSERT` / `REPLACE`
+    // target"), `CREATE [TEMP | TEMPORARY] TABLE [IF NOT EXISTS] name (col type
+    // …, …)` (optionally `WITHOUT ROWID` / `STRICT`), `ALTER TABLE name ADD
+    // [COLUMN] [IF NOT EXISTS] col type …` ("one column"), `CREATE VIRTUAL
+    // TABLE [IF NOT EXISTS] name USING fts5(col [UNINDEXED], …, opt = value …)`
+    // on the closed option list, transaction control ("`BEGIN`, `COMMIT`,
+    // `ROLLBACK`, `SAVEPOINT`, `RELEASE`, followed only by words"), `CREATE
+    // [UNIQUE] INDEX [IF NOT EXISTS] name ON table (col [COLLATE c] [ASC |
+    // DESC], …) [WHERE …]`, and the closed `PRAGMA` list. "An admitted form
+    // that gives a relation outside the tenant set a `tenant_id` column … is
+    // E-TENANT-UNDECLARED … Every other statement is
+    // E-SQL-PROGRAM-STATEMENT-NOT-ADMITTED".
+    //
+    // The bootstrap's TENANT SET IS EMPTY: both declaring surfaces (`<schema>`,
+    // `<db tables=>`) are refused, so EVERY `tenant_id` column a program-body
+    // statement creates is undeclared. The S455 reading is deliberately wide
+    // (fail closed): `tenant_id` ANYWHERE in a `CREATE TABLE` / `ALTER TABLE`
+    // statement — a quoted name or a string literal included — counts.
+    //
+    // The closed lexical subset is read through scanSql, whose vocabulary is
+    // NARROWER than the SPEC's (it admits no comment, no `&` `~` `^` `::`): a
+    // statement it cannot read whole is judged on what it can prove, and
+    // anything it cannot prove is refused —
+    //   - a DML statement: admitted when the plain text holds no `INTO` but its
+    //     own target's and none of the characters the subset never admits;
+    //   - any other statement: `tenant_id` anywhere in a `CREATE` / `ALTER` is
+    //     E-TENANT-UNDECLARED, everything else NOT-ADMITTED ("cannot be read
+    //     exactly").
+    // `?` outside a `${…}` (a driver parameter) is outside the subset.
+    // Returns code "" (admitted) or the code, with the reason (for
+    // E-TENANT-UNDECLARED: the relation's name).
+    // =========================================================================
+    export type StmtVerdict:struct = { code: string, why: string }
+
+    fn admitted() -> StmtVerdict { return { code: "", why: "" } }
+    fn notAdmitted(why: string) -> StmtVerdict { return { code: "E-SQL-PROGRAM-STATEMENT-NOT-ADMITTED", why: why } }
+    fn tenantUndeclared(rel: string) -> StmtVerdict { return { code: "E-TENANT-UNDECLARED", why: rel } }
+
+    export fn programStatement(chunks: string[]) -> StmtVerdict {
+        let sc: SScan = scanSql(chunks)
+        // a statement scanSql cannot read only because of its comments: read it
+        // without them when it lies in the closed lexical subset (subsetRead)
+        if (sc.broken) {
+            const sr: SubsetRead = subsetRead(chunks)
+            if (sr.state == 0) {
+                const sc2: SScan = scanSql(sr.chunks)
+                if (!sc2.broken) sc = sc2
+            }
+        }
+        let ts: STok[] = sc.toks
+        // a single trailing `;` (§8.1.2 allows it; more is E-SQL-MULTIPLE-STATEMENTS, judged first)
+        if (!sc.broken && ts.length > 0 && isP(ts[ts.length - 1], ";")) ts = ts.slice(0, ts.length - 1)
+        // a body of `${…}` slots alone is E-SQL-003's (the SPEC: it "stays E-SQL-003's")
+        let onlyValues = true
+        for (const t of ts) {
+            if (t.k != SK.Value) onlyValues = false
+        }
+        if (onlyValues && ts.length > 0 && !sc.broken) return admitted()
+        const lead: string = at(ts, 0).w
+        if (!isWord(at(ts, 0))) {
+            if (sc.broken) return notAdmitted("the compiler cannot read it exactly: it opens with a comment, a quoting form or a character outside the closed lexical subset")
+            return notAdmitted("it does not begin with a keyword")
+        }
+        if (sc.broken) return brokenVerdict(chunks, lead, ts)
+        let i: int = 0
+        while (i < ts.length) {
+            if (isP(ts[i], "?")) return notAdmitted("a `?` driver parameter is outside the closed lexical subset — every value is a bound slot (§8.1)")
+            i = i + 1
+        }
+        if (isDmlLead(lead)) return dmlVerdict(ts)
+        if (lead == "CREATE") return createVerdict(ts)
+        if (lead == "ALTER") return alterVerdict(ts)
+        if (lead == "PRAGMA") return pragmaVerdict(ts)
+        if (lead == "BEGIN" || lead == "COMMIT" || lead == "ROLLBACK" || lead == "SAVEPOINT" || lead == "RELEASE") {
+            let j: int = 1
+            while (j < ts.length) {
+                if (!isWord(ts[j])) return notAdmitted("transaction control is admitted followed only by words")
+                j = j + 1
+            }
+            return admitted()
+        }
+        return notAdmitted("a `" + lead + "` statement is not on the admitted list")
+    }
+
+    fn isDmlLead(w: string) -> boolean {
+        return ["SELECT", "WITH", "INSERT", "UPDATE", "DELETE", "REPLACE"].indexOf(w) >= 0
+    }
+
+    // the name a token spells: a word as written, a quoted name or string without its quotes; lower-cased
+    fn tokName(t: STok) -> string {
+        if (t.k == SK.Word) return t.text.toLowerCase()
+        if (t.k == SK.QName || t.k == SK.Str) {
+            const q: string = t.text.substring(0, 1)
+            return t.text.substring(1, t.text.length - 1).split(q + q).join(q).toLowerCase()
+        }
+        return ""
+    }
+
+    fn isNameTok(t: STok) -> boolean { return t.k == SK.Word || t.k == SK.QName }
+
+    fn mentionsTenant(ts: STok[]) -> boolean {
+        for (const t of ts) {
+            if (tokName(t) == "tenant_id") return true
+        }
+        return false
+    }
+
+    // DML: every `INTO` is the statement's own `INSERT` / `REPLACE` target —
+    // right after `INSERT`, `REPLACE`, or `INSERT OR <word>`.
+    fn dmlVerdict(ts: STok[]) -> StmtVerdict {
+        let i: int = 0
+        while (i < ts.length) {
+            if (isWord(ts[i]) && ts[i].w == "INTO") {
+                const p: string = at(ts, i - 1).w
+                const own: boolean = p == "INSERT" || p == "REPLACE" || (at(ts, i - 2).w == "OR" && at(ts, i - 3).w == "INSERT")
+                if (!own) return notAdmitted("an `INTO` that is not the target of the statement's own `INSERT` / `REPLACE` (a `SELECT … INTO` creates a table on Postgres and writes variables or a file on MySQL)")
+            }
+            i = i + 1
+        }
+        return admitted()
+    }
+
+    // the index of the `)` closing the `(` at `i` (-1: none)
+    fn closeParen(ts: STok[], i: int) -> int {
+        let depth: int = 0
+        let j: int = i
+        while (j < ts.length) {
+            if (isP(ts[j], "(")) depth = depth + 1
+            if (isP(ts[j], ")")) {
+                depth = depth - 1
+                if (depth == 0) return j
+            }
+            j = j + 1
+        }
+        return -1
+    }
+
+    // the start index of each top-level comma-separated item between `(` at `open` and `)` at `close`
+    fn itemStarts(ts: STok[], open: int, close: int) -> int[] {
+        let out: int[] = [open + 1]
+        let depth: int = 0
+        let j: int = open + 1
+        while (j < close) {
+            if (isP(ts[j], "(")) depth = depth + 1
+            if (isP(ts[j], ")")) depth = depth - 1
+            if (depth == 0 && isP(ts[j], ",")) out = out.concat([j + 1])
+            j = j + 1
+        }
+        return out
+    }
+
+    // a relation name at `i`: one unqualified name. The index after it (-1: not one).
+    fn relName(ts: STok[], i: int) -> int {
+        if (!isNameTok(at(ts, i))) return -1
+        if (isP(at(ts, i + 1), ".")) return -1
+        return i + 1
+    }
+
+    fn createVerdict(ts: STok[]) -> StmtVerdict {
+        let j: int = 1
+        let unique = false
+        if (at(ts, j).w == "UNIQUE") {
+            unique = true
+            j = j + 1
+        }
+        if (at(ts, j).w == "INDEX") return indexVerdict(ts, j + 1)
+        if (unique) return notAdmitted("`CREATE UNIQUE` is admitted only for an index")
+        if (at(ts, j).w == "VIRTUAL") return virtualVerdict(ts, j + 1)
+        if (at(ts, j).w == "TEMP" || at(ts, j).w == "TEMPORARY") j = j + 1
+        if (at(ts, j).w != "TABLE") return notAdmitted("`CREATE " + at(ts, 1).text + "` is not on the admitted list (only a spelled `CREATE TABLE`, an fts5 `CREATE VIRTUAL TABLE` and `CREATE [UNIQUE] INDEX`)")
+        const k: int = skipIfExists(ts, j + 1)
+        const after: int = relName(ts, k)
+        if (after < 0) return notAdmitted("a `CREATE TABLE` names one unqualified table")
+        // the wide reading (S455): `tenant_id` anywhere in the statement scopes the table
+        if (mentionsTenant(ts)) return tenantUndeclared(tokName(at(ts, k)))
+        if (!isP(at(ts, after), "(")) return notAdmitted("a `CREATE TABLE` is admitted only with a spelled column list (`CREATE TABLE … AS`, a `LIKE` copy and the like create a relation whose columns are not spelled)")
+        const close: int = closeParen(ts, after)
+        if (close < 0) return notAdmitted("its column list does not close")
+        // optionally SQLite's `WITHOUT ROWID` / `STRICT`, comma-separated
+        let m: int = close + 1
+        while (m < ts.length) {
+            if (at(ts, m).w == "WITHOUT" && at(ts, m + 1).w == "ROWID") {
+                m = m + 2
+            } else if (at(ts, m).w == "STRICT" && isWord(at(ts, m))) {
+                m = m + 1
+            } else {
+                return notAdmitted("only `WITHOUT ROWID` / `STRICT` may follow the column list")
+            }
+            if (m < ts.length) {
+                if (!isP(at(ts, m), ",")) return notAdmitted("only `WITHOUT ROWID` / `STRICT` may follow the column list")
+                m = m + 1
+            }
+        }
+        return admitted()
+    }
+
+    fn alterVerdict(ts: STok[]) -> StmtVerdict {
+        if (at(ts, 1).w != "TABLE") return notAdmitted("`ALTER " + at(ts, 1).text + "` is not on the admitted list (only `ALTER TABLE … ADD [COLUMN]`)")
+        const after: int = relName(ts, 2)
+        if (after < 0) return notAdmitted("an `ALTER TABLE` names one unqualified table")
+        if (mentionsTenant(ts)) return tenantUndeclared(tokName(at(ts, 2)))
+        if (at(ts, after).w != "ADD") return notAdmitted("an `ALTER TABLE` other than one `ADD COLUMN` is not admitted")
+        let j: int = after + 1
+        if (at(ts, j).w == "COLUMN") j = j + 1
+        j = skipIfExists(ts, j)
+        if (!isNameTok(at(ts, j))) return notAdmitted("an `ADD` that is not one column")
+        if (isWord(at(ts, j)) && ["CONSTRAINT", "PRIMARY", "UNIQUE", "CHECK", "FOREIGN"].indexOf(at(ts, j).w) >= 0) return notAdmitted("an `ADD` of a constraint is not admitted")
+        let depth: int = 0
+        let m: int = j
+        while (m < ts.length) {
+            if (isP(ts[m], "(")) depth = depth + 1
+            if (isP(ts[m], ")")) depth = depth - 1
+            if (depth == 0 && isP(ts[m], ",")) return notAdmitted("an `ALTER TABLE` adds ONE column")
+            m = m + 1
+        }
+        return admitted()
+    }
+
+    fn indexShape() -> StmtVerdict {
+        return notAdmitted("a `CREATE INDEX` is `CREATE [UNIQUE] INDEX [IF NOT EXISTS] name ON table (col [COLLATE c] [ASC | DESC], …) [WHERE …]`")
+    }
+
+    fn indexVerdict(ts: STok[], j0: int) -> StmtVerdict {
+        const k: int = skipIfExists(ts, j0)
+        const a: int = relName(ts, k)
+        if (a < 0 || at(ts, a).w != "ON") return indexShape()
+        const b: int = relName(ts, a + 1)
+        if (b < 0 || !isP(at(ts, b), "(")) return indexShape()
+        const close: int = closeParen(ts, b)
+        if (close < 0) return indexShape()
+        for (const s of itemStarts(ts, b, close)) {
+            let m: int = s
+            if (!isNameTok(at(ts, m))) return indexShape()
+            m = m + 1
+            if (at(ts, m).w == "COLLATE" && isWord(at(ts, m + 1))) m = m + 2
+            if (at(ts, m).w == "ASC" || at(ts, m).w == "DESC") m = m + 1
+            if (!(isP(at(ts, m), ",") || m == close)) return indexShape()
+        }
+        if (close + 1 < ts.length && at(ts, close + 1).w != "WHERE") return indexShape()
+        return admitted()
+    }
+
+    fn isFts5Option(w: string) -> boolean {
+        return ["content", "content_rowid", "tokenize", "prefix", "columnsize", "detail", "contentless_delete", "contentless_unindexed", "locale", "tokendata"].indexOf(w) >= 0
+    }
+
+    fn virtualVerdict(ts: STok[], j0: int) -> StmtVerdict {
+        if (at(ts, j0).w != "TABLE") return notAdmitted("`CREATE VIRTUAL` is admitted only as `CREATE VIRTUAL TABLE … USING fts5(…)`")
+        const k: int = skipIfExists(ts, j0 + 1)
+        const a: int = relName(ts, k)
+        if (a < 0 || at(ts, a).w != "USING") return notAdmitted("a virtual table is `CREATE VIRTUAL TABLE [IF NOT EXISTS] name USING fts5(…)`")
+        if (at(ts, a + 1).w != "FTS5" || !isP(at(ts, a + 2), "(")) return notAdmitted("a virtual-table module other than `fts5` is not admitted (`fts4` / `fts3` / `rtree` included)")
+        const close: int = closeParen(ts, a + 2)
+        if (close < 0 || close != ts.length - 1) return notAdmitted("an fts5 table's argument list must close the statement")
+        for (const s of itemStarts(ts, a + 2, close)) {
+            const t: STok = at(ts, s)
+            if (isP(at(ts, s + 1), "=")) {
+                if (!isWord(t) || !isFts5Option(t.text.toLowerCase())) return notAdmitted("`" + t.text + "` is not an admitted fts5 option")
+                const v: STok = at(ts, s + 2)
+                if (!(v.k == SK.Word || v.k == SK.Str || v.k == SK.Num || v.k == SK.QName)) return notAdmitted("an fts5 option's value is one word, string or number")
+                if (!(isP(at(ts, s + 3), ",") || s + 3 == close)) return notAdmitted("an fts5 option's value is one word, string or number")
+            } else {
+                if (!isNameTok(t)) return notAdmitted("an fts5 column is a name, optionally `UNINDEXED`")
+                if (tokName(t) == "tenant_id") return tenantUndeclared(tokName(at(ts, k)))
+                let m: int = s + 1
+                if (at(ts, m).w == "UNINDEXED") m = m + 1
+                if (!(isP(at(ts, m), ",") || m == close)) return notAdmitted("an fts5 column is a name, optionally `UNINDEXED`")
+            }
+        }
+        return admitted()
+    }
+
+    fn isPragmaOk(w: string) -> boolean {
+        return ["table_info", "table_xinfo", "index_list", "index_info", "foreign_key_list", "busy_timeout", "journal_mode"].indexOf(w) >= 0
+    }
+
+    fn pragmaVerdict(ts: STok[]) -> StmtVerdict {
+        const n: STok = at(ts, 1)
+        if (!isWord(n) || !isPragmaOk(n.text.toLowerCase())) return notAdmitted("`PRAGMA " + n.text + "` is not on the admitted list (`table_info`, `table_xinfo`, `index_list`, `index_info`, `foreign_key_list`, `busy_timeout`, `journal_mode`)")
+        if (ts.length == 2) return admitted()
+        const v: STok = at(ts, 3)
+        const one: boolean = v.k == SK.Word || v.k == SK.Str || v.k == SK.Num || v.k == SK.QName || v.k == SK.Value
+        if (isP(at(ts, 2), "=") && one && ts.length == 4) return admitted()
+        if (isP(at(ts, 2), "(") && one && isP(at(ts, 4), ")") && ts.length == 5) return admitted()
+        return notAdmitted("a `PRAGMA` is `PRAGMA name`, `PRAGMA name = value` or `PRAGMA name(argument)`")
+    }
+
+    // The statement scanSql could not read whole. `ts` — the tokens it read before it stopped.
+    fn brokenVerdict(chunks: string[], lead: string, ts: STok[]) -> StmtVerdict {
+        const s: string = chunks.join(" ? ")
+        const low: string = s.toLowerCase()
+        if ((lead == "CREATE" || lead == "ALTER") && low.indexOf("tenant_id") >= 0) {
+            let rel: string = ""
+            for (const t of ts) {
+                if (rel == "" && isNameTok(t) && ["CREATE", "ALTER", "TABLE", "TEMP", "TEMPORARY", "VIRTUAL", "IF", "NOT", "EXISTS"].indexOf(t.w) < 0) rel = tokName(t)
+            }
+            return tenantUndeclared(rel)
+        }
+        if (!isDmlLead(lead)) return notAdmitted("the compiler cannot read it exactly (a comment, a quoting form or a character outside its scanner), and only a DML statement is judged on what can be proved without that reading")
+        // the characters the closed lexical subset never admits — anywhere, literals included (fail closed)
+        let i: int = 0
+        while (i < s.length) {
+            const c: string = ch(s, i)
+            if ("$#@[]\\`{}".indexOf(c) >= 0 || c.charCodeAt(0) > 126) return notAdmitted("it holds `" + c + "`, which the closed lexical subset admits only inside a literal read exactly — and the compiler cannot read this statement exactly")
+            i = i + 1
+        }
+        // every `into` word is right after `insert` / `replace` / `insert or <word>`
+        let words: string[] = []
+        let j: int = 0
+        while (j < low.length) {
+            if (isWordCh(ch(low, j))) {
+                let e: int = j
+                while (e < low.length && isWordCh(ch(low, e))) { e = e + 1 }
+                words = words.concat([low.substring(j, e)])
+                j = e
+            } else {
+                j = j + 1
+            }
+        }
+        let w: int = 0
+        while (w < words.length) {
+            if (words[w] == "into") {
+                let p: string = ""
+                if (w > 0) p = words[w - 1]
+                const own: boolean = p == "insert" || p == "replace" || (w > 2 && words[w - 2] == "or" && words[w - 3] == "insert")
+                if (!own) return notAdmitted("an `INTO` that is not the target of the statement's own `INSERT` / `REPLACE` — read in the plain text, since the compiler cannot read this statement exactly")
+            }
+            w = w + 1
+        }
+        return admitted()
+    }
 }

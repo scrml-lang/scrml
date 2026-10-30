@@ -40,6 +40,7 @@
  * rebuilds; nothing else does. `--rebuild` forces it.
  */
 
+import { Database } from "bun:sqlite";
 import { createHash } from "node:crypto";
 import {
   copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, watch, writeFileSync,
@@ -359,6 +360,69 @@ async function hostFilesOf(core: any, stdlibRoot: string, diagnostics: Diagnosti
  * (absolute path → text) replaces the disk for the paths it names: an editor's unsaved buffers
  * (the entry itself need not exist on disk). Findings are diagnostics; a bootstrap crash throws.
  */
+/**
+ * s473 (boot-failclosed-sql-protect) — SPEC §14.8.10, "An undeclared `tenant_id` table is refused
+ * (S456)", item (2): "A SQLite database file the compiler opens at compile time … is scanned whole —
+ * every table and view …: each relation carrying a `tenant_id` column (case-insensitive; read with
+ * `table_xinfo`, so a generated column and a hidden one … count) that is not in the tenant set is
+ * `E-TENANT-UNDECLARED`, as is a relation whose columns cannot be read (unknown is not clean)."
+ *
+ * The bootstrap's tenant set is ALWAYS EMPTY — both declaring surfaces (`<schema>`, `<db tables=>`)
+ * are refused — so every `tenant_id` relation is undeclared. Before s473 the compile never opened
+ * the file, and the built server served every tenant's rows to every request (audit S473 probe
+ * s148/t1: an anonymous request got both tenants' orders with 200).
+ *
+ * BOOTSTRAP INTERIM, wider than the SPEC: §14.8.10 opens only a `<db src=…>` file and leaves a
+ * `<program db=…>` file to the startup check (item 3). Here EVERY SQLite file that exists at compile
+ * time is scanned, whichever form names it. A database that does not exist yet, or is not SQLite,
+ * is item (3)'s — the startup check in slice-m1/runtime/server-runtime.js (`tenantGate`).
+ * The scan is the host's, like the stdlib host files: the bootstrap front end does no I/O.
+ */
+function tenantScan(core: any, root: string, sources: Map<string, string>): Diagnostic[] {
+  const out: Diagnostic[] = [];
+  const seen = new Set<string>();
+  for (const d of core.dbs ?? []) {
+    if (d.driver !== "Sqlite") continue;
+    let t = String(d.target);
+    if (t === ":memory:" || t === "") continue;
+    if (t.startsWith("file:")) t = t.slice(5).split("?")[0];
+    const declaring = join(root, ...String(d.file).split("/"));
+    const path = isAbsolute(t) ? t : resolve(dirname(declaring), t);
+    if (seen.has(path) || !existsSync(path)) continue;
+    seen.add(path);
+    const src = sources.get(declaring);
+    const at = src !== undefined && src.indexOf(String(d.target)) >= 0 ? lineCol(src, src.indexOf(String(d.target))) : undefined;
+    const diag = (message: string): Diagnostic => ({ severity: "error", code: "E-TENANT-UNDECLARED", message, file: declaring, line: at?.line, col: at?.col });
+    const fix = "Declare it in `<schema>` so the tenant floor scopes it (`<schema>` / `<db tables=>` are not in the bootstrap yet, so on the bootstrap the tenant set is empty), or — when its rows are not tenant data — rename the column; a view is not a declaration: drop it or rename the column (§14.8.10, S456)";
+    let found: string[] = [];
+    try {
+      const db = new Database(path, { readonly: true });
+      try {
+        const rels = db.query("SELECT name, type FROM sqlite_master WHERE type IN ('table', 'view') ORDER BY name").all() as Array<{ name: string; type: string }>;
+        for (const r of rels) {
+          let cols: Array<{ name: string }>;
+          try {
+            cols = db.query("SELECT name FROM pragma_table_xinfo(?)").all(r.name) as Array<{ name: string }>;
+          } catch (e: any) {
+            out.push(diag(`the ${r.type} \`${r.name}\` in the SQLite database \`${shown(path)}\` has columns the compiler cannot read (${String(e?.message ?? e)}) — unknown is not clean: it may carry a \`tenant_id\` column outside the compilation's tenant set. ${fix}`));
+            continue;
+          }
+          if (cols.some((c) => String(c.name).toLowerCase() === "tenant_id")) found.push(`${r.type} \`${r.name}\``);
+        }
+      } finally {
+        db.close();
+      }
+    } catch (e: any) {
+      out.push(diag(`the SQLite database \`${shown(path)}\` exists but the compiler cannot read its tables (${String(e?.message ?? e)}) — unknown is not clean: it may hold a \`tenant_id\` relation outside the compilation's tenant set (§14.8.10 item (2))`));
+      continue;
+    }
+    for (const f of found) {
+      out.push(diag(`the ${f} in the SQLite database \`${shown(path)}\` carries a \`tenant_id\` column and is not in the compilation's tenant set (§14.8.10 item (2), S456): the tenant floor would not scope it, so the built server would serve every tenant's rows to every request. ${fix}`));
+    }
+  }
+  return out;
+}
+
 export async function compileSource(
   entry: string,
   opts: { overlay?: ReadonlyMap<string, string>; rebuild?: boolean; log?: (s: string) => void; stdlibRoot?: string } = {},
@@ -422,6 +486,9 @@ export async function compileSource(
     }
     return result(false);
   }
+  // s473: §14.8.10 item (2) — a SQLite file the compile can open is scanned for undeclared tenant tables
+  diagnostics.push(...tenantScan(fe.core, root, sources));
+  if (diagnostics.some((d) => d.severity === "error")) return result(false);
   // printProgram / printServer run checkCore themselves (the gate at emission); a finding is a refusal.
   const out = boot.mods.print.printProgram(fe.core, "program.client.js", "scrml-runtime.js");
   for (const r of out.refused ?? []) diagnostics.push(refusalDiag(String(r)));
