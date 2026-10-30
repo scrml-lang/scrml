@@ -1,6 +1,8 @@
 // §14.13.2: a slot of unresolved type is refused (fail closed).
+// (s473: §48.8 infers `fn one() { return 1; }` as `int` now; a return through recursion is not inferred.)
 <program>
-    fn one() { return 1; }
+    fn one() { return down(1); }
+    fn down(n: int) { if (n > 0) { return down(n - 1); } else { return 1; } }
     fn show() -> string {
         return `v=${one()}`;
     }
