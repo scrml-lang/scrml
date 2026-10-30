@@ -63,3 +63,6 @@ committed; nor was it returned, so no redirect either.
   compile error. 957f19d7c — lint-transaction refuses it with E-TRANSACTION-CONTROL-FLOW (existing
   code; a reading — #1682 names no navigate-specific code). Rollback pin replaced by 4 must-refuse
   shapes (red on 79ed33510) + near-miss (navigate after the block: 302, both writes committed).
+- Merged origin/main (998d7f7e5): known-gaps merged by the generated-content driver, union of gap ids
+  diffed (none lost), severity.scrml regenerated. Filed g-impl1-navigate-via-peer-inside-transaction-not-refused-s473
+  (MED, open): a navigating peer called inside transaction{} still rolls back at run time.
