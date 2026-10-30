@@ -20,6 +20,7 @@ export const M2_MODULES = [
   "effects.scrml",
   "analyze.scrml",
   "lower.scrml",
+  "refusals.scrml",
 ];
 
 export function loadM2() {

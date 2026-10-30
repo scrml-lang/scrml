@@ -17,6 +17,7 @@
     import { parseFile } from "../parse.scrml"
     import { analyze } from "../analyze.scrml"
     import { lower } from "../lower.scrml"
+    import { relabelRefusals } from "../refusals.scrml"
     import { parseProgram } from "../link.scrml"
     import { sqlFacts } from "../sql.scrml"
     import { counterCore } from "../slice-m1/counter.core.scrml"

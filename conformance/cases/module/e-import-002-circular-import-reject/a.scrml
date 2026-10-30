@@ -1,4 +1,4 @@
 ${
     import { fromEntry } from './case.scrml';
 }
-export const fromA = fromEntry
+export const fromA = fromEntry;

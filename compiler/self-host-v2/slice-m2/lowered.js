@@ -77,7 +77,12 @@ export function frontEnd(mods, files, entry, opts = {}) {
   const t1 = performance.now();
   const tp = mods.analyze.analyze(asts, entry);
   // s469 — a statement a later phase refuses is not also E-STMT-NO-EFFECT (parse.scrml withoutRefusedNoEffect)
-  const parseDiags = mods.parse.withoutRefusedNoEffect(linked.diags, tp.diags);
+  const parseDiags0 = mods.parse.withoutRefusedNoEffect(linked.diags, tp.diags);
+  // s473 D28 — the named-refusal table (refusals.scrml): in a file that already fails, a construct
+  // the bootstrap does not build is reported by name and the generic cascade it caused is dropped.
+  // Re-label only: it never adds an error to a file that had none (Core is lowered from `tp` as before).
+  const rel = mods.refusals.relabelRefusals(files.map((f) => ({ path: f.path, src: f.src })), parseDiags0, tp.diags);
+  const parseDiags = rel.parse;
   const t2 = performance.now();
   const lowered = mods.lower.lower(tp);
   const t3 = performance.now();
@@ -87,7 +92,7 @@ export function frontEnd(mods, files, entry, opts = {}) {
     core: lowered.core,
     // the parse phase's diagnostics, apart (the conformance probe buckets on them)
     parseDiags,
-    diags: parseDiags.concat(tp.diags),
+    diags: parseDiags.concat(rel.later),
     // s449: the non-fatal I- notes (§55.17.6: I-FORM-SUBMIT-GATED "reports in the warnings stream")
     infos: tp.infos,
     nodes: next,

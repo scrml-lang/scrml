@@ -63,13 +63,13 @@ ${
     // s451 (U1a): the three template token kinds get their own classes — a
     // `?{}` SQL template is read from them (TChunk = a literal run, TIStart /
     // TIEnd = a `${` / its `}`); everywhere else they are still not an expression.
-    type TC:enum = { Punct, Ident, Keyword, Num, Str, Variant, At, Other, End, TChunk, TIStart, TIEnd, Foreign }
+    export type TC:enum = { Punct, Ident, Keyword, Num, Str, Variant, At, Other, End, TChunk, TIStart, TIEnd, Foreign }
 
     // `v` = the payload the parser needs: a name, a cooked string, a raw number.
     // s469 (templates): `bad` — a template chunk's malformed escape (lex.scrml
     // escapeWhy), "" for every other token. A slot's `}` (TIEnd) carries its
     // unreadable reason in `v`.
-    type PTok:struct = { cls: TC, v: string, text: string, start: int, end: int, line: int, bad: string }
+    export type PTok:struct = { cls: TC, v: string, text: string, start: int, end: int, line: int, bad: string }
 
     fn tokClass(k: TokenKind) -> TC {
         return match k {
@@ -161,7 +161,7 @@ ${
                  start: t.span.start, end: t.span.end, line: t.span.line, bad: tokBad(t.kind) }
     }
 
-    fn toPToks(ts: Token[]) -> PTok[] {
+    export fn toPToks(ts: Token[]) -> PTok[] {
         let out: PTok[] = []
         for (const t of ts) { out = out.concat([toPTok(t)]) }
         return out

@@ -15,7 +15,13 @@ PASS 265 · FAIL 40 · NOT-TWINNED 685 · UNSUPPORTED 823 (bootstrap-unsupported
       E-SCOPE-001 → E-STATE-UNDECLARED (`@x` read naming nothing); E-TYPE-041 → E-TYPE-043 (`return not` into a
       non-optional return); E-FN-003 → E-FN-004 (`fn` calls a clock reader / a `scrml:random` member).
       Tests updated (slice-m2 typer*, slice-m4 markup-failclosed/persist/server/core-additions, lsp boot-lsp).
-- [ ] D28 named-refusal table (compiler/self-host-v2/refusals.scrml) + test
-- [ ] module-case semicolons (e-import-002-*, e-export-001-*)
+- [x] D28 named-refusal table (compiler/self-host-v2/refusals.scrml, wired in slice-m2/lowered.js frontEnd;
+      parse.scrml exports TC/PTok/toPToks) + slice-m4/named-refusals-s473.test.js. Re-label only: fires only in a
+      file that already has an Error symptom on the construct's line. Measured over 2862 sets (every conformance
+      case as written + every S473 audit probe): 238 relabeled, 0 compile outcomes changed.
+      impl#1 hazards met: it rewrites `fn`, `X.y`, `is .V` inside STRING LITERALS of the bootstrap source and
+      text-scans `fn` bodies for `T =` — the table builds those words from pieces (FN / DOT / IS consts).
+- [x] module-case semicolons (e-import-002-*, e-export-001-*): 16 `;` added; impl#1 conformance still PASS on all 7.
+      After: PASS 281 · FAIL 241 · UNSUPPORTED 606 (bootstrap-unsupported only).
 - [ ] regen docs/bootstrap-conformance.md, coverage rows, gaps
 - [ ] gates, PR
