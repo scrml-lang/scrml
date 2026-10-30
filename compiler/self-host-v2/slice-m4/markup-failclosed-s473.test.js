@@ -154,7 +154,7 @@ describe("§66.6.6 — a bare tag naming a program cell", () => {
   test("RULED S473 (review-surfaced decisions item 3) — a cell named like an element, beside that tag: refused AT THE CELL", () => {
     for (const n of ["filter", "data", "time", "title", "label", "progress", "output", "text", "view", "search", "summary", "p"]) {
       const r = run(P(`        <${n}/>`, `    let <${n}:string=""/>`));
-      expect([n, r.diags.map((d) => d.code)]).toEqual([n, ["E-NAME-COLLIDES-ELEMENT"]]);
+      expect([n, r.diags.map((d) => d.code)]).toEqual([n, ["E-DECL-ELEMENT-NAME-COLLIDES"]]);
       expect(r.diags[0].message).toContain(`\`${n}\``);
     }
   });

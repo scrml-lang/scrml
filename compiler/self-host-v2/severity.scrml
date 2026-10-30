@@ -19,6 +19,7 @@
 //   E-BOOTSTRAP-REDECLARE — no §34 row
 //   E-BOOTSTRAP-UNSUPPORTED — no §34 row
 //   E-DECL-AS — no §34 row
+//   E-DECL-ELEMENT-NAME-COLLIDES — no §34 row
 //   E-DECL-FIELD-TAG-NEEDS-STAR — no §34 row
 //   E-DECL-HANDLE-NOT-NARROWED — no §34 row
 //   E-DECL-ILLEGAL-FIELD-NAME — no §34 row
@@ -40,7 +41,6 @@
 //   E-HANDLE-REDECLARE — no §34 row
 //   E-INT-DIVISION — no §34 row
 //   E-INTERNAL-RECOVERED-UNREPORTED — no §34 row
-//   E-NAME-COLLIDES-ELEMENT — no §34 row
 //   E-OPERAND-NOT-NARROWED — no §34 row
 //   E-OPERATOR-OPERAND-TYPE — no §34 row
 //   E-PROGRAM-MISSING — no §34 row

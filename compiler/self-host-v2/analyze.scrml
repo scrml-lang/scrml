@@ -4909,10 +4909,10 @@ ${
                         // <filter:string=""/>` + `<filter/>` (that tag used to be
                         // the inert element, §66.6.6's "silently changes
                         // meaning"). With no colliding tag the cell is fine.
-                        // ⚑ The code name is a READING (no SPEC row yet):
-                        // E-NAME-COLLIDES-ELEMENT, after E-NAME-COLLIDES-RESERVED.
+                        // Code: the one #1682 (S473 SPEC rulings) names for this rule —
+                        // E-DECL-ELEMENT-NAME-COLLIDES.
                         if (!isNestedUserDecl(c) && markupElementName(c.name) && programUsesTag(p, c.name)) {
-                            st = addDiag(st, s.file, c.span, "E-NAME-COLLIDES-ELEMENT", "the program cell `" + c.name + "` is named like the markup element `<" + c.name + ">`, and this program also writes `<" + c.name + ">` as a tag — the tag would be the element, not the cell (§66.6.6: a tag never silently changes meaning; ruled S473). Rename the cell, or drop the tag (show the value with `$" + "{@" + c.name + "}`)")
+                            st = addDiag(st, s.file, c.span, "E-DECL-ELEMENT-NAME-COLLIDES", "the program cell `" + c.name + "` is named like the markup element `<" + c.name + ">`, and this program also writes `<" + c.name + ">` as a tag — the tag would be the element, not the cell (§66.6.6: a tag never silently changes meaning; ruled S473). Rename the cell, or drop the tag (show the value with `$" + "{@" + c.name + "}`)")
                         }
                         if (!isNestedUserDecl(c) && ownTypeName(c) != "" && declNames.indexOf(ownTypeName(c)) >= 0) {
                             st = addDiag(st, s.file, c.span, "E-BOOTSTRAP-UNSUPPORTED", "`<" + c.name + ":" + ownTypeName(c) + " …/>` is a named shared instance of `<" + ownTypeName(c) + ">` (§66.8.2) — not in the bootstrap")
@@ -15824,7 +15824,7 @@ ${
     // the program's cells included (R4: they are the program's fields), except a
     // program cell spelled like a markup element. RULED (bryan, user-voice S473
     // "review-surfaced decisions" item 3): that collision is refused at the
-    // CELL (E-NAME-COLLIDES-ELEMENT, namedInstanceDiags), so the tag is not
+    // CELL (E-DECL-ELEMENT-NAME-COLLIDES, namedInstanceDiags), so the tag is not
     // reported a second time here — one report per fault. Inside a user
     // declaration the field reading has always won (and still does).
     fn namesOwnField(env: Env, tag: string) -> boolean {
