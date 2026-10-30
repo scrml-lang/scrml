@@ -31,8 +31,8 @@
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 270 | 5 |
-| MED | 742 | 8 |
-| LOW | 659 | 0 |
+| MED | 741 | 8 |
+| LOW | 656 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
 
@@ -29897,6 +29897,7 @@ Recommendation: when #1659 lands, make its rule 8 and this rule one table (url.s
 
 ### g-boot-implicit-envelope-unbuilt-not-refused-s473 — a `!` server function with two or more `?{}` runs them with no BEGIN/COMMIT, and the shape is neither built nor refused — `NEW S473; HIGH; open`
 §8.9.2 / §19.10.5: two or more non-`.nobatch()` `?{}` in a `!` server body run in one implicit transaction that rolls back on `fail`. The bootstrap emits bare sequential `rt.query` calls, so `INSERT; UPDATE; fail .Bad` leaves both writes committed (probes `docs/changes/s473-spec-coverage/probes/part-2/s8/envelope.scrml`, `docs/changes/s473-spec-coverage/probes/part-3/p19-tx.scrml`). The U1 design plan says unbuilt units are "refused until their unit (U1e)"; this one is not refused, and the only trace is an analyze.scrml:25605 comment. E-SQL-011 (a transaction may not span databases) is unbuilt with it (`docs/changes/s473-spec-coverage/probes/part-2/s8/xdb2.scrml` compiles clean). impl#1 builds §8.9.2 for an explicit `server` fn. Who pays: data integrity (money debited, never credited). Fix direction now: refuse (E-BOOTSTRAP-UNSUPPORTED naming U1e) a `!` server body with two or more coalescing queries; build the envelope with U1e. **In flight:** lane `s473-boot-failclosed-sql-protect` (S473). Status stays `open` until it lands. Audit source: P2 §8.9.2; P3 §19.10.5; P2 §8.1.1 E-SQL-011.
+**S473 review-surfaced 1 (ruling:user-voice-scrml.md S473 "⭐ RULED — S473 review-surfaced decisions, all PA recs"):** the envelope trigger is the TRANSITIVE QUERY set (every `?{}` reached from the `!` body, its own and its non-`!` callees' — refined by user-voice "⭐ RULED — S473: the transitive `!` envelope counts QUERIES, not writes"); the interim bootstrap refusal covers a `!` function whose transitive query set has two or more queries or one in a loop (SPEC §8.9.2 amendment).
 <!-- @gap id=g-boot-implicit-envelope-unbuilt-not-refused-s473 sev=HIGH status=narrowed narrowed-by=s473-boot-failclosed-sql-protect locus=compiler/self-host-v2/analyze.scrml(~25605 'no implicit envelope until U1e')+compiler/self-host-v2/print-server.scrml prov=audit:s473-spec-coverage(P2_§8.9.2+_P3_§19.10.5+_P2_§8.1.1_E-SQL-011);lane:s473-boot-failclosed-sql-protect -->
 > **NARROWED (S473, lane `s473-boot-failclosed-sql-protect`, PR #1675) — refused on bootstrap; build owed (U1e).** analyze.scrml `envelopeDiags`: a `!` function whose body runs two or more `?{}` without `.nobatch()` (the §8.9.2 / §19.10.5 trigger) is E-BOOTSTRAP-UNSUPPORTED naming the implicit per-handler transaction. A single query (atomic by itself) still compiles. E-SQL-011 is moot while no envelope can be compiled (an envelope-bearing `!` body is refused). STILL OWED: the envelope itself (BEGIN/COMMIT, ROLLBACK on error and `fail`), E-BATCH-001, E-SQL-011. Tests `compiler/self-host-v2/slice-m4/failclosed-sql-protect-s473.test.js` (probes s8/envelope, part-3 p19-tx; red on base).
 
@@ -30075,9 +30076,10 @@ Both are SHALL-refusals that are not enforced; the program still means what it s
 §51.0.F / §66.13.2: inside a state-child body (or on straight-line flow) the from-state is static, and a target with no edge is rejected at compile time. The bootstrap checks only "no incoming edge"; `<Idle rule=.Loading>` holding `@phase = .Done` and `@phase = .Loading; @phase = .Idle;` compile and throw E-ENGINE-INVALID-TRANSITION at click time. The wildcard `rule=*` gives E-PARSE-EXPR. Probes `docs/changes/s473-spec-coverage/probes/part-5/p51-statechild-static.scrml`, `p51-static-flow.scrml`, `p51-wildcard.scrml`. The runtime backstop holds. Audit source: P5 §51.0.F / §51.5.1.
 <!-- @gap id=g-boot-rule-static-from-state-check-missing-s473 sev=LOW status=open locus=compiler/self-host-v2/analyze.scrml(transitionCheck) prov=audit:s473-spec-coverage(P5_§51.0.F_/_§51.5.1) -->
 
-### g-boot-output-name-encoding-unbuilt-s473 — §47 output name encoding is not implemented: the bootstrap mints hint-based names (no FNV, kind marker, canonical type string, seq, debug/production split) — `NEW S473; MED; open`
+### g-boot-output-name-encoding-unbuilt-s473 — §47 output name encoding is not implemented: the bootstrap mints hint-based names (no FNV, kind marker, canonical type string, seq, debug/production split) — `NEW S473; MED; resolved S473 D4`
 §47: "All JavaScript variable names in compiled output SHALL use encoded names" (`'_' kind hash seq`, FNV-1a-32 → 8 base36, alpha-sorted canonical type strings, E-CG-010..014, debug `$name`). compiler/self-host-v2/names.scrml `mint()` is `sanitize(hint)` + `_N`; grep for fnv / base36 / toString(36) = 0. No gap, ruling or design (dpa-051 §3.3 never weighs §47) covered it: the hole that started this audit. impl#1 also ignores it: `runCG` defaults `encoding` to false and no CLI path passes it. Who pays: nobody today, but it blocks every §47-keyed feature (test-bind keys, dpa-061 persist type hashes, the §47.6 protect check, §58.7). Ruling asked first (decisions.md): is §47.1–§47.5 a language obligation or impl#1 detail? §47.1.1b and §47.6 stay normative either way. Audit source: P5 §47 preamble, §47.1–§47.5.
-<!-- @gap id=g-boot-output-name-encoding-unbuilt-s473 sev=MED status=open locus=compiler/self-host-v2/names.scrml(mint) prov=audit:s473-spec-coverage(P5_§47_preamble+_§47.1–§47.5) -->
+**RESOLVED S473 (D4 — §47.1–§47.5 demoted to an impl#1 annex; not a bootstrap obligation; ruling:user-voice-scrml.md S473 "your recs on all").**
+<!-- @gap id=g-boot-output-name-encoding-unbuilt-s473 sev=MED status=resolved locus=compiler/self-host-v2/names.scrml(mint) prov=audit:s473-spec-coverage(P5_§47_preamble+_§47.1–§47.5) -->
 
 ### g-boot-no-emitted-js-parse-gate-s473 — no emitted-JS parse gate: a compile that emits unparseable JS still exits 0 (E-CODEGEN-INVALID-LOGIC) — `NEW S473; LOW; open`
 §2.2.1: the compiler parses its emitted JS and reports E-CODEGEN-INVALID-LOGIC instead of writing an unparseable artifact. grep across self-host-v2, slice-m*, scripts/scrml-boot.ts = 0; checkCore (check.scrml C1–C19) checks Core, not the output. Risk is lower than impl#1's because the printer is structured. Fix direction: parse each artifact (Bun's transpiler) before writing. Audit source: P1 §2.2.1.
@@ -30087,9 +30089,10 @@ Both are SHALL-refusals that are not enforced; the program still means what it s
 §17.0 (normative home of §1.5's W-LIFECYCLE-CANDIDATE) and §17.4c (W-EACH-PROMOTABLE) are info-level nudges. Neither code is in the bootstrap; three boolean cells gating one region compile with no lint. Probe `docs/changes/s473-spec-coverage/probes/part-3/p17-boolcells.scrml`. impl#1 has W-LIFECYCLE-CANDIDATE (lint-ghost-patterns.js). Audit source: P1 §1.5; P3 §17.0, §17.4c.
 <!-- @gap id=g-boot-lifecycle-candidate-lint-absent-s473 sev=LOW status=open locus=compiler/self-host-v2/analyze.scrml(no lint pass) prov=audit:s473-spec-coverage(P1_§1.5+_P3_§17.0+_§17.4c) -->
 
-### g-boot-verbose-closers-absent-s473 — `verbose closers` (§4.5) is not implemented — `NEW S473; LOW; open`
+### g-boot-verbose-closers-absent-s473 — `verbose closers` (§4.5) is not implemented — `NEW S473; LOW; resolved S473 D31`
 Nothing in the bootstrap touches §4.5 (0 hits); impl#1 ignores it too. A SPEC note may be enough; see decisions.md. Audit source: P1 §4.5 (s4).
-<!-- @gap id=g-boot-verbose-closers-absent-s473 sev=LOW status=open locus=compiler/self-host-v2/parse.scrml prov=audit:s473-spec-coverage(P1_§4.5_(s4)) -->
+**RESOLVED S473 (D31 — §4.5 `verbose closers` retired; ruling:user-voice-scrml.md S473 "your recs on all").**
+<!-- @gap id=g-boot-verbose-closers-absent-s473 sev=LOW status=resolved locus=compiler/self-host-v2/parse.scrml prov=audit:s473-spec-coverage(P1_§4.5_(s4)) -->
 
 ### g-boot-w-display-text-overquote-absent-s473 — W-DISPLAY-TEXT-OVERQUOTE is never emitted — `NEW S473; LOW; open`
 §4.18.7 asks a warning for a display-text literal that needs no quotes. Probe `docs/changes/s473-spec-coverage/probes/part-1/s4/q10-overquote.scrml` compiles with no warning. impl#1 emits it. Audit source: P1 §4.18.7 (s4).
@@ -30111,9 +30114,19 @@ Nothing in the bootstrap touches §4.5 (0 hits); impl#1 ignores it too. A SPEC n
 `import "./side.css";` is E-PARSE-IMPORT. The SPEC names no mechanism, so the text is probably stale (decisions.md). Probe `docs/changes/s473-spec-coverage/probes/part-2/s9/cssfile.scrml`. Audit source: P2 §9.3.
 <!-- @gap id=g-boot-css-files-not-ingested-s473 sev=LOW status=open locus=compiler/SPEC.md(§9.3)+compiler/self-host-v2(no .css ingestion) prov=audit:s473-spec-coverage(P2_§9.3) -->
 
-### g-spec-toenum-lookup-table-output-form-s473 — §14.4.1 says the compiler SHALL emit `const TypeName_toEnum = {…}`; the bootstrap emits an equivalent inline match — `NEW S473; LOW; open`
+### g-spec-key-canonical-form-s473 — §6.5.3 (`key=` on the lifted element) and §17.4b (`key` in the loop header) give two spellings of keyed reconciliation — RULED S473: the loop-header `key` is canonical; the bootstrap's legacy-`key=` refusal and the W-KEY-001 header lint are owed — `NEW S473; LOW; open; RULED`
+**RULED S473 (review-surfaced 5, ruling:user-voice-scrml.md S473 "⭐ RULED — S473 review-surfaced decisions, all PA recs"):** the loop-header `key` (§17.4b) is canonical; §6.5.3 `key=` is legacy and the bootstrap refuses it with a hint naming the header form (owed); W-KEY-001 takes the header meaning. What remains open is the bootstrap refusal and the W-KEY-001 header lint.
+SPEC §6.5.3 puts `key=` on the element passed to `lift`; §17.4b puts `key` in the `for` header. decisions.md D31 lists it ("needs one canonical form"); the S473 D31 record-lag sweep cannot pick one (a semantics choice). PA recommendation: the loop-header `key` (§17.4b). Also: `W-KEY-001` means two things — a duplicate key value (§6.5.3) and an object collection iterated with no key (§17.4b). Both sections carry a "pending a ruling" marker (PR #1682).
+<!-- @gap id=g-spec-key-canonical-form-s473 sev=LOW status=open locus=compiler/SPEC.md(§6.5.3,§17.4b) prov=ruling:user-voice-scrml.md-S473-D31 -->
+
+### g-impl1-sql-slot-inside-quoted-literal-dropped-s468 — impl#1 silently drops a `${…}` inside a quoted SQL literal or SQL comment (E-SQL-SLOT-IN-LITERAL not emitted) — `NEW S468; LOW; open; carried`
+S468 ruling (user-voice-scrml.md "⭐ RULED — "safe ints only, your recs"" item 3, verbatim): *"impl#1's silent drop of that slot is filed LOW (`g-impl1-sql-slot-inside-quoted-literal-dropped-s468`), impl#1 unchanged (S435: not security — no injection, a wrong result)."* The language rule is SPEC §8.1 `E-SQL-SLOT-IN-LITERAL` (landed S473 D31). Filed S473 (the id was cited but never filed).
+<!-- @gap id=g-impl1-sql-slot-inside-quoted-literal-dropped-s468 sev=LOW status=open locus=compiler/src(SQL template lowering) prov=ruling:user-voice-scrml.md-S468-safe-ints-item-3 -->
+
+### g-spec-toenum-lookup-table-output-form-s473 — §14.4.1 says the compiler SHALL emit `const TypeName_toEnum = {…}`; the bootstrap emits an equivalent inline match — `NEW S473; LOW; resolved S473 D4`
 An output-form SHALL (the §47 pattern): no code observes the table name, and the inline `(m$ => { if (m$ === "Admin") … })(s)` is semantically equivalent. Probe `docs/changes/s473-spec-coverage/probes/part-2/s14a/b2/eparse.scrml` (compile it to see the output). Recommended fix: demote the sentence to non-normative implementation prose (decisions.md). Audit source: P2 §14.4.1 / §14.4.3.
-<!-- @gap id=g-spec-toenum-lookup-table-output-form-s473 sev=LOW status=open locus=compiler/SPEC.md(§14.4.1 / §14.4.3)+compiler/self-host-v2/lower.scrml(toEnumExpr) prov=audit:s473-spec-coverage(P2_§14.4.1_/_§14.4.3) -->
+**RESOLVED S473 (D4 — the toEnum table sentence demoted to an impl#1 output form; ruling:user-voice-scrml.md S473 "your recs on all").**
+<!-- @gap id=g-spec-toenum-lookup-table-output-form-s473 sev=LOW status=resolved locus=compiler/SPEC.md(§14.4.1 / §14.4.3)+compiler/self-host-v2/lower.scrml(toEnumExpr) prov=audit:s473-spec-coverage(P2_§14.4.1_/_§14.4.3) -->
 
 ### g-boot-w-case-001-absent-s473 — W-CASE-001 is never emitted: a declaration named like an HTML element (`<button …/>`) silently replaces it in scope — `NEW S473; LOW; open`
 §15.15.4 asks a warning when a user declaration shadows an HTML element. `<button label:string/>` compiles with no warning and every `<button>` in scope becomes the declaration. Probe `docs/changes/s473-spec-coverage/probes/part-3/p15-shadow.scrml`. Audit source: P3 §15.15.4.
@@ -30139,9 +30152,10 @@ An output-form SHALL (the §47 pattern): no code observes the table name, and th
 §21.7 caps auto-gather at 5000 files (E-IMPORT-007). scripts/scrml-boot.ts `sourceClosure` has no limit. Arguably N/A: the clause names the impl#1 CLI. Audit source: P4 §21.7.
 <!-- @gap id=g-boot-gather-limit-absent-s473 sev=LOW status=open locus=scripts/scrml-boot.ts(sourceClosure ~150-190) prov=audit:s473-spec-coverage(P4_§21.7) -->
 
-### g-boot-component-shape-constraints-unchecked-s473 — component shape constraints (a component is valid only where its root element is) are not checked — `NEW S473; LOW; open`
+### g-boot-component-shape-constraints-unchecked-s473 — component shape constraints (a component is valid only where its root element is) are not checked — `NEW S473; LOW; resolved S473 D25`
 §24.3 / §15.4: `const card = <div>` is valid only where `<div>` is. Nothing in the bootstrap checks use-site shape. UNVERIFIED and probably superseded: §66.15.1's mapping table does not carry shape inheritance (decisions.md). Audit source: P4 §24.3; P3 §15.4.
-<!-- @gap id=g-boot-component-shape-constraints-unchecked-s473 sev=LOW status=open locus=compiler/self-host-v2/analyze.scrml(resolveUse) prov=audit:s473-spec-coverage(P4_§24.3+_P3_§15.4) -->
+**RESOLVED S473 (D25 — shape inheritance retired (superseded by the HTML content-model check, g-boot-html-content-model-unchecked-s473); ruling:user-voice-scrml.md S473 "your recs on all").**
+<!-- @gap id=g-boot-component-shape-constraints-unchecked-s473 sev=LOW status=resolved locus=compiler/self-host-v2/analyze.scrml(resolveUse) prov=audit:s473-spec-coverage(P4_§24.3+_P3_§15.4) -->
 
 ### g-boot-w-match-value-unused-absent-s473 — W-MATCH-VALUE-UNUSED is never emitted: a value-producing `match` as a function's last statement compiles silently — `NEW S473; LOW; open`
 §48.13 lists W-MATCH-VALUE-UNUSED. `fn f(k:int) { match k { 1 :> "a", _ :> "b" } }` compiles with no diagnostic (grep = 0). It may also breach the S445 no-effect-free-expression rule. Probe `docs/changes/s473-spec-coverage/probes/part-5/p48-matchtail.scrml`. Audit source: P5 §48.13.
@@ -30151,9 +30165,10 @@ An output-form SHALL (the §47 pattern): no code observes the table name, and th
 §51.0.F.1: writing a graph field to its current variant is a no-op with an Info lint. The no-op is built (engine.test.js); the lint has 0 hits. Audit source: P5 §51.0.F.1.
 <!-- @gap id=g-boot-engine-self-write-lint-absent-s473 sev=LOW status=open locus=compiler/self-host-v2/analyze.scrml(transitionCheck) prov=audit:s473-spec-coverage(P5_§51.0.F.1) -->
 
-### g-boot-emit-machine-tests-absent-s473 — `--emit-machine-tests` (§51.13 property tests) does not exist on scrml-boot — `NEW S473; LOW; open`
+### g-boot-emit-machine-tests-absent-s473 — `--emit-machine-tests` (§51.13 property tests) does not exist on scrml-boot — `NEW S473; LOW; deferred S473 D8`
 No such flag in scripts/scrml-boot.ts USAGE. Arguably tooling under the S447 carve-out; whether §51.13 re-homes into the `single` form at all is part of the §51 legacy-surface ruling (decisions.md). Audit source: P5 §51.13.
-<!-- @gap id=g-boot-emit-machine-tests-absent-s473 sev=LOW status=open locus=scripts/scrml-boot.ts(USAGE) prov=audit:s473-spec-coverage(P5_§51.13) -->
+**DEFERRED S473 (D8 — `--emit-machine-tests` banked (tooling); ruling:user-voice-scrml.md S473 "your recs on all").**
+<!-- @gap id=g-boot-emit-machine-tests-absent-s473 sev=LOW status=deferred locus=scripts/scrml-boot.ts(USAGE) prov=audit:s473-spec-coverage(P5_§51.13) -->
 
 ### g-bootstrap-promotion-lints-unbuilt-s473 — the promotion info lints I-MATCH-PROMOTABLE and I-FN-PROMOTABLE are absent — `NEW S473; LOW; open`
 §56: an exhaustive `if=`/`else-if=` chain over an enum cell and a fn-eligible `function` each get an info nudge. Neither code exists; both probes compile with no info. Probes `docs/changes/s473-spec-coverage/probes/part-6/B/p56-match-promotable.scrml`, `p56-fn-promotable.scrml`. impl#1 has both. The `bun scrml promote` CLI is tooling (N/A). Audit source: P6 §56.2–§56.4, §56.9.
@@ -30271,9 +30286,10 @@ E-ASSIGN-POSITION (a bootstrap-local code; only its missing §34 row is tracked 
 S472 made `<db>` cells the bootstrap's server-authoritative cell. The §52 surfaces are refused (`unknownOpenerMessage`, analyze.scrml:5039) with no gap; the §52.6.8 banner says "the bootstrap builds it", which is false. Probes `docs/changes/s473-spec-coverage/probes/part-6/A/p52-tier1.scrml`, `p52-server-attr.scrml`. Ruling asked in decisions.md. Audit source: P6 §52.3, §52.4.
 <!-- @gap id=g-bootstrap-s52-server-cell-surfaces-vs-db-cells-unruled-s473 sev=MED status=open locus=compiler/self-host-v2/analyze.scrml(unknownOpenerMessage ~5039) prov=audit:s473-spec-coverage(P6_§52.3+_§52.4) -->
 
-### g-spec-54-substates-no-s66-spelling-s473 — §54 nested substates and state-local transitions have no §66 spelling — `NEW S473; LOW; open`
+### g-spec-54-substates-no-s66-spelling-s473 — §54 nested substates and state-local transitions have no §66 spelling — `NEW S473; LOW; deferred S473 D9`
 The legacy form is parse-rejected (`p54-legacy`); the closest §66 shape reads substate tags as child fields (E-DECL-TYPE-NOT-INFERABLE, `p54-s66`). §66 never mentions substates. A SPEC fork more than a bootstrap bug; ruling asked in decisions.md. Probes `docs/changes/s473-spec-coverage/probes/part-6/A/p54-legacy.scrml`, `p54-s66.scrml`. Audit source: P6 §54.
-<!-- @gap id=g-spec-54-substates-no-s66-spelling-s473 sev=LOW status=open locus=compiler/SPEC.md(§54 vs §66) prov=audit:s473-spec-coverage(P6_§54) -->
+**DEFERRED S473 (D9 — §54 marked superseded-pending and banked; the §66 spelling is a deep-dive; ruling:user-voice-scrml.md S473 "your recs on all").**
+<!-- @gap id=g-spec-54-substates-no-s66-spelling-s473 sev=LOW status=deferred locus=compiler/SPEC.md(§54 vs §66) prov=audit:s473-spec-coverage(P6_§54) -->
 
 ### g-bootstrap-e-auth-001-reported-as-e-reactive-003-s473 — a client-local `@var` used as a `?{}` bound parameter is refused as E-REACTIVE-003, never E-AUTH-001 — `NEW S473; LOW; open`
 The semantics hold, fail-closed, under a different code, so a conformance case asserting E-AUTH-001 FAILs. Probes `docs/changes/s473-spec-coverage/probes/part-6/A/p52-auth001.scrml`, `p52-auth001b.scrml`. Fix direction: a §34 superseded-code mapping, or emit E-AUTH-001 at that site. Audit source: P6 §52.4.4.
