@@ -22,6 +22,7 @@ import { describe, test, expect, beforeAll, afterAll } from "bun:test";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync, existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import "../slice-m1/load-program.js"; // happy-dom
 import { compileFile, compileSource } from "../../../scripts/scrml-boot.ts";
 
@@ -195,6 +196,18 @@ describe("rule 3 — exports are read statically, NEVER by loading the file", ()
     expect(errCodes(await check(d))).toEqual(["E-IMPORT-004"]);
   }, 60000);
 
+  test("#1670 L3: an `export *` cycle bound from BOTH ends, in both orders, is clean (no partial result memoized for the cycle partner)", async () => {
+    const files = {
+      "a.js": "export * from './b.js';\nexport function fa() { return 1; }\n",
+      "b.js": "export * from './a.js';\nexport function fb() { return 2; }\n",
+    };
+    const two = (first, second) => `<host src="./${first[0]}">\n  ${first[1]}() -> int\n</host>\n<host src="./${second[0]}">\n  ${second[1]}() -> int\n</host>\n<program>\n<p id="o">\${${first[1]}()}\${${second[1]}()}</p>\n</program>\n`;
+    for (const [x, y] of [[["a.js", "fb"], ["b.js", "fa"]], [["b.js", "fa"], ["a.js", "fb"]], [["a.js", "fa"], ["b.js", "fb"]]]) {
+      const d = project({ ...files, "app.scrml": two(x, y) });
+      expect([x, y, errCodes(await check(d))]).toEqual([x, y, []]);
+    }
+  }, 60000);
+
   test("an `export *` cycle terminates", async () => {
     const d = project({
       "glue.js": "export * from './b.js';\nexport function f() { return 1; }\n",
@@ -263,6 +276,43 @@ describe("rule 3 — the file checks and the §21.3 copy closure", () => {
       "app.scrml": app("  f() -> int", "<p>x</p>"),
     });
     expect(errCodes(await check(d3))).toEqual(["E-IMPORT-011"]);
+  }, 60000);
+
+  test("#1670 L1: a real path holding `\"`, a newline, `%2e%2e`, `#`, `?` and `*/` is written into the shim as an encoded JSON specifier, never raw (and never into the comment) — the page loads the right file", async () => {
+    const weird = 'w"q\nn%2e%2e#h?q*/c';
+    const d = project({
+      [weird + "/glue.js"]: "export function f() { return 41; }\n",
+      "app.scrml": app("  f() -> int", '<p id="o">${f()}</p>', "./link.js"),
+    });
+    symlinkSync(join(d, weird, "glue.js"), join(d, "link.js"));
+    // (resolved as the BROWSER resolves a module specifier — a URL relative to the shim's URL; bun's own
+    // resolver does not percent-decode a relative specifier, so the page is not loaded here)
+    const out = join(d, "dist");
+    const r = await compileFile(join(d, "app.scrml"), { outDir: out });
+    expect(errCodes(r)).toEqual([]);
+    const shimPath = join(out, "_scrml/host-src/0.js");
+    const viaUrl = (p, s) => fileURLToPath(new URL(s, pathToFileURL(p)));
+    const shim = readFileSync(shimPath, "utf8");
+    const lines = shim.split("\n");
+    expect(lines.length).toBe(3); // comment, export, trailing newline: no raw newline inside the specifier
+    expect(lines[0]).not.toContain("w\"q");
+    expect(lines[0]).not.toContain("*/");
+    const spec = JSON.parse(/^export \* from (".*");$/.exec(lines[1])[1]);
+    expect(spec).toBe("../../_scrml_local/" + weird.split("/").map(encodeURIComponent).join("/") + "/glue.js"); // `*/` makes `w"q…*` a directory
+    expect(r.written).toContain("_scrml_local/" + weird + "/glue.js");
+    expect(viaUrl(shimPath, spec)).toBe(join(out, "_scrml_local", weird, "glue.js"));
+    expect(readFileSync(viaUrl(shimPath, spec), "utf8")).toContain("return 41");
+    // a directory literally named `%2e%2e` is not read as `..` by the URL resolver
+    const d2 = project({
+      "%2e%2e/glue.js": "export function f() { return 42; }\n",
+      "glue.js": "export function f() { return 666; }\n",
+      "app.scrml": app("  f() -> int", '<p id="o">${f()}</p>', "./%2e%2e/glue.js"),
+    });
+    const out2 = join(d2, "dist");
+    expect(errCodes(await compileFile(join(d2, "app.scrml"), { outDir: out2 }))).toEqual([]);
+    const shim2 = join(out2, "_scrml/host-src/0.js");
+    const spec2 = JSON.parse(/export \* from (".*");/.exec(readFileSync(shim2, "utf8"))[1]);
+    expect(readFileSync(viaUrl(shim2, spec2), "utf8")).toContain("return 42");
   }, 60000);
 
   test("a build that refuses writes no copy", async () => {

@@ -186,6 +186,39 @@ suite("R1 class in Chromium — iframe.src, a.href javascript:, form.action, <ba
     expect(r).toEqual(["base", "meta", "link", "style", "object", "embed", "template", "x-probe"].map((t) => t + ":E-HOST-RECEIVER-RT"));
   });
 
+  test("#1670 M1: CONTROL then guarded — a customized built-in `<button is=…>` (localName `button`) runs its author's attributeChangedCallback; guarded, it traps", async () => {
+    const c = await inPage(`
+      if (!customElements.get("x-b1")) customElements.define("x-b1", class extends HTMLButtonElement { static get observedAttributes() { return ["title"]; } attributeChangedCallback(n, o, v) { this.innerHTML = v; } }, { extends: "button" });
+      const b = document.createElement("button", { is: "x-b1" }); document.body.appendChild(b);
+      b.setAttribute("title", "<img src=x onerror=\\"window.__ran.push('cbuiltin-control')\\">");
+      return b.localName;`);
+    expect(c.r).toBe("button");
+    expect(c.ran).toEqual(["cbuiltin-control"]);
+    const { r, ran } = await inPage(`
+      const b = document.createElement("button", { is: "x-b1" }); document.body.appendChild(b);
+      return trap(() => rt.hostInert(b, AT).setAttribute(rt.hostSetAttrName("title", AT), rt.hostAttrValue(b, "title", "<img src=x onerror=\\"window.__ran.push('cbuiltin')\\">", AT)));`);
+    expect(r).toBe("E-HOST-RECEIVER-RT");
+    expect(ran).toEqual([]);
+  });
+
+  test("#1670 I2 / M1: another same-origin realm's inert element and a re-prototyped element are not inert receivers of this page", async () => {
+    const { r } = await inPage(`
+      const od = document.getElementById("other").contentDocument;
+      const x = od.createElement("div");
+      const s = document.createElement("span"); Object.setPrototypeOf(s, HTMLDivElement.prototype);
+      return [trap(() => rt.hostInert(x, AT)), trap(() => rt.hostInert(s, AT)), trap(() => rt.hostInert(document.createElement("div"), AT)).slice(0, 2)];`);
+    expect(r).toEqual(["E-HOST-RECEIVER-RT", "E-HOST-RECEIVER-RT", "ok"]);
+  });
+
+  test("#1670 L2: a non-string attribute name whose toString flips `title` → `href` is refused, never judged by one String()", async () => {
+    const { r } = await inPage(`
+      let k = 0; const flip = { toString: () => (k++ === 0 ? "title" : "href") };
+      const a = document.createElement("a");
+      const t = trap(() => a.setAttribute(flip, rt.hostAttrValue(a, flip, "javascript:1", AT)));
+      return [t.startsWith("raw hostAttrValue"), a.getAttribute("href")];`);
+    expect(r).toEqual([true, null]);
+  });
+
   test("an inert receiver passes and the member runs (a real <div>, <a>, <img>)", async () => {
     const { r } = await inPage(`
       const d = document.createElement("div"); rt.hostInert(d, AT).textContent = "hi";
@@ -214,6 +247,30 @@ suite("brand checks in Chromium (r8.7) — another realm's object, a prototype-b
         trap(() => rt.hostInert(Object.create(HTMLDivElement.prototype), AT)),
       ];`);
     expect(r).toEqual(["E-HOST-VALUE-MISMATCH-RT", "E-HOST-VALUE-MISMATCH-RT", "ok", "E-HOST-RECEIVER-RT"]);
+  });
+
+  test("#1670 M2: prototype-borrowing fakes and Proxies of NON-Node interfaces fail (a WebIDL brand getter), and an element's tag must match its interface", async () => {
+    const { r } = await inPage(`
+      const realDiv = document.createElement("div");
+      const div = document.createElement("div"); Object.setPrototypeOf(div, HTMLCanvasElement.prototype);
+      const sc = document.createElement("script"); Object.setPrototypeOf(sc, HTMLDivElement.prototype);
+      const ctx = document.createElement("canvas").getContext("2d");
+      return [
+        trap(() => rt.hostBrand(Object.create(CanvasRenderingContext2D.prototype), "CanvasRenderingContext2D", AT)),
+        trap(() => rt.hostBrand(Object.create(DOMRect.prototype), "DOMRect", AT)),
+        trap(() => rt.hostBrand(new Proxy({}, { getPrototypeOf: () => DOMRect.prototype }), "DOMRect", AT)),
+        trap(() => rt.hostBrand(new Proxy(realDiv, {}), "HTMLDivElement", AT)),
+        trap(() => rt.hostBrand(div, "HTMLCanvasElement", AT)),
+        trap(() => rt.hostBrand(sc, "HTMLDivElement", AT)),
+        trap(() => rt.hostBrand(new DOMRectReadOnly(1, 2, 3, 4), "DOMRect", AT)),
+        // the real ones pass
+        trap(() => rt.hostBrand(ctx, "CanvasRenderingContext2D", AT)).slice(0, 2),
+        trap(() => rt.hostBrand(new DOMRect(1, 2, 3, 4), "DOMRect", AT)).slice(0, 2),
+        trap(() => rt.hostBrand(realDiv, "HTMLDivElement", AT)).slice(0, 2),
+        trap(() => rt.hostBrand(document.createElement("script"), "HTMLElement", AT)).slice(0, 2),
+      ];`);
+    const M = "E-HOST-VALUE-MISMATCH-RT";
+    expect(r).toEqual([M, M, M, M, M, M, M, "ok", "ok", "ok", "ok"]);
   });
 
   test("a memoized callback wrapper: addEventListener then removeEventListener with the same function removes it", async () => {

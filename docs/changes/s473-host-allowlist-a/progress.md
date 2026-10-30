@@ -29,8 +29,12 @@ Rulings (verbatim, `scrml-support/user-voice-scrml.md` S473 2026-10-29):
 - `hostBrand(v, iface, at, optional)` and the hostCall/hostDecode descriptor `{ k: "iface", name }` — r8.7
   brand checks: `instanceof` the interface object captured at start (snapshot of the realm's own
   capitalised constructor globals), plus the captured `Node.prototype.nodeType` getter for a Node
-  interface and the captured `localName` getter for an Element interface (a prototype-borrowing fake
-  fails). Miss → `E-HOST-VALUE-MISMATCH-RT`.
+  interface and the captured `localName` getter for an Element interface. Miss → `E-HOST-VALUE-MISMATCH-RT`.
+  **CORRECTION (#1670 review M2):** the claim first written here — "a prototype-borrowing fake fails" — was
+  FALSE for non-Node interfaces (`instanceof` alone: `Object.create(DOMRect.prototype)`, a Proxy whose
+  `getPrototypeOf` answers `DOMRect.prototype`, `Object.create(CanvasRenderingContext2D.prototype)` all
+  passed) and the element kind was not checked (a `<div>` re-prototyped as `HTMLCanvasElement` passed). Fixed
+  in the fix round below.
 - `hostCallback(fn, argDescs, at)` — the callback wrapper, memoized per (function, signature text) in a
   WeakMap, so `removeEventListener` removes what `addEventListener` added; each host argument decoded by
   hostDecode (rule 13); extra args and `this` dropped; returns nothing to the host.
@@ -98,3 +102,28 @@ generated file to regen and no gap id lost. Draft PR #1670 → main.
 - `g-spec-host-target-url-sinks-unjudged-s473`: re-titled code-exec, LOW → HIGH, status NARROWED (not
   resolved: a compiled target reaches the guards only when lane B's walk + printer route it).
 - `g-boot-host-block-f3-unbuilt-s473`: item (a) (`src=`) marked built.
+
+## 2026-10-30 — #1670 fix round 1 (review ~/.cache/scrml/review/s473-1670/REVIEW.md, LAND-W-F/U)
+
+- **M1 (customized built-ins pass hostInert)** — hostInert also requires `Object.getPrototypeOf(el)` to be
+  EXACTLY this realm's own prototype for its tag, from an element of each inert tag made at runtime start
+  (`hostCaps.inertProtos`). Refuses `<button is="x-b">` (its prototype is the author's class), another
+  realm's element (closes I2) and a re-prototyped element. Chromium red→green: control shows the customized
+  built-in's attributeChangedCallback runs an `onerror` payload; guarded → E-HOST-RECEIVER-RT, nothing runs.
+- **M2 (hostBrand only a brand check for Node)** — every branded interface now needs, besides `instanceof`:
+  its BRAND GETTER (the first own accessor on its prototype chain, captured at start; a WebIDL getter throws
+  Illegal invocation on a non-branded receiver; no accessor → fail closed, except a Node superinterface —
+  EventTarget — which is admitted only for a value branding as a Node); for an Element interface, the
+  element's prototype must be EXACTLY the realm's prototype for its namespace + local name (made lazily with
+  the captured `createElementNS` on the captured document; a hyphenated name fails closed). Chromium
+  red→green: all five review fakes refused; real canvas context, DOMRect, div, script-as-HTMLElement pass.
+  The false progress.md claim is corrected above. Note: a customized built-in now FAILS the brand check of
+  its base interface (fail closed).
+- **L1 (shim path raw)** — the shim's specifier is percent-encoded per segment and written with
+  JSON.stringify; the comment carries no path. Test: a real dir path with `"`, newline, `%2e%2e`, `#`, `?`,
+  `*/`, resolved the way a browser resolves a module URL (bun's resolver does not percent-decode, so the page
+  is not loaded there); and a literal `%2e%2e` dir.
+- **L2 (hostAttrValue name coercion)** — a non-string name throws (compiler defect), never `String()`ed.
+- **L3 (star-cycle memo order)** — a result computed under an open cycle cut carries the cut and is not
+  memoized. Test: two `<host src=>` blocks over an `a ⇄ b` star cycle, both orders.
+- Not touched (coordinator files them): L4, L5, I1, I3–I5.

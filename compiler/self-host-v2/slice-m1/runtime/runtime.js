@@ -1461,14 +1461,17 @@ export function hostCall(thunk, ty, at) {
 //   - guarded(inert-receiver) hostInert: the receiver's local name and namespace, read through the
 //                             `Element.prototype` getters CAPTURED at runtime start (never the
 //                             instance's own `localName`), SHALL be HTML and on the inert element
-//                             list (HOST_INERT_ELEMENTS). Otherwise the trap E-HOST-RECEIVER-RT.
+//                             list (HOST_INERT_ELEMENTS), and its prototype SHALL be the realm's own
+//                             for that tag (no customized built-in, no other realm; #1670 M1).
+//                             Otherwise the trap E-HOST-RECEIVER-RT.
 //   - guarded(attr-name)      hostSetAttrName: the run-time wall behind the compile-time
 //                             literal-name rule (§5.2's event-handler test and `srcdoc`).
 //   - brand checks (r8.7)     hostBrand / descriptor `{ k: "iface", name }`: `instanceof` the
 //                             interface object CAPTURED at runtime start (another realm's object
-//                             fails), plus, for a Node interface, the captured
-//                             `Node.prototype.nodeType` getter, which throws for an object that only
-//                             borrows the prototype. A failure is E-HOST-VALUE-MISMATCH-RT.
+//                             fails), plus the interface's captured WebIDL brand getter (Illegal
+//                             invocation on a fake or a Proxy), plus, for an Element interface, the
+//                             realm's exact prototype for the element's tag (#1670 review M2). A
+//                             failure is E-HOST-VALUE-MISMATCH-RT.
 //   - callback wrappers       hostCallback: a scrml function in a callback slot crosses as a
 //                             wrapper, MEMOIZED per (function, signature), so
 //                             `removeEventListener(t, cb)` removes what `addEventListener(t, cb)`
@@ -1538,6 +1541,39 @@ const hostCaps = (() => {
     } catch { v = undefined; }
     if (typeof v === "function" && v.prototype !== null && typeof v.prototype === "object") ifaces.set(n, v);
   }
+  // #1670 review M2 — each interface's BRAND GETTER: the first own accessor found walking its prototype
+  // chain (the interface's own prototype first, `Object.prototype` excluded). A WebIDL attribute getter
+  // throws "Illegal invocation" on a receiver that is not a platform object of that interface (or a
+  // subinterface): `Object.create(DOMRect.prototype)`, a Proxy, a different interface's object. An
+  // interface with no accessor has no brand getter, and its brand check fails closed.
+  const brandGetters = new Map();
+  for (const [n, C] of ifaces) {
+    let found = null;
+    let p = C.prototype;
+    for (let depth = 0; p !== null && p !== Object.prototype && depth < 64 && found === null; depth++) {
+      let keys = [];
+      try { keys = Object.getOwnPropertyNames(p); } catch { keys = []; }
+      for (const k of keys) {
+        let d;
+        try { d = Object.getOwnPropertyDescriptor(p, k); } catch { d = undefined; }
+        if (d && typeof d.get === "function") { found = d.get; break; }
+      }
+      try { p = Object.getPrototypeOf(p); } catch { p = null; }
+    }
+    if (found !== null) brandGetters.set(n, found);
+  }
+  // #1670 review M1 / I2 — the realm's own prototype for each INERT tag, from an element this module
+  // makes at start: a receiver must have exactly it, so a customized built-in (`<button is="x-b">`,
+  // whose prototype is the author's class), another realm's element and a re-prototyped element fail.
+  const doc = g.document && typeof g.document === "object" ? g.document : null;
+  const createElement = doc !== null && typeof doc.createElement === "function" ? doc.createElement : null;
+  const createElementNS = doc !== null && typeof doc.createElementNS === "function" ? doc.createElementNS : null;
+  const inertProtos = new Map();
+  if (createElement !== null) {
+    for (const t of HOST_INERT_ELEMENTS) {
+      try { inertProtos.set(t, Object.getPrototypeOf(createElement.call(doc, t))); } catch { /* absent: refused */ }
+    }
+  }
   return {
     localName: getter(Elem, "localName"),
     namespaceURI: getter(Elem, "namespaceURI"),
@@ -1545,10 +1581,31 @@ const hostCaps = (() => {
     NodeProto: NodeC ? NodeC.prototype : null,
     ElementProto: Elem ? Elem.prototype : null,
     ifaces,
+    brandGetters,
+    inertProtos,
+    doc,
+    createElementNS,
+    getPrototypeOf: Object.getPrototypeOf,
     instanceOf: Function.prototype[Symbol.hasInstance],
     isPrototypeOf: Object.prototype.isPrototypeOf,
   };
 })();
+
+// The realm's own prototype of a STANDARD element named `ln` in namespace `ns` (memoized), made with
+// the captured `createElementNS` on the document captured at start. null for a custom-element name (a
+// hyphen: making one could run an author constructor) or when no element can be made — fail closed.
+const hostTagProtoMemo = new Map();
+function hostTagProto(ns, ln) {
+  if (typeof ns !== "string" || typeof ln !== "string" || ln === "" || ln.indexOf("-") >= 0) return null;
+  const key = ns + " " + ln;
+  if (hostTagProtoMemo.has(key)) return hostTagProtoMemo.get(key);
+  let p = null;
+  if (hostCaps.createElementNS !== null) {
+    try { p = hostCaps.getPrototypeOf(hostCaps.createElementNS.call(hostCaps.doc, ns, ln)); } catch { p = null; }
+  }
+  hostTagProtoMemo.set(key, p);
+  return p;
+}
 
 function hostReceiverTrap(at, what) {
   throw new ScrmlTrap("E-HOST-RECEIVER-RT", at + " — its receiver is " + what + ", which a `<host>` binding SHALL NOT mutate: a `guarded(inert-receiver)` entry changes only an HTML element on the inert element list (§21.3.3 rule 8.5, Appendix H §H.4); a <script>, <iframe>, <base>, <meta>, <link>, <style>, <object>, <embed>, <form>, a custom element and a non-HTML element are refused", { at, receiver: what });
@@ -1575,6 +1632,13 @@ export function hostInert(el, at) {
   const ln = hostLocalName(el);
   if (ln === null) return hostReceiverTrap(at, el === null || el === undefined ? String(el) : "not an HTML element");
   if (!hostInertSet.has(ln)) return hostReceiverTrap(at, "a <" + ln + ">");
+  // #1670 review M1 / I2: the element's prototype SHALL be this realm's own prototype for its tag — a
+  // customized built-in (`<button is="x-b">` reports `button` but runs the author's
+  // attributeChangedCallback), another realm's element and a re-prototyped element are refused
+  const want = hostCaps.inertProtos.get(ln);
+  let have;
+  try { have = hostCaps.getPrototypeOf(el); } catch { have = undefined; }
+  if (want === undefined || have !== want) return hostReceiverTrap(at, "a <" + ln + "> that is not this page's own standard <" + ln + "> (a customized built-in `is=` element, another realm's element, or a re-prototyped one)");
   return el;
 }
 
@@ -1595,6 +1659,11 @@ export function hostUrl(el, name, value, at) {
  * Any other value is returned unchanged (setAttribute converts it).
  */
 export function hostAttrValue(el, name, value, at) {
+  // #1670 review L2: the name is a string (a compile-time literal); anything else — an object whose
+  // `toString` can answer `title` here and `href` to setAttribute — is refused, never converted
+  if (typeof name !== "string") {
+    throw new Error("hostAttrValue: " + at + " — the attribute name is not a string (a compiler defect: §21.3.3 rule 8.5 guarded(attr-name) requires a string literal)");
+  }
   const ln = hostLocalName(el);
   if (_scrml_is_url_attr(ln === null ? "" : ln, name)) return _scrml_safe_url(el, name, value);
   return value;
@@ -1617,10 +1686,20 @@ export function hostSetAttrName(name, at) {
 
 /**
  * The brand check (r8.7): `v` is a platform object of the Appendix H interface `iface` in THIS realm.
- * `instanceof` the interface object captured at start (another realm's object fails: its chain holds
- * that realm's prototypes), and, for a Node interface, the captured `Node.prototype.nodeType` getter
- * must accept `v`; it throws for `Object.create(HTMLElement.prototype)`, which is not a platform
- * object. An interface the realm did not have at start fails closed.
+ * Every one of these, all captured at start, must hold (#1670 review M2):
+ *   1. `instanceof` the interface object (another realm's object fails: its chain holds that realm's
+ *      prototypes);
+ *   2. the interface's BRAND GETTER (hostCaps.brandGetters — a WebIDL attribute getter of the interface
+ *      or an ancestor) accepts `v`. A real WebIDL getter throws "Illegal invocation" for a receiver that
+ *      is not a platform object implementing it, so `Object.create(DOMRect.prototype)`, a Proxy whose
+ *      `getPrototypeOf` answers `DOMRect.prototype`, and `Object.create(CanvasRenderingContext2D
+ *      .prototype)` fail. An interface with no accessor fails closed;
+ *   3. a Node interface: the captured `nodeType` getter accepts `v`;
+ *   4. an Element interface: the element's prototype is EXACTLY this realm's own prototype for its
+ *      namespace and local name (hostTagProto), so a `<div>` re-prototyped as `HTMLCanvasElement`, a
+ *      `<script>` re-prototyped as `HTMLDivElement`, and a customized built-in fail; a custom element
+ *      (a hyphenated name) fails closed.
+ * (Under an emulated DOM — happy-dom — a JS getter may not throw for a fake; 4 still refuses it there.)
  */
 function hostBranded(v, iface) {
   if (v === null || (typeof v !== "object" && typeof v !== "function")) return false;
@@ -1629,21 +1708,40 @@ function hostBranded(v, iface) {
   let ok = false;
   try { ok = hostCaps.instanceOf.call(C, v) === true; } catch { ok = false; }
   if (!ok) return false;
+  const brand = hostCaps.brandGetters.get(iface);
+  if (brand !== undefined) {
+    try { brand.call(v); } catch { return false; }
+  } else {
+    // no accessor (EventTarget): admitted only for a value that brands as a Node — a superinterface
+    // of Node is implemented by every Node — and otherwise refused (fail closed)
+    let nodeAncestor = false;
+    try { nodeAncestor = hostCaps.NodeProto !== null && hostCaps.isPrototypeOf.call(C.prototype, hostCaps.NodeProto); } catch { nodeAncestor = false; }
+    if (!nodeAncestor || hostCaps.nodeType === null) return false;
+    try { hostCaps.nodeType.call(v); } catch { return false; }
+    if (!hostBranded(v, "Node")) return false;
+  }
   const under = (P) => {
     if (P === null) return false;
     try { return C.prototype === P || hostCaps.isPrototypeOf.call(P, C.prototype); } catch { return true; }
   };
-  if (hostCaps.nodeType !== null && under(hostCaps.NodeProto)) {
+  if (hostCaps.NodeProto !== null && under(hostCaps.NodeProto)) {
+    if (hostCaps.nodeType === null) return false;
     let t;
     try { t = hostCaps.nodeType.call(v); } catch { return false; }
     if (typeof t !== "number") return false;
   }
-  // an Element interface: the captured `localName` getter yields the element's name (a real platform
-  // object's getter brand-checks; an emulated DOM's getter at least finds no name on a fake)
-  if (hostCaps.localName !== null && under(hostCaps.ElementProto)) {
+  if (hostCaps.ElementProto !== null && under(hostCaps.ElementProto)) {
+    if (hostCaps.localName === null || hostCaps.namespaceURI === null) return false;
     let ln;
-    try { ln = hostCaps.localName.call(v); } catch { return false; }
-    if (typeof ln !== "string" || ln === "") return false;
+    let ns;
+    try {
+      ln = hostCaps.localName.call(v);
+      ns = hostCaps.namespaceURI.call(v);
+    } catch { return false; }
+    const want = hostTagProto(ns, ln);
+    let have;
+    try { have = hostCaps.getPrototypeOf(v); } catch { return false; }
+    if (want === null || have !== want) return false;
   }
   return true;
 }
