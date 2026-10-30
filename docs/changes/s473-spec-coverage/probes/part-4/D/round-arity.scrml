@@ -1,0 +1,5 @@
+<program>
+${ import { round } from 'scrml:math'; }
+<n:int=(round(2.5))/>
+<main><p>${@n}</p></main>
+</program>

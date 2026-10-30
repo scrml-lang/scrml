@@ -1,0 +1,12 @@
+<program>
+    type Phase:enum = { Idle, Loading, Done }
+    <engine for=Phase initial=.Idle>
+        <Idle rule=.Loading/>
+        <Loading rule=.Done/>
+        <Done/>
+    </engine>
+    function go() { @phase = .Done; }
+    <main>
+        <button onclick=go()>go</button>
+    </main>
+</program>

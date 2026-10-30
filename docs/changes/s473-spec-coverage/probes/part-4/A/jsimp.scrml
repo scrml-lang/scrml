@@ -1,0 +1,4 @@
+${ import { helper } from "./helper.js"; }
+<program>
+<main><p>x</p></main>
+</program>

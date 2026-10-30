@@ -1,0 +1,5 @@
+<program>
+    let <a:int=1/>
+    let <b=(@a + 1) persist="local" key="app.b"/>
+    <main><p>${@b}</p></main>
+</program>

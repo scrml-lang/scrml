@@ -1,0 +1,7 @@
+<host>
+  f(e: string) -> string = document.body.setAttribute("onclick", e)
+</host>
+<program>
+
+<p>x</p>
+</program>

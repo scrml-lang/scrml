@@ -1,0 +1,4 @@
+<program>
+function f() -> string { return "a"; }
+<div title=f() "y">y</div>
+</program>

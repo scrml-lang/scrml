@@ -1,0 +1,5 @@
+<program>
+    let <n:int=0/>
+    fn f(k: int) { match k { 1 :> "a", _ :> "b" } }
+    <main><p>x</p></main>
+</program>

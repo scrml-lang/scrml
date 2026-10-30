@@ -1,0 +1,11 @@
+<program>
+    type Level:enum = { Low, High }
+    let <miles:int=0/>
+    <level:Level=(match @miles > 500 { true :> .High, false :> .Low }) single>
+        <Low : "low">
+        <High : "high">
+    </>
+    function bump() { @miles = @miles + 600; }
+
+    <main><p><*level/></p><button onclick=bump()>b</button></main>
+</program>

@@ -1,0 +1,5 @@
+${
+  import { f } from "./b.scrml";
+  export function g(x: int) -> int { return x + 1; }
+  function h(x: int) -> int { return f(x); }
+}

@@ -1,0 +1,5 @@
+<program>
+${ type P:enum = { A, B } }
+${ fn f() -> bool { const p = P.toEnum("A"); return true; } }
+<p>${f()}</p>
+</program>

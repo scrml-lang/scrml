@@ -1,0 +1,5 @@
+<program>
+    type C:enum = { Red, Green }
+    function v(c: C) -> string { return c.variant; }
+    <main><p>${v(.Red)}</p></main>
+</program>

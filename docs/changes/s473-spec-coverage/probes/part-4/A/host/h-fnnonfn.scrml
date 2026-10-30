@@ -1,0 +1,7 @@
+<host>
+  t() -> string = document.title
+</host>
+<program>
+fn g() -> string { return t(); }
+<p>${g()}</p>
+</program>

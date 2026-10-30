@@ -1,0 +1,6 @@
+<program>
+let <count:int=0/>
+function log(n: int) -> int { return n; }
+function go() { @count = log(@count); }
+<main><button onclick=go()>go</button></main>
+</program>

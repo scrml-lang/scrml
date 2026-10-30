@@ -1,0 +1,6 @@
+<program>
+let <n:int=0/>
+function a() { @n = 1; }
+function b() { @n = 2; }
+<button onclick=a(); b()>x</button>
+</program>

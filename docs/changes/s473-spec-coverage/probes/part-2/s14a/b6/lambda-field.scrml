@@ -1,0 +1,4 @@
+<program>
+    function f() -> int { const o = { n: 1, f: (x: int) => x }; return 1; }
+    <p>${f()}</p>
+</program>

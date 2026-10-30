@@ -1,0 +1,5 @@
+<program>
+    let <n:int=0/>
+    function load() -> int { return 1; }
+    <main><request id="r">@n = load();</request><p>${@n}</p></main>
+</program>

@@ -1,0 +1,4 @@
+${
+  export type Color:enum = { Red, Blue }
+  export function f(x: int) -> int { return x + 1; }
+}

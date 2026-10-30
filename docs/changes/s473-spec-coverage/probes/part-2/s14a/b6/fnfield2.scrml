@@ -1,0 +1,4 @@
+<program>
+    type T:struct = { n: int, cb: fn() }
+    <p>hi</p>
+</program>

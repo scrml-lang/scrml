@@ -1,0 +1,5 @@
+<program>
+    type Status:enum = { pending, Active }
+    let <s:Status=.Active/>
+    <p>${@s}</p>
+</program>

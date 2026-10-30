@@ -1,0 +1,3 @@
+<program db="./app.db">
+    <main><p>${@currentUser.id}</p></main>
+</program>

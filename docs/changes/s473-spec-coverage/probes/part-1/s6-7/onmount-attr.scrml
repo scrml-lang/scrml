@@ -1,0 +1,4 @@
+<program>
+    function hello() -> int { return 1; }
+    <main><p onmount=hello()>x</p></main>
+</program>

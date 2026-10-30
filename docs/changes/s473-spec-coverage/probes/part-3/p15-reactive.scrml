@@ -1,0 +1,9 @@
+<program>
+    let <count:int=0/>
+    <card title:string/>
+    renders <div><h2>${title} ${@count}</h2><button onclick=(@count = @count + 1)>+</button></div>
+    <main>
+        <card title="a"/>
+        <card title="b"/>
+    </main>
+</program>

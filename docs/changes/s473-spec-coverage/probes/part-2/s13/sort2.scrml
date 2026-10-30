@@ -1,0 +1,21 @@
+<program db="./app.db">
+    type Ok:struct = { ok: int }
+    let <out:string=""/>
+    let <n:int=0/>
+    function cnt(id: int) -> int {
+        const r: Ok = ?{`SELECT count(*) AS ok FROM t WHERE id = ${id}`}.get() !{ _ :> { return 0; } };
+        return r.ok;
+    }
+    function bump(id: int) -> int {
+        ?{`UPDATE t SET x = x + 1 WHERE id = ${id}`}.run() !{ _ :> { return 0; } };
+        return 1;
+    }
+    function srv(xs: int[]) -> int {
+        ?{`UPDATE t SET x = 1`}.run() !{ _ :> { return 0; } };
+        const ys: int[] = xs.sort((a, b) => cnt(a) - cnt(b));
+        const zs: int[] = xs.filter(x => cnt(x) > 0);
+        return ys.length + zs.length;
+    }
+    function g() { @n = srv([1]) !{ _ :> 0 }; }
+    <main><button onclick=g()>x</button></main>
+</program>

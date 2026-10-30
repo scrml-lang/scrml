@@ -1,0 +1,5 @@
+<program>
+<xs:string[]=["a"]/>
+function rows() { for (const it of @xs) { lift <li>   lifted   ${it}   li</li>; } }
+<ul>${ rows() }</ul>
+</program>

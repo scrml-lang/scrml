@@ -1,0 +1,9 @@
+<program>
+    ${
+        lin token = "abc";
+    }
+    <main>
+        <p>Value is ${token}</p>
+        <p>Again ${token}</p>
+    </main>
+</program>

@@ -1,0 +1,5 @@
+<program>
+type Ph:enum = { A, B }
+let <s:Ph=.A/>
+<p if=(@s is .A)>yes</p>
+</program>

@@ -1,0 +1,7 @@
+<program>
+    type Phase:enum = { Idle, Done
+        transitions { .Idle => .Done }
+    }
+    let <s:Phase=.Idle/>
+    <p>hi</p>
+</program>

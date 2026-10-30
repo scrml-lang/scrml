@@ -1,0 +1,4 @@
+<program>
+<s:set[string]=[:]/>
+<p>${@s.size}</p>
+</program>

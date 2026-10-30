@@ -1,0 +1,6 @@
+<program>
+    type A:enum = { Small, Big }
+    type B:enum = { Small, Tiny }
+    function f() -> string { const x = .Small; return "a"; }
+    <p>${f()}</p>
+</program>

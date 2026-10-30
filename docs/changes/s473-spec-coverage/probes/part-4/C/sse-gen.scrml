@@ -1,0 +1,7 @@
+<program>
+    let <count:int=0/>
+    server function* countdown(from: int) {
+        yield from;
+    }
+    <main><p>${@count}</p></main>
+</program>

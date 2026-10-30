@@ -1,0 +1,4 @@
+<program>
+    <items:string[]=(["a","b"])/>
+    <ul>${ @items.lift(<li>x</li>); }</ul>
+</program>

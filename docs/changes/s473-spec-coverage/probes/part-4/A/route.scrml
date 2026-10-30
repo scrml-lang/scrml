@@ -1,0 +1,4 @@
+<program>
+function tab() -> string { return route.path; }
+<main><p>${tab()}</p></main>
+</program>

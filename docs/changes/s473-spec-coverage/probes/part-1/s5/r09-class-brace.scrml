@@ -1,0 +1,4 @@
+<program>
+let <act:bool=false/>
+<div class={@act ? "a" : "b"}>x</div>
+</program>

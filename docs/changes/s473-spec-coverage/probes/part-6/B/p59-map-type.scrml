@@ -1,0 +1,4 @@
+<program>
+<m:[string: int]=[:]/>
+<p>${@m.size}</p>
+</program>

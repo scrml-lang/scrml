@@ -1,0 +1,7 @@
+<program>
+type Ph:enum = { Idle, Serving(n: int) }
+let <p:Ph=(Ph.Idle)/>
+let <b:bool=false/>
+function f() { @b = @p == Ph.Serving(3); }
+<main><button onclick=f()>${@b}</button></main>
+</program>

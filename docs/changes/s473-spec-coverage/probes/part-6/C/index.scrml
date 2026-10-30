@@ -1,0 +1,10 @@
+<program>
+    <xs:int[free, append, write]=([1, 2, 3])/>
+    let <i:int=5/>
+    <s:string="héllo"/>
+    function f() -> int { return @xs[@i]; }
+    function g() -> int { const v = @xs.at(@i); if (v is given) { return v; } return 0; }
+    function h() -> string { return @s[1]; }
+    function w() { @xs[@i] = 9; }
+    <main><p>${f()} ${g()} ${h()}</p><button onclick=w()>w</button></main>
+</program>

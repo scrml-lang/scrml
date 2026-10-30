@@ -1,0 +1,4 @@
+<program>
+    <todos> = []
+    <main><p>${@todos.length}</p></main>
+</program>

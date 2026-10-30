@@ -1,0 +1,5 @@
+<program>
+    let <n:int=0/>
+    fn w() -> string { return window.location.href; }
+    <main><p>${@n}</p></main>
+</program>

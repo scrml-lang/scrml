@@ -1,0 +1,6 @@
+<program>
+    type C:enum = { Red, Green }
+    function use1(n: int) -> int { return n; }
+    function f(c: C) -> int { lin t = 5; return match c { .Red :> use1(t), .Green :> 2, }; }
+    <main><p>${f(.Red)}</p></main>
+</program>

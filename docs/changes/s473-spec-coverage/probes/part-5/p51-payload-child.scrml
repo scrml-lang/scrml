@@ -1,0 +1,8 @@
+<program>
+    type Phase:enum = { Idle, Done(rows: int) }
+    <phase:Phase=.Idle single>
+        <Idle rule=.Done : "i">
+        <Done rows rule=.Idle : "d">
+    </>
+    <main><p><*phase/></p></main>
+</program>

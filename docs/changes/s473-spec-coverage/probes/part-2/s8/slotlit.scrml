@@ -1,0 +1,6 @@
+<program db="./app.db">
+    type R:struct = { id: int }
+    function f(a: int) -> int { const rs: R[] = ?{`SELECT id FROM t WHERE n LIKE '%${a}%'`}.all() !{ _ :> [] }; return rs.length; }
+    function go() { const r: int = f(1) !{ .Transport(t) :> return }; }
+    <main><button onclick=go()>a</button></main>
+</program>

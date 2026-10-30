@@ -1,0 +1,4 @@
+<program>
+    let <c:int=0 persist="cookie" key="k"/>
+    <main><p>${@c}</p></main>
+</program>

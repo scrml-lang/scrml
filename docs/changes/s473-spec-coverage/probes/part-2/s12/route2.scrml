@@ -1,0 +1,10 @@
+<program>
+    <db src="./app.db">
+        type Row:struct = { id: int }
+    </db>
+    let <c:int=0/>
+    function readC() -> int { return @c; }
+    function srv() -> int { const r = ?{`SELECT 1 AS id`}.all() !{ _ :> [] }; return readC(); }
+    function go() { @c = srv(); }
+    <main><button onclick=go()>${@c}</button></main>
+</program>

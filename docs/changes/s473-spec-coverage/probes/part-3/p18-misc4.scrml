@@ -1,0 +1,5 @@
+<program>
+    type C:enum = { Red, Green }
+    function ms(a: C, b: C) -> int { return match (a, b) { (.Red, .Red) :> 1, (_, _) :> 2, }; }
+    <main><p>${ms(.Red, .Green)}</p></main>
+</program>

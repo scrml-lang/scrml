@@ -1,0 +1,5 @@
+<program>
+    type Ph:enum = { Idle, Done }
+    let <p:(.Idle to .Done)=.Idle/>
+    <p>${@p}</p>
+</program>

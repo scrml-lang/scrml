@@ -1,0 +1,6 @@
+<program>
+let <s:string=""/>
+let <n:int=0/>
+function f() { @n = @n + 1; }
+<input bind:value=@s oninput=f()/>
+</program>

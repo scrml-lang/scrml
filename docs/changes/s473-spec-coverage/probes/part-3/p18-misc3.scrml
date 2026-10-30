@@ -1,0 +1,5 @@
+<program>
+    type C:enum = { Red, Green }
+    function part(c: C) -> int { let r = 0; partial match c { .Red :> { r = 1; }, }; return r; }
+    <main><p>${part(.Red)}</p></main>
+</program>

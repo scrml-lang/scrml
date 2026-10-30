@@ -1,0 +1,6 @@
+<channel name="chat">
+    let <msgs:string[]=[]/>
+</channel>
+<program>
+    <main><p>hi</p></main>
+</program>

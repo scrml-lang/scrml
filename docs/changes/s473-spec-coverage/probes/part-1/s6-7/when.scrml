@@ -1,0 +1,5 @@
+<program>
+    let <n:int=0/>
+    function inc() { @n = @n + 1; }
+    <main>${ when @n changes { log(@n); } }<button onclick=inc()>x</button></main>
+</program>

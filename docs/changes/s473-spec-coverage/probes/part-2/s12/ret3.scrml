@@ -1,0 +1,8 @@
+<program>
+    <db src="./app.db">
+        type Row:struct = { id: int }
+    </db>
+    let <c:int=0/>
+    function srv(cb: (x: int) => int) -> int { const r = ?{`SELECT 1 AS id`}.all() !{ _ :> [] }; return 1; }
+    <main><p>${@c}</p></main>
+</program>

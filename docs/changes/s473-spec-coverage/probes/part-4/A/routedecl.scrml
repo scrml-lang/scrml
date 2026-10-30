@@ -1,0 +1,4 @@
+<program>
+let <route:int=0/>
+<main><p>${@route}</p></main>
+</program>

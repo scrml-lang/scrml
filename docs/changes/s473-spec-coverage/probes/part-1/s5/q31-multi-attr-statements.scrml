@@ -1,0 +1,5 @@
+<program>
+let <n:int=0/>
+function f() -> string { return "t"; }
+<div title=(f())>x</div>
+</program>

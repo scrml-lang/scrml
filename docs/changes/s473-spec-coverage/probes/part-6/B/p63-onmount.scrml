@@ -1,0 +1,5 @@
+<program>
+<n:int=0/>
+${ on mount { console.log("x"); } }
+<p>${@n}</p>
+</program>

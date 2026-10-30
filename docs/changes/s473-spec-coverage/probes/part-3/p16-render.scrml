@@ -1,0 +1,7 @@
+<program>
+    <card title:string/>
+    renders <div class="card"><h2>${title}</h2>${render header()}</div>
+    <main>
+        <card title="x"/>
+    </main>
+</program>

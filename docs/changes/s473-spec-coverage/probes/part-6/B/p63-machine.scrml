@@ -1,0 +1,7 @@
+<program>
+${ type P:enum = { A, B } }
+<machine for=P initial=.A>
+  <A/>
+  <B/>
+</machine>
+</program>

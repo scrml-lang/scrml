@@ -1,0 +1,7 @@
+<program>
+    type S:enum = { Draft, Sent, Gone }
+    <p:(.Draft to .Sent)=.Draft/>
+    function a() { @p = .Sent; }
+    function b() { @p = .Gone; }
+    <main><button onclick=a()>a</button><button onclick=b()>b</button></main>
+</program>

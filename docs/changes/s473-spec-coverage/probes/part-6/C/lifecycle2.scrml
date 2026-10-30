@@ -1,0 +1,5 @@
+<program>
+    type S:enum = { Draft, Sent }
+    type R:struct = { p: (.Draft to .Sent) }
+    <main><p>x</p></main>
+</program>

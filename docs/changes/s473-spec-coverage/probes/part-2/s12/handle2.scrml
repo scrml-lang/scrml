@@ -1,0 +1,10 @@
+<program>
+    <db src="./app.db">
+        type Row:struct = { id: int }
+    </db>
+    let <c:int=0/>
+    function handle(request: string, resolve: string) -> string { return "denied"; }
+    function srv() -> int { const r = ?{`SELECT 1 AS id`}.all() !{ _ :> [] }; return 1; }
+    function go() { @c = srv() !{ _ :> 0 }; }
+    <main><button onclick=go()>${@c}</button></main>
+</program>

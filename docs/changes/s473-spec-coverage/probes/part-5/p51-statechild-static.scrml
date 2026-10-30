@@ -1,0 +1,13 @@
+<program>
+    type Phase:enum = { Idle, Loading, Done }
+    <phase:Phase=.Idle single>
+        <Idle rule=.Loading>
+            <button onclick={ @phase = .Done; }>skip</button>
+        </>
+        <Loading rule=.Done : "Loading">
+        <Done rule=.Idle : "Done">
+    </>
+    <main>
+        <p><*phase/></p>
+    </main>
+</program>

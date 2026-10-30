@@ -1,0 +1,4 @@
+<program>
+function f() -> int { return 1; }
+<div title=f()>x</div>
+</program>

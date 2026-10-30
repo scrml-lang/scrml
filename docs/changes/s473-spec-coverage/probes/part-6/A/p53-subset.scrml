@@ -1,0 +1,5 @@
+<program>
+    type Role:enum = { Admin, Editor, Guest }
+    function f(r: Role oneOf([.Admin, .Editor])) -> int { return 1; }
+    <main><p>${f(.Guest)}</p></main>
+</program>

@@ -1,0 +1,5 @@
+<program>
+    type T:struct = { n: int }
+    function f() -> int { const g = (x: int) => x + 1; const xs = [g]; return 1; }
+    <p>${f()}</p>
+</program>

@@ -1,0 +1,5 @@
+<program>
+    <box title:string/>
+    renders <section><h2>${title}</h2><slot/></section>
+    <main><box title="T"><p>inner</p></box></main>
+</program>

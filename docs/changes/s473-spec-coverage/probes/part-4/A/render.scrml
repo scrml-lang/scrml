@@ -1,0 +1,6 @@
+<program>
+let <count:int=0/>
+function render(n: int) -> int { return n + 1; }
+function go() { @count = render(@count); }
+<main><button onclick=go()>${@count}</button></main>
+</program>

@@ -1,0 +1,5 @@
+<program>
+    let <out:int=0/>
+    pure function a() -> int { return 1; }
+    <p>${@out}</p>
+</program>

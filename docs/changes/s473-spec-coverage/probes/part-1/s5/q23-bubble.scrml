@@ -1,0 +1,6 @@
+<program>
+let <n:int=0/>
+function a() { @n = @n + 1; }
+function b() { @n = @n + 10; }
+<div onclick=b()><button onclick=a()>${@n}</button></div>
+</program>

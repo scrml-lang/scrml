@@ -1,0 +1,6 @@
+<program>
+<db src="x.db">
+  "hello db"
+  <p>in db</p>
+</db>
+</program>

@@ -1,0 +1,4 @@
+<program>
+    function g() -> int { return 1; }.idempotent()
+    <main><p>${g()}</p></main>
+</program>

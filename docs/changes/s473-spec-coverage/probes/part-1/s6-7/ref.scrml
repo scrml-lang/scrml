@@ -1,0 +1,4 @@
+<program>
+    let <el:asIs=not/>
+    <main><canvas ref=@el></canvas></main>
+</program>

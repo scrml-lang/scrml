@@ -1,0 +1,3 @@
+<program>
+<img srcset="/a.png 1x, javascript:alert(1) 2x">
+</program>

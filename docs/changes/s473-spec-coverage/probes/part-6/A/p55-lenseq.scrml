@@ -1,0 +1,4 @@
+<program>
+    let <xs:string[]=([]) length(>=1)/>
+    <main><p>${@xs.isValid}</p></main>
+</program>

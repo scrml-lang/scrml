@@ -1,0 +1,12 @@
+<program>
+    let <x:string="" req/>
+    let <show:bool=false/>
+    let <calls:int=0/>
+    function save() { @calls = @calls + 1; }
+    <main>
+        <form id="f" onsubmit=save()>
+            <input id="i" if=@show bind:value=@x/>
+            <button type="submit">s</button>
+        </form>
+    </main>
+</program>

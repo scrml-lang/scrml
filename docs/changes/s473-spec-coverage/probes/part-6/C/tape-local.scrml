@@ -1,0 +1,18 @@
+<program>
+    function one(n: int) -> int[] {
+        let out: int[free, append] = [];
+        out.append(n);
+        return out;
+    }
+    function bad(n: int) -> int {
+        let bare = [];
+        bare.append(n);
+        return 0;
+    }
+    function bad2(n: int) -> int {
+        let out: int[free, append] = [];
+        out = [];
+        return 0;
+    }
+    <main><p>${one(1).length} ${bad(2)} ${bad2(3)}</p></main>
+</program>

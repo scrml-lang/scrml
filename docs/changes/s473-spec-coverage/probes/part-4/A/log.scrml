@@ -1,0 +1,5 @@
+<program>
+let <count:int=0/>
+function go() { log("hi", @count); }
+<main><button onclick=go()>go</button></main>
+</program>
