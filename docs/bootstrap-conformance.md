@@ -11,26 +11,26 @@ Scope: **1813 of 1813 cases attempted** — every attempted case reached the pur
 
 | bucket | cases | share of attempted |
 |---|---:|---:|
-| PASS | 265 | 14.6% |
+| PASS | 267 | 14.7% |
 | CODES-ONLY | 0 | 0.0% |
-| FAIL | 40 | 2.2% |
+| FAIL | 39 | 2.2% |
 | LEGACY | 0 | 0.0% |
 | NOT-TWINNED | 685 | 37.8% |
-| UNSUPPORTED | 823 | 45.4% |
+| UNSUPPORTED | 822 | 45.3% |
 | CRASH | 0 | 0.0% |
 | INVALID | 0 | 0.0% |
 
-**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 305; of those, 265 hold (86.9%). Runtime half executed on the bootstrap for 100 case(s).
+**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 306; of those, 267 hold (87.3%). Runtime half executed on the bootstrap for 100 case(s).
 
-- **Vacuous** passes: 19 of 265 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **246**.
-- FAILs whose required code appears nowhere in the bootstrap's sources (check not implemented): 16 of 40; the other 24 are implemented checks that answered wrong.
+- **Vacuous** passes: 19 of 267 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **248**.
+- FAILs whose required code appears nowhere in the bootstrap's sources (check not implemented): 16 of 39; the other 23 are implemented checks that answered wrong.
 
 LEGACY by marker (a case may carry several): none.
-UNSUPPORTED by reason: bootstrap-unsupported 550 · parse-reject 273.
+UNSUPPORTED by reason: bootstrap-unsupported 547 · parse-reject 275.
 
 ### §66 twins (S449 dialect ruling 1 — generated at test time by the `scrml fix` §66 rules)
 
-Legacy-dialect cases graded on their generated §66 twin: **793** — PASS 163 · FAIL 32 · UNSUPPORTED 598. Twin holds 163 (non-vacuous 148). Every twin verdict above is included in the bucket table.
+Legacy-dialect cases graded on their generated §66 twin: **793** — PASS 164 · FAIL 31 · UNSUPPORTED 598. Twin holds 164 (non-vacuous 149). Every twin verdict above is included in the bucket table.
 - `dialect.s66` overrides: 0 replace a twin's expectations · 11 exclude a case.
 - Superseded-code mappings applied: 2 case(s) (E-ENGINE-VAR-DUPLICATE→E-SCOPE-010). Rows: E-ENGINE-VAR-DUPLICATE→E-SCOPE-010 [applied] · E-ENGINE-STATE-CHILD-INVALID-VARIANT→∅ [owed] · E-ENGINE-RULE-INVALID-VARIANT→∅ [owed] · E-ENGINE-INITIAL-INVALID-VARIANT→∅ [owed] · E-CELL-NO-RENDER-SPEC→∅ [owed] · E-CELL-RENDER-SPEC-NOT-BINDABLE→∅ [owed] · E-DECL-RHS-INTERP-WRAPPED→∅ [owed] · E-COMPONENT-010→∅ [owed].
 
@@ -107,7 +107,7 @@ NOT-TWINNED by reason (685 cases; a case counts once per distinct reason):
 | channel | 49 | · | · | · | · | 37 | 12 | · | · |
 | codegen | 4 | · | · | · | · | 3 | 1 | · | · |
 | components | 68 | 1 | · | · | · | 65 | 2 | · | · |
-| condition | 36 | 18 | · | 5 | · | 8 | 5 | · | · |
+| condition | 36 | 19 | · | 5 | · | 8 | 4 | · | · |
 | control-flow | 76 | 16 | · | 1 | · | 21 | 38 | · | · |
 | defer | 51 | 15 | · | 2 | · | 4 | 30 | · | · |
 | derived | 6 | · | · | · | · | 5 | 1 | · | · |
@@ -149,7 +149,7 @@ NOT-TWINNED by reason (685 cases; a case counts once per distinct reason):
 | print | 1 | · | · | · | · | · | 1 | · | · |
 | protect | 81 | · | · | · | · | 45 | 36 | · | · |
 | raw-content | 9 | 6 | · | · | · | 1 | 2 | · | · |
-| reactive | 115 | 28 | · | 4 | · | 65 | 18 | · | · |
+| reactive | 115 | 29 | · | 3 | · | 65 | 18 | · | · |
 | refinement | 57 | · | · | · | · | 25 | 32 | · | · |
 | route-region | 1 | · | · | · | · | 1 | · | · | · |
 | schema | 10 | · | · | · | · | · | 10 | · | · |
@@ -163,7 +163,7 @@ NOT-TWINNED by reason (685 cases; a case counts once per distinct reason):
 | tenant | 23 | · | · | · | · | · | 23 | · | · |
 | type-state-codes | 32 | 3 | · | 1 | · | 3 | 25 | · | · |
 
-### FAIL (40)
+### FAIL (39)
 
 - `condition/unresolved-call-markup-neg` (codes)
   - missing E-COND-NOT-BOOLEAN
@@ -237,9 +237,6 @@ NOT-TWINNED by reason (685 cases; a case counts once per distinct reason):
 - `reactive/dg-002-no-readers-pos` (twin · codes; not in the bootstrap: E-DG-002)
   - missing E-DG-002
   - severity: E-DG-002 did not fire (expected warning)
-- `reactive/name-collides-state-pos` (twin · codes)
-  - missing E-NAME-COLLIDES-STATE
-  - severity: E-NAME-COLLIDES-STATE did not fire (expected error)
 - `reactive/reset-reserved-identifier` (twin · codes; not in the bootstrap: E-RESERVED-IDENTIFIER)
   - missing E-RESERVED-IDENTIFIER
   - severity: E-RESERVED-IDENTIFIER did not fire (expected error)
@@ -272,7 +269,7 @@ none
 
 none
 
-### PASS / CODES-ONLY (265)
+### PASS / CODES-ONLY (267)
 
 - `attr-executable-sink/bound-svg-animation-runtime-guard` — PASS · TWIN
 - `attr-executable-sink/bound-url-runtime-guard` — PASS · TWIN
@@ -322,6 +319,7 @@ none
 - `condition/unresolved-explicit-fix-pos` — PASS (also emitted, unasserted: E-TYPE-001)
 - `condition/unresolved-operand-outside-condition-pos` — PASS (also emitted, unasserted: E-TYPE-001)
 - `condition/unresolved-sql-row-neg` — PASS
+- `condition/unresolved-unannotated-param-neg` — PASS (also emitted, unasserted: E-PARAM-TYPE-REQUIRED)
 - `control-flow/ctrl-001-orphan-else-pos` — PASS · TWIN
 - `control-flow/ctrl-001-orphan-else-program-pos` — PASS
 - `control-flow/ctrl-002-orphan-else-if-pos` — PASS · TWIN
@@ -505,6 +503,7 @@ none
 - `reactive/if-wiring-bearing-subtree-mounts` — PASS · TWIN
 - `reactive/multi-cell-interp` — PASS · TWIN
 - `reactive/name-collides-state-neg` — PASS · TWIN
+- `reactive/name-collides-state-pos` — PASS · TWIN
 - `reactive/no-write-attr-neg` — PASS
 - `reactive/no-write-attr-pos` — PASS
 - `reactive/no-write-derived-neg` — PASS
@@ -540,7 +539,7 @@ none
 - `type-state-codes/e-type-081-partial-match-render-neg` — PASS · TWIN · VACUOUS
 - `type-state-codes/e-type-lifecycle-on-engine-cell-neg` — PASS · TWIN · VACUOUS
 
-### UNSUPPORTED (823)
+### UNSUPPORTED (822)
 
 - `api/api-base-missing-neg` — bootstrap-unsupported: `<api>` is a scrml structural element (§60), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `api/api-clean-pos` — twin · bootstrap-unsupported: `<api>` is a scrml structural element (§60), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
@@ -664,7 +663,6 @@ none
 - `condition/given-presence-deprecated-arm` — twin · parse-reject: E-PARSE-ARM: expected an arm pattern (`.Variant`, `.Variant(a, b)`, `not`, a literal, `_` or `else`), found `given`
 - `condition/known-int-while-neg` — parse-reject: E-LOOP-WHILE-RETIRED: `while` is not a scrml loop — write `for (cond) { … }`: a `for` with a condition head runs while the condition is true (§49.1, §49.4.1)
 - `condition/presence-bare-optional-while-pos` — parse-reject: E-LOOP-WHILE-RETIRED: `while` is not a scrml loop — write `for (cond) { … }`: a `for` with a condition head runs while the condition is true (§49.1, §49.4.1)
-- `condition/unresolved-unannotated-param-neg` — bootstrap-unsupported: an unannotated parameter `a` — bootstrap slice M2 needs `a: Type` (Core parameters are typed)
 - `control-flow/ctrl-001-orphan-else-neg` — parse-reject: E-PARSE-TAG: unexpected `{` in the tag `<session`
 - `control-flow/ctrl-002-orphan-else-if-neg` — parse-reject: E-PARSE-TAG: unexpected `{` in the tag `<wizard`
 - `control-flow/ctrl-003-extend-past-else-neg` — parse-reject: E-PARSE-TAG: unexpected `{` in the tag `<session`
@@ -732,7 +730,7 @@ none
 - `defer/tilde-across-defer` — twin · parse-reject: E-PARSE-EXPR: expected an expression, found `~`
 - `defer/unbraced-arm-neg` — twin · parse-reject: E-PARSE-EXPECTED: a `for` body is a block — expected `{`, found `defer` (§49.2.1 `loop-body ::= '{' loop-statement* '}'`)
 - `defer/unsupported-site-neg` — twin · parse-reject: E-PARSE-EXPECTED: expected `:`, found `D`
-- `defer/yield-in-defer-neg` — twin · bootstrap-unsupported: an unannotated parameter `gen` — bootstrap slice M2 needs `gen: Type` (Core parameters are typed)
+- `defer/yield-in-defer-neg` — twin · bootstrap-unsupported: a parameter the bootstrap cannot read (a default value `b: int = 1` or a rest parameter `...xs: T[]` is not in the bootstrap) — write a plain `name: Type` parameter
 - `derived/e-derived-server-only-reach-fn-path` — twin · bootstrap-unsupported: `scrml:auth` is a server-only stdlib module (§12.2 Trigger 3: its implementation reaches a host API no browser has, or it handles a credential). Calling one of its bindings SHALL place the calling fun
 - `element-refusal/fn-return-script-pos` — twin · parse-reject: E-PARSE-EXPR: expected an expression, found `<`
 - `element-refusal/handler-arrow-markup-script-pos` — bootstrap-unsupported: an arrow function is in the bootstrap only as the argument of `.filter(…)` / `.map(…)` on a sequence
@@ -811,7 +809,7 @@ none
 - `error/construct-variant-payload-arity-trailing-comma-ok` — twin · bootstrap-unsupported: a `let` at the top level of a logic block — §7.6 admits a file-scope `let`, but it is module-level mutable state, and where that state lives (the client, the server, or both; once per process or per r
 - `error/error-008-message-pos` — twin · parse-reject: E-PARSE-TYPE: expected `:enum` or `:struct`, found `:error`
 - `error/error-008-neg` — twin · parse-reject: E-PARSE-TYPE: expected `:enum` or `:struct`, found `:error`
-- `error/failable-fn-value-passed-handled-neg` — twin · bootstrap-unsupported: an unannotated parameter `f` — bootstrap slice M2 needs `f: Type` (Core parameters are typed)
+- `error/failable-fn-value-passed-handled-neg` — twin · bootstrap-unsupported: only a declared scrml function is callable in the bootstrap — `f` names a value (a local, a parameter, a field), and calling a function VALUE is not in the bootstrap
 - `error/failable-handler-lift` — twin · parse-reject: E-STMT-MISSING-SEMICOLON: Expected `;` to end the statement — insert `;` after `}`. A `;` ends every statement that is not block-like, the last one before a `}` included (`{ @n = @n + 1; }`); a newlin
 - `error/failable-handler-lift-success` — twin · parse-reject: E-STMT-MISSING-SEMICOLON: Expected `;` to end the statement — insert `;` after `}`. A `;` ends every statement that is not block-like, the last one before a `}` included (`{ @n = @n + 1; }`); a newlin
 - `error/failable-handler-lift-timeout` — twin · parse-reject: E-STMT-MISSING-SEMICOLON: Expected `;` to end the statement — insert `;` after `}`. A `;` ends every statement that is not block-like, the last one before a `}` included (`{ @n = @n + 1; }`); a newlin
@@ -1070,8 +1068,8 @@ none
 - `meta/meta-reflect-outside-block-neg` — twin · bootstrap-unsupported: the initializer of the file-scope constant `info` holds a call — the bootstrap builds a file-scope `const` whose value is fixed at compile time: literals, unit enum variants, other constants, a member
 - `meta/meta-reflect-unknown-type-neg` — twin · parse-reject: E-PARSE-ITEM: unexpected text at program level
 - `meta/meta-sql-in-runtime-block-neg` — twin · parse-reject: E-PARSE-ITEM: unexpected text at program level
-- `middleware/duplicate-handle-neg` — twin · bootstrap-unsupported: an unannotated parameter `request` — bootstrap slice M2 needs `request: Type` (Core parameters are typed)
-- `middleware/duplicate-handle-pos` — twin · bootstrap-unsupported: an unannotated parameter `request` — bootstrap slice M2 needs `request: Type` (Core parameters are typed)
+- `middleware/duplicate-handle-neg` — twin · bootstrap-unsupported: only a declared scrml function is callable in the bootstrap — `resolve` names a value (a local, a parameter, a field), and calling a function VALUE is not in the bootstrap
+- `middleware/duplicate-handle-pos` — twin · bootstrap-unsupported: only a declared scrml function is callable in the bootstrap — `resolve` names a value (a local, a parameter, a field), and calling a function VALUE is not in the bootstrap
 - `middleware/ratelimit-invalid-unit-neg` — bootstrap-unsupported: `<program ratelimit="100/min">` is not in the bootstrap — it emits no request pipeline (§40.2), so the limit would be dropped
 - `module/e-export-001-export-const-clean` — twin · parse-reject: E-STMT-MISSING-SEMICOLON: Expected `;` to end the statement — insert `;` after `$`. A `;` ends every statement that is not block-like, the last one before a `}` included (`{ @n = @n + 1; }`); a newlin
 - `module/e-export-001-export-state-cell-reject` — twin · parse-reject: E-PARSE-ITEM: expected `import`, `type`, `const`, `function` or `fn` in a logic block, found `{` (other statements at logic-block level are not in the bootstrap)
@@ -1177,36 +1175,36 @@ none
 - `reactive/write-not-in-logic-context-pos` — twin · parse-reject: E-PARSE-ITEM: unexpected text at program level
 - `refinement/array-literal-element-pos` — twin · bootstrap-unsupported: `<links>` has an own value (or an own type) AND attributes — what `@links` then names is ⚑ O19 (not ruled); the bootstrap does not decide it
 - `refinement/base-type-literal-pos` — twin · parse-reject: E-PARSE-TAG: unexpected `(` in the tag `<count`
-- `refinement/base-type-reject-rt` — twin · bootstrap-unsupported: an unannotated parameter `` — bootstrap slice M2 needs `: Type` (Core parameters are typed)
+- `refinement/base-type-reject-rt` — twin · bootstrap-unsupported: a parameter the bootstrap cannot read (a default value `b: int = 1` or a rest parameter `...xs: T[]` is not in the bootstrap) — write a plain `name: Type` parameter
 - `refinement/block-arrow-refined-local-pos` — twin · bootstrap-unsupported: an arrow function with a braced body is not in the bootstrap — write an expression body
-- `refinement/boundary-reject-rt` — twin · bootstrap-unsupported: an unannotated parameter `` — bootstrap slice M2 needs `: Type` (Core parameters are typed)
+- `refinement/boundary-reject-rt` — twin · bootstrap-unsupported: a parameter the bootstrap cannot read (a default value `b: int = 1` or a rest parameter `...xs: T[]` is not in the bootstrap) — write a plain `name: Type` parameter
 - `refinement/const-reject-rt` — twin · parse-reject: E-PARSE-EXPECTED: expected `=`, found `(`
-- `refinement/enum-subset-param-accept-neg` — twin · bootstrap-unsupported: an unannotated parameter `oneOf` — bootstrap slice M2 needs `oneOf: Type` (Core parameters are typed)
-- `refinement/enum-subset-param-reject-rt` — twin · bootstrap-unsupported: an unannotated parameter `oneOf` — bootstrap slice M2 needs `oneOf: Type` (Core parameters are typed)
+- `refinement/enum-subset-param-accept-neg` — twin · bootstrap-unsupported: a parameter the bootstrap cannot read (a default value `b: int = 1` or a rest parameter `...xs: T[]` is not in the bootstrap) — write a plain `name: Type` parameter
+- `refinement/enum-subset-param-reject-rt` — twin · bootstrap-unsupported: a parameter the bootstrap cannot read (a default value `b: int = 1` or a rest parameter `...xs: T[]` is not in the bootstrap) — write a plain `name: Type` parameter
 - `refinement/external-ref-pos` — twin · parse-reject: E-PARSE-TAG: unexpected `(` in the tag `<hp`
-- `refinement/inhabit-rt` — twin · bootstrap-unsupported: an unannotated parameter `` — bootstrap slice M2 needs `: Type` (Core parameters are typed)
-- `refinement/literal-call-arg-neg` — twin · bootstrap-unsupported: an unannotated parameter `` — bootstrap slice M2 needs `: Type` (Core parameters are typed)
-- `refinement/literal-call-arg-pos` — twin · bootstrap-unsupported: an unannotated parameter `` — bootstrap slice M2 needs `: Type` (Core parameters are typed)
+- `refinement/inhabit-rt` — twin · bootstrap-unsupported: a parameter the bootstrap cannot read (a default value `b: int = 1` or a rest parameter `...xs: T[]` is not in the bootstrap) — write a plain `name: Type` parameter
+- `refinement/literal-call-arg-neg` — twin · bootstrap-unsupported: a parameter the bootstrap cannot read (a default value `b: int = 1` or a rest parameter `...xs: T[]` is not in the bootstrap) — write a plain `name: Type` parameter
+- `refinement/literal-call-arg-pos` — twin · bootstrap-unsupported: a parameter the bootstrap cannot read (a default value `b: int = 1` or a rest parameter `...xs: T[]` is not in the bootstrap) — write a plain `name: Type` parameter
 - `refinement/literal-violation-pos` — twin · parse-reject: E-PARSE-TAG: unexpected `(` in the tag `<amount`
 - `refinement/local-write-forms-reject-rt` — twin · bootstrap-unsupported: `--` is not in bootstrap slice M2 — write `x = x - 1`
-- `refinement/malformed-predicate-param-pos` — twin · bootstrap-unsupported: an unannotated parameter `` — bootstrap slice M2 needs `: Type` (Core parameters are typed)
+- `refinement/malformed-predicate-param-pos` — twin · bootstrap-unsupported: a parameter the bootstrap cannot read (a default value `b: int = 1` or a rest parameter `...xs: T[]` is not in the bootstrap) — write a plain `name: Type` parameter
 - `refinement/nested-fn-param-reject-rt` — twin · parse-reject: E-STMT-MISSING-SEMICOLON: Expected `;` to end the statement — insert `;` after `function`. A `;` ends every statement that is not block-like, the last one before a `}` included (`{ @n = @n + 1; }`); a
 - `refinement/reassign-cell-accept-neg` — twin · bootstrap-unsupported: `<link>` has an own value (or an own type) AND attributes — what `@link` then names is ⚑ O19 (not ruled); the bootstrap does not decide it
 - `refinement/reassign-cell-reject-rt` — twin · bootstrap-unsupported: `<link>` has an own value (or an own type) AND attributes — what `@link` then names is ⚑ O19 (not ruled); the bootstrap does not decide it
 - `refinement/reassign-literal-pos` — twin · bootstrap-unsupported: `<link>` has an own value (or an own type) AND attributes — what `@link` then names is ⚑ O19 (not ruled); the bootstrap does not decide it
-- `refinement/sharedcore-inparen-reject-rt` — twin · bootstrap-unsupported: an unannotated parameter `` — bootstrap slice M2 needs `: Type` (Core parameters are typed)
-- `refinement/string-operand-reject-rt` — twin · bootstrap-unsupported: an unannotated parameter `` — bootstrap slice M2 needs `: Type` (Core parameters are typed)
-- `refinement/string-shape-inhabit-rt` — twin · bootstrap-unsupported: an unannotated parameter `` — bootstrap slice M2 needs `: Type` (Core parameters are typed)
+- `refinement/sharedcore-inparen-reject-rt` — twin · bootstrap-unsupported: a parameter the bootstrap cannot read (a default value `b: int = 1` or a rest parameter `...xs: T[]` is not in the bootstrap) — write a plain `name: Type` parameter
+- `refinement/string-operand-reject-rt` — twin · bootstrap-unsupported: a parameter the bootstrap cannot read (a default value `b: int = 1` or a rest parameter `...xs: T[]` is not in the bootstrap) — write a plain `name: Type` parameter
+- `refinement/string-shape-inhabit-rt` — twin · bootstrap-unsupported: a parameter the bootstrap cannot read (a default value `b: int = 1` or a rest parameter `...xs: T[]` is not in the bootstrap) — write a plain `name: Type` parameter
 - `refinement/string-shape-literal-violation-pos` — twin · parse-reject: E-PARSE-TAG: unexpected `(` in the tag `<email`
 - `refinement/struct-field-literal-pos` — twin · bootstrap-unsupported: member access `.href` on a value that is not a struct or an instance is not in bootstrap slice M2
 - `refinement/struct-field-reject-rt` — twin · parse-reject: E-PARSE-TYPE: expected a field name, found `(`
 - `refinement/tail-after-predicate-pos` — twin · parse-reject: E-PARSE-EXPECTED: expected `=`, found `(`
-- `refinement/union-member-reject-rt` — twin · bootstrap-unsupported: an unannotated parameter `` — bootstrap slice M2 needs `: Type` (Core parameters are typed)
-- `refinement/union-nonprimitive-member-reject-rt` — twin · bootstrap-unsupported: an unannotated parameter `` — bootstrap slice M2 needs `: Type` (Core parameters are typed)
+- `refinement/union-member-reject-rt` — twin · bootstrap-unsupported: a parameter the bootstrap cannot read (a default value `b: int = 1` or a rest parameter `...xs: T[]` is not in the bootstrap) — write a plain `name: Type` parameter
+- `refinement/union-nonprimitive-member-reject-rt` — twin · bootstrap-unsupported: a parameter the bootstrap cannot read (a default value `b: int = 1` or a rest parameter `...xs: T[]` is not in the bootstrap) — write a plain `name: Type` parameter
 - `refinement/unknown-shape-boundary-pos` — twin · parse-reject: E-PARSE-EXPECTED: expected `=`, found `(`
 - `refinement/unknown-shape-pos` — twin · parse-reject: E-PARSE-TAG: unexpected `(` in the tag `<s`
 - `refinement/url-executable-scheme-literal-pos` — twin · bootstrap-unsupported: `<link>` has an own value (or an own type) AND attributes — what `@link` then names is ⚑ O19 (not ruled); the bootstrap does not decide it
-- `refinement/url-executable-scheme-reject-rt` — twin · bootstrap-unsupported: an unannotated parameter `` — bootstrap slice M2 needs `: Type` (Core parameters are typed)
+- `refinement/url-executable-scheme-reject-rt` — twin · bootstrap-unsupported: a parameter the bootstrap cannot read (a default value `b: int = 1` or a rest parameter `...xs: T[]` is not in the bootstrap) — write a plain `name: Type` parameter
 - `schema-for/error-invalid-call-context` — twin · bootstrap-unsupported: `scrml:data` — the bootstrap cannot import this stdlib module: the build supplied no source for it that the bootstrap compiles, so none of its names are imported (§41.5)
 - `schema-for/error-nested-struct-no-fk` — twin · bootstrap-unsupported: `scrml:data` — the bootstrap cannot import this stdlib module: the build supplied no source for it that the bootstrap compiles, so none of its names are imported (§41.5)
 - `schema-for/error-no-sql-mapping` — twin · bootstrap-unsupported: `scrml:data` — the bootstrap cannot import this stdlib module: the build supplied no source for it that the bootstrap compiles, so none of its names are imported (§41.5)
@@ -1233,7 +1231,7 @@ none
 - `schema/schema-015-disagree-neg` — bootstrap-unsupported: `<schema>` is a scrml structural element (§39.2), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `schema/w-schema-001-warn` — bootstrap-unsupported: `<schema>` is a scrml structural element (§39.2), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `server-db/async-call-then-in-handler-neg` — twin · parse-reject: E-PARSE-TRAILING: unexpected `{` after the expression
-- `server-db/async-fn-escapes-as-value-handler-neg` — twin · bootstrap-unsupported: an unannotated parameter `f` — bootstrap slice M2 needs `f: Type` (Core parameters are typed)
+- `server-db/async-fn-escapes-as-value-handler-neg` — twin · parse-reject: E-PARSE-TRAILING: unexpected `{` after the expression
 - `server-db/async-fn-escapes-handler-destructured-scheduler-neg` — twin · parse-reject: E-PARSE-TRAILING: unexpected `{` after the expression
 - `server-db/async-fn-escapes-scheduler-s09-monkeypatch-neg` — twin · parse-reject: E-PARSE-ITEM: expected `import`, `type`, `const`, `function` or `fn` in a logic block, found `globalThis` (other statements at logic-block level are not in the bootstrap)
 - `server-db/async-fn-escapes-scheduler-s15-window-patch-neg` — twin · bootstrap-unsupported: an arrow function is in the bootstrap only as the argument of `.filter(…)` / `.map(…)` on a sequence
@@ -1256,19 +1254,19 @@ none
 - `server-db/event-after-await-e22-returnValue-neg` — twin · parse-reject: E-PARSE-TRAILING: unexpected `{` after the expression
 - `server-db/event-after-await-e23-cancelBubble-neg` — twin · parse-reject: E-PARSE-TRAILING: unexpected `{` after the expression
 - `server-db/event-after-await-e25-before-ok-pos` — twin · parse-reject: E-PARSE-TRAILING: unexpected `{` after the expression
-- `server-db/event-after-await-h03-helper-after-await-neg` — twin · bootstrap-unsupported: an unannotated parameter `e` — bootstrap slice M2 needs `e: Type` (Core parameters are typed)
+- `server-db/event-after-await-h03-helper-after-await-neg` — twin · bootstrap-unsupported: `.preventDefault(…)` is not in the bootstrap — only calls of a named function, `Date.now()`, `.filter(x => …)` / `.map(x => …)` / `.sort(…)` / `.reverse()` / `.join(sep)` on a tape, and the string met
 - `server-db/event-after-await-h08-n3-inner-pos` — twin · parse-reject: E-PARSE-TRAILING: unexpected `{` after the expression
 - `server-db/event-control-after-await-alias-neg` — twin · parse-reject: E-PARSE-TRAILING: unexpected `{` after the expression
 - `server-db/event-control-after-await-bracket-neg` — twin · parse-reject: E-PARSE-TRAILING: unexpected `{` after the expression
 - `server-db/event-control-after-await-closure-neg` — twin · parse-reject: E-PARSE-TRAILING: unexpected `{` after the expression
 - `server-db/event-control-after-await-neg` — twin · parse-reject: E-PARSE-TRAILING: unexpected `{` after the expression
-- `server-db/first-class-fn-ref-server-helper-rt` — twin · bootstrap-unsupported: an unannotated parameter `rows` — bootstrap slice M2 needs `rows: Type` (Core parameters are typed)
+- `server-db/first-class-fn-ref-server-helper-rt` — twin · bootstrap-unsupported: `sumAmounts` names a function without calling it (an alias, a returned, passed or stored function) — function values arrive with a later "function values" slice; call it directly: `sumAmounts(…)`
 - `server-db/inline-handler-server-call-condition-runtime` — twin · parse-reject: E-PARSE-TRAILING: unexpected `{` after the expression
 - `server-db/inline-handler-server-call-sort-neg` — twin · bootstrap-unsupported: an array spread `...` is in the bootstrap only as a recognized edit shape (`@x = [...@x, e]`, §66.11.2) — Core has no spread value
 - `server-db/nested-helper-server-fn-some-runtime` — twin · bootstrap-unsupported: `.some(…)` is not in the bootstrap — only calls of a named function, `Date.now()`, `.filter(x => …)` / `.map(x => …)` / `.sort(…)` / `.reverse()` / `.join(sep)` on a tape, and the string methods `toUp
 - `server-db/nested-helper-server-fn-sort-neg` — bootstrap-unsupported: `.sort(…)` on a value whose type the compiler cannot resolve — give it a tape type
 - `server-db/nested-helper-sibling-block-let-some-runtime` — twin · bootstrap-unsupported: `.some(…)` is not in the bootstrap — only calls of a named function, `Date.now()`, `.filter(x => …)` / `.map(x => …)` / `.sort(…)` / `.reverse()` / `.join(sep)` on a tape, and the string methods `toUp
-- `server-db/on-mount-server-call-some-runtime` — twin · bootstrap-unsupported: an unannotated parameter `x` — bootstrap slice M2 needs `x: Type` (Core parameters are typed)
+- `server-db/on-mount-server-call-some-runtime` — twin · parse-reject: E-STMT-MISSING-SEMICOLON: Expected `;` to end the statement — insert `;` after `100`. A `;` ends every statement that is not block-like, the last one before a `}` included (`{ @n = @n + 1; }`); a newl
 - `server-db/reserved-prefix-raw-driver-neg` — bootstrap-unsupported: `<db tables=…>` generates a type per table from the schema (§14.8.4), which is not in the bootstrap — it would be ignored
 - `server-db/reserved-prefix-raw-driver-pos` — bootstrap-unsupported: `<db tables=…>` generates a type per table from the schema (§14.8.4), which is not in the bootstrap — it would be ignored
 - `server-db/server-fn-writes-reactive-cell-neg` — twin · bootstrap-unsupported: `<schema>` is a scrml structural element (§39.2), not an HTML element (§4.15, §24.4) — it is not in the bootstrap

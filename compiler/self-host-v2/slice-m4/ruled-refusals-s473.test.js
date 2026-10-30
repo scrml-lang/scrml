@@ -198,7 +198,7 @@ describe("5 — §26.2 (D13): I-TAILWIND-NOT-BUILT, once per compile", () => {
 // ---------------------------------------------------------------------------
 describe("6 — §7.6 (D14): a function-body local named like a cell is E-NAME-COLLIDES-STATE", () => {
   const P = (body) => `<program>\n    <count:int=0/>\n    function f() -> int {\n${body}    }\n    <main><p>\${@count}</p></main>\n</program>\n`;
-  test("let / const / lin, at the top of the body and nested", () => {
+  test("let / const, at the top of the body and nested", () => {
     for (const body of ["        let count = 5;\n        return count;\n", "        const count: int = 5;\n        return count;\n",
       "        if (true) {\n            let count = 2;\n            return count;\n        }\n        return 0;\n"]) {
       const e = errs(P(body));
