@@ -52,6 +52,7 @@ ${
              AProgram, AItem, AItemK, AConst, FileAst, ADbFn, Diag, ASql, ASqlMode,
              AHow, AHandled, AArm, APat, ABind, AArmBody, AFail, AFor, AForHead, AIterSrc, AForBound, ALift, ACss, AForeign, mkSpan, newDiag, stdlibPathPrefix } from "./ast.scrml"
     import { CssErr, CssParsed, parseCssBlock } from "./css-syntax.scrml"
+    import { logicWriteSink, executableAttrName } from "./url.scrml"
 
     // =========================================================================
     // Tokens, as the parser sees them: one TOTAL classification of TokenKind
@@ -343,6 +344,73 @@ ${
         return tk(t, "+") || tk(t, "-") || tk(t, "*") || tk(t, "/") || tk(t, "%")
     }
 
+    // s473 — the sink member a compound assignment's target writes ("" — none):
+    // `x.innerHTML += …`, `x["onclick"] += …` (url.scrml logicWriteSink).
+    fn compoundSinkMember(t: AExpr) -> string {
+        const k: AExprK = t.k
+        const name: string = match k {
+            .Member(obj: o, name: n) :> n
+            .Index(obj: o, idx: ix) :> strLitText(ix)
+            .Name(name: n) :> ""
+            .At(name: n) :> ""
+            .AtItem :> ""
+            .Num(raw: r) :> ""
+            .Str(v: x) :> ""
+            .Bool(v: b) :> ""
+            .NotLit :> ""
+            .Recovered :> ""
+            .Variant(name: n) :> ""
+            .Call(callee: c) :> ""
+            .Unary(op: o) :> ""
+            .Binary(op: o) :> ""
+            .Ternary(test: x) :> ""
+            .Assign(target: x) :> ""
+            .ArrayLit(elems: es) :> ""
+            .ObjectLit(props: ps) :> ""
+            .Spread(e: x) :> ""
+            .Lambda(params: ps) :> ""
+            .Sql(q: q) :> ""
+            .Handled(h: x) :> ""
+            .Template(quasis: qs) :> ""
+            .Foreign(f: fb0) :> ""
+        }
+        // by name only (the type-judged kinds — `on…`, a navigation — are left to the
+        // unsupported-form refusal below: the parser sees no types)
+        const kind: string = logicWriteSink(name)
+        if (name != "" && (kind == "html" || kind == "exec")) return name
+        return ""
+    }
+
+    fn strLitText(e: AExpr) -> string {
+        const k: AExprK = e.k
+        return match k {
+            .Str(v: x) :> x
+            .Name(name: n) :> ""
+            .At(name: n) :> ""
+            .AtItem :> ""
+            .Num(raw: r) :> ""
+            .Bool(v: b) :> ""
+            .NotLit :> ""
+            .Recovered :> ""
+            .Variant(name: n) :> ""
+            .Member(obj: o) :> ""
+            .Call(callee: c) :> ""
+            .Unary(op: o) :> ""
+            .Binary(op: o) :> ""
+            .Ternary(test: x) :> ""
+            .Assign(target: x) :> ""
+            .ArrayLit(elems: es) :> ""
+            .ObjectLit(props: ps) :> ""
+            .Spread(e: x) :> ""
+            .Index(obj: o) :> ""
+            .Lambda(params: ps) :> ""
+            .Sql(q: q) :> ""
+            .Handled(h: x) :> ""
+            .Template(quasis: qs) :> ""
+            .Foreign(f: fb0) :> ""
+        }
+    }
+
     export fn parseAssign(tp: TP) -> RExpr {
         const start: int = cur(tp).start
         const lhs: RExpr = parseTernary(tp)
@@ -352,6 +420,15 @@ ${
         }
         if (isCompoundAssign(lhs.tp)) {
             const op: PTok = cur(lhs.tp)
+            // s473 — §5.2 "Executable sinks in plain logic (S473)": a compound write
+            // of a sink member (`el.innerHTML += s`) is refused as the sink it is
+            // (its value is never a static literal), not only as an unsupported form
+            const sinkName: string = compoundSinkMember(lhs.e)
+            if (sinkName != "") {
+                const ds: TP = diagAt(lhs.tp, "E-LOGIC-EXECUTABLE-SINK", "`… ." + sinkName + " " + op.text + "= …` writes `" + sinkName + "` from data — `" + sinkName + "` is an executable sink: the browser parses or runs what is written there, script included, without scrml checking it, and data is never written into it (§5.2, S473). Render the content as markup, or write plain text with `textContent`.", op)
+                const rhs3: RExpr = parseAssign(adv(adv(ds)))
+                return mkE(rhs3.tp, start, AExprK.Recovered)
+            }
             const d: TP = diagAt(lhs.tp, "E-BOOTSTRAP-UNSUPPORTED", "compound assignment `" + op.text + "=` is not in bootstrap slice M2 — write `x = x " + op.text + " …`", op)
             const rhs2: RExpr = parseAssign(adv(adv(d)))
             // reported above; recovered as a placeholder, never typed as `x = v`
@@ -4835,11 +4912,10 @@ ${
     // error (E-ATTR-INTERP-EXECUTABLE)". The bootstrap refuses every other
     // quoted `${…}` too (no reactive templates, above); a scheme-led URL
     // attribute stays that refusal (its judgment reads the literal scheme).
+    // s473: the test is url.scrml's `executableAttrName` (§5.2 rule 1's name test
+    // plus `srcdoc`) — one table, shared with the plain-logic sink judgment.
     fn executableByName(name: string) -> boolean {
-        const lower: string = name.toLowerCase()
-        if (lower == "srcdoc") return true
-        if (lower.length <= 2 || lower.substring(0, 2) != "on") return false
-        return lower != "one" && lower != "online" && lower != "onboarding"
+        return executableAttrName(name)
     }
 
     fn executableInterpDiag(mp: MP, name: string, tag: string, sp: ASpan) -> MP {

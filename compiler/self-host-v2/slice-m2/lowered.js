@@ -132,6 +132,25 @@ function stdlibFile(root, rel) {
  * name that is not a stdlib name, or a module with no file under `root` is not
  * supplied — so its import resolves to nothing and analyze refuses it by name.
  */
+/**
+ * s473 (#1658 review F2) — the import specifiers (`from`) of one file, in source order, read by
+ * the bootstrap parser (parse.scrml `parseFile` + link.scrml `importsOfItems`). The result depends
+ * on `src` alone (`path` reaches only diagnostic spans), so it is memoised by the text: a driver
+ * that shares one reader between its own import closure and the front end parses each file for its
+ * imports once. One reader per compile — the memo holds every text it was given.
+ */
+export function importFroms(mods) {
+  const memo = new Map(); // src → string[]
+  return (path, src) => {
+    let r = memo.get(src);
+    if (r === undefined) {
+      r = mods.link.importsOfItems(mods.parse.parseFile(path, src, 0).ast.items).map((imp) => String(imp.from));
+      memo.set(src, r);
+    }
+    return r;
+  };
+}
+
 export function stdlibSources(mods, files, opts = {}) {
   const root = opts.stdlibRoot ?? STDLIB_ROOT;
   const exclude = opts.exclude ?? new Set();
@@ -139,11 +158,13 @@ export function stdlibSources(mods, files, opts = {}) {
   const byPath = new Map(); // stdlib path → { path, src, abs }
   const modules = new Map(); // module name → Set<stdlib path>
   // the stdlib paths `file` imports (a module name per `scrml:` import; a relative one inside the prefix)
+  // s473 (#1658 review F2): `opts.importFroms` — a driver's own memoised reader of a file's import
+  // specifiers (scripts/scrml-boot.ts importReader), so a file the driver already parsed to follow
+  // its imports is not parsed again here. Default: the bootstrap parser, as below.
+  const fromsOf = opts.importFroms ?? importFroms(mods);
   const importsOf = (path, src) => {
-    const ast = mods.parse.parseFile(path, src, 0).ast;
     const out = [];
-    for (const imp of mods.link.importsOfItems(ast.items)) {
-      const from = String(imp.from);
+    for (const from of fromsOf(path, src)) {
       if (from.startsWith(prefix)) {
         const name = from.slice(prefix.length);
         if (!STDLIB_NAME.test(name) || deferredStdlib(name) || exclude.has(name)) continue;
@@ -236,8 +257,10 @@ export function frontEndStdlib(mods, files, entry, opts = {}) {
   if (named.length > 0) return { ...refusedFrontEnd(named), stdlib: { supplied: [], sources: [], refused: [] } };
   const exclude = new Set(opts.exclude ?? []);
   const refused = [];
+  // one reader for every round (a withdrawn module re-runs the search over the same texts)
+  const readFroms = opts.importFroms ?? importFroms(mods);
   for (;;) {
-    const std = stdlibSources(mods, files, { stdlibRoot: opts.stdlibRoot, exclude });
+    const std = stdlibSources(mods, files, { stdlibRoot: opts.stdlibRoot, exclude, importFroms: readFroms });
     const r = frontEnd(mods, [...files, ...std.sources.map((s) => ({ path: s.path, src: s.src }))], entry, { stdlibPaths: std.sources.map((s) => s.path) });
     const bad = new Map(); // module → its Error diagnostics
     for (const d of r.diags) {
