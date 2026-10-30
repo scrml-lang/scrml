@@ -231,7 +231,7 @@ Conversions that can fail or lose information are spelled out. Text becomes a nu
 
 The type annotation **is** the validation schema — no separate schema library, no `z.object()` wrappers, no `z.infer<typeof>` indirection.
 
-<!-- gate: spec-ahead [E-DECL-STATE-CHILD, E-PARSE-CLOSER, E-PARSE-DECL-BODY, E-PARSE-TAG, E-PARSE-UNCLOSED, E-SCOPE-001] — the bootstrap has no refinement types (number(>0 && <10000), string(email)) in an opener, a struct field or a parameter yet; the first opener's parse failure cascades through the file -->
+<!-- gate: spec-ahead [E-DECL-STATE-CHILD, E-PARSE-CLOSER, E-PARSE-DECL-BODY, E-PARSE-TAG, E-PARSE-UNCLOSED, E-SCOPE-001, E-STATE-UNDECLARED] — the bootstrap has no refinement types (number(>0 && <10000), string(email)) in an opener, a struct field or a parameter yet; the first opener's parse failure cascades through the file -->
 <!-- snippet: docs/readme-snippets/nerdme/refinement.scrml -->
 ```scrml
 // NERDME.md "Runtime type validation" — ruled; spec-ahead on the bootstrap (no refinement types yet).

@@ -1576,7 +1576,7 @@ For per-role markup variance, the `<auth role="X">` element exists, but **it is 
 
 Channels live **inside `<program>`** — a sibling of `<page>` (SPEC §38.1). A `<channel>` placed outside `<program>` in a file that *has* a `<program>` fires `E-CHANNEL-OUTSIDE-PROGRAM`; one inside a `<page>` fires `E-CHANNEL-INSIDE-PAGE`; a file-top `<channel>` is canonical only in a pure-channel module file that has no `<program>` (§38.12.6). A channel auto-creates a WebSocket endpoint. State declared inside a channel body syncs across every connected client. **There is no `@shared` modifier; the synchronization comes from being declared inside a channel body.**
 
-<!-- gate: spec-ahead [E-BOOTSTRAP-UNSUPPORTED, E-SCOPE-001] — the bootstrap has no <channel> yet -->
+<!-- gate: spec-ahead [E-BOOTSTRAP-UNSUPPORTED, E-SCOPE-001, E-STATE-UNDECLARED] — the bootstrap has no <channel> yet -->
 ```scrml
 <program>
 
