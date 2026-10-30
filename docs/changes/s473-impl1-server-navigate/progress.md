@@ -24,3 +24,29 @@ committed; nor was it returned, so no redirect either.
 
 ## Log
 - (start) branch s473-impl1-server-navigate from origin/main f4079bd2d.
+- 3af29588c — fix: server lowering (`_scrml_server_navigate`), handler catch (`_scrml_nav_settle`),
+  server string fallback, client stubs (`X-Scrml-Fetch` / `X-Scrml-Navigate` / `_scrml_follow_server_navigate`).
+  The catch is stripped and no helper injected when the server bundle has no server-side navigate.
+- 944a9c016 — tests: integration (30; 26 red on base f4079bd2d, 4 pass there = 2 controls + 2 tests of
+  the new module's reader) and browser/happy-dom (2; 2 red on base).
+- 7126f291b — the signal is an Error with a message (uncaught in a non-route server context → readable 500).
+- known-gaps: g-impl1-server-navigate-referenceerror-after-commit-s473 filed HIGH, status=resolved.
+  Bootstrap coverage §20.1 row (impl#2, REFUSED-LOUD) is about the bootstrap and stays unchanged.
+
+## Readings / SPEC silences (flag in PR)
+1. Wire shape for scrml's fetch wrapper (204 + X-Scrml-Navigate; request X-Scrml-Fetch: 1) — SPEC silent.
+2. "navigate ends the server function" — SPEC says "compiles to a 302 redirect"; it does not say what
+   happens to statements after it. Read as: a redirect IS the response, so nothing after it runs.
+3. Path safety rule — SPEC says only "a developer-defined URL string".
+4. navigate inside `transaction { }` rolls the block back (same as `return`, §19.10.3 S453/B1a) — a
+   save-then-navigate inside a transaction block LOSES the writes while the user is redirected. Owner
+   fork: keep (consistent with return) / commit-then-navigate / refuse at compile time (recommend refuse).
+5. CPS-split function: navigate lands in the client continuation and soft-navigates (pre-existing).
+
+## Deferred (not closed)
+- navigate in a non-route server context (SSR/`/__mountHydrate` loader, SSE, `<endpoint>`, `handle()`)
+  fails the request (500, readable message) instead of redirecting the page.
+- A refused target after an autocommitted write (no implicit envelope) leaves that write committed.
+- Client-side `_scrml_navigate` (`.Hard` from client code) has no target guard (`javascript:`).
+- Cross-file: a server helper imported from another module that navigates — its importer's handler
+  catch is stripped unless the importer itself navigates (fails closed: 500).
