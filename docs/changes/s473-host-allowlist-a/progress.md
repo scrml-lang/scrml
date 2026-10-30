@@ -59,3 +59,42 @@ shape directly.
   Chromium: remote `<script src>`, script `textContent`, `iframe.src = javascript:`, `a.href = javascript:` +
   click, `form.action = javascript:` + submit), then the guarded shape refuses it and nothing runs.
   Recorded run (Chromium /usr/bin/chromium): base 1 pass (the pure control) / 13 fail; head 14 pass / 0 fail.
+
+## 2026-10-30 — merge of origin/main after #1659 landed
+
+`git merge origin/main` (a79caa051): clean, no conflicts. Branch diff vs main = only this lane's files, so no
+generated file to regen and no gap id lost. Draft PR #1670 → main.
+
+## 2026-10-30 — step 1: rule 3's static `src=` export read (7c489f9a7)
+
+- parse.scrml: a valid `src=` is no longer refused (hostSrcDiags); in a `<host src=>`, a target root that is
+  not a parameter / host root is an export of src (rule 4), a bare export call is admitted (A-world).
+- core.scrml: `HostBind.src: HostSrc | not` — `{ path (relative to the source root, may begin `../`), file,
+  at, targetless }`. analyze.scrml hostBindCore: a targetless binding is a call of the export of its own
+  name, params in order (rule 3). check.scrml C-HB2 re-verifies. print.scrml: `hostSrcs(p)` numbers the
+  files; each is imported once as `import * as hostsrc$K from "./_scrml/host-src/K.js"`.
+- slice-m1/host-src.js `planHostSrcs(core, sourceRoot)` (driver side — the only place files are read):
+  acorn module parse (impl#1's helperModuleSpecifiers walk; nothing evaluated); every export form incl.
+  destructuring; `export { x } from` verified against its source (a broken one is E-IMPORT-004 for the
+  whole file — the browser would not link it); `export *` followed, cycle-safe, ES ambiguity excluded;
+  non-relative `export * from "pkg"` is "a form the parse cannot resolve" → E-IMPORT-004 naming it.
+  Files: realpath (symlinks followed), E-IMPORT-006 missing, E-IMPORT-011 outside the project root
+  (nearest `scrml.toml` / `.git` ancestor of the source root) or in a §47.13 denied class (impl#1's one
+  `_scrml_static_denied`, imported). Copy closure = every relative `.js`/`.mjs` import / re-export /
+  literal dynamic import, transitively. Layout `_scrml_local/<project-relative path>` (impl#1's) plus a
+  shim `_scrml/host-src/K.js` = `export * from "../../_scrml_local/<rel>"`.
+- scripts/scrml-boot.ts: runs it after the front end (diagnostics mapped to file:line), writes copies +
+  shims, clears `_scrml_local/`, adds them to `written` (so `dev` serves them).
+- Tests: `slice-m4/host-src-s473.test.js` 18 (compile on temp projects with scrml-boot, run the page in
+  happy-dom). Base 1 pass (the "refused build writes no copy" negative) / 17 fail; head 18 pass.
+  host-block-f3 rule 3 case updated (front end clean, Core carries the export root).
+- Not done: `slice-m1/load-program.js` / `server-artifact-harness.js` do not copy `src=` files, so the
+  #1659 probe tests' move to `src=` fixtures (step 6) should use scrml-boot `compileFile` as this test
+  does, or extend loadProgram with `planHostSrcs`.
+- A-world chains still pass through the #1659 INTERIM denylist (hostSinkWhy) — unchanged, as ruled.
+
+## Gaps
+
+- `g-spec-host-target-url-sinks-unjudged-s473`: re-titled code-exec, LOW → HIGH, status NARROWED (not
+  resolved: a compiled target reaches the guards only when lane B's walk + printer route it).
+- `g-boot-host-block-f3-unbuilt-s473`: item (a) (`src=`) marked built.
