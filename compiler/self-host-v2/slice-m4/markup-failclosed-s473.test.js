@@ -151,6 +151,19 @@ describe("§66.6.6 — a bare tag naming a program cell", () => {
   test("`let <email:string=\"\"/>` then `<email/>` → E-DECL-FIELD-TAG-NEEDS-STAR", () => {
     expect(codes(P(`        <email/>`, `    let <email:string=""/>`))).toEqual(["E-DECL-FIELD-TAG-NEEDS-STAR"]);
   });
+  test("RULED S473 (review-surfaced decisions item 3) — a cell named like an element, beside that tag: refused AT THE CELL", () => {
+    for (const n of ["filter", "data", "time", "title", "label", "progress", "output", "text", "view", "search", "summary", "p"]) {
+      const r = run(P(`        <${n}/>`, `    let <${n}:string=""/>`));
+      expect([n, r.diags.map((d) => d.code)]).toEqual([n, ["E-NAME-COLLIDES-ELEMENT"]]);
+      expect(r.diags[0].message).toContain(`\`${n}\``);
+    }
+  });
+  test("…and a cell named like an element with no colliding tag still compiles", () => {
+    clean(P(`        <p>\${@filter}</p>`, `    let <filter:string="x"/>`));
+  });
+  test("a non-element cell name used as a tag stays E-DECL-FIELD-TAG-NEEDS-STAR (`<status/>`)", () => {
+    expect(codes(P(`        <status/>`, `    let <status:string=""/>`))).toEqual(["E-DECL-FIELD-TAG-NEEDS-STAR"]);
+  });
   test("`\${@count}` is the value form and compiles", () => {
     clean(P(`        <p>\${@count}</p>`, `    let <count:int=0/>`));
   });

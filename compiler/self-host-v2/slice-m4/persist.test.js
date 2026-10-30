@@ -354,13 +354,13 @@ describe("§6.14 — codes", () => {
   });
 
   test("E-HOLD-WITHOUT-PERSIST (§6.14.4.3 r2) — `hold=@x` naming a non-persisted cell; `hold=` on a persisted cell and any other operand form are refused", () => {
-    const decls = `    let <x:int=0/>\n    let <p:int=0 persist="local" key="k4"/>`;
+    const decls = `    let <x:int=0/>\n    let <pt:int=0 persist="local" key="k4"/>`;
     expect(codes(P(decls, `        <section hold=@x><p>\${@x}</p></section>`))).toEqual(["E-HOLD-WITHOUT-PERSIST"]);
     expect(codes(P(decls, `        <section hold=@nope><p>a</p></section>`))).toEqual(["E-SCOPE-001", "E-HOLD-WITHOUT-PERSIST"]);
-    const held = diagsOf(P(decls, `        <section hold=@p><p>\${@p}</p></section>`));
+    const held = diagsOf(P(decls, `        <section hold=@pt><p>\${@pt}</p></section>`));
     expect(held.map((x) => x.code)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
     expect(held[0].message).toContain("HOLD");
-    expect(codes(P(decls, `        <section hold=(@p + 1)><p>a</p></section>`))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+    expect(codes(P(decls, `        <section hold=(@pt + 1)><p>a</p></section>`))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
     // inside a declaration's renders, the declaration's own field `p` shadows the persisted program cell
     const shadow = `<program>\n let <p:int=0 persist="local" key="k5"/>\n <box p:int=1/>\n renders <div hold=@p>\${p}</div>\n <main><box/></main>\n</program>\n`;
     expect(codes(shadow)).toEqual(["E-HOLD-WITHOUT-PERSIST"]);
@@ -421,7 +421,7 @@ describe("§6.14 — refused, never accepted-and-ignored (E-BOOTSTRAP-UNSUPPORTE
     // negative: validator CALLS with different arguments are a conjunction, each read — not a repeat
     expect(codes(P(`    let <x:string="" length(>2) length(<9)/>`, `        <p>x</p>`))).toEqual([]);
     // `single single` on an engine cell
-    const eng = `<program>\n    type P:enum = { A, B }\n    <p:P=.A single single>\n        <A rule=.B : "a">\n        <B rule=.A : "b">\n    </>\n    <main><*p/></main>\n</program>\n`;
+    const eng = `<program>\n    type P:enum = { A, B }\n    <pt:P=.A single single>\n        <A rule=.B : "a">\n        <B rule=.A : "b">\n    </>\n    <main><*pt/></main>\n</program>\n`;
     expect(diagsOf(eng).some((x) => x.code === "E-BOOTSTRAP-UNSUPPORTED" && x.message.includes("`single` is written twice"))).toBe(true);
     // on a declaration's field too
     const field = `<program>\n <box a:int=1>\n  let <c:int=0 req req/>\n </>\n renders <p>\${a}</p>\n <main><box/></main>\n</program>\n`;

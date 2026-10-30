@@ -1629,6 +1629,27 @@ ${
         }
     }
 
+    // s473 — does the program body's markup write `<tag>` (a plain tag, any
+    // depth; not a `<*x>` reference, not inside a user declaration's renders)?
+    fn programUsesTag(p: AProgram, tag: string) -> boolean {
+        for (const it of p.items) {
+            const n: ANode | not = markupOfItem(it)
+            if (n is given && nodesUseTag([n], tag)) return true
+        }
+        return false
+    }
+
+    fn nodesUseTag(ns: ANode[], tag: string) -> boolean {
+        for (const n of ns) {
+            const e: AElem | not = elemOfANode(n)
+            if (e is given) {
+                if (!e.star && e.tag == tag) return true
+                if (nodesUseTag(e.kids, tag)) return true
+            }
+        }
+        return false
+    }
+
     fn markupOfItem(it: AItem) -> ANode | not {
         const k: AItemK = it.k
         return match k {
@@ -4881,6 +4902,18 @@ ${
                         // body is refused as it is at file scope (above). It
                         // compiled clean: its attributes were dropped and `@name`
                         // read `rt.noDefault`, which throws.
+                        // s473 — RULED (bryan, user-voice S473 "review-surfaced
+                        // decisions" item 3): a program cell named like a markup
+                        // element is refused WHERE IT IS DECLARED when the same
+                        // program body also writes that name as a tag — `let
+                        // <filter:string=""/>` + `<filter/>` (that tag used to be
+                        // the inert element, §66.6.6's "silently changes
+                        // meaning"). With no colliding tag the cell is fine.
+                        // ⚑ The code name is a READING (no SPEC row yet):
+                        // E-NAME-COLLIDES-ELEMENT, after E-NAME-COLLIDES-RESERVED.
+                        if (!isNestedUserDecl(c) && markupElementName(c.name) && programUsesTag(p, c.name)) {
+                            st = addDiag(st, s.file, c.span, "E-NAME-COLLIDES-ELEMENT", "the program cell `" + c.name + "` is named like the markup element `<" + c.name + ">`, and this program also writes `<" + c.name + ">` as a tag — the tag would be the element, not the cell (§66.6.6: a tag never silently changes meaning; ruled S473). Rename the cell, or drop the tag (show the value with `$" + "{@" + c.name + "}`)")
+                        }
                         if (!isNestedUserDecl(c) && ownTypeName(c) != "" && declNames.indexOf(ownTypeName(c)) >= 0) {
                             st = addDiag(st, s.file, c.span, "E-BOOTSTRAP-UNSUPPORTED", "`<" + c.name + ":" + ownTypeName(c) + " …/>` is a named shared instance of `<" + ownTypeName(c) + ">` (§66.8.2) — not in the bootstrap")
                         }
@@ -15789,10 +15822,10 @@ ${
 
     // s473 — a bare tag that names a child field of the enclosing declaration —
     // the program's cells included (R4: they are the program's fields), except a
-    // program cell spelled like a markup element: in the program's markup the
-    // tag stays the element (`let <p:P=…/>` beside `<p class="pt">…</p>`, the
-    // M2 fixtures). ⚑ SPEC-silent: §66.6.6 does not say which reading a tag
-    // takes when a program cell shares an element's name; inside a user
+    // program cell spelled like a markup element. RULED (bryan, user-voice S473
+    // "review-surfaced decisions" item 3): that collision is refused at the
+    // CELL (E-NAME-COLLIDES-ELEMENT, namedInstanceDiags), so the tag is not
+    // reported a second time here — one report per fault. Inside a user
     // declaration the field reading has always won (and still does).
     fn namesOwnField(env: Env, tag: string) -> boolean {
         const cd: DeclSrc | not = ctxDecl(env)

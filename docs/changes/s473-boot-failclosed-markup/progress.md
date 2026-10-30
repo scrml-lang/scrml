@@ -45,3 +45,7 @@ Branch: `s473-boot-failclosed-markup` off origin/main 741a2b51c.
 - F5 noted in the gap. Conformance: PASS 264, FAIL 41. Corpus: +31 E-CONTROL-FLOW-IN-MARKUP on
   already-failing files; post-ce-residual-component-reject now fails to compile as its case expects.
 - F2 (merge with #1675) pending its landing.
+- F3 RULED (bryan, user-voice S473 "review-surfaced decisions" item 3): an element-named program cell
+  beside a same-named tag is refused at the cell — E-NAME-COLLIDES-ELEMENT (code name is a READING;
+  #1682 names none). Tests migrated by the ruling: M2 `p` cell → `pt` (5 slice-m2, 3 slice-m4 files,
+  3 acceptance cases), sink-guards `set` cell → `srcs`. Gap → resolved. Corpus: no change.

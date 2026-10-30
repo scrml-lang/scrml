@@ -185,16 +185,16 @@ describe("rule 8 — the cycle diagnostic wins", () => {
 describe("rule 9 — boundaries need a written type", () => {
   const SEED = "    let <seed:int=1/>\n";
   test("a non-literal persist= cell: E-DECL-TYPE-REQUIRED-AT-BOUNDARY (instead of, not beside, an inference code)", () => {
-    expect(codes(SEED + "    let <p=(@seed * 2) persist=\"local\" key=\"a.p\"/>")).toEqual(["E-DECL-TYPE-REQUIRED-AT-BOUNDARY"]);
+    expect(codes(SEED + "    let <pt=(@seed * 2) persist=\"local\" key=\"a.p\"/>")).toEqual(["E-DECL-TYPE-REQUIRED-AT-BOUNDARY"]);
   });
   test("a non-inferable persist= cell: still only the boundary code", () => {
-    expect(codes("    let <f:bool=true/>\n    let <p=(!@f) persist=\"local\" key=\"a.p\"/>")).toEqual(["E-DECL-TYPE-REQUIRED-AT-BOUNDARY"]);
+    expect(codes("    let <f:bool=true/>\n    let <pt=(!@f) persist=\"local\" key=\"a.p\"/>")).toEqual(["E-DECL-TYPE-REQUIRED-AT-BOUNDARY"]);
   });
   test("a literal persist= cell is unaffected (§6.14's `= \"all\"`)", () => {
     expect(codes("    let <tab=\"all\" persist=\"session\" key=\"a.t\"/>")).toEqual([]);
   });
   test("an annotated non-literal persist= cell is fine", () => {
-    expect(codes(SEED + "    let <p:int=(@seed * 2) persist=\"local\" key=\"a.p\"/>")).toEqual([]);
+    expect(codes(SEED + "    let <pt:int=(@seed * 2) persist=\"local\" key=\"a.p\"/>")).toEqual([]);
   });
   test("a non-literal exported own value: required (the default while O2 / O39 is open); a literal one is not", () => {
     expect(codes(SEED + "    export <t=(@seed * 2)/>")).toEqual(["E-DECL-TYPE-REQUIRED-AT-BOUNDARY"]);

@@ -69,7 +69,7 @@ renders <a class="lnk" href=u>l</a>
     let <pic:string="data:image/png;base64,AAAA"/>
     let <u:string="/start"/>
     let <spaced:string="  JaVaScRiPt:alert(4)"/>
-    let <set:string="/a.png 1x, javascript:alert(5) 2x"/>
+    let <srcs:string="/a.png 1x, javascript:alert(5) 2x"/>
     let <list:string="/a;javascript:alert(2)"/>
     let <animated:string="fill"/>
     <rows:Row[]=([{ id: 1, url: "JaVaScRiPt:alert(3)" }, { id: 2, url: "https://example.com/" }])/>
@@ -84,7 +84,7 @@ renders <a class="lnk" href=u>l</a>
         <a id="d" href=@u>reactive</a>
         <a id="sp" href=@spaced>leading space, mixed case</a>
         <a id="up" HREF=@bad>upper-case name</a>
-        <img id="ss" srcset=@set/>
+        <img id="ss" srcset=@srcs/>
         <object id="ob" data=@bad></object>
         <div id="dv" data=@bad></div>
         <button id="flip" onclick=flip()>flip</button>
