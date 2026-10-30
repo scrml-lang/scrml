@@ -11,7 +11,8 @@ Branch: s473-spec-audit-rulings (from origin/main 3d8a05cf1). SPEC text only (+ 
 - [x] D29–D30 diagnostics / conformance (SPEC halves only)
 - [x] D31 record-lag sweep (except §6.5.3 vs §17.4b — see Flags)
 - [x] regen SPEC-INDEX + severity; s34-census --check-new, delta-lint, SPEC-INDEX --check pass
-- [ ] bootstrap-spec-coverage.md row changes — #1673 not on main; listed below for a follow-up
+- [x] merged origin/main after #1673 landed; bootstrap-spec-coverage.md: 65 rows annotated with their S473 ruling, statuses flipped as listed below (§47.1–§47.5 → N/A etc.); `spec-coverage-check.ts --write` totals refreshed; check passes (76 SILENT, all gapped; was 91)
+- [x] known-gaps.md: resolved g-boot-output-name-encoding-unbuilt-s473, g-spec-toenum-lookup-table-output-form-s473 (D4), g-boot-component-shape-constraints-unchecked-s473 (D25), g-boot-verbose-closers-absent-s473 (D31); deferred g-boot-emit-machine-tests-absent-s473 (D8), g-spec-54-substates-no-s66-spelling-s473 (D9); gap-counts regenerated (state.ts; master-list.md change discarded)
 
 ## Sections changed, per ruling
 - D4: §47 intro + banner; §47.1–§47.5 markers; §47.5 test-bind cross-ref; §19.12.6 / §19.12.7 re-keyed (server-fn identity); §6.14.5 O-061-3; §58.7 note; §14.4.3 toEnum table SHALL demoted; §5 bind:value enum note.
