@@ -1076,7 +1076,7 @@ Also available: `<style>` blocks (§9.2), plain `.css` files (§9.3), and **CSS 
 
 ---
 
-## §10 stdlib — what's on the shelf (18 modules)
+## §10 stdlib — what's on the shelf (module list and count: docs/FACTS.md)
 
 **Important:** stdlib modules are **import-only**, not standalone-compile targets. Don't try to compile `stdlib/<x>/index.scrml` directly — it's designed to be imported into a `<program>`.
 
@@ -1179,17 +1179,17 @@ What LLMs reflexively reach for + the scrml form:
 
 ## §12 Operational rules (orientation, not language)
 
-- **Pre-commit hook** runs `bun test` (excluding browser). Never bypass with `--no-verify` without explicit user authorization. ~7,800-8,800 tests pass; 0 failures is the contract.
+- **Pre-commit hook** runs `bun test` (excluding browser). Never bypass with `--no-verify` without explicit user authorization. The full suite (test-file count: docs/FACTS.md) must pass; 0 failures is the contract.
 - **Cherry-pick + push protocol** — see pa.md §"Cross-machine sync hygiene" + §"wrap" definition.
 - **Worktree path discipline** — agent dispatches with `isolation: "worktree"` may construct main-rooted paths from intake docs by mistake; brief must paste the absolute worktree path explicitly; agents must run `pwd` at startup.
 - **Agent-file edits don't propagate mid-session** — if you edit `~/.claude/agents/<name>.md`, the change takes effect at the NEXT PA session, not the current one. Plan accordingly.
 - **`scrml-js-codegen-engineer` tool set** (post S57; agent renamed from `scrml-dev-pipeline` per S133 DD — see pa.md "Code editing rules" canonical-dev-agent line): `Read, Write, Edit, Glob, Grep, Bash` (S454 correction: NO `Agent` — verified against both the live `~/.claude/agents/` file and the staged `scrml-support/agents/` copy, which are identical). Default model `opus`. Edits to this file took effect S58+; before that, the agent's tools were limited and dispatches needed careful brief design.
-- **SPEC.md size** (post-D4): **~24,382 lines / ~410k tokens**. Past the size where Read+Write full-file-overwrite is feasible; Edit's diff-form scales fine. Per-section split queued as v0.3.0+ candidate (see IMPLEMENTATION-ROADMAP.md §8.5).
+- **SPEC.md size:** over 50,000 lines (current figure: docs/FACTS.md) — several times one Read's budget. Past the size where Read+Write full-file-overwrite is feasible; Edit's diff-form scales fine. Per-section split queued as v0.3.0+ candidate (see IMPLEMENTATION-ROADMAP.md §8.5).
 - **PIPELINE.md size** (post-D4): ~2,380 lines (1,941 → 2,380; 22.6% rewrite). Per-stage v0.next addenda landed: TAB / NR / MOD / UVB / TS / DG / CG. Integration Failure Mode Catalog +11 v0.next entries. **Follow-up prose pass deferred** (IMPLEMENTATION-ROADMAP.md §8.6 #2) — addenda are stitched, not re-flowed; engineering content complete.
 - **`const @x` → `const <x>` sweep DONE (S58)**. Two-phase cleanup: (a) §6 sweep (62 edits) replaced declarations within §6 itself; (b) follow-up cleanup across §11/§12/§22/§23/§34/§52 (13 more edits). SPEC.md now has zero `const @x` declarations. Canonical form `const <x> = expr` is universal. Read sites still use `@x` (canonical access).
 - **`bun install` required in fresh worktrees**: pre-commit `bun test` fails with "cannot find package 'acorn'" in newly-spawned worktrees because node_modules doesn't inherit from main. Hit by every D2.8/D3/oauth/D4 dispatch this session. Workaround: `bun install` once at worktree startup. Worth a pa.md F4 addendum or a worktree-setup hook (deferred).
 - **`bun run pretest` required in fresh worktrees** (S59 rev-1 finding): browser tests load from `samples/compilation-tests/dist/` which is gitignored. Without `bun run pretest`, full `bun test` produces ~130 ECONNREFUSED-shaped failures in happy-dom. Use `bun run test` (chains pretest) NOT `bun test` directly for baseline checks. Documented in pa.md F4 step 5.
-- **SPEC.md Read-budget reality (S64 amendment).** SPEC.md is ~410k tokens. Primer + SPEC-INDEX.md + targeted-section Read is the only sustainable pattern. Never attempt full-file Read (will overflow). For lookups: `grep -n "^### " compiler/SPEC.md` for top-level headings, then targeted Read with `offset:` + `limit:`. SPEC-INDEX.md (~288 lines) is the navigation map. Per-section split queued as v0.3.0+ candidate.
+- **SPEC.md Read-budget reality (S64 amendment).** SPEC.md is far past one Read's budget (line count: docs/FACTS.md). Primer + SPEC-INDEX.md + targeted-section Read is the only sustainable pattern. Never attempt full-file Read (will overflow). For lookups: `grep -n "^### " compiler/SPEC.md` for top-level headings, then targeted Read with `offset:` + `limit:`. SPEC-INDEX.md (~288 lines) is the navigation map. Per-section split queued as v0.3.0+ candidate.
 - **Adding a new scrml-special structural element (S64 amendment)** — e.g., a new structural element added at SPEC §4/§24 — REQUIRES updating `compiler/src/attribute-registry.js` (~233 LOC, defines per-element attribute schemas) for VP-1 (attribute-allowlist.ts) and VP-3 (attribute-interpolation.ts) validation. Otherwise unknown attributes are silently forwarded as HTML. PIPELINE.md 0.7.0 §3.3 calls this out at the stage-contract level; the dispatch checklist must enforce it.
 - **BPP override hook (S64 amendment; re-scoped S447).** `compiler/src/codegen/compat/parser-workarounds.js` exposes `setBPPOverrides(mod)` / `getBPPOverrides()` — a runtime hook that swaps in replacement implementations of its four legacy helpers. It was built for the v1 self-hosted BPP module; that tree (`compiler/self-host/`) was retired S447, so no compiled module supplies one any more. It stays live for two callers: `compileScrml`'s `selfHostModules.bpp` option (installed for one compile, restored after) and the spy harness in `tests/integration/m6-5-parser-workarounds-noop-under-native.test.js`. Without context it looks like dead-code-with-getter; it isn't — its retirement is M6.8 (delete the whole file with the live BS+TAB path).
 - **Open SPEC-ISSUE registry (S64 amendment, scattered in SPEC prose).** Discoverable via `grep -ohE 'SPEC-ISSUE-[0-9]+' compiler/SPEC.md | sort -u`. As of 2026-05-06: **005** (HTML version target), **010-COMPONENT** (component overloading; pinned for queued debate-03), **012** (Tailwind variants/theming), **018** (SQL transactions), **025-027** (server `@var` initial-load semantics), §53.13.1-4 (named-shape registry, constraint arithmetic, type-alias for predicates, boolean predicates). 010-FUNCTION closed-without-resolution (debate-02 verdict). 013 closed 2026-03-27.
@@ -1328,7 +1328,7 @@ The tier ladder (§1) is "promotion is mechanical and additive." Promotion ergon
 
 ## §14 What this primer does NOT cover (read elsewhere)
 
-- Detailed grammar — see `compiler/SPEC.md` (the authoritative spec; ~24k lines / ~410k tokens — see §12 Read-budget reality)
+- Detailed grammar — see `compiler/SPEC.md` (the authoritative spec; over 50,000 lines, current figure in docs/FACTS.md — see §12 Read-budget reality)
 - Section index — see `compiler/SPEC-INDEX.md`
 - Recipes (auth, real-time, schema, etc.) — see `docs/articles/llm-kickstarter-v2-2026-05-04.md` §11
 - Anti-patterns table for dev-agent dispatch — see `scrml-support/docs/gauntlets/BRIEFING-ANTI-PATTERNS.md`
