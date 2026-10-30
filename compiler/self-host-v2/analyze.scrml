@@ -61,6 +61,9 @@ ${
     import { SqlFacts, SlotQuote, sqlFacts, slotInLiteral, txControl, txControlAware } from "./sql.scrml"
     import { FxAtom, ownAtom, closeDim, witnessOf, atomChain } from "./effects.scrml"
     import { UrlAttr, StaticSink, classifyStatic, staticExecMessage, logicWriteSink, logicCallSink, attrNameArgIndex, executableAttrName, htmlArgIndex, attrNodeMember, attrNodeValueMember, urlValueAdmitted, schemeOfUrl, isUrlAttrName, attrValueArgIndex } from "./url.scrml"
+    import { HEntry, surfaceInterfaces, isSurfaceIface, isDomElementIface, ifaceInherits, findEntry, accessesOf, sigParams, sigResult,
+             slotType, slotOptional, isCallbackSlot, slotAlternatives, slotAdmitsNot, unWaiting, entryGuards, inertTagIface,
+             dictKeys, attrNameVerdict, entryConflict, runtimeGuardsBuilt, brandChecksBuilt } from "./host-surface.scrml"
 
     // =========================================================================
     // THE TABLES (exported — `lower` consumes them).
@@ -803,6 +806,17 @@ ${
             }
             out = out.concat([{ nid: -1, name: bd.name, file: builtinFile(), exported: false, sym: rb.s,
                                 isEnum: true, members: bms, src: bd }])
+        }
+        // s473-host-allowlist-b (DRAFT §21.3.3 rule 8.1, ruling Q2 — "WebIDL interface names
+        // are built-in scrml types"): each Appendix H interface is a built-in host type (a
+        // HostDef, no members). Its Sym is FIXED (ifaceSym, a negative id), not minted, so
+        // adding the surface shifts no other Sym of any program.
+        let k = 0
+        for (const f of surfaceInterfaces()) {
+            const td: ATypeDecl = { nid: -1, span: mkSpan(0, 0), exported: false, name: f.name, body: ATypeBody.HostBody }
+            out = out.concat([{ nid: -1, name: f.name, file: builtinFile(), exported: false, sym: mkSym(-2000 - k, f.name),
+                                isEnum: false, members: [], src: td }])
+            k = k + 1
         }
         return { stubs: out, st: st }
     }
@@ -4212,8 +4226,12 @@ ${
                 if (isStdlibPath(fs.info.file)) {
                     st = addDiag(st, fs.info.file, fs.f.span, "E-BOOTSTRAP-UNSUPPORTED", "`" + fs.info.name + "` is a `<host>` binding in a stdlib module file — a compiler-bundled stdlib module's bindings may be reached from server code too (§21.3.3 rule 10, S473 ruling), and those server-side bindings are not in the bootstrap yet; the module keeps the §21.3.1.1 `import:host` wrapper form")
                 } else {
+                    // s473-host-allowlist-b: rule 8 — the typed chain walk over the host surface
+                    const hwk: HSurfWalk = hostWalk(teAt(te, fs.info.file), types, fs, hb, st)
                     const why: string = hostBindTypeWhy(teAt(te, fs.info.file), types, fs, st)
-                    if (why != "") {
+                    if (hwk.hcode != "") {
+                        st = addDiag(st, fs.info.file, hostWalkSpan(fs, hb), hwk.hcode, hwk.hmsg)
+                    } else if (why != "") {
                         st = addDiag(st, fs.info.file, fs.f.span, "E-BOOTSTRAP-UNSUPPORTED", "the `<host>` binding `" + fs.info.name + "` " + why)
                     } else {
                         const bind: HostBind | not = hostBindCore(fs.f.params, hb)
@@ -4232,6 +4250,347 @@ ${
             out = out.concat([next])
         }
         return { fs: out, st: st }
+    }
+
+    // =========================================================================
+    // s473-host-allowlist-b — RULE 8, THE TYPED CHAIN WALK (DRAFT SPEC §21.3.3
+    // rule 8, Appendix H; host-surface.scrml is the surface).
+    //
+    // Rulings (user-voice-scrml.md, S473): "§21.3.3 rule 8 becomes an ALLOWLIST.
+    // A binding may call or read only what the allowlist admits; everything else
+    // is refused at compile time." · Q1 "the unit is option (d), a curated
+    // surface typed by interface" · Q2 "WebIDL interface names are built-in
+    // scrml types, replacing user-named handles" · Q4 "existing bindings get a
+    // hard error now".
+    //
+    // It replaces #1659's INTERIM denylist (parse.scrml hostSinkWhy and its
+    // three name tables): instead of guessing what a handle might hold, every
+    // receiver has a static interface, and every step is an Appendix H entry.
+    //   8.2 the root: `window` / `document` / `navigator`, or a parameter typed
+    //       by an Appendix H interface (`I | not` included); a parameter of a
+    //       user `:host` type declared in the same `<host src=>` is the `src=`
+    //       world (8.6, not walked); anything else is E-HOST-ROOT-OPAQUE.
+    //   8.3 each member but the last a `read` entry whose result is an
+    //       interface; the last an entry of the target's access (call /
+    //       construct / read / write); else E-HOST-TARGET-NOT-ALLOWED. An entry
+    //       url.scrml's sink table disagrees with is never admitted (one source).
+    //   8.4 arguments assignable to the entry's slots (E-HOST-ARG-TYPE), the
+    //       declared result one the entry yields (E-HOST-RESULT-TYPE).
+    //   8.5 guarded(attr-name) judged here on the literal name; a literal URL
+    //       judged here by §5.2's test (E-ATTR-STATIC-EXECUTABLE); the run-time
+    //       guards and the 8.7 brand check are lane A's — until built, an entry
+    //       needing one is refused by name (host-surface.scrml runtimeGuardsBuilt).
+    // The walk runs only on a target whose shape parse.scrml accepted (rule 4).
+    // =========================================================================
+    type HSurfWalk:struct = { hcode: string, hmsg: string }
+    type HArgFit:struct = { w: HSurfWalk, tag: string, url: boolean, urlLit: string }
+
+    fn hwOk() -> HSurfWalk { return { hcode: "", hmsg: "" } }
+    fn hw(code: string, msg: string) -> HSurfWalk { return { hcode: code, hmsg: msg } }
+    fn haOk() -> HArgFit { return { w: hwOk(), tag: "", url: false, urlLit: "" } }
+    fn haBad(code: string, msg: string) -> HArgFit { return { w: hw(code, msg), tag: "", url: false, urlLit: "" } }
+
+    fn hostWalkSpan(fs: FnSrc, hb: AHostBind) -> ASpan {
+        const tg: AExpr | not = hb.target
+        if (tg is given) return tg.span
+        return fs.f.span
+    }
+
+    // A scrml type in the surface's slot notation (Appendix H.1): `int`, `number`,
+    // `string`, `bool`, `T[]`, `T | not`, an Appendix H interface by name, and
+    // `host:N` / `struct:N` / `enum:N` for a user type (never an interface).
+    fn hostSlotText(types: TypeInfo[], t: Type) -> string {
+        return match t {
+            .Int :> "int"
+            .Num :> "number"
+            .Str :> "string"
+            .Bool :> "bool"
+            .Maybe(inner: i) :> hostSlotText(types, i) + " | not"
+            .Seq(elem: e) :> hostSlotText(types, e) + "[]"
+            .Named(sym: s) :> hostNamedText(types, s)
+        }
+    }
+
+    fn hostNamedText(types: TypeInfo[], s: Sym) -> string {
+        const ti: TypeInfo | not = typeInfoOf(types, s)
+        if (ti is not) return "?"
+        if (isHostDef(ti.def)) {
+            if (ti.file == builtinFile() && isSurfaceIface(ti.name)) return ti.name
+            return "host:" + ti.name
+        }
+        const fs: FieldDef[] | not = structFieldDefs(ti.def)
+        if (fs is given) return "struct:" + ti.name
+        return "enum:" + ti.name
+    }
+
+    fn stripNot(t: string) -> string {
+        if (t.endsWith(" | not")) return t.substring(0, t.length - 6)
+        return t
+    }
+
+    // Is a value of slot text `h` (no `| not`) assignable to the alternative `w`?
+    // WebIDL inheritance for interfaces; `int` into `number`.
+    fn hostCoreFits(h: string, w: string) -> boolean {
+        if (h == w) return true
+        if (h == "int" && w == "number") return true
+        if (isSurfaceIface(h) && isSurfaceIface(w)) return ifaceInherits(h, w)
+        if (h.endsWith("[]") && w.endsWith("[]")) return hostCoreFits(h.substring(0, h.length - 2), w.substring(0, w.length - 2)) && h.substring(0, h.length - 2) == w.substring(0, w.length - 2)
+        return false
+    }
+
+    // A parameter of type `h` in a slot of type `w` (8.4).
+    fn hostArgFits(h: string, w: string) -> boolean {
+        if (h.endsWith(" | not") && !slotAdmitsNot(w)) return false
+        const hc: string = stripNot(h)
+        for (const alt of slotAlternatives(w)) {
+            if (hostCoreFits(hc, alt)) return true
+        }
+        return false
+    }
+
+    // An entry's result `r` (no `waiting`) against a declared result `d` (8.4):
+    // "ok"; "down" — a subinterface (a downcast, brand-checked at run time, 8.7);
+    // "bad". A widening (`T` declared as a supertype, or as `T | not`) is ok; a
+    // result that admits `not` declared without it is bad.
+    fn hostResultVerdict(r: string, d: string) -> string {
+        if (r.endsWith(" | not") && !d.endsWith(" | not")) return "bad"
+        const rc: string = stripNot(r)
+        const dc: string = stripNot(d)
+        if (rc == dc) return "ok"
+        if (rc == "int" && dc == "number") return "ok"
+        if (rc == "number" && dc == "int") return "ok"   // rule 13 decodes `int` (integral, ±(2^53−1))
+        if (isSurfaceIface(rc) && isSurfaceIface(dc)) {
+            if (ifaceInherits(rc, dc)) return "ok"
+            if (ifaceInherits(dc, rc)) return "down"
+            return "bad"
+        }
+        if (rc.endsWith("[]") && dc.endsWith("[]")) return hostResultVerdict(rc.substring(0, rc.length - 2), dc.substring(0, dc.length - 2))
+        return "bad"
+    }
+
+    fn hostNotAllowed(name: string, iface: string, member: string, access: string) -> HSurfWalk {
+        const there: string[] = accessesOf(iface, member)
+        let note: string = ""
+        if (there.length > 0) note = " (the surface has `" + iface + "." + member + "` only as: " + there.join(", ") + ")"
+        return hw("E-HOST-TARGET-NOT-ALLOWED", "the target of `" + name + "` uses `" + member + "` (" + access + ") on `" + iface + "`, which is not on the host surface" + note + " — a binding may reach only an Appendix H entry of its receiver's interface with that access (§21.3.3 rule 8.3). Bind it through a `src=` file instead: `<host src=\"./glue.js\">` (rule 8.6; the surface changes only by SPEC amendment, rule 8.8)")
+    }
+
+    fn hostParamSlot(te: TypeEnv, types: TypeInfo[], p: AParam, st: AS) -> string {
+        const at: AType | not = p.ty
+        if (at is not) return "?"
+        const rt: RType = resolveType(te, at, st)
+        return hostSlotText(types, rt.t)
+    }
+
+    fn hostWalk(te: TypeEnv, types: TypeInfo[], fs: FnSrc, hb: AHostBind, st: AS) -> HSurfWalk {
+        const tg: AExpr | not = hb.target
+        if (tg is not) return hwOk()                      // no target: a `src=` export (8.6)
+        const parts: HTargetParts = hostTargetParts(tg, hb.isNew)
+        if (!parts.ok || !parts.chain.ok) return hwOk()   // rule 4 — parse.scrml reported it
+        const name: string = fs.info.name
+        const ps: AParam[] = fs.f.params
+        const root: string = parts.chain.root
+        let cur: string = ""
+        if (root == "window") cur = "Window"
+        if (root == "document") cur = "Document"
+        if (root == "navigator") cur = "Navigator"
+        if (cur == "") {
+            const pi: int = paramIndexOf(ps, root)
+            if (pi < 0) return hwOk()                     // rule 4 — E-HOST-TARGET-UNBOUND (parse.scrml)
+            const rs: string = hostParamSlot(te, types, ps[pi], st)
+            const core: string = stripNot(rs)
+            if (isSurfaceIface(core)) {
+                cur = core
+            } else if (core.startsWith("host:") && hb.src != "" && hb.blockTypes.indexOf(core.substring(5, core.length)) >= 0) {
+                return hwOk()                             // 8.6 — the `src=` world, not walked
+            } else {
+                let what: string = "`" + rs + "`, which is not an Appendix H interface"
+                if (core.startsWith("host:")) what = "the user-named handle type `" + core.substring(5, core.length) + "`, which is a receiver only inside the `<host src=>` block that declares it (rule 8.6)"
+                return hw("E-HOST-ROOT-OPAQUE", "the target of `" + name + "` is rooted at the parameter `" + root + "` of type " + what + " — a target's root is `window`, `document`, `navigator`, or a parameter typed by an Appendix H interface (§21.3.3 rule 8.2); a data value, `asIs` or a callback is not a host receiver")
+            }
+        }
+        const ms: string[] = parts.chain.members
+        let i: int = 0
+        while (i < ms.length - 1) {
+            const e0: HEntry | not = findEntry(cur, ms[i], "read")
+            if (e0 is not) return hostNotAllowed(name, cur, ms[i], "read")
+            const r0: string = sigResult(e0)
+            if (!isSurfaceIface(r0)) return hw("E-HOST-TARGET-NOT-ALLOWED", "the target of `" + name + "` continues past `" + cur + "." + ms[i] + "`, whose result is `" + r0 + "`, not an interface — each member of a chain but the last SHALL be a `read` entry whose result is an interface (§21.3.3 rule 8.3); read it in a binding of its own, test it, and pass it on")
+            cur = r0
+            i = i + 1
+        }
+        const last: string = ms[ms.length - 1]
+        let access: string = "call"
+        if (parts.shape == 1) access = "construct"
+        if (parts.shape == 2) access = "read"
+        if (parts.shape == 3) access = "write"
+        const e1: HEntry | not = findEntry(cur, last, access)
+        if (e1 is not) return hostNotAllowed(name, cur, last, access)
+        const e: HEntry = e1
+        const conflict: string = entryConflict(e)
+        if (conflict != "") return hw("E-HOST-TARGET-NOT-ALLOWED", "the target of `" + name + "` uses `" + cur + "." + last + "` (" + access + "): " + conflict + " — one sink table, never a second list (§21.3.3 rule 8.3)")
+        // 8.4 — the arguments
+        let tagIface: string = ""
+        let attrUrl: boolean = false
+        let urlLit: string = ""
+        let urlAttr: string = last
+        if (access == "write") {
+            const fa: HArgFit = hostArgFit(te, types, ps, parts.args[0], e.sig, name, st)
+            if (fa.w.hcode != "") return fa.w
+            urlLit = fa.urlLit
+        } else if (access == "call" || access == "construct") {
+            const slots: string[] = sigParams(e)
+            let required: int = 0
+            for (const sl of slots) { if (!slotOptional(sl)) required = required + 1 }
+            if (parts.args.length > slots.length || parts.args.length < required) {
+                return hw("E-HOST-ARG-TYPE", "the target of `" + name + "` passes " + parts.args.length + " argument(s) to `" + cur + "." + last + "`, whose entry takes " + e.sig + " (§21.3.3 rule 8.4, Appendix H " + e.id + ")")
+            }
+            let j: int = 0
+            for (const x of parts.args) {
+                const fa: HArgFit = hostArgFit(te, types, ps, x, slotType(slots[j]), name, st)
+                if (fa.w.hcode != "") return fa.w
+                if (fa.tag != "") tagIface = fa.tag
+                if (fa.url) {
+                    attrUrl = true
+                    urlAttr = fa.urlLit
+                }
+                if (attrUrl && j == 1) urlLit = fa.urlLit
+                j = j + 1
+            }
+            // a URL-valued attribute's value literal (`setAttribute("href", "…")`): judged below
+            if (attrUrl) {
+                const vv: HView = hostView(parts.args[1])
+                urlLit = ""
+                if (vv.k == 4) urlLit = vv.name
+            }
+        }
+        // 8.4 — the result
+        let r: string = sigResult(e)
+        const rw: boolean = r.startsWith("waiting ")
+        r = unWaiting(r)
+        if (tagIface != "") r = tagIface
+        if (rw && !hb.waiting) return hw("E-HOST-RESULT-TYPE", "`" + name + "` reaches `" + cur + "." + last + "`, whose result is `waiting " + r + "` — declare the binding `-> waiting " + r + "` (§21.3.3 rules 8.4, 17)")
+        const dr: Type | not = fs.info.ret
+        if (hb.hasResult && dr is given) {
+            const d: string = hostSlotText(types, dr)
+            const dc: string = stripNot(d)
+            let v: string = "bad"
+            if (r == "void") {
+                v = "bad"
+            } else if (dc.startsWith("host:")) {
+                v = "bad"
+            } else if (dc.startsWith("struct:") && isSurfaceIface(stripNot(r))) {
+                v = hostStructFromIface(types, dr, stripNot(r))
+                if (v == "ok" && r.endsWith(" | not") && !d.endsWith(" | not")) v = "bad"
+            } else {
+                v = hostResultVerdict(r, d)
+            }
+            if (v == "down" && !brandChecksBuilt()) return hw("E-BOOTSTRAP-UNSUPPORTED", "`" + name + "` declares `-> " + d + "`, a subinterface of the entry's result `" + r + "` (a downcast) — it is admitted with a run-time brand check (§21.3.3 rules 8.4, 8.7), which is not in this build yet; declare `-> " + r + "`")
+            if (v == "bad") {
+                let why: string = "the entry yields `" + r + "`"
+                if (dc.startsWith("host:")) why = "a user-named `:host` type is never the result of a surface entry (rule 8.6)"
+                if (dc.startsWith("struct:")) why = "a struct result of an interface-valued entry declares only fields that are `read` entries of that interface, of compatible types"
+                return hw("E-HOST-RESULT-TYPE", "`" + name + "` declares `-> " + d + "` for `" + cur + "." + last + "` (" + access + ") — " + why + " (§21.3.3 rule 8.4, Appendix H " + e.id + ")")
+            }
+        }
+        // 8.5 — the guards
+        let guards: string[] = []
+        for (const g of entryGuards(e)) { if (g != "attr-name") guards = guards.concat([g]) }
+        if (attrUrl && guards.indexOf("url") < 0) guards = guards.concat(["url"])
+        if (guards.indexOf("url") >= 0 && urlLit != "") {
+            if (!urlValueAdmitted(urlAttr, urlLit)) return hw("E-ATTR-STATIC-EXECUTABLE", "the target of `" + name + "` writes the URL `" + urlLit + "` to `" + urlAttr + "`, whose scheme (`" + schemeOfUrl(urlLit) + ":`) is not admitted — a `guarded(url)` entry's literal value is judged at compile time by §5.2 rule 2's test (§21.3.3 rule 8.5)")
+            let rest: string[] = []
+            for (const g of guards) { if (g != "url") rest = rest.concat([g]) }
+            guards = rest
+        }
+        if (guards.length > 0 && !runtimeGuardsBuilt()) return hw("E-BOOTSTRAP-UNSUPPORTED", "`" + name + "` reaches `" + cur + "." + last + "` (" + access + "), a `guarded(" + guards.join(", ") + ")` entry (Appendix H " + e.id + ") — its run-time check (§21.3.3 rule 8.5) is not in this build yet, so the entry is refused rather than run unguarded")
+        return hwOk()
+    }
+
+    // One argument `x` of a target against the slot type `slot` (8.4, 8.5).
+    fn hostArgFit(te: TypeEnv, types: TypeInfo[], ps: AParam[], x: AExpr, slot: string, name: string, st: AS) -> HArgFit {
+        const v: HView = hostView(x)
+        const bad: string = "an argument of `" + name + "`'s target does not fit the slot `" + slot + "`"
+        if (v.k == 0) {
+            const pi: int = paramIndexOf(ps, v.name)
+            if (pi < 0) return haOk()                     // rule 4 (parse.scrml)
+            const h: string = hostParamSlot(te, types, ps[pi], st)
+            if (isCallbackSlot(slot)) return haBad("E-HOST-ARG-TYPE", bad + ": the parameter `" + v.name + "` is `" + h + "`, and a callback slot takes a scrml function (§21.3.3 rule 8.4)")
+            if (slot == "inert-tag" || slot == "attr-name" || slot.startsWith("\"")) return haBad("E-HOST-ARG-TYPE", bad + ": the parameter `" + v.name + "` is not a string literal, and this slot admits only a literal (§21.3.3 rule 8.5, Appendix H.1)")
+            if (dictKeys(stripNot(slot)) is given) return haBad("E-HOST-ARG-TYPE", bad + ": a dictionary slot takes a one-level object literal (§21.3.3 rule 8.4)")
+            if (!hostArgFits(h, slot)) return haBad("E-HOST-ARG-TYPE", bad + ": the parameter `" + v.name + "` is `" + h + "` (§21.3.3 rule 8.4)")
+            return haOk()
+        }
+        if (v.k == 4) {
+            if (slot == "inert-tag") {
+                const ti: string = inertTagIface(v.name)
+                if (ti == "") return haBad("E-HOST-ARG-TYPE", bad + ": `\"" + v.name + "\"` is not on the inert element list (Appendix H.4) — `createElement` makes only an element whose content and attributes run nothing (§21.3.3 rule 8.5)")
+                return { w: hwOk(), tag: ti, url: false, urlLit: "" }
+            }
+            if (slot == "attr-name") {
+                const av: string = attrNameVerdict(v.name)
+                if (av == "exec") return haBad("E-HOST-TARGET-NOT-ALLOWED", "the target of `" + name + "` names the attribute `" + v.name + "` — an event-handler attribute or `srcdoc` installs or runs code, and a `guarded(attr-name)` entry refuses it (§21.3.3 rule 8.5, §5.2's name test)")
+                if (av == "url") return { w: hwOk(), tag: "", url: true, urlLit: v.name }
+                return haOk()
+            }
+            if (slot.startsWith("\"")) {
+                if (slot == "\"" + v.name + "\"") return haOk()
+                return haBad("E-HOST-ARG-TYPE", bad + ": this slot admits only the literal " + slot)
+            }
+            for (const alt of slotAlternatives(slot)) {
+                if (alt == "string") return { w: hwOk(), tag: "", url: false, urlLit: v.name }
+            }
+            return haBad("E-HOST-ARG-TYPE", bad + ": a string literal (§21.3.3 rule 8.4)")
+        }
+        if (v.k == 5) {
+            for (const alt of slotAlternatives(slot)) {
+                if (alt == "number") return haOk()
+                if (alt == "int" && v.name.indexOf(".") < 0 && v.name.indexOf("e") < 0 && v.name.indexOf("E") < 0) return haOk()
+            }
+            return haBad("E-HOST-ARG-TYPE", bad + ": a number literal (§21.3.3 rule 8.4)")
+        }
+        if (v.k == 6) {
+            for (const alt of slotAlternatives(slot)) { if (alt == "bool") return haOk() }
+            return haBad("E-HOST-ARG-TYPE", bad + ": a bool literal (§21.3.3 rule 8.4)")
+        }
+        if (v.k == 7) {
+            const keys: string[] | not = dictKeys(stripNot(slot))
+            if (keys is not) return haBad("E-HOST-ARG-TYPE", bad + ": an object literal fills only a dictionary slot (§21.3.3 rule 8.4, Appendix H.5)")
+            for (const pr of v.props) {
+                let kt: string = ""
+                for (const k of keys) {
+                    const at: int = k.indexOf(":")
+                    let kn: string = k.substring(0, at).trim()
+                    if (kn.endsWith("?")) kn = kn.substring(0, kn.length - 1)
+                    if (kn == pr.name) kt = k.substring(at + 1, k.length).trim()
+                }
+                if (kt == "") return haBad("E-HOST-ARG-TYPE", "the object literal in `" + name + "`'s target has the key `" + pr.name + "`, which the dictionary `" + stripNot(slot) + "` does not have (§21.3.3 rule 8.4, Appendix H.5)")
+                const fa: HArgFit = hostArgFit(te, types, ps, pr.value, kt, name, st)
+                if (fa.w.hcode != "") return fa
+            }
+            return haOk()
+        }
+        return haOk()                                     // rule 4 (parse.scrml)
+    }
+
+    // A struct declared as the result of an interface-valued entry: every field a
+    // `read` entry of `iface` whose type yields the field's (8.4). "ok" / "bad".
+    fn hostStructFromIface(types: TypeInfo[], dr: Type, iface: string) -> string {
+        let t: Type = dr
+        const mi: Type | not = maybeInner(dr)
+        if (mi is given) t = mi
+        const s: Sym | not = namedOf(t)
+        if (s is not) return "bad"
+        const ti: TypeInfo | not = typeInfoOf(types, s)
+        if (ti is not) return "bad"
+        const fs: FieldDef[] | not = structFieldDefs(ti.def)
+        if (fs is not) return "bad"
+        for (const f of fs) {
+            const e: HEntry | not = findEntry(iface, f.sym.hint, "read")
+            if (e is not) return "bad"
+            if (hostResultVerdict(sigResult(e), hostSlotText(types, f.ty)) != "ok") return "bad"
+        }
+        return "ok"
     }
 
     // Why the binding's signature does not cross the boundary in the bootstrap ("" — it does).
@@ -6046,6 +6405,9 @@ ${
         }
         // s473 (§21.3.3 rule 15): a declared `:host` handle is closed
         if (t is given) {
+            // s473-host-allowlist-b (rule 16 as amended): a DOM element type's members stay OPEN
+            // in logic — E-HOST-HANDLE-MEMBER never applies; open untyped DOM access is not built
+            if (isDomElementIface(hostSlotText(env.g.types, unMaybe(t)))) return diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", "member access `." + name + "` on the DOM element type `" + typeName(unMaybe(t)) + "` — DOM members stay open in logic (§21.3.3 rule 16, S473 round 2 item 7), but open, untyped DOM member access is not in the bootstrap; declare a `<host>` binding for it", st)
             if (isHostType(env.g.types, unMaybe(t))) return diagX(env, e, "E-HOST-HANDLE-MEMBER", "member access " + hostMemberText(typeName(unMaybe(t)), name), st)
         }
         return diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", "member access `." + name + "` on a value that is not a struct or an instance is not in bootstrap slice M2", st)
@@ -6361,6 +6723,7 @@ ${
                 const hro: RX = resolveExpr(env, m.obj, not, st0)
                 const hot: Type | not = hro.x.ty
                 if (hot is given) {
+                    if (isDomElementIface(hostSlotText(env.g.types, unMaybe(hot)))) return diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", "the method call `." + m.method + "(…)` on the DOM element type `" + typeName(unMaybe(hot)) + "` — DOM members stay open in logic (§21.3.3 rule 16, S473 round 2 item 7), but open, untyped DOM member access is not in the bootstrap; declare a `<host>` binding for it", hro.st)
                     if (isHostType(env.g.types, unMaybe(hot))) return diagX(env, e, "E-HOST-HANDLE-MEMBER", "the method call " + hostMemberText(typeName(unMaybe(hot)), m.method), hro.st)
                 }
                 // s444: the host-call surface (one call — the clock read) and the
@@ -8477,7 +8840,7 @@ ${
     // one, or a named type declared in the program (never a host type).
     fn sinkKnown(env: Env, t: Type) -> boolean {
         return match t {
-            .Named(sym: s) :> typeInfoOf(env.g.types, s) is given
+            .Named(sym: s) :> sinkKnownNamed(env, s)
             .Seq(elem: el) :> sinkKnown(env, el)
             .Maybe(inner: i) :> sinkKnown(env, i)
             .Int :> true
@@ -8485,6 +8848,16 @@ ${
             .Str :> true
             .Bool :> true
         }
+    }
+
+    // s473-host-allowlist-b: a HOST type — a user `:host` handle or a built-in Appendix H
+    // interface (`HTMLElement`, `Event`, …) — is NOT a scrml type for the sink judgment:
+    // its values are host objects (invariant (1) below), so a computed key on one stays
+    // refused (fail closed), as it was while such a type was unknown.
+    fn sinkKnownNamed(env: Env, s: Sym) -> boolean {
+        const ti: TypeInfo | not = typeInfoOf(env.g.types, s)
+        if (ti is not) return false
+        return !isHostDef(ti.def)
     }
 
     // INVARIANT (the #1663 reviews, F1 / N3) — the by-type half is sound only while
@@ -17598,6 +17971,13 @@ ${
                 out = out.concat([mkDiag(ti.file, ti.span, "E-BOOTSTRAP-REDECLARE", "`SqlError` is the built-in enum of query failures (§19.8.1) — \"The developer SHALL NOT redefine it\" (§19.8.4); name this type something else")])
             }
             // s454 (U1b) — §19.9.10: "the developer SHALL NOT redefine it"
+            // s473-host-allowlist-b (DRAFT §21.3.3 rule 8.1, PA-flagged reading): a user STRUCT or
+            // ENUM named like an Appendix H interface (`type Node:struct` — a tree node) SHADOWS the
+            // built-in host type in its scope, as a user `Error` shadows the built-in enum
+            // (resolveTypeName: a user type wins). It is not refused: the design's "SHALL NOT reuse"
+            // would break every program with a `Node` / `Event` / `Text` type, and shadowing is
+            // fail-closed for rule 8 (a parameter of the user type is no host root,
+            // E-HOST-ROOT-OPAQUE). Only `type Name:host` reusing one is E-SCOPE-010 (parse.scrml).
             if (ti.file != builtinFile() && ti.name == serverCallErrorName()) {
                 out = out.concat([mkDiag(ti.file, ti.span, "E-BOOTSTRAP-REDECLARE", "`ServerCallError` is the built-in enum of a client call's boundary failures (§19.9.10: `Unreachable`, `Refused(status)`, `ServerFault(status)`, `Malformed(reason)`) — \"the developer SHALL NOT redefine it\"; name this type something else")])
             }

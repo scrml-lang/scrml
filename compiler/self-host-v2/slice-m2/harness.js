@@ -11,6 +11,7 @@ export const M2_MODULES = [
   "lex.scrml",
   "severity.scrml",
   "ast.scrml",
+  "host-surface.scrml",
   "css-syntax.scrml",
   "sql.scrml",
   "parse.scrml",
