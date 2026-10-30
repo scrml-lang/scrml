@@ -19,7 +19,9 @@
 //  - §17.4 / §34: E-CONTROL-FLOW-IN-MARKUP for a bare braced `for`/`if`/`while`.
 //  - §17.7.2: E-EACH-ITER-SHAPE, E-EACH-EMPTY-BODY.
 //  - §5.2: E-ATTR-UNQUOTED-OPERATOR.
-//  - §15.7 / §66.15.1: `fixed` carries over (a directive, not a DOM attribute).
+//  - S473 D26: `fixed` is retired — refused by name. S473 D2: an unknown name is emitted only
+//    when hyphenated (a custom element); `protect=` / `authority=` the bootstrap does not
+//    enforce are refused (S473 D1: refuse rather than drop a guarantee).
 //
 // "One list": elements.scrml is impl#1's html-elements.js `isKnownElementName`
 // list ported as data. The first block runs both over every name impl#1 knows
@@ -95,7 +97,15 @@ describe("§4.1 — an unknown element is a compile error, never an inert elemen
     <main><p>x</p></main>
 </program>
 `;
-    expect(codes(src)).toEqual(["E-COMPONENT-035"]);
+    // S473 D2: the unknown name AND each unenforced control on it are refused
+    expect(codes(src)).toEqual(["E-COMPONENT-035", "E-BOOTSTRAP-UNSUPPORTED", "E-BOOTSTRAP-UNSUPPORTED"]);
+  });
+  test("S473 D2 — `protect=` / `authority=` on an HTML or custom element is refused, never written out", () => {
+    expect(codes(P(`        <div protect="secret">x</div>`))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+    expect(codes(P(`        <my-card authority="server">x</my-card>`))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+  });
+  test("S473 D2 — an unknown hyphenated name is a custom element and is emitted", () => {
+    clean(P(`        <x-unknown-thing>x</x-unknown-thing>`));
   });
   test("its attributes and children are still judged", () => {
     expect(codes(P(`        <frobnicate title=@nope><blorp/></frobnicate>`))).toEqual(["E-MARKUP-001", "E-SCOPE-001", "E-MARKUP-001"]);
@@ -192,9 +202,13 @@ describe("§5.2 — E-ATTR-UNQUOTED-OPERATOR", () => {
   });
 });
 
-describe("§15.7 — `fixed` is not written to the DOM", () => {
-  test("probe p15-fixed: no `fixed` attribute in the renders template", () => {
-    const core = clean(P(`        <card title="x"/>`, `    <card title:string/>\n    renders <div class="card"><div class="foot" fixed><p>f</p></div></div>`));
-    expect(JSON.stringify(core)).not.toContain("\"fixed\"");
+describe("S473 D26 — `fixed` is retired: refused by name, never written to the DOM", () => {
+  test("probe p15-fixed: `fixed` in a renders template → E-BOOTSTRAP-UNSUPPORTED naming D26", () => {
+    const r = run(P(`        <card title="x"/>`, `    <card title:string/>\n    renders <div class="card"><div class="foot" fixed><p>f</p></div></div>`));
+    expect(r.diags.map((d) => d.code)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+    expect(r.diags[0].message).toContain("S473 D26");
+  });
+  test("and outside a declaration too", () => {
+    expect(codes(P(`        <div fixed>x</div>`))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
   });
 });

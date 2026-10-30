@@ -15706,11 +15706,20 @@ ${
         return resolveHtml(env, e, st)
     }
 
-    // s473 — inside a user declaration's `renders` (or body), not the program's.
-    fn inDeclRenders(env: Env) -> boolean {
-        const cd: DeclSrc | not = ctxDecl(env)
-        if (cd is not) return false
-        return !cd.isProgram
+    // s473 — an element attribute that is a scrml directive the bootstrap does
+    // not carry: refused by name, never written to the DOM ("" = not one).
+    //  - `fixed` — RETIRED (ruling S473 D26): it used to leak as `fixed=""`.
+    //  - `protect=` / `authority=` — §14.8.9 / §52 confidentiality and authority
+    //    controls the bootstrap does not enforce (ruling S473 D2: "so is any
+    //    element carrying protect= / authority= that the bootstrap doesn't
+    //    enforce"; S473 D1: refuse rather than drop a guarantee). On an HTML or
+    //    custom element they would be written out as plain attributes, the
+    //    guarantee silently gone.
+    fn refusedDirectiveAttr(name: string, tag: string) -> string {
+        const n: string = name.toLowerCase()
+        if (n == "fixed") return "`fixed` on `<" + tag + ">` is retired (ruling S473 D26 — §15.7's non-overridable subtree has no meaning under §66, where a use cannot override a `renders` element, §66.6.9); remove it. It is not an HTML attribute and is never written to the page"
+        if (n == "protect" || n == "authority") return "`" + name + "=` on `<" + tag + ">` is a scrml " + (n == "protect" ? "confidentiality" : "authority") + " control (§14.8.9, §52) that the bootstrap does not enforce — refused, never dropped (ruling S473 D1 / D2): written out as a plain attribute it would guarantee nothing"
+        return ""
     }
 
     // s473 — a bare tag that names a child field of the enclosing declaration —
@@ -16550,7 +16559,11 @@ ${
         }
         for (const a of e.attrs) {
             const ev: string = eventName(a.name)
-            if (isChainAttr(a.name)) {
+            const directive: string = refusedDirectiveAttr(a.name, e.tag)
+            if (directive != "") {
+                // s473 — S473 D26 (`fixed`), S473 D1 / D2 (`protect=` / `authority=`)
+                st = addDiag(st, env.file, a.span, "E-BOOTSTRAP-UNSUPPORTED", directive)
+            } else if (isChainAttr(a.name)) {
                 // s451: `if=` / `else-if=` / `else` (§17.1.1) — chain attributes (chainCheck)
                 st = resolveIfValue(env, a.value, st)
                 st = addAttr(st, a.nid, AttrKind.AIf)
@@ -16659,14 +16672,6 @@ ${
             } else if (valueExpr(a.value) is given) {
                 st = resolveValue(penv, a.value, not, st)
                 st = addAttr(st, a.nid, AttrKind.ABound)
-            } else if (a.name == "fixed" && isNoValue(a.value) && inDeclRenders(env)) {
-                // s473 — §15.7 / §66.15.1: `fixed` in a component's (a
-                // declaration's) renders marks the subtree non-overridable and
-                // "carries over" — a compile-time directive, not an HTML
-                // attribute. A §66 use cannot override a renders element at all
-                // (§66.6.9), so there is nothing for E-COMPONENT-001 to judge; it
-                // is not written to the DOM (no fact — lower emits no attribute).
-                // It used to leak as `fixed=""`.
             } else {
                 st = addAttr(st, a.nid, AttrKind.AStatic)
             }
