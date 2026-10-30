@@ -1,0 +1,8 @@
+<program>
+    type Ph:enum = { A, B }
+    <ph:Ph=.A single>
+        <A rule=.B>Ready to fetch.</>
+        <B rule=.A : "B">
+    </>
+    <main><p id="s"><*ph/></p></main>
+</program>

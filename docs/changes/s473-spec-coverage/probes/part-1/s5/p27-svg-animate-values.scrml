@@ -1,0 +1,3 @@
+<program>
+<svg><a><animate attributeName="href" values="/ok;javascript:alert(1)"/><text>x</text></a></svg>
+</program>

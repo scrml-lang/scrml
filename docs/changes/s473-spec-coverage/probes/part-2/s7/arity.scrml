@@ -1,0 +1,6 @@
+<program>
+    let <out:int=0/>
+    function add(a: int) -> int { return a; }
+    function go() { @out = add(1, 2); @out = add("x"); }
+    <button onclick=go()>${@out}</button>
+</program>

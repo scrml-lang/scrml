@@ -1,0 +1,5 @@
+${ import { shared } from "./lib/st.scrml"; }
+<program>
+    function f() { @shared = { pub: 1, priv: 2 }; }
+    <main><button onclick=f()>f</button><p>${@shared.pub}</p></main>
+</program>

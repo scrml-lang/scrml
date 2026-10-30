@@ -1,0 +1,7 @@
+<program>
+    <card title:string="t">
+        let <n:int=0/>
+    </>
+    renders <p>${title} ${n}</p>
+    <main><*card n=3/><*card class="x"/><*card if=true/></main>
+</program>

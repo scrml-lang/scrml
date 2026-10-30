@@ -1,0 +1,4 @@
+<program>
+    let <n:int=1/>
+    <ul>${ lift <li>one</li>; lift <li>two</li>; }</ul>
+</program>

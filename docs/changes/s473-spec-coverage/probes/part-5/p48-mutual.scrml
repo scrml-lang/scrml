@@ -1,0 +1,6 @@
+<program>
+    let <n:int=0/>
+    fn a(x: int) -> int { if (x <= 0) { return 0; } return b(x - 1); }
+    fn b(x: int) -> int { return a(x); }
+    <main><p>${@n}</p></main>
+</program>

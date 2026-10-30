@@ -1,0 +1,15 @@
+<program db="./app.db">
+    type Ok:struct = { ok: int }
+    let <out:string=""/>
+    let <n:int=0/>
+    function cnt(id: int) -> int {
+        const r: Ok = ?{`SELECT count(*) AS ok FROM t WHERE id = ${id}`}.get() !{ _ :> { return 0; } };
+        return r.ok;
+    }
+    function bump(id: int) -> int {
+        ?{`UPDATE t SET x = x + 1 WHERE id = ${id}`}.run() !{ _ :> { return 0; } };
+        return 1;
+    }
+    function g() { const a: int = cnt(1) !{ _ :> 0 }; const b: int = cnt(2) !{ _ :> 0 }; @n = a + b; }
+    <main><button onclick=g()>x</button></main>
+</program>

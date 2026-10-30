@@ -1,0 +1,9 @@
+<program>
+    type Phase:enum = { Draft, Validated, Submitted }
+    let <phase:Phase=.Draft>
+        <Draft rule=.Validated/>
+        <Validated rule=.Submitted/>
+        <Submitted/>
+    </phase>
+    <main><button onclick={ @phase = .Submitted; }>x</button><p>${@phase}</p></main>
+</program>

@@ -1,0 +1,13 @@
+<program>
+    <card title:string/>
+    renders <div class="card">
+        #{
+            button { color: red; }
+            #go { color: blue; }
+        }
+        <button id="go">${title}</button>
+    </div>
+    <main>
+        <card title="hello"/>
+    </main>
+</program>

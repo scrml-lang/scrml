@@ -1,0 +1,5 @@
+<program>
+    let <n:int=0/>
+    function g() { const xs: int[] = for (i of 0..3) { lift i; }; @n = ~; }
+    <main><p>x</p></main>
+</program>

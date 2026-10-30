@@ -1,0 +1,3 @@
+<program kind="tool">
+${ function main(args: string[]): number { return 0 } }
+</program>

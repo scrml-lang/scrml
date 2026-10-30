@@ -1,0 +1,4 @@
+<program>
+<doc:string="# hi"/>
+<md of=@doc/>
+</program>

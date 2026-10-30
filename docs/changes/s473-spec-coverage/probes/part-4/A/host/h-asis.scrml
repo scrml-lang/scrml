@@ -1,0 +1,7 @@
+<host>
+  mk() -> asIs = window.foo.make()
+</host>
+<program>
+
+<p>x</p>
+</program>

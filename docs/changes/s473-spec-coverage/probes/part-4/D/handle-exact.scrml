@@ -1,0 +1,7 @@
+<program>
+<count:int=0/>
+function handle(request: Request, resolve: (req: Request) => Response) -> Response {
+    return resolve(request);
+}
+<main><p>${@count}</p></main>
+</program>

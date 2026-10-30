@@ -1,0 +1,4 @@
+<program>
+    type Post:struct = { title: string req, n: int }
+    <main><p>hi</p></main>
+</program>

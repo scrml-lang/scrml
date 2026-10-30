@@ -1,0 +1,6 @@
+<program>
+    type K:enum = { Primary, Secondary }
+    <btn kind:K=.Primary/>
+    renders <button>x</button>
+    <main><btn kind="Primary"/><btn kind=.Secondary/></main>
+</program>

@@ -1,0 +1,5 @@
+<program>
+    let <count:int=0/>
+    function bump() { @count = @count + 1; }
+    <button onclick=bump()>${@count}</button>
+</program>

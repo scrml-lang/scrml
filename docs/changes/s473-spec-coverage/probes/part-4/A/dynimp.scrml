@@ -1,0 +1,5 @@
+<program>
+let <n:int=0/>
+function go() { const m = import("./x.js"); @n = 1; }
+<main><button onclick=go()>${@n}</button></main>
+</program>

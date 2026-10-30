@@ -1,0 +1,5 @@
+<program>
+    type Role:enum = { Admin, User }
+    function f() -> string { const x = .Admin; return "a"; }
+    <p>${f()}</p>
+</program>

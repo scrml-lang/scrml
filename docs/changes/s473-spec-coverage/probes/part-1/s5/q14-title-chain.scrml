@@ -1,0 +1,4 @@
+<program>
+function fmt(n:int) -> string { return "a"; }
+<div title=fmt(1).trim()>y</div>
+</program>

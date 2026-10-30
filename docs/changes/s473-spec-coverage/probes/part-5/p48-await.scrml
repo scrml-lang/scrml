@@ -1,0 +1,6 @@
+<program>
+    let <n:int=0/>
+    fn a() -> int { const x: int = await g(); return x; }
+    function g() -> int { return 1; }
+    <main><p>${@n}</p></main>
+</program>

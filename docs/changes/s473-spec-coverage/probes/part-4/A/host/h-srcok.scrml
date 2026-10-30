@@ -1,0 +1,6 @@
+<host src="./g.js">
+  f() -> int
+</host>
+<program>
+<p>${f()}</p>
+</program>

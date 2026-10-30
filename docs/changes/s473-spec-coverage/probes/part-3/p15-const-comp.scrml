@@ -1,0 +1,6 @@
+<program>
+    ${ const Card = <div class="card" props={ title: string }><h2>${title}</h2></div>; }
+    <main>
+        <Card title="x"/>
+    </main>
+</program>

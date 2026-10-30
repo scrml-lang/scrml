@@ -1,0 +1,5 @@
+<program>
+<n:int=0/>
+${ const @d = @n + 1; }
+<p>${@d}</p>
+</program>

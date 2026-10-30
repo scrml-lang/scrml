@@ -1,0 +1,7 @@
+<program>
+    <chip label:string>
+        #{ p { color: navy; } }
+    </chip>
+    renders <span id="chip">${label}</span>
+    <main><chip label="x"/></main>
+</program>

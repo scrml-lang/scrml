@@ -1,0 +1,8 @@
+<program>
+    <program name="compute" lang="go" build="go build">
+        _={
+            package main
+        }=
+    </program>
+    <main><p>"x"</p></main>
+</program>

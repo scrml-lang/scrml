@@ -1,0 +1,9 @@
+<program>
+    type Phase:enum = { Idle, Loading, Done }
+    let <phase:Phase=.Idle/>
+    <machine name=PhaseM for=Phase>
+        .Idle => .Loading
+        .Loading => .Done
+    </>
+    <main><p>${@phase}</p></main>
+</program>

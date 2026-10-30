@@ -1,0 +1,6 @@
+<program>
+let <x:string | not=not/>
+let <y:string="z"/>
+function f() { const v: string | not = @x; given v => { @y = v; } }
+<main><button onclick=f()>go</button></main>
+</program>

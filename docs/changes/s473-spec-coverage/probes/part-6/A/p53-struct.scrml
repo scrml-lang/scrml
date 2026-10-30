@@ -1,0 +1,4 @@
+<program>
+    type Inv:struct = { amount: number(>0 && <10000) }
+    <main><p>hi</p></main>
+</program>

@@ -1,0 +1,3 @@
+<program>
+<div tabPanel={ (t) => <article><h2>x</h2></article> }>y</div>
+</program>

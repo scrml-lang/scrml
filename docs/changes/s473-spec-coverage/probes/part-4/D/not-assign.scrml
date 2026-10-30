@@ -1,0 +1,4 @@
+<program>
+let <y:string=not/>
+<main><p>${@y}</p></main>
+</program>

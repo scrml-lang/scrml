@@ -1,0 +1,14 @@
+<program>
+    type Phase:enum = { Idle, Loading, Done }
+    <phase:Phase=.Idle single>
+        <Idle rule=.Loading/>
+        <Loading rule=.Done/>
+        <Done rule=.Idle/>
+    </>
+    function skip() { @phase = .Done; }
+    function adv() { @phase.advance(.Loading); }
+    <main>
+        <button onclick=skip()>s</button>
+        <button onclick=adv()>a</button>
+    </main>
+</program>

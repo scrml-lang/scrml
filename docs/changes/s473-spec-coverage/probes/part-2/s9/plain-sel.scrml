@@ -1,0 +1,5 @@
+<program>
+    <main>
+        <div>#{ p { color: red; } }<p>x</p></div>
+    </main>
+</program>

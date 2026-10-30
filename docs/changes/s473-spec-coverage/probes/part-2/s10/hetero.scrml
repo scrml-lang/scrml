@@ -1,0 +1,5 @@
+<program>
+    <items:string[]=(["a","b"])/>
+    function f() -> int { const xs = for (x of @items) { lift x; lift 1; }; return xs.length; }
+    <p>x</p>
+</program>

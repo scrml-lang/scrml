@@ -1,0 +1,4 @@
+<program>
+let <s:string=""/>
+<div bind:value=@s></div>
+</program>

@@ -1,0 +1,5 @@
+<program>
+    let <email:string | not=""/>
+    <id:int | string=0/>
+    <main><p>x</p></main>
+</program>

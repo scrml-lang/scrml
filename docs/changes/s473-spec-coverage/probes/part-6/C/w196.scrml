@@ -1,0 +1,26 @@
+<program>
+    type Phase:enum = { Idle, Loading, Done, Failed }
+    <phase:Phase=.Idle single>
+        <Idle    rule=.Loading : "Ready">
+        <Loading rule=(.Done | .Failed) : "Loading…">
+        <Done    rule=.Idle : "Done">
+        <Failed  rule=(.Loading | .Idle) : "Failed — retry?">
+    </>
+    <card title:string>
+        <status:Phase=.Idle>
+            <Idle    rule=.Loading/>
+            <Loading rule=(.Done | .Failed)/>
+            <Done    rule=.Idle/>
+            <Failed  rule=.Idle/>
+        </>
+    </>
+    renders <article><h3>${title}</h3><p>${status}</p></article>
+    function load()   { @phase = .Loading; }
+    function finish() { @phase = .Done; }
+    <main>
+        <p><*phase/></p>
+        <button onclick=load()>Load</button>
+        <card title="One"/>
+        <card title="Two"/>
+    </main>
+</program>

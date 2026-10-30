@@ -1,0 +1,9 @@
+<program>
+    let <count:int=0/>
+    <step=1/>
+    <doubled:int=(@count * 2)/>
+    function a() { @step = 2; }
+    function b() { @doubled = 0; }
+    function c() { @count = "x"; }
+    <main><button onclick=a()>a</button><button onclick=b()>b</button><button onclick=c()>c</button></main>
+</program>

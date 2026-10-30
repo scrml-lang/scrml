@@ -1,0 +1,5 @@
+<program>
+    let <q:string="init"/>
+    function clear() { reset(@q); }
+    <main><p>${@q}</p><button onclick=clear()>x</button></main>
+</program>

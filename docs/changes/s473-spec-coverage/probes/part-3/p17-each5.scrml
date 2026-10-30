@@ -1,0 +1,10 @@
+<program>
+    type T:struct = { name: string }
+    <xs:T[free, replace]=([{ name: "a" }, { name: "a" }])/>
+    <main>
+        <ul><each><li>x</li></each></ul>
+        <ul><each in=@xs></each></ul>
+        <ul><each in=@xs><li>${@.name}</li></each></ul>
+        <ul><each in=@xs key=@.name><li>${@.name}</li></each></ul>
+    </main>
+</program>

@@ -1,0 +1,6 @@
+<program>
+    ${ import { hashPassword } from "scrml:auth"; }
+    let <pw:string="secret"/>
+    <h:string=(hashPassword(@pw))/>
+    <main><p>${@h}</p></main>
+</program>

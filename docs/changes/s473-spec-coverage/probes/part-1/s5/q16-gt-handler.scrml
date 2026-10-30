@@ -1,0 +1,5 @@
+<program>
+let <big:bool=false/>
+let <n:int=0/>
+<button onclick=@big = @n > 1>x</button>
+</program>

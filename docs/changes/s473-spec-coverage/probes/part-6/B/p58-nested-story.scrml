@@ -1,0 +1,6 @@
+<program>
+<p>hi</p>
+<program name="w" story="legacy">
+${ export function s() -> int { return 1; } }
+</program>
+</program>

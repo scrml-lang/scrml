@@ -1,0 +1,4 @@
+<program>
+<each:int=0/>
+<p>${@each}</p>
+</program>

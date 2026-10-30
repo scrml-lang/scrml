@@ -1,0 +1,11 @@
+<program>
+    type E:enum = { Bad }
+    function f(n: int)! E { return n; }
+    let <r:int=0/>
+    <main>
+        <button onclick=f(1)>a</button>
+        <button onclick=f>b</button>
+        <button onclick={ f(1) !{ _ :> @r = 1, }; }>c</button>
+        <div>!{ _ :> "oops" }</div>
+    </main>
+</program>

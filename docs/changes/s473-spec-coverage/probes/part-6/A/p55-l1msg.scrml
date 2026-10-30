@@ -1,0 +1,4 @@
+<program>
+    let <x:string="" req("Please")/>
+    <main><input bind:value=@x/></main>
+</program>

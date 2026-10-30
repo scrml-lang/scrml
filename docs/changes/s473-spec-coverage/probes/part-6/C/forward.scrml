@@ -1,0 +1,5 @@
+<program>
+    <btn label:string ...attrs:button/>
+    renders <button ...attrs>${label}</button>
+    <main><btn label="go" aria-label="x"/></main>
+</program>

@@ -1,0 +1,10 @@
+<program>
+    let <flag:bool=false/>
+    <main>
+        <div>
+            if (@flag) {
+                <p>secret</p>
+            }
+        </div>
+    </main>
+</program>

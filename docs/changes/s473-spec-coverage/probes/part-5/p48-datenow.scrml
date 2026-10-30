@@ -1,0 +1,5 @@
+<program>
+    let <n:int=0/>
+    fn p() -> number { return Date.now(); }
+    <main><p>${@n}</p></main>
+</program>

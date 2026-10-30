@@ -1,0 +1,4 @@
+<program>
+    function f() -> int { return 1; }
+    <main><div onclient:open=f() onserver:message=f()>x</div></main>
+</program>

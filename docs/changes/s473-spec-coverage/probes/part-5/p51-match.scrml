@@ -1,0 +1,10 @@
+<program>
+    type Phase:enum = { Idle, Loading }
+    let <label:string="?"/>
+    <phase:Phase=.Idle single>
+        <Idle rule=.Loading : "i">
+        <Loading rule=.Idle : "l">
+    </>
+    function go() { @phase = .Loading; @label = match @phase { .Idle :> "idle", .Loading :> "loading" }; }
+    <main><p>${@label}</p><button onclick=go()>g</button></main>
+</program>

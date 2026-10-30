@@ -1,0 +1,8 @@
+<program>
+    <signup note:string="n">
+        let <email:string=""/>
+        renders <input bind:value=@email/>
+    </>
+    renders <form id="f"><*email/><button type="submit">s</button></form>
+    <main><*signup/><p>${@signup.isValid}|${@signup.email.isValid}|${@signup.submitted}</p><errors of=@signup.email/></main>
+</program>

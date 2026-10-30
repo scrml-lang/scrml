@@ -1,0 +1,5 @@
+<program>
+    function greet() -> string { return "Hello, " + @name; }
+    <main><p id="g">${greet()}</p></main>
+    let <name:string="world"/>
+</program>

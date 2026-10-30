@@ -1,0 +1,5 @@
+<program>
+    type Pt:struct = { x: int, y: int }
+    let <o:Pt=(0, 0)/>
+    <p>${@o.x}</p>
+</program>

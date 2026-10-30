@@ -1,0 +1,4 @@
+<program>
+    type T:struct = { m: !number, k: (!not && !number) }
+    <p>hi</p>
+</program>

@@ -1,0 +1,14 @@
+<program>
+    type Inner:enum = { A, B }
+    type Phase:enum = { Idle, Busy }
+    <phase:Phase=.Idle single>
+        <Idle rule=.Busy : "i">
+        <Busy rule=.Idle>
+            <sub:Inner=.A>
+                <A rule=.B : "a">
+                <B rule=.A : "b">
+            </>
+        </>
+    </>
+    <main><p><*phase/></p></main>
+</program>

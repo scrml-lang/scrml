@@ -1,0 +1,4 @@
+${ ^{ emit("<p>hi</p>") } }
+<program>
+    <main><p>"x"</p></main>
+</program>

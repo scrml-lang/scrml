@@ -1,0 +1,3 @@
+${
+    export fn floor(x: number) -> int { return 999; }
+}

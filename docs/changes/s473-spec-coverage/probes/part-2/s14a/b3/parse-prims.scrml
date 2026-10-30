@@ -1,0 +1,5 @@
+<program>
+    let <s:string=" 42"/>
+    function a() -> string { const v = int.parse(@s); const w = number.parse("1e400"); const b = bool.parse("true"); if (v is given) { return "y"; } return "n"; }
+    <p>${a()}</p>
+</program>

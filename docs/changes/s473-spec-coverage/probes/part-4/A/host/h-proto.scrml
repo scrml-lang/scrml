@@ -1,0 +1,7 @@
+<host>
+  f() -> string = document.body.__proto__.x
+</host>
+<program>
+
+<p>${f()}</p>
+</program>

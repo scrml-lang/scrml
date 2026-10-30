@@ -1,0 +1,5 @@
+<program>
+    function draw() { log("f"); }
+    function go() { animationFrame(draw); }
+    <main><button onclick=go()>x</button></main>
+</program>

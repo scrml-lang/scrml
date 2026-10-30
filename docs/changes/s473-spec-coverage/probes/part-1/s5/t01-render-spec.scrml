@@ -1,0 +1,4 @@
+<program>
+<userName req> = <input type="text"/>
+<form><userName/></form>
+</program>

@@ -1,0 +1,4 @@
+<program>
+function f() { const g = eval; }
+<button onclick=f()>x</button>
+</program>

@@ -1,0 +1,8 @@
+<program>
+    let <flag:bool=false/>
+    function go() { @flag = true; <p>lost</p>; }
+    <main>
+        <button onclick=go()>g</button>
+        <div>${ <p>hello</p> }</div>
+    </main>
+</program>

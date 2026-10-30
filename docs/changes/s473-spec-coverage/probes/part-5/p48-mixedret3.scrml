@@ -1,0 +1,6 @@
+<program>
+    let <n:int=0/>
+    fn f(k: int) { if (k == 1) { return 1; } return "two"; }
+    function g() { @n = f(2); }
+    <main><p>${@n}</p><button onclick=g()>g</button></main>
+</program>

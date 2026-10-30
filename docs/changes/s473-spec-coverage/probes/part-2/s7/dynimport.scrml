@@ -1,0 +1,5 @@
+<program>
+    let <out:int=0/>
+    function f() -> int { const m = import("./x.js"); return 1; }
+    <p>${@out}</p>
+</program>

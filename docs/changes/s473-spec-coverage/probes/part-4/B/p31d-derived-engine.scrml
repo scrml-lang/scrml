@@ -1,0 +1,9 @@
+<program>
+    type Phase:enum = { A, B }
+    let <n:int=0/>
+    <engine for=Phase derived=(@n)>
+        <A>"a"</A>
+        <B>"b"</B>
+    </engine>
+    <main><p>"x"</p></main>
+</program>

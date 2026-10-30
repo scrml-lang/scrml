@@ -1,0 +1,7 @@
+<program>
+    type Status:enum = { Pending, Active, Closed }
+    type Issue:struct = { id: int, status: Status = .Pending }
+    let <i:Issue={ id: 1 }/>
+    function lab() -> string { return match @i.status { .Pending :> "p", .Active :> "a" }; }
+    <p>${lab()}</p>
+</program>

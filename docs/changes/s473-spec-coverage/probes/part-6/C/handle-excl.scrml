@@ -1,0 +1,10 @@
+<program>
+    let <b:bool=false/>
+    <card title:string/>
+    renders <p>${title}</p>
+    <xs:int[]=([1, 2])/>
+    <main><card as=h title="a" if=@b/><card as=h title="b" if=(!@b)/>
+      <each in=@xs key=x as x><card as=k title="r"/></each>
+      <card as=k title="top"/>
+    </main>
+</program>

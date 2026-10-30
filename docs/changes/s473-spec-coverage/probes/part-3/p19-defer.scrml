@@ -1,0 +1,10 @@
+<program>
+    let <n:int=0/>
+    function f() -> int {
+        defer { @n = @n + 1; }
+        function inner() -> int { return 1; }
+        function inner() -> int { return 2; }
+        return inner();
+    }
+    <main><button onclick={ @n = f(); }>x</button></main>
+</program>

@@ -1,0 +1,6 @@
+<program>
+    <audit:int[free, append]=[]/>
+    function appended(a: int[free, append], e: int) -> int[free, append] { return [...a, e]; }
+    function f() { @audit = appended(@audit, 1); }
+    <main><button onclick=f()>f</button></main>
+</program>

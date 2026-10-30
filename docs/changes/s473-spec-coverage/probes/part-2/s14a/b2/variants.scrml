@@ -1,0 +1,4 @@
+<program>
+    type Role:enum = { Admin, User }
+    <ul>${ for (v of Role.variants) { lift <li>${v}</li>; } }</ul>
+</program>

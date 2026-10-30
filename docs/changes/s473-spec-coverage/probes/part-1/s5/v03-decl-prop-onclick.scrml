@@ -1,0 +1,6 @@
+<program>
+<bt h:string="">
+</>
+renders <button onclick=h>b</button>
+<main><bt h="alert(1)"/></main>
+</program>

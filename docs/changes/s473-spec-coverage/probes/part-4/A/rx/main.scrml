@@ -1,0 +1,5 @@
+${ import { f } from "./b.scrml"; }
+<program>
+let <n:int=0/>
+<main><button onclick=(@n = f(@n))>${@n}</button></main>
+</program>

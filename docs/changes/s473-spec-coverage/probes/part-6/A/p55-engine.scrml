@@ -1,0 +1,8 @@
+<program>
+    type Phase:enum = { A, B }
+    let <phase:Phase=.A oneOf([.A])>
+        <A rule=.B/>
+        <B/>
+    </phase>
+    <main><p>${@phase}</p></main>
+</program>
