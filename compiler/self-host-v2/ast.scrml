@@ -458,8 +458,12 @@ ${
     // as written (`-> waiting T`, `! E`), `hasResult` whether `->` was written,
     // `src` the `<host src=>` value ("" none), `top` the `<host>` stood at an item
     // position (rule 1). Its body is empty: a binding has no scrml body.
+    // s473-host-allowlist-b — `blockTypes`: the `type Name:host` names declared in
+    // the SAME `<host>` block (rule 8.6: a chain rooted at a parameter of one of
+    // them, in a `<host src=>`, is the `src=` world and is not looked up on the
+    // host surface).
     export type AHostBind:struct = { fn: int, span: ASpan, target: AExpr | not, isNew: boolean, waiting: boolean,
-                                     failable: boolean, hasResult: boolean, src: string, isFn: boolean }
+                                     failable: boolean, hasResult: boolean, src: string, isFn: boolean, blockTypes: string[] }
     export type FileAst:struct = { path: string, items: AItem[], errs: ASpan[], lines: int[], dbFns: ADbFn[], hosts: AHostBind[] }
 
     // A diagnostic: a code, its §34 severity, a message, where. (§4 permits
