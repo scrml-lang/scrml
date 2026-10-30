@@ -175,11 +175,11 @@ function docProgram(fns) {
     src: `${DOC}
 <program>
     type P:struct = { let x: int, y: int }
-    let <p:P=({ x: 0, y: 0 })/>
+    let <pt:P=({ x: 0, y: 0 })/>
 ${fns}
     <main>
         <doc as=d title="Spec"/>
-        <p class="pt">\${@p.x},\${@p.y}</p>
+        <p class="pt">\${@pt.x},\${@pt.y}</p>
         <button class="publish" onclick=publish()>publish</button>
         <button class="retract" onclick=retract()>retract</button>
         <button class="bump" onclick=bumpY()>bump</button>
@@ -192,8 +192,8 @@ ${fns}
 
 const DOC_FNS = `    function publish() { @d = { ...@d, phase: .Live }; }
     function retract() { @d = { ...@d, phase: .Draft }; }
-    function bumpY() { @p = { ...@p, y: 5 }; }
-    function replaceP() { @p = { x: 1, y: 2 }; }`;
+    function bumpY() { @pt = { ...@pt, y: 5 }; }
+    function replaceP() { @pt = { x: 1, y: 2 }; }`;
 
 describe("O58 (b) — `@x = { ...@x, f: v }` is the field edit `@x.f = v`; a genuine replace is authoritative", () => {
   test("the spread lowers to field writes: a Transition on the instance's graph field, a FieldAt on the struct", () => {
@@ -255,11 +255,11 @@ function snapshotProgram(fns) {
     src: `${PAIR}
 <program>
     type P:struct = { let x: int, y: int }
-    let <p:P=({ x: 1, y: 2 })/>
+    let <pt:P=({ x: 1, y: 2 })/>
 ${fns}
     <main>
         <pair as=pp/>
-        <p class="pt">\${@p.x},\${@p.y}</p>
+        <p class="pt">\${@pt.x},\${@pt.y}</p>
         <button class="go" onclick=go()>go</button>
     </main>
 </program>
@@ -277,19 +277,19 @@ async function spreadOutcome(fn, tag) {
 }
 
 describe("O58 (b) — a spread reads ONE snapshot: it means what the genuine replace means (§66.10.1, §66.11.3.1)", () => {
-  test("a struct-cell swap `{ ...@p, x: @p.y, y: @p.x }` swaps (the genuine replace's 2,1 — never 2,2)", async () => {
-    const genuine = await spreadOutcome("    function go() { @p = { x: @p.y, y: @p.x }; }", "snap-genuine");
+  test("a struct-cell swap `{ ...@pt, x: @pt.y, y: @pt.x }` swaps (the genuine replace's 2,1 — never 2,2)", async () => {
+    const genuine = await spreadOutcome("    function go() { @pt = { x: @pt.y, y: @pt.x }; }", "snap-genuine");
     expect(genuine.pt).toBe("2,1");
-    const spread = await spreadOutcome("    function go() { @p = { ...@p, x: @p.y, y: @p.x }; }", "snap-swap");
+    const spread = await spreadOutcome("    function go() { @pt = { ...@pt, x: @pt.y, y: @pt.x }; }", "snap-swap");
     expect(spread.pt).toBe(genuine.pt);
   });
 
-  test("override order does not matter: `{ ...@p, y: @p.x + 10, x: @p.y }` → 2,11", async () => {
-    expect((await spreadOutcome("    function go() { @p = { ...@p, y: @p.x + 10, x: @p.y }; }", "snap-order")).pt).toBe("2,11");
+  test("override order does not matter: `{ ...@pt, y: @pt.x + 10, x: @pt.y }` → 2,11", async () => {
+    expect((await spreadOutcome("    function go() { @pt = { ...@pt, y: @pt.x + 10, x: @pt.y }; }", "snap-order")).pt).toBe("2,11");
   });
 
-  test("a value reading its own and a sibling field sees the pre-write snapshot: `{ ...@p, x: @p.x + @p.y, y: @p.x }` → 3,1", async () => {
-    expect((await spreadOutcome("    function go() { @p = { ...@p, x: @p.x + @p.y, y: @p.x }; }", "snap-self")).pt).toBe("3,1");
+  test("a value reading its own and a sibling field sees the pre-write snapshot: `{ ...@pt, x: @pt.x + @pt.y, y: @pt.x }` → 3,1", async () => {
+    expect((await spreadOutcome("    function go() { @pt = { ...@pt, x: @pt.x + @pt.y, y: @pt.x }; }", "snap-self")).pt).toBe("3,1");
   });
 
   test("an INSTANCE spread swap `{ ...@pp, a: @pp.b, b: @pp.a }` swaps (the instance path, not only the struct path)", async () => {
@@ -297,10 +297,10 @@ describe("O58 (b) — a spread reads ONE snapshot: it means what the genuine rep
   });
 
   test("the classification is unchanged: still one contract-checked FieldAt Write per override, values evaluated first", async () => {
-    const { r } = await spreadOutcome("    function go() { @p = { ...@p, x: @p.y, y: @p.x }; }", "snap-shape");
+    const { r } = await spreadOutcome("    function go() { @pt = { ...@pt, x: @pt.y, y: @pt.x }; }", "snap-shape");
     const st = r.core.fns.find((f) => f.sym.hint === "go").body.stmts;
     // S440: the instance is resolved once (Let inst = Handle(…)); the pre-statement value is read
-    // once (Let before = @p, strict snapshot); the writes are grouped in one all-or-nothing Commit
+    // once (Let before = @pt, strict snapshot); the writes are grouped in one all-or-nothing Commit
     // through the instance local (was: Let, Let, Write, Write)
     expect(st.map((s) => s.variant)).toEqual(["Let", "Let", "Let", "Let", "Commit"]);
     expect(st[0].data.init.variant).toBe("Handle");
@@ -321,10 +321,10 @@ describe("O58 (b) — a spread reads ONE snapshot: it means what the genuine rep
     expect(ws[1].data.value).toEqual({ variant: "Local", data: { sym: st[3].data.sym } });
   });
 
-  test("a LONE override stays a single Write (no Commit); a snapshot Let only when its value reads `@p`", async () => {
-    const lone = (await spreadOutcome("    function go() { @p = { ...@p, x: 4 }; }", "snap-lone")).r;
+  test("a LONE override stays a single Write (no Commit); a snapshot Let only when its value reads `@pt`", async () => {
+    const lone = (await spreadOutcome("    function go() { @pt = { ...@pt, x: 4 }; }", "snap-lone")).r;
     expect(lone.core.fns.find((f) => f.sym.hint === "go").body.stmts.map((s) => s.variant)).toEqual(["Write"]);
-    const reads = (await spreadOutcome("    function go() { @p = { ...@p, x: @p.y }; }", "snap-lone-reads")).r;
+    const reads = (await spreadOutcome("    function go() { @pt = { ...@pt, x: @pt.y }; }", "snap-lone-reads")).r;
     expect(reads.core.fns.find((f) => f.sym.hint === "go").body.stmts.map((s) => s.variant)).toEqual(["Let", "Write"]);
   });
 });
@@ -358,11 +358,11 @@ function gateProgram(fns) {
     src: `${GATES}
 <program>
     type P:struct = { let x: int, y: int }
-    let <p:P=({ x: 1, y: 2 })/>
+    let <pt:P=({ x: 1, y: 2 })/>
 ${fns}
     <main>
         <gate as=g title="G"/>
-        <p class="pt">\${@p.x},\${@p.y}</p>
+        <p class="pt">\${@pt.x},\${@pt.y}</p>
         <button class="live" onclick=live()>live</button>
         <button class="go" onclick=go()>go</button>
     </main>
@@ -444,8 +444,8 @@ describe("RULED S440 — a spread write is ALL-OR-NOTHING on a runtime refusal",
     expect(texts()).toEqual(["a: Draft/Draft/n0", "b: Live/Live/n0"]);     // only row b, both fields
   });
 
-  test("a spread with ZERO overrides (`@g = { ...@g }`, `@p = { ...@p }`) is the same value: nothing is written", () => {
-    const r = run([gateProgram(`${LIVE}\n    function go() { @g = { ...@g };\n @p = { ...@p }; }`)]);
+  test("a spread with ZERO overrides (`@g = { ...@g }`, `@pt = { ...@pt }`) is the same value: nothing is written", () => {
+    const r = run([gateProgram(`${LIVE}\n    function go() { @g = { ...@g };\n @pt = { ...@pt }; }`)]);
     expect(codes(r)).toEqual([]);
     expect(r.core.fns.find((f) => f.sym.hint === "go").body.stmts).toEqual([]);
   });
@@ -506,14 +506,14 @@ const TRIPLE = (fns) => ({
   path: "triple.scrml",
   src: `<program>
     type P:struct = { let x: int, let y: int, let z: int }
-    let <p:P=({ x: 1, y: 2, z: 3 })/>
-    function bump() -> int { @p.z = 99;
+    let <pt:P=({ x: 1, y: 2, z: 3 })/>
+    function bump() -> int { @pt.z = 99;
  return 5; }
-    function touch() -> int { @p.x = 99;
+    function touch() -> int { @pt.x = 99;
  return 7; }
 ${fns}
     <main>
-        <p class="pt">\${@p.x},\${@p.y},\${@p.z}</p>
+        <p class="pt">\${@pt.x},\${@pt.y},\${@pt.z}</p>
         <button class="go" onclick=go()>go</button>
     </main>
 </program>
@@ -530,20 +530,20 @@ async function tripleAfter(fn, tag) {
 }
 
 describe("RULED S440 — STRICT SNAPSHOT: every `@x` read in a spread-override literal sees the pre-statement value", () => {
-  test("the bump case `{ ...@p, x: bump(), y: @p.z }` (bump writes @p.z = 99) → 5,3,99 (was 5,99,99)", async () => {
-    expect(await tripleAfter("    function go() { @p = { ...@p, x: bump(), y: @p.z }; }", "strict-bump")).toBe("5,3,99");
+  test("the bump case `{ ...@pt, x: bump(), y: @pt.z }` (bump writes @pt.z = 99) → 5,3,99 (was 5,99,99)", async () => {
+    expect(await tripleAfter("    function go() { @pt = { ...@pt, x: bump(), y: @pt.z }; }", "strict-bump")).toBe("5,3,99");
   });
 
-  test("a swap with a call in between `{ ...@p, x: @p.y, y: touch(), z: @p.x }` (touch writes @p.x = 99) → 2,7,1 (was 2,7,99)", async () => {
-    expect(await tripleAfter("    function go() { @p = { ...@p, x: @p.y, y: touch(), z: @p.x }; }", "strict-swap-call")).toBe("2,7,1");
+  test("a swap with a call in between `{ ...@pt, x: @pt.y, y: touch(), z: @pt.x }` (touch writes @pt.x = 99) → 2,7,1 (was 2,7,99)", async () => {
+    expect(await tripleAfter("    function go() { @pt = { ...@pt, x: @pt.y, y: touch(), z: @pt.x }; }", "strict-swap-call")).toBe("2,7,1");
   });
 
-  test("rotate-3 `{ ...@p, x: @p.y, y: @p.z, z: @p.x }` → 2,3,1", async () => {
-    expect(await tripleAfter("    function go() { @p = { ...@p, x: @p.y, y: @p.z, z: @p.x }; }", "strict-rotate3")).toBe("2,3,1");
+  test("rotate-3 `{ ...@pt, x: @pt.y, y: @pt.z, z: @pt.x }` → 2,3,1", async () => {
+    expect(await tripleAfter("    function go() { @pt = { ...@pt, x: @pt.y, y: @pt.z, z: @pt.x }; }", "strict-rotate3")).toBe("2,3,1");
   });
 
-  test("a LONE override reading after a call in its own value `{ ...@p, y: bump() + @p.z }` → 1,8,99 (was 1,104,99)", async () => {
-    expect(await tripleAfter("    function go() { @p = { ...@p, y: bump() + @p.z }; }", "strict-lone")).toBe("1,8,99");
+  test("a LONE override reading after a call in its own value `{ ...@pt, y: bump() + @pt.z }` → 1,8,99 (was 1,104,99)", async () => {
+    expect(await tripleAfter("    function go() { @pt = { ...@pt, y: bump() + @pt.z }; }", "strict-lone")).toBe("1,8,99");
   });
 
   test("an INSTANCE spread: `{ ...@g, note: mark(), stage: @g.phase }` (mark moves phase Draft → Live) — stage gets the pre-statement Draft; mark's phase write survives", async () => {
@@ -667,13 +667,13 @@ describe("RULED S440 — a duplicate override key is a compile error (E-STRUCT-D
     expect(r.diags[0].message).toContain("`phase` is named twice");
   });
 
-  test("a STRUCT-CELL spread `{ ...@p, x: 5, x: 6 }` is refused", () => {
-    expect(codes(run([TRIPLE("    function go() { @p = { ...@p, x: 5, x: 6 }; }")]))).toEqual(["E-STRUCT-DUPLICATE-KEY"]);
+  test("a STRUCT-CELL spread `{ ...@pt, x: 5, x: 6 }` is refused", () => {
+    expect(codes(run([TRIPLE("    function go() { @pt = { ...@pt, x: 5, x: 6 }; }")]))).toEqual(["E-STRUCT-DUPLICATE-KEY"]);
   });
 
   test("three of one key report twice; distinct keys are fine", () => {
-    expect(codes(run([TRIPLE("    function go() { @p = { ...@p, x: 5, y: 1, x: 6, x: 7 }; }")]))).toEqual(["E-STRUCT-DUPLICATE-KEY", "E-STRUCT-DUPLICATE-KEY"]);
-    expect(codes(run([TRIPLE("    function go() { @p = { ...@p, x: 5, y: 6 }; }")]))).toEqual([]);
+    expect(codes(run([TRIPLE("    function go() { @pt = { ...@pt, x: 5, y: 1, x: 6, x: 7 }; }")]))).toEqual(["E-STRUCT-DUPLICATE-KEY", "E-STRUCT-DUPLICATE-KEY"]);
+    expect(codes(run([TRIPLE("    function go() { @pt = { ...@pt, x: 5, y: 6 }; }")]))).toEqual([]);
   });
 });
 

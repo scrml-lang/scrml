@@ -11,14 +11,15 @@
 // ast.scrml `newDiag` is the one Diag constructor and reads `severityOf`. The
 // code's prefix is not the severity (§34 makes E-DG-002 a Warning, many W- Info).
 //
-// 254 codes with a §34 severity; 0 PROVISIONAL (no row yet, severity from the
-// generator's PROVISIONAL table: none); 36 without one (FAIL-CLOSED Error):
+// 258 codes with a §34 severity; 0 PROVISIONAL (no row yet, severity from the
+// generator's PROVISIONAL table: none); 39 without one (FAIL-CLOSED Error):
 //   E-ASSIGN-CONST — no §34 row
 //   E-ASSIGN-POSITION — no §34 row
 //   E-ASSIGN-TARGET — no §34 row
 //   E-BOOTSTRAP-REDECLARE — no §34 row
 //   E-BOOTSTRAP-UNSUPPORTED — no §34 row
 //   E-DECL-AS — no §34 row
+//   E-DECL-ELEMENT-NAME-COLLIDES — no §34 row
 //   E-DECL-FIELD-TAG-NEEDS-STAR — no §34 row
 //   E-DECL-HANDLE-NOT-NARROWED — no §34 row
 //   E-DECL-ILLEGAL-FIELD-NAME — no §34 row
@@ -31,6 +32,8 @@
 //   E-DECL-STAR-PREDEFINED — no §34 row
 //   E-DECL-STAR-REF-ATTR-WRITE — no §34 row
 //   E-DECL-STATE-CHILD — no §34 row
+//   E-EACH-EMPTY-BODY — no §34 row
+//   E-EACH-ITER-SHAPE — no §34 row
 //   E-ENGINE-INVALID-TRANSITION — §34 Severity "Runtime" is not a compile severity
 //   E-ERROR-016 — no §34 row
 //   E-FIELD-PRIVATE-WRITE — no §34 row
@@ -89,6 +92,7 @@ ${
             "E-ATTR-QUOTED-HANDLER" :> Severity.Error
             "E-ATTR-STATIC-EXECUTABLE" :> Severity.Error
             "E-ATTR-STYLESHEET-HREF" :> Severity.Error
+            "E-ATTR-UNQUOTED-OPERATOR" :> Severity.Error
             "E-AUTH-ATTR-INVALID" :> Severity.Error
             "E-CALL-ARITY" :> Severity.Error
             "E-CHANNEL-OUTSIDE-PROGRAM" :> Severity.Error
@@ -99,6 +103,7 @@ ${
             "E-COMPONENT-NAME-DUPLICATE" :> Severity.Error
             "E-COND-NOT-BOOLEAN" :> Severity.Error
             "E-CONDITION-HEAD-UNPARENTHESIZED" :> Severity.Error
+            "E-CONTROL-FLOW-IN-MARKUP" :> Severity.Error
             "E-CSS-SYNTAX" :> Severity.Error
             "E-CTRL-001" :> Severity.Error
             "E-CTRL-002" :> Severity.Error
@@ -202,11 +207,13 @@ ${
             "E-LOOP-008" :> Severity.Error
             "E-LOOP-DO-WHILE-RETIRED" :> Severity.Error
             "E-LOOP-WHILE-RETIRED" :> Severity.Error
+            "E-MARKUP-001" :> Severity.Error
             "E-MATCH-012" :> Severity.Error
             "E-MATCH-ARM-SEPARATOR" :> Severity.Error
             "E-MATCH-ARM-SHORTHAND-AMBIGUOUS" :> Severity.Error
             "E-MATCH-BARE-BINDER" :> Severity.Error
             "E-MW-002" :> Severity.Error
+            "E-NAME-COLLIDES-RESERVED" :> Severity.Error
             "E-NAME-COLLIDES-RESERVED-PREFIX" :> Severity.Error
             "E-NAME-COLLIDES-STATE" :> Severity.Error
             "E-OUTLET-OUTSIDE-SHELL" :> Severity.Error

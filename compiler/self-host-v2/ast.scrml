@@ -481,6 +481,42 @@ ${
 
     export fn mkSpan(start: int, end: int) -> ASpan { return { start: start, end: end } }
 
+    // s473 (#1678 review F9) — an unquoted attribute value that reads as a
+    // hyphenated WORD (`class=foo-bar`, `data-x=a-b`: plain names joined by `-`).
+    // It parses as a subtraction of names; when those names resolve to nothing it
+    // is refused there (E-SCOPE-001), so the parser leaves its operator report to
+    // analyze (resolveHtml), which adds E-ATTR-UNQUOTED-OPERATOR only when the
+    // names DO resolve — one report per fault.
+    export fn isHyphenWordExpr(e: AExpr) -> boolean {
+        const k: AExprK = e.k
+        return match k {
+            .Name(name: n) :> true
+            .Binary(op: o, l: l, r: r) :> o == BinOp.Sub && isHyphenWordExpr(l) && isHyphenWordExpr(r)
+            .Recovered :> false
+            .Sql(q: q) :> false
+            .Template(quasis: qs) :> false
+            .Foreign(f: fb0) :> false
+            .At(name: n) :> false
+            .AtItem :> false
+            .Num(raw: r) :> false
+            .Str(v: s) :> false
+            .Bool(v: b) :> false
+            .NotLit :> false
+            .Variant(name: n) :> false
+            .Member(obj: o) :> false
+            .Call(callee: c) :> false
+            .Unary(op: o) :> false
+            .Ternary(test: t) :> false
+            .Assign(target: t) :> false
+            .ArrayLit(elems: es) :> false
+            .ObjectLit(props: ps) :> false
+            .Spread(e: s) :> false
+            .Index(obj: o) :> false
+            .Lambda(params: ps) :> false
+            .Handled(h: h) :> false
+        }
+    }
+
     // s472 — THE path prefix a driver names stdlib files under
     // (`scrml:format/index.scrml`); link.scrml `stdlibPrefix` and the parser's
     // nested-import judgement both read it.

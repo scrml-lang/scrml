@@ -29,19 +29,19 @@ const diagsIn = (decls, markup = "<p>x</p>") => run([LIB(), app(decls, markup)])
 // items #1 "a wrong-typed FIELD write is E-TYPE-031 too".
 // ---------------------------------------------------------------------------
 describe("#1 — cell and field writes are type-checked (E-TYPE-031)", () => {
-  const P = "    type P:struct = { let x: int, let s: string }\n    let <p:P=({ x: 1, s: \"a\" })/>\n";
+  const P = "    type P:struct = { let x: int, let s: string }\n    let <pt:P=({ x: 1, s: \"a\" })/>\n";
   test("E-TYPE-031 — a string into an `int` cell (the ruling's own example)", () => {
     expect(inApp("    let <x:int=0/>\n    function f() { @x = \"oops\"; }")).toEqual(["E-TYPE-031"]);
   });
-  test("E-TYPE-031 — a string into an `int` FIELD of a struct cell (`@p.x = \"oops\"`)", () => {
-    expect(inApp(P + "    function f() { @p.x = \"oops\"; }")).toEqual(["E-TYPE-031"]);
+  test("E-TYPE-031 — a string into an `int` FIELD of a struct cell (`@pt.x = \"oops\"`)", () => {
+    expect(inApp(P + "    function f() { @pt.x = \"oops\"; }")).toEqual(["E-TYPE-031"]);
   });
   test("E-TYPE-031 — a number into a `string` field of a declaration instance (`@country.value = 5`)", () => {
     expect(inApp("    function f() { @country.value = 5; }", "<dropdown as=country label=\"1\" options=([\"a\"])/>")).toEqual(["E-TYPE-031"]);
   });
   test("twins silent — the right type in each position", () => {
     expect(inApp("    let <x:int=0/>\n    function f() { @x = 7; }")).toEqual([]);
-    expect(inApp(P + "    function f() { @p.x = 2;\n @p.s = \"b\"; }")).toEqual([]);
+    expect(inApp(P + "    function f() { @pt.x = 2;\n @pt.s = \"b\"; }")).toEqual([]);
     expect(inApp("    function f() { @country.value = \"CA\"; }", "<dropdown as=country label=\"1\" options=([\"a\"])/>")).toEqual([]);
   });
   test("provable-or-silent — an unannotated parameter's value (untyped → Unknown) is never checked", () => {
@@ -49,7 +49,7 @@ describe("#1 — cell and field writes are type-checked (E-TYPE-031)", () => {
     expect(inApp("    let <x:int=0/>\n    function f(a) { @x = a; }")).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
   });
   test("the message names the target's declared type and the value's", () => {
-    const d = diagsIn(P + "    function f() { @p.x = \"oops\"; }");
+    const d = diagsIn(P + "    function f() { @pt.x = \"oops\"; }");
     expect(d[0].message).toContain("`int`");
     expect(d[0].message).toContain("`string`");
   });
@@ -99,7 +99,7 @@ describe("#3 — `<each in=>` over a non-sequence (E-EACH-NOT-SEQUENCE)", () => 
   test("E-EACH-NOT-SEQUENCE — an int, a number, a bool, a string, a struct, an enum, an instance", () => {
     for (const [decls, src] of [
       ["    <n:int=3/>", "@n"], ["    <r:number=0.5/>", "@r"], ["    <b:bool=true/>", "@b"], ["    <s:string=\"ab\"/>", "@s"],
-      ["    type P:struct = { x: int }\n    <p:P=({ x: 1 })/>", "@p"], ["    <o:Openness=.Closed/>", "@o"],
+      ["    type P:struct = { x: int }\n    <pt:P=({ x: 1 })/>", "@pt"], ["    <o:Openness=.Closed/>", "@o"],
     ]) {
       expect(inApp(decls, `<each in=${src} as c><p>x</p></each>`)).toEqual(["E-EACH-NOT-SEQUENCE"]);
     }
@@ -211,33 +211,33 @@ describe("#6 — a duplicate top-level `function` (E-SCOPE-010)", () => {
 // key in any struct literal (plain, nested, or the spread-override shape) is a compile error".
 // ---------------------------------------------------------------------------
 describe("duplicate struct-literal keys (E-STRUCT-DUPLICATE-KEY)", () => {
-  const P = "    type P:struct = { let x: int, let y: int }\n    let <p:P=({ x: 1, y: 2 })/>\n";
+  const P = "    type P:struct = { let x: int, let y: int }\n    let <pt:P=({ x: 1, y: 2 })/>\n";
   const N = "    type Q:struct = { let a: int }\n    type R:struct = { let q: Q, let b: int }\n    let <r:R=({ q: { a: 1 }, b: 2 })/>\n";
   test("a PLAIN literal written to a cell — the ruling's own `{ x: 5, x: 6, y: 1 }`", () => {
-    expect(inApp(P + "    function f() { @p = { x: 5, x: 6, y: 1 }; }")).toEqual(["E-STRUCT-DUPLICATE-KEY"]);
+    expect(inApp(P + "    function f() { @pt = { x: 5, x: 6, y: 1 }; }")).toEqual(["E-STRUCT-DUPLICATE-KEY"]);
   });
   test("a NESTED literal", () => {
     expect(inApp(N + "    function f() { @r = { q: { a: 1, a: 2 }, b: 3 }; }")).toEqual(["E-STRUCT-DUPLICATE-KEY"]);
   });
   test("a literal as a declaration's initializer, and as an annotated local's", () => {
-    expect(inApp("    type P:struct = { x: int, y: int }\n    <p:P=({ x: 1, x: 2, y: 3 })/>")).toEqual(["E-STRUCT-DUPLICATE-KEY"]);
+    expect(inApp("    type P:struct = { x: int, y: int }\n    <pt:P=({ x: 1, x: 2, y: 3 })/>")).toEqual(["E-STRUCT-DUPLICATE-KEY"]);
     expect(inApp("    type P:struct = { x: int, y: int }\n    function f() { let v: P = { x: 1, y: 2, y: 3 }; }")).toEqual(["E-STRUCT-DUPLICATE-KEY"]);
   });
   test("a literal with NO struct context still reports its duplicate (beside the context error)", () => {
     expect(inApp("    function f() { let v = { x: 1, x: 2 }; }")).toEqual(["E-STRUCT-DUPLICATE-KEY", "E-TYPE-STRUCT-CONTEXT"]);
   });
   test("three of one key report twice, at the repeats; the message names the key", () => {
-    const d = diagsIn(P + "    function f() { @p = { x: 5, y: 1, x: 6, x: 7 }; }");
+    const d = diagsIn(P + "    function f() { @pt = { x: 5, y: 1, x: 6, x: 7 }; }");
     expect(d.map((x) => x.code)).toEqual(["E-STRUCT-DUPLICATE-KEY", "E-STRUCT-DUPLICATE-KEY"]);
     expect(d[0].message).toContain("`x` is named twice");
   });
   test("twins silent — each key once (plain, nested, initializer)", () => {
-    expect(inApp(P + "    function f() { @p = { x: 5, y: 1 }; }")).toEqual([]);
+    expect(inApp(P + "    function f() { @pt = { x: 5, y: 1 }; }")).toEqual([]);
     expect(inApp(N + "    function f() { @r = { q: { a: 1 }, b: 3 }; }")).toEqual([]);
-    expect(inApp("    type P:struct = { x: int, y: int }\n    <p:P=({ x: 1, y: 3 })/>")).toEqual([]);
+    expect(inApp("    type P:struct = { x: int, y: int }\n    <pt:P=({ x: 1, y: 3 })/>")).toEqual([]);
   });
   test("the retired bootstrap-local code is gone", () => {
-    expect(inApp(P + "    function f() { @p = { ...@p, x: 5, x: 6 }; }")).toEqual(["E-STRUCT-DUPLICATE-KEY"]);
+    expect(inApp(P + "    function f() { @pt = { ...@pt, x: 5, x: 6 }; }")).toEqual(["E-STRUCT-DUPLICATE-KEY"]);
   });
 });
 
@@ -657,7 +657,7 @@ describe("#9 — `int` enforced; `/` on two ints names `div`", () => {
   });
   test("r2 F4 — a hex / binary / octal literal is an INTEGER literal (`0xE`'s `E` is a digit, not an exponent)", () => {
     // (the slice lexer scans hex only — `0b…` / `0o…` are E-PARSE-TRAILING there; the classifier covers them anyway)
-    expect(inApp("    let <q:int=0xE/>\n    let <p:int=0XFE/>\n    function f() { @q = 0xFE; }")).toEqual([]);
+    expect(inApp("    let <q:int=0xE/>\n    let <pt:int=0XFE/>\n    function f() { @q = 0xFE; }")).toEqual([]);
     expect(inApp(CELLS + "    function f() { @r = 0xFE / 2; }")).toEqual(["E-INT-DIVISION"]);
     // twin: a real exponent stays a non-integer literal (`1e3` into `int` is bryan's open question — unchanged)
     expect(inApp("    let <q:int=1e3/>")).toEqual(["E-TYPE-031"]);
@@ -683,7 +683,7 @@ describe("#9 — `int` enforced; `/` on two ints names `div`", () => {
   test("r4 (c) — `int` enforced at ALL initializers (non-literal local / cell / use-site, struct-literal fields, `int[]` elements)", () => {
     expect(inApp(CELLS + "    function f() { let k: int = @r; }")).toEqual(["E-TYPE-031"]);
     expect(inApp(CELLS + "    let <q:int=(@r)/>")).toEqual(["E-TYPE-031"]);
-    expect(inApp("    type P:struct = { x: int }\n    <p:P=({ x: 2.5 })/>")).toEqual(["E-TYPE-031"]);
+    expect(inApp("    type P:struct = { x: int }\n    <pt:P=({ x: 2.5 })/>")).toEqual(["E-TYPE-031"]);
     expect(inApp("    <ks:int[]=([1.5])/>")).toEqual(["E-TYPE-031"]);
     expect(inApp("    function f() { let ks: int[] = [1, 2.5]; }")).toEqual(["E-TYPE-031"]);
     expect(codes([boxLibS("export <box n:int=0/>\nrenders <p>${n}</p>\n"), boxAppS("<box n=(0.5 * 2)/>")])).toEqual(["E-TYPE-031"]);

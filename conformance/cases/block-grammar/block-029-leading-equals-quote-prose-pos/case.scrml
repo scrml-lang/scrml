@@ -1,2 +1,2 @@
-<div id="wrap"><note id="a">= don't</note><b id="b">it's</b></div>
-<div id="wrap2"><cell id="c">= 5" wide</cell><cell id="d">12" tall</cell></div>
+<div id="wrap"><span id="a">= don't</span><b id="b">it's</b></div>
+<div id="wrap2"><span id="c">= 5" wide</span><span id="d">12" tall</span></div>

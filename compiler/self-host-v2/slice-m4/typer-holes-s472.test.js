@@ -44,7 +44,7 @@ const shows = async (src, want) => {
 };
 const prog = (decls, markup = `<p id="o">x</p>`) => `<program>\n${decls}\n    <main>${markup}</main>\n</program>\n`;
 const C = `    type C:enum = { A, B }\n    let <c:C=.A/>`;
-const P = `    type P:struct = { n: int }\n    let <p:P=({ n: 1 })/>`;
+const P = `    type P:struct = { n: int }\n    let <pt:P=({ n: 1 })/>`;
 
 // ---------------------------------------------------------------------------
 describe("F1 — a literal initializer is checked against every annotation type (one rule)", () => {
@@ -58,7 +58,7 @@ describe("F1 — a literal initializer is checked against every annotation type 
     ["a cell `C | not` given an int literal", `    type C:enum = { A, B }\n    let <x:C | not=5/>`, "E-TYPE-031"],
     ["a cell of a struct given an int literal", `    type P:struct = { n: int }\n    let <x:P=5/>`, "E-TYPE-031"],
     ["a declaration field `C | not` given an int literal", `    type C:enum = { A, B }\n    <box k:C | not=5>\n    </>\n    renders <p>x</p>`, "E-TYPE-031"],
-    ["a struct literal's `int | not` field given a string literal", `    type P:struct = { n: int | not }\n    let <p:P=({ n: "s" })/>`, "E-TYPE-031"],
+    ["a struct literal's `int | not` field given a string literal", `    type P:struct = { n: int | not }\n    let <pt:P=({ n: "s" })/>`, "E-TYPE-031"],
     ["a local `int | not` given a string literal", `    fn f() -> int {\n        let y: int | not = "s";\n        return 1;\n    }`, "E-TYPE-031"],
     ["a local of an enum given a string literal", `    type C:enum = { A, B }\n    fn f() -> int {\n        const y: C = "A";\n        return 1;\n    }`, "E-TYPE-031"],
   ];
@@ -77,7 +77,7 @@ describe("F1 — a literal initializer is checked against every annotation type 
     expect(d[0].message).toContain("§7.5.1");
   });
   test("legal twins — each annotation given a literal that fits compiles and runs", async () => {
-    await shows(prog(`    type C:enum = { A, B }\n    type P:struct = { n: int }\n    let <a:int | not=5/>\n    let <b:number | not=5/>\n    let <c:C | not=.A/>\n    let <d:int | not=not/>\n    let <p:P=({ n: 1 })/>\n    let <s:string | not="hi"/>\n    fn g() -> string {\n        let y: int | not = 3;\n        const z: C = .B;\n        if (@a is given) { return \`a\${@a}\`; }\n        return "none";\n    }`,
+    await shows(prog(`    type C:enum = { A, B }\n    type P:struct = { n: int }\n    let <a:int | not=5/>\n    let <b:number | not=5/>\n    let <c:C | not=.A/>\n    let <d:int | not=not/>\n    let <pt:P=({ n: 1 })/>\n    let <s:string | not="hi"/>\n    fn g() -> string {\n        let y: int | not = 3;\n        const z: C = .B;\n        if (@a is given) { return \`a\${@a}\`; }\n        return "none";\n    }`,
       `<p id="o">\${g()}</p>`), "a5");
   });
   test("legal twin — the ADMIN shape with a bool literal renders the value it was given", async () => {
@@ -97,7 +97,7 @@ describe("F2 — a match whose arms disagree is E-TYPE-001 (§18.4 rule 3)", () 
     ["into a `string` return (int arm first)", `${C}\n    fn g() -> string { return match @c { .A :> 5, .B :> "b", }; }`],
     ["a `{ lift … }` block arm", `    let <n:int=1/>\n    fn g() -> int { return match @n { 1 :> { lift "one"; }, else :> 0, }; }`],
     ["a literal-arm match", `    let <s:string="a"/>\n    fn g() -> int { return match @s { "a" :> "A", else :> 0, }; }`],
-    ["in markup text, a struct arm beside a string arm", `${C}\n${P}`, `<p id="o">\${match @c { .A :> @p, .B :> "b", }}</p>`],
+    ["in markup text, a struct arm beside a string arm", `${C}\n${P}`, `<p id="o">\${match @c { .A :> @pt, .B :> "b", }}</p>`],
     ["in markup text, two primitive arms of different types", C, `<p id="o">\${match @c { .A :> 1, .B :> "x", }}</p>`],
   ];
   for (const [name, decls, markup] of BAD) {
@@ -127,8 +127,8 @@ describe("F2 — a ternary whose arms disagree is a choice; every typed position
     ["as a return", `${B}\n    fn g() -> int { return ${T}; }`, [], "E-TYPE-031"],
     ["through an UNANNOTATED local into an argument", `${B}\n    fn h(x: int) -> int { return x; }\n    fn g() -> int {\n        const v = ${T};\n        return h(v);\n    }`, [], "E-TYPE-031"],
     ["as an operand of `+` (a number and a string)", `${B}\n    fn k() -> string {\n        const v = ${T};\n        const w = v + 1;\n        return "x";\n    }`, [], "E-OPERATOR-OPERAND-TYPE"],
-    ["a struct arm in a template slot", `${B}\n${P}\n    fn g() -> string { return \`v \${@b ? @p : "x"}\`; }`, [], "E-TEXT-NON-PRIMITIVE"],
-    ["a struct arm in markup text", `${B}\n${P}`, [`<p id="o">\${@b ? @p : "x"}</p>`], "E-TEXT-NON-PRIMITIVE"],
+    ["a struct arm in a template slot", `${B}\n${P}\n    fn g() -> string { return \`v \${@b ? @pt : "x"}\`; }`, [], "E-TEXT-NON-PRIMITIVE"],
+    ["a struct arm in markup text", `${B}\n${P}`, [`<p id="o">\${@b ? @pt : "x"}</p>`], "E-TEXT-NON-PRIMITIVE"],
     ["an element of a mixed array literal into `int[]`", `    fn g() -> int {\n        const xs: int[] = [1, "a"];\n        return 1;\n    }`, [], "E-TYPE-031"],
   ];
   for (const [name, decls, markup, code] of BAD) {
@@ -156,16 +156,16 @@ describe("F2 — a ternary whose arms disagree is a choice; every typed position
 // ---------------------------------------------------------------------------
 describe("O2 — markup text is a text sink (§14.13.2): a known non-primitive is E-TEXT-NON-PRIMITIVE", () => {
   const BAD = [
-    ["a struct", P, `<p id="o">\${@p}</p>`],
+    ["a struct", P, `<p id="o">\${@pt}</p>`],
     ["a tape", `    <xs:int[]=([1, 2])/>`, `<p id="o">\${@xs}</p>`],
-    ["a `P | not`", `    type P:struct = { n: int }\n    let <p:P | not=not/>`, `<p id="o">\${@p}</p>`],
+    ["a `P | not`", `    type P:struct = { n: int }\n    let <pt:P | not=not/>`, `<p id="o">\${@pt}</p>`],
     ["a payload enum value", `    type S:enum = { On(n: int), Off }\n    let <s:S=(S.On(1))/>`, `<p id="o">\${@s}</p>`],
   ];
   for (const [name, decls, markup] of BAD) {
     test(`E-TEXT-NON-PRIMITIVE — ${name}`, () => { expect(codes(prog(decls, markup))).toEqual(["E-TEXT-NON-PRIMITIVE"]); });
   }
   test("legal — a field read, a `T | not` of a primitive (renders nothing when `not`), a unit enum", async () => {
-    await shows(prog(`${P}\n    let <m:int | not=not/>\n${C}`, `<p id="o">\${@p.n}|\${@m}|\${@c}</p>`), "1||A");
+    await shows(prog(`${P}\n    let <m:int | not=not/>\n${C}`, `<p id="o">\${@pt.n}|\${@m}|\${@c}</p>`), "1||A");
   });
 });
 
@@ -179,25 +179,25 @@ describe("r1 HIGH-1 — the text-sink check follows the lift's sink", () => {
   const XS = `    <xs:int[]=([1, 2])/>`;
   const B = `    let <b:bool=true/>`;
   test("FR1 — a value loop lifting a struct into `P[]` compiles and runs", async () => {
-    await shows(prog(`${P}\n${XS}\n    fn g() -> int {\n        const ps: P[] = for (x of @xs) { lift @p; };\n        return ps.length;\n    }`, `<p id="o">\${g()}</p>`), "2");
+    await shows(prog(`${P}\n${XS}\n    fn g() -> int {\n        const ps: P[] = for (x of @xs) { lift @pt; };\n        return ps.length;\n    }`, `<p id="o">\${g()}</p>`), "2");
   });
   test("FR3 — a value loop lifting a tape compiles and runs", async () => {
     await shows(prog(`${XS}\n    fn g() -> int {\n        const ps = for (x of @xs) { lift @xs; };\n        return ps.length;\n    }`, `<p id="o">\${g()}</p>`), "2");
   });
   test("a value loop lifting a choice with a struct member compiles", () => {
-    expect(codes(prog(`${B}\n${P}\n${XS}\n    fn g() -> int {\n        const ps = for (x of @xs) { lift @b ? @p : "s"; };\n        return 1;\n    }`, `<p id="o">\${g()}</p>`))).toEqual([]);
+    expect(codes(prog(`${B}\n${P}\n${XS}\n    fn g() -> int {\n        const ps = for (x of @xs) { lift @b ? @pt : "s"; };\n        return 1;\n    }`, `<p id="o">\${g()}</p>`))).toEqual([]);
   });
   test("a `{ lift … }` match arm lifting a struct is the arm's value, not text", () => {
-    expect(codes(prog(`${C}\n${P}\n    fn h(q: P) -> int { return q.n; }\n    fn g() -> int { return h(match @c { .A :> { lift @p; }, .B :> @p, }); }`, `<p id="o">\${g()}</p>`))).toEqual([]);
+    expect(codes(prog(`${C}\n${P}\n    fn h(q: P) -> int { return q.n; }\n    fn g() -> int { return h(match @c { .A :> { lift @pt; }, .B :> @pt, }); }`, `<p id="o">\${g()}</p>`))).toEqual([]);
   });
   test("L1 control — a MARKUP gather lifting a struct stays E-TEXT-NON-PRIMITIVE", () => {
-    expect(codes(prog(`${P}\n${XS}`, `<p id="o">\${ for (x of @xs) { lift @p; } }</p>`))).toEqual(["E-TEXT-NON-PRIMITIVE"]);
+    expect(codes(prog(`${P}\n${XS}`, `<p id="o">\${ for (x of @xs) { lift @pt; } }</p>`))).toEqual(["E-TEXT-NON-PRIMITIVE"]);
   });
   test("control — a markup gather lifting a struct inside an `if` is refused too", () => {
-    expect(codes(prog(`${B}\n${P}\n${XS}`, `<p id="o">\${ for (x of @xs) { if (@b) { lift @p; } } }</p>`))).toEqual(["E-TEXT-NON-PRIMITIVE"]);
+    expect(codes(prog(`${B}\n${P}\n${XS}`, `<p id="o">\${ for (x of @xs) { if (@b) { lift @pt; } } }</p>`))).toEqual(["E-TEXT-NON-PRIMITIVE"]);
   });
   test("control — a value loop nested in a markup gather keeps its struct lifts; the gather's own lift is judged", () => {
-    expect(codes(prog(`${P}\n${XS}`, `<p id="o">\${ for (x of @xs) { const ps = for (y of @xs) { lift @p; }; lift ps.length; } }</p>`))).toEqual([]);
+    expect(codes(prog(`${P}\n${XS}`, `<p id="o">\${ for (x of @xs) { const ps = for (y of @xs) { lift @pt; }; lift ps.length; } }</p>`))).toEqual([]);
   });
   test("legal — a markup gather lifting primitives renders them", async () => {
     await shows(prog(XS, `<p id="o">\${ for (x of @xs) { lift x; } }</p>`), "12");
