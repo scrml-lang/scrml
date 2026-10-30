@@ -54,10 +54,10 @@ Code names for D11 / D13 / D26 are PA readings for bryan's veto.
 - D15: the legacy `export { count }` stays E-EXPORT-001 (minimal reading, left as written); the §66 `export let <x/>` is not E-EXPORT-001. The owed re-pin is a clean §66 twin case (follow-up below); the legacy case `conformance/cases/module/e-export-001-export-state-cell-reject` still holds.
 - D31 key form: RULED (review-surfaced 5) — the loop-header `key` (§17.4b) is canonical; §6.5.3 `key=` is legacy (bootstrap refusal with a hint owed); W-KEY-001 takes the header meaning; its duplicate-`key=` meaning is impl#1's carried divergence.
 - D31 §14.12: already carries an S435 supersession marker; nothing added.
-- Open for bryan (raised by the PA): ruling-1 read-then-write snapshot consistency (reads are not rolled back; one SELECT + one UPDATE no longer gets the envelope).
+- Ruling-1 read-then-write: RULED — the envelope counts QUERIES (SELECT + UPDATE keeps its envelope).
 
 ## Review round 1 (#1682 FIX-FIRST) — done
-(Round 2, re-review r1: §50.2.1 / §50.4.1 / §50.4.2 marked; §8.9 head + §8.9.2 bold trigger marked superseded; "or a write in a loop" moved to the bootstrap interim only; §20.3 reach = written in the block or in a function it calls (impl#1 refuses only the written case — g-impl1-navigate-via-peer-inside-transaction-not-refused-s473); E-TRANSACTION-CONTROL-FLOW says THREE limbs, navigate a refused navigation; W-KEY-001 duplicate meaning = impl#1 carried divergence; key gap retitled; §16 code table extended to `<slot/>`; D7 cites the user-voice correction; direction-of-change note on writes vs queries with the PA flag.)
+(Round 2, re-review r1: §50.2.1 / §50.4.1 / §50.4.2 marked; §8.9 head + §8.9.2 bold trigger marked superseded; "or a write in a loop" moved to the bootstrap interim only; §20.3 reach = written in the block or in a function it calls (impl#1 refuses only the written case — g-impl1-navigate-via-peer-inside-transaction-not-refused-s473); E-TRANSACTION-CONTROL-FLOW says THREE limbs, navigate a refused navigation; W-KEY-001 duplicate meaning = impl#1 carried divergence; key gap retitled; §16 code table extended to `<slot/>`; D7 cites the user-voice correction; direction-of-change note; then refined to the transitive QUERY set per bryan's ruling.)
 - D10: §50.1 restated; §50.2.3, §50.3.2, §50.8.1, §50.8.3, §50.9 bullets struck/marked; §50.10.2 / §50.10.3 / §50.10.4 flipped to Invalid (E-ASSIGN-POSITION); E-ASSIGN-002 rows marked unreachable.
 - D14: limited to function-body LOCALS; "impl#1 already refuses it" removed (false).
 - D7: Tier 1 `authority=` / `protect=` stated as OWED AND REFUSED (decisions.md D7 (a)); the "not decided" flag dropped.
@@ -69,14 +69,14 @@ Code names for D11 / D13 / D26 are PA readings for bryan's veto.
 - D23 owed-case note flags the handler that awaits a server call partway; D13 "once per compile" flagged as a PA reading.
 
 ## Review-surfaced rulings (user-voice "⭐ RULED — S473 review-surfaced decisions, all PA recs", scrml-support f648b65) — done
-1. §8.9.2 + §19.10.5: implicit-envelope trigger = TRANSITIVE write set; interim bootstrap refusal (E-BOOTSTRAP-UNSUPPORTED).
+1. §8.9.2 + §19.10.5: implicit-envelope trigger = TRANSITIVE QUERY set (refined by "⭐ RULED — S473: the transitive `!` envelope counts QUERIES, not writes"); interim bootstrap refusal (E-BOOTSTRAP-UNSUPPORTED) on 2+ transitively reached queries or one in a loop.
 2. §8.9.2 + §14.8.10 allow-list: `PRAGMA journal_mode = OFF` reaching a `!` connection → E-SQL-JOURNAL-OFF (new; name is a PA reading).
 3. §66.6.6: element-named program cell colliding with a tag use → E-DECL-ELEMENT-NAME-COLLIDES at the declaration (new; reading).
 4. §20.3 + §19.10.3: `navigate()` inside `transaction {}` → E-TRANSACTION-CONTROL-FLOW (reused existing code — reconciled with impl#1 lane #1679; PA reading).
 5. §6.5.3 / §17.4b: loop-header `key` canonical; `key=` legacy (bootstrap refuses with a hint, owed); W-KEY-001 takes the header meaning. The "pending" markers are replaced; g-spec-key-canonical-form-s473 marked RULED (bootstrap refusal still owed).
 
 ## Follow-ups outside this lane (no SPEC text)
-- Bootstrap: build E-SQL-JOURNAL-OFF, E-DECL-ELEMENT-NAME-COLLIDES, the transitive-write-set refusal, and the legacy `key=` refusal with a hint.
+- Bootstrap: build E-SQL-JOURNAL-OFF, E-DECL-ELEMENT-NAME-COLLIDES, the transitive-query-set refusal, and the legacy `key=` refusal with a hint.
 - D15: the owed re-pin — a clean §66 twin conformance case (`export let <x/>`, E-EXPORT-001 absent).
 - D29 bootstrap re-codes: E-AUTH-001, E-STATE-UNDECLARED, E-TYPE-043, E-FN-004 (compiler work).
 - D30: fix the module conformance cases' semicolons (case edits — not done here); grader change in scripts/bootstrap-conformance.ts.
