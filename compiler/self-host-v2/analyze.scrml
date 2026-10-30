@@ -58,7 +58,7 @@ ${
     import { Severity } from "./severity.scrml"
     import { importTarget, importsOfItems, hostImportsOfItems, hostTagOf, isStdlibPath, HostLoc, hostLocOf } from "./link.scrml"
     import { WireBuild, WireTable, wireBuild, hasFixedLength } from "./codec.scrml"
-    import { SqlFacts, SlotQuote, sqlFacts, slotInLiteral, txControl, txControlAware } from "./sql.scrml"
+    import { SqlFacts, SlotQuote, MultiStmt, StmtVerdict, sqlFacts, slotInLiteral, txControl, txControlAware, multiStatement, programStatement } from "./sql.scrml"
     import { FxAtom, ownAtom, closeDim, witnessOf, atomChain } from "./effects.scrml"
     import { UrlAttr, StaticSink, classifyStatic, staticExecMessage, logicWriteSink, logicCallSink, attrNameArgIndex, executableAttrName, htmlArgIndex, attrNodeMember, attrNodeValueMember, urlValueAdmitted, schemeOfUrl, isUrlAttrName, attrValueArgIndex } from "./url.scrml"
     import { HEntry, surfaceInterfaces, isSurfaceIface, isDomElementIface, ifaceInherits, findEntry, accessesOf, sigParams, sigResult,
@@ -16127,7 +16127,62 @@ ${
         if (owner != "") {
             return addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "`<" + e.tag + ">` is a scrml structural element (" + owner + "), not an HTML element (§4.15, §24.4) — it is not in the bootstrap")
         }
+        // s473 (boot-failclosed-sql-protect) — a CAPITALIZED tag that names no
+        // declaration is never HTML (gap g-bootstrap-unknown-tags-resolved-as-html).
+        // Its worst reading: a §52.3 state type declaration — `<User
+        // authority="server" table="users" protect="passwordHash">` + a field list
+        // — which the bootstrap does not model. Rendered as an HTML element, its
+        // `protect=` was DROPPED and the protected column served to the client
+        // (§14.8.9: "each §52 type-level `protect=`" covers every `?{}`; audit S473
+        // probe s148/t10 — the route answered `passwordHash:"SECRET"`). Refused,
+        // never rendered: with a §52 attribute it is named as that declaration
+        // (E-BOOTSTRAP-UNSUPPORTED); without one, as an undeclared component
+        // (§15.14.2 E-COMPONENT-035 — "SHALL NOT produce code outputs").
+        if (isCapitalTag(e.tag)) return addDiag(resolveNodes(env, e.kids, st), env.file, e.span, capitalTagCode(e), capitalTagWhy(e))
         return resolveHtml(env, e, st)
+    }
+
+    // A capitalized tag that is not a case variant of an HTML element (HTML tag
+    // names are case-insensitive: `<FORM>` is `<form>`, and the URL/attribute
+    // rules already judge it as one).
+    fn isCapitalTag(tag: string) -> boolean {
+        const c: string = tag.substring(0, 1)
+        return c != "" && "ABCDEFGHIJKLMNOPQRSTUVWXYZ".indexOf(c) >= 0 && !isHtmlElementName(tag.toLowerCase())
+    }
+
+    // The HTML Living Standard's element names (§4 of the WHATWG HTML standard),
+    // plus the obsolete ones browsers still parse as elements.
+    fn isHtmlElementName(t: string) -> boolean {
+        return ["a", "abbr", "address", "area", "article", "aside", "audio", "b", "base", "bdi", "bdo", "blockquote", "body", "br", "button",
+                "canvas", "caption", "cite", "code", "col", "colgroup", "data", "datalist", "dd", "del", "details", "dfn", "dialog", "div", "dl",
+                "dt", "em", "embed", "fieldset", "figcaption", "figure", "footer", "form", "h1", "h2", "h3", "h4", "h5", "h6", "head", "header",
+                "hgroup", "hr", "html", "i", "iframe", "img", "input", "ins", "kbd", "label", "legend", "li", "link", "main", "map", "mark",
+                "menu", "meta", "meter", "nav", "noscript", "object", "ol", "optgroup", "option", "output", "p", "picture", "pre", "progress",
+                "q", "rp", "rt", "ruby", "s", "samp", "script", "search", "section", "select", "slot", "small", "source", "span", "strong",
+                "style", "sub", "summary", "sup", "table", "tbody", "td", "template", "textarea", "tfoot", "th", "thead", "time", "title", "tr",
+                "track", "u", "ul", "var", "video", "wbr", "svg", "math",
+                "acronym", "applet", "basefont", "big", "blink", "center", "dir", "font", "frame", "frameset", "marquee", "nobr", "noembed",
+                "noframes", "param", "plaintext", "rb", "rtc", "strike", "tt", "xmp"].indexOf(t) >= 0
+    }
+
+    // `protect=` / `authority=` / `table=` — the §52.3.1 state-type attributes
+    fn stateTypeAttr(e: AElem) -> string {
+        for (const a of e.attrs) {
+            const n: string = a.name.toLowerCase()
+            if (n == "protect" || n == "authority" || n == "table") return a.name
+        }
+        return ""
+    }
+
+    fn capitalTagCode(e: AElem) -> string {
+        if (stateTypeAttr(e) != "") return "E-BOOTSTRAP-UNSUPPORTED"
+        return "E-COMPONENT-035"
+    }
+
+    fn capitalTagWhy(e: AElem) -> string {
+        const a: string = stateTypeAttr(e)
+        if (a != "") return "`<" + e.tag + " " + a + "=…>` is a §52.3 state type declaration (`authority=` / `table=` / `protect=` and a field list), which is not in the bootstrap — refused, never rendered as an HTML element: its `protect=` would be dropped and the protected fields served to the client (§14.8.9). Keep secret columns out of the `SELECT` list of every query that answers the client"
+        return "`<" + e.tag + ">` names no declaration in scope — a capitalized tag is a component or a §52.3 state type declaration, never an HTML element (§15.14.2: an unresolved component is E-COMPONENT-035). Declare `" + e.tag + "`, import it, or write the HTML element in lower case"
     }
 
     // s452 — a `<db src=…>` state block. §4: "A state block is a first-class
@@ -16872,7 +16927,11 @@ ${
         }
         for (const a of e.attrs) {
             const ev: string = eventName(a.name)
-            if (isChainAttr(a.name)) {
+            if (a.name.toLowerCase() == "protect" || a.name.toLowerCase() == "authority") {
+                // s473: a confidentiality / authority control is refused, never
+                // written out as an inert HTML attribute (§14.8.9, §52.3)
+                st = addDiag(st, env.file, a.span, "E-BOOTSTRAP-UNSUPPORTED", "`" + a.name + "=` on `<" + e.tag + ">` is a scrml " + a.name.toLowerCase() + " control (§14.8.9 / §52.3), which the bootstrap does not enforce on any element — a confidentiality control is refused, never ignored")
+            } else if (isChainAttr(a.name)) {
                 // s451: `if=` / `else-if=` / `else` (§17.1.1) — chain attributes (chainCheck)
                 st = resolveIfValue(env, a.value, st)
                 st = addAttr(st, a.nid, AttrKind.AIf)
@@ -24979,8 +25038,13 @@ ${
     //        `?{}` — §8.5.4 "any function that contains a `?{}` block is
     //        server-escalated"); T4 "an explicit `server` annotation (§52.10).
     //        DEPRECATED" (T2 protected fields and T3 server-only stdlib imports
-    //        have no source form in the bootstrap — `protect=` / stdlib imports
-    //        are not in it; T5 is emission — design §2 "Trigger 5 is emission,
+    //        are NOT escalation triggers here — both are REFUSED instead (s473):
+    //        every `protect=` — `<db protect=>` (resolveDb), a §52.3 type-level
+    //        `<T protect=…>` (resolveElem: a capitalized undeclared tag), a
+    //        `protect=` on any element (resolveHtml) — and every import of a
+    //        server-only stdlib module (checkImports, isServerOnlyStdlib). stdlib
+    //        imports DO exist since s471; T3's escalation is owed (gap
+    //        g-boot-trigger-3-server-only-import-escalation-unbuilt-s473). T5 is emission — design §2 "Trigger 5 is emission,
     //        not inference" — and T6/T7/T8 have no bootstrap surface).
     //  §52.10 "During the deprecation window, the parser SHALL accept `server
     //        function` declarations and emit `W-DEPRECATED-SERVER-MODIFIER`."
@@ -25987,6 +26051,7 @@ ${
             // binder — §19.9.10, remoteHandled / remoteUnhandled — and lowered by
             // the suspension plan; the U1a refusal is gone)
             // the queries in its body: database, facts, the failable rule
+            if (f.failable) st = envelopeDiags(f, st)
             for (const s of f.sqls) {
                 if (!f.failable) st = manualTxDiag(f.file, s, "'" + f.name + "', which is not declared '!'", f.name, st)
                 const sr: RSqlSite = sqlSiteFacts(g, rd, f.file, fnScope(rd.fns, f.nid), s, f.failable, st)
@@ -26237,8 +26302,38 @@ ${
             st = addDiag(st, file, s.span, "E-BOOTSTRAP-UNSUPPORTED", "`" + slotSigil() + "…}` #" + (sq.slot + 1) + " of this `" + sqlSigil() + "}` stands inside " + sq.what + " — there it cannot be a bound parameter (§8.1: every `" + slotSigil() + "…}` SHALL be one): the driver would read it as text and the value would be lost. Build the whole value outside the quotes and bind it — `LIKE " + slotSigil() + "\"%\" + q + \"%\"}`, not `LIKE '%" + slotSigil() + "q}%'`")
             return { info: not, creates: false, st: st }
         }
+        st = statementDiags(file, s, st)
         const sf: SqlFacts = sqlFacts(s.q.chunks)
         return { info: { nid: s.nid, db: db.sym, kind: sf.kind, reads: sf.reads, writes: sf.writes, columns: sf.columns }, creates: sf.createsTable, st: st }
+    }
+
+    // s473 (boot-failclosed-sql-protect) — what a program-body `?{}` may hold,
+    // in a compilation with a database (this site has one: sqlSiteFacts resolved
+    // it). §8.1.2: exactly ONE statement (E-SQL-MULTIPLE-STATEMENTS — "The
+    // message SHALL name the fix: one `?{}` per statement; statements that must
+    // succeed or fail together go in a `transaction { }` block"); §14.8.10 item
+    // (1): that statement on the closed allow-list (E-SQL-PROGRAM-STATEMENT-NOT-
+    // ADMITTED), and no `tenant_id` column outside the tenant set — which on the
+    // bootstrap is EMPTY, since `<schema>` / `<db tables=>` are refused
+    // (E-TENANT-UNDECLARED). Both read sql.scrml's one scanner. Before s473 both
+    // compiled clean: `INSERT …; DELETE FROM notes` ran its DELETE on SQLite.
+    fn statementDiags(file: string, s: SqlSite, st: AS) -> AS {
+        const ms: MultiStmt = multiStatement(s.q.chunks)
+        if (ms.multi) {
+            let why: string = ""
+            if (ms.plain) why = " (Found by reading every `;` in the query text as a statement boundary: this query holds a comment or a quoting form the compiler cannot read exactly on every database, so a `;` inside a comment or a string counts too. Drop the comment, or bind the text as a value with `" + slotSigil() + "…}`.)"
+            return addDiag(st, file, s.span, "E-SQL-MULTIPLE-STATEMENTS", "this `" + sqlSigil() + "}` holds more than one SQL statement — a `;` followed by more SQL begins a second one, and a program-body query SHALL hold exactly one (§8.1.2): on SQLite every statement after the first runs. Write one `" + sqlSigil() + "}` per statement; statements that must succeed or fail together go in a `transaction { }` block (§8.5.3, §19.10)." + why)
+        }
+        const v: StmtVerdict = programStatement(s.q.chunks)
+        if (v.code == "E-TENANT-UNDECLARED") {
+            let rel: string = "a relation"
+            if (v.why != "") rel = "`" + v.why + "`"
+            return addDiag(st, file, s.span, "E-TENANT-UNDECLARED", "this `" + sqlSigil() + "}` gives " + rel + " a `tenant_id` column, and " + rel + " is not in the compilation's tenant set (§14.8.10 item (1), S456): the tenant floor would not scope it, so every tenant's rows would reach every request. Declare it in `<schema>` so the floor scopes it — `<schema>` / `<db tables=>` are not in the bootstrap yet, so on the bootstrap the tenant set is empty — or, when its rows are not tenant data, rename the column")
+        }
+        if (v.code != "") {
+            return addDiag(st, file, s.span, v.code, "this `" + sqlSigil() + "}` is not on the program-body allow-list (§14.8.10 item (1), S456): " + v.why + ". A program-body query is DML (`SELECT` / `WITH` / `INSERT` / `UPDATE` / `DELETE` / `REPLACE`), a spelled `CREATE [TEMP] TABLE name (…)`, one `ALTER TABLE … ADD [COLUMN]`, an fts5 `CREATE VIRTUAL TABLE`, transaction control, `CREATE [UNIQUE] INDEX`, or an admitted `PRAGMA`. Declare anything else in `<schema>`")
+        }
+        return st
     }
 
     // the `${` of a SQL value slot, for messages, in two pieces (as sqlSigil)
@@ -26264,7 +26359,50 @@ ${
     // the SPEC's message. `where` names the place; `fname` the function ("" —
     // a body top). The bootstrap emits no W-BATCH-001 (no implicit envelope
     // until U1e), so E-ERROR-015 is the one transaction diagnostic here, as
-    // §19.10.4 requires outside a `!` function.
+    // §19.10.4 requires outside a `!` function. (Inside a `!` function manual
+    // transaction control is REFUSED until U1e — envelopeDiags, s473.)
+    //
+    // s473 (boot-failclosed-sql-protect) — THE TRANSACTION ENVELOPES ARE NOT
+    // BUILT, so the shapes that need one are REFUSED, never compiled without it
+    // (the U1 design's "each refused until its unit"; before s473 they compiled
+    // clean and ran non-atomically — audit S473 part 2 §8.9.2, part 3 §19.10):
+    //  §8.9.2 / §19.10.5 "when a `!` server function body contains two or more
+    //        `?{}` queries that do not carry `.nobatch()`, the compiler SHALL wrap
+    //        the handler body in `?{BEGIN DEFERRED}` / `?{COMMIT}` (`?{ROLLBACK}`
+    //        on an exception or a `fail` exit)" — the bootstrap emits no envelope,
+    //        so a `fail` after two writes left both committed;
+    //  §19.10.4 / §19.10.6 (S451 R6) "A manual transaction is held by the
+    //        invocation of the function that opened it … one still open at the
+    //        function's return is rolled back and reported", behind the
+    //        per-connection gate ("a statement issued for another request SHALL
+    //        NOT run inside it") — the server runtime has neither, so a `fail`
+    //        between `?{BEGIN}` and `?{COMMIT}` left the SHARED connection inside
+    //        the open transaction for every later request. With W-BATCH-001
+    //        (§8.9.2) this is the `!` half; outside a `!` function the same SQL is
+    //        E-ERROR-015 (manualTxDiag) — so manual transaction control is
+    //        refused in EVERY server function.
+    // No §8 / §19 code names "not built", so both are E-BOOTSTRAP-UNSUPPORTED.
+    fn envelopeDiags(f: FnFacts, st0: AS) -> AS {
+        let st: AS = st0
+        let manual = false
+        for (const s of f.sqls) {
+            const kw: string = txControl(s.q.chunks)
+            if (kw != "") {
+                manual = true
+                st = addDiag(st, f.file, s.span, "E-BOOTSTRAP-UNSUPPORTED", "Manual transaction control '" + kw + "' in '" + f.name + "', which is declared '!' — the bootstrap does not build what §19.10.6 requires of it (S451 R6): the transaction held by this invocation behind the database's per-connection gate, and rolled back and reported when the function returns with it still open. Without them a `fail` or an error between `BEGIN` and `COMMIT` leaves the shared connection inside the open transaction, and later requests run in it. Refused until unit U1e builds the envelopes; write the queries without transaction control for now (each `" + sqlSigil() + "}` then commits on its own)")
+            }
+        }
+        if (manual) return st
+        let n: int = 0
+        for (const s of f.sqls) {
+            if (!s.q.nobatch) n = n + 1
+        }
+        if (n >= 2) {
+            st = addDiag(st, f.file, f.span, "E-BOOTSTRAP-UNSUPPORTED", "'" + f.name + "' is declared '!' and runs " + n + " `" + sqlSigil() + "}` queries, so it needs the implicit per-handler transaction (§8.9.2, §19.10.5): its body wrapped in `BEGIN` / `COMMIT`, rolled back on an error or a `fail` exit. The bootstrap does not build it yet (unit U1e), and without it a `fail` after a write leaves that write committed — refused, never compiled non-atomic. Until then: put the queries in separate functions, or mark each that need not be atomic with `.nobatch()` (§8.9.5)")
+        }
+        return st
+    }
+
     fn manualTxDiag(file: string, s: SqlSite, where: string, fname: string, st: AS) -> AS {
         const kw: string = txControl(s.q.chunks)
         if (kw == "") return st
@@ -29761,7 +29899,9 @@ ${
         for (const f of files) {
             for (const imp of importsOfItems(f.items)) {
                 const target: string = importTarget(f.path, imp.from, paths)
-                if (target == "") {
+                if (isServerOnlyStdlib(imp.from)) {
+                    st = addDiag(st, f.path, imp.span, "E-BOOTSTRAP-UNSUPPORTED", serverOnlyWhy(imp.from))
+                } else if (target == "") {
                     const r: ImportRefusal = importRefusal(imp.from)
                     st = addDiag(st, f.path, imp.span, r.code, r.why)
                 } else {
@@ -29893,6 +30033,38 @@ ${
         let out: string[] = []
         for (const f of files) { out = out.concat([f.path]) }
         return out
+    }
+
+    // s473 (boot-failclosed-sql-protect) — §12.2 Trigger 3: "calling a binding
+    // imported from any of [the server-only stdlib modules] escalates the function
+    // that calls it". The bootstrap has NO such escalation: placePass places a
+    // function on the server for a `?{}`, a foreign block or the `server`
+    // modifier, never for what it imports. So the first server-only module that
+    // compiled on the bootstrap would put its callers — and its Bun-only
+    // implementation, and any secret they handle — on the CLIENT, the S299
+    // founding defect. Until the escalation is built, importing one is REFUSED at
+    // the import (in any file — a stdlib module reaching another one included).
+    //
+    // The set is §12.2's own evaluation of its normative criterion — "(a) its
+    // implementation reaches a host API that does not exist in a browser —
+    // `Bun.*`, `process.*`, or an import of `bun` / `bun:*` / `node:*` — or (b) it
+    // accepts or transmits a credential" — as of S299: auth, crypto, cron, fs,
+    // mcp, oauth, path, process, redis, store (a submodule — `scrml:auth/jwt` —
+    // is the module's). Limb (b) cannot be read off source, so the list is the
+    // authority here; slice-m4/server-only-stdlib-s473.test.js re-derives limb
+    // (a) from the stdlib's sources on every run and FAILS when a module meets
+    // it but is missing here (the SPEC: "a hand-maintained derived list rots
+    // silently and nothing fails when it does").
+    fn isServerOnlyStdlib(from: string) -> boolean {
+        if (!from.startsWith("scrml:")) return false
+        let m: string = from.substring(6)
+        if (m.indexOf("/") >= 0) m = m.substring(0, m.indexOf("/"))
+        if (m.endsWith(".scrml")) m = m.substring(0, m.length - 6)
+        return ["auth", "crypto", "cron", "fs", "mcp", "oauth", "path", "process", "redis", "store"].indexOf(m) >= 0
+    }
+
+    fn serverOnlyWhy(from: string) -> string {
+        return "`" + from + "` is a server-only stdlib module (§12.2 Trigger 3: its implementation reaches a host API no browser has, or it handles a credential). Calling one of its bindings SHALL place the calling function on the server, and the bootstrap does not build that escalation yet — the caller would run in the browser, with the module's implementation and whatever it is passed. Refused until it is built; keep this work in a program compiled by the main compiler"
     }
 
     type ImportRefusal:struct = { code: string, why: string }

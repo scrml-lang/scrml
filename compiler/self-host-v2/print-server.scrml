@@ -18,7 +18,7 @@
 //     const db$7 = rt.connection(host$, { driver, target, file });   // one per database, injected by the host
 //     async function f(…) { … const o = await rt.query(db$7, "get", sql$12, [v0], [0]); … }
 //     function helper(…) { … }
-//     return rt.server(host$, [ rt.route(route$f, (args$) => f(args$[0], …)) ]);
+//     return rt.server(host$, [ rt.route(route$f, (args$) => f(args$[0], …)) ], [ db$7 ]);
 //   }
 //
 // - ROUTED IFF REACHED FROM A CLIENT ROOT (design §4): one route per server
@@ -117,8 +117,10 @@ ${
 
         // createServer(host$): the databases, the functions, the routes
         let inner: JsStmt[] = []
+        let conns: JsExpr[] = []
         for (const d of dbsOf(p, queries)) {
             inner = inner.concat([JsStmt.SConst(dbVarName(d.sym), jcall(jmember(jid("rt"), "connection"), [jid("host$"), dbJs(d)]))])
+            conns = conns.concat([jid(dbVarName(d.sym))])
         }
         for (const sf of p.server) {
             if (reach.indexOf(sf.sym.id) >= 0) inner = inner.concat([serverFnJs(ctx, sf.sym, sf.params, sf.body, sf.waits)])
@@ -128,7 +130,9 @@ ${
         }
         let routeExprs: JsExpr[] = []
         for (const sf of routed) { routeExprs = routeExprs.concat([routeEntry(ctx, sf)]) }
-        inner = inner.concat([JsStmt.SReturn(jcall(jmember(jid("rt"), "server"), [jid("host$"), JsExpr.JArray(routeExprs)]))])
+        // s473: the databases go to the server too — it checks each for an undeclared tenant
+        // relation before it serves (SPEC §14.8.10 item (3); server-runtime.js tenantGate)
+        inner = inner.concat([JsStmt.SReturn(jcall(jmember(jid("rt"), "server"), [jid("host$"), JsExpr.JArray(routeExprs), JsExpr.JArray(conns)]))])
         body = body.concat([
             JsStmt.SBlank,
             JsStmt.SComment("createServer(host$) — host$.connect(desc) supplies each database's driver (Bun.SQL by default); host$.log the server log"),
