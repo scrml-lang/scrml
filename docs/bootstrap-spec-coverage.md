@@ -1,0 +1,1526 @@
+# Bootstrap SPEC coverage
+
+What the bootstrap (impl#2, `compiler/self-host-v2`) does with every section of `compiler/SPEC.md`. One row per section or subsection that carries normative content. Merged in S473 from a six-part read-only audit, which classified every row against the bootstrap with probe compiles (`bun scripts/scrml-boot.ts compile …`).
+
+## Why this table exists
+
+SPEC §47 (Output Name Encoding) was found unimplemented in the bootstrap with no gap, no refusal and no ruling, and it was found by accident. The audit that followed found about 70 more such holes. This table, and the gate that checks it, make that state visible and keep it from coming back.
+
+## Statuses
+
+| status | meaning | the row must show |
+|---|---|---|
+| BUILT | the bootstrap implements it | where, and a test or probe that exercises it |
+| PARTIAL | part of it is built | what is missing, and the gap(s) covering it |
+| REFUSED-LOUD | the bootstrap rejects the construct with a diagnostic (E-BOOTSTRAP-UNSUPPORTED, a fail-closed refusal, or a generic parse/scope code) | where the refusal fires |
+| DEFERRED-RULED | a ruling, a gap or a plan explicitly defers it for the bootstrap | the ruling or gap |
+| N/A | not a compiler obligation: prose, rationale, history, tooling outside the compiler, impl#1-only text, a code index | a one-line reason |
+| SILENT-ACCEPT | the bootstrap accepts the source and drops or mis-handles the meaning, with no diagnostic | a probe, **and a gap id** |
+| SILENT-ABSENT | nothing in the bootstrap touches the SHALL (e.g. an output-form rule the emitter never follows) | **a gap id** |
+| UNVERIFIED | the auditor could not settle it; an honest unknown beats a wrong BUILT | what is unknown |
+
+**SILENT is forbidden going forward.** A SILENT-* status describes behaviour; it is legal in this table only with a gap id that tracks the hole. `scripts/spec-coverage-check.ts` (CI `checks` job; the pre-commit hook when SPEC.md, SPEC-INDEX.md, this file or known-gaps.md is staged) fails when:
+
+- (a) a top-level § in `compiler/SPEC-INDEX.md` has no row here (a new section needs at least one row; a new subsection does not);
+- (b) a row says SILENT-ACCEPT or SILENT-ABSENT and cites no gap;
+- (c) a cited gap id has no `@gap` marker in `docs/known-gaps.md`;
+- and it warns (d) when a cited gap is closed while its row still says SILENT-* or PARTIAL.
+
+**Keeping it current.** When a gap lands, flip its rows (usually to BUILT or REFUSED-LOUD) in the same PR. When a SPEC section lands, add its rows. Then run `bun scripts/spec-coverage-check.ts --write` to refresh the totals.
+
+## Totals
+
+<!-- @generated:coverage-totals START (do not edit — `bun scripts/spec-coverage-check.ts --write`) -->
+| status | rows |
+|---|---:|
+| BUILT | 274 |
+| PARTIAL | 153 |
+| REFUSED-LOUD | 324 |
+| DEFERRED-RULED | 66 |
+| N/A | 189 |
+| SILENT-ACCEPT | 44 |
+| SILENT-ABSENT | 47 |
+| UNVERIFIED | 9 |
+| **total** | **1106** |
+
+SILENT rows carrying a gap id: 91 of 91.
+<!-- @generated:coverage-totals END -->
+
+## How the six parts were merged
+
+- **Scope per part:** P1 §1–§6 (incl. §4 and §5 sub-audits), P2 §7–§14, P3 §15–§19 and Appendices A–E, P4 §20–§46, P5 §47–§51, P6 §52–§68. The note column starts with the part. Evidence is trimmed to fit; probe paths name the auditors' scratch tree (`~/.cache/scrml-agent-tmp/spec-coverage-audit/probes-<part>/`), which is not durable, so every gap entry restates its repro in prose.
+- **One status per row.** A row the auditor gave a combined status takes its first-listed status, except that a SILENT limb wins: the hole must carry a gap.
+- **Deduplicated at the gap, not the row.** Where several parts hit one root, their rows cite the same gap. The unknown-element root (P1 §4.1, P2 §14.8.9 (b), P3 §15.14, P4 §24.1, P6 §68.4) is one gap, `g-bootstrap-unknown-tags-resolved-as-html`, raised to HIGH. The same holds for render-by-tag (P1 §6.4, P6 §66.6), `handle()` (P2 §12.2 T8, P4 §40.3), the implicit transaction (P2 §8.9.2, P3 §19.10.5), the manual BEGIN (P2 §8.9.2, P3 §19.10.4/6), the no-value cell (P1 §6.2, P6 §66.2.2, P5 §51.0.E, P3 §15.10), the server-only reach (P1 §6.6.19, P2 §12.2 T3) and the data root (P2 §8.1.1, P5 §47.14).
+- **Reclassified:** P1 §6.7.1a `<onMount>` (DEFERRED-RULED → SILENT-ACCEPT: the gap existed, but the behaviour is a live fail-open). Code-index rows (§47.7, §48.12, §51.8, §58.13, §59.11, §65.10) → N/A.
+- **Rulings the parts asked for** are in `docs/changes/s473-spec-coverage/decisions.md`, not decided here.
+
+## §1 — Overview
+
+| § | title | status | evidence | gap ids | note |
+|---|---|---|---|---|---|
+| §1 | Overview | N/A | prose | — | (P1) |
+| §1.1 | Design principles | N/A | rationale; the §29 pass-through is marked Nominal in the text | — | (P1) |
+| §1.2 | Runtime (compiler on Bun; no compile-time Bun calls in output) | BUILT | The bootstrap runs on Bun via scripts/scrml-boot.ts. The only `Bun.` uses are at run time in slice-m1/runtime/server-runtime.js:90 (`Bun.SQL`, the run-time driver). print.scrml emits no compile-time Bun calls. | — | (P1) grep-level check only |
+| §1.4 | Markup-as-first-class-value: five doors | PARTIAL | Doors that work: components (`renders`; acceptance/css/component-scope) and `<each>`. Markup as an expression fails to parse with generic E-PARSE-EXPR (fn return/arg: probe `s1-4-fn-markup`; cell value: `s1-4-markup-cell`). Enum `renders` (`s1-4-enum-renders`) gives E-PARSE-TYPE. | g-boot-markup-as-value-unbuilt-s473 | (P1) Fails closed, but with parse codes, not E-BOOTSTRAP-UNSUPPORTED. The markup-derived door is OPEN (§66.22 O24). E-CELL-RENDER-SPEC-NOT-BINDABLE is legacy. |
+| §1.5 | North star / Tier ladder; W-LIFECYCLE-CANDIDATE | SILENT-ABSENT | grep for W-LIFECYCLE-CANDIDATE in self-host-v2: 0 hits | g-boot-lifecycle-candidate-lint-absent-s473 | (P1) The normative home is §17.0 (another part). impl#1 emits it (compiler/src/lint-ghost-patterns.js). Info lint, LOW. |
+| §1.6 | V5-strict access principle | PARTIAL | "Bare names are locals": BUILT — analyze.scrml gives E-SCOPE-001 "`count` is a cell — read it as `@count`" (probe p0). E-NAME-COLLIDES-STATE: only a file-scope const collides (analyze.scrml `dupConsts`; rulings-s473-one-name.test.js). | — | (P1) A function-body local that shadows a cell is accepted. See §6.1.3. |
+
+## §2 — File Format and Compilation Model
+
+| § | title | status | evidence | gap ids | note |
+|---|---|---|---|---|---|
+| §2.1 | Source files | N/A | the §29 pass-through is Nominal in the text | — | (P1) |
+| §2.2 | Output categories (HTML, CSS, JS) | BUILT | print.scrml (client), print-server.scrml, css.scrml; index.html / program.client.js / program.server.js | — | (P1) |
+| §2.2.1 | Emitted-JS parse gate (E-CODEGEN-INVALID-LOGIC on unparseable output) | SILENT-ABSENT | grep for parse-gate / validate-emit / E-CODEGEN-INVALID-LOGIC across self-host-v2/*.scrml, slice-m*/*.js and scripts/scrml-boot.ts: 0 hits. checkCore (check.scrml C1–C19) is a Core well-formedness gate, not a parse of emitted JS. | g-boot-no-emitted-js-parse-gate-s473 | (P1) No in-process gate. Tests do execute output, which exercises it, but no compile ever parses its artifacts. LOW–MED: the printer is structured, so risk is lower than in impl#1, but a SHALL is unmet with no gap. |
+| §2.2.1 | Un-lowered `__scrml_<name>__` placeholder refusal | UNVERIFIED | the bootstrap printer uses no placeholder lowering, so the gate's premise is impl#1-shaped | — | (P1) An author-written `__scrml_x__` belongs to §47.1.1 (another part). |
+| §2.2.1 (S451) | No runnable artifact after an Error-severity compile | BUILT | severity.scrml (generated table); lower.scrml:71; scripts/scrml-boot.ts prints "nothing written"; slice-m4/diag-gate.test.js, severity.test.js, error-rulings.test.js | — | (P1) every failing probe printed "✗ N errors — nothing written" |
+| §2.2.1 | `--no-validate-emit` opt-out | N/A | no gate to toggle (see row above) | — | (P1) |
+| §2.3 | Entry point (`bun run src/index.js`) | N/A | impl#1 CLI text | — | (P1) |
+| §2.4 | Performance (workers, SharedArrayBuffer/Atomics, under 1 s per 4000 lines) | DEFERRED-RULED | gap `g-spec-2-4-and-43-5-1-restatements-owed` (RULED S440 dpa-056 R7: restate §2.4 as non-normative guidance). No Worker/SAB in the bootstrap. | g-spec-2-4-and-43-5-1-restatements-owed | (P1) The SPEC text still says SHALL; the restatement is owed (see Questionable). |
+
+## §3 — Context Model
+
+| § | title | status | evidence | gap ids | note |
+|---|---|---|---|---|---|
+| §3.1 | Context types table | PARTIAL | Built: markup, `${}` logic, `?{}` SQL, `#{}` CSS (css.scrml; acceptance/css/*). `<style>` gives E-STYLE-001 (probe `s3-1-style`; css-ingest.scrml:489). | — | (P1) §3.1 and §9.2 list `<style>` as a valid context, while §4.17 and §34 E-STYLE-001 forbid it. This is a SPEC contradiction; the bootstrap follows §4.17. |
+| §3.2 | Context stack: E-CTX-001 / E-CTX-003 | BUILT | Probes `s3-2-unclosed-eof`, `s3-2-unclosed-logic`, `s3-2-closer-in-logic` give E-PARSE-UNCLOSED / E-PARSE-CLOSER / E-PARSE-EXPR. E-CTX-001 is used only for an unterminated display literal (parse.scrml:5002). | g-bootstrap-unimplemented-construct-reported-as-generic-code, g-boot-conformance-parse-reject-hides-code-drift-s473 | (P1) Fails closed under codes other than the SPEC's. No gap. Conformance hides it: `block-047-unclosed-brace-pos` expects E-CTX-003 and is bucketed UNSUPPORTED (see Questionable). |
+| §3.3 | Context coercion: E-TYPE-010 / E-TYPE-011 | PARTIAL | Non-markup in markup gives E-TEXT-NON-PRIMITIVE, the newer §14.13.2 rule (probe `s3-3-struct-interp`). A bare function value is refused, E-BOOTSTRAP-UNSUPPORTED (`s3-3-fn-interp`). | — | (P1) E-TYPE-010 itself is never emitted. E-TYPE-011 (`cssClass[]` from `${}` in `#{}`) is moot: `${}` in `#{}` is E-CSS-SYNTAX by the S469 ruling. |
+| §3.4 | Per-locus access-form table | PARTIAL | `@x` read/write BUILT. `@x += n` is refused, E-BOOTSTRAP-UNSUPPORTED (`s3-4-compound-assign`; parse.scrml:433; gap g-bootstrap-loop-head-surface-s469 names compound assignment). `@.` in `<each>`: analyze.scrml E-SYNTAX-064. The engine state-child row maps to `single` declarations. | g-bootstrap-loop-head-surface-s469 | (P1) The structural-form `<x> = init` row is legacy (see §6.1.1). |
+
+## §4 — Block Grammar
+
+| § | title | status | evidence | gap ids | note |
+|---|---|---|---|---|---|
+| §4.1 | HTML tag syntax | PARTIAL | p01 `<frobnicate>` is emitted as HTML; t06 `<div$x>` accepted | g-bootstrap-unknown-tags-resolved-as-html | (P1) gap g-bootstrap-unknown-tags-resolved-as-html (MED, open) |
+| §4.2 | State-object syntax | PARTIAL | spaced `< db>` gives E-PARSE-TAG; the SPEC wants W-WHITESPACE-001 | g-bootstrap-unimplemented-construct-reported-as-generic-code | (P1) NO GAP |
+| §4.3 | Disambiguation | PARTIAL | the spaced opener is a hard error, not the soft-deprecated warning | g-bootstrap-unimplemented-construct-reported-as-generic-code | (P1) NO GAP |
+| §4.4 / 4.4.1 / 4.4.2 | Closers | BUILT | E-PARSE-CLOSER / E-PARSE-EXPR vs E-CTX-001 / E-CTX-003 | — | (P1) |
+| §4.5 | `verbose closers` | SILENT-ABSENT | 0 hits | g-boot-verbose-closers-absent-s473 | (P1) impl#1 ignores it too |
+| §4.6 / §4.7 | `<` and `//` suppression | BUILT | lex.scrml region lexer; comment-escapes.test.js | — | (P1) |
+| §4.9 | Preprocessor output | REFUSED-LOUD | `^{` refused | — | (P1) |
+| §4.10 | Newline before tag | PARTIAL | same root cause as §4.3 | g-bootstrap-unimplemented-construct-reported-as-generic-code | (P1) |
+| §4.11.1–2 | `lift`, `?{` | BUILT | `extract` gives E-SCOPE-001, not E-SYNTAX-003 | — | (P1) |
+| §4.11.3 | `is` | REFUSED-LOUD | `x is .V` gives parse errors; `is` lexed as a keyword everywhere | g-bootstrap-unimplemented-construct-reported-as-generic-code | (P1) NO GAP |
+| §4.11.4 | `given` | N/A | superseded S462 | — | (P1) |
+| §4.12 + 4.12.1–8 | Nested `<program>` | REFUSED-LOUD | nestedProgramDiags | — | (P1) Attribute checks (§4.12.2, §4.12.9) BUILT; route-file ancestor UNVERIFIED; §4.12.7 N/A |
+| §4.13 | angleDepth | REFUSED-LOUD | moot under token lexing | — | (P1) |
+| §4.14 | `:`-shorthand | PARTIAL | core built; code drift, and the legacy placement hard-errors where a W-lint is wanted | g-bootstrap-unimplemented-construct-reported-as-generic-code | (P1) NO GAP |
+| §4.15 | Structural-element registry | PARTIAL | `<md>` and `<onMount>` missing from structuralOwner and fall through to HTML | g-bootstrap-md-static-owed-s462, g-bootstrap-onmount-owed, g-bootstrap-unknown-tags-resolved-as-html | (P1) gaps g-bootstrap-md-static-owed-s462, g-bootstrap-onmount-owed |
+| §4.15 | E-NAME-COLLIDES-RESERVED | SILENT-ACCEPT | `s4/t01-each-decl` (user `<each>` declaration hijacked, then `null.forEach` throws), `r06`, `q16` | g-boot-name-collides-reserved-unfired-s473 | (P1) |
+| §4.15 | `<each>` needs `in=` or `of=` | SILENT-ACCEPT | `s4/t07-each-no-in`: `rt.each(() => null)` throws at mount | g-boot-each-missing-source-accepted-s473 | (P1) owned by §17.7 |
+| §4.16 | `<///>` | REFUSED-LOUD | E-PARSE-CLOSER (SPEC: E-PARSE-001) | — | (P1) |
+| §4.17 | Raw `<pre>` / `<code>` | PARTIAL | uppercase not raw: gap g-bootstrap-uppercase-pre-code-not-raw-content-s472 (RULED S473, owed) | g-bootstrap-uppercase-pre-code-not-raw-content-s472 | (P1) |
+| §4.18.1 | Text-mode productions | PARTIAL | program-body statement sequence and `"…"` give E-PARSE-ITEM | — | (P1) owned by §40.8; NO GAP |
+| §4.18.1 (db, schema), 4.18.1a, 4.18.1b, 4.18.2–4.18.6, 4.18.8 | Code-default / free-text / display literal | BUILT | parseDbBody, displayEscapeDiags, etc.; dpa045.test.js, comment-escapes.test.js, acceptance/display/* | — | (P1) |
+| §4.18.7 | E-UNQUOTED-DISPLAY-TEXT | PARTIAL | code drift in `:`-shorthand and program bodies | — | (P1) |
+| §4.18.7 | W-DISPLAY-TEXT-OVERQUOTE | SILENT-ABSENT | `s4/q10-overquote` | g-boot-w-display-text-overquote-absent-s473 | (P1) impl#1 emits it |
+
+## §5 — Attribute Quoting Semantics
+
+| § | title | status | evidence | gap ids | note |
+|---|---|---|---|---|---|
+| §5.1 | Three forms | PARTIAL | the `onclick=${…}` form gives a parse error | — | (P1) recorded only inside resolved gap g-bootstrap-no-s5-2-sink-floor-s462 |
+| §5.1 xref | `"`-only delimiter | SILENT-ACCEPT | `s5/w01`: `title='x'` accepted | g-boot-single-quoted-attr-accepted-s473 | (P1) LOW |
+| §5.2 security rows (≈25 rows) | see the headline above | BUILT | as above | g-bootstrap-md-static-owed-s462 | (P1) scheme-led quoted URL with `${}`: REFUSED-LOUD (blanket); `<md>` links DEFERRED (g-bootstrap-md-static-owed-s462); SSR first paint N/A |
+| §5.2 | Attribute value type (E-ATTR-001) | SILENT-ACCEPT | `s5/q01d`: struct gives `[object Object]`; a tape gives `"a,b"` | g-boot-attr-value-non-primitive-stringified-s473 | (P1) LOW–MED |
+| §5.2 | Named codes E-ATTR-UNQUOTED-OPERATOR, E-EVENT-UNBOUND, E-MULTI-STATEMENT-HANDLER, E-ATTR-MULTI-STATEMENT | REFUSED-LOUD | analyze.scrml:16474 comment | g-bootstrap-unimplemented-construct-reported-as-generic-code | (P1) NO GAP |
+| §5.2.1 / 5.2.2 | Handler forms | PARTIAL | a reference to a non-function value is a no-op listener (`s5/v03`, `s11`) | g-boot-handler-ref-non-function-noop-s473 | (P1) LOW |
+| §5.2.2 | Bubbling contract | UNVERIFIED | — | — | (P1) |
+| §5.3 | Boolean attributes set as a property | SILENT-ACCEPT | `checked=` / `selected=` / `value=` go through setAttribute (`s5/r20`, `u03`, `u02`) | g-boot-form-state-attr-written-as-content-attribute-s473 | (P1) MED: the value goes stale after user input |
+| §5.3 | E-ATTR-002 `disabled="false"` | SILENT-ACCEPT | `s5/r21` ships a disabled button | g-boot-boolean-attr-quoted-string-accepted-s473 | (P1) MED; impl#1 emits it |
+| §5.4 | `bind:` (value, checked, E-ATTR-010/011) | BUILT | core-additions.test.js | — | (P1) `bind:selected` / `bind:group` / coercions REFUSED-LOUD; enum select gives misleading E-TYPE-031 |
+| §5.4.1 | Bind by render-spec | N/A | legacy | — | (P1) no supersession banner |
+| §5.5.1 / 5.5.4 (string) | class | BUILT | — | — | (P1) |
+| §5.5.2 / 5.5.3 / `class={}` / 5.5.5 | `class:`, template class, components | REFUSED-LOUD | — | — | (P1) |
+| §5.5.4 S469 | class value type rule | SILENT-ACCEPT | `s5/r07`: a string tape renders `class="a,b"`; int / bool / struct accepted | g-boot-class-expr-type-unchecked-s473 | (P1) MED |
+| §5.5.4 Axiom ① | Writer conflict | PARTIAL | `value=(…)` plus `bind:value` emits both writers | g-bootstrap-bind-value-with-hand-written-value-accepted | (P1) g-bootstrap-bind-value-with-hand-written-value-accepted covers only the static half |
+
+## §6 — Reactivity and the V5-Strict Access Model
+
+| § | title | status | evidence | gap ids | note |
+|---|---|---|---|---|---|
+| §6 | Reactivity (whole) | PARTIAL | see rows | — | (P1) |
+| §6.1.1 | Structural form; legacy `<count> = 0` declaration | REFUSED-LOUD | Probes `s6-1-legacy-decl` and `s6-1-legacy-decl-logic` give an E-PARSE-CLOSER / E-PARSE-UNCLOSED / E-PARSE-ITEM cascade, then E-SCOPE-001 on the use. | g-bootstrap-e-decl-legacy-rhs-unemitted-s473 | (P1) Never E-DECL-LEGACY-RHS (0 hits in the bootstrap) and never a §66.21 W-lint. Questionable (see below). |
+| §6.1.1 | E-STATE-UNDECLARED (write side) | BUILT | analyze.scrml; probe `s6-1-undeclared`; slice-m2/typer.test.js, slice-m4/program-attrs-s473.test.js | — | (P1) |
+| §6.1.1 | E-STATE-UNDECLARED (read side, S192) | BUILT | A read gives E-SCOPE-001 | g-bootstrap-undeclared-cell-read-code-s473 | (P1) gap `g-bootstrap-undeclared-cell-read-code-s473` (LOW, open) |
+| §6.1.2 | `@x` read/write | BUILT | every runtime probe; slice-m4 acceptance | — | (P1) |
+| §6.1.2 | Compound assignment `@x += 1` | REFUSED-LOUD | parse.scrml:433, E-BOOTSTRAP-UNSUPPORTED | — | (P1) |
+| §6.1.2 | E-OBJECT-SHORTHAND-CELL `{ @x }` and `@x` as a destructuring target | REFUSED-LOUD | `s6-1-shorthand` gives E-PARSE-OBJECT; `s6-1-destructure` gives E-PARSE-LOCAL | g-bootstrap-unimplemented-construct-reported-as-generic-code | (P1) The named code has 0 hits. Fails closed; no gap. |
+| §6.1.3 | E-NAME-COLLIDES-STATE: a function-body local named like a cell | SILENT-ACCEPT | `s6-1-collide.scrml`: `let <count:int=0/>` plus `function f() { let count = 5; … }` compiles at exit 0. analyze.scrml:17772 says on purpose: "A function-body local or a parameter of the name SHADOWS it … no report". | g-boot-local-shadows-cell-accepted-s473 | (P1) Contradicts the §6.1.3 example (which is exactly this), §1.6, §34, the S55 ruling ("If file declares `<count> = 0;` and a function then writes `let count = 5`, that's an error") and impl#1, which fires it (G-CONST-COLLIDES-STATE, "by-design"). A tier-1 code divergence. |
+| §6.1.4 | Why two forms | N/A | rationale | — | (P1) |
+| §6.1.5 | State declaration grammar (legacy) | N/A | superseded by §66.2 | — | (P1) |
+| §6.2 Shape 1 | Plain cell | BUILT | every probe | — | (P1) E-CELL-NO-RENDER-SPEC (legacy) has 0 hits; see §6.4. |
+| §6.2 Shape 2 | Render-spec cell | N/A | superseded by §66.5 `renders` | — | (P1) |
+| §6.2 Shape 3 | Derived | BUILT | `rt.derived` (`s6-6-derived-fn`); E-DERIVED-WRITE (`s6-2-locked-write`; slice-m2/parse.test.js, front.test.js) | — | (P1) |
+| §6.2 Shape 4 | Typed no-value declaration defaults to the canonical empty (`0`, `""`, `false`, `[]`) | SILENT-ACCEPT | `s6-2-norhs.scrml` (`let <n:int/>`, `let <s:string/>`, `let <b:bool/>`) and `s6-2-norhs-struct.scrml` compile at exit 0 to `rt.seeded(() => rt.noDefault("<program> attribute `n`"))`. That throws at construction (runtime.js:660: "has no default and no use-site value (SPEC §66.3 O33 is OPEN)"), so the page boots blank. | g-bootstrap-timestamp-canonical-empty-s473, g-boot-no-value-cell-runtime-throw-s473 | (P1) O33 is OPEN, but the honest posture would be a compile-time refusal, not a run-time crash. Mentioned only in passing in `g-bootstrap-timestamp-canonical-empty-s473` ("a no-value cell is the O33 `noDefault` trap for every type"). No gap of its own. |
+| §6.2 Shape 4 | E-REFINEMENT-NO-DEFAULT; `(A to B)` no-value | DEFERRED-RULED | A refinement in an opener gives E-PARSE-TAG (`s6-2-refine-nodefault`). gap `g-bootstrap-opener-refinement-lifecycle-type-rejected` (narrowed). | g-bootstrap-opener-refinement-lifecycle-type-rejected | (P1) |
+| §6.2 | E-DECL-RHS-INTERP-WRAPPED | N/A | legacy RHS form; the conformance SUPERSEDED_CODE_MAP marks it "owed → ∅" | — | (P1) |
+| §6.3.1 | Tier 1 plain cell | BUILT | — | — | (P1) |
+| §6.3.2 | Compound children (as §66.4 `<f:struct>…</>`) | BUILT | `s6-3-compound.scrml` compiles; read and write go through `shared_form().fields[0]` | — | (P1) Covered by tests: slice-m2/typer.test.js and slice-m4/core-additions.test.js use `:struct>` |
+| §6.3.3 | Tier-3 positional construction | REFUSED-LOUD | `s6-3-positional` gives E-PARSE-EXPECTED plus E-TYPE-031 | — | (P1) Retired by S435 #14; a §66.18 code would be cleaner |
+| §6.3.4 | Engine-typed | N/A | belongs to §51 | — | (P1) |
+| §6.3.5 | Bare `formRes.name` is a scope error | BUILT | E-SCOPE-001 "is a cell" (probe `s6-1-shorthand` shows the message) | — | (P1) |
+| §6.4 / §6.4.1 | Bare `<count/>` naming a program cell | SILENT-ACCEPT | `s6-4-plain-tag-cell.scrml` compiles at exit 0, and index.html holds a literal `<main><count></count></main>`. analyze.scrml:16345 `resolveHtml` skips E-DECL-FIELD-TAG-NEEDS-STAR when `cd.isProgram`. | g-boot-program-field-bare-tag-renders-inert-s473 | (P1) The legacy render-by-tag `<x/>` now silently renders an inert unknown element. §66.6.6 says: "there is NO deprecation window in which `<x/>` silently changes meaning". Also found by the §4 and §5 sub-auditors. |
+| §6.4.2 | Shape-2 expansion via `<*x/>` | REFUSED-LOUD | `s6-4-star-norender` gives E-BOOTSTRAP-UNSUPPORTED (only a `rule=` graph field with bodied state-children, O5 (1i); otherwise O51 OPEN) | — | (P1) |
+| §6.4.3 | Markup-typed derived | DEFERRED-RULED | OPEN §66.22 O24; markup is not a value in the bootstrap's logic | — | (P1) |
+| §6.4.4 | No runtime override | N/A | follows from the rows above | — | (P1) |
+| §6.5 | Freely mutable legacy tape | N/A | the S469 banner: not scrml semantics | — | (P1) |
+| §6.5.1 | Mutating methods: the JS names are refused and grant-named methods are used | BUILT | E-TAPE-JS-METHOD (analyze.scrml); acceptance/tapes/neg-push, neg-unshift, append-prepend; slice-m2/typer.test.js, slice-m4/audit.test.js | — | (P1) A local `xs.push` with an inferred type gives E-BOOTSTRAP-UNSUPPORTED ("receiver of a known type", `s6-5-local-push`) |
+| §6.5.2 | Non-mutating methods | BUILT | acceptance/tapes/sort-reverse-join, neg-tosorted | — | (P1) |
+| §6.5.3 | `key=` on the lifted element: keyed reconciliation; E-KEY-001; descendant `key=` invalid | SILENT-ACCEPT | In `s6-5-key.scrml`, `lift <li key=it.id>` compiles at exit 0 to `rt.attr(scope$, n$0, "key", () => it.id)`. The key ships as a DOM attribute, and `rt.gather` tears down and rebuilds every row (runtime.js:2630 "no key: §17.4b keyed reconciliation is not built"). `s6-5-key-bad` (a struct key) gives no E-KEY-001. … | g-bootstrap-loop-head-surface-s469, g-boot-lift-key-attr-silently-emitted-s473 | (P1) The header-form `key` clause is refused and gapped (`g-bootstrap-loop-head-surface-s469`; known-gaps.md:1639 says keyed reconciliation is "refused with the head surface"), but the §6.5.3 attribute form slips through. E-KEY-001 / W-KEY-001: 0 hits. |
+| §6.5.4 | Length reactivity | BUILT | `${@ys.length}` binds through `rt.text` and the runtime tracks it (`s6-6-mutate`) | — | (P1) |
+| §6.5.5 | Full replacement | BUILT | `.set` on the field | — | (P1) |
+| §6.5.6 / 6.5.7 | Nested arrays / arrays of objects | N/A | dissolved by §66.10 value semantics (S439 #3 note) | — | (P1) |
+| §6.5.9 | E-REACTIVE-006 | N/A | superseded by the §66.12 grant/method model | — | (P1) |
+| §6.5.10 / 6.5.11 | Implementation notes / interaction notes | N/A | non-normative | — | (P1) |
+| §6.5.12 | Each mutation notifies on its own; no implicit batching | SILENT-ACCEPT | runtime.js:2560 `on()` wraps every handler in `batch(...)`, so two writes in one handler produce one flush and an `<effect>` runs once, where the SPEC says twice | g-boot-handler-batch-vs-6-5-12-s473 | (P1) The banner (§66.11/12) may cover this, since its notify is "permission-driven". Not stated either way (see Questionable). |
+| §6.6.1 | `const <x>` syntax; E-REACTIVE-001; W-CONST-AT-DEPRECATED | N/A | superseded by §66.9 (locked declaration with a reactive initializer) | — | (P1) |
+| §6.6.2 | Static `const` vs derived | BUILT | a local `const` is a snapshot; a locked declaration reading cells is `rt.derived` | — | (P1) |
+| §6.6.3 | Lazy pull, dirty flags, transitive tracking through calls | BUILT | runtime.js:204 `class Derived` (stale flag, recompute on read); `s6-6-derived-fn` (derived via `dbl()` reading `@p`) is tracked at run time | — | (P1) "SHALL NOT be discovered at runtime" (a static subscription graph) is an emitted-shape mandate, which is a D3 implementation freedom. W-REACTIVE-001 (vanilla `.js` callee) is UNVERIFIED. |
+| §6.6.4 | Diamond: evaluated at most once | BUILT | follows from lazy pull with a cached stale flag | — | (P1) Not separately tested; "dirty flag cleared before evaluation" is not literal (`stale = false` comes after `fn()`) but has no observable effect, since cycles are refused. |
+| §6.6.5 | Stale read until flush; `flush()` built-in; E-REACTIVE-004 | PARTIAL | A read after a write returns the FRESH value (`Derived.get` recomputes when stale), not the cached stale one. `flush()` gives E-SCOPE-001 "not declared" (`s6-6-flush`). | g-bootstrap-unimplemented-construct-reported-as-generic-code | (P1) The SPEC's "SHALL return the previously cached value" is a strange SHALL, and the bootstrap's behaviour is strictly better. `flush()` is absent with a generic code and no gap. See Questionable. |
+| §6.6.6 | `^{}` meta auto-tracking | REFUSED-LOUD | `^{` is refused, E-BOOTSTRAP-UNSUPPORTED (§4 sub-audit q05) | — | (P1) |
+| §6.6.7 | Emitted code shape (`_scrml_derived_declare` / `_subscribe`) | N/A | D3: emitted-JS shape is an implementation freedom | — | (P1) |
+| §6.6.8 | E-DERIVED-WRITE | BUILT | probes `s6-2-locked-write`, `s6-6-16-compound-derived`; slice-m2/parse.test.js, front.test.js, slice-m4/arms-union-s469.test.js | g-boot-derived-write-message-empty-deps-s473 | (P1) For an in-compound derived, the message says "initializer reads ()", an empty dependency list. The SPEC requires the upstream dependencies to be listed. LOW. |
+| §6.6.9 | E-REACTIVE-003 (cell read in a wholly-server fn) | BUILT | analyze.scrml; slice-m4/server.test.js:224 | — | (P1) |
+| §6.6.9 | CPS marshal carve-out | REFUSED-LOUD | `s6-6-cps` gives E-BOOTSTRAP-UNSUPPORTED "split across the client/server boundary … arrives with un…" | — | (P1) W-SERVER-DERIVED-MARSHAL is moot until the split exists |
+| §6.6.9 | E-SESSION-AMBIENT-SERVER; `@currentUser` / `@session` exclusions | REFUSED-LOUD | `s6-6-session2`: `@session` gives E-SCOPE-001 "names no cell" | g-boot-s20-builtins-unbuilt-s473 | (P1) Ambient identity is absent entirely. Fails closed with no spoofing hole. The code is not emitted. |
+| §6.6.10 | Cycle detection | BUILT | E-DERIVED-CIRCULAR-DEP (`s6-6-cycle`; slice-m2/typer-s462.test.js); per the S66 rename note this code is canonical | g-bootstrap-derived-cycle-through-function-s462 | (P1) A cycle through a function body is not detected: `g-bootstrap-derived-cycle-through-function-s462` (DEFERRED, named in the SPEC itself) |
+| §6.6.11 | W-DERIVED-001 | N/A | under §66.9 a locked declaration that reads no cells is a constant, not a derived value | — | (P1) Only slice-m3/footprint.test.js mentions it, as impl#1's CG code |
+| §6.6.13 / 6.6.14 | Examples / interaction notes | N/A | — | — | (P1) |
+| §6.6.15 | Cached between upstream changes | BUILT | `Derived` caches | — | (P1) |
+| §6.6.16 | In-compound derived | BUILT | `s6-6-16-compound-derived` | — | (P1) See the §6.6.8 message note |
+| §6.6.17 | Markup-typed derived | DEFERRED-RULED | OPEN O24 | — | (P1) |
+| §6.6.18 | E-DERIVED-VALUE-MUTATE | BUILT | analyze.scrml; probe `s6-6-18-mutate` (`@ys.append(3)` on a derived tape fires it) | — | (P1) No test file found; probe only |
+| §6.6.19 | E-DERIVED-SERVER-ONLY-REACH (security) | REFUSED-LOUD | All 10 ESCALATION_SERVER_ONLY_MODULES are refused at the import, with E-BOOTSTRAP-UNSUPPORTED "does not compile on the bootstrap yet". Probes: `s6-6-19-auth`, `s6-6-19-crypto`, `imp-{cron,fs,process,redis,store,path,mcp,oauth}`. | g-boot-server-only-stdlib-escalation-unbuilt-s473 | (P1) **Latent.** The bootstrap has no reach check at all: 0 hits for the code, no server-only module set. The day one of these modules compiles on the bootstrap, the derived position (and §41's plain-initializer sibling) opens with no diagnostic. A tripwire is needed. |
+| §6.7.1 | Lifecycle overview | N/A | prose | — | (P1) |
+| §6.7.1a | `<onMount>` | SILENT-ACCEPT | gap `g-bootstrap-onmount-owed` (MED, open). Live behaviour in `s6-7/onmount3.scrml`: exit 0; index.html has a literal `<onMount><!----></onMount>`; the body is a render interpolation `rt.text(…, () => hello())`, so it runs at render, re-runs reactively and shows its value. | g-bootstrap-onmount-owed, g-impl1-onmount-element-s449 | (P1) Reclassified SILENT-ACCEPT in consolidation: the part counted it DEFERRED-RULED, but the behaviour is a live fail-open (the gap now records it). Lane s473-boot-failclosed-markup. `structuralOwner` (analyze.scrml:15882) refuses timer, poll, request and timeout, but not … |
+| §6.7.1a | `on mount { }` keyword (§63 window) | REFUSED-LOUD | `s6-7/onmount-kw` gives E-PARSE-EXPECTED / E-SCOPE-001 `on` | g-bootstrap-onmount-owed | (P1) W-ON-MOUNT-DEPRECATED is never emitted; gapped under g-bootstrap-onmount-owed |
+| §6.7.1a | E-MOUNT-WRITES-STATE / -UNPROVEN | DEFERRED-RULED | g-bootstrap-onmount-owed | g-bootstrap-onmount-owed | (P1) Incidentally, a writing body inside the accepted `<onMount>` is caught by §6.15 E-VALUE-WRITES-STATE, because it is treated as an interpolation |
+| §6.7.1b | `ref=`, E-REF-HOST-OWNED-CONTENT, mount handle | REFUSED-LOUD | `s6-7/ref` gives E-BOOTSTRAP-UNSUPPORTED "`ref=` … would be emitted as a plain `ref` attribute and bind nothing" | — | (P1) |
+| §6.7.2 | Scope as lifecycle boundary; teardown order | PARTIAL | Effects in `if=` scopes are disposed with the scope (runtime.js scope.child/dispose; slice-m1 effect.runtime.test.js) | — | (P1) Steps 2–4 (timers, cleanup LIFO, rAF) have no host because each is refused. Route regions belong to §20.8. |
+| §6.7.2.1 | Scope taxonomy | PARTIAL | `<program>` scope and `if=` scopes built; route regions refused (§20.8) | — | (P1) |
+| §6.7.3 | `cleanup()` | REFUSED-LOUD | `s6-7/cleanup` gives E-SCOPE-001 "`cleanup` is not declared"; gapped in g-bootstrap-onmount-owed ("no `cleanup()`") | g-bootstrap-onmount-owed | (P1) Codes E-LIFECYCLE-001/002/004/005 and W-LIFECYCLE-009: 0 hits |
+| §6.7.4 | `<effect deps=[…]>`: trigger, not-on-mount, no-write rule, E-EFFECT-NO-DEPS, E-LIFECYCLE-007/016, W-LIFECYCLE-010, render-before-effect … | BUILT | analyze.scrml/effects.scrml write summary; check.scrml C11; runtime.js drainQueues (render queue before effectQueue); slice-m4/effect.test.js, slice-m1/effect.runtime.test.js; probes `s6-7/effect2`, `effect-write` (E-EFFECT-WRITES-STATE) | — | (P1) |
+| §6.7.4 | Owed remainder: E-LIFT-IN-LIFECYCLE-BODY, cross-module write summaries, transition-write cycle | DEFERRED-RULED | `g-bootstrap-effect-open-items-owed` (MED). `lift` in an effect gives E-BOOTSTRAP-UNSUPPORTED (`s6-7/effect-lift`) | g-bootstrap-effect-open-items-owed | (P1) |
+| §6.7.4 | `when … changes { }` (§63 window) | BUILT | W-WHEN-EFFECT-DEPRECATED (`s6-7/when`; effect.test.js) | — | (P1) |
+| §6.7.4 | Newest-run-wins cancellation at a server call (S446 / S471) | UNVERIFIED | cpsBody effect lowering exists (lower.scrml:1558) | — | (P1) Not probed at run time |
+| §6.7.5 | `<timer>` | REFUSED-LOUD | `s6-7/timer`, `timer-noint` give E-BOOTSTRAP-UNSUPPORTED (structuralOwner) | — | (P1) E-LIFECYCLE-009/010/011 and W-LIFECYCLE-002/003/007 are moot |
+| §6.7.6 | `<poll>` | REFUSED-LOUD | `s6-7/poll` | — | (P1) E-LIFECYCLE-012, W-LIFECYCLE-004/005/008 moot |
+| §6.7.7 (+7.1–7.3) | `<request>` | REFUSED-LOUD | `s6-7/request`; open items in g-bootstrap-effect-open-items-owed | g-bootstrap-effect-open-items-owed | (P1) E-LIFECYCLE-018–022, W-LIFECYCLE-011–014, E-LIN-006 moot |
+| §6.7.8 | `<timeout>` | REFUSED-LOUD | `s6-7/timeout` | — | (P1) E-TIMEOUT-001–003, W-TIMEOUT-001 moot |
+| §6.7.9 | `animationFrame()` | REFUSED-LOUD | `s6-7/raf` gives E-SCOPE-001 "`animationFrame` is not declared" (plus function values refused) | g-bootstrap-unimplemented-construct-reported-as-generic-code | (P1) No gap names it. E-LIFECYCLE-013/014/015/017 moot. |
+| §6.7.10 | Code summary | PARTIAL | Emitted: E-EFFECT-WRITES-STATE, E-EFFECT-WRITE-UNPROVEN, E-EFFECT-NO-DEPS, E-LIFECYCLE-007, E-LIFECYCLE-016, W-LIFECYCLE-010, W-WHEN-EFFECT-DEPRECATED. The other ~38 codes have 0 hits, all behind refused constructs except the `<onMount>` group. | — | (P1) |
+| §6.7.11 | Worked examples | N/A | — | — | (P1) |
+| §6.7.12 | Interaction notes; E-LIN-004 | N/A | `lin` is function-local in the bootstrap (acceptance/lin), and top-level `let`/`lin` are refused, so an outer `lin` cannot reach an effect body | — | (P1) Not probed |
+| §6.7.13 / 6.7.14 | Open issues / alternatives | N/A | — | — | (P1) |
+| §6.8.1 | `default=` | REFUSED-LOUD | `s6-8/default` gives E-BOOTSTRAP-UNSUPPORTED "`default` in a declaration opener is not in the bootstrap … never ignores a word it does not implement" | — | (P1) E-SYNTAX-042 moot |
+| §6.8.2 | `reset(@cell)` (re-evaluates the init) | BUILT | `s6-8/reset` lowers to `.set("init")`; reset in server fns tested (slice-m4/server.test.js:239) | — | (P1) |
+| §6.8.3 | Reset and lifecycle annotation | UNVERIFIED | lifecycle types in openers are narrowed-refused (see §6.2 Shape 4) | — | (P1) |
+| §6.8.4 | `reset-on=[…]` | BUILT | `rt.resetOn` (`s6-8/reseton`); check.scrml C13; E-RESET-ON-CYCLE / INVALID-ENTRY / NOT-WRITABLE in analyze.scrml; slice-m2/reset-on.test.js, slice-m1/reset-on.runtime.test.js | g-bootstrap-effect-open-items-owed | (P1) Remainder (E-RESET-ON-SHARED-CELL, per-instance entry) is in g-bootstrap-effect-open-items-owed |
+| §6.9 | Hoisting | BUILT | `s6-8/hoist` (function reads `@name` declared after the markup) compiles; the program is a declaration whose fields construct before render | — | (P1) Runtime not executed |
+| §6.9.3 / §6.10 | `pinned`; E-STATE-PINNED-FORWARD-REF | REFUSED-LOUD | `s6-8/pinned` gives E-BOOTSTRAP-UNSUPPORTED | — | (P1) |
+| §6.10.6 | `server` modifier | REFUSED-LOUD | `s6-8/server` | — | (P1) |
+| §6.11 | Validity surface stub | N/A | stub that points to §55 (another part); check.scrml C14 exists | — | (P1) |
+| §6.12.1 | `protect=` on `<db>` (security) | REFUSED-LOUD | `s6-8/protect` gives E-BOOTSTRAP-UNSUPPORTED "a confidentiality control is refused, never ignored" | — | (P1) Correct fail-closed posture |
+| §6.13 | `debounced=` / `throttled=` | REFUSED-LOUD | `debounced=300` and `="300ms"` give E-BOOTSTRAP-UNSUPPORTED (`s6-8/debounced2`, `debounced3`). The canonical literal `debounced=300ms` gives generic E-PARSE-TRAILING (`s6-8/debounced`). | — | (P1) E-DEBOUNCED-WITH-DERIVED, E-REACTIVITY-ATTR-CONFLICT moot |
+| §6.14.1 / 6.14.2 | `persist=` | BUILT | `rt.persisted` (`s6-8/persist`); check.scrml C17; slice-m4/persist.test.js | — | (P1) |
+| §6.14.3 | Privacy errors | PARTIAL | E-PERSIST-WITH-SERVER is in analyze.scrml. E-PERSIST-REVEALED and E-PERSIST-LIN have 0 hits, but they are unreachable: `reveal`/§14.8.9 and `lin` cells do not exist on the bootstrap. | — | (P1) UNVERIFIED that they are unreachable in every path |
+| §6.14.4 | `prepaint` / `hold=` | REFUSED-LOUD | `s6-8/prepaint`, `s6-8/hold` | — | (P1) |
+| §6.14.5 | OPEN items | N/A | — | — | (P1) |
+| §6.14.6 | Codes | PARTIAL | E-PERSIST-STORAGE-UNKNOWN (`s6-8/persist-cookie`) and E-PERSIST-KEY-REQUIRED (`s6-8/persist-nokey`) BUILT; E-PERSIST-DRAFT-OVERWRITTEN owed with `<request>` | — | (P1) |
+| §6.15 | E-VALUE-WRITES-STATE | BUILT | analyze.scrml valuePositions; `s6-8/valuewrite`; slice-m4/position-write-s472.test.js, slice-m2/front.test.js; gap g-bootstrap-value-writes-state-owed RESOLVED | g-bootstrap-value-writes-effect-suppression-global | (P1) g-bootstrap-value-writes-effect-suppression-global (LOW) open |
+
+## §7 — Logic Contexts
+
+| § | title | status | evidence | gap ids | note |
+|---|---|---|---|---|---|
+| §7.1 | `${ }` syntax | BUILT | parse.scrml logic-block reader (items: import/type/const/function/fn); every slice test | — | (P2) Logic-block level admits only those items. A statement there is E-PARSE-ITEM "not in the bootstrap" (fail closed). |
+| §7.2 | Content = JS minus exclusions | PARTIAL | The bootstrap's JS is a subset. Refused with E-BOOTSTRAP-UNSUPPORTED: compound assign / `++` (parse.scrml:433/440), braced arrow (1865), tagged template (546), function values (probe s7/lambda.scrml) | g-bootstrap-function-values-slice-s451, g-boot-param-default-and-rest-s473, g-boot-async-stdlib-function-s473, g-boot-compound-write-sink-desugar-s473 | (P2) Gaps: g-bootstrap-function-values-slice-s451, g-boot-param-default-and-rest-s473, g-boot-async-stdlib-function-s473, g-boot-compound-write-sink-desugar-s473 |
+| §7.2.1 | JS constructs that are not scrml (`E-*-NOT-IN-SCRML` family) | PARTIAL | None of the 7 codes (E-CLASS/TRY/THROW/ASYNC/AWAIT/FOR-AWAIT-NOT-IN-SCRML, E-SWITCH-FORBIDDEN, E-DYNAMIC-IMPORT-NOT-IN-SCRML) occurs in compiler/self-host-v2. Probes s7/{class,classdecl,try,throw,async,await,switch,dynimport}.scrml: each is rejected only by a cascade, e.g. class → E-STMT-MISSING-SEMICOLON + "`class` … | g-boot-not-in-scrml-codes-unbuilt-s473, g-bootstrap-unimplemented-construct-reported-as-generic-code | (P2) Fail closed, but the SPEC table is the one home of these codes and §34 lists them. NO GAP. |
+| §7.2.2 | Statement termination | BUILT | parse.scrml `parseTermStmt`/`missingSemi` (:2288)/`splitContinuation` (:676)/`noEffectStmt` (:2071); tests slice-m4/termination-rulings-s469.test.js, acceptance.test.js (acceptance/termination) | g-bootstrap-newline-sensitive-rules-remain-s469 | (P2) Residue is gapped: g-bootstrap-newline-sensitive-rules-remain-s469 (narrowed) |
+| §7.3 | Function declaration forms | PARTIAL | `function`/`fn` BUILT; `pure function` → E-PARSE-ITEM "unexpected text at program level"† (s7/purekw.scrml); W-PURE-DEPRECATED absent; E-CALL-ARITY BUILT | g-bootstrap-unimplemented-construct-reported-as-generic-code | (P2) `pure function` is a deprecated synonym the SPEC still admits. NO GAP. |
+| §7.3.1 | Nested function declarations | REFUSED-LOUD | s7/nested.scrml, nested2.scrml: "E-STMT-MISSING-SEMICOLON … after `function`" plus a parse cascade. analyze.scrml:11188/14390/17854 comments assume "no function declaration inside a body" | g-boot-nested-function-decl-unbuilt-s473 | (P2) MAY in the SPEC, and a common idiom. The diagnostic misleads. NO GAP. |
+| §7.3.2 | Default parameter values (+ E-PARAM-DEFAULT-*) | DEFERRED-RULED | gap g-boot-param-default-and-rest-s473 (MED, open). s7/deflt.scrml refuses with the garbled "an unannotated parameter `` — needs `: Type`" | g-boot-param-default-and-rest-s473 | (P2) The E-PARAM-DEFAULT-* codes are moot until defaults parse. The message is wrong (it names an empty parameter). |
+| §7.3.3 | A block binds each name once (E-SCOPE-REDECLARE) | BUILT | analyze.scrml; slice-m2/typer.test.js; s7/redecl.scrml fires | — | (P2) |
+| §7.3.4 | Call checking: arity + argument type | BUILT | analyze.scrml E-CALL-ARITY/E-TYPE-031; slice-m2/typer-s440.test.js, typer-gap.test.js; s7/arity.scrml fires both | — | (P2) |
+| §7.4 / 7.4.1 | Markup as expression in logic (markup-as-value pillar) | REFUSED-LOUD | s7/markupexpr.scrml (`return <li>…</li>;`) gives E-PARSE-EXPR "expected an expression, found `<`". Only the lift case has an honest message (parse.scrml:2965, "markup is not a value in the bootstrap's logic") | g-boot-markup-as-value-unbuilt-s473 | (P2) A pillar of the language with no gap or ruling for the bootstrap. Fails closed. |
+| §7.4.2 | Expressions interpolated into markup | PARTIAL | BUILT: reactive `rt.text` effect; `${not}` renders "" (runtime.js:2136 `display`); E-TEXT-NON-PRIMITIVE (slice-m4/value-form-s469.test.js); E-VALUE-WRITES-STATE (s7/interpwrite.scrml) | g-boot-markup-text-decl-instance-unjudged-s473, g-boot-markup-text-unresolved-limb-s472 | (P2) Open gaps: g-boot-markup-text-decl-instance-unjudged-s473 (MED), g-boot-markup-text-unresolved-limb-s472 (LOW) |
+| §7.5 | Type annotation grammar | PARTIAL | `int/integer/bool/boolean/void` accepted (s7/syn.scrml). Unions other than `T \| not` refused, honestly (parse.scrml:4624). **`T?` sugar does not parse**: param `x: string?` gives "an unannotated parameter ``"; cell `<m:string?=not/>` gives E-PARSE-TAG (s7/interpnot.scrml, first version). E-PARAM-TYPE-REQUIRED is … | g-boot-optional-type-sugar-unparsed-s473, g-boot-param-type-required-code-s473 | (P2) The `T?` SHALL ("desugared before type checking") is refused† with NO GAP. The re-coding to E-PARAM-TYPE-REQUIRED is acknowledged as owed in SPEC prose only, with no gap id. |
+| §7.5.1 | Assignability (provable domain) | BUILT | analyze.scrml typer; slice-m2/typer*.test.js (E-TYPE-031 in 23 test files) | g-spec-7-5-1-annotated-initializer-typed-widening-owed-s472 | (P2) The bootstrap exceeds the SPEC (see g-spec-7-5-1-annotated-initializer-typed-widening-owed-s472, which is SPEC-side) |
+| §7.5.2 | Unproven types / W-TYPE-031-UNPROVEN | REFUSED-LOUD | `asIs` is refused (analyze.scrml:1171). The bootstrap has no `unknown`-plus-warning path: an unresolved value fails closed as an error | — | (P2) Stricter than the SPEC (error, not warning). There is no gap or ruling for "bootstrap has no asIs". §14.7 (the s14a section) covers asIs itself. |
+| §7.6 | File-level `${}` scope | PARTIAL | `const` shared across blocks BUILT (s7/filescope.scrml). E-SCOPE-010 including one-name-per-program BUILT (slice-m4/rulings-s473-one-name.test.js, s7/dupfile.scrml). File-scope `let` refused (parse.scrml:4005) | g-spec-file-scope-binding-placement-s472 | (P2) `let` is deferred by g-spec-file-scope-binding-placement-s472 (SPEC silence). I did not verify the `if=`-nested lift-declaration clause (UNVERIFIED). |
+| §7.6.1 | Scope with V5-strict, hoisting, `pinned` | PARTIAL | Hoisting BUILT: s7/fwd.scrml, a forward cell reference, settles through runtime.js `seeded`/`construct` owed-queue. E-NAME-COLLIDES-STATE BUILT (s7/collide.scrml; logic-block-const-s472.test.js). `pinned <a…/>` → E-PARSE-ITEM†; E-STATE-PINNED-FORWARD-REF absent | g-bootstrap-unimplemented-construct-reported-as-generic-code | (P2) `pinned` has no gap (it is §6.10's, part 1's range). |
+| §7.7 | Logic-markup interleaving | BUILT | s7/filescope.scrml interleaves; the acceptance corpus does throughout | — | (P2) |
+
+## §8 — SQL Contexts
+
+| § | title | status | evidence | gap ids | note |
+|---|---|---|---|---|---|
+| §8.1 | Syntax (`?{`…`}`; `${}` = bound param; E-SQL-001) | BUILT | parse.scrml ~1299-1450 (`?{` reader, chain); core.scrml:290 (params are Exprs, "E-SQL-001 unrepresentable"); server-runtime.js `sqlText`/`query` (frozen literal runs + driver bound values); test slice-m4/server-artifact.test.js "§8.1 — a value interpolated in SQL never appears in the SQL text sent to the driver … | g-boot-sql-slot-in-literal-code-s473 | (P2) A `${}` inside a quoted SQL literal / comment is refused (probe `slotlit.scrml`), but under E-BOOTSTRAP-UNSUPPORTED, not the S468-ruled E-SQL-SLOT-IN-LITERAL (see §3). |
+| §8.1.1 | Driver resolution — nearest database scope, `<db>` supply (11a), E-SQL-004 | BUILT | analyze.scrml `dbsPass` (~24843), `positionDb`, E-SQL-004 sites ~25565/25653; tests slice-m4/db-body-s472.test.js ("the NEAREST scope…", "two sibling `<db src>`…", "a `<db>` with no `src=`…"); probe `nodb.scrml` → E-SQL-004 | — | (P2) |
+| §8.1.1 | Prefix table, E-SQL-005, `file:` URI, mongo | BUILT | analyze.scrml ~25123-25175; probe `badprefix.scrml` → E-SQL-005 | — | (P2) mongo refused as "not a `?{}` database" (matches §44, though §8.1.1's E-SQL-005 bullet still lists `mongo:` among "valid prefixes" — SPEC-internal inconsistency, not a bootstrap defect). |
+| §8.1.1 | Resolution base (relative SQLite path vs declaring file; cwd SHALL NOT matter) | PARTIAL | server-runtime.js `resolveSqlitePath`: `root = host.root ?? process.cwd()` joined with the declaring file's project-relative dir; scripts/scrml-boot.ts:519 `dev` passes `root: dirname(entryAbs)` | g-boot-server-runtime-data-root-s473 | (P2) Under `scrml-boot dev` correct for the entry; a `program.server.js` started with the default host resolves against **cwd** — exactly what the SHALL forbids. NO GAP. |
+| §8.1.1 | Ownership + Creation (only an owning file creates the SQLite file; stderr notice; referencing handle fails loudly if missing; never an … | SILENT-ACCEPT | analyze.scrml ~25341 computes `owner` into core.scrml `Db.owner` (:385), but print-server.scrml never prints it and server-runtime.js `connectWith` opens `new SQL("sqlite://…")` for every handle. Executed: Bun.SQL on a missing path **creates a 0-byte file** and the query succeeds (scratch `c.mjs`). | g-boot-sqlite-ownership-creation-unprinted-s473 | (P2) A referencing program pointed at a wrong path silently gets an empty database; no stderr line. NO GAP. |
+| §8.1.1 | W-DB-PATH-RESOLVES-ELSEWHERE; owned-empty-db-at-compile-time read | SILENT-ABSENT | `grep W-DB-PATH compiler/self-host-v2` = 0 | g-boot-sqlite-ownership-creation-unprinted-s473 | (P2) The compile-time half depends on the §14.8 schema read, which the bootstrap does not do (schema refused) — the warning itself is still absent. |
+| §8.1.1 | Transactions do not span databases — E-SQL-011 | SILENT-ACCEPT | `grep E-SQL-011 compiler/self-host-v2` = 0; probe `xdb2.scrml` (`!` fn, 2 writes on a.db, calls a fn writing b.db) compiles clean | g-boot-implicit-envelope-unbuilt-not-refused-s473 | (P2) Moot-ish today only because the bootstrap has no envelope at all (next row) — but the SHALL is a compile error and nothing refuses. |
+| §8.1.2 | One statement per `?{}` — E-SQL-MULTIPLE-STATEMENTS + defence-in-depth | SILENT-ACCEPT | `grep MULTIPLE-STATEMENTS compiler/self-host-v2` = 0; probe `multi.scrml` (`INSERT … (${body}); DELETE FROM notes`) compiles clean; emitted `rt.sqlText(["INSERT INTO notes (body) VALUES (", "); DELETE FROM notes"])` (out-multi/program.server.js:11). Executed against Bun.SQL SQLite with that exact template shape: the … | g-boot-sql-multiple-statements-unbuilt-s473 | (P2) sql.scrml scans `;` only for kind/txControl classification; nothing refuses. Worst item in §8 (the S456 rule is the tenant re-pin closer; SQLite runs the trailing statements on every path). |
+| §8.1.2 | E-SQL-QUERY-NOT-READABLE | N/A | the rule targets impl#1's unparsed-expression-text path; the bootstrap parses every `?{` structurally (an unbackticked `?{ … }` is E-SQL-003, parse.scrml:1399) | — | (P2) |
+| §8.1.3 | Functions and state in a `<db>` body (db cells, E-DB-CELL-SERVER-READ / -WRITE-OUTSIDE-BLOCK / -EDIT-GRANT) | PARTIAL | parse.scrml `parseDbBody`, analyze.scrml (codes in severity.scrml + analyze.scrml); tests slice-m4/db-body-s472.test.js, db-cells-s473.test.js, acceptance/db-cells/*, acceptance/db-body/* | g-bootstrap-db-in-component-decl-body-dropped-s473, g-bootstrap-db-cell-load-failure-surface-s473, g-bootstrap-db-cell-shapes-refused-s473, g-boot-db-fn-in-match-arm-refusal-untested-s473 | (P2) Known residue: `g-bootstrap-db-in-component-decl-body-dropped-s473` (silently drops a cell — LOW, a real SILENT-ACCEPT already gapped), `g-bootstrap-db-cell-load-failure-surface-s473`, `g-bootstrap-db-cell-shapes-refused-s473`, … |
+| §8.2 | Bound parameter semantics + dedup | BUILT | Core `SqlQuery` params/slots (C-SQL1); probe `dedup.scrml` → `rt.query(db, "all", sql, [a], [0, 0])`; test server-artifact.test.js "§8.2 — a repeated expression is ONE parameter, evaluated ONCE" | — | (P2) |
+| §8.3 | Chaining (`.all()`/bare, `.get()`, `.run()`; `.prepare()` E-SQL-006) | BUILT | parse.scrml:1421-1450 chain; server-runtime.js `query` modes; probes `bare.scrml` (bare = all, compiles), `e006.scrml` → E-SQL-006; tests server-artifact.test.js sql-get-single-row-rt / sql-all-array-shape-rt | — | (P2) |
+| §8.4 | Conditional WHERE (`not` → NULL) | BUILT | print.scrml:524 `.Absent :> JNull`, values passed as bound params | — | (P2) By construction; no dedicated test found — low confidence beyond construction. |
+| §8.4 | E-SQL-002 compile-time SQL validation | DEFERRED-RULED | SPEC §8.6 row: "Reserved / spec-ahead, S263 — no fire site … Excluded from the freeze fireable set"; bootstrap-u1 design §5 defers it | — | (P2) |
+| §8.4 / 8.4.1 | Literal template (E-SQL-003); no fragment-as-value | BUILT | parse.scrml:1368/1377/1399 E-SQL-003; probe `e003.scrml` → E-SQL-003; tagged templates refused (parse.scrml:546) | — | (P2) |
+| §8.5.1 | `.run()` void; `?{}` escalates to server | BUILT | server-runtime.js `query` returns null for run; test db-body-s472.test.js "the function is SERVER-placed (§12: its body runs a `?{}`)"; print.scrml:2928 refuses a client `?{}` | — | (P2) |
+| §8.5.2 | `.prepare()` removed | BUILT | as 8.3 | — | (P2) |
+| §8.5.3 | `transaction { }` blocks | REFUSED-LOUD | parse.scrml:2440 E-BOOTSTRAP-UNSUPPORTED "arrives with unit U1e"; probe `txn.scrml` | — | (P2) |
+| §8.5.4 | Server escalation of writes | BUILT | as 8.5.1 | — | (P2) |
+| §8.6 | Error-code table | PARTIAL | fired: E-SQL-003/004/005/006/008, E-ERROR-015, E-ERROR-002 (probes e003, nodb, badprefix, e006, e008, e002); not fired anywhere in the bootstrap: E-SQL-MULTIPLE-STATEMENTS, E-SQL-011, E-BATCH-001, W-BATCH-001, E-SQL-007, D-BATCH-001, E-BATCH-002, E-PROTECT-003 | g-boot-sql-multiple-statements-unbuilt-s473, g-boot-implicit-envelope-unbuilt-not-refused-s473 | (P2) E-SQL-007's job (no `?{}` outside an awaitable server body) is done by C-S2 / print.scrml:2928 + E-VALUE-SERVER-CALL; E-BATCH-*/E-PROTECT-003/D-BATCH-001 follow the deferred §8.9/§8.10. |
+| §8.7 | Runtime errors (`?{}` failable everywhere; E-ERROR-002 outside `!`) | BUILT | analyze.scrml `errorTwo` (~25593); server-runtime.js `sqlErrorOf` → SqlError variants; probe `e002.scrml` → E-ERROR-002; test server-artifact.test.js "a constraint violation is a SqlError VALUE"; slice-m4/error-rulings.test.js | g-boot-sqlerror-variant-client-checkcore-s472 | (P2) `g-boot-sqlerror-variant-client-checkcore-s472` (LOW) open. |
+| §8.8 | Interaction notes | N/A | cross-references (protect → §14.8.9; meta `?{}` → §22; nested program → §4.12, refused in bootstrap analyze.scrml:2111) | — | (P2) |
+| §8.9 (head) / 8.9.1 / 8.9.3 | Shared prepare/lock cycle; candidate set | DEFERRED-RULED | bootstrap-u1-server-boundary-design-2026-10-03.md §5: "the §8.9 shared prepare/lock cycle (perf only …)" deferred | — | (P2) Not observable; sequential is correct. |
+| §8.9.2 | Implicit per-handler transaction (≥2 `?{}` in a `!` server body; ROLLBACK on throw/`fail`) | SILENT-ACCEPT | analyze.scrml:25605 comment "The bootstrap emits no W-BATCH-001 (no implicit envelope until U1e)"; probe `envelope.scrml` (`!` fn: INSERT, UPDATE, then `fail .Bad`) compiles clean — emitted `move` (out-envelope/program.server.js) has two bare `rt.query` calls, no BEGIN/COMMIT/ROLLBACK, `fail` returns … | g-implicit-envelope-requires-explicit-server-modifier, g-boot-implicit-envelope-unbuilt-not-refused-s473 | (P2) The U1 design plan schedules this for U1e and says unbuilt units are "refused until their unit"; the bootstrap does NOT refuse — it ships non-atomic writes that the SPEC promises roll back. NO GAP for the bootstrap (the HIGH gaps … |
+| §8.9.2 | Manual `?{BEGIN}` in a `!` fn: W-BATCH-001 + invocation-held gate, rollback-and-report at return (R6) | SILENT-ACCEPT | probe `manual.scrml` (`!` fn: `?{BEGIN}`, UPDATE, `fail .Bad`, `?{COMMIT}`) compiles clean, no W-BATCH-001; server-runtime.js has no gate / no open-txn check | g-boot-manual-tx-left-open-no-gate-s473 | (P2) On the `fail` path the shared connection is left inside an open transaction for later requests (compile verified; runtime consequence not executed — UNVERIFIED at run time). E-ERROR-015 outside `!` IS built (analyze.scrml `manualTxDiag`). |
+| §8.9.4 | Error model (BatchPrepareFailed inside `!`) | DEFERRED-RULED | follows the §8.9 deferral (no batching ⇒ no batch prepare) | — | (P2) |
+| §8.9.5 | `.nobatch()` | BUILT | parse.scrml:1446 (any chain position); probe `nobatch.scrml` compiles | — | (P2) Marker only — nothing consumes it yet (no batching), which matches "no runtime effect". |
+| §8.9.6 | Interaction with lin | N/A | no batch rewrite exists to order against lin-check | — | (P2) |
+| §8.10 (all) | N+1 loop hoisting, D-BATCH-001, E-BATCH-002, cap, protect check | DEFERRED-RULED | bootstrap-u1 design §5 "Defer … §8.10 N+1 hoisting and §8.11 mount-hydration coalescing (performance; sequential is correct)" and §8 "Not in U1 … §8.10/§8.11 coalescing"; probe `loop.scrml` compiles to a per-row loop | — | (P2) The design says "refused, fail closed" but the bootstrap compiles the loop un-hoisted (correct semantics, perf only). D-BATCH-001 (Info, a SHALL) also absent. |
+| §8.11 | Mount-hydration coalescing (`<var server>`) | REFUSED-LOUD | `server` declarations refused E-BOOTSTRAP-UNSUPPORTED (analyze.scrml ~3216); the db-cell analogue: `g-bootstrap-db-cell-loads-uncoalesced-s473` | g-bootstrap-db-cell-loads-uncoalesced-s473 | (P2) |
+
+## §9 — CSS Contexts
+
+| § | title | status | evidence | gap ids | note |
+|---|---|---|---|---|---|
+| §9.1 (DQ-6) | `#{}` at program, top level, or in a plain element = global; E-CSS-SYNTAX; no `${}` | BUILT | css-syntax.scrml, css-ingest.scrml; acceptance/css/{global-rule,neg-interp,neg-bad-selector,neg-missing-semicolon}; slice-m4/css-s469.test.js; s9/plain-sel.scrml compiles global | — | (P2) Flat blocks outside DQ-7 are refused (s9/plain-flat.scrml), as the SPEC's ⚑ OPEN text says the bootstrap does |
+| §9.1 (DQ-7) | Component scoping (`@scope` donut, `data-scrml`, root-anchored, flat → `style=`, `\3c`, E-COMPONENT-NAME-DUPLICATE, E-PARSE-DECL-BODY) | PARTIAL | All of these are BUILT: acceptance/css/{component-scope,flat-inline}; css-chromium-s469.test.js; css-injection-pack-s469.test.js; s9/declbody.scrml gives E-PARSE-DECL-BODY; s9/lt.scrml gives E-CSS-SYNTAX on `<`; s9/nested-flat.scrml is refused | g-bootstrap-css-residuals-s469 | (P2) Ruled CSS that is not carried is refused with E-BOOTSTRAP-UNSUPPORTED (`@media`/`@supports`/nesting/`!important`; css-syntax.scrml:27; acceptance/css/media-unsupported); gap g-bootstrap-css-residuals-s469. The §65 E-STYLE-CONFLICT is absent (that is §65's row, not this one). |
+| §9.2 | `<style>` block "valid at file top-level" | REFUSED-LOUD | s9/style.scrml gives E-STYLE-001 | — | (P2) Consistent with §4.17 (`<style>` not admitted). §9.2 itself is stale (see Questionable). |
+| §9.3 | CSS files ("scrml CSS variable syntax available in `.css` files") | SILENT-ABSENT | No `.css` ingestion in compiler/self-host-v2; `import "./side.css";` is E-PARSE-IMPORT (s9/cssfile.scrml) | g-boot-css-files-not-ingested-s473 | (P2) The SPEC names no mechanism, so this is probably stale text (Questionable). LOW. |
+
+## §10 — The `lift` Keyword
+
+| § | title | status | evidence | gap ids | note |
+|---|---|---|---|---|---|
+| §10.1 | `lift` semantics (accumulation; value-lift) | PARTIAL | Accumulation is BUILT only in a Tier-0 `${ for … }` and in bound loops (acceptance/loop-value/*). A bare `${ lift <li>a</li>; lift <li>b</li>; }` with no loop gives "`lift` is not declared"† (s10/bare.scrml). Value-lift (if-as-expression) is refused with E-BOOTSTRAP-UNSUPPORTED (parse.scrml:1901) | g-boot-lift-surface-residue-s473 | (P2) E-MARKUP-STATEMENT-NOT-RENDERED is absent; it is moot because markup is not parsed as a logic statement. The bare-block refusal has NO GAP. |
+| §10.1.1 | `lift` under the markup-as-value framing | N/A | framing note ("rules below remain authoritative") | — | (P2) |
+| §10.2 | Context-coercion rules | PARTIAL | Markup-parent coercion BUILT (Tier-0). The style-context `cssClass[]` row is unreachable, because `${}` in `#{}` is E-CSS-SYNTAX (S469). E-TYPE-010/011 are absent | — | (P2) The style row is superseded by S469 (Questionable) |
+| §10.3 | Syntax forms (statement / chain `.lift(…)`) | PARTIAL | Statement form BUILT. Chain form `xs.lift(<li>…)` gives E-PARSE-EXPR† (s10/chain.scrml) | g-boot-lift-surface-residue-s473 | (P2) NO GAP for the chain form |
+| §10.4 | Valid use sites (E-SYNTAX-002, `fn` + `return ~`, E-LIFT-002, E-TYPE-012, E-SYNTAX-001) | PARTIAL | E-SYNTAX-002 BUILT (s10/funclift.scrml; acceptance/loop-value/neg-lift-in-function). `lift` in an `fn` body with `return ~` is REFUSED: E-BOOTSTRAP-UNSUPPORTED plus E-PARSE-EXPR on `~` (s10/fnlift.scrml). E-LIFT-002 is moot (value-lift refused). Heterogeneous lifts are refused as a union tape, E-BOOTSTRAP-UNSUPPORTED … | g-bootstrap-loop-value-form-residue-s469, g-boot-lift-surface-residue-s473 | (P2) The `fn`-lift / `~` refusal has NO GAP. §10.4 says E-TYPE-012 for heterogeneous lifts; §49.6 says they give a union (Questionable) |
+| §10.5 (10.5.1–10.5.4) | Lift ordering; concurrent lift (E-LIFT-001) | BUILT | The bootstrap never parallelises: no `Promise.all` in print.scrml, lower.scrml or analyze.scrml, and the §13 fork found calls run in source order. So lift order is runtime order and E-LIFT-001 cannot arise | — | (P2) E-LIFT-001 itself is absent; it becomes owed when §13.2 parallelisation lands |
+| §10.5.5 | DG-pass concurrent-lift detection algorithm | N/A | impl#1's Stage-7 DG algorithm; the bootstrap has no parallel scheduling | — | (P2) |
+| §10.6 | Nested `lift` scoping | BUILT | s10/nestedlift.scrml: each inner `${ for }` gathers into its own `<li>` (out-nestedlift/program.client.js nested `rt.gather`); acceptance/loop-value/tier0-rows | — | (P2) |
+| §10.7 | Value-lift vs accumulation mode | REFUSED-LOUD | if-as-expression refused (parse.scrml:1901, honest message) | — | (P2) |
+| §10.8 | Accumulation order and taken-branch-only | BUILT | s10/ifelse.scrml, s10/cond.scrml; acceptance/loop-value/tier0-rows (a conditional lift, runtime-checked) | — | (P2) |
+
+## §11 — State Objects and `protect=` (Reserved — Folded)
+
+| § | title | status | evidence | gap ids | note |
+|---|---|---|---|---|---|
+| §11 | State objects / `protect=` (folded) | N/A | the section is a fold log; content lives in §6 and §52 | — | (P2) |
+
+## §12 — Route Inference
+
+| § | title | status | evidence | gap ids | note |
+|---|---|---|---|---|---|
+| §12.1 | Default placement = client | BUILT | analyze.scrml `placePass` (~25291), header 24308–24365 | — | (P2) |
+| §12.2 T1/T4/T5 | `?{}` escalates; `server` modifier + W-DEPRECATED-SERVER-MODIFIER; caller-context inheritance | BUILT | T1: slice-m4/db-body-s472.test.js ("the function is SERVER-placed"). T4: W-DEPRECATED-SERVER-MODIFIER (1 test). T5: s12/t5.scrml, a helper called only from a server fn, is in program.server.js and absent from program.client.js | — | (P2) |
+| §12.2 T2 | Protected-field escalation | REFUSED-LOUD | `<db protect=>` gives E-BOOTSTRAP-UNSUPPORTED "a confidentiality control is refused, never ignored" (s12/protect.scrml) | g-bootstrap-unknown-tags-resolved-as-html | (P2) **But** the s148 section found a §52 type-level `<User protect=…>` SILENT-ACCEPT (unknown tag emitted as HTML): see §14.8.9 |
+| §12.2 T3 | Server-only stdlib import escalates its caller | REFUSED-LOUD | Today only `scrml:math` and `scrml:random` import (s12/m-*.scrml: all 20 others give E-BOOTSTRAP-UNSUPPORTED "cannot import this stdlib module"). There is **no escalation logic**: analyze.scrml:24322 says "T3 server-only stdlib imports have no source form in the bootstrap", which is no longer true, since stdlib … | g-boot-server-only-stdlib-escalation-unbuilt-s473 | (P2) The moment a server-only module (crypto, auth, store, oauth, fs, path) ports, its caller is placed on the CLIENT, and the S299 founding defect (a secret plus a Bun-only implementation in the browser) returns with no diagnostic. NO GAP. |
+| §12.2 T6 | W-DEAD-FUNCTION | SILENT-ABSENT | `grep W-DEAD-FUNCTION compiler/self-host-v2` = 0; s12/dead.scrml compiles with no warning | g-boot-w-dead-function-unbuilt-s473 | (P2) A warning SHALL. LOW. |
+| §12.2 T7 | Channel `broadcast()` escalation | REFUSED-LOUD | `<channel>` gives E-BOOTSTRAP-UNSUPPORTED (s12/chan.scrml) | — | (P2) |
+| §12.2 T8 | Reserved-name `handle(request, resolve)` → middleware, server | SILENT-ACCEPT | s12/handle2.scrml: `function handle(request: string, resolve: string)` compiles. It ships in **program.client.js** as a dead function, is never woven into the server pipeline, and draws no diagnostic. With the real §40.3.2 type `request: Request` it is refused with E-TYPE-UNKNOWN (s12/handle3.scrml) | g-boot-handle-reserved-name-unchecked-s473 | (P2) Recognition is by name plus parameter names, and the bootstrap builds no request pipeline. An auth middleware written this way silently never runs. LOW: the realistic spelling is refused. |
+| §12.3 | Generated infrastructure (route + fetch + ser/de; complete HTTP response; internal route names) | BUILT | print-server.scrml `printServer`; slice-m1/runtime/server-runtime.js; slice-m4/server.test.js, server-artifact.test.js, server-call-runtime.test.js | — | (P2) Author `route=` on an SSE generator is moot: generators are refused (§13.6 row) |
+| §12.4 | Normative: E-ROUTE-001/002 (+ reactive-cell chain)/005, E-REACTIVE-003, E-RI-002, per-function over binder facts | BUILT | analyze.scrml placePass; s12/route2.scrml gives E-ROUTE-002 naming the chain `srv() → readC()` and `@c`; s12/route5.scrml gives E-ROUTE-005; tests: E-ROUTE-002 ×3, E-ROUTE-005 ×3, E-REACTIVE-003 ×2 test files | — | (P2) |
+| §12.4 | E-ARG-SERVER-IDENTITY | REFUSED-LOUD | No `@session` / `session` exists in the bootstrap: s12/ident.scrml and ident2.scrml give E-SCOPE-001 | g-boot-s20-builtins-unbuilt-s473 | (P2) The identity rule is moot until §20.5 lands. The refusal code is generic. |
+| §12.5 | Server return values (§57 codec, `__scrml_absent`, `{variant,data}`, E-ROUTE-003/004, strict decoder) | BUILT | codec.scrml; analyze.scrml:25484–25502 `wireDiag`; s12/enumret.scrml compiles; tests slice-m4/server.test.js, server-call-runtime.test.js, server-await-review.test.js | — | (P2) |
+| §12.6 | Library-mode emission | N/A | Conditional on `--mode library`, which the bootstrap does not have (scripts/scrml-boot.ts: `compile` / `dev` only) | g-boot-kind-tool-emit-unbuilt-s473 | (P2) Whether library mode is owed is §21.5's question (another part's range). Related: g-boot-kind-tool-emit-unbuilt-s473 |
+
+## §13 — Async Model
+
+| § | title | status | evidence | gap ids | note |
+|---|---|---|---|---|---|
+| §13.1 | Developer-visible syntax (no `async`/`await`/`Promise`) | REFUSED-LOUD | probes `async1` (`async function` → E-PARSE-ITEM "unexpected text at program level"), `await1` (`await` → E-SCOPE-001 "`await` is not declared"), `newp1` (`new Promise` → E-SCOPE-001 `new`/`Promise`) | g-boot-async-stdlib-function-s473, g-bootstrap-unimplemented-construct-reported-as-generic-code, g-boot-not-in-scrml-codes-unbuilt-s473 | (P2) Fails closed, but with generic codes; the §7.2.1 codes E-ASYNC-NOT-IN-SCRML / E-AWAIT-NOT-IN-SCRML appear nowhere in self-host-v2 (grep = 0). Gaps: g-boot-async-stdlib-function-s473 (async item), g-bootstrap-unimplemented-construct-reported-as-generic-code (generic code). … |
+| §13.2 (items 1,4,5 + "insert await" / "wrap async") | Compiler-managed asynchrony: await at every server call, async wrap | BUILT | client: CPS `rt.waiting`/`rt.suspend` (print.scrml ~946 "THE ONE `await` RULE … printed at a Suspend and nowhere else"; lower.scrml waiting fns ~2227/3196); server: `async function` + `await` (print-server.scrml; probe `comp2` out `program.server.js:30-36`). Tests: slice-m4/server-await-pack.test.js, … | — | (P2) Probe `par1` output: two calls each suspended in sequence. |
+| §13.2 (items 2,3 + S451 R4) | Parallelize independent provably-READ server calls (`Promise.all`) | DEFERRED-RULED | bootstrap-u1-server-boundary-design-2026-10-03.md §8: "Not in U1 (each refused until its unit): … §13.2 parallelization (R4)" → U3. Probe `par1` (two READ `cnt` calls) emits nested sequential `rt.suspend`, no `Promise.all` (grep self-host-v2 for `Promise.all` = 0) | g-boot-13-2-read-parallelization-unbuilt-s473 | (P2) Not refused — silently sequential. That is the SAFE direction (R4's own fallback is source order), so no correctness loss; a performance SHALL is unmet. No gap id: suggest `g-boot-13-2-read-parallelization-unbuilt` LOW. |
+| §13.2 (every body) | Handlers / `on mount` bodies awaited, async scope | PARTIAL | handlers: probe `par1` (`rt.suspend(task$, g(task$), …)`); `<effect>` body: probe `eff3` (server call suspended); function bodies BUILT | g-bootstrap-onmount-owed | (P2) `<onMount>` / `on mount` not in the bootstrap — g-bootstrap-onmount-owed (MED). |
+| §13.2 (S450) | Sole-root handler write MAY be fire-and-forget; all else awaited in place | BUILT | every handler suspends (par1 `render_program`); the MAY is simply not taken | — | (P2) By construction. |
+| §13.2 (value-use ban) | Async-colored fn SHALL NOT be a value; E-ASYNC-FN-ESCAPES-AS-VALUE | REFUSED-LOUD | probe `alias1` (`const f = cnt` → E-BOOTSTRAP-UNSUPPORTED "names a function without calling it … function values arrive with a later slice"); probe `lam2` (any stored lambda → E-BOOTSTRAP-UNSUPPORTED) | g-bootstrap-function-values-slice-s451 | (P2) SPEC §13.2 S469 note itself records "the bootstrap refuses … with E-BOOTSTRAP-UNSUPPORTED until function types exist". Gap g-bootstrap-function-values-slice-s451. |
+| §13.2 (awaited combinators) | A waiting lambda as the arg of `.map/.filter/.some/…` lowered to an awaiting combinator | REFUSED-LOUD | probes `filt2` (client), `sort2`/`sort3` (server): E-BOOTSTRAP-UNSUPPORTED "an awaited combinator (§13.2) is not in the bootstrap; it arrives with the §13.2 awaited-combinator slice" | g-boot-awaited-combinator-slice-s473 | (P2) NO GAP for the "awaited-combinator slice". Message always says `xs.map(x => …)` even for `.sort`/`.filter` (cosmetic). |
+| §13.2 (sync callbacks) | E-SERVER-FN-IN-SYNC-CALLBACK / E-ASYNC-STDLIB-IN-SYNC-CALLBACK | REFUSED-LOUD | same refusal as above (probe `sort2`: `.sort` comparator calling a waiting fn, server side) | g-boot-awaited-combinator-slice-s473 | (P2) Codes not emitted (grep = 0); refusal is the combinator one. |
+| §13.2 (scheduler shadow) | Global-scheduler fire-and-forget; shadowed scheduler → E-ASYNC-FN-ESCAPES-AS-VALUE | N/A | no function values reach any callee; `setTimeout`/`setInterval` exist only as executable sinks (parse.scrml:6862, analyze.scrml:8375) | — | (P2) Unreachable in the bootstrap's language subset. |
+| §13.2 | E-EVENT-CONTROL-AFTER-AWAIT | REFUSED-LOUD | probe `evt1`: no event object (`event` → E-SCOPE-001, `Event` → E-TYPE-UNKNOWN, `.preventDefault` → E-BOOTSTRAP-UNSUPPORTED) | — | (P2) Unreachable by construction; generic codes. |
+| §13.2 | E-ASYNC-CALL-PROMISE-METHOD (`.then` on awaited call) | REFUSED-LOUD | probe `then1`: `.then(…)` → E-BOOTSTRAP-UNSUPPORTED (generic method refusal) | — | (P2) Code not emitted. |
+| §13.2 | E-ASYNC-HANDLER-UNANALYZABLE | N/A | the bootstrap writes nothing on any parse error ("✗ N errors — nothing written"); no partial-analysis path exists | — | (P2) Fail-closed by construction. |
+| §13.2 (S462) | Server Promise trap (boolean test of a direct `scrml:` stdlib call → HTTP 500) | N/A | no Promise-returning stdlib function compiles (g-boot-async-stdlib-function-s473); server-side stdlib host bindings refused (analyze.scrml:4213); any thenable at a host boundary is the trap E-HOST-VALUE-MISMATCH-RT (runtime.js:1182, 1210, 1431; slice-m4/host-block-f3-s473.test.js, math-port-s472.test.js) | g-boot-async-stdlib-function-s473 | (P2) A stronger, all-position backstop replaces the trap. UNVERIFIED that the server artifact runs the same hostDecode (server-runtime imports ./runtime.js, so likely). |
+| §13.3 | Worked example | N/A | example | — | (P2) Its `Promise.all` emit claim = row "13.2 items 2,3". |
+| §13.4 | Server function composition (in-place call, no extra route, two representations) | BUILT | probe `comp2`: `both` (server) does `await cnt(id_2)` inside `createServer`, `cnt` also routed because the client calls it; probe `comp3`: `cnt` only server-called → manifest has only `both` (routed-iff-client-reachable). print-server.scrml:371 refuses a client-call inside a server fn (C-S1). Test: … | — | (P2) |
+| §13.5.1–13.5.5 | RemoteData problem + worked examples | N/A | rationale / examples | — | (P2) |
+| §13.5.6 | Normative: enum lifecycle pattern; exhaustive `match` in markup | BUILT | probe `rd1` → E-TYPE-020 "not exhaustive: it does not cover .Failed" (correct §34 code); `rd2` compiles | — | (P2) The SHOULD `transitions { }` block is a parse error (probe `rd3`, E-PARSE-TYPE) — home §51 / §14.4.0, outside this fork. "Pattern is canonical" / SHOULDs are guidance (N/A). |
+| §13.6 | Generators — full language vocabulary (`function*`, `yield`, `yield*`); `yield` outside a generator = E-SSE-001 | REFUSED-LOUD | probe `gen1`: `function* gen()` → E-PARSE-FN "expected a function name" + cascade, `yield` → E-SCOPE-001. parse.scrml:7040 recognises `function*` only in the `<db>`-body item-head lookahead. E-SSE-001 grep = 0 | g-boot-generators-and-sse-unbuilt-s473 | (P2) Fails closed but with a misleading parse cascade, and no gap / ruling / plan defers it. Suggest gap. |
+| §13.7 | E-VALUE-SERVER-CALL (items 1–3: server call, client fn reaching one, `?{}` in position) | BUILT | analyze.scrml `valueServerDiags` (~25618-25640), message names position + what waits (with chain) + `<request>` fix. Probes `val1` (initializer, interpolation, `title=`), `val2` (derived formula, interpolation, `if=` via `lbl() → cnt()`). Tests: slice-m4/server.test.js:313-340, server-call-core.test.js:177, … | — | (P2) |
+| §13.7 (item 4) | Promise-returning stdlib call in a value position | N/A | `fetch` → E-SCOPE-001 (probe `fetch1`); no waiting stdlib compiles (g-boot-async-stdlib-function-s473) | g-boot-async-stdlib-function-s473 | (P2) Unreachable today; must be wired when that gap closes. |
+| §13.7 (errorBoundary / §52) | `<errorBoundary>` does not exempt; `<x server>` RHS governed by §52 | REFUSED-LOUD | `<errorBoundary>` refused as an unbuilt structural tag (analyze.scrml `structuralOwner` ~15885); `server` declarations refused E-BOOTSTRAP-UNSUPPORTED (analyze.scrml ~3216) | — | (P2) |
+| §13.7 (S467 second fix) | Message SHALL add "or declare the cell `(not to T)`" for a cell initializer | PARTIAL | `waitFix()` (analyze.scrml) offers only `<request>` / `<x server>` | g-boot-value-server-call-fix-names-refused-forms-s473 | (P2) Consistent with §13.9 being unbuilt (offering it would point at a refused form). Covered by the §13.9 plan; no gap. |
+| §13.8 | The one rule — where a waiting value may stand | PARTIAL | (i) function bodies, handlers, `<effect>` bodies BUILT (par1, eff3); `<request>`, `<onMount>`, `<onTransition>` bodies not in the bootstrap (structuralOwner; g-bootstrap-onmount-owed); `safeCallAsync` absent (g-boot-async-stdlib-function-s473); (ii) pending cells — see §13.9 | g-bootstrap-onmount-owed, g-boot-async-stdlib-function-s473, g-boot-param-default-and-rest-s473 | (P2) Every "everywhere else" row refuses loud: value positions E-VALUE-SERVER-CALL (BUILT); sync callbacks / function values E-BOOTSTRAP-UNSUPPORTED; param defaults are a parse error (probe `pdef1`; g-boot-param-default-and-rest-s473). No silent accept found. |
+| §13.8 item 3 (S471) | Promise combinators / producers are waiting values | REFUSED-LOUD | probes `promall1` (`Promise.all` → E-BOOTSTRAP-UNSUPPORTED `.all(…)`), `promres1` (`Promise.resolve` → E-BOOTSTRAP-UNSUPPORTED), `newp1` (`new Promise` → E-SCOPE-001) | g-spec-host-promise-statics-s470 | (P2) g-spec-host-promise-statics-s470 tracks impl side (written for impl#1). |
+| §13.8 (impl#1 limit) | E-IMPL1-ACTION-NOT-AWAITED | N/A | impl#1-only | — | (P2) |
+| §13.9 / 13.9.1 | Pending cells — the `(not to T)` marker | DEFERRED-RULED | SPEC §13.9 status: "The bootstrap builds this section, after its U1c … and U2 (`<request>`) units … build order is the DD's Phase 3" (dpa-023-build-arc-scoping DD). Today: probe `pend1` `let <m:(not to int)=(…)/>` → E-PARSE-TYPE "expected a type after `:`" (g-bootstrap-opener-refinement-lifecycle-type-rejected, MED … | g-bootstrap-opener-refinement-lifecycle-type-rejected, g-boot-pending-cells-unbuilt-s473 | (P2) Refused loud by the parse gap; the semantics have no gap of their own (plan only). `<request>` (U2) is also unbuilt. |
+| §13.9.2 | Desugar to cell + `<request>`; no new runtime repr; no reset re-run | DEFERRED-RULED | same plan | g-boot-pending-cells-unbuilt-s473 | (P2) |
+| §13.9.3 | Pre-discrimination read = E-TYPE-001; render positions keep E-VALUE-SERVER-CALL | PARTIAL | render half BUILT (val1/val2); E-TYPE-001 pending-read half DEFERRED-RULED (plan) | g-boot-pending-cells-unbuilt-s473 | (P2) |
+| §13.9.4 | Stale while reloading; action-position write keeps current value | DEFERRED-RULED | plan | g-boot-pending-cells-unbuilt-s473 | (P2) |
+| §13.9.5 | Failure handled at the declaration (E-ERROR-002, E-ERROR-012) | DEFERRED-RULED | plan; E-ERROR-002 for an unhandled `?{}` in a value position is built generically (server.test.js:137) | g-boot-pending-cells-unbuilt-s473 | (P2) |
+| §13.9.6 | A waiting function is bound only by a `function` declaration | REFUSED-LOUD | probe `lam2` (any lambda outside `.filter/.map` → E-BOOTSTRAP-UNSUPPORTED), `alias1` | g-bootstrap-function-values-slice-s451, g-boot-pending-cells-unbuilt-s473 | (P2) Over-refuses (also refuses synchronous lambdas the SPEC allows) — g-bootstrap-function-values-slice-s451. |
+| §13.9.7 | Normative statements (summary) | DEFERRED-RULED | as 13.9.1–13.9.6 | g-boot-pending-cells-unbuilt-s473 | (P2) |
+
+## §14 — Type System
+
+| § | title | status | evidence | gap ids | note |
+|---|---|---|---|---|---|
+| §14 / 14.1 | Overview | N/A | prose | — | (P2) |
+| §14.1.1 | `any` is not a type (`E-TYPE-ANY-FORBIDDEN`) | PARTIAL | probe `s14a/any.scrml` → `E-TYPE-UNKNOWN: unknown type 'any'` (SA/analyze.scrml:1188 resolveTypeName). `E-TYPE-ANY-FORBIDDEN` has 0 occurrences in SA. | g-boot-type-unknown-code-s472, g-bootstrap-unimplemented-construct-reported-as-generic-code | (P2) The program is rejected, but under the wrong code, and there is no "use asIs" hint (asIs is refused in any case). **NO GAP** names the ANY-FORBIDDEN code; the closest is g-boot-type-unknown-code-s472. |
+| §14.1.2 | Unrecognized type names | PARTIAL | analyze.scrml:1188; probe `s14a/unknown.scrml` → E-TYPE-UNKNOWN; tests slice-m2/typer.test.js, typer-s440.test.js, visibility-s472.test.js | g-boot-type-unknown-code-s472 | (P2) The refusal is right but the code is wrong (SPEC: E-TYPE-UNKNOWN-NAME). Gap **g-boot-type-unknown-code-s472** (LOW, open). |
+| §14.2 | Type declaration syntax | BUILT | parse.scrml `type` items; every probe declares struct and enum types; slice-m2/typer.test.js | — | (P2) `:tuple` and `:error` kinds were not separately audited (outside §14.2's "defined kinds"). |
+| §14.3 | Struct fields, plain `field: type`, nominal assignment | BUILT | probe `b7/nominal.scrml` → E-TYPE-031 "expects `B`, and this value is `A`"; E-TYPE-STRUCT-FIELD for a missing field (`b4/variant-field-default`); slice-m2/typer.test.js | — | (P2) |
+| §14.3 | Field type negation `!T`, conjunction `(!A && !B)` | REFUSED-LOUD | probe `b6/neg-type.scrml` → E-PARSE-TYPE cascade | g-bootstrap-unimplemented-construct-reported-as-generic-code | (P2) Generic code. **NO GAP**. |
+| §14.3 | Field union `A \| B` | REFUSED-LOUD | parse.scrml:4624 E-BOOTSTRAP-UNSUPPORTED "the union type … is not in the bootstrap — its type system has `T \| not` only" | — | (P2) |
+| §14.3 | Map field type `[K: V]` | REFUSED-LOUD | probe `b6/maptype.scrml` → E-PARSE-TYPE + E-TYPE-UNKNOWN `` | g-bootstrap-unimplemented-construct-reported-as-generic-code | (P2) Generic code. §59 is the home section; **NO GAP** found for bootstrap maps. |
+| §14.3 | `E-STRUCT-FUNCTION-FIELD` | REFUSED-LOUD | probes `s14a/fnfield.scrml` and `b6/fnfield2.scrml` → E-PARSE-TYPE, or E-TYPE-UNKNOWN `fn` | g-bootstrap-unimplemented-construct-reported-as-generic-code | (P2) Rejected, but the SPEC's code is never emitted (0 hits in SA). |
+| §14.3 | `E-VALUE-FUNCTION-STORED` (no value holds a function) | REFUSED-LOUD | probe `s14a/fnstored.scrml` → E-BOOTSTRAP-UNSUPPORTED "`twice` names a function without calling it"; `b7/lambda-untyped.scrml` → "an arrow function is in the bootstrap only as the argument of `.filter`/`.map`" | g-bootstrap-function-values-slice-s451 | (P2) Every non-call function value is refused, so nothing can be stored. Gap g-bootstrap-function-values-slice-s451 (MED) covers that slice. |
+| §14.3 | `E-STRUCT-DUPLICATE-KEY` | BUILT | analyze.scrml:9177; probe `b2/dupkey.scrml`; slice-m2/front.test.js, typer-s440.test.js | — | (P2) |
+| §14.3.1 | Optional fields `f: T = not`; E-TYPE-046 deref guard; E-STATE-COMPLETE | REFUSED-LOUD | probe `s14a/optdefault.scrml` → E-PARSE-TYPE at `=`; probe `b2/optderef.scrml` (`@t.block.n` with `block: B \| not`) → E-BOOTSTRAP-UNSUPPORTED "member access … not in bootstrap slice M2" | g-boot-struct-field-defaults-unparsed-s473 | (P2) The field-default syntax is not parsed, and a deref of a `T \| not` field is refused wholesale, so the E-TYPE-046 hazard cannot arise. The E-TYPE-046 code is not in SA. **NO GAP** for the field-default syntax. `<Token>` construction is legacy (§66). |
+| §14.3.2 | Enum types as struct fields | PARTIAL | probe `b2/enumfield.scrml` compiles; the exhaustive match on the field is checked (`s14a/enumfield.scrml` → E-TYPE-020 "does not cover .Closed") | g-boot-struct-field-defaults-unparsed-s473 | (P2) Missing: the default `status: Status = .Pending` is a parse error (E-PARSE-TYPE), so "optional, initializes to the default variant" is unbuilt. **NO GAP**. |
+| §14.4 | Enum declaration, payload variants, construction arity E-TYPE-082 | BUILT | analyze.scrml:6338/6343; probe `s14a/arity.scrml`; slice-m4/variants-s472.test.js, error-model.test.js | — | (P2) |
+| §14.4 | `E-ENUM-VARIANT-CASE` (variant uppercase) | SILENT-ACCEPT | probes `b4/variantlower-use.scrml` (`{ pending, active }`) and `b5/lower-payload.scrml` (`circle(r: int)`) compile clean | g-boot-enum-case-rules-unchecked-s473 | (P2) SA *assumes* the rule: analyze.scrml:6275 and 6283 cite E-ENUM-VARIANT-CASE to justify treating a lowercase member as "not a variant", but no site emits it. **NO GAP**. |
+| §14.4 | `E-ENUM-TYPE-CASE` (type name uppercase) | SILENT-ACCEPT | probe `s14a/enumlower.scrml` (`type status:enum`) compiles clean | g-boot-enum-case-rules-unchecked-s473 | (P2) 0 occurrences in SA. **NO GAP**. |
+| §14.4 | `E-ENUM-PAYLOAD-FIELD-RESERVED` (`variant` field) | DEFERRED-RULED | probe `s14a/payloadvariant.scrml` and `b4/variantread.scrml` compile clean | g-spec-enum-payload-field-named-variant-s470, g-boot-dot-variant-member-unbuilt-s473 | (P2) The SPEC marks it "Nominal — no compiler emits the code yet". Gap g-spec-enum-payload-field-named-variant-s470: "the impl half is open", naming impl#1 only. The shadowing hazard is latent on the bootstrap because `.variant` is itself unbuilt … |
+| §14.4.0 | `transitions {}` block in an enum body | REFUSED-LOUD | probe `s14a/transitions.scrml` → E-PARSE-TYPE "expected a variant name, found `{`" | g-bootstrap-unimplemented-construct-reported-as-generic-code | (P2) Generic code. **NO GAP**. Likely superseded in the ruled language by §66.11 field `rule=` contracts, but §14.4.0 carries no supersession marker. |
+| §14.4.1 | `toEnum()` / `E.parse(s)` | BUILT | analyze.scrml:6380–6382 (VToEnum), 19911 toEnumArgCheck; lower.scrml:2502 toEnumExpr; probes `b2/toenum.scrml` and `b2/eparse.scrml` compile, emitting a `===` match that returns `null`; acceptance/toenum/{neg-arg-type,prototype-keys}; slice-m4/ruled-backlog-s469.test.js, match-s469.test.js | — | (P2) `W-TOENUM-DEPRECATED` is not emitted. That is correct: the §63 window is not open (SPEC). |
+| §14.4.1 / 14.4.3 | "SHALL emit a lookup table `const TypeName_toEnum = {…}` in the client bundle for every enum with a unit variant" | SILENT-ABSENT | `b2/out-eparse/program.client.js`: an inline `(m$ => { if (m$ === "Admin") … })(s)`, with no table | g-spec-toenum-lookup-table-output-form-s473 | (P2) Output-form SHALL (the §47 pattern). It is semantically equivalent, and no code observes the table name, so the impact is low. **NO GAP**. |
+| §14.4.2 | `EnumType.variants` | REFUSED-LOUD | probe `b2/variants.scrml` → `E-TYPE-VARIANT: Role.variants — variants is not a variant of Role` | g-bootstrap-unimplemented-construct-reported-as-generic-code | (P2) It fails closed, but the code says the author misspelled a variant. **NO GAP**. |
+| §14.4.3 | Enum coercion from DB rows (`E.parse` in `.map`) | UNVERIFIED | `E.parse` itself is BUILT; the `<db>` row-mapping idiom (`{...row, status: …}` spread inside `.map`) was not probed | — | (P2) Full auto-coercion is deferred by the SPEC itself (N/A). |
+| §14.5 | Qualified `T.V`, shorthand `.V` | BUILT | probes in `b2` and `b8` | — | (P2) |
+| §14.5 | `::` alias for `.` | PARTIAL | `::V` in a match-arm pattern is BUILT (`b4/colon-arm.scrml` compiles; parse.scrml:974). `Role::Admin` / `::User` in expression position is refused with E-PARSE-TRAILING / E-PARSE-EXPR (`b2/colon2.scrml`) | g-bootstrap-unimplemented-construct-reported-as-generic-code | (P2) The SPEC says the compiler "SHALL resolve both `.` and `::`". It fails closed with a generic code. **NO GAP**. |
+| §14.5 | E-TYPE-061 (shorthand with no context) | PARTIAL | `b2/nocontext.scrml` (`const x = .Admin;`, one enum declares it) compiles | g-boot-bare-variant-no-context-resolves-s472 | (P2) Gap **g-boot-bare-variant-no-context-resolves-s472** (LOW, RULED S473 "follow §14.10", code owed). E-TYPE-061 has 0 hits in SA. The two-declarer case is BUILT (`b2/ambig.scrml` → E-VARIANT-AMBIGUOUS). |
+| §14.6 | Pattern matching: exhaustiveness E-TYPE-020; `else` default arm | BUILT | `b2/nonexh.scrml` (the `else :>` arm passes, the missing `.C` fires E-TYPE-020); slice-m4/match-s469.test.js, error-model.test.js | — | (P2) |
+| §14.7 | `asIs` | REFUSED-LOUD | analyze.scrml:1171 E-BOOTSTRAP-UNSUPPORTED "the built-in type `asIs` … is not in the bootstrap"; probe `b2/asis.scrml` | — | (P2) E-TYPE-030 is unbuilt in impl#1 as well (the SPEC discloses this). Moot on the bootstrap. |
+| §14.9 | `snippet` type kind, `render`, E-TYPE-070..073 | REFUSED-LOUD | probe `b2/snippet.scrml` → `E-TYPE-UNKNOWN: unknown type 'snippet'`; E-TYPE-070..073 have 0 hits | g-bootstrap-unimplemented-construct-reported-as-generic-code | (P2) Components retire into declarations (§66.15), so the slot/snippet surface may be moot. **NO GAP**, and §14.9 carries no supersession marker. |
+| §14.10 | Bare-variant inference (LHS, cell, param, return, payload-ctor arg, initializer inference) | PARTIAL | `b8/bare-positions.scrml` (param, return and nested payload arg all resolve; a wrong payload variant is rejected); `b8/infer-init.scrml` (`<c=(Col.Red)/>` then `@c = .Blue` compiles); `b2/infer-init` (`.Green` → E-TYPE-VARIANT); slice-m4/variants-s472.test.js | g-boot-bare-variant-no-context-resolves-s472, g-bootstrap-unnamed-state-child-variant-codes | (P2) Missing: (a) the no-context limb (g-boot-bare-variant-no-context-resolves-s472). (b) A wrong payload-arg variant reports E-TYPE-VARIANT where the SPEC says **E-TYPE-063**; the code-naming family is covered by g-bootstrap-unnamed-state-child-variant-codes (its locus names … |
+| §14.11 | Positional binding for predefined-shape compound state | N/A | retired by §66.18 (S435) | — | (P2) The bootstrap rejects `(0, 0)` (`b2/positional.scrml` → E-PARSE-EXPECTED + E-TYPE-031), which matches the retirement. |
+| §14.12.1–14.12.3 | Lifecycle `(A to B)` at struct field, Shape-1 cell, param, return; presence-progression on a cell | REFUSED-LOUD | `b3/lc-field`, `lc-cell`, `lc-variant-cell`, `lc-param`, `lc-return`: all E-PARSE-TYPE / E-PARSE-TAG. analyze.scrml:4904–4934 refuses a bare `timestamp` cell *because* it has no implicit `(not to T)` lifecycle | g-bootstrap-opener-refinement-lifecycle-type-rejected, g-boot-lifecycle-types-unbuilt-s473 | (P2) Only the opener limb has a gap: g-bootstrap-opener-refinement-lifecycle-type-rejected (MED, narrowed, "still open"). Field, param and return lifecycle have **NO GAP**. §14.12 is marked superseded by §66.11.6, which is also unbuilt (no lifecycle type anywhere in SA). |
+| §14.12.4 | Engine-cell carve-out (E-TYPE-LIFECYCLE-ON-ENGINE-CELL) | DEFERRED-RULED | SPEC §14.12 banner: "§14.12.4's engine-cell carve-out is OPEN under §66.13 (O7)" | — | (P2) The bootstrap cannot write a lifecycle at all, so the carve-out cannot be reached. |
+| §14.12.5 | `->` legacy glyph + W-LIFECYCLE-LEGACY-ARROW | REFUSED-LOUD | `b3/lc-legacy.scrml` → E-PARSE-TYPE | — | (P2) The SPEC's window says `->` should be accepted with an Info lint. The bootstrap rejects it, consistent with "speaks the ruled language". |
+| §14.12.6 / 6.1 / 6.2 / 6.3 | Function-return lifecycle; discrimination-is-transition; `transition()` built-in; E-TYPE-LIFECYCLE-VARIANT-NOT-TRANSITIONED | REFUSED-LOUD | `b3/lc-return.scrml` → E-PARSE-TYPE; `b3/transition.scrml` → `E-SCOPE-001: transition is not declared` | g-boot-lifecycle-types-unbuilt-s473 | (P2) **NO GAP**. Fails closed. |
+| §14.12.6.4 | Multi-variant chains | N/A | reserved for a future amendment | — | (P2) |
+| §14.12.7 | Schema-field lifecycle | REFUSED-LOUD | `b9/schema.scrml` → E-BOOTSTRAP-UNSUPPORTED "`<schema>` … is not in the bootstrap" | g-boot-lifecycle-types-unbuilt-s473 | (P2) |
+| §14.12.8 | Channel-cell lifecycle | REFUSED-LOUD | `b9/channel.scrml` → E-BOOTSTRAP-UNSUPPORTED "`<channel>` … is not in the bootstrap" | g-boot-lifecycle-types-unbuilt-s473 | (P2) |
+| §14.12.9 | Cross-references | N/A | prose | — | (P2) |
+| §14.12.10 | Normative summary (incl. `reset(@cell)` × lifecycle) | REFUSED-LOUD | follows from the rows above: no lifecycle type is parseable | g-boot-lifecycle-types-unbuilt-s473 | (P2) |
+| §14.13.1 | The conversion rule: int→number widening; number→int spelled; non-string → `string` param refused; `+` mixed; `==` cross-type | BUILT | `b3/lossy.scrml`: `@i = @n` → E-TYPE-031 "a `number` is not implicitly an `int`"; `@n = @i` accepted; `h(@i)` → E-TYPE-031. `b3/plus-mixed` → E-OPERATOR-OPERAND-TYPE; `b3/eq-cross` → E-EQ-001; `b3/round-nomode` → E-CALL-ARITY (stdlib/math `round(x, mode)`); `b6/trunc` compiles; slice-m2/typer-s440.test.js, … | — | (P2) |
+| §14.13.2 | What a text sink accepts (E-TEXT-NON-PRIMITIVE; `not` renders nothing) | PARTIAL | markup text: `b3/text-struct` → E-TEXT-NON-PRIMITIVE. Template: `b6/template-struct` → E-TEXT-NON-PRIMITIVE; `b6/template-notnarrowed` → E-OPERAND-NOT-NARROWED. `not` in markup → "" (runtime.js:2136 `display`; `b6/markup-not`); slice-m4/templates-s469.test.js | g-boot-markup-text-decl-instance-unjudged-s473, g-boot-markup-text-unresolved-limb-s472 | (P2) Missing: (a) a quoted-attribute sink is refused wholesale (`b3/attr-struct` → E-BOOTSTRAP-UNSUPPORTED, parse.scrml:4965), which is loud. (b) `print`/`println` are absent (`b3/print-struct` → E-SCOPE-001; §20.7 home). (c) Holes: g-boot-markup-text-decl-instance-unjudged-s473 … |
+| §14.13.3 | Logic backtick templates; W-STRING-INTERP-LITERAL | BUILT | `b3/quoted-interp` → W-STRING-INTERP-LITERAL; runtime.js:1792 textOf; acceptance/templates/*; slice-m4/templates-s469.test.js, strings-s469.test.js | — | (P2) Tagged templates are refused (parse.scrml:546). |
+| §14.13.4 | `T.parse(s)`, strict whole-string, finite only | BUILT | runtime.js:1766 parseIntText, 1775 parseNumText (`Number.isFinite`), 1799 parseBoolText; `b3/parse-prims` lowers to `rt.parseIntText`; analyze.scrml:6918 (a primitive name is a namespace for `.parse` only); slice-m4/ruled-backlog-s469.test.js, math-port-s472.test.js | — | (P2) `integer.parse` is refused (`b3/integer-ns` → E-SCOPE-001 with the ruled message). |
+| §14.13.5 | `bind:value` number/bool: bad text keeps the old value | REFUSED-LOUD | `b3/bind-num.scrml` → E-BOOTSTRAP-UNSUPPORTED "`bind:value` to a `int` place needs a number coercion … (only string places)" | g-boot-bind-value-number-bool-unbuilt-s473 | (P2) **NO GAP** found for the number/bool bind. |
+| §14.13.6 | `int`/`bool` spelling; `integer`/`boolean` synonyms; W-TYPE-NAME-DEPRECATED | BUILT | analyze.scrml:1162, ingest.scrml:1164; `b3/integer-name` compiles; slice-m4/ruled-backlog-s469.test.js, typer-s440.test.js | — | (P2) The lint is Nominal: its window has not opened (SPEC). Not emitting it is correct. |
+| §14.13.7 | What this section does not decide | N/A | prose | — | (P2) |
+| §14.8 (intro) | Database-schema-derived types, overview | N/A | prose (it frames the TS stage's consumption of PA's `ColumnDef[]`) | — | (P2) |
+| §14.8.1 | Type generation (full and client struct per `tables=` table, nominal) | REFUSED-LOUD | analyze.scrml `resolveDb` L15668-15669: "`<db tables=…>` generates a type per table … not in the bootstrap — it would be ignored". `<program tables=>` is refused by `topProgramAttrDiags` L1819. Test: slice-m4/error-rulings.test.js:433. Probe s148/t5-protect.scrml gives 2× E-BOOTSTRAP-UNSUPPORTED. | g-boot-schema-unbuilt-s473 | (P2) A `?{}` row is `VType.Unknown` (analyze.scrml L19765, "no row type yet (§14.8 schema types are not in the bootstrap)"). |
+| §14.8.2 | Naming convention (PascalCase), E-TYPE-050 | REFUSED-LOUD | gated on `tables=` (above) | g-boot-schema-unbuilt-s473 | (P2) E-TYPE-050 appears nowhere in the bootstrap. That is unreachable while `tables=` is refused. |
+| §14.8.3 | SQLite type mapping / affinity / nullability, E-TYPE-051 | REFUSED-LOUD | gated on `tables=` | g-boot-schema-unbuilt-s473 | (P2) The bootstrap never opens the DB file at compile time: `dbOfAttr` L25127 reads only the connection string. |
+| §14.8.4 | Scope insertion, full/client view selection by RouteMap, program-supplying `<db>` exception | REFUSED-LOUD | gated on `tables=` / `protect=` | g-boot-schema-unbuilt-s473 | (P2) |
+| §14.8.5 | Error conditions (E-TYPE-050 / 051) | REFUSED-LOUD | gated | g-boot-schema-unbuilt-s473 | (P2) |
+| §14.8.6 | Worked examples | N/A | examples. The protect + tables example is refused (t5). | — | (P2) |
+| §14.8.7 | Interaction notes: read-site row typing (Tranche 1), W-SQL-ROW-UNTYPED, nominal per-`<db>` | REFUSED-LOUD | Row typing is "typed from the §14.8 generated (full) table type", and that needs `tables=`, which is refused. | g-boot-schema-unbuilt-s473 | (P2) With no `tables=`, a row is Unknown and is trusted against the author's declared struct. A mismatch is caught at RUN time by the exact-key codec: probe t8-width.scrml (missing column) and probe t11-extra-col.scrml (extra `passwordHash` column) each give a logged 500, "does … |
+| §14.8.8 | Cross-file projection-row width subtyping, E-SQL-ROW-CONTRACT-MISMATCH, E-TYPE-004 on row binders | REFUSED-LOUD | The source must be a Tranche-1 projection-row type. None exists without generated types. | g-boot-schema-unbuilt-s473 | (P2) E-SQL-ROW-CONTRACT-MISMATCH is absent from the bootstrap. Caveat: UNVERIFIED whether impl#1 types projection rows from any source other than generated types. If it does, this row moves to SILENT-ABSENT. |
+| §14.8.9 (a) | Protected-column egress redaction: `<db protect=>` origins | REFUSED-LOUD | analyze.scrml L15670-15671: "a confidentiality control is refused, never ignored". Test error-rulings.test.js:433. Probe t5. | — | (P2) |
+| §14.8.9 (b) | Protected-column egress redaction: "each §52 type-level `protect=`" covers every `?{}` | SILENT-ACCEPT | Probe s148/t10-type-protect-leak.scrml: `<User authority="server" table="users" protect="passwordHash">` plus a `<db>` cell `SELECT * FROM users` compiles with 0 diagnostics. The `<User …>` declaration is emitted verbatim as an HTML element into the page `<template>` (out-t10/index.html). Executed: the route answers … | g-bootstrap-unknown-tags-resolved-as-html | (P2) Root cause: unknown tags resolve as HTML (gap `g-bootstrap-unknown-tags-resolved-as-html`, MED, narrowed). That gap does not name the confidentiality consequence. §66 has no spelling for a type-level `protect=`. See Q2. |
+| §14.8.9 (c) | Binding rule (origin / every sink / fail-closed), sinks, `reveal`, closed-world, E-PROTECT-004/005, I-PROTECT-STRIP-001, §8.11 composition | REFUSED-LOUD | No protect origin can exist except through row (b). There are no channel / SSE / SSR / mountHydrate sinks, and those surfaces are refused elsewhere. | — | (P2) `reveal` and E-PROTECT-* are absent from the bootstrap. That is moot while (a) is refused, but live for (b). |
+| §14.8.10 (intro) | Tenant key: consume `@currentUser.tenantId`, never derive; W-TENANT-SUBSTRATE-SCOPED | REFUSED-LOUD | needs a tenant set (below) | g-boot-schema-unbuilt-s473 | (P2) |
+| §14.8.10 | Declaration: `tenant_id` column convention, one tenant set per compilation (S455), ALTER-scoping | REFUSED-LOUD | Both declaring surfaces are refused. `<schema>`: analyze.scrml `structuralOwner` L15891 "§39.2", probe t6-schema.scrml. `<db tables=>`: probe t5. | g-boot-schema-unbuilt-s473 | (P2) The tenant set is therefore always EMPTY. Under S456 that makes every `tenant_id` relation undeclared (next 3 rows). |
+| §14.8.10 S456 item 1 | Program-body `?{}` closed allow-list: E-SQL-PROGRAM-STATEMENT-NOT-ADMITTED, E-TENANT-UNDECLARED, closed lexical subset | SILENT-ACCEPT | Probe s148/t3-ddl.scrml compiles clean. It holds `?{CREATE TABLE inv (id INTEGER, tenant_id INTEGER)}` (spec: E-TENANT-UNDECLARED), `?{CREATE VIEW vv AS SELECT * FROM orders}` and `?{DROP TABLE orders}` (spec: E-SQL-PROGRAM-STATEMENT-NOT-ADMITTED for both). Neither code appears in the bootstrap. | g-boot-schema-unbuilt-s473, g-boot-sql-program-statement-allow-list-unbuilt-s473 | (P2) The rule applies to EVERY database compilation, not only tenant apps. sql.scrml classifies statement kind for READ/WRITE (fail-closed to "write") but admits any statement. |
+| §14.8.10 S456 item 2 | A compile-time SQLite file is scanned whole; an undeclared `tenant_id` relation is E-TENANT-UNDECLARED | SILENT-ACCEPT | Probe s148/t1-tenant-table.scrml: `<db src="./app.db">` plus a cell `SELECT id, item FROM orders` (`orders` carries `tenant_id`) compiles clean. Executed with no session: `200 [{"id":1,"item":"a"},{"id":2,"item":"b"}]`, i.e. both tenants' rows to an anonymous request. | g-boot-schema-unbuilt-s473, g-boot-tenant-undeclared-table-served-s473 | (P2) The bootstrap never opens the DB at compile time. So under the spec's own fallback, item 3 governs it, and item 3 is absent too. |
+| §14.8.10 S456 item 3 | Startup check: E-DEPLOY-DB-TENANT-UNDECLARED, every request 503, `/_scrml/health` 503 plus re-check and backoff | SILENT-ABSENT | slice-m1/runtime/server-runtime.js has no `tenant` / `health` / `table_xinfo` / `pg_attribute` / 503 path. `server()` L296 serves 404/405/403/400/500 only. | g-boot-schema-unbuilt-s473, g-boot-tenant-undeclared-table-served-s473 | (P2) Same probe as item 2: the built server serves. |
+| §14.8.10 | Enforcement: source filter (S452), egress strip, I-TENANT-STRIP, query-shape readings, composition, soundness scope | REFUSED-LOUD | empty tenant set, because the declarations are refused | g-boot-schema-unbuilt-s473 | (P2) dpa-067 Approach D (filter in `srt.query`) is designed, not built. |
+| §14.8.10 | `.acrossTenants()` declassification, I-TENANT-ACROSS | REFUSED-LOUD | Probe s148/t4-across.scrml: the chain is refused with E-BOOTSTRAP-UNSUPPORTED (generic method-call refusal). | g-boot-schema-unbuilt-s473 | (P2) The refusal is generic, not tenant-specific. |
+| §14.8.10 | Diagnostics: E-TENANT-AGG / -WRITE / -RAW-EGRESS / -SCHEMA-HAZARD | REFUSED-LOUD | needs a tenant set / `<schema>` | g-boot-schema-unbuilt-s473 | (P2) |
+| §14.8.10 | Implementation status (Nominal) | N/A | describes impl#1 | g-boot-schema-unbuilt-s473 | (P2) |
+| §14.8.11 | DB-authoritative tier M1: RLS DDL, bounded role, per-request principal GUC, S7 fence, one-statement | REFUSED-LOUD | `db-authoritative` is a `<schema>` bareword, and `<schema>` is refused (t6) | g-boot-schema-unbuilt-s473 | (P2) |
+| §14.8.11.1 | Migration-apply seam, `scrml db-migrate` | N/A | an out-of-app CLI (impl#1 tooling: compiler/src/commands/db-migrate.js), not a compiler obligation | g-boot-schema-unbuilt-s473 | (P2) |
+| §14.8.11.2 | Writes-authority: `immutable`, SECDEF `fn` in `<schema>`, capability GUC, SQLite fails closed | REFUSED-LOUD | `<schema>` refused (t6) | g-boot-schema-unbuilt-s473 | (P2) |
+
+## §15 — Component System
+
+| § | title | status | evidence | gap ids | note |
+|---|---|---|---|---|---|
+| §15 (hdr) | Component System | N/A | superseded banner → §66.15 | — | (P3) |
+| §15.1 / 15.1.1 | Component definition `const X = <…>` / inline | REFUSED-LOUD | parse.scrml:3954 E-BOOTSTRAP-UNSUPPORTED "a component written as a constant… neither form is in the bootstrap"; probe p15-const-comp | — | (P3) the §66 form `<card title:string/> renders …` is what is built (dropdown.browser.test.js) |
+| §15.2 | Bare props / `asIs` / E-TYPE-030 | N/A | superseded by §66.15.1 (typed attributes) | — | (P3) |
+| §15.3 | Typed props with `using` constraint | N/A | superseded (§66 typed attributes + validators) | — | (P3) |
+| §15.4 | Shape inheritance, W-NAME-001 | N/A | §66.15.1's mapping table does not carry shape inheritance | g-boot-component-shape-constraints-unchecked-s473 | (P3) see Questionable Q6 |
+| §15.5 | Static attrs and class merging | BUILT | analyze.scrml E-DECL-USE-ATTR (§66.6.9); use-attr.test.js; probe p15-decl-comp | — | (P3) class merging is reversed by S462 |
+| §15.6 | Component naming | N/A | case rule retired; W-CASE-001 → 15.15.4 | — | (P3) |
+| §15.7 | `fixed` attribute | SILENT-ACCEPT | probe p15-fixed: `fixed` is emitted as the DOM attribute `fixed=""` in the `renders` template | g-boot-fixed-attr-leaks-to-dom-s473 | (P3) §66.15.1 says `fixed` "carries over", but in §66 a use cannot override anything, so E-COMPONENT-001 has nothing to fire on. The cost is only that a compile-time directive leaks into the DOM |
+| §15.8 | Component usage | BUILT | resolveElem→resolveUse (analyze.scrml ~15611); dropdown tests | — | (P3) |
+| §15.9 | Inline prop interpolation `${prop}` | BUILT | probe p15-fixed (`${title}` in renders) | — | (P3) |
+| §15.10 | `props={…}` block, E-COMPONENT-010/011/012 | DEFERRED-RULED | the legacy form is refused (15.1). The §66 analogue of a missing required prop is OPEN **O33** (§66.22) | g-boot-no-value-cell-runtime-throw-s473 | (P3) probe p15-missing-attr: `<card/>` with no `title` compiles silently. That is under O33 (open), but it is still a silent accept |
+| §15.10.1 | Prop substitution into logic | N/A | impl#1 CE mechanism; §66 attributes are scoped names | — | (P3) |
+| §15.11.1 | `bind:` on component props | REFUSED-LOUD | E-DECL-USE-ATTR on `bind:title=` at a use; probe p15-bind | — | (P3) superseded by §66.14 (exported `let` + `as=`) |
+| §15.11.2 | State projection `<#id>` | N/A | superseded by §66.7 `as=` handles; `<#contact>` fails to parse (probe p15-stateref) | — | (P3) |
+| §15.11.3 | Choosing mechanisms | N/A | prose | — | (P3) |
+| §15.11.4 | Function-typed props, W-COMPONENT-001 | REFUSED-LOUD | probe p15-fnattr: `act:fn()` → E-PARSE-TAG + E-TYPE-UNKNOWN `fn` | g-bootstrap-function-values-slice-s451 | (P3) the §66 replacement (function-typed attributes, O8 ruled) is not built; it is the function-values slice, gap g-bootstrap-function-values-slice-s451 (MED, open) |
+| §15.11.5 / 15.11.5.1 | Rejections; passed-vs-stored, E-VALUE-FUNCTION-STORED | REFUSED-LOUD | probe p15-fnstore: E-BOOTSTRAP-UNSUPPORTED "names a function without calling it… function values arrive with a later slice" | — | (P3) the bootstrap refuses all function values, which is a superset of the rule |
+| §15.11.6 / 15.11.7 | Interaction notes, code summary | N/A |  | — | (P3) |
+| §15.12 | Component rendering syntax | BUILT | §66 use sites | — | (P3) |
+| §15.13.1–15.13.4 | Component reactive scope | BUILT | `@cell` in renders, per-instance state: dropdown.browser.test.js, valuesem.browser.test.js; probe p15-reactive | — | (P3) non-`bind` props captured once is superseded by §66.9 L6 (a live initializer is derived) |
+| §15.13.5 | Components vs engines, E-COMPONENT-ENGINE-SCOPE | BUILT | analyze.scrml:3778; engine.test.js | — | (P3) |
+| §15.13.6 | V5-strict note | N/A | composition note | — | (P3) |
+| §15.14 / 15.14.2 | Post-CE invariant, no residual component (E-COMPONENT-035) | PARTIAL | probe p15-unknown: `<Widget title="x"/>` and `<frobnicate/>` compile at exit 0 and are emitted as DOM elements (the phantom-element pattern §15.14.1 describes) | g-bootstrap-unknown-tags-resolved-as-html | (P3) gap **g-bootstrap-unknown-tags-resolved-as-html** (MED, narrowed, still open) |
+| §15.14.1 / .3 / .4 / .5 | Rationale; E-COMPONENT-020; CE test discipline; W2 cross-file | N/A | impl#1 CE pipeline | — | (P3) |
+| §15.15.1–15.15.3 | Registry, lookup order, casing | N/A | impl#1 NR architecture; the bootstrap's own order (declaration > structural refusal > HTML) is in resolveElem | — | (P3) the unknown step is the 15.14 gap |
+| §15.15.4 | W-CASE-001 (user declaration shadows an HTML element) | SILENT-ABSENT | probe p15-shadow: `<button label:string/>` compiles with no warning, and every `<button>` in scope becomes the user declaration; no W-CASE-001 anywhere in self-host-v2 | g-boot-w-case-001-absent-s473 | (P3) |
+| §15.15.5 | W-WHITESPACE-001 (`< name` opener) | REFUSED-LOUD | probe p15-ws2: `< main>` → E-PARSE-TAG | g-bootstrap-unimplemented-construct-reported-as-generic-code | (P3) the SPEC says both forms compile and the spaced one warns; §63.5 calls a stricter parser an impl bug. NO GAP. Free-text-body behaviour matches the S442 amendment (p15-ws) |
+| §15.15.6 / 15.15.7 | NR authority | N/A | impl#1 | — | (P3) |
+
+## §16 — Component Slots
+
+| § | title | status | evidence | gap ids | note |
+|---|---|---|---|---|---|
+| §16 (hdr) / 16.1 | Slots overview | N/A | superseded banner → §66.15.2 | — | (P3) |
+| §16.2 / 16.3 | Snippet props, `${render name()}` | DEFERRED-RULED | named and parametric slots on declarations are OPEN **O9** (§66.15.2); probe p16-render → E-SCOPE-001 `render` (loud, generic code) | — | (P3) |
+| §16.4a | `${...}` children spread | REFUSED-LOUD | probe p16-spread → E-PARSE-EXPR | — | (P3) consistent with O46 RULED S462 (it retires in §66) |
+| §16.4b | Use-site children via `<slot/>` (§66.15.2), plus the E-COMPONENT-020/021 analogues | SILENT-ACCEPT | `<slot/>` is built (print.scrml:1819 rt.slot; front.test.js). Probe p16-twoslot: two `<slot/>` → the children render twice. Probe p16-noslot: children of a declaration with no `<slot/>` are silently dropped (their template is emitted but never filled). Probe p16-slotout: `<slot/>` outside any renders compiles and … | g-boot-slot-count-unchecked-s473 | (P3) §66 says nothing on 0 or >1 slots; legacy §16.4 made both errors. NO GAP |
+| §16.5 | `slot="name"` fills | SILENT-ACCEPT | probe p16-named: `<h3 slot="header">` lands in the unnamed `<slot/>`, with `slot=` left as a DOM attribute. Probe p16-slotname: `<slot name="header"/>` is read as an unnamed slot, so the children render twice | g-boot-named-slot-shapes-not-refused-s473 | (P3) O9 is open; the bootstrap should refuse instead of guessing |
+| §16.6 | Parametric slots (lambda) | DEFERRED-RULED | O9 OPEN; markup lambdas are not in the bootstrap | — | (P3) |
+| §16.7 / 16.8 / 16.9 / 16.10 | Codes; CE/TS render validation; `slot=` in lift; TAB shape | N/A | impl#1 CE/TS/TAB internals; no markup lift in logic | — | (P3) |
+
+## §17 — Control Flow
+
+| § | title | status | evidence | gap ids | note |
+|---|---|---|---|---|---|
+| §17.0 | Tier ladder, W-LIFECYCLE-CANDIDATE | SILENT-ABSENT | probe p17-boolcells (3 boolean cells gating one region): no lint; code absent | g-boot-lifecycle-candidate-lint-absent-s473 | (P3) info lint |
+| §17.0.1 | Advisory step | N/A | rationale; I-MATCH-PROMOTABLE belongs to §56 | — | (P3) |
+| §17.1 | `if=` | PARTIAL | BUILT: the E-COND-NOT-BOOLEAN condition rule, presence-test narrowing in children, reactive gate, valueless/quoted/braced `if` refused (analyze checkCond/resolveIfValue; if-chain.test.js, typer-s462.test.js; probes p17-cond, p17-presence2, p17-bareif). MISSING: E-ATTR-UNQUOTED-OPERATOR. Probe p17-bareop2: `if=@a&&@b` … | g-boot-bare-operator-gate-and-match-attr-accepted-s473 | (P3) NO GAP. The comment at analyze.scrml:16474 claims the parser refuses bare operators with E-PARSE-TAG; for `&&` and `==` it does not (Q3) |
+| §17.1.1 | `else` / `else-if=` | BUILT | E-CTRL-001/002/003/005 (analyze.scrml); a comment does not break a chain (S471); if-chain.test.js; probe p17-chain | — | (P3) E-CTRL-004 cannot arise (no state openers) |
+| §17.1.2 / .1 / .2 | `if=` on `<engine>/<match>/<each>`; render-gating; composition | REFUSED-LOUD | resolveEach analyze.scrml:16886 "`<each if=>` / `else=` / `show=` is not in bootstrap slice M2"; `<match>`/`<engine>` refused by structuralOwner (analyze.scrml:15639); probe p17-eachif | — | (P3) |
+| §17.1.2.3 | `if=` inside an `<each>` row | BUILT | probe p17-rowif: rt.cond in the row render (row item and outer cell); gate.test.js, visibility-s472.test.js | — | (P3) |
+| §17.2 | `show=` | BUILT | rt.visibility; checkCond; does not narrow; show.test.js | — | (P3) |
+| §17.3 | Lifecycle of bare expressions | REFUSED-LOUD | probe p17-bare: a statement at logic-block top level → E-PARSE-ITEM "not in the bootstrap"; markup `${call()}` that writes a cell → E-VALUE-WRITES-STATE (p17-bare2) | — | (P3) |
+| §17.4a | Tier-0 `${ for/lift }` (core) | BUILT | parse.scrml markup-`for` path; loops-s469.test.js; probe p17-forlift; E-FOR-UNPARENTHESIZED-HEAD (p17-forhead) | — | (P3) |
+| §17.4b | E-CONTROL-FLOW-IN-MARKUP | SILENT-ACCEPT | probe p17-cfmarkup2: `<div> if (@flag) { <p>secret</p> } </div>` compiles at exit 0. The `if (@flag) {` text ships as page text and `<p>secret</p>` renders **unconditionally**. No such code exists in self-host-v2 | g-boot-control-flow-in-markup-renders-ungated-s473 | (P3) fail-open gate. NO GAP. impl#1 has the diagnostic for braced forms |
+| §17.4c | W-EACH-PROMOTABLE | SILENT-ABSENT | code absent | g-boot-lifecycle-candidate-lint-absent-s473 | (P3) permanent info nudge |
+| §17.4a(§) | `for … else` empty block | REFUSED-LOUD | parse.scrml:2888; probe p17-forelse | — | (P3) the binder-write rule is enforced as E-ASSIGN-CONST, not E-ASSIGN-004 (p17-binderwrite) |
+| §17.4b(§) | `key` in the loop header | REFUSED-LOUD | probe p17-forkey → E-PARSE-EXPECTED | g-bootstrap-loop-head-surface-s469 | (P3) NO GAP |
+| §17.5 | Discrimination → match/engine | N/A | retirement record | — | (P3) |
+| §17.6.1–17.6.9 | If-as-expression | REFUSED-LOUD | parse.scrml:1901 "an `if` used as a value … is not in the bootstrap yet"; probe p17-ifexpr | — | (P3) |
+| §17.6.10 | Value-form in an interpolation | PARTIAL | the `match` value-form is built (probe p18-ctx `${ match @c {…} }`); the `if` value-form is refused (p17-ifexpr-markup) | — | (P3) |
+| §17.6.10.1 | E-MARKUP-STATEMENT-NOT-RENDERED | REFUSED-LOUD | markup in logic is not in the bootstrap (parse.scrml:2965); probes p17-stmtmarkup / p17-stmtmarkup2 → parse cascades | g-boot-markup-as-value-unbuilt-s473 | (P3) |
+| §17.7.1 | `<each>` overview | N/A |  | — | (P3) |
+| §17.7.2 | `<each>` shapes and normative statements | PARTIAL | BUILT: `in=`, `as`, `key=`, multi-root rows (p17-each1), E-EACH-NOT-SEQUENCE (typer tests), row disposal on removal (runtime reconcile `scope.dispose()`). REFUSED: `of=` (p17-each2). SILENT: `<each>` with neither `in=` nor `of=` compiles to `rt.each(…, () => null, …)` and renders nothing (E-EACH-ITER-SHAPE); `<each` … | g-boot-each-missing-source-accepted-s473 | (P3) both codes are only "queued" in the SPEC; LOW |
+| §17.7.3 | `@.` sigil | BUILT | E-SYNTAX-064 (analyze); probe p17-each3; acceptance.test.js | — | (P3) |
+| §17.7.4 | `<empty>` | REFUSED-LOUD | structuralOwner "empty"; probe p17-each1 (first version) | — | (P3) |
+| §17.7.5 | `key=` inference, W-EACH-KEY-001, `__index__` | SILENT-ABSENT | probe p17-each1: items with an `.id` field still get key `null` (positional), against the SHALL "silently infer key=@.id"; no W-EACH-KEY-001; `key=__index__` → E-SCOPE-001 (p17-each4) | g-boot-each-key-inference-unbuilt-s473 | (P3) positional keying is correct but loses per-row DOM state on reorder |
+| §17.7.6 | `:`-shorthand in `<each>` | BUILT | probe p17-each1 `<li : @.name>` | — | (P3) |
+
+## §18 — Pattern Matching and Enums
+
+| § | title | status | evidence | gap ids | note |
+|---|---|---|---|---|---|
+| §18 (hdr) | Aliases `::`, `_`, `=>`/`->` legacy | BUILT | W-MATCH-ARROW-LEGACY (parse.scrml); probe p18-arrow | — | (P3) |
+| §18.0 | Two match shapes | N/A | overview | — | (P3) |
+| §18.0.1 / 18.0.2 | Block-form `<match for= on=>`; attribute legality | REFUSED-LOUD | structuralOwner "match" → E-BOOTSTRAP-UNSUPPORTED | — | (P3) |
+| §18.0.3 | Bare-variant inference | BUILT | resolveVariant; E-VARIANT-AMBIGUOUS present; variants-s472.test.js | — | (P3) general union subjects refused (18.8.2) |
+| §18.1 | MatchExpr, no desugar | BUILT | ast.scrml match node; lower.scrml | — | (P3) |
+| §18.2 | Grammar | PARTIAL | BUILT: `:>`, comma list E-MATCH-ARM-SEPARATOR, E-MATCH-BARE-BINDER, E-MATCH-ARM-SHORTHAND-AMBIGUOUS, leave arms; match-s469.test.js. REFUSED: alternation `.A \| .B :>` (named, p18-alt). Stricter than SPEC: `const match = 2` refused (the SPEC says the contextual identifier SHALL compile) | g-bootstrap-unimplemented-construct-reported-as-generic-code | (P3) NO GAP for either |
+| §18.3 | Match as expression/statement | BUILT | E-TYPE-001 (void) | — | (P3) |
+| §18.4 | Result type rule | BUILT | E-TYPE-001 arm-unify; probe p18-basic | — | (P3) |
+| §18.5 | Arm body forms | BUILT | E-ARM-TAIL-VALUE; match-s469.test.js | — | (P3) |
+| §18.6 | Default arm | BUILT | W-MATCH-001, E-SYNTAX-010; p18-basic, p18-arrow | — | (P3) |
+| §18.6.1 | Whole-error binder `_ e` | BUILT | E-MATCH-BARE-BINDER on a non-failable subject (p18-binder); `_ e` on a failable call accepted (p19-b) | — | (P3) |
+| §18.7 | Payload destructuring | PARTIAL | positional BUILT (E-TYPE-021); named `.A(x: q)` → E-PARSE-ARM "expected a binder name" (p18-payload); E-TYPE-022 absent | g-bootstrap-unimplemented-construct-reported-as-generic-code | (P3) NO GAP |
+| §18.8.1 | Enum exhaustiveness | BUILT | E-TYPE-020 (analyze, check.scrml); error-model.test.js | — | (P3) the enum-subset half (§53.15) is UNVERIFIED |
+| §18.8.2 | Union exhaustiveness | PARTIAL | `T \| not` BUILT (E-MATCH-012, p18-misc); other unions refused (parse.scrml:4624 E-BOOTSTRAP-UNSUPPORTED) | — | (P3) |
+| §18.8.3 | Code consolidation | N/A |  | — | (P3) |
+| §18.9 | Valid contexts, E-TYPE-026 | PARTIAL | probe p18-ctx: `class=(match @c {…})` as an attribute value is accepted and works; the SPEC says E-TYPE-026 | g-boot-bare-operator-gate-and-match-attr-accepted-s473 | (P3) see Questionable Q4 |
+| §18.10 | Guards excluded | PARTIAL | refused, but as E-PARSE-ARM + cascade, not E-SYNTAX-011 (p18-misc2) | g-bootstrap-unimplemented-construct-reported-as-generic-code | (P3) |
+| §18.11 | Nested patterns excluded | PARTIAL | refused as E-PARSE-ARM cascade, not E-SYNTAX-012 (p18-misc5) | g-bootstrap-unimplemented-construct-reported-as-generic-code | (P3) |
+| §18.12 | `lin` × match | BUILT | E-LIN-002 on use after a match consume (p18-lin), E-LIN-003 path consistency (p18-lin2); lin-s471.test.js | — | (P3) |
+| §18.13 | Arm qualification | PARTIAL | `C.Red :>` in `match` compiles (p18-qual); in a `!{}` arm qualified patterns are refused by name (parse.scrml:944) | — | (P3) |
+| §18.14.1 / 18.14.2 | Zero-variant enum; duplicate arms | BUILT | p18-zero compiles; E-TYPE-023 (p18-basic) | — | (P3) |
+| §18.15 / 18.16.3 / 18.16.4 | Code summaries / AST | N/A |  | — | (P3) |
+| §18.16.1 / 18.16.2 | Literal arms | BUILT | W-MATCH-002, E-TYPE-028 (p18-misc, p18-misc2) | — | (P3) |
+| §18.17 | `is .Variant` operator | REFUSED-LOUD | probe p18-is: `x is .Green` → E-SCOPE-001 "`is` is not declared" + cascade; `is given` / `is not` presence work | g-bootstrap-unimplemented-construct-reported-as-generic-code | (P3) NO GAP specific (class g-bootstrap-unimplemented-construct-reported-as-generic-code) |
+| §18.17.1 | `.variant` member | REFUSED-LOUD | probe p18-misc6 → E-BOOTSTRAP-UNSUPPORTED | g-boot-dot-variant-member-unbuilt-s473 | (P3) gap **g-boot-dot-variant-member-unbuilt-s473** (MED, open) |
+| §18.18 | `partial match` | REFUSED-LOUD | probe p18-misc3 → E-SCOPE-001 `partial` + E-TYPE-020 | g-bootstrap-unimplemented-construct-reported-as-generic-code | (P3) NO GAP |
+| §18.19 | Multi-scrutinee match | REFUSED-LOUD | probe p18-misc4 → parse cascade | g-bootstrap-unimplemented-construct-reported-as-generic-code | (P3) the SPEC itself marks it Nominal |
+
+## §19 — Error Handling (Revised)
+
+| § | title | status | evidence | gap ids | note |
+|---|---|---|---|---|---|
+| §19.1 | No try/catch, no exceptions | REFUSED-LOUD | probes p19-try / p19-throw → E-SCOPE-001 `try` / `throw`; no E-TRY-NOT-IN-SCRML | g-bootstrap-unimplemented-construct-reported-as-generic-code | (P3) |
+| §19.2 | `renders` on enum variants, E-ERROR-006 | REFUSED-LOUD | probe p19-a: E-PARSE-TYPE cascade; parser recovery turns `renders`, `p`, `$`, `why` into "variants" (see E-TYPE-VARIANT message), but the compile does fail | g-bootstrap-unimplemented-construct-reported-as-generic-code | (P3) NO GAP. Also blocks §19.15 / §19.6 display |
+| §19.3 | `fail` | BUILT | E-ERROR-001, E-ERROR-009, E-TYPE-082, bare `fail .V`; error-model.test.js; probes p19-a, p19-b | — | (P3) |
+| §19.4.1 / 19.4.2 | `!` syntax, built-in `Error` | BUILT | analyze builtinTypeDecls (~830); `fail .Generic` | — | (P3) |
+| §19.4.3 | Calling a `!` function | BUILT | E-ERROR-002 at statement, value, handler call and handler reference (p19-d), E-ERROR-012 (p19-b), E-ERROR-013 (p19-a), E-ERROR-014 (p19-d); error-rulings.test.js | — | (P3) items 4–5 (`<errorBoundary>`, `<request>`) refused; failable functions as values refused (function-values slice) |
+| §19.4.4 / 19.4.4.1 | Normative; error type SHALL be an enum | BUILT | E-ERROR-011 (p19-c) | — | (P3) `pure function` refused (p19-c line 8, outside this range) |
+| §19.4.5 | `!{}` arm grammar, W-ARM-PIPE-LEGACY | BUILT | probe p19-c | — | (P3) |
+| §19.5 | `?` propagation | BUILT | E-ERROR-003/004/010 (p19-a, p19-c) | — | (P3) |
+| §19.6.1–19.6.6 | `<errorBoundary>` | REFUSED-LOUD | structuralOwner "errorboundary"; the E-ERROR-002 message says "the bootstrap has no `<errorBoundary>`" | — | (P3) |
+| §19.6.7 | Multi-batch CPS granularity | N/A | needs body-split + boundary, both refused | — | (P3) |
+| §19.6.8 | Runtime backstop B1–B7 | UNVERIFIED | B1–B6 depend on the boundary (refused). For B7 (handler rejections reach the logging surface), runtime `on()` (runtime.js ~2552) has no catch; not traced further | — | (P3) |
+| §19.7 | Exhaustive matching of failable results | BUILT | E-TYPE-080 handler exhaustiveness (p19-b), `.Ok` arm (p19-b m3) | — | (P3) |
+| §19.8.1 / 19.8.2 / 19.8.4 | SqlError; `?{}` in `!`; no-row ≠ failure | BUILT | analyze builtinTypeDecls; server.test.js:131; server-runtime query (get→null, all→[]) | — | (P3) |
+| §19.8.3 | `?{}` outside `!` is failable | BUILT | server.test.js:111–136 | — | (P3) the `<x server>` exemption is moot (§52 refused, server.test.js:371) |
+| §19.9.1 | Error serialization | BUILT | server-runtime.js encodeError (§57.8 envelope); server-artifact.test.js | — | (P3) |
+| §19.9.2 | HTTP status mapping | PARTIAL | name heuristic BUILT (server-runtime.js:206 failStatus); `httpStatus(404)` on a variant → E-PARSE-TYPE (p19-http) | g-bootstrap-unimplemented-construct-reported-as-generic-code | (P3) NO GAP. The runtime comment acknowledges it ("The bootstrap has no `httpStatus` attribute") |
+| §19.9.3 / 19.9.4 | CPS preservation | BUILT | server-call*.test.js | — | (P3) |
+| §19.9.5 | Auto-`!` wrap / body-split | REFUSED-LOUD | E-BOOTSTRAP-UNSUPPORTED naming U1d (analyze.scrml:25316); server.test.js:205 | — | (P3) |
+| §19.9.6 | Monotonicity classification, Idempotency-Key | REFUSED-LOUD | there is no split, so there are no CPS batches | — | (P3) see Q5: whether whole-function client→server calls fall under it is ambiguous; no Idempotency-Key is emitted anywhere |
+| §19.9.7 | `.idempotent()` | REFUSED-LOUD | probe p19-idem → E-PARSE-ITEM | g-bootstrap-unimplemented-construct-reported-as-generic-code | (P3) |
+| §19.9.8 | No async/await | REFUSED-LOUD | probes p19-async (E-PARSE-ITEM), p19-await (E-SCOPE-001 `await`); no E-ASYNC-/E-AWAIT-/E-FOR-AWAIT-NOT-IN-SCRML | g-bootstrap-unimplemented-construct-reported-as-generic-code | (P3) |
+| §19.9.9 (.1–.8) | Multi-batch CPS | REFUSED-LOUD | U1d refusal (as 19.9.5) | — | (P3) 19.9.9.7 / .8 are N/A without a split |
+| §19.9.10 | Client call to a server function is failable | BUILT | ServerCallError / Transport (analyze ~822); server-call.test.js, server-call-runtime.test.js | — | (P3) |
+| §19.10.1–19.10.3 | `transaction {}` block | REFUSED-LOUD | parse.scrml:2440 "`transaction { … }` … arrives with unit U1e" | — | (P3) |
+| §19.10.4 | Transaction normative | SILENT-ACCEPT | E-ERROR-015 BUILT (analyze.scrml:25616). But probe p19-manualtx: `?{BEGIN}` … `?{COMMIT}` inside a `!` function compiles. When the middle query fails, the emitted server function `return rt.failure(…)`s with **no ROLLBACK**, so the transaction stays open on the shared per-database connection (server-runtime.js … | g-boot-manual-tx-left-open-no-gate-s473 | (P3) breaks "no transaction SHALL be left open" and §19.10.6. NO GAP |
+| §19.10.5 | Implicit per-handler transaction | SILENT-ACCEPT | probe p19-tx: a `! SqlError` server function with two UPDATEs compiles (out/p19-tx/program.server.js). The UPDATEs run with no BEGIN/COMMIT envelope, so a failure of the second leaves the first committed | g-boot-implicit-envelope-unbuilt-not-refused-s473 | (P3) analyze.scrml:25605 comment: "The bootstrap emits no W-BATCH-001 (no implicit envelope until U1e)". Planned in bootstrap-u1-server-boundary-design §6 / U1e, but the shape is neither refused nor in a gap |
+| §19.10.6 | One transaction per connection (the gate) | SILENT-ACCEPT | server-runtime.js `connection()` / `query()`: no per-connection gate; concurrent requests share one driver handle | g-boot-manual-tx-left-open-no-gate-s473 | (P3) it bites as soon as any transaction exists (19.10.4 manual BEGIN). It is the bootstrap twin of impl#1's resolved g-shared-sql-connection-concurrent-handlers-share-transaction |
+| §19.11 | Reactive error state | BUILT | enum error values in cells work; `@x = f()` unhandled → E-ERROR-002 | — | (P3) the SPEC contradicts itself here (Q1) |
+| §19.12.1–19.12.5 | `~{}` tests, `assert.fails` | REFUSED-LOUD | E-PARSE-ITEM at `~` | g-boot-test-block-s473 | (P3) gap **g-boot-test-block-s473** (LOW, open) |
+| §19.12.6–19.12.8 | `test-bind` | REFUSED-LOUD | same | — | (P3) same gap; E-TEST-006 N/A |
+| §19.13 / 19.14 | Code table; worked examples | N/A | aggregate/examples | — | (P3) |
+| §19.15 | `<render of=X/>` | REFUSED-LOUD | structuralOwner "render" | — | (P3) also blocked by 19.2 |
+| §19.16 | `defer` | BUILT | E-DEFER-CONTROL-FLOW (incl. `lift`, p19-defer2), -NESTED, -UNHANDLED-FAILABLE, -OUTSIDE-FUNCTION, -UNSUPPORTED-SITE, -LATER-SHADOW, -AMBIGUOUS-LEAD; defer.test.js, defer-loop-s471.test.js, loop-defer-s471.test.js | — | (P3) -SERVER-IN-SPLIT N/A (no split); -DUPLICATE-FUNCTION N/A (no nested function declarations, p19-defer) |
+| §19.17 | Runtime traps | PARTIAL | E-INDEX-OUT-OF-RANGE-RT built (core/print/analyze; rulings-s473-trap.test.js); E-HOST-VALUE-MISMATCH-RT in the runtime; fixed 500 text (server-runtime FIXED[500]). Not checked: "every trap SHALL be reported to the logging surface", trap in a transaction (moot: no tx) | g-bootstrap-int-overflow-and-mod-zero-untrapped-s469 | (P3) the int-overflow trap is a separate open gap, g-bootstrap-int-overflow-and-mod-zero-untrapped-s469 (§66) |
+
+## Appendix A — Appendix A: Interaction Matrix
+
+| § | title | status | evidence | gap ids | note |
+|---|---|---|---|---|---|
+| App. A | Interaction matrix | N/A | summary table | — | (P3) |
+
+## Appendix B — Appendix B: Superseded Spec Text
+
+| § | title | status | evidence | gap ids | note |
+|---|---|---|---|---|---|
+| App. B | Superseded text | N/A | history | — | (P3) |
+
+## Appendix C — Appendix C: Future Considerations
+
+| § | title | status | evidence | gap ids | note |
+|---|---|---|---|---|---|
+| App. C | Future considerations | N/A | out of scope by its own text | — | (P3) |
+
+## Appendix D — Appendix D: JS Standard Library
+
+| § | title | status | evidence | gap ids | note |
+|---|---|---|---|---|---|
+| App. D | JS stdlib in logic | PARTIAL | OUT names refused (generic codes: `Math.floor` E-BOOTSTRAP-UNSUPPORTED, `String`/`parseInt`/`Proxy` E-SCOPE-001; pD-out). IN typed arrays not usable (`new Float64Array` → E-SCOPE-001 `new`; pD-in). `window` in a client function refused (pD-win2) | g-bootstrap-no-host-method-calls-refuses-correct-code-s460, g-boot-no-host-bridge-s471 | (P3) gaps g-bootstrap-no-host-method-calls-refuses-correct-code-s460 (MED, narrowed), g-boot-no-host-bridge-s471 (HIGH, narrowed). Fails closed |
+| App. D.1 | String method table | BUILT | strMethodOp/methodSig; E-STRING-METHOD-UNKNOWN, E-POSITION-NEGATIVE (pD-str); strings-s469.test.js | — | (P3) |
+
+## Appendix E — Appendix E: `</>` Closer Migration
+
+| § | title | status | evidence | gap ids | note |
+|---|---|---|---|---|---|
+| App. E | `</>` closer migration | PARTIAL | `</>` BUILT (pE-closer). Bare `/` and trailing-`content/` closers are rejected only as a side effect of closer mismatch (E-PARSE-CLOSER, pE-slash, pE-slash2); the SHALL hint "Did you mean `</>`?" is missing | — | (P3) LOW |
+
+## §20 — Navigation API
+
+| § | title | status | evidence | gap ids | note |
+|---|---|---|---|---|---|
+| §20 (top) | Navigation API | REFUSED-LOUD | see rows | g-boot-s20-builtins-unbuilt-s473 | (P4) The built-ins are absent. Every use is refused with E-SCOPE-001. |
+| §20.1 | `navigate()` built-in | REFUSED-LOUD | probe `nav.scrml` → `E-SCOPE-001 navigate is not declared` | g-boot-s20-builtins-unbuilt-s473 | (P4) No soft or hard navigation lowering. No gap names the bootstrap's lack of `navigate`. |
+| §20.2 | `.Hard` / `.Soft` override | REFUSED-LOUD | follows from 20.1 | g-boot-s20-builtins-unbuilt-s473 | (P4) |
+| §20.3 | Navigation normative (W-NAV-001) | REFUSED-LOUD | follows from 20.1. `W-NAV-001` does not appear in self-host-v2 | g-boot-s20-builtins-unbuilt-s473 | (P4) |
+| §20.3a | `render()` built-in, shadowing, W-RENDER-SHADOWED | REFUSED-LOUD | probe `render.scrml`: `function render(...)` → `E-PARSE-FN expected a function name`. lex.scrml:311 makes `render` a keyword | g-boot-s20-builtins-unbuilt-s473 | (P4) The SPEC says `render` SHALL NOT be reserved and that declaring `function render` is legal. The bootstrap rejects legal source with a generic parse code. It fails closed, but on a construct the SPEC says is legal. NO GAP. |
+| §20.4 | Route parameters (`route`) | REFUSED-LOUD | probe `route.scrml` → E-SCOPE-001 `route` + E-BOOTSTRAP-UNSUPPORTED `.path`. Gap `g-route-query-string-or-not-unimplemented-s469` (open, "owed: bootstrap") | g-route-query-string-or-not-unimplemented-s469, g-boot-s20-builtins-unbuilt-s473 | (P4) `let <route:int=0/>` compiles clean (probe `routedecl.scrml`). The E-SCOPE-010 reserved-name rule is spec-ahead on impl#1 too, and it is moot while the bootstrap has no `route` binding. E-SCOPE-011 is absent. |
+| §20.5 | Session context (`session`) | REFUSED-LOUD | probe `session.scrml` → E-SCOPE-001 `session` + E-BOOTSTRAP-UNSUPPORTED. E-SCOPE-012, E-SESSION-*, E-SESSION-VALUE and E-SESSION-CONTEXT all have 0 hits in self-host-v2 | g-boot-s20-builtins-unbuilt-s473 | (P4) No session infrastructure. analyze.scrml:1757 builds the `session-secure` name in pieces only to stay clear of impl#1's route scan. NO GAP names bootstrap session. |
+| §20.5.1 | Session establishment (set, destroy, cookie, store, rotation, reserved keys) | REFUSED-LOUD | follows from 20.5. `<program sessionExpiry/session-secure>` are in the attribute set (analyze.scrml isProgramAttrName). UNVERIFIED whether they are honoured or refused when written | g-boot-s20-builtins-unbuilt-s473 | (P4) The security-heavy section. Absent, and unreachable because `session` is refused. |
+| §20.6 | `log()` built-in (origin tag, dev view, render, prod strip, W-LOG-SHADOWED) | REFUSED-LOUD | probe `log.scrml` → E-SCOPE-001 `log` | g-boot-s20-builtins-unbuilt-s473 | (P4) A user `function log` compiles (probe `logshadow.scrml`). W-LOG-SHADOWED is not emitted, which is moot because there is no built-in to shadow. NO GAP. |
+| §20.7 | `print()` / `println()` | REFUSED-LOUD | probe `print.scrml` → E-SCOPE-001 `println` | g-boot-s20-builtins-unbuilt-s473 | (P4) E-PRINT-NON-PRIMITIVE and W-PRINT-SHADOWED are absent. §20.7.2's "honest text" definition is shared with markup text. That half is §14.13 / Part 3's concern. NO GAP. |
+| §20.8 (top) | Client router | REFUSED-LOUD | `<outlet>` → E-BOOTSTRAP-UNSUPPORTED (analyze.scrml structuralOwner "§20.8", probe `ahard.scrml`). `<page>` is refused as well (structuralOwner "§40") | g-boot-s20-builtins-unbuilt-s473 | (P4) No soft navigation. |
+| §20.8.1 / 20.8.1.1 | Shell, `<outlet>`, one-landmark rule, E-OUTLET-* | REFUSED-LOUD | as 20.8 | g-boot-s20-builtins-unbuilt-s473 | (P4) |
+| §20.8.2 | Soft-nav pipeline incl. step 0 same-build check (`data-scrml-build`) | SILENT-ABSENT | `data-scrml-build` has 0 hits in self-host-v2 and runtime.js. Probe `out-ahref/index.html`: `<html>` is unstamped | g-boot-s20-builtins-unbuilt-s473, g-boot-build-identity-stamp-absent-s473 | (P4) "The compiler SHALL stamp it on every emitted page" is unconditional, and the bootstrap never stamps. Impact is low today because the bootstrap has no soft nav and no chunks. It becomes a hole the day soft nav lands. |
+| §20.8.3 | Link-boost, `hard` | N/A | probe `ahref.scrml`: `<a href="/x" hard>` emits a plain link with `hard=""` | g-boot-s20-builtins-unbuilt-s473 | (P4) With no `<outlet>`, §20.8.1 specifies a hard-nav fallback, so plain links agree with the SPEC. `hard` passes through as an unknown HTML attribute, which is harmless. |
+| §20.8.4 | Keep-alive | REFUSED-LOUD | `<page>` refused | g-boot-s20-builtins-unbuilt-s473 | (P4) |
+| §20.8.5 | Correctness (popstate, scroll, focus, cancellation, nav-to-error, no-JS, no-VT) | N/A | no soft nav | g-boot-s20-builtins-unbuilt-s473 | (P4) |
+| §20.8.6 | Client-router normative | REFUSED-LOUD | as 20.8 | g-boot-s20-builtins-unbuilt-s473 | (P4) |
+| §20.8.7 | Codes (E-OUTLET-*, W-NAV-*, E-CHUNK-BUILD-MISMATCH, E-NAV-NO-PATH, W-ROUTE-REQUEST-DUPLICATES-SERVER-LOAD) | REFUSED-LOUD | none emitted. Their triggers are refused upstream | g-boot-s20-builtins-unbuilt-s473 | (P4) |
+| §20.8.8 | Route-region lifecycle | REFUSED-LOUD | needs `<outlet>` | g-boot-s20-builtins-unbuilt-s473 | (P4) Also Nominal on impl#1. |
+
+## §21 — Module and Import System
+
+| § | title | status | evidence | gap ids | note |
+|---|---|---|---|---|---|
+| §21 (top) | Module and import system | PARTIAL | see rows | — | (P4) |
+| §21.1 | Overview | N/A | prose | — | (P4) |
+| §21.2 | Export syntax: Form 1 `export <Comp>` | REFUSED-LOUD | probe `f1/` → E-PARSE-EXPORT + E-BOOTSTRAP-UNSUPPORTED (top-level `<Greeting>`) + E-IMPORT-004 | — | (P4) The bootstrap's component form is §66 `renders`. Form 1 / Form 2 component-as-const are legacy. E-EXPORT-002/003 are absent, which is moot. |
+| §21.2 | Form 2 `export type / function / fn / const` | BUILT | analyze.scrml exportedBy / checkImports. Probe `fn/` (enum + function imported, compiles). Tests slice-m4/imports-s471.test.js, visibility-s472.test.js | — | (P4) |
+| §21.2 | E-EXPORT-001 (a reactive cell SHALL NOT be exported) | PARTIAL | probe `exp/`: `export let <count:int=0/>` in a non-entry file, plus `import { count }`, compiles clean | — | (P4) §66.2.5 (S447/S449/S469) explicitly admits `export let <x/>`, so the bootstrap follows §66. §21.2 still says E-EXPORT-001. That is a SPEC contradiction (see Questionable). E-EXPORT-001 is absent from self-host-v2. |
+| §21.2 | Type/module file (no markup) emits only a JS module | REFUSED-LOUD | `bun scrml-boot compile rx/c.scrml` → E-PROGRAM-MISSING | — | (P4) An imported file is folded into the one program artifact. |
+| §21.2 | `export <channel>` | REFUSED-LOUD | `<channel>` is structuralOwner "§38" | — | (P4) |
+| §21.3 | Import syntax: named imports from `.scrml`, E-IMPORT-003/004/005/006 | BUILT | analyze.scrml checkImports / importRefusal. parse.scrml:2422 (E-IMPORT-003). Probe `imp-in-fn.scrml` → E-IMPORT-003. Tests imports-s471.test.js, acceptance.test.js | — | (P4) |
+| §21.3 | Default import (`import f from`) | REFUSED-LOUD | probe `def/` → E-PARSE-IMPORT ×3 + a spurious E-IMPORT-005 on `` | g-boot-import-codes-and-alias-s471 | (P4) The SPEC says default imports SHALL resolve. NO GAP (g-boot-import-codes-and-alias-s471 covers `as` only). |
+| §21.3 | `import { a as b }` | REFUSED-LOUD | gap `g-boot-import-codes-and-alias-s471` (open) | g-boot-import-codes-and-alias-s471 | (P4) |
+| §21.3 | E-IMPORT-002 circular import | SILENT-ACCEPT | probe `cyc/` (main→b→c→b) compiles clean: "✓ compiled". 0 hits for E-IMPORT-002 in self-host-v2. link.scrml:21/250 *deliberately* breaks a cycle ("an import cycle places the first unplaced file in path order") and nothing reports it | g-boot-reexport-from-s473, g-boot-import-cycle-unreported-s473, g-boot-conformance-parse-reject-hides-code-drift-s473 | (P4) The SPEC: "Circular imports SHALL be a compile error (E-IMPORT-002) … report all files in the cycle." The conformance case `module/e-import-002-circular-import-reject` hides this: it is a parse-reject on semicolons (bootstrap-conformance.md:1111). Gap … |
+| §21.3 | Type imports first-class | BUILT | probe `fn/` (imported enum). imports-s471.test.js | — | (P4) |
+| §21.3 | Plain-JS helper import and `_scrml_local` copy, E-IMPORT-011 | REFUSED-LOUD | probe `jsimp.scrml` → E-BOOTSTRAP-UNSUPPORTED (importRefusal: "a JavaScript … module import is not in the bootstrap") | — | (P4) |
+| §21.3 | "Typed door" note (W-HOST-UNTYPED-CALL) | REFUSED-LOUD | the `.js` import is refused, so there is nothing to lint | — | (P4) |
+| §21.3.1 | `import:host` (E-IMPORT-003/008/009, `host` tag only) | BUILT | parse.scrml:2412–2422. analyze.scrml checkHostImport. Tests slice-m4/import-host-s472.test.js, math-port-s472.test.js | — | (P4) |
+| §21.3.1 | Cyclic `import:host` → E-IMPORT-002 | SILENT-ABSENT | no cycle detector exists (see 21.3) | g-boot-import-cycle-unreported-s473 | (P4) Only reachable from stdlib files. LOW. |
+| §21.3.1.1 | Wrapper rule, E-HOST-BINDING-USE, output location, E-IMPORT-012, return-point decode | BUILT | analyze.scrml hostWrappers / resolveHostBinding / checkHostImport. scripts/scrml-boot.ts hostFilesOf / compileFile. runtime.js hostResult. Tests import-host-s472.test.js | g-boot-host-wrappers-not-shaken-from-client-s473, g-boot-host-path-backslash-segment-unverified-s473 | (P4) Non-scalar wrappers are refused by name (as the SPEC says). Related gaps: g-boot-host-wrappers-not-shaken-from-client-s473, g-boot-host-path-backslash-segment-unverified-s473. |
+| §21.3.2 | Dynamic `import(...)` → E-DYNAMIC-IMPORT-NOT-IN-SCRML | REFUSED-LOUD | probe `dynimp.scrml` → `E-SCOPE-001 import is not declared` | g-boot-not-in-scrml-codes-unbuilt-s473 | (P4) Fails closed, but not with the named code. 0 hits for E-DYNAMIC-IMPORT-NOT-IN-SCRML in self-host-v2. NO GAP. |
+| §21.3.3 r1 | `<host>` placement, E-HOST-BINDING-PLACEMENT, no HTML | BUILT | parse.scrml (host block reader). host-block-f3-s473.test.js "rule 1" | — | (P4) |
+| §21.3.3 r2 | Body lines, E-HOST-BINDING-MALFORMED (incl. `pure`) | BUILT | probes `h-pure`, `h-optchain`, `h-cb`. test "rule 2" | — | (P4) |
+| §21.3.3 r3 | `src=` (E-HOST-SRC-INVALID / E-IMPORT-005 / static export read) | PARTIAL | probe `h-srcok` → E-BOOTSTRAP-UNSUPPORTED (parse.scrml:6623). parse.scrml:6618 E-IMPORT-005. Gap `g-boot-host-block-f3-unbuilt-s473` (a) | g-boot-host-block-f3-unbuilt-s473 | (P4) A valid `src=` is refused by name. E-IMPORT-006/011 for `src=` are not reached. |
+| §21.3.3 r4 | Target shapes, E-HOST-TARGET-SHAPE / -UNBOUND | BUILT | probes `h-objnest`, `h-ctor`, `h-proto`, `h-bracket`, `h-tmpl`, `h-newnomember` all → SHAPE. test "rule 4" (15 SHAPE asserts) | — | (P4) |
+| §21.3.3 r5 | E-HOST-PARAM-USE | BUILT | test "rule 5" | — | (P4) |
+| §21.3.3 r6 | E-HOST-NO-TARGET | BUILT | test "rule 6" | — | (P4) |
+| §21.3.3 r7 | Target emitted as literal JS, no `Function` | BUILT | probe `out-h-handlelocal/program.client.js:25`: `rt.hostCall(() => rt.hostRoot("window").foo.make(), …)`. No `Function(` / `eval(` | — | (P4) |
+| §21.3.3 r8 | No execution / navigation sinks | DEFERRED-RULED | per dispatch: being rewritten as an allowlist now (branch s473-host-allowlist-a). Open gap `g-spec-host-target-url-sinks-unjudged-s473` | g-spec-host-target-url-sinks-unjudged-s473 | (P4) Not audited. FYI, probe `h-hrefwrite` (`document.body.href = u`) compiles. The current text leaves URL-valued writes unjudged. |
+| §21.3.3 r9 | Binding is a file-scope fn, E-CALL-ARITY / E-TYPE-031 / E-SCOPE-010; MAY be exported | PARTIAL | arity/type/E-SCOPE-010 tested (test lines 98, 280–287). Export: probe `hx/` → E-IMPORT-004, and `export t()` in the block → MALFORMED (probe `h-export`). Gap `g-boot-host-block-f3-unbuilt-s473` (i) | g-boot-host-block-f3-unbuilt-s473 | (P4) Export fails closed. |
+| §21.3.3 r10 | Client-only outside stdlib (E-ROUTE-002/005); stdlib server side | PARTIAL | E-ROUTE-002/-005 tested. A stdlib `<host>` → E-BOOTSTRAP-UNSUPPORTED (analyze.scrml:4213). Gap (d) | — | (P4) |
+| §21.3.3 r11 | `fn` bindings, E-FN-003, `fn` rooted at window → SHAPE | BUILT | probes `h-fnnonfn` → E-FN-003, `h-fnwin` → SHAPE | — | (P4) |
+| §21.3.3 r12 | What crosses in (deep copy, `not`→null, optional `p?:`) | PARTIAL | scalars and handles BUILT. Struct/tape arguments refused (gap (e)). Optional `p?: T` → garbled refusal (probe `h-defaultp`: E-HOST-PARAM-USE on an empty name + "unannotated parameter `a`") | g-boot-optional-type-sugar-unparsed-s473 | (P4) Optional-parameter refusal: loud, but the message is wrong. Not in the gap's list. |
+| §21.3.3 r13 | Checked results (decode, read-once, chain-terminal, own indices, thenable) | PARTIAL | runtime.js hostCall / hostDecode (thenable at :1425–1433). Tests: 11 E-HOST-VALUE-MISMATCH-RT asserts. Enum result refused (gap (f)) | — | (P4) |
+| §21.3.3 r14 | E-HOST-TYPE-NOT-CROSSABLE | REFUSED-LOUD | probes `h-cb`, `h-linres` → MALFORMED. The types are unparseable. Gap (h) | — | (P4) The named code is never emitted, but nothing is accepted. |
+| §21.3.3 r15 | Closed handles: E-HOST-TYPE-OUTSIDE / -HANDLE-MEMBER / E-EQ-003 / -HANDLE-NOT-DATA | PARTIAL | probes `h-eqhandle` → E-EQ-003, `h-handlesrv` → E-HOST-HANDLE-NOT-DATA, `h-handlecell` / `h-handletape` → E-BOOTSTRAP-UNSUPPORTED (gap (g)). `h-handlemember` (`mk().x`) → a generic "member access … not in bootstrap" instead of E-HOST-HANDLE-MEMBER | — | (P4) Fails closed throughout. A handle in a local works (`h-handlelocal` compiles). |
+| §21.3.3 r16 | DOM element types | REFUSED-LOUD | probe `h-dom` → E-TYPE-UNKNOWN `HTMLElement`. Gap (h) | — | (P4) |
+| §21.3.3 r17 | `-> waiting T` | REFUSED-LOUD | probe `h-waiting` → E-BOOTSTRAP-UNSUPPORTED (parse.scrml:6817). Gap (b) | — | (P4) |
+| §21.3.3 r18 | `! HostError`, E-HOST-ERROR-TYPE, E-HOST-THROW-RT | PARTIAL | `! HostError` refused (parse.scrml:6822, gap (c)). E-HOST-ERROR-TYPE and E-HOST-THROW-RT tested (5 asserts) | — | (P4) |
+| §21.3.3 r19 | Callbacks, E-HOST-CALLBACK-WAITS | REFUSED-LOUD | probe `h-cb` → MALFORMED. Gap (h) | — | (P4) |
+| §21.3.3 r20 | `lin` parameter consumed at the call | REFUSED-LOUD | probe `h-lin` → `E-LIN-001 lin variable a … is not consumed` | g-boot-host-lin-param-false-e-lin-001-s473 | (P4) A false diagnostic on legal source. Fails closed. NOT in the gap's (a)–(k) list. |
+| §21.3.3 r21 | No lifecycle / retry / caching | N/A | a non-obligation (boundary) | — | (P4) |
+| §21.3.3 r22 | W-HOST-UNTYPED-CALL | DEFERRED-RULED | gap (j): "moot while the bootstrap refuses bare globals and untyped `.js` imports". Confirmed: probe `h-docread` → E-SCOPE-001 `document` | — | (P4) |
+| §21.3.3 | Relation to the wrapper form, migration | DEFERRED-RULED | gap (k) | — | (P4) |
+| §21.4 | Re-export (named, `export *`, ambiguity, cycles) | REFUSED-LOUD | probes `rx/`, `star/`, `amb/` → E-PARSE-ITEM at `{` / `*`, plus an E-IMPORT-004 at the importer. Gap `g-boot-reexport-from-s473` (open, "fails closed") | g-boot-reexport-from-s473 | (P4) |
+| §21.5 | Pure-type files | REFUSED-LOUD | E-PROGRAM-MISSING (above). The bootstrap has no `--mode library` | — | (P4) |
+| §21.5.1 | `export server function` / `export pure function` | BUILT | probe `expsrv.scrml` compiles with W-DEPRECATED-SERVER-MODIFIER | — | (P4) `pure` is deprecated (§33). Not probed. |
+| §21.6 | Error codes | PARTIAL | E-IMPORT-003/004/005/006/008/009/012 emitted. E-IMPORT-001, **E-IMPORT-002**, E-IMPORT-007, E-IMPORT-011, E-EXPORT-001/002/003 absent | g-boot-import-cycle-unreported-s473 | (P4) E-IMPORT-002 is the only one whose trigger is accepted (see SILENT). |
+| §21.7 | CLI auto-gather | BUILT | scripts/scrml-boot.ts sourceClosure (lines ~150–190). Test scrml-boot-import-quotes-s473.test.js | g-boot-gather-limit-absent-s473 | (P4) No 5000-file cap / E-IMPORT-007, and no `--no-gather` (the clause names the impl#1 CLI). See SILENT-ABSENT. |
+| §21.8 | Cross-file engine import | REFUSED-LOUD | `<engine>` is structuralOwner "§51.0 (retired into `single` declarations)" | — | (P4) UNVERIFIED: cross-file import of a §66 `single` declaration. |
+| §21.8.1 | `pinned` on imports, E-IMPORT-PINNED-INVALID | REFUSED-LOUD | probe `pin/` → `E-IMPORT-004 pinned is not exported` (read as a second name). Gap `g-bootstrap-module-import-checks-missing` (narrowed, "Still open: E-IMPORT-PINNED-INVALID and E-EXPORT-003") | g-bootstrap-module-import-checks-missing | (P4) |
+
+## §22 — Metaprogramming
+
+| § | title | status | evidence | gap ids | note |
+|---|---|---|---|---|---|
+| §22 | Metaprogramming | REFUSED-LOUD | see subsections | g-bootstrap-unimplemented-construct-reported-as-generic-code | (P4) No `E-META-*` code exists in the bootstrap (severity.scrml has none). Every `^{` is refused, but only markup gets a named refusal. |
+| §22.1 | Overview | N/A | prose | g-bootstrap-unimplemented-construct-reported-as-generic-code | (P4) |
+| §22.2 | The `^{}` meta context | REFUSED-LOUD | parse.scrml `skipSigil` (~7186): in markup, "a `^{…}` context in markup is not in the bootstrap (§3.1)" E-BOOTSTRAP-UNSUPPORTED (probe p22a-meta-markup). In a function body: `E-PARSE-EXPR` "expected an expression, found `^`" (p22b-meta-logic). In a file-top logic block: `E-PARSE-ITEM` (p22d-meta-toplevel). | g-bootstrap-unimplemented-construct-reported-as-generic-code | (P4) Loud in every position. In logic positions the code is a generic parse code, not a refusal that names the construct (family g-bootstrap-unimplemented-construct-reported-as-generic-code). |
+| §22.3 | Context preservation | REFUSED-LOUD | covered by the §22.2 refusal | g-bootstrap-unimplemented-construct-reported-as-generic-code | (P4) |
+| §22.4 (+.1 emit, .2 reflect) | Compile-time meta | REFUSED-LOUD | `^{` is refused. `reflect(int)` outside meta gives E-SCOPE-001 "`reflect` is not declared" (p22c-reflect). | g-bootstrap-unimplemented-construct-reported-as-generic-code | (P4) §22.11 names E-META-008 for `reflect()` outside meta. The bootstrap reports E-SCOPE-001 instead. It is loud, but with the wrong code. |
+| §22.5 | Runtime meta | REFUSED-LOUD | covered by §22.2 | g-bootstrap-unimplemented-construct-reported-as-generic-code | (P4) |
+| §22.6 | DG tracking for runtime meta | REFUSED-LOUD | covered | g-bootstrap-unimplemented-construct-reported-as-generic-code | (P4) |
+| §22.7 | Runtime meta guard (E-META-001, `meta.runtime`) | REFUSED-LOUD | covered. The bootstrap has no `meta.runtime` setting. | g-bootstrap-unimplemented-construct-reported-as-generic-code | (P4) |
+| §22.8 | Phase separation (E-META-005) | REFUSED-LOUD | covered | g-bootstrap-unimplemented-construct-reported-as-generic-code | (P4) |
+| §22.9 | Interaction (E-META-006/007/009) | REFUSED-LOUD | covered | g-bootstrap-unimplemented-construct-reported-as-generic-code | (P4) |
+| §22.10 | Codegen contract | REFUSED-LOUD | covered | g-bootstrap-unimplemented-construct-reported-as-generic-code | (P4) |
+| §22.11 | Error code summary | REFUSED-LOUD | no E-META-* emitted. The umbrella refusal stands in for them. | g-bootstrap-unimplemented-construct-reported-as-generic-code | (P4) |
+| §22.12 | Approach C (closed allow-list; S130 extension to `${}`) | BUILT | The bootstrap's binder is a closed scope. `fetch` gives E-SCOPE-001 (p22e-ambient). `setInterval` gives E-SCOPE-001 (p22g-setinterval). `process.env` gives E-SCOPE-001 (earlier p22e variant). `console.log` and `Math.floor` give E-BOOTSTRAP-UNSUPPORTED (p22h-globals). `bun.eval` / `eval` give E-LOGIC-EXECUTABLE-SINK … | g-bootstrap-unimplemented-construct-reported-as-generic-code | (P4) `Date.now()` is admitted (analyze.scrml method allow-list). That is a JS-host ambient, but Approach C names no rule for it. |
+| §22.13 | Manifest `[capabilities] host-import` | PARTIAL | parse.scrml `judgeNestedImport` (~2408) and analyze `checkHostImport`: E-IMPORT-008 when the file is not under `stdlibPathPrefix()` (probe p22f-import-host fires E-IMPORT-008). Tests: slice-m4/import-host-s472.test.js, math-port-s472.test.js. | g-bootstrap-unimplemented-construct-reported-as-generic-code, g-boot-host-import-manifest-not-read-s473 | (P4) Missing: the bootstrap never reads `scrml.toml`. The allow-list is a hard-coded stdlib path, and `E-MANIFEST-001` (invalid value) is absent. In v1 this is equivalent in effect, because "disabled" and "self-host-only" give an adopter no opt-in. NO GAP for the manifest read. |
+
+## §23 — Foreign Code Contexts (`_{}`)
+
+| § | title | status | evidence | gap ids | note |
+|---|---|---|---|---|---|
+| §23 | Foreign code `_{}` | PARTIAL | see subsections | — | (P4) Reading and checking are built. Emission is refused by name. |
+| §23.1 | Overview | N/A | prose | — | (P4) |
+| §23.2 | Syntax, levels, identifier guard, E-FOREIGN-001/002, W-FOREIGN-001 | BUILT | lex.scrml `foreignExtentAt` (one opaque token); parse.scrml ~150 and ~1553–1582 (E-FOREIGN-001/002, W-FOREIGN-001, E-FOREIGN-007 header shape). Probes p23m-level0 (W-FOREIGN-001) and p23n-mismatch (E-FOREIGN-001). Test: slice-m4/foreign-blocks-s473.test.js §L. | g-boot-foreign-level0-glued-eq-read-as-closer-s473, g-boot-foreign-header-checks-unbuilt-s473 | (P4) Open LOW gaps: g-boot-foreign-level0-glued-eq-read-as-closer-s473, g-boot-foreign-header-checks-unbuilt-s473. |
+| §23.2.1 | Language determination (E-FOREIGN-003) | BUILT | analyze.scrml `foreignLangOf` / `itemsLang` (~7853). E-FOREIGN-003 fires (p23k-nolang). `<program lang="go">` gives E-BOOTSTRAP-UNSUPPORTED plus E-FOREIGN-005 (p23l-golang). | — | (P4) Nested `<program lang>` is refused (nested program unsupported), so "closest ancestor" collapses to the top program. |
+| §23.2.2 | AST representation | BUILT | `AExprK.Foreign` / `AForeign` (ast.scrml), with crossings | — | (P4) The shape differs from the spec's ForeignBlock node. That is implementation freedom. |
+| §23.2.3 | Pipeline stage contracts (CG) | REFUSED-LOUD | analyze.scrml `foreignEmitMsg` (~7816): "its emission … is not in the bootstrap yet" E-BOOTSTRAP-UNSUPPORTED (p23e-inline) | g-boot-foreign-block-emission-unbuilt-s473 | (P4) gap g-boot-foreign-block-emission-unbuilt-s473 (MED, open) |
+| §23.2.4 | Valid contexts (E-FOREIGN-004) | BUILT | analyze.scrml ~7781–7797. parse.scrml `skipForeign` (markup body gives E-FOREIGN-004, p23j-markup-foreign). Test: foreign-blocks-s473.test.js §C. | — | (P4) The tool form (form 3) is admitted, but `kind="tool"` programs are refused. |
+| §23.2.4a | Inline value-returning form (crossings, seal, E-FOREIGN-005/006/007, OUT typing) | PARTIAL | E-FOREIGN-005 BUILT (p23l). The `in:{}` header and its shape check (E-FOREIGN-007 header) are BUILT. OUT typed `asIs` per test. E-FOREIGN-006 is NOT built (p23i-shadow gets only the emission refusal). The sealed-slice emission is refused. | g-boot-foreign-block-emission-unbuilt-s473, g-boot-foreign-header-checks-unbuilt-s473 | (P4) E-FOREIGN-006 / full E-FOREIGN-007 are named as unbuilt in analyze.scrml:7811 and covered by g-boot-foreign-block-emission-unbuilt-s473 and g-boot-foreign-header-checks-unbuilt-s473. Unreachable while every block errors. |
+| §23.2.5 | Worked examples | N/A | examples | — | (P4) |
+| §23.2.6 | Error conditions | PARTIAL | 001/002/003/004/005/W-001 fire; 006 absent; 007 only for header shape | — | (P4) as above |
+| §23.3 | Call-char sigils for WASM (`extern`, `r{}`, E-WASM-*) | REFUSED-LOUD | `${ extern r f(x:int)->int }` gives E-PARSE-ITEM (p23a-extern). `r{ … }` gives E-SCOPE-001 `r` plus a parse cascade (p23b-callchar). A nested `<program mode=wasm>` is refused by name (analyze.scrml ~2111). | g-bootstrap-unimplemented-construct-reported-as-generic-code | (P4) Nominal/spec-ahead language-wide (E-WASM-NOMINAL on impl#1). The bootstrap is loud, but with generic parse/scope codes, not a named refusal. |
+| §23.4 | Sidecar `use foreign:` (E-FOREIGN-010/011/012) | REFUSED-LOUD | `use foreign:ml { predict }` gives E-PARSE-ITEM "unexpected text at program level" (p23c-use-foreign). The sidecar `<program lang=go>` gives "a nested `<program>` … is not in the bootstrap" (p23d-sidecar). | g-bootstrap-unimplemented-construct-reported-as-generic-code | (P4) Nominal language-wide (E-FOREIGN-SIDECAR-NOMINAL on impl#1). Generic code. |
+| §23.5 | Capability declaration | PARTIAL | `capabilities=` grammar plus E-FOREIGN-CAPABILITY-UNKNOWN BUILT, analyze.scrml ~1889–1911 (p23f-cap-unknown). Test: slice-m4/program-shape.test.js. | g-boot-foreign-block-emission-unbuilt-s473 | (P4) `W-FOREIGN-UNDECLARED-CAPABILITY` (§23.5.5, "SHALL emit") is absent: no source mentions it (p23g-cap-nolint emits no info). NO GAP. Moot while emission is refused. §23.5.4 closest-wins collapses (no nested programs). §23.5.6 is deferred by the spec itself. |
+| §23.6 | Library `<foreign lang>` | REFUSED-LOUD | `itemsLang` READS `<foreign lang>` for language resolution, yet analyze.scrml ~1665 refuses the element itself: "`<foreign>` at a file's top level, outside any `<program>`, is not in the bootstrap — the SPEC names no rule for what it renders as (§40.8)" (two-file probe p23o/). E-FOREIGN-LANG-IN-PROGRAM BUILT … | g-boot-foreign-block-emission-unbuilt-s473 | (P4) The refusal message is wrong: §23.6 does name the rule. See Questionable. |
+
+## §24 — HTML Spec Awareness
+
+| § | title | status | evidence | gap ids | note |
+|---|---|---|---|---|---|
+| §24 | HTML spec awareness | PARTIAL |  | — | (P4) |
+| §24.1 | Built-in element registry | PARTIAL | `<foo>` compiles exit 0 and prints `<foo>` (p24b-unknown-el). Structural tags are refused (analyze.scrml `structuralOwner` ~15881). | g-bootstrap-unknown-tags-resolved-as-html | (P4) gap g-bootstrap-unknown-tags-resolved-as-html (MED, narrowed, still open for unknown tags). The bootstrap has no per-element attribute or content-model table. |
+| §24.2 | E-HTML-001 invalid attr / E-HTML-002 content model / E-HTML-003 attr type | SILENT-ACCEPT | `<div hreff="x">` is emitted verbatim (p24a-badattr). `<ul><p>` and `<p><div>` are emitted (p24c-content-model). `<input maxlength="abc">` and `<textarea rows="many">` are emitted (p24d-attr-type). No source mentions E-HTML-00x or W-HTML-001. | g-boot-html-attr-registry-absent-s473, g-boot-html-content-model-unchecked-s473 | (P4) NO GAP. impl#1 ALSO never emits E-HTML-001/002/003 or W-HTML-001 (zero hits in compiler/src). |
+| §24.3 | Shape constraints (component inherits root shape) | SILENT-ABSENT | nothing in the bootstrap checks a use-site shape | g-boot-component-shape-constraints-unchecked-s473 | (P4) The `const card = <div>` component form is legacy (§66.15). Whether §66 `renders` components owe this check is unclear. LOW. |
+| §24.3.1 | Raw-content `<pre>`/`<code>` cross-ref | BUILT | html.scrml `HRawText`; owned by §4.17 (another part) | — | (P4) |
+| §24.4 | Scrml structural elements registry | PARTIAL | `structuralOwner` (analyze.scrml ~15881) refuses unimplemented structural tags by name (p31d: `<engine>` refused). `<each>`, `<errors>`, `<slot>` are implemented. | g-boot-name-collides-reserved-unfired-s473 | (P4) `E-NAME-COLLIDES-RESERVED` absent. `let <match:int=0/>` compiles (p24e-reserved-name). That is a cell, not a component, so it is UNVERIFIED for a §66 component named `engine`/`match`. |
+
+## §25 — CSS Variable Syntax
+
+| § | title | status | evidence | gap ids | note |
+|---|---|---|---|---|---|
+| §25 | CSS variable syntax | BUILT |  | — | (P4) |
+| §25.1/25.2 | `name = value;` gives `--name: value` | BUILT | css-syntax.scrml header (line 16) and reader. Probe p25a-cssvar prints `.card { --card-border: #e2e8f0; color: red; }`. Test: slice-m4/css-s469.test.js:133. | — | (P4) |
+| §25.3 | Use-site form | N/A | RETIRED S469 (ruling "#{} CSS on the bootstrap" item 4) | — | (P4) |
+| §25.4 | Hyphenated names | BUILT | p25a (`card-border`) | — | (P4) |
+| §25.5 | Scoping | N/A | "compiler does not alter" | — | (P4) |
+| §25.6 | Constructor-scoped `@scope` donut; flat block gives style=; program-level global | BUILT | css.scrml `.Scope` (466). css-s469.test.js:70, 82, 113, 121, 288, 306. | — | (P4) |
+| §25.7 | `<theme>` tokens lower to custom properties | PARTIAL | the `@cell` gives `var(--scrml-cell)` bridge: BUILT (css-s469.test.js:155, 320). `<theme>` is refused by name (parse.scrml:7277; slice-m4/theme.test.js). | — | (P4) Nominal (§65). |
+
+## §26 — Tailwind Utility Classes
+
+| § | title | status | evidence | gap ids | note |
+|---|---|---|---|---|---|
+| §26 | Tailwind utility classes | DEFERRED-RULED | user-voice S469 "Owner direction — styling priority: native over Tailwind on the bootstrap": *"I don't want to spend alot of resource on it … I would prefer the native styling system be priority"* | g-boot-tailwind-classes-pass-through-unstyled-s473 | (P4) The deferral is silent in behavior. See Questionable #1. |
+| §26.1/26.2 | Integration, emit only used utilities | DEFERRED-RULED | no Tailwind table in the bootstrap. `class="p-4 md:hover:bg-blue-500"` passes through with zero CSS (p26a-tailwind). | g-boot-tailwind-classes-pass-through-unstyled-s473 | (P4) |
+| §26.3 | Variant prefixes, W-TAILWIND-001 | DEFERRED-RULED | `weird:p-4` gets no W-TAILWIND-001 (p26a) | g-boot-tailwind-classes-pass-through-unstyled-s473 | (P4) |
+| §26.4 | Arbitrary values, E-TAILWIND-001 | DEFERRED-RULED | `p-[;}]` compiles with no E-TAILWIND-001 (p26b-tw-arbitrary) | g-boot-tailwind-classes-pass-through-unstyled-s473 | (P4) No injection: no CSS is generated, and the class value is attribute-escaped. |
+| §26.5 | Open items, W-TAILWIND-UNRECOGNIZED-CLASS, dynamic fragments | DEFERRED-RULED | `notaclass` raises no lint (p26a) | g-boot-tailwind-classes-pass-through-unstyled-s473 | (P4) |
+| §26.6 | Typography plugin | DEFERRED-RULED | — | g-boot-tailwind-classes-pass-through-unstyled-s473 | (P4) |
+| §26.7 | Composing utilities | DEFERRED-RULED | — | g-boot-tailwind-classes-pass-through-unstyled-s473 | (P4) |
+| §26.8 | `@apply` | REFUSED-LOUD | css-syntax.scrml:971 / 1059: "`@apply` (§26.8) is not in the bootstrap" E-BOOTSTRAP-UNSUPPORTED | g-boot-tailwind-classes-pass-through-unstyled-s473 | (P4) |
+| §26.9 | Fixed `@layer` order (Nominal §65.8) | PARTIAL | the bootstrap prints `@layer reset, global;` (two layers, all probes) | g-boot-tailwind-classes-pass-through-unstyled-s473 | (P4) Nominal. The full 6-layer order is not emitted. Owned by §65 (other part). |
+
+## §27 — Comment Syntax
+
+| § | title | status | evidence | gap ids | note |
+|---|---|---|---|---|---|
+| §27 | Comment syntax | BUILT |  | — | (P4) |
+| §27.1 | Universal `//` (free-text line-start rule) | BUILT | p27a-comments: `http://x.y` stays text, `//` comments are dropped in logic, CSS and markup. Tests: slice-m4/comment-escapes.test.js R1, css-s469.test.js:371. | — | (P4) `//` inside `?{}` SQL is UNVERIFIED. |
+| §27.2 | Per-context native comments | BUILT | `<!-- -->` dropped, `/* */` in logic and CSS (p27a). SQL `--` / `/* */` pass through, and sql.scrml `scanRun` fails the analysis closed on any comment (sql.scrml:122). | — | (P4) |
+
+## §28 — Compiler Settings
+
+| § | title | status | evidence | gap ids | note |
+|---|---|---|---|---|---|
+| §28 | Compiler settings | N/A | "configuration file (format TBD)". The bootstrap has no settings surface, and neither does a defined format. | — | (P4) The `lint.*` suppressions have no fire sites to suppress in the bootstrap. |
+| §28.1 | `html-content-model` | SILENT-ABSENT | no setting and no content-model check (see §24.2) | g-boot-html-content-model-unchecked-s473 | (P4) Rides on the §24.2 hole. impl#1 also has none. |
+
+## §29 — Vanilla File Interop
+
+| § | title | status | evidence | gap ids | note |
+|---|---|---|---|---|---|
+| §29 | Vanilla file interop | DEFERRED-RULED | SPEC: "NOMINAL … Disposition: defer (S131 Q-W3-4)" | — | (P4) |
+
+## §30 — Compile-Time Eval — `bun.eval()`
+
+| § | title | status | evidence | gap ids | note |
+|---|---|---|---|---|---|
+| §30 / §30.1 | `bun.eval()` compiler-internal | N/A | compiler-internal. "Generated output SHALL NOT contain bun.eval()" holds: user `bun.eval(...)` gives E-LOGIC-EXECUTABLE-SINK (p30a-bun-eval). | — | (P4) |
+
+## §31 — Dependency Graph
+
+| § | title | status | evidence | gap ids | note |
+|---|---|---|---|---|---|
+| §31 | Dependency graph | PARTIAL |  | — | (P4) |
+| §31.1–31.3 | Purpose / construction / route analysis | N/A | implementation architecture. The bootstrap uses NodeId side-tables (analyze.scrml header) instead of one DG. The observable obligations (reactivity, placement) are owned by §6/§12. | — | (P4) |
+| §31.4 | Validator predicate-arg deps, E-VALIDATOR-CIRCULAR-DEP | REFUSED-LOUD | `eq(@pw)` gives E-BOOTSTRAP-UNSUPPORTED "the bootstrap's validity surface does not evaluate this validator yet" (analyze.scrml ~3441–3447; p31c-validator-cellarg) | — | (P4) |
+| §31.5 | Derived-state deps, E-DERIVED-CIRCULAR-DEP, E-DERIVED-ENGINE-CIRCULAR | PARTIAL | derived cells plus cycle detection BUILT: analyze.scrml derivedCycles (~5183–5230), probe p31a-derived-cycle, test slice-m2/typer-s462.test.js. A derived engine `<engine derived=>` is refused by name (p31d-derived-engine). | — | (P4) E-DERIVED-ENGINE-CIRCULAR is unreachable because `<engine>` is retired (§66.13.3). |
+
+## §32 — The `~` Keyword
+
+| § | title | status | evidence | gap ids | note |
+|---|---|---|---|---|---|
+| §32 | `~` pipeline accumulator | REFUSED-LOUD | `~` is not a token in the expression grammar: E-PARSE-EXPR "expected an expression, found `~`" (p32a-tilde) | g-bootstrap-unimplemented-construct-reported-as-generic-code | (P4) Loud, but a generic parse code, not a named refusal. Unbound expression statements (`g(1); g(2);`, p32c) compile without E-TILDE-002. That matches the §32.6 elision reading ("~ never referenced") and impl#1. |
+| §32.1–32.7 | init / lin / boundary / E-TILDE-001/002 / lift / examples | REFUSED-LOUD | covered by the §32 parse refusal | g-bootstrap-unimplemented-construct-reported-as-generic-code | (P4) No E-TILDE-* in the bootstrap. Moot while `~` cannot be written. |
+
+## §33 — The `pure` Keyword
+
+| § | title | status | evidence | gap ids | note |
+|---|---|---|---|---|---|
+| §33 | `pure` keyword (DEPRECATED) | REFUSED-LOUD | `pure function` at program level gives E-PARSE-ITEM "unexpected text at program level" (p33a-pure). In `${}` it gives E-PARSE-ITEM "found `pure`" (p33c-pure-in-logic). In a `<host>` binding it gets a named message (parse.scrml:6753). | g-bootstrap-unimplemented-construct-reported-as-generic-code | (P4) W-PURE-DEPRECATED is not emitted; a parse rejection replaces it. Adopters use `fn` (§48, other part). |
+| §33.1–33.6 | overview / declaration / constraints / codes / normative / relation to fn | REFUSED-LOUD | covered. The purity contract is enforced via `fn` (§48, out of range). | g-bootstrap-unimplemented-construct-reported-as-generic-code | (P4) |
+
+## §34 — Error Codes
+
+| § | title | status | evidence | gap ids | note |
+|---|---|---|---|---|---|
+| §34 (preamble, Severity S451) | Error is fatal, no runnable artifact | BUILT | `severity.scrml` (generated from §34 by `scripts/gen-bootstrap-severity.ts`, checked by `severity.test.js`); `ast.scrml newDiag` reads `severityOf`; scrml-boot prints "✗ N errors — nothing written" and exits 1 | — | (P4) |
+| §34.0 | Row well-formedness | N/A | editorial rule over the catalog (the SPEC itself says "not a language rule") | — | (P4) see Q3: 36 bootstrap codes have no row |
+| §34.0 (impl#1 divergences table) | impl#1 behaviour, not language | N/A | describes impl#1; the language rules live in App. D / §66.12.8 (other parts) | — | (P4) |
+| §34.1 | Native-parser parse diagnostics (E-EXPR-*, E-STMT-*, I-NATIVE-*) | N/A | SPEC: "informative for other implementations: no other implementation is required to emit these codes" | — | (P4) the bootstrap emits 3/54 E-STMT (e.g. E-STMT-MISSING-SEMICOLON, E-STMT-NO-EFFECT) under its own rules |
+| §34.2 | Bootstrap parse diagnostics (E-PARSE-*) | BUILT | all 32 rows are exactly the `"E-PARSE-…"` literals in `compiler/self-host-v2/*.scrml` (comm diff = empty, plus E-PARSE-001 from the main catalog) | — | (P4) |
+| §34 family table | (see §1a) | PARTIAL | §1a below | — | (P4) |
+
+## §35 — Linear Types — `lin`
+
+| § | title | status | evidence | gap ids | note |
+|---|---|---|---|---|---|
+| §35 | Linear types `lin` | BUILT | `analyze.scrml linPass` (~l.27690–28260); `slice-m4/lin-s471.test.js` (codes + runtime); gap `g-bootstrap-lin-not-implemented-s469` resolved | — | (P4) conformance `linear/*` shows 0 PASS (13 UNSUPPORTED, 2 FAIL) because every case uses logic-block-level `lin`/`let` (see Q1) |
+| §35.1 | Overview | N/A | prose | — | (P4) |
+| §35.2 | Declaration syntax | PARTIAL | decl + immutability: lin-s471 "the binding is immutable" test. The S471 type annotation `lin t: T = …` is refused: probe `lin-annot.scrml` → E-BOOTSTRAP-UNSUPPORTED (`parse.scrml` ~l.3451) | — | (P4) SPEC marks the annotation "Nominal … the bootstrap refuses it until built" = a spec-recorded deferral. The refusal message is stale (Q2) |
+| §35.2.1 | Linear function parameters | BUILT | `linPass` seeds `p.lin` params; lin-s471 tests l.145, l.153 (E-LIN-001/2/3, loop, JS same as without `lin`) | — | (P4) |
+| §35.2.2 | Cross-`${}` block lin | REFUSED-LOUD | probes `lin-crossblock.scrml`, `lin-crossblock-twice.scrml` → E-PARSE-ITEM "found `lin` (other statements at logic-block level are not in the bootstrap)" | g-boot-lin-logic-block-level-refused-s473 | (P4) NO GAP names this sub-feature (Q1) |
+| §35.3 | Consumption events | BUILT | lin-s471 l.55, l.118 (match subject), l.162 (closure); probes `lin-field.scrml` (clean) and `lin-field2.scrml` (`b.v = t; return t;` → E-LIN-002) prove the field-assign rule | — | (P4) |
+| §35.4.1–35.4.3 | Sequential / if-else / match | BUILT | lin-s471 l.86–118, l.181 (non-exhaustive → E-TYPE-020 only, linear pass deferred) | — | (P4) |
+| §35.4.4 | Loops + per-iteration carve-out | BUILT | lin-s471 l.122–132 | g-boot-linfor-extra-lin-001-s471 | (P4) open gap `g-boot-linfor-extra-lin-001-s471` (LOW: a spurious extra E-LIN-001) |
+| §35.4.5 | Exit paths / closure bodies (S471) | BUILT | lin-s471 l.99, l.175 (`?` exit); probe `lin-sql-exit.scrml` → E-LIN-001 "not consumed on the path that leaves through this `?{}`" | — | (P4) |
+| §35.5 | Error conditions | PARTIAL | E-LIN-001/002/003/005 emitted (analyze.scrml l.27832–28106). E-LIN-005 misses loop binders, lambda params and arm binders: `g-boot-lin-005-unchecked-on-binders-s471` (LOW). E-LIN-006 is never emitted, but it cannot be reached: `<request>`/`<poll>` are refused (`structuralOwner`, analyze.scrml ~l.15883) | g-boot-lin-005-unchecked-on-binders-s471 | (P4) "reported at Stage 6" is impl#1 pipeline text (N/A) |
+| §35.6 | Closures | BUILT | lin-s471 l.162, l.170 | — | (P4) only expression-bodied lambdas exist in the bootstrap (braced arrows are refused, parse.scrml l.1865) |
+| §35.7 | Server/client boundary | BUILT | W-LIN-001 at analyze.scrml l.28252; lin-s471 l.188 | — | (P4) |
+| §35.8 | Interaction with `~` | REFUSED-LOUD | probe `tilde.scrml` → E-PARSE-EXPR "found `~`"; no E-TILDE-* in the bootstrap | — | (P4) the refusal is a generic parse error, not a named one (§32 belongs to another sub-range) |
+| §35.9 | Worked examples | N/A | examples. All use logic-block-level `lin`, which is refused as in §35.2.2 | — | (P4) |
+
+## §36 — Input State Types
+
+| § | title | status | evidence | gap ids | note |
+|---|---|---|---|---|---|
+| §36 | Input state types | REFUSED-LOUD | `analyze.scrml structuralOwner` maps keyboard/mouse/gamepad → "§36 input state" → E-BOOTSTRAP-UNSUPPORTED (l.15641); probes `input-keyboard.scrml`, `input-keyboard-noid.scrml`; `slice-m4/failclosed.test.js` l.26 | — | (P4) |
+| §36.1–§36.4 | Overview / `<keyboard>` / `<mouse>` / `<gamepad>` | REFUSED-LOUD | as above. `<#id>` reads: probe `input-ref.scrml` → E-PARSE-EXPR | — | (P4) |
+| §36.5 | Cleanup guarantee | REFUSED-LOUD | the element is refused, so no output exists | — | (P4) |
+| §36.6 | animationFrame interaction / W-INPUT-STATE-MARKUP-NONREACTIVE | REFUSED-LOUD | the element is refused | — | (P4) |
+| §36.7 | E-INPUT-001..005 | REFUSED-LOUD | 0/5 emitted; the whole feature is refused first | — | (P4) |
+
+## §37 — Server-Sent Events
+
+| § | title | status | evidence | gap ids | note |
+|---|---|---|---|---|---|
+| §37 | SSE `server function*` | REFUSED-LOUD | probe `sse-gen.scrml` → 6 errors: E-STMT-MISSING-SEMICOLON after `yield`, E-BOOTSTRAP-UNSUPPORTED "an unannotated parameter `countdown`", E-SCOPE-001 "`yield` is not declared". The function-item parser has no `*` (only `dbItemHeadAt`, parse.scrml l.7040, peeks it) | g-boot-generators-and-sse-unbuilt-s473 | (P4) fails closed, but nothing names the construct. Suggested gap below (LOW) |
+| §37.1–§37.6 | Overview / syntax / route / event shape / client binding / cleanup | REFUSED-LOUD | as §37 | g-boot-generators-and-sse-unbuilt-s473 | (P4) |
+| §37.7 | E-RI-002 exemption | N/A | no generator body can exist in the bootstrap | g-boot-generators-and-sse-unbuilt-s473 | (P4) E-RI-002 itself is emitted (1/2 E-RI) |
+| §37.8 | Security invariants | N/A | nothing is emitted for generators | g-boot-generators-and-sse-unbuilt-s473 | (P4) |
+| §37.9 | E-SSE-001 / W-SSE-001 | REFUSED-LOUD | probe `sse-yield.scrml` (`yield` in a plain fn) → E-SCOPE-001 "`yield` is not declared", not E-SSE-001 | g-s34-rows-e-type-021-e-error-007-e-sse-001-have-no-emitter, g-boot-generators-and-sse-unbuilt-s473 | (P4) the §34 row E-SSE-001 also has no impl#1 emitter (`g-s34-rows-e-type-021-e-error-007-e-sse-001-have-no-emitter`) |
+| §37.10–§37.11 | Normative statements / examples | REFUSED-LOUD | as §37 | g-boot-generators-and-sse-unbuilt-s473 | (P4) |
+
+## §38 — WebSocket Channels
+
+| § | title | status | evidence | gap ids | note |
+|---|---|---|---|---|---|
+| §38 | WebSocket channels | REFUSED-LOUD | `structuralOwner` "channel" → "§38" → E-BOOTSTRAP-UNSUPPORTED; probes `channel.scrml`, `ch-nested.scrml`; `failclosed.test.js` | — | (P4) the parser's `o61Body` notes the refusal by design |
+| §38.1–§38.2 | Placement / syntax | PARTIAL | E-CHANNEL-OUTSIDE-PROGRAM is built (`analyze.scrml outsideProgramDiag` l.1662; `slice-m4/program-shape.test.js`; probe `channel-top.scrml`). Everything else in a channel is refused | — | (P4) E-CHANNEL-INSIDE-PAGE / E-CHANNEL-SHARED-MODIFIER cannot be reached (`<page>` and `<channel>` are refused) |
+| §38.3 | Attributes | REFUSED-LOUD | the element is refused | — | (P4) |
+| §38.3.1 | `<program channel-reconnect=>` | REFUSED-LOUD | probe `ch-reconnect.scrml` → E-BOOTSTRAP-UNSUPPORTED "it reads no `<program>` attribute, and never ignores one it does not implement" (analyze.scrml l.1820) | — | (P4) |
+| §38.4 / §38.4.1 | Reactive sync / migration | REFUSED-LOUD | the element is refused; the migration note is history | g-bootstrap-let-decl-in-db-channel-body-refused-s469 | (P4) `g-bootstrap-let-decl-in-db-channel-body-refused-s469` (narrowed) covers the channel-body half |
+| §38.5 | auth= | REFUSED-LOUD | the element is refused | — | (P4) |
+| §38.6 | broadcast()/disconnect() | REFUSED-LOUD | probe `broadcast.scrml` → E-SCOPE-001 "`broadcast` is not declared" (not E-CHANNEL-004) | — | (P4) loud, but the code differs from the SPEC's |
+| §38.6.1 / §38.6.2 | onserver:message binding / topic=not | REFUSED-LOUD | the element is refused. `onclient:`/`onserver:` on a plain element parses as a typed-attr declaration and fails (probe `ch-onclient.scrml`, 7 errors) | g-bootstrap-no-channel-handler-checks-s462 | (P4) `g-bootstrap-no-channel-handler-checks-s462` (LOW, open) records no E-CHANNEL-005/006 |
+| §38.7 / §38.8 | Client / server JS output | N/A | nothing is emitted | — | (P4) |
+| §38.9 | Error codes | PARTIAL | 1/21 E-CHANNEL-* (OUTSIDE-PROGRAM); the rest cannot be reached | — | (P4) |
+| §38.10 | onclient:* hooks | REFUSED-LOUD | as §38.6.1 | — | (P4) |
+| §38.11 | Literal name/topic | REFUSED-LOUD | the element is refused | — | (P4) |
+| §38.12 | Cross-file inline expansion / PURE-CHANNEL-FILE | REFUSED-LOUD | probes `ch-pure.scrml`, `ch-import.scrml` → E-PARSE-EXPORT "`export` applies to a declaration, not to markup", plus E-BOOTSTRAP-UNSUPPORTED "`<channel>` at a file's top level … the SPEC names no rule" | — | (P4) message is inaccurate (Q4) |
+| §38.13 | `<channel watches=>` / `<onchange>` | REFUSED-LOUD | "channel" and "onchange" (→ "§38.13") are both in `structuralOwner` | — | (P4) |
+
+## §39 — Schema and Migrations
+
+| § | title | status | evidence | gap ids | note |
+|---|---|---|---|---|---|
+| §39 | `<schema>` (whole) | REFUSED-LOUD | `analyze.scrml:structuralOwner` "schema" → `resolveElem` E-BOOTSTRAP-UNSUPPORTED; probe `D/schema.scrml`, `D/schema-nodb.scrml` | g-boot-schema-unbuilt-s473 | (P4) NO GAP and no ruling defer `<schema>` for the bootstrap; the refusal itself is the only record |
+| §39.1 | Overview | N/A | prose | g-boot-schema-unbuilt-s473 | (P4) |
+| §39.2 | Syntax (DSL + raw CREATE TABLE heads, E-SCHEMA-012..015) | REFUSED-LOUD | as §39 | g-boot-schema-unbuilt-s473 | (P4) none of E-SCHEMA-0xx exists in the bootstrap; moot while refused |
+| §39.3 | Block attributes (E-SCHEMA-001/2/3) | REFUSED-LOUD | as §39 | g-boot-schema-unbuilt-s473 | (P4) |
+| §39.4 | Column types (E-SCHEMA-004, boolean coercion) | REFUSED-LOUD | as §39 | g-boot-schema-unbuilt-s473 | (P4) |
+| §39.5 (38.5.1–39.5.9) | Column constraints, shared-core lowering | REFUSED-LOUD | as §39 | g-boot-schema-unbuilt-s473 | (P4) |
+| §39.6 | Migration diff algorithm | REFUSED-LOUD | as §39 | g-boot-schema-unbuilt-s473 | (P4) |
+| §39.7 | Compile-time schema validation | REFUSED-LOUD | as §39 | g-boot-schema-unbuilt-s473 | (P4) |
+| §39.8 | `scrml migrate` CLI + `.migration.sql/.json` artifacts | REFUSED-LOUD | as §39 | g-boot-schema-unbuilt-s473 | (P4) the CLI is tooling outside the compiler |
+| §39.9 | Interaction with `<db>` / `?{}` | REFUSED-LOUD | as §39 | g-boot-schema-unbuilt-s473 | (P4) |
+| §39.10 | Interaction with `protect=` | REFUSED-LOUD | `resolveElem` `<db protect=…>` refused (analyze ~15671) | g-boot-schema-unbuilt-s473 | (P4) |
+| §39.11 | Type system integration (+39.11.1) | REFUSED-LOUD | as §39 | g-boot-schema-unbuilt-s473 | (P4) |
+| §39.12.0 | v0.3 db-anchor `<program db=>` in non-route files | REFUSED-LOUD | `analyze.scrml` ~1558 "a `<program>` outside the entry file" | g-boot-schema-unbuilt-s473 | (P4) |
+| §39.12 | Error codes | REFUSED-LOUD | as §39 | g-boot-schema-unbuilt-s473 | (P4) |
+
+## §40 — Middleware and Request Pipeline
+
+| § | title | status | evidence | gap ids | note |
+|---|---|---|---|---|---|
+| §40.1 | Overview (two-tier pipeline) | N/A | prose | — | (P4) |
+| §40.1.1 | Static role classification | REFUSED-LOUD | `<auth>` / `<page auth>` / `<channel auth>` refused (structuralOwner); `<program auth=>` refused (`topAuthDiag`) | — | (P4) W-AUTH-RUNTIME-FALLBACK is absent, which is moot while those gates are refused |
+| §40.2 | Compiler-auto middleware attributes | PARTIAL | cors/log/headers/csrf/idempotency-store refused by name (`topProgramAttrDiags`; probe `D/cors.scrml` → 5× E-BOOTSTRAP-UNSUPPORTED); ratelimit: E-MW-002 on a malformed value, a valid one refused (`ratelimitDiag`); auth= refused (`topAuthDiag`). BUILT: the baseline double-submit CSRF on state-mutating server-fn routes … | g-boot-middleware-attrs-unbuilt-s473 | (P4) Fail-closed for everything it does not build. The WebSocket-Origin and compose-route bullets are moot: channels and auth are refused |
+| §40.2 (39.2.1–39.2.6) | cors / log / csrf / ratelimit / headers / idempotency-store | REFUSED-LOUD | as above | g-boot-middleware-attrs-unbuilt-s473 | (P4) W-ATTR-002 is absent, moot because csrf= is refused |
+| §40.3 | `handle()` escape hatch (40.3.1–40.3.5) | SILENT-ACCEPT | canonical `handle(request: Request, resolve: (req: Request) => Response) -> Response` → E-SCOPE-001 on `Request`/`Response` (`D/handle-exact.scrml`); `function handle(request: string, resolve: string) -> string { return request; }` compiles clean (`D/handle.scrml`), as an ordinary client fn, and `server function` … | g-boot-handle-reserved-name-unchecked-s473 | (P4) The SPEC makes `handle` a reserved name, server-escalated by its name and woven into the pipeline. E-MW-004 (non-Response return), E-MW-003, E-MW-005 and E-MW-006 do not exist; duplicates get E-SCOPE-010 instead (`D/handle-two.scrml`). The canonical form is unwritable … |
+| §40.4 | handle() + auto middleware | REFUSED-LOUD | follows §40.2/§40.3 | — | (P4) |
+| §40.5 | Progressive disclosure | N/A | prose | — | (P4) |
+| §40.6 | Error codes (E-MW-002..008) | PARTIAL | E-MW-002 BUILT (`ratelimitDiag`, `program-shape.test.js`); E-MW-003..006 absent (§40.3); E-MW-007/008 are multi-module or session, moot (the bootstrap is single-entry, auth refused) | — | (P4) |
+| §40.7 | Documentary attributes | BUILT | `topProgramAttrDiags` (isDocumentaryAttr read) → lower `headOf` → print; probe `D/doc-attrs.scrml` (order title, description, application-version, author, license; HTML-escaped); author `<title>` suppresses `title=` (`D/title-own.scrml`); W-PROGRAM-TITLE-NESTED in analyze; test `slice-m4/program-attrs-s473.test.js` | g-bootstrap-title-elem-in-renders-not-seen-s473 | (P4) Open: `g-bootstrap-title-elem-in-renders-not-seen-s473` (LOW, a `<title>` inside renders is not seen) |
+| §40.8 | One program per application, code-default body | PARTIAL | E-PROGRAM-002 same-file BUILT (`D/two-programs.scrml`; `program-shape.test.js`); non-entry `<program>` refused (analyze ~1558); E-UNQUOTED-DISPLAY-TEXT, E-STMT-NO-EFFECT BUILT (parse.scrml; acceptance/dpa045/terminators tests); `<page>` refused (`D/page.scrml`); `<program spa>` → W-ATTR-001 (`D/spa.scrml`, acceptable … | g-boot-program-spa-inferred-lint-absent-s473 | (P4) See SILENT #4 |
+| §40.8.1 | SPA inference + W-PROGRAM-SPA-INFERRED | SILENT-ABSENT | zero hits for W-PROGRAM-SPA-INFERRED in compiler/self-host-v2; `D/doc-attrs.scrml` compiles with no info lint | g-boot-program-spa-inferred-lint-absent-s473 | (P4) info-level SHALL-emit. See SILENT #3 |
+| §40.8.2 | Multi-file shell composition | REFUSED-LOUD | `<outlet>` and `<page>` refused (structuralOwner), non-entry `<program>` refused | — | (P4) |
+| §40.9 | Closure analysis (40.9.0–40.9.11) | N/A | the SPEC frames it as "MAY compute" and staged across later waves; the bootstrap emits one client artifact per program | — | (P4) W-AUTH-CONTENT-NOT-GATED and W-AUTH-RUNTIME-FALLBACK attach to `<auth>`, which is refused |
+
+## §41 — Import System — `use`/`import`
+
+| § | title | status | evidence | gap ids | note |
+|---|---|---|---|---|---|
+| §41.1 | Overview | N/A | prose | — | (P4) |
+| §41.2 | `use` capability imports (41.2.1–41.2.3) | REFUSED-LOUD | `use scrml:ui` at file top or body top → E-PARSE-ITEM "unexpected text at program level" (`D/use-decl.scrml`, `D/use-in-program.scrml`) | g-bootstrap-unimplemented-construct-reported-as-generic-code | (P4) No E-USE-00x or W-USE-001 in the bootstrap. The refusal is a generic parse error, not a named one. NO GAP |
+| §41.3 | `import` value imports | BUILT | `parse.scrml:parseImport`; E-IMPORT-003 for a nested import (`D/imp-infn.scrml`); body-top bare `import` accepted, correct under the S441 code-default body (`D/imp-bare.scrml`); E-IMPORT-004/006 (`analyze.scrml` checkImports / importRefusal ~29240); tests `slice-m4/stdlib-s471.test.js`, `math-port-s472.test.js` | — | (P4) |
+| §41.4 | Protocol prefixes | PARTIAL | bare npm → E-IMPORT-005 (`D/imp-lodash.scrml`); `vendor:`/`bun:`/`node:` → E-BOOTSTRAP-UNSUPPORTED (`D/imp-node.scrml`, `D/imp-vendor.scrml`); a JS-file relative import refused | — | (P4) E-IMPORT-010 is NAMED/RESERVED, not implemented anywhere (N/A) |
+| §41.5 | Resolution hierarchy | SILENT-ACCEPT | a vendored `vendor/scrml/math/index.scrml` (floor returns 999) is ignored and the bundled stdlib is compiled in (`D/vendorproj/app.scrml`, out uses `_scrml/math/host.js`). A missing `scrml:nope` gives E-BOOTSTRAP-UNSUPPORTED, not E-IMPORT-006 (`g-boot-import-codes-and-alias-s471`, LOW) | g-boot-import-codes-and-alias-s471, g-boot-vendor-stdlib-override-ignored-s473 | (P4) "The user vendor directory SHALL always take precedence." impl#1 also has no `vendor/scrml` lookup (grep compiler/src). See SILENT #1. `--verbose` logging is N/A (tooling) |
+| §41.6 | Vendoring model | SILENT-ACCEPT | same probe; "no download" is trivially met | g-boot-vendor-stdlib-override-ignored-s473 | (P4) |
+| §41.7 | Name resolution / conflicts | PARTIAL | W-IMPORT-001 BUILT (`analyze.scrml` ~1006–1033; `D/imp-dup.scrml`); import:host collisions E-SCOPE-010 (~29190); E-USE-006 / W-USE-001 moot (`use` refused) | — | (P4) |
+| §41.8 | `use` in worker programs | REFUSED-LOUD | nested `<program>` refused (analyze ~2111) | g-boot-nested-program-workers-unbuilt-s473 | (P4) |
+| §41.9 | Tree-shaking of `use` | N/A | `use` is refused. For `import`, the open gap `g-boot-host-wrappers-not-shaken-from-client-s473` (LOW) applies: every host wrapper of an imported module is printed (`D/out-imp-math/program.client.js`) | g-boot-host-wrappers-not-shaken-from-client-s473 | (P4) |
+| §41.10 | Interaction with §21 | N/A | cross-reference prose | — | (P4) |
+| §41.11 | Error codes | PARTIAL | E-IMPORT-005/006, W-IMPORT-001 BUILT; E-USE-* absent (`use` refused generically) | — | (P4) |
+| §41.12 | `scrml:data` registerMessages | REFUSED-LOUD | `scrml:data` does not compile on the bootstrap → import refused by name (`D/imp-data-registerMessages.scrml`); gaps `g-boot-stdlib-none-compiles-s471` (HIGH, narrowed), `g-boot-stdlib-intrinsic-fns-s473` (MED) | g-boot-stdlib-none-compiles-s471, g-boot-stdlib-intrinsic-fns-s473 | (P4) |
+| §41.13 | parseVariant | REFUSED-LOUD | `D/imp-data-parseVariant.scrml`; same gaps | — | (P4) |
+| §41.14 | formFor | REFUSED-LOUD | import refused (`D/imp-data-formFor.scrml`); `<formFor>` also a structural tag | — | (P4) |
+| §41.15 | schemaFor | REFUSED-LOUD | `D/imp-data-schemaFor.scrml` | — | (P4) |
+| §41.16 | tableFor | REFUSED-LOUD | `D/imp-data-tableFor.scrml`; `<tableFor>` structural | — | (P4) |
+| §41.17 | `scrml:compiler` KNOWN-DEFERRED | REFUSED-LOUD | `analyze.scrml:importRefusal` names §41.17 (`D/compiler-imp.scrml`) | — | (P4) The SPEC wants a non-fatal W-STDLIB-COMPILER-DEFERRED (an impl#1 bundler rule); the bootstrap is stricter (an error). Acceptable, but it is a divergence |
+| §41.18 | `scrml:math` | BUILT | `stdlib/math/index.scrml` + `stdlib/math/host.js` via import:host; `D/imp-math.scrml` compiles and runs `floor`; `round(x)` → E-CALL-ARITY (`D/round-arity.scrml`); test `slice-m4/math-port-s472.test.js` | — | (P4) E-INT-CONVERSION-RT trap: UNVERIFIED by probe (in the host module) |
+| §41.19 | `scrml:time.now()` | REFUSED-LOUD | `scrml:time` does not compile (234 errors) → import refused (`D/imp-time-now.scrml`); `g-boot-stdlib-none-compiles-s471` | g-boot-stdlib-none-compiles-s471 | (P4) |
+| §41.20 | `scrml:random` | PARTIAL | compiles and runs (`D/imp-random.scrml`; `slice-m4/stdlib-boot-clean-s473.test.js`). In a `fn` body, `random()` gets **E-FN-003** (a `fn` calls a `function`), not the SPEC's E-FN-004 (`D/random-fn.scrml`) | — | (P4) Loud; different code. The binding-aware E-FN-004 is not implemented as such |
+| §41.21 | `scrml:time` debounce/throttle | REFUSED-LOUD | `D/imp-time-debounce.scrml`; E-TIMER-STRUCT-MISUSE absent (moot) | — | (P4) |
+| §41.22 | `scrml:format` | REFUSED-LOUD | 141 errors on the bootstrap → refused (`D/imp-format-formatNumber.scrml`) | — | (P4) The SPEC itself says the module is Nominal / spec-ahead |
+
+## §42 — `not` — Unified Absence Value
+
+| § | title | status | evidence | gap ids | note |
+|---|---|---|---|---|---|
+| §42.1 | `not` overview; no null/undefined | SILENT-ABSENT | `null`/`undefined` → **E-PARSE-NO-NULL** (`parse.scrml`; §34.2 row exists), in value and attribute position (`D/not-null.scrml`, `D/not-undef.scrml`, `D/not-attrnull.scrml`) | g-boot-absence-lint-and-code-name-s473 | (P4) SPEC §42.6/§42.7 name E-SYNTAX-042 and require W-ABSENCE-IN-SCRML-SOURCE ("Compilers MUST emit"); neither code exists in the bootstrap. The program is rejected anyway, so the missing lint has no observable effect |
+| §42.1.1 | `""`/0/false/[] are defined | BUILT | presence test lowers to `v != null` (`D/out-cond2/program.client.js`) | — | (P4) |
+| §42.2.1 | Assigning absence | BUILT | `T \| not` cells (`D/not-given.scrml`); E-TYPE-041 on a non-optional (`D/not-assign.scrml`) | — | (P4) |
+| §42.2.2 / 42.2.2a | `is not`, `is given`, `is some` (+W-IS-SOME-DEPRECATED) | BUILT | parse.scrml; tests `slice-m2/is-some-s462.test.js`, `templates-s469.test.js` | — | (P4) |
+| §42.2.3 | `given` guard (soft-deprecated) | BUILT | narrows and runs only when present (`D/out-not-given/program.client.js`: `if (v != null)`); W-GIVEN-PRESENCE-DEPRECATED, also on the `=>` form (`D/not-givenarrow.scrml`); E-SYNTAX-044 (`typer-s460.test.js`) | — | (P4) E-SYNTAX-043 `(x) =>` → E-BOOTSTRAP-UNSUPPORTED "arrow with braced body" (`D/not-arrowguard.scrml`). E-SYNTAX-045 rebind → E-BOOTSTRAP-UNSUPPORTED (`D/not-given-rebind.scrml`). Both loud, under other codes |
+| §42.2.4 | Compound operands, evaluated once | BUILT | `g() is given` → `if (g() != null)`, one call (`D/out-compound/program.client.js`) | — | (P4) |
+| §42.2.5 | `is given` vs `req` | N/A | clarification; the §55 validator side is out of range | — | (P4) |
+| §42.3.1 | `T \| not` union, normalization | BUILT | E-TYPE-041 (`typer.test.js`, `typer-s440.test.js`) | — | (P4) the union-normalization idempotence was not separately probed |
+| §42.3.2 | Equality vs `is not` | BUILT | `== not` → E-EQ-002 (`D/not-eqnot.scrml`); `== null` → E-PARSE-NO-NULL | — | (P4) the SPEC row says E-TYPE-042 for `== not`; the bootstrap uses the §45 code E-EQ-002 (the two SPEC sections disagree) |
+| §42.3.3 | `not` in return types (E-TYPE-043) | PARTIAL | fall-off / bare return → E-TYPE-043 BUILT (`acceptance.test.js`, `exitless-loop-s473.test.js`); `return not;` in `-> string` → **E-TYPE-041**, not E-TYPE-043 (`D/not-ret.scrml`) | — | (P4) loud; code mismatch |
+| §42.3.4 | Reactive state no-change no-render | UNVERIFIED | not probed | — | (P4) |
+| §42.3.5 | Member access through `T \| not` (E-TYPE-046) | REFUSED-LOUD | `@u.name` on `U \| not` → E-BOOTSTRAP-UNSUPPORTED "member access … not a struct" (`D/not-member.scrml`) | — | (P4) stricter than the SPEC (narrowed access is UNVERIFIED) |
+| §42.3.6 | Optional chaining `?.` | REFUSED-LOUD | `@u?.name` → E-PARSE-TRAILING (`D/not-optchain.scrml`) | g-bootstrap-unimplemented-construct-reported-as-generic-code | (P4) NO GAP found for bootstrap `?.` |
+| §42.4 | Conditions: presence test / E-COND-NOT-BOOLEAN | BUILT | `analyze.scrml` typer; `if (@n)` on int → E-COND-NOT-BOOLEAN (`D/cond.scrml`); tests `typer-s460.test.js`, `typer-s462.test.js`, `typer-gap.test.js` | — | (P4) |
+| §42.5 | Codegen | BUILT | `!= null` lowering (`D/out-cond2`) | — | (P4) |
+| §42.6 | Error codes | PARTIAL | present: E-TYPE-041/043/044, E-MATCH-012 (`D/not-match.scrml`), E-COND-NOT-BOOLEAN, E-SYNTAX-044, W-IS-SOME-/W-GIVEN-PRESENCE-DEPRECATED. Absent (each case is loud under another code): E-SYNTAX-042 (→ E-PARSE-NO-NULL), E-SYNTAX-043, E-SYNTAX-045, E-TYPE-045 (`not @b` → E-STMT-MISSING-SEMICOLON + E-TYPE-041, … | — | (P4) |
+| §42.7 | Normative statements | PARTIAL | as §42.6; ".get() returns T \| not" BUILT (SQL Row \| not) | — | (P4) |
+| §42.8 | Runtime representation | BUILT | not → `null`; checks `!= null` (covers undefined) | — | (P4) |
+| §42.9 | JS interop boundary | BUILT | `runtime.js:hostResult` maps null/undefined → null (~1213); `^{}`/`_{}` are refused elsewhere | — | (P4) |
+| §42.10 | `not` vs `!` | N/A | disambiguation prose | — | (P4) |
+
+## §43 — Nested `<program>`
+
+| § | title | status | evidence | gap ids | note |
+|---|---|---|---|---|---|
+| §43 | Nested `<program>` (43.1–43.7) | REFUSED-LOUD | `analyze.scrml` ~2111 "a nested `<program>` … is not in the bootstrap" (`D/worker.scrml`); test `program-shape.test.js` "the nested program itself is refused" | g-boot-kind-service-unbuilt-s473, g-boot-kind-tool-emit-unbuilt-s473, g-boot-nested-program-workers-unbuilt-s473 | (P4) E-PROG-001..005 absent (moot). The related `kind=service/tool` gaps `g-boot-kind-service-unbuilt-s473` / `g-boot-kind-tool-emit-unbuilt-s473` cover adjacent ground; NO GAP specifically for §43 workers |
+
+## §44 — `?{}` Multi-Database Adaptation
+
+| § | title | status | evidence | gap ids | note |
+|---|---|---|---|---|---|
+| §44.1 | `?{}` overview | BUILT | `sql.scrml`, `print-server.scrml`, `core.scrml` Db/Driver {Sqlite, Postgres, Mysql} | — | (P4) |
+| §44.2 | Driver resolution | BUILT | dbsPass; E-SQL-004 (`D/sql-noscope.scrml`), E-SQL-005 mongo (`D/sql-mongo.scrml`); tests `server.test.js`, `error-rulings.test.js`, `db-body-s472.test.js` | — | (P4) |
+| §44.3 | Method API (.all/.get/.run; .prepare E-SQL-006) | BUILT | `D/sql-prepare.scrml` → E-SQL-006; `?{}` failable E-ERROR-002 (§19.8.3) | — | (P4) |
+| §44.4 | Async model | BUILT | `rt.query` awaited (print-server header), `server-await-*.test.js` | — | (P4) E-SQL-007 is moot |
+| §44.5 | Bound parameters | BUILT | `print-server.scrml` ~16–19, 109–111 "every value is a bound parameter"; `server.test.js` | — | (P4) |
+| §44.6 | Transactions | REFUSED-LOUD | `transaction { … }` → E-BOOTSTRAP-UNSUPPORTED (parse.scrml ~2440, "unit U1e"); the SPEC itself defers (SPEC-ISSUE-018) | — | (P4) |
+| §44.7 / 44.7.1 | Error codes; module-with-db-context | PARTIAL | E-SQL-004/005/006/008 BUILT; a `?{}` in an imported module → E-BOOTSTRAP-UNSUPPORTED (analyze ~25561); E-SQL-009/010/011 absent (009 moot: modules with `?{}` are refused; 010 moot: transactions="concurrent" is a refused program attribute; 011 moot: transactions refused) | — | (P4) |
+| §44.8 | Bracket-matched `?{` scanner, E-SQL-008 | BUILT | `parse.scrml`; `server.test.js:83`, `templates-s469.test.js` | — | (P4) |
+
+## §45 — Equality Semantics
+
+| § | title | status | evidence | gap ids | note |
+|---|---|---|---|---|---|
+| §45.1–45.2 | `==` structural, comparability | BUILT | `rt.eq` for structs and payload enums (`D/out-eq-struct`, `D/out-eq-enumpay`); E-EQ-003 (`host-block-f3-s473.test.js`) | — | (P4) W-EQ-001 (asIs) is moot: asIs is refused (analyze ~1171). Map equality is out of range (§59) |
+| §45.3 | Cross-type comparison E-EQ-001 | BUILT | `D/eq-cross.scrml`; `templates-s469.test.js` | — | (P4) |
+| §45.4 | Codegen | BUILT | `===` for primitives, `rt.eq` for structural values | — | (P4) |
+| §45.5 | `is` RHS bounded (E-EQ-005) | REFUSED-LOUD | `@n is 0` → E-SCOPE-001 "`is` is not declared" + an E-TYPE-031 cascade (`D/eq-isvalue.scrml`) | g-bootstrap-unimplemented-construct-reported-as-generic-code | (P4) E-EQ-005 absent; loud but misleading |
+| §45.6 | No identity operator | N/A | prose | — | (P4) |
+| §45.7 | Error codes | PARTIAL | E-EQ-001/002/003 BUILT; `===` → E-PARSE-STRICT-EQ (§34.2 row; `parse.test.js`) in place of E-EQ-004; W-EQ-PAYLOAD-VARIANT case → E-BOOTSTRAP-UNSUPPORTED (stricter, `D/eq-payload.scrml`) | — | (P4) |
+| §45.8 | Normative statements | BUILT | as above | — | (P4) |
+| §45.9 | Word-form `or` / `and` | REFUSED-LOUD | `@n > 1 or @n < 0 and @b` → E-SCOPE-001 "`or` is not declared" / "`and`" + cascade (`D/eq-orand.scrml`); parse.scrml:3535 knows the words only as a terminator check | g-bootstrap-unimplemented-construct-reported-as-generic-code | (P4) The language is RULED (user-voice S136 "R24-BUG-1 word-form `or`/`and` ratification (Option i)"). Loud, not silent, but the message is misleading and no gap records it. See Questionable #3 |
+
+## §46 — Worker Lifecycle
+
+| § | title | status | evidence | gap ids | note |
+|---|---|---|---|---|---|
+| §46.1–46.6 | Worker lifecycle (when … from <#name>, restart=) | REFUSED-LOUD | `when message from <#worker>` → E-PARSE-ITEM (`D/worker-when.scrml`); nested `<program>` refused; restart= / max-restarts= / within= are refused nested-program attributes (analyze ~2131) | g-boot-nested-program-workers-unbuilt-s473 | (P4) §46.5 Open question is N/A |
+
+## §47 — Output Name Encoding
+
+| § | title | status | evidence | gap ids | note |
+|---|---|---|---|---|---|
+| §47 (preamble) | "All JavaScript variable names in compiled output SHALL use encoded names"; synthesized names ride `p`/`a`/`t` | SILENT-ABSENT | `compiler/self-host-v2/names.scrml` `mint()` = `sanitize(hint)` + `_N` on collision; probe `p47-names.scrml` → `out-p47/program.client.js` emits `function bump()`, `function double(x)`, `const user = x`, `decl_program`, `rt.declare("program", ["count"])` | g-boot-output-name-encoding-unbuilt-s473 | (P5) **Confirmed.** No FNV, base36, kind marker or canonical string anywhere in `compiler/self-host-v2/` (grep `fnv\|FNV\|base36\|toString(36)` = 0). No gap, no ruling. dpa-051 §3.3 designs the NameSupply with no §47 reference (grep of the bootstrap deep-dives: §47 appears only … |
+| §47.1.1a | encoded-name format `'_' kind hash seq`; E-CG-012 | SILENT-ABSENT | probe `p47-reserved2.scrml`: `const _s7km3f2x00: int = 1` compiles and is emitted verbatim | g-boot-output-name-encoding-unbuilt-s473 | (P5) E-CG-012 is moot while nothing is encoded. It becomes live the day the encoder lands. |
+| §47.1.1b | `_scrml_` / `__scrml_` reserved prefixes — E-NAME-COLLIDES-RESERVED-PREFIX (S439 #7, S440 #9, S457) | SILENT-ACCEPT | probes `p47-reserved.scrml` (`const _scrml_x`), `p47-reserved2.scrml` (`const __scrml_y`): both compile clean and are emitted as written; grep `RESERVED-PREFIX` in self-host-v2 = 0 | g-boot-reserved-prefix-unchecked-s473 | (P5) The SPEC text says *"bootstrap twin owed"*, but no gap exists. The security motive is weaker here: a REFERENCE to an undeclared `_scrml_sql` is E-SCOPE-001, and the bootstrap has no `__scrml_` placeholder strings. The DECLARATION half is plainly accepted. |
+| §47.1.2 | kind markers; E-CG-013 | SILENT-ABSENT | as 47 | g-boot-output-name-encoding-unbuilt-s473 | (P5) |
+| §47.1.3 | FNV-1a-32 → 8 base36 | SILENT-ABSENT | grep = 0 | g-boot-output-name-encoding-unbuilt-s473 | (P5) |
+| §47.1.4 | canonical type strings (alpha-sorted fields, `&Name` recursion) | SILENT-ABSENT | grep `canonical` hits only link order / arm rewrite | g-boot-output-name-encoding-unbuilt-s473 | (P5) dpa-061's persist envelope (`"t":"<§47.1.4 hash>"`) depends on it. Persist is built: `persist` area 5/5 PASS. Whether the persisted envelope carries a type hash was not checked; see Questionable Q6. |
+| §47.1.5 | collision detection, E-CG-010; determinism/injectivity SHALLs | SILENT-ABSENT | — | g-boot-output-name-encoding-unbuilt-s473 | (P5) names.scrml is injective by construction over *its* keys, but over hints, not types. |
+| §47.1.6 | value-canonical map key codec | REFUSED-LOUD | probe `p47-map.scrml` (`<m:[string: int]=[:]/>`) → `E-TYPE-UNKNOWN: unknown type ''` + `E-GRANT-UNKNOWN` (5 errors) | g-bootstrap-unimplemented-construct-reported-as-generic-code | (P5) Maps are not in the bootstrap (`maps` area 13/13 NOT-TWINNED). The refusal is loud but **mis-coded**: it reads `[K: V]` as a tape grant list. Same family as `g-bootstrap-unimplemented-construct-reported-as-generic-code`. |
+| §47.2 (.1–.3) | `reflect()` runtime decode, opt-in bundling, dev-throw / prod-foreign | REFUSED-LOUD | probe `p47-reflect.scrml` → `E-SCOPE-001: 'reflect' is not declared`; `meta` area 65/66 UNSUPPORTED | g-bootstrap-unimplemented-construct-reported-as-generic-code | (P5) Generic code, not a named refusal. Unreachable anyway while `^{}` is refused. |
+| §47.3 | debug-mode `$name` suffix; E-CG-011 (debug+production) | SILENT-ABSENT | no `output.debug` / `output.mode` in scrml-boot or the printer | g-boot-output-name-encoding-unbuilt-s473 | (P5) The bootstrap ALWAYS emits developer names (cell names in `rt.declare`, `/* count */` comments). That is §47.3's debug form, which the SPEC says *"is never appropriate for production"*. Harmless until the bootstrap has a production build. |
+| §47.4 (.1–.3) | seq disambiguator, decode strips seq, E-CG-014 | SILENT-ABSENT | names.scrml uses `base_1`, `base_2`, … | g-boot-output-name-encoding-unbuilt-s473 | (P5) A different scheme, unruled. |
+| §47.5 | scope of application (every binding encoded; exports / CSS / HTML not) + cross-refs (test-bind keying, closure determinism, `chunks.json` … | SILENT-ABSENT | as 47 | g-boot-test-block-s473, g-boot-output-name-encoding-unbuilt-s473 | (P5) Cross-refs: test-bind is unbuilt (`~{` refused, `g-boot-test-block-s473`); the bootstrap has no route splitter, so the `chunks.json` fields are N/A here (§40.9 belongs to another part). |
+| §47.6 | `protect=` × encoding; "no clientJs encoded name contains a protected field" | REFUSED-LOUD | `analyze.scrml:15671`: `<db protect=…>` → E-BOOTSTRAP-UNSUPPORTED *"a confidentiality control is refused, never ignored"* | — | (P5) Vacuous: no protected field can exist, so none can leak. |
+| §47.7 | error-code table | N/A | per code: E-CG-010–014 SILENT-ABSENT (with the encoder); E-CG-015 N/A (one entry per compilation); E-CG-016 N/A (no `SQL` binding is ever emitted: names are minted, and server-runtime reads `globalThis.Bun.SQL`); E-CG-018 N/A (no chunks); E-CG-TILDE-UNRESOLVED N/A (`~` is refused at parse: probe `p47-tilde.scrml` → … | — | (P5) Code index; each code is classified in its own row. Not counted separately. |
+| §47.8 | worked examples | N/A | illustrative | — | (P5) |
+| §47.9.1–47.9.7 | output base dir, per-artifact path, E-CG-015, `pages/` strip | DEFERRED-RULED | S447 tooling carve-out; `scripts/scrml-boot.ts` writes a fixed `index.html` / `program.client.js` / `scrml-runtime.js` layout into `dist/<name>/` | — | (P5) The bootstrap links the whole program into ONE artifact, so per-source paths and E-CG-015 cannot arise. `<page>` route inference (47.9.2) was not probed; it is §40.8's to judge. |
+| §47.9.8 | content-addressed bundle/CSS names + cache-header contract | DEFERRED-RULED | carve-out; scrml-boot has no `build`. `dev` sends `Cache-Control: no-store` on every response (`scrml-boot.ts:556-576`) | — | (P5) `no-store` is stricter than the contract, so it fails safe. |
+| §47.9.9 | shipped-JS comment/whitespace strip + token-stream proof | DEFERRED-RULED | carve-out; no build path | — | (P5) |
+| §47.10 (.1–.3) | relative `.scrml` import rewrites | N/A | probe `p51-xfile/app.scrml` (imports `./types.scrml`) → `out-app/program.client.js` holds only `import * as rt from "./scrml-runtime.js"` | — | (P5) Whole-program link: no cross-file specifier is ever emitted. |
+| §47.11 | stdlib bundling (`scrml:NAME` → `_scrml/NAME.js` shim; unknown left to fail at runtime) | BUILT | `scripts/scrml-boot.ts` `hostFilesOf` (stdlib host files copied to `_scrml/<module>/<file>`), `compiler/self-host-v2/slice-m2/lowered.js` `frontEndStdlib`; tests `slice-m4/stdlib-s47x*`, `slice-m4/host-block-f3-s473.test.js` | — | (P5) A different mechanism, and ruled: S472 *"stdlib host `.js` output location"*. It is stricter than §47.11 (a missing export is E-IMPORT-004 at compile time). §47.11's "left as-is" text is impl#1-only. |
+| §47.12 | `_server.js` name de-dup across pages | DEFERRED-RULED | carve-out; bootstrap emits one `program.server.js` | — | (P5) |
+| §47.13 | static serving = allowlist (denied classes, percent-decode, dotfiles, `.db`, `.scrml`, `*.map`, manifest) — "both servers" | SILENT-ACCEPT | probe `probes-5/p47-serve/` + `p47-serve.log`: `scrml-boot dev app.scrml --output-dir <src dir>` then curl → `/.env` 200 `SECRET=1`, `/%2eenv` 200, `/app.db` 200, `/app.scrml` 200 (full source). Code: `scrml-boot.ts:569-576` refuses only paths outside outDir and `basename == "program.server.js"` | g-boot-dev-static-serve-not-allowlisted-s473 | (P5) Reached only with a non-default `--output-dir`, because the default `dist/<name>/` holds no db and no source. Bound to 127.0.0.1. It still serves `.env`, databases, `.scrml` and dotfiles, and impl#1's shared `static-serve-policy-emitted.js` exists and is not used. No gap. |
+| §47.14a | data root — runtime limb (record relative to project root; resolve vs `SCRML_DATA_DIR` ?? recorded root; moved build refuses; no creation … | SILENT-ABSENT | `slice-m1/runtime/server-runtime.js:99-106` `resolveSqlitePath`: `root = host.root ?? process.cwd()`; no `SCRML_DATA_DIR` anywhere in self-host-v2 | g-boot-server-runtime-data-root-s473 | (P5) §47.14 says the working directory *"cannot name it"*, yet `createServer()` falls back to cwd, and `new Bun.SQL("sqlite://…")` creates the file wherever that points. `scrml-boot dev` passes `root: dirname(entry)`, so dev matches the §8.1.1 file. A standalone … |
+| §47.14b | `scrml dev` ignores `SCRML_DATA_DIR` and SAYS so, removing it | SILENT-ABSENT | `scrml-boot.ts` `dev()` never reads, reports or deletes `SCRML_DATA_DIR` | g-boot-server-runtime-data-root-s473 | (P5) The behaviour is right (dev ignores it). The required message and removal are missing. |
+| §47.14c | referenced-db startup errors + `/_scrml/health` 503; tenant-table startup gate (S456); build report; `W-DEPLOY-DB-*`; adapters | DEFERRED-RULED | carve-out (build/deploy adapters). Tenant: `tenant` area 23/23 UNSUPPORTED (refused) | — | (P5) |
+
+## §48 — The `fn` Keyword
+
+| § | title | status | evidence | gap ids | note |
+|---|---|---|---|---|---|
+| §48 (preamble) | S469 return rule: explicit `return` only; E-TYPE-043; E-RETURN-INCOMPLETE | BUILT | `analyze.scrml` `fallOffPass` / `fallOffDiags` (~6497–6560); probe `p48-tail.scrml` → E-TYPE-043; tests `slice-m4/core-additions.test.js`, `slice-m4/defer.test.js` | — | (P5) |
+| §48.1 | overview | N/A | prose | — | (P5) |
+| §48.2 | `fn` decl syntax; `pure fn` / `export fn` / `server fn` prefixes; E-FN-EQUALS-BODY | PARTIAL | `fn` BUILT (every probe). `pure fn` → E-PARSE-ITEM (`p48-purefn`). `fn f() -> int = x * 2;` → 17-error generic cascade, never E-FN-EQUALS-BODY (`p48-equals`). | g-bootstrap-unimplemented-construct-reported-as-generic-code | (P5) Loud but mis-coded. NO GAP for E-FN-EQUALS-BODY. |
+| §48.2.1 | anonymous `fn` expressions | REFUSED-LOUD | probe `p48-anon.scrml` → 13 errors (E-SCOPE-001 `x`, E-TYPE-STRUCT-CONTEXT …) | g-bootstrap-unimplemented-construct-reported-as-generic-code | (P5) A garbage cascade, not a named refusal. Contrast 48.6.3, which IS named. |
+| §48.2.2 | every parameter typed (E-PARAM-TYPE-REQUIRED) | REFUSED-LOUD | probe `p48-untyped.scrml` → E-BOOTSTRAP-UNSUPPORTED *"an unannotated parameter … needs `x: Type`"* | g-boot-param-type-required-code-s473 | (P5) Right outcome, wrong code: the SPEC names E-PARAM-TYPE-REQUIRED. |
+| §48.3.1 | E-FN-001 `?{}` in `fn` | PARTIAL | gap `g-pure-fn-sql-compiles-as-server-fn-s472` (MED, open): *"a §48 pure `fn` whose body runs a `?{}` query compiles clean as a SERVER function"* | g-pure-fn-sql-compiles-as-server-fn-s472 | (P5) Known SILENT-ACCEPT, gapped. My probe `p48-sql.scrml` was blocked first by E-ERROR-002 (unhandled failable), so I did not re-prove it. |
+| §48.3.2 | E-FN-002 DOM mutation; W-FN-001 | REFUSED-LOUD | probe `p48-dom.scrml` → E-BOOTSTRAP-UNSUPPORTED `.createElement(…)` (host-method surface) | — | (P5) Vacuously safe: DOM APIs are not callable anywhere in the bootstrap. |
+| §48.3.3 | E-FN-003 outer-scope write | BUILT | `analyze.scrml` `fnWritePass`; test `slice-m4/fn-writes.test.js`; probe `p48-outerwrite.scrml` | — | (P5) The bootstrap refuses file-scope `let`, so cells are the only outer scope. |
+| §48.3.4 | E-FN-004 non-deterministic calls + global-state reads | BUILT | `analyze.scrml` `resolveHost` `.HostPure` → E-FN-004 (Date.now); probe `p48-datenow.scrml` | — | (P5) `Math.random`, `performance.now`, `crypto.*`, `window.*` are refused as unsupported host calls (`p48-random`, `p48-perfnow`, `p48-window`), never accepted. **Oddity:** the E-FN-004 message prints *"a `function` body is pure"*, while the source (`analyze.scrml:6807`) reads … |
+| §48.3.5 | E-FN-005 `async` / `await` | REFUSED-LOUD | `p48-async` → E-PARSE-ITEM; `p48-await` → E-SCOPE-001 `await` | — | (P5) Never the named code (nor E-ASYNC-NOT-IN-SCRML / E-AWAIT-NOT-IN-SCRML). |
+| §48.4 | return-site completeness → §54 | N/A | pointer | — | (P5) |
+| §48.4.1 | E-FN-007 branches return different types | SILENT-ACCEPT | probe `p48-mixedret3.scrml`: `fn f(k:int) { if (k==1) { return 1; } return "two"; }` + `@n = f(2)` with `<n:int>` → compiles; run → page shows `two` in the `int` cell. `p48-mixedret.scrml` (struct A vs B) also compiles. grep E-FN-007 = 0 | g-boot-unannotated-return-type-not-inferred-s473 | (P5) See 48.8: same root cause. |
+| §48.5 (.1, .2) | `lift` in `fn` → fn-local `~`; E-FN-008 | REFUSED-LOUD | probe `p48-liftout.scrml` → E-BOOTSTRAP-UNSUPPORTED (*"lift … in neither … a `fn`"*); test `slice-m4/value-form-s469.test.js` (*"its `~`, §48.5, is not built"*) | — | (P5) |
+| §48.5.3 / 48.5.4 | pure read vs live subscription; E-FN-009 | DEFERRED-RULED | SPEC: *"Nominal / spec-ahead (deferred)… Retained per the S31 'Fate of fn' ruling"* | — | (P5) Vacuous: there is no subscription API in the bootstrap. |
+| §48.6.1 | `fn` may call `fn` | BUILT | `analyze.scrml` `fnCallsFunction` (`cf.pure` → ok); probe `p48-mutual.scrml` | — | (P5) |
+| §48.6.2 | `fn` SHALL NOT call `function` (E-FN-003); `pure function` exception | BUILT | `analyze.scrml` `callPurity` / `fnCallsFunctionDiag`; probe `p48-callfunc.scrml` → E-FN-003; test `slice-m2/typer-s440.test.js` | — | (P5) The `pure function` exception is unreachable: `pure` does not parse (48.9). |
+| §48.6.3 | `fn` as a value | REFUSED-LOUD | probe `p48-fnvalue.scrml` → E-BOOTSTRAP-UNSUPPORTED *"function values arrive with a later 'function values' slice"* | — | (P5) Named refusal. |
+| §48.6.4a | file-scope hoisting / mutual recursion | BUILT | probe `p48-mutual.scrml` (forward call `a`→`b`) compiles | — | (P5) No dedicated test located. BUILT on probe evidence only. |
+| §48.6.4b | `pinned fn` + E-STATE-PINNED-FORWARD-REF | REFUSED-LOUD | probe `p48-pinned.scrml` → E-PARSE-ITEM + E-SCOPE-001 | — | (P5) Generic codes. |
+| §48.7 | several `<state>` objects in one `fn` | N/A | `<Item>` state-literal construction / E-STATE-COMPLETE is §54 | — | (P5) UNVERIFIED for the bootstrap; left to the §54 auditor. |
+| §48.8 | return-type annotation; inference when absent | SILENT-ACCEPT | annotated: probe `p48-annret.scrml` → E-TYPE-031 *"`@n` expects `int`, and this value is `string`"*. Unannotated: `p48-unannret.scrml` (`fn f() { return "s"; }` + `@n = f()`) and `p48-unannretfn.scrml` (same with `function`) compile clean | g-boot-unannotated-return-type-not-inferred-s473 | (P5) §48.8: *"The compiler infers the return type from the `return` statements … If `return` statements produce different types, E-FN-007 fires."* The bootstrap types an unannotated call result as unchecked, so a `string` reaches an `int` cell with no diagnostic. **A … |
+| §48.9 | relation to `pure`; W-PURE-DEPRECATED | REFUSED-LOUD | `p48-pure` / `p48-purefn` → E-PARSE-ITEM *"unexpected text at program level"* | — | (P5) Deprecated forms are refused rather than warned on. Defensible, but the code is generic. |
+| §48.10 | `server fn` | UNVERIFIED | `p48-serverfn.scrml` compiles with W-DEPRECATED-SERVER-MODIFIER | — | (P5) Whether the §48.3 prohibitions run on a `server fn` body was not probed. |
+| §48.11 | relation to `function` / `pure function`; one return rule for every form | BUILT | covered by the 48 preamble row | — | (P5) |
+| §48.12 | code table | N/A | summarised in the rows above | — | (P5) Code index; each code is classified in its own row. not counted |
+| §48.13 | normative list incl. W-MATCH-VALUE-UNUSED | SILENT-ABSENT | probe `p48-matchtail.scrml` (`fn f(k:int) { match k { 1 :> "a", _ :> "b" } }`) compiles with no diagnostic; grep W-MATCH-VALUE-UNUSED = 0 | g-boot-w-match-value-unused-absent-s473 | (P5) Warning-level. It may also break the S445 "bare effect-free expression is an error" rule (outside my range). |
+| §48.14–48.16 | examples, interaction notes, future | N/A | prose / non-normative | — | (P5) |
+
+## §49 — Loops — one `for`
+
+| § | title | status | evidence | gap ids | note |
+|---|---|---|---|---|---|
+| §49 (preamble, 49.1) | one `for`, four heads; `while` / `do` retired | BUILT | `parse.scrml` (E-LOOP-WHILE-RETIRED / DO-WHILE); `analyze.scrml` planLoop; test `slice-m4/loops-s469.test.js` ("the four heads … run") | — | (P5) |
+| §49.2.1 | grammar | BUILT | loops-s469.test.js "Core — the loop nodes" | — | (P5) |
+| §49.2.2 | labels; E-LOOP-006 | BUILT | loops-s469.test.js "two loops of one body sharing a label: E-LOOP-006" | — | (P5) |
+| §49.2.3 | condition rule (E-COND-NOT-BOOLEAN); E-CONDITION-HEAD-UNPARENTHESIZED | BUILT | loops-s469.test.js "a condition is a `bool` or a `T \| not`", "LOW: `for (c < 3) (c) {`" | — | (P5) |
+| §49.2.4 | head discrimination; E-CTRL-011; E-FOR-UNPARENTHESIZED-HEAD | BUILT | loops-s469.test.js "the braceless head … `for (… in …)` is E-CTRL-011" | — | (P5) |
+| §49.2.5 | ranges `..` / `..=`; E-RANGE-OUTSIDE-LOOP-HEAD; E-RANGE-BOUND-NOT-INT | BUILT | loops-s469.test.js (range tests + both codes) | — | (P5) |
+| §49.3.1–49.3.6 | head semantics, break / continue | BUILT | loops-s469.test.js runtime tests | — | (P5) |
+| §49.3.5 (iterables) | iterate tape / map view / set view / `Enum.variants` / generator / range | PARTIAL | tape, range and string BUILT; others refused (loops-s469.test.js "what the bootstrap does not iterate … is refused (fail closed)") | — | (P5) Loud refusal, NO GAP for the missing iterables. |
+| §49.3.7 | per-iteration binding | BUILT | loops-s469.test.js "a `let` binder is the iteration's own"; value-form-s469.test.js "a row snapshots the loop's locals" | — | (P5) |
+| §49.4.1 / 49.4.2 | E-LOOP-001/002/003/004 | BUILT | loops-s469.test.js | — | (P5) |
+| §49.4.3 | E-LOOP-005 function / value boundary | BUILT | value-form-s469.test.js; inner-forever-loop-s473.test.js | — | (P5) |
+| §49.4.4 | statement unless bound; E-LOOP-007 | BUILT | value-form-s469.test.js | — | (P5) |
+| §49.5.1 / 49.5.2 | condition / body type | BUILT | as 49.2.3 | — | (P5) |
+| §49.5.3 | interaction with `lin` | PARTIAL | `g-boot-linfor-extra-lin-001-s471`, `g-boot-lin-005-unchecked-on-binders-s471` (LOW, open) | g-boot-linfor-extra-lin-001-s471, g-boot-lin-005-unchecked-on-binders-s471 | (P5) |
+| §49.6 | value form from every head | BUILT | value-form-s469.test.js "rule 1 — every head binds as a value" | — | (P5) Union-tape lifts and `for…else` on a bound loop are refused by name. |
+| §49.6.1 | `let result = ~` retired | BUILT | `~` is not parsed (probe `p47-tilde.scrml`) | — | (P5) |
+| §49.6.2 | `lift` in loops | PARTIAL | `g-boot-lift-to-bound-loop-inside-defer-refused-s471`; lift in an arm block of a bound loop is refused by name | g-boot-lift-to-bound-loop-inside-defer-refused-s471 | (P5) |
+| §49.7 | interaction with `fn` | BUILT | loops run in `fn` / `function` bodies (loops-s469.test.js) | — | (P5) |
+| §49.8 | impl#1 note | N/A | impl#1-only | — | (P5) |
+| §49.9 | error codes incl. E-LOOP-008 | BUILT | exitless-loop-s473.test.js, inner-forever-loop-s473.test.js | g-bootstrap-loop-never-completes-dead-break-s473 | (P5) residual `g-bootstrap-loop-never-completes-dead-break-s473` (LOW) |
+| §49.10 / 49.11 | summary / examples | N/A | — | — | (P5) |
+| §49.12.1–49.12.5 | interaction notes (lift, `~`, lin, fn, markup) | N/A | cross-references; behaviour covered above | — | (P5) |
+| §49.12.6 | loops × error handling | PARTIAL | `g-boot-wait-loop-in-bang-arm-backstop-only-s471`, `g-boot-break-in-bang-arm-in-loop-e-error-012-s471` (LOW) | g-boot-wait-loop-in-bang-arm-backstop-only-s471, g-boot-break-in-bang-arm-in-loop-e-error-012-s471 | (P5) |
+| §49.12.7 | N+1 hoisting / server calls in loops | PARTIAL | `g-bootstrap-loop-wait-and-defer-s469` (MED, narrowed): a loop cannot wait (refused, C19) | g-bootstrap-loop-wait-and-defer-s469 | (P5) |
+| §49.13 | `xs[i]` trap / `xs.at(i)` | BUILT | `runtime.js` `indexRead` / `atRead` (E-INDEX-OUT-OF-RANGE-RT); loops-s469.test.js "index reads" | — | (P5) |
+
+## §50 — Assignment as Expression
+
+| § | title | status | evidence | gap ids | note |
+|---|---|---|---|---|---|
+| §50.1–50.4 | assignment as an expression (value, chain, in a condition, `@x = v` as a value) | REFUSED-LOUD | `analyze.scrml:5719` `resolveValueAssign` → **E-ASSIGN-POSITION** *"an assignment is a statement — it cannot be used as a value"*; probes `p50-expr`, `p50-chain`, `p50-cond`, `p50-cellexpr`, `p50-ifsingle` | g-bootstrap-s34-rows-owed-s451, g-boot-assign-as-expression-unbuilt-s473 | (P5) A bootstrap-local code with no §34 row; only the code is covered, by `g-bootstrap-s34-rows-owed-s451`. **No gap or ruling says the §50 FEATURE is out of the bootstrap.** See Questionable Q1. |
+| §50.3.5 | lvalue scope: E-ASSIGN-003 undeclared, E-ASSIGN-004 const | PARTIAL | E-ASSIGN-004 BUILT for a file-scope const (`analyze.scrml:8135`, test `slice-m4/logic-block-const-s472.test.js`); a local const → E-ASSIGN-CONST (`p50-constre`); undeclared → E-SCOPE-001 *"not a writable local"* (`p50-undecl`) | g-bootstrap-loop-codes-owed-s469, g-boot-assign-as-expression-unbuilt-s473 | (P5) E-ASSIGN-CONST vs E-ASSIGN-004 is gapped: `g-bootstrap-loop-codes-owed-s469` (LOW). E-ASSIGN-003 is never emitted, NO GAP. |
+| §50.2.1 / 50.8.2 | declaration as an expression, E-ASSIGN-001 | REFUSED-LOUD | probe `p50-declexpr.scrml` → E-SCOPE-001 `let` is not declared | g-boot-assign-as-expression-unbuilt-s473 | (P5) Generic code. |
+| §50.3.2 / 50.8.3 | E-ASSIGN-002 chain type mismatch | N/A | chains are refused outright (E-ASSIGN-POSITION) | g-boot-assign-as-expression-unbuilt-s473 | (P5) |
+| §50.5 | × `fn` (E-FN-003 applies to the expression form too) | BUILT | statement form = 48.3.3; the expression form cannot be written | g-boot-assign-as-expression-unbuilt-s473 | (P5) |
+| §50.6 | × `lin` (E-LIN-004) | REFUSED-LOUD | probe `p50-lin.scrml` → E-ASSIGN-CONST (plus a `lin` annotation refusal) | g-bootstrap-loop-codes-owed-s469, g-boot-assign-as-expression-unbuilt-s473 | (P5) E-LIN-004 is never emitted (grep = 0); the code mismatch is gapped by `g-bootstrap-loop-codes-owed-s469`. |
+| §50.7 | codegen | N/A | impl#1 lowering detail | g-boot-assign-as-expression-unbuilt-s473 | (P5) |
+| §50.8.1 | W-ASSIGN-001 single-paren assignment in a condition | REFUSED-LOUD | `p50-ifsingle` → E-ASSIGN-POSITION | g-boot-assign-as-expression-unbuilt-s473 | (P5) Stricter: an error, not a warning. |
+| §50.9–50.13 | normative restatement, examples, notes, future | N/A | covered above | g-boot-assign-as-expression-unbuilt-s473 | (P5) |
+| §50.14 | × markup-as-value (`${@x = v}`) | REFUSED-LOUD | E-ASSIGN-POSITION (same path) | g-boot-assign-as-expression-unbuilt-s473 | (P5) |
+| §50.15 | × bare-form handler `onclick=@phase = .Loading` | REFUSED-LOUD | probe (first form of `p51-statechild-static`) → E-PARSE-TAG *"unexpected `=` in the tag `<button`"* | g-boot-assign-as-expression-unbuilt-s473 | (P5) Generic parse code. The inline block `onclick={ … }` IS built. |
+
+## §51 — State Transition Rules / `< machine>` / `<engine>`
+
+| § | title | status | evidence | gap ids | note |
+|---|---|---|---|---|---|
+| §51 / 51.0 intro | legacy-vs-§51.0 framing | N/A | prose | — | (P5) |
+| §51.0.A | engines as singletons (→ `single`, §66.13) | BUILT | `<x:T=.V single>`; test `slice-m4/engine.test.js` (§66.19.6) | — | (P5) |
+| §51.0.B | `<engine for= initial= …>` declaration syntax + state-child attribute surface | REFUSED-LOUD | probe `p51-legacy-engine.scrml` → E-BOOTSTRAP-UNSUPPORTED *"`<engine>` … (§51.0 (retired into `single` declarations, §66.13.3)) … not in the bootstrap"* | — | (P5) The refusal follows the ruling (S435 Q6 / O5; S449 dialect). In the `single` form: `rule=` BUILT; reserved attrs `history` / `internal:rule` / `effect` refused by name (086f8f209). A block `<match>` in a state-child (S439 #5 SUPPORTED) is refused, because `<match>` is not … |
+| §51.0.B.1 | payload binding on state-children | REFUSED-LOUD | probe `p51-payload-child.scrml` → E-BOOTSTRAP-UNSUPPORTED *"`rows` on the state-child `<Done>` … would be ignored"* | g-bootstrap-single-transition-graph-checks-missing | (P5) `g-bootstrap-single-transition-graph-checks-missing` (narrowed) records this limb as fixed by refusal. |
+| §51.0.C | auto-declared var / `var=` | N/A | retired by O5 RULED S435 (*"var= / name= / §51.0.C auto-naming RETIRE"*); E-ENGINE-VAR-DUPLICATE→E-SCOPE-010 mapping applied (conformance PASS) | — | (P5) |
+| §51.0.D | mount position / cross-file `<EngineName/>` → `<*name/>` | PARTIAL | `<*phase/>` + E-DECL-SINGLE-INSTANTIATED BUILT (engine.test.js); E-ENGINE-MOUNT-NOT-ENGINE FAILs (`engine/mount-not-engine-pos`) — gap `g-bootstrap-unknown-tags-resolved-as-html` (MED, narrowed) | g-bootstrap-unknown-tags-resolved-as-html | (P5) |
+| §51.0.E | `initial=` (→ own value); W-ENGINE-INITIAL-MISSING defaulting to the first variant; E-ENGINE-INITIAL-INVALID-VARIANT | PARTIAL | own value BUILT. Probe `p51-noinitial.scrml` (`<phase:Phase single>`, no value) **compiles clean**, then boot throws *"`<program>` attribute `phase` has no default and no use-site value (SPEC §66.3 O33 is OPEN)"*. Invalid variant → E-TYPE-VARIANT (gap `g-bootstrap-unnamed-state-child-variant-codes`) | g-bootstrap-unnamed-state-child-variant-codes, g-boot-no-value-cell-runtime-throw-s473 | (P5) No W-ENGINE-INITIAL-MISSING and no default. The compile succeeds for a page that cannot boot. Partly DEFERRED (O33 OPEN). See Questionable Q4. |
+| §51.0.F | `rule=` contract: single / multi / wildcard; compile-time when the from-state is static; runtime otherwise | PARTIAL | runtime BUILT: `runtime.js:1028-1031` `transition` throws E-ENGINE-INVALID-TRANSITION (engine.test.js; probe run of `p51-statechild-static` → *"`.Idle → .Done` is not an edge"*). Static unreachable-target check BUILT (`analyze.scrml` `transitionCheck`). **Wildcard `rule=*` → E-PARSE-EXPR** (`p51-wildcard.scrml`). … | g-boot-rule-static-from-state-check-missing-s473 | (P5) §51.0.F: *"Inside `<Small>`'s body the compiler knows the from-state … any other target is rejected statically."* §66.13.2 keeps it (*"compile-time where the from-state is static"*). The runtime backstop exists, so this is LOW. NO GAP for the static limb or the wildcard. |
+| §51.0.F.1 | self-write is a no-op; W-ENGINE-SELF-WRITE-DETECTED | PARTIAL | no-op BUILT (engine.test.js "finish() from .Done is a no-op"); the Info lint is SILENT-ABSENT (grep = 0) | g-boot-engine-self-write-lint-absent-s473 | (P5) |
+| §51.0.G / 51.0.G.1 | `.advance(.X)` + argument resolution | REFUSED-LOUD | probe `p51-single-static-bad.scrml` → E-BOOTSTRAP-UNSUPPORTED `.advance(…)` | g-boot-o5-engine-features-unbuilt-s473 | (P5) O5 KEEPS `.advance`. Owed, NO GAP. |
+| §51.0.H | `effect=` / `<onTransition>` / opener `effect=` | REFUSED-LOUD | `p51-effect.scrml`, `p51-ontransition.scrml` → E-BOOTSTRAP-UNSUPPORTED | g-bootstrap-effect-open-items-owed | (P5) gap `g-bootstrap-effect-open-items-owed` (MED, open) names *"no … `<onTransition>` / state-child `effect=` yet"*. |
+| §51.0.I | `:`-shorthand body | BUILT | `slice-m4/src/engine/after.scrml`; engine.test.js | — | (P5) |
+| §51.0.J | derived engines (→ locked declaration with a reactive initializer, §66.9 rule 3) | SILENT-ACCEPT | probe `p51-derived.scrml`: `<level:Level=(match @miles > 500 {…}) single>` with `<Low>` / `<High>` state-children compiles clean and emits `rt.seeded(…)` (`untrack`). Run: click `bump` (miles += 600) → still `low`. Control `p51-derived-control.scrml` (same declaration, no state-children) emits `rt.derived(…)` and … | g-boot-derived-single-with-state-children-seeded-s473 | (P5) O5: *"`derived=` RETIRES (a locked declaration with a reactive initializer is derived, §66.9)"*. Adding state-children silently turns a derived value into a seeded one: the UI goes stale, with no diagnostic. NO GAP. |
+| §51.0.K | components vs engines; E-COMPONENT-ENGINE-SCOPE | BUILT | engine.test.js negative table | — | (P5) Move 20 reversed (§66.13.4); the invariant survives. |
+| §51.0.L | relation to legacy content | N/A | prose | — | (P5) |
+| §51.0.M | `<onTimeout>` | REFUSED-LOUD | `p51-ontimeout.scrml` → E-BOOTSTRAP-UNSUPPORTED | g-boot-o5-engine-features-unbuilt-s473 | (P5) O5 carries it. NO GAP. |
+| §51.0.N | `history` on composite state-children | REFUSED-LOUD | `p51-history.scrml` → E-BOOTSTRAP-UNSUPPORTED | g-boot-o5-engine-features-unbuilt-s473 | (P5) O5 carries it. Refusal landed 086f8f209; NO GAP for the feature. |
+| §51.0.O | `internal:rule=` | REFUSED-LOUD | `p51-history.scrml` (second error) | g-boot-o5-engine-features-unbuilt-s473 | (P5) as 51.0.N |
+| §51.0.Q | hierarchy / nested engines / parent-rule cascade | REFUSED-LOUD | `p51-nested.scrml` → E-BOOTSTRAP-UNSUPPORTED *"a declaration inside markup is not in bootstrap slice M2"* | g-boot-o5-engine-features-unbuilt-s473 | (P5) O5: a nested engine is an enum-valued child field. Child-field graphs are BUILT (`<card>`'s `status`); a declaration in a state-child body and the cascade are not. NO GAP. |
+| §51.0.R | `<onIdle>` | REFUSED-LOUD | `p51-onidle.scrml` → E-BOOTSTRAP-UNSUPPORTED | g-boot-o5-engine-features-unbuilt-s473 | (P5) O5 carries it. NO GAP. |
+| §51.0.S | `accepts=` + `(state × message)` arms | REFUSED-LOUD | `p51-accepts.scrml` → E-BOOTSTRAP-UNSUPPORTED *"`accepts` in a declaration opener"* | g-boot-o5-engine-features-unbuilt-s473 | (P5) O5 (2ii) KEEPS it. NO GAP. |
+| §51.1 | legacy overview | N/A | prose | — | (P5) |
+| §51.2 | type-level `transitions {}` block | REFUSED-LOUD | `p51-transitions.scrml` → E-PARSE-TYPE ×4 + E-PARSE-ITEM | g-bootstrap-unimplemented-construct-reported-as-generic-code | (P5) Generic parse codes. Whether §66 keeps the type-level form is unruled: Questionable Q3. |
+| §51.3 (.1–.5) | `<machine>`, machine binding `@x: M`, override | REFUSED-LOUD | `p51-machine2.scrml` → E-BOOTSTRAP-UNSUPPORTED *"`<machine>` is a scrml structural element (§6.7 lifecycle)"* | g-bootstrap-unimplemented-construct-reported-as-generic-code | (P5) The message cites the wrong section (§6.7, not §51.3). §63.7 keeps `<machine>` *"permanent-soft"*, which conflicts with a bootstrap refusal: Q3. |
+| §51.4 | several graphs per enum | BUILT | engine.test.js: `phase` and `<card>`'s `status` are both `Phase`, with different edge lists | — | (P5) |
+| §51.5.1 | compile-time data-flow enforcement | PARTIAL | probe `p51-static-flow.scrml` (`@phase = .Loading; @phase = .Idle;`, where `.Loading → .Idle` is not an edge) compiles clean; it fails only at runtime | g-boot-rule-static-from-state-check-missing-s473 | (P5) Only "no incoming edge" is checked statically. Same root as the 51.0.F static limb. NO GAP. |
+| §51.5.2 | runtime guard | BUILT | `runtime.js` `transition`; engine.test.js | — | (P5) |
+| §51.6 | `event` object in effect blocks | REFUSED-LOUD | effect bodies refused (51.0.H) | — | (P5) |
+| §51.7.1 | × `<effect deps>`; async hooks newest-run-wins (S471) | REFUSED-LOUD | hooks refused (51.0.H); `g-bootstrap-effect-open-items-owed` | g-bootstrap-effect-open-items-owed | (P5) |
+| §51.7.2 | × `match` | BUILT | probe `p51-match.scrml`: `match @phase {…}` after a transition, run → `loading` | — | (P5) No dedicated test located. |
+| §51.7.3 | × `lin` | UNVERIFIED | not probed | — | (P5) |
+| §51.7.4 | × struct fields (graph on a child field) | BUILT | engine.test.js (`<card>`'s `status` graph) | — | (P5) |
+| §51.8 | error codes | N/A | E-ENGINE-INVALID-TRANSITION BUILT; the rest are per row | — | (P5) Code index; each code is classified in its own row. not counted |
+| §51.9 | derived / projection machines | REFUSED-LOUD | `<machine>` refused (51.3) | — | (P5) Its §66 analogue is 51.0.J (SILENT-ACCEPT). |
+| §51.10 | open questions | N/A | non-normative | — | (P5) |
+| §51.11 | `audit @log` clause | REFUSED-LOUD | `p51-audit.scrml` → E-PARSE-DECL-BODY *"a declaration body holds child declarations and state-children only"* | g-bootstrap-unimplemented-construct-reported-as-generic-code | (P5) O5 does not list audit: unruled re-homing (Q3). |
+| §51.12 | temporal `.From after Ns => .To` (incl. 51.12.3.1 computed delay) | REFUSED-LOUD | arrow-rule bodies are refused (`<machine>` / `<engine>`); `<onTimeout>` refused (51.0.M) | — | (P5) |
+| §51.13 | `--emit-machine-tests` property tests | SILENT-ABSENT | scrml-boot has no such flag (USAGE in `scrml-boot.ts`) | g-boot-emit-machine-tests-absent-s473 | (P5) LOW. Arguably tooling. |
+| §51.14 | `replay(@target, @log [, i])` | REFUSED-LOUD | `p51-replay.scrml` → E-SCOPE-001 *"`replay` is not declared"* | g-bootstrap-unimplemented-construct-reported-as-generic-code | (P5) Generic code. Unruled under §66 (Q3). |
+| §51.15 | state-local transitions × machine cross-check; E-STATE-MACHINE-DIVERGENCE | REFUSED-LOUD | machines refused; §54 substates are another part's | — | (P5) |
+| §51.16 | cross-file type resolution for an imported enum | BUILT | probe `p51-xfile/app.scrml` (imports `Phase` from `./types.scrml`) compiles; run → `i` then `l` after a click | — | (P5) No dedicated test located. |
+
+## §52 — State Authority Declarations
+
+| § | title | status | evidence | gap ids | note |
+|---|---|---|---|---|---|
+| §52 preamble, §52.1 | Motivation; default-local; form state needs no declaration | N/A | prose | — | (P6) "SHALL NOT require an authority decl for form input" holds trivially |
+| §52.3 (.1–.7) | Tier 1 type-level authority (`authority=`/`table=`, E-AUTH-003/004) | REFUSED-LOUD | AZ:5039 `unknownOpenerMessage`; probe `p52-tier1` → E-BOOTSTRAP-UNSUPPORTED on `authority` and on `table`; conformance auth/auth-003/004-* are UNSUPPORTED | g-bootstrap-s52-server-cell-surfaces-vs-db-cells-unruled-s473 | (P6) NO GAP. E-AUTH-003/004 are never emitted (the construct is refused before them) |
+| §52.4 (.1–.3, .5, .7) | Tier 2 `<x server>`; placeholder; E-AUTH-002 | REFUSED-LOUD | AZ:5039 via the opener-word check; probe `p52-server-attr`; conformance auth/auth-002/005-* are UNSUPPORTED ("`server` in a declaration opener is not in the bootstrap") | g-bootstrap-s52-server-cell-surfaces-vs-db-cells-unruled-s473 | (P6) NO GAP for `<x server>` itself. The server-cell job moved to §8.1.3 `<db>` cells (S472), but no ruling retires `<x server>` (see §3) |
+| §52.4.4 (E-AUTH-001 clause) | client-local `@var` as a `?{}` bound param | PARTIAL | AZ:25459 E-REACTIVE-003 ("server function … reads `@editingId` — a reactive cell lives in the browser"); probes `p52-auth001`, `p52-auth001b`; tests M4/server.test.js, M4/db-cells-s473.test.js | g-bootstrap-s52-server-cell-surfaces-vs-db-cells-unruled-s473, g-bootstrap-e-auth-001-reported-as-e-reactive-003-s473 | (P6) The semantics hold, fail-closed, under a DIFFERENT code. E-AUTH-001 never fires, so a case asserting it FAILs. NO GAP for the code divergence |
+| §52.5 | Authority rules summary table | N/A | restatement | — | (P6) |
+| §52.6.1–.6.6 | initial load, local landing, no auto-persist/rollback, Patterns A/B/C, W-AUTH-001/004, write convention | REFUSED-LOUD | they follow from the `server` refusal (the construct cannot be written) | — | (P6) the db-cell analogue is §8.1.3 (built; its limits have gaps g-bootstrap-db-cell-*-s473) |
+| §52.6.7 | §38 fan-out composition | N/A | composition guidance; "no auto-fan-out" holds trivially | — | (P6) |
+| §52.6.8 | failed hydration → log line, placeholder stays, `@x.error`, E-SERVER-CELL-RESERVED-NAME | REFUSED-LOUD | `server` is refused; for db cells a failed load mounts nothing (RT:3628 `loadDbCells`), gap g-bootstrap-db-cell-load-failure-surface-s473 | g-bootstrap-db-cell-load-failure-surface-s473 | (P6) the §52.6.8 banner says "the bootstrap builds it", which is FALSE (§3) |
+| §52.7 | `protect=` × `authority=` | REFUSED-LOUD | Tier 1 is refused; `<db protect=>` is refused at AZ:15671 | — | (P6) |
+| §52.8 | SSR pre-render of server-authoritative cells (+ S459 seed refusal) | DEFERRED-RULED | plan: dpa-051 §8.4 steps 2 and 6; gap g-bootstrap-db-cell-loads-uncoalesced-s473 ("the bootstrap has no SSR") | g-bootstrap-db-cell-loads-uncoalesced-s473 | (P6) db cells are server-authoritative and are NOT pre-rendered (the page waits on the client fetch) |
+| §52.9 | vs `<request>` | N/A | guidance (SHOULD) | — | (P6) |
+| §52.10 | deprecated `server function` / W-DEPRECATED-SERVER-MODIFIER | BUILT | PZ:3908 `parseFn(..., true)`; analyze emits the warning; probe `p52-serverfn` (warns, compiles); test M4/server.test.js | — | (P6) the E-DEPRECATED end state is not due yet |
+| §52.11 | error-code tables | N/A | an index; each code is classified in its own section | — | (P6) none of E-AUTH-001..005, E-SERVER-CELL-RESERVED-NAME, W-AUTH-001 exists in the bootstrap sources |
+| §52.12 | Open questions | N/A | — | — | (P6) |
+| §52.13 | `auth=` legal values, `csrf=`, W-AUTH-LOGIN-MISSING | REFUSED-LOUD | AZ:1858 `topAuthDiag`: required/optional/none → E-BOOTSTRAP-UNSUPPORTED ("refused rather than compiled ungated"); `csrf=` → E-BOOTSTRAP-UNSUPPORTED (probe `p52-csrf`); `<page>` is refused | — | (P6) fail-closed by design (security). The message says "emits no server", which is stale (§3) |
+| §52.13.1–.13.2 | `role:X` / unrecognized / non-literal `auth=` → E-AUTH-ATTR-INVALID; nested → E-PROGRAM-NESTED-AUTH only | BUILT | AZ:1858–1863, AZ:2122; probe `p52-authrole`; test M4/program-shape.test.js; conformance auth/auth-attr-empty-string-pos, auth-attr-nonliteral-program-pos PASS | — | (P6) the `<page>` and `<channel>` loci are refused, not built |
+| §52.13.3 | open vs closed attribute sets | PARTIAL | plain HTML passes unknown/`data-`/`aria-` through (probe `p52-htmlattr`); an unknown `<program>` attribute is a hard E-BOOTSTRAP-UNSUPPORTED, not W-ATTR-001 | — | (P6) stricter (fail-closed), NO GAP, harmless. W-ATTR-001 on `<machine>`/`<errorBoundary>`/`<channel>` is UNVERIFIED |
+| §52.14 | Tier 1 vs Tier 2 reach-for rule | N/A | guidance; its E-AUTH-004 clause cannot be reached | — | (P6) |
+| §52.15.1 | ambient `@currentUser` | REFUSED-LOUD | probe `p52-currentuser` → E-SCOPE-001 (a generic code) | g-bootstrap-unimplemented-construct-reported-as-generic-code | (P6) covered only by the general class g-bootstrap-unimplemented-construct-reported-as-generic-code (LOW) |
+| §52.15.2–.15.4 | route gate 401/403, per-user row scope, stacking axes | REFUSED-LOUD | there is no auth in the bootstrap (§52.13 refused), so nothing to gate; `@currentUser` does not resolve | — | (P6) db-cell load routes are ungated, but an app cannot declare auth, so this is not a hole today. It becomes one the day `auth=` lands without §52.15.2 |
+| §52.15.5 | SSR auto-omission of auth-scoped cells | DEFERRED-RULED | no SSR (dpa-051 plan); gap g-bootstrap-db-cell-loads-uncoalesced-s473 names "the SSR seed (§52.15.5)" | g-bootstrap-db-cell-loads-uncoalesced-s473 | (P6) |
+| §52.15.6 | codes | N/A | index | — | (P6) |
+
+## §53 — Inline Type Predicates
+
+| § | title | status | evidence | gap ids | note |
+|---|---|---|---|---|---|
+| §53 preamble, §53.1 | Motivation | N/A | — | — | (P6) |
+| §53.2 (.1–.3) | predicate grammar, positions, `[label]` | REFUSED-LOUD | parse-reject in EVERY position: opener `p53-opener` (E-PARSE-TAG), param `p53-param`, local `p53-local`, return `p53-ret`, struct field `p53-struct`, `string(email)` `p53-strshape`, alias `p53-alias` | g-bootstrap-opener-refinement-lifecycle-type-rejected, g-bootstrap-refinement-types-unbuilt-all-positions-s473 | (P6) only the OPENER form has a gap (g-bootstrap-opener-refinement-lifecycle-type-rejected, narrowed). The other positions have NO GAP and give cascading generic parse errors |
+| §53.3 (.1–.4) | semantics, S459 copy-in, S460 scope, subtype | REFUSED-LOUD | cannot be reached (§53.2 refused) | g-bootstrap-refinement-types-unbuilt-all-positions-s473 | (P6) |
+| §53.4 (.1–.5) | three-zone SPARK, runtime check | REFUSED-LOUD | cannot be reached; E-CONTRACT-001(-RT) is absent from the bootstrap sources | g-bootstrap-refinement-types-unbuilt-all-positions-s473 | (P6) |
+| §53.5 | T-PRED-1..5 | REFUSED-LOUD | cannot be reached | g-bootstrap-refinement-types-unbuilt-all-positions-s473 | (P6) |
+| §53.6.1 (registry) | built-in shapes incl. the normative `url` scheme rule | REFUSED-LOUD | AZ:1187 named-shape type `email` → E-BOOTSTRAP-UNSUPPORTED (probe `p53-shape`); `string(email)` is parse-rejected | — | (P6) fail-closed: `string(url)` cannot be declared, so the scheme guard cannot fail open |
+| §53.6.2 (registry ext.) | `^{}` extension | N/A | TBD spec issue | — | (P6) |
+| §53.6.3 | E-CONTRACT-002 lookup failure | REFUSED-LOUD | parse-reject | g-bootstrap-refinement-types-unbuilt-all-positions-s473 | (P6) |
+| §53.6.1 (shared-core) | dot-chain `string.req.length(…)` in type position | REFUSED-LOUD | probe `p53-dotchain` → E-PARSE-EXPECTED cascade | g-bootstrap-refinement-types-unbuilt-all-positions-s473 | (P6) NO GAP |
+| §53.6.2 (composition) | refinement + state validator | REFUSED-LOUD | cannot be reached | — | (P6) |
+| §53.7 (.1–.3) | bind:value HTML attrs, input check, E-CONTRACT-004-WARN | REFUSED-LOUD | cannot be reached | g-bootstrap-refinement-types-unbuilt-all-positions-s473 | (P6) |
+| §53.8 (.1–.3) | `<machine>` orthogonality, order, E-CONTRACT-003 | REFUSED-LOUD | cannot be reached | — | (P6) |
+| §53.9 (.1–.4) | param/return constraints, server-side boundary check | REFUSED-LOUD | probes `p53-param`, `p53-ret`, `p53-subset` | g-bootstrap-refinement-types-unbuilt-all-positions-s473 | (P6) fail-closed: no unchecked server param, because the annotation cannot be written |
+| §53.10 | × `protect=` | REFUSED-LOUD | cannot be reached | — | (P6) |
+| §53.11 | error codes | N/A | index; no E-CONTRACT-* in the bootstrap | — | (P6) |
+| §53.12, §53.13 | worked examples, open questions | N/A | — | — | (P6) |
+| §53.14.1–.4 | type-as-argument motivation/family/discipline | N/A | design governance | — | (P6) |
+| §53.14.5–.6 | type-arg recognition (`parseVariant`/`formFor`/…), stdlib types | REFUSED-LOUD | probes `p53-parsevariant2`, `p53-formfor` → "`scrml:data` … cannot be imported" E-BOOTSTRAP-UNSUPPORTED | g-boot-stdlib-intrinsic-fns-s473 | (P6) gap g-boot-stdlib-intrinsic-fns-s473 (MED) |
+| §53.15.1–.5 | enum-subset refinement, match narrowing, E-MATCH-SUBSET-DEAD-ARM | REFUSED-LOUD | probes `p53-subset` (param), `p53-structsubset` (struct field) parse-reject; `oneOf` as a validator → E-BOOTSTRAP-UNSUPPORTED (`p55-engine`) | g-bootstrap-refinement-types-unbuilt-all-positions-s473 | (P6) NO GAP; E-MATCH-SUBSET-DEAD-ARM is absent |
+| §53.15.6–.8 | teachable rule, deferred OQ-3, xrefs | N/A | — | — | (P6) |
+
+## §54 — Nested Substates and State-Local Transitions
+
+| § | title | status | evidence | gap ids | note |
+|---|---|---|---|---|---|
+| §54 preamble, §54.1 | overview | N/A | — | — | (P6) |
+| §54.2 | nested substate declarations | REFUSED-LOUD | probe `p54-legacy` → E-PARSE-CLOSER/UNCLOSED; the closest §66 shape, `p54-s66`, → E-DECL-TYPE-NOT-INFERABLE (the substate tags read as child fields) | g-spec-54-substates-no-s66-spelling-s473 | (P6) NO GAP, NO RULING, and §66 gives §54 NO spelling (the §66 text never mentions substates) — see §3 |
+| §54.3 | state-local transitions, `from`, purity | REFUSED-LOUD | `p54-legacy` | g-spec-54-substates-no-s66-spelling-s473 | (P6) same |
+| §54.4 | field visibility / narrowing / E-TYPE-020 | REFUSED-LOUD | cannot be reached | g-spec-54-substates-no-s66-spelling-s473 | (P6) |
+| §54.5 | terminal states | REFUSED-LOUD | cannot be reached | g-spec-54-substates-no-s66-spelling-s473 | (P6) |
+| §54.6.1–.6.6 | E-STATE-COMPLETE / FIELD-MISSING / TRANSITION-ILLEGAL / TERMINAL-MUTATION / NO-RETURN | REFUSED-LOUD | none of these codes is in the bootstrap sources; the state literal is not parsed | g-spec-54-substates-no-s66-spelling-s473 | (P6) the universal E-STATE-COMPLETE has no §66 counterpart in this range |
+| §54.7.1–.7.8 | interaction matrix | REFUSED-LOUD | cannot be reached | g-spec-54-substates-no-s66-spelling-s473 | (P6) |
+
+## §55 — Validators and the Auto-Synthesized Validity Surface
+
+| § | title | status | evidence | gap ids | note |
+|---|---|---|---|---|---|
+| §55 preamble | status banner | N/A | — | — | (P6) banner STALE (§3) |
+| §55.1 | universal-core vocabulary | PARTIAL | built: `req` on a string, `length` (string, int literal), `min`/`max` (numeric literal), exact `pattern` — AZ:3343 `fieldVals`, `bareVal`/`cmpVal`/`exprsVal`/`regexVal`; RT:781 `check`; E-TYPE-031 on a misapplied predicate; test M4/validators.test.js | g-bootstrap-validity-errors-value-and-messages-unbuilt | (P6) refused (E-BOOTSTRAP-UNSUPPORTED): `is given` (`p55-isgiven`), `eq`/`neq`/`gt`/`lt`/`gte`/`lte` (`p55-eq`), `oneOf`/`notIn`, non-literal bounds, `length` on a sequence (`p55-lenseq`), `req` on a non-string (`p55-reqnum`). Gap … |
+| §55.2 | validators on state-cell decls | BUILT | AZ:3343 (where = 1 a child field, 2 a top-level value); validators on other positions refused; tests M4/validators.test.js, M4/gate.test.js; conformance forms/* PASS | — | (P6) cross-field args → §55.11 |
+| §55.3 | refinement-type locus | REFUSED-LOUD | see §53 | — | (P6) |
+| §55.4 | `<schema>` column validators → DDL | REFUSED-LOUD | probe `p55-schema` → "`<schema>` … is not in the bootstrap" | — | (P6) |
+| §55.5 | compound surface; Edge B; read-only | PARTIAL | `isValid`/`submitted` built (RT:827 `compoundSubmitted`, AZ:6081 `compoundSurface`); Edge B: a no-validator compound has a surface (probe `p55-edgeb` compiles); E-SYNTHESIZED-WRITE (probe `p55-synthwrite`; M4/gate.test.js) | — | (P6) the compound `errors`/`touched` MAPS are refused; gap ...-errors-value-and-messages-unbuilt (2) |
+| §55.5.1 | top-level validated value has the surface | PARTIAL | RT:845; AZ:6090 `fieldSurface`; conformance forms/surface-top-level-validated-neg and -no-validators-pos PASS; E-VALIDITY-NO-SURFACE (probe `p55-nosurface`) | — | (P6) `@x.errors` read as a value is refused (`p55-errval`); gap item (1) |
+| §55.5.2 | E-VALIDATOR-DEAD (S447 trigger) | BUILT | AZ (validatorPass, AZ:28428); probe `p55-dead`; test M4/validators.test.js; conformance forms/validator-dead-locked-pos, validator-live-let-neg PASS | g-bootstrap-validator-dead-fires-on-bound-locked-value-s473 | (P6) nit: fires spuriously beside E-WRITE-NOT-GRANTED when a LOCKED value IS bound (`p55-lockedbound`), and its message then says "no `bind:` targets it", which is false |
+| §55.5.3 | reserved surface names, E-VALIDITY-RESERVED-NAME | BUILT | probes `p55-reserved` (child field `errors`), `p55-reservedattr` (attribute `isValid`); test M4/gate.test.js | — | (P6) case 2 (a struct-type field of a validated value) cannot be reached: validators on struct values are refused |
+| §55.6 | per-field surface | PARTIAL | RT:845–861; M4/gate.test.js | g-bootstrap-validity-spec-silences-s449 | (P6) the `errors` value is refused (gap item 1); a child field's `submitted` → E-SCOPE-001 (gap g-bootstrap-validity-spec-silences-s449 (a)) |
+| §55.7 | property semantics (touched on input/focus-out, form-scoped submitted, persist restore) | BUILT | RT:2581 `bind` (input/change + focusout → touch); RT:961 `gate`; M4/gate.test.js (focusout at :194); `p55-persist` compiles and restore does not set touched | — | (P6) channel-cell clause (iii) is UNVERIFIED; the server-cell clause cannot be reached |
+| §55.8 | `<errors of=…/>` | PARTIAL | RT:893 `errors` (first only / `all`; no DOM when empty; `textContent`, so the security property holds); AZ:15762 `resolveErrors`; E-VALIDITY-NO-SURFACE on `of=` a no-validator value (`p55-errnosurf`); M4/gate.test.js:236 | — | (P6) the body override is refused (AZ:15777); gap item (3) |
+| §55.9 | `ValidationError` enum | REFUSED-LOUD | the runtime holds the tags (RT:770ff), but there is no Core enum type; value reads are refused | — | (P6) gap item (1) |
+| §55.10 | 4-level message chain | PARTIAL | L3 built (RT:815 `messageFor`); L1 `req("…")` refused (AZ:3435, `p55-l1msg`); L2 `registerMessages` refused (scrml:data cannot be imported, g-boot-stdlib-intrinsic-fns-s473); L4 match refused (no enum) | g-boot-stdlib-intrinsic-fns-s473 | (P6) E-VALIDATOR-INLINE-DYNAMIC/-COLON are absent (L1 is refused whole, so no fail-open); gap item (4) |
+| §55.11 | cross-field via predicate args, E-VALIDATOR-CIRCULAR-DEP | REFUSED-LOUD | `eq(@pw)` → E-BOOTSTRAP-UNSUPPORTED (`p55-eq`) | — | (P6) gap item (5); the circular-dep code cannot be reached |
+| §55.12 | short-circuit + declaration order | BUILT | RT `runChecks` (req short-circuits; order kept); M4/gate.test.js:437 ("email is required.") | — | (P6) non-`req` predicates on `not` follow an agent reading: gap ...-spec-silences-s449 (b) |
+| §55.13 | `reset` clears the surface | BUILT | RT:857–861; M4/gate.test.js:187 (top-level), :258 (field) | — | (P6) |
+| §55.14 | engine-cell and derived-cell validators | PARTIAL | E-DERIVED-WITH-VALIDATORS (AZ:3349; M4/validators.test.js) | — | (P6) engine-cell validators (`oneOf`) are refused (`p55-engine`); gap item (5) |
+| §55.15 | xrefs + code list | N/A | index | — | (P6) rows are STALE (§3) |
+| §55.16 | validators × `server` | REFUSED-LOUD | `server` is refused; db-cell validators are refused (gap g-bootstrap-db-cell-shapes-refused-s473) | g-bootstrap-db-cell-shapes-refused-s473 | (P6) |
+| §55.17.1 | validators follow the bind | BUILT | AZ `bindValAttrs`; M4/validators.test.js:49–213 (parent/use/Star/two controls; textarea/select subset; exact pattern only); probe `p55-textarea` | — | (P6) |
+| §55.17.2 | `novalidate` on forms with lowered attributes | BUILT | lower.scrml:1612–1622; AZ:28428 `validatorPass`, AZ:28961 `formsInElem`; M4/form.test.js, M4/gate.test.js | — | (P6) the rule-1 "lifted markup" clause cannot be reached (markup lift is refused, `p55-liftinform`) |
+| §55.17.3 | submit gate incl. the `form=` owner (S472) | BUILT | RT:961 `gate`; M4/gate.test.js, M4/gate-reach.test.js (closed `if=` regions, uses, slots, handles, `form=`, E-FORM-OWNER-UNRESOLVED); conformance forms/gate-* PASS; `p55-ifattr` | g-bootstrap-gate-disabled-readonly-controls-still-gate, g-bootstrap-form-owner-outside-program-markup-s472 | (P6) residuals have gaps: g-bootstrap-gate-disabled-readonly-controls-still-gate (LOW), g-bootstrap-form-owner-outside-program-markup-s472 (LOW, refused) |
+| §55.17.4 | `formnovalidate` bypass, submitter | BUILT | RT `gate` (`e.submitter … hasAttribute("formnovalidate")`; submit() before the bypass return); M4/gate.test.js | — | (P6) |
+| §55.17.5 | gate scope: forms only | BUILT | by construction (only `<form>` gets `gate`) | — | (P6) |
+| §55.17.6 | I-FORM-SUBMIT-GATED + `data-scrml-gated` | BUILT | print.scrml:1695–1701 `gatedMarker`; probe `p55-childgate` → `data-scrml-gated="signup.email"`; M4/gate.test.js, M4/severity.test.js | — | (P6) |
+| §55.17.7 | relation to `formFor` | REFUSED-LOUD | `formFor` cannot be imported (`p53-formfor`), gap g-boot-stdlib-intrinsic-fns-s473 | g-boot-stdlib-intrinsic-fns-s473 | (P6) |
+| §55.17.8 | worked example | N/A | — | — | (P6) (the `eq` line in it is refused in the bootstrap) |
+
+## §56 — Promotion Ergonomics — `I-MATCH-PROMOTABLE` and `bun scrml promote`
+
+| § | title | status | evidence | gap ids | note |
+|---|---|---|---|---|---|
+| §56 | Promotion Ergonomics | SILENT-ABSENT | see rows below | g-bootstrap-promotion-lints-unbuilt-s473 | (P6) map row 56: "UNSTARTED". Not a gap and not a ruling |
+| §56.1 | Motivation | N/A | rationale | — | (P6) |
+| §56.2 | `I-MATCH-PROMOTABLE` fire conditions | SILENT-ABSENT | the code appears nowhere in self-host-v2/*.scrml. Probe `p56-match-promotable.scrml`: an exhaustive markup `if=`/`else-if=` chain over enum cell `@ph` compiles clean with no info | g-bootstrap-promotion-lints-unbuilt-s473 | (P6) info-only, never blocking (§56.7). impl#1 has it |
+| §56.3 (.1–.3) | Three message shapes; defer to W-LIFECYCLE-CANDIDATE | SILENT-ABSENT | as 56.2 | g-bootstrap-promotion-lints-unbuilt-s473 | (P6) |
+| §56.4 | Compound-condition advisory | SILENT-ABSENT | as 56.2 | g-bootstrap-promotion-lints-unbuilt-s473 | (P6) |
+| §56.5 (.1–.5) | `bun scrml promote` CLI (`--match`) | N/A | a CLI verb in impl#1 `compiler/src/cli.js`, i.e. language tooling (§58.2 component 2) and not a compiler pass | — | (P6) |
+| §56.6 (.1–.4) | `--engine` mode | N/A | CLI tooling | — | (P6) |
+| §56.7 | Tooling integration | SILENT-ABSENT |  | g-bootstrap-promotion-lints-unbuilt-s473 | (P6) |
+| §56.8 | Cross-references | N/A |  | — | (P6) |
+| §56.9 (.1–.3) | `I-FN-PROMOTABLE` | SILENT-ABSENT | code absent. Probe `p56-fn-promotable.scrml`: `function add(a,b) -> int { return a + b; }` is fn-eligible and compiles with no info | g-bootstrap-promotion-lints-unbuilt-s473 | (P6) impl#1 `lint-i-fn-promotable.js` |
+| §56.9.4 | `promote --fn` (deferred) | N/A | the SPEC defers it in both impls, and it is CLI | — | (P6) |
+| §56.9.5 | Anti-patterns | N/A | prose | — | (P6) |
+| §56.10 (.1–.10) | `--each` mode | N/A | CLI. "Landing 3 PENDING" in the SPEC | — | (P6) W-EACH-PROMOTABLE is also absent from the bootstrap (§17 owns it) |
+
+## §57 — Wire Format
+
+| § | title | status | evidence | gap ids | note |
+|---|---|---|---|---|---|
+| §57 | Wire Format | BUILT | below | — | (P6) channels and SSE are refused elsewhere, see 57.1 |
+| §57.1 | Scope (sinks) | PARTIAL | server-fn sink built. `<channel>` refused (analyze `structuralOwner` "§38"). `server function*` SSE fails to parse (probe `p57-sse.scrml`, E-PARSE-FN). The `persist=` sink uses runtime `decode` without `canonicalOnly`, which is the dual decoder | — | (P6) the persist decode mode is OPEN in the SPEC (O-061-12). Channel and SSE belong to other sections and are refused, not silent |
+| §57.2 | Envelope shape | BUILT | `slice-m1/runtime/runtime.js` `isAbsenceEnvelope`/`ABSENT_KEY`; `codec.scrml` `absentKey`, which refuses a struct field named `__scrml_absent`. Tests: `slice-codec/codec.test.js`, `slice-codec/cross-impl.test.js` | — | (P6) |
+| §57.3 | Encoder rules | BUILT | runtime.js `encode` (strict; the `hostNullPassthrough` opt-in for §57.3 bullet 5). codec.test.js | — | (P6) `-0`→`0` is unruled (Q6 in the s446 progress) |
+| §57.4 | Decoder: strict on compiler-internal routes (S451 R10) | BUILT | `server-runtime.js:337` decodes args with `{canonicalOnly:true}`. `runtime.js:3713/3720` decodes result and error strictly. Test: `slice-m4/server-call-runtime.test.js:71` "strict, not dual … (R10, canonicalOnly)" | — | (P6) the foreign-endpoint dual half is unreachable because `<api>`/`<endpoint>` are refused |
+| §57.5 | v1.0 clean break (scoped by R10) | BUILT | as 57.4 | — | (P6) stale comment: runtime.js:2816 still says "the default is the v0.x dual-decoder", the struck §57.5 framing (see §3) |
+| §57.6 | Forward-compat naming | N/A | design note | — | (P6) |
+| §57.7 | Cross-references | N/A |  | — | (P6) |
+| §57.8 | Enum values, one shape (R8) | BUILT | runtime.js ~2977–3009 (`{variant,data}` keyed by declared field). `server-runtime.js:185–198` `fail` envelope with `__scrml_error`+`type`. codec.test.js (130 variant assertions) | — | (P6) |
+
+## §58 — Build Story
+
+| § | title | status | evidence | gap ids | note |
+|---|---|---|---|---|---|
+| §58 | Build Story | SILENT-ABSENT | below | g-build-story-unbuilt-s473 | (P6) SPEC banner "Nominal … No build-story implementation exists in the compiler". impl#1 has none either |
+| §58.1 | Compilation as a pure function | PARTIAL | output is deterministic: two compiles of `p65-comp-conflict.scrml` diff IDENTICAL (`det1`/`det2`). The build-story input is not read | — | (P6) bit-identity was checked on one probe only |
+| §58.2 | Four-component composite | N/A | definitional | — | (P6) |
+| §58.3 | Merkle closure | SILENT-ABSENT | nothing in the bootstrap | g-build-story-unbuilt-s473 | (P6) both impls |
+| §58.4 | `[story]` manifest table | SILENT-ABSENT | the bootstrap reads no `scrml.toml` | g-build-story-unbuilt-s473 | (P6) under §58.5.4 a malformed story is "never silently ignored", but it is ignored today because the file is never read. Both impls |
+| §58.5 (.1–.4) | `build-story.lock` model, encoding, format, verification | SILENT-ABSENT | none | g-build-story-unbuilt-s473 | (P6) likely belongs to a separate tool, not compile. Both impls |
+| §58.6 | Closure encoding (SHA-256) | SILENT-ABSENT | none | g-build-story-unbuilt-s473 | (P6) both impls |
+| §58.7 | Relationship to §47; `chunks.json` `compiler` field | N/A | the bootstrap emits no `chunks.json` (outputs: index.html, program.client.js, scrml-runtime.js) | — | (P6) §47's auditor owns `chunks.json` |
+| §58.8 | `story=` attribute | BUILT | analyze.scrml `topProgramAttrDiags` → `W-STORY-ON-TOP-LEVEL`. Tests: `slice-m4/program-shape.test.js:102`, `slice-m4/severity.test.js`. Probe `p58-story-top.scrml` compiles with the warning and the attribute is ignored. A nested `<program>` is refused (analyze.scrml:2111). Probe `p58-nested-story.scrml` | — | (P6) |
+| §58.9 | Resolution and inheritance; `E-STORY-UNKNOWN` | REFUSED-LOUD | nested `<program>` is refused, so `E-STORY-UNKNOWN` cannot be reached (the code is absent) | — | (P6) |
+| §58.10 | Dialect islands | N/A | design; needs nested programs | — | (P6) |
+| §58.11 | Cross-program ABI invariance | N/A | follows from §57 plus §43, which is refused | — | (P6) |
+| §58.12 | Determinism gaps | N/A | a statement of open gaps | — | (P6) |
+| §58.13 | Error codes | N/A |  | — | (P6) Code index; each code is classified in its own row. |
+
+## §59 — Value-Native Maps
+
+| § | title | status | evidence | gap ids | note |
+|---|---|---|---|---|---|
+| §59 | Value-Native Maps | REFUSED-LOUD | probes `p59-empty-map` (`[:]` → E-PARSE-EXPR "expected an expression, found `:`"), `p59-map-literal` (E-PARSE-EXPECTED), `p59-map-type` (`[string: int]` → E-PARSE-TYPE), `p59-set` (E-PARSE-EXPR). boot-conf: maps 13 NOT-TWINNED | g-bootstrap-unimplemented-construct-reported-as-generic-code | (P6) the §59.7 banner says maps under the transition axis are OPEN (O44), and dpa-051 lists O44 as an EditKind extension. The rejection is fail-closed but its message wrongly calls the form a syntax error (see §3) |
+| §59.1–59.2 | Overview, type grammar | REFUSED-LOUD | p59-map-type | g-bootstrap-unimplemented-construct-reported-as-generic-code | (P6) |
+| §59.3 | Literals, disambiguation, E-VALUE-FUNCTION-STORED for map | REFUSED-LOUD | p59-empty-map, p59-map-literal | g-bootstrap-unimplemented-construct-reported-as-generic-code | (P6) |
+| §59.4–59.5 | Key domain, key hash | REFUSED-LOUD |  | g-bootstrap-unimplemented-construct-reported-as-generic-code | (P6) |
+| §59.6–59.9 | Read, write, iteration, equality | REFUSED-LOUD |  | g-bootstrap-unimplemented-construct-reported-as-generic-code | (P6) |
+| §59.10 | Lossless serialization | REFUSED-LOUD | `codec.scrml` header: "maps (§59.10) — Core has no map type yet" | g-bootstrap-unimplemented-construct-reported-as-generic-code | (P6) |
+| §59.11 | Codes | N/A |  | g-bootstrap-unimplemented-construct-reported-as-generic-code | (P6) Code index; each code is classified in its own row. |
+| §59.12 | v1 scope-cuts incl. `set` | REFUSED-LOUD | p59-set | g-bootstrap-unimplemented-construct-reported-as-generic-code | (P6) |
+
+## §60 — Typed External API — `<api>`
+
+| § | title | status | evidence | gap ids | note |
+|---|---|---|---|---|---|
+| §60 | Typed External API `<api>` | REFUSED-LOUD | analyze.scrml `structuralOwner` "api" → E-BOOTSTRAP-UNSUPPORTED. Probe `p60-api.scrml`. boot-conf: api 10/10 UNSUPPORTED | — | (P6) `<request>` is also refused ("§6.7.7") |
+| §60.1–60.11 | all subsections | REFUSED-LOUD | as above | — | (P6) 60.7, 60.8 and 60.10 are N/A prose |
+
+## §61 — Typed Inbound Endpoint — `<endpoint>`
+
+| § | title | status | evidence | gap ids | note |
+|---|---|---|---|---|---|
+| §61 | Typed Inbound Endpoint `<endpoint>` | REFUSED-LOUD | `structuralOwner` "endpoint". Probe `p61-endpoint.scrml`. boot-conf: endpoint 17/17 UNSUPPORTED | — | (P6) |
+| §61.1–61.11 | all subsections | REFUSED-LOUD | as above | — | (P6) 61.8 and 61.10 are N/A prose |
+
+## §62 — Language Versioning — the `scrml-language` semver axis
+
+| § | title | status | evidence | gap ids | note |
+|---|---|---|---|---|---|
+| §62 | Language Versioning | SILENT-ABSENT | below | g-language-version-surface-unbuilt-s473 | (P6) SPEC banner "Nominal / spec-ahead"; the §62.8 provenance says there are zero fire sites in impl#1 |
+| §62.1–62.3 | Two axes; corpus is the contract; tiers | N/A | governance and process | — | (P6) |
+| §62.4 | `chunks.json` `language` field | SILENT-ABSENT | the bootstrap emits no `chunks.json` | g-language-version-surface-unbuilt-s473 | (P6) absent in impl#1 too |
+| §62.5 | 1.0 cut / freeze discipline | N/A | process | — | (P6) |
+| §62.6 | `[language] version` pin; E-LANGUAGE-VERSION-TOO-NEW / E-LANGUAGE-COMPILER-TOO-OLD | SILENT-ABSENT | no `scrml.toml` read; neither code appears anywhere | g-language-version-surface-unbuilt-s473 | (P6) absent in impl#1 too. Harmless while only 1.0 exists, but a `version="1.1"` pin is silently ignored instead of failing closed |
+| §62.7 | `lang:` vocabulary | N/A | labels; the bootstrap's E-BOOTSTRAP-UNSUPPORTED convention is its fail-closed "future" honesty | — | (P6) |
+| §62.8 | No editions | N/A | design; the tripwire is unfired (nothing reads `[language]`) | — | (P6) |
+| §62.9 | Cross-references | N/A |  | — | (P6) |
+
+## §63 — Deprecation Lifecycle — the stage machine
+
+| § | title | status | evidence | gap ids | note |
+|---|---|---|---|---|---|
+| §63 | Deprecation Lifecycle | PARTIAL | below | — | (P6) |
+| §63.1–63.3 | Stage machine, invariant, timing | N/A | process | — | (P6) |
+| §63.4 | `--fix` gate / `scrml fix` verb | N/A | impl#1 CLI tooling (`compiler/src/commands/fix*.js`) | — | (P6) |
+| §63.5 | Conformance interaction (deprecated form accepted with W, runtime identical) | PARTIAL | accepted with W: `W-IS-SOME-DEPRECATED` (parse.scrml:693; `slice-m2/is-some-s462.test.js`; probe `p63-is-some`), `W-GIVEN-PRESENCE-DEPRECATED` (parse.scrml:3777; probe `p63-given-arrow`), `W-ARM-PIPE-LEGACY` (parse.scrml), `W-WHEN-EFFECT-DEPRECATED` (analyze; `slice-m4/effect.test.js`), `W-MATCH-ARROW-LEGACY`, … | g-bootstrap-given-arrow-legacy-lint-missing-s473, g-bootstrap-unimplemented-construct-reported-as-generic-code | (P6) §63.5: "A native parser (impl #2) that is stricter than 1.0 — rejecting a `deprecated` form — is a conformance BUG in impl #2". See §3 |
+| §63.6 | `lang:` transition semantics | N/A | labels | — | (P6) |
+| §63.7 | Corpus disposition | PARTIAL | `<machine>` → E-BOOTSTRAP-UNSUPPORTED "§6.7 lifecycle" (`p63-machine`), but §63.7 says "`E-DEPRECATED-001` fires at 1.0", and that code appears nowhere in the bootstrap. Rejection is correct; the code is wrong. `integer` is accepted with no warning (`p63-integer`) and `toEnum` with no warning (`p63-toenum`), both … | g-bootstrap-given-arrow-legacy-lint-missing-s473, g-bootstrap-unimplemented-construct-reported-as-generic-code | (P6) where a form is rejected, the W-code being absent is the REFUSED case. The W-GIVEN-ARROW-LEGACY site is the only accept-without-W found. That the code applies to this guard form is UNVERIFIED (see §2) |
+| §63.8 | Not lifecycle (W-ABSENCE-IN-SCRML-SOURCE, promotion nudges) | N/A | the bootstrap hard-rejects `null` (E-PARSE-NO-NULL, probe `p63-null`), which is stricter than a W but is the §42 axiom, not a lifecycle form | — | (P6) the hard-reject vs W difference may belong to §42's auditor |
+| §63.9 | Cross-references | N/A |  | — | (P6) |
+
+## §64 — Standalone Tool Target — `<program kind="tool">`
+
+| § | title | status | evidence | gap ids | note |
+|---|---|---|---|---|---|
+| §64 | Standalone Tool Target `<program kind="tool">` | REFUSED-LOUD | analyze.scrml `isProgramAttrName` "kind"/"serve" → E-BOOTSTRAP-UNSUPPORTED "`<program kind=…>` is not in the bootstrap". Gap `g-boot-kind-tool-emit-unbuilt-s473` (MED, open). boot-conf: `print/tool-println-clean-stdout` and 2 others UNSUPPORTED | g-boot-kind-tool-emit-unbuilt-s473 | (P6) `fileIsTool` (analyze.scrml:7888) cannot be reached while `kind=` is refused. The unsupported-refusals list also cites §64 at analyze.scrml:2131 (nested `kind=`/`serve=`) |
+| §64.1–64.9 | emit shape, main, harness, constraints, imports, E-TOOL-*, serve=, SCRML_HOST loopback | REFUSED-LOUD | as above; no E-TOOL-* code is in the bootstrap | — | (P6) `kind="service"` (§68) is refused by the same path |
+
+## §65 — The scrml-native CSS Model — predictable, cascade-free styling
+
+| § | title | status | evidence | gap ids | note |
+|---|---|---|---|---|---|
+| §65 | scrml-native CSS Model | PARTIAL | below | g-bootstrap-css-conflict-checker-unbuilt-s473 | (P6) ruling: "SCOPE: **Wave 1 gates 1.0** (flat-specificity + `E-STYLE-CONFLICT` on existing `#{}` + `<theme>` + reset); Waves 2-3 + Full stay v1.next" (user-voice-scrml.md, the "CSS to V1.0" entry near line 11522) |
+| §65.0–65.1 | Thesis; single resolution algorithm | N/A | design | — | (P6) |
+| §65.2 / 65.2.1 | Flat specificity; unconditional overlap = E-STYLE-CONFLICT | SILENT-ACCEPT | E-STYLE-CONFLICT and W-STYLE-CONFLICT-POSSIBLE appear nowhere in self-host-v2. Probes: `p65-comp-conflict.scrml` (component scope, `button{color:red}` vs `#go{color:blue}` on `<button id="go">`, tag × id, decidable hard) and `p65-comp-tagtag.scrml` (`h2{color:red}` and `h2{color:blue}`) both compile clean. The output … | g-bootstrap-css-conflict-checker-unbuilt-s473 | (P6) a **Wave-1, V1.0-gate** guarantee. Its absence is noted only in `docs/changes/s469-boot-css/progress.md:79` ("the §65.2 conflict checker is not in the bootstrap (deferred)") and in the map; there is no gap and no ruling. impl#1 has it (`css-conflict-check.ts`) |
+| §65.2.2 | Conditional rules are layers | PARTIAL | pseudo-class arms are kept unwrapped (css.scrml header). `@media`/`@container`/at-rule blocks are refused (`p65-media-container.scrml` → E-BOOTSTRAP-UNSUPPORTED "the at-rule `@media` is not in the bootstrap yet") | — | (P6) |
+| §65.2.3 | Same-axis recursion; E-STYLE-CONDITION-OVERLAP | SILENT-ACCEPT | `p65-hover-twice.scrml` (`p:hover` set twice) compiles clean | g-bootstrap-css-conflict-checker-unbuilt-s473 | (P6) the same-axis case is "the same E-STYLE-CONFLICT family", so it folds into the 65.2.1 gap. The cross-axis code is ruled "Full (v1.next)" |
+| §65.2.4 | Decidability, fail-closed residue, R1–R3 | PARTIAL | R1 floor ordering is built (css.scrml "floor arms are emitted first"; `slice-m3/css.test.js` r1-floor-order oracle). The decidable checker and R2/R3 soft are absent: probe `p65-conflict.scrml` (program-scope `p` vs `.x` on `<p class="x">`, a provable same-file overlap) has no W-STYLE-CONFLICT-POSSIBLE. boot-conf: … | g-bootstrap-css-conflict-checker-unbuilt-s473 | (P6) same gap as 65.2.1. W-STYLE-CONFLICT-POSSIBLE "over dynamic markup" is ruled "Full (v1.next)" |
+| §65.2.5 | `:where()`-flat emission; E-CSS-SYNTAX | BUILT | css.scrml `Flat` → `:where(…)`; pseudo-elements unwrapped. `css-syntax.scrml` E-CSS-SYNTAX. Tests: `slice-m3/css.test.js`, `slice-m4/css-s469.test.js`, `acceptance/css/neg-*` | — | (P6) css.scrml header says "CHOICE (review F6, unruled): program-global rules are NOT wrapped", against §65.2's "All scrml-emitted selectors are specificity-flat". impl#1 does the same (see §3) |
+| §65.2.6 | `--explain-style` | DEFERRED-RULED | §65.15 "remains a follow-on DX complement, NOT a Wave-1 gate" | — | (P6) CLI/LSP |
+| §65.3.1 | DOM inheritance | N/A | browser behaviour | — | (P6) |
+| §65.3.2 | `<theme>` tokens → custom properties; E-THEME-TOKEN-UNKNOWN | REFUSED-LOUD | parse.scrml `refuseTheme` → E-BOOTSTRAP-UNSUPPORTED (probe `p65-theme.scrml`). `@nope` → E-THEME-TOKEN-UNKNOWN (analyze.scrml:27406; probe `p65-token-unknown.scrml`; `acceptance/css/neg-unknown-ref`) | g-bootstrap-theme-front-end-unwired-s473 | (P6) `<theme>` is Wave 1, a V1.0 gate. It is refused, not silent, but there is NO GAP. The refusal message ("it has no CSS emission in this slice") is stale (see §3) |
+| §65.3.3 | `<defaults>`; E-DEFAULTS-MISUSE, W-STYLE-DEFAULTS-DEAD | REFUSED-LOUD | `structuralOwner` "defaults" → E-BOOTSTRAP-UNSUPPORTED (probe `p65-defaults.scrml`) | — | (P6) Wave 2 (v1.next) by ruling |
+| §65.3.4 | Built-in reset; `reset="none"` | BUILT | css.scrml `@layer reset`. The output matches all five bullets (`out-p65-plain/index.html`). analyze.scrml `resetAttrDiag` refuses any value other than "none"; `p65-reset-none.scrml` emits no reset. Tests: `slice-m3/css.test.js` (reset-bullets oracle), `slice-m4/program-shape.test.js` | — | (P6) |
+| §65.4.1 | `#{}` expression vs statement position | REFUSED-LOUD | `const chrome = #{…}` → E-PARSE-EXPR (probe `p65-style-hash-value.scrml`). Flat inline `#{}`→`style=` is built (`acceptance/css/flat-inline`) | — | (P6) style values are Wave 2 |
+| §65.4.2 | `style=` value-shape overloading; guarded `${}`; E-STYLE-INTERP-IN-URL-CONTEXT | REFUSED-LOUD | `style=chrome` / `style=[a,b]` → E-STYLE-VALUE-NOT-STYLE (analyze.scrml:16437; probes `p65-style-ident`, `p65-style-list2`). Quoted `style="…${}…"` → E-BOOTSTRAP-UNSUPPORTED (parse.scrml:4963; probe `p65-quoted-style.scrml`) | — | (P6) E-STYLE-INTERP-IN-URL-CONTEXT is "not emitted yet by either implementation", which is correct because no lowering exists |
+| §65.4.3–65.4.6 | flat scope, `style=[a,b]`, `style:name=`, division of labour | DEFERRED-RULED | `style:big=` → "not in bootstrap slice M2" (probe `p65-style-cond.scrml`) | — | (P6) |
+| §65.5 | Precedence / layer order | BUILT | css.scrml emits `@layer reset, global;` with the component scope unlayered (output of `p65-conflict`); tests in css.test.js / css-s469.test.js | — | (P6) the full chain is Wave 3 |
+| §65.6 | Reactive theming, runtime reflection | REFUSED-LOUD | `<theme>` is refused (65.3.2). css.scrml can emit OnVariant `:root[data-scrml-theme-<cell>]`, but only on the impl#1-ingest path (`css-ingest.scrml`), not the pure front end. `slice-m4/theme.test.js` asserts the refusal | g-bootstrap-theme-front-end-unwired-s473 | (P6) Wave 1; no gap |
+| §65.7 | `!important` | REFUSED-LOUD | probe `p65-important.scrml` → E-BOOTSTRAP-UNSUPPORTED "§65.7 … the bootstrap does not classify which this is" | — | (P6) Wave 3 |
+| §65.8 | Tailwind / fixed `@layer` order; `@charset`/`@import` hoist | BUILT | css.scrml header §65.8 hoisting; `slice-m3` charset-layer-import / import-hoist oracles | — | (P6) |
+| §65.9 | Structural keywords; placement | REFUSED-LOUD | `<theme>`/`<defaults>` refused, so E-STRUCTURAL-ELEMENT-MISPLACED cannot be reached | — | (P6) |
+| §65.10 | Codes | N/A | E-STYLE-KEYFRAMES-COLLISION is OQ-5 OPEN; `@keyframes` is refused (probe `p65-keyframes.scrml`) | — | (P6) Code index; each code is classified in its own row. |
+| §65.11 | MVP gate / dry-run | N/A | a process record (impl#1) | — | (P6) the hard path is "re-validated after Wave-2" |
+| §65.12 | Open questions | N/A | OPEN | — | (P6) |
+| §65.13 | Worked example | N/A | example | — | (P6) |
+| §65.14 | Migration | N/A | prose | — | (P6) |
+| §65.15 | Implementation status / waves | N/A | plan, quoted above as the deferral source for Waves 2–3 | — | (P6) |
+| §65.16 | Cross-references | N/A |  | — | (P6) |
+
+## §66 — Declarations, Instances, and Value Contracts
+
+| § | title | status | evidence | gap ids | note |
+|---|---|---|---|---|---|
+| §66 | Declarations, Instances, Value Contracts (preamble) | PARTIAL | see the rows below | — | (P6) Nominal banner (impl#1). It is the bootstrap's own dialect, and most of it is built. |
+| §66.0 | Reading guide / supersession map / Notation | N/A | — | — | (P6) A map and provenance only. |
+| §66.1 | What a declaration is (rule 5: every write is type-checked) | BUILT | A resolveAssign E-TYPE-031 "(§66.1 rule 5 …)"; probe `locked-write` (`@count = "x"` gives E-TYPE-031); tests m2/typer.test.js, m4/typer-holes-s472.test.js | — | (P6) |
+| §66.2.1 | Termination (`/>`, `</>`) | BUILT | P parseDeclBody; m2/parse.test.js; probe `counter` | — | (P6) |
+| §66.2.2 | Declaration vs use; `:struct`; `:Decl`; O52 | BUILT | P opener marker; m2/parse.test.js | g-boot-no-value-cell-runtime-throw-s473 | (P6) **O31 (OPEN)** `<count:int/>` compiles clean as a no-value field and throws at runtime (see SILENT #3). |
+| §66.2.3 | Illegal field names (+ validity names) | BUILT | P E-DECL-ILLEGAL-FIELD-NAME; A E-VALIDITY-RESERVED-NAME; m2/parse.test.js, m4/gate.test.js; probes `illegal-field`, `reserved-name` | g-bootstrap-decl-field-named-as-shadowed-by-handle-s462 | (P6) O41 is open. Gap g-bootstrap-decl-field-named-as-shadowed-by-handle-s462 (LOW). |
+| §66.2.4 | Opener expressions (parens; bare refinement/lifecycle/union types) | PARTIAL | P:7547 E-DECL-OPENER-EXPR-UNPARENTHESIZED (probe `unparen2`); m2/parse.test.js | g-bootstrap-opener-refinement-lifecycle-type-rejected, g-bootstrap-union-type-in-opener-refused-s473 | (P6) (a) An unparenthesized `>` (`<big:bool=@count > 10/>`, probe `unparen`) gives a generic E-PARSE-DECL-BODY/CLOSER cascade, not the named code. (b) Bare refinement/lifecycle types fail to parse: gap g-bootstrap-opener-refinement-lifecycle-type-rejected (MED, narrowed, limb … |
+| §66.2.5 | Keywords outside the opener; item positions (O61) | PARTIAL | P E-DECL-LET-IN-OPENER / E-DECL-RENDERS-IN-OPENER / E-DECL-KEYWORD-NOT-ITEM; m2/parse.test.js, m4/parse-batch-s471.test.js; probes `freetext` (prose stays text), `freetext2` (fires) | g-bootstrap-let-decl-in-db-channel-body-refused-s469 | (P6) O61 bodies (`<db>`/`<channel>`/`<page>`/`<theme>`): gap g-bootstrap-let-decl-in-db-channel-body-refused-s469 (MED, narrowed). |
+| §66.3 | Own value, inline defaults, inference (rules 1–10) | BUILT | A ownOrigin / originReport / boundaryOf; m2/typer-s462.test.js; probes `infer` (E-DECL-TYPE-NOT-INFERABLE), `persist-boundary` (E-DECL-TYPE-REQUIRED-AT-BOUNDARY) | — | (P6) The `server` limb of rule 9 has no fire site (`server` is refused, see 66.16). O19 is refused loud (A o19Diags; probe `o19`). |
+| §66.4 | Attributes are data; children are validated fields | PARTIAL | rules 1, 2, 4, 6 are in P (decl body, E-DECL-LET-IN-OPENER on an attribute) | — | (P6) Rule 3 (validators on the own opener bind the own value) is REFUSED-LOUD, A:4837. Rule 5's promotion hint is O42 (open). |
+| §66.5.1 | `renders` syntax | BUILT | P renders clause; m1/dropdown.browser.test.js; probe `slot` | — | (P6) |
+| §66.5.2 | Names in scope inside `renders` (read-only projections) | BUILT | A E-DECL-RENDERS-BARE-WRITE; m2/front.test.js; probe `bare-write` | — | (P6) |
+| §66.5.3 | Use-site children in `renders` | BUILT | see 66.15.2 | — | (P6) |
+| §66.5.4 | Where a declaration renders (#19) | REFUSED-LOUD | a declaration inside markup: "a declaration inside markup is not in bootstrap slice M2" (probe `single-in-each`) | — | (P6) O38 is open. |
+| §66.5.5 | Binding/validators inside `renders` (O25) | N/A | the normative text is §55.17 (another range); m4/validators.test.js, m4/form.test.js; probe `w192` (I-FORM-SUBMIT-GATED) | — | (P6) Only a pointer here. |
+| §66.6.1 | A plain tag makes a new one | PARTIAL | instance construction mk_<decl> in print; m1/dropdown.browser.test.js | g-boot-program-field-bare-tag-renders-inert-s473 | (P6) **Hole:** a plain tag naming a top-level CELL (`<email/>`) emits a raw `<email></email>` HTML element (SILENT #1). |
+| §66.6.2 | `<*x>` is the existing one | PARTIAL | top-level `<*card/>` twice renders the one shared instance (probe `star-shared`) | — | (P6) REFUSED-LOUD for `<*f/>` of a field without a graph body (A:16050) and for `<*x/>` of an enclosing declaration inside `renders` (A:16079). |
+| §66.6.3 | Self-reference inside `renders` (O54) | BUILT | A `own` field: "`@own` is this instance (O54 = (a), RULED S442)"; dropdown Core `.Lexical(0)` | — | (P6) The SPEC still says OPEN (see Questionable). |
+| §66.6.4 | The shared instance (lazy) | BUILT | print `shared_<decl>()` is memoized and emitted only when referenced (dpa-051 §(4)); probe `star-shared`; m1/runtime.test.js | — | (P6) |
+| §66.6.5 | Predefined declarations have no shared instance | BUILT | A E-DECL-STAR-PREDEFINED; m2/front.test.js, m2/typer.test.js; probe `star-div` | — | (P6) |
+| §66.6.6 | A bare own-field tag is an error; same-arc migration | PARTIAL | A E-DECL-FIELD-TAG-NEEDS-STAR inside a declaration; m2/front.test.js, m4/form.test.js; probe `field-tag` | g-boot-program-field-bare-tag-renders-inert-s473 | (P6) The top-level `<x/>` of a cell changes meaning silently, which the same-arc rule forbids (SILENT #1). |
+| §66.6.7 | Attributes on a `<*x>` are read-only | BUILT | A E-DECL-STAR-REF-ATTR-WRITE / resolveStar; m4/use-attr.test.js, m4/review-r1.test.js; probe `star-attr` | — | (P6) O18-r: `if=` on `<*x>` is E-BOOTSTRAP-UNSUPPORTED, as the SPEC states. |
+| §66.6.8 | A use of a declaration with no `renders` (O51) | PARTIAL | `<*x/>` is refused, A:16083 | — | (P6) A plain `<sig/>` / `<counter as=c …/>` compiles as a data-only instance (option (b)) with no diagnostic (probe `norender-use`). That takes a side on an OPEN item; see Questionable. |
+| §66.6.9 | A use carries only what its declaration declares (O18) | BUILT | A resolveUse / resolveStar / resolveConstructValue E-DECL-USE-ATTR; m4/use-attr.test.js; probe `use-attr` | — | (P6) Rule 7: m4/sink-guards.test.js; the script/style gap is §4.17, out of range. |
+| §66.7.1 | `@name` is the shared instance's value | BUILT | probe `star-shared` (`@card.n` read/write) | — | (P6) |
+| §66.7.2 | `as=` binds an instance; E-HANDLE-REDECLARE (i)(ii)(iii) | BUILT | A E-HANDLE-REDECLARE; m2/typer*.test.js; probes `handle-redecl`, `handle-excl` | — | (P6) The SPEC row says "not yet emitted"; that is stale. |
+| §66.7.3 | Instances inside `<each>` (keyed, disposed) | BUILT | m1/dropdown.browser.test.js (row instances, disposal) | — | (P6) |
+| §66.7.4 | `as=` inside `<each>` is row-scoped; may shadow a handle, not a cell | BUILT | probes `handle-excl` (row `k` + top `k` both legal), `handle-row-cell` (E-HANDLE-REDECLARE) | — | (P6) |
+| §66.7.5 | Handle to a conditionally-mounted instance is `T \| not` | BUILT | A E-DECL-HANDLE-NOT-NARROWED (reads and writes); m2/front.test.js, m4/gate-reach.test.js; probe `handle-narrow` | — | (P6) `given` over a non-handle value is E-BOOTSTRAP-UNSUPPORTED (A:13366), which is wider than O56's ruled error. |
+| §66.7.6 | Instances exist from program construction (L12, O59) | BUILT | rt.construct; m2/front.test.js, m1/runtime.test.js, m1/dropdown.browser.test.js (L12) | — | (P6) |
+| §66.8.1 | Every declaration registers a type | PARTIAL | the type name is accepted as a parameter, a struct field and a tape element (probe `decl-type2`) | g-boot-markup-text-decl-instance-unjudged-s473 | (P6) A member read on a value of declaration type is E-BOOTSTRAP-UNSUPPORTED (probe `decl-type`). `${@decl}` in markup text renders `[object Object]`: gap g-boot-markup-text-decl-instance-unjudged-s473 (MED, open). |
+| §66.8.2 | Named shared instances `<name:Decl …/>` | SILENT-ACCEPT | A namedInstanceDiags (A:4832) refuses only at file scope; probes `named-shared3`, `named-shared4` | g-bootstrap-named-shared-instance-in-program-body-unrefused-s473 | (P6) In a `<program>` body it compiles clean. The use-site attributes are dropped, and `${@accent}` evaluates `rt.noDefault`, which throws at runtime. NO GAP. |
+| §66.9 | Writability: `let` / locked / derived / seeded; `const` retires; rule 8 (L6/O60, quoted enum S473); rule 9 | BUILT | A E-WRITE-NOT-GRANTED / E-DERIVED-WRITE (the message names the `let` seeding, rule 5); E-VALUE-WRITES-STATE; m2/front.test.js, m4/core-additions.test.js, m1/dropdown.browser.test.js (L6/O60), m4/typer-holes-s472.test.js (quoted enum); probes `locked-write`, `quoted-enum` | g-boot-derived-cell-with-grants-takes-writes-s472 | (P6) Gap g-boot-derived-cell-with-grants-takes-writes-s472 (LOW). Rule 7 (the `const` legacy form) is in 66.21. |
+| §66.10 | Value semantics; identities; W-LOOP-COPY-WRITE-UNREAD | BUILT | m1/valuesem.core.scrml + valuesem.browser.test.js; A loopCopyFor; m4/rulings-s473-lint.test.js | — | (P6) |
+| §66.11.1 | Immutable unless a contract grants the write | BUILT | A grant checks; m4/grants.test.js; probe `audit` | — | (P6) |
+| §66.11.2 | Permissions govern the transition, not the spelling | BUILT | A classifier (spread = end-append, filter = shrink, map/reverse = position write, else replace); probe `audit` (all six refusals) | — | (P6) |
+| §66.11.3 | `replace` subsumes edits; spread-override shape (S437/S440) | PARTIAL | spread = field edit through rt.transition (probe `spread`); E-STRUCT-DUPLICATE-KEY; snapshot and all-or-nothing in m2/front.test.js:393 | g-bootstrap-w-grant-redundant-unbuilt-s473 | (P6) W-GRANT-REDUNDANT is never emitted (next row). |
+| §66.11.3 (W-GRANT-REDUNDANT) | redundancy warning | SILENT-ABSENT | zero hits in any bootstrap source; probe `grant-redundant` (`int[free, append, replace]` compiles clean, no warning) | g-bootstrap-w-grant-redundant-unbuilt-s473 | (P6) dpa-051 line 199 planned it in the typer. NO GAP. |
+| §66.11.4 | Structs, the same rule | BUILT | probe `spread`; probe `audit` (an element-field write is a fixed-field edit) | — | (P6) |
+| §66.11.5 | Local `let` rebinding is out of scope | BUILT | probe `tape-local` (`out = []` is E-WRITE-NOT-GRANTED; §66.12.6 rule 4 applied) | — | (P6) |
+| §66.11.6 | Lifecycles are write contracts | REFUSED-LOUD | there is no lifecycle type anywhere: a struct field `(.A to .B)` gives an E-PARSE-TYPE cascade (probe `lifecycle2`), and the opener form likewise (probe `lifecycle`) | g-bootstrap-opener-refinement-lifecycle-type-rejected, g-boot-lifecycle-types-unbuilt-s473 | (P6) Gap only for the opener limb (g-bootstrap-opener-refinement-lifecycle-type-rejected). No gap for lifecycle write contracts as a feature. |
+| §66.11.7 | Reactive notify is permission-driven | BUILT | RT append / prepend / removeEnd / transition / setPosition all go through `target.set` (notify); m1/runtime.test.js | — | (P6) O14 / O36 / O44 notes are open or record lag. |
+| §66.12.1 | One sequence kind; omission = fully constrained | BUILT | core fixedSeq; probe `bounded` (an append on a no-`free` tape gives E-WRITE-INVARIANT) | — | (P6) |
+| §66.12.2 | Permissions are axes; the grant vocabulary (O10) | PARTIAL | free / append / pop / prepend / shift / write / replace are parsed and checked; `writable` / `end` / `any` give E-GRANT-UNKNOWN with fix-its (probe `grant-unknown`) | g-bootstrap-tape-methods-insert-remove-fill-owed-s469, g-bootstrap-bounded-length-grant-refused-s473 | (P6) (a) The bounded length `1..=3` is refused as E-GRANT-UNKNOWN "not a permission axis value" (probe `bounded`). The message is misleading, since the token is ruled valid. NO GAP. (b) The `insert`/`remove` methods are owed: gap … |
+| §66.12.3 | Permissions live on the type; call-site direction; O37 certify | PARTIAL | a less-granting argument is refused, E-BOOTSTRAP-UNSUPPORTED A:20924 (gap g-bootstrap-callsite-grant-subset-unchecked-s469, narrowed) | g-bootstrap-callsite-grant-subset-unchecked-s469, g-bootstrap-o37-callee-certification-unbuilt-s473 | (P6) **O37 = (c) certify is NOT built.** No certifier exists ("certif" has zero hits in A). `@audit = appended(@audit, e)` is a plain replace, E-WRITE-NOT-GRANTED, and the helper's `[...a, e]` is itself E-BOOTSTRAP-UNSUPPORTED (probe `certify`). This fails closed, but the … |
+| §66.12.4 | No `any` permission, no exception | BUILT | E-GRANT-UNKNOWN (probe `grant-unknown`); m4/grants.test.js | — | (P6) The legacy RHS tape cell is in 66.21. |
+| §66.12.5 | Tuples, per-position-typed sequences | REFUSED-LOUD | probes `tuple` and `tuple2` give generic E-PARSE-EXPR / E-PARSE-TYPE / E-GRANT-UNKNOWN `:number` | g-bootstrap-tuples-unbuilt-s473 | (P6) The language has had tuples since S435. NO bootstrap gap. O16 / O34 are open. |
+| §66.12.6 | No position escapes the grants (S469/S472) | PARTIAL | BUILT for cells, fields, struct-field tapes (structTapeWrites), inner tapes (innerTapeHits / tapeWriteInnerProblems), enum payload, E-TAPE-JS-METHOD (tapeJsFix / tapeMethodStmt), natural-order sort (E-TYPE-031), the index-write trap (RT setPosition / writePath); m4/map-grants-s472, tape-grants-r3, position-write-s472, … | — | (P6) REFUSED-LOUD: local and parameter edits ("Core has no edit of a local", probes `tape-local`, `tape-param`), and `.pop()` used as a value (probe `pop-ret`). `xs.length = n` gives E-ASSIGN-TARGET, a loud but wrong code (SPEC: a shrink, `pop`). insert / remove / fill: owed by … |
+| §66.12.7 | Host boundary (tape out frozen/copy; undefined → not) | PARTIAL | rule 2: RT hostDecode maps null/undefined to null, and decodes per the declared type (m4/host-block-f3-s473.test.js) | g-boot-no-host-bridge-s471, g-boot-foreign-block-emission-unbuilt-s473 | (P6) Rule 1: a tape or struct argument to the host is refused (A:4243, "deep fresh copy … is not built"); `_{}` emission is unbuilt (g-boot-no-host-bridge-s471 / g-boot-foreign-block-emission-unbuilt-s473). |
+| §66.12.8 | Index reads `xs[i]` / `xs.at(i)` / `s[i]` code point | BUILT | RT indexRead / atRead (code points, trap); probe `index`; m4/loops-s469, strings-s469, rulings-s473-trap .test.js | — | (P6) The SPEC status line "the bootstrap refuses an index read today" is stale. |
+| §66.13.1 | Instance state written through field contracts | BUILT | probes `spread`, `w196`; m1/dropdown.browser.test.js | — | (P6) |
+| §66.13.2 | A value carrying a transition graph | BUILT | A graphOf, E-DECL-STATE-CHILD, E-ENGINE-INVALID-TRANSITION; RT transition / checkEdge; m4/engine.test.js, m4/review-r1.test.js | — | (P6) State-child attributes other than `rule=` (the O5 surface) are refused, A:3694. |
+| §66.13.3 | `single` (O55) | BUILT | A E-DECL-SINGLE-INSTANTIATED; m4/engine.test.js, m4/failclosed.test.js; probes `single`, `w196` | — | (P6) The SPEC row says "not yet emitted"; that is stale. |
+| §66.13.4 | Move 20 reversed; E-COMPONENT-ENGINE-SCOPE | PARTIAL | a `single` inside a declaration gives E-COMPONENT-ENGINE-SCOPE (probe `single-in-decl`; m4/engine.test.js) | — | (P6) In an `<each>` row (S439 #10, S440 #11) the result is the generic "declaration inside markup" refusal, and `<engine>` is refused whole. That is loud, but not the named code or the SHALL message that names the per-row form. |
+| §66.14 | Encapsulation E2 | PARTIAL | rules 1–4: A E-FIELD-PRIVATE-WRITE; m2/front.test.js; probe `xf/app` | — | (P6) Rule 5 (E-FOREIGN-REPLACE-PRIVATE) is never emitted, because any whole-instance write is E-BOOTSTRAP-UNSUPPORTED (probe `xf/app2`), so this is REFUSED-LOUD by reach. O2 / O39 are open. The rule-9 export boundary is built. |
+| §66.15.1 | A component IS a declaration | PARTIAL | typed attributes + `renders` (dropdown); class merging reversed to E-DECL-USE-ATTR | g-bootstrap-function-values-slice-s451 | (P6) **Function-typed attributes (O8, RULED S435) are not built.** `<btn act:fn()/>` gives generic E-PARSE-TAG / E-TYPE-UNKNOWN `fn` (probe `fnattr`). NO GAP. `fixed` carry-over: UNVERIFIED. |
+| §66.15.2 | Slot content; O46 (`${...}` retires) | BUILT | rt.slot; probe `slot`; dropdown; `${...}` is a parse error (probe `spreadkids`) | — | (P6) Fallback content is refused (A:15841). O9 is open. |
+| §66.15.3 | Explicit attribute forwarding | REFUSED-LOUD | `...attrs:button` gives a generic E-PARSE-TAG (probe `forward`) | g-bootstrap-attr-forwarding-unbuilt-s473 | (P6) The SPEC self-labels it "Nominal, not built". The ruling says "build it as soon as O46 is ruled" (O46 was ruled S462), and the sink precondition gap is resolved, so this is owed. NO GAP. |
+| §66.16 | `server` / `pinned` on declarations | REFUSED-LOUD | P: "`server` in a declaration opener is not in the bootstrap …" (probes `server-decl`, `pinned-decl`) | — | (P6) |
+| §66.17 | `<theme>` tokens (T3) | REFUSED-LOUD | P:7277 `<theme>` E-BOOTSTRAP-UNSUPPORTED (probe `leg-theme`) | g-bootstrap-theme-front-end-unwired-s473 | (P6) E-THEME-TOKEN-CELL-COLLISION has no fire site; the SPEC row says so. dpa-051 lists theme as P5 seam 1. |
+| §66.18 | Tier-3 positional retired | REFUSED-LOUD | `<u>: U = ("alice", 30)` gives E-PARSE-CLOSER (probe `leg-pos`) | — | (P6) The retired form is not accepted, which is correct. O15 is open. |
+| §66.19 | Worked programs | PARTIAL | 19.1 counter: m1/counter.browser.test.js, probe `counter`. 19.2: probe `w192` compiles. 19.3 dropdown: m1/dropdown.browser.test.js. 19.5 audit: m4/audit.test.js, probe `audit`. 19.6: probe `w196` compiles | — | (P6) 19.4 (theme library) is refused (theme, named shared instances). The `appended` line of 19.5 is refused (no O37 certify). |
+| §66.20 | Diagnostics | PARTIAL | most rows are emitted (see above) | g-bootstrap-e-decl-legacy-rhs-unemitted-s473 | (P6) Missing: W-GRANT-REDUNDANT (SILENT-ABSENT); E-FOREIGN-REPLACE-PRIVATE (unreachable); E-THEME-TOKEN-CELL-COLLISION (no theme); E-DECL-LEGACY-RHS, E-CELL-NO-RENDER-SPEC and every legacy W- lint (zero hits). |
+| §66.21 | Legacy forms and migration (§63) | REFUSED-LOUD | `<x> = v` and `<todos> = []` give E-PARSE-CLOSER; `const <b> = …` and `const Card = <div props=…>` give E-PARSE-ITEM; `<engine>` and `<theme>` are E-BOOTSTRAP-UNSUPPORTED (probes `leg-*`) | g-bootstrap-e-decl-legacy-rhs-unemitted-s473 | (P6) No Stage-1 "parses identically + W-lint" in the bootstrap. The S469 ruling says "the bootstrap refuses it (**E-DECL-LEGACY-RHS**)" for the tape case; the bootstrap emits a generic E-PARSE-CLOSER instead. NO GAP. |
+| §66.22 | OPEN items, consolidated | N/A | — | — | (P6) List only. O54 has record lag (see Questionable). |
+| §66.23 | Cross-references | N/A | — | — | (P6) |
+
+## §67 — The `<md>` Element — Markdown as Declared Prose
+
+| § | title | status | evidence | gap ids | note |
+|---|---|---|---|---|---|
+| §67 | The `<md>` element | DEFERRED-RULED | gap `g-bootstrap-md-static-owed-s462` (MED, open; known-gaps.md:3179). It lists the six owed steps. | g-bootstrap-md-static-owed-s462 | (P6) The bootstrap has zero `<md>` code. The behaviour is silent-accept, covered by the gap: ~/.cache/scrml-agent-tmp/spec-coverage-audit/probes-6/lead/md-static.scrml compiles clean and emits `<md>## Title …</md>` verbatim. Conformance: md/* gives 7 FAIL, 6 UNSUPPORTED, 2 … |
+| §67.1 | Overview | N/A | prose and example | g-bootstrap-md-static-owed-s462 | (P6) |
+| §67.2 | Static body: the fourth text-mode production, dedent, placement, attributes | DEFERRED-RULED | gap `g-bootstrap-md-static-owed-s462`, items 1, 3 and 5 | g-bootstrap-md-static-owed-s462 | (P6) No E-MD-INDENT-MIXED, E-MD-IN-PHRASING (probe md-phrasing compiles clean) or E-MD-INTERP-UNCLOSED. The bootstrap parses `${…}` as logic, so `${HOME:-/tmp}` is an E-PARSE error. |
+| §67.3 | scrml-md dialect and W-MD lints | DEFERRED-RULED | same gap, item 5 | g-bootstrap-md-static-owed-s462 | (P6) No W-MD surfacing. |
+| §67.4 | Text-only interpolation (F1) | DEFERRED-RULED | same gap, item 3 | g-bootstrap-md-static-owed-s462 | (P6) Today `${x}` in `<md>` renders as a reactive text node, which is text-only by accident. |
+| §67.5 | The reader's tree | DEFERRED-RULED | same gap, item 2 (call the shared `scrml:md` reader) | g-bootstrap-md-static-owed-s462 | (P6) The API itself lives in stdlib/md and is not a compiler obligation. |
+| §67.6 | Closed element set (MD-SAFE), §5.2 URLs, heading ids | DEFERRED-RULED | same gap, items 4 and 6 | g-bootstrap-md-static-owed-s462 | (P6) No lowering, no E-MD-URL-SCHEME, no slugs. MD-SAFE is not violated today: `[x](javascript:…)` stays inert text inside an unknown element. |
+| §67.7 | `<md of=expr/>` (Nominal, phase 3) | DEFERRED-RULED | gap text: "`<md of=…/>` (phase 3) is owed by both implementations" | g-bootstrap-md-static-owed-s462 | (P6) SPEC banner "Nominal / spec-ahead". The bootstrap compiles it to an empty host with an `of` attribute and no refusal, where impl#1 gives E-MD-OF-NOMINAL. See Questionable. |
+| §67.8 | One reader (F4) | DEFERRED-RULED | same gap, item 2 | g-bootstrap-md-static-owed-s462 | (P6) The bootstrap holds no second reader, so it does not violate "no second reader". |
+| §67.9 | Bounds | N/A | a property of the shared reader (stdlib/md), not of the compiler | g-bootstrap-md-static-owed-s462 | (P6) |
+| §67.10 | Styling | DEFERRED-RULED | follows from item 4 of the gap | g-bootstrap-md-static-owed-s462 | (P6) There is no output to style yet. |
+| §67.11 | Diagnostics | DEFERRED-RULED | same gap, item 5 | g-bootstrap-md-static-owed-s462 | (P6) No `E-MD-` or `W-MD-` string anywhere in self-host-v2 (gap locus). |
+| §67.12 | Cross-references | N/A |  | g-bootstrap-md-static-owed-s462 | (P6) |
+
+## §68 — Long-Running Programs — `<program kind="service">` (DRAFT)
+
+| § | title | status | evidence | gap ids | note |
+|---|---|---|---|---|---|
+| §68 | `<program kind="service">` (DRAFT) | DEFERRED-RULED | gap `g-boot-kind-service-unbuilt-s473` (MED, open, known-gaps.md:566). S473 ruling sets the build order after `kind="tool"` emit, `<host>` and `scrml:process`. | g-boot-kind-service-unbuilt-s473 | (P6) SPEC banner "DRAFT, Nominal". Refused loudly as well: ~/.cache/scrml-agent-tmp/spec-coverage-audit/probes-6/lead/svc.scrml gives E-BOOTSTRAP-UNSUPPORTED "`<program kind=…>` … never ignores one it does not implement". |
+| §68.1 | Syntax | DEFERRED-RULED | same gap | — | (P6) |
+| §68.2 | The kind and its body (E-SERVICE-RENDER, E-SERVICE-CELL-UNSUPPORTED) | DEFERRED-RULED | same gap | — | (P6) |
+| §68.3 | Start (main, `stop` in onMount) | DEFERRED-RULED | same gap | — | (P6) |
+| §68.4 | Event sources (`<stdin>`, `<watch>`, `<onSignal>`; E-SERVICE-SOURCE-PLACEMENT) | DEFERRED-RULED | same gap ("none of the 13 §68 codes is emitted") | g-bootstrap-unknown-tags-resolved-as-html | (P6) Today `<stdin>` in a page compiles clean as an unknown element (~/.cache/scrml-agent-tmp/spec-coverage-audit/probes-6/lead/stdin-in-page.scrml). That is the pre-§68 state, and the out-of-range unknown-element observation applies. |
+| §68.5 | Turn loop, state, back-pressure | DEFERRED-RULED | same gap (no service runtime) | — | (P6) |
+| §68.6 | Traps abort only their turn; `on-trap=` | DEFERRED-RULED | same gap | — | (P6) `on-trap=` on a non-service program gives W-ATTR-001 today (~/.cache/scrml-agent-tmp/spec-coverage-audit/probes-6/lead/ontrap.scrml), matching the current §52.13.3. |
+| §68.7 | Stopping, quiescence, signals, exit codes | DEFERRED-RULED | same gap | — | (P6) |
+| §68.8 | Teardown, `stop-grace=` | DEFERRED-RULED | same gap | — | (P6) |
+| §68.9 | Output and the `scrml:process` seam | DEFERRED-RULED | same gap (blocked on `scrml:process`) | — | (P6) |
+| §68.10 | Determinism and test mode | DEFERRED-RULED | same gap (test-mode unit) | — | (P6) |
+| §68.11 | Banked, not in v1 | N/A | banked list | — | (P6) |
+| §68.12 | Examples | DEFERRED-RULED | same gap (flogence acceptance ports) | — | (P6) |
+| §68.13 | Diagnostics (all Nominal) | DEFERRED-RULED | same gap | — | (P6) |
+| §68.14 | Owed work | N/A | plan text | — | (P6) |
+| §68.15 | Cross-references | N/A |  | — | (P6) |
