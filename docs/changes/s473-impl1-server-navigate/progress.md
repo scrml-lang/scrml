@@ -50,3 +50,13 @@ committed; nor was it returned, so no redirect either.
 - Client-side `_scrml_navigate` (`.Hard` from client code) has no target guard (`javascript:`).
 - Cross-file: a server helper imported from another module that navigates — its importer's handler
   catch is stripped unless the importer itself navigates (fails closed: 500).
+
+## Review round (#1679, LAND-W-F/U — ~/.cache/scrml/review/s473-1679/REVIEW.md)
+- ad093ea8a — F1 client origin pin (frozen `_SCRML_NAV_ORIGINS` in both bundles), F4 module-private
+  `Symbol()` + settle re-check, F5 `#fragment` target settles, F3 docblock corrected, F7 call-site
+  scanner (no member calls / string / comment text) + empty navigate() → E-NAV-NO-PATH in the string
+  lowering. Tests: integration 36 (6 new, red on 3d9ec7db4), browser 5 (3 new, red on 3d9ec7db4).
+- F3 lint filed as a gap (needs a §34 row + a reliable codegen→diagnostics channel):
+  g-impl1-server-navigate-target-unproven-lint-s473 (MED, open). Proposed name W-NAV-TARGET-UNPROVEN (reading).
+- F6 filed: g-impl1-per-route-stub-ignores-server-navigate-s473 (LOW, latent).
+- F2 (navigate inside transaction{}) left as is, pending the owner ruling; its test stays pinned.
