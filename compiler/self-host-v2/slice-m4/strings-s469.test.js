@@ -61,7 +61,7 @@ describe("B — string methods are typed member calls", () => {
     expect(codes(prog(S, `        <p>\${@s.toUpperCase(1)}</p>`))).toEqual(["E-CALL-ARITY"]);
   });
   test("an argument of unknown type is refused, fail closed (never handed to the host unchecked)", () => {
-    const src = prog(S + `\n    function f() { return 1; }`, `        <p>\${@s.charAt(f())}</p>`);
+    const src = prog(S + `\n    function f() { return fr(1); }\n    function fr(n: int) { if (n > 0) { return fr(n - 1); } else { return 1; } }`, `        <p>\${@s.charAt(f())}</p>`);
     const d = diag(src, "E-BOOTSTRAP-UNSUPPORTED");
     expect(d?.message).toContain("cannot resolve");
   });

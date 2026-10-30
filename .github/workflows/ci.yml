@@ -187,7 +187,9 @@ jobs:
       # with impl#1 — and the surface floor holds (a new README / NERDME / DESIGN / docs/**.md page
       # with scrml in it must be gated or excused with a reason). Dated pre-S469 articles and the two
       # release announcements are bannered and excused file by file (S469 "Banner + exempt").
-      - name: Claim gate (every public scrml fence compiles; the surface floor)
+      # S473 — C2: a repo-derived figure (lines / tests / modules / codes / …) on the same surface must
+      # cite docs/FACTS.md on its line or paragraph (scripts/claim-gate-c2.js).
+      - name: Claim gate (every public scrml fence compiles; derived figures cite FACTS.md; the surface floor)
         if: ${{ !cancelled() }}
         run: bun scripts/claim-gate.js
       # ABSOLUTE floor (NOT differential): every shipped showcase PROGRAM (examples/* + multi-file
