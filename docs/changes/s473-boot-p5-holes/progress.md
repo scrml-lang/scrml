@@ -10,8 +10,8 @@ Bootstrap only (compiler/self-host-v2 + scripts/scrml-boot.ts). impl#1 frozen.
 - [x] 4 §47.1.1 — E-NAME-COLLIDES-RESERVED-PREFIX (declarations + bare/@ references; stdlib exempt)
 - [x] 5 §51.0.E / O33 — `<program>` field with no value → E-BOOTSTRAP-UNSUPPORTED naming O33
 - [x] tests: slice-m4/p5-holes-s473.test.js (17 red on base, 25/25 green); fixtures that leaned on the Unknown call result updated
-- [ ] known-gaps: #1673 files the ids — merge main after it lands, then RESOLVE/NARROW (do not file new)
-- [ ] gates: slices m1–m4, CI checks job, types-gate, s34-census, e2e-render-map
+- [x] known-gaps (ids from #1673): resolved dev-static, derived-single, no-value-cell; narrowed unannotated-return (recursion residual), reserved-prefix (member names); coverage rows updated
+- [x] gates: slices, hook, types-gate, s34-census, e2e-render-map, snippet/claim/floor/spec-index/delta/conformance-report, spec-coverage-check
 - [ ] PR
 
 ## Corpus (conformance/cases, samples, stdlib, examples — 2858 files, bootstrap)
