@@ -1,0 +1,6 @@
+// s473 fixture stdlib — a module NOT on the §12.2 Trigger-3 list: its import stays admitted.
+${
+    export fn twice(s: string) -> string {
+        return s + s;
+    }
+}

@@ -153,7 +153,7 @@ describe("scrml:math on the bootstrap — compiled and RUN, client and server", 
       for (const js of [client, server]) expect(js).toContain('import * as hostmod$0 from "./_scrml/math/host.js";');
       // the server artifact, loaded FROM the output directory, resolves the host module there
       const mod = await import(pathToFileURL(join(out, "program.server.js")).href);
-      const srv = mod.createServer({ connect: () => spyDriver().fn, log: () => {}, respond: plainRespond });
+      const srv = mod.createServer({ connect: () => spyDriver().fn, log: () => {}, respond: plainRespond, tenantRelations: async () => [] });
       const route = mod.manifest.routes.find((x) => x.fn === "onServer").path;
       const res = await srv.fetch(plainRequest(route, "POST", { "Content-Type": "application/json", Cookie: "scrml_csrf=t", "X-CSRF-Token": "t" }, "[2.5]"));
       expect([res.status, JSON.parse(await res.text())]).toEqual([200, "2 3 2 1 -1.5 127"]);

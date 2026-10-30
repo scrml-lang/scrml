@@ -1,0 +1,6 @@
+// s473 fixture stdlib — a submodule of a server-only module (`scrml:auth/jwt`) is server-only too.
+${
+    export fn token(s: string) -> string {
+        return "jwt:" + s;
+    }
+}
