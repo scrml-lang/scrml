@@ -1,0 +1,6 @@
+<program>
+    <db src="t.db">
+    fn f() -> int { const r = ?{`SELECT 1 AS a`}.get(); return 1; }
+    </db>
+    <main><p>hi</p></main>
+</program>

@@ -1,0 +1,12 @@
+<program db="./app.db">
+    type E:enum = { Bad, QueryFailed(message: string), ConstraintViolation(field: string), ConnectionLost }
+    function move(a: int)! E {
+        ?{`BEGIN`}.run();
+        ?{`UPDATE acct SET n = n - ${a}`}.run();
+        if (a > 2) fail .Bad;
+        ?{`COMMIT`}.run();
+        return 1;
+    }
+    function go() { const r: int = move(3) !{ _ :> return }; }
+    <main><button onclick=go()>a</button></main>
+</program>

@@ -1,0 +1,5 @@
+<program>
+    let <n:int=0/>
+    function f() -> boolean { return @n is 0; }
+    <main><p>${f()}</p></main>
+</program>

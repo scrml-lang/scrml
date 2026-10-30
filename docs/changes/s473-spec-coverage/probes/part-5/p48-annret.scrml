@@ -1,0 +1,6 @@
+<program>
+    let <n:int=0/>
+    fn f() -> string { return "s"; }
+    function g() { @n = f(); }
+    <main><p>${@n}</p><button onclick=g()>g</button></main>
+</program>

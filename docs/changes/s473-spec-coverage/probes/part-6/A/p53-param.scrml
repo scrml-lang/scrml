@@ -1,0 +1,5 @@
+<program>
+    let <n:number=0/>
+    function setN(x: number(>0)) { @n = x; }
+    <main><button onclick=setN(-5)>go</button><p>${@n}</p></main>
+</program>

@@ -1,0 +1,4 @@
+<program>
+    type T:struct = { m: [string: int] }
+    <p>hi</p>
+</program>

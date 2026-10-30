@@ -1,0 +1,4 @@
+<program>
+    function f(c: bool) -> int { const x = if (c) { lift 1; } else { lift 2; }; return x; }
+    <main><p>${f(true)}</p></main>
+</program>

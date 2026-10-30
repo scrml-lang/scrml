@@ -1,0 +1,5 @@
+<program>
+let <b:bool=true/>
+function f() { @b = not @b; }
+<main><button onclick=f()>go</button></main>
+</program>

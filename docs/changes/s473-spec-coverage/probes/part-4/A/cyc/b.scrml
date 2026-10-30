@@ -1,0 +1,4 @@
+${
+  import { g } from "./c.scrml";
+  export function f(x: int) -> int { return g(x); }
+}

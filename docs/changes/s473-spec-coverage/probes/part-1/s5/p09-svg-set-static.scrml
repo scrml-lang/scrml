@@ -1,0 +1,3 @@
+<program>
+<svg><a><set attributeName="href" to="javascript:alert(1)"/><text>x</text></a></svg>
+</program>

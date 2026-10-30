@@ -1,0 +1,5 @@
+<program>
+    let <out:int=0/>
+    async function f() -> int { return 1; }
+    <p>${@out}</p>
+</program>

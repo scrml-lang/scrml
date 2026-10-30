@@ -1,0 +1,5 @@
+<program>
+    type T:struct = { id: int, name: string }
+    <items:T[free, append]=([{ id: 1, name: "a" }, { id: 1, name: "b" }])/>
+    <main><ul>${ for (it of @items) { lift <li key=it.id>${it.name}</li>; } }</ul></main>
+</program>

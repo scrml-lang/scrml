@@ -1,0 +1,3 @@
+<program lang="ts">
+    <main><p>_={ return 1 }=</p></main>
+</program>

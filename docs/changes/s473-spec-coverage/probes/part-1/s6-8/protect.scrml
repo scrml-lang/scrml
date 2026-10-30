@@ -1,0 +1,5 @@
+<program>
+    <db src="./app.db" protect="password">
+    </db>
+    <main><p>x</p></main>
+</program>

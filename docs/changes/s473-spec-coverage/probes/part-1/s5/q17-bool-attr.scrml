@@ -1,0 +1,4 @@
+<program>
+let <b:bool=false/>
+<button disabled=@b>x</button>
+</program>

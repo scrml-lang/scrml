@@ -1,0 +1,4 @@
+<program>
+${ import { clamp } from 'scrml:math' }
+<main><p>x</p></main>
+</program>

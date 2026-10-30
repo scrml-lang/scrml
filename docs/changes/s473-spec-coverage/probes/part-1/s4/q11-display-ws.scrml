@@ -1,0 +1,9 @@
+<program>
+    type Ph:enum = { A, B }
+    <ph:Ph=.A single>
+        <A rule=.B>"two  spaces
+newline"</>
+        <B rule=.A : "B">
+    </>
+    <main><p id="s"><*ph/></p></main>
+</program>

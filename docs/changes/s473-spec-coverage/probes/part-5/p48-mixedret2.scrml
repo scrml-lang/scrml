@@ -1,0 +1,8 @@
+<program>
+    let <n:int=0/>
+    type A:struct = { a: int }
+    type B:struct = { b: int }
+    fn f(k: int) { if (k == 1) { const x: A = { a: 1 }; return x; } const y: B = { b: 2 }; return y; }
+    function g() { const z = f(2); @n = z.a + 1; }
+    <main><p>${@n}</p><button onclick=g()>g</button></main>
+</program>

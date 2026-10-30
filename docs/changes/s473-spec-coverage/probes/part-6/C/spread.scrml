@@ -1,0 +1,14 @@
+<program>
+    type Status:enum = { Placed, Packed, Shipped }
+    let <order:struct>
+        <id:int=1/>
+        <status:Status=.Placed>
+            <Placed rule=.Packed/>
+            <Packed rule=.Shipped/>
+            <Shipped/>
+        </>
+    </>
+    function a() { @order = { ...@order, status: .Shipped }; }
+    function b() { @order.status = .Shipped; }
+    <main><button onclick=a()>a</button><button onclick=b()>b</button></main>
+</program>

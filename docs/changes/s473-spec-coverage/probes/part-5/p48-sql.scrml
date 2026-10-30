@@ -1,0 +1,6 @@
+<program>
+    let <n:int=0/>
+    <db src="./a.db"/>
+    fn q() -> int { const r = ?{`SELECT 1 AS one`}.get(); return 1; }
+    <main><p>${@n}</p></main>
+</program>

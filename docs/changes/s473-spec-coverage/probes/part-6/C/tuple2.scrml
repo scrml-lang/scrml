@@ -1,0 +1,4 @@
+<program>
+    <coords:[:number, :number]=([0, 0])/>
+    <main><p>x</p></main>
+</program>

@@ -1,0 +1,5 @@
+<program>
+    let <owner:string="a"/>
+    function f() -> string { const o = { @owner }; return o.owner; }
+    <main><p>${f()}</p></main>
+</program>

@@ -1,0 +1,3 @@
+<program>
+    <main><keyboard/><mouse id="m"/><gamepad id="g" index=7/><p>hi</p></main>
+</program>

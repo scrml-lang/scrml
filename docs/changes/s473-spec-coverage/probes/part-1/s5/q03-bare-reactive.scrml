@@ -1,0 +1,4 @@
+<program>
+let <count:int=0/>
+<div title=count>x</div>
+</program>

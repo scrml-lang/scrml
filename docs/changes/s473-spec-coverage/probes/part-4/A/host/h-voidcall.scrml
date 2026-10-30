@@ -1,0 +1,7 @@
+<host>
+  ping() = window.foo.ping()
+</host>
+<program>
+
+<button onclick=ping()>x</button>
+</program>

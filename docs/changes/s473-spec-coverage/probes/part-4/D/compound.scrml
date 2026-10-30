@@ -1,0 +1,6 @@
+<program>
+let <y:string="z"/>
+function g() -> string | not { @y = @y + "!"; return not; }
+function f() { if (g() is given) { @y = "b"; } }
+<main><button onclick=f()>go</button></main>
+</program>

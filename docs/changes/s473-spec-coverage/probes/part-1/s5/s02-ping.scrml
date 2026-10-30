@@ -1,0 +1,3 @@
+<program>
+<a href="/x" ping="/a javascript:alert(1)">x</a>
+</program>

@@ -1,0 +1,16 @@
+<program db="./app.db">
+    type Ok:struct = { ok: int }
+    let <out:string=""/>
+    let <n:int=0/>
+    function cnt(id: int) -> int {
+        const r: Ok = ?{`SELECT count(*) AS ok FROM t WHERE id = ${id}`}.get() !{ _ :> { return 0; } };
+        return r.ok;
+    }
+    function bump(id: int) -> int {
+        ?{`UPDATE t SET x = x + 1 WHERE id = ${id}`}.run() !{ _ :> { return 0; } };
+        return 1;
+    }
+    function lbl() -> int { return (cnt(1) !{ _ :> 0 }) + 1; }
+    <d:int=(@n + lbl())/>
+    <main><p>${lbl()}</p><p if=(lbl() > 0)>x</p></main>
+</program>

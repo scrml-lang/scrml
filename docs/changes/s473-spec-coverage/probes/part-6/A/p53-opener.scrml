@@ -1,0 +1,4 @@
+<program>
+    let <hp:number(>0)=5/>
+    <main><p>${@hp}</p></main>
+</program>

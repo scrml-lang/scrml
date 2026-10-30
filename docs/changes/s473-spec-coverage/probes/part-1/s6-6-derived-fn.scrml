@@ -1,0 +1,7 @@
+<program>
+    let <p:int=1/>
+    function dbl() -> int { return @p * 2; }
+    <d:int=(dbl())/>
+    function inc() { @p = @p + 1; }
+    <main><button id="b" onclick=inc()>g</button><p id="o">${@d}</p></main>
+</program>

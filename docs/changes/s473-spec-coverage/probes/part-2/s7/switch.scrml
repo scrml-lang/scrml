@@ -1,0 +1,5 @@
+<program>
+    let <out:int=0/>
+    function f(k: int) -> int { switch (k) { case 1: return 1; } return 2; }
+    <p>${@out}</p>
+</program>

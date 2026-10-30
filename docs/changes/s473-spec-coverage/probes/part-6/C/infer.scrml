@@ -1,0 +1,8 @@
+<program>
+    type U:struct = { name: string }
+    let <user:U=({ name: "a" })/>
+    <n=(1 + 2)/>
+    <r=1.5/>
+    <x=(@user.name)/>
+    <main><p>${@n} ${@r} ${@x}</p></main>
+</program>

@@ -1,0 +1,5 @@
+<program>
+    let <n:int=0/>
+    function inc() { @n += 1 }
+    <main><button onclick=inc()>${@n}</button></main>
+</program>

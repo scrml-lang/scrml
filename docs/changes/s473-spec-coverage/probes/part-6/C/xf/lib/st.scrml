@@ -1,0 +1,5 @@
+export type Box:struct = { a: int }
+export let <shared:struct>
+    export let <pub:int=0/>
+    let <priv:int=0/>
+</>

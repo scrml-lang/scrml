@@ -1,0 +1,6 @@
+<program>
+    <c:int=0/>
+    <d:int=(@c * 2)/>
+    function f() { @d = 5; }
+    <main><p>${@d}</p><button onclick=f()>x</button></main>
+</program>

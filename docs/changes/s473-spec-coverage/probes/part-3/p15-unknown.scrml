@@ -1,0 +1,6 @@
+<program>
+    <main>
+        <Widget title="x"/>
+        <frobnicate/>
+    </main>
+</program>

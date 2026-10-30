@@ -1,0 +1,5 @@
+<program>
+<n:int=0/>
+${ fn f(x: int | not) -> bool { return x is some; } }
+<p>${f(@n)}</p>
+</program>

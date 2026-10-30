@@ -1,0 +1,6 @@
+<program>
+    let <n:int=0/>
+    function f() -> int { return 1; }
+    fn g() -> int { return f(); }
+    <main><p>${@n}</p></main>
+</program>

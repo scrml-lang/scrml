@@ -1,0 +1,5 @@
+<program>
+    let <n:int=0/>
+    async fn a() -> int { return 1; }
+    <main><p>${@n}</p></main>
+</program>

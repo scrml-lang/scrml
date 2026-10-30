@@ -1,0 +1,5 @@
+<program>
+<n:int=0/>
+${ fn f(x: int | not) -> int { given x => { return x; } return 0; } }
+<p>${f(@n)}</p>
+</program>

@@ -1,0 +1,5 @@
+<program>
+    let <n:int=0/>
+    fn w() -> int { @n = 5; return 1; }
+    <main><p>${@n}</p></main>
+</program>

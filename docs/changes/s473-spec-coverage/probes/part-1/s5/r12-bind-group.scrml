@@ -1,0 +1,5 @@
+<program>
+let <c:string="red"/>
+<input type="radio" name="c" value="red" bind:group=@c/>
+<input type="radio" name="c" value="blue" bind:group=@c/>
+</program>

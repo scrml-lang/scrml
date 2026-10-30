@@ -1,0 +1,6 @@
+<program>
+    type Col:enum = { Red, Blue }
+    let <c=(Col.Red)/>
+    function f() { @c = .Blue; }
+    <button onclick=f()>${@c}</button>
+</program>

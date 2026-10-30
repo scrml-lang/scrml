@@ -1,0 +1,6 @@
+<program>
+    let <n:int=0/>
+    fn dbl(x: int) -> int { return x * 2; }
+    function g() -> int { const h = dbl; return h(2); }
+    <main><p>${@n}</p></main>
+</program>

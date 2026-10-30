@@ -1,0 +1,10 @@
+<program>
+    <db src="./app.db">
+        type Row:struct = { id: int }
+    </db>
+    type R:enum = { A(n: int), B }
+    let <c:int=0/>
+    function srv() -> R { const r = ?{`SELECT 1 AS id`}.all() !{ _ :> [] }; return R.A(1); }
+    function go() { const v = srv() !{ _ :> R.B }; @c = match v { .A(n) :> n, .B :> 0 }; }
+    <main><button onclick=go()>${@c}</button></main>
+</program>

@@ -1,0 +1,6 @@
+<program>
+    type S:enum = { A, B }
+    let <s:S=.A/>
+    function f() -> string { return match @s { ::A :> "a", ::B :> "b" }; }
+    <p>${f()}</p>
+</program>

@@ -1,0 +1,4 @@
+<program>
+    function top() { window.scrollTo(0, 0); }
+    <main><button onclick=top()>t</button></main>
+</program>

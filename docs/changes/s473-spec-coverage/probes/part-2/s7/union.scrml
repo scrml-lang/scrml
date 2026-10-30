@@ -1,0 +1,5 @@
+<program>
+    let <n:int=3/>
+    function f(x: int | string) -> int { return 1; }
+    <p>${@n}</p>
+</program>

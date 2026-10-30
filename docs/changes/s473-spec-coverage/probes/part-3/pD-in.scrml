@@ -1,0 +1,4 @@
+<program>
+    function a() -> int { const f = new Float64Array(3); return 1; }
+    <main><p>${a()}</p></main>
+</program>

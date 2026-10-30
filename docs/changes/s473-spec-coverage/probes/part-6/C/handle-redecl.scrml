@@ -1,0 +1,6 @@
+<program>
+    let <c:int=0/>
+    <card title:string/>
+    renders <p>${title}</p>
+    <main><card as=h title="a"/><card as=h title="b"/><card as=c title="c"/></main>
+</program>

@@ -1,0 +1,4 @@
+<program>
+    ${ import { x } from "scrml:fs"; }
+    <main><p>a</p></main>
+</program>

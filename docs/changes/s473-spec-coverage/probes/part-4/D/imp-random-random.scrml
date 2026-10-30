@@ -1,0 +1,4 @@
+<program>
+${ import { random } from 'scrml:random' }
+<main><p>x</p></main>
+</program>

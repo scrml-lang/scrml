@@ -1,0 +1,9 @@
+<program db="./app.db">
+    type Note:struct = { id: int, body: string }
+    function addNote(body: string) -> int {
+        ?{`INSERT INTO notes (body) VALUES (${body}); DELETE FROM notes`}.run() !{ _ :> { return 0; } };
+        return 1;
+    }
+    function onAdd() { const r: int = addNote("x") !{ .Transport(t) :> return }; }
+    <main><button onclick=onAdd()>a</button></main>
+</program>

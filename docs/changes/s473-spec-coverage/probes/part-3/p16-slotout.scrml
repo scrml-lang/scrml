@@ -1,0 +1,5 @@
+<program>
+    <main>
+        <div><slot/></div>
+    </main>
+</program>

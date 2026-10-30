@@ -1,0 +1,4 @@
+<program>
+    ${ import { x } from "scrml:store"; }
+    <main><p>a</p></main>
+</program>

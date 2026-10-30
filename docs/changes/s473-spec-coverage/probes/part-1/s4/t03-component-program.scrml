@@ -1,0 +1,4 @@
+<program>
+<Svc:struct/> renders <div><program auth="required"><p>x</p></program></div>
+<Svc/>
+</program>

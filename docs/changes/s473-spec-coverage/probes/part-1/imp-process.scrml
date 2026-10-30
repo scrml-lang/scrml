@@ -1,0 +1,4 @@
+<program>
+    ${ import { x } from "scrml:process"; }
+    <main><p>a</p></main>
+</program>

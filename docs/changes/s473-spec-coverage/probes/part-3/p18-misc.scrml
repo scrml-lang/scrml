@@ -1,0 +1,12 @@
+<program>
+    type C:enum = { Red, Green }
+    type P:struct = { a: int }
+    function lit(s: string) -> int { return match s { "a" :> 1, "b" :> 2, }; }
+    function lit2(n: int) -> int { return match n { 1 :> 1, else :> 2, }; }
+    function lit3(b: bool) -> int { return match b { true :> 1, false :> 0, }; }
+    function st(p: P) -> int { return match p { else :> 1, }; }
+    function isop(c: C) -> bool { return c is .Red; }
+    function un(x: C | not) -> int { return match x { .Red :> 1, .Green :> 2, not :> 0, }; }
+    function un2(x: C | not) -> int { return match x { .Red :> 1, .Green :> 2, }; }
+    <main><p>${lit("a")} ${lit2(1)} ${lit3(true)} ${st({ a: 1 })} ${isop(.Red)} ${un(not)} ${un2(not)}</p></main>
+</program>

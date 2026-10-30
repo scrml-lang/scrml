@@ -1,0 +1,7 @@
+<program>
+    let <flag:bool=true/>
+    <xs:string[free, replace]=(["a", "b"])/>
+    <main>
+        <each in=@xs as x><li><b if=@flag>${x}</b><i if=(x == "a")>A</i></li></each>
+    </main>
+</program>

@@ -1,0 +1,5 @@
+<program>
+let <x:string=""/>
+function f() { window.open(@x); }
+<button onclick=f()>x</button>
+</program>

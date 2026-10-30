@@ -1,0 +1,6 @@
+<program>
+    function a() -> string { return JSON.stringify(1); }
+    function b() -> int { console.log("x"); return 1; }
+    function c() -> int { const d = new Date(); return 1; }
+    <main><p>${a()} ${b()} ${c()}</p></main>
+</program>

@@ -1,0 +1,5 @@
+<program>
+type C:enum = { A, B }
+let <c:C=.A/>
+<select bind:value=@c><option value="A">A</option><option value="Z">Z</option></select>
+</program>

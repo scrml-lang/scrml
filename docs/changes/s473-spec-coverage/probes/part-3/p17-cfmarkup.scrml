@@ -1,0 +1,10 @@
+<program>
+    <xs:string[free, replace]=(["a", "b"])/>
+    <main>
+        <ul>
+            for (x of @xs) {
+                <li>${x}</li>
+            }
+        </ul>
+    </main>
+</program>

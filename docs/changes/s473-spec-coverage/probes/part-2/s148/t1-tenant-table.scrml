@@ -1,0 +1,8 @@
+// §14.8.10 item 2: a compile-time SQLite file holding an undeclared tenant_id table → E-TENANT-UNDECLARED expected
+<program>
+    <db src="./app.db">
+        type Order:struct = { id: int, item: string }
+        <orders:Order[]=(?{`SELECT id, item FROM orders`}.all() !{ _ :> [] })/>
+    </db>
+    <main><p>${@orders.length}</p></main>
+</program>

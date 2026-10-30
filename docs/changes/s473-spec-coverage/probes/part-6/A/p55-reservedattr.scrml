@@ -1,0 +1,7 @@
+<program>
+    <signup isValid:string="n">
+        let <email:string="" req/>
+        renders <input bind:value=@email/>
+    </>
+    <main><*signup/></main>
+</program>

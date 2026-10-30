@@ -1,0 +1,5 @@
+<program>
+    let <n:int=0/>
+    function hello() { @n = 1; }
+    <main><onMount>${ hello(); }</onMount><p>${@n}</p></main>
+</program>

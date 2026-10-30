@@ -1,0 +1,4 @@
+<program>
+    let <q:string="a" pinned/>
+    <main><p>${@q}</p></main>
+</program>

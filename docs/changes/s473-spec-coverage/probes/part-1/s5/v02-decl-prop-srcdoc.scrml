@@ -1,0 +1,6 @@
+<program>
+<fr d:string="">
+</>
+renders <iframe srcdoc=d></iframe>
+<main><fr d="<script>alert(1)</script>"/></main>
+</program>

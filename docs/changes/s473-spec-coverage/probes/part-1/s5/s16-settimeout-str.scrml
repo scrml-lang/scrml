@@ -1,0 +1,4 @@
+<program>
+function f() { setTimeout("alert(1)", 1); }
+<button onclick=f()>x</button>
+</program>

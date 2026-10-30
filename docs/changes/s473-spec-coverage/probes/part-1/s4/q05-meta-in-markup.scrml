@@ -1,0 +1,3 @@
+<program>
+<p>x ^{ emit("y") } z</p>
+</program>

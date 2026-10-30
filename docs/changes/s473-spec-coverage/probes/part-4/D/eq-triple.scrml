@@ -1,0 +1,6 @@
+<program>
+let <n:int=0/>
+let <b:bool=false/>
+function f() { @b = @n === 1; }
+<main><button onclick=f()>x</button></main>
+</program>

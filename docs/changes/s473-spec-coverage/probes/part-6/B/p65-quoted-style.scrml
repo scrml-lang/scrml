@@ -1,0 +1,4 @@
+<program>
+<v:string="x"/>
+<p style="background: url(${@v})">hi</p>
+</program>

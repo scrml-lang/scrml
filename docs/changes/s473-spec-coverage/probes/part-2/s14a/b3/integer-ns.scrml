@@ -1,0 +1,4 @@
+<program>
+    function f() -> bool { const v = integer.parse("1"); return v is given; }
+    <p>${f()}</p>
+</program>

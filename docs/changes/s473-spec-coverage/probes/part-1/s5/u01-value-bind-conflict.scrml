@@ -1,0 +1,5 @@
+<program>
+let <s:string=""/>
+let <t:string=""/>
+<input value=(@t) bind:value=@s/>
+</program>

@@ -1,0 +1,8 @@
+<program>
+    let <form:struct>
+        let <name:string=""/>
+        let <email:string=""/>
+    </>
+    function setIt() { @form.name = "alice"; }
+    <main><p id="n">${@form.name}</p><button onclick=setIt()>x</button></main>
+</program>

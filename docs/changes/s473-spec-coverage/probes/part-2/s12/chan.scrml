@@ -1,0 +1,6 @@
+<program>
+    <channel name="room">
+        function pub(m: string) { broadcast(m); }
+    </channel>
+    <main><p>x</p></main>
+</program>

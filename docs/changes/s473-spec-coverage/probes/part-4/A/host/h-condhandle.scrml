@@ -1,0 +1,8 @@
+<host>
+  type O:host
+  mk() -> O | not = window.foo.make()
+</host>
+<program>
+
+<p>${mk() is given}</p>
+</program>

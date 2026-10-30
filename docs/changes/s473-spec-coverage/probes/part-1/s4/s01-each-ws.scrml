@@ -1,0 +1,4 @@
+<program>
+<xs:string[free]=(["Peter"])/>
+<ul><each in=@xs as x><li>${x} ${x}   z</li></each></ul>
+</program>
