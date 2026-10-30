@@ -21,4 +21,7 @@ Intermittents seen once each (not families): S27 §51.11 timer audit (4092853370
 - [x] fix hook-slice test stub
 - [x] fix spec-coverage-check CRLF + test (new CRLF cases: 2 red with the normalization removed)
 - [x] known-gaps: g-windows-facts-dangling-… and g-windows-hook-trigger-… resolved; filed g-windows-impl1-routemap-native-key-miss-s473 (MED, defer=impl1-s471-policy)
-- [ ] PR, windows job green on the three fixed families (the impl#1 family stays red until compiler/src is ruled)
+- [x] PR #1681. Dispatched windows run 41069177484: the three fixed families are green; only the 20 impl#1 cases remain (down from 28 unique on main)
+
+## Guard (proposal, not implemented)
+All four introducing PRs (#1620, #1658, #1664, #1673) ran `windows` on the PR itself and it was RED. They merged anyway because main was already red, so a new family looked the same as the old ones. The missing piece is a ratchet, more than visibility: a committed baseline of known Windows failures, each tied to a gap id, where the job fails only on a failure outside the baseline. That makes `windows` safe to require.
