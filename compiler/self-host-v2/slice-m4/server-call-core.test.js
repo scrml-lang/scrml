@@ -118,13 +118,15 @@ describe("S2 — §19.9.10 the client call is failable: E-ERROR-002, totality, `
   });
 
   test("with the wrapper declared, `?` re-fails every variant of the client set — the four retags", () => {
-    const E = `\n    type SyncError:enum = {\n        Conflict(current: int)\n        TooLong(limit: int)\n        Storage\n        Transport(t: ServerCallError)\n    }\n    function sync()! SyncError {\n        @version = saveNote("n1", @body, @version)?;\n        @words = wordCount("n1")?;\n    }`;
+    const E = `\n    type SyncError:enum = {\n        Conflict(current: int)\n        TooLong(limit: int)\n        Storage\n        Transport(t: ServerCallError)\n    }\n    function sync()! SyncError {\n        @version = saveNote("n1", @body, @version)?;\n    }\n    function sync2()! SyncError {\n        @words = wordCount("n1")?;\n    }`;
+    // s473 (F11, ruled S473): two server calls in ONE client-placed `!` function are E-TX-CLIENT-MULTI-CALL
+    // (no transaction spans two requests) — the two retags are read from two functions
     const r = clean(P(NOTES + E));
     const s1 = fnCore(r, "sync").body.stmts[0];
     const at = s1.data.then.stmts[0];
     expect(at.data.arms.map((a) => [a.pat.data.idx, a.body.stmts[0].data.idx])).toEqual([[0, 0], [1, 1], [2, 2], [3, 3]]);
     // the non-`!` callee: `?` on a failable call (no E-ERROR-004) — its one variant re-fails as Transport
-    const s2 = s1.data.then.stmts.find((x) => v(x) === "Suspend");
+    const s2 = fnCore(r, "sync2").body.stmts.find((x) => v(x) === "Suspend");
     const at2 = s2.data.then.stmts[0];
     expect(at2.data.err.hint).toBe("Transport");
     expect(at2.data.arms.map((a) => a.body.stmts[0].data.idx)).toEqual([3]);

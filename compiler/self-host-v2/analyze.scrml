@@ -14283,7 +14283,34 @@ ${
     // its offset) is a defect, refused.
     fn resolveRow(env: Env, n: ANode, st: AS) -> AS {
         if (n.nid < 0) return addDiag(st, env.file, n.span, "E-BOOTSTRAP-UNSUPPORTED", "internal: a lifted element was not read (a bootstrap defect — please report it)")
-        return resolveNodes(withLift(env, LiftCtx.NoLift), [n], st)
+        return resolveNodes(withLift(env, LiftCtx.NoLift), [n], liftedKeyDiag(env, n, st))
+    }
+
+    // s473 (ruled refusals) — §6.5.3 / §17.4b (S473 review-surfaced 5): "`key=`
+    // on the lifted element (§6.5.3) is the LEGACY spelling: an implementation
+    // that speaks the ruled dialect (the bootstrap) refuses it with a hint naming
+    // the header form". The ruling's scope is the LIFTED element (#1690 review
+    // F8): `key=` elsewhere is not judged here. It was written as a DOM
+    // attribute (g-boot-lift-key-attr-silently-emitted-s473). The header form
+    // is not parsed by the bootstrap yet (#1690 review F9) — the message says so.
+    fn liftedKeyDiag(env: Env, n: ANode, st: AS) -> AS {
+        const k: ANodeK = n.k
+        const el: AElem | not = match k {
+            .Elem(e: x) :> x
+            .Text(text: t) :> not
+            .Interp(e: x) :> not
+            .DeclNode(d: d) :> not
+            .Effect(w: w) :> not
+            .Css(c: c) :> not
+            .Gather(f: f) :> not
+        }
+        if (el is not) return st
+        for (const a of el.attrs) {
+            if (a.name.toLowerCase() == "key") {
+                return addDiag(st, env.file, a.span, "E-BOOTSTRAP-UNSUPPORTED", "`key=` on the lifted `<" + el.tag + ">` is the legacy keyed-iteration spelling (§6.5.3), refused (ruled S473: the loop-header `key` is canonical, §17.4b — `for (const it of @items key it.id)`). The bootstrap does not parse the header `key` yet either, so for now drop the `key=`: the list renders unkeyed (positional), and `key=` would only have been written as a DOM attribute")
+            }
+        }
+        return st
     }
 
     fn liftsMarkup(w: ALift) -> boolean {
@@ -14469,6 +14496,7 @@ ${
                 counter = rc.s
             }
         }
+        st = localCellClash(env, b.span, b.name, st)     // #1690 review F12: a for-of binder is a function-body const/let (§7.6, D14)
         const rb: RSym = mint(reservedName(st, env.file, b.span, b.name), b.name)
         st = addBind(rb.st, b.nid, BindFact.BBind(rb.s))
         st = addBind(st, f.nid, BindFact.BLoop(label, end, counter))
@@ -16762,15 +16790,24 @@ ${
             const directive: string = refusedDirectiveAttr(a.name, e.tag)
             if (directive != "") {
                 st = addDiag(st, env.file, a.span, "E-BOOTSTRAP-UNSUPPORTED", directive)
-            } else if (a.name == "name") {
+            } else if (a.name.toLowerCase() == "name") {
                 st = addDiag(st, env.file, a.span, "E-BOOTSTRAP-UNSUPPORTED", "a named slot (`<slot name=…>`) is ⚑ O9 (§66.15.2: named and parametric slots are not ruled) — not in the bootstrap; it would be read as the unnamed `<slot/>`. Use one unnamed `<slot/>`")
             }
         }
+        // a named slot is refused above (O9) — one code for it, not a second (#1690 review F6)
+        if (namedSlot(e)) return addElem(st, e.nid, ElemFact.MSlot)
         let own: int[] = []
+        let looped: int[] = []
         const cd: DeclSrc | not = ctxDecl(env)
-        if (cd is given && !cd.isProgram) own = slotsIn(rendersNodes(cd))
+        if (cd is given && !cd.isProgram) {
+            own = slotsIn(rendersNodes(cd))
+            looped = loopSlotsIn(rendersNodes(cd))
+        }
         const at: int = own.indexOf(e.nid)
-        if (at < 0) {
+        if (looped.indexOf(e.nid) >= 0) {
+            // #1690 review F6: a `<slot/>` lifted in a loop of the renders is inside it — and renders once per row
+            st = addDiag(st, env.file, e.span, "E-COMPONENT-020", "a `<slot/>` lifted inside a loop of this `renders` — a use's content would render once per row (§66.15.2 rule 2, S473 D11). Place the `<slot/>` outside the loop")
+        } else if (at < 0) {
             st = addDiag(st, env.file, e.span, "E-DECL-SLOT-OUTSIDE-RENDERS", "`<slot/>` stands outside a declaration's `renders` — it names no use, so it would render nothing (§66.15.2 rule 3, S473 D11). A slot marks where a USE's content goes; put it inside the `renders` of the declaration whose uses carry content")
         } else if (at > 0) {
             st = addDiag(st, env.file, e.span, "E-COMPONENT-020", "a second unnamed `<slot/>` in this `renders` — a use's content would render once per slot (§66.15.2 rule 2, S473 D11). Keep one `<slot/>`")
@@ -16785,32 +16822,43 @@ ${
 
     // The unnamed `<slot/>` elements of a markup tree, in document order
     // (s473: §66.15.2 multiplicity). A slot with a `name=` is not counted (O9 — refused).
-    fn slotsIn(ns: ANode[]) -> int[] {
+    fn slotsIn(ns: ANode[]) -> int[] { return slotsWalk(ns, false, false) }
+
+    // The unnamed `<slot/>`s lifted inside a Tier-0 loop (they render once per row).
+    fn loopSlotsIn(ns: ANode[]) -> int[] { return slotsWalk(ns, true, false) }
+
+    // `wantLooped`: collect the slots under a loop (true) or the ones outside every loop (false).
+    fn slotsWalk(ns: ANode[], wantLooped: boolean, inLoop: boolean) -> int[] {
         let out: int[] = []
         for (const n of ns) {
             const k: ANodeK = n.k
             const kids: int[] = match k {
-                .Elem(e: el) :> slotsInElem(el)
+                .Elem(e: el) :> slotsInElem(el, wantLooped, inLoop)
                 .Text(text: t) :> []
                 .Interp(e: x) :> []
                 .DeclNode(d: dd) :> []
                 .Effect(w: w) :> []
                 .Css(c: c) :> []
-                .Gather(f: f) :> []
+                .Gather(f: f) :> slotsWalk(gatherRows(f), wantLooped, true)
             }
             out = out.concat(kids)
         }
         return out
     }
 
-    fn slotsInElem(el: AElem) -> int[] {
+    fn slotsInElem(el: AElem, wantLooped: boolean, inLoop: boolean) -> int[] {
         if (el.tag == "slot") {
-            for (const a of el.attrs) {
-                if (a.name == "name") return []
-            }
+            if (namedSlot(el) || inLoop != wantLooped) return []
             return [el.nid]
         }
-        return slotsIn(el.kids)
+        return slotsWalk(el.kids, wantLooped, inLoop)
+    }
+
+    fn namedSlot(el: AElem) -> boolean {
+        for (const a of el.attrs) {
+            if (a.name.toLowerCase() == "name") return true
+        }
+        return false
     }
 
     // Does a use carry content between its tags (anything but whitespace)?
@@ -17538,12 +17586,6 @@ ${
             if (directive != "") {
                 // s473 — S473 D26 (`fixed`), S473 D1 / D2 (`protect=` / `authority=`)
                 st = addDiag(st, env.file, a.span, "E-BOOTSTRAP-UNSUPPORTED", directive)
-            } else if (a.name.toLowerCase() == "key") {
-                // s473 (ruled refusals) — §6.5.3 / §17.4b (S473 review-surfaced 5): "`key=` on the
-                // lifted element (§6.5.3) is the LEGACY spelling: an implementation that speaks the
-                // ruled dialect (the bootstrap) refuses it with a hint naming the header form". It
-                // was written as a DOM attribute (g-boot-lift-key-attr-silently-emitted-s473).
-                st = addDiag(st, env.file, a.span, "E-BOOTSTRAP-UNSUPPORTED", "`key=` on `<" + e.tag + ">` is the legacy keyed-iteration spelling (§6.5.3), refused (ruled S473: the loop-header `key` is canonical, §17.4b) — it would be written as a DOM attribute, with no keyed reconciliation. Write the key in the loop header instead: `for (const it of @items key it.id) { lift <" + e.tag + ">…</" + e.tag + ">; }`. (The bootstrap does not build the header `key` yet either — the list renders unkeyed (positional) without one.)")
             } else if (isChainAttr(a.name)) {
                 // s451: `if=` / `else-if=` / `else` (§17.1.1) — chain attributes (chainCheck)
                 st = resolveIfValue(env, a.value, st)
@@ -18038,7 +18080,7 @@ ${
         const rn: ANode[] = rendersNodes(d)
         if (rn.length == 0 && fileErrs(env.g.files, d.file).length == 0) {
             st = addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "`<" + e.tag + "/>` — `<" + e.tag + ">` has no `renders`, and a use of a declaration with no `renders` is ⚑ O51 (§66.6.8, not ruled: an error, or a data-only instance). Until O51 is ruled it is refused, `as=`-bound uses included (S473 D12); give `<" + e.tag + ">` a `renders`, or keep its state in program cells")
-        } else if (hasContentKids(e.kids) && slotsIn(rn).length == 0) {
+        } else if (hasContentKids(e.kids) && slotsIn(rn).length == 0 && loopSlotsIn(rn).length == 0) {
             // §66.15.2 rule 1 (S473 D11): children with no slot
             st = addDiag(st, env.file, e.span, "E-COMPONENT-021", "`<" + e.tag + ">` is given content between its tags, but its `renders` holds no `<slot/>` — the content would have nowhere to go (§66.15.2 rule 1, S473 D11). Add `<slot/>` to `<" + e.tag + ">`'s `renders` where the content belongs, or remove the content")
         }
@@ -26795,7 +26837,7 @@ ${
         let sqls: SqlInfo[] = []
         let creates: int[] = []
         let doms: int[] = []
-        const tq: TxQ = txQuerySets(sum.nodes)     // s473: the transitive query sets (§8.9.2 amendment)
+        const tq: TxQ = txQuerySets(sum.nodes, places)     // s473: the transitive query sets (§8.9.2 amendment)
         let jOff: JournalOff[] = []                 // s473: `PRAGMA journal_mode = OFF` sites (journalDiags)
         let bangWrites: int[] = []                  // s473: the databases a `!` function writes
         for (const f of all) {
@@ -26829,11 +26871,11 @@ ${
                     sqls = sqls.concat([si])
                     if (sr.creates) creates = creates.concat([si.db.id])
                     if (f.failable && si.kind == SqlKind.SqlWrite) bangWrites = bangWrites.concat([si.db.id])
-                    if (journalOff(s.q.chunks)) jOff = jOff.concat([{ file: f.file, span: s.span, fname: f.name, bang: f.failable, db: si.db.id }])
+                    if (journalOff(s.q.chunks)) jOff = jOff.concat([{ file: f.file, span: s.span, fname: f.name, bang: f.failable, db: si.db.id, sym: f.sym }])
                 }
             }
         }
-        st = journalDiags(jOff, bangWrites, st)
+        st = journalDiags(sum.nodes, tq, sqls, jOff, bangWrites, st)
         // §8.1.1 Ownership: a file owns a SQLite database when a query in it creates a table there
         let owned: Db[] = []
         for (const d of dbs) {
@@ -26857,14 +26899,35 @@ ${
     // disables the journal the rollback needs." A `?{}` in a value or action
     // position is refused already (E-VALUE-SERVER-CALL / the U1d split), so the
     // sites here are the functions'.
-    type JournalOff:struct = { file: string, span: ASpan, fname: string, bang: boolean, db: int }
+    // #1690 review F3: both halves read the transitive reach — a site in a
+    // non-`!` function a `!` function calls IS on that `!` function's
+    // connection, and a `!` function writes a database through the non-`!`
+    // functions it calls too.
+    type JournalOff:struct = { file: string, span: ASpan, fname: string, bang: boolean, db: int, sym: int }
 
-    fn journalDiags(js: JournalOff[], bangWrites: int[], st0: AS) -> AS {
+    fn journalDiags(nodes: Callable[], tq: TxQ, sqls: SqlInfo[], js: JournalOff[], ownWrites: int[], st0: AS) -> AS {
         let st: AS = st0
-        for (const j of js) {
+        const reach: boolean[] = bangReach(nodes, tq)
+        let bangWrites: int[] = ownWrites
+        let i: int = 0
+        while (i < nodes.length) {
+            if (nodes[i].kind == CallableK.KFn && nodes[i].f.failable) {
+                for (const a of tq.qs[i]) {
+                    const site: SqlSite = nodes[a.root].f.sqls[a.pos]
+                    for (const si of sqls) {
+                        if (si.nid == site.nid && si.kind == SqlKind.SqlWrite) bangWrites = bangWrites.concat([si.db.id])
+                    }
+                }
+            }
+            i = i + 1
+        }
+        for (const j0 of js) {
+            const k: int = nodeIdx(nodes, j0.sym)
+            let j: JournalOff = j0
+            if (k >= 0 && reach[k]) j = { file: j0.file, span: j0.span, fname: j0.fname, bang: true, db: j0.db, sym: j0.sym }
             const why: string = "`PRAGMA journal_mode = OFF` turns off the rollback journal for the whole connection, and a `!` function's all-or-nothing guarantee (§8.9.2, §19.10) needs that journal to roll back"
             if (j.bang) {
-                st = addDiag(st, j.file, j.span, "E-SQL-JOURNAL-OFF", "'" + j.fname + "' is declared '!' and runs `PRAGMA journal_mode = OFF` — " + why + " (§8.9.2, S473). Remove it, or use another `journal_mode` (`WAL`, `DELETE`, … stay admitted, §14.8.10)")
+                st = addDiag(st, j.file, j.span, "E-SQL-JOURNAL-OFF", "'" + j.fname + "' is declared '!' (or is called by a function declared '!') and runs `PRAGMA journal_mode = OFF` — " + why + " (§8.9.2, S473). Remove it, or use another `journal_mode` (`WAL`, `DELETE`, … stay admitted, §14.8.10)")
             } else if (bangWrites.indexOf(j.db) >= 0) {
                 st = addDiag(st, j.file, j.span, "E-SQL-JOURNAL-OFF", "`PRAGMA journal_mode = OFF` in '" + j.fname + "' sets the connection a `!` function of this program writes through — " + why + " (§8.9.2, S473). Remove it, or use another `journal_mode` (`WAL`, `DELETE`, … stay admitted, §14.8.10)")
             }
@@ -27195,6 +27258,13 @@ ${
     // either way). "Inside a loop" (repeatsInBlock): a query, or a call
     // reaching one, in a region that may run more than once — and a query
     // reached through a recursive non-`!` function.
+    //
+    // F11 (ruled S473, #1690 review — a PERMANENT refusal, §19.10.5): "a
+    // client-placed `!` function that calls two or more server functions is a
+    // PERMANENT named refusal, not an interim one: no transaction can span two
+    // requests." Counted: each call of a server function (a remote call — one
+    // request) the client-placed body makes, directly or through client-side
+    // callees, and one in a repeated region counts twice (remoteRuns).
     fn envelopeDiags(sum: Summary, tq: TxQ, f: FnFacts, st0: AS) -> AS {
         let st: AS = st0
         let manual = false
@@ -27208,10 +27278,17 @@ ${
         if (manual) return st
         const i: int = nodeIdx(sum.nodes, f.sym)
         if (i < 0) return st
+        if (tq.remote[i] >= 2) {
+            return addDiag(st, f.file, f.span, "E-TX-CLIENT-MULTI-CALL", "'" + f.name + "' is declared '!' and runs on the client, and it makes more than one server call (" + tq.remoteWhy[i] + ") — each call is its own request, and no transaction can span two requests, so its all-or-nothing guarantee cannot hold (§19.10.5, S473). Compose the calls in one server `!` function and call that once")
+        }
         const qs: FxAtom[] = tq.qs[i]
-        const tail: string = " The bootstrap does not build the envelope yet (unit U1e), and without it a `fail` after a write leaves that write committed — refused, never compiled non-atomic. Until then: split the work so no `!` function reaches more than one query (a `!` callee keeps its own envelope), or mark each query that need not be atomic with `.nobatch()` (§8.9.5)"
+        const tail: string = " The bootstrap does not build the envelope yet (unit U1e), and without it a `fail` after a write leaves that write committed — refused, never compiled non-atomic. Until then: split the work so no `!` function reaches more than one query (a `!` callee's queries count too — it would run as a nested savepoint, §19.10.6), or mark each query that need not be atomic with `.nobatch()` (§8.9.5)"
         if (qs.length >= 2) {
-            return addDiag(st, f.file, f.span, "E-BOOTSTRAP-UNSUPPORTED", "'" + f.name + "' is declared '!' and its transitive query set (§8.9.2, S473: every `" + sqlSigil() + "}` reached from its body — its own and those of the non-'!' functions it calls) holds " + qs.length + " queries — " + txWhere(sum, tq.qs, i, qs[0]) + " and " + txWhere(sum, tq.qs, i, qs[1]) + " — so it needs the implicit per-handler transaction (§8.9.2, §19.10.5): its body wrapped in `BEGIN` / `COMMIT`, rolled back on an error or a `fail` exit, every one of those queries inside." + tail)
+            return addDiag(st, f.file, f.span, "E-BOOTSTRAP-UNSUPPORTED", "'" + f.name + "' is declared '!' and its transitive query set (§8.9.2, S473: every `" + sqlSigil() + "}` reached from its body — its own and those of the functions it calls, `!` ones included) holds " + qs.length + " queries — " + txWhere(sum, tq.qs, i, qs[0]) + " and " + txWhere(sum, tq.qs, i, qs[1]) + " — so it needs the implicit per-handler transaction (§8.9.2, §19.10.5): its body wrapped in `BEGIN` / `COMMIT`, rolled back on an error or a `fail` exit, every one of those queries inside." + tail)
+        }
+        if (qs.length == 1 && tq.runs[i] >= 2) {
+            // #1690 review F1: one query, reached more than once (two calls of one helper, a diamond)
+            return addDiag(st, f.file, f.span, "E-BOOTSTRAP-UNSUPPORTED", "'" + f.name + "' is declared '!' and its transitive query set (§8.9.2, S473) runs one query more than once — " + txWhere(sum, tq.qs, i, qs[0]) + ", reached through more than one call — so it needs the implicit per-handler transaction (§8.9.2, §19.10.5) around every run of it." + tail)
         }
         const lw: FxAtom | not = witnessOf(tq.loops[i])
         if (lw is given) {
@@ -27234,9 +27311,14 @@ ${
     // `qs[i]` — every `?{}` (none `.nobatch()`) callable i runs or reaches
     // through calls of non-`!` functions; `loops[i]` — a witness that one of
     // them may run more than once (`loopWhy[root]` says how).
-    type TxQ:struct = { qs: FxAtom[][], loops: FxAtom[][], loopWhy: string[] }
+    // `runs[i]` — how many query RUNS callable i reaches along its calls (a
+    // query reached through two calls counts twice — #1690 review F1), capped at
+    // 2; `edges` — the non-`!` call edges the sets are closed over (journalDiags
+    // reads them: what a `!` function reaches).
+    // `remote[i]` — the server calls (requests) client-placed callable i makes, capped at 2; `remoteWhy[i]` names them.
+    type TxQ:struct = { qs: FxAtom[][], loops: FxAtom[][], loopWhy: string[], runs: int[], edges: int[][], remote: int[], remoteWhy: string[] }
 
-    fn txQuerySets(nodes: Callable[]) -> TxQ {
+    fn txQuerySets(nodes: Callable[], places: PlaceFact[]) -> TxQ {
         let own: FxAtom[][] = []
         let edges: int[][] = []
         let i: int = 0
@@ -27249,9 +27331,11 @@ ${
                     if (!s.q.nobatch) q = q.concat([ownAtom("q" + i + "." + p, i, p)])
                     p = p + 1
                 }
+                // F10 (ruled S473, #1690 review): `!` callees count too — an inner `!` runs
+                // as a nested savepoint inside the outer envelope (§19.10.6)
                 for (const r of c.f.scan.refs) {
                     const j: int = nodeIdx(nodes, r.sym)
-                    if (isFnNode(nodes, j) && !nodes[j].f.failable) e = e.concat([j])
+                    if (isFnNode(nodes, j)) e = e.concat([j])
                 }
             }
             own = own.concat([q])
@@ -27259,7 +27343,7 @@ ${
             i = i + 1
         }
         const qs: FxAtom[][] = closeDim(own, edges)
-        // recursion: a callable in a cycle of non-`!` calls runs its queries any number of times
+        // recursion: a callable in a cycle of calls runs its queries any number of times
         let cyc: boolean[] = []
         for (const c of nodes) { cyc = cyc.concat([false]) }
         for (const scc of sccOrder(edges)) {
@@ -27278,7 +27362,7 @@ ${
                 }
                 for (const r of c.f.scan.refs) {
                     const j: int = nodeIdx(nodes, r.sym)
-                    if (w == "" && isFnNode(nodes, j) && !nodes[j].f.failable && qs[j].length > 0 && inRepeat(c.f.repeats, r.span)) w = "a call of `" + nodes[j].label + "`, which runs a query, inside a loop (or a lambda) in `" + c.label + "`"
+                    if (w == "" && isFnNode(nodes, j) && qs[j].length > 0 && inRepeat(c.f.repeats, r.span)) w = "a call of `" + nodes[j].label + "`, which runs a query, inside a loop (or a lambda) in `" + c.label + "`"
                 }
                 if (w == "" && cyc[i] && qs[i].length > 0) w = "`" + c.label + "` runs a query and is recursive (it calls itself, directly or through other functions)"
             }
@@ -27288,7 +27372,87 @@ ${
             why = why.concat([w])
             i = i + 1
         }
-        return { qs: qs, loops: closeDim(ownL, edges), loopWhy: why }
+        // the runs: own queries plus each call's runs, callees first (a cycle is the loop clause's)
+        let runs: int[] = []
+        for (const c of nodes) {
+            let n: int = 0
+            if (c.kind == CallableK.KFn) {
+                for (const q of c.f.sqls) {
+                    if (!q.q.nobatch) n = n + 1
+                }
+            }
+            runs = runs.concat([n])
+        }
+        let own2: int[] = runs
+        for (const scc of sccOrder(edges)) {
+            for (const m of scc) {
+                let n: int = own2[m]
+                for (const j of edges[m]) { n = n + runs[j] }
+                if (n > 2) n = 2
+                runs = runs.slice(0, m).concat([n]).concat(runs.slice(m + 1))
+            }
+        }
+        // the remote calls of client-placed callables, callees first
+        let remote: int[] = []
+        let rwhy: string[] = []
+        for (const c of nodes) {
+            remote = remote.concat([0])
+            rwhy = rwhy.concat([""])
+        }
+        for (const scc of sccOrder(edges)) {
+            for (const m of scc) {
+                const c: Callable = nodes[m]
+                if (c.kind == CallableK.KFn && !isServerPlace(placeOf(places, c.f.sym))) {
+                    let n: int = 0
+                    let names: string[] = []
+                    for (const r of c.f.scan.refs) {
+                        const j: int = nodeIdx(nodes, r.sym)
+                        if (isFnNode(nodes, j)) {
+                            let k: int = 0
+                            if (isServerPlace(placeOf(places, nodes[j].f.sym))) {
+                                k = 1
+                            } else {
+                                k = remote[j]
+                            }
+                            if (k > 0 && inRepeat(c.f.repeats, r.span)) k = 2
+                            if (k > 0) names = names.concat(["`" + nodes[j].label + "`"])
+                            n = n + k
+                        }
+                    }
+                    if (n > 2) n = 2
+                    remote = remote.slice(0, m).concat([n]).concat(remote.slice(m + 1))
+                    rwhy = rwhy.slice(0, m).concat([names.join(", ")]).concat(rwhy.slice(m + 1))
+                }
+            }
+        }
+        return { qs: qs, loops: closeDim(ownL, edges), loopWhy: why, runs: runs, edges: edges, remote: remote, remoteWhy: rwhy }
+    }
+
+    fn isServerPlace(pk: PlaceK) -> boolean {
+        return pk == PlaceK.Server || pk == PlaceK.Split
+    }
+
+    // The callables a `!` function reaches along non-`!` calls — itself included.
+    fn bangReach(nodes: Callable[], tq: TxQ) -> boolean[] {
+        let r: boolean[] = []
+        for (const c of nodes) { r = r.concat([c.kind == CallableK.KFn && c.f.failable]) }
+        let changed = true
+        while (changed) {
+            changed = false
+            let i: int = 0
+            while (i < nodes.length) {
+                if (r[i]) {
+                    for (const j of tq.edges[i]) {
+                        if (!r[j]) {
+                            r = setBoolAt(r, j, true)
+                            changed = true
+                        }
+                    }
+                }
+                i = i + 1
+            }
+        }
+        return r
     }
 
     fn setBoolAt(xs: boolean[], i: int, v: boolean) -> boolean[] {

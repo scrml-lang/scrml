@@ -198,12 +198,22 @@ ${
     // ---- `PRAGMA journal_mode = OFF` (s473 ruled refusals) ---------------------
     // §8.9.2 amendment (S473 review-surfaced 2): "A `?{PRAGMA journal_mode = OFF}`
     // (any case or spacing) inside a `!` function SHALL be a compile error,
-    // E-SQL-JOURNAL-OFF". Read on the plain text, fail closed: whitespace and
-    // quote characters dropped and the case folded, the statement is a PRAGMA
-    // whose text holds `journal_mode=off` or `journal_mode(off)` (a schema
-    // prefix — `main.journal_mode` — included).
+    // E-SQL-JOURNAL-OFF". The comments go first, by the closed-subset reader the
+    // program-body allow-list uses (subsetRead: each `--` / `/* */` comment
+    // becomes one space — #1690 review F2: a leading or inner comment hid the
+    // PRAGMA). Then, whitespace and quote characters dropped and the case
+    // folded, the statement is a PRAGMA whose text holds `journal_mode=off` or
+    // `journal_mode(off)` (a schema prefix — `main.journal_mode` — included). A
+    // text the subset cannot read is judged on its raw words, fail closed: a
+    // PRAGMA holding both `journal_mode` and `off` (the allow-list refuses
+    // such a statement anyway).
     export fn journalOff(chunks: string[]) -> boolean {
-        const raw: string = chunks.join(" ? ").toLowerCase()
+        const sr: SubsetRead = subsetRead(chunks)
+        if (sr.state != 0) {
+            const low: string = chunks.join(" ? ").toLowerCase()
+            return low.indexOf("pragma") >= 0 && low.indexOf("journal_mode") >= 0 && low.indexOf("off") >= 0
+        }
+        const raw: string = sr.chunks.join(" ? ").toLowerCase()
         let t: string = ""
         let i: int = 0
         while (i < raw.length) {

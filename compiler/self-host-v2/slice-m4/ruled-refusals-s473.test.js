@@ -35,9 +35,9 @@ const own = (sql, nb = "") => `        ${SQ}\`${sql}\`}${nb}.run();\n`;
 
 // ---------------------------------------------------------------------------
 describe("1 — §8.9.2 amendment: the interim envelope refusal reads the TRANSITIVE query set", () => {
-  test("two queries, each through a non-`!` helper (none in the `!` body)", () => {
+  test("two queries, each through a non-`!` helper (the body's own query is `.nobatch()`, so it is server-placed)", () => {
     const src = DBP(helper("logIt", "INSERT INTO log (a) VALUES (${a})") + helper("bump", "UPDATE acct SET n = n - ${a}") +
-      bang(`        ${hcall("x", "logIt", "a")}\n        ${hcall("y", "bump", "a")}\n`));
+      bang(own("SELECT n FROM acct", ".nobatch()") + "        const x: int = logIt(a);\n        const y: int = bump(a);\n"));
     const e = errs(src).filter((d) => d.code === "E-BOOTSTRAP-UNSUPPORTED");
     expect(e.length).toBe(1);
     expect(e[0].message).toContain("transitive query set");
@@ -70,17 +70,14 @@ describe("1 — §8.9.2 amendment: the interim envelope refusal reads the TRANSI
     expect(e[0].message).toContain("more than once");
     expect(e[0].message).toContain("inside a loop");
     const viaCall = DBP(helper("bump", "UPDATE acct SET n = n - ${a}") +
-      bang(`        for (let i = 0; i < 3; i = i + 1) {\n            ${hcall("y", "bump", "i")}\n        }\n`));
+      bang(own("SELECT n FROM acct", ".nobatch()") + "        for (let i = 0; i < 3; i = i + 1) {\n            const y: int = bump(i);\n        }\n"));
     expect(codes(viaCall)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
     expect(errs(viaCall)[0].message).toContain("a call of `bump()`");
   });
 
-  test("near-misses: one query (own, or through one helper) compiles; a `!` callee keeps its own envelope; `.nobatch()` is not counted", () => {
+  test("near-misses: one query (own, or through one helper) compiles; `.nobatch()` is not counted", () => {
     expect(codes(DBP(bang(own("UPDATE acct SET n = 1"))))).toEqual([]);
     expect(codes(DBP(helper("bump", "UPDATE acct SET n = n - ${a}") + bang(`        ${hcall("y", "bump", "a")}\n`)))).toEqual([]);
-    // a `!` callee is not followed (its queries are its own envelope's)
-    const g = `    function g(a: int)! SqlError {\n${own("UPDATE acct SET n = 2")}        return 1;\n    }\n`;
-    expect(codes(DBP(g + bang(own("SELECT n FROM acct") + `        ${hcall("y", "g", "a")}\n`)))).toEqual([]);
     // a loop that runs no query, beside one query outside it
     expect(codes(DBP(bang(own("UPDATE acct SET n = 1") + "        for (let i = 0; i < 3; i = i + 1) {\n            const z: int = i;\n        }\n")))).toEqual([]);
     // a helper whose one query carries `.nobatch()`, beside one own query
@@ -264,5 +261,108 @@ describe("9 — §50 (D10): every assignment used as a value outside the kept fo
 
   test("near-miss: a statement-position assignment is not an expression", () => {
     expect(codes(F("        x = a;\n        y = x + 1;\n"))).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// #1690 review (FIX-FIRST) — the reviewer's probes (~/.cache/scrml/review/s473-1690/c_*.mjs), red on 98d02fd03.
+describe("review F1 — a query reached more than once counts more than once (item 1)", () => {
+  const H = helper("bump", "UPDATE acct SET n = n - ${a}");
+  const NB = own("SELECT n FROM acct", ".nobatch()");
+  test("one helper called twice; a helper calling it twice; a diamond", () => {
+    for (const [name, src] of [
+      ["same_helper_twice_server", DBP(H + bang(NB + "        const y: int = bump(a);\n        const w: int = bump(a);\n"))],
+      ["mid_calls_twice", DBP(H + "    function mid(a: int) -> int {\n        const y: int = bump(a);\n        return bump(a);\n    }\n" + bang(NB + "        const y: int = mid(a);\n"))],
+      ["diamond", DBP(H + "    function m1(a: int) -> int {\n        return bump(a);\n    }\n    function m2(a: int) -> int {\n        return bump(a);\n    }\n" + bang(NB + "        const y: int = m1(a);\n        const w: int = m2(a);\n"))],
+    ]) {
+      const e = errs(src);
+      expect([name, e.map((d) => d.code)]).toEqual([name, ["E-BOOTSTRAP-UNSUPPORTED"]]);
+      expect(e[0].message).toContain("more than once");
+    }
+  });
+  test("near-miss: reached once through a chain", () => {
+    expect(codes(DBP(H + "    function mid(a: int) -> int {\n        return bump(a);\n    }\n" + bang(NB + "        const y: int = mid(a);\n")))).toEqual([]);
+  });
+});
+
+describe("review F2 / F3 — `journal_mode = OFF` behind a comment, and through a call (item 2)", () => {
+  test("a leading block or line comment, an inner comment", () => {
+    for (const sql of ["/* c */ PRAGMA journal_mode = OFF", "-- c\nPRAGMA journal_mode = OFF", "PRAGMA journal_mode /* x */ = OFF"]) {
+      expect([sql, codes(DBP(bang(own(sql))))]).toEqual([sql, ["E-SQL-JOURNAL-OFF"]]);
+    }
+    expect(codes(DBP(bang(own("/* c */ PRAGMA journal_mode = WAL"))))).toEqual([]);
+  });
+  test("in a helper a `!` function calls; elsewhere, when the `!` function writes only through a helper", () => {
+    const off = (p) => `    function setup(${p}) -> int {\n        ${SQ}\`PRAGMA journal_mode = OFF\`}.run() !{ _ :> { return 0; } };\n        return 1;\n    }\n`;
+    expect(codes(DBP(off("a: int") + bang(`        ${hcall("y", "setup", "a")}\n`)))).toEqual(["E-SQL-JOURNAL-OFF"]);
+    const bump = helper("bump", "UPDATE acct SET n = 1");
+    const src = `<program db="./app.db">\n${off("")}${bump}${bang(`        ${hcall("y", "bump", "a")}\n`)}    let <r:int=0/>\n    <main><button onclick={ @r = move(1) !{ _ :> 0, }; }>go</button><button onclick={ @r = setup() !{ _ :> 0, }; }>s</button></main>\n</program>\n`;
+    expect(codes(src)).toEqual(["E-SQL-JOURNAL-OFF"]);
+  });
+});
+
+describe("review F5 / F6 — slots: one correct code each (item 3)", () => {
+  test("a named slot (any case) is refused once, as O9 — not also outside-renders", () => {
+    for (const nm of ["name", "NAME"]) {
+      const e = errs(CARD(`<div><slot ${nm}="h"/></div>`) + "    <main><card title=\"a\"/></main>\n</program>\n");
+      expect([nm, e.map((d) => d.code)]).toEqual([nm, ["E-BOOTSTRAP-UNSUPPORTED"]]);
+      expect(e[0].message).toContain("O9");
+    }
+  });
+  test("a `<slot/>` lifted in a loop of the renders is inside it: E-COMPONENT-020 (once per row), not outside-renders / -021", () => {
+    const e = errs(CARD("<div>${ for (const x of [1, 2]) { lift <slot/>; } }</div>") + "    <main><card title=\"a\"><b>hi</b></card></main>\n</program>\n");
+    expect(e.map((d) => d.code)).toEqual(["E-COMPONENT-020"]);
+    expect(e[0].message).toContain("once per row");
+  });
+});
+
+describe("review F8 / F9 / F12", () => {
+  test("F8: `key=` off a loop is not judged by the legacy-key refusal", () => {
+    expect(codes("<program>\n    <main><p key=\"a\">x</p></main>\n</program>\n")).toEqual([]);
+  });
+  test("F9: the hint says the header `key` is not parsed yet", () => {
+    const src = "<program>\n    type Item:struct = { id: int, name: string }\n    <items:Item[]=([])/>\n    <main>\n        <ul>${ for (const it of @items) { lift <li key=it.id>${it.name}</li>; } }</ul>\n    </main>\n</program>\n";
+    expect(errs(src)[0].message).toContain("does not parse the header `key` yet");
+  });
+  test("F12: a for-of binder named like a cell is E-NAME-COLLIDES-STATE", () => {
+    const src = `<program>\n    <count:int=0/>\n    function f() -> int {\n        for (const count of [1, 2]) {\n            return count;\n        }\n        return 0;\n    }\n    <main><p>\${@count}</p></main>\n</program>\n`;
+    expect(codes(src)).toEqual(["E-NAME-COLLIDES-STATE"]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Ruled S473 (user-voice "⭐ RULED — S473 #1690 review: `!` callees count toward the envelope; client
+// multi-call `!` is a permanent refusal"): F10 and F11.
+describe("F10 — a `!` callee's queries count toward the outer `!` function's set (interim refusal)", () => {
+  const G = `    function g(a: int)! SqlError {\n${own("UPDATE acct SET n = 2")}        return 1;\n    }\n`;
+  const NB = own("SELECT n FROM acct", ".nobatch()");
+  test("an outer `!` calling an inner `!` twice; an outer UPDATE plus one `!` call; a `!` called in a loop", () => {
+    for (const [name, src] of [
+      ["inner twice", DBP(G + bang(NB + "        const y: int = g(a) !{ _ :> { return 0; } };\n        const w: int = g(a) !{ _ :> { return 0; } };\n"))],
+      ["outer UPDATE + one ! call", DBP(G + bang(own("UPDATE acct SET n = 1") + "        const y: int = g(a) !{ _ :> { return 0; } };\n"))],
+      ["! in a loop", DBP(G + bang(NB + "        for (let i = 0; i < 3; i = i + 1) {\n            const y: int = g(i) !{ _ :> { return 0; } };\n        }\n"))],
+    ]) {
+      expect([name, codes(src)]).toEqual([name, ["E-BOOTSTRAP-UNSUPPORTED"]]);
+    }
+  });
+  test("near-miss: an outer whose set holds exactly one query (its own `.nobatch()` read, one `!` call)", () => {
+    expect(codes(DBP(G + bang(NB + "        const y: int = g(a) !{ _ :> { return 0; } };\n")))).toEqual([]);
+  });
+});
+
+describe("F11 — a client-placed `!` function making two or more server calls: E-TX-CLIENT-MULTI-CALL (permanent)", () => {
+  const L = helper("logIt", "INSERT INTO log (a) VALUES (${a})") + helper("bump", "UPDATE acct SET n = n - ${a}");
+  test("two server calls; one in a loop", () => {
+    for (const [name, body] of [
+      ["two calls", `        ${hcall("x", "logIt", "a")}\n        ${hcall("y", "bump", "a")}\n`],
+      ["one call in a loop", `        for (let i = 0; i < 3; i = i + 1) {\n            ${hcall("y", "bump", "i")}\n        }\n`],
+    ]) {
+      const e = errs(DBP(L + bang(body)));
+      expect([name, e.map((d) => d.code)]).toEqual([name, ["E-TX-CLIENT-MULTI-CALL"]]);
+      expect(e[0].message).toContain("Compose the calls in one server `!` function");
+    }
+  });
+  test("near-miss: one server call", () => {
+    expect(codes(DBP(L + bang(`        ${hcall("y", "bump", "a")}\n`)))).toEqual([]);
   });
 });
