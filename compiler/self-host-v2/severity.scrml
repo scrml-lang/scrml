@@ -11,7 +11,7 @@
 // ast.scrml `newDiag` is the one Diag constructor and reads `severityOf`. The
 // code's prefix is not the severity (§34 makes E-DG-002 a Warning, many W- Info).
 //
-// 244 codes with a §34 severity; 0 PROVISIONAL (no row yet, severity from the
+// 247 codes with a §34 severity; 0 PROVISIONAL (no row yet, severity from the
 // generator's PROVISIONAL table: none); 35 without one (FAIL-CLOSED Error):
 //   E-ASSIGN-CONST — no §34 row
 //   E-ASSIGN-TARGET — no §34 row
@@ -121,6 +121,7 @@ ${
             "E-DEFER-UNHANDLED-FAILABLE" :> Severity.Error
             "E-DEFER-UNSUPPORTED-SITE" :> Severity.Error
             "E-DERIVED-CIRCULAR-DEP" :> Severity.Error
+            "E-DERIVED-ENGINE-NO-RULES" :> Severity.Error
             "E-DERIVED-VALUE-MUTATE" :> Severity.Error
             "E-DERIVED-WITH-VALIDATORS" :> Severity.Error
             "E-DERIVED-WRITE" :> Severity.Error
@@ -146,6 +147,7 @@ ${
             "E-ERRORS-002" :> Severity.Error
             "E-FN-003" :> Severity.Error
             "E-FN-004" :> Severity.Error
+            "E-FN-007" :> Severity.Error
             "E-FOR-UNPARENTHESIZED-HEAD" :> Severity.Error
             "E-FOREIGN-001" :> Severity.Error
             "E-FOREIGN-002" :> Severity.Error
@@ -200,6 +202,7 @@ ${
             "E-MATCH-ARM-SHORTHAND-AMBIGUOUS" :> Severity.Error
             "E-MATCH-BARE-BINDER" :> Severity.Error
             "E-MW-002" :> Severity.Error
+            "E-NAME-COLLIDES-RESERVED-PREFIX" :> Severity.Error
             "E-NAME-COLLIDES-STATE" :> Severity.Error
             "E-OUTLET-OUTSIDE-SHELL" :> Severity.Error
             "E-PARSE-001" :> Severity.Error

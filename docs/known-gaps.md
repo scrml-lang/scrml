@@ -32,7 +32,7 @@
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 272 | 5 |
 | MED | 743 | 8 |
-| LOW | 656 | 0 |
+| LOW | 658 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
 
@@ -29817,6 +29817,7 @@ Recommendation: when #1659 lands, make its rule 8 and this rule one table (url.s
 
 ### g-boot-implicit-envelope-unbuilt-not-refused-s473 — a `!` server function with two or more `?{}` runs them with no BEGIN/COMMIT, and the shape is neither built nor refused — `NEW S473; HIGH; open`
 §8.9.2 / §19.10.5: two or more non-`.nobatch()` `?{}` in a `!` server body run in one implicit transaction that rolls back on `fail`. The bootstrap emits bare sequential `rt.query` calls, so `INSERT; UPDATE; fail .Bad` leaves both writes committed (probes `docs/changes/s473-spec-coverage/probes/part-2/s8/envelope.scrml`, `docs/changes/s473-spec-coverage/probes/part-3/p19-tx.scrml`). The U1 design plan says unbuilt units are "refused until their unit (U1e)"; this one is not refused, and the only trace is an analyze.scrml:25605 comment. E-SQL-011 (a transaction may not span databases) is unbuilt with it (`docs/changes/s473-spec-coverage/probes/part-2/s8/xdb2.scrml` compiles clean). impl#1 builds §8.9.2 for an explicit `server` fn. Who pays: data integrity (money debited, never credited). Fix direction now: refuse (E-BOOTSTRAP-UNSUPPORTED naming U1e) a `!` server body with two or more coalescing queries; build the envelope with U1e. **In flight:** lane `s473-boot-failclosed-sql-protect` (S473). Status stays `open` until it lands. Audit source: P2 §8.9.2; P3 §19.10.5; P2 §8.1.1 E-SQL-011.
+**S473 review-surfaced 1 (ruling:user-voice-scrml.md S473 "⭐ RULED — S473 review-surfaced decisions, all PA recs"):** the envelope trigger is the TRANSITIVE write set (writes of every non-`!` callee count); the interim bootstrap refusal covers a `!` function whose transitive write set has two or more writes or a write in a loop (SPEC §8.9.2 amendment).
 <!-- @gap id=g-boot-implicit-envelope-unbuilt-not-refused-s473 sev=HIGH status=open locus=compiler/self-host-v2/analyze.scrml(~25605 'no implicit envelope until U1e')+compiler/self-host-v2/print-server.scrml prov=audit:s473-spec-coverage(P2_§8.9.2+_P3_§19.10.5+_P2_§8.1.1_E-SQL-011);lane:s473-boot-failclosed-sql-protect -->
 
 ### g-boot-manual-tx-left-open-no-gate-s473 — a manual `?{BEGIN}` in a `!` function is left open on a failure exit, on the one shared connection, with no gate — `NEW S473; HIGH; open`
@@ -30020,6 +30021,15 @@ Nothing in the bootstrap touches §4.5 (0 hits); impl#1 ignores it too. A SPEC n
 ### g-boot-css-files-not-ingested-s473 — §9.3 says scrml CSS variable syntax is available in `.css` files; nothing ingests a `.css` file — `NEW S473; LOW; open`
 `import "./side.css";` is E-PARSE-IMPORT. The SPEC names no mechanism, so the text is probably stale (decisions.md). Probe `docs/changes/s473-spec-coverage/probes/part-2/s9/cssfile.scrml`. Audit source: P2 §9.3.
 <!-- @gap id=g-boot-css-files-not-ingested-s473 sev=LOW status=open locus=compiler/SPEC.md(§9.3)+compiler/self-host-v2(no .css ingestion) prov=audit:s473-spec-coverage(P2_§9.3) -->
+
+### g-spec-key-canonical-form-s473 — §6.5.3 (`key=` on the lifted element) and §17.4b (`key` in the loop header) give two spellings of keyed reconciliation; the canonical one is unruled — `NEW S473; LOW; open; RULED`
+**RULED S473 (review-surfaced 5, ruling:user-voice-scrml.md S473 "⭐ RULED — S473 review-surfaced decisions, all PA recs"):** the loop-header `key` (§17.4b) is canonical; §6.5.3 `key=` is legacy and the bootstrap refuses it with a hint naming the header form (owed); W-KEY-001 takes the header meaning. What remains open is the bootstrap refusal and the W-KEY-001 header lint.
+SPEC §6.5.3 puts `key=` on the element passed to `lift`; §17.4b puts `key` in the `for` header. decisions.md D31 lists it ("needs one canonical form"); the S473 D31 record-lag sweep cannot pick one (a semantics choice). PA recommendation: the loop-header `key` (§17.4b). Also: `W-KEY-001` means two things — a duplicate key value (§6.5.3) and an object collection iterated with no key (§17.4b). Both sections carry a "pending a ruling" marker (PR #1682).
+<!-- @gap id=g-spec-key-canonical-form-s473 sev=LOW status=open locus=compiler/SPEC.md(§6.5.3,§17.4b) prov=ruling:user-voice-scrml.md-S473-D31 -->
+
+### g-impl1-sql-slot-inside-quoted-literal-dropped-s468 — impl#1 silently drops a `${…}` inside a quoted SQL literal or SQL comment (E-SQL-SLOT-IN-LITERAL not emitted) — `NEW S468; LOW; open; carried`
+S468 ruling (user-voice-scrml.md "⭐ RULED — "safe ints only, your recs"" item 3, verbatim): *"impl#1's silent drop of that slot is filed LOW (`g-impl1-sql-slot-inside-quoted-literal-dropped-s468`), impl#1 unchanged (S435: not security — no injection, a wrong result)."* The language rule is SPEC §8.1 `E-SQL-SLOT-IN-LITERAL` (landed S473 D31). Filed S473 (the id was cited but never filed).
+<!-- @gap id=g-impl1-sql-slot-inside-quoted-literal-dropped-s468 sev=LOW status=open locus=compiler/src(SQL template lowering) prov=ruling:user-voice-scrml.md-S468-safe-ints-item-3 -->
 
 ### g-spec-toenum-lookup-table-output-form-s473 — §14.4.1 says the compiler SHALL emit `const TypeName_toEnum = {…}`; the bootstrap emits an equivalent inline match — `NEW S473; LOW; resolved S473 D4`
 An output-form SHALL (the §47 pattern): no code observes the table name, and the inline `(m$ => { if (m$ === "Admin") … })(s)` is semantically equivalent. Probe `docs/changes/s473-spec-coverage/probes/part-2/s14a/b2/eparse.scrml` (compile it to see the output). Recommended fix: demote the sentence to non-normative implementation prose (decisions.md). Audit source: P2 §14.4.1 / §14.4.3.

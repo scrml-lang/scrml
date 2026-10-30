@@ -3289,6 +3289,14 @@ the lazy pull + dirty flag semantics of §6.6.
 
 #### 6.5.3 Iteration Over Reactive Arrays
 
+> **RULED S473 — the loop-header `key` is canonical (§17.4b).** `key=` on the lifted element (§6.5.3) is the LEGACY
+> spelling: an implementation that speaks the ruled dialect (the bootstrap) refuses it with a hint naming the header
+> form (`for (let x of xs key x.id) { … }`) — a named refusal under §63.5 (D5). `W-KEY-001` takes the header meaning:
+> a collection of objects iterated with no header `key` (§17.4b); the §6.5.3 duplicate-`key=` reading is the legacy
+> form's. **Provenance:** ruling:user-voice-scrml.md S473 "⭐ RULED — S473 review-surfaced decisions, all PA recs" ("your recs") item 5 — *"**D31 follow-up: the loop-header `key` is the canonical keyed-iteration form (§17.4b).** `key=` on the lifted element (§6.5.3) is the legacy spelling: the bootstrap refuses it with a hint naming the header form, and W-KEY-001 takes the header meaning."* · supersedes: the S473 D31 "pending a ruling" marker and
+> §6.5.3's `key=` as a canonical form. **Direction of change:** newly-rejecting on the bootstrap (legacy `key=`);
+> impl#1 keeps both. Gap: `g-spec-key-canonical-form-s473` (now ruled; the bootstrap refusal is owed).
+
 Iterate over a reactive array using the standard `for/lift` pattern (§17.4):
 
 ```scrml
@@ -3489,7 +3497,7 @@ array, calls `.sort()` on the clone, writes back. The `<ul>` re-renders in sorte
 | Code | Trigger | Severity |
 |---|---|---|
 | E-KEY-001 | `key=` value is not a string or number expression | Error |
-| W-KEY-001 | Duplicate `key=` values within a single `for/lift` block | Warning |
+| W-KEY-001 | Duplicate `key=` values within a single `for/lift` block. **S473:** the code takes the §17.4b header meaning (an object collection iterated with no header `key`); this duplicate-`key=` reading is the legacy form's (the header meaning is Nominal / not yet emitted) | Warning |
 | E-REACTIVE-006 | Mutating method called on a non-reactive (non-`@`) array variable | Error |
 
 **E-REACTIVE-006 detail:** Calling a mutating method (push, pop, etc.) on a non-reactive
@@ -3552,7 +3560,9 @@ performs reconciliation. For unkeyed lists, the runtime rebuilds the list from s
 > amended by D22). The statements below that require a synchronous notification per mutation call and "no
 > implicit batching" are superseded; clone-mutate-assign stays valid but is no longer needed for atomicity inside
 > a handler. The observable difference — effect run counts for a handler that writes the same cell more than
-> once — SHALL be pinned by a conformance case (owed with the gap below).
+> once — SHALL be pinned by a conformance case (owed with the gap below). ⚑ *Flagged for that case:* a handler that
+> awaits a server call partway through — whether the writes before the suspension are notified then, or with the
+> rest when the handler returns — is not settled by the ruling text.
 > **Provenance:** ruling:user-voice-scrml.md S473 D23 "your recs on all" — *"§6.5.12 is amended to handler-level
 > batching, pinned by a conformance case."* · decisions.md D23 (a) *"Amend §6.5.12 to handler-level batching under
 > §66.11.7's permission-driven notify"* · supersedes: the first two normative statements below and the "two
@@ -3814,9 +3824,13 @@ flush site.
 ~~derived value immediately after a write and see the updated result SHALL call `flush()` to~~
 ~~trigger synchronous re-evaluation of all dirty derived nodes before continuing.~~
 
+> *(RETIRED S473 D22 — the example below is the record. `flush()` is no longer a built-in; no dedicated refusal
+> code exists, so a `flush()` call is an unknown function, `E-SCOPE-001` on the bootstrap — flagged: a named
+> refusal pointing at pull-on-read may be owed under D28.)*
+
 ```scrml
 @price = newPrice
-flush()                            // forces re-evaluation of all dirty derived nodes
+flush()                            // RETIRED (S473 D22) — forces re-evaluation of all dirty derived nodes
 let display = @display             // reads the updated (post-flush) value
 ```
 
@@ -9166,8 +9180,8 @@ ${ let loud = greeting.toUpperCase() }
 - A variable declared with `let` or `const` at the top level of a file-level `${}` block SHALL be in scope for all subsequent `${}` blocks and markup interpolations in the same file.
 - File-level `${}` blocks do NOT introduce an isolated scope boundary. A subsequent `${}` block does not shadow or reset the file scope.
 - Reactive variables (`@var`) declared at file level (outside any `${}`) are in scope for all `${}` blocks and markup throughout the file (§6.1).
-- Variables declared inside a function body within a `${}` block are scoped to that function. Only top-level declarations within the `${}` block participate in file scope. **Function scoping does not license a local named like a cell (S473 D14):** a `let` / `const` / `lin` / parameter / `function` declared inside a function body (at any nesting depth) with the name of a reactive cell in scope is `E-NAME-COLLIDES-STATE` (§6.1.3), exactly as at file scope.
-  > **Provenance:** ruling:user-voice-scrml.md S473 D14 "your recs on all" — *"a function-body local named like a cell is an error (S55 stands)."* · supersedes: the reading that §7.6's function-scoping of locals (or §7.3.3's nested-block shadowing) admits a local named like a cell. **Direction of change:** newly-rejecting on the bootstrap (which accepted it citing §7.6); impl#1 already refuses it.
+- Variables declared inside a function body within a `${}` block are scoped to that function. Only top-level declarations within the `${}` block participate in file scope. **Function scoping does not license a local named like a cell (S473 D14):** a LOCAL — a `let` / `const` / `lin` declared inside a function body (at any nesting depth) — with the name of a reactive cell in scope is `E-NAME-COLLIDES-STATE` (§6.1.3), exactly as at file scope. *(Parameters and nested `function` declarations are not decided by this ruling.)*
+  > **Provenance:** ruling:user-voice-scrml.md S473 D14 "your recs on all" — *"a function-body local named like a cell is an error (S55 stands)."* · supersedes: the reading that §7.6's function-scoping of locals (or §7.3.3's nested-block shadowing) admits a local named like a cell. **Direction of change:** newly-rejecting on the bootstrap (which accepted it citing §7.6).
 - Re-declaring a name with `let` in a later file-level `${}` block when that name was already declared at file scope SHALL be a compile error (E-SCOPE-010: duplicate binding in file scope).
 - **Two top-level `function` declarations of one name SHALL be a compile error (E-SCOPE-010: duplicate binding in file scope)** — the rule above names `let`; it applies to `function` too (S440 ruling #6). **Named; impl pending — Nominal / not yet emitted for the `function` case** (measured S440: impl#1 compiles two top-level `function f()` declarations in one `<program>` at exit 0); impl#1 carries it (§34.0). A duplicate `function` inside a function body is §7.3.3's concern, not this rule's.
   > **Provenance:** ruling:user-voice-scrml.md S440 (the S440 22-item queue, item 6) — *"duplicate top-level `function` → E-SCOPE-010, §7.6 text fixed to name `function`"*.
@@ -10038,6 +10052,28 @@ The Batch Planner (PIPELINE.md Stage 7.5) computes this set from the finalized D
 When two or more `?{}` calls in a server handler are coalescing candidates, the compiler SHALL coalesce their prepare/lock cycle. Separately, **when a `!` server function body contains two or more `?{}` queries that do not carry `.nobatch()`**, the compiler SHALL wrap the handler body in `?{BEGIN DEFERRED}` / `?{COMMIT}` (`?{ROLLBACK}` on an exception or a `fail` exit) — the implicit per-handler transaction. The trigger is stated in source terms on purpose: whether two queries share a prepare/lock cycle depends on the §8.9.1 candidate set (dependency-graph `'awaits'` edges), but that sharing is not observable, while the envelope is; so the envelope does not depend on the candidate set, and a data dependency between two queries does not remove it.
 
 > **Provenance:** ruling:user-voice-scrml.md S451 "yes on all seven" — R9: *"§8.9.1's implicit-envelope trigger restated in language terms: two or more `?{}` in one `!` server body, none `.nobatch()`."* · design §10 R9 (*"the data-dependency clause only changes the prepare/lock sharing, which is not observable"*) · supersedes: *"When two or more `?{}` calls in a server handler are coalescing candidates, … In `!` handlers ONLY, the compiler SHALL additionally wrap the handler body …"* (the envelope keyed on the candidate set) and §19.10.5's *"An implicit per-handler transaction SHALL apply only when two or more `?{}` queries in the handler form a coalescing candidate set (§8.9.1)."* · **Direction of change: semantics-changed** — a `!` body whose two queries depend on each other (`const a = ?{SELECT …}.get()` then `?{UPDATE … ${a.id}}.run()`) now always runs them in one transaction. impl#1 (probed S451 on `b490f3b75`, a `server function f()! -> SqlError` with that dependent pair) already emits the envelope for that shape; its known envelope holes are the existing `g-implicit-envelope-requires-explicit-server-modifier` and `g-implicit-envelope-only-on-baseline-csrf-arm`, both measured against this trigger. `BEGIN DEFERRED` is the SQLite spelling; on a Postgres or MySQL database (§44.2) the opening statement SHALL be a plain `BEGIN`, which those databases accept and which opens the same lazily-locking transaction. *(PA reading, S449: Postgres rejects `BEGIN DEFERRED` as a syntax error — measured on PG16 — so the literal text made the envelope unusable there.)*
+
+> **Amendment S473 (review-surfaced 1) — the trigger is the TRANSITIVE write set.** A `!` function's all-or-nothing
+> guarantee covers the writes of every non-`!` function it calls, transitively — the same reach E-SQL-011 already
+> has. The implicit-envelope trigger above is therefore read over the function's **transitive write set**: the
+> `?{}` writes in its body PLUS those of every non-`!` function it reaches. Two or more such writes (none
+> `.nobatch()`), or one inside a loop, open the implicit per-handler transaction. ~~"when a `!` server function body
+> contains two or more `?{}` queries"~~ as a LEXICAL count of the body is superseded. **Interim (bootstrap):** until
+> the bootstrap builds the envelope, it SHALL refuse — `E-BOOTSTRAP-UNSUPPORTED`, naming this section — a `!`
+> function whose transitive write set has two or more writes or a write inside a loop; it SHALL NOT compile it
+> without the guarantee (S473 D1). **Provenance:** ruling:user-voice-scrml.md S473 "⭐ RULED — S473 review-surfaced decisions, all PA recs" ("your recs") item 1 — *"**`!` atomicity is TRANSITIVE (from #1675 review F5).** A `!` function's all-or-nothing guarantee covers the writes of the non-`!` functions it calls, the same way E-SQL-011 is already transitive. The §8.9.2 / §19.10.5 implicit-envelope trigger is the transitive write set, not the lexical count of `?{}` in the body. Until the envelope is built, the bootstrap refuses a `!` function whose transitive write set has two or more writes (or a write in a loop)."* · supersedes: the lexical
+> reading of the S451 R9 trigger. **Direction of change:** newly-guaranteeing (more programs get the envelope);
+> newly-rejecting on the bootstrap until built. Gap: `g-boot-implicit-envelope-unbuilt-not-refused-s473`.
+>
+> **Amendment S473 (review-surfaced 2) — `PRAGMA journal_mode = OFF` defeats rollback and is refused.** A
+> `?{PRAGMA journal_mode = OFF}` (any case or spacing) inside a `!` function SHALL be a compile error,
+> **`E-SQL-JOURNAL-OFF`** (§34). So SHALL one anywhere else whose connection a `!` function's envelope uses — a
+> program-body statement or a non-`!` function on a database that some `!` function in the compilation writes —
+> because the setting is per connection and disables the journal the rollback needs. Other `journal_mode` values
+> stay as the S456 allow-list (§14.8.10) has them. *(The code name is a PA reading, for bryan's veto; no existing
+> code fits — `E-SQL-PROGRAM-STATEMENT-NOT-ADMITTED` covers program-body statements only.)* **Provenance:**
+> ruling:user-voice-scrml.md S473 "⭐ RULED — S473 review-surfaced decisions, all PA recs" ("your recs") item 2 — *"**`PRAGMA journal_mode = OFF` is refused inside a `!` function (from #1675 F6)**, and anywhere it would reach a `!` function's connection, because it defeats rollback. (Other `journal_mode` values stay as the S456 allow-list has them.)"* · supersedes: the unconditional admission of `journal_mode` in the S456 allow-list
+> for the `OFF` value. **Direction of change:** newly-rejecting. **Nominal / not yet emitted** by either compiler.
 
 **Normative statements:**
 
@@ -13575,7 +13611,9 @@ carries a `tenant_id` column but is in neither is NOT silently scoped and NOT si
    - **`CREATE [UNIQUE] INDEX [IF NOT EXISTS] name ON table (col [COLLATE c] [ASC | DESC], …)
      [WHERE …]`** — an index adds no column and is not a readable relation;
    - **`PRAGMA`** `table_info`, `table_xinfo`, `index_list`, `index_info`, `foreign_key_list`,
-     `busy_timeout` or `journal_mode` (`PRAGMA name`, `= value` or `(argument)`).
+     `busy_timeout` or `journal_mode` (`PRAGMA name`, `= value` or `(argument)`) — except
+     `journal_mode = OFF` where it reaches a `!` function's connection, which is **`E-SQL-JOURNAL-OFF`**
+     (§8.9.2; S473 review-surfaced 2 — ruling:user-voice-scrml.md S473 "⭐ RULED — S473 review-surfaced decisions, all PA recs" ("your recs") item 2).
    An admitted form that gives a relation outside the tenant set a `tenant_id` column (any case or
    quoting — a generated column included) or an fts5 `content =` a tenant-scoped table is
    **`E-TENANT-UNDECLARED`**, naming the relation and the fix: declare it in `<schema>` so the tenant
@@ -17926,6 +17964,14 @@ ${ for (let item of @items) {
 ```
 
 ### 17.4b `key` in Loop Header — Keyed Reconciliation
+
+> **RULED S473 — the loop-header `key` is canonical (§17.4b).** `key=` on the lifted element (§6.5.3) is the LEGACY
+> spelling: an implementation that speaks the ruled dialect (the bootstrap) refuses it with a hint naming the header
+> form (`for (let x of xs key x.id) { … }`) — a named refusal under §63.5 (D5). `W-KEY-001` takes the header meaning:
+> a collection of objects iterated with no header `key` (§17.4b); the §6.5.3 duplicate-`key=` reading is the legacy
+> form's. **Provenance:** ruling:user-voice-scrml.md S473 "⭐ RULED — S473 review-surfaced decisions, all PA recs" ("your recs") item 5 — *"**D31 follow-up: the loop-header `key` is the canonical keyed-iteration form (§17.4b).** `key=` on the lifted element (§6.5.3) is the legacy spelling: the bootstrap refuses it with a hint naming the header form, and W-KEY-001 takes the header meaning."* · supersedes: the S473 D31 "pending a ruling" marker and
+> §6.5.3's `key=` as a canonical form. **Direction of change:** newly-rejecting on the bootstrap (legacy `key=`);
+> impl#1 keeps both. Gap: `g-spec-key-canonical-form-s473` (now ruled; the bootstrap refusal is owed).
 
 A `for` loop with `lift` MAY declare a key expression in the loop header. The key identifies each element for efficient DOM diffing during list updates.
 
@@ -22591,6 +22637,7 @@ function transferFunds(from: int, to: int, amount: number)! -> TransferError {
 - `transaction { }` is syntactic sugar. The compiler SHALL emit `?{BEGIN}` at the start of the block, `?{COMMIT}` at the end of normal completion, and `?{ROLLBACK}` before any `fail` statement within the block.
 - **Only normal completion COMMITs (S453).** A `return`, or a `break` / `continue` whose target is outside the `transaction` block, SHALL roll the transaction back before the exit proceeds: the block's four endings are therefore **normal completion → COMMIT**, and **`fail` · a SQL error · a `return` / `break` / `continue` out of the block → ROLLBACK**. The exit itself is not suppressed — the `return` returns, the `break` / `continue` reaches its target — and the return expression SHALL be evaluated **before** the rollback, so a `?{}` read inside `return <expr>` still executes within the transaction. A `break` / `continue` whose loop is inside the block does not leave it and is not an exit for this purpose; neither is a `return` after the block, which runs once the block has committed. A `yield` is a suspension rather than an exit and is not governed here (§19.10.4).
 - If a `fail` occurs inside a `transaction` block, the compiler SHALL insert a `?{ROLLBACK}` before the fail's return. The `fail` then returns the error variant to the caller.
+- **`navigate()` inside a `transaction` block is a compile error (S473 review-surfaced 4):** `E-NAVIGATE-IN-TRANSACTION` (§20.3). The block would roll back while the user gets a success redirect. The author moves the `navigate` after the block. **Provenance:** ruling:user-voice-scrml.md S473 "⭐ RULED — S473 review-surfaced decisions, all PA recs" ("your recs") item 4 — *"**`navigate()` inside a `transaction { }` block is a compile error (from #1679).** Today it rolls the block back while the user gets a success redirect, which silently loses data. The author moves the `navigate` after the block."*
 - If a SQL error occurs inside a `transaction` block (and the function is `!`), the transaction is automatically rolled back before the SQL error is propagated.
 - *(Informative — `defer` × `transaction`, S454.)* A `transaction` block's body is a statement list, so it is an **enclosing block** for §19.16.2 registration. A `defer` registered INSIDE the block runs when control leaves the block, before the block's own COMMIT or ROLLBACK: its writes are inside the transaction and share its fate — rolled back with it on a `return` (or any other rollback ending), and on normal completion run (in LIFO order, §19.16.2) and then committed with it. A `defer` registered at FUNCTION level before the block runs when the function exits — AFTER the block has committed or rolled back — so its writes are outside the transaction and persist whatever the block's ending. Both follow from §19.16 scope; nothing here is a new rule. *(Provenance: ruling:user-voice-scrml.md S454 "your recs on all" — item C: *"a §19.10.3 note on `defer` × `transaction` composition (a `defer` inside the block runs inside the transaction; one at function level before the block runs after the rollback and persists) — yes."* · supersedes: nothing · direction: inert. Not measured on impl#1 by this change.)*
 
@@ -22619,7 +22666,7 @@ The compiler MAY synthesize an implicit transactional envelope around the body o
 
 **Normative statements:**
 
-- An implicit per-handler transaction SHALL apply only when the `!` server function body contains two or more `?{}` queries that do not carry `.nobatch()` (§8.9.2, S451 R9 — supersedes: "SHALL apply only when two or more `?{}` queries in the handler form a coalescing candidate set (§8.9.1)").
+- An implicit per-handler transaction SHALL apply only when the `!` server function's ~~body contains~~ **transitive write set (its body and every non-`!` function it reaches) contains** two or more `?{}` writes that do not carry `.nobatch()`, or one inside a loop (§8.9.2, S451 R9 as amended S473 review-surfaced 1 — supersedes: "SHALL apply only when two or more `?{}` queries in the handler form a coalescing candidate set (§8.9.1)" and the lexical body count). Until built, the bootstrap refuses such a function (`E-BOOTSTRAP-UNSUPPORTED`). **Provenance:** ruling:user-voice-scrml.md S473 "⭐ RULED — S473 review-surfaced decisions, all PA recs" ("your recs") item 1 — *"**`!` atomicity is TRANSITIVE (from #1675 review F5).** A `!` function's all-or-nothing guarantee covers the writes of the non-`!` functions it calls, the same way E-SQL-011 is already transitive. The §8.9.2 / §19.10.5 implicit-envelope trigger is the transitive write set, not the lexical count of `?{}` in the body. Until the envelope is built, the bootstrap refuses a `!` function whose transitive write set has two or more writes (or a write in a loop)."*
 - An implicit per-handler transaction SHALL apply only inside `!` handlers. This preserves §19.10.4 (transactions require `!`).
 - An implicit per-handler transaction SHALL NOT compose with an explicit `transaction { }` block in the same handler. The compiler SHALL emit **E-BATCH-001** when both are present.
 - An explicit `?{BEGIN}` inside a `!` handler suppresses the implicit envelope and emits **W-BATCH-001** advising the developer to use `transaction { }` or `.nobatch()` for clarity. Outside a `!` function the explicit `?{BEGIN}` is **E-ERROR-015** (§19.10.4) and W-BATCH-001 is not emitted. *(S451 "your recs on all of them" item 2(c) — supersedes: "An explicit `?{BEGIN}` inside the handler suppresses the implicit envelope and emits **W-BATCH-001** …".)*
@@ -23880,7 +23927,7 @@ navigate(path, .Soft)   // always history push
 
 ### 20.3 Normative Statements (Navigation)
 
-- `navigate(path)` SHALL be valid inside any function in any context.
+- `navigate(path)` SHALL be valid inside any function in any context — **except inside a `transaction { }` block (S473 review-surfaced 4):** a `navigate(…)` call lexically inside a `transaction { }` block SHALL be a compile error, **`E-NAVIGATE-IN-TRANSACTION`** (§34, §19.10.3). Its redirect would reach the user while the block rolls back, silently losing the data; move the `navigate` after the block. *(The code name is a PA reading.)* **Provenance:** ruling:user-voice-scrml.md S473 "⭐ RULED — S473 review-surfaced decisions, all PA recs" ("your recs") item 4 — *"**`navigate()` inside a `transaction { }` block is a compile error (from #1679).** Today it rolls the block back while the user gets a success redirect, which silently loses data. The author moves the `navigate` after the block."*
 - The navigation type SHALL be inferred from the function's server/client classification unless explicitly overridden.
 - Calling `navigate(path, .Hard)` from a client-side function SHALL cause the compiler to emit a server redirect. The compiler SHALL escalate the calling function to a server route if necessary, or emit a warning if the escalation is not possible (W-NAV-001).
 - A client-side `navigate(path)` (or `navigate(path, .Soft)`) SHALL execute the §20.8 soft-navigation pipeline (an in-place `<outlet>` swap + hydrate over the persistent shell); it SHALL NOT perform a full document reload (§20.8.2).
@@ -27766,7 +27813,7 @@ scrml supports Tailwind utility class names natively. No Tailwind CLI, PostCSS, 
 
 > **Amendment S473 (D13) — Tailwind on the bootstrap: one Info diagnostic, no CSS.** The bootstrap does not build
 > §26 and emits no Tailwind CSS. When a static `class=` token of a compiled program matches the Tailwind
-> utility grammar (§26.3–§26.4), the bootstrap SHALL report **one** Info diagnostic for the compile,
+> utility grammar (§26.3–§26.4), the bootstrap SHALL report **one** Info diagnostic for the compile *("once per compile" is a PA reading of "one Info diagnostic")*,
 > **`I-TAILWIND-NOT-BUILT`** (§34), saying that utility classes are passed through unstyled and naming the first
 > matching class. The class token is still written to the element unchanged and the compile does not fail
 > (Info, §34). The normative statements below bind impl#1, which builds §26. *(The code name is a PA reading for
@@ -29012,6 +29059,7 @@ are REFUSED by impl#1, `E-IMPL1-RULED-FORM-UNSUPPORTED` (its row lands with that
 | E-TENANT-SCHEMA-HAZARD | §14.8.10 | A `<schema>` declares SQL the database runs on its own against a tenant-scoped table (one carrying `tenant_id`): (1) a trigger — any timing, `INSTEAD OF` included — declared on a tenant-scoped table or on a view over one, or whose body names one; (2) a Postgres rule declared on, or whose action names, one; (3) a foreign key whose `ON DELETE` / `ON UPDATE` action is `CASCADE`, `SET NULL` or `SET DEFAULT` with EITHER end tenant-scoped; (4) a view (materialized included) reading one, directly or through another view. Fail-closed: a declaration the compiler cannot attribute — unreadable text, a function body (`EXECUTE FUNCTION`), a call off the §14.8.10 subset allow-list, a `${…}`, a `CREATE FUNCTION` / `PROCEDURE` / `DO` body, an unattributable foreign-key action, text a reading left unread (a keyword-spelled identifier never ends a declaration), a quoted form whose extent differs between databases (a backslash escape, `E'…'`), any other `<schema>` statement naming a tenant table — is charged; a `CREATE POLICY` on a tenant-scoped table is charged (kind *permissive policy*) unless it is explicitly `AS RESTRICTIVE`, because a permissive policy (the Postgres default) is ORed with §14.8.11's `scrml_tenant_iso` and widens it — against every tenant-scoped table (*unattributable*). **Isolation removal** (kind *isolation removal*, S455 "yes both"): `DROP POLICY … ON <tenant>`; `ALTER TABLE <tenant> DISABLE ROW LEVEL SECURITY` / `NO FORCE ROW LEVEL SECURITY` / `OWNER TO`; `GRANT … ON <tenant>` (or `ON ALL TABLES IN SCHEMA`) to any grantee but §14.8.11's bounded `scrml_app`, and `GRANT <role> TO scrml_app`; `CREATE | ALTER ROLE | USER … BYPASSRLS | SUPERUSER`; `SET [SESSION | LOCAL] ROLE`, `SET SESSION AUTHORIZATION`, `SET row_security` — the last three groups name no table and are charged against every tenant-scoped table of the compilation. **Provenance (isolation removal):** ruling:user-voice-scrml.md S455 "yes both" · supersedes: impl#1's unwritten DROP / PRAGMA / COMMENT / GRANT / REVOKE / VACUUM / transaction-control / SET exemptions and its "ALTER TABLE naming its own target" exemption · Direction of change: newly-rejecting. **Statement-kind allow-list** (kind *statement not admitted in a tenant schema*, S455 "your rec on the allow-list"): in a compilation with ANY tenant-scoped table, a `<schema>` admits ONLY `CREATE TABLE`, `CREATE INDEX`, `ALTER TABLE` whose every action is `ADD [COLUMN]`, `ALTER [COLUMN] … SET | DROP NOT NULL | SET DEFAULT | DROP DEFAULT`, `RENAME [COLUMN] a TO b`, or `ADD [CONSTRAINT] CHECK (…)` / a foreign key with no cascading action, `CREATE VIEW`, `CREATE TRIGGER`, `CREATE POLICY … AS RESTRICTIVE` (its expressions allow-listed), `GRANT {SELECT|INSERT|UPDATE|DELETE}[, …] ON [TABLE] <named tables> TO scrml_app` / `GRANT USAGE[, SELECT] ON SEQUENCE <named> TO scrml_app` (unquoted, or exactly `"scrml_app"`; PA reading — no `WITH GRANT OPTION`, `TRUNCATE`, `ALL`, `ON ALL … IN SCHEMA`, other privileges), `COMMENT ON`, `ANALYZE`, `REINDEX`, `VACUUM` (not `VACUUM INTO`); never a `RENAME` to / from `tenant_id` nor a `SET | DROP DEFAULT` of it; a statement is judged by its first token, whatever it is (a `(`- or `WITH`-led statement is not admitted); a column / cast / literal type, an index operator class or an access method that is not built in is charged, in every region (view / trigger / rule / policy bodies included); a `GRANT` on a system object (`pg_catalog`, `information_schema`, `pg_*`, `sqlite_*`) is not admitted; `[ … ]` is a quoted name only in a name position, elsewhere a subscript whose contents are read (a bracketed name holding `(` is charged); every other statement is charged whether or not it names a tenant table — roles, privileges, publications, extensions, session settings and data changes belong to deploy / ops. The other rules still apply within the admitted kinds. **Provenance (allow-list):** ruling:user-voice-scrml.md S455 "your rec on the allow-list" · supersedes: the S455 "yes both" (ii) closed exemption list over statements naming a tenant table · Direction of change: narrowing overall (newly-rejecting outside the list; newly-accepting `COMMENT ON`, `VACUUM`, `ALTER COLUMN … NOT NULL / DEFAULT`, `RENAME COLUMN`, a non-cascading `ADD CONSTRAINT`); corpus: 2355 single-file + 5 multi-file projects, 0 newly failing. The tenant floor scopes each query; it cannot scope a trigger or rule body, a view's definition or a foreign-key action, so the declaration is refused where it is declared, whatever the queries do, with no `.acrossTenants()` opt-out. Only `<schema>` is visible (§14.8.10 Limit). Resolution: remove the declaration and do the work in server code, where the floor applies — or declare the object only over tables without `tenant_id`. **Provenance:** ruling:user-voice-scrml.md S455 "go, comp-time schema" · supersedes: *"A write to a tenant-scoped table is `E-TENANT-WRITE`, naming the object, when the program's `<schema>` declares, on that table, a trigger, a Postgres rule, or a foreign key referencing it whose `ON DELETE` / `ON UPDATE` action is `CASCADE`, `SET NULL` or `SET DEFAULT`."* as the boundary (kept as defense in depth) · Direction of change: newly-rejecting (corpus: 2410 `.scrml`, 0 newly failing). Evaluated once per file over the `<schema>` as it will exist (after `schemaFor` / meta expansion), against ONE tenant set — the union over every file compiled together, whatever database each names (compilation-scoped; accepted cost: two genuinely different databases compiled together share it) — the SAME set the floor's query scoping reads, computed once (S455), which counts a `tenant_id` added by an `ALTER TABLE` in `<schema>`. A program compiled SEPARATELY that opens the same database is not seen (the Limit). **Bodies in the tenant SQL subset** (kind *body outside the tenant SQL subset*, S455 "yes, both"): in a compilation with a tenant-scoped table, a view / trigger / rule / `AS RESTRICTIVE` policy body and a `CREATE TABLE … AS` query must lie inside the §14.8.10 query floor's SQL subset — its closed token set (a trigger's `;` separator admitted; `::<built-in type>` admitted on Postgres / unknown, S455 "a"; no quoted identifier, comment, `[…]`, `$`, `${…}`), its function allow-list (a policy: the expression allow-list) — every name, cast and type a BUILT-IN of the compilation's database (§44 driver; unknown / mixed → built in on both) — a view / `CREATE TABLE … AS` query led by SELECT / VALUES / WITH with no data-modifying statement inside, a trigger body of `BEGIN` + SELECT / INSERT / UPDATE / DELETE statements + `END` — and a qualified `rel.f` must name a column the compilation's `<schema>` declares on the relation it resolves to, the relation keyed by its name AS WRITTEN (`ext.o2` ≠ `o2`), an alias hiding its relation's name, a parenthesized JOIN group's aliases bound, `FROM` inside a call introducing no relation (Postgres reads `rel.f` as the call `f(rel)` otherwise; an unbound, three-part or `(…).f` reference is outside; in an index / `DEFAULT` / `CHECK` expression, `own.f` must be declared); the message names the first offending token; charged against every tenant-scoped table. **Provenance (bodies):** ruling:user-voice-scrml.md S455 "yes, both" (+ S455 "a" for `::`; the S239 review of ee1a80bc, executed on PG16, for dialect / JOIN groups / qualified relations / query leaders) · supersedes: nothing struck (the hand-rolled body reading is subsumed) · Direction of change: newly-rejecting in tenant compilations (quoted identifier / comment / `[…]` / `$$` / non-built-in `::` in a body; an undeclared qualified column; a trigger without `BEGIN … END`; a non-built-in name of the database); newly-accepting `::<built-in type>`. (Emitted by the `TENANT-SCHEMA` stage in `compiler/src/api.js` via `compiler/src/tenant-schema-hazards.ts` `fileTenantSchemaHazards`.) | Error |
 | E-TENANT-UNDECLARED | §14.8.10 | A relation carrying a `tenant_id` column is not in the compilation's tenant set (no `<schema>` in any form and no `<db src=… tables=…>` registry declares it), where the compiler can see it: (1) an ADMITTED program-body `?{}` statement (§14.8.10 item (1) — `.acrossTenants()` or not) gives one a `tenant_id` column — a spelled `CREATE [TEMP] TABLE`, one `ALTER TABLE … ADD COLUMN`, an fts5 table (a `tenant_id` column, or `content =` a tenant-scoped table), any case or quoting, a generated column included; (2) a relation of a SQLite file a `<db src=…>` opens at compile time — every table and view in the file, not only `tables=` — carries `tenant_id`, generated and hidden columns included (`table_xinfo`; an fts4 `languageid=`), or its columns cannot be read. The floor scopes only declared tables, so its rows would reach every request unscoped. The message names the relation and the fix: declare it in `<schema>` so the tenant floor scopes it (a temporary table cannot be declared — keep the rows in a declared table; a view — drop it); no opt-out: a `tenant_id` column IS the declaration, so a table meant to stay unscoped renames the column. A program-body statement off the allow-list is `E-SQL-PROGRAM-STATEMENT-NOT-ADMITTED`; a database unreadable at compile time is checked at server startup (`E-DEPLOY-DB-TENANT-UNDECLARED`). **Provenance:** ruling:user-voice-scrml.md S456 "b, startup check lands with it" + "a, fix F7/F9 too" · supersedes: spec:§14.8.10 "A table whose `tenant_id` exists only in a live `<program db=>` file … is NOT tenant-scoped", and the S456 round-2 "known columns" trigger · Direction of change: newly-rejecting (corpus: 2428 single-file compiles + ex22 / ex23 / flogence multi-file, 0 newly failing). (Emitted by the `TENANT-SCHEMA` stage in `compiler/src/api.js` via `compiler/src/tenant-undeclared.ts` `programBodyUndeclaredTenantTables` (over `compiler/src/schema-differ.js` `programStatementVerdicts`) / `liveUndeclaredTenantTables`; the live relations from `compiler/src/protect-analyzer.ts` `collectLiveTenantRelations`.) | Error |
 | E-SQL-PROGRAM-STATEMENT-NOT-ADMITTED | §14.8.10 | In a compilation with a database, a program-body `?{}` statement (outside `<schema>`, statement or expression position — including expression text held unparsed, S456 fix round F2 — `.acrossTenants()` or not; each `;`-separated statement judged) is not on the CLOSED allow-list — DML led by `SELECT` / `WITH` / `INSERT` / `UPDATE` / `DELETE` / `REPLACE` with no `INTO` at any depth other than the statement's own `INSERT` / `REPLACE` target; `CREATE [TEMP] TABLE [IF NOT EXISTS] name (col type, …)` (one name, a spelled column list, optional `WITHOUT ROWID` / `STRICT`); one `ALTER TABLE name ADD [COLUMN] col type`; `CREATE VIRTUAL TABLE name USING fts5(…)` whose options are on the closed list (`content`, `content_rowid`, `tokenize`, `prefix`, `columnsize`, `detail`, `contentless_delete`, `contentless_unindexed`, `locale`, `tokendata`); `BEGIN` / `COMMIT` / `ROLLBACK` / `SAVEPOINT` / `RELEASE`; `CREATE [UNIQUE] INDEX [IF NOT EXISTS] name ON table (cols) [WHERE …]`; `PRAGMA table_info` / `table_xinfo` / `index_list` / `index_info` / `foreign_key_list` / `busy_timeout` / `journal_mode` — or it does not begin with a keyword, or it is UNREADABLE: outside the closed lexical subset (S456 round 4) — outside a literal or comment only space / tab / LF / CR LF, ASCII identifiers, printable-ASCII `"…"` identifiers (`""` escape only), standard `'…'` strings (`''` escape only, no backslash, no prefix), unsigned numbers, `-- ` and non-nested, non-executable `/* */` comments, `${…}` slots and the punctuation `( ) , ; . * + - / % = < > ! | & ~ ^ ::`; anything else (a `$` outside `${`, non-ASCII, `U&` / `E'` / `B'` / `X'` / `N'`, a backslash, `#`, backticks, `[…]`, `@` / `?` / `:` parameters, `/*!`, a lone carriage return) is refused, whatever the database. Everything else is refused whatever it would create — `CREATE VIEW` / `SCHEMA` / `FUNCTION` / `TABLE … AS`, other virtual-table modules, `ALTER` other than `ADD COLUMN`, `DROP`, `EXPLAIN`, other `PRAGMA`s, `ATTACH`, `VACUUM`, `DO`, `CALL`, `SET`. A body of `${…}` slots alone stays E-SQL-003's (a bare-identifier body draws both codes). Resolution: declare the relation in `<schema>`. **Provenance:** ruling:user-voice-scrml.md S456 "a, fix F7/F9 too" (the allow-list; "The S452 durable at the DDL layer: allow-list, not classify") + S456 "your recs, go" (transaction control, `CREATE INDEX`, the closed `PRAGMA` list) · supersedes: the S456 round-2 "known columns" reader and (round 4, S239 r4 review, executed on PG16 / Bun.SQL sqlite) the round-3 enumerated disagreement list · Direction of change: newly-rejecting (corpus: 2430 single-file compiles + ex22 / ex23 / flogence multi-file, 0 newly failing; the S239 r3 and r4 reviews' executed shapes now refused). (Emitted by the `TENANT-SCHEMA` stage in `compiler/src/api.js` via `compiler/src/tenant-undeclared.ts` `programBodyUndeclaredTenantTables` over `compiler/src/schema-differ.js` `programStatementVerdicts`.) | Error |
+| E-SQL-JOURNAL-OFF | §8.9.2, §14.8.10 | `?{PRAGMA journal_mode = OFF}` inside a `!` function, or anywhere its connection is one a `!` function's envelope uses (a program-body statement or a non-`!` function on a database a `!` function writes): the setting disables the journal rollback needs. Other `journal_mode` values stay admitted per the S456 allow-list. **Provenance:** ruling:user-voice-scrml.md S473 "⭐ RULED — S473 review-surfaced decisions, all PA recs" ("your recs") item 2. Code name: PA reading, for bryan's veto. **Nominal / not yet emitted** by either compiler. | Error |
 | E-SQL-SLOT-IN-LITERAL | §8.1 | A `${…}` slot inside a quoted SQL string literal (`'…'` / `"…"`) or a SQL comment (`--` / `/* … */`) in a `?{}` template: a bound parameter stands for a whole value, so the slot cannot be bound. The message names the bound form (`LIKE ${"%" + q + "%"}`). **Provenance:** ruling:user-voice-scrml.md S468 "⭐ RULED — "safe ints only, your recs"" item 2 — *"**`E-SQL-SLOT-IN-LITERAL`** — a `${…}` inside a quoted SQL literal or SQL comment is a compile error; the message names the bound form (`LIKE ${"%" + q + "%"}`). §8 sentence + §34 row; the bootstrap emits it (it refuses today with E-BOOTSTRAP-UNSUPPORTED)."* · landed S473 D31. **Not yet emitted under this name:** the bootstrap refuses the slot today as `E-BOOTSTRAP-UNSUPPORTED` (re-code owed, `g-boot-sql-slot-in-literal-code-s473`); impl#1 silently drops it (carried, `g-impl1-sql-slot-inside-quoted-literal-dropped-s468`). | Error |
 | E-SQL-MULTIPLE-STATEMENTS | §8.1.2, §14.8.10, §14.8.11 | In a compilation with a database, a program-body `?{}` (outside `<schema>`, statement or expression position — including a `?{}` inside expression text held unparsed: an `if` / `while` condition, a template-literal slot, a raw `match` arm (S456 fix round F2) — any chain, `.acrossTenants()` included) holds more than one SQL statement: read with the §14.8.10 item (1) token walk, a `;` outside a string literal, quoted identifier, comment or `${…}` slot is followed by any further token (a word, literal, slot, punctuation or another `;`; a `;` inside parentheses counts). A single trailing `;` followed only by whitespace and comments is allowed; a `<schema>` body is not governed; a body outside the closed lexical subset is `E-SQL-PROGRAM-STATEMENT-NOT-ADMITTED`'s. The message names the fix: one `?{}` per statement, and a `transaction { }` block (§8.5.3, §19.10) when they must be atomic. The slot extents are the emitter's (one reader, JS-aware — §8.1.2; S456 fix round F1). Codegen defence in depth: the emitted driver call is read with a JavaScript parser and a site whose SQL text holds more than one statement throws `E-SQL-MULTIPLE-STATEMENTS` at run time instead of sending it (Postgres runs every statement of `unsafe("…")` without parameters; SQLite runs the statements after a row-less first one on EVERY path — tagged, parameterized, `unsafe` — so on SQLite the token walk is the only protection). **Provenance:** ruling:user-voice-scrml.md S456 "one statement per seams reasonable. push" · resolves `g-tenant-set-config-in-program-body-s456` (S239 r5, executed on PG16: `SELECT set_config('scrml.tenant','B',true); select …` re-pinned the tenant inside the §14.8.11 tier transaction; `set_config('role','none',true)` read every tenant) · Direction of change: newly-rejecting (corpus: 1331 program-body `?{}` bodies in 2581 files incl. flogence/src, 0 hold more than one statement). (Emitted by the `TENANT-SCHEMA` stage in `compiler/src/api.js` via `compiler/src/sql-one-statement.ts` `programBodyMultipleStatements` over `compiler/src/schema-differ.js` `programStatementCount`; the codegen guard is `compiler/src/codegen/sql-one-statement-guard.ts`, called from `emit-logic.ts` `case "sql"` and `rewrite.ts` `rewriteSqlRefs`.) | Error |
 | E-SQL-QUERY-NOT-READABLE | §8.1.2, §14.8.10 | In a compilation with a database, a `?{` inside expression text the compiler holds unparsed — an `if` / `while` condition the expression parser did not structure, a template-literal `${…}` slot, a raw `match` arm — that codegen's text path does not lower: not written `?{` + backtick template + `}` (an unbackticked `?{ … }` the parser could not structure), a backtick inside the body, or no `}` right after the closing backtick. No check (one statement per `?{}` — §8.1.2; the program-body allow-list — §14.8.10) can read it, so it is refused at compile; before S456 it was emitted unrewritten (invalid JavaScript) with no diagnostic. A `?{` inside a JS string or comment in that text is data, not a query. Fix: the backtick form, or bind the query to a local first (`const row = ?{`…`}.get()`). **Provenance:** review:s456-S239-one-statement-F2/F4 under ruling:user-voice-scrml.md S456 "one statement per seams reasonable. push" · Direction of change: newly-rejecting (corpus: 0 newly rejected). (Emitted by the `TENANT-SCHEMA` stage in `compiler/src/api.js` via `compiler/src/sql-one-statement.ts` `programBodyMultipleStatements` over `compiler/src/sql-in-expression-text.ts` `scanExpressionTextForSql`.) | Error |
@@ -29059,6 +29107,7 @@ are REFUSED by impl#1, `E-IMPL1-RULED-FORM-UNSUPPORTED` (its row lands with that
 | W-HTML-001 | §28.1 | Content model violation under `warn` mode | Warning |
 | ~~W-MACRO-001~~ | §4.9 | **Retired 2026-06-19 (S209 — state-as-primary unification follow-through).** Premised on a macro expansion altering block type at a `<` boundary via whitespace; under NR (§15.15.6) whitespace never reclassifies an opener (P1, 2026-04-30), so the trigger cannot occur. Macro-inserted leading whitespace surfaces W-WHITESPACE-001 (§15.15.5) instead. Spec-only — never implemented. | — |
 | ~~W-PROTECT-001~~ | §11.4 | **Retired 2026-08-01 (S310) — fold-orphan.** Twin of the retired `E-PROTECT-002`: §11 is *"Reserved — Folded"* and §11.4 no longer exists as normative text. Searched §11.4, §52, §14.8.9, §12.2 and the whole SPEC — **no normative definition survives**; index row only, no emitter. Its premise is also superseded by design: server placement is INFERRED (§12.2), not annotated, so "not `server`-annotated" is no longer a meaningful condition — the `server function` modifier is itself deprecated (`W-DEPRECATED-SERVER-MODIFIER`). Audit: `docs/changes/s34-catalog-truthfulness/`. | — |
+| E-NAVIGATE-IN-TRANSACTION | §20.3, §19.10.3 | A `navigate(…)` call inside a `transaction { }` block: the block would roll back while the user gets a success redirect, silently losing data. Move the `navigate` after the block. **Provenance:** ruling:user-voice-scrml.md S473 "⭐ RULED — S473 review-surfaced decisions, all PA recs" ("your recs") item 4. Code name: PA reading, for bryan's veto. **Nominal / not yet emitted** by either compiler. | Error |
 | W-NAV-001 | §20.3 | `navigate(path, .Hard)` from client function cannot be escalated | Warning |
 | W-NAV-CHUNK-LOAD-FAILED | §20.8.2, §20.8.7 | (Client Router — cross-chunk soft navigation, navigate-wave1c; info-level.) A soft navigation targeted a route whose client chunk is not present in the live document, and that chunk could not be loaded — a network/`onerror` failure, or the `_SCRML_NAV_CHUNK_TIMEOUT_MS` budget elapsed. The runtime falls back to a HARD navigation rather than swapping in markup it cannot wire (the route's reactive wiring ships in the chunk that failed, so a swap would render correct-looking but completely inert content). Informational only — SSR-first is preserved and the destination still loads, just as a full document. A failure that arrives AFTER a newer navigation superseded this one bails SILENTLY with no log and no hard-nav: the newer navigation owns the outcome (last-nav-wins, §20.8.5). Emitted by `_scrml_nav_chunk_failed` (`compiler/src/runtime-template.js`). | Info |
 | W-NAV-BUILD-MISMATCH | §20.8.2, §20.8.7 | (Client Router — same-build check, S469, security; info-level.) A soft navigation fetched a page whose `data-scrml-build` identity is missing or differs from the running build's, or the document has already refused a chunk (`E-CHUNK-BUILD-MISMATCH`). Handler ids are allocated per compile, so another build's markup could have the running build's listeners run the wrong handler on a click; the runtime falls back to a HARD navigation before applying any part of the page. Emitted by `_scrml_nav_apply_html` (`compiler/src/runtime-template.js`). | Info |
@@ -29208,7 +29257,7 @@ are REFUSED by impl#1, `E-IMPL1-RULED-FORM-UNSUPPORTED` (its row lands with that
 | ~~W-ASSIGN-001~~ | §50.4 | `=` in condition position without double parentheses. **Superseded S473 D10** by `E-ASSIGN-POSITION` (the single-parens form is refused). Provenance: ruling:user-voice-scrml.md S473 D10 "your recs on all". | — |
 | E-ASSIGN-001 | §50.9 | Declaration form (`let`/`const`/`lin`) in expression position | Error |
 | E-ASSIGN-POSITION | §50 (S473 D10 amendment) | An assignment used as a value anywhere except the kept form — an assignment in its own parentheses inside a `for (…)` / `if (…)` / `else if (…)` condition head (`for ((m = re.exec(s)) is given)`, `if ((x = e))`). Refused: a single-parenthesized condition `if (x = e)` (formerly `W-ASSIGN-001`), a chain `a = b = c`, an initializer, argument, return, operand or interpolation value. A statement-position assignment is not an expression and is unaffected. **Provenance:** ruling:user-voice-scrml.md S473 D10 "your recs on all" (*"§50 keeps only the double-parenthesized assignment-in-condition head; other assignment-as-expression forms are refused."*) · D29 (*"E-ASSIGN-POSITION follows D10."*). (Emitted by the bootstrap at `compiler/self-host-v2/analyze.scrml` (the value-position assignment check) — today for EVERY value-position assignment, the kept form included, until it is built (`g-boot-assign-as-expression-unbuilt-s473`). Nominal on impl#1, which accepts §50 whole — carried divergence, §34.0.) | Error |
-| E-ASSIGN-002 | §50.9 | Type mismatch in chained assignment | Error |
+| E-ASSIGN-002 | §50.9 | Type mismatch in chained assignment. **Unreachable after S473 D10** — chains are refused with `E-ASSIGN-POSITION`, so this check has nothing to check; Reserved — not emitted by either compiler (ruling:user-voice-scrml.md S473 D10 "your recs on all"). | Error |
 | E-ASSIGN-003 | §50.9 | Undeclared identifier as assignment expression target | Error |
 | E-ASSIGN-004 | §50.9 | `const` variable as assignment target, statement or expression position (emitted at `compiler/src/type-system.ts`). Includes a write to a keywordless loop binder (`for (it of xs)`, §50.8.5 — S439 ruling #8) — **Nominal for that case: not yet emitted.** | Error |
 | E-AUTH-001 | §52.11 | Client-local `@var` used as bound parameter in `?{}` INSERT/UPDATE/DELETE outside server function | Error |
@@ -29297,9 +29346,8 @@ are REFUSED by impl#1, `E-IMPL1-RULED-FORM-UNSUPPORTED` (its row lands with that
 | E-DECL-RHS-INTERP-WRAPPED | §6.2 | A derived/state-cell declaration RHS is wrapped in a `${ }` logic block — `const <bad> = ${ @x }` (Shape 3) / `<bad> = ${ @x }` (Shape 1) / `const <bad>: T = ${ @x }` (typed). The canonical RHS is a BARE expression (§6.2 — the three RHS shapes are all bare expressions); the `${ }` wrapper is non-canonical at decl-RHS position (there is ONE canonical form — `limit-the-primitive`, §14.1.1). Resolution: remove the wrapper — write `const <bad> = @x`. Pre-fix the wrapped RHS collapsed to a bare `$` identifier → a misleading `E-SCOPE-001: Undeclared identifier `$`` cascade; this code fires INSTEAD and recovers by unwrapping (no spurious E-SCOPE-001). Fires for derived (`const <x>`), plain (`<x> =`), and typed (`<x>: T =`) structural decls in logic-block / default-logic position. (Catalog addition S190 cluster-c dog-food; emitted at `compiler/src/ast-builder.js` `tryParseStructuralDecl`.) | Error |
 | E-DECL-NEEDS-INITIALIZER | §6.2 | A `const`-derived cell with a type annotation and no RHS — `const <doubled>: int` or `const <items>: string[]` — has no expression to derive from. Shape 4's no-RHS canonical-empty default (§6.2 — `int`→0, `string`→"", `T[]`→[]) applies to PLAIN reactive cells ONLY; a derived (`const`) cell REQUIRES an initializer expression (§6.2 closing parenthetical, SPEC.md `A `const`-derived cell still requires an expression`). Resolution: `const <doubled>: int = @x * 2`, or drop `const` for a plain Shape-4 cell. The rule is UNCONDITIONAL over the annotation type — BOTH scalar and array const-derived forms fire (S260 ruling: the prior impl array-form exemption was removed). NOT retired (supersedes the older "RETIRED" note in the E-REFINEMENT-NO-DEFAULT row). Emitted at `compiler/src/ast-builder.js`. (S260 — uncatalogued-code backfill from the §34-vs-impl audit + the const-array ruling.) | Error |
 | E-FIXED-RETIRED | §15.7, §66.15.1 | A `fixed` attribute on an element. `fixed` is retired (S473 D26): a §66 use cannot override anything inside a declaration's `renders` (§66.6.9), so there is nothing to mark; the attribute is refused, never written to the DOM. **Provenance:** ruling:user-voice-scrml.md S473 D26 "your recs on all" — *"`fixed` is retired and refused with a named message."* Code name: PA reading, for bryan's veto. **Nominal / not yet emitted** (`g-boot-fixed-attr-leaks-to-dom-s473`; impl#1 carries §15.7 for the legacy form). | Error |
-| E-DECL-SLOT-MISSING | §66.15.2 | §66 dialect: a use writes content between its tags and the declaration's `renders` holds no `<slot/>` — the children have nowhere to go (the legacy analog is `E-COMPONENT-021`). **Provenance:** ruling:user-voice-scrml.md S473 D11 "your recs on all". Code name: PA reading, for bryan's veto. **Nominal / not yet emitted** (bootstrap: `g-boot-slot-count-unchecked-s473`; impl#1 does not implement §66). | Error |
-| E-DECL-SLOT-MULTIPLE | §66.15.2 | §66 dialect: a declaration's `renders` holds more than one unnamed `<slot/>` — the use's children would render more than once (the legacy analog is `E-COMPONENT-020`). **Provenance:** ruling:user-voice-scrml.md S473 D11 "your recs on all". Code name: PA reading, for bryan's veto. **Nominal / not yet emitted** (bootstrap: `g-boot-slot-count-unchecked-s473`; impl#1 does not implement §66). | Error |
-| E-DECL-SLOT-OUTSIDE-RENDERS | §66.15.2 | §66 dialect: a `<slot/>` outside a declaration's `renders` — it names no use, so it would render nothing. **Provenance:** ruling:user-voice-scrml.md S473 D11 "your recs on all". Code name: PA reading, for bryan's veto. **Nominal / not yet emitted** (bootstrap: `g-boot-slot-count-unchecked-s473`; impl#1 does not implement §66). | Error |
+| E-DECL-ELEMENT-NAME-COLLIDES | §66.6.6 | A program cell whose name is an HTML element name, declared in a scope that also uses that name as a tag (`let <filter:string=""/>` and `<filter/>`): reported at the DECLARATION, naming the element and the tag use. The cell is legal when no tag use collides. **Provenance:** ruling:user-voice-scrml.md S473 "⭐ RULED — S473 review-surfaced decisions, all PA recs" ("your recs") item 3. Code name: PA reading, for bryan's veto. **Nominal / not yet emitted** (the bootstrap emits an inert element today). | Error |
+| E-DECL-SLOT-OUTSIDE-RENDERS | §66.15.2 | §66 dialect: a `<slot/>` outside a declaration's `renders` — it names no use, so it would render nothing. (Rules 1–2 of §66.15.2 reuse E-COMPONENT-021 / E-COMPONENT-020.) **Provenance:** ruling:user-voice-scrml.md S473 D11 "your recs on all". Code name: PA reading, for bryan's veto. **Nominal / not yet emitted** (bootstrap: `g-boot-slot-count-unchecked-s473`; impl#1 does not implement §66). | Error |
 | E-DECL-USE-ATTR | §66.6.9, §66.20 | §66 dialect: an attribute on a plain use `<x …/>` that is not a declared attribute or child field of `x`, `as=`, or `if=` / `else-if=` / `else` (`class`, `style`, `id`, `aria-*`, `data-*`, `on…`, `bind:…`, `show=`, `key=`, a misspelled field, …); an attribute on a `<*x>` reference that names no field of `x` (`as=` included; `if=` / `else-if=` / `else` excepted — the open residue O18-r, `E-BOOTSTRAP-UNSUPPORTED` on the bootstrap for now, §66.6.9 rule 3); a construction value written as a `{…}` block. Nothing a use writes reaches an element of its `renders`. The legacy `const X = <…>` form keeps `E-COMPONENT-011` (§15.10). **Provenance:** ruling:user-voice-scrml.md S462 "ratified path to X" (dpa-069 item 1). **Nominal on impl#1** (impl#1 does not implement §66); emitted by the bootstrap at `compiler/self-host-v2/analyze.scrml` (`resolveUse`, `resolveStar`, `resolveConstructValue`). | Error |
 | E-RESERVED-IDENTIFIER | §6.8 | Local identifier shadows a reserved language keyword. Specific case: `function reset() {...}` or `fn reset {...}` shadows the `reset` keyword. | Error |
 | E-SYNTHESIZED-WRITE | §6.11, §52.6.8 | Assignment to an auto-synthesized property (e.g., `@signup.isValid = false`). Synthesized validity surface properties are read-only. See §55 for full validity surface specification. **S451 limb:** an assignment to a `<x server>` cell's load-failure state `@x.error` (§52.6.8 rule 4; ruling:user-voice-scrml.md S451 "your recs on all five" item 2) — **Nominal / spec-ahead for this limb, not yet emitted**. The validity limb is emitted at `compiler/src/symbol-table.ts:5231`. | Error |
@@ -29514,8 +29562,8 @@ are REFUSED by impl#1, `E-IMPL1-RULED-FORM-UNSUPPORTED` (its row lands with that
 | E-COMPONENT-PROP-WRITE | §15.11.1, §15.13.2 | A component body writes (assignment, compound assignment, `++` / `--`, a forwarded `bind:value=propName`) a prop the call site did not bind with `bind:propName=@var` — a by-value prop, or a bindable prop passed by value or omitted. The prop is passed by value; bind it with `bind:` at the call site to write back, or copy it into a component-owned cell. The write is never lowered onto the caller's cell. (Emitted at `compiler/src/component-expander.ts`, `expandComponentNode`. Provenance: ruling:user-voice-scrml.md S458 "your recs on both D1 codes" — replaces the interim reuse of E-ASSIGN-004.) | Error |
 | E-COMPONENT-NAME-DUPLICATE | §9.1, §21.2 | Two components (declarations with `renders`) of one name in one program, declared in two files. A component's name is its CSS scope key (`data-scrml="ConstructorName"`, §9.1 DQ-7), so the two would share one style scope; exporting does not qualify the name. Rename one. (In one file the pair is E-SCOPE-010, §7.6.) Provenance: ruling:user-voice-scrml.md S473 "⭐ RULED — S473 PA recs, all" item 4. Emitted by the bootstrap at `compiler/self-host-v2/analyze.scrml` (`dupDecls`); Nominal on impl#1 (§34.0). | Error |
 | E-COMPONENT-014 | §15.10 | `bind` prop declared with a non-primitive type (struct or state type). `bind` props must be primitive types; for non-primitive cross-component state use state projection (§15.11.2) instead. (Catalog addition S78 audit; emitted at `compiler/src/component-expander.ts`.) | Error |
-| E-COMPONENT-020 | §15.14, §16.4 | More than one `${...}` or `${children}` spread node in a component body. A component body has at most one spread fill-site; multiple spreads have no defined semantics. (Catalog addition S78 audit; emitted at `compiler/src/component-expander.ts`.) | Error |
-| E-COMPONENT-021 | §16.4 | Caller provides unslotted children but the target component has no `${...}` spread in its body — the children have nowhere to go. Resolution: add a spread in the component body, or remove the unslotted children. (Catalog addition S78 audit; emitted at `compiler/src/component-expander.ts`.) | Error |
+| E-COMPONENT-020 | §15.14, §16.4 | More than one `${...}` or `${children}` spread node in a component body. A component body has at most one spread fill-site; multiple spreads have no defined semantics. (Catalog addition S78 audit; emitted at `compiler/src/component-expander.ts`.) **S473 D11 — carried into §66.15.2:** more than one unnamed `<slot/>` in a declaration's `renders` is this code too (ruling:user-voice-scrml.md S473 D11 "your recs on all"); that trigger is Nominal / not yet emitted by the bootstrap (`g-boot-slot-count-unchecked-s473`). | Error |
+| E-COMPONENT-021 | §16.4 | Caller provides unslotted children but the target component has no `${...}` spread in its body — the children have nowhere to go. Resolution: add a spread in the component body, or remove the unslotted children. (Catalog addition S78 audit; emitted at `compiler/src/component-expander.ts`.) **S473 D11 — carried into §66.15.2:** a §66 use with children whose declaration's `renders` holds no `<slot/>` is this code too (ruling:user-voice-scrml.md S473 D11 "your recs on all"); that trigger is Nominal / not yet emitted by the bootstrap (`g-boot-slot-count-unchecked-s473`). | Error |
 | W-COMPONENT-001 | §15.11 | Component declares a function-typed prop. Function props are an escape hatch (advisory): prefer `bind` props or state projection for typical cross-component data flow. The function-typed prop continues to work; this warning surfaces the escape-hatch nature so developers don't pick it by accident. (Catalog addition S78 audit; emitted at `compiler/src/component-expander.ts`.) | Warning |
 | E-CTRL-001 | §17.5, §17.1.1, §17.1.2.2 | `else` attribute appears on an element without a preceding `if=` or `else-if=` sibling at the same level — or on an element that is not part of a LOWERED `if=` chain: a structural element (`<engine>` / `<match>` / `<each>`, an `<each>`'s `<empty>`), an `<onTimeout>` / `<onIdle>` / `<onTransition>`, markup in an `<each>` row or lifted markup. `else` only makes sense as a continuation of an `if=` chain; where impl#1 builds none it is refused rather than rendered ungated (S469). (Catalog addition S78 audit; emitted at `compiler/src/ast-builder.js` (`collapseIfChains`, `refuseUnconsumedStructuralChainAttrs`), `compiler/src/codegen/refused-lowering-errors.ts` (`refuseUnloweredElseChain`), `compiler/src/symbol-table.ts` (`timerGateAttrDiagnostic`), `compiler/src/type-system.ts` (the `<onTransition>` check).) | Error |
 | E-CTRL-002 | §17.5, §17.1.1, §17.1.2.2 | `else-if=` attribute appears on an element without a preceding `if=` or `else-if=` sibling at the same level — or on an element that is not part of a LOWERED `if=` chain (the same positions as E-CTRL-001). `else-if=` only makes sense as a continuation of an `if=` chain. (Catalog addition S78 audit; emitted at `compiler/src/ast-builder.js` (`collapseIfChains`, `refuseUnconsumedStructuralChainAttrs`), `compiler/src/codegen/refused-lowering-errors.ts` (`refuseUnloweredElseChain`), `compiler/src/symbol-table.ts` (`timerGateAttrDiagnostic`), `compiler/src/type-system.ts` (the `<onTransition>` check).) | Error |
@@ -29660,7 +29708,7 @@ are REFUSED by impl#1, `E-IMPL1-RULED-FORM-UNSUPPORTED` (its row lands with that
 | E-REACTIVE-006 | §6.5 | A mutating array method (`push`, `pop`, `shift`, `unshift`, `splice`, `sort`, `reverse`, etc.) is called on a non-reactive (non-`@`) array variable. Mutating-method interception is part of the reactive-array contract (§6.5); calling those methods on a plain `let`-bound array silently breaks fine-grained reactivity. Resolution: declare the array as `@items` (reactive cell) or use the non-mutating spread form. (Catalog addition S84 Wave 2 #5; full prose at §6.5 lines 2258-2268.) | Error |
 | W-REACTIVE-001 | §6.6.3 | A reactive-dependency tracker invoked a function `f` whose source is unavailable at compile time (e.g., imported from a vanilla `.js` file). The compiler cannot statically resolve which `@variable` reads occur inside `f`; the reads are NOT tracked as dependencies of the enclosing reactive expression. Resolution: rewrite `f` in scrml, or accept the warning if the function genuinely has no reactive dependencies. (Catalog addition S84 Wave 2 #5; full prose at §6.6.3 line 2484.) | Warning |
 | E-KEY-001 | §10.6 | A `key=` value on a `for`/`lift` block is not a string or number expression. The keyed-iteration runtime requires primitive keys for stable diffing; object or array keys would defeat structural-sharing. (Catalog addition S84 Wave 2 #5; full prose at §10 lines 2095-2096 + §10.6 line 2256.) | Error |
-| W-KEY-001 | §10.6 | Two `key=` values within the same `for`/`lift` block evaluate to the same primitive — the keyed-iteration runtime would diff incorrectly. The compiler MAY also emit this warning for collections of objects without a declared `key`. Resolution: derive `key=` from a primary-key-shaped field. (Catalog addition S84 Wave 2 #5; full prose at §10 line 2095 + §10.6 line 2257 + §17.2 line 9122.) | Warning |
+| W-KEY-001 | §10.6 | Two `key=` values within the same `for`/`lift` block evaluate to the same primitive — the keyed-iteration runtime would diff incorrectly. The compiler MAY also emit this warning for collections of objects without a declared `key`. Resolution: derive `key=` from a primary-key-shaped field. (Catalog addition S84 Wave 2 #5; full prose at §10 line 2095 + §10.6 line 2257 + §17.2 line 9122.) **S473 (review-surfaced 5):** the loop-header `key` (§17.4b) is canonical and W-KEY-001 takes the header meaning — an object collection iterated with no header `key`; the duplicate-`key=` reading belongs to the legacy §6.5.3 spelling, which the bootstrap refuses with a hint (Nominal / not yet emitted there). Provenance: ruling:user-voice-scrml.md S473 "⭐ RULED — S473 review-surfaced decisions, all PA recs" ("your recs") item 5. | Warning |
 | E-SYNTAX-004 | §17.4, §51.5 | An `if` keyword appears in a `<machine>` rule guard position. Rule guards are predicate-shaped (§51 grammar); using JS `if` blocks here is a category error. Resolution: use the rule-guard predicate syntax (`given x :>` etc.). (Catalog addition S84 Wave 2 #5; full prose at §17.4 line 650.) | Error |
 | E-LIFT-002 | §17.6 | Two or more `lift` statements appear on the same reachable execution path inside a single value-lift arm body. In an if-as-expression each arm produces exactly one value; multiple lifts on the same path would emit multiple values. Resolution: remove or consolidate the extra `lift` calls, or restructure into a separate accumulation context. (Catalog addition S84 Wave 2 #5; full prose at §17.6 lines 6027-6035, worked example line 9426.) | Error |
 | W-LIFT-001 | §17.6 | A value-lift arm body in an if-as-expression executes no `lift` statement on any reachable path. The arm contributes `not` to the expression type. Resolution: if intentional (side-effect-only arm), annotate the binding with `: T \| not` to silence; otherwise add a `lift` to the arm body. (Catalog addition S84 Wave 2 #5; full prose at §17.6 lines 9204-9207.) | Warning |
@@ -38245,7 +38293,7 @@ the PA's brief, "Move §49.13 into §66.12". Direction of change: inert.)*
 
 ### 50.1 Overview
 
-~~In scrml, a bare assignment (`x = value`) MAY appear in any expression position.~~ *(narrowed S473 D10 — see the amendment above)* In scrml, a bare assignment (`x = value`) MAY appear in any expression position. The result of the assignment expression is the assigned value. This is a narrow, precisely scoped feature: only bare variable assignment is an expression. Declaration forms (`let`, `const`, `lin`) are statements and are never expressions.
+~~In scrml, a bare assignment (`x = value`) MAY appear in any expression position.~~ *(narrowed S473 D10 — see the amendment above)* In scrml, an assignment is an expression in exactly one place: wrapped in its own parentheses inside a `for (…)` / `if (…)` / `else if (…)` condition head (`for ((m = re.exec(str)) is given)`, `if ((x = e))`). Anywhere else an assignment used as a value is `E-ASSIGN-POSITION`. The result of the kept assignment expression is the assigned value. This is a narrow, precisely scoped feature: only bare variable assignment is an expression. Declaration forms (`let`, `const`, `lin`) are statements and are never expressions.
 
 The primary motivating use case is the regex iteration idiom:
 
@@ -38314,15 +38362,15 @@ The compiler distinguishes intentional assignment-in-condition from accidental a
 
 - **`while ((x = expr))`** — double parens. The inner `(x = expr)` is the assignment expression. The outer parens are the while condition's required parens. This is unambiguously intentional. No warning is emitted.
 
-- **`while (x = expr)`** — single parens. The `=` appears directly inside the condition parens. This triggers W-ASSIGN-001 (did you mean `==`?). The program is not rejected — the warning is advisory.
+- ~~**`while (x = expr)`** — single parens. The `=` appears directly inside the condition parens. This triggers W-ASSIGN-001 (did you mean `==`?). The program is not rejected — the warning is advisory.~~ *(superseded S473 D10 — ruling:user-voice-scrml.md S473 D10 "your recs on all"; see the §50 amendment)* A single-parenthesized assignment condition is **`E-ASSIGN-POSITION`** (refused).
 
 - **`if ((x = expr))`** — same rule applies. Double parens signals intent.
 
-- **`if (x = expr)`** — triggers W-ASSIGN-001.
+- ~~**`if (x = expr)`** — triggers W-ASSIGN-001.~~ *(superseded S473 D10 — ruling:user-voice-scrml.md S473 D10 "your recs on all"; see the §50 amendment)* `if (x = expr)` is **`E-ASSIGN-POSITION`**.
 
 The double-parens requirement applies only when assignment appears as the **outermost** expression inside the condition. Assignment nested inside a larger expression (e.g., `while ((m = re.exec(str)) is given)`) is NOT subject to the double-parens requirement because the assignment is not the outermost expression — the `is given` operator is outermost.
 
-Formally: W-ASSIGN-001 is triggered when the direct child of the while/if condition's parens is an `assign-expr` node (i.e., the root of the condition expression tree is `=`). When the assign-expr appears at any non-root position in the condition expression tree, no warning is triggered.
+~~Formally: W-ASSIGN-001 is triggered when the direct child of the while/if condition's parens is an `assign-expr` node (i.e., the root of the condition expression tree is `=`). When the assign-expr appears at any non-root position in the condition expression tree, no warning is triggered.~~ *(superseded S473 D10 — ruling:user-voice-scrml.md S473 D10 "your recs on all"; see the §50 amendment)* Formally, after D10: an `assign-expr` is admitted in a condition head only as a PARENTHESIZED node — the root wrapped in its own `(…)` (`((x = e))`) or a parenthesized operand (`((m = re.exec(s)) is given)`). An unparenthesized `=` anywhere in the head is `E-ASSIGN-POSITION`.
 
 **Corollary — the outer parens are the CONDITION's, so they wrap the whole condition.** The double-parens rule above is stated in terms of "the outer parens are the while condition's **required** parens"; §50.2.1's `while-stmt` / `if-stmt-logic` productions and §49.2.1 say the same structurally. It follows that a head whose outermost `(` closes and whose condition then CONTINUES past it is not a legal head at all:
 
@@ -38358,6 +38406,8 @@ In `a = b = c = value`:
 4. `a` is assigned the result.
 
 All three variables hold the same value after the chain completes. Chaining is valid only when all lvalues have the same declared type, or when the type is inferred from context. Type mismatch across a chain is E-ASSIGN-002.
+
+> **Superseded S473 (D10).** A chain `a = b = c = value` is refused, `E-ASSIGN-POSITION` (the inner `b = …` is an assignment in a value position). The evaluation order above is the record of the withdrawn form; write one assignment per statement. *(superseded S473 D10 — ruling:user-voice-scrml.md S473 D10 "your recs on all"; see the §50 amendment)*
 
 #### 50.3.3 Side Effects and Evaluation
 
@@ -38494,7 +38544,7 @@ W-ASSIGN-001: Assignment (`=`) used as the condition of `while` at line N.
   Single parentheses in a condition with `=` as the root expression are ambiguous.
 ```
 
-W-ASSIGN-001 does not prevent compilation. The program compiles and runs with the assignment semantics. The warning is advisory.
+~~W-ASSIGN-001 does not prevent compilation. The program compiles and runs with the assignment semantics. The warning is advisory.~~ *(superseded S473 D10 — ruling:user-voice-scrml.md S473 D10 "your recs on all"; see the §50 amendment)* **W-ASSIGN-001 is superseded:** the single-parenthesized form is refused with `E-ASSIGN-POSITION`. This subsection is the record of the withdrawn warning.
 
 #### 50.8.2 E-ASSIGN-001 — Declaration Form Used as Expression
 
@@ -38509,10 +38559,12 @@ E-ASSIGN-001: `let` declaration at line N appears in an expression position.
   To assign a variable and use its value as an expression, declare it first:
 
     let x = initialValue
-    someCall(x = newValue)   // bare assignment is an expression; declaration is not
+    someCall(x = newValue)   // (S473 D10: this is now E-ASSIGN-POSITION — write `x = newValue` then `someCall(x)`)
 ```
 
 #### 50.8.3 E-ASSIGN-002 — Type Mismatch in Chained Assignment
+
+> **Unreachable after S473 (D10).** Chains are refused with `E-ASSIGN-POSITION`, so this check has nothing left to check. Record only. *(superseded S473 D10 — ruling:user-voice-scrml.md S473 D10 "your recs on all"; see the §50 amendment)*
 
 **Trigger:** In `a = b = value`, the type of `value` is not assignable to both `a` and `b`, or `a` and `b` have declared types that are incompatible with each other.
 
@@ -38622,15 +38674,15 @@ ${
 
 ### 50.9 Normative Statements
 
-- A bare assignment expression `x = value` SHALL produce the assigned value as its result when appearing in any expression position. (§50.3.1)
+- ~~A bare assignment expression `x = value` SHALL produce the assigned value as its result when appearing in any expression position. (§50.3.1)~~ *(superseded S473 D10 — ruling:user-voice-scrml.md S473 D10 "your recs on all"; see the §50 amendment)* The kept form — an assignment in its own parentheses in a `for` / `if` / `else if` condition head — SHALL produce the assigned value; an assignment in any other value position SHALL be `E-ASSIGN-POSITION`. (§50.3.1)
 - The right-hand side of an assignment expression SHALL be evaluated exactly once. (§50.3.3)
 - Declaration forms (`let`, `const`, `lin`) SHALL NOT appear in expression positions. The compiler SHALL emit E-ASSIGN-001. (§50.4.3)
-- In chained assignment `a = b = value`, evaluation SHALL be right-to-left and each lvalue SHALL receive the same value. (§50.3.2)
-- All lvalues in a chained assignment SHALL have types that accept the value type. The compiler SHALL emit E-ASSIGN-002 when this condition is violated. (§50.4.2)
+- ~~In chained assignment `a = b = value`, evaluation SHALL be right-to-left and each lvalue SHALL receive the same value. (§50.3.2)~~ *(superseded S473 D10 — ruling:user-voice-scrml.md S473 D10 "your recs on all"; see the §50 amendment)* A chained assignment SHALL be `E-ASSIGN-POSITION`.
+- ~~All lvalues in a chained assignment SHALL have types that accept the value type. The compiler SHALL emit E-ASSIGN-002 when this condition is violated. (§50.4.2)~~ *(superseded S473 D10 — ruling:user-voice-scrml.md S473 D10 "your recs on all"; see the §50 amendment)* (unreachable: chains are refused)
 - An assignment expression to an `@variable` SHALL trigger the reactive update as a side effect. The expression result SHALL be the assigned value, not a reactive reference. (§50.3.4)
-- When `=` appears as the root expression of a `while`, `if`, or `else-if` condition without double parentheses, the compiler SHALL emit W-ASSIGN-001. (§50.2.3)
-- When `=` appears at a non-root position in a condition expression tree, W-ASSIGN-001 SHALL NOT be emitted. (§50.2.3)
-- The double-parentheses form `while ((x = expr))` is unambiguously intentional assignment. The compiler SHALL NOT emit W-ASSIGN-001 for this form. (§50.2.3)
+- ~~When `=` appears as the root expression of a `while`, `if`, or `else-if` condition without double parentheses, the compiler SHALL emit W-ASSIGN-001. (§50.2.3)~~ *(superseded S473 D10 — ruling:user-voice-scrml.md S473 D10 "your recs on all"; see the §50 amendment)* An unparenthesized `=` in a condition head SHALL be `E-ASSIGN-POSITION`. (§50.2.3)
+- ~~When `=` appears at a non-root position in a condition expression tree, W-ASSIGN-001 SHALL NOT be emitted. (§50.2.3)~~ *(superseded S473 D10 — ruling:user-voice-scrml.md S473 D10 "your recs on all"; see the §50 amendment)* A parenthesized operand assignment in a condition head (`((m = re.exec(s)) is given)`) is the kept form and SHALL be accepted.
+- The double-parentheses form ~~`while ((x = expr))`~~ `for ((x = expr))` / `if ((x = expr))` is unambiguously intentional assignment ~~. The compiler SHALL NOT emit W-ASSIGN-001 for this form.~~ and SHALL be accepted (S473 D10; `while` retired S469). (§50.2.3)
 - An assignment to a `const` variable SHALL be a compile error (E-ASSIGN-004), in statement position and in expression position alike. (§50.8.5)
 - A binding created without `let` SHALL be a `const` binding. The keywordless bare naming statement `x = value` declares `x` exactly as `const x = value` does; `let` is the only declaration form that produces a mutable binding. (§50.8.5)
 - A compound assignment (`+=`, `-=`, `*=`, `/=`, `%=`) whose target is a `const` binding SHALL be E-ASSIGN-004. Compound assignment is statement-only in scrml (§50.12), so this follows from the statement-form rule above. (§50.8.5)
@@ -38670,7 +38722,9 @@ while ((m = re.exec(str), m !== null && m !== undefined)) {
 }
 ```
 
-#### 50.10.2 Valid — Chained Assignment
+#### 50.10.2 ~~Valid~~ Invalid — Chained Assignment (E-ASSIGN-POSITION, S473 D10)
+
+> **Flipped S473 (D10):** both programs below are now refused, `E-ASSIGN-POSITION` — a chain puts an assignment in a value position. The "Expected" lines are the record of the withdrawn behaviour. *(superseded S473 D10 — ruling:user-voice-scrml.md S473 D10 "your recs on all"; see the §50 amendment)*
 
 ```scrml
 ${
@@ -38680,7 +38734,7 @@ ${
 }
 ```
 
-Expected: Compiles without error. `b = 0` is evaluated first, assigning `0` to `b` and producing `0`. Then `a = 0` assigns `0` to `a`. Both variables hold `0`.
+Expected (S473 D10): `E-ASSIGN-POSITION` at `b = 0`. ~~Compiles without error. `b = 0` is evaluated first, assigning `0` to `b` and producing `0`. Then `a = 0` assigns `0` to `a`. Both variables hold `0`.~~
 
 ```scrml
 // In a single expression context:
@@ -38692,9 +38746,11 @@ ${
 }
 ```
 
-Expected: Compiles without error. All three variables receive the result of `computeValue()`.
+Expected (S473 D10): `E-ASSIGN-POSITION`. ~~Compiles without error. All three variables receive the result of `computeValue()`.~~
 
-#### 50.10.3 Valid — Assignment in Ternary
+#### 50.10.3 ~~Valid~~ Invalid — Assignment in Ternary (E-ASSIGN-POSITION, S473 D10)
+
+> **Flipped S473 (D10):** a ternary test is not a `for` / `if` condition head, so the parenthesized assignment there is refused, `E-ASSIGN-POSITION`. *(superseded S473 D10 — ruling:user-voice-scrml.md S473 D10 "your recs on all"; see the §50 amendment)*
 
 ```scrml
 ${
@@ -38703,11 +38759,13 @@ ${
 }
 ```
 
-Expected: Compiles without error. `flag = computeFlag()` is an assignment expression. Its result (the value assigned to `flag`) is used as the ternary condition. `result` receives `"yes"` or `"no"`. `flag` is also updated as a side effect.
+Expected (S473 D10): `E-ASSIGN-POSITION` at `flag = computeFlag()`. ~~Compiles without error. `flag = computeFlag()` is an assignment expression. Its result (the value assigned to `flag`) is used as the ternary condition. `result` receives `"yes"` or `"no"`. `flag` is also updated as a side effect.~~
 
 Note: This is a dense expression. Its clarity in real code depends on context. W-ASSIGN-001 is NOT triggered here because `flag = computeFlag()` is not in a while/if condition — it is the condition of a ternary (`?:`), which is not subject to W-ASSIGN-001.
 
-#### 50.10.4 Warning — Assignment in `if` Without Double Parens
+#### 50.10.4 ~~Warning~~ Invalid — Assignment in `if` Without Double Parens (E-ASSIGN-POSITION, S473 D10)
+
+> **Flipped S473 (D10):** `if (x = 5)` is refused, `E-ASSIGN-POSITION`; the W-ASSIGN-001 output below is the record of the withdrawn warning. *(superseded S473 D10 — ruling:user-voice-scrml.md S473 D10 "your recs on all"; see the §50 amendment)*
 
 ```scrml
 ${
@@ -38776,7 +38834,7 @@ E-ASSIGN-001: `let` declaration at line 3 appears in an expression position.
 | ~~W-ASSIGN-001~~ | `=` is the root expression of a while/if/else-if condition without double parentheses. **Superseded S473 D10** — the single-parens form is now `E-ASSIGN-POSITION`. | — |
 | E-ASSIGN-POSITION | An assignment in a value position other than the kept double-parenthesized condition-head form (S473 D10): a single-parens condition, a chain, an initializer / argument / return / operand value (emitted by the bootstrap at `compiler/self-host-v2/analyze.scrml`; Nominal on impl#1) | Error |
 | E-ASSIGN-001 | `let`, `const`, or `lin` declaration form appears in an expression position | Error |
-| E-ASSIGN-002 | Type mismatch in chained assignment — value type not assignable to all lvalues | Error |
+| E-ASSIGN-002 | Type mismatch in chained assignment — value type not assignable to all lvalues. **Unreachable after S473 D10** (chains are E-ASSIGN-POSITION); Reserved — not emitted by either compiler | Error |
 | E-ASSIGN-003 | Undeclared identifier used as assignment expression target | Error |
 | E-ASSIGN-004 | `const` variable used as assignment target, statement or expression position (emitted at `compiler/src/type-system.ts`) | Error |
 
@@ -43197,12 +43255,11 @@ No spec changes required for §52 under v0.next. Existing semantics hold.
 > §52.4 instance-level form `<x server> = …` (and the §52.6.5 / §52.6.6 Tier 2 load / write conventions that serve
 > it) is not part of the ruled language: an implementation that speaks the ruled dialect (the bootstrap) refuses
 > it with a named refusal whose hint names a `<db>` cell (§63.5, D5); impl#1 (frozen) still accepts it as a
-> carried divergence. **Type-level `protect=` stays OWED**: it is the confidentiality story, and until it is
-> built an implementation SHALL refuse an element carrying `protect=` (or `authority=`) that it does not enforce
-> (S473 D2). ⚑ **Not decided here (flagged):** whether Tier 1 type-level `authority="server"` (§52.3) is retired
-> with Tier 2 or stays owed — the ruling's parenthetical lists *"`authority=` server cells"* under Tier 2, while
-> decisions.md D7 (a) keeps *"Tier 1 type-level authority/`protect=` as owed"*. §52.3 is left as written until
-> that is confirmed.
+> carried divergence. **Tier 1 type-level authority (§52.3: `<T authority="server" table=…>`) and type-level
+> `protect=` STAY OWED AND REFUSED**: they are the confidentiality story, and until they are built an implementation
+> SHALL refuse an element carrying `protect=` (or `authority=`) that it does not enforce (S473 D2). Only Tier 2 is
+> retired; §52.3 stands as owed. *(The ruling adopts decisions.md D7 option (a): "Retire Tier 2 in favour of `<db>`
+> cells, and keep Tier 1 type-level authority/`protect=` as owed (refused until built).")*
 >
 > **Provenance:** ruling:user-voice-scrml.md S473 D7 "your recs on all" — *"§52 Tier 2 (`<x server>`,
 > `authority=` server cells) is retired in favour of §8.1.3 `<db>` cells. Type-level `protect=` stays owed and
@@ -47868,7 +47925,7 @@ The bit-identical-artifact claim (§58.1, §58.6, §58.10, each marked `*`) is o
 
 **Specified and solid:**
 
-- §47 content-addressing of output names — deterministic, FNV-1a over canonical strings (§47.1.3–§47.1.4).
+- §47 content-addressing of output names — deterministic, FNV-1a over canonical strings (§47.1.3–§47.1.4). *(S473 D4: the output-name encoding is an impl#1 annex, not a conformance obligation; this bullet describes impl#1. Chunk content-addressing, §40.9.8 / the §47.5 cross-refs, stays normative.)*
 - §40.9.8 closure-analysis determinism — "deterministic-from-source-only"; no telemetry, environment variable, or timestamp participates (§47.5 cross-reference).
 
 **`*` — specified as a target, not yet proven for the scrml toolchain:**
@@ -48441,7 +48498,9 @@ what kind of change it is** (§62.3).
 that expects an error code and gets a DIFFERENT code is a **FAIL**, whatever phase (parse,
 scope, type) produced the wrong one. **UNSUPPORTED** is reserved for a case the implementation
 refuses with `E-BOOTSTRAP-UNSUPPORTED` — its named "not in this implementation yet" refusal —
-and for nothing else; an unexpected parse-phase error is not UNSUPPORTED. **Provenance:**
+and for nothing else; an unexpected parse-phase error is not UNSUPPORTED. A §34.2 parser spelling of a rule
+(`E-PARSE-NO-NULL` for `E-SYNTAX-042`, `E-PARSE-STRICT-EQ` for `E-EQ-004`) counts as the expected code
+*(PA reading — D29 "one code per rule")*. **Provenance:**
 ruling:user-voice-scrml.md S473 D30 "your recs on all" — *"conformance grading: a wrong error
 code is FAIL; UNSUPPORTED is only for E-BOOTSTRAP-UNSUPPORTED. Fix the module cases'
 semicolons."* · supersedes: the grader's practice of bucketing an unexpected parse-phase error
@@ -50585,6 +50644,14 @@ The existing render-by-tag uses (`<x/>` as a view of a shared cell — measured 
 silently changes meaning. This is the one §66 retirement that does NOT go through the §63 soft-deprecation
 window (§66.21).
 
+**A program cell named like an HTML element collides with a tag use of that name (S473 review-surfaced 3).** When a
+scope declares a program cell whose name is an HTML element name (`let <filter:string=""/>`) and the same scope also
+uses that name as a tag (`<filter/>`), the DECLARATION SHALL be a compile error, **`E-DECL-ELEMENT-NAME-COLLIDES`**
+(§34), naming the element and the tag use — not an inert `<filter>` element in the output. The cell keeps working
+when no tag use of its name collides. *(The code name is a PA reading, for bryan's veto.)* **Provenance:** ruling:user-voice-scrml.md S473 "⭐ RULED — S473 review-surfaced decisions, all PA recs" ("your recs") item
+3 — *"**A program cell named like an HTML element is refused where the cell is DECLARED when the same scope also uses that name as a tag (from #1678 F3).** `let <filter:string=""/>` followed by `<filter/>` is an error at the declaration, not an inert `<filter>` element. The cell keeps working when no tag use collides."* · supersedes: nothing written (§66 was silent; the bootstrap emitted an inert element). **Direction of
+change:** newly-rejecting. **Nominal / not yet emitted.**
+
 #### 66.6.7 Attributes on a `<*x>` reference are read-only (Q1)
 
 A `<*x>` reference cannot write: an attribute that would set a value of the referenced instance is a compile
@@ -52111,7 +52178,8 @@ unless the field is exported — and route the count to bryan.
 > **Provenance:** ruling:user-voice-scrml.md S435 (dpa-050 §7 #10) · *"yes, retire it, move on"* (ratifying:
 > `const X = <… props={…}>` retires; a declaration with typed attributes + `renders` IS the component; callback
 > props = function-typed attributes; use-site children = slot content via `<slot/>`; §15.11.1 bind props →
-> E2 exported `let` fields; spread / `fixed` / ~~class merging~~ carry over; §63 deprecation, not same-arc).
+> E2 exported `let` fields; spread / ~~`fixed`~~ / ~~class merging~~ carry over; §63 deprecation, not same-arc).
+> *(The "`fixed` carries over" clause is superseded S473 D26 — `fixed` is retired and refused, `E-FIXED-RETIRED`, §15.7 / §66.15.1.)*
 > *(The "class merging carry over" clause is superseded S462 — §66.15.1's reversed row; "spread" is O46, ruled S462: `${...}` retires, §66.15.2.)*
 > **supersedes:** §15.1 / §15.1.1 / §15.3 / §15.10 (component definition by `const X = <root props={…}>`);
 > §15.12 (component rendering syntax); §15.13.5 (see §66.13); §16's slot-declaration surface as far as §66.15.2
@@ -52156,17 +52224,16 @@ Content written between a use's tags is **slot content**, placed inside the decl
 compile error:
 
 1. **Children with no slot** — a use writes content between its tags, and the declaration's `renders` holds no
-   `<slot/>`: **`E-DECL-SLOT-MISSING`**. The children would have nowhere to go (the legacy analog is
-   `E-COMPONENT-021`, §16.4).
+   `<slot/>`: **`E-COMPONENT-021`** — the legacy code, carried into §66.15.2. The children would have nowhere to go.
 2. **More than one unnamed slot** — a declaration's `renders` holds more than one unnamed `<slot/>`:
-   **`E-DECL-SLOT-MULTIPLE`**. The children would render more than once (the legacy analog is `E-COMPONENT-020`).
+   **`E-COMPONENT-020`** — the legacy code, carried into §66.15.2. The children would render more than once.
 3. **A slot outside `renders`** — a `<slot/>` anywhere but inside a declaration's `renders` (a program or page
    body, a plain markup body, a declaration body outside `renders`): **`E-DECL-SLOT-OUTSIDE-RENDERS`**. It names no
    use, so it would render nothing.
 
 A use with no children and a `renders` with one `<slot/>` is legal (the slot renders nothing). Named and
-parametric slots stay ⚑ O9 below. *(The three code names are PA readings following the §66 `E-DECL-*`
-convention, for bryan's veto.)*
+parametric slots stay ⚑ O9 below. *(Rules 1 and 2 reuse the legacy codes, per decisions.md D11 (a). The rule-3 name
+`E-DECL-SLOT-OUTSIDE-RENDERS` is a PA reading following the §66 `E-DECL-*` convention, for bryan's veto.)*
 > **Provenance:** ruling:user-voice-scrml.md S473 D11 "your recs on all" — *"slots: zero `<slot/>` with use-site
 > children, more than one unnamed slot, and a `<slot/>` outside `renders` are each compile errors."* · decisions.md
 > D11 (a) *"Carry legacy E-COMPONENT-020/021 into §66.15.2"* · supersedes: nothing written (§66 was silent).
@@ -52190,7 +52257,7 @@ convention, for bryan's veto.)*
 >
 > *(superseded S462)* **O46: does the `${...}` children spread survive beside `<slot/>`?** The components text
 > bryan answered *"yes, retire it"* rules `<slot/>` for use-site children and separately lists *"Attribute spread
-> (`${...}`), `fixed`, and class merging: these carry over"* — naming as "attribute spread" the token §16.4 defines
+> (`${...}`), `fixed`, and class merging: these carry over"* *(`fixed`: superseded S473 D26 — retired, `E-FIXED-RETIRED`)* — naming as "attribute spread" the token §16.4 defines
 > as the UNNAMED-CHILDREN spread. Whether `${...}` survives beside `<slot/>` as the children spread (two spellings),
 > is replaced by it, or is repurposed as an attribute spread, is not determinable from that text.
 

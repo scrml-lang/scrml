@@ -44,18 +44,38 @@ Branch: s473-spec-audit-rulings (from origin/main 3d8a05cf1). SPEC text only (+ 
 - D31: §14.4.1 E.parse; §52.6.8 banner; §13.9 status; §14.8.9 / §14.8.10 "Implemented in impl#1"; §2.4 SAB/Atomics restated (S440 R7); §8.1.1 mongo struck; §9.3 stale banner; §4.5 retired; markers §14.9, §5.4.1, §5.5.5; O54 RULED (§66.6.3, §66.22, inline markers); §66.12.8 index read built; §66.20 — 16 rows corrected to "emitted by the bootstrap", 3 (W-GRANT-REDUNDANT, E-FOREIGN-REPLACE-PRIVATE, E-CELL-NO-RENDER-SPEC) to "the bootstrap does not emit it either"; §55 header, §55.17 banner, four §55.15 rows; §8.1 E-SQL-SLOT-IN-LITERAL sentence + §34 row (S468); §7.5 / §34 E-PARAM-TYPE-REQUIRED re-code recorded with gap.
 
 ## New §34 rows
-E-ASSIGN-POSITION (D10), E-DECL-SLOT-MISSING / E-DECL-SLOT-MULTIPLE / E-DECL-SLOT-OUTSIDE-RENDERS (D11),
+E-ASSIGN-POSITION (D10), E-DECL-SLOT-OUTSIDE-RENDERS (D11; rules 1–2 reuse E-COMPONENT-021 / -020),
 I-TAILWIND-NOT-BUILT (D13), E-FIXED-RETIRED (D26), E-SQL-SLOT-IN-LITERAL (D31/S468).
 Retired: E-TYPE-012 (D17), E-TYPE-026 (D19), E-REACTIVE-004 (D22).
 Code names for D11 / D13 / D26 are PA readings for bryan's veto.
 
 ## Flags (ambiguous — not decided)
-- D7: the ruling's parenthetical puts "`authority=` server cells" under Tier 2 (retired); decisions.md D7 (a) keeps Tier 1 type-level authority owed. §52.3 left as written; flagged in §52's amendment.
+- D7: RESOLVED in review round 1 — Tier 1 stays owed and refused (decisions.md D7 (a)); the user-voice parenthetical was a PA summary error.
 - D15: whether legacy `export { count }` stays E-EXPORT-001 — left as written (minimal reading). decisions.md says "re-pin conformance case `e-export-001-*`"; NOT done (case `conformance/cases/module/e-export-001-export-state-cell-reject` is the legacy form and still holds under the minimal reading).
 - D31 §6.5.3 (`key=` on lifted element) vs §17.4b (header `key`): "needs one canonical form" is a semantics choice; not made.
 - D31 §14.12: already carries an S435 supersession marker; nothing added.
 
+## Review round 1 (#1682 FIX-FIRST) — done
+- D10: §50.1 restated; §50.2.3, §50.3.2, §50.8.1, §50.8.3, §50.9 bullets struck/marked; §50.10.2 / §50.10.3 / §50.10.4 flipped to Invalid (E-ASSIGN-POSITION); E-ASSIGN-002 rows marked unreachable.
+- D14: limited to function-body LOCALS; "impl#1 already refuses it" removed (false).
+- D7: Tier 1 `authority=` / `protect=` stated as OWED AND REFUSED (decisions.md D7 (a)); the "not decided" flag dropped.
+- D11: rules 1–2 reuse E-COMPONENT-021 / E-COMPONENT-020 (rows extended); E-DECL-SLOT-MISSING / -MULTIPLE removed; E-DECL-SLOT-OUTSIDE-RENDERS kept, flagged.
+- §6.5.3 / §17.4b "canonical key pending a ruling" markers + W-KEY-001's two meanings; gap g-spec-key-canonical-form-s473 filed.
+- §62.2: a §34.2 parser spelling counts as the expected code (PA reading, D29).
+- §58.12 bullet annotated (D4); two "`fixed` carries over" record lines annotated (D26); the `flush()` example marked retired — a call is E-SCOPE-001 on the bootstrap (probed), flagged for a D28 named refusal.
+- g-impl1-sql-slot-inside-quoted-literal-dropped-s468 filed verbatim from S468 item 3.
+- D23 owed-case note flags the handler that awaits a server call partway; D13 "once per compile" flagged as a PA reading.
+
+## Review-surfaced rulings (user-voice "⭐ RULED — S473 review-surfaced decisions, all PA recs", scrml-support f648b65) — done
+1. §8.9.2 + §19.10.5: implicit-envelope trigger = TRANSITIVE write set; interim bootstrap refusal (E-BOOTSTRAP-UNSUPPORTED).
+2. §8.9.2 + §14.8.10 allow-list: `PRAGMA journal_mode = OFF` reaching a `!` connection → E-SQL-JOURNAL-OFF (new; name is a PA reading).
+3. §66.6.6: element-named program cell colliding with a tag use → E-DECL-ELEMENT-NAME-COLLIDES at the declaration (new; reading).
+4. §20.3 + §19.10.3: `navigate()` inside `transaction {}` → E-NAVIGATE-IN-TRANSACTION (new; reading).
+5. §6.5.3 / §17.4b: loop-header `key` canonical; `key=` legacy (bootstrap refuses with a hint, owed); W-KEY-001 takes the header meaning. The "pending" markers are replaced; g-spec-key-canonical-form-s473 marked RULED (bootstrap refusal still owed).
+
 ## Follow-ups outside this lane (no SPEC text)
+- Bootstrap: build E-SQL-JOURNAL-OFF, E-DECL-ELEMENT-NAME-COLLIDES, E-NAVIGATE-IN-TRANSACTION, the transitive-write-set refusal, and the legacy `key=` refusal with a hint.
+- D15: the owed re-pin — a clean §66 twin conformance case (`export let <x/>`, E-EXPORT-001 absent).
 - D29 bootstrap re-codes: E-AUTH-001, E-STATE-UNDECLARED, E-TYPE-043, E-FN-004 (compiler work).
 - D30: fix the module conformance cases' semicolons (case edits — not done here); grader change in scripts/bootstrap-conformance.ts.
 - D19: build E-ATTR-UNQUOTED-OPERATOR in the bootstrap.
