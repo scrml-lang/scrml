@@ -127,11 +127,11 @@ describe("rule 3 — `src=`", () => {
     expect(codes(`<host src="x.js">\n  f() -> int\n</host>\n<program>\n<p>x</p>\n</program>\n`)).toEqual(["E-IMPORT-005"]);
   });
 
-  test("a valid relative .js path: refused BY NAME — the static export read (H2) is not built, and no host JS is loaded", () => {
+  test("a valid relative .js path: the front end is clean and carries the export root into Core — the driver reads the exports statically (s473 allowlist lane A; host-src-s473.test.js), no host JS is loaded", () => {
     const src = `<host src="./glue.js">\n  f() -> int\n</host>\n<program>\n<p>x</p>\n</program>\n`;
-    const r = run(src);
-    expect(errs(r).map((d) => d.code)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
-    expect(errs(r)[0].message).toContain("read statically");
+    const r = clean(src);
+    const b = r.core.fns.find((f) => f.host && f.host.bind).host.bind;
+    expect([b.root, b.rootParam, b.chain, b.src.path, b.src.targetless]).toEqual(["f", -1, [], "glue.js", true]);
   });
 });
 

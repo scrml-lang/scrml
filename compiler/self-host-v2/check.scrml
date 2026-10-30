@@ -98,7 +98,7 @@
 // =============================================================================
 ${
     import { Sym, Type, TypeDef, FieldDef, VariantDef, FieldRef, InstRef, Place, Literal, Expr, SeqFn, PrimOp, Attr, Block, LoopHead,
-             EditKind, Check, Stmt, View, EffectDep, Field, Decl, Fn, HostFn, HostBind, HostArg, HostProp, CoreProgram, CapOwner, TransitionGraph,
+             EditKind, Check, Stmt, View, EffectDep, Field, Decl, Fn, HostFn, HostBind, HostSrc, HostArg, HostProp, CoreProgram, CapOwner, TransitionGraph,
              DeclKind, SurfaceProp, ValidityOf, Persist, PersistStore, ServerFn, SqlQuery, Db,
              Pattern, Failable, OkArm, ErrArm, HostCall, Gather, Lifted, GatherRow,
              capOwner, grantsAnyWrite, findDecl, findTypeDef, findFn, findServerFn, findDb } from "./core.scrml"
@@ -301,7 +301,12 @@ ${
         if (b.shape < 0 || b.shape > 3) out = out.concat(["C-HB1: the binding " + who + " has an unknown target shape"])
         if (b.shape >= 2 && b.chain.length == 0) out = out.concat(["C-HB1: the binding " + who + " reads or writes no member"])
         if (b.shape == 3 && b.args.length != 1) out = out.concat(["C-HB1: the binding " + who + " writes " + b.args.length + " values"])
-        if (b.rootParam < 0) {
+        const hs: HostSrc | not = b.src
+        if (hs is given) {
+            // s473 (allowlist lane A): rooted at an export of a `<host src=>` file — an identifier, no parameter root
+            if (b.rootParam >= 0 || !hostIdent(b.root) || hs.path == "" || hs.path.indexOf("\\") >= 0) out = out.concat(["C-HB2: the binding " + who + " has a malformed `src=` export root"])
+            if (hs.targetless && (b.shape != 0 || b.chain.length != 0)) out = out.concat(["C-HB2: the binding " + who + " has no target but is not a call of the export"])
+        } else if (b.rootParam < 0) {
             if (b.root != "window" && b.root != "document" && b.root != "navigator") out = out.concat(["C-HB2: the binding " + who + " is rooted at `" + b.root + "`"])
         } else if (b.root != "" || b.rootParam >= f.params.length) {
             out = out.concat(["C-HB2: the binding " + who + " has a parameter root out of range"])
