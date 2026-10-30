@@ -47,6 +47,10 @@ import {
 import { homedir } from "node:os";
 import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+// s473 (p5 hole 3, g-boot-dev-static-serve-not-allowlisted-s473) — SPEC §47.13: the ONE static-serving
+// policy both impl#1 servers use (`scrml dev` imports it, `_server.js` embeds its text). Imported,
+// never copied, so the bootstrap's dev server cannot drift from it.
+import { _scrml_static_denied, _scrml_static_request_path, _scrml_static_servable, collectClientAssets } from "../compiler/src/static-serve-policy.js";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const SHV2 = join(ROOT, "compiler", "self-host-v2");
@@ -485,10 +489,54 @@ const RELOAD_PATH = "/__scrml-boot/events";
 const RELOAD_SNIPPET = `<script>(()=>{const es=new EventSource(${JSON.stringify(RELOAD_PATH)});es.onmessage=(e)=>{if(e.data==="reload")return location.reload();let o=document.getElementById("__scrml_boot_errors");if(!o){o=document.createElement("pre");o.id="__scrml_boot_errors";o.style.cssText="position:fixed;inset:auto 0 0 0;max-height:60vh;overflow:auto;margin:0;padding:12px 16px;background:#2b0d0d;color:#ffd7d7;font:13px/1.4 ui-monospace,monospace;white-space:pre-wrap;z-index:2147483647";document.body.appendChild(o);}o.textContent=JSON.parse(e.data);};})();</script>`;
 const MIME: Record<string, string> = { ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8", ".json": "application/json" };
 
+/**
+ * SPEC §47.13 — the file a dev-server request for `pathname` may be answered with, or null (a 404).
+ * The request path is decoded and normalized by `_scrml_static_request_path` (traversal, dot-paths,
+ * encoded separators, NUL, backslash and `:` refused), then judged by `_scrml_static_servable`
+ * against the build's client-asset manifest (`assets`, collectClientAssets over what the build wrote
+ * for the browser): a database, a `.scrml` source, a server module, a source map or a dotfile is
+ * never served, whatever is in the output directory. Beyond the shared policy, the resolved file's
+ * REAL path must lie inside the real output directory — a symlink placed there cannot hand out a file
+ * from elsewhere. Exported for the tests.
+ */
+export function devStaticTarget(outDir: string, assets: Set<string>, pathname: string): string | null {
+  const safe = _scrml_static_request_path(pathname);
+  if (safe === false) return null;
+  const rel = safe === "/" ? "index.html" : safe.slice(1);
+  if (!_scrml_static_servable(rel, assets)) return null;
+  const p = resolve(outDir, ...rel.split("/"));
+  if (!p.startsWith(outDir + sep)) return null;
+  let real: string;
+  let realRoot: string;
+  try {
+    real = realpathSync(p);
+    realRoot = realpathSync(outDir);
+  } catch {
+    return null;
+  }
+  if (!real.startsWith(realRoot + sep)) return null;
+  // #1676 review F1: a symlink INSIDE the output dir naming a denied file there (`inner.png -> app.db`)
+  // — the RESOLVED path's class is judged too, not only the requested name's. (A hardlink cannot be
+  // told apart from its target's name and is not caught: g-boot-dev-static-serve-not-allowlisted-s473.)
+  if (_scrml_static_denied(relative(realRoot, real).split(sep).join("/"))) return null;
+  try {
+    if (!statSync(real).isFile()) return null;
+  } catch {
+    return null;
+  }
+  return real;
+}
+
+/** The build's client-asset manifest (§47.13): what it wrote for the browser, closed over their imports. */
+export function devClientAssets(r: CompileResult): Set<string> {
+  return new Set(collectClientAssets(r.outDir, ["index.html", "program.client.js", "scrml-runtime.js"]));
+}
+
 async function dev(file: string, opts: { outDir?: string; port: number; format: "pretty" | "line" }) {
   const entryAbs = resolve(file);
   const log = (s: string) => console.error(s);
   let current: CompileResult | null = null;
+  let assets: Set<string> = new Set();
   let server: { fetch(req: Request): Promise<Response> } | null = null;
   let generation = 0;
   const clients = new Set<ReadableStreamDefaultController>();
@@ -512,6 +560,7 @@ async function dev(file: string, opts: { outDir?: string; port: number; format: 
       return;
     }
     current = r;
+    assets = devClientAssets(r);
     generation++;
     server = null;
     if (r.server) {
@@ -556,23 +605,21 @@ async function dev(file: string, opts: { outDir?: string; port: number; format: 
         return new Response(stream, { headers: { "Content-Type": "text/event-stream", "Cache-Control": "no-store" } });
       }
       if (url.pathname.startsWith("/_scrml/")) {
-        // s472 (boot-math-port): a stdlib host module the build copied there is a static file
-        // (SPEC §21.3.1); everything else under `/_scrml/` is a server-function route
-        const host = current?.written.includes(decodeURIComponent(url.pathname.slice(1))) ? resolve(current.outDir, decodeURIComponent(url.pathname.slice(1))) : null;
-        if (host !== null && current !== null && host.startsWith(current.outDir + sep) && existsSync(host)) {
+        // s472 (boot-math-port): a stdlib host module the CLIENT imports is a static file (SPEC §21.3.1)
+        // — admitted by the §47.13 policy as a client asset (a host file only the server imports is
+        // not); everything else under `/_scrml/` is a server-function route
+        const host = current === null ? null : devStaticTarget(current.outDir, assets, url.pathname);
+        if (host !== null) {
           return new Response(readFileSync(host), { headers: { "Content-Type": MIME[".js"] ?? "text/javascript", "Cache-Control": "no-store" } });
         }
         if (server === null) return new Response("this program has no server functions", { status: 404 });
         return server.fetch(req);
       }
       if (current === null) return new Response("scrml-boot: no successful compile yet — see the terminal", { status: 503 });
-      const rel = url.pathname === "/" ? "index.html" : decodeURIComponent(url.pathname.slice(1));
-      const p = resolve(current.outDir, rel);
-      if (!p.startsWith(current.outDir + sep) || !existsSync(p) || !statSync(p).isFile() || basename(p) === "program.server.js") {
-        return new Response("not found", { status: 404 });
-      }
+      const p = devStaticTarget(current.outDir, assets, url.pathname);
+      if (p === null) return new Response("not found", { status: 404 });
       let body: string | Uint8Array = readFileSync(p);
-      if (rel === "index.html") body = String(readFileSync(p, "utf8")).replace("</head>", RELOAD_SNIPPET + "</head>");
+      if (p === realpathSync(join(current.outDir, "index.html"))) body = String(readFileSync(p, "utf8")).replace("</head>", RELOAD_SNIPPET + "</head>");
       return new Response(body, { headers: { "Content-Type": MIME[extname(p)] ?? "application/octet-stream", "Cache-Control": "no-store" } });
     },
   });
