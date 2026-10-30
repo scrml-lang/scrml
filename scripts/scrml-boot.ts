@@ -295,6 +295,10 @@ export type CheckResult = {
   // s472 (boot-math-port): the stdlib host modules the artifacts import (SPEC §21.3.1) — `src` the
   // file in the stdlib, `out` its path under the output directory (`_scrml/<module>/<file>`)
   hostFiles?: Array<{ src: string; out: string }>; // present when ok
+  // s473 (allowlist lane A): the `<host src=>` files (DRAFT SPEC §21.3.3 rule 3) — `copies` each file and
+  // the relative imports it reaches, copied to `_scrml_local/<path relative to the project root>`, and
+  // `shims` the `_scrml/host-src/<K>.js` modules the client artifact imports (slice-m1/host-src.js)
+  hostSrc?: { copies: Array<{ src: string; out: string }>; shims: Array<{ out: string; text: string }> }; // present when ok
   ms: { boot: number; compile: number };
 };
 
@@ -434,8 +438,18 @@ export async function compileSource(
   if (diagnostics.some((d) => d.severity === "error")) return result(false);
   const serverJs = typeof so.js === "string" && so.js !== "" ? (so.js as string) : undefined;
   const hostFiles = await hostFilesOf(fe.core, opts.stdlibRoot ?? STDLIB_ROOT, diagnostics);
+  // s473 (allowlist lane A): `<host src=>` (DRAFT §21.3.3 rule 3) — the files' existence, project-root and
+  // copy-class checks and their STATIC export read (acorn's parse; nothing is loaded or evaluated)
+  const { planHostSrcs } = await import("../compiler/self-host-v2/slice-m1/host-src.js");
+  const hs = planHostSrcs(fe.core, root);
+  for (const d of hs.diags as Array<{ code: string; message: string; file?: string; at?: number }>) {
+    const f = d.file !== undefined ? relToAbs.get(d.file) : undefined;
+    const src = f !== undefined ? sources.get(f) : undefined;
+    const lc = src !== undefined && typeof d.at === "number" ? lineCol(src, d.at) : undefined;
+    diagnostics.push({ severity: "error", code: d.code, message: d.message, file: f, line: lc?.line, col: lc?.col });
+  }
   if (diagnostics.some((d) => d.severity === "error")) return result(false);
-  return result(true, { client: { html: out.html, js: out.js }, serverJs, hostFiles });
+  return result(true, { client: { html: out.html, js: out.js }, serverJs, hostFiles, hostSrc: { copies: hs.copies, shims: hs.shims } });
 }
 
 export async function compileFile(file: string, opts: { outDir?: string; rebuild?: boolean; log?: (s: string) => void; stdlibRoot?: string } = {}): Promise<CompileResult> {
@@ -464,6 +478,21 @@ export async function compileFile(file: string, opts: { outDir?: string; rebuild
   // s472 (boot-math-port): the stdlib host modules, at `_scrml/<module>/<file>` (SPEC §21.3.1). The
   // `_scrml/` directory is the compiler's: what a previous compile left there goes first.
   rmSync(join(outDir, "_scrml"), { recursive: true, force: true });
+  // s473 (allowlist lane A): the `<host src=>` files and their shims (§21.3.3 rule 3); `_scrml_local/` is
+  // the compiler's directory too
+  rmSync(join(outDir, "_scrml_local"), { recursive: true, force: true });
+  for (const h of c.hostSrc?.copies ?? []) {
+    const dst = join(outDir, ...h.out.split("/"));
+    mkdirSync(dirname(dst), { recursive: true });
+    copyFileSync(h.src, dst);
+    written.push(h.out);
+  }
+  for (const h of c.hostSrc?.shims ?? []) {
+    const dst = join(outDir, ...h.out.split("/"));
+    mkdirSync(dirname(dst), { recursive: true });
+    writeFileSync(dst, h.text);
+    written.push(h.out);
+  }
   for (const h of c.hostFiles ?? []) {
     const dst = join(outDir, ...h.out.split("/"));
     mkdirSync(dirname(dst), { recursive: true });
