@@ -15,7 +15,8 @@ Tests: compiler/self-host-v2/slice-m4/ruled-refusals-s473.test.js (27 tests, eve
 - [x] 8 E-SQL-SLOT-IN-LITERAL / E-PARAM-TYPE-REQUIRED re-codes (a nameless/non-identifier param — the parser's recovery of a default/rest param — stays E-BOOTSTRAP-UNSUPPORTED)
 - [x] 9 D10 — confirmed partially: refused forms all E-ASSIGN-POSITION (tests); the KEPT double-paren form is NOT built — the parser drops parentheses, so it is refused with E-ASSIGN-POSITION too (gap stays open)
 - [x] corpus delta measured (see PR body)
-- [ ] gaps, coverage rows, regen, gates, PR
+- [x] gaps (6 resolved, 3 narrowed), coverage rows, regen (severity, gap counts, coverage totals, bootstrap-conformance.md), gates (slices, types-gate, s34-census, bootstrap-conformance --check, spec-coverage-check, claim/snippet gates, e2e-render-map)
+- [x] PR
 
 ## Existing tests changed (newly-rejecting per the SPEC)
 - loop-wait-s471: a query in a loop of a `!` fn → `.nobatch()` (interim refusal, §8.9.2).
