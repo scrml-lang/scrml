@@ -112,8 +112,11 @@ describe("§4.1 — an unknown element is a compile error, never an inert elemen
     <main><p>x</p></main>
 </program>
 `;
-    // S473 D2: the unknown name AND each unenforced control on it are refused
-    expect(codes(src)).toEqual(["E-COMPONENT-035", "E-BOOTSTRAP-UNSUPPORTED", "E-BOOTSTRAP-UNSUPPORTED"]);
+    // #1678 ∪ #1675 (F2): one report — #1675's capital-tag rule names it as the §52.3 state
+    // type declaration it is (E-BOOTSTRAP-UNSUPPORTED), ahead of the registry check
+    const r = run(src);
+    expect(r.diags.map((d) => d.code)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+    expect(r.diags[0].message).toContain("§52.3");
   });
   test("S473 D2 — `protect=` / `authority=` on an HTML or custom element is refused, never written out", () => {
     expect(codes(P(`        <div protect="secret">x</div>`))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);

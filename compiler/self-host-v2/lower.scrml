@@ -2995,6 +2995,14 @@ ${
     // s454 (U1b) — the types a shipped built-in enum's payloads NAME (the
     // client-call failure enum's `Transport(t: ServerCallError)` names the
     // built-in `ServerCallError`, which then ships too).
+    fn isHostTypeDef(td: TypeDef) -> boolean {
+        return match td {
+            .HostDef(sym: x) :> true
+            .StructDef(sym: x) :> false
+            .EnumDef(sym: x) :> false
+        }
+    }
+
     fn namedIn(t: Tables, used: int[]) -> int[] {
         let out: int[] = []
         for (const ti of t.types) {
@@ -3542,9 +3550,17 @@ ${
         let sqlError: Sym | not = not
         let serverCallError: Sym | not = not
         const used2: int[] = used.concat(namedIn(t, used))
+        // s473-host-allowlist-b: the built-in host types (the Appendix H interfaces, DRAFT §21.3.3
+        // rule 8.1) ship when the program has a host-backed function — every value of one crosses
+        // only through a binding, and a binding's decode descriptor names its type
+        let anyHost: boolean = false
+        for (const f of t.fns) {
+            const h: HostFn | not = f.host
+            if (h is given) anyHost = true
+        }
         for (const ti of t.types) {
             const ts: Sym = typeDefSym(ti.def)
-            if (ti.file != builtinFile() || used2.indexOf(ts.id) >= 0) types = types.concat([ti.def])
+            if (ti.file != builtinFile() || used2.indexOf(ts.id) >= 0 || (anyHost && isHostTypeDef(ti.def))) types = types.concat([ti.def])
             if (ti.file == builtinFile() && ti.name == "SqlError" && used2.indexOf(ts.id) >= 0) sqlError = ts
             if (ti.file == builtinFile() && ti.name == serverCallErrorName() && used2.indexOf(ts.id) >= 0) serverCallError = ts
         }

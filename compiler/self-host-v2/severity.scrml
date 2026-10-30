@@ -11,7 +11,7 @@
 // ast.scrml `newDiag` is the one Diag constructor and reads `severityOf`. The
 // code's prefix is not the severity (§34 makes E-DG-002 a Warning, many W- Info).
 //
-// 248 codes with a §34 severity; 0 PROVISIONAL (no row yet, severity from the
+// 258 codes with a §34 severity; 0 PROVISIONAL (no row yet, severity from the
 // generator's PROVISIONAL table: none); 39 without one (FAIL-CLOSED Error):
 //   E-ASSIGN-CONST — no §34 row
 //   E-ASSIGN-POSITION — no §34 row
@@ -127,6 +127,7 @@ ${
             "E-DEFER-UNHANDLED-FAILABLE" :> Severity.Error
             "E-DEFER-UNSUPPORTED-SITE" :> Severity.Error
             "E-DERIVED-CIRCULAR-DEP" :> Severity.Error
+            "E-DERIVED-ENGINE-NO-RULES" :> Severity.Error
             "E-DERIVED-VALUE-MUTATE" :> Severity.Error
             "E-DERIVED-WITH-VALIDATORS" :> Severity.Error
             "E-DERIVED-WRITE" :> Severity.Error
@@ -152,6 +153,7 @@ ${
             "E-ERRORS-002" :> Severity.Error
             "E-FN-003" :> Severity.Error
             "E-FN-004" :> Severity.Error
+            "E-FN-007" :> Severity.Error
             "E-FOR-UNPARENTHESIZED-HEAD" :> Severity.Error
             "E-FOREIGN-001" :> Severity.Error
             "E-FOREIGN-002" :> Severity.Error
@@ -164,6 +166,7 @@ ${
             "E-FORM-OWNER-UNRESOLVED" :> Severity.Error
             "E-GRANT-UNKNOWN" :> Severity.Error
             "E-HOLD-WITHOUT-PERSIST" :> Severity.Error
+            "E-HOST-ARG-TYPE" :> Severity.Error
             "E-HOST-BINDING-MALFORMED" :> Severity.Error
             "E-HOST-BINDING-PLACEMENT" :> Severity.Error
             "E-HOST-BINDING-USE" :> Severity.Error
@@ -172,10 +175,13 @@ ${
             "E-HOST-HANDLE-NOT-DATA" :> Severity.Error
             "E-HOST-NO-TARGET" :> Severity.Error
             "E-HOST-PARAM-USE" :> Severity.Error
+            "E-HOST-RESULT-TYPE" :> Severity.Error
+            "E-HOST-ROOT-OPAQUE" :> Severity.Error
             "E-HOST-SRC-INVALID" :> Severity.Error
+            "E-HOST-TARGET-NOT-ALLOWED" :> Severity.Error
             "E-HOST-TARGET-SHAPE" :> Severity.Error
-            "E-HOST-TARGET-SINK" :> Severity.Error
             "E-HOST-TARGET-UNBOUND" :> Severity.Error
+            "E-HOST-TYPE-NO-SRC" :> Severity.Error
             "E-HOST-TYPE-OUTSIDE" :> Severity.Error
             "E-IMPORT-003" :> Severity.Error
             "E-IMPORT-004" :> Severity.Error
@@ -208,6 +214,7 @@ ${
             "E-MATCH-BARE-BINDER" :> Severity.Error
             "E-MW-002" :> Severity.Error
             "E-NAME-COLLIDES-RESERVED" :> Severity.Error
+            "E-NAME-COLLIDES-RESERVED-PREFIX" :> Severity.Error
             "E-NAME-COLLIDES-STATE" :> Severity.Error
             "E-OUTLET-OUTSIDE-SHELL" :> Severity.Error
             "E-PARSE-001" :> Severity.Error
@@ -275,6 +282,8 @@ ${
             "E-SQL-005" :> Severity.Error
             "E-SQL-006" :> Severity.Error
             "E-SQL-008" :> Severity.Error
+            "E-SQL-MULTIPLE-STATEMENTS" :> Severity.Error
+            "E-SQL-PROGRAM-STATEMENT-NOT-ADMITTED" :> Severity.Error
             "E-STATE-UNDECLARED" :> Severity.Error
             "E-STMT-MISSING-SEMICOLON" :> Severity.Error
             "E-STMT-NO-EFFECT" :> Severity.Error
@@ -289,6 +298,7 @@ ${
             "E-SYNTAX-064" :> Severity.Error
             "E-SYNTHESIZED-WRITE" :> Severity.Error
             "E-TAPE-JS-METHOD" :> Severity.Error
+            "E-TENANT-UNDECLARED" :> Severity.Error
             "E-TEXT-NON-PRIMITIVE" :> Severity.Error
             "E-THEME-TOKEN-UNKNOWN" :> Severity.Error
             "E-TYPE-001" :> Severity.Error

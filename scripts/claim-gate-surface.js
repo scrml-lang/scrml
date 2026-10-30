@@ -129,6 +129,29 @@ export const SURFACE_EXCLUDE = Object.keys(SURFACE_UNGATED);
 
 const under = (rel, p) => rel === p || rel.startsWith(p + "/");
 
+/**
+ * The declared surface resolved to its `.md` files (repo-relative, `/`-separated, sorted), the
+ * same set claim-gate.js walks with no path arguments: absent rows tolerated, SURFACE_EXCLUDE rows
+ * walked past. In-process and cwd-independent, for tests that check the real surface without
+ * spawning the (compiling) gate.
+ * @param {string} repoRoot
+ * @returns {string[]}
+ */
+export function surfaceFiles(repoRoot) {
+  const out = new Set();
+  const walk = (rel) => {
+    const abs = join(repoRoot, rel);
+    if (!existsSync(abs) || SURFACE_EXCLUDE.includes(rel)) return;
+    if (statSync(abs).isDirectory()) {
+      for (const e of readdirSync(abs)) walk(`${rel}/${e}`);
+      return;
+    }
+    if (rel.endsWith(".md")) out.add(rel);
+  };
+  for (const r of PUBLIC_SURFACE) walk(r);
+  return [...out].sort();
+}
+
 /** The roots the floor scans: README.md, NERDME.md, DESIGN.md, and docs/ recursively. */
 export const FLOOR_ROOTS = ["README.md", "NERDME.md", "DESIGN.md", "docs"];
 

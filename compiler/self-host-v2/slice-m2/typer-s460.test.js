@@ -79,7 +79,7 @@ describe("S460 — a bare `bool | not` stays an error naming both fixes (S442 ke
 });
 
 describe("S460 NEW — a condition whose type the compiler cannot resolve is E-COND-NOT-BOOLEAN", () => {
-  const G = "    function g() { return 1; }\n";   // no declared return type: its value is unresolved
+  const G = "    function g() { return gr(1); }\n    function gr(n: int) { if (n > 0) { return gr(n - 1); } else { return 1; } }\n";   // s473: §48.8 infers an unannotated return now (`return 1` is an `int`); a return through recursion is not inferred — still unresolved
   test("a call with no declared return type in `if=`, `else-if=`, `show=`, an `if`, a ternary", () => {
     expect(codes(G, "<p if=g()>a</p>")).toEqual(["E-COND-NOT-BOOLEAN"]);
     expect(codes(G + "    let <b:bool=false/>\n", "<p if=@b>a</p><p else-if=g()>b</p>")).toEqual(["E-COND-NOT-BOOLEAN"]);
@@ -144,7 +144,7 @@ describe("S460 statement 6 — no second report: an unresolved type an error alr
     expect(codes("", "<p if=nope()>a</p>")).toEqual(["E-SCOPE-001"]);
   });
   test("a parse error inside the condition (Rule C — the condition is not judged)", () => {
-    const cs = codes("    function g() { return 1; }\n    let <m:int=0/>\n    function f() { if (g(#)) { @m = 1; } }");
+    const cs = codes("    function g() { return gr(1); }\n    function gr(n: int) { if (n > 0) { return gr(n - 1); } else { return 1; } }\n    let <m:int=0/>\n    function f() { if (g(#)) { @m = 1; } }");
     expect(cs).toContain("E-PARSE-EXPR");
     expect(cs).not.toContain("E-COND-NOT-BOOLEAN");
   });
@@ -216,7 +216,7 @@ describe("S460 — `!` / `&&` / `||` take booleans only: a bare `T | not` is a p
 // `||` whose type cannot be resolved is E-COND-NOT-BOOLEAN (unresolved message), like a bare unresolved
 // condition; operands OUTSIDE a condition stay provable-or-silent (S440 Q2). SPEC §42.4 statement 10.
 describe("S460 F2 — an unresolved operand of `!` / `&&` / `||` in a condition is E-COND-NOT-BOOLEAN", () => {
-  const G = "    function g() { return 1; }\n    let <b:bool=false/>\n    let <c:bool=false/>\n    let <m:int=0/>\n";
+  const G = "    function g() { return gr(1); }\n    function gr(n: int) { if (n > 0) { return gr(n - 1); } else { return 1; } }\n    let <b:bool=false/>\n    let <c:bool=false/>\n    let <m:int=0/>\n";
   const inIf = (cond) => codes(G + `    function f() { if (${cond}) { @m = 1; } }`);
   test("fires — `!g()`, `g() && @b`, `g() || false` in an `if`", () => {
     expect(inIf("!g()")).toEqual(["E-COND-NOT-BOOLEAN"]);
@@ -305,7 +305,7 @@ describe("S460 at runtime — `is given` / `is not` lower to absence checks, nev
 // E-COND-NOT-BOOLEAN, blamed at the arm / operand; a `T | not` arm is a presence test). A ternary in a VALUE
 // position (an initializer, a call argument) stays a value: silent (S440 Q2).
 describe("S460 N1 — ternary arms of the condition's value are inside the condition", () => {
-  const G = "    function g() { return 1; }\n    function h(x: bool) -> bool { return x; }\n    let <b:bool=false/>\n    let <c:bool=false/>\n    let <m:int=0/>\n";
+  const G = "    function g() { return gr(1); }\n    function gr(n: int) { if (n > 0) { return gr(n - 1); } else { return 1; } }\n    function h(x: bool) -> bool { return x; }\n    let <b:bool=false/>\n    let <c:bool=false/>\n    let <m:int=0/>\n";
   const inIf = (cond) => diags(G + `    function f() { if (${cond}) { @m = 1; } }`);
   const blamed = (cond) => {
     const src = prog(G + `    function f() { if (${cond}) { @m = 1; } }`);
@@ -368,7 +368,7 @@ describe("S460 N1 — ternary arms of the condition's value are inside the condi
 });
 
 describe("S460 N3 — the condition message names the attribute it stands in", () => {
-  const G = "    function g() { return 1; }\n    let <b:bool=false/>\n    let <c:bool=false/>\n";
+  const G = "    function g() { return gr(1); }\n    function gr(n: int) { if (n > 0) { return gr(n - 1); } else { return 1; } }\n    let <b:bool=false/>\n    let <c:bool=false/>\n";
   test("an `else-if=` operand and a whole `else-if=` say `else-if=`, not `if=`", () => {
     const d = diags(G, "<p if=@c>a</p><p else-if=(@b || g())>b</p>");
     expect(d.map((x) => x.code)).toEqual(["E-COND-NOT-BOOLEAN"]);

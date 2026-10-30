@@ -12,6 +12,7 @@ export const M2_MODULES = [
   "severity.scrml",
   "elements.scrml",
   "ast.scrml",
+  "host-surface.scrml",
   "css-syntax.scrml",
   "sql.scrml",
   "parse.scrml",

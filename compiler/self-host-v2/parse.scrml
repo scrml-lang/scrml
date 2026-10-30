@@ -54,6 +54,7 @@ ${
              HView, HChain, HTargetParts, hostView, hostChainOf, hostRootGlobal, hostTargetParts, isHyphenWordExpr } from "./ast.scrml"
     import { CssErr, CssParsed, parseCssBlock } from "./css-syntax.scrml"
     import { logicWriteSink, executableAttrName } from "./url.scrml"
+    import { isSurfaceIface } from "./host-surface.scrml"
 
     // =========================================================================
     // Tokens, as the parser sees them: one TOTAL classification of TokenKind
@@ -6592,6 +6593,7 @@ ${
         m = hostOpenerDiags(o, m)
         const src: string = hostSrcOf(o)
         if (o.selfClosing) return { items: [], mp: m }
+        const blockTypes: string[] = hostBlockTypes(m.src, m.pos)
         let items: AItem[] = []
         let going = true
         while (going) {
@@ -6603,7 +6605,7 @@ ${
                 going = false
             } else {
                 const before: int = m.pos
-                const r: RMItems = hostLine(m, src)
+                const r: RMItems = hostLine(m, src, blockTypes)
                 items = items.concat(r.items)
                 m = r.mp
                 if (m.pos <= before) m = mAdv(m, 1)
@@ -6611,6 +6613,22 @@ ${
         }
         if (mLooking(m, "</")) m = parseCloser(m, "host")
         return { items: items, mp: m }
+    }
+
+    // s473-host-allowlist-b (rule 8.6): the `type Name:host` names declared in
+    // this block's body [pos, `</host>`) — a line that is exactly `type Name:host`.
+    fn hostBlockTypes(src: string, pos: int) -> string[] {
+        let end: int = src.indexOf("</host>", pos)
+        if (end < 0) end = src.length
+        let out: string[] = []
+        for (const raw of src.substring(pos, end).split("\n")) {
+            const l: string = raw.trim()
+            if (l.startsWith("type ") && l.endsWith(":host")) {
+                const n: string = l.substring(5, l.length - 5).trim()
+                if (n != "" && n.indexOf(" ") < 0) out = out.concat([n])
+            }
+        }
+        return out
     }
 
     // The opener carries `src="…"` and nothing else.
@@ -6659,9 +6677,8 @@ ${
     // `?`, `#` or `\`, and ends exactly in `.js` or `.mjs` (case included). Any
     // other value (… a non-string) SHALL be `E-HOST-SRC-INVALID`; a specifier
     // that names no relative path at all (`x.js`) is the §21.3 bare-specifier
-    // `E-IMPORT-005`." A valid one needs the static export read (rule 3
-    // "Exports are read statically"), which the bootstrap does not build:
-    // refused by name.
+    // `E-IMPORT-005`." A valid one is read by the driver (rule 3 "Exports are
+    // read statically" — slice-m1/host-src.js, s473 allowlist lane A).
     fn hostSrcDiags(a: AAttr, mp: MP) -> MP {
         const q: string | not = quotedOf(a.value)
         if (q is not) return mDiag(mp, "E-HOST-SRC-INVALID", "`<host src=…>` is not a string — `src=` is a quoted relative `.js` / `.mjs` path (§21.3.3 rule 3)", a.span.start, a.span.end)
@@ -6672,7 +6689,10 @@ ${
         if (!rel || looksAbs || q.indexOf("?") >= 0 || q.indexOf("#") >= 0 || !extOk) {
             return mDiag(mp, "E-HOST-SRC-INVALID", "`<host src=\"" + q + "\">` is not a relative `.js` / `.mjs` path — it SHALL begin with `./` or `../`, use `/` as its only separator, contain no `?`, `#` or `\\`, and end exactly in `.js` or `.mjs` (§21.3.3 rule 3)", a.span.start, a.span.end)
         }
-        return mDiag(mp, "E-BOOTSTRAP-UNSUPPORTED", "`<host src=\"" + q + "\">` is not in the bootstrap — a `src=` file's exports are read statically (§21.3.3 rule 3: \"The exports of a `src=` file SHALL be determined by parsing its ES module export declarations … The compiler SHALL NOT load, import, or evaluate a `src=` file\"), and that static export read and the file's copy are not built; a binding rooted at `window`, `document`, `navigator` or a parameter needs no `src=`", a.span.start, a.span.end)
+        // s473 (allowlist lane A): a valid `src=` is built — the file's existence, project-root and
+        // copy-class checks, its static export read and its copy are the driver's (slice-m1/host-src.js,
+        // over the checked Core: E-IMPORT-006 / -011 / -004), since only the driver reads files
+        return mp
     }
 
     // Rule 2's skippable lines: blank space and `//` comments.
@@ -6735,7 +6755,7 @@ ${
         return false
     }
 
-    fn hostLine(mp: MP, src: string) -> RMItems {
+    fn hostLine(mp: MP, src: string, blockTypes: string[]) -> RMItems {
         const at: int = mp.pos
         let end: int = hostLineEnd(mp.src, at)
         const c0: string = chAt(mp, 0)
@@ -6764,8 +6784,8 @@ ${
         }
         toks = toks.concat([lexed[lexed.length - 1]])
         const t0: TP = { toks: toks, i: 0, nid: mp.nid, diags: mp.diags, file: mp.file }
-        if (isWord(t0, "type")) return hostTypeLine(mp, t0, at, end)
-        return hostBindLine(mp, t0, at, end, src)
+        if (isWord(t0, "type")) return hostTypeLine(mp, t0, at, end, src)
+        return hostBindLine(mp, t0, at, end, src, blockTypes)
     }
 
     // A built-in type name, or a built-in declaration's name, a `:host` handle may not reuse.
@@ -6777,7 +6797,7 @@ ${
     }
 
     // `type Name:host` (rule 15: "`type Name:host` declares a nominal, opaque host type").
-    fn hostTypeLine(mp: MP, t0: TP, at: int, end: int) -> RMItems {
+    fn hostTypeLine(mp: MP, t0: TP, at: int, end: int, src: string) -> RMItems {
         const n: PTok = peekAt(t0, 1)
         const c: PTok = peekAt(t0, 2)
         const h: PTok = peekAt(t0, 3)
@@ -6792,14 +6812,24 @@ ${
         if (hostReservedTypeName(n.v) || n.cls == TC.Keyword) {
             return { items: [], mp: mAt(mDiag(mp, "E-SCOPE-010", "`type " + n.v + ":host` names the built-in type `" + n.v + "` — a `:host` handle type SHALL have a fresh name (§21.3.3 rule 15, §7.6)", at, end), end) }
         }
-        const td: ATypeDecl = { nid: mp.nid, span: mkSpan(at, end), exported: false, name: n.v, body: ATypeBody.HostBody }
-        const m1: MP = mBump(mp)
+        // s473-host-allowlist-b (DRAFT rule 8.6, ruling Q2 — "WebIDL interface names are built-in
+        // scrml types, replacing user-named handles"): an Appendix H interface name is a built-in
+        // host type a user type SHALL NOT reuse (rule 8.1, E-SCOPE-010); and a user-named handle
+        // has a producer only in the `src=` world, so `type Name:host` in a `<host>` without
+        // `src=` is E-HOST-TYPE-NO-SRC (the item is kept, so its uses resolve).
+        if (isSurfaceIface(n.v)) {
+            return { items: [], mp: mAt(mDiag(mp, "E-SCOPE-010", "`type " + n.v + ":host` names the built-in host type `" + n.v + "` (Appendix H) — write `" + n.v + "` as a parameter or result type directly, with no type line (§21.3.3 rule 8.1)", at, end), end) }
+        }
+        let mp0: MP = mp
+        if (src == "") mp0 = mDiag(mp, "E-HOST-TYPE-NO-SRC", "`type " + n.v + ":host` stands in a `<host>` without `src=` — no host-surface entry returns a user-named handle, so it has no producer here; use the Appendix H interface name as the type (`IntersectionObserver`, `HTMLElement`, `DOMRect`, …), or move the binding that returns it into a `<host src=\"./glue.js\">` (§21.3.3 rule 8.6)", at, end)
+        const td: ATypeDecl = { nid: mp0.nid, span: mkSpan(at, end), exported: false, name: n.v, body: ATypeBody.HostBody }
+        const m1: MP = mBump(mp0)
         const it: AItem = { nid: m1.nid, span: mkSpan(at, end), k: AItemK.TypeItem(td) }
         return { items: [it], mp: mAt(mBump(m1), end) }
     }
 
     // `[fn] name(params) [-> [waiting] T] [! E] [= target]` (§21.3.3 host-binding).
-    fn hostBindLine(mp: MP, t0: TP, at: int, end: int, src: string) -> RMItems {
+    fn hostBindLine(mp: MP, t0: TP, at: int, end: int, src: string, blockTypes: string[]) -> RMItems {
         let t: TP = t0
         let isFn = false
         if (isWord(t, "pure")) return hostMalformed(mp, at, end, "a binding spelled with the deprecated `pure` (a pure binding is spelled `fn`, §33)")
@@ -6864,7 +6894,7 @@ ${
         const it: AItem = { nid: t.nid, span: mkSpan(at, end), k: AItemK.FnItem(f) }
         t = bumpId(t)
         const hb: AHostBind = { fn: fnNid, span: mkSpan(at, end), target: target, isNew: isNew, waiting: waiting,
-                                failable: failable, hasResult: hasResult, src: src, isFn: isFn }
+                                failable: failable, hasResult: hasResult, src: src, isFn: isFn, blockTypes: blockTypes }
         let ds: Diag[] = t.diags
         if (waiting) ds = ds.concat([newDiag("E-BOOTSTRAP-UNSUPPORTED", "`" + nameTok.v + "` is declared `-> waiting …` — a waiting `<host>` binding (§21.3.3 rule 17: \"A call of a binding declared `-> waiting T` is a waiting value (§13.8)\") is not in the bootstrap yet; its settled-value decode and §13.8 placement are not built", mp.file, mkSpan(at, end))])
         if (failable) {
@@ -6897,53 +6927,12 @@ ${
         return -1
     }
 
-    // s473 (boot-host-block-f3, #1659 review H1 — FAIL-CLOSED tightening of rule 8,
-    // S473 PA ruling): rule 8 is one shared sink table, judged over EVERY segment of a
-    // target's chain in EVERY shape, a property READ included — because a binding may read
-    // a sink-valued member and return it as a `:host` handle, and a second binding then
-    // calls, constructs or writes through the handle's parameter, where its chain names only
-    // the parameter. The #1659 Chromium probes reached `Function`, `document.write`,
-    // `Reflect.set(…, "innerHTML", …)`, a `location` navigation and an `on…` attribute
-    // (through `setAttributeNode`) by exactly two clean bindings. So:
-    //
-    // TIER 1 — an EXECUTION / HTML / NAVIGATION / ATTRIBUTE-NODE / REALM-CROSSING name is
-    // refused WHEREVER it appears as a chain member, in any shape (a read of it as a result
-    // included). Returning `window.eval` / `window.Function` / `window.Reflect` /
-    // `document.defaultView` / an element's `.contentWindow` as a handle is refused here.
-    fn hostExecSink(s: string) -> boolean {
-        return s == "eval" || s == "Function" || s == "setTimeout" || s == "setInterval"
-            || s == "insertAdjacentHTML" || s == "createContextualFragment" || s == "setHTMLUnsafe" || s == "execCommand"
-            || s == "write" || s == "writeln" || s == "open"
-            || s == "Reflect" || s == "assign" || s == "defineProperty" || s == "defineProperties"
-            || s == "__defineSetter__" || s == "__defineGetter__" || s == "setPrototypeOf"
-            || s == "Worker" || s == "SharedWorker" || s == "serviceWorker" || s == "register"
-            || s == "navigation" || s == "navigate"
-            || s == "setAttributeNode" || s == "setAttributeNodeNS" || s == "setNamedItem" || s == "setNamedItemNS"
-            || s == "createAttribute" || s == "getAttributeNode" || s == "getNamedItem" || s == "attributes"
-            || s == "contentWindow" || s == "contentDocument" || s == "defaultView"
-    }
-
-    // TIER 2 — a REALM / HANDLE-exposing name (`document`, `location`, `window`, `self`,
-    // `top`, `parent`, `frames`, `opener`, `ownerDocument`, `globalThis`) refused as the LAST
-    // member of a property READ — i.e. returned as a `:host` handle. Mid-chain it is fine, so
-    // `window.location.href` (a URL read, §21.3.3 "A URL-valued property … is not judged")
-    // still compiles: `location` is not the read's last member, `href` is.
-    fn hostRealmResultWord(s: string) -> boolean {
-        return s == "document" || s == "location" || s == "window" || s == "self" || s == "top"
-            || s == "parent" || s == "frames" || s == "opener" || s == "ownerDocument" || s == "globalThis"
-    }
-
-    // A WRITE sink: a property whose write runs source text or installs a handler. `location`
-    // is a navigation; `innerHTML` / `outerHTML` / `srcdoc` are markup; `text` / `textContent`
-    // are a `<script>`'s body; `value` / `nodeValue` are an `Attr`'s. Refused as the written
-    // member (shape 3's last member). *(value / textContent writes on an ordinary element are
-    // refused too — the bootstrap has no DOM element types to tell them apart; fail closed,
-    // `g-spec-host-sink-aliases-reflect-s473`.)*
-    fn hostWriteSinkWord(s: string) -> boolean {
-        return s == "innerHTML" || s == "outerHTML" || s == "srcdoc" || s == "location"
-            || s == "text" || s == "textContent" || s == "value" || s == "nodeValue"
-    }
-
+    // Rules 4, 5, 6, 11 (the target's shape). Rule 8 — the allowlist — is NOT judged here:
+    // s473-host-allowlist-b replaced #1659's INTERIM denylist (hostSinkWhy and its name tables
+    // hostExecSink / hostRealmResultWord / hostWriteSinkWord, deleted once
+    // slice-m4/host-allowlist-parity-s473.test.js proved the walk refuses every line they
+    // refused) with the TYPED CHAIN WALK in analyze.scrml (hostWalk), which needs the
+    // parameters' resolved types.
     fn hostTargetDiags(file: string, name: string, ps: AParam[], target0: AExpr | not, isNew: boolean, isFn: boolean, src: string, line: ASpan) -> Diag[] {
         let out: Diag[] = []
         for (const p of ps) {
@@ -6966,13 +6955,18 @@ ${
         // s473 (#1659 review H1 (b)): a call / `new` whose callee is a bare root (a parameter,
         // so a `:host` handle, or a global) with no members — rule 4 says the callee is a dotted
         // member chain, and a callable handle is the whole fail-open. Refuse it.
-        if (parts.shape <= 1 && ch.members.length == 0) return out.concat([newDiag("E-HOST-TARGET-SHAPE", "the target of `" + name + "` calls `" + ch.root + "` directly, with no member — a binding's callee SHALL be a dotted member chain (§21.3.3 rule 4), never a bare parameter or a bare global (a callable `:host` handle is a rule 8 fail-open, S473 #1659)" + shapeWhy, file, sp)])
+        // s473 (allowlist lane A, rule 4 "an export of `src` (when `src=` is present)"): in a `<host src=>`
+        // a root that is not a parameter or a host root names an export of the file — the driver reads the
+        // exports statically and refuses one the file does not export (E-HOST-TARGET-UNBOUND). Calling the
+        // export itself (`= mountChart(el)`) is the A-world (design §5.2 step 5): the author's JavaScript.
+        const srcRoot: boolean = src != "" && hostParamIndex(ps, ch.root) < 0 && !hostRootGlobal(ch.root) && ch.root != "globalThis"
+        if (parts.shape <= 1 && ch.members.length == 0 && !srcRoot) return out.concat([newDiag("E-HOST-TARGET-SHAPE", "the target of `" + name + "` calls `" + ch.root + "` directly, with no member — a binding's callee SHALL be a dotted member chain (§21.3.3 rule 4), never a bare parameter or a bare global (a callable `:host` handle is a rule 8 fail-open, S473 #1659)" + shapeWhy, file, sp)])
         for (const mb of ch.members) {
             if (mb == "constructor" || mb == "prototype" || mb == "__proto__") return out.concat([newDiag("E-HOST-TARGET-SHAPE", "the target of `" + name + "` names `" + mb + "` — a member named `constructor`, `prototype` or `__proto__` SHALL NOT appear in a target's chain (§21.3.3 rule 4)", file, sp)])
         }
         const rootParam: int = hostParamIndex(ps, ch.root)
-        if (rootParam < 0 && !hostRootGlobal(ch.root)) return out.concat([newDiag("E-HOST-TARGET-UNBOUND", "the target of `" + name + "` is rooted at `" + ch.root + "`, which is not a parameter of the binding, an export of `src`, or `window` / `document` / `navigator` (§21.3.3 rule 4; `globalThis` and other globals are not roots)", file, sp)])
-        if (isFn && rootParam < 0) return out.concat([newDiag("E-HOST-TARGET-SHAPE", "`" + name + "` is declared `fn` (deterministic, no effect — §21.3.3 rule 11) but its target is rooted at `" + ch.root + "`: those reads are the `E-FN-004` class; drop `fn`", file, sp)])
+        if (rootParam < 0 && !hostRootGlobal(ch.root) && !srcRoot) return out.concat([newDiag("E-HOST-TARGET-UNBOUND", "the target of `" + name + "` is rooted at `" + ch.root + "`, which is not a parameter of the binding, an export of `src`, or `window` / `document` / `navigator` (§21.3.3 rule 4; `globalThis` and other globals are not roots)", file, sp)])
+        if (isFn && rootParam < 0 && !srcRoot) return out.concat([newDiag("E-HOST-TARGET-SHAPE", "`" + name + "` is declared `fn` (deterministic, no effect — §21.3.3 rule 11) but its target is rooted at `" + ch.root + "`: those reads are the `E-FN-004` class; drop `fn`", file, sp)])
         // the arguments (rule 4)
         let uses: string[] = []
         if (rootParam >= 0) uses = uses.concat([ch.root])
@@ -7009,43 +7003,7 @@ ${
                 out = out.concat([newDiag("E-HOST-PARAM-USE", "the parameter `" + p.name + "` of `" + name + "` SHALL appear exactly once in its target, and the target " + how + " (§21.3.3 rule 5)", file, p.span)])
             }
         }
-        const sink: string = hostSinkWhy(parts)
-        if (sink != "") return out.concat([newDiag("E-HOST-TARGET-SINK", "the target of `" + name + "` " + sink + " — a target SHALL NOT reach a sink that runs source text, navigates the page, installs a handler or hands out a realm (§21.3.3 rule 8, the §5.2 principle; S473 #1659 fail-closed tightening)", file, sp)])
         return out
-    }
-
-    // Rule 8 (S473 #1659, fail-closed): one shared sink table judged over EVERY chain segment
-    // (the root is an allowed global or a parameter, so only members i>=1 name a member) in
-    // EVERY shape, a read included. An exec / html / nav / attribute-node / realm-crossing
-    // member (`hostExecSink`) anywhere is refused — a `.call` / `.apply` alias of it included,
-    // since it is the same member name. A realm name returned as a handle (`hostRealmResultWord`
-    // as a read's last member) is refused. A write sink (`hostWriteSinkWord` as a shape-3 last
-    // member) is refused. `setAttribute` / `setAttributeNS` / `toggleAttribute` keep the
-    // literal-name rule (an `on…` / `srcdoc` / non-literal name is a sink).
-    fn hostSinkWhy(parts: HTargetParts) -> string {
-        const segs: string[] = [parts.chain.root].concat(parts.chain.members)
-        const last: int = segs.length - 1
-        let i: int = 1
-        while (i < segs.length) {
-            const s: string = segs[i]
-            if (hostExecSink(s)) return "reaches `" + s + "`"
-            if (parts.shape == 2 && i == last && hostRealmResultWord(s)) return "returns `" + s + "` as a handle (a realm / window / document / location object)"
-            if (s == "setAttribute" || s == "setAttributeNS" || s == "toggleAttribute") {
-                if (i < last || parts.shape > 1) return "reaches `" + s + "` other than as the called member"
-                let at: int = 0
-                if (s == "setAttributeNS") at = 1
-                if (at >= parts.args.length) return "calls `" + s + "` without a literal attribute name"
-                const nv: HView = hostView(parts.args[at])
-                if (nv.k != 4) return "calls `" + s + "` with an attribute name that is not a string literal"
-                const low: string = nv.name.toLowerCase()
-                if (low == "srcdoc" || low.startsWith("on")) return "calls `" + s + "` on the attribute `" + nv.name + "`"
-            }
-            if (parts.shape <= 1 && s == "location") return "calls through `location` (a navigation)"
-            if (parts.shape == 3 && s == "location") return "writes through `location` (a navigation)"
-            if (parts.shape == 3 && i == last && hostWriteSinkWord(s)) return "writes `" + s + "`"
-            i = i + 1
-        }
-        return ""
     }
 
     fn isTypeItem(k: AItemK) -> boolean {

@@ -40,6 +40,7 @@
  * rebuilds; nothing else does. `--rebuild` forces it.
  */
 
+import { Database } from "bun:sqlite";
 import { createHash } from "node:crypto";
 import {
   copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, watch, writeFileSync,
@@ -47,6 +48,10 @@ import {
 import { homedir } from "node:os";
 import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+// s473 (p5 hole 3, g-boot-dev-static-serve-not-allowlisted-s473) — SPEC §47.13: the ONE static-serving
+// policy both impl#1 servers use (`scrml dev` imports it, `_server.js` embeds its text). Imported,
+// never copied, so the bootstrap's dev server cannot drift from it.
+import { _scrml_static_denied, _scrml_static_request_path, _scrml_static_servable, collectClientAssets } from "../compiler/src/static-serve-policy.js";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const SHV2 = join(ROOT, "compiler", "self-host-v2");
@@ -291,6 +296,10 @@ export type CheckResult = {
   // s472 (boot-math-port): the stdlib host modules the artifacts import (SPEC §21.3.1) — `src` the
   // file in the stdlib, `out` its path under the output directory (`_scrml/<module>/<file>`)
   hostFiles?: Array<{ src: string; out: string }>; // present when ok
+  // s473 (allowlist lane A): the `<host src=>` files (DRAFT SPEC §21.3.3 rule 3) — `copies` each file and
+  // the relative imports it reaches, copied to `_scrml_local/<path relative to the project root>`, and
+  // `shims` the `_scrml/host-src/<K>.js` modules the client artifact imports (slice-m1/host-src.js)
+  hostSrc?: { copies: Array<{ src: string; out: string }>; shims: Array<{ out: string; text: string }> }; // present when ok
   ms: { boot: number; compile: number };
 };
 
@@ -359,6 +368,77 @@ async function hostFilesOf(core: any, stdlibRoot: string, diagnostics: Diagnosti
  * (absolute path → text) replaces the disk for the paths it names: an editor's unsaved buffers
  * (the entry itself need not exist on disk). Findings are diagnostics; a bootstrap crash throws.
  */
+/**
+ * s473 (boot-failclosed-sql-protect) — SPEC §14.8.10, "An undeclared `tenant_id` table is refused
+ * (S456)", item (2): "A SQLite database file the compiler opens at compile time … is scanned whole —
+ * every table and view …: each relation carrying a `tenant_id` column (case-insensitive; read with
+ * `table_xinfo`, so a generated column and a hidden one … count) that is not in the tenant set is
+ * `E-TENANT-UNDECLARED`, as is a relation whose columns cannot be read (unknown is not clean)."
+ *
+ * The bootstrap's tenant set is ALWAYS EMPTY — both declaring surfaces (`<schema>`, `<db tables=>`)
+ * are refused — so every `tenant_id` relation is undeclared. Before s473 the compile never opened
+ * the file, and the built server served every tenant's rows to every request (audit S473 probe
+ * s148/t1: an anonymous request got both tenants' orders with 200).
+ *
+ * BOOTSTRAP INTERIM, wider than the SPEC: §14.8.10 opens only a `<db src=…>` file and leaves a
+ * `<program db=…>` file to the startup check (item 3). Here EVERY SQLite file that exists at compile
+ * time is scanned, whichever form names it. A database that does not exist yet, or is not SQLite,
+ * is item (3)'s — the startup check in slice-m1/runtime/server-runtime.js (`tenantGate`).
+ * The scan is the host's, like the stdlib host files: the bootstrap front end does no I/O.
+ */
+function tenantScan(core: any, root: string, sources: Map<string, string>): Diagnostic[] {
+  const out: Diagnostic[] = [];
+  const seen = new Set<string>();
+  for (const d of core.dbs ?? []) {
+    if (d.driver !== "Sqlite") continue;
+    let t = String(d.target);
+    if (t === ":memory:" || t === "") continue;
+    if (t.startsWith("file:")) t = t.slice(5).split("?")[0];
+    const declaring = join(root, ...String(d.file).split("/"));
+    const path = isAbsolute(t) ? t : resolve(dirname(declaring), t);
+    if (seen.has(path) || !existsSync(path)) continue;
+    seen.add(path);
+    // s473 r1 (F3): only a regular file is opened — a FIFO would block the compile forever, a directory
+    // or device is no database; each is unknown, and unknown is not clean
+    let regular = false;
+    try { regular = statSync(path).isFile(); } catch { regular = false; }
+    const src = sources.get(declaring);
+    const at = src !== undefined && src.indexOf(String(d.target)) >= 0 ? lineCol(src, src.indexOf(String(d.target))) : undefined;
+    const diag = (message: string): Diagnostic => ({ severity: "error", code: "E-TENANT-UNDECLARED", message, file: declaring, line: at?.line, col: at?.col });
+    const fix = "Declare it in `<schema>` so the tenant floor scopes it (`<schema>` / `<db tables=>` are not in the bootstrap yet, so on the bootstrap the tenant set is empty), or — when its rows are not tenant data — rename the column; a view is not a declaration: drop it or rename the column (§14.8.10, S456)";
+    if (!regular) {
+      out.push(diag(`\`${shown(path)}\` (a SQLite database path) is not a regular file, so the compiler could not check it for a \`tenant_id\` relation outside the compilation's tenant set — unknown is not clean (§14.8.10 item (2))`));
+      continue;
+    }
+    let found: string[] = [];
+    try {
+      const db = new Database(path, { readonly: true });
+      try {
+        const rels = db.query("SELECT name, type FROM sqlite_master WHERE type IN ('table', 'view') ORDER BY name").all() as Array<{ name: string; type: string }>;
+        for (const r of rels) {
+          let cols: Array<{ name: string }>;
+          try {
+            cols = db.query("SELECT name FROM pragma_table_xinfo(?)").all(r.name) as Array<{ name: string }>;
+          } catch (e: any) {
+            out.push(diag(`the ${r.type} \`${r.name}\` in the SQLite database \`${shown(path)}\` has columns the compiler cannot read (${String(e?.message ?? e)}) — unknown is not clean: it may carry a \`tenant_id\` column outside the compilation's tenant set. ${fix}`));
+            continue;
+          }
+          if (cols.some((c) => String(c.name).toLowerCase() === "tenant_id")) found.push(`${r.type} \`${r.name}\``);
+        }
+      } finally {
+        db.close();
+      }
+    } catch (e: any) {
+      out.push(diag(`the SQLite database \`${shown(path)}\` exists but the compiler cannot read its tables (${String(e?.message ?? e)}) — unknown is not clean: it may hold a \`tenant_id\` relation outside the compilation's tenant set (§14.8.10 item (2))`));
+      continue;
+    }
+    for (const f of found) {
+      out.push(diag(`the ${f} in the SQLite database \`${shown(path)}\` carries a \`tenant_id\` column and is not in the compilation's tenant set (§14.8.10 item (2), S456): the tenant floor would not scope it, so the built server would serve every tenant's rows to every request. ${fix}`));
+    }
+  }
+  return out;
+}
+
 export async function compileSource(
   entry: string,
   opts: { overlay?: ReadonlyMap<string, string>; rebuild?: boolean; log?: (s: string) => void; stdlibRoot?: string } = {},
@@ -422,6 +502,9 @@ export async function compileSource(
     }
     return result(false);
   }
+  // s473: §14.8.10 item (2) — a SQLite file the compile can open is scanned for undeclared tenant tables
+  diagnostics.push(...tenantScan(fe.core, root, sources));
+  if (diagnostics.some((d) => d.severity === "error")) return result(false);
   // printProgram / printServer run checkCore themselves (the gate at emission); a finding is a refusal.
   const out = boot.mods.print.printProgram(fe.core, "program.client.js", "scrml-runtime.js");
   for (const r of out.refused ?? []) diagnostics.push(refusalDiag(String(r)));
@@ -430,8 +513,18 @@ export async function compileSource(
   if (diagnostics.some((d) => d.severity === "error")) return result(false);
   const serverJs = typeof so.js === "string" && so.js !== "" ? (so.js as string) : undefined;
   const hostFiles = await hostFilesOf(fe.core, opts.stdlibRoot ?? STDLIB_ROOT, diagnostics);
+  // s473 (allowlist lane A): `<host src=>` (DRAFT §21.3.3 rule 3) — the files' existence, project-root and
+  // copy-class checks and their STATIC export read (acorn's parse; nothing is loaded or evaluated)
+  const { planHostSrcs } = await import("../compiler/self-host-v2/slice-m1/host-src.js");
+  const hs = planHostSrcs(fe.core, root);
+  for (const d of hs.diags as Array<{ code: string; message: string; file?: string; at?: number }>) {
+    const f = d.file !== undefined ? relToAbs.get(d.file) : undefined;
+    const src = f !== undefined ? sources.get(f) : undefined;
+    const lc = src !== undefined && typeof d.at === "number" ? lineCol(src, d.at) : undefined;
+    diagnostics.push({ severity: "error", code: d.code, message: d.message, file: f, line: lc?.line, col: lc?.col });
+  }
   if (diagnostics.some((d) => d.severity === "error")) return result(false);
-  return result(true, { client: { html: out.html, js: out.js }, serverJs, hostFiles });
+  return result(true, { client: { html: out.html, js: out.js }, serverJs, hostFiles, hostSrc: { copies: hs.copies, shims: hs.shims } });
 }
 
 export async function compileFile(file: string, opts: { outDir?: string; rebuild?: boolean; log?: (s: string) => void; stdlibRoot?: string } = {}): Promise<CompileResult> {
@@ -460,6 +553,21 @@ export async function compileFile(file: string, opts: { outDir?: string; rebuild
   // s472 (boot-math-port): the stdlib host modules, at `_scrml/<module>/<file>` (SPEC §21.3.1). The
   // `_scrml/` directory is the compiler's: what a previous compile left there goes first.
   rmSync(join(outDir, "_scrml"), { recursive: true, force: true });
+  // s473 (allowlist lane A): the `<host src=>` files and their shims (§21.3.3 rule 3); `_scrml_local/` is
+  // the compiler's directory too
+  rmSync(join(outDir, "_scrml_local"), { recursive: true, force: true });
+  for (const h of c.hostSrc?.copies ?? []) {
+    const dst = join(outDir, ...h.out.split("/"));
+    mkdirSync(dirname(dst), { recursive: true });
+    copyFileSync(h.src, dst);
+    written.push(h.out);
+  }
+  for (const h of c.hostSrc?.shims ?? []) {
+    const dst = join(outDir, ...h.out.split("/"));
+    mkdirSync(dirname(dst), { recursive: true });
+    writeFileSync(dst, h.text);
+    written.push(h.out);
+  }
   for (const h of c.hostFiles ?? []) {
     const dst = join(outDir, ...h.out.split("/"));
     mkdirSync(dirname(dst), { recursive: true });
@@ -485,10 +593,54 @@ const RELOAD_PATH = "/__scrml-boot/events";
 const RELOAD_SNIPPET = `<script>(()=>{const es=new EventSource(${JSON.stringify(RELOAD_PATH)});es.onmessage=(e)=>{if(e.data==="reload")return location.reload();let o=document.getElementById("__scrml_boot_errors");if(!o){o=document.createElement("pre");o.id="__scrml_boot_errors";o.style.cssText="position:fixed;inset:auto 0 0 0;max-height:60vh;overflow:auto;margin:0;padding:12px 16px;background:#2b0d0d;color:#ffd7d7;font:13px/1.4 ui-monospace,monospace;white-space:pre-wrap;z-index:2147483647";document.body.appendChild(o);}o.textContent=JSON.parse(e.data);};})();</script>`;
 const MIME: Record<string, string> = { ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8", ".json": "application/json" };
 
+/**
+ * SPEC §47.13 — the file a dev-server request for `pathname` may be answered with, or null (a 404).
+ * The request path is decoded and normalized by `_scrml_static_request_path` (traversal, dot-paths,
+ * encoded separators, NUL, backslash and `:` refused), then judged by `_scrml_static_servable`
+ * against the build's client-asset manifest (`assets`, collectClientAssets over what the build wrote
+ * for the browser): a database, a `.scrml` source, a server module, a source map or a dotfile is
+ * never served, whatever is in the output directory. Beyond the shared policy, the resolved file's
+ * REAL path must lie inside the real output directory — a symlink placed there cannot hand out a file
+ * from elsewhere. Exported for the tests.
+ */
+export function devStaticTarget(outDir: string, assets: Set<string>, pathname: string): string | null {
+  const safe = _scrml_static_request_path(pathname);
+  if (safe === false) return null;
+  const rel = safe === "/" ? "index.html" : safe.slice(1);
+  if (!_scrml_static_servable(rel, assets)) return null;
+  const p = resolve(outDir, ...rel.split("/"));
+  if (!p.startsWith(outDir + sep)) return null;
+  let real: string;
+  let realRoot: string;
+  try {
+    real = realpathSync(p);
+    realRoot = realpathSync(outDir);
+  } catch {
+    return null;
+  }
+  if (!real.startsWith(realRoot + sep)) return null;
+  // #1676 review F1: a symlink INSIDE the output dir naming a denied file there (`inner.png -> app.db`)
+  // — the RESOLVED path's class is judged too, not only the requested name's. (A hardlink cannot be
+  // told apart from its target's name and is not caught: g-boot-dev-static-serve-not-allowlisted-s473.)
+  if (_scrml_static_denied(relative(realRoot, real).split(sep).join("/"))) return null;
+  try {
+    if (!statSync(real).isFile()) return null;
+  } catch {
+    return null;
+  }
+  return real;
+}
+
+/** The build's client-asset manifest (§47.13): what it wrote for the browser, closed over their imports. */
+export function devClientAssets(r: CompileResult): Set<string> {
+  return new Set(collectClientAssets(r.outDir, ["index.html", "program.client.js", "scrml-runtime.js"]));
+}
+
 async function dev(file: string, opts: { outDir?: string; port: number; format: "pretty" | "line" }) {
   const entryAbs = resolve(file);
   const log = (s: string) => console.error(s);
   let current: CompileResult | null = null;
+  let assets: Set<string> = new Set();
   let server: { fetch(req: Request): Promise<Response> } | null = null;
   let generation = 0;
   const clients = new Set<ReadableStreamDefaultController>();
@@ -512,6 +664,7 @@ async function dev(file: string, opts: { outDir?: string; port: number; format: 
       return;
     }
     current = r;
+    assets = devClientAssets(r);
     generation++;
     server = null;
     if (r.server) {
@@ -556,23 +709,21 @@ async function dev(file: string, opts: { outDir?: string; port: number; format: 
         return new Response(stream, { headers: { "Content-Type": "text/event-stream", "Cache-Control": "no-store" } });
       }
       if (url.pathname.startsWith("/_scrml/")) {
-        // s472 (boot-math-port): a stdlib host module the build copied there is a static file
-        // (SPEC §21.3.1); everything else under `/_scrml/` is a server-function route
-        const host = current?.written.includes(decodeURIComponent(url.pathname.slice(1))) ? resolve(current.outDir, decodeURIComponent(url.pathname.slice(1))) : null;
-        if (host !== null && current !== null && host.startsWith(current.outDir + sep) && existsSync(host)) {
+        // s472 (boot-math-port): a stdlib host module the CLIENT imports is a static file (SPEC §21.3.1)
+        // — admitted by the §47.13 policy as a client asset (a host file only the server imports is
+        // not); everything else under `/_scrml/` is a server-function route
+        const host = current === null ? null : devStaticTarget(current.outDir, assets, url.pathname);
+        if (host !== null) {
           return new Response(readFileSync(host), { headers: { "Content-Type": MIME[".js"] ?? "text/javascript", "Cache-Control": "no-store" } });
         }
         if (server === null) return new Response("this program has no server functions", { status: 404 });
         return server.fetch(req);
       }
       if (current === null) return new Response("scrml-boot: no successful compile yet — see the terminal", { status: 503 });
-      const rel = url.pathname === "/" ? "index.html" : decodeURIComponent(url.pathname.slice(1));
-      const p = resolve(current.outDir, rel);
-      if (!p.startsWith(current.outDir + sep) || !existsSync(p) || !statSync(p).isFile() || basename(p) === "program.server.js") {
-        return new Response("not found", { status: 404 });
-      }
+      const p = devStaticTarget(current.outDir, assets, url.pathname);
+      if (p === null) return new Response("not found", { status: 404 });
       let body: string | Uint8Array = readFileSync(p);
-      if (rel === "index.html") body = String(readFileSync(p, "utf8")).replace("</head>", RELOAD_SNIPPET + "</head>");
+      if (p === realpathSync(join(current.outDir, "index.html"))) body = String(readFileSync(p, "utf8")).replace("</head>", RELOAD_SNIPPET + "</head>");
       return new Response(body, { headers: { "Content-Type": MIME[extname(p)] ?? "application/octet-stream", "Cache-Control": "no-store" } });
     },
   });

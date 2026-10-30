@@ -49,3 +49,4 @@ Branch: `s473-boot-failclosed-markup` off origin/main 741a2b51c.
   beside a same-named tag is refused at the cell — E-NAME-COLLIDES-ELEMENT (code name is a READING;
   #1682 names none). Tests migrated by the ruling: M2 `p` cell → `pt` (5 slice-m2, 3 slice-m4 files,
   3 acceptance cases), sink-guards `set` cell → `srcs`. Gap → resolved. Corpus: no change.
+- F2 union merge with #1675 done: capital-tag rule (one HTML list, elements.scrml) ahead of the registry; userDeclStub runs both reserved-name checks; F3 code renamed to the SPEC's E-DECL-ELEMENT-NAME-COLLIDES. <User authority= table= protect=> → one E-BOOTSTRAP-UNSUPPORTED (§52.3). Conformance PASS 265 / FAIL 40.

@@ -11,26 +11,26 @@ Scope: **1813 of 1813 cases attempted** — every attempted case reached the pur
 
 | bucket | cases | share of attempted |
 |---|---:|---:|
-| PASS | 264 | 14.6% |
+| PASS | 265 | 14.6% |
 | CODES-ONLY | 0 | 0.0% |
-| FAIL | 41 | 2.3% |
+| FAIL | 40 | 2.2% |
 | LEGACY | 0 | 0.0% |
 | NOT-TWINNED | 685 | 37.8% |
 | UNSUPPORTED | 823 | 45.4% |
 | CRASH | 0 | 0.0% |
 | INVALID | 0 | 0.0% |
 
-**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 305; of those, 264 hold (86.6%). Runtime half executed on the bootstrap for 100 case(s).
+**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 305; of those, 265 hold (86.9%). Runtime half executed on the bootstrap for 100 case(s).
 
-- **Vacuous** passes: 19 of 264 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **245**.
-- FAILs whose required code appears nowhere in the bootstrap's sources (check not implemented): 17 of 41; the other 24 are implemented checks that answered wrong.
+- **Vacuous** passes: 19 of 265 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **246**.
+- FAILs whose required code appears nowhere in the bootstrap's sources (check not implemented): 16 of 40; the other 24 are implemented checks that answered wrong.
 
 LEGACY by marker (a case may carry several): none.
-UNSUPPORTED by reason: bootstrap-unsupported 549 · parse-reject 274.
+UNSUPPORTED by reason: bootstrap-unsupported 550 · parse-reject 273.
 
 ### §66 twins (S449 dialect ruling 1 — generated at test time by the `scrml fix` §66 rules)
 
-Legacy-dialect cases graded on their generated §66 twin: **793** — PASS 162 · FAIL 33 · UNSUPPORTED 598. Twin holds 162 (non-vacuous 147). Every twin verdict above is included in the bucket table.
+Legacy-dialect cases graded on their generated §66 twin: **793** — PASS 163 · FAIL 32 · UNSUPPORTED 598. Twin holds 163 (non-vacuous 148). Every twin verdict above is included in the bucket table.
 - `dialect.s66` overrides: 0 replace a twin's expectations · 11 exclude a case.
 - Superseded-code mappings applied: 2 case(s) (E-ENGINE-VAR-DUPLICATE→E-SCOPE-010). Rows: E-ENGINE-VAR-DUPLICATE→E-SCOPE-010 [applied] · E-ENGINE-STATE-CHILD-INVALID-VARIANT→∅ [owed] · E-ENGINE-RULE-INVALID-VARIANT→∅ [owed] · E-ENGINE-INITIAL-INVALID-VARIANT→∅ [owed] · E-CELL-NO-RENDER-SPEC→∅ [owed] · E-CELL-RENDER-SPEC-NOT-BINDABLE→∅ [owed] · E-DECL-RHS-INTERP-WRAPPED→∅ [owed] · E-COMPONENT-010→∅ [owed].
 
@@ -149,7 +149,7 @@ NOT-TWINNED by reason (685 cases; a case counts once per distinct reason):
 | print | 1 | · | · | · | · | · | 1 | · | · |
 | protect | 81 | · | · | · | · | 45 | 36 | · | · |
 | raw-content | 9 | 6 | · | · | · | 1 | 2 | · | · |
-| reactive | 115 | 27 | · | 5 | · | 65 | 18 | · | · |
+| reactive | 115 | 28 | · | 4 | · | 65 | 18 | · | · |
 | refinement | 57 | · | · | · | · | 25 | 32 | · | · |
 | route-region | 1 | · | · | · | · | 1 | · | · | · |
 | schema | 10 | · | · | · | · | · | 10 | · | · |
@@ -163,7 +163,7 @@ NOT-TWINNED by reason (685 cases; a case counts once per distinct reason):
 | tenant | 23 | · | · | · | · | · | 23 | · | · |
 | type-state-codes | 32 | 3 | · | 1 | · | 3 | 25 | · | · |
 
-### FAIL (41)
+### FAIL (40)
 
 - `condition/unresolved-call-markup-neg` (codes)
   - missing E-COND-NOT-BOOLEAN
@@ -240,9 +240,6 @@ NOT-TWINNED by reason (685 cases; a case counts once per distinct reason):
 - `reactive/name-collides-state-pos` (twin · codes)
   - missing E-NAME-COLLIDES-STATE
   - severity: E-NAME-COLLIDES-STATE did not fire (expected error)
-- `reactive/reserved-prefix-declaration-pos` (twin · codes; not in the bootstrap: E-NAME-COLLIDES-RESERVED-PREFIX)
-  - missing E-NAME-COLLIDES-RESERVED-PREFIX
-  - severity: E-NAME-COLLIDES-RESERVED-PREFIX did not fire (expected error)
 - `reactive/reset-reserved-identifier` (twin · codes; not in the bootstrap: E-RESERVED-IDENTIFIER)
   - missing E-RESERVED-IDENTIFIER
   - severity: E-RESERVED-IDENTIFIER did not fire (expected error)
@@ -275,7 +272,7 @@ none
 
 none
 
-### PASS / CODES-ONLY (264)
+### PASS / CODES-ONLY (265)
 
 - `attr-executable-sink/bound-svg-animation-runtime-guard` — PASS · TWIN
 - `attr-executable-sink/bound-url-runtime-guard` — PASS · TWIN
@@ -521,6 +518,7 @@ none
 - `reactive/no-write-interp-pos` — PASS
 - `reactive/no-write-own-init-neg` — PASS
 - `reactive/no-write-own-init-pos` — PASS
+- `reactive/reserved-prefix-declaration-pos` — PASS · TWIN
 - `reactive/reset-handler` — PASS · TWIN
 - `reactive/reset-handler-nonzero-initial` — PASS · TWIN
 - `reactive/textarea-rcdata-value-bind` — PASS · TWIN
@@ -568,14 +566,14 @@ none
 - `attr-executable-sink/srcdoc-data-forms-neg` — twin · parse-reject: E-PARSE-TRAILING: unexpected `{` after the expression
 - `attr-executable-sink/svg-animation-literal-scheme-neg` — twin · bootstrap-unsupported: `to="…"` holds a `${…}` interpolation — a quoted value with `${…}` is a reactive template (§5.5.3), which is not in the bootstrap; it would be emitted as literal text. Write the value as an expression
 - `attr-executable-sink/url-scheme-interp-neg` — twin · bootstrap-unsupported: `href="…"` holds a `${…}` interpolation — a quoted value with `${…}` is a reactive template (§5.5.3), which is not in the bootstrap; it would be emitted as literal text. Write the value as an expressi
-- `auth/async-fn-escapes-as-value-dispatch-object-neg` — twin · bootstrap-unsupported: `scrml:auth` — the bootstrap cannot import this stdlib module: the build supplied no source for it that the bootstrap compiles, so none of its names are imported (§41.5)
-- `auth/async-fn-escapes-as-value-user-hof-neg` — twin · bootstrap-unsupported: `scrml:auth` — the bootstrap cannot import this stdlib module: the build supplied no source for it that the bootstrap compiles, so none of its names are imported (§41.5)
-- `auth/async-fn-escapes-destructured-scheduler-arr-neg` — twin · bootstrap-unsupported: `scrml:auth` — the bootstrap cannot import this stdlib module: the build supplied no source for it that the bootstrap compiles, so none of its names are imported (§41.5)
-- `auth/async-fn-escapes-destructured-scheduler-obj-neg` — twin · bootstrap-unsupported: `scrml:auth` — the bootstrap cannot import this stdlib module: the build supplied no source for it that the bootstrap compiles, so none of its names are imported (§41.5)
-- `auth/async-fn-escapes-forof-scheduler-neg` — twin · bootstrap-unsupported: `scrml:auth` — the bootstrap cannot import this stdlib module: the build supplied no source for it that the bootstrap compiles, so none of its names are imported (§41.5)
-- `auth/async-fn-escapes-local-scheduler-neg` — twin · bootstrap-unsupported: `scrml:auth` — the bootstrap cannot import this stdlib module: the build supplied no source for it that the bootstrap compiles, so none of its names are imported (§41.5)
-- `auth/async-fn-escapes-scheduler-x02-strip-server-neg` — twin · bootstrap-unsupported: `scrml:auth` — the bootstrap cannot import this stdlib module: the build supplied no source for it that the bootstrap compiles, so none of its names are imported (§41.5)
-- `auth/async-fn-escapes-scheduler-x04-blk-server-neg` — twin · bootstrap-unsupported: `scrml:auth` — the bootstrap cannot import this stdlib module: the build supplied no source for it that the bootstrap compiles, so none of its names are imported (§41.5)
+- `auth/async-fn-escapes-as-value-dispatch-object-neg` — twin · bootstrap-unsupported: `scrml:auth` is a server-only stdlib module (§12.2 Trigger 3: its implementation reaches a host API no browser has, or it handles a credential). Calling one of its bindings SHALL place the calling fun
+- `auth/async-fn-escapes-as-value-user-hof-neg` — twin · bootstrap-unsupported: `scrml:auth` is a server-only stdlib module (§12.2 Trigger 3: its implementation reaches a host API no browser has, or it handles a credential). Calling one of its bindings SHALL place the calling fun
+- `auth/async-fn-escapes-destructured-scheduler-arr-neg` — twin · bootstrap-unsupported: `scrml:auth` is a server-only stdlib module (§12.2 Trigger 3: its implementation reaches a host API no browser has, or it handles a credential). Calling one of its bindings SHALL place the calling fun
+- `auth/async-fn-escapes-destructured-scheduler-obj-neg` — twin · bootstrap-unsupported: `scrml:auth` is a server-only stdlib module (§12.2 Trigger 3: its implementation reaches a host API no browser has, or it handles a credential). Calling one of its bindings SHALL place the calling fun
+- `auth/async-fn-escapes-forof-scheduler-neg` — twin · bootstrap-unsupported: `scrml:auth` is a server-only stdlib module (§12.2 Trigger 3: its implementation reaches a host API no browser has, or it handles a credential). Calling one of its bindings SHALL place the calling fun
+- `auth/async-fn-escapes-local-scheduler-neg` — twin · bootstrap-unsupported: `scrml:auth` is a server-only stdlib module (§12.2 Trigger 3: its implementation reaches a host API no browser has, or it handles a credential). Calling one of its bindings SHALL place the calling fun
+- `auth/async-fn-escapes-scheduler-x02-strip-server-neg` — twin · bootstrap-unsupported: `scrml:auth` is a server-only stdlib module (§12.2 Trigger 3: its implementation reaches a host API no browser has, or it handles a credential). Calling one of its bindings SHALL place the calling fun
+- `auth/async-fn-escapes-scheduler-x04-blk-server-neg` — twin · bootstrap-unsupported: `scrml:auth` is a server-only stdlib module (§12.2 Trigger 3: its implementation reaches a host API no browser has, or it handles a credential). Calling one of its bindings SHALL place the calling fun
 - `auth/auth-002-neg` — twin · bootstrap-unsupported: `server` in a declaration opener is not in the bootstrap — it reads only typed attributes, the own value, `single` and validators there, and never ignores a word it does not implement
 - `auth/auth-003-neg` — bootstrap-unsupported: `<>` at a file's top level, outside any `<program>`, is not in the bootstrap — the SPEC names no rule for what it renders as (§40.8); move it inside the `<program>`
 - `auth/auth-003-pos` — bootstrap-unsupported: `<>` at a file's top level, outside any `<program>`, is not in the bootstrap — the SPEC names no rule for what it renders as (§40.8); move it inside the `<program>`
@@ -594,9 +592,9 @@ none
 - `auth/auth-graph-004-neg` — bootstrap-unsupported: `<program auth="required">` is not in the bootstrap — it emits no server and no login gate (§52.13, §40.2), so the program is refused rather than compiled ungated
 - `auth/auth-graph-004-pos` — bootstrap-unsupported: `<program auth="required">` is not in the bootstrap — it emits no server and no login gate (§52.13, §40.2), so the program is refused rather than compiled ungated
 - `auth/i-auth-redirect-unresolved-pos` — bootstrap-unsupported: `<program auth="required">` is not in the bootstrap — it emits no server and no login gate (§52.13, §40.2), so the program is refused rather than compiled ungated
-- `auth/nested-helper-block-shadowed-import-sort-neg` — twin · bootstrap-unsupported: `scrml:auth` — the bootstrap cannot import this stdlib module: the build supplied no source for it that the bootstrap compiles, so none of its names are imported (§41.5)
+- `auth/nested-helper-block-shadowed-import-sort-neg` — twin · bootstrap-unsupported: `scrml:auth` is a server-only stdlib module (§12.2 Trigger 3: its implementation reaches a host API no browser has, or it handles a credential). Calling one of its bindings SHALL place the calling fun
 - `auth/nested-helper-server-block-body-callback-neg` — twin · bootstrap-unsupported: an arrow function with a braced body is not in the bootstrap — write an expression body
-- `auth/nested-helper-verify-password-sort-neg` — twin · bootstrap-unsupported: `scrml:auth` — the bootstrap cannot import this stdlib module: the build supplied no source for it that the bootstrap compiles, so none of its names are imported (§41.5)
+- `auth/nested-helper-verify-password-sort-neg` — twin · bootstrap-unsupported: `scrml:auth` is a server-only stdlib module (§12.2 Trigger 3: its implementation reaches a host API no browser has, or it handles a credential). Calling one of its bindings SHALL place the calling fun
 - `auth/page-auth-required-gates-document` — bootstrap-unsupported: `<page>` is a scrml structural element (§40), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `auth/program-nested-app-attr-pos` — parse-reject: E-PARSE-PROGRAM: `<program>` inside markup
 - `auth/program-nested-auth-neg` — bootstrap-unsupported: `<program auth="required">` is not in the bootstrap — it emits no server and no login gate (§52.13, §40.2), so the program is refused rather than compiled ungated
@@ -735,7 +733,7 @@ none
 - `defer/unbraced-arm-neg` — twin · parse-reject: E-PARSE-EXPECTED: a `for` body is a block — expected `{`, found `defer` (§49.2.1 `loop-body ::= '{' loop-statement* '}'`)
 - `defer/unsupported-site-neg` — twin · parse-reject: E-PARSE-EXPECTED: expected `:`, found `D`
 - `defer/yield-in-defer-neg` — twin · bootstrap-unsupported: an unannotated parameter `gen` — bootstrap slice M2 needs `gen: Type` (Core parameters are typed)
-- `derived/e-derived-server-only-reach-fn-path` — twin · bootstrap-unsupported: `scrml:auth` — the bootstrap cannot import this stdlib module: the build supplied no source for it that the bootstrap compiles, so none of its names are imported (§41.5)
+- `derived/e-derived-server-only-reach-fn-path` — twin · bootstrap-unsupported: `scrml:auth` is a server-only stdlib module (§12.2 Trigger 3: its implementation reaches a host API no browser has, or it handles a credential). Calling one of its bindings SHALL place the calling fun
 - `element-refusal/fn-return-script-pos` — twin · parse-reject: E-PARSE-EXPR: expected an expression, found `<`
 - `element-refusal/handler-arrow-markup-script-pos` — bootstrap-unsupported: an arrow function is in the bootstrap only as the argument of `.filter(…)` / `.map(…)` on a sequence
 - `element-refusal/implied-lift-arm-script-pos` — twin · parse-reject: E-PARSE-ITEM: expected `import`, `type`, `const`, `function` or `fn` in a logic block, found `if` (other statements at logic-block level are not in the bootstrap)
@@ -824,7 +822,7 @@ none
 - `error/handler-guard-in-match-arm-rt` — twin · bootstrap-unsupported: `<match>` is a scrml structural element (§18.0.1), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `error/handler-unhandled-failable-arrow-pos` — twin · bootstrap-unsupported: an arrow function is in the bootstrap only as the argument of `.filter(…)` / `.map(…)` on a sequence
 - `error/handler-unhandled-failable-bare-and-expr-pos` — twin · parse-reject: E-PARSE-TRAILING: unexpected `{` after the expression
-- `error/implicit-tx-explicit-begin` — twin · parse-reject: E-PARSE-EXPECTED: expected `:`, found `,`
+- `error/implicit-tx-explicit-begin` — twin · bootstrap-unsupported: Manual transaction control 'BEGIN' in 'manual', which is declared '!' — the bootstrap does not build what §19.10.6 requires of it (S451 R6): the transaction held by this invocation behind the database
 - `error/implicit-tx-explicit-transaction-block` — bootstrap-unsupported: `transaction { … }` (§19.10) is not in the bootstrap — it arrives with unit U1e (transactions, which need the error model's `!` functions)
 - `error/propagate-success-unwrap` — twin · parse-reject: E-STMT-MISSING-SEMICOLON: Expected `;` to end the statement — insert `;` after `return`. A `;` ends every statement that is not block-like, the last one before a `}` included (`{ @n = @n + 1; }`); a n
 - `error/render-no-clause-neg` — twin · bootstrap-unsupported: `<render>` is a scrml structural element (§19.15), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
@@ -1093,8 +1091,8 @@ none
 - `module/e-import-004-stdlib-name-exported-clean` — twin · bootstrap-unsupported: `scrml:data` — the bootstrap cannot import this stdlib module: the build supplied no source for it that the bootstrap compiles, so none of its names are imported (§41.5)
 - `module/e-import-004-stdlib-name-not-exported-reject` — twin · bootstrap-unsupported: `scrml:data` — the bootstrap cannot import this stdlib module: the build supplied no source for it that the bootstrap compiles, so none of its names are imported (§41.5)
 - `module/e-import-004-stdlib-reexport-missing-name-reject` — twin · parse-reject: E-PARSE-ITEM: expected `import`, `type`, `const`, `function` or `fn` in a logic block, found `{` (other statements at logic-block level are not in the bootstrap)
-- `module/e-import-004-stdlib-submodule-only-name-reject` — twin · bootstrap-unsupported: `scrml:auth` — the bootstrap cannot import this stdlib module: the build supplied no source for it that the bootstrap compiles, so none of its names are imported (§41.5)
-- `module/e-import-004-stdlib-subpath-name-clean` — twin · bootstrap-unsupported: `scrml:auth/jwt` — the bootstrap cannot import this stdlib module: the build supplied no source for it that the bootstrap compiles, so none of its names are imported (§41.5)
+- `module/e-import-004-stdlib-submodule-only-name-reject` — twin · bootstrap-unsupported: `scrml:auth` is a server-only stdlib module (§12.2 Trigger 3: its implementation reaches a host API no browser has, or it handles a credential). Calling one of its bindings SHALL place the calling fun
+- `module/e-import-004-stdlib-subpath-name-clean` — twin · bootstrap-unsupported: `scrml:auth/jwt` is a server-only stdlib module (§12.2 Trigger 3: its implementation reaches a host API no browser has, or it handles a credential). Calling one of its bindings SHALL place the calling
 - `module/e-import-006-reexport-missing-file-reject` — twin · parse-reject: E-PARSE-ITEM: expected `import`, `type`, `const`, `function` or `fn` in a logic block, found `{` (other statements at logic-block level are not in the bootstrap)
 - `module/e-import-006-reexport-star-missing-file-reject` — twin · parse-reject: E-PARSE-ITEM: expected `import`, `type`, `const`, `function` or `fn` in a logic block, found `*` (other statements at logic-block level are not in the bootstrap)
 - `module/e-import-pinned-const-clean` — twin · parse-reject: E-STMT-MISSING-SEMICOLON: Expected `;` to end the statement — insert `;` after `1`. A `;` ends every statement that is not block-like, the last one before a `}` included (`{ @n = @n + 1; }`); a newlin
@@ -1243,7 +1241,7 @@ none
 - `server-db/cps-idempotency-store-driver-mismatch-pos` — twin · bootstrap-unsupported: `<program idempotency-store=…>` is not in the bootstrap — it reads no `<program>` attribute, and never ignores one it does not implement
 - `server-db/cps-idempotency-store-missing-import-neg` — twin · bootstrap-unsupported: `<program idempotency-store=…>` is not in the bootstrap — it reads no `<program>` attribute, and never ignores one it does not implement
 - `server-db/cps-idempotency-store-missing-import-pos` — twin · bootstrap-unsupported: `<program idempotency-store=…>` is not in the bootstrap — it reads no `<program>` attribute, and never ignores one it does not implement
-- `server-db/cps-login-check-stays-server` — twin · bootstrap-unsupported: `scrml:auth` — the bootstrap cannot import this stdlib module: the build supplied no source for it that the bootstrap compiles, so none of its names are imported (§41.5)
+- `server-db/cps-login-check-stays-server` — twin · bootstrap-unsupported: `scrml:auth` is a server-only stdlib module (§12.2 Trigger 3: its implementation reaches a host API no browser has, or it handles a credential). Calling one of its bindings SHALL place the calling fun
 - `server-db/cps-nonidem-no-storage-neg` — twin · bootstrap-unsupported: `<program idempotency-store=…>` is not in the bootstrap — it reads no `<program>` attribute, and never ignores one it does not implement
 - `server-db/cps-nonidem-no-storage-pos` — twin · bootstrap-unsupported: `<program idempotency-store=…>` is not in the bootstrap — it reads no `<program>` attribute, and never ignores one it does not implement
 - `server-db/event-after-await-e01-destructure-neg` — twin · parse-reject: E-PARSE-TRAILING: unexpected `{` after the expression
