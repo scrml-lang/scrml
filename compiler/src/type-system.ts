@@ -1606,6 +1606,31 @@ const PARSE_VARIANT_FAILURE = "scrml:data/ParseError";
 const COMPILER_ERROR_TYPE_NAMES: ReadonlySet<string> = new Set(["Error", "SqlError", "ServerCallError"]);
 
 /**
+ * S473 — §19.9.10 (S454) "For an `f` not declared `!`, the failure set is `Transport(t:
+ * ServerCallError)` alone": the type of a `_ e :>` whole-error binder (§18.6.1) on a CLIENT call to
+ * a server-placed function that is not declared `!` (server-placed by a `?{}`, by inheritance, by
+ * the `server` keyword — local or imported). Read ONLY by the whole-error binder audit
+ * (`wholeBinderCalleeEnum`): `e.variant`, `e is .Transport` and `match e { .Transport :> … }` are
+ * checkable against it; a payload read is E-TYPE-004, as on any enum value (§18.17.1).
+ *
+ * The payload `t` is typed `asIs` (impl#1 does not build `ServerCallError`), so its canonical key is
+ * unknown: a `.Transport(t)` binder and passing `e` whole to a function stay refused (fail closed).
+ * One frozen object, never registered in a type registry, so no program name can denote it.
+ *
+ * impl#1 does not build §19.9.10 at run time (`g-impl1-client-server-call-not-failable-s451`): a
+ * failed call to such a function throws past the `!{}` (the stub raises `HTTP <status>`), so the
+ * arm is not entered there; the typing is the SPEC's, for the code the arm holds.
+ */
+const CLIENT_SERVER_CALL_FAILURE_SET: EnumType = Object.freeze({
+  kind: "enum" as const,
+  name: "Transport(t: ServerCallError)",
+  variants: Object.freeze([
+    Object.freeze({ name: "Transport", payload: new Map<string, ResolvedType>([["t", tAsIs()]]), renders: null }),
+  ]) as unknown as VariantDef[],
+  transitionRules: null,
+}) as EnumType;
+
+/**
  * The VARIANT SET an error-type name denotes, for the checks that read one
  * (exhaustiveness, `?` propagation, qualifier mismatch): the file's registry (declared,
  * imported under its LOCAL name, or a BUILTIN_TYPES entry), or — for the parseVariant
@@ -11675,14 +11700,51 @@ function annotateNodes(
     const res = wholeBinderResolveFn(name, scope);
     if (res) {
       const errName = typeof res.decl.errorType === "string" ? res.decl.errorType.trim() : "";
-      return errName ? resolveErrorEnumThroughAliases(errName, typeRegistry, _fileTypeDeclsForErrors) : null;
+      if (errName) return resolveErrorEnumThroughAliases(errName, typeRegistry, _fileTypeDeclsForErrors);
+      // S473 — a server-placed callee not declared `!`, called on the client (§19.9.10).
+      return wholeBinderPlainServerCallee(res.decl, filePath) && wholeBinderCallIsClient(scope) ? CLIENT_SERVER_CALL_FAILURE_SET : null;
     }
-    // Nothing in this file binds the name: an IMPORTED failable function.
+    // Nothing in this file binds the name: an IMPORTED function.
     const r = resolveFnBinding(name, scope, true);
-    if (r.k === "unknown" && importedFnErrorEnums.has(name) && wholeBinderTopLevelDeclCount(name) === 1 && !allFnDecls.some((d) => d.name === name)) {
-      return importedFnErrorEnums.get(name) ?? null;
+    if (r.k === "unknown" && wholeBinderTopLevelDeclCount(name) === 1 && !allFnDecls.some((d) => d.name === name)) {
+      if (importedFnErrorEnums.has(name)) return importedFnErrorEnums.get(name) ?? null;
+      // S473 — an imported server-placed function not declared `!`, called on the client
+      // (§19.9.10: "A call to a function imported from another file is judged by the callee's
+      // placement, exactly as a same-file call").
+      const d = importedFnDecls?.get(name);
+      if (d && wholeBinderPlainServerCallee(d.fnNode, d.depFilePath) && wholeBinderCallIsClient(scope)) return CLIENT_SERVER_CALL_FAILURE_SET;
     }
     return null;
+  }
+  /**
+   * S473 — `decl` (declared in `declFile`) is server-placed and NOT declared `!`, and route
+   * inference did not body-split it (a CPS split sends impl#1's own `CpsError` variants, which the
+   * failure set does not name — that callee stays untyped, fail closed).
+   */
+  function wholeBinderPlainServerCallee(decl: ASTNodeLike, declFile: string): boolean {
+    if (decl.canFail === true) return false;
+    const entry = routeMap?.functions?.get(`${declFile}::${(decl.span as Span | undefined)?.start}`);
+    if (entry && entry.cpsSplit) return false;
+    return (decl as { isServer?: boolean }).isServer === true || (!!entry && entry.boundary === "server");
+  }
+  /**
+   * S473 — the `!{}` provably runs on the CLIENT. FAIL CLOSED (#1658 review F1): only a KNOWN client
+   * context counts — the innermost function scope around it (labelled `fn:<name>:<boundary>` by the
+   * function-decl visit) is client-placed, or, with no function scope in between, a DOM event-handler
+   * attribute's scope (`handler:` / `handler-check:` / `handler-stamp:` + `on<event>`), or, with
+   * neither, the value of a DOM event-handler attribute the post-walk audit is inside
+   * (`_wholeBinderDomHandlerDepth`: an inline `onclick=${ … }` / arrow, walked with no handler scope).
+   * Anything else is not client: no function and no handler scope elsewhere (a body-top statement), a channel `onserver:*` handler (§38.6.1 "Invoked server-side" — a server→server
+   * call has no failure set, §19.9.10 "Not affected"), `onclient:*` and `on:*` (not modelled here).
+   */
+  function wholeBinderCallIsClient(scope: Scope): boolean {
+    for (let s: Scope | null = scope; s !== null; s = s.parent) {
+      if (s.label.startsWith("fn:")) return s.label.endsWith(":client");
+      const h = /^handler(?:-check|-stamp)?:(.*)$/.exec(s.label);
+      if (h) return /^on[a-z]+$/i.test(h[1]);
+    }
+    // No function or handler scope: client only inside a DOM event-handler attribute's value.
+    return _wholeBinderDomHandlerDepth > 0;
   }
   function auditWholeBinderArms(arms: unknown, en: EnumType | null, scope: Scope, frames: unknown[], fallbackSpan: Span): void {
     if (!Array.isArray(arms)) return;
@@ -11723,6 +11785,10 @@ function annotateNodes(
   // whole-error binder audit runs after the walk (`_checkExpressionPositionHandlers`), keyed on
   // the `!{}` node itself wherever it sits, and reads these.
   const _wholeBinderNodeScope = new WeakMap<object, Scope>();
+  // S473 (#1658 review F1) — > 0 while the post-walk audit is inside the value of a DOM event-handler
+  // attribute (`on<event>=…`, no `:`): an inline handler expression or arrow there is checked with no
+  // handler scope, and this is how `wholeBinderCallIsClient` knows it runs on the client.
+  let _wholeBinderDomHandlerDepth = 0;
   // S470 fix round 3 — the engine bodies the checker parsed from TEXT (`readEngineBody`: the opener
   // `effect=`, a state-child `effect=`, an `<onTransition>` body, a guard, a delay, a message arm)
   // and visited: the post-walk walks these statements too (the file's tree does not reach them).
@@ -20484,9 +20550,18 @@ function annotateNodes(
           }
         }
       }
-      for (const k of Object.keys(o)) {
-        if (k === "span" || k === "parent") continue;
-        walk(o[k], here, scope, frames, inText);
+      // S473 (#1658 review F1) — a markup attribute node (`{ name, value, span }`, no `kind`) of a DOM
+      // event handler: its value runs on the client.
+      const domHandlerAttr = o.kind === undefined && typeof o.name === "string" && /^on[a-z]+$/i.test(o.name)
+        && !!o.value && typeof o.value === "object";
+      if (domHandlerAttr) _wholeBinderDomHandlerDepth++;
+      try {
+        for (const k of Object.keys(o)) {
+          if (k === "span" || k === "parent") continue;
+          walk(o[k], here, scope, frames, inText);
+        }
+      } finally {
+        if (domHandlerAttr) _wholeBinderDomHandlerDepth--;
       }
     };
     walk(roots, null);

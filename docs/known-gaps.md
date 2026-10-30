@@ -30,9 +30,9 @@
 | Severity | Open (owed by impl#1, the TS compiler) | Carried (owed by the bootstrap; xfail on impl#1) |
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 264 | 5 |
-| MED | 712 | 8 |
-| LOW | 590 | 0 |
+| HIGH | 265 | 5 |
+| MED | 713 | 8 |
+| LOW | 593 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
 
@@ -1108,6 +1108,33 @@ Sibling of `g-host-promise-global-in-render-not-refused-s470`. Both need a host-
 <!-- @gap id=g-impl1-whole-error-binder-allowlist-stricter-than-spec-s469 sev=LOW status=open locus=compiler/src/type-system.ts(auditWholeErrorBinderText — the allow-list) prov=review:S469-return-match-r5-HIGH-A;spec:§18.6.1("passing it on whole … is unaffected") -->
 
 Round 6 replaced round 5's two-spelling deny-list (which every other spelling bypassed — the review's r5a2 probes logged in on all sides) with an allow-list that fails closed: `match err` over its enum's variants, `err is .V`, `err.variant`, a variant constructor whose field is the enum, a local function whose parameter is typed with the SAME enum (its body audited the same way), and `log()`. §18.6.1 says only that a payload read and a primitive comparison are errors and that passing the value on whole is unaffected, so impl#1 refuses programs the SPEC's text accepts: a helper with an untyped parameter (its body could read any field — the review's `getReason(e)`), a local alias (`const held = err`, which hides every later use from the check), a cell write (`@held = err`, then `match @held` with no type), and every use of a binder whose enum is unknown. **Recommendation:** ratify the allow-list as §18.6.1's rule (a whole-error binder is used only as a match subject, an `is` operand, `.variant`, or a whole argument where the receiving position is typed with the same error enum) — the deny-list form cannot be made complete. Not a wrong answer either way: every refused program is refused at compile time.
+
+**Narrowed (S473, `s473-flogence-two-fixes`).** One "cannot be resolved" case is closed: a `!{}` on a CLIENT call to a server-placed function NOT declared `!` (server-placed by a `?{}`, by inheritance or by `server`; local or imported) now types `_ e :>` by §19.9.10's failure set `Transport(t: ServerCallError)` (§18.6.1 "a client call to a server function (§19.9.10): the call's failure set"), so `e.variant` and `e is .Transport` compile and `e.message` is E-TYPE-004 (was E-TYPE-031). Still refused: a CPS body-split callee (impl#1 sends `CpsError` variants, not the failure set), a server-side caller, a `?{}` handled directly (`g-impl1-whole-binder-direct-sql-untyped-s473`), the stdlib / `Error`-default callees and the third-file alias.
+
+<!-- @gap id=g-impl1-imported-callee-cell-write-handler-skipped-s473 sev=HIGH status=open locus=compiler/src/codegen(the `@cell = f() !{ … }` lowering when `f` is IMPORTED) prov=dispatch:s473-flogence-two-fixes(found measuring flogence viewapp/view.scrml) -->
+### g-impl1-imported-callee-cell-write-handler-skipped-s473 — (security) `@x = f() !{ … }` with an IMPORTED `f` writes the call's raw result into `@x` and never runs the handler — `NEW S473; HIGH; open (fixed by #1661)`
+
+Fixed by #1661 (deferSyncGuardedCellWrites await branch). This entry stays `open` here; #1661 carries the resolved entry and its merge resolves it.
+
+<!-- @gap id=g-impl1-direct-transport-payload-arm-untyped-s473 sev=LOW status=open locus=compiler/src/type-system.ts(the `!{}` variant-arm payload binder — out of the whole-binder audit's scope) prov=review:S473-#1658-F4(a17) -->
+### g-impl1-direct-transport-payload-arm-untyped-s473 — `!{ .Transport(t) :> { @status = t.message; return [] } }` on a client call to a plain server function compiles with `t` untyped: a member read off what §19.9.10 types `ServerCallError` (an enum, §18.17.1: E-TYPE-004) is not checked — `NEW S473 (review of #1658, F4); LOW; open`
+
+Review probe `a17` (`~/.cache/scrml/review/s473-1658/p/a17-direct-transport-t.json`): compiles on base `66242067a` and on `4f4314dab` alike (pre-existing). The same payload is refused through `_ e :>` (`match e { .Transport(t) :> … }`, E-TYPE-031). On impl#1 the arm is not entered for a real failure (`g-impl1-client-server-call-not-failable-s451`), so nothing wrong runs today.
+
+<!-- @gap id=g-impl1-whole-binder-direct-sql-untyped-s473 sev=LOW status=open locus=compiler/src/type-system.ts(wholeBinderCalleeEnum — a `!{}` whose operand is a `?{}` query has no callee name, so the binder has no enum) prov=dispatch:s473-flogence-two-fixes -->
+### g-impl1-whole-binder-direct-sql-untyped-s473 — `?{…}.all() !{ _ e :> … e.variant … }` refuses every use of `e` (E-TYPE-031 "the handled call's error enum cannot be resolved here"), though §18.6.1 types the binder of a `?{}` handler as `SqlError` — `NEW S473; LOW; open (fails closed)`
+
+Measured on `cfbc329a0`: `server function q() { const rows = ?{SELECT id FROM gnode}.all() !{ _ e :> { log(e.variant); return [] } } … }` → E-TYPE-031. The runtime builds a SqlError envelope there (S455, `_scrml_sql_attempt`), so typing the binder by a compiler-provided SqlError enum (`QueryFailed(message: string)`, `ConstraintViolation(field: string)`, `ConnectionLost`, `BatchPrepareFailed`) would be runtime-accurate. Recommended: a small follow-up lane on the same audit (`wholeBinderCalleeEnum` + the `sqlQueryHeadOfExpr` operand test).
+
+<!-- @gap id=g-impl1-match-expr-in-bang-arm-client-fn-s473 sev=LOW status=open locus=UNTRACED(impl#1 parse of a one-line `!{ _ e :> match e { … } }` in a client function body) prov=dispatch:s473-flogence-two-fixes -->
+### g-impl1-match-expr-in-bang-arm-client-fn-s473 — in a CLIENT function, `const w = risky() !{ _ e :> match e { .Bad :> "x", else :> "?" } }` is E-SCOPE-001 "Undeclared identifier `match`" (plus E-TYPE-031) — `NEW S473; LOW; open (fails closed)`
+
+Measured on `cfbc329a0` with `type E:enum = { Bad, Gone }`, `function risky()! -> E { fail E::Bad }` (a declared, local, client callee — so not this lane's change). §18.6.1 names `match err { … }` as the way to reach the payload. The same arm in a `server function` compiles (`whole-error-binder-allowlist-s469.test.js` "match e over its variants").
+
+<!-- @gap id=g-boot-dot-variant-member-unbuilt-s473 sev=MED status=open locus=compiler/self-host-v2/analyze.scrml(member access — "member access `.<name>` on a value that is not a struct or an instance is not in bootstrap slice M2") prov=spec:§18.17.1;dispatch:s473-flogence-two-fixes -->
+### g-boot-dot-variant-member-unbuilt-s473 — the bootstrap does not build §18.17.1's `.variant` member: `e.variant` on a `!{}` whole-error binder is E-BOOTSTRAP-UNSUPPORTED — `NEW S473; MED; open (fails closed)`
+
+Measured on `cfbc329a0` with `scrml-boot compile`: a client function `const b = fetchLocal() !{ _ e :> { …; "local arm failed: " + e.variant; …; return; } };` (`fetchLocal` a same-file `?{}` function declared `-> Arc[]`) → `E-BOOTSTRAP-UNSUPPORTED: member access .variant on a value that is not a struct or an instance is not in bootstrap slice M2`. §18.17.1: "Every enum value has the member `.variant`". Over an IMPORTED `?{}` function the bootstrap stops earlier: a `?{}` in an imported module is E-BOOTSTRAP-UNSUPPORTED (§44.7.1 module-with-db-context), and flogence's `<db>`-at-file-top library (`graph-read.scrml`) is E-DB-BODY-STATEMENT + E-BOOTSTRAP-UNSUPPORTED.
 
 ### g-impl1-enum-declared-twice-codegen-invalid-logic-s469 — an enum declared twice in one file (`type AuthErr:enum = …` twice) fails as E-CODEGEN-INVALID-LOGIC ("compiler defect") instead of a duplicate-declaration error — `NEW S469 (review of 716ee804e, LOW); LOW; open (fails closed)`
 
@@ -27592,6 +27619,8 @@ Governing: SPEC §8.1.1 (the "A `<db src=>` that supplies its program's database
 ### g-impl1-client-server-call-not-failable-s451 — impl#1 DIVERGENCE (filed, not fixed): a client call to a server function NOT declared `!` that nothing handles compiles at exit 0 — the S451 E-ERROR-002 trigger (§19.9.10) is not emitted, and a transport failure has no scrml error value — `NEW S451; MED; open`
 <!-- @gap id=g-impl1-client-server-call-not-failable-s451 sev=MED status=open locus=compiler/src/type-system.ts(the E-ERROR-002 checker treats a callee as failable only when it is declared `!` or CPS body-split — the latter answered with W-CPS-NEEDS-FAILABLE, not E-ERROR-002; a plain server-placed callee is never failable) prov=ruling:user-voice-scrml.md-S451-"your-recs-on-all-of-them"-item-1 -->
 Governing: SPEC §19.9.10 (S451 "your recs on all of them" item 1), §19.4.3, §19.9.5. Measured on `dbb671c2d`: `function userCount() { const row = ?{SELECT …}.get() !{ | _ :> not } … }` (server-placed by its `?{}`, not declared `!`) called as `@users = userCount()` in a client function and as `onclick={ @users = userCount() }` → exit 0, no E-ERROR-002, no W-CPS-NEEDS-FAILABLE; a body-split callee still gets the WARNING W-CPS-NEEDS-FAILABLE where the SPEC now requires E-ERROR-002. MED: an unhandled network failure surfaces as an unhandled rejection, not a scrml error. **Migration owed with the bootstrap (measured with impl#1's Route Inference, `docs/changes/s451-spec-client-failable/measure.mjs`):** 337 unhandled client call sites in 231 files (`conformance/cases/` 174 in 158 · `samples/` 109 in 47 · `examples/` 54 in 26); 11 of them are in value positions already E-VALUE-SERVER-CALL. Per-file list in `docs/changes/s451-spec-client-failable/progress.md`. The error type's exact shape is OPEN for the bootstrap's U1b design pass, so no `xfail` case can pin the error VALUE yet; a case pinning the E-ERROR-002 code (and converting this gap to `status=carried`) is owed once U1b lands.
+
+**Note (S473, #1658 review F3).** Since `s473-flogence-two-fixes`, impl#1 TYPES a `_ e :>` binder on such a call by §19.9.10's failure set (`Transport(t: ServerCallError)`), so `e.variant` and `e is .Transport` compile. At run time `e.variant` cannot be `"Transport"` yet: the arm runs only when the response body is a returned `__scrml_error` envelope (a plain server function never sends one; a transport failure throws `HTTP <status>` past the `!{}`), and then `e.variant` is whatever that body says. Lane `s473-impl1-imported-handler-arm` is routing the transport failure to the arm.
 
 ### g-impl1-bare-binder-arm-accepted-s451 — impl#1 DIVERGENCE (filed, not fixed): a `!{}` arm whose whole pattern is a bare identifier (`| err :>`) compiles at exit 0 — E-MATCH-BARE-BINDER is not emitted; the `match` form fails closed with E-CODEGEN-INVALID-LOGIC instead of the named code — `NEW S451; LOW; open`
 <!-- @gap id=g-impl1-bare-binder-arm-accepted-s451 sev=LOW status=open locus=searched:compiler/src(no E-MATCH-BARE-BINDER; the `!{}` arm parser accepts an identifier pattern, and a `match` arm with one reaches codegen raw) prov=ruling:user-voice-scrml.md-S451-"your-recs-on-all-of-them"-item-2a -->
