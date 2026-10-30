@@ -1569,6 +1569,29 @@ const hostCaps = (() => {
   const doc = g.document && typeof g.document === "object" ? g.document : null;
   const createElement = doc !== null && typeof doc.createElement === "function" ? doc.createElement : null;
   const createElementNS = doc !== null && typeof doc.createElementNS === "function" ? doc.createElementNS : null;
+  // #1674 review F2 — the interfaces whose prototype carries NO own accessor in a real browser, so
+  // no brand getter exists: `Window` and `Location` (their members are [LegacyUnforgeable] instance
+  // properties) and `ResizeObserver` (methods only). Their brand test is not instanceof alone:
+  //   - Window / Location are per-realm SINGLETONS: the brand is IDENTITY with the instance captured
+  //     here (`globalThis` itself, and its `location`), so a Proxy, Object.create(…) or another
+  //     realm's window / location fails;
+  //   - ResizeObserver: a METHOD brand — the captured `unobserve` called on the value with a detached
+  //     element this module made (a no-op on a real observer, which never observed it; "Illegal
+  //     invocation" on anything else).
+  let winSingleton = null;
+  let locSingleton = null;
+  try { if (g.window === g) winSingleton = g; } catch { winSingleton = null; }
+  try {
+    const l = g.location;
+    if (l !== null && typeof l === "object") locSingleton = l;
+  } catch { locSingleton = null; }
+  const brandMethods = new Map();
+  try {
+    const RO = ifaces.get("ResizeObserver");
+    const un = RO ? Object.getOwnPropertyDescriptor(RO.prototype, "unobserve") : undefined;
+    const probe = g.document && typeof g.document.createElement === "function" ? g.document.createElement("div") : null;
+    if (un && typeof un.value === "function" && probe !== null) brandMethods.set("ResizeObserver", (v) => { un.value.call(v, probe); });
+  } catch { /* absent: ResizeObserver brands fail closed */ }
   const inertProtos = new Map();
   if (createElement !== null) {
     for (const t of HOST_INERT_ELEMENTS) {
@@ -1584,6 +1607,9 @@ const hostCaps = (() => {
     ifaces,
     brandGetters,
     inertProtos,
+    winSingleton,
+    locSingleton,
+    brandMethods,
     doc,
     createElementNS,
     getPrototypeOf: Object.getPrototypeOf,
@@ -1672,9 +1698,24 @@ export function hostAttrValue(el, name, value, at) {
   if (typeof name !== "string") {
     throw new Error("hostAttrValue: " + at + " — the attribute name is not a string (a compiler defect: §21.3.3 rule 8.5 guarded(attr-name) requires a string literal)");
   }
-  const ln = hostLocalName(el);
-  if (_scrml_is_url_attr(ln === null ? "" : ln, name)) return _scrml_safe_url(el, name, value);
-  return value;
+  // #1674 review F1 — ONE write path: the data-attribute walls `rt.attr` uses (refusedDataAttrWrite:
+  // `form` / `formaction` / `action`, `style`, `srcdoc`, a refresh `<meta>`, a `<base>` / stylesheet
+  // `<link>` href), then its value guard (writeGuardOf: §5.2 rule 3's URL guard, the CSS-url
+  // attributes' cssValueOf). The compiler refuses every such NAME (E-HOST-TARGET-NOT-ALLOWED), so
+  // reaching a refusal here is a compiler defect; the write is still never made (the attribute is
+  // removed, the binding throws — E-HOST-THROW-RT).
+  if (refusedDataAttrWrite(el, name)) {
+    throw new Error("hostAttrValue: " + at + " — `" + name + "` is never written from data (SPEC §5.2 / §65.4.2; a compiler defect: §21.3.3 rule 8.5 refuses the name at compile time)");
+  }
+  const guard = writeGuardOf(el, name);
+  const s = String(value);
+  if (guard === null) return s;
+  const w = guard(s);
+  if (w === null) {
+    el.removeAttribute(name);
+    throw new Error("hostAttrValue: " + at + " — the value for `" + name + "` was refused by the CSS value guard (SPEC §25.7); the attribute was removed");
+  }
+  return w;
 }
 
 /**
@@ -1716,6 +1757,17 @@ function hostBranded(v, iface) {
   let ok = false;
   try { ok = hostCaps.instanceOf.call(C, v) === true; } catch { ok = false; }
   if (!ok) return false;
+  // #1674 review F2 — the per-realm singletons brand by IDENTITY: `Window` is exactly the captured
+  // global, `Location` exactly its captured `location` (a superinterface of Window — EventTarget —
+  // admits the captured global too). Neither is ever admitted by a getter or a prototype.
+  if (iface === "Window") return hostCaps.winSingleton !== null && v === hostCaps.winSingleton;
+  if (iface === "Location") return hostCaps.locSingleton !== null && v === hostCaps.locSingleton;
+  if (hostCaps.winSingleton !== null && v === hostCaps.winSingleton) return true;   // instanceof C above
+  const method = hostCaps.brandMethods.get(iface);
+  if (method !== undefined) {
+    try { method(v); } catch { return false; }
+    return true;
+  }
   const brand = hostCaps.brandGetters.get(iface);
   if (brand !== undefined) {
     try { brand.call(v); } catch { return false; }
@@ -2554,42 +2606,7 @@ function metaRefreshes(el) {
  * string first, exactly as the write converts it (§5.2 rule 3 "The test").
  */
 export function attr(scope, el, name, fn) {
-  // s473 — §5.2 "Data never chooses where a form posts or where the page goes
-  // (S473)": the compiler refuses these writes (E-ATTR-FORM-ACTION /
-  // E-ATTR-META-REFRESH); this is the wall behind it (fail closed — `fn` is
-  // never run, and a value already on the element is removed).
-  if (refusedNavigationWrite(el, name)) return;
-  // s472 — §65.4.2: "you cannot apply an arbitrary runtime string as a
-  // style-value (that would reopen the injection surface)". The compiler
-  // refuses `style=` from data (E-STYLE-VALUE-NOT-STYLE), so no compiled
-  // program asks for this; a `style` write from data is still never made
-  // (fail closed): the attribute is removed and the refusal reported — never
-  // the value; `fn` is never run). A static `style="…"` is in the template and
-  // is not written here.
-  if (String(name).toLowerCase() === "style") {
-    el.removeAttribute(name);
-    console.warn("[scrml css-guard] refused a data-supplied `style` write: a style is never built from data (SPEC §65.4.2). The attribute was removed.");
-    return;
-  }
-  // s473 — §5.2 "Data never moves the document base (S473)": a `<base>`'s
-  // `href` is never written from data. The compiler refuses it
-  // (E-ATTR-BASE-HREF); this is the wall behind it (fail closed — no compiled
-  // program asks for this write; `fn` is never run, and an `href` already on
-  // the element is removed rather than left standing).
-  if (isBaseElement(el) && isHrefName(name)) {
-    el.removeAttribute(name);
-    console.warn("[scrml url-guard] refused a data-supplied `href` on a <base>: the document's base URL is never chosen by data (SPEC §5.2). The attribute was removed.");
-    return;
-  }
-  // s473 — §5.2 rule 2 "`srcdoc` in every form": a `srcdoc` whose value is
-  // not a static string is a compile error (E-ATTR-INTERP-EXECUTABLE), so no
-  // compiled program asks for this write either; the wall behind it, on any
-  // element (fail closed).
-  if (String(name).toLowerCase() === "srcdoc") {
-    el.removeAttribute(name);
-    console.warn("[scrml url-guard] refused a data-supplied `srcdoc`: an HTML document is never written from data (SPEC §5.2). The attribute was removed.");
-    return;
-  }
+  if (refusedDataAttrWrite(el, name)) return;
   // s473 — user-voice-scrml.md S472 "five PA recs" item 3: "A data-bound
   // `href` on a `<link>` whose `rel` contains `stylesheet` (or is computed) is
   // REFUSED." The compiler refuses it (E-ATTR-STYLESHEET-HREF); this is the
@@ -2616,6 +2633,58 @@ export function attr(scope, el, name, fn) {
     if (w === null) { el.removeAttribute(name); return; }
     el.setAttribute(name, w);
   });
+}
+
+/**
+ * THE data-attribute walls — every write of an attribute from data goes through this one function:
+ * `rt.attr` (markup's bound attributes) and `hostAttrValue` (a `<host>` binding's `setAttribute`,
+ * s473-host-allowlist-b, #1674 review F1 — "one write path, not two"). True when the write is refused:
+ * the attribute is removed and the refusal reported (never the value). Followed, for an admitted write,
+ * by `writeGuardOf` (a URL or CSS-url value).
+ */
+function refusedDataAttrWrite(el, name) {
+  // s473 — §5.2 "Data never chooses where a form posts or where the page goes
+  // (S473)": the compiler refuses these writes (E-ATTR-FORM-ACTION /
+  // E-ATTR-META-REFRESH); this is the wall behind it (fail closed — `fn` is
+  // never run, and a value already on the element is removed).
+  if (refusedNavigationWrite(el, name)) return true;
+  // s472 — §65.4.2: "you cannot apply an arbitrary runtime string as a
+  // style-value (that would reopen the injection surface)". The compiler
+  // refuses `style=` from data (E-STYLE-VALUE-NOT-STYLE), so no compiled
+  // program asks for this; a `style` write from data is still never made
+  // (fail closed): the attribute is removed and the refusal reported — never
+  // the value; `fn` is never run). A static `style="…"` is in the template and
+  // is not written here.
+  if (String(name).toLowerCase() === "style") {
+    el.removeAttribute(name);
+    console.warn("[scrml css-guard] refused a data-supplied `style` write: a style is never built from data (SPEC §65.4.2). The attribute was removed.");
+    return true;
+  }
+  // s473 — §5.2 "Data never moves the document base (S473)": a `<base>`'s
+  // `href` is never written from data. The compiler refuses it
+  // (E-ATTR-BASE-HREF); this is the wall behind it (fail closed — no compiled
+  // program asks for this write; `fn` is never run, and an `href` already on
+  // the element is removed rather than left standing).
+  if (isBaseElement(el) && isHrefName(name)) {
+    el.removeAttribute(name);
+    console.warn("[scrml url-guard] refused a data-supplied `href` on a <base>: the document's base URL is never chosen by data (SPEC §5.2). The attribute was removed.");
+    return true;
+  }
+  // s473 — §5.2 rule 2 "`srcdoc` in every form": a `srcdoc` whose value is
+  // not a static string is a compile error (E-ATTR-INTERP-EXECUTABLE), so no
+  // compiled program asks for this write either; the wall behind it, on any
+  // element (fail closed).
+  if (String(name).toLowerCase() === "srcdoc") {
+    el.removeAttribute(name);
+    console.warn("[scrml url-guard] refused a data-supplied `srcdoc`: an HTML document is never written from data (SPEC §5.2). The attribute was removed.");
+    return true;
+  }
+  // s473 — user-voice-scrml.md S472 "five PA recs" item 3: "A data-bound
+  // `href` on a `<link>` whose `rel` contains `stylesheet` (or is computed) is
+  // REFUSED." The compiler refuses it (E-ATTR-STYLESHEET-HREF); this is the
+  // wall behind it (fail closed — no compiled program asks for this write).
+  if (isLinkElement(el) && isHrefName(name) && linkLoadsSheet(el)) { refuseLinkHref(el, name); return true; }
+  return false;
 }
 
 // s473 — the `<base>` element (tag compared case-insensitively; HTML reads

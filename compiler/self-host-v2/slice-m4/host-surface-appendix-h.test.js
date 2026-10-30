@@ -146,8 +146,8 @@ describe("inertness is never read off a static type (rule 8.5)", () => {
     }
   });
 
-  test("a mid-chain guarded read is checked at ITS step: `e.classList.add(t)` / `e.style.setProperty(…)` route `e` through hostInert", () => {
-    for (const line of ["f(e: Element, t: string) = e.classList.add(t)", "f(e: HTMLElement, a: string, b: string) = e.style.setProperty(a, b)"]) {
+  test("a mid-chain guarded read is checked at ITS step: `e.classList.add(t)` / `e.style.removeProperty(…)` route `e` through hostInert", () => {
+    for (const line of ["f(e: Element, t: string) = e.classList.add(t)", "f(e: HTMLElement, a: string) -> string = e.style.removeProperty(a)"]) {
       const r = run(P("  " + line));
       expect(errsOf(r)).toEqual([]);
       expect([line, /hostInert\(e[^,]*, "f\(\) — the `<host>` binding"\)\.(classList|style)\./.test(jsOf(r))]).toEqual([line, true]);

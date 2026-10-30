@@ -271,6 +271,10 @@ ${
     // sink table? "" — yes; otherwise why it is not admitted.
     export fn entryConflict(e: HEntry) -> string {
         const m: string = e.member
+        // #1674 review F1: §65.4.2 — "you cannot apply an arbitrary runtime string as a style-value";
+        // the one data-to-CSS door is the §25.7 bridge (the runtime's cssValueOf). A CSSStyleDeclaration
+        // write, or a call taking a value (setProperty), is never on the surface (H-094 removed).
+        if (e.iface == "CSSStyleDeclaration" && (e.access == "write" || (e.access == "call" && sigParams(e).length > 1))) return "§65.4.2 refuses a CSS value from data (the door is the §25.7 bridge); `" + m + "` is never on the surface"
         if (e.access == "write") {
             const k: string = logicWriteSink(m)
             if (k == "html" || k == "exec" || k == "on") return "url.scrml's sink table marks a write of `" + m + "` as an executable sink (" + k + ")"
@@ -428,7 +432,6 @@ ${
             entry("H-091", "DOMTokenList", "remove", "call", "(token: string) -> void", "open", "DOM DOMTokenList"),
             entry("H-092", "DOMTokenList", "toggle", "call", "(token: string) -> bool", "open", "DOM DOMTokenList"),
             entry("H-093", "DOMTokenList", "contains", "call", "(token: string) -> bool", "open", "DOM DOMTokenList"),
-            entry("H-094", "CSSStyleDeclaration", "setProperty", "call", "(property: string, value: string) -> void", "open", "CSSOM CSSStyleDeclaration"),
             entry("H-095", "CSSStyleDeclaration", "removeProperty", "call", "(property: string) -> string", "open", "CSSOM CSSStyleDeclaration"),
             entry("H-096", "HTMLInputElement", "value", "read", "string", "open", "HTML HTMLInputElement"),
             entry("H-097", "HTMLInputElement", "value", "write", "string", "guarded(inert-receiver)", "HTML HTMLInputElement"),

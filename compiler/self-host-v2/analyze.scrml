@@ -63,7 +63,7 @@ ${
     import { UrlAttr, StaticSink, classifyStatic, staticExecMessage, logicWriteSink, logicCallSink, attrNameArgIndex, executableAttrName, htmlArgIndex, attrNodeMember, attrNodeValueMember, urlValueAdmitted, schemeOfUrl, isUrlAttrName, attrValueArgIndex } from "./url.scrml"
     import { HEntry, surfaceInterfaces, isSurfaceIface, isDomElementIface, ifaceInherits, findEntry, accessesOf, sigParams, sigResult,
              slotType, slotOptional, isCallbackSlot, slotAlternatives, slotAdmitsNot, unWaiting, entryGuards, inertTagIface,
-             dictKeys, attrNameVerdict, entryConflict, runtimeGuardsBuilt, brandChecksBuilt } from "./host-surface.scrml"
+             dictKeys, attrNameVerdict, entryConflict, runtimeGuardsBuilt, brandChecksBuilt, inertElements } from "./host-surface.scrml"
 
     // =========================================================================
     // THE TABLES (exported — `lower` consumes them).
@@ -4489,6 +4489,9 @@ ${
             } else {
                 v = hostResultVerdict(r, d)
             }
+            // #1674 review I1: a `createElement` result is EXACTLY its literal tag's interface (H.4), so a
+            // declared subinterface of it can never pass the brand check — refused at compile time
+            if (v == "down" && tagIface != "") return hw("E-HOST-RESULT-TYPE", "`" + name + "` declares `-> " + d + "` for `createElement`, but the literal tag makes exactly `" + r + "` (Appendix H.4) — the result would always fail its brand check (§21.3.3 rules 8.4, 8.7); declare `-> " + r + "`")
             if (v == "down" && !brandChecksBuilt()) return hw("E-BOOTSTRAP-UNSUPPORTED", "`" + name + "` declares `-> " + d + "`, a subinterface of the entry's result `" + r + "` (a downcast) — it is admitted with a run-time brand check (§21.3.3 rules 8.4, 8.7), which is not in this build yet; declare `-> " + r + "`")
             if (v == "bad") {
                 let why: string = "the entry yields `" + r + "`"
@@ -4538,6 +4541,13 @@ ${
             if (slot == "attr-name") {
                 const av: string = attrNameVerdict(v.name)
                 if (av == "exec") return haBad("E-HOST-TARGET-NOT-ALLOWED", "the target of `" + name + "` names the attribute `" + v.name + "` — an event-handler attribute or `srcdoc` installs or runs code, and a `guarded(attr-name)` entry refuses it (§21.3.3 rule 8.5, §5.2's name test)")
+                // #1674 review F1: every name the MARKUP walk refuses from data, on any element the
+                // receiver may be (the H.4 inert list) — `form`, `formaction`, `style`, … — by markup's
+                // own predicate (dataAttrRefusal), whatever the value: a binding is a data path
+                for (const it of inertElements()) {
+                    const mc: string = dataAttrRefusal(it.tag, v.name, [])
+                    if (mc != "") return haBad("E-HOST-TARGET-NOT-ALLOWED", "the target of `" + name + "` names the attribute `" + v.name + "`, which §5.2 / §65.4.2 never write from data (markup refuses a data `" + v.name + "=` on `<" + it.tag + ">` as " + mc + ": data never chooses where a form posts, which form a control submits with, or a style) — a `guarded(attr-name)` entry refuses it too (§21.3.3 rule 8.5); write it as a static attribute in markup")
+                }
                 if (av == "url") return { w: hwOk(), tag: "", url: true, urlLit: v.name }
                 return haOk()
             }
@@ -16673,10 +16683,37 @@ ${
     //     become `refresh`), and `content` when the `http-equiv` refreshes or
     //     is computed (`metaEquivRefreshes`): E-ATTR-META-REFRESH.
     fn navSinkCode(e: AElem, a: AAttr) -> string {
-        const n: string = a.name.toLowerCase()
-        const t: string = e.tag.toLowerCase()
+        return navSinkCodeOf(e.tag, a.name, e.attrs)
+    }
+
+    fn navSinkCodeOf(tag: string, name: string, attrs: AAttr[]) -> string {
+        const n: string = name.toLowerCase()
+        const t: string = tag.toLowerCase()
         if (n == "formaction" || n == "form" || (n == "action" && t == "form")) return "E-ATTR-FORM-ACTION"
-        if (t == "meta" && (n == "http-equiv" || (n == "content" && metaEquivRefreshes(e.attrs)))) return "E-ATTR-META-REFRESH"
+        if (t == "meta" && (n == "http-equiv" || (n == "content" && metaEquivRefreshes(attrs)))) return "E-ATTR-META-REFRESH"
+        return ""
+    }
+
+    // The markup attribute walk's other data refusals, as predicates the `<host>` walk calls too
+    // (s473-host-allowlist-b, #1674 review F1 — one test, not a second list):
+    //   §65.4.2 `style` from data (E-STYLE-VALUE-NOT-STYLE); §5.2 a `<base>` `href` (E-ATTR-BASE-HREF);
+    //   §5.2 a stylesheet `<link>` `href` (E-ATTR-STYLESHEET-HREF).
+    fn styleAttrFromData(name: string) -> boolean { return name.toLowerCase() == "style" }
+    fn baseHrefFromData(tag: string, name: string) -> boolean { return name.toLowerCase() == "href" && tag.toLowerCase() == "base" }
+    fn sheetHrefFromData(tag: string, name: string, attrs: AAttr[]) -> boolean {
+        return name.toLowerCase() == "href" && tag.toLowerCase() == "link" && linkRelLoadsSheet(attrs)
+    }
+
+    // THE markup walk's refusal of a DATA value for the attribute `name` on a `<tag>` ("" — admitted;
+    // otherwise the code markup reports). `srcdoc` and event handlers are refused from data in every form
+    // too (url.scrml executableAttrName, asked separately by both walks).
+    fn dataAttrRefusal(tag: string, name: string, attrs: AAttr[]) -> string {
+        if (name.toLowerCase() == "srcdoc") return "E-ATTR-INTERP-EXECUTABLE"
+        const nav: string = navSinkCodeOf(tag, name, attrs)
+        if (nav != "") return nav
+        if (styleAttrFromData(name)) return "E-STYLE-VALUE-NOT-STYLE"
+        if (baseHrefFromData(tag, name)) return "E-ATTR-BASE-HREF"
+        if (sheetHrefFromData(tag, name, attrs)) return "E-ATTR-STYLESHEET-HREF"
         return ""
     }
 
@@ -16833,7 +16870,7 @@ ${
                 const code: string = navSinkCode(e, a)
                 st = resolveValue(penv, a.value, not, st)
                 st = addDiag(st, env.file, a.span, code, navSinkMessage(code, a, e))
-            } else if (valueExpr(a.value) is given && a.name.toLowerCase() == "style") {
+            } else if (valueExpr(a.value) is given && styleAttrFromData(a.name)) {
                 // s472 — §65.4.2: "`style=<expr>` where `<expr>` is neither a
                 // quoted string literal nor a `style`-typed value/list SHALL
                 // emit `E-STYLE-VALUE-NOT-STYLE`. Dynamic raw CSS is **only**
@@ -16855,7 +16892,7 @@ ${
                 // declaration's body it is reported once, at the definition.
                 st = resolveValue(penv, a.value, not, st)
                 st = addDiag(st, env.file, a.span, "E-STYLE-VALUE-NOT-STYLE", "`" + a.name + "=` on `<" + e.tag + ">` takes its value from data (an expression, a variable, a call or a field), and only a quoted string literal or a `style`-typed value applies a style — an arbitrary runtime string written into `style` is CSS built from data (`url(…)` fetches, `@import`, overlays). Write the style as a static `style=\"…\"`, put the dynamic part in a `#" + "{…}` rule as `@cell` (§25.7 — the bridge admits only a plain CSS value), or switch a class with `class=(…)` (§65.4.2)")
-            } else if (valueExpr(a.value) is given && a.name.toLowerCase() == "href" && e.tag.toLowerCase() == "base") {
+            } else if (valueExpr(a.value) is given && baseHrefFromData(e.tag, a.name)) {
                 // s473 — §5.2 "Data never moves the document base (S473)": "A
                 // `<base>` … whose `href` (any case) is not a static string …
                 // SHALL be a compile error (E-ATTR-BASE-HREF)." The base URL
@@ -16866,7 +16903,7 @@ ${
                 // In a declaration's body it is reported once, at the definition.
                 st = resolveValue(penv, a.value, not, st)
                 st = addDiag(st, env.file, a.span, "E-ATTR-BASE-HREF", "`" + a.name + "=` on `<" + e.tag + ">` takes its value from data (an expression, a variable, a call or a field) — data never chooses the document's base URL: it resolves every relative URL on the page (links, forms, fetches), so a data base moves them to another origin. Write the `href` as a static string (`href=\"/app/\"`), or build the URLs that need a varying prefix where they are used (§5.2)")
-            } else if (valueExpr(a.value) is given && a.name.toLowerCase() == "href" && e.tag.toLowerCase() == "link" && linkRelLoadsSheet(e.attrs)) {
+            } else if (valueExpr(a.value) is given && sheetHrefFromData(e.tag, a.name, e.attrs)) {
                 // s473 — §5.2 "Data-supplied stylesheets (S472)": "A `<link>`
                 // whose `href` is not a static string … and whose `rel` contains
                 // the text `stylesheet` … or is not a static string SHALL

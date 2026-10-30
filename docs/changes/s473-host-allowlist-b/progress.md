@@ -34,3 +34,16 @@ Lane A (s473-host-allowlist-a) owns slice-m1/runtime/runtime.js and the `src=` s
   E-IMPORT-004 (rule 3).
 - parity test: the 26 `textContent`-write typings are admitted only because their emitted JS goes through hostInert
   (checked per case).
+
+## #1674 combined review fix round (FIX-FIRST → F1, F2, F3, I1)
+- F1: guarded(attr-name) refuses every name the markup walk refuses from data — analyze.scrml
+  dataAttrRefusal (navSinkCodeOf / styleAttrFromData / baseHrefFromData / sheetHrefFromData, the markup
+  walk's own predicates, now shared), over every H.4 tag, whatever the value. runtime.js: rt.attr's walls
+  extracted to refusedDataAttrWrite; hostAttrValue = those walls + writeGuardOf (one write path).
+  H-094 CSSStyleDeclaration.setProperty REMOVED (id not reused); entryConflict refuses any CSS value write.
+- F2: brand by identity for the Window / Location singletons, a method brand (unobserve on a detached
+  div) for ResizeObserver; Chromium test: real passes / 3 fakes fail for all 35 interfaces, other-realm
+  window / location fail.
+- F3: SPEC 8.5 / §19.17 / §21.3.3 / §34 state the exact-prototype rule; 8.7 the WebIDL brand, the
+  singletons, and that a customized built-in fails its base interface (D2).
+- I1: createElement result declared as a subinterface of its tag's interface → E-HOST-RESULT-TYPE.

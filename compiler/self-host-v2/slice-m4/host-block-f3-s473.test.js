@@ -389,6 +389,37 @@ describe("rules 4 / 5 / 6 / 8 / 11 — the target's shape, roots, parameters and
     expect(walk("ou(b: string) -> string = window.URL.createObjectURL(b)")).toEqual([NA]);
   });
 
+  // #1674 review F1 — guarded(attr-name) refuses every name the MARKUP walk refuses from data (its own
+  // predicate, analyze.scrml dataAttrRefusal), whatever the value: E20 / E7 / E21 / E8 are must-refuse.
+  test("F1 — E20 / E7 / E21: `form`, `formaction`, `style` (any case) through setAttribute are E-HOST-TARGET-NOT-ALLOWED, a literal value included", () => {
+    for (const line of [
+      "owner(e: Element, f: string) = e.setAttribute(\"form\", f)",                   // E20: a password into an off-origin form
+      "fa(e: HTMLElement, v: string) = e.setAttribute(\"formaction\", v)",           // E7: a CSRF token to /exfil-form
+      "fo(e: HTMLElement, v: string) = e.setAttribute(\"FORM\", v)",
+      "st(e: Element, v: string) = e.setAttribute(\"style\", v)",                    // E21: CSS url() fetch
+      "st2(e: Element) = e.setAttribute(\"Style\", \"background:url(/x)\")",
+      "fa2(e: Element) = e.setAttribute(\"formaction\", \"/exfil-form\")",
+      "rs(e: Element) = e.removeAttribute(\"style\")",
+    ]) {
+      expect([line, walk(line)]).toEqual([line, [NA]]);
+    }
+    // the reviewer's E20 / E7 programs, as written
+    expect(codes(P("  byId(id: string) -> Element | not = document.getElementById(id)\n  owner(e: Element, f: string) = e.setAttribute(\"form\", f)"))).toEqual([NA]);
+    expect(codes(P("  mkB() -> HTMLElement = document.createElement(\"button\")\n  sa1(e: HTMLElement, v: string) = e.setAttribute(\"form\", v)\n  sa2(e: HTMLElement, v: string) = e.setAttribute(\"formaction\", v)"))).toEqual([NA, NA]);
+    // an ordinary attribute still compiles
+    clean(P("  t(e: Element, v: string) = e.setAttribute(\"title\", v)\n  n(e: Element, v: string) = e.setAttribute(\"name\", v)"));
+  });
+
+  test("F1 — E8: CSSStyleDeclaration.setProperty is off the surface (H-094 removed); a CSS value from data has one door, the §25.7 bridge", () => {
+    expect(walk("sp(e: HTMLElement, p: string, v: string) = e.style.setProperty(p, v)")).toEqual([NA]);
+    clean(P("  rp(e: HTMLElement, p: string) -> string = e.style.removeProperty(p)"));
+  });
+
+  test("I1 — createElement's result is exactly its tag's interface: a declared subinterface is E-HOST-RESULT-TYPE", () => {
+    expect(walk("mk() -> HTMLAnchorElement = document.createElement(\"div\")")).toEqual([RES]);
+    clean(P("  mk() -> HTMLAnchorElement = document.createElement(\"a\")\n  mk2() -> HTMLElement = document.createElement(\"div\")"));
+  });
+
   test("one sink source: every Appendix H entry agrees with url.scrml's executable-sink table (no second list)", () => {
     const S = mods()["host-surface"];
     expect(S.surfaceEntries().map((e) => [e.id, S.entryConflict(e)]).filter((x) => x[1] !== "")).toEqual([]);

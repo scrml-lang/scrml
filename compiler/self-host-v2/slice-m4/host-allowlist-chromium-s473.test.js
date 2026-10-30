@@ -171,8 +171,9 @@ suite("R1 class in Chromium — iframe.src, a.href javascript:, form.action, <ba
     const { r, ran } = await inPage(`
       const f = document.createElement("form"); document.body.appendChild(f);
       const t = trap(() => rt.hostInert(f, AT).setAttribute("action", rt.hostAttrValue(f, "action", "javascript:window.__ran.push('xform')", AT)));
-      return [t, rt.hostAttrValue(f, "action", "javascript:x", AT), f.getAttribute("action")];`);
-    expect(r).toEqual(["E-HOST-RECEIVER-RT", "about:blank", null]);
+      // #1674 review F1: action on a form is never written from data — refused by the rt.attr walls, not guarded to about:blank
+      return [t, trap(() => rt.hostAttrValue(f, "action", "javascript:x", AT)).startsWith("raw hostAttrValue"), f.getAttribute("action")];`);
+    expect(r).toEqual(["E-HOST-RECEIVER-RT", true, null]);
     expect(ran).toEqual([]);
   });
 
@@ -334,4 +335,71 @@ suite("rule 8.7 — a compiled `src=` binding brand-checks an interface result (
     expect(errs.some((m) => m.includes("E-HOST-VALUE-MISMATCH-RT"))).toBe(true);
     expect(text).not.toBe("7");
   }, 60000);
+});
+
+// s473-host-allowlist-b — the #1674 review fix round, in a real browser.
+suite("#1674 review F2 — every Appendix H interface's REAL object passes the brand check; every fake fails (Chromium)", () => {
+  test("real objects pass and three fakes (Object.create(proto), a Proxy of the real one, Object.create(real)) fail, for all 35 interfaces", async () => {
+    const { r } = await inPage(`
+      for (const [id, tag] of [["c","canvas"],["v","video"],["au","audio"],["i","img"],["a","a"],["in","input"]]) { const e = document.createElement(tag); e.id = "b-" + id; document.body.appendChild(e); }
+      const $ = (id) => document.getElementById("b-" + id);
+      const io = new IntersectionObserver(() => {}); const ro = new ResizeObserver(() => {});
+      let ioe = null; await new Promise((res) => { const o = new IntersectionObserver((es) => { ioe = es[0]; o.disconnect(); res(); }); o.observe(document.body); setTimeout(res, 500); });
+      let roe = null; await new Promise((res) => { const o = new ResizeObserver((es) => { roe = es[0]; o.disconnect(); res(); }); o.observe(document.body); setTimeout(res, 500); });
+      const ctx = $("c").getContext("2d");
+      const real = {
+        EventTarget: document.body, Window: window, Node: document.body, Document: document, CharacterData: document.createTextNode("x"), Text: document.createTextNode("x"),
+        Element: document.body, HTMLElement: document.body, HTMLInputElement: $("in"), HTMLMediaElement: $("v"), HTMLVideoElement: $("v"), HTMLAudioElement: $("au"),
+        HTMLCanvasElement: $("c"), HTMLImageElement: $("i"), HTMLAnchorElement: $("a"), Navigator: navigator, Clipboard: navigator.clipboard,
+        Performance: performance, Crypto: crypto, Location: location, Event: new Event("x"), UIEvent: new UIEvent("x"), MouseEvent: new MouseEvent("x"),
+        KeyboardEvent: new KeyboardEvent("x"), DOMTokenList: document.body.classList, CSSStyleDeclaration: document.body.style, CanvasRenderingContext2D: ctx,
+        TextMetrics: ctx.measureText("x"), IntersectionObserver: io, IntersectionObserverEntry: ioe, ResizeObserver: ro, ResizeObserverEntry: roe,
+        MediaQueryList: matchMedia("(min-width: 1px)"), DOMRectReadOnly: new DOMRectReadOnly(), DOMRect: new DOMRect(),
+      };
+      const out = {};
+      for (const [n, v] of Object.entries(real)) {
+        const t = (x) => { try { rt.hostBrand(x, n, AT, false); return "ok"; } catch (e) { return e.code || "raw"; } };
+        let f1 = null, f2 = null, f3 = null;
+        try { f1 = Object.create(window[n].prototype); } catch {}
+        try { f2 = new Proxy(v, {}); } catch {}
+        try { f3 = Object.create(v); } catch {}
+        out[n] = [t(v), t(f1), t(f2), t(f3)].join(" ");
+      }
+      // another realm's window / location fail too
+      const fr = document.getElementById("other").contentWindow;
+      out["Window(other realm)"] = (() => { try { rt.hostBrand(fr, "Window", AT, false); return "ok"; } catch (e) { return e.code; } })();
+      out["Location(other realm)"] = (() => { try { rt.hostBrand(fr.location, "Location", AT, false); return "ok"; } catch (e) { return e.code; } })();
+      return out;`);
+    const M = "E-HOST-VALUE-MISMATCH-RT";
+    const want = {};
+    for (const n of Object.keys(r)) want[n] = n.includes("other realm") ? M : ["ok", M, M, M].join(" ");
+    expect(r).toEqual(want);
+    expect(Object.keys(r).length).toBe(37);
+    expect(errors).toEqual([]);
+  }, 60000);
+});
+
+suite("#1674 review F1 — the data-attribute walls hold on a <host> write (Chromium, the emitted guarded shape)", () => {
+  test("E20 — a data `form` on an author password input is refused; submitting the off-origin form sends no password", async () => {
+    const hits = [];
+    const { r } = await inPage(`
+      document.body.insertAdjacentHTML("beforeend", '<form id="login" action="/ok"><input type="password" id="pw" name="pw" value="hunter2"></form><form id="offsite" action="/exfil-offsite" target="sink"><button id="sub2">go</button></form><iframe name="sink"></iframe>');
+      const pw = document.getElementById("pw");
+      const res = trap(() => rt.hostInert(pw, AT).setAttribute(rt.hostSetAttrName("form", AT), rt.hostAttrValue(pw, "form", "offsite", AT)));
+      return [res, pw.getAttribute("form"), pw.form && pw.form.id];`);
+    expect(r).toEqual(["raw hostAttrValue: " + AT + " — `form` is never written from data (SPEC §5.2 / §65.4.2; a compiler defect: §21.3.3 rule 8.5 refuses the name at compile time)", null, "login"]);
+  }, 30000);
+
+  test("E7 / E21 — `formaction` and `style` from data are refused; a CSS-url attribute's url() value is refused by cssValueOf", async () => {
+    const { r } = await inPage(`
+      const b = document.createElement("button"); document.body.appendChild(b);
+      const d = document.createElement("div"); document.body.appendChild(d);
+      const fa = trap(() => rt.hostAttrValue(b, "formaction", "/exfil-form", AT));
+      const st = trap(() => rt.hostAttrValue(d, "style", "background:url(/exfil-styleattr)", AT));
+      const fill = trap(() => rt.hostAttrValue(d, "fill", "url(/exfil-fill)", AT));
+      const ok = trap(() => rt.hostAttrValue(d, "title", "hello", AT));
+      await new Promise((res) => setTimeout(res, 200));
+      return [fa.startsWith("raw"), st.startsWith("raw"), fill.startsWith("raw"), ok, b.hasAttribute("formaction"), d.hasAttribute("style")];`);
+    expect(r).toEqual([true, true, true, "ok hello", false, false]);
+  }, 30000);
 });

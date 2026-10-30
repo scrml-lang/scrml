@@ -140,13 +140,16 @@ describe("guarded(url) — the §5.2 rule 3 guard, reused (hostUrl / hostAttrVal
   test("setAttribute's value: the URL guard iff the name is URL-valued on the receiver's element", () => {
     expect(quiet(() => rt.hostAttrValue(el("a"), "href", "javascript:x", AT)).v).toBe("about:blank");
     expect(quiet(() => rt.hostAttrValue(el("a"), "HREF", "javascript:x", AT)).v).toBe("about:blank");
-    expect(quiet(() => rt.hostAttrValue(el("button"), "formaction", "javascript:x", AT)).v).toBe("about:blank");
+    // #1674 review F1: `formaction` (and `action` on a <form>, `form`, `style`) is never written from data — the rt.attr walls; the write is refused, not guarded
+    expect(() => quiet(() => rt.hostAttrValue(el("button"), "formaction", "/exfil", AT))).toThrow("never written from data");
     expect(quiet(() => rt.hostAttrValue(el("video"), "poster", "javascript:x", AT)).v).toBe("about:blank");
     // a non-URL attribute keeps the data's value
     expect(rt.hostAttrValue(el("div"), "title", "javascript:x", AT)).toBe("javascript:x");
     // `action` is a URL on <form> only (element-scoped, as §5.2 scopes it)
     expect(rt.hostAttrValue(el("div"), "action", "javascript:x", AT)).toBe("javascript:x");
-    expect(quiet(() => rt.hostAttrValue(el("form"), "action", "javascript:x", AT)).v).toBe("about:blank");
+    expect(() => quiet(() => rt.hostAttrValue(el("form"), "action", "/exfil", AT))).toThrow("never written from data");
+    expect(() => quiet(() => rt.hostAttrValue(el("input"), "form", "offsite", AT))).toThrow("never written from data");
+    expect(() => quiet(() => rt.hostAttrValue(el("div"), "style", "background:url(/x)", AT))).toThrow("never written from data");
   });
 });
 
