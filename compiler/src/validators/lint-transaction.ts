@@ -336,7 +336,7 @@ export function runTransactionChecks(ast: FileAST | null | undefined): Transacti
         // Sound pre-filter: every statement this checker acts on begins with one
         // of these words (or is a `?`), so text without any of them cannot contain
         // one. A hit is still decided by PARSING below, never by the match.
-        if (tb.text !== null && !/\b(return|break|continue|yield|transaction|fail)\b|\?/.test(tb.text)) continue;
+        if (tb.text !== null && !/\b(return|break|continue|yield|transaction|fail|navigate)\b|\?/.test(tb.text)) continue;
         const parsed = tb.text === null ? { ok: false as const } : parseStatementText(tb.text, filePath);
         if (!parsed.ok) {
           if (t.inFunction) {
@@ -381,6 +381,21 @@ export function runTransactionChecks(ast: FileAST | null | undefined): Transacti
           if (kind === "fail-expr" || (kind === "escape-hatch" && n.nativeKind === "Fail")) failInStmtMatchArm(n, "`fail`");
           else if (kind === "propagate-expr" || (kind === "escape-hatch" && n.nativeKind === "Propagate")) failInStmtMatchArm(n, "`?` propagation");
         }
+      }
+
+      // S473 (RULED, user-voice S473 "review-surfaced decisions" item 4) — `navigate()` inside a
+      // `transaction` block is refused. A server-side navigate ENDS the function (it throws the
+      // navigation signal, server-navigate.ts), so it leaves the block the way a `return` does and
+      // the block ROLLS BACK (§19.10.3) — while the client is sent the success redirect. A
+      // save-then-navigate inside the block would lose its writes silently. The author moves the
+      // navigate after the block. Code: the existing E-TRANSACTION-CONTROL-FLOW (a reading — the
+      // SPEC names no navigate-specific code).
+      if (kind === "call" && n.callee && (n.callee as Node).kind === "ident" && (n.callee as Node).name === "navigate") {
+        report("E-TRANSACTION-CONTROL-FLOW", n,
+          "`navigate()` cannot be called inside a `transaction` block — a server-side `navigate()` ends the " +
+          "function, so it would leave the block and ROLL IT BACK (§19.10.3) while the browser is sent to the " +
+          "new page: the block's writes would be lost with no error. Move the `navigate()` after the block, so " +
+          "the block commits first: `transaction { … }` then `navigate(\"/path\")`.");
       }
 
       if (typeof kind === "string" && (LOOP_KINDS.has(kind) || kind === "switch-stmt")) {

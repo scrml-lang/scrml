@@ -811,7 +811,18 @@ ${
     // `shape`: 0 a call, 1 a `new` construction, 2 a property read, 3 a property
     // write (`args` the one written value). `root`: `window` / `document` /
     // `navigator`, or "" when the chain is rooted at the parameter `rootParam`.
-    export type HostBind:struct = { shape: int, root: string, rootParam: int, chain: string[], args: HostArg[] }
+    // s473 (allowlist lane A, §21.3.3 rule 3): `src` — the chain is rooted at an EXPORT of a `<host src=>`
+    // file (`root` names the export; rootParam -1), `not` otherwise. HostSrc: `path` the `src=` value
+    // resolved against the declaring file's directory, relative to the build's source root (it may begin
+    // with `../`); `file` / `at` where the binding stands; `targetless` the binding has no `= target`
+    // (its call is of the export of its own name, its parameters in order). The driver reads the file's
+    // exports statically (slice-m1/host-src.js) and copies it; the printer imports it as
+    // `./_scrml/host-src/<K>.js` (print.scrml hostSrcs).
+    export type HostSrc:struct  = { path: string, file: string, at: int, targetless: boolean }
+    // s473-host-allowlist-b: `guards` — the rule 8.5 run-time checks the walk (analyze.scrml hostWalk)
+    // found on the entry: "inert-receiver", "url", "attr-name" (the printer routes the target through
+    // runtime.js hostInert / hostUrl / hostSetAttrName + hostAttrValue). [] — an open entry or the src world.
+    export type HostBind:struct = { shape: int, root: string, rootParam: int, chain: string[], args: HostArg[], src: HostSrc | not, guards: string[] }
     export type HostFn:struct   = { module: string, file: string, name: string, ret: Type | not, bind: HostBind | not }
     export type Fn:struct       = { sym: Sym, params: Param[], body: Block, pure: boolean, err: Sym | not, waits: boolean, host: HostFn | not }
     // s451 (U1a): a function route inference placed on the SERVER (§12.2) — its

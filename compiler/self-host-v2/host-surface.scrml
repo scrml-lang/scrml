@@ -1,0 +1,598 @@
+// =============================================================================
+// self-host-v2 / host-surface.scrml — THE HOST SURFACE (DRAFT SPEC §21.3.3
+// rule 8 and Appendix H), the allowlist a `<host>` binding's target is walked
+// over (s473-host-allowlist-b).
+//
+// Rulings (scrml-support/user-voice-scrml.md, S473):
+//   "⭐ RULED — `<host>` rule 8 moves from a sink denylist to an allowlist" —
+//   "A binding may call or read only what the allowlist admits; everything else
+//   is refused at compile time."
+//   "⭐ RULED — S473 PA recs: host allowlist Q1–Q4, …" item 1 — "Q1: the unit is
+//   option (d), a curated surface typed by interface (SPEC Appendix H:
+//   interface · member · access · signature · safety class), with `src=` as the
+//   explicit, audited escape. Q2: WebIDL interface names are built-in scrml
+//   types, replacing user-named handles. Q3: … There is no project-local
+//   surface."
+//
+// This file MIRRORS Appendix H one-to-one, as data (H.2 interfaces, H.3
+// entries, H.4 the inert element list, H.5 dictionaries).
+// slice-m4/host-surface-appendix-h.test.js diffs the two: a row in one and not
+// the other, or a field that differs, is a failing test, not a second list.
+// There is NO project-local surface (Q3): nothing outside this file adds an
+// entry.
+//
+// ONE SOURCE OF SINK KNOWLEDGE. The executable-sink table of plain client
+// logic (url.scrml logicWriteSink / logicCallSink, E-LOGIC-EXECUTABLE-SINK,
+// #1663) is the bootstrap's one statement of which member names execute,
+// navigate or install code. The surface does not keep a second list: an entry
+// counts as admitted only when it agrees with that table (`entryConflict`) — a
+// member url.scrml calls an HTML / exec / handler write sink is never admitted
+// whatever this table says; a URL write ("nav") is admitted only as
+// `guarded(url)`; an attribute-name call ("attr") only as `guarded(attr-name)`;
+// a timer only with a callback first slot. The guard oracles themselves are
+// url.scrml's too: guarded(attr-name) is `executableAttrName` (§5.2's event-
+// handler name test + `srcdoc`), and a URL-valued attribute name is
+// `isUrlAttrName` (§5.2 rule 3's list). slice-m4/host-surface-appendix-h.test.js
+// requires every entry to be conflict-free.
+//
+// Signature notation (Appendix H.1): a read / write entry's signature is the
+// property's type; a call / construct entry's is `(name: T, …) -> R`. A slot
+// type is a scrml data type (`string`, `number`, `int`, `bool`, `T[]`,
+// `T | not`), an Appendix H interface, a union of two (`Node | string`), a
+// callback `(…) => U`, a dictionary (H.5), a string literal (`"2d"`: that
+// literal only), `inert-tag` (a string literal on H.4; the result is that
+// tag's interface) or `attr-name` (a string literal attribute name, judged by
+// guarded(attr-name)). A result may be `waiting T`.
+// =============================================================================
+${
+    import { logicWriteSink, logicCallSink, executableAttrName, isUrlAttrName } from "./url.scrml"
+
+    export type HIface:struct = { name: string, parent: string }
+    export type HEntry:struct = { id: string, iface: string, member: string, access: string, sig: string, cls: string, idl: string }
+    export type HTag:struct = { tag: string, iface: string }
+    export type HDict:struct = { name: string, keys: string[] }
+
+    fn iface(n: string, p: string) -> HIface { return { name: n, parent: p } }
+    fn entry(id: string, i: string, m: string, a: string, s: string, c: string, w: string) -> HEntry {
+        return { id: id, iface: i, member: m, access: a, sig: s, cls: c, idl: w }
+    }
+    fn tag(t: string, i: string) -> HTag { return { tag: t, iface: i } }
+
+    // ---- lookups ------------------------------------------------------------
+
+    // Is `n` an Appendix H interface (a built-in host type, rule 8.1)?
+    export fn isSurfaceIface(n: string) -> boolean {
+        for (const f of surfaceInterfaces()) {
+            if (f.name == n) return true
+        }
+        return false
+    }
+
+    export fn ifaceParent(n: string) -> string {
+        for (const f of surfaceInterfaces()) {
+            if (f.name == n) return f.parent
+        }
+        return ""
+    }
+
+    // Does `sub` inherit from `sup` (reflexive), as WebIDL states (H.2)?
+    export fn ifaceInherits(sub: string, sup: string) -> boolean {
+        let x: string = sub
+        let guard: int = 0
+        while (x != "" && guard < 32) {
+            if (x == sup) return true
+            x = ifaceParent(x)
+            guard = guard + 1
+        }
+        return false
+    }
+
+    // A DOM element type: an Appendix H interface that inherits from `Element`
+    // (rule 16 as amended — member access on one in logic stays open).
+    export fn isDomElementIface(n: string) -> boolean {
+        return isSurfaceIface(n) && ifaceInherits(n, "Element")
+    }
+
+    // The entry `(iface, member, access)`, found on `iface` or an interface it
+    // inherits from (rule 8.1); `not` — none (rule 8.3: E-HOST-TARGET-NOT-ALLOWED).
+    export fn findEntry(i: string, m: string, a: string) -> HEntry | not {
+        let x: string = i
+        let guard: int = 0
+        while (x != "" && guard < 32) {
+            for (const e of surfaceEntries()) {
+                if (e.iface == x && e.member == m && e.access == a) return e
+            }
+            x = ifaceParent(x)
+            guard = guard + 1
+        }
+        return not
+    }
+
+    // The access kinds `member` has on `i` (for a diagnostic that names what IS there).
+    export fn accessesOf(i: string, m: string) -> string[] {
+        let out: string[] = []
+        for (const a of ["read", "write", "call", "construct"]) {
+            const e: HEntry | not = findEntry(i, m, a)
+            if (e is given) out = out.concat([a])
+        }
+        return out
+    }
+
+    // ---- the signature notation (H.1) -----------------------------------------
+
+    // Split `s` at each top-level ", " (outside parentheses).
+    fn splitTop(s: string) -> string[] {
+        let out: string[] = []
+        let depth: int = 0
+        let start: int = 0
+        let i: int = 0
+        while (i < s.length) {
+            const c: string = s.charAt(i)
+            if (c == "(") depth = depth + 1
+            if (c == ")") depth = depth - 1
+            if (c == "," && depth == 0) {
+                out = out.concat([s.substring(start, i).trim()])
+                start = i + 1
+            }
+            i = i + 1
+        }
+        const last: string = s.substring(start, s.length).trim()
+        if (last != "") out = out.concat([last])
+        return out
+    }
+
+    // The index of the `)` that closes the `(` at 0.
+    fn closeParen(s: string) -> int {
+        let depth: int = 0
+        let i: int = 0
+        while (i < s.length) {
+            const c: string = s.charAt(i)
+            if (c == "(") depth = depth + 1
+            if (c == ")") {
+                depth = depth - 1
+                if (depth == 0) return i
+            }
+            i = i + 1
+        }
+        return -1
+    }
+
+    // A call / construct entry's parameters, each `name: T` or `name?: T`.
+    export fn sigParams(e: HEntry) -> string[] {
+        if (e.access == "read" || e.access == "write") return []
+        const close: int = closeParen(e.sig)
+        if (close < 0) return []
+        return splitTop(e.sig.substring(1, close))
+    }
+
+    // An entry's result: the property type of a read, `void` for a write, the
+    // `-> R` of a call / construct.
+    export fn sigResult(e: HEntry) -> string {
+        if (e.access == "read") return e.sig
+        if (e.access == "write") return "void"
+        const close: int = closeParen(e.sig)
+        if (close < 0) return "void"
+        const rest: string = e.sig.substring(close + 1, e.sig.length).trim()
+        if (rest.startsWith("->")) return rest.substring(2, rest.length).trim()
+        return "void"
+    }
+
+    // A write entry's value slot type.
+    export fn writeSlot(e: HEntry) -> string { return e.sig }
+
+    // `name: T` → `T`.
+    export fn slotType(p: string) -> string {
+        const at: int = p.indexOf(":")
+        if (at < 0) return p
+        return p.substring(at + 1, p.length).trim()
+    }
+
+    // `name?: T` is optional.
+    export fn slotOptional(p: string) -> boolean {
+        const at: int = p.indexOf(":")
+        if (at < 1) return false
+        return p.charAt(at - 1) == "?"
+    }
+
+    // A callback slot type `(…) => U`.
+    export fn isCallbackSlot(t: string) -> boolean { return t.startsWith("(") }
+
+    // A slot / result type `A | B` — its alternatives (one when there is no `|`).
+    // `T | not` is NOT split here (`not` is the optional mark, rule 13).
+    export fn slotAlternatives(t: string) -> string[] {
+        if (isCallbackSlot(t)) return [t]
+        const parts: string[] = t.split(" | ")
+        let out: string[] = []
+        for (const p of parts) {
+            if (p.trim() != "not") out = out.concat([p.trim()])
+        }
+        return out
+    }
+
+    // Does `t` admit `not` (`T | not`)?
+    export fn slotAdmitsNot(t: string) -> boolean { return t.endsWith(" | not") }
+
+    // `waiting T` → `T`.
+    export fn unWaiting(t: string) -> string {
+        if (t.startsWith("waiting ")) return t.substring(8, t.length)
+        return t
+    }
+
+    // ---- what the RUNTIME carries (lane A, s473-host-allowlist-a) -------------
+    // The run-time halves of rule 8 are lane A's (slice-m1/runtime/runtime.js):
+    // the guarded(url) / guarded(inert-receiver) checks (rule 8.5) and the brand
+    // check (rule 8.7). They are in this build since the lane merge (design §10
+    // step 6, lane A #1670 merged into lane B): print.scrml hostBindJs routes a
+    // guarded entry through rt.hostInert / hostUrl / hostSetAttrName /
+    // hostAttrValue, and an interface result decodes as `{ k: "iface" }` (the
+    // brand check). Set either to false and every entry needing it is refused BY
+    // NAME again (E-BOOTSTRAP-UNSUPPORTED), never emitted unguarded.
+    export fn runtimeGuardsBuilt() -> boolean { return true }
+    export fn brandChecksBuilt() -> boolean { return true }
+
+    // ---- classes (rule 8.5) ---------------------------------------------------
+
+    // The guards of an entry's class (`open` — none): a subset of `url`,
+    // `attr-name`, `inert-receiver`.
+    export fn entryGuards(e: HEntry) -> string[] {
+        if (!e.cls.startsWith("guarded(")) return []
+        return splitTop(e.cls.substring(8, e.cls.length - 1))
+    }
+
+    export fn hasGuard(e: HEntry, g: string) -> boolean { return entryGuards(e).indexOf(g) >= 0 }
+
+    // The H.4 inert element list: the interface of a literal tag ("" — not inert).
+    export fn inertTagIface(t: string) -> string {
+        for (const x of inertElements()) {
+            if (x.tag == t) return x.iface
+        }
+        return ""
+    }
+
+    // An H.5 dictionary's keys (`not` — no such dictionary).
+    export fn dictKeys(n: string) -> string[] | not {
+        for (const d of surfaceDicts()) {
+            if (d.name == n) return d.keys
+        }
+        return not
+    }
+
+    // guarded(attr-name), judged at compile time on a LITERAL name: "" — admitted;
+    // "exec" — an event-handler name or `srcdoc` (url.scrml executableAttrName —
+    // §5.2's test, one definition): E-HOST-TARGET-NOT-ALLOWED; "url" — a §5.2
+    // rule 3 URL-valued name (url.scrml isUrlAttrName): it takes guarded(url).
+    export fn attrNameVerdict(name: string) -> string {
+        if (executableAttrName(name)) return "exec"
+        if (isUrlAttrName(name)) return "url"
+        return ""
+    }
+
+    // ONE SOURCE (the header): does entry `e` agree with url.scrml's executable-
+    // sink table? "" — yes; otherwise why it is not admitted.
+    export fn entryConflict(e: HEntry) -> string {
+        const m: string = e.member
+        // #1674 review F1: §65.4.2 — "you cannot apply an arbitrary runtime string as a style-value";
+        // the one data-to-CSS door is the §25.7 bridge (the runtime's cssValueOf). A CSSStyleDeclaration
+        // write, or a call taking a value (setProperty), is never on the surface (H-094 removed).
+        if (e.iface == "CSSStyleDeclaration" && (e.access == "write" || (e.access == "call" && sigParams(e).length > 1))) return "§65.4.2 refuses a CSS value from data (the door is the §25.7 bridge); `" + m + "` is never on the surface"
+        if (e.access == "write") {
+            const k: string = logicWriteSink(m)
+            if (k == "html" || k == "exec" || k == "on") return "url.scrml's sink table marks a write of `" + m + "` as an executable sink (" + k + ")"
+            if (k == "nav" && !hasGuard(e, "url")) return "url.scrml's sink table marks a write of `" + m + "` as a navigation / load (nav), which the surface admits only as guarded(url)"
+            return ""
+        }
+        const k: string = logicCallSink(m)
+        if (e.access == "read") {
+            if (k == "exec") return "url.scrml's sink table marks `" + m + "` as source-text execution; it is never read as a value"
+            return ""
+        }
+        if (k == "exec" || k == "html" || k == "execcmd" || k == "attrnode" || k == "nav" || k == "open") return "url.scrml's sink table marks a call of `" + m + "` as an executable sink (" + k + ")"
+        if (k == "timer") {
+            const ps: string[] = sigParams(e)
+            if (ps.length == 0 || !isCallbackSlot(slotType(ps[0]))) return "url.scrml's sink table marks `" + m + "` as a timer, admitted only with a callback first slot"
+            return ""
+        }
+        if (k == "attr" && !hasGuard(e, "attr-name")) return "url.scrml's sink table marks `" + m + "` as an attribute-name call, admitted only as guarded(attr-name)"
+        return ""
+    }
+
+    // ---- THE DATA (Appendix H, one-to-one) ------------------------------------
+    export fn surfaceInterfaces() -> HIface[] {
+        return [
+            iface("EventTarget", ""),
+            iface("Window", "EventTarget"),
+            iface("Node", "EventTarget"),
+            iface("Document", "Node"),
+            iface("CharacterData", "Node"),
+            iface("Text", "CharacterData"),
+            iface("Element", "Node"),
+            iface("HTMLElement", "Element"),
+            iface("HTMLInputElement", "HTMLElement"),
+            iface("HTMLMediaElement", "HTMLElement"),
+            iface("HTMLVideoElement", "HTMLMediaElement"),
+            iface("HTMLAudioElement", "HTMLMediaElement"),
+            iface("HTMLCanvasElement", "HTMLElement"),
+            iface("HTMLImageElement", "HTMLElement"),
+            iface("HTMLAnchorElement", "HTMLElement"),
+            iface("Navigator", ""),
+            iface("Clipboard", "EventTarget"),
+            iface("Performance", "EventTarget"),
+            iface("Crypto", ""),
+            iface("Location", ""),
+            iface("Event", ""),
+            iface("UIEvent", "Event"),
+            iface("MouseEvent", "UIEvent"),
+            iface("KeyboardEvent", "UIEvent"),
+            iface("DOMTokenList", ""),
+            iface("CSSStyleDeclaration", ""),
+            iface("CanvasRenderingContext2D", ""),
+            iface("TextMetrics", ""),
+            iface("IntersectionObserver", ""),
+            iface("IntersectionObserverEntry", ""),
+            iface("ResizeObserver", ""),
+            iface("ResizeObserverEntry", ""),
+            iface("MediaQueryList", "EventTarget"),
+            iface("DOMRectReadOnly", ""),
+            iface("DOMRect", "DOMRectReadOnly"),
+        ]
+    }
+
+    export fn surfaceEntries() -> HEntry[] {
+        return [
+            entry("H-001", "Window", "document", "read", "Document", "open", "HTML Window"),
+            entry("H-002", "Window", "navigator", "read", "Navigator", "open", "HTML Window"),
+            entry("H-003", "Window", "performance", "read", "Performance", "open", "HR-Time WindowOrWorkerGlobalScope"),
+            entry("H-004", "Window", "crypto", "read", "Crypto", "open", "WebCrypto WindowOrWorkerGlobalScope"),
+            entry("H-005", "Window", "location", "read", "Location", "open", "HTML Window"),
+            entry("H-006", "Window", "innerWidth", "read", "int", "open", "CSSOM View Window"),
+            entry("H-007", "Window", "innerHeight", "read", "int", "open", "CSSOM View Window"),
+            entry("H-008", "Window", "devicePixelRatio", "read", "number", "open", "CSSOM View Window"),
+            entry("H-009", "Window", "scrollX", "read", "number", "open", "CSSOM View Window"),
+            entry("H-010", "Window", "scrollY", "read", "number", "open", "CSSOM View Window"),
+            entry("H-011", "Window", "matchMedia", "call", "(query: string) -> MediaQueryList", "open", "CSSOM View Window"),
+            entry("H-012", "Window", "requestAnimationFrame", "call", "(callback: (time: number) => void) -> int", "open", "HTML AnimationFrameProvider"),
+            entry("H-013", "Window", "cancelAnimationFrame", "call", "(handle: int) -> void", "open", "HTML AnimationFrameProvider"),
+            entry("H-014", "Window", "setTimeout", "call", "(handler: () => void, timeout: int) -> int", "open", "HTML WindowOrWorkerGlobalScope"),
+            entry("H-015", "Window", "clearTimeout", "call", "(id: int) -> void", "open", "HTML WindowOrWorkerGlobalScope"),
+            entry("H-016", "Window", "scrollTo", "call", "(x: number, y: number) -> void", "open", "CSSOM View Window"),
+            entry("H-017", "Window", "IntersectionObserver", "construct", "(callback: (entries: IntersectionObserverEntry[]) => void, options?: IntersectionObserverInit) -> IntersectionObserver", "open", "IntersectionObserver"),
+            entry("H-018", "Window", "ResizeObserver", "construct", "(callback: (entries: ResizeObserverEntry[]) => void) -> ResizeObserver", "open", "ResizeObserver"),
+            entry("H-019", "Document", "title", "read", "string", "open", "HTML Document"),
+            entry("H-020", "Document", "title", "write", "string", "open", "HTML Document"),
+            entry("H-021", "Document", "body", "read", "HTMLElement | not", "open", "HTML Document"),
+            entry("H-022", "Document", "documentElement", "read", "Element | not", "open", "DOM Document"),
+            entry("H-023", "Document", "activeElement", "read", "Element | not", "open", "HTML DocumentOrShadowRoot"),
+            entry("H-024", "Document", "visibilityState", "read", "string", "open", "HTML Document"),
+            entry("H-025", "Document", "hidden", "read", "bool", "open", "HTML Document"),
+            entry("H-026", "Document", "getElementById", "call", "(elementId: string) -> Element | not", "open", "DOM NonElementParentNode"),
+            entry("H-027", "Document", "querySelector", "call", "(selectors: string) -> Element | not", "open", "DOM ParentNode"),
+            entry("H-028", "Document", "createElement", "call", "(localName: inert-tag) -> HTMLElement", "open", "DOM Document"),
+            entry("H-029", "Document", "createTextNode", "call", "(data: string) -> Text", "open", "DOM Document"),
+            entry("H-030", "Navigator", "clipboard", "read", "Clipboard", "open", "Clipboard API Navigator"),
+            entry("H-031", "Navigator", "language", "read", "string", "open", "HTML NavigatorLanguage"),
+            entry("H-032", "Navigator", "languages", "read", "string[]", "open", "HTML NavigatorLanguage"),
+            entry("H-033", "Navigator", "onLine", "read", "bool", "open", "HTML NavigatorOnLine"),
+            entry("H-034", "Navigator", "userAgent", "read", "string", "open", "HTML NavigatorID"),
+            entry("H-035", "Navigator", "vibrate", "call", "(pattern: int) -> bool", "open", "Vibration Navigator"),
+            entry("H-036", "Clipboard", "writeText", "call", "(data: string) -> waiting void", "open", "Clipboard API Clipboard"),
+            entry("H-037", "Clipboard", "readText", "call", "() -> waiting string", "open", "Clipboard API Clipboard"),
+            entry("H-038", "Performance", "now", "call", "() -> number", "open", "HR-Time Performance"),
+            entry("H-039", "Crypto", "randomUUID", "call", "() -> string", "open", "WebCrypto Crypto"),
+            entry("H-040", "Location", "href", "read", "string", "open", "HTML Location"),
+            entry("H-041", "Location", "pathname", "read", "string", "open", "HTML Location"),
+            entry("H-042", "Location", "search", "read", "string", "open", "HTML Location"),
+            entry("H-043", "Location", "hash", "read", "string", "open", "HTML Location"),
+            entry("H-044", "Location", "origin", "read", "string", "open", "HTML Location"),
+            entry("H-045", "EventTarget", "addEventListener", "call", "(type: string, callback: (event: Event) => void) -> void", "open", "DOM EventTarget"),
+            entry("H-046", "EventTarget", "removeEventListener", "call", "(type: string, callback: (event: Event) => void) -> void", "open", "DOM EventTarget"),
+            entry("H-047", "Event", "type", "read", "string", "open", "DOM Event"),
+            entry("H-048", "Event", "timeStamp", "read", "number", "open", "DOM Event"),
+            entry("H-049", "Event", "target", "read", "EventTarget | not", "open", "DOM Event"),
+            entry("H-050", "Event", "preventDefault", "call", "() -> void", "open", "DOM Event"),
+            entry("H-051", "Event", "stopPropagation", "call", "() -> void", "open", "DOM Event"),
+            entry("H-052", "MouseEvent", "clientX", "read", "number", "open", "UI Events MouseEvent"),
+            entry("H-053", "MouseEvent", "clientY", "read", "number", "open", "UI Events MouseEvent"),
+            entry("H-054", "MouseEvent", "button", "read", "int", "open", "UI Events MouseEvent"),
+            entry("H-055", "KeyboardEvent", "key", "read", "string", "open", "UI Events KeyboardEvent"),
+            entry("H-056", "KeyboardEvent", "code", "read", "string", "open", "UI Events KeyboardEvent"),
+            entry("H-057", "KeyboardEvent", "shiftKey", "read", "bool", "open", "UI Events KeyboardEvent"),
+            entry("H-058", "KeyboardEvent", "ctrlKey", "read", "bool", "open", "UI Events KeyboardEvent"),
+            entry("H-059", "KeyboardEvent", "altKey", "read", "bool", "open", "UI Events KeyboardEvent"),
+            entry("H-060", "KeyboardEvent", "metaKey", "read", "bool", "open", "UI Events KeyboardEvent"),
+            entry("H-061", "Node", "textContent", "read", "string | not", "open", "DOM Node"),
+            entry("H-062", "Node", "textContent", "write", "string", "guarded(inert-receiver)", "DOM Node"),
+            entry("H-063", "Node", "parentElement", "read", "Element | not", "open", "DOM Node"),
+            entry("H-064", "Node", "contains", "call", "(other: Node) -> bool", "open", "DOM Node"),
+            entry("H-065", "Element", "id", "read", "string", "open", "DOM Element"),
+            entry("H-066", "Element", "id", "write", "string", "guarded(inert-receiver)", "DOM Element"),
+            entry("H-067", "Element", "className", "read", "string", "open", "DOM Element"),
+            entry("H-068", "Element", "localName", "read", "string", "open", "DOM Element"),
+            entry("H-069", "Element", "classList", "read", "DOMTokenList", "guarded(inert-receiver)", "DOM Element"),
+            entry("H-070", "Element", "getAttribute", "call", "(qualifiedName: string) -> string | not", "open", "DOM Element"),
+            entry("H-071", "Element", "hasAttribute", "call", "(qualifiedName: string) -> bool", "open", "DOM Element"),
+            entry("H-072", "Element", "setAttribute", "call", "(qualifiedName: attr-name, value: string) -> void", "guarded(attr-name, inert-receiver)", "DOM Element"),
+            entry("H-073", "Element", "removeAttribute", "call", "(qualifiedName: attr-name) -> void", "guarded(attr-name, inert-receiver)", "DOM Element"),
+            entry("H-074", "Element", "append", "call", "(node: Node | string) -> void", "guarded(inert-receiver)", "DOM ParentNode"),
+            entry("H-075", "Element", "prepend", "call", "(node: Node | string) -> void", "guarded(inert-receiver)", "DOM ParentNode"),
+            entry("H-076", "Element", "replaceChildren", "call", "(node: Node | string) -> void", "guarded(inert-receiver)", "DOM ParentNode"),
+            entry("H-077", "Element", "remove", "call", "() -> void", "guarded(inert-receiver)", "DOM ChildNode"),
+            entry("H-078", "Element", "querySelector", "call", "(selectors: string) -> Element | not", "open", "DOM ParentNode"),
+            entry("H-079", "Element", "getBoundingClientRect", "call", "() -> DOMRect", "open", "CSSOM View Element"),
+            entry("H-080", "Element", "scrollIntoView", "call", "() -> void", "open", "CSSOM View Element"),
+            entry("H-081", "HTMLElement", "hidden", "read", "bool", "open", "HTML HTMLElement"),
+            entry("H-082", "HTMLElement", "hidden", "write", "bool", "guarded(inert-receiver)", "HTML HTMLElement"),
+            entry("H-083", "HTMLElement", "title", "read", "string", "open", "HTML HTMLElement"),
+            entry("H-084", "HTMLElement", "title", "write", "string", "guarded(inert-receiver)", "HTML HTMLElement"),
+            entry("H-085", "HTMLElement", "offsetWidth", "read", "int", "open", "CSSOM View HTMLElement"),
+            entry("H-086", "HTMLElement", "offsetHeight", "read", "int", "open", "CSSOM View HTMLElement"),
+            entry("H-087", "HTMLElement", "style", "read", "CSSStyleDeclaration", "guarded(inert-receiver)", "CSSOM ElementCSSInlineStyle"),
+            entry("H-088", "HTMLElement", "focus", "call", "() -> void", "open", "HTML HTMLOrSVGElement"),
+            entry("H-089", "HTMLElement", "blur", "call", "() -> void", "open", "HTML HTMLOrSVGElement"),
+            entry("H-090", "DOMTokenList", "add", "call", "(token: string) -> void", "open", "DOM DOMTokenList"),
+            entry("H-091", "DOMTokenList", "remove", "call", "(token: string) -> void", "open", "DOM DOMTokenList"),
+            entry("H-092", "DOMTokenList", "toggle", "call", "(token: string) -> bool", "open", "DOM DOMTokenList"),
+            entry("H-093", "DOMTokenList", "contains", "call", "(token: string) -> bool", "open", "DOM DOMTokenList"),
+            entry("H-095", "CSSStyleDeclaration", "removeProperty", "call", "(property: string) -> string", "open", "CSSOM CSSStyleDeclaration"),
+            entry("H-096", "HTMLInputElement", "value", "read", "string", "open", "HTML HTMLInputElement"),
+            entry("H-097", "HTMLInputElement", "value", "write", "string", "guarded(inert-receiver)", "HTML HTMLInputElement"),
+            entry("H-098", "HTMLInputElement", "checked", "read", "bool", "open", "HTML HTMLInputElement"),
+            entry("H-099", "HTMLInputElement", "checked", "write", "bool", "open", "HTML HTMLInputElement"),
+            entry("H-100", "HTMLInputElement", "select", "call", "() -> void", "open", "HTML HTMLInputElement"),
+            entry("H-101", "HTMLInputElement", "setSelectionRange", "call", "(start: int, end: int) -> void", "open", "HTML HTMLInputElement"),
+            entry("H-102", "HTMLMediaElement", "paused", "read", "bool", "open", "HTML HTMLMediaElement"),
+            entry("H-103", "HTMLMediaElement", "duration", "read", "number", "open", "HTML HTMLMediaElement"),
+            entry("H-104", "HTMLMediaElement", "currentTime", "read", "number", "open", "HTML HTMLMediaElement"),
+            entry("H-105", "HTMLMediaElement", "currentTime", "write", "number", "open", "HTML HTMLMediaElement"),
+            entry("H-106", "HTMLMediaElement", "volume", "read", "number", "open", "HTML HTMLMediaElement"),
+            entry("H-107", "HTMLMediaElement", "volume", "write", "number", "open", "HTML HTMLMediaElement"),
+            entry("H-108", "HTMLMediaElement", "muted", "read", "bool", "open", "HTML HTMLMediaElement"),
+            entry("H-109", "HTMLMediaElement", "muted", "write", "bool", "open", "HTML HTMLMediaElement"),
+            entry("H-110", "HTMLMediaElement", "play", "call", "() -> waiting void", "open", "HTML HTMLMediaElement"),
+            entry("H-111", "HTMLMediaElement", "pause", "call", "() -> void", "open", "HTML HTMLMediaElement"),
+            entry("H-112", "HTMLCanvasElement", "width", "read", "int", "open", "HTML HTMLCanvasElement"),
+            entry("H-113", "HTMLCanvasElement", "width", "write", "int", "guarded(inert-receiver)", "HTML HTMLCanvasElement"),
+            entry("H-114", "HTMLCanvasElement", "height", "read", "int", "open", "HTML HTMLCanvasElement"),
+            entry("H-115", "HTMLCanvasElement", "height", "write", "int", "guarded(inert-receiver)", "HTML HTMLCanvasElement"),
+            entry("H-116", "HTMLCanvasElement", "getContext", "call", "(contextId: \"2d\") -> CanvasRenderingContext2D | not", "open", "HTML HTMLCanvasElement"),
+            entry("H-117", "CanvasRenderingContext2D", "fillStyle", "write", "string", "open", "HTML CanvasFillStrokeStyles"),
+            entry("H-118", "CanvasRenderingContext2D", "strokeStyle", "write", "string", "open", "HTML CanvasFillStrokeStyles"),
+            entry("H-119", "CanvasRenderingContext2D", "lineWidth", "write", "number", "open", "HTML CanvasPathDrawingStyles"),
+            entry("H-120", "CanvasRenderingContext2D", "font", "write", "string", "open", "HTML CanvasTextDrawingStyles"),
+            entry("H-121", "CanvasRenderingContext2D", "fillRect", "call", "(x: number, y: number, w: number, h: number) -> void", "open", "HTML CanvasRect"),
+            entry("H-122", "CanvasRenderingContext2D", "clearRect", "call", "(x: number, y: number, w: number, h: number) -> void", "open", "HTML CanvasRect"),
+            entry("H-123", "CanvasRenderingContext2D", "strokeRect", "call", "(x: number, y: number, w: number, h: number) -> void", "open", "HTML CanvasRect"),
+            entry("H-124", "CanvasRenderingContext2D", "beginPath", "call", "() -> void", "open", "HTML CanvasDrawPath"),
+            entry("H-125", "CanvasRenderingContext2D", "moveTo", "call", "(x: number, y: number) -> void", "open", "HTML CanvasPath"),
+            entry("H-126", "CanvasRenderingContext2D", "lineTo", "call", "(x: number, y: number) -> void", "open", "HTML CanvasPath"),
+            entry("H-127", "CanvasRenderingContext2D", "arc", "call", "(x: number, y: number, radius: number, startAngle: number, endAngle: number) -> void", "open", "HTML CanvasPath"),
+            entry("H-128", "CanvasRenderingContext2D", "stroke", "call", "() -> void", "open", "HTML CanvasDrawPath"),
+            entry("H-129", "CanvasRenderingContext2D", "fill", "call", "() -> void", "open", "HTML CanvasDrawPath"),
+            entry("H-130", "CanvasRenderingContext2D", "fillText", "call", "(text: string, x: number, y: number) -> void", "open", "HTML CanvasText"),
+            entry("H-131", "CanvasRenderingContext2D", "measureText", "call", "(text: string) -> TextMetrics", "open", "HTML CanvasText"),
+            entry("H-132", "CanvasRenderingContext2D", "save", "call", "() -> void", "open", "HTML CanvasState"),
+            entry("H-133", "CanvasRenderingContext2D", "restore", "call", "() -> void", "open", "HTML CanvasState"),
+            entry("H-134", "CanvasRenderingContext2D", "translate", "call", "(x: number, y: number) -> void", "open", "HTML CanvasTransform"),
+            entry("H-135", "CanvasRenderingContext2D", "scale", "call", "(x: number, y: number) -> void", "open", "HTML CanvasTransform"),
+            entry("H-136", "CanvasRenderingContext2D", "rotate", "call", "(angle: number) -> void", "open", "HTML CanvasTransform"),
+            entry("H-137", "CanvasRenderingContext2D", "drawImage", "call", "(image: HTMLImageElement | HTMLCanvasElement, dx: number, dy: number) -> void", "open", "HTML CanvasDrawImage"),
+            entry("H-138", "TextMetrics", "width", "read", "number", "open", "HTML TextMetrics"),
+            entry("H-139", "HTMLImageElement", "src", "write", "string", "guarded(url, inert-receiver)", "HTML HTMLImageElement"),
+            entry("H-140", "HTMLImageElement", "naturalWidth", "read", "int", "open", "HTML HTMLImageElement"),
+            entry("H-141", "HTMLImageElement", "naturalHeight", "read", "int", "open", "HTML HTMLImageElement"),
+            entry("H-142", "HTMLImageElement", "complete", "read", "bool", "open", "HTML HTMLImageElement"),
+            entry("H-143", "HTMLAnchorElement", "href", "write", "string", "guarded(url, inert-receiver)", "HTML HTMLHyperlinkElementUtils"),
+            entry("H-144", "IntersectionObserver", "observe", "call", "(target: Element) -> void", "open", "IntersectionObserver"),
+            entry("H-145", "IntersectionObserver", "unobserve", "call", "(target: Element) -> void", "open", "IntersectionObserver"),
+            entry("H-146", "IntersectionObserver", "disconnect", "call", "() -> void", "open", "IntersectionObserver"),
+            entry("H-147", "IntersectionObserverEntry", "isIntersecting", "read", "bool", "open", "IntersectionObserver"),
+            entry("H-148", "IntersectionObserverEntry", "intersectionRatio", "read", "number", "open", "IntersectionObserver"),
+            entry("H-149", "IntersectionObserverEntry", "target", "read", "Element", "open", "IntersectionObserver"),
+            entry("H-150", "IntersectionObserverEntry", "boundingClientRect", "read", "DOMRectReadOnly", "open", "IntersectionObserver"),
+            entry("H-151", "ResizeObserver", "observe", "call", "(target: Element) -> void", "open", "ResizeObserver"),
+            entry("H-152", "ResizeObserver", "unobserve", "call", "(target: Element) -> void", "open", "ResizeObserver"),
+            entry("H-153", "ResizeObserver", "disconnect", "call", "() -> void", "open", "ResizeObserver"),
+            entry("H-154", "ResizeObserverEntry", "target", "read", "Element", "open", "ResizeObserver"),
+            entry("H-155", "ResizeObserverEntry", "contentRect", "read", "DOMRectReadOnly", "open", "ResizeObserver"),
+            entry("H-156", "MediaQueryList", "matches", "read", "bool", "open", "CSSOM View MediaQueryList"),
+            entry("H-157", "MediaQueryList", "media", "read", "string", "open", "CSSOM View MediaQueryList"),
+            entry("H-158", "DOMRectReadOnly", "x", "read", "number", "open", "Geometry DOMRectReadOnly"),
+            entry("H-159", "DOMRectReadOnly", "y", "read", "number", "open", "Geometry DOMRectReadOnly"),
+            entry("H-160", "DOMRectReadOnly", "width", "read", "number", "open", "Geometry DOMRectReadOnly"),
+            entry("H-161", "DOMRectReadOnly", "height", "read", "number", "open", "Geometry DOMRectReadOnly"),
+            entry("H-162", "DOMRectReadOnly", "top", "read", "number", "open", "Geometry DOMRectReadOnly"),
+            entry("H-163", "DOMRectReadOnly", "right", "read", "number", "open", "Geometry DOMRectReadOnly"),
+            entry("H-164", "DOMRectReadOnly", "bottom", "read", "number", "open", "Geometry DOMRectReadOnly"),
+            entry("H-165", "DOMRectReadOnly", "left", "read", "number", "open", "Geometry DOMRectReadOnly"),
+        ]
+    }
+
+    export fn inertElements() -> HTag[] {
+        return [
+            tag("a", "HTMLAnchorElement"),
+            tag("abbr", "HTMLElement"),
+            tag("article", "HTMLElement"),
+            tag("aside", "HTMLElement"),
+            tag("audio", "HTMLAudioElement"),
+            tag("b", "HTMLElement"),
+            tag("blockquote", "HTMLElement"),
+            tag("br", "HTMLElement"),
+            tag("button", "HTMLElement"),
+            tag("canvas", "HTMLCanvasElement"),
+            tag("caption", "HTMLElement"),
+            tag("cite", "HTMLElement"),
+            tag("code", "HTMLElement"),
+            tag("col", "HTMLElement"),
+            tag("colgroup", "HTMLElement"),
+            tag("dd", "HTMLElement"),
+            tag("del", "HTMLElement"),
+            tag("details", "HTMLElement"),
+            tag("dfn", "HTMLElement"),
+            tag("div", "HTMLElement"),
+            tag("dl", "HTMLElement"),
+            tag("dt", "HTMLElement"),
+            tag("em", "HTMLElement"),
+            tag("fieldset", "HTMLElement"),
+            tag("figcaption", "HTMLElement"),
+            tag("figure", "HTMLElement"),
+            tag("footer", "HTMLElement"),
+            tag("h1", "HTMLElement"),
+            tag("h2", "HTMLElement"),
+            tag("h3", "HTMLElement"),
+            tag("h4", "HTMLElement"),
+            tag("h5", "HTMLElement"),
+            tag("h6", "HTMLElement"),
+            tag("header", "HTMLElement"),
+            tag("hr", "HTMLElement"),
+            tag("i", "HTMLElement"),
+            tag("img", "HTMLImageElement"),
+            tag("input", "HTMLInputElement"),
+            tag("ins", "HTMLElement"),
+            tag("kbd", "HTMLElement"),
+            tag("label", "HTMLElement"),
+            tag("legend", "HTMLElement"),
+            tag("li", "HTMLElement"),
+            tag("main", "HTMLElement"),
+            tag("mark", "HTMLElement"),
+            tag("meter", "HTMLElement"),
+            tag("nav", "HTMLElement"),
+            tag("ol", "HTMLElement"),
+            tag("optgroup", "HTMLElement"),
+            tag("option", "HTMLElement"),
+            tag("output", "HTMLElement"),
+            tag("p", "HTMLElement"),
+            tag("pre", "HTMLElement"),
+            tag("progress", "HTMLElement"),
+            tag("q", "HTMLElement"),
+            tag("s", "HTMLElement"),
+            tag("samp", "HTMLElement"),
+            tag("section", "HTMLElement"),
+            tag("select", "HTMLElement"),
+            tag("small", "HTMLElement"),
+            tag("span", "HTMLElement"),
+            tag("strong", "HTMLElement"),
+            tag("sub", "HTMLElement"),
+            tag("summary", "HTMLElement"),
+            tag("sup", "HTMLElement"),
+            tag("table", "HTMLElement"),
+            tag("tbody", "HTMLElement"),
+            tag("td", "HTMLElement"),
+            tag("textarea", "HTMLElement"),
+            tag("tfoot", "HTMLElement"),
+            tag("th", "HTMLElement"),
+            tag("thead", "HTMLElement"),
+            tag("time", "HTMLElement"),
+            tag("tr", "HTMLElement"),
+            tag("u", "HTMLElement"),
+            tag("ul", "HTMLElement"),
+            tag("var", "HTMLElement"),
+            tag("video", "HTMLVideoElement"),
+            tag("wbr", "HTMLElement"),
+        ]
+    }
+
+    export fn surfaceDicts() -> HDict[] {
+        return [
+            { name: "IntersectionObserverInit", keys: ["rootMargin?: string", "threshold?: number"] },
+        ]
+    }
+}
