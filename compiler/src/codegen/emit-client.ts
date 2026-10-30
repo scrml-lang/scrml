@@ -15,6 +15,7 @@ import { asyncCombinatorHelperBlock } from "./async-combinators.ts";
 import { buildFunctionBodyRegistry, iterableHasReactiveRefs, forBodyLiftsMarkup, collectMapVarNames, fileHasMapUsage, collectRequestBodyCells, collectRequestIds, collectStructuralDeclNames, collectDerivedVarNames, requestDepReadLines, type RequestBodyCell } from "./reactive-deps.ts";
 import { setCurrentFileRequestIds } from "./emit-expr.ts";
 import { CGError } from "./errors.ts";
+import { NAV_REQUEST_HEADER, clientFollowNavHelperLines } from "./server-navigate.ts";
 import { escapeRegex, maskStringLiteralSpans } from "./utils.ts";
 import { rewriteCodeSegments, findObjectShorthandRegions } from "./code-segments.ts";
 import { renameUserFnRefsScoped } from "./fn-name-rename.ts";
@@ -3169,10 +3170,12 @@ function generateClientJsImpl(ctx: CompileContext): string {
       // for the fresh X-CSRF-Token. Single-shot retry — if the second
       // attempt also 403s, it's a real mismatch (stale token, actual CSRF
       // attempt) and propagates to the caller.
+      // §20.1 (S473) — ask for a server-side navigate() as a header, not a 302 (server-navigate.ts).
+      const _navReqHeader = ctx.serverNavigateOrigins != null ? `, "${NAV_REQUEST_HEADER}": "1"` : "";
       lines.push("async function _scrml_fetch_with_csrf_retry(path, method, body) {");
       lines.push("  let _scrml_resp = await _scrml_g.fetch(path, {");
       lines.push("    method,");
-      lines.push('    headers: { "Content-Type": "application/json", "X-CSRF-Token": _scrml_get_csrf_token() },');
+      lines.push(`    headers: { "Content-Type": "application/json", "X-CSRF-Token": _scrml_get_csrf_token()${_navReqHeader} },`);
       lines.push("    body,");
       // #1664 fix round 1 (MED-1) — tag a network failure at its source (emit-functions.ts).
       lines.push(`  })${FETCH_NETWORK_FAILURE_TAG};`);
@@ -3180,7 +3183,7 @@ function generateClientJsImpl(ctx: CompileContext): string {
       if (_csrfMetaPresent) lines.push("    _scrml_csrf_sync_meta_from_cookie();");
       lines.push("    _scrml_resp = await _scrml_g.fetch(path, {");
       lines.push("      method,");
-      lines.push('      headers: { "Content-Type": "application/json", "X-CSRF-Token": _scrml_get_csrf_token() },');
+      lines.push(`      headers: { "Content-Type": "application/json", "X-CSRF-Token": _scrml_get_csrf_token()${_navReqHeader} },`);
       lines.push("      body,");
       lines.push(`    })${FETCH_NETWORK_FAILURE_TAG};`);
       lines.push("  }");
@@ -3188,6 +3191,11 @@ function generateClientJsImpl(ctx: CompileContext): string {
       lines.push("}");
       lines.push("");
     }
+  }
+
+  // §20.1 (S473) — the fetch stubs below follow a server function that ended with navigate().
+  if (ctx.serverNavigateOrigins != null) {
+    for (const l of clientFollowNavHelperLines(ctx.serverNavigateOrigins)) lines.push(l);
   }
 
   // Emit fetch stubs, CPS wrappers, and client-boundary function bodies

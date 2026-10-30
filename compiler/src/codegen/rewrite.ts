@@ -26,6 +26,7 @@ import {
   type ProtectedColumns,
 } from "./protect-egress.ts";
 import { sqlSkeleton } from "./protect-flow.ts";
+import { serverNavigateCall, navigateFixedOriginOfText } from "./server-navigate.ts";
 import { sqlHoldsOneStatement, refuseMultipleStatements, judgeDriverCallDetail, refusedDriverCallExpr, SQL_TEXT_NOT_READ_MESSAGE, recordProgramStatementRefusal } from "./sql-one-statement-guard.ts";
 // §39.4 boolean-column decode coercion — a `boolean`-declared column crosses the
 // `?{}` SELECT boundary as SQLite INTEGER 1/0; resolve the boolean OUTPUT columns
@@ -770,11 +771,43 @@ function lowerSqlBareSite(sqlContent: string, across: boolean, dbVar: string): s
  * result, `.Home :> navigate("/x")`) soft-navs instead of full-reloading
  * (navigate-wave1b divergence #4). An explicit `.Hard`/`.Soft` modifier is
  * honored + stripped (never forwarded as a runtime arg). The SERVER pipeline
- * (`soft` false) keeps the hard `_scrml_navigate(path)` (a server redirect).
+ * (`soft` false) lowers to `_scrml_server_navigate(path, origin)` — the §20.1 302 that ends
+ * the server function (S473).
  */
-export function rewriteNavigateCalls(expr: string, soft = false): string {
+export function rewriteNavigateCalls(expr: string, soft = false, errors?: any[]): string {
   if (!expr || typeof expr !== "string") return expr;
-  if (!soft) return expr.replace(/\bnavigate\s*\(/g, '_scrml_navigate(');
+  // SERVER (S473, §20.1): every variant is the hard navigation that ends the server function —
+  // `_scrml_server_navigate(path, origin)` (server-navigate.ts), the `.Hard`/`.Soft` modifier
+  // stripped (it used to be forwarded verbatim: `_scrml_navigate("/x", .Hard)` is not JS) and
+  // the literal origin passed for the open-redirect guard. Same per-call balance-parse as the
+  // client arm below.
+  if (!soft) {
+    let sOut = "";
+    let sLast = 0;
+    for (const site of _navigateCallSites(expr)) {
+      if (site.start < sLast) continue; // inside a call already lowered
+      const parsed = _navBalanceArgs(expr, site.openIdx);
+      if (!parsed) continue;
+      const args = parsed.args.filter((a) => {
+        const norm = a.replace(/\s+/g, "");
+        return norm !== ".Hard" && norm !== ".Soft";
+      });
+      const pathText = (args[0] ?? "").trim();
+      if (pathText === "" && errors) {
+        // §20.1 — no destination. The type system fires this for a structured call; a call that
+        // reaches this string lowering is reported here rather than silently doing nothing.
+        errors.push(new CGError(
+          "E-NAV-NO-PATH",
+          "E-NAV-NO-PATH: `navigate(...)` requires a path argument (§20.1). The first argument is the destination URL; " +
+          "`.Hard` / `.Soft` is an OPTIONAL second-position navigation-type modifier, not a path. Write `navigate(\"/path\")`.",
+          { start: 0, end: 0 },
+        ));
+      }
+      sOut += expr.slice(sLast, site.start) + (pathText === "" ? "(void 0)" : serverNavigateCall(pathText, navigateFixedOriginOfText(pathText)));
+      sLast = parsed.closeIdx + 1;
+    }
+    return sOut + expr.slice(sLast);
+  }
   // CLIENT: lower EACH navigate() call INDEPENDENTLY. A regex `([\s\S]*?)` for the
   // `.Hard`/`.Soft` modifier can span an intervening navigate() call (two calls in
   // one expression — e.g. a `match` value-arm — would cross-contaminate: the plain
@@ -782,11 +815,9 @@ export function rewriteNavigateCalls(expr: string, soft = false): string {
   // runs). So balance-parse each call's args and inspect only ITS last arg.
   let out = "";
   let last = 0;
-  const re = /\bnavigate\s*\(/g;
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(expr)) !== null) {
-    const openIdx = m.index + m[0].length - 1; // the '('
-    const parsed = _navBalanceArgs(expr, openIdx);
+  for (const site of _navigateCallSites(expr)) {
+    if (site.start < last) continue; // inside a call already lowered (resume AFTER it)
+    const parsed = _navBalanceArgs(expr, site.openIdx);
     if (!parsed) continue; // unbalanced — leave the text as-is
     const argc = parsed.args.length;
     const lastArg = argc > 0 ? parsed.args[argc - 1].trim() : "";
@@ -803,12 +834,64 @@ export function rewriteNavigateCalls(expr: string, soft = false): string {
     let keep = parsed.args;
     if (lastArgNorm === ".Hard") { fn = "_scrml_navigate"; keep = parsed.args.slice(0, -1); }
     else if (lastArgNorm === ".Soft") { fn = "_scrml_navigate_soft"; keep = parsed.args.slice(0, -1); }
-    out += expr.slice(last, m.index) + fn + "(" + keep.join(",") + ")";
+    out += expr.slice(last, site.start) + fn + "(" + keep.join(",") + ")";
     last = parsed.closeIdx + 1;
-    re.lastIndex = parsed.closeIdx + 1; // resume AFTER this call (never mid-args)
   }
   out += expr.slice(last);
   return out;
+}
+
+/**
+ * The `navigate(` CALL sites of `expr`: `start` is the index of the `navigate` word, `openIdx`
+ * that of its `(`. Only a bare `navigate` identifier in code counts — not a member call
+ * (`router.navigate(`), not a longer name (`$navigate(`, `_scrml_navigate(`), and nothing inside
+ * a string, a template literal's text (its `${…}` code IS scanned) or a comment. (S473 review F7:
+ * the former `\bnavigate\s*\(` regex rewrote all of those.)
+ */
+function _navigateCallSites(expr: string): Array<{ start: number; openIdx: number }> {
+  const sites: Array<{ start: number; openIdx: number }> = [];
+  // Frames: "code" (with a brace depth, for a template's `${ }`) or "tpl" (template text).
+  const frames: Array<{ kind: "code" | "tpl"; depth: number }> = [{ kind: "code", depth: 0 }];
+  const isIdent = (c: string | undefined) => c !== undefined && /[\w$]/.test(c);
+  let i = 0;
+  while (i < expr.length) {
+    const top = frames[frames.length - 1];
+    const c = expr[i];
+    if (top.kind === "tpl") {
+      if (c === "\\") { i += 2; continue; }
+      if (c === "`") { frames.pop(); i++; continue; }
+      if (c === "$" && expr[i + 1] === "{") { frames.push({ kind: "code", depth: 0 }); i += 2; continue; }
+      i++;
+      continue;
+    }
+    if (c === '"' || c === "'") {
+      i++;
+      while (i < expr.length && expr[i] !== c) i += expr[i] === "\\" ? 2 : 1;
+      i++;
+      continue;
+    }
+    if (c === "`") { frames.push({ kind: "tpl", depth: 0 }); i++; continue; }
+    if (c === "/" && expr[i + 1] === "/") { const nl = expr.indexOf("\n", i); i = nl === -1 ? expr.length : nl; continue; }
+    if (c === "/" && expr[i + 1] === "*") { const end = expr.indexOf("*/", i + 2); i = end === -1 ? expr.length : end + 2; continue; }
+    if (c === "{") { top.depth++; i++; continue; }
+    if (c === "}") {
+      if (top.depth === 0 && frames.length > 1) frames.pop();
+      else top.depth--;
+      i++;
+      continue;
+    }
+    if (c === "n" && expr.startsWith("navigate", i) && !isIdent(expr[i - 1]) && !isIdent(expr[i + 8])) {
+      let back = i - 1;
+      while (back >= 0 && /\s/.test(expr[back])) back--;
+      let j = i + 8;
+      while (j < expr.length && /\s/.test(expr[j])) j++;
+      if (expr[back] !== "." && expr[j] === "(") sites.push({ start: i, openIdx: j });
+      i += 8;
+      continue;
+    }
+    i++;
+  }
+  return sites;
 }
 
 /**
@@ -3349,7 +3432,7 @@ const serverPasses: RewritePass[] = [
   // Running rewriteServerReactiveRefs again here rewrites them before they reach the output.
   (s, _ctx) => rewriteServerReactiveRefs(s),
   // Pass 9
-  (s, _ctx) => rewriteNavigateCalls(s),
+  (s, ctx) => rewriteNavigateCalls(s, false, ctx.errors),
   // Pass 10
   (s, _ctx) => rewriteIsOperator(s),
   // Pass 11

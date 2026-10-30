@@ -138,6 +138,14 @@ export interface CompileContext {
    */
   reachabilityRecord?: ReachabilityRecord | null;
   /**
+   * §20.1 (S473) — non-null when THIS file's server bundle lowers a server-side `navigate()`
+   * (emitted before the client in codegen/index.ts): the literal http(s) origins those calls
+   * name. The client fetch wrappers then send `X-Scrml-Fetch: 1` and follow an `X-Scrml-Navigate`
+   * response to a same-site path or one of these origins (server-navigate.ts). Absent / null →
+   * wrappers are byte-unchanged.
+   */
+  serverNavigateOrigins?: string[] | null;
+  /**
    * S461 — true when this compile runs the per-route artifact splitter
    * (`CgInput.emitPerRoute`, `--emit-per-route`). The splitter is the ONLY
    * emitter of `_scrml_chunk_mount(` / `_scrml_vendor_require(` /
