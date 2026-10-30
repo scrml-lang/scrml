@@ -30,3 +30,45 @@ The job also does not race. `concurrency: facts-regen` with `cancel-in-progress`
 - The CI step and the pre-push hook print a warning. That's expected.
 
 **Token:** the job writes with the `MAPS_PAT` secret, the fine-grained PAT that `cloud-maps.yml` also uses (Contents R/W, Pull-requests R/W). The default `GITHUB_TOKEN` can't be used, because a PR it opens does not trigger `gate`, so the queue would never take it. Fine-grained PATs expire. When `MAPS_PAT` lapses, both bot workflows go red at checkout. Merges aren't blocked, since neither is a required check, but FACTS drifts until the PAT is renewed. Then re-fire with `gh workflow run facts-regen`.
+
+## Windows: a ratchet, required through `gate` (S473)
+
+Owner ruling, S473: the Windows CI ratchet (scrml-support `user-voice-scrml.md`, "RULED — S473 Windows … CI ratchet guard", item 2). Until S473 the `windows` job was `continue-on-error` and not required. It went red at #1620 and stayed red. #1658, #1664 and #1673 each merged with a red `windows` on their own PR, because a new failure looked exactly like the old ones.
+
+**What the job does now** (`ci.yml`, job `windows`):
+
+1. Runs `compiler/tests/unit` + `compiler/tests/conformance`, then `compiler/tests/e2e-render-map`, on `windows-latest`, each with a junit report. These steps record bun's exit code and never fail by themselves.
+2. **Flake rescue.** It re-runs ONCE every test file that has a failure outside the baseline, or that did not report. It skips the retry when more than 40 files would be re-run, since that is a mass failure, not a flake.
+3. **The judge**, `bun scripts/windows-ratchet.ts judge`, fails the job when:
+   - a test fails that is not in `.github/windows-baseline.json`, and it failed again on the retry (**new failure**);
+   - a baseline entry passes, is skipped, or no longer exists in a file that ran (**stale entry**). So the baseline only shrinks;
+   - a suite left no report, an empty one, or exited non-zero with no failing test in it (a crash).
+
+   A test that failed and then passed on the retry is listed as a **flake**, with a warning annotation. It does not fail the job.
+
+The verdict is printed in the step log and in the job summary.
+
+**Test ids** take the form `<repo-relative POSIX file> > <describe> > … > <test name>`. That is the string bun prints after `(fail)`, with the file in front. bun omits a file that throws at load from its junit. So the judge also lists the expected test files, and a missing one is a failure under the id `<file> > (file did not report)`.
+
+**The baseline.** `.github/windows-baseline.json` has `entries: [{file, test, gap, reason}]`. Every `gap` must be an **open** gap id in `docs/known-gaps.md`. The `checks` job runs `windows-ratchet.ts validate` on every PR, so a PR that resolves a gap cannot leave an entry that points at it. You add an entry only for a failure you cannot fix in the PR, and only with an open gap. The reason is written for the next reader.
+
+**How `gate` treats it:**
+
+| event | windows job | gate reads |
+|---|---|---|
+| PR whose diff touches path-handling code (the filter in the job header) | suites run, judge decides | judge's verdict |
+| PR outside the path filter | job runs and its filter step skips the suites; concludes `success` | pass, nothing was judged |
+| `push` to main, nightly `schedule`, `workflow_dispatch` | always runs the suites | judge's verdict |
+| `merge_group` | skipped by its job `if:` | `skipped` is accepted **for `windows` only, on this event only** |
+
+The merge-queue run does not repeat Windows. The PR's run is the gate, and the queue's push to main runs it again.
+
+**Visibility on main.** The path filter means a PR outside it can break Windows unseen until the push to main. `windows-main-report.yml` runs daily at 07:47 UTC, after the 06:41 nightly CI, and on `workflow_dispatch`. It reads main's CI runs, prints the latest concluded `windows` result, and while that result is red, prints the **first red** run and SHA and the last green one. It fails while main is red. It opens no issue or PR. Run it locally with `bun scripts/windows-ratchet.ts report`.
+
+**Running a PR's Windows suites when the filter skipped them:** `gh workflow run CI --ref <branch>`. A dispatched run always runs the suites.
+
+**Limits, stated plainly:**
+
+- The retry re-runs whole files, not single tests. bun has no exact-test-id re-run, and `-t` is a regex over names. A file holding a flake re-runs its passing tests too.
+- A flaky **baseline** test that passes on the first run reads as stale. Stale is judged on the first run, so a baseline entry must be a deterministic failure.
+- A PR outside the path filter is not judged on Windows. When it breaks Windows, the next path-touching PR inherits the red, and so does main's report. Whoever opens that next PR pays, until it is fixed or baselined.

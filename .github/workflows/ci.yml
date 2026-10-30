@@ -24,8 +24,12 @@
 #   • host-global   — the S457 host-global alias scan, sharded BY EMISSION MODE (each leg a full corpus pass
 #                     in its own modes — the scan already supports `--modes`, and its KNOWN_THROWS bookkeeping
 #                     is scoped to the modes a run covers).
+#   • windows       — (S473: BLOCKING) unit + conformance + e2e-render-map on windows-latest, judged by the
+#                     ratchet (scripts/windows-ratchet.ts vs .github/windows-baseline.json). Path-filtered
+#                     on PRs; see its header.
 #   • gate          — the AGGREGATOR. `needs:` every job above, runs `if: always()`, and FAILS unless every one
-#                     of them concluded `success` (failed / cancelled / skipped all fail it). It also checks that
+#                     of them concluded `success` (failed / cancelled / skipped all fail it — the one
+#                     exception is `windows` skipped on `merge_group`, where it never runs). It also checks that
 #                     the sharded suites are an exact partition of their test files (scripts/ci-shards.ts
 #                     reconcile): a shard that silently ran nothing cannot pass for a green suite.
 #
@@ -40,11 +44,12 @@
 #   `--update-timings` and junit-reporter shape (scripts/ci-shards.ts reads its `<testsuite file=…>`).
 #   An unpinned `setup-bun` resolves package.json's ">=1.3.13" to the latest release, so an upstream change
 #   to any of those could alter what the gate checks with no commit here. Bump it deliberately, in a PR.
-#   ⚑ `checks` runs `scripts/ci-shards.ts needs`: every job except `gate` / `tracking` / `windows` must be in
+#   ⚑ `checks` runs `scripts/ci-shards.ts needs`: every job except `gate` / `tracking` must be in
 #   `gate.needs`, so a blocking job added later cannot be silently non-blocking.
 #
-#   NON-BLOCKING jobs: `tracking` (bootstrap conformance count + severity-table staleness, never in `gate`)
-#   and `windows` (OS-path-separator surface; runs on main, nightly, and PRs touching path-handling code).
+#   NON-BLOCKING job: `tracking` (bootstrap conformance count + severity-table staleness, never in `gate`).
+#   `windows` was non-blocking until S473 and sat red on main from #1620 on, hiding each new Windows
+#   regression behind the old ones; it is now blocking through the ratchet (its header, and .github/CI.md).
 #
 # KEY FINDING (S253): the local "full gate" (pre-push) partly PASSES ON UN-REPRODUCIBLE LOCAL ARTIFACTS —
 # the self-host tests (`compiler/tests/self-host` AND `integration/self-host-smoke.test.js`) need a
@@ -95,8 +100,8 @@ on:
   # `gh-readonly-queue/main/…` ref and fires `merge_group`; the required `gate` check must report on that
   # event too, or the queue waits on a check that never arrives. Every blocking job + the `gate`
   # aggregator therefore runs unconditionally on `merge_group` (none of them carries an event `if:`);
-  # only the NON-blocking `tracking` and `windows` sit it out (they run again on the push to main that
-  # the queue's merge produces). PR-base-relative steps read `merge_group.base_sha` here.
+  # only `tracking` and `windows` sit it out (they run again on the push to main that the queue's merge
+  # produces; `gate` accepts `windows` = skipped on this event only — see the windows header). PR-base-relative steps read `merge_group.base_sha` here.
   # Adding the trigger changes nothing until bryan enables "Require merge queue" in the settings.
   merge_group:
   # S468 — NIGHTLY full run of `main`. Exists for the `windows` job (which no longer runs on every
@@ -278,6 +283,12 @@ jobs:
       - name: Every blocking job is in gate.needs (scripts/ci-shards.ts needs)
         if: ${{ !cancelled() }}
         run: bun scripts/ci-shards.ts needs .github/workflows/ci.yml
+      # S473 — the Windows ratchet's baseline: every entry names an OPEN gap in docs/known-gaps.md and a
+      # file that exists. Here (Linux, every PR) because the windows job itself is path-filtered: a PR that
+      # resolves a gap must not leave a baseline entry pointing at it.
+      - name: Windows baseline is valid (scripts/windows-ratchet.ts validate)
+        if: ${{ !cancelled() }}
+        run: bun scripts/windows-ratchet.ts validate
       - name: §34.0 row-provenance gate (new error-code rows state where they fire)
         if: ${{ !cancelled() }}
         run: bun scripts/s34-census.ts --check-new --base ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || 'HEAD~1' }}
@@ -495,16 +506,21 @@ jobs:
   # ───────────────────────────────────────────────────────────────────────────────────────────────
   gate:
     if: ${{ always() }}
-    needs: [checks, unit, integration, browser, slices, host-global]
+    needs: [checks, unit, integration, browser, slices, host-global, windows]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
+      # S473: `windows` is judged like every other need, with ONE exception: on `merge_group` the job is
+      # skipped by its own `if:` (it ran on the PR, and runs again on the queue's push to main), so there,
+      # and only there, `skipped` is accepted for it. A PR whose diff the windows path filter skips still
+      # reports `success` (the filter is a STEP inside the job, so the job runs and concludes success).
       - name: Every blocking job succeeded
         env:
           NEEDS: ${{ toJSON(needs) }}
+          EVENT: ${{ github.event_name }}
         run: |
           echo "$NEEDS" | jq -r 'to_entries[] | "\(.key): \(.value.result)"'
-          if echo "$NEEDS" | jq -e 'to_entries | all(.value.result == "success")' > /dev/null; then
+          if echo "$NEEDS" | jq -e --arg ev "$EVENT" 'to_entries | all(.value.result == "success" or (.key == "windows" and .value.result == "skipped" and $ev == "merge_group"))' > /dev/null; then
             echo "gate: every blocking job concluded success"
           else
             echo "::error::gate: a blocking job did not succeed (failure, cancellation and skip all count)"
@@ -575,9 +591,19 @@ jobs:
         run: bun scripts/gen-bootstrap-severity.ts --check
 
   # ───────────────────────────────────────────────────────────────────────────────────────────────
-  # windows — NON-BLOCKING (continue-on-error; NOT a required check). Surfaces OS-path-separator
+  # windows — BLOCKING since S473 (in `gate.needs`), judged by a RATCHET. Surfaces OS-path-separator
   # regressions invisible on Linux: #25 nested-pages prefix, #26 isStdlibFilePath auth-bypass (both
   # `\` vs `/`), and the S417 e2e-render-map tier that minted every relpath with `\`.
+  #
+  # S473 — THE RATCHET (ruling: scrml-support user-voice-scrml.md, "RULED — S473 Windows … CI ratchet").
+  # Until S473 this job was `continue-on-error`; it went red at #1620 and stayed red, and #1658, #1664 and
+  # #1673 each merged with a red `windows` on their own PR, because a new failure looked like the old
+  # ones. Now the suites run with junit, failed tests outside the baseline get ONE retry (their files
+  # re-run once), and `scripts/windows-ratchet.ts judge` decides: it FAILS on a failure not in
+  # `.github/windows-baseline.json` (each entry tied to an open gap) and on a baseline entry that passes,
+  # is skipped or no longer exists. The test steps themselves never fail the job; the judge does.
+  # main's windows history (latest conclusion, first red SHA) is reported nightly by
+  # `windows-main-report.yml`, because path-filtered PRs skip the suites.
   #
   # S468 — WHEN IT RUNS. Every push to main, the nightly schedule, manual dispatch, and a PR whose diff
   # touches code where an OS path is built, split, compared or resolved:
@@ -593,10 +619,9 @@ jobs:
   # pull_request merge commit's own two parents — fail closed: if the diff cannot be computed, it runs.
   # ───────────────────────────────────────────────────────────────────────────────────────────────
   windows:
-    if: ${{ github.event_name != 'merge_group' }}   # non-blocking; re-runs on the queue's push to main
+    if: ${{ github.event_name != 'merge_group' }}   # ran on the PR; re-runs on the queue's push to main (gate accepts this skip)
     runs-on: windows-latest
-    continue-on-error: true
-    timeout-minutes: 30
+    timeout-minutes: 45                             # ~18 min of suites + one retry of the failed files
     steps:
       - uses: actions/checkout@v4
         with:
@@ -628,11 +653,53 @@ jobs:
         env:
           PUPPETEER_SKIP_DOWNLOAD: "true"
         run: bun install --frozen-lockfile
+      # The two suite steps record bun's exit code and never fail themselves: the ratchet judges. (A
+      # non-zero exit that no failing test explains — a crash — is a failure in the judge.)
       - name: Unit + conformance on Windows (catches `\` vs `/` OS-path bugs — #25/#26 class)
+        id: unit
         if: ${{ steps.need.outputs.run == 'true' }}
-        run: bun test compiler/tests/unit compiler/tests/conformance
+        shell: bash
+        run: |
+          set +e
+          bun test compiler/tests/unit compiler/tests/conformance --reporter=junit --reporter-outfile="$RUNNER_TEMP/win-unit.xml"
+          rc=$?; echo "rc=$rc" >> "$GITHUB_OUTPUT"; echo "bun exited $rc — the ratchet step judges"
       # S427: the e2e-render-map tier was a SILENT WHOLE-TIER NO-OP on Windows (S417: every relpath
       # minted with `\`, 0 of 449 baseline keys resolved, the tier reported green).
       - name: e2e-render-map tier on Windows (S427 — the S417 separator class)
-        if: ${{ steps.need.outputs.run == 'true' }}
-        run: bun test compiler/tests/e2e-render-map/
+        id: e2e
+        if: ${{ !cancelled() && steps.need.outputs.run == 'true' }}
+        shell: bash
+        run: |
+          set +e
+          bun test compiler/tests/e2e-render-map/ --reporter=junit --reporter-outfile="$RUNNER_TEMP/win-e2e.xml"
+          rc=$?; echo "rc=$rc" >> "$GITHUB_OUTPUT"; echo "bun exited $rc — the ratchet step judges"
+      # FLAKE RESCUE: the files holding a failure outside the baseline (or an expected file that did not
+      # report) are re-run ONCE. A test that fails then passes is listed as a flake, not judged. More than
+      # 40 such files is a mass failure, not a flake, and is not retried.
+      - name: Retry failed tests once (flake rescue)
+        if: ${{ !cancelled() && steps.need.outputs.run == 'true' }}
+        shell: bash
+        run: |
+          files=$(bun scripts/windows-ratchet.ts retry-list --junit "$RUNNER_TEMP/win-unit.xml" "$RUNNER_TEMP/win-e2e.xml" --expect compiler/tests/unit compiler/tests/conformance compiler/tests/e2e-render-map)
+          if [ -z "$files" ]; then echo "nothing to retry"; exit 0; fi
+          echo "re-running once:"; printf '%s\n' "$files"
+          set +e
+          bun test $files --reporter=junit --reporter-outfile="$RUNNER_TEMP/win-retry.xml"
+          echo "retry: bun exited $? (the ratchet reads the report, not this code)"
+          exit 0
+      - name: Windows ratchet (fails on a failure outside .github/windows-baseline.json, or a stale entry)
+        if: ${{ !cancelled() && steps.need.outputs.run == 'true' }}
+        shell: bash
+        run: >-
+          bun scripts/windows-ratchet.ts judge
+          --junit "unit=$RUNNER_TEMP/win-unit.xml:${{ steps.unit.outputs.rc }}" "e2e-render-map=$RUNNER_TEMP/win-e2e.xml:${{ steps.e2e.outputs.rc }}"
+          --retry "$RUNNER_TEMP/win-retry.xml"
+          --expect compiler/tests/unit compiler/tests/conformance compiler/tests/e2e-render-map
+      - name: Upload Windows test reports
+        if: ${{ always() && steps.need.outputs.run == 'true' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-junit
+          path: ${{ runner.temp }}/win-*.xml
+          retention-days: 14
+          if-no-files-found: warn

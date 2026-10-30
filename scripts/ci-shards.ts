@@ -23,7 +23,7 @@
 //       Exit 0 = every suite is an exact partition · 1 = a violation (listed) · 2 = bad invocation.
 //
 //   bun scripts/ci-shards.ts needs <workflow.yml>
-//       Exit 1 unless every job except gate/tracking/windows is in `gate.needs` (and each need is a
+//       Exit 1 unless every job except gate/tracking is in `gate.needs` (and each need is a
 //       real job, and gate keeps `if: always()`): a blocking job missing from needs gates nothing.
 //
 //   bun scripts/ci-shards.ts merge-timings <out.json> <in.json>…
@@ -138,8 +138,8 @@ function mergeTimings(out: string, inputs: string[]): number {
   return 0;
 }
 
-/** NON-blocking by design (ci.yml header); every other job must be one the `gate` aggregator needs. */
-const NON_BLOCKING = new Set(["gate", "tracking", "windows"]);
+/** NON-blocking by design (ci.yml header; `windows` left this set at S473 — the ratchet); every other job must be one the `gate` aggregator needs. */
+const NON_BLOCKING = new Set(["gate", "tracking"]);
 
 function needsLint(workflow: string): number {
   let y: any;
