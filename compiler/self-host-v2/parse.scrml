@@ -5605,9 +5605,11 @@ ${
         }
         let v: AAttrValue = AAttrValue.NoValue
         if (chAt(m, 0) == "=") {
+            const vStart: int = m.pos + 1
             const rv2: RValue = parseAttrValue(mAdv(m, 1), isHandlerName(name))
             v = rv2.v
             m = rv2.mp
+            if (!isHandlerName(name)) m = unquotedOperatorDiag(m, name, v, vStart)
         } else if (name == "as" && isSpaceCh(chAt(m, 0))) {
             // `<each … as name>` (§17.7): the binding name follows after a space.
             const m2: MP = skipSpace(m)
@@ -5638,6 +5640,56 @@ ${
         const fix: string = "make `" + name + "` a child declaration in the body, `" + kw + " <" + name + ":Type=…/>` (a `:struct` opener when no typed attribute is left) — an attribute is always locked data (§66.4 rule 6, S447)"
         if (isLet) return mDiag(mp, "E-DECL-LET-IN-OPENER", "`" + kw + "` cannot stand on the attribute `" + name + "`: " + fix, start, mp.pos)
         return mDiag(mp, "E-PARSE-ATTR", "`export` cannot stand on the attribute `" + name + "`: " + fix, start, mp.pos)
+    }
+
+    // s473 — §5.2 "Unquoted attribute CONDITIONS are atomic-only (cluster-A,
+    // S188)": "A bare operator in an unquoted condition SHALL be compile error
+    // `E-ATTR-UNQUOTED-OPERATOR`, fired exactly once per offending attribute,
+    // naming the operator and steering to the parens/quotes form"; and "any
+    // other attribute followed by an operator (`title=@a + "x"`, …) is
+    // `E-ATTR-UNQUOTED-OPERATOR`" — every attribute but an event handler (whose
+    // value is one expression, §5.2.3). An unspaced operator (`if=@a&&@b`,
+    // `show=@n==3`) is read whole by the bare-value reader as a binary,
+    // conditional or assignment expression, and was accepted.
+    fn unquotedOperatorDiag(mp: MP, name: string, v: AAttrValue, start: int) -> MP {
+        const x: AExpr | not = match v {
+            .Bare(e: e) :> e
+            .NoValue :> not
+            .Paren(e: e) :> not
+            .Quoted(v: s) :> not
+            .Braced(b: b) :> not
+        }
+        if (x is not) return mp
+        const k: AExprK = x.k
+        const op: boolean = match k {
+            .Binary(op: o) :> true
+            .Ternary(test: t) :> true
+            .Assign(target: t) :> true
+            .Name(name: n) :> false
+            .Recovered :> false
+            .Sql(q: q) :> false
+            .Template(quasis: qs) :> false
+            .Foreign(f: fb0) :> false
+            .At(name: n) :> false
+            .AtItem :> false
+            .Num(raw: r) :> false
+            .Str(v: s) :> false
+            .Bool(v: b) :> false
+            .NotLit :> false
+            .Variant(name: n) :> false
+            .Member(obj: o) :> false
+            .Call(callee: c) :> false
+            .Unary(op: o) :> false
+            .ArrayLit(elems: es) :> false
+            .ObjectLit(props: ps) :> false
+            .Spread(e: s) :> false
+            .Index(obj: o) :> false
+            .Lambda(params: ps) :> false
+            .Handled(h: h) :> false
+        }
+        if (!op) return mp
+        const text: string = mp.src.substring(start, mp.pos)
+        return mDiag(mp, "E-ATTR-UNQUOTED-OPERATOR", "`" + name + "=" + text + "` — an unquoted attribute value holds no operator: it is an identifier, a member chain or a call (§5.1, §5.2). Parenthesize the expression — `" + name + "=(" + text + ")` — or quote it", start, mp.pos)
     }
 
     // `renders` followed by whitespace and a markup element: the clause shape.

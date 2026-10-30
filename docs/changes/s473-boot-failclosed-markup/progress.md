@@ -1,0 +1,24 @@
+# s473-boot-failclosed-markup — progress
+
+Lane: make the bootstrap (compiler/self-host-v2) fail closed on markup it does not understand.
+Branch: `s473-boot-failclosed-markup` off origin/main 741a2b51c.
+
+## Done (commit 1 — WIP)
+- `elements.scrml` (new): impl#1's E-MARKUP-001 element list ported as data (HTML + SVG + MathML,
+  legacy names, custom-element grammar); `isKnownElementName`. Registered in slice-m2 M2_MODULES.
+- analyze `resolveElem`: unknown lowercase tag → E-MARKUP-001; unknown capitalised → E-COMPONENT-035.
+- analyze `structuralOwner`: `onmount` (§6.7.1a), `md` (§67) → E-BOOTSTRAP-UNSUPPORTED.
+- analyze `resolveHtml`: E-DECL-FIELD-TAG-NEEDS-STAR now covers program cells (`<count/>`, §66.6.6).
+- analyze `namedInstanceDiags`: named shared instance in a `<program>` body refused (§66.8.2).
+- analyze `userDeclStub`: E-NAME-COLLIDES-RESERVED (§4.15 / §24.4 list, case-insensitive).
+- analyze `controlFlowInMarkup`: E-CONTROL-FLOW-IN-MARKUP (§17.4, impl#1's braced recognizer).
+- analyze `eachShapeDiags`: E-EACH-ITER-SHAPE, E-EACH-EMPTY-BODY (§17.7.2).
+- analyze: `fixed` in a declaration's renders not written to the DOM (§15.7 / §66.15.1).
+- parse `unquotedOperatorDiag`: E-ATTR-UNQUOTED-OPERATOR (§5.2); analyze comment fixed.
+
+## Corpus (measure.ts over conformance/cases, samples, stdlib, examples — 2858 files)
+- clean before 69, after 61. Newly failing: 8 (6 md/* now refused; script-style-exact-name-neg
+  `<scripts>`; engine/mount-not-engine-pos `<helper/>` naming an imported function).
+
+## Next
+- tests, gaps, regen (severity, conformance report, known-gaps), gates, PR.
