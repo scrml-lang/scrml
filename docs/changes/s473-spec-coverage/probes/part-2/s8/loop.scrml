@@ -1,0 +1,6 @@
+<program db="./app.db">
+    type R:struct = { id: int }
+    function f(a: int) -> int { let n: int = 0; for (const i of [1, 2, 3]) { const r: R | not = ?{`SELECT id FROM t WHERE id = ${i}`}.get() !{ _ :> not }; n = n + 1; } return n; }
+    function go() { const r: int = f(1) !{ .Transport(t) :> return }; }
+    <main><button onclick=go()>a</button></main>
+</program>

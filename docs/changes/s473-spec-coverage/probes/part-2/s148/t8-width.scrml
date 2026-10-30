@@ -1,0 +1,8 @@
+// §14.8.8 / §14.8.7: row typing — a SELECT row read into a declared struct missing a column
+<program>
+    <db src="./app.db">
+        type Row:struct = { id: int, email: string, nope: string }
+        <rows:Row[]=(?{`SELECT id, email FROM users`}.all() !{ _ :> [] })/>
+    </db>
+    <main><p>${@rows.length}</p></main>
+</program>

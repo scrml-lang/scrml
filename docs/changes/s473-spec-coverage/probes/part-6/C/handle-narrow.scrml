@@ -1,0 +1,10 @@
+<program>
+    let <show:bool=false/>
+    <card title:string>
+        let <n:int=0/>
+    </>
+    renders <p>${title}</p>
+    function f() { @h.n = 1; }
+    function g() { given c = @h :> { c.n = 2; } }
+    <main><div if=@show><card as=h title="a"/></div><p>${@h.n}</p><button onclick=f()>f</button></main>
+</program>

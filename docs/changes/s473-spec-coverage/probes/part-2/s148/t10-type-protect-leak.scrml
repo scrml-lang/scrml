@@ -1,0 +1,13 @@
+// §14.8.9 "each §52 type-level protect=" covers every ?{}: passwordHash must be stripped at egress.
+<program>
+    <User authority="server" table="users" protect="passwordHash">
+        id: number
+        email: string
+        passwordHash: string
+    </>
+    <db src="./app.db">
+        type Row:struct = { id: int, email: string, passwordHash: string }
+        <rows:Row[]=(?{`SELECT * FROM users`}.all() !{ _ :> [] })/>
+    </db>
+    <main><p>${@rows.length}</p></main>
+</program>

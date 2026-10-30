@@ -1,0 +1,11 @@
+<program>
+    let <out:int=0/>
+    function f(n: int) -> int {
+        let pos = 0;
+        function adv() { pos = pos + 1; }
+        adv();
+        return pos + n;
+    }
+    function go() { @out = f(2); }
+    <button onclick=go()>${@out}</button>
+</program>

@@ -1,0 +1,10 @@
+<program>
+    let <loading:bool=false/>
+    let <err:bool=false/>
+    let <done:bool=false/>
+    <main>
+        <p if=@loading>L</p>
+        <p if=@err>E</p>
+        <p if=@done>D</p>
+    </main>
+</program>

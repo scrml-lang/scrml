@@ -1,0 +1,4 @@
+<program>
+<each:struct/> renders <p>hi</p>
+<each/>
+</program>

@@ -1,0 +1,6 @@
+<program>
+    type User:struct = { id: int }
+    function load(i: int) -> (not to User) { return not; }
+    function f() -> int { const u = load(1); return u.id; }
+    <p>${f()}</p>
+</program>

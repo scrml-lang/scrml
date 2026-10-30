@@ -1,0 +1,5 @@
+<program>
+    let <n:int=1/>
+    function f() -> string { return "a" + @n; }
+    <p>${f()}</p>
+</program>

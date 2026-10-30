@@ -1,0 +1,7 @@
+<program>
+    let <n:int=0/>
+    <btn label:string act:fn()/>
+    renders <button onclick=act()>${label}</button>
+    function inc() { @n = @n + 1; }
+    <main><btn as=b label="go" act=inc()/><p>${@n}</p></main>
+</program>

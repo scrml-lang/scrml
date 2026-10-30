@@ -1,0 +1,7 @@
+<program>
+    type Sh:enum = { circle(r: int), Point }
+    let <s:Sh=.Point/>
+    function f() { @s = Sh.circle(2); }
+    function g() -> int { return match @s { .circle(r) :> r, .Point :> 0 }; }
+    <button onclick=f()>${g()}</button>
+</program>

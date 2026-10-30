@@ -1,0 +1,6 @@
+<program>
+<Box:struct renders <div>
+   a    b
+</div>/>
+<Box/>
+</program>

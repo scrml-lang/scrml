@@ -1,0 +1,15 @@
+<program>
+    <Submission>
+        id: string
+        <Draft>
+            body: string
+            validate() => <Validated> {
+                return <Validated> id = from.id body = from.body </>
+            }
+        </>
+        <Validated>
+            body: string
+        </>
+    </>
+    <main><p>hi</p></main>
+</program>

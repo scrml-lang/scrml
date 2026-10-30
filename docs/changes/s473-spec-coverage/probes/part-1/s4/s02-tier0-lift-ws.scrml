@@ -1,0 +1,4 @@
+<program>
+<xs:string[free]=(["a"])/>
+<ul>${ for (const it of @xs) { lift <li>   lifted   ${it}   li</li>; } }</ul>
+</program>

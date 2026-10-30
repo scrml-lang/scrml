@@ -1,0 +1,8 @@
+<program>
+    let <msg:string | not=not/>
+    function up(s: string) -> string { return s; }
+    <main>
+        <p if=@msg>${up(@msg)}</p>
+        <p>${up(@msg)}</p>
+    </main>
+</program>

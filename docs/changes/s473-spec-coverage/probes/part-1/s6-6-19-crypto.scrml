@@ -1,0 +1,5 @@
+<program>
+    ${ import { generateToken } from "scrml:crypto"; }
+    <h:string=(generateToken())/>
+    <main><p>${@h}</p></main>
+</program>

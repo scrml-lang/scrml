@@ -1,0 +1,6 @@
+<program>
+    <swatch label:string="Brand"/>
+    renders <span>${label}</span>
+    <accent:swatch label="Accent"/>
+    <main><p>${@accent}</p></main>
+</program>

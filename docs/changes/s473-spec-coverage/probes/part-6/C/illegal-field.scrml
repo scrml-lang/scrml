@@ -1,0 +1,5 @@
+<program>
+    <card class:string="x" title:string="t"/>
+    renders <div>${title}</div>
+    <main><card title="a"/></main>
+</program>

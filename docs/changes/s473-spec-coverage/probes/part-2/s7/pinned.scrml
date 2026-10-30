@@ -1,0 +1,5 @@
+<program>
+    pinned <a:int=(@b + 1)/>
+    let <b:int=0/>
+    <p>${@a}</p>
+</program>

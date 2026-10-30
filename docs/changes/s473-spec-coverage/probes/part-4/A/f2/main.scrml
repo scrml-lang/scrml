@@ -1,0 +1,4 @@
+${ import { greeting } from "./b.scrml"; }
+<program>
+<main><greeting who="Ada"/></main>
+</program>

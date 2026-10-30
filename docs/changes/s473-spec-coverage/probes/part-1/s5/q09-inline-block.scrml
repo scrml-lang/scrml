@@ -1,0 +1,5 @@
+<program>
+let <n:int=0/>
+let <m:int=0/>
+<button onclick={ @n = @n + 1; @m = @n; }>${@m}</button>
+</program>

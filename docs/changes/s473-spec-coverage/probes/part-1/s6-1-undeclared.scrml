@@ -1,0 +1,4 @@
+<program>
+    function f() { @ghost = 1; }
+    <main><p>${@nope}</p><button onclick=f()>x</button></main>
+</program>

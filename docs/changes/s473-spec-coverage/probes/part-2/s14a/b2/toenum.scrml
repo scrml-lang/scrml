@@ -1,0 +1,6 @@
+<program>
+    type Role:enum = { Admin, User }
+    let <r:Role=.User/>
+    function set(s: string) { const v = Role.toEnum(s); if (v is given) { @r = v; } }
+    <button onclick=set("Admin")>${@r}</button>
+</program>

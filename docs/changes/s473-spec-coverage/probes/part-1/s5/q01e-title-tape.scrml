@@ -1,0 +1,4 @@
+<program>
+<xs:string[]=(["a","b"])/>
+<div title=(@xs)>x</div>
+</program>

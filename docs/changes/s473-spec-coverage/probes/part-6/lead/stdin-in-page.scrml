@@ -1,0 +1,8 @@
+<program>
+<n:number=0/>
+<stdin>
+  Line(t) => { @n = @n + 1 }
+  End => { }
+</stdin>
+<p>${@n}</p>
+</program>

@@ -1,0 +1,6 @@
+<program>
+    type Box:struct = { f: fn() }
+    function hit() -> int { return 1; }
+    function mk() -> int { const o = { f: hit }; return 1; }
+    <main><p>${mk()}</p></main>
+</program>

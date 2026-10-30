@@ -1,0 +1,5 @@
+<program>
+    <chip label:string/>
+    renders <span id="chip"><b>#{ color: navy; }${label}</b></span>
+    <main><chip label="x"/></main>
+</program>

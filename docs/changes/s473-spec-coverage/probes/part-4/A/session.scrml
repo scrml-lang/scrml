@@ -1,0 +1,7 @@
+<program>
+<db src="a.db">
+server function who() -> string { return session.userId; }
+</db>
+let <n:int=0/>
+<main><p>${@n}</p></main>
+</program>

@@ -1,0 +1,5 @@
+<program>
+let <x:string=""/>
+function f() { document.body.setAttribute("onclick", @x); }
+<button onclick=f()>x</button>
+</program>

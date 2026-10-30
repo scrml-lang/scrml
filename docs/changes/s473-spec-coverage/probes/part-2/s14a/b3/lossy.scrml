@@ -1,0 +1,9 @@
+<program>
+    let <n:number=1.5/>
+    let <i:int=0/>
+    function f() { @i = @n; }
+    function g() { @n = @i; }
+    function h(s: string) -> string { return s; }
+    function k() -> string { return h(@i); }
+    <button onclick=f()>${k()}</button>
+</program>

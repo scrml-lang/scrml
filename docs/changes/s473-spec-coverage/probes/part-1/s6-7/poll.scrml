@@ -1,0 +1,5 @@
+<program>
+    let <n:int=0/>
+    function tick() { @n = @n + 1; }
+    <main><poll interval=1000>tick();</poll><p>${@n}</p></main>
+</program>

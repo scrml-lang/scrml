@@ -1,0 +1,11 @@
+<program>
+    type P:enum = { Idle, Loading }
+    <card title:string>
+        <status:P=.Idle single>
+            <Idle rule=.Loading/>
+            <Loading rule=.Idle/>
+        </>
+    </>
+    renders <p>${title}</p>
+    <main><card title="a"/></main>
+</program>

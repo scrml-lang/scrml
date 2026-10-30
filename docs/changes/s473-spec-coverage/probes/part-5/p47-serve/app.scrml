@@ -1,0 +1,10 @@
+<program>
+    type User:struct = { name: string, age: int }
+    let <count:int=0/>
+    function bump() { @count = @count + 1; }
+    fn double(x: int) -> int { const user: int = x; return user * 2; }
+    <main>
+        <p>${@count}</p>
+        <button onclick=bump()>+</button>
+    </main>
+</program>

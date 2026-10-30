@@ -1,0 +1,5 @@
+<program>
+    <p>${@a}</p>
+    let <a:int=(@b + 1)/>
+    let <b:int=5/>
+</program>

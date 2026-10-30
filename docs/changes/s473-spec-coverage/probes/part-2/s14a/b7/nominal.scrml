@@ -1,0 +1,7 @@
+<program>
+    type A:struct = { x: int }
+    type B:struct = { x: int }
+    let <a:A=({ x: 1 })/>
+    function mk() -> B { return @a; }
+    <p>${mk().x}</p>
+</program>

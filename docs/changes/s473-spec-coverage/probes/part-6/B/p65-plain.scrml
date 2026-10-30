@@ -1,0 +1,4 @@
+<program>
+#{ p { color: red; } p::before { content: ""; } }
+<p>hi</p>
+</program>

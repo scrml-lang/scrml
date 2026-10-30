@@ -1,0 +1,8 @@
+<program db="./app.db">
+    let <editingId:int=0/>
+    function logEdit() {
+        const v: int = @editingId;
+        ?{`INSERT INTO audit_log (object_id) VALUES (${v})`}.run() !{ _ :> return };
+    }
+    <main><button onclick={ logEdit() !{ .Transport(t) :> return }; }>go</button></main>
+</program>

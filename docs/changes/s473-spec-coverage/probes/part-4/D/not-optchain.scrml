@@ -1,0 +1,5 @@
+<program>
+type U:struct = { name: string }
+let <u:U | not=not/>
+<main><p>${@u?.name}</p></main>
+</program>

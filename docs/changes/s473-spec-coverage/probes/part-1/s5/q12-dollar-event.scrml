@@ -1,0 +1,4 @@
+<program>
+let <s:string=""/>
+<input oninput=${(e) => @s = e.target.value}/>
+</program>

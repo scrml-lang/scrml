@@ -1,0 +1,5 @@
+<program>
+    let <n:number=0/>
+    function fee() -> number(>=0) { return @n - 5; }
+    <main><p>${fee()}</p></main>
+</program>

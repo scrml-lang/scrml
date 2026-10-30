@@ -1,0 +1,5 @@
+<program>
+let <n:int=0/>
+<onMount>${ @n = 1 }</onMount>
+<p>${@n}</p>
+</program>

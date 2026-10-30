@@ -1,0 +1,5 @@
+<program>
+    <ys:int[free, append, replace]=[]/>
+    function f() { @ys.append(1); }
+    <main><button onclick=f()>f</button><p>${@ys.length}</p></main>
+</program>

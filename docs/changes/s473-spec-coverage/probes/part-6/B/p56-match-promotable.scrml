@@ -1,0 +1,13 @@
+<program>
+${ type Phase:enum = { Idle, Busy } }
+<ph:Phase=.Idle/>
+${
+  function f(p: Phase) -> string {
+    if (p == .Idle) { return "i"; } else if (p == .Busy) { return "b"; }
+    return "z";
+  }
+}
+<p>${f(@ph)}</p>
+<p if=(@ph == .Idle)>idle</p>
+<p else-if=(@ph == .Busy)>busy</p>
+</program>

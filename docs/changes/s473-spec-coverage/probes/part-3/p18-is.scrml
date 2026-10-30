@@ -1,0 +1,8 @@
+<program>
+    type C:enum = { Red, Green(n: int) }
+    function a(x: int | not) -> bool { return x is given; }
+    function b(x: int | not) -> bool { return x is not; }
+    function c(x: C) -> bool { return x is .Green; }
+    function d(x: C) -> bool { return x is C.Green; }
+    <main><p>${a(1)} ${b(1)} ${c(.Red)} ${d(.Red)}</p></main>
+</program>

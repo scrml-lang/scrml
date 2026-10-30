@@ -1,0 +1,7 @@
+<host>
+  mk() -> lin string = window.foo.make()
+</host>
+<program>
+
+<p>x</p>
+</program>

@@ -1,0 +1,14 @@
+<program>
+    <xs:int[free, append, pop, write]=([3, 1, 2])/>
+    <ss:string[]=(["b", "a"])/>
+    type P:struct = { a: int }
+    <ps:P[]=([{ a: 1 }])/>
+    function a() { @xs.push(1); }
+    function b() { @xs.sort(); }
+    function c() -> int[] { return @xs.sort(); }
+    function d() -> P[] { return @ps.sort(); }
+    function e() { @xs.length = 1; }
+    function f() { @xs.insert(0, 1); }
+    function g() { @xs = @xs.toSorted(); }
+    <main><p>x</p></main>
+</program>

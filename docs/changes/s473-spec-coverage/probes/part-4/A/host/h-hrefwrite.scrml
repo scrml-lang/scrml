@@ -1,0 +1,7 @@
+<host>
+  f(u: string) = document.body.href = u
+</host>
+<program>
+
+<p>x</p>
+</program>

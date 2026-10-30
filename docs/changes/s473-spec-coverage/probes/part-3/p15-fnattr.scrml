@@ -1,0 +1,10 @@
+<program>
+    let <n:int=0/>
+    function hit() { @n = @n + 1; }
+    <btn label:string act:fn()/>
+    renders <button onclick=act()>${label}</button>
+    <main>
+        <btn label="go" act=hit()/>
+        <p>${@n}</p>
+    </main>
+</program>

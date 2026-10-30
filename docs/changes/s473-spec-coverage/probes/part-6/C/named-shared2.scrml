@@ -1,0 +1,9 @@
+<program>
+    <swatch:struct>
+        let <label:string="Brand"/>
+    </>
+    renders <span>${label}</span>
+    <accent:swatch label="Accent"/>
+    function f() { @accent.label = "W"; }
+    <main><p>${@accent.label}</p><button onclick=f()>f</button></main>
+</program>

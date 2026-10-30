@@ -1,0 +1,6 @@
+<program>
+    <f:struct>
+        let <isValid:bool=false/>
+    </>
+    <main><p>x</p></main>
+</program>

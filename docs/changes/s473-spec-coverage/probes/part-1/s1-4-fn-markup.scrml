@@ -1,0 +1,4 @@
+<program>
+    function badge(n: int) { return <span>${n}</span>; }
+    <main><p>${badge(3)}</p></main>
+</program>

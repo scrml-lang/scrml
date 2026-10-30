@@ -1,0 +1,6 @@
+<program>
+<onMount><p>x</p></onMount>
+let <n:int=3/>
+function f() -> int { let s = 0; for (let i = 0; i < @n; i = i + 1) { s = s + i; } return s; }
+<p>${f()}</p>
+</program>

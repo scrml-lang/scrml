@@ -1,0 +1,4 @@
+use scrml:ui
+<program>
+<main><p>x</p></main>
+</program>

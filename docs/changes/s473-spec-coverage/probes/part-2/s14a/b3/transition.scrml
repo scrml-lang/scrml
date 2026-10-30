@@ -1,0 +1,5 @@
+<program>
+    let <n:int=0/>
+    function f() { transition(n); }
+    <p>hi</p>
+</program>

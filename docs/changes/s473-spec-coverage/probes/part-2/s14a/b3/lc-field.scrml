@@ -1,0 +1,6 @@
+<program>
+    type User:struct = { id: int, hash: (not to string) }
+    let <u:User=({ id: 1, hash: not })/>
+    function f() -> int { return @u.hash.length; }
+    <p>${f()}</p>
+</program>

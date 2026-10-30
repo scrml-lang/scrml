@@ -1,0 +1,5 @@
+<program>
+let <r:string=""/>
+let <h:string=""/>
+<link rel=@r href=@h>
+</program>

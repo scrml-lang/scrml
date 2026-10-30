@@ -1,0 +1,4 @@
+<program>
+<on:bool=true/>
+<p style:big=@on>hi</p>
+</program>

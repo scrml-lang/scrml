@@ -1,0 +1,6 @@
+<program>
+    let <n:int=0/>
+    function inc() { @n = @n + 1; }
+    function show(x: int) -> int { return x; }
+    <main><effect deps=[@n]>${ show(@n); }</effect><button onclick=inc()>x</button></main>
+</program>

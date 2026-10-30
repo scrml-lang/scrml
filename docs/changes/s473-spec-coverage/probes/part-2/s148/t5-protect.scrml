@@ -1,0 +1,6 @@
+<program>
+    <db src="./app.db" protect="passwordHash" tables="users">
+        type U:struct = { id: int, email: string }
+    </db>
+    <main><p>x</p></main>
+</program>
