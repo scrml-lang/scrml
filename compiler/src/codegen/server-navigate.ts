@@ -15,8 +15,9 @@
  * awaited, inside a nested block — and every one of them must end the request, not just the
  * innermost function. When the batch planner wrapped the handler in its implicit transaction
  * (§8.9.2 — only where it coalesced the body's writes), that transaction COMMITS: the body
- * finished by navigating, not by failing. A `transaction { }` block the call leaves rolls back,
- * exactly as a `return` out of it does (§19.10.3, S453/B1a).
+ * finished by navigating, not by failing. A `navigate()` inside a `transaction { }` block is a
+ * compile error (E-TRANSACTION-CONTROL-FLOW, validators/lint-transaction.ts; RULED S473): it
+ * would leave the block and roll it back (§19.10.3) while the browser is sent on.
  *
  * THE WIRE. SPEC §20.1 fixes the 302; it is silent on how scrml's own fetch wrapper learns of it
  * (a browser `fetch` FOLLOWS a 302 by itself and would hand the wrapper the target page's HTML).

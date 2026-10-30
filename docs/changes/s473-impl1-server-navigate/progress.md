@@ -59,4 +59,7 @@ committed; nor was it returned, so no redirect either.
 - F3 lint filed as a gap (needs a §34 row + a reliable codegen→diagnostics channel):
   g-impl1-server-navigate-target-unproven-lint-s473 (MED, open). Proposed name W-NAV-TARGET-UNPROVEN (reading).
 - F6 filed: g-impl1-per-route-stub-ignores-server-navigate-s473 (LOW, latent).
-- F2 (navigate inside transaction{}) left as is, pending the owner ruling; its test stays pinned.
+- F2 RULED (user-voice S473 "review-surfaced decisions" item 4): navigate inside transaction{} is a
+  compile error. 957f19d7c — lint-transaction refuses it with E-TRANSACTION-CONTROL-FLOW (existing
+  code; a reading — #1682 names no navigate-specific code). Rollback pin replaced by 4 must-refuse
+  shapes (red on 79ed33510) + near-miss (navigate after the block: 302, both writes committed).
