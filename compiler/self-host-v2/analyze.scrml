@@ -57,7 +57,7 @@ ${
              HView, HTargetParts, hostView, hostTargetParts, hostRootGlobal, isHyphenWordExpr } from "./ast.scrml"
     import { Severity } from "./severity.scrml"
     import { isKnownElementName, isHtmlElementName } from "./elements.scrml"
-    import { importTarget, importsOfItems, hostImportsOfItems, hostTagOf, isStdlibPath, HostLoc, hostLocOf } from "./link.scrml"
+    import { importTarget, importsOfItems, hostImportsOfItems, hostTagOf, isStdlibPath, stdlibPrefix, HostLoc, hostLocOf } from "./link.scrml"
     import { WireBuild, WireTable, wireBuild, hasFixedLength } from "./codec.scrml"
     import { SqlFacts, SlotQuote, MultiStmt, StmtVerdict, sqlFacts, slotInLiteral, txControl, txControlAware, multiStatement, programStatement, journalOff } from "./sql.scrml"
     import { FxAtom, ownAtom, closeDim, witnessOf, atomChain, sccOrder } from "./effects.scrml"
@@ -6459,7 +6459,10 @@ ${
             return { x: { ty: Type.Named(ud.info.sym), inst: si, iDecl: ud.info.sym, maybe: false },
                      st: addName(st, e.nid, NameFact.NInst(ud.info.sym, si)) }
         }
-        return diagX(env, e, "E-SCOPE-001", "`@" + name + "` names no cell, declaration or `as=` handle in scope", st)
+        // s473 D29 — the read side of §6.1.1 is E-STATE-UNDECLARED (the more specific code; §34 row
+        // "Read-side fire"), as the write side is (placeName). Was E-SCOPE-001
+        // (g-bootstrap-undeclared-cell-read-code-s473).
+        return diagX(env, e, "E-STATE-UNDECLARED", "`@" + name + "` is read here, but it names no cell, declaration or `as=` handle in scope (§6.1.1: declare it, e.g. `let <" + name + ":T=(…)/>`)", st)
     }
 
     fn resolveAtItem(env: Env, e: AExpr, st: AS) -> RX {
@@ -7018,10 +7021,22 @@ ${
         }
     }
 
+    // s473 D29 ("one code per rule, the more specific winning") — a `fn` calling a function that
+    // is NON-DETERMINISTIC is §48.3.4 E-FN-004, not the general §48.6.2 E-FN-003: one that reads
+    // the clock (the summary's `clock`, through calls — decided by rulesPass), or a member of the
+    // stdlib's `scrml:random` (§41.20: "every member is NON-DETERMINISTIC … E-FN-004"). Any other
+    // `function` callee stays E-FN-003.
     fn fnCallsFunction(env: Env, e: AExpr, cf: FnInfo, st: AS) -> AS {
         if (cf.pure) return st
+        if (isRandomModuleFile(cf.file)) return addDiag(st, env.file, e.span, "E-FN-004", "a `fn` body calls `" + cf.name + "` from `scrml:random`, which is non-deterministic — a `fn` is pure and cannot call it (§48.3.4, §41.20); call it in a `function` (or an event handler) and pass the value in as a parameter")
         return addPending(st, PendRule.PureCall(cf.sym.id, fnCallsFunctionDiag(env, e, cf, ""),
-            fnCallsFunctionDiag(env, e, cf, " — and `" + cf.name + "` reads the clock (" + dateNowText() + ", non-deterministic, §48.3.4)")))
+            newDiag("E-FN-004", "a `fn` body calls `" + cf.name + "`, which reads the clock (" + dateNowText() + ", directly or through a function it calls) — a non-deterministic call, so a `fn` cannot make it (§48.3.4); call it in a `function` (or an event handler) and pass the time in as a parameter", env.file, e.span)))
+    }
+
+    // A file of the stdlib's `scrml:random` module (the prefixed stdlib path, link.scrml).
+    fn isRandomModuleFile(path: string) -> boolean {
+        const p: string = stdlibPrefix() + "random"
+        return path == p + ".scrml" || path.startsWith(p + "/")
     }
 
     // s468 — the WRITE half of E-FN-003 (SPEC §48.3.3): "A `fn` body SHALL NOT
@@ -22267,8 +22282,12 @@ ${
         const rt: Type | not = env.fret
         if (rt is not) return ts
         const ts1: TypeState = checkNotElems(env, e, rt, ts)
+        const v: VType = exprType0(ts1, e.nid)
+        // s473 D29 — `return not` from a function whose declared return type has no `| not` is
+        // §42.3.3 / §17.6 E-TYPE-043 (the more specific code), not the general E-TYPE-041.
+        if (isAbsentVT(v) && maybeInner(rt) is not) return report(ts1, env, e.span, "E-TYPE-043", "this function is declared `-> " + typeName(rt) + "` and returns `not` here — a non-optional return type never holds the absence sentinel (§42.3.3). Declare `-> " + typeName(rt) + " | not`, or return a `" + typeName(rt) + "` value")
         // r7 A: full assignability for EVERY return type (§7.5.1 position 4)
-        return checkValue(env, exprType0(ts1, e.nid), rt, e.span, "the return value", ts1)
+        return checkValue(env, v, rt, e.span, "the return value", ts1)
     }
 
     // A non-literal initializer into an `int`-bearing annotation (a literal is
@@ -27025,6 +27044,15 @@ ${
         return st
     }
 
+    // s473 D29 — `at` lies inside the text of a `?{}` that writes (not a SELECT / WITH … SELECT,
+    // sql.scrml `sqlFacts`): a cell read there is one of the query's bound parameters (§52.11).
+    fn inWriteSqlSlot(sqls: SqlSite[], at: ASpan) -> boolean {
+        for (const q of sqls) {
+            if (at.start >= q.span.start && at.end <= q.span.end && sqlFacts(q.q.chunks).kind != SqlKind.SqlSelect) return true
+        }
+        return false
+    }
+
     // A wholly-server function's own body and call graph (§6.6.9, §12.4, §12.5.3).
     fn serverBodyDiags(cx: PlaceCx, f: FnFacts, all: FnFacts[], ps: PlaceFact[], sum: Summary, st0: AS) -> AS {
         let st: AS = st0
@@ -27037,6 +27065,13 @@ ${
                 seen = seen.concat([r.what])
                 const who: string = isLoadName(f.name) ? "the value of the `<db>` cell `" + f.name + "` (its load, run on the server per request)" : "server function `" + f.name + "()`"
                 st = addDiag(st, f.file, r.span, "E-DB-CELL-SERVER-READ", who + " reads `" + r.what + "`, a `<db>` cell — on the server `" + r.what + "` would be the browser's copy, which server code never reads (S472 ruling item 4, §8.1.3). Run the query that loads it here instead, or call a function that does")
+            } else if (seen.indexOf(r.what) < 0 && !f.modifier && inWriteSqlSlot(f.sqls, r.span)) {
+                // s473 D29 ("one code per rule, the more specific winning"): a client cell read as a
+                // bound parameter of a `?{}` write outside a `server` function is §52.11 E-AUTH-001 —
+                // the specific case of the E-REACTIVE-003 rule (the function is on the server only
+                // because of that `?{}`, so the browser's value would never reach it).
+                seen = seen.concat([r.what])
+                st = addDiag(st, f.file, r.span, "E-AUTH-001", "`" + r.what + "` is client-local and cannot be used as a bound parameter in a `?" + "{}` persistence block (§52.11): `" + f.name + "()` runs on the server because of that `?" + "{}`, where the browser's `" + r.what + "` is never sent. Pass it to a server function as an argument first (a parameter here, `" + f.name + "(" + r.what + ")` at the call site)")
             } else if (seen.indexOf(r.what) < 0) {
                 seen = seen.concat([r.what])
                 st = addDiag(st, f.file, r.span, "E-REACTIVE-003", serverFnLabel(f) + " (placed on the server by " + serverTrigger(f) + ") reads `" + r.what + "` — a reactive cell lives in the browser (§6.6.9) and is not sent with the call, so on the server it would be `undefined`. Pass the value as an argument (`" + f.name + "(" + r.what + ")` at the call site, a parameter here), or have the server compute it itself inside the query")

@@ -23,3 +23,11 @@ Tests: compiler/self-host-v2/slice-m4/ruled-refusals-s473.test.js (27 tests, eve
 - server-await-probes{,-review}: c6 UPDATE + check()'s SELECT = 2 transitive queries → `.nobatch()`.
 - error-rulings: a local `n` named like the cell `n` → renamed `k` (D14).
 - re-codes: front / typer* (E-PARAM-TYPE-REQUIRED), server / server-artifact (E-SQL-SLOT-IN-LITERAL), effect (E-COMPONENT-020/021 alongside), server-await-review code sets.
+
+## #1690 review round (FIX-FIRST) + F10/F11 ruling — done
+- F1 reach multiplicity (TxQ.runs); F2 comment-aware journalOff (subsetRead); F3 journal OFF over the `!` reach (bangReach + transitive writes)
+- F5 case-insensitive named slot; F6 one code each (named slot → O9 only; lifted slot → E-COMPONENT-020)
+- F8 legacy `key=` judged only on the lifted element (resolveRow); F9 message says the header key is not parsed yet; F12 for-of binder
+- F10 (ruled) `!` callees count; F11 (ruled) E-TX-CLIENT-MULTI-CALL, permanent — SPEC §8.9.2 amendment, §19.10.5 rule + trigger, §34 row
+- F4 filed g-boot-decl-body-markup-dropped-s473; F7 noted on the slot gap for a ruling refinement
+- merged origin/main (#1691 lane B); conformance (strict grading) main 281/241/606 → head 283/241/604

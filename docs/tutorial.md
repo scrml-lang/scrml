@@ -1001,7 +1001,7 @@ The bootstrap compiles this program today.
 
 Real-time sync over a WebSocket connection is built into the language as a `<channel>` element. In an entry file (a file that declares `<program>`), the channel lives **inside** `<program>` as a sibling of `<page>` and the rest of the program body. State declared inside the channel body is auto-synced to every connected client:
 
-<!-- gate: spec-ahead [E-BOOTSTRAP-UNSUPPORTED, E-SCOPE-001] — the bootstrap has no <channel> yet -->
+<!-- gate: spec-ahead [E-BOOTSTRAP-UNSUPPORTED, E-SCOPE-001, E-STATE-UNDECLARED] — the bootstrap has no <channel> yet -->
 <!-- snippet: docs/tutorial-snippets/07-channel-chat.scrml -->
 ```scrml
 // 07-channel-chat.scrml — chat room with shared state.
@@ -1103,7 +1103,7 @@ What this does and does not give you:
 
 By now you have seen every primitive you need to build a working scrml app. Here they are collected in one real program — a small notes app — in the order they usually appear in a non-trivial scrml file:
 
-<!-- gate: spec-ahead [E-BOOTSTRAP-UNSUPPORTED, E-PARSE-TAG, E-SCOPE-001, E-STATE-UNDECLARED] — the bootstrap has no <schema>, <channel> or <match> block element, cannot construct a payload variant, and has no typed ?{} rows yet; ⚑ how untyped .all() rows become Note values is also open -->
+<!-- gate: spec-ahead [E-BOOTSTRAP-UNSUPPORTED, E-PARSE-TAG, E-STATE-UNDECLARED] — the bootstrap has no <schema>, <channel> or <match> block element, cannot construct a payload variant, and has no typed ?{} rows yet; ⚑ how untyped .all() rows become Note values is also open -->
 <!-- snippet: docs/tutorial-snippets/10-all-together.scrml -->
 ```scrml
 // 10-all-together.scrml — the spine of a typical scrml program, in one file.

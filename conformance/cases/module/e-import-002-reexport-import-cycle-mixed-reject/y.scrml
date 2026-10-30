@@ -1,4 +1,4 @@
 ${
     import { A } from './x.scrml';
-    export const B = A + "bb"
+    export const B = A + "bb";
 }

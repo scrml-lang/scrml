@@ -1,0 +1,408 @@
+// =============================================================================
+// self-host-v2 / refusals.scrml — THE NAMED-REFUSAL TABLE (S473 D28).
+//
+// Ruling (user-voice-scrml.md S473 D28, "your recs on all"): "every construct
+// the bootstrap does not build gets a NAMED refusal, from one table." Before
+// this table such a construct fell through to a generic cascade — `x is .V`
+// read as "`is` is not declared", `try { … }` as six parse errors — and an
+// adopter read a bootstrap limit as their own bug
+// (g-bootstrap-unimplemented-construct-reported-as-generic-code).
+//
+// WHAT A ROW IS. A construct, the SPEC section that defines it, the code it is
+// refused with, and a token PATTERN that finds it in the source:
+//   - `E-BOOTSTRAP-UNSUPPORTED` — the construct is scrml, the bootstrap does not
+//     build it yet. The message names it and its section.
+//   - a SPEC code — the construct is NOT scrml and the SPEC names the code that
+//     rejects it (`try` → E-TRY-NOT-IN-SCRML, §7.2.1 / §19.1). Refusing those
+//     with E-BOOTSTRAP-UNSUPPORTED would claim a bootstrap limit where the
+//     language itself says no; the SPEC's code is the more specific one (D29
+//     "one code per rule, the more specific winning").
+//
+// WHEN A ROW FIRES — RE-LABEL ONLY, NEVER A NEW REFUSAL. A row fires only in a
+// file the front end ALREADY rejects: the pattern must match AND an Error
+// diagnostic the row accepts as its symptom (`on`, default the generic
+// parse / scope / type cascade codes) must lie on the matched lines (or, for
+// a `near` row, start inside the match). So the table changes WHICH codes a
+// failing compile reports, never WHETHER it fails: a program that compiled
+// before compiles now (a matching construct with no error on its line is
+// simply not this construct — `is` in prose, `and` in text), and one that
+// failed still fails (a named refusal is an Error). Fail-closed stays
+// fail-closed by construction.
+//
+// WHAT A FIRING REPLACES. The cascade the construct caused: in that file,
+// every Error diagnostic whose code is a CASCADE code (the parse-structure /
+// unknown-name / unknown-type codes, `cascadeCode`) and every Error
+// diagnostic on the refused construct's own lines (for a construct that opens
+// a block — `try {`, `transitions {` — every line through the block's `}`: its
+// body is misread with it). Warnings and Infos, and
+// specific codes on other lines, stay. (A real E-SCOPE-001 typo elsewhere in a
+// file that also holds a refused construct is reported once the construct is
+// gone — the named refusal is what the author must act on first.)
+//
+// THE PATTERN LANGUAGE (one element per token, over the parser's own token
+// classes — parse.scrml `toPToks`, the one classification of the lexer's
+// TokenKind):
+//   `try`         a token whose text is exactly `try` (never a string or a
+//                 template piece)
+//   `$w`          a word (identifier or keyword)   `$v`  a bare variant `.V`
+//   `$n`          a number    `$s`  a string    `@`  the cell sigil    `*`  any
+//   `a|b`         any one of the alternatives (each may be a class above)
+//   `!a|b`        any token that is none of them
+//   `...`         zero or more tokens on the same line, none of them `{` / `;`
+// `glue`: "tight" — every matched token touches the next (`^{`, `[:]`, `::`);
+// "spaced" — the first two do NOT touch (`< name`); "lead" — the first token
+// begins its line (a statement-head word that is also an English word: `use`,
+// `on mount`, `class`); "" — no constraint.
+//
+// The lexer reads the whole file as code (a closing tag's `</` is scanned as
+// `<<`, so `</p>` cannot open a regex literal that hides the rest of its line).
+// Any construct the scan still misses fails SAFE: it keeps its generic codes.
+// =============================================================================
+${
+    import { Diag, ASpan, newDiag, mkSpan } from "./ast.scrml"
+    import { Severity } from "./severity.scrml"
+    import { lex } from "./lex.scrml"
+    import { TC, PTok, toPToks } from "./parse.scrml"
+
+    export type Refusal:struct = {
+        construct: string, section: string, code: string,
+        pattern: string[], glue: string, on: string[], near: boolean, hint: string,
+    }
+    export type SrcFile:struct = { path: string, src: string }
+    export type Relabeled:struct = { parse: Diag[], later: Diag[] }
+
+    // A row with the defaults (`glue` none, `on` the cascade codes, line-scoped).
+    fn row(construct: string, section: string, code: string, pattern: string[], hint: string) -> Refusal {
+        return { construct: construct, section: section, code: code, pattern: pattern, glue: "", on: [], near: false, hint: hint }
+    }
+    fn rowG(construct: string, section: string, code: string, pattern: string[], glue: string, hint: string) -> Refusal {
+        return { construct: construct, section: section, code: code, pattern: pattern, glue: glue, on: [], near: false, hint: hint }
+    }
+    fn rowOn(construct: string, section: string, code: string, pattern: string[], on: string[], near: boolean, hint: string) -> Refusal {
+        return { construct: construct, section: section, code: code, pattern: pattern, glue: "", on: on, near: near, hint: hint }
+    }
+
+    // THE TABLE. Order matters: at a token, the FIRST row whose pattern matches
+    // is the one tried (`for await` before `await`, `use foreign:` before `use`).
+    export fn refusalTable() -> Refusal[] {
+        const U: string = "E-BOOTSTRAP-UNSUPPORTED"
+        // impl#1 workaround (as analyze.scrml dateNowText): impl#1 rewrites an `is` test it sees inside a
+        // string literal, so the word is never written next to its operand in one literal here.
+        const IS: string = "i" + "s"
+        const DOT: string = "."
+        // impl#1 likewise rewrites the word `fn` inside a string literal (to `function`), and a
+        // `Name.member` in one (to `Name_member`): both are built from pieces.
+        const FN: string = "f" + "n"
+        return [
+            // ---- not scrml: the SPEC's own code (§7.2.1 the E-*-NOT-IN-SCRML family) ----
+            row("for await", "§19.9.8", "E-FOR-AWAIT-NOT-IN-SCRML", ["for", "await"], "`for await … of` is not scrml (§19.9.8): there is no `async` / `await`; a server call is written plainly and the compiler splits the body around it (§19.9.3)"),
+            row("try", "§19.1", "E-TRY-NOT-IN-SCRML", ["try", "{"], "`try` is not scrml (§19.1): there is no `try` / `catch` / `finally` — a failure is a value, handled with `!{}`, `?` or `match` (§19)"),
+            row("catch", "§19.1", "E-TRY-NOT-IN-SCRML", ["}", "catch|finally", "...", "{"], "`catch` / `finally` is not scrml (§19.1): there is no `try` / `catch` / `finally` — a failure is a value, handled with `!{}`, `?` or `match` (§19)"),
+            row("throw", "§19.3", "E-THROW-NOT-IN-SCRML", ["throw"], "`throw` is not scrml (§19.3): signal a failure with `fail` and a variant, inside a `!` function"),
+            row("async " + FN, "§48.3.5", "E-FN-005", ["async", FN], "`async` on a `" + FN + "` is not scrml (§48.3.5, §19.9.8): a `" + FN + "` is pure and synchronous; make the server call in a `function`"),
+            row("async", "§19.9.8", "E-ASYNC-NOT-IN-SCRML", ["async"], "`async` is not scrml (§19.9.8): a server call is written plainly and the compiler splits the body around it (§19.9.3)"),
+            row("await", "§19.9.8", "E-AWAIT-NOT-IN-SCRML", ["await"], "`await` is not scrml (§19.9.8): a server call is written plainly and the compiler splits the body around it (§19.9.3)"),
+            rowG("class", "§7.2.1", "E-CLASS-NOT-IN-SCRML", ["class", "$w|{"], "lead", "`class` is not scrml (§7.2.1): declare data with `type T:struct` / `type T:enum` and behaviour with functions"),
+            row("switch", "§17", "E-SWITCH-FORBIDDEN", ["switch", "("], "`switch` is not scrml (§17): branch with `match x { … }` (or `if` / `else`)"),
+            rowG("import(…)", "§21.3.2", "E-DYNAMIC-IMPORT-NOT-IN-SCRML", ["import", "("], "tight", "a dynamic `import(…)` is not scrml (§21.3.2): write a static `import { … } from \"…\"`"),
+            rowOn("any", "§14.1.1", "E-TYPE-ANY-FORBIDDEN", [":", "any"], ["E-TYPE-UNKNOWN", "E-PARSE-TYPE"], false, "`any` is not a scrml type (§14.1.1): write the type the value has (a union `A | B` when it can be several)"),
+            rowOn(FN + " … = expr", "§48.2", "E-FN-EQUALS-BODY", [FN + "|function", "$w", "(", "...", ")", "="], [], false, "a function body is a `{ … }` block, never `= <expr>` (§48.2): write `{ return <expr>; }`"),
+            rowOn(FN + " … -> R = expr", "§48.2", "E-FN-EQUALS-BODY", [FN + "|function", "$w", "(", "...", ")", "-", ">", "...", "="], [], false, "a function body is a `{ … }` block, never `= <expr>` (§48.2): write `{ return <expr>; }`"),
+            rowOn("match-arm guard", "§18.10", "E-SYNTAX-011", ["$v|_", "if"], [], false, "a match arm has no guard clause in v1 (§18.10): match the variant, then branch inside the arm body"),
+            rowOn("nested pattern", "§18.11", "E-SYNTAX-012", ["$v", "(", "$v"], ["E-PARSE-ARM", "E-PARSE-EXPECTED", "E-PARSE-EXPR"], false, "a nested pattern in a binding position is not supported in v1 (§18.11): bind the payload, then `match` it in the arm body"),
+            rowOn("reflect()", "§22.4", "E-META-008", ["reflect", "("], ["E-SCOPE-001"], true, "`reflect()` is a meta-context call (§22.4): it is valid only inside a `^{ }` meta block"),
+            rowOn("x is <value>", "§45.5", "E-EQ-005", ["is", "$n|$s|true|false|@"], [], false, "`" + IS + "` tests absence (`not`, `given`) or a variant, never a value (§45.5): compare a value with `==`"),
+            rowOn("{ @x } shorthand", "§6.1.2", "E-OBJECT-SHORTHAND-CELL", ["!$", "{|,", "@", "$w", "}|,"], ["E-PARSE-OBJECT"], false, "an object-literal shorthand cannot take its key from a cell read (§6.1.2): write the key, `{ x: @x }`"),
+            rowOn("struct field of function type", "§14.3", "E-STRUCT-FUNCTION-FIELD", [":", FN, "("], ["E-PARSE-TYPE", "E-TYPE-UNKNOWN"], false, "a struct field cannot hold a function (§14.3): a function is not value data — keep the data in the struct and the behaviour in a function that takes it"),
+            rowOn("struct field of function type", "§14.3", "E-STRUCT-FUNCTION-FIELD", [":", "(", ")", "-|=>"], ["E-PARSE-TYPE", "E-TYPE-UNKNOWN"], false, "a struct field cannot hold a function (§14.3): a function is not value data — keep the data in the struct and the behaviour in a function that takes it"),
+            // ---- retired by a ruling: named, with what replaces it ----
+            rowOn("flush()", "§6.6.5", "E-SCOPE-001", ["flush", "("], ["E-SCOPE-001"], true, "`flush()` is retired (§6.6.5, S473 D22): a derived value is recomputed when it is read (pull-on-read), so a read after a write already sees the new value — delete the call"),
+            // ---- scrml the bootstrap does not build yet: E-BOOTSTRAP-UNSUPPORTED ----
+            row("partial match", "§18.18", U, ["partial", "match"], "write a full `match` with an `else :>` arm"),
+            rowOn("multi-scrutinee match", "§18.19", U, ["match", "(", "*", ","], [], false, "match one value, and nest a second `match` in its arms"),
+            rowOn("multi-scrutinee match", "§18.19", U, ["match", "(", "@", "$w", ","], [], false, "match one value, and nest a second `match` in its arms"),
+            rowOn("named payload binding", "§18.7", U, ["$v", "(", "$w", ":", "$w"], ["E-PARSE-ARM"], false, "bind the payload positionally, `" + DOT + "V(a, b)`, in declared field order"),
+            row(IS + " <variant>", "§18.17", U, ["is", "$v"], "test the variant with a `match` (an `else :>` arm for the rest)"),
+            rowG("pure function", "§48.9", U, ["pure", FN + "|function"], "lead", "`" + FN + "` is the pure form the bootstrap builds (§48); `pure function` is the deprecated spelling"),
+            rowG("pinned", "§7.6.1", U, ["pinned", FN + "|function|let|const|<"], "lead", ""),
+            row("animationFrame()", "§6.7.9", U, ["animationFrame", "("], ""),
+            rowOn("enum transitions block", "§14.4.0", U, ["transitions", "{"], [], false, "the engine form `<x:T" + "=" + DOT + "V single>` with state-children carries the transition graph in the bootstrap (§66.13)"),
+            rowOn("EnumType" + DOT + "variants", "§14.4.2", U, [".", "variants"], ["E-TYPE-VARIANT", "E-SCOPE-001"], false, ""),
+            rowOn("`::` in an expression", "§14.5", U, [":", ":", "!:"], ["E-PARSE-TRAILING", "E-PARSE-EXPR"], true, "write `.` (`Role" + DOT + "Admin`, `" + DOT + "Admin`); `::` is built in a match-arm pattern only"),
+            rowOn("snippet type", "§14.9", U, ["snippet"], ["E-TYPE-UNKNOWN", "E-PARSE-TYPE", "E-SCOPE-001"], false, ""),
+            row("render", "§16.3", U, ["render", "$w"], "named / parametric slots are OPEN O9 (§66.15.2)"),
+            rowOn("renders on an enum variant", "§19.2", U, ["renders"], ["E-PARSE-TYPE"], false, "render the error in markup where it is handled (`!{}` / `match`)"),
+            rowOn("httpStatus(…) on a variant", "§19.9.2", U, ["httpStatus", "("], ["E-PARSE-TYPE"], false, "the server maps a failure to a status by the variant's name (§19.9.2)"),
+            row(".idempotent()", "§19.9.7", U, [".", "idempotent", "("], ""),
+            row(".idempotent()", "§19.9.7", U, [".idempotent", "("], ""),
+            rowG("^{ } in logic", "§22.2", U, ["^", "{"], "tight", "meta-programming is not in the bootstrap"),
+            rowG("extern", "§23.3", U, ["extern", "$w"], "lead", ""),
+            rowG("r{ } call-char block", "§23.3", U, ["r", "{"], "tight", ""),
+            rowG("use foreign:", "§23.4", U, ["use", "foreign"], "lead", ""),
+            rowG("use", "§41.2", U, ["use", "$w"], "lead", "import the names you need: `import { … } from \"scrml:…\"` (§41.3)"),
+            row("~ pipeline accumulator", "§32", U, ["~"], ""),
+            rowOn("?. optional chaining", "§42.3.6", U, ["?."], [], true, "test presence first: `if (x " + IS + " given) { … x.f … }` (§42.2)"),
+            rowOn("word-form `or`", "§45.9", U, ["or"], ["E-SCOPE-001"], true, "write `||`"),
+            rowOn("word-form `and`", "§45.9", U, ["and"], ["E-SCOPE-001"], true, "write `&&`"),
+            rowG("map literal [:]", "§59", U, ["[", ":", "]"], "tight", "maps (§59, O44) are not in the bootstrap"),
+            rowOn("map type [K: V]", "§59", U, ["[", "$w", ":", "$w", "]"], [], false, "maps (§59, O44) are not in the bootstrap"),
+            rowOn("map literal [k: v]", "§59", U, ["[", "$s|$n", ":"], [], false, "maps (§59, O44) are not in the bootstrap"),
+            rowOn(FN + "(…) => expr", "§48.2.1", "E-FN-ARROW-BODY", [FN, "(", "...", ")", "=>"], [], false, "an anonymous `" + FN + "` takes a block body, `" + FN + "(x: T) { return …; }`; for an inline body write a plain lambda `(x: T) => …` (§48.2.1)"),
+            rowOn("anonymous " + FN + " expression", "§48.2.1", U, [FN, "("], [], false, "declare a named `" + FN + "` and pass its name, or write an arrow `(x: T) => …` where a callback is taken"),
+            rowG("audit @log", "§51.11", U, ["audit", "@"], "lead", ""),
+            rowOn("replay()", "§51.14", U, ["replay", "("], ["E-SCOPE-001"], true, ""),
+            rowOn("@currentUser", "§52.15.1", U, ["@", "currentUser"], ["E-STATE-UNDECLARED", "E-SCOPE-001"], true, "read the session in a server function and pass the value in"),
+            rowG("on mount { }", "§6.7.1a", U, ["on", "mount", "{"], "", "write `<onMount>${ … }</>` (§6.7.1a, S449)"),
+            rowG("const @x = … derived", "§6.6.1", U, ["const", "@"], "", "declare a derived cell `<x=(expr)/>` (§66.9)"),
+            rowOn("new X(…)", "App. D", U, ["new", "$w"], ["E-SCOPE-001"], true, "a host constructor call is not in the bootstrap"),
+            rowOn("field type negation !T", "§14.3", U, [":", "!"], ["E-PARSE-TYPE"], false, ""),
+            rowOn("field type conjunction (!A && !B)", "§14.3", U, [":", "(", "!"], ["E-PARSE-TYPE"], false, ""),
+        ]
+    }
+
+    // The codes a firing replaces file-wide: the parse-structure, unknown-name
+    // and unknown-type codes a construct the bootstrap misreads cascades into.
+    export fn cascadeCode(c: string) -> boolean {
+        return ["E-PARSE-ITEM", "E-PARSE-TRAILING", "E-PARSE-EXPECTED", "E-PARSE-TAG", "E-PARSE-TYPE", "E-PARSE-ARM",
+                "E-PARSE-PROGRAM", "E-PARSE-EXPR", "E-PARSE-UNCLOSED", "E-PARSE-CLOSER", "E-PARSE-DECL-BODY",
+                "E-PARSE-OBJECT", "E-PARSE-LOCAL", "E-PARSE-IMPORT", "E-SCOPE-001", "E-TYPE-UNKNOWN",
+                "E-TYPE-STRUCT-CONTEXT"].indexOf(c) >= 0
+    }
+
+    // The codes a row accepts as its symptom when it names none: the cascade
+    // codes, and the line-local statement codes a misread construct produces.
+    fn symptomCode(c: string) -> boolean {
+        if (cascadeCode(c)) return true
+        return ["E-STMT-MISSING-SEMICOLON", "E-MATCH-ARM-SEPARATOR", "E-STMT-NO-EFFECT", "E-ASSIGN-POSITION",
+                "E-FOR-UNPARENTHESIZED-HEAD", "E-DECL-OPENER-EXPR-UNPARENTHESIZED", "E-STATE-UNDECLARED"].indexOf(c) >= 0
+    }
+
+    // ---- the matcher ----------------------------------------------------------
+    fn refTplPiece(t: PTok) -> boolean { return t.cls == TC.TChunk || t.cls == TC.TIStart || t.cls == TC.TIEnd }
+
+    fn oneMatches(el: string, t: PTok) -> boolean {
+        if (t.cls == TC.End) return false
+        if (el == "*") return true
+        if (el == "$w") return t.cls == TC.Ident || t.cls == TC.Keyword
+        if (el == "$v") return t.cls == TC.Variant
+        if (el == "$n") return t.cls == TC.Num
+        if (el == "$s") return t.cls == TC.Str
+        if (el == "@") return t.cls == TC.At
+        if (t.cls == TC.Str || refTplPiece(t)) return false
+        return t.text == el
+    }
+
+    fn elemMatches(el: string, t: PTok) -> boolean {
+        if (t.cls == TC.End) return false
+        if (el.length > 1 && el.substring(0, 1) == "!") return !elemMatches(el.substring(1), t)
+        for (const a of el.split("|")) {
+            if (oneMatches(a, t)) return true
+        }
+        return false
+    }
+
+    // Where pattern `p` from element `k` matches the tokens from `i`: the index
+    // just past the last matched token, or -1.
+    fn refMatchFrom(ts: PTok[], i: int, p: string[], k: int, line: int) -> int {
+        if (k >= p.length) return i
+        if (i >= ts.length) return -1
+        if (p[k] == "...") {
+            let j: int = i
+            while (j < ts.length) {
+                const r: int = refMatchFrom(ts, j, p, k + 1, line)
+                if (r >= 0) return r
+                const t: PTok = ts[j]
+                if (t.cls == TC.End || t.line != line || t.text == "{" || t.text == ";") return -1
+                j = j + 1
+            }
+            return -1
+        }
+        if (!elemMatches(p[k], ts[i])) return -1
+        return refMatchFrom(ts, i + 1, p, k + 1, ts[i].line)
+    }
+
+    fn glueHolds(ts: PTok[], i: int, end: int, glue: string) -> boolean {
+        if (glue == "tight") {
+            let j: int = i
+            while (j + 1 < end) {
+                if (ts[j].end != ts[j + 1].start) return false
+                j = j + 1
+            }
+            return true
+        }
+        if (glue == "spaced") return end - i < 2 || ts[i].end != ts[i + 1].start
+        if (glue == "lead") return i == 0 || ts[i - 1].line != ts[i].line
+        return true
+    }
+
+    // ---- lines ------------------------------------------------------------------
+    fn refLineStarts(src: string) -> int[] {
+        let out: int[] = [0]
+        let i: int = src.indexOf("\n")
+        while (i >= 0) {
+            out = out.concat([i + 1])
+            i = src.indexOf("\n", i + 1)
+        }
+        return out
+    }
+
+    // The 1-based line holding offset `at`.
+    fn refLineOf(starts: int[], at: int) -> int {
+        let lo: int = 0
+        let hi: int = starts.length - 1
+        while (lo < hi) {
+            const mid: int = lo + Math.floor((hi - lo + 1) / 2)
+            if (starts[mid] <= at) {
+                lo = mid
+            } else {
+                hi = mid - 1
+            }
+        }
+        return lo + 1
+    }
+
+    // One firing: the row, the construct's span, and its lines.
+    type Firing:struct = { r: Refusal, start: int, end: int, first: int, last: int }
+
+    fn refIsError(d: Diag) -> boolean { return d.severity == Severity.Error }
+
+    // Is there a symptom of row `r`'s firing among the file's diagnostics?
+    fn hasSymptom(r: Refusal, start: int, end: int, first: int, last: int, ds: Diag[], starts: int[]) -> boolean {
+        for (const d of ds) {
+            if (refIsError(d)) {
+                const known: boolean = r.on.length == 0 ? symptomCode(d.code) : r.on.indexOf(d.code) >= 0
+                if (known) {
+                    if (r.near) {
+                        if (d.span.start >= start && d.span.start <= end) return true
+                    } else {
+                        const l: int = refLineOf(starts, d.span.start)
+                        if (l >= first && l <= last) return true
+                    }
+                }
+            }
+        }
+        return false
+    }
+
+    // The firings in one file whose front-end diagnostics are `ds`.
+    fn firingsIn(src: string, ds: Diag[]) -> Firing[] {
+        // A closing tag's `</` would let the lexer, which reads the whole file as code, take the
+        // rest of its line for a regex literal (`/p> …`) and hide a construct written after it:
+        // `</` is scanned as `<<` (same length — every span, so every line, is unchanged).
+        const ts: PTok[] = toPToks(lex(src.split("</").join("<<")))
+        const starts: int[] = refLineStarts(src)
+        const table: Refusal[] = refusalTable()
+        let out: Firing[] = []
+        let i: int = 0
+        while (i < ts.length) {
+            let next: int = i + 1
+            let done: boolean = false
+            for (const r of table) {
+                if (!done) {
+                    const end: int = refMatchFrom(ts, i, r.pattern, 0, ts[i].line)
+                    if (end > i && glueHolds(ts, i, end, r.glue)) {
+                        const first: int = ts[i].line
+                        const last: int = ts[end - 1].line
+                        const s: int = ts[i].start
+                        const e: int = ts[end - 1].end
+                        if (hasSymptom(r, s, e, first, last, ds, starts)) {
+                            // a construct that opens a block (`try {`, `transitions {`) owns the
+                            // block's lines: its body is misread with it
+                            const blockLast: int = ts[end - 1].text == "{" ? closerLine(ts, end - 1) : last
+                            out = out.concat([{ r: r, start: s, end: e, first: first, last: blockLast }])
+                            next = end
+                            done = true
+                        }
+                    }
+                }
+            }
+            i = next
+        }
+        return out
+    }
+
+    // The line of the `}` that closes the `{` at `k` (the last token's line when it is never closed).
+    fn closerLine(ts: PTok[], k: int) -> int {
+        let depth: int = 0
+        let j: int = k
+        while (j < ts.length) {
+            const t: PTok = ts[j]
+            if (t.cls == TC.End) return ts[j].line
+            if (!refTplPiece(t) && t.cls != TC.Str) {
+                if (t.text == "{") depth = depth + 1
+                if (t.text == "}") {
+                    depth = depth - 1
+                    if (depth == 0) return t.line
+                }
+            }
+            j = j + 1
+        }
+        return ts[ts.length - 1].line
+    }
+
+    fn refusalDiag(f: Firing, path: string) -> Diag {
+        const r: Refusal = f.r
+        if (r.code == "E-BOOTSTRAP-UNSUPPORTED") {
+            const tail: string = r.hint == "" ? "" : " — " + r.hint
+            return newDiag(r.code, "`" + r.construct + "` (" + r.section + ") is not in the bootstrap yet; it is refused here by name rather than misread" + tail, path, mkSpan(f.start, f.end))
+        }
+        return newDiag(r.code, r.hint, path, mkSpan(f.start, f.end))
+    }
+
+    // Is `d` part of the cascade a firing in its file replaces?
+    fn refReplaced(d: Diag, fs: Firing[], starts: int[]) -> boolean {
+        if (!refIsError(d)) return false
+        if (cascadeCode(d.code)) return true
+        const l: int = refLineOf(starts, d.span.start)
+        for (const f of fs) {
+            if (l >= f.first && l <= f.last) return true
+        }
+        return false
+    }
+
+    fn refKeep(ds: Diag[], path: string, fs: Firing[], starts: int[]) -> Diag[] {
+        let out: Diag[] = []
+        for (const d of ds) {
+            if (d.file != path || !refReplaced(d, fs, starts)) out = out.concat([d])
+        }
+        return out
+    }
+
+    fn refInFile(ds: Diag[], path: string) -> Diag[] {
+        let out: Diag[] = []
+        for (const d of ds) {
+            if (d.file == path) out = out.concat([d])
+        }
+        return out
+    }
+
+    fn refAnyError(ds: Diag[]) -> boolean {
+        for (const d of ds) {
+            if (refIsError(d)) return true
+        }
+        return false
+    }
+
+    // THE ENTRY (slice-m2/lowered.js `frontEnd`): the front end's parse-phase
+    // and later diagnostics, with every table construct in a file that already
+    // failed reported by name and its cascade dropped. The named refusals lead
+    // the later list.
+    export fn relabelRefusals(files: SrcFile[], parse: Diag[], later: Diag[]) -> Relabeled {
+        let p: Diag[] = parse
+        let l: Diag[] = later
+        let named: Diag[] = []
+        for (const f of files) {
+            const mine: Diag[] = refInFile(p, f.path).concat(refInFile(l, f.path))
+            if (refAnyError(mine)) {
+                const fs: Firing[] = firingsIn(f.src, mine)
+                if (fs.length > 0) {
+                    const starts: int[] = refLineStarts(f.src)
+                    for (const x of fs) { named = named.concat([refusalDiag(x, f.path)]) }
+                    p = refKeep(p, f.path, fs, starts)
+                    l = refKeep(l, f.path, fs, starts)
+                }
+            }
+        }
+        return { parse: p, later: named.concat(l) }
+    }
+}

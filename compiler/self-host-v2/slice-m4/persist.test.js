@@ -356,7 +356,7 @@ describe("§6.14 — codes", () => {
   test("E-HOLD-WITHOUT-PERSIST (§6.14.4.3 r2) — `hold=@x` naming a non-persisted cell; `hold=` on a persisted cell and any other operand form are refused", () => {
     const decls = `    let <x:int=0/>\n    let <pt:int=0 persist="local" key="k4"/>`;
     expect(codes(P(decls, `        <section hold=@x><p>\${@x}</p></section>`))).toEqual(["E-HOLD-WITHOUT-PERSIST"]);
-    expect(codes(P(decls, `        <section hold=@nope><p>a</p></section>`))).toEqual(["E-SCOPE-001", "E-HOLD-WITHOUT-PERSIST"]);
+    expect(codes(P(decls, `        <section hold=@nope><p>a</p></section>`))).toEqual(["E-STATE-UNDECLARED", "E-HOLD-WITHOUT-PERSIST"]);
     const held = diagsOf(P(decls, `        <section hold=@pt><p>\${@pt}</p></section>`));
     expect(held.map((x) => x.code)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
     expect(held[0].message).toContain("HOLD");

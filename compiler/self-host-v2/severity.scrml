@@ -11,7 +11,7 @@
 // ast.scrml `newDiag` is the one Diag constructor and reads `severityOf`. The
 // code's prefix is not the severity (§34 makes E-DG-002 a Warning, many W- Info).
 //
-// 268 codes with a §34 severity; 0 PROVISIONAL (no row yet, severity from the
+// 287 codes with a §34 severity; 0 PROVISIONAL (no row yet, severity from the
 // generator's PROVISIONAL table: none); 37 without one (FAIL-CLOSED Error):
 //   E-ASSIGN-CONST — no §34 row
 //   E-ASSIGN-TARGET — no §34 row
@@ -83,6 +83,7 @@ ${
             "E-ARM-TAIL-VALUE" :> Severity.Error
             "E-ASSIGN-004" :> Severity.Error
             "E-ASSIGN-POSITION" :> Severity.Error
+            "E-ASYNC-NOT-IN-SCRML" :> Severity.Error
             "E-ATTR-010" :> Severity.Error
             "E-ATTR-011" :> Severity.Error
             "E-ATTR-BASE-HREF" :> Severity.Error
@@ -93,9 +94,12 @@ ${
             "E-ATTR-STATIC-EXECUTABLE" :> Severity.Error
             "E-ATTR-STYLESHEET-HREF" :> Severity.Error
             "E-ATTR-UNQUOTED-OPERATOR" :> Severity.Error
+            "E-AUTH-001" :> Severity.Error
             "E-AUTH-ATTR-INVALID" :> Severity.Error
+            "E-AWAIT-NOT-IN-SCRML" :> Severity.Error
             "E-CALL-ARITY" :> Severity.Error
             "E-CHANNEL-OUTSIDE-PROGRAM" :> Severity.Error
+            "E-CLASS-NOT-IN-SCRML" :> Severity.Error
             "E-CLOSER-001" :> Severity.Error
             "E-COLON-SHORTHAND-ON-VOID" :> Severity.Error
             "E-COMPONENT-020" :> Severity.Error
@@ -135,6 +139,7 @@ ${
             "E-DERIVED-VALUE-MUTATE" :> Severity.Error
             "E-DERIVED-WITH-VALIDATORS" :> Severity.Error
             "E-DERIVED-WRITE" :> Severity.Error
+            "E-DYNAMIC-IMPORT-NOT-IN-SCRML" :> Severity.Error
             "E-EACH-NOT-SEQUENCE" :> Severity.Error
             "E-EFFECT-NO-DEPS" :> Severity.Error
             "E-EFFECT-WRITE-UNPROVEN" :> Severity.Error
@@ -142,6 +147,7 @@ ${
             "E-EQ-001" :> Severity.Error
             "E-EQ-002" :> Severity.Error
             "E-EQ-003" :> Severity.Error
+            "E-EQ-005" :> Severity.Error
             "E-ERROR-001" :> Severity.Error
             "E-ERROR-002" :> Severity.Error
             "E-ERROR-003" :> Severity.Error
@@ -157,7 +163,11 @@ ${
             "E-ERRORS-002" :> Severity.Error
             "E-FN-003" :> Severity.Error
             "E-FN-004" :> Severity.Error
+            "E-FN-005" :> Severity.Error
             "E-FN-007" :> Severity.Error
+            "E-FN-ARROW-BODY" :> Severity.Error
+            "E-FN-EQUALS-BODY" :> Severity.Error
+            "E-FOR-AWAIT-NOT-IN-SCRML" :> Severity.Error
             "E-FOR-UNPARENTHESIZED-HEAD" :> Severity.Error
             "E-FOREIGN-001" :> Severity.Error
             "E-FOREIGN-002" :> Severity.Error
@@ -216,10 +226,12 @@ ${
             "E-MATCH-ARM-SEPARATOR" :> Severity.Error
             "E-MATCH-ARM-SHORTHAND-AMBIGUOUS" :> Severity.Error
             "E-MATCH-BARE-BINDER" :> Severity.Error
+            "E-META-008" :> Severity.Error
             "E-MW-002" :> Severity.Error
             "E-NAME-COLLIDES-RESERVED" :> Severity.Error
             "E-NAME-COLLIDES-RESERVED-PREFIX" :> Severity.Error
             "E-NAME-COLLIDES-STATE" :> Severity.Error
+            "E-OBJECT-SHORTHAND-CELL" :> Severity.Error
             "E-OUTLET-OUTSIDE-SHELL" :> Severity.Error
             "E-PARAM-TYPE-REQUIRED" :> Severity.Error
             "E-PARSE-001" :> Severity.Error
@@ -297,10 +309,14 @@ ${
             "E-STMT-SPLIT-CONTINUATION" :> Severity.Error
             "E-STRING-METHOD-UNKNOWN" :> Severity.Error
             "E-STRUCT-DUPLICATE-KEY" :> Severity.Error
+            "E-STRUCT-FUNCTION-FIELD" :> Severity.Error
             "E-STYLE-001" :> Severity.Error
             "E-STYLE-VALUE-NOT-STYLE" :> Severity.Error
+            "E-SWITCH-FORBIDDEN" :> Severity.Error
             "E-SYNTAX-002" :> Severity.Error
             "E-SYNTAX-010" :> Severity.Error
+            "E-SYNTAX-011" :> Severity.Error
+            "E-SYNTAX-012" :> Severity.Error
             "E-SYNTAX-044" :> Severity.Error
             "E-SYNTAX-064" :> Severity.Error
             "E-SYNTHESIZED-WRITE" :> Severity.Error
@@ -308,6 +324,8 @@ ${
             "E-TENANT-UNDECLARED" :> Severity.Error
             "E-TEXT-NON-PRIMITIVE" :> Severity.Error
             "E-THEME-TOKEN-UNKNOWN" :> Severity.Error
+            "E-THROW-NOT-IN-SCRML" :> Severity.Error
+            "E-TRY-NOT-IN-SCRML" :> Severity.Error
             "E-TX-CLIENT-MULTI-CALL" :> Severity.Error
             "E-TYPE-001" :> Severity.Error
             "E-TYPE-020" :> Severity.Error
@@ -321,6 +339,7 @@ ${
             "E-TYPE-044" :> Severity.Error
             "E-TYPE-080" :> Severity.Error
             "E-TYPE-082" :> Severity.Error
+            "E-TYPE-ANY-FORBIDDEN" :> Severity.Error
             "E-UNQUOTED-DISPLAY-TEXT" :> Severity.Error
             "E-VALIDATOR-DEAD" :> Severity.Error
             "E-VALIDITY-NO-SURFACE" :> Severity.Error

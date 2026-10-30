@@ -221,9 +221,15 @@ describe("§12 — placement (Client / Server / Ambient; Split detected and refu
 });
 
 describe("§6.6.9 / §12 — a wholly-server body touches no cell", () => {
-  test("E-REACTIVE-003: a server function reads a cell (once per cell)", () => {
+  // s473 D29: a cell read as a BOUND PARAMETER of a `?{}` write, outside a `server` function, is the
+  // more specific §52.11 E-AUTH-001; any other cell read in a wholly-server body stays E-REACTIVE-003.
+  test("E-AUTH-001: a function placed on the server by its `?{}` write binds a cell in it (once per cell)", () => {
     const src = P(DB, `    let <n:int=0/>\n    function save() {\n        ${SQ}\`INSERT INTO t (a) VALUES (\${@n})\`}.run();\n        ${SQ}\`INSERT INTO t (b) VALUES (\${@n})\`}.run();\n    }`);
-    expect(sorted(src)).toEqual(["E-ERROR-002", "E-ERROR-002", "E-REACTIVE-003"]);
+    expect(sorted(src)).toEqual(["E-AUTH-001", "E-ERROR-002", "E-ERROR-002"]);
+  });
+  test("E-REACTIVE-003: a server function reads a cell outside a `?{}` write (once per cell)", () => {
+    const src = P(DB, `    let <n:int=0/>\n    function save() {\n        const v: int = @n;\n        ${SQ}\`INSERT INTO t (a) VALUES (\${v})\`}.run();\n        ${SQ}\`INSERT INTO t (b) VALUES (\${@n + v})\`}.run();\n    }`);
+    expect(sorted(src)).toContain("E-REACTIVE-003");
     expect(diag(src, "E-REACTIVE-003").message).toContain("@n");
   });
 

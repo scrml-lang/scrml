@@ -26,8 +26,10 @@
  *                executed — the stub answers the bootstrap's own client calls over its route
  *                manifest; see `stubFetch`. s468 U1c: a `serverDb` case IS executed — the
  *                bootstrap's OWN server artifact answers them; see `serverFetch`.)
- *   FAIL         the bootstrap handled the case and got it WRONG: a required code missing, a
- *                forbidden code fired, a severity / count mismatch, or a runtime-half mismatch —
+ *   FAIL         the bootstrap handled the case and got it WRONG: a required code missing (a
+ *                DIFFERENT code from any phase — parse, scope, type — is a FAIL, §62.2 D30), a
+ *                forbidden code fired, an unexpected Error-severity PARSE-phase diagnostic
+ *                (`parse-reject`), a severity / count mismatch, or a runtime-half mismatch —
  *                or (a §66 twin only) it emitted an E- code the case does not assert
  *                (`twin-extra-error`: twins are generated, so a stray error is a defect signal).
  *                A FAIL is a bug or a divergence — the most useful output of this probe.
@@ -40,11 +42,14 @@
  *                construct in it (entry or aux file) is not mechanically rewritable by the
  *                `scrml fix` §66 rules, or a `dialect.s66` override excludes it. The reason is
  *                printed. All-or-nothing: a half-migrated file is never graded.
- *   UNSUPPORTED  a §66-dialect case the bootstrap refuses: an unexpected E-BOOTSTRAP-UNSUPPORTED
- *                (sub-reason `bootstrap-unsupported`), or an unexpected Error-severity PARSE-phase
- *                diagnostic (sub-reason `parse-reject` — a construct the bootstrap parser does not
- *                know; a parse-phase Warning / Info lint is an ACCEPTED form, not a reject; the
- *                case list is printed so a real parser bug cannot hide here).
+ *   UNSUPPORTED  a §66-dialect case the bootstrap refuses BY NAME: an unexpected
+ *                E-BOOTSTRAP-UNSUPPORTED (sub-reason `bootstrap-unsupported`) — from the front end
+ *                (the named-refusal table, compiler/self-host-v2/refusals.scrml, among others) or
+ *                a printer refusal — and NOTHING else (SPEC §62.2, S473 D30: "UNSUPPORTED is only
+ *                for E-BOOTSTRAP-UNSUPPORTED"). An unexpected Error-severity PARSE-phase
+ *                diagnostic is a FAIL (sub-reason `parse-reject`): before D30 it was bucketed
+ *                UNSUPPORTED, which hid code drift on error cases and the import-cycle hole. A
+ *                parse-phase Warning / Info lint is an ACCEPTED form, not a reject.
  *   CRASH        the bootstrap THREW (front end, printer, or the runtime half) — not a verdict.
  *   INVALID      the case's own `expect` block is malformed (S365 container policy) — the
  *                contract cannot be evaluated by ANY implementation.
@@ -771,6 +776,23 @@ function runtimeHalfFailures(ex: Record<string, any>, r: { dom: string; state: {
 
 const PARSE_PHASE_HINT = /^E-(PARSE|SYNTAX|CLOSER|UNQUOTED)-/;
 
+/**
+ * S473 D29 / D30 — the §34.2 PARSER SPELLINGS: a bootstrap parser code that is the same rule as a
+ * SPEC code ("one code per rule"; §34.2 rows E-PARSE-NO-NULL / E-PARSE-STRICT-EQ). A case is graded
+ * as if the SPEC code had fired (SPEC §62.2: "A §34.2 parser spelling of a rule … counts as the
+ * expected code" — the PA reading of D29). The rewrite is applied to the bootstrap's diagnostics
+ * before ANY grading, so a required code is met, a forbidden one is caught, and the parse-reject
+ * rule sees the SPEC code (E-SYNTAX-042 is parse-phase by its prefix; E-EQ-004 is not). A new row
+ * needs a §34.2 row naming the bootstrap spelling as an alias — never a counter-only mapping.
+ */
+export const PARSER_SPELLINGS: Readonly<Record<string, string>> = {
+  "E-PARSE-NO-NULL": "E-SYNTAX-042",
+  "E-PARSE-STRICT-EQ": "E-EQ-004",
+};
+export function specSpelling<T extends { code: string }>(ds: T[]): T[] {
+  return ds.map((d) => (PARSER_SPELLINGS[d.code] ? { ...d, code: PARSER_SPELLINGS[d.code] } : d));
+}
+
 export interface ClassifyOptions {
   /** Grade legacy-dialect cases on their generated §66 twin (default true). */
   twins?: boolean;
@@ -883,6 +905,7 @@ async function gradeCase(boot: Bootstrap, c: LoadedCase, g: GradeInput): Promise
   } catch (e) {
     return v("CRASH", "front end threw", { failures: [String((e as Error)?.message ?? e).split("\n")[0]] });
   }
+  fe = { ...fe, parseDiags: specSpelling(fe.parseDiags), diags: specSpelling(fe.diags), infos: specSpelling(fe.infos) };
   const expectedCodes = new Set<string>(ex.codes ?? []);
   const emitted = [...new Set(fe.diags.map((d) => d.code))].sort();
   const unexpected = emitted.filter((code) => !expectedCodes.has(code));
@@ -899,10 +922,15 @@ async function gradeCase(boot: Bootstrap, c: LoadedCase, g: GradeInput): Promise
   // Warning / Info (W-ARM-PIPE-LEGACY, §19.4.5 — the first one) means the parser KNEW the form and
   // accepted it (§34: Warning and Info "do not fail the compile"); it is graded like any other
   // unasserted non-error code (allowed), never bucketed UNSUPPORTED.
+  // S473 D30 (SPEC §62.2 "Grading an implementation against a case"): an unexpected Error-severity
+  // parse-phase diagnostic is a FAIL — the parser rejected or misread the program as written. It is
+  // NOT UNSUPPORTED (only E-BOOTSTRAP-UNSUPPORTED is, above): bucketing it there hid code drift on
+  // error cases (a case expecting E-CTX-001 answered E-PARSE-UNCLOSED) and the import-cycle hole.
   const parseRejects = fe.parseDiags.filter((d) => !expectedCodes.has(d.code) && errorCodes.has(d.code));
-  if (parseRejects.length > 0 || unexpected.some((code) => PARSE_PHASE_HINT.test(code))) {
-    const msgs = parseRejects.slice(0, 3).map((d) => `${d.code}: ${d.message}`);
-    return v("UNSUPPORTED", "parse-reject", { ...base, failures: msgs });
+  if (parseRejects.length > 0 || unexpected.some((code) => PARSE_PHASE_HINT.test(code) && errorCodes.has(code))) {
+    const shown = parseRejects.length > 0 ? parseRejects : fe.diags.filter((d) => !expectedCodes.has(d.code) && PARSE_PHASE_HINT.test(d.code) && errorCodes.has(d.code));
+    const msgs = [...codesHalfFailures(ex, fe.diags, fe.infos), ...shown.slice(0, 3).map((d) => `${d.code}: ${d.message}`)];
+    return v("FAIL", "parse-reject", { ...base, failures: msgs });
   }
 
   const codeFailures = codesHalfFailures(ex, fe.diags, fe.infos);
