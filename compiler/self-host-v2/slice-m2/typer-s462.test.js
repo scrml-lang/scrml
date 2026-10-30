@@ -219,7 +219,9 @@ describe("rule 10 — an unproven annotation is an error", () => {
     expect(codes(MK + "    <v:int=(mk(true) + 1)/>")).toEqual(["E-DECL-TYPE-UNPROVEN"]);
   });
   test("a call's ARGUMENT is not its value — `tw(mk(true))` with `tw -> int` is proven", () => {
-    expect(codes(MK + "    fn tw(x: int) -> int { return x * 2; }\n    <v:int=(tw(mk(true)))/>")).toEqual([]);
+    // s473 (§48.8): rule 10 stays silent (the value is `tw`'s `int`), and the ARGUMENT is now checked —
+    // `mk`'s inferred return is `int | string` (a `function`'s returns of two types are a choice), not `int`
+    expect(codes(MK + "    fn tw(x: int) -> int { return x * 2; }\n    <v:int=(tw(mk(true)))/>")).toEqual(["E-TYPE-031"]);
   });
   test("a declared return, or a proven one, is silent", () => {
     expect(codes("    function mk() -> int { const k: int = 5;\n return k; }\n    <v:int=(mk())/>")).toEqual([]);
@@ -230,7 +232,9 @@ describe("rule 10 — an unproven annotation is an error", () => {
   });
   test("scope: rule 10 is ruled for OWN values — an ATTRIBUTE default `a:int=(mk(true))` is not judged (⚑ surfaced, not widened)", () => {
     const src = "<chip a:int=(mk(true))/> renders <p>${a}</p>\n<program>\n" + MK + "    <main><chip/></main>\n</program>\n";
-    expect(frontEnd(mods, [{ path: "app.scrml", src }]).diags.map((d) => d.code)).toEqual([]);
+    // s473 (§48.8): rule 10 still does not judge it; the attribute default is now checked as any
+    // annotated initializer is — `mk`'s inferred `int | string` into `int` is E-TYPE-031 (was unchecked)
+    expect(frontEnd(mods, [{ path: "app.scrml", src }]).diags.map((d) => d.code)).toEqual(["E-TYPE-031"]);
   });
   test("a CHILD field's own value written `:T` over an unproven call is judged", () => {
     const src = "<card:struct>\n    let <n:int=(mk(true))/>\n</> renders <p>x</p>\n<program>\n" + MK + "    <main><card/></main>\n</program>\n";
