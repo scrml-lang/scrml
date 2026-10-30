@@ -17,10 +17,9 @@
  *      not seen — the inotify measurement noted in the hook stays the primary method.)
  */
 
-import { describe, test, expect, beforeAll, afterAll } from "bun:test";
-import { mkdtempSync, writeFileSync, chmodSync, rmSync, readFileSync, readdirSync, statSync } from "fs";
+import { describe, test, expect } from "bun:test";
+import { readFileSync, readdirSync, statSync } from "fs";
 import { join, relative, dirname, sep } from "path";
-import { tmpdir } from "os";
 import { spawnSync } from "child_process";
 
 const REPO = join(import.meta.dir, "../../..");
@@ -45,18 +44,16 @@ function triggerPatterns() {
     .map((p) => new RegExp("^" + p.replace(/[.+?^${}()[\]\\]/g, "\\$&").replace(/\*/g, ".*") + "$"));
 }
 
-let stub;
-beforeAll(() => {
-  stub = mkdtempSync(join(tmpdir(), "hook-slices-s472-"));
-  writeFileSync(join(stub, "git"), `#!/bin/sh\nprintf '%s\\n' "$STAGED"\n`);
-  chmodSync(join(stub, "git"), 0o755);
-});
-afterAll(() => rmSync(stub, { recursive: true, force: true }));
+// The stub `git` is a bash FUNCTION defined ahead of the decision block, not a script put first on
+// PATH (S473 windows-red): `${stub}:${PATH}` is not a PATH on Windows (`;` delimits there), so the
+// real git ran, nothing was staged, and the slices always read as skipped. A function shadows the
+// `git` command on every OS, and the `< <(git …)` process substitution inherits it.
+const STUB_GIT = `git() { printf '%s\\n' "$STAGED"; }\n`;
 
 function decide(staged) {
-  const env = { ...process.env, PATH: `${stub}:${process.env.PATH}`, STAGED: staged };
+  const env = { ...process.env, STAGED: staged };
   delete env.SCRML_HOOK_SLICES;
-  const r = spawnSync("bash", ["-c", `${decisionBlock()}\necho "RUN_SLICES=$RUN_SLICES"`], { cwd: REPO, env, encoding: "utf8" });
+  const r = spawnSync("bash", ["-c", `${STUB_GIT}${decisionBlock()}\necho "RUN_SLICES=$RUN_SLICES"`], { cwd: REPO, env, encoding: "utf8" });
   expect(r.status).toBe(0);
   return r.stdout.trim();
 }

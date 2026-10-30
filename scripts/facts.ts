@@ -33,11 +33,14 @@
 // House style mirrors scripts/state.ts (plain bun-run TS, readFileSync, anchor find/replace).
 
 import { readFileSync, writeFileSync, readdirSync, existsSync, statSync, lstatSync } from "fs";
-import { join, dirname, relative, extname } from "path";
+import { join, dirname, relative, extname, sep } from "path";
 import { fileURLToPath } from "url";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
-const rel = (p: string) => relative(ROOT, p) || p;
+// Repo-relative paths are DISPLAYED with `/` on every OS (S473 windows-red: on Windows `relative`
+// gave `stdlib\dangling`, so the named refusal read differently per host). Display only; every
+// filesystem call still takes the native path.
+const rel = (p: string) => (relative(ROOT, p) || p).split(sep).join("/");
 const read = (p: string) => readFileSync(p, "utf8");
 
 /**
