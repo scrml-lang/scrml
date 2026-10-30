@@ -1,4 +1,5 @@
 import { CGError } from "./errors.ts";
+import { SERVER_NAVIGATE_FN, NAV_SETTLE_CATCH, SERVER_NAVIGATE_HELPER_LINES } from "./server-navigate.ts";
 import { withHostGlobalAlias } from "./host-global-alias.ts";
 import { drainRefusedLowerings } from "./refused-lowering-errors.ts";
 import { genVar, getVarCounter, setVarCounter } from "./var-counter.ts";
@@ -5891,7 +5892,9 @@ function generateServerJsImpl(
       // §14.8.9 / E-PROTECT-005 — scan THIS author body (protect-active only).
       _protectResponseGate(name, lines.slice(_authorBodyStartCsrf).join("\n"), fnNode.span, "statements");
 
-      lines.push(`  })();`);
+      // §20.1 (S473) — a server-side navigate() ends the body by throwing the navigation
+      // signal; this catch answers it (stripped below from a bundle that never navigates).
+      lines.push(`  })()${NAV_SETTLE_CATCH};`);
       if (_envelope) {
         // §8.9.2 (S449 ruling D) — the envelope ROLLs BACK on a `fail` exit as well as
         // on an exception; only a successful completion commits. A `fail` (and a `?`
@@ -6252,7 +6255,9 @@ function generateServerJsImpl(
       // handler's. Splitting the exit is what let the bare-return class hide:
       // the ONE arm that was exercised by a test asserted a `Response`, and the
       // two that were not asserted a value.
-      lines.push(`  })();`);
+      // §20.1 (S473) — a server-side navigate() ends the body by throwing the navigation
+      // signal; this catch answers it (stripped below from a bundle that never navigates).
+      lines.push(`  })()${NAV_SETTLE_CATCH};`);
       // The OPAQUE-RESULT guard (`_opaqueResultGuard`) — the ONE emitter for this
       // shape, shared with the baseline-CSRF arm and `<endpoint>`. It is placed
       // BEFORE the redact on both of its branches, for two different reasons:
@@ -7898,6 +7903,16 @@ function generateServerJsImpl(
   // call; a module with no handled query is byte-unchanged.
   if (finalEmitted.includes(`${SQL_ATTEMPT_FN}(`)) {
     finalEmitted = injectAfterHeader(finalEmitted, SERVER_SQL_ATTEMPT_HELPER);
+  }
+
+  // §20.1 (S473) — a server-side navigate() lowers to `_scrml_server_navigate(` and every route
+  // handler's body carries the catch that answers it (server-navigate.ts). Inject the helpers
+  // when the bundle navigates; otherwise strip the catch, so a navigate-free module is
+  // byte-unchanged. Checked BEFORE the injection (the helper text names the function itself).
+  if (finalEmitted.includes(`${SERVER_NAVIGATE_FN}(`)) {
+    finalEmitted = injectAfterHeader(finalEmitted, SERVER_NAVIGATE_HELPER_LINES.join("\n"));
+  } else {
+    finalEmitted = finalEmitted.split(NAV_SETTLE_CATCH).join("");
   }
 
   // §13.2 server Promise trap (S462 Q20) — inject the settle assertion IFF a

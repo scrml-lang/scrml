@@ -26,6 +26,7 @@ import {
   type ProtectedColumns,
 } from "./protect-egress.ts";
 import { sqlSkeleton } from "./protect-flow.ts";
+import { serverNavigateCall, navigateFixedOriginOfText } from "./server-navigate.ts";
 import { sqlHoldsOneStatement, refuseMultipleStatements, judgeDriverCallDetail, refusedDriverCallExpr, SQL_TEXT_NOT_READ_MESSAGE, recordProgramStatementRefusal } from "./sql-one-statement-guard.ts";
 // §39.4 boolean-column decode coercion — a `boolean`-declared column crosses the
 // `?{}` SELECT boundary as SQLite INTEGER 1/0; resolve the boolean OUTPUT columns
@@ -770,11 +771,36 @@ function lowerSqlBareSite(sqlContent: string, across: boolean, dbVar: string): s
  * result, `.Home :> navigate("/x")`) soft-navs instead of full-reloading
  * (navigate-wave1b divergence #4). An explicit `.Hard`/`.Soft` modifier is
  * honored + stripped (never forwarded as a runtime arg). The SERVER pipeline
- * (`soft` false) keeps the hard `_scrml_navigate(path)` (a server redirect).
+ * (`soft` false) lowers to `_scrml_server_navigate(path, origin)` — the §20.1 302 that ends
+ * the server function (S473).
  */
 export function rewriteNavigateCalls(expr: string, soft = false): string {
   if (!expr || typeof expr !== "string") return expr;
-  if (!soft) return expr.replace(/\bnavigate\s*\(/g, '_scrml_navigate(');
+  // SERVER (S473, §20.1): every variant is the hard navigation that ends the server function —
+  // `_scrml_server_navigate(path, origin)` (server-navigate.ts), the `.Hard`/`.Soft` modifier
+  // stripped (it used to be forwarded verbatim: `_scrml_navigate("/x", .Hard)` is not JS) and
+  // the literal origin passed for the open-redirect guard. Same per-call balance-parse as the
+  // client arm below.
+  if (!soft) {
+    let sOut = "";
+    let sLast = 0;
+    const sRe = /\bnavigate\s*\(/g;
+    let sm: RegExpExecArray | null;
+    while ((sm = sRe.exec(expr)) !== null) {
+      const openIdx = sm.index + sm[0].length - 1;
+      const parsed = _navBalanceArgs(expr, openIdx);
+      if (!parsed) continue;
+      const args = parsed.args.filter((a) => {
+        const norm = a.replace(/\s+/g, "");
+        return norm !== ".Hard" && norm !== ".Soft";
+      });
+      const pathText = (args[0] ?? "").trim();
+      sOut += expr.slice(sLast, sm.index) + (pathText === "" ? "(void 0)" : serverNavigateCall(pathText, navigateFixedOriginOfText(pathText)));
+      sLast = parsed.closeIdx + 1;
+      sRe.lastIndex = parsed.closeIdx + 1;
+    }
+    return sOut + expr.slice(sLast);
+  }
   // CLIENT: lower EACH navigate() call INDEPENDENTLY. A regex `([\s\S]*?)` for the
   // `.Hard`/`.Soft` modifier can span an intervening navigate() call (two calls in
   // one expression — e.g. a `match` value-arm — would cross-contaminate: the plain
