@@ -49,13 +49,15 @@ I-TAILWIND-NOT-BUILT (D13), E-FIXED-RETIRED (D26), E-SQL-SLOT-IN-LITERAL (D31/S4
 Retired: E-TYPE-012 (D17), E-TYPE-026 (D19), E-REACTIVE-004 (D22).
 Code names for D11 / D13 / D26 are PA readings for bryan's veto.
 
-## Flags (ambiguous — not decided)
-- D7: RESOLVED in review round 1 — Tier 1 stays owed and refused (decisions.md D7 (a)); the user-voice parenthetical was a PA summary error.
-- D15: whether legacy `export { count }` stays E-EXPORT-001 — left as written (minimal reading). decisions.md says "re-pin conformance case `e-export-001-*`"; NOT done (case `conformance/cases/module/e-export-001-export-state-cell-reject` is the legacy form and still holds under the minimal reading).
-- D31 §6.5.3 (`key=` on lifted element) vs §17.4b (header `key`): "needs one canonical form" is a semantics choice; not made.
+## Flags — status
+- D7: RESOLVED — Tier 1 `authority=` / `protect=` stay owed and refused (decisions.md D7 (a)); the user-voice D7 parenthetical was a PA summary error, corrected in user-voice (cited in §52's amendment).
+- D15: the legacy `export { count }` stays E-EXPORT-001 (minimal reading, left as written); the §66 `export let <x/>` is not E-EXPORT-001. The owed re-pin is a clean §66 twin case (follow-up below); the legacy case `conformance/cases/module/e-export-001-export-state-cell-reject` still holds.
+- D31 key form: RULED (review-surfaced 5) — the loop-header `key` (§17.4b) is canonical; §6.5.3 `key=` is legacy (bootstrap refusal with a hint owed); W-KEY-001 takes the header meaning; its duplicate-`key=` meaning is impl#1's carried divergence.
 - D31 §14.12: already carries an S435 supersession marker; nothing added.
+- Open for bryan (raised by the PA): ruling-1 read-then-write snapshot consistency (reads are not rolled back; one SELECT + one UPDATE no longer gets the envelope).
 
 ## Review round 1 (#1682 FIX-FIRST) — done
+(Round 2, re-review r1: §50.2.1 / §50.4.1 / §50.4.2 marked; §8.9 head + §8.9.2 bold trigger marked superseded; "or a write in a loop" moved to the bootstrap interim only; §20.3 reach = written in the block or in a function it calls (impl#1 refuses only the written case — g-impl1-navigate-via-peer-inside-transaction-not-refused-s473); E-TRANSACTION-CONTROL-FLOW says THREE limbs, navigate a refused navigation; W-KEY-001 duplicate meaning = impl#1 carried divergence; key gap retitled; §16 code table extended to `<slot/>`; D7 cites the user-voice correction; direction-of-change note on writes vs queries with the PA flag.)
 - D10: §50.1 restated; §50.2.3, §50.3.2, §50.8.1, §50.8.3, §50.9 bullets struck/marked; §50.10.2 / §50.10.3 / §50.10.4 flipped to Invalid (E-ASSIGN-POSITION); E-ASSIGN-002 rows marked unreachable.
 - D14: limited to function-body LOCALS; "impl#1 already refuses it" removed (false).
 - D7: Tier 1 `authority=` / `protect=` stated as OWED AND REFUSED (decisions.md D7 (a)); the "not decided" flag dropped.
@@ -83,7 +85,8 @@ Code names for D11 / D13 / D26 are PA readings for bryan's veto.
 
 ## Conformance cases whose expected code may change (not edited)
 - D18: none found expecting E-TYPE-042 (it was retired S305).
-- D29: cases expecting E-SYNTAX-042 / E-EQ-004 are met by the bootstrap's E-PARSE-NO-NULL / E-PARSE-STRICT-EQ only if the grader treats the parser spelling as the same rule; under D30 strict grading they would FAIL. Not decided here.
+- D29/D30: DECIDED in review round 1 — §62.2 now says a §34.2 parser spelling counts as the expected code (PA reading, D29 "one code per rule"), so cases expecting E-SYNTAX-042 / E-EQ-004 are met by E-PARSE-NO-NULL / E-PARSE-STRICT-EQ. No case edited.
+- D10: no case edited; cases relying on chained / value-position assignment would now expect E-ASSIGN-POSITION (none located in this lane — the grader change is a follow-up).
 
 ## docs/bootstrap-spec-coverage.md row changes (apply once #1673 lands)
 - §47.1.1a, §47.1.2, §47.1.3, §47.1.4, §47.1.5, §47.3, §47.4 (.1–.3), §47.5 (name-encoding half): SILENT-ABSENT → N/A (impl#1 annex, D4). §47.1.6 and §47.2: REFUSED-LOUD → N/A (annex, D4). §47.1.1b and §47.6 unchanged (normative).
