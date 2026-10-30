@@ -18,7 +18,8 @@ import { spawnSync } from "child_process";
 import { mkdtempSync, writeFileSync, rmSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
-import { findDerivedNumberClaims } from "../../../scripts/claim-gate-c2.js";
+import { findDerivedNumberClaims, scanFiles } from "../../../scripts/claim-gate-c2.js";
+import { surfaceFiles } from "../../../scripts/claim-gate-surface.js";
 
 const ROOT = join(import.meta.dir, "../../..");
 const B = "```";
@@ -66,10 +67,21 @@ describe("claim-gate C2 — derived figures must cite docs/FACTS.md (S473)", () 
     expect(hits("a draft of 9 lines <!-- claim: not-derived -->\nand 12 tests")).toEqual(["12 tests"]);
   });
 
+  // In-process, against the repo root resolved from import.meta.dir: no spawn of the compiling gate
+  // (spawning `claim-gate.js --report` hit bun's 5s default timeout under a loaded CI shard), no
+  // dependence on cwd.
   test("the real public surface carries no uncited derived figure", () => {
-    const r = spawnSync("bun", ["scripts/claim-gate.js", "--report"], { cwd: ROOT, encoding: "utf8" });
-    expect(r.stdout).toContain("claim-gate C2: 0 uncited derived-number claim(s).");
+    const files = surfaceFiles(ROOT);
+    expect(files).toContain("DESIGN.md");
+    expect(files).toContain("README.md");
+    expect(scanFiles(files.map((f) => join(ROOT, f))).map((h) => `${h.file}:${h.line} ${h.match}`)).toEqual([]);
   });
+
+  test("surfaceFiles() is the set claim-gate.js resolves (--list)", () => {
+    const r = spawnSync("bun", ["scripts/claim-gate.js", "--list"], { cwd: ROOT, encoding: "utf8" });
+    const listed = r.stdout.split("\n").filter((l) => /^  \S+\.md$/.test(l)).map((l) => l.trim()).sort();
+    expect(listed).toEqual(surfaceFiles(ROOT));
+  }, 60_000);
 });
 
 describe("scripts/claim-gate.js runs C2 end to end", () => {
@@ -90,11 +102,11 @@ describe("scripts/claim-gate.js runs C2 end to end", () => {
     expect(r.stdout).toContain("claim-gate C2: 1 uncited derived-number claim(s)");
     expect(r.stderr).toContain("C2 uncited derived figure «18,000 lines»");
     expect(r.status).toBe(1);
-  });
+  }, 60_000);
 
   test("a cited figure passes", () => {
     const r = spawnSync("bun", ["scripts/claim-gate.js", good], { cwd: ROOT, encoding: "utf8" });
     expect(r.stdout).toContain("claim-gate C2: 0 uncited derived-number claim(s).");
     expect(r.status).toBe(0);
-  });
+  }, 60_000);
 });
