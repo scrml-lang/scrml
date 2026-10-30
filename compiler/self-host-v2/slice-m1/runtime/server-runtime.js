@@ -317,13 +317,20 @@ export function route(desc, run) {
 const TENANT_CATALOGUE = {
   sqlite: "SELECT m.name AS name FROM sqlite_master m JOIN pragma_table_xinfo(m.name) p WHERE m.type IN ('table', 'view') AND lower(p.name) = 'tenant_id'",
   postgres: "SELECT c.relname AS name FROM pg_attribute a JOIN pg_class c ON c.oid = a.attrelid JOIN pg_namespace n ON n.oid = c.relnamespace WHERE a.attnum > 0 AND NOT a.attisdropped AND lower(a.attname) = 'tenant_id' AND c.relkind IN ('r', 'v', 'm', 'f', 'p') AND NOT c.relispartition AND n.nspname NOT IN ('pg_catalog', 'information_schema')",
-  mysql: "SELECT table_name AS name FROM information_schema.columns WHERE table_schema = DATABASE() AND lower(column_name) = 'tenant_id'",
+  // s473 r1 (F2): EVERY non-system schema (a `LIKE otherdb.t`, a second database on the server), not only DATABASE()
+  mysql: "SELECT CONCAT(table_schema, '.', table_name) AS name FROM information_schema.columns WHERE lower(column_name) = 'tenant_id' AND table_schema NOT IN ('mysql', 'information_schema', 'performance_schema', 'sys')",
 };
 
 async function tenantRelations(host, conn) {
   if (host && typeof host.tenantRelations === "function") return [...(await host.tenantRelations(conn.desc))].map(String);
   const text = TENANT_CATALOGUE[conn.desc.driver];
   if (text === undefined) throw new Error(`no catalogue query for the ${conn.desc.driver} driver`);
+  if (conn.desc.driver === "mysql") {
+    // s473 r1 (F2): a connection with no default database cannot say which schema it serves — not checked, not clean
+    const cur = await conn.open()(sqlText(["SELECT DATABASE() AS db"]));
+    const db = cur && cur[0] ? cur[0].db ?? cur[0].DB : null;
+    if (db === null || db === undefined) throw new Error("the connection has no default database (DATABASE() is NULL)");
+  }
   const rows = await conn.open()(sqlText([text]));
   const out = [];
   for (const r of rows ?? []) {
@@ -374,7 +381,13 @@ export function tenantGate(host, conns) {
       if (ok) return true;
       if (pending !== null) return pending;
       if (!force && Date.now() < nextAt) return false;
-      pending = check().finally(() => { pending = null; });
+      // s473 r1 (F7): a check that itself throws backs off too (it fails closed either way)
+      pending = check().catch((e) => {
+        logLine(host, `scrml server: the tenant check failed — ${messageOf(e)}`);
+        delay = delay === 0 ? 1000 : Math.min(delay * 2, 30000);
+        nextAt = Date.now() + delay;
+        return false;
+      }).finally(() => { pending = null; });
       return pending;
     },
   };

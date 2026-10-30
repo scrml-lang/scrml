@@ -39,8 +39,30 @@ untouched.
 base ok 68 → head ok 67. Newly refused: 1 — conformance/cases/components/post-ce-residual-component-reject
 (`<program><Unknown/></program>`, expects E-COMPONENT-035: a FAIL case that now PASSES). 84 already-
 failing files gain/lose codes (E-COMPONENT-035, the new SQL codes; a few E-SCOPE-001 nested under an
-unknown capitalized tag replaced by E-COMPONENT-035). 0 artifact changes. bootstrap-conformance:
-PASS 263 → 264, FAIL 49 → 48.
+unknown capitalized tag replaced by E-COMPONENT-035). bootstrap-conformance: PASS 263 → 264,
+FAIL 49 → 48. ARTIFACTS (corrected, review r1 F9): the corpus measurement showed 0 artifact
+changes only because none of the 67 compiling files has a reachable database; every server artifact
+WITH a database now passes its connections to the server as a third argument —
+`rt.server(host$, [routes], [db$N])` — so the tenant gate can check them.
+
+## Known side effect (review r1 F4 — documented, not changed)
+The compile-time scan opens a SQLite file read-only (`new Database(path, { readonly: true })`). A
+database in WAL mode may then get `-shm` / `-wal` side files next to it (SQLite creates the shared
+memory index for any reader). We deliberately do NOT open with `immutable=1`: that tells SQLite to
+ignore the WAL, so the scan would read a stale snapshot and could miss a `tenant_id` table that lives
+only in the WAL — a fail-open.
+
+## Review r1 (#1675, FIX-FIRST) — fixed
+- F1 (MED): a `LIKE` copy in a `CREATE TABLE` column list (`(LIKE tmpl INCLUDING ALL)`,
+  `(id INTEGER, LIKE orders)`) is NOT-ADMITTED (sql.scrml createVerdict); pg / mysql / sqlite tests.
+- F2 (LOW): the MySQL catalogue reads every non-system schema; a connection with DATABASE() NULL is
+  "could not be checked" (503).
+- F3 (LOW): a db path that is not a regular file (FIFO, directory) is not opened — "could not check"
+  E-TENANT-UNDECLARED, no hang.
+- F7 (INFO): a check that throws internally backs off too.
+- F8 (INFO): the T3 limb-(a) tripwire regex also catches bare Node builtins and `require` / `import()`.
+- F5 / F6 left for bryan (coordinator): the envelope trigger is lexical, not transitive; `PRAGMA
+  journal_mode = OFF` is admitted (it is on the SPEC's list).
 
 ## Log
 - branch cut from origin/main 741a2b51c; baseline measured.

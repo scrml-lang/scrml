@@ -390,10 +390,18 @@ function tenantScan(core: any, root: string, sources: Map<string, string>): Diag
     const path = isAbsolute(t) ? t : resolve(dirname(declaring), t);
     if (seen.has(path) || !existsSync(path)) continue;
     seen.add(path);
+    // s473 r1 (F3): only a regular file is opened — a FIFO would block the compile forever, a directory
+    // or device is no database; each is unknown, and unknown is not clean
+    let regular = false;
+    try { regular = statSync(path).isFile(); } catch { regular = false; }
     const src = sources.get(declaring);
     const at = src !== undefined && src.indexOf(String(d.target)) >= 0 ? lineCol(src, src.indexOf(String(d.target))) : undefined;
     const diag = (message: string): Diagnostic => ({ severity: "error", code: "E-TENANT-UNDECLARED", message, file: declaring, line: at?.line, col: at?.col });
     const fix = "Declare it in `<schema>` so the tenant floor scopes it (`<schema>` / `<db tables=>` are not in the bootstrap yet, so on the bootstrap the tenant set is empty), or — when its rows are not tenant data — rename the column; a view is not a declaration: drop it or rename the column (§14.8.10, S456)";
+    if (!regular) {
+      out.push(diag(`\`${shown(path)}\` (a SQLite database path) is not a regular file, so the compiler could not check it for a \`tenant_id\` relation outside the compilation's tenant set — unknown is not clean (§14.8.10 item (2))`));
+      continue;
+    }
     let found: string[] = [];
     try {
       const db = new Database(path, { readonly: true });

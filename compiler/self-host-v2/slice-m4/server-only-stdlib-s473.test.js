@@ -72,7 +72,10 @@ function filesUnder(d) {
   return out;
 }
 const stripComments = (s) => s.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/(^|[^:"'`])\/\/[^\n]*/g, "$1");
-const HOST_REACH = /\bBun\.|\bprocess\.|from\s+["']bun["']|["']bun:|["']node:/;
+// r1 (F8): also a BARE Node builtin (`from "fs"`, `require("fs")`, `import("path")`) — Bun resolves it
+// exactly like `node:fs` — and any `require(…)` / `import(…)` of `bun`.
+const NODE_BUILTINS = "assert|async_hooks|buffer|child_process|cluster|crypto|dgram|diagnostics_channel|dns|domain|events|fs|fs/promises|http|http2|https|inspector|module|net|os|path|perf_hooks|process|querystring|readline|repl|stream|string_decoder|timers|tls|trace_events|tty|url|util|v8|vm|wasi|worker_threads|zlib";
+const HOST_REACH = new RegExp(String.raw`\bBun\.|\bprocess\.|["']bun:|["']node:|(?:from\s+|\brequire\s*\(\s*|\bimport\s*\(\s*)["'](?:bun|${NODE_BUILTINS})["']`);
 
 describe("§12.2 T3 — the bootstrap's server-only set covers the criterion", () => {
   test("limb (a): every stdlib module whose implementation reaches Bun.* / process.* / bun / bun:* / node:* is refused", () => {

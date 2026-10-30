@@ -16,7 +16,7 @@
 
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
 import { join } from "node:path";
-import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, writeFileSync, rmSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { Database } from "bun:sqlite";
 import { loadM2, frontEnd } from "./harness.js";
@@ -186,6 +186,20 @@ describe("6 — §14.8.10 item (1): the program-body allow-list", () => {
     }
   });
 
+  test("review r1 F1: a `LIKE` copy is not admitted — on postgres:// and mysql:// (the reviewer's probes)", () => {
+    const on = (db, sql) => `<program db="${db}">\n    function mk() -> int {\n        ${SQ}\`${sql}\`}.run() !{ _ :> { return 0; } };\n        return 1;\n    }\n    function go() { const r: int = mk() !{ .Transport(t) :> return }; }\n    <main><button onclick=go()>a</button></main>\n</program>\n`;
+    for (const db of ["postgres://u:p@localhost/app", "mysql://u:p@localhost/app", "./app.db"]) {
+      for (const sql of ["CREATE TABLE IF NOT EXISTS copy (LIKE tmpl INCLUDING ALL)", "CREATE TABLE copy (LIKE orders INCLUDING ALL)", "CREATE TABLE IF NOT EXISTS copy (id INTEGER, LIKE orders)",
+        "CREATE TABLE copy (LIKE orders EXCLUDING DEFAULTS, x INTEGER)", "CREATE TABLE copy (LIKE orders)", "CREATE TABLE copy LIKE orders"]) {
+        const e = errs(on(db, sql));
+        expect([db, sql, e.map((d) => d.code)]).toEqual([db, sql, ["E-SQL-PROGRAM-STATEMENT-NOT-ADMITTED"]]);
+      }
+    }
+    expect(errs(on("postgres://u:p@localhost/app", "CREATE TABLE copy (LIKE orders)"))[0].message).toContain("`LIKE` copy");
+    // near-miss: a quoted column named like, and `LIKE` as an operator in a CHECK, are not a copy
+    expect(codes(fnWith("CREATE TABLE t (\"like\" TEXT, b TEXT CHECK (b LIKE 'a%'))"))).toEqual([]);
+  });
+
   test("every other statement is not admitted", () => {
     for (const sql of ["CREATE VIEW v AS SELECT 1", "CREATE TABLE t AS SELECT * FROM u", "CREATE TABLE main.t (a INT)", "DROP TABLE t", "ALTER TABLE t RENAME TO u", "ALTER TABLE t ADD a INT, ADD b INT",
       "CREATE VIRTUAL TABLE f USING fts4(title)", "CREATE VIRTUAL TABLE f USING fts5(title, evil = 1)", "PRAGMA writable_schema = 1", "ATTACH 'x.db' AS y", "VACUUM", "SET ROLE none", "EXPLAIN SELECT 1",
@@ -322,6 +336,38 @@ describe("1 — §14.8.10 item (3): the built server checks each database before
     expect(logs.join("\n")).toContain("could not be checked");
   });
 
+  test("review r1 F2: MySQL — every non-system schema is asked; no default database is 'could not be checked'", async () => {
+    const s = await srt();
+    const seen = [];
+    const mk = (answer) => {
+      const logs = [];
+      const host = { connect: () => (strings) => { seen.push(strings.join("?")); return Promise.resolve(answer(strings.join("?"))); }, log: (l) => logs.push(l), respond };
+      const conn = s.connection(host, { driver: "mysql", target: "mysql://h/app", file: "app.scrml" });
+      return { logs, server: s.server(host, [s.route(ROUTE, async () => 7)], [conn]) };
+    };
+    const nodb = mk((q) => (q.includes("DATABASE()") ? [{ db: null }] : []));
+    expect((await nodb.server.fetch(req(ROUTE.path))).status).toBe(503);
+    expect(nodb.logs.join("\n")).toContain("could not be checked");
+    const other = mk((q) => (q.includes("SELECT DATABASE()") ? [{ db: "app" }] : [{ name: "otherdb.orders" }]));
+    expect((await other.server.fetch(req(ROUTE.path))).status).toBe(503);
+    expect(other.logs.join("\n")).toContain("`otherdb.orders`");
+    expect(seen.some((q) => q.includes("NOT IN ('mysql', 'information_schema', 'performance_schema', 'sys')") && !q.includes("= DATABASE()"))).toBe(true);
+    const clean = mk((q) => (q.includes("SELECT DATABASE()") ? [{ db: "app" }] : []));
+    expect((await clean.server.fetch(req(ROUTE.path))).status).toBe(200);
+  });
+
+  test("review r1 F7: a check that throws internally backs off (no re-check on every request) and stays 503", async () => {
+    const s = await srt();
+    let asked = 0;
+    const host = { respond, log: () => {}, tenantRelations: () => { asked++; throw new Error("internal"); } };
+    const conn = s.connection(host, { driver: "sqlite", target: "./x.db", file: "app.scrml" });
+    const server = s.server(host, [s.route(ROUTE, async () => 7)], [conn]);
+    expect((await server.fetch(req(ROUTE.path))).status).toBe(503);
+    expect((await server.fetch(req(ROUTE.path))).status).toBe(503);
+    expect((await server.fetch(req(ROUTE.path))).status).toBe(503);
+    expect(asked).toBe(1);
+  });
+
   test("near-misses: no tenant relation serves; a program with no database is not gated", async () => {
     const t = await make(["CREATE TABLE orders (id INTEGER, item TEXT)"]);
     expect((await t.server.fetch(req(ROUTE.path))).status).toBe(200);
@@ -379,6 +425,19 @@ describe("1 — §14.8.10 item (2): a SQLite file the compile opens is scanned f
     expect(errCodes(await compileSource(gen))).toEqual(["E-TENANT-UNDECLARED"]);
     const pdb = project("pdb", ["CREATE TABLE orders (id INTEGER, item TEXT, tenant_id INTEGER)"], `<program db="./app.db">\n    function n() -> int {\n        ${SQ}\`SELECT id FROM orders\`}.all() !{ _ :> { return 0; } };\n        return 1;\n    }\n    <main><p>x</p></main>\n</program>\n`);
     expect(errCodes(await compileSource(pdb))).toEqual(["E-TENANT-UNDECLARED"]);
+  }, 120000);
+
+  test("review r1 F3: a FIFO (or a directory) at the db path is not opened — 'could not check', no hang", async () => {
+    const f = project("fifo", null, PROBE_T1_TENANT);
+    const fifo = join(f, "..", "app.db");
+    const mk = Bun.spawnSync(["mkfifo", fifo]);
+    expect(mk.exitCode).toBe(0);
+    const r = await compileSource(f);
+    expect(errCodes(r)).toEqual(["E-TENANT-UNDECLARED"]);
+    expect(r.diagnostics[0].message).toContain("not a regular file");
+    const d = project("dir", null, PROBE_T1_TENANT);
+    mkdirSync(join(d, "..", "app.db"));
+    expect(errCodes(await compileSource(d))).toEqual(["E-TENANT-UNDECLARED"]);
   }, 120000);
 
   test("a file that is not a SQLite database is unknown, and unknown is not clean", async () => {

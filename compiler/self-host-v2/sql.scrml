@@ -1108,6 +1108,14 @@ ${
         if (!isP(at(ts, after), "(")) return notAdmitted("a `CREATE TABLE` is admitted only with a spelled column list (`CREATE TABLE … AS`, a `LIKE` copy and the like create a relation whose columns are not spelled)")
         const close: int = closeParen(ts, after)
         if (close < 0) return notAdmitted("its column list does not close")
+        // s473 r1 (F1): a `LIKE` copy inside the column list — Postgres `(LIKE tmpl INCLUDING ALL)`,
+        // `(id INTEGER, LIKE tmpl)`, MySQL `(LIKE tmpl)` — copies another relation's columns
+        // (a `tenant_id` included) into a table nobody declared: §14.8.10 item (1) names "a `LIKE`
+        // copy" NOT-ADMITTED (the E-SCHEMA-014(e) shape). An item that begins with an UNQUOTED
+        // `LIKE` is refused whatever follows it (`like` is reserved; a column so named is quoted).
+        for (const s of itemStarts(ts, after, close)) {
+            if (isWord(at(ts, s)) && at(ts, s).w == "LIKE") return notAdmitted("a `LIKE` copy in the column list copies another relation's columns (a `tenant_id` included) into a table no `<schema>` declares")
+        }
         // optionally SQLite's `WITHOUT ROWID` / `STRICT`, comma-separated
         let m: int = close + 1
         while (m < ts.length) {
