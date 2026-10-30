@@ -11,15 +11,13 @@
 // ast.scrml `newDiag` is the one Diag constructor and reads `severityOf`. The
 // code's prefix is not the severity (§34 makes E-DG-002 a Warning, many W- Info).
 //
-// 277 codes with a §34 severity; 0 PROVISIONAL (no row yet, severity from the
-// generator's PROVISIONAL table: none); 39 without one (FAIL-CLOSED Error):
+// 279 codes with a §34 severity; 0 PROVISIONAL (no row yet, severity from the
+// generator's PROVISIONAL table: none); 37 without one (FAIL-CLOSED Error):
 //   E-ASSIGN-CONST — no §34 row
-//   E-ASSIGN-POSITION — no §34 row
 //   E-ASSIGN-TARGET — no §34 row
 //   E-BOOTSTRAP-REDECLARE — no §34 row
 //   E-BOOTSTRAP-UNSUPPORTED — no §34 row
 //   E-DECL-AS — no §34 row
-//   E-DECL-ELEMENT-NAME-COLLIDES — no §34 row
 //   E-DECL-FIELD-TAG-NEEDS-STAR — no §34 row
 //   E-DECL-HANDLE-NOT-NARROWED — no §34 row
 //   E-DECL-ILLEGAL-FIELD-NAME — no §34 row
@@ -83,6 +81,7 @@ ${
             // §34 Severity: Error
             "E-ARM-TAIL-VALUE" :> Severity.Error
             "E-ASSIGN-004" :> Severity.Error
+            "E-ASSIGN-POSITION" :> Severity.Error
             "E-ASYNC-NOT-IN-SCRML" :> Severity.Error
             "E-ATTR-010" :> Severity.Error
             "E-ATTR-011" :> Severity.Error
@@ -119,6 +118,7 @@ ${
             "E-DB-CELL-EDIT-GRANT" :> Severity.Error
             "E-DB-CELL-SERVER-READ" :> Severity.Error
             "E-DB-CELL-WRITE-OUTSIDE-BLOCK" :> Severity.Error
+            "E-DECL-ELEMENT-NAME-COLLIDES" :> Severity.Error
             "E-DECL-TYPE-NOT-INFERABLE" :> Severity.Error
             "E-DECL-TYPE-REQUIRED-AT-BOUNDARY" :> Severity.Error
             "E-DECL-TYPE-UNPROVEN" :> Severity.Error
