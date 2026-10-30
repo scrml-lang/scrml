@@ -126,7 +126,7 @@ describe("§4.1 — an unknown element is a compile error, never an inert elemen
     clean(P(`        <x-unknown-thing>x</x-unknown-thing>`));
   });
   test("its attributes and children are still judged", () => {
-    expect(codes(P(`        <frobnicate title=@nope><blorp/></frobnicate>`))).toEqual(["E-MARKUP-001", "E-SCOPE-001", "E-MARKUP-001"]);
+    expect(codes(P(`        <frobnicate title=@nope><blorp/></frobnicate>`))).toEqual(["E-MARKUP-001", "E-STATE-UNDECLARED", "E-MARKUP-001"]);
   });
   test("HTML (any case), SVG, MathML and custom elements compile", () => {
     clean(P(`        <section><my-widget>a</my-widget><svg><g><feGaussianBlur/><clipPath/></g></svg><math><mrow/></math><DIV>x</DIV></section>`));

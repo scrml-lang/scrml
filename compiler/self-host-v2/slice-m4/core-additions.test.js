@@ -164,13 +164,17 @@ describe("2 — the host call (Expr.Host: `Date.now()` only)", () => {
 
   // r2 F4 (S239 review): the restriction holds through a helper.
   const h = `    function h() -> number { return Date.now() + 1; }`;
-  test("a `fn` calling a `function` → E-FN-003 (§48.6.2) — so a `fn` never reaches the clock through a helper", () => {
+  // s473 D29: a `fn` calling a function that reads the clock is the more specific §48.3.4 E-FN-004
+  // (a non-deterministic call); a `fn` calling any other `function` stays §48.6.2 E-FN-003.
+  test("a `fn` calling a clock-reading `function` → E-FN-004 (§48.3.4) — so a `fn` never reaches the clock through a helper", () => {
     const d = run(P(`${h}\n    fn f() -> number { return h(); }`, `        <p>x</p>`)).diags;
-    expect(d.map((x) => x.code)).toEqual(["E-FN-003"]);
-    expect(d[0].message).toContain("§48.6.2");
+    expect(d.map((x) => x.code)).toEqual(["E-FN-004"]);
+    const g = run(P(`    function g() -> number { return 1; }\n    fn f() -> number { return g(); }`, `        <p>x</p>`)).diags;
+    expect(g.map((x) => x.code)).toEqual(["E-FN-003"]);
+    expect(d[0].message).toContain("§48.3.4");
     expect(d[0].message).toContain("reads the clock");
-    // two levels: the `fn` calls a `function` that calls the clock helper
-    expect(codes(P(`${h}\n    function g() -> number { return h(); }\n    fn f() -> number { return g(); }`, `        <p>x</p>`))).toEqual(["E-FN-003"]);
+    // two levels: the `fn` calls a `function` that calls the clock helper (the summary's `clock` is transitive)
+    expect(codes(P(`${h}\n    function g() -> number { return h(); }\n    fn f() -> number { return g(); }`, `        <p>x</p>`))).toEqual(["E-FN-004"]);
     // a `function` with no clock is still not callable from a `fn` (§48.6.2: no purity guarantee)
     const d2 = run(P(`    function k() -> int { return 1; }\n    fn f() -> int { return k(); }`, `        <p>x</p>`)).diags;
     expect(d2.map((x) => x.code)).toEqual(["E-FN-003"]);

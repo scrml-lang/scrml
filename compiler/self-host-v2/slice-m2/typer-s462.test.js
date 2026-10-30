@@ -131,8 +131,8 @@ describe("rule 7 — outside the set is E-DECL-TYPE-NOT-INFERABLE", () => {
   test("a CONDITION reading the failed cell is not a second report (E-COND-NOT-BOOLEAN stays silent — the field's own code owns it)", () => {
     expect(codes("    let <f:bool=true/>\n    <r=(!@f)/>", "<p if=@r>x</p>")).toEqual(["E-DECL-TYPE-NOT-INFERABLE"]);
   });
-  test("no report when an Error already lies inside the initializer (E-SCOPE-001 owns `@nope`)", () => {
-    expect(codes("    <r=(@nope + 1)/>")).toEqual(["E-SCOPE-001"]);
+  test("no report when an Error already lies inside the initializer (E-STATE-UNDECLARED owns `@nope`, s473 D29)", () => {
+    expect(codes("    <r=(@nope + 1)/>")).toEqual(["E-STATE-UNDECLARED"]);
   });
   test("UNSUPPORTED — an untyped ATTRIBUTE is refused by the bootstrap parser whole (literal or not), so the attribute limb has no fire site", () => {
     const c = frontEnd(mods, [{ path: "app.scrml", src: "<chip a:int=1 b=(@base * 2)/> renders <p>${a}</p>\n<program>\n    let <base:int=1/>\n    <main><chip/></main>\n</program>\n" }]).diags.map((d) => d.code);
