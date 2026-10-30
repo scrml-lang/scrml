@@ -2261,6 +2261,8 @@ bind-attr ::= 'bind:' attribute-name '=' '@' identifier ('.' identifier)*
     - `enum`: `EnumTypeName_toEnum[event.target.value]` ~~`?? event.target.value`~~ *(raw-string
       fallback struck S440 — an unmatched value is handled by the S440 text directly below)* — where
       `EnumTypeName_toEnum` is the compiler-generated lookup table for the enum type (§14.4.1).
+      *(S473 D4: the table name is impl#1's output form; the language rule is the result — the
+      variant whose name exactly matches the value, i.e. `E.parse(event.target.value)`, §14.4.1.)*
       ~~The `?? event.target.value` fallback preserves the raw string if no variant matches.~~
       *(superseded S440 — an unmatched value never writes a stray string:)* **If no variant
       matches:** when the cell's type admits `not` (`E | not`), the write stores `not`; otherwise
@@ -7975,7 +7977,7 @@ type SidebarMode:enum = { Open, Collapsed }
 
 - **O-061-1** — The write-failure status property (§6.14.2 rule 6): its **name**, its **shape** (boolean vs a failure-reason enum), and whether a later successful write clears it and re-syncs the whole value.
 - ~~**O-061-2** — **Explicit pre-paint opt-in** for cells other than a theme mode cell — bryan's stated preference for option (ii) generally, via an explicit author opt-in; he does not know what that surface would look like. **Banked as dpa-062.**~~ **CLOSED S444 → §6.14.4** (dpa-062 RULED: cell-level `prepaint` = REFLECT only + region-level `hold=@cell`). *ruling:user-voice-scrml.md S444 "c" / "recs" · dd:prepaint-opt-in-dpa-062-2026-09-30*
-- **O-061-3** — The stored **envelope** (e.g. a version marker or a §47.1.4 type-fingerprint field). Under the call-4 ruling a fingerprint mismatch is not by itself a discard trigger, so what, if anything, the envelope carries is open.
+- **O-061-3** — The stored **envelope** (e.g. a version marker or a type-fingerprint field ~~(§47.1.4)~~ — *S473 D4: §47.1.4 is an impl#1 annex, so a fingerprint, if the envelope carries one, is defined by §6.14 itself, not by the §47 encoding*). Under the call-4 ruling a fingerprint mismatch is not by itself a discard trigger, so what, if anything, the envelope carries is open.
 - **O-061-4** — Whether the §55 validators are part of the "full declared contract" a restored value is decoded against, or only type-level contracts (refinements, sequence bounds, lifecycles).
 - **O-061-5** — A cross-tab `storage`-event value: is it judged as a write under the §66.11 write contract (e.g. `rule=` guards) or applied as construction-like hydration? ~~What happens when it fails to decode (keep the current value, or take the default) and when the key is removed in the other tab? *(S449: a reset now removes the key, §6.14.2 rule 9, so "the key is removed in the other tab" is the cross-tab face of a reset; the rec pack's lean is that the other tab takes its default, i.e. performs the same reset — recorded, not ruled.)*~~ **Failure halves CLOSED S451 → §6.14.2 rule 5** (an undecodable cross-tab value or a removed key: the cell takes its default and never writes back). *ruling:user-voice-scrml.md S451 "your rec, a"* The write-contract-vs-hydration half stays OPEN.
 - ~~**O-061-6** — Whether the restore at construction fires `when @x changes` effects. *(S447: … Read as settled by S447 2b for effects; the PA flags it for confirmation.)*~~ **CLOSED S449 (confirmed — rec pack V3):** a restore at construction fires no `<effect>` and no `reset-on=` reset (§6.7.4 "Not on mount"; §6.8.4 rule 7). *ruling:user-voice-scrml.md S449 item 7 — *"**`<effect>` OPEN items — accept the rec pack** (`docs/deep-dives/effect-open-items-rec-pack-2026-10-02.md`) … the three PA readings in their veto window confirmed."**
@@ -12102,6 +12104,8 @@ type Shape:enum = {
 
 #### 14.4.0 Transition Rules Cross-Reference
 
+> **SUPERSEDED S473 (D8)** — type-level `transitions {}` is dropped; field `rule=` (§66.13) supersedes it (§51.2). Record only. *(Provenance: ruling:user-voice-scrml.md S473 D8 "your recs on all".)*
+
 **Added:** 2026-04-08 — §51 cross-reference.
 
 An enum type body MAY include a `transitions {}` block following the variant list. The
@@ -12196,8 +12200,14 @@ ${ @issues = ?{`SELECT * FROM issues`}.all().map(row => ({
 
 - `TypeName.toEnum(str)` SHALL return the matching enum variant string if `str` exactly
   matches a unit variant name (case-sensitive), or `not` if no match is found.
-- The compiler SHALL emit a lookup table `const TypeName_toEnum = { ... }` in the client
-  bundle for every enum type with at least one unit variant.
+- ~~The compiler SHALL emit a lookup table `const TypeName_toEnum = { ... }` in the client
+  bundle for every enum type with at least one unit variant.~~ *(demoted S473 D4 — an output form,
+  not a language obligation.)* impl#1 emits a lookup table `const TypeName_toEnum = { ... }` in the
+  client bundle for every enum type with at least one unit variant; any implementation MAY realize
+  the lookup however it likes, provided `toEnum` / `parse` returns what the first statement above
+  says. **Provenance:** ruling:user-voice-scrml.md S473 D4 "your recs on all" — *"The §14.4.1 "SHALL
+  emit a TypeName_toEnum table" output-form sentence gets the same treatment."* · supersedes: the
+  struck sentence. Resolves `g-spec-toenum-lookup-table-output-form-s473`.
 - Using `toEnum()` inside `.map()` on a query result is the standard idiom for enum-typed
   DB columns and is fully supported.
 - Full auto-coercion (compiler-injected `.map()` at query boundaries) is deferred to the
@@ -22678,7 +22688,7 @@ The `test-bind` declaration form provides scope-local server-function binding in
 test-bind-decl ::= 'test-bind' identifier '=' expression
 ```
 
-- `identifier` SHALL name a server function (`server fn`, §12.5) that is in the file's import or declaration scope. The identifier is resolved against §47-encoded names — no new naming scheme is introduced.
+- `identifier` SHALL name a server function (`server fn`, §12.5) that is in the file's import or declaration scope. The identifier is resolved to that server function's stable identity (its defining module plus declared name) — no new naming scheme is introduced. *(Re-keyed S473 D4: was "resolved against §47-encoded names"; §47.1–§47.5 are now an impl#1 annex, and impl#1 spells the identity as the §47 encoded name. Provenance: ruling:user-voice-scrml.md S473 D4 "your recs on all" — *"Features keyed off §47 names re-key onto their own stable ids."*)*
 - `expression` SHALL be any expression legal in the surrounding logic context (§7). The typer (compiler stage TS) decides dispatch shape from the resolved type of the expression:
   - If the expression resolves to a function value whose signature is assignable to the bound server function's signature, the test-mode dispatch SHALL invoke that function with the call-site arguments.
   - Otherwise, the expression value `v` SHALL act as a return-stub: the test-mode dispatch SHALL ignore call-site arguments and return `v`. The typer SHALL require `typeof v` to be assignable to the bound server function's return type.
@@ -22702,7 +22712,7 @@ test-bind-decl ::= 'test-bind' identifier '=' expression
 
 **Production binary cost: 0 bytes.** When `output.testMode` is disabled (release builds, `output.mode: "production"`), the dispatch hook SHALL NOT be emitted. The server-fn call site emits exactly the production call shape. The `test-bind` declaration form, the dispatch table, the per-call guard, and the `E-TEST-006` runtime check SHALL all be dead-code-eliminated from release artefacts. `test-bind` is a test-mode-only surface; the production binary is bit-identical to a compilation that contained no `test-bind` declarations.
 
-**Cross-reference: §47 (Output Name Encoding).** The keys of the test-mode dispatch table are the §47-encoded names of the bound server functions. No new naming scheme is introduced by `test-bind`; the encoding rules of §47.1–§47.4 apply unchanged to the dispatch keys. See §47.5 for the matching cross-reference paragraph on the dispatch hook's relation to the encoded-name surface.
+**Dispatch keys (re-keyed S473 D4).** The keys of the test-mode dispatch table are the stable identities of the bound server functions (defining module plus declared name, §19.12.6). No new naming scheme is introduced by `test-bind`. ~~The keys of the test-mode dispatch table are the §47-encoded names of the bound server functions. … the encoding rules of §47.1–§47.4 apply unchanged to the dispatch keys.~~ impl#1 spells each identity as its §47 encoded name (the §47.1–§47.5 impl#1 annex; see the §47.5 cross-reference paragraph). **Provenance:** ruling:user-voice-scrml.md S473 D4 "your recs on all" · supersedes: the struck sentences.
 
 **Forward-compatibility — Position B (effect-record schemas) NOT ADOPTED at this time.** Design-insight 22 considered an alternative shape ("Position B": effect-record schemas + `expects` sequences, re-frame style) and is **not adopted at this time**. The `test-bind` dispatch point defined here is structurally a subset of what Position B would need: a future amendment MAY extend the dispatch hook to also emit an effect-record at the dispatch site rather than only forwarding to the binding. Such an extension would be additive over the surface defined here and SHALL NOT break existing `test-bind` declarations. Per S67 user-direction methodology (recorded in design-insights.md alongside Insight 22), this deferral is **not** gated on a flip condition — it is a "not adopted at this time; structurally extensible if a real use case emerges later" deferral, with no flip-condition framing.
 
@@ -35398,11 +35408,44 @@ The hash input (canonical string per §47.1.4) for synthesized properties uses a
 
 No new error codes or kind markers required. The composition is ADDITIVE.
 
-All JavaScript variable names in compiled output SHALL use encoded names as specified in this section. The compiled JS is an IR; encoded names are correct and intentional. Source maps (PIPELINE.md §Stage 8) are the specified debugging path back to `.scrml` source.
+~~All JavaScript variable names in compiled output SHALL use encoded names as specified in this section.~~ *(demoted S473 D4 — see the banner below)* In impl#1, JavaScript variable names in compiled output use the encoded names described in §47.1–§47.5. The compiled JS is an IR; encoded names are correct and intentional. Source maps (PIPELINE.md §Stage 8) are the specified debugging path back to `.scrml` source.
+
+> **§47.1–§47.5 are an impl#1 annex: implementation detail, not a conformance obligation (S473 D4).** The output
+> name encoding of §47.1–§47.5 (format, kind markers, hash, canonical strings, collision check, the `reflect()`
+> decode table, the debug-mode suffix and the seq disambiguator) describes how **impl#1** names emitted bindings. It
+> is NOT a language obligation: a conforming implementation MAY name its emitted bindings however it likes, and
+> the §62 conformance corpus does not observe emitted names. Every SHALL in §47.1–§47.5 that is about the shape
+> of an emitted name binds impl#1 only, and so do the codes that exist only to police that shape (E-CG-010,
+> E-CG-011, E-CG-013, E-CG-014; and E-CG-012, which reserves the encoded-name pattern for an implementation that
+> uses it — PA reading). **What stays normative in this part of §47:**
+> - the **reserved-prefix bullets of §47.1.1** (the `_scrml_` / `__scrml_` reservations of S439 #7, S440 #9 and
+>   S457, and the per-compilation placeholder token; the audit's "§47.1.1b"), with `E-NAME-COLLIDES-RESERVED-PREFIX`;
+> - **§47.6** (no protected field name in an emitted client name);
+> - the §47.5 **cross-reference paragraphs about chunk content-addressing and the `chunks.json` `compiler` /
+>   `language` fields** — they are not name encoding; their obligations live in §40.9.7 / §40.9.8, §58.7 and §62.4
+>   and are unchanged *(PA reading: the ruling's "(output name encoding)" scopes the demotion)*;
+> - §47.9 onward (output paths, imports, stdlib bundling, server entry, static serving, data root).
+>
+> Other sections that cite the FNV-1a parameters of §47.1.3 or the canonical-string discipline of §47.1.4
+> (§47.9.8 content hashes, §59.5 map-key hashing) cite them as a definition by reference; D4 does not change
+> those sections. Features that were keyed off a §47 encoded name are re-keyed onto their own stable ids:
+> `test-bind` (§19.12.6 / §19.12.7) keys on the bound server function's identity, and the `persist=` envelope
+> question (§6.14.5 O-061-3) no longer names a §47 fingerprint.
+>
+> **Provenance:** ruling:user-voice-scrml.md S473 D4 "your recs on all" (*"§47.1–§47.5 (output name encoding) are
+> NOT a language obligation. They are demoted to an impl#1 annex; §47.1.1b (reserved prefixes) and §47.6 stay
+> normative. The §14.4.1 "SHALL emit a TypeName_toEnum table" output-form sentence gets the same treatment.
+> Features keyed off §47 names re-key onto their own stable ids."*) · supersedes: "All JavaScript variable names
+> in compiled output SHALL use encoded names as specified in this section." (struck above) and the normative force
+> of every emitted-name SHALL in §47.1–§47.5. **Direction of change:** inert for program acceptance and meaning —
+> no program's behaviour depends on an emitted name; the bootstrap's hint-based names become conformant.
+> Resolves `g-boot-output-name-encoding-unbuilt-s473`.
 
 ---
 
 ### 47.1 Encoding Scheme
+
+*(impl#1 annex — not a conformance obligation, S473 D4; the reserved-prefix bullets of §47.1.1 stay normative.)*
 
 **Resolved from ADR-001 OQ-1.** The encoding scheme is a hybrid prefix + content hash.
 
@@ -35539,6 +35582,8 @@ Value-native maps (§59) hash a **runtime key value** rather than a `ResolvedTyp
 
 ### 47.2 Runtime Decode API — `reflect(variable)`
 
+*(impl#1 annex — not a conformance obligation, S473 D4. `reflect()` itself is defined in §22; this subsection describes impl#1's decode table.)*
+
 **Resolved from ADR-001 OQ-2.** The `reflect()` built-in is the single API for type introspection.
 
 #### 47.2.1 Behavior by Evaluation Context
@@ -35584,6 +35629,8 @@ The decode table and the runtime `reflect()` implementation are bundled in `clie
 
 ### 47.3 Debug-Mode Name Format
 
+*(impl#1 annex — not a conformance obligation, S473 D4.)*
+
 **Resolved from ADR-001 OQ-3.**
 
 When `output.debug: true` is set in compiler configuration (§28), encoded names include the original developer-written variable name as a suffix:
@@ -35612,6 +35659,8 @@ debug-name ::= encoded-name '$' original-identifier
 ---
 
 ### 47.4 Binding-Level Disambiguator
+
+*(impl#1 annex — not a conformance obligation, S473 D4.)*
 
 **Resolved from ADR-001 OQ-4.**
 
@@ -35656,6 +35705,8 @@ The seq suffix for a given binding is stable only within a single compilation ru
 
 ### 47.5 Scope of Application
 
+*(impl#1 annex — not a conformance obligation, S473 D4 — EXCEPT the cross-reference paragraphs below on closure-analysis determinism, the `chunks.json` `compiler` / `language` fields and the S118 per-`<program>` amendment, which are not name encoding and stay normative.)*
+
 Encoded names apply to ALL JavaScript variable names in compiled output:
 - Bindings from `let`, `@var` (reactive), `const`, and `lin` declarations in logic blocks
 - Function parameters and local variables in compiled function bodies
@@ -35674,7 +35725,7 @@ Encoded names do NOT apply to:
 - CG SHALL NOT apply encoded names to CSS class names, HTML element names, HTML attribute names, or public export identifiers.
 - The public module boundary (§21) SHALL use developer-chosen names for exported identifiers. Internal bindings behind that boundary SHALL use encoded names.
 
-**Cross-reference — test-mode `test-bind` dispatch hook (§19.12.6 / §19.12.7).** When `output.testMode` is enabled, every server-function call site emits a guarded dispatch keyed by the §47-encoded name of the called server function. A `test-bind` declaration inside an enclosing `~{}` block populates a scope-local dispatch table under those same encoded keys; the call-site dispatch consults the table before forwarding to production. The encoded-name surface defined by §47.1–§47.4 is the SOLE keying mechanism — `test-bind` introduces no new naming scheme. When `output.testMode` is disabled (release builds), the dispatch hook is dead-code-eliminated; the production binary is bit-identical to a compilation that contained no `test-bind` declarations. See §19.12.6 (declaration syntax), §19.12.7 (dispatch contract + 0-byte production guarantee), and §34 row `E-TEST-006` (fail-fast on unbound server-fn in active test-bind context).
+**Cross-reference — test-mode `test-bind` dispatch hook (§19.12.6 / §19.12.7).** When `output.testMode` is enabled, every server-function call site emits a guarded dispatch keyed by the ~~§47-encoded name~~ **identity** of the called server function *(re-keyed S473 D4: the key is the server function's own stable id — its defining module plus declared name — and impl#1 spells that id as the §47 encoded name)*. A `test-bind` declaration inside an enclosing `~{}` block populates a scope-local dispatch table under those same keys; the call-site dispatch consults the table before forwarding to production. ~~The encoded-name surface defined by §47.1–§47.4 is the SOLE keying mechanism —~~ `test-bind` introduces no new naming scheme. When `output.testMode` is disabled (release builds), the dispatch hook is dead-code-eliminated; the production binary is bit-identical to a compilation that contained no `test-bind` declarations. See §19.12.6 (declaration syntax), §19.12.7 (dispatch contract + 0-byte production guarantee), and §34 row `E-TEST-006` (fail-fast on unbound server-fn in active test-bind context).
 
 **Cross-reference — closure-analysis determinism (§40.9.8).** Added 2026-05-12 (v0.3 Approach A spec-amendment). The §40.9 closure-analysis pass (PIPELINE.md Stage 7.6 Reachability Solver) produces per-entry-point chunk assignments that the codegen pass at §Stage 8 consumes alongside the encoded-name surface defined here. The closure-analysis output is **deterministic-from-source-only**: all inputs to `playable_surface(E, N)` are static (source files + spec semantics + the app-scope role enum). The §47 content-addressing surface incorporates the closure-analysis output without modification — same source produces same closure produces same per-tier chunk assignments produces same content addresses per chunk. No additional axis (telemetry version, environment variable, build timestamp) participates in chunk content addresses in v0.3. The Approach B telemetry-PGO surface (dive H §"Approach B"; Insight 29 M2 deferral) is OUT OF SCOPE for v0.3 and queued to v2; when B is reconsidered, the spec extension MUST preserve §47 content-addressing by treating the telemetry artifact as a versioned, addressable input. v0.3's deterministic-from-source-only behaviour is the FLOOR that B extends — B does not replace A.
 
@@ -40957,6 +41008,27 @@ The engine owns the whole thing.
 
 ### 51.1 Overview (legacy `<machine>` framing — preserved)
 
+> **Amendment S473 (D8) — the §51 legacy features with no §66 home.** Each legacy feature below gets one
+> disposition:
+> - **temporal `after`** (`.From after Ns => .To`, §51.12) → **re-homed onto `<onTimeout>`** (§51.0.M), the
+>   O5-carried temporal surface; §51.12's rule form is superseded by it.
+> - **type-level `transitions {}`** (§51.2, §14.4.0) → **dropped**; field `rule=` (§66.13, §51.0.F) supersedes it.
+> - **derived / projection machines** (§51.9) → **dropped**; a derived `single` declaration (§51.0.J) covers it.
+> - **`audit @log`** (§51.11) and **`replay`** (§51.14) → **banked for v1.next**; not in the v1 language.
+> - **`--emit-machine-tests`** (§51.13) → **banked** (tooling, not language).
+> - **`<machine>`** → **`E-DEPRECATED-001`** (§63.7) in every implementation, the bootstrap included; a
+>   generic `E-BOOTSTRAP-UNSUPPORTED` for `<machine>` is not the ruled code.
+>
+> The sections named keep their text as the record; each carries a one-line marker. Features that stay in the
+> language and are unbuilt are gapped (`g-boot-o5-engine-features-unbuilt-s473`).
+>
+> **Provenance:** ruling:user-voice-scrml.md S473 D8 "your recs on all" — *"§51 legacy features: temporal `after`
+> → `<onTimeout>`; type-level `transitions {}` dropped (field `rule=` supersedes it); projection machines dropped
+> (a derived `single`, §51.0.J); `audit` / `replay` banked for v1.next; `--emit-machine-tests` banked (tooling);
+> `<machine>` → E-DEPRECATED-001."* · supersedes: §51.2, §51.9, §51.12 as live language surfaces; §51.11, §51.13,
+> §51.14 as v1 surfaces. **Direction of change:** newly-rejecting for the dropped forms in the ruled dialect
+> (the bootstrap already refused them); impl#1 (frozen) keeps its behaviour as a carried divergence.
+
 A scrml enum type defines what values exist. A **transition rule** defines which moves
 between those values are legal. Transition rules are a first-class language feature; they
 are not implemented as hand-coded validation functions.
@@ -40996,6 +41068,8 @@ Sites 1 and 3 are authoritative for their respective graphs. Site 2 (machine) is
 ---
 
 ### 51.2 Type-Level Transitions — `transitions {}` Block
+
+> **DROPPED S473 (D8)** — field `rule=` (§66.13, §51.0.F) supersedes type-level `transitions {}`. Record only. *(Provenance: ruling:user-voice-scrml.md S473 D8 "your recs on all".)*
 
 #### 51.2.1 Syntax
 
@@ -41819,6 +41893,8 @@ knowledge to decode.
 
 ### 51.9 Derived / Projection Machines
 
+> **DROPPED S473 (D8)** — a derived `single` declaration (§51.0.J) covers projection machines. Record only. *(Provenance: ruling:user-voice-scrml.md S473 D8 "your recs on all".)*
+
 **Added (landed S22):** 2026-04-17. Resolves
 the debate outcome in
 `scrml-support/docs/deep-dives/machine-cluster-expressiveness-2026-04-17.md` Candidate (I).
@@ -42017,6 +42093,8 @@ The four shadow booleans collapse to one projection. Never-drift by construction
 ---
 
 ### 51.11 Audit Clause — `audit @varName`
+
+> **BANKED for v1.next S473 (D8)** — not in the v1 language. Record only. *(Provenance: ruling:user-voice-scrml.md S473 D8 "your recs on all".)*
 
 **Added:** 2026-04-18 — implementation of §2b G (machine-cluster-expressiveness
 deep-dive). Opt-in audit/replay/time-travel support for `<machine>`-governed
@@ -42217,6 +42295,8 @@ issues before §51 is considered fully ratified.
 
 ### 51.12 Temporal Transitions — `.From after Ns => .To`
 
+> **RE-HOMED S473 (D8)** onto `<onTimeout>` (§51.0.M); this rule form is superseded. Record only. *(Provenance: ruling:user-voice-scrml.md S473 D8 "your recs on all".)*
+
 **Added:** 2026-04-18 — implementation of §2b C (machine-cluster-expressiveness
 deep-dive). Time-driven transitions as first-class machine rules. Prior art:
 XState `after`, SCXML `<send delay>`, Erlang `gen_statem` state timeouts.
@@ -42406,6 +42486,8 @@ Two subcases:
 
 ### 51.13 Auto-Generated Property Tests — `--emit-machine-tests`
 
+> **BANKED S473 (D8)** — tooling, not language. Record only. *(Provenance: ruling:user-voice-scrml.md S473 D8 "your recs on all".)*
+
 **Added:** 2026-04-18. Implementation of §2b F
 (machine-cluster-expressiveness-2026-04-17.md). Behind the
 `--emit-machine-tests` compile flag, the compiler emits a bun:test suite that
@@ -42531,6 +42613,8 @@ the same phase-2-style comment.
 ---
 
 ### 51.14 Replay Primitive — `replay(@target, @log [, index])`
+
+> **BANKED for v1.next S473 (D8)** — not in the v1 language. Record only. *(Provenance: ruling:user-voice-scrml.md S473 D8 "your recs on all".)*
 
 **Added:** 2026-04-19 — §2b G slice 2 (machine-cluster-expressiveness
 deep-dive). Follows §51.11 (audit clause) and §51.11.4 (entry shape
@@ -42925,6 +43009,24 @@ No spec changes required for §52 under v0.next. Existing semantics hold.
 
 **Cross-reference — closure analysis (§40.9.4 Component 3).** Added 2026-05-12 (v0.3 Approach A spec-amendment). The server-fn boundary classified by Stage 5 (RI) under §52 is one of the five input components to the §40.9 closure analysis (Component 3: `server_fn_reachable_within(N, C_set)`). The closure analysis does NOT re-classify server-vs-client functions; it consumes RI's classification and derives the interaction-graph projection (event-handler-to-server-fn reachability across N user interactions) on top of the §52 boundary. The §52 boundary is unchanged by §40.9 — the closure analysis is a downstream consumer.
 
+> **Amendment S473 (D7) — Tier 2 (`<x server>`) is RETIRED in favour of §8.1.3 `<db>` cells.** The
+> server-authoritative cell of the ruled language is a state declaration in a `<db>` body (§8.1.3, S472). The
+> §52.4 instance-level form `<x server> = …` (and the §52.6.5 / §52.6.6 Tier 2 load / write conventions that serve
+> it) is not part of the ruled language: an implementation that speaks the ruled dialect (the bootstrap) refuses
+> it with a named refusal whose hint names a `<db>` cell (§63.5, D5); impl#1 (frozen) still accepts it as a
+> carried divergence. **Type-level `protect=` stays OWED**: it is the confidentiality story, and until it is
+> built an implementation SHALL refuse an element carrying `protect=` (or `authority=`) that it does not enforce
+> (S473 D2). ⚑ **Not decided here (flagged):** whether Tier 1 type-level `authority="server"` (§52.3) is retired
+> with Tier 2 or stays owed — the ruling's parenthetical lists *"`authority=` server cells"* under Tier 2, while
+> decisions.md D7 (a) keeps *"Tier 1 type-level authority/`protect=` as owed"*. §52.3 is left as written until
+> that is confirmed.
+>
+> **Provenance:** ruling:user-voice-scrml.md S473 D7 "your recs on all" — *"§52 Tier 2 (`<x server>`,
+> `authority=` server cells) is retired in favour of §8.1.3 `<db>` cells. Type-level `protect=` stays owed and
+> refused (D2)."* · supersedes: §52.14's *"Both tiers are first-class canonical surfaces"* and §52.4 as a
+> canonical surface. **Direction of change:** newly-rejecting for the ruled dialect (the bootstrap already
+> refused `<x server>` by name); inert for impl#1. Gap: `g-bootstrap-s52-server-cell-surfaces-vs-db-cells-unruled-s473`.
+
 ### 52.1 Motivation
 
 A scrml reactive variable (`@var`) carries no implicit claim about where its data lives. Developers working in previous gauntlet rounds consistently annotated authority in comments because the language provided no way to express it: "source of truth is server," "these are CLIENT-SIDE reactive vars, not server state," "server owns the write, client owns the state."
@@ -43121,6 +43223,10 @@ function submit() {
 Expected compiler output: no errors. `@draft` is `CardDraft` (local). `@cards` is `Card[]` (server-authoritative). `submitDraft` is the explicit authority crossing point. The compiler enforces the separation at the type level.
 
 ### 52.4 Tier 2 — Instance-Level Authority
+
+> **RETIRED S473 (D7)** in favour of §8.1.3 `<db>` cells — see the amendment at the head of §52. The text below
+> is kept as the record of the form and of impl#1's carried behaviour; it is not a ruled-language surface.
+> *(Provenance: ruling:user-voice-scrml.md S473 D7 "your recs on all".)*
 
 #### 52.4.1 Syntax
 
@@ -43881,7 +43987,7 @@ mechanism M1).
 | **Tier 1** (§52.3) | `<TypeName authority="server" table="...">` on a state type declaration | Type-shared — every cell of this type, across every file in the program, shares the contract |
 | **Tier 2** (§52.4) | `<x server>` bare-attribute on a V-kill structural decl (§6.1.5) | Per-cell — exactly this one cell carries the contract |
 
-Both tiers are first-class canonical surfaces. Neither is "advanced" or "deferred"; they cover different authority scopes.
+~~Both tiers are first-class canonical surfaces. Neither is "advanced" or "deferred"; they cover different authority scopes.~~ *(superseded S473 D7 — Tier 2 is retired in favour of §8.1.3 `<db>` cells; a per-cell server-authoritative cell is a `<db>`-body state declaration. Provenance: ruling:user-voice-scrml.md S473 D7 "your recs on all".)*
 
 **The distinguishing reach-for question.** *"Do I want this server-authority on one cell, or across all cells of this type?"*
 
@@ -47467,7 +47573,7 @@ The build-story root is a trust artifact: it is the verification-layer answer to
 
 ### 58.7 Relationship to §47 content-addressing — closing the compiler-in-the-hash gap
 
-§47.5 normatively states that the **compiler version SHALL NOT be a content-addressing hash input** — two chunks produced by different compiler versions but with byte-identical post-canonicalization payloads produce identical FNV-1a hashes, so a payload-identical chunk deduplicates across compiler versions. This is correct and is **not changed** by this section.
+*(S473 D4: "§47" in this section means chunk **content-addressing** — the §47.5 cross-reference paragraphs and §40.9.8, which stay normative — not the §47.1–§47.5 name encoding, which is an impl#1 annex.)* §47.5 normatively states that the **compiler version SHALL NOT be a content-addressing hash input** — two chunks produced by different compiler versions but with byte-identical post-canonicalization payloads produce identical FNV-1a hashes, so a payload-identical chunk deduplicates across compiler versions. This is correct and is **not changed** by this section.
 
 The build story operates in a **different layer**. §47 hashes *payloads* and stays compiler-agnostic *by design*. The build story hashes *the compiler that produced those payloads*. The two are **complementary, not contradictory**:
 
@@ -48589,6 +48695,22 @@ conformance delta is a known named set the day the deprecation lands. **A native
 in impl #2, not a breaking change.** This is precisely the machinery that reclassifies
 "native enforces canonical" from a breaking event into an implementation bug to fix.
 
+**Amendment S473 (D5) — the ruled-dialect exception.** An implementation that speaks the ruled
+dialect — the bootstrap (impl#2), which was ruled to "speak the ruled language" (S449) — MAY refuse
+a deprecated form instead of accepting it with its W-code, **provided the refusal is NAMED and
+carries a replacement hint**: the diagnostic names the deprecated form and the canonical form that
+replaces it (e.g. E-DECL-LEGACY-RHS for a legacy `<x> = v` declaration; a `pure function` refusal
+that names `fn`; an `on mount {}` refusal that names `<onMount>`). Such a refusal is conformant. A
+**generic** parse or scope error on a deprecated form (one that does not name the form and its
+replacement) stays a conformance bug.
+
+> **Provenance:** ruling:user-voice-scrml.md S473 D5 "your recs on all" — *"§63.5 is amended: a named
+> refusal of a deprecated form with a replacement hint is conformant for an implementation that speaks
+> the ruled dialect (the bootstrap)."* · supersedes: the unconditional reading of "A native parser
+> (impl #2) that is stricter than 1.0 — rejecting a `deprecated` form — is a conformance BUG in impl #2"
+> for an implementation that speaks the ruled dialect. **Direction of change:** inert for the language
+> (both forms stay in the 1.0 contract); it widens what an implementation may do with a deprecated form.
+
 ### 63.6 The `lang:` transition semantics
 
 D4 (this section) owns the `deprecated → removed` transition; D2 owns the `lang:` labels
@@ -49619,11 +49741,31 @@ own value nor a typed attribute spells its kind explicitly: **`<name:struct>…<
 out of the termination rule: `:swatch` is a typed own value, so it's a declaration."* A `:Decl` type after the
 name thus counts as (i) for a declaration type.
 
-> ⚑ **OPEN (not ruled) — O31 (narrowed): `name:Type` without `=` for a NON-declaration type.** The #16 text
-> ratifies `:Decl` as "a typed own value"; `:struct` is ruled separately. Whether a bare `name:Type` for any other
-> type (`<count:int/>`, the Shape-4 analog) is also a declaration is not ruled. Evidence the termination text
-> narrowed the DD lean: DD §7 #1 read *"a tag is a declaration iff it has an **own type** or ≥1 typed
-> attribute"*, whereas the message bryan answered *"yes, :struct,"* speaks of an own VALUE.
+> ✅ **RULED S473 (D6) — O31: a typed own value with no `=` takes §6.2 Shape 4's canonical empty.** A
+> `name:Type` with no `=` (`<count:int/>`, `let <n:int/>`) is a typed declaration with no written value — the
+> §66 analog of Shape 4 — and its own value is that type's canonical empty: `0` for `int` / `number`, `""` for
+> `string`, `false` for `bool`, `[]` for a sequence; `not` (with the implicit `(not to T)` lifecycle, §14.12)
+> for a type with no canonical empty, including a plain `:enum` own value (§6.2 Shape 4). A **`single`** enum
+> declaration with no initial variant (`<phase:Phase single>`) takes the FIRST state-child's variant and
+> `W-ENGINE-INITIAL-MISSING` fires, as for `<engine>` without `initial=` (§51.0.E). Refinement types keep
+> Shape 4's `E-REFINEMENT-NO-DEFAULT`.
+> - **Interim — the bootstrap refuses, at compile time.** Until the bootstrap builds a given no-value form, it
+>   SHALL refuse it at compile time with a named refusal (`E-BOOTSTRAP-UNSUPPORTED`, naming the form and this
+>   section). It SHALL NOT compile it to a program that throws at run time.
+>
+> *(Ruled record — the prior OPEN text:)* ~~⚑ **OPEN (not ruled) — O31 (narrowed): `name:Type` without `=` for a
+> NON-declaration type.** … Whether a bare `name:Type` for any other type (`<count:int/>`, the Shape-4 analog) is
+> also a declaration is not ruled.~~ Evidence the termination text narrowed the DD lean: DD §7 #1 read *"a tag is
+> a declaration iff it has an **own type** or ≥1 typed attribute"*, whereas the message bryan answered *"yes,
+> :struct,"* speaks of an own VALUE. *(PA reading: D6 treats `<n:int/>` as "a typed declaration with no value",
+> which answers O31's declaration-or-use half as "declaration".)*
+> **Provenance:** ruling:user-voice-scrml.md S473 D6 "your recs on all" — *"O31/O33: the ruling is §6.2 Shape 4's
+> documented canonical empty; until each is built the bootstrap refuses at compile time, never at run time."* ·
+> decisions.md D6 option (a), the ruling half: *"the canonical empty (`0`, `""`, `false`, `[]`), `not` for types
+> without one, and §51.0.E's first variant plus W-ENGINE-INITIAL-MISSING for an enum"* · supersedes: the OPEN
+> text struck above. **Direction of change:** inert for impl#1-accepted programs (Shape 4 already reads this way);
+> on the bootstrap, newly-rejecting at compile time a program that compiled and then threw at page construction.
+> Gap: `g-boot-no-value-cell-runtime-throw-s473`.
 
 > ✅ **RULED S435 — O52** (bryan: *"yes"*): (1) a declaration BODY holds two kinds of child told apart by the opener alone — a tag with an own value or a typed attribute is a CHILD FIELD; a tag with neither is a STATE-CHILD and must name a variant of the enclosing enum-valued field / own value (checked at the type stage; the parser needs no type lookup); a body holds no uses (use-site content lives in `renders`, #11). (2) `:` glued to a name is a TYPE annotation (`count:int`); `:` preceded by whitespace is a `:`-shorthand BODY (`<Idle : "idle">`) — the existing §4.14 rule. No state-child migration. The prior OPEN text follows for the record.
 >
@@ -49979,10 +50121,23 @@ attribute (`<x let a:T/>`, `export let a:T`) — is `E-DECL-LET-IN-OPENER` (§66
 > both an own value and attributes/children (`<count:int=0 step:int=1/>`), and if so whether `@count` is the
 > scalar own value or a struct of its fields, is not ruled. §66's examples never combine them.
 
-> ⚑ **OPEN (not ruled) — O33: attributes with no default.** Whether an attribute declared without a default
-> (`<dropdown label:string …/>`) is REQUIRED at every use (the §15.10 `E-COMPONENT-010` analog) or takes the §6.2
-> Shape-4 canonical empty; and what such an attribute holds in the declaration's shared instance (§66.6.4),
-> where no use supplies it.
+> ✅ **RULED S473 (D6) — O33: an attribute with no default takes §6.2 Shape 4's canonical empty.** An attribute
+> declared without a default (`<dropdown label:string …/>`) is NOT required at every use: a use that omits it,
+> and the declaration's shared instance (§66.6.4), hold the attribute type's canonical empty (`0`, `""`,
+> `false`, `[]`), or `not` with the implicit `(not to T)` lifecycle where the type has none (§6.2 Shape 4).
+> **Interim:** until the bootstrap builds this, it SHALL refuse an omitted no-default attribute at compile time
+> (`E-BOOTSTRAP-UNSUPPORTED`, naming the attribute), never at run time.
+>
+> *(Ruled record — the prior OPEN text:)* ~~Whether an attribute declared without a default is REQUIRED at every
+> use (the §15.10 `E-COMPONENT-010` analog) or takes the §6.2 Shape-4 canonical empty; and what such an attribute
+> holds in the declaration's shared instance (§66.6.4), where no use supplies it.~~
+> **Provenance:** ruling:user-voice-scrml.md S473 D6 "your recs on all" — *"O31/O33: the ruling is §6.2 Shape 4's
+> documented canonical empty; until each is built the bootstrap refuses at compile time, never at run time."* ·
+> decisions.md D6 option (a), the ruling half: *"the canonical empty (`0`, `""`, `false`, `[]`), `not` for types
+> without one, and §51.0.E's first variant plus W-ENGINE-INITIAL-MISSING for an enum"* · supersedes: the OPEN
+> text struck above. **Direction of change:** inert for impl#1-accepted programs (Shape 4 already reads this way);
+> on the bootstrap, newly-rejecting at compile time a program that compiled and then threw at page construction.
+> Gap: `g-boot-no-value-cell-runtime-throw-s473`.
 
 ### 66.4 Attributes are data; children are validated fields
 
@@ -52474,9 +52629,9 @@ outcome. §66 does not decide them. Labels are stable identifiers, not a count.
 | O19 | §66.3 | An own value AND attributes on one declaration; what `@x` then is. |
 | ~~O21~~ RULED S437 (by derivation from L6) | §66.9 | A derived (locked, reactive-default) attribute vs use-site construction. RULED: a use MAY set it — the use-site attribute is that instance's initializer (§66.9 rule 8). Provenance: ruling:user-voice-scrml.md S437 — *"O58 b, O57 no, O59 lean, O60 lean, confirms yes"*. |
 | O24 | §66.5 | The spelling of a markup-typed derived cell. |
-| O31 | §66.2.2 | Whether a bare `name:Type` for a NON-declaration type (`<count:int/>`) is a declaration (`:Decl` and `:struct` are ruled). |
+| ~~O31~~ RULED S473 (D6) | §66.2.2 | Whether a bare `name:Type` for a NON-declaration type (`<count:int/>`) is a declaration (`:Decl` and `:struct` are ruled). RULED: a typed declaration whose own value is §6.2 Shape 4's canonical empty (`not` where none; a `single` enum's first variant + `W-ENGINE-INITIAL-MISSING`); the bootstrap refuses at compile time until built. Provenance: ruling:user-voice-scrml.md S473 D6 "your recs on all". |
 | O32 | §66.2.4 | Whether compound literals may stand bare in an opener. |
-| O33 | §66.3 | Attributes with no default: required at every use, or canonical-empty; their value in the shared instance. |
+| ~~O33~~ RULED S473 (D6) | §66.3 | Attributes with no default: required at every use, or canonical-empty; their value in the shared instance. RULED: canonical-empty (§6.2 Shape 4), at every use that omits it and in the shared instance; the bootstrap refuses at compile time until built. Provenance: ruling:user-voice-scrml.md S473 D6 "your recs on all". |
 | O34 | §66.12.5 | A tuple position with no default, with or without a lifecycle. |
 | O35 | §66.3 | The unruled parts of DD §7 #17 (own-value-only inference / required attribute types; annotation required for `not`/`[]`/`{}`; `<x>` in logic). |
 | ~~O35(d)~~ RULED S462 | §66.3 | Must a NON-literal own value carry `:T`? RULED: inferred from an enumerated set (§66.3 rule 5, base type, rule 6); outside it a hard error, `E-DECL-TYPE-NOT-INFERABLE` (rule 7; diverges from §7.5.2's locals rule); a cycle's diagnostic wins (rule 8); `:T` required at `persist=` / server / export (rule 9; export is the default until O2 / O39); an unproven `:T` is `E-DECL-TYPE-UNPROVEN` (rule 10). Provenance: ruling:user-voice-scrml.md S462 "go on the package" · dd:scrml-support/docs/deep-dives/own-value-type-annotation-o35d-dpa-065-2026-10-08.md. |
