@@ -737,8 +737,9 @@ describe("#9 — `int` enforced; `/` on two ints names `div`", () => {
   });
   // r7 C: code E-TYPE-041 (§42.3.1: `not` into a non-optional type) — the code every other position already
   // emits for the `not` LITERAL (a write, an annotated local, `return not` / `g(not)` into `int`); one shape, one code.
-  test("r7 C — the `not` literal into a non-optional return / argument / element is E-TYPE-041 for every type", () => {
-    expect(inApp(O + "    function h() -> string { return not; }")).toEqual(["E-TYPE-041"]);
+  // s473 D29: `return not` into a non-optional RETURN type is the more specific §42.3.3 E-TYPE-043.
+  test("r7 C — the `not` literal into a non-optional argument / element is E-TYPE-041 for every type (a return: E-TYPE-043)", () => {
+    expect(inApp(O + "    function h() -> string { return not; }")).toEqual(["E-TYPE-043"]);
     expect(inApp(O + "    function g(z: string) { }\n    function f() { g(not); }")).toEqual(["E-TYPE-041"]);
     expect(inApp(O + "    function f() { let ks: string[] = [not]; }")).toEqual(["E-TYPE-041"]);
     expect(inApp(O + "    <ks:string[replace]=([])/>\n    function f() { @ks = [not, not]; }")).toEqual(["E-TYPE-041", "E-TYPE-041"]);

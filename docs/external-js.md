@@ -202,7 +202,7 @@ A vendored plain-JavaScript library (ESM) is imported with a relative path inste
 
 If your external code is not JavaScript at all — Go, Rust, Python, etc. — the specified pattern is a sidecar: nest a `<program name="…" lang="…">` that declares, in scrml types, the functions the sidecar exports, and import them with `use foreign:` at the top level of the outer program:
 
-<!-- gate: spec-ahead [E-BOOTSTRAP-UNSUPPORTED, E-PARSE-EXPECTED, E-PARSE-EXPR, E-PARSE-UNCLOSED, E-SCOPE-001, E-SCOPE-010, E-TYPE-STRUCT-CONTEXT] — the bootstrap has no nested <program> (sidecar; it reads the inner Features as a second binding of the name in one file, E-SCOPE-010) and no use foreign: declaration yet -->
+<!-- gate: spec-ahead [E-BOOTSTRAP-UNSUPPORTED, E-SCOPE-010] — the bootstrap has no nested <program> (sidecar; it reads the inner Features as a second binding of the name in one file, E-SCOPE-010) and no use foreign: declaration yet -->
 ```scrml
 <program>
   type Features:struct = { values: number[], modelId: string }   // declared on both sides: a type does not cross a <program> boundary (§40.4)

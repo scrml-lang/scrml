@@ -1,4 +1,4 @@
 ${
-    export const A = "aa"
-    export { B } from './y.scrml'
+    export const A = "aa";
+    export { B } from './y.scrml';
 }

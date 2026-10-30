@@ -312,16 +312,19 @@ const BASE_66_19 = [
   // (link.scrml importTarget resolves nothing), where it was one E-IMPORT-NOT-EXPORTED per name (judged "exported
   // by any file"); the bootstrap now spells §21.6's E-IMPORT-004 for a name the resolved file does not export.
   // s473: `@country.open = …` (`country` names no handle in scope — its cross-file `as=` is unresolved) is
-  // E-STATE-UNDECLARED (§6.1.1), as its read is E-SCOPE-001; it was mislabeled "writing a whole instance".
-  ["E-BOOTSTRAP-UNSUPPORTED", "E-BOOTSTRAP-UNSUPPORTED", "E-BOOTSTRAP-UNSUPPORTED", "E-IMPORT-006", "E-SCOPE-001", "E-SCOPE-001", "E-SCOPE-001", "E-SCOPE-001", "E-SCOPE-001", "E-SCOPE-001", "E-STATE-UNDECLARED", "E-TYPE-VARIANT"],
+  // E-STATE-UNDECLARED (§6.1.1); it was mislabeled "writing a whole instance".
+  // s473 D29: an `@x` READ naming nothing in scope is E-STATE-UNDECLARED too (three were E-SCOPE-001).
+  ["E-BOOTSTRAP-UNSUPPORTED", "E-BOOTSTRAP-UNSUPPORTED", "E-BOOTSTRAP-UNSUPPORTED", "E-IMPORT-006", "E-SCOPE-001", "E-SCOPE-001", "E-SCOPE-001", "E-STATE-UNDECLARED", "E-STATE-UNDECLARED", "E-STATE-UNDECLARED", "E-STATE-UNDECLARED", "E-TYPE-VARIANT"],
   // s451: + one E-BOOTSTRAP-UNSUPPORTED — `style="background:${hex}"` (a §5.5.3 quoted-value template) used to be
   // emitted as literal text; it is refused now (parse.scrml quotedInterpDiags).
   // s451 (Ue): - two E-PARSE-EXPECTED, two E-PARSE-TRAILING — the theme's `match @mode { .Light :> …  .Dark :> … }`
   // tokens parse now (parse.scrml parseMatch); its theme refusal stands.
-  ["E-BOOTSTRAP-UNSUPPORTED", "E-BOOTSTRAP-UNSUPPORTED", "E-BOOTSTRAP-UNSUPPORTED", "E-BOOTSTRAP-UNSUPPORTED", "E-BOOTSTRAP-UNSUPPORTED", "E-PROGRAM-MISSING", "E-SCOPE-001", "E-SCOPE-001", "E-SCOPE-001"],
+  // s473 D29: one `@x` read naming nothing in scope is E-STATE-UNDECLARED (was E-SCOPE-001).
+  ["E-BOOTSTRAP-UNSUPPORTED", "E-BOOTSTRAP-UNSUPPORTED", "E-BOOTSTRAP-UNSUPPORTED", "E-BOOTSTRAP-UNSUPPORTED", "E-BOOTSTRAP-UNSUPPORTED", "E-PROGRAM-MISSING", "E-SCOPE-001", "E-SCOPE-001", "E-STATE-UNDECLARED"],
   // s471: one E-IMPORT-006 at the unsupplied import (was seven per-name E-IMPORT-NOT-EXPORTED), and two uses of
   // names only that refused import brings are no longer also E-SCOPE-001 (analyze.scrml importRefusesName).
-  ["E-DECL-STAR-PREDEFINED", "E-DECL-STAR-PREDEFINED", "E-IMPORT-006", "E-SCOPE-001", "E-SCOPE-001"],
+  // s473 D29: both are `@x` reads naming nothing in scope — E-STATE-UNDECLARED (were E-SCOPE-001).
+  ["E-DECL-STAR-PREDEFINED", "E-DECL-STAR-PREDEFINED", "E-IMPORT-006", "E-STATE-UNDECLARED", "E-STATE-UNDECLARED"],
   // §66.19.5: s444 Phase A — the host call and the bind are Core now: the program compiles clean.
   // s469-tape-followups (#1472): the SPEC log now appends with `@audit.append(…)` (S469 "tape methods are named
   // after their grants", §66.12.6 rule 3). The bootstrap's method allowlist still knows only `push`/`unshift`, so
@@ -540,18 +543,19 @@ describe("R2-1 — a program cell is visible only in the program's own file (§7
   test("twin silent — `@box.c = 2` (right for `<box>`, wrong for the app's cell)", () => {
     expect(codes([BOXC, MID("2"), APP_BOXCELL(CELL)])).toEqual([]);
   });
-  test("E-SCOPE-001 — a library's renders reading `@q` does not see the app's cell `q`", () => {
+  // s473 D29: an `@x` READ that names nothing in scope is §6.1.1 E-STATE-UNDECLARED (was E-SCOPE-001).
+  test("E-STATE-UNDECLARED — a library's renders reading `@q` does not see the app's cell `q`", () => {
     const lib = f2("lib/b2.scrml", "export <b2 n:int=0/>\nrenders <p>${@q}</p>\n");
     const main = f2("app.scrml", "${ import { b2 } from \"./lib/b2.scrml\"; }\n<program>\n    let <q:string=\"c\"/>\n    <main><b2/></main>\n</program>\n");
-    expect(codes([lib, main])).toEqual(["E-SCOPE-001"]);
+    expect(codes([lib, main])).toEqual(["E-STATE-UNDECLARED"]);
   });
   test("twin silent — the program's own markup reads its cell `@q`", () => {
     expect(inApp("    let <q:string=\"c\"/>", "<p>${@q}</p>")).toEqual([]);
   });
-  test("E-SCOPE-001 — `@card` names a declaration the file neither declares nor imports", () => {
+  test("E-STATE-UNDECLARED — `@card` names a declaration the file neither declares nor imports", () => {
     const other = f2("lib/other.scrml", "export <card title:string=\"\"/>\nrenders <p>x</p>\n");
     expect(codes([other, f2("app.scrml", "<program>\n    let <s:string=\"\"/>\n    function f() { @s = @card.title; }\n    <main><p>x</p></main>\n</program>\n")]))
-      .toContain("E-SCOPE-001");
+      .toContain("E-STATE-UNDECLARED");
   });
 });
 
@@ -576,9 +580,9 @@ describe("R2-2 — (PA interim S439, RULED S440 #5 (ii) + #7) an `as=` handle ma
 
 describe("R2-3 — `<each key=…>` is resolved OUTSIDE the row's template (§66.7.3, §66.7.4)", () => {
   const LINES = "    type L:struct = { id: int }\n    <lines:L[]=([{ id: 1 }])/>";
-  test("E-SCOPE-001 — `key=@q.value` cannot name the row's own `as=q` instance (a circular key)", () => {
+  test("E-STATE-UNDECLARED — `key=@q.value` cannot name the row's own `as=q` instance (a circular key)", () => {
     expect(inApp(LINES, "<each in=@lines key=@q.value as line><dropdown as=q label=\"1\" options=([\"a\"])/></each>"))
-      .toEqual(["E-SCOPE-001", "E-BOOTSTRAP-UNSUPPORTED"]);
+      .toEqual(["E-STATE-UNDECLARED", "E-BOOTSTRAP-UNSUPPORTED"]);
   });
   test("twin silent — `key=@.id` (the row's item) and `key=line.id` (its `as` name)", () => {
     expect(inApp(LINES, "<each in=@lines key=@.id as line><dropdown as=q label=\"1\" options=([\"a\"])/></each>")).toEqual([]);

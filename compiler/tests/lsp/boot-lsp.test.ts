@@ -219,7 +219,7 @@ describe("lsp-boot over stdio", () => {
     const d1 = (await p).params.diagnostics;
     expect(d1.length).toBeGreaterThanOrEqual(1);
     expect(d1[0]).toMatchObject({
-      severity: 1, code: "E-SCOPE-001", source: "scrml-boot",
+      severity: 1, code: "E-STATE-UNDECLARED", source: "scrml-boot",
       range: { start: { line: BAD_LINE, character: BAD_COL }, end: { line: BAD_LINE, character: BAD_COL + 3 } },
     });
 
@@ -231,7 +231,7 @@ describe("lsp-boot over stdio", () => {
     // break the buffer again; the disk is still clean
     p = c.nextDiagnostics(uri);
     c.changeFull(uri, 3, BAD);
-    expect((await p).params.diagnostics[0].code).toBe("E-SCOPE-001");
+    expect((await p).params.diagnostics[0].code).toBe("E-STATE-UNDECLARED");
 
     // close clears
     p = c.nextDiagnostics(uri);
@@ -283,7 +283,7 @@ describe("lsp-boot over stdio", () => {
     }
     p = c.nextDiagnostics(uri);
     const last = (await p).params.diagnostics;
-    expect(last[0].code).toBe("E-SCOPE-001");
+    expect(last[0].code).toBe("E-STATE-UNDECLARED");
     await sleep(500); // nothing else arrives
     expect(c.published(uri).length - before).toBe(1);
     c.kill();
@@ -354,7 +354,7 @@ describe("lsp-boot over stdio", () => {
 
     p = c.nextDiagnostics(uri);
     c.changeFull(uri, 2, BAD);
-    expect((await p).params.diagnostics[0].code).toBe("E-SCOPE-001");
+    expect((await p).params.diagnostics[0].code).toBe("E-STATE-UNDECLARED");
     expect(await c.stop()).toBe(0);
   }, 90_000);
 });

@@ -124,7 +124,8 @@ describe("fixture corpus — each case lands in its known bucket", () => {
   }, { timeout: 60000 });
 
   // s452-boot-arm-pipe: a parse-phase Info lint (W-ARM-PIPE-LEGACY) is an ACCEPTED form — graded,
-  // never `parse-reject`. Bite: the same source with a parse ERROR added is UNSUPPORTED/parse-reject.
+  // never `parse-reject`. Bite: the same source with a parse ERROR added is FAIL/parse-reject (S473
+  // D30: an unexpected parse-phase error is a FAIL, never UNSUPPORTED).
   test("a parse-phase Info lint is graded (unasserted, allowed), not a parse rejection", async () => {
     const cs = loadCases(FIXTURES);
     const c = cs.find((x) => x.relDir === "codes/parse-info");
@@ -134,8 +135,27 @@ describe("fixture corpus — each case lands in its known bucket", () => {
     expect(v.unexpectedErrors).toEqual([]);
     const bad = { ...c, source: c.source.replace("| _ :> @n = 2", "| _ :> @n = 2\n            ]") };
     const b = await classifyCase(boot, bad);
-    expect([b.bucket, b.reason]).toEqual(["UNSUPPORTED", "parse-reject"]);
+    expect([b.bucket, b.reason]).toEqual(["FAIL", "parse-reject"]);
     expect(b.failures.every((f) => !f.startsWith("W-"))).toBe(true);
+  }, { timeout: 60000 });
+
+  // S473 D30 (SPEC §62.2 "Grading an implementation against a case"): a case that expects an error
+  // code and gets a DIFFERENT one is a FAIL, whatever phase produced it; UNSUPPORTED is only for
+  // E-BOOTSTRAP-UNSUPPORTED; a §34.2 parser spelling counts as the SPEC code.
+  test("D30: a wrong code on an error case is FAIL (parse phase too); a §34.2 parser spelling counts as the SPEC code", async () => {
+    const base = loadCases(FIXTURES).find((x) => x.relDir === "codes/pass-codes");
+    const withSrc = (source, expect) => ({ ...structuredClone(base), source, expected: { ...base.expected, expect } });
+    // `null` → the parser's E-PARSE-NO-NULL, which §34.2 names as the spelling of E-SYNTAX-042
+    const nullSrc = "<program>\n    let <a:int=1/>\n    function f() -> boolean { return @a == null; }\n    <p>${@a}</p>\n</program>\n";
+    const ok = await classifyCase(boot, withSrc(nullSrc, { codes: ["E-SYNTAX-042"] }));
+    expect([ok.bucket, ok.emitted.includes("E-SYNTAX-042"), ok.emitted.includes("E-PARSE-NO-NULL")]).toEqual(["PASS", true, false]);
+    // the same program against a case expecting another code: the parse error is a FAIL, not UNSUPPORTED
+    const wrong = await classifyCase(boot, withSrc(nullSrc, { codes: ["E-TYPE-031"] }));
+    expect([wrong.bucket, wrong.reason]).toEqual(["FAIL", "parse-reject"]);
+    expect(wrong.failures).toContain("missing E-TYPE-031");
+    // a forbidden SPEC code is caught through its parser spelling
+    const neg = await classifyCase(boot, withSrc(nullSrc, { codes: [], notCodes: ["E-SYNTAX-042"] }));
+    expect(neg.bucket).toBe("FAIL");
   }, { timeout: 60000 });
 
   test("UNSUPPORTED names the refusal; --no-twins grades a legacy case as written → LEGACY, naming the marker", async () => {
