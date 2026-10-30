@@ -135,6 +135,7 @@ import type { AsyncNameFacts } from "./async-combinators.ts";
 // s440 — nested-helper async coloring (lexical resolutions marked by the pre-pass).
 import { localCalleeOf, localFnRefOf, localSyncShadowOf, anchorDiagnosticSpan } from "./local-async-fns.ts";
 import type { AsyncRoot } from "./local-async-fns.ts";
+import { serverNavigateCall, navigateFixedOrigin } from "./server-navigate.ts";
 
 // ---------------------------------------------------------------------------
 // §20.6 (F4=A) — production strip toggle for the log() builtin.
@@ -4717,8 +4718,11 @@ function emitCall(node: CallExpr, ctx: EmitExprContext): string {
   //   - CLIENT caller (or explicit `.Soft`) → `_scrml_navigate_soft(path)`, the
   //     §20.8.2 in-place `<outlet>` swap pipeline (fetch SSR HTML → swap →
   //     rehydrate → View-Transition). NOT a document reload (§20.3).
-  //   - SERVER-escalated caller (or explicit `.Hard`) → `_scrml_navigate(path)`,
-  //     the existing full-document hard navigation (§20.1 hard leg).
+  //   - CLIENT caller with an explicit `.Hard` → `_scrml_navigate(path)`, the
+  //     full-document hard navigation.
+  //   - SERVER-escalated caller (any variant) → `_scrml_server_navigate(path, origin)`,
+  //     the §20.1 302 hard navigation that ends the server function (S473,
+  //     server-navigate.ts).
   //
   // §20.3 note (SURFACED, deferred): a `.Hard` from a client caller "SHALL cause
   // the compiler to emit a server redirect … escalate the calling function to a
@@ -4765,10 +4769,16 @@ function emitCall(node: CallExpr, ctx: EmitExprContext): string {
     // channels — a bounded follow-on. The BEHAVIOR (server hard redirect) is
     // correct regardless.
     const isServer = ctx.mode === "server";
-    if (explicit === "Soft" && isServer) {
-      return `_scrml_navigate(${pathExpr})`;
+    // §20.1 (S473) — SERVER-side, any variant is the hard navigation, and it ENDS the server
+    // function: `_scrml_server_navigate` throws the navigation signal the route handler answers
+    // with a 302 (or, for scrml's own fetch wrapper, the X-Scrml-Navigate header). It used to emit
+    // the CLIENT runtime's `_scrml_navigate`, absent from the server bundle — a ReferenceError
+    // thrown AFTER the body's writes had committed. The literal origin (if the source wrote one)
+    // rides along for the open-redirect guard (server-navigate.ts).
+    if (isServer) {
+      return serverNavigateCall(pathExpr, navigateFixedOrigin(pathNode));
     }
-    const isSoft = explicit === "Soft" || (explicit === null && !isServer);
+    const isSoft = explicit === "Soft" || explicit === null;
     return isSoft ? `_scrml_navigate_soft(${pathExpr})` : `_scrml_navigate(${pathExpr})`;
   }
 
