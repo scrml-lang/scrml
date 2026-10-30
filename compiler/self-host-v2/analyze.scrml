@@ -44,16 +44,17 @@
 ${
     import { Sym, Type, SeqAt, LengthGrant, SeqGrants, FieldDef, VariantDef, TypeDef, FieldRef, InstRef,
              Literal, PrimOp, EditKind, Check, FieldMode, FieldRole, GrantSet, Edge, TransitionGraph,
-             DeclKind, HostCall, HostFn, SeqFn, BindKind, Validator, SurfaceProp, ValidityOf, Persist, PersistStore, CoreProgram,
+             DeclKind, HostCall, HostFn, HostBind, HostArg, HostProp, SeqFn, BindKind, Validator, SurfaceProp, ValidityOf, Persist, PersistStore, CoreProgram,
              SqlKind, SqlTables, SqlColumns, Db, Driver, DbLoad,
              CssPart, CssDecl, StyleRule, CssImport, ScopeSheet,
              mkSym, noGrants, replaceGrant, typeDefSym, validityInst, validityDecl, plainHead } from "./core.scrml"
     import { ASpan, BinOp, UnOp, AExpr, AProp, AExprK, AStmt, ABlock, AStmtK, AEffect, AType, ATypeK,
              ATypeField, AVariant, ATypeBody, ATypeDecl, AParam, AFn, AImportName, AImport,
              AAttrValue, AAttr, AElem, ANode, ANodeK, ADeclAttr, AStateChild, ADeclChild, ADecl, AValArg, AValidator,
-             AProgram, AItem, AItemK, AConst, FileAst, ADbFn, Diag, ASql,
+             AProgram, AItem, AItemK, AConst, FileAst, ADbFn, AHostBind, Diag, ASql,
              AHow, AHandled, AArm, APat, ABind, AArmBody, AFail, AFor, AForHead, AIterSrc, AForBound, ALift, AForeign,
-             ACss, ACssItem, ACssRule, ACssDecl, ACssPart, ACssRef, mkSpan, newDiag } from "./ast.scrml"
+             ACss, ACssItem, ACssRule, ACssDecl, ACssPart, ACssRef, mkSpan, newDiag,
+             HView, HTargetParts, hostView, hostTargetParts, hostRootGlobal } from "./ast.scrml"
     import { Severity } from "./severity.scrml"
     import { importTarget, importsOfItems, hostImportsOfItems, hostTagOf, isStdlibPath, HostLoc, hostLocOf } from "./link.scrml"
     import { WireBuild, WireTable, wireBuild, hasFixedLength } from "./codec.scrml"
@@ -871,6 +872,7 @@ ${
         return match b {
             .EnumBody(variants: vs) :> true
             .StructBody(fields: fs) :> false
+            .HostBody :> false
         }
     }
 
@@ -878,6 +880,7 @@ ${
         return match b {
             .EnumBody(variants: vs) :> variantNames(vs)
             .StructBody(fields: fs) :> typeFieldNames(fs)
+            .HostBody :> []
         }
     }
 
@@ -1286,6 +1289,7 @@ ${
         return match body {
             .EnumBody(variants: vs) :> enumDefOf(te, s, vs, st)
             .StructBody(fields: fs) :> structDefOf(te, s, fs, st)
+            .HostBody :> hostDefOf(s, st)
         }
     }
 
@@ -1361,6 +1365,7 @@ ${
         return match td {
             .EnumDef(sym: s, variants: vs) :> vs
             .StructDef(sym: s) :> []
+            .HostDef(sym: s) :> []
         }
     }
 
@@ -1368,6 +1373,7 @@ ${
         return match td {
             .StructDef(sym: s, fields: fs) :> fs
             .EnumDef(sym: s) :> not
+            .HostDef(sym: s) :> not
         }
     }
 
@@ -1388,6 +1394,7 @@ ${
         if (s is not) return not
         const ti: TypeInfo | not = typeInfoOf(ts, s)
         if (ti is not) return not
+        if (isHostDef(ti.def)) return not
         if (enumVariants(ti.def).length == 0) {
             const fs: FieldDef[] | not = structFieldDefs(ti.def)
             if (fs is given) return not
@@ -4060,7 +4067,7 @@ ${
                             const loc: HostLoc | not = hostLocOf(fs.info.file, b.from)
                             const rt: Type | not = fs.info.ret
                             if (loc is given && rt is given) {
-                                const hf: HostFn = { module: loc.module, file: loc.file, name: hostOrigOf(b, h), ret: rt }
+                                const hf: HostFn = { module: loc.module, file: loc.file, name: hostOrigOf(b, h), ret: rt, bind: not }
                                 next = { info: fnWithHost(fs.info, hf), f: fs.f }
                                 sites = sites.concat([{ nid: c.callee.nid, wrapper: fs.info.sym, ok: true, why: "" }])
                             }
@@ -4087,6 +4094,302 @@ ${
             }
         }
         return out
+    }
+
+    // =========================================================================
+    // s473 (boot-host-block-f3) — `<host>` BINDINGS (DRAFT SPEC §21.3.3).
+    // ruling:user-voice-scrml.md S473 "⭐ RULED — S473 PA recs, all" item 4 —
+    // "F3 typed host binding Q1–Q5: a `<host>` block; `-> waiting T`; `!
+    // HostError`; closed `:host` handles; checked results."
+    //
+    // The parser desugared each binding into a function item with an empty body
+    // (FileAst.hosts keeps the target), so rule 9 — "A binding is a function
+    // bound in file scope (§7.6) … Its calls are checked like any call: wrong
+    // arity is `E-CALL-ARITY`, a wrong argument type is `E-TYPE-031` … A
+    // binding name that is also bound in its file as a value … SHALL be
+    // `E-SCOPE-010`" — holds by construction: every pass sees an ordinary
+    // function. Here each binding the bootstrap can carry becomes HOST-BACKED
+    // (FnInfo.host with a HostBind — Core keeps its signature, no body, and the
+    // printer emits the target as literal JavaScript, rule 7).
+    //
+    // What the bootstrap carries across the boundary (else E-BOOTSTRAP-UNSUPPORTED
+    // at the binding, naming the rule not built):
+    //   - a parameter: `int` / `number` / `string` / `bool`, a declared `:host`
+    //     handle, or the `T | not` of one (rule 12 — those cross "in its runtime
+    //     representation"; a struct or tape argument's deep fresh copy is not
+    //     built);
+    //   - a result: those, a struct whose fields are results, a tape of results
+    //     (rule 13's decode); not an enum (the §41.13 parseVariant decode is not
+    //     built), not a declaration type, not a DOM element type (rule 16 — the
+    //     bootstrap has no DOM element types).
+    // Rule 10 (S473 round 2 item 3): "Server-side `<host>` bindings SHALL be
+    // allowed only in a compiler-bundled stdlib module file … In any other file,
+    // a binding is client-only" — an adopter binding is client-only for route
+    // analysis (domsInExpr); a stdlib module's `<host>` (server-side bindings)
+    // is not built and refused by name.
+    // =========================================================================
+    fn hostDefOf(s: TypeStub, st: AS) -> RTypeDef {
+        return { def: TypeDef.HostDef(s.sym), st: st }
+    }
+
+    fn isHostDef(td: TypeDef) -> boolean {
+        return match td {
+            .HostDef(sym: s) :> true
+            .StructDef(sym: s) :> false
+            .EnumDef(sym: s) :> false
+        }
+    }
+
+    // Is `t` a declared `:host` handle type?
+    fn isHostType(ts: TypeInfo[], t: Type) -> boolean {
+        const s: Sym | not = namedOf(t)
+        if (s is not) return false
+        const ti: TypeInfo | not = typeInfoOf(ts, s)
+        if (ti is not) return false
+        return isHostDef(ti.def)
+    }
+
+    // Does `t` contain a declared `:host` type at any depth (a `T | not`, a
+    // tape element, a struct field, an enum payload)? `depth` bounds a cyclic type.
+    fn containsHost(ts: TypeInfo[], t: Type, depth: int) -> boolean {
+        if (depth > 12) return false
+        if (isHostType(ts, t)) return true
+        const mi: Type | not = maybeInner(t)
+        if (mi is given) return containsHost(ts, mi, depth + 1)
+        const el: Type | not = seqElemOf(t)
+        if (el is given) return containsHost(ts, el, depth + 1)
+        const s: Sym | not = namedOf(t)
+        if (s is not) return false
+        const ti: TypeInfo | not = typeInfoOf(ts, s)
+        if (ti is not) return false
+        const fs: FieldDef[] | not = structFieldDefs(ti.def)
+        if (fs is given) {
+            for (const f of fs) {
+                if (containsHost(ts, f.ty, depth + 1)) return true
+            }
+        }
+        for (const v of enumVariants(ti.def)) {
+            for (const f of v.fields) {
+                if (containsHost(ts, f.ty, depth + 1)) return true
+            }
+        }
+        return false
+    }
+
+    fn seqElemOf(t: Type) -> Type | not {
+        return match t {
+            .Seq(elem: e) :> e
+            .Int :> not
+            .Num :> not
+            .Str :> not
+            .Bool :> not
+            .Named(sym: s) :> not
+            .Maybe(inner: i) :> not
+        }
+    }
+
+    // The FileAst.hosts record of the function item `nid` in `file`; `not`: not a binding.
+    fn hostBindOf(files: FileAst[], file: string, nid: int) -> AHostBind | not {
+        for (const f of files) {
+            if (f.path == file) {
+                for (const h of f.hosts) { if (h.fn == nid) return h }
+            }
+        }
+        return not
+    }
+
+    fn isHostBindFn(files: FileAst[], fs: FnSrc) -> boolean {
+        return hostBindOf(files, fs.info.file, fs.f.nid) is given
+    }
+
+    fn hostBindings(files: FileAst[], te: TypeEnv, types: TypeInfo[], fs0: FnSrc[], st0: AS) -> RFns {
+        let st: AS = st0
+        let out: FnSrc[] = []
+        for (const fs of fs0) {
+            let next: FnSrc = fs
+            const hb: AHostBind | not = hostBindOf(files, fs.info.file, fs.f.nid)
+            if (hb is given && !hasErrIn(fileErrs(files, fs.info.file), fs.f.span)) {
+                if (isStdlibPath(fs.info.file)) {
+                    st = addDiag(st, fs.info.file, fs.f.span, "E-BOOTSTRAP-UNSUPPORTED", "`" + fs.info.name + "` is a `<host>` binding in a stdlib module file — a compiler-bundled stdlib module's bindings may be reached from server code too (§21.3.3 rule 10, S473 ruling), and those server-side bindings are not in the bootstrap yet; the module keeps the §21.3.1.1 `import:host` wrapper form")
+                } else {
+                    const why: string = hostBindTypeWhy(teAt(te, fs.info.file), types, fs, st)
+                    if (why != "") {
+                        st = addDiag(st, fs.info.file, fs.f.span, "E-BOOTSTRAP-UNSUPPORTED", "the `<host>` binding `" + fs.info.name + "` " + why)
+                    } else {
+                        const bind: HostBind | not = hostBindCore(fs.f.params, hb)
+                        if (bind is given) {
+                            const hf: HostFn = { module: "", file: "", name: fs.info.name, ret: fs.info.ret, bind: bind }
+                            next = { info: fnWithHost(fs.info, hf), f: fs.f }
+                        } else if (hb.src == "") {
+                            // (a `src=` binding has no target to convert: its opener is refused, parse.scrml hostSrcDiags)
+                            // FAIL CLOSED: a binding the parser accepted always converts; should one not,
+                            // it is refused here — never left an ordinary function with an empty body
+                            st = addDiag(st, fs.info.file, fs.f.span, "E-BOOTSTRAP-UNSUPPORTED", "the `<host>` binding `" + fs.info.name + "`'s target could not be carried into Core (a bootstrap defect: please report it)")
+                        }
+                    }
+                }
+            }
+            out = out.concat([next])
+        }
+        return { fs: out, st: st }
+    }
+
+    // Why the binding's signature does not cross the boundary in the bootstrap ("" — it does).
+    fn hostBindTypeWhy(te: TypeEnv, types: TypeInfo[], fs: FnSrc, st: AS) -> string {
+        for (const p of fs.f.params) {
+            const at: AType | not = p.ty
+            if (at is not) return "does not declare the type of its parameter `" + p.name + "` — a binding is fully typed: its signature is the host function's type (§21.3.3)"
+            const rt: RType = resolveType(te, at, st)
+            if (!rt.unresolved && !hostArgOk(types, rt.t)) return "takes the parameter `" + p.name + "` of type `" + typeName(rt.t) + "` — the bootstrap passes `int`, `number`, `string`, `bool`, a declared `:host` handle, or the `T | not` of one into the host; a struct or tape argument's deep fresh copy (§21.3.3 rule 12) is not built"
+        }
+        const r: Type | not = fs.info.ret
+        if (r is given) {
+            if (!hostResultOk(types, r, 0)) return "returns `" + typeName(r) + "` — the bootstrap decodes a host result of `int`, `number`, `string`, `bool`, a declared `:host` handle, a struct of those, a tape of those, or the `T | not` of one (§21.3.3 rule 13); an enum's decode (the §41.13 `parseVariant` shape) and DOM element types (rule 16) are not built"
+        }
+        return ""
+    }
+
+    fn hostArgOk(types: TypeInfo[], t: Type) -> boolean {
+        const mi: Type | not = maybeInner(t)
+        if (mi is given) return hostArgOk(types, mi)
+        return scalarType(t) || isHostType(types, t)
+    }
+
+    fn hostResultOk(types: TypeInfo[], t: Type, depth: int) -> boolean {
+        if (depth > 12) return false
+        if (scalarType(t) || isHostType(types, t)) return true
+        const mi: Type | not = maybeInner(t)
+        if (mi is given) return hostResultOk(types, mi, depth + 1)
+        const el: Type | not = seqElemOf(t)
+        if (el is given) return hostResultOk(types, el, depth + 1)
+        const s: Sym | not = namedOf(t)
+        if (s is not) return false
+        const ti: TypeInfo | not = typeInfoOf(types, s)
+        if (ti is not) return false
+        const fs: FieldDef[] | not = structFieldDefs(ti.def)
+        if (fs is not) return false
+        for (const f of fs) {
+            if (!hostResultOk(types, f.ty, depth + 1)) return false
+        }
+        return true
+    }
+
+    // The checked target as Core's HostBind (parse.scrml already judged its
+    // shape — rules 4, 5, 8; a shape it refused carries its report, so `not`).
+    fn hostBindCore(ps: AParam[], hb: AHostBind) -> HostBind | not {
+        const tg: AExpr | not = hb.target
+        if (tg is not) return not
+        const parts: HTargetParts = hostTargetParts(tg, hb.isNew)
+        if (!parts.ok || !parts.chain.ok) return not
+        let root: string = parts.chain.root
+        const rp: int = paramIndexOf(ps, root)
+        if (rp >= 0) {
+            root = ""
+        } else if (!hostRootGlobal(root)) {
+            return not
+        }
+        let args: HostArg[] = []
+        for (const x of parts.args) {
+            const a: HostArg | not = hostArgCore(ps, x, true)
+            if (a is not) return not
+            args = args.concat([a])
+        }
+        return { shape: parts.shape, root: root, rootParam: rp, chain: parts.chain.members, args: args }
+    }
+
+    fn paramIndexOf(ps: AParam[], n: string) -> int {
+        let i: int = 0
+        for (const p of ps) {
+            if (p.name == n) return i
+            i = i + 1
+        }
+        return -1
+    }
+
+    fn hostArgCore(ps: AParam[], x: AExpr, objOk: boolean) -> HostArg | not {
+        const v: HView = hostView(x)
+        if (v.k == 0) {
+            const i: int = paramIndexOf(ps, v.name)
+            if (i < 0) return not
+            return HostArg.HParam(i)
+        }
+        if (v.k == 4) return HostArg.HStr(v.name)
+        if (v.k == 5) return HostArg.HNum(v.name)
+        if (v.k == 6) return HostArg.HBool(v.name == "true")
+        if (v.k == 7 && objOk) {
+            let props: HostProp[] = []
+            for (const pr of v.props) {
+                if (pr.spread || pr.name == "__proto__") return not
+                const pv: HostArg | not = hostArgCore(ps, pr.value, false)
+                if (pv is not) return not
+                props = props.concat([{ key: pr.name, value: pv }])
+            }
+            return HostArg.HObj(props)
+        }
+        return not
+    }
+
+    // Rule 15 — a declared `:host` type is not data: "A struct field SHALL NOT be
+    // of a type that contains a declared `:host` type … Each of these SHALL be
+    // `E-HOST-HANDLE-NOT-DATA`." An enum payload holding one, and a CELL holding
+    // one (rule 15 admits a client cell; the bootstrap's cells are the §57 /
+    // persist / server boundaries' carriers, whose handle checks are not built),
+    // are refused by name — fail closed.
+    fn hostTypeDataDiags(types: TypeInfo[], st0: AS) -> AS {
+        let st: AS = st0
+        for (const ti of types) {
+            const fs: FieldDef[] | not = structFieldDefs(ti.def)
+            if (fs is given) {
+                for (const f of fs) {
+                    if (containsHost(types, f.ty, 0)) st = addDiag(st, ti.file, ti.span, "E-HOST-HANDLE-NOT-DATA", "the struct `" + ti.name + "` has the field `" + f.sym.hint + "` of type `" + typeName(f.ty) + "`, which contains a declared `:host` handle type — a struct field SHALL NOT be of a type that contains one (§21.3.3 rule 15: a handle is not data)")
+                }
+            }
+            for (const v of enumVariants(ti.def)) {
+                for (const f of v.fields) {
+                    if (containsHost(types, f.ty, 0)) st = addDiag(st, ti.file, ti.span, "E-BOOTSTRAP-UNSUPPORTED", "the variant `" + ti.name + "." + v.sym.hint + "` has a payload field of type `" + typeName(f.ty) + "`, which contains a declared `:host` handle type — an enum payload holding a host handle is not in the bootstrap (§21.3.3 rule 15 refuses it at every data boundary; those checks are not built here)")
+                }
+            }
+        }
+        return st
+    }
+
+    // Rule 15 at the server boundary: "A value whose type contains one at any
+    // depth … SHALL NOT … be sent where one sends: … a server-function
+    // parameter or result". Judged after placement, on each SERVER-placed function.
+    fn hostServerDiags(g: Globals, servers: int[]) -> Diag[] {
+        let out: Diag[] = []
+        for (const fs of g.fns) {
+            if (servers.indexOf(fs.info.sym.id) >= 0) {
+                const te: TypeEnv = teAt(g.te, fs.info.file)
+                for (const p of fs.f.params) {
+                    const at: AType | not = p.ty
+                    if (at is given) {
+                        const rt: RType = resolveType(te, at, emptyAS())
+                        if (!rt.unresolved && containsHost(g.types, rt.t, 0)) out = out.concat([newDiag("E-HOST-HANDLE-NOT-DATA", "the server function `" + fs.info.name + "` takes `" + p.name + ": " + typeName(rt.t) + "`, which contains a declared `:host` handle type — a host handle SHALL NOT cross to the server (§21.3.3 rule 15)", fs.info.file, p.span)])
+                    }
+                }
+                const r: Type | not = fs.info.ret
+                if (r is given) {
+                    if (containsHost(g.types, r, 0)) out = out.concat([newDiag("E-HOST-HANDLE-NOT-DATA", "the server function `" + fs.info.name + "` returns `" + typeName(r) + "`, which contains a declared `:host` handle type — a host handle SHALL NOT cross from the server (§21.3.3 rule 15)", fs.info.file, fs.info.span)])
+                }
+            }
+        }
+        return out
+    }
+
+    fn hostMemberText(ty: string, name: string) -> string {
+        return "`." + name + "` on a value of the declared host handle type `" + ty + "` — a `:host` handle is closed: no member access or method call is written on it (§21.3.3 rule 15). Declare a binding that does it instead: `" + name + "(h: " + ty + ") -> T = h." + name + "` (or `= h." + name + "(…)`) in a `<host>`"
+    }
+
+    // A cell (a declaration's field) whose type contains a declared `:host` type.
+    fn hostCellDiags(g: Globals, st0: AS) -> AS {
+        let st: AS = st0
+        for (const ds of g.decls) {
+            for (const f of ds.info.fields) {
+                if (containsHost(g.types, f.ty, 0)) st = addDiag(st, ds.file, f.span, "E-BOOTSTRAP-UNSUPPORTED", "the cell `" + f.sym.hint + "` holds `" + typeName(f.ty) + "`, which contains a declared `:host` handle type — a cell holding a host handle is not in the bootstrap (§21.3.3 rule 15 admits a client cell but refuses a `persist=` / `server` cell; the bootstrap does not build that split). Hold the handle in a local")
+            }
+        }
+        return st
     }
 
     fn fnWithHost(i: FnInfo, h: HostFn) -> FnInfo {
@@ -4815,7 +5118,10 @@ ${
         // s472 (boot-math-port): the host-backed functions (the §21.3.1 wrapper rule)
         const rh: RHostFns = hostWrappers(files, te0, rf00.fs, st)
         st = rh.st
-        const rf0: RFns = { fs: rh.fs, st: st }
+        // s473 (boot-host-block-f3): the `<host>` bindings (DRAFT §21.3.3)
+        const rhb: RFns = hostBindings(files, te0, rt.ts, rh.fs, st)
+        st = rhb.st
+        const rf0: RFns = { fs: rhb.fs, st: st }
         // s454 (U1b): the failure enum of a client call of each server-triggered function
         const rr: RRemoteEnums = remoteEnums(rf0.fs, rt.ts, builtinSym(rs.stubs, serverCallErrorName()), st)
         st = rr.st
@@ -5738,6 +6044,10 @@ ${
                 }
             }
         }
+        // s473 (§21.3.3 rule 15): a declared `:host` handle is closed
+        if (t is given) {
+            if (isHostType(env.g.types, unMaybe(t))) return diagX(env, e, "E-HOST-HANDLE-MEMBER", "member access " + hostMemberText(typeName(unMaybe(t)), name), st)
+        }
         return diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", "member access `." + name + "` on a value that is not a struct or an instance is not in bootstrap slice M2", st)
     }
 
@@ -6046,6 +6356,13 @@ ${
         if (n == "") {
             const m: MethodCall | not = memberCall(callee)
             if (m is given) {
+                // s473 (§21.3.3 rule 15): a method call on a declared `:host` handle is
+                // E-HOST-HANDLE-MEMBER (the receiver is peeked: its resolution is redone below)
+                const hro: RX = resolveExpr(env, m.obj, not, st0)
+                const hot: Type | not = hro.x.ty
+                if (hot is given) {
+                    if (isHostType(env.g.types, unMaybe(hot))) return diagX(env, e, "E-HOST-HANDLE-MEMBER", "the method call " + hostMemberText(typeName(unMaybe(hot)), m.method), hro.st)
+                }
                 // s444: the host-call surface (one call — the clock read) and the
                 // sequence functions a lambda is admitted to (filter / map)
                 if (m.method == "now" && exprName(m.obj) == "Date" && lookupLocal(env, "Date") is not) return resolveHost(env, e, args, st0)
@@ -6210,7 +6527,8 @@ ${
         let out: Diag[] = []
         for (const fs of g.fns) {
             // a function with a parse error inside it is not judged (Rule C: its body is not what was written)
-            if (!hasErrIn(fileErrs(g.files, fs.info.file), fs.f.span)) out = out.concat(fallOffDiags(g, t, fs))
+            // s473: a `<host>` binding has no scrml body (§21.3.3 — its target is the function)
+            if (!hasErrIn(fileErrs(g.files, fs.info.file), fs.f.span) && !isHostBindFn(g.files, fs)) out = out.concat(fallOffDiags(g, t, fs))
         }
         return out
     }
@@ -19857,6 +20175,12 @@ ${
     fn checkEqTypes(env: TEnv, e: AExpr, a: VType, b: VType, ts: TypeState) -> TypeState {
         const x0: Type | not = knownOf(a)
         const y0: Type | not = knownOf(b)
+        // s473 (§21.3.3 rule 15): "It is not comparable: `==` or `!=` on a type that
+        // contains a declared `:host` type SHALL be `E-EQ-003`, as for a function (§45.2)"
+        let hosty: boolean = false
+        if (x0 is given) hosty = containsHost(env.t.types, x0, 0)
+        if (y0 is given && !hosty) hosty = containsHost(env.t.types, y0, 0)
+        if (hosty) return report(ts, env, e.span, "E-EQ-003", "equality on a value of a declared `:host` handle type — a host handle is not comparable (§21.3.3 rule 15, §45.2: there is no identity comparison in scrml, §45.6); test it with `is given` / `is not`, or declare a binding that compares on the host side")
         if (x0 is not || y0 is not) return ts
         const x: Type = unMaybe(x0)
         const y: Type = unMaybe(y0)
@@ -24359,10 +24683,46 @@ ${
         if ((n == "document" || n == "window") && nameFact(t.names, e.nid) is not && bindFact(t.binds, e.nid) is not) {
             return [{ what: "the DOM global `" + n + "`", span: e.span }]
         }
+        // s473 (§21.3.3 rule 10): "In any other file [than a compiler-bundled stdlib
+        // module], a binding is client-only: a function whose body calls one is
+        // client-only for route analysis (§12.4), as a body that reads `document` or
+        // `window` is" — a REFERENCE to a `<host>` binding is that use
+        const hb: string = hostBindNamed(t, e)
+        if (hb != "") return [{ what: "the `<host>` binding `" + hb + "`", span: e.span }]
         let out: CellUse[] = []
         for (const x of exprKids(e)) { out = out.concat(domsInExpr(t, x)) }
         for (const b of exprBlocks(e)) { out = out.concat(domsInBlock(t, b)) }   // s451 (Ue): an arm block
         return out
+    }
+
+    // The name of the `<host>` binding `e` references ("" — none).
+    fn hostBindNamed(t: Tables, e: AExpr) -> string {
+        const nf: NameFact | not = nameFact(t.names, e.nid)
+        if (nf is not) return ""
+        const s: Sym | not = fnSymOfFact(nf)
+        if (s is not) return ""
+        for (const f of t.fns) {
+            if (f.sym.id == s.id) {
+                const h: HostFn | not = f.host
+                if (h is given) {
+                    if (h.bind is given) return f.name
+                }
+            }
+        }
+        return ""
+    }
+
+    fn fnSymOfFact(nf: NameFact) -> Sym | not {
+        return match nf {
+            .NFn(sym: s) :> s
+            .NLocal(sym: s) :> not
+            .NField(decl: d) :> not
+            .NInst(decl: d) :> not
+            .NStruct(owner: o) :> not
+            .NLength :> not
+            .NSurface(of: o) :> not
+            .NConst(sym: s) :> not
+        }
     }
 
     fn domsInExprs(t: Tables, es: AExpr[]) -> CellUse[] {
@@ -27952,6 +28312,8 @@ ${
         let st: AS = checkImports(files, ra.g, ra.st)
         st = phaseB(ra.g, st)
         st = strayEffects(files, st)
+        // s473 (§21.3.3 rule 15): a declared `:host` handle is not data
+        st = hostCellDiags(ra.g, hostTypeDataDiags(ra.g.types, st))
         const rr: RResets = resetOnPass(ra.g, st)
         st = rr.st
         const rp: RPersists = persistPass(ra.g, files, st)
@@ -27997,7 +28359,7 @@ ${
                             names: bound.names, values: bound.values, effects: bound.effects, binds: bound.binds,
                             elems: bound.elems, attrs: bound.attrs, fails: bound.fails, annots: bound.annots, unresolved: bound.unresolved, typing: typed.typing,
                             novalidate: vp.forms, resets: bound.resets, gated: vp.gated, persists: bound.persists, server: sf, css: css.facts, consts: bound.consts }
-        const base0: Diag[] = domScopeDropped(pl.st.diags, pp.doms).concat(scopeDiags).concat(effectDiags).concat(vp.diags).concat(sinkDiags).concat(typed.diags).concat(hostPlacedDiags(fns, pp.facts.servers))
+        const base0: Diag[] = domScopeDropped(pl.st.diags, pp.doms).concat(scopeDiags).concat(effectDiags).concat(vp.diags).concat(sinkDiags).concat(typed.diags).concat(hostPlacedDiags(fns, pp.facts.servers)).concat(hostServerDiags(ra.g, pp.facts.servers))
         // s471: the linear pass (§35) — after the typer (§35.5: "after type resolution and
         // route inference"; a non-exhaustive `match`'s E-TYPE-020 is in `base0`, §35.4.3)
         const base: Diag[] = base0.concat(linPass(ra.g, typedT, base0))

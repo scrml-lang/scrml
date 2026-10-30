@@ -39,6 +39,11 @@ ${
         // s468 (U1c): `await e` — printed ONLY for a Core Suspend in the server
         // artifact (print.scrml serverStmtsJs; the S467 §13 gate's one await rule)
         JAwait(e: JsExpr),
+        // s473 (boot-host-block-f3): `new (callee)(args)` — a `<host>` binding's
+        // `new` target (DRAFT §21.3.3 rule 4). The callee is ALWAYS parenthesized,
+        // so a call inside it (`rt.hostRoot("window").X`) is never read as the
+        // `new`'s own argument list.
+        JNew(callee: JsExpr, args: JsExpr[]),
     }
 
     export type JsStmt:enum = {
@@ -161,6 +166,7 @@ ${
             .JArrowE :> 2
             .JAnnot(e: inner) :> prec(inner)
             .JAwait :> 15
+            .JNew :> 18
         }
     }
 
@@ -206,6 +212,7 @@ ${
             .JArray :> false
             .JAnnot :> false
             .JAwait :> false
+            .JNew :> false
         }
     }
 
@@ -231,6 +238,7 @@ ${
             .JObject(props: ps) :> objectText(ps, ind)
             .JAnnot(e: x, note: n) :> expr(x, ind) + " /* " + n + " */"
             .JAwait(e: x) :> "await " + wrap(x, 15, ind)
+            .JNew(callee: f, args: args) :> "new (" + expr(f, ind) + ")(" + joinExprs(args, 2, ind) + ")"
         }
     }
 

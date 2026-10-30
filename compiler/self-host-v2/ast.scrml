@@ -252,6 +252,7 @@ ${
     export type ATypeBody:enum = {
         EnumBody(variants: AVariant[]),
         StructBody(fields: ATypeField[]),
+        HostBody,       // s473: `type Name:host` inside a `<host>` (DRAFT §21.3.3 rule 15) — a closed, opaque host handle type
     }
     export type ATypeDecl:struct = { nid: int, span: ASpan, exported: boolean, name: string, body: ATypeBody }
 
@@ -446,7 +447,20 @@ ${
     // writes"). A load's name is `@name`, which no identifier can spell, so no
     // program code can call it (it is not in any file scope).
     export type ADbFn:struct = { fn: int, db: int, cell: int, start: int, end: int }
-    export type FileAst:struct = { path: string, items: AItem[], errs: ASpan[], lines: int[], dbFns: ADbFn[] }
+    // s473 (boot-host-block-f3, DRAFT SPEC §21.3.3) — `hosts`: each binding line of
+    // a `<host>` block. The parser desugars a binding `name(params) -> R = target`
+    // into a FUNCTION item of its file (rule 9: "A binding is a function bound in
+    // file scope (§7.6)"), hoisted into the enclosing item list like a `<db>`
+    // body's functions — so every pass sees it as an ordinary function (scope,
+    // E-SCOPE-010, arity, argument types). This table keeps what makes it a host
+    // binding: `fn` the function item's nid, `target` the parsed target (`not`:
+    // none written — rule 6), `isNew` a `new` construction, `waiting` / `failable`
+    // as written (`-> waiting T`, `! E`), `hasResult` whether `->` was written,
+    // `src` the `<host src=>` value ("" none), `top` the `<host>` stood at an item
+    // position (rule 1). Its body is empty: a binding has no scrml body.
+    export type AHostBind:struct = { fn: int, span: ASpan, target: AExpr | not, isNew: boolean, waiting: boolean,
+                                     failable: boolean, hasResult: boolean, src: string, isFn: boolean }
+    export type FileAst:struct = { path: string, items: AItem[], errs: ASpan[], lines: int[], dbFns: ADbFn[], hosts: AHostBind[] }
 
     // A diagnostic: a code, its §34 severity, a message, where. (§4 permits
     // message text.)
@@ -466,5 +480,94 @@ ${
     // s472 — THE path prefix a driver names stdlib files under
     // (`scrml:format/index.scrml`); link.scrml `stdlibPrefix` and the parser's
     // nested-import judgement both read it.
+    // s473 (boot-host-block-f3, DRAFT SPEC §21.3.3) — a `<host>` binding target's
+    // parts, read by parse.scrml (the rule 4 / 5 / 8 checks) and analyze.scrml
+    // (Core's HostBind). Pure functions of the AST.
+    // One view of an expression node — the parts the target rules read. `k`:
+    // 0 a name, 1 a member `obj.name`, 2 a call `obj(args)`, 3 an assignment
+    // `obj = value`, 4 a string literal (`name` its value), 5 a number, 6 a
+    // bool, 7 an object literal, 8 a recovered parse error, -1 anything else.
+    export type HView:struct = { k: int, name: string, obj: AExpr | not, args: AExpr[], value: AExpr | not, props: AProp[] }
+
+    fn hv(k: int, name: string) -> HView { return { k: k, name: name, obj: not, args: [], value: not, props: [] } }
+    fn hvMember(o: AExpr, n: string) -> HView { return { k: 1, name: n, obj: o, args: [], value: not, props: [] } }
+    fn hvCall(c: AExpr, xs: AExpr[]) -> HView { return { k: 2, name: "", obj: c, args: xs, value: not, props: [] } }
+    fn hvAssign(l: AExpr, r: AExpr) -> HView { return { k: 3, name: "", obj: l, args: [], value: r, props: [] } }
+    fn hvObject(ps: AProp[]) -> HView { return { k: 7, name: "", obj: not, args: [], value: not, props: ps } }
+    export fn hostBoolWord(b: boolean) -> string {
+        if (b) return "true"
+        return "false"
+    }
+
+    export fn hostView(e: AExpr) -> HView {
+        return match e.k {
+            .Name(name: n) :> hv(0, n)
+            .Member(obj: o, name: n) :> hvMember(o, n)
+            .Call(callee: c, args: xs) :> hvCall(c, xs)
+            .Assign(target: l, value: r) :> hvAssign(l, r)
+            .Str(v: s) :> hv(4, s)
+            .Num(raw: r) :> hv(5, r)
+            .Bool(v: b) :> hv(6, hostBoolWord(b))
+            .ObjectLit(props: ps) :> hvObject(ps)
+            .Recovered :> hv(8, "")
+            .At(name: n) :> hv(-1, "")
+            .AtItem :> hv(-1, "")
+            .NotLit :> hv(-1, "")
+            .Variant(name: n) :> hv(-1, "")
+            .Unary(op: o) :> hv(-1, "")
+            .Binary(op: o) :> hv(-1, "")
+            .Ternary(test: x) :> hv(-1, "")
+            .ArrayLit(elems: es) :> hv(-1, "")
+            .Spread(e: x) :> hv(-1, "")
+            .Index(obj: x) :> hv(-1, "")
+            .Lambda(params: ps) :> hv(-1, "")
+            .Sql(q: q) :> hv(-1, "")
+            .Handled(h: x) :> hv(-1, "")
+            .Template(quasis: qs) :> hv(-1, "")
+            .Foreign(f: fb) :> hv(-1, "")
+        }
+    }
+
+    // A dotted member chain `root.m1.….mn`; `ok` false when the expression is
+    // not one (a computed member, a call inside it, any other node).
+    export type HChain:struct = { ok: boolean, root: string, members: string[] }
+
+    export fn hostChainOf(e: AExpr) -> HChain {
+        const v: HView = hostView(e)
+        if (v.k == 0) return { ok: true, root: v.name, members: [] }
+        if (v.k == 1) {
+            const o: AExpr | not = v.obj
+            if (o is given) {
+                const c: HChain = hostChainOf(o)
+                return { ok: c.ok, root: c.root, members: c.members.concat([v.name]) }
+            }
+        }
+        return { ok: false, root: "", members: [] }
+    }
+
+    export fn hostRootGlobal(n: string) -> boolean { return n == "window" || n == "document" || n == "navigator" }
+
+    // The checked target's pieces: `shape` 0 call, 1 `new`, 2 property read,
+    // 3 property write; `chain` the callee / the read or written member chain;
+    // `args` the call arguments (for a write, the one written value).
+    export type HTargetParts:struct = { ok: boolean, shape: int, chain: HChain, args: AExpr[] }
+
+    export fn hostTargetParts(target: AExpr, isNew: boolean) -> HTargetParts {
+        const v: HView = hostView(target)
+        const bad: HTargetParts = { ok: false, shape: -1, chain: { ok: false, root: "", members: [] }, args: [] }
+        const o: AExpr | not = v.obj
+        if (v.k == 2 && o is given) {
+            let shape: int = 0
+            if (isNew) shape = 1
+            return { ok: true, shape: shape, chain: hostChainOf(o), args: v.args }
+        }
+        if (isNew) return bad
+        if (v.k == 1) return { ok: true, shape: 2, chain: hostChainOf(target), args: [] }
+        const w: AExpr | not = v.value
+        if (v.k == 3 && o is given && w is given) return { ok: true, shape: 3, chain: hostChainOf(o), args: [w] }
+        return bad
+    }
+
+
     export fn stdlibPathPrefix() -> string { return "scrml:" }
 }

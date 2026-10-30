@@ -98,7 +98,7 @@
 // =============================================================================
 ${
     import { Sym, Type, TypeDef, FieldDef, VariantDef, FieldRef, InstRef, Place, Literal, Expr, SeqFn, PrimOp, Attr, Block, LoopHead,
-             EditKind, Check, Stmt, View, EffectDep, Field, Decl, Fn, HostFn, CoreProgram, CapOwner, TransitionGraph,
+             EditKind, Check, Stmt, View, EffectDep, Field, Decl, Fn, HostFn, HostBind, HostArg, HostProp, CoreProgram, CapOwner, TransitionGraph,
              DeclKind, SurfaceProp, ValidityOf, Persist, PersistStore, ServerFn, SqlQuery, Db,
              Pattern, Failable, OkArm, ErrArm, HostCall, Gather, Lifted, GatherRow,
              capOwner, grantsAnyWrite, findDecl, findTypeDef, findFn, findServerFn, findDb } from "./core.scrml"
@@ -256,21 +256,203 @@ ${
                 if (f.body.stmts.length > 0) out = out.concat(["C-H1: the host-backed " + who + " has a body — a host-backed function is its signature and the host call only"])
                 if (f.err is given) out = out.concat(["C-H1: the host-backed " + who + " is declared `!`"])
                 if (f.waits) out = out.concat(["C-H1: the host-backed " + who + " waits — a host binding is not a waiting value"])
-                for (const prm of f.params) {
-                    if (!hostScalar(prm.ty)) out = out.concat(["C-H2: a parameter of the host-backed " + who + " is not a scalar (int, number, string, bool)"])
-                }
-                if (!hostScalar(h.ret)) {
-                    const inner: Type | not = hostMaybeInner(h.ret)
-                    if (inner is not) {
-                        out = out.concat(["C-H2: the host-backed " + who + " returns a type the return-point decode does not check"])
-                    } else if (!hostScalar(inner)) {
-                        out = out.concat(["C-H2: the host-backed " + who + " returns a type the return-point decode does not check"])
+                const hb: HostBind | not = h.bind
+                if (hb is given) {
+                    out = out.concat(checkHostBind(p, f, hb, h.ret, who))
+                } else {
+                    for (const prm of f.params) {
+                        if (!hostScalar(prm.ty)) out = out.concat(["C-H2: a parameter of the host-backed " + who + " is not a scalar (int, number, string, bool)"])
                     }
+                    const hr: Type | not = h.ret
+                    if (hr is not) {
+                        out = out.concat(["C-H2: the host-backed " + who + " declares no return type — a wrapper's return-point decode has none to check"])
+                    } else if (!hostScalar(hr)) {
+                        const inner: Type | not = hostMaybeInner(hr)
+                        if (inner is not) {
+                            out = out.concat(["C-H2: the host-backed " + who + " returns a type the return-point decode does not check"])
+                        } else if (!hostScalar(inner)) {
+                            out = out.concat(["C-H2: the host-backed " + who + " returns a type the return-point decode does not check"])
+                        }
+                    }
+                    if (h.name == "" || !hostSegment(h.module) || !hostRelPath(h.file)) out = out.concat(["C-H3: the host module of " + who + " (`" + h.module + "/" + h.file + "`) is not a path inside its module directory"])
                 }
-                if (h.name == "" || !hostSegment(h.module) || !hostRelPath(h.file)) out = out.concat(["C-H3: the host module of " + who + " (`" + h.module + "/" + h.file + "`) is not a path inside its module directory"])
             }
         }
         return out
+    }
+
+    // s473 (boot-host-block-f3) — a `<host>` BINDING (core.scrml HostBind, DRAFT
+    // SPEC §21.3.3). The printer emits its target as literal JavaScript, so its
+    // pieces are re-verified here, the printer's precondition:
+    //   C-HB1 the shape is one of the four (rule 4); a read / write names at
+    //         least one member; a write has exactly one value;
+    //   C-HB2 the root is `window` / `document` / `navigator` (rootParam -1) or
+    //         a parameter (root "", rootParam in range); every chain member is a
+    //         plain identifier and none is `constructor` / `prototype` /
+    //         `__proto__` (rule 4);
+    //   C-HB3 every parameter is used exactly once (rule 5), every argument is a
+    //         parameter in range or a literal, an object literal one level deep
+    //         with no `__proto__` key;
+    //   C-HB4 every parameter crosses as itself (a scalar, a declared `:host`
+    //         handle, the `T | not` of one) and the result is one the decode checks
+    //         (those, a struct of those, a tape of those) — rules 12, 13.
+    fn checkHostBind(p: CoreProgram, f: Fn, b: HostBind, ret: Type | not, who: string) -> string[] {
+        let out: string[] = []
+        if (b.shape < 0 || b.shape > 3) out = out.concat(["C-HB1: the binding " + who + " has an unknown target shape"])
+        if (b.shape >= 2 && b.chain.length == 0) out = out.concat(["C-HB1: the binding " + who + " reads or writes no member"])
+        if (b.shape == 3 && b.args.length != 1) out = out.concat(["C-HB1: the binding " + who + " writes " + b.args.length + " values"])
+        if (b.rootParam < 0) {
+            if (b.root != "window" && b.root != "document" && b.root != "navigator") out = out.concat(["C-HB2: the binding " + who + " is rooted at `" + b.root + "`"])
+        } else if (b.root != "" || b.rootParam >= f.params.length) {
+            out = out.concat(["C-HB2: the binding " + who + " has a parameter root out of range"])
+        }
+        for (const m of b.chain) {
+            if (!hostIdent(m) || m == "constructor" || m == "prototype" || m == "__proto__") out = out.concat(["C-HB2: the binding " + who + " names the member `" + m + "`"])
+        }
+        let uses: int[] = []
+        if (b.rootParam >= 0) uses = uses.concat([b.rootParam])
+        for (const a of b.args) {
+            const r: HostArgCheck = checkHostArg(a, f.params.length, true)
+            uses = uses.concat(r.uses)
+            if (r.why != "") out = out.concat(["C-HB3: the binding " + who + " " + r.why])
+        }
+        let i: int = 0
+        while (i < f.params.length) {
+            let n: int = 0
+            for (const u of uses) {
+                if (u == i) n = n + 1
+            }
+            if (n != 1) out = out.concat(["C-HB3: parameter " + i + " of the binding " + who + " is used " + n + " times"])
+            i = i + 1
+        }
+        for (const prm of f.params) {
+            if (!hostCrossesIn(p, prm.ty)) out = out.concat(["C-HB4: a parameter of the binding " + who + " does not cross into the host as itself"])
+        }
+        if (ret is given) {
+            if (!hostDecodes(p, ret, 0)) out = out.concat(["C-HB4: the binding " + who + " returns a type the decode does not check"])
+        }
+        return out
+    }
+
+    type HostArgCheck:struct = { uses: int[], why: string }
+
+    fn checkHostArg(a: HostArg, n: int, top: boolean) -> HostArgCheck {
+        return match a {
+            .HParam(idx: i) :> hostArgParam(i, n)
+            .HStr(v: s) :> hostArgNone()
+            .HNum(raw: r) :> hostArgNum(r)
+            .HBool(v: b) :> hostArgNone()
+            .HObj(props: ps) :> hostArgObj(ps, n, top)
+        }
+    }
+
+    fn hostArgNone() -> HostArgCheck { return { uses: [], why: "" } }
+
+    fn hostArgParam(i: int, n: int) -> HostArgCheck {
+        if (i < 0 || i >= n) return { uses: [], why: "passes parameter " + i + ", out of range" }
+        return { uses: [i], why: "" }
+    }
+
+    fn hostArgNum(r: string) -> HostArgCheck {
+        if (r == "" || r.substring(0, 1) == "-") return { uses: [], why: "passes the number literal `" + r + "`" }
+        return { uses: [], why: "" }
+    }
+
+    fn hostArgObj(ps: HostProp[], n: int, top: boolean) -> HostArgCheck {
+        if (!top) return { uses: [], why: "nests an object literal" }
+        let uses: int[] = []
+        for (const pr of ps) {
+            if (pr.key == "__proto__") return { uses: [], why: "has the object-literal key `__proto__`" }
+            const r: HostArgCheck = checkHostArg(pr.value, n, false)
+            if (r.why != "") return r
+            uses = uses.concat(r.uses)
+        }
+        return { uses: uses, why: "" }
+    }
+
+    fn hostIdent(s: string) -> boolean {
+        if (s == "") return false
+        let i: int = 0
+        while (i < s.length) {
+            const c: string = s.charAt(i)
+            const letter: boolean = (c >= "a" && c <= "z") || (c >= "A" && c <= "Z") || c == "_" || c == "$"
+            const digit: boolean = c >= "0" && c <= "9"
+            if (!letter && !(digit && i > 0)) return false
+            i = i + 1
+        }
+        return true
+    }
+
+    fn hostIsHandle(p: CoreProgram, t: Type) -> boolean {
+        return match t {
+            .Named(sym: s) :> hostDefNamed(p, s)
+            .Int :> false
+            .Num :> false
+            .Str :> false
+            .Bool :> false
+            .Seq(elem: e) :> false
+            .Maybe(inner: i) :> false
+        }
+    }
+
+    fn hostDefNamed(p: CoreProgram, s: Sym) -> boolean {
+        const td: TypeDef | not = findTypeDef(p, s)
+        if (td is not) return false
+        return hostIsHostDef(td)
+    }
+
+    fn hostIsHostDef(td: TypeDef) -> boolean {
+        return match td {
+            .HostDef(sym: x) :> true
+            .StructDef(sym: x) :> false
+            .EnumDef(sym: x) :> false
+        }
+    }
+
+    fn hostCrossesIn(p: CoreProgram, t: Type) -> boolean {
+        const inner: Type | not = hostMaybeInner(t)
+        if (inner is given) return hostCrossesIn(p, inner)
+        return hostScalar(t) || hostIsHandle(p, t)
+    }
+
+    fn hostDecodes(p: CoreProgram, t: Type, depth: int) -> boolean {
+        if (depth > 12) return false
+        if (hostScalar(t) || hostIsHandle(p, t)) return true
+        return match t {
+            .Maybe(inner: i) :> hostDecodes(p, i, depth + 1)
+            .Seq(elem: e) :> hostDecodes(p, e, depth + 1)
+            .Named(sym: s) :> hostStructDecodes(p, s, depth)
+            .Int :> true
+            .Num :> true
+            .Str :> true
+            .Bool :> true
+        }
+    }
+
+    fn hostStructDecodes(p: CoreProgram, s: Sym, depth: int) -> boolean {
+        const td: TypeDef | not = findTypeDef(p, s)
+        if (td is not) return false
+        if (!hostIsStructDef(td)) return false
+        for (const fd of hostStructFields(td)) {
+            if (!hostDecodes(p, fd.ty, depth + 1)) return false
+        }
+        return true
+    }
+
+    fn hostStructFields(td: TypeDef) -> FieldDef[] {
+        return match td {
+            .StructDef(fields: x) :> x
+            .EnumDef(sym: x) :> []
+            .HostDef(sym: x) :> []
+        }
+    }
+
+    fn hostIsStructDef(td: TypeDef) -> boolean {
+        return match td {
+            .StructDef(fields: x) :> true
+            .EnumDef(sym: x) :> false
+            .HostDef(sym: x) :> false
+        }
     }
 
     fn hostScalar(t: Type) -> boolean {
@@ -508,6 +690,7 @@ ${
         return match t {
             .EnumDef(variants: vs) :> vs
             .StructDef(fields: x) :> []
+            .HostDef(sym: x) :> []
         }
     }
 
@@ -515,6 +698,7 @@ ${
         return match t {
             .EnumDef(variants: x) :> true
             .StructDef(fields: x) :> false
+            .HostDef(sym: x) :> false
         }
     }
 
@@ -3723,6 +3907,7 @@ ${
         return match t {
             .StructDef(sym: s, fields: fs) :> fs
             .EnumDef(sym: s) :> not
+            .HostDef(sym: s) :> not
         }
     }
 
@@ -4353,6 +4538,7 @@ ${
         return match t {
             .EnumDef(sym: s, variants: vs) :> vs.length
             .StructDef(sym: s) :> 0
+            .HostDef(sym: s) :> 0
         }
     }
 

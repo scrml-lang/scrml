@@ -309,6 +309,9 @@ async function hostFilesOf(core: any, stdlibRoot: string, diagnostics: Diagnosti
   for (const f of core.fns ?? []) {
     const h = f.host;
     if (h === null || h === undefined) continue;
+    // s473: a `<host>` binding (h.bind, DRAFT SPEC §21.3.3) names no host module — its target is printed in
+    // place, and nothing is loaded at build time (rule 3: "The compiler SHALL NOT load, import, or evaluate")
+    if (h.bind !== null && h.bind !== undefined) continue;
     const out = `_scrml/${h.module}/${h.file}`;
     let e = byOut.get(out);
     if (e === undefined) {

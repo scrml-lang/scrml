@@ -77,9 +77,15 @@ ${
     // (the M2 fix round removed the unfillable `FieldDef.graph` — progress.md).
     export type FieldDef:struct   = { sym: Sym, ty: Type, grants: GrantSet }
     export type VariantDef:struct = { sym: Sym, fields: FieldDef[] }
+    // s473 (boot-host-block-f3) — `HostDef`: a `type Name:host` declared in a
+    // `<host>` block (DRAFT SPEC §21.3.3 rule 15, "a nominal, opaque host
+    // type"). It has no members and no wire form; its values are host objects
+    // that cross into scrml only as a `<host>` binding's result and back only as
+    // a binding's argument (rules 12, 13).
     export type TypeDef:enum = {
         EnumDef(sym: Sym, variants: VariantDef[]),
         StructDef(sym: Sym, fields: FieldDef[]),
+        HostDef(sym: Sym),
     }
 
     // -------------------------------------------------------------------------
@@ -787,7 +793,26 @@ ${
     // value the host returns is DECODED against `ret` at that point (the F3
     // §5.4 boundary decode — a mismatch is the E-HOST-VALUE-MISMATCH-RT trap).
     // `not`: an ordinary scrml function.
-    export type HostFn:struct   = { module: string, file: string, name: string, ret: Type }
+    // s473 (boot-host-block-f3) — `bind`: a `<host>` BINDING (DRAFT SPEC
+    // §21.3.3), not an `import:host` wrapper. Its call evaluates `bind`'s
+    // target — emitted as literal JavaScript (rule 7) — and decodes the result
+    // against `ret` (rule 13; `not`: no `->` written, the result discarded but a
+    // thenable still a mismatch). `module` / `file` are "" (a binding names no
+    // host module: `src=` is not built). For a wrapper `bind` is `not` and `ret`
+    // is its declared return type.
+    export type HostArg:enum = {
+        HParam(idx: int),
+        HStr(v: string),
+        HNum(raw: string),
+        HBool(v: boolean),
+        HObj(props: HostProp[]),
+    }
+    export type HostProp:struct = { key: string, value: HostArg }
+    // `shape`: 0 a call, 1 a `new` construction, 2 a property read, 3 a property
+    // write (`args` the one written value). `root`: `window` / `document` /
+    // `navigator`, or "" when the chain is rooted at the parameter `rootParam`.
+    export type HostBind:struct = { shape: int, root: string, rootParam: int, chain: string[], args: HostArg[] }
+    export type HostFn:struct   = { module: string, file: string, name: string, ret: Type | not, bind: HostBind | not }
     export type Fn:struct       = { sym: Sym, params: Param[], body: Block, pure: boolean, err: Sym | not, waits: boolean, host: HostFn | not }
     // s451 (U1a): a function route inference placed on the SERVER (§12.2) — its
     // body holds the program's SQL and no client state (check.scrml C-S1/C-S2);
@@ -943,6 +968,7 @@ ${
         return match t {
             .EnumDef(sym: s, variants: vs)  :> s
             .StructDef(sym: s, fields: fs)  :> s
+            .HostDef(sym: s)                :> s
         }
     }
 

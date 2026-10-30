@@ -29,7 +29,7 @@ ${
     import { Sym, Type, DeclKind, TypeDef, FieldDef, VariantDef, TransitionGraph, FieldRef, InstRef, Place, Literal, PrimOp, Pattern, Expr, MatchArm,
              HostCall, SeqFn, BindKind,
              EditKind, Check, Stmt, Block, Attr, ConstructAttr, CondArm, View, EffectDep, FieldRole, Field,
-             Decl, Fn, HostFn, CoreProgram, CapOwner, SurfaceProp, ValidityOf, Validator, Persist, PersistStore,
+             Decl, Fn, HostFn, HostBind, HostArg, HostProp, CoreProgram, CapOwner, SurfaceProp, ValidityOf, Validator, Persist, PersistStore,
              Failable, OkArm, ErrArm, ServerFn, SqlQuery, SqlMode, Param, LoopHead, EachHead, RangeHead, CssUnit, CoreCss, CssVar,
              Gather, Lifted, GatherRow, PathStep, CoreConst, HeadTitle, CoreMeta,
              findDecl, findTypeDef, typeDefSym, capOwner, findFn, findServerFn, mountedInstances } from "./core.scrml"
@@ -205,6 +205,7 @@ ${
         return match t {
             .StructDef(fields: fs) :> memberAt(fs, idx)
             .EnumDef :> "field" + idx
+            .HostDef :> "field" + idx
         }
     }
 
@@ -224,6 +225,7 @@ ${
         return match t {
             .EnumDef(variants: vs) :> variantAt(vs, idx)
             .StructDef :> "variant" + idx
+            .HostDef :> "variant" + idx
         }
     }
 
@@ -242,6 +244,7 @@ ${
         return match t {
             .EnumDef(variants: vs) :> variantArity(vs, idx)
             .StructDef :> 0
+            .HostDef :> 0
         }
     }
 
@@ -260,6 +263,7 @@ ${
         return match t {
             .EnumDef(variants: vs) :> variantFieldAt(vs, idx, j)
             .StructDef :> "field" + j
+            .HostDef :> "field" + j
         }
     }
 
@@ -2225,6 +2229,7 @@ ${
             .JObject :> false
             .JAnnot :> false
             .JAwait :> false
+            .JNew :> false
         }
     }
 
@@ -2465,6 +2470,7 @@ ${
         return match t {
             .StructDef(fields: fs) :> fs
             .EnumDef(variants: vs) :> []
+            .HostDef(sym: x) :> []
         }
     }
 
@@ -2702,7 +2708,8 @@ ${
         for (const f of p.fns) {
             const h: HostFn | not = f.host
             if (h is given) {
-                if (hostModuleIndex(out, h) < 0) out = out.concat([h])
+                // s473: a `<host>` binding names no host module (its target is printed in place)
+                if (h.bind is not && hostModuleIndex(out, h) < 0) out = out.concat([h])
             }
         }
         return out
@@ -2732,7 +2739,7 @@ ${
         for (const f of fs) {
             const h: HostFn | not = f.host
             if (h is given) {
-                if (hostModuleIndex(seen, h) < 0) seen = seen.concat([h])
+                if (h.bind is not && hostModuleIndex(seen, h) < 0) seen = seen.concat([h])
             }
         }
         let out: JsStmt[] = []
@@ -2748,9 +2755,90 @@ ${
             params = params.concat([n])
             args = args.concat([jid(n)])
         }
+        const hb: HostBind | not = h.bind
+        if (hb is given) return hostBindJs(ctx, f, hb, h.ret, params)
         const call: JsExpr = jcall(jmember(jid(hostModName(ctx.p, h)), h.name), args)
         const at: string = f.sym.hint + "() — the host function `" + h.name + "` of " + hostModulePath(h).slice(2)
-        return JsStmt.SFunc(symName(ctx, f.sym), params, [JsStmt.SReturn(rtCall(ctx, "hostResult", [call, hostTypeJs(h.ret), jstr(at)]))])
+        const rt0: Type | not = h.ret
+        let desc: JsExpr = hostKind("unchecked")
+        if (rt0 is given) desc = hostTypeJs(rt0)
+        return JsStmt.SFunc(symName(ctx, f.sym), params, [JsStmt.SReturn(rtCall(ctx, "hostResult", [call, desc, jstr(at)]))])
+    }
+
+    // s473 (boot-host-block-f3) — a `<host>` BINDING (DRAFT SPEC §21.3.3): its
+    // target printed as LITERAL JavaScript (rule 7 — never built from source
+    // text at run time) inside a thunk the runtime calls (`rt.hostCall`), which
+    // turns a throw into `E-HOST-THROW-RT` (rule 18) and decodes the result
+    // against the declared type (rule 13; `{ k: "void" }` — no `->`: discarded,
+    // a thenable still a mismatch). A root `window` / `document` / `navigator`
+    // is read through the runtime (`rt.hostRoot("window")`), so no name the
+    // program declares can shadow it.
+    fn hostBindJs(ctx: Ctx, f: Fn, b: HostBind, ret: Type | not, params: string[]) -> JsStmt {
+        let base: JsExpr = rtCall(ctx, "hostRoot", [jstr(b.root)])
+        if (b.rootParam >= 0) base = jid(params[b.rootParam])
+        for (const m of b.chain) { base = jmember(base, m) }
+        let args: JsExpr[] = []
+        for (const a of b.args) { args = args.concat([hostArgJs(a, params)]) }
+        let thunk: JsExpr = JsExpr.JArrowE([], jcall(base, args))
+        if (b.shape == 1) thunk = JsExpr.JArrowE([], JsExpr.JNew(base, args))
+        if (b.shape == 2) thunk = JsExpr.JArrowE([], base)
+        if (b.shape == 3) thunk = JsExpr.JArrow([], [JsStmt.SAssign(base, args[0])])
+        let desc: JsExpr = hostKind("void")
+        if (ret is given) desc = hostDescJs(ctx, ret, 0)
+        const at: string = f.sym.hint + "() — the `<host>` binding"
+        return JsStmt.SFunc(symName(ctx, f.sym), params, [JsStmt.SReturn(rtCall(ctx, "hostCall", [thunk, desc, jstr(at)]))])
+    }
+
+    fn hostArgJs(a: HostArg, params: string[]) -> JsExpr {
+        return match a {
+            .HParam(idx: i) :> jid(params[i])
+            .HStr(v: s) :> jstr(s)
+            .HNum(raw: r) :> JsExpr.JNum(r)
+            .HBool(v: b) :> JsExpr.JBool(b)
+            .HObj(props: ps) :> hostObjJs(ps, params)
+        }
+    }
+
+    fn hostObjJs(ps: HostProp[], params: string[]) -> JsExpr {
+        let out: JsProp[] = []
+        for (const p of ps) { out = out.concat([{ key: p.key, value: hostArgJs(p.value, params) }]) }
+        return JsExpr.JObject(out)
+    }
+
+    // The decode descriptor of a binding's declared result (rule 13) — check.scrml C-HB4.
+    fn hostDescJs(ctx: Ctx, t: Type, depth: int) -> JsExpr {
+        return match t {
+            .Int :> hostKind("int")
+            .Num :> hostKind("number")
+            .Str :> hostKind("string")
+            .Bool :> hostKind("bool")
+            .Maybe(inner: i) :> JsExpr.JObject([{ key: "k", value: jstr("maybe") }, { key: "inner", value: hostDescJs(ctx, i, depth + 1) }])
+            .Seq(elem: e) :> JsExpr.JObject([{ key: "k", value: jstr("tape") }, { key: "elem", value: hostDescJs(ctx, e, depth + 1) }])
+            .Named(sym: s) :> hostNamedDesc(ctx, s, depth)
+        }
+    }
+
+    fn hostNamedDesc(ctx: Ctx, s: Sym, depth: int) -> JsExpr {
+        const td: TypeDef | not = findTypeDef(ctx.p, s)
+        if (td is not) return hostKind("unchecked")
+        if (depth > 12) return hostKind("unchecked")
+        return hostDefDesc(ctx, s, td, depth)
+    }
+
+    fn hostDefDesc(ctx: Ctx, s: Sym, td: TypeDef, depth: int) -> JsExpr {
+        return match td {
+            .HostDef(sym: x) :> JsExpr.JObject([{ key: "k", value: jstr("handle") }, { key: "name", value: jstr(s.hint) }])
+            .StructDef(fields: fs) :> hostStructDesc(ctx, s, fs, depth)
+            .EnumDef(sym: x) :> hostKind("unchecked")
+        }
+    }
+
+    fn hostStructDesc(ctx: Ctx, s: Sym, fs: FieldDef[], depth: int) -> JsExpr {
+        let fields: JsExpr[] = []
+        for (const fd of fs) {
+            fields = fields.concat([JsExpr.JObject([{ key: "name", value: jstr(fd.sym.hint) }, { key: "ty", value: hostDescJs(ctx, fd.ty, depth + 1) }])])
+        }
+        return JsExpr.JObject([{ key: "k", value: jstr("struct") }, { key: "name", value: jstr(s.hint) }, { key: "fields", value: JsExpr.JArray(fields) }])
     }
 
     // The return-point decode's descriptor of a (scalar, or scalar `T | not`) type — check.scrml C-H2.

@@ -13,6 +13,7 @@ export function copyHostFiles(core, dir, stdlibRoot = STDLIB) {
   for (const f of core.fns ?? []) {
     const h = f.host;
     if (h === null || h === undefined) continue;
+    if (h.bind !== null && h.bind !== undefined) continue; // s473: a `<host>` binding names no host module
     const dst = join(dir, "_scrml", h.module, ...String(h.file).split("/"));
     mkdirSync(dirname(dst), { recursive: true });
     copyFileSync(join(stdlibRoot, h.module, ...String(h.file).split("/")), dst);

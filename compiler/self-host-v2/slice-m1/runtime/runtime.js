@@ -1232,6 +1232,215 @@ export function hostResult(v, ty, at) {
   return hostMismatch(v, hostWant(ty), at);
 }
 
+// ---------------------------------------------------------------------------
+// s473 (boot-host-block-f3) — `<host>` BINDINGS (DRAFT SPEC §21.3.3). The
+// printer (print.scrml hostBindJs) emits each binding as
+//   function name(p…) { return rt.hostCall(() => <target>, <descriptor>, "<at>") }
+// with the target as literal JavaScript (rule 7). `hostCall` evaluates it and:
+//   - a THROW is the trap E-HOST-THROW-RT (rule 18: "A binding not declared `!
+//     HostError` whose target throws … SHALL raise the trap `E-HOST-THROW-RT`").
+//     Its text is built without running a conversion of a host object (rule 18:
+//     `message` / `name` read once; "no `toString`, `valueOf` or
+//     `Symbol.toPrimitive` of a thrown object is called");
+//   - the result is DECODED against the declared type (rule 13 — "SHALL NOT be
+//     coerced. The decode reads host data, not wire data, so it SHALL read only
+//     what it inspects, and only once"):
+//       scalars by `typeof` (a boxed `new String("x")` is a mismatch); `int`
+//       integral within ±(2^53−1); `T | not`: null / undefined is `not`; a
+//       non-optional type receiving null / undefined is a mismatch;
+//       a struct: each declared field read ONCE by ordinary property access,
+//       ABSENT when the prototype chain does not have it below
+//       `Object.prototype` ("so a polluted `Object.prototype` cannot supply a
+//       field") — a WebIDL accessor on an interface prototype IS found, and its
+//       getter runs once; undeclared members dropped; the copy is built with
+//       defineProperty, so a field named `__proto__` stays data;
+//       a tape: `Array.isArray` true (a NodeList / HTMLCollection is not), its
+//       `length` and each element read once; an absent index is absent;
+//       a declared `:host` handle: not decoded, but never null / undefined;
+//       a thenable result of a binding not declared waiting is a mismatch —
+//       after a rejection handler is attached, so the fault is not reported a
+//       second time as an unhandled rejection; the message names the fix;
+//   - a throw WHILE DECODING (a getter that throws, a Proxy trap) is the trap
+//     E-HOST-THROW-RT too (PA reading: the host threw; the value is never
+//     admitted).
+// A mismatch is E-HOST-VALUE-MISMATCH-RT (§19.17): the declaration is wrong.
+// ---------------------------------------------------------------------------
+
+/** A host root a target names (`window`, `document`, `navigator`) — read here, so no program name can shadow it. */
+export function hostRoot(name) {
+  switch (name) {
+    case "window": return globalThis.window;
+    case "document": return globalThis.document;
+    case "navigator": return globalThis.navigator;
+  }
+  throw new Error("hostRoot: " + JSON.stringify(name) + " is not a host root (a compiler defect — check.scrml C-HB2)");
+}
+
+/** Rule 18's payload of a thrown value: `message` / `name`, each read once, no conversion of a host object. */
+export function hostThrownParts(e) {
+  if (e === null || (typeof e !== "object" && typeof e !== "function")) {
+    let message = "a non-Error value was thrown";
+    try { message = String(e); } catch { /* a primitive runs no host code; keep the fixed text */ }
+    return { message, name: "UnknownThrow" };
+  }
+  let message;
+  let name;
+  try {
+    const m = e.message;
+    if (typeof m === "string") message = m;
+  } catch { message = undefined; }
+  try {
+    const n = e.name;
+    if (typeof n === "string" && n !== "") name = n;
+  } catch { name = undefined; }
+  return {
+    message: message === undefined ? "a non-Error value was thrown" : message,
+    name: name === undefined ? (message === undefined ? "UnknownThrow" : "Error") : name,
+  };
+}
+
+function hostThrew(e, at, when) {
+  const p = hostThrownParts(e);
+  throw new ScrmlTrap("E-HOST-THROW-RT", at + " — the host threw " + when + ": " + p.name + ": " + p.message + " (a binding not declared `! HostError` traps on a host throw, §21.3.3 rule 18)", { at, name: p.name, message: p.message });
+}
+
+function hostShowSafe(v) {
+  try { return hostShow(v); } catch { return "a value"; }
+}
+
+function hostBindMismatch(v, want, at, where) {
+  const shown = hostShowSafe(v);
+  throw new ScrmlTrap("E-HOST-VALUE-MISMATCH-RT", at + " — " + where + " is " + shown + " where its declared type is " + want + " — the declaration does not describe the host (§21.3.3 rule 13)", { value: shown, want, at });
+}
+
+function hostDescWant(ty) {
+  switch (ty.k) {
+    case "maybe": return hostDescWant(ty.inner) + " | not";
+    case "tape": return hostDescWant(ty.elem) + "[]";
+    case "struct": case "handle": return ty.name;
+    default: return ty.k;
+  }
+}
+
+const hostOwn = Object.prototype.hasOwnProperty;
+
+/**
+ * s473 (#1659 review M1) — a STRUCT field's chain search (rule 13). A field is present when it
+ * is an own property of `o` or of an intermediate prototype (a WebIDL interface prototype, whose
+ * accessors carry the field), and ABSENT when it is found only on a chain-TERMINAL object — one
+ * whose own prototype is `null`. That terminal is `Object.prototype` of WHATEVER realm `o` came
+ * from (this realm's, or a cross-realm iframe's), so a polluted `Object.prototype` can never
+ * supply a field, cross-realm included. A struct value is required to be a non-array, non-function
+ * ordinary object (hostDecode), so `Array.prototype` / `Function.prototype` are never in its
+ * chain; only the Object.prototype terminal is excluded.
+ */
+function hostHasField(o, key, at) {
+  let p = o;
+  for (let n = 0; n < 4096; n++) {
+    if (p === null || p === undefined) return false;
+    const proto = Object.getPrototypeOf(p);
+    if (proto === null) return false; // p is a chain terminal (an Object.prototype of some realm) — excluded
+    if (hostOwn.call(p, key)) return true;
+    p = proto;
+  }
+  return hostBindMismatch(o, "an object whose prototype chain ends", at, "a value");
+}
+
+function hostDecode(v, ty, at, where, topThen) {
+  switch (ty.k) {
+    case "maybe":
+      if (v === null || v === undefined) return null;
+      return hostDecode(v, ty.inner, at, where);
+    case "int":
+      if (typeof v === "number" && Number.isInteger(v) && Math.abs(v) <= MAX_EXACT_INT) return v === 0 ? 0 : v;
+      break;
+    case "number":
+      if (typeof v === "number") return v;
+      break;
+    case "string":
+      if (typeof v === "string") return v;
+      break;
+    case "bool":
+      if (typeof v === "boolean") return v;
+      break;
+    case "handle":
+      if (v !== null && v !== undefined) return v;
+      break;
+    case "struct": {
+      // s473 (#1659 review M1): a struct must be a NON-ARRAY, non-function ordinary object, so
+      // its chain cannot be `Array.prototype` / `Function.prototype`; only `Object.prototype`
+      // (any realm, hostHasField) is the excluded terminal.
+      if (v === null || typeof v !== "object" || Array.isArray(v)) break;
+      const out = {};
+      for (const f of ty.fields) {
+        let fv = null;
+        // s473 (#1659 review M2): the top object's `then` was read once in hostCall; reuse it for a
+        // field named `then` so no getter runs twice.
+        if (topThen !== undefined && f.name === "then") {
+          fv = hostDecode(topThen.value, f.ty, at, where + "'s field `then`");
+        } else if (hostHasField(v, f.name, at)) {
+          fv = hostDecode(v[f.name], f.ty, at, where + "'s field `" + f.name + "`");
+        } else if (f.ty.k === "maybe") {
+          fv = null;
+        } else {
+          return hostBindMismatch(undefined, hostDescWant(f.ty), at, where + "'s field `" + f.name + "` (absent)");
+        }
+        Object.defineProperty(out, f.name, { value: fv, writable: true, enumerable: true, configurable: true });
+      }
+      return out;
+    }
+    case "tape": {
+      if (!Array.isArray(v)) break;
+      const n = v.length;
+      if (!(typeof n === "number" && Number.isInteger(n) && n >= 0 && n <= 4294967295)) break;
+      const out = [];
+      for (let i = 0; i < n; i++) {
+        // s473 (#1659 review M1 / open Q2): a tape element counts only when it is an OWN index of
+        // the array — a hole, and a polluted `Array.prototype[i]` (cross-realm included), is absent.
+        if (hostOwn.call(v, String(i))) {
+          out.push(hostDecode(v[i], ty.elem, at, where + "'s element " + i));
+        } else if (ty.elem.k === "maybe") {
+          out.push(null);
+        } else {
+          return hostBindMismatch(undefined, hostDescWant(ty.elem), at, where + "'s element " + i + " (absent)");
+        }
+      }
+      return out;
+    }
+    default:
+      throw new Error("hostCall: unknown descriptor " + JSON.stringify(ty) + " (a compiler defect — check.scrml C-HB4)");
+  }
+  return hostBindMismatch(v, hostDescWant(ty), at, where);
+}
+
+/** A `<host>` binding's call: evaluate the target, then decode its result (rules 13, 18). */
+export function hostCall(thunk, ty, at) {
+  let v;
+  try {
+    v = thunk();
+  } catch (e) {
+    hostThrew(e, at, "evaluating its target");
+  }
+  try {
+    // s473 (#1659 review M2): read `then` ONCE. The value is reused for the decode of a struct
+    // field named `then`, so no getter runs twice.
+    let topThen;
+    if (v !== null && (typeof v === "object" || typeof v === "function")) {
+      const then = v.then;
+      topThen = { value: then };
+      if (typeof then === "function") {
+        try { then.call(v, undefined, () => {}); } catch { /* no handler could be attached */ }
+        return hostBindMismatch(v, (ty.k === "void" ? "nothing (no `->`)" : hostDescWant(ty)) + " and it is a thenable — the binding is not declared waiting; declare it `-> waiting void` (or `-> waiting T`)", at, "its result");
+      }
+    }
+    if (ty.k === "void") return undefined;
+    return hostDecode(v, ty, at, "its result", topThen);
+  } catch (e) {
+    if (e instanceof ScrmlTrap) throw e;
+    return hostThrew(e, at, "while its result was decoded");
+  }
+}
+
 /** Structural equality (§45) for `==` on structs and sequences. */
 export function eq(a, b) {
   if (Object.is(a, b)) return true;
