@@ -4409,10 +4409,15 @@ ${
             }
         }
         const ms: string[] = parts.chain.members
+        // `inert@k`: the receiver of chain member k SHALL pass the run-time inert-receiver check
+        // (rule 8.5) — every guarded(inert-receiver) entry on the chain, a mid-chain read included
+        // (`e.classList.add(t)`: the classList read is guarded). The static type is never the proof.
+        let inertAt: string[] = []
         let i: int = 0
         while (i < ms.length - 1) {
             const e0: HEntry | not = findEntry(cur, ms[i], "read")
             if (e0 is not) return hostNotAllowed(name, cur, ms[i], "read")
+            if (entryGuards(e0).indexOf("inert-receiver") >= 0) inertAt = inertAt.concat(["inert@" + i])
             const r0: string = sigResult(e0)
             if (!isSurfaceIface(r0)) return hw("E-HOST-TARGET-NOT-ALLOWED", "the target of `" + name + "` continues past `" + cur + "." + ms[i] + "`, whose result is `" + r0 + "`, not an interface — each member of a chain but the last SHALL be a `read` entry whose result is an interface (§21.3.3 rule 8.3); read it in a binding of its own, test it, and pass it on")
             cur = r0
@@ -4505,7 +4510,9 @@ ${
         if (guards.length > 0 && !runtimeGuardsBuilt()) return hw("E-BOOTSTRAP-UNSUPPORTED", "`" + name + "` reaches `" + cur + "." + last + "` (" + access + "), a `guarded(" + guards.join(", ") + ")` entry (Appendix H " + e.id + ") — its run-time check (§21.3.3 rule 8.5) is not in this build yet, so the entry is refused rather than run unguarded")
         // the run-time checks the printer emits (print.scrml hostBindJs): every guard of the entry,
         // a statically admitted literal URL included (the guard is cheap and the emission one shape)
-        return { hcode: "", hmsg: "", hguards: entryGuards(e) }
+        if (entryGuards(e).indexOf("inert-receiver") >= 0) inertAt = inertAt.concat(["inert@" + (ms.length - 1)])
+        if (inertAt.length > 0 && !runtimeGuardsBuilt()) return hw("E-BOOTSTRAP-UNSUPPORTED", "`" + name + "`'s chain reaches a `guarded(inert-receiver)` entry — its run-time check (§21.3.3 rule 8.5) is not in this build, so the entry is refused rather than run unguarded")
+        return { hcode: "", hmsg: "", hguards: entryGuards(e).concat(inertAt) }
     }
 
     // One argument `x` of a target against the slot type `slot` (8.4, 8.5).
@@ -18011,7 +18018,7 @@ ${
                 out = out.concat([mkDiag(ti.file, ti.span, "E-BOOTSTRAP-REDECLARE", "`SqlError` is the built-in enum of query failures (§19.8.1) — \"The developer SHALL NOT redefine it\" (§19.8.4); name this type something else")])
             }
             // s454 (U1b) — §19.9.10: "the developer SHALL NOT redefine it"
-            // s473-host-allowlist-b (DRAFT §21.3.3 rule 8.1, PA-flagged reading): a user STRUCT or
+            // s473-host-allowlist-b (DRAFT §21.3.3 rule 8.1; ruling: user-voice-scrml.md S473 D34): a user STRUCT or
             // ENUM named like an Appendix H interface (`type Node:struct` — a tree node) SHADOWS the
             // built-in host type in its scope, as a user `Error` shadows the built-in enum
             // (resolveTypeName: a user type wins). It is not refused: the design's "SHALL NOT reuse"

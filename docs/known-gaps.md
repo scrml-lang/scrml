@@ -32,7 +32,7 @@
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 264 | 5 |
 | MED | 714 | 8 |
-| LOW | 599 | 0 |
+| LOW | 598 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
 
@@ -1099,8 +1099,10 @@ Rule 13's old tape bullet said *"an index that is absent by the struct rule abov
 
 > **NARROWED S473 (s473-boot-host-block-f3, #1659 review H1 — PA ruling, fail-closed tightening of rule 8).** Rule 8 is now one shared sink table judged over EVERY chain segment in EVERY shape, a read included (`hostExecSink` anywhere; a realm/handle name as a read's last member, `hostRealmResultWord`; a write sink `hostWriteSinkWord`; a bare-callee is `E-HOST-TARGET-SHAPE`). The SPEC sentence is written (§21.3.3 rule 8, "S473 PA ruling — fail-closed tightening"). Every #1659 Chromium repro (Function, document.write, Reflect.set, location navigation, on… attribute through setAttributeNode) is a refused-at-compile test. **Residual (the narrow part still open):** a `value` / `textContent` / `nodeValue` / `text` WRITE is refused on ANY receiver because the bootstrap has no DOM element types to tell a `<script>` / an `Attr` from an ordinary element — conservative, to be refined when DOM types land (F7).
 
-<!-- @gap id=g-spec-host-surface-name-shadowing-s473 sev=LOW status=open locus=compiler/SPEC.md(§21.3.3 rule 8.1)+compiler/self-host-v2/analyze.scrml(builtinRedeclares — no refusal) prov=dispatch:s473-host-allowlist-b;dd:host-binding-allowlist-design-2026-10-29.md(§8 rule 8.1) -->
-### g-spec-host-surface-name-shadowing-s473 — (owner fork) may a user struct / enum reuse an Appendix H interface name (`Node`, `Event`, `Text`, `Element`, `Location`)? — `NEW S473; LOW; open (PA reading taken: it shadows)`
+<!-- @gap id=g-spec-host-surface-name-shadowing-s473 sev=LOW status=resolved resolved-by=ruling:user-voice-scrml.md(S473-D34) locus=compiler/SPEC.md(§21.3.3 rule 8.1)+compiler/self-host-v2/analyze.scrml(builtinRedeclares — no refusal) prov=dispatch:s473-host-allowlist-b;dd:host-binding-allowlist-design-2026-10-29.md(§8 rule 8.1) -->
+### g-spec-host-surface-name-shadowing-s473 — (owner fork) may a user struct / enum reuse an Appendix H interface name (`Node`, `Event`, `Text`, `Element`, `Location`)? — `NEW S473; LOW; RESOLVED S473 (ruled D34: it shadows)`
+
+> **RESOLVED S473 (ruling: user-voice-scrml.md S473 D34, "your recs on all").** *"a user struct or enum named like an Appendix H interface (e.g. the codec's `type Node:struct`) SHADOWS the built-in, as a user `Error` does. A parameter of that type is not a host root (fails closed). Only a `type X:host` line reusing an Appendix H name is E-SCOPE-010."* SPEC §21.3.3 rule 8.1 states it; the bootstrap already built it (analyze.scrml builtinRedeclares does not refuse; parse.scrml hostTypeLine refuses the `:host` line).
 
 > **Filed S473 (s473-host-allowlist-b).** The design's DRAFT rule 8.1 says *"A user type declaration SHALL NOT reuse one … (E-SCOPE-010)"*. Built that way, it refused `compiler/self-host-v2/slice-codec/src/types.scrml`'s `type Node:struct` (and `walk.scrml`'s, mirrored in scrml-corpus) — a tree `Node` is common, and the design's §7 breakage count measured only `<host>` uses, not type names. The ruling (Q2) makes the names *built-in types*, which `Error` already is, and a user `Error` shadows it (§19.4.2). **Reading taken (reversible):** a user struct / enum of such a name shadows the built-in in its scope; a parameter of it is then no host root (`E-HOST-ROOT-OPAQUE` — fail closed); only a `type Name:host` line reusing one is `E-SCOPE-010`. **Rec:** keep shadowing. The cost of the strict reading falls on adopters with ordinary data types named `Node` / `Event` / `Text`; the cost of shadowing is that a file with its own `Node` cannot also bind `Node`-typed host parameters (it writes `Element` / `HTMLElement`).
 

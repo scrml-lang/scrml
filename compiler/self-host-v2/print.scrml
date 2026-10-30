@@ -2818,18 +2818,25 @@ ${
         // guarded(url) on a write: the value through `rt.hostUrl` (§5.2 rule 3's guard);
         // guarded(attr-name): the name through `rt.hostSetAttrName` and a `setAttribute` value through
         // `rt.hostAttrValue` (URL-valued names judged by the same guard). Still literal JS (rule 7).
+        // `inert@k` (analyze.scrml hostWalk): the receiver of chain member k goes through rt.hostInert —
+        // at EVERY guarded(inert-receiver) step, a mid-chain read (`e.classList`) included
         let recv: JsExpr = base
+        let recvG: JsExpr = base
         let i: int = 0
-        while (i < b.chain.length - 1) {
-            recv = jmember(recv, b.chain[i])
+        while (i < b.chain.length) {
+            let r: JsExpr = recv
+            if (b.guards.indexOf("inert@" + i) >= 0) r = rtCall(ctx, "hostInert", [recv, jstr(at0)])
+            if (i == b.chain.length - 1) {
+                recvG = r
+            } else {
+                recv = jmember(r, b.chain[i])
+            }
             i = i + 1
         }
         let args: JsExpr[] = []
         for (const a of b.args) { args = args.concat([hostArgJs(a, params)]) }
         if (b.chain.length > 0 && b.guards.length > 0) {
             const last: string = b.chain[b.chain.length - 1]
-            let recvG: JsExpr = recv
-            if (b.guards.indexOf("inert-receiver") >= 0) recvG = rtCall(ctx, "hostInert", [recv, jstr(at0)])
             if (b.shape == 3 && b.guards.indexOf("url") >= 0) args = [rtCall(ctx, "hostUrl", [recv, jstr(last), args[0], jstr(at0)])]
             if (b.guards.indexOf("attr-name") >= 0 && args.length > 0) {
                 const nameArg: JsExpr = args[0]

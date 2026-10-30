@@ -23809,6 +23809,8 @@ rule 8.4 states how a struct fits an interface result, not a dictionary one: ⚑
 
 #### H.3 The entries
 
+**Inertness is never read off a static type.** Every entry that changes an element's children or attributes — a reflected-attribute write (`id`, `hidden`, `title`, a canvas `width` / `height`, an input `value`, whose "default" value mode writes the `value` attribute), `textContent`, `append` / `prepend` / `replaceChildren`, `remove`, `setAttribute` / `removeAttribute`, a URL write — and every read that hands out an element's attribute-backed sub-object (`classList`, `style`, whose mutators then change the `class` / `style` attribute) is `guarded(inert-receiver)`: the receiver passes rule 8.5's run-time check at each such step of a chain, whatever its static interface (*S473 PA ruling on the lane B report: "no admitted entry treats a static element TYPE as proof of inertness"*). The one child-changing entry without an element receiver is `Document.title` write, which replaces the text of the document's `<title>` (RCDATA: its text never runs).
+
 | id | interface | member | access | signature | class | WebIDL source |
 |---|---|---|---|---|---|---|
 | H-001 | `Window` | `document` | read | `Document` | open | HTML Window |
@@ -23876,10 +23878,10 @@ rule 8.4 states how a struct fits an interface result, not a dictionary one: ⚑
 | H-063 | `Node` | `parentElement` | read | `Element \| not` | open | DOM Node |
 | H-064 | `Node` | `contains` | call | `(other: Node) -> bool` | open | DOM Node |
 | H-065 | `Element` | `id` | read | `string` | open | DOM Element |
-| H-066 | `Element` | `id` | write | `string` | open | DOM Element |
+| H-066 | `Element` | `id` | write | `string` | guarded(inert-receiver) | DOM Element |
 | H-067 | `Element` | `className` | read | `string` | open | DOM Element |
 | H-068 | `Element` | `localName` | read | `string` | open | DOM Element |
-| H-069 | `Element` | `classList` | read | `DOMTokenList` | open | DOM Element |
+| H-069 | `Element` | `classList` | read | `DOMTokenList` | guarded(inert-receiver) | DOM Element |
 | H-070 | `Element` | `getAttribute` | call | `(qualifiedName: string) -> string \| not` | open | DOM Element |
 | H-071 | `Element` | `hasAttribute` | call | `(qualifiedName: string) -> bool` | open | DOM Element |
 | H-072 | `Element` | `setAttribute` | call | `(qualifiedName: attr-name, value: string) -> void` | guarded(attr-name, inert-receiver) | DOM Element |
@@ -23887,17 +23889,17 @@ rule 8.4 states how a struct fits an interface result, not a dictionary one: ⚑
 | H-074 | `Element` | `append` | call | `(node: Node \| string) -> void` | guarded(inert-receiver) | DOM ParentNode |
 | H-075 | `Element` | `prepend` | call | `(node: Node \| string) -> void` | guarded(inert-receiver) | DOM ParentNode |
 | H-076 | `Element` | `replaceChildren` | call | `(node: Node \| string) -> void` | guarded(inert-receiver) | DOM ParentNode |
-| H-077 | `Element` | `remove` | call | `() -> void` | open | DOM ChildNode |
+| H-077 | `Element` | `remove` | call | `() -> void` | guarded(inert-receiver) | DOM ChildNode |
 | H-078 | `Element` | `querySelector` | call | `(selectors: string) -> Element \| not` | open | DOM ParentNode |
 | H-079 | `Element` | `getBoundingClientRect` | call | `() -> DOMRect` | open | CSSOM View Element |
 | H-080 | `Element` | `scrollIntoView` | call | `() -> void` | open | CSSOM View Element |
 | H-081 | `HTMLElement` | `hidden` | read | `bool` | open | HTML HTMLElement |
-| H-082 | `HTMLElement` | `hidden` | write | `bool` | open | HTML HTMLElement |
+| H-082 | `HTMLElement` | `hidden` | write | `bool` | guarded(inert-receiver) | HTML HTMLElement |
 | H-083 | `HTMLElement` | `title` | read | `string` | open | HTML HTMLElement |
-| H-084 | `HTMLElement` | `title` | write | `string` | open | HTML HTMLElement |
+| H-084 | `HTMLElement` | `title` | write | `string` | guarded(inert-receiver) | HTML HTMLElement |
 | H-085 | `HTMLElement` | `offsetWidth` | read | `int` | open | CSSOM View HTMLElement |
 | H-086 | `HTMLElement` | `offsetHeight` | read | `int` | open | CSSOM View HTMLElement |
-| H-087 | `HTMLElement` | `style` | read | `CSSStyleDeclaration` | open | CSSOM ElementCSSInlineStyle |
+| H-087 | `HTMLElement` | `style` | read | `CSSStyleDeclaration` | guarded(inert-receiver) | CSSOM ElementCSSInlineStyle |
 | H-088 | `HTMLElement` | `focus` | call | `() -> void` | open | HTML HTMLOrSVGElement |
 | H-089 | `HTMLElement` | `blur` | call | `() -> void` | open | HTML HTMLOrSVGElement |
 | H-090 | `DOMTokenList` | `add` | call | `(token: string) -> void` | open | DOM DOMTokenList |
@@ -23907,7 +23909,7 @@ rule 8.4 states how a struct fits an interface result, not a dictionary one: ⚑
 | H-094 | `CSSStyleDeclaration` | `setProperty` | call | `(property: string, value: string) -> void` | open | CSSOM CSSStyleDeclaration |
 | H-095 | `CSSStyleDeclaration` | `removeProperty` | call | `(property: string) -> string` | open | CSSOM CSSStyleDeclaration |
 | H-096 | `HTMLInputElement` | `value` | read | `string` | open | HTML HTMLInputElement |
-| H-097 | `HTMLInputElement` | `value` | write | `string` | open | HTML HTMLInputElement |
+| H-097 | `HTMLInputElement` | `value` | write | `string` | guarded(inert-receiver) | HTML HTMLInputElement |
 | H-098 | `HTMLInputElement` | `checked` | read | `bool` | open | HTML HTMLInputElement |
 | H-099 | `HTMLInputElement` | `checked` | write | `bool` | open | HTML HTMLInputElement |
 | H-100 | `HTMLInputElement` | `select` | call | `() -> void` | open | HTML HTMLInputElement |
@@ -23923,9 +23925,9 @@ rule 8.4 states how a struct fits an interface result, not a dictionary one: ⚑
 | H-110 | `HTMLMediaElement` | `play` | call | `() -> waiting void` | open | HTML HTMLMediaElement |
 | H-111 | `HTMLMediaElement` | `pause` | call | `() -> void` | open | HTML HTMLMediaElement |
 | H-112 | `HTMLCanvasElement` | `width` | read | `int` | open | HTML HTMLCanvasElement |
-| H-113 | `HTMLCanvasElement` | `width` | write | `int` | open | HTML HTMLCanvasElement |
+| H-113 | `HTMLCanvasElement` | `width` | write | `int` | guarded(inert-receiver) | HTML HTMLCanvasElement |
 | H-114 | `HTMLCanvasElement` | `height` | read | `int` | open | HTML HTMLCanvasElement |
-| H-115 | `HTMLCanvasElement` | `height` | write | `int` | open | HTML HTMLCanvasElement |
+| H-115 | `HTMLCanvasElement` | `height` | write | `int` | guarded(inert-receiver) | HTML HTMLCanvasElement |
 | H-116 | `HTMLCanvasElement` | `getContext` | call | `(contextId: "2d") -> CanvasRenderingContext2D \| not` | open | HTML HTMLCanvasElement |
 | H-117 | `CanvasRenderingContext2D` | `fillStyle` | write | `string` | open | HTML CanvasFillStrokeStyles |
 | H-118 | `CanvasRenderingContext2D` | `strokeStyle` | write | `string` | open | HTML CanvasFillStrokeStyles |
@@ -25451,10 +25453,12 @@ type Sighting:struct = { isIntersecting: bool, intersectionRatio: number }
    interface applies to each interface that inherits from it. The interface names of Appendix H are built-in host
    types (§14). A `type Name:host` line SHALL NOT reuse one, or a built-in scalar type name (`E-SCOPE-010`). A user
    struct or enum declaration of such a name shadows the built-in host type in its scope, as a user `Error` shadows
-   the built-in enum (§19.4.2); a parameter of that user type is then not a host root (8.2). *(⚑ PA reading, flagged
-   for a ruling: the design's text — "A user type declaration SHALL NOT reuse one" — would refuse every program with
-   a tree `Node`, an `Event` or a `Text` struct; the ruling (Q2) makes the names built-in types, which `Error`
-   already is, shadowably. Shadowing is fail-closed for this rule. `g-spec-host-surface-name-shadowing-s473`.)*
+   the built-in enum (§19.4.2); a parameter of that user type is then not a host root (8.2), so it fails closed. *(ruling:
+   user-voice-scrml.md S473 D34 — "⭐ RULED — S473 SPEC-coverage audit decisions D1–D34, all PA recs", *"your recs on all"*:
+   *"a user struct or enum named like an Appendix H interface (e.g. the codec's `type Node:struct`) SHADOWS the built-in,
+   as a user `Error` does. A parameter of that type is not a host root (fails closed). Only a `type X:host` line reusing
+   an Appendix H name is E-SCOPE-010. This replaces the design's 'SHALL NOT reuse a name' rule 8.1."* Closes
+   `g-spec-host-surface-name-shadowing-s473`.)*
 
    8.2 **Roots.** A target's root is resolved to an interface:
    - `window` is `Window`, `document` is `Document` and `navigator` is `Navigator`;
@@ -29250,7 +29254,7 @@ are REFUSED by impl#1, `E-IMPL1-RULED-FORM-UNSUPPORTED` (its row lands with that
 | E-SCOPE-001 | §5.2, §15.10.1 | Unquoted identifier not resolvable in scope. Includes a component prop referenced in component-body text the compiler cannot parse: the prop cannot be substituted there (§15.10.1), so it would reach the page unbound (emitted at `compiler/src/component-expander.ts`, `expandComponentNode`). Provenance: ruling:user-voice-scrml.md S458 "your recs on both D1 codes". | Error |
 | E-SCOPE-REDECLARE | §7.3.3 | Inside a function body, a `let` / `const` / `lin` / `function` declaration redeclares a name already bound in the SAME block (another such declaration, or — in the function's top-level block — a parameter). Nested-block shadowing is legal; so are two `function` declarations of one name and a `function` declaration named like a parameter (S432). Before this code the program failed at codegen ("Identifier already declared"); a `defer` in the block made it compile. Direction: newly-rejecting in name only (every rejected program already failed at codegen). (S430 round 5; emitted at `compiler/src/validators/lint-redeclare.ts`.) | Error |
 | E-CALL-ARITY | §7.3 | A call passes more arguments than the function declares parameters, or fewer — unless each omitted parameter has a default (§7.3.2). Reopen condition (ruled): the callback case. **Provenance:** ruling:user-voice-scrml.md S440 (#4 = (c); #2 and #5 = PA recs — item #2). **Named; impl pending — Nominal / not yet emitted** (measured S440: impl#1 compiles both at exit 0); impl#1 carries it (§34.0). **S447:** the call-site check is restated with the argument-type check in §7.3.4 (plain calls); same Nominal status. **Provenance:** ruling:user-voice-scrml.md S447 (*"RULED — UFCS PARKED; keep only the argument checks"* — call 9 kept). | Error |
-| E-SCOPE-010 | §7.6, §20.4, §21.3.1.1, §21.3.3 | **Duplicate binding in file scope.** A name already bound at file scope is bound again in the same file, whatever the two bindings name — a `let` / `const`, a `function`, a `type`, a user declaration (`<card>`), or an import of the name — in any pairing (S440 ruling #6: two top-level `function`s; S473: across kinds, `<card>` beside `function card`, a type beside a function of its name). ALSO (S473 round 2, narrowed, §7.6): one name EXPORTED by two user files of one program; a private name never collides across files. Provenance: ruling:user-voice-scrml.md S440 (the S440 22-item queue, item 6); ruling:user-voice-scrml.md S473 "⭐ RULED — S473 PA recs, all" item 4; ruling:user-voice-scrml.md "⭐ RULED — S473 owner questions round 2, PA recs" item 5; ruling:user-voice-scrml.md "⭐ RULED — 'one name per program' narrowed to exported names". Emitted by the bootstrap at `compiler/self-host-v2/analyze.scrml` (its `fileNameClashes`, `dupDecls`, `dupFns`, `dupFields` and `linkage` passes). impl#1 emits it for a duplicate file-scope `let` / `const` only and carries the S440 / S473 cases (Nominal, §34.0). ALSO (§20.4): a variable named with a reserved binding name (`route`, `session`) — that trigger is spec-ahead (S265), not emitted by either compiler. ALSO (S473, §21.3.1.1, §41.7): a host-import name collision — an `import:host` binding name also bound by a plain `import`, another `import:host`, the same `import:host` twice, or a declaration of its file (emitted by the bootstrap at `compiler/self-host-v2/analyze.scrml` hostImportClash; Nominal on impl#1); and a `<host>` binding name also bound in its file as a value — by another binding, a declaration, a plain `import` or an `import:host` (DRAFT §21.3.3 rule 9 — emitted by the bootstrap, where a binding is an ordinary file-scope function item, s473-boot-host-block-f3; Nominal on impl#1; extends item 2 to `<host>`, ratified by ruling:user-voice-scrml.md S473 "⭐ RULED — S473 owner questions round 2, PA recs" item 8). Provenance: ruling:user-voice-scrml.md S473 "⭐ RULED — S473 PA recs, all" item 2. ALSO (S473 allowlist, DRAFT §21.3.3 rule 8.1): a `type Name:host` line naming an Appendix H interface (a built-in host type) — emitted by the bootstrap at `compiler/self-host-v2/parse.scrml` (hostTypeLine; s473-host-allowlist-b); a user struct or enum of such a name shadows the built-in instead (PA reading, `g-spec-host-surface-name-shadowing-s473`). | Error |
+| E-SCOPE-010 | §7.6, §20.4, §21.3.1.1, §21.3.3 | **Duplicate binding in file scope.** A name already bound at file scope is bound again in the same file, whatever the two bindings name — a `let` / `const`, a `function`, a `type`, a user declaration (`<card>`), or an import of the name — in any pairing (S440 ruling #6: two top-level `function`s; S473: across kinds, `<card>` beside `function card`, a type beside a function of its name). ALSO (S473 round 2, narrowed, §7.6): one name EXPORTED by two user files of one program; a private name never collides across files. Provenance: ruling:user-voice-scrml.md S440 (the S440 22-item queue, item 6); ruling:user-voice-scrml.md S473 "⭐ RULED — S473 PA recs, all" item 4; ruling:user-voice-scrml.md "⭐ RULED — S473 owner questions round 2, PA recs" item 5; ruling:user-voice-scrml.md "⭐ RULED — 'one name per program' narrowed to exported names". Emitted by the bootstrap at `compiler/self-host-v2/analyze.scrml` (its `fileNameClashes`, `dupDecls`, `dupFns`, `dupFields` and `linkage` passes). impl#1 emits it for a duplicate file-scope `let` / `const` only and carries the S440 / S473 cases (Nominal, §34.0). ALSO (§20.4): a variable named with a reserved binding name (`route`, `session`) — that trigger is spec-ahead (S265), not emitted by either compiler. ALSO (S473, §21.3.1.1, §41.7): a host-import name collision — an `import:host` binding name also bound by a plain `import`, another `import:host`, the same `import:host` twice, or a declaration of its file (emitted by the bootstrap at `compiler/self-host-v2/analyze.scrml` hostImportClash; Nominal on impl#1); and a `<host>` binding name also bound in its file as a value — by another binding, a declaration, a plain `import` or an `import:host` (DRAFT §21.3.3 rule 9 — emitted by the bootstrap, where a binding is an ordinary file-scope function item, s473-boot-host-block-f3; Nominal on impl#1; extends item 2 to `<host>`, ratified by ruling:user-voice-scrml.md S473 "⭐ RULED — S473 owner questions round 2, PA recs" item 8). Provenance: ruling:user-voice-scrml.md S473 "⭐ RULED — S473 PA recs, all" item 2. ALSO (S473 allowlist, DRAFT §21.3.3 rule 8.1): a `type Name:host` line naming an Appendix H interface (a built-in host type) — emitted by the bootstrap at `compiler/self-host-v2/parse.scrml` (hostTypeLine; s473-host-allowlist-b); a user struct or enum of such a name shadows the built-in instead (ruling: user-voice-scrml.md S473 D34). | Error |
 | E-SCOPE-011 | §20.4 | Access to undeclared route parameter name **(Reserved / spec-ahead, S263 — no fire site: the undeclared-route-param check is spec-ahead — `route.params` is not typer-supported for pages and no param-name allow-list exists. Excluded from the freeze fireable set.)** | Error |
 | E-SCOPE-012 | §20.5 | `session` accessed outside a server-escalated function body **(LIVE, S265 (i29e) — the §20.5 server `session` establishment builtin is built; bare `session` is bound into server-escalated scopes and auto-escalates its enclosing function, so a `session` reference that is NOT server-escalated (e.g. top-level `${ }` logic) fires this. Distinct from the `@session` client projection.)** | Error |
 | E-SESSION-CONTEXT | §20.5.1 | `session.*` used outside a web-app server route handler — an SSE `server function*`, an `<endpoint>` arm, a `<machine>` method, a serverLoad cell, an in-process server-fn helper called by another server function, or a headless `kind="tool"` program. Those contexts have no cookie-session request/response context. **(LIVE, S265/S239 i29e.)** | Error |
