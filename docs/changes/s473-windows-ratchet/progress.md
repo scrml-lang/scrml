@@ -3,16 +3,24 @@
 Ruling: scrml-support/user-voice-scrml.md, "RULED — S473 Windows: impl#1 routeMap fix exception + CI ratchet guard", item 2.
 
 ## Plan
-- [ ] scripts/windows-ratchet.ts (validate · retry-list · judge · report) + unit tests with fixture junit
-- [ ] .github/windows-baseline.json (each entry tied to a gap id in docs/known-gaps.md)
-- [ ] ci.yml windows job: junit, one retry of failed files, ratchet step; drop continue-on-error
-- [ ] gate needs windows (skipped allowed only on merge_group, where the job never runs)
-- [ ] checks: baseline validate step; ci-shards NON_BLOCKING drops windows
-- [ ] nightly windows-main-report.yml (latest conclusion + first red SHA)
-- [ ] .github/CI.md section
-- [ ] dispatch CI on branch, PR
+- [x] scripts/windows-ratchet.ts (validate · retry-list · judge · report) + unit tests with fixture junit
+      (compiler/tests/unit/windows-ratchet-s473.test.js, 18 cases, one reads a report bun itself writes)
+- [x] .github/windows-baseline.json — EMPTY: #1681 (s473-windows-red) fixes all five families on main, incl.
+      the impl#1 routeMap fix (402e6a1f8). Must land AFTER #1681, or with the 28 main failures baselined.
+- [x] ci.yml windows job: junit, one retry of failed files, ratchet step; drop continue-on-error
+- [x] gate needs windows (skipped allowed only on merge_group, where the job never runs)
+- [x] checks: baseline validate step; ci-shards NON_BLOCKING drops windows
+- [x] nightly windows-main-report.yml (latest conclusion + first red SHA). Local run against main: RED,
+      first red af34aa328 (run 40754958089), last green e8d2e38cd (run 40726257771) — matches #1681's bisect.
+- [x] .github/CI.md section
+- [ ] dispatched CI: 41082134439 (this branch on main — expect the ratchet to FAIL on main's ~28),
+      41082138775 (this branch + #1681 merged, scratch branch s473-windows-ratchet-x1681 — expect PASS)
+- [ ] PR
 
 ## Findings
 - bun 1.4.3 junit OMITS a test file that throws at load. The console counts it as "1 error" and there is no
-  `<testsuite>` for it in the report. A junit-only ratchet would wave that through, so the judge also enumerates the
-  expected test files and treats an unreported file as a failure.
+  `<testsuite>` for it in the report; with ONLY such files, no report is written at all. A junit-only ratchet
+  would wave that through, so the judge also enumerates the expected test files and treats an unreported file
+  as a failure.
+- No actionlint locally; workflow YAML parsed by Bun.YAML (ci-shards needs) and reviewed by hand. Gate jq
+  expression exercised locally for PR success / merge_group skipped / PR skipped / push failure.
