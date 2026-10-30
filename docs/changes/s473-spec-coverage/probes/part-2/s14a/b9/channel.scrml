@@ -1,0 +1,6 @@
+<program>
+    <channel name="presence">
+      let <who:string=""/>
+    </>
+    <p>hi</p>
+</program>

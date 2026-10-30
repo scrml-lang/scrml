@@ -1,0 +1,5 @@
+<program>
+<label:string="Email"/>
+<span : @label>
+<li :"Static item">
+</program>

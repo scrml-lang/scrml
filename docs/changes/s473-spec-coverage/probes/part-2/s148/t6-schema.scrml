@@ -1,0 +1,6 @@
+<program db="./app.db">
+    <schema>
+        orders { id: int primary, tenant_id: int, item: text }
+    </schema>
+    <main><p>x</p></main>
+</program>

@@ -1,0 +1,7 @@
+<program>
+    function go() -> int {
+        broadcast("x");
+        return 1;
+    }
+    <main><p>${go()}</p></main>
+</program>

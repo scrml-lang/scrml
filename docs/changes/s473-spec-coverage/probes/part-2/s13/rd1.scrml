@@ -1,0 +1,9 @@
+<program>
+    type Load:enum = { Idle, Loading, Ready(n: int), Failed(msg: string) }
+    let <st:Load=.Idle/>
+    function go() { @st = .Ready(3); }
+    <main>
+        <button onclick=go()>x</button>
+        <p>${ match @st { .Idle :> "idle", .Loading :> "…", .Ready(n) :> "ok" } }</p>
+    </main>
+</program>

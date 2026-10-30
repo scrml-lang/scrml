@@ -1,0 +1,7 @@
+<program>
+#{
+  @media (min-width: 1px) { p { color: red; } }
+  @container (min-width: 1px) { p { color: blue; } }
+}
+<p>hi</p>
+</program>

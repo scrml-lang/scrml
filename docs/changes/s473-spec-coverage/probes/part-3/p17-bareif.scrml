@@ -1,0 +1,8 @@
+<program>
+    let <a:bool=false/>
+    <main>
+        <p if>x</p>
+        <p if="@a">q</p>
+        <p if={ @a }>r</p>
+    </main>
+</program>

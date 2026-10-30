@@ -1,0 +1,11 @@
+<program>
+    type D:enum = { Easy, Hard }
+    type M:enum = { One(d: D), Two }
+    type MS:enum = { Small, Big }
+    let <m:M=(.One(.Easy))/>
+    let <s:MS=.Small/>
+    function grow(x: MS) -> MS { if (x == .Small) { return .Big; } return x; }
+    function f() { @s = grow(.Small); @m = .One(.Hard); }
+    function g() { @m = .One(.Big); }
+    <button onclick=f()>${@s}</button>
+</program>

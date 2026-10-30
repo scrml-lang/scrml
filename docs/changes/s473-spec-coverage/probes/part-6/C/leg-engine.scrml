@@ -1,0 +1,8 @@
+<program>
+    type Phase:enum = { Idle, Loading }
+    <engine for=Phase initial=.Idle>
+        <Idle rule=.Loading : "Ready">
+        <Loading rule=.Idle : "Loading">
+    </>
+    <main><p>x</p></main>
+</program>

@@ -1,0 +1,6 @@
+<program>
+let <n:int=0/>
+function a() { @n = 1; }
+function b() { @n = 2; }
+<button onclick={ if (@n > 0) { a(); } else { b(); } }>x</button>
+</program>

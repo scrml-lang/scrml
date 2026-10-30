@@ -1,0 +1,5 @@
+<program>
+<a:string="a"/>
+<b:string="b"/>
+<span : @a; @b>
+</program>

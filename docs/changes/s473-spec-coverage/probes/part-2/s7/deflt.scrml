@@ -1,0 +1,5 @@
+<program>
+    let <out:int=0/>
+    function f(a: int = 1) -> int { return a; }
+    <p>${@out}</p>
+</program>

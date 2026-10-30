@@ -1,0 +1,4 @@
+<program>
+    let <e:email="x"/>
+    <main><p>${@e}</p></main>
+</program>

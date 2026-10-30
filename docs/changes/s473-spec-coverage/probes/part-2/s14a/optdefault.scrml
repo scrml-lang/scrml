@@ -1,0 +1,6 @@
+<program>
+    type B:struct = { n: int }
+    type T:struct = { kind: string, block: B = not }
+    let <t:T={ kind: "a" }/>
+    <p>${@t.kind}</p>
+</program>

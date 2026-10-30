@@ -1,0 +1,4 @@
+<program>
+    type User:struct = { id: int, hash: (not -> string) }
+    <p>hi</p>
+</program>

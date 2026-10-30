@@ -1,0 +1,5 @@
+<program>
+function handle(request: string, resolve: string) -> string { return request; }
+function handle(request: string, resolve: string) -> string { return resolve; }
+<main><p>x</p></main>
+</program>

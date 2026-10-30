@@ -1,0 +1,5 @@
+<program>
+    let <n:int=0/>
+    fn r() -> number { return Math.random(); }
+    <main><p>${@n}</p></main>
+</program>

@@ -1,0 +1,4 @@
+<program>
+    let <x:string="" pattern(/^[a-z]+$/)/>
+    <main><form><input bind:value=@x/></form></main>
+</program>

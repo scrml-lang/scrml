@@ -1,0 +1,8 @@
+<program db="./app.db">
+    type Order:struct = { id: int, item: string }
+    let <list:Order[]=[]/>
+    function load() {
+        @list = ?{`SELECT id, item FROM orders`}.acrossTenants().all() !{ _ :> [] };
+    }
+    <main><button onclick=load()>go</button></main>
+</program>

@@ -1,0 +1,7 @@
+<host>
+  f(a: string) -> string = window.foo.bar({ x: { y: a } })
+</host>
+<program>
+
+<p>${f("q")}</p>
+</program>

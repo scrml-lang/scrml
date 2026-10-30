@@ -1,0 +1,4 @@
+<program>
+    function f(x: Strng) -> any { return x; }
+    <main><p>hi</p></main>
+</program>

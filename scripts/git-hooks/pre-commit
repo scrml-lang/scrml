@@ -115,5 +115,16 @@ if [ -f scripts/gen-md-shim.ts ] && ! bun scripts/gen-md-shim.ts --check 2>&1; t
   exit 1
 fi
 
+# S473 — the bootstrap SPEC-coverage gate (CI `checks` runs it on every push). Here it runs only when the
+# staged diff touches what it reads: a new SPEC section (via SPEC.md / SPEC-INDEX.md) needs a row in
+# docs/bootstrap-spec-coverage.md, and a gap renamed or deleted in known-gaps.md must not orphan a row.
+# ~0.1s. Guarded: a branch cut before the gate landed has no script and must not be blocked.
+if [ -f scripts/spec-coverage-check.ts ] && git diff --cached --name-only --no-renames | grep -qE '^(compiler/SPEC\.md|compiler/SPEC-INDEX\.md|docs/bootstrap-spec-coverage\.md|docs/known-gaps\.md|scripts/spec-coverage-check\.ts)$'; then
+  if ! bun scripts/spec-coverage-check.ts 2>&1; then
+    echo "✗ SPEC-coverage gate failed (docs/bootstrap-spec-coverage.md). Add the missing row / gap id, or run: bun scripts/spec-coverage-check.ts --write (totals only)" >&2
+    exit 1
+  fi
+fi
+
 echo "✓ Pre-commit checks passed."
 exit 0

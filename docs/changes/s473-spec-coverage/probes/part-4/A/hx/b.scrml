@@ -1,0 +1,3 @@
+<host>
+  t() -> string = document.title
+</host>

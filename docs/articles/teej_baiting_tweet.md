@@ -8,7 +8,7 @@ This file is a stub. The full content has been archived to:
 
 ## Why retracted
 
-This was a personal tweet draft (9 lines about ordering coffee from terminal.shop + a Teej Hooper bait). Off-topic from scrml; not an article; not for scrml.dev. Should never have lived in `docs/articles/`.
+This was a personal tweet draft (a few lines about ordering coffee from terminal.shop + a Teej Hooper bait). Off-topic from scrml; not an article; not for scrml.dev. Should never have lived in `docs/articles/`.
 
 ## References
 

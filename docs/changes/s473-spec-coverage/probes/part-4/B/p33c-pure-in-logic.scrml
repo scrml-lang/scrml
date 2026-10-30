@@ -1,0 +1,6 @@
+${ pure function add(a: int, b: int) -> int { return a + b; } }
+<program>
+    let <count:int=0/>
+    function bump() { @count = add(@count, 1); }
+    <main><button onclick=bump()>"+"</button></main>
+</program>

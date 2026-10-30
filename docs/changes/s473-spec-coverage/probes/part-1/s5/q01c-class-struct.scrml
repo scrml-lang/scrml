@@ -1,0 +1,5 @@
+<program>
+type P:struct = { a: int }
+<p:P=({ a: 1 })/>
+<div class=(@p)>x</div>
+</program>

@@ -187,7 +187,9 @@ jobs:
       # with impl#1 — and the surface floor holds (a new README / NERDME / DESIGN / docs/**.md page
       # with scrml in it must be gated or excused with a reason). Dated pre-S469 articles and the two
       # release announcements are bannered and excused file by file (S469 "Banner + exempt").
-      - name: Claim gate (every public scrml fence compiles; the surface floor)
+      # S473 — C2: a repo-derived figure (lines / tests / modules / codes / …) on the same surface must
+      # cite docs/FACTS.md on its line or paragraph (scripts/claim-gate-c2.js).
+      - name: Claim gate (every public scrml fence compiles; derived figures cite FACTS.md; the surface floor)
         if: ${{ !cancelled() }}
         run: bun scripts/claim-gate.js
       # ABSOLUTE floor (NOT differential): every shipped showcase PROGRAM (examples/* + multi-file
@@ -256,6 +258,14 @@ jobs:
       - name: SPEC-INDEX currency gate (totals + every row's range + full-scan coverage)
         if: ${{ !cancelled() }}
         run: bun run scripts/regen-spec-index.ts --check
+      # S473 — SPEC §47 sat unimplemented in the bootstrap with no gap, refusal or ruling until it was
+      # found by accident. docs/bootstrap-spec-coverage.md classifies every SPEC section against the
+      # bootstrap; this gate fails when a top-level § in SPEC-INDEX has no row, a SILENT-* row cites no
+      # gap, a cited gap id does not exist, or the totals block is stale (a closed gap on a SILENT/PARTIAL
+      # row only warns). Tested by compiler/tests/unit/spec-coverage-check-s473.test.js.
+      - name: SPEC-coverage gate (every § has a row; no SILENT row without a gap)
+        if: ${{ !cancelled() }}
+        run: bun scripts/spec-coverage-check.ts
       # A duplicate delta-log sequence number silently drops an entry from the flogence digest.
       # BASELINED (handOffs/delta-log-dupes.baseline.json) — only a NEW duplicate fails.
       - name: delta-log sequence gate (a duplicate silently drops an entry from the digest)

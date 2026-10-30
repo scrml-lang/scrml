@@ -1,0 +1,7 @@
+<host>
+  export t() -> string = document.title
+</host>
+<program>
+
+<p>${t()}</p>
+</program>

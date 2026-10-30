@@ -1,0 +1,6 @@
+<program>
+    let <xs:int[free, append]=([1, 2])/>
+    <ys:int[]=(@xs)/>
+    function f() { @ys.append(3); }
+    <main><button onclick=f()>g</button><p>${@ys.length}</p></main>
+</program>

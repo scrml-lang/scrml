@@ -1,0 +1,6 @@
+<program>
+    let <n:int=0/>
+    fn a() -> int { return b(); }
+    pinned fn b() -> int { return 1; }
+    <main><p>${@n}</p></main>
+</program>

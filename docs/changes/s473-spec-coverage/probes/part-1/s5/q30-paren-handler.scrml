@@ -1,0 +1,4 @@
+<program>
+let <n:int=0/>
+<button onclick=(@n = @n + 1)>${@n}</button>
+</program>

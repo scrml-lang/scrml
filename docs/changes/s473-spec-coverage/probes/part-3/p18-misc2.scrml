@@ -1,0 +1,5 @@
+<program>
+    type C:enum = { Red, Green }
+    function grd(c: C, n: int) -> int { return match c { .Red if n > 0 :> 1, else :> 2, }; }
+    <main><p>${grd(.Red, 1)}</p></main>
+</program>

@@ -1,0 +1,5 @@
+<program>
+    let <n:integer=1/>
+    let <b:boolean=true/>
+    <p>${@n}${@b}</p>
+</program>

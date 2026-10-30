@@ -1,0 +1,5 @@
+<program>
+    type P:struct = { x: int }
+    let <p:P=({ x: 1 })/>
+    <p title="v ${@p}">x</p>
+</program>

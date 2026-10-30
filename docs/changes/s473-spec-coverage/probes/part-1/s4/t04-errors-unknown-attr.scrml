@@ -1,0 +1,6 @@
+<program>
+<f:struct>
+  <email:string=""/>
+</f>
+<errors of=@f bogus="1"/>
+</program>

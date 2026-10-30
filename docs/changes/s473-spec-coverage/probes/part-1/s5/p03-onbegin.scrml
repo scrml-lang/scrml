@@ -1,0 +1,3 @@
+<program>
+<svg><set attributeName="x" onbegin="alert(1)"/></svg>
+</program>

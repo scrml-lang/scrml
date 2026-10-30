@@ -1,0 +1,5 @@
+<program>
+    let <n:int=0/>
+    <input bind:value=@n/>
+    <p>${@n}</p>
+</program>

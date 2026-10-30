@@ -1,0 +1,8 @@
+<program>
+    let <n:int=0/>
+    function f() -> int {
+        defer { lift 3; }
+        return 1;
+    }
+    <main><button onclick={ @n = f(); }>x</button></main>
+</program>

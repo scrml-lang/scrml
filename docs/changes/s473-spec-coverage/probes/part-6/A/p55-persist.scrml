@@ -1,0 +1,4 @@
+<program>
+    let <hour:int=0 max(23) persist="local" key="app.hour"/>
+    <main><p>${@hour.isValid}</p></main>
+</program>

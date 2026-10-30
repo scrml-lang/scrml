@@ -1,0 +1,5 @@
+<program>
+    let <count:int=0/>
+    <big:bool=@count > 10/>
+    <main><p>${@big}</p></main>
+</program>

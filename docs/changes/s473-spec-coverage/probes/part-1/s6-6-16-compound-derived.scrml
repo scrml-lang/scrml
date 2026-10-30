@@ -1,0 +1,9 @@
+<program>
+    let <form:struct>
+        let <name:string=""/>
+        <upper:string=(@form.name.toUpperCase())/>
+    </>
+    function setIt() { @form.name = "al"; }
+    function bad() { @form.upper = "x"; }
+    <main><p>${@form.upper}</p><button onclick=setIt()>x</button><button onclick=bad()>y</button></main>
+</program>

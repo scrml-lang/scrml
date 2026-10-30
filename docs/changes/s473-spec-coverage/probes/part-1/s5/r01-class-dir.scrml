@@ -1,0 +1,4 @@
+<program>
+let <on:bool=false/>
+<div class="card" class:active=@on>x</div>
+</program>

@@ -1,0 +1,4 @@
+<program>
+    function f(s: string(email)) -> string { return s; }
+    <main><p>${f("x")}</p></main>
+</program>

@@ -1,0 +1,3 @@
+<program>
+    <main><input maxlength="abc"/><textarea rows="many"></textarea></main>
+</program>

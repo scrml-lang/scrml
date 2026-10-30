@@ -1,0 +1,32 @@
+<program>
+    type SaveState:enum = { Idle, Saving, Saved, Failed }
+    <saveState:SaveState=.Idle single>
+        <Idle   rule=.Saving : "">
+        <Saving rule=(.Saved | .Failed) : "Saving…">
+        <Saved  rule=.Saving : "Saved">
+        <Failed rule=.Saving : "Failed">
+    </>
+    <signup:struct>
+        let <agree:bool=false/>
+        let <email:string="" req length(>=5)/>
+        renders <input type="email" bind:value=@email/>
+        let <password:string="" req length(>=8)/>
+        renders <input type="password" bind:value=@password/>
+    </>
+    renders <form>
+        <label>Email <*email/></label>
+        <label>Password <*password/></label>
+        <label><input type="checkbox" bind:checked=@signup.agree/> I agree</label>
+        <p>${agree ? "" : "Please agree to continue."}</p>
+        <button type="button" onclick=save()>Save</button>
+    </form>
+    function save() {
+        if (!@signup.agree) { return; }
+        @saveState = .Saving;
+        @saveState = .Saved;
+    }
+    <main>
+        <*signup/>
+        <p><*saveState/></p>
+    </main>
+</program>

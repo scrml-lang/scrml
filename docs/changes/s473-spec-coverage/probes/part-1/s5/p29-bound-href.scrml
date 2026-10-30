@@ -1,0 +1,4 @@
+<program>
+let <x:string="javascript:alert(1)"/>
+<a href=@x>x</a>
+</program>

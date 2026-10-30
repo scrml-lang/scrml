@@ -1,0 +1,4 @@
+<program>
+    let <x:string="" req/>
+    <main><input bind:value=@x/><button onclick={ @x.isValid = true; }>x</button></main>
+</program>

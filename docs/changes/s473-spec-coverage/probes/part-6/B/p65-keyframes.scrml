@@ -1,0 +1,7 @@
+<program>
+#{
+  @keyframes spin { from { opacity: 0; } to { opacity: 1; } }
+  p { animation: spin 1s; }
+}
+<p>hi</p>
+</program>

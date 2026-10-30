@@ -1,0 +1,5 @@
+<program>
+let <s:string="a"/>
+when message from <#worker> (data) { @s = data; }
+<main><p>x</p></main>
+</program>

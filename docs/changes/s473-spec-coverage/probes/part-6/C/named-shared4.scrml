@@ -1,0 +1,8 @@
+<program>
+    <swatch:struct>
+        let <label:string="Brand"/>
+    </>
+    renders <span>${label}</span>
+    <accent:swatch label="Accent"/>
+    <main><p>x</p></main>
+</program>

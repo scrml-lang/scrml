@@ -1,0 +1,8 @@
+// §14.8.9 with no protect= declared: SELECT * ships passwordHash — spec-correct (no declaration), control probe
+<program>
+    <db src="./app.db">
+        type Row:struct = { id: int, email: string }
+        <rows:Row[]=(?{`SELECT * FROM users`}.all() !{ _ :> [] })/>
+    </db>
+    <main><p>${@rows.length}</p></main>
+</program>

@@ -1,0 +1,5 @@
+<program>
+    let <count:int=0/>
+    ${ const count = 2; }
+    <p>${@count}</p>
+</program>

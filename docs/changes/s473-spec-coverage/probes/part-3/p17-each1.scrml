@@ -1,0 +1,9 @@
+<program>
+    type It:struct = { id: int, name: string }
+    <xs:It[free, replace]=([{ id: 1, name: "a" }])/>
+    <main>
+        <ul><each in=@xs><li : @.name></each></ul>
+        <ul><each in=@xs as it><li>${it.name} ${@.id}</li><b>2nd root</b></each></ul>
+        
+    </main>
+</program>

@@ -1,0 +1,6 @@
+<program>
+    let <count:int=0/>
+    function tick() { @count = @count + 1; }
+    function start() { setInterval(tick, 100); }
+    <main><p>${@count}</p><button onclick=start()>"go"</button></main>
+</program>

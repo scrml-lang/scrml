@@ -116,7 +116,7 @@ describe("#3 — `<each in=>` over a non-sequence (E-EACH-NOT-SEQUENCE)", () => 
     expect(inApp("", "<each in=([1, 2]) as c><p>${c}</p></each>")).toEqual([]);
   });
   test("provable-or-silent — a call with no declared return type (Unknown) is silent", () => {
-    expect(inApp("    function g() { return 1; }", "<each in=g() as c><p>x</p></each>")).toEqual([]);
+    expect(inApp("    function g() { return gr(1); }\n    function gr(n: int) { if (n > 0) { return gr(n - 1); } else { return 1; } }", "<each in=g() as c><p>x</p></each>")).toEqual([]);   // s473: §48.8 infers an unannotated return now (`return 1` is an `int`); a return through recursion is not inferred — still unresolved
   });
   test("provable-or-silent — a call DECLARED to return a non-sequence fires", () => {
     expect(inApp("    function g() -> int { return 1; }", "<each in=g() as c><p>x</p></each>")).toEqual(["E-EACH-NOT-SEQUENCE"]);
@@ -448,11 +448,11 @@ describe("#7 / #8 — `!` / `&&` / `||` take booleans only (Gotcha Q2)", () => {
     expect(inApp(O + "    function f() { if (!@o.f) { @m = 1; } }")).toEqual(["E-OPERAND-NOT-NARROWED"]);
   });
   test("a legal `&&` / `||` is a `bool` (Q2 supersedes §45.9's JS operand semantics): into an int cell is E-TYPE-031", () => {
-    expect(inApp(CELLS + "    function g() { return 1; }\n    function f() { @n = @b || g(); }")).toEqual(["E-TYPE-031"]);
-    expect(inApp(CELLS + "    function g() { return 1; }\n    function f() { @b = @b || g(); }")).toEqual([]);
+    expect(inApp(CELLS + "    function g() { return true; }\n    function f() { @n = @b || g(); }")).toEqual(["E-TYPE-031"]);
+    expect(inApp(CELLS + "    function g() { return true; }\n    function f() { @b = @b || g(); }")).toEqual([]);
     // r1 F1: the `&&` arm pinned the same way
-    expect(inApp(CELLS + "    function g() { return 1; }\n    function f() { @n = @b && g(); }")).toEqual(["E-TYPE-031"]);
-    expect(inApp(CELLS + "    function g() { return 1; }\n    function f() { @b = @b && g(); }")).toEqual([]);
+    expect(inApp(CELLS + "    function g() { return true; }\n    function f() { @n = @b && g(); }")).toEqual(["E-TYPE-031"]);
+    expect(inApp(CELLS + "    function g() { return true; }\n    function f() { @b = @b && g(); }")).toEqual([]);
   });
   test("twins silent — bools; a narrowed `bool | not`; a presence comparison", () => {
     expect(inApp(CELLS + "    function f() { @b = !@b && (@n > 0 || @s == \"\"); }")).toEqual([]);
@@ -505,7 +505,7 @@ describe("#8 — arithmetic / relational / `+` operands (Gotcha Q1)", () => {
     expect(inApp(CELLS + G + "    function f() { if (g(1)) { @b = true; } }")).toEqual(["E-COND-NOT-BOOLEAN"]);   // twin: no parse error → judged
   });
   test("provable-or-silent — an operand of unknown type (a call with no return type) is silent", () => {
-    expect(inApp(CELLS + "    function g() { return 1; }\n    function f() { @s = @s + g();\n @b = g() < 1; }")).toEqual([]);
+    expect(inApp(CELLS + "    function g() { return gr(1); }\n    function gr(n: int) { if (n > 0) { return gr(n - 1); } else { return 1; } }\n    function f() { @s = @s + g();\n @b = g() < 1; }")).toEqual([]);
   });
 });
 

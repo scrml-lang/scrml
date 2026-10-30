@@ -1,0 +1,5 @@
+<program>
+    let <count:int=0/>
+    function f() -> int { let count = 5; return count; }
+    <main><p>${f()}</p></main>
+</program>

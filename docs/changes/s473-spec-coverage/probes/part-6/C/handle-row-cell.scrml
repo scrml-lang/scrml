@@ -1,0 +1,7 @@
+<program>
+    let <k:int=0/>
+    <card title:string/>
+    renders <p>${title}</p>
+    <xs:int[]=([1, 2])/>
+    <main><each in=@xs key=x as x><card as=k title="r"/></each></main>
+</program>

@@ -1,0 +1,5 @@
+<program>
+let <count:int=0/>
+function go() { navigate("/x"); }
+<main><button onclick=go()>go</button></main>
+</program>
