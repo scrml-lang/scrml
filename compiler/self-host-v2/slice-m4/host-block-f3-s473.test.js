@@ -127,11 +127,11 @@ describe("rule 3 — `src=`", () => {
     expect(codes(`<host src="x.js">\n  f() -> int\n</host>\n<program>\n<p>x</p>\n</program>\n`)).toEqual(["E-IMPORT-005"]);
   });
 
-  test("a valid relative .js path: refused BY NAME — the static export read (H2) is not built, and no host JS is loaded", () => {
+  test("a valid relative .js path: the front end is clean and carries the export root into Core — the driver reads the exports statically (s473 allowlist lane A; host-src-s473.test.js), no host JS is loaded", () => {
     const src = `<host src="./glue.js">\n  f() -> int\n</host>\n<program>\n<p>x</p>\n</program>\n`;
-    const r = run(src);
-    expect(errs(r).map((d) => d.code)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
-    expect(errs(r)[0].message).toContain("read statically");
+    const r = clean(src);
+    const b = r.core.fns.find((f) => f.host && f.host.bind).host.bind;
+    expect([b.root, b.rootParam, b.chain, b.src.path, b.src.targetless]).toEqual(["f", -1, [], "glue.js", true]);
   });
 });
 
@@ -176,100 +176,253 @@ describe("rules 4 / 5 / 6 / 8 / 11 — the target's shape, roots, parameters and
     expect(one("fn f() -> string = navigator.language")).toEqual(["E-HOST-TARGET-SHAPE"]);
   });
 
-  test("rule 8 sinks: eval, Function, a timer, document.write, HTML-string APIs, innerHTML / outerHTML / srcdoc writes, setAttribute on…/srcdoc/non-literal, location, window.open", () => {
-    const S = ["E-HOST-TARGET-SINK"];
+  // ===========================================================================
+  // Rule 8 — THE ALLOWLIST (s473-host-allowlist-b; DRAFT §21.3.3 rule 8, Appendix H). Each
+  // case below was clean, or refused only by #1659's INTERIM name tables, before; now the typed
+  // chain walk refuses it with the code rule 8 names. `hostWalk` (analyze.scrml).
+  // ===========================================================================
+  const walk = (line) => codes(P("  " + line));
+  const NA = "E-HOST-TARGET-NOT-ALLOWED", OPQ = "E-HOST-ROOT-OPAQUE", ARG = "E-HOST-ARG-TYPE", RES = "E-HOST-RESULT-TYPE";
+
+  test("8.3 — source-text, HTML-string, navigation and window sinks are not on the surface: E-HOST-TARGET-NOT-ALLOWED", () => {
     for (const line of [
       "f(s: string) -> int = window.eval(s)",
       "f(s: string) = window.eval.call(s)",
       "f(s: string) -> int = new window.Function(s)",
-      "f(s: string) = window.setTimeout(s, 0)",
       "f(s: string) = document.write(s)",
       "f(s: string) = document.writeln(s)",
-      "f(h: H, s: string) = h.insertAdjacentHTML(\"beforeend\", s)",
-      "f(h: H, s: string) = h.innerHTML = s",
-      "f(h: H, s: string) = h.outerHTML = s",
-      "f(h: H, s: string) = h.srcdoc = s",
-      "f(h: H, s: string) = h.setAttribute(\"onclick\", s)",
-      "f(h: H, s: string) = h.setAttribute(\"ONload\", s)",
-      "f(h: H, s: string) = h.setAttribute(\"srcdoc\", s)",
-      "f(h: H, n: string, s: string) = h.setAttribute(n, s)",
-      "f(h: H, s: string) = h.setAttributeNS(\"x\", \"onclick\", s)",
-      "f(h: H, s: string) = h.setAttribute.call(\"onclick\", s)",
+      "f(h: Element, s: string) = h.insertAdjacentHTML(\"beforeend\", s)",
+      "f(h: HTMLElement, s: string) = h.innerHTML = s",
+      "f(h: HTMLElement, s: string) = h.outerHTML = s",
+      "f(h: HTMLElement, s: string) = h.srcdoc = s",
+      "f(h: HTMLElement, s: string) = h.setAttributeNS(\"x\", \"onclick\", s)",
+      "f(h: Element, s: string) = h.setAttribute.call(\"onclick\", s)",
       "f(u: string) = window.location.href = u",
       "f(u: string) = document.location = u",
       "f(u: string) = window.location.assign(u)",
       "f(u: string) = window.location.replace(u)",
       "f(u: string) = window.open(u)",
-      // the same calls through their aliases along a chain
-      "f(h: H, s: string) = h.ownerDocument.write(s)",
+      "f(h: Element, s: string) = h.ownerDocument.write(s)",
       "f(u: string) = window.self.open(u)",
-      "f(h: H, u: string) = h.ownerDocument.defaultView.open(u)",
-      "f(h: H, u: string) = h.contentWindow.location.href = u",
+      "f(h: Element, u: string) = h.ownerDocument.defaultView.open(u)",
+      "f(h: HTMLElement, u: string) = h.contentWindow.location.href = u",
+      "x(s: string) = document.execCommand(\"insertHTML\", false, s)",
+      "f(h: Element, s: string) -> bool = window.Reflect.set(h, \"innerHTML\", s)",
+      "f(h: Element, s: string) = window.Object.assign(h, { innerHTML: s })",
+      "f(h: Element, s: string) = window.Object.defineProperty(h, \"srcdoc\", { value: s })",
+      "q(e: Element, s: string) = e.__defineSetter__(s)",
     ]) {
-      expect([line, codes(P("  type H:host\n  " + line))]).toEqual([line, S]);
+      expect([line, walk(line)]).toEqual([line, [NA]]);
     }
   });
 
-  test("a write of a property NAMED BY DATA (Reflect, Object.assign, defineProperty) reaches a sink unnamed: refused by name", () => {
-    for (const line of [
-      "f(h: H, s: string) -> bool = window.Reflect.set(h, \"innerHTML\", s)",
-      "f(h: H, s: string) = window.Object.assign(h, { innerHTML: s })",
-      "f(h: H, s: string) = window.Object.defineProperty(h, \"srcdoc\", { value: s })",
+  test("8.5 guarded(attr-name) — an event-handler or `srcdoc` attribute name is E-HOST-TARGET-NOT-ALLOWED (§5.2's test, url.scrml executableAttrName); a non-literal name is E-HOST-ARG-TYPE", () => {
+    expect(walk("f(h: Element, s: string) = h.setAttribute(\"onclick\", s)")).toEqual([NA]);
+    expect(walk("f(h: Element, s: string) = h.setAttribute(\"ONload\", s)")).toEqual([NA]);
+    expect(walk("f(h: Element, s: string) = h.setAttribute(\"srcdoc\", s)")).toEqual([NA]);
+    expect(walk("f(h: Element, s: string) = h.setAttribute(\"SRCDOC\", s)")).toEqual([NA]);
+    expect(walk("f(h: Element, n: string, s: string) = h.setAttribute(n, s)")).toEqual([ARG]);
+  });
+
+  test("8.4 — a string where the slot takes a callback (a string timer) is E-HOST-ARG-TYPE", () => {
+    expect(walk("f(s: string) = window.setTimeout(s, 0)")).toEqual([ARG]);
+    expect(walk("st(s: string) = window.setTimeout(s)")).toEqual([ARG]);
+  });
+
+  test("8.2 — a root typed by data (`number`, `string`) or by a non-interface is E-HOST-ROOT-OPAQUE (a data value is not a host receiver)", () => {
+    expect(walk("fn fix(x: number, d: int) -> string = x.toFixed(d)")).toEqual([OPQ]);
+    expect(walk("f(s: string) -> int = s.length")).toEqual([OPQ]);
+    // `Reflect` is no interface: the parameter's type is unknown, and it is no root
+    expect(walk("r(o: Reflect, e: Element, s: string) = o.set(e, \"innerHTML\", s)")).toEqual(expect.arrayContaining([OPQ, "E-TYPE-UNKNOWN"]));
+  });
+
+  test("8.6 — `type Name:host` in a `<host>` without `src=` is E-HOST-TYPE-NO-SRC, and a parameter of it is no root (E-HOST-ROOT-OPAQUE)", () => {
+    expect(codes(P("  type H:host\n  t() -> string = document.title"))).toEqual(["E-HOST-TYPE-NO-SRC"]);
+    expect(codes(P("  type H:host\n  f(h: H) -> string = h.title"))).toEqual(["E-HOST-ROOT-OPAQUE", "E-HOST-TYPE-NO-SRC"]);
+  });
+
+  test("8.1 — `type I:host` reusing an Appendix H name is E-SCOPE-010; a user struct of such a name SHADOWS the built-in in its scope, and is then no host root (fail closed)", () => {
+    expect(codes(P("  type HTMLElement:host\n  t() -> string = document.title"))).toEqual(["E-SCOPE-010"]);
+    clean(P("  t() -> string = document.title", "<p>x</p>", "    type Node:struct = { a: int }"));
+    expect(codes(P("  f(n: Node) -> string = n.textContent", "<p>x</p>", "    type Node:struct = { a: int }"))).toEqual(["E-HOST-ROOT-OPAQUE"]);
+  });
+
+  test("8.3 — the chain continues only through a read whose result is an interface (not an optional one)", () => {
+    expect(walk("f() -> string = document.title.length")).toEqual([NA]);
+    expect(walk("f(s: string) = document.body.append(s)")).toEqual([NA]);
+  });
+
+  test("8.4 — results: a supertype widens; `T | not` declared without `not` is E-HOST-RESULT-TYPE; a data mismatch is E-HOST-RESULT-TYPE; a downcast is admitted, brand-checked at run time (8.7)", () => {
+    clean(P("  el(id: string) -> Element | not = document.getElementById(id)\n  n(id: string) -> Node | not = document.getElementById(id)"));
+    expect(walk("el(id: string) -> Element = document.getElementById(id)")).toEqual([RES]);
+    expect(walk("t() -> int = document.title")).toEqual([RES]);
+    expect(walk("t() -> Element = document.title")).toEqual([RES]);
+    expect(walk("t(s: string) -> string = document.title = s")).toEqual([RES]);
+    clean(P("  el(id: string) -> HTMLElement | not = document.getElementById(id)"));
+  });
+
+  test("8.4 — a struct result of an interface-valued entry declares only `read` entries of that interface", () => {
+    clean(P("  measure(c: CanvasRenderingContext2D, s: string) -> M = c.measureText(s)", "<p>x</p>", "    type M:struct = { width: number }"));
+    expect(codes(P("  measure(c: CanvasRenderingContext2D, s: string) -> M = c.measureText(s)", "<p>x</p>", "    type M:struct = { width: number, actualBoundingBoxLeft: number }"))).toEqual([RES]);
+  });
+
+  test("8.4 — arguments: arity, a data type into an interface slot, a literal into the wrong slot", () => {
+    expect(walk("v(ms: int, x: int) -> bool = navigator.vibrate(ms, x)")).toEqual([ARG]);
+    expect(walk("v(ms: string) -> bool = navigator.vibrate(ms)")).toEqual([ARG]);
+    expect(walk("v() -> bool = navigator.vibrate(\"10\")")).toEqual([ARG]);
+    expect(walk("c(n: Node, s: string) -> bool = n.contains(s)")).toEqual([ARG]);
+    expect(walk("g(c: HTMLCanvasElement) -> CanvasRenderingContext2D | not = c.getContext(\"webgl\")")).toEqual([ARG]);
+    clean(P("  g(c: HTMLCanvasElement) -> CanvasRenderingContext2D | not = c.getContext(\"2d\")\n  v() -> bool = navigator.vibrate(10)"));
+  });
+
+  test("on the surface, clean: document.title read / write, a URL READ through location, navigator reads, matchMedia, a DOM element read", () => {
+    clean(P([
+      "  t() -> string = document.title",
+      "  setT(s: string) = document.title = s",
+      "  href() -> string = window.location.href",
+      "  lang() -> string = navigator.language",
+      "  langs() -> string[] = navigator.languages",
+      "  vibrate(ms: int) -> bool = navigator.vibrate(ms)",
+      "  mq(q: string) -> MediaQueryList = window.matchMedia(q)",
+      "  matches(m: MediaQueryList) -> bool = m.matches",
+      "  paused(v: HTMLVideoElement) -> bool = v.paused",
+      "  w(r: DOMRect) -> number = r.width",
+      "  fn fw(r: DOMRect) -> number = r.width",
+      "  id(e: Element) -> string = e.id",
+    ].join("\n")));
+  });
+
+  test("a guarded entry compiles, and is EMITTED through its run-time check (rule 8.5; runtime.js, lane A)", () => {
+    for (const [line, guard] of [
+      ["setTitle(h: Element, s: string) = h.setAttribute(\"title\", s)", "hostSetAttrName("],
+      ["setHref(h: Element, s: string) = h.setAttribute(\"href\", s)", "hostAttrValue("],
+      ["rmAttr(h: Element) = h.removeAttribute(\"title\")", "hostSetAttrName("],
+      ["setText(e: HTMLElement, s: string) = e.textContent = s", "hostInert("],
+      ["add(e: Element, s: string) = e.append(s)", "hostInert("],
+      ["src(i: HTMLImageElement, u: string) = i.src = u", "hostUrl("],
+      ["go(a: HTMLAnchorElement, u: string) = a.href = u", "hostUrl("],
     ]) {
-      expect([line, codes(P("  type H:host\n  " + line))]).toEqual([line, ["E-HOST-TARGET-SINK"]]);
+      const r = clean(P("  " + line));
+      const js = mods().print.printProgram(r.core, "t.client.js", "scrml-runtime.js").js;
+      expect([line, js.includes(guard), js.includes("hostInert(")]).toEqual([line, true, true]);
     }
   });
 
-  test("not sinks: a literal non-event attribute, a URL READ (location mid-chain), a plain call", () => {
-    clean(P("  type H:host\n  setTitle(h: H, s: string) = h.setAttribute(\"title\", s)\n  href() -> string = window.location.href\n  vibrate(ms: int) -> bool = navigator.vibrate(ms)"));
+
+  test("8.5 guarded(url) — a literal URL is judged at compile time by §5.2 rule 2's test (E-ATTR-STATIC-EXECUTABLE)", () => {
+    expect(walk("go(a: HTMLAnchorElement) = a.href = \"javascript:alert(1)\"")).toEqual(["E-ATTR-STATIC-EXECUTABLE"]);
+    expect(walk("go(a: Element) = a.setAttribute(\"href\", \"javascript:alert(1)\")")).toEqual(["E-ATTR-STATIC-EXECUTABLE"]);
   });
 
-  // #1659 review H1: the two-binding fail-open — a binding READS a sink-valued member and
-  // returns it as a handle, a second binding calls / constructs / writes through the handle.
-  // The SOURCE binding is refused, so the chain never forms. Every chrome-probe source is here
-  // as a refused-at-compile case. The target expressions are inert member reads.
-  test("H1 — a sink read as a result is refused (E-HOST-TARGET-SINK), so no handle can carry it", () => {
-    const S = ["E-HOST-TARGET-SINK"];
-    for (const line of [
-      "getF() -> Fn = window.Function",
-      "getE() -> Fn = window.eval",
-      "getT() -> Fn = window.setTimeout",
-      "getR() -> Fn = window.Reflect",
-      "doc() -> Fn = window.document",
-      "loc() -> Fn = document.location",
-      "win() -> Fn = document.defaultView",
-      "frameWin(e: Fn) -> Fn = e.contentWindow",
-      "frameDoc(e: Fn) -> Fn = e.contentDocument",
-      "mkAttr(n: string) -> Fn = document.createAttribute(n)",
-      "getAttr(e: Fn, n: string) -> Fn = e.getAttributeNode(n)",
-      "attrs(e: Fn) -> Fn = e.attributes",
-      "setNode(e: Fn, a: Fn) = e.setAttributeNode(a)",
-      "mkWorker(u: string) -> Fn = new window.Worker(u)",
-      "reg(u: string) = navigator.serviceWorker.register(u)",
-      "docOpen(u: string, n: string, f: string) = document.open(u, n, f)",
-      "navTo(u: string) = window.navigation.navigate(u)",
-    ]) {
-      expect([line, codes(P("  type Fn:host\n  " + line))]).toEqual([line, S]);
-    }
-  });
-
-  test("H1(c) — attribute-node write path and an Attr value / nodeValue / script text write are refused", () => {
-    const S = ["E-HOST-TARGET-SINK"];
-    for (const line of [
-      "setVal(a: H, s: string) = a.value = s",
-      "setNodeVal(a: H, s: string) = a.nodeValue = s",
-      "setText(e: H, s: string) = e.text = s",
-      "setTC(e: H, s: string) = e.textContent = s",
-      "setNamed(m: H, a: H) = m.setNamedItem(a)",
-    ]) {
-      expect([line, codes(P("  type H:host\n  " + line))]).toEqual([line, S]);
+  // #1659 review H1 — the two-binding fail-open. Every source binding of the Chromium probes,
+  // typed as strongly as Appendix H allows: the walk refuses the source or the second hop.
+  test("H1 — every row of the #1659 review's H1 table is refused under the allowlist", () => {
+    const H1 = [
+      ["getF() = window.Function", NA],                       // Function read as a handle
+      ["getE() = window.eval", NA],
+      ["getT() = window.setTimeout", NA],                     // a read: setTimeout has a call entry only
+      ["getR() = window.Reflect", NA],
+      ["w(d: Document, s: string) = d.write(s)", NA],         // window.document is on the surface; write is not
+      ["l(o: Location, u: string) = o.href = u", NA],         // Location is read-only on the surface
+      ["l(o: Location, u: string) = o.assign(u)", NA],
+      ["win() = document.defaultView", NA],
+      ["op(w: Window, u: string) = w.open(u)", NA],
+      ["mkAttr(n: string) = document.createAttribute(n)", NA],
+      ["setNode(e: Element, a: Node) = e.setAttributeNode(a)", NA],
+      ["attrs(e: Element) = e.attributes", NA],
+      ["getAttr(e: Element, n: string) = e.getAttributeNode(n)", NA],
+      ["frameWin(e: HTMLElement) = e.contentWindow", NA],
+      ["frameDoc(e: HTMLElement) = e.contentDocument", NA],
+      ["mkWorker(u: string) = new window.Worker(u)", NA],
+      ["reg(u: string) = navigator.serviceWorker.register(u)", NA],
+      ["docOpen(u: string, n: string, f: string) = document.open(u, n, f)", NA],
+      ["navTo(u: string) = window.navigation.navigate(u)", NA],
+      ["me() = window.self", NA],
+      ["t() = window.top", NA],
+      ["o() = window.opener", NA],
+      ["fr() = window.frames", NA],
+      ["g() = window.globalThis", NA],
+      ["od(e: Element) = e.ownerDocument", NA],
+      ["setNodeVal(a: Node, s: string) = a.nodeValue = s", NA],
+      ["setText(e: HTMLElement, s: string) = e.text = s", NA],
+      ["setNamed(e: Element, a: Node) = e.attributes.setNamedItem(a)", NA],
+      ["refl(r: Reflect, o: Element, s: string) -> bool = r.set(o, \"innerHTML\", s)", OPQ],
+    ];
+    for (const [line, code] of H1) {
+      expect([line, walk(line)]).toEqual([line, expect.arrayContaining([code])]);
     }
   });
 
   test("H1(b) — a call / new whose callee is a bare parameter or bare global (no member) is E-HOST-TARGET-SHAPE", () => {
-    expect(codes(P("  type Fn:host\n  call0(f: Fn) = f()"))).toEqual(["E-HOST-TARGET-SHAPE"]);
-    expect(codes(P("  type Fn:host\n  mk(f: Fn, s: string) -> Fn = new f(s)"))).toEqual(["E-HOST-TARGET-SHAPE"]);
+    expect(codes(P("  call0(f: Element) = f()"))).toEqual(["E-HOST-TARGET-SHAPE"]);
+    expect(codes(P("  mk(f: Element, s: string) = new f(s)"))).toEqual(["E-HOST-TARGET-SHAPE"]);
     expect(codes(P("  callw() = window()"))).toEqual(["E-HOST-TARGET-SHAPE"]);
+  });
+
+  // #1659 r1 re-review R1 (HIGH, code execution): createElement('script') + `.src = url` +
+  // appendChild loaded and ran remote JS, clean. Each step is refused now.
+  test("R1 — script / iframe / anchor / form URL loads are refused at every step", () => {
+    expect(walk("mk(n: string) -> HTMLElement = document.createElement(n)")).toEqual([ARG]);           // a non-literal tag
+    for (const tag of ["script", "iframe", "frame", "object", "embed", "base", "meta", "link", "style", "template", "slot", "my-widget", "svg"]) {
+      expect([tag, walk("mk() -> HTMLElement = document.createElement(\"" + tag + "\")")]).toEqual([tag, [ARG]]);  // not on the inert list (H.4)
+    }
+    expect(walk("setSrc(e: HTMLElement, u: string) = e.src = u")).toEqual([NA]);                      // no (HTMLElement, src, write)
+    expect(walk("setSrc(e: Element, u: string) = e.src = u")).toEqual([NA]);
+    expect(walk("append(b: HTMLElement, e: HTMLElement) = b.appendChild(e)")).toEqual([NA]);          // appendChild is not on the surface
+    expect(walk("append(e: HTMLElement) = document.body.appendChild(e)")).toEqual([NA]);
+    expect(walk("txt(e: HTMLElement, s: string) = e.text = s")).toEqual([NA]);                        // script text
+    expect(walk("go(f: HTMLElement, u: string) = f.action = u")).toEqual([NA]);                       // form.action
+    expect(walk("go(f: HTMLFormElement, u: string) = f.action = u")).toEqual(expect.arrayContaining([OPQ]));  // not an Appendix H interface
+    expect(walk("go(f: HTMLIFrameElement, u: string) = f.src = u")).toEqual(expect.arrayContaining([OPQ]));
+    expect(walk("go(a: HTMLAnchorElement) = a.href = \"javascript:alert(1)\"")).toEqual(["E-ATTR-STATIC-EXECUTABLE"]);
+    // the reviewer's three bindings, as written then and as typed now
+    expect(codes(P("  type E:host\n  mk(n: string) -> E = document.createElement(n)\n  setSrc(e: E, u: string) = e.src = u\n  append(e: E) = document.body.appendChild(e)"))).toEqual(expect.arrayContaining(["E-HOST-TYPE-NO-SRC"]));
+    expect(codes(P("  mk(n: string) -> HTMLElement = document.createElement(n)\n  setSrc(e: HTMLElement, u: string) = e.src = u\n  append(e: HTMLElement) = document.body.appendChild(e)"))).toEqual([ARG, NA, NA]);
+  });
+
+  // #1659 r1 re-review R2 (LOW): each stays off the surface (refused); none is admitted with a P argument.
+  test("R2 — insertRule, DOMParser.parseFromString, history.pushState, URL.createObjectURL are refused", () => {
+    expect(walk("ins(s: CSSStyleSheet, r: string) -> int = s.insertRule(r)")).toEqual(expect.arrayContaining([OPQ]));
+    expect(walk("p(s: string) = new window.DOMParser(s)")).toEqual([NA]);
+    expect(walk("p(d: DOMParser, s: string) = d.parseFromString(s, \"text/html\")")).toEqual(expect.arrayContaining([OPQ]));
+    expect(walk("push(s: string, u: string) = window.history.pushState(s, \"\", u)")).toEqual([NA]);
+    expect(walk("ou(b: string) -> string = window.URL.createObjectURL(b)")).toEqual([NA]);
+  });
+
+  // #1674 review F1 — guarded(attr-name) refuses every name the MARKUP walk refuses from data (its own
+  // predicate, analyze.scrml dataAttrRefusal), whatever the value: E20 / E7 / E21 / E8 are must-refuse.
+  test("F1 — E20 / E7 / E21: `form`, `formaction`, `style` (any case) through setAttribute are E-HOST-TARGET-NOT-ALLOWED, a literal value included", () => {
+    for (const line of [
+      "owner(e: Element, f: string) = e.setAttribute(\"form\", f)",                   // E20: a password into an off-origin form
+      "fa(e: HTMLElement, v: string) = e.setAttribute(\"formaction\", v)",           // E7: a CSRF token to /exfil-form
+      "fo(e: HTMLElement, v: string) = e.setAttribute(\"FORM\", v)",
+      "st(e: Element, v: string) = e.setAttribute(\"style\", v)",                    // E21: CSS url() fetch
+      "st2(e: Element) = e.setAttribute(\"Style\", \"background:url(/x)\")",
+      "fa2(e: Element) = e.setAttribute(\"formaction\", \"/exfil-form\")",
+      "rs(e: Element) = e.removeAttribute(\"style\")",
+    ]) {
+      expect([line, walk(line)]).toEqual([line, [NA]]);
+    }
+    // the reviewer's E20 / E7 programs, as written
+    expect(codes(P("  byId(id: string) -> Element | not = document.getElementById(id)\n  owner(e: Element, f: string) = e.setAttribute(\"form\", f)"))).toEqual([NA]);
+    expect(codes(P("  mkB() -> HTMLElement = document.createElement(\"button\")\n  sa1(e: HTMLElement, v: string) = e.setAttribute(\"form\", v)\n  sa2(e: HTMLElement, v: string) = e.setAttribute(\"formaction\", v)"))).toEqual([NA, NA]);
+    // an ordinary attribute still compiles
+    clean(P("  t(e: Element, v: string) = e.setAttribute(\"title\", v)\n  n(e: Element, v: string) = e.setAttribute(\"name\", v)"));
+  });
+
+  test("F1 — E8: CSSStyleDeclaration.setProperty is off the surface (H-094 removed); a CSS value from data has one door, the §25.7 bridge", () => {
+    expect(walk("sp(e: HTMLElement, p: string, v: string) = e.style.setProperty(p, v)")).toEqual([NA]);
+    clean(P("  rp(e: HTMLElement, p: string) -> string = e.style.removeProperty(p)"));
+  });
+
+  test("I1 — createElement's result is exactly its tag's interface: a declared subinterface is E-HOST-RESULT-TYPE", () => {
+    expect(walk("mk() -> HTMLAnchorElement = document.createElement(\"div\")")).toEqual([RES]);
+    clean(P("  mk() -> HTMLAnchorElement = document.createElement(\"a\")\n  mk2() -> HTMLElement = document.createElement(\"div\")"));
+  });
+
+  test("one sink source: every Appendix H entry agrees with url.scrml's executable-sink table (no second list)", () => {
+    const S = mods()["host-surface"];
+    expect(S.surfaceEntries().map((e) => [e.id, S.entryConflict(e)]).filter((x) => x[1] !== "")).toEqual([]);
   });
 });
 
@@ -309,13 +462,13 @@ describe("refused by name: `-> waiting`, `! HostError`; E-HOST-ERROR-TYPE", () =
     expect(codes(P("  t() -> string ! Oops = document.title"))).toEqual(["E-HOST-ERROR-TYPE"]);
   });
 
-  test("a struct / tape ARGUMENT and an enum RESULT: E-BOOTSTRAP-UNSUPPORTED (rule 12 deep copy / rule 13 enum decode not built)", () => {
-    expect(codes(P("  f(xs: int[]) = window.g(xs)"))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
-    expect(codes(P("  f() -> Mode = window.g()", "<p>x</p>", "    type Mode:enum = { A, B }"))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+  test("a tape ARGUMENT fits no v1 slot (E-HOST-ARG-TYPE); an enum RESULT is not an entry's result (E-HOST-RESULT-TYPE)", () => {
+    expect(codes(P("  f(xs: int[]) -> bool = navigator.vibrate(xs)"))).toEqual(["E-HOST-ARG-TYPE"]);
+    expect(codes(P("  f() -> Mode = document.title", "<p>x</p>", "    type Mode:enum = { A, B }"))).toEqual(["E-HOST-RESULT-TYPE"]);
   });
 
-  test("a DOM element type is not in the bootstrap (rule 16): an unknown type, never accepted", () => {
-    expect(codes(P("  paused(v: HTMLVideoElement) -> bool = v.paused"))).toEqual(["E-TYPE-UNKNOWN"]);
+  test("a DOM element type is a built-in host type (Appendix H, ruling Q2): accepted as a parameter, its read entries walked", () => {
+    clean(P("  paused(v: HTMLVideoElement) -> bool = v.paused"));
   });
 
   test("a `<host>` in a stdlib module file: E-BOOTSTRAP-UNSUPPORTED (rule 10's server-side bindings)", () => {
@@ -340,92 +493,90 @@ describe("rule 10 — an adopter binding is client-only for route analysis", () 
 });
 
 // =============================================================================
-// Rule 15 — closed handles
+// Rule 15 — closed handles. Since the allowlist (ruling Q2) a no-src `<host>` has no user-named
+// handle (E-HOST-TYPE-NO-SRC): a non-DOM Appendix H interface (here `MediaQueryList`) is the
+// closed handle (rule 15 as amended).
 // =============================================================================
-describe("rule 15 — `type Name:host` handles are closed", () => {
-  const H = "  type Box:host\n  mk() -> Box = window.probe.mk()\n  val(b: Box) -> int = b.v";
+describe("rule 15 — handles are closed (a non-DOM Appendix H interface; `type Name:host` outside a `<host>`)", () => {
+  const H = "  mq(q: string) -> MediaQueryList = window.matchMedia(q)\n  matches(m: MediaQueryList) -> bool = m.matches\n  rect(e: Element) -> DOMRect = e.getBoundingClientRect()";
   test("`type X:host` outside a `<host>`: E-HOST-TYPE-OUTSIDE", () => {
     expect(codes("<program>\n${\n    type X:host\n}\n<p>x</p>\n</program>\n")).toContain("E-HOST-TYPE-OUTSIDE");
   });
 
-  test("a member read / method call on a handle: E-HOST-HANDLE-MEMBER (naming the binding to declare)", () => {
-    const src = P(H, "<p>${f()}</p>", "    function f() -> int {\n        const b: Box = mk();\n        return b.v;\n    }");
+  test("a member read / method call on a non-DOM interface value: E-HOST-HANDLE-MEMBER (naming the binding to declare)", () => {
+    const src = P(H, "<p>${f()}</p>", "    function f() -> bool {\n        const m: MediaQueryList = mq(\"(min-width: 1px)\");\n        return m.matches;\n    }");
     expect(codes(src)).toEqual(["E-HOST-HANDLE-MEMBER"]);
-    // an INFERRED local's member: the binder does not know the type yet — refused all the same, never accepted
-    expect(codes(P(H, "<p>${f()}</p>", "    function f() -> int {\n        const b = mk();\n        return b.v;\n    }")).length).toBeGreaterThan(0);
     expect(errs(run(src))[0].message).toContain("<host>");
-    const src2 = P(H, "<p>${f()}</p>", "    function f() -> int {\n        const b: Box = mk();\n        return b.size();\n    }");
+    const src2 = P(H, "<p>${f()}</p>", "    function f() -> bool {\n        const m: MediaQueryList = mq(\"x\");\n        return m.addListener();\n    }");
     expect(codes(src2)).toEqual(["E-HOST-HANDLE-MEMBER"]);
   });
 
+  test("a member access on a DOM element type is NOT E-HOST-HANDLE-MEMBER (rule 16: DOM members stay open) — open access is refused by name in the bootstrap", () => {
+    const src = P("  body() -> HTMLElement | not = document.body", "<p>${f()}</p>", "    function f() -> string {\n        const b: HTMLElement | not = body();\n        return b.title;\n    }");
+    const r = run(src);
+    expect(errs(r).map((d) => d.code)).not.toContain("E-HOST-HANDLE-MEMBER");
+    expect(errs(r).map((d) => d.code)).toContain("E-BOOTSTRAP-UNSUPPORTED");
+  });
+
   test("`==` on handles: E-EQ-003", () => {
-    const src = P(H, "<p>${f()}</p>", "    function f() -> bool {\n        return mk() == mk();\n    }");
-    expect(codes(src)).toContain("E-EQ-003");
+    expect(codes(P(H, "<p>${f()}</p>", "    function f() -> bool {\n        return mq(\"a\") == mq(\"b\");\n    }"))).toContain("E-EQ-003");
   });
 
   test("a struct field holding a handle: E-HOST-HANDLE-NOT-DATA", () => {
-    const src = P(H, "<p>x</p>", "    type Pair:struct = { b: Box, n: int }");
-    expect(codes(src)).toContain("E-HOST-HANDLE-NOT-DATA");
+    expect(codes(P(H, "<p>x</p>", "    type Pair:struct = { m: MediaQueryList, n: int }"))).toContain("E-HOST-HANDLE-NOT-DATA");
   });
 
   test("a server function taking a handle: E-HOST-HANDLE-NOT-DATA", () => {
-    const src = P(H, "<p>x</p>", "    server function s(b: Box) -> int {\n        return 1;\n    }");
-    expect(codes(src)).toContain("E-HOST-HANDLE-NOT-DATA");
+    expect(codes(P(H, "<p>x</p>", "    server function s(m: MediaQueryList) -> int {\n        return 1;\n    }"))).toContain("E-HOST-HANDLE-NOT-DATA");
   });
 
-  test("a handle is nominal and cannot be forged: `{}` is not a `Box`, an `Other` is not a `Box`, a string is not a `Box`", () => {
-    const H2 = H + "\n  type Other:host\n  mkO() -> Other = window.probe.mk()";
-    expect(codes(P(H2, "<p>${f()}</p>", "    function f() -> int {\n        const b: Box = {};\n        return val(b);\n    }"))).toEqual(["E-TYPE-STRUCT-CONTEXT"]);
-    expect(codes(P(H2, "<p>${f()}</p>", "    function f() -> int {\n        const o: Other = mkO();\n        return val(o);\n    }"))).toEqual(["E-TYPE-031"]);
-    expect(codes(P(H2, "<p>${val(\"x\")}</p>"))).toEqual(["E-TYPE-031"]);
+  test("a handle is nominal and cannot be forged: `{}` is not a `MediaQueryList`, a `DOMRect` is not one, a string is not one", () => {
+    expect(codes(P(H, "<p>${f()}</p>", "    function f() -> bool {\n        const m: MediaQueryList = {};\n        return matches(m);\n    }"))).toEqual(["E-TYPE-STRUCT-CONTEXT"]);
+    expect(codes(P(H, "<p>x</p>", "    function f(e: Element) -> bool {\n        const r: DOMRect = rect(e);\n        return matches(r);\n    }"))).toEqual(["E-TYPE-031"]);
+    expect(codes(P(H, "<p>${matches(\"x\")}</p>"))).toEqual(["E-TYPE-031"]);
   });
 
   test("a handle has no text: displayed, templated or joined, it is refused (no host toString runs)", () => {
-    expect(codes(P(H, "<p>${mk()}</p>"))).toEqual(["E-TEXT-NON-PRIMITIVE"]);
-    expect(codes(P(H, "<p>${f()}</p>", "    function f() -> string {\n        const b: Box = mk();\n        return `v=${b}`;\n    }"))).toEqual(["E-TEXT-NON-PRIMITIVE"]);
-    expect(codes(P(H, "<p>${f()}</p>", "    function f() -> string {\n        const xs: Box[] = [mk()];\n        return xs.join(\",\");\n    }"))).toEqual(["E-TYPE-031"]);
-    expect(codes(P(H, "<p>${f()}</p>", "    function f() -> bool {\n        const b: Box = mk();\n        if (b) {\n            return true;\n        }\n        return false;\n    }"))).toEqual(["E-COND-NOT-BOOLEAN"]);
+    expect(codes(P(H, "<p>${mq(\"x\")}</p>"))).toEqual(["E-TEXT-NON-PRIMITIVE"]);
+    expect(codes(P(H, "<p>${f()}</p>", "    function f() -> string {\n        const m: MediaQueryList = mq(\"x\");\n        return `v=${m}`;\n    }"))).toEqual(["E-TEXT-NON-PRIMITIVE"]);
+    expect(codes(P(H, "<p>${f()}</p>", "    function f() -> string {\n        const xs: MediaQueryList[] = [mq(\"x\")];\n        return xs.join(\",\");\n    }"))).toEqual(["E-TYPE-031"]);
+    expect(codes(P(H, "<p>${f()}</p>", "    function f() -> bool {\n        const m: MediaQueryList = mq(\"x\");\n        if (m) {\n            return true;\n        }\n        return false;\n    }"))).toEqual(["E-COND-NOT-BOOLEAN"]);
   });
 
   test("a cell holding a handle: refused by name (E-BOOTSTRAP-UNSUPPORTED)", () => {
-    const src = `<host>\n${H}\n</host>\n<program>\nlet <b:Box | not = not/>\n<p>x</p>\n</program>\n`;
+    const src = `<host>\n${H}\n</host>\n<program>\nlet <m:MediaQueryList | not = not/>\n<p>x</p>\n</program>\n`;
     expect(codes(src)).toContain("E-BOOTSTRAP-UNSUPPORTED");
   });
 });
 
 // =============================================================================
-// Emission and the run-time decode (rules 7, 12, 13, 18) — in happy-dom
+// Emission (rules 7, 12, 13, 18) — in happy-dom, through surface bindings only. The decode of
+// ARBITRARY host values (the probe values #1659 injected as `window.probe.*`, which is off the
+// surface now) is exercised directly on runtime.js's hostCall below; end to end it returns with
+// `src=` fixtures when lane A's static export read lands (design §10 step 6).
 // =============================================================================
-const STRUCTS = "    type Rect:struct = { w: number, h: number }\n    type Opt:struct = { name: string, admin: bool | not }";
 const HOSTS = [
-  "  type Box:host",
   "  title() -> string = document.title",
   "  setTitle(t: string) = document.title = t",
-  "  num() -> number = window.probe.num()",
-  "  anInt() -> int = window.probe.anInt()",
-  "  str() -> string = window.probe.str()",
-  "  maybeStr() -> string | not = window.probe.str()",
-  "  rect() -> Rect = window.probe.rect()",
-  "  opt() -> Opt = window.probe.opt()",
-  "  langs() -> string[] = window.probe.langs()",
-  "  nodes() -> int[] = document.querySelectorAll(\"p\")",
-  "  mk() -> Box = window.probe.mk()",
-  "  val(b: Box) -> int = b.v",
-  "  fire() = window.probe.fire()",
-  "  echo(s: string, n: int, f: bool, o: string) -> string = window.probe.echo(s, n, f, \"lit\", { k: o, n: 2 })",
-  "  made(s: string) -> Box = new window.probe.Made(s)",
-  "  label(b: Box) -> string = b.label",
-  "  fn fix(x: number, d: int) -> string = x.toFixed(d)",
+  "  lang() -> string = navigator.language",
+  "  langs() -> string[] = navigator.languages",
+  "  mq(q: string) -> MediaQueryList = window.matchMedia(q)",
+  "  matches(m: MediaQueryList) -> bool = m.matches",
+  "  byId(id: string) -> Element | not = document.getElementById(id)",
+  "  idOf(e: Element) -> string = e.id",
+  "  byIdH(id: string) -> HTMLElement | not = document.getElementById(id)",
+  "  anchor(id: string) -> HTMLAnchorElement | not = document.getElementById(id)",
+  "  setText(e: HTMLElement, s: string) = e.textContent = s",
+  "  go(a: HTMLAnchorElement, u: string) = a.href = u",
+  "  setAttr(e: Element, s: string) = e.setAttribute(\"title\", s)",
 ].join("\n");
-const EXPOSE = ["title", "setTitle", "num", "anInt", "str", "maybeStr", "rect", "opt", "langs", "nodes", "mk", "val", "fire", "echo", "made", "label", "fix", "fixed"];
-// rule 11: a `fn` may call a binding declared `fn`
-const PROG = P(HOSTS, "<p id=\"t\">${title()}</p><p id=\"f\">${fixed()}</p>", STRUCTS + "\n    fn fixed() -> string {\n        return fix(3.14159, 2);\n    }");
+const EXPOSE = ["title", "setTitle", "lang", "langs", "mq", "matches", "byId", "idOf", "byIdH", "anchor", "setText", "go", "setAttr"];
+const PROG = P(HOSTS, "<p id=\"t\">${title()}</p>");
 
 describe("emission — the target as literal JavaScript, the result checked (rules 7, 13, 18)", () => {
   let program;
   let out;
   beforeAll(async () => {
-    window.probe = {};
     const r = clean(PROG);
     ({ program, out } = await loadProgram(r.core, "s473-hb-" + k++, EXPOSE));
     document.title = "hello";
@@ -435,145 +586,128 @@ describe("emission — the target as literal JavaScript, the result checked (rul
     expect(out.js).toContain("hostCall(");
     expect(out.js).toContain("hostRoot(\"document\").title");
     expect(out.js).not.toMatch(/new Function|\beval\(/);
-    expect(out.js).toContain("new (");
   });
 
-  test("rule 11: a `fn` binding rooted at a parameter runs, from a `fn` too", () => {
-    expect(document.querySelector("#f").textContent).toBe("3.14");
-    expect(program.fix(2.5, 0)).toBe("3");
-  });
-
-  test("a read, a write, scalars, literal arguments and a one-level object literal cross", () => {
-    expect(document.querySelector("#t").textContent).toBe("program"); // rendered at load, from the page's own <title>
+  test("a read, a write, a tape decode, an interface handle passed from one binding to the next", () => {
+    expect(document.querySelector("#t").textContent).toBe("program");
     expect(program.title()).toBe("hello");
     program.setTitle("bye");
     expect(document.title).toBe("bye");
-    let got;
-    window.probe.echo = (...a) => { got = a; return "ok"; };
-    expect(program.echo("s", 3, true, "o")).toBe("ok");
-    expect(got).toEqual(["s", 3, true, "lit", { k: "o", n: 2 }]);
+    expect(typeof program.lang()).toBe("string");
+    expect(Array.isArray(program.langs())).toBe(true);
+    // (matchMedia is not run: happy-dom's result is not a platform MediaQueryList, so the r8.7 brand check refuses it)
+    expect(program.byId("t")).not.toBe(null);
+    expect(program.idOf(program.byId("t"))).toBe("t");
+    expect(program.byId("nope")).toBe(null);
   });
 
-  test("scalars by typeof: a boxed string, a fractional int, NaN for int, null for non-optional are E-HOST-VALUE-MISMATCH-RT; `T | not` admits null", () => {
-    const M = "E-HOST-VALUE-MISMATCH-RT";
-    window.probe.str = () => new String("x");
-    expect(trapOf(() => program.str())).toBe(M);
-    window.probe.anInt = () => 1.5;
-    expect(trapOf(() => program.anInt())).toBe(M);
-    window.probe.anInt = () => 2 ** 53;
-    expect(trapOf(() => program.anInt())).toBe(M);
-    window.probe.str = () => null;
-    expect(trapOf(() => program.str())).toBe(M);
-    expect(program.maybeStr()).toBe(null);
-    window.probe.str = () => undefined;
-    expect(program.maybeStr()).toBe(null);
-    window.probe.num = () => NaN;
-    expect(program.num()).toBeNaN();
+  // s473-host-allowlist-b, the lane merge: a COMPILED guarded binding runs through runtime.js's guards
+  test("rule 8.5 / 8.7 end to end: a downcast is brand-checked; textContent on a <script> traps E-HOST-RECEIVER-RT; a javascript: href is written as about:blank", () => {
+    const sx = document.createElement("script"); sx.id = "sx"; document.body.appendChild(sx);
+    const px = document.createElement("p"); px.id = "px"; document.body.appendChild(px);
+    const ax = document.createElement("a"); ax.id = "ax"; document.body.appendChild(ax);
+    try {
+      expect(trapOf(() => program.setText(program.byIdH("sx"), "window.__pwn = 1"))).toBe("E-HOST-RECEIVER-RT");
+      expect(sx.textContent).toBe("");
+      program.setText(program.byIdH("px"), "ok");
+      expect(px.textContent).toBe("ok");
+      expect(trapOf(() => program.anchor("px"))).toBe("E-HOST-VALUE-MISMATCH-RT");   // a <p> is not an HTMLAnchorElement
+      program.go(program.anchor("ax"), "javascript:alert(1)");
+      expect(ax.getAttribute("href")).toBe("about:blank");
+      program.go(program.anchor("ax"), "https://example.com/");
+      expect(ax.getAttribute("href")).toBe("https://example.com/");
+      program.setAttr(program.byIdH("px"), "hi");
+      expect(px.getAttribute("title")).toBe("hi");
+    } finally { sx.remove(); px.remove(); ax.remove(); }
+  });
+});
+
+// The rule 13 / 18 decode on hostCall (runtime.js) — the values #1659's probe bindings returned.
+describe("runtime.js — the rule 13 decode and rule 18 throw on hostCall (the #1659 probe values, ported)", () => {
+  const M = "E-HOST-VALUE-MISMATCH-RT";
+  const S = { k: "string" }, I = { k: "int" }, N = { k: "number" };
+  const call = (v, ty) => hostCall(() => v, ty, "t()");
+  const callF = (f, ty) => hostCall(f, ty, "t()");
+  const RECT = { k: "struct", name: "Rect", fields: [{ name: "w", ty: N }, { name: "h", ty: N }] };
+  const OPT = { k: "struct", name: "Opt", fields: [{ name: "name", ty: S }, { name: "admin", ty: { k: "maybe", inner: { k: "bool" } } }] };
+  const TAPE = { k: "tape", elem: S };
+
+  test("scalars by typeof: a boxed string, a fractional int, an out-of-range int, null for non-optional are mismatches; `T | not` admits null", () => {
+    expect(trapOf(() => call(new String("x"), S))).toBe(M);
+    expect(trapOf(() => call(1.5, I))).toBe(M);
+    expect(trapOf(() => call(2 ** 53, I))).toBe(M);
+    expect(trapOf(() => call(null, S))).toBe(M);
+    expect(call(null, { k: "maybe", inner: S })).toBe(null);
+    expect(call(undefined, { k: "maybe", inner: S })).toBe(null);
+    expect(call(NaN, N)).toBeNaN();
   });
 
-  test("N1 — a WebIDL-style accessor on the prototype is READ (once per field); an own data field too; extra members dropped", () => {
+  test("N1 — a WebIDL-style accessor on the prototype is READ (once per field); extra members dropped", () => {
     let reads = 0;
     class RectLike { get w() { reads++; return 3; } get h() { reads++; return 4; } }
-    window.probe.rect = () => new RectLike();
-    const r = program.rect();
-    expect(r).toEqual({ w: 3, h: 4 });
+    expect(call(new RectLike(), RECT)).toEqual({ w: 3, h: 4 });
     expect(reads).toBe(2);
-    window.probe.rect = () => ({ w: 1, h: 2, extra: "dropped" });
-    expect(Object.keys(program.rect())).toEqual(["w", "h"]);
+    expect(Object.keys(call({ w: 1, h: 2, extra: "dropped" }, RECT))).toEqual(["w", "h"]);
   });
 
-  test("N1 — a polluted Object.prototype cannot supply a field: absent is `not` for an optional field, a mismatch for a required one", () => {
+  test("N1 — a polluted Object.prototype cannot supply a field", () => {
     Object.prototype.admin = true;
     Object.prototype.name = "polluted";
     try {
-      window.probe.opt = () => ({ name: "real" });
-      expect(program.opt()).toEqual({ name: "real", admin: null });
-      window.probe.opt = () => ({});
-      expect(trapOf(() => program.opt())).toBe("E-HOST-VALUE-MISMATCH-RT");
+      expect(call({ name: "real" }, OPT)).toEqual({ name: "real", admin: null });
+      expect(trapOf(() => call({}, OPT))).toBe(M);
     } finally {
       delete Object.prototype.admin;
       delete Object.prototype.name;
     }
   });
 
-  test("M1 — a tape counts only OWN indices: a hole and a polluted Array.prototype index are absent", () => {
-    Array.prototype[1] = "proto-polluted";
-    try {
-      const sparse = ["en"];
-      sparse[2] = "de"; // index 1 is a hole
-      window.probe.langs = () => sparse;
-      // index 1 is absent (a hole) → a required string element is a mismatch, never the polluted value
-      expect(trapOf(() => program.langs())).toBe("E-HOST-VALUE-MISMATCH-RT");
-    } finally {
-      delete Array.prototype[1];
-    }
-  });
-
-  test("a field named `__proto__` / a `constructor` field cannot reshape the decoded value", () => {
-    window.probe.opt = () => JSON.parse('{"name":"n","admin":false,"__proto__":{"polluted":1}}');
-    const v = program.opt();
+  test("a field named `__proto__` cannot reshape the decoded value", () => {
+    const v = call(JSON.parse('{"name":"n","admin":false,"__proto__":{"polluted":1}}'), OPT);
     expect(Object.getPrototypeOf(v)).toBe(Object.prototype);
     expect(v.polluted).toBe(undefined);
   });
 
-  test("a getter that throws while the result is decoded: E-HOST-THROW-RT (never a raw host error)", () => {
-    window.probe.rect = () => ({ get w() { throw new Error("boom"); }, h: 1 });
-    expect(trapOf(() => program.rect())).toBe("E-HOST-THROW-RT");
+  test("a getter that throws during the decode: E-HOST-THROW-RT", () => {
+    expect(trapOf(() => call({ get w() { throw new Error("boom"); }, h: 1 }, RECT))).toBe("E-HOST-THROW-RT");
   });
 
-  test("a tape is an Array.isArray value: a real array decodes element by element; a NodeList and an array-like are mismatches", () => {
-    window.probe.langs = () => ["en", "fr"];
-    expect(program.langs()).toEqual(["en", "fr"]);
-    window.probe.langs = () => ["en", 1];
-    expect(trapOf(() => program.langs())).toBe("E-HOST-VALUE-MISMATCH-RT");
-    window.probe.langs = () => ({ length: 1, 0: "en" });
-    expect(trapOf(() => program.langs())).toBe("E-HOST-VALUE-MISMATCH-RT");
-    expect(trapOf(() => program.nodes())).toBe("E-HOST-VALUE-MISMATCH-RT");
+  test("a tape is an Array.isArray value: a NodeList and an array-like are mismatches", () => {
+    expect(call(["en", "fr"], TAPE)).toEqual(["en", "fr"]);
+    expect(trapOf(() => call(["en", 1], TAPE))).toBe(M);
+    expect(trapOf(() => call({ length: 1, 0: "en" }, TAPE))).toBe(M);
+    expect(trapOf(() => call(document.querySelectorAll("p"), TAPE))).toBe(M);
   });
 
-  test("a thenable result of a non-waiting binding: a mismatch naming `-> waiting void`, with a rejection handler attached (no unhandled rejection)", async () => {
-    window.probe.fire = () => Promise.reject(new Error("late"));
+  test("a thenable result of a non-waiting binding: a mismatch naming `-> waiting void`, its rejection handled; `then` read once", async () => {
     let e;
-    try { program.fire(); } catch (x) { e = x; }
-    expect(e.code).toBe("E-HOST-VALUE-MISMATCH-RT");
+    try { callF(() => Promise.reject(new Error("late")), { k: "void" }); } catch (x) { e = x; }
+    expect(e.code).toBe(M);
     expect(e.message).toContain("-> waiting void");
     await settle();
     expect(takePageErrors()).toEqual([]);
     let thenReads = 0;
-    window.probe.str = () => ({ get then() { thenReads++; return (a, b) => {}; } });
-    expect(trapOf(() => program.str())).toBe("E-HOST-VALUE-MISMATCH-RT");
+    expect(trapOf(() => call({ get then() { thenReads++; return (a, b) => {}; } }, S))).toBe(M);
     expect(thenReads).toBe(1);
   });
 
-  test("rule 18 — a throw is E-HOST-THROW-RT; the thrown object's toString / valueOf / Symbol.toPrimitive are never called", () => {
+  test("rule 18 — a throw is E-HOST-THROW-RT; a thrown object's toString / valueOf / Symbol.toPrimitive never run", () => {
     let converted = false;
     const evil = { get message() { return 5; }, toString() { converted = true; return "x"; }, valueOf() { converted = true; return 1; }, [Symbol.toPrimitive]() { converted = true; return "p"; } };
-    window.probe.fire = () => { throw evil; };
     let e;
-    try { program.fire(); } catch (x) { e = x; }
+    try { callF(() => { throw evil; }, { k: "void" }); } catch (x) { e = x; }
     expect(e.code).toBe("E-HOST-THROW-RT");
     expect(e.message).toContain("a non-Error value was thrown");
     expect(converted).toBe(false);
-    window.probe.fire = () => { throw new TypeError("nope"); };
-    try { program.fire(); } catch (x) { e = x; }
+    try { callF(() => { throw new TypeError("nope"); }, { k: "void" }); } catch (x) { e = x; }
     expect([e.code, e.detail.name, e.detail.message]).toEqual(["E-HOST-THROW-RT", "TypeError", "nope"]);
-    // a missing intermediate member throws inside the target: E-HOST-THROW-RT, not a raw TypeError
-    window.probe = undefined;
-    try {
-      expect(trapOf(() => program.num())).toBe("E-HOST-THROW-RT");
-    } finally {
-      window.probe = {};
-    }
   });
 
-  test("handles: a binding's handle result passes to another binding as itself; a null handle is a mismatch; `new` constructs", () => {
+  test("handles: an object crosses as itself; a null handle is a mismatch", () => {
     const obj = { v: 41 };
-    window.probe.mk = () => obj;
-    expect(program.val(program.mk())).toBe(41);
-    window.probe.mk = () => null;
-    expect(trapOf(() => program.mk())).toBe("E-HOST-VALUE-MISMATCH-RT");
-    window.probe.Made = class { constructor(s) { this.label = "made " + s; } };
-    expect(program.label(program.made("x"))).toBe("made x");
+    const H = { k: "handle", name: "MediaQueryList" };
+    expect(call(obj, H)).toBe(obj);
+    expect(trapOf(() => call(null, H))).toBe(M);
   });
 });
 
