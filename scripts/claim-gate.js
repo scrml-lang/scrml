@@ -2,8 +2,11 @@
 /**
  * scripts/claim-gate.js
  *
- * The C1 (code-claim) half of the marketing claim-gate. Generalizes the S101
+ * The marketing claim-gate. C1 (code claims) is this file: it generalizes the S101
  * `scripts/extract-readme-scrml.js` from one file to a declared PUBLIC SURFACE.
+ * C2 (derived-number claims, S473) is `scripts/claim-gate-c2.js`, run here over the
+ * same surface: a figure like "18,000 lines" or "5,500+ tests" must cite docs/FACTS.md
+ * on its line or paragraph, or carry `<!-- claim: not-derived -->`.
  *
  * WHY (S280): marketing/public content makes CLAIMS, and a claim that was true
  * when written rots silently — nothing fails when a published code sample stops
@@ -65,8 +68,8 @@
  *   `bun scripts/claim-gate.js [paths...]` override the surface with explicit paths.
  *
  * Exit: 0 on all-pass (or any --report run); 1 on any failure in GATE mode.
- * (Not wired into CI or the hook as of S469 — the surface still has impl#1-era
- * failures being migrated doc by doc. snippet-gate IS a required CI check.)
+ * BLOCKING in CI's `checks` job since S469 (C2 joined it S473). Not run by the
+ * pre-push hook: it compiles every public fence, too slow for a push.
  *
  * Authored S280 (2026-07-22). `scripts/extract-readme-scrml.js` (S101) was
  * RETIRED in the same landing: its gate role passed to `scripts/snippet-gate.js`
@@ -82,6 +85,7 @@ import { lintGhostPatterns } from "../compiler/src/lint-ghost-patterns.js";
 import { parseDocMarkers } from "./doc-gate-markers.js";
 import { isDriftScanned, inSnippetCorpus } from "./snippet-drift.js";
 import { PUBLIC_SURFACE, SURFACE_EXCLUDE, SURFACE_UNGATED, uncoveredDocs, bannerProblems } from "./claim-gate-surface.js";
+import { scanFiles as scanDerivedNumbers, C2_HINT } from "./claim-gate-c2.js";
 
 // The declared surface, its walked-past excludes, and the FLOOR (every fenced public
 // document must be gated or excused with a reason) live in scripts/claim-gate-surface.js.
@@ -194,6 +198,18 @@ for (const b of bannerMisses) {
   failures.push({
     file: b.file, blockNum: null, startLine: 1,
     why: `banner missing (S469 "Banner + exempt", enforced S472): ${b.why} — restore the banner, or remove the exemption row in scripts/claim-gate-surface.js and gate the piece`,
+    compileOutput: "", ghostDiags: [],
+  });
+  mode.impl1.failed++;
+}
+
+// C2 (S473) — a derived figure (lines / tests / modules / codes / …) on the public surface must cite
+// docs/FACTS.md on its line or paragraph, or carry `<!-- claim: not-derived -->`. scripts/claim-gate-c2.js.
+const c2Hits = scanDerivedNumbers(files);
+for (const h of c2Hits) {
+  failures.push({
+    file: h.file, blockNum: null, startLine: h.line,
+    why: `C2 uncited derived figure «${h.match}»: ${C2_HINT}`,
     compileOutput: "", ghostDiags: [],
   });
   mode.impl1.failed++;
@@ -391,6 +407,7 @@ console.log(
     `bootstrap (ruled) — ${mode.ruled.files} file(s), ${mode.ruled.passed} pass, ${mode.ruled.skipped} skip, ` +
     `${mode.ruled.snippet} snippet, ${mode.ruled.specAhead} spec-ahead, ${mode.ruled.stale} stale, ${mode.ruled.failed} fail`,
 );
+console.log(`claim-gate C2: ${c2Hits.length} uncited derived-number claim(s)${c2Hits.length ? " — " + c2Hits.map((h) => `${h.file}:${h.line} «${h.match}»`).join(", ") : ""}.`);
 console.log(
   `claim-gate: ${passed} passed, ${skipped} skipped, ${snippet} snippet-gated, ${specAhead + stale} spec-ahead${stale ? ` (${stale} stale)` : ""}, ${failed} failed (${blockTotal} total).`,
 );

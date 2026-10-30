@@ -99,7 +99,7 @@
 ${
     import { Sym, Type, TypeDef, FieldDef, VariantDef, FieldRef, InstRef, Place, Literal, Expr, SeqFn, PrimOp, Attr, Block, LoopHead,
              EditKind, Check, Stmt, View, EffectDep, Field, Decl, Fn, HostFn, HostBind, HostArg, HostProp, CoreProgram, CapOwner, TransitionGraph,
-             DeclKind, SurfaceProp, ValidityOf, Persist, PersistStore, ServerFn, SqlQuery, Db,
+             DeclKind, FieldMode, SurfaceProp, ValidityOf, Persist, PersistStore, ServerFn, SqlQuery, Db,
              Pattern, Failable, OkArm, ErrArm, HostCall, Gather, Lifted, GatherRow,
              capOwner, grantsAnyWrite, findDecl, findTypeDef, findFn, findServerFn, findDb } from "./core.scrml"
     import { Node, allNodes } from "./walk.scrml"
@@ -1141,7 +1141,9 @@ ${
 
     fn checkField(d: Decl, f: Field) -> string[] {
         const has: boolean = f.wcap is given
-        const grants: boolean = grantsAnyWrite(f) || f.graph is given
+        // s473: a DERIVED field's graph is its state-children's bodies only — no
+        // edge is authored (§51.0.J E-DERIVED-ENGINE-NO-RULES), nothing writes it
+        const grants: boolean = grantsAnyWrite(f) || (f.graph is given && f.mode != FieldMode.Derived)
         if (has && !grants) return ["C1: <" + d.sym.hint + ">." + f.sym.hint + " has a write capability but grants no write"]
         if (!has && grants) return ["C1: <" + d.sym.hint + ">." + f.sym.hint + " grants a write but has no write capability"]
         return []

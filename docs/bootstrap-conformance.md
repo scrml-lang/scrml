@@ -11,26 +11,26 @@ Scope: **1813 of 1813 cases attempted** — every attempted case reached the pur
 
 | bucket | cases | share of attempted |
 |---|---:|---:|
-| PASS | 264 | 14.6% |
+| PASS | 265 | 14.6% |
 | CODES-ONLY | 0 | 0.0% |
-| FAIL | 48 | 2.6% |
+| FAIL | 47 | 2.6% |
 | LEGACY | 0 | 0.0% |
 | NOT-TWINNED | 685 | 37.8% |
 | UNSUPPORTED | 816 | 45.0% |
 | CRASH | 0 | 0.0% |
 | INVALID | 0 | 0.0% |
 
-**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 312; of those, 264 hold (84.6%). Runtime half executed on the bootstrap for 103 case(s).
+**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 312; of those, 265 hold (84.9%). Runtime half executed on the bootstrap for 103 case(s).
 
-- **Vacuous** passes: 19 of 264 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **245**.
-- FAILs whose required code appears nowhere in the bootstrap's sources (check not implemented): 22 of 48; the other 26 are implemented checks that answered wrong.
+- **Vacuous** passes: 19 of 265 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **246**.
+- FAILs whose required code appears nowhere in the bootstrap's sources (check not implemented): 21 of 47; the other 26 are implemented checks that answered wrong.
 
 LEGACY by marker (a case may carry several): none.
 UNSUPPORTED by reason: bootstrap-unsupported 536 · parse-reject 280.
 
 ### §66 twins (S449 dialect ruling 1 — generated at test time by the `scrml fix` §66 rules)
 
-Legacy-dialect cases graded on their generated §66 twin: **793** — PASS 162 · FAIL 34 · UNSUPPORTED 597. Twin holds 162 (non-vacuous 147). Every twin verdict above is included in the bucket table.
+Legacy-dialect cases graded on their generated §66 twin: **793** — PASS 163 · FAIL 33 · UNSUPPORTED 597. Twin holds 163 (non-vacuous 148). Every twin verdict above is included in the bucket table.
 - `dialect.s66` overrides: 0 replace a twin's expectations · 11 exclude a case.
 - Superseded-code mappings applied: 2 case(s) (E-ENGINE-VAR-DUPLICATE→E-SCOPE-010). Rows: E-ENGINE-VAR-DUPLICATE→E-SCOPE-010 [applied] · E-ENGINE-STATE-CHILD-INVALID-VARIANT→∅ [owed] · E-ENGINE-RULE-INVALID-VARIANT→∅ [owed] · E-ENGINE-INITIAL-INVALID-VARIANT→∅ [owed] · E-CELL-NO-RENDER-SPEC→∅ [owed] · E-CELL-RENDER-SPEC-NOT-BINDABLE→∅ [owed] · E-DECL-RHS-INTERP-WRAPPED→∅ [owed] · E-COMPONENT-010→∅ [owed].
 
@@ -149,7 +149,7 @@ NOT-TWINNED by reason (685 cases; a case counts once per distinct reason):
 | print | 1 | · | · | · | · | · | 1 | · | · |
 | protect | 81 | · | · | · | · | 45 | 36 | · | · |
 | raw-content | 9 | 6 | · | · | · | 1 | 2 | · | · |
-| reactive | 115 | 27 | · | 5 | · | 65 | 18 | · | · |
+| reactive | 115 | 28 | · | 4 | · | 65 | 18 | · | · |
 | refinement | 57 | · | · | · | · | 25 | 32 | · | · |
 | route-region | 1 | · | · | · | · | 1 | · | · | · |
 | schema | 10 | · | · | · | · | · | 10 | · | · |
@@ -163,7 +163,7 @@ NOT-TWINNED by reason (685 cases; a case counts once per distinct reason):
 | tenant | 23 | · | · | · | · | · | 23 | · | · |
 | type-state-codes | 32 | 3 | · | 1 | · | 3 | 25 | · | · |
 
-### FAIL (48)
+### FAIL (47)
 
 - `condition/unresolved-call-markup-neg` (codes)
   - missing E-COND-NOT-BOOLEAN
@@ -273,9 +273,6 @@ NOT-TWINNED by reason (685 cases; a case counts once per distinct reason):
 - `reactive/name-collides-state-pos` (twin · codes)
   - missing E-NAME-COLLIDES-STATE
   - severity: E-NAME-COLLIDES-STATE did not fire (expected error)
-- `reactive/reserved-prefix-declaration-pos` (twin · codes; not in the bootstrap: E-NAME-COLLIDES-RESERVED-PREFIX)
-  - missing E-NAME-COLLIDES-RESERVED-PREFIX
-  - severity: E-NAME-COLLIDES-RESERVED-PREFIX did not fire (expected error)
 - `reactive/reset-reserved-identifier` (twin · codes; not in the bootstrap: E-RESERVED-IDENTIFIER)
   - missing E-RESERVED-IDENTIFIER
   - severity: E-RESERVED-IDENTIFIER did not fire (expected error)
@@ -308,7 +305,7 @@ none
 
 none
 
-### PASS / CODES-ONLY (264)
+### PASS / CODES-ONLY (265)
 
 - `attr-executable-sink/bound-svg-animation-runtime-guard` — PASS · TWIN
 - `attr-executable-sink/bound-url-runtime-guard` — PASS · TWIN
@@ -554,6 +551,7 @@ none
 - `reactive/no-write-interp-pos` — PASS
 - `reactive/no-write-own-init-neg` — PASS
 - `reactive/no-write-own-init-pos` — PASS
+- `reactive/reserved-prefix-declaration-pos` — PASS · TWIN
 - `reactive/reset-handler` — PASS · TWIN
 - `reactive/reset-handler-nonzero-initial` — PASS · TWIN
 - `reactive/textarea-rcdata-value-bind` — PASS · TWIN
