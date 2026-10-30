@@ -131,7 +131,7 @@ export async function loadBoot(opts: { rebuild?: boolean; log?: (s: string) => v
     }
   }
   const mods = h1.evaluateChunks(chunks);
-  for (const m of ["link", "analyze", "lower", "check", "print", "print-server"]) {
+  for (const m of ["parse", "link", "analyze", "lower", "check", "print", "print-server"]) {
     if (!mods[m]) throw new Error(`bootstrap module '${m}' missing from the slice-m2 bundle`);
   }
   loadedBoot = { mods, cached, key, ms: performance.now() - t0 };
@@ -150,26 +150,36 @@ function pruneCache(dir: string, keep: number) {
 // The source set: the entry + the `.scrml` files it imports (relative imports, transitively).
 // ─────────────────────────────────────────────────────────────────────────────
 
-const IMPORT_RE = /\bfrom\s*"(\.\.?\/[^"]*\.scrml)"/g;
-
 function readSource(f: string, overlay?: ReadonlyMap<string, string>): string {
   const o = overlay?.get(f);
   return o !== undefined ? o : readFileSync(f, "utf8");
 }
 
+/** A file's import specifiers, in source order: `(path, src) => from[]` (lowered.js `importFroms`). */
+export type ImportReader = (path: string, src: string) => string[];
+
 /**
+ * The entry and the `.scrml` files it imports (relative imports, transitively). Each file's imports
+ * are read by `readFroms` — lowered.js `importFroms(mods)`, the BOOTSTRAP PARSER's reading
+ * (parse.scrml `parseFile` + link.scrml `importsOfItems`), never a text scan. S473 (flogence S60):
+ * the regex that stood here accepted only double-quoted specifiers, so `from '../graph-read.scrml'`
+ * left its file out of the build — a false E-IMPORT-006 — and it followed an import written inside a
+ * comment or a string. #1658 review F2: `compileSource` hands the SAME memoised reader to the front
+ * end's stdlib search, which reads every project file's imports too, so each file is parsed for its
+ * imports once per compile, not twice.
  * `overlay` (absolute path → text) stands in for the disk: an editor's unsaved buffers. A path in
  * the overlay is read from it (and need not exist on disk); every other path is read from disk.
  */
-export function sourceClosure(entryAbs: string, overlay?: ReadonlyMap<string, string>): string[] {
+export function sourceClosure(readFroms: ImportReader, entryAbs: string, overlay?: ReadonlyMap<string, string>): string[] {
   const seen = new Set<string>();
   const todo = [entryAbs];
   while (todo.length > 0) {
     const f = todo.pop() as string;
     if (seen.has(f) || !(overlay?.has(f) || existsSync(f))) continue;
     seen.add(f);
-    const src = readSource(f, overlay);
-    for (const m of src.matchAll(IMPORT_RE)) todo.push(resolve(dirname(f), m[1]));
+    for (const from of readFroms(f, readSource(f, overlay))) {
+      if ((from.startsWith("./") || from.startsWith("../")) && from.endsWith(".scrml")) todo.push(resolve(dirname(f), from));
+    }
   }
   return [...seen];
 }
@@ -354,7 +364,10 @@ export async function compileSource(
   const overlay = opts.overlay;
   const boot = await loadBoot({ rebuild: opts.rebuild, log: opts.log });
   const t0 = performance.now();
-  const abs = sourceClosure(entryAbs, overlay);
+  const { frontEndStdlib, STDLIB_ROOT, importFroms } = await import("../compiler/self-host-v2/slice-m2/lowered.js");
+  // one memoised import reader for the closure AND the front end's stdlib search (#1658 review F2)
+  const readFroms: ImportReader = importFroms(boot.mods);
+  const abs = sourceClosure(readFroms, entryAbs, overlay);
   if (abs.length === 0) throw new Error(`no such file: ${entryAbs}`);
   const root = commonDir(abs);
   const toRel = (f: string) => relative(root, f).split(sep).join("/");
@@ -372,8 +385,7 @@ export async function compileSource(
   // s471: the `scrml:` stdlib modules the program imports join the compile as source (lowered.js
   // frontEndStdlib); one that does not compile on the bootstrap is withdrawn, and its import refused
   // by name (E-BOOTSTRAP-UNSUPPORTED at the import) — with WHY reported here, at its first error.
-  const { frontEndStdlib, STDLIB_ROOT } = await import("../compiler/self-host-v2/slice-m2/lowered.js");
-  const fe = frontEndStdlib(boot.mods, files, toRel(entryAbs), { stdlibRoot: opts.stdlibRoot });
+  const fe = frontEndStdlib(boot.mods, files, toRel(entryAbs), { stdlibRoot: opts.stdlibRoot, importFroms: readFroms });
   const withdrawn: Diagnostic[] = [];
   for (const r of fe.stdlib.refused as Array<{ module: string; direct: boolean; diags: any[]; sources: Array<{ path: string; src: string; abs: string }> }>) {
     // a module only another stdlib module imports is reported through that one (its import there is the first error)
