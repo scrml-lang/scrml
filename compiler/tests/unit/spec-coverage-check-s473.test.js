@@ -20,14 +20,18 @@ import { join, dirname } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import {
-  checkCoverage, coverageRows, indexTops, topOf, renderTotals, main,
+  checkCoverage, coverageRows, indexTops, topOf, renderTotals, main, lf,
 } from "../../../scripts/spec-coverage-check.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const FIX = join(HERE, "fixtures", "spec-coverage");
-const INDEX = readFileSync(join(FIX, "index.md"), "utf8");
-const GAPS = readFileSync(join(FIX, "gaps.md"), "utf8");
-const OK = readFileSync(join(FIX, "coverage-ok.md"), "utf8");
+// Read as LF: the cases below mutate the fixtures with "\n"-terminated rows, and a Windows checkout
+// (core.autocrlf) hands them over as CRLF (S473 windows-red). The gate's OWN CRLF handling is pinned
+// in "line endings" below, against CRLF made from these.
+const INDEX = lf(readFileSync(join(FIX, "index.md"), "utf8"));
+const GAPS = lf(readFileSync(join(FIX, "gaps.md"), "utf8"));
+const OK = lf(readFileSync(join(FIX, "coverage-ok.md"), "utf8"));
+const crlf = (s) => s.replace(/\n/g, "\r\n");
 
 /** Re-render the totals so a mutated fixture fails only for the rule under test. */
 function withTotals(cov) {
@@ -132,6 +136,38 @@ describe("spec-coverage-check — rules", () => {
     expect(checkCoverage("# no sections table\n", OK, GAPS).fatal).toMatch(/SPEC-INDEX/);
     expect(checkCoverage(INDEX, "# no tables here\n", GAPS).fatal).toMatch(/no coverage rows/);
     expect(checkCoverage(INDEX, OK, "# no markers\n").fatal).toMatch(/@gap/);
+  });
+});
+
+describe("spec-coverage-check — line endings (S473 windows-red: a CRLF checkout read every totals block as stale)", () => {
+  test("CRLF inputs give the same verdict as LF — the OK fixture passes, totals current", () => {
+    const r = checkCoverage(crlf(INDEX), crlf(OK), crlf(GAPS));
+    expect(r.fatal).toBeNull();
+    expect(r.errors).toEqual([]);
+    expect(r.totalsCurrent).toBe(true);
+    expect(r.rows.length).toBe(coverageRows(OK).length);
+  });
+
+  test("CRLF does not hide a violation: a SILENT row with no gap still fails", () => {
+    const bad = withTotals(OK.replace("| SILENT-ACCEPT | probe w.scrml | g-fix-open-one |", "| SILENT-ACCEPT | probe w.scrml | — |"));
+    expect(checkCoverage(crlf(INDEX), crlf(bad), crlf(GAPS)).errors.filter((e) => e.startsWith("(b)")).length).toBe(1);
+  });
+
+  test("--write on a CRLF file repairs the totals and keeps the file CRLF", () => {
+    const dir = mkdtempSync(join(tmpdir(), "spec-cov-crlf-"));
+    try {
+      const stale = join(dir, "stale.md");
+      writeFileSync(stale, crlf(OK.replace("| BUILT | x.scrml:f; t.test.js |", "| REFUSED-LOUD | x.scrml:f; t.test.js |")));
+      const a = ["--index", join(FIX, "index.md"), "--coverage", stale, "--gaps", join(FIX, "gaps.md")];
+      expect(main(a)).toBe(1);
+      expect(main([...a, "--write"])).toBe(0);
+      const after = readFileSync(stale, "utf8");
+      expect(after.includes("\r\n")).toBe(true);
+      expect(/[^\r]\n/.test(after)).toBe(false);
+      expect(main(a)).toBe(0);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 
