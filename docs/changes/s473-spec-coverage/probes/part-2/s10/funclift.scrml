@@ -1,0 +1,5 @@
+<program>
+    <items:string[]=(["a","b"])/>
+    function rows(xs: string[]) { for (x of xs) { lift x; } }
+    <p>x</p>
+</program>

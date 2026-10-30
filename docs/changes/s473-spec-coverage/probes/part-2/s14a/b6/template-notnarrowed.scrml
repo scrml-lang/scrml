@@ -1,0 +1,5 @@
+<program>
+    let <p:string | not=not/>
+    function f() -> string { return `v ${@p}`; }
+    <p>${f()}</p>
+</program>

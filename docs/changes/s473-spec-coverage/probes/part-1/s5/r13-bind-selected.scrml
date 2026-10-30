@@ -1,0 +1,4 @@
+<program>
+let <c:string="a"/>
+<select bind:selected=@c><option value="a">a</option></select>
+</program>

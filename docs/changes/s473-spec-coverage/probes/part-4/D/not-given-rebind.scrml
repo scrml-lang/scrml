@@ -1,0 +1,6 @@
+<program>
+let <x:string | not=not/>
+let <y:string="z"/>
+function f() { given v = @x :> { @y = v; } }
+<main><button onclick=f()>go</button></main>
+</program>

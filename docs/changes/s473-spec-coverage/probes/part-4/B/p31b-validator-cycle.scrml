@@ -1,0 +1,7 @@
+<program>
+    <signup>
+        <password:string="" req eq(@signup.confirm)/>
+        <confirm:string="" req eq(@signup.password)/>
+    </signup>
+    <main><p>"x"</p></main>
+</program>

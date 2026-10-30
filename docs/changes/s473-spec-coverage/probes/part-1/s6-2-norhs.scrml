@@ -1,0 +1,6 @@
+<program>
+    let <n:int/>
+    let <s:string/>
+    let <b:bool/>
+    <main><p id="n">${@n}</p><p id="s">${@s}</p><p id="b">${@b}</p></main>
+</program>

@@ -1,0 +1,7 @@
+<program>
+    function a() -> int { return Math.floor(1); }
+    function b() -> string { return String(1); }
+    function c() -> int { return parseInt("1"); }
+    function d() -> int { const p = new Proxy({}, {}); return 1; }
+    <main><p>${a()} ${b()} ${c()} ${d()}</p></main>
+</program>

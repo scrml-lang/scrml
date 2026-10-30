@@ -1,0 +1,5 @@
+<program>
+    let <n:int=0/>
+    function show(x: int) -> int { return x; }
+    <main><effect deps=[@n]>${ show(@n); }<effect deps=[@n]>${ show(@n); }</effect></effect></main>
+</program>

@@ -1,0 +1,13 @@
+<program db="./a.db">
+    type E:enum = { Bad, QueryFailed(message: string), ConstraintViolation(field: string), ConnectionLost }
+    <db src="./b.db">
+        function wb(a: int) -> int { ?{`INSERT INTO t (a) VALUES (${a})`}.run() !{ _ :> { return 0; } }; return 1; }
+    </db>
+    function both(a: int)! E {
+        ?{`INSERT INTO t (a) VALUES (${a})`}.run();
+        ?{`INSERT INTO t (a) VALUES (${a})`}.run();
+        const r: int = wb(a); return 1;
+    }
+    function go() { const q: int = both(3) !{ _ :> return }; }
+    <main><button onclick=go()>a</button></main>
+</program>

@@ -1,0 +1,4 @@
+<program>
+let <x:string=""/>
+<form><button formaction=@x>s</button></form>
+</program>

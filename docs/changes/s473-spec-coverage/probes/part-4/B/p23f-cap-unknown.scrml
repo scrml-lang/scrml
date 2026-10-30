@@ -1,0 +1,3 @@
+<program lang="ts" capabilities=[network("a.com"), teleport]>
+    <main><p>"x"</p></main>
+</program>

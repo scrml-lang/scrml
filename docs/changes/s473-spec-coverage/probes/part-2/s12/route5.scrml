@@ -1,0 +1,7 @@
+<program>
+    <db src="./app.db">
+        type Row:struct = { id: int }
+    </db>
+    function both() -> int { const n = document.title; const r = ?{`SELECT 1 AS id`}.get() !{ _ :> not }; return 1; }
+    <main><p>${both()}</p></main>
+</program>

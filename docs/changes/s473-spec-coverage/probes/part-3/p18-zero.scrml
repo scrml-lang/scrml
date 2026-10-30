@@ -1,0 +1,5 @@
+<program>
+    type V:enum = { }
+    function f(v: V) -> int { return match v { }; }
+    <main><p>x</p></main>
+</program>

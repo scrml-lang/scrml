@@ -1,0 +1,5 @@
+<program>
+    let <a:int=0 min(1)/>
+    let <b:int=0 max(5)/>
+    <main><p>${@a.isValid}${@b.isValid}</p></main>
+</program>

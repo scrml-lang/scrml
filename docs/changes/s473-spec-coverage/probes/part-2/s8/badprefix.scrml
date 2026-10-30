@@ -1,0 +1,8 @@
+<program db="redis://x">
+    function cnt() -> int {
+        ?{`DELETE FROM notes`}.run() !{ _ :> { return 0; } };
+        return 1;
+    }
+    function go() { const r: int = cnt() !{ .Transport(t) :> return }; }
+    <main><button onclick=go()>a</button></main>
+</program>

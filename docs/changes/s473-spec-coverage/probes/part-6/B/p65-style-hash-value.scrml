@@ -1,0 +1,4 @@
+<program>
+${ const chrome = #{ padding: 4px; }; }
+<p style=chrome>hi</p>
+</program>

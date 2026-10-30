@@ -1,0 +1,6 @@
+<program>
+<defaults>
+  a { color: red; }
+</defaults>
+<p>hi</p>
+</program>

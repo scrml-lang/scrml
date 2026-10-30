@@ -1,0 +1,4 @@
+<program>
+let <s:string=""/>
+<textarea bind:value=@s></textarea>
+</program>

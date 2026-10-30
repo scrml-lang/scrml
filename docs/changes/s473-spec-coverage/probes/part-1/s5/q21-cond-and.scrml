@@ -1,0 +1,5 @@
+<program>
+let <a:bool=false/>
+let <b:bool=false/>
+<p if=@a && @b>x</p>
+</program>

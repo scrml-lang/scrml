@@ -1,0 +1,5 @@
+<program>
+    <main>
+        <ul><each of=3><li>${@.}</li></each></ul>
+    </main>
+</program>

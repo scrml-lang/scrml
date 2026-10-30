@@ -1,0 +1,7 @@
+<program>
+    type D:enum = { Easy, Hard }
+    type M:enum = { One(d: D), Two }
+    let <m:M=.One(.Easy)/>
+    function f() { @m = .One(.Hard); }
+    <button onclick=f()>x</button>
+</program>

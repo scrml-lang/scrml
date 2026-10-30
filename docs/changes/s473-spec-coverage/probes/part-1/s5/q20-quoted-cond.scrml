@@ -1,0 +1,4 @@
+<program>
+let <n:int=0/>
+<p if="@n >= 3">x</p>
+</program>

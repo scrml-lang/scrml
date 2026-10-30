@@ -1,0 +1,7 @@
+<host>
+  foc(e: HTMLElement) = e.focus()
+</host>
+<program>
+
+<p>x</p>
+</program>

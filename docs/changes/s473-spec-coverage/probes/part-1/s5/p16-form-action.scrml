@@ -1,0 +1,4 @@
+<program>
+let <x:string=""/>
+<form action=@x><input name="a"/></form>
+</program>

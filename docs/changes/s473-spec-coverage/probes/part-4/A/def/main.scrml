@@ -1,0 +1,5 @@
+${ import f from "./b.scrml" }
+<program>
+let <n:int=0/>
+<main><p>${@n}</p></main>
+</program>

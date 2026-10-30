@@ -1,0 +1,5 @@
+<program>
+    type Role:enum = { Admin, Editor, Guest }
+    type Post:struct = { role: Role oneOf([.Admin, .Editor]) }
+    <main><p>hi</p></main>
+</program>

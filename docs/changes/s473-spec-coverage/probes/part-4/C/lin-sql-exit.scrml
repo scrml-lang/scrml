@@ -1,0 +1,11 @@
+<program>
+    <db src="t.db">
+    function f(t: string)! SqlError {
+        lin tok = t;
+        const r = ?{`SELECT 1 AS a`}.get();
+        return use(tok);
+    }
+    </db>
+    function use(s: string) -> string { return s; }
+    <main><p>hi</p></main>
+</program>

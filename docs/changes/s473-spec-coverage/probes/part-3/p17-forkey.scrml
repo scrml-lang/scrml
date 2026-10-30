@@ -1,0 +1,7 @@
+<program>
+    type It:struct = { id: int, name: string }
+    <xs:It[free, replace]=([{ id: 1, name: "a" }])/>
+    <main>
+        <ul>${ for (x of @xs key x.id) { lift <li>${x.name}</li>; } }</ul>
+    </main>
+</program>

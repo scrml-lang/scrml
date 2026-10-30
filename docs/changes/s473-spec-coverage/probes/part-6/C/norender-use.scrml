@@ -1,0 +1,7 @@
+<program>
+    <sig:struct>
+        let <a:int=0/>
+    </>
+    <counter title:string="t"/>
+    <main><sig/><counter title="x"/><counter as=c title="y"/><p>${@c.title}</p></main>
+</program>

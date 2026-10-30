@@ -1,0 +1,4 @@
+<program>
+    let <n:int=0/>
+    <main><effect deps=[@n]>${ lift <p>x</p>; }</effect></main>
+</program>

@@ -1,0 +1,6 @@
+<program>
+    type T:struct = { class: string }
+    let <t:T={ class: "a" }/>
+    function f(x: T) -> string { return x.class; }
+    <div class="a"><p>${f(@t)}</p></div>
+</program>

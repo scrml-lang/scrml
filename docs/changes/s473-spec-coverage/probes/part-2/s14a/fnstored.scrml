@@ -1,0 +1,6 @@
+<program>
+    type T:struct = { n: int }
+    function twice(a: int) -> int { return a * 2; }
+    function mk() -> int { const o = { n: 1, f: twice }; return o.n; }
+    <p>${mk()}</p>
+</program>

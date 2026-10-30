@@ -1,0 +1,7 @@
+<host>
+  fn f() -> string = document.title
+</host>
+<program>
+
+<p>${f()}</p>
+</program>

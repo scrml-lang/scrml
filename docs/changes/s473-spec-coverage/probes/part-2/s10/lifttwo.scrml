@@ -1,0 +1,5 @@
+<program>
+    <n:int=1/>
+    function f(c: bool) -> int { const xs = for (y of 0..3) { lift y; }; return 1; }
+    <main><p>${@n}</p></main>
+</program>

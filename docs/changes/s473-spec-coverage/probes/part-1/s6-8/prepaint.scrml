@@ -1,0 +1,4 @@
+<program>
+    let <mode:string="light" persist="local" key="app.mode" prepaint/>
+    <main><p>${@mode}</p></main>
+</program>

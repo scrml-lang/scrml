@@ -1,0 +1,5 @@
+<program>
+    function stop() { log("bye"); }
+    function setup() { cleanup(stop); }
+    <main><button onclick=setup()>x</button></main>
+</program>

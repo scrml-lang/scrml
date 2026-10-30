@@ -1,0 +1,6 @@
+<program>
+    <xs:int[any]=[]/>
+    <ys:int[free, writable]=[]/>
+    <zs:int[free, end]=[]/>
+    <main><p>${@xs.length}</p></main>
+</program>

@@ -1,0 +1,7 @@
+<program>
+    <Submission id:string="">
+        <Draft body:string=""/>
+        <Validated body:string=""/>
+    </Submission>
+    <main><p>hi</p></main>
+</program>

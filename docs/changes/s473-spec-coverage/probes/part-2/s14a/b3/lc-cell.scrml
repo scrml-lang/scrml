@@ -1,0 +1,5 @@
+<program>
+    let <p:(not to string)=not/>
+    function f() -> int { return @p.length; }
+    <p>${f()}</p>
+</program>

@@ -2,7 +2,7 @@
 #
 # OWNER RULING (scrml-support user-voice, S469): "Regenerate on main after merge." PRs no longer fail on
 #   stale FACTS counts; this job keeps main's public numbers current within minutes, and the PR-side
-#   `facts.ts --check` in ci.yml is a WARNING. See .github/README.md for the whole flow.
+#   `facts.ts --check` in ci.yml is a WARNING. See .github/CI.md for the whole flow.
 #
 # WHY: FACTS.md holds repo-wide totals (compiler/src lines, test files, SPEC lines, conformance cases …).
 #   48 of the 78 landings 2026-10-10..22 changed it, so each landing staled — and textually conflicted

@@ -1,0 +1,12 @@
+<program>
+    let <x:string="" req length(<=10)/>
+    let <calls:int=0/>
+    function save() { @calls = @calls + 1; }
+    <main>
+        <form id="f" onsubmit=save()>
+            <textarea id="t" bind:value=@x></textarea>
+            <select id="s" bind:value=@x><option value="">-</option><option value="a">a</option></select>
+            <button type="submit">s</button>
+        </form>
+    </main>
+</program>

@@ -1,0 +1,3 @@
+<program>
+<form action="javascript:alert(1)"><input name="a"/></form>
+</program>

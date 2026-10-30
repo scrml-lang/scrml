@@ -1,0 +1,5 @@
+<program>
+    let <out:int=0/>
+    function f(n: int) -> int { const n = 2; return n; }
+    <p>${@out}</p>
+</program>

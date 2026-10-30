@@ -1,0 +1,7 @@
+<program>
+#{
+  p:hover { color: red; }
+  p:hover { color: blue; }
+}
+<p>hi</p>
+</program>

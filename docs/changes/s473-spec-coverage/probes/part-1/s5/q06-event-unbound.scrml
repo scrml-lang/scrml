@@ -1,0 +1,5 @@
+<program>
+let <s:string=""/>
+function f(v:string) { @s = v; }
+<input oninput=f(event.target.value)/>
+</program>

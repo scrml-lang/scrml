@@ -1,0 +1,4 @@
+<program>
+    function g() -> int { try { return 1; } catch (e) { return 2; } }
+    <main><p>${g()}</p></main>
+</program>

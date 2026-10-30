@@ -1,0 +1,4 @@
+${ import { count } from "./b.scrml"; }
+<program>
+<main><p>hi</p></main>
+</program>

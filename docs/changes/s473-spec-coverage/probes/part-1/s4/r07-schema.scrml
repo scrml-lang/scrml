@@ -1,0 +1,5 @@
+<program>
+<schema>
+  users { id: integer primary key }
+</schema>
+</program>

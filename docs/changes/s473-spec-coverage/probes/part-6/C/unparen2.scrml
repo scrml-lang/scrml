@@ -1,0 +1,6 @@
+<program>
+    let <count:int=0/>
+    <d:int=@count*2/>
+    <e:int=-@count/>
+    <main><p>${@d}</p></main>
+</program>

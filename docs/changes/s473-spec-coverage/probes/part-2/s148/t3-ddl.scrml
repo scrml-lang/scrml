@@ -1,0 +1,16 @@
+<program db="./app.db">
+    let <msg:string=""/>
+    function mk() {
+        ?{`CREATE TABLE inv (id INTEGER, tenant_id INTEGER)`}.run() !{ _ :> not };
+    }
+    function v() {
+        ?{`CREATE VIEW vv AS SELECT * FROM orders`}.run() !{ _ :> not };
+    }
+    function dr() {
+        ?{`DROP TABLE orders`}.run() !{ _ :> not };
+    }
+    function a() { mk() !{ _ :> @msg = "e" }; }
+    function b() { v() !{ _ :> @msg = "e" }; }
+    function c() { dr() !{ _ :> @msg = "e" }; }
+    <main><button onclick=a()>a</button><button onclick=b()>b</button><button onclick=c()>c</button></main>
+</program>

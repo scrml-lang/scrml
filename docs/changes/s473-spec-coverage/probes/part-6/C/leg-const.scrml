@@ -1,0 +1,5 @@
+<program>
+    let <a:int=1/>
+    const <b> = @a * 2
+    <main><p>${@b}</p></main>
+</program>

@@ -1,0 +1,6 @@
+<program>
+    let <count:int=0/>
+    function g(x: int) -> int { return x; }
+    function bump() { g(1); g(2); @count = 1; }
+    <main><button onclick=bump()>"+"</button></main>
+</program>

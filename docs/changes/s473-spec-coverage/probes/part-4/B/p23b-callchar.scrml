@@ -1,0 +1,5 @@
+<program>
+    let <count:int=0/>
+    function bump() { @count = r{ applyFilter(@count) } }
+    <main><button onclick=bump()>"+"</button></main>
+</program>

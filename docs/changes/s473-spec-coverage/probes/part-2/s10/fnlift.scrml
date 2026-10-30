@@ -1,0 +1,5 @@
+<program>
+    <items:string[]=(["a","b"])/>
+    fn rows(xs: string[]) -> string[] { for (x of xs) { lift x; } return ~; }
+    <p>${rows(@items).length}</p>
+</program>

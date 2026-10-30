@@ -1,0 +1,6 @@
+<program>
+let <x:string=""/>
+let <k:string="innerHTML"/>
+function f() { document.body[@k] = @x; }
+<button onclick=f()>x</button>
+</program>

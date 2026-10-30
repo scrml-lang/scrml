@@ -1,0 +1,14 @@
+<program>
+    type Entry:struct = { at: int, actor: string, action: string }
+    <audit:Entry[free, append]=[]/>
+    let <actor:string="ops"/>
+    function a() { @audit = []; }
+    function b() { reset(@audit); }
+    function c() { @audit.pop(); }
+    function d() { @audit = @audit.filter(e => e.actor != "x"); }
+    function e() { @audit = @audit.reverse(); }
+    function f() { @audit[0].action = "edited"; }
+    function ok1(action: string) { @audit.append({ at: 1, actor: @actor, action: action }); }
+    function ok2(action: string) { @audit = [...@audit, { at: 1, actor: @actor, action: action }]; }
+    <main><p>x</p></main>
+</program>

@@ -1,0 +1,4 @@
+<program>
+let <a:string=""/>
+<div title=@a + "x">y</div>
+</program>

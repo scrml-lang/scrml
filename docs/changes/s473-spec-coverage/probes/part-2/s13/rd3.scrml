@@ -1,0 +1,7 @@
+<program>
+    type Load:enum = { Idle, Ready(n: int)
+        transitions { .Idle => .Ready }
+    }
+    let <st:Load=.Idle/>
+    <main><p>x</p></main>
+</program>

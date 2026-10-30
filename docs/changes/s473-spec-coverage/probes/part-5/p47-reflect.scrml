@@ -1,0 +1,5 @@
+<program>
+    let <n:int=0/>
+    function g() { const d = reflect(@n); }
+    <main><p>x</p></main>
+</program>

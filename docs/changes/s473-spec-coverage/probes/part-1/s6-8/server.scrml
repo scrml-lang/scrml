@@ -1,0 +1,4 @@
+<program>
+    let <q:string="" server/>
+    <main><p>${@q}</p></main>
+</program>

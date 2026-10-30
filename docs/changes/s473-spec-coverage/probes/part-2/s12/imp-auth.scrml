@@ -1,0 +1,5 @@
+<program>
+    ${ import * as M from "scrml:auth"; }
+    <n:int=0/>
+    <main><p>${@n}</p></main>
+</program>

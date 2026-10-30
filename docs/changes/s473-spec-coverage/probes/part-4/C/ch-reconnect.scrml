@@ -1,0 +1,3 @@
+<program channel-reconnect=5000>
+    <main><p>hi</p></main>
+</program>

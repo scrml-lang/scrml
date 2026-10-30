@@ -1,0 +1,11 @@
+<program>
+    type P:enum = { Idle, Loading }
+    <xs:int[]=([1, 2])/>
+    <main><each in=@xs key=@. as x>
+        <ph:P=.Idle single>
+            <Idle rule=.Loading/>
+            <Loading rule=.Idle/>
+        </>
+        <p>${x}</p>
+    </each></main>
+</program>

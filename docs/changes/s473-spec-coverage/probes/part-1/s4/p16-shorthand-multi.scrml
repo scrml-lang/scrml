@@ -1,0 +1,5 @@
+<program>
+function a() -> string { return "a" }
+function b() -> string { return "b" }
+<span : a(); b()>
+</program>

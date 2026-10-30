@@ -1,0 +1,1 @@
+export <greeting who:string="x"> renders <p>Hello, ${@who}!</p> </greeting>

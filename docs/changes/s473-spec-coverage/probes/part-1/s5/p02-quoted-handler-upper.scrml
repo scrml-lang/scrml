@@ -1,0 +1,3 @@
+<program>
+<button ONCLICK="alert(1)">x</button>
+</program>

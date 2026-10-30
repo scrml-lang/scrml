@@ -1,0 +1,3 @@
+<program>
+    <main><p #{ color: red; }>hi</p></main>
+</program>

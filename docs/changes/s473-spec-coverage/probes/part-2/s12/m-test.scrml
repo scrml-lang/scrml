@@ -1,0 +1,4 @@
+<program>
+    ${ import { zzz } from "scrml:test"; }
+    <main><p>x</p></main>
+</program>

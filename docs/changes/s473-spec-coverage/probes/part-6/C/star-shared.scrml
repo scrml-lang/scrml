@@ -1,0 +1,8 @@
+<program>
+    <card title:string="t">
+        let <n:int=0/>
+    </>
+    renders <p>${title} ${n}</p>
+    function bump() { @card.n = @card.n + 1; }
+    <main><*card/><*card/><button onclick=bump()>b</button><p>${@card.n}</p></main>
+</program>

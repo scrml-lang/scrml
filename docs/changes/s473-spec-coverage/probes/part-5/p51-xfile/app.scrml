@@ -1,0 +1,9 @@
+${ import { Phase } from './types.scrml'; }
+<program>
+    <phase:Phase=.Idle single>
+        <Idle rule=.Loading : "i">
+        <Loading rule=.Idle : "l">
+    </>
+    function go() { @phase = .Loading; }
+    <main><p><*phase/></p><button onclick=go()>g</button></main>
+</program>

@@ -1,0 +1,7 @@
+<program>
+${ type M:enum = { A, B } }
+<endpoint path="/x" method="POST" accepts=M>
+  <A : 1>
+  <B : 2>
+</endpoint>
+</program>

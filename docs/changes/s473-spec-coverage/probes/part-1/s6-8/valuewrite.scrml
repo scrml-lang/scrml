@@ -1,0 +1,5 @@
+<program>
+    let <n:int=0/>
+    function bump() -> int { @n = @n + 1; return @n; }
+    <main><p>${bump()}</p></main>
+</program>

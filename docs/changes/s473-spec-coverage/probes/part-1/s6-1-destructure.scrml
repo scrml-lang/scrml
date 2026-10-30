@@ -1,0 +1,6 @@
+<program>
+    type O:struct = { owner: string }
+    let <owner:string="a"/>
+    function f(o: O) { const { @owner } = o; }
+    <main><p>${@owner}</p></main>
+</program>

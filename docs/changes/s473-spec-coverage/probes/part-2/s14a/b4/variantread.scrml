@@ -1,0 +1,6 @@
+<program>
+    type R:enum = { Bad(variant: string), Ok }
+    let <s:R=.Ok/>
+    function f() -> string { const r = R.Bad("x"); return match r { .Bad(v) :> v, .Ok :> "ok" }; }
+    <p>${f()}</p>
+</program>

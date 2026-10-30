@@ -1,0 +1,6 @@
+<program>
+    let <flag:bool=false/>
+    <main>
+        <button onclick={ @flag = true; <p>lost</p>; }>g</button>
+    </main>
+</program>

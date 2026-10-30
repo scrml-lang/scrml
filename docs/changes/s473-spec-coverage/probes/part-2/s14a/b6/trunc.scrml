@@ -1,0 +1,6 @@
+<program>
+    import { trunc, floor } from "scrml:math";
+    let <n:number=1.5/>
+    function f() -> int { return trunc(@n); }
+    <p>${f()}</p>
+</program>

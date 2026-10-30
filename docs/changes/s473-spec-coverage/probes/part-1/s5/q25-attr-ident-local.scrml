@@ -1,0 +1,4 @@
+<program>
+const t = "hi";
+<div title=t>x</div>
+</program>
