@@ -1,0 +1,7 @@
+<program>
+    ${ const GREETING = "Hello"; }
+    <p>${GREETING}</p>
+    let <count:int=0/>
+    ${ const LOUD = GREETING + "!"; }
+    <p>${LOUD} ${@count}</p>
+</program>

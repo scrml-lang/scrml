@@ -1,0 +1,13 @@
+<program>
+    // a universal comment
+    let <count:int=0/> // trailing
+    function bump() { /* block */ @count = @count + 1; // c
+    }
+    #{ /* css */ .a { color: red; } // css line
+    }
+    <main>
+        <!-- html comment -->
+        <p>"see http://x.y"</p>
+        <button class="a" onclick=bump()>"+"</button>
+    </main>
+</program>

@@ -1,0 +1,5 @@
+<program>
+    function g() -> int { const v = await h(); return v; }
+    function h() -> int { return 1; }
+    <main><p>${g()}</p></main>
+</program>

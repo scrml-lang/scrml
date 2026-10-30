@@ -1,0 +1,5 @@
+<program>
+    type UserInfo:struct = { name: string, age: int, active: bool }
+    <u:UserInfo=("alice", 30, true)/>
+    <main><p>${@u.name}</p></main>
+</program>

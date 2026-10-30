@@ -1,0 +1,7 @@
+<program>
+    let <on:bool=false/>
+    <main>
+        <p IF=@on>secret</p>
+        <p Show=@on>s2</p>
+    </main>
+</program>

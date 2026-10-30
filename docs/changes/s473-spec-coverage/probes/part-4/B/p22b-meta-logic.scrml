@@ -1,0 +1,7 @@
+<program>
+    let <count:int=0/>
+    function bump() { ^{ emit("x") } @count = @count + 1 }
+    <main>
+        <button onclick=bump()>"+"</button>
+    </main>
+</program>

@@ -1,0 +1,11 @@
+<program>
+    type E:enum = { Bad(why: string) renders <p>${why} ${nope}</p>, Worse }
+    function f(n: int)! E { if (n < 0) { fail .Bad("neg"); } return n; }
+    function g(n: int) -> int { fail E.Worse; }
+    function h(n: int) -> int { return f(n); }
+    function k(n: int)! E { const v = f(n)?; return v; }
+    function m(n: int) -> int { const v = f(n) !{ .Bad(w) :> 0, .Worse :> 1, }; return v; }
+    function q(n: int) -> int { const v = h(n) !{ _ :> 0, }; return v; }
+    function r(n: int) -> int { const v = h(n)?; return v; }
+    <main><p>${m(1)}</p></main>
+</program>

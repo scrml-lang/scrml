@@ -1,0 +1,10 @@
+<host>
+  type O:host
+  mk() -> O = window.foo.make()
+  use(o: O) -> string = o.name()
+</host>
+<program>
+let <s:string=""/>
+function go() { const o = mk(); @s = use(o); }
+<button onclick=go()>x</button>
+</program>

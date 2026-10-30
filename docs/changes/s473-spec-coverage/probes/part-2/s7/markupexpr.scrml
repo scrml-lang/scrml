@@ -1,0 +1,5 @@
+<program>
+    let <out:int=0/>
+    function item(name: string) { return <li class="item">${name}</li>; }
+    <ul>${item("a")}</ul>
+</program>

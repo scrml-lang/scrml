@@ -1,0 +1,8 @@
+<program>
+    let <v:string=""/>
+    <card title:string/>
+    renders <div class="card"><h2>${title}</h2></div>
+    <main>
+        <card title="x" bind:title=@v/>
+    </main>
+</program>

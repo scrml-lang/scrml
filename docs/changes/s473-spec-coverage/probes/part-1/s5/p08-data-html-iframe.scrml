@@ -1,0 +1,3 @@
+<program>
+<iframe src="data:text/html,<script>alert(1)</script>"></iframe>
+</program>

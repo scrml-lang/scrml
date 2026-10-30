@@ -1,0 +1,4 @@
+<program>
+function f() { document.body.innerHTML = "<b>hi</b>"; }
+<button onclick=f()>x</button>
+</program>

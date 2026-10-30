@@ -1,0 +1,7 @@
+<program>
+    type S:enum = { A(x: int, y: int), B }
+    function f(s: S) -> int { return match s { .A(x) :> x, .B :> 0, }; }
+    function g(s: S) -> int { return match s { .A(x: q, z: w) :> q, .B :> 0, }; }
+    function h(s: S) -> int { return match s { .A(x, _) :> x, .B :> 0, }; }
+    <main><p>${f(.B)} ${g(.B)} ${h(.B)}</p></main>
+</program>

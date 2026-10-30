@@ -1,0 +1,5 @@
+<program>
+    let <out:int=0/>
+    function f() -> int { throw "x"; }
+    <p>${@out}</p>
+</program>

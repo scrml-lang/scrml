@@ -1,0 +1,6 @@
+<program>
+    let <p:int=1/>
+    <d:int=(@p * 2)/>
+    function go() -> int { @p = 5; flush(); return @d; }
+    <main><button onclick=go()>g</button><p>${@d}</p></main>
+</program>

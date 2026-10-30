@@ -1,0 +1,6 @@
+<program>
+    type Role:enum = { Admin, User }
+    let <r:Role=Role::Admin/>
+    function f() { @r = ::User; }
+    <button onclick=f()>${@r}</button>
+</program>

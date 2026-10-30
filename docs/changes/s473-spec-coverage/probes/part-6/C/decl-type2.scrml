@@ -1,0 +1,8 @@
+<program>
+    <card title:string="t"/>
+    renders <p>${title}</p>
+    type Holder:struct = { c: card }
+    <cards:card[]=([])/>
+    function f(c: card) -> string { return "x"; }
+    <main><p>${@cards.length}</p></main>
+</program>

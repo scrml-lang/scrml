@@ -1,0 +1,6 @@
+<program>
+<lnk u:string="/">
+</>
+renders <a href=u>go</a>
+<main><lnk u="javascript:alert(1)"/></main>
+</program>

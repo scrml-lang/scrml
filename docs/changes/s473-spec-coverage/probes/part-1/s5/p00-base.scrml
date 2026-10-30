@@ -1,0 +1,5 @@
+<program>
+let <count:int=0/>
+function inc() { @count = @count + 1; }
+<button onclick=inc()>${@count}</button>
+</program>

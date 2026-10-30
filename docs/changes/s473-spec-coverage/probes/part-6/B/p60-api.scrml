@@ -1,0 +1,6 @@
+<program>
+${ type R:enum = { Ok, No } }
+<api base="https://x.example">
+  get() -> GET "/a" : R
+</api>
+</program>

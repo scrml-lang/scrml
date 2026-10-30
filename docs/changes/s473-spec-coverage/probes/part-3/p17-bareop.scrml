@@ -1,0 +1,7 @@
+<program>
+    let <n:int=0/>
+    <main>
+        <p if=@n>=3>big</p>
+        <p show=@n==3>eq</p>
+    </main>
+</program>

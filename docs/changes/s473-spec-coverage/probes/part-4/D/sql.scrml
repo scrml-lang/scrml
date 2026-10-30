@@ -1,0 +1,10 @@
+<program db="./app.db">
+let <name:string="?"/>
+function load(id: int) -> string | not {
+    const r = ?{`SELECT name FROM users WHERE id = ${id}`}.get();
+    if (r is not) { return not; }
+    return r.name;
+}
+function go() { const n: string | not = load(3); if (n is given) { @name = n; } }
+<main><button onclick=go()>${@name}</button></main>
+</program>

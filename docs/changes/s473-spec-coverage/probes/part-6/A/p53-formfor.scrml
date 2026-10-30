@@ -1,0 +1,5 @@
+<program>
+    import { formFor } from 'scrml:data'
+    type U:struct = { name: string }
+    <main><p>hi</p></main>
+</program>

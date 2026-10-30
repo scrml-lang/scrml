@@ -1,0 +1,4 @@
+<program>
+    let <amt:number=0 min(1)/>
+    <main><input type="number" bind:value=@amt/></main>
+</program>

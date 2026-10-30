@@ -1,0 +1,7 @@
+<program lang="ts">
+    function f() -> string {
+        const v: string = _{ return "x" };
+        return v;
+    }
+    <main><p>"x"</p></main>
+</program>

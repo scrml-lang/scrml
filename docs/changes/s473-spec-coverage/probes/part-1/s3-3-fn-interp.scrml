@@ -1,0 +1,4 @@
+<program>
+    function f(x: int) -> int { return x }
+    <main><p>${f}</p></main>
+</program>

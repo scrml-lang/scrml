@@ -1,0 +1,4 @@
+<program>
+    let <q:string="" debounced=300ms/>
+    <main><input bind:value=@q/><p>${@q}</p></main>
+</program>

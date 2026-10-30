@@ -1,0 +1,6 @@
+<program>
+    type In:enum = { X(n: int), Y }
+    type Out:enum = { A(i: In), B }
+    function nest(o: Out) -> int { return match o { .A(.X(n)) :> n, else :> 0, }; }
+    <main><p>${nest(.B)}</p></main>
+</program>

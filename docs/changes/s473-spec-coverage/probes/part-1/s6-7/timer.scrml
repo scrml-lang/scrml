@@ -1,0 +1,5 @@
+<program>
+    let <n:int=0/>
+    function tick() { @n = @n + 1; }
+    <main><timer interval=1000>tick();</timer><p>${@n}</p></main>
+</program>

@@ -1,0 +1,4 @@
+<program>
+#{ p { color: red !important; } }
+<p>hi</p>
+</program>

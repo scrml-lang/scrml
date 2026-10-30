@@ -1,0 +1,8 @@
+<program>
+    type U:struct = { name: string }
+    let <u:U | not=not/>
+    <main>
+        <p if=@u>${@u.name}</p>
+        <p if=(@u)>x</p>
+    </main>
+</program>

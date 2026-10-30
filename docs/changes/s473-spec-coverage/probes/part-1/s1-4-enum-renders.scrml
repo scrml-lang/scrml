@@ -1,0 +1,6 @@
+<program>
+    type S:enum = { Idle renders <p>idle</p>, Busy renders <p>busy</p> }
+    let <s:S=.Idle/>
+    function go() { @s = .Busy; }
+    <main>${@s}<button onclick=go()>go</button></main>
+</program>

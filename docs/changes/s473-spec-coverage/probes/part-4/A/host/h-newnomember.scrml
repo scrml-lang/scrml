@@ -1,0 +1,8 @@
+<host>
+  type O:host
+  f(a: string) -> O = new Foo(a)
+</host>
+<program>
+
+<p>x</p>
+</program>

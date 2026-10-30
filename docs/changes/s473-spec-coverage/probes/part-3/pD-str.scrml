@@ -1,0 +1,6 @@
+<program>
+    function a(s: string) -> string { return s.substring(1); }
+    function b(s: string) -> string { return s.slice(-1); }
+    function c(s: string) -> int { return s.length; }
+    <main><p>${a("x")} ${b("y")} ${c("z")}</p></main>
+</program>

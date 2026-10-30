@@ -1,0 +1,5 @@
+<program>
+    type Shape:enum = { Circle(r: number), Point }
+    let <s:Shape=Shape.Circle(1, 2)/>
+    <p>hi</p>
+</program>

@@ -1,0 +1,4 @@
+<program>
+let <b:bool=false/>
+<input type="text" bind:checked=@b/>
+</program>

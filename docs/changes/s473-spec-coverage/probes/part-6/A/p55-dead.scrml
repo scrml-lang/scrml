@@ -1,0 +1,4 @@
+<program>
+    <email:string="" req/>
+    <main><p>${@email.isValid}</p></main>
+</program>

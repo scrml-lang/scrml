@@ -1,0 +1,6 @@
+<program>
+    let <m:string | not=not/>
+    let <n:int=3/>
+    <p id="a">x${@m}y</p>
+    <p id="b">typed ${@n} chars</p>
+</program>

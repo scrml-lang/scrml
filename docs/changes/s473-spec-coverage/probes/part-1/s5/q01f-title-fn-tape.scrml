@@ -1,0 +1,4 @@
+<program>
+function f() -> string[] { const v: string[] = ["a"]; return v; }
+<div title=f()>x</div>
+</program>

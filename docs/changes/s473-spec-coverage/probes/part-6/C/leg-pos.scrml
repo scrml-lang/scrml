@@ -1,0 +1,5 @@
+<program>
+    type U:struct = { name: string, age: int }
+    <u>: U = ("alice", 30)
+    <main><p>x</p></main>
+</program>

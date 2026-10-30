@@ -1,0 +1,12 @@
+<program>
+    type Phase:enum = { Idle, Loading }
+    type Entry:struct = { at: number }
+    let <log:Entry[free, append]=[]/>
+    <phase:Phase=.Idle single>
+        <Idle rule=.Loading : "i">
+        <Loading rule=.Idle : "l">
+        audit @log
+    </>
+    function rp() { replay(@phase, @log, 0); }
+    <main><p><*phase/></p><button onclick=rp()>r</button></main>
+</program>

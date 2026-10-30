@@ -1,0 +1,3 @@
+<program>
+    <main><p>${ bun.eval("1+1") }</p></main>
+</program>

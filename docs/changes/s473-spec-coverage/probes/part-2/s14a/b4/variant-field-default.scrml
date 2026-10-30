@@ -1,0 +1,6 @@
+<program>
+    type S:enum = { A, B }
+    type I:struct = { id: int, s: S }
+    let <i:I=({ id: 1 })/>
+    <p>${@i.id}</p>
+</program>

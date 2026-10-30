@@ -1,0 +1,2 @@
+✓ start: compiled /home/bmacs/.cache/scrml-agent-tmp/spec-coverage-audit/probes-5/p47-serve/app.scrml in 191 ms → /home/bmacs/.cache/scrml-agent-tmp/spec-coverage-audit/probes-5/p47-serve
+scrml-boot dev: http://127.0.0.1:38917/  (watching /home/bmacs/.cache/scrml-agent-tmp/spec-coverage-audit/probes-5/p47-serve/app.scrml; Ctrl-C to stop)

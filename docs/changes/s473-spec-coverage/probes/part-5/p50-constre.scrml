@@ -1,0 +1,5 @@
+<program>
+    let <n:int=0/>
+    function g() { const a: int = 1; a = 2; }
+    <main><p>${@n}</p><button onclick=g()>g</button></main>
+</program>

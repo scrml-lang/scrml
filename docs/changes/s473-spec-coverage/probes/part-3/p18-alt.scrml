@@ -1,0 +1,7 @@
+<program>
+    type C:enum = { Red, Green, Blue(n: int), Cyan(n: int) }
+    function f(c: C) -> int { return match c { .Red | .Green :> 1, .Blue(n) | .Cyan(n) :> n, }; }
+    function g(c: C) -> int { const match = 2; return match; }
+    function h(c: C) -> int { match c { .Red :> return 1, else :> return 2, } }
+    <main><p>${f(.Red)} ${g(.Red)} ${h(.Red)}</p></main>
+</program>

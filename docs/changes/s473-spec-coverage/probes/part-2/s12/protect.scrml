@@ -1,0 +1,6 @@
+<program db="./app.db">
+    <db src="./app.db" protect="password">
+        type Row:struct = { id: int, name: string }
+    </db>
+    <main><p>x</p></main>
+</program>

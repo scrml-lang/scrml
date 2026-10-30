@@ -1,0 +1,7 @@
+<program>
+    <button label:string/>
+    renders <span>${label}</span>
+    <main>
+        <button label="x"/>
+    </main>
+</program>

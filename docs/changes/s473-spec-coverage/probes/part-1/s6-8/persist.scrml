@@ -1,0 +1,5 @@
+<program>
+    let <c:int=0 persist="local" key="app.c"/>
+    function inc() { @c = @c + 1; }
+    <main><button onclick=inc()>${@c}</button></main>
+</program>

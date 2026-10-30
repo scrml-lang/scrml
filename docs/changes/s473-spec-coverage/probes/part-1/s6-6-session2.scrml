@@ -1,0 +1,6 @@
+<program db="./app.db">
+    function who() {
+        ?{`INSERT INTO t (a) VALUES (${@session.userId})`}.run();
+    }
+    <main><button onclick=who()>x</button></main>
+</program>

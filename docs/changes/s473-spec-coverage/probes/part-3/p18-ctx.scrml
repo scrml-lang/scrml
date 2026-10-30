@@ -1,0 +1,8 @@
+<program>
+    type C:enum = { Red, Green }
+    let <c:C=.Red/>
+    <main>
+        <p class=(match @c { .Red :> "r", .Green :> "g", })>x</p>
+        <p>${ match @c { .Red :> "r", .Green :> "g", } }</p>
+    </main>
+</program>

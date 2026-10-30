@@ -1,0 +1,4 @@
+<program>
+let <xs:int[]=([1])/>
+<button onclick=@xs.push(2)>x</button>
+</program>

@@ -1,0 +1,5 @@
+<program>
+    let <n:int=0/>
+    pure fn p(x: int) -> int { return x; }
+    <main><p>${@n}</p></main>
+</program>

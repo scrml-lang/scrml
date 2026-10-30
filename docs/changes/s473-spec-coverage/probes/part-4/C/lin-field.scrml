@@ -1,0 +1,10 @@
+<program>
+    type Box:struct = { v: string }
+    function f() -> string {
+        lin t = "a";
+        let b: Box = { v: "x" };
+        b.v = t;
+        return b.v;
+    }
+    <main><p>${f()}</p></main>
+</program>

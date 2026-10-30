@@ -1,0 +1,6 @@
+${ import { dd } from "./lib/dd.scrml"; }
+<program>
+    function f() { @h.value = "x"; }
+    function g() { @h.secret = "y"; }
+    <main><dd as=h label="L"/><button onclick=f()>f</button><button onclick=g()>g</button></main>
+</program>

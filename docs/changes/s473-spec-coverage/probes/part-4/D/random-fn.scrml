@@ -1,0 +1,7 @@
+<program>
+${ import { random } from 'scrml:random'; }
+fn pick() -> number { return random(); }
+let <n:number=0/>
+function roll() { @n = pick(); }
+<main><button onclick=roll()>${@n}</button></main>
+</program>

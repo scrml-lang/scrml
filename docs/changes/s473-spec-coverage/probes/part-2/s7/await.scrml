@@ -1,0 +1,6 @@
+<program>
+    let <out:int=0/>
+    function f() -> int { const x = await g(); return 1; }
+    function g() -> int { return 1; }
+    <p>${@out}</p>
+</program>

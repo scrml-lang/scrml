@@ -1,0 +1,4 @@
+<program>
+    <items:string[]=(["a","b"])/>
+    <ul>${ for (it of @items) { lift <li>${it}</li>; } }</ul>
+</program>

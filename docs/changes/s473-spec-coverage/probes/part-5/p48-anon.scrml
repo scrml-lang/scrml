@@ -1,0 +1,5 @@
+<program>
+    let <n:int=0/>
+    function h() -> int { const f = fn(x: int) -> int { return x * 2; }; return f(2); }
+    <main><p>${@n}</p></main>
+</program>

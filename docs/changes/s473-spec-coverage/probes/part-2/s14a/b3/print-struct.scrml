@@ -1,0 +1,6 @@
+<program>
+    type P:struct = { x: int }
+    let <p:P=({ x: 1 })/>
+    function f() { print(@p); }
+    <button onclick=f()>x</button>
+</program>

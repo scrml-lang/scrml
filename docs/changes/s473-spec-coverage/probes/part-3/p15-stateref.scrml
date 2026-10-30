@@ -1,0 +1,5 @@
+<program>
+    <main>
+        <p>${<#contact>.name}</p>
+    </main>
+</program>

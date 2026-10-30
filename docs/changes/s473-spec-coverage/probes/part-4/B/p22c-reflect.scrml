@@ -1,0 +1,5 @@
+<program>
+    let <count:int=0/>
+    function bump() { const r = reflect(int); @count = @count + 1; }
+    <main><button onclick=bump()>"+"</button></main>
+</program>

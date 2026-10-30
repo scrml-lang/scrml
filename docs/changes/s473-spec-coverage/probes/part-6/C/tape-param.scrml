@@ -1,0 +1,11 @@
+<program>
+    type Entry:struct = { at: int, action: string }
+    <audit:Entry[free, append]=[]/>
+    function record(log: Entry[free, append], e: Entry) -> Entry[free, append] {
+        log.append(e);
+        log.pop();
+        return log;
+    }
+    function f() { @audit = record(@audit, { at: 1, action: "x" }); }
+    <main><button onclick=f()>f</button></main>
+</program>

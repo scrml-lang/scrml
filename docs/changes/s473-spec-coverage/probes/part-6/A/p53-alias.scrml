@@ -1,0 +1,4 @@
+<program>
+    type Amt = number(>0)
+    <main><p>hi</p></main>
+</program>

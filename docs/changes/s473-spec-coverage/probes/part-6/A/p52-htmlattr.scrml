@@ -1,0 +1,3 @@
+<program>
+    <main><div foo="x" data-y="1" aria-label="z">hi</div></main>
+</program>

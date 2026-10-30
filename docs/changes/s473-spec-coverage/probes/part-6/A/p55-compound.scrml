@@ -1,0 +1,10 @@
+<program>
+    <Signup>
+        let <name:string="" req length(>=2)/>
+        let <pw:string="" req/>
+        renders <form onsubmit=done()><input bind:value=@name/><input bind:value=@pw/><button type="submit">s</button></form>
+    </Signup>
+    let <n:int=0/>
+    function done() { @n = @n + 1; }
+    <main><Signup/><p>${@n}</p></main>
+</program>

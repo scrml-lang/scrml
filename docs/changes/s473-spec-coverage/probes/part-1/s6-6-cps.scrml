@@ -1,0 +1,9 @@
+<program db="./app.db">
+    let <n:int=0/>
+    let <msg:string=""/>
+    function save() ! DbError {
+        ?{`INSERT INTO t (a) VALUES (${@n})`}.run();
+        @msg = "saved";
+    }
+    <main><button onclick=save()>s</button><p>${@msg}</p></main>
+</program>
