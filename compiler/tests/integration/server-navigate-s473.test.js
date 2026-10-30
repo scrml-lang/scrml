@@ -21,7 +21,7 @@
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
 import { fileURLToPath } from "node:url";
 import { resolve, dirname, join } from "path";
-import { writeFileSync, existsSync, mkdirSync, readFileSync } from "fs";
+import { writeFileSync, existsSync, mkdirSync, readFileSync, rmSync } from "fs";
 import { Database } from "bun:sqlite";
 import { compileScrml } from "../../src/api.js";
 import { patchAndImport, closeOpenedDbHandles, safeRmSync } from "../helpers/self-host-server-import.js";
@@ -50,6 +50,8 @@ function compileApp(src, tag) {
   const name = `${tag}-${++tmpCounter}`;
   const dir = resolve(TMP_ROOT, name);
   const out = resolve(dir, "dist");
+  // A run killed before afterAll leaves its directories: never read a stale bundle.
+  rmSync(dir, { recursive: true, force: true });
   mkdirSync(out, { recursive: true });
   const dbPath = resolve(dir, "app.db");
   const db = new Database(dbPath, { create: true });
@@ -466,5 +468,81 @@ describe("S473 — an app with no server-side navigate() is byte-unchanged", () 
     expect(app.clientJs).not.toContain("_scrml_follow_server_navigate");
     // The client-side navigate keeps the soft pipeline.
     expect(app.clientJs).toContain('_scrml_navigate_soft("/client-side")');
+  });
+});
+
+/** The emitted server-navigate helper block of a bundle, evaluated on its own (review F4). */
+function evalNavHelpers(serverJs) {
+  const start = serverJs.indexOf("// --- §20.1 (S473): navigate() in a server function");
+  const end = serverJs.indexOf("\n// --- ", start + 10);
+  expect(start).toBeGreaterThan(-1);
+  const src = serverJs.slice(start, end === -1 ? undefined : end);
+  return new Function("_scrml_g", `${src}\nreturn { settle: _scrml_nav_settle, SYM: _SCRML_NAVIGATE };`)(globalThis);
+}
+
+describe("S473 review F4 — a navigation signal cannot be forged, and settle re-checks it", () => {
+  let app;
+  beforeAll(() => {
+    app = compileApp(PLACEMENTS, "forge");
+  });
+  const req = { headers: { get: () => null } };
+
+  test("the marker is a module-private symbol, not a global-registry key", () => {
+    expect(app.serverJs).toContain('const _SCRML_NAVIGATE = _scrml_g.Symbol("scrml.navigate");');
+    expect(app.serverJs).not.toContain('Symbol.for("scrml.navigate")');
+  });
+
+  test("an object carrying Symbol.for(\"scrml.navigate\") is rethrown unchanged, never answered", () => {
+    const { settle } = evalNavHelpers(app.serverJs);
+    const forged = { [Symbol.for("scrml.navigate")]: "javascript:alert(1)" };
+    let thrown;
+    try {
+      settle(forged, req);
+    } catch (e) {
+      thrown = e;
+    }
+    expect(thrown).toBe(forged);
+  });
+
+  test("even a signal carrying the module's own marker is re-checked before it is answered", () => {
+    const { settle, SYM } = evalNavHelpers(app.serverJs);
+    for (const bad of ["javascript:alert(1)", "https://evil.example/", "//evil.example", "/a\r\nX: 1"]) {
+      let thrown;
+      try {
+        settle({ [SYM]: bad }, req);
+      } catch (e) {
+        thrown = e;
+      }
+      expect(String(thrown && thrown.message)).toContain("refused a navigation to");
+    }
+    // The module's literal origin and a same-site path are answered.
+    expect(settle({ [SYM]: "https://idp.example.com/cb" }, req).headers.get("location")).toBe("https://idp.example.com/cb");
+    expect(settle({ [SYM]: "/posts" }, req).status).toBe(302);
+  });
+
+  test("both bundles carry the file's literal-origin list", () => {
+    expect(app.serverJs).toContain('const _SCRML_NAV_ORIGINS = _scrml_g.Object.freeze(["https://idp.example.com"]);');
+    expect(app.clientJs).toContain('const _SCRML_NAV_ORIGINS = _scrml_g.Object.freeze(["https://idp.example.com"]);');
+  });
+});
+
+describe("S473 review F7 — the server string lowering only rewrites real navigate() calls", () => {
+  test("a member call, a longer name, and string / comment text are left alone", () => {
+    expect(rewriteNavigateCalls('router.navigate("/x")')).toBe('router.navigate("/x")');
+    expect(rewriteNavigateCalls('router . navigate("/x")')).toBe('router . navigate("/x")');
+    expect(rewriteNavigateCalls('$navigate("/x")')).toBe('$navigate("/x")');
+    expect(rewriteNavigateCalls('log("navigate(\\"/x\\")")')).toBe('log("navigate(\\"/x\\")")');
+    expect(rewriteNavigateCalls("log('navigate(1)') /* navigate(2) */")).toBe("log('navigate(1)') /* navigate(2) */");
+    expect(rewriteNavigateCalls("`text navigate(1) ${navigate(\"/a\")}`")).toBe('`text navigate(1) ${_scrml_server_navigate("/a", null)}`');
+    // The client pipeline uses the same scanner.
+    expect(rewriteNavigateCalls('router.navigate("/x")', true)).toBe('router.navigate("/x")');
+    expect(rewriteNavigateCalls('"navigate(1)" + navigate("/b")', true)).toBe('"navigate(1)" + _scrml_navigate_soft("/b")');
+  });
+
+  test("an empty navigate() reaching the string lowering is E-NAV-NO-PATH, not a silent no-op", () => {
+    const errors = [];
+    rewriteNavigateCalls("navigate()", false, errors);
+    rewriteNavigateCalls("navigate(.Hard)", false, errors);
+    expect(errors.map((e) => e.code)).toEqual(["E-NAV-NO-PATH", "E-NAV-NO-PATH"]);
   });
 });

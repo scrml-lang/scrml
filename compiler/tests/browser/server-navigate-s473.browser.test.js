@@ -51,11 +51,34 @@ const SRC = `<program db="./app.db">
         createPost("hello")
         @after = "ran"
     }
+
+    function toIdp(s: string) {
+        ?{\`INSERT INTO posts (title) VALUES (\${"idp-" + s})\`}.run()
+        navigate(\`https://idp.example.com/authorize?state=\${s}\`)
+    }
+
+    function forged(s: string) {
+        ?{\`INSERT INTO posts (title) VALUES (\${"forged-" + s})\`}.run()
+        return new Response("", { headers: { "X-Scrml-Navigate": "https://evil.example/phish" } })
+    }
+
+    function toFragment(s: string) {
+        ?{\`INSERT INTO posts (title) VALUES (\${"frag-" + s})\`}.run()
+        navigate("/new-post#saved")
+    }
+
+    function saveAndStay() {
+        toFragment("a")
+        @after = "continued"
+    }
 }
 </>
 
 <button id="create" onclick=createPost("hello")>Create post</button>
 <button id="submit" onclick=submit()>Submit</button>
+<button id="idp" onclick=toIdp("st8")>IdP</button>
+<button id="forged" onclick=forged("x")>Forged</button>
+<button id="frag" onclick=saveAndStay()>Fragment</button>
 <p id="after">\${@after}</p>
 
 </program>
@@ -180,5 +203,47 @@ describe("S473 — click → server function → hard navigation", () => {
     expect(globalThis.__s473nav_get("after")).toBe("");
     expect(document.querySelector("#after").textContent).toBe("");
     expect(b.rows()).toEqual(["hello"]);
+  }, 30_000);
+
+  test("an origin the server navigate() names literally is followed", async () => {
+    const b = await buildAndMount("idp");
+    expect(b.errors).toEqual([]);
+    try {
+      document.querySelector("#idp").click();
+      await settle();
+    } finally {
+      b.restore();
+    }
+    expect(b.logged).toEqual([]);
+    expect(b.assigned).toEqual(["https://idp.example.com/authorize?state=st8"]);
+    expect(b.clientJs).toContain('const _SCRML_NAV_ORIGINS = _scrml_g.Object.freeze(["https://idp.example.com"]);');
+  }, 30_000);
+
+  test("review F1: a response the compiler did not build cannot send the page to another origin", async () => {
+    const b = await buildAndMount("forged");
+    expect(b.errors).toEqual([]);
+    try {
+      document.querySelector("#forged").click();
+      await settle();
+    } finally {
+      b.restore();
+    }
+    expect(b.assigned).toEqual([]);
+    expect(b.logged.some((l) => l.includes("refused the navigation target") && l.includes("https://evil.example/phish"))).toBe(true);
+  }, 30_000);
+
+  test("review F5: a same-document (#fragment) target settles, so the caller goes on", async () => {
+    const b = await buildAndMount("fragment");
+    expect(b.errors).toEqual([]);
+    try {
+      document.querySelector("#frag").click();
+      await settle();
+    } finally {
+      b.restore();
+    }
+    expect(b.logged).toEqual([]);
+    expect(b.assigned).toEqual(["/new-post#saved"]);
+    expect(globalThis.__s473nav_get("after")).toBe("continued");
+    expect(b.rows()).toEqual(["frag-a"]);
   }, 30_000);
 });

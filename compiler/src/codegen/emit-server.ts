@@ -1,5 +1,5 @@
 import { CGError } from "./errors.ts";
-import { SERVER_NAVIGATE_FN, NAV_SETTLE_CATCH, SERVER_NAVIGATE_HELPER_LINES } from "./server-navigate.ts";
+import { SERVER_NAVIGATE_FN, NAV_SETTLE_CATCH, serverNavigateHelperLines, beginNavigateOriginCollection, collectedNavigateOrigins, endNavigateOriginCollection } from "./server-navigate.ts";
 import { withHostGlobalAlias } from "./host-global-alias.ts";
 import { drainRefusedLowerings } from "./refused-lowering-errors.ts";
 import { genVar, getVarCounter, setVarCounter } from "./var-counter.ts";
@@ -2398,9 +2398,12 @@ export function generateServerJs(...args: Parameters<typeof generateServerJsImpl
   // them: the emitters after this one in the same file (library mode) key by them too.
   const _variantSnap = snapshotVariantFieldsForFile();
   const _rewriterSnap = snapshotRewriterVariantFields();
+  // §20.1 (S473) — the literal origins of this file's server navigates (server-navigate.ts).
+  const _navOriginsPrev = beginNavigateOriginCollection();
   try {
     return generateServerJsImpl(...args);
   } finally {
+    endNavigateOriginCollection(_navOriginsPrev);
     setServerPromiseTrap(prevTrap);
     restoreVariantFieldsForFile(_variantSnap);
     restoreRewriterVariantFields(_rewriterSnap);
@@ -7910,7 +7913,7 @@ function generateServerJsImpl(
   // when the bundle navigates; otherwise strip the catch, so a navigate-free module is
   // byte-unchanged. Checked BEFORE the injection (the helper text names the function itself).
   if (finalEmitted.includes(`${SERVER_NAVIGATE_FN}(`)) {
-    finalEmitted = injectAfterHeader(finalEmitted, SERVER_NAVIGATE_HELPER_LINES.join("\n"));
+    finalEmitted = injectAfterHeader(finalEmitted, serverNavigateHelperLines(collectedNavigateOrigins()).join("\n"));
   } else {
     finalEmitted = finalEmitted.split(NAV_SETTLE_CATCH).join("");
   }

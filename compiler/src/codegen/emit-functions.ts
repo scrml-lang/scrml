@@ -1142,7 +1142,7 @@ export function emitFunctions(ctx: CompileContext): { lines: string[]; fnNameMap
     const usesCsrfRetry = csrfEnabled && httpMethod !== "GET" && httpMethod !== "HEAD";
     // §20.1 (S473) — when this file's server bundle has a server-side navigate(), every stub
     // asks for it as the X-Scrml-Navigate header instead of a 302 (server-navigate.ts).
-    const _navReqHeader = (ctx as { serverNavigates?: boolean }).serverNavigates ? `, "${NAV_REQUEST_HEADER}": "1"` : "";
+    const _navReqHeader = (ctx as { serverNavigateOrigins?: string[] | null }).serverNavigateOrigins != null ? `, "${NAV_REQUEST_HEADER}": "1"` : "";
     // A9 Ext 5 (§19.9.6): non-monotone CPS batches receive a per-invocation
     // UUIDv4 idempotency key transmitted via the `Idempotency-Key` header
     // (IETF-draft standard). Server stub (emit-server.ts) consults the

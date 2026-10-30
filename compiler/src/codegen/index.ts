@@ -74,7 +74,7 @@ import { buildProtectContext } from "./protect-egress.ts";
 import { setBatchLoopHoists, setBatchInListCap, setVariantFieldsForFile, setShadowedVariantNames } from "./emit-control-flow.ts";
 import { drainMachineCodegenErrors, clearMachineCodegenErrors } from "./emit-machines.ts";
 import { generateClientJs, collectClientReferencedIdentsForAST, setImportedTypesForCodegen, buildVariantFieldsRegistry } from "./emit-client.js";
-import { SERVER_NAVIGATE_FN } from "./server-navigate.ts";
+import { navigateOriginsOfServerBundle } from "./server-navigate.ts";
 import { generateLibraryJs } from "./emit-library.ts";
 import { resetRefusedLowerings, drainRefusedLowerings, recordRefusedLowering } from "./refused-lowering-errors.ts";
 import { dropCascadeOnlyErrors } from "./server-text-guard.ts";
@@ -3148,8 +3148,8 @@ export function runCG(input: CgInput): CgOutput {
         // will consume per-entry-point per-role ChunkPlans. Empty until A-2.2+.
         reachabilityRecord: reachabilityRecordInput,
         // §20.1 (S473) — the client fetch wrappers follow a server-side navigate() only
-        // when this file's server bundle has one (server-navigate.ts).
-        serverNavigates: typeof serverJs === "string" && serverJs.includes(`${SERVER_NAVIGATE_FN}(`),
+        // when this file's server bundle has one, and only to its literal origins (server-navigate.ts).
+        serverNavigateOrigins: navigateOriginsOfServerBundle(serverJs),
         // PGO P2.1 (S102) — threaded so `emit-client.ts:clientStage` can
         // gate timing on the same `debugPerf` flag, route output through
         // the same `log` sink, and accumulate per-sub-emit totals into a
