@@ -13,9 +13,12 @@ Ruling: scrml-support/user-voice-scrml.md, "RULED — S473 Windows: impl#1 route
 - [x] nightly windows-main-report.yml (latest conclusion + first red SHA). Local run against main: RED,
       first red af34aa328 (run 40754958089), last green e8d2e38cd (run 40726257771) — matches #1681's bisect.
 - [x] .github/CI.md section
-- [ ] dispatched CI: 41082134439 (this branch on main — expect the ratchet to FAIL on main's ~28),
-      41082138775 (this branch + #1681 merged, scratch branch s473-windows-ratchet-x1681 — expect PASS)
-- [ ] PR
+- [x] dispatched CI: 41082134439 (this branch on main): ratchet FAIL, 25 new (facts 1, spec-coverage 4,
+      transport 16, whole-error 4), 4 files retried, none rescued; every other job green.
+      41082138775 (this branch + #1681 @402e6a1f8, scratch branch since deleted): ratchet FAIL, 2 new, both in
+      #1681's own routemap-native-key-s473.test.js (harness key-shape case + `e.variant` imported). The 20
+      impl#1 cases pass there.
+- [x] PR #1685 — lands AFTER #1681 (and #1681's two real-Windows failures) with the empty baseline.
 
 ## Findings
 - bun 1.4.3 junit OMITS a test file that throws at load. The console counts it as "1 error" and there is no
