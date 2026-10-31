@@ -1,7 +1,13 @@
-// §19.10.5 (S473 #1690 review F11): a client-placed `!` function making two server calls is the
-// PERMANENT refusal E-TX-CLIENT-MULTI-CALL — no transaction spans two requests.
+// §19.10.5 / §19.9.9.8 rule 3 (S474 ruling, door 2 — the PERMANENT residue of F11): a client-placed
+// `!` function's server calls compose into ONE request with ONE envelope — unless a statement that
+// needs the browser stands between them. `title()` is a `<host>` binding (client-only, §21.3.3 rule
+// 10); it cannot move into the server batch, so the calls would be two requests:
+// E-TX-CLIENT-MULTI-CALL, at that statement.
 <program db="./app.db">
-    type E:enum = { Bad, QueryFailed(message: string), ConstraintViolation(field: string), ConnectionLost }
+    type E:enum = { Bad, QueryFailed(message: string), ConstraintViolation(field: string), ConnectionLost, Transport(t: ServerCallError) }
+    <host>
+      title() -> string = document.title
+    </host>
     let <r:int=0/>
     function s1(a: int)! E {
         ?{`INSERT INTO log (a) VALUES (${a})`}.run();
@@ -12,8 +18,9 @@
         return 1;
     }
     function move(a: int)! E {
-        const x: int = s1(a) !{ _ :> { return 0; } };
-        const y: int = s2(a) !{ _ :> { return 0; } };
+        const x: int = s1(a)?;
+        const t: string = title();
+        const y: int = s2(a)?;
         return x + y;
     }
     <main><button onclick={ @r = move(1) !{ _ :> 0, }; }>go</button></main>
