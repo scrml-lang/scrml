@@ -128,6 +128,7 @@ All 20 sub-steps (rev 6 decomposition: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 11.0a-
 > `bun scripts/state.ts --write` regenerates it; `--check` gates it.
 
 <!-- @generated:recent-sessions START (do not edit — `bun scripts/state.ts --write`) -->
+- `34ebef81d` — Merge pull request #1693 from scrml-lang/wrap/s473 — **pushed**
 - `a62629d68` — Merge pull request #1624 from scrml-lang/wrap/s472 — **pushed**
 - `b28c85cea` — Merge pull request #1600 from scrml-lang/wrap/s471 — **pushed**
 - `a8bac7248` — Merge pull request #1583 from scrml-lang/wrap/s470 — **pushed**
@@ -135,7 +136,6 @@ All 20 sub-steps (rev 6 decomposition: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 11.0a-
 - `43ad24d9e` — wrap(s468): theRog first boot; 4 PRs merged, 11 in flight (all checkpointed); bootstrap U1c reviewed; eight impl#1 wrong-password paths found (#1452) — **pushed**
 - `1f1b5be4e` — wrap(s467): wrap anchor + theRog transfer note (#1438) — **pushed**
 - `0c185b644` — Merge wrap/s465 into land/s464-batch — **pushed**
-- `980cb3001` — wrap(S461 AUTO): 7 PRs landed; 3 questions for bryan; 6 review findings filed (#1383) — **pushed**
 <!-- @generated:recent-sessions END -->
 
 ## A. Compiler core
