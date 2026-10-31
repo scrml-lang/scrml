@@ -27,6 +27,7 @@ import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { compileScrml } from "../../src/api.js";
 
 const DIRS = [];
+const RESPONSE_BODIES = [];
 const GLOBALS_BEFORE = new Set(Object.getOwnPropertyNames(globalThis));
 afterAll(async () => {
   if (GlobalRegistrator.isRegistered) await GlobalRegistrator.unregister();
@@ -163,12 +164,16 @@ async function realFetch(out) {
     if (!route) return new Response("not found", { status: 404 });
     const hdr = { "content-type": "application/json", cookie: "scrml_csrf=t", "x-csrf-token": "t" };
     try {
-      return await route.handler({
+      const resp = await route.handler({
         url: "http://localhost" + route.path,
         method: init.method ?? "POST",
         headers: { get: (k) => hdr[String(k).toLowerCase()] ?? null },
         json: async () => (init.body ? JSON.parse(init.body) : {}),
       });
+      // Every response body the client receives, for the "no driver text on the wire" checks.
+      const text = await resp.text();
+      RESPONSE_BODIES.push(text);
+      return new Response(text, { status: resp.status, headers: resp.headers });
     } catch {
       // What the built server answers an exception a route handler does not catch with
       // (commands/build.js, the emitted `Bun.serve({ error(err) { … } })`, §14.8.9): a fixed 500.
@@ -504,9 +509,13 @@ describe("S474 — run time: a REAL failing query on the server (the table is dr
     db.close();
     const page = await boot(out);
     try {
+      RESPONSE_BODIES.length = 0;
       for (const b of ["#b-import", "#b-local", "#b-named", "#b-qf"]) await page.click(b);
       expect([page.text("#import-seen"), page.text("#local-seen"), page.text("#named-seen"), page.text("#qf-seen")]).toEqual(["import:QueryFailed", "local:QueryFailed", "named:other", "qf:empty"]);
       expect([page.text("#import-n"), page.text("#local-n"), page.text("#named-n"), page.text("#qf-n")]).toEqual(["0", "0", "0", "0"]);
+      // No server text reaches the client in the failure (S474 ruling 2: production build).
+      expect(RESPONSE_BODIES.length).toBeGreaterThan(0);
+      for (const b of RESPONSE_BODIES) expect(b).not.toContain("no such table");
       // No host backstop; one server log line per failed call, carrying the driver's text.
       for (const l of page.logged) expect(l).not.toMatch(/host backstop/);
       expect(page.logged.length).toBe(4);

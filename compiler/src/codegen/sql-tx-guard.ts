@@ -72,7 +72,8 @@
  *   - A BEGIN / COMMIT / ROLLBACK issued while the scope already owns a transaction is
  *     rewritten to SAVEPOINT / RELEASE / ROLLBACK TO (S449 review F3).
  *
- * DRIVER FAILURES ARE MARKED (S474, §19.8.2). The guarded tagged call and `.unsafe()` mark the
+ * DRIVER FAILURES ARE MARKED (S474, §19.8.2). The guarded tagged call, `.unsafe()` and the
+ * callback transaction (`begin(cb)` / `transaction(cb)`, compiler-emitted SQL only; S474 r1) mark the
  * error the driver rejects with (`Symbol.for("scrml.db.failure")`, non-enumerable) before
  * rethrowing it unchanged. The mark is the only way a later boundary can tell "a query failed to
  * run" from a host error thrown by the code around it. Two places read it: the boundary of a
@@ -279,7 +280,9 @@ export const SQL_TX_GUARD_HELPER_LINES: readonly string[] = Object.freeze([
   "    apply: (_target, _this, args) => run(args[0] && args[0][0], (conn) => conn(...args)).catch(_scrml_db_mark_failure),",
   "    get: (_target, key) => {",
   "      if (key === \"unsafe\") return (text, ...rest) => run(text, (conn) => conn.unsafe(text, ...rest)).catch(_scrml_db_mark_failure);",
-  "      if (key === \"begin\" || key === \"transaction\") return callbackTx(key);",
+  "      // A callback transaction holds only compiler-emitted SQL (the db-authoritative principal",
+  "      // wrapper), so its rejection is a driver failure too (S474 r1 F2).",
+  "      if (key === \"begin\" || key === \"transaction\") { const tx = callbackTx(key); return (...a) => tx(...a).catch(_scrml_db_mark_failure); }",
   "      if (key === _scrml_db_abandon) return abandon;",
   "      const value = base[key];",
   "      return typeof value === \"function\" ? value.bind(base) : value;",

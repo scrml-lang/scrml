@@ -343,6 +343,32 @@ export function handledSqlGuardInner(node: unknown): Record<string, any> | null 
 }
 
 /**
+ * The `_scrml_sql_error` classifier (§19.8.1): a driver error to a SqlError variant. ONE text,
+ * carried by `SERVER_SQL_ATTEMPT_HELPER` and, alone, by `SERVER_SQL_ERROR_HELPER` (S474 r1 F7:
+ * composed from this constant, not sliced out of the attempt helper by a comment).
+ */
+const SQL_ERROR_CLASSIFIER_LINES: readonly string[] = [
+  "// Map a driver error to a SqlError variant (§19.8.1): QueryFailed(message),",
+  "// ConstraintViolation(field), ConnectionLost.",
+  "function _scrml_sql_error(err) {",
+  "  const message = _scrml_g.String((err && err.message) || err);",
+  "  const code = _scrml_g.String((err && (err.code ?? err.errno)) ?? \"\");",
+  "  if (/CONSTRAINT/i.test(code) || /^23\\d{3}$/.test(code) || /constraint failed/i.test(message)) {",
+  "    const m = /constraint failed: ([\\w.]+)/i.exec(message);",
+  "    const field = m ? m[1].split(\".\").pop() : _scrml_g.String((err && (err.column ?? err.constraint)) ?? \"\");",
+  "    return { __scrml_error: true, type: \"SqlError\", variant: \"ConstraintViolation\", data: { field } };",
+  "  }",
+  "  // S474 r1 (F3): Bun.SQL reports an unreachable server as `Failed to connect` (code",
+  "  // ECONNREFUSED / ERR_POSTGRES_CONNECTION_CLOSED, by version) — a lost connection too.",
+  "  if (/ECONNREFUSED|ECONNRESET|ECONNABORTED|EHOSTUNREACH|ENETUNREACH|ENOTFOUND|EPIPE|ETIMEDOUT|CONNECTION_CLOSED|CONNECTION_FAILED/i.test(code) || /^08\\d{3}$/.test(code) ||",
+  "      /connection (?:closed|lost|refused|terminated|failed)|failed to connect/i.test(message)) {",
+  "    return { __scrml_error: true, type: \"SqlError\", variant: \"ConnectionLost\", data: null };",
+  "  }",
+  "  return { __scrml_error: true, type: \"SqlError\", variant: \"QueryFailed\", data: { message } };",
+  "}",
+];
+
+/**
  * The server-bundle runtime helper. Injected into a server module IFF the module
  * references `_scrml_sql_attempt(`. Readable on purpose: an adopter debugging a
  * handled query lands here.
@@ -365,22 +391,7 @@ export const SERVER_SQL_ATTEMPT_HELPER: string = [
   "  }",
   "  return then(rows);",
   "}",
-  "// Map a driver error to a SqlError variant (§19.8.1): QueryFailed(message),",
-  "// ConstraintViolation(field), ConnectionLost.",
-  "function _scrml_sql_error(err) {",
-  "  const message = _scrml_g.String((err && err.message) || err);",
-  "  const code = _scrml_g.String((err && (err.code ?? err.errno)) ?? \"\");",
-  "  if (/CONSTRAINT/i.test(code) || /^23\\d{3}$/.test(code) || /constraint failed/i.test(message)) {",
-  "    const m = /constraint failed: ([\\w.]+)/i.exec(message);",
-  "    const field = m ? m[1].split(\".\").pop() : _scrml_g.String((err && (err.column ?? err.constraint)) ?? \"\");",
-  "    return { __scrml_error: true, type: \"SqlError\", variant: \"ConstraintViolation\", data: { field } };",
-  "  }",
-  "  if (/ECONNREFUSED|ECONNRESET|EPIPE|ETIMEDOUT|CONNECTION_CLOSED/i.test(code) || /^08\\d{3}$/.test(code) ||",
-  "      /connection (?:closed|lost|refused|terminated)/i.test(message)) {",
-  "    return { __scrml_error: true, type: \"SqlError\", variant: \"ConnectionLost\", data: null };",
-  "  }",
-  "  return { __scrml_error: true, type: \"SqlError\", variant: \"QueryFailed\", data: { message } };",
-  "}",
+  ...SQL_ERROR_CLASSIFIER_LINES,
 ].join("\n");
 
 /** The runtime helper a declared-`!` server function's boundary calls (S474). */
@@ -406,9 +417,7 @@ export function sqlFailurePropagates(fnNode: unknown): boolean {
  * The `_scrml_sql_error` classifier alone — for a module that propagates query failures but
  * handles none at the site, so `SERVER_SQL_ATTEMPT_HELPER` (which carries it) is not injected.
  */
-export const SERVER_SQL_ERROR_HELPER: string = "\n" + SERVER_SQL_ATTEMPT_HELPER.slice(
-  SERVER_SQL_ATTEMPT_HELPER.indexOf("// Map a driver error to a SqlError variant"),
-);
+export const SERVER_SQL_ERROR_HELPER: string = ["", ...SQL_ERROR_CLASSIFIER_LINES].join("\n");
 
 /**
  * S474 ruling 2, as amended ("capability over limitation" item 3): "a dev build keeps the full
@@ -459,6 +468,59 @@ export function serverSqlPropagateHelper(keepText: boolean): string {
     "}",
   ].join("\n");
 }
+
+/** The runtime helper that runs a declared-`!` (SqlError) body inside its own transaction (S474 r1). */
+export const SQL_BANG_ENVELOPE_FN = "_scrml_sql_bang_envelope";
+
+/**
+ * S474 r1 (review F1 of #1704; S473 transitive-envelope ruling, F10 savepoints) — a typed
+ * SqlError failure is only honest when NOTHING was written: §8.9.2 makes a `!` handler's
+ * failure atomic. impl#1 opens the §8.9.2 envelope by a LEXICAL query count (the Batch Planner),
+ * so a body with one query plus a querying helper, a body-escalated `!`, or an in-process `!`
+ * callee had none — and delivering the variant there reported a clean failure over committed
+ * writes. So every `! -> SqlError` body (route and in-process callable) runs through this helper:
+ *   BEGIN → body → COMMIT on success, ROLLBACK on a `fail` (an error envelope result) or on any
+ *   throw. A driver failure (anywhere: BEGIN, the body, COMMIT) becomes the SqlError value
+ *   AFTER the rollback; anything else is rethrown after it.
+ * Inside a caller's transaction the guard (sql-tx-guard.ts) nests BEGIN / COMMIT / ROLLBACK as
+ * SAVEPOINT / RELEASE / ROLLBACK TO, so an inner `!` callee whose failure the caller handles
+ * undoes only its own writes; the caller's own outcome decides the rest. Every query the body
+ * reaches — through a helper or a callee — runs on the transaction's connection (the guard's
+ * request scope), which is the transitive envelope S473 ruled.
+ */
+export const SERVER_SQL_BANG_ENVELOPE_HELPER: string = [
+  "",
+  "// --- §8.9.2 / §19.8.2 (S474): a declared-`!` (SqlError) body runs in its own transaction (compiler-generated) ---",
+  "// A delivered SqlError means nothing was written: every query the body reaches (helpers and",
+  "// callees too) runs inside this transaction, and any failure rolls it back before the value",
+  "// is returned. Inside a caller's transaction the BEGIN / COMMIT / ROLLBACK nest as a",
+  "// SAVEPOINT (_scrml_db_guard), so a handled inner failure undoes only its own writes.",
+  "async function _scrml_sql_bang_envelope(db, begin, fn, body) {",
+  "  try {",
+  "    await db.unsafe(begin);",
+  "  } catch (err) {",
+  "    return _scrml_sql_propagate(err, fn);",
+  "  }",
+  "  let result;",
+  "  try {",
+  "    result = await body();",
+  "  } catch (err) {",
+  "    try { await db.unsafe(\"ROLLBACK\"); } catch { /* the connection is gone — never mask err */ }",
+  "    return _scrml_sql_propagate(err, fn);",
+  "  }",
+  "  if (result !== null && typeof result === \"object\" && result.__scrml_error === true) {",
+  "    await db.unsafe(\"ROLLBACK\"); // a `fail` exit (or a propagated failure) writes nothing",
+  "    return result;",
+  "  }",
+  "  try {",
+  "    await db.unsafe(\"COMMIT\");",
+  "  } catch (err) {",
+  "    try { await db.unsafe(\"ROLLBACK\"); } catch { /* already ended */ }",
+  "    return _scrml_sql_propagate(err, fn);",
+  "  }",
+  "  return result;",
+  "}",
+].join("\n");
 
 /**
  * S474 ruling 2 — the CPS `ServerError` envelope's message when the thrown error is a driver

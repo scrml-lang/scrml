@@ -242,6 +242,41 @@ async function boot(out) {
   };
 }
 
+// Calls one compiled route handler directly (no client), recording the server log.
+async function callRoute(out, fn, args) {
+  if (out.codes.length > 0) throw new Error(`compile errors: ${out.codes.join(", ")} — ${out.messages.join(" | ")}`);
+  const routes = await routesOf(out);
+  const route = routes.find((r) => r.path.includes("_route_" + fn + "_"));
+  if (!route) throw new Error(`no route for ${fn}: ${routes.map((r) => r.path).join(", ")}`);
+  const hdr = { "content-type": "application/json", cookie: "scrml_csrf=t", "x-csrf-token": "t" };
+  const logged = [];
+  const origError = console.error;
+  console.error = (...a) => { logged.push(a.map((x) => (x && x.message) || String(x)).join(" ")); };
+  try {
+    const resp = await route.handler({
+      url: "http://localhost" + route.path,
+      method: "POST",
+      headers: { get: (k) => hdr[String(k).toLowerCase()] ?? null },
+      json: async () => args,
+    });
+    return { status: resp.status, text: await resp.text(), logged };
+  } catch (e) {
+    return { status: "THROW", text: String((e && e.message) || e), logged };
+  } finally {
+    console.error = origError;
+  }
+}
+
+// The `users` emails, read through a SEPARATE connection after the response.
+function emails(out) {
+  const db = new Database(out.dbPath);
+  try {
+    return db.query("SELECT email FROM users ORDER BY email").all().map((r) => r.email);
+  } finally {
+    db.close();
+  }
+}
+
 let BUILT = null;
 const built = () => (BUILT ??= compileApp(APP));
 
@@ -333,14 +368,15 @@ describe("S474 ruling 3 — a declared-`!` server function's failure reaches the
     }
   });
 
-  test("emission: only a SqlError-typed `!` body ends in the propagation catch", () => {
+  test("emission: only a SqlError-typed `!` body runs in the transaction-and-propagate helper", () => {
     const js = built().serverJs;
-    expect(js).toContain(`_scrml_sql_propagate(_scrml_e, "addUser")`);
-    expect(js).toContain(`_scrml_sql_propagate(_scrml_e, "listGone")`);
-    expect(js).not.toContain(`_scrml_sql_propagate(_scrml_e, "find")`);
-    expect(js).not.toContain(`_scrml_sql_propagate(_scrml_e, "plainAdd")`);
+    expect(js).toContain(`_scrml_sql_bang_envelope(_scrml_sql, "BEGIN DEFERRED", "addUser", `);
+    expect(js).toContain(`_scrml_sql_bang_envelope(_scrml_sql, "BEGIN DEFERRED", "listGone", `);
+    expect(js).not.toContain(`"find", () =>`);
+    expect(js).not.toContain(`"plainAdd", () =>`);
     // The client bundle carries none of it.
     expect(built().clientJs).not.toContain("_scrml_sql_propagate");
+    expect(built().clientJs).not.toContain("_scrml_sql_bang_envelope");
   });
 });
 
@@ -484,8 +520,8 @@ describe("S474 ruling 2 as amended — a DEV build keeps the driver text on the 
     expect(dev().serverJs).toContain("This is a DEV build");
   });
 
-  test("under `protect=` a dev build still blanks (a driver message can quote a protected value, §14.8.9)", () => {
-    const out = compileApp(`<program>
+  test("under `protect=` a dev build still blanks (a driver message can quote a protected value, §14.8.9)", async () => {
+    const out = compileApp(`<program auth="none">
 <db src="./g.db" protect="secret" tables="users">
   \${
     <seen> = "none"
@@ -502,7 +538,204 @@ describe("S474 ruling 2 as amended — a DEV build keeps the driver text on the 
 </program>
 `, { devBuild: true });
     expect(out.codes).toEqual([]);
-    expect(out.serverJs).toContain(`_scrml_sql_propagate(_scrml_e, "listGone")`);
-    expect(out.serverJs).toContain(`if (failure.variant === "QueryFailed") failure.data = { message: "" };`);
+    // r1 (review F4) — executed, not only read: the route's response carries no driver text.
+    const r = await callRoute(out, "listGone", {});
+    expect(r.status).toBe(200);
+    expect(JSON.parse(r.text)).toEqual({ __scrml_error: true, type: "SqlError", variant: "QueryFailed", data: { message: "" } });
+    expect(r.logged.some((l) => l.includes("no such table: gone"))).toBe(true);
   });
+});
+
+// r1 (review F1 of #1704, HIGH) — a delivered SqlError means NOTHING was written. Before r1 the
+// variant was delivered over committed partial writes wherever the §8.9.2 Batch-Planner envelope
+// (a LEXICAL query count) was absent. Every case reads the table through a separate connection
+// after the response.
+describe("S474 r1 — a delivered SqlError means nothing was written (the `! -> SqlError` body has its own transaction)", () => {
+  test("p13: INSERT, then a querying (non-`!`) helper fails — the variant is delivered and NOTHING is written", async () => {
+    const out = compileApp(`<program db="./g.db">
+  \${
+    server function helper() {
+      ?{\`INSERT INTO users (email) VALUES (\${"taken@x.io"})\`}.run()
+      return 1
+    }
+    server function f(email)! -> SqlError {
+      ?{\`INSERT INTO users (email) VALUES (\${email})\`}.run()
+      helper()
+      return "ok"
+    }
+  }
+  <main><p>x</p></main>
+</program>
+`);
+    const r = await callRoute(out, "f", { email: "p13@x.io" });
+    expect(r.status).toBe(200);
+    expect(JSON.parse(r.text)).toEqual({ __scrml_error: true, type: "SqlError", variant: "ConstraintViolation", data: { field: "email" } });
+    expect(emails(out)).toEqual(["taken@x.io"]);
+  });
+
+  test("p3: a body-escalated `!` (no `server` modifier) with two INSERTs, the second failing — nothing written", async () => {
+    const out = compileApp(`<program db="./g.db">
+  \${
+    <seen> = "none"
+    function two(email)! -> SqlError {
+      ?{\`INSERT INTO users (email) VALUES (\${email})\`}.run()
+      ?{\`INSERT INTO users (email) VALUES (\${"taken@x.io"})\`}.run()
+      return "added"
+    }
+    function goTwo() {
+      const r = two("p3@x.io") !{ _ e :> { @seen = "f:" + e.variant; return } }
+      @seen = "ok:" + r
+    }
+  }
+  <main><p id="seen">\${@seen}</p><button id="b" onclick=goTwo()>o</button></main>
+</program>
+`);
+    const page = await boot(out);
+    try {
+      await page.click("#b");
+      expect(page.seen()).toBe("f:ConstraintViolation");
+    } finally {
+      page.restore();
+    }
+    expect(emails(out)).toEqual(["taken@x.io"]);
+  });
+
+  const P2 = `<program db="./g.db">
+  \${
+    server function two(email)! -> SqlError {
+      ?{\`INSERT INTO users (email) VALUES (\${email})\`}.run()
+      ?{\`INSERT INTO users (email) VALUES (\${"taken@x.io"})\`}.run()
+      return "added"
+    }
+    server function outer(email)! -> SqlError {
+      const r = two(email) !{ _ e :> "inner-failed:" + e.variant }
+      ?{\`INSERT INTO users (email) VALUES (\${email + ".outer"})\`}.run()
+      return r
+    }
+    server function outerFails(email)! -> SqlError {
+      const r = two(email) !{ _ e :> "inner-failed:" + e.variant }
+      ?{\`INSERT INTO users (email) VALUES (\${email + ".outer"})\`}.run()
+      ?{\`INSERT INTO users (email) VALUES (\${"taken@x.io"})\`}.run()
+      return r
+    }
+    server function plainOuter(email) {
+      const r = two(email) !{ _ e :> "inner-failed:" + e.variant }
+      ?{\`INSERT INTO users (email) VALUES (\${email + ".plain"})\`}.run()
+      return r
+    }
+  }
+  <main><p>x</p></main>
+</program>
+`;
+
+  test("p2: an inner `!` callee handled by a `!` server caller — the inner savepoint rolls back, the caller's own write is kept", async () => {
+    const out = compileApp(P2);
+    const r = await callRoute(out, "outer", { email: "p2@x.io" });
+    expect(r.status).toBe(200);
+    expect(JSON.parse(r.text)).toBe("inner-failed:ConstraintViolation");
+    expect(emails(out)).toEqual(["p2@x.io.outer", "taken@x.io"]);
+  });
+
+  test("p2: the same, and then the caller fails itself — everything rolls back, the inner savepoint included", async () => {
+    const out = compileApp(P2);
+    const r = await callRoute(out, "outerFails", { email: "p2b@x.io" });
+    expect(JSON.parse(r.text)).toEqual({ __scrml_error: true, type: "SqlError", variant: "ConstraintViolation", data: { field: "email" } });
+    expect(emails(out)).toEqual(["taken@x.io"]);
+  });
+
+  test("p2: a NON-`!` caller that handles the inner failure — the inner transaction rolls back, the caller's write autocommits", async () => {
+    const out = compileApp(P2);
+    const r = await callRoute(out, "plainOuter", { email: "p2c@x.io" });
+    expect(JSON.parse(r.text)).toBe("inner-failed:ConstraintViolation");
+    expect(emails(out)).toEqual(["p2c@x.io.plain", "taken@x.io"]);
+  });
+
+  test("the direct route: two INSERTs, the second failing — the variant is delivered and the first is rolled back", async () => {
+    const out = compileApp(P2);
+    const r = await callRoute(out, "two", { email: "direct@x.io" });
+    expect(JSON.parse(r.text).variant).toBe("ConstraintViolation");
+    expect(emails(out)).toEqual(["taken@x.io"]);
+    // And success commits.
+    const ok = compileApp(`<program db="./g.db">
+  \${
+    server function both(email)! -> SqlError {
+      ?{\`INSERT INTO users (email) VALUES (\${email})\`}.run()
+      ?{\`INSERT INTO users (email) VALUES (\${email + ".2"})\`}.run()
+      return "added"
+    }
+  }
+  <main><p>x</p></main>
+</program>
+`);
+    const r2 = await callRoute(ok, "both", { email: "ok@x.io" });
+    expect(JSON.parse(r2.text)).toBe("added");
+    expect(emails(ok)).toEqual(["ok@x.io", "ok@x.io.2", "taken@x.io"]);
+  });
+
+  test("a `fail` exit after a write rolls the write back too", async () => {
+    const out = compileApp(`<program db="./g.db">
+  \${
+    type MyErr:enum = { Nope }
+    server function writeThenFail(email)! -> SqlError {
+      ?{\`INSERT INTO users (email) VALUES (\${email})\`}.run()
+      fail SqlError.ConnectionLost
+    }
+  }
+  <main><p>x</p></main>
+</program>
+`);
+    const r = await callRoute(out, "writeThenFail", { email: "wf@x.io" });
+    expect(JSON.parse(r.text).variant).toBe("ConnectionLost");
+    expect(emails(out)).toEqual(["taken@x.io"]);
+  });
+});
+
+// r1 (review F2 + F3) — the db-authoritative tier runs every request-scoped query inside
+// `_scrml_sql.begin(cb)` (the guard's callback transaction), which r0 did not mark. Against an
+// unreachable Postgres server: the variant is delivered, classified ConnectionLost, and no driver
+// text crosses in a production build.
+describe("S474 r1 — db-authoritative (Postgres callback transaction): an unreachable server is delivered as ConnectionLost", () => {
+  const PG = `<program db="postgres://127.0.0.1:1/app">
+  <schema>
+    invoices {
+      id: text primary key
+      tenant_id: text not null
+      amount: real not null
+    } db-authoritative
+  </schema>
+  \${
+    <s> = "none"
+    <rows> = []
+    server function listInv()! -> SqlError {
+      return ?{\`select id, tenant_id, amount from invoices\`}.all()
+    }
+    function mixed() {
+      const found = ?{\`select id from invoices\`}.all()
+      @s = "loaded"
+      return found
+    }
+    function go() { @rows = mixed() !{ _ :> [] } }
+  }
+  <main><p id="seen">\${@s}</p><button id="b" onclick=go()>g</button></main>
+</program>
+`;
+
+  test("listInv: 200, SqlError.ConnectionLost, no driver text in the body; the server log has it", async () => {
+    const out = compileApp(PG);
+    expect(out.serverJs).toContain(".begin(");
+    const r = await callRoute(out, "listInv", {});
+    expect(r.status).toBe(200);
+    expect(JSON.parse(r.text)).toEqual({ __scrml_error: true, type: "SqlError", variant: "ConnectionLost", data: null });
+    expect(r.text).not.toMatch(/failed to connect|ECONNREFUSED|127\.0\.0\.1/i);
+    expect(r.logged.some((l) => l.startsWith("[scrml] server function `listInv` failed:"))).toBe(true);
+  }, 30000);
+
+  test("the CPS ServerError of the same failure carries an empty message in production", async () => {
+    const out = compileApp(PG);
+    const r = await callRoute(out, "mixed", {});
+    expect(r.status).toBe(500);
+    const env = JSON.parse(r.text);
+    expect(env.variant).toBe("ServerError");
+    expect(env.data.message).toBe("");
+  }, 30000);
 });
