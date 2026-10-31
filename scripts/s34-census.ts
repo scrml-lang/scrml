@@ -56,13 +56,15 @@
  *
  * Usage:  bun scripts/s34-census.ts [--full] [--json]
  *         bun scripts/s34-census.ts --check-new [--base <ref>]   # §34.0 gate, DIFF-SCOPED
+ *         bun scripts/s34-census.ts --check-all                  # same checks, EVERY §34 row (measurement)
  */
 
-import { readFileSync, readdirSync, statSync, existsSync } from "node:fs";
+import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join, relative, dirname } from "node:path";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { parseS34Rows } from "./s34-catalog.ts";
+import { extractCitations, identsOfSource, staleReasons } from "./s34-provenance.ts";
 
 // `new URL(import.meta.url).pathname` yields a `/C:/…` form on Windows that does not
 // open (the leading slash makes an invalid `\C:\…` after dirname/join); `fileURLToPath`
@@ -73,7 +75,11 @@ const rawArgv = process.argv.slice(2);
 const argv = new Set(rawArgv);
 const FULL = argv.has("--full");
 const JSON_OUT = argv.has("--json");
-const CHECK_NEW = argv.has("--check-new");
+// --check-all: the --check-new checks over EVERY §34 row, not a diff — the measurement mode for a
+// change to the resolver (pa-base §8: measure what a newly-rejecting gate rejects before landing).
+// Not a CI gate: the legacy backlog is the PA's to rule on, so CI stays diff-scoped.
+const CHECK_ALL = argv.has("--check-all");
+const CHECK_NEW = argv.has("--check-new") || CHECK_ALL;
 const BASE_REF = (() => {
   const i = rawArgv.indexOf("--base");
   return i >= 0 && rawArgv[i + 1] ? rawArgv[i + 1] : "origin/main";
@@ -223,10 +229,11 @@ const SCAN = ["compiler/src", "compiler/native-parser", "compiler/runtime", "com
 const EXT = /\.(ts|js|mjs|scrml)$/;
 const TOKEN = /\b[EWI]-[A-Z0-9]+(?:-[A-Z0-9]+)*\b/g;
 const JSISH = /\.(ts|js|mjs)$/;
-const IDENT = /[A-Za-z_$][A-Za-z0-9_$]*/g;
 const implHits = new Map<string, number>();
-/** Every identifier appearing in EXECUTABLE source (comments stripped) — backs the §34.0
- *  provenance check below. Populated only for `--check-new`; the default census never needs it. */
+/** Every identifier appearing in EXECUTABLE source (comments and literal contents blanked) across
+ *  every scanned tree, `.scrml` included (S474 — the bootstrap's symbols were invisible before) —
+ *  backs the tree-wide citation forms of the §34.0 provenance check below (scripts/s34-provenance.ts).
+ *  Populated only for `--check-new`/`--check-all`; the default census never needs it. */
 const treeIdents = new Set<string>();
 let filesScanned = 0;
 for (const rootRel of SCAN) {
@@ -239,8 +246,8 @@ for (const rootRel of SCAN) {
     // A COMMENT IS NOT AN EMITTER. Strip comment spans before the token match, or a code
     // named in prose counts as an implementation site (see stripComments above).
     const code = JSISH.test(f) ? stripComments(t) : t;
-    if (CHECK_NEW && JSISH.test(f)) {
-      for (const id of code.match(IDENT) ?? []) treeIdents.add(id);
+    if (CHECK_NEW) {
+      for (const id of identsOfSource(t, f) ?? []) treeIdents.add(id);
     }
     if (!isImpl) continue;
     for (const tok of code.match(TOKEN) ?? []) {
@@ -290,23 +297,30 @@ if (CHECK_NEW) {
   // `git diff base...HEAD` (three-dot) compares COMMITTED HEAD only and silently ignores uncommitted
   // edits — which made the first cut of this gate hollow: it reported PASS on a deliberately bad row.
   // Caught by the bite proof, which is the entire reason §8 requires one.
-  let mergeBase = BASE_REF;
-  try {
-    mergeBase = execFileSync("git", ["merge-base", BASE_REF, "HEAD"], { cwd: ROOT, encoding: "utf8" }).trim();
-  } catch { /* detached / shallow clone — fall back to the ref itself */ }
+  // --check-all reads every §34 row instead of a diff (measurement, not CI).
+  let candidates: string[];
+  if (CHECK_ALL) {
+    candidates = parseS34Rows(specLines).map((r) => r.raw);
+  } else {
+    let mergeBase = BASE_REF;
+    try {
+      mergeBase = execFileSync("git", ["merge-base", BASE_REF, "HEAD"], { cwd: ROOT, encoding: "utf8" }).trim();
+    } catch { /* detached / shallow clone — fall back to the ref itself */ }
 
-  let diff = "";
-  try {
-    diff = execFileSync("git", ["diff", "-U0", mergeBase, "--", "compiler/SPEC.md"],
-      { cwd: ROOT, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
-  } catch (e) {
-    console.error(`§34.0 gate: cannot diff against '${BASE_REF}' (merge-base ${mergeBase}) — ${(e as Error).message}`);
-    process.exit(2);
+    let diff = "";
+    try {
+      diff = execFileSync("git", ["diff", "-U0", mergeBase, "--", "compiler/SPEC.md"],
+        { cwd: ROOT, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
+    } catch (e) {
+      console.error(`§34.0 gate: cannot diff against '${BASE_REF}' (merge-base ${mergeBase}) — ${(e as Error).message}`);
+      process.exit(2);
+    }
+    candidates = diff.split("\n").filter((l) => l.startsWith("+") && !l.startsWith("+++")).map((l) => l.slice(1));
   }
 
   const EMITTER = /emitted at|emitter:|`(?:compiler|scripts|lsp|stdlib)\/[A-Za-z0-9_./-]+`|\((?:compiler|scripts)\/[A-Za-z0-9_./-]+:\d+\)/i;
 
-  // -- provenance RESOLUTION (this round) --------------------------------------------------------
+  // -- provenance RESOLUTION ---------------------------------------------------------------------
   // The check above is a regex for the SHAPE of a provenance note. It never asked whether the note
   // points at anything: a row naming a deleted file or a renamed function passed, because a
   // backticked path is a backticked path. Measured on this tree at S364 — `I-MATCH-PROMOTABLE`
@@ -315,32 +329,21 @@ if (CHECK_NEW) {
   // The row was corrected at S365, so this reads as history, not as a live defect — a comment
   // asserting a falsehood about the current tree is the exact rot this resolver was built to stop.
   //
-  // So a note that HAS the shape must also RESOLVE:
+  // So a note that HAS the shape must also RESOLVE (scripts/s34-provenance.ts `staleReasons`):
   //   - every backticked repo path in the row must exist on disk
-  //   - every symbol the row names must appear in executable source (comments stripped, so a
-  //     function deleted but still eulogised in a comment does not launder the claim)
-  const PATH_REF = /`((?:compiler|scripts|lsp|stdlib)\/[A-Za-z0-9_./-]+?)(?::\d+)?`/g;
-  // The two provenance conventions §34 actually uses, and only those: a backticked symbol
-  // IMMEDIATELY after a backticked path (`compiler/src/type-system.ts` `checkPrintArgs`), or one
-  // introduced by "via"/"in". Anything looser reads ordinary prose as a symbol claim.
-  const SYMBOL_REFS = [
-    /`(?:compiler|scripts|lsp|stdlib)\/[A-Za-z0-9_./-]+(?::\d+)?`\s+`([A-Za-z_$][A-Za-z0-9_$]*)`/g,
-    /\bvia\s+`([A-Za-z_$][A-Za-z0-9_$]*)`/gi,
-    /\bin\s+(?:the\s+)?`([A-Za-z_$][A-Za-z0-9_$]*)`/gi,
-  ];
-  // Backticked prose that is NOT a JS symbol: pure lowercase_snake_case with no leading underscore
-  // — e.g. E-SCHEMA-011's row names the Postgres catalog `pg_constraint`. This codebase has no
-  // lowercase_snake function names, and `_scrml_*` keeps its leading underscore, so the filter costs
-  // nothing real. It was the ONLY false positive across all 811 catalogued rows.
-  const NOT_A_SYMBOL = /^[a-z]+(?:_[a-z0-9]+)+$/;
+  //   - every symbol the row names must appear in executable source — comments and literal
+  //     contents blanked, so a function deleted but still eulogised in a comment does not launder
+  //     the claim; a symbol cited WITH a path (`path` `sym` or `path` (`sym`)) must appear in
+  //     THAT file, `.scrml` included (S474: the bootstrap's symbols were never checked before).
 
   const offenders: { code: string; why: string }[] = [];
   const stale: { code: string; why: string }[] = [];
   let added = 0;
+  // Citations checked, by form — printed by --check-all so a measurement shows what was RESOLVED,
+  // not only what failed (a resolver that parses nothing also reports zero failures).
+  const citeCounts = new Map<string, number>();
 
-  for (const line of diff.split("\n")) {
-    if (!line.startsWith("+") || line.startsWith("+++")) continue;
-    const row = line.slice(1);
+  for (const row of candidates) {
     if (!row.startsWith("|")) continue;
     const cells = row.split("|");
     if (cells.length < 3) continue;
@@ -354,20 +357,10 @@ if (CHECK_NEW) {
 
     // A row may name an emitter AND declare itself spec-ahead. Whatever provenance it does name
     // still has to resolve — a Nominal row citing a deleted file is a stale claim either way.
-    for (const m of row.matchAll(PATH_REF)) {
-      if (!existsSync(join(ROOT, m[1]))) {
-        stale.push({ code, why: `names \`${m[1]}\`, which does not exist` });
-      }
-    }
-    for (const re of SYMBOL_REFS) {
-      re.lastIndex = 0;
-      for (const m of row.matchAll(re)) {
-        const sym = m[1];
-        if (NOT_A_SYMBOL.test(sym)) continue;
-        if (!treeIdents.has(sym)) {
-          stale.push({ code, why: `names symbol \`${sym}\`, which appears in no executable source` });
-        }
-      }
+    for (const why of staleReasons(row, { root: ROOT, treeIdents })) stale.push({ code, why });
+    for (const c of extractCitations(row)) {
+      const k = c.path?.endsWith(".scrml") ? `${c.form} (.scrml)` : c.form;
+      citeCounts.set(k, (citeCounts.get(k) ?? 0) + 1);
     }
 
     if (DECLARED_AHEAD.test(row)) continue;     // (2) honest spec-ahead declaration
@@ -375,10 +368,18 @@ if (CHECK_NEW) {
     offenders.push({ code, why: "no emitter provenance note, no spec-ahead declaration, not struck" });
   }
 
+  const scope = CHECK_ALL ? "§34 row(s) (--check-all)" : "new/changed §34 row(s)";
   if (!added) { console.log(`§34.0 gate: no new/changed §34 rows vs ${BASE_REF} — PASS`); process.exit(0); }
+  if (CHECK_ALL) {
+    const total = [...citeCounts.values()].reduce((a, b) => a + b, 0);
+    console.log(`§34.0 --check-all: ${total} symbol citation(s) resolved across ${added} row(s) — ` +
+      [...citeCounts].sort().map(([k, v]) => `${k} ${v}`).join(" · "));
+    console.log(`  stale provenance: ${stale.length} · legacy no-provenance rows: ${offenders.length}` +
+      ` (the latter is the pre-§34.0 backlog; --check-new, the CI mode, judges new/changed rows only)`);
+  }
   if (offenders.length || stale.length) {
     const n = offenders.length + stale.length;
-    console.error(`§34.0 gate FAILED — ${n} problem(s) across ${added} new/changed §34 row(s):\n`);
+    console.error(`§34.0 gate FAILED — ${n} problem(s) across ${added} ${scope}:\n`);
     for (const o of offenders) console.error(`  ${o.code} — ${o.why}`);
     for (const s of stale) console.error(`  ${s.code} — STALE PROVENANCE: ${s.why}`);
     if (offenders.length) {
@@ -390,12 +391,14 @@ if (CHECK_NEW) {
     }
     if (stale.length) {
       console.error(`\nA provenance note SHALL RESOLVE: every backticked repo path must exist, and every`);
-      console.error(`symbol named via \`path\` \`sym\` / "via \`sym\`" / "in \`sym\`" must appear in executable`);
-      console.error(`source. A note pointing at a renamed function is a false claim in the §62.2 contract.`);
+      console.error(`symbol named via \`path\` \`sym\` / \`path\` (\`sym\`) / "via \`sym\`" / "in \`sym\`" must appear in`);
+      console.error(`executable source — IN THAT FILE when a path is given (.scrml included; comments and`);
+      console.error(`string/display-text contents do not count). A note pointing at a renamed function is a`);
+      console.error(`false claim in the §62.2 contract.`);
     }
     process.exit(1);
   }
-  console.log(`§34.0 gate: ${added} new/changed §34 row(s), all well-formed (provenance resolves) — PASS`);
+  console.log(`§34.0 gate: ${added} ${scope}, all well-formed (provenance resolves) — PASS`);
   process.exit(0);
 }
 
