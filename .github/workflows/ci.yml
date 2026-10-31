@@ -47,7 +47,12 @@
 #   ⚑ `checks` runs `scripts/ci-shards.ts needs`: every job except `gate` / `tracking` must be in
 #   `gate.needs`, so a blocking job added later cannot be silently non-blocking.
 #
-#   NON-BLOCKING job: `tracking` (bootstrap conformance count + severity-table staleness, never in `gate`).
+#   NON-BLOCKING job: `tracking` (bootstrap conformance report staleness on runs where `checks` skips it).
+#
+#   ⚑ GENERATED BLOCKS (S474 owner ruling: "a post-merge bot … regenerates them on main; CI checks only the
+#   sources"): every currency check of a derived block below runs through scripts/ci-stale-warn.sh — exit 4
+#   (stale) is a ::warning::, every other non-zero FAILS (a crash, a degenerate measurement, a missing
+#   anchor, a structural/source violation). .github/workflows/generated-regen.yml regenerates main.
 #   `windows` was non-blocking until S473 and sat red on main from #1620 on, hiding each new Windows
 #   regression behind the old ones; it is now blocking through the ratchet (its header, and .github/CI.md).
 #
@@ -211,7 +216,7 @@ jobs:
       # FACTS holds repo-wide totals (compiler/src lines, test files, SPEC lines …) that ~60% of
       # landings move (measured: 48 of the 78 landings 2026-10-10..22), so every landing staled every
       # other queued PR's FACTS.md and the queue kicked it. main is now regenerated after each merge by
-      # `.github/workflows/facts-regen.yml`. Exit 4 (stale) → a ::warning:: annotation, still in this
+      # `.github/workflows/generated-regen.yml` (S474; was facts-regen.yml). Exit 4 (stale) → a ::warning:: annotation, still in this
       # log; EVERY other non-zero FAILS — 2 (degenerate zero measurement), 3 (missing @generated
       # anchor), 5 (dangling symlink in a measured tree) and 1, which is bun's code for an uncaught
       # exception. S472: stale used to be 1, so a CRASHING facts.ts was warned through here as stale
@@ -224,20 +229,26 @@ jobs:
           bun scripts/facts.ts --check
           rc=$?
           if [ "$rc" = "4" ]; then
-            echo "::warning title=docs/FACTS.md stale (non-blocking)::Figures differ from this tree. facts-regen.yml regenerates FACTS.md on main after merge; do not commit a regen in this PR."
+            echo "::warning title=docs/FACTS.md stale (non-blocking)::Figures differ from this tree. generated-regen.yml regenerates FACTS.md on main after merge; do not commit a regen in this PR."
             exit 0
           fi
           exit $rc
       # S462 md phase 1 — the scrml:md runtime shim is impl#1's compile of the scrml reader
       # (SPEC §67.8, one md reader); it must be byte-current with the source AND the compiler.
+      # S474: STAYS BLOCKING and in-PR — generated CODE the runtime LOADS, not a derived doc block. Left to
+      # the post-merge bot, main would ship a md reader that is not the scrml source's between the merge
+      # and the bot's landing (and every test of it would grade the stale one).
       - name: scrml:md shim gate (compiler/runtime/stdlib/md.js generated from stdlib/md/index.scrml)
         if: ${{ !cancelled() }}
         run: bun scripts/gen-md-shim.ts --check
       # S457 — docs/bootstrap-conformance.md went STALE for SEVEN consecutive map windows while its
-      # `--check` sat in continue-on-error `tracking` (non-compliance N-S455-3). BLOCKING here, but
-      # PATH-SCOPED: only a pull request whose diff touches `conformance/cases/**` or
-      # `compiler/self-host-v2/**` must leave the report current. What blocks is STALENESS only — the
-      # FAIL count never sets the exit status. Remedy: `bun scripts/bootstrap-conformance.ts --write`.
+      # `--check` sat in continue-on-error `tracking` (non-compliance N-S455-3). PATH-SCOPED: runs only on
+      # a pull request whose diff touches `conformance/cases/**` or `compiler/self-host-v2/**`.
+      # S474 — STALENESS NO LONGER BLOCKS (owner ruling; generated-regen.yml regenerates main after merge,
+      # which is also what cures the "two current PRs merge into a stale combination" case below). What
+      # still BLOCKS: exit 2 (the bootstrap bundle failed to build/load, or zero cases attempted) and 1 (a
+      # crash) — a PR that breaks the bootstrap's build must not land, or the bot breaks on main. The FAIL
+      # count never sets the exit status.
       #
       # PR-ONLY: on a push to `main` there is no PR base, and two individually-current corpus PRs can
       # merge into a stale combination; failing the trunk check for that would be cry-wolf. `tracking`
@@ -246,31 +257,51 @@ jobs:
       # HONEST LIMIT: the report also reads impl#1's front end (`compiler/src/commands/fix-s66.js`) and
       # `conformance/*.ts`, so a PR touching only those can stale it without tripping this step.
       # `git diff` erroring (bad base SHA) counts as "touched" — the check runs (fail closed).
-      - name: Bootstrap conformance report current (PRs touching conformance/cases or self-host-v2)
+      - name: Bootstrap conformance report (PRs touching conformance/cases or self-host-v2; stale WARNS)
         if: ${{ !cancelled() && (github.event_name == 'pull_request' || github.event_name == 'merge_group') }}
         run: |
           if git diff --quiet "${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}"...HEAD -- conformance/cases compiler/self-host-v2; then
-            echo "no conformance/cases or compiler/self-host-v2 change in this PR — report currency not required here"
+            echo "no conformance/cases or compiler/self-host-v2 change in this PR — the bootstrap run is not repeated here"
           else
-            bun scripts/bootstrap-conformance.ts --check
+            scripts/ci-stale-warn.sh docs/bootstrap-conformance.md bun scripts/bootstrap-conformance.ts --check
           fi
       # S409 — an unresolved merge conflict reached `main` at e74f5423 (#900) and the gate was GREEN.
       - name: Conflict-marker gate (no unresolved merge markers on the trunk)
         if: ${{ !cancelled() }}
         run: bun scripts/conflict-marker-gate.ts
-      # S409 — gates every Sections row's range/size AND asserts the scan reached all sections (a
+      # S409 — checks every Sections row's range/size AND asserts the scan reached all sections (a
       # stray line ends the table scan, and a zero over a partial scan is not a pass).
-      - name: SPEC-INDEX currency gate (totals + every row's range + full-scan coverage)
+      # S474 — stale totals / row Lines-Size cells (exit 4) WARN: generated-regen.yml regenerates them.
+      # Still BLOCKING (exit 1): a SPEC section with NO row (a new § needs a hand-written row; --write never
+      # adds one), a TRUNCATED scan, a row naming a section SPEC.md lacks, missing totals anchors.
+      - name: SPEC-INDEX gate (rows exist + full scan; stale totals/ranges WARN)
         if: ${{ !cancelled() }}
-        run: bun run scripts/regen-spec-index.ts --check
+        run: scripts/ci-stale-warn.sh compiler/SPEC-INDEX.md bun run scripts/regen-spec-index.ts --check
       # S473 — SPEC §47 sat unimplemented in the bootstrap with no gap, refusal or ruling until it was
       # found by accident. docs/bootstrap-spec-coverage.md classifies every SPEC section against the
       # bootstrap; this gate fails when a top-level § in SPEC-INDEX has no row, a SILENT-* row cites no
-      # gap, a cited gap id does not exist, or the totals block is stale (a closed gap on a SILENT/PARTIAL
-      # row only warns). Tested by compiler/tests/unit/spec-coverage-check-s473.test.js.
+      # gap, or a cited gap id does not exist (a closed gap on a SILENT/PARTIAL row only warns). S474: a
+      # stale totals block alone exits 4 and WARNS (generated-regen.yml regenerates it); missing anchors
+      # and every rule above stay BLOCKING. Tested by compiler/tests/unit/spec-coverage-check-s473.test.js.
       - name: SPEC-coverage gate (every § has a row; no SILENT row without a gap)
         if: ${{ !cancelled() }}
-        run: bun scripts/spec-coverage-check.ts
+        run: scripts/ci-stale-warn.sh docs/bootstrap-spec-coverage.md bun scripts/spec-coverage-check.ts
+      # S474 — the gap ledger + session index (state.ts). Was NOT CI-gated at all: a PR could land a
+      # ledger that makes `state.ts --write` refuse (an unclassifiable @gap status throws; a stray second
+      # START/END anchor; a degenerate zero parse) and the bot would then fail on main. Staleness of
+      # `@generated:gap-counts` / `@generated:recent-sessions` (exit 4) WARNS — recent-sessions is stale
+      # on every PR by construction (a wrap's own merge commit does not exist yet; the bot catches it up).
+      # Needs fetch-depth: 0 (this job has it): recent-sessions pages `git log` for 8 wrap commits.
+      - name: Gap ledger + session index (state.ts — sources must parse; stale counts WARN)
+        if: ${{ !cancelled() }}
+        run: scripts/ci-stale-warn.sh "docs/known-gaps.md gap-counts / master-list.md recent-sessions" bun scripts/state.ts --check
+      # S474 — compiler/self-host-v2/severity.scrml (generated from SPEC §34). Moved here from `tracking`:
+      # byte staleness WARNS (4) — answer-changing drift fails slice-m4/severity.test.js on the PR, so only
+      # answer-neutral drift reaches main, and the bot regenerates it — but a CRASHING generator (a §34
+      # table the catalog parser cannot read) must fail the PR, not first the bot on main.
+      - name: Bootstrap severity table (generator must run; stale WARNS)
+        if: ${{ !cancelled() }}
+        run: scripts/ci-stale-warn.sh compiler/self-host-v2/severity.scrml bun scripts/gen-bootstrap-severity.ts --check
       # A duplicate delta-log sequence number silently drops an entry from the flogence digest.
       # BASELINED (handOffs/delta-log-dupes.baseline.json) — only a NEW duplicate fails.
       - name: delta-log sequence gate (a duplicate silently drops an entry from the digest)
@@ -570,8 +601,9 @@ jobs:
         env:
           PUPPETEER_SKIP_DOWNLOAD: "true"
         run: bun install --frozen-lockfile
-      # S449 — how many conformance cases the PURE bootstrap passes; `--check` exits 1 only when
-      # docs/bootstrap-conformance.md is stale. S468 DE-DUP: on a PR that touches conformance/cases or
+      # S449 — how many conformance cases the PURE bootstrap passes; `--check` exits 4 (S474; was 1) only
+      # when docs/bootstrap-conformance.md is stale — a warning here, as in `checks`; 2 = the bootstrap did
+      # not build/load. S468 DE-DUP: on a PR that touches conformance/cases or
       # compiler/self-host-v2 the BLOCKING `checks` step runs this exact check, so it is not run twice;
       # here it reports staleness on every OTHER run (push, nightly, dispatch, untouched PRs). The
       # touched-test below is byte-for-byte the blocking step's, so exactly one of the two runs.
@@ -581,14 +613,10 @@ jobs:
           if [ "${{ github.event_name }}" = "pull_request" ] && ! git diff --quiet "${{ github.event.pull_request.base.sha }}"...HEAD -- conformance/cases compiler/self-host-v2; then
             echo "this PR touches conformance/cases or compiler/self-host-v2 — the blocking 'checks' job runs this check; not repeated here"
           else
-            bun scripts/bootstrap-conformance.ts --check
+            scripts/ci-stale-warn.sh docs/bootstrap-conformance.md bun scripts/bootstrap-conformance.ts --check
           fi
-      # s451-boot-diag-severity — compiler/self-host-v2/severity.scrml is GENERATED from SPEC §34.
-      # Staleness is TRACKED, not gated (a docs-only §34 row can stale it without changing any answer);
-      # the SEMANTIC check is in slice-m4/severity.test.js. Regenerate: `bun scripts/gen-bootstrap-severity.ts`.
-      - name: Bootstrap severity table (tracking; report staleness)
-        continue-on-error: true
-        run: bun scripts/gen-bootstrap-severity.ts --check
+      # (S474: the severity-table staleness step moved from here to `checks` — generator crashes block,
+      # byte staleness warns; see "Bootstrap severity table" there.)
 
   # ───────────────────────────────────────────────────────────────────────────────────────────────
   # windows — BLOCKING since S473 (in `gate.needs`), judged by a RATCHET. Surfaces OS-path-separator

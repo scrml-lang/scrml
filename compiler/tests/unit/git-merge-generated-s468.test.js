@@ -27,6 +27,7 @@ import {
   gapIdCounts,
   unionEntryAdditions,
   regenBlock,
+  failBlock,
   stripRegenBlock,
 } from "../../../scripts/git-merge-generated.ts";
 import { gapCountsSection } from "../../../scripts/state.ts";
@@ -336,6 +337,26 @@ describe("cross-file sections — one-sided change taken; a TWO-sided change STO
     expect(stripRegenBlock(blocked + `${OPEN} x\na\n${"=".repeat(7)}\nb\n${CLOSE} y\n`)).toBeNull();
   });
 
+  test("BITE (S474 SPEC-INDEX line-1 leak): every driver block is marker lines only, so no resolution leaves text behind", () => {
+    // Merge d327610cb (#1682 lane) resolved a regen stop on compiler/SPEC-INDEX.md by keeping the block's
+    // OURS side, a plain-text "Run `bun scripts/git-merge-generated.ts --regen`: …" line, and that line sat
+    // on main as line 1. Pre-fix: both blocks carried one such line and this test failed on it.
+    const isMarker = (l) => /^(<{7}|={7}|>{7})( |\r?$)/.test(l);
+    for (const block of [regenBlock(7, ["spec-index-totals", "spec-index-rows"]), failBlock(7, "INTERNAL ERROR: x")]) {
+      const lines = block.split("\n").filter((l) => l !== "");
+      expect(lines.filter((l) => !isMarker(l))).toEqual([]);
+      // the "take both sides" / "delete the marker lines" resolution leaves NOTHING of the block
+      expect(block.split("\n").filter((l) => !isMarker(l)).join("")).toBe("");
+    }
+    // a merge stopped by a pre-S474 driver (one text line on the OURS side) still strips
+    const body = facts("0.8.0", "1,754");
+    const old = `${OPEN} scrml-generated-merge: REGENERATION REQUIRED — both sides changed derived content: facts-table\n` +
+      "Run `bun scripts/git-merge-generated.ts --regen`: it regenerates this file from the MERGED tree and stages it.\n" +
+      `${"=".repeat(7)}\n${CLOSE} (the text below is provisional)\n`;
+    expect(stripRegenBlock(old + body)).toBe(body);
+    expect(stripRegenBlock(crlf(old) + crlf(body))).toBe(crlf(body));
+  });
+
   test("BITE (Windows checkout, CRLF): the regen block still strips, and a CRLF conflict marker is still refused", () => {
     // `core.autocrlf=true` checks the stopped file out CRLF; `--regen` reads that worktree copy.
     const body = crlf(facts("0.8.0", "1,754"));
@@ -558,6 +579,8 @@ describe("end to end through `git merge`, with the config the installer ships", 
       const text = kg(root);
       expect(text).toContain(OPEN);
       expect(text).toContain("DRIVER FAILED");
+      // S474: the wrapper's banner is marker lines only (pre-fix its 2nd line was plain text)
+      expect(text.split("\n").slice(0, 3).map((l) => /^(<{7}|={7}|>{7})( |$)/.test(l))).toEqual([true, true, true]);
       expect(text).toContain("g-new-ours");
       expect(text).toContain("g-new-theirs"); // the pre-fix wrapper left pure ours: theirs absent
       expect(g("ls-files", "-u").stdout).toContain("docs/known-gaps.md");

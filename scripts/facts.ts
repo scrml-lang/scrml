@@ -11,7 +11,7 @@
 //   2  degenerate zero measurement — the instrument is not measuring the repo   (always fatal)
 //   3  missing `@generated` anchor — a broken FILE `--write` cannot repair      (always fatal)
 //   4  STALE — `--check` only: the figures moved. Since S469 CI + pre-push treat exactly this
-//      code as a WARNING: main is regenerated post-merge (.github/workflows/facts-regen.yml).
+//      code as a WARNING: main is regenerated post-merge (.github/workflows/generated-regen.yml).
 //   5  broken tree — a dangling symlink under a measured directory               (always fatal)
 //   anything else (bun exits 1 on an uncaught exception) — the script CRASHED   (always fatal)
 //
@@ -420,7 +420,7 @@ for (const m of missing) console.error(`  MISSING ${m}`);
 // hard error (exit 3) everywhere — `--write` exits 3 on it too. A STALE section only means "the
 // numbers moved": since S469 the PR-side CI step and the pre-push hook treat it as a WARNING —
 // exit EXIT_STALE (4), never 1, which is bun's uncaught-exception code (S472) — because
-// .github/workflows/facts-regen.yml regenerates docs/FACTS.md on main after every merge (owner
+// .github/workflows/generated-regen.yml (S474; was facts-regen.yml) regenerates docs/FACTS.md on main after every merge (owner
 // ruling S469: "Regenerate on main after merge"). Exit 2 (degenerate zero, above) is always fatal.
 if (missing.length > 0) {
   console.error(
@@ -432,7 +432,7 @@ if (missing.length > 0) {
 if (stale.length > 0) {
   console.error(
     `\nSTALE — docs/FACTS.md is out of date with this tree. main is regenerated automatically after\n` +
-      `every merge (.github/workflows/facts-regen.yml), so a pull request need not — and should not —\n` +
+      `every merge (.github/workflows/generated-regen.yml), so a pull request need not — and should not —\n` +
       `commit a FACTS.md regen (it only conflicts with the bot's). By hand: \`bun scripts/facts.ts --write\`.`,
   );
   process.exit(EXIT_STALE);

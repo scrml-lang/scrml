@@ -16788,7 +16788,8 @@ ${
     // s473 (ruled refusals) — §66.15.2 slot multiplicity (S473 D11), rules 2
     // and 3 (rule 1 is the use's — resolveUse): "More than one unnamed slot — a
     // declaration's `renders` holds more than one unnamed `<slot/>`:
-    // E-COMPONENT-020" (reported at each slot after the first); "A slot outside
+    // E-COMPONENT-020" (s474 F7: counted per render path — reported at each
+    // slot some path reaches with a slot already rendered, excessSlotsIn); "A slot outside
     // `renders` — a `<slot/>` anywhere but inside a declaration's `renders` (a
     // program or page body, a plain markup body, a declaration body outside
     // `renders`): E-DECL-SLOT-OUTSIDE-RENDERS". A slot is inside a renders when
@@ -16813,19 +16814,21 @@ ${
         if (namedSlot(e)) return addElem(st, e.nid, ElemFact.MSlot)
         let own: int[] = []
         let looped: int[] = []
+        let excess: int[] = []
         const cd: DeclSrc | not = ctxDecl(env)
         if (cd is given && !cd.isProgram) {
             own = slotsIn(rendersNodes(cd))
             looped = loopSlotsIn(rendersNodes(cd))
+            excess = excessSlotsIn(rendersNodes(cd))
         }
         const at: int = own.indexOf(e.nid)
         if (looped.indexOf(e.nid) >= 0) {
             // #1690 review F6: a `<slot/>` lifted in a loop of the renders is inside it — and renders once per row
-            st = addDiag(st, env.file, e.span, "E-COMPONENT-020", "a `<slot/>` lifted inside a loop of this `renders` — a use's content would render once per row (§66.15.2 rule 2, S473 D11). Place the `<slot/>` outside the loop")
+            st = addDiag(st, env.file, e.span, "E-COMPONENT-020", "a `<slot/>` inside a loop of this `renders` (a `${ for … lift }` or an `<each>` row) — a use's content would render once per row (§66.15.2 rule 2, S473 D11). Place the `<slot/>` outside the loop")
         } else if (at < 0) {
             st = addDiag(st, env.file, e.span, "E-DECL-SLOT-OUTSIDE-RENDERS", "`<slot/>` stands outside a declaration's `renders` — it names no use, so it would render nothing (§66.15.2 rule 3, S473 D11). A slot marks where a USE's content goes; put it inside the `renders` of the declaration whose uses carry content")
-        } else if (at > 0) {
-            st = addDiag(st, env.file, e.span, "E-COMPONENT-020", "a second unnamed `<slot/>` in this `renders` — a use's content would render once per slot (§66.15.2 rule 2, S473 D11). Keep one `<slot/>`")
+        } else if (excess.indexOf(e.nid) >= 0) {
+            st = addDiag(st, env.file, e.span, "E-COMPONENT-020", "a second unnamed `<slot/>` on one render path of this `renders` — a use's content would render once per slot (§66.15.2 rule 2, S473 D11). Keep one `<slot/>` per path: one in each branch of an `if=` / `else-if=` / `else` chain is legal, because only one branch renders (S474 F7)")
         }
         for (const k of e.kids) {
             if (!blankNode(k)) {
@@ -16839,7 +16842,7 @@ ${
     // (s473: §66.15.2 multiplicity). A slot with a `name=` is not counted (O9 — refused).
     fn slotsIn(ns: ANode[]) -> int[] { return slotsWalk(ns, false, false) }
 
-    // The unnamed `<slot/>`s lifted inside a Tier-0 loop (they render once per row).
+    // The unnamed `<slot/>`s lifted inside a Tier-0 loop or an `<each>` row (they render once per row).
     fn loopSlotsIn(ns: ANode[]) -> int[] { return slotsWalk(ns, true, false) }
 
     // `wantLooped`: collect the slots under a loop (true) or the ones outside every loop (false).
@@ -16866,7 +16869,86 @@ ${
             if (namedSlot(el) || inLoop != wantLooped) return []
             return [el.nid]
         }
+        // s474: an `<each>` row repeats like a Tier-0 loop row (§66.15.2 "Exclusive branches", repeating regions)
+        if (el.tag == "each" && !el.star) return slotsWalk(el.kids, wantLooped, true)
         return slotsWalk(el.kids, wantLooped, inLoop)
+    }
+
+    // s474 (F7, §66.15.2 "Exclusive branches") — rule 2 counts unnamed slots
+    // PER RENDER PATH, not in total: "on every render path through a `renders`,
+    // at most one unnamed `<slot/>` SHALL render". The exclusive sets the
+    // bootstrap has are the `if=` / `else-if=` / `else` chains (§17.1.1, read
+    // as chainCheck reads them: whitespace and `#{}` do not break a chain, any
+    // other non-element node does, an `else` ends it); a lifting `${ if … }`
+    // and `<match>` are not in the bootstrap. A slot is EXCESS when some path
+    // reaches it with a slot already rendered — each excess slot is reported
+    // once (E-COMPONENT-020). Looped slots are not walked (loopSlotsIn — they
+    // are refused as once-per-row); a named slot is O9, refused, not counted.
+    type SlotPath:struct = { n: int, bad: int[] }
+
+    fn excessSlotsIn(ns: ANode[]) -> int[] { return slotPathWalk(ns, 0).bad }
+
+    // `before` — the most slots any path has rendered on reaching `ns`.
+    fn slotPathWalk(ns: ANode[], before: int) -> SlotPath {
+        let n: int = before
+        let bad: int[] = []
+        let inChain: boolean = false     // inside an `if=` chain
+        let base: int = 0                // the count each member of the open chain starts from
+        let most: int = 0                // the open chain's max over its members (and the no-member path)
+        for (const node of ns) {
+            const k: ANodeK = node.k
+            const e: AElem | not = match k {
+                .Elem(e: x) :> x
+                .Text(text: t) :> not
+                .Interp(e: x) :> not
+                .DeclNode(d: d) :> not
+                .Css(c: c) :> not
+                .Gather(f: x) :> not
+                .Effect(w: w) :> not
+            }
+            if (e is given) {
+                const opens: boolean = attrNamed(e.attrs, "if") is given
+                const continues: boolean = !opens && (attrNamed(e.attrs, "else-if") is given || attrNamed(e.attrs, "else") is given)
+                if (inChain && continues) {
+                    const r: SlotPath = slotPathElem(e, base)
+                    bad = bad.concat(r.bad)
+                    if (r.n > most) most = r.n
+                    if (attrNamed(e.attrs, "else") is given) {
+                        n = most
+                        inChain = false
+                    }
+                } else {
+                    if (inChain) n = most
+                    inChain = false
+                    if (opens) {
+                        base = n
+                        const r: SlotPath = slotPathElem(e, base)
+                        bad = bad.concat(r.bad)
+                        most = r.n
+                        inChain = true
+                    } else {
+                        const r: SlotPath = slotPathElem(e, n)
+                        bad = bad.concat(r.bad)
+                        n = r.n
+                    }
+                }
+            } else if (!blankNode(node) && !isCssNode(node)) {
+                if (inChain) n = most
+                inChain = false
+            }
+        }
+        if (inChain) n = most
+        return { n: n, bad: bad }
+    }
+
+    fn slotPathElem(el: AElem, before: int) -> SlotPath {
+        if (el.tag == "slot") {
+            if (namedSlot(el)) return { n: before, bad: [] }
+            if (before > 0) return { n: before + 1, bad: [el.nid] }
+            return { n: before + 1, bad: [] }
+        }
+        if (el.tag == "each" && !el.star) return { n: before, bad: [] }   // its slots are looped (loopSlotsIn)
+        return slotPathWalk(el.kids, before)
     }
 
     fn namedSlot(el: AElem) -> boolean {

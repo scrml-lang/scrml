@@ -304,7 +304,7 @@ test (1), time (1). Plus `compiler` (16) — self-host reference copies (primary
 ## L. Scripts
 
 `scripts/` — key utility scripts (curated subset of `scripts/`; trimmed S2 from 24; round/session/section-specific patches archived to `scrml-support/archive/scripts/scrmlTS-2026-04-10/`):
-- `state.ts` — **DD3 project-state tool (S172):** `bun scripts/state.ts` PRINTS state-at-HEAD (gap counts by severity from `docs/known-gaps.md` `@gap` tokens, bun-test subset pass/skip/fail, version, inventory, last-N `wrap(s…)` anchors, maps-staleness); `--write` regenerates the in-repo `@generated:*` sections (known-gaps §0 count table); `--check` is the wrap-6d currency gate (exit 1 on stale `@generated`; maps WARN-only). Mirrors the `regen-spec-index.ts` pattern.
+- `state.ts` — **DD3 project-state tool (S172):** `bun scripts/state.ts` PRINTS state-at-HEAD (gap counts by severity from `docs/known-gaps.md` `@gap` tokens, bun-test subset pass/skip/fail, version, inventory, last-N `wrap(s…)` anchors, maps-staleness); `--write` regenerates the in-repo `@generated:*` sections (known-gaps §0 count table); `--check` validates the sources and reports currency (S474: exit 4 = stale `@generated` only — CI `checks` WARNS on it, `generated-regen.yml` regenerates main after merge; 1/2/3 = a broken ledger / degenerate parse / missing anchor, which FAIL; maps WARN-only). Mirrors the `regen-spec-index.ts` pattern.
 - `regen-spec-index.ts` — regen `compiler/SPEC-INDEX.md` from SPEC.md
 - `update-spec-index.sh` — regen `compiler/SPEC-INDEX.md`
 - `assemble-spec.sh` — spec assembly

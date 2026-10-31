@@ -48,8 +48,9 @@ fi
 # lines with neither side under them.
 bar() { b=; i=0; while [ "$i" -lt "$L" ]; do b="$b$1"; i=$((i + 1)); done; printf '%s' "$b"; }
 {
-  printf '%s scrml-generated-merge: %s - generated content NOT regenerated\n' "$(bar '<')" "$why"
-  printf 'Below is git'"'"'s plain 3-way merge of the original inputs.\n'
+  # Marker lines only (S474): a plain-text line inside the block survives a resolution that deletes the
+  # marker lines or keeps both sides (see regenBlock in git-merge-generated.ts).
+  printf '%s scrml-generated-merge: %s - generated content NOT regenerated; git'"'"'s plain 3-way merge of the original inputs follows this block\n' "$(bar '<')" "$why"
   printf '%s\n' "$(bar '=')"
   printf '%s resolve by hand (then bun scripts/state.ts --write / --regen), and delete this block\n' "$(bar '>')"
 } > "$A"
