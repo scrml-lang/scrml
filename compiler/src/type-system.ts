@@ -20456,17 +20456,23 @@ function annotateNodes(
           ex && ex.kind === "call" && ex.callee && ex.callee.kind === "ident" && typeof ex.callee.name === "string" ? ex.callee.name : null;
         let arms: unknown[] | null;
         let callee: string | null;
+        // S474 — the handled expression is a `?{}` query (§18.6.1 "a `?{}` query (§19.8.3):
+        // `SqlError`"; the runtime builds that envelope, `_scrml_sql_attempt`).
+        let handlesSql: boolean;
         if (wbRaw === null) {
           arms = Array.isArray(o.arms) ? o.arms as unknown[] : [];
           const g = o.guardedNode as Record<string, unknown> | undefined;
           callee = g ? calleeOf((g.exprNode ?? g.initExpr) as never) : null;
+          handlesSql = handledSqlOfGuardedNode(g) !== null;
         } else {
           try { arms = (parseGuardArmsFromRaw(wbRaw, filePath) as unknown[] | null) ?? null; } catch { arms = null; }
-          callee = calleeOf((o.callee as Record<string, unknown>).object as never);
+          const recv = (o.callee as Record<string, unknown>).object as ExprNode | undefined;
+          callee = calleeOf(recv as never);
+          handlesSql = sqlQueryHeadOfExpr(recv) !== null;
         }
         // S470 round 3 — the enum of the callee the call names BY BINDING (unresolvable: unknown,
         // and every use of the binder is refused).
-        const en = wholeBinderCalleeEnum(callee, scope, frames);
+        const en = handlesSql ? (typeRegistry.has("SqlError") ? null : sqlErrorBinderEnum()) : wholeBinderCalleeEnum(callee, scope, frames);
         if (arms === null) {
           // FAIL CLOSED: arms the reader cannot read may hold a whole-error binder.
           refuseUnreadText("the arms of this `!{ … }` handler", hereSpan);
