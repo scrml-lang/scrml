@@ -75,7 +75,7 @@ export function frontEnd(mods, files, entry, opts = {}) {
   const asts = linked.files;
   const next = linked.nextId;
   const t1 = performance.now();
-  const tp = mods.analyze.analyze(asts, entry);
+  const tp = mods.analyze.analyzeLinked(asts, entry, next); // s474: the linker's first unused node id (client-bang composition)
   // s469 — a statement a later phase refuses is not also E-STMT-NO-EFFECT (parse.scrml withoutRefusedNoEffect)
   const parseDiags0 = mods.parse.withoutRefusedNoEffect(linked.diags, tp.diags);
   // s473 D28 — the named-refusal table (refusals.scrml): in a file that already fails, a construct

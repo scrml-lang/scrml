@@ -1,0 +1,24 @@
+{
+  "id": "acceptance-envelope-client-non-bang-callee",
+  "description": "Against a real SQLite: a client `!` whose one server call is a non-`!` function running two INSERTs. move(6) fails after them inside the composed batch — both rows rolled back; move(1) commits two rows. Count 2 (4 without the envelope), @r = 1.",
+  "language-version": "1.0",
+  "spec": "§8.9.2 · §19.9.9.8 rule 1 · §19.10.5 · S474 ruling (capability over limitation, item 2)",
+  "rationale": "S474 (user-voice-scrml.md, capability over limitation, item 2): \"a client `!` whose one server call is a non-`!` server function running two queries … the compiler wraps that server call in the transaction envelope when the caller is `!`.\" Was the S473 D1 refusal (E-BOOTSTRAP-UNSUPPORTED).",
+  "expect": {
+    "codes": [],
+    "sqlEngine": "real",
+    "serverDb": { "log": [{ "a": 0 }] },
+    "input": [
+      { "click": "#bad" },
+      { "wait": "settle" },
+      { "click": "#ok" },
+      { "wait": "settle" },
+      { "click": "#count" },
+      { "wait": "settle" }
+    ],
+    "domAnchored": [
+      { "selector": "#r", "text": "1" },
+      { "selector": "#n", "text": "2" }
+    ]
+  }
+}
