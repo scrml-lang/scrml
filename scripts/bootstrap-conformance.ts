@@ -1283,7 +1283,8 @@ async function main(): Promise<number> {
     }
     const delta = ratchetDelta(was, r.counts);
     if (delta.regressed.length) {
-      console.log(`::error title=bootstrap-conformance REGRESSION on main: ${delta.regressed.join(", ")}::${delta.summary} — the report was NOT rewritten (the baseline does not ratchet up). ${RATCHET_REMEDY}`);
+      // (" · ", never ", ": a comma inside a workflow-command title is read as a property separator.)
+      console.log(`::error title=bootstrap-conformance REGRESSION on main: ${delta.regressed.join(" · ")}::${delta.summary} — the report was NOT rewritten (the baseline does not ratchet up). ${RATCHET_REMEDY}`);
       console.error(`bootstrap-conformance: --ratchet REFUSED the write — ${delta.regressed.join(", ")} rose (${delta.summary}).\n${RATCHET_REMEDY}`);
       return 1;
     }

@@ -146,11 +146,31 @@ describe("regen-spec-index.ts --check — stale is 4, structural is 1 (S474)", (
  * A mirror tree for state.ts (whose ROOT is its own script's parent dir): every top-level entry is a symlink
  * to the real repo EXCEPT scripts/ (a copy of state.ts), docs/ (per-entry symlinks + a real known-gaps.md
  * COPY) and master-list.md (a real COPY) — the two files `--write` writes, so a write can never reach
- * through a symlink into the checkout. `.git` is symlinked so recent-sessions reads the real history.
+ * through a symlink into the checkout. `.git` is NOT linked: the mirror gets its own synthetic wrap history (initWrapHistory), so the result
+ * never depends on the checkout's clone depth.
  */
+/**
+ * S474 CI fix — the mirror gets its OWN git history instead of a symlink to the checkout's `.git`: CI's
+ * `unit` job clones shallowly (fetch-depth 1), where the real history holds no wrap commits, so
+ * recent-sessions hit state.ts's degenerate-zero refusal (exit 2) and the test was environment-
+ * dependent. Ten synthetic `wrap(sNNN)` commits with pinned dates (deterministic SHAs) are more than
+ * the eight the index needs. state.ts's exit-2 guard is unchanged — it is exercised below on purpose.
+ */
+function initWrapHistory(root) {
+  const env = {
+    ...BASE_ENV, GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@t", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@t",
+    GIT_AUTHOR_DATE: "2026-01-01T00:00:00Z", GIT_COMMITTER_DATE: "2026-01-01T00:00:00Z",
+  };
+  const git = (...a) => expect(spawnSync("git", a, { cwd: root, env, encoding: "utf8" }).status).toBe(0);
+  git("init", "-q");
+  for (let i = 1; i <= 10; i++) git("commit", "-q", "--allow-empty", "-m", `wrap(s9${String(i).padStart(2, "0")}): synthetic session close ${i}`);
+  const top = spawnSync("git", ["rev-parse", "--absolute-git-dir"], { cwd: root, env, encoding: "utf8" }).stdout.trim();
+  expect(top.endsWith(".git") && top.includes(root.split("/").pop())).toBe(true); // never the checkout's
+}
+
 function stateMirror(gaps) {
   const root = tmp("state-s474-");
-  const SPECIAL = new Set(["scripts", "docs", "master-list.md", "node_modules"]);
+  const SPECIAL = new Set(["scripts", "docs", "master-list.md", "node_modules", ".git"]);
   for (const e of readdirSync(REPO)) {
     if (SPECIAL.has(e)) continue;
     symlinkSync(join(REPO, e), join(root, e));
@@ -164,6 +184,7 @@ function stateMirror(gaps) {
   }
   writeFileSync(join(root, "docs/known-gaps.md"), gaps);
   copyFileSync(join(REPO, "master-list.md"), join(root, "master-list.md"));
+  initWrapHistory(root);
   return root;
 }
 
