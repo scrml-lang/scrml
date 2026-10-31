@@ -73,3 +73,32 @@ next statements autocommit (so a failed statement inside an envelope is followed
 BEGIN DEFERRED / COMMIT / ROLLBACK, SAVEPOINT / RELEASE / ROLLBACK TO when nested; broken-transaction
 probe. Scratch check (8 scenarios: commit, fail, throw, outer-undoes-inner, inner-savepoint-rollback,
 concurrent isolation, auto-rollback detection, non-standalone plain) all as expected.
+
+## 2026-10-30 — unit 2: the envelope in the compiler (commit 4bf8d92e3)
+
+- core.scrml: `Envelope { fn, db, standalone }`, `CoreProgram.envelopes` (7 literal sites updated).
+- analyze.scrml: the s473 interim refusal in `envelopeDiags` is REMOVED (manual-tx refusal and F11
+  stay there); new `envelopePass` / `envelopeOf` after the per-function loop of `placePass`:
+  every `!` function with a non-empty transitive query set gets an Envelope (`standalone` = the
+  S473 trigger: 2+ queries, one reached twice, or one in a loop/lambda/recursion). Named refusals
+  for what is not built: E-SQL-011 (SPEC code, write to another db), E-BOOTSTRAP-UNSUPPORTED for a
+  read of another db, a pooled (PG/MySQL) envelope, and a client `!` whose one server call is a
+  non-`!` function running the queries. F11 false positive fixed: a server-only (inherited, §12.2
+  T5) function's calls are in place, not requests (`txQuerySets(…, inherited)`).
+- print.scrml `envelopedFnJs` / print-server.scrml `bodyFnJs`: the body becomes inner
+  `async function body$()`, the function returns `await rt.envelope(db$N, body$, standalone)`;
+  printer fail-closed `envelopeRefusal`.
+- check.scrml C-TX1..C-TX3 (`checkEnvelopes`).
+- severity.scrml regenerated (+E-SQL-011).
+- Hook: 52356 pass / 0 fail / 152 skip (same as baseline).
+
+## 2026-10-30 — unit 3: tests + acceptance
+
+- slice-m4/envelope-s474.test.js (24 tests): the emitted server against a real SQLite FILE, every
+  assertion a SELECT through a second connection (bun:sqlite) after the response. BITE checks
+  (temporary env-var switches in server-runtime.js, reverted, never committed): envelope → plain
+  run: 9 of the runtime tests fail; gate off for autocommit statements: the R5 interleaving test
+  fails (all six concurrent plain writes rolled back inside another request's envelope).
+- acceptance/envelope/ — 4 runtime cases (sqlEngine real) + 5 neg cases; STATUS rows added.
+- ruled-refusals-s473 / failclosed-sql-protect-s473 tests converted from "refused" to "compiles,
+  with the Envelope" (the interim-refusal assertions).

@@ -1,0 +1,30 @@
+// §8.9.2 amendment (S473 review-surfaced 1): the envelope's trigger is the TRANSITIVE query set —
+// one query in the `!` body plus one in a non-`!` helper it calls is two, so both run in one
+// transaction, and the `fail` after them rolls the helper's write back too.
+<program db="./app.db">
+    type E:enum = { Bad, QueryFailed(message: string), ConstraintViolation(field: string), ConnectionLost }
+    type C:struct = { c: int }
+    let <r:int=0/>
+    let <n:int=0/>
+    function logIt(a: int) -> int {
+        ?{`INSERT INTO log (a) VALUES (${a})`}.run() !{ _ :> { return 0; } };
+        return 1;
+    }
+    function move(a: int)! E {
+        ?{`INSERT INTO log (a) VALUES (${a})`}.run();
+        const x: int = logIt(a + 1);
+        if (a > 5) fail .Bad;
+        return x;
+    }
+    function count()! E {
+        const row: C = ?{`SELECT count(*) AS c FROM log WHERE a > 0`}.get();
+        return row.c;
+    }
+    <main>
+        <button id="bad" onclick={ @r = move(6) !{ _ :> 9, }; }>bad</button>
+        <button id="ok" onclick={ @r = move(1) !{ _ :> 9, }; }>ok</button>
+        <button id="count" onclick={ @n = count() !{ _ :> 99, }; }>count</button>
+        <p id="r">${@r}</p>
+        <p id="n">${@n}</p>
+    </main>
+</program>

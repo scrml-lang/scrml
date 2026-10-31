@@ -1,0 +1,24 @@
+{
+  "id": "acceptance-envelope-via-helper",
+  "description": "One query in a `!` body plus one in the non-`!` helper it calls, against a real SQLite: move(6) fails after both writes (rolled back, the helper's included), move(1) succeeds — 2 rows persist (4 without the envelope, 3 if it did not reach the helper).",
+  "language-version": "1.0",
+  "spec": "§8.9.2 (S473 amendment) · §19.10.5",
+  "rationale": "§8.9.2 amendment S473: \"The implicit-envelope trigger above is therefore read over the function's transitive query set: every `?{}` reached from the `!` body — its own and those of every non-`!` function it reaches\". Ruling user-voice-scrml.md S473 \"the transitive `!` envelope counts QUERIES, not writes\".",
+  "expect": {
+    "codes": [],
+    "sqlEngine": "real",
+    "serverDb": { "log": [{ "a": 0 }] },
+    "input": [
+      { "click": "#bad" },
+      { "wait": "settle" },
+      { "click": "#ok" },
+      { "wait": "settle" },
+      { "click": "#count" },
+      { "wait": "settle" }
+    ],
+    "domAnchored": [
+      { "selector": "#r", "text": "1" },
+      { "selector": "#n", "text": "2" }
+    ]
+  }
+}

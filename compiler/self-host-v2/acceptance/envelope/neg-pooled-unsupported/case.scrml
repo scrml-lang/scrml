@@ -1,0 +1,12 @@
+// §19.10.6 Pooled drivers: a transaction runs on one connection reserved from the pool. The
+// bootstrap's server runtime reserves none, so an envelope on a Postgres database is refused (S473 D1).
+<program db="postgres://localhost/app">
+    type E:enum = { Bad, QueryFailed(message: string), ConstraintViolation(field: string), ConnectionLost }
+    let <r:int=0/>
+    function move(a: int)! E {
+        ?{`UPDATE acct SET n = n - ${a}`}.run();
+        ?{`UPDATE acct SET n = n + ${a}`}.run();
+        return 1;
+    }
+    <main><button onclick={ @r = move(1) !{ _ :> 0, }; }>go</button></main>
+</program>

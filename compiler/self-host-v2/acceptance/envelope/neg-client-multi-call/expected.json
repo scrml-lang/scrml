@@ -1,0 +1,12 @@
+{
+  "id": "acceptance-envelope-neg-client-multi-call",
+  "description": "A client-placed `!` function calling two server functions: E-TX-CLIENT-MULTI-CALL (permanent).",
+  "language-version": "1.0",
+  "spec": "§19.10.5 (S473 #1690 review F11) · §34 E-TX-CLIENT-MULTI-CALL",
+  "rationale": "§19.10.5: \"A client-placed `!` function SHALL NOT make two or more server calls … This is a permanent rule, not an interim refusal.\"",
+  "expect": {
+    "codes": [
+      "E-TX-CLIENT-MULTI-CALL"
+    ]
+  }
+}

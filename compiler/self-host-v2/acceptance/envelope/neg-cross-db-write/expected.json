@@ -1,0 +1,12 @@
+{
+  "id": "acceptance-envelope-neg-cross-db-write",
+  "description": "A `!` function whose envelope is on ./a.db calls a function writing ./b.db: E-SQL-011.",
+  "language-version": "1.0",
+  "spec": "§8.9.2 (S451 ruling 4a) · §19.10.5 · §34 E-SQL-011",
+  "rationale": "§8.9.2: \"in a `!` function whose implicit or explicit envelope is on database A, a **write** to a database B other than A that the envelope's extent can reach … SHALL be a compile error: **E-SQL-011**\".",
+  "expect": {
+    "codes": [
+      "E-SQL-011"
+    ]
+  }
+}
