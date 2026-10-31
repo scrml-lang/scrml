@@ -4125,30 +4125,58 @@ ${
             host = tag.v
             t = adv(t)
         }
+        // s474 — a namespace import (`import * as m from "…"`) or a default import
+        // (`import X from "…"`) is refused BY NAME, its statement read whole (was a
+        // wall of E-PARSE-IMPORT / E-PARSE-EXPECTED and a spurious E-IMPORT-005).
+        // §21.3 names "Named imports (`{ name }`) and default imports (`name`)" and
+        // nothing more; no scrml form exports a default, and the namespace form is
+        // not in the SPEC (g-boot-import-codes-and-alias-s471).
+        if (host is not && !isP(t, "{")) {
+            const h: PTok = cur(t)
+            const isNs: boolean = tk(h, "*")
+            if (isNs || h.cls == TC.Ident || h.cls == TC.Keyword) {
+                let why: string = "a default import (`import " + h.text + " from …`) is not in the bootstrap — no scrml form exports a default (§21.2), so it would bind nothing; import the name: `import { " + h.text + " } from \"…\"` (rename it with `as`)"
+                if (isNs) why = "a namespace import (`import * as …`) is not in the bootstrap — §21.3 defines named imports (`{ name }`) and default imports, not a namespace object; import the names used: `import { a, b } from \"…\"` (rename one with `as`)"
+                let rt: TP = diagAt(t, "E-BOOTSTRAP-UNSUPPORTED", why, h)
+                const line: int = h.line
+                while (!atEnd(rt) && cur(rt).line == line && cur(rt).cls != TC.Str) { rt = adv(rt) }
+                let from0: string = ""
+                if (cur(rt).cls == TC.Str) {
+                    from0 = cur(rt).v
+                    rt = adv(rt)
+                    if (isP(rt, ";")) rt = adv(rt)
+                }
+                if (from0 == "") return { items: [], tp: rt }
+                const imp0: AImport = { nid: rt.nid, span: spanFrom(rt, start), names: [], from: from0, host: host, top: top }
+                return mkItem(bumpId(rt), start, AItemK.ImportItem(imp0))
+            }
+        }
         t = expectP(t, "{")
         let names: AImportName[] = []
         while (!isP(t, "}") && !atEnd(t)) {
             const n: PTok = cur(t)
             if (n.cls == TC.Ident || n.cls == TC.Keyword) {
                 let bound: PTok = n
-                const ta: TP = adv(t)
-                // a host import's `name as local` binds `local` (§21.3.1); a plain
-                // import has no `as` form in the bootstrap (g-boot-import-codes-and-alias-s471)
-                if (host is given && isWord(ta, "as")) {
-                    const loc: PTok = cur(adv(ta))
+                t = adv(t)
+                // `name as local` binds `local` to the exported `name` — a host import's
+                // (§21.3.1 `named-binding ::= identifier ('as' identifier)?`) and, s474, a
+                // plain import's (§21.3 "ES module `import` syntax"; §21.4 names the renamed
+                // re-export `export { a as b } from`) (g-boot-import-codes-and-alias-s471)
+                if (isWord(t, "as")) {
+                    const loc: PTok = cur(adv(t))
                     if (loc.cls == TC.Ident || loc.cls == TC.Keyword) {
                         bound = loc
-                        t = adv(ta)
+                        t = adv(adv(t))
                     } else {
-                        t = diagAt(adv(ta), "E-PARSE-IMPORT", "expected the local name after `as`, found `" + loc.text + "`", loc)
+                        t = adv(diagAt(t, "E-PARSE-IMPORT", "expected the local name after `as`, found `" + loc.text + "` (`import { " + n.text + " as localName } from \"…\"`)", loc))
                     }
                 }
                 names = names.concat([{ nid: t.nid, span: mkSpan(n.start, bound.end), name: bound.v, orig: n.v }])
                 t = bumpId(t)
-            } else if (!tk(n, ",")) {
-                t = diagAt(t, "E-PARSE-IMPORT", "expected an imported name, found `" + n.text + "`", n)
+            } else {
+                if (!tk(n, ",")) t = diagAt(t, "E-PARSE-IMPORT", "expected an imported name, found `" + n.text + "`", n)
+                t = adv(t)
             }
-            t = adv(t)
         }
         t = expectP(t, "}")
         if (!isWord(t, "from")) t = diagAt(t, "E-PARSE-IMPORT", "expected `from` after the import list", cur(t))

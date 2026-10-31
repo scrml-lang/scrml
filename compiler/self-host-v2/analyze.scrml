@@ -975,28 +975,71 @@ ${
     // s472: KConst — a file-scope constant (§7.6; `[export] const NAME = …` in a `${ }` block).
     type NameKind:enum = { KType, KFn, KDecl, KConst }
     type OwnName:struct = { name: string, kind: NameKind, file: string, exported: boolean }
-    type ScopeName:struct = { name: string, kind: NameKind, from: string }
+    // s474 (import alias): `name` is the LOCAL name (what the file writes);
+    // `orig` the name the declaration has in `from` — they differ only for an
+    // aliased import (`import { Card as Card2 }`: name `Card2`, orig `Card`).
+    // A lookup takes the declaration of (`from`, `orig`), so the declaration —
+    // and its per-file scope key — stay the DECLARING file's.
+    type ScopeName:struct = { name: string, kind: NameKind, from: string, orig: string }
     type FileScope:struct = { file: string, names: ScopeName[] }
     type Linkage:struct = { own: OwnName[], scopes: FileScope[] }
 
     // The file whose declaration of KIND `k` named `name` is in scope in
     // `file`; "" when none is.
     fn scopeFrom(lk: Linkage, file: string, k: NameKind, name: string) -> string {
+        const h: ScopeName | not = scopeHit(lk, file, k, name)
+        if (h is not) return ""
+        return h.from
+    }
+
+    // s474 — the name the declaration that `name` denotes in `file` has where it
+    // is DECLARED (`name` itself unless an import aliases it); "" when none is.
+    fn scopeOrig(lk: Linkage, file: string, k: NameKind, name: string) -> string {
+        const h: ScopeName | not = scopeHit(lk, file, k, name)
+        if (h is not) return ""
+        return h.orig
+    }
+
+    // The scope entry of KIND `k` that the local name `name` denotes in `file`:
+    // the first one (see linkage), else not.
+    fn scopeHit(lk: Linkage, file: string, k: NameKind, name: string) -> ScopeName | not {
         for (const fs of lk.scopes) {
             if (fs.file == file) {
                 for (const n of fs.names) {
-                    if (n.name == name && n.kind == k) return n.from
+                    if (n.name == name && n.kind == k) return n
                 }
-                return ""
+                return not
             }
         }
-        return ""
+        return not
     }
 
-    // Is the `k` declaration of `name` in `declFile` the one `name` denotes in `file`?
+    // s474 — every LOCAL name under which `file` binds the `k` declaration
+    // `declName` of `declFile`: its own name, an alias, or both (`import { Card,
+    // Card as C2 }`); empty when the declaration is not in scope there. Only a
+    // name that DENOTES it counts (the first entry of that name, as scopeHit).
+    fn boundAs(lk: Linkage, file: string, k: NameKind, declName: string, declFile: string) -> string[] {
+        let out: string[] = []
+        for (const fs of lk.scopes) {
+            if (fs.file == file) {
+                for (const n of fs.names) {
+                    if (n.kind == k && n.from == declFile && n.orig == declName && out.indexOf(n.name) < 0) {
+                        const h: ScopeName | not = scopeHit(lk, file, k, n.name)
+                        if (h is given) {
+                            if (h.from == declFile && h.orig == declName) out = out.concat([n.name])
+                        }
+                    }
+                }
+                return out
+            }
+        }
+        return out
+    }
+
+    // Is the `k` declaration `name` of `declFile` in scope in `file` — under its
+    // own name or (s474) an alias?
     fn inScope(lk: Linkage, file: string, k: NameKind, name: string, declFile: string) -> boolean {
-        const from: string = scopeFrom(lk, file, k, name)
-        return from != "" && from == declFile
+        return boundAs(lk, file, k, name, declFile).length > 0
     }
 
     fn exportsName(own: OwnName[], file: string, name: string) -> boolean {
@@ -1050,41 +1093,50 @@ ${
             let mine: string[] = []
             for (const o of own) {
                 if (o.file == f.path) {
-                    names = names.concat([{ name: o.name, kind: o.kind, from: f.path }])
+                    names = names.concat([{ name: o.name, kind: o.kind, from: f.path, orig: o.name }])
                     if (mine.indexOf(o.name) < 0) mine = mine.concat([o.name])
                 }
             }
+            // s474 (import alias): the rules below are about the LOCAL name an import
+            // binds (`n.name` — the alias when there is one); the export it binds is
+            // `n.orig` of `target`. `importedOrig[i]` / `importedFrom[i]`: the
+            // declaration the i-th local name already binds.
             let imported: string[] = []
             let importedFrom: string[] = []
+            let importedOrig: string[] = []
             for (const imp of importsOfItems(f.items)) {
                 const target: string = importTarget(f.path, imp.from, paths)
                 for (const n of imp.names) {
-                    if (target != "" && exportsName(own, target, n.name)) {
+                    if (target != "" && exportsName(own, target, n.orig)) {
                         if (mine.indexOf(n.name) >= 0) {
-                            st = addDiag(st, f.path, n.span, "E-SCOPE-010", "`" + n.name + "` is imported from `" + imp.from + "` and also declared in this file — a name is bound once in file scope (duplicate binding in file scope, §7.6); rename one, or drop the import")
+                            st = addDiag(st, f.path, n.span, "E-SCOPE-010", "`" + n.name + "` is imported from `" + imp.from + "` and also declared in this file — a name is bound once in file scope (duplicate binding in file scope, §7.6); rename one, drop the import, or import it under another name (`import { " + n.orig + " as " + n.orig + "2 } from \"" + imp.from + "\"`)")
                         } else {
                             const at: int = imported.indexOf(n.name)
                             if (at >= 0) {
                                 const earlier: string = importedFrom[at]
                                 // s474 (door 3): two USER files may each export a name now; importing
                                 // both into ONE file binds it twice in that file's scope — refused
-                                // here, at the later import (was: refused at the second exporter, S473)
-                                if (earlier != target && !isStdlibPath(earlier) && !isStdlibPath(target)) {
+                                // here, at the later import (was: refused at the second exporter, S473).
+                                // s474 (alias): so are two DIFFERENT exports of one file bound to one
+                                // local name (`{ a as x, b as x }`); the same export twice stays §41.7
+                                const other: boolean = earlier != target || importedOrig[at] != n.orig
+                                if (other && !isStdlibPath(earlier) && !isStdlibPath(target)) {
                                     // s474 r1 (review F3): no cascade. The build already fails here; the
                                     // EARLIER import keeps the name (scopeFrom takes the first entry of a
                                     // kind), and the refused one's entries follow it, so a use of the name
                                     // of EITHER kind resolves — never also E-SCOPE-001 ("this file does not
                                     // import it") for a name this file does import
-                                    st = addDiag(st, f.path, n.span, "E-SCOPE-010", "`" + n.name + "` is already imported into this file from `" + earlier + "`, and this import brings another `" + n.name + "` from `" + target + "` — two user files may each export one name, but one file binds a name once (duplicate binding in file scope, §7.6; ruled S474); import one of them here, or rename one of the exports")
-                                    names = names.concat(exportedEntries(own, target, n.name))
+                                    st = addDiag(st, f.path, n.span, "E-SCOPE-010", "`" + n.name + "` is already imported into this file (`" + importedOrig[at] + "` from `" + earlier + "`), and this import binds it to another declaration (`" + n.orig + "` from `" + target + "`) — two user files may each export one name, but one file binds a name once (duplicate binding in file scope, §7.6; ruled S474); import one of them under another name (`import { " + n.orig + " as " + n.orig + "2 } from \"" + imp.from + "\"`), or drop one import")
+                                    names = names.concat(exportedEntries(own, target, n.orig, n.name))
                                 } else {
-                                    st = addDiag(st, f.path, n.span, "W-IMPORT-001", "`" + n.name + "` is already imported by an earlier import in this file — this later import wins (§41.7); remove the duplicate, or rename one")
-                                    names = unbound(names, n.name).concat(exportedEntries(own, target, n.name))
+                                    st = addDiag(st, f.path, n.span, "W-IMPORT-001", "`" + n.name + "` is already imported by an earlier import in this file — this later import wins (§41.7); remove the duplicate, or rename one with `as`")
+                                    names = unbound(names, n.name).concat(exportedEntries(own, target, n.orig, n.name))
                                 }
                             } else {
                                 imported = imported.concat([n.name])
                                 importedFrom = importedFrom.concat([target])
-                                names = names.concat(exportedEntries(own, target, n.name))
+                                importedOrig = importedOrig.concat([n.orig])
+                                names = names.concat(exportedEntries(own, target, n.orig, n.name))
                             }
                         }
                     }
@@ -1097,10 +1149,11 @@ ${
 
     // The scope entries an import of `name` from `target` brings: one per
     // EXPORTED declaration of that name there (never a private one).
-    fn exportedEntries(own: OwnName[], target: string, name: string) -> ScopeName[] {
+    // s474: bound under the LOCAL name `local` (an alias, or `name` itself).
+    fn exportedEntries(own: OwnName[], target: string, name: string, local: string) -> ScopeName[] {
         let out: ScopeName[] = []
         for (const o of own) {
-            if (o.file == target && o.name == name && o.exported) out = out.concat([{ name: name, kind: o.kind, from: target }])
+            if (o.file == target && o.name == name && o.exported) out = out.concat([{ name: local, kind: o.kind, from: target, orig: name }])
         }
         return out
     }
@@ -1120,6 +1173,9 @@ ${
     fn elsewhereNote(lk: Linkage, file: string, k: NameKind, alsoDecl: boolean, name: string) -> string {
         for (const o of lk.own) {
             if (o.name == name && o.file != file && o.exported && kindFits(o.kind, k, alsoDecl)) {
+                // s474: imported here under an alias — the alias is the name in this file
+                const als: string[] = boundAs(lk, file, o.kind, name, o.file)
+                if (als.length > 0) return " in this file — it is imported from `" + o.file + "` as `" + als[0] + "`, and that is its name here (`import { " + name + " as " + als[0] + " }` binds `" + als[0] + "` only, §21.3)"
                 return " in this file — `" + o.file + "` exports it, but this file does not import it: write `import { " + name + " } from …` (§21.3)"
             }
         }
@@ -1156,12 +1212,11 @@ ${
     // type in scope).
     fn stubNamed(te: TypeEnv, name: string) -> TypeStub | not {
         const from: string = scopeFrom(te.link, te.file, NameKind.KType, name)
+        const orig: string = scopeOrig(te.link, te.file, NameKind.KType, name)   // s474: an alias names its export
         let builtin: TypeStub | not = not
         for (const s of te.stubs) {
-            if (s.name == name) {
-                if (from != "" && s.file == from) return s
-                if (s.file == builtinFile()) builtin = s
-            }
+            if (from != "" && s.file == from && s.name == orig) return s
+            if (s.name == name && s.file == builtinFile()) builtin = s
         }
         return builtin
     }
@@ -1170,9 +1225,10 @@ ${
     fn declTypeNamed(te: TypeEnv, name: string) -> Sym | not {
         const from: string = scopeFrom(te.link, te.file, NameKind.KDecl, name)
         if (from == "") return not
+        const orig: string = scopeOrig(te.link, te.file, NameKind.KDecl, name)
         let i = 0
         while (i < te.declNames.length) {
-            if (te.declNames[i] == name && te.declFiles[i] == from) return te.declSyms[i]
+            if (te.declNames[i] == orig && te.declFiles[i] == from) return te.declSyms[i]
             i = i + 1
         }
         return not
@@ -1488,8 +1544,9 @@ ${
     fn declNamed(g: Globals, file: string, name: string) -> DeclSrc | not {
         const from: string = scopeFrom(g.te.link, file, NameKind.KDecl, name)
         if (from == "") return not
+        const orig: string = scopeOrig(g.te.link, file, NameKind.KDecl, name)   // s474: an alias names its export
         for (const d of g.decls) {
-            if (!d.isProgram && d.info.sym.hint == name && d.file == from) return d
+            if (!d.isProgram && d.info.sym.hint == orig && d.file == from) return d
         }
         return not
     }
@@ -1517,8 +1574,9 @@ ${
     fn fnNamed(g: Globals, file: string, name: string) -> FnInfo | not {
         const from: string = scopeFrom(g.te.link, file, NameKind.KFn, name)
         if (from == "") return not
+        const orig: string = scopeOrig(g.te.link, file, NameKind.KFn, name)   // s474: an alias names its export
         for (const f of g.fns) {
-            if (f.info.name == name && f.info.file == from) return f.info
+            if (f.info.name == orig && f.info.file == from) return f.info
         }
         return not
     }
@@ -2977,8 +3035,9 @@ ${
         // s472: the function `n` denotes in the file being read (declared there, or imported)
         let found: FnSrc | not = not
         const from: string = scopeFrom(cx.te.link, cx.te.file, NameKind.KFn, n)
+        const orig: string = scopeOrig(cx.te.link, cx.te.file, NameKind.KFn, n)   // s474: an alias names its export
         for (const f of cx.fns) {
-            if (f.info.name == n && f.info.file == from) found = f
+            if (f.info.name == orig && f.info.file == from) found = f
         }
         if (found is not) return rinf(infOut("`" + n + "(…)`, which is not a function in scope here"), done)
         const fi: FnInfo = found.info
@@ -3953,7 +4012,7 @@ ${
     type RHandles:struct = { hs: HandleInfo[], st: AS }
     type HWalk:struct = { owner: int, conditional: boolean, file: string }
 
-    fn handlesIn(g0: DeclStub[], nodes: ANode[], w: HWalk, st0: AS) -> RHandles {
+    fn handlesIn(g0: ScopedStub[], nodes: ANode[], w: HWalk, st0: AS) -> RHandles {
         let st: AS = st0
         let out: HandleInfo[] = []
         for (const n of nodes) {
@@ -3964,7 +4023,7 @@ ${
         return { hs: out, st: st }
     }
 
-    fn handlesInNode(g0: DeclStub[], n: ANode, w: HWalk, st: AS) -> RHandles {
+    fn handlesInNode(g0: ScopedStub[], n: ANode, w: HWalk, st: AS) -> RHandles {
         const k: ANodeK = n.k
         return match k {
             .Elem(e: e) :> handlesInElem(g0, e, w, st)
@@ -4026,24 +4085,30 @@ ${
         }
     }
 
-    // s472: the decl stubs a file can name — the program, and each user
-    // declaration in scope there (handlesIn's `g0`: a tag names one of these).
-    fn stubsInScope(ds: DeclStub[], lk: Linkage, file: string) -> DeclStub[] {
-        let out: DeclStub[] = []
+    // s472: the decl stubs a file can name — each user declaration in scope there
+    // (handlesIn's `g0`: a tag names one of these). s474: one per LOCAL name it is
+    // bound under (an aliased import binds it as the alias), so a tag names it by
+    // that name. (The program is no tag's target.)
+    type ScopedStub:struct = { local: string, d: DeclStub }
+
+    fn stubsInScope(ds: DeclStub[], lk: Linkage, file: string) -> ScopedStub[] {
+        let out: ScopedStub[] = []
         for (const d of ds) {
-            if (d.isProgram || inScope(lk, file, NameKind.KDecl, d.sym.hint, d.file)) out = out.concat([d])
+            if (!d.isProgram) {
+                for (const local of boundAs(lk, file, NameKind.KDecl, d.sym.hint, d.file)) { out = out.concat([{ local: local, d: d }]) }
+            }
         }
         return out
     }
 
-    fn stubNamedDecl(g0: DeclStub[], name: string) -> DeclStub | not {
-        for (const d of g0) {
-            if (!d.isProgram && d.sym.hint == name) return d
+    fn stubNamedDecl(g0: ScopedStub[], name: string) -> DeclStub | not {
+        for (const s of g0) {
+            if (s.local == name) return s.d
         }
         return not
     }
 
-    fn handlesInElem(g0: DeclStub[], e: AElem, w: HWalk, st0: AS) -> RHandles {
+    fn handlesInElem(g0: ScopedStub[], e: AElem, w: HWalk, st0: AS) -> RHandles {
         let st: AS = st0
         let out: HandleInfo[] = []
         const cond: boolean = w.conditional || attrNamed(e.attrs, "if") is given || attrNamed(e.attrs, "else-if") is given || attrNamed(e.attrs, "else") is given
@@ -7316,22 +7381,26 @@ ${
     // s472: the functions whose names are in scope in `file` — one per name, so
     // a by-name match among them (retIsValue) is THE callee, never another
     // file's function of that name.
-    fn fnsInScope(fs: FnSrc[], lk: Linkage, file: string) -> FnSrc[] {
-        let out: FnSrc[] = []
+    // s474: one entry per LOCAL name the function is bound under (an aliased
+    // import binds it as the alias): `local` is what a call writes, `id` its sym.
+    type ScopedFn:struct = { local: string, id: int }
+
+    fn fnsInScope(fs: FnSrc[], lk: Linkage, file: string) -> ScopedFn[] {
+        let out: ScopedFn[] = []
         for (const f of fs) {
-            if (inScope(lk, file, NameKind.KFn, f.info.name, f.info.file)) out = out.concat([f])
+            for (const local of boundAs(lk, file, NameKind.KFn, f.info.name, f.info.file)) { out = out.concat([{ local: local, id: f.info.sym.id }]) }
         }
         return out
     }
 
-    fn valueReturnIn(fs: FnSrc[], v: int[], b: ABlock) -> boolean {
+    fn valueReturnIn(fs: ScopedFn[], v: int[], b: ABlock) -> boolean {
         for (const s of b.stmts) {
             if (stmtValueReturn(fs, v, s)) return true
         }
         return false
     }
 
-    fn stmtValueReturn(fs: FnSrc[], v: int[], s: AStmt) -> boolean {
+    fn stmtValueReturn(fs: ScopedFn[], v: int[], s: AStmt) -> boolean {
         const k: AStmtK = s.k
         return match k {
             .Return(e: x) :> retIsValue(fs, v, x)
@@ -7349,7 +7418,7 @@ ${
         }
     }
 
-    fn blocksValueReturn(fs: FnSrc[], v: int[], bs: ABlock[]) -> boolean {
+    fn blocksValueReturn(fs: ScopedFn[], v: int[], bs: ABlock[]) -> boolean {
         for (const b of bs) {
             if (valueReturnIn(fs, v, b)) return true
         }
@@ -7357,14 +7426,14 @@ ${
     }
 
     // A `return` operand that is a value: present, and not a call of a void function.
-    fn retIsValue(fs: FnSrc[], v: int[], x: AExpr | not) -> boolean {
+    fn retIsValue(fs: ScopedFn[], v: int[], x: AExpr | not) -> boolean {
         if (x is not) return false
         const c: AExpr | not = calleeOf(x.k)
         if (c is not) return true
         const n: string = exprName(c)
         if (n == "") return true
         for (const f of fs) {
-            if (f.info.name == n) return v.indexOf(f.info.sym.id) < 0
+            if (f.local == n) return v.indexOf(f.id) < 0
         }
         return true
     }
@@ -18824,8 +18893,9 @@ ${
     fn constNamed(g: Globals, file: string, name: string) -> ConstInfo | not {
         const from: string = scopeFrom(g.te.link, file, NameKind.KConst, name)
         if (from == "") return not
+        const orig: string = scopeOrig(g.te.link, file, NameKind.KConst, name)   // s474: an alias names its export
         for (const c of g.consts) {
-            if (c.file == from && c.name == name) return c
+            if (c.file == from && c.name == orig) return c
         }
         return not
     }
@@ -19009,8 +19079,12 @@ ${
     // s472: through the file's scope — declared there, or imported FROM ITS
     // FILE (was: any import of the name, whichever file it named).
     fn visibleDeclNamed(lk: Linkage, t: Tables, file: string, name: string) -> boolean {
+        // s474: `name` as written here — an alias denotes its export (scopeOrig)
+        const from: string = scopeFrom(lk, file, NameKind.KDecl, name)
+        if (from == "") return false
+        const orig: string = scopeOrig(lk, file, NameKind.KDecl, name)
         for (const d of t.decls) {
-            if (d.sym.id != t.program.id && d.sym.hint == name && inScope(lk, file, NameKind.KDecl, name, d.file)) return true
+            if (d.sym.id != t.program.id && d.sym.hint == orig && d.file == from) return true
         }
         return false
     }
@@ -19150,9 +19224,9 @@ ${
             if (f.path == file) {
                 for (const imp of importsOfItems(f.items)) {
                     const target: string = importTarget(f.path, imp.from, paths)
-                    if (target != "" && exportsName(lk.own, target, name)) {
+                    if (target != "") {
                         for (const x of imp.names) {
-                            if (x.name == name) return imp.from
+                            if (x.name == name && exportsName(lk.own, target, x.orig)) return imp.from   // s474: `name` is the local (alias) name
                         }
                     }
                 }
@@ -20248,8 +20322,11 @@ ${
     // name, so `callKeys` over them answers for THE callee a name denotes there.
     fn fnwIn(ws: FnW[], lk: Linkage, file: string) -> FnW[] {
         let out: FnW[] = []
+        // s474: one per LOCAL name the function is bound under (an alias: the call writes the alias)
         for (const w of ws) {
-            if (inScope(lk, file, NameKind.KFn, w.name, w.file)) out = out.concat([w])
+            for (const local of boundAs(lk, file, NameKind.KFn, w.name, w.file)) {
+                out = out.concat([{ name: local, nid: w.nid, file: w.file, keys: w.keys, params: w.params }])
+            }
         }
         return out
     }
@@ -31609,8 +31686,9 @@ ${
                     st = addDiag(st, f.path, imp.span, r.code, r.why)
                 } else {
                     for (const n of imp.names) {
-                        if (!exportedBy(g, target, n.name)) {
-                            st = addDiag(st, f.path, n.span, "E-IMPORT-004", "`" + n.name + "` is not exported by `" + imp.from + "`")
+                        // s474: an aliased import (`{ a as b }`) names the export `a`
+                        if (!exportedBy(g, target, n.orig)) {
+                            st = addDiag(st, f.path, n.span, "E-IMPORT-004", "`" + n.orig + "` is not exported by `" + imp.from + "`")
                         }
                     }
                 }
@@ -31702,6 +31780,7 @@ ${
             if (f.path == file) {
                 for (const imp of importsOfItems(f.items)) {
                     for (const m of imp.names) {
+                        if (m.name == name && m.orig != name) return "`import { " + m.orig + " as " + name + " } from \"" + imp.from + "\"`"   // s474: an alias
                         if (m.name == name) return "`import { " + name + " } from \"" + imp.from + "\"`"
                     }
                 }
