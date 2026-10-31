@@ -669,7 +669,10 @@ async function dev(file: string, opts: { outDir?: string; port: number; format: 
     server = null;
     if (r.server) {
       const mod = await import(pathToFileURL(join(r.outDir, "program.server.js")).href + "?v=" + generation);
-      server = mod.createServer({ root: dirname(entryAbs) });
+      // `dev: true` — this is the DEV build (S474 ruling 2 as amended, "capability over limitation"
+      // item 3): a failed query's driver text stays in the failure the client receives. A deployed
+      // `compile` output is served by its own host, which does not pass it: production, blanked.
+      server = mod.createServer({ root: dirname(entryAbs), dev: true });
     }
     log(`✓ ${reason}: compiled ${shown(entryAbs)} in ${Math.round(performance.now() - t)} ms → ${shown(r.outDir)}`);
     for (const c of clients) { try { c.enqueue("data: reload\n\n"); } catch { clients.delete(c); } }
