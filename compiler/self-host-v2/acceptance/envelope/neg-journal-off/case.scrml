@@ -1,0 +1,12 @@
+// §8.9.2 amendment (S473 review-surfaced 2): `PRAGMA journal_mode = OFF` on a `!` function's
+// connection disables the journal its rollback needs — E-SQL-JOURNAL-OFF.
+<program db="./app.db">
+    type E:enum = { Bad, QueryFailed(message: string), ConstraintViolation(field: string), ConnectionLost }
+    let <r:int=0/>
+    function move(a: int)! E {
+        ?{`PRAGMA journal_mode = OFF`}.run();
+        ?{`UPDATE acct SET n = n + ${a}`}.run();
+        return 1;
+    }
+    <main><button onclick={ @r = move(1) !{ _ :> 0, }; }>go</button></main>
+</program>

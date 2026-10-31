@@ -1,0 +1,19 @@
+// §8.9.2 (S451 ruling 4a): an envelope covers its own database only — a write to another database
+// reached while it is open is E-SQL-011, never compiled with a partial rollback.
+<program db="./a.db">
+    type E:enum = { Bad, QueryFailed(message: string), ConstraintViolation(field: string), ConnectionLost }
+    <db src="./b.db">
+        function logB(a: int) -> int {
+            ?{`INSERT INTO blog (a) VALUES (${a})`}.run() !{ _ :> { return 0; } };
+            return 1;
+        }
+    </db>
+    let <r:int=0/>
+    function move(a: int)! E {
+        ?{`UPDATE acct SET n = n - ${a}`}.run();
+        ?{`UPDATE acct SET n = n + ${a}`}.run();
+        const x: int = logB(a);
+        return x;
+    }
+    <main><button onclick={ @r = move(1) !{ _ :> 0, }; }>go</button></main>
+</program>

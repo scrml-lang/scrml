@@ -1,0 +1,12 @@
+{
+  "id": "acceptance-envelope-neg-pooled-unsupported",
+  "description": "A `!` function needing the envelope on a Postgres database: refused by name (no reserved pool connection in the bootstrap).",
+  "language-version": "1.0",
+  "spec": "§8.9.2 · §19.10.6 (Pooled drivers) · S473 D1",
+  "rationale": "§19.10.6: \"A transaction SHALL run on one connection taken from the pool for it alone\"; S473 D1: \"the bootstrap SHALL refuse code whose server guarantee it does not build … never compile it without the guarantee\".",
+  "expect": {
+    "codes": [
+      "E-BOOTSTRAP-UNSUPPORTED"
+    ]
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "id": "acceptance-envelope-neg-nobatch-cross-db-write",
+  "description": "A `!` function's envelope on ./a.db reaches a `.nobatch()` write to ./b.db: still E-SQL-011 (before s474 r1 it compiled and the write survived the rollback).",
+  "language-version": "1.0",
+  "spec": "§8.9.2 (S451 ruling 4a) · §8.9.5 · §34 E-SQL-011",
+  "rationale": "§8.9.5: `.nobatch()` excludes a query from coalescing candidate sets — the trigger count — not from the envelope's extent; §8.9.2: a write to database B that the envelope's extent can reach SHALL be E-SQL-011.",
+  "expect": {
+    "codes": [
+      "E-SQL-011"
+    ]
+  }
+}

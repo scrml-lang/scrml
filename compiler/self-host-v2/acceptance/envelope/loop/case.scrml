@@ -1,0 +1,27 @@
+// §8.9.2 amendment F10 (S473 #1690 review): a query inside a loop is reached more than once, so it
+// counts as two or more — the `!` function runs every iteration's write in one transaction, and a
+// `fail` after the loop rolls them all back.
+<program db="./app.db">
+    type E:enum = { Bad, QueryFailed(message: string), ConstraintViolation(field: string), ConnectionLost }
+    type C:struct = { c: int }
+    let <r:int=0/>
+    let <n:int=0/>
+    function fill(a: int)! E {
+        for (let i = 0; i < 3; i = i + 1) {
+            ?{`INSERT INTO log (a) VALUES (${a + i})`}.run();
+        }
+        if (a > 5) fail .Bad;
+        return 1;
+    }
+    function count()! E {
+        const row: C = ?{`SELECT count(*) AS c FROM log WHERE a > 0`}.get();
+        return row.c;
+    }
+    <main>
+        <button id="bad" onclick={ @r = fill(6) !{ _ :> 9, }; }>bad</button>
+        <button id="ok" onclick={ @r = fill(1) !{ _ :> 9, }; }>ok</button>
+        <button id="count" onclick={ @n = count() !{ _ :> 99, }; }>count</button>
+        <p id="r">${@r}</p>
+        <p id="n">${@n}</p>
+    </main>
+</program>

@@ -1,0 +1,20 @@
+// §19.10.5 (S473 #1690 review F11): a client-placed `!` function making two server calls is the
+// PERMANENT refusal E-TX-CLIENT-MULTI-CALL — no transaction spans two requests.
+<program db="./app.db">
+    type E:enum = { Bad, QueryFailed(message: string), ConstraintViolation(field: string), ConnectionLost }
+    let <r:int=0/>
+    function s1(a: int)! E {
+        ?{`INSERT INTO log (a) VALUES (${a})`}.run();
+        return 1;
+    }
+    function s2(a: int)! E {
+        ?{`INSERT INTO log (a) VALUES (${a})`}.run();
+        return 1;
+    }
+    function move(a: int)! E {
+        const x: int = s1(a) !{ _ :> { return 0; } };
+        const y: int = s2(a) !{ _ :> { return 0; } };
+        return x + y;
+    }
+    <main><button onclick={ @r = move(1) !{ _ :> 0, }; }>go</button></main>
+</program>

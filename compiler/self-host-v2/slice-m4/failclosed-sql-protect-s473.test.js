@@ -8,7 +8,7 @@
 //   2. §14.8.9 / §52.3: a type-level `<User authority= table= protect=>` was emitted as HTML and its
 //      `protect=` dropped — refused (a capitalized undeclared tag; `protect=` / `authority=` anywhere).
 //   3. §8.1.2: E-SQL-MULTIPLE-STATEMENTS.
-//   4. §8.9.2 / §19.10.5: a `!` function with two or more `?{}` needs the implicit envelope, unbuilt.
+//   4. §8.9.2 / §19.10.5: a `!` function with two or more `?{}` needs the implicit envelope (s474 U1e: built; the probes compile).
 //   5. §19.10.4 / §19.10.6: manual transaction control in a `!` function, ungated — refused.
 //   6. §14.8.10 item (1): the program-body allow-list — E-SQL-PROGRAM-STATEMENT-NOT-ADMITTED /
 //      E-TENANT-UNDECLARED.
@@ -214,26 +214,35 @@ describe("6 — §14.8.10 item (1): the program-body allow-list", () => {
   });
 });
 
-describe("4 — §8.9.2 / §19.10.5: the implicit per-handler transaction is not built — refused", () => {
+describe("4 — §8.9.2 / §19.10.5: the implicit per-handler transaction (s474 U1e: BUILT — was refused here)", () => {
+  // The probes compile now, with the `!` function's Envelope in Core and its body run inside
+  // `rt.envelope` by the server artifact (runtime behaviour: slice-m4/envelope-s474.test.js).
+  const envOf = (src, name = "move") => {
+    const r = frontEnd(mods, [{ path: "t.scrml", src }]);
+    return r.core ? (r.core.envelopes.find((e) => e.fn.hint === name) ?? null) : null;
+  };
   test("probe s8/envelope: a `!` function with two writes and a `fail` exit", () => {
-    const e = errs(PROBE_ENVELOPE);
-    expect(e.map((d) => d.code)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
-    expect(e[0].message).toContain("implicit per-handler transaction (§8.9.2");
-    expect(e[0].message).toContain(".nobatch()");
+    expect(codes(PROBE_ENVELOPE)).toEqual([]);
+    expect(envOf(PROBE_ENVELOPE).standalone).toBe(true);
   });
 
   test("probe p19-tx (audit part 3): two UPDATEs in a `!` function", () => {
-    expect(codes(PROBE_P19_TX)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+    expect(codes(PROBE_P19_TX)).toEqual([]);
+    expect(envOf(PROBE_P19_TX).standalone).toBe(true);
   });
 
   test("near-misses: one query; `.nobatch()` leaves fewer than two; a function not declared `!`", () => {
     const bang = (q1, q2) => DBP(`    type E:enum = { Bad, QueryFailed(message: string), ConstraintViolation(field: string), ConnectionLost }\n    function move(a: int)! E {\n${q1}${q2}        return 1;\n    }`);
     const q = (sql, nb = "") => `        ${SQ}\`${sql}\`}${nb}.run();\n`;
     expect(codes(bang(q("UPDATE t SET n = 1"), ""))).toEqual([]);
+    expect(envOf(bang(q("UPDATE t SET n = 1"), "")).standalone).toBe(false);
     expect(codes(bang(q("UPDATE t SET n = 1"), q("UPDATE u SET n = 2", ".nobatch()")))).toEqual([]);
-    expect(codes(bang(q("UPDATE t SET n = 1"), q("UPDATE u SET n = 2")))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+    expect(envOf(bang(q("UPDATE t SET n = 1"), q("UPDATE u SET n = 2", ".nobatch()"))).standalone).toBe(false);
+    expect(codes(bang(q("UPDATE t SET n = 1"), q("UPDATE u SET n = 2")))).toEqual([]);
+    expect(envOf(bang(q("UPDATE t SET n = 1"), q("UPDATE u SET n = 2"))).standalone).toBe(true);
     const plain = DBP(`    function f() -> int {\n        ${SQ}\`UPDATE t SET n = 1\`}.run() !{ _ :> { return 0; } };\n        ${SQ}\`UPDATE u SET n = 1\`}.run() !{ _ :> { return 0; } };\n        return 1;\n    }`);
     expect(codes(plain)).toEqual([]);
+    expect(envOf(plain, "f")).toBeNull();
   });
 });
 
