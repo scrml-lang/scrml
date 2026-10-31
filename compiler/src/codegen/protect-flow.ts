@@ -898,6 +898,8 @@ const SQL_METHODS = new Set(["unsafe"]);
 const TX_GUARD_RUNTIME_NAMES = new Set([
   "_scrml_db_guard", "_scrml_db_request_scope", "_scrml_db_scope_end", "_scrml_db_stream_end",
   "_scrml_db_tx_kind", "_scrml_db_sql_head", "_scrml_db_savepoint_name",
+  // S474 — marks a DRIVER error before rethrowing it (the guard's own `.catch`); no row data.
+  "_scrml_db_mark_failure",
 ]);
 
 /** Compiler-runtime helpers the analysis models itself (never walked). */
