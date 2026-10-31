@@ -357,6 +357,62 @@ describe("S474 r1 — payload binders of `match e` arms are checked against the 
   });
 });
 
+// S474 fix round 1 (review of #1698, F4): each guard that keeps the compiler-provided SqlError set
+// from being substituted where it is not the callee's type has a test that FAILS when the guard is
+// removed (measured by mutation; table in docs/changes/s474-impl1-sqlerror-binder/progress.md).
+describe("S474 r1 — the guards around the SqlError binder set (each bitten by mutation)", () => {
+  const MINI = (decls, body) => `<program db="../g.db">
+  \${
+    import { listArcs } from '../lib.scrml'
+    <msg> = "init"
+    <s> = "s"
+    ${decls}
+    function fetchLocal()! -> SqlError {
+      return ?{\`SELECT id, title FROM gnode\`}.all()
+    }
+    ${body}
+  }
+  <main><p>\${@msg} \${@s}</p></main>
+</program>
+`;
+  const codes = (decls, body) => compileProject(MINI(decls, body)).codes;
+
+  test("M1 — a program `SqlError` that is not an enum (a struct): a local `! -> SqlError` callee's binder stays untyped", () => {
+    expect(codes("type SqlError:struct = { a: string }", `function go() { @msg = fetchLocal() !{ _ e :> { @s = e.variant; return } } }`)).toEqual(["E-TYPE-031"]);
+  });
+
+  test("M1 — a view-declared `SqlError` enum: the IMPORTED callee's binder is not given the built-in set", () => {
+    expect(codes("type SqlError:enum = { Mine }", `function go() { @msg = listArcs() !{ _ e :> { @s = e is .QueryFailed ? "q" : "o"; return } } }`)).toEqual(["E-TYPE-031"]);
+  });
+
+  test("M2 — a program `SqlError` enum: a `?{}` handled at the site is not given the built-in set", () => {
+    expect(codes("type SqlError:enum = { Mine }", `server function q() { const r = ?{\`SELECT id FROM gnode\`}.all() !{ _ e :> { log(e is .QueryFailed); return [] } }
+      return r }`)).toEqual(["E-TYPE-031"]);
+  });
+
+  test("M3 — a CPS body-split `! -> SqlError` callee stays untyped (it also sends impl#1's CpsError variants)", () => {
+    expect(codes("", `function mixed()! -> SqlError {
+      const rows = ?{\`SELECT id FROM gnode\`}.all()
+      @s = "loaded"
+      return rows
+    }
+    function go() { @msg = mixed() !{ _ e :> { @s = e.variant; return } } }`)).toEqual(["E-TYPE-031"]);
+  });
+
+  // An argument / array / object position reaches the audit as the guard-marker call
+  // (`<operand>.__scrml_guard__("!{…}")`). impl#1's codegen then refuses that position (E-CG-003,
+  // a separate limitation), so the test asserts what the AUDIT says: typed, so `e.variant` is not
+  // E-TYPE-031 and `e.message` is E-TYPE-004 (untyped, both would be E-TYPE-031).
+  test("M7 — an expression-position `!{}` on a `?{}` (the guard-marker path) is typed SqlError", () => {
+    const at = (arm) => codes("", `server function q() { log(?{\`SELECT id FROM gnode\`}.all() !{ _ e :> { ${arm}; return [] } })
+      return 1 }`);
+    expect(at("log(e.variant)")).not.toContain("E-TYPE-031");
+    const msg = at("log(e.message)");
+    expect(msg).toContain("E-TYPE-004");
+    expect(msg).not.toContain("E-TYPE-031");
+  });
+});
+
 describe("S474 — run time: a REAL failing query on the server (the table is dropped under the running server)", () => {
   test("success first: the rows land in the cells, no arm runs", async () => {
     const page = await boot(built());
