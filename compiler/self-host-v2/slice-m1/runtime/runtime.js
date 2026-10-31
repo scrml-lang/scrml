@@ -3077,7 +3077,7 @@ export function gather(scope, anchor, build) {
  * animation, scroll position) for elements whose key persists"). `build` runs
  * the loop TRACKED, as `gather`'s does; each iteration first evaluates its key
  * once (`loopKey`), and each lift appends a `keyRow` naming that iteration.
- * A row's identity is (key, its place among its iteration's lifts, its
+ * A row's identity is (key, its template, its place among its iteration's lifts of that
  * template). On a re-run a row whose identity persists keeps its DOM nodes and
  * its scope — it is MOVED if its position changed, and its cells (the loop's
  * locals the row's markup reads) are set to the iteration's new values; a row
@@ -3093,14 +3093,23 @@ export function gatherKeyed(scope, anchor, build) {
   });
 }
 
-/** s474 — one iteration's key (§17.4b), evaluated once per iteration. */
+/**
+ * s474 — one iteration's key (§17.4b), evaluated once per iteration. `per`
+ * counts the iteration's lifts PER TEMPLATE (#1700 review F3): a row's place is
+ * its place among the lifts of its own template, so a conditional lift of
+ * another template earlier in the body never shifts it (its DOM state
+ * persists with its key, §17.4b).
+ */
 export function loopKey(key) {
-  return { key, lifts: 0 };
+  return { key, lifts: 0, per: new Map() };
 }
 
 /** s474 — a lifted row of a keyed loop: template `tpl`, the row's snapshot `vals`, its render. */
 export function keyRow(it, tpl, vals, render) {
-  return { it, ord: it.lifts++, tpl, vals, render };
+  const ord = it.per.get(tpl) || 0;
+  it.per.set(tpl, ord + 1);
+  it.lifts++;
+  return { it, ord, tpl, vals, render };
 }
 
 /** s474 — a primitive value lifted in a keyed loop: a text row whose text follows its cell. */

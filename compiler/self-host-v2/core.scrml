@@ -703,7 +703,7 @@ ${
         // s474 — `key`: the loop-header `key` (§17.4b), the local the body's
         // FIRST statement binds (`Let(key, <the key expression>)`, once per
         // iteration); `not` — unkeyed. Keyed, the rows are reconciled by
-        // (key, the row's place among its iteration's lifts, its template): a
+        // (key, its template, its place among its iteration's lifts of that template): a
         // row whose identity persists keeps its DOM and takes the iteration's
         // new values (§17.4b "preserving DOM state … for elements whose key
         // persists"); a key two iterations share is a runtime trap.

@@ -1851,7 +1851,7 @@ ${
     // { … })` — the row's template index and its snapshot of the loop's
     // locals; the row's markup reads each of those locals through a CELL (`x`
     // is a cell there, read `x.get()`, as an `<each>` row reads its item), so a
-    // row whose identity — key, place among its iteration's lifts, template —
+    // row whose identity — key, template, place among the iteration's lifts of that template —
     // persists across a re-run keeps its DOM and its scope, and only the cells
     // are set to the iteration's new values (§17.4b: "preserving DOM state …
     // for elements whose key persists"). A value Lift appends `rt.keyTextRow(key, v)`.

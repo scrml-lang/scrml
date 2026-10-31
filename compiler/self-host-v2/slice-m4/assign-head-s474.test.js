@@ -165,3 +165,36 @@ describe("4 — every other assignment-as-expression stays E-ASSIGN-POSITION (S4
     expect(fnCodes(`        let x = 0;\n        x = 1;\n        return x;`)).toEqual([]);
   });
 });
+
+// ---------------------------------------------------------------------------
+// #1700 review round r1
+describe("r1 — F1: a kept target named again in the same head is refused by name (no stale narrowing)", () => {
+  test("the reviewer's repros: a second kept assignment of `m` in a later operand", () => {
+    for (const b of [
+      `        const xs: int[] = [1];\n        let m: int | not = not;\n        if ((m = xs.at(0)) is given && ((m = xs.at(9)) is not || true)) { return m + 1; }\n        return 0;`,
+      `        const xs: int[] = [1];\n        let m: int | not = not;\n        let q = 0;\n        if ((m = xs.at(0)) is given && (q = 1) > 0 && ((m = xs.at(9)) == m)) { return m + 1; }\n        return 0;`,
+      `        const xs: int[] = [1];\n        let m: int | not = not;\n        for ((m = xs.at(0)) is given && ((m = xs.at(9)) is not || true)) { return m + 1; }\n        return 0;`,
+    ]) {
+      const e = errs(fnProg(b)).filter((d) => d.code === "E-BOOTSTRAP-UNSUPPORTED");
+      expect([b, e.length > 0]).toEqual([b, true]);
+      expect(e[0].message).toContain("named again elsewhere in the same head");
+    }
+  });
+  test("a read / test of the target in another operand (before or after it) is refused too", () => {
+    expect(fnCodes(`        const xs: int[] = [1];\n        let m: int | not = not;\n        if (m is given && (m = xs.at(9)) is not) { return 1; }\n        return 0;`)).toContain("E-BOOTSTRAP-UNSUPPORTED");
+    expect(fnCodes(`        const xs: int[] = [1];\n        let m: int | not = not;\n        if ((m = xs.at(0)) is given && m > 0) { return 1; }\n        return 0;`)).toContain("E-BOOTSTRAP-UNSUPPORTED");
+  });
+  test("near-misses: its own value may read it; two DIFFERENT kept locals; a member of another name", async () => {
+    expect(fnCodes(`        let m = 0;\n        if ((m = m + 1) > 0) { return m; }\n        return 0;`)).toEqual([]);
+    expect(fnCodes(`        const xs: int[] = [1, 2];\n        let a: int | not = not;\n        let b: int | not = not;\n        if ((a = xs.at(0)) is given && (b = xs.at(1)) is given) { return a + b; }\n        return 0;`)).toEqual([]);
+    await load(fnProg(`        let m = 0;\n        if ((m = m + 1) > 0) { m = m * 10; }\n        return m;`));
+    expect($("#o").textContent).toBe("10");
+  });
+});
+
+describe("r1 — F4: the kept form takes the statement form's executable-sink judgement", () => {
+  test("an attribute node bound through a kept head is E-LOGIC-EXECUTABLE-SINK, as the statement form", () => {
+    expect(fnCodes(`        let n = not;\n        n = document.body.attributes[0];\n        return 0;`)).toContain("E-LOGIC-EXECUTABLE-SINK");
+    expect(fnCodes(`        let n = not;\n        if ((n = document.body.attributes[0]) is given) { n.value = "x"; }\n        return 0;`)).toContain("E-LOGIC-EXECUTABLE-SINK");
+  });
+});

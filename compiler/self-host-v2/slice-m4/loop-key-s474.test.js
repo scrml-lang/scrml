@@ -94,12 +94,11 @@ describe("2 — RUNTIME: keyed reconciliation preserves DOM identity", () => {
     expect(after.map((e) => e.textContent)).toEqual(["C", "a", "b"]);
     for (const a of after) expect(before.includes(a)).toBe(false);
   });
-  test("DOM state follows the item: an input's typed text and focus survive a reorder", async () => {
+  // (#1700 review F5: focus does NOT survive — moving a node blurs it; the node itself and its typed text do)
+  test("DOM state follows the item: an input's NODE and typed text survive a reorder", async () => {
     await load(prog(ITEMS, `        <ul id="u">\${ for (const it of @items key it.id) { lift <li><input class="t"/>\${it.name}</li>; } }</ul>`));
     const inputs = [...document.querySelectorAll("#u input.t")];
     inputs[2].value = "typed into c";
-    inputs[2].focus();
-    expect(document.activeElement).toBe(inputs[2]);
     click(btn("rot"));
     const now = [...document.querySelectorAll("#u input.t")];
     expect(now[0]).toBe(inputs[2]);
@@ -192,5 +191,54 @@ describe("5 — a `key` on a loop that renders no rows of its own is refused by 
     expect(e1.message).toContain("header `key`");
     expect(codes(fnP(`        const ids = for (const it of @items key it.id) { lift it.id; };\n        return ids.length;`))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
     expect(codes(prog(ITEMS, `        <ul>\${ for (const it of @items key it.id) { for (i of 0..2 key i) { lift <li>\${i}</li>; } } }</ul>`))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// #1700 review round r1
+describe("r1 — F3: a row's place is counted per template (a conditional lift of another template never shifts it)", () => {
+  test("`if (it.name == \"C\") { lift <b>!</b>; } lift <li><input/>…</li>` — the c row's input keeps its node and text when c becomes C", async () => {
+    await load(prog(ITEMS, `        <div id="d">\${ for (const it of @items key it.id) { if (it.name == "C") { lift <b>!</b>; } lift <li><input class="t"/>\${it.name}</li>; } }</div>`));
+    const before = [...document.querySelectorAll("#d input.t")];
+    before[2].value = "typed into c";
+    click(btn("rot"));
+    expect([...document.querySelectorAll("#d > *")].map((e) => e.tagName + ":" + e.textContent)).toEqual(["B:!", "LI:C", "LI:a", "LI:b"]);
+    const now = [...document.querySelectorAll("#d input.t")];
+    expect(now[0]).toBe(before[2]);
+    expect(now[0].value).toBe("typed into c");
+    expect(now[1]).toBe(before[0]);
+  });
+});
+
+describe("r1 — F2: an unkeyed inner loop lifting markup inside a KEYED loop is refused by name", () => {
+  const G = `    type Tag:struct = { id: int, n: string }
+    type Grp:struct = { id: int, tags: Tag[replace] }
+    <gs:Grp[replace]=([{ id: 1, tags: [{ id: 10, n: "x" }, { id: 11, n: "y" }] }])/>`;
+  const P = (body) => `<program>\n${G}\n    <main>\n${body}\n    </main>\n</program>\n`;
+  test("the reviewer's repro (typed text would move from x to y) — E-BOOTSTRAP-UNSUPPORTED naming the nested keyed list", () => {
+    const e = run(P(`        <div>\${ for (const g of @gs key g.id) { for (const t of g.tags) { lift <label><input/>\${t.n}</label>; } } }</div>`)).diags.filter((d) => d.code === "E-BOOTSTRAP-UNSUPPORTED");
+    expect(e.length).toBe(1);
+    expect(e[0].message).toContain("nested keyed list");
+  });
+  test("also under an `if`; near-misses: the same loop unkeyed outside, an inner loop lifting only values, a nested Tier-0 inside a row", () => {
+    expect(codes(P(`        <div>\${ for (const g of @gs key g.id) { if (g.id > 0) { for (const t of g.tags) { lift <i>\${t.n}</i>; } } } }</div>`))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+    expect(codes(P(`        <div>\${ for (const g of @gs) { for (const t of g.tags) { lift <i>\${t.n}</i>; } } }</div>`))).not.toContain("E-BOOTSTRAP-UNSUPPORTED");
+    expect(codes(P(`        <p>\${ for (const g of @gs key g.id) { for (const t of g.tags) { lift t.n; } } }</p>`))).toEqual([]);
+    expect(codes(P(`        <div>\${ for (const g of @gs key g.id) { lift <section>\${ for (const t of g.tags key t.id) { lift <i>\${t.n}</i>; } }</section>; } }</div>`))).toEqual([]);
+  });
+});
+
+describe("r1 — F7 / F8: diagnostic texts", () => {
+  test("E-KEY-001 for a key that may be an int or a string names both (not \"not known\")", () => {
+    const d = diag(prog(ITEMS, `        <ul>\${ for (const it of @items key it.id > 1 ? it.id : it.name) { lift <li>a</li>; } }</ul>`), "E-KEY-001");
+    expect(d).toBeTruthy();
+    expect(d.message).not.toContain("not known");
+    expect(d.message).toContain("int");
+    expect(d.message).toContain("string");
+  });
+  test("W-KEY-001 says an unkeyed loop REBUILDS its rows (state lost, not kept by position)", () => {
+    const d = diag(prog(ITEMS, `        <ul>\${ for (const it of @items) { lift <li>\${it.name}</li>; } }</ul>`), "W-KEY-001");
+    expect(d.message).toContain("REBUILDS");
+    expect(d.message).not.toContain("stays with the position");
   });
 });
