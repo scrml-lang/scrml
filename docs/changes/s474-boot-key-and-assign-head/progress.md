@@ -99,3 +99,22 @@ Task B — D10:
 - spec-coverage-check: 0 warnings, 0 violations (totals block refreshed — the S474 post-merge-bot ruling is not wired
   yet, so the gate still checks the totals). severity.scrml regenerated for W-KEY-001 / E-KEY-001 (`--check` current).
 - CI-only: types-gate OK (unchanged), s34-census --check-new PASS (no §34 rows touched), e2e-render-map 259 / 0.
+
+## 2026-10-30 — fix round r1 (#1700 review of f267a1a81)
+- **F5 correction:** the "input text + focus kept" claim above (Task A Tests) is WRONG for focus — moving a node blurs it.
+  A surviving row keeps its node and its typed text; focus is not kept. Test renamed / focus asserts removed.
+- F1 (HIGH): `keptHeadAliasing` (resolveCond) — a kept target named anywhere else in the same head (a second kept
+  assignment, or a read / test in another operand; its own value may read it) is E-BOOTSTRAP-UNSUPPORTED by name.
+  Chosen over ordered narrowing (the PA's preferred narrowest change). A duplicate-fn clash (`assignTargetOf`
+  already existed — impl#1 binds the last one) was caught by lint-duplicate-fn; renamed `keptTargetExpr`.
+- F2 (HIGH): an UNKEYED inner statement loop lifting markup inside a KEYED Tier-0 loop is E-BOOTSTRAP-UNSUPPORTED by
+  name (`nestedRowLoops`, resolveTier0); nested identity not built, so the inner `key` stays refused too.
+- F3 (MED): runtime `loopKey` / `keyRow` count a row's place PER TEMPLATE (reviewer's fix). Test: the conditional
+  `<b>!</b>` before the `<li><input/>` row.
+- F4 (MED): `assignSinkWhy` — one executable-sink judgement for the statement and kept forms (adds `sinkYieldsAttr`).
+- F7 / F8: E-KEY-001 names a union key's member types; W-KEY-001 says an unkeyed loop REBUILDS its rows. SPEC §34
+  rows (both tables) for E-KEY-001 / W-KEY-001 updated (header form; bootstrap emits; Nominal on impl#1) — s34-census
+  --check-new PASS.
+- Gaps filed: g-boot-keyed-dup-key-first-render-unmounts-s474 (F6), g-spec-loop-key-identity-undefined-s474 (F7 LOW);
+  g-bootstrap-loop-codes-owed-s469 extended to the kept form (E-ASSIGN-004 / E-LIN-004).
+- Hook green on the r1 code commit: 52410 pass / 0 fail.
