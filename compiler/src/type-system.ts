@@ -90,7 +90,7 @@ import { isEventHandlerAttrName } from "./multi-statement-scan.ts";
 import { isRawContentElement } from "./raw-content-encode.ts";
 import { parseHandlerStatementsForCheck, parseGuardArmsFromRaw } from "./ast-builder.js";
 import { escapeHatchBodyStatements } from "./escape-hatch-body.ts";
-import { sqlQueryExprShape, sqlQueryHeadOfExpr, sqlQueriesNotCoveredByHandler, sqlRefsOfExpr, SQL_ERROR_EXHAUSTIVE_VARIANTS, handledSqlOfGuardedNode, handledSqlGuardInner } from "./codegen/sql-attempt.ts";
+import { sqlQueryExprShape, sqlQueryHeadOfExpr, sqlQueriesNotCoveredByHandler, sqlRefsOfExpr, SQL_ERROR_EXHAUSTIVE_VARIANTS, SQL_ERROR_VARIANT_FIELDS, handledSqlOfGuardedNode, handledSqlGuardInner } from "./codegen/sql-attempt.ts";
 // §7.5 (S365, dpa-036 call 1) — `inferExprType` switches exhaustively over this
 // union. Imported as a TYPE so the `never` fallthrough has a closed set to close
 // over: adding a member to `ExprNode` without teaching inference about it is a
@@ -1629,6 +1629,58 @@ const CLIENT_SERVER_CALL_FAILURE_SET: EnumType = Object.freeze({
   ]) as unknown as VariantDef[],
   transitionRules: null,
 }) as EnumType;
+
+/**
+ * S474 — §18.6.1 "The binder's type is the type of the failure being handled — … a call to a
+ * function declared `!` (§19.4.1): the declared error enum": the type of a `_ e :>` whole-error
+ * binder on a call to a function declared `! -> SqlError` (§19.8.3 item 3), local or imported,
+ * when no program type of that name exists (§19.8.1: "The developer SHALL NOT redefine it").
+ * Variants: §19.8.1's three (`QueryFailed(message: string)`, `ConstraintViolation(field: string)`,
+ * `ConnectionLost`) + §8.9.4's `BatchPrepareFailed { sites }` — the SAME list the `?{}` handler's
+ * exhaustiveness check uses (SQL_ERROR_EXHAUSTIVE_VARIANTS); `sites` is typed `asIs` (impl#1 has no
+ * source-location type), so a binder on it stays refused (fail closed).
+ *
+ * Read ONLY by the whole-error binder audit (`wholeBinderCalleeEnum`). It is deliberately NOT what
+ * `resolveFailableErrorType` returns for `SqlError` (that function's other consumers keep the S466
+ * scope). One frozen object, never registered in a type registry, so no program name denotes it.
+ */
+function sqlErrorVariantDefs(): VariantDef[] {
+  const fields = new Map<string, readonly string[]>(SQL_ERROR_VARIANT_FIELDS.map(([v, fs]) => [v, fs]));
+  return SQL_ERROR_EXHAUSTIVE_VARIANTS.map((v) => {
+    const fs = fields.get(v);
+    const payload = fs === undefined
+      ? new Map<string, ResolvedType>([["sites", tAsIs()]])
+      : fs.length === 0 ? null : new Map<string, ResolvedType>(fs.map((f) => [f, tPrimitive("string")] as [string, ResolvedType]));
+    return Object.freeze({ name: v, payload, renders: null }) as unknown as VariantDef;
+  });
+}
+// Built on first use (not at module load): the variant lists are imported, and an import cycle
+// must not see them before their module has run.
+let _sqlErrorBinderEnum: EnumType | null = null;
+function sqlErrorBinderEnum(): EnumType {
+  return _sqlErrorBinderEnum ??= Object.freeze({
+    kind: "enum" as const,
+    name: "SqlError",
+    variants: Object.freeze(sqlErrorVariantDefs()) as unknown as VariantDef[],
+    transitionRules: null,
+  }) as EnumType;
+}
+
+/**
+ * S474 — §18.6.1 "a client call to a server function (§19.9.10): the call's failure set —
+ * `Transport(t: ServerCallError)`, and for a server function declared `! E` the variants of `E` as
+ * well": the binder's type on a CLIENT call to a server-placed function declared `! -> SqlError`.
+ * Read ONLY by `wholeBinderCalleeEnum`, like the two sets above.
+ */
+let _sqlErrorClientCallFailureSet: EnumType | null = null;
+function sqlErrorClientCallFailureSet(): EnumType {
+  return _sqlErrorClientCallFailureSet ??= Object.freeze({
+    kind: "enum" as const,
+    name: "SqlError | Transport(t: ServerCallError)",
+    variants: Object.freeze([...sqlErrorBinderEnum().variants, ...CLIENT_SERVER_CALL_FAILURE_SET.variants]) as unknown as VariantDef[],
+    transitionRules: null,
+  }) as EnumType;
+}
 
 /**
  * The VARIANT SET an error-type name denotes, for the checks that read one
@@ -11756,7 +11808,12 @@ function annotateNodes(
     const res = wholeBinderResolveFn(name, scope);
     if (res) {
       const errName = typeof res.decl.errorType === "string" ? res.decl.errorType.trim() : "";
-      if (errName) return resolveErrorEnumThroughAliases(errName, typeRegistry, _fileTypeDeclsForErrors);
+      if (errName) {
+        const declared = resolveErrorEnumThroughAliases(errName, typeRegistry, _fileTypeDeclsForErrors);
+        if (declared) return declared;
+        // S474 — `! -> SqlError` (§19.8.3 item 3): the compiler-provided enum (§18.6.1).
+        return wholeBinderSqlErrorSet(res.decl, filePath, errName, scope);
+      }
       // S473 — a server-placed callee not declared `!`, called on the client (§19.9.10).
       return wholeBinderPlainServerCallee(res.decl, filePath) && wholeBinderCallIsClient(scope) ? CLIENT_SERVER_CALL_FAILURE_SET : null;
     }
@@ -11769,8 +11826,27 @@ function annotateNodes(
       // placement, exactly as a same-file call").
       const d = importedFnDecls?.get(name);
       if (d && wholeBinderPlainServerCallee(d.fnNode, d.depFilePath) && wholeBinderCallIsClient(scope)) return CLIENT_SERVER_CALL_FAILURE_SET;
+      // S474 — an imported function declared `! -> SqlError` whose declaring file has no enum of
+      // that name (so `importedFnErrorEnums` holds none): the compiler-provided enum (§18.6.1).
+      const errName = d && typeof d.fnNode.errorType === "string" ? d.fnNode.errorType.trim() : "";
+      if (d && errName) return wholeBinderSqlErrorSet(d.fnNode, d.depFilePath, errName, scope);
     }
     return null;
+  }
+  /**
+   * S474 — the whole-error binder's type for a callee declared `! -> SqlError` whose error type no
+   * program enum denotes: `sqlErrorBinderEnum()`, or — on a CLIENT call to a server-placed callee —
+   * `sqlErrorClientCallFailureSet()` (§18.6.1 / §19.9.10: `Transport` "and … the variants of `E`
+   * as well"). Null (fail closed: every use refused) for any other error-type name, a callee not
+   * declared `!`, a program-declared `SqlError` (§19.8.1 forbids it; never second-guessed here), and
+   * a CPS-split callee (it also sends impl#1's own `CpsError` variants, which this set does not name).
+   */
+  function wholeBinderSqlErrorSet(decl: ASTNodeLike, declFile: string, errName: string, scope: Scope): EnumType | null {
+    if (errName !== "SqlError" || decl.canFail !== true || typeRegistry.has("SqlError")) return null;
+    const entry = routeEntryAt(declFile, (decl.span as Span | undefined)?.start);
+    if (entry && entry.cpsSplit) return null;
+    const serverPlaced = (decl as { isServer?: boolean }).isServer === true || (!!entry && entry.boundary === "server");
+    return serverPlaced && wholeBinderCallIsClient(scope) ? sqlErrorClientCallFailureSet() : sqlErrorBinderEnum();
   }
   /**
    * S473 — `decl` (declared in `declFile`) is server-placed and NOT declared `!`, and route
