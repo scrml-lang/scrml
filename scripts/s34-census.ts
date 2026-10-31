@@ -56,7 +56,7 @@
  *
  * Usage:  bun scripts/s34-census.ts [--full] [--json]
  *         bun scripts/s34-census.ts --check-new [--base <ref>]   # §34.0 gate, DIFF-SCOPED
- *         bun scripts/s34-census.ts --check-all                  # same checks, EVERY §34 row (measurement)
+ *         bun scripts/s34-census.ts --check-all [--json]         # same checks, EVERY §34 row (measurement)
  */
 
 import { readFileSync, readdirSync, statSync } from "node:fs";
@@ -64,7 +64,7 @@ import { join, relative, dirname } from "node:path";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { parseS34Rows } from "./s34-catalog.ts";
-import { extractCitations, identsOfSource, staleReasons } from "./s34-provenance.ts";
+import { SCAN_ROOTS, buildTreeIdents, extractCitations, staleReasons, type ResolveCtx } from "./s34-provenance.ts";
 
 // `new URL(import.meta.url).pathname` yields a `/C:/…` form on Windows that does not
 // open (the leading slash makes an invalid `\C:\…` after dirname/join); `fileURLToPath`
@@ -224,17 +224,18 @@ for (const f of walk(join(ROOT, "conformance/cases"))) {
 }
 
 // -- emitter scan, every tree (T2, T3) -----------------------------------------------------------
-const SCAN = ["compiler/src", "compiler/native-parser", "compiler/runtime", "compiler/scripts",
-  "compiler/self-host-v2", "lsp", "scripts", "stdlib", "compiler/tests"];
+// The tree list lives in scripts/s34-provenance.ts so the resolver's identifier set and this scan
+// can never cover different trees.
+const SCAN = SCAN_ROOTS;
 const EXT = /\.(ts|js|mjs|scrml)$/;
 const TOKEN = /\b[EWI]-[A-Z0-9]+(?:-[A-Z0-9]+)*\b/g;
 const JSISH = /\.(ts|js|mjs)$/;
 const implHits = new Map<string, number>();
-/** Every identifier appearing in EXECUTABLE source (comments and literal contents blanked) across
- *  every scanned tree, `.scrml` included (S474 — the bootstrap's symbols were invisible before) —
- *  backs the tree-wide citation forms of the §34.0 provenance check below (scripts/s34-provenance.ts).
- *  Populated only for `--check-new`/`--check-all`; the default census never needs it. */
-const treeIdents = new Set<string>();
+/** Every identifier in comment-stripped NON-TEST source across the scanned trees, `.scrml`
+ *  included (S474 — the bootstrap's symbols were invisible before) — backs the tree-wide citation
+ *  forms of the §34.0 provenance check (scripts/s34-provenance.ts `buildTreeIdents`). Built only
+ *  for `--check-new`/`--check-all`; the default census never needs it. */
+const treeIdents = CHECK_NEW ? buildTreeIdents(ROOT) : new Set<string>();
 let filesScanned = 0;
 for (const rootRel of SCAN) {
   for (const f of walk(join(ROOT, rootRel))) {
@@ -246,9 +247,6 @@ for (const rootRel of SCAN) {
     // A COMMENT IS NOT AN EMITTER. Strip comment spans before the token match, or a code
     // named in prose counts as an implementation site (see stripComments above).
     const code = JSISH.test(f) ? stripComments(t) : t;
-    if (CHECK_NEW) {
-      for (const id of identsOfSource(t, f) ?? []) treeIdents.add(id);
-    }
     if (!isImpl) continue;
     for (const tok of code.match(TOKEN) ?? []) {
       if (codeSet.has(tok)) implHits.set(tok, (implHits.get(tok) ?? 0) + 1);
@@ -342,6 +340,7 @@ if (CHECK_NEW) {
   // Citations checked, by form — printed by --check-all so a measurement shows what was RESOLVED,
   // not only what failed (a resolver that parses nothing also reports zero failures).
   const citeCounts = new Map<string, number>();
+  const resolveCtx: ResolveCtx = { root: ROOT, treeIdents };
 
   for (const row of candidates) {
     if (!row.startsWith("|")) continue;
@@ -357,9 +356,9 @@ if (CHECK_NEW) {
 
     // A row may name an emitter AND declare itself spec-ahead. Whatever provenance it does name
     // still has to resolve — a Nominal row citing a deleted file is a stale claim either way.
-    for (const why of staleReasons(row, { root: ROOT, treeIdents })) stale.push({ code, why });
+    for (const why of staleReasons(row, resolveCtx)) stale.push({ code, why });
     for (const c of extractCitations(row)) {
-      const k = c.path?.endsWith(".scrml") ? `${c.form} (.scrml)` : c.form;
+      const k = (c.path ?? c.bare ?? "").endsWith(".scrml") ? `${c.form} (.scrml)` : c.form;
       citeCounts.set(k, (citeCounts.get(k) ?? 0) + 1);
     }
 
@@ -370,9 +369,19 @@ if (CHECK_NEW) {
 
   const scope = CHECK_ALL ? "§34 row(s) (--check-all)" : "new/changed §34 row(s)";
   if (!added) { console.log(`§34.0 gate: no new/changed §34 rows vs ${BASE_REF} — PASS`); process.exit(0); }
+  if (CHECK_ALL && JSON_OUT) {
+    // Machine-readable measurement (pinned by compiler/tests/unit/s34-census-check-all-s474.test.js).
+    console.log(JSON.stringify({
+      rows: added,
+      checked: Object.fromEntries([...citeCounts].sort()),
+      stale,
+      legacyNoProvenance: offenders.length,
+    }, null, 2));
+    process.exit(stale.length ? 1 : 0);
+  }
   if (CHECK_ALL) {
     const total = [...citeCounts.values()].reduce((a, b) => a + b, 0);
-    console.log(`§34.0 --check-all: ${total} symbol citation(s) resolved across ${added} row(s) — ` +
+    console.log(`§34.0 --check-all: ${total} symbol citation(s) checked across ${added} row(s) — ` +
       [...citeCounts].sort().map(([k, v]) => `${k} ${v}`).join(" · "));
     console.log(`  stale provenance: ${stale.length} · legacy no-provenance rows: ${offenders.length}` +
       ` (the latter is the pre-§34.0 backlog; --check-new, the CI mode, judges new/changed rows only)`);
@@ -391,10 +400,11 @@ if (CHECK_NEW) {
     }
     if (stale.length) {
       console.error(`\nA provenance note SHALL RESOLVE: every backticked repo path must exist, and every`);
-      console.error(`symbol named via \`path\` \`sym\` / \`path\` (\`sym\`) / "via \`sym\`" / "in \`sym\`" must appear in`);
-      console.error(`executable source — IN THAT FILE when a path is given (.scrml included; comments and`);
-      console.error(`string/display-text contents do not count). A note pointing at a renamed function is a`);
-      console.error(`false claim in the §62.2 contract.`);
+      console.error(`symbol named via \`path\` \`sym\` / \`path\` (\`sym\`, …) / \`file.ext\` \`sym\` / "via \`sym\`" /`);
+      console.error(`"in \`sym\`" must appear in source outside comments — IN THAT FILE when a path is given`);
+      console.error(`(.scrml included; a bare filename must resolve to one file; a path must be a source`);
+      console.error(`file); otherwise in non-test source. A note pointing at a renamed function is a false`);
+      console.error(`claim in the §62.2 contract.`);
     }
     process.exit(1);
   }
