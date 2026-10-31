@@ -1,0 +1,11 @@
+// §50 (S473 D10): a single-parenthesized assignment condition is refused.
+<program>
+    function f() -> int {
+        let x = 0;
+        if (x = 1) { return 1; }
+        return 0;
+    }
+    <main>
+        <p>${f()}</p>
+    </main>
+</program>

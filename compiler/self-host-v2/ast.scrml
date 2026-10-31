@@ -57,7 +57,12 @@ ${
         Unary(op: UnOp, e: AExpr),
         Binary(op: BinOp, l: AExpr, r: AExpr),
         Ternary(test: AExpr, yes: AExpr, no: AExpr),
-        Assign(target: AExpr, value: AExpr),         // statement position only (analyze checks)
+        // statement position only (analyze checks) — except the §50 kept form
+        // (S473 D10). s474: `paren` — the assignment stood in its own parentheses
+        // (`(x = e)`); `kept` — a parenthesized one at a kept place of a `for (…)` /
+        // `if (…)` / `else if (…)` condition head: the whole condition, or an
+        // operand of it (parse.scrml keptHead). Only a kept one is a value.
+        Assign(target: AExpr, value: AExpr, paren: boolean, kept: boolean),
         ArrayLit(elems: AExpr[]),
         ObjectLit(props: AProp[]),
         // s442 (§66.19.5): an array element `...e` (an object literal's spread is
@@ -221,6 +226,10 @@ ${
     // HIter's `mutable` is a `let` binder (§49.3.5: keywordless and `const` are
     // const). A range is ONLY an iterable (§49.2.5: "A range is not a value"),
     // so it is IterRange here and no expression kind can hold one.
+    // s474 — HIter's `key`: the header `key-clause` (§49.2.1 `iterate-head ::=
+    // for-binder 'of' iterable key-clause?`, `key-clause ::= 'key' expression`;
+    // §17.4b), `not` when absent. It reads the binder; evaluated once per
+    // iteration (§17.4b).
     export type AIterSrc:enum = {
         IterOf(e: AExpr),
         IterRange(lo: AExpr, hi: AExpr, inclusive: boolean),
@@ -229,7 +238,7 @@ ${
         HForever,
         HCond(cond: AExpr),
         HCounted(init: AStmt[], cond: AExpr | not, step: AExpr[]),
-        HIter(bind: ABind, mutable: boolean, src: AIterSrc),
+        HIter(bind: ABind, mutable: boolean, src: AIterSrc, key: AExpr | not),
     }
     // s469 — `bound`: the loop is BOUND AS A VALUE (§49.2.1 `for-binding`,
     // §49.6): `const xs = for (…) { … lift e; … };` — the binder, its

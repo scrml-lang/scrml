@@ -1,0 +1,16 @@
+{
+  "id": "acceptance-loop-value-tier0-keyed",
+  "description": "A keyed Tier-0 loop renders its rows in collection order: `<li>a</li><li>b</li><li>c</li>`, no diagnostic.",
+  "language-version": "1.0",
+  "spec": "§17.4b · §49.2.1",
+  "rationale": "§49.2.1: \"iterate-head ::= for-binder 'of' iterable key-clause?\" · §17.4b: \"When a `key` expression is declared, the compiler SHALL generate keyed reconciliation\".",
+  "expect": {
+    "codes": [],
+    "domAnchored": [
+      {
+        "selector": "#u",
+        "text": "abc"
+      }
+    ]
+  }
+}

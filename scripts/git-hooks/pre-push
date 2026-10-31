@@ -145,12 +145,18 @@ fi
 #     Runs on EVERY push — including the feature-branch pushes the S254 relaxation
 #     exempts from the full suite, which are exactly the ones that were failing.
 #     Skipped when the payload is deletions only (nothing to check).
+#
+#     S474 — STALENESS NO LONGER BLOCKS HERE (owner ruling, user-voice S474: "Generated files move to a
+#     post-merge bot … CI checks only the sources"). .github/workflows/generated-regen.yml regenerates
+#     every derived block on main after merge, so a branch should NOT commit regens. This step now
+#     blocks only a BROKEN source or instrument (a crash, a missing anchor, a SPEC § with no row …) —
+#     still worth catching before the ~3-minute CI round-trip, which is why the step stays.
 if [ "$HAS_UPDATE" = "1" ]; then
   echo ""
   echo "--- generated-doc currency (mirrors the cloud gate; ~0.3s) ---"
   CURRENCY_FAILED=0
   # S469 — FACTS is WARN-only (owner ruling "Regenerate on main after merge"): main regenerates
-  # docs/FACTS.md post-merge (.github/workflows/facts-regen.yml), so a stale table no longer blocks a
+  # docs/FACTS.md post-merge (.github/workflows/generated-regen.yml), so a stale table no longer blocks a
   # push and a branch should not commit a regen. Exit 4 = stale → warn; any other non-zero blocks:
   # 2 = zero measurement, 3 = missing anchor, 5 = dangling symlink, and 1 = bun's uncaught-exception
   # code — S472: stale used to be 1, so a CRASHING facts.ts was warned through as "figures differ".
@@ -175,17 +181,29 @@ if [ "$HAS_UPDATE" = "1" ]; then
     CURRENCY_FAILED=1
   fi
   # END facts-currency
-  if ! bun run scripts/regen-spec-index.ts --check >/dev/null 2>&1; then
-    echo "  STALE  SPEC-INDEX totals (compiler/SPEC-INDEX.md)"
+  # S474 (owner ruling: generated blocks regenerate post-merge — .github/workflows/generated-regen.yml).
+  # SPEC-INDEX: exit 4 = only the totals / row Lines-Size cells are stale → WARN (main is regenerated
+  # after merge; do not commit a regen). Any other non-zero BLOCKS: a SPEC section with no row, a
+  # truncated row scan, a row naming a missing section, missing anchors (1), or a crash.
+  # VERSION SKEW: a branch cut before S474 still exits 1 for stale, so it is still blocked by staleness
+  # here — fail-closed, and cured by merging main (which brings the new regen-spec-index.ts).
+  # (The block between the BEGIN/END markers is run verbatim by generated-stale-exit-codes-s474.test.js.)
+  # BEGIN spec-index-currency
+  SPECIDX_RC=0
+  SPECIDX_OUT=$(bun run scripts/regen-spec-index.ts --check 2>&1) || SPECIDX_RC=$?   # `|| …` — set -e
+  if [ "$SPECIDX_RC" = "4" ]; then
+    echo "  WARN   compiler/SPEC-INDEX.md totals/row ranges differ from SPEC.md (non-blocking; regenerated on main after merge)"
+  elif [ "$SPECIDX_RC" != "0" ]; then
+    printf '%s\n' "$SPECIDX_OUT" | tail -12
+    echo "  FAIL   compiler/SPEC-INDEX.md (rc $SPECIDX_RC) — a structural problem a regen cannot fix (see above)"
     CURRENCY_FAILED=1
   fi
+  # END spec-index-currency
   if [ "$CURRENCY_FAILED" = "1" ]; then
     echo ""
-    echo "X Generated docs are stale — push blocked (the cloud gate would reject this)."
-    echo "   Fix:  bun run scripts/regen-spec-index.ts   (+ bun scripts/facts.ts --write only if the FACTS check failed hard above)"
-    echo "   Then amend or add a commit with the regenerated file(s)."
-    echo "   NOTE: regenerate AFTER your last content commit, not before it — regenerating"
-    echo "         early and then editing compiler/src again is what this gate exists to catch."
+    echo "X A generated-doc producer reported a BROKEN source or instrument — push blocked (the cloud gate would reject this)."
+    echo "   Staleness alone never blocks (S474): main regenerates derived blocks after merge, so do NOT commit a regen."
+    echo "   Fix the source the message above names (e.g. add the SPEC-INDEX row for a new §), or the crashing script."
     exit 1
   fi
 fi

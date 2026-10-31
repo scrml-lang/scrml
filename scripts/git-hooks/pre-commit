@@ -119,11 +119,24 @@ fi
 # staged diff touches what it reads: a new SPEC section (via SPEC.md / SPEC-INDEX.md) needs a row in
 # docs/bootstrap-spec-coverage.md, and a gap renamed or deleted in known-gaps.md must not orphan a row.
 # ~0.1s. Guarded: a branch cut before the gate landed has no script and must not be blocked.
+# S474 (owner ruling: generated blocks regenerate post-merge — .github/workflows/generated-regen.yml):
+# exit 4 = NO violation, only the @generated:coverage-totals block is stale → a warning, never a block (do not
+# commit a regen; main is regenerated after merge). Any other non-zero still blocks: a § with no row, a SILENT
+# row with no gap, a cited gap that does not exist, a bad status/token, missing anchors (1), unreadable inputs (2).
+# VERSION SKEW: this hook runs from the main checkout against the worktree's script; a branch cut before S474
+# still exits 1 for stale totals and is still blocked by them (fail-closed; merging main cures it).
+# (The block between the BEGIN/END markers is run verbatim by generated-stale-exit-codes-s474.test.js.)
 if [ -f scripts/spec-coverage-check.ts ] && git diff --cached --name-only --no-renames | grep -qE '^(compiler/SPEC\.md|compiler/SPEC-INDEX\.md|docs/bootstrap-spec-coverage\.md|docs/known-gaps\.md|scripts/spec-coverage-check\.ts)$'; then
-  if ! bun scripts/spec-coverage-check.ts 2>&1; then
-    echo "✗ SPEC-coverage gate failed (docs/bootstrap-spec-coverage.md). Add the missing row / gap id, or run: bun scripts/spec-coverage-check.ts --write (totals only)" >&2
+  # BEGIN spec-coverage
+  COV_RC=0
+  bun scripts/spec-coverage-check.ts 2>&1 || COV_RC=$?   # `|| …` — this hook runs under set -e
+  if [ "$COV_RC" = "4" ]; then
+    echo "⚠ SPEC-coverage totals block is stale (non-blocking — regenerated on main after merge; do not commit a regen)." >&2
+  elif [ "$COV_RC" != "0" ]; then
+    echo "✗ SPEC-coverage gate failed (docs/bootstrap-spec-coverage.md, rc $COV_RC). Add the missing row / gap id named above." >&2
     exit 1
   fi
+  # END spec-coverage
 fi
 
 echo "✓ Pre-commit checks passed."
