@@ -579,7 +579,11 @@ describe("r1 F3 — a call's write set is THE callee's in the calling file's sco
 describe("r1 F4 — two types of one name are told apart by declaring file", () => {
   test("reimport-type-mismatch: the message names both declaring files", () => {
     const C2 = { path: "colors2.scrml", src: `\${\n    export type Color:enum = { Green, Red }\n    export fn name2(c: Color) -> string {\n        return "x";\n    }\n}\n` };
-    const r = run(`<program>\n    \${ import { Color, name } from "./pick.scrml"; import { Color, name2 } from "./colors2.scrml"; }\n    <p id="o">\${name(Color.Red)}</p>\n</program>\n`, [PICK, C2]);
+    // s474 r1 (#1706 review F3): `Color` is imported from ONE file only. Importing it from both is
+    // now E-SCOPE-010 at the later import, and the earlier binding is kept (no cascade), so the old
+    // shape (`import { Color, name } from pick; import { Color, name2 } from colors2`) no longer
+    // reaches the type check. Here colors2's `Color` meets pick's `name(c: pick.Color)` directly.
+    const r = run(`<program>\n    \${ import { name } from "./pick.scrml"; import { Color, name2 } from "./colors2.scrml"; }\n    <p id="o">\${name(Color.Red)}</p>\n</program>\n`, [PICK, C2]);
     const m = r.diags.find((d) => d.code === "E-TYPE-031");
     expect(m.message).toContain("two different types named `Color`");
     expect(m.message).toContain("`pick.scrml`");

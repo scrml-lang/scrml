@@ -33,7 +33,7 @@ ${
              GrantSet, TransitionGraph, Field, DeclKind, WiringAttr, Decl, Param, Fn, HostFn, CoreProgram, Validator, SurfaceProp, ValidityOf, Persist,
              ServerFn, SqlMode, Db, SqlQuery, SqlKind, SqlTables, SqlColumns, Failable, OkArm, ErrArm, VariantDef,
              LoopHead, EachHead, RangeHead, HostCall, CssUnit, CssDecl, CoreCss, CssVar, Gather, Lifted, GatherRow, PathStep,
-             CoreConst, CoreHead, CoreMeta, HeadTitle, block, litStr, mkSym, typeDefSym, readField, mountedInstances, scopeKey } from "./core.scrml"
+             CoreConst, CoreHead, CoreMeta, HeadTitle, block, litStr, mkSym, typeDefSym, readField, mountedInstances, declScopeKey } from "./core.scrml"
     import { partsText } from "./css.scrml"
     import { ASpan, BinOp, UnOp, AExpr, AProp, AExprK, AStmt, ABlock, AStmtK, AEffect, AType, AParam, AFn,
              AAttrValue, AAttr, AElem, ANode, ANodeK, ADecl, AProgram, AItem, AItemK, AConst, FileAst, Diag, ASql, ASqlMode,
@@ -2117,16 +2117,16 @@ ${
             if (rv is given) renders = stampViews(rv, cssRootAttrs(t, d), t.css.scopes.length > 0)
         }
         const wiring: WiringAttr[] = []
-        return { sym: d.sym, key: declKey(d), kind: d.kind, single: d.single, fields: fields, renders: renders, wiring: wiring, handles: d.handles }
+        return { sym: d.sym, key: declKey(t, d), kind: d.kind, single: d.single, fields: fields, renders: renders, wiring: wiring, handles: d.handles }
     }
 
     // s474 (door 3): a user declaration's output name is per-file qualified, always (core.scrml
     // scopeKey); the program and a predefined declaration keep their bare name.
-    fn declKey(d: DeclInfo) -> string {
+    fn declKey(t: Tables, d: DeclInfo) -> string {
         const k: DeclKind = d.kind
         return match k {
             .Program :> d.sym.hint
-            .User :> scopeKey(d.file, d.sym.hint)
+            .User :> declScopeKey(t.css.keyBase, d.file, d.sym.hint)
             .Predefined :> d.sym.hint
         }
     }
@@ -2170,7 +2170,7 @@ ${
     fn cssRootAttrs(t: Tables, d: DeclInfo) -> Attr[] {
         let out: Attr[] = []
         // s474 (door 3): `<name>~<file tag>`, the key cssPass gave the component's sheet (core.scrml scopeKey)
-        if (t.css.scopes.length > 0) out = [Attr.Static("data-scrml", declKey(d))]
+        if (t.css.scopes.length > 0) out = [Attr.Static("data-scrml", declKey(t, d))]
         for (const x of t.css.inline) {
             if (x.decl == d.sym.id) out = out.concat([Attr.Static("style", inlineCssText(x.decls))])
         }

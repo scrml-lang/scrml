@@ -47,7 +47,7 @@ ${
              DeclKind, HostCall, HostFn, HostBind, HostSrc, HostArg, HostProp, SeqFn, BindKind, Validator, SurfaceProp, ValidityOf, Persist, PersistStore, CoreProgram,
              SqlKind, SqlTables, SqlColumns, Db, Driver, DbLoad, Envelope,
              CssPart, CssDecl, StyleRule, CssImport, ScopeSheet,
-             mkSym, noGrants, replaceGrant, typeDefSym, validityInst, validityDecl, plainHead, scopeKey } from "./core.scrml"
+             mkSym, noGrants, replaceGrant, typeDefSym, validityInst, validityDecl, plainHead, declScopeKey } from "./core.scrml"
     import { ASpan, BinOp, UnOp, AExpr, AProp, AExprK, AStmt, ABlock, AStmtK, AEffect, AType, ATypeK,
              ATypeField, AVariant, ATypeBody, ATypeDecl, AParam, AFn, AImportName, AImport,
              AAttrValue, AAttr, AElem, ANode, ANodeK, ADeclAttr, AStateChild, ADeclChild, ADecl, AValArg, AValidator,
@@ -1070,16 +1070,22 @@ ${
                                 // both into ONE file binds it twice in that file's scope — refused
                                 // here, at the later import (was: refused at the second exporter, S473)
                                 if (earlier != target && !isStdlibPath(earlier) && !isStdlibPath(target)) {
+                                    // s474 r1 (review F3): no cascade. The build already fails here; the
+                                    // EARLIER import keeps the name (scopeFrom takes the first entry of a
+                                    // kind), and the refused one's entries follow it, so a use of the name
+                                    // of EITHER kind resolves — never also E-SCOPE-001 ("this file does not
+                                    // import it") for a name this file does import
                                     st = addDiag(st, f.path, n.span, "E-SCOPE-010", "`" + n.name + "` is already imported into this file from `" + earlier + "`, and this import brings another `" + n.name + "` from `" + target + "` — two user files may each export one name, but one file binds a name once (duplicate binding in file scope, §7.6; ruled S474); import one of them here, or rename one of the exports")
+                                    names = names.concat(exportedEntries(own, target, n.name))
                                 } else {
                                     st = addDiag(st, f.path, n.span, "W-IMPORT-001", "`" + n.name + "` is already imported by an earlier import in this file — this later import wins (§41.7); remove the duplicate, or rename one")
+                                    names = unbound(names, n.name).concat(exportedEntries(own, target, n.name))
                                 }
-                                names = unbound(names, n.name)
                             } else {
                                 imported = imported.concat([n.name])
                                 importedFrom = importedFrom.concat([target])
+                                names = names.concat(exportedEntries(own, target, n.name))
                             }
-                            names = names.concat(exportedEntries(own, target, n.name))
                         }
                     }
                 }
@@ -19268,9 +19274,10 @@ ${
     // a component or not, exported or not. (Was: E-COMPONENT-NAME-DUPLICATE for two components,
     // the bootstrap limit for any other pair.)
     // What stays: FAIL CLOSED if two declarations of one name in two files get ONE key — the
-    // file tag is a 32-bit hash of the path, so two paths can share it; one key would merge
-    // their style scopes and their templates. Not reachable by any ordinary project, but never
-    // silent: E-BOOTSTRAP-UNSUPPORTED, rename one (or move a file).
+    // file tag is a hash of the path (two independent 32-bit hashes, core.scrml fileTag), so two
+    // paths can share it; one key would merge their style scopes and their templates. A
+    // collision is rare, not unreachable (s474 r1, review F6) — and never silent:
+    // E-BOOTSTRAP-UNSUPPORTED, rename one (or move a file).
     fn dupDecls(files: FileAst[], t: Tables, lk: Linkage) -> Diag[] {
         let out: Diag[] = []
         let users: DeclInfo[] = []
@@ -19284,8 +19291,9 @@ ${
             let hit = false
             while (i < j && !hit) {
                 const m: DeclInfo = users[i]
-                if (m.file != d.file && m.sym.hint == d.sym.hint && scopeKey(m.file, m.sym.hint) == scopeKey(d.file, d.sym.hint)) {
-                    out = out.concat([mkDiag(d.file, d.span, "E-BOOTSTRAP-UNSUPPORTED", "`<" + d.sym.hint + ">` is also declared in `" + m.file + "`, and the two files' paths hash to one file tag, so both declarations would get the one output key `" + scopeKey(d.file, d.sym.hint) + "` (one style scope, one template) — the bootstrap keys a declaration's output by its file (s474); rename one, or move one file")])
+                const kb: string = t.css.keyBase
+                if (m.file != d.file && m.sym.hint == d.sym.hint && declScopeKey(kb, m.file, m.sym.hint) == declScopeKey(kb, d.file, d.sym.hint)) {
+                    out = out.concat([mkDiag(d.file, d.span, "E-BOOTSTRAP-UNSUPPORTED", "`<" + d.sym.hint + ">` is also declared in `" + m.file + "`, and the two files' paths hash to one file tag, so both declarations would get the one output key `" + declScopeKey(kb, d.file, d.sym.hint) + "` (one style scope, one template) — the bootstrap keys a declaration's output by its file (s474); rename one, or move one file")])
                     hit = true
                 }
                 i = i + 1
@@ -29798,9 +29806,12 @@ ${
         scopes: ScopeSheet[],
         inline: CssInline[],
         bridges: CssBridge[],
+        // s474 r1 (review F1): the build's source root under the project root (core.scrml
+        // fileKeyPath) — every user declaration's output key is declScopeKey(keyBase, file, name)
+        keyBase: string,
     }
 
-    export fn noCssFacts() -> CssFacts { return { charsets: [], imports: [], global: [], scopes: [], inline: [], bridges: [] } }
+    export fn noCssFacts() -> CssFacts { return { charsets: [], imports: [], global: [], scopes: [], inline: [], bridges: [], keyBase: "" } }
 
     type CssPlace:struct = { comp: boolean, decl: Sym, name: string, root: boolean, rootStyled: boolean }
     type CssAcc:struct = { facts: CssFacts, diags: Diag[] }
@@ -29879,7 +29890,7 @@ ${
             let bs: CssBridge[] = a.facts.bridges
             if (!hasBridge(bs, f.sym.id)) bs = bs.concat([{ cell: f.sym, idx: idx }])
             const nf: CssFacts = { charsets: a.facts.charsets, imports: a.facts.imports, global: a.facts.global, scopes: a.facts.scopes,
-                                   inline: a.facts.inline, bridges: bs }
+                                   inline: a.facts.inline, bridges: bs, keyBase: a.facts.keyBase }
             return { parts: [CssPart.CellVar(f.sym)], acc: cssWithFacts(a, nf) }
         }
         return { parts: [], acc: cssDiag(a, file, r.span, "E-THEME-TOKEN-UNKNOWN", "`@" + r.name + "` names no theme token and no declared cell (§65.3.2) — declare `<" + r.name + "…/>` in the program, fix the spelling, or drop the `@` for a literal CSS value") }
@@ -29969,7 +29980,7 @@ ${
             const dr: CssDeclsR = cssDecls(g, prog, at, file, flats, a)
             a = dr.acc
             const nf: CssFacts = { charsets: a.facts.charsets, imports: a.facts.imports, global: a.facts.global, scopes: a.facts.scopes,
-                                   inline: addInline(a.facts.inline, at.decl.id, dr.decls), bridges: a.facts.bridges }
+                                   inline: addInline(a.facts.inline, at.decl.id, dr.decls), bridges: a.facts.bridges, keyBase: a.facts.keyBase }
             return cssWithFacts(a, nf)
         }
         let charsets: string[] = a.facts.charsets
@@ -30011,11 +30022,11 @@ ${
         let scopes: ScopeSheet[] = a.facts.scopes
         if (at.comp) {
             // s474 (door 3): the scope key is per-file qualified, always — `file` is the component's own file
-            if (out.length > 0) scopes = addScope(scopes, scopeKey(file, at.name), out)
+            if (out.length > 0) scopes = addScope(scopes, declScopeKey(a.facts.keyBase, file, at.name), out)
         } else {
             globalRules = globalRules.concat(out)
         }
-        const nf: CssFacts = { charsets: charsets, imports: imports, global: globalRules, scopes: scopes, inline: a.facts.inline, bridges: a.facts.bridges }
+        const nf: CssFacts = { charsets: charsets, imports: imports, global: globalRules, scopes: scopes, inline: a.facts.inline, bridges: a.facts.bridges, keyBase: a.facts.keyBase }
         return cssWithFacts(a, nf)
     }
 
@@ -30105,12 +30116,13 @@ ${
 
     type CssPassR:struct = { facts: CssFacts, diags: Diag[] }
 
-    fn cssPass(g: Globals) -> CssPassR {
+    fn cssPass(g: Globals, keyBase: string) -> CssPassR {
         let prog: DeclSrc | not = not
         for (const ds of g.decls) {
             if (ds.isProgram && ds.info.sym.id == g.program.id) prog = ds
         }
-        let a: CssAcc = { facts: noCssFacts(), diags: [] }
+        const f0: CssFacts = noCssFacts()
+        let a: CssAcc = { facts: { charsets: f0.charsets, imports: f0.imports, global: f0.global, scopes: f0.scopes, inline: f0.inline, bridges: f0.bridges, keyBase: keyBase }, diags: [] }
         const none: Sym = mkSym(0 - 1, "")
         const globalAt: CssPlace = { comp: false, decl: none, name: "", root: false, rootStyled: false }
         // a file's top level (outside `<program>`)
@@ -30784,7 +30796,12 @@ ${
         return linExpr(cx, target, s1)
     }
 
-    export fn analyze(files: FileAst[], entry: string) -> TypedProgram {
+    export fn analyze(files: FileAst[], entry: string) -> TypedProgram { return analyzeKeyed(files, entry, "") }
+
+    // s474 r1 (review F1): `keyBase` = the build's source root under the PROJECT root (§21.3) —
+    // the root the per-file output keys are hashed from (core.scrml fileKeyPath); `""` when the
+    // source root is the project root. The file names the front end reports are not changed.
+    export fn analyzeKeyed(files: FileAst[], entry: string, keyBase: string) -> TypedProgram {
         const st0: AS = { facts: noFacts(), diags: [], nextSym: 0, annots: [], bad: { params: [], fields: [] }, effects: [], pend: [], lifts: [] }
         const ra0: RGlobals = phaseA(files, entry, st0)
         // s472: the file-scope constants' initializers, in order (before any body reads one)
@@ -30799,7 +30816,7 @@ ${
         const rp: RPersists = persistPass(ra.g, files, st)
         st = programNoValue(ra.g, rp.st)
         // s469: the stylesheet (§9.1, §65) — placed by position, its `@name` references resolved
-        const css: CssPassR = cssPass(ra.g)
+        const css: CssPassR = cssPass(ra.g, keyBase)
         let decls: DeclInfo[] = []
         for (const d of ra.g.decls) { decls = decls.concat([d.info]) }
         let fns: FnInfo[] = []

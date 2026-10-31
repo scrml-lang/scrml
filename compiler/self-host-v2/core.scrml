@@ -1162,12 +1162,23 @@ ${
 
     // s474 (door 3, user-voice-scrml.md "⭐ RULED — permanent-restrictions re-review: the four
     // one-way doors", item 3: "The CSS scope key and output names are always per-file qualified,
-    // not only on a collision") — a component's CSS scope key is `<name>~<file tag>`, ALWAYS:
-    // two files may each declare a `<card>`, and each keeps its own style scope. The file tag is
-    // 8 hex digits of a 32-bit hash of the declaring file's PROJECT-RELATIVE path, normalised
-    // (`\` → `/`, a leading `./` and repeated `/` dropped), so it is the same on every machine and
-    // every OS. The front end is handed project-relative paths (the same paths imports resolve
-    // by); the hash never sees an absolute path.
+    // not only on a collision") — a user declaration's output key is `<name>~<file tag>`, ALWAYS:
+    // two files may each declare a `<card>`, and each keeps its own style scope.
+    //
+    // What the tag hashes: the declaring file's KEY PATH — its path relative to the PROJECT root
+    // (§21.3: the nearest ancestor of the build's source root holding `scrml.toml` or `.git`),
+    // normalised (`\` → `/`, repeated `/` collapsed, a leading `./` dropped). The front end names
+    // files relative to the build's source root (the paths imports resolve by, and diagnostics
+    // show); the driver hands the front end, separately, `keyBase` — the source root's own path
+    // under the project root (`""` when they are one directory) — and the key path is
+    // `keyBase/<file>` (fileKeyPath). What that guarantees:
+    //   - the same file gets the same key in every page of one project, and as the project grows
+    //     (an import from outside the old source root does not move it), on every machine and OS;
+    //   - with no `scrml.toml` / `.git` above the sources, the source root IS the project root
+    //     (§21.3's fallback): keys are then stable across machines but move if the closure's
+    //     common directory moves — a project SHOULD carry a `scrml.toml`;
+    //   - a `scrml:` stdlib file's key path is its `scrml:` path, whatever the project.
+    // The hash never sees an absolute path.
     export fn normalPath(path: string) -> string {
         let p: string = path.replaceAll("\\", "/")
         while (p.indexOf("//") >= 0) { p = p.replaceAll("//", "/") }
@@ -1175,20 +1186,19 @@ ${
         return p
     }
 
+    // The key path of the front-end file `file` under the source root `keyBase` (above).
+    export fn fileKeyPath(keyBase: string, file: string) -> string {
+        const base: string = normalPath(keyBase)
+        if (base == "" || base == "." || file.startsWith("scrml:")) return normalPath(file)
+        return normalPath(base + "/" + file)
+    }
+
     fn hexDigit(d: int) -> string {
         return "0123456789abcdef".slice(d, d + 1)
     }
 
-    // 32-bit polynomial hash (h = h * 33 + code, mod 2^32 — exact in a double: h * 33 < 2^38),
-    // printed as 8 lowercase hex digits.
-    export fn fileTag(path: string) -> string {
-        const p: string = normalPath(path)
-        let h = 5381
-        let i = 0
-        while (i < p.length) {
-            h = (h * 33 + p.charCodeAt(i)) % 4294967296
-            i = i + 1
-        }
+    fn hex8(v: int) -> string {
+        let h: int = v
         let out = ""
         let k = 0
         while (k < 8) {
@@ -1199,9 +1209,66 @@ ${
         return out
     }
 
-    // The CSS scope key of the component `name` declared in the file `path` (§9.1 DQ-7 as re-ruled
-    // S474): its root's `data-scrml` value and its sheet's `@scope ([data-scrml="…"])`.
+    // a XOR b for two bytes (0..255) — the bootstrap dialect has no bitwise operators.
+    fn xorByte(a: int, b: int) -> int {
+        let x: int = a
+        let y: int = b
+        let r = 0
+        let bit = 1
+        let k = 0
+        while (k < 8) {
+            const xa: int = x % 2
+            const ya: int = y % 2
+            if (xa != ya) r = r + bit
+            x = (x - xa) / 2
+            y = (y - ya) / 2
+            bit = bit * 2
+            k = k + 1
+        }
+        return r
+    }
+
+    // One FNV-1a 32-bit round over a byte: h ^= b; h *= 16777619 (mod 2^32). The multiply is
+    // split so every intermediate is exact in a double: 16777619 = 2^24 + 403, and
+    // (h * 2^24) mod 2^32 = (h mod 2^8) * 2^24.
+    fn fnvByte(h: int, b: int) -> int {
+        const low: int = h % 256
+        const x: int = h - low + xorByte(low, b)
+        return ((x % 256) * 16777216 + x * 403) % 4294967296
+    }
+
+    // The file tag: 16 lowercase hex digits — two INDEPENDENT 32-bit hashes of the key path's
+    // UTF-16 code units (each unit fed as its low byte, then its high byte when non-zero):
+    //   1. FNV-1a 32 (offset basis 2166136261);
+    //   2. a polynomial hash modulo the prime 4294967291 (h = h * 1000003 + unit; h < 2^32, so
+    //      h * 1000003 < 2^52 — exact).
+    // (s474 r1, review F6: was one 8-hex djb2, whose collisions were two-character swaps.)
+    // Exact 64-bit FNV is not available: the dialect's numbers are doubles, with no bitwise
+    // operators. A collision is now rare, not unreachable — analyze.scrml dupDecls still fails
+    // closed on one.
+    export fn fileTag(path: string) -> string {
+        const p: string = normalPath(path)
+        let a = 2166136261
+        let m = 7
+        let i = 0
+        while (i < p.length) {
+            const u: int = p.charCodeAt(i)
+            const lo: int = u % 256
+            const hi: int = (u - lo) / 256
+            a = fnvByte(a, lo)
+            if (hi > 0) a = fnvByte(a, hi)
+            m = (m * 1000003 + u) % 4294967291
+            i = i + 1
+        }
+        return hex8(a) + hex8(m)
+    }
+
+    // The CSS scope key of the component `name` declared at the KEY PATH `path` (§9.1 DQ-7 as
+    // re-ruled S474): its root's `data-scrml` value and its sheet's `@scope ([data-scrml="…"])`.
     export fn scopeKey(path: string, name: string) -> string { return name + "~" + fileTag(path) }
+
+    // The key of the declaration `name` in the front-end file `file`, under the source root `keyBase`.
+    export fn declScopeKey(keyBase: string, file: string, name: string) -> string { return scopeKey(fileKeyPath(keyBase, file), name) }
 
     // One file's stylesheet. `reset` = the §65.3.4 built-in reset is on (opt out:
     // `<program reset="none">`). `global` = program-level `#{}` rules (§9.1, the

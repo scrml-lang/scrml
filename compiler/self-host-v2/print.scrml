@@ -114,7 +114,7 @@ ${
         for (const k of p.consts) { t = mint(t, NameKey.OfSym(k.sym.id), k.sym.hint) }
         for (const d of p.decls) {
             // s474 (door 3): a declaration's module-level names carry its per-file output name
-            // (core.scrml Decl.key: `card~d41a3302` → `mk_card_d41a3302`), always
+            // (core.scrml Decl.key: `card~<16 hex>` → `mk_card_<16 hex>`), always
             const h: string = d.key.replaceAll("~", "_")
             t = mint(t, NameKey.DeclInfo(d.sym.id), "decl_" + h)
             t = mint(t, NameKey.Factory(d.sym.id), "mk_" + h)

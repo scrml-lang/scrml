@@ -8,9 +8,10 @@
 // What the bootstrap does now:
 //   - a user declaration's OUTPUT name is `<name>~<file tag>` (core.scrml scopeKey), always: its
 //     root's `data-scrml`, its sheet's `@scope ([data-scrml="…"])`, its `<template>` ids, and its
-//     module-level JS bindings (`mk_card_<tag>`, …). The file tag is 8 hex digits of a 32-bit hash
-//     of the declaring file's project-relative path, normalised (`\` → `/`, a leading `./`
-//     dropped), so it is the same on every machine and OS;
+//     module-level JS bindings (`mk_card_<tag>`, …). The file tag is 16 hex digits — two
+//     independent 32-bit hashes (FNV-1a 32 + a polynomial mod a prime; r1, review F6) — of the
+//     declaring file's path relative to the PROJECT root (r1, review F1:
+//     slice-m4/scope-keys-root-s474.test.js), normalised (`\` → `/`, a leading `./` dropped);
 //   - two files may each declare a `<card>` (a component or not, exported or not) — each keeps
 //     its own style scope (was E-COMPONENT-NAME-DUPLICATE, S473 #1636);
 //   - two user files may each export one name (was E-SCOPE-010 at the second exporter, S473
@@ -69,8 +70,8 @@ const APP = {
 };
 
 describe("the file tag and the key (core.scrml)", () => {
-  test("8 lowercase hex digits; deterministic; one path, one tag", () => {
-    expect(tag("ui/red.scrml")).toMatch(/^[0-9a-f]{8}$/);
+  test("16 lowercase hex digits; deterministic; one path, one tag", () => {
+    expect(tag("ui/red.scrml")).toMatch(/^[0-9a-f]{16}$/);
     expect(tag("ui/red.scrml")).toBe(tag("ui/red.scrml"));
     expect(tag("ui/red.scrml")).not.toBe(tag("app.scrml"));
     expect(key("ui/red.scrml", "card")).toBe("card~" + tag("ui/red.scrml"));
@@ -82,10 +83,25 @@ describe("the file tag and the key (core.scrml)", () => {
     expect(mods.core.normalPath(".\\ui\\red.scrml")).toBe("ui/red.scrml");
   });
   test("a stable value (pinned: a change here changes every emitted key)", () => {
-    // 32-bit h = h * 33 + code (mod 2^32) from 5381, over the normalised path
-    let h = 5381;
-    for (const c of "ui/red.scrml") h = (h * 33 + c.charCodeAt(0)) % 4294967296;
-    expect(tag("ui/red.scrml")).toBe(h.toString(16).padStart(8, "0"));
+    // FNV-1a 32 over each UTF-16 unit's low byte (then its high byte when non-zero), then a
+    // polynomial hash mod the prime 4294967291 (h = h * 1000003 + unit, from 7)
+    const ref = (p) => {
+      let a = 2166136261, m = 7;
+      const step = (h, b) => Math.imul((h ^ b) >>> 0, 16777619) >>> 0;
+      for (const ch of p) {
+        for (let i = 0; i < ch.length; i++) {
+          const u = ch.charCodeAt(i);
+          a = step(a, u & 255);
+          if (u >> 8) a = step(a, u >> 8);
+          m = (m * 1000003 + u) % 4294967291;
+        }
+      }
+      return a.toString(16).padStart(8, "0") + m.toString(16).padStart(8, "0");
+    };
+    for (const p of ["ui/red.scrml", "app.scrml", "src/ui/card.scrml", "lib/é/ü€.scrml", "scrml:ui/index.scrml"]) expect([p, tag(p)]).toEqual([p, ref(p)]);
+  });
+  test("r1 (review F6): the djb2 two-character-swap collision is gone (`Ab` / `BA`)", () => {
+    expect(tag("Ab.scrml")).not.toBe(tag("BA.scrml"));
   });
 });
 
@@ -183,6 +199,16 @@ describe("importing both into ONE file: refused, with a clear message", () => {
     const CB = { path: "b.scrml", src: `export <card t:string/>\nrenders <p>\${t}</p>\n` };
     const M = { path: ENTRY, src: `import { card } from "./a.scrml";\nimport { card } from "./b.scrml";\n<program>\n    <main><card t="x"/></main>\n</program>\n` };
     expect(at(prog([CA, CB, M]))).toEqual([["E-SCOPE-010", ENTRY]]);
+  });
+  // r1 (review F3): no cascade — the build fails once, at the import
+  test("a component and a function of one name from two files: only E-SCOPE-010, never also E-SCOPE-001 at the use (either order)", () => {
+    const CA = { path: "a.scrml", src: `export <card t:string/>\nrenders <div>\${t}</div>\n` };
+    const FB = { path: "b.scrml", src: `\${\n    export fn card() -> int {\n        return 1;\n    }\n}\n` };
+    for (const [x, y] of [["./a.scrml", "./b.scrml"], ["./b.scrml", "./a.scrml"]]) {
+      const M = { path: ENTRY, src: `import { card } from "${x}";\nimport { card } from "${y}";\n<program>\n    <main><card t="q"/><p>\${card()}</p></main>\n</program>\n` };
+      const r = prog([CA, FB, M]);
+      expect([x, at(r)]).toEqual([x, [["E-SCOPE-010", ENTRY]]]);
+    }
   });
   test("control: the same name imported twice from ONE file stays the §41.7 W-IMPORT-001 warning", () => {
     const src = `<program>\n    \${ import { Card } from "./a.scrml"; import { Card } from "./a.scrml"; }\n    <main><p>\${Card()}</p></main>\n</program>\n`;
