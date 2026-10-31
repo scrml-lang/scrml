@@ -108,7 +108,8 @@ ${
     }
 
     fn sanitize(hint: string) -> string {
-        const s: string = hint.replaceAll("$", "_")
+        // s474 r1 (review L3): `#` — a composed batch's hint (`book#batch`), which no identifier spells
+        const s: string = hint.replaceAll("$", "_").replaceAll("#", "_")
         if (s.length == 0) return "x"
         const c: int = s.charCodeAt(0)
         if (c >= 48 && c <= 57) return "_" + s

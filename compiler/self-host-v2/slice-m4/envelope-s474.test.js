@@ -309,7 +309,7 @@ describe("still refused, each with its named code", () => {
     const ok = mk(E.replace("ConnectionLost }", "ConnectionLost, Transport(t: ServerCallError) }"));
     expect(errsOf(ok)).toEqual([]);
     const core = compile(ok).core;
-    const batch = core.server.find((x) => x.sym.hint === "move$batch");
+    const batch = core.server.find((x) => x.sym.hint === "move#batch");
     expect(core.envelopes.find((e) => e.fn.id === batch.sym.id)).toMatchObject({ standalone: true, writes: true });
   });
   test("near-miss: the same client `!` calling a `!` server function compiles — that function's own envelope holds both", () => {
@@ -328,7 +328,7 @@ describe("still refused, each with its named code", () => {
     const ok = mk(E.replace("ConnectionLost }", "ConnectionLost, Transport(t: ServerCallError) }"));
     expect(errsOf(ok)).toEqual([]);
     const core = compile(ok).core;
-    const batch = core.server.find((x) => x.sym.hint === "move$batch");
+    const batch = core.server.find((x) => x.sym.hint === "move#batch");
     expect(core.envelopes.find((e) => e.fn.id === batch.sym.id)).toMatchObject({ standalone: true, writes: true });
   });
   test("`PRAGMA journal_mode = OFF` on a `!` function's connection — E-SQL-JOURNAL-OFF", () => {

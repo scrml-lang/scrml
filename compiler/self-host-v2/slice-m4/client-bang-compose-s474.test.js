@@ -90,7 +90,7 @@ describe("the composed program: one server `!` batch, one envelope", () => {
   test("book() compiles; its two server calls run in ONE routed server function, enveloped (IMMEDIATE — it writes)", () => {
     const r = compile(BOOK);
     expect(check(r.core)).toEqual([]);
-    const batch = r.core.server.find((s) => s.sym.hint === "book$batch");
+    const batch = r.core.server.find((s) => s.sym.hint === "book#batch");
     expect(batch).toBeTruthy();
     const env = r.core.envelopes.find((e) => e.fn.id === batch.sym.id);
     expect(env).toMatchObject({ standalone: true, writes: true });
@@ -131,10 +131,10 @@ describe("end to end — two server `!` calls compose (real SQLite, the client's
     const r = compile(BOOK);
     const sql = await realDb(DDL);
     const { srv, routes } = await serve(r.core, sql);
-    const ok = await post(srv, pathOf(routes, "book$batch"), [4, 0]);
+    const ok = await post(srv, pathOf(routes, "book#batch"), [4, 0]);
     expect(ok.status).toBe(200);
     expect(await rows(sql)).toEqual([4, 104]);
-    const bad = await post(srv, pathOf(routes, "book$batch"), [5, 1]);
+    const bad = await post(srv, pathOf(routes, "book#batch"), [5, 1]);
     expect(bad.status).toBe(500);
     expect(bad.json).toMatchObject({ __scrml_error: true, type: "E", variant: "Bad" });
     expect(await rows(sql)).toEqual([4, 104]);
@@ -164,7 +164,7 @@ describe("a client `!` calling ONE non-`!` server function that runs two queries
   test("it compiles (was E-BOOTSTRAP-UNSUPPORTED); the batch holds the call in an IMMEDIATE envelope", () => {
     const r = compile(BOTH);
     expect(check(r.core)).toEqual([]);
-    const batch = r.core.server.find((s) => s.sym.hint === "move$batch");
+    const batch = r.core.server.find((s) => s.sym.hint === "move#batch");
     expect(batch).toBeTruthy();
     expect(r.core.envelopes.find((e) => e.fn.id === batch.sym.id)).toMatchObject({ standalone: true, writes: true });
   });
@@ -311,5 +311,183 @@ ${HOLD_CHARGE}    let <n:int=0/>
     const e = errs(src);
     expect(e.map((d) => d.code)).toEqual(["E-ERROR-010"]);
     expect(e[0].message).toContain("add `Transport(t: ServerCallError)` to `F`");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// s474 r1 — the review of #1713 (~/.cache/scrml/review/s474-1713/review.md) and the PA's rulings on it.
+const warns = (src) => fe(src).diags.filter((d) => d.severity === "Warning");
+const HOST = `<host>\n  title() -> string = document.title\n</host>\n`;
+const withHost = (src) => src.replace(`<program db="./app.db">\n`, `<program db="./app.db">\n${HOST}`);
+
+describe("r1 M2 (PA ruling): a `fail` / `?` after the batch must not report failure over committed writes", () => {
+  // the reviewer's repro: a movable guard after the last call
+  const POST = (guard) => `<program db="./app.db">
+${HOLD_CHARGE}    let <r:int=0/>
+    function book(a: int, f: int)! E {
+        hold(a)?;
+        charge(a, 0)?;
+        ${guard}
+        return 3;
+    }
+    <main>
+        <button id="bad" onclick={ @r = book(1, 1) !{ .Bad :> 7, _ :> 9, }; }>bad</button>
+        <button id="ok" onclick={ @r = book(1, 0) !{ .Bad :> 7, _ :> 9, }; }>ok</button>
+    </main>
+</program>
+`;
+  test("(a) a movable trailing `fail` JOINS the batch: the caller gets `.Bad` and the table stays EMPTY", async () => {
+    const src = POST("if (f > 0) fail .Bad;");
+    expect(errs(src)).toEqual([]);
+    expect(warns(src)).toEqual([]);
+    const r = compile(src);
+    const sql = await realDb(DDL);
+    const bad = await clickRun(r.core, sql, "#bad");
+    expect(bad.calls).toBe(1);
+    expect(bad.state.r).toBe(7);
+    expect(await rows(sql)).toEqual([]);
+    const ok = await clickRun(r.core, sql, "#ok");
+    expect(ok.state.r).toBe(3);
+    expect(await rows(sql)).toEqual([1, 101]);
+  });
+
+  test("(b) a trailing `fail` that needs the browser stays — W-TX-FAIL-AFTER-COMMIT names it and says the writes are committed", () => {
+    const src = withHost(POST(`if (title() == "x") fail .Bad;`));
+    expect(errs(src)).toEqual([]);
+    const w = warns(src);
+    expect(w.map((d) => d.code)).toEqual(["W-TX-FAIL-AFTER-COMMIT"]);
+    expect(w[0].message).toContain("COMMITTED");
+    expect(w[0].message).toContain("not rolled back");
+    expect(w[0].message).toContain("the `<host>` binding `title`");
+    expect(src.slice(w[0].span.start, w[0].span.end)).toContain("title()");
+  });
+
+  // the same treatment for ONE server call
+  const ONE = (guard) => `<program db="./app.db">
+${HOLD_CHARGE}    let <r:int=0/>
+    function book(a: int, f: int)! E {
+        hold(a)?;
+        ${guard}
+        return 3;
+    }
+    <main>
+        <button id="bad" onclick={ @r = book(1, 1) !{ .Bad :> 7, _ :> 9, }; }>bad</button>
+    </main>
+</program>
+`;
+  test("(a) one server call + a movable trailing `fail`: composed, so the failure rolls the call's write back", async () => {
+    const src = ONE("if (f > 0) fail .Bad;");
+    expect(errs(src)).toEqual([]);
+    const r = compile(src);
+    expect(r.core.server.map((x) => x.sym.hint)).toContain("book#batch");
+    const sql = await realDb(DDL);
+    const bad = await clickRun(r.core, sql, "#bad");
+    expect(bad.calls).toBe(1);
+    expect(bad.state.r).toBe(7);
+    expect(await rows(sql)).toEqual([]);
+  });
+
+  test("(b) one server call + a browser trailing `fail`: not composed; W-TX-FAIL-AFTER-COMMIT", () => {
+    const src = withHost(ONE(`if (title() == "x") fail .Bad;`));
+    expect(errs(src)).toEqual([]);
+    expect(warns(src).map((d) => d.code)).toEqual(["W-TX-FAIL-AFTER-COMMIT"]);
+    expect(compile(src).core.server.map((x) => x.sym.hint)).not.toContain("book#batch");
+  });
+
+  test("near-miss: one server call and no later `fail` is unchanged (not composed, no warning)", () => {
+    const src = ONE("@r = 5;");
+    expect(errs(src)).toEqual([]);
+    expect(warns(src)).toEqual([]);
+    expect(compile(src).core.server.map((x) => x.sym.hint)).not.toContain("book#batch");
+  });
+});
+
+describe("r1 L1: a per-call wire-failure handler that can no longer run is a warning, not a silent drop", () => {
+  test("a `.Transport` arm on a `!` call inside the batch — W-TX-ARM-UNREACHABLE at the arm", () => {
+    const src = `<program db="./app.db">
+${HOLD_CHARGE}    let <r:int=0/>
+    function book(a: int, f: int)! E {
+        const v: int = hold(a) !{ .Transport(t) :> 50, _ :> 60 };
+        charge(v, f)?;
+        return v;
+    }
+    <main><button onclick={ @r = book(1, 0) !{ _ :> 9, }; }>go</button></main>
+</program>
+`;
+    expect(errs(src)).toEqual([]);
+    const w = warns(src);
+    expect(w.map((d) => d.code)).toEqual(["W-TX-ARM-UNREACHABLE"]);
+    expect(src.slice(w[0].span.start, w[0].span.end)).toContain(".Transport");
+  });
+  test("near-miss: the handler a non-`!` server call MUST carry on the client (§19.9.10) is dropped in the batch without a warning the author could not act on", () => {
+    expect(warns(BOTH)).toEqual([]);
+  });
+});
+
+describe("r1 L2 / L3 / L5: the synthesized batch's names", () => {
+  test("L2: no diagnostic names `#book` or `book#batch` — it is `book (its composed server batch)`", () => {
+    const btn = `        <button onclick={ book(1, 0) !{ _ :> { @s = "f"; }, }; }>go</button>`;
+    const src = `<program db="./a.db">\n${E}    function hold(a: int)! E {\n        ${q("INSERT INTO log (a) VALUES (${a})")}\n        return 1;\n    }\n    <db src="./b.db">\n        function onB(a: int)! E {\n            ${q("INSERT INTO blog (a) VALUES (${a})")}\n            return 1;\n        }\n    </db>\n    let <s:string=""/>\n    function book(a: int, f: int)! E {\n        hold(a)?;\n        onB(a)?;\n    }\n    <main>\n${btn}\n    </main>\n</program>\n`;
+    const ds = fe(src).diags;
+    expect(ds.map((d) => d.code)).toContain("E-SQL-011");
+    for (const d of ds) {
+      expect(d.message).not.toContain("#book");
+      expect(d.message).not.toContain("book#batch");
+    }
+    expect(ds.find((d) => d.code === "E-SQL-011").message).toContain("book (its composed server batch)");
+  });
+
+  test("L3: an author's `book$batch` and the composed `book`'s batch are two routes with two names", () => {
+    const src = BOOK.replace("    let <r:int=0/>\n", `    let <r:int=0/>\n    function book$batch(a: int) -> int {\n        ${SQ}\`INSERT INTO log (a) VALUES (\${a + 1000})\`}.run() !{ _ :> { return 0; } };\n        return 1;\n    }\n`)
+      .replace(`<button id="ok"`, `<button id="mine" onclick={ @r = book$batch(5) !{ _ :> 9, }; }>mine</button>\n        <button id="ok"`);
+    const r = compile(src);
+    const names = r.core.server.map((x) => x.sym.hint);
+    expect(names).toContain("book$batch");
+    expect(names).toContain("book#batch");
+  });
+
+  test("L5: frontEnd returns the COMPOSED files and a node count above every id in them", () => {
+    const r = fe(BOOK);
+    const fns = JSON.stringify(r.asts);
+    expect(fns).toContain('"name":"#book"');
+    let top = -1;
+    const walk = (v) => { if (v && typeof v === "object") { if (typeof v.nid === "number" && v.nid > top) top = v.nid; for (const k in v) walk(v[k]); } };
+    walk(r.asts);
+    expect(r.nodes).toBeGreaterThan(top);
+  });
+});
+
+describe("r1 L4 / L7", () => {
+  test("L4: `Date.now()` between the calls is browser work — E-TX-CLIENT-MULTI-CALL naming the browser's clock", () => {
+    const src = `<program db="./app.db">
+${HOLD_CHARGE}    let <r:int=0/>
+    function book(a: int, f: int)! E {
+        hold(a)?;
+        const t = Date.now();
+        if (t > 0) { charge(a, f)?; }
+        return 1;
+    }
+    <main><button onclick={ @r = book(1, 0) !{ _ :> 9, }; }>go</button></main>
+</program>
+`;
+    const e = errs(src);
+    expect(e.map((d) => d.code)).toEqual(["E-TX-CLIENT-MULTI-CALL"]);
+    expect(e[0].message).toContain("the browser's clock");
+  });
+
+  test("L7: a cell written in a handler arm of a server call — refused with its own message (not 'a value the batch computes')", () => {
+    const src = `<program db="./app.db">
+${HOLD_CHARGE}    let <s:string=""/>
+    function book(a: int, f: int)! E {
+        hold(a) !{ .Transport(t) :> { @s = "t"; }, _ :> { @s = "o"; } };
+        charge(a, f)?;
+    }
+    <main><button onclick={ book(1, 0) !{ _ :> { @s = "f"; }, }; }>go</button></main>
+</program>
+`;
+    const e = errs(src);
+    expect(e.map((d) => d.code)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+    expect(e[0].message).toContain("makes a server call and writes `@s`");
+    expect(e[0].message).not.toContain("with a value the batch computes");
   });
 });

@@ -4110,10 +4110,10 @@ ${
             const fte: TypeEnv = teAt(te, f.path)
             for (const af of fnItems(f.items)) {
                 // s473: a db cell's load `@rows` is minted as `load$rows` (its Sym hint names generated code)
-                // s474: a composed batch `#book` is minted as `book$batch` (composeFiles)
+                // s474: a composed batch `#book` is minted as `book#batch` (composeFiles; the printers write `#` as `_`)
                 let hint: string = af.name
                 if (isLoadName(af.name)) hint = "load$" + af.name.substring(1)
-                if (isBatchName(af.name)) hint = af.name.substring(1) + "$batch"
+                if (isBatchName(af.name)) hint = af.name.substring(1) + "#batch"   // r1 (review L3): `#` — no identifier spells it
                 const r: RSym = mint(reservedName(st, f.path, af.span, af.name), hint)
                 st = r.st
                 // each signature component is judged by its own type
@@ -27735,7 +27735,10 @@ ${
     //    own (E-ERROR-010 otherwise).
     // =========================================================================
     export type ComposeExtra:struct = { name: string, span: ASpan, ty: AType | not, vt: Type | not }
-    export type ComposePlan:struct = { fnNid: int, lo: int, hi: int, deferred: int[], extra: ComposeExtra[], strip: int[], drop: int[], returns: boolean }
+    // `name`: F's name (analyzeLinked maps the batch's names back to it, review L2); `notes`: the
+    // warnings the plan raises (W-TX-FAIL-AFTER-COMMIT, W-TX-ARM-UNREACHABLE — reported with the
+    // composed program's diagnostics); `late`: how many of them are W-TX-FAIL-AFTER-COMMIT.
+    export type ComposePlan:struct = { fnNid: int, name: string, lo: int, hi: int, deferred: int[], extra: ComposeExtra[], strip: int[], drop: int[], returns: boolean, notes: Diag[], late: int }
     type RCompose:struct = { plans: ComposePlan[], st: AS }
     type RPlan:struct = { plan: ComposePlan | not, st: AS }
 
@@ -27820,12 +27823,19 @@ ${
     // assignment target; `rets`: a `return`; `exits`: a `fail` or a `?`; `effects`: an
     // effect statement; `handled`: every handling form whose subject is a call of a name.
     type CHand:struct = { nid: int, callee: int, how: int, arms: AArm[] }
-    type CFold:struct = { names: int[], assigns: int[], rets: boolean, exits: boolean, effects: boolean, handled: CHand[] }
+    // `clocks` (review L4): every bare `Date` / `performance` name — the browser's clock is not the server's.
+    type CFold:struct = { names: int[], assigns: int[], rets: boolean, exits: boolean, effects: boolean, handled: CHand[], clocks: int[] }
 
-    fn cf0() -> CFold { return { names: [], assigns: [], rets: false, exits: false, effects: false, handled: [] } }
+    fn cf0() -> CFold { return { names: [], assigns: [], rets: false, exits: false, effects: false, handled: [], clocks: [] } }
 
     fn cfWith(a: CFold, names: int[], assigns: int[], rets: boolean, exits: boolean, effects: boolean, handled: CHand[]) -> CFold {
-        return { names: names, assigns: assigns, rets: rets, exits: exits, effects: effects, handled: handled }
+        return { names: names, assigns: assigns, rets: rets, exits: exits, effects: effects, handled: handled, clocks: a.clocks }
+    }
+
+    fn cfName(a: CFold, nid: int, n: string) -> CFold {
+        let c: int[] = a.clocks
+        if (n == "Date" || n == "performance") c = c.concat([nid])
+        return { names: a.names.concat([nid]), assigns: a.assigns, rets: a.rets, exits: a.exits, effects: a.effects, handled: a.handled, clocks: c }
     }
 
     fn cfStmts(ss: AStmt[], a0: CFold) -> CFold {
@@ -27882,7 +27892,7 @@ ${
     fn cfOwn(e: AExpr, a: CFold) -> CFold {
         const k: AExprK = e.k
         return match k {
-            .Name(name: n) :> cfWith(a, a.names.concat([e.nid]), a.assigns, a.rets, a.exits, a.effects, a.handled)
+            .Name(name: n) :> cfName(a, e.nid, n)
             .Assign(target: t) :> cfWith(a, a.names, a.assigns.concat([rootNameNid(t)]), a.rets, a.exits, a.effects, a.handled)
             .Handled(h: h) :> cfHandled(a, e.nid, h)
             .At(name: n) :> a
@@ -28140,6 +28150,11 @@ ${
                     st = r.st
                     const p: ComposePlan | not = r.plan
                     if (p is given) plans = plans.concat([p])
+                } else if (tq.remote[i] == 1) {
+                    const r1: RPlan = composeSingle(g, t, sum, tq, places, dr, fs, i, allow, st)
+                    st = r1.st
+                    const p1: ComposePlan | not = r1.plan
+                    if (p1 is given) plans = plans.concat([p1])
                 }
             }
         }
@@ -28170,8 +28185,7 @@ ${
         const file: string = fs.info.file
         if (!allow) return composeRefuse(st, file, fs.info.span, name, why, "the composed batch is written with the linker's node ids, which this analysis was not given. Compose the calls in one server `!` function and call that once")
         const ss: AStmt[] = fs.f.body.stmts
-        let fx: StmtFx[] = []
-        for (const s of ss) { fx = fx.concat([stmtFx(sum, tq, places, dr, f, s.span)]) }
+        const fx: StmtFx[] = stmtFxs(sum, tq, places, dr, f, t, ss)
         // the batch: first through last statement that calls a server function
         let lo: int = -1
         let hi: int = -1
@@ -28197,7 +28211,13 @@ ${
             }
             k = hi + 1
             while (!changed && k < ss.length) {
-                if (anyIn(localSymsOf(t, cfStmt(ss[k], cf0()).names), bsyms)) {
+                const fk: CFold = cfStmt(ss[k], cf0())
+                if (anyIn(localSymsOf(t, fk.names), bsyms)) {
+                    hi = k
+                    changed = true
+                } else if (fk.exits && fx[k].write == "" && movableRun(t, ss, fx, hi + 1, k)) {
+                    // s474 r1 (review M2, PA ruling (a)): a later statement that can `fail` / `?` and can
+                    // move joins the batch — its failure then rolls the batch's writes back with it
                     hi = k
                     changed = true
                 }
@@ -28260,7 +28280,10 @@ ${
             if (x.client != "") return composeRefuse(st, file, s.span, name, why, "this statement calls `" + x.client + "`, which reads or writes client state: composed, it would run in the server batch with its cells marshalled into the request and written back with the result (§6.6.9, §19.9.9.8 rule 1). Move the call before the first server call or after the last one")
             if (x.read != "") return composeRefuse(st, file, s.span, name, why, "this statement reads `" + x.read + "` inside the batch: composed, the read is the client's value at the batch's start, marshalled into the request (§6.6.9, §19.9.9.7). Read it into a local before the first server call (`const v = " + x.read + ";`) and use the local")
             if (x.write != "") {
-                const needsBatch: boolean = x.remote.length > 0 || one.rets || one.exits || isLocalStmt(s) || anyIn(localSymsOf(t, one.names), bsyms)
+                // s474 r1 (review L7): a write in the statement that makes the server call — its result
+                // assigned to a cell, or a cell written in a handler arm of the call
+                if (x.remote.length > 0) return composeRefuse(st, file, s.span, name, why, "this statement makes a server call and writes `" + x.write + "` (the call's result, or a write in one of its handler arms): composed, the write is decided inside the batch and comes back with the result in the cell envelope (§19.9.9.8 rule 1). Keep the call's value in a local and write the cell before the first server call or from what '" + name + "' returns")
+                const needsBatch: boolean = one.rets || one.exits || isLocalStmt(s) || anyIn(localSymsOf(t, one.names), bsyms)
                 if (needsBatch) return composeRefuse(st, file, s.span, name, why, "this statement writes `" + x.write + "` with a value the batch computes: composed, the write joins the batch and its value comes back with the result in the cell envelope (§19.9.9.8 rule 1). Write the cell after the batch from a value the function returns, or before the first server call")
                 if (seenRet) return composeRefuse(st, file, s.span, name, why, "this write follows a `return` inside the batch, so whether it runs is decided on the server (§19.9.9.8 rule 3). Move the write before the first server call")
                 deferred = deferred.concat([k])
@@ -28307,6 +28330,7 @@ ${
         // arm is dropped when its own error type has none (the per-call wire is gone)
         let strip: int[] = []
         let drop: int[] = []
+        let notes: Diag[] = []
         for (const h of body.handled) {
             const cs: Sym | not = fnSymAt(t, h.callee)
             if (cs is given) {
@@ -28316,9 +28340,15 @@ ${
                         if (!fi.failable) {
                             if (h.how == 2) return composeRefuse(st, file, fs.info.span, name, why, "the batch `match`es on a call of the non-`!` server function `" + fi.name + "`, which cannot fail inside the server batch (§19.9.10). Use the value directly")
                             strip = strip.concat([h.nid])
-                        } else if (!enumHasVariant(t, fi.err, "Transport")) {
+                            // (s474 r1, review L1: no warning here — the first pass requires this handler on a
+                            // client call, §19.9.10, so the author could not remove it; it is dropped silently)
+                        } else {
+                            const keep: boolean = enumHasVariant(t, fi.err, "Transport")
                             for (const a of h.arms) {
-                                if (armIsTransport(a)) drop = drop.concat([a.nid])
+                                if (armIsTransport(a)) {
+                                    if (!keep) drop = drop.concat([a.nid])
+                                    notes = notes.concat([newDiag("W-TX-ARM-UNREACHABLE", "this `.Transport` arm on `" + fi.name + "()` cannot run on the wire: '" + name + "' is declared '!', and its server calls now run in ONE composed request (§19.9.9.8 rule 1, S474), where `" + fi.name + "` is called in place — " + (keep ? "the arm runs only when `" + fi.name + "` itself fails with `Transport`" : "the arm is dropped") + ". A wire failure of the composed request reaches the caller of '" + name + "' as its own `Transport` variant. Use `?` or a `_` arm instead", file, a.span)])
+                                }
                             }
                         }
                     }
@@ -28336,7 +28366,99 @@ ${
         if (rets && (hi + 1 < ss.length || deferred.length > 0)) {
             return composeRefuse(st, file, ss[hi + 1 < ss.length ? hi + 1 : hi].span, name, why, "the batch holds a `return`, and client work follows it: composed, the batch would end the function and hand back its result with an exit flag (§19.9.9.8 rule 3). Move the client work before the first server call, or end the function with the batch")
         }
-        return { plan: { fnNid: fs.f.nid, lo: lo, hi: hi, deferred: deferred, extra: extra, strip: strip, drop: drop, returns: rets }, st: st }
+        // s474 r1 (review M2, PA ruling (b)): a later `fail` / `?` that cannot join the batch runs after it committed
+        const late: Diag[] = lateExits(g, t, fs, fx, calls, hi)
+        return { plan: { fnNid: fs.f.nid, name: name, lo: lo, hi: hi, deferred: deferred, extra: extra, strip: strip, drop: drop, returns: rets, notes: notes.concat(late), late: late.length }, st: st }
+    }
+
+    // Each statement's facts, a `Date` / `performance` read counted as browser work (review L4:
+    // the browser's clock is not movable — §19.9.9.8 rule 3 names `Math`, `JSON`, `String`).
+    fn stmtFxs(sum: Summary, tq: TxQ, places: PlaceFact[], dr: boolean[], f: FnFacts, t: Tables, ss: AStmt[]) -> StmtFx[] {
+        let out: StmtFx[] = []
+        for (const s of ss) {
+            const x: StmtFx = stmtFx(sum, tq, places, dr, f, s.span)
+            let clock: string = ""
+            for (const n of cfStmt(s, cf0()).clocks) {
+                if (clock == "" && localSymAt(t, n) < 0 && fnSymAt(t, n) is not) clock = "the browser's clock (`Date` / `performance`)"
+            }
+            if (clock != "" && x.browser == "") {
+                out = out.concat([{ remote: x.remote, via: x.via, browser: clock, client: x.client, read: x.read, write: x.write }])
+            } else {
+                out = out.concat([x])
+            }
+        }
+        return out
+    }
+
+    // Can statements from..to (inclusive) all move into the batch? (rule 3: no browser work, no cell
+    // read — the marshal is not built — no client function, no effect, no `defer`)
+    fn movableRun(t: Tables, ss: AStmt[], fx: StmtFx[], from: int, to: int) -> boolean {
+        let k: int = from
+        while (k <= to) {
+            const x: StmtFx = fx[k]
+            if (x.browser != "" || x.read != "" || x.client != "" || x.via != "" || x.remote.length > 0) return false
+            if (cfStmt(ss[k], cf0()).effects || cpIsDefer(ss[k])) return false
+            k = k + 1
+        }
+        return true
+    }
+
+    // W-TX-FAIL-AFTER-COMMIT for each statement after `from` that can `fail` / `?` (PA ruling, review M2 (b)).
+    fn lateExits(g: Globals, t: Tables, fs: FnSrc, fx: StmtFx[], calls: string[], from: int) -> Diag[] {
+        let out: Diag[] = []
+        const ss: AStmt[] = fs.f.body.stmts
+        const name: string = fs.info.name
+        let k: int = from + 1
+        let blocked: string = ""
+        while (k < ss.length) {
+            const x: StmtFx = fx[k]
+            if (blocked == "" && x.write != "") blocked = "it writes `" + x.write + "` in the same statement"
+            if (blocked == "" && x.client != "") blocked = "it calls `" + x.client + "`, which reads or writes client state"
+            if (blocked == "" && x.read != "") blocked = "it reads `" + x.read + "`, which is not marshalled into the batch yet"
+            if (x.browser != "") blocked = "it uses " + x.browser + ", which needs the browser"
+            if (cfStmt(ss[k], cf0()).exits) {
+                let why: string = blocked
+                if (why == "") why = "a statement before it cannot join the batch"
+                out = out.concat([newDiag("W-TX-FAIL-AFTER-COMMIT", "this `fail` / `?` (line " + lineOf(g, fs.info.file, ss[k].span.start) + ") runs after '" + name + "''s server work (" + calls.join(", ") + ") has COMMITTED: when it fails, the caller is told '" + name + "' failed, but the batch's writes are already committed and are not rolled back (§19.10.5, S474). It cannot join the server batch because " + why + ". Move the check before the first server call, or into the server function, so it can roll the writes back", fs.info.file, ss[k].span)])
+            }
+            k = k + 1
+        }
+        return out
+    }
+
+    // s474 r1 (review M2, PA ruling): ONE server call followed by a `fail` / `?` — composed like two,
+    // so a movable check joins the call's request and rolls its writes back. Composed only when every
+    // such check joins (otherwise nothing changes): a check that cannot move is W-TX-FAIL-AFTER-COMMIT.
+    // A function whose one call is a composed batch's (the composed program's F) is not looked at again.
+    fn composeSingle(g: Globals, t: Tables, sum: Summary, tq: TxQ, places: PlaceFact[], dr: boolean[], fs: FnSrc, i: int, allow: boolean, st0: AS) -> RPlan {
+        const f: FnFacts = sum.nodes[i].f
+        const ss: AStmt[] = fs.f.body.stmts
+        const fx: StmtFx[] = stmtFxs(sum, tq, places, dr, f, t, ss)
+        let at: int = -1
+        let k: int = 0
+        while (k < ss.length) {
+            if (fx[k].remote.length > 0 || fx[k].via != "") at = k
+            k = k + 1
+        }
+        if (at < 0 || fx[at].via != "") return { plan: not, st: st0 }
+        for (const r of fx[at].remote) {
+            if (r.substring(0, 2) == "`#") return { plan: not, st: st0 }
+        }
+        let exits = false
+        k = at + 1
+        while (k < ss.length) {
+            if (cfStmt(ss[k], cf0()).exits) exits = true
+            k = k + 1
+        }
+        if (!exits) return { plan: not, st: st0 }
+        const r1: RPlan = composeOne(g, t, sum, tq, places, dr, fs, i, "a statement after its one server call can `fail`", allow, st0)
+        const p: ComposePlan | not = r1.plan
+        if (p is given) {
+            if (p.late == 0) return r1
+        }
+        let st: AS = st0
+        for (const d of lateExits(g, t, fs, fx, fx[at].remote, at)) { st = addDiag(st, d.file, d.span, d.code, d.message) }
+        return { plan: not, st: st }
     }
 
     fn errName(e: Sym | not) -> string {
@@ -28752,7 +28874,9 @@ ${
         const rinfos: SqlInfo[] = atomInfos(sum, reached, sqls)
         if (infos.length < qs.length || rinfos.length < reached.length) return { envs: [], st: st }
         const fsym: Sym = { id: f.sym, hint: f.name }
-        const needs: boolean = qs.length >= 2 || tq.runs[i] >= 2 || witnessOf(tq.loops[i]) is given
+        // s474 r1 (review M2): a composed batch (`#F`) holds its queries in a transaction of its own even
+        // when it reaches ONE — a `fail` / `?` it joined after that query must roll the query back
+        const needs: boolean = qs.length >= 2 || tq.runs[i] >= 2 || witnessOf(tq.loops[i]) is given || isBatchName(f.name)
         // S474 ruling 5: the envelope opens with BEGIN IMMEDIATE when a query it reaches writes
         // (core.scrml Envelope.writes) — every query of `rinfos` runs inside it, `.nobatch()` included
         let writes: boolean = false
@@ -31828,7 +31952,31 @@ ${
     export fn analyzeLinked(files: FileAst[], entry: string, keyBase: string, nextId: int) -> TypedProgram {
         const r1: ARun = analyzeRun(files, entry, keyBase, nextId >= 0)
         if (r1.plans.length == 0 || hasErrorDiag(r1.tp.diags)) return r1.tp
-        return analyzeRun(composeFiles(files, r1.plans, nextId), entry, keyBase, false).tp
+        const r2: ARun = analyzeRun(composeFiles(files, r1.plans, nextId), entry, keyBase, false)
+        // the plans' warnings join the composed program's diagnostics, and no diagnostic names the
+        // synthesized batch (`#F`, `F#batch` — review L2): it is "F (its composed server batch)"
+        let notes: Diag[] = []
+        for (const p of r1.plans) { notes = notes.concat(p.notes) }
+        let ds: Diag[] = []
+        for (const d of r2.tp.diags.concat(notes)) { ds = ds.concat([newDiag(d.code, batchNamesOut(r1.plans, d.message), d.file, d.span)]) }
+        return { files: r2.tp.files, tables: r2.tp.tables, diags: ds, infos: r2.tp.infos }
+    }
+
+    fn batchNamesOut(plans: ComposePlan[], m0: string) -> string {
+        let m: string = m0
+        // longest name first, so `#book` never rewrites inside `#bookings`
+        let done: string[] = []
+        let left: int = plans.length
+        while (left > 0) {
+            let best: string = ""
+            for (const p of plans) {
+                if (done.indexOf(p.name) < 0 && p.name.length >= best.length) best = p.name
+            }
+            done = done.concat([best])
+            m = m.replaceAll(best + "#batch", best + " (its composed server batch)").replaceAll("#" + best, best + " (its composed server batch)")
+            left = left - 1
+        }
+        return m
     }
 
     fn analyzeRun(files: FileAst[], entry: string, keyBase: string, allow: boolean) -> ARun {

@@ -351,7 +351,7 @@ describe("F10 — a `!` callee's queries count toward the outer `!` function's s
 
 // s474-boot-client-bang-composition (S474 ruling, the four one-way doors, door 2): "F11 becomes INTERIM: a
 // client `!`'s server calls compose into one request with one envelope". These two shapes were the permanent
-// E-TX-CLIENT-MULTI-CALL; they now compose (a server `!` batch `move$batch`, one standalone envelope). The
+// E-TX-CLIENT-MULTI-CALL; they now compose (a server `!` batch `move#batch`, one standalone envelope). The
 // composed request can fail on the wire, so `move`'s error type needs `Transport` — the built-in `SqlError`
 // has none: E-ERROR-010 naming the line to add. (What stays E-TX-CLIENT-MULTI-CALL — a browser statement
 // splitting the calls — is pinned in client-bang-compose-s474.test.js and acceptance/envelope/neg-client-multi-call.)
@@ -369,7 +369,7 @@ describe("F11 (s474: INTERIM, built) — a client-placed `!` function making two
       const ok = DBP(T + L + bang(body).replace("! SqlError", "! TE"));
       expect([name, codes(ok)]).toEqual([name, []]);
       const core = run(ok).core;
-      const batch = core.server.find((x) => x.sym.hint === "move$batch");
+      const batch = core.server.find((x) => x.sym.hint === "move#batch");
       expect([name, core.envelopes.find((x) => x.fn.id === batch.sym.id).standalone]).toEqual([name, true]);
     }
   });

@@ -62,7 +62,12 @@ export function bootstrapCodes(): string[] {
  * never shadow §34. Keep it SHORT: every entry is owed a §34 row.
  *   (empty — W-STRING-INTERP-LITERAL left when its §34 row landed, s469-spec-followup)
  */
-export const PROVISIONAL: Record<string, CompileSeverity> = {};
+export const PROVISIONAL: Record<string, CompileSeverity> = {
+  // s474-boot-client-bang-composition r1 (PA ruling on review M2 / L1 of #1713): the §34 rows are owed
+  // by the SPEC lane (#1711) — both warnings name a composed client `!` function's batch
+  "W-TX-FAIL-AFTER-COMMIT": "Warning",
+  "W-TX-ARM-UNREACHABLE": "Warning",
+};
 
 export type SeverityEntry = { code: string; severity: CompileSeverity; line: number; provisional?: boolean };
 export type CatalogGap = { code: string; why: string };
