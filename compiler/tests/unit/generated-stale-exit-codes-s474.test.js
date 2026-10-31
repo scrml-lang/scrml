@@ -32,7 +32,7 @@ import {
   mkdtempSync, mkdirSync, symlinkSync, readdirSync, copyFileSync, writeFileSync, readFileSync,
   rmSync, chmodSync,
 } from "fs";
-import { join } from "path";
+import { basename, join } from "path";
 import { tmpdir } from "os";
 import { spawnSync } from "child_process";
 
@@ -165,7 +165,10 @@ function initWrapHistory(root) {
   git("init", "-q");
   for (let i = 1; i <= 10; i++) git("commit", "-q", "--allow-empty", "-m", `wrap(s9${String(i).padStart(2, "0")}): synthetic session close ${i}`);
   const top = spawnSync("git", ["rev-parse", "--absolute-git-dir"], { cwd: root, env, encoding: "utf8" }).stdout.trim();
-  expect(top.endsWith(".git") && top.includes(root.split("/").pop())).toBe(true); // never the checkout's
+  // never the checkout's git dir. Compared by PATH SEGMENT (basename), not by string prefix: on Windows
+  // `root` uses `\` while git prints `D:/…`, and the runner's temp path may be 8.3-shortened.
+  const segs = top.replace(/\\/g, "/").split("/");
+  expect([segs[segs.length - 1], segs.includes(basename(root))]).toEqual([".git", true]);
 }
 
 function stateMirror(gaps) {
