@@ -1262,7 +1262,7 @@ ${
         why = why.concat(vs.why)
 
         const decl: Decl = {
-            sym: prog, kind: DeclKind.Program, single: true, fields: fs.fields,
+            sym: prog, key: prog.hint, kind: DeclKind.Program, single: true, fields: fs.fields,
             renders: vs.views, wiring: [], handles: [],
         }
         const core: CoreProgram = { program: prog, decls: [decl], types: [], fns: fns, server: [], dbs: [], reset: false, sqlError: not, serverCallError: not, css: not, consts: [], loads: [], envelopes: [], head: plainHead() }   // the hybrid's stylesheet is css-ingest's (slice-m3)
