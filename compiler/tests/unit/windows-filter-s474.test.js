@@ -63,7 +63,7 @@ const ALLOW = [
 const allowed = (p) => ALLOW.find(([pre]) => p.startsWith(pre));
 
 const TRACE = readFileSync(join(REPO, "compiler/tests/unit/fixtures/windows-suite-reads-s474.txt"), "utf8")
-  .split("\n").filter((l) => l && !l.startsWith("#"));
+  .split(/\r?\n/).filter((l) => l && !l.startsWith("#")); // CRLF on a Windows checkout (core.autocrlf)
 
 describe("windows filter — structural: every path the suites open is covered or allowlisted", () => {
   test("the step declares its filter as env (WIN_TRIGGER, WIN_MD_TRIGGER)", () => {

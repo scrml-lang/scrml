@@ -144,11 +144,14 @@ describe("scripts/bot-owned-untouched.sh --bot (S474 r1 F4: the bot is checked, 
     mkdirSync(join(s.root, "compiler/src"), { recursive: true });
     writeFileSync(join(s.root, "compiler/src/runtime-url-guard.js"), "// forged\n");
     const wf = join(s.root, ".github/workflows/generated-regen.yml");
-    const widened = readFileSync(wf, "utf8").replace(
-      /(\n\s+FILES: >-\n)(\s+)/,
+    // LF-normalised: a Windows checkout (core.autocrlf) reads this file CRLF, and the regex is LF-only.
+    // Written back LF — git stores LF either way, and the script reads the committed blob (git show).
+    const original = readFileSync(wf, "utf8").replace(/\r\n/g, "\n");
+    const widened = original.replace(
+      /(\n[ \t]+FILES: >-\n)([ \t]+)/,
       (_, head, ind) => `${head}${ind}compiler/src/runtime-url-guard.js\n${ind}.github/workflows/generated-regen.yml\n${ind}`,
     );
-    expect(widened).not.toBe(readFileSync(wf, "utf8"));
+    expect(widened).not.toBe(original);
     // the widening really parses (the forge would succeed against the head's own copy)
     expect(String(Bun.YAML.parse(widened).jobs.regen.env.FILES)).toContain("compiler/src/runtime-url-guard.js");
     writeFileSync(wf, widened);
