@@ -12,13 +12,21 @@
 # WHY A PAT (not default GITHUB_TOKEN): a PR opened by GITHUB_TOKEN does NOT trigger `gate`
 #   ("events from GITHUB_TOKEN don't cascade") → auto-merge would wait forever on a gate that never fires.
 #   A PAT-opened PR DOES fire gate. Needs a fine-grained PAT (Contents R/W + Pull-requests R/W on this repo)
-#   as the `MAPS_PAT` secret. Until it exists a run reds at checkout — HARMLESS (this workflow is off the
-#   required-checks list, it cannot block a merge). NB fine-grained PATs expire (≤1yr) → renew MAPS_PAT
-#   before expiry or the bot goes dark. S469: facts-regen.yml uses the same secret, same reason.
+#   as the `MAPS_PAT` secret.
+#   ⚑ S474 (r1/r2): THIS job no longer writes, so it no longer uses MAPS_PAT — it checks out with the
+#   default token, read-only, and does NOT go red when MAPS_PAT is missing or expired. The PAT paragraph
+#   above is the history of the PR step it used to have; the PAT's live user is generated-regen.yml.
 #
 # TWO STAGES: (1) deterministic `bun scripts/state.ts --write` (@generated rollup; zero AI cost) then
 #   (2) the `project-mapper` agent (committed at .claude/agents/, force-added since .claude/ is gitignored)
 #   regenerates .claude/maps/. Claude GitHub App (github.com/apps/claude) must be installed for step 2.
+#
+# ⚑ S474 — WHAT IS LEFT: Stage 2 was removed at S310 (below). Stage 1 and its PR step were removed at S474:
+#   `.github/workflows/generated-regen.yml` now runs `state.ts --write` (with every other derived-block
+#   producer) after EVERY merge to main, through one fixed bot branch. A second, daily writer of the same
+#   master-list.md block would open a `maps/regen-*` PR that conflicts with the bot's — two writers, the
+#   race generated-regen.yml's single-branch design exists to rule out. Only the non-writing Stage 1b
+#   thread-board probe remains here.
 
 name: cloud-maps
 
@@ -32,9 +40,8 @@ concurrency:
   cancel-in-progress: false
 
 permissions:
-  contents: write
-  pull-requests: write
-  # id-token dropped S310 — it existed solely for the removed claude-code-action Stage 2 (OIDC).
+  contents: read                   # S474: nothing here writes any more (Stage 1 + its PR step moved out)
+  # pull-requests: write dropped S474 with the PR step. id-token dropped S310 — it existed solely for the removed claude-code-action Stage 2 (OIDC).
 
 jobs:
   regen:
@@ -42,14 +49,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          token: ${{ secrets.MAPS_PAT }}     # identity whose opened PR fires `gate` (GITHUB_TOKEN's wouldn't)
+          persist-credentials: false         # S474 r1: read-only job — default token, nothing persisted (MAPS_PAT no longer used here)
           fetch-depth: 0
 
       - uses: oven-sh/setup-bun@v2
       - run: bun install --frozen-lockfile
 
-      - name: Stage 1 — regenerate @generated state rollup (deterministic, no AI cost)
-        run: bun scripts/state.ts --write
+      # (Stage 1 — `bun scripts/state.ts --write` — moved to generated-regen.yml at S474; see the header.)
 
       - name: Stage 1b — thread-board probe-health (non-blocking; catches rotted DONE-PROBE fields + prints the board)
         continue-on-error: true
@@ -64,7 +70,7 @@ jobs:
       #
       # CONSEQUENCE, stated plainly: nav-maps are NO LONGER refreshed on a schedule. That reverts to the
       # PA at wrap (the contract's wrap step 6c), which is where it lived before this workflow existed.
-      # Stage 1/1b below are deterministic and free, so the @generated state rollup keeps drifting-checked.
+      # (S474: the @generated state rollup is now regenerated after every merge by generated-regen.yml.)
       #
       # TO REINSTATE: restore a `anthropics/claude-code-action@v1` step here with the project-mapper
       # FULL_COLD_START prompt and set the `ANTHROPIC_API_KEY` repo secret.
@@ -80,21 +86,7 @@ jobs:
       # all. pa-base §10: an obligation and the probe that reads it must resolve to the SAME
       # artifact — here the PR's own name was the probe, and it read the wrong artifact.
       # If Stage 2 is ever reinstated, put "maps" back in these two strings in the same change.
-      - name: Open @generated-state PR + enable auto-merge (only if drift)
-        env:
-          GH_TOKEN: ${{ secrets.MAPS_PAT }}
-        run: |
-          if [ -z "$(git status --porcelain -- .claude/maps master-list.md)" ]; then
-            echo "No @generated drift — nothing to land."; exit 0
-          fi
-          BR="maps/regen-${{ github.run_id }}"
-          git config user.name  "scrml-maps-ci"
-          git config user.email "scrml-maps-ci@users.noreply.github.com"
-          git checkout -b "$BR"
-          git add -f .claude/maps master-list.md      # -f: .claude/ is gitignored (maps are force-tracked)
-          git commit -m "chore(state): scheduled @generated regen (nav-maps NOT refreshed — Stage 2 removed S310)"
-          git push -u origin "$BR"
-          gh pr create --base main --head "$BR" \
-            --title "chore(state): scheduled @generated regen" \
-            --body "Automated \`bun scripts/state.ts --write\` regen of the \`@generated\` state rollup (cloud-maps beachhead). **Nav-maps are NOT refreshed by this job** — the project-mapper stage was removed at S310 on a cost ruling, so map refresh lives with the PA at wrap step 6c. \`gate\` runs on this PR; auto-merges on green. No branch-protection bypass."
-          gh pr merge "$BR" --squash --auto --delete-branch
+      #
+      # S474 — the "Open @generated-state PR" step this comment described was REMOVED with Stage 1: with
+      # nothing written here, there is nothing to land. The lesson carries over to generated-regen.yml,
+      # whose PR title/body name exactly the files it regenerates.

@@ -82,7 +82,9 @@
  *   bun scripts/bootstrap-conformance.ts --cases <dir>   a different case root (the tests' fixtures)
  *   bun scripts/bootstrap-conformance.ts --json <path>   also write the per-case JSON
  *   bun scripts/bootstrap-conformance.ts --write         also regenerate docs/bootstrap-conformance.md
- *   bun scripts/bootstrap-conformance.ts --check         exit 1 when docs/bootstrap-conformance.md is stale
+ *   bun scripts/bootstrap-conformance.ts --check         exit 4 when docs/bootstrap-conformance.md is stale (S474; was 1)
+ *   bun scripts/bootstrap-conformance.ts --write --ratchet   refuse the write (exit 1) when CRASH or INVALID
+ *                                                        rose over the committed report (S474 r2; the bot)
  *   bun scripts/bootstrap-conformance.ts --fail-on-fail  exit 1 when FAIL or CRASH > 0
  *   bun scripts/bootstrap-conformance.ts --no-twins      grade legacy cases as written (pre-twin)
  *
@@ -90,11 +92,17 @@
  *
  *   0  a VALID measurement was taken (whatever the numbers say). This is a TRACKING probe, not a
  *      gate: a red exit over a known backlog would be the §8 cry-wolf shape.
- *   1  only with --fail-on-fail (a FAIL or a CRASH was found) or --check (the report file is stale).
- *      CI runs `--check` in the NON-BLOCKING `tracking` job on every PR, and (S457) as a BLOCKING
- *      `gate` step on a pull request whose diff touches `conformance/cases/**` or
- *      `compiler/self-host-v2/**` — the report's STALENESS blocks there, never its FAIL count.
+ *   1  with --fail-on-fail (a FAIL or a CRASH was found); with --check when the report is stale AND
+ *      CRASH or INVALID rose against the committed report (S474 r1 ratchet — staleness must not hide
+ *      a regression; the FAIL count stays free), or the committed report has no parseable table;
+ *      or bun's uncaught-exception code.
  *   2  NOT A VALID RUN — the bootstrap bundle failed to build/load, or zero cases were attempted.
+ *   4  --check: the report file is STALE (S474; was 1). CI runs `--check` in the NON-BLOCKING
+ *      `tracking` job, and (S457) as a `checks` step on a pull request whose diff touches
+ *      `conformance/cases/**` or `compiler/self-host-v2/**`. Since S474 (owner ruling: generated
+ *      blocks regenerate post-merge) that step WARNS on 4 and FAILS on anything else — so a PR that
+ *      breaks the bootstrap build (2) still blocks; staleness never does, and the FAIL count never
+ *      did. main is regenerated after merge by .github/workflows/generated-regen.yml.
  *
  * The report always states its own scope: "N of M cases attempted" (attempted = reached the
  * bootstrap at all; every case is attempted unless --filter narrows the set, which is printed).
@@ -1189,6 +1197,34 @@ It is a run, not a static count, so it is NOT a \`docs/FACTS.md\` row (FACTS exc
 // CLI
 // ---------------------------------------------------------------------------
 
+/** The bucket counts in a rendered report's `| bucket | cases | … |` table, or null if none parse. */
+export function reportCounts(text: string): Record<string, number> | null {
+  const out: Record<string, number> = {};
+  for (const m of text.replace(/\r\n/g, "\n").matchAll(/^\| ([A-Z][A-Z-]*) \| (\d+) \| [^|\n]* \|$/gm)) out[m[1]] = Number(m[2]);
+  return BUCKETS.every((b) => b in out) ? out : null;
+}
+
+/** S474 r1: the buckets that may not RISE between the committed report and a run (the ratchet). */
+export const RATCHET_BUCKETS = ["CRASH", "INVALID"] as const;
+
+/** What to do when the ratchet blocks (S474 r2: the error names the remedy). */
+export const RATCHET_REMEDY =
+  "Remedy: fix the bootstrap so the case no longer crashes — or, if the bootstrap genuinely cannot handle it yet, " +
+  "file a bootstrap gap in docs/known-gaps.md and make the case refuse BY NAME (E-BOOTSTRAP-UNSUPPORTED → UNSUPPORTED), " +
+  "then regenerate the report in this PR (`bun scripts/bootstrap-conformance.ts --write`) so the new baseline is reviewed.";
+
+export function ratchetDelta(was: Record<string, number>, now: Record<string, number>): { summary: string; title: string; regressed: string[] } {
+  const show = ["PASS", "FAIL", "CRASH", "UNSUPPORTED", "INVALID"];
+  const fmt = (b: string) => {
+    const d = (now[b] ?? 0) - (was[b] ?? 0);
+    return `${b} ${was[b] ?? 0}→${now[b] ?? 0}${d ? ` (${d > 0 ? "+" : ""}${d})` : ""}`;
+  };
+  const regressed = RATCHET_BUCKETS.filter((b) => (now[b] ?? 0) > (was[b] ?? 0)).map((b) => `${b} ${was[b] ?? 0}→${now[b] ?? 0}`);
+  // The annotation TITLE (what the Checks summary shows): always PASS, plus CRASH when it moved.
+  const title = `bootstrap-conformance ${fmt("PASS")}${(now.CRASH ?? 0) !== (was.CRASH ?? 0) ? ` · ${fmt("CRASH")}` : ""}`;
+  return { summary: show.map(fmt).join(" · "), title, regressed };
+}
+
 async function main(): Promise<number> {
   const args = process.argv.slice(2);
   const opt = (name: string) => {
@@ -1202,6 +1238,7 @@ async function main(): Promise<number> {
   const failOnFail = args.includes("--fail-on-fail");
   const check = args.includes("--check");
   const twins = !args.includes("--no-twins");
+  const ratchet = args.includes("--ratchet");
 
   if (!existsSync(casesDir)) {
     console.error(`bootstrap-conformance: no case root ${casesDir}`);
@@ -1233,6 +1270,25 @@ async function main(): Promise<number> {
     console.error("bootstrap-conformance: --write / --check need the full default corpus with twins (no --filter / --cases / --no-twins)");
     return 2;
   }
+  // S474 r2 (review R1) — the bot runs `--write --ratchet`. The bootstrap is COMPILED by impl#1
+  // (slice-m1/harness.js imports compiler/src/api.js), so a compiler/src-only PR skips the path-scoped
+  // PR-side ratchet, and two individually-passing PRs can merge into a rise. Without this the bot would
+  // rewrite the report with the higher CRASH and the baseline would silently ratchet UP. A rise refuses
+  // the write (exit 1, before anything is written); the bot restores the file, ends red, names the delta.
+  if (write && ratchet) {
+    const was = reportCounts(existsSync(REPORT_PATH) ? readFileSync(REPORT_PATH, "utf8") : "");
+    if (!was) {
+      console.error(`bootstrap-conformance: --ratchet — the committed report has no parseable bucket table; refusing to write (exit 1)`);
+      return 1;
+    }
+    const delta = ratchetDelta(was, r.counts);
+    if (delta.regressed.length) {
+      // (" · ", never ", ": a comma inside a workflow-command title is read as a property separator.)
+      console.log(`::error title=bootstrap-conformance REGRESSION on main: ${delta.regressed.join(" · ")}::${delta.summary} — the report was NOT rewritten (the baseline does not ratchet up). ${RATCHET_REMEDY}`);
+      console.error(`bootstrap-conformance: --ratchet REFUSED the write — ${delta.regressed.join(", ")} rose (${delta.summary}).\n${RATCHET_REMEDY}`);
+      return 1;
+    }
+  }
   if (write) {
     writeFileSync(REPORT_PATH, REPORT_HEADER + body);
     console.error(`wrote ${relative(REPO_ROOT, REPORT_PATH)}`);
@@ -1244,9 +1300,33 @@ async function main(): Promise<number> {
     console.error(stale
       ? `bootstrap-conformance: ${relative(REPO_ROOT, REPORT_PATH)} is STALE — regenerate with --write`
       : `bootstrap-conformance: ${relative(REPO_ROOT, REPORT_PATH)} is current`);
+    if (stale) {
+      // S474 r1 (review F2) — staleness must not HIDE a regression. Since S474 a stale report only
+      // warns, so a PR that crashes the bootstrap on hundreds of cases (measured: a broken
+      // severity.scrml took CRASH 0 → 707, PASS 283 → 247) went green with a warning. Ratchet against
+      // the COMMITTED report: CRASH or INVALID rising fails (1); the FAIL count stays free (it is the
+      // probe's product, not a defect of the PR's making — §8 cry-wolf). The delta is always printed.
+      const was = reportCounts(onDisk);
+      if (!was) {
+        console.error(`bootstrap-conformance: the committed report has no parseable bucket table — cannot ratchet (exit 1)`);
+        return 1;
+      }
+      const delta = ratchetDelta(was, r.counts);
+      // S474 r2: the PASS (and CRASH) delta goes in the TITLE — the Checks summary shows titles only, and
+      // a PASS collapse (283 → 0, UNSUPPORTED +283) is warn-only by design but must not be invisible.
+      console.log(`::warning title=${delta.title}::${delta.summary}`);
+      console.error(`bootstrap-conformance: delta vs committed report — ${delta.summary}`);
+      if (delta.regressed.length) {
+        console.error(`bootstrap-conformance: REGRESSION — ${delta.regressed.join(", ")} rose (exit 1; staleness alone would be 4).\n${RATCHET_REMEDY}`);
+        return 1;
+      }
+    }
   }
   if (failOnFail && r.counts.FAIL + r.counts.CRASH > 0) return 1;
-  if (stale) return 1;
+  // S474 — stale is its OWN code (4), so a PR-side caller can warn on staleness alone (main is
+  // regenerated after merge by generated-regen.yml) while a crash (1 — bun's uncaught-exception code)
+  // or an invalid run (2) still fails it.
+  if (stale) return 4;
   return 0;
 }
 

@@ -26,7 +26,7 @@ SPEC §47 (Output Name Encoding) was found unimplemented in the bootstrap with n
 - (c) a cited gap id has no `@gap` marker in `docs/known-gaps.md`;
 - and it warns (d) when a cited gap is closed while its row still says SILENT-* or PARTIAL.
 
-**Keeping it current.** When a gap lands, flip its rows (usually to BUILT or REFUSED-LOUD) in the same PR. When a SPEC section lands, add its rows. Then run `bun scripts/spec-coverage-check.ts --write` to refresh the totals.
+**Keeping it current.** When a gap lands, flip its rows (usually to BUILT or REFUSED-LOUD) in the same PR. When a SPEC section lands, add its rows. Do not commit a totals refresh: since S474 the totals block is regenerated on main after merge by `.github/workflows/generated-regen.yml`, and a stale block only warns (exit 4). A missing row or gap still fails. `bun scripts/spec-coverage-check.ts --write` refreshes the totals locally.
 
 ## Totals
 
