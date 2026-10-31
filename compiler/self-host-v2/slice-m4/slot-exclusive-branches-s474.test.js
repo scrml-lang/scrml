@@ -31,8 +31,9 @@ const clean = (src) => {
 };
 
 // A declaration `<card mode:int>` whose `renders` is `renders`, and a use carrying content.
-const CARD = (renders, use = "<card mode=1><b id=\"kid\">hi</b></card>") =>
-  `<program>\n    <card mode:int/>\n    renders ${renders}\n    <main>${use}</main>\n</program>\n`;
+const CARD = (renders, use = "<card mode=1><b id=\"kid\">hi</b></card>", extra = "") =>
+  `<program>\n${extra}    <card mode:int/>\n    renders ${renders}\n    <main>${use}</main>\n</program>\n`;
+const INNER = "    <inner k:int/>\n    renders <i><slot/></i>\n";
 
 describe("positive — one unnamed slot per exclusive branch compiles", () => {
   test("if / else: one slot in each arm", () => {
@@ -49,6 +50,18 @@ describe("positive — one unnamed slot per exclusive branch compiles", () => {
 
   test("whitespace and a comment between members do not break the chain", () => {
     expect(codes(CARD("<div>\n        <p if=(mode == 1)><slot/></p>\n        // between\n        <p else><slot/></p>\n    </div>"))).toEqual([]);
+  });
+
+  test("an HTML comment between members does not break the chain (§17.1.1, S471)", () => {
+    expect(codes(CARD("<div><p if=(mode == 1)><slot/></p><!-- c --><p else><slot/></p></div>"))).toEqual([]);
+  });
+
+  test("a `#{}` block between members does not break the chain (as chainCheck / lower read it — see gap F2)", () => {
+    expect(codes(CARD("<div><p if=(mode == 1)><slot/></p>#{ p { color: red; } }<p else><slot/></p></div>"))).toEqual([]);
+  });
+
+  test("component uses as chain members: one slot in each use's content", () => {
+    expect(codes(CARD("<div><inner k=1 if=(mode == 1)><slot/></inner><inner k=2 else><slot/></inner></div>", undefined, INNER))).toEqual([]);
   });
 
   test("nested: an if inside an arm, one slot in each inner branch", () => {
@@ -68,7 +81,8 @@ describe("positive — one unnamed slot per exclusive branch compiles", () => {
 describe("negative — non-exclusive duplicates stay E-COMPONENT-020", () => {
   test("two sibling slots", () => {
     const e = errs(CARD("<div><slot/><hr/><slot/></div>"));
-    expect(e.map((d) => d.code)).toEqual(["E-COMPONENT-020"]);
+    expect(e.length).toBe(1);
+    expect(e[0].code).toBe("E-COMPONENT-020");
     expect(e[0].message).toContain("render path");
   });
 
@@ -86,6 +100,16 @@ describe("negative — non-exclusive duplicates stay E-COMPONENT-020", () => {
   test("a non-element node between members ends the chain: the second `if=` opens a new one", () => {
     // `x` text between the two `if=` elements: two chains, both can render
     expect(codes(CARD("<div><p if=(mode == 1)><slot/></p>x<p if=(mode == 2)><slot/></p></div>"))).toEqual(["E-COMPONENT-020"]);
+  });
+
+  test("a comment / `#{}` between two `if=` elements does not join them: two chains", () => {
+    expect(codes(CARD("<div><p if=(mode == 1)><slot/></p><!-- c --><p if=(mode == 1)><slot/></p></div>"))).toEqual(["E-COMPONENT-020"]);
+    expect(codes(CARD("<div><p if=(mode == 1)><slot/></p>#{ p { color: red; } }<p if=(mode == 1)><slot/></p></div>"))).toEqual(["E-COMPONENT-020"]);
+  });
+
+  test("component uses that are not a chain: a slot in a use's content and one beside it", () => {
+    expect(codes(CARD("<div><inner k=1><slot/></inner><slot/></div>", undefined, INNER))).toEqual(["E-COMPONENT-020"]);
+    expect(codes(CARD("<div><inner k=1><slot/><slot/></inner></div>", undefined, INNER))).toEqual(["E-COMPONENT-020"]);
   });
 
   test("two slots inside ONE arm", () => {
@@ -158,7 +182,8 @@ describe("runtime — the children land in the live branch's slot, exactly once"
   });
 });
 
-// A per-instance toggle: the branch flips at runtime and the children move with it.
+// A per-instance toggle: the branch flips at runtime and the children are RE-CREATED in the newly live
+// slot (a fresh render of the use-site content — typed input state is not carried, old effects are disposed).
 const RT2 = `<program>
     <box label:string>
         export let <alt:bool=false/>
@@ -174,7 +199,7 @@ const RT2 = `<program>
 </program>
 `;
 
-describe("runtime — toggling the branch moves the children to the newly live slot", () => {
+describe("runtime — toggling the branch re-creates the children in the newly live slot", () => {
   let program;
   beforeAll(async () => { ({ program } = await loadProgram(clean(RT2), "slot-branches-toggle", ["bump"])); }, { timeout: 60000 });
 
