@@ -63,8 +63,12 @@
 //     (pre-S474 branches, habit) and for the same-spot @gap entry union, which is hand text.
 //
 // ═══ WHAT IS GENERATED (each producer's header read at S468) ════════════════════════════════════
-//   docs/known-gaps.md            `@generated:gap-counts`       state.ts       SELF-CONTAINED (own @gap markers)
-//   master-list.md                `@generated:recent-sessions`  state.ts       cross (git history)
+//   (S474: `@generated:gap-counts` and `@generated:recent-sessions` LEFT docs/known-gaps.md and master-list.md
+//   for docs/generated/{gap-counts,recent-sessions}.md — bot-owned files a PR never modifies, so they need no
+//   driver. GitHub's merge runs no custom driver: this driver regenerating gap-counts inside every local
+//   `git merge origin/main` was what put PR branches on the lines the bot rewrites, so each bot regen made
+//   them DIRTY on GitHub (#1702 → #1699, #1701). Both files keep the driver for the @gap-entry union.
+//   SELF_CONTAINED below still handles a gap-counts block in any file that has one — a pre-S474 branch.)
 //   docs/FACTS.md                 `@generated:facts-table`,     facts.ts       cross (compiler/src, SPEC.md, …)
 //                                 `@generated:facts-lists`
 //   compiler/SPEC-INDEX.md        `@generated:spec-index-totals` + the Lines/Size cells of every
@@ -113,10 +117,11 @@ export const SELF_CONTAINED: Record<string, (mergedText: string) => string> = {
 export const PRODUCERS: { path: string; cmd: string[]; historyDerived?: boolean; slow?: boolean }[] = [
   { path: "compiler/SPEC-INDEX.md", cmd: ["bun", "run", "scripts/regen-spec-index.ts"] },
   { path: "docs/FACTS.md", cmd: ["bun", "scripts/facts.ts", "--write"] },
-  // state.ts --write regenerates BOTH gap-counts (known-gaps.md) and recent-sessions (master-list.md);
-  // recent-sessions reads `git log` of HEAD, so it is only right once the merge COMMIT exists.
-  { path: "docs/known-gaps.md", cmd: ["bun", "scripts/state.ts", "--write"], historyDerived: true },
-  { path: "master-list.md", cmd: ["bun", "scripts/state.ts", "--write"], historyDerived: true },
+  // S474: no state.ts entry. gap-counts and recent-sessions moved out of docs/known-gaps.md and
+  // master-list.md into docs/generated/ (bot-owned; a PR must not modify it), so neither file carries
+  // generated content any more, and running `state.ts --write` here would write the bot's files into a
+  // PR branch — the exact thing that made PRs go DIRTY on GitHub. A pending record naming either file
+  // (left by a pre-S474 merge) is dropped as unknown below.
   { path: "docs/bootstrap-conformance.md", cmd: ["bun", "scripts/bootstrap-conformance.ts", "--write"], slow: true },
 ];
 

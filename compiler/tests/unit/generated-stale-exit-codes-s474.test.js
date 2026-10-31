@@ -15,7 +15,8 @@
  * Pinned here:
  *   - regen-spec-index.ts --check: stale totals / row ranges → 4; a SPEC § with no row, a row naming a
  *     missing §, missing totals anchors → 1; structural wins over stale.
- *   - state.ts --check: stale gap-counts → 4; missing anchor → 3; stray anchor → 1; unclassifiable status → 1
+ *   - state.ts --check (S474: blocks in docs/generated/): stale gap-counts → 4; missing anchor or deleted file → 3;
+ *     stray anchor, or an old block left in known-gaps.md / master-list.md → 1; unclassifiable status → 1
  *     (throws); zero markers → 2.
  *   - gen-bootstrap-severity.ts --check: stale → 4; a crash → 1 (never 4).
  *   - (spec-coverage-check.ts: pinned in spec-coverage-check-s473.test.js — stale → 4, violation → 1.)
@@ -145,9 +146,10 @@ describe("regen-spec-index.ts --check — stale is 4, structural is 1 (S474)", (
 /**
  * A mirror tree for state.ts (whose ROOT is its own script's parent dir): every top-level entry is a symlink
  * to the real repo EXCEPT scripts/ (a copy of state.ts), docs/ (per-entry symlinks + a real known-gaps.md
- * COPY) and master-list.md (a real COPY) — the two files `--write` writes, so a write can never reach
- * through a symlink into the checkout. `.git` is NOT linked: the mirror gets its own synthetic wrap history (initWrapHistory), so the result
- * never depends on the checkout's clone depth.
+ * COPY + a real docs/generated/ COPY) and master-list.md (a real COPY). Since S474 `--write` writes only
+ * docs/generated/*, and every file it could touch is a copy, so a write can never reach through a symlink
+ * into the checkout. `.git` is NOT linked: the mirror gets its own synthetic wrap history (initWrapHistory),
+ * so the result never depends on the checkout's clone depth.
  */
 /**
  * S474 CI fix — the mirror gets its OWN git history instead of a symlink to the checkout's `.git`: CI's
@@ -171,7 +173,9 @@ function initWrapHistory(root) {
   expect([segs[segs.length - 1], segs.includes(basename(root))]).toEqual([".git", true]);
 }
 
-function stateMirror(gaps) {
+const GEN_FILES = ["gap-counts.md", "recent-sessions.md"];
+
+function stateMirror(gaps, { masterList = null } = {}) {
   const root = tmp("state-s474-");
   const SPECIAL = new Set(["scripts", "docs", "master-list.md", "node_modules", ".git"]);
   for (const e of readdirSync(REPO)) {
@@ -182,31 +186,34 @@ function stateMirror(gaps) {
   copyFileSync(join(REPO, "scripts/state.ts"), join(root, "scripts/state.ts"));
   mkdirSync(join(root, "docs"));
   for (const e of readdirSync(join(REPO, "docs"))) {
-    if (e === "known-gaps.md") continue;
+    if (e === "known-gaps.md" || e === "generated") continue;
     symlinkSync(join(REPO, "docs", e), join(root, "docs", e));
   }
   writeFileSync(join(root, "docs/known-gaps.md"), gaps);
-  copyFileSync(join(REPO, "master-list.md"), join(root, "master-list.md"));
+  mkdirSync(join(root, "docs/generated"));
+  for (const f of GEN_FILES) copyFileSync(join(REPO, "docs/generated", f), join(root, "docs/generated", f));
+  if (masterList === null) copyFileSync(join(REPO, "master-list.md"), join(root, "master-list.md"));
+  else writeFileSync(join(root, "master-list.md"), masterList);
   initWrapHistory(root);
   return root;
 }
 
 describe("state.ts --check — stale is 4; missing anchor 3; stray/unparseable 1; zero 2 (S474)", () => {
   const SCRIPT = (root) => join(root, "scripts/state.ts");
-  let GAPS;
-  beforeAll(() => {
-    // Regenerate in a mirror first: the branch's own blocks may legitimately be stale (the bot owns main).
-    const m = stateMirror(readFileSync(join(REPO, "docs/known-gaps.md"), "utf8"));
-    expect(run("bun", [SCRIPT(m), "--write"], m).rc).toBe(0);
-    GAPS = readFileSync(join(m, "docs/known-gaps.md"), "utf8");
-  }, 60000);
-  const checkWith = (gaps, { fresh = true } = {}) => {
-    const m = stateMirror(gaps);
-    if (fresh) {
-      // Make recent-sessions current in THIS mirror without touching the ledger under test.
-      const saved = readFileSync(join(m, "docs/known-gaps.md"), "utf8");
-      run("bun", [SCRIPT(m), "--write"], m);
-      writeFileSync(join(m, "docs/known-gaps.md"), saved);
+  const GAPS = readFileSync(join(REPO, "docs/known-gaps.md"), "utf8");
+  const COUNTS = (m) => join(m, "docs/generated/gap-counts.md");
+  /**
+   * A mirror over `gaps`; with `fresh`, `--write` first makes both generated files current for THIS mirror
+   * (the branch's own copies may legitimately be stale — the bot owns main), then `mutate` edits the
+   * generated gap-counts file under test (text → text, or null to delete it).
+   */
+  const checkWith = (gaps, { fresh = true, mutate = null, masterList = null } = {}) => {
+    const m = stateMirror(gaps, { masterList });
+    if (fresh) expect(run("bun", [SCRIPT(m), "--write"], m).rc).toBe(0);
+    if (mutate) {
+      const next = mutate(readFileSync(COUNTS(m), "utf8"));
+      if (next === null) rmSync(COUNTS(m));
+      else writeFileSync(COUNTS(m), next);
     }
     return run("bun", [SCRIPT(m), "--check"], m);
   };
@@ -217,24 +224,58 @@ describe("state.ts --check — stale is 4; missing anchor 3; stray/unparseable 1
     expect(checkWith(GAPS).rc).toBe(0);
   }, 30000);
 
+  test("--write touches only docs/generated/* — the ledger and master-list are byte-unchanged", () => {
+    const m = stateMirror(GAPS);
+    const ml = readFileSync(join(m, "master-list.md"), "utf8");
+    expect(run("bun", [SCRIPT(m), "--write"], m).rc).toBe(0);
+    expect(readFileSync(join(m, "docs/known-gaps.md"), "utf8")).toBe(GAPS);
+    expect(readFileSync(join(m, "master-list.md"), "utf8")).toBe(ml);
+  }, 30000);
+
   test("a gap-counts table that disagrees with the markers → 4 (stale only)", () => {
-    const s = GAPS.indexOf(S);
-    const e = GAPS.indexOf(E);
-    const body = GAPS.slice(s, e);
-    const stale = GAPS.slice(0, s) + body.replace(/\| (\d+) \|/, (m, n) => `| ${Number(n) + 1} |`) + GAPS.slice(e);
-    expect(stale).not.toBe(GAPS);
-    const r = checkWith(stale);
+    const r = checkWith(GAPS, {
+      mutate: (t) => {
+        const s = t.indexOf(S);
+        const out = t.slice(0, s) + t.slice(s).replace(/\| (\d+) \|/, (_, n) => `| ${Number(n) + 1} |`);
+        expect(out).not.toBe(t);
+        return out;
+      },
+    });
     expect(r.out).toContain("STALE");
     expect(r.rc).toBe(4);
   }, 30000);
 
   test("a MISSING anchor (END deleted) → 3, never 4", () => {
-    expect(checkWith(GAPS.replace(E, "")).rc).toBe(3);
+    expect(checkWith(GAPS, { mutate: (t) => t.replace(E, "") }).rc).toBe(3);
+  }, 30000);
+
+  test("the generated file DELETED → 3 (missing anchors), not a crash", () => {
+    const r = checkWith(GAPS, { mutate: () => null });
+    expect(r.out).toContain("MISSING");
+    expect(r.rc).toBe(3);
   }, 30000);
 
   test("a STRAY second START anchor → 1", () => {
-    const r = checkWith(GAPS.replace("\n## ", `\n${S} (stray) -->\n\n## `));
+    const r = checkWith(GAPS, { mutate: (t) => t.replace(S, `${S} (stray) -->\n${S}`) });
     expect(r.out).toContain("STRAY");
+    expect(r.rc).toBe(1);
+  }, 30000);
+
+  test("an old in-ledger gap-counts block (a pre-S474 branch merged forward) → 1, naming the move", () => {
+    const old = GAPS.replace("\n## ", `\n${S} (do not edit) -->\n| HIGH | 1 | 0 |\n${E}\n\n## `);
+    expect(old).not.toBe(GAPS);
+    const r = checkWith(old, { fresh: false });
+    expect(r.out).toContain("moved to docs/generated/");
+    expect(r.rc).toBe(1);
+  }, 30000);
+
+  test("an old recent-sessions block left in master-list.md → 1", () => {
+    const ml = readFileSync(join(REPO, "master-list.md"), "utf8").replace(
+      "\n## ",
+      "\n<!-- @generated:recent-sessions START (do not edit) -->\n- x\n<!-- @generated:recent-sessions END -->\n\n## ",
+    );
+    const r = checkWith(GAPS, { fresh: false, masterList: ml });
+    expect(r.out).toContain("moved to docs/generated/");
     expect(r.rc).toBe(1);
   }, 30000);
 
@@ -554,7 +595,7 @@ case "$*" in
   *gen-bootstrap-severity*) f=compiler/self-host-v2/severity.scrml; s=gen-bootstrap-severity ;;
   *regen-spec-index*)       f=compiler/SPEC-INDEX.md;               s=regen-spec-index ;;
   *spec-coverage-check*)    f=docs/bootstrap-spec-coverage.md;      s=spec-coverage-check ;;
-  *state.ts*)               f="docs/known-gaps.md master-list.md";  s=state ;;
+  *state.ts*)               f="docs/generated/gap-counts.md docs/generated/recent-sessions.md";  s=state ;;
   *bootstrap-conformance*)  f=docs/bootstrap-conformance.md;        s=bootstrap-conformance ;;
   *facts.ts*)               f=docs/FACTS.md;                        s=facts ;;
   *) exit 99 ;;
@@ -583,7 +624,8 @@ exit 0
   test("FILES is exactly the class-(a) set (+ severity.scrml); the md shim is NOT in it", () => {
     expect(FILES.sort()).toEqual([
       "compiler/SPEC-INDEX.md", "compiler/self-host-v2/severity.scrml", "docs/FACTS.md",
-      "docs/bootstrap-conformance.md", "docs/bootstrap-spec-coverage.md", "docs/known-gaps.md", "master-list.md",
+      "docs/bootstrap-conformance.md", "docs/bootstrap-spec-coverage.md", "docs/generated/gap-counts.md",
+      "docs/generated/recent-sessions.md",
     ]);
   });
 
@@ -597,8 +639,8 @@ exit 0
   test("one producer fails → ITS files are restored, the others still land, the failure is reported", () => {
     const r = runProduce({ FAIL_SCRIPT: "state" });
     expect(r.rc).toBe(0); // the step continues; the last workflow step turns the run red
-    expect(r.changed).not.toContain("docs/known-gaps.md");
-    expect(r.changed).not.toContain("master-list.md");
+    expect(r.changed).not.toContain("docs/generated/gap-counts.md");
+    expect(r.changed).not.toContain("docs/generated/recent-sessions.md");
     expect(r.changed).toContain("docs/FACTS.md");
     expect(r.changed).toContain("compiler/SPEC-INDEX.md");
     expect(r.ghOut).toMatch(/^failed=.*\bstate\b/m);

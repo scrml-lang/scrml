@@ -62,6 +62,11 @@ scripts/git-hooks/* text eol=lf
 # main after merge (owner ruling; .github/CI.md). The driver STAYS: harmless (inert unless installed; GitHub
 # never runs it) and still right for a branch that DID regenerate — a pre-S474 branch, or a habit — merging
 # the bot's output, and for its gap-id union of two branches' same-spot gap entries (hand text, not generated).
+#
+# S474 r2 — gap-counts and recent-sessions LEFT known-gaps.md / master-list.md for docs/generated/ (bot-owned;
+# ci.yml refuses a PR that modifies it), because GitHub's merge — which never runs this driver — went DIRTY on
+# every bot regen of lines a PR branch also carried (#1702 → #1699, #1701). docs/generated/ needs no driver:
+# a PR never touches it. Both files keep the driver for the @gap-entry union.
 /docs/known-gaps.md            merge=scrml-generated
 /master-list.md                merge=scrml-generated
 /docs/FACTS.md                 merge=scrml-generated

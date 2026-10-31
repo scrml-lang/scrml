@@ -292,9 +292,20 @@ jobs:
       # `@generated:gap-counts` / `@generated:recent-sessions` (exit 4) WARNS — recent-sessions is stale
       # on every PR by construction (a wrap's own merge commit does not exist yet; the bot catches it up).
       # Needs fetch-depth: 0 (this job has it): recent-sessions pages `git log` for 8 wrap commits.
+      # S474 r2: both blocks live in docs/generated/ (bot-owned); an old copy of either left in
+      # docs/known-gaps.md / master-list.md (a pre-move branch merged forward) is refused, exit 1.
       - name: Gap ledger + session index (state.ts — sources must parse; stale counts WARN)
         if: ${{ !cancelled() }}
-        run: scripts/ci-stale-warn.sh "docs/known-gaps.md gap-counts / master-list.md recent-sessions" bun scripts/state.ts --check
+        run: scripts/ci-stale-warn.sh "docs/generated/gap-counts.md / docs/generated/recent-sessions.md" bun scripts/state.ts --check
+      # S474 — a PR must not modify or delete a file under docs/generated/ (BLOCKING). generated-regen.yml
+      # rewrites those files on main after every merge, and GitHub's merge runs no custom merge driver: a
+      # PR carrying its own value of a line the bot rewrites goes DIRTY when the bot lands (#1702 landed →
+      # #1699 and #1701 DIRTY, kicked from the queue, on the gap-counts rows). Adding a file there is
+      # allowed. The bot's own PR is exempt. Not on merge_group: the PR run already judged it, and a queue
+      # group may legitimately include the bot's PR.
+      - name: Bot-owned generated files untouched (docs/generated/)
+        if: ${{ !cancelled() && github.event_name == 'pull_request' && github.head_ref != 'bot/generated-regen' }}
+        run: scripts/bot-owned-untouched.sh "${{ github.event.pull_request.base.sha }}"
       # S474 — compiler/self-host-v2/severity.scrml (generated from SPEC §34). Moved here from `tracking`:
       # byte staleness WARNS (4) — answer-changing drift fails slice-m4/severity.test.js on the PR, so only
       # answer-neutral drift reaches main, and the bot regenerates it — but a CRASHING generator (a §34

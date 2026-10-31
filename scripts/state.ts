@@ -41,7 +41,7 @@
 //   The §R28/§R27 cluster-table OPEN rows DO count (their tokens live inline in each row's final cell).
 //   This reproduces the canonical S170 hand-count HIGH 0 · MED 9 · LOW 18 · Nominal 9.
 
-import { readFileSync, writeFileSync } from "fs";
+import { existsSync, readFileSync, writeFileSync } from "fs";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "child_process";
 
@@ -414,25 +414,54 @@ export function headingMarkerDrift(srcText?: string): {
 //   <!-- @generated:<NAME> END -->
 type GenSection = { name: string; file: string; produce: () => string };
 
+// S474 — BOTH SECTIONS LIVE IN THEIR OWN BOT-OWNED FILES under docs/generated/. They used to sit inside
+// hand-edited files (docs/known-gaps.md §0, master-list.md §0.6). generated-regen.yml rewrites them on
+// main after every merge, so every open PR whose branch carried its own value of those lines (a habitual
+// `--write`, or the local merge driver regenerating gap-counts in each `git merge origin/main`) went
+// DIRTY on GitHub the moment the bot's regen landed: GitHub's merge runs no custom driver, sees both
+// sides change the same lines, and refuses. Witnessed: #1702 landed → #1699 and #1701 dirty, each on
+// the gap-counts rows only. A file a PR never touches cannot conflict, and ci.yml `checks` refuses a PR
+// that modifies docs/generated/**. The SOURCES (the @gap markers, git log) stay where they were.
 const GEN_SECTIONS: GenSection[] = [
   {
     name: "gap-counts",
-    file: `${ROOT}/docs/known-gaps.md`,
-    // The §0 at-a-glance table's four data rows — derived from the @gap tokens, so they always
-    // equal what PRINT reports. Header + separator + the "Count basis" legend stay STATIC (hand-doc).
+    file: `${ROOT}/docs/generated/gap-counts.md`,
+    // The at-a-glance table's four data rows — derived from docs/known-gaps.md's @gap tokens, so they
+    // always equal what PRINT reports. Header + separator stay STATIC in the generated file.
     // S430: a THIRD column, Carried — owed by the bootstrap, not by impl#1 (see GAP_STATUS_CARRIED).
-    // ⚑ The static header in docs/known-gaps.md §0 must name three columns to match.
+    // ⚑ The static header in docs/generated/gap-counts.md must name three columns to match.
     produce: () => gapCountsSection(readFileSync(`${ROOT}/docs/known-gaps.md`, "utf8")),
   },
   {
     name: "recent-sessions",
-    file: `${ROOT}/master-list.md`,
-    // The master-list §0.6 generated index — last-N wrap anchors + push-state + tag-cut (DD3 Fork 1,
-    // S173). Per-session narrative lives in docs/changelog.md (the ONE narrative SoT); this is the
-    // startup-load-bearing forensic index only.
+    file: `${ROOT}/docs/generated/recent-sessions.md`,
+    // The generated session index (master-list.md §0.6 points at it) — last-N wrap anchors + push-state
+    // + tag-cut (DD3 Fork 1, S173). Per-session narrative lives in docs/changelog.md (the ONE narrative
+    // SoT); this is the startup-load-bearing forensic index only.
     produce: () => recentSessions(8),
   },
 ];
+
+/**
+ * Where each section lived before S474. A START/END anchor left there (a pre-S474 branch merged
+ * forward, or a hand re-add) is refused by refuseStrayAnchors (exit 1): no producer updates it any more,
+ * and that in-file position is exactly the shape that made PRs go DIRTY. EXPORTED for the unit test.
+ */
+export const RETIRED_HOMES: { name: string; file: string }[] = [
+  { name: "gap-counts", file: `${ROOT}/docs/known-gaps.md` },
+  { name: "recent-sessions", file: `${ROOT}/master-list.md` },
+];
+
+/** A generated file's text; "" when the file is absent, so a deleted file reads as MISSING anchors (exit 3), never a crash. */
+function readGenFile(file: string): string {
+  return existsSync(file) ? readFileSync(file, "utf8") : "";
+}
+
+/** The anchors of NAME still present in a retired home's TEXT (line numbers), or []. EXPORTED for the test. */
+export function retiredAnchorLines(text: string, name: string): number[] {
+  const re = new RegExp(`<!--\\s*@generated:${escapeRe(name)}\\s+(?:START|END)\\b[^>]*-->`, "g");
+  return [...text.matchAll(re)].map((m) => text.slice(0, m.index).split("\n").length);
+}
 
 // Find the START/END anchor pair for NAME in `text`. Returns the byte offsets of the content
 // region (between the START line's trailing newline and the END line's leading newline) plus the
@@ -508,8 +537,17 @@ function regenInText(text: string, sec: GenSection): { text: string; changed: bo
 function refuseStrayAnchors(): void {
   const problems: string[] = [];
   for (const sec of GEN_SECTIONS) {
-    for (const p of strayAnchors(readFileSync(sec.file, "utf8"), sec.name)) {
+    for (const p of strayAnchors(readGenFile(sec.file), sec.name)) {
       problems.push(`@generated:${sec.name} in ${rel(sec.file)}: ${p}`);
+    }
+  }
+  for (const h of RETIRED_HOMES) {
+    const lines = existsSync(h.file) ? retiredAnchorLines(readFileSync(h.file, "utf8"), h.name) : [];
+    if (lines.length) {
+      problems.push(
+        `@generated:${h.name} in ${rel(h.file)} (lines ${lines.join(", ")}): this section moved to ` +
+          `docs/generated/ at S474 — delete the old block (with its table header) from ${rel(h.file)}`,
+      );
     }
   }
   if (problems.length === 0) return;
@@ -538,7 +576,7 @@ function runWrite(): number {
   let anyChanged = false;
   const missing: string[] = [];
   for (const [file, secs] of byFile) {
-    let text = readFileSync(file, "utf8");
+    let text = readGenFile(file);
     let fileChanged = false;
     for (const sec of secs) {
       const r = regenInText(text, sec);
@@ -637,7 +675,7 @@ function runCheck(): number {
   // Read each file once.
   const fileText = new Map<string, string>();
   for (const sec of GEN_SECTIONS) {
-    if (!fileText.has(sec.file)) fileText.set(sec.file, readFileSync(sec.file, "utf8"));
+    if (!fileText.has(sec.file)) fileText.set(sec.file, readGenFile(sec.file));
     const text = fileText.get(sec.file)!;
     const span = findAnchorSpan(text, sec.name);
     if (!span) {
