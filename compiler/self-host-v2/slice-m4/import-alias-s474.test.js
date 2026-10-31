@@ -230,6 +230,11 @@ describe("errors", () => {
     const r = prog([T, R, useFns(`import { Crate } from "./r.scrml";`, `<p>x</p>`)]);
     expect(at(r)).toContainEqual(["E-PARSE-ITEM", "r.scrml"]);
   });
+  test("`import stuff` (no `from`) is no import form — not reported as a default import", () => {
+    const r = prog([useFns(`import stuff;`, `<p>x</p>`)]);
+    expect(r.diags.length).toBeGreaterThan(0);
+    expect(r.diags.map((d) => d.message).join("\n")).not.toContain("default import");
+  });
   test("a namespace import of a missing module still reports the module (E-IMPORT-006 beside the refusal)", () => {
     const r = prog([useFns(`import * as m from "./gone.scrml";`, `<p>x</p>`)]);
     expect(r.diags.map((d) => d.code).sort()).toEqual(["E-BOOTSTRAP-UNSUPPORTED", "E-IMPORT-006"]);

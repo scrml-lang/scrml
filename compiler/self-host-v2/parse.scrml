@@ -4134,7 +4134,11 @@ ${
         if (host is not && !isP(t, "{")) {
             const h: PTok = cur(t)
             const isNs: boolean = tk(h, "*")
-            if (isNs || h.cls == TC.Ident || h.cls == TC.Keyword) {
+            // a default import is a name followed by `from` or `,` — `import stuff` alone is no
+            // import form at all, and keeps the ordinary parse errors
+            const nx: TP = adv(t)
+            const isDef: boolean = (h.cls == TC.Ident || h.cls == TC.Keyword) && (isWord(nx, "from") || isP(nx, ","))
+            if (isNs || isDef) {
                 let why: string = "a default import (`import " + h.text + " from …`) is not in the bootstrap — no scrml form exports a default (§21.2), so it would bind nothing; import the name: `import { " + h.text + " } from \"…\"` (rename it with `as`)"
                 if (isNs) why = "a namespace import (`import * as …`) is not in the bootstrap — §21.3 defines named imports (`{ name }`) and default imports, not a namespace object; import the names used: `import { a, b } from \"…\"` (rename one with `as`)"
                 let rt: TP = diagAt(t, "E-BOOTSTRAP-UNSUPPORTED", why, h)
