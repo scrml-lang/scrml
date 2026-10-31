@@ -99,7 +99,7 @@
 ${
     import { Sym, Type, TypeDef, FieldDef, VariantDef, FieldRef, InstRef, Place, Literal, Expr, SeqFn, PrimOp, Attr, Block, LoopHead,
              EditKind, Check, Stmt, View, EffectDep, Field, Decl, Fn, HostFn, HostBind, HostSrc, HostArg, HostProp, CoreProgram, CapOwner, TransitionGraph,
-             DeclKind, FieldMode, SurfaceProp, ValidityOf, Persist, PersistStore, ServerFn, SqlQuery, Db,
+             DeclKind, FieldMode, SurfaceProp, ValidityOf, Persist, PersistStore, ServerFn, SqlQuery, Db, Driver,
              Pattern, Failable, OkArm, ErrArm, HostCall, Gather, Lifted, GatherRow,
              capOwner, grantsAnyWrite, findDecl, findTypeDef, findFn, findServerFn, findDb } from "./core.scrml"
     import { Node, allNodes } from "./walk.scrml"
@@ -128,7 +128,52 @@ ${
         for (const s of p.server) {
             for (const n of allNodes(Node.NServerFn(s))) { out = out.concat(checkNode(p, [], n)) }
         }
-        return out.concat(checkSuspends(p)).concat(checkServer(p)).concat(checkFailures(p)).concat(checkClientCalls(p)).concat(checkJumps(p)).concat(checkGathers(p)).concat(checkHostFns(p)).concat(checkDbLoads(p))
+        return out.concat(checkSuspends(p)).concat(checkServer(p)).concat(checkFailures(p)).concat(checkClientCalls(p)).concat(checkJumps(p)).concat(checkGathers(p)).concat(checkHostFns(p)).concat(checkDbLoads(p)).concat(checkEnvelopes(p))
+    }
+
+    // =========================================================================
+    // s474 (U1e — SPEC §8.9.2 / §19.10.5 / §19.10.6) — THE TRANSACTION ENVELOPES
+    // (CoreProgram.envelopes). Each:
+    //   C-TX1 `fn` names one Fn or ServerFn of the program, listed once; `db` is
+    //         one of the program's databases
+    //   C-TX2 `fn` WAITS (Fn.waits / ServerFn.waits): its transitive query set
+    //         holds a query, so it reaches a Suspend — its callers await it, and
+    //         the envelope's own BEGIN / COMMIT are awaited inside it
+    //   C-TX3 a `standalone` envelope is on a SQLite database (the server
+    //         runtime reserves no pooled connection, §19.10.6 — analyze refuses
+    //         the source shape; this keeps a bad Core from printing)
+    // =========================================================================
+    fn checkEnvelopes(p: CoreProgram) -> string[] {
+        let out: string[] = []
+        let seen: int[] = []
+        for (const e of p.envelopes) {
+            const who: string = "the transaction envelope of " + e.fn.hint + "()"
+            if (seen.indexOf(e.fn.id) >= 0) out = out.concat(["C-TX1: " + who + " is listed twice"])
+            seen = seen.concat([e.fn.id])
+            let found = false
+            let waits = false
+            for (const f of p.fns) {
+                if (f.sym.id == e.fn.id) {
+                    found = true
+                    waits = f.waits
+                }
+            }
+            for (const sf of p.server) {
+                if (sf.sym.id == e.fn.id) {
+                    found = true
+                    waits = sf.waits
+                }
+            }
+            if (!found) out = out.concat(["C-TX1: " + who + " names no function of the program"])
+            if (found && !waits) out = out.concat(["C-TX2: " + who + ": the function does not wait"])
+            const d: Db | not = findDb(p, e.db)
+            if (d is not) {
+                out = out.concat(["C-TX1: " + who + " names no database of the program"])
+            } else if (e.standalone && d.driver != Driver.Sqlite) {
+                out = out.concat(["C-TX3: " + who + " is on a pooled (Postgres / MySQL) database"])
+            }
+        }
+        return out
     }
 
     // =========================================================================

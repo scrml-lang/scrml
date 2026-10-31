@@ -384,6 +384,19 @@ ${
     export type Driver:enum = { Sqlite, Postgres, Mysql }
     export type Db:struct = { sym: Sym, driver: Driver, target: string, file: string, owner: boolean }
 
+    // s474 (U1e) — THE IMPLICIT PER-HANDLER TRANSACTION of a `!` function (SPEC
+    // §8.9.2 / §19.10.5, the S473 transitive query set): `fn` (a Fn or ServerFn)
+    // runs its body inside `rt.envelope(<db>, body, standalone)` wherever the
+    // SERVER artifact prints it — BEGIN DEFERRED / COMMIT, ROLLBACK on a `fail`
+    // exit or a throw, and a SAVEPOINT when an enclosing envelope of the same
+    // request is open on `db` (§19.10.6 Nesting; S473 #1690 review F10).
+    // `standalone`: its transitive query set needs a transaction of its own (two
+    // or more queries, or one reached more than once); a `!` function whose set
+    // holds one query is listed with `false` — outside a transaction it runs as
+    // written, inside one it is a savepoint. Decided by analyze (envelopePass),
+    // never by a printer; check.scrml C-TX1..C-TX3 re-verify it.
+    export type Envelope:struct = { fn: Sym, db: Sym, standalone: boolean }
+
     // -------------------------------------------------------------------------
     // Statements. `Let` and `Assign` are DIFFERENT nodes (§3.3 — the
     // `const n = n + 1` family is unrepresentable). A cell write is a `Write`
@@ -880,6 +893,8 @@ ${
         // cell's `init` is `Local(val)`: the module-level value its load
         // answered (check.scrml C-DB1).
         loads: DbLoad[],
+        // s474 (U1e) — the `!` functions' transaction envelopes (Envelope, above).
+        envelopes: Envelope[],
         // s473 — the page's `<head>` metadata (§40.7, the top-level program's
         // documentary attributes). (`lang=` is not carried here: its one
         // reader is analyze foreignLangOf, the language of a file's `_{}`

@@ -4,7 +4,7 @@
 // QUERIES, not writes"), each with the SPEC code #1682 wrote for it. Every block is red on base
 // (origin/main 2603affc6) and green here.
 //
-//   1. §8.9.2 amendment (review-surfaced 1, refined): the interim refusal reads the TRANSITIVE query set.
+//   1. §8.9.2 amendment (review-surfaced 1, refined): the envelope trigger reads the TRANSITIVE query set (s474 U1e: the interim refusal is now the built envelope).
 //   2. §8.9.2 amendment (review-surfaced 2): E-SQL-JOURNAL-OFF.
 //   3. §66.15.2 (D11): slot multiplicity — E-COMPONENT-021 / E-COMPONENT-020 / E-DECL-SLOT-OUTSIDE-RENDERS.
 //   4. §66.6.8 (D12): a use or `<*x/>` of a declaration with no `renders` — refused, citing O51.
@@ -32,51 +32,46 @@ const bang = (body) => `    function move(a: int)! SqlError {\n${body}        re
 // remote and handled — §19.9.10)
 const hcall = (v, name, arg) => `const ${v}: int = ${name}(${arg}) !{ _ :> { return 0; } };`;
 const own = (sql, nb = "") => `        ${SQ}\`${sql}\`}${nb}.run();\n`;
+// s474 (U1e): the envelope is BUILT — what was the interim refusal now compiles, and the Core
+// carries the `!` function's Envelope (`standalone`: its set needs a transaction of its own)
+const envOf = (src, name = "move") => {
+  const r = run(src);
+  return r.core ? (r.core.envelopes.find((e) => e.fn.hint === name) ?? null) : null;
+};
+const enveloped = (src, name = "move") => {
+  expect(codes(src)).toEqual([]);
+  const e = envOf(src, name);
+  expect(e).not.toBeNull();
+  expect(e.standalone).toBe(true);
+};
 
 // ---------------------------------------------------------------------------
-describe("1 — §8.9.2 amendment: the interim envelope refusal reads the TRANSITIVE query set", () => {
+describe("1 — §8.9.2 amendment: the envelope trigger reads the TRANSITIVE query set (s474: built, was the interim refusal)", () => {
   test("two queries, each through a non-`!` helper (the body's own query is `.nobatch()`, so it is server-placed)", () => {
-    const src = DBP(helper("logIt", "INSERT INTO log (a) VALUES (${a})") + helper("bump", "UPDATE acct SET n = n - ${a}") +
-      bang(own("SELECT n FROM acct", ".nobatch()") + "        const x: int = logIt(a);\n        const y: int = bump(a);\n"));
-    const e = errs(src).filter((d) => d.code === "E-BOOTSTRAP-UNSUPPORTED");
-    expect(e.length).toBe(1);
-    expect(e[0].message).toContain("transitive query set");
-    expect(e[0].message).toContain("§8.9.2");
-    expect(e[0].message).toContain("move() → logIt()");
-    expect(e[0].message).toContain("move() → bump()");
+    enveloped(DBP(helper("logIt", "INSERT INTO log (a) VALUES (${a})") + helper("bump", "UPDATE acct SET n = n - ${a}") +
+      bang(own("SELECT n FROM acct", ".nobatch()") + "        const x: int = logIt(a);\n        const y: int = bump(a);\n")));
   });
 
   test("SELECT in the body + UPDATE through a helper (a read-then-write keeps its envelope)", () => {
-    const src = DBP(helper("bump", "UPDATE acct SET n = n - ${a}") +
-      bang(own("SELECT n FROM acct") + "        const y: int = bump(a);\n"));
-    const e = errs(src);
-    expect(e.map((d) => d.code)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
-    expect(e[0].message).toContain("one in its own body");
-    expect(e[0].message).toContain("move() → bump()");
+    enveloped(DBP(helper("bump", "UPDATE acct SET n = n - ${a}") +
+      bang(own("SELECT n FROM acct") + "        const y: int = bump(a);\n")));
   });
 
   test("two levels down: a helper that calls a helper", () => {
-    const src = DBP(helper("bump", "UPDATE acct SET n = n - ${a}") +
+    enveloped(DBP(helper("bump", "UPDATE acct SET n = n - ${a}") +
       "    function mid(a: int) -> int {\n        return bump(a);\n    }\n" +
-      bang(own("SELECT n FROM acct") + "        const y: int = mid(a);\n"));
-    expect(codes(src)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
-    expect(errs(src)[0].message).toContain("move() → mid() → bump()");
+      bang(own("SELECT n FROM acct") + "        const y: int = mid(a);\n")));
   });
 
   test("one query inside a loop — in the body, and through a helper called in a loop", () => {
-    const inBody = DBP(bang("        for (let i = 0; i < 3; i = i + 1) {\n    " + own("UPDATE acct SET n = n - 1") + "        }\n"));
-    const e = errs(inBody);
-    expect(e.map((d) => d.code)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
-    expect(e[0].message).toContain("more than once");
-    expect(e[0].message).toContain("inside a loop");
-    const viaCall = DBP(helper("bump", "UPDATE acct SET n = n - ${a}") +
-      bang(own("SELECT n FROM acct", ".nobatch()") + "        for (let i = 0; i < 3; i = i + 1) {\n            const y: int = bump(i);\n        }\n"));
-    expect(codes(viaCall)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
-    expect(errs(viaCall)[0].message).toContain("a call of `bump()`");
+    enveloped(DBP(bang("        for (let i = 0; i < 3; i = i + 1) {\n    " + own("UPDATE acct SET n = n - 1") + "        }\n")));
+    enveloped(DBP(helper("bump", "UPDATE acct SET n = n - ${a}") +
+      bang(own("SELECT n FROM acct", ".nobatch()") + "        for (let i = 0; i < 3; i = i + 1) {\n            const y: int = bump(i);\n        }\n")));
   });
 
-  test("near-misses: one query (own, or through one helper) compiles; `.nobatch()` is not counted", () => {
+  test("near-misses: one query (own, or through one helper) needs no transaction of its own; `.nobatch()` is not counted", () => {
     expect(codes(DBP(bang(own("UPDATE acct SET n = 1"))))).toEqual([]);
+    expect(envOf(DBP(bang(own("UPDATE acct SET n = 1")))).standalone).toBe(false);
     expect(codes(DBP(helper("bump", "UPDATE acct SET n = n - ${a}") + bang(`        ${hcall("y", "bump", "a")}\n`)))).toEqual([]);
     // a loop that runs no query, beside one query outside it
     expect(codes(DBP(bang(own("UPDATE acct SET n = 1") + "        for (let i = 0; i < 3; i = i + 1) {\n            const z: int = i;\n        }\n")))).toEqual([]);
@@ -275,9 +270,8 @@ describe("review F1 — a query reached more than once counts more than once (it
       ["mid_calls_twice", DBP(H + "    function mid(a: int) -> int {\n        const y: int = bump(a);\n        return bump(a);\n    }\n" + bang(NB + "        const y: int = mid(a);\n"))],
       ["diamond", DBP(H + "    function m1(a: int) -> int {\n        return bump(a);\n    }\n    function m2(a: int) -> int {\n        return bump(a);\n    }\n" + bang(NB + "        const y: int = m1(a);\n        const w: int = m2(a);\n"))],
     ]) {
-      const e = errs(src);
-      expect([name, e.map((d) => d.code)]).toEqual([name, ["E-BOOTSTRAP-UNSUPPORTED"]]);
-      expect(e[0].message).toContain("more than once");
+      expect([name, codes(src)]).toEqual([name, []]);
+      expect([name, envOf(src).standalone]).toEqual([name, true]);
     }
   });
   test("near-miss: reached once through a chain", () => {
@@ -333,7 +327,7 @@ describe("review F8 / F9 / F12", () => {
 // ---------------------------------------------------------------------------
 // Ruled S473 (user-voice "⭐ RULED — S473 #1690 review: `!` callees count toward the envelope; client
 // multi-call `!` is a permanent refusal"): F10 and F11.
-describe("F10 — a `!` callee's queries count toward the outer `!` function's set (interim refusal)", () => {
+describe("F10 — a `!` callee's queries count toward the outer `!` function's set (s474: built — the inner is a savepoint)", () => {
   const G = `    function g(a: int)! SqlError {\n${own("UPDATE acct SET n = 2")}        return 1;\n    }\n`;
   const NB = own("SELECT n FROM acct", ".nobatch()");
   test("an outer `!` calling an inner `!` twice; an outer UPDATE plus one `!` call; a `!` called in a loop", () => {
@@ -342,11 +336,15 @@ describe("F10 — a `!` callee's queries count toward the outer `!` function's s
       ["outer UPDATE + one ! call", DBP(G + bang(own("UPDATE acct SET n = 1") + "        const y: int = g(a) !{ _ :> { return 0; } };\n"))],
       ["! in a loop", DBP(G + bang(NB + "        for (let i = 0; i < 3; i = i + 1) {\n            const y: int = g(i) !{ _ :> { return 0; } };\n        }\n"))],
     ]) {
-      expect([name, codes(src)]).toEqual([name, ["E-BOOTSTRAP-UNSUPPORTED"]]);
+      expect([name, codes(src)]).toEqual([name, []]);
+      expect([name, envOf(src).standalone]).toEqual([name, true]);
+      // the inner `!` (one query) is a savepoint inside the outer's transaction
+      expect([name, envOf(src, "g").standalone]).toEqual([name, false]);
     }
   });
   test("near-miss: an outer whose set holds exactly one query (its own `.nobatch()` read, one `!` call)", () => {
     expect(codes(DBP(G + bang(NB + "        const y: int = g(a) !{ _ :> { return 0; } };\n")))).toEqual([]);
+    expect(envOf(DBP(G + bang(NB + "        const y: int = g(a) !{ _ :> { return 0; } };\n"))).standalone).toBe(false);
   });
 });
 
