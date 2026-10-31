@@ -146,7 +146,7 @@ describe("the emitted server: the body inside rt.envelope", () => {
       expect([fn, new RegExp(`async function ${fn}\\w*\\(`).test(js)]).toEqual([fn, true]);
     }
     expect(js).toContain("return await rt.envelope(db$");
-    expect(js.match(/rt\.envelope\(db\$\d+, body\$, true\)/g).length).toBe(8);
+    expect(js.match(/rt\.envelope\(db\$\d+, body\$, true, "IMMEDIATE"\)/g).length).toBe(8);
     // the non-`!` helper is not wrapped (§8.9.2: only a `!` function)
     expect(/async function logIt\(a\) \{\n\s+async function body\$/.test(js)).toBe(false);
   });
@@ -374,7 +374,7 @@ describe("server-runtime.js envelope — the exits a scrml program cannot reach 
     failOn = "COMMIT";
     let threw = null;
     try {
-      await rt.envelope(db, async () => { await rt.query(db, "run", ins, [1], [0]); await rt.query(db, "run", ins, [2], [0]); return 1; }, true);
+      await rt.envelope(db, async () => { await rt.query(db, "run", ins, [1], [0]); await rt.query(db, "run", ins, [2], [0]); return 1; }, true, "IMMEDIATE");
     } catch (e) { threw = e; }
     expect(threw).not.toBeNull();
     expect(seen.slice(-2)).toEqual(["COMMIT", "ROLLBACK"]);
@@ -389,7 +389,7 @@ describe("server-runtime.js envelope — the exits a scrml program cannot reach 
     failOn = "BEGIN";
     let ran = false;
     let threw = null;
-    try { await rt.envelope(db, async () => { ran = true; return 1; }, true); } catch (e) { threw = e; }
+    try { await rt.envelope(db, async () => { ran = true; return 1; }, true, "IMMEDIATE"); } catch (e) { threw = e; }
     expect(threw).not.toBeNull();
     expect(ran).toBe(false);
     expect(await rt.query(db, "run", ins, [3], [0])).toBeNull();
@@ -409,7 +409,7 @@ describe("server-runtime.js envelope — the exits a scrml program cannot reach 
         after = true;
         await rt.query(db, "run", ins, [2], [0]);
         return 1;
-      }, true);
+      }, true, "IMMEDIATE");
     } catch (e) { threw = e; }
     expect(threw).not.toBeNull();
     expect(String(threw.message)).toContain("rolled the transaction back by itself");
@@ -428,7 +428,7 @@ describe("server-runtime.js envelope — the exits a scrml program cannot reach 
       const dup = await rt.query(db, "run", u, [], []);
       await rt.query(db, "run", ins, [rt.failed(dup) ? 7 : 8], [0]);
       return 1;
-    }, true);
+    }, true, "IMMEDIATE");
     expect(r).toBe(1);
     expect(await rowsOf()).toEqual([7]);
   });
@@ -539,10 +539,10 @@ describe("r1 F6 — strictly nested savepoints; no statement after its envelope"
   test("two inner envelopes run concurrently inside one: refused, the whole transaction rolled back", async () => {
     await mem6.unsafe("DELETE FROM t6");
     const db = conn6();
-    const inner = (n, ms) => rt.envelope(db, async () => { await rt.query(db, "run", ins6, [n], [0]); await new Promise((x) => setTimeout(x, ms)); await rt.query(db, "run", ins6, [n + 1], [0]); return 1; }, true);
+    const inner = (n, ms) => rt.envelope(db, async () => { await rt.query(db, "run", ins6, [n], [0]); await new Promise((x) => setTimeout(x, ms)); await rt.query(db, "run", ins6, [n + 1], [0]); return 1; }, true, "IMMEDIATE");
     let threw = null;
     try {
-      await rt.envelope(db, async () => { await rt.query(db, "run", ins6, [1], [0]); await Promise.all([inner(10, 1), inner(20, 15)]); return 1; }, true);
+      await rt.envelope(db, async () => { await rt.query(db, "run", ins6, [1], [0]); await Promise.all([inner(10, 1), inner(20, 15)]); return 1; }, true, "IMMEDIATE");
     } catch (e) { threw = e; }
     expect(threw).not.toBeNull();
     expect(String(threw.message)).toContain("not the innermost open one");
@@ -557,7 +557,7 @@ describe("r1 F6 — strictly nested savepoints; no statement after its envelope"
       // fire-and-forget: not awaited by the body
       late = new Promise((x) => setTimeout(x, 10)).then(() => rt.query(db, "run", ins6, [99], [0]));
       return rt.failure("Bad");
-    }, true);
+    }, true, "IMMEDIATE");
     expect(rt.failed(r)).toBe(true);
     let threw = null;
     try { await late; } catch (e) { threw = e; }
@@ -648,7 +648,7 @@ describe("r2 item 5 — the tenant catalogue question passes the §19.10.6 gate"
     const srv = rt.server(host, [], [db]);
     let release;
     const hold = new Promise((x) => { release = x; });
-    const env = rt.envelope(db, async () => { await hold; return 1; }, true);
+    const env = rt.envelope(db, async () => { await hold; return 1; }, true, "DEFERRED");
     await new Promise((x) => setTimeout(x, 5));
     const health = srv.fetch({ url: "http://localhost/_scrml/health", method: "GET", headers: { get: () => null }, text: async () => "" });
     await new Promise((x) => setTimeout(x, 20));

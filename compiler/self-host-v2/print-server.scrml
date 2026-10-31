@@ -153,7 +153,7 @@ ${
     // s474 (U1e): a function with an Envelope runs its body inside it (print.scrml envelopedFnJs).
     fn bodyFnJs(ctx: Ctx, p: CoreProgram, sym: Sym, params: Param[], body: Block, waits: boolean) -> JsStmt {
         for (const e of p.envelopes) {
-            if (e.fn.id == sym.id) return envelopedFnJs(ctx, sym, params, body, e.db, e.standalone)
+            if (e.fn.id == sym.id) return envelopedFnJs(ctx, sym, params, body, e.db, e.standalone, e.writes)
         }
         return serverFnJs(ctx, sym, params, body, waits)
     }

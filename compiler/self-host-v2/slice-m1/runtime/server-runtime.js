@@ -352,8 +352,23 @@ function brokenError(conn) {
 //
 //   async function move(a) {
 //     async function body$() { … the function's own body … }
-//     return await rt.envelope(db$1, body$, true);
+//     return await rt.envelope(db$1, body$, true, "IMMEDIATE");
 //   }
+//
+// `begin` (S474 ruling 5, user-voice-scrml.md "RULED — S474 review-surfaced
+// decisions" item 5: "The implicit envelope opens with `BEGIN IMMEDIATE` when its
+// transitive query set contains a write, `BEGIN DEFERRED` otherwise"):
+// "IMMEDIATE" or "DEFERRED", decided by the COMPILER from the envelope's query
+// set (analyze.scrml envelopeOf → core.scrml Envelope.writes) and printed as a
+// literal. IMMEDIATE takes SQLite's RESERVED lock at BEGIN, so a second process
+// holding a write lock surfaces as SQLITE_BUSY from the BEGIN itself — the
+// envelope fails before any statement of the body runs — instead of at the
+// envelope's first write, after its reads (the late conflict a DEFERRED
+// read-then-write transaction meets: SQLITE_BUSY_SNAPSHOT under WAL, BUSY under
+// a rollback journal; g-boot-envelope-begin-deferred-late-conflict-s474). A
+// read-only set stays DEFERRED (no write lock is taken; readers do not block a
+// writer). A savepoint inside an enclosing envelope issues no BEGIN; the
+// enclosing envelope's set already contains the inner one's queries (F10).
 //
 // §8.9.2: "the compiler SHALL wrap the handler body in `?{BEGIN DEFERRED}` /
 // `?{COMMIT}` (`?{ROLLBACK}` on an exception or a `fail` exit)"; "The implicit
@@ -384,7 +399,11 @@ function brokenError(conn) {
 // follows releases it" — so a failed COMMIT is followed by ROLLBACK, then the
 // release, then a throw (the call does not report success: its writes are gone).
 // ---------------------------------------------------------------------------
-export async function envelope(conn, run, standalone) {
+const BEGINS = { IMMEDIATE: "BEGIN IMMEDIATE", DEFERRED: "BEGIN DEFERRED" };
+export async function envelope(conn, run, standalone, begin) {
+  if (!Object.hasOwn(BEGINS, begin)) {
+    throw new Error(`scrml server: an envelope's BEGIN must be "IMMEDIATE" or "DEFERRED" (the compiler decides it from the query set), got ${String(begin)}`);
+  }
   const outer = ownTx(conn);
   if (outer !== null) return savepoint(outer, run);
   if (!standalone) return run();
@@ -393,7 +412,7 @@ export async function envelope(conn, run, standalone) {
   const tx = { conn, open: true, broken: false, seq: 0, stack: [] };
   try {
     try {
-      await control(conn, "BEGIN DEFERRED");
+      await control(conn, BEGINS[begin]);
     } catch (e) {
       // "after a `BEGIN` that fails" the connection is released (the finally below)
       conn.log(`scrml server: BEGIN on ${conn.desc.driver}:${conn.desc.file} failed — ${messageOf(e)}`);

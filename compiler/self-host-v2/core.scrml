@@ -386,8 +386,9 @@ ${
 
     // s474 (U1e) — THE IMPLICIT PER-HANDLER TRANSACTION of a `!` function (SPEC
     // §8.9.2 / §19.10.5, the S473 transitive query set): `fn` (a Fn or ServerFn)
-    // runs its body inside `rt.envelope(<db>, body, standalone)` wherever the
-    // SERVER artifact prints it — BEGIN DEFERRED / COMMIT, ROLLBACK on a `fail`
+    // runs its body inside `rt.envelope(<db>, body, standalone, "IMMEDIATE" | "DEFERRED")` wherever the
+    // SERVER artifact prints it — BEGIN IMMEDIATE (a writing set) or BEGIN
+    // DEFERRED (a read-only one) / COMMIT, ROLLBACK on a `fail`
     // exit or a throw, and a SAVEPOINT when an enclosing envelope of the same
     // request is open on `db` (§19.10.6 Nesting; S473 #1690 review F10).
     // `standalone`: its transitive query set needs a transaction of its own (two
@@ -395,7 +396,14 @@ ${
     // holds one query is listed with `false` — outside a transaction it runs as
     // written, inside one it is a savepoint. Decided by analyze (envelopePass),
     // never by a printer; check.scrml C-TX1..C-TX3 re-verify it.
-    export type Envelope:struct = { fn: Sym, db: Sym, standalone: boolean }
+    // `writes` (S474 ruling 5, user-voice-scrml.md "RULED — S474 review-surfaced
+    // decisions" item 5: "The implicit envelope opens with `BEGIN IMMEDIATE` when
+    // its transitive query set contains a write, `BEGIN DEFERRED` otherwise"):
+    // some query the envelope REACHES (`.nobatch()` ones included — they run
+    // inside it) is not provably a pure SELECT (sql.scrml kindOf: an INSERT /
+    // UPDATE / DELETE / REPLACE / UPSERT, DDL, a PRAGMA, anything unrecognised).
+    // Decided at compile time from the query set; the runtime only spells it.
+    export type Envelope:struct = { fn: Sym, db: Sym, standalone: boolean, writes: boolean }
 
     // -------------------------------------------------------------------------
     // Statements. `Let` and `Assign` are DIFFERENT nodes (§3.3 — the
