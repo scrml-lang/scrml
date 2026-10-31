@@ -60,7 +60,8 @@ export function bootstrapCodes(): string[] {
  * yet. Each carries its intended severity here until the SPEC follow-up adds its row; once the row
  * exists `resolveSeverities` throws (agreeing or not) until the entry is removed, so this table can
  * never shadow §34. Keep it SHORT: every entry is owed a §34 row.
- *   (empty — W-STRING-INTERP-LITERAL left when its §34 row landed, s469-spec-followup)
+ *   (empty — W-STRING-INTERP-LITERAL left when its §34 row landed, s469-spec-followup; W-TX-FAIL-AFTER-COMMIT /
+ *   W-TX-ARM-UNREACHABLE left when their §34 rows landed, s474-spec-rulings-1-7)
  */
 export const PROVISIONAL: Record<string, CompileSeverity> = {};
 
