@@ -1266,6 +1266,11 @@ SPEC §18.6.1: "a later `match err { … }` is exhaustive over the whole enum". 
 
 impl#1 then resolves the program's `SqlError` wherever it looks the name up, and the S474 whole-error binder set steps aside for it (a program-declared `SqlError` keeps the binder on that declaration, or untyped — pinned by the M1 / M2 tests in `compiler/tests/unit/whole-error-binder-sqlerror-callee-s474.test.js`). §34 names no code for the redefinition, so refusing it needs a code and is newly-rejecting: owner ruling. Related: `g-boot-const-like-builtin-type-s472`.
 
+<!-- @gap id=g-impl1-payload-binder-empty-parens-and-duplicate-field-s474 sev=LOW status=open locus=compiler/src/codegen/emit-control-flow.ts(planPayloadBinders — `()` reads as zero binders, a repeated named field is not checked)+compiler/src/type-system.ts(auditPayloadShapeRefusal — no duplicate-field check) prov=review:s474-1698(r1 re-review, item 4) -->
+### g-impl1-payload-binder-empty-parens-and-duplicate-field-s474 — two §18.7 payload-binder shapes are inconsistent: `.Boom()` (empty parens) on a PROGRAM enum's `match e` arm compiles, while the same on a SqlError variant with fields is E-TYPE-021; and a repeated named field (`.QueryFailed(message: a, message: b)`) compiles on both kinds — `NEW S474 (re-review of #1698 r1); LOW; open`
+
+RELAYED from the #1698 r1 re-review (not re-measured here). The S474 r1 audit (`auditPayloadShapeRefusal`, compiler-provided sets only) counts `()` as zero positional binders, so a variant with fields is E-TYPE-021; codegen's `planPayloadBinders`, which checks program enums, accepts `()`. Neither reader refuses a field named twice. §18.7 does not spell out either case: deciding whether `()` means "bind nothing" (as `.V :>` does) or an arity error is an owner reading; a duplicate field is presumably an error, but it is newly-rejecting.
+
 <!-- @gap id=g-impl1-match-expr-in-bang-arm-client-fn-s473 sev=LOW status=open locus=UNTRACED(impl#1 parse of a one-line `!{ _ e :> match e { … } }` in a client function body) prov=dispatch:s473-flogence-two-fixes -->
 ### g-impl1-match-expr-in-bang-arm-client-fn-s473 — in a CLIENT function, `const w = risky() !{ _ e :> match e { .Bad :> "x", else :> "?" } }` is E-SCOPE-001 "Undeclared identifier `match`" (plus E-TYPE-031) — `NEW S473; LOW; open (fails closed)`
 

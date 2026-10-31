@@ -55,3 +55,10 @@ Script (scratch, not in repo): `~/.cache/scrml-agent-tmp/s474-impl1-sqlerror-bin
 - **Filed (not fixed):** F2 `g-impl1-fail-site-unchecked-against-sqlerror-s474` (MED, owner question), F3 `g-impl1-match-on-whole-binder-not-exhaustive-s474` (LOW), F6 `g-impl1-sqlerror-redefinition-not-refused-s474` (LOW). Count block NOT regenerated (S474 ruling 1).
 - **Residual seen:** a `?{} !{ _ e :> … }` as a ternary operand or a concise arrow body is still E-TYPE-031 (neither reader recognises the handled query there).
 - **Corpus differential re-run for r1** (base `34ebef81d` vs `aaf762a02` src, both extracts): 2927 sources incl. 62 flogence — **0 differ** (exit≠0 1185 / 1185). F1 is newly-rejecting only on `match e` arms over a compiler-provided set, a shape no corpus file holds.
+
+## 9. Fix round r2 (re-review of 485cadea3: LAND-WITH-FOLLOW-UP)
+- **R6 pinned:** a client call to a server-placed `! -> SqlError` callee gets the UNION set; `match e { .QueryFailed(msg: m) … }` and `.Transport(zzz: m)` on it → E-TYPE-022 (test).
+- **R3 KEPT, pinned (reachable, not dead):** a STATEMENT `match e { .V(…) :> { … } else :> { … } }` with block arms inside a block arm `_ e :> { … }` reaches the structured `match-arm-block` reader (measured by instrumenting a copy: BLOCK-ARM / R3-HIT logged for that shape, server-side and as a statement handler). With the call removed, `.QueryFailed(msg: m)` there compiles (`[]`). Tests: that shape → E-TYPE-022; `message: m` → clean; `.ConnectionLost(x: m)` in a statement handler → E-TYPE-022.
+- **M7:** a value arm on the guard-marker path compiles clean: `log(?{…}.all() !{ _ e :> [e.variant] })` and `(?{…} !{ _ e :> [e.variant] }).length` → `[]` (added; the audit-only assertions kept; comment corrected — the E-CG-003 premise holds only for a `return` block arm).
+- **Filed:** `g-impl1-payload-binder-empty-parens-and-duplicate-field-s474` (LOW).
+- **Mutation table r2** (12 mutants on a `git archive` copy; test file 33 tests): M1 2 fail · M2 1 · M3 1 · M7 1 · MF1 12 · MF5 1 · R1 10 · R2 2 · R3 1 · R4 11 · R5 1 · R6 2 · unmutated 0/33. Every mutant is caught.
