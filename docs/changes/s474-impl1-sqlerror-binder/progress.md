@@ -34,3 +34,24 @@ Script (scratch, not in repo): `~/.cache/scrml-agent-tmp/s474-impl1-sqlerror-bin
 - `match e { .QueryFailed(m) :> … }` (positional) inside the arm is E-TYPE-027 (codegen cannot see the subject's enum); named `.QueryFailed(message: m)` compiles and lowers `.data.message`.
 - `.QueryFailed(m) :>` directly on an IMPORTED `! -> SqlError` call is E-TYPE-027 (base too); local is fine.
 - Block `match e { … }` statement inside a `{ }` arm body is "an expression the compiler does not model" (E-TYPE-031) for any enum.
+
+## 8. Fix round r1 (review of df3bd5416; DO-NOT-LAND pending F1)
+- **F1 (fixed, aaf762a02).** Verified the reviewer's cause: `auditEnumPayloadBinderRefusal` keeps only fields the variant declares (`checked = fields.filter(set.has)`), so an undeclared named field was silently dropped; codegen's `planPayloadBinders` refuses it only when it holds the variant's field list, which it does not for compiler-provided sets. New `auditPayloadShapeRefusal` (type-system.ts): on a `match e` arm over a COMPILER-PROVIDED set only (`isCompilerProvidedBinderSet`: SqlError, the S473 Transport set, their union), a named binder of an undeclared field → E-TYPE-022, a positional list that does not number the fields → E-TYPE-021. Called from both `match e` readers (raw-arm text and statement `match-arm-block`). Not applied to program enums, because codegen already refuses those and a second code would be reported (measured: first draft gave `["E-TYPE-022","E-TYPE-022"]` on a user enum). Mixing positional and named binders is left to codegen, which refuses it for every enum.
+  Probe (base → head): `?{}`/local/imported `.QueryFailed(msg: m)` 031 → 022; `.ConnectionLost(x: y)` 031 → 022; `.QueryFailed(message: a, extra: b)` 031 → 022; `.ConnectionLost(y)` 031+027 → 021+027; `.QueryFailed(a, b)` 031+027 → 021+027; `.Transport(zzz: m)` [] → 022; user enums unchanged (022 / 021 / 022 / []).
+- **F5 (fixed, aaf762a02).** The refusal hint drops "a function whose parameter is typed `SqlError | Transport(…)`" for compiler-provided sets.
+- **F4 (pinned, 4b92f6df9).** Mutation table (each mutant applied to a `git archive` copy of HEAD; the test file run against it):
+
+| mutant | tests failing |
+|---|---|
+| M1 drop `typeRegistry.has("SqlError")` in `wholeBinderSqlErrorSet` | 2 (M1 struct SqlError + local callee; M1 view enum + imported callee) |
+| M2 drop the registry guard on the direct-`?{}` path | 1 (M2) |
+| M3 drop the `cpsSplit` null | 1 (M3) |
+| M7 `handlesSql = false` on the expression-position path | 1 (M7) |
+| MF1 `auditPayloadShapeRefusal` disabled | 10 (the F1 table) |
+| MF5 hint keeps the typed-parameter offer | 1 (F5 hint) |
+| unmutated | 0 of 31 |
+
+  M7 needed an expression-position shape: instrumentation shows `return ?{…} !{…}`, `if`/`for` bodies and assignments take the STATEMENT path; an argument / array / object position takes the guard-marker path (codegen then refuses it, E-CG-003 — separate limitation), so M7's test asserts the audit's codes.
+- **Filed (not fixed):** F2 `g-impl1-fail-site-unchecked-against-sqlerror-s474` (MED, owner question), F3 `g-impl1-match-on-whole-binder-not-exhaustive-s474` (LOW), F6 `g-impl1-sqlerror-redefinition-not-refused-s474` (LOW). Count block NOT regenerated (S474 ruling 1).
+- **Residual seen:** a `?{} !{ _ e :> … }` as a ternary operand or a concise arrow body is still E-TYPE-031 (neither reader recognises the handled query there).
+- **Corpus differential re-run for r1** (base `34ebef81d` vs `aaf762a02` src, both extracts): 2927 sources incl. 62 flogence — **0 differ** (exit≠0 1185 / 1185). F1 is newly-rejecting only on `match e` arms over a compiler-provided set, a shape no corpus file holds.
