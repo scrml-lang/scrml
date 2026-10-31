@@ -9,7 +9,7 @@
  * wiring: ci.yml runs it on pull_request, exempting only the bot's branch.
  */
 import { describe, test, expect, afterAll } from "bun:test";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync, renameSync } from "fs";
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync, renameSync, symlinkSync, copyFileSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import { spawnSync } from "child_process";
@@ -90,10 +90,54 @@ describe("scripts/bot-owned-untouched.sh", () => {
     expect(s.check().rc).toBe(0);
   });
 
+  // POSIX only: a symlink needs a privilege on Windows (and core.symlinks=false there checks it out as text).
+  test.skipIf(process.platform === "win32")("BITE (S474 r1 F3): a bot-owned file replaced by a SYMLINK (type change) → 1", () => {
+    const s = sandbox();
+    rmSync(join(s.root, "docs/generated/gap-counts.md"));
+    symlinkSync("../known-gaps.md", join(s.root, "docs/generated/gap-counts.md"));
+    s.commit("type change");
+    expect(s.g("diff", "--name-status", "main...HEAD")).toMatch(/^T\s+docs\/generated\/gap-counts\.md/m);
+    const r = s.check();
+    expect(r.rc).toBe(1);
+    expect(r.out).toContain("docs/generated/gap-counts.md");
+  });
+
   test("an uncomputable diff (unknown base) fails closed → 1", () => {
     const s = sandbox();
     const r = spawnSync("bash", [SCRIPT, "no-such-ref"], { cwd: s.root, env: ENV, encoding: "utf8" });
     expect(r.status).toBe(1);
+  });
+});
+
+describe("scripts/bot-owned-untouched.sh --bot (S474 r1 F4: the bot is checked, not waved through)", () => {
+  /** A sandbox carrying the real generated-regen.yml, so --bot reads the real FILES list. */
+  function botSandbox() {
+    const s = sandbox();
+    s.g("checkout", "-q", "main");
+    mkdirSync(join(s.root, ".github/workflows"), { recursive: true });
+    copyFileSync(join(REPO, ".github/workflows/generated-regen.yml"), join(s.root, ".github/workflows/generated-regen.yml"));
+    s.commit("wf");
+    s.g("checkout", "-q", "-B", "bot/generated-regen");
+    const bot = () => {
+      const r = spawnSync("bash", [SCRIPT, "--bot", "main"], { cwd: s.root, env: ENV, encoding: "utf8" });
+      return { rc: r.status, out: (r.stdout ?? "") + (r.stderr ?? "") };
+    };
+    return { ...s, bot };
+  }
+  test("the bot changing only its FILES passes", () => {
+    const s = botSandbox();
+    writeFileSync(join(s.root, "docs/generated/gap-counts.md"), "| HIGH | 3 | 0 |\n");
+    s.commit("regen");
+    expect(s.bot().rc).toBe(0);
+  });
+  test("BITE: a bot-named branch that also edits a hand-written file → 1, naming it", () => {
+    const s = botSandbox();
+    writeFileSync(join(s.root, "docs/generated/gap-counts.md"), "| HIGH | 3 | 0 |\n");
+    writeFileSync(join(s.root, "docs/known-gaps.md"), "tampered\n");
+    s.commit("regen + more");
+    const r = s.bot();
+    expect(r.rc).toBe(1);
+    expect(r.out).toContain("docs/known-gaps.md");
   });
 });
 
@@ -103,12 +147,15 @@ describe("ci.yml wiring", () => {
   test("the `checks` job runs it against the PR base, blocking (no continue-on-error)", () => {
     expect(step).toBeDefined();
     expect(String(step.run)).toContain("scripts/bot-owned-untouched.sh");
-    expect(String(step.run)).toContain("github.event.pull_request.base.sha");
+    expect(String(step.env.BASE)).toContain("github.event.pull_request.base.sha");
     expect(step["continue-on-error"]).toBeUndefined();
   });
-  test("only on pull_request, and only the bot's own branch is exempt", () => {
+  test("on every pull_request; the bot is recognised by branch AND same-repo head, then checked with --bot", () => {
     expect(String(step.if)).toContain("github.event_name == 'pull_request'");
-    expect(String(step.if)).toContain("github.head_ref != 'bot/generated-regen'");
+    expect(String(step.if)).not.toContain("head_ref");            // no PR skips the step by its branch name
+    expect(String(step.env.IS_BOT)).toContain("github.head_ref == 'bot/generated-regen'");
+    expect(String(step.env.IS_BOT)).toContain("github.event.pull_request.head.repo.full_name == github.repository");
+    expect(String(step.run)).toMatch(/IS_BOT.*--bot/s);
   });
   test("generated-regen.yml writes exactly the files this guard protects (and no hand-edited file)", () => {
     const regen = Bun.YAML.parse(readFileSync(join(REPO, ".github/workflows/generated-regen.yml"), "utf8"));
@@ -117,5 +164,12 @@ describe("ci.yml wiring", () => {
     expect(files).toContain("docs/generated/recent-sessions.md");
     expect(files).not.toContain("docs/known-gaps.md");
     expect(files).not.toContain("master-list.md");
+  });
+  test("the bot's PR body names the new locations (#1707 F10)", () => {
+    const src = readFileSync(join(REPO, ".github/workflows/generated-regen.yml"), "utf8");
+    const body = src.slice(src.indexOf("gh pr create"), src.indexOf("PR=$(gh pr list", src.indexOf("gh pr create")));
+    expect(body).toContain("docs/generated/gap-counts.md");
+    expect(body).toContain("docs/generated/recent-sessions.md");
+    expect(body).not.toContain("master-list recent-sessions");
   });
 });

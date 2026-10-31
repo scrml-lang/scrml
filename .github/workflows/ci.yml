@@ -301,11 +301,18 @@ jobs:
       # rewrites those files on main after every merge, and GitHub's merge runs no custom merge driver: a
       # PR carrying its own value of a line the bot rewrites goes DIRTY when the bot lands (#1702 landed →
       # #1699 and #1701 DIRTY, kicked from the queue, on the gap-counts rows). Adding a file there is
-      # allowed. The bot's own PR is exempt. Not on merge_group: the PR run already judged it, and a queue
-      # group may legitimately include the bot's PR.
+      # allowed; so is nothing else (a type change — file → symlink — is refused too). S474 r1 F4: the bot's
+      # PR is recognised by branch name AND same-repo head (a fork's or collaborator's branch merely named
+      # bot/generated-regen is not), and even then it is checked, not waved through: `--bot` passes only if
+      # every changed file is in generated-regen.yml's FILES. Not on merge_group: the PR run already judged
+      # it, and a queue group may legitimately include the bot's PR.
       - name: Bot-owned generated files untouched (docs/generated/)
-        if: ${{ !cancelled() && github.event_name == 'pull_request' && github.head_ref != 'bot/generated-regen' }}
-        run: scripts/bot-owned-untouched.sh "${{ github.event.pull_request.base.sha }}"
+        if: ${{ !cancelled() && github.event_name == 'pull_request' }}
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+          IS_BOT: ${{ github.head_ref == 'bot/generated-regen' && github.event.pull_request.head.repo.full_name == github.repository }}
+        run: |
+          if [ "$IS_BOT" = "true" ]; then scripts/bot-owned-untouched.sh --bot "$BASE"; else scripts/bot-owned-untouched.sh "$BASE"; fi
       # S474 — compiler/self-host-v2/severity.scrml (generated from SPEC §34). Moved here from `tracking`:
       # byte staleness WARNS (4) — answer-changing drift fails slice-m4/severity.test.js on the PR, so only
       # answer-neutral drift reaches main, and the bot regenerates it — but a CRASHING generator (a §34
@@ -645,24 +652,36 @@ jobs:
   # `windows-main-report.yml`, because path-filtered PRs skip the suites.
   #
   # S468 — WHEN IT RUNS. Every push to main, the nightly schedule, manual dispatch, and a PR whose diff
-  # touches code the three Windows suites (unit, conformance, e2e-render-map) execute or read:
-  #   compiler/src/** compiler/bin/** compiler/runtime/** compiler/native-parser/**   the compiler (#25, #26)
+  # touches a file the three Windows suites (unit, conformance, e2e-render-map) execute, or read as code
+  # or fixtures. The trigger is the step's `env.WIN_TRIGGER` (an ERE over repo-relative paths):
+  #   compiler/{src,bin,runtime,native-parser}/**   the compiler (#25, #26)
   #   stdlib/** lsp/**           modules the unit suite imports (stdlib/host/… touches the file system)
-  #   scripts/**.{ts,js,mjs}     repo tooling the unit suite imports and tests (state.ts, ratchet, gates …)
+  #   scripts/**                 ALL of it (S474 r1): .ts/.js the unit suite imports, and the .sh scripts and
+  #                              git-hooks/* it spawns through bash — Git Bash is the OS-divergent surface
   #   conformance/**             run.ts + adapters + cases: compiler/tests/conformance/corpus-bridge runs them
+  #   examples/22-multifile/**   the multi-file path-resolution example (the #25/#26 class) a unit test compiles
   #   compiler/tests/{unit,conformance,e2e-render-map}/**   the suites themselves
   #   compiler/tests/{helpers,fixtures}/**                  shared test infra + inputs those suites read
-  #   bunfig.toml, package.json, bun.lock, .github/workflows/ci.yml, .github/windows-baseline.json   toolchain + ratchet
-  # A `.md` file never triggers it, wherever it lives (docs-only PRs skip it).
+  #   bunfig.toml, package.json, bun.lock, .github/workflows/**, .github/windows-baseline.json  toolchain,
+  #                              ratchet, and the workflow files unit tests parse (generated-regen, cloud-maps)
+  #   .gitattributes             decides every file's checked-out line endings ON WINDOWS (core.autocrlf)
+  # `.md` (S474 r1): an `.md` file does NOT trigger it — EXCEPT inside `env.WIN_MD_TRIGGER` (compiler/tests/**,
+  # scripts/**), where an .md is a fixture a suite parses (spec-coverage fixtures, flograph-fixture/sample.md).
+  # THE TRADE, stated: the suites also read compiler/SPEC.md, compiler/SPEC-INDEX.md, docs/known-gaps.md and
+  # docs/FACTS.md, which check out CRLF on Windows. An edit to one of those alone does not run Windows, so a
+  # CRLF-unsafe parse of new ledger/SPEC text turns main red after merge (caught by the push run / nightly),
+  # not on the PR. Accepted: they change on most PRs, and making them triggers would run Windows nearly always.
+  # Pinned by compiler/tests/unit/windows-filter-s474.test.js against the S474 reviewer's inotify trace of
+  # what the suites open (its fixture), minus a documented allowlist.
   # S474 — TEST PATHS ADDED. Until S474 a test-only PR skipped Windows: #1694 (a unit regression test) did,
   # and #1698's Windows EBUSY in an `afterAll` rmSync was caught only because it also touched compiler/src.
-  # Measured over main's last 30 days of PR merges: the old filter ran Windows on 59 of 234, this one on 91.
   # NOT included: compiler/self-host-v2/** (its *.test.js are not in this job — they run in `slices` on
-  # Linux; including the tree would add ~35 more PRs a month for suites Windows never runs), and
-  # compiler/tests/{integration,browser,commands,lsp,self-host}/** (not run here either). A unit test that
-  # reads a self-host-v2 file (bootstrap-url-guard-verbatim reads slice-m1's runtime) is caught on the
-  # next push to main or the nightly. The decision is made INSIDE the job (so the job always reports), from the
-  # pull_request merge commit's own two parents — fail closed: if the diff cannot be computed, it runs.
+  # Linux; including the tree would add ~36 more PRs a month for suites Windows never runs; the unit tests
+  # that read it read content OS-neutrally), compiler/tests/{integration,browser,commands,lsp,self-host}/**
+  # (not run here), and content-only corpora (samples/, docs/website/, benchmarks/, examples/23-…).
+  # Renames: the diff is `--no-renames`, so moving a file OUT of a watched path still triggers (S474 r1).
+  # The decision is made INSIDE the job (so the job always reports), from the pull_request merge commit's
+  # own two parents — fail closed: if the diff cannot be computed, it runs.
   # ───────────────────────────────────────────────────────────────────────────────────────────────
   windows:
     if: ${{ github.event_name != 'merge_group' }}   # ran on the PR; re-runs on the queue's push to main (gate accepts this skip)
@@ -675,14 +694,20 @@ jobs:
       - name: Does this run need the Windows suite?
         id: need
         shell: bash
+        env:
+          # ⚑ compiler/tests/unit/windows-filter-s474.test.js reads these two and runs this step's script.
+          WIN_TRIGGER: '^(compiler/(src|bin|runtime|native-parser)/|stdlib/|lsp/|scripts/|conformance/|examples/22-multifile/|compiler/tests/(unit|conformance|e2e-render-map|helpers|fixtures)/|\.gitattributes$|bunfig\.toml$|package\.json$|bun\.lock$|\.github/(workflows/|windows-baseline\.json$))'
+          WIN_MD_TRIGGER: '^(compiler/tests/|scripts/)'
+          EVENT: ${{ github.event_name }}
         run: |
-          if [ "${{ github.event_name }}" != "pull_request" ]; then
-            echo "run=true" >> "$GITHUB_OUTPUT"; echo "event ${{ github.event_name }} — always runs"; exit 0
+          if [ "$EVENT" != "pull_request" ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"; echo "event $EVENT — always runs"; exit 0
           fi
-          if ! changed=$(git diff --name-only HEAD^1 HEAD 2>/dev/null); then
+          if ! changed=$(git diff --no-renames --name-only HEAD^1 HEAD 2>/dev/null); then
             echo "run=true" >> "$GITHUB_OUTPUT"; echo "could not compute the PR diff — running (fail closed)"; exit 0
           fi
-          hits=$(printf '%s\n' "$changed" | grep -v -E '\.md$' | grep -E '^(compiler/(src|bin|runtime|native-parser)/|stdlib/|lsp/|scripts/.*\.(ts|js|mjs)$|conformance/|compiler/tests/(unit|conformance|e2e-render-map|helpers|fixtures)/|bunfig\.toml$|package\.json$|bun\.lock$|\.github/workflows/ci\.yml$|\.github/windows-baseline\.json$)' || true)
+          trig=$(printf '%s\n' "$changed" | grep -E "$WIN_TRIGGER" || true)
+          hits=$( { printf '%s\n' "$trig" | grep -v -E '\.md$' || true; printf '%s\n' "$trig" | grep -E '\.md$' | grep -E "$WIN_MD_TRIGGER" || true; } | grep -v '^$' || true)
           if [ -n "$hits" ]; then
             echo "run=true" >> "$GITHUB_OUTPUT"; echo "files the Windows suites run or read changed:"; printf '%s\n' "$hits" | head -40
           else

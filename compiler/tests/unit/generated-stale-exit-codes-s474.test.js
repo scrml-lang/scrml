@@ -36,6 +36,7 @@ import {
 import { basename, join } from "path";
 import { tmpdir } from "os";
 import { spawnSync } from "child_process";
+import { gapCountsFile, recentSessionsFile } from "../../../scripts/state.ts";
 
 const REPO = join(import.meta.dir, "../../..");
 
@@ -253,6 +254,44 @@ describe("state.ts --check — stale is 4; missing anchor 3; stray/unparseable 1
     const r = checkWith(GAPS, { mutate: () => null });
     expect(r.out).toContain("MISSING");
     expect(r.rc).toBe(3);
+  }, 30000);
+
+  // S474 r1 (#1707 F5): the producer owns the WHOLE file, so text outside the block is not frozen.
+  test("a hand-edited header (outside the anchors) → 4 (stale): the producer owns the whole file", () => {
+    const r = checkWith(GAPS, { mutate: (t) => t.replace("# Open-gap inventory (counts)", "# Edited by hand") });
+    expect(r.out).toContain("STALE");
+    expect(r.rc).toBe(4);
+  }, 30000);
+
+  test("--write recreates a DELETED generated file whole; --check is then 0", () => {
+    const m = stateMirror(GAPS);
+    rmSync(COUNTS(m));
+    expect(run("bun", [SCRIPT(m), "--write"], m).rc).toBe(0);
+    const t = readFileSync(COUNTS(m), "utf8");
+    expect(t).toContain("# Open-gap inventory (counts) — GENERATED");
+    expect(t).toMatch(/\| Severity \| Open[^\n]*\| Carried[^\n]*\|\n\|---\|---\|---\|\n<!-- @generated:gap-counts START/);
+    expect(run("bun", [SCRIPT(m), "--check"], m).rc).toBe(0);
+  }, 30000);
+
+  test("the committed generated files are exactly the producer's template around their block", () => {
+    // (values may be stale — the bot owns them — but header/legend/anchors must be the template's)
+    for (const [f, name] of [["gap-counts.md", "gap-counts"], ["recent-sessions.md", "recent-sessions"]]) {
+      const t = readFileSync(join(REPO, "docs/generated", f), "utf8").replace(/\r\n/g, "\n");
+      const s = t.indexOf("\n", t.indexOf(`@generated:${name} START`)) + 1;
+      const e = t.lastIndexOf("\n", t.indexOf(`<!-- @generated:${name} END`));
+      const fn = name === "gap-counts" ? gapCountsFile : recentSessionsFile;
+      expect(t).toBe(fn(t.slice(s, e)));
+    }
+  });
+
+  test("a gap-counts block pasted into master-list.md (the OTHER retired home) → 1 (#1707 F9)", () => {
+    const ml = readFileSync(join(REPO, "master-list.md"), "utf8").replace(
+      "\n## ",
+      `\n${S} (do not edit) -->\n| HIGH | 1 | 0 |\n${E}\n\n## `,
+    );
+    const r = checkWith(GAPS, { fresh: false, masterList: ml });
+    expect(r.out).toContain("docs/generated/gap-counts.md since S474");
+    expect(r.rc).toBe(1);
   }, 30000);
 
   test("a STRAY second START anchor → 1", () => {

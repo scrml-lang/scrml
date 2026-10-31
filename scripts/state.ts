@@ -41,7 +41,8 @@
 //   The §R28/§R27 cluster-table OPEN rows DO count (their tokens live inline in each row's final cell).
 //   This reproduces the canonical S170 hand-count HIGH 0 · MED 9 · LOW 18 · Nominal 9.
 
-import { existsSync, readFileSync, writeFileSync } from "fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
+import { dirname } from "path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "child_process";
 
@@ -412,7 +413,59 @@ export function headingMarkerDrift(srcText?: string): {
 //   <!-- @generated:<NAME> START (do not edit — `bun scripts/state.ts --write`) -->
 //   ...generated content...
 //   <!-- @generated:<NAME> END -->
-type GenSection = { name: string; file: string; produce: () => string };
+//
+// S474 r1 (#1707 review F5) — `whole`: the section's file is produced WHOLE (header + legend + anchored
+// block) from `whole(produce())`. A PR may not modify docs/generated/**, so text the producer did not
+// write would be frozen forever (a column change, as at S430, would have no legitimate path). Owning
+// the whole file, the producer is that path: change the template here, and the bot rewrites the file
+// after merge. It also makes a DELETED file self-repairing on the bot's `--write` (`--check` still says 3).
+type GenSection = { name: string; file: string; produce: () => string; whole: (block: string) => string };
+
+const START_MARK = (name: string) => `<!-- @generated:${name} START (do not edit — \`bun scripts/state.ts --write\`) -->`;
+const END_MARK = (name: string) => `<!-- @generated:${name} END -->`;
+const BOT_OWNED_NOTE = (from: string) =>
+  `<!-- BOT-OWNED (S474): regenerated WHOLE on main after merge by .github/workflows/generated-regen.yml\n` +
+  `     (\`bun scripts/state.ts --write\`), from ${from}. A PR must not modify\n` +
+  `     this file (ci.yml \`checks\`: "Bot-owned generated files untouched"); change its template in\n` +
+  `     scripts/state.ts (GEN_SECTIONS) instead. -->`;
+
+/** The whole text of docs/generated/gap-counts.md for a given anchored block. EXPORTED for the test. */
+export function gapCountsFile(block: string): string {
+  return [
+    "# Open-gap inventory (counts) — GENERATED",
+    "",
+    BOT_OWNED_NOTE("the `@gap` markers in docs/known-gaps.md"),
+    "",
+    'Derived from the `@gap` markers in [`docs/known-gaps.md`](../known-gaps.md); its §0 "Count basis"',
+    "legend defines each column. This table is as of main's last regeneration, so it may trail an open",
+    "PR's own ledger edits.",
+    "",
+    // S430: a THIRD column, Carried — owed by the bootstrap, not by impl#1 (see GAP_STATUS_CARRIED).
+    "| Severity | Open (owed by impl#1, the TS compiler) | Carried (owed by the bootstrap; xfail on impl#1) |",
+    "|---|---|---|",
+    START_MARK("gap-counts"),
+    block,
+    END_MARK("gap-counts"),
+    "",
+  ].join("\n");
+}
+
+/** The whole text of docs/generated/recent-sessions.md for a given anchored block. EXPORTED for the test. */
+export function recentSessionsFile(block: string): string {
+  return [
+    "# Recent sessions (generated index) — GENERATED",
+    "",
+    BOT_OWNED_NOTE("the `wrap(s…)` commits in `git log`"),
+    "",
+    "The last-8 session-wrap anchors: SHA, push state, tag cut. Per-session narrative is in",
+    "[`docs/changelog.md`](../changelog.md). Context: [`master-list.md`](../../master-list.md) §0.6.",
+    "",
+    START_MARK("recent-sessions"),
+    block,
+    END_MARK("recent-sessions"),
+    "",
+  ].join("\n");
+}
 
 // S474 — BOTH SECTIONS LIVE IN THEIR OWN BOT-OWNED FILES under docs/generated/. They used to sit inside
 // hand-edited files (docs/known-gaps.md §0, master-list.md §0.6). generated-regen.yml rewrites them on
@@ -427,10 +480,9 @@ const GEN_SECTIONS: GenSection[] = [
     name: "gap-counts",
     file: `${ROOT}/docs/generated/gap-counts.md`,
     // The at-a-glance table's four data rows — derived from docs/known-gaps.md's @gap tokens, so they
-    // always equal what PRINT reports. Header + separator stay STATIC in the generated file.
-    // S430: a THIRD column, Carried — owed by the bootstrap, not by impl#1 (see GAP_STATUS_CARRIED).
-    // ⚑ The static header in docs/generated/gap-counts.md must name three columns to match.
+    // always equal what PRINT reports. The header + separator are in gapCountsFile (three columns, to match).
     produce: () => gapCountsSection(readFileSync(`${ROOT}/docs/known-gaps.md`, "utf8")),
+    whole: gapCountsFile,
   },
   {
     name: "recent-sessions",
@@ -439,6 +491,7 @@ const GEN_SECTIONS: GenSection[] = [
     // + tag-cut (DD3 Fork 1, S173). Per-session narrative lives in docs/changelog.md (the ONE narrative
     // SoT); this is the startup-load-bearing forensic index only.
     produce: () => recentSessions(8),
+    whole: recentSessionsFile,
   },
 ];
 
@@ -518,18 +571,11 @@ function eolNorm(s: string): string {
   return s.replace(/\r\n/g, "\n");
 }
 
-// Regenerate one section's content in-place within `text`. Returns the new text + whether it
-// changed, or null if the anchor pair is missing (caller reports, does not crash).
-function regenInText(text: string, sec: GenSection): { text: string; changed: boolean } | null {
-  const span = findAnchorSpan(text, sec.name);
-  if (!span) return null;
-  // Emit the generated block in the file's own EOL so a CRLF (Windows) doc stays
-  // CRLF; compare EOL-normalized so a CRLF file is not perpetually reported stale.
-  const eol = text.includes("\r\n") ? "\r\n" : "\n";
-  const fresh = sec.produce().replace(/\r\n/g, "\n").replace(/\n/g, eol);
-  if (eolNorm(span.current) === eolNorm(fresh)) return { text, changed: false };
-  const next = text.slice(0, span.betweenStart) + fresh + text.slice(span.betweenEnd);
-  return { text: next, changed: true };
+// The section's whole fresh file, in the current file's own EOL so a CRLF (Windows) checkout stays CRLF;
+// callers compare EOL-normalized so a CRLF file is not perpetually reported stale.
+function wholeFresh(sec: GenSection, currentText: string): string {
+  const eol = currentText.includes("\r\n") ? "\r\n" : "\n";
+  return sec.whole(eolNorm(sec.produce())).replace(/\n/g, eol);
 }
 
 // Refuse to regenerate or compare while any section has a second START or END marker (see
@@ -541,13 +587,19 @@ function refuseStrayAnchors(): void {
       problems.push(`@generated:${sec.name} in ${rel(sec.file)}: ${p}`);
     }
   }
-  for (const h of RETIRED_HOMES) {
-    const lines = existsSync(h.file) ? retiredAnchorLines(readFileSync(h.file, "utf8"), h.name) : [];
-    if (lines.length) {
-      problems.push(
-        `@generated:${h.name} in ${rel(h.file)} (lines ${lines.join(", ")}): this section moved to ` +
-          `docs/generated/ at S474 — delete the old block (with its table header) from ${rel(h.file)}`,
-      );
+  // Every retired home is checked for EVERY section name (#1707 review F9: a gap-counts block pasted into
+  // master-list.md is as wrong as one left in known-gaps.md).
+  for (const file of new Set(RETIRED_HOMES.map((h) => h.file))) {
+    if (!existsSync(file)) continue;
+    const text = readFileSync(file, "utf8");
+    for (const sec of GEN_SECTIONS) {
+      const lines = retiredAnchorLines(text, sec.name);
+      if (lines.length) {
+        problems.push(
+          `@generated:${sec.name} in ${rel(file)} (lines ${lines.join(", ")}): this section lives in ` +
+            `${rel(sec.file)} since S474 (moved to docs/generated/) — delete the old block (with its table header) from ${rel(file)}`,
+        );
+      }
     }
   }
   if (problems.length === 0) return;
@@ -566,41 +618,20 @@ function runWrite(): number {
   refuseDegenerateProjection();
   refuseUnparsedDeltaEntries();
   refuseStrayAnchors();
-  // Group sections by file so each file is read/written once (idempotent across multiple sections).
-  const byFile = new Map<string, GenSection[]>();
-  for (const s of GEN_SECTIONS) {
-    const arr = byFile.get(s.file) ?? [];
-    arr.push(s);
-    byFile.set(s.file, arr);
-  }
+  // S474 r1: each generated file is written WHOLE (sec.whole) — header and block — so a missing or
+  // hand-damaged file is repaired, not reported. One section per file.
   let anyChanged = false;
-  const missing: string[] = [];
-  for (const [file, secs] of byFile) {
-    let text = readGenFile(file);
-    let fileChanged = false;
-    for (const sec of secs) {
-      const r = regenInText(text, sec);
-      if (r === null) {
-        missing.push(`@generated:${sec.name} (in ${rel(file)})`);
-        continue;
-      }
-      if (r.changed) {
-        text = r.text;
-        fileChanged = true;
-        console.log(`  regenerated @generated:${sec.name} in ${rel(file)}`);
-      } else {
-        console.log(`  @generated:${sec.name} already current in ${rel(file)}`);
-      }
+  for (const sec of GEN_SECTIONS) {
+    const current = readGenFile(sec.file);
+    const fresh = wholeFresh(sec, current);
+    if (eolNorm(current) === eolNorm(fresh)) {
+      console.log(`  @generated:${sec.name} already current in ${rel(sec.file)}`);
+      continue;
     }
-    if (fileChanged) {
-      writeFileSync(file, text);
-      anyChanged = true;
-    }
-  }
-  if (missing.length) {
-    console.log("");
-    console.log("⚠ MISSING anchor pair(s) — not regenerated:");
-    for (const m of missing) console.log(`  ${m}`);
+    mkdirSync(dirname(sec.file), { recursive: true });
+    writeFileSync(sec.file, fresh);
+    anyChanged = true;
+    console.log(`  ${current === "" ? "created" : "regenerated"} ${rel(sec.file)} (@generated:${sec.name})`);
   }
   console.log("");
   console.log(anyChanged ? "--write: sections regenerated." : "--write: no changes (already current).");
@@ -682,8 +713,9 @@ function runCheck(): number {
       missing.push(`@generated:${sec.name} (in ${rel(sec.file)})`);
       continue;
     }
-    const fresh = sec.produce();
-    if (eolNorm(span.current) === eolNorm(fresh)) ok.push(`@generated:${sec.name} (${rel(sec.file)})`);
+    // S474 r1: the WHOLE file is compared (header + legend + block — the producer owns all of it), so a
+    // template change in this script reads as stale (4) until the bot rewrites main.
+    if (eolNorm(text) === eolNorm(wholeFresh(sec, text))) ok.push(`@generated:${sec.name} (${rel(sec.file)})`);
     else stale.push(`@generated:${sec.name} (${rel(sec.file)})`);
   }
 

@@ -1,8 +1,9 @@
 # Open-gap inventory (counts) — GENERATED
 
-<!-- BOT-OWNED (S474): regenerated on main after merge by .github/workflows/generated-regen.yml
-     (`bun scripts/state.ts --write`), from the `@gap` markers in docs/known-gaps.md. A PR must not
-     modify this file (ci.yml `checks`: "Bot-owned generated files untouched"). -->
+<!-- BOT-OWNED (S474): regenerated WHOLE on main after merge by .github/workflows/generated-regen.yml
+     (`bun scripts/state.ts --write`), from the `@gap` markers in docs/known-gaps.md. A PR must not modify
+     this file (ci.yml `checks`: "Bot-owned generated files untouched"); change its template in
+     scripts/state.ts (GEN_SECTIONS) instead. -->
 
 Derived from the `@gap` markers in [`docs/known-gaps.md`](../known-gaps.md); its §0 "Count basis"
 legend defines each column. This table is as of main's last regeneration, so it may trail an open

@@ -1,8 +1,9 @@
 # Recent sessions (generated index) — GENERATED
 
-<!-- BOT-OWNED (S474): regenerated on main after merge by .github/workflows/generated-regen.yml
+<!-- BOT-OWNED (S474): regenerated WHOLE on main after merge by .github/workflows/generated-regen.yml
      (`bun scripts/state.ts --write`), from the `wrap(s…)` commits in `git log`. A PR must not modify
-     this file (ci.yml `checks`: "Bot-owned generated files untouched"). -->
+     this file (ci.yml `checks`: "Bot-owned generated files untouched"); change its template in
+     scripts/state.ts (GEN_SECTIONS) instead. -->
 
 The last-8 session-wrap anchors: SHA, push state, tag cut. Per-session narrative is in
 [`docs/changelog.md`](../changelog.md). Context: [`master-list.md`](../../master-list.md) §0.6.

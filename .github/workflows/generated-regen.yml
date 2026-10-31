@@ -216,7 +216,7 @@ jobs:
             if [ -z "$PR" ]; then
               gh pr create --base main --head "$BR" \
                 --title "chore(generated): post-merge regen of derived blocks" \
-                --body "Automated regeneration on main's tip by \`.github/workflows/generated-regen.yml\` (owner rulings S469 \"Regenerate on main after merge\" + S474 \"Generated files move to a post-merge bot\"). Only derived blocks change: \`severity.scrml\`, SPEC-INDEX totals/row ranges, coverage totals, known-gaps counts, master-list recent-sessions, \`bootstrap-conformance.md\`, \`FACTS.md\`. The branch \`$BR\` is force-updated by every merge to main, so this PR always carries the newest content; it goes through \`gate\` and the merge queue like any other PR."
+                --body "Automated regeneration on main's tip by \`.github/workflows/generated-regen.yml\` (owner rulings S469 \"Regenerate on main after merge\" + S474 \"Generated files move to a post-merge bot\"). Only derived blocks change: \`severity.scrml\`, SPEC-INDEX totals/row ranges, coverage totals, \`docs/generated/gap-counts.md\` (known-gaps counts), \`docs/generated/recent-sessions.md\` (session index), \`bootstrap-conformance.md\`, \`FACTS.md\`. The branch \`$BR\` is force-updated by every merge to main, so this PR always carries the newest content; it goes through \`gate\` and the merge queue like any other PR."
               PR=$(gh pr list --head "$BR" --base main --state open --json number --jq '.[0].number')
             fi
           fi
