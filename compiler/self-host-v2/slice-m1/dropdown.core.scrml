@@ -62,7 +62,7 @@ ${
              Field, Decl, Fn, CoreProgram,
              mkSym, block, noGrants, replaceGrant, litStr, litBool, litVariant, litInt,
              readField, readLocalField, prim1, prim2, call0,
-             el, textView, dyn, staticAttr, onEvent, construct, plainHead } from "../core.scrml"
+             el, textView, dyn, staticAttr, onEvent, construct, plainHead, scopeKey } from "../core.scrml"
 
     // A sequence type with no grants is fully constrained (§66.12.1).
     fn fixedSeq(elem: Type) -> Type {
@@ -228,7 +228,7 @@ ${
         ])
 
         const dropdown: Decl = {
-            sym: sDropdown, kind: DeclKind.User, single: false,
+            sym: sDropdown, key: scopeKey("lib/dropdown.scrml", sDropdown.hint), kind: DeclKind.User, single: false,
             fields: [fLabel, fOptions, fValue, fOpen],
             renders: [dropdownView], wiring: [], handles: [],
         }
@@ -340,7 +340,7 @@ ${
         }
 
         const program: Decl = {
-            sym: sProgram, kind: DeclKind.Program, single: true,
+            sym: sProgram, key: sProgram.hint, kind: DeclKind.Program, single: true,
             fields: programFields,
             renders: [main], wiring: [],
             handles: [hCountry, hColor],                 // top-level as= cells live on the program instance (L10)

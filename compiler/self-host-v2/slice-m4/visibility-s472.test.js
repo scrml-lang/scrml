@@ -307,9 +307,11 @@ describe("an import binds a name in file scope", () => {
     expect(src.slice(r.diags[0].span.start, r.diags[0].span.end)).toBe("twice");
   });
 
-  // s473 r2 #5 (narrowed to exported names): two user files EXPORTING one name are E-SCOPE-010 at
-  // the later file; the §41.7 W-IMPORT-001 still reports the second import beside it.
-  test("two imports of one name from two user files that both export it: E-SCOPE-010 (§7.6, S473), with W-IMPORT-001 (§41.7)", () => {
+  // s474 (door 3, "two files exporting one name: INTERIM"): two user files may each export a name;
+  // importing BOTH into one file binds it twice in that file's scope — E-SCOPE-010 at the later
+  // import, and the pair is refused, not resolved (no §41.7 later-wins W-IMPORT-001). Was (S473):
+  // E-SCOPE-010 at the second EXPORTER (lib2.scrml), with W-IMPORT-001 at the import.
+  test("two imports of one name from two user files that both export it: E-SCOPE-010 at the later import (§7.6, S474)", () => {
     const L2 = { path: "lib2.scrml", src: `\${\n    export fn twice(n: int) -> int {\n        return n * 20;\n    }\n}\n` };
     const src = `<program>
     \${ import { twice } from "./lib.scrml"; import { twice } from "./lib2.scrml"; }
@@ -317,7 +319,9 @@ describe("an import binds a name in file scope", () => {
 </program>
 `;
     const r = run(src, [LIB, L2]);
-    expect(r.diags.map((d) => [d.code, d.file]).sort()).toEqual([["E-SCOPE-010", "lib2.scrml"], ["W-IMPORT-001", ENTRY]].sort());
+    expect(r.diags.map((d) => [d.code, d.file])).toEqual([["E-SCOPE-010", ENTRY]]);
+    expect(src.slice(r.diags[0].span.start, r.diags[0].span.end)).toBe("twice");
+    expect(r.diags[0].span.start).toBeGreaterThan(src.indexOf("lib.scrml"));
   });
 
   // s473 r2 LOW-C: later-import-wins can still happen between a USER import and a STDLIB import of one
@@ -575,7 +579,11 @@ describe("r1 F3 — a call's write set is THE callee's in the calling file's sco
 describe("r1 F4 — two types of one name are told apart by declaring file", () => {
   test("reimport-type-mismatch: the message names both declaring files", () => {
     const C2 = { path: "colors2.scrml", src: `\${\n    export type Color:enum = { Green, Red }\n    export fn name2(c: Color) -> string {\n        return "x";\n    }\n}\n` };
-    const r = run(`<program>\n    \${ import { Color, name } from "./pick.scrml"; import { Color, name2 } from "./colors2.scrml"; }\n    <p id="o">\${name(Color.Red)}</p>\n</program>\n`, [PICK, C2]);
+    // s474 r1 (#1706 review F3): `Color` is imported from ONE file only. Importing it from both is
+    // now E-SCOPE-010 at the later import, and the earlier binding is kept (no cascade), so the old
+    // shape (`import { Color, name } from pick; import { Color, name2 } from colors2`) no longer
+    // reaches the type check. Here colors2's `Color` meets pick's `name(c: pick.Color)` directly.
+    const r = run(`<program>\n    \${ import { name } from "./pick.scrml"; import { Color, name2 } from "./colors2.scrml"; }\n    <p id="o">\${name(Color.Red)}</p>\n</program>\n`, [PICK, C2]);
     const m = r.diags.find((d) => d.code === "E-TYPE-031");
     expect(m.message).toContain("two different types named `Color`");
     expect(m.message).toContain("`pick.scrml`");
