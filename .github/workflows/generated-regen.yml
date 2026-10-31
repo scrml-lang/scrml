@@ -1,0 +1,230 @@
+# generated-regen — regenerate every derived DOC block (+ the bootstrap severity table) on main AFTER
+# merge (S474; extends S469's facts-regen.yml, which this file replaces).
+#
+# OWNER RULINGS (scrml-support user-voice-scrml.md):
+#   S469 "Regenerate on main after merge." (FACTS.md)
+#   S474 "Generated files move to a post-merge bot. PRs stop committing regenerated blocks (known-gaps
+#        counts, coverage totals, `severity.scrml`, SPEC-INDEX, bootstrap-conformance.md and the like); a
+#        post-merge bot (the FACTS.md pattern) regenerates them on main; CI checks only the sources."
+#
+# WHY: in S473 every PR that touched gaps went DIRTY when another landed (~8–10 re-merge rounds): each PR
+#   regenerated the same derived blocks, so each landing staled — and textually conflicted with — every
+#   other in-flight PR. FACTS.md had the same disease at S469 (48 of 78 landings moved it).
+#
+# WHAT IT REGENERATES — in DEPENDENCY ORDER, one pass over one tip, one commit (see PRODUCERS below):
+#   1. compiler/self-host-v2/severity.scrml  gen-bootstrap-severity.ts   ← SPEC §34 + bootstrap code literals
+#   2. compiler/SPEC-INDEX.md                regen-spec-index.ts         ← SPEC.md (totals + row Lines/Size)
+#   3. docs/bootstrap-spec-coverage.md       spec-coverage-check --write ← its own rows (reads SPEC-INDEX: after 2)
+#   4. docs/known-gaps.md + master-list.md   state.ts --write            ← @gap markers; `git log` wrap commits
+#   5. docs/bootstrap-conformance.md         bootstrap-conformance --write ← a bootstrap run (compiles 1: after 1)
+#   6. docs/FACTS.md                         facts.ts --write            ← repo-wide counts (LAST: it measures files 1–5 touch)
+#
+# WHY ONE WORKFLOW, NOT A SIBLING OF facts-regen: the producers depend on each other's outputs (1 → 5,
+#   2 → 3, everything → 6). Two bots would each compute from a tip that lacks the other's commit, and
+#   their two PRs would stale and conflict with each other — the S473 churn, moved into the bots. One
+#   ordered pass + one commit + one PR + one concurrency group = one writer.
+#
+# NOT HERE (class b — generated CODE the build/runtime/tests consume, kept IN-PR and blocking):
+#   compiler/runtime/stdlib/md.js (gen-md-shim.ts — the runtime LOADS it; stale = a wrong md reader on main),
+#   the URL-guard verbatim block in compiler/self-host-v2/slice-m1/runtime/runtime.js
+#   (sync-bootstrap-url-guard.ts — security, unit-tested byte-exact). severity.scrml (1) IS code, and is here
+#   only because its answer-changing drift fails slice-m4/severity.test.js ON THE PR — what can reach main
+#   stale is byte drift that changes no answer (scripts/gen-bootstrap-severity.ts header).
+#
+# HOW: on every push to main, run the producers on main's tip. No drift → nothing (and a leftover bot PR is
+#   closed). Drift → one commit on top of main's tip, force-pushed to the FIXED branch `bot/generated-regen`,
+#   one PR from it, auto-merge enabled → it goes through the merge queue and the required `gate` like any
+#   other PR. NO direct push to main: ruleset 25356240 (no bypass actors) requires a PR + `gate` + the queue.
+#
+# A BROKEN PRODUCER IS NEVER COMMITTED: a producer that exits non-zero has ITS files restored to main's
+#   content (a broken instrument must not be recorded as a fact), the others still land, and the job ends
+#   RED naming it. Every producer also runs PR-side in ci.yml `checks`, where only exit 4 (stale) warns —
+#   so a PR that breaks a producer is caught on the PR, not first here.
+#
+# TOKEN: MAPS_PAT (a fine-grained PAT — Contents R/W + Pull-requests R/W), on the LANDING step only (S474 r1):
+#   the checkout persists no credentials and the producers — repo code — never see it. A PR opened
+#   with GITHUB_TOKEN does not trigger other workflows, so `gate` would never run on it and the queue would
+#   never take it. NB fine-grained PATs expire — when MAPS_PAT lapses this job goes red at the landing step;
+#   harmless to merges (not a required check) but the blocks then drift until it is renewed
+#   (`gh workflow run generated-regen` re-fires it).
+#
+# NO LOOP: no producer's output is an input of its own figures, and the bot's own merge adds no input:
+#   its commit touches only the files below; its merge-commit subject ("Merge pull request #N from
+#   scrml-lang/bot/generated-regen") is not a session wrap, so state.ts's recent-sessions index ignores it.
+#   So when the bot PR lands, the push re-runs this job, every producer finds main current (a fixpoint),
+#   and the job exits without a PR. Termination is by idempotence, not by a path filter — deliberately: a
+#   path filter would also skip the run that must catch a bot PR that landed values computed on an older tip.
+#
+# NO RACE: (1) `concurrency: generated-regen` with cancel-in-progress — a burst of merges leaves only the
+#   newest run alive, and it computes from main's CURRENT tip; (2) one fixed branch, force-updated, so there
+#   is never more than one bot PR; (3) if the open bot PR already carries exactly the content the current tip
+#   needs and is not conflicting, it is left alone (no force-push → no needless dequeue, no re-run of `gate`);
+#   (4) a bot PR that main has caught up with on its own is closed, so a stale regen cannot land later and
+#   roll values back; (5) the S469 branch `bot/facts-regen` is retired — an open PR from it is closed here.
+
+name: generated-regen
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]                   # S474 r1: recent-sessions carries a `tag` note per wrap — a release tag
+                                   # pushed without a main push must still refresh it
+  schedule:
+    - cron: "23 8 * * *"           # daily backstop (the tag note, a missed/cancelled run, a renewed PAT)
+  workflow_dispatch: {}            # manual re-fire (e.g. after renewing MAPS_PAT)
+
+concurrency:
+  group: generated-regen
+  cancel-in-progress: true
+
+permissions:
+  contents: read                   # every write goes through MAPS_PAT, not GITHUB_TOKEN
+
+jobs:
+  regen:
+    if: ${{ github.repository == 'scrml-lang/scrml' }}   # forks have no MAPS_PAT
+    runs-on: ubuntu-latest
+    timeout-minutes: 30              # the bootstrap-conformance run is ~1.5–2.5 min; the rest is seconds
+    env:
+      BR: bot/generated-regen
+      LEGACY_BR: bot/facts-regen
+      # (S474 r1: GH_TOKEN / MAPS_PAT is scoped to the LANDING step only — the producers below run repo
+      # code and never see the write token.)
+      # Every file a producer below may write. The landing step stages and compares exactly these.
+      FILES: >-
+        compiler/self-host-v2/severity.scrml
+        compiler/SPEC-INDEX.md
+        docs/bootstrap-spec-coverage.md
+        docs/known-gaps.md
+        master-list.md
+        docs/bootstrap-conformance.md
+        docs/FACTS.md
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main                          # the CURRENT tip, not the SHA that triggered this run
+          persist-credentials: false         # S474 r1: no token left in .git/config for the producers;
+                                             # the landing step sets the MAPS_PAT push URL itself
+          fetch-depth: 0                     # state.ts recent-sessions pages `git log` for 8 wrap commits
+                                             # and asks `merge-base --is-ancestor … origin/main`; a shallow
+                                             # clone is its degenerate-projection refusal (exit 2)
+          filter: blob:none                  # full history, but only the tip's blobs (S474 r1)
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4.3"   # PINNED — same as ci.yml (see its header note on bun)
+      - name: Install deps
+        env:
+          PUPPETEER_SKIP_DOWNLOAD: "true"    # bootstrap-conformance runs in happy-dom, not Chromium
+        run: bun install --frozen-lockfile
+
+      # One step, in dependency order. Each producer's exit status is its own verdict: non-zero → its
+      # files are restored to main's content and the failure is recorded; the loop continues so one
+      # broken producer does not freeze the others. (No producer's --write exits 4.)
+      - name: Regenerate every derived block from main's tip
+        id: produce
+        run: |
+          set -uo pipefail
+          failed=""
+          run_producer() {   # <label> <"files"> <cmd...>
+            local label=$1 files=$2; shift 2
+            echo "::group::$label — $*"
+            "$@"; local rc=$?
+            echo "::endgroup::"
+            if [ "$rc" != "0" ]; then
+              echo "::error title=generated-regen: $label failed (rc $rc)::$* — its files ($files) are NOT regenerated on main until this is fixed."
+              # shellcheck disable=SC2086
+              git checkout -- $files
+              failed="$failed $label"
+            fi
+          }
+          run_producer severity     "compiler/self-host-v2/severity.scrml"  bun scripts/gen-bootstrap-severity.ts
+          run_producer spec-index   "compiler/SPEC-INDEX.md"                bun run scripts/regen-spec-index.ts
+          run_producer coverage     "docs/bootstrap-spec-coverage.md"       bun scripts/spec-coverage-check.ts --write
+          run_producer state        "docs/known-gaps.md master-list.md"     bun scripts/state.ts --write
+          # --ratchet (S474 r2): a CRASH/INVALID rise over main's committed report is a producer FAILURE —
+          # the write is refused, the file restored, the run ends red naming the delta (never absorbed).
+          run_producer conformance  "docs/bootstrap-conformance.md"         bun scripts/bootstrap-conformance.ts --write --ratchet
+          run_producer facts        "docs/FACTS.md"                         bun scripts/facts.ts --write
+          echo "failed=$failed" >> "$GITHUB_OUTPUT"
+          # Nothing outside FILES may change: a producer writing elsewhere would be landed by nobody and
+          # would mean this list is wrong.
+          # shellcheck disable=SC2086
+          stray=$(git status --porcelain -- . $(printf ':!%s ' $FILES))
+          if [ -n "$stray" ]; then
+            echo "::error title=generated-regen: a producer wrote outside FILES::$stray"
+            exit 1
+          fi
+
+      - name: Land the regen through the merge queue (only if drift)
+        env:
+          GH_TOKEN: ${{ secrets.MAPS_PAT }}   # identity whose push/PR fires `gate` (GITHUB_TOKEN's wouldn't)
+        run: |
+          set -euo pipefail
+          # shellcheck disable=SC2086
+          set -- $FILES
+          # The checkout persisted no credentials (S474 r1): authenticate origin for this step only.
+          git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+
+          # S474: the S469 bot branch is retired — close a PR still open from it (its files are a subset).
+          OLD=$(gh pr list --head "$LEGACY_BR" --base main --state open --json number --jq '.[0].number // empty')
+          if [ -n "$OLD" ]; then
+            gh pr close "$OLD" --delete-branch --comment "Superseded by \`$BR\` (.github/workflows/generated-regen.yml, S474)." || true
+          fi
+
+          PR=$(gh pr list --head "$BR" --base main --state open --json number --jq '.[0].number // empty')
+
+          if git diff --quiet -- "$@"; then
+            echo "every generated block is current on main — nothing to land."
+            if [ -n "$PR" ]; then
+              gh pr close "$PR" --delete-branch \
+                --comment "main's generated blocks are already current at $(git rev-parse --short HEAD); this regen is no longer needed."
+            fi
+            exit 0
+          fi
+          git diff --stat -- "$@"
+
+          # An open bot PR that already carries exactly this content, and still merges cleanly, is left
+          # untouched: force-pushing it would dequeue it and re-run `gate` for no change.
+          if [ -n "$PR" ] && git fetch -q origin "$BR" \
+             && git diff --quiet FETCH_HEAD -- "$@" \
+             && [ "$(gh pr view "$PR" --json mergeable --jq .mergeable)" != "CONFLICTING" ]; then
+            echo "bot PR #$PR already carries this content — leaving it as is."
+            # S474 r1 (review F3): "left as is" must not mean "stuck forever". If a REQUIRED check on it
+            # has FAILED, auto-merge will never fire and every derived block stops updating on main while
+            # this run stays green. End red and name it (a human decides: fix main, or re-run the check).
+            FAILED_CHECKS=$(gh pr checks "$PR" --required --json name,bucket \
+              --jq '[.[] | select(.bucket == "fail" or .bucket == "cancel") | "\(.name) (\(.bucket))"] | join(", ")' 2>/dev/null || true)
+            # (S474 r2: a CANCELLED required check — e.g. `gate` cancelled by a superseded queue run — is as
+            # stuck as a failed one: auto-merge waits on it forever.)
+            if [ -n "$FAILED_CHECKS" ]; then
+              echo "::error title=generated-regen: bot PR #$PR is STUCK::required check(s) failed: $FAILED_CHECKS — auto-merge will never fire; derived blocks on main are not updating."
+              exit 1
+            fi
+          else
+            git config user.name  "scrml-generated-ci"
+            git config user.email "scrml-generated-ci@users.noreply.github.com"
+            CHANGED=$(git diff --name-only -- "$@" | tr '\n' ' ')
+            git checkout -B "$BR"
+            git add -- "$@"
+            git commit -q -m "chore(generated): regenerate derived blocks after merge of $(git rev-parse --short HEAD)" \
+              -m "Files: $CHANGED" -m "Automated by .github/workflows/generated-regen.yml (owner rulings S469 + S474)."
+            git push --force origin "HEAD:refs/heads/$BR"
+            if [ -z "$PR" ]; then
+              gh pr create --base main --head "$BR" \
+                --title "chore(generated): post-merge regen of derived blocks" \
+                --body "Automated regeneration on main's tip by \`.github/workflows/generated-regen.yml\` (owner rulings S469 \"Regenerate on main after merge\" + S474 \"Generated files move to a post-merge bot\"). Only derived blocks change: \`severity.scrml\`, SPEC-INDEX totals/row ranges, coverage totals, known-gaps counts, master-list recent-sessions, \`bootstrap-conformance.md\`, \`FACTS.md\`. The branch \`$BR\` is force-updated by every merge to main, so this PR always carries the newest content; it goes through \`gate\` and the merge queue like any other PR."
+              PR=$(gh pr list --head "$BR" --base main --state open --json number --jq '.[0].number')
+            fi
+          fi
+
+          # Idempotent. With the merge queue required, --auto enqueues once checks pass and the
+          # strategy flag is ignored (the queue's MERGE method applies); it matters only if the queue
+          # is ever switched off.
+          gh pr merge "$PR" --auto --merge
+
+      # Last, so a broken producer does not stop the others from landing — but the run still ends RED.
+      - name: Fail if any producer failed
+        if: ${{ steps.produce.outputs.failed != '' }}
+        run: |
+          echo "::error title=generated-regen: producer(s) failed::${{ steps.produce.outputs.failed }} — see the step above; their files were not regenerated."
+          exit 1

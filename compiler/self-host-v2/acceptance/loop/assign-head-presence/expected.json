@@ -1,0 +1,16 @@
+{
+  "id": "acceptance-loop-assign-head-presence",
+  "description": "`for ((x = xs.at(i)) is given)` runs once per element: 4 + 5 + 6 = 15.",
+  "language-version": "1.0",
+  "spec": "§50 · §49.2.3",
+  "rationale": "§50 amendment (S473 D10): \"The ONLY assignment-as-expression the language keeps is an assignment wrapped in its own parentheses inside the condition head of a `for (…)` or `if (…)` / `else if (…)` … as a parenthesized operand of the condition — `for ((m = re.exec(str)) is given) { … }`\" · §50.3.1: \"Produce the assigned value as the result of the expression.\"",
+  "expect": {
+    "codes": [],
+    "domAnchored": [
+      {
+        "selector": "#o",
+        "text": "15"
+      }
+    ]
+  }
+}

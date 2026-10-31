@@ -3070,6 +3070,115 @@ export function gather(scope, anchor, build) {
   });
 }
 
+/**
+ * s474 — a KEYED Tier-0 loop (SPEC §17.4b: "When a `key` expression is
+ * declared, the compiler SHALL generate keyed reconciliation: elements are
+ * matched by key identity across updates, preserving DOM state (focus,
+ * animation, scroll position) for elements whose key persists"). `build` runs
+ * the loop TRACKED, as `gather`'s does; each iteration first evaluates its key
+ * once (`loopKey`), and each lift appends a `keyRow` naming that iteration.
+ * A row's identity is (key, its template, its place among its iteration's lifts of that
+ * template). On a re-run a row whose identity persists keeps its DOM nodes and
+ * its scope — it is MOVED if its position changed, and its cells (the loop's
+ * locals the row's markup reads) are set to the iteration's new values; a row
+ * whose identity is new renders; a row whose identity left is disposed. A key
+ * two iterations share is a trap (§17.4b: the key "must produce a value that
+ * is unique within the collection").
+ */
+export function gatherKeyed(scope, anchor, build) {
+  let rows = [];
+  effect(scope, () => {
+    const lifted = build();
+    untrack(() => { rows = reconcileKeyed(scope, anchor, rows, lifted); });
+  });
+}
+
+/**
+ * s474 — one iteration's key (§17.4b), evaluated once per iteration. `per`
+ * counts the iteration's lifts PER TEMPLATE (#1700 review F3): a row's place is
+ * its place among the lifts of its own template, so a conditional lift of
+ * another template earlier in the body never shifts it (its DOM state
+ * persists with its key, §17.4b).
+ */
+export function loopKey(key) {
+  return { key, lifts: 0, per: new Map() };
+}
+
+/** s474 — a lifted row of a keyed loop: template `tpl`, the row's snapshot `vals`, its render. */
+export function keyRow(it, tpl, vals, render) {
+  const ord = it.per.get(tpl) || 0;
+  it.per.set(tpl, ord + 1);
+  it.lifts++;
+  return { it, ord, tpl, vals, render };
+}
+
+/** s474 — a primitive value lifted in a keyed loop: a text row whose text follows its cell. */
+export function keyTextRow(it, v) {
+  return keyRow(it, -1, [v], textCellRow);
+}
+
+function textCellRow(scope, anchor, cell) {
+  const t = document.createTextNode("");
+  anchor.parentNode.insertBefore(t, anchor);
+  scope.own(() => { if (t.parentNode) t.parentNode.removeChild(t); });
+  effect(scope, () => { t.data = display(cell.get()); });
+}
+
+function reconcileKeyed(scope, anchor, oldRows, lifted) {
+  // old rows by key, then by (place, template)
+  const byKey = new Map();
+  oldRows.forEach((r, i) => {
+    let at = byKey.get(r.key);
+    if (!at) { at = []; byKey.set(r.key, at); }
+    at.push({ row: r, index: i });
+  });
+  const iterOf = new Map();
+  const next = [];
+  const kept = new Set();
+  for (const l of lifted) {
+    const k = l.it.key;
+    const owner = iterOf.get(k);
+    if (owner === undefined) iterOf.set(k, l.it);
+    else if (owner !== l.it) throw new Error(`for … key: duplicate key ${String(k)} — two iterations share it (§17.4b: a key is unique within the collection)`);
+    const cands = byKey.get(k);
+    const old = cands ? cands.find((c) => c.row.ord === l.ord && c.row.tpl === l.tpl) : undefined;
+    if (old) {
+      kept.add(old.row);
+      old.row.cells.forEach((c, j) => c.set(l.vals[j]));
+      next.push({ row: old.row, oldIndex: old.index });
+    } else {
+      next.push({ row: null, lift: l, oldIndex: -1 });
+    }
+  }
+  // Dispose rows whose identity left.
+  for (const r of oldRows) if (!kept.has(r)) r.scope.dispose();
+  // Rows on the longest increasing run of old positions stay put; others move.
+  const stay = new Set(lis(next.map((n) => n.oldIndex)));
+  const out = new Array(next.length);
+  let before = anchor;
+  for (let i = next.length - 1; i >= 0; i--) {
+    const n = next[i];
+    let row = n.row;
+    if (!row) {
+      const l = n.lift;
+      const rowScope = scope.child();
+      const start = document.createComment("row");
+      const end = document.createComment("/row");
+      before.parentNode.insertBefore(start, before);
+      before.parentNode.insertBefore(end, before);
+      const cells = l.vals.map((v) => new Cell(v));
+      row = { key: l.it.key, ord: l.ord, tpl: l.tpl, scope: rowScope, cells, start, end };
+      rowScope.own(removeRange(start, end));
+      l.render(rowScope, end, ...cells);
+    } else if (!stay.has(i)) {
+      moveRange(row, before);
+    }
+    out[i] = row;
+    before = row.start;
+  }
+  return out;
+}
+
 /** s469 — a Tier-0 row of text: a primitive value lifted in the loop (§17.4). */
 export function textRow(v) {
   const text = display(v);

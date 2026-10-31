@@ -168,7 +168,32 @@ function routeBunSpawnEnv(childEnv) {
   };
 }
 
+/**
+ * S474 r1 — SCRUB GIT'S HOOK ENVIRONMENT. git runs hooks with GIT_INDEX_FILE (and, in a linked worktree,
+ * GIT_DIR) exported, and the pre-commit hook runs this suite. Every `git` a test spawns then targets the
+ * COMMITTING checkout's index / git dir instead of the one its cwd names:
+ *   - measured S474: a sandbox `git init && git add -A` in a temp dir REPLACED the committing worktree's
+ *     index (14k paths staged as deleted);
+ *   - integration/self-compilation.test.js and integration/self-host-smoke.test.js resolve the repo root
+ *     with `git rev-parse` / `git worktree list` — under a worktree's hook GIT_DIR they resolve the wrong
+ *     tree and grade the MAIN checkout's sources from a worktree (a false green or red).
+ * No test needs these variables (CI never sets them; outside a hook they are absent), so they are removed
+ * from this process — and from the env the Bun.spawn wrapper hands to children — before any test runs.
+ * Exported for the unit test.
+ */
+export function scrubGitEnv(env) {
+  const removed = [];
+  for (const k of Object.keys(env)) {
+    if (/^GIT_/.test(k)) {
+      removed.push(k);
+      delete env[k];
+    }
+  }
+  return removed;
+}
+
 function install() {
+  scrubGitEnv(process.env);
   const startupEnv = { ...process.env };
   const originalTmp = tmpdir();
   const xdg = process.env.XDG_CACHE_HOME;
@@ -185,7 +210,12 @@ function install() {
         ? `[tmp-root-preload] ${preferred} and ${fallback} are inside a git repo / scrml.toml project — leaving TMPDIR=${originalTmp} unchanged (tests will leak into it)`
         : `[tmp-root-preload] ${preferred} is unusable (inside a git repo / scrml.toml project, or not creatable) — using ${fallback}`,
     );
-    if (base === null) return;
+    if (base === null) {
+      // still route Bun.spawn children to the SCRUBBED env (they would otherwise get the startup env,
+      // GIT_* included — see scrubGitEnv)
+      routeBunSpawnEnv(startupEnv);
+      return;
+    }
   }
 
   pruneStale(base);

@@ -35,9 +35,17 @@ It also configures the generated-content merge driver for the clone (see below).
     CI's `slices` job on the pushed branch catches both. If merge-made breakage starts reaching main, the fix is a `pre-merge-commit` hook running the same trigger, not a pre-push step.
 - **post-merge**, **post-rewrite** (rebase only) — phase 2 of the generated-content merge driver (below). Inert unless the driver recorded pending content for THAT merge/rebase (the record is keyed to ORIG_HEAD); then runs `bun scripts/git-merge-generated.ts --regen` and leaves the regenerated files modified for you to commit. Only history-derived content (`recent-sessions`) relies on this — derived content both sides changed stops the merge instead.
 
+## Generated blocks are not the hooks' to block on (S474)
+
+Owner ruling, S474: generated blocks regenerate on main after merge (`.github/workflows/generated-regen.yml`), and PRs don't commit regens. So a **stale** derived block never blocks a commit or a push. The pre-commit SPEC-coverage step and the pre-push SPEC-INDEX and FACTS steps warn on exit 4. They still **block** any other non-zero: a SPEC § with no row, a SILENT coverage row with no gap, a missing anchor, or a crashing producer. Those are broken sources that no regen can fix. The md shim (`compiler/runtime/stdlib/md.js`) is generated **code** the runtime loads. It stays a blocking byte-exact check. Full table: `.github/CI.md`.
+
+Version skew: the hooks run from the main checkout (`core.hooksPath` is absolute), but they run the committing worktree's scripts. A branch cut before S474 still exits 1 for "stale", so its staleness still blocks. That is fail-closed, and merging main cures it.
+
 ## The generated-content merge driver (S468, revised S469)
 
-`docs/known-gaps.md`, `master-list.md`, `docs/FACTS.md`, `compiler/SPEC-INDEX.md` and `docs/bootstrap-conformance.md` carry GENERATED content: `@generated:*` sections, the SPEC-INDEX row line ranges, and the whole bootstrap report. Every PR regenerates it, so without help any two open PRs conflict on it. `.gitattributes` maps those files to `merge=scrml-generated`. git runs `scripts/git-merge-generated.sh`, a crash-safe wrapper, which runs `scripts/git-merge-generated.ts`:
+S474: the driver stays. Since PRs no longer regenerate, it rarely has anything to do, but it is still right for a branch that did regenerate (a pre-S474 branch, or a habit) when it merges main's bot output. It is inert unless installed. See `.github/CI.md`.
+
+`docs/known-gaps.md`, `master-list.md`, `docs/FACTS.md`, `compiler/SPEC-INDEX.md` and `docs/bootstrap-conformance.md` carry GENERATED content: `@generated:*` sections, the SPEC-INDEX row line ranges, and the whole bootstrap report. Until S474 every PR regenerated it, so without help any two open PRs conflicted on it (since S474 the post-merge bot owns the regen, which removes most of these conflicts at the source). `.gitattributes` maps those files to `merge=scrml-generated`. git runs `scripts/git-merge-generated.sh`, a crash-safe wrapper, which runs `scripts/git-merge-generated.ts`:
 
 1. **Hand-written text.** It is merged 3-way, and a conflict there still stops the merge (exit 1, normal markers). One exception: when every conflicted hunk is both sides **adding** distinct new `@gap` entries at the same spot, both are kept, ours first. That needs an empty base side, disjoint ids, and no identical line added on both sides.
 2. **`@generated:gap-counts`** is **regenerated** exactly from the merged ledger text. The entries are merged first, then counted.
@@ -56,7 +64,7 @@ It also configures the generated-content merge driver for the clone (see below).
 - Opt out of the pretest install with `SCRML_SKIP_MERGE_DRIVER_INSTALL=1`.
 - Check with `git config --get merge.scrml-generated.driver`.
 
-**Pending records.** A pending record is keyed to the operation it came from (`ORIG_HEAD`). A record left by `git merge --abort` is dropped instead of being replayed on the next merge. `--pending` lists what is owed. The CI / pre-push currency gates (`facts.ts --check`, `regen-spec-index.ts --check`) remain the backstop.
+**Pending records.** A pending record is keyed to the operation it came from (`ORIG_HEAD`). A record left by `git merge --abort` is dropped instead of being replayed on the next merge. `--pending` lists what is owed. The backstop is now the post-merge bot (`generated-regen.yml`), which regenerates main. The CI / pre-push checks only warn on staleness since S474.
 
 **GitHub does not run custom merge drivers.** That includes GitHub's server-side merge and "Update branch", and any CI-side merge. A PR stays `dirty` on GitHub until its branch is updated locally (`git merge origin/main` with the driver installed) and pushed.
 

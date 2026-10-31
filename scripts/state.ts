@@ -6,7 +6,8 @@
 //   `bun scripts/state.ts --write` WRITE  — in-place-regenerate every `@generated:*` section in the
 //                                           docs from the same derive functions (Fork 3B). Idempotent.
 //   `bun scripts/state.ts --check` CHECK  — regenerate every `@generated:*` section in memory + compare
-//                                           to on-disk; exit 1 on any stale section (Fork 4). Maps-behind
+//                                           to on-disk; exit 4 on a stale section, 3 on a missing anchor
+//                                           pair (S474 — both were 1; see runCheck). Maps-behind
 //                                           is WARN-only (maps are refreshed by project-mapper, a
 //                                           different seam — see GEN policy note below; a future pa.md
 //                                           wrap-gate calls this).
@@ -503,7 +504,7 @@ function regenInText(text: string, sec: GenSection): { text: string; changed: bo
 }
 
 // Refuse to regenerate or compare while any section has a second START or END marker (see
-// strayAnchors). Exit 1, the same code as a stale section: the doc is out of shape, fix the doc.
+// strayAnchors). Exit 1 — BLOCKING, never the stale code 4 (S474): the doc is out of shape, fix the doc.
 function refuseStrayAnchors(): void {
   const problems: string[] = [];
   for (const sec of GEN_SECTIONS) {
@@ -570,8 +571,8 @@ function runWrite(): number {
 }
 
 // ── CHECK mode (Fork 4) ──────────────────────────────────────────────────────
-// Regenerate every @generated section in memory + compare to on-disk. FAIL (exit 1) on any stale
-// section OR any missing anchor pair. Maps-behind is WARN-ONLY: maps are refreshed by project-mapper
+// Regenerate every @generated section in memory + compare to on-disk. Exit 4 on a stale section
+// (S474: non-blocking for PRs — the bot regenerates main), 3 on a missing anchor pair. Maps-behind is WARN-ONLY: maps are refreshed by project-mapper
 // (a different seam), so the future pa.md wrap-gate should NOT block doc-currency on map staleness —
 // it prints the maps line for visibility but does not gate on it yet. (TODO future pa.md wrap-gate:
 // decide whether to promote maps-behind to a hard fail once map-refresh joins the wrap flow.)
@@ -679,11 +680,23 @@ function runCheck(): number {
     if (drift.length > SHOWN) console.log(`      … and ${drift.length - SHOWN} more (this list is truncated; the count above is not)`);
   }
   console.log("");
+  // S474 (owner ruling: generated blocks regenerate post-merge — .github/workflows/generated-regen.yml).
+  // EXIT CODES, mirroring scripts/facts.ts so every caller can tell STALE from BROKEN:
+  //   4 = only stale (the bot regenerates main after merge; PR-side callers WARN on exactly this),
+  //   3 = a START/END anchor pair is MISSING (the doc is out of shape — no regen can fix it; FAILS),
+  //   2 = degenerate projection (refuseDegenerateProjection), 1 = stray anchor / unparsed delta entry /
+  //   an unclassifiable @gap status (throws → bun's uncaught-exception code). Only 4 is non-blocking.
   if (failed) {
-    const names = [...stale, ...missing].join(", ");
-    console.log(`  FAIL — stale/missing @generated section(s): ${names}`);
+    if (missing.length > 0) {
+      console.log(`  FAIL — MISSING @generated anchor pair(s): ${missing.join(", ")}  (restore the START/END markers by hand)`);
+      if (stale.length) console.log(`  (also stale: ${stale.join(", ")})`);
+      console.log("══════════════════════════════════════════════════════════════════");
+      return 3;
+    }
+    console.log(`  STALE — @generated section(s) differ from this tree: ${stale.join(", ")}`);
+    console.log("  (exit 4 — main is regenerated after merge by generated-regen.yml; a PR need not commit a regen)");
     console.log("══════════════════════════════════════════════════════════════════");
-    return 1;
+    return 4;
   }
   console.log("  PASS — all @generated sections current.");
   console.log("══════════════════════════════════════════════════════════════════");

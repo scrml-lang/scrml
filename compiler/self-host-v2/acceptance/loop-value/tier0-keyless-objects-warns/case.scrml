@@ -1,0 +1,9 @@
+// §17.4b / §34 W-KEY-001 (the header meaning, S473 review-surfaced 5): a markup loop over a
+// tape of structs with no header `key` warns; it still renders, positionally.
+<program>
+    type Item:struct = { id: int, name: string }
+    <items:Item[]=([{ id: 1, name: "a" }, { id: 2, name: "b" }])/>
+    <main>
+        <ul id="u">${ for (const it of @items) { lift <li>${it.name}</li>; } }</ul>
+    </main>
+</program>
