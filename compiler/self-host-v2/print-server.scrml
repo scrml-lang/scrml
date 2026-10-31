@@ -137,7 +137,7 @@ ${
         inner = inner.concat([JsStmt.SReturn(jcall(jmember(jid("rt"), "server"), [jid("host$"), JsExpr.JArray(routeExprs), JsExpr.JArray(conns)]))])
         body = body.concat([
             JsStmt.SBlank,
-            JsStmt.SComment("createServer(host$) — host$.connect(desc) supplies each database's driver (Bun.SQL by default); host$.log the server log"),
+            JsStmt.SComment("createServer(host$) — host$.connect(desc) supplies each database's driver (Bun.SQL by default); host$.log the server log; host$.dev true only in a dev build (a failed query's driver text is then kept in a failure answer — S474 ruling 2)"),
             JsStmt.SExportFunc("createServer", ["host$"], inner),
         ])
         return { js: printModule(body), refused: [], routes: routes }

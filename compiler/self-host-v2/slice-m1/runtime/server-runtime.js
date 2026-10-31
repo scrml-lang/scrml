@@ -538,8 +538,9 @@ function logLine(host, line) {
 // inspects — its error a `SqlError` value (§19.8.1: QueryFailed(message),
 // ConstraintViolation(field), ConnectionLost), in the runtime's enum shape
 // (a unit variant is its name; a payload variant `{ variant, data: [...] }`).
-// The message stays on the server: it reaches a client only if the author's
-// own code returns it.
+// The value keeps the full driver text, so a `?{}` handled in server code
+// where it is written sees it (S474 ruling 2); what crosses the wire in a
+// route's failure answer is decided at the boundary (`withholdDriverText`).
 // ---------------------------------------------------------------------------
 // `params`: each DISTINCT value, evaluated once (§8.2); `slots[i]`: the param the
 // template's i-th `${}` binds (core.scrml SqlQuery — C-SQL1 lines them up).
@@ -570,6 +571,7 @@ async function runQuery(conn, mode, text, params, slots, tx) {
   } catch (e) {
     const err = sqlErrorOf(e);
     conn.log(`scrml server: a query on ${conn.desc.driver}:${conn.desc.file} failed — ${messageOf(e)}`);
+    noteDriverText(e, err);
     if (tx !== null) {
       await probeTx(tx);
       if (tx.broken) throw brokenError(conn);
@@ -618,6 +620,79 @@ export function sqlErrorOf(e) {
   }
   if (CONNECTION_CODES.has(code) || [...CONNECTION_CODES].some((c) => code.startsWith(c))) return "ConnectionLost";
   return { variant: "QueryFailed", data: [msg] };
+}
+
+// ---------------------------------------------------------------------------
+// S474 ruling 2, as amended (user-voice-scrml.md "RULED — S474 review-surfaced
+// decisions 1–7" item 2: "A failed query's error text does not cross the wire.
+// The client receives the error variant with its message blanked; the server
+// logs the full driver text. (Driver text exposes the schema.) A `?{}` handled
+// where it is written still sees the driver text in server code." — amended by
+// "RULED — capability over limitation" item 3: "a dev build keeps the full
+// driver text in the value delivered to the client; a production build blanks
+// it (the server logs it either way)").
+//
+// The query's failure value keeps the driver text (server code sees it). Each
+// driver-derived string of a failed query — the driver's message, and the
+// SqlError payload taken from it (QueryFailed's message, ConstraintViolation's
+// field, e.g. `users.email`) — is recorded in the REQUEST it ran in (an
+// AsyncLocalStorage scope `handle` opens around the route's body). When the
+// route answers a failure, every string of the encoded failure's payload that
+// CONTAINS a recorded text is replaced by "" — the variant and the payload's
+// shape stay, so the client's match arms still decode it — unless the server
+// is a DEV build (`host.dev === true`, passed by `scrml-boot dev`; every other
+// host, a deployed `scrml-boot compile` output included, is production).
+// The ORIGIN is tracked, not the variant name: a failure the author spells
+// (`fail .QueryFailed("no such user")`) is not blanked; a driver text the
+// author re-wraps into another variant (`fail .Bad("db: " + m)`) is.
+// Fail closed: with no AsyncLocalStorage the request's texts cannot be told
+// apart, so a production build blanks EVERY string of a failure payload.
+// The full text was already logged where the query failed (runQuery).
+// ---------------------------------------------------------------------------
+let reqScope = null;
+function requestStore() {
+  if (reqScope === null) {
+    const hooks = globalThis.process && typeof globalThis.process.getBuiltinModule === "function"
+      ? globalThis.process.getBuiltinModule("node:async_hooks") : null;
+    if (!hooks || typeof hooks.AsyncLocalStorage !== "function") return null;
+    reqScope = new hooks.AsyncLocalStorage();
+  }
+  return reqScope;
+}
+
+function noteDriverText(e, err) {
+  if (reqScope === null) return;
+  const rec = reqScope.getStore();
+  if (rec === undefined) return;
+  const add = (t) => { if (typeof t === "string" && t !== "" && !rec.texts.includes(t)) rec.texts.push(t); };
+  add(messageOf(e));
+  if (e && typeof e === "object") {
+    add(e.column);
+    add(e.constraint);
+    add(e.detail);
+  }
+  if (err && typeof err === "object" && Array.isArray(err.data)) for (const d of err.data) add(d);
+}
+
+// The encoded failure `wire` with every driver-derived string blanked (see above).
+function withholdDriverText(wire, rec) {
+  let changed = false;
+  const tainted = (str) => rec.unknown || rec.texts.some((t) => str.includes(t));
+  const walk = (v) => {
+    if (typeof v === "string") {
+      if (v !== "" && tainted(v)) { changed = true; return ""; }
+      return v;
+    }
+    if (Array.isArray(v)) return v.map(walk);
+    if (v !== null && typeof v === "object") {
+      const out = {};
+      for (const k of Object.keys(v)) out[k] = walk(v[k]);
+      return out;
+    }
+    return v;
+  };
+  const data = walk(wire.data);
+  return { wire: changed ? { ...wire, data } : wire, changed };
 }
 
 // ---------------------------------------------------------------------------
@@ -906,8 +981,11 @@ async function handle(host, r, request) {
     args.push(d.value);
   }
   let result;
+  const rec = { texts: [], unknown: false };
+  const rs = requestStore();
+  if (rs === null) rec.unknown = true;
   try {
-    result = await r.run(args);
+    result = rs === null ? await r.run(args) : await rs.run(rec, () => r.run(args));
   } catch (e) {
     logLine(host, `scrml server: ${r.path} threw — ${messageOf(e)}`);
     return jsonResponse(host, 500, FIXED[500]);
@@ -922,7 +1000,15 @@ async function handle(host, r, request) {
       logLine(host, `scrml server: ${r.path} — its error does not encode (${env.error.reason})`);
       return jsonResponse(host, 500, FIXED[500]);
     }
-    return jsonResponse(host, failStatus(env.wire.variant), env.wire);
+    let out = env.wire;
+    if (!(host && host.dev === true) && (rec.unknown || rec.texts.length > 0)) {
+      const w = withholdDriverText(out, rec);
+      if (w.changed) {
+        out = w.wire;
+        logLine(host, `scrml server: ${r.path} — its failure (${out.variant}) carried database driver text; blanked in the response (production build, S474 ruling 2) — the full text is logged above`);
+      }
+    }
+    return jsonResponse(host, failStatus(out.variant), out);
   }
   if (r.desc.result === null) return noContent(host);
   const out = encode(r.desc.result, result);
