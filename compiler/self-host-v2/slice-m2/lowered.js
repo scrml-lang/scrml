@@ -75,7 +75,10 @@ export function frontEnd(mods, files, entry, opts = {}) {
   const asts = linked.files;
   const next = linked.nextId;
   const t1 = performance.now();
-  const tp = mods.analyze.analyzeLinked(asts, entry, next); // s474: the linker's first unused node id (client-bang composition)
+  // s474 r1 (review F1): `opts.keyBase` — the files' root under the PROJECT root, which the per-file
+  // output keys hash from (core.scrml fileKeyPath); the reported file names stay `f.path`.
+  // s474 (client-bang composition): `next` — the linker's first unused node id (composeFiles)
+  const tp = mods.analyze.analyzeLinked(asts, entry, opts.keyBase ?? "", next);
   // s469 — a statement a later phase refuses is not also E-STMT-NO-EFFECT (parse.scrml withoutRefusedNoEffect)
   const parseDiags0 = mods.parse.withoutRefusedNoEffect(linked.diags, tp.diags);
   // s473 D28 — the named-refusal table (refusals.scrml): in a file that already fails, a construct
@@ -86,8 +89,11 @@ export function frontEnd(mods, files, entry, opts = {}) {
   const t2 = performance.now();
   const lowered = mods.lower.lower(tp);
   const t3 = performance.now();
+  // s474 r1 (review L5): when a client `!` function composed, the analyzed program is the COMPOSED
+  // one (analyze.scrml composeFiles) — its files and its node count are the ones every later sweep sees
+  const composed = tp.files !== asts;
   return {
-    asts,
+    asts: composed ? tp.files : asts,
     typed: tp,
     core: lowered.core,
     // the parse phase's diagnostics, apart (the conformance probe buckets on them)
@@ -95,9 +101,23 @@ export function frontEnd(mods, files, entry, opts = {}) {
     diags: parseDiags.concat(rel.later),
     // s449: the non-fatal I- notes (§55.17.6: I-FORM-SUBMIT-GATED "reports in the warnings stream")
     infos: tp.infos,
-    nodes: next,
+    nodes: composed ? Math.max(next, maxNid(tp.files) + 1) : next,
     ms: { parse: t1 - t0, analyze: t2 - t1, lower: t3 - t2, total: t3 - t0 },
   };
+}
+
+/** s474 r1 (review L5): the largest node id anywhere in `x` (an AST value; -1 for none). */
+function maxNid(x) {
+  let top = -1;
+  const todo = [x];
+  while (todo.length > 0) {
+    const v = todo.pop();
+    if (v === null || typeof v !== "object") continue;
+    if (Array.isArray(v)) { for (const e of v) todo.push(e); continue; }
+    if (typeof v.nid === "number" && v.nid > top) top = v.nid;
+    for (const k in v) todo.push(v[k]);
+  }
+  return top;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -266,7 +286,7 @@ export function frontEndStdlib(mods, files, entry, opts = {}) {
   const readFroms = opts.importFroms ?? importFroms(mods);
   for (;;) {
     const std = stdlibSources(mods, files, { stdlibRoot: opts.stdlibRoot, exclude, importFroms: readFroms });
-    const r = frontEnd(mods, [...files, ...std.sources.map((s) => ({ path: s.path, src: s.src }))], entry, { stdlibPaths: std.sources.map((s) => s.path) });
+    const r = frontEnd(mods, [...files, ...std.sources.map((s) => ({ path: s.path, src: s.src }))], entry, { stdlibPaths: std.sources.map((s) => s.path), keyBase: opts.keyBase });
     const bad = new Map(); // module → its Error diagnostics
     for (const d of r.diags) {
       if (!isError(d) || !String(d.file ?? "").startsWith(prefix)) continue;

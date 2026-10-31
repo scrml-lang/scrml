@@ -110,7 +110,7 @@ ${
         ])
 
         const program: Decl = {
-            sym: sProgram, kind: DeclKind.Program, single: true,
+            sym: sProgram, key: sProgram.hint, kind: DeclKind.Program, single: true,
             fields: [fCount, fStep, fDoubled],
             renders: [main], wiring: [], handles: [],
         }

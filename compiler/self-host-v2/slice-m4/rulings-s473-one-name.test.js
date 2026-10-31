@@ -8,6 +8,10 @@
 //    §7.6 file scope stays uniform (one name per file, #1636), and an imported name colliding
 //    with a local declaration stays E-SCOPE-010."
 //
+// s474 (door 3, "⭐ RULED — permanent-restrictions re-review: the four one-way doors", item 3)
+// LIFTS the exported-name half: "two files exporting one name: INTERIM". The 2a pins and the
+// cross-file component pins below are flipped to clean; the one-file rules are unchanged.
+//
 // Also pinned: a program cell is a file-scope binding (§7.6.1), so a cell beside a function or a
 // type of its name in one file is E-SCOPE-010; a cell beside an IMPORT of its name, from any
 // source (a stdlib module included), is E-SCOPE-010 (review MED-1); each binding is reported once
@@ -40,44 +44,41 @@ const FN = (name, exp = "") => `    ${exp}fn ${name}() -> string {\n        retu
 const USE = (name) => `    export fn use_${name.replace(/\W/g, "")}() -> string {\n        return "u";\n    }`;
 
 // ---------------------------------------------------------------------------
-describe("2a — two user files EXPORTING one name: E-SCOPE-010 (§7.6, S473 narrowed)", () => {
+// s474 (door 3, user-voice-scrml.md "⭐ RULED — permanent-restrictions re-review: the four one-way
+// doors", item 3): "Same-name components across files, and two files exporting one name: INTERIM.
+// The CSS scope key and output names are always per-file qualified." The S473 refusal pinned here
+// (E-SCOPE-010 at the second exporter) is LIFTED: every pair below now compiles. Importing two of
+// them into ONE file is the collision — slice-m4/scope-keys-s474.test.js.
+describe("2a — two user files EXPORTING one name: legal (S474 door 3; was E-SCOPE-010, S473 narrowed)", () => {
   test("two exported functions of one name in two libraries", () => {
     const A = lib("a.scrml", `${FN("helper", "export ")}`);
     const B = lib("b.scrml", `${FN("helper", "export ")}\n${USE("b")}`);
-    const r = prog(P(`    \${ import { use_b } from "./b.scrml"; }`), [A, B]);
-    expect(at(r)).toEqual([["E-SCOPE-010", "b.scrml"]]);
-    expect(errs(r)[0].message).toContain("§7.6");
-    // review LOW-5: the first binding by file:line:col
-    expect(errs(r)[0].message).toContain("a.scrml:2:5");
+    expect(at(prog(P(`    \${ import { use_b } from "./b.scrml"; }`), [A, B]))).toEqual([]);
   });
   test("across kinds: an exported type in one file, an exported function of its name in another", () => {
     const A = lib("a.scrml", `    export type Box:enum = { A, B }`);
     const B = lib("b.scrml", `    export fn Box() -> string {\n        return "b";\n    }`);
-    expect(at(prog(P(`    <p>x</p>`), [A, B]))).toEqual([["E-SCOPE-010", "b.scrml"]]);
+    expect(at(prog(P(`    <p>x</p>`), [A, B]))).toEqual([]);
   });
   test("across kinds: an exported constant and an exported user declaration of its name", () => {
     const A = lib("a.scrml", `    export const card = 3;`);
     const B = { path: "b.scrml", src: `export <card t:string/>\n` };
-    expect(at(prog(P(`    <p>x</p>`), [A, B]))).toEqual([["E-SCOPE-010", "b.scrml"]]);
+    expect(at(prog(P(`    <p>x</p>`), [A, B]))).toEqual([]);
   });
-  test("two exported non-component declarations of one name: E-SCOPE-010 (was E-BOOTSTRAP-UNSUPPORTED)", () => {
+  test("two exported non-component declarations of one name", () => {
     const A = { path: "a.scrml", src: `export <card t:string/>\n` };
     const B = { path: "b.scrml", src: `export <card u:string/>\n` };
-    expect(at(prog(P(`    <p>x</p>`), [A, B]))).toEqual([["E-SCOPE-010", "b.scrml"]]);
+    expect(at(prog(P(`    <p>x</p>`), [A, B]))).toEqual([]);
   });
-  test("r2 LOW-A: a private `<card>` first, then two files EXPORTING `<card>` — the exported pair is E-SCOPE-010", () => {
+  test("r2 LOW-A shape: a private `<card>` first, then two files EXPORTING `<card>`", () => {
     const r = prog(P(`    <p>x</p>`), [{ path: "a.scrml", src: `<card t:string/>\n` }, { path: "b.scrml", src: `export <card u:string/>\n` }, { path: "c.scrml", src: `export <card v:string/>\n` }]);
-    // b vs the private a: legal by the ruling, the bootstrap limit (fail closed); c vs the exported b: E-SCOPE-010
-    expect(at(r)).toEqual([["E-BOOTSTRAP-UNSUPPORTED", "b.scrml"], ["E-SCOPE-010", "c.scrml"]]);
-    expect(errs(r)[1].message).toContain("b.scrml:1:");
+    expect(at(r)).toEqual([]);
   });
-  test("three files exporting one name: one report per later binding (two)", () => {
+  test("three files exporting one name", () => {
     const A = lib("a.scrml", FN("helper", "export "));
     const B = lib("b.scrml", FN("helper", "export "));
     const C = lib("c.scrml", FN("helper", "export "));
-    const r = prog(P(`    <p>x</p>`), [A, B, C]);
-    expect(at(r)).toEqual([["E-SCOPE-010", "b.scrml"], ["E-SCOPE-010", "c.scrml"]]);
-    for (const d of errs(r)) expect(d.message).toContain("a.scrml:");
+    expect(at(prog(P(`    <p>x</p>`), [A, B, C]))).toEqual([]);
   });
 });
 
@@ -99,13 +100,15 @@ describe("2b — a private name never collides with another file's (S473 narrowe
     const A = lib("a.scrml", `    export fn count() -> int {\n        return 1;\n    }`);
     clean(prog(P(`    let <count:int=0/>`), [A]));
   });
-  test("two components of one name in two files keep E-COMPONENT-NAME-DUPLICATE (S473 item 4) — one report", () => {
+  // s474 (door 3): was E-COMPONENT-NAME-DUPLICATE (S473 item 4) — the scope key is per file now
+  test("two components of one name in two files: clean (S474 door 3)", () => {
     const A = { path: "a.scrml", src: `export <card t:string/>\nrenders <div>\${t}</div>\n` };
-    expect(at(prog(P(`    <card x:string/>\n    renders <p>\${x}</p>`), [A]))).toEqual([["E-COMPONENT-NAME-DUPLICATE", ENTRY]]);
+    clean(prog(P(`    <card x:string/>\n    renders <p>\${x}</p>`), [A]));
   });
-  test("a private non-component declaration pair: legal by the ruling, still the bootstrap limit (fail closed)", () => {
+  // s474 (door 3): was the bootstrap limit E-BOOTSTRAP-UNSUPPORTED (g-boot-decl-same-name-noncomponent-s473)
+  test("a private non-component declaration pair: clean (S474 door 3)", () => {
     const A = { path: "a.scrml", src: `export <card t:string/>\n` };
-    expect(at(prog(P(`    <card x:string/>\n    renders <p>\${x}</p>`), [A]))).toEqual([["E-BOOTSTRAP-UNSUPPORTED", ENTRY]]);
+    clean(prog(P(`    <card x:string/>\n    renders <p>\${x}</p>`), [A]));
   });
 });
 
@@ -160,14 +163,13 @@ describe("2c — one file: the §7.6 file scope (cells included) and the import-
     expect(at(r)).toEqual([["E-SCOPE-010", ENTRY]]);
   });
   test("review LOW-1: an owned pair does not hide an unowned clash of the same binding", () => {
-    // b.scrml: `export <card>` (a component) clashes with a.scrml's exported component (dupDecls,
-    // E-COMPONENT-NAME-DUPLICATE, at it) AND with b.scrml's own later `fn card` (file scope)
+    // b.scrml: `export <card>` (a component) beside a.scrml's exported component — legal since s474
+    // (door 3; was E-COMPONENT-NAME-DUPLICATE) — AND beside b.scrml's own later `fn card` (file
+    // scope, E-SCOPE-010: kept, PERMANENT). The one-file clash is still reported.
     const A = { path: "a.scrml", src: `export <card t:string/>\nrenders <div>\${t}</div>\n` };
     const B = { path: "b.scrml", src: `export <card u:string/>\nrenders <i>\${u}</i>\n\${\n    fn card() -> int {\n        return 1;\n    }\n}\n` };
     const r = prog(P(`    <p>x</p>`), [A, B]);
-    expect(at(r).sort()).toEqual([["E-COMPONENT-NAME-DUPLICATE", "b.scrml"], ["E-SCOPE-010", "b.scrml"]].sort());
-    const s = errs(r).map((d) => d.span.start);
-    expect(new Set(s).size).toBe(2);
+    expect(at(r)).toEqual([["E-SCOPE-010", "b.scrml"]]);
   });
 });
 
