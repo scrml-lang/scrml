@@ -1683,6 +1683,15 @@ function sqlErrorClientCallFailureSet(): EnumType {
 }
 
 /**
+ * S474 — the binder enums the COMPILER builds (never a program's declaration): codegen holds no
+ * field list for them, so §18.7's field checks on a `match <binder>` arm are the audit's
+ * (`auditPayloadShapeRefusal`).
+ */
+function isCompilerProvidedBinderSet(en: EnumType): boolean {
+  return en === CLIENT_SERVER_CALL_FAILURE_SET || en === sqlErrorBinderEnum() || en === sqlErrorClientCallFailureSet();
+}
+
+/**
  * The VARIANT SET an error-type name denotes, for the checks that read one
  * (exhaustiveness, `?` propagation, qualifier mismatch): the file's registry (declared,
  * imported under its LOCAL name, or a BUILTIN_TYPES entry), or — for the parseVariant
@@ -1838,7 +1847,7 @@ function auditLogIsBuiltin(ctx: WholeBinderAuditCtx): boolean {
   return !ctx.fileDeclaresLog && !auditFramesDeclare(ctx, "log") && !ctx.scope.lookup("log");
 }
 
-interface WholeBinderRefusal { code: "E-TYPE-004" | "E-EQ-001" | "E-TYPE-028" | "E-TYPE-031"; what: string }
+interface WholeBinderRefusal { code: "E-TYPE-004" | "E-EQ-001" | "E-TYPE-021" | "E-TYPE-022" | "E-TYPE-028" | "E-TYPE-031"; what: string }
 
 /** End index (exclusive) of the template literal opening at `i` (a backquote), nested `${…}` aware. */
 function templateLiteralEnd(text: string, i: number): number {
@@ -1946,6 +1955,8 @@ function auditBinderMatchPattern(pattern: string, binder: string, ctx: WholeBind
       return { code: "E-TYPE-031", what: `the arm \`${piece.trim()}\` re-binds \`${binder}\`` };
     }
     if (m[3] !== undefined) {
+      const shape = auditPayloadShapeRefusal(m[2], m[3], ctx);
+      if (shape) return shape;
       const binds = auditPayloadBindsOf(m[3]);
       if (binds === null || binds.length > 0) {
         const bad = auditEnumPayloadBinderRefusal(m[2], binds, ctx);
@@ -1973,6 +1984,39 @@ function auditPayloadBindsOf(text: string): AuditPayloadBind[] | null {
     unread = true;
   });
   return unread ? null : binds;
+}
+
+/**
+ * S474 (review of #1698, F1) — §18.7 against a COMPILER-PROVIDED binder enum (SqlError, the
+ * §19.9.10 failure set, their union), for an arm of `match <binder>` whose pattern carries a payload
+ * list (`.V(…)`): a named binder SHALL name a declared field (E-TYPE-022) and a positional list
+ * SHALL number exactly the variant's fields (E-TYPE-021). Codegen's `planPayloadBinders` applies
+ * these rules wherever it holds the variant's field list — every program-declared or imported enum
+ * — but it holds none for these sets, so a misnamed binder read `undefined` (`.QueryFailed(msg: m)`)
+ * or threw (`.ConnectionLost(x: y)`). Checked here for those sets ONLY, so a program enum's arm is
+ * not reported twice; mixing positional and named binders is refused by `planPayloadBinders` for
+ * every enum (it needs no field list). `text` is the list inside the parens.
+ */
+function auditPayloadShapeRefusal(variant: string, text: string, ctx: WholeBinderAuditCtx): WholeBinderRefusal | null {
+  if (!ctx.en || !isCompilerProvidedBinderSet(ctx.en)) return null;
+  const v = (ctx.en.variants ?? []).find((x) => x.name === variant);
+  if (!v) return null; // not a variant of the enum: the pattern checks refuse it
+  const fields = v.payload instanceof Map ? [...v.payload.keys()] : [];
+  const parts = text.trim() === "" ? [] : splitTopLevel(text, [","]).map((x) => x.trim());
+  const declared = fields.length === 0 ? "declares no payload fields" : `declares ${fields.map((f) => `\`${f}\``).join(", ")}`;
+  let named = 0;
+  for (const part of parts) {
+    const nm = /^([A-Za-z_$][\w$]*)\s*:/.exec(part);
+    if (!nm) continue;
+    named++;
+    if (!fields.includes(nm[1])) {
+      return { code: "E-TYPE-022", what: `the arm \`.${variant}(${text.trim()})\` names the payload field \`${nm[1]}\`, but \`${variant}\` ${declared} (§18.7)` };
+    }
+  }
+  if (named === 0 && parts.length !== fields.length) {
+    return { code: "E-TYPE-021", what: `the arm \`.${variant}(${text.trim()})\` gives ${parts.length} positional binder${parts.length === 1 ? "" : "s"}, but \`${variant}\` ${declared} (§18.7: positional binding binds every field, in declaration order)` };
+  }
+  return null;
 }
 
 /** S470 fix round 1 — one payload binder of a `match <binder>` arm: its position, or its field (named form). */
@@ -2197,6 +2241,11 @@ function auditWholeBinderTree(
             if (Array.isArray(arm.literals) && arm.literals.length > 0) { refuse("E-TYPE-028", `a literal arm is used over the error enum in \`match ${binder}\``); return; }
             if (!arm.isWildcard && !(ctx.en!.variants ?? []).some((v) => v.name === arm.variant)) { refuse("E-TYPE-031", `an arm of \`match ${binder}\` is not a variant of the handled error enum`); return; }
             if (bindingNames(arm.payloadBindings).includes(binder) || bindingNames(arm.binding).includes(binder)) { refuse("E-TYPE-031", `an arm re-binds \`${binder}\``); return; }
+            // S474 (review of #1698, F1) — §18.7 field names and arity, read off the pattern text.
+            if (!arm.isWildcard && typeof arm.binding === "string") {
+              const shape = auditPayloadShapeRefusal(String(arm.variant ?? ""), arm.binding, ctx);
+              if (shape) { st.refusal = shape; return; }
+            }
             if (!arm.isWildcard && [...bindingNames(arm.payloadBindings), ...bindingNames(arm.binding)].some((s) => s !== "" && s !== "_")) {
               // S470 fix round 1 — `payloadBindings` flattens a named form (`.V(f: _, g: x)` reads
               // `["_", "x"]`, while the lowering binds `x` to field `g`), so the arm's pattern TEXT
@@ -11939,7 +11988,12 @@ function annotateNodes(
   const wholeBinderRefusalError = (why: WholeBinderRefusal, binder: string, en: EnumType | null, span: Span): TSError => {
     const ty = en ? `\`${en.name}\`` : "the handled call's error enum";
     const allowed = `As a whole error it may only be \`match\`ed (\`match ${binder} { .Variant(x) :> … }\`), tested with \`is\` (\`${binder} is .Variant\`), ` +
-      `read as \`${binder}.variant\`, or passed whole to a variant constructor or a function whose parameter is typed ${ty}. ` +
+      // S474 (review of #1698, F5) — a compiler-provided set (SqlError, the §19.9.10 failure set)
+      // cannot be written in a type annotation on impl#1 (g-builtin-error-types-unknown-in-annotation-position-s466),
+      // so the hint does not offer a parameter typed with it.
+      (en && isCompilerProvidedBinderSet(en)
+        ? `or read as \`${binder}.variant\` (${ty} is compiler-provided; impl#1 cannot yet name it in a type annotation, so it cannot be passed to a typed parameter). `
+        : `read as \`${binder}.variant\`, or passed whole to a variant constructor or a function whose parameter is typed ${ty}. `) +
       `To read a payload, name the variant in the arm (\`.Variant(x) :> …\`) (§18.6.1).`;
     const lead = why.code === "E-TYPE-004"
       ? `\`${binder}\` in \`_ ${binder} :>\` is the WHOLE error value — an error-enum value, not a struct — so ${why.what}; it reads no field.`

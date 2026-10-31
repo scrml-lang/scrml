@@ -217,6 +217,21 @@ describe("S474 — `_ e :>` on a `! -> SqlError` callee is typed (§18.6.1): imp
     expect(out.codes).toEqual(["E-TYPE-004", "E-TYPE-004"]);
   });
 
+  test("the E-TYPE-004 hint does not offer a parameter typed with a compiler-provided set (r1 F5: unwritable on impl#1)", () => {
+    const out = compileProject(VIEW("", `function loadMsg() {
+      @fromLocal = fetchLocal() !{ _ e :> { @localSeen = e.message; return } }
+    }`));
+    expect(out.codes).toEqual(["E-TYPE-004"]);
+    expect(out.messages[0]).not.toMatch(/parameter is typed/);
+    expect(out.messages[0]).toMatch(/compiler-provided/);
+    // A program-declared enum keeps the offer.
+    const user = compileProject(VIEW(`type AuthErr:enum = { Denied(reason: string), Gone }
+    server function check(p)! -> AuthErr { fail AuthErr.Gone }`, `server function q(p) { const r = check(p) !{ _ e :> { log(e.reason); return "x" } }
+      return r }`));
+    expect(user.codes).toEqual(["E-TYPE-004"]);
+    expect(user.messages[0]).toMatch(/parameter is typed `AuthErr`/);
+  });
+
   test("comparing the whole error with a primitive stays E-EQ-001", () => {
     const out = compileProject(VIEW("", `function loadEq() {
       @fromLocal = fetchLocal() !{ _ e :> { @localSeen = e == "QueryFailed" ? "y" : "n"; return } }
@@ -291,6 +306,54 @@ describe("S474 — the whole binder on a `?{}` handled at the site is `SqlError`
     expect(at("log(e is .ConnectionLost)").codes).toEqual([]);
     expect(at("log(e.message)").codes).toEqual(["E-TYPE-004"]);
     expect(at("log(e is .Transport)").codes).toEqual(["E-TYPE-031"]);
+  });
+});
+
+// S474 fix round 1 (review of #1698, F1): §18.7 on a `match e` arm over a COMPILER-PROVIDED binder
+// enum. Codegen's `planPayloadBinders` holds no field list for SqlError / the §19.9.10 set, so
+// before this a misnamed binder compiled and read `undefined` (the route answered 200
+// "msg=undefined" with the table dropped) and `.ConnectionLost(x: y)` threw at run time.
+describe("S474 r1 — payload binders of `match e` arms are checked against the compiler-provided set (§18.7)", () => {
+  const codesOf = (fnText) => compileProject(VIEW("", fnText)).codes;
+  const onSql = (arms) => `server function q() { const r = ?{\`SELECT id FROM gnode\`}.all() !{ _ e :> match e { ${arms} } }
+      return r }`;
+  const onCallee = (arms) => `server function q() { const r = fetchLocal() !{ _ e :> match e { ${arms} } }
+      return r }`;
+  const onImported = (arms) => `server function q() { const r = listArcs() !{ _ e :> match e { ${arms} } }
+      return r }`;
+  const onTransport = (arms) => `function q() { @directSeen = qDirect() !{ _ e :> match e { ${arms} } } }`;
+
+  test.each([
+    ["?{} — a field QueryFailed does not declare", onSql(`.QueryFailed(msg: m) :> "msg=" + m, else :> "other"`), ["E-TYPE-022"]],
+    ["?{} — a named binder on a unit variant", onSql(`.ConnectionLost(x: y) :> "c" + y, else :> "other"`), ["E-TYPE-022"]],
+    ["?{} — a declared field plus an undeclared one", onSql(`.QueryFailed(message: a, extra: b) :> a + b, else :> "other"`), ["E-TYPE-022"]],
+    ["?{} — a positional binder on a unit variant", onSql(`.ConnectionLost(y) :> "c" + y, else :> "other"`), ["E-TYPE-021", "E-TYPE-027"]],
+    ["?{} — two positional binders on a one-field variant", onSql(`.QueryFailed(a, b) :> a + b, else :> "other"`), ["E-TYPE-021", "E-TYPE-027"]],
+    ["?{} — positional and named mixed (codegen's refusal, reported once)", onSql(`.QueryFailed(a, message: b) :> a + b, else :> "other"`), ["E-TYPE-021"]],
+    ["local `! -> SqlError` — a field QueryFailed does not declare", onCallee(`.QueryFailed(msg: m) :> "msg=" + m, else :> "other"`), ["E-TYPE-022"]],
+    ["local `! -> SqlError` — a named binder on a unit variant", onCallee(`.ConnectionLost(x: y) :> "c" + y, else :> "other"`), ["E-TYPE-022"]],
+    ["local `! -> SqlError` — an extra named field", onCallee(`.QueryFailed(message: a, extra: b) :> a + b, else :> "other"`), ["E-TYPE-022"]],
+    ["imported `! -> SqlError` — a field ConstraintViolation does not declare", onImported(`.ConstraintViolation(column: c) :> c, else :> "other"`), ["E-TYPE-022"]],
+    ["the §19.9.10 set — a field Transport does not declare", onTransport(`.Transport(zzz: m) :> "t", else :> "other"`), ["E-TYPE-022"]],
+  ])("%s", (_label, fnText, want) => {
+    expect(codesOf(fnText)).toEqual(want);
+  });
+
+  test("the declared field still binds: `.QueryFailed(message: m)` / `.ConstraintViolation(field: f)` compile", () => {
+    expect(codesOf(onSql(`.QueryFailed(message: m) :> "msg=" + m, else :> "other"`))).toEqual([]);
+    expect(codesOf(onCallee(`.QueryFailed(message: m) :> m, else :> "other"`))).toEqual([]);
+    expect(codesOf(onImported(`.ConstraintViolation(field: f) :> f, else :> "other"`))).toEqual([]);
+  });
+
+  test("a program-declared enum is unchanged: the same misuses are refused ONCE, by codegen (E-TYPE-022 / E-TYPE-021)", () => {
+    const ue = (arms) => `type AuthErr:enum = { Denied(reason: string), Gone }
+    server function check(p)! -> AuthErr { fail AuthErr.Gone }
+    server function q(p) { const r = check(p) !{ _ e :> match e { ${arms} } }
+      return r }`;
+    expect(compileProject(VIEW(ue(`.Denied(msg: m) :> m, else :> "other"`))).codes).toEqual(["E-TYPE-022"]);
+    expect(compileProject(VIEW(ue(`.Gone(x: y) :> y, else :> "other"`))).codes).toEqual(["E-TYPE-022"]);
+    expect(compileProject(VIEW(ue(`.Denied(a, b) :> a + b, else :> "other"`))).codes).toEqual(["E-TYPE-021"]);
+    expect(compileProject(VIEW(ue(`.Denied(reason: m) :> m, else :> "other"`))).codes).toEqual([]);
   });
 });
 
