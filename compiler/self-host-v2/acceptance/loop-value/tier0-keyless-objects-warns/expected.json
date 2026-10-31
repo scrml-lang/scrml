@@ -1,0 +1,24 @@
+{
+  "id": "acceptance-loop-value-tier0-keyless-objects-warns",
+  "description": "W-KEY-001 (Warning): a Tier-0 loop over `Item[]` with no header `key`; the rows render.",
+  "language-version": "1.0",
+  "spec": "§17.4b · §34",
+  "rationale": "§17.4b: \"When no `key` is declared, the compiler MAY emit W-KEY-001 warning for collections that contain objects.\" · §6.5.3 RULED S473: \"`W-KEY-001` takes the header meaning: a collection of objects iterated with no header `key`\".",
+  "expect": {
+    "codes": [
+      "W-KEY-001"
+    ],
+    "codeCounts": {
+      "W-KEY-001": 1
+    },
+    "severity": {
+      "W-KEY-001": "warning"
+    },
+    "domAnchored": [
+      {
+        "selector": "#u",
+        "text": "ab"
+      }
+    ]
+  }
+}

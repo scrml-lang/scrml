@@ -90,7 +90,10 @@ ${
         cycles: CycleJs[],
     }
 
-    type Tier0Rows:struct = { rows: JsExpr[] }
+    // s474: `key` — a KEYED loop's (§17.4b) iteration-key local (its name and
+    // Sym id; "" / -1 unkeyed): its Let prints `rt.loopKey(…)`, and a value
+    // Lift appends a keyed text row.
+    type Tier0Rows:struct = { rows: JsExpr[], key: string, keyId: int }
     // s471 — a waiting loop's two ways out of an iteration: `exit` (the Join of
     // what follows the loop) and `next` (the next iteration, its bindings
     // carried forward — §49.3.7).
@@ -387,6 +390,7 @@ ${
             .StructOf(ty: ty, fields: fs) :> structJs(ctx, ty, fs)
             .VariantOf(enumSym: es, idx: vi, args: va) :> variantValueJs(ctx, es, vi, va)   // s472: THE ENUM VALUE SHAPE, as a `fail` builds it
             .Handle(inst: i) :> instJs(ctx, i)
+            .Assigned(local: l, value: v) :> JsExpr.JAssignE(symName(ctx, l), exprJs(ctx, v))   // s474 (§50, D10): the kept condition-head assignment
             .InitOf(decl: d, inst: i, idx: x) :> rtCall(ctx, "initial", [instJs(ctx, i), JsExpr.JAnnot(jnum(x), memberName(ctx, d, x))])
             .Host(call: c) :> hostJs(c)
             .Lambda(params: ps, body: b) :> JsExpr.JArrowE(symNames(ctx, ps), exprJs(ctx, b))
@@ -1161,6 +1165,7 @@ ${
 
     fn tier0Value(ctx: Ctx, t0: Tier0Rows | not, v: JsExpr) -> JsExpr {
         if (t0 is not) return v
+        if (t0.key != "") return rtCall(ctx, "keyTextRow", [jid(t0.key), v])   // s474 (§17.4b)
         return rtCall(ctx, "textRow", [v])
     }
 
@@ -1468,6 +1473,9 @@ ${
 
     fn letJs(ctx: Ctx, sym: Sym, init: Expr, assigned: int[]) -> JsStmt {
         if (hasInt(assigned, sym.id)) return JsStmt.SLet(symName(ctx, sym), exprJs(ctx, init))
+        // s474 — a keyed Tier-0 loop's iteration key (§17.4b): `rt.loopKey(v)`
+        const t0: Tier0Rows | not = ctx.tier0
+        if (t0 is given && t0.keyId == sym.id) return JsStmt.SConst(symName(ctx, sym), rtCall(ctx, "loopKey", [exprJs(ctx, init)]))
         return JsStmt.SConst(symName(ctx, sym), exprJs(ctx, init))
     }
 
@@ -1823,7 +1831,7 @@ ${
             .ResetOn(triggers: ds, reset: b, rank: r) :> resetOnJs(ctx, ds, b, r)
             .Errors(of: x, all: a) :> only([sexpr(rtCall(ctx, "errors", [scopeVar(), node, jthunk(jmcall(surfaceJs(ctx, x), "messages", [])), JsExpr.JBool(a)]))])
             .Reach(fields: fs) :> reachJs(ctx, fs, node)
-            .Gather(g: g, rows: rows) :> gatherJs(ctx, g, rows, node, tid + "/" + pathText(h.path))
+            .Gather(g: g, rows: rows, key: gk) :> gatherJs(ctx, g, rows, gk, node, tid + "/" + pathText(h.path))
         }
     }
 
@@ -1836,33 +1844,71 @@ ${
     // is made WHEN its Lift runs and closes over a snapshot of the loop's locals
     // it reads (`((x, i) => (scope$, anchor$) => { … })(x, i)`), so a local the
     // loop rebinds later never changes a row already lifted (§49.6 rule 3).
-    fn gatherJs(ctx: Ctx, g: Gather, rows: GatherRow[], node: JsExpr, tid: string) -> Rendered {
+    //
+    // s474 — KEYED (§17.4b `for (x of xs key e)`; `key` the local the body's
+    // first statement binds, `const key = rt.loopKey(e)`): `rt.gatherKeyed`.
+    // A row Lift appends `rt.keyRow(key, idx, [x, i], (scope$, anchor$, x, i) =>
+    // { … })` — the row's template index and its snapshot of the loop's
+    // locals; the row's markup reads each of those locals through a CELL (`x`
+    // is a cell there, read `x.get()`, as an `<each>` row reads its item), so a
+    // row whose identity — key, template, place among the iteration's lifts of that template —
+    // persists across a re-run keeps its DOM and its scope, and only the cells
+    // are set to the iteration's new values (§17.4b: "preserving DOM state …
+    // for elements whose key persists"). A value Lift appends `rt.keyTextRow(key, v)`.
+    fn gatherJs(ctx: Ctx, g: Gather, rows: GatherRow[], key: Sym | not, node: JsExpr, tid: string) -> Rendered {
         const local: Sym[] = boundSyms(Node.NStmt(Stmt.Gather(g)))
         let thunks: JsExpr[] = []
         let templates: Template[] = []
+        let keyName: string = ""
+        let keyId: int = -1
+        if (key is given) {
+            keyName = symName(ctx, key)
+            keyId = key.id
+        }
         let k = 0
         for (const row of rows) {
-            const r: Rendered = renderViews(withTier0(nested(ctx), not), row.views, tid + "." + k)
-            const snap: string[] = rowSnapshot(ctx, local, row.views)
+            const snapSyms: Sym[] = rowSnapshotSyms(ctx, local, row.views)
+            let snap: string[] = []
+            let snapIds: int[] = []
             let args: JsExpr[] = []
-            for (const n of snap) { args = args.concat([jid(n)]) }
-            const render: JsExpr = JsExpr.JArrow(["scope$", "anchor$"], r.stmts)
-            thunks = thunks.concat([jcall(JsExpr.JArrowE(snap, render), args)])
-            templates = templates.concat(r.templates)
+            for (const sy of snapSyms) {
+                snap = snap.concat([symName(ctx, sy)])
+                snapIds = snapIds.concat([sy.id])
+                args = args.concat([jid(symName(ctx, sy))])
+            }
+            if (keyName != "") {
+                const kr: Rendered = renderViews(withRowCells(withTier0(nested(ctx), not), snapIds), row.views, tid + "." + k)
+                const krender: JsExpr = JsExpr.JArrow(["scope$", "anchor$"].concat(snap), kr.stmts)
+                thunks = thunks.concat([rtCall(ctx, "keyRow", [jid(keyName), jnum(k), JsExpr.JArray(args), krender])])
+                templates = templates.concat(kr.templates)
+            } else {
+                const r: Rendered = renderViews(withTier0(nested(ctx), not), row.views, tid + "." + k)
+                const render: JsExpr = JsExpr.JArrow(["scope$", "anchor$"], r.stmts)
+                thunks = thunks.concat([jcall(JsExpr.JArrowE(snap, render), args)])
+                templates = templates.concat(r.templates)
+            }
             k = k + 1
         }
         const acc: string = symName(ctx, g.bind)
         const assigned: int[] = assignedSyms(Node.NStmt(Stmt.Gather(g)))
-        const lctx: Ctx = withTier0(ctx, { rows: thunks })
+        const lctx: Ctx = withTier0(ctx, { rows: thunks, key: keyName, keyId: keyId })
         const body: JsStmt[] = [JsStmt.SConst(acc, JsExpr.JArray([]))]
             .concat(loopJs(lctx, g.label, g.head, g.body, assigned))
             .concat([JsStmt.SReturn(jid(acc))])
-        return { stmts: [sexpr(rtCall(ctx, "gather", [scopeVar(), node, JsExpr.JArrow([], body)]))], templates: templates }
+        let entry: string = "gather"
+        if (keyName != "") entry = "gatherKeyed"
+        return { stmts: [sexpr(rtCall(ctx, entry, [scopeVar(), node, JsExpr.JArrow([], body)]))], templates: templates }
+    }
+
+    // s474 — a keyed row's snapshot locals are CELLS in its markup (`x.get()`).
+    fn withRowCells(ctx: Ctx, ids: int[]) -> Ctx {
+        return { p: ctx.p, names: ctx.names, lexical: ctx.lexical, handles: ctx.handles, shared: ctx.shared,
+                 rows: ctx.rows.concat(ids), slot: ctx.slot, prebuilt: ctx.prebuilt, ret: ctx.ret, server: ctx.server, tier0: ctx.tier0, cycles: ctx.cycles }
     }
 
     // The loop's locals (`local`: the Syms the Gather binds, at any depth of
     // its head and body, in walk order) that a row reads, by name.
-    fn rowSnapshot(ctx: Ctx, local: Sym[], views: View[]) -> string[] {
+    fn rowSnapshotSyms(ctx: Ctx, local: Sym[], views: View[]) -> Sym[] {
         let reads: int[] = []
         for (const v of views) {
             for (const n of allNodes(Node.NView(v))) {
@@ -1870,9 +1916,13 @@ ${
                 if (id >= 0 && !hasInt(reads, id)) reads = reads.concat([id])
             }
         }
-        let out: string[] = []
+        let out: Sym[] = []
+        let names: string[] = []
         for (const s of local) {
-            if (hasInt(reads, s.id) && out.indexOf(symName(ctx, s)) < 0) out = out.concat([symName(ctx, s)])
+            if (hasInt(reads, s.id) && names.indexOf(symName(ctx, s)) < 0) {
+                out = out.concat([s])
+                names = names.concat([symName(ctx, s)])
+            }
         }
         return out
     }
@@ -1908,6 +1958,7 @@ ${
             .StructOf(ty: x) :> -1
             .VariantOf(enumSym: x) :> -1
             .Handle(inst: x) :> -1
+            .Assigned(local: x) :> -1
             .InitOf(decl: x) :> -1
             .Host(call: x) :> -1
             .Lambda(params: x) :> -1
@@ -2113,6 +2164,7 @@ ${
             .StructOf(ty: x) :> []
             .VariantOf(enumSym: x) :> []
             .Handle(inst: x) :> []
+            .Assigned(local: x) :> []
             .InitOf(decl: x) :> []
             .Host(call: x) :> []
             .Lambda(params: x) :> []
@@ -2230,6 +2282,7 @@ ${
             .JObject :> false
             .JAnnot :> false
             .JAwait :> false
+            .JAssignE :> false
             .JNew :> false
         }
     }
@@ -2581,6 +2634,7 @@ ${
             .StructOf(ty: t) :> false
             .VariantOf(enumSym: t) :> false
             .Handle(inst: i) :> false
+            .Assigned(local: x) :> false
             .Host(call: c) :> false
             .Lambda(params: ps) :> false
             .SeqCall(op: o) :> false
@@ -3046,6 +3100,7 @@ ${
             .StructOf(ty: x) :> false
             .VariantOf(enumSym: x) :> false
             .Handle(inst: x) :> false
+            .Assigned(local: x) :> false
             .InitOf(decl: x) :> false
             .Host(call: x) :> false
             .Lambda(params: x) :> false
@@ -3295,6 +3350,7 @@ ${
             .StructOf(ty: x) :> not
             .VariantOf(enumSym: x) :> not
             .Handle(inst: x) :> not
+            .Assigned(local: x) :> not
             .InitOf(decl: x) :> not
             .Host(call: x) :> not
             .Lambda(params: x) :> not
@@ -3412,6 +3468,7 @@ ${
             .StructOf(ty: x) :> not
             .VariantOf(enumSym: x) :> not
             .Handle(inst: x) :> not
+            .Assigned(local: x) :> not
             .InitOf(decl: x) :> not
             .Host(call: x) :> not
             .Lambda(params: x) :> not

@@ -1,0 +1,8 @@
+// §17.4b (canonical keyed iteration, S473 review-surfaced 5): `key` in the loop header.
+<program>
+    type Item:struct = { id: int, name: string }
+    <items:Item[]=([{ id: 7, name: "a" }, { id: 3, name: "b" }, { id: 5, name: "c" }])/>
+    <main>
+        <ul id="u">${ for (const it of @items key it.id) { lift <li>${it.name}</li>; } }</ul>
+    </main>
+</program>

@@ -1,0 +1,18 @@
+{
+  "id": "acceptance-loop-value-neg-tier0-key-type",
+  "description": "E-KEY-001: the header `key` is a struct (`key it`), not a string or a number.",
+  "language-version": "1.0",
+  "spec": "§17.4b · §6.5.3 · §34",
+  "rationale": "§6.5.3: \"A non-string, non-number `key=` value SHALL be a compile error (E-KEY-001).\" · §34 E-KEY-001: \"The keyed-iteration runtime requires primitive keys for stable diffing\" — carried to the canonical header form (S473 review-surfaced 5).",
+  "expect": {
+    "codes": [
+      "E-KEY-001"
+    ],
+    "codeCounts": {
+      "E-KEY-001": 1
+    },
+    "severity": {
+      "E-KEY-001": "error"
+    }
+  }
+}
