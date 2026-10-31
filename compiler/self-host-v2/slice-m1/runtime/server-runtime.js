@@ -509,9 +509,36 @@ function connectWith(host, desc) {
   if (typeof SQL !== "function") throw new Error("scrml server: no database driver — pass `host.connect(desc)` to createServer");
   if (desc.driver === "sqlite") {
     if (desc.target === ":memory:") return new SQL(":memory:");
-    return new SQL("sqlite://" + resolveSqlitePath(host, desc));
+    return configured(new SQL("sqlite://" + resolveSqlitePath(host, desc)));
   }
   return new SQL(desc.target);
+}
+
+// S474 #1703 r1 (review F3) — the SQLite defaults impl#1 applies to the handle its
+// server opens (operator ruling S385 A1: "WAL + 5s busy-timeout as the safe default";
+// impl#1 compiler/src/codegen/sqlite-defaults.ts). Without a busy timeout, a writing
+// envelope's BEGIN IMMEDIATE (S474 ruling 5) fails at once while another process
+// holds the write lock; with it, the BEGIN waits up to 5 s and then runs.
+// As impl#1: `busy_timeout` FIRST, each pragma in its OWN try (a WAL change needs a
+// momentary exclusive lock and throws under contention — it must not take
+// busy_timeout with it; it persists in the file once an uncontended open lands it);
+// silent catches (a handle that does not answer PRAGMA runs with sqlite's own
+// settings — never worse than without). Only the DEFAULT host's file-backed handle:
+// a host that injects `host.connect` configures its own driver.
+const SQLITE_BUSY_TIMEOUT_MS = 5000;
+function configured(sql) {
+  let ready = null;
+  const setup = async () => {
+    try { await sql.unsafe(`PRAGMA busy_timeout = ${SQLITE_BUSY_TIMEOUT_MS}`); } catch { /* not answered */ }
+    try { await sql.unsafe("PRAGMA journal_mode = WAL"); } catch { /* contended or read-only */ }
+  };
+  // every statement waits for the pragmas, issued once before the first one
+  const run = (strings, ...values) => {
+    if (ready === null) ready = setup();
+    return ready.then(() => sql(strings, ...values));
+  };
+  run.close = (...a) => sql.close(...a);
+  return run;
 }
 
 function resolveSqlitePath(host, desc) {
@@ -612,14 +639,31 @@ export function sqlErrorOf(e) {
   const code = e && typeof e.code === "string" ? e.code : "";
   const msg = messageOf(e);
   if (code.startsWith("SQLITE_CONSTRAINT") || /^23\d\d\d$/.test(code)) {
-    const m = /constraint failed: (.*)$/.exec(msg);
-    let field = m ? m[1] : "";
-    if (field === "" && e && typeof e.column === "string") field = e.column;
-    if (field === "" && e && typeof e.constraint === "string") field = e.constraint;
-    return { variant: "ConstraintViolation", data: [field] };
+    return { variant: "ConstraintViolation", data: [constraintField(e, msg).field] };
   }
   if (CONNECTION_CODES.has(code) || [...CONNECTION_CODES].some((c) => code.startsWith(c))) return "ConnectionLost";
   return { variant: "QueryFailed", data: [msg] };
+}
+
+// ConstraintViolation's `field` (S474 #1703 r1, PA ruling): the COLUMN name only —
+// `email`, never `users.email` — in every build, as impl#1 (#1704) delivers it: a
+// client needs the field to say "that email is taken", and the table name is schema.
+// SQLite names the columns `table.col[, table.col…]` after "constraint failed: "
+// (UNIQUE / NOT NULL / PRIMARY KEY); each is cut to its column. Anything else after
+// it (a CHECK's constraint name or expression) is NOT a column: it stays the field's
+// value in server code and is withheld from a production answer (`column: false`).
+// Postgres / MySQL: the driver's `column` when it gives one, else its `constraint`
+// name (not a column).
+function constraintField(e, msg) {
+  const m = /constraint failed: (.*)$/.exec(msg);
+  if (m) {
+    const cols = m[1].split(", ").map((part) => /^[^\s.,]+\.([^\s.,]+)$/.exec(part));
+    if (cols.every((c) => c !== null)) return { field: cols.map((c) => c[1]).join(", "), column: true };
+    return { field: m[1], column: false };
+  }
+  if (e && typeof e.column === "string" && e.column !== "") return { field: e.column, column: true };
+  if (e && typeof e.constraint === "string" && e.constraint !== "") return { field: e.constraint, column: false };
+  return { field: "", column: false };
 }
 
 // ---------------------------------------------------------------------------
@@ -632,19 +676,30 @@ export function sqlErrorOf(e) {
 // driver text in the value delivered to the client; a production build blanks
 // it (the server logs it either way)").
 //
-// The query's failure value keeps the driver text (server code sees it). Each
-// driver-derived string of a failed query — the driver's message, and the
-// SqlError payload taken from it (QueryFailed's message, ConstraintViolation's
-// field, e.g. `users.email`) — is recorded in the REQUEST it ran in (an
-// AsyncLocalStorage scope `handle` opens around the route's body). When the
-// route answers a failure, every string of the encoded failure's payload that
-// CONTAINS a recorded text is replaced by "" — the variant and the payload's
-// shape stay, so the client's match arms still decode it — unless the server
-// is a DEV build (`host.dev === true`, passed by `scrml-boot dev`; every other
-// host, a deployed `scrml-boot compile` output included, is production).
-// The ORIGIN is tracked, not the variant name: a failure the author spells
-// (`fail .QueryFailed("no such user")`) is not blanked; a driver text the
-// author re-wraps into another variant (`fail .Bad("db: " + m)`) is.
+// THE CONTRACT (S474 #1703 r1): the compiler and runtime never send UNCHANGED
+// driver text by themselves; text the author HANDLED is the author's.
+//  - A failed query's value keeps its driver text, so server code that handles
+//    the `?{}` sees it (QueryFailed's message is the driver's message;
+//    ConstraintViolation's field is the column name — constraintField).
+//  - Its driver texts are recorded in the REQUEST it ran in (an AsyncLocalStorage
+//    scope `handle` opens around the route's body): the driver's MESSAGES (its
+//    message, Postgres's `detail`) and its non-column TOKENS (a CHECK's
+//    constraint name, Postgres's `constraint`). A column name is not recorded: it
+//    is delivered (PA ruling, above).
+//  - When the route answers a failure in a PRODUCTION build, a payload string is
+//    replaced by "" when it CONTAINS a whole recorded message, or EQUALS a recorded
+//    token — the variant and the payload's shape stay, so the client's match arms
+//    still decode it. So `?` propagation (the implicit re-fail) and a verbatim
+//    re-wrap (`fail .Bad(m)`, `fail .Bad("db: " + m)`) are withheld.
+//  - A token is NEVER matched as a substring: "the amount must be positive" is the
+//    author's text even when a CHECK named `positive` failed (#1703 review F2).
+//  - NOT tracked (best effort, not a guarantee — g-boot-wire-driver-text-transformed-
+//    not-tracked-s474): driver text the author TRANSFORMS (`m.slice(16)`,
+//    `f.toUpperCase()`) — JS strings carry no taint, so the author owns what a
+//    handler builds — and a success value the author returns.
+//  - DEV build (`host.dev === true`, passed by `scrml-boot dev`; every other host,
+//    a deployed `scrml-boot compile` output included, is production): delivered
+//    unchanged.
 // Fail closed: with no AsyncLocalStorage the request's texts cannot be told
 // apart, so a production build blanks EVERY string of a failure payload.
 // The full text was already logged where the query failed (runQuery).
@@ -664,20 +719,27 @@ function noteDriverText(e, err) {
   if (reqScope === null) return;
   const rec = reqScope.getStore();
   if (rec === undefined) return;
-  const add = (t) => { if (typeof t === "string" && t !== "" && !rec.texts.includes(t)) rec.texts.push(t); };
-  add(messageOf(e));
+  const addTo = (list, t) => {
+    if (typeof t !== "string" || t === "" || list.includes(t)) return;
+    list.push(t);
+    rec.texts.push(t);
+  };
+  const msg = messageOf(e);
+  addTo(rec.messages, msg);
   if (e && typeof e === "object") {
-    add(e.column);
-    add(e.constraint);
-    add(e.detail);
+    addTo(rec.messages, e.detail);
+    addTo(rec.tokens, e.constraint);
   }
-  if (err && typeof err === "object" && Array.isArray(err.data)) for (const d of err.data) add(d);
+  if (err && typeof err === "object" && err.variant === "ConstraintViolation") {
+    const cf = constraintField(e, msg);
+    if (!cf.column) addTo(rec.tokens, cf.field);
+  }
 }
 
 // The encoded failure `wire` with every driver-derived string blanked (see above).
 function withholdDriverText(wire, rec) {
   let changed = false;
-  const tainted = (str) => rec.unknown || rec.texts.some((t) => str.includes(t));
+  const tainted = (str) => rec.unknown || rec.messages.some((t) => str.includes(t)) || rec.tokens.includes(str);
   const walk = (v) => {
     if (typeof v === "string") {
       if (v !== "" && tainted(v)) { changed = true; return ""; }
@@ -981,7 +1043,7 @@ async function handle(host, r, request) {
     args.push(d.value);
   }
   let result;
-  const rec = { texts: [], unknown: false };
+  const rec = { texts: [], messages: [], tokens: [], unknown: false };
   const rs = requestStore();
   if (rs === null) rec.unknown = true;
   try {

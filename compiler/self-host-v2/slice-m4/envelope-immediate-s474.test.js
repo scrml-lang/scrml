@@ -23,7 +23,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { SQL } from "bun";
 import { Database } from "bun:sqlite";
-import { compile, serve, post, pathOf } from "./server-artifact-harness.js";
+import { compile, serve, post, pathOf, artifacts, loadServer, plainRespond } from "./server-artifact-harness.js";
 
 const SQ = "?" + "{";
 const run = (sql, nb = "") => `${SQ}\`${sql}\`}${nb}.run();`;
@@ -196,4 +196,68 @@ describe("run time: a second connection holding the write lock (rollback journal
       });
     });
   }
+});
+
+// ---------------------------------------------------------------------------
+// #1703 fix round r1 (review F3): the DEFAULT host's file-backed SQLite handle runs
+// `PRAGMA busy_timeout = 5000` then `PRAGMA journal_mode = WAL` before its first statement —
+// impl#1's S385 default (compiler/src/codegen/sqlite-defaults.ts). Without it, a writing
+// envelope's BEGIN IMMEDIATE answered 500 at once while another PROCESS held the write lock.
+// (The blocks above inject their own driver — a host that injects `connect` configures its own,
+// so they still see the immediate BUSY.) The other writer here is a real second PROCESS.
+// ---------------------------------------------------------------------------
+describe("the default host's SQLite handle waits a held lock out (busy_timeout 5000 + WAL)", () => {
+  let dir, file, srv, routes, logs;
+  beforeAll(async () => {
+    dir = mkdtempSync(join(tmpdir(), "s474-busy-"));
+    file = join(dir, "app.db");
+    const setup = new Database(file);
+    setup.exec("CREATE TABLE log (a INTEGER)");
+    setup.close();
+    const { server } = artifacts(core);
+    routes = server.routes;
+    const mod = await loadServer(server.js, core);
+    logs = [];
+    // no `connect`: the server opens the database itself (Bun.SQL), resolved against `root`
+    srv = mod.createServer({ root: dir, log: (l) => logs.push(l), respond: plainRespond });
+  }, 300000);
+  afterAll(() => rmSync(dir, { recursive: true, force: true }));
+  const rows = () => {
+    const db = new Database(file, { readonly: true });
+    try { return db.query("SELECT a FROM log ORDER BY a").all().map((r) => r.a); } finally { db.close(); }
+  };
+
+  test("the first (uncontended) request configures the handle: the file is WAL afterwards", async () => {
+    const res = await post(srv, pathOf(routes, "readTwo"), [1]);
+    expect(res.status).toBe(200);
+    const db = new Database(file, { readonly: true });
+    try { expect(String(db.query("PRAGMA journal_mode").get().journal_mode).toLowerCase()).toBe("wal"); } finally { db.close(); }
+  });
+  test("a second process holding the write lock ~200 ms: the envelope waits at BEGIN IMMEDIATE, then commits", async () => {
+    const script = [
+      `const { Database } = require("bun:sqlite");`,
+      `const db = new Database(${JSON.stringify(file)});`,
+      `db.exec("BEGIN IMMEDIATE");`,
+      `db.exec("INSERT INTO log (a) VALUES (999)");`,
+      `console.log("locked");`,
+      `setTimeout(() => { db.exec("ROLLBACK"); db.close(); }, 200);`,
+    ].join("\n");
+    const holder = Bun.spawn([process.execPath, "-e", script], { stdout: "pipe" });
+    const reader = holder.stdout.getReader();
+    let seen = "";
+    while (!seen.includes("locked")) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      seen += new TextDecoder().decode(value);
+    }
+    expect(seen).toContain("locked");
+    const t0 = Date.now();
+    const res = await post(srv, pathOf(routes, "readThenWrite"), [1]);
+    const waited = Date.now() - t0;
+    await holder.exited;
+    expect(res.status).toBe(200);
+    expect(waited).toBeGreaterThanOrEqual(100);
+    expect(rows()).toEqual([1]);
+    expect(logs.some((l) => /BEGIN on sqlite:.* failed/.test(l))).toBe(false);
+  }, 30000);
 });
