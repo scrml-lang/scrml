@@ -19,3 +19,9 @@
   - Bare filenames: sibling of last full path, else unique non-test repo match, else STALE. 20 §34 bare citations, all resolve. `control-015-try-catch.scrml` is in a §19.4.3 provenance blockquote (SPEC ~21194), not a §34 row; the file exists at samples/compilation-tests/.
   - --check-all head: 326 citations checked (path-sym 165, path-paren 47 + 40 .scrml, bare-sym 19 + 1 .scrml, via 28, in 26); stale = the same 2 as base → 0 of 1117 newly failing. Default census --json unchanged.
   - Filed LOW gaps g-s34-census-unparsed-citation-spellings-s474 (F5), g-s34-census-scrml-stripper-parity-s474 (F6).
+- r2 (PA re-review of 5b396ad26):
+  - N1: buildBasenameIndex walks SCAN_ROOTS only (was: whole repo, incl. .claude/worktrees/*). Reproduced red first by planting a copy of compiler/src + compiler/self-host-v2 at .claude/worktrees/fake in this worktree: the check-all test failed with 6 extra STALE (E-ATTR-UNQUOTED-OPERATOR, E-SCHEMA-012/013, W-AUTH-CONTENT-NOT-GATED, W-CG-SHIP-STRIP-FALLBACK, W-DISPLAY-TEXT-OVERQUOTE); after the fix, green with the copy still present. Fixture test plants duplicates under .claude/worktrees/x/ and docs/changes/; reverting the fix fails it (and 2 others).
+  - isTestPath narrowed: compiler/tests/, acceptance/, fixtures/, __tests__/, *.test.*/*.spec.* (stdlib/test/index.scrml is a shipping module). --check-all unchanged: same 2 stale.
+  - Bare-name errors say how the name was resolved ("resolved as sibling of `…`").
+  - KNOWN_STALE failure message names the gap + fixed-row / renamed-code instructions.
+  - Gaps: g-s34-census-known-stale-self-host-rows-s474, g-s34-census-string-occurrence-vouches-s474 (LOW); amended g-s34-census-unparsed-citation-spellings-s474 with samples/ + bare compiler/ paths.
