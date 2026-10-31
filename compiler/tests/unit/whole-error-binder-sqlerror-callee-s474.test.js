@@ -30,7 +30,13 @@ const DIRS = [];
 const GLOBALS_BEFORE = new Set(Object.getOwnPropertyNames(globalThis));
 afterAll(async () => {
   if (GlobalRegistrator.isRegistered) await GlobalRegistrator.unregister();
-  for (const d of DIRS) rmSync(d, { recursive: true, force: true });
+  // Best effort (helpers/per-run-tmp.js, S438): the imported `.server.js` route modules hold their
+  // bun:sqlite handle for the life of the process, so on Windows removing the dir that holds the
+  // `.db` throws EBUSY — a hook error reported as a failing "(unnamed)" test. Every dir here is
+  // unique per compile (time + random), so a leftover is never reused; the temp root reaps it.
+  for (const d of DIRS) {
+    try { rmSync(d, { recursive: true, force: true }); } catch { /* EBUSY: a live sqlite handle (Windows) */ }
+  }
   for (const k of Object.getOwnPropertyNames(globalThis)) {
     if (/^_scrml/.test(k) && !GLOBALS_BEFORE.has(k)) { try { delete globalThis[k]; } catch { /* non-configurable */ } }
   }
