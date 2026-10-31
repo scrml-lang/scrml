@@ -29,6 +29,7 @@ import { SQL } from "bun";
 import { Database } from "bun:sqlite";
 import { mods, compile, serve, post, pathOf } from "./server-artifact-harness.js";
 import { frontEnd } from "./harness.js";
+import * as rt from "../slice-m1/runtime/server-runtime.js";
 
 const SQ = "?" + "{";
 const q = (sql, nb = "") => `${SQ}\`${sql}\`}${nb}.run();`;
@@ -83,8 +84,15 @@ ${E}
         ${q("INSERT INTO uniq (k) VALUES (${a})")}
         return 1;
     }
+    function trap(a: int)! E {
+        ${q("INSERT INTO log (a) VALUES (${a})")}
+        ${q("INSERT INTO log (a) VALUES (${a + 1})")}
+        const xs: int[] = [1, 2];
+        return xs[a];
+    }
     let <r:int=0/>
     <main>
+        <button onclick={ @r = trap(1) !{ _ :> 0, }; }>t</button>
         <button onclick={ @r = two(1) !{ _ :> 0, }; }>a</button>
         <button onclick={ @r = viaHelper(1) !{ _ :> 0, }; }>b</button>
         <button onclick={ @r = viaBang(1, 0) !{ _ :> 0, }; }>c</button>
@@ -133,12 +141,12 @@ afterAll(async () => {
 
 describe("the emitted server: the body inside rt.envelope", () => {
   test("each `!` function with a set of 2+ queries is wrapped standalone; the inner `!` too", () => {
-    for (const fn of ["two", "viaHelper", "viaBang", "handled", "loopy", "inner", "dup"]) {
+    for (const fn of ["two", "viaHelper", "viaBang", "handled", "loopy", "inner", "dup", "trap"]) {
       // (a source name the printer must rename — `handled` — keeps its name as the prefix)
       expect([fn, new RegExp(`async function ${fn}\\w*\\(`).test(js)]).toEqual([fn, true]);
     }
     expect(js).toContain("return await rt.envelope(db$");
-    expect(js.match(/rt\.envelope\(db\$\d+, body\$, true\)/g).length).toBe(7);
+    expect(js.match(/rt\.envelope\(db\$\d+, body\$, true\)/g).length).toBe(8);
     // the non-`!` helper is not wrapped (§8.9.2: only a `!` function)
     expect(/async function logIt\(a\) \{\n\s+async function body\$/.test(js)).toBe(false);
   });
@@ -203,6 +211,18 @@ describe("through a `!` callee — a nested savepoint (F10, §19.10.6)", () => {
     expect(persisted()).toEqual([]);
     expect((await call("inner", [1])).status).toBe(200);
     expect(persisted()).toEqual([1, 101]);
+  });
+});
+
+describe("a trap (a thrown host error) after the writes", () => {
+  test("an out-of-range index read traps → 500, nothing persisted; in range → committed", async () => {
+    await reset();
+    const res = await call("trap", [5]);
+    expect(res.status).toBe(500);
+    expect(logs.some((l) => l.includes("E-INDEX-OUT-OF-RANGE-RT"))).toBe(true);
+    expect(persisted()).toEqual([]);
+    expect((await call("trap", [1])).status).toBe(200);
+    expect(persisted()).toEqual([1, 2]);
   });
 });
 
@@ -317,5 +337,99 @@ describe("F11 counts CLIENT requests only: a server-only (inherited) `!` helper 
     expect(env.find((e) => e.fn.hint === "top").standalone).toBe(true);
     expect(env.find((e) => e.fn.hint === "mid").standalone).toBe(true);
     expect(env.find((e) => e.fn.hint === "s1").standalone).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The runtime's own exits (server-runtime.js `envelope`), over a real SQLite with a driver that fails
+// on cue: §19.10.6 "The connection SHALL be released on every exit path: after `COMMIT` or `ROLLBACK`,
+// after a `BEGIN` that fails"; "A failed `COMMIT` SHALL NOT release the connection … the `ROLLBACK`
+// that follows releases it"; and a transaction SQLite ends by itself is never followed by an autocommit.
+describe("server-runtime.js envelope — the exits a scrml program cannot reach on cue", () => {
+  let mem, seen, failOn;
+  const conn = () => {
+    const drv = (strings, ...values) => {
+      const text = strings.join("?");
+      seen.push(text);
+      if (failOn !== null && text.startsWith(failOn)) {
+        failOn = null;
+        return Promise.reject(Object.assign(new Error("injected failure of " + text), { code: "SQLITE_IOERR" }));
+      }
+      return mem(strings, ...values);
+    };
+    return rt.connection({ connect: () => drv, log: () => {} }, { driver: "sqlite", target: ":memory:", file: "app.scrml" });
+  };
+  const ins = rt.sqlText(["INSERT INTO t (n) VALUES (", ")"]);
+  const rowsOf = async () => (await mem.unsafe("SELECT n FROM t ORDER BY n")).map((r) => r.n);
+  beforeAll(async () => {
+    mem = new SQL(":memory:");
+    await mem.unsafe("CREATE TABLE t (n INTEGER)");
+    await mem.unsafe("CREATE TABLE k (a INTEGER PRIMARY KEY ON CONFLICT ROLLBACK)");
+  });
+  const fresh = async () => { seen = []; failOn = null; await mem.unsafe("DELETE FROM t"); await mem.unsafe("DELETE FROM k"); };
+
+  test("a failed COMMIT: ROLLBACK follows, the call throws, the gate is released", async () => {
+    await fresh();
+    const db = conn();
+    failOn = "COMMIT";
+    let threw = null;
+    try {
+      await rt.envelope(db, async () => { await rt.query(db, "run", ins, [1], [0]); await rt.query(db, "run", ins, [2], [0]); return 1; }, true);
+    } catch (e) { threw = e; }
+    expect(threw).not.toBeNull();
+    expect(seen.slice(-2)).toEqual(["COMMIT", "ROLLBACK"]);
+    expect(await rowsOf()).toEqual([]);
+    // released: the next statement on the connection runs
+    expect(await rt.query(db, "run", ins, [9], [0])).toBeNull();
+    expect(await rowsOf()).toEqual([9]);
+  });
+  test("a failed BEGIN: the call throws, nothing runs, the gate is released", async () => {
+    await fresh();
+    const db = conn();
+    failOn = "BEGIN";
+    let ran = false;
+    let threw = null;
+    try { await rt.envelope(db, async () => { ran = true; return 1; }, true); } catch (e) { threw = e; }
+    expect(threw).not.toBeNull();
+    expect(ran).toBe(false);
+    expect(await rt.query(db, "run", ins, [3], [0])).toBeNull();
+    expect(await rowsOf()).toEqual([3]);
+  });
+  test("SQLite ends the transaction by itself (ON CONFLICT ROLLBACK): nothing after it autocommits, the envelope throws", async () => {
+    await fresh();
+    const db = conn();
+    const k = rt.sqlText(["INSERT INTO k (a) VALUES (1)"]);
+    let threw = null;
+    let after = false;
+    try {
+      await rt.envelope(db, async () => {
+        await rt.query(db, "run", ins, [1], [0]);
+        await rt.query(db, "run", k, [], []);
+        await rt.query(db, "run", k, [], []);   // the conflict: SQLite rolls the whole transaction back
+        after = true;
+        await rt.query(db, "run", ins, [2], [0]);
+        return 1;
+      }, true);
+    } catch (e) { threw = e; }
+    expect(threw).not.toBeNull();
+    expect(String(threw.message)).toContain("rolled the transaction back by itself");
+    expect(after).toBe(false);
+    expect(await rowsOf()).toEqual([]);
+    expect((await mem.unsafe("SELECT a FROM k")).length).toBe(0);
+  });
+  test("a constraint violation SQLite does NOT roll back is a failure value; the envelope stays usable", async () => {
+    await fresh();
+    await mem.unsafe("CREATE TABLE IF NOT EXISTS u (a INTEGER PRIMARY KEY)");
+    await mem.unsafe("DELETE FROM u");
+    const db = conn();
+    const u = rt.sqlText(["INSERT INTO u (a) VALUES (1)"]);
+    const r = await rt.envelope(db, async () => {
+      await rt.query(db, "run", u, [], []);
+      const dup = await rt.query(db, "run", u, [], []);
+      await rt.query(db, "run", ins, [rt.failed(dup) ? 7 : 8], [0]);
+      return 1;
+    }, true);
+    expect(r).toBe(1);
+    expect(await rowsOf()).toEqual([7]);
   });
 });

@@ -102,3 +102,31 @@ concurrent isolation, auto-rollback detection, non-standalone plain) all as expe
 - acceptance/envelope/ — 4 runtime cases (sqlEngine real) + 5 neg cases; STATUS rows added.
 - ruled-refusals-s473 / failclosed-sql-protect-s473 tests converted from "refused" to "compiles,
   with the Envelope" (the interim-refusal assertions).
+
+## 2026-10-30 — unit 4: docs, refusal text, more runtime exits
+
+- parse.scrml: the `transaction { }` refusal no longer promises "arrives with unit U1e" (U1e built
+  the implicit envelope, not the block form).
+- slice test +5: a trap (out-of-range index) after two writes → 500, nothing persisted; runtime exits
+  over a real SQLite with an injecting driver — failed COMMIT (ROLLBACK follows, throws, gate
+  released), failed BEGIN (released, body never runs), ON CONFLICT ROLLBACK (nothing after it
+  autocommits, envelope throws), a non-rolling constraint violation stays a failure value.
+- docs/known-gaps.md: g-boot-implicit-envelope-unbuilt-not-refused-s473 RESOLVED;
+  g-boot-manual-tx-left-open-no-gate-s473 narrowed (gate built, manual form still refused); NEW
+  g-boot-envelope-pooled-and-cross-db-read-refused-s474 (MED, open). gap-counts hunk regenerated
+  (only that hunk — the master-list.md change from `state.ts --write` was reverted).
+- docs/bootstrap-spec-coverage.md: §8.1.1 E-SQL-011 → BUILT; §8.9.2 / §19.10.5 / §19.10.6 → PARTIAL
+  (SQLite built; pooled / cross-db read / client non-`!` callee refused); §8.6, §8.9.2 manual,
+  §19.10.1-4, §8.5.3, §44.6 evidence refreshed. `spec-coverage-check.ts`: 0 warnings, 0 violations.
+- Conformance (`bun scripts/bootstrap-conformance.ts`): before PASS 283 / FAIL 241 / NOT-TWINNED 685
+  / UNSUPPORTED 604; after IDENTICAL, no verdict bucket or emitted-code change (no corpus case hit
+  the interim refusal). docs/bootstrap-conformance.md rewritten (`--write`; only the
+  transaction-block reason text changed). Acceptance (`--cases compiler/self-host-v2/acceptance`):
+  before PASS 235 / FAIL 0 / UNSUP 3; after PASS 244 / FAIL 0 / UNSUP 3 (+9 new envelope cases).
+- Empirical (CLI, default host = Bun.SQL on a real file): `bun run boot:compile` of
+  acceptance/envelope/{fail-rolls-back,savepoint}/case.scrml, the emitted program.server.js driven by
+  POSTs, SELECT through bun:sqlite after each:
+    move(6) -> HTTP 500 {"__scrml_error":true,"type":"E","variant":"Bad","data":{}}  -> []
+    move(1) -> HTTP 200 1                                                             -> [1,2]
+    outerFails(1) -> HTTP 500 … "Bad"                                                -> []
+    outerHandles(1) -> HTTP 200 0                                                     -> [1,2]
