@@ -312,6 +312,19 @@ const STATUS = {
   "control-flow/defer-return-value": ["PASS", []],
   "control-flow/defer-loop-iteration": ["PASS", []],
   "control-flow/neg-defer-loop-value-direct": ["PASS", ["E-DEFER-UNSUPPORTED-SITE"]],
+  // s474-boot-u1e-envelope — §8.9.2 / §19.10.5 / §19.10.6 the transitive `!` envelope, BUILT (each
+  // runtime case against a real SQLite: a `fail` rolls back, success commits, an inner `!` is a savepoint)
+  "envelope/fail-rolls-back": ["PASS", []],
+  "envelope/via-helper": ["PASS", []],
+  "envelope/savepoint": ["PASS", []],
+  "envelope/loop": ["PASS", []],
+  // … and what stays refused, each by its named code (S473 D1 / D28)
+  "envelope/neg-cross-db-write": ["PASS", ["E-SQL-011"]],
+  "envelope/neg-nobatch-cross-db-write": ["PASS", ["E-SQL-011"]],   // s474 r1 F1
+  "envelope/neg-client-multi-call": ["PASS", ["E-TX-CLIENT-MULTI-CALL"]],
+  "envelope/neg-journal-off": ["PASS", ["E-SQL-JOURNAL-OFF"]],
+  "envelope/neg-pooled-unsupported": ["PASS", ["E-BOOTSTRAP-UNSUPPORTED"]],
+  "envelope/neg-client-non-bang-callee": ["PASS", ["E-BOOTSTRAP-UNSUPPORTED"]],
 };
 
 let verdicts;
@@ -343,7 +356,8 @@ describe("bootstrap acceptance cases — today's verdicts", () => {
     expect(["db-body/fn-and-markup", verdicts["db-body/fn-and-markup"].runtimeExecuted]).toEqual(["db-body/fn-and-markup", true]);
   });
   test("the runtime halves executed where the case has one", () => {
-    for (const rel of ["arms/comma-guard", "arms/comma-match", "opener/union-maybe", "termination/guard-next-line", "termination/fail-next-line", "termination/defer-next-line"]) {
+    for (const rel of ["arms/comma-guard", "arms/comma-match", "opener/union-maybe", "termination/guard-next-line", "termination/fail-next-line", "termination/defer-next-line",
+      "envelope/fail-rolls-back", "envelope/via-helper", "envelope/savepoint", "envelope/loop"]) {
       expect([rel, verdicts[rel].runtimeExecuted]).toEqual([rel, true]);
     }
   });

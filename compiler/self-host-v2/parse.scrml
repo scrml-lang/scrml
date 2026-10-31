@@ -2438,7 +2438,7 @@ ${
         // s469 (§7.2.2 rule 10): `transaction` before `{`, on its line or the next
         if (isWord(tp, "transaction") && tk(peekAt(tp, 1), "{")) {
             // s451 (Ue): §19.10.2 — refused, never read as a name + a block
-            const dt: TP = diagAt(tp, "E-BOOTSTRAP-UNSUPPORTED", "`transaction { … }` (§19.10) is not in the bootstrap — it arrives with unit U1e (transactions, which need the error model's `!` functions)", t)
+            const dt: TP = diagAt(tp, "E-BOOTSTRAP-UNSUPPORTED", "`transaction { … }` (§19.10) is not in the bootstrap — unit U1e built the implicit per-handler transaction of a `!` function (§8.9.2), not the block form, which stays owed. Remove the block: in a `!` function whose transitive query set holds two or more queries they already run in one transaction, rolled back on a `fail` or an error", t)
             const rb: RBlock = parseBlock(adv(dt))
             const re: RExpr = mkE(rb.tp, start, AExprK.Recovered)
             return mkS(re.tp, start, AStmtK.Eval(re.e))

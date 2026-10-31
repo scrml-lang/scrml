@@ -1,0 +1,24 @@
+{
+  "id": "acceptance-envelope-loop",
+  "description": "One query inside a loop of a `!` function, against a real SQLite: fill(6) writes three rows then fails (all three rolled back), fill(1) writes three and succeeds — 3 rows persist (6 without the envelope).",
+  "language-version": "1.0",
+  "spec": "§8.9.2 (S473 #1690 review F10) · §19.10.5",
+  "rationale": "§8.9.2 F10: \"A query is counted once per time it is reached: one reached through two calls … counts twice, as one inside a loop does.\" Ruling user-voice-scrml.md S473 \"#1690 review\" item 1: \"Reach multiplicity counts\".",
+  "expect": {
+    "codes": [],
+    "sqlEngine": "real",
+    "serverDb": { "log": [{ "a": 0 }] },
+    "input": [
+      { "click": "#bad" },
+      { "wait": "settle" },
+      { "click": "#ok" },
+      { "wait": "settle" },
+      { "click": "#count" },
+      { "wait": "settle" }
+    ],
+    "domAnchored": [
+      { "selector": "#r", "text": "1" },
+      { "selector": "#n", "text": "3" }
+    ]
+  }
+}
