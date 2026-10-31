@@ -418,7 +418,7 @@ ${
         const lhs: RExpr = parseTernary(tp)
         if (isP(lhs.tp, "=")) {
             const rhs: RExpr = parseAssign(adv(lhs.tp))
-            return mkE(rhs.tp, start, AExprK.Assign(lhs.e, rhs.e))
+            return mkE(rhs.tp, start, AExprK.Assign(lhs.e, rhs.e, false, false))
         }
         if (isCompoundAssign(lhs.tp)) {
             const op: PTok = cur(lhs.tp)
@@ -1534,7 +1534,7 @@ ${
             const ps: string[] | not = lambdaParams(tp)
             if (ps is given) return parseLambda(skipParams(tp), start, ps)
             const inner: RExpr = parseAssign(adv(tp))
-            return { e: inner.e, tp: expectP(inner.tp, ")") }
+            return { e: parenMark(inner.e), tp: expectP(inner.tp, ")") }
         }
         if (isP(tp, "[")) {
             const elems: RExprs = parseArrayElems(adv(tp))
@@ -2849,8 +2849,9 @@ ${
         if (binderThen(t, "in") >= 0) return refusedHead(t, "E-CTRL-011", "`for (… in …)` is not a scrml loop — scrml iterates values with `of`: `for (x of xs) { … }` (§17.4, §49.2.4)", kw, start)
         if (destructAhead(t)) return refusedHead(t, "E-BOOTSTRAP-UNSUPPORTED", "a destructuring `for` binder is not in the bootstrap yet — bind the element and read its fields (`for (o of xs) { … o.id … }`)", kw, start)
         if (binderThen(t, "of") >= 0) return parseIterHead(t, label, start)
-        // the condition head (§49.3.1)
-        const cond: RExpr = parseAssign(adv(t))
+        // the condition head (§49.3.1); s474: its kept assignments (§50, D10)
+        const cond0: RExpr = parseAssign(adv(t))
+        const cond: RExpr = { e: keptHead(cond0.e), tp: cond0.tp }
         let t2: TP = cond.tp
         if (!isP(t2, ")")) {
             const bad: PTok = cur(t2)
@@ -3468,10 +3469,90 @@ ${
         return mkS(init.tp, start, AStmtK.Local(nameTok.v, false, aty, init.e, true))
     }
 
+    // s474 (§50, S473 D10) — an assignment in its own parentheses `(x = e)`: the
+    // mark the condition-head rule (keptHead) reads. Parentheses are otherwise
+    // transparent (the node is the inner expression).
+    fn parenMark(e: AExpr) -> AExpr {
+        const k: AExprK = e.k
+        return match k {
+            .Assign(target: t, value: v) :> { nid: e.nid, span: e.span, k: AExprK.Assign(t, v, true, false) }
+            .Unary(op: o) :> e
+            .Binary(op: o) :> e
+            .Str(v: x) :> e
+            .Name(name: x) :> e
+            .At(name: x) :> e
+            .AtItem :> e
+            .Num(raw: x) :> e
+            .Bool(v: x) :> e
+            .NotLit :> e
+            .Recovered :> e
+            .Variant(name: x) :> e
+            .Member(obj: x) :> e
+            .Call(callee: x) :> e
+            .Ternary(test: x) :> e
+            .ArrayLit(elems: x) :> e
+            .ObjectLit(props: x) :> e
+            .Spread(e: x) :> e
+            .Index(obj: x) :> e
+            .Lambda(params: x) :> e
+            .Sql(q: x) :> e
+            .Handled(h: x) :> e
+            .Template(quasis: x) :> e
+            .Foreign(f: x) :> e
+        }
+    }
+
+    // s474 (§50 amendment, S473 D10): "The ONLY assignment-as-expression the
+    // language keeps is an assignment wrapped in its own parentheses inside the
+    // condition head of a `for (…)` or `if (…)` / `else if (…)`: as the whole
+    // condition … or as a parenthesized operand of the condition" (§50.2.3: "the
+    // root wrapped in its own `(…)` … or a parenthesized operand"). The kept
+    // places: the head's root, and — through the operators — an operand of a
+    // unary or binary operator of the condition (`((m = f(s)) is given)`,
+    // `((n = next()) > 0 && ok)`). A parenthesized assignment there is marked
+    // `kept`; anything else (unparenthesized, an argument, a ternary arm, a
+    // member's object, inside a kept assignment's own value) stays a value
+    // position — E-ASSIGN-POSITION (analyze resolveValueAssign).
+    fn keptHead(e: AExpr) -> AExpr {
+        const k: AExprK = e.k
+        return match k {
+            .Assign(target: t, value: v, paren: p) :> keptAssign(e, t, v, p)
+            .Unary(op: o, e: x) :> { nid: e.nid, span: e.span, k: AExprK.Unary(o, keptHead(x)) }
+            .Binary(op: o, l: l, r: r) :> { nid: e.nid, span: e.span, k: AExprK.Binary(o, keptHead(l), keptHead(r)) }
+            .Str(v: x) :> e
+            .Name(name: x) :> e
+            .At(name: x) :> e
+            .AtItem :> e
+            .Num(raw: x) :> e
+            .Bool(v: x) :> e
+            .NotLit :> e
+            .Recovered :> e
+            .Variant(name: x) :> e
+            .Member(obj: x) :> e
+            .Call(callee: x) :> e
+            .Ternary(test: x) :> e
+            .ArrayLit(elems: x) :> e
+            .ObjectLit(props: x) :> e
+            .Spread(e: x) :> e
+            .Index(obj: x) :> e
+            .Lambda(params: x) :> e
+            .Sql(q: x) :> e
+            .Handled(h: x) :> e
+            .Template(quasis: x) :> e
+            .Foreign(f: x) :> e
+        }
+    }
+
+    fn keptAssign(e: AExpr, t: AExpr, v: AExpr, paren: boolean) -> AExpr {
+        if (!paren) return e
+        return { nid: e.nid, span: e.span, k: AExprK.Assign(t, v, true, true) }
+    }
+
     fn parseIf(tp: TP) -> RStmt {
         const start: int = cur(tp).start
         let t: TP = expectP(adv(tp), "(")
-        const cond: RExpr = parseAssign(t)
+        const cond0: RExpr = parseAssign(t)
+        const cond: RExpr = { e: keptHead(cond0.e), tp: cond0.tp }   // s474 (§50, D10)
         t = expectP(cond.tp, ")")
         const thenB: RBlock = parseBlockOrStmt(t)
         t = thenB.tp

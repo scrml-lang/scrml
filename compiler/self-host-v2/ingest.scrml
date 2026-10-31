@@ -1057,6 +1057,7 @@ ${
             .StructOf(ty: x) :> false
             .VariantOf(enumSym: x) :> false
             .Handle(inst: x) :> false
+            .Assigned(local: x) :> false
             .InitOf(decl: x) :> false
             .Host(call: x) :> false
             .Lambda(params: x) :> false
@@ -1321,6 +1322,7 @@ ${
             .StructOf(ty: x) :> "Expr.StructOf"
             .VariantOf(enumSym: x) :> "Expr.VariantOf"
             .Handle(inst: x) :> "Expr.Handle"
+            .Assigned(local: x) :> "Expr.Assigned"
             .InitOf(decl: x) :> "Expr.InitOf"
             .Host(call: x) :> "Expr.Host"
             .Lambda(params: x) :> "Expr.Lambda"

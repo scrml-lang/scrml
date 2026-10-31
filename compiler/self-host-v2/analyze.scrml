@@ -6235,7 +6235,7 @@ ${
             .Unary(op: o, e: x) :> resolveUnary(env, e, o, x, st)
             .Binary(op: o, l: l, r: r) :> resolveBinary(env, e, o, l, r, st)
             .Ternary(test: t, yes: y, no: n) :> resolveTernary(env, e, t, y, n, expected, st)
-            .Assign(target: t, value: av) :> resolveValueAssign(env, e, t, av, st)
+            .Assign(target: t, value: av, kept: kp) :> assignAsValue(env, e, t, av, kp, st)   // s474: the §50 kept form
             .ArrayLit(elems: es) :> resolveArray(env, e, es, expected, st)
             .ObjectLit(props: ps) :> resolveObject(env, e, ps, expected, st)
             .Spread(e: x) :> diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", "an array spread `...` is in the bootstrap only as a recognized edit shape (`@x = [...@x, e]`, §66.11.2) — Core has no spread value", st)
@@ -6246,6 +6246,34 @@ ${
             .Template(quasis: qs, slots: ss) :> resolveTemplate(env, e, ss, st)   // s469 (§14.13.3)
             .Foreign(f: fb0) :> resolveForeign(env, e, fb0, st)                 // s473 (§23.2.4a)
         }
+    }
+
+    // s474 (§50 amendment, S473 D10): "The ONLY assignment-as-expression the
+    // language keeps is an assignment wrapped in its own parentheses inside the
+    // condition head of a `for (…)` or `if (…)` / `else if (…)`" — parse.scrml
+    // keptHead marks it `kept`. Its target is an lvalue (§50.2.1: `lvalue ::=
+    // identifier | reactive-lvalue`): a `let` local is built — rebound, and the
+    // expression's value is the assigned value (§50.3.1), its type the value's
+    // (§50.4.1, the typer); a `const` local is E-ASSIGN-CONST, as the statement
+    // form (§50.3.5 "same error as a statement-level `const` reassignment"); a
+    // CELL target (`((@x = e))`, §50.3.4) is not built — refused by name; any
+    // other target is not an lvalue, so not the kept form: E-ASSIGN-POSITION.
+    fn assignAsValue(env: Env, e: AExpr, t: AExpr, v: AExpr, kept: boolean, st: AS) -> RX {
+        if (!kept) return resolveValueAssign(env, e, t, v, st)
+        if (!env.fx.serverOwn) {
+            const sw: string = sinkTargetWhy(env, t, v)
+            if (sw != "") return diagX(env, e, "E-LOGIC-EXECUTABLE-SINK", sinkMessage(sw), st)
+        }
+        const rp: RPlace = resolvePlace(env, t, st)
+        const l: LocalB | not = rp.local
+        if (l is given && exprName(t) != "") {
+            let st1: AS = rp.st
+            if (!l.mutable) st1 = addDiag(st1, env.file, t.span, "E-ASSIGN-CONST", "`" + l.name + "` is not a `let` local")
+            st1 = addEffect(st1, e.nid, EffectFact.EAssignLocal(l.s, [], not))
+            return resolveExpr(env, v, l.ty, st1)
+        }
+        if (rp.place is given) return diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", "a CELL as the target of a condition-head assignment (`((" + placeKey(t) + " = …))`, §50.3.4) is not in the bootstrap yet — write the cell in a statement before the test (`" + placeKey(t) + " = …;` then `if (" + placeKey(t) + " …)`); a `let` local is built (`((x = e))`)", resolveExpr(env, v, not, rp.st).st)
+        return diagX(env, e, "E-ASSIGN-POSITION", "the kept condition-head assignment `((x = e))` assigns a VARIABLE (§50.2.1 `lvalue ::= identifier`) — `" + placeKey(t) + "` is not one, so this is an assignment used as a value (S473 D10). Write it as a statement before the test", resolveExpr(env, v, not, rp.st).st)
     }
 
     // An assignment where a value stands is E-ASSIGN-POSITION; one that writes an
@@ -15742,7 +15770,8 @@ ${
         return keepTEnv(tDeferEnv(env), ts)
     }
 
-    fn typeLoopCond(env: TEnv, c: AExpr, body: ABlock, ts0: TypeState) -> TypeState {
+    fn typeLoopCond(env0: TEnv, c: AExpr, body: ABlock, ts0: TypeState) -> TypeState {
+        const env: TEnv = tKeptUnnarrow(env0, c)      // s474 (§50, D10)
         const rc: RVT = typeExpr(env, c, ts0)
         const ts: TypeState = checkCond(env, c, rc.vt, "a `for` condition", rc.ts)
         const n: Narrowing = condNarrowing(env, c)
@@ -19657,7 +19686,7 @@ ${
             .Unary(op: o) :> ""
             .Binary(op: o) :> ""
             .Ternary(test: x) :> ""
-            .Assign(target: x) :> ""
+            .Assign(target: x, kept: kp) :> keptKey(env, e, kp)     // s474: a kept `(x = e)` is the place `x` (§50)
             .ArrayLit(elems: es) :> ""
             .ObjectLit(props: ps) :> ""
             .Spread(e: sx) :> ""
@@ -19668,6 +19697,17 @@ ${
             .Template(quasis: qs) :> ""
             .Foreign(f: fb0) :> ""
         }
+    }
+
+    // s474 (§50.3.1): the kept assignment's value IS the local's new value, so a
+    // presence test of `(m = e)` is a presence test of `m` (`((m = re.exec(s))
+    // is given)` narrows `m` in the body).
+    // (the local is the one the resolver rebinds — EAssignLocal on the node)
+    fn keptKey(env: TEnv, a: AExpr, kept: boolean) -> string {
+        if (!kept) return ""
+        const s: Sym | not = assignedLocal(effectFact(env.t.effects, a.nid))
+        if (s is not) return ""
+        return "#" + s.id
     }
 
     fn localKey(f: NameFact | not) -> string {
@@ -19732,7 +19772,7 @@ ${
             .Variant(name: n) :> noNarrowing()
             .Call(callee: x) :> noNarrowing()
             .Ternary(test: x) :> noNarrowing()
-            .Assign(target: x) :> noNarrowing()
+            .Assign(target: x, kept: kp) :> keptPlaceNarrowing(env, c, kp)   // s474: `if ((x = e))` tests `x` (§50)
             .ArrayLit(elems: es) :> noNarrowing()
             .ObjectLit(props: ps) :> noNarrowing()
             .Spread(e: sx) :> noNarrowing()
@@ -19748,6 +19788,11 @@ ${
     // A bare place as a condition is a presence test (truthiness Q1): true ⇒ present.
     // (F17: a match arm whose body is an object literal — arms call this instead.)
     fn placeNarrowing(env: TEnv, c: AExpr) -> Narrowing { return { yes: [nKey(env, c)], no: [] } }
+
+    fn keptPlaceNarrowing(env: TEnv, c: AExpr, kept: boolean) -> Narrowing {
+        if (!kept) return noNarrowing()
+        return placeNarrowing(env, c)
+    }
 
     fn binNarrowing(env: TEnv, op: BinOp, l: AExpr, r: AExpr) -> Narrowing {
         return match op {
@@ -21156,7 +21201,7 @@ ${
             .Unary(op: o, e: x) :> typeUnary(env, e, o, x, ts)
             .Binary(op: o, l: l, r: r) :> typeBinary(env, e, vf, o, l, r, ts)
             .Ternary(test: x, yes: y, no: n) :> typeTernary(env, x, y, n, ts)
-            .Assign(target: x, value: v) :> rvt(VType.Unknown, typeExpr(env, v, ts).ts)
+            .Assign(target: x, value: v, kept: kp) :> typeAssignValue(env, e, x, v, kp, ts)   // s474 (§50, D10)
             .ArrayLit(elems: es) :> typeArray(env, es, ts)
             .ObjectLit(props: ps) :> rvt(valueType(vf), typePropValues(env, ps, ts))
             .Spread(e: x) :> rvt(VType.Unknown, typeExpr(env, x, ts).ts)
@@ -23049,7 +23094,8 @@ ${
     // The condition is checked (checkCond, ruled S440 #4 = (c)); each branch
     // is typed under the condition's narrowing (less what the condition's own
     // calls may undo); the statement leaves the join of both paths.
-    fn typeIf(env: TEnv, c: AExpr, tb: ABlock, el: ABlock | not, ts0: TypeState) -> RTEnv {
+    fn typeIf(env0: TEnv, c: AExpr, tb: ABlock, el: ABlock | not, ts0: TypeState) -> RTEnv {
+        const env: TEnv = tKeptUnnarrow(env0, c)      // s474 (§50, D10): the head rebinds its kept locals
         const rc: RVT = typeExpr(env, c, ts0)
         let ts: TypeState = checkCond(env, c, rc.vt, "an `if` condition", rc.ts)
         const n: Narrowing = condNarrowing(env, c)
@@ -23101,6 +23147,63 @@ ${
             .Template(quasis: qs) :> typeExpr(env, e, ts).ts
             .Foreign(f: fb0) :> typeExpr(env, e, ts).ts
         }
+    }
+
+    // s474 (§50.4.1): "The type of `x = value` is the type of `value`, which must
+    // be assignable to the declared type of `x`" — the kept condition-head
+    // assignment is typed as the statement form (typeAssign: the value against
+    // the local's written type, or joined into its inferred one), and its value
+    // is the value's. A refused (not kept) one is Unknown.
+    fn typeAssignValue(env: TEnv, e: AExpr, target: AExpr, value: AExpr, kept: boolean, ts0: TypeState) -> RVT {
+        if (!kept) return rvt(VType.Unknown, typeExpr(env, value, ts0).ts)
+        const ts: TypeState = typeAssign(env, e, target, value, ts0)
+        return rvt(exprType0(ts, value.nid), ts)
+    }
+
+    // s474 — a condition head's kept assignments rebind their locals before the
+    // head's test is decided: a narrowing of the local from before the head no
+    // longer holds (the head's own test narrows it again, condNarrowing).
+    fn tKeptUnnarrow(env: TEnv, c: AExpr) -> TEnv {
+        let out: TEnv = env
+        for (const a of keptAssigns(c)) { out = tUnnarrow(out, nKey(env, a)) }
+        return out
+    }
+
+    // The kept assignments of a condition head (parse.scrml keptHead's places:
+    // the root, and operands through unary / binary operators).
+    fn keptAssigns(c: AExpr) -> AExpr[] {
+        const k: AExprK = c.k
+        return match k {
+            .Assign(target: t, kept: kp) :> keptAssignOf(c, kp)
+            .Unary(op: o, e: x) :> keptAssigns(x)
+            .Binary(op: o, l: l, r: r) :> keptAssigns(l).concat(keptAssigns(r))
+            .Name(name: n) :> []
+            .At(name: n) :> []
+            .AtItem :> []
+            .Num(raw: r) :> []
+            .Str(v: s) :> []
+            .Bool(v: b) :> []
+            .NotLit :> []
+            .Recovered :> []
+            .Variant(name: n) :> []
+            .Member(obj: o) :> []
+            .Call(callee: x) :> []
+            .Ternary(test: x) :> []
+            .ArrayLit(elems: es) :> []
+            .ObjectLit(props: ps) :> []
+            .Spread(e: sx) :> []
+            .Index(obj: ix) :> []
+            .Lambda(params: lp) :> []
+            .Sql(q: q) :> []
+            .Handled(h: x) :> []
+            .Template(quasis: qs) :> []
+            .Foreign(f: fb0) :> []
+        }
+    }
+
+    fn keptAssignOf(a: AExpr, kept: boolean) -> AExpr[] {
+        if (kept) return [a]
+        return []
     }
 
     fn typeAssign(env: TEnv, e: AExpr, target: AExpr, value: AExpr, ts0: TypeState) -> TypeState {

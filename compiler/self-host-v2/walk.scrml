@@ -228,6 +228,7 @@ ${
             .StructOf(ty: ty, fields: fields) :> exprNodes(fields)
             .VariantOf(enumSym: es, args: args) :> exprNodes(args)
             .Handle(inst: inst) :> [Node.NInst(inst)]
+            .Assigned(local: l, value: v) :> [Node.NExpr(v)]
             .InitOf(decl: d, inst: inst) :> [Node.NInst(inst)]
             .Host(call: c) :> []
             .Lambda(params: ps, body: b) :> [Node.NExpr(b)]
@@ -429,6 +430,7 @@ ${
             .StructOf(ty: x) :> []
             .VariantOf(enumSym: x) :> []
             .Handle(inst: x) :> []
+            .Assigned(local: x) :> []
             .InitOf(decl: x) :> []
             .Host(call: x) :> []
             .SeqCall(op: x) :> []
@@ -546,13 +548,36 @@ ${
             .NFn(f: f) :> -1
             .NServerFn(f: f) :> -1
             .NBlock(b: b) :> -1
-            .NExpr(e: e) :> -1
+            .NExpr(e: e) :> assignedInExpr(e)       // s474: the kept condition-head assignment (§50)
             .NPlace(pl: pl) :> -1
             .NInst(i: i) :> -1
             .NPattern(pat: pat) :> -1
             .NEdit(k: k) :> -1
             .NView(v: v) :> -1
             .NAttr(a: a) :> -1
+        }
+    }
+
+    fn assignedInExpr(e: Expr) -> int {
+        return match e {
+            .Assigned(local: l) :> l.id
+            .Lit(lit: x) :> -1
+            .Local(sym: x) :> -1
+            .Read(place: x) :> -1
+            .Call(callee: x) :> -1
+            .Prim(op: x) :> -1
+            .Match(scrut: x) :> -1
+            .ArrayOf(elems: x) :> -1
+            .StructOf(ty: x) :> -1
+            .VariantOf(enumSym: x) :> -1
+            .Handle(inst: x) :> -1
+            .InitOf(decl: x) :> -1
+            .Host(call: x) :> -1
+            .Lambda(params: x) :> -1
+            .SeqCall(op: x) :> -1
+            .Validity(of: x) :> -1
+            .ServerCall(fn: x) :> -1
+            .Query(q: x) :> -1
         }
     }
 

@@ -390,6 +390,7 @@ ${
             .StructOf(ty: ty, fields: fs) :> structJs(ctx, ty, fs)
             .VariantOf(enumSym: es, idx: vi, args: va) :> variantValueJs(ctx, es, vi, va)   // s472: THE ENUM VALUE SHAPE, as a `fail` builds it
             .Handle(inst: i) :> instJs(ctx, i)
+            .Assigned(local: l, value: v) :> JsExpr.JAssignE(symName(ctx, l), exprJs(ctx, v))   // s474 (§50, D10): the kept condition-head assignment
             .InitOf(decl: d, inst: i, idx: x) :> rtCall(ctx, "initial", [instJs(ctx, i), JsExpr.JAnnot(jnum(x), memberName(ctx, d, x))])
             .Host(call: c) :> hostJs(c)
             .Lambda(params: ps, body: b) :> JsExpr.JArrowE(symNames(ctx, ps), exprJs(ctx, b))
@@ -1957,6 +1958,7 @@ ${
             .StructOf(ty: x) :> -1
             .VariantOf(enumSym: x) :> -1
             .Handle(inst: x) :> -1
+            .Assigned(local: x) :> -1
             .InitOf(decl: x) :> -1
             .Host(call: x) :> -1
             .Lambda(params: x) :> -1
@@ -2162,6 +2164,7 @@ ${
             .StructOf(ty: x) :> []
             .VariantOf(enumSym: x) :> []
             .Handle(inst: x) :> []
+            .Assigned(local: x) :> []
             .InitOf(decl: x) :> []
             .Host(call: x) :> []
             .Lambda(params: x) :> []
@@ -2279,6 +2282,7 @@ ${
             .JObject :> false
             .JAnnot :> false
             .JAwait :> false
+            .JAssignE :> false
             .JNew :> false
         }
     }
@@ -2630,6 +2634,7 @@ ${
             .StructOf(ty: t) :> false
             .VariantOf(enumSym: t) :> false
             .Handle(inst: i) :> false
+            .Assigned(local: x) :> false
             .Host(call: c) :> false
             .Lambda(params: ps) :> false
             .SeqCall(op: o) :> false
@@ -3095,6 +3100,7 @@ ${
             .StructOf(ty: x) :> false
             .VariantOf(enumSym: x) :> false
             .Handle(inst: x) :> false
+            .Assigned(local: x) :> false
             .InitOf(decl: x) :> false
             .Host(call: x) :> false
             .Lambda(params: x) :> false
@@ -3344,6 +3350,7 @@ ${
             .StructOf(ty: x) :> not
             .VariantOf(enumSym: x) :> not
             .Handle(inst: x) :> not
+            .Assigned(local: x) :> not
             .InitOf(decl: x) :> not
             .Host(call: x) :> not
             .Lambda(params: x) :> not
@@ -3461,6 +3468,7 @@ ${
             .StructOf(ty: x) :> not
             .VariantOf(enumSym: x) :> not
             .Handle(inst: x) :> not
+            .Assigned(local: x) :> not
             .InitOf(decl: x) :> not
             .Host(call: x) :> not
             .Lambda(params: x) :> not

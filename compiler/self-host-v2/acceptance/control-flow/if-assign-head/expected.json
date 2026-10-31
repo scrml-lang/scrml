@@ -1,0 +1,16 @@
+{
+  "id": "acceptance-control-flow-if-assign-head",
+  "description": "`if ((ok = 1 > 2))` is false, `else if ((ok = 2 > 1))` true; `ok` stays bound to true after: 20.",
+  "language-version": "1.0",
+  "spec": "§50",
+  "rationale": "§50 amendment (S473 D10): \"as the whole condition — `if ((x = next()))`\" · §50.3.1: the assigned value is the expression's value.",
+  "expect": {
+    "codes": [],
+    "domAnchored": [
+      {
+        "selector": "#o",
+        "text": "20"
+      }
+    ]
+  }
+}

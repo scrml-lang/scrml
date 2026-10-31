@@ -223,6 +223,7 @@ ${
             .StructOf(ty: x) :> -1
             .VariantOf(enumSym: x) :> -1
             .Handle(inst: x) :> -1
+            .Assigned(local: x) :> -1
             .InitOf(decl: x) :> -1
             .Host(call: x) :> -1
             .Lambda(params: x) :> -1
@@ -1006,6 +1007,7 @@ ${
     fn exprTouchesClient(e: Expr) -> string {
         return match e {
             .Handle(inst: x) :> "names an instance"
+            .Assigned(local: x) :> ""
             .InitOf(decl: d) :> "re-evaluates an initializer of <" + d.hint + ">"
             .Validity(of: x) :> "reads a validity surface"
             .ServerCall(fn: x) :> "makes a client call of a server function (a server body calls one in place, §13.4)"
@@ -1060,6 +1062,7 @@ ${
             .StructOf(ty: x) :> not
             .VariantOf(enumSym: x) :> not
             .Handle(inst: x) :> not
+            .Assigned(local: x) :> not
             .InitOf(decl: x) :> not
             .Host(call: x) :> not
             .Lambda(params: x) :> not
@@ -1134,6 +1137,7 @@ ${
             .StructOf(ty: x) :> not
             .VariantOf(enumSym: x) :> not
             .Handle(inst: x) :> not
+            .Assigned(local: x) :> not
             .InitOf(decl: x) :> not
             .Host(call: x) :> not
             .Lambda(params: x) :> not
@@ -1276,6 +1280,7 @@ ${
             .StructOf(ty: x) :> false
             .VariantOf(enumSym: x) :> false
             .Handle(inst: x) :> false
+            .Assigned(local: x) :> false
             .InitOf(decl: x) :> false
             .Host(call: x) :> false
             .Lambda(params: x) :> false
@@ -1299,6 +1304,7 @@ ${
             .StructOf(ty: x) :> "(not a cell read)"
             .VariantOf(enumSym: x) :> "(not a cell read)"
             .Handle(inst: x) :> "(not a cell read)"
+            .Assigned(local: x) :> "(not a cell read)"
             .InitOf(decl: x) :> "(not a cell read)"
             .Host(call: x) :> "(not a cell read)"
             .Lambda(params: x) :> "(not a cell read)"
@@ -1959,6 +1965,7 @@ ${
             .StructOf(ty: x) :> not
             .VariantOf(enumSym: x) :> not
             .Handle(inst: x) :> not
+            .Assigned(local: x) :> not
             .InitOf(decl: x) :> not
             .Host(call: x) :> not
             .Lambda(params: x) :> not
@@ -2459,6 +2466,7 @@ ${
             .StructOf(ty: x) :> false
             .VariantOf(enumSym: x) :> false
             .Handle(inst: x) :> false
+            .Assigned(local: x) :> false
             .InitOf(decl: x) :> false
             .Host(call: x) :> false
             .Lambda(params: x) :> false
@@ -2618,6 +2626,7 @@ ${
             .StructOf(ty: x) :> not
             .VariantOf(enumSym: x) :> not
             .Handle(inst: x) :> not
+            .Assigned(local: x) :> not
             .InitOf(decl: x) :> not
             .Host(call: x) :> not
             .Lambda(params: x) :> not
@@ -3573,6 +3582,7 @@ ${
             .StructOf(ty: x) :> "a Commit write's value is not a Local (the snapshot)"
             .VariantOf(enumSym: x) :> "a Commit write's value is not a Local (the snapshot)"
             .Handle(inst: x) :> "a Commit write's value is not a Local (the snapshot)"
+            .Assigned(local: x) :> "a Commit write's value is not a Local (the snapshot)"
             .InitOf(decl: x) :> "a Commit write's value is not a Local (the snapshot)"
             .Host(call: x) :> "a Commit write's value is not a Local (the snapshot)"
             .Lambda(params: x) :> "a Commit write's value is not a Local (the snapshot)"
@@ -3661,6 +3671,7 @@ ${
             .StructOf(ty: x) :> "a shrink-anywhere's value is not a filter of the field"
             .VariantOf(enumSym: x) :> "a shrink-anywhere's value is not a filter of the field"
             .Handle(inst: x) :> "a shrink-anywhere's value is not a filter of the field"
+            .Assigned(local: x) :> "a shrink-anywhere's value is not a filter of the field"
             .InitOf(decl: x) :> "a shrink-anywhere's value is not a filter of the field"
             .Host(call: x) :> "a shrink-anywhere's value is not a filter of the field"
             .Lambda(params: x) :> "a shrink-anywhere's value is not a filter of the field"
@@ -3700,6 +3711,7 @@ ${
             .StructOf(ty: x) :> bad
             .VariantOf(enumSym: x) :> bad
             .Handle(inst: x) :> bad
+            .Assigned(local: x) :> bad
             .InitOf(decl: x) :> bad
             .Host(call: x) :> bad
             .Lambda(params: x) :> bad
@@ -3873,6 +3885,7 @@ ${
             .StructOf(ty: x) :> not
             .VariantOf(enumSym: x) :> not
             .Handle(inst: x) :> not
+            .Assigned(local: x) :> not
             .InitOf(decl: x) :> not
             .Host(call: x) :> not
             .Lambda(params: x) :> not
@@ -4160,6 +4173,7 @@ ${
             .StructOf(ty: x) :> not
             .VariantOf(enumSym: x) :> not
             .Handle(inst: x) :> not
+            .Assigned(local: x) :> not
             .InitOf(decl: x) :> not
             .Host(call: x) :> not
             .Lambda(params: x) :> not
@@ -4194,6 +4208,7 @@ ${
             .StructOf(ty: x) :> not
             .VariantOf(enumSym: x) :> not
             .Handle(inst: x) :> not
+            .Assigned(local: x) :> not
             .InitOf(decl: x) :> not
             .Host(call: x) :> not
             .Lambda(params: x) :> not
@@ -4293,6 +4308,7 @@ ${
             .Match(scrut: x) :> not
             .ArrayOf(elems: x) :> not
             .Handle(inst: x) :> not
+            .Assigned(local: x) :> not
             .InitOf(decl: x) :> not
             .Host(call: x) :> not
             .Lambda(params: x) :> not
@@ -4437,6 +4453,7 @@ ${
     fn exprHandle(e: Expr) -> InstRef | not {
         return match e {
             .Handle(inst: i) :> i
+            .Assigned(local: x) :> not
             .InitOf(decl: x) :> not
             .Lit(lit: x) :> not
             .Local(sym: x) :> not
@@ -4480,6 +4497,7 @@ ${
             .StructOf(ty: t) :> []
             .VariantOf(enumSym: es, idx: vi, args: va) :> checkVariantOf(p, es, vi, va.length)   // s472 C-V1
             .Handle(inst: i) :> []
+            .Assigned(local: x) :> []
             .Host(call: c) :> unreadableHost(c)
             .Lambda(params: ps) :> []
             .SeqCall(op: o) :> []
@@ -4542,6 +4560,7 @@ ${
         return match e {
             .Lit(lit: l) :> l
             .Handle(inst: x) :> not
+            .Assigned(local: x) :> not
             .InitOf(decl: x) :> not
             .Local(sym: x) :> not
             .Read(place: x) :> not

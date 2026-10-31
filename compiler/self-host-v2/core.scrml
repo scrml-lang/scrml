@@ -289,6 +289,12 @@ ${
         // the Suspend's `then` (C-S7), never read raw. Its values are `q.params`
         // — Exprs, never text: E-SQL-001 (§8.1) stays unrepresentable.
         Query(q: SqlQuery),
+        // s474 (§50, S473 D10) — the KEPT assignment-as-expression: `local` is
+        // rebound to `value`, and the expression's value is the assigned value
+        // (§50.3.1). It stands ONLY in a `for (cond)` / `if` / `else if`
+        // condition (analyze admits it there and nowhere else; E-ASSIGN-POSITION
+        // elsewhere); `local` is a `let` local (walk.scrml assignedSyms counts it).
+        Assigned(local: Sym, value: Expr),
     }
     export type MatchArm:struct = { pat: Pattern, body: Expr }
 

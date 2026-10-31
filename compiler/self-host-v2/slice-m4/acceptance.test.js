@@ -199,6 +199,11 @@ const STATUS = {
   "loop/neg-range-paren": ["PASS", ["E-RANGE-OUTSIDE-LOOP-HEAD"]],
   "loop/neg-range-value": ["PASS", ["E-RANGE-OUTSIDE-LOOP-HEAD"]],
   "loop/neg-while": ["PASS", ["E-LOOP-WHILE-RETIRED"]],
+  // s474 — the §50 kept assignment-as-expression (S473 D10) and its refusals
+  "loop/assign-head-presence": ["PASS", []],
+  "control-flow/if-assign-head": ["PASS", []],
+  "control-flow/neg-assign-single-paren": ["PASS", ["E-ASSIGN-POSITION"]],
+  "control-flow/neg-assign-argument-in-head": ["PASS", ["E-ASSIGN-POSITION"]],
   "loop/range": ["PASS", []],
   "loop/sum-tape": ["PASS", []],
   // s471 (g-bootstrap-loop-wait-and-defer-s469): a `defer` in a loop body; a loop in a deferred body
@@ -379,7 +384,8 @@ describe("bootstrap acceptance cases — today's verdicts", () => {
     for (const rel of ["security/login-enum", "security/login-literal", "security/login-literal-no-else", "security/login-maybe", "toenum/prototype-keys",
                        "security/return-not-value", "security/return-not-stmt", "security/return-not-string", "security/return-not-enum",
                        "security/failable-fails",
-                       "loop/sum-tape", "loop/range", "loop/cond-head", "loop/counted-continue", "loop/forever-break", "loop/labels", "loop/index-at"]) {
+                       "loop/sum-tape", "loop/range", "loop/cond-head", "loop/counted-continue", "loop/forever-break", "loop/labels", "loop/index-at",
+                       "loop/assign-head-presence", "control-flow/if-assign-head"]) {
       expect([rel, verdicts[rel].runtimeExecuted]).toEqual([rel, true]);
     }
   });

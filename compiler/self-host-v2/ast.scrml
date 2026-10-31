@@ -57,7 +57,12 @@ ${
         Unary(op: UnOp, e: AExpr),
         Binary(op: BinOp, l: AExpr, r: AExpr),
         Ternary(test: AExpr, yes: AExpr, no: AExpr),
-        Assign(target: AExpr, value: AExpr),         // statement position only (analyze checks)
+        // statement position only (analyze checks) — except the §50 kept form
+        // (S473 D10). s474: `paren` — the assignment stood in its own parentheses
+        // (`(x = e)`); `kept` — a parenthesized one at a kept place of a `for (…)` /
+        // `if (…)` / `else if (…)` condition head: the whole condition, or an
+        // operand of it (parse.scrml keptHead). Only a kept one is a value.
+        Assign(target: AExpr, value: AExpr, paren: boolean, kept: boolean),
         ArrayLit(elems: AExpr[]),
         ObjectLit(props: AProp[]),
         // s442 (§66.19.5): an array element `...e` (an object literal's spread is

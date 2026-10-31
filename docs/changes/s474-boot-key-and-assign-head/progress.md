@@ -66,3 +66,26 @@ Task B — D10:
   multi-lift, template switch, text rows, duplicate-key trap; W-KEY-001 / E-KEY-001 / refusal), acceptance
   loop-value/{tier0-keyed, tier0-keyless-objects-warns, neg-tier0-key-type}; ruled-refusals F9 hint updated.
   slice-m4 full: 4263 pass / 0 fail (before acceptance additions).
+
+## 2026-10-30 — Task A committed (hook green: 52375 pass / 0 fail incl. slices)
+
+## 2026-10-30 — Task B built (D10 kept form)
+- Locus: parse.scrml held (`parsePrimary` dropped the parens — now `parenMark`; `parseIf` / `parseFor` HCond →
+  `keptHead`); ast.scrml `Assign(target, value, paren, kept)`; analyze.scrml `assignAsValue` (resolver),
+  `typeAssignValue` + `keptKey` + `keptPlaceNarrowing` + `tKeptUnnarrow` (typer, in `typeIf` / `typeLoopCond`);
+  lower.scrml `keptAssignExpr`; Core `Expr.Assigned(local, value)` (+ an arm in every Expr match: check 19, lower 6,
+  walk 2 + `assignedInExpr` for `let`, print 7, print-server 3, measure 1, ingest 2); js.scrml `JAssignE` (printed
+  `(x = v)`, always parenthesized). Locus refinement: core/walk/js/measure/ingest/print-server needed arms (totality),
+  check.scrml only trivial arms (no new rule).
+- Kept places (parse keptHead): the head's root, and operands through Unary / Binary operators. NOT kept (stay
+  E-ASSIGN-POSITION): single parens, chain, initializer, argument (also inside a head), return, operand outside a
+  head, ternary arm in a head, inside a kept assignment's value, a member target, a COUNTED head's condition.
+- READINGS for PA: (1) the counted head's `cond` clause is not a kept place (§50 names `for (…)` / `if (…)` /
+  `else if (…)` condition heads; the examples are condition heads) — refused, E-ASSIGN-POSITION; (2) a cell target
+  `((@x = e))` (§50.3.4 allows it) is not built — E-BOOTSTRAP-UNSUPPORTED by name (gap stays narrowed);
+  (3) a const target gives E-ASSIGN-CONST (the bootstrap's statement-form code; §50.3.5 says E-ASSIGN-004 — the
+  existing E-ASSIGN-CONST vs E-ASSIGN-004 split is g-bootstrap-loop-codes-owed-s469's, not changed here).
+- Tests: slice-m4/assign-head-s474.test.js (22: runtime of `for ((x = xs.at(i)) is given)`, `if ((x = e))`,
+  `else if`, `for ((x = e))` with `continue`, `&&` short-circuit; printed form; typing; 12 refusals);
+  acceptance loop/assign-head-presence, control-flow/{if-assign-head, neg-assign-single-paren,
+  neg-assign-argument-in-head}. All slices: 5242 pass / 0 fail; SLICE_CORE=lowered slice-m1 109 / 0.
