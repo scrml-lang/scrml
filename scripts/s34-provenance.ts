@@ -52,13 +52,15 @@ const SKIP_DIRS = new Set(["node_modules", "dist", ".git"]);
 const blank = (c: string) => (c === "\n" ? "\n" : " ");
 
 /**
- * A TEST path (repo-relative, `/`-separated): under a `tests` / `__tests__` / `test` / `fixtures`
- * / `acceptance` directory, or a `*.test.*` / `*.spec.*` file. Its identifiers never vouch for a
- * tree-wide citation, and a bare filename is never resolved to it.
+ * A TEST path (repo-relative, `/`-separated): under `compiler/tests/`, or an `acceptance` /
+ * `fixtures` / `__tests__` directory, or a `*.test.*` / `*.spec.*` file. Its identifiers never
+ * vouch for a tree-wide citation, and a bare filename is never resolved to it.
+ * NOT a generic `test/` rule: `stdlib/test/index.scrml` is a SHIPPING module (`scrml:test`).
  */
 export function isTestPath(rel: string): boolean {
   const p = rel.replace(/\\/g, "/");
-  if (/(?:^|\/)(?:tests|__tests__|test|fixtures|acceptance)\//.test(p)) return true;
+  if (p.startsWith("compiler/tests/")) return true;
+  if (/(?:^|\/)(?:__tests__|fixtures|acceptance)\//.test(p)) return true;
   return /\.(?:test|spec)\.[A-Za-z]+$/.test(p);
 }
 
@@ -323,10 +325,17 @@ export function buildTreeIdents(root: string, roots: string[] = SCAN_ROOTS): Set
   return ids;
 }
 
-/** basename → repo-relative (`/`-separated) paths of every NON-TEST source file under `root`. */
-export function buildBasenameIndex(root: string): Map<string, string[]> {
+/**
+ * basename → repo-relative (`/`-separated) paths of every NON-TEST source file in the SCANNED
+ * trees (SCAN_ROOTS) — never the whole repo. S474 review N1: a whole-repo walk read the main
+ * checkout's `.claude/worktrees/*` (two dozen full copies of compiler/src), so every bare citation
+ * became "ambiguous" and the pre-commit hook went red for every commit from the main checkout
+ * while any worktree existed; even without worktrees, docs/changes probes, benchmarks and
+ * examples made 90 of 3441 basenames ambiguous. Every bare citation in §34 names a scanned-tree file.
+ */
+export function buildBasenameIndex(root: string, roots: string[] = SCAN_ROOTS): Map<string, string[]> {
   const idx = new Map<string, string[]>();
-  for (const f of walkSources(root)) {
+  for (const f of roots.flatMap((r) => walkSources(join(root, r)))) {
     const rel = relative(root, f).replace(/\\/g, "/");
     if (isTestPath(rel)) continue;
     const b = basename(f);
@@ -357,22 +366,22 @@ export function identsOfPath(root: string, rel: string): Set<string> | null {
  *   2. else the UNIQUE non-test source file of that name in the repo;
  *   3. else an error — the row must give the full path.
  */
-export function resolveBare(name: string, row: string, at: number, ctx: ResolveCtx): { path: string } | { error: string } {
+export function resolveBare(name: string, row: string, at: number, ctx: ResolveCtx): { path: string; how: string } | { error: string } {
   let last: string | null = null;
   PATH_REF.lastIndex = 0;
   for (const m of row.matchAll(PATH_REF)) { if ((m.index ?? 0) < at) last = m[1]; }
   if (last) {
     const dir = last.endsWith("/") ? last.slice(0, -1) : dirname(last).replace(/\\/g, "/");
     const sib = `${dir}/${name}`;
-    if (existsSync(join(ctx.root, sib))) return { path: sib };
+    if (existsSync(join(ctx.root, sib))) return { path: sib, how: `\`${name}\` resolved as sibling of \`${last}\`` };
   }
   ctx.basenames ??= buildBasenameIndex(ctx.root);
   const hits = ctx.basenames.get(name) ?? [];
-  if (hits.length === 1) return { path: hits[0] };
+  if (hits.length === 1) return { path: hits[0], how: `\`${name}\` resolved as the only scanned non-test file of that name` };
   return {
     error: hits.length
       ? `names bare filename \`${name}\`, which is ambiguous (${hits.length} files: ${hits.slice(0, 4).join(", ")}${hits.length > 4 ? ", …" : ""}) — give the full path`
-      : `names bare filename \`${name}\`, which matches no non-test source file — give the full path`,
+      : `names bare filename \`${name}\`, which matches no non-test source file in the scanned trees — give the full path`,
   };
 }
 
@@ -391,10 +400,12 @@ export function staleReasons(row: string, ctx: ResolveCtx): string[] {
   const bareErrs = new Set<string>();
   for (const c of extractCitations(row)) {
     let path = c.path;
+    let how = "";
     if (c.bare !== undefined) {
       const r = resolveBare(c.bare, row, c.at, ctx);
       if ("error" in r) { if (!bareErrs.has(r.error)) why.push(r.error); bareErrs.add(r.error); continue; }
       path = r.path;
+      how = ` (${r.how})`;
     }
     const key = `${path ?? ""}\u0000${c.sym}`;
     if (seen.has(key)) continue;
@@ -405,8 +416,8 @@ export function staleReasons(row: string, ctx: ResolveCtx): string[] {
     }
     if (missing.has(path)) continue; // already reported as a missing path
     const ids = identsOfPath(ctx.root, path);
-    if (!ids) { why.push(`names symbol \`${c.sym}\` in \`${path}\`, which is not a source file — cite the source file`); continue; }
-    if (!ids.has(c.sym)) why.push(`names symbol \`${c.sym}\` in \`${path}\`, which does not contain it outside comments`);
+    if (!ids) { why.push(`names symbol \`${c.sym}\` in \`${path}\`${how}, which is not a source file — cite the source file`); continue; }
+    if (!ids.has(c.sym)) why.push(`names symbol \`${c.sym}\` in \`${path}\`${how}, which does not contain it outside comments`);
   }
   return why;
 }

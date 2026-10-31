@@ -20,7 +20,8 @@ import { fileURLToPath } from "node:url";
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
 
 // Both cite `compiler/self-host/`, the v1 self-host tree retired at S447 (PR 1230). Left for a PA
-// ruling (S474): newly rejecting over a backlog is not this gate's call.
+// ruling (S474): newly rejecting over a backlog is not this gate's call. Tracked as
+// g-s34-census-known-stale-self-host-rows-s474 (E-CLASS's mention is history, not provenance).
 const KNOWN_STALE = ["E-CLASS-NOT-IN-SCRML", "E-DYNAMIC-IMPORT-NOT-IN-SCRML"];
 
 test("--check-all checks every citation form over the live SPEC; only the known-stale rows fail", () => {
@@ -32,5 +33,13 @@ test("--check-all checks every citation form over the live SPEC; only the known-
   expect(out.checked["path-paren (.scrml)"]).toBeGreaterThan(0);
   expect(out.checked["path-sym"]).toBeGreaterThan(0);
   expect(out.checked["bare-sym"]).toBeGreaterThan(0);
-  expect([...new Set(out.stale.map((s) => s.code))].sort()).toEqual([...KNOWN_STALE].sort());
+  const got = [...new Set(out.stale.map((s) => s.code))].sort();
+  const want = [...KNOWN_STALE].sort();
+  if (JSON.stringify(got) !== JSON.stringify(want)) {
+    throw new Error(
+      `§34 stale-provenance set changed.\n  expected: ${want.join(", ")}\n  got:      ${got.join(", ")}\n` +
+      out.stale.map((s) => `    ${s.code} — ${s.why}`).join("\n") +
+      `\nIf you FIXED a row, remove it from KNOWN_STALE (gap g-s34-census-known-stale-self-host-rows-s474).` +
+      `\nIf you RENAMED or moved code, fix the §34 row that cites it.`);
+  }
 }, 60000);

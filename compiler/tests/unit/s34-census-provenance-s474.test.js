@@ -141,7 +141,10 @@ describe("resolution on the REAL tree — the bite, every form", () => {
   test("bare filename: the sibling of the row's last full path wins over a repo-wide ambiguity", () => {
     // parse.scrml is ambiguous repo-wide; the sibling rule picks compiler/self-host-v2/parse.scrml
     expect(staleReasons(row("`compiler/self-host-v2/css-syntax.scrml` (`parseCssBlock`, via `parse.scrml` `parseCssNode`)"), ctx)).toEqual([]);
-    expect(staleReasons(row("`compiler/self-host-v2/css-syntax.scrml` (`parseCssBlock`, via `parse.scrml` `parseCssNodeRenamed`)"), ctx).length).toBe(1);
+    const r = staleReasons(row("`compiler/self-host-v2/css-syntax.scrml` (`parseCssBlock`, via `parse.scrml` `parseCssNodeRenamed`)"), ctx);
+    expect(r.length).toBe(1);
+    // the error says how the bare name was resolved
+    expect(r[0]).toContain("`parse.scrml` resolved as sibling of `compiler/self-host-v2/css-syntax.scrml`");
   });
 
   test("F4: a symbol cited in a NON-source path (a script, a doc, a directory) fails — cite the source file", () => {
@@ -168,6 +171,8 @@ describe("resolution on the REAL tree — the bite, every form", () => {
     expect(isTestPath("compiler/self-host-v2/slice-m4/gate.test.js")).toBe(true);
     expect(isTestPath("compiler/self-host-v2/acceptance/arms/x/case.scrml")).toBe(true);
     expect(isTestPath("compiler/self-host-v2/analyze.scrml")).toBe(false);
+    // a SHIPPING module (scrml:test) is not a test tree — no generic `test/` rule (S474 review r2)
+    expect(isTestPath("stdlib/test/index.scrml")).toBe(false);
   });
 });
 
@@ -230,6 +235,12 @@ describe("bare-filename resolution on a fixture tree", () => {
     writeFileSync(join(root, "compiler/src/a/only.ts"), "export function onlyFn() {}\n");
     writeFileSync(join(root, "compiler/self-host-v2/m.scrml"), "${ fn newFn() {} }\n");
     writeFileSync(join(root, "compiler/tests/unit/testonly.ts"), "export function inTest() {}\n");
+    // S474 review N1: copies OUTSIDE the scanned trees — a nested worktree (the main checkout's
+    // .claude/worktrees/*) and a docs/changes probe — must not make a unique name ambiguous
+    for (const d of [".claude/worktrees/x/compiler/src/a", "docs/changes/probe"]) {
+      mkdirSync(join(root, d), { recursive: true });
+      writeFileSync(join(root, d, "only.ts"), "export function onlyFn() {}\n");
+    }
   });
   afterAll(() => rmSync(root, { recursive: true, force: true }));
 
@@ -247,6 +258,12 @@ describe("bare-filename resolution on a fixture tree", () => {
     expect(amb.length).toBe(1);
     expect(amb[0]).toContain("ambiguous");
     expect(amb[0]).toContain("give the full path");
+  });
+
+  test("N1: duplicates under .claude/worktrees/ and docs/changes/ do not change resolution", () => {
+    const ctx = { root, treeIdents: new Set() };
+    expect(staleReasons(row("`only.ts` `onlyFn`"), ctx)).toEqual([]);
+    expect(ctx.basenames.get("only.ts")).toEqual(["compiler/src/a/only.ts"]);
   });
 
   test("no match — and a test-tree file is never a bare-name match — fails: give the full path", () => {
