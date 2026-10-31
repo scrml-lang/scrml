@@ -20,8 +20,11 @@
 //   bun scripts/spec-coverage-check.ts --write    regenerate the @generated:coverage-totals block
 //   --index <p> --coverage <p> --gaps <p>         override the three inputs (tests use fixtures)
 //
-// EXIT: 0 pass (warnings allowed) · 1 a violation (a/b/c, bad status, bad token, stale totals) ·
-//       2 the inputs could not be read or parsed (no Sections rows, no coverage rows, no @gap markers).
+// EXIT: 0 pass (warnings allowed) · 1 a violation (a/b/c, bad status, bad token, missing totals anchors) ·
+//       2 the inputs could not be read or parsed (no Sections rows, no coverage rows, no @gap markers) ·
+//       4 (S474) NO violation, but the totals block is stale — CI / the pre-commit hook WARN on exactly 4;
+//         main is regenerated after merge by .github/workflows/generated-regen.yml. A violation always
+//         wins over staleness (1, not 4), so a stale table never hides a missing row or gap.
 
 import { readFileSync, writeFileSync } from "fs";
 import { fileURLToPath } from "node:url";
@@ -169,7 +172,11 @@ export function checkCoverage(indexText: string, coverageText: string, gapsText:
     if (SILENT.has(r.status) && r.gaps.length === 0) errors.push(`(b) ${where}: status ${r.status} with no gap id — SILENT is not allowed without a gap`);
   }
   const out = res(null);
-  if (!out.totalsCurrent) errors.push("the @generated:coverage-totals block is stale or missing — run `bun scripts/spec-coverage-check.ts --write`");
+  // S474 — a MISSING anchor pair is a violation (no regen can restore it); a STALE totals block is not:
+  // it is exactly what `--write` repairs, and main is regenerated after merge (generated-regen.yml), so
+  // staleness alone is reported through `totalsCurrent` and exits 4 (see main), never as an error.
+  const hasAnchors = coverageText.includes(TOTALS_START.slice(0, 40)) && coverageText.includes(TOTALS_END);
+  if (!hasAnchors) errors.push("the @generated:coverage-totals START/END anchors are missing — restore them by hand, then `bun scripts/spec-coverage-check.ts --write`");
   return out;
 }
 
@@ -210,7 +217,12 @@ export function main(argv: string[]): number {
   for (const e of r.errors) console.error(`FAIL  ${e}`);
   const silent = r.rows.filter((x) => SILENT.has(x.status)).length;
   console.log(`spec-coverage-check: ${r.rows.length} rows, ${silent} SILENT (all must carry a gap), ${r.warnings.length} warning(s), ${r.errors.length} violation(s)`);
-  return r.errors.length > 0 ? 1 : 0;
+  if (r.errors.length > 0) return 1;
+  if (!r.totalsCurrent) {
+    console.log("STALE  the @generated:coverage-totals block differs from the rows (exit 4 — main regenerates it after merge; `--write` repairs it locally)");
+    return 4;
+  }
+  return 0;
 }
 
 if (import.meta.main) process.exit(main(process.argv.slice(2)));

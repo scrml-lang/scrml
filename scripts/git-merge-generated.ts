@@ -56,8 +56,11 @@
 //     producers over the merged tree, stages the files; then commit. (b) after a completed merge /
 //     rebase: regenerates pending paths (the post-merge / post-rewrite hooks run it). A pending
 //     record is keyed to the operation (ORIG_HEAD) so an aborted merge's record is dropped, never
-//     replayed on the next unrelated merge. The CI currency gates (`facts.ts --check`, …) stay the
-//     backstop.
+//     replayed on the next unrelated merge. Since S474 the backstop is the post-merge bot
+//     (.github/workflows/generated-regen.yml), which regenerates every derived block on main; the CI
+//     currency checks only WARN on staleness (exit 4). PRs no longer regenerate these blocks, so this
+//     driver rarely has derived content to reconcile — it stays for branches that did regenerate
+//     (pre-S474 branches, habit) and for the same-spot @gap entry union, which is hand text.
 //
 // ═══ WHAT IS GENERATED (each producer's header read at S468) ════════════════════════════════════
 //   docs/known-gaps.md            `@generated:gap-counts`       state.ts       SELF-CONTAINED (own @gap markers)

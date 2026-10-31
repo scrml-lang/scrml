@@ -82,7 +82,7 @@
  *   bun scripts/bootstrap-conformance.ts --cases <dir>   a different case root (the tests' fixtures)
  *   bun scripts/bootstrap-conformance.ts --json <path>   also write the per-case JSON
  *   bun scripts/bootstrap-conformance.ts --write         also regenerate docs/bootstrap-conformance.md
- *   bun scripts/bootstrap-conformance.ts --check         exit 1 when docs/bootstrap-conformance.md is stale
+ *   bun scripts/bootstrap-conformance.ts --check         exit 4 when docs/bootstrap-conformance.md is stale (S474; was 1)
  *   bun scripts/bootstrap-conformance.ts --fail-on-fail  exit 1 when FAIL or CRASH > 0
  *   bun scripts/bootstrap-conformance.ts --no-twins      grade legacy cases as written (pre-twin)
  *
@@ -90,11 +90,14 @@
  *
  *   0  a VALID measurement was taken (whatever the numbers say). This is a TRACKING probe, not a
  *      gate: a red exit over a known backlog would be the §8 cry-wolf shape.
- *   1  only with --fail-on-fail (a FAIL or a CRASH was found) or --check (the report file is stale).
- *      CI runs `--check` in the NON-BLOCKING `tracking` job on every PR, and (S457) as a BLOCKING
- *      `gate` step on a pull request whose diff touches `conformance/cases/**` or
- *      `compiler/self-host-v2/**` — the report's STALENESS blocks there, never its FAIL count.
+ *   1  only with --fail-on-fail (a FAIL or a CRASH was found), or bun's uncaught-exception code.
  *   2  NOT A VALID RUN — the bootstrap bundle failed to build/load, or zero cases were attempted.
+ *   4  --check: the report file is STALE (S474; was 1). CI runs `--check` in the NON-BLOCKING
+ *      `tracking` job, and (S457) as a `checks` step on a pull request whose diff touches
+ *      `conformance/cases/**` or `compiler/self-host-v2/**`. Since S474 (owner ruling: generated
+ *      blocks regenerate post-merge) that step WARNS on 4 and FAILS on anything else — so a PR that
+ *      breaks the bootstrap build (2) still blocks; staleness never does, and the FAIL count never
+ *      did. main is regenerated after merge by .github/workflows/generated-regen.yml.
  *
  * The report always states its own scope: "N of M cases attempted" (attempted = reached the
  * bootstrap at all; every case is attempted unless --filter narrows the set, which is printed).
@@ -1246,7 +1249,10 @@ async function main(): Promise<number> {
       : `bootstrap-conformance: ${relative(REPO_ROOT, REPORT_PATH)} is current`);
   }
   if (failOnFail && r.counts.FAIL + r.counts.CRASH > 0) return 1;
-  if (stale) return 1;
+  // S474 — stale is its OWN code (4), so a PR-side caller can warn on staleness alone (main is
+  // regenerated after merge by generated-regen.yml) while a crash (1 — bun's uncaught-exception code)
+  // or an invalid run (2) still fails it.
+  if (stale) return 4;
   return 0;
 }
 

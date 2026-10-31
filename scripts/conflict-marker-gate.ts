@@ -33,7 +33,17 @@ import { execFileSync } from "node:child_process";
 // Built at runtime so this file's own source does not contain a matchable literal.
 const OPEN = "<".repeat(7) + " ";
 const CLOSE = ">".repeat(7) + " ";
-const PATTERN = `^(${OPEN}|${CLOSE})`;
+// S474 — ALSO the BODY lines of the merge driver's own stop blocks (scripts/git-merge-generated.ts
+// `regenBlock` / `failBlock`). Twice a hand resolution deleted the three marker lines of a REGENERATION
+// REQUIRED block and kept its instruction line, which then sat on main as line 1 of compiler/SPEC-INDEX.md
+// with this gate green: removed at 996a049a8 (S471), back via d327610cb (S473), removed again at S474. The
+// leftover is as much an unresolved merge as a marker is. Backlog at introduction: zero (the S474 line
+// was its only instance). Built from pieces for the same reason as OPEN/CLOSE.
+const DRIVER = "scripts/git-merge-" + "generated.ts";
+const REGEN_BODY = "Run `bun " + DRIVER + " --regen`: it regenerates";
+const FAIL_BODY = "This merge was STOPPED by " + DRIVER;
+const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+const PATTERN = `^(${OPEN}|${CLOSE}|${esc(REGEN_BODY)}|${esc(FAIL_BODY)})`;
 
 let hits: string[] = [];
 try {

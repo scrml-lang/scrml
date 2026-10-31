@@ -2,34 +2,52 @@
 
 Workflows live in `workflows/`. The required check on `main` is the `gate` aggregator in `ci.yml`. `main` is protected by ruleset 25356240, which requires a pull request, `gate` and the merge queue, with no bypass actors. Every automated write therefore goes in through a PR.
 
-## Generated docs: which are gated, and where
+## Generated blocks: regenerated on main after merge (S469 FACTS, S474 everything derived)
 
-| doc | producer | PR-side | kept current on `main` by |
-|---|---|---|---|
-| `docs/FACTS.md` | `scripts/facts.ts` | **warns** when stale (exit 4 only); every other non-zero fails — a broken measurement (2), a missing anchor (3), a dangling symlink (5), or a crash (1, bun's uncaught-exception code) | `facts-regen.yml`, after every merge |
-| `compiler/SPEC-INDEX.md` | `scripts/regen-spec-index.ts` | blocking (`checks`) and pre-push | the PR that edits `SPEC.md` |
-| `docs/bootstrap-conformance.md` | `scripts/bootstrap-conformance.ts` | blocking only when the PR touches `conformance/cases` or `compiler/self-host-v2`; `tracking` reports it otherwise | the PR that changes the corpus or the bootstrap |
-| `docs/known-gaps.md` `@generated:gap-counts` | `scripts/state.ts` | not CI-gated; derived only from the same file, so a PR's table always agrees with its own gap markers | the PR that adds or resolves gaps (`cloud-maps.yml` does not stage this file) |
+Owner rulings: S469 "Regenerate on main after merge." (FACTS.md), then S474 "Generated files move to a post-merge bot. PRs stop committing regenerated blocks (known-gaps counts, coverage totals, `severity.scrml`, SPEC-INDEX, bootstrap-conformance.md and the like); a post-merge bot (the FACTS.md pattern) regenerates them on main; CI checks only the sources." (scrml-support `user-voice-scrml.md` §S474.) Why: in S473 every PR that touched gaps went dirty when another landed, costing ~8–10 re-merge rounds; FACTS had the same problem at S469, when 48 of 78 landings moved it.
 
-## FACTS: regenerated on main after merge (S469)
+| block | producer | derives from | PR-side (CI `checks`; hook) | stale exit | still BLOCKS on |
+|---|---|---|---|---|---|
+| `docs/FACTS.md` | `facts.ts` | compiler/src, tests, SPEC, conformance, stdlib … | warns; pre-push warns | 4 | 1 crash, 2 zero measurement, 3 missing anchor, 5 dangling symlink |
+| `compiler/SPEC-INDEX.md` totals + row Lines/Size | `regen-spec-index.ts` | `SPEC.md` | warns; pre-push warns | 4 | 1: a § with **no row** (a new § needs a hand-written row), a truncated row scan, a row naming a § SPEC lacks, missing anchors |
+| `docs/bootstrap-spec-coverage.md` `@generated:coverage-totals` | `spec-coverage-check.ts --write` | the doc's own rows | warns; pre-commit warns | 4 | 1: a § with no row, a SILENT row with no gap, a cited gap that doesn't exist, bad status/token, missing anchors · 2: unparseable inputs |
+| `docs/known-gaps.md` `@generated:gap-counts`, `master-list.md` `@generated:recent-sessions` | `state.ts --write` | the `@gap` markers; `git log` wrap commits | warns (**new step at S474** — was not CI-gated at all) | 4 | 1: an unclassifiable `@gap` status, a stray 2nd START/END anchor · 2: zero markers parsed · 3: missing anchor |
+| `docs/bootstrap-conformance.md` | `bootstrap-conformance.ts --write` | a bootstrap run over `conformance/cases` | warns (PR touching `conformance/cases` / `compiler/self-host-v2`; `tracking` otherwise) | 4 | 2: the bootstrap failed to build/load or 0 cases · 1: crash |
+| `compiler/self-host-v2/severity.scrml` | `gen-bootstrap-severity.ts` | SPEC §34 + bootstrap code literals | warns (**moved from `tracking` to `checks`** at S474) | 4 | 1: crash. Answer-changing drift fails `slice-m4/severity.test.js` on the PR. |
 
-Owner ruling, S469: "Regenerate on main after merge." FACTS holds repo-wide totals that most landings move. 48 of the 78 landings between 2026-10-10 and 2026-10-22 changed it. A PR's FACTS edit was stale, and in textual conflict, as soon as any other PR landed.
+Every row's PR-side check runs through `scripts/ci-stale-warn.sh` (FACTS has its own identical step): exit 4 becomes a `::warning::`, and any other non-zero fails. A broken source or a broken producer still fails the PR. Only staleness passes, and nobody has to fix it in the PR. Pinned by `compiler/tests/unit/generated-stale-exit-codes-s474.test.js` and `facts-check-exit-codes-s472.test.js`.
 
-The flow, in `facts-regen.yml`:
+**Not moved: generated code the build or runtime consumes.** These stay in-PR and blocking, because a stale copy on main between the merge and the bot's landing would be a wrong program, not a wrong number:
 
-1. Every push to `main` (and `workflow_dispatch`) runs `bun scripts/facts.ts --write` on main's **current** tip.
-2. If there is no drift, nothing happens, and a leftover bot PR is closed.
-3. If there is drift, the job makes one commit on top of the tip and force-pushes it to the fixed branch `bot/facts-regen`. It opens a PR from that branch, or reuses the open one, and enables auto-merge. The PR goes through `gate` and the merge queue like any other PR.
-4. When that PR lands, its push re-runs the job, which finds a fixpoint: FACTS.md is not an input to any figure in it. So there is no loop.
+- `compiler/runtime/stdlib/md.js` (`gen-md-shim.ts --check`; the runtime loads it, and SPEC §67.8 allows one md reader).
+- The URL-guard verbatim block in `compiler/self-host-v2/slice-m1/runtime/runtime.js` (`sync-bootstrap-url-guard.ts`, checked byte-exact by `bootstrap-url-guard-verbatim.test.js`; security).
 
-The job also does not race. `concurrency: facts-regen` with `cancel-in-progress` keeps only the newest run alive, and there is only ever one bot branch and one bot PR. An open bot PR that already carries the right figures is not force-pushed, so it is not dequeued.
+`severity.scrml` is code too. It is on the bot only because of the semantic test: an answer-changing drift fails the PR, so the only drift that can reach main is byte drift that changes no answer.
+
+### The bot: `generated-regen.yml`
+
+1. Every push to `main` (and `workflow_dispatch`) runs the six producers on main's **current** tip, in dependency order: severity → SPEC-INDEX → coverage (reads SPEC-INDEX) → state → bootstrap-conformance (compiles severity) → FACTS (measures the rest).
+2. If a producer fails, its files are restored to main's content, so a broken measurement is never committed. The others still land, and the run ends red with the failure named.
+3. If there is no drift, nothing happens, and a leftover bot PR is closed.
+4. If there is drift, the job makes one commit on top of the tip and force-pushes it to the fixed branch `bot/generated-regen`. It opens a PR from that branch, or reuses the open one, and enables auto-merge. The PR goes through `gate` and the merge queue like any other PR.
+5. When that PR lands, its push re-runs the job, which finds a fixpoint: no block is an input of its own figures, and the bot's merge commit is not a session wrap, so recent-sessions ignores it. So there is no loop.
+
+The job also does not race. `concurrency: generated-regen` with `cancel-in-progress` keeps only the newest run alive, and there is only ever one bot branch and one bot PR. An open bot PR that already carries the right content is not force-pushed, so it is not dequeued.
+
+**Why one workflow, not a sibling of facts-regen:** the producers read each other's outputs. Two bots would each compute from a tip that lacks the other's commit, and their PRs would stale and conflict with each other. That is the S473 problem again, between the bots. The S469 branch `bot/facts-regen` is retired, and the job closes any PR still open from it.
 
 **What this means for a PR author:**
 
-- Don't commit a FACTS.md regen. It only conflicts with the bot's.
-- The CI step and the pre-push hook print a warning. That's expected.
+- Don't commit a regen of any block in the table. It only conflicts with the bot's.
+- Do make the hand-written source edits the checks require: a new SPEC § needs its SPEC-INDEX row and a coverage row, and a SILENT coverage row needs a gap id. Those still fail the PR.
+- `severity.scrml`: regenerate it when `severity.test.js` fails, which happens when a §34 change alters an answer the bootstrap gives. Leave answer-neutral drift to the bot.
+- The CI steps and the hooks print warnings for stale blocks. That's expected.
 
-**Token:** the job writes with the `MAPS_PAT` secret, the fine-grained PAT that `cloud-maps.yml` also uses (Contents R/W, Pull-requests R/W). The default `GITHUB_TOKEN` can't be used, because a PR it opens does not trigger `gate`, so the queue would never take it. Fine-grained PATs expire. When `MAPS_PAT` lapses, both bot workflows go red at checkout. Merges aren't blocked, since neither is a required check, but FACTS drifts until the PAT is renewed. Then re-fire with `gh workflow run facts-regen`.
+**The merge driver stays.** `.gitattributes`' `scrml-generated` driver still helps locally: a branch that did run a producer (by habit, or a pre-S474 branch) merges main's bot output without conflict hunks, and the driver's gap-id union keeps two branches' same-spot gap entries. It is inert unless installed, and GitHub never runs it. With PRs no longer touching generated regions, it rarely has anything to do.
+
+**`cloud-maps.yml` no longer writes.** Its Stage 1 (`state.ts --write` + a `maps/regen-*` PR) was a second, daily writer of `master-list.md`, and it would race the bot. It was removed, and only the thread-board probe remains.
+
+**Token:** the job writes with the `MAPS_PAT` secret (Contents R/W, Pull-requests R/W). The default `GITHUB_TOKEN` can't be used, because a PR it opens does not trigger `gate`, so the queue would never take it. Fine-grained PATs expire. When `MAPS_PAT` lapses, the bot goes red at checkout. Merges aren't blocked, since it is not a required check, but the blocks drift until the PAT is renewed. Then re-fire with `gh workflow run generated-regen`.
 
 ## Windows: a ratchet, required through `gate` (S473)
 

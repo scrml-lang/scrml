@@ -19,12 +19,20 @@
  *
  * Restricting the table to the bootstrap's own codes keeps it small and makes an unrelated §34 edit
  * inert; a §34 change to a code the bootstrap emits, or a new code literal in a bootstrap source,
- * makes the file stale — `--check` reports it (CI's NON-blocking tracking job runs it). The
- * self-host-v2 test severity.test.js checks SEMANTICS only (compiled severityOf == §34 for every
- * code the bootstrap names), so a docs-only §34 row that changes no answer does not go red.
+ * makes the file stale — `--check` reports it. The self-host-v2 test severity.test.js checks
+ * SEMANTICS only (compiled severityOf == §34 for every code the bootstrap names), so a docs-only §34
+ * row that changes no answer does not go red.
+ *
+ * S474 (owner ruling: generated files regenerate post-merge). This file is CODE the bootstrap compiles
+ * — the class a post-merge bot must not leave wrong on main. It is safe here because of the split
+ * above: any drift that CHANGES an answer fails severity.test.js on the PR (blocking, CI `slices` and
+ * the pre-commit slice step), so the PR must regenerate; only answer-NEUTRAL byte drift (a row added
+ * with the severity the fail-closed default already gives, a header gap-list line) can reach main,
+ * and .github/workflows/generated-regen.yml regenerates that after merge. CI `checks` runs `--check`
+ * and WARNS on 4 / FAILS on anything else (a crashing generator would otherwise first fail on main).
  *
  * Usage:  bun scripts/gen-bootstrap-severity.ts            write severity.scrml
- *         bun scripts/gen-bootstrap-severity.ts --check    exit 1 when severity.scrml is stale
+ *         bun scripts/gen-bootstrap-severity.ts --check    exit 4 when severity.scrml is stale (S474; was 1)
  */
 import { readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -170,8 +178,11 @@ if (import.meta.main) {
     let cur = "";
     try { cur = readFileSync(SEVERITY_FILE, "utf8"); } catch {}
     if (cur !== text) {
-      console.error("compiler/self-host-v2/severity.scrml is STALE against SPEC §34 / the bootstrap sources — run `bun scripts/gen-bootstrap-severity.ts`");
-      process.exit(1);
+      // S474 — 4 (not 1, which is also bun's crash code): stale only. CI WARNS on 4 and fails on any
+      // other non-zero; generated-regen.yml regenerates main after merge. An answer-CHANGING drift is
+      // not left to the bot: slice-m4/severity.test.js fails the PR itself (see the header).
+      console.error("compiler/self-host-v2/severity.scrml is STALE against SPEC §34 / the bootstrap sources — run `bun scripts/gen-bootstrap-severity.ts` (exit 4)");
+      process.exit(4);
     }
     console.log("severity.scrml is current");
   } else {
