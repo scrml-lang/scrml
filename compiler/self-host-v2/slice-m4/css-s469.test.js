@@ -40,6 +40,9 @@ const clean = (src) => {
   return r.core;
 };
 const printed = (core) => mods.print.printProgram(core, "c.client.js", "scrml-runtime.js");
+// s474 (door 3, "The CSS scope key and output names are always per-file qualified"): a component's
+// key is `<name>~<file tag>` (core.scrml scopeKey) — here, of the one file `c.scrml`
+const key = (name, path = "c.scrml") => mods.core.scopeKey(path, name);
 const sheetOf = (core) => {
   const m = /<style>([\s\S]*?)<\/style>/.exec(printed(core).html);
   return m ? m[1] : null;
@@ -93,7 +96,7 @@ describe("placement and the printed sheet (§9.1 DQ-6 / DQ-7, §65.5, §65.8)", 
     const css = sheetOf(core);
     expect(author(css)).toBe([
       "@layer reset, global;",
-      '@scope ([data-scrml="card"]) to ([data-scrml]) {',
+      `@scope ([data-scrml="${key("card")}"]) to ([data-scrml]) {`,
       // each arm twice: as written (a descendant) and root-anchored (ruled S469 "include the root")
       "  :where(.card > h2), :where(:scope.card > h2), .card:hover, :where(:scope).card:hover { color: green; }",
       '  [data-k="1"], :where(:scope)[data-k="1"] { margin: 0; }',
@@ -102,7 +105,7 @@ describe("placement and the printed sheet (§9.1 DQ-6 / DQ-7, §65.5, §65.8)", 
     ].join("\n"));
     // the `>` combinator is printed verbatim in the raw-text `<style>`, never as `&gt;`
     expect(css).not.toContain("&gt;");
-    expect(printed(core).html).toContain('<div class="card" data-scrml="card">');
+    expect(printed(core).html).toContain(`<div class="card" data-scrml="${key("card")}">`);
   });
 
   test("§65.2.4 R1: a universal / bare-root arm is emitted FIRST in its scope (a floor below specific rules)", () => {
@@ -113,7 +116,7 @@ describe("placement and the printed sheet (§9.1 DQ-6 / DQ-7, §65.5, §65.8)", 
   test("once any component has a scoped sheet, EVERY component root is stamped (the donut's limit); with none, nothing is", () => {
     const plain = `    <chip label:string/>\n    renders <span>\${label}</span>\n`;
     const scoped = clean(P(`        <card title="a"/>\n        <chip label="b"/>`, CARD + plain));
-    expect(printed(scoped).html).toContain('<span data-scrml="chip">');
+    expect(printed(scoped).html).toContain(`<span data-scrml="${key("chip")}">`);
     const none = clean(P(`        <chip label="b"/>`, `    #{ p { color: red; } }\n` + plain));
     expect(printed(none).html).not.toContain("data-scrml");
   });
@@ -253,18 +256,18 @@ describe("diagnostics — ruled CSS the bootstrap refuses by name, and the use-s
     ], "app.scrml");
     expect(r.diags.filter((d) => d.code !== "E-STMT-MISSING-SEMICOLON").map((d) => [d.code, d.file])).toEqual([["E-BOOTSTRAP-UNSUPPORTED", "lib.scrml"]]);
   });
-  // s472: file scope — uses resolve per file now, but the scope KEY is still the bare name
-  // (§9.1 DQ-7), so two same-named components in two files stay refused (dupDecls;
-  // g-boot-component-scope-key-bare-name-s472). Importing the name AND declaring it is,
-  // in addition, a duplicate binding in file scope (E-SCOPE-010, §7.6).
-  test("two components of one name cannot share a scope key: the linker refuses the second declaration", () => {
+  // s474 (door 3): the scope KEY is per file (`<name>~<file tag>`), so two same-named components in
+  // two files no longer share one (was E-COMPONENT-NAME-DUPLICATE, S473). Importing the name AND
+  // declaring it is still a duplicate binding in file scope (E-SCOPE-010, §7.6).
+  test("two components of one name in two files get two scope keys; importing one AND declaring one stays E-SCOPE-010", () => {
     const r = frontEnd(mods, [
       { path: "a.scrml", src: `export <card t:string/>\nrenders <div>#{ .x { color: red; } }\${t}</div>\n` },
-      { path: "app.scrml", src: `<program>\n    <card x:string/>\n    renders <p>\${x}</p>\n    <main><p>x</p></main>\n</program>\n` },
+      { path: "app.scrml", src: `<program>\n    <card x:string/>\n    renders <p>#{ .x { color: blue; } }\${x}</p>\n    <main><card x="hi"/></main>\n</program>\n` },
     ], "app.scrml");
-    expect(r.diags.map((d) => d.code)).toEqual(["E-COMPONENT-NAME-DUPLICATE"]);   // s473: the language rule (§9.1)
-    expect(r.diags[0].message).toContain("is also declared in");
-    expect(r.diags[0].message).toContain("CSS scope key");
+    expect(r.diags.map((d) => d.code)).toEqual([]);
+    const html = mods.print.printProgram(r.core, "x.client.js", "scrml-runtime.js").html;
+    expect(html).toContain(`@scope ([data-scrml="${key("card", "a.scrml")}"]) to ([data-scrml]) {\n  :where(.x), :where(:scope.x) { color: red; }\n}`);
+    expect(html).toContain(`@scope ([data-scrml="${key("card", "app.scrml")}"]) to ([data-scrml]) {\n  :where(.x), :where(:scope.x) { color: blue; }\n}`);
     const r2 = frontEnd(mods, [
       { path: "a.scrml", src: `export <card t:string/>\nrenders <div>#{ .x { color: red; } }\${t}</div>\n` },
       { path: "app.scrml", src: `import { card } from "./a.scrml";\n<program>\n    <card x:string/>\n    renders <p>\${x}</p>\n    <main><p>x</p></main>\n</program>\n` },
@@ -279,8 +282,8 @@ describe("diagnostics — ruled CSS the bootstrap refuses by name, and the use-s
     ], "app.scrml");
     expect(r.diags).toEqual([]);
     const html = mods.print.printProgram(r.core, "x.client.js", "scrml-runtime.js").html;
-    expect(html).toContain('@scope ([data-scrml="card"]) to ([data-scrml]) {\n  :where(.c), :where(:scope.c) { color: red; }\n}');
-    expect(html).toContain('<div class="c" data-scrml="card">');
+    expect(html).toContain(`@scope ([data-scrml="${key("card", "a.scrml")}"]) to ([data-scrml]) {\n  :where(.c), :where(:scope.c) { color: red; }\n}`);
+    expect(html).toContain(`<div class="c" data-scrml="${key("card", "a.scrml")}">`);
   });
 });
 
@@ -299,8 +302,8 @@ describe("in the browser (happy-dom): the styles apply", () => {
     expect(color("#own")).toBe("green");
     expect(color("#in")).not.toBe("green");
     expect(color("#page")).not.toBe("green");
-    expect($(".outer").getAttribute("data-scrml")).toBe("outer");
-    expect($(".inner").getAttribute("data-scrml")).toBe("inner");
+    expect($(".outer").getAttribute("data-scrml")).toBe(key("outer"));
+    expect($(".inner").getAttribute("data-scrml")).toBe(key("inner"));
   });
 
   test("a flat block's inline style applies to the root", async () => {

@@ -46,11 +46,11 @@
 // binding (positional binding over an imported enum is silently dropped).
 // =============================================================================
 ${
-    import { Sym, Expr, Stmt, Failable, Fn, HostFn, ServerFn, CoreProgram, Db, Driver, SqlQuery, Param,
+    import { Sym, Expr, Stmt, Failable, Fn, HostFn, ServerFn, CoreProgram, Db, Driver, SqlQuery, Param, Block,
              findFn, findServerFn, findDb } from "./core.scrml"
     import { Node, allNodes } from "./walk.scrml"
     import { JsExpr, JsStmt, JsProp, jid, jstr, jnum, jcall, jmember, printModule } from "./js.scrml"
-    import { RouteOut, Ctx, coreRefusal, serverCtx, serverFnJs, symNameOf, routeJs, routeName, routePath, calledServerFns,
+    import { RouteOut, Ctx, coreRefusal, serverCtx, serverFnJs, envelopedFnJs, symNameOf, routeJs, routeName, routePath, calledServerFns,
              sqlTextName, dbVarName, hostImports, hostFnJs, constsReadIn, constStmts } from "./print.scrml"
 
     export type ServerOutput:struct = { js: string, refused: string[], routes: RouteOut[] }
@@ -118,15 +118,17 @@ ${
         // createServer(host$): the databases, the functions, the routes
         let inner: JsStmt[] = []
         let conns: JsExpr[] = []
+        const envRefused: string[] = envelopeRefusal(p, reach, dbsOf(p, queries))
+        if (envRefused.length > 0) return { js: "", refused: envRefused, routes: [] }
         for (const d of dbsOf(p, queries)) {
             inner = inner.concat([JsStmt.SConst(dbVarName(d.sym), jcall(jmember(jid("rt"), "connection"), [jid("host$"), dbJs(d)]))])
             conns = conns.concat([jid(dbVarName(d.sym))])
         }
         for (const sf of p.server) {
-            if (reach.indexOf(sf.sym.id) >= 0) inner = inner.concat([serverFnJs(ctx, sf.sym, sf.params, sf.body, sf.waits)])
+            if (reach.indexOf(sf.sym.id) >= 0) inner = inner.concat([bodyFnJs(ctx, p, sf.sym, sf.params, sf.body, sf.waits)])
         }
         for (const f of p.fns) {
-            if (reach.indexOf(f.sym.id) >= 0) inner = inner.concat([serverFnOf(ctx, f)])
+            if (reach.indexOf(f.sym.id) >= 0) inner = inner.concat([serverFnOf(ctx, p, f)])
         }
         let routeExprs: JsExpr[] = []
         for (const sf of routed) { routeExprs = routeExprs.concat([routeEntry(ctx, sf)]) }
@@ -135,17 +137,48 @@ ${
         inner = inner.concat([JsStmt.SReturn(jcall(jmember(jid("rt"), "server"), [jid("host$"), JsExpr.JArray(routeExprs), JsExpr.JArray(conns)]))])
         body = body.concat([
             JsStmt.SBlank,
-            JsStmt.SComment("createServer(host$) — host$.connect(desc) supplies each database's driver (Bun.SQL by default); host$.log the server log"),
+            JsStmt.SComment("createServer(host$) — host$.connect(desc) supplies each database's driver (Bun.SQL by default); host$.log the server log; host$.dev true only in a dev build (a failed query's driver text is then kept in a failure answer — S474 ruling 2)"),
             JsStmt.SExportFunc("createServer", ["host$"], inner),
         ])
         return { js: printModule(body), refused: [], routes: routes }
     }
 
     // A reached Fn: a host-backed one is its signature around the decoded host call (print.scrml hostFnJs).
-    fn serverFnOf(ctx: Ctx, f: Fn) -> JsStmt {
+    fn serverFnOf(ctx: Ctx, p: CoreProgram, f: Fn) -> JsStmt {
         const h: HostFn | not = f.host
         if (h is given) return hostFnJs(ctx, f, h)
-        return serverFnJs(ctx, f.sym, f.params, f.body, f.waits)
+        return bodyFnJs(ctx, p, f.sym, f.params, f.body, f.waits)
+    }
+
+    // s474 (U1e): a function with an Envelope runs its body inside it (print.scrml envelopedFnJs).
+    fn bodyFnJs(ctx: Ctx, p: CoreProgram, sym: Sym, params: Param[], body: Block, waits: boolean) -> JsStmt {
+        for (const e of p.envelopes) {
+            if (e.fn.id == sym.id) return envelopedFnJs(ctx, sym, params, body, e.db, e.standalone, e.writes)
+        }
+        return serverFnJs(ctx, sym, params, body, waits)
+    }
+
+    // s474 (U1e) — fail closed on its own (check.scrml C-TX1..C-TX3 are the Core's
+    // invariants): an envelope this artifact prints must name a function that waits
+    // and a SQLite database this artifact connects to.
+    fn envelopeRefusal(p: CoreProgram, reach: int[], conns: Db[]) -> string[] {
+        let out: string[] = []
+        for (const e of p.envelopes) {
+            if (reach.indexOf(e.fn.id) >= 0) {
+                let waits = false
+                for (const sf of p.server) { if (sf.sym.id == e.fn.id) waits = sf.waits }
+                for (const f of p.fns) { if (f.sym.id == e.fn.id) waits = f.waits }
+                let db: Db | not = not
+                for (const d of conns) { if (d.sym.id == e.db.id) db = d }
+                if (!waits) out = out.concat(["E-BOOTSTRAP-UNSUPPORTED: " + e.fn.hint + "() has a transaction envelope but does not wait — the Core is ill-formed (check.scrml C-TX2)"])
+                if (db is not) {
+                    out = out.concat(["E-BOOTSTRAP-UNSUPPORTED: " + e.fn.hint + "()'s transaction envelope is on a database none of the server's queries use — the Core is ill-formed (check.scrml C-TX1)"])
+                } else if (e.standalone && db.driver != Driver.Sqlite) {
+                    out = out.concat(["E-BOOTSTRAP-UNSUPPORTED: " + e.fn.hint + "()'s transaction envelope is on a pooled database — the server runtime reserves no pool connection (check.scrml C-TX3)"])
+                }
+            }
+        }
+        return out
     }
 
     // `rt.route(route$f, (args$) => f(args$[0], args$[1]))` — the arguments arrive

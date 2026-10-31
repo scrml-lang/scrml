@@ -60,7 +60,8 @@ describe("a driver error is a SqlError VALUE (§19.8.1), with a server log line 
     const conn = srt.connection({ connect: () => sql, log: (l) => logs.push(l) }, { driver: "sqlite", target: ":memory:", file: "a.scrml" });
     const dup = await srt.query(conn, "run", srt.sqlText(["INSERT INTO m (email) VALUES (", ")"]), ["a@x"], [0]);
     expect(rt.failed(dup)).toBe(true);
-    expect(dup.error).toEqual({ variant: "ConstraintViolation", data: ["m.email"] });
+    // S474 #1703 r1 (PA ruling): the COLUMN name only, never `table.column`
+    expect(dup.error).toEqual({ variant: "ConstraintViolation", data: ["email"] });
     const bad = await srt.query(conn, "all", srt.sqlText(["SELECT nope FROM m"]), [], []);
     expect(bad.error.variant).toBe("QueryFailed");
     expect(logs.length).toBe(2);

@@ -49,9 +49,9 @@ afterAll(async () => {
 });
 
 let seq = 0;
-/** Compile `src` (clean), serve it, open it; returns the page. */
+/** Compile `src` (clean) — or a list of `{ path, src }` files, the entry `app.scrml` — serve it, open it; returns the page. */
 async function open(src) {
-  const r = frontEnd(mods, [{ path: "c.scrml", src }]);
+  const r = typeof src === "string" ? frontEnd(mods, [{ path: "c.scrml", src }]) : frontEnd(mods, src, "app.scrml");
   expect(r.diags.map((d) => `${d.code}: ${d.message}`)).toEqual([]);
   const name = `p${seq++}`;
   const out = mods.print.printProgram(r.core, `${name}.client.js`, "scrml-runtime.js");
@@ -140,6 +140,39 @@ suite("Chromium — a component's `#{}` styles its own root and subtree, inside 
     expect(await style(page, "#x", "color")).toBe("rgb(0, 128, 128)");
     await page.click("#go");
     expect(await style(page, "#x", "color")).toBe("rgb(1, 2, 3)");
+    await page.close();
+  });
+});
+
+// s474 (door 3, user-voice-scrml.md "⭐ RULED — permanent-restrictions re-review: the four one-way doors",
+// item 3: "The CSS scope key and output names are always per-file qualified"): two files each declare a
+// `<card>` with its own `#{}`; in a real browser each instance gets only its own CSS.
+suite("Chromium — two files' same-named `<card>`s keep apart (s474)", () => {
+  test("each card's scoped rule reaches only its own instance", async () => {
+    const page = await open([
+      { path: "ui/red.scrml", src: `<card t:string/>
+renders <div class="c" id="red-card">#{ .c { color: rgb(255, 0, 0); } }<span class="c" id="red-t">\${t}</span></div>
+export <redPanel t:string/>
+renders <section><card t=t/></section>
+` },
+      { path: "app.scrml", src: `import { redPanel } from "./ui/red.scrml";
+<program>
+    <card t:string/>
+    renders <div class="c" id="blue-card">#{ .c { color: rgb(0, 0, 255); } }<span class="c" id="blue-t">\${t}</span></div>
+    <main>
+        <redPanel t="r"/>
+        <card t="b"/>
+    </main>
+</program>
+` },
+    ]);
+    expect(await style(page, "#red-t", "color")).toBe("rgb(255, 0, 0)");
+    expect(await style(page, "#blue-t", "color")).toBe("rgb(0, 0, 255)");
+    // the root itself (ruled S469 "include the root"), each by its own key
+    expect(await style(page, "#red-card", "color")).toBe("rgb(255, 0, 0)");
+    expect(await style(page, "#blue-card", "color")).toBe("rgb(0, 0, 255)");
+    const keys = await page.evaluate(() => [document.querySelector("#red-card").getAttribute("data-scrml"), document.querySelector("#blue-card").getAttribute("data-scrml")]);
+    expect(keys).toEqual([mods.core.scopeKey("ui/red.scrml", "card"), mods.core.scopeKey("app.scrml", "card")]);
     await page.close();
   });
 });

@@ -1,0 +1,25 @@
+{
+  "id": "acceptance-envelope-client-multi-call",
+  "description": "Against a real SQLite: a client `!` function calling two `!` server functions, composed into one request with one envelope. book(1, 1) fails in the second call — the first call's row is rolled back too; book(2, 0) commits both. Count 2 (3 if the first call had committed on its own), @r = 3, @status = booked.",
+  "language-version": "1.0",
+  "spec": "§19.9.9.8 rules 1, 4 · §19.10.5 · §8.9.2 · S474 ruling door 2",
+  "rationale": "S474 (user-voice-scrml.md, the four one-way doors, door 2): \"F11 becomes INTERIM: a client `!`'s server calls compose into one request with one envelope (planner composition, per §19.9.9.8 rule 1)\". Was E-TX-CLIENT-MULTI-CALL (S473 F11, permanent).",
+  "expect": {
+    "codes": [],
+    "sqlEngine": "real",
+    "serverDb": { "log": [{ "a": 0 }] },
+    "input": [
+      { "click": "#bad" },
+      { "wait": "settle" },
+      { "click": "#ok" },
+      { "wait": "settle" },
+      { "click": "#count" },
+      { "wait": "settle" }
+    ],
+    "domAnchored": [
+      { "selector": "#r", "text": "3" },
+      { "selector": "#n", "text": "2" },
+      { "selector": "#s", "text": "booked" }
+    ]
+  }
+}

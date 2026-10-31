@@ -22,6 +22,7 @@ import {
   classifyGapStatus,
   GAP_STATUS_CARRIED,
   strayAnchors,
+  retiredAnchorLines,
 } from "../../../scripts/state.ts";
 import { readFileSync } from "fs";
 import { join } from "path";
@@ -190,8 +191,9 @@ describe("state.ts §5 — status=carried is a recognised, separately-counted pa
     expect(drift.map((d) => d.id)).toEqual(["g-half"]);
   });
 
-  test("the live §0 table header names the Carried column the generator writes", () => {
-    const ledger = readFileSync(join(import.meta.dir, "../../../docs/known-gaps.md"), "utf8");
+  test("the live counts table header names the Carried column the generator writes", () => {
+    // S474: the table lives in docs/generated/gap-counts.md (bot-owned), not in the ledger.
+    const ledger = readFileSync(join(import.meta.dir, "../../../docs/generated/gap-counts.md"), "utf8");
     // The generated rows carry THREE cells; a two-column static header would render them as garbage.
     // `\r?\n`: a Windows checkout (core.autocrlf) reads this ledger with CRLF line ends (CI `windows`, #1050).
     expect(ledger).toMatch(/\| Severity \| Open[^|\r\n]*\| Carried[^|\r\n]*\|\r?\n\|---\|---\|---\|/);
@@ -218,8 +220,16 @@ describe("state.ts — a second @generated START/END marker is refused (S469 hyg
     expect(strayAnchors(text, "gap-counts")).toEqual(["2 START markers (lines 1, 2)"]);
   });
 
-  test("the live ledger carries exactly one gap-counts START and END", () => {
+  test("the live generated file carries exactly one gap-counts START and END (S474: docs/generated/)", () => {
+    const counts = readFileSync(join(import.meta.dir, "../../../docs/generated/gap-counts.md"), "utf8");
+    expect(strayAnchors(counts, "gap-counts")).toEqual([]);
+    expect(retiredAnchorLines(counts, "gap-counts").length).toBe(2);
+  });
+
+  test("S474: the hand-edited files carry NO generated anchors (a PR edits them; the bot must not)", () => {
     const ledger = readFileSync(join(import.meta.dir, "../../../docs/known-gaps.md"), "utf8");
-    expect(strayAnchors(ledger, "gap-counts")).toEqual([]);
+    const master = readFileSync(join(import.meta.dir, "../../../master-list.md"), "utf8");
+    expect(retiredAnchorLines(ledger, "gap-counts")).toEqual([]);
+    expect(retiredAnchorLines(master, "recent-sessions")).toEqual([]);
   });
 });

@@ -1,0 +1,12 @@
+{
+  "id": "acceptance-envelope-neg-journal-off",
+  "description": "`PRAGMA journal_mode = OFF` inside a `!` function that needs the envelope: E-SQL-JOURNAL-OFF.",
+  "language-version": "1.0",
+  "spec": "§8.9.2 (S473 review-surfaced 2) · §34 E-SQL-JOURNAL-OFF",
+  "rationale": "§8.9.2: \"A `?{PRAGMA journal_mode = OFF}` (any case or spacing) inside a `!` function SHALL be a compile error, **`E-SQL-JOURNAL-OFF`**\".",
+  "expect": {
+    "codes": [
+      "E-SQL-JOURNAL-OFF"
+    ]
+  }
+}

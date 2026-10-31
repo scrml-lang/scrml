@@ -118,7 +118,8 @@ export async function serve(core, driver, logs = [], opts = {}) {
   const mod = await loadServer(server.js, core, opts.stdlibRoot);
   // s473: a spy / test driver has no catalogue — the host answers the tenant gate's question itself
   // (server-runtime.js tenantGate; `opts.tenantRelations` to exercise it)
-  const srv = mod.createServer({ connect: () => driver, log: (l) => logs.push(l), respond: plainRespond, tenantRelations: opts.tenantRelations ?? (async () => []) });
+  // `opts.dev`: a DEV build's host (scrml-boot dev passes `dev: true` — S474 ruling 2 as amended)
+  const srv = mod.createServer({ connect: () => driver, log: (l) => logs.push(l), respond: plainRespond, tenantRelations: opts.tenantRelations ?? (async () => []), ...(opts.dev === true ? { dev: true } : {}) });
   return { srv, mod, js: server.js, routes: server.routes, logs };
 }
 

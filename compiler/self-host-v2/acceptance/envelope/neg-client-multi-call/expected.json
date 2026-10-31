@@ -1,0 +1,12 @@
+{
+  "id": "acceptance-envelope-neg-client-multi-call",
+  "description": "A client-placed `!` function whose two server calls are split by a browser statement (a `<host>` binding call): E-TX-CLIENT-MULTI-CALL at that statement (the permanent residue — the calls would be two requests).",
+  "language-version": "1.0",
+  "spec": "§19.10.5 · §19.9.9.8 rule 3 · §34 E-TX-CLIENT-MULTI-CALL · S474 ruling door 2",
+  "rationale": "S474 (user-voice-scrml.md, the four one-way doors, door 2): \"F11 becomes INTERIM: a client `!`'s server calls compose into one request with one envelope … Only calls separated by browser work that cannot move stay refused.\" §19.9.9.8 rule 3: \"A statement that needs the browser … SHALL NOT be relocated\".",
+  "expect": {
+    "codes": [
+      "E-TX-CLIENT-MULTI-CALL"
+    ]
+  }
+}

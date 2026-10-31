@@ -45,9 +45,9 @@ ${
     import { Sym, Type, SeqAt, LengthGrant, SeqGrants, FieldDef, VariantDef, TypeDef, FieldRef, InstRef,
              Literal, PrimOp, EditKind, Check, FieldMode, FieldRole, GrantSet, Edge, TransitionGraph,
              DeclKind, HostCall, HostFn, HostBind, HostSrc, HostArg, HostProp, SeqFn, BindKind, Validator, SurfaceProp, ValidityOf, Persist, PersistStore, CoreProgram,
-             SqlKind, SqlTables, SqlColumns, Db, Driver, DbLoad,
+             SqlKind, SqlTables, SqlColumns, Db, Driver, DbLoad, Envelope,
              CssPart, CssDecl, StyleRule, CssImport, ScopeSheet,
-             mkSym, noGrants, replaceGrant, typeDefSym, validityInst, validityDecl, plainHead } from "./core.scrml"
+             mkSym, noGrants, replaceGrant, typeDefSym, validityInst, validityDecl, plainHead, declScopeKey } from "./core.scrml"
     import { ASpan, BinOp, UnOp, AExpr, AProp, AExprK, AStmt, ABlock, AStmtK, AEffect, AType, ATypeK,
              ATypeField, AVariant, ATypeBody, ATypeDecl, AParam, AFn, AImportName, AImport,
              AAttrValue, AAttr, AElem, ANode, ANodeK, ADeclAttr, AStateChild, ADeclChild, ADecl, AValArg, AValidator,
@@ -469,9 +469,9 @@ ${
     // s454 (U1b): `inherited` — the functions server-placed by inheritance
     // (§12.2 Trigger 5): their calls of server functions are made in place;
     // `plan` — the suspension plan (planPass) lower reads.
-    export type ServerFacts:struct = { servers: int[], sqls: SqlInfo[], dbs: Db[], places: PlaceFact[], inherited: int[], plan: SuspendPlan, loads: DbLoad[] }
+    export type ServerFacts:struct = { servers: int[], sqls: SqlInfo[], dbs: Db[], places: PlaceFact[], inherited: int[], plan: SuspendPlan, loads: DbLoad[], envelopes: Envelope[] }
 
-    export fn noServerFacts() -> ServerFacts { return { servers: [], sqls: [], dbs: [], places: [], inherited: [], plan: noPlan(), loads: [] } }
+    export fn noServerFacts() -> ServerFacts { return { servers: [], sqls: [], dbs: [], places: [], inherited: [], plan: noPlan(), loads: [], envelopes: [] } }
 
     // s454 (U1b): is a call made in function `caller` (-1: a handler / effect body)
     // a CLIENT call — the caller is not server-placed, by its own body or by
@@ -1055,6 +1055,7 @@ ${
                 }
             }
             let imported: string[] = []
+            let importedFrom: string[] = []
             for (const imp of importsOfItems(f.items)) {
                 const target: string = importTarget(f.path, imp.from, paths)
                 for (const n of imp.names) {
@@ -1062,13 +1063,29 @@ ${
                         if (mine.indexOf(n.name) >= 0) {
                             st = addDiag(st, f.path, n.span, "E-SCOPE-010", "`" + n.name + "` is imported from `" + imp.from + "` and also declared in this file — a name is bound once in file scope (duplicate binding in file scope, §7.6); rename one, or drop the import")
                         } else {
-                            if (imported.indexOf(n.name) >= 0) {
-                                st = addDiag(st, f.path, n.span, "W-IMPORT-001", "`" + n.name + "` is already imported by an earlier import in this file — this later import wins (§41.7); remove the duplicate, or rename one")
-                                names = unbound(names, n.name)
+                            const at: int = imported.indexOf(n.name)
+                            if (at >= 0) {
+                                const earlier: string = importedFrom[at]
+                                // s474 (door 3): two USER files may each export a name now; importing
+                                // both into ONE file binds it twice in that file's scope — refused
+                                // here, at the later import (was: refused at the second exporter, S473)
+                                if (earlier != target && !isStdlibPath(earlier) && !isStdlibPath(target)) {
+                                    // s474 r1 (review F3): no cascade. The build already fails here; the
+                                    // EARLIER import keeps the name (scopeFrom takes the first entry of a
+                                    // kind), and the refused one's entries follow it, so a use of the name
+                                    // of EITHER kind resolves — never also E-SCOPE-001 ("this file does not
+                                    // import it") for a name this file does import
+                                    st = addDiag(st, f.path, n.span, "E-SCOPE-010", "`" + n.name + "` is already imported into this file from `" + earlier + "`, and this import brings another `" + n.name + "` from `" + target + "` — two user files may each export one name, but one file binds a name once (duplicate binding in file scope, §7.6; ruled S474); import one of them here, or rename one of the exports")
+                                    names = names.concat(exportedEntries(own, target, n.name))
+                                } else {
+                                    st = addDiag(st, f.path, n.span, "W-IMPORT-001", "`" + n.name + "` is already imported by an earlier import in this file — this later import wins (§41.7); remove the duplicate, or rename one")
+                                    names = unbound(names, n.name).concat(exportedEntries(own, target, n.name))
+                                }
                             } else {
                                 imported = imported.concat([n.name])
+                                importedFrom = importedFrom.concat([target])
+                                names = names.concat(exportedEntries(own, target, n.name))
                             }
-                            names = names.concat(exportedEntries(own, target, n.name))
                         }
                     }
                 }
@@ -4093,7 +4110,11 @@ ${
             const fte: TypeEnv = teAt(te, f.path)
             for (const af of fnItems(f.items)) {
                 // s473: a db cell's load `@rows` is minted as `load$rows` (its Sym hint names generated code)
-                const r: RSym = mint(reservedName(st, f.path, af.span, af.name), isLoadName(af.name) ? "load$" + af.name.substring(1) : af.name)
+                // s474: a composed batch `#book` is minted as `book#batch` (composeFiles; the printers write `#` as `_`)
+                let hint: string = af.name
+                if (isLoadName(af.name)) hint = "load$" + af.name.substring(1)
+                if (isBatchName(af.name)) hint = af.name.substring(1) + "#batch"   // r1 (review L3): `#` — no identifier spells it
+                const r: RSym = mint(reservedName(st, f.path, af.span, af.name), hint)
                 st = r.st
                 // each signature component is judged by its own type
                 // expression: the return type alone, the parameter list as a
@@ -10966,6 +10987,12 @@ ${
             .Named(sym: x) :> false
             .Maybe(inner: i) :> false
         }
+    }
+
+    // s474 (client-bang composition, composeFiles): a written tape type `T[g…]` copied into the
+    // composed batch's parameter list — its grant words carried whole, as written (no grant is read)
+    fn seqAType(r: RTy, sp: ASpan, gs: string[]) -> RTy {
+        return { ty: { nid: r.next, span: sp, k: ATypeK.TSeq(r.ty, gs) }, next: r.next + 1 }
     }
 
     // ---- END OF THE TAPE GRANT READER (tape-write-forms.test.js: no grant is read outside it) ----
@@ -18917,15 +18944,14 @@ ${
     //     pairing (`<card>` beside `fn card`, `type T` beside `fn T`, two
     //     declarations, two types): E-SCOPE-010 (§7.6, ruled S473 "`<card>`
     //     beside `fn card`: REFUSED") — fileNameClashes, dupConsts;
-    //   - s473 r2 #5 (narrowed to exported names): one name EXPORTED by two USER
-    //     files of one program, whatever the two name: E-SCOPE-010 (§7.6) —
-    //     fileNameClashes; a private name never collides across files;
-    //   - s473: two COMPONENTS (declarations with `renders`) of one name in two
-    //     files of one program: E-COMPONENT-NAME-DUPLICATE (§9.1 DQ-7, §21.2;
-    //     ruled S473 "Same-name components across files … REFUSED") — dupDecls.
-    //     Two declarations of one name in two files that are not both components
-    //     and not both exported user declarations stay the bootstrap limit
-    //     E-BOOTSTRAP-UNSUPPORTED (legal by the ruling when private);
+    //   - s474 (door 3, "Same-name components across files, and two files
+    //     exporting one name: INTERIM … always per-file qualified"): two files
+    //     may each declare or export one name — a component included; a user
+    //     declaration's output is keyed by its file (core.scrml scopeKey). Two
+    //     same-named exports imported into ONE file: E-SCOPE-010 at the later
+    //     import (linkage). (Was S473: E-SCOPE-010 at the second exporter, and
+    //     E-COMPONENT-NAME-DUPLICATE for two components.) dupDecls keeps only
+    //     the fail-closed file-tag collision (E-BOOTSTRAP-UNSUPPORTED);
     //   - where no ruling / SPEC sentence names one — a handle or a program
     //     cell named like a visible declaration, two fields of one
     //     declaration, two parameters of one name, a redeclaration inside an
@@ -18999,21 +19025,17 @@ ${
         return false
     }
 
-    // s473 — ONE name, ONE binding: in a file, whatever it names; across the
-    // program, for EXPORTED names. §7.6 (S473): "A file-scope name is bound once
-    // in its file, whatever it names". S473 round 2 #5, narrowed (ruled S473
-    // "'one name per program' narrowed to exported names": "The program-wide
-    // one-name rule covers only names a file exports: two user files exporting
-    // the same name is E-SCOPE-010. A non-exported (private) name never collides
-    // with a name in another file"). The bindings: a user declaration, a type, a
+    // s473 — ONE name, ONE binding, in a file, whatever it names. §7.6 (S473): "A
+    // file-scope name is bound once in its file, whatever it names". (S473 round 2
+    // #5's program-wide rule for EXPORTED names — "two user files exporting the
+    // same name is E-SCOPE-010" — is lifted by s474, door 3: "two files exporting
+    // one name: INTERIM"; see bindingsClash. Importing two of them into one file
+    // is linkage's E-SCOPE-010.) The bindings: a user declaration, a type, a
     // function, a file-scope constant, a program cell (never exported). Two
-    // bindings CLASH when they share a name and sit in one file, or are both
-    // EXPORTED from two USER files (a stdlib file's names are not user
-    // declarations; a stdlib file still binds each name once IN its file).
+    // bindings CLASH when they share a name and sit in one file.
     // Each binding after the first of a clash gets ONE report, here, unless:
     //   - another pass already reports AT it (s473 r2 review LOW-1: no two reports
-    //     at one span): dupFns (a later function in one file), dupDecls (two
-    //     components, or another cross-file declaration pair, in two files),
+    //     at one span): dupFns (a later function in one file),
     //     dupFields (a later cell, or a cell named like a visible declaration),
     //     dupConsts (a constant beside a cell of its file, E-NAME-COLLIDES-STATE);
     //   - its file imports the name (from a user or a stdlib file) and it is a
@@ -19023,8 +19045,7 @@ ${
     //     name, from ANY source, is reported here, at the cell (review MED-1);
     //   - every earlier binding it clashes with is a pair another pass reports
     //     (an OWNED pair): a cell and a visible declaration (dupFields, at the
-    //     cell), a constant and a cell of one file (dupConsts, at the constant),
-    //     or a binding whose file imports the name from `n`'s file (linkage).
+    //     cell), a constant and a cell of one file (dupConsts, at the constant).
     // One owned pair never hides an unowned one (review LOW-1). The report names
     // the first binding it clashes with, by file:line:col (review LOW-5). A local,
     // a parameter, a loop binder shadow (§7.3.3) and are never compared; a host
@@ -19081,10 +19102,13 @@ ${
         return fileRank(files, m.file) < fileRank(files, n.file)
     }
 
-    // Do `m` and `n` (one name) clash: one file, or both EXPORTED from two USER files?
+    // Do `m` and `n` (one name) clash? Only in ONE file. s474 (door 3, "two files exporting one
+    // name: INTERIM"): two files may each export a name — each import names its file, so it
+    // resolves to one of them; the output names each per file (print.scrml's NameSupply mints
+    // one JS name per Sym; a declaration's names carry its file key). Two of them imported into
+    // ONE file is the collision, reported there (linkage).
     fn bindingsClash(m: FileName, n: FileName) -> boolean {
-        if (m.file == n.file) return true
-        return m.exported && n.exported && !isStdlibPath(m.file) && !isStdlibPath(n.file)
+        return m.file == n.file
     }
 
     // "file:line:col" of `offset` in `file` (parse.scrml records each file's line starts).
@@ -19128,23 +19152,6 @@ ${
         return false
     }
 
-    // Does `file` import `name` from the file `from` (a plain `import { … }`, §21.3)?
-    fn importsNameFrom(files: FileAst[], file: string, name: string, from: string) -> boolean {
-        const paths: string[] = filePaths(files)
-        for (const f of files) {
-            if (f.path == file) {
-                for (const imp of importsOfItems(f.items)) {
-                    if (importTarget(f.path, imp.from, paths) == from) {
-                        for (const x of imp.names) {
-                            if (x.name == name) return true
-                        }
-                    }
-                }
-            }
-        }
-        return false
-    }
-
     // The `from` of an import in `file` that brings `name` into its scope — a
     // plain `import` whose target (a user OR a stdlib file) exports it — else "".
     fn importBringing(files: FileAst[], lk: Linkage, file: string, name: string) -> string {
@@ -19172,7 +19179,7 @@ ${
             }
             return false
         }
-        if (n.kind == "decl") return dupDeclReportsAt(files, lk, t, n.nid)
+        // (a declaration: dupDecls reports only a CROSS-file pair — s474 — which never clashes here)
         if (n.kind == "const") {
             for (const m of ns) {
                 if (m.kind == "cell" && m.file == n.file && m.name == n.name) return true
@@ -19192,7 +19199,6 @@ ${
     fn pairOwned(files: FileAst[], lk: Linkage, t: Tables, m: FileName, n: FileName) -> boolean {
         if (m.kind == "cell" && n.kind == "decl" && visibleDeclNamed(lk, t, m.file, m.name)) return true
         if (m.kind == "const" && n.kind == "cell" && m.file == n.file) return true
-        if (m.file != n.file && m.kind != "cell" && importsNameFrom(files, m.file, m.name, n.file)) return true
         return false
     }
 
@@ -19213,11 +19219,7 @@ ${
                         }
                     }
                     if (first is given) {
-                        if (first.file == n.file) {
-                            out = out.concat([mkDiag(n.file, n.span, "E-SCOPE-010", "`" + n.name + "` is already bound in this file by " + first.what + " (at " + placeIn(files, first.file, first.span.start) + ") — a file-scope name is bound once, whatever it names (a declaration, a type, a function, a constant, a cell): duplicate binding in file scope (§7.6; ruled S473); rename one")])
-                        } else {
-                            out = out.concat([mkDiag(n.file, n.span, "E-SCOPE-010", "`" + n.name + "` is also exported by " + first.what + " (at " + placeIn(files, first.file, first.span.start) + ") — two files of a program SHALL NOT export one name (§7.6; ruled S473 \"one name per program\" narrowed to exported names); rename one, or stop exporting it")])
-                        }
+                        out = out.concat([mkDiag(n.file, n.span, "E-SCOPE-010", "`" + n.name + "` is already bound in this file by " + first.what + " (at " + placeIn(files, first.file, first.span.start) + ") — a file-scope name is bound once, whatever it names (a declaration, a type, a function, a constant, a cell): duplicate binding in file scope (§7.6; ruled S473); rename one")])
                     } else if (n.kind == "cell" && imported != "") {
                         // s473 r2 review MED-1: a cell beside an import of its name, whatever the source
                         out = out.concat([mkDiag(n.file, n.span, "E-SCOPE-010", "`" + n.name + "` is imported from `" + imported + "` and also bound in this file by " + n.what + " — a name is bound once in file scope, an import included (§7.6); rename the cell, or drop the import")])
@@ -19272,116 +19274,43 @@ ${
     }
 
     // Two user declarations of one name in two FILES (one file: fileNameClashes,
-    // E-SCOPE-010). Every USE resolves per file (s472, declNamed), but the
-    // program's OUTPUT names a component by its bare name — §9.1 DQ-7 stamps a
-    // component's root `data-scrml="ConstructorName"` and scopes its CSS
-    // `@scope ([data-scrml="<name>"])`. s473: two COMPONENTS of one name in one
-    // program are refused by the language — §9.1 DQ-7 (S473): "Two components of
-    // one name in one program SHALL be a compile error (E-COMPONENT-NAME-DUPLICATE),
-    // whichever files declare them" (ruled S473 "Same-name components across
-    // files … REFUSED"). Any other cross-file pair (dupDeclKind):
-    //   - both EXPORTED from user files: E-SCOPE-010 in fileNameClashes (§7.6,
-    //     S473 r2 #5 narrowed to exported names);
-    //   - its file imports the name: linkage's E-SCOPE-010, at the import (review LOW-2);
-    //   - else (a private one, or a stdlib file in the pair): the bootstrap limit
-    //     E-BOOTSTRAP-UNSUPPORTED, fail closed — the ruling makes a private pair
-    //     legal, but two non-component declarations of one name in one output are
-    //     not in the bootstrap (g-boot-decl-same-name-noncomponent-s473).
+    // E-SCOPE-010). s474 (door 3, user-voice-scrml.md "⭐ RULED — permanent-restrictions
+    // re-review: the four one-way doors", item 3): "Same-name components across files, and two
+    // files exporting one name: INTERIM. The CSS scope key and output names are always per-file
+    // qualified, not only on a collision." Every USE resolves per file (s472, declNamed), and
+    // every OUTPUT name of a user declaration — its root's `data-scrml`, its sheet's `@scope`,
+    // its `<template>` ids, its module-level bindings — is its per-file key `<name>~<file tag>`
+    // (core.scrml scopeKey, lower.scrml declKey), so two files may each declare a `<card>`,
+    // a component or not, exported or not. (Was: E-COMPONENT-NAME-DUPLICATE for two components,
+    // the bootstrap limit for any other pair.)
+    // What stays: FAIL CLOSED if two declarations of one name in two files get ONE key — the
+    // file tag is a hash of the path (two independent 32-bit hashes, core.scrml fileTag), so two
+    // paths can share it; one key would merge their style scopes and their templates. A
+    // collision is rare, not unreachable (s474 r1, review F6) — and never silent:
+    // E-BOOTSTRAP-UNSUPPORTED, rename one (or move a file).
     fn dupDecls(files: FileAst[], t: Tables, lk: Linkage) -> Diag[] {
         let out: Diag[] = []
-        for (const d of t.decls) {
-            const k: string = dupDeclKind(files, lk, t, d.nid)
-            if (k != "") {
-                const first: DeclInfo = dupDeclFirst(t, d.nid)
-                if (k == "component") {
-                    out = out.concat([mkDiag(d.file, d.span, "E-COMPONENT-NAME-DUPLICATE", "the component `<" + d.sym.hint + ">` is also declared in `" + first.file + "` — a component's name is its CSS scope key (`data-scrml=\"" + d.sym.hint + "\"`, §9.1 DQ-7), so two components of one name in one program would share one style scope; a program has one component of each name, whichever files declare them (§9.1, §21.2; ruled S473) — rename one")])
-                } else {
-                    out = out.concat([mkDiag(d.file, d.span, "E-BOOTSTRAP-UNSUPPORTED", "`<" + d.sym.hint + ">` is also declared in `" + first.file + "` — two declarations of one name in one program, not both components and not both exported user declarations, are not in the bootstrap (the output names a declaration by its bare name); the language allows a private pair (§7.6, S473) — rename one")])
-                }
-            }
-        }
-        return out
-    }
-
-    // The first earlier user declaration with the name of the declaration `nid`
-    // (t.decls order); the declaration itself when there is none.
-    fn dupDeclFirst(t: Tables, nid: int) -> DeclInfo {
         let users: DeclInfo[] = []
         for (const d of t.decls) {
             if (d.sym.id != t.program.id) users = users.concat([d])
         }
-        let names: string[] = []
-        for (const d of users) { names = names.concat([d.sym.hint]) }
         let j = 0
         while (j < users.length) {
-            if (users[j].nid == nid) {
-                const i: int = earlierSame(names, j)
-                if (i >= 0) return users[i]
-                return users[j]
+            const d: DeclInfo = users[j]
+            let i = 0
+            let hit = false
+            while (i < j && !hit) {
+                const m: DeclInfo = users[i]
+                const kb: string = t.css.keyBase
+                if (m.file != d.file && m.sym.hint == d.sym.hint && declScopeKey(kb, m.file, m.sym.hint) == declScopeKey(kb, d.file, d.sym.hint)) {
+                    out = out.concat([mkDiag(d.file, d.span, "E-BOOTSTRAP-UNSUPPORTED", "`<" + d.sym.hint + ">` is also declared in `" + m.file + "`, and the two files' paths hash to one file tag, so both declarations would get the one output key `" + declScopeKey(kb, d.file, d.sym.hint) + "` (one style scope, one template) — the bootstrap keys a declaration's output by its file (s474); rename one, or move one file")])
+                    hit = true
+                }
+                i = i + 1
             }
             j = j + 1
         }
-        return t.decls[0]
-    }
-
-    // What dupDecls reports AT the declaration `nid`: "component", "limit", or ""
-    // (nothing — no earlier declaration of its name in another file, or the pair
-    // is fileNameClashes' / linkage's).
-    fn dupDeclKind(files: FileAst[], lk: Linkage, t: Tables, nid: int) -> string {
-        let d: DeclInfo | not = not
-        for (const x of t.decls) {
-            if (x.nid == nid && x.sym.id != t.program.id) d = x
-        }
-        if (d is not) return ""
-        const first: DeclInfo = dupDeclFirst(t, nid)
-        if (first.nid == nid || first.file == d.file) return ""
-        // r2 LOW-B: a declaration its file also imports is linkage's (one report), a component included
-        if (importBringing(files, lk, d.file, d.sym.hint) != "") return ""
-        if (declRenders(files, first.nid) && declRenders(files, d.nid)) return "component"
-        if (isStdlibPath(first.file) || isStdlibPath(d.file)) return "limit"
-        // r2 LOW-A: an EXPORTED declaration with an earlier exported user declaration of its name in
-        // another file is fileNameClashes' E-SCOPE-010 — whatever private declaration came first
-        if (declExported(lk, d.file, d.sym.hint)) {
-            for (const x of t.decls) {
-                if (x.sym.id != t.program.id && x.sym.hint == d.sym.hint && x.file != d.file && !isStdlibPath(x.file) && fileOrderBefore(t, x.nid, nid) && declExported(lk, x.file, x.sym.hint)) return ""
-            }
-        }
-        return "limit"
-    }
-
-    // Does the declaration `a` come before the declaration `b` in t.decls (link) order?
-    fn fileOrderBefore(t: Tables, a: int, b: int) -> boolean {
-        for (const x of t.decls) {
-            if (x.nid == a) return true
-            if (x.nid == b) return false
-        }
-        return false
-    }
-
-    fn dupDeclReportsAt(files: FileAst[], lk: Linkage, t: Tables, nid: int) -> boolean {
-        return dupDeclKind(files, lk, t, nid) != ""
-    }
-
-    // s473 — is the user declaration `nid` a COMPONENT (written with `renders`,
-    // §66.15.1) — the declarations that carry a CSS scope key (§9.1 DQ-7)? A
-    // declaration is a top-level item of its file or an item of its `<program>`.
-    fn declRenders(files: FileAst[], nid: int) -> boolean {
-        for (const f of files) {
-            for (const it of f.items) {
-                for (const d of declsOfItem(it)) {
-                    if (d.nid == nid) return d.renders is given
-                }
-                const p: AProgram | not = programOfItem(it)
-                if (p is given) {
-                    for (const pit of p.items) {
-                        for (const d of declsOfItem(pit)) {
-                            if (d.nid == nid) return d.renders is given
-                        }
-                    }
-                }
-            }
-        }
-        return false
+        return out
     }
 
     // Two functions of one name. In one file that is a file-scope duplicate:
@@ -26021,7 +25950,7 @@ ${
     fn typesProgram(g: Globals) -> CoreProgram {
         let defs: TypeDef[] = []
         for (const t of g.types) { defs = defs.concat([t.def]) }
-        return { program: g.program, decls: [], types: defs, fns: [], server: [], dbs: [], reset: true, sqlError: not, serverCallError: not, css: not, consts: [], loads: [], head: plainHead() }
+        return { program: g.program, decls: [], types: defs, fns: [], server: [], dbs: [], reset: true, sqlError: not, serverCallError: not, css: not, consts: [], loads: [], envelopes: [], head: plainHead() }
     }
 
     fn storeOf(v: AAttrValue) -> PersistStore | not {
@@ -27125,7 +27054,7 @@ ${
         const scheme: string = schemeOf(v)
         if (scheme == "") return ""                      // a plain path: implicit `sqlite:`
         if (scheme == "sqlite") {
-            if (v.substring(7).trim() == "") return "`sqlite:` names no path"
+            if (sqlitePathOf(v).trim() == "") return "`sqlite:` names no path"
             return ""
         }
         if (scheme == "postgres" || scheme == "postgresql" || scheme == "mysql") {
@@ -27163,8 +27092,21 @@ ${
     }
 
     fn dbTarget(v: string) -> string {
-        if (schemeOf(v) == "sqlite") return v.substring(7)
+        if (schemeOf(v) == "sqlite") return sqlitePathOf(v)
         return v
+    }
+
+    // s474 r2 (review of #1699, item 3) — the path a `sqlite:` value names. §8.1.1 defines
+    // `sqlite:<path>` (`sqlite:./app.db`); it is silent on the URL spelling `sqlite://…`. Before r2
+    // the bootstrap kept the `//`, so `sqlite://app.db` named `//app.db` — the file `app.db` in the
+    // filesystem ROOT. impl#1 (compiler/src/db-target.ts `classifyDbTarget`: `/^sqlite:(?:\/\/)?/`)
+    // reads `sqlite://app.db` as `app.db` (relative to the declaring file) and `sqlite:///abs/a.db`
+    // as `/abs/a.db`; the bootstrap now reads it the same way (both implementations open one file).
+    // The SPEC sentence is owed: g-spec-sqlite-url-form-unspecified-s474.
+    fn sqlitePathOf(v: string) -> string {
+        const rest: string = v.substring(7)
+        if (rest.substring(0, 2) == "//") return rest.substring(2)
+        return rest
     }
 
     fn scopeDbOf(ss: ScopeDb[], nid: int) -> ScopeDb | not {
@@ -27266,12 +27208,12 @@ ${
         let sqls: SqlInfo[] = []
         let creates: int[] = []
         let doms: int[] = []
-        const tq: TxQ = txQuerySets(sum.nodes, places)     // s473: the transitive query sets (§8.9.2 amendment)
+        const tq: TxQ = txQuerySets(sum.nodes, places, sum.inherited)     // s473: the transitive query sets (§8.9.2 amendment)
         let jOff: JournalOff[] = []                 // s473: `PRAGMA journal_mode = OFF` sites (journalDiags)
         let bangWrites: int[] = []                  // s473: the databases a `!` function writes
         for (const f of all) {
             const pk: PlaceK = placeOf(places, f.sym)
-            if (f.modifier && !isLoadName(f.name)) st = addDiag(st, f.file, f.span, "W-DEPRECATED-SERVER-MODIFIER", "`server function " + f.name + "` — the `server` modifier is deprecated (§52.10, Insight 26): write `function " + f.name + "(…)` and let route inference place it (§12.2 — a `" + sqlSigil() + "}` in its body places it on the server)")
+            if (f.modifier && !isLoadName(f.name) && !isBatchName(f.name)) st = addDiag(st, f.file, f.span, "W-DEPRECATED-SERVER-MODIFIER", "`server function " + f.name + "` — the `server` modifier is deprecated (§52.10, Insight 26): write `function " + f.name + "(…)` and let route inference place it (§12.2 — a `" + sqlSigil() + "}` in its body places it on the server)")
             if (f.doms.length > 0 && serverTriggered(f)) {
                 for (const du of f.doms) { doms = doms.concat([du.span.start]) }
                 st = addDiag(st, f.file, f.span, "E-ROUTE-005", "`" + f.name + "()` cannot be placed: its own body uses " + serverTrigger(f) + " (server-only) AND " + f.doms[0].what + " (client-only, no server referent) — route analysis can put it on neither side (§12.4). Split it: keep the server work in a server function, move the DOM access into a client function, and have the client function call the server one")
@@ -27304,7 +27246,10 @@ ${
                 }
             }
         }
-        st = journalDiags(sum.nodes, tq, sqls, jOff, bangWrites, st)
+        st = journalDiags(sum.nodes, tq, sqls, jOff, bangWrites, dbs, st)
+        // s474 (U1e): the implicit per-handler transactions, built (envelopePass)
+        const ep: REnv = envelopePass(sum, tq, all, places, sqls, dbs, rd, st)
+        st = ep.st
         // §8.1.1 Ownership: a file owns a SQLite database when a query in it creates a table there
         let owned: Db[] = []
         for (const d of dbs) {
@@ -27316,7 +27261,7 @@ ${
         st = actionServerDiags(g, t, all, places, rd, st)
         const rl: RLoads = dbLoads(g, servers, st)
         st = rl.st
-        return { facts: { servers: servers, sqls: sqls, dbs: owned, places: places, inherited: sum.inherited, plan: noPlan(), loads: rl.loads }, doms: doms, st: st }
+        return { facts: { servers: servers, sqls: sqls, dbs: owned, places: places, inherited: sum.inherited, plan: noPlan(), loads: rl.loads, envelopes: ep.envs }, doms: doms, st: st }
     }
 
     // s473 (ruled refusals) — §8.9.2 amendment (S473 review-surfaced 2): "A
@@ -27334,7 +27279,7 @@ ${
     // functions it calls too.
     type JournalOff:struct = { file: string, span: ASpan, fname: string, bang: boolean, db: int, sym: int }
 
-    fn journalDiags(nodes: Callable[], tq: TxQ, sqls: SqlInfo[], js: JournalOff[], ownWrites: int[], st0: AS) -> AS {
+    fn journalDiags(nodes: Callable[], tq: TxQ, sqls: SqlInfo[], js: JournalOff[], ownWrites: int[], dbs: Db[], st0: AS) -> AS {
         let st: AS = st0
         const reach: boolean[] = bangReach(nodes, tq)
         let bangWrites: int[] = ownWrites
@@ -27357,11 +27302,20 @@ ${
             const why: string = "`PRAGMA journal_mode = OFF` turns off the rollback journal for the whole connection, and a `!` function's all-or-nothing guarantee (§8.9.2, §19.10) needs that journal to roll back"
             if (j.bang) {
                 st = addDiag(st, j.file, j.span, "E-SQL-JOURNAL-OFF", "'" + j.fname + "' is declared '!' (or is called by a function declared '!') and runs `PRAGMA journal_mode = OFF` — " + why + " (§8.9.2, S473). Remove it, or use another `journal_mode` (`WAL`, `DELETE`, … stay admitted, §14.8.10)")
-            } else if (bangWrites.indexOf(j.db) >= 0) {
+            } else if (sameDbIn(dbs, bangWrites, j.db)) {
                 st = addDiag(st, j.file, j.span, "E-SQL-JOURNAL-OFF", "`PRAGMA journal_mode = OFF` in '" + j.fname + "' sets the connection a `!` function of this program writes through — " + why + " (§8.9.2, S473). Remove it, or use another `journal_mode` (`WAL`, `DELETE`, … stay admitted, §14.8.10)")
             }
         }
         return st
+    }
+
+    // s474 r1 (review F3): `ids` holds a database the same as `id` (dbKey — not the same spelling, the same database).
+    fn sameDbIn(dbs: Db[], ids: int[], id: int) -> boolean {
+        const want: string = dbKey(dbs, { id: id, hint: "" })
+        for (const x of ids) {
+            if (dbKey(dbs, { id: x, hint: "" }) == want) return true
+        }
+        return false
     }
 
     // s473 (Lane B) — the program's `<db>` cells, each with its load (a server
@@ -27661,48 +27615,39 @@ ${
     // "written where no enclosing function is declared `!` (in a function
     // without `!`, or at a body top) SHALL be a compile error: E-ERROR-015" —
     // the SPEC's message. `where` names the place; `fname` the function ("" —
-    // a body top). The bootstrap emits no W-BATCH-001 (no implicit envelope
-    // until U1e), so E-ERROR-015 is the one transaction diagnostic here, as
-    // §19.10.4 requires outside a `!` function. (Inside a `!` function manual
-    // transaction control is REFUSED until U1e — envelopeDiags, s473.)
+    // a body top). E-ERROR-015 is the one transaction diagnostic outside a `!`
+    // function, as §19.10.4 requires there. (Inside a `!` function manual
+    // transaction control is REFUSED — envelopeDiags.)
     //
-    // s473 (boot-failclosed-sql-protect) — THE TRANSACTION ENVELOPES ARE NOT
-    // BUILT, so the shapes that need one are REFUSED, never compiled without it
-    // (the U1 design's "each refused until its unit"; before s473 they compiled
-    // clean and ran non-atomically — audit S473 part 2 §8.9.2, part 3 §19.10):
-    //  §8.9.2 / §19.10.5 "when a `!` server function body contains two or more
-    //        `?{}` queries that do not carry `.nobatch()`, the compiler SHALL wrap
-    //        the handler body in `?{BEGIN DEFERRED}` / `?{COMMIT}` (`?{ROLLBACK}`
-    //        on an exception or a `fail` exit)" — the bootstrap emits no envelope,
-    //        so a `fail` after two writes left both committed;
-    //  §19.10.4 / §19.10.6 (S451 R6) "A manual transaction is held by the
-    //        invocation of the function that opened it … one still open at the
-    //        function's return is rolled back and reported", behind the
-    //        per-connection gate ("a statement issued for another request SHALL
-    //        NOT run inside it") — the server runtime has neither, so a `fail`
-    //        between `?{BEGIN}` and `?{COMMIT}` left the SHARED connection inside
-    //        the open transaction for every later request. With W-BATCH-001
-    //        (§8.9.2) this is the `!` half; outside a `!` function the same SQL is
-    //        E-ERROR-015 (manualTxDiag) — so manual transaction control is
-    //        refused in EVERY server function.
-    // No §8 / §19 code names "not built", so both are E-BOOTSTRAP-UNSUPPORTED.
+    // s473 (boot-failclosed-sql-protect) refused every transaction shape the
+    // bootstrap did not build (before s473 they compiled clean and ran
+    // non-atomically — audit S473 part 2 §8.9.2, part 3 §19.10). s474 (U1e)
+    // BUILDS the implicit per-handler transaction (§8.9.2 / §19.10.5) over the
+    // S473 transitive query set, with its §19.10.6 nesting and per-connection
+    // gate — envelopePass below. What stays refused here:
+    //  §19.10.4 / §19.10.6 (S451 R6) MANUAL transaction control in a `!`
+    //        function: "A manual transaction is held by the invocation of the
+    //        function that opened it … one still open at the function's return
+    //        is rolled back and reported", and an explicit `?{BEGIN}` suppresses
+    //        the implicit envelope with W-BATCH-001 (§8.9.2). The runtime's gate
+    //        exists now (server-runtime.js), but nothing holds a manual
+    //        transaction by its function's invocation or rolls back one left
+    //        open at its return — so a `fail` between `?{BEGIN}` and
+    //        `?{COMMIT}` would still leave the SHARED connection inside the open
+    //        transaction. Outside a `!` function the same SQL is E-ERROR-015
+    //        (manualTxDiag) — so manual transaction control is refused in EVERY
+    //        server function. No §8 / §19 code names "not built":
+    //        E-BOOTSTRAP-UNSUPPORTED.
     //
-    // s473 (ruled refusals) — THE TRIGGER IS THE TRANSITIVE QUERY SET. §8.9.2
-    // amendment (S473 review-surfaced 1, refined): "The implicit-envelope
-    // trigger above is therefore read over the function's transitive query
-    // set: every `?{}` reached from the `!` body — its own and those of every
-    // non-`!` function it reaches — reads included … Interim (bootstrap):
-    // until the bootstrap builds the envelope, it SHALL refuse —
-    // `E-BOOTSTRAP-UNSUPPORTED`, naming this section — a `!` function whose
-    // transitive query set has two or more queries, or one inside a loop; it
-    // SHALL NOT compile it without the guarantee (S473 D1)." The set is
-    // txQuerySets' (one closure over the call graph, effects.scrml closeDim):
-    // a `!` callee is not followed (its own envelope is its own); a call is
-    // followed whatever the callee's placement (a remote call included — the
-    // ruling counts every `?{}` reached, and the bootstrap builds no envelope
-    // either way). "Inside a loop" (repeatsInBlock): a query, or a call
-    // reaching one, in a region that may run more than once — and a query
-    // reached through a recursive non-`!` function.
+    // THE TRIGGER IS THE TRANSITIVE QUERY SET (§8.9.2 amendments S473
+    // review-surfaced 1 and #1690 review F10): "every `?{}` reached from the
+    // `!` body, its own and every function's it calls, `!` or not … A query is
+    // counted once per time it is reached". The set is txQuerySets' (one
+    // closure over the call graph, effects.scrml closeDim): a call is followed
+    // whatever the callee's placement and whether or not it is `!` (an inner
+    // `!` runs as a nested savepoint). "Inside a loop" (repeatsInBlock): a
+    // query, or a call reaching one, in a region that may run more than once —
+    // and a query reached through a recursive function.
     //
     // F11 (ruled S473, #1690 review — a PERMANENT refusal, §19.10.5): "a
     // client-placed `!` function that calls two or more server functions is a
@@ -27717,32 +27662,1460 @@ ${
             const kw: string = txControl(s.q.chunks)
             if (kw != "") {
                 manual = true
-                st = addDiag(st, f.file, s.span, "E-BOOTSTRAP-UNSUPPORTED", "Manual transaction control '" + kw + "' in '" + f.name + "', which is declared '!' — the bootstrap does not build what §19.10.6 requires of it (S451 R6): the transaction held by this invocation behind the database's per-connection gate, and rolled back and reported when the function returns with it still open. Without them a `fail` or an error between `BEGIN` and `COMMIT` leaves the shared connection inside the open transaction, and later requests run in it. Refused until unit U1e builds the envelopes; write the queries without transaction control for now (each `" + sqlSigil() + "}` then commits on its own)")
+                st = addDiag(st, f.file, s.span, "E-BOOTSTRAP-UNSUPPORTED", "Manual transaction control '" + kw + "' in '" + f.name + "', which is declared '!' — the bootstrap does not build what §19.10.6 requires of it (S451 R6): the transaction held by this invocation behind the database's per-connection gate, and rolled back and reported when the function returns with it still open. Without them a `fail` or an error between `BEGIN` and `COMMIT` leaves the shared connection inside the open transaction, and later requests run in it. Remove the transaction control: the bootstrap builds the implicit per-handler transaction (§8.9.2), so a `!` function whose transitive query set holds two or more queries already runs them all in one transaction, rolled back on a `fail` or an error")
             }
         }
         if (manual) return st
-        const i: int = nodeIdx(sum.nodes, f.sym)
-        if (i < 0) return st
-        if (tq.remote[i] >= 2) {
-            return addDiag(st, f.file, f.span, "E-TX-CLIENT-MULTI-CALL", "'" + f.name + "' is declared '!' and runs on the client, and it makes more than one server call (" + tq.remoteWhy[i] + ") — each call is its own request, and no transaction can span two requests, so its all-or-nothing guarantee cannot hold (§19.10.5, S473). Compose the calls in one server `!` function and call that once")
-        }
-        const qs: FxAtom[] = tq.qs[i]
-        const tail: string = " The bootstrap does not build the envelope yet (unit U1e), and without it a `fail` after a write leaves that write committed — refused, never compiled non-atomic. Until then: split the work so no `!` function reaches more than one query (a `!` callee's queries count too — it would run as a nested savepoint, §19.10.6), or mark each query that need not be atomic with `.nobatch()` (§8.9.5)"
-        if (qs.length >= 2) {
-            return addDiag(st, f.file, f.span, "E-BOOTSTRAP-UNSUPPORTED", "'" + f.name + "' is declared '!' and its transitive query set (§8.9.2, S473: every `" + sqlSigil() + "}` reached from its body — its own and those of the functions it calls, `!` ones included) holds " + qs.length + " queries — " + txWhere(sum, tq.qs, i, qs[0]) + " and " + txWhere(sum, tq.qs, i, qs[1]) + " — so it needs the implicit per-handler transaction (§8.9.2, §19.10.5): its body wrapped in `BEGIN` / `COMMIT`, rolled back on an error or a `fail` exit, every one of those queries inside." + tail)
-        }
-        if (qs.length == 1 && tq.runs[i] >= 2) {
-            // #1690 review F1: one query, reached more than once (two calls of one helper, a diamond)
-            return addDiag(st, f.file, f.span, "E-BOOTSTRAP-UNSUPPORTED", "'" + f.name + "' is declared '!' and its transitive query set (§8.9.2, S473) runs one query more than once — " + txWhere(sum, tq.qs, i, qs[0]) + ", reached through more than one call — so it needs the implicit per-handler transaction (§8.9.2, §19.10.5) around every run of it." + tail)
-        }
-        const lw: FxAtom | not = witnessOf(tq.loops[i])
-        if (lw is given) {
-            let via: string = ""
-            const ch: string[] = fxChain(sum, tq.loops, i, lw)
-            if (ch.length > 1) via = " (through `" + ch.join(" → ") + "`)"
-            return addDiag(st, f.file, f.span, "E-BOOTSTRAP-UNSUPPORTED", "'" + f.name + "' is declared '!' and its transitive query set (§8.9.2, S473) runs a query more than once: " + tq.loopWhy[lw.root] + via + " — so it needs the implicit per-handler transaction (§8.9.2, §19.10.5) around every run of it." + tail)
-        }
+        // s474 (client-bang composition): a client-placed `!` function's two or more server
+        // calls are no longer refused here — composePass composes them into one request with
+        // one envelope, and refuses (E-TX-CLIENT-MULTI-CALL) only the browser-split residue
         return st
+    }
+
+    // =========================================================================
+    // s474 (boot-client-bang-composition) — A CLIENT `!` FUNCTION'S SERVER CALLS
+    // COMPOSE INTO ONE REQUEST WITH ONE ENVELOPE. Ruling: user-voice-scrml.md S474
+    // "permanent-restrictions re-review: the four one-way doors", door 2: "F11
+    // becomes INTERIM: a client `!`'s server calls compose into one request with
+    // one envelope (planner composition, per §19.9.9.8 rule 1) … Only calls
+    // separated by browser work that cannot move stay refused"; and "capability
+    // over limitation" item 2: "a client `!` whose one server call is a non-`!`
+    // server function running two queries … the compiler wraps that server call in
+    // the transaction envelope when the caller is `!`".
+    //
+    // §19.9.9.8 rule 1: "A statement that calls a function placed on the server
+    // SHALL be server-tier at the call site: the callee runs in the same request";
+    // rule 2: "every statement between them SHALL join the server batch"; rule 3:
+    // "Only movable statements move … A statement that needs the browser … SHALL
+    // NOT be relocated"; rule 4: "Statements before the function's first server
+    // statement are never moved: `@busy = true` ahead of the query renders before
+    // the request leaves."
+    //
+    // THE BUILD. A client-placed `!` function F whose server calls need one
+    // transaction (two or more requests — tq.remote — or one call of a non-`!`
+    // server function whose queries need one) is planned here over its TOP-LEVEL
+    // statements S[0..n):
+    //   - the BATCH is S[lo..hi]: `lo` the first statement that calls a server
+    //     function, `hi` the last — extended (rule 1, to a fixpoint) over every later
+    //     statement that reads a local the batch declares;
+    //   - S[0..lo) stays on the client and runs first (rule 4, the spinner);
+    //   - a statement of the batch that only WRITES CELLS (no server call, no cell
+    //     read, no exit, reading nothing the batch computes) is DEFERRED: the client
+    //     applies it after the batch commits, in source order — its value is the one
+    //     the batch would return in the cell envelope (§19.9.9.8 rule 1), computed
+    //     from what the client already holds;
+    //   - S(hi..n) stays on the client and runs after the batch commits.
+    // composeFiles then writes the plan into the program, as the author would by
+    // hand ("compose the calls in one server `!` function and call that once"): a
+    // server `!` function `#F` (a name no identifier can spell — isBatchName) holding
+    // the batch, with F's parameters and the client locals the batch reads, and F's
+    // batch replaced by ONE call `#F(…)?` (`return #F(…)?` when the batch returns).
+    // analyzeLinked analyzes the composed program again, so the batch is an ordinary
+    // routed server `!` function: its envelope is envelopePass's (standalone when its
+    // transitive query set needs one — BEGIN IMMEDIATE when a query it reaches
+    // writes, S474 ruling 5), its callees run in place (an inner `!` as a savepoint,
+    // F10), its failure is the routed `fail` wire shape (with #1703's production
+    // blanking of driver text), and F's `?` re-fails it as F's own variant.
+    //
+    // What stays refused:
+    //  - PERMANENT (the residue of F11): a statement of the batch that needs the
+    //    browser — a DOM global, a `<host>` binding, a client function reaching one.
+    //    Its calls would be two requests, and no transaction spans two requests
+    //    (§19.10.5): E-TX-CLIENT-MULTI-CALL, at that statement.
+    //  - INTERIM (E-BOOTSTRAP-UNSUPPORTED, the capable form named in each message):
+    //    a cell READ in the batch (§6.6.9 marshal into the request), a cell write
+    //    that needs a batch value (the cell envelope), a statement after the batch
+    //    reading a batch local that cannot join it, a batch `return` with client
+    //    work after it, a client function in the batch that reaches client state or
+    //    a server call, a top-level `defer` or an effect in the batch, a `lin`
+    //    parameter, a parameter or a client local with no nameable type, a `match`
+    //    on a non-`!` server call.
+    //  - F's error type must hold `Transport(t: ServerCallError)`: the composed
+    //    request can fail on the wire (§19.9.10), and F re-fails that failure as its
+    //    own (E-ERROR-010 otherwise).
+    // =========================================================================
+    export type ComposeExtra:struct = { name: string, span: ASpan, ty: AType | not, vt: Type | not }
+    // `name`: F's name (analyzeLinked maps the batch's names back to it, review L2); `notes`: the
+    // warnings the plan raises (W-TX-FAIL-AFTER-COMMIT, W-TX-ARM-UNREACHABLE — reported with the
+    // composed program's diagnostics); `late`: how many of them are W-TX-FAIL-AFTER-COMMIT.
+    export type ComposePlan:struct = { fnNid: int, name: string, lo: int, hi: int, deferred: int[], extra: ComposeExtra[], strip: int[], drop: int[], returns: boolean, notes: Diag[], late: int }
+    type RCompose:struct = { plans: ComposePlan[], st: AS }
+    type RPlan:struct = { plan: ComposePlan | not, st: AS }
+
+    // A synthesized batch function's name: `#` + the client function's (no identifier spells it).
+    export fn isBatchName(n: string) -> boolean { return n.substring(0, 1) == "#" }
+
+    fn hasErrorDiag(ds: Diag[]) -> boolean {
+        for (const d of ds) {
+            if (d.severity == Severity.Error) return true
+        }
+        return false
+    }
+
+    // What one top-level statement does, by the function's own facts (span containment).
+    // `remote`: the server functions it calls; `via`: a client function it calls that
+    // makes a server call; `browser`: what it uses that needs the browser; `client`: a
+    // client function it calls that reaches client state; `read` / `write`: a cell.
+    type StmtFx:struct = { remote: string[], via: string, browser: string, client: string, read: string, write: string }
+
+    fn spanIn(sp: ASpan, outer: ASpan) -> boolean { return sp.start >= outer.start && sp.end <= outer.end }
+
+    fn stmtFx(sum: Summary, tq: TxQ, places: PlaceFact[], dr: boolean[], f: FnFacts, sp: ASpan) -> StmtFx {
+        let remote: string[] = []
+        let via: string = ""
+        let browser: string = ""
+        let client: string = ""
+        let read: string = ""
+        let write: string = ""
+        for (const r of f.scan.refs) {
+            const j: int = nodeIdx(sum.nodes, r.sym)
+            if (spanIn(r.span, sp) && isFnNode(sum.nodes, j)) {
+                const pk: PlaceK = placeOf(places, sum.nodes[j].f.sym)
+                if (isServerPlace(pk)) {
+                    const nm: string = "`" + sum.nodes[j].f.name + "`"
+                    if (remote.indexOf(nm) < 0) remote = remote.concat([nm])
+                } else if (dr[j]) {
+                    if (browser == "") browser = "a call of `" + sum.nodes[j].label + "`, which uses the browser"
+                } else if (tq.remote[j] > 0) {
+                    if (via == "") via = sum.nodes[j].label
+                } else if (pk == PlaceK.Client) {
+                    if (client == "") client = sum.nodes[j].label
+                }
+            }
+        }
+        for (const d of f.doms) {
+            if (browser == "" && spanIn(d.span, sp)) browser = d.what
+        }
+        for (const c of f.reads) {
+            if (read == "" && spanIn(c.span, sp)) read = c.what
+        }
+        for (const w of f.scan.writes) {
+            if (write == "" && spanIn(w.span, sp)) write = w.cell
+        }
+        return { remote: remote, via: via, browser: browser, client: client, read: read, write: write }
+    }
+
+    // The callables that reach a DOM global or a `<host>` binding through client-side calls.
+    fn domReach(nodes: Callable[], tq: TxQ, places: PlaceFact[]) -> boolean[] {
+        let r: boolean[] = []
+        for (const c of nodes) { r = r.concat([c.kind == CallableK.KFn && c.f.doms.length > 0]) }
+        let changed = true
+        while (changed) {
+            changed = false
+            let i: int = 0
+            while (i < nodes.length) {
+                if (!r[i]) {
+                    for (const j of tq.edges[i]) {
+                        if (!r[i] && r[j] && !isServerPlace(placeOf(places, nodes[j].f.sym))) {
+                            r = setBoolAt(r, i, true)
+                            changed = true
+                        }
+                    }
+                }
+                i = i + 1
+            }
+        }
+        return r
+    }
+
+    // ---- the composition fold: what a run of statements names ----------------------
+    // `names`: every bare-name expression (its nid); `assigns`: the root name of every
+    // assignment target; `rets`: a `return`; `exits`: a `fail` or a `?`; `effects`: an
+    // effect statement; `handled`: every handling form whose subject is a call of a name.
+    type CHand:struct = { nid: int, callee: int, how: int, arms: AArm[] }
+    // `clocks` (review L4): every bare `Date` / `performance` name — the browser's clock is not the server's.
+    type CFold:struct = { names: int[], assigns: int[], rets: boolean, exits: boolean, effects: boolean, handled: CHand[], clocks: int[] }
+
+    fn cf0() -> CFold { return { names: [], assigns: [], rets: false, exits: false, effects: false, handled: [], clocks: [] } }
+
+    fn cfWith(a: CFold, names: int[], assigns: int[], rets: boolean, exits: boolean, effects: boolean, handled: CHand[]) -> CFold {
+        return { names: names, assigns: assigns, rets: rets, exits: exits, effects: effects, handled: handled, clocks: a.clocks }
+    }
+
+    fn cfName(a: CFold, nid: int, n: string) -> CFold {
+        let c: int[] = a.clocks
+        if (n == "Date" || n == "performance") c = c.concat([nid])
+        return { names: a.names.concat([nid]), assigns: a.assigns, rets: a.rets, exits: a.exits, effects: a.effects, handled: a.handled, clocks: c }
+    }
+
+    fn cfStmts(ss: AStmt[], a0: CFold) -> CFold {
+        let a: CFold = a0
+        for (const s of ss) { a = cfStmt(s, a) }
+        return a
+    }
+
+    fn cfMaybeBlock(b: ABlock | not, a: CFold) -> CFold {
+        if (b is not) return a
+        return cfStmts(b.stmts, a)
+    }
+
+    fn cfMaybe(e: AExpr | not, a: CFold) -> CFold {
+        if (e is not) return a
+        return cfExpr(e, a)
+    }
+
+    fn cfExprs(es: AExpr[], a0: CFold) -> CFold {
+        let a: CFold = a0
+        for (const e of es) { a = cfExpr(e, a) }
+        return a
+    }
+
+    fn cfRet(a: CFold) -> CFold { return cfWith(a, a.names, a.assigns, true, a.exits, a.effects, a.handled) }
+    fn cfExit(a: CFold) -> CFold { return cfWith(a, a.names, a.assigns, a.rets, true, a.effects, a.handled) }
+    fn cfEffect(a: CFold) -> CFold { return cfWith(a, a.names, a.assigns, a.rets, a.exits, true, a.handled) }
+
+    fn cfStmt(s: AStmt, a: CFold) -> CFold {
+        const k: AStmtK = s.k
+        return match k {
+            .Eval(e: e) :> cfExpr(e, a)
+            .Local(name: n, init: i) :> cfExpr(i, a)
+            .Return(e: e) :> cfMaybe(e, cfRet(a))
+            .If(cond: c, thenB: tb, elseB: eb) :> cfMaybeBlock(eb, cfStmts(tb.stmts, cfExpr(c, a)))
+            .Given(name: n, subject: x, body: b) :> cfStmts(b.stmts, cfExpr(x, a))
+            .For(f: lf) :> cfStmts(lf.body.stmts, cfExprs(forExprs(lf), a))
+            .Break(label: x) :> a
+            .Continue(label: x) :> a
+            .Lift(what: w) :> cfExprs(liftExprs(w), a)
+            .EffectStmt(w: w) :> cfEffect(a)
+            .Defer(body: b) :> cfStmts(b.stmts, a)
+            .Fail(f: f) :> cfExprs(failExprs(f), cfExit(a))
+        }
+    }
+
+    fn cfExpr(e: AExpr, a0: CFold) -> CFold {
+        let a: CFold = cfOwn(e, a0)
+        for (const x of exprKids(e)) { a = cfExpr(x, a) }
+        for (const b of exprBlocks(e)) { a = cfStmts(b.stmts, a) }
+        return a
+    }
+
+    fn cfOwn(e: AExpr, a: CFold) -> CFold {
+        const k: AExprK = e.k
+        return match k {
+            .Name(name: n) :> cfName(a, e.nid, n)
+            .Assign(target: t) :> cfWith(a, a.names, a.assigns.concat([e.nid, rootNameNid(t)]), a.rets, a.exits, a.effects, a.handled)
+            .Handled(h: h) :> cfHandled(a, e.nid, h)
+            .At(name: n) :> a
+            .AtItem :> a
+            .Num(raw: r) :> a
+            .Str(v: s) :> a
+            .Bool(v: b) :> a
+            .NotLit :> a
+            .Recovered :> a
+            .Variant(name: n) :> a
+            .Member(obj: o) :> a
+            .Call(callee: c) :> a
+            .Unary(op: o) :> a
+            .Binary(op: o) :> a
+            .Ternary(test: x) :> a
+            .ArrayLit(elems: es) :> a
+            .ObjectLit(props: ps) :> a
+            .Spread(e: sx) :> a
+            .Index(obj: ix) :> a
+            .Lambda(params: lp) :> a
+            .Sql(q: q) :> a
+            .Template(quasis: qs) :> a
+            .Foreign(f: fb0) :> a
+        }
+    }
+
+    fn cfHandled(a0: CFold, nid: int, h: AHandled) -> CFold {
+        let a: CFold = a0
+        const how: AHow = h.how
+        const hk: int = match how {
+            .Propagate :> 0
+            .Guard(arms: x) :> 1
+            .MatchOn(arms: x) :> 2
+        }
+        if (hk == 0) a = cfExit(a)
+        const c: AExpr | not = calleeOf(h.subject.k)
+        if (c is given) {
+            if (exprName(c) != "") a = cfWith(a, a.names, a.assigns, a.rets, a.exits, a.effects, a.handled.concat([{ nid: nid, callee: c.nid, how: hk, arms: handledArms(h) }]))
+        }
+        return a
+    }
+
+    // The bare name an assignment target is rooted at (`x`, `x.f`, `x[i]`); -1 for a cell or anything else.
+    fn rootNameNid(t: AExpr) -> int {
+        const k: AExprK = t.k
+        return match k {
+            .Name(name: n) :> t.nid
+            .Member(obj: o) :> rootNameNid(o)
+            .Index(obj: o) :> rootNameNid(o)
+            .At(name: n) :> -1
+            .AtItem :> -1
+            .Num(raw: r) :> -1
+            .Str(v: s) :> -1
+            .Bool(v: b) :> -1
+            .NotLit :> -1
+            .Recovered :> -1
+            .Variant(name: n) :> -1
+            .Call(callee: c) :> -1
+            .Unary(op: x) :> -1
+            .Binary(op: x) :> -1
+            .Ternary(test: x) :> -1
+            .Assign(target: x) :> -1
+            .ArrayLit(elems: es) :> -1
+            .ObjectLit(props: ps) :> -1
+            .Spread(e: sx) :> -1
+            .Lambda(params: lp) :> -1
+            .Sql(q: q) :> -1
+            .Handled(h: x) :> -1
+            .Template(quasis: qs) :> -1
+            .Foreign(f: fb0) :> -1
+        }
+    }
+
+    // The local Sym id a name expression resolves to (-1: not a local).
+    fn localSymAt(t: Tables, nid: int) -> int {
+        if (nid < 0) return -1
+        const nf: NameFact | not = nameFact(t.names, nid)
+        return match nf {
+            .NLocal(sym: s) :> s.id
+            .NField(decl: d) :> -1
+            .NInst(decl: d) :> -1
+            .NStruct(owner: o) :> -1
+            .NFn(sym: s) :> -1
+            .NLength :> -1
+            .NSurface(of: o) :> -1
+            .NConst(sym: s) :> -1
+            not :> -1
+        }
+    }
+
+    // The local Sym ids the assignments at `nids` rebind (an assignment's nid: its EAssignLocal; a
+    // target name's nid: its name fact).
+    fn assignedSymsOf(t: Tables, nids: int[]) -> int[] {
+        let out: int[] = []
+        for (const n of nids) {
+            let ef: EffectFact | not = not
+            if (n >= 0) ef = effectFact(t.effects, n)
+            const s: int = match ef {
+                .EAssignLocal(sym: x) :> x.id
+                .EWrite(w: w) :> -1
+                .ESpread(ws: ws) :> -1
+                .EReset(w: w) :> -1
+                .EEdits(w: w) :> -1
+                .ERemove(w: w) :> -1
+                .EElemAt(cap: c) :> -1
+                .EPosition(cap: c) :> -1
+                not :> localSymAt(t, n)
+            }
+            if (s >= 0) out = out.concat([s])
+        }
+        return out
+    }
+
+    fn fnSymAt(t: Tables, nid: int) -> Sym | not {
+        const nf: NameFact | not = nameFact(t.names, nid)
+        if (nf is not) return not
+        return fnSymOfFact(nf)
+    }
+
+    // The Sym ids a top-level statement declares for the statements after it.
+    fn topBinds(t: Tables, s: AStmt) -> int[] {
+        const k: AStmtK = s.k
+        return match k {
+            .Local(name: n) :> symIds(bindSym(bindFact(t.binds, s.nid)))
+            .For(f: lf) :> forBoundSyms(t, lf)
+            .Eval(e: e) :> []
+            .Return(e: e) :> []
+            .If(cond: c) :> []
+            .Given(name: n) :> []
+            .Break(label: x) :> []
+            .Continue(label: x) :> []
+            .Lift(what: w) :> []
+            .EffectStmt(w: w) :> []
+            .Defer(body: b) :> []
+            .Fail(f: f) :> []
+        }
+    }
+
+    fn forBoundSyms(t: Tables, lf: AFor) -> int[] {
+        const b: AForBound | not = lf.bound
+        if (b is not) return []
+        return symIds(bindSym(bindFact(t.binds, b.nid)))
+    }
+
+    fn symIds(s: Sym | not) -> int[] {
+        if (s is not) return []
+        return [s.id]
+    }
+
+    fn anyIn(xs: int[], ys: int[]) -> boolean {
+        for (const x of xs) {
+            if (ys.indexOf(x) >= 0) return true
+        }
+        return false
+    }
+
+    fn localSymsOf(t: Tables, nids: int[]) -> int[] {
+        let out: int[] = []
+        for (const n of nids) {
+            const s: int = localSymAt(t, n)
+            if (s >= 0) out = out.concat([s])
+        }
+        return out
+    }
+
+    fn cpIsDefer(s: AStmt) -> boolean {
+        const k: AStmtK = s.k
+        return match k {
+            .Defer(body: b) :> true
+            .Eval(e: e) :> false
+            .Local(name: n) :> false
+            .Return(e: e) :> false
+            .If(cond: c) :> false
+            .Given(name: n) :> false
+            .For(f: lf) :> false
+            .Break(label: x) :> false
+            .Continue(label: x) :> false
+            .Lift(what: w) :> false
+            .EffectStmt(w: w) :> false
+            .Fail(f: f) :> false
+        }
+    }
+
+    fn isLocalStmt(s: AStmt) -> boolean {
+        const k: AStmtK = s.k
+        return match k {
+            .Local(name: n) :> true
+            .For(f: lf) :> lf.bound is given
+            .Defer(body: b) :> false
+            .Eval(e: e) :> false
+            .Return(e: e) :> false
+            .If(cond: c) :> false
+            .Given(name: n) :> false
+            .Break(label: x) :> false
+            .Continue(label: x) :> false
+            .Lift(what: w) :> false
+            .EffectStmt(w: w) :> false
+            .Fail(f: f) :> false
+        }
+    }
+
+    // A `let` / `const` statement's written type, initializer and `lin` (for a client local the batch reads).
+    type LocalDecl:struct = { name: string, ty: AType | not, init: AExpr | not, lin: boolean }
+    fn localDeclOf(s: AStmt) -> LocalDecl | not {
+        const k: AStmtK = s.k
+        return match k {
+            .Local(name: n, mutable: m, ty: ty, init: i, lin: l) :> { name: n, ty: ty, init: i, lin: l }
+            .For(f: lf) :> forLocalDecl(lf)
+            .Defer(body: b) :> not
+            .Eval(e: e) :> not
+            .Return(e: e) :> not
+            .If(cond: c) :> not
+            .Given(name: n) :> not
+            .Break(label: x) :> not
+            .Continue(label: x) :> not
+            .Lift(what: w) :> not
+            .EffectStmt(w: w) :> not
+            .Fail(f: f) :> not
+        }
+    }
+
+    fn forLocalDecl(lf: AFor) -> LocalDecl | not {
+        const b: AForBound | not = lf.bound
+        if (b is not) return not
+        return { name: b.name, ty: b.ty, init: not, lin: false }
+    }
+
+    fn enumHasVariant(t: Tables, e: Sym | not, name: string) -> boolean {
+        if (e is not) return false
+        const ti: TypeInfo | not = typeInfoOf(t.types, e)
+        if (ti is not) return false
+        for (const v of enumVariants(ti.def)) {
+            if (v.sym.hint == name) return true
+        }
+        return false
+    }
+
+    fn armIsTransport(a: AArm) -> boolean {
+        const p: APat = a.pat
+        return match p {
+            .PName(name: n) :> n == "Transport"
+            .PWild :> false
+            .PWhole(bind: b) :> false
+            .PBare(bind: b) :> false
+            .PNot :> false
+            .PLit(e: x) :> false
+        }
+    }
+
+    // A resolved Type the batch's parameter list can spell back (a tape cannot: its grants).
+    fn spellable(ty: Type) -> boolean {
+        return match ty {
+            .Int :> true
+            .Num :> true
+            .Str :> true
+            .Bool :> true
+            .Named(sym: s) :> true
+            .Seq(elem: e) :> false          // a tape's grants are the reader's (s469 F2) — its type is written, or refused
+            .Maybe(inner: i) :> spellable(i)
+        }
+    }
+
+    // ---- the pass ------------------------------------------------------------------
+    // `allow`: the composed program can be written (analyzeLinked has fresh node ids); when
+    // false, a function that would compose is refused instead — never compiled as two requests.
+    fn composePass(g: Globals, t: Tables, sum: Summary, allow: boolean, st0: AS) -> RCompose {
+        let st: AS = st0
+        let plans: ComposePlan[] = []
+        const places: PlaceFact[] = t.server.places
+        const tq: TxQ = txQuerySets(sum.nodes, places, sum.inherited)
+        const dr: boolean[] = domReach(sum.nodes, tq, places)
+        for (const fs of g.fns) {
+            const i: int = nodeIdx(sum.nodes, fs.info.sym.id)
+            if (i >= 0 && fs.f.failable && !isServerPlace(placeOf(places, fs.info.sym.id)) && sum.inherited.indexOf(fs.info.sym.id) < 0 && !holdsTxControl(sum.nodes[i].f)) {
+                const why: string = composeTrigger(sum, tq, places, i)
+                if (why != "") {
+                    const r: RPlan = composeOne(g, t, sum, tq, places, dr, fs, i, why, allow, st)
+                    st = r.st
+                    const p: ComposePlan | not = r.plan
+                    if (p is given) plans = plans.concat([p])
+                } else if (tq.remote[i] == 1) {
+                    const r1: RPlan = composeSingle(g, t, sum, tq, places, dr, fs, i, allow, st)
+                    st = r1.st
+                    const p1: ComposePlan | not = r1.plan
+                    if (p1 is given) plans = plans.concat([p1])
+                }
+            }
+        }
+        return { plans: plans, st: st }
+    }
+
+    // Why callable i's server calls need composing ("" — they do not): two or more
+    // requests (F11's count), or one whose non-`!` server callee runs queries that
+    // need one transaction (§8.9.2 wraps only a `!` server function).
+    fn composeTrigger(sum: Summary, tq: TxQ, places: PlaceFact[], i: int) -> string {
+        if (tq.remote[i] >= 2) return "it makes more than one server call (" + tq.remoteWhy[i] + ")"
+        const needs: boolean = tq.qs[i].length >= 2 || tq.runs[i] >= 2 || witnessOf(tq.loops[i]) is given
+        if (!needs) return ""
+        for (const j of remoteCallees(sum.nodes, tq, places, i)) {
+            if (tq.qs[j].length > 0 && !sum.nodes[j].f.failable) return "its queries run in the server function `" + sum.nodes[j].label + "`, which is not declared '!'"
+        }
+        return ""
+    }
+
+    fn composeRefuse(st: AS, file: string, span: ASpan, fname: string, why: string, capable: string) -> RPlan {
+        return { plan: not, st: addDiag(st, file, span, "E-BOOTSTRAP-UNSUPPORTED", "'" + fname + "' is declared '!' and runs on the client, and " + why + " — so its server calls must run in ONE request inside ONE transaction (§19.9.9.8 rule 1, §19.10.5; S474 ruling door 2). The bootstrap composes them, but not this shape yet: " + capable) }
+    }
+
+    fn composeOne(g: Globals, t: Tables, sum: Summary, tq: TxQ, places: PlaceFact[], dr: boolean[], fs: FnSrc, i: int, why: string, allow: boolean, st0: AS) -> RPlan {
+        let st: AS = st0
+        const f: FnFacts = sum.nodes[i].f
+        const name: string = fs.info.name
+        const file: string = fs.info.file
+        if (!allow) return composeRefuse(st, file, fs.info.span, name, why, "the composed batch is written with the linker's node ids, which this analysis was not given. Compose the calls in one server `!` function and call that once")
+        const ss: AStmt[] = fs.f.body.stmts
+        const fx: StmtFx[] = stmtFxs(sum, tq, places, dr, f, t, ss)
+        // the batch: first through last statement that calls a server function
+        let lo: int = -1
+        let hi: int = -1
+        let k: int = 0
+        while (k < ss.length) {
+            if (fx[k].remote.length > 0 || fx[k].via != "") {
+                if (lo < 0) lo = k
+                hi = k
+            }
+            k = k + 1
+        }
+        if (lo < 0) return composeRefuse(st, file, fs.info.span, name, why, "its server calls are not made by its own statements. Compose the calls in one server `!` function and call that once")
+        const lastCall: int = hi
+        // rule 1, to a fixpoint: a later statement reading a local the batch declares joins it
+        let changed = true
+        while (changed) {
+            changed = false
+            let bsyms: int[] = []
+            k = lo
+            while (k <= hi) {
+                bsyms = bsyms.concat(topBinds(t, ss[k]))
+                k = k + 1
+            }
+            k = hi + 1
+            while (!changed && k < ss.length) {
+                const fk: CFold = cfStmt(ss[k], cf0())
+                if (anyIn(localSymsOf(t, fk.names), bsyms)) {
+                    hi = k
+                    changed = true
+                } else if (fk.exits && fx[k].write == "" && movableRun(t, ss, fx, hi + 1, k) && !cpRetsIn(ss, hi + 1, k)) {
+                    // s474 r1 (review M2, PA ruling (a)): a later statement that can `fail` / `?` and can
+                    // move joins the batch — its failure then rolls the batch's writes back with it
+                    hi = k
+                    changed = true
+                }
+                k = k + 1
+            }
+        }
+        let calls: string[] = []
+        k = lo
+        while (k <= hi) {
+            for (const r of fx[k].remote) {
+                if (calls.indexOf(r) < 0) calls = calls.concat([r])
+            }
+            k = k + 1
+        }
+        // PERMANENT: browser work between the server calls splits them into two requests. (After the
+        // last call, a browser statement joined the batch only by reading a value it computes: §19.9.9.8
+        // rule 3 permits it on the client — the value comes back — which is INTERIM, below.)
+        k = lo
+        while (k <= lastCall) {
+            if (fx[k].browser != "") {
+                return { plan: not, st: addDiag(st, file, ss[k].span, "E-TX-CLIENT-MULTI-CALL", "'" + name + "' is declared '!' and runs on the client; its server calls (" + calls.join(", ") + ") must run in ONE request inside ONE transaction (§19.9.9.8 rule 1, S474) — but this statement (line " + lineOf(g, file, ss[k].span.start) + ") uses " + fx[k].browser + ", which needs the browser and cannot move into the server batch (§19.9.9.8 rule 3), and it stands between them: the calls would be two requests, and no transaction spans two requests, so the all-or-nothing guarantee cannot hold (§19.10.5). Move the browser work before the first server call or after the last one, or split the function") }
+            }
+            k = k + 1
+        }
+        // the parameters and client locals the batch can be handed
+        let psyms: int[] = []
+        for (const p of fs.f.params) {
+            if (p.lin) return composeRefuse(st, file, p.span, name, why, "its parameter `" + p.name + "` is `lin` — handing it to the batch is a use the composed form does not count yet")
+            if (p.ty is not) return composeRefuse(st, file, p.span, name, why, "its parameter `" + p.name + "` has no written type, and the batch's request encodes its arguments by type (§57). Write the parameter's type")
+            psyms = psyms.concat(symIds(bindSym(bindFact(t.binds, p.nid))))
+        }
+        let presyms: int[] = []
+        let prestmt: int[] = []
+        k = 0
+        while (k < lo) {
+            for (const s of topBinds(t, ss[k])) {
+                presyms = presyms.concat([s])
+                prestmt = prestmt.concat([k])
+            }
+            k = k + 1
+        }
+        if (!enumHasVariant(t, fs.info.err, "Transport")) {
+            const en: string = fs.info.err is given ? "`" + errName(fs.info.err) + "`" : "its error type"
+            return { plan: not, st: addDiag(st, file, fs.info.span, "E-ERROR-010", "'" + name + "' is declared '!' and runs on the client, and " + why + ": the bootstrap composes those calls into ONE request inside ONE transaction (§19.9.9.8 rule 1, S474), and that request can also fail on the wire (§19.9.10). '" + name + "' re-fails that failure as its own, so add `Transport(t: ServerCallError)` to " + en) }
+        }
+        // the batch's statements: deferred cell writes apart
+        let deferred: int[] = []
+        let bsyms: int[] = []
+        let seenRet = false
+        let body: CFold = cf0()
+        k = lo
+        while (k <= hi) {
+            const s: AStmt = ss[k]
+            const x: StmtFx = fx[k]
+            const one: CFold = cfStmt(s, cf0())
+            if (cpIsDefer(s)) return composeRefuse(st, file, s.span, name, why, "this `defer` would run when the server batch ends, not when '" + name + "' returns (§19.16). Move it before the first server call")
+            if (x.browser != "") return composeRefuse(st, file, s.span, name, why, "this statement, after the last server call, uses " + x.browser + " and reads a value the batch computes: it stays in the browser, and the value would come back with the batch's result (§19.9.9.8 rule 3). Return the value from '" + name + "' and use it in the browser where it is called")
+            if (one.effects) return composeRefuse(st, file, s.span, name, why, "this statement holds an effect, which belongs to the page. Move it out of the function")
+            if (x.via != "") return composeRefuse(st, file, s.span, name, why, "this statement calls `" + x.via + "`, a client function that makes a server call: composed, it would run in place in the batch (§19.9.9.8 rule 1). Call the server function from '" + name + "' directly")
+            if (x.client != "") return composeRefuse(st, file, s.span, name, why, "this statement calls `" + x.client + "`, which reads or writes client state: composed, it would run in the server batch with its cells marshalled into the request and written back with the result (§6.6.9, §19.9.9.8 rule 1). Move the call before the first server call or after the last one")
+            if (x.read != "") return composeRefuse(st, file, s.span, name, why, "this statement reads `" + x.read + "` inside the batch: composed, the read is the client's value at the batch's start, marshalled into the request (§6.6.9, §19.9.9.7). Read it into a local before the first server call (`const v = " + x.read + ";`) and use the local")
+            if (x.write != "") {
+                // s474 r1 (review L7): a write in the statement that makes the server call — its result
+                // assigned to a cell, or a cell written in a handler arm of the call
+                if (x.remote.length > 0) return composeRefuse(st, file, s.span, name, why, "this statement makes a server call and writes `" + x.write + "` (the call's result, or a write in one of its handler arms): composed, the write is decided inside the batch and comes back with the result in the cell envelope (§19.9.9.8 rule 1). Keep the call's value in a local and write the cell before the first server call or from what '" + name + "' returns")
+                const needsBatch: boolean = one.rets || one.exits || isLocalStmt(s) || anyIn(localSymsOf(t, one.names), bsyms)
+                if (needsBatch) return composeRefuse(st, file, s.span, name, why, "this statement writes `" + x.write + "` with a value the batch computes: composed, the write joins the batch and its value comes back with the result in the cell envelope (§19.9.9.8 rule 1). Write the cell after the batch from a value the function returns, or before the first server call")
+                if (seenRet) return composeRefuse(st, file, s.span, name, why, "this write follows a `return` inside the batch, so whether it runs is decided on the server (§19.9.9.8 rule 3). Move the write before the first server call")
+                deferred = deferred.concat([k])
+            } else {
+                body = cfStmt(s, body)
+                if (one.rets) seenRet = true
+            }
+            bsyms = bsyms.concat(topBinds(t, s))
+            k = k + 1
+        }
+        // a batch may not assign what the client holds (s474 r2, review N3: the local an assignment
+        // rebinds is the assign checker's — EAssignLocal at the assignment — not the target's name fact)
+        for (const sym of assignedSymsOf(t, body.assigns)) {
+            if (psyms.indexOf(sym) >= 0 || presyms.indexOf(sym) >= 0) return composeRefuse(st, file, fs.info.span, name, why, "the batch assigns a parameter or a local declared before it, whose new value would have to come back from the server. Declare a new local inside the batch")
+        }
+        // a statement after the batch may not read what it computed (rule 1 joined every one that could)
+        k = hi + 1
+        while (k < ss.length) {
+            if (anyIn(localSymsOf(t, cfStmt(ss[k], cf0()).names), bsyms)) return composeRefuse(st, file, ss[k].span, name, why, "this statement reads a local the batch computes, and it cannot join the batch: the value would come back in the cell envelope as a cell write (§19.9.9.8 rule 1). Write the cells in the batch's place, or return the value")
+            k = k + 1
+        }
+        // the client locals the batch reads, handed to it as arguments
+        let extra: ComposeExtra[] = []
+        let took: int[] = []
+        for (const sym of localSymsOf(t, body.names)) {
+            const at: int = presyms.indexOf(sym)
+            if (at >= 0 && took.indexOf(sym) < 0) {
+                took = took.concat([sym])
+                const ds: AStmt = ss[prestmt[at]]
+                const ld: LocalDecl | not = localDeclOf(ds)
+                if (ld is not) return composeRefuse(st, file, ds.span, name, why, "the batch reads a local this statement declares, which the composed form cannot hand to the batch yet")
+                if (ld.lin) return composeRefuse(st, file, ds.span, name, why, "the batch reads the `lin` local `" + ld.name + "` — handing it to the batch is a use the composed form does not count yet")
+                let vt: Type | not = not
+                if (ld.ty is not) {
+                    const ini: AExpr | not = ld.init
+                    if (ini is given) vt = knownOf(exprType(t, ini.nid))
+                    const v0: Type | not = vt
+                    if (v0 is not || !spellable(v0)) return composeRefuse(st, file, ds.span, name, why, "the batch reads `" + ld.name + "`, whose type the bootstrap cannot write into the batch's parameter list. Write its type (`const " + ld.name + ": T = …`)")
+                }
+                extra = extra.concat([{ name: ld.name, span: ds.span, ty: ld.ty, vt: vt }])
+            }
+        }
+        // the handling forms on server calls inside the batch: a non-`!` callee cannot fail there
+        // (server→server, §19.9.10) — its handler or `?` is dropped; a `!` callee's `.Transport`
+        // arm is dropped when its own error type has none (the per-call wire is gone)
+        let strip: int[] = []
+        let drop: int[] = []
+        let notes: Diag[] = []
+        for (const h of body.handled) {
+            const cs: Sym | not = fnSymAt(t, h.callee)
+            if (cs is given) {
+                if (isServerPlace(placeOf(places, cs.id))) {
+                    const fi: FnInfo | not = fnInfoOf(t, cs)
+                    if (fi is given) {
+                        if (!fi.failable) {
+                            if (h.how == 2) return composeRefuse(st, file, fs.info.span, name, why, "the batch `match`es on a call of the non-`!` server function `" + fi.name + "`, which cannot fail inside the server batch (§19.9.10). Use the value directly")
+                            strip = strip.concat([h.nid])
+                            // (s474 r1, review L1: no warning here — the first pass requires this handler on a
+                            // client call, §19.9.10, so the author could not remove it; it is dropped silently)
+                        } else {
+                            const keep: boolean = enumHasVariant(t, fi.err, "Transport")
+                            for (const a of h.arms) {
+                                if (armIsTransport(a)) {
+                                    if (!keep) drop = drop.concat([a.nid])
+                                    notes = notes.concat([newDiag("W-TX-ARM-UNREACHABLE", "this `.Transport` arm on `" + fi.name + "()` cannot run on the wire: '" + name + "' is declared '!', and its server calls now run in ONE composed request (§19.9.9.8 rule 1, S474), where `" + fi.name + "` is called in place — " + (keep ? "the arm runs only when `" + fi.name + "` itself fails with `Transport`" : "the arm is dropped") + ". A wire failure of the composed request reaches the caller of '" + name + "' as its own `Transport` variant. Use `?` or a `_` arm instead", file, a.span)])
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        // does the batch, as it will run (the dropped handlers' arms gone), return?
+        let bss: AStmt[] = []
+        k = lo
+        while (k <= hi) {
+            if (deferred.indexOf(k) < 0) bss = bss.concat([ss[k]])
+            k = k + 1
+        }
+        const rets: boolean = cfStmts(mStmts(bss, { strip: strip, drop: drop }), cf0()).rets
+        if (rets && (hi + 1 < ss.length || deferred.length > 0)) {
+            return composeRefuse(st, file, ss[hi + 1 < ss.length ? hi + 1 : hi].span, name, why, "the batch holds a `return`, and client work follows it: composed, the batch would end the function and hand back its result with an exit flag (§19.9.9.8 rule 3). Move the client work before the first server call, or end the function with the batch")
+        }
+        // s474 r1 (review M2, PA ruling (b)): a later `fail` / `?` that cannot join the batch runs after it committed
+        const late: Diag[] = lateExits(g, t, fs, fx, calls, hi, "")
+        return { plan: { fnNid: fs.f.nid, name: name, lo: lo, hi: hi, deferred: deferred, extra: extra, strip: strip, drop: drop, returns: rets, notes: notes.concat(late), late: late.length }, st: st }
+    }
+
+    // Each statement's facts, a `Date` / `performance` read counted as browser work (review L4:
+    // the browser's clock is not movable — §19.9.9.8 rule 3 names `Math`, `JSON`, `String`).
+    fn stmtFxs(sum: Summary, tq: TxQ, places: PlaceFact[], dr: boolean[], f: FnFacts, t: Tables, ss: AStmt[]) -> StmtFx[] {
+        let out: StmtFx[] = []
+        for (const s of ss) {
+            const x: StmtFx = stmtFx(sum, tq, places, dr, f, s.span)
+            let clock: string = ""
+            for (const n of cfStmt(s, cf0()).clocks) {
+                if (clock == "" && localSymAt(t, n) < 0 && fnSymAt(t, n) is not) clock = "the browser's clock (`Date` / `performance`)"
+            }
+            if (clock != "" && x.browser == "") {
+                out = out.concat([{ remote: x.remote, via: x.via, browser: clock, client: x.client, read: x.read, write: x.write }])
+            } else {
+                out = out.concat([x])
+            }
+        }
+        return out
+    }
+
+    // Does a statement of from..to (inclusive) hold a `return`? (s474 r2, review N1: joining it would
+    // put a `return` in the batch with client work after it — the exit flag is not built)
+    fn cpRetsIn(ss: AStmt[], from: int, to: int) -> boolean {
+        let k: int = from
+        while (k <= to) {
+            if (cfStmt(ss[k], cf0()).rets) return true
+            k = k + 1
+        }
+        return false
+    }
+
+    // Can statements from..to (inclusive) all move into the batch? (rule 3: no browser work, no cell
+    // read — the marshal is not built — no client function, no effect, no `defer`)
+    fn movableRun(t: Tables, ss: AStmt[], fx: StmtFx[], from: int, to: int) -> boolean {
+        let k: int = from
+        while (k <= to) {
+            const x: StmtFx = fx[k]
+            if (x.browser != "" || x.read != "" || x.client != "" || x.via != "" || x.remote.length > 0) return false
+            if (cfStmt(ss[k], cf0()).effects || cpIsDefer(ss[k])) return false
+            k = k + 1
+        }
+        return true
+    }
+
+    // W-TX-FAIL-AFTER-COMMIT for each statement after `from` that can `fail` / `?` (PA ruling, review M2 (b)).
+    // `reason0`: why nothing after `from` could join, when the statements do not say it (review N2 / N4).
+    fn lateExits(g: Globals, t: Tables, fs: FnSrc, fx: StmtFx[], calls: string[], from: int, reason0: string) -> Diag[] {
+        let out: Diag[] = []
+        const ss: AStmt[] = fs.f.body.stmts
+        const name: string = fs.info.name
+        let k: int = from + 1
+        let blocked: string = ""
+        while (k < ss.length) {
+            const x: StmtFx = fx[k]
+            if (blocked == "" && x.write != "") blocked = "it writes `" + x.write + "` in the same statement"
+            if (blocked == "" && x.client != "") blocked = "it calls `" + x.client + "`, which reads or writes client state"
+            if (blocked == "" && x.read != "") blocked = "it reads `" + x.read + "`, which is not marshalled into the batch yet"
+            if (x.browser != "") blocked = "it uses " + x.browser + ", which needs the browser"
+            const fk: CFold = cfStmt(ss[k], cf0())
+            if (fk.exits) {
+                let why: string = blocked
+                if (why == "") why = reason0
+                if (why == "") why = "a statement before it cannot join the batch"
+                out = out.concat([newDiag("W-TX-FAIL-AFTER-COMMIT", "this `fail` / `?` (line " + lineOf(g, fs.info.file, ss[k].span.start) + ") runs after '" + name + "''s server work (" + calls.join(", ") + ") has COMMITTED: when it fails, the caller is told '" + name + "' failed, but the batch's writes are already committed and are not rolled back (§19.10.5, S474). It cannot join the server batch because " + why + ". Move the check before the first server call, or into the server function, so it can roll the writes back", fs.info.file, ss[k].span)])
+            }
+            if (blocked == "" && fk.rets) blocked = "a `return` before it would end the batch with client work after it (the batch's exit flag is not built)"
+            k = k + 1
+        }
+        return out
+    }
+
+    // s474 r1 (review M2, PA ruling): ONE server call followed by a `fail` / `?` — composed like two,
+    // so a movable check joins the call's request and rolls its writes back. Composed only when every
+    // such check joins (otherwise nothing changes): a check that cannot move is W-TX-FAIL-AFTER-COMMIT.
+    // A function whose one call is a composed batch's (the composed program's F) is not looked at again.
+    fn composeSingle(g: Globals, t: Tables, sum: Summary, tq: TxQ, places: PlaceFact[], dr: boolean[], fs: FnSrc, i: int, allow: boolean, st0: AS) -> RPlan {
+        const f: FnFacts = sum.nodes[i].f
+        const ss: AStmt[] = fs.f.body.stmts
+        const fx: StmtFx[] = stmtFxs(sum, tq, places, dr, f, t, ss)
+        let at: int = -1
+        let k: int = 0
+        while (k < ss.length) {
+            if (fx[k].remote.length > 0 || fx[k].via != "") at = k
+            k = k + 1
+        }
+        if (at < 0) return { plan: not, st: st0 }
+        // s474 r2 (review N2): the one request is made by a client function — composing it is not built,
+        // so a later `fail` / `?` runs after that request committed
+        if (fx[at].via != "") {
+            let st2: AS = st0
+            for (const d of lateExits(g, t, fs, fx, ["`" + fx[at].via + "`"], at, "the server call is made inside `" + fx[at].via + "`, a client function, and composing that call is not built yet (call the server function from '" + fs.info.name + "' directly)")) { st2 = addDiag(st2, d.file, d.span, d.code, d.message) }
+            return { plan: not, st: st2 }
+        }
+        for (const r of fx[at].remote) {
+            if (r.substring(0, 2) == "`#") return { plan: not, st: st0 }
+        }
+        let exits = false
+        k = at + 1
+        while (k < ss.length) {
+            if (cfStmt(ss[k], cf0()).exits) exits = true
+            k = k + 1
+        }
+        if (!exits) return { plan: not, st: st0 }
+        const r1: RPlan = composeOne(g, t, sum, tq, places, dr, fs, i, "a statement after its one server call can `fail`", allow, st0)
+        const p: ComposePlan | not = r1.plan
+        if (p is given) {
+            if (p.late == 0) return r1
+        }
+        // s474 r2 (review N4): the reason composing failed, when it was refused
+        let reason: string = ""
+        if (p is not && r1.st.diags.length > st0.diags.length) reason = refusalReason(r1.st.diags[r1.st.diags.length - 1])
+        let st: AS = st0
+        for (const d of lateExits(g, t, fs, fx, fx[at].remote, at, reason)) { st = addDiag(st, d.file, d.span, d.code, d.message) }
+        return { plan: not, st: st }
+    }
+
+    fn refusalReason(d: Diag) -> string {
+        if (d.code == "E-ERROR-010") return "composing the call needs `Transport(t: ServerCallError)` in the function's error type (E-ERROR-010: the composed request can fail on the wire) — add it, and this check joins the batch"
+        const at: int = d.message.indexOf("not this shape yet: ")
+        if (at >= 0) return "composing the call is not built for this function yet: " + d.message.substring(at + 20)
+        return "composing the call is refused (" + d.code + ")"
+    }
+
+    fn errName(e: Sym | not) -> string {
+        if (e is not) return ""
+        return e.hint
+    }
+
+    // ---- the composed program (s474, client-bang composition) ------------------------
+    // composeFiles writes each plan into its function: F keeps S[0..lo), then ONE call
+    // of the batch (`#F(params…, client locals…)?`, or `return #F(…)?;` when the batch
+    // returns), then the deferred cell writes, then S(hi..n); the batch function `#F`
+    // follows F in the same item list. The moved statements keep their node ids and
+    // spans (a later report points at what the author wrote); every synthesized node
+    // takes a fresh id from `next` (the linker's first unused id).
+    type RFiles:struct = { files: FileAst[], next: int }
+    type RItems:struct = { items: AItem[], next: int }
+    type RTy:struct = { ty: AType, next: int }
+    type RFn2:struct = { fns: AFn[], next: int }
+    type CMap:struct = { strip: int[], drop: int[] }
+
+    fn composeFiles(files: FileAst[], plans: ComposePlan[], next0: int) -> FileAst[] {
+        let next: int = next0
+        let out: FileAst[] = []
+        for (const f of files) {
+            const r: RItems = composeItems(f.items, plans, next)
+            next = r.next
+            out = out.concat([{ path: f.path, items: r.items, errs: f.errs, lines: f.lines, dbFns: f.dbFns, hosts: f.hosts }])
+        }
+        return out
+    }
+
+    fn composeItems(items: AItem[], plans: ComposePlan[], next0: int) -> RItems {
+        let next: int = next0
+        let out: AItem[] = []
+        for (const it of items) {
+            const k: AItemK = it.k
+            const p: AProgram | not = cpProgramOf(k)
+            const af: AFn | not = fnOfItem(k)
+            if (p is given) {
+                const r: RItems = composeItems(p.items, plans, next)
+                next = r.next
+                out = out.concat([{ nid: it.nid, span: it.span, k: AItemK.ProgramItem({ nid: p.nid, span: p.span, attrs: p.attrs, items: r.items }) }])
+            } else if (af is given) {
+                const pl: ComposePlan | not = planFor(plans, af.nid)
+                if (pl is given) {
+                    const r2: RFn2 = composeFn(af, pl, next)
+                    next = r2.next
+                    out = out.concat([{ nid: it.nid, span: it.span, k: AItemK.FnItem(r2.fns[0]) }])
+                    out = out.concat([{ nid: next, span: it.span, k: AItemK.FnItem(r2.fns[1]) }])
+                    next = next + 1
+                } else {
+                    out = out.concat([it])
+                }
+            } else {
+                out = out.concat([it])
+            }
+        }
+        return { items: out, next: next }
+    }
+
+    fn planFor(plans: ComposePlan[], nid: int) -> ComposePlan | not {
+        for (const p of plans) {
+            if (p.fnNid == nid) return p
+        }
+        return not
+    }
+
+    fn cpProgramOf(k: AItemK) -> AProgram | not {
+        return match k {
+            .ProgramItem(p: p) :> p
+            .FnItem(f: f) :> not
+            .ConstItem(c: c) :> not
+            .ImportItem(i: i) :> not
+            .TypeItem(t: t) :> not
+            .DeclItem(d: d) :> not
+            .MarkupItem(n: n) :> not
+        }
+    }
+
+    fn fnOfItem(k: AItemK) -> AFn | not {
+        return match k {
+            .FnItem(f: f) :> f
+            .ProgramItem(p: p) :> not
+            .ConstItem(c: c) :> not
+            .ImportItem(i: i) :> not
+            .TypeItem(t: t) :> not
+            .DeclItem(d: d) :> not
+            .MarkupItem(n: n) :> not
+        }
+    }
+
+    // [F rewritten, the batch function #F]
+    fn composeFn(af: AFn, pl: ComposePlan, next0: int) -> RFn2 {
+        let next: int = next0
+        const ss: AStmt[] = af.body.stmts
+        const cm: CMap = { strip: pl.strip, drop: pl.drop }
+        const sp: ASpan = mkSpan(ss[pl.lo].span.start, ss[pl.hi].span.end)
+        // the batch's parameters: F's, then the client locals it reads
+        let params: AParam[] = []
+        let args: AExpr[] = []
+        for (const p of af.params) {
+            const pt: AType | not = p.ty
+            let ty: AType | not = not
+            if (pt is given) {
+                const r: RTy = copyAType(pt, next)
+                next = r.next
+                ty = r.ty
+            }
+            params = params.concat([{ nid: next, span: p.span, name: p.name, ty: ty, lin: false }])
+            args = args.concat([{ nid: next + 1, span: sp, k: AExprK.Name(p.name) }])
+            next = next + 2
+        }
+        for (const x of pl.extra) {
+            let ty: AType | not = not
+            const xt: AType | not = x.ty
+            const xv: Type | not = x.vt
+            if (xt is given) {
+                const r: RTy = copyAType(xt, next)
+                next = r.next
+                ty = r.ty
+            } else if (xv is given) {
+                const r2: RTy = typeAType(xv, x.span, next)
+                next = r2.next
+                ty = r2.ty
+            }
+            params = params.concat([{ nid: next, span: x.span, name: x.name, ty: ty, lin: false }])
+            args = args.concat([{ nid: next + 1, span: sp, k: AExprK.Name(x.name) }])
+            next = next + 2
+        }
+        let et: AType | not = not
+        const ae: AType | not = af.err
+        if (ae is given) {
+            const r3: RTy = copyAType(ae, next)
+            next = r3.next
+            et = r3.ty
+        }
+        // the batch body: S[lo..hi] without the deferred writes, its server-call handling adjusted
+        let bstmts: AStmt[] = []
+        let defs: AStmt[] = []
+        let k: int = pl.lo
+        while (k <= pl.hi) {
+            if (pl.deferred.indexOf(k) >= 0) {
+                defs = defs.concat([ss[k]])
+            } else {
+                bstmts = bstmts.concat([mStmt(ss[k], cm)])
+            }
+            k = k + 1
+        }
+        // a batch that returns nothing answers `true` — a client call decodes the answer against
+        // the callee's success type (§57.4, S451 R10), and F discards it (`#F(…)?;`)
+        if (!pl.returns) {
+            const tv: AExpr = { nid: next, span: sp, k: AExprK.Bool(true) }
+            bstmts = bstmts.concat([{ nid: next + 1, span: sp, k: AStmtK.Return(tv) }])
+            next = next + 2
+        }
+        const bname: string = "#" + af.name
+        const batch: AFn = { nid: next, span: af.span, exported: false, pure: false, name: bname, params: params, ret: not,
+                             body: { nid: next + 1, span: sp, stmts: bstmts }, server: true, failable: true, err: et }
+        // the one call: `#F(…)?` (`return #F(…)?;` when the batch returns)
+        const callee: AExpr = { nid: next + 2, span: sp, k: AExprK.Name(bname) }
+        const call: AExpr = { nid: next + 3, span: sp, k: AExprK.Call(callee, args) }
+        const prop: AExpr = { nid: next + 4, span: sp, k: AExprK.Handled({ subject: call, how: AHow.Propagate }) }
+        let cs: AStmt = { nid: next + 5, span: sp, k: AStmtK.Eval(prop) }
+        if (pl.returns) cs = { nid: next + 5, span: sp, k: AStmtK.Return(prop) }
+        next = next + 6
+        const fstmts: AStmt[] = ss.slice(0, pl.lo).concat([cs]).concat(defs).concat(ss.slice(pl.hi + 1))
+        const f2: AFn = { nid: af.nid, span: af.span, exported: af.exported, pure: af.pure, name: af.name, params: af.params, ret: af.ret,
+                          body: { nid: af.body.nid, span: af.body.span, stmts: fstmts }, server: af.server, failable: af.failable, err: af.err }
+        return { fns: [f2, batch], next: next }
+    }
+
+    fn copyAType(t: AType, next: int) -> RTy {
+        const k: ATypeK = t.k
+        return match k {
+            .TName(name: n) :> { ty: { nid: next, span: t.span, k: ATypeK.TName(n) }, next: next + 1 }
+            .TSeq(elem: e, grants: gs) :> seqAType(copyAType(e, next), t.span, gs)
+            .TMaybe(inner: i) :> maybeAType(copyAType(i, next), t.span)
+        }
+    }
+
+    fn maybeAType(r: RTy, sp: ASpan) -> RTy {
+        return { ty: { nid: r.next, span: sp, k: ATypeK.TMaybe(r.ty) }, next: r.next + 1 }
+    }
+
+    // A resolved type spelled back as syntax (composeOne admits only `spellable` ones).
+    fn typeAType(ty: Type, sp: ASpan, next: int) -> RTy {
+        return match ty {
+            .Int :> { ty: { nid: next, span: sp, k: ATypeK.TName("int") }, next: next + 1 }
+            .Num :> { ty: { nid: next, span: sp, k: ATypeK.TName("number") }, next: next + 1 }
+            .Str :> { ty: { nid: next, span: sp, k: ATypeK.TName("string") }, next: next + 1 }
+            .Bool :> { ty: { nid: next, span: sp, k: ATypeK.TName("bool") }, next: next + 1 }
+            .Named(sym: s) :> { ty: { nid: next, span: sp, k: ATypeK.TName(s.hint) }, next: next + 1 }
+            .Seq(elem: e) :> seqAType(typeAType(e, sp, next), sp, [])
+            .Maybe(inner: i) :> maybeAType(typeAType(i, sp, next), sp)
+        }
+    }
+
+    // ---- the batch's statements, with the server-call handling adjusted (CMap) -------
+    fn mStmts(ss: AStmt[], m: CMap) -> AStmt[] {
+        let out: AStmt[] = []
+        for (const s of ss) { out = out.concat([mStmt(s, m)]) }
+        return out
+    }
+
+    fn mBlock(b: ABlock, m: CMap) -> ABlock { return { nid: b.nid, span: b.span, stmts: mStmts(b.stmts, m) } }
+
+    fn mMaybeBlock(b: ABlock | not, m: CMap) -> ABlock | not {
+        if (b is not) return not
+        return mBlock(b, m)
+    }
+
+    fn mMaybe(e: AExpr | not, m: CMap) -> AExpr | not {
+        if (e is not) return not
+        return mExpr(e, m)
+    }
+
+    fn mExprs(es: AExpr[], m: CMap) -> AExpr[] {
+        let out: AExpr[] = []
+        for (const e of es) { out = out.concat([mExpr(e, m)]) }
+        return out
+    }
+
+    fn mStmt(s: AStmt, m: CMap) -> AStmt {
+        const k: AStmtK = s.k
+        const k2: AStmtK = match k {
+            .Eval(e: e) :> AStmtK.Eval(mExpr(e, m))
+            .Local(name: n, mutable: mu, ty: ty, init: i, lin: l) :> AStmtK.Local(n, mu, ty, mExpr(i, m), l)
+            .Return(e: e) :> AStmtK.Return(mMaybe(e, m))
+            .If(cond: c, thenB: tb, elseB: eb) :> AStmtK.If(mExpr(c, m), mBlock(tb, m), mMaybeBlock(eb, m))
+            .Given(name: n, subject: x, body: b) :> AStmtK.Given(n, mExpr(x, m), mBlock(b, m))
+            .EffectStmt(w: w) :> k
+            .Defer(body: b, arrayLead: al, bare: br) :> AStmtK.Defer(mBlock(b, m), al, br)
+            .Fail(f: f) :> AStmtK.Fail(mFail(f, m))
+            .For(f: lf) :> AStmtK.For(mFor(lf, m))
+            .Break(label: x) :> k
+            .Continue(label: x) :> k
+            .Lift(what: w) :> AStmtK.Lift(mLift(w, m))
+        }
+        return { nid: s.nid, span: s.span, k: k2 }
+    }
+
+    fn mFail(f: AFail, m: CMap) -> AFail {
+        return { enumName: f.enumName, variant: f.variant, args: mExprs(f.args, m), target: mMaybe(f.target, m), split: f.split }
+    }
+
+    fn mLift(w: ALift, m: CMap) -> ALift {
+        return match w {
+            .LiftExpr(e: e) :> ALift.LiftExpr(mExpr(e, m))
+            .LiftNode(n: x) :> w
+        }
+    }
+
+    fn mFor(lf: AFor, m: CMap) -> AFor {
+        return { nid: lf.nid, span: lf.span, label: lf.label, head: mHead(lf.head, m), body: mBlock(lf.body, m), bound: lf.bound }
+    }
+
+    fn mHead(h: AForHead, m: CMap) -> AForHead {
+        return match h {
+            .HForever :> h
+            .HCond(cond: c) :> AForHead.HCond(mExpr(c, m))
+            .HCounted(init: i, cond: c, step: sp) :> AForHead.HCounted(mStmts(i, m), mMaybe(c, m), mExprs(sp, m))
+            .HIter(bind: b, mutable: mu, src: src, key: ky) :> AForHead.HIter(b, mu, mIter(src, m), mMaybe(ky, m))
+        }
+    }
+
+    fn mIter(s: AIterSrc, m: CMap) -> AIterSrc {
+        return match s {
+            .IterOf(e: e) :> AIterSrc.IterOf(mExpr(e, m))
+            .IterRange(lo: l, hi: h, inclusive: inc) :> AIterSrc.IterRange(mExpr(l, m), mExpr(h, m), inc)
+        }
+    }
+
+    fn mProps(ps: AProp[], m: CMap) -> AProp[] {
+        let out: AProp[] = []
+        for (const p of ps) { out = out.concat([{ nid: p.nid, span: p.span, spread: p.spread, name: p.name, value: mExpr(p.value, m) }]) }
+        return out
+    }
+
+    fn mArms(arms: AArm[], m: CMap) -> AArm[] {
+        let out: AArm[] = []
+        for (const a of arms) {
+            if (m.drop.indexOf(a.nid) < 0) out = out.concat([{ nid: a.nid, span: a.span, pat: a.pat, body: mArmBody(a.body, m), legacy: a.legacy, lifted: a.lifted }])
+        }
+        return out
+    }
+
+    fn mArmBody(b: AArmBody, m: CMap) -> AArmBody {
+        return match b {
+            .ArmExpr(e: x) :> AArmBody.ArmExpr(mExpr(x, m))
+            .ArmBlock(b: blk) :> AArmBody.ArmBlock(mBlock(blk, m))
+        }
+    }
+
+    fn mHow(h: AHow, m: CMap) -> AHow {
+        return match h {
+            .Propagate :> h
+            .Guard(arms: a) :> AHow.Guard(mArms(a, m))
+            .MatchOn(arms: a) :> AHow.MatchOn(mArms(a, m))
+        }
+    }
+
+    fn mExpr(e: AExpr, m: CMap) -> AExpr {
+        const k: AExprK = e.k
+        if (m.strip.indexOf(e.nid) >= 0) {
+            const h: AHandled | not = handledOf(k)
+            if (h is given) return mExpr(h.subject, m)
+        }
+        const k2: AExprK = match k {
+            .Name(name: n) :> k
+            .At(name: n) :> k
+            .AtItem :> k
+            .Num(raw: r) :> k
+            .Str(v: s) :> k
+            .Bool(v: b) :> k
+            .NotLit :> k
+            .Recovered :> k
+            .Variant(name: n) :> k
+            .Foreign(f: fb0) :> k
+            .Member(obj: o, name: n) :> AExprK.Member(mExpr(o, m), n)
+            .Call(callee: c, args: a) :> AExprK.Call(mExpr(c, m), mExprs(a, m))
+            .Unary(op: o, e: x) :> AExprK.Unary(o, mExpr(x, m))
+            .Binary(op: o, l: l, r: r) :> AExprK.Binary(o, mExpr(l, m), mExpr(r, m))
+            .Ternary(test: t, yes: y, no: no) :> AExprK.Ternary(mExpr(t, m), mExpr(y, m), mExpr(no, m))
+            .Assign(target: t, value: v, paren: p, kept: kp) :> AExprK.Assign(mExpr(t, m), mExpr(v, m), p, kp)
+            .ArrayLit(elems: es) :> AExprK.ArrayLit(mExprs(es, m))
+            .ObjectLit(props: ps) :> AExprK.ObjectLit(mProps(ps, m))
+            .Spread(e: x) :> AExprK.Spread(mExpr(x, m))
+            .Index(obj: o, idx: i) :> AExprK.Index(mExpr(o, m), mExpr(i, m))
+            .Lambda(params: ps, body: b) :> AExprK.Lambda(ps, mExpr(b, m))
+            .Sql(q: q) :> AExprK.Sql({ chunks: q.chunks, params: mExprs(q.params, m), mode: q.mode, nobatch: q.nobatch, handled: q.handled })
+            .Handled(h: h) :> AExprK.Handled({ subject: mExpr(h.subject, m), how: mHow(h.how, m) })
+            .Template(quasis: qs, slots: ss) :> AExprK.Template(qs, mExprs(ss, m))
+        }
+        return { nid: e.nid, span: e.span, k: k2 }
+    }
+
+    // =========================================================================
+    // s474 (U1e) — THE ENVELOPES ARE BUILT. §8.9.2 (as amended S473): "when a `!`
+    // server function's transitive query set contains two or more `?{}` queries
+    // that do not carry `.nobatch()` (through non-`!` and `!` callees, a query
+    // counted once per time it is reached …), the compiler SHALL wrap the
+    // handler body in `?{BEGIN DEFERRED}` / `?{COMMIT}` (`?{ROLLBACK}` on an
+    // exception or a `fail` exit)"; F10: "An inner `!` function called inside an
+    // outer envelope runs as a nested savepoint (§19.10.6), so the outer envelope
+    // can roll back the inner's writes." The set is txQuerySets' (unchanged from
+    // the s473 interim refusal, which this replaces): its own queries and every
+    // callee's, `!` or not, a query reached twice counting twice, one in a loop
+    // (or a lambda, or a recursive callee) counting as two.
+    //
+    // Each `!` function whose set holds a query gets an Envelope (CoreProgram.
+    // envelopes): `standalone` when the set needs a transaction of its own (the
+    // trigger above), else `false` — it is then a savepoint inside an enclosing
+    // envelope and runs as written outside one. The server printer wraps the
+    // body (print.scrml envelopedFnJs); the runtime holds the transaction across
+    // the body's waits behind the §19.10.6 per-connection gate
+    // (server-runtime.js `envelope`).
+    //
+    // What is NOT built stays a NAMED refusal (S473 D1: "refuse code whose
+    // server guarantee it does not build … never compile it without the
+    // guarantee"), each checked only where an envelope is needed:
+    //  - a write to another database inside the envelope — §8.9.2 (S451 ruling
+    //    4a) names it: E-SQL-011 (the SPEC's text);
+    //  - a read of another database inside the envelope — the SPEC allows it;
+    //    the bootstrap does not prove two connection gates deadlock-free (a
+    //    request holding A's gate waiting on B's while another holds B's waiting
+    //    on A — §19.10.6 leaves cross-database deadlock uncovered):
+    //    E-BOOTSTRAP-UNSUPPORTED;
+    //  - an envelope on a Postgres / MySQL database — §19.10.6 "A transaction
+    //    SHALL run on one connection taken from the pool for it alone"; the
+    //    bootstrap's server runtime reserves no pool connection:
+    //    E-BOOTSTRAP-UNSUPPORTED;
+    //  - a CLIENT-placed `!` function (its one server call — two are the
+    //    permanent E-TX-CLIENT-MULTI-CALL) whose queries run in a server
+    //    function that is not `!`: that function runs them with no envelope of
+    //    its own, and none can span the request: E-BOOTSTRAP-UNSUPPORTED naming
+    //    the fix (declare it `!`, so its own envelope holds them).
+    // Manual transaction control in a `!` function stays refused
+    // (envelopeDiags): such a function gets no envelope here.
+    // =========================================================================
+    type REnv:struct = { envs: Envelope[], st: AS }
+
+    fn envelopePass(sum: Summary, tq: TxQ, all: FnFacts[], places: PlaceFact[], sqls: SqlInfo[], dbs: Db[], rd: RDbs, st0: AS) -> REnv {
+        let st: AS = st0
+        let envs: Envelope[] = []
+        for (const f of all) {
+            const i: int = nodeIdx(sum.nodes, f.sym)
+            if (f.failable && i >= 0 && !holdsTxControl(f) && tq.remote[i] < 2) {
+                const r: REnv = envelopeOf(sum, tq, f, i, places, sqls, dbs, rd, st)
+                st = r.st
+                envs = envs.concat(r.envs)
+            }
+        }
+        return { envs: envs, st: st }
+    }
+
+    fn holdsTxControl(f: FnFacts) -> boolean {
+        for (const s of f.sqls) {
+            if (txControl(s.q.chunks) != "") return true
+        }
+        return false
+    }
+
+    // One `!` function's envelope (none when its set is empty), or its refusal.
+    fn envelopeOf(sum: Summary, tq: TxQ, f: FnFacts, i: int, places: PlaceFact[], sqls: SqlInfo[], dbs: Db[], rd: RDbs, st0: AS) -> REnv {
+        let st: AS = st0
+        const qs: FxAtom[] = tq.qs[i]
+        if (qs.length == 0) return { envs: [], st: st }
+        // the facts of each query the set COUNTS (the trigger), and of every query the envelope
+        // REACHES — `.nobatch()` ones included (s474 r1, review F1/F2: §8.9.5 opts a query out of
+        // the count, not out of the envelope's extent); a site with no facts was refused where it stands
+        const infos: SqlInfo[] = atomInfos(sum, qs, sqls)
+        const reached: FxAtom[] = tq.all[i]
+        const rinfos: SqlInfo[] = atomInfos(sum, reached, sqls)
+        if (infos.length < qs.length || rinfos.length < reached.length) return { envs: [], st: st }
+        const fsym: Sym = { id: f.sym, hint: f.name }
+        // S474 ruling 5: the envelope opens with BEGIN IMMEDIATE when a query it reaches writes
+        // (core.scrml Envelope.writes) — every query of `rinfos` runs inside it, `.nobatch()` included
+        let writes: boolean = false
+        for (const wi of rinfos) {
+            if (wi.kind == SqlKind.SqlWrite) writes = true
+        }
+        // s474 r2 (review N5) — PA reading S474, M2: a `!` that fails leaves no writes. A composed batch
+        // (`#F`) whose set WRITES (the same fail-closed write test as `writes` above) holds its queries in
+        // a transaction of its own even when it reaches ONE, so a `fail` / `?` it joined after the write
+        // rolls the write back. A read-only batch opens none (its reads stay off the §19.10.6 gate).
+        const needs: boolean = qs.length >= 2 || tq.runs[i] >= 2 || witnessOf(tq.loops[i]) is given || (isBatchName(f.name) && writes)
+        if (!needs) return { envs: [{ fn: fsym, db: infos[0].db, standalone: false, writes: writes }], st: st }
+        // a client-placed `!` function: its queries run in the server function(s) it calls, each in
+        // that function's own envelope — it holds no transaction itself. s474 r2 (review item 2): so
+        // the one-database checks below do not apply to it (a client `!` calling one `!` function of
+        // `<db src=b>` is not E-SQL-011) — unless a server-run function calls it in place, where its
+        // server copy runs its own envelope and the checks hold for that copy.
+        const pk: PlaceK = placeOf(places, f.sym)
+        if (!isServerPlace(pk) && sum.inherited.indexOf(f.sym) < 0) {
+            // s474 (client-bang composition): a non-`!` server callee whose queries need one
+            // transaction is composed (composePass) — its call runs inside the composed batch's envelope
+            if (!calledInPlace(sum, tq, places, i)) return { envs: [], st: st }
+        }
+        // the envelope's database: §8.9.2 "on the database of their function's `?{}` sites — the
+        // function's nearest database scope (§8.1.1)"; a function with none, its set's first
+        let home: Sym = infos[0].db
+        const sc: int = fnScope(rd.fns, f.nid)
+        if (sc >= 0) {
+            const pd: ScopeDb | not = scopeDbOf(rd.scopes, sc)
+            if (pd is given) {
+                const d0: Db | not = pd.db
+                if (d0 is given) home = d0.sym
+            }
+        }
+        // §8.9.2: "'B other than A' compares databases, not spellings: scopes naming the same
+        // database are the same database" (s474 r1, review F3) — dbKey, the resolved target
+        const homeKey: string = dbKey(dbs, home)
+        const homeName: string = dbLabel(dbs, home)
+        let k: int = 0
+        let readElse: int = -1
+        while (k < rinfos.length) {
+            if (dbKey(dbs, rinfos[k].db) != homeKey) {
+                if (rinfos[k].kind == SqlKind.SqlWrite) {
+                    const path: string = sqlPathOf(sum, tq.all, i, reached[k])
+                    const other: string = dbLabel(dbs, rinfos[k].db)
+                    return { envs: [], st: addDiag(st, f.file, f.span, "E-SQL-011", "'" + f.name + "' holds a transaction on " + homeName + " (§8.9.2), and " + path + " writes " + other + ". A transaction covers one database: a 'fail' or an error would roll back " + homeName + " and leave the write to " + other + " in place. Move the write to " + other + " out of '" + f.name + "' (call it after '" + f.name + "' returns), or remove the envelope ('.nobatch()' on every query of the envelope, §8.9.5) if the writes need not be atomic.") }
+                }
+                if (readElse < 0) readElse = k
+            }
+            k = k + 1
+        }
+        if (readElse >= 0) {
+            const path2: string = sqlPathOf(sum, tq.all, i, reached[readElse])
+            return { envs: [], st: addDiag(st, f.file, f.span, "E-BOOTSTRAP-UNSUPPORTED", "'" + f.name + "' is declared '!' and needs the implicit per-handler transaction (§8.9.2) on " + homeName + ", and " + path2 + " reads " + dbLabel(dbs, rinfos[readElse].db) + " while it is open (a `.nobatch()` query included: it opts out of the count, not out of the envelope). The SPEC allows that read (§8.9.2: reading database B inside the envelope is allowed), but the bootstrap does not build it: a request holding one database's transaction gate while it waits on another's can deadlock against a request holding them the other way round (§19.10.6). Read the other database before calling '" + f.name + "' and pass the value in") }
+        }
+        if (!sqliteDb(dbs, home)) {
+            return { envs: [], st: addDiag(st, f.file, f.span, "E-BOOTSTRAP-UNSUPPORTED", "'" + f.name + "' is declared '!' and its transitive query set (§8.9.2, S473) needs the implicit per-handler transaction on " + homeName + ", a pooled (Postgres / MySQL) database. §19.10.6 runs such a transaction on one connection taken from the pool for it alone, which the bootstrap's server runtime does not reserve — refused, never compiled non-atomic (S473 D1). Use a SQLite database, or mark each query that need not be atomic with `.nobatch()` (§8.9.5)") }
+        }
+        // the connection the envelope opens: one a reached query of the home database uses (a
+        // second scope naming the same file is the same database — and the server runtime the same
+        // connection, server-runtime.js `connection` — but only a used scope is printed)
+        let envDb: Sym = home
+        let found = false
+        for (const ri of rinfos) {
+            if (!found && dbKey(dbs, ri.db) == homeKey) {
+                envDb = ri.db
+                found = true
+            }
+        }
+        return { envs: [{ fn: fsym, db: envDb, standalone: true, writes: writes }], st: st }
+    }
+
+    // The SqlInfo of each atom's site, in atom order (an atom whose site has none is skipped).
+    fn atomInfos(sum: Summary, atoms: FxAtom[], sqls: SqlInfo[]) -> SqlInfo[] {
+        let out: SqlInfo[] = []
+        for (const a of atoms) {
+            const site: SqlSite = sum.nodes[a.root].f.sqls[a.pos]
+            for (const si of sqls) {
+                if (si.nid == site.nid) out = out.concat([si])
+            }
+        }
+        return out
+    }
+
+    // s474 r1 (review F3) — a database's IDENTITY, for "the same database" (§8.9.2: "compares
+    // databases, not spellings: scopes naming the same database are the same database"): the driver
+    // and the resolved target — a relative SQLite path joined to its declaring file's directory and
+    // normalized (`./`, `.` and `..` segments), exactly as the server runtime resolves it
+    // (server-runtime.js `connKey`, which opens ONE connection, with ONE gate, per key). `:memory:`
+    // is a database of its own per scope (each connection to it is a fresh one).
+    fn dbKey(dbs: Db[], d: Sym) -> string {
+        for (const x of dbs) {
+            if (x.sym.id == d.id) return dbKeyOf(x)
+        }
+        return "?" + d.id
+    }
+
+    fn dbKeyOf(x: Db) -> string {
+        if (x.driver != Driver.Sqlite) return driverKey(x.driver) + ":" + x.target
+        if (x.target == ":memory:") return "sqlite::memory:#" + x.sym.id
+        let path: string = x.target
+        if (path.substring(0, 1) != "/") {
+            const slash: int = x.file.lastIndexOf("/")
+            if (slash >= 0) path = x.file.substring(0, slash) + "/" + path
+        }
+        return "sqlite:" + normPath(path)
+    }
+
+    fn driverKey(d: Driver) -> string {
+        return match d {
+            .Sqlite :> "sqlite"
+            .Postgres :> "postgres"
+            .Mysql :> "mysql"
+        }
+    }
+
+    // `a/./b/../c` → `a/c`; a leading `/` kept; a `..` past the start kept.
+    fn normPath(p: string) -> string {
+        const abs: boolean = p.substring(0, 1) == "/"
+        let out: string[] = []
+        for (const seg of p.split("/")) {
+            if (seg != "" && seg != ".") {
+                if (seg == ".." && out.length > 0 && out[out.length - 1] != "..") {
+                    out = out.slice(0, out.length - 1)
+                } else {
+                    out = out.concat([seg])
+                }
+            }
+        }
+        if (abs) return "/" + out.join("/")
+        return out.join("/")
+    }
+
+    // s474 r2: some server-run function (server-placed, or server-only by §12.2 T5) calls callable i in place.
+    fn calledInPlace(sum: Summary, tq: TxQ, places: PlaceFact[], i: int) -> boolean {
+        let m: int = 0
+        while (m < sum.nodes.length) {
+            if (sum.nodes[m].kind == CallableK.KFn && tq.edges[m].indexOf(i) >= 0) {
+                if (isServerPlace(placeOf(places, sum.nodes[m].f.sym)) || sum.inherited.indexOf(sum.nodes[m].f.sym) >= 0) return true
+            }
+            m = m + 1
+        }
+        return false
+    }
+
+    // The server-placed functions client-placed callable i calls (through client-side callees).
+    fn remoteCallees(nodes: Callable[], tq: TxQ, places: PlaceFact[], i: int) -> int[] {
+        let out: int[] = []
+        let seen: int[] = [i]
+        let todo: int[] = [i]
+        while (todo.length > 0) {
+            const m: int = todo[0]
+            todo = todo.slice(1)
+            for (const j of tq.edges[m]) {
+                if (seen.indexOf(j) < 0) {
+                    seen = seen.concat([j])
+                    if (isServerPlace(placeOf(places, nodes[j].f.sym))) {
+                        out = out.concat([j])
+                    } else {
+                        todo = todo.concat([j])
+                    }
+                }
+            }
+        }
+        return out
+    }
+
+    // How a query of the set is reached, for a message: "its own `?{}`" or "`f() → g()`".
+    fn sqlPathOf(sum: Summary, dim: FxAtom[][], i: int, a: FxAtom) -> string {
+        const ch: string[] = fxChain(sum, dim, i, a)
+        if (ch.length <= 1) return "its own `" + sqlSigil() + "}`"
+        return "`" + ch.join(" → ") + "`"
+    }
+
+    fn dbLabel(dbs: Db[], d: Sym) -> string {
+        for (const x of dbs) {
+            if (x.sym.id == d.id) return "`" + x.target + "`"
+        }
+        return "`" + d.hint + "`"
+    }
+
+    fn sqliteDb(dbs: Db[], d: Sym) -> boolean {
+        for (const x of dbs) {
+            if (x.sym.id == d.id) return x.driver == Driver.Sqlite
+        }
+        return false
     }
 
     // Where a query of a transitive query set stands, for a message.
@@ -27761,19 +29134,25 @@ ${
     // 2; `edges` — the non-`!` call edges the sets are closed over (journalDiags
     // reads them: what a `!` function reaches).
     // `remote[i]` — the server calls (requests) client-placed callable i makes, capped at 2; `remoteWhy[i]` names them.
-    type TxQ:struct = { qs: FxAtom[][], loops: FxAtom[][], loopWhy: string[], runs: int[], edges: int[][], remote: int[], remoteWhy: string[] }
+    // `all[i]` (s474 r1, review F1/F2) — EVERY `?{}` callable i reaches, `.nobatch()` ones included:
+    // §8.9.5 makes `.nobatch()` opt a query out of the COUNT (the trigger), not out of what an open
+    // envelope reaches — so the one-database checks (E-SQL-011, the cross-database read) read `all`.
+    type TxQ:struct = { qs: FxAtom[][], all: FxAtom[][], loops: FxAtom[][], loopWhy: string[], runs: int[], edges: int[][], remote: int[], remoteWhy: string[] }
 
-    fn txQuerySets(nodes: Callable[], places: PlaceFact[]) -> TxQ {
+    fn txQuerySets(nodes: Callable[], places: PlaceFact[], inherited: int[]) -> TxQ {
         let own: FxAtom[][] = []
+        let ownAll: FxAtom[][] = []
         let edges: int[][] = []
         let i: int = 0
         for (const c of nodes) {
             let q: FxAtom[] = []
+            let qa: FxAtom[] = []
             let e: int[] = []
             if (c.kind == CallableK.KFn) {
                 let p: int = 0
                 for (const s of c.f.sqls) {
                     if (!s.q.nobatch) q = q.concat([ownAtom("q" + i + "." + p, i, p)])
+                    qa = qa.concat([ownAtom("q" + i + "." + p, i, p)])
                     p = p + 1
                 }
                 // F10 (ruled S473, #1690 review): `!` callees count too — an inner `!` runs
@@ -27784,6 +29163,7 @@ ${
                 }
             }
             own = own.concat([q])
+            ownAll = ownAll.concat([qa])
             edges = edges.concat([e])
             i = i + 1
         }
@@ -27847,7 +29227,7 @@ ${
         for (const scc of sccOrder(edges)) {
             for (const m of scc) {
                 const c: Callable = nodes[m]
-                if (c.kind == CallableK.KFn && !isServerPlace(placeOf(places, c.f.sym))) {
+                if (c.kind == CallableK.KFn && !isServerPlace(placeOf(places, c.f.sym)) && inherited.indexOf(c.f.sym) < 0) {   // s474: a server-only (inherited, §12.2 T5) function calls in place
                     let n: int = 0
                     let names: string[] = []
                     for (const r of c.f.scan.refs) {
@@ -27870,7 +29250,7 @@ ${
                 }
             }
         }
-        return { qs: qs, loops: closeDim(ownL, edges), loopWhy: why, runs: runs, edges: edges, remote: remote, remoteWhy: rwhy }
+        return { qs: qs, all: closeDim(ownAll, edges), loops: closeDim(ownL, edges), loopWhy: why, runs: runs, edges: edges, remote: remote, remoteWhy: rwhy }
     }
 
     fn isServerPlace(pk: PlaceK) -> boolean {
@@ -29620,9 +31000,12 @@ ${
         scopes: ScopeSheet[],
         inline: CssInline[],
         bridges: CssBridge[],
+        // s474 r1 (review F1): the build's source root under the project root (core.scrml
+        // fileKeyPath) — every user declaration's output key is declScopeKey(keyBase, file, name)
+        keyBase: string,
     }
 
-    export fn noCssFacts() -> CssFacts { return { charsets: [], imports: [], global: [], scopes: [], inline: [], bridges: [] } }
+    export fn noCssFacts() -> CssFacts { return { charsets: [], imports: [], global: [], scopes: [], inline: [], bridges: [], keyBase: "" } }
 
     type CssPlace:struct = { comp: boolean, decl: Sym, name: string, root: boolean, rootStyled: boolean }
     type CssAcc:struct = { facts: CssFacts, diags: Diag[] }
@@ -29701,7 +31084,7 @@ ${
             let bs: CssBridge[] = a.facts.bridges
             if (!hasBridge(bs, f.sym.id)) bs = bs.concat([{ cell: f.sym, idx: idx }])
             const nf: CssFacts = { charsets: a.facts.charsets, imports: a.facts.imports, global: a.facts.global, scopes: a.facts.scopes,
-                                   inline: a.facts.inline, bridges: bs }
+                                   inline: a.facts.inline, bridges: bs, keyBase: a.facts.keyBase }
             return { parts: [CssPart.CellVar(f.sym)], acc: cssWithFacts(a, nf) }
         }
         return { parts: [], acc: cssDiag(a, file, r.span, "E-THEME-TOKEN-UNKNOWN", "`@" + r.name + "` names no theme token and no declared cell (§65.3.2) — declare `<" + r.name + "…/>` in the program, fix the spelling, or drop the `@` for a literal CSS value") }
@@ -29791,7 +31174,7 @@ ${
             const dr: CssDeclsR = cssDecls(g, prog, at, file, flats, a)
             a = dr.acc
             const nf: CssFacts = { charsets: a.facts.charsets, imports: a.facts.imports, global: a.facts.global, scopes: a.facts.scopes,
-                                   inline: addInline(a.facts.inline, at.decl.id, dr.decls), bridges: a.facts.bridges }
+                                   inline: addInline(a.facts.inline, at.decl.id, dr.decls), bridges: a.facts.bridges, keyBase: a.facts.keyBase }
             return cssWithFacts(a, nf)
         }
         let charsets: string[] = a.facts.charsets
@@ -29832,11 +31215,12 @@ ${
         let globalRules: StyleRule[] = a.facts.global
         let scopes: ScopeSheet[] = a.facts.scopes
         if (at.comp) {
-            if (out.length > 0) scopes = addScope(scopes, at.name, out)
+            // s474 (door 3): the scope key is per-file qualified, always — `file` is the component's own file
+            if (out.length > 0) scopes = addScope(scopes, declScopeKey(a.facts.keyBase, file, at.name), out)
         } else {
             globalRules = globalRules.concat(out)
         }
-        const nf: CssFacts = { charsets: charsets, imports: imports, global: globalRules, scopes: scopes, inline: a.facts.inline, bridges: a.facts.bridges }
+        const nf: CssFacts = { charsets: charsets, imports: imports, global: globalRules, scopes: scopes, inline: a.facts.inline, bridges: a.facts.bridges, keyBase: a.facts.keyBase }
         return cssWithFacts(a, nf)
     }
 
@@ -29926,12 +31310,13 @@ ${
 
     type CssPassR:struct = { facts: CssFacts, diags: Diag[] }
 
-    fn cssPass(g: Globals) -> CssPassR {
+    fn cssPass(g: Globals, keyBase: string) -> CssPassR {
         let prog: DeclSrc | not = not
         for (const ds of g.decls) {
             if (ds.isProgram && ds.info.sym.id == g.program.id) prog = ds
         }
-        let a: CssAcc = { facts: noCssFacts(), diags: [] }
+        const f0: CssFacts = noCssFacts()
+        let a: CssAcc = { facts: { charsets: f0.charsets, imports: f0.imports, global: f0.global, scopes: f0.scopes, inline: f0.inline, bridges: f0.bridges, keyBase: keyBase }, diags: [] }
         const none: Sym = mkSym(0 - 1, "")
         const globalAt: CssPlace = { comp: false, decl: none, name: "", root: false, rootStyled: false }
         // a file's top level (outside `<program>`)
@@ -30605,7 +31990,84 @@ ${
         return linExpr(cx, target, s1)
     }
 
-    export fn analyze(files: FileAst[], entry: string) -> TypedProgram {
+    // s474 (client-bang composition): the analysis, and the composed program's. A
+    // client `!` function whose server calls compose (composePass) is written into
+    // the program as one call of a server `!` batch function (composeFiles), and the
+    // composed program is analyzed in its place — so its batch is placed, enveloped,
+    // routed and checked as every server `!` function is. `nextId`: the linker's first
+    // unused node id (link.scrml Linked.nextId); without one (-1) nothing is composed
+    // and such a function is refused. A program with an error is not composed (its
+    // report stands; the compile fails either way). Both passes get `keyBase`.
+    export type ARun:struct = { tp: TypedProgram, plans: ComposePlan[] }
+
+    export fn analyze(files: FileAst[], entry: string) -> TypedProgram { return analyzeLinked(files, entry, "", -1) }
+
+    // s474 r1 (review F1): `keyBase` = the build's source root under the PROJECT root (§21.3) —
+    // the root the per-file output keys are hashed from (core.scrml fileKeyPath); `""` when the
+    // source root is the project root. The file names the front end reports are not changed.
+    export fn analyzeKeyed(files: FileAst[], entry: string, keyBase: string) -> TypedProgram { return analyzeLinked(files, entry, keyBase, -1) }
+
+    export fn analyzeLinked(files: FileAst[], entry: string, keyBase: string, nextId: int) -> TypedProgram {
+        const r1: ARun = analyzeRun(files, entry, keyBase, nextId >= 0)
+        if (r1.plans.length == 0 || hasErrorDiag(r1.tp.diags)) return r1.tp
+        const r2: ARun = analyzeRun(composeFiles(files, r1.plans, nextId), entry, keyBase, false)
+        // the plans' warnings join the composed program's diagnostics, and no diagnostic names the
+        // synthesized batch (`#F`, `F#batch` — review L2): it is "F (its composed server batch)"
+        let notes: Diag[] = []
+        for (const p of r1.plans) { notes = notes.concat(p.notes) }
+        let ds: Diag[] = []
+        for (const d of r2.tp.diags.concat(notes)) { ds = ds.concat([newDiag(d.code, batchNamesOut(r1.plans, d.message), d.file, d.span)]) }
+        return { files: r2.tp.files, tables: r2.tp.tables, diags: ds, infos: r2.tp.infos }
+    }
+
+    // `m` with every WHOLE `tok` (no identifier character before or after it) replaced by `rep`, and a
+    // `()` right after one dropped (s474 r2, review N6).
+    fn replaceToken(m: string, tok: string, rep: string) -> string {
+        let out: string = ""
+        let i: int = 0
+        let more = true
+        while (more) {
+            const j: int = m.indexOf(tok, i)
+            if (j < 0) {
+                more = false
+            } else {
+                const e: int = j + tok.length
+                let whole = true
+                if (j > 0 && cpIdentCh(m.charCodeAt(j - 1))) whole = false
+                if (e < m.length && cpIdentCh(m.charCodeAt(e))) whole = false
+                if (whole) {
+                    out = out + m.substring(i, j) + rep
+                    i = e
+                    if (m.substring(i, i + 2) == "()") i = i + 2
+                } else {
+                    out = out + m.substring(i, e)
+                    i = e
+                }
+            }
+        }
+        return out + m.substring(i)
+    }
+
+    fn cpIdentCh(c: int) -> boolean { return (c >= 65 && c <= 90) || (c >= 97 && c <= 122) || (c >= 48 && c <= 57) || c == 95 || c == 36 }
+
+    fn batchNamesOut(plans: ComposePlan[], m0: string) -> string {
+        let m: string = m0
+        // longest name first, so `#book` never rewrites inside `#bookings`
+        let done: string[] = []
+        let left: int = plans.length
+        while (left > 0) {
+            let best: string = ""
+            for (const p of plans) {
+                if (done.indexOf(p.name) < 0 && p.name.length >= best.length) best = p.name
+            }
+            done = done.concat([best])
+            m = replaceToken(replaceToken(m, best + "#batch", best + " (its composed server batch)"), "#" + best, best + " (its composed server batch)")
+            left = left - 1
+        }
+        return m
+    }
+
+    fn analyzeRun(files: FileAst[], entry: string, keyBase: string, allow: boolean) -> ARun {
         const st0: AS = { facts: noFacts(), diags: [], nextSym: 0, annots: [], bad: { params: [], fields: [] }, effects: [], pend: [], lifts: [] }
         const ra0: RGlobals = phaseA(files, entry, st0)
         // s472: the file-scope constants' initializers, in order (before any body reads one)
@@ -30620,7 +32082,7 @@ ${
         const rp: RPersists = persistPass(ra.g, files, st)
         st = programNoValue(ra.g, rp.st)
         // s469: the stylesheet (§9.1, §65) — placed by position, its `@name` references resolved
-        const css: CssPassR = cssPass(ra.g)
+        const css: CssPassR = cssPass(ra.g, keyBase)
         let decls: DeclInfo[] = []
         for (const d of ra.g.decls) { decls = decls.concat([d.info]) }
         let fns: FnInfo[] = []
@@ -30653,9 +32115,11 @@ ${
                                  names: bound.names, values: bound.values, effects: bound.effects, binds: bound.binds,
                                  elems: bound.elems, attrs: bound.attrs, fails: bound.fails, annots: bound.annots, unresolved: bound.unresolved, typing: typed.typing,
                                  novalidate: vp.forms, resets: bound.resets, gated: vp.gated, persists: bound.persists, server: pp.facts, css: css.facts, consts: bound.consts }
-        const pl: PS = planPass(ra.g, typedT, sum, pp.st)
+        // s474: the client `!` functions whose server calls compose into one request
+        const cp: RCompose = composePass(ra.g, typedT, sum, allow, pp.st)
+        const pl: PS = planPass(ra.g, typedT, sum, cp.st)
         const sf: ServerFacts = { servers: pp.facts.servers, sqls: pp.facts.sqls, dbs: pp.facts.dbs, places: pp.facts.places,
-                                  inherited: pp.facts.inherited, plan: pl.plan, loads: pp.facts.loads }
+                                  inherited: pp.facts.inherited, plan: pl.plan, loads: pp.facts.loads, envelopes: pp.facts.envelopes }
         const t: Tables = { program: bound.program, types: bound.types, decls: bound.decls, fns: bound.fns, handles: bound.handles,
                             names: bound.names, values: bound.values, effects: bound.effects, binds: bound.binds,
                             elems: bound.elems, attrs: bound.attrs, fails: bound.fails, annots: bound.annots, unresolved: bound.unresolved, typing: typed.typing,
@@ -30668,8 +32132,8 @@ ${
         // other pass's diagnostics — so an Error anywhere inside the
         // initializer, or inside the function a failed proof stands in, owns
         // the failure whatever pass reported it (no cascade)
-        return { files: files, tables: t, diags: base.concat(originPass(files, t, base)),
-                 infos: gatedInfos(vp.gated) }
+        return { tp: { files: files, tables: t, diags: base.concat(originPass(files, t, base)),
+                       infos: gatedInfos(vp.gated) }, plans: cp.plans }
     }
 
     fn originPass(files: FileAst[], t: Tables, prior: Diag[]) -> Diag[] {

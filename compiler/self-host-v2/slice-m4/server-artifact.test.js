@@ -653,7 +653,8 @@ describe("server-db/sql-*-rt — the design's twelve, on the bootstrap's own art
         return "ok";
     }`, `        <button id="add" onclick={ @msg = add("a@x.com") !{ .Transport(t) :> return }; }>Add</button>`);
     const { state } = await endToEnd(src, ["CREATE TABLE members (id INTEGER PRIMARY KEY, email TEXT UNIQUE)"], { members: [{ id: 1, email: "a@x.com" }] }, ["#add"]);
-    expect(state.msg).toBe("dup:members.email");
+    // S474 #1703 r1 (PA ruling): ConstraintViolation's field is the COLUMN name only
+    expect(state.msg).toBe("dup:email");
   });
 });
 
