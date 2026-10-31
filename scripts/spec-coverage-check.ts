@@ -129,6 +129,17 @@ export function renderTotals(rows: CoverageRow[]): string {
   return lines.join("\n");
 }
 
+/** null when the totals anchors occur exactly once each with START before END; else what is wrong. */
+export function anchorShape(text: string): string | null {
+  const count = (s: string) => text.split(s).length - 1;
+  const ns = count(TOTALS_START.slice(0, 40));
+  const ne = count(TOTALS_END);
+  if (ns === 0 || ne === 0) return `missing (${ns} START, ${ne} END)`;
+  if (ns > 1 || ne > 1) return `${ns} START and ${ne} END markers (each must occur exactly once)`;
+  if (text.indexOf(TOTALS_END) < text.indexOf(TOTALS_START.slice(0, 40))) return "END comes before START";
+  return null;
+}
+
 export type Result = { errors: string[]; warnings: string[]; fatal: string | null; rows: CoverageRow[]; totals: string; totalsCurrent: boolean };
 
 /** CRLF → LF. A Windows checkout (`core.autocrlf`, the windows-latest default) hands every input over with `\r\n`. */
@@ -175,8 +186,11 @@ export function checkCoverage(indexText: string, coverageText: string, gapsText:
   // S474 — a MISSING anchor pair is a violation (no regen can restore it); a STALE totals block is not:
   // it is exactly what `--write` repairs, and main is regenerated after merge (generated-regen.yml), so
   // staleness alone is reported through `totalsCurrent` and exits 4 (see main), never as an error.
-  const hasAnchors = coverageText.includes(TOTALS_START.slice(0, 40)) && coverageText.includes(TOTALS_END);
-  if (!hasAnchors) errors.push("the @generated:coverage-totals START/END anchors are missing — restore them by hand, then `bun scripts/spec-coverage-check.ts --write`");
+  // S474 r1 (review F6): exactly ONE START and ONE END, START first — an `includes` test passed a
+  // duplicated totals block (rc 0) and a swapped pair (4, after which `--write` inserted a second
+  // block). Mirrors state.ts refuseStrayAnchors.
+  const anchorProblem = anchorShape(coverageText);
+  if (anchorProblem) errors.push(`the @generated:coverage-totals anchors are malformed: ${anchorProblem} — fix them by hand, then \`bun scripts/spec-coverage-check.ts --write\``);
   return out;
 }
 
@@ -207,6 +221,8 @@ export function main(argv: string[]): number {
     const s = lfText.indexOf(TOTALS_START.slice(0, 40));
     const e = lfText.indexOf(TOTALS_END);
     if (s < 0 || e < 0) { console.error("spec-coverage-check: --write needs the @generated:coverage-totals anchors in the coverage doc"); return 2; }
+    const shape = anchorShape(lfText);
+    if (shape) { console.error(`spec-coverage-check: --write refuses — the totals anchors are malformed (${shape}); fix them by hand`); return 1; }
     const spliced = lfText.slice(0, s) + r.totals + lfText.slice(e + TOTALS_END.length);
     const next = crlf ? spliced.replace(/\n/g, "\r\n") : spliced;
     if (next !== covText) writeFileSync(covPath, next);

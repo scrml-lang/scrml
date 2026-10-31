@@ -73,6 +73,22 @@ for (let i = 0; i < lines.length; i++) {
   sections.push({ line: i + 1, key });
 }
 
+// S474 r1 (review F5) — a DUPLICATE section key (e.g. `## 47.` twice, a merge leftover or a mis-numbered
+// insertion) makes `ranges` keep only the last one, so the first section silently vanishes from the
+// index and `--check` read it as mere staleness (4). It is a SPEC defect no regen can fix: exit 1.
+{
+  const seen = new Map<string, number>();
+  const dups: string[] = [];
+  for (const s of sections) {
+    if (seen.has(s.key)) dups.push(`§${s.key} at SPEC.md lines ${seen.get(s.key)} and ${s.line}`);
+    else seen.set(s.key, s.line);
+  }
+  if (dups.length) {
+    console.error(`\nERROR: duplicate SPEC section heading(s) — the index cannot represent both:\n  ${dups.join("\n  ")}\nRenumber or merge the sections in compiler/SPEC.md.`);
+    process.exit(1);
+  }
+}
+
 // Compute ranges.
 // `split("\n")` yields a trailing empty element for a file ending in a newline; drop it so the
 // count matches `wc -l` AND `scripts/facts.ts specLines()`. Two generated figures for the same

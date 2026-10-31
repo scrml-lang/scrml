@@ -12,3 +12,11 @@
   - bootstrap-conformance: report corrupted -> raw 4, wrapper 0 + ::warning · restored 0 · `--cases /nonexistent` -> 2 through wrapper (BLOCKS)
   - conflict-marker-gate (extended): clean 0 · S473 leaked regen line re-inserted -> 1 · failBlock body line -> 1 · restored 0
 - unit 2: docs (CI.md table, hooks README, .gitattributes, FACTS prose, coverage prose, master-list state.ts line, facts.ts/merge-driver comments); SPEC-INDEX.md leaked line 1 removed; conflict-marker-gate flags driver block-body lines.
+
+## r1 (PA review of 89e117fc9: LAND-WITH-FOLLOW-UP)
+- F1 gen-bootstrap-severity --check compares ANSWER maps (`"CODE" :> Severity.X` + `_` default, a missing arm = the default) of fresh render vs disk: differ -> 1; byte-only drift -> 4. BITE (reviewer's exact mutation, render Info->Warning): rc 1 "DIFFERENT ANSWERS (6)"; restored 0. Unit: mirror with the mutated generator -> 1; answer-neutral arm move -> no diff.
+- F2 bootstrap-conformance --check on stale ratchets vs the committed report: CRASH or INVALID rise -> 1; delta always printed as ::warning. BITE: severity.scrml with every explicit arm answering Info -> rc 1 "CRASH 0→3" (PASS 283→293, FAIL 241→272, UNSUPPORTED 604→560); default arm -> a non-existent variant -> rc 0 + warning (PASS 283→278, FAIL +4: FAIL is free by design — that table is ALSO refused by F1's severity step, answers differ); restored 0.
+- F11 real build failure: unbalanced garbage appended to compiler/self-host-v2/ast.scrml -> rc 2 "the bootstrap failed to build/load" through ci-stale-warn.sh; restored 0. (Replaces the `--cases /nonexistent` claim.)
+- F5 regen-spec-index: duplicate section key -> 1. BITE: `## 47.` twice -> rc 1 "duplicate SPEC section heading"; restored 0.
+- F6 spec-coverage anchors exactly once each, START first; --write refuses a malformed pair. BITE: totals block duplicated -> rc 1; START/END swapped -> rc 1; --write on swapped -> rc 1, file untouched; restored 0.
+- F7 conflict-marker-gate also flags the crash-wrapper banner. BITE: banner at column 0 -> rc 1; restored 0.

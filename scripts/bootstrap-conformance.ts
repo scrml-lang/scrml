@@ -90,7 +90,10 @@
  *
  *   0  a VALID measurement was taken (whatever the numbers say). This is a TRACKING probe, not a
  *      gate: a red exit over a known backlog would be the §8 cry-wolf shape.
- *   1  only with --fail-on-fail (a FAIL or a CRASH was found), or bun's uncaught-exception code.
+ *   1  with --fail-on-fail (a FAIL or a CRASH was found); with --check when the report is stale AND
+ *      CRASH or INVALID rose against the committed report (S474 r1 ratchet — staleness must not hide
+ *      a regression; the FAIL count stays free), or the committed report has no parseable table;
+ *      or bun's uncaught-exception code.
  *   2  NOT A VALID RUN — the bootstrap bundle failed to build/load, or zero cases were attempted.
  *   4  --check: the report file is STALE (S474; was 1). CI runs `--check` in the NON-BLOCKING
  *      `tracking` job, and (S457) as a `checks` step on a pull request whose diff touches
@@ -1192,6 +1195,26 @@ It is a run, not a static count, so it is NOT a \`docs/FACTS.md\` row (FACTS exc
 // CLI
 // ---------------------------------------------------------------------------
 
+/** The bucket counts in a rendered report's `| bucket | cases | … |` table, or null if none parse. */
+export function reportCounts(text: string): Record<string, number> | null {
+  const out: Record<string, number> = {};
+  for (const m of text.replace(/\r\n/g, "\n").matchAll(/^\| ([A-Z][A-Z-]*) \| (\d+) \| [^|\n]* \|$/gm)) out[m[1]] = Number(m[2]);
+  return BUCKETS.every((b) => b in out) ? out : null;
+}
+
+/** S474 r1: the buckets that may not RISE between the committed report and a run (the ratchet). */
+export const RATCHET_BUCKETS = ["CRASH", "INVALID"] as const;
+
+export function ratchetDelta(was: Record<string, number>, now: Record<string, number>): { summary: string; regressed: string[] } {
+  const show = ["PASS", "FAIL", "CRASH", "UNSUPPORTED", "INVALID"];
+  const fmt = (b: string) => {
+    const d = (now[b] ?? 0) - (was[b] ?? 0);
+    return `${b} ${was[b] ?? 0}→${now[b] ?? 0}${d ? ` (${d > 0 ? "+" : ""}${d})` : ""}`;
+  };
+  const regressed = RATCHET_BUCKETS.filter((b) => (now[b] ?? 0) > (was[b] ?? 0)).map((b) => `${b} ${was[b] ?? 0}→${now[b] ?? 0}`);
+  return { summary: show.map(fmt).join(" · "), regressed };
+}
+
 async function main(): Promise<number> {
   const args = process.argv.slice(2);
   const opt = (name: string) => {
@@ -1247,6 +1270,25 @@ async function main(): Promise<number> {
     console.error(stale
       ? `bootstrap-conformance: ${relative(REPO_ROOT, REPORT_PATH)} is STALE — regenerate with --write`
       : `bootstrap-conformance: ${relative(REPO_ROOT, REPORT_PATH)} is current`);
+    if (stale) {
+      // S474 r1 (review F2) — staleness must not HIDE a regression. Since S474 a stale report only
+      // warns, so a PR that crashes the bootstrap on hundreds of cases (measured: a broken
+      // severity.scrml took CRASH 0 → 707, PASS 283 → 247) went green with a warning. Ratchet against
+      // the COMMITTED report: CRASH or INVALID rising fails (1); the FAIL count stays free (it is the
+      // probe's product, not a defect of the PR's making — §8 cry-wolf). The delta is always printed.
+      const was = reportCounts(onDisk);
+      if (!was) {
+        console.error(`bootstrap-conformance: the committed report has no parseable bucket table — cannot ratchet (exit 1)`);
+        return 1;
+      }
+      const delta = ratchetDelta(was, r.counts);
+      console.log(`::warning title=bootstrap-conformance delta vs committed report::${delta.summary}`);
+      console.error(`bootstrap-conformance: delta vs committed report — ${delta.summary}`);
+      if (delta.regressed.length) {
+        console.error(`bootstrap-conformance: REGRESSION — ${delta.regressed.join(", ")} rose (exit 1; staleness alone would be 4)`);
+        return 1;
+      }
+    }
   }
   if (failOnFail && r.counts.FAIL + r.counts.CRASH > 0) return 1;
   // S474 — stale is its OWN code (4), so a PR-side caller can warn on staleness alone (main is

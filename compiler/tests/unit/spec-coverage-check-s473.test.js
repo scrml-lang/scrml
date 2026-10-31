@@ -140,7 +140,33 @@ describe("spec-coverage-check — rules", () => {
     const s = OK.indexOf("<!-- @generated:coverage-totals START");
     const e = OK.indexOf("<!-- @generated:coverage-totals END -->") + "<!-- @generated:coverage-totals END -->".length;
     const r = checkCoverage(INDEX, OK.slice(0, s) + OK.slice(e), GAPS);
-    expect(r.errors.some((x) => x.includes("anchors are missing"))).toBe(true);
+    expect(r.errors.some((x) => x.includes("anchors are malformed: missing"))).toBe(true);
+  });
+
+  // S474 r1 (review F6) — an `includes` test passed these; each anchor must occur once, START first.
+  test("a DUPLICATED totals block is a violation (it passed rc 0 before r1)", () => {
+    const s = OK.indexOf("<!-- @generated:coverage-totals START");
+    const e = OK.indexOf("<!-- @generated:coverage-totals END -->") + "<!-- @generated:coverage-totals END -->".length;
+    const block = OK.slice(s, e);
+    const r = checkCoverage(INDEX, OK.slice(0, e) + "\n\n" + block + OK.slice(e), GAPS);
+    expect(r.errors.some((x) => x.includes("each must occur exactly once"))).toBe(true);
+  });
+
+  test("a SWAPPED START/END pair is a violation, and --write refuses it (it inserted a second block before r1)", () => {
+    const S = OK.match(/<!-- @generated:coverage-totals START[^\n]*-->/)[0];
+    const E = "<!-- @generated:coverage-totals END -->";
+    const swapped = OK.replace(S, "\u0000").replace(E, S).replace("\u0000", E);
+    const r = checkCoverage(INDEX, swapped, GAPS);
+    expect(r.errors.some((x) => x.includes("END comes before START"))).toBe(true);
+    const dir = mkdtempSync(join(tmpdir(), "spec-cov-swap-"));
+    try {
+      const p = join(dir, "swap.md");
+      writeFileSync(p, swapped);
+      expect(main(["--index", join(FIX, "index.md"), "--coverage", p, "--gaps", join(FIX, "gaps.md"), "--write"])).toBe(1);
+      expect(readFileSync(p, "utf8")).toBe(swapped);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   test("staleness never hides a violation: stale totals + a SILENT row with no gap is still a violation", () => {

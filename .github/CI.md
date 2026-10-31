@@ -9,11 +9,11 @@ Owner rulings: S469 "Regenerate on main after merge." (FACTS.md), then S474 "Gen
 | block | producer | derives from | PR-side (CI `checks`; hook) | stale exit | still BLOCKS on |
 |---|---|---|---|---|---|
 | `docs/FACTS.md` | `facts.ts` | compiler/src, tests, SPEC, conformance, stdlib … | warns; pre-push warns | 4 | 1 crash, 2 zero measurement, 3 missing anchor, 5 dangling symlink |
-| `compiler/SPEC-INDEX.md` totals + row Lines/Size | `regen-spec-index.ts` | `SPEC.md` | warns; pre-push warns | 4 | 1: a § with **no row** (a new § needs a hand-written row), a truncated row scan, a row naming a § SPEC lacks, missing anchors |
-| `docs/bootstrap-spec-coverage.md` `@generated:coverage-totals` | `spec-coverage-check.ts --write` | the doc's own rows | warns; pre-commit warns | 4 | 1: a § with no row, a SILENT row with no gap, a cited gap that doesn't exist, bad status/token, missing anchors · 2: unparseable inputs |
+| `compiler/SPEC-INDEX.md` totals + row Lines/Size | `regen-spec-index.ts` | `SPEC.md` | warns; pre-push warns | 4 | 1: a § with **no row** (a new § needs a hand-written row), a truncated row scan, a row naming a § SPEC lacks, missing anchors, a **duplicate** SPEC section heading (S474 r1) |
+| `docs/bootstrap-spec-coverage.md` `@generated:coverage-totals` | `spec-coverage-check.ts --write` | the doc's own rows | warns; pre-commit warns | 4 | 1: a § with no row, a SILENT row with no gap, a cited gap that doesn't exist, bad status/token, totals anchors missing / duplicated / swapped (each exactly once, START first — S474 r1) · 2: unparseable inputs |
 | `docs/known-gaps.md` `@generated:gap-counts`, `master-list.md` `@generated:recent-sessions` | `state.ts --write` | the `@gap` markers; `git log` wrap commits | warns (**new step at S474** — was not CI-gated at all) | 4 | 1: an unclassifiable `@gap` status, a stray 2nd START/END anchor · 2: zero markers parsed · 3: missing anchor |
-| `docs/bootstrap-conformance.md` | `bootstrap-conformance.ts --write` | a bootstrap run over `conformance/cases` | warns (PR touching `conformance/cases` / `compiler/self-host-v2`; `tracking` otherwise) | 4 | 2: the bootstrap failed to build/load or 0 cases · 1: crash |
-| `compiler/self-host-v2/severity.scrml` | `gen-bootstrap-severity.ts` | SPEC §34 + bootstrap code literals | warns (**moved from `tracking` to `checks`** at S474) | 4 | 1: crash. Answer-changing drift fails `slice-m4/severity.test.js` on the PR. |
+| `docs/bootstrap-conformance.md` | `bootstrap-conformance.ts --write` | a bootstrap run over `conformance/cases` | warns (PR touching `conformance/cases` / `compiler/self-host-v2`; `tracking` otherwise) | 4 (the PASS/FAIL/CRASH/UNSUPPORTED delta vs the committed report is printed as a `::warning`) | 2: the bootstrap failed to build/load or 0 cases · 1: CRASH or INVALID **rose** vs the committed report (S474 r1 ratchet; the FAIL count stays free), or a crash |
+| `compiler/self-host-v2/severity.scrml` | `gen-bootstrap-severity.ts` | SPEC §34 + bootstrap code literals | warns (**moved from `tracking` to `checks`** at S474) | 4 (byte drift that changes no answer) | 1: the fresh render's `"CODE" :> Severity.X` answers differ from the file's (S474 r1 — catches a broken GENERATOR, which `slice-m4/severity.test.js` cannot see: it grades the on-disk table) · 1: crash |
 
 Every row's PR-side check runs through `scripts/ci-stale-warn.sh` (FACTS has its own identical step): exit 4 becomes a `::warning::`, and any other non-zero fails. A broken source or a broken producer still fails the PR. Only staleness passes, and nobody has to fix it in the PR. Pinned by `compiler/tests/unit/generated-stale-exit-codes-s474.test.js` and `facts-check-exit-codes-s472.test.js`.
 
@@ -22,7 +22,9 @@ Every row's PR-side check runs through `scripts/ci-stale-warn.sh` (FACTS has its
 - `compiler/runtime/stdlib/md.js` (`gen-md-shim.ts --check`; the runtime loads it, and SPEC §67.8 allows one md reader).
 - The URL-guard verbatim block in `compiler/self-host-v2/slice-m1/runtime/runtime.js` (`sync-bootstrap-url-guard.ts`, checked byte-exact by `bootstrap-url-guard-verbatim.test.js`; security).
 
-`severity.scrml` is code too. It is on the bot only because of the semantic test: an answer-changing drift fails the PR, so the only drift that can reach main is byte drift that changes no answer.
+`severity.scrml` is code too. It is on the bot only because answer-changing drift fails the PR. `severity.test.js` catches a wrong table on disk. `gen-bootstrap-severity.ts --check` (S474 r1) catches a generator whose fresh render answers differently. So the only drift that can reach main is byte drift that changes no answer.
+
+**Stuck bot PR.** If an open bot PR already carries the right content but a required check on it has failed, the run ends red with `STUCK` and names the check (S474 r1). Auto-merge would otherwise never fire while the run stayed green.
 
 ### The bot: `generated-regen.yml`
 

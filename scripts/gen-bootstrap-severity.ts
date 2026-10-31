@@ -172,11 +172,54 @@ export function render(specText: string, codes: string[], table: Record<string, 
   return L.join("\n");
 }
 
+/**
+ * The ANSWERS a severity table gives: every `"CODE" :> Severity.X` arm, plus the `_ :>` default.
+ * S474 r1 (review F1): `--check` compares these between the fresh render and the file on disk. A
+ * difference is NOT staleness for the bot to absorb — it means the generator (or §34, or the sources)
+ * now produces different answers than the compiled table, and severity.test.js only checks the ON-DISK
+ * table against §34, so a broken `render()` would pass the PR and break `slices` on the bot's own PR
+ * (auto-merge never fires; every derived block stops updating on main). So: answers differ → exit 1.
+ */
+export function answerMap(text: string): Map<string, string> {
+  const m = new Map<string, string>();
+  for (const x of text.replace(/\r\n/g, "\n").matchAll(/^\s*(?:"([EWI]-[A-Z0-9-]+)"|(_))\s*:>\s*Severity\.(\w+)\s*$/gm)) {
+    const k = x[1] ?? "_";
+    if (m.has(k)) m.set(k, `${m.get(k)}|DUPLICATE`); else m.set(k, x[3]);
+  }
+  return m;
+}
+
+/**
+ * Codes whose EFFECTIVE answer differs between two tables. A code with no arm answers the `_` default,
+ * so moving a code from the fail-closed default to an explicit arm of the SAME severity (a §34 row
+ * added that agrees with the default) is byte drift, not an answer change.
+ */
+export function answerDiff(a: Map<string, string>, b: Map<string, string>): string[] {
+  const eff = (m: Map<string, string>, k: string) => m.get(k) ?? m.get("_") ?? "(none)";
+  const out: string[] = [];
+  for (const k of new Set([...a.keys(), ...b.keys()])) {
+    const x = eff(a, k), y = eff(b, k);
+    if (x !== y) out.push(`${k}: ${x} -> ${y}`);
+  }
+  return out.sort();
+}
+
 if (import.meta.main) {
   const text = render(readFileSync(SPEC, "utf8"), bootstrapCodes());
   if (process.argv.includes("--check")) {
     let cur = "";
     try { cur = readFileSync(SEVERITY_FILE, "utf8"); } catch {}
+    const diff = answerDiff(answerMap(cur), answerMap(text));
+    if (diff.length > 0) {
+      console.error(
+        `compiler/self-host-v2/severity.scrml gives DIFFERENT ANSWERS than a fresh generation (${diff.length}) — exit 1 (blocking):\n` +
+          diff.slice(0, 20).map((d) => `  ${d}  (on disk -> fresh)`).join("\n") +
+          (diff.length > 20 ? `\n  … +${diff.length - 20} more` : "") +
+          `\nIf §34 or the bootstrap's code literals changed, regenerate in THIS PR (\`bun scripts/gen-bootstrap-severity.ts\`)` +
+          ` and let severity.test.js judge it; if the generator changed, it is wrong until the regenerated table passes that test.`,
+      );
+      process.exit(1);
+    }
     if (cur !== text) {
       // S474 — 4 (not 1, which is also bun's crash code): stale only. CI WARNS on 4 and fails on any
       // other non-zero; generated-regen.yml regenerates main after merge. An answer-CHANGING drift is

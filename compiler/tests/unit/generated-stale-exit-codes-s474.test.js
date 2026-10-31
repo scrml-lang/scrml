@@ -60,6 +60,15 @@ const run = (cmd, args, cwd, env = {}) => {
   return { rc: r.status, out: (r.stdout ?? "") + (r.stderr ?? "") };
 };
 
+// S474 r1 — the preload (compiler/tests/helpers/tmp-root-preload.js) scrubs git's hook env for the WHOLE
+// suite; this file's own BASE_ENV is now belt-and-braces. Under the pre-commit hook this is the line that
+// would go red if the scrub regressed.
+test("no GIT_* variable reaches a test process (tmp-root-preload scrubGitEnv)", () => {
+  expect(Object.keys(process.env).filter((k) => /^GIT_/.test(k))).toEqual([]);
+  const r = spawnSync(process.execPath, ["-e", "console.log(Object.keys(process.env).filter(k=>/^GIT_/.test(k)).join(','))"], { encoding: "utf8" });
+  expect(r.stdout.trim()).toBe("");
+});
+
 // ------------------------------------------------------------------ regen-spec-index.ts
 
 describe("regen-spec-index.ts --check — stale is 4, structural is 1 (S474)", () => {
@@ -107,6 +116,16 @@ describe("regen-spec-index.ts --check — stale is 4, structural is 1 (S474)", (
     const idx = current().replace(rowRe("47"), (m) => m + m.replace(/^\| 47 \|/, "| 999 |"));
     const r = check(SPEC, idx);
     expect(r.out).toContain("does not have");
+    expect(r.rc).toBe(1);
+  });
+
+  test("a DUPLICATE section heading in SPEC.md (`## 47.` twice) → 1, not 4 (S474 r1, review F5)", () => {
+    const h = SPEC.match(/^## 47\.[^\n]*$/m);
+    expect(h).not.toBeNull();
+    const dup = SPEC.replace(/^## 48\./m, `${h[0]}\n\nduplicate\n\n## 48.`);
+    expect(dup).not.toBe(SPEC);
+    const r = check(dup, current());
+    expect(r.out).toContain("duplicate SPEC section heading");
     expect(r.rc).toBe(1);
   });
 
@@ -214,7 +233,7 @@ describe("state.ts --check — stale is 4; missing anchor 3; stray/unparseable 1
 
 describe("gen-bootstrap-severity.ts --check — stale is 4, a crash is not (S474)", () => {
   /** scripts/ copies, compiler/ and compiler/self-host-v2/ as per-entry symlinks with a real severity copy. */
-  function sevMirror({ severity = null, specIsDir = false } = {}) {
+  function sevMirror({ severity = null, specIsDir = false, mutate = null } = {}) {
     const root = tmp("sev-s474-");
     for (const e of readdirSync(REPO)) {
       if (e === "scripts" || e === "compiler" || e === "node_modules") continue;
@@ -222,6 +241,13 @@ describe("gen-bootstrap-severity.ts --check — stale is 4, a crash is not (S474
     }
     mkdirSync(join(root, "scripts"));
     for (const f of ["gen-bootstrap-severity.ts", "s34-catalog.ts"]) copyFileSync(join(REPO, "scripts", f), join(root, "scripts", f));
+    if (mutate) {
+      const p = join(root, "scripts/gen-bootstrap-severity.ts");
+      const src = readFileSync(p, "utf8");
+      const next = mutate(src);
+      expect(next).not.toBe(src);
+      writeFileSync(p, next);
+    }
     mkdirSync(join(root, "compiler"));
     for (const e of readdirSync(join(REPO, "compiler"))) {
       if (e === "self-host-v2" || (specIsDir && e === "SPEC.md")) continue;
@@ -248,10 +274,46 @@ describe("gen-bootstrap-severity.ts --check — stale is 4, a crash is not (S474
     expect(r.rc).toBe(4);
   });
 
+  // S474 r1 (review F1): severity.test.js grades the ON-DISK table, so a broken render() would land green
+  // and only break `slices` on the bot's regen PR (auto-merge never fires; every block stops updating).
+  test("GENERATOR drift that changes an answer (Info rendered as Warning) → 1, never 4", () => {
+    const r = check(sevMirror({ mutate: (s) => s.replace('Severity.${sev}`)', 'Severity.${sev === "Info" ? "Warning" : sev}`)') }));
+    expect(r.out).toContain("DIFFERENT ANSWERS");
+    expect(r.rc).toBe(1);
+  });
+
+  test("answer-neutral drift: a code moved from the `_` default to an explicit arm of the SAME severity → 4", async () => {
+    const { answerMap, answerDiff } = await import("../../../scripts/gen-bootstrap-severity.ts");
+    const cur = readFileSync(join(REPO, "compiler/self-host-v2/severity.scrml"), "utf8");
+    const withArm = cur.replace(/^(\s*)_ :> Severity\.Error/m, '$1"E-S474-NEUTRAL" :> Severity.Error\n$1_ :> Severity.Error');
+    expect(withArm).not.toBe(cur);
+    expect(answerDiff(answerMap(cur), answerMap(withArm))).toEqual([]);
+    expect(answerDiff(answerMap(cur), answerMap(withArm.replace('"E-S474-NEUTRAL" :> Severity.Error', '"E-S474-NEUTRAL" :> Severity.Info')))).toEqual(["E-S474-NEUTRAL: Error -> Info"]);
+  });
+
   test("an unreadable SPEC.md (a directory) crashes → non-zero, non-4", () => {
     const r = check(sevMirror({ specIsDir: true }));
     expect(r.rc).not.toBe(0);
     expect(r.rc).not.toBe(4);
+  });
+});
+
+// ------------------------------------------------------------------ bootstrap-conformance ratchet (pure)
+
+describe("bootstrap-conformance --check ratchet — staleness never hides a CRASH/INVALID rise (S474 r1, review F2)", () => {
+  test("the committed report's bucket table parses; a CRASH rise regresses, a FAIL rise does not", async () => {
+    const { reportCounts, ratchetDelta } = await import("../../../scripts/bootstrap-conformance.ts");
+    const was = reportCounts(readFileSync(join(REPO, "docs/bootstrap-conformance.md"), "utf8"));
+    expect(was).not.toBeNull();
+    // the reviewer's measurement: a broken severity.scrml took CRASH 0 → 707, PASS 283 → 247
+    const crash = ratchetDelta({ ...was, CRASH: 0, PASS: 283 }, { ...was, CRASH: 707, PASS: 247 });
+    expect(crash.regressed).toEqual(["CRASH 0→707"]);
+    expect(crash.summary).toContain("PASS 283→247 (-36)");
+    expect(ratchetDelta(was, { ...was, INVALID: (was.INVALID ?? 0) + 1 }).regressed.length).toBe(1);
+    const fail = ratchetDelta(was, { ...was, FAIL: was.FAIL + 5, PASS: was.PASS - 5 });
+    expect(fail.regressed).toEqual([]);
+    expect(fail.summary).toContain("FAIL");
+    expect(reportCounts("# no table here\n")).toBeNull();
   });
 });
 
@@ -367,6 +429,36 @@ describe("pre-commit SPEC-coverage block — only exit 4 is a warning", () => {
 });
 
 // ------------------------------------------------------------------ the bot's producer step
+
+describe("generated-regen.yml — token scope, stuck-PR detection, triggers (S474 r1, review F3/F8/F9)", () => {
+  const wf = Bun.YAML.parse(readFileSync(join(REPO, ".github/workflows/generated-regen.yml"), "utf8"));
+  const job = wf.jobs.regen;
+  test("MAPS_PAT is on the landing step only; the checkout persists no credentials", () => {
+    expect(job.env.GH_TOKEN).toBeUndefined();
+    const co = job.steps.find((s) => String(s.uses ?? "").startsWith("actions/checkout"));
+    expect(co.with.token).toBeUndefined();
+    expect(co.with["persist-credentials"]).toBe(false);
+    expect(co.with["fetch-depth"]).toBe(0);
+    expect(co.with.filter).toBe("blob:none");
+    const withToken = job.steps.filter((s) => /MAPS_PAT/.test(JSON.stringify(s)));
+    expect(withToken.map((s) => s.name)).toEqual(["Land the regen through the merge queue (only if drift)"]);
+    expect(String(withToken[0].run)).toContain("git remote set-url origin");
+  });
+  test("an open bot PR left as is with a FAILED required check ends the run red", () => {
+    const land = String(job.steps.find((s) => /^Land the regen/.test(s.name ?? "")).run);
+    expect(land).toMatch(/gh pr checks "\$PR" --required/);
+    expect(land).toMatch(/STUCK[\s\S]*exit 1/);
+  });
+  test("runs on main pushes, release tags, a daily schedule and dispatch", () => {
+    expect(wf.on.push.branches).toEqual(["main"]);
+    expect(wf.on.push.tags).toEqual(["v*"]);
+    expect(wf.on.schedule.length).toBe(1);
+    expect("workflow_dispatch" in wf.on).toBe(true);
+  });
+  test("cloud-maps (now read-only) no longer uses MAPS_PAT", () => {
+    expect(readFileSync(join(REPO, ".github/workflows/cloud-maps.yml"), "utf8")).not.toMatch(/secrets\.MAPS_PAT/);
+  });
+});
 
 // The workflow runs on ubuntu-latest only, so its shell is exercised on POSIX only (a Windows run would test
 // Git-Bash path translation, not the workflow).
