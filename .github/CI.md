@@ -76,7 +76,7 @@ The verdict is printed in the step log and in the job summary.
 
 | event | windows job | gate reads |
 |---|---|---|
-| PR whose diff touches path-handling code (the filter in the job header) | suites run, judge decides | judge's verdict |
+| PR whose diff touches a non-`.md` file the Windows suites run or read (the filter in the job header: compiler source, `stdlib/`, `lsp/`, `scripts/*.{ts,js,mjs}`, `conformance/`, `compiler/tests/{unit,conformance,e2e-render-map,helpers,fixtures}/`, the toolchain files, the baseline) | suites run, judge decides | judge's verdict |
 | PR outside the path filter | job runs and its filter step skips the suites; concludes `success` | pass, nothing was judged |
 | `push` to main, nightly `schedule`, `workflow_dispatch` | always runs the suites | judge's verdict |
 | `merge_group` | skipped by its job `if:` | `skipped` is accepted **for `windows` only, on this event only** |
