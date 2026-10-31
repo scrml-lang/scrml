@@ -35,3 +35,4 @@
 - CRASH-block messages carry RATCHET_REMEDY ("fix the bootstrap … or file a bootstrap gap and make the case refuse by name (UNSUPPORTED), then regenerate the report in this PR").
 - answerMap strips trailing `//` comments before matching; any `:>` line that parses as no arm -> --check 1.
 - stuck-PR check also treats a CANCELLED required check as stuck. cloud-maps header no longer claims a PAT-less run reds.
+- r2 unit A committed 45631e607 (R1, title, remedy, stuck-cancel). Unit B: answerMap comment strip + malformed-arm rc 1 (unit-tested on a mirror with the REAL generator: hand arm with // comment -> rc 1 DIFFERENT ANSWERS; ':>' line with extra tokens -> rc 1), cloud-maps header.

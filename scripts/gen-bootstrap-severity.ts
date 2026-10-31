@@ -180,13 +180,31 @@ export function render(specText: string, codes: string[], table: Record<string, 
  * table against §34, so a broken `render()` would pass the PR and break `slices` on the bot's own PR
  * (auto-merge never fires; every derived block stops updating on main). So: answers differ → exit 1.
  */
+const ARM_RE = /^\s*(?:"([EWI]-[A-Z0-9-]+)"|(_))\s*:>\s*Severity\.(\w+)\s*$/;
+/** A line with its trailing `// …` comment removed (codes never contain `//`). S474 r2. */
+const codeOf = (line: string) => line.replace(/\s*\/\/.*$/, "");
+
 export function answerMap(text: string): Map<string, string> {
   const m = new Map<string, string>();
-  for (const x of text.replace(/\r\n/g, "\n").matchAll(/^\s*(?:"([EWI]-[A-Z0-9-]+)"|(_))\s*:>\s*Severity\.(\w+)\s*$/gm)) {
+  // S474 r2: trailing comments are stripped BEFORE matching — a hand-added arm `"E-X" :> Severity.Info
+  // // why` used to fall outside the regex and read as mere staleness.
+  for (const line of text.replace(/\r\n/g, "\n").split("\n")) {
+    const x = ARM_RE.exec(codeOf(line));
+    if (!x) continue;
     const k = x[1] ?? "_";
     if (m.has(k)) m.set(k, `${m.get(k)}|DUPLICATE`); else m.set(k, x[3]);
   }
   return m;
+}
+
+/** S474 r2: every non-comment line holding a `:>` arm that does NOT parse as one (exit 1 in --check). */
+export function malformedArms(text: string): string[] {
+  const out: string[] = [];
+  text.replace(/\r\n/g, "\n").split("\n").forEach((line, i) => {
+    const code = codeOf(line);
+    if (code.includes(":>") && !ARM_RE.test(code)) out.push(`line ${i + 1}: ${line.trim()}`);
+  });
+  return out;
 }
 
 /**
@@ -209,6 +227,11 @@ if (import.meta.main) {
   if (process.argv.includes("--check")) {
     let cur = "";
     try { cur = readFileSync(SEVERITY_FILE, "utf8"); } catch {}
+    const bad = malformedArms(cur);
+    if (bad.length > 0) {
+      console.error(`compiler/self-host-v2/severity.scrml has ${bad.length} \`:>\` line(s) that do not parse as an arm — exit 1 (blocking):\n  ${bad.slice(0, 20).join("\n  ")}`);
+      process.exit(1);
+    }
     const diff = answerDiff(answerMap(cur), answerMap(text));
     if (diff.length > 0) {
       console.error(
