@@ -171,7 +171,9 @@ describe("§1 every boolean-test position wraps a direct stdlib call (server)", 
     });
     expect(codes).toEqual([]);
     const js = out("app.scrml").serverJs ?? "";
-    const m = /data: \{ message: (_scrml_g\.String\(_scrml_cps_err && _scrml_cps_err\.message \|\| _scrml_cps_err\)), fn: "getCps" \}/.exec(js);
+    // S474 ruling 2 wraps it: a driver failure (marked by `_scrml_db_guard`) is blanked; the trap's
+    // error is not a driver failure, so it keeps the text.
+    const m = /data: \{ message: (\(_scrml_cps_err && typeof _scrml_cps_err === 'object' && _scrml_cps_err\[_scrml_g\.Symbol\.for\("scrml\.db\.failure"\)\] === true \? "" : _scrml_g\.String\(_scrml_cps_err && _scrml_cps_err\.message \|\| _scrml_cps_err\)\)), fn: "getCps" \}/.exec(js);
     expect(m).not.toBeNull();
     const envelopeMessage = new Function("_scrml_g", "_scrml_cps_err", `return ${m[1]};`);
     const trapErr = new Error("Internal Server Error", { cause: "scrml: an asynchronous standard-library result was tested before it settled" });

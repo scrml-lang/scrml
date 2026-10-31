@@ -382,3 +382,91 @@ export const SERVER_SQL_ATTEMPT_HELPER: string = [
   "  return { __scrml_error: true, type: \"SqlError\", variant: \"QueryFailed\", data: { message } };",
   "}",
 ].join("\n");
+
+/** The runtime helper a declared-`!` server function's boundary calls (S474). */
+export const SQL_PROPAGATE_FN = "_scrml_sql_propagate";
+
+/**
+ * §19.8.2 / §19.8.4 (S474 rulings 2 + 3) — does a failing `?{}` inside this function propagate
+ * as the function's failure? True for a function declared `!` whose error type is `SqlError`
+ * (alone or in a `|` union), or a bare `!` with no declared type. A `! -> E` naming another enum
+ * is not "compatible" (§19.8.4: "propagated if the enclosing function's error type is
+ * compatible"), so its failing query keeps the route's error path (a host 500, unchanged); a
+ * `fail E.V` there already travels as the envelope, because the `fail` lowering returns it.
+ */
+export function sqlFailurePropagates(fnNode: unknown): boolean {
+  if (!fnNode || typeof fnNode !== "object") return false;
+  const f = fnNode as { canFail?: boolean; errorType?: unknown };
+  if (f.canFail !== true) return false;
+  if (typeof f.errorType !== "string" || f.errorType.trim() === "") return true;
+  return f.errorType.split("|").some((t) => t.trim() === "SqlError");
+}
+
+/**
+ * The `_scrml_sql_error` classifier alone — for a module that propagates query failures but
+ * handles none at the site, so `SERVER_SQL_ATTEMPT_HELPER` (which carries it) is not injected.
+ */
+export const SERVER_SQL_ERROR_HELPER: string = "\n" + SERVER_SQL_ATTEMPT_HELPER.slice(
+  SERVER_SQL_ATTEMPT_HELPER.indexOf("// Map a driver error to a SqlError variant"),
+);
+
+/**
+ * S474 ruling 2, as amended ("capability over limitation" item 3): "a dev build keeps the full
+ * driver text in the value delivered to the client; a production build blanks it (the server
+ * logs it either way)". Compile-wide, set once per compile by runCG from the `devBuild` option
+ * (`scrml dev` sets it; every other build blanks — fail closed). Same shape as the §20.6 log()
+ * production-strip flag (emit-expr.ts `setLogProductionStrip`).
+ */
+let _sqlDriverTextOnWire = false;
+export function setSqlDriverTextOnWire(on: boolean): void {
+  _sqlDriverTextOnWire = on === true;
+}
+/** True in a dev build (see `setSqlDriverTextOnWire`). */
+export function sqlDriverTextOnWire(): boolean {
+  return _sqlDriverTextOnWire;
+}
+
+/**
+ * The server-bundle helper a declared-`!` function's boundary calls (S474). Injected IFF the
+ * module references `_scrml_sql_propagate(`. It reads the mark `_scrml_db_guard` puts on a
+ * driver failure (sql-tx-guard.ts), so only a failed QUERY becomes the SqlError value; a host
+ * error in the code around it is rethrown unchanged. `keepText` (a dev build, and no
+ * `protect=` column in the module — a driver message can quote a protected value, §14.8.9) keeps
+ * the QueryFailed message; otherwise it is blanked.
+ */
+export function serverSqlPropagateHelper(keepText: boolean): string {
+  return [
+    "",
+    "// --- §19.8.2 (S474): a ?{} failure leaves the `!` function it is written in (compiler-generated) ---",
+    "// Inside a function declared `!` (error type SqlError), a query the driver failed is the",
+    "// function's failure: it becomes the SqlError value the caller's arms match on, the same",
+    "// envelope a `fail` returns. Any other error is rethrown unchanged. The driver's text is",
+    "// logged here in every build.",
+    ...(keepText
+      ? ["// This is a DEV build: the QueryFailed message keeps the driver's text (a production",
+         "// build sends it empty — S474 ruling 2: the text exposes the schema)."]
+      : ["// The QueryFailed message is sent empty (S474 ruling 2: the driver's text exposes the",
+         "// schema; a dev build keeps it). A ?{} handled where it is written (`!{}` / `match`)",
+         "// is unaffected: its arms still see the driver's text."]),
+    "function _scrml_sql_propagate(err, fn) {",
+    "  if (err === null || typeof err !== \"object\" || err[_scrml_g.Symbol.for(\"scrml.db.failure\")] !== true) throw err;",
+    "  _scrml_g.console.error(\"[scrml] server function `\" + fn + \"` failed: \" + _scrml_g.String(err.message || err));",
+    ...(keepText
+      ? ["  return _scrml_sql_error(err);"]
+      : ["  const failure = _scrml_sql_error(err);",
+         "  if (failure.variant === \"QueryFailed\") failure.data = { message: \"\" };",
+         "  return failure;"]),
+    "}",
+  ].join("\n");
+}
+
+/**
+ * S474 ruling 2 — the CPS `ServerError` envelope's message when the thrown error is a driver
+ * failure (marked by `_scrml_db_guard`): blank in a production build, so a failed query's text
+ * does not cross the wire. With `keepText` (a dev build) it keeps `otherwise` too. `errVar` names the caught
+ * error; `otherwise` is the message expression for every other error.
+ */
+export function cpsMessageBlankingSqlFailure(errVar: string, otherwise: string, keepText: boolean): string {
+  if (keepText) return otherwise;
+  return `(${errVar} && typeof ${errVar} === 'object' && ${errVar}[_scrml_g.Symbol.for("scrml.db.failure")] === true ? "" : ${otherwise})`;
+}

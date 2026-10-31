@@ -110,6 +110,7 @@ import { buildSourceMap } from "./build-source-map.ts";
 import { registerFileSource, resetLogLoc, fileDeclaresLog, fileDeclaresRender, filePrintBuiltinsShadowed, fileDeclaresFileScopeBinding, resolveSpanLineCol } from "./log-loc.ts";
 import { resetUnattributableSessionUnits, drainUnattributableSessionUnits } from "./session-config-resolve.ts";
 import { setServerSessionUserCell, resetServerAmbientSessionRefusals, drainServerAmbientSessionRefusalErrors, fileScopeDeclaresSessionCell, fileNodesOf } from "./server-session-guard.ts";
+import { setSqlDriverTextOnWire } from "./sql-attempt.ts";
 import { setLogProductionStrip, setLogShadowedInFile, setRenderShadowedInFile, setPrintShadowedNames, setSessionProjectionActive, setSessionShadowedInFile, setCurrentUserAmbientActive, resetTildeUnresolvedErrors, drainTildeUnresolvedErrors, resetExprGuardErrors, drainExprGuardErrors, setCurrentFileRequestIds, setServerAsyncClassifier, refuseUnloweredBoundaryChecks } from "./emit-expr.ts";
 import {
   buildChunkNamespaceState,
@@ -234,6 +235,11 @@ export interface CgInput {
    * §19.12.7). Default false (development — log() is active).
    */
   production?: boolean;
+  /**
+   * S474 (ruling 2 as amended) — a DEV build (`scrml dev`): a failed query's driver text stays
+   * in the error value a server route sends the client. Default false: blanked on the wire.
+   */
+  devBuild?: boolean;
   /**
    * ESM chunks arc (Unit 1) — client runtime module format. `"classic"` (the
    * default) emits the shared runtime as a classic `<script src>` body,
@@ -1369,6 +1375,8 @@ export function runCG(input: CgInput): CgOutput {
     // release artefacts; mirrors the test-bind 0-byte production guarantee,
     // §19.12.7). Threaded into EmitLogicOpts.production -> EmitExprContext.
     production = false,
+    // S474 — a dev build keeps a failed query's driver text on the wire (sql-attempt.ts).
+    devBuild = false,
     // ESM chunks arc (Unit 1) — runtime module format. Default "classic" keeps
     // the shared runtime byte-identical to pre-arc output; "esm" transforms the
     // assembled runtime into an ES module (see the `!embedRuntime` path below).
@@ -1384,6 +1392,8 @@ export function runCG(input: CgInput): CgOutput {
   resetLogLoc();
   // §20.6 (F4=A) — set the compile-wide log() production-strip flag.
   setLogProductionStrip(production);
+  // S474 (ruling 2 as amended) — set the compile-wide "driver text reaches the client" flag.
+  setSqlDriverTextOnWire(devBuild === true);
 
   // ESM chunks arc (Unit 3) — under `--module-format=esm` every emitted client
   // chunk + runtime `<script src>` tag is an ES module, so its tag must carry

@@ -72,6 +72,14 @@
  *   - A BEGIN / COMMIT / ROLLBACK issued while the scope already owns a transaction is
  *     rewritten to SAVEPOINT / RELEASE / ROLLBACK TO (S449 review F3).
  *
+ * DRIVER FAILURES ARE MARKED (S474, §19.8.2). The guarded tagged call and `.unsafe()` mark the
+ * error the driver rejects with (`Symbol.for("scrml.db.failure")`, non-enumerable) before
+ * rethrowing it unchanged. The mark is the only way a later boundary can tell "a query failed to
+ * run" from a host error thrown by the code around it. Two places read it: the boundary of a
+ * declared-`!` server function, which turns a marked failure into the SqlError value
+ * (`_scrml_sql_propagate`, sql-attempt.ts), and the CPS `ServerError` envelope, which blanks the
+ * driver text in a production build (S474 ruling 2).
+ *
  * Normative text: SPEC §19.10.6 (provenance `ruling:user-voice-scrml.md S449 C`).
  */
 
@@ -98,6 +106,15 @@ export const SQL_TX_GUARD_HELPER_LINES: readonly string[] = Object.freeze([
   "// Code outside any request (module init, a script that imports this module) shares one scope.",
   "const _scrml_db_no_scope = (_scrml_g.__scrml_db_no_scope ??= { held: new _scrml_g.Map() });",
   "const _scrml_db_abandon = _scrml_g.Symbol.for(\"scrml.db.abandon\");",
+  "// §19.8.2 (S474): a statement the DRIVER failed is marked before it is rethrown, so the boundary",
+  "// of a `!` function can tell a failed query (a SqlError) from a host error in the code around it.",
+  "const _scrml_db_failure = _scrml_g.Symbol.for(\"scrml.db.failure\");",
+  "function _scrml_db_mark_failure(e) {",
+  "  if (e !== null && typeof e === \"object\" && _scrml_g.Object.isExtensible(e)) {",
+  "    try { _scrml_g.Object.defineProperty(e, _scrml_db_failure, { value: true }); } catch { /* already marked */ }",
+  "  }",
+  "  throw e;",
+  "}",
   "// The statement with its leading whitespace and comments removed, upper-cased.",
   "function _scrml_db_sql_head(text) {",
   "  let s = _scrml_g.String(text ?? \"\");",
@@ -259,9 +276,9 @@ export const SQL_TX_GUARD_HELPER_LINES: readonly string[] = Object.freeze([
   "    return true;",
   "  };",
   "  const guard = new _scrml_g.Proxy(function () {}, {",
-  "    apply: (_target, _this, args) => run(args[0] && args[0][0], (conn) => conn(...args)),",
+  "    apply: (_target, _this, args) => run(args[0] && args[0][0], (conn) => conn(...args)).catch(_scrml_db_mark_failure),",
   "    get: (_target, key) => {",
-  "      if (key === \"unsafe\") return (text, ...rest) => run(text, (conn) => conn.unsafe(text, ...rest));",
+  "      if (key === \"unsafe\") return (text, ...rest) => run(text, (conn) => conn.unsafe(text, ...rest)).catch(_scrml_db_mark_failure);",
   "      if (key === \"begin\" || key === \"transaction\") return callbackTx(key);",
   "      if (key === _scrml_db_abandon) return abandon;",
   "      const value = base[key];",

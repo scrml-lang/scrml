@@ -492,13 +492,12 @@ describe("S474 — run time: a REAL failing query on the server (the table is dr
     }
   });
 
-  // KNOWN GAP (pinned so a change is a decision, not drift): a `! -> SqlError` SERVER function
-  // whose query fails does not produce a SqlError value (§19.8.2) — the route answers a plain 500
-  // — and the client stub of a DECLARED-`!` server function does not route a 5xx into the `!{}`
-  // (S473 ruling "impl#1 transport routing" item 3 put declared-`!` callees out of scope). So the
-  // arms this change types are not entered at run time: the failure reaches the §19.6.8 host
-  // backstop, and no cell is written (fails closed). `g-impl1-bang-sqlerror-callee-failure-not-delivered-s474`.
-  test("a `! -> SqlError` callee (imported and local): the arm is NOT entered — host backstop, cells untouched (known gap)", async () => {
+  // S474 rulings 2 + 3 (`s474-impl1-bang-failure-delivery`; was the pinned known gap
+  // `g-impl1-bang-sqlerror-callee-failure-not-delivered-s474`): a `! -> SqlError` SERVER function
+  // whose query fails produces the SqlError value (§19.8.2), sent as the `fail` envelope, so the
+  // client's arms run. The driver's text stays on the server in this (non-dev) build: the
+  // `.QueryFailed(m)` arm sees an empty `m`, and the server log holds `no such table`.
+  test("a `! -> SqlError` callee (imported and local): the arm IS entered with the SqlError variant", async () => {
     const out = built();
     const db = new Database(out.dbPath);
     db.run("DROP TABLE IF EXISTS gnode");
@@ -506,12 +505,12 @@ describe("S474 — run time: a REAL failing query on the server (the table is dr
     const page = await boot(out);
     try {
       for (const b of ["#b-import", "#b-local", "#b-named", "#b-qf"]) await page.click(b);
-      expect([page.text("#import-seen"), page.text("#local-seen"), page.text("#named-seen"), page.text("#qf-seen")]).toEqual(["none", "none", "none", "none"]);
+      expect([page.text("#import-seen"), page.text("#local-seen"), page.text("#named-seen"), page.text("#qf-seen")]).toEqual(["import:QueryFailed", "local:QueryFailed", "named:other", "qf:empty"]);
       expect([page.text("#import-n"), page.text("#local-n"), page.text("#named-n"), page.text("#qf-n")]).toEqual(["0", "0", "0", "0"]);
+      // No host backstop; one server log line per failed call, carrying the driver's text.
+      for (const l of page.logged) expect(l).not.toMatch(/host backstop/);
       expect(page.logged.length).toBe(4);
-      for (const l of page.logged) expect(l).toMatch(/host backstop, §19\.6\.8/);
-      // No server text reaches the client in the failure.
-      for (const l of page.logged) expect(l).not.toMatch(/no such table/);
+      for (const l of page.logged) expect(l).toMatch(/^\[scrml\] server function `(listArcs|fetchLocal)` failed: .*no such table: gnode/);
     } finally {
       page.restore();
     }

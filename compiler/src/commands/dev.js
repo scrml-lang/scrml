@@ -694,6 +694,9 @@ function runOnce(opts, gatheredOut) {
       gather,
       write: true,
       log: console.log,
+      // S474 (ruling 2 as amended) — the dev server is a DEV build: a failed query's driver
+      // text stays in the error value the client receives (`scrml build` blanks it).
+      devBuild: true,
       // S142 — `--validate-emit` / `--no-validate-emit`. undefined = compileScrml default.
       validateEmit,
       // ESM chunks arc (Unit 1) — `--module-format=classic|esm`. Default
