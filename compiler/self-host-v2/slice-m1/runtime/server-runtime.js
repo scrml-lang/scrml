@@ -81,7 +81,241 @@ export function connection(host, desc) {
       return sql;
     },
     log(line) { logLine(host, line); },
+    // s474 (U1e): the §19.10.6 gate — one owner on the connection at a time
+    gate: fifoGate(),
   };
+}
+
+// ---------------------------------------------------------------------------
+// s474 (U1e) — SPEC §19.10.6 "Concurrent Requests — One Transaction per
+// Connection": "Concurrent requests SHALL NOT observe or join another request's
+// open transaction"; "A transaction SHALL hold its connection from its `BEGIN`
+// until its `COMMIT` or `ROLLBACK`, across every suspension point in between. On
+// a single-connection database (SQLite), a statement from another request SHALL
+// wait until the transaction ends. Waiting requests SHALL be served in arrival
+// order"; (S451 R5) "The gate covers every statement on the connection".
+//
+// THE GATE: a FIFO async mutex per connection. A SQLite connection is ONE
+// connection, so EVERY statement on it passes the gate — a statement inside an
+// envelope (the envelope holds the gate from BEGIN to COMMIT / ROLLBACK) and an
+// autocommit `?{}` outside any (it holds the gate for that one statement).
+// Measured on Bun.SQL before this (sqlite :memory:): request B's autocommit
+// INSERT, issued while request A sat between BEGIN and ROLLBACK, ran inside A's
+// transaction and was rolled back with it.
+//
+// THE OWNER: an envelope runs its body inside an AsyncLocalStorage scope that
+// names its open transaction (per connection). A statement issued from that
+// scope — the `!` function's own `?{}`, and those of every function it calls in
+// place, `!` or not — runs on the transaction WITHOUT waiting (§19.10.6 "A
+// statement issued by the request that owns the transaction — including from a
+// server function that request calls in-process — SHALL run inside the
+// transaction without waiting"). Any other statement waits at the gate.
+//
+// Pooled drivers (Postgres / MySQL) are not gated here: the bootstrap builds no
+// envelope on them (analyze.scrml refuses one — a pooled transaction needs a
+// connection reserved from the pool, which is not built), so a statement there
+// never meets an open transaction of another request.
+// ---------------------------------------------------------------------------
+function fifoGate() {
+  let held = false;
+  const waiting = [];
+  return {
+    acquire() {
+      if (!held) {
+        held = true;
+        return Promise.resolve();
+      }
+      return new Promise((resolve) => waiting.push(resolve));
+    },
+    release() {
+      const next = waiting.shift();
+      if (next === undefined) {
+        held = false;
+      } else {
+        next();   // handed straight to the next in arrival order (still held)
+      }
+    },
+  };
+}
+
+// The scope store: a Map from a connection to the transaction this scope owns on it.
+let txScope = null;
+function scopeStore() {
+  if (txScope === null) {
+    const hooks = globalThis.process && typeof globalThis.process.getBuiltinModule === "function"
+      ? globalThis.process.getBuiltinModule("node:async_hooks") : null;
+    if (!hooks || typeof hooks.AsyncLocalStorage !== "function") {
+      throw new Error("scrml server: no AsyncLocalStorage — a `!` function's transaction cannot be held across its waits");
+    }
+    txScope = new hooks.AsyncLocalStorage();
+  }
+  return txScope;
+}
+
+// The open transaction this scope owns on `conn`, or null.
+function ownTx(conn) {
+  if (txScope === null) return null;
+  const m = txScope.getStore();
+  if (m === undefined) return null;
+  const tx = m.get(conn);
+  return tx !== undefined && tx.open ? tx : null;
+}
+
+const GATED = new Set(["sqlite"]);
+function gated(conn) {
+  return GATED.has(conn.desc.driver);
+}
+
+// A compiler-issued control statement (BEGIN / SAVEPOINT / …): fixed text, no values.
+function control(conn, text) {
+  return conn.open()(sqlText([text]));
+}
+
+// After a statement failed INSIDE a transaction: is the transaction still open?
+// SQLite rolls a transaction back BY ITSELF on some errors (an `ON CONFLICT
+// ROLLBACK` / `OR ROLLBACK` conflict, SQLITE_FULL, SQLITE_IOERR, SQLITE_NOMEM,
+// SQLITE_BUSY, SQLITE_INTERRUPT); every later statement would then autocommit,
+// outside any rollback. The probe is a `BEGIN`: inside an open transaction
+// SQLite refuses it ("cannot start a transaction within a transaction") and
+// nothing changes; if it SUCCEEDS the transaction was gone — the probe's own
+// transaction is rolled back at once and the envelope is BROKEN: every later
+// statement in it throws, and so does the envelope (a host error: the route
+// answers 500, never success — its writes are gone).
+async function probeTx(tx) {
+  try {
+    await control(tx.conn, "BEGIN DEFERRED");
+  } catch (e) {
+    if (/within a transaction/i.test(messageOf(e))) return;
+    tx.broken = true;
+    return;
+  }
+  tx.broken = true;
+  try { await control(tx.conn, "ROLLBACK"); } catch { /* the probe's own; nothing in it */ }
+}
+
+function brokenError(conn) {
+  return new Error(`scrml server: the database ${conn.desc.driver}:${conn.desc.file} rolled the transaction back by itself (an ON CONFLICT ROLLBACK or a database fault) — the \`!\` function's writes are gone, and nothing after it may commit`);
+}
+
+// ---------------------------------------------------------------------------
+// s474 (U1e) — THE IMPLICIT PER-HANDLER TRANSACTION (SPEC §8.9.2 / §19.10.5) and
+// its nesting (§19.10.6). Printed by print-server.scrml around the body of every
+// `!` function the compiler gave an envelope (CoreProgram.envelopes):
+//
+//   async function move(a) {
+//     async function body$() { … the function's own body … }
+//     return await rt.envelope(db$1, body$, true);
+//   }
+//
+// §8.9.2: "the compiler SHALL wrap the handler body in `?{BEGIN DEFERRED}` /
+// `?{COMMIT}` (`?{ROLLBACK}` on an exception or a `fail` exit)"; "The implicit
+// handler transaction SHALL COMMIT only when the handler completes
+// successfully. It SHALL ROLL BACK when the handler throws AND when it exits
+// through `fail` — at any depth of the body — including a `?` that propagates a
+// callee's failure … The failure value is returned to the caller unchanged; only
+// its writes are undone." A `fail` / `?` is a RETURNED failure value (§19.1 —
+// runtime.js `failure`), so the envelope reads the body's result: a failure →
+// ROLLBACK and the failure returned; a throw (a host error, a trap) → ROLLBACK
+// and the throw continues (the route answers 500); anything else → COMMIT.
+//
+// §19.10.6 Nesting (S473 #1690 review F10: "An inner `!` call inside an outer
+// envelope runs as a nested savepoint … so the outer can roll back the inner's
+// writes"): when this scope already owns a transaction on `conn`, the body runs
+// under `SAVEPOINT` — `RELEASE` on success, `ROLLBACK TO` (then `RELEASE`) on a
+// failure or a throw — and neither commits nor ends the enclosing transaction,
+// so a later `fail` in the outer function still rolls everything back.
+//
+// `standalone`: whether this function needs its own transaction when no
+// enclosing one is open (its transitive query set has two or more queries, or
+// one reached more than once — §8.9.2 amendment). A `!` function with one query
+// in its set is printed with `standalone = false`: outside a transaction it runs
+// as written (one statement autocommits atomically by itself), inside one it is
+// a savepoint like any inner `!` call.
+//
+// "A failed `COMMIT` SHALL NOT release the connection … the `ROLLBACK` that
+// follows releases it" — so a failed COMMIT is followed by ROLLBACK, then the
+// release, then a throw (the call does not report success: its writes are gone).
+// ---------------------------------------------------------------------------
+export async function envelope(conn, run, standalone) {
+  const outer = ownTx(conn);
+  if (outer !== null) return savepoint(outer, run);
+  if (!standalone) return run();
+  const als = scopeStore();
+  await conn.gate.acquire();
+  const tx = { conn, open: true, broken: false, seq: 0 };
+  try {
+    try {
+      await control(conn, "BEGIN DEFERRED");
+    } catch (e) {
+      // "after a `BEGIN` that fails" the connection is released (the finally below)
+      conn.log(`scrml server: BEGIN on ${conn.desc.driver}:${conn.desc.file} failed — ${messageOf(e)}`);
+      throw e;
+    }
+    const store = new Map(als.getStore() ?? []);
+    store.set(conn, tx);
+    let result;
+    try {
+      result = await als.run(store, run);
+    } catch (e) {
+      await rollbackQuiet(tx, "ROLLBACK");
+      throw e;
+    }
+    if (tx.broken) {
+      await rollbackQuiet(tx, "ROLLBACK");
+      throw brokenError(conn);
+    }
+    if (failed(result)) {
+      await rollbackQuiet(tx, "ROLLBACK");
+      return result;
+    }
+    try {
+      await control(conn, "COMMIT");
+    } catch (e) {
+      conn.log(`scrml server: COMMIT on ${conn.desc.driver}:${conn.desc.file} failed — ${messageOf(e)}; rolled back`);
+      await rollbackQuiet(tx, "ROLLBACK");
+      throw e;
+    }
+    return result;
+  } finally {
+    tx.open = false;
+    conn.gate.release();
+  }
+}
+
+async function savepoint(tx, run) {
+  if (tx.broken) throw brokenError(tx.conn);
+  tx.seq = tx.seq + 1;
+  const name = "scrml_sp_" + tx.seq;
+  await control(tx.conn, "SAVEPOINT " + name);
+  let result;
+  try {
+    result = await run();
+  } catch (e) {
+    await undoSavepoint(tx, name);
+    throw e;
+  }
+  if (tx.broken) throw brokenError(tx.conn);
+  if (failed(result)) {
+    await undoSavepoint(tx, name);
+    return result;
+  }
+  await control(tx.conn, "RELEASE " + name);
+  return result;
+}
+
+async function undoSavepoint(tx, name) {
+  if (tx.broken) return;   // nothing left to roll back to — the outer envelope throws
+  await control(tx.conn, "ROLLBACK TO " + name);
+  await control(tx.conn, "RELEASE " + name);
+}
+
+async function rollbackQuiet(tx, text) {
+  try {
+    await control(tx.conn, text);
+  } catch (e) {
+    // a transaction the database already ended answers "no transaction is active"
+    if (!tx.broken) tx.conn.log(`scrml server: ROLLBACK on ${tx.conn.desc.driver}:${tx.conn.desc.file} failed — ${messageOf(e)}`);
+  }
 }
 
 function connectWith(host, desc) {
@@ -125,7 +359,25 @@ function logLine(host, line) {
 // ---------------------------------------------------------------------------
 // `params`: each DISTINCT value, evaluated once (§8.2); `slots[i]`: the param the
 // template's i-th `${}` binds (core.scrml SqlQuery — C-SQL1 lines them up).
+// s474 (U1e): inside an envelope this scope owns, the statement runs on the
+// transaction at once; any other statement on a gated (SQLite) connection waits
+// at the §19.10.6 gate for its turn and holds it for this one statement.
 export async function query(conn, mode, text, params, slots) {
+  const tx = ownTx(conn);
+  if (tx !== null) {
+    if (tx.broken) throw brokenError(conn);
+    return runQuery(conn, mode, text, params, slots, tx);
+  }
+  if (!gated(conn)) return runQuery(conn, mode, text, params, slots, null);
+  await conn.gate.acquire();
+  try {
+    return await runQuery(conn, mode, text, params, slots, null);
+  } finally {
+    conn.gate.release();
+  }
+}
+
+async function runQuery(conn, mode, text, params, slots, tx) {
   let rows;
   try {
     const values = slots.map((i) => params[i]);
@@ -134,6 +386,10 @@ export async function query(conn, mode, text, params, slots) {
   } catch (e) {
     const err = sqlErrorOf(e);
     conn.log(`scrml server: a query on ${conn.desc.driver}:${conn.desc.file} failed — ${messageOf(e)}`);
+    if (tx !== null) {
+      await probeTx(tx);
+      if (tx.broken) throw brokenError(conn);
+    }
     return failure(err);
   }
   if (mode === "run") return null;
