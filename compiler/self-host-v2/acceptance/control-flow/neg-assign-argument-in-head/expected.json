@@ -1,0 +1,18 @@
+{
+  "id": "acceptance-control-flow-neg-assign-argument-in-head",
+  "description": "E-ASSIGN-POSITION: `if (g((x = 1)) > 0)` — an argument, not the condition or an operand of it.",
+  "language-version": "1.0",
+  "spec": "§50 · §34",
+  "rationale": "§50 amendment (S473 D10): the kept places are \"the whole condition\" and \"a parenthesized operand of the condition\"; \"an assignment in any non-condition value position — … an argument (`f(x = 1)`)\" is `E-ASSIGN-POSITION`.",
+  "expect": {
+    "codes": [
+      "E-ASSIGN-POSITION"
+    ],
+    "codeCounts": {
+      "E-ASSIGN-POSITION": 1
+    },
+    "severity": {
+      "E-ASSIGN-POSITION": "error"
+    }
+  }
+}

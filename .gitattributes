@@ -44,7 +44,7 @@ scripts/git-hooks/* text eol=lf
 # ---------------------------------------------------------------------------
 # Files carrying GENERATED content — the scrml-generated merge driver (S468).
 #
-# Every PR regenerates the same @generated sections, so any two open PRs conflicted on them and
+# Until S474 every PR regenerated the same @generated sections, so any two open PRs conflicted on them and
 # each merge to main re-conflicted every other PR. The driver (scripts/git-merge-generated.ts)
 # merges only the HAND-WRITTEN text 3-way, regenerates the self-contained @generated:gap-counts
 # table from the merged text, unions same-spot additions of distinct gap entries, and STOPS
@@ -57,6 +57,11 @@ scripts/git-hooks/* text eol=lf
 # pretest` and by `./scripts/git-hooks/install.sh` (merge drivers are per-clone config; undo with
 # `--uninstall`). GitHub's own merge never runs it — update a PR branch locally to use it.
 # Paths are anchored with a leading `/` so only the root-level files match.
+#
+# S474 — PRs no longer regenerate these blocks: .github/workflows/generated-regen.yml regenerates them on
+# main after merge (owner ruling; .github/CI.md). The driver STAYS: harmless (inert unless installed; GitHub
+# never runs it) and still right for a branch that DID regenerate — a pre-S474 branch, or a habit — merging
+# the bot's output, and for its gap-id union of two branches' same-spot gap entries (hand text, not generated).
 /docs/known-gaps.md            merge=scrml-generated
 /master-list.md                merge=scrml-generated
 /docs/FACTS.md                 merge=scrml-generated

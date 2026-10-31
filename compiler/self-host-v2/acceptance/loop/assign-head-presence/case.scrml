@@ -1,0 +1,18 @@
+// §50 (S473 D10): the kept assignment-as-expression — a parenthesized operand of a
+// `for (cond)` head; the body sees the assigned local present (narrowed).
+<program>
+    function sum() -> int {
+        const xs: int[] = [4, 5, 6];
+        let i = 0;
+        let total = 0;
+        let x: int | not = not;
+        for ((x = xs.at(i)) is given) {
+            total = total + x;
+            i = i + 1;
+        }
+        return total;
+    }
+    <main>
+        <p id="o">${sum()}</p>
+    </main>
+</program>

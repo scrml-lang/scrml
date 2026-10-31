@@ -1,0 +1,18 @@
+{
+  "id": "acceptance-control-flow-neg-assign-single-paren",
+  "description": "E-ASSIGN-POSITION: `if (x = 1)` — the assignment is not in its own parentheses.",
+  "language-version": "1.0",
+  "spec": "§50 · §34",
+  "rationale": "§50 amendment (S473 D10): \"Every OTHER assignment in a value position is refused, compile error `E-ASSIGN-POSITION` (§34): a single-parenthesized condition `if (x = e)`\".",
+  "expect": {
+    "codes": [
+      "E-ASSIGN-POSITION"
+    ],
+    "codeCounts": {
+      "E-ASSIGN-POSITION": 1
+    },
+    "severity": {
+      "E-ASSIGN-POSITION": "error"
+    }
+  }
+}

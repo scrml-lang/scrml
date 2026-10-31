@@ -1,0 +1,8 @@
+// §17.4b / §6.5.3 / §34 E-KEY-001: a loop `key` is a string or a number — here a struct.
+<program>
+    type Item:struct = { id: int, name: string }
+    <items:Item[]=([{ id: 1, name: "a" }])/>
+    <main>
+        <ul>${ for (const it of @items key it) { lift <li>${it.name}</li>; } }</ul>
+    </main>
+</program>

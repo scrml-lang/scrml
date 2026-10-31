@@ -73,6 +73,22 @@ for (let i = 0; i < lines.length; i++) {
   sections.push({ line: i + 1, key });
 }
 
+// S474 r1 (review F5) — a DUPLICATE section key (e.g. `## 47.` twice, a merge leftover or a mis-numbered
+// insertion) makes `ranges` keep only the last one, so the first section silently vanishes from the
+// index and `--check` read it as mere staleness (4). It is a SPEC defect no regen can fix: exit 1.
+{
+  const seen = new Map<string, number>();
+  const dups: string[] = [];
+  for (const s of sections) {
+    if (seen.has(s.key)) dups.push(`§${s.key} at SPEC.md lines ${seen.get(s.key)} and ${s.line}`);
+    else seen.set(s.key, s.line);
+  }
+  if (dups.length) {
+    console.error(`\nERROR: duplicate SPEC section heading(s) — the index cannot represent both:\n  ${dups.join("\n  ")}\nRenumber or merge the sections in compiler/SPEC.md.`);
+    process.exit(1);
+  }
+}
+
 // Compute ranges.
 // `split("\n")` yields a trailing empty element for a file ending in a newline; drop it so the
 // count matches `wc -l` AND `scripts/facts.ts specLines()`. Two generated figures for the same
@@ -179,13 +195,24 @@ if (startIdx === -1 || endIdx === -1 || endIdx < startIdx) {
 const oldTotals = out.slice(startIdx + 1, endIdx).join("\n");
 if (oldTotals !== totalsBody) totalsUpdated = true;
 
+// S474 — EXIT CODES (owner ruling: generated blocks regenerate post-merge, generated-regen.yml):
+//   0  current.
+//   4  STALE ONLY — the totals line and/or some rows' Lines/Size cells differ from SPEC.md. Exactly what
+//      `--write` repairs, so the bot repairs it on main after merge; PR-side callers WARN on 4.
+//   1  STRUCTURAL — needs a HAND edit, which no regen can make: the totals anchors are missing or
+//      malformed (exits above), the row scan was TRUNCATED or a SPEC section has NO row (`--write` only
+//      updates existing rows; it never adds one), or a row names a section SPEC.md does not have.
+//      Also bun's code for a crash. BLOCKING everywhere. Structural is checked FIRST, so a doc that is
+//      both stale and broken reports 1, never 4.
 if (CHECK) {
+  const STALE_EXIT = 4;
+  let stale = false;
   if (totalsUpdated) {
     console.error(
       `\nSPEC-INDEX totals are STALE.\n  have: ${oldTotals}\n  want: ${totalsBody}\n` +
-        `Run \`bun run scripts/regen-spec-index.ts\` and commit the result.`,
+        `(exit 4 — main regenerates this after merge; \`bun run scripts/regen-spec-index.ts\` repairs it locally.)`,
     );
-    process.exit(1);
+    stale = true;
   }
   // S409 — the row check. `updated` and `missing` were already computed above and then DISCARDED,
   // so the drift this catches was in hand the whole time and nothing read it. See the header for
@@ -202,15 +229,23 @@ if (CHECK) {
     );
     process.exit(1);
   }
-  if (updated > 0 || missing.length > 0) {
+  if (missing.length > 0) {
     console.error(
-      `\nSPEC-INDEX Sections rows are STALE — ${updated} row(s) whose line range or size no longer` +
-        ` matches SPEC.md${missing.length ? `, ${missing.length} row(s) with no matching section` : ""}.\n` +
-        `Run \`bun run scripts/regen-spec-index.ts\` and commit the result.`,
+      `\nSPEC-INDEX has ${missing.length} Sections row(s) naming a section SPEC.md does not have —` +
+        ` a hand-written row is wrong (renamed / removed section). Fix the row by hand.`,
     );
     for (const m of missing) console.error(`  missing: ${m}`);
     process.exit(1);
   }
+  if (updated > 0) {
+    console.error(
+      `\nSPEC-INDEX Sections rows are STALE — ${updated} row(s) whose line range or size no longer` +
+        ` matches SPEC.md.\n` +
+        `(exit 4 — main regenerates this after merge; \`bun run scripts/regen-spec-index.ts\` repairs it locally.)`,
+    );
+    stale = true;
+  }
+  if (stale) process.exit(STALE_EXIT);
   console.log(
     `SPEC-INDEX OK — ${totalsBody}; ${seenKeys.size} of ${ranges.size} sections scanned,` +
       ` 0 stale, 0 missing.`,

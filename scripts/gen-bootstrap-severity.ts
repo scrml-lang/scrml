@@ -19,12 +19,20 @@
  *
  * Restricting the table to the bootstrap's own codes keeps it small and makes an unrelated §34 edit
  * inert; a §34 change to a code the bootstrap emits, or a new code literal in a bootstrap source,
- * makes the file stale — `--check` reports it (CI's NON-blocking tracking job runs it). The
- * self-host-v2 test severity.test.js checks SEMANTICS only (compiled severityOf == §34 for every
- * code the bootstrap names), so a docs-only §34 row that changes no answer does not go red.
+ * makes the file stale — `--check` reports it. The self-host-v2 test severity.test.js checks
+ * SEMANTICS only (compiled severityOf == §34 for every code the bootstrap names), so a docs-only §34
+ * row that changes no answer does not go red.
+ *
+ * S474 (owner ruling: generated files regenerate post-merge). This file is CODE the bootstrap compiles
+ * — the class a post-merge bot must not leave wrong on main. It is safe here because of the split
+ * above: any drift that CHANGES an answer fails severity.test.js on the PR (blocking, CI `slices` and
+ * the pre-commit slice step), so the PR must regenerate; only answer-NEUTRAL byte drift (a row added
+ * with the severity the fail-closed default already gives, a header gap-list line) can reach main,
+ * and .github/workflows/generated-regen.yml regenerates that after merge. CI `checks` runs `--check`
+ * and WARNS on 4 / FAILS on anything else (a crashing generator would otherwise first fail on main).
  *
  * Usage:  bun scripts/gen-bootstrap-severity.ts            write severity.scrml
- *         bun scripts/gen-bootstrap-severity.ts --check    exit 1 when severity.scrml is stale
+ *         bun scripts/gen-bootstrap-severity.ts --check    exit 4 when severity.scrml is stale (S474; was 1)
  */
 import { readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -164,14 +172,83 @@ export function render(specText: string, codes: string[], table: Record<string, 
   return L.join("\n");
 }
 
+/**
+ * The ANSWERS a severity table gives: every `"CODE" :> Severity.X` arm, plus the `_ :>` default.
+ * S474 r1 (review F1): `--check` compares these between the fresh render and the file on disk. A
+ * difference is NOT staleness for the bot to absorb — it means the generator (or §34, or the sources)
+ * now produces different answers than the compiled table, and severity.test.js only checks the ON-DISK
+ * table against §34, so a broken `render()` would pass the PR and break `slices` on the bot's own PR
+ * (auto-merge never fires; every derived block stops updating on main). So: answers differ → exit 1.
+ */
+const ARM_RE = /^\s*(?:"([EWI]-[A-Z0-9-]+)"|(_))\s*:>\s*Severity\.(\w+)\s*$/;
+/** A line with its trailing `// …` comment removed (codes never contain `//`). S474 r2. */
+const codeOf = (line: string) => line.replace(/\s*\/\/.*$/, "");
+
+export function answerMap(text: string): Map<string, string> {
+  const m = new Map<string, string>();
+  // S474 r2: trailing comments are stripped BEFORE matching — a hand-added arm `"E-X" :> Severity.Info
+  // // why` used to fall outside the regex and read as mere staleness.
+  for (const line of text.replace(/\r\n/g, "\n").split("\n")) {
+    const x = ARM_RE.exec(codeOf(line));
+    if (!x) continue;
+    const k = x[1] ?? "_";
+    if (m.has(k)) m.set(k, `${m.get(k)}|DUPLICATE`); else m.set(k, x[3]);
+  }
+  return m;
+}
+
+/** S474 r2: every non-comment line holding a `:>` arm that does NOT parse as one (exit 1 in --check). */
+export function malformedArms(text: string): string[] {
+  const out: string[] = [];
+  text.replace(/\r\n/g, "\n").split("\n").forEach((line, i) => {
+    const code = codeOf(line);
+    if (code.includes(":>") && !ARM_RE.test(code)) out.push(`line ${i + 1}: ${line.trim()}`);
+  });
+  return out;
+}
+
+/**
+ * Codes whose EFFECTIVE answer differs between two tables. A code with no arm answers the `_` default,
+ * so moving a code from the fail-closed default to an explicit arm of the SAME severity (a §34 row
+ * added that agrees with the default) is byte drift, not an answer change.
+ */
+export function answerDiff(a: Map<string, string>, b: Map<string, string>): string[] {
+  const eff = (m: Map<string, string>, k: string) => m.get(k) ?? m.get("_") ?? "(none)";
+  const out: string[] = [];
+  for (const k of new Set([...a.keys(), ...b.keys()])) {
+    const x = eff(a, k), y = eff(b, k);
+    if (x !== y) out.push(`${k}: ${x} -> ${y}`);
+  }
+  return out.sort();
+}
+
 if (import.meta.main) {
   const text = render(readFileSync(SPEC, "utf8"), bootstrapCodes());
   if (process.argv.includes("--check")) {
     let cur = "";
     try { cur = readFileSync(SEVERITY_FILE, "utf8"); } catch {}
-    if (cur !== text) {
-      console.error("compiler/self-host-v2/severity.scrml is STALE against SPEC §34 / the bootstrap sources — run `bun scripts/gen-bootstrap-severity.ts`");
+    const bad = malformedArms(cur);
+    if (bad.length > 0) {
+      console.error(`compiler/self-host-v2/severity.scrml has ${bad.length} \`:>\` line(s) that do not parse as an arm — exit 1 (blocking):\n  ${bad.slice(0, 20).join("\n  ")}`);
       process.exit(1);
+    }
+    const diff = answerDiff(answerMap(cur), answerMap(text));
+    if (diff.length > 0) {
+      console.error(
+        `compiler/self-host-v2/severity.scrml gives DIFFERENT ANSWERS than a fresh generation (${diff.length}) — exit 1 (blocking):\n` +
+          diff.slice(0, 20).map((d) => `  ${d}  (on disk -> fresh)`).join("\n") +
+          (diff.length > 20 ? `\n  … +${diff.length - 20} more` : "") +
+          `\nIf §34 or the bootstrap's code literals changed, regenerate in THIS PR (\`bun scripts/gen-bootstrap-severity.ts\`)` +
+          ` and let severity.test.js judge it; if the generator changed, it is wrong until the regenerated table passes that test.`,
+      );
+      process.exit(1);
+    }
+    if (cur !== text) {
+      // S474 — 4 (not 1, which is also bun's crash code): stale only. CI WARNS on 4 and fails on any
+      // other non-zero; generated-regen.yml regenerates main after merge. An answer-CHANGING drift is
+      // not left to the bot: slice-m4/severity.test.js fails the PR itself (see the header).
+      console.error("compiler/self-host-v2/severity.scrml is STALE against SPEC §34 / the bootstrap sources — run `bun scripts/gen-bootstrap-severity.ts` (exit 4)");
+      process.exit(4);
     }
     console.log("severity.scrml is current");
   } else {
