@@ -17,7 +17,7 @@
  */
 
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync, readdirSync, statSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync, readdirSync, statSync, existsSync } from "node:fs";
 import { join, dirname, relative } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
@@ -180,7 +180,8 @@ describe("F1 — every definition in the scanned trees is visible to the resolve
     let es; try { es = readdirSync(d); } catch { return o; }
     for (const e of es) {
       if (e === "node_modules" || e === "dist" || e.startsWith(".")) continue;
-      const p = join(d, e); const st = statSync(p);
+      // other tests create and delete fixture files while this walks — a vanished entry is skipped
+      const p = join(d, e); let st; try { st = statSync(p); } catch { continue; }
       if (st.isDirectory()) walk(p, o); else if (SOURCE_EXT.test(p)) o.push(p);
     }
     return o;
@@ -208,9 +209,10 @@ describe("F1 — every definition in the scanned trees is visible to the resolve
     const misses = [];
     for (const r of SCAN_ROOTS) for (const f of walk(join(ROOT, r))) {
       const rel = relative(ROOT, f).replace(/\\/g, "/");
-      for (const sym of new Set(oracleDefs(readFileSync(f, "utf8")))) {
+      let src; try { src = readFileSync(f, "utf8"); } catch { continue; }
+      for (const sym of new Set(oracleDefs(src))) {
         defs++;
-        if (staleReasons(row(`\`${rel}\` \`${sym}\``), ctx).length) misses.push(`${rel} ${sym}`);
+        if (staleReasons(row(`\`${rel}\` \`${sym}\``), ctx).length && existsSync(f)) misses.push(`${rel} ${sym}`);
       }
     }
     expect(defs).toBeGreaterThan(10000);
