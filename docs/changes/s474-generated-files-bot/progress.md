@@ -23,3 +23,15 @@
 - r1 unit A committed 191c63b15 (F1 F2 F5 F6 F7 F11).
 - F3/F8/F9 workflow: landing step `gh pr checks --required` -> STUCK error exit 1; MAPS_PAT only on the landing step (persist-credentials:false, set-url in-step); cloud-maps default token; fetch-depth 0 + filter blob:none; push tags v* + daily schedule. Structural tests in generated-stale-exit-codes-s474.test.js.
 - HOOK-ENV: tmp-root-preload.js scrubGitEnv deletes every /^GIT_/ key (process.env + the Bun.spawn child env). PROOF under forced worktree GIT_DIR + GIT_INDEX_FILE (scratch index), the self-compilation/self-host-smoke root resolution (`git -C <testDir> rev-parse --show-toplevel`): BEFORE = .../agent-a72f3a50e28e94dab/compiler/tests/integration (WRONG), AFTER = .../agent-a72f3a50e28e94dab (= no-hook baseline); both files 29/29 pass either way (the false-green shape); scratch index never written.
+- r1 unit B committed 60126d3d6 (F3 F8 F9 HOOK-ENV); pushed.
+
+## r2 (PA re-review of 60126d3d6: LAND-WITH-FOLLOW-UP)
+- R1: the bot runs `bootstrap-conformance.ts --write --ratchet`: CRASH/INVALID rising over main's committed report refuses the write BEFORE writing (exit 1) -> the bot's run_producer records the failure, the file stays main's, the run ends red; `::error` names the delta + remedy.
+  BITE (throwaway repo: a tar copy of this worktree, its own fresh `git init`, GIT_* unset; the workflow's producer step extracted VERBATIM from generated-regen.yml and run with FILES/GITHUB_OUTPUT):
+  bootstrap runtime made to throw on load (slice-m1/runtime/runtime.js) -> `::error title=bootstrap-conformance REGRESSION on main: CRASH 0→100::PASS 283→183 (-100) · FAIL 241→241 · CRASH 0→100 (+100) …`, `failed= state conformance`, docs/bootstrap-conformance.md UNCHANGED.
+  (`state` also fails there by construction: the throwaway has one commit, no wrap history -> the degenerate-zero refusal; on CI the checkout has full history.)
+  A first mutation attempt (generator renders every arm Info) moved PASS 283→274 / FAIL 241→293 / UNSUPPORTED 604→561 with CRASH 0 on that run, so the bot absorbed it — correct by design (PASS/FAIL free), and the case F1's PR-side severity check refuses before merge.
+- PASS delta now in the ::warning TITLE (`bootstrap-conformance PASS a→b (±n)[ · CRASH …]`); PASS drop stays non-blocking.
+- CRASH-block messages carry RATCHET_REMEDY ("fix the bootstrap … or file a bootstrap gap and make the case refuse by name (UNSUPPORTED), then regenerate the report in this PR").
+- answerMap strips trailing `//` comments before matching; any `:>` line that parses as no arm -> --check 1.
+- stuck-PR check also treats a CANCELLED required check as stuck. cloud-maps header no longer claims a PAT-less run reds.

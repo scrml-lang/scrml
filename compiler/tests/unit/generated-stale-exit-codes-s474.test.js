@@ -291,6 +291,28 @@ describe("gen-bootstrap-severity.ts --check — stale is 4, a crash is not (S474
     expect(answerDiff(answerMap(cur), answerMap(withArm.replace('"E-S474-NEUTRAL" :> Severity.Error', '"E-S474-NEUTRAL" :> Severity.Info')))).toEqual(["E-S474-NEUTRAL: Error -> Info"]);
   });
 
+  // S474 r2 (review item 4): a hand-added arm with a trailing comment, for a code with no §34 row, used to
+  // fall outside the arm regex and read as merely stale; a `:>` line that parses as no arm is an error.
+  test("a hand-added arm WITH a trailing // comment is still read as an answer → 1", async () => {
+    const cur = readFileSync(join(REPO, "compiler/self-host-v2/severity.scrml"), "utf8");
+    const hand = cur.replace(/^(\s*)_ :> Severity\.Error/m, '$1"E-S474-HAND-NO-ROW" :> Severity.Info // added by hand\n$1_ :> Severity.Error');
+    expect(hand).not.toBe(cur);
+    const { answerMap } = await import("../../../scripts/gen-bootstrap-severity.ts");
+    expect(answerMap(hand).get("E-S474-HAND-NO-ROW")).toBe("Info");
+    const r = check(sevMirror({ severity: hand }));
+    expect(r.out).toContain("DIFFERENT ANSWERS");
+    expect(r.rc).toBe(1);
+  });
+
+  test("a `:>` line that does not parse as an arm → 1", () => {
+    const cur = readFileSync(join(REPO, "compiler/self-host-v2/severity.scrml"), "utf8");
+    const bad = cur.replace(/^(\s*)_ :> Severity\.Error/m, '$1"E-S474-BAD" :> Severity.Info extra tokens\n$1_ :> Severity.Error');
+    expect(bad).not.toBe(cur);
+    const r = check(sevMirror({ severity: bad }));
+    expect(r.out).toContain("do not parse as an arm");
+    expect(r.rc).toBe(1);
+  });
+
   test("an unreadable SPEC.md (a directory) crashes → non-zero, non-4", () => {
     const r = check(sevMirror({ specIsDir: true }));
     expect(r.rc).not.toBe(0);
@@ -314,6 +336,23 @@ describe("bootstrap-conformance --check ratchet — staleness never hides a CRAS
     expect(fail.regressed).toEqual([]);
     expect(fail.summary).toContain("FAIL");
     expect(reportCounts("# no table here\n")).toBeNull();
+  });
+
+  test("S474 r2: the PASS delta is in the annotation TITLE (a collapse is warn-only but visible)", async () => {
+    const { reportCounts, ratchetDelta, RATCHET_REMEDY } = await import("../../../scripts/bootstrap-conformance.ts");
+    const was = reportCounts(readFileSync(join(REPO, "docs/bootstrap-conformance.md"), "utf8"));
+    const collapse = ratchetDelta(was, { ...was, PASS: 0, UNSUPPORTED: was.UNSUPPORTED + was.PASS });
+    expect(collapse.regressed).toEqual([]); // PASS dropping is NOT blocking
+    expect(collapse.title).toContain(`PASS ${was.PASS}→0 (-${was.PASS})`);
+    expect(ratchetDelta({ ...was, CRASH: 0 }, { ...was, CRASH: 3 }).title).toContain("CRASH 0→3 (+3)");
+    expect(RATCHET_REMEDY).toMatch(/file a bootstrap gap/);
+    expect(RATCHET_REMEDY).toMatch(/fix the bootstrap/);
+  });
+
+  test("S474 r2 (review R1): the BOT runs the conformance producer with --ratchet", () => {
+    const wf = Bun.YAML.parse(readFileSync(join(REPO, ".github/workflows/generated-regen.yml"), "utf8"));
+    const produce = String(wf.jobs.regen.steps.find((s) => s.id === "produce").run);
+    expect(produce).toMatch(/run_producer conformance .*bootstrap-conformance\.ts --write --ratchet/);
   });
 });
 
@@ -448,6 +487,7 @@ describe("generated-regen.yml — token scope, stuck-PR detection, triggers (S47
     const land = String(job.steps.find((s) => /^Land the regen/.test(s.name ?? "")).run);
     expect(land).toMatch(/gh pr checks "\$PR" --required/);
     expect(land).toMatch(/STUCK[\s\S]*exit 1/);
+    expect(land).toMatch(/\.bucket == "cancel"/); // S474 r2: a CANCELLED required check is stuck too
   });
   test("runs on main pushes, release tags, a daily schedule and dispatch", () => {
     expect(wf.on.push.branches).toEqual(["main"]);

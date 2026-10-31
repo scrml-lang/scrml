@@ -24,12 +24,12 @@ Every row's PR-side check runs through `scripts/ci-stale-warn.sh` (FACTS has its
 
 `severity.scrml` is code too. It is on the bot only because answer-changing drift fails the PR. `severity.test.js` catches a wrong table on disk. `gen-bootstrap-severity.ts --check` (S474 r1) catches a generator whose fresh render answers differently. So the only drift that can reach main is byte drift that changes no answer.
 
-**Stuck bot PR.** If an open bot PR already carries the right content but a required check on it has failed, the run ends red with `STUCK` and names the check (S474 r1). Auto-merge would otherwise never fire while the run stayed green.
+**Stuck bot PR.** If an open bot PR already carries the right content but a required check on it has failed or was cancelled (S474 r2), the run ends red with `STUCK` and names the check (S474 r1). Auto-merge would otherwise never fire while the run stayed green.
 
 ### The bot: `generated-regen.yml`
 
 1. Every push to `main` (and `workflow_dispatch`) runs the six producers on main's **current** tip, in dependency order: severity → SPEC-INDEX → coverage (reads SPEC-INDEX) → state → bootstrap-conformance (compiles severity) → FACTS (measures the rest).
-2. If a producer fails, its files are restored to main's content, so a broken measurement is never committed. The others still land, and the run ends red with the failure named.
+2. If a producer fails, its files are restored to main's content, so a broken measurement is never committed. The bootstrap report runs as `--write --ratchet` (S474 r2): if CRASH or INVALID rose over main's committed report, the write is refused and the run ends red naming the delta, so the baseline never ratchets up. This catches what the PR-side check cannot: a `compiler/src`-only PR (impl#1 compiles the bootstrap) skips that path-scoped step, and two passing PRs can merge into a rise. The others still land, and the run ends red with the failure named.
 3. If there is no drift, nothing happens, and a leftover bot PR is closed.
 4. If there is drift, the job makes one commit on top of the tip and force-pushes it to the fixed branch `bot/generated-regen`. It opens a PR from that branch, or reuses the open one, and enables auto-merge. The PR goes through `gate` and the merge queue like any other PR.
 5. When that PR lands, its push re-runs the job, which finds a fixpoint: no block is an input of its own figures, and the bot's merge commit is not a session wrap, so recent-sessions ignores it. So there is no loop.

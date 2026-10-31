@@ -141,7 +141,9 @@ jobs:
           run_producer spec-index   "compiler/SPEC-INDEX.md"                bun run scripts/regen-spec-index.ts
           run_producer coverage     "docs/bootstrap-spec-coverage.md"       bun scripts/spec-coverage-check.ts --write
           run_producer state        "docs/known-gaps.md master-list.md"     bun scripts/state.ts --write
-          run_producer conformance  "docs/bootstrap-conformance.md"         bun scripts/bootstrap-conformance.ts --write
+          # --ratchet (S474 r2): a CRASH/INVALID rise over main's committed report is a producer FAILURE —
+          # the write is refused, the file restored, the run ends red naming the delta (never absorbed).
+          run_producer conformance  "docs/bootstrap-conformance.md"         bun scripts/bootstrap-conformance.ts --write --ratchet
           run_producer facts        "docs/FACTS.md"                         bun scripts/facts.ts --write
           echo "failed=$failed" >> "$GITHUB_OUTPUT"
           # Nothing outside FILES may change: a producer writing elsewhere would be landed by nobody and
@@ -191,7 +193,9 @@ jobs:
             # has FAILED, auto-merge will never fire and every derived block stops updating on main while
             # this run stays green. End red and name it (a human decides: fix main, or re-run the check).
             FAILED_CHECKS=$(gh pr checks "$PR" --required --json name,bucket \
-              --jq '[.[] | select(.bucket == "fail") | .name] | join(", ")' 2>/dev/null || true)
+              --jq '[.[] | select(.bucket == "fail" or .bucket == "cancel") | "\(.name) (\(.bucket))"] | join(", ")' 2>/dev/null || true)
+            # (S474 r2: a CANCELLED required check — e.g. `gate` cancelled by a superseded queue run — is as
+            # stuck as a failed one: auto-merge waits on it forever.)
             if [ -n "$FAILED_CHECKS" ]; then
               echo "::error title=generated-regen: bot PR #$PR is STUCK::required check(s) failed: $FAILED_CHECKS — auto-merge will never fire; derived blocks on main are not updating."
               exit 1

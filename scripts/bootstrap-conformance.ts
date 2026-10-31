@@ -83,6 +83,8 @@
  *   bun scripts/bootstrap-conformance.ts --json <path>   also write the per-case JSON
  *   bun scripts/bootstrap-conformance.ts --write         also regenerate docs/bootstrap-conformance.md
  *   bun scripts/bootstrap-conformance.ts --check         exit 4 when docs/bootstrap-conformance.md is stale (S474; was 1)
+ *   bun scripts/bootstrap-conformance.ts --write --ratchet   refuse the write (exit 1) when CRASH or INVALID
+ *                                                        rose over the committed report (S474 r2; the bot)
  *   bun scripts/bootstrap-conformance.ts --fail-on-fail  exit 1 when FAIL or CRASH > 0
  *   bun scripts/bootstrap-conformance.ts --no-twins      grade legacy cases as written (pre-twin)
  *
@@ -1205,14 +1207,22 @@ export function reportCounts(text: string): Record<string, number> | null {
 /** S474 r1: the buckets that may not RISE between the committed report and a run (the ratchet). */
 export const RATCHET_BUCKETS = ["CRASH", "INVALID"] as const;
 
-export function ratchetDelta(was: Record<string, number>, now: Record<string, number>): { summary: string; regressed: string[] } {
+/** What to do when the ratchet blocks (S474 r2: the error names the remedy). */
+export const RATCHET_REMEDY =
+  "Remedy: fix the bootstrap so the case no longer crashes — or, if the bootstrap genuinely cannot handle it yet, " +
+  "file a bootstrap gap in docs/known-gaps.md and make the case refuse BY NAME (E-BOOTSTRAP-UNSUPPORTED → UNSUPPORTED), " +
+  "then regenerate the report in this PR (`bun scripts/bootstrap-conformance.ts --write`) so the new baseline is reviewed.";
+
+export function ratchetDelta(was: Record<string, number>, now: Record<string, number>): { summary: string; title: string; regressed: string[] } {
   const show = ["PASS", "FAIL", "CRASH", "UNSUPPORTED", "INVALID"];
   const fmt = (b: string) => {
     const d = (now[b] ?? 0) - (was[b] ?? 0);
     return `${b} ${was[b] ?? 0}→${now[b] ?? 0}${d ? ` (${d > 0 ? "+" : ""}${d})` : ""}`;
   };
   const regressed = RATCHET_BUCKETS.filter((b) => (now[b] ?? 0) > (was[b] ?? 0)).map((b) => `${b} ${was[b] ?? 0}→${now[b] ?? 0}`);
-  return { summary: show.map(fmt).join(" · "), regressed };
+  // The annotation TITLE (what the Checks summary shows): always PASS, plus CRASH when it moved.
+  const title = `bootstrap-conformance ${fmt("PASS")}${(now.CRASH ?? 0) !== (was.CRASH ?? 0) ? ` · ${fmt("CRASH")}` : ""}`;
+  return { summary: show.map(fmt).join(" · "), title, regressed };
 }
 
 async function main(): Promise<number> {
@@ -1228,6 +1238,7 @@ async function main(): Promise<number> {
   const failOnFail = args.includes("--fail-on-fail");
   const check = args.includes("--check");
   const twins = !args.includes("--no-twins");
+  const ratchet = args.includes("--ratchet");
 
   if (!existsSync(casesDir)) {
     console.error(`bootstrap-conformance: no case root ${casesDir}`);
@@ -1259,6 +1270,24 @@ async function main(): Promise<number> {
     console.error("bootstrap-conformance: --write / --check need the full default corpus with twins (no --filter / --cases / --no-twins)");
     return 2;
   }
+  // S474 r2 (review R1) — the bot runs `--write --ratchet`. The bootstrap is COMPILED by impl#1
+  // (slice-m1/harness.js imports compiler/src/api.js), so a compiler/src-only PR skips the path-scoped
+  // PR-side ratchet, and two individually-passing PRs can merge into a rise. Without this the bot would
+  // rewrite the report with the higher CRASH and the baseline would silently ratchet UP. A rise refuses
+  // the write (exit 1, before anything is written); the bot restores the file, ends red, names the delta.
+  if (write && ratchet) {
+    const was = reportCounts(existsSync(REPORT_PATH) ? readFileSync(REPORT_PATH, "utf8") : "");
+    if (!was) {
+      console.error(`bootstrap-conformance: --ratchet — the committed report has no parseable bucket table; refusing to write (exit 1)`);
+      return 1;
+    }
+    const delta = ratchetDelta(was, r.counts);
+    if (delta.regressed.length) {
+      console.log(`::error title=bootstrap-conformance REGRESSION on main: ${delta.regressed.join(", ")}::${delta.summary} — the report was NOT rewritten (the baseline does not ratchet up). ${RATCHET_REMEDY}`);
+      console.error(`bootstrap-conformance: --ratchet REFUSED the write — ${delta.regressed.join(", ")} rose (${delta.summary}).\n${RATCHET_REMEDY}`);
+      return 1;
+    }
+  }
   if (write) {
     writeFileSync(REPORT_PATH, REPORT_HEADER + body);
     console.error(`wrote ${relative(REPO_ROOT, REPORT_PATH)}`);
@@ -1282,10 +1311,12 @@ async function main(): Promise<number> {
         return 1;
       }
       const delta = ratchetDelta(was, r.counts);
-      console.log(`::warning title=bootstrap-conformance delta vs committed report::${delta.summary}`);
+      // S474 r2: the PASS (and CRASH) delta goes in the TITLE — the Checks summary shows titles only, and
+      // a PASS collapse (283 → 0, UNSUPPORTED +283) is warn-only by design but must not be invisible.
+      console.log(`::warning title=${delta.title}::${delta.summary}`);
       console.error(`bootstrap-conformance: delta vs committed report — ${delta.summary}`);
       if (delta.regressed.length) {
-        console.error(`bootstrap-conformance: REGRESSION — ${delta.regressed.join(", ")} rose (exit 1; staleness alone would be 4)`);
+        console.error(`bootstrap-conformance: REGRESSION — ${delta.regressed.join(", ")} rose (exit 1; staleness alone would be 4).\n${RATCHET_REMEDY}`);
         return 1;
       }
     }
