@@ -18,7 +18,7 @@
 // back after each click / request.
 
 import { describe, test, expect, beforeAll, afterEach } from "bun:test";
-import { mods, compile, codes, check, realDb, serve, post, pathOf, bridge } from "./server-artifact-harness.js";
+import { mods, compile, codes, check, realDb, serve, post, pathOf, bridge, spyDriver } from "./server-artifact-harness.js";
 import { frontEnd } from "./harness.js";
 import { loadProgram, click, expectNoPageErrors, warmLoadProgram } from "../slice-m1/load-program.js";
 
@@ -489,5 +489,145 @@ ${HOLD_CHARGE}    let <s:string=""/>
     expect(e.map((d) => d.code)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
     expect(e[0].message).toContain("makes a server call and writes `@s`");
     expect(e[0].message).not.toContain("with a value the batch computes");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// s474 r2 — the re-review of #1713 (~/.cache/scrml/review/s474-1713-r1/review.md) and the PA's readings.
+describe("r2 N5 (PA reading S474, M2: a `!` that fails leaves no writes): the batch's own transaction only when it writes", () => {
+  const RO = `<program db="./app.db">
+${E}    type C:struct = { c: int }
+    let <r:int=0/>
+    function getN(a: int)! E {
+        const row: C = ${SQ}\`SELECT count(*) AS c FROM log WHERE a = \${a}\`}.get();
+        return row.c;
+    }
+    function book(a: int, f: int)! E {
+        const n: int = getN(a)?;
+        if (f > 0) fail .Bad;
+        return n;
+    }
+    <main><button onclick={ @r = book(1, 1) !{ _ :> 9, }; }>go</button></main>
+</program>
+`;
+  test("a read-only single-call batch: composed, but NO transaction — no BEGIN reaches the driver", async () => {
+    const r = compile(RO);
+    const batch = r.core.server.find((x) => x.sym.hint === "book#batch");
+    expect(batch).toBeTruthy();
+    const env = r.core.envelopes.find((e) => e.fn.id === batch.sym.id);
+    expect(env === undefined || env.standalone === false).toBe(true);
+    const spy = spyDriver(() => [{ c: 1 }]);
+    const { srv, routes } = await serve(r.core, spy.fn);
+    const res = await post(srv, pathOf(routes, "book#batch"), [1, 1]);
+    expect(res.status).toBe(500);
+    const sent = spy.calls.map((c) => c.strings.join("?")).join(" | ");
+    expect(sent).toContain("SELECT");
+    expect(/BEGIN/i.test(sent)).toBe(false);
+  });
+  test("a WRITING single-call batch: its own IMMEDIATE transaction", () => {
+    const src = `<program db="./app.db">
+${HOLD_CHARGE}    let <r:int=0/>
+    function book(a: int, f: int)! E {
+        hold(a)?;
+        if (f > 0) fail .Bad;
+        return 3;
+    }
+    <main><button onclick={ @r = book(1, 1) !{ _ :> 9, }; }>go</button></main>
+</program>
+`;
+    const r = compile(src);
+    const batch = r.core.server.find((x) => x.sym.hint === "book#batch");
+    expect(r.core.envelopes.find((e) => e.fn.id === batch.sym.id)).toMatchObject({ standalone: true, writes: true });
+  });
+});
+
+describe("r2 N1 / N2 / N3 / N4", () => {
+  test("N1: a `return` between the batch and a later `fail` — compiles; the `fail` is W-TX-FAIL-AFTER-COMMIT naming the `return`", () => {
+    const src = `<program db="./app.db">
+${HOLD_CHARGE}    let <r:int=0/>
+    function book(a: int, f: int)! E {
+        hold(a)?;
+        charge(a, 0)?;
+        if (a > 5) { return 1; }
+        if (f > 0) fail .Bad;
+        return 2;
+    }
+    <main><button onclick={ @r = book(1, 1) !{ _ :> 9, }; }>go</button></main>
+</program>
+`;
+    expect(errs(src)).toEqual([]);
+    const w = warns(src);
+    expect(w.map((d) => d.code)).toEqual(["W-TX-FAIL-AFTER-COMMIT"]);
+    expect(w[0].message).toContain("a `return` before it");
+  });
+
+  test("N2: one request made inside a client `!` callee, then a `fail` — W-TX-FAIL-AFTER-COMMIT", () => {
+    const src = `<program db="./app.db">
+${HOLD_CHARGE}    let <r:int=0/>
+    function one(a: int)! E {
+        hold(a)?;
+        return 1;
+    }
+    function outer(a: int, f: int)! E {
+        one(a)?;
+        if (f > 0) fail .Bad;
+        return 1;
+    }
+    <main><button onclick={ @r = outer(1, 1) !{ _ :> 9, }; }>go</button></main>
+</program>
+`;
+    expect(errs(src)).toEqual([]);
+    const w = warns(src);
+    expect(w.map((d) => d.code)).toEqual(["W-TX-FAIL-AFTER-COMMIT"]);
+    expect(w[0].message).toContain("`one()`, a client function");
+  });
+
+  test("N3: the batch assigning a client local — the named refusal, not a false E-ASSIGN-CONST", () => {
+    const src = `<program db="./app.db">
+${HOLD_CHARGE}    let <r:int=0/>
+    function book(a: int, f: int)! E {
+        let m: int = a;
+        hold(a)?;
+        m = m + 1;
+        charge(m, 0)?;
+        return 3;
+    }
+    <main><button onclick={ @r = book(1, 0) !{ _ :> 9, }; }>go</button></main>
+</program>
+`;
+    const e = errs(src);
+    expect(e.map((d) => d.code)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+    expect(e[0].message).toContain("Declare a new local inside the batch");
+  });
+
+  test("N4: a single call whose composition needs `Transport` — the warning says so", () => {
+    const src = `<program db="./app.db">
+    type F2:enum = { Bad, QueryFailed(message: string), ConstraintViolation(field: string), ConnectionLost }
+    let <r:int=0/>
+    function holdF(a: int)! F2 {
+        ${q("INSERT INTO log (a) VALUES (${a})")}
+        return 1;
+    }
+    function book(a: int, f: int)! F2 {
+        const v: int = holdF(a) !{ _ :> 0 };
+        if (f > 0) fail .Bad;
+        return v;
+    }
+    <main><button onclick={ @r = book(1, 1) !{ _ :> 9, }; }>go</button></main>
+</program>
+`;
+    expect(errs(src)).toEqual([]);
+    const w = warns(src);
+    expect(w.map((d) => d.code)).toEqual(["W-TX-FAIL-AFTER-COMMIT"]);
+    expect(w[0].message).toContain("Transport(t: ServerCallError)");
+    expect(w[0].message).not.toContain("a statement before it cannot join");
+  });
+
+  test("N6: the mapped name replaces whole tokens and drops its `()`", () => {
+    const btn = `        <button onclick={ book(1, 0) !{ _ :> { @s = "f"; }, }; }>go</button>`;
+    const src = `<program db="./a.db">\n${E}    function hold(a: int)! E {\n        ${q("INSERT INTO log (a) VALUES (${a})")}\n        return 1;\n    }\n    <db src="./b.db">\n        function onB(a: int)! E {\n            ${q("INSERT INTO blog (a) VALUES (${a})")}\n            return 1;\n        }\n    </db>\n    let <s:string=""/>\n    function book(a: int, f: int)! E {\n        hold(a)?;\n        onB(a)?;\n    }\n    <main>\n${btn}\n    </main>\n</program>\n`;
+    const m = fe(src).diags.find((d) => d.code === "E-SQL-011").message;
+    expect(m).toContain("book (its composed server batch)");
+    expect(m).not.toContain("batch)()");
   });
 });

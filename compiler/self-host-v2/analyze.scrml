@@ -27893,7 +27893,7 @@ ${
         const k: AExprK = e.k
         return match k {
             .Name(name: n) :> cfName(a, e.nid, n)
-            .Assign(target: t) :> cfWith(a, a.names, a.assigns.concat([rootNameNid(t)]), a.rets, a.exits, a.effects, a.handled)
+            .Assign(target: t) :> cfWith(a, a.names, a.assigns.concat([e.nid, rootNameNid(t)]), a.rets, a.exits, a.effects, a.handled)
             .Handled(h: h) :> cfHandled(a, e.nid, h)
             .At(name: n) :> a
             .AtItem :> a
@@ -27981,6 +27981,29 @@ ${
             .NConst(sym: s) :> -1
             not :> -1
         }
+    }
+
+    // The local Sym ids the assignments at `nids` rebind (an assignment's nid: its EAssignLocal; a
+    // target name's nid: its name fact).
+    fn assignedSymsOf(t: Tables, nids: int[]) -> int[] {
+        let out: int[] = []
+        for (const n of nids) {
+            let ef: EffectFact | not = not
+            if (n >= 0) ef = effectFact(t.effects, n)
+            const s: int = match ef {
+                .EAssignLocal(sym: x) :> x.id
+                .EWrite(w: w) :> -1
+                .ESpread(ws: ws) :> -1
+                .EReset(w: w) :> -1
+                .EEdits(w: w) :> -1
+                .ERemove(w: w) :> -1
+                .EElemAt(cap: c) :> -1
+                .EPosition(cap: c) :> -1
+                not :> localSymAt(t, n)
+            }
+            if (s >= 0) out = out.concat([s])
+        }
+        return out
     }
 
     fn fnSymAt(t: Tables, nid: int) -> Sym | not {
@@ -28215,7 +28238,7 @@ ${
                 if (anyIn(localSymsOf(t, fk.names), bsyms)) {
                     hi = k
                     changed = true
-                } else if (fk.exits && fx[k].write == "" && movableRun(t, ss, fx, hi + 1, k)) {
+                } else if (fk.exits && fx[k].write == "" && movableRun(t, ss, fx, hi + 1, k) && !cpRetsIn(ss, hi + 1, k)) {
                     // s474 r1 (review M2, PA ruling (a)): a later statement that can `fail` / `?` and can
                     // move joins the batch — its failure then rolls the batch's writes back with it
                     hi = k
@@ -28294,8 +28317,9 @@ ${
             bsyms = bsyms.concat(topBinds(t, s))
             k = k + 1
         }
-        // a batch may not assign what the client holds
-        for (const sym of localSymsOf(t, body.assigns)) {
+        // a batch may not assign what the client holds (s474 r2, review N3: the local an assignment
+        // rebinds is the assign checker's — EAssignLocal at the assignment — not the target's name fact)
+        for (const sym of assignedSymsOf(t, body.assigns)) {
             if (psyms.indexOf(sym) >= 0 || presyms.indexOf(sym) >= 0) return composeRefuse(st, file, fs.info.span, name, why, "the batch assigns a parameter or a local declared before it, whose new value would have to come back from the server. Declare a new local inside the batch")
         }
         // a statement after the batch may not read what it computed (rule 1 joined every one that could)
@@ -28367,7 +28391,7 @@ ${
             return composeRefuse(st, file, ss[hi + 1 < ss.length ? hi + 1 : hi].span, name, why, "the batch holds a `return`, and client work follows it: composed, the batch would end the function and hand back its result with an exit flag (§19.9.9.8 rule 3). Move the client work before the first server call, or end the function with the batch")
         }
         // s474 r1 (review M2, PA ruling (b)): a later `fail` / `?` that cannot join the batch runs after it committed
-        const late: Diag[] = lateExits(g, t, fs, fx, calls, hi)
+        const late: Diag[] = lateExits(g, t, fs, fx, calls, hi, "")
         return { plan: { fnNid: fs.f.nid, name: name, lo: lo, hi: hi, deferred: deferred, extra: extra, strip: strip, drop: drop, returns: rets, notes: notes.concat(late), late: late.length }, st: st }
     }
 
@@ -28390,6 +28414,17 @@ ${
         return out
     }
 
+    // Does a statement of from..to (inclusive) hold a `return`? (s474 r2, review N1: joining it would
+    // put a `return` in the batch with client work after it — the exit flag is not built)
+    fn cpRetsIn(ss: AStmt[], from: int, to: int) -> boolean {
+        let k: int = from
+        while (k <= to) {
+            if (cfStmt(ss[k], cf0()).rets) return true
+            k = k + 1
+        }
+        return false
+    }
+
     // Can statements from..to (inclusive) all move into the batch? (rule 3: no browser work, no cell
     // read — the marshal is not built — no client function, no effect, no `defer`)
     fn movableRun(t: Tables, ss: AStmt[], fx: StmtFx[], from: int, to: int) -> boolean {
@@ -28404,7 +28439,8 @@ ${
     }
 
     // W-TX-FAIL-AFTER-COMMIT for each statement after `from` that can `fail` / `?` (PA ruling, review M2 (b)).
-    fn lateExits(g: Globals, t: Tables, fs: FnSrc, fx: StmtFx[], calls: string[], from: int) -> Diag[] {
+    // `reason0`: why nothing after `from` could join, when the statements do not say it (review N2 / N4).
+    fn lateExits(g: Globals, t: Tables, fs: FnSrc, fx: StmtFx[], calls: string[], from: int, reason0: string) -> Diag[] {
         let out: Diag[] = []
         const ss: AStmt[] = fs.f.body.stmts
         const name: string = fs.info.name
@@ -28416,11 +28452,14 @@ ${
             if (blocked == "" && x.client != "") blocked = "it calls `" + x.client + "`, which reads or writes client state"
             if (blocked == "" && x.read != "") blocked = "it reads `" + x.read + "`, which is not marshalled into the batch yet"
             if (x.browser != "") blocked = "it uses " + x.browser + ", which needs the browser"
-            if (cfStmt(ss[k], cf0()).exits) {
+            const fk: CFold = cfStmt(ss[k], cf0())
+            if (fk.exits) {
                 let why: string = blocked
+                if (why == "") why = reason0
                 if (why == "") why = "a statement before it cannot join the batch"
                 out = out.concat([newDiag("W-TX-FAIL-AFTER-COMMIT", "this `fail` / `?` (line " + lineOf(g, fs.info.file, ss[k].span.start) + ") runs after '" + name + "''s server work (" + calls.join(", ") + ") has COMMITTED: when it fails, the caller is told '" + name + "' failed, but the batch's writes are already committed and are not rolled back (§19.10.5, S474). It cannot join the server batch because " + why + ". Move the check before the first server call, or into the server function, so it can roll the writes back", fs.info.file, ss[k].span)])
             }
+            if (blocked == "" && fk.rets) blocked = "a `return` before it would end the batch with client work after it (the batch's exit flag is not built)"
             k = k + 1
         }
         return out
@@ -28440,7 +28479,14 @@ ${
             if (fx[k].remote.length > 0 || fx[k].via != "") at = k
             k = k + 1
         }
-        if (at < 0 || fx[at].via != "") return { plan: not, st: st0 }
+        if (at < 0) return { plan: not, st: st0 }
+        // s474 r2 (review N2): the one request is made by a client function — composing it is not built,
+        // so a later `fail` / `?` runs after that request committed
+        if (fx[at].via != "") {
+            let st2: AS = st0
+            for (const d of lateExits(g, t, fs, fx, ["`" + fx[at].via + "`"], at, "the server call is made inside `" + fx[at].via + "`, a client function, and composing that call is not built yet (call the server function from '" + fs.info.name + "' directly)")) { st2 = addDiag(st2, d.file, d.span, d.code, d.message) }
+            return { plan: not, st: st2 }
+        }
         for (const r of fx[at].remote) {
             if (r.substring(0, 2) == "`#") return { plan: not, st: st0 }
         }
@@ -28456,9 +28502,19 @@ ${
         if (p is given) {
             if (p.late == 0) return r1
         }
+        // s474 r2 (review N4): the reason composing failed, when it was refused
+        let reason: string = ""
+        if (p is not && r1.st.diags.length > st0.diags.length) reason = refusalReason(r1.st.diags[r1.st.diags.length - 1])
         let st: AS = st0
-        for (const d of lateExits(g, t, fs, fx, fx[at].remote, at)) { st = addDiag(st, d.file, d.span, d.code, d.message) }
+        for (const d of lateExits(g, t, fs, fx, fx[at].remote, at, reason)) { st = addDiag(st, d.file, d.span, d.code, d.message) }
         return { plan: not, st: st }
+    }
+
+    fn refusalReason(d: Diag) -> string {
+        if (d.code == "E-ERROR-010") return "composing the call needs `Transport(t: ServerCallError)` in the function's error type (E-ERROR-010: the composed request can fail on the wire) — add it, and this check joins the batch"
+        const at: int = d.message.indexOf("not this shape yet: ")
+        if (at >= 0) return "composing the call is not built for this function yet: " + d.message.substring(at + 20)
+        return "composing the call is refused (" + d.code + ")"
     }
 
     fn errName(e: Sym | not) -> string {
@@ -28874,15 +28930,17 @@ ${
         const rinfos: SqlInfo[] = atomInfos(sum, reached, sqls)
         if (infos.length < qs.length || rinfos.length < reached.length) return { envs: [], st: st }
         const fsym: Sym = { id: f.sym, hint: f.name }
-        // s474 r1 (review M2): a composed batch (`#F`) holds its queries in a transaction of its own even
-        // when it reaches ONE — a `fail` / `?` it joined after that query must roll the query back
-        const needs: boolean = qs.length >= 2 || tq.runs[i] >= 2 || witnessOf(tq.loops[i]) is given || isBatchName(f.name)
         // S474 ruling 5: the envelope opens with BEGIN IMMEDIATE when a query it reaches writes
         // (core.scrml Envelope.writes) — every query of `rinfos` runs inside it, `.nobatch()` included
         let writes: boolean = false
         for (const wi of rinfos) {
             if (wi.kind == SqlKind.SqlWrite) writes = true
         }
+        // s474 r2 (review N5) — PA reading S474, M2: a `!` that fails leaves no writes. A composed batch
+        // (`#F`) whose set WRITES (the same fail-closed write test as `writes` above) holds its queries in
+        // a transaction of its own even when it reaches ONE, so a `fail` / `?` it joined after the write
+        // rolls the write back. A read-only batch opens none (its reads stay off the §19.10.6 gate).
+        const needs: boolean = qs.length >= 2 || tq.runs[i] >= 2 || witnessOf(tq.loops[i]) is given || (isBatchName(f.name) && writes)
         if (!needs) return { envs: [{ fn: fsym, db: infos[0].db, standalone: false, writes: writes }], st: st }
         // a client-placed `!` function: its queries run in the server function(s) it calls, each in
         // that function's own envelope — it holds no transaction itself. s474 r2 (review item 2): so
@@ -31962,6 +32020,36 @@ ${
         return { files: r2.tp.files, tables: r2.tp.tables, diags: ds, infos: r2.tp.infos }
     }
 
+    // `m` with every WHOLE `tok` (no identifier character before or after it) replaced by `rep`, and a
+    // `()` right after one dropped (s474 r2, review N6).
+    fn replaceToken(m: string, tok: string, rep: string) -> string {
+        let out: string = ""
+        let i: int = 0
+        let more = true
+        while (more) {
+            const j: int = m.indexOf(tok, i)
+            if (j < 0) {
+                more = false
+            } else {
+                const e: int = j + tok.length
+                let whole = true
+                if (j > 0 && cpIdentCh(m.charCodeAt(j - 1))) whole = false
+                if (e < m.length && cpIdentCh(m.charCodeAt(e))) whole = false
+                if (whole) {
+                    out = out + m.substring(i, j) + rep
+                    i = e
+                    if (m.substring(i, i + 2) == "()") i = i + 2
+                } else {
+                    out = out + m.substring(i, e)
+                    i = e
+                }
+            }
+        }
+        return out + m.substring(i)
+    }
+
+    fn cpIdentCh(c: int) -> boolean { return (c >= 65 && c <= 90) || (c >= 97 && c <= 122) || (c >= 48 && c <= 57) || c == 95 || c == 36 }
+
     fn batchNamesOut(plans: ComposePlan[], m0: string) -> string {
         let m: string = m0
         // longest name first, so `#book` never rewrites inside `#bookings`
@@ -31973,7 +32061,7 @@ ${
                 if (done.indexOf(p.name) < 0 && p.name.length >= best.length) best = p.name
             }
             done = done.concat([best])
-            m = m.replaceAll(best + "#batch", best + " (its composed server batch)").replaceAll("#" + best, best + " (its composed server batch)")
+            m = replaceToken(replaceToken(m, best + "#batch", best + " (its composed server batch)"), "#" + best, best + " (its composed server batch)")
             left = left - 1
         }
         return m
