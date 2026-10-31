@@ -3634,8 +3634,8 @@ ${
         const consts: CoreConst[] = coreConsts(t)
         const top: AProgram | not = topProgramOf(tp.files, t)
         const head: CoreHead = headOf(top)
-        const pre: CoreProgram = { program: t.program, decls: decls, types: types, fns: fns, server: server, dbs: dbs, reset: reset, sqlError: sqlError, serverCallError: serverCallError, css: css, consts: consts, loads: t.server.loads, head: head }
-        const core: CoreProgram = { program: t.program, decls: gateDecls(pre), types: types, fns: fns, server: server, dbs: dbs, reset: reset, sqlError: sqlError, serverCallError: serverCallError, css: css, consts: consts, loads: t.server.loads, head: head }
+        const pre: CoreProgram = { program: t.program, decls: decls, types: types, fns: fns, server: server, dbs: dbs, reset: reset, sqlError: sqlError, serverCallError: serverCallError, css: css, consts: consts, loads: t.server.loads, envelopes: t.server.envelopes, head: head }
+        const core: CoreProgram = { program: t.program, decls: gateDecls(pre), types: types, fns: fns, server: server, dbs: dbs, reset: reset, sqlError: sqlError, serverCallError: serverCallError, css: css, consts: consts, loads: t.server.loads, envelopes: t.server.envelopes, head: head }
         return { core: core, diags: tp.diags }
     }
 

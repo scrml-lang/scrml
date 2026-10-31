@@ -45,7 +45,7 @@ ${
     import { Sym, Type, SeqAt, LengthGrant, SeqGrants, FieldDef, VariantDef, TypeDef, FieldRef, InstRef,
              Literal, PrimOp, EditKind, Check, FieldMode, FieldRole, GrantSet, Edge, TransitionGraph,
              DeclKind, HostCall, HostFn, HostBind, HostSrc, HostArg, HostProp, SeqFn, BindKind, Validator, SurfaceProp, ValidityOf, Persist, PersistStore, CoreProgram,
-             SqlKind, SqlTables, SqlColumns, Db, Driver, DbLoad,
+             SqlKind, SqlTables, SqlColumns, Db, Driver, DbLoad, Envelope,
              CssPart, CssDecl, StyleRule, CssImport, ScopeSheet,
              mkSym, noGrants, replaceGrant, typeDefSym, validityInst, validityDecl, plainHead } from "./core.scrml"
     import { ASpan, BinOp, UnOp, AExpr, AProp, AExprK, AStmt, ABlock, AStmtK, AEffect, AType, ATypeK,
@@ -469,9 +469,9 @@ ${
     // s454 (U1b): `inherited` — the functions server-placed by inheritance
     // (§12.2 Trigger 5): their calls of server functions are made in place;
     // `plan` — the suspension plan (planPass) lower reads.
-    export type ServerFacts:struct = { servers: int[], sqls: SqlInfo[], dbs: Db[], places: PlaceFact[], inherited: int[], plan: SuspendPlan, loads: DbLoad[] }
+    export type ServerFacts:struct = { servers: int[], sqls: SqlInfo[], dbs: Db[], places: PlaceFact[], inherited: int[], plan: SuspendPlan, loads: DbLoad[], envelopes: Envelope[] }
 
-    export fn noServerFacts() -> ServerFacts { return { servers: [], sqls: [], dbs: [], places: [], inherited: [], plan: noPlan(), loads: [] } }
+    export fn noServerFacts() -> ServerFacts { return { servers: [], sqls: [], dbs: [], places: [], inherited: [], plan: noPlan(), loads: [], envelopes: [] } }
 
     // s454 (U1b): is a call made in function `caller` (-1: a handler / effect body)
     // a CLIENT call — the caller is not server-placed, by its own body or by
@@ -26021,7 +26021,7 @@ ${
     fn typesProgram(g: Globals) -> CoreProgram {
         let defs: TypeDef[] = []
         for (const t of g.types) { defs = defs.concat([t.def]) }
-        return { program: g.program, decls: [], types: defs, fns: [], server: [], dbs: [], reset: true, sqlError: not, serverCallError: not, css: not, consts: [], loads: [], head: plainHead() }
+        return { program: g.program, decls: [], types: defs, fns: [], server: [], dbs: [], reset: true, sqlError: not, serverCallError: not, css: not, consts: [], loads: [], envelopes: [], head: plainHead() }
     }
 
     fn storeOf(v: AAttrValue) -> PersistStore | not {
@@ -27125,7 +27125,7 @@ ${
         const scheme: string = schemeOf(v)
         if (scheme == "") return ""                      // a plain path: implicit `sqlite:`
         if (scheme == "sqlite") {
-            if (v.substring(7).trim() == "") return "`sqlite:` names no path"
+            if (sqlitePathOf(v).trim() == "") return "`sqlite:` names no path"
             return ""
         }
         if (scheme == "postgres" || scheme == "postgresql" || scheme == "mysql") {
@@ -27163,8 +27163,21 @@ ${
     }
 
     fn dbTarget(v: string) -> string {
-        if (schemeOf(v) == "sqlite") return v.substring(7)
+        if (schemeOf(v) == "sqlite") return sqlitePathOf(v)
         return v
+    }
+
+    // s474 r2 (review of #1699, item 3) — the path a `sqlite:` value names. §8.1.1 defines
+    // `sqlite:<path>` (`sqlite:./app.db`); it is silent on the URL spelling `sqlite://…`. Before r2
+    // the bootstrap kept the `//`, so `sqlite://app.db` named `//app.db` — the file `app.db` in the
+    // filesystem ROOT. impl#1 (compiler/src/db-target.ts `classifyDbTarget`: `/^sqlite:(?:\/\/)?/`)
+    // reads `sqlite://app.db` as `app.db` (relative to the declaring file) and `sqlite:///abs/a.db`
+    // as `/abs/a.db`; the bootstrap now reads it the same way (both implementations open one file).
+    // The SPEC sentence is owed: g-spec-sqlite-url-form-unspecified-s474.
+    fn sqlitePathOf(v: string) -> string {
+        const rest: string = v.substring(7)
+        if (rest.substring(0, 2) == "//") return rest.substring(2)
+        return rest
     }
 
     fn scopeDbOf(ss: ScopeDb[], nid: int) -> ScopeDb | not {
@@ -27266,7 +27279,7 @@ ${
         let sqls: SqlInfo[] = []
         let creates: int[] = []
         let doms: int[] = []
-        const tq: TxQ = txQuerySets(sum.nodes, places)     // s473: the transitive query sets (§8.9.2 amendment)
+        const tq: TxQ = txQuerySets(sum.nodes, places, sum.inherited)     // s473: the transitive query sets (§8.9.2 amendment)
         let jOff: JournalOff[] = []                 // s473: `PRAGMA journal_mode = OFF` sites (journalDiags)
         let bangWrites: int[] = []                  // s473: the databases a `!` function writes
         for (const f of all) {
@@ -27304,7 +27317,10 @@ ${
                 }
             }
         }
-        st = journalDiags(sum.nodes, tq, sqls, jOff, bangWrites, st)
+        st = journalDiags(sum.nodes, tq, sqls, jOff, bangWrites, dbs, st)
+        // s474 (U1e): the implicit per-handler transactions, built (envelopePass)
+        const ep: REnv = envelopePass(sum, tq, all, places, sqls, dbs, rd, st)
+        st = ep.st
         // §8.1.1 Ownership: a file owns a SQLite database when a query in it creates a table there
         let owned: Db[] = []
         for (const d of dbs) {
@@ -27316,7 +27332,7 @@ ${
         st = actionServerDiags(g, t, all, places, rd, st)
         const rl: RLoads = dbLoads(g, servers, st)
         st = rl.st
-        return { facts: { servers: servers, sqls: sqls, dbs: owned, places: places, inherited: sum.inherited, plan: noPlan(), loads: rl.loads }, doms: doms, st: st }
+        return { facts: { servers: servers, sqls: sqls, dbs: owned, places: places, inherited: sum.inherited, plan: noPlan(), loads: rl.loads, envelopes: ep.envs }, doms: doms, st: st }
     }
 
     // s473 (ruled refusals) — §8.9.2 amendment (S473 review-surfaced 2): "A
@@ -27334,7 +27350,7 @@ ${
     // functions it calls too.
     type JournalOff:struct = { file: string, span: ASpan, fname: string, bang: boolean, db: int, sym: int }
 
-    fn journalDiags(nodes: Callable[], tq: TxQ, sqls: SqlInfo[], js: JournalOff[], ownWrites: int[], st0: AS) -> AS {
+    fn journalDiags(nodes: Callable[], tq: TxQ, sqls: SqlInfo[], js: JournalOff[], ownWrites: int[], dbs: Db[], st0: AS) -> AS {
         let st: AS = st0
         const reach: boolean[] = bangReach(nodes, tq)
         let bangWrites: int[] = ownWrites
@@ -27357,11 +27373,20 @@ ${
             const why: string = "`PRAGMA journal_mode = OFF` turns off the rollback journal for the whole connection, and a `!` function's all-or-nothing guarantee (§8.9.2, §19.10) needs that journal to roll back"
             if (j.bang) {
                 st = addDiag(st, j.file, j.span, "E-SQL-JOURNAL-OFF", "'" + j.fname + "' is declared '!' (or is called by a function declared '!') and runs `PRAGMA journal_mode = OFF` — " + why + " (§8.9.2, S473). Remove it, or use another `journal_mode` (`WAL`, `DELETE`, … stay admitted, §14.8.10)")
-            } else if (bangWrites.indexOf(j.db) >= 0) {
+            } else if (sameDbIn(dbs, bangWrites, j.db)) {
                 st = addDiag(st, j.file, j.span, "E-SQL-JOURNAL-OFF", "`PRAGMA journal_mode = OFF` in '" + j.fname + "' sets the connection a `!` function of this program writes through — " + why + " (§8.9.2, S473). Remove it, or use another `journal_mode` (`WAL`, `DELETE`, … stay admitted, §14.8.10)")
             }
         }
         return st
+    }
+
+    // s474 r1 (review F3): `ids` holds a database the same as `id` (dbKey — not the same spelling, the same database).
+    fn sameDbIn(dbs: Db[], ids: int[], id: int) -> boolean {
+        const want: string = dbKey(dbs, { id: id, hint: "" })
+        for (const x of ids) {
+            if (dbKey(dbs, { id: x, hint: "" }) == want) return true
+        }
+        return false
     }
 
     // s473 (Lane B) — the program's `<db>` cells, each with its load (a server
@@ -27661,48 +27686,39 @@ ${
     // "written where no enclosing function is declared `!` (in a function
     // without `!`, or at a body top) SHALL be a compile error: E-ERROR-015" —
     // the SPEC's message. `where` names the place; `fname` the function ("" —
-    // a body top). The bootstrap emits no W-BATCH-001 (no implicit envelope
-    // until U1e), so E-ERROR-015 is the one transaction diagnostic here, as
-    // §19.10.4 requires outside a `!` function. (Inside a `!` function manual
-    // transaction control is REFUSED until U1e — envelopeDiags, s473.)
+    // a body top). E-ERROR-015 is the one transaction diagnostic outside a `!`
+    // function, as §19.10.4 requires there. (Inside a `!` function manual
+    // transaction control is REFUSED — envelopeDiags.)
     //
-    // s473 (boot-failclosed-sql-protect) — THE TRANSACTION ENVELOPES ARE NOT
-    // BUILT, so the shapes that need one are REFUSED, never compiled without it
-    // (the U1 design's "each refused until its unit"; before s473 they compiled
-    // clean and ran non-atomically — audit S473 part 2 §8.9.2, part 3 §19.10):
-    //  §8.9.2 / §19.10.5 "when a `!` server function body contains two or more
-    //        `?{}` queries that do not carry `.nobatch()`, the compiler SHALL wrap
-    //        the handler body in `?{BEGIN DEFERRED}` / `?{COMMIT}` (`?{ROLLBACK}`
-    //        on an exception or a `fail` exit)" — the bootstrap emits no envelope,
-    //        so a `fail` after two writes left both committed;
-    //  §19.10.4 / §19.10.6 (S451 R6) "A manual transaction is held by the
-    //        invocation of the function that opened it … one still open at the
-    //        function's return is rolled back and reported", behind the
-    //        per-connection gate ("a statement issued for another request SHALL
-    //        NOT run inside it") — the server runtime has neither, so a `fail`
-    //        between `?{BEGIN}` and `?{COMMIT}` left the SHARED connection inside
-    //        the open transaction for every later request. With W-BATCH-001
-    //        (§8.9.2) this is the `!` half; outside a `!` function the same SQL is
-    //        E-ERROR-015 (manualTxDiag) — so manual transaction control is
-    //        refused in EVERY server function.
-    // No §8 / §19 code names "not built", so both are E-BOOTSTRAP-UNSUPPORTED.
+    // s473 (boot-failclosed-sql-protect) refused every transaction shape the
+    // bootstrap did not build (before s473 they compiled clean and ran
+    // non-atomically — audit S473 part 2 §8.9.2, part 3 §19.10). s474 (U1e)
+    // BUILDS the implicit per-handler transaction (§8.9.2 / §19.10.5) over the
+    // S473 transitive query set, with its §19.10.6 nesting and per-connection
+    // gate — envelopePass below. What stays refused here:
+    //  §19.10.4 / §19.10.6 (S451 R6) MANUAL transaction control in a `!`
+    //        function: "A manual transaction is held by the invocation of the
+    //        function that opened it … one still open at the function's return
+    //        is rolled back and reported", and an explicit `?{BEGIN}` suppresses
+    //        the implicit envelope with W-BATCH-001 (§8.9.2). The runtime's gate
+    //        exists now (server-runtime.js), but nothing holds a manual
+    //        transaction by its function's invocation or rolls back one left
+    //        open at its return — so a `fail` between `?{BEGIN}` and
+    //        `?{COMMIT}` would still leave the SHARED connection inside the open
+    //        transaction. Outside a `!` function the same SQL is E-ERROR-015
+    //        (manualTxDiag) — so manual transaction control is refused in EVERY
+    //        server function. No §8 / §19 code names "not built":
+    //        E-BOOTSTRAP-UNSUPPORTED.
     //
-    // s473 (ruled refusals) — THE TRIGGER IS THE TRANSITIVE QUERY SET. §8.9.2
-    // amendment (S473 review-surfaced 1, refined): "The implicit-envelope
-    // trigger above is therefore read over the function's transitive query
-    // set: every `?{}` reached from the `!` body — its own and those of every
-    // non-`!` function it reaches — reads included … Interim (bootstrap):
-    // until the bootstrap builds the envelope, it SHALL refuse —
-    // `E-BOOTSTRAP-UNSUPPORTED`, naming this section — a `!` function whose
-    // transitive query set has two or more queries, or one inside a loop; it
-    // SHALL NOT compile it without the guarantee (S473 D1)." The set is
-    // txQuerySets' (one closure over the call graph, effects.scrml closeDim):
-    // a `!` callee is not followed (its own envelope is its own); a call is
-    // followed whatever the callee's placement (a remote call included — the
-    // ruling counts every `?{}` reached, and the bootstrap builds no envelope
-    // either way). "Inside a loop" (repeatsInBlock): a query, or a call
-    // reaching one, in a region that may run more than once — and a query
-    // reached through a recursive non-`!` function.
+    // THE TRIGGER IS THE TRANSITIVE QUERY SET (§8.9.2 amendments S473
+    // review-surfaced 1 and #1690 review F10): "every `?{}` reached from the
+    // `!` body, its own and every function's it calls, `!` or not … A query is
+    // counted once per time it is reached". The set is txQuerySets' (one
+    // closure over the call graph, effects.scrml closeDim): a call is followed
+    // whatever the callee's placement and whether or not it is `!` (an inner
+    // `!` runs as a nested savepoint). "Inside a loop" (repeatsInBlock): a
+    // query, or a call reaching one, in a region that may run more than once —
+    // and a query reached through a recursive function.
     //
     // F11 (ruled S473, #1690 review — a PERMANENT refusal, §19.10.5): "a
     // client-placed `!` function that calls two or more server functions is a
@@ -27717,7 +27733,7 @@ ${
             const kw: string = txControl(s.q.chunks)
             if (kw != "") {
                 manual = true
-                st = addDiag(st, f.file, s.span, "E-BOOTSTRAP-UNSUPPORTED", "Manual transaction control '" + kw + "' in '" + f.name + "', which is declared '!' — the bootstrap does not build what §19.10.6 requires of it (S451 R6): the transaction held by this invocation behind the database's per-connection gate, and rolled back and reported when the function returns with it still open. Without them a `fail` or an error between `BEGIN` and `COMMIT` leaves the shared connection inside the open transaction, and later requests run in it. Refused until unit U1e builds the envelopes; write the queries without transaction control for now (each `" + sqlSigil() + "}` then commits on its own)")
+                st = addDiag(st, f.file, s.span, "E-BOOTSTRAP-UNSUPPORTED", "Manual transaction control '" + kw + "' in '" + f.name + "', which is declared '!' — the bootstrap does not build what §19.10.6 requires of it (S451 R6): the transaction held by this invocation behind the database's per-connection gate, and rolled back and reported when the function returns with it still open. Without them a `fail` or an error between `BEGIN` and `COMMIT` leaves the shared connection inside the open transaction, and later requests run in it. Remove the transaction control: the bootstrap builds the implicit per-handler transaction (§8.9.2), so a `!` function whose transitive query set holds two or more queries already runs them all in one transaction, rolled back on a `fail` or an error")
             }
         }
         if (manual) return st
@@ -27726,23 +27742,267 @@ ${
         if (tq.remote[i] >= 2) {
             return addDiag(st, f.file, f.span, "E-TX-CLIENT-MULTI-CALL", "'" + f.name + "' is declared '!' and runs on the client, and it makes more than one server call (" + tq.remoteWhy[i] + ") — each call is its own request, and no transaction can span two requests, so its all-or-nothing guarantee cannot hold (§19.10.5, S473). Compose the calls in one server `!` function and call that once")
         }
-        const qs: FxAtom[] = tq.qs[i]
-        const tail: string = " The bootstrap does not build the envelope yet (unit U1e), and without it a `fail` after a write leaves that write committed — refused, never compiled non-atomic. Until then: split the work so no `!` function reaches more than one query (a `!` callee's queries count too — it would run as a nested savepoint, §19.10.6), or mark each query that need not be atomic with `.nobatch()` (§8.9.5)"
-        if (qs.length >= 2) {
-            return addDiag(st, f.file, f.span, "E-BOOTSTRAP-UNSUPPORTED", "'" + f.name + "' is declared '!' and its transitive query set (§8.9.2, S473: every `" + sqlSigil() + "}` reached from its body — its own and those of the functions it calls, `!` ones included) holds " + qs.length + " queries — " + txWhere(sum, tq.qs, i, qs[0]) + " and " + txWhere(sum, tq.qs, i, qs[1]) + " — so it needs the implicit per-handler transaction (§8.9.2, §19.10.5): its body wrapped in `BEGIN` / `COMMIT`, rolled back on an error or a `fail` exit, every one of those queries inside." + tail)
-        }
-        if (qs.length == 1 && tq.runs[i] >= 2) {
-            // #1690 review F1: one query, reached more than once (two calls of one helper, a diamond)
-            return addDiag(st, f.file, f.span, "E-BOOTSTRAP-UNSUPPORTED", "'" + f.name + "' is declared '!' and its transitive query set (§8.9.2, S473) runs one query more than once — " + txWhere(sum, tq.qs, i, qs[0]) + ", reached through more than one call — so it needs the implicit per-handler transaction (§8.9.2, §19.10.5) around every run of it." + tail)
-        }
-        const lw: FxAtom | not = witnessOf(tq.loops[i])
-        if (lw is given) {
-            let via: string = ""
-            const ch: string[] = fxChain(sum, tq.loops, i, lw)
-            if (ch.length > 1) via = " (through `" + ch.join(" → ") + "`)"
-            return addDiag(st, f.file, f.span, "E-BOOTSTRAP-UNSUPPORTED", "'" + f.name + "' is declared '!' and its transitive query set (§8.9.2, S473) runs a query more than once: " + tq.loopWhy[lw.root] + via + " — so it needs the implicit per-handler transaction (§8.9.2, §19.10.5) around every run of it." + tail)
-        }
         return st
+    }
+
+    // =========================================================================
+    // s474 (U1e) — THE ENVELOPES ARE BUILT. §8.9.2 (as amended S473): "when a `!`
+    // server function's transitive query set contains two or more `?{}` queries
+    // that do not carry `.nobatch()` (through non-`!` and `!` callees, a query
+    // counted once per time it is reached …), the compiler SHALL wrap the
+    // handler body in `?{BEGIN DEFERRED}` / `?{COMMIT}` (`?{ROLLBACK}` on an
+    // exception or a `fail` exit)"; F10: "An inner `!` function called inside an
+    // outer envelope runs as a nested savepoint (§19.10.6), so the outer envelope
+    // can roll back the inner's writes." The set is txQuerySets' (unchanged from
+    // the s473 interim refusal, which this replaces): its own queries and every
+    // callee's, `!` or not, a query reached twice counting twice, one in a loop
+    // (or a lambda, or a recursive callee) counting as two.
+    //
+    // Each `!` function whose set holds a query gets an Envelope (CoreProgram.
+    // envelopes): `standalone` when the set needs a transaction of its own (the
+    // trigger above), else `false` — it is then a savepoint inside an enclosing
+    // envelope and runs as written outside one. The server printer wraps the
+    // body (print.scrml envelopedFnJs); the runtime holds the transaction across
+    // the body's waits behind the §19.10.6 per-connection gate
+    // (server-runtime.js `envelope`).
+    //
+    // What is NOT built stays a NAMED refusal (S473 D1: "refuse code whose
+    // server guarantee it does not build … never compile it without the
+    // guarantee"), each checked only where an envelope is needed:
+    //  - a write to another database inside the envelope — §8.9.2 (S451 ruling
+    //    4a) names it: E-SQL-011 (the SPEC's text);
+    //  - a read of another database inside the envelope — the SPEC allows it;
+    //    the bootstrap does not prove two connection gates deadlock-free (a
+    //    request holding A's gate waiting on B's while another holds B's waiting
+    //    on A — §19.10.6 leaves cross-database deadlock uncovered):
+    //    E-BOOTSTRAP-UNSUPPORTED;
+    //  - an envelope on a Postgres / MySQL database — §19.10.6 "A transaction
+    //    SHALL run on one connection taken from the pool for it alone"; the
+    //    bootstrap's server runtime reserves no pool connection:
+    //    E-BOOTSTRAP-UNSUPPORTED;
+    //  - a CLIENT-placed `!` function (its one server call — two are the
+    //    permanent E-TX-CLIENT-MULTI-CALL) whose queries run in a server
+    //    function that is not `!`: that function runs them with no envelope of
+    //    its own, and none can span the request: E-BOOTSTRAP-UNSUPPORTED naming
+    //    the fix (declare it `!`, so its own envelope holds them).
+    // Manual transaction control in a `!` function stays refused
+    // (envelopeDiags): such a function gets no envelope here.
+    // =========================================================================
+    type REnv:struct = { envs: Envelope[], st: AS }
+
+    fn envelopePass(sum: Summary, tq: TxQ, all: FnFacts[], places: PlaceFact[], sqls: SqlInfo[], dbs: Db[], rd: RDbs, st0: AS) -> REnv {
+        let st: AS = st0
+        let envs: Envelope[] = []
+        for (const f of all) {
+            const i: int = nodeIdx(sum.nodes, f.sym)
+            if (f.failable && i >= 0 && !holdsTxControl(f) && tq.remote[i] < 2) {
+                const r: REnv = envelopeOf(sum, tq, f, i, places, sqls, dbs, rd, st)
+                st = r.st
+                envs = envs.concat(r.envs)
+            }
+        }
+        return { envs: envs, st: st }
+    }
+
+    fn holdsTxControl(f: FnFacts) -> boolean {
+        for (const s of f.sqls) {
+            if (txControl(s.q.chunks) != "") return true
+        }
+        return false
+    }
+
+    // One `!` function's envelope (none when its set is empty), or its refusal.
+    fn envelopeOf(sum: Summary, tq: TxQ, f: FnFacts, i: int, places: PlaceFact[], sqls: SqlInfo[], dbs: Db[], rd: RDbs, st0: AS) -> REnv {
+        let st: AS = st0
+        const qs: FxAtom[] = tq.qs[i]
+        if (qs.length == 0) return { envs: [], st: st }
+        // the facts of each query the set COUNTS (the trigger), and of every query the envelope
+        // REACHES — `.nobatch()` ones included (s474 r1, review F1/F2: §8.9.5 opts a query out of
+        // the count, not out of the envelope's extent); a site with no facts was refused where it stands
+        const infos: SqlInfo[] = atomInfos(sum, qs, sqls)
+        const reached: FxAtom[] = tq.all[i]
+        const rinfos: SqlInfo[] = atomInfos(sum, reached, sqls)
+        if (infos.length < qs.length || rinfos.length < reached.length) return { envs: [], st: st }
+        const fsym: Sym = { id: f.sym, hint: f.name }
+        const needs: boolean = qs.length >= 2 || tq.runs[i] >= 2 || witnessOf(tq.loops[i]) is given
+        if (!needs) return { envs: [{ fn: fsym, db: infos[0].db, standalone: false }], st: st }
+        // a client-placed `!` function: its queries run in the server function(s) it calls, each in
+        // that function's own envelope — it holds no transaction itself. s474 r2 (review item 2): so
+        // the one-database checks below do not apply to it (a client `!` calling one `!` function of
+        // `<db src=b>` is not E-SQL-011) — unless a server-run function calls it in place, where its
+        // server copy runs its own envelope and the checks hold for that copy.
+        const pk: PlaceK = placeOf(places, f.sym)
+        if (!isServerPlace(pk) && sum.inherited.indexOf(f.sym) < 0) {
+            for (const j of remoteCallees(sum.nodes, tq, places, i)) {
+                if (tq.qs[j].length > 0 && !sum.nodes[j].f.failable) {
+                    return { envs: [], st: addDiag(st, f.file, f.span, "E-BOOTSTRAP-UNSUPPORTED", "'" + f.name + "' is declared '!' and runs on the client; its transitive query set (§8.9.2, S473) needs one transaction, and its queries run in the server function `" + sum.nodes[j].label + "`, which is not declared '!' — so the server runs them with no envelope (§8.9.2 wraps only a `!` server function), and no transaction spans the request (§19.10.5). Declare `" + sum.nodes[j].label + "` with '!' (and an error type), so the implicit per-handler transaction holds its queries") }
+                }
+            }
+            if (!calledInPlace(sum, tq, places, i)) return { envs: [], st: st }
+        }
+        // the envelope's database: §8.9.2 "on the database of their function's `?{}` sites — the
+        // function's nearest database scope (§8.1.1)"; a function with none, its set's first
+        let home: Sym = infos[0].db
+        const sc: int = fnScope(rd.fns, f.nid)
+        if (sc >= 0) {
+            const pd: ScopeDb | not = scopeDbOf(rd.scopes, sc)
+            if (pd is given) {
+                const d0: Db | not = pd.db
+                if (d0 is given) home = d0.sym
+            }
+        }
+        // §8.9.2: "'B other than A' compares databases, not spellings: scopes naming the same
+        // database are the same database" (s474 r1, review F3) — dbKey, the resolved target
+        const homeKey: string = dbKey(dbs, home)
+        const homeName: string = dbLabel(dbs, home)
+        let k: int = 0
+        let readElse: int = -1
+        while (k < rinfos.length) {
+            if (dbKey(dbs, rinfos[k].db) != homeKey) {
+                if (rinfos[k].kind == SqlKind.SqlWrite) {
+                    const path: string = sqlPathOf(sum, tq.all, i, reached[k])
+                    const other: string = dbLabel(dbs, rinfos[k].db)
+                    return { envs: [], st: addDiag(st, f.file, f.span, "E-SQL-011", "'" + f.name + "' holds a transaction on " + homeName + " (§8.9.2), and " + path + " writes " + other + ". A transaction covers one database: a 'fail' or an error would roll back " + homeName + " and leave the write to " + other + " in place. Move the write to " + other + " out of '" + f.name + "' (call it after '" + f.name + "' returns), or remove the envelope ('.nobatch()' on every query of the envelope, §8.9.5) if the writes need not be atomic.") }
+                }
+                if (readElse < 0) readElse = k
+            }
+            k = k + 1
+        }
+        if (readElse >= 0) {
+            const path2: string = sqlPathOf(sum, tq.all, i, reached[readElse])
+            return { envs: [], st: addDiag(st, f.file, f.span, "E-BOOTSTRAP-UNSUPPORTED", "'" + f.name + "' is declared '!' and needs the implicit per-handler transaction (§8.9.2) on " + homeName + ", and " + path2 + " reads " + dbLabel(dbs, rinfos[readElse].db) + " while it is open (a `.nobatch()` query included: it opts out of the count, not out of the envelope). The SPEC allows that read (§8.9.2: reading database B inside the envelope is allowed), but the bootstrap does not build it: a request holding one database's transaction gate while it waits on another's can deadlock against a request holding them the other way round (§19.10.6). Read the other database before calling '" + f.name + "' and pass the value in") }
+        }
+        if (!sqliteDb(dbs, home)) {
+            return { envs: [], st: addDiag(st, f.file, f.span, "E-BOOTSTRAP-UNSUPPORTED", "'" + f.name + "' is declared '!' and its transitive query set (§8.9.2, S473) needs the implicit per-handler transaction on " + homeName + ", a pooled (Postgres / MySQL) database. §19.10.6 runs such a transaction on one connection taken from the pool for it alone, which the bootstrap's server runtime does not reserve — refused, never compiled non-atomic (S473 D1). Use a SQLite database, or mark each query that need not be atomic with `.nobatch()` (§8.9.5)") }
+        }
+        // the connection the envelope opens: one a reached query of the home database uses (a
+        // second scope naming the same file is the same database — and the server runtime the same
+        // connection, server-runtime.js `connection` — but only a used scope is printed)
+        let envDb: Sym = home
+        let found = false
+        for (const ri of rinfos) {
+            if (!found && dbKey(dbs, ri.db) == homeKey) {
+                envDb = ri.db
+                found = true
+            }
+        }
+        return { envs: [{ fn: fsym, db: envDb, standalone: true }], st: st }
+    }
+
+    // The SqlInfo of each atom's site, in atom order (an atom whose site has none is skipped).
+    fn atomInfos(sum: Summary, atoms: FxAtom[], sqls: SqlInfo[]) -> SqlInfo[] {
+        let out: SqlInfo[] = []
+        for (const a of atoms) {
+            const site: SqlSite = sum.nodes[a.root].f.sqls[a.pos]
+            for (const si of sqls) {
+                if (si.nid == site.nid) out = out.concat([si])
+            }
+        }
+        return out
+    }
+
+    // s474 r1 (review F3) — a database's IDENTITY, for "the same database" (§8.9.2: "compares
+    // databases, not spellings: scopes naming the same database are the same database"): the driver
+    // and the resolved target — a relative SQLite path joined to its declaring file's directory and
+    // normalized (`./`, `.` and `..` segments), exactly as the server runtime resolves it
+    // (server-runtime.js `connKey`, which opens ONE connection, with ONE gate, per key). `:memory:`
+    // is a database of its own per scope (each connection to it is a fresh one).
+    fn dbKey(dbs: Db[], d: Sym) -> string {
+        for (const x of dbs) {
+            if (x.sym.id == d.id) return dbKeyOf(x)
+        }
+        return "?" + d.id
+    }
+
+    fn dbKeyOf(x: Db) -> string {
+        if (x.driver != Driver.Sqlite) return driverKey(x.driver) + ":" + x.target
+        if (x.target == ":memory:") return "sqlite::memory:#" + x.sym.id
+        let path: string = x.target
+        if (path.substring(0, 1) != "/") {
+            const slash: int = x.file.lastIndexOf("/")
+            if (slash >= 0) path = x.file.substring(0, slash) + "/" + path
+        }
+        return "sqlite:" + normPath(path)
+    }
+
+    fn driverKey(d: Driver) -> string {
+        return match d {
+            .Sqlite :> "sqlite"
+            .Postgres :> "postgres"
+            .Mysql :> "mysql"
+        }
+    }
+
+    // `a/./b/../c` → `a/c`; a leading `/` kept; a `..` past the start kept.
+    fn normPath(p: string) -> string {
+        const abs: boolean = p.substring(0, 1) == "/"
+        let out: string[] = []
+        for (const seg of p.split("/")) {
+            if (seg != "" && seg != ".") {
+                if (seg == ".." && out.length > 0 && out[out.length - 1] != "..") {
+                    out = out.slice(0, out.length - 1)
+                } else {
+                    out = out.concat([seg])
+                }
+            }
+        }
+        if (abs) return "/" + out.join("/")
+        return out.join("/")
+    }
+
+    // s474 r2: some server-run function (server-placed, or server-only by §12.2 T5) calls callable i in place.
+    fn calledInPlace(sum: Summary, tq: TxQ, places: PlaceFact[], i: int) -> boolean {
+        let m: int = 0
+        while (m < sum.nodes.length) {
+            if (sum.nodes[m].kind == CallableK.KFn && tq.edges[m].indexOf(i) >= 0) {
+                if (isServerPlace(placeOf(places, sum.nodes[m].f.sym)) || sum.inherited.indexOf(sum.nodes[m].f.sym) >= 0) return true
+            }
+            m = m + 1
+        }
+        return false
+    }
+
+    // The server-placed functions client-placed callable i calls (through client-side callees).
+    fn remoteCallees(nodes: Callable[], tq: TxQ, places: PlaceFact[], i: int) -> int[] {
+        let out: int[] = []
+        let seen: int[] = [i]
+        let todo: int[] = [i]
+        while (todo.length > 0) {
+            const m: int = todo[0]
+            todo = todo.slice(1)
+            for (const j of tq.edges[m]) {
+                if (seen.indexOf(j) < 0) {
+                    seen = seen.concat([j])
+                    if (isServerPlace(placeOf(places, nodes[j].f.sym))) {
+                        out = out.concat([j])
+                    } else {
+                        todo = todo.concat([j])
+                    }
+                }
+            }
+        }
+        return out
+    }
+
+    // How a query of the set is reached, for a message: "its own `?{}`" or "`f() → g()`".
+    fn sqlPathOf(sum: Summary, dim: FxAtom[][], i: int, a: FxAtom) -> string {
+        const ch: string[] = fxChain(sum, dim, i, a)
+        if (ch.length <= 1) return "its own `" + sqlSigil() + "}`"
+        return "`" + ch.join(" → ") + "`"
+    }
+
+    fn dbLabel(dbs: Db[], d: Sym) -> string {
+        for (const x of dbs) {
+            if (x.sym.id == d.id) return "`" + x.target + "`"
+        }
+        return "`" + d.hint + "`"
+    }
+
+    fn sqliteDb(dbs: Db[], d: Sym) -> boolean {
+        for (const x of dbs) {
+            if (x.sym.id == d.id) return x.driver == Driver.Sqlite
+        }
+        return false
     }
 
     // Where a query of a transitive query set stands, for a message.
@@ -27761,19 +28021,25 @@ ${
     // 2; `edges` — the non-`!` call edges the sets are closed over (journalDiags
     // reads them: what a `!` function reaches).
     // `remote[i]` — the server calls (requests) client-placed callable i makes, capped at 2; `remoteWhy[i]` names them.
-    type TxQ:struct = { qs: FxAtom[][], loops: FxAtom[][], loopWhy: string[], runs: int[], edges: int[][], remote: int[], remoteWhy: string[] }
+    // `all[i]` (s474 r1, review F1/F2) — EVERY `?{}` callable i reaches, `.nobatch()` ones included:
+    // §8.9.5 makes `.nobatch()` opt a query out of the COUNT (the trigger), not out of what an open
+    // envelope reaches — so the one-database checks (E-SQL-011, the cross-database read) read `all`.
+    type TxQ:struct = { qs: FxAtom[][], all: FxAtom[][], loops: FxAtom[][], loopWhy: string[], runs: int[], edges: int[][], remote: int[], remoteWhy: string[] }
 
-    fn txQuerySets(nodes: Callable[], places: PlaceFact[]) -> TxQ {
+    fn txQuerySets(nodes: Callable[], places: PlaceFact[], inherited: int[]) -> TxQ {
         let own: FxAtom[][] = []
+        let ownAll: FxAtom[][] = []
         let edges: int[][] = []
         let i: int = 0
         for (const c of nodes) {
             let q: FxAtom[] = []
+            let qa: FxAtom[] = []
             let e: int[] = []
             if (c.kind == CallableK.KFn) {
                 let p: int = 0
                 for (const s of c.f.sqls) {
                     if (!s.q.nobatch) q = q.concat([ownAtom("q" + i + "." + p, i, p)])
+                    qa = qa.concat([ownAtom("q" + i + "." + p, i, p)])
                     p = p + 1
                 }
                 // F10 (ruled S473, #1690 review): `!` callees count too — an inner `!` runs
@@ -27784,6 +28050,7 @@ ${
                 }
             }
             own = own.concat([q])
+            ownAll = ownAll.concat([qa])
             edges = edges.concat([e])
             i = i + 1
         }
@@ -27847,7 +28114,7 @@ ${
         for (const scc of sccOrder(edges)) {
             for (const m of scc) {
                 const c: Callable = nodes[m]
-                if (c.kind == CallableK.KFn && !isServerPlace(placeOf(places, c.f.sym))) {
+                if (c.kind == CallableK.KFn && !isServerPlace(placeOf(places, c.f.sym)) && inherited.indexOf(c.f.sym) < 0) {   // s474: a server-only (inherited, §12.2 T5) function calls in place
                     let n: int = 0
                     let names: string[] = []
                     for (const r of c.f.scan.refs) {
@@ -27870,7 +28137,7 @@ ${
                 }
             }
         }
-        return { qs: qs, loops: closeDim(ownL, edges), loopWhy: why, runs: runs, edges: edges, remote: remote, remoteWhy: rwhy }
+        return { qs: qs, all: closeDim(ownAll, edges), loops: closeDim(ownL, edges), loopWhy: why, runs: runs, edges: edges, remote: remote, remoteWhy: rwhy }
     }
 
     fn isServerPlace(pk: PlaceK) -> boolean {
@@ -30655,7 +30922,7 @@ ${
                                  novalidate: vp.forms, resets: bound.resets, gated: vp.gated, persists: bound.persists, server: pp.facts, css: css.facts, consts: bound.consts }
         const pl: PS = planPass(ra.g, typedT, sum, pp.st)
         const sf: ServerFacts = { servers: pp.facts.servers, sqls: pp.facts.sqls, dbs: pp.facts.dbs, places: pp.facts.places,
-                                  inherited: pp.facts.inherited, plan: pl.plan, loads: pp.facts.loads }
+                                  inherited: pp.facts.inherited, plan: pl.plan, loads: pp.facts.loads, envelopes: pp.facts.envelopes }
         const t: Tables = { program: bound.program, types: bound.types, decls: bound.decls, fns: bound.fns, handles: bound.handles,
                             names: bound.names, values: bound.values, effects: bound.effects, binds: bound.binds,
                             elems: bound.elems, attrs: bound.attrs, fails: bound.fails, annots: bound.annots, unresolved: bound.unresolved, typing: typed.typing,

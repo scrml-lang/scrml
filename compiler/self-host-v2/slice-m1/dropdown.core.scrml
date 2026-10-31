@@ -401,6 +401,7 @@ ${
             css: not,
             consts: [],
             loads: [],
+            envelopes: [],
             head: plainHead(),
         }
     }

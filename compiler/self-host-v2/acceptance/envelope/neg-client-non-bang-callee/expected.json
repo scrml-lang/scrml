@@ -1,0 +1,12 @@
+{
+  "id": "acceptance-envelope-neg-client-non-bang-callee",
+  "description": "A client `!` whose one server call is a non-`!` function running two queries: refused by name, with the fix (declare it `!`).",
+  "language-version": "1.0",
+  "spec": "§8.9.2 · §19.10.5 · S473 D1",
+  "rationale": "§8.9.2 wraps only a `!` server function; S473 D1: \"refuse … never compile it without the guarantee\".",
+  "expect": {
+    "codes": [
+      "E-BOOTSTRAP-UNSUPPORTED"
+    ]
+  }
+}

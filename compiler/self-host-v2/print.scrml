@@ -3036,6 +3036,27 @@ ${
         return JsStmt.SFunc(symName(ctx, sym), ps, blockJs(ctx, body))
     }
 
+    // s474 (U1e) — a `!` function with an Envelope (CoreProgram.envelopes, SPEC
+    // §8.9.2 / §19.10.5 / §19.10.6), on the SERVER: its body, unchanged, as the
+    // inner `body$`, run by the runtime inside the transaction —
+    //   async function move(a) {
+    //     async function body$() { … }
+    //     return await rt.envelope(db$1, body$, true);
+    //   }
+    // The envelope reads the body's result: a failure (`fail`, `?`) rolls back
+    // and is returned unchanged; a throw rolls back and continues; anything else
+    // commits. The function waits (check.scrml C-TX2 — its set holds a query),
+    // so its callers already await it; the `await` here is the envelope's.
+    export fn envelopedFnJs(ctx: Ctx, sym: Sym, params: Param[], body: Block, db: Sym, standalone: boolean) -> JsStmt {
+        let ps: string[] = []
+        for (const prm of params) { ps = ps.concat([symName(ctx, prm.sym)]) }
+        const run: JsExpr = rtCall(ctx, "envelope", [jid(dbVarName(db)), jid("body$"), JsExpr.JBool(standalone)])
+        return JsStmt.SAsyncFunc(symName(ctx, sym), ps, [
+            JsStmt.SAsyncFunc("body$", [], blockJs(ctx, body)),
+            JsStmt.SReturn(JsExpr.JAwait(run)),
+        ])
+    }
+
     // -------------------------------------------------------------------------
     // The program.
     // -------------------------------------------------------------------------

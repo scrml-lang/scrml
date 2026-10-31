@@ -1,0 +1,24 @@
+{
+  "id": "acceptance-envelope-fail-rolls-back",
+  "description": "A `!` function with two INSERTs and a `fail` after them, against a real SQLite: move(6) fails after both writes, then move(1) succeeds — the count of written rows is 2 (move(1)'s two; move(6)'s two were rolled back with its transaction; without the envelope it would be 4).",
+  "language-version": "1.0",
+  "spec": "§8.9.2 · §19.10.5 · §19.10.6",
+  "rationale": "§8.9.2: \"the compiler SHALL wrap the handler body in `?{BEGIN DEFERRED}` / `?{COMMIT}` (`?{ROLLBACK}` on an exception or a `fail` exit)\"; \"The implicit handler transaction SHALL COMMIT only when the handler completes successfully. It SHALL ROLL BACK when the handler throws AND when it exits through `fail`\". Built by s474 U1e (was the s473 interim refusal).",
+  "expect": {
+    "codes": [],
+    "sqlEngine": "real",
+    "serverDb": { "log": [{ "a": 0 }] },
+    "input": [
+      { "click": "#bad" },
+      { "wait": "settle" },
+      { "click": "#ok" },
+      { "wait": "settle" },
+      { "click": "#count" },
+      { "wait": "settle" }
+    ],
+    "domAnchored": [
+      { "selector": "#r", "text": "1" },
+      { "selector": "#n", "text": "2" }
+    ]
+  }
+}
