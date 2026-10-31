@@ -224,6 +224,10 @@ const STATUS = {
   "loop-value/nested": ["PASS", []],
   "loop-value/strings": ["PASS", []],
   "loop-value/tier0-rows": ["PASS", []],
+  // s474 — the loop-header `key` (§17.4b, canonical S473 review-surfaced 5), W-KEY-001 / E-KEY-001
+  "loop-value/tier0-keyed": ["PASS", []],
+  "loop-value/tier0-keyless-objects-warns": ["PASS", ["W-KEY-001"]],
+  "loop-value/neg-tier0-key-type": ["PASS", ["E-KEY-001"]],
   "loop-value/tier0-text": ["PASS", []],
   "loop-value/tier0-break": ["PASS", []],
   "loop-value/neg-break-outer": ["PASS", ["E-LOOP-005"]],
@@ -361,7 +365,8 @@ describe("bootstrap acceptance cases — today's verdicts", () => {
   test("s469-boot-loop-value-form: every positive value-form / Tier-0 case RAN on the bootstrap (output checked)", () => {
     for (const rel of ["loop-value/iterate", "loop-value/range", "loop-value/cond-head", "loop-value/counted",
                        "loop-value/forever-break-prefix", "loop-value/continue-keeps", "loop-value/empty", "loop-value/nested",
-                       "loop-value/strings", "loop-value/tier0-rows", "loop-value/tier0-text", "loop-value/tier0-break"]) {
+                       "loop-value/strings", "loop-value/tier0-rows", "loop-value/tier0-text", "loop-value/tier0-break",
+                       "loop-value/tier0-keyed", "loop-value/tier0-keyless-objects-warns"]) {
       expect([rel, verdicts[rel].runtimeExecuted]).toEqual([rel, true]);
     }
   });

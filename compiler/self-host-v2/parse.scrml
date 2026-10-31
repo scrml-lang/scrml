@@ -3148,8 +3148,17 @@ ${
         const bind: ABind = { nid: t.nid, span: mkSpan(bt.start, bt.end), name: bt.v }
         t = adv(adv(bumpId(t)))
         const src: RSrc = parseIterSrc(t)
-        const body: RBlock = parseLoopBody(closeHead(src.tp))
-        return forStmt(body.tp, start, label, AForHead.HIter(bind, mutable, src.src), body.b)
+        // s474 — the header `key-clause` (§49.2.1 `iterate-head ::= for-binder
+        // 'of' iterable key-clause?`, `key-clause ::= 'key' expression`, §17.4b)
+        let ht: TP = src.tp
+        let key: AExpr | not = not
+        if (isWord(ht, "key")) {
+            const kx: RExpr = parseAssign(adv(ht))
+            key = kx.e
+            ht = kx.tp
+        }
+        const body: RBlock = parseLoopBody(closeHead(ht))
+        return forStmt(body.tp, start, label, AForHead.HIter(bind, mutable, src.src, key), body.b)
     }
 
     // The iterable (after `of`), up to (not consuming) the head's `)`: an
@@ -3166,7 +3175,7 @@ ${
         if (!isRangeTok(lo.tp)) return rangeNotWhole(lo.tp, cur(lo.tp))
         const inclusive: boolean = isP(lo.tp, "..=")
         const hi: RExpr = parseBinary(adv(lo.tp), 6)
-        if (isP(hi.tp, ")")) return { src: AIterSrc.IterRange(lo.e, hi.e, inclusive), tp: hi.tp }
+        if (isP(hi.tp, ")") || isWord(hi.tp, "key")) return { src: AIterSrc.IterRange(lo.e, hi.e, inclusive), tp: hi.tp }   // s474: or the header `key`
         if (hi.tp.diags.length == lo.tp.diags.length && continuesExpr(hi.tp)) return rangeNotWhole(hi.tp, cur(lo.tp))
         const re: RExpr = mkE(hi.tp, cur(lo.tp).start, AExprK.Recovered)
         return { src: AIterSrc.IterOf(re.e), tp: re.tp }

@@ -221,6 +221,10 @@ ${
     // HIter's `mutable` is a `let` binder (§49.3.5: keywordless and `const` are
     // const). A range is ONLY an iterable (§49.2.5: "A range is not a value"),
     // so it is IterRange here and no expression kind can hold one.
+    // s474 — HIter's `key`: the header `key-clause` (§49.2.1 `iterate-head ::=
+    // for-binder 'of' iterable key-clause?`, `key-clause ::= 'key' expression`;
+    // §17.4b), `not` when absent. It reads the binder; evaluated once per
+    // iteration (§17.4b).
     export type AIterSrc:enum = {
         IterOf(e: AExpr),
         IterRange(lo: AExpr, hi: AExpr, inclusive: boolean),
@@ -229,7 +233,7 @@ ${
         HForever,
         HCond(cond: AExpr),
         HCounted(init: AStmt[], cond: AExpr | not, step: AExpr[]),
-        HIter(bind: ABind, mutable: boolean, src: AIterSrc),
+        HIter(bind: ABind, mutable: boolean, src: AIterSrc, key: AExpr | not),
     }
     // s469 — `bound`: the loop is BOUND AS A VALUE (§49.2.1 `for-binding`,
     // §49.6): `const xs = for (…) { … lift e; … };` — the binder, its

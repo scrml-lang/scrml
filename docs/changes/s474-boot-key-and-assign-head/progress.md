@@ -42,3 +42,27 @@ Task B — D10:
 - §50.3.5: "The lvalue SHALL be declared … before it is used"; "assigning to a `const` as an expression is E-ASSIGN-004
   (same error as a statement-level `const` reassignment)".
 - §50.4.1: "The type of `x = value` is the type of `value`, which must be assignable to the declared type of `x`."
+
+## 2026-10-30 — Task A built (loop-header `key` + W-KEY-001 + E-KEY-001)
+- Locus: parse.scrml `parseIterHead` / `parseIterSrc` (held); ast.scrml `HIter.key`; analyze.scrml `resolveIter`
+  (key resolved in the body scope; key local minted; `BLoop.key`), `keyOffMarkup` (key on a non-markup loop →
+  E-BOOTSTRAP-UNSUPPORTED, fail closed), typer `typeLoopKey` (E-KEY-001), `keylessObjects` (W-KEY-001, from
+  `typeGather`); lower.scrml `gatherView` (body's first stmt `Let(key, e)`; `View.Gather.key`); core.scrml
+  `View.Gather(g, rows, key)`; check.scrml `checkGatherKey` (C20: first stmt binds the key, iterate head);
+  print.scrml `gatherJs` keyed mode (`rt.gatherKeyed`, `rt.loopKey`, `rt.keyRow`, `rt.keyTextRow`; a keyed row's
+  snapshot locals are cells in its markup — `withRowCells`); runtime.js `gatherKeyed` / `reconcileKeyed` (LIS moves,
+  as `<each>`'s reconcile). Locus refinement: the runtime half lives in slice-m1/runtime/runtime.js (not named in the
+  brief's locus list).
+- Row identity = (key, place among its iteration's lifts, template index); a template switch under one key
+  re-renders; a key shared by two iterations is a runtime trap (Error "duplicate key").
+- READINGS for PA (no SPEC text decides them): (1) E-KEY-001 applied to the header key (its §34 row speaks of `key=`;
+  the rationale "primitive keys for stable diffing" is the same mechanism) — an unknown key type fails closed with
+  E-KEY-001; (2) a `key` on a statement loop / value-form loop / loop nested inside a markup loop is refused
+  E-BOOTSTRAP-UNSUPPORTED (no rows of its own to reconcile; not evaluated-and-dropped); (3) W-KEY-001 fires for a
+  Tier-0 loop lifting markup over a tape of STRUCTS (not payload enums, not primitives, not value-only lifts).
+- g-boot-each-key-inference-unbuilt-s473 NOT touched: §17.7.5 is `<each>`'s `key=@.id` inference + W-EACH-KEY-001,
+  a different element and code.
+- Tests: slice-m4/loop-key-s474.test.js (16; runtime DOM identity on reorder, input text + focus kept, removal,
+  multi-lift, template switch, text rows, duplicate-key trap; W-KEY-001 / E-KEY-001 / refusal), acceptance
+  loop-value/{tier0-keyed, tier0-keyless-objects-warns, neg-tier0-key-type}; ruled-refusals F9 hint updated.
+  slice-m4 full: 4263 pass / 0 fail (before acceptance additions).

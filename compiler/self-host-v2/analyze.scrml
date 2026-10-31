@@ -289,7 +289,7 @@ ${
         BBind(sym: Sym),                                  // a binder: a local statement, a function
         BParam(sym: Sym, ty: Type),                       // a function parameter and its (annotated) type
         BGiven(sym: Sym, inst: InstRef),                  // given c = @handle (L11)
-        BLoop(label: Sym, end: Sym | not, counter: Sym | not), // s469: a `for` (on the AFor) — its label; a range head's `end` / `counter` (§49.2.5)
+        BLoop(label: Sym, end: Sym | not, counter: Sym | not, key: Sym | not), // s469: a `for` (on the AFor) — its label; a range head's `end` / `counter` (§49.2.5); s474: the local holding an iteration's header `key` (§17.4b)
         BJump(target: Sym),                               // s469: a `break` / `continue` — the label Sym of the loop it leaves / re-enters
     }
     export type ElemFact:enum = {
@@ -14012,13 +14012,13 @@ ${
         let hint: string = f.label
         if (hint == "") hint = "loop"
         const rl: RSym = mint(st0, hint)
-        const plain0: AS = addBind(rl.st, f.nid, BindFact.BLoop(rl.s, not, not))
+        const plain0: AS = addBind(rl.st, f.nid, BindFact.BLoop(rl.s, not, not, not))
         const h: AForHead = f.head
         return match h {
             .HForever :> resolveBlock(env, f.body, plain0)
             .HCond(cond: c) :> resolveBlock(env, f.body, resolveCond(env, c, plain0))
             .HCounted(init: i, cond: c, step: sp) :> resolveCounted(env, f, i, c, sp, plain0)
-            .HIter(bind: b, mutable: m, src: src) :> resolveIter(env, f, rl.s, b, m, src, rl.st)
+            .HIter(bind: b, mutable: m, src: src, key: ky) :> resolveIter(env, f, rl.s, b, m, src, ky, rl.st)
         }
     }
 
@@ -14035,8 +14035,9 @@ ${
     // is E-LOOP-007 (§49.4.4). `break` keeps the prefix (rule 5) and the body
     // is a break boundary (rule 6, E-LOOP-005) — the loop-control pass.
     // =========================================================================
-    fn resolveForStmt(env: Env, s: AStmt, f: AFor, st0: AS) -> RB {
+    fn resolveForStmt(env: Env, s: AStmt, f: AFor, st00: AS) -> RB {
         const b: AForBound | not = f.bound
+        const st0: AS = keyOffMarkup(env, f, st00)
         if (b is not) return keepEnv(env, resolveFor(env, s, f, st0))
         let st: AS = st0
         let annot: Type | not = not
@@ -14061,6 +14062,28 @@ ${
         if (annot is given) lty = annot
         const l: LocalB = { name: b.name, s: rs.s, ty: lty, mutable: b.mutable, narrowed: not, nDecl: not, fresh: false }
         return { env: withLocal(env, l), st: st }
+    }
+
+    // s474 — the header `key` (§17.4b) names the ROWS a markup loop renders,
+    // for keyed reconciliation. The bootstrap builds it on a Tier-0
+    // `${ for … }` in markup (resolveTier0 — not through here); on a statement
+    // loop or a loop bound as a value (here, a nested loop inside a Tier-0 body
+    // included) there are no rows of its own to reconcile, so the clause is
+    // refused by name rather than evaluated and dropped (fail closed, D28).
+    fn keyOffMarkup(env: Env, f: AFor, st: AS) -> AS {
+        const ky: AExpr | not = forKey(f)
+        if (ky is not) return st
+        return addDiag(st, env.file, ky.span, "E-BOOTSTRAP-UNSUPPORTED", "a header `key` names the rows a `" + "$" + "{ for … }` in markup renders (keyed reconciliation, §17.4b); this loop is a statement or a loop bound as a value, which renders no rows of its own — the bootstrap builds the `key` only on the markup loop itself. Drop the `key` here, or move it to the `" + "$" + "{ for … }` that renders the rows")
+    }
+
+    fn forKey(f: AFor) -> AExpr | not {
+        const h: AForHead = f.head
+        return match h {
+            .HIter(bind: b, key: ky) :> ky
+            .HForever :> not
+            .HCond(cond: c) :> not
+            .HCounted(init: i) :> not
+        }
     }
 
     // §49.4.4: "a `lift` reachable on some path" — a `lift` into THIS loop that
@@ -14306,8 +14329,8 @@ ${
     // that speaks the ruled dialect (the bootstrap) refuses it with a hint naming
     // the header form". The ruling's scope is the LIFTED element (#1690 review
     // F8): `key=` elsewhere is not judged here. It was written as a DOM
-    // attribute (g-boot-lift-key-attr-silently-emitted-s473). The header form
-    // is not parsed by the bootstrap yet (#1690 review F9) — the message says so.
+    // attribute (g-boot-lift-key-attr-silently-emitted-s473). s474: the header
+    // form is built (keyed reconciliation) — the message names it as the fix.
     fn liftedKeyDiag(env: Env, n: ANode, st: AS) -> AS {
         const k: ANodeK = n.k
         const el: AElem | not = match k {
@@ -14322,7 +14345,7 @@ ${
         if (el is not) return st
         for (const a of el.attrs) {
             if (a.name.toLowerCase() == "key") {
-                return addDiag(st, env.file, a.span, "E-BOOTSTRAP-UNSUPPORTED", "`key=` on the lifted `<" + el.tag + ">` is the legacy keyed-iteration spelling (§6.5.3), refused (ruled S473: the loop-header `key` is canonical, §17.4b — `for (const it of @items key it.id)`). The bootstrap does not parse the header `key` yet either, so for now drop the `key=`: the list renders unkeyed (positional), and `key=` would only have been written as a DOM attribute")
+                return addDiag(st, env.file, a.span, "E-BOOTSTRAP-UNSUPPORTED", "`key=` on the lifted `<" + el.tag + ">` is the legacy keyed-iteration spelling (§6.5.3), refused (ruled S473: the loop-header `key` is canonical, §17.4b). Move it into the loop head — `for (const it of @items key it.id)` — and drop the `key=`")
             }
         }
         return st
@@ -14496,7 +14519,7 @@ ${
         }
     }
 
-    fn resolveIter(env: Env, f: AFor, label: Sym, b: ABind, mutable: boolean, src: AIterSrc, st0: AS) -> AS {
+    fn resolveIter(env: Env, f: AFor, label: Sym, b: ABind, mutable: boolean, src: AIterSrc, key: AExpr | not, st0: AS) -> AS {
         const rx: RX = resolveIterSrc(env, src, st0)
         let st: AS = rx.st
         let end: Sym | not = not
@@ -14514,9 +14537,20 @@ ${
         st = localCellClash(env, b.span, b.name, st)     // #1690 review F12: a for-of binder is a function-body const/let (§7.6, D14)
         const rb: RSym = mint(reservedName(st, env.file, b.span, b.name), b.name)
         st = addBind(rb.st, b.nid, BindFact.BBind(rb.s))
-        st = addBind(st, f.nid, BindFact.BLoop(label, end, counter))
         const l: LocalB = { name: b.name, s: rb.s, ty: rx.x.ty, mutable: mutable, narrowed: not, nDecl: not, fresh: false }
-        return resolveBlock(withLocal(env, l), f.body, st)
+        const benv: Env = withLocal(env, l)
+        // s474 — the header `key` (§17.4b): read in the body's scope (it reads
+        // the binder), once per iteration — into a local minted HERE (lower
+        // names it; the printer keys the iteration's rows by it)
+        let keySym: Sym | not = not
+        if (key is given) {
+            st = resolveExpr(benv, key, not, st).st
+            const rk: RSym = mint(st, "key")
+            st = rk.st
+            keySym = rk.s
+        }
+        st = addBind(st, f.nid, BindFact.BLoop(label, end, counter, keySym))
+        return resolveBlock(benv, f.body, st)
     }
 
     // The iterable, resolved; its type is the BINDER's: a tape's element, a
@@ -14580,7 +14614,7 @@ ${
             .HForever :> []
             .HCond(cond: c) :> [c]
             .HCounted(init: i, cond: c, step: sp) :> maybeExprList(c).concat(sp)
-            .HIter(bind: b, src: src) :> iterSrcExprs(src)
+            .HIter(bind: b, src: src, key: ky) :> iterSrcExprs(src).concat(maybeExprList(ky))   // s474: the header `key` (§17.4b)
         }
     }
 
@@ -15703,7 +15737,7 @@ ${
             .HForever :> typeBlock(entry, f.body, ts0)
             .HCond(cond: c) :> typeLoopCond(entry, c, f.body, ts0)
             .HCounted(init: i, cond: c, step: sp) :> typeCounted(entry, i, c, sp, f.body, ts0)
-            .HIter(bind: b, src: src) :> typeIter(entry, b, src, f.body, ts0)
+            .HIter(bind: b, src: src, key: ky) :> typeIter(entry, b, src, ky, f.body, ts0)
         }
         return keepTEnv(tDeferEnv(env), ts)
     }
@@ -15731,7 +15765,7 @@ ${
         return ts
     }
 
-    fn typeIter(env: TEnv, b: ABind, src: AIterSrc, body: ABlock, ts0: TypeState) -> TypeState {
+    fn typeIter(env: TEnv, b: ABind, src: AIterSrc, key: AExpr | not, body: ABlock, ts0: TypeState) -> TypeState {
         const r: RVT = typeIterSrc(env, src, ts0)
         let ts: TypeState = r.ts
         const sym: Sym | not = bindSym(bindFact(env.t.binds, b.nid))
@@ -15739,7 +15773,28 @@ ${
         // the binder's type is the element's — and an assignment to a `let`
         // binder joins with it (contribute), never replaces it
         ts = contribute(ts, sym, r.vt)
-        return typeBlock(tWithLocal(env, sym, r.vt), body, ts)
+        const benv: TEnv = tWithLocal(env, sym, r.vt)
+        if (key is given) ts = typeLoopKey(benv, key, ts)
+        return typeBlock(benv, body, ts)
+    }
+
+    // s474 — the header `key` (§17.4b) reads the binder. Its value identifies
+    // a row across updates, so it is a string or a number: E-KEY-001 (§34: "The
+    // keyed-iteration runtime requires primitive keys for stable diffing" — the
+    // §6.5.3 rule, carried to the canonical header form, S473 review-surfaced
+    // 5). A key whose type is not known fails closed (an object key would never
+    // match itself across updates); one blamed on an earlier error is not
+    // reported again (Rule C).
+    fn typeLoopKey(env: TEnv, key: AExpr, ts0: TypeState) -> TypeState {
+        const rk: RVT = typeExpr(env, key, ts0)
+        if (hasErrIn(env.errs, key.span) || condBlamed(env, key, rk.ts)) return rk.ts
+        const t: Type | not = knownOf(rk.vt)
+        if (t is given) {
+            const k: int = kindOf(t)
+            if (k <= 2) return rk.ts
+            return report(rk.ts, env, key.span, "E-KEY-001", "a loop `key` is a string or a number — it names the row across updates, and this one is `" + typeName(t) + "`. Key by a primitive field (`key x.id`) (§17.4b, §6.5.3)")
+        }
+        return report(rk.ts, env, key.span, "E-KEY-001", "the type of this loop `key` is not known — a `key` is a string or a number (it names the row across updates); key by a primitive field (`key x.id`) or annotate what it reads (§17.4b, §6.5.3)")
     }
 
     fn typeIterSrc(env: TEnv, src: AIterSrc, ts: TypeState) -> RVT {
@@ -23431,7 +23486,42 @@ ${
     fn typeGather(env: TEnv, lf: AFor, ts0: TypeState) -> TypeState {
         let ts: TypeState = typeFor(env, forAsStmt(lf), lf, ts0).ts
         for (const e of liftOperands(lf.body)) { ts = markupText(env, e, exprType0(ts, e.nid), ts) }
-        return ts
+        return keylessObjects(env, lf, ts)
+    }
+
+    // s474 — W-KEY-001, the §17.4b header meaning (S473 review-surfaced 5):
+    // "When no `key` is declared, the compiler MAY emit W-KEY-001 warning for
+    // collections that contain objects." Here: a Tier-0 loop that lifts
+    // markup rows over a tape of STRUCTS with no header `key` — its rows are
+    // positional, so a row's DOM state (focus, text typed, scroll) follows its
+    // position, not its item, when the tape is reordered.
+    fn keylessObjects(env: TEnv, lf: AFor, ts: TypeState) -> TypeState {
+        const h: AForHead = lf.head
+        const src: AExpr | not = match h {
+            .HIter(bind: b, src: sr, key: ky) :> keylessIterable(sr, ky)
+            .HForever :> not
+            .HCond(cond: c) :> not
+            .HCounted(init: i) :> not
+        }
+        if (src is not || gatherRows(lf).length == 0) return ts
+        const t: Type | not = knownOf(exprType0(ts, src.nid))
+        if (t is not) return ts
+        const el: Type | not = seqElem(t)
+        if (el is not) return ts
+        const s: Sym | not = namedOf(el)
+        if (s is not) return ts
+        const ti: TypeInfo | not = typeInfoOf(env.t.types, s)
+        if (ti is not) return ts
+        if (structFieldDefs(ti.def) is not) return ts
+        return report(ts, env, src.span, "W-KEY-001", "this loop renders a row per `" + s.hint + "` with no `key`, so the rows are matched by position: when the tape is reordered, a row's DOM state (focus, typed text, scroll) stays with the position, not with its item. Name what identifies an item in the head — `for (const x of xs key x.id)` (§17.4b)")
+    }
+
+    fn keylessIterable(src: AIterSrc, key: AExpr | not) -> AExpr | not {
+        if (key is given) return not
+        return match src {
+            .IterOf(e: x) :> x
+            .IterRange(lo: lo) :> not
+        }
     }
 
     // The markup-text sink check (§14.13.2) of a value already typed `v`.
@@ -25948,7 +26038,7 @@ ${
             .HForever :> []
             .HCond(cond: c) :> [c]
             .HCounted(init: i, cond: c, step: sp) :> maybeExprList(c).concat(sp)
-            .HIter(bind: b, src: src) :> []
+            .HIter(bind: b, src: src, key: ky) :> maybeExprList(ky)      // s474: the header `key`, once per iteration (§17.4b)
         }
         for (const x of per) { out = out.concat([x.span]) }
         return out.concat(repeatsInExprs(forExprs(lf)))
@@ -29836,7 +29926,7 @@ ${
             .HForever :> []
             .HCond(cond: c) :> [c]
             .HCounted(init: i, cond: c, step: sp) :> maybeExprList(c).concat(sp)
-            .HIter(bind: b) :> []
+            .HIter(bind: b, key: ky) :> maybeExprList(ky)                // s474: the header `key`, once per iteration (§17.4b)
         }
         const r0: LinR = linExprs(cx, once, s)
         if (r0.ends) return r0

@@ -221,8 +221,9 @@ describe("7 — §6.5.3 / §17.4b (review-surfaced 5): legacy `key=` on a lifted
     expect(e[0].message).toContain("key it.id");
   });
 
-  test("near-miss: the same loop with no `key=` compiles", () => {
-    expect(codes("<program>\n    type Item:struct = { id: int, name: string }\n    <items:Item[]=([])/>\n    <main>\n        <ul>${ for (const it of @items) { lift <li>${it.name}</li>; } }</ul>\n    </main>\n</program>\n")).toEqual([]);
+  test("near-miss: the same loop with no `key=` compiles; so does the same loop keyed in the head (s474)", () => {
+    expect(codes("<program>\n    type Item:struct = { id: int, name: string }\n    <items:Item[]=([])/>\n    <main>\n        <ul>${ for (const it of @items) { lift <li>${it.name}</li>; } }</ul>\n    </main>\n</program>\n")).toEqual([]);   // errors only (W-KEY-001 is a Warning)
+    expect(codes("<program>\n    type Item:struct = { id: int, name: string }\n    <items:Item[]=([])/>\n    <main>\n        <ul>${ for (const it of @items key it.id) { lift <li>${it.name}</li>; } }</ul>\n    </main>\n</program>\n")).toEqual([]);
   });
 });
 
@@ -320,9 +321,9 @@ describe("review F8 / F9 / F12", () => {
   test("F8: `key=` off a loop is not judged by the legacy-key refusal", () => {
     expect(codes("<program>\n    <main><p key=\"a\">x</p></main>\n</program>\n")).toEqual([]);
   });
-  test("F9: the hint says the header `key` is not parsed yet", () => {
+  test("F9 (s474: the header `key` is built): the hint says to move the key into the loop head", () => {
     const src = "<program>\n    type Item:struct = { id: int, name: string }\n    <items:Item[]=([])/>\n    <main>\n        <ul>${ for (const it of @items) { lift <li key=it.id>${it.name}</li>; } }</ul>\n    </main>\n</program>\n";
-    expect(errs(src)[0].message).toContain("does not parse the header `key` yet");
+    expect(errs(src)[0].message).toContain("Move it into the loop head");
   });
   test("F12: a for-of binder named like a cell is E-NAME-COLLIDES-STATE", () => {
     const src = `<program>\n    <count:int=0/>\n    function f() -> int {\n        for (const count of [1, 2]) {\n            return count;\n        }\n        return 0;\n    }\n    <main><p>\${@count}</p></main>\n</program>\n`;

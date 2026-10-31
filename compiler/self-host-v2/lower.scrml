@@ -775,13 +775,13 @@ ${
     // minted for them. A missing fact means analyze reported an error, and the
     // compile has no Core (the gate above).
     // =========================================================================
-    type LoopB:struct = { label: Sym, end: Sym | not, counter: Sym | not }
+    type LoopB:struct = { label: Sym, end: Sym | not, counter: Sym | not, key: Sym | not }
 
-    fn mkLoopB(l: Sym, e: Sym | not, k: Sym | not) -> LoopB { return { label: l, end: e, counter: k } }
+    fn mkLoopB(l: Sym, e: Sym | not, k: Sym | not, ky: Sym | not) -> LoopB { return { label: l, end: e, counter: k, key: ky } }
 
     fn loopBOf(f: BindFact | not) -> LoopB | not {
         return match f {
-            .BLoop(label: l, end: e, counter: k) :> mkLoopB(l, e, k)
+            .BLoop(label: l, end: e, counter: k, key: ky) :> mkLoopB(l, e, k, ky)
             .BBind(sym: x) :> not
             .BParam(sym: x) :> not
             .BGiven(sym: x) :> not
@@ -854,10 +854,27 @@ ${
         const rc: LC = { t: c.t, file: c.file, subst: c.subst, snap: c.snap, rows: ids }
         const h: LoopHead | not = loopHeadOf(rc, lb, f)
         if (h is not) return []
-        const body: Block = lowerBlock(rc, f.body)
+        const body0: Block = lowerBlock(rc, f.body)
         let rows: GatherRow[] = []
         for (const r of rns) { rows = rows.concat([{ views: lowerNode(c, r) }]) }
-        return [View.Gather({ label: lb.label, bind: acc, head: h, body: body }, rows)]
+        // s474 — the header `key` (§17.4b): the body's first statement binds it,
+        // once per iteration, before anything the body lifts
+        const kx: AExpr | not = headKey(f.head)
+        const ks: Sym | not = lb.key
+        if (kx is given && ks is given) {
+            const body: Block = { stmts: [Stmt.Let(ks, lowerExpr(rc, kx))].concat(body0.stmts) }
+            return [View.Gather({ label: lb.label, bind: acc, head: h, body: body }, rows, ks)]
+        }
+        return [View.Gather({ label: lb.label, bind: acc, head: h, body: body0 }, rows, not)]
+    }
+
+    fn headKey(h: AForHead) -> AExpr | not {
+        return match h {
+            .HIter(bind: b, key: ky) :> ky
+            .HForever :> not
+            .HCond(cond: x) :> not
+            .HCounted(init: i) :> not
+        }
     }
 
     // The lifted rows of a Tier-0 loop body, in source order (where parse's
@@ -2161,7 +2178,7 @@ ${
             .ResetOn(triggers: ds) :> v
             .Errors(of: o) :> v
             .Reach(fields: fs) :> v
-            .Gather(g: g, rows: rs) :> View.Gather(g, stampRows(rs, extra, keyed))
+            .Gather(g: g, rows: rs, key: gk) :> View.Gather(g, stampRows(rs, extra, keyed), gk)
         }
     }
 
@@ -3664,7 +3681,7 @@ ${
             .ResetOn(triggers: x) :> v
             .Errors(of: x) :> v
             .Reach(fields: fs) :> v
-            .Gather(g: g, rows: rs) :> View.Gather(g, gateRows(p, rs, ext))
+            .Gather(g: g, rows: rs, key: gk) :> View.Gather(g, gateRows(p, rs, ext), gk)
         }
     }
 

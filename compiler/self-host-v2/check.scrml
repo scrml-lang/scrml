@@ -1345,7 +1345,7 @@ ${
             .ResetOn(triggers: ds, reset: b) :> checkResetOn(p, encl, ds, b)
             .Errors(of: x) :> checkSurface(p, encl, x)
             .Reach(fields: fs) :> checkGateFields(p, encl, fs)
-            .Gather(g: g, rows: rows) :> checkLoop(g.head, g.body).concat(viewGatherDefers(g.body)).concat(checkViewGather(p, g, rows))
+            .Gather(g: g, rows: rows, key: gk) :> checkLoop(g.head, g.body).concat(viewGatherDefers(g.body)).concat(checkViewGather(p, g, rows)).concat(checkGatherKey(g, gk))
             .El(tag: t, attrs: attrs) :> checkGates(t, attrs).concat(checkStaticSinks(t, attrs))
             .Text(text: x) :> []
             .RawText(text: x) :> []
@@ -3377,6 +3377,48 @@ ${
         const w: string = blockWriteWitness(p, whole, [])
         if (w != "") out = out.concat(["C20: a Tier-0 loop writes reactive state — " + w + " (§6.15: a render expression writes no reactive cell)"])
         return out
+    }
+
+    // s474 (§17.4b) — a keyed View.Gather: its `key` is the local the body's
+    // FIRST statement binds (once per iteration, before anything is lifted) —
+    // the printer keys the iteration's rows by it — and an iterate head binds it.
+    fn checkGatherKey(g: Gather, key: Sym | not) -> string[] {
+        if (key is not) return []
+        const gh: LoopHead = g.head
+        const iterate: boolean = match gh {
+            .Each(h: x) :> true
+            .Range(h: x) :> true
+            .Forever :> false
+            .While(cond: x) :> false
+            .Counted(init: x) :> false
+        }
+        if (!iterate) return ["C20: a keyed Tier-0 loop has no iterate head (§17.4b: `key` follows `x of xs`)"]
+        if (g.body.stmts.length == 0) return ["C20: a keyed Tier-0 loop's body does not begin by binding its key"]
+        const first: Stmt = g.body.stmts[0]
+        const bound: int = match first {
+            .Let(sym: s) :> s.id
+            .Return(e: x) :> -1
+            .Fail(err: x) :> -1
+            .Attempt(result: x) :> -1
+            .Assign(local: x) :> -1
+            .Write(cap: x) :> -1
+            .Commit(writes: x) :> -1
+            .If(cond: x) :> -1
+            .Eval(e: x) :> -1
+            .Suspend(bind: x) :> -1
+            .ResetSurface(of: x) :> -1
+            .Defer(body: x) :> -1
+            .Unpersist(decl: x) :> -1
+            .Loop(label: x) :> -1
+            .Break(target: x) :> -1
+            .Continue(target: x) :> -1
+            .Gather(g: x) :> -1
+            .Lift(into: x) :> -1
+            .Join(k: x) :> -1
+            .Jump(k: x) :> -1
+        }
+        if (bound != key.id) return ["C20: a keyed Tier-0 loop's body does not begin by binding its key"]
+        return []
     }
 
     fn viewGatherExit(n: Node) -> string {
