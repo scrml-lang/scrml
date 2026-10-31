@@ -23,7 +23,7 @@
 
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
 import { join } from "node:path";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, mkdirSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { SQL } from "bun";
 import { Database } from "bun:sqlite";
@@ -564,5 +564,103 @@ describe("r1 F6 — strictly nested savepoints; no statement after its envelope"
     expect(threw).not.toBeNull();
     expect(String(threw.message)).toContain("after the transaction of its envelope ended");
     expect(await rows6()).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// s474 r2 (re-review of #1699).
+describe("r2 item 1 — the runtime keys a SQLite connection by the file's REAL path", () => {
+  const twoScopes = (inner) => `<program db="./app.db">\n${E}    <db src="${inner}">\n        function logB(a: int) -> int {\n            ${SQ}\`INSERT INTO log (a) VALUES (\${a})\`}.run() !{ _ :> { return 0; } };\n            return 1;\n        }\n    </db>\n    function move(a: int)! E {\n        ${q("INSERT INTO log (a) VALUES (${a})")}\n        const x: int = logB(a + 100);\n        if (a > 5) fail .Bad;\n        return x;\n    }\n${page(["move(1)", "logB(1)"])}</program>\n`;
+  test("spelling-equal scopes that are two files (a symlink in the path) — the server refuses to start", async () => {
+    const root = mkdtempSync(join(tmpdir(), "s474-r2-link-"));
+    try {
+      mkdirSync(join(root, "other", "sub"), { recursive: true });
+      symlinkSync(join(root, "other", "sub"), join(root, "a"));
+      // the compiler reads `./a/../app.db` as `./app.db` (one database: one envelope, no E-SQL-011) …
+      const src = twoScopes("./a/../app.db");
+      expect(errsOf(src)).toEqual([]);
+      const r = compile(src);
+      const { server } = artifacts(r.core);
+      const mod = await loadServer(server.js, r.core);
+      // … but on this host it is `<root>/other/app.db`, not `<root>/app.db`
+      let threw = null;
+      try {
+        mod.createServer({ root, connect: () => { throw new Error("no connection should be opened"); }, log: () => {}, respond: plainRespond, tenantRelations: async () => [] });
+      } catch (e) { threw = e; }
+      expect(threw).not.toBeNull();
+      expect(String(threw.message)).toContain("are two different files on this host");
+      expect(String(threw.message)).toContain(join(root, "other", "app.db"));
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+  test("spelling-different scopes that are ONE file (a symlink) share one connection; spelling-equal ones too", async () => {
+    const root = mkdtempSync(join(tmpdir(), "s474-r2-same-"));
+    try {
+      symlinkSync(root, join(root, "b"));
+      const opened = [];
+      const host = { root, connect: (d) => { opened.push(d.target); return () => Promise.resolve([]); }, log: () => {}, respond: plainRespond };
+      const c1 = rt.connection(host, { driver: "sqlite", target: "./app.db", file: "app.scrml" });
+      const c2 = rt.connection(host, { driver: "sqlite", target: "./b/app.db", file: "app.scrml" });
+      const c3 = rt.connection(host, { driver: "sqlite", target: "app.db", file: "app.scrml" });
+      const c4 = rt.connection(host, { driver: "sqlite", target: "./other.db", file: "app.scrml" });
+      expect(c1).toBe(c2);
+      expect(c1).toBe(c3);
+      expect(c1).not.toBe(c4);
+      expect(c1.gate).toBe(c2.gate);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("r2 item 2 — a CLIENT `!` holds no transaction: no one-database check on it", () => {
+  test("a client `!` making one call to a `!` function of `<db src=b>` compiles; the callee carries the envelope", () => {
+    const src = `<program db="./a.db">\n${E}    <db src="./b.db">\n        function onB(a: int)! E {\n            ${q("INSERT INTO blog (a) VALUES (${a})")}\n            ${q("INSERT INTO blog (a) VALUES (${a + 1})")}\n            return 1;\n        }\n    </db>\n    function move(a: int)! E {\n        const y: int = onB(a) !{ _ :> { return 0; } };\n        if (y == 0) fail .Bad;\n        return y;\n    }\n${page(["move(1)"])}</program>\n`;
+    expect(errsOf(src)).toEqual([]);
+    const env = compile(src).core.envelopes;
+    expect(env.find((e) => e.fn.hint === "onB").standalone).toBe(true);
+    expect(env.find((e) => e.fn.hint === "move")).toBeUndefined();
+  });
+  test("near-miss: a SERVER `!` doing the same is E-SQL-011 (it holds the transaction)", () => {
+    const src = `<program db="./a.db">\n${E}    <db src="./b.db">\n        function onB(a: int)! E {\n            ${q("INSERT INTO blog (a) VALUES (${a})")}\n            return 1;\n        }\n    </db>\n    function move(a: int)! E {\n        ${q("INSERT INTO acct (n) VALUES (${a})")}\n        const y: int = onB(a)?;\n        return y;\n    }\n${page(["move(1)"])}</program>\n`;
+    expect(errsOf(src)).toEqual(["E-SQL-011"]);
+  });
+});
+
+describe("r2 item 3 — `sqlite://` reads as impl#1 reads it", () => {
+  test("`sqlite://app.db` names `app.db` (beside the declaring file), `sqlite:///abs/x.db` the absolute path", () => {
+    const one = (db) => `<program db="${db}">\n${E}    function move(a: int)! E {\n        ${q("INSERT INTO log (a) VALUES (${a})")}\n        return 1;\n    }\n${page(["move(1)"])}</program>\n`;
+    expect(compile(one("sqlite://app.db")).core.dbs.map((d) => d.target)).toEqual(["app.db"]);
+    expect(compile(one("sqlite:///abs/x.db")).core.dbs.map((d) => d.target)).toEqual(["/abs/x.db"]);
+    expect(compile(one("sqlite:./app.db")).core.dbs.map((d) => d.target)).toEqual(["./app.db"]);
+    expect(errsOf(one("sqlite://"))).toEqual(["E-SQL-005"]);
+  });
+});
+
+describe("r2 item 5 — the tenant catalogue question passes the §19.10.6 gate", () => {
+  test("while an envelope holds the connection, the startup catalogue query waits for it to end", async () => {
+    const mem = new SQL(":memory:");
+    const order = [];
+    const drv = (strings, ...values) => { order.push(strings.join("?").slice(0, 30)); return mem(strings, ...values); };
+    const host = { connect: () => drv, log: () => {}, respond: plainRespond };   // no tenantRelations: the catalogue is asked of the database
+    const db = rt.connection(host, { driver: "sqlite", target: ":memory:", file: "app.scrml" });
+    const srv = rt.server(host, [], [db]);
+    let release;
+    const hold = new Promise((x) => { release = x; });
+    const env = rt.envelope(db, async () => { await hold; return 1; }, true);
+    await new Promise((x) => setTimeout(x, 5));
+    const health = srv.fetch({ url: "http://localhost/_scrml/health", method: "GET", headers: { get: () => null }, text: async () => "" });
+    await new Promise((x) => setTimeout(x, 20));
+    // the catalogue question has not run inside the open transaction
+    expect(order).toEqual(["BEGIN DEFERRED"]);
+    release();
+    await env;
+    const res = await health;
+    expect(res.status).toBe(200);
+    expect(order[0]).toBe("BEGIN DEFERRED");
+    expect(order[1]).toBe("COMMIT");
+    expect(order[2]).toContain("SELECT m.name AS name");
+    await mem.close();
   });
 });

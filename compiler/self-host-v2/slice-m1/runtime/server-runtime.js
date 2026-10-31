@@ -111,8 +111,88 @@ export function connKey(desc) {
   return "sqlite:" + (abs ? "/" : "") + out.join("/");
 }
 
+// s474 r2 (review of #1699, item 1) — the RUNTIME identity of a SQLite file is its REAL path:
+// `connKey` compares spellings (as analyze.scrml `dbKeyOf` does at compile time), and a spelling
+// can hide a symlink (`./a/../app.db` with `a` a link to another directory names a different
+// file than `./app.db`). Connections are shared by real path, so two scopes on two files never
+// merge; and when two scopes the COMPILER treated as one database (spelling-equal) turn out to be
+// two files, the server refuses to start — the compiler checked an envelope against one database
+// that is really two, so serving would run some of its statements outside the transaction.
+const fsMod = globalThis.process && typeof globalThis.process.getBuiltinModule === "function"
+  ? globalThis.process.getBuiltinModule("node:fs") : null;
+// The path the OS opens, with KERNEL semantics: each component is resolved in turn and a symlink
+// replaced by its target BEFORE the next `..` applies — `./a/../app.db` with `a` a link to
+// `other/sub` is `other/app.db`. (Bun's `fs.realpathSync`, `.native` included, normalizes `..`
+// lexically first and would answer `./app.db` — measured, Bun 1.4.3.) A component that does not
+// exist yet ends the walk: the rest is appended as written (normalized).
+function osPath(p, depth = 0) {
+  if (depth > 40) throw new Error("too many levels of symbolic links: " + p);
+  let cur = "";
+  const segs = p.split("/");
+  for (let i = 0; i < segs.length; i++) {
+    const seg = segs[i];
+    if (seg === "" || seg === ".") continue;
+    if (seg === "..") {
+      cur = cur.slice(0, Math.max(0, cur.lastIndexOf("/")));
+      continue;
+    }
+    const next = cur + "/" + seg;
+    let st = null;
+    try { st = fsMod.lstatSync(next); } catch { st = null; }
+    if (st === null) {
+      const rest = segs.slice(i + 1).filter((x) => x !== "" && x !== ".");
+      return lexical([next, ...rest].join("/"));
+    }
+    if (st.isSymbolicLink()) {
+      const target = fsMod.readlinkSync(next);
+      cur = osPath(target.startsWith("/") ? target : cur + "/" + target, depth + 1);
+    } else {
+      cur = next;
+    }
+  }
+  return cur === "" ? "/" : cur;
+}
+function lexical(p) {
+  const out = [];
+  for (const seg of p.split("/")) {
+    if (seg === "" || seg === ".") continue;
+    if (seg === ".." && out.length > 0) out.pop();
+    else if (seg !== "..") out.push(seg);
+  }
+  return "/" + out.join("/");
+}
+function realKeyOf(host, desc, spellKey) {
+  if (desc.driver !== "sqlite" || spellKey === null) return spellKey;
+  let abs = resolveSqlitePath(host, desc);
+  if (!abs.startsWith("/") && globalThis.process) abs = globalThis.process.cwd() + "/" + abs;
+  if (fsMod === null) return "sqlite-real:" + abs;
+  try {
+    return "sqlite-real:" + osPath(abs);
+  } catch {
+    return "sqlite-real:" + abs;
+  }
+}
+const spellToReal = new WeakMap();
+const defaultSpellToReal = new Map();
+
 export function connection(host, desc) {
-  const key = connKey(desc);
+  const spellKey = connKey(desc);
+  const key = realKeyOf(host, desc, spellKey);
+  if (spellKey !== null) {
+    let s2r = defaultSpellToReal;
+    if (host !== null && typeof host === "object") {
+      s2r = spellToReal.get(host);
+      if (s2r === undefined) {
+        s2r = new Map();
+        spellToReal.set(host, s2r);
+      }
+    }
+    const seen = s2r.get(spellKey);
+    if (seen !== undefined && seen !== key) {
+      throw new Error(`scrml server: two database scopes the compiler read as ONE database (${spellKey}, declared in ${desc.file}) are two different files on this host (${seen.slice(12)} and ${key.slice(12)} — a symbolic link in the path). A \`!\` function's transaction was checked against one database, so the server does not start; write the same path in both scopes, or remove the link`);
+    }
+    s2r.set(spellKey, key);
+  }
   const reg = connRegistry(host);
   if (key !== null && reg.has(key)) return reg.get(key);
   let sql = null;
@@ -174,23 +254,28 @@ function fifoGate(host, desc) {
     }, GATE_SLOW_MS);
     if (slow && typeof slow.unref === "function") slow.unref();
   };
+  // s474 r2 (review item 4): the timer is armed only when the gate is CONTENDED (a waiter exists) —
+  // an uncontended acquisition costs no timer (measured ~15% on concurrent reads when it did)
+  const unwatch = () => {
+    if (slow !== null) clearTimeout(slow);
+    slow = null;
+  };
   return {
     acquire() {
       if (!held) {
         held = true;
-        watch();
         return Promise.resolve();
       }
+      if (slow === null) watch();
       return new Promise((resolve) => waiting.push(resolve));
     },
     release() {
       const next = waiting.shift();
       if (next === undefined) {
         held = false;
-        if (slow !== null) clearTimeout(slow);
-        slow = null;
+        unwatch();
       } else {
-        watch();
+        if (waiting.length > 0) watch(); else unwatch();
         next();   // handed straight to the next in arrival order (still held)
       }
     },

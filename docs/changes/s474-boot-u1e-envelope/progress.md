@@ -160,3 +160,19 @@ concurrent isolation, auto-rollback detection, non-standalone plain) all as expe
   envelope gap; coverage §8.1.1 / §19.10.6 rows. Conformance after r1: PASS 283 / FAIL 241 /
   NOT-TWINNED 685 / UNSUPPORTED 604 (no verdict change; report already current). Acceptance +1 case
   (envelope/neg-nobatch-cross-db-write). spec-coverage-check 0 warnings.
+
+## 2026-10-30 — fix round r2 (PA re-review of 685368a17)
+
+1. Runtime connection key = the file the OS opens (`osPath`: component-wise, a symlink replaced
+   before the next `..`; Bun's `realpathSync`/`.native` normalize `..` lexically — measured: for
+   `root/a/../x.db` with `a → other/sub` Bun answers `root`, while Bun.SQL creates `other/x.db`).
+   A spelling-equal pair (one database to the compiler) that is two files → `createServer` throws
+   at startup; a spelling-different pair that is one file shares one connection + gate. Tests with
+   a real symlink; bite (key back to spelling) fails both.
+2. Client-placed `!` (no transaction of its own) skips the one-database checks unless a server-run
+   function calls it in place (`calledInPlace`). Test + near-miss (server `!` still E-SQL-011).
+3. `sqlite://app.db` named `/app.db` (the `//` kept). §8.1.1 is silent on the URL form; impl#1
+   strips `//` (db-target.ts). Bootstrap now reads it the same (`sqlitePathOf`); SPEC sentence owed:
+   gap g-spec-sqlite-url-form-unspecified-s474 (LOW).
+4. GATE_SLOW_MS timer armed only when a waiter exists.
+5. Test pinning `gatedRun` (catalogue query waits for an open envelope); bite (gatedRun → direct) fails it.
