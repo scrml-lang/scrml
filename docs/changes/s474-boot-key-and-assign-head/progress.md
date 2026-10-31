@@ -89,3 +89,13 @@ Task B — D10:
   `else if`, `for ((x = e))` with `continue`, `&&` short-circuit; printed form; typing; 12 refusals);
   acceptance loop/assign-head-presence, control-flow/{if-assign-head, neg-assign-single-paren,
   neg-assign-argument-in-head}. All slices: 5242 pass / 0 fail; SLICE_CORE=lowered slice-m1 109 / 0.
+
+## 2026-10-30 — Task B committed; verification
+- Hook green on c0277c3a6: 52401 pass / 0 fail (incl. all bootstrap slices). (One earlier attempt died on an
+  impl#1 shard's MEMORY ceiling under machine load — infra, retried unchanged.)
+- bootstrap-conformance: before 34ebef81d PASS 283 / FAIL 241 (1813 attempted); after PASS 283 / FAIL 241 —
+  0 bucket changes, 0 emitted-code changes across all 1813 cases (no conformance case exercises the header key or the
+  kept head). `--check`: current.
+- spec-coverage-check: 0 warnings, 0 violations (totals block refreshed — the S474 post-merge-bot ruling is not wired
+  yet, so the gate still checks the totals). severity.scrml regenerated for W-KEY-001 / E-KEY-001 (`--check` current).
+- CI-only: types-gate OK (unchanged), s34-census --check-new PASS (no §34 rows touched), e2e-render-map 259 / 0.
