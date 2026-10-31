@@ -22,3 +22,15 @@
 ## 5. Runtime finding (surfaced, NOT fixed)
 Dropping the table under the compiled server: the `! -> SqlError` route answers a plain 500 (the failing `?{}` inside a `!` body throws; §19.8.2 says it "SHALL produce a SqlError variant"), and the declared-`!` client stub `JSON.parse`s the 500 text → host backstop (§19.6.8). The `!{}` arm is never entered, imported or local. Fails closed (no cell written, no server text on the client). Pre-existing: the same holds on base for the `.QueryFailed(m) :>` arm, which compiled before this change. Client routing of declared-`!` callees is out of scope per S473 ruling item 3; delivering `QueryFailed(message)` to the client also exposes the driver's message text — both are rulings. Pinned in the test; gap filed.
 The `?{}`-handled-at-the-site shape IS wired: the arm receives `{type:"SqlError", variant:"QueryFailed"}` and `e.variant` reads `QueryFailed` (test).
+
+## 6. Corpus diagnostic differential
+Script (scratch, not in repo): `~/.cache/scrml-agent-tmp/s474-impl1-sqlerror-binder/diag-diff.ts` — compiles every `.scrml` under samples/ examples/ conformance/ stdlib/ benchmarks/ (this worktree) and `/home/bmacs/scrmlMaster/flogence` (read-only; output to ~/.cache) with a BASE compiler (`git archive 34ebef81d`) and a HEAD compiler (`git archive` of this branch at `443784c68`, the code under review; later commits change tests/docs only), both extracted under `~/.cache/scrml/review/s474-sqlerror-binder/`, and compares exit code + diagnostic-code multiset per file.
+- Result: 2927 sources (samples 881, examples 71, conformance 1852, stdlib 54, benchmarks 7, flogence 62); **0 differ**; exit!=0 base 1185 / head 1185.
+- A first run with HEAD = the worktree itself (inside the git repo) and BASE = the extract (outside) showed 33 deltas (E-IMPORT-008 / E-ASYNC-NOT-IN-SCRML / E-NAME-COLLIDES-RESERVED-PREFIX on stdlib and samples): compiler-root-location noise, not this change — gone when both sides are extracts.
+- No corpus file (flogence included) has a `! -> SqlError` callee handled by `_ e :>` today, so the delta is expected empty: the change is newly-accepting only on a shape the corpus does not yet contain.
+
+## 7. Residuals observed (pre-existing, not changed)
+- One-line `match e { .Unit :> … }` (unit-variant arm first) inside a `!{}` arm is E-SCOPE-001 `match` for ANY enum, client or server (`g-impl1-match-expr-in-bang-arm-client-fn-s473`; it is not client-only). Named binders `.V(field: x)` parse.
+- `match e { .QueryFailed(m) :> … }` (positional) inside the arm is E-TYPE-027 (codegen cannot see the subject's enum); named `.QueryFailed(message: m)` compiles and lowers `.data.message`.
+- `.QueryFailed(m) :>` directly on an IMPORTED `! -> SqlError` call is E-TYPE-027 (base too); local is fine.
+- Block `match e { … }` statement inside a `{ }` arm body is "an expression the compiler does not model" (E-TYPE-031) for any enum.

@@ -255,6 +255,24 @@ describe("S474 — `_ e :>` on a `! -> SqlError` callee is typed (§18.6.1): imp
     expect(bad.codes).toEqual(["E-TYPE-031"]);
   });
 
+  test("`match e` over the SqlError variants compiles, and a named payload binder reads the declared field (§19.8.1 `message`)", () => {
+    const out = compileProject(VIEW("", `server function srvMatch() {
+      const v = fetchLocal() !{ _ e :> match e { .QueryFailed(message: m) :> m, else :> "o" } }
+      const w = listArcs() !{ _ e :> match e { .ConstraintViolation(field: f) :> f, else :> "o" } }
+      return "" + v.length + w.length
+    }`));
+    expect(out.codes).toEqual([]);
+    const server = readFileSync(resolve(out.outDir, "viewapp/view.server.js"), "utf8");
+    expect(server).toMatch(/=== "QueryFailed"\) \{ const m = _scrml_match_\d+\.data\.message;/);
+    expect(server).toMatch(/=== "ConstraintViolation"\) \{ const f = _scrml_match_\d+\.data\.field;/);
+    // A variant SqlError does not declare is refused.
+    const bad = compileProject(VIEW("", `server function srvBad() {
+      const v = fetchLocal() !{ _ e :> match e { .Nope(x: y) :> y, else :> "o" } }
+      return v.length
+    }`));
+    expect(bad.codes).toEqual(["E-TYPE-031"]);
+  });
+
   test("a program that declares its own `SqlError` enum keeps it (the built-in set is not substituted)", () => {
     const out = compileProject(VIEW(`type SqlError:enum = { Mine }`, `function loadMine() {
       @fromLocal = fetchLocal() !{ _ e :> { @localSeen = e is .QueryFailed ? "y" : "n"; return } }
