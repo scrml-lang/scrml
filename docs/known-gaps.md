@@ -27,14 +27,11 @@
 
 ## §0 At-a-glance — open-gap inventory (counts)
 
-| Severity | Open (owed by impl#1, the TS compiler) | Carried (owed by the bootstrap; xfail on impl#1) |
-|---|---|---|
-<!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 269 | 5 |
-| MED | 747 | 8 |
-| LOW | 674 | 0 |
-| Nominal (spec-ahead-of-impl) | 7 | 0 |
-<!-- @generated:gap-counts END -->
+> **The counts table moved to [`docs/generated/gap-counts.md`](generated/gap-counts.md) (S474).** It is derived
+> from the `@gap` markers in this file and regenerated on main after every merge by
+> `.github/workflows/generated-regen.yml` (`bun scripts/state.ts --write`). A PR never edits it — CI
+> refuses a PR that modifies `docs/generated/**` — so a PR that files or resolves gaps no longer
+> conflicts with the bot. `bun scripts/state.ts` prints the live counts for any tree.
 
 ### g-impl1-navigate-via-peer-inside-transaction-not-refused-s473 — the S473 refusal of `navigate()` inside a `transaction { }` block (E-TRANSACTION-CONTROL-FLOW, `lint-transaction.ts`) sees only a `navigate()` written in the block itself. A server function called inside the block that navigates (an in-process peer, `transaction { ?{…}.run(); finish() }` with `function finish() { navigate("/done") }`) is not refused: at run time its navigation signal leaves the block, the block ROLLS BACK (§19.10.3), and the browser is still sent the redirect, so the block's writes are lost with no error. That is the silent shape the ruling forbids, reached one call away — `NEW S473 (review round of #1679; the residual of the transaction ruling); MED; open`
 
@@ -900,6 +897,20 @@ Repro: `~/.cache/scrml/review/s472-backfill/repros/banner-survives-producer.sh`.
 <!-- @gap id=g-merge-driver-union-rehomes-entry-under-new-section-s472 sev=LOW status=open locus=scripts/git-merge-generated.ts(unionEntryAdditions — no section-heading check) prov=review:S472-backfill(#1454) -->
 
 Repro: `~/.cache/scrml/review/s472-backfill/repros/union-misfiles-entry.sh`. No entry is lost and the gap-counts are correct, but the entry's section-level provenance (date, change dir, probe claims) is wrong. Fix: refuse the union when either insertion contains a `## ` heading, which falls back to a plain conflict.
+
+### g-ci-generated-blocks-in-hand-edited-files-dirty-s474 — the post-merge bot still rewrites derived content that a PR may also carry, so a bot regen can still make an open PR DIRTY on GitHub (GitHub's merge runs no custom merge driver) — `NEW S474 (lane s474-ci-windows-filter-and-regen-dirty); MED; open`
+
+The cause, confirmed: after #1702 (a bot regen) landed, #1699 and #1701 went DIRTY and left the merge queue, while a local `git merge origin/main` merged cleanly. The repo's merge driver resolved locally what GitHub's plain 3-way could not. With the driver disabled, #1701 `7bbd04ee5` × main `548cd4824` (base `5318337bb`) conflicts in ONE hunk, the `@generated:gap-counts` LOW row (`671` against the bot's `667`). #1699 `8cde7879e` conflicts in the same block. The branches carried their own counts because their commits ran `state.ts --write`, and because the driver regenerates gap-counts in every local merge of main. S474 r2 fixed the two blocks that conflicted: gap-counts and recent-sessions moved to `docs/generated/`, which only the bot writes, and CI's `Bot-owned generated files untouched` step refuses a PR that modifies them.
+
+Still exposed to the same class:
+- **(a) Derived content inside hand-edited files:** `compiler/SPEC-INDEX.md` (`spec-index-totals`, and the Lines/Size cells of every Sections row, which a PR adding a § must edit in the same row) and `docs/bootstrap-spec-coverage.md` `coverage-totals`.
+- **(b) Wholly generated files a PR can still commit:** `docs/FACTS.md`, `docs/bootstrap-conformance.md`, and `compiler/self-host-v2/severity.scrml`, which a PR MUST regenerate when a §34 change alters an answer.
+- **(c) The phase-2 `--regen` path of the local driver** (`scripts/git-merge-generated.ts` PRODUCERS) still writes FACTS / SPEC-INDEX / bootstrap-conformance into a PR branch.
+
+Proposed: move each (a) block into `docs/generated/`. The SPEC-INDEX row cells need a design: the hand-written key and summary would stay, and the generated ranges would go to a sibling table. Move the (b) files there except severity.scrml, which is code. Drop the (c) PRODUCERS for moved files. Then extend `scripts/bot-owned-untouched.sh` to them. Open PRs that still carry those files need a one-time `git checkout origin/main -- <file>` first.
+
+Related but a different class, not bot-caused: two PRs that each insert a gap entry at the same spot in this ledger also conflict on GitHub. The driver unions them only locally.
+<!-- @gap id=g-ci-generated-blocks-in-hand-edited-files-dirty-s474 sev=MED status=open locus=compiler/SPEC-INDEX.md(spec-index-totals + Sections-row Lines/Size)+docs/bootstrap-spec-coverage.md(coverage-totals)+docs/FACTS.md+docs/bootstrap-conformance.md+scripts/git-merge-generated.ts(PRODUCERS)+scripts/bot-owned-untouched.sh(BOT_OWNED) prov=lane:s474-ci-windows-filter-and-regen-dirty(git merge-file of 7bbd04ee5/5318337bb/548cd4824, driver off) -->
 
 ### g-ci-test-dir-ownership-unchecked-s472 — CI runs hand-listed test dirs; a test file in a NEW `compiler/tests/<dir>/` or `compiler/self-host-v2/slice-<new>/` runs in no blocking job and no hook, and `ci-shards.ts reconcile` cannot see it (it enumerates only the dirs it is passed) — the class of g-e2e-render-map-tier-runs-in-no-ci-job-at-all — `NEW S472; LOW; open`
 
