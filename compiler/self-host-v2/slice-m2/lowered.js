@@ -75,7 +75,9 @@ export function frontEnd(mods, files, entry, opts = {}) {
   const asts = linked.files;
   const next = linked.nextId;
   const t1 = performance.now();
-  const tp = mods.analyze.analyze(asts, entry);
+  // s474 r1 (review F1): `opts.keyBase` — the files' root under the PROJECT root, which the per-file
+  // output keys hash from (core.scrml fileKeyPath); the reported file names stay `f.path`
+  const tp = mods.analyze.analyzeKeyed(asts, entry, opts.keyBase ?? "");
   // s469 — a statement a later phase refuses is not also E-STMT-NO-EFFECT (parse.scrml withoutRefusedNoEffect)
   const parseDiags0 = mods.parse.withoutRefusedNoEffect(linked.diags, tp.diags);
   // s473 D28 — the named-refusal table (refusals.scrml): in a file that already fails, a construct
@@ -266,7 +268,7 @@ export function frontEndStdlib(mods, files, entry, opts = {}) {
   const readFroms = opts.importFroms ?? importFroms(mods);
   for (;;) {
     const std = stdlibSources(mods, files, { stdlibRoot: opts.stdlibRoot, exclude, importFroms: readFroms });
-    const r = frontEnd(mods, [...files, ...std.sources.map((s) => ({ path: s.path, src: s.src }))], entry, { stdlibPaths: std.sources.map((s) => s.path) });
+    const r = frontEnd(mods, [...files, ...std.sources.map((s) => ({ path: s.path, src: s.src }))], entry, { stdlibPaths: std.sources.map((s) => s.path), keyBase: opts.keyBase });
     const bad = new Map(); // module → its Error diagnostics
     for (const d of r.diags) {
       if (!isError(d) || !String(d.file ?? "").startsWith(prefix)) continue;

@@ -175,18 +175,75 @@ export type ImportReader = (path: string, src: string) => string[];
  * `overlay` (absolute path → text) stands in for the disk: an editor's unsaved buffers. A path in
  * the overlay is read from it (and need not exist on disk); every other path is read from disk.
  */
-export function sourceClosure(readFroms: ImportReader, entryAbs: string, overlay?: ReadonlyMap<string, string>): string[] {
+export type ClosureAlias = { importer: string; spelling: string; first: string };
+
+/**
+ * s474 r1 (review F2): one file on disk is ONE module. A file reached under a second spelling — a
+ * symlinked directory, or another letter case on a case-insensitive file system — is the file
+ * already in the closure: `realpathSync.native` (which also gives macOS / Windows their on-disk case)
+ * names it, and only its FIRST spelling joins the closure. (S474 door 3 keys a component's output by
+ * its file, so two spellings would otherwise be two components with two keys, silently.) The front
+ * end resolves an import by its path text, so the second spelling cannot be bound to the first
+ * module there; each one is reported in `aliases` (when given), and compileSource refuses the
+ * build with it — import the file by one spelling.
+ */
+export function sourceClosure(readFroms: ImportReader, entryAbs: string, overlay?: ReadonlyMap<string, string>, aliases?: ClosureAlias[]): string[] {
   const seen = new Set<string>();
-  const todo = [entryAbs];
+  const byReal = new Map<string, string>(); // realpath -> the spelling in the closure
+  const order: string[] = [];
+  const todo: Array<{ f: string; importer: string }> = [{ f: entryAbs, importer: "" }];
   while (todo.length > 0) {
-    const f = todo.pop() as string;
+    const { f, importer } = todo.pop() as { f: string; importer: string };
     if (seen.has(f) || !(overlay?.has(f) || existsSync(f))) continue;
     seen.add(f);
+    const real = canonicalPath(f, overlay);
+    const first = byReal.get(real);
+    if (first !== undefined) {
+      aliases?.push({ importer, spelling: f, first });
+      continue;
+    }
+    byReal.set(real, f);
+    order.push(f);
     for (const from of readFroms(f, readSource(f, overlay))) {
-      if ((from.startsWith("./") || from.startsWith("../")) && from.endsWith(".scrml")) todo.push(resolve(dirname(f), from));
+      if ((from.startsWith("./") || from.startsWith("../")) && from.endsWith(".scrml")) todo.push({ f: resolve(dirname(f), from), importer: f });
     }
   }
-  return [...seen];
+  return order;
+}
+
+/** The on-disk identity of `f` (symlinks followed, the stored case); an overlay-only path is itself. */
+function canonicalPath(f: string, overlay?: ReadonlyMap<string, string>): string {
+  if (!existsSync(f)) return f;
+  try {
+    return realpathSync.native(f);
+  } catch {
+    return f;
+  }
+}
+
+/**
+ * s474 r1 (review F1) — the PROJECT root (§21.3): the nearest ancestor of the build's source root
+ * holding `scrml.toml` or `.git`, else the source root itself. The per-file output keys (S474 door 3)
+ * hash each file's path relative to it, so one file keeps one key in every page of the project and as
+ * the import closure grows. If no marker exists, the source root — the closure's common directory —
+ * is the project root (the SPEC's own fallback): keys are then stable across machines, but move when
+ * the closure's common directory moves.
+ */
+export function projectRootOf(sourceRoot: string): string {
+  let d = sourceRoot;
+  for (;;) {
+    if (existsSync(join(d, "scrml.toml")) || existsSync(join(d, ".git"))) return d;
+    const up = dirname(d);
+    if (up === d) return sourceRoot;
+    d = up;
+  }
+}
+
+/** `keyBase` for the front end: the source root's path under the project root, "/"-separated ("" when one). */
+export function keyBaseOf(sourceRoot: string): string {
+  const r = relative(projectRootOf(sourceRoot), sourceRoot);
+  if (r === "" || r.startsWith("..") || isAbsolute(r)) return "";
+  return r.split(sep).join("/");
 }
 
 function commonDir(files: string[]): string {
@@ -450,7 +507,8 @@ export async function compileSource(
   const { frontEndStdlib, STDLIB_ROOT, importFroms } = await import("../compiler/self-host-v2/slice-m2/lowered.js");
   // one memoised import reader for the closure AND the front end's stdlib search (#1658 review F2)
   const readFroms: ImportReader = importFroms(boot.mods);
-  const abs = sourceClosure(readFroms, entryAbs, overlay);
+  const aliases: ClosureAlias[] = [];
+  const abs = sourceClosure(readFroms, entryAbs, overlay, aliases);
   if (abs.length === 0) throw new Error(`no such file: ${entryAbs}`);
   const root = commonDir(abs);
   const toRel = (f: string) => relative(root, f).split(sep).join("/");
@@ -468,7 +526,20 @@ export async function compileSource(
   // s471: the `scrml:` stdlib modules the program imports join the compile as source (lowered.js
   // frontEndStdlib); one that does not compile on the bootstrap is withdrawn, and its import refused
   // by name (E-BOOTSTRAP-UNSUPPORTED at the import) — with WHY reported here, at its first error.
-  const fe = frontEndStdlib(boot.mods, files, toRel(entryAbs), { stdlibRoot: opts.stdlibRoot, importFroms: readFroms });
+  // s474 r1 (review F2): a file imported under two spellings is refused (one module per file on disk)
+  if (aliases.length > 0) {
+    for (const a of aliases) {
+      diagnostics.push({
+        severity: "error", code: "E-BOOTSTRAP-UNSUPPORTED",
+        message: `\`${shown(a.spelling)}\` is the file \`${shown(a.first)}\` (one file on disk — a symlink, or another letter case), imported under a second spelling — a file is one module, and the bootstrap resolves an import by its path text, so it cannot bind the second spelling to it; import the file by one spelling`,
+        file: a.importer || undefined,
+      });
+    }
+    return result(false);
+  }
+  // s474 r1 (review F1): the per-file output keys hash from the PROJECT root (keyBaseOf); the file
+  // names the front end reports (and diagnostics show) stay relative to the source root
+  const fe = frontEndStdlib(boot.mods, files, toRel(entryAbs), { stdlibRoot: opts.stdlibRoot, importFroms: readFroms, keyBase: keyBaseOf(root) });
   const withdrawn: Diagnostic[] = [];
   for (const r of fe.stdlib.refused as Array<{ module: string; direct: boolean; diags: any[]; sources: Array<{ path: string; src: string; abs: string }> }>) {
     // a module only another stdlib module imports is reported through that one (its import there is the first error)
@@ -669,7 +740,10 @@ async function dev(file: string, opts: { outDir?: string; port: number; format: 
     server = null;
     if (r.server) {
       const mod = await import(pathToFileURL(join(r.outDir, "program.server.js")).href + "?v=" + generation);
-      server = mod.createServer({ root: dirname(entryAbs) });
+      // `dev: true` — this is the DEV build (S474 ruling 2 as amended, "capability over limitation"
+      // item 3): a failed query's driver text stays in the failure the client receives. A deployed
+      // `compile` output is served by its own host, which does not pass it: production, blanked.
+      server = mod.createServer({ root: dirname(entryAbs), dev: true });
     }
     log(`✓ ${reason}: compiled ${shown(entryAbs)} in ${Math.round(performance.now() - t)} ms → ${shown(r.outDir)}`);
     for (const c of clients) { try { c.enqueue("data: reload\n\n"); } catch { clients.delete(c); } }

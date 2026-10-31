@@ -47,7 +47,7 @@ ${
              DeclKind, HostCall, HostFn, HostBind, HostSrc, HostArg, HostProp, SeqFn, BindKind, Validator, SurfaceProp, ValidityOf, Persist, PersistStore, CoreProgram,
              SqlKind, SqlTables, SqlColumns, Db, Driver, DbLoad, Envelope,
              CssPart, CssDecl, StyleRule, CssImport, ScopeSheet,
-             mkSym, noGrants, replaceGrant, typeDefSym, validityInst, validityDecl, plainHead } from "./core.scrml"
+             mkSym, noGrants, replaceGrant, typeDefSym, validityInst, validityDecl, plainHead, declScopeKey } from "./core.scrml"
     import { ASpan, BinOp, UnOp, AExpr, AProp, AExprK, AStmt, ABlock, AStmtK, AEffect, AType, ATypeK,
              ATypeField, AVariant, ATypeBody, ATypeDecl, AParam, AFn, AImportName, AImport,
              AAttrValue, AAttr, AElem, ANode, ANodeK, ADeclAttr, AStateChild, ADeclChild, ADecl, AValArg, AValidator,
@@ -1055,6 +1055,7 @@ ${
                 }
             }
             let imported: string[] = []
+            let importedFrom: string[] = []
             for (const imp of importsOfItems(f.items)) {
                 const target: string = importTarget(f.path, imp.from, paths)
                 for (const n of imp.names) {
@@ -1062,13 +1063,29 @@ ${
                         if (mine.indexOf(n.name) >= 0) {
                             st = addDiag(st, f.path, n.span, "E-SCOPE-010", "`" + n.name + "` is imported from `" + imp.from + "` and also declared in this file — a name is bound once in file scope (duplicate binding in file scope, §7.6); rename one, or drop the import")
                         } else {
-                            if (imported.indexOf(n.name) >= 0) {
-                                st = addDiag(st, f.path, n.span, "W-IMPORT-001", "`" + n.name + "` is already imported by an earlier import in this file — this later import wins (§41.7); remove the duplicate, or rename one")
-                                names = unbound(names, n.name)
+                            const at: int = imported.indexOf(n.name)
+                            if (at >= 0) {
+                                const earlier: string = importedFrom[at]
+                                // s474 (door 3): two USER files may each export a name now; importing
+                                // both into ONE file binds it twice in that file's scope — refused
+                                // here, at the later import (was: refused at the second exporter, S473)
+                                if (earlier != target && !isStdlibPath(earlier) && !isStdlibPath(target)) {
+                                    // s474 r1 (review F3): no cascade. The build already fails here; the
+                                    // EARLIER import keeps the name (scopeFrom takes the first entry of a
+                                    // kind), and the refused one's entries follow it, so a use of the name
+                                    // of EITHER kind resolves — never also E-SCOPE-001 ("this file does not
+                                    // import it") for a name this file does import
+                                    st = addDiag(st, f.path, n.span, "E-SCOPE-010", "`" + n.name + "` is already imported into this file from `" + earlier + "`, and this import brings another `" + n.name + "` from `" + target + "` — two user files may each export one name, but one file binds a name once (duplicate binding in file scope, §7.6; ruled S474); import one of them here, or rename one of the exports")
+                                    names = names.concat(exportedEntries(own, target, n.name))
+                                } else {
+                                    st = addDiag(st, f.path, n.span, "W-IMPORT-001", "`" + n.name + "` is already imported by an earlier import in this file — this later import wins (§41.7); remove the duplicate, or rename one")
+                                    names = unbound(names, n.name).concat(exportedEntries(own, target, n.name))
+                                }
                             } else {
                                 imported = imported.concat([n.name])
+                                importedFrom = importedFrom.concat([target])
+                                names = names.concat(exportedEntries(own, target, n.name))
                             }
-                            names = names.concat(exportedEntries(own, target, n.name))
                         }
                     }
                 }
@@ -18917,15 +18934,14 @@ ${
     //     pairing (`<card>` beside `fn card`, `type T` beside `fn T`, two
     //     declarations, two types): E-SCOPE-010 (§7.6, ruled S473 "`<card>`
     //     beside `fn card`: REFUSED") — fileNameClashes, dupConsts;
-    //   - s473 r2 #5 (narrowed to exported names): one name EXPORTED by two USER
-    //     files of one program, whatever the two name: E-SCOPE-010 (§7.6) —
-    //     fileNameClashes; a private name never collides across files;
-    //   - s473: two COMPONENTS (declarations with `renders`) of one name in two
-    //     files of one program: E-COMPONENT-NAME-DUPLICATE (§9.1 DQ-7, §21.2;
-    //     ruled S473 "Same-name components across files … REFUSED") — dupDecls.
-    //     Two declarations of one name in two files that are not both components
-    //     and not both exported user declarations stay the bootstrap limit
-    //     E-BOOTSTRAP-UNSUPPORTED (legal by the ruling when private);
+    //   - s474 (door 3, "Same-name components across files, and two files
+    //     exporting one name: INTERIM … always per-file qualified"): two files
+    //     may each declare or export one name — a component included; a user
+    //     declaration's output is keyed by its file (core.scrml scopeKey). Two
+    //     same-named exports imported into ONE file: E-SCOPE-010 at the later
+    //     import (linkage). (Was S473: E-SCOPE-010 at the second exporter, and
+    //     E-COMPONENT-NAME-DUPLICATE for two components.) dupDecls keeps only
+    //     the fail-closed file-tag collision (E-BOOTSTRAP-UNSUPPORTED);
     //   - where no ruling / SPEC sentence names one — a handle or a program
     //     cell named like a visible declaration, two fields of one
     //     declaration, two parameters of one name, a redeclaration inside an
@@ -18999,21 +19015,17 @@ ${
         return false
     }
 
-    // s473 — ONE name, ONE binding: in a file, whatever it names; across the
-    // program, for EXPORTED names. §7.6 (S473): "A file-scope name is bound once
-    // in its file, whatever it names". S473 round 2 #5, narrowed (ruled S473
-    // "'one name per program' narrowed to exported names": "The program-wide
-    // one-name rule covers only names a file exports: two user files exporting
-    // the same name is E-SCOPE-010. A non-exported (private) name never collides
-    // with a name in another file"). The bindings: a user declaration, a type, a
+    // s473 — ONE name, ONE binding, in a file, whatever it names. §7.6 (S473): "A
+    // file-scope name is bound once in its file, whatever it names". (S473 round 2
+    // #5's program-wide rule for EXPORTED names — "two user files exporting the
+    // same name is E-SCOPE-010" — is lifted by s474, door 3: "two files exporting
+    // one name: INTERIM"; see bindingsClash. Importing two of them into one file
+    // is linkage's E-SCOPE-010.) The bindings: a user declaration, a type, a
     // function, a file-scope constant, a program cell (never exported). Two
-    // bindings CLASH when they share a name and sit in one file, or are both
-    // EXPORTED from two USER files (a stdlib file's names are not user
-    // declarations; a stdlib file still binds each name once IN its file).
+    // bindings CLASH when they share a name and sit in one file.
     // Each binding after the first of a clash gets ONE report, here, unless:
     //   - another pass already reports AT it (s473 r2 review LOW-1: no two reports
-    //     at one span): dupFns (a later function in one file), dupDecls (two
-    //     components, or another cross-file declaration pair, in two files),
+    //     at one span): dupFns (a later function in one file),
     //     dupFields (a later cell, or a cell named like a visible declaration),
     //     dupConsts (a constant beside a cell of its file, E-NAME-COLLIDES-STATE);
     //   - its file imports the name (from a user or a stdlib file) and it is a
@@ -19023,8 +19035,7 @@ ${
     //     name, from ANY source, is reported here, at the cell (review MED-1);
     //   - every earlier binding it clashes with is a pair another pass reports
     //     (an OWNED pair): a cell and a visible declaration (dupFields, at the
-    //     cell), a constant and a cell of one file (dupConsts, at the constant),
-    //     or a binding whose file imports the name from `n`'s file (linkage).
+    //     cell), a constant and a cell of one file (dupConsts, at the constant).
     // One owned pair never hides an unowned one (review LOW-1). The report names
     // the first binding it clashes with, by file:line:col (review LOW-5). A local,
     // a parameter, a loop binder shadow (§7.3.3) and are never compared; a host
@@ -19081,10 +19092,13 @@ ${
         return fileRank(files, m.file) < fileRank(files, n.file)
     }
 
-    // Do `m` and `n` (one name) clash: one file, or both EXPORTED from two USER files?
+    // Do `m` and `n` (one name) clash? Only in ONE file. s474 (door 3, "two files exporting one
+    // name: INTERIM"): two files may each export a name — each import names its file, so it
+    // resolves to one of them; the output names each per file (print.scrml's NameSupply mints
+    // one JS name per Sym; a declaration's names carry its file key). Two of them imported into
+    // ONE file is the collision, reported there (linkage).
     fn bindingsClash(m: FileName, n: FileName) -> boolean {
-        if (m.file == n.file) return true
-        return m.exported && n.exported && !isStdlibPath(m.file) && !isStdlibPath(n.file)
+        return m.file == n.file
     }
 
     // "file:line:col" of `offset` in `file` (parse.scrml records each file's line starts).
@@ -19128,23 +19142,6 @@ ${
         return false
     }
 
-    // Does `file` import `name` from the file `from` (a plain `import { … }`, §21.3)?
-    fn importsNameFrom(files: FileAst[], file: string, name: string, from: string) -> boolean {
-        const paths: string[] = filePaths(files)
-        for (const f of files) {
-            if (f.path == file) {
-                for (const imp of importsOfItems(f.items)) {
-                    if (importTarget(f.path, imp.from, paths) == from) {
-                        for (const x of imp.names) {
-                            if (x.name == name) return true
-                        }
-                    }
-                }
-            }
-        }
-        return false
-    }
-
     // The `from` of an import in `file` that brings `name` into its scope — a
     // plain `import` whose target (a user OR a stdlib file) exports it — else "".
     fn importBringing(files: FileAst[], lk: Linkage, file: string, name: string) -> string {
@@ -19172,7 +19169,7 @@ ${
             }
             return false
         }
-        if (n.kind == "decl") return dupDeclReportsAt(files, lk, t, n.nid)
+        // (a declaration: dupDecls reports only a CROSS-file pair — s474 — which never clashes here)
         if (n.kind == "const") {
             for (const m of ns) {
                 if (m.kind == "cell" && m.file == n.file && m.name == n.name) return true
@@ -19192,7 +19189,6 @@ ${
     fn pairOwned(files: FileAst[], lk: Linkage, t: Tables, m: FileName, n: FileName) -> boolean {
         if (m.kind == "cell" && n.kind == "decl" && visibleDeclNamed(lk, t, m.file, m.name)) return true
         if (m.kind == "const" && n.kind == "cell" && m.file == n.file) return true
-        if (m.file != n.file && m.kind != "cell" && importsNameFrom(files, m.file, m.name, n.file)) return true
         return false
     }
 
@@ -19213,11 +19209,7 @@ ${
                         }
                     }
                     if (first is given) {
-                        if (first.file == n.file) {
-                            out = out.concat([mkDiag(n.file, n.span, "E-SCOPE-010", "`" + n.name + "` is already bound in this file by " + first.what + " (at " + placeIn(files, first.file, first.span.start) + ") — a file-scope name is bound once, whatever it names (a declaration, a type, a function, a constant, a cell): duplicate binding in file scope (§7.6; ruled S473); rename one")])
-                        } else {
-                            out = out.concat([mkDiag(n.file, n.span, "E-SCOPE-010", "`" + n.name + "` is also exported by " + first.what + " (at " + placeIn(files, first.file, first.span.start) + ") — two files of a program SHALL NOT export one name (§7.6; ruled S473 \"one name per program\" narrowed to exported names); rename one, or stop exporting it")])
-                        }
+                        out = out.concat([mkDiag(n.file, n.span, "E-SCOPE-010", "`" + n.name + "` is already bound in this file by " + first.what + " (at " + placeIn(files, first.file, first.span.start) + ") — a file-scope name is bound once, whatever it names (a declaration, a type, a function, a constant, a cell): duplicate binding in file scope (§7.6; ruled S473); rename one")])
                     } else if (n.kind == "cell" && imported != "") {
                         // s473 r2 review MED-1: a cell beside an import of its name, whatever the source
                         out = out.concat([mkDiag(n.file, n.span, "E-SCOPE-010", "`" + n.name + "` is imported from `" + imported + "` and also bound in this file by " + n.what + " — a name is bound once in file scope, an import included (§7.6); rename the cell, or drop the import")])
@@ -19272,116 +19264,43 @@ ${
     }
 
     // Two user declarations of one name in two FILES (one file: fileNameClashes,
-    // E-SCOPE-010). Every USE resolves per file (s472, declNamed), but the
-    // program's OUTPUT names a component by its bare name — §9.1 DQ-7 stamps a
-    // component's root `data-scrml="ConstructorName"` and scopes its CSS
-    // `@scope ([data-scrml="<name>"])`. s473: two COMPONENTS of one name in one
-    // program are refused by the language — §9.1 DQ-7 (S473): "Two components of
-    // one name in one program SHALL be a compile error (E-COMPONENT-NAME-DUPLICATE),
-    // whichever files declare them" (ruled S473 "Same-name components across
-    // files … REFUSED"). Any other cross-file pair (dupDeclKind):
-    //   - both EXPORTED from user files: E-SCOPE-010 in fileNameClashes (§7.6,
-    //     S473 r2 #5 narrowed to exported names);
-    //   - its file imports the name: linkage's E-SCOPE-010, at the import (review LOW-2);
-    //   - else (a private one, or a stdlib file in the pair): the bootstrap limit
-    //     E-BOOTSTRAP-UNSUPPORTED, fail closed — the ruling makes a private pair
-    //     legal, but two non-component declarations of one name in one output are
-    //     not in the bootstrap (g-boot-decl-same-name-noncomponent-s473).
+    // E-SCOPE-010). s474 (door 3, user-voice-scrml.md "⭐ RULED — permanent-restrictions
+    // re-review: the four one-way doors", item 3): "Same-name components across files, and two
+    // files exporting one name: INTERIM. The CSS scope key and output names are always per-file
+    // qualified, not only on a collision." Every USE resolves per file (s472, declNamed), and
+    // every OUTPUT name of a user declaration — its root's `data-scrml`, its sheet's `@scope`,
+    // its `<template>` ids, its module-level bindings — is its per-file key `<name>~<file tag>`
+    // (core.scrml scopeKey, lower.scrml declKey), so two files may each declare a `<card>`,
+    // a component or not, exported or not. (Was: E-COMPONENT-NAME-DUPLICATE for two components,
+    // the bootstrap limit for any other pair.)
+    // What stays: FAIL CLOSED if two declarations of one name in two files get ONE key — the
+    // file tag is a hash of the path (two independent 32-bit hashes, core.scrml fileTag), so two
+    // paths can share it; one key would merge their style scopes and their templates. A
+    // collision is rare, not unreachable (s474 r1, review F6) — and never silent:
+    // E-BOOTSTRAP-UNSUPPORTED, rename one (or move a file).
     fn dupDecls(files: FileAst[], t: Tables, lk: Linkage) -> Diag[] {
         let out: Diag[] = []
-        for (const d of t.decls) {
-            const k: string = dupDeclKind(files, lk, t, d.nid)
-            if (k != "") {
-                const first: DeclInfo = dupDeclFirst(t, d.nid)
-                if (k == "component") {
-                    out = out.concat([mkDiag(d.file, d.span, "E-COMPONENT-NAME-DUPLICATE", "the component `<" + d.sym.hint + ">` is also declared in `" + first.file + "` — a component's name is its CSS scope key (`data-scrml=\"" + d.sym.hint + "\"`, §9.1 DQ-7), so two components of one name in one program would share one style scope; a program has one component of each name, whichever files declare them (§9.1, §21.2; ruled S473) — rename one")])
-                } else {
-                    out = out.concat([mkDiag(d.file, d.span, "E-BOOTSTRAP-UNSUPPORTED", "`<" + d.sym.hint + ">` is also declared in `" + first.file + "` — two declarations of one name in one program, not both components and not both exported user declarations, are not in the bootstrap (the output names a declaration by its bare name); the language allows a private pair (§7.6, S473) — rename one")])
-                }
-            }
-        }
-        return out
-    }
-
-    // The first earlier user declaration with the name of the declaration `nid`
-    // (t.decls order); the declaration itself when there is none.
-    fn dupDeclFirst(t: Tables, nid: int) -> DeclInfo {
         let users: DeclInfo[] = []
         for (const d of t.decls) {
             if (d.sym.id != t.program.id) users = users.concat([d])
         }
-        let names: string[] = []
-        for (const d of users) { names = names.concat([d.sym.hint]) }
         let j = 0
         while (j < users.length) {
-            if (users[j].nid == nid) {
-                const i: int = earlierSame(names, j)
-                if (i >= 0) return users[i]
-                return users[j]
+            const d: DeclInfo = users[j]
+            let i = 0
+            let hit = false
+            while (i < j && !hit) {
+                const m: DeclInfo = users[i]
+                const kb: string = t.css.keyBase
+                if (m.file != d.file && m.sym.hint == d.sym.hint && declScopeKey(kb, m.file, m.sym.hint) == declScopeKey(kb, d.file, d.sym.hint)) {
+                    out = out.concat([mkDiag(d.file, d.span, "E-BOOTSTRAP-UNSUPPORTED", "`<" + d.sym.hint + ">` is also declared in `" + m.file + "`, and the two files' paths hash to one file tag, so both declarations would get the one output key `" + declScopeKey(kb, d.file, d.sym.hint) + "` (one style scope, one template) — the bootstrap keys a declaration's output by its file (s474); rename one, or move one file")])
+                    hit = true
+                }
+                i = i + 1
             }
             j = j + 1
         }
-        return t.decls[0]
-    }
-
-    // What dupDecls reports AT the declaration `nid`: "component", "limit", or ""
-    // (nothing — no earlier declaration of its name in another file, or the pair
-    // is fileNameClashes' / linkage's).
-    fn dupDeclKind(files: FileAst[], lk: Linkage, t: Tables, nid: int) -> string {
-        let d: DeclInfo | not = not
-        for (const x of t.decls) {
-            if (x.nid == nid && x.sym.id != t.program.id) d = x
-        }
-        if (d is not) return ""
-        const first: DeclInfo = dupDeclFirst(t, nid)
-        if (first.nid == nid || first.file == d.file) return ""
-        // r2 LOW-B: a declaration its file also imports is linkage's (one report), a component included
-        if (importBringing(files, lk, d.file, d.sym.hint) != "") return ""
-        if (declRenders(files, first.nid) && declRenders(files, d.nid)) return "component"
-        if (isStdlibPath(first.file) || isStdlibPath(d.file)) return "limit"
-        // r2 LOW-A: an EXPORTED declaration with an earlier exported user declaration of its name in
-        // another file is fileNameClashes' E-SCOPE-010 — whatever private declaration came first
-        if (declExported(lk, d.file, d.sym.hint)) {
-            for (const x of t.decls) {
-                if (x.sym.id != t.program.id && x.sym.hint == d.sym.hint && x.file != d.file && !isStdlibPath(x.file) && fileOrderBefore(t, x.nid, nid) && declExported(lk, x.file, x.sym.hint)) return ""
-            }
-        }
-        return "limit"
-    }
-
-    // Does the declaration `a` come before the declaration `b` in t.decls (link) order?
-    fn fileOrderBefore(t: Tables, a: int, b: int) -> boolean {
-        for (const x of t.decls) {
-            if (x.nid == a) return true
-            if (x.nid == b) return false
-        }
-        return false
-    }
-
-    fn dupDeclReportsAt(files: FileAst[], lk: Linkage, t: Tables, nid: int) -> boolean {
-        return dupDeclKind(files, lk, t, nid) != ""
-    }
-
-    // s473 — is the user declaration `nid` a COMPONENT (written with `renders`,
-    // §66.15.1) — the declarations that carry a CSS scope key (§9.1 DQ-7)? A
-    // declaration is a top-level item of its file or an item of its `<program>`.
-    fn declRenders(files: FileAst[], nid: int) -> boolean {
-        for (const f of files) {
-            for (const it of f.items) {
-                for (const d of declsOfItem(it)) {
-                    if (d.nid == nid) return d.renders is given
-                }
-                const p: AProgram | not = programOfItem(it)
-                if (p is given) {
-                    for (const pit of p.items) {
-                        for (const d of declsOfItem(pit)) {
-                            if (d.nid == nid) return d.renders is given
-                        }
-                    }
-                }
-            }
-        }
-        return false
+        return out
     }
 
     // Two functions of one name. In one file that is a file-scope duplicate:
@@ -27825,7 +27744,13 @@ ${
         if (infos.length < qs.length || rinfos.length < reached.length) return { envs: [], st: st }
         const fsym: Sym = { id: f.sym, hint: f.name }
         const needs: boolean = qs.length >= 2 || tq.runs[i] >= 2 || witnessOf(tq.loops[i]) is given
-        if (!needs) return { envs: [{ fn: fsym, db: infos[0].db, standalone: false }], st: st }
+        // S474 ruling 5: the envelope opens with BEGIN IMMEDIATE when a query it reaches writes
+        // (core.scrml Envelope.writes) — every query of `rinfos` runs inside it, `.nobatch()` included
+        let writes: boolean = false
+        for (const wi of rinfos) {
+            if (wi.kind == SqlKind.SqlWrite) writes = true
+        }
+        if (!needs) return { envs: [{ fn: fsym, db: infos[0].db, standalone: false, writes: writes }], st: st }
         // a client-placed `!` function: its queries run in the server function(s) it calls, each in
         // that function's own envelope — it holds no transaction itself. s474 r2 (review item 2): so
         // the one-database checks below do not apply to it (a client `!` calling one `!` function of
@@ -27886,7 +27811,7 @@ ${
                 found = true
             }
         }
-        return { envs: [{ fn: fsym, db: envDb, standalone: true }], st: st }
+        return { envs: [{ fn: fsym, db: envDb, standalone: true, writes: writes }], st: st }
     }
 
     // The SqlInfo of each atom's site, in atom order (an atom whose site has none is skipped).
@@ -29887,9 +29812,12 @@ ${
         scopes: ScopeSheet[],
         inline: CssInline[],
         bridges: CssBridge[],
+        // s474 r1 (review F1): the build's source root under the project root (core.scrml
+        // fileKeyPath) — every user declaration's output key is declScopeKey(keyBase, file, name)
+        keyBase: string,
     }
 
-    export fn noCssFacts() -> CssFacts { return { charsets: [], imports: [], global: [], scopes: [], inline: [], bridges: [] } }
+    export fn noCssFacts() -> CssFacts { return { charsets: [], imports: [], global: [], scopes: [], inline: [], bridges: [], keyBase: "" } }
 
     type CssPlace:struct = { comp: boolean, decl: Sym, name: string, root: boolean, rootStyled: boolean }
     type CssAcc:struct = { facts: CssFacts, diags: Diag[] }
@@ -29968,7 +29896,7 @@ ${
             let bs: CssBridge[] = a.facts.bridges
             if (!hasBridge(bs, f.sym.id)) bs = bs.concat([{ cell: f.sym, idx: idx }])
             const nf: CssFacts = { charsets: a.facts.charsets, imports: a.facts.imports, global: a.facts.global, scopes: a.facts.scopes,
-                                   inline: a.facts.inline, bridges: bs }
+                                   inline: a.facts.inline, bridges: bs, keyBase: a.facts.keyBase }
             return { parts: [CssPart.CellVar(f.sym)], acc: cssWithFacts(a, nf) }
         }
         return { parts: [], acc: cssDiag(a, file, r.span, "E-THEME-TOKEN-UNKNOWN", "`@" + r.name + "` names no theme token and no declared cell (§65.3.2) — declare `<" + r.name + "…/>` in the program, fix the spelling, or drop the `@` for a literal CSS value") }
@@ -30058,7 +29986,7 @@ ${
             const dr: CssDeclsR = cssDecls(g, prog, at, file, flats, a)
             a = dr.acc
             const nf: CssFacts = { charsets: a.facts.charsets, imports: a.facts.imports, global: a.facts.global, scopes: a.facts.scopes,
-                                   inline: addInline(a.facts.inline, at.decl.id, dr.decls), bridges: a.facts.bridges }
+                                   inline: addInline(a.facts.inline, at.decl.id, dr.decls), bridges: a.facts.bridges, keyBase: a.facts.keyBase }
             return cssWithFacts(a, nf)
         }
         let charsets: string[] = a.facts.charsets
@@ -30099,11 +30027,12 @@ ${
         let globalRules: StyleRule[] = a.facts.global
         let scopes: ScopeSheet[] = a.facts.scopes
         if (at.comp) {
-            if (out.length > 0) scopes = addScope(scopes, at.name, out)
+            // s474 (door 3): the scope key is per-file qualified, always — `file` is the component's own file
+            if (out.length > 0) scopes = addScope(scopes, declScopeKey(a.facts.keyBase, file, at.name), out)
         } else {
             globalRules = globalRules.concat(out)
         }
-        const nf: CssFacts = { charsets: charsets, imports: imports, global: globalRules, scopes: scopes, inline: a.facts.inline, bridges: a.facts.bridges }
+        const nf: CssFacts = { charsets: charsets, imports: imports, global: globalRules, scopes: scopes, inline: a.facts.inline, bridges: a.facts.bridges, keyBase: a.facts.keyBase }
         return cssWithFacts(a, nf)
     }
 
@@ -30193,12 +30122,13 @@ ${
 
     type CssPassR:struct = { facts: CssFacts, diags: Diag[] }
 
-    fn cssPass(g: Globals) -> CssPassR {
+    fn cssPass(g: Globals, keyBase: string) -> CssPassR {
         let prog: DeclSrc | not = not
         for (const ds of g.decls) {
             if (ds.isProgram && ds.info.sym.id == g.program.id) prog = ds
         }
-        let a: CssAcc = { facts: noCssFacts(), diags: [] }
+        const f0: CssFacts = noCssFacts()
+        let a: CssAcc = { facts: { charsets: f0.charsets, imports: f0.imports, global: f0.global, scopes: f0.scopes, inline: f0.inline, bridges: f0.bridges, keyBase: keyBase }, diags: [] }
         const none: Sym = mkSym(0 - 1, "")
         const globalAt: CssPlace = { comp: false, decl: none, name: "", root: false, rootStyled: false }
         // a file's top level (outside `<program>`)
@@ -30872,7 +30802,12 @@ ${
         return linExpr(cx, target, s1)
     }
 
-    export fn analyze(files: FileAst[], entry: string) -> TypedProgram {
+    export fn analyze(files: FileAst[], entry: string) -> TypedProgram { return analyzeKeyed(files, entry, "") }
+
+    // s474 r1 (review F1): `keyBase` = the build's source root under the PROJECT root (§21.3) —
+    // the root the per-file output keys are hashed from (core.scrml fileKeyPath); `""` when the
+    // source root is the project root. The file names the front end reports are not changed.
+    export fn analyzeKeyed(files: FileAst[], entry: string, keyBase: string) -> TypedProgram {
         const st0: AS = { facts: noFacts(), diags: [], nextSym: 0, annots: [], bad: { params: [], fields: [] }, effects: [], pend: [], lifts: [] }
         const ra0: RGlobals = phaseA(files, entry, st0)
         // s472: the file-scope constants' initializers, in order (before any body reads one)
@@ -30887,7 +30822,7 @@ ${
         const rp: RPersists = persistPass(ra.g, files, st)
         st = programNoValue(ra.g, rp.st)
         // s469: the stylesheet (§9.1, §65) — placed by position, its `@name` references resolved
-        const css: CssPassR = cssPass(ra.g)
+        const css: CssPassR = cssPass(ra.g, keyBase)
         let decls: DeclInfo[] = []
         for (const d of ra.g.decls) { decls = decls.concat([d.info]) }
         let fns: FnInfo[] = []

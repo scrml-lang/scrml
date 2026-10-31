@@ -102,23 +102,28 @@ describe("1a — one file-scope name, one binding: E-SCOPE-010 across kinds (§7
   });
 });
 
-describe("1b — two components of one name in one program: E-COMPONENT-NAME-DUPLICATE (§9.1, §21, S473)", () => {
-  test("in two files: refused by the language rule, at the second declaration", () => {
+// s474 (door 3, user-voice-scrml.md "⭐ RULED — permanent-restrictions re-review: the four one-way
+// doors", item 3): "Same-name components across files … INTERIM. The CSS scope key and output names
+// are always per-file qualified." The S473 cross-file refusal pinned here is LIFTED; the output
+// keys are pinned in slice-m4/scope-keys-s474.test.js. (1a's one-file rules are kept.)
+describe("1b — two components of one name in two files: legal (S474 door 3; was E-COMPONENT-NAME-DUPLICATE, S473)", () => {
+  test("in two files: clean", () => {
     const ds = two(`export <card t:string/>\nrenders <div>\${t}</div>\n`, P(`    <card x:string/>\n    renders <p>\${x}</p>`));
-    expect(ds).toEqual([["E-COMPONENT-NAME-DUPLICATE", "app.scrml"]]);
+    expect(ds).toEqual([]);
   });
-  test("the message names the other file and the scope key", () => {
+  test("each keeps its own key: the two roots' `data-scrml` differ, by file", () => {
     const r = frontEnd(mods, [
-      { path: "a.scrml", src: `export <card t:string/>\nrenders <div>\${t}</div>\n` },
-      { path: "app.scrml", src: P(`    <card x:string/>\n    renders <p>\${x}</p>`) },
+      { path: "a.scrml", src: `export <card t:string/>\nrenders <div>#{ .x { color: red; } }\${t}</div>\n` },
+      { path: "app.scrml", src: P(`    <card x:string/>\n    renders <p>#{ .x { color: blue; } }\${x}</p>`) },
     ], "app.scrml");
-    expect(r.diags[0].message).toContain("a.scrml");
-    expect(r.diags[0].message).toContain("data-scrml");
+    expect(r.diags).toEqual([]);
+    const keys = find(r.core, (n) => n.variant === "Static" && n.data && n.data.name === "data-scrml").map((n) => n.data.value);
+    expect(new Set(keys)).toEqual(new Set([mods.core.scopeKey("a.scrml", "card"), mods.core.scopeKey("app.scrml", "card")]));
   });
-  test("two same-named declarations that are NOT both components: unruled — still refused by the bootstrap (fail closed)", () => {
-    expect(two(`export <card t:string/>\n`, P(`    <card x:string/>\n    renders <p>\${x}</p>`))).toEqual([["E-BOOTSTRAP-UNSUPPORTED", "app.scrml"]]);
+  test("two same-named declarations that are NOT both components: clean (was the bootstrap limit)", () => {
+    expect(two(`export <card t:string/>\n`, P(`    <card x:string/>\n    renders <p>\${x}</p>`))).toEqual([]);
   });
-  test("fails closed: no runnable Core is trusted — the code is an Error (§34)", () => {
+  test("the code stays an Error in the table (§34) — the bootstrap no longer emits it", () => {
     expect(mods.severity.severityOf("E-COMPONENT-NAME-DUPLICATE")).toBe("Error");
   });
 });

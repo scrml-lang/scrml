@@ -79,7 +79,7 @@ ${
         ])
 
         const program: Decl = {
-            sym: sProgram, kind: DeclKind.Program, single: true,
+            sym: sProgram, key: sProgram.hint, kind: DeclKind.Program, single: true,
             fields: [fAudit, fSeen], renders: [main], wiring: [], handles: [],
         }
         return { program: sProgram, decls: [program], types: [], fns: [log], server: [], dbs: [], reset: true, sqlError: not, serverCallError: not, css: not, consts: [], loads: [], envelopes: [], head: plainHead() }
