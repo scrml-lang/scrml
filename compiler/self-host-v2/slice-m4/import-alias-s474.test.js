@@ -25,7 +25,9 @@
 //     (one E-BOOTSTRAP-UNSUPPORTED; was a wall of E-PARSE-IMPORT and a spurious E-IMPORT-005).
 
 import { describe, test, expect, beforeAll, afterEach } from "bun:test";
+import { join } from "node:path";
 import { loadM2, frontEnd } from "./harness.js";
+import { frontEndStdlib } from "../slice-m2/lowered.js";
 import { loadProgram, expectNoPageErrors, warmLoadProgram } from "../slice-m1/load-program.js";
 
 let mods;
@@ -131,12 +133,48 @@ describe("aliasing a function, a type, an enum and a constant", () => {
     expect($("#o").textContent).toBe("boxed");
     expect($("#h").textContent).toBe("b");
   });
-  test("a type alias resolves to the declaring file's type: a field it lacks is a type error", () => {
+  // r1 (#1715 review: the weak pin) — exactly E-SCOPE-001 "has no field `nope`", and (F7) the
+  // message names the type by its alias here, with what it is
+  test("a type alias resolves to the declaring file's type: a field it lacks is E-SCOPE-001", () => {
     const T = { path: "t.scrml", src: `\${\n    export type Box:struct = { v: string }\n}\n` };
     const M = useFns(`import { Box as Crate } from "./t.scrml";\n    fn open(c: Crate) -> string {\n        return c.nope;\n    }`, `<p>x</p>`);
     const r = prog([T, M]);
-    expect(errs(r).length).toBeGreaterThan(0);
-    expect(r.diags.map((d) => d.code)).not.toContain("E-TYPE-UNKNOWN");
+    expect(at(r)).toEqual([["E-SCOPE-001", ENTRY]]);
+    expect(errs(r)[0].message).toContain("has no field `nope`");
+    expect(errs(r)[0].message).toContain("`Crate` (`Box`, declared in `t.scrml`)");
+  });
+  // r1 F7: two same-named types aliased apart are named apart in a type error
+  test("F7: a type error between two aliased same-named enums names each by its alias", () => {
+    const A = { path: "a.scrml", src: `\${\n    export type C:enum = { Red, Blue }\n}\n` };
+    const B = { path: "b.scrml", src: `\${\n    export type C:enum = { Red, Blue }\n}\n` };
+    const M = useFns(`import { C as A } from "./a.scrml"; import { C as B } from "./b.scrml";\n    fn f(x: A) -> string {\n        return "a";\n    }\n    fn g() -> string {\n        const y: B = B.Red;\n        return f(y);\n    }`, `<p>\${g()}</p>`);
+    const r = prog([A, B, M]);
+    expect(at(r)).toEqual([["E-TYPE-031", ENTRY]]);
+    const m = errs(r)[0].message;
+    expect(m).toContain("expects `A` (`A` is `C`, declared in `a.scrml`)");
+    expect(m).toContain("this value is `B` (`B` is `C`, declared in `b.scrml`)");
+  });
+  // r1 (#1715 review F1, HIGH — fail-open): an alias used in the wrong KIND of position is
+  // E-SCOPE-001, as the unaliased spelling is (was CLEAN, rendering nothing)
+  test("F1: an aliased TYPE used as a value or a callee is E-SCOPE-001, as unaliased", () => {
+    const T = { path: "t.scrml", src: `\${\n    export type Box:struct = { v: string }\n}\n` };
+    for (const body of [`<p>\${Crate}</p>`, `<p>\${Crate()}</p>`]) {
+      const r = prog([T, useFns(`import { Box as Crate } from "./t.scrml";`, body)]);
+      expect([body, at(r)]).toEqual([body, [["E-SCOPE-001", ENTRY]]]);
+      const plain = prog([T, useFns(`import { Box } from "./t.scrml";`, body.replace("Crate", "Box"))]);
+      expect([body, at(plain)]).toEqual([body, [["E-SCOPE-001", ENTRY]]]);
+    }
+  });
+  test("F1: an aliased COMPONENT used as a value is E-SCOPE-001, as unaliased", () => {
+    const r = prog([CA, useFns(`import { card as c2 } from "./ui/a.scrml";`, `<p>\${c2}</p>`)]);
+    expect(at(r)).toEqual([["E-SCOPE-001", ENTRY]]);
+    const plain = prog([CA, useFns(`import { card } from "./ui/a.scrml";`, `<p>\${card}</p>`)]);
+    expect(at(plain)).toEqual([["E-SCOPE-001", ENTRY]]);
+  });
+  test("F1 control: an alias of a PRIVATE export is E-IMPORT-004 only (no cascade at a use)", () => {
+    const P = { path: "a.scrml", src: `\${\n    fn Card() -> string {\n        return "p";\n    }\n}\n` };
+    const r = prog([P, useFns(`import { Card as C2 } from "./a.scrml";`, `<p>\${C2()}</p>`)]);
+    expect(at(r)).toEqual([["E-IMPORT-004", ENTRY]]);
   });
   test("a constant", async () => {
     const C = { path: "c.scrml", src: `\${\n    export const GREETING = "hello";\n}\n` };
@@ -175,6 +213,19 @@ describe("E-SCOPE-010 applies to LOCAL names", () => {
     const r = prog([L, useFns(`import { one as x, two as x } from "./a.scrml";`, `<p>\${x()}</p>`)]);
     expect(at(r)).toEqual([["E-SCOPE-010", ENTRY]]);
   });
+  // r1 (#1715 review F2, PA ruling — row-C amendment "one local name cannot bind two
+  // declarations"): uniform, a stdlib side included
+  test("F2: two DIFFERENT stdlib exports bound to one local name (one list): E-SCOPE-010, not W-IMPORT-001", () => {
+    const FIXTURE = join(import.meta.dir, "src", "stdlib-s472");
+    const r = frontEndStdlib(mods, [useFns(`import { pub as x, toneName as x } from "scrml:vis";`, `<p>x</p>`)], ENTRY, { stdlibRoot: FIXTURE });
+    expect(r.diags.map((d) => [d.code, d.severity])).toEqual([["E-SCOPE-010", "Error"]]);
+    expect(r.diags[0].message).toContain("one local name cannot bind two declarations");
+  });
+  test("F2: a user export and a stdlib export bound to one local name: E-SCOPE-010", () => {
+    const FIXTURE = join(import.meta.dir, "src", "stdlib-s472");
+    const r = frontEndStdlib(mods, [LIB("a.scrml", "a"), useFns(`import { pub } from "scrml:vis"; import { Card as pub } from "./a.scrml";`, `<p>x</p>`)], ENTRY, { stdlibRoot: FIXTURE });
+    expect(r.diags.map((d) => [d.code, d.severity])).toEqual([["E-SCOPE-010", "Error"]]);
+  });
   test("the SAME export twice under one alias stays the §41.7 W-IMPORT-001 warning", () => {
     const r = prog([LIB("a.scrml", "a"), useFns(`import { Card as C } from "./a.scrml"; import { Card as C } from "./a.scrml";`, `<p>\${C()}</p>`)]);
     expect(r.diags.map((d) => [d.code, d.severity])).toEqual([["W-IMPORT-001", "Warning"]]);
@@ -212,15 +263,57 @@ describe("errors", () => {
     expect(r.diags.map((d) => d.code)).toContain("E-PARSE-IMPORT");
     expect(r.diags.map((d) => d.code)).not.toContain("E-IMPORT-004");
   });
-  test("a namespace import is refused BY NAME — one E-BOOTSTRAP-UNSUPPORTED (§21.3 defines no namespace import)", () => {
+  // r1 F3: INTERIM — "not in the bootstrap yet" (g-boot-namespace-import-unbuilt-s474)
+  test("a namespace import is refused BY NAME, INTERIM — one E-BOOTSTRAP-UNSUPPORTED", () => {
     const r = prog([LIB("a.scrml", "a"), useFns(`import * as m from "./a.scrml";`, `<p>x</p>`)]);
     expect(r.diags.map((d) => d.code)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
     expect(r.diags[0].message).toContain("namespace import");
+    expect(r.diags[0].message).toContain("not in the bootstrap yet");
+    expect(r.diags[0].message).toContain("g-boot-namespace-import-unbuilt-s474");
   });
-  test("a default import is refused BY NAME — one E-BOOTSTRAP-UNSUPPORTED (was 3 E-PARSE-IMPORT + E-IMPORT-005)", () => {
+  // r1 F4 (PA ruling): §21.3 resolves a default import against the export list, and a scrml
+  // file exports no default — E-IMPORT-004, one diagnostic (was E-BOOTSTRAP-UNSUPPORTED; before
+  // that 3 E-PARSE-IMPORT + E-IMPORT-005)
+  test("a default import of a .scrml file is E-IMPORT-004 — one diagnostic", () => {
     const r = prog([LIB("a.scrml", "a"), useFns(`import Card from "./a.scrml";`, `<p>x</p>`)]);
+    expect(r.diags.map((d) => d.code)).toEqual(["E-IMPORT-004"]);
+    expect(r.diags[0].message).toContain("`Card`: a .scrml file has no default export");
+    expect(r.diags[0].message).toContain("import { Card }");
+  });
+  // r1 F8: the recovery skips to the statement's `from "…"` across lines
+  test("F8: a default / namespace import split across lines is still ONE diagnostic", () => {
+    for (const [imp, code] of [[`import Card\n        from "./a.scrml";`, "E-IMPORT-004"], [`import * as m\n        from "./a.scrml";`, "E-BOOTSTRAP-UNSUPPORTED"]]) {
+      const r = prog([LIB("a.scrml", "a"), useFns(imp, `<p>x</p>`)]);
+      expect([imp, r.diags.map((d) => d.code)]).toEqual([imp, [code]]);
+    }
+  });
+  // r1 F5: a keyword is no binding name; a reserved prefix is refused at the import
+  test("F5: a keyword as the local name is E-PARSE-IMPORT at the import", () => {
+    for (const kw of ["if", "return", "const", "true", "fn"]) {
+      const r = prog([LIB("a.scrml", "a"), useFns(`import { Card as ${kw} } from "./a.scrml";`, `<p>x</p>`)]);
+      expect([kw, r.diags.map((d) => d.code)]).toEqual([kw, ["E-PARSE-IMPORT"]]);
+      expect(r.diags[0].message).toContain("is a keyword and cannot be a local name");
+    }
+  });
+  test("F5: a `_scrml_`-prefixed alias is E-NAME-COLLIDES-RESERVED-PREFIX at the import", () => {
+    const src = `import { Card as _scrml_card } from "./a.scrml";`;
+    const r = prog([LIB("a.scrml", "a"), useFns(src, `<p>x</p>`)]);
+    expect(at(r)).toEqual([["E-NAME-COLLIDES-RESERVED-PREFIX", ENTRY]]);
+  });
+  // r1 F9: §21.3 — specifiers are separated by commas
+  test("F9: specifiers need commas — `{ Card as b Card }` and `{ a b }` are E-PARSE-IMPORT", () => {
+    for (const list of ["Card as b Card", "Card Card", "Card as b as c"]) {
+      const r = prog([LIB("a.scrml", "a"), useFns(`import { ${list} } from "./a.scrml";`, `<p>x</p>`)]);
+      expect([list, r.diags.map((d) => d.code)]).toEqual([list, ["E-PARSE-IMPORT"]]);
+    }
+  });
+  test("F9 controls: a trailing comma and a multi-line list are fine", () => {
+    clean(prog([LIB("a.scrml", "a"), LIB("b.scrml", "b"), useFns(`import {\n        Card,\n    } from "./a.scrml"; import { Card as C2, } from "./b.scrml";`, `<p>\${Card()}\${C2()}</p>`)]));
+  });
+  test("§21.8.1 `pinned` on an import is named (E-BOOTSTRAP-UNSUPPORTED), not read as an imported name", () => {
+    const r = prog([LIB("a.scrml", "a"), useFns(`import { Card pinned } from "./a.scrml";`, `<p>\${Card()}</p>`)]);
     expect(r.diags.map((d) => d.code)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
-    expect(r.diags[0].message).toContain("default import");
+    expect(r.diags[0].message).toContain("`pinned` on an import");
   });
   // §21.4 defines the renamed re-export; the bootstrap reads no re-export at all yet
   // (g-boot-reexport-from-s473, whose capable form now names the rename too). Fails closed.
