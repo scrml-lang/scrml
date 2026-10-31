@@ -28265,6 +28265,7 @@ ${
             k = k + 1
         }
         if (lo < 0) return composeRefuse(st, file, fs.info.span, name, why, "its server calls are not made by its own statements. Compose the calls in one server `!` function and call that once")
+        const lastCall: int = hi
         // rule 1, to a fixpoint: a later statement reading a local the batch declares joins it
         let changed = true
         while (changed) {
@@ -28292,9 +28293,11 @@ ${
             }
             k = k + 1
         }
-        // PERMANENT: browser work inside the batch splits it into two requests
+        // PERMANENT: browser work between the server calls splits them into two requests. (After the
+        // last call, a browser statement joined the batch only by reading a value it computes: §19.9.9.8
+        // rule 3 permits it on the client — the value comes back — which is INTERIM, below.)
         k = lo
-        while (k <= hi) {
+        while (k <= lastCall) {
             if (fx[k].browser != "") {
                 return { plan: not, st: addDiag(st, file, ss[k].span, "E-TX-CLIENT-MULTI-CALL", "'" + name + "' is declared '!' and runs on the client; its server calls (" + calls.join(", ") + ") must run in ONE request inside ONE transaction (§19.9.9.8 rule 1, S474) — but this statement (line " + lineOf(g, file, ss[k].span.start) + ") uses " + fx[k].browser + ", which needs the browser and cannot move into the server batch (§19.9.9.8 rule 3), and it stands between them: the calls would be two requests, and no transaction spans two requests, so the all-or-nothing guarantee cannot hold (§19.10.5). Move the browser work before the first server call or after the last one, or split the function") }
             }
@@ -28332,6 +28335,7 @@ ${
             const x: StmtFx = fx[k]
             const one: CFold = cfStmt(s, cf0())
             if (cpIsDefer(s)) return composeRefuse(st, file, s.span, name, why, "this `defer` would run when the server batch ends, not when '" + name + "' returns (§19.16). Move it before the first server call")
+            if (x.browser != "") return composeRefuse(st, file, s.span, name, why, "this statement, after the last server call, uses " + x.browser + " and reads a value the batch computes: it stays in the browser, and the value would come back with the batch's result (§19.9.9.8 rule 3). Return the value from '" + name + "' and use it in the browser where it is called")
             if (one.effects) return composeRefuse(st, file, s.span, name, why, "this statement holds an effect, which belongs to the page. Move it out of the function")
             if (x.via != "") return composeRefuse(st, file, s.span, name, why, "this statement calls `" + x.via + "`, a client function that makes a server call: composed, it would run in place in the batch (§19.9.9.8 rule 1). Call the server function from '" + name + "' directly")
             if (x.client != "") return composeRefuse(st, file, s.span, name, why, "this statement calls `" + x.client + "`, which reads or writes client state: composed, it would run in the server batch with its cells marshalled into the request and written back with the result (§6.6.9, §19.9.9.8 rule 1). Move the call before the first server call or after the last one")

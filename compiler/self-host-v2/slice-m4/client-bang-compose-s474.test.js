@@ -227,6 +227,25 @@ ${HOLD_CHARGE}    let <s:string=""/>
     expect(errs(src)).toEqual([]);
   });
 
+  test("INTERIM (not the permanent split): a browser statement AFTER the last call that reads a value the batch computes", () => {
+    const src = `<program db="./app.db">
+<host>
+  title() -> string = document.title
+</host>
+${HOLD_CHARGE}    let <s:string=""/>
+    function book(a: int)! E {
+        hold(a)?;
+        const y: int = charge(a, 0)?;
+        if (y > 0) { @s = title(); }
+    }
+    <main><button onclick={ book(1) !{ _ :> { @s = "f"; }, }; }>go</button></main>
+</program>
+`;
+    const e = errs(src);
+    expect(e.map((d) => d.code)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+    expect(e[0].message).toContain("after the last server call, uses the `<host>` binding `title`");
+  });
+
   test("INTERIM: a cell READ inside the batch (the §6.6.9 marshal is not built) — E-BOOTSTRAP-UNSUPPORTED naming the fix", () => {
     const src = `<program db="./app.db">
 ${HOLD_CHARGE}    let <n:int=1/>
