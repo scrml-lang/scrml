@@ -130,3 +130,26 @@ concurrent isolation, auto-rollback detection, non-standalone plain) all as expe
     move(1) -> HTTP 200 1                                                             -> [1,2]
     outerFails(1) -> HTTP 500 … "Bad"                                                -> []
     outerHandles(1) -> HTTP 200 0                                                     -> [1,2]
+
+## 2026-10-30 — fix round r1 (PA review of 3cfded1a7)
+
+- F1/F2 (HIGH): `txQuerySets` now also closes EVERY `?{}` site (`TxQ.all`, `.nobatch()` included);
+  `envelopeOf` runs E-SQL-011 and the cross-database-read refusal over `all`, the trigger (`needs`)
+  still over the counted set (§8.9.5: `.nobatch()` opts out of the count, not out of the envelope's
+  reach). E-SQL-011 hint now "'.nobatch()' on every query of the envelope". Reviewer probe xdbrun
+  re-run on this tree: the F1 program is E-SQL-011, the F2 deadlock pair is refused (both).
+  Near-miss runtime test: a `.nobatch()` same-database write inside an envelope is rolled back by
+  the `fail` (real SQLite file).
+- F3 (MED): fixed, contained. analyze `dbKey`/`dbKeyOf` (driver + resolved, normalized target;
+  `:memory:` per scope) used by the cross-db checks and journalDiags (`sameDbIn`); the envelope's
+  db is a used scope of the home database. server-runtime.js `connection()` returns ONE record (one
+  driver, one gate) per `connKey` (same formula) per host. Reviewer probes samedb/samedbrun/samedb2:
+  no false E-SQL-011 for `./app.db` / `app.db`; one connection opened; the second scope's plain
+  write during an envelope waits at the shared gate and persists. Bite: connKey → null fails the
+  F3 runtime test.
+- F6 (LOW): savepoints strictly nested (`tx.stack`, innermost assert → broken + throw); a statement
+  from a scope whose envelope ended throws (`ownTx`). Direct-runtime tests for both.
+- F7: tenant catalogue questions pass the gate (`gatedRun`); `server()` dedupes shared connections.
+- F5: a server log line when one owner holds a gate > 30 s (`GATE_SLOW_MS`, unref'd timer); gap filed.
+- F8: bite count with `envelope()` neutered: 14 of 29 at 3cfded1a7 (the PR body's "9" was the count
+  before the runtime-exit tests were added); 18 of 37 now.

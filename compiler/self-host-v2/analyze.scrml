@@ -26894,7 +26894,7 @@ ${
                 }
             }
         }
-        st = journalDiags(sum.nodes, tq, sqls, jOff, bangWrites, st)
+        st = journalDiags(sum.nodes, tq, sqls, jOff, bangWrites, dbs, st)
         // s474 (U1e): the implicit per-handler transactions, built (envelopePass)
         const ep: REnv = envelopePass(sum, tq, all, places, sqls, dbs, rd, st)
         st = ep.st
@@ -26927,7 +26927,7 @@ ${
     // functions it calls too.
     type JournalOff:struct = { file: string, span: ASpan, fname: string, bang: boolean, db: int, sym: int }
 
-    fn journalDiags(nodes: Callable[], tq: TxQ, sqls: SqlInfo[], js: JournalOff[], ownWrites: int[], st0: AS) -> AS {
+    fn journalDiags(nodes: Callable[], tq: TxQ, sqls: SqlInfo[], js: JournalOff[], ownWrites: int[], dbs: Db[], st0: AS) -> AS {
         let st: AS = st0
         const reach: boolean[] = bangReach(nodes, tq)
         let bangWrites: int[] = ownWrites
@@ -26950,11 +26950,20 @@ ${
             const why: string = "`PRAGMA journal_mode = OFF` turns off the rollback journal for the whole connection, and a `!` function's all-or-nothing guarantee (§8.9.2, §19.10) needs that journal to roll back"
             if (j.bang) {
                 st = addDiag(st, j.file, j.span, "E-SQL-JOURNAL-OFF", "'" + j.fname + "' is declared '!' (or is called by a function declared '!') and runs `PRAGMA journal_mode = OFF` — " + why + " (§8.9.2, S473). Remove it, or use another `journal_mode` (`WAL`, `DELETE`, … stay admitted, §14.8.10)")
-            } else if (bangWrites.indexOf(j.db) >= 0) {
+            } else if (sameDbIn(dbs, bangWrites, j.db)) {
                 st = addDiag(st, j.file, j.span, "E-SQL-JOURNAL-OFF", "`PRAGMA journal_mode = OFF` in '" + j.fname + "' sets the connection a `!` function of this program writes through — " + why + " (§8.9.2, S473). Remove it, or use another `journal_mode` (`WAL`, `DELETE`, … stay admitted, §14.8.10)")
             }
         }
         return st
+    }
+
+    // s474 r1 (review F3): `ids` holds a database the same as `id` (dbKey — not the same spelling, the same database).
+    fn sameDbIn(dbs: Db[], ids: int[], id: int) -> boolean {
+        const want: string = dbKey(dbs, { id: id, hint: "" })
+        for (const x of ids) {
+            if (dbKey(dbs, { id: x, hint: "" }) == want) return true
+        }
+        return false
     }
 
     // s473 (Lane B) — the program's `<db>` cells, each with its load (a server
@@ -27384,19 +27393,13 @@ ${
         let st: AS = st0
         const qs: FxAtom[] = tq.qs[i]
         if (qs.length == 0) return { envs: [], st: st }
-        // the facts of each query of the set (a site with none was refused where it stands)
-        let infos: SqlInfo[] = []
-        let atoms: FxAtom[] = []
-        for (const a of qs) {
-            const site: SqlSite = sum.nodes[a.root].f.sqls[a.pos]
-            for (const si of sqls) {
-                if (si.nid == site.nid) {
-                    infos = infos.concat([si])
-                    atoms = atoms.concat([a])
-                }
-            }
-        }
-        if (infos.length < qs.length) return { envs: [], st: st }
+        // the facts of each query the set COUNTS (the trigger), and of every query the envelope
+        // REACHES — `.nobatch()` ones included (s474 r1, review F1/F2: §8.9.5 opts a query out of
+        // the count, not out of the envelope's extent); a site with no facts was refused where it stands
+        const infos: SqlInfo[] = atomInfos(sum, qs, sqls)
+        const reached: FxAtom[] = tq.all[i]
+        const rinfos: SqlInfo[] = atomInfos(sum, reached, sqls)
+        if (infos.length < qs.length || rinfos.length < reached.length) return { envs: [], st: st }
         const fsym: Sym = { id: f.sym, hint: f.name }
         const needs: boolean = qs.length >= 2 || tq.runs[i] >= 2 || witnessOf(tq.loops[i]) is given
         if (!needs) return { envs: [{ fn: fsym, db: infos[0].db, standalone: false }], st: st }
@@ -27411,23 +27414,26 @@ ${
                 if (d0 is given) home = d0.sym
             }
         }
+        // §8.9.2: "'B other than A' compares databases, not spellings: scopes naming the same
+        // database are the same database" (s474 r1, review F3) — dbKey, the resolved target
+        const homeKey: string = dbKey(dbs, home)
         const homeName: string = dbLabel(dbs, home)
         let k: int = 0
         let readElse: int = -1
-        while (k < infos.length) {
-            if (infos[k].db.id != home.id) {
-                if (infos[k].kind == SqlKind.SqlWrite) {
-                    const path: string = sqlPathOf(sum, tq.qs, i, atoms[k])
-                    const other: string = dbLabel(dbs, infos[k].db)
-                    return { envs: [], st: addDiag(st, f.file, f.span, "E-SQL-011", "'" + f.name + "' holds a transaction on " + homeName + " (§8.9.2), and " + path + " writes " + other + ". A transaction covers one database: a 'fail' or an error would roll back " + homeName + " and leave the write to " + other + " in place. Move the write to " + other + " out of '" + f.name + "' (call it after '" + f.name + "' returns), or remove the envelope ('.nobatch()' on the queries, §8.9.5) if the writes need not be atomic.") }
+        while (k < rinfos.length) {
+            if (dbKey(dbs, rinfos[k].db) != homeKey) {
+                if (rinfos[k].kind == SqlKind.SqlWrite) {
+                    const path: string = sqlPathOf(sum, tq.all, i, reached[k])
+                    const other: string = dbLabel(dbs, rinfos[k].db)
+                    return { envs: [], st: addDiag(st, f.file, f.span, "E-SQL-011", "'" + f.name + "' holds a transaction on " + homeName + " (§8.9.2), and " + path + " writes " + other + ". A transaction covers one database: a 'fail' or an error would roll back " + homeName + " and leave the write to " + other + " in place. Move the write to " + other + " out of '" + f.name + "' (call it after '" + f.name + "' returns), or remove the envelope ('.nobatch()' on every query of the envelope, §8.9.5) if the writes need not be atomic.") }
                 }
                 if (readElse < 0) readElse = k
             }
             k = k + 1
         }
         if (readElse >= 0) {
-            const path2: string = sqlPathOf(sum, tq.qs, i, atoms[readElse])
-            return { envs: [], st: addDiag(st, f.file, f.span, "E-BOOTSTRAP-UNSUPPORTED", "'" + f.name + "' is declared '!' and needs the implicit per-handler transaction (§8.9.2) on " + homeName + ", and " + path2 + " reads " + dbLabel(dbs, infos[readElse].db) + " while it is open. The SPEC allows that read (§8.9.2: reading database B inside the envelope is allowed), but the bootstrap does not build it: a request holding one database's transaction gate while it waits on another's can deadlock against a request holding them the other way round (§19.10.6). Read the other database before calling '" + f.name + "' and pass the value in") }
+            const path2: string = sqlPathOf(sum, tq.all, i, reached[readElse])
+            return { envs: [], st: addDiag(st, f.file, f.span, "E-BOOTSTRAP-UNSUPPORTED", "'" + f.name + "' is declared '!' and needs the implicit per-handler transaction (§8.9.2) on " + homeName + ", and " + path2 + " reads " + dbLabel(dbs, rinfos[readElse].db) + " while it is open (a `.nobatch()` query included: it opts out of the count, not out of the envelope). The SPEC allows that read (§8.9.2: reading database B inside the envelope is allowed), but the bootstrap does not build it: a request holding one database's transaction gate while it waits on another's can deadlock against a request holding them the other way round (§19.10.6). Read the other database before calling '" + f.name + "' and pass the value in") }
         }
         if (!sqliteDb(dbs, home)) {
             return { envs: [], st: addDiag(st, f.file, f.span, "E-BOOTSTRAP-UNSUPPORTED", "'" + f.name + "' is declared '!' and its transitive query set (§8.9.2, S473) needs the implicit per-handler transaction on " + homeName + ", a pooled (Postgres / MySQL) database. §19.10.6 runs such a transaction on one connection taken from the pool for it alone, which the bootstrap's server runtime does not reserve — refused, never compiled non-atomic (S473 D1). Use a SQLite database, or mark each query that need not be atomic with `.nobatch()` (§8.9.5)") }
@@ -27441,7 +27447,79 @@ ${
                 }
             }
         }
-        return { envs: [{ fn: fsym, db: home, standalone: true }], st: st }
+        // the connection the envelope opens: one a reached query of the home database uses (a
+        // second scope naming the same file is the same database — and the server runtime the same
+        // connection, server-runtime.js `connection` — but only a used scope is printed)
+        let envDb: Sym = home
+        let found = false
+        for (const ri of rinfos) {
+            if (!found && dbKey(dbs, ri.db) == homeKey) {
+                envDb = ri.db
+                found = true
+            }
+        }
+        return { envs: [{ fn: fsym, db: envDb, standalone: true }], st: st }
+    }
+
+    // The SqlInfo of each atom's site, in atom order (an atom whose site has none is skipped).
+    fn atomInfos(sum: Summary, atoms: FxAtom[], sqls: SqlInfo[]) -> SqlInfo[] {
+        let out: SqlInfo[] = []
+        for (const a of atoms) {
+            const site: SqlSite = sum.nodes[a.root].f.sqls[a.pos]
+            for (const si of sqls) {
+                if (si.nid == site.nid) out = out.concat([si])
+            }
+        }
+        return out
+    }
+
+    // s474 r1 (review F3) — a database's IDENTITY, for "the same database" (§8.9.2: "compares
+    // databases, not spellings: scopes naming the same database are the same database"): the driver
+    // and the resolved target — a relative SQLite path joined to its declaring file's directory and
+    // normalized (`./`, `.` and `..` segments), exactly as the server runtime resolves it
+    // (server-runtime.js `connKey`, which opens ONE connection, with ONE gate, per key). `:memory:`
+    // is a database of its own per scope (each connection to it is a fresh one).
+    fn dbKey(dbs: Db[], d: Sym) -> string {
+        for (const x of dbs) {
+            if (x.sym.id == d.id) return dbKeyOf(x)
+        }
+        return "?" + d.id
+    }
+
+    fn dbKeyOf(x: Db) -> string {
+        if (x.driver != Driver.Sqlite) return driverKey(x.driver) + ":" + x.target
+        if (x.target == ":memory:") return "sqlite::memory:#" + x.sym.id
+        let path: string = x.target
+        if (path.substring(0, 1) != "/") {
+            const slash: int = x.file.lastIndexOf("/")
+            if (slash >= 0) path = x.file.substring(0, slash) + "/" + path
+        }
+        return "sqlite:" + normPath(path)
+    }
+
+    fn driverKey(d: Driver) -> string {
+        return match d {
+            .Sqlite :> "sqlite"
+            .Postgres :> "postgres"
+            .Mysql :> "mysql"
+        }
+    }
+
+    // `a/./b/../c` → `a/c`; a leading `/` kept; a `..` past the start kept.
+    fn normPath(p: string) -> string {
+        const abs: boolean = p.substring(0, 1) == "/"
+        let out: string[] = []
+        for (const seg of p.split("/")) {
+            if (seg != "" && seg != ".") {
+                if (seg == ".." && out.length > 0 && out[out.length - 1] != "..") {
+                    out = out.slice(0, out.length - 1)
+                } else {
+                    out = out.concat([seg])
+                }
+            }
+        }
+        if (abs) return "/" + out.join("/")
+        return out.join("/")
     }
 
     // The server-placed functions client-placed callable i calls (through client-side callees).
@@ -27503,19 +27581,25 @@ ${
     // 2; `edges` — the non-`!` call edges the sets are closed over (journalDiags
     // reads them: what a `!` function reaches).
     // `remote[i]` — the server calls (requests) client-placed callable i makes, capped at 2; `remoteWhy[i]` names them.
-    type TxQ:struct = { qs: FxAtom[][], loops: FxAtom[][], loopWhy: string[], runs: int[], edges: int[][], remote: int[], remoteWhy: string[] }
+    // `all[i]` (s474 r1, review F1/F2) — EVERY `?{}` callable i reaches, `.nobatch()` ones included:
+    // §8.9.5 makes `.nobatch()` opt a query out of the COUNT (the trigger), not out of what an open
+    // envelope reaches — so the one-database checks (E-SQL-011, the cross-database read) read `all`.
+    type TxQ:struct = { qs: FxAtom[][], all: FxAtom[][], loops: FxAtom[][], loopWhy: string[], runs: int[], edges: int[][], remote: int[], remoteWhy: string[] }
 
     fn txQuerySets(nodes: Callable[], places: PlaceFact[], inherited: int[]) -> TxQ {
         let own: FxAtom[][] = []
+        let ownAll: FxAtom[][] = []
         let edges: int[][] = []
         let i: int = 0
         for (const c of nodes) {
             let q: FxAtom[] = []
+            let qa: FxAtom[] = []
             let e: int[] = []
             if (c.kind == CallableK.KFn) {
                 let p: int = 0
                 for (const s of c.f.sqls) {
                     if (!s.q.nobatch) q = q.concat([ownAtom("q" + i + "." + p, i, p)])
+                    qa = qa.concat([ownAtom("q" + i + "." + p, i, p)])
                     p = p + 1
                 }
                 // F10 (ruled S473, #1690 review): `!` callees count too — an inner `!` runs
@@ -27526,6 +27610,7 @@ ${
                 }
             }
             own = own.concat([q])
+            ownAll = ownAll.concat([qa])
             edges = edges.concat([e])
             i = i + 1
         }
@@ -27612,7 +27697,7 @@ ${
                 }
             }
         }
-        return { qs: qs, loops: closeDim(ownL, edges), loopWhy: why, runs: runs, edges: edges, remote: remote, remoteWhy: rwhy }
+        return { qs: qs, all: closeDim(ownAll, edges), loops: closeDim(ownL, edges), loopWhy: why, runs: runs, edges: edges, remote: remote, remoteWhy: rwhy }
     }
 
     fn isServerPlace(pk: PlaceK) -> boolean {

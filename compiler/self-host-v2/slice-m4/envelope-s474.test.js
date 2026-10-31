@@ -27,7 +27,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { SQL } from "bun";
 import { Database } from "bun:sqlite";
-import { mods, compile, serve, post, pathOf } from "./server-artifact-harness.js";
+import { mods, compile, serve, post, pathOf, artifacts, loadServer, plainRespond } from "./server-artifact-harness.js";
 import { frontEnd } from "./harness.js";
 import * as rt from "../slice-m1/runtime/server-runtime.js";
 
@@ -431,5 +431,138 @@ describe("server-runtime.js envelope — the exits a scrml program cannot reach 
     }, true);
     expect(r).toBe(1);
     expect(await rowsOf()).toEqual([7]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// s474 r1 (review of #1699) — F1 / F2: `.nobatch()` opts a query out of the envelope's COUNT
+// (§8.9.5), not out of what the open envelope REACHES. Before r1 the one-database checks read the
+// counted set only, so a `.nobatch()` write to another database compiled and SURVIVED the rollback
+// (reviewer probe: move(6) → 500, a.acct unchanged, b.blog = [{"a":6}]), and `.nobatch()` reads in
+// opposite orders deadlocked two requests forever.
+const xdb = (bFn, body, extraTop = "") => `<program db="./a.db">\n${E}${extraTop}    <db src="./b.db">\n${bFn}    </db>\n    function move(a: int)! E {\n${body}    }\n${page(["move(1)"])}</program>\n`;
+describe("r1 F1/F2 — a `.nobatch()` query is still inside the envelope's reach", () => {
+  test("F1: a `.nobatch()` write to another database — E-SQL-011, the hint naming every query", () => {
+    const logB = `        function logB(a: int) -> int {\n            ${SQ}\`INSERT INTO blog (a) VALUES (\${a})\`}.nobatch().run() !{ _ :> { return 0; } };\n            return 1;\n        }\n`;
+    const src = xdb(logB, `        ${q("UPDATE acct SET n = n - ${a}")}\n        ${q("UPDATE acct SET n = n - ${a}")}\n        const x: int = logB(a);\n        if (a > 5) fail .Bad;\n        return x;\n`);
+    expect(errsOf(src)).toEqual(["E-SQL-011"]);
+    expect(msgOf(src, "E-SQL-011")).toContain("'.nobatch()' on every query of the envelope");
+    expect(fe(src).core).toBeFalsy();
+  });
+  test("F1: the `!` function's OWN `.nobatch()` write to another database — E-SQL-011", () => {
+    const src = `<program db="./a.db">\n${E}    <db src="./b.db">\n        function onB(a: int)! E {\n            ${q("INSERT INTO blog (a) VALUES (${a})")}\n            ${q("INSERT INTO blog (a) VALUES (${a})")}\n            const x: int = alsoA(a);\n            return x;\n        }\n    </db>\n    function alsoA(a: int) -> int {\n        ${SQ}\`INSERT INTO acct (n) VALUES (\${a})\`}.nobatch().run() !{ _ :> { return 0; } };\n        return 1;\n    }\n${page(["onB(1)"])}</program>\n`;
+    expect(errsOf(src)).toEqual(["E-SQL-011"]);
+  });
+  test("F2: `.nobatch()` reads of the other database (the opposite-order deadlock pair) — refused, both", () => {
+    const src = `<program db="./a.db">\n${E}    type C:struct = { c: int }\n    function readA(a: int) -> int {\n        const n: C | not = ${SQ}\`SELECT count(*) AS c FROM ta\`}.nobatch().get() !{ _ :> { return 0; } };\n        return 1;\n    }\n    <db src="./b.db">\n        function readB(a: int) -> int {\n            const n: C | not = ${SQ}\`SELECT count(*) AS c FROM tb\`}.nobatch().get() !{ _ :> { return 0; } };\n            return 1;\n        }\n        function onB(a: int)! E {\n            ${q("INSERT INTO tb VALUES (${a})")}\n            const x: int = readA(a);\n            ${q("INSERT INTO tb VALUES (${a})")}\n            return x;\n        }\n    </db>\n    function onA(a: int)! E {\n        ${q("INSERT INTO ta VALUES (${a})")}\n        const x: int = readB(a);\n        ${q("INSERT INTO ta VALUES (${a})")}\n        return x;\n    }\n${page(["onA(1)", "onB(1)"])}</program>\n`;
+    expect(errsOf(src)).toEqual(["E-BOOTSTRAP-UNSUPPORTED", "E-BOOTSTRAP-UNSUPPORTED"]);
+    expect(msgOf(src, "E-BOOTSTRAP-UNSUPPORTED")).toContain("a `.nobatch()` query included");
+  });
+  test("near-miss: a `.nobatch()` query on the SAME database runs inside the transaction — a `fail` rolls it back too", async () => {
+    const src = `<program db="./app.db">\n${E}    function nbHelper(a: int) -> int {\n        ${SQ}\`INSERT INTO log (a) VALUES (\${a})\`}.nobatch().run() !{ _ :> { return 0; } };\n        return 1;\n    }\n    function move(a: int)! E {\n        ${q("INSERT INTO log (a) VALUES (${a})")}\n        ${q("INSERT INTO log (a) VALUES (${a + 1})")}\n        const x: int = nbHelper(a + 2);\n        if (a > 5) fail .Bad;\n        return x;\n    }\n${page(["move(1)"])}</program>\n`;
+    const d2 = mkdtempSync(join(tmpdir(), "s474-r1-nb-"));
+    const f2 = join(d2, "app.db");
+    const s2 = new SQL("sqlite://" + f2);
+    try {
+      await s2.unsafe("CREATE TABLE log (a INTEGER)");
+      const { srv: srv2, routes: rt2 } = await serve(compile(src).core, s2, []);
+      const rows2 = () => { const db = new Database(f2, { readonly: true }); try { return db.query("SELECT a FROM log ORDER BY a").all().map((r) => r.a); } finally { db.close(); } };
+      expect((await post(srv2, pathOf(rt2, "move"), [6])).status).toBe(500);
+      expect(rows2()).toEqual([]);
+      expect((await post(srv2, pathOf(rt2, "move"), [1])).status).toBe(200);
+      expect(rows2()).toEqual([1, 2, 3]);
+    } finally {
+      await s2.close();
+      rmSync(d2, { recursive: true, force: true });
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// s474 r1 — F3: two `<db>` scopes naming the same file are ONE database (§8.9.2 "compares databases,
+// not spellings") — at compile time (no false E-SQL-011) and at run time (one connection, one gate).
+const sameFile = (spelling, logBody) => `<program db="./app.db">\n${E}    <db src="${spelling}">\n        function logB(a: int) -> int {\n            ${logBody}\n            return 1;\n        }\n    </db>\n    function move(a: int)! E {\n        for (let i = 0; i < 3; i = i + 1) {\n            ${q("INSERT INTO log (a) VALUES (${a + i})")}\n        }\n        const x: int = logB(a + 100);\n        if (a > 5) fail .Bad;\n        return x;\n    }\n${page(["move(1)", "logB(1)"])}</program>\n`;
+const LOGB = `${SQ}\`INSERT INTO log (a) VALUES (\${a})\`}.run() !{ _ :> { return 0; } };`;
+describe("r1 F3 — a second `<db>` scope on the same file is the same database", () => {
+  test("compile: `./app.db` and `app.db` beside `db=\"./app.db\"` — no E-SQL-011, one envelope", () => {
+    for (const sp of ["./app.db", "app.db", "./x/../app.db"]) {
+      expect([sp, errsOf(sameFile(sp, LOGB))]).toEqual([sp, []]);
+      expect([sp, compile(sameFile(sp, LOGB)).core.envelopes.find((e) => e.fn.hint === "move").standalone]).toEqual([sp, true]);
+    }
+    // a different file is still another database
+    expect(errsOf(sameFile("./other.db", LOGB))).toEqual(["E-SQL-011"]);
+  });
+  test("run: the second scope's write is inside the envelope (rolled back with it), and one connection is opened", async () => {
+    const d3 = mkdtempSync(join(tmpdir(), "s474-r1-same-"));
+    const f3 = join(d3, "app.db");
+    const boot = new SQL("sqlite://" + f3);
+    await boot.unsafe("CREATE TABLE log (a INTEGER)");
+    await boot.close();
+    const opened = [];
+    const r = compile(sameFile("app.db", LOGB));
+    const { server } = artifacts(r.core);
+    const mod = await loadServer(server.js, r.core);
+    const conns = [];
+    const slow3 = (s) => (st, ...v) => new Promise((x) => setTimeout(x, 2)).then(() => s(st, ...v));
+    const srv3 = mod.createServer({ connect: (d) => { opened.push(d.target); const s = new SQL("sqlite://" + f3); conns.push(s); return slow3(s); }, log: () => {}, respond: plainRespond, tenantRelations: async () => [] });
+    const rows3 = () => { const db = new Database(f3, { readonly: true }); try { return db.query("SELECT a FROM log ORDER BY a").all().map((x) => x.a); } finally { db.close(); } };
+    try {
+      expect((await post(srv3, pathOf(server.routes, "move"), [6])).status).toBe(500);
+      expect(rows3()).toEqual([]);
+      expect((await post(srv3, pathOf(server.routes, "move"), [1])).status).toBe(200);
+      expect(rows3()).toEqual([1, 2, 3, 101]);
+      // a plain write through the second scope, arriving while an envelope is open, waits at the
+      // (shared) gate and persists — before r1 it failed "database is locked" and was lost
+      const p1 = post(srv3, pathOf(server.routes, "move"), [6]);
+      await new Promise((x) => setTimeout(x, 5));
+      const p2 = await post(srv3, pathOf(server.routes, "logB"), [777]);
+      expect((await p1).status).toBe(500);
+      expect(p2.status).toBe(200);
+      expect(rows3()).toEqual([1, 2, 3, 101, 777]);
+      expect(opened.length).toBe(1);
+    } finally {
+      for (const c of conns) await c.close();
+      rmSync(d3, { recursive: true, force: true });
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// s474 r1 — F6: hardening the runtime against shapes scrml cannot produce today (it awaits every
+// call): overlapping inner envelopes on one transaction, and a statement issued after its envelope ended.
+describe("r1 F6 — strictly nested savepoints; no statement after its envelope", () => {
+  let mem6;
+  const ins6 = rt.sqlText(["INSERT INTO t6 (n) VALUES (", ")"]);
+  const conn6 = () => rt.connection({ connect: () => mem6, log: () => {} }, { driver: "sqlite", target: ":memory:", file: "app.scrml" });
+  beforeAll(async () => { mem6 = new SQL(":memory:"); await mem6.unsafe("CREATE TABLE t6 (n INTEGER)"); });
+  const rows6 = async () => (await mem6.unsafe("SELECT n FROM t6 ORDER BY n")).map((r) => r.n);
+  test("two inner envelopes run concurrently inside one: refused, the whole transaction rolled back", async () => {
+    await mem6.unsafe("DELETE FROM t6");
+    const db = conn6();
+    const inner = (n, ms) => rt.envelope(db, async () => { await rt.query(db, "run", ins6, [n], [0]); await new Promise((x) => setTimeout(x, ms)); await rt.query(db, "run", ins6, [n + 1], [0]); return 1; }, true);
+    let threw = null;
+    try {
+      await rt.envelope(db, async () => { await rt.query(db, "run", ins6, [1], [0]); await Promise.all([inner(10, 1), inner(20, 15)]); return 1; }, true);
+    } catch (e) { threw = e; }
+    expect(threw).not.toBeNull();
+    expect(String(threw.message)).toContain("not the innermost open one");
+    expect(await rows6()).toEqual([]);
+  });
+  test("a statement left running past its envelope throws instead of autocommitting", async () => {
+    await mem6.unsafe("DELETE FROM t6");
+    const db = conn6();
+    let late = null;
+    const r = await rt.envelope(db, async () => {
+      await rt.query(db, "run", ins6, [1], [0]);
+      // fire-and-forget: not awaited by the body
+      late = new Promise((x) => setTimeout(x, 10)).then(() => rt.query(db, "run", ins6, [99], [0]));
+      return rt.failure("Bad");
+    }, true);
+    expect(rt.failed(r)).toBe(true);
+    let threw = null;
+    try { await late; } catch (e) { threw = e; }
+    expect(threw).not.toBeNull();
+    expect(String(threw.message)).toContain("after the transaction of its envelope ended");
+    expect(await rows6()).toEqual([]);
   });
 });

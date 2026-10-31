@@ -311,6 +311,7 @@ const STATUS = {
   "envelope/loop": ["PASS", []],
   // … and what stays refused, each by its named code (S473 D1 / D28)
   "envelope/neg-cross-db-write": ["PASS", ["E-SQL-011"]],
+  "envelope/neg-nobatch-cross-db-write": ["PASS", ["E-SQL-011"]],   // s474 r1 F1
   "envelope/neg-client-multi-call": ["PASS", ["E-TX-CLIENT-MULTI-CALL"]],
   "envelope/neg-journal-off": ["PASS", ["E-SQL-JOURNAL-OFF"]],
   "envelope/neg-pooled-unsupported": ["PASS", ["E-BOOTSTRAP-UNSUPPORTED"]],

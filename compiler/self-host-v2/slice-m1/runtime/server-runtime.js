@@ -72,9 +72,51 @@ export function sqlText(chunks) {
 // relative SQLite path resolves against ITS directory, §8.1.1 "Resolution
 // base"). The driver is opened lazily, once, on the first query.
 // ---------------------------------------------------------------------------
+//
+// s474 r1 (review F3) — ONE connection, with ONE gate, per DATABASE: two `<db>` scopes naming the
+// same file (`./app.db` and `app.db`, or a nested `<db src=>` repeating the program's `db=`) are
+// one database (SPEC §8.9.2: "compares databases, not spellings: scopes naming the same database
+// are the same database"), so `connection()` hands both the same record, keyed by `connKey` — the
+// same identity analyze.scrml `dbKeyOf` compares at compile time. Before this a second scope opened
+// a second SQLite connection to the file, outside the first one's gate and transaction: a write
+// through it during an envelope failed "database is locked" and was lost. `:memory:` is never
+// shared (every connection to it is a fresh database, as at compile time).
+const sharedConns = new WeakMap();
+const defaultHostConns = new Map();
+function connRegistry(host) {
+  if (host === null || typeof host !== "object") return defaultHostConns;
+  let m = sharedConns.get(host);
+  if (m === undefined) {
+    m = new Map();
+    sharedConns.set(host, m);
+  }
+  return m;
+}
+
+export function connKey(desc) {
+  if (desc.driver !== "sqlite") return desc.driver + ":" + desc.target;
+  if (desc.target === ":memory:") return null;
+  let path = desc.target;
+  if (!path.startsWith("/")) {
+    const slash = desc.file.lastIndexOf("/");
+    if (slash >= 0) path = desc.file.slice(0, slash) + "/" + path;
+  }
+  const abs = path.startsWith("/");
+  const out = [];
+  for (const seg of path.split("/")) {
+    if (seg === "" || seg === ".") continue;
+    if (seg === ".." && out.length > 0 && out[out.length - 1] !== "..") out.pop();
+    else out.push(seg);
+  }
+  return "sqlite:" + (abs ? "/" : "") + out.join("/");
+}
+
 export function connection(host, desc) {
+  const key = connKey(desc);
+  const reg = connRegistry(host);
+  if (key !== null && reg.has(key)) return reg.get(key);
   let sql = null;
-  return {
+  const conn = {
     desc,
     open() {
       if (sql === null) sql = connectWith(host, desc);
@@ -82,8 +124,10 @@ export function connection(host, desc) {
     },
     log(line) { logLine(host, line); },
     // s474 (U1e): the §19.10.6 gate — one owner on the connection at a time
-    gate: fifoGate(),
+    gate: fifoGate(host, desc),
   };
+  if (key !== null) reg.set(key, conn);
+  return conn;
 }
 
 // ---------------------------------------------------------------------------
@@ -116,13 +160,25 @@ export function connection(host, desc) {
 // connection reserved from the pool, which is not built), so a statement there
 // never meets an open transaction of another request.
 // ---------------------------------------------------------------------------
-function fifoGate() {
+// s474 r1 (review F5): there is no timeout (g-boot-envelope-gate-no-timeout-s474) — a holder that
+// never finishes holds the connection; a server log line names it after GATE_SLOW_MS.
+const GATE_SLOW_MS = 30000;
+function fifoGate(host, desc) {
   let held = false;
+  let slow = null;
   const waiting = [];
+  const watch = () => {
+    if (slow !== null) clearTimeout(slow);
+    slow = setTimeout(() => {
+      logLine(host, `scrml server: the connection to ${desc.driver}:${desc.file} has been held for over ${GATE_SLOW_MS / 1000} s by one owner; ${waiting.length} statement(s) / transaction(s) wait behind it (§19.10.6 — no gate timeout)`);
+    }, GATE_SLOW_MS);
+    if (slow && typeof slow.unref === "function") slow.unref();
+  };
   return {
     acquire() {
       if (!held) {
         held = true;
+        watch();
         return Promise.resolve();
       }
       return new Promise((resolve) => waiting.push(resolve));
@@ -131,7 +187,10 @@ function fifoGate() {
       const next = waiting.shift();
       if (next === undefined) {
         held = false;
+        if (slow !== null) clearTimeout(slow);
+        slow = null;
       } else {
+        watch();
         next();   // handed straight to the next in arrival order (still held)
       }
     },
@@ -152,13 +211,17 @@ function scopeStore() {
   return txScope;
 }
 
-// The open transaction this scope owns on `conn`, or null.
+// The open transaction this scope owns on `conn`, or null. s474 r1 (review F6): a scope whose
+// transaction on `conn` has ENDED (a statement left running past its envelope — unreachable from
+// scrml, which awaits every query) throws instead of autocommitting outside the rollback.
 function ownTx(conn) {
   if (txScope === null) return null;
   const m = txScope.getStore();
   if (m === undefined) return null;
   const tx = m.get(conn);
-  return tx !== undefined && tx.open ? tx : null;
+  if (tx === undefined) return null;
+  if (!tx.open) throw new Error(`scrml server: a statement on ${conn.desc.driver}:${conn.desc.file} was issued after the transaction of its envelope ended — refused, never autocommitted`);
+  return tx;
 }
 
 const GATED = new Set(["sqlite"]);
@@ -242,7 +305,7 @@ export async function envelope(conn, run, standalone) {
   if (!standalone) return run();
   const als = scopeStore();
   await conn.gate.acquire();
-  const tx = { conn, open: true, broken: false, seq: 0 };
+  const tx = { conn, open: true, broken: false, seq: 0, stack: [] };
   try {
     try {
       await control(conn, "BEGIN DEFERRED");
@@ -282,11 +345,17 @@ export async function envelope(conn, run, standalone) {
   }
 }
 
+// s474 r1 (review F6): savepoints are strictly nested — SQLite's RELEASE / ROLLBACK TO of an
+// outer savepoint also ends every newer one, so two inner envelopes interleaved on one transaction
+// (concurrent calls inside one body — unreachable from scrml, which awaits each call) would end each
+// other's. The one being ended must be the innermost open one; anything else throws (the enclosing
+// envelope then rolls everything back).
 async function savepoint(tx, run) {
   if (tx.broken) throw brokenError(tx.conn);
   tx.seq = tx.seq + 1;
   const name = "scrml_sp_" + tx.seq;
   await control(tx.conn, "SAVEPOINT " + name);
+  tx.stack.push(name);
   let result;
   try {
     result = await run();
@@ -299,14 +368,25 @@ async function savepoint(tx, run) {
     await undoSavepoint(tx, name);
     return result;
   }
+  innermost(tx, name);
   await control(tx.conn, "RELEASE " + name);
+  tx.stack.pop();
   return result;
+}
+
+function innermost(tx, name) {
+  if (tx.stack[tx.stack.length - 1] !== name) {
+    tx.broken = true;
+    throw new Error(`scrml server: savepoint ${name} is not the innermost open one (${tx.stack.join(", ")}) — two nested envelopes overlapped on one transaction; the enclosing transaction is rolled back`);
+  }
 }
 
 async function undoSavepoint(tx, name) {
   if (tx.broken) return;   // nothing left to roll back to — the outer envelope throws
+  innermost(tx, name);
   await control(tx.conn, "ROLLBACK TO " + name);
   await control(tx.conn, "RELEASE " + name);
+  tx.stack.pop();
 }
 
 async function rollbackQuiet(tx, text) {
@@ -577,17 +657,28 @@ const TENANT_CATALOGUE = {
   mysql: "SELECT CONCAT(table_schema, '.', table_name) AS name FROM information_schema.columns WHERE lower(column_name) = 'tenant_id' AND table_schema NOT IN ('mysql', 'information_schema', 'performance_schema', 'sys')",
 };
 
+// s474 r1 (review F7): the catalogue questions pass the §19.10.6 gate like every other statement.
+async function gatedRun(conn, text) {
+  if (!gated(conn)) return conn.open()(sqlText([text]));
+  await conn.gate.acquire();
+  try {
+    return await conn.open()(sqlText([text]));
+  } finally {
+    conn.gate.release();
+  }
+}
+
 async function tenantRelations(host, conn) {
   if (host && typeof host.tenantRelations === "function") return [...(await host.tenantRelations(conn.desc))].map(String);
   const text = TENANT_CATALOGUE[conn.desc.driver];
   if (text === undefined) throw new Error(`no catalogue query for the ${conn.desc.driver} driver`);
   if (conn.desc.driver === "mysql") {
     // s473 r1 (F2): a connection with no default database cannot say which schema it serves — not checked, not clean
-    const cur = await conn.open()(sqlText(["SELECT DATABASE() AS db"]));
+    const cur = await gatedRun(conn, "SELECT DATABASE() AS db");
     const db = cur && cur[0] ? cur[0].db ?? cur[0].DB : null;
     if (db === null || db === undefined) throw new Error("the connection has no default database (DATABASE() is NULL)");
   }
-  const rows = await conn.open()(sqlText([text]));
+  const rows = await gatedRun(conn, text);
   const out = [];
   for (const r of rows ?? []) {
     const name = r && typeof r === "object" ? (r.name ?? r.NAME ?? r.relname ?? r.table_name ?? r.TABLE_NAME) : undefined;
@@ -656,7 +747,7 @@ export function tenantGate(host, conns) {
 export function server(host, routes, conns = []) {
   const byPath = new Map();
   for (const r of routes) byPath.set(r.path, r);
-  const gate = tenantGate(host, conns);
+  const gate = tenantGate(host, [...new Set(conns)]);   // s474 r1: two scopes on one database are one connection
   return {
     routes: routes.map((r) => ({ path: r.path, method: "POST" })),
     async fetch(request) {
