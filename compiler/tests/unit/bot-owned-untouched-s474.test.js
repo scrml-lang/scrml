@@ -139,6 +139,31 @@ describe("scripts/bot-owned-untouched.sh --bot (S474 r1 F4: the bot is checked, 
     expect(r.rc).toBe(1);
     expect(r.out).toContain("docs/known-gaps.md");
   });
+  test("BITE (#1707 r2 N1): a head that WIDENS its own FILES (compiler/src + the workflow) → 1 — FILES is read from the base", () => {
+    const s = botSandbox();
+    mkdirSync(join(s.root, "compiler/src"), { recursive: true });
+    writeFileSync(join(s.root, "compiler/src/runtime-url-guard.js"), "// forged\n");
+    const wf = join(s.root, ".github/workflows/generated-regen.yml");
+    const widened = readFileSync(wf, "utf8").replace(
+      /(\n\s+FILES: >-\n)(\s+)/,
+      (_, head, ind) => `${head}${ind}compiler/src/runtime-url-guard.js\n${ind}.github/workflows/generated-regen.yml\n${ind}`,
+    );
+    expect(widened).not.toBe(readFileSync(wf, "utf8"));
+    // the widening really parses (the forge would succeed against the head's own copy)
+    expect(String(Bun.YAML.parse(widened).jobs.regen.env.FILES)).toContain("compiler/src/runtime-url-guard.js");
+    writeFileSync(wf, widened);
+    s.commit("forge FILES");
+    const r = s.bot();
+    expect(r.rc).toBe(1);
+    expect(r.out).toContain("compiler/src/runtime-url-guard.js");
+  });
+  test("--bot fails closed when the base has no generated-regen.yml", () => {
+    const s = sandbox(); // base without the workflow
+    writeFileSync(join(s.root, "docs/generated/gap-counts.md"), "| HIGH | 3 | 0 |\n");
+    s.commit("regen");
+    const r = spawnSync("bash", [SCRIPT, "--bot", "main"], { cwd: s.root, env: ENV, encoding: "utf8" });
+    expect(r.status).toBe(1);
+  });
 });
 
 describe("ci.yml wiring", () => {

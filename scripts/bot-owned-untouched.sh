@@ -22,6 +22,7 @@
 # --bot (S474 r1 F4): ci.yml passes it only for the bot's branch of THIS repository (head.repo ==
 # github.repository). Instead of exempting the bot by branch name alone, it checks the bot touched nothing
 # but its own FILES — a branch merely NAMED bot/generated-regen that edits anything else is refused.
+# FILES comes from the BASE ref's generated-regen.yml (r2 N1), so the branch cannot widen its own allowance.
 #
 # To fix a refusal: `git checkout origin/main -- docs/generated/ && git commit` (the bot regenerates
 # main after your merge; `bun scripts/state.ts` prints the live counts for your tree meanwhile). To change
@@ -36,8 +37,11 @@ base=${1:?usage: bot-owned-untouched.sh [--bot] <base-ref> [<head-ref>]}
 head=${2:-HEAD}
 
 if [ "$bot" = 1 ]; then
-  if ! files=$(bun -e 'const y=Bun.YAML.parse(require("fs").readFileSync(process.argv[1],"utf8"));const f=String(y?.jobs?.regen?.env?.FILES??"").trim();if(!f)process.exit(3);console.log(f.split(/\s+/).join("\n"))' "$REGEN_WF"); then
-    echo "bot-owned-untouched --bot: could not read FILES from $REGEN_WF — refusing (fail closed)" >&2
+  # FILES is read from the BASE's copy of the workflow, never the head's (#1707 r2 N1): a same-repo branch
+  # named bot/generated-regen could otherwise widen FILES in its own tree to cover whatever it changes.
+  if ! wf=$(git show "$base:$REGEN_WF" 2>/dev/null) ||
+     ! files=$(printf '%s' "$wf" | bun -e 'const y=Bun.YAML.parse(await Bun.stdin.text());const f=String(y?.jobs?.regen?.env?.FILES??"").trim();if(!f)process.exit(3);console.log(f.split(/\s+/).join("\n"))'); then
+    echo "bot-owned-untouched --bot: could not read FILES from $base:$REGEN_WF — refusing (fail closed)" >&2
     exit 1
   fi
   if ! changed=$(git diff --no-renames --name-only "$base...$head"); then

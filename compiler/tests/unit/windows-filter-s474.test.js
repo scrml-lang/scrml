@@ -10,6 +10,13 @@
  *   1. STRUCTURAL — every path in the trace fixture (fixtures/windows-suite-reads-s474.txt) triggers the job
  *      or sits under an ALLOWLIST prefix that says why it may not. A new reader added to a suite under an
  *      uncovered path fails here once the fixture is re-traced.
+ *      THE FIXTURE is the FULL trace, unreduced, one path per line, sorted (7752 tracked files): the
+ *      reviewer's inotify trace of the job's own commands on a Linux checkout
+ *      (~/.cache/scrml/review/s474-1707/tools/run-trace.sh → opened-tracked.txt). r1 committed a reduction
+ *      (one path per first-3-dir-segments + extension); #1707 r2 N2 showed it unsound — rules cut inside
+ *      filenames (compiler/tests/native- vs compiler/tests/parser-conformance-*.test.js), so 8 siblings of an
+ *      allowlisted representative escaped while this test passed. STATIC: a reader added later is caught
+ *      only after someone re-traces; regenerate by re-running that script and `sort`.
  *   2. A table of named paths, each with the expected decision.
  *   3. The step's own bash, run against real git history: a rename OUT of a watched path still triggers
  *      (`--no-renames`), and an uncomputable diff runs (fail closed).
@@ -42,6 +49,7 @@ const ALLOW = [
   ["compiler/tests/lsp/", "listed, not executed here"],
   ["compiler/tests/parser-conformance/", "listed, not executed here"],
   ["compiler/tests/native-", "root-level parser tests: listed, not executed here"],
+  ["compiler/tests/parser-conformance-", "root-level parser-conformance-*.test.js: listed, not executed here (#1707 r2 N2)"],
   ["samples/", "compile-input corpus: content, OS-neutral"],
   ["benchmarks/", "compile-input corpus"],
   ["dashboard/", "compile-input corpus"],
