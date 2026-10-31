@@ -339,6 +339,46 @@ describe("S474 r1 — payload binders of `match e` arms are checked against the 
     expect(codesOf(fnText)).toEqual(want);
   });
 
+  // r2 (re-review R6): the CLIENT call to a server-placed `! -> SqlError` callee is typed by the
+  // UNION set (SqlError + Transport) — a set of its own, so it needs its own pin.
+  test("client call to a server-placed `! -> SqlError` callee (the SqlError + Transport union): undeclared fields are E-TYPE-022", () => {
+    const onClient = (arms) => `function q() { @localSeen = fetchLocal() !{ _ e :> match e { ${arms} } } }`;
+    expect(codesOf(onClient(`.QueryFailed(msg: m) :> m, else :> "o"`))).toEqual(["E-TYPE-022"]);
+    expect(codesOf(onClient(`.Transport(zzz: m) :> "t", else :> "o"`))).toEqual(["E-TYPE-022"]);
+    expect(codesOf(onClient(`.QueryFailed(message: m) :> m, else :> "o"`))).toEqual([]);
+  });
+
+  // r2 (re-review R3): a STATEMENT `match e { … }` with block arms inside a block arm is read by the
+  // structured (`match-arm-block`) reader, not the arm-text reader.
+  test("a statement `match e` with block arms inside a block arm (the structured reader): undeclared field is E-TYPE-022", () => {
+    const blockMatch = (bind) => `server function q() {
+      const r = fetchLocal() !{
+        _ e :> {
+          match e {
+            .QueryFailed(${bind}) :> { log(m) }
+            else :> { log("o") }
+          }
+          return []
+        }
+      }
+      return r
+    }`;
+    expect(codesOf(blockMatch("msg: m"))).toEqual(["E-TYPE-022"]);
+    expect(codesOf(blockMatch("message: m"))).toEqual([]);
+    const stmt = `server function q() {
+      fetchLocal() !{
+        _ e :> {
+          match e {
+            .ConnectionLost(x: m) :> { log(m) }
+            else :> { log("o") }
+          }
+        }
+      }
+      return 1
+    }`;
+    expect(codesOf(stmt)).toEqual(["E-TYPE-022"]);
+  });
+
   test("the declared field still binds: `.QueryFailed(message: m)` / `.ConstraintViolation(field: f)` compile", () => {
     expect(codesOf(onSql(`.QueryFailed(message: m) :> "msg=" + m, else :> "other"`))).toEqual([]);
     expect(codesOf(onCallee(`.QueryFailed(message: m) :> m, else :> "other"`))).toEqual([]);
@@ -400,9 +440,9 @@ describe("S474 r1 — the guards around the SqlError binder set (each bitten by 
   });
 
   // An argument / array / object position reaches the audit as the guard-marker call
-  // (`<operand>.__scrml_guard__("!{…}")`). impl#1's codegen then refuses that position (E-CG-003,
-  // a separate limitation), so the test asserts what the AUDIT says: typed, so `e.variant` is not
-  // E-TYPE-031 and `e.message` is E-TYPE-004 (untyped, both would be E-TYPE-031).
+  // (`<operand>.__scrml_guard__("!{…}")`). A BLOCK arm that `return`s there is refused by codegen
+  // (E-CG-003, a separate limitation), so the first assertions read only the audit's codes (typed:
+  // `e.variant` is not E-TYPE-031, `e.message` is E-TYPE-004); a VALUE arm compiles clean.
   test("M7 — an expression-position `!{}` on a `?{}` (the guard-marker path) is typed SqlError", () => {
     const at = (arm) => codes("", `server function q() { log(?{\`SELECT id FROM gnode\`}.all() !{ _ e :> { ${arm}; return [] } })
       return 1 }`);
@@ -410,6 +450,11 @@ describe("S474 r1 — the guards around the SqlError binder set (each bitten by 
     const msg = at("log(e.message)");
     expect(msg).toContain("E-TYPE-004");
     expect(msg).not.toContain("E-TYPE-031");
+    // r2 (re-review): a VALUE arm on the same path compiles clean (no E-CG-003) — the stronger pin.
+    expect(codes("", `server function q() { log(?{\`SELECT id FROM gnode\`}.all() !{ _ e :> [e.variant] })
+      return 1 }`)).toEqual([]);
+    expect(codes("", `server function q() { const n = (?{\`SELECT id FROM gnode\`}.all() !{ _ e :> [e.variant] }).length
+      return n }`)).toEqual([]);
   });
 });
 
