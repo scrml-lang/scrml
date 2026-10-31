@@ -30,6 +30,7 @@ import { writeFileSync, readFileSync, rmSync, existsSync, mkdirSync, readdirSync
 import { Database } from "bun:sqlite";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { compileScrml } from "../../src/api.js";
+import { SERVER_SQL_ERROR_HELPER, serverSqlPropagateHelper } from "../../src/codegen/sql-attempt.ts";
 
 const DIRS = [];
 const GLOBALS_BEFORE = new Set(Object.getOwnPropertyNames(globalThis));
@@ -517,7 +518,7 @@ describe("S474 ruling 2 as amended — a DEV build keeps the driver text on the 
     const prod = built().serverJs;
     expect(prod).toContain(`if (failure.variant === "QueryFailed") failure.data = { message: "" };`);
     expect(dev().serverJs).not.toContain(`failure.data = { message: "" }`);
-    expect(dev().serverJs).toContain("This is a DEV build");
+    expect(dev().serverJs).toContain("This module: message kept; non-column field kept.");
   });
 
   test("under `protect=` a dev build still blanks (a driver message can quote a protected value, §14.8.9)", async () => {
@@ -738,4 +739,124 @@ describe("S474 r1 — db-authoritative (Postgres callback transaction): an unrea
     expect(env.variant).toBe("ServerError");
     expect(env.data.message).toBe("");
   }, 30000);
+});
+
+// S474 (bootstrap re-review R1 of #1703) — ONE ConstraintViolation `field` rule with the bootstrap's
+// `constraintField`: a field is a column only when each part is exactly `table.col`; that delivers
+// `col` (composite UNIQUE: `a, b`). Anything else is not a column: server code sees it, a production
+// answer blanks it, a dev build keeps it (even under `protect=`: a constraint name is schema, not a
+// value). The QueryFailed MESSAGE under `protect=` stays blank in a dev build too: it can quote a
+// protected value (§14.8.9, "bad JSON path: '<the hash>'").
+describe("S474 — ConstraintViolation field: the bootstrap's column-only rule (driver-shaped errors)", () => {
+  const DB_FAILURE = Symbol.for("scrml.db.failure");
+  const runtime = (keepMessage, keepName) =>
+    new Function("_scrml_g", `${SERVER_SQL_ERROR_HELPER}\n${serverSqlPropagateHelper(keepMessage, keepName)}\nreturn { _scrml_sql_error, _scrml_sql_propagate };`)(globalThis);
+  const marked = (msg, extra = {}) => {
+    const e = Object.assign(new Error(msg), extra);
+    Object.defineProperty(e, DB_FAILURE, { value: true });
+    return e;
+  };
+  // [case, error, field server code sees, column?]
+  const CASES = [
+    ["UNIQUE users.email", () => marked("UNIQUE constraint failed: users.email", { code: "SQLITE_CONSTRAINT_UNIQUE" }), "email", true],
+    ["composite UNIQUE", () => marked("UNIQUE constraint failed: comp.a, comp.b", { code: "SQLITE_CONSTRAINT_UNIQUE" }), "a, b", true],
+    ["NOT NULL", () => marked("NOT NULL constraint failed: users.email", { code: "SQLITE_CONSTRAINT_NOTNULL" }), "email", true],
+    ["spaced names", () => marked("UNIQUE constraint failed: my table.e mail", { code: "SQLITE_CONSTRAINT_UNIQUE" }), "my table.e mail", false],
+    ["a.b.c.d", () => marked("UNIQUE constraint failed: a.b.c.d", { code: "SQLITE_CONSTRAINT_UNIQUE" }), "a.b.c.d", false],
+    ["expression index", () => marked("UNIQUE constraint failed: index 'x_lower'", { code: "SQLITE_CONSTRAINT_UNIQUE" }), "index 'x_lower'", false],
+    ["unnamed CHECK", () => marked("CHECK constraint failed: n > 0", { code: "SQLITE_CONSTRAINT_CHECK" }), "n > 0", false],
+    ["named CHECK", () => marked("CHECK constraint failed: positive", { code: "SQLITE_CONSTRAINT_CHECK" }), "positive", false],
+    ["PG 23505 constraint name", () => marked('duplicate key value violates unique constraint "users_email_key"', { code: "23505", constraint: "users_email_key", detail: "Key (email)=(t@x) already exists.", table: "users" }), "users_email_key", false],
+    ["PG 23502 column", () => marked('null value in column "email" of relation "users" violates not-null constraint', { code: "23502", column: "email", detail: "Failing row contains (1, null).", table: "users" }), "email", true],
+  ];
+  const quiet = (f) => { const o = console.error; console.error = () => {}; try { return f(); } finally { console.error = o; } };
+
+  for (const [name, mk, field, column] of CASES) {
+    test(`${name}: server code sees \`${field}\`; production ${column ? "delivers it" : "blanks it"}; dev keeps it`, () => {
+      const prod = runtime(false, false);
+      expect(prod._scrml_sql_error(mk())).toEqual({ __scrml_error: true, type: "SqlError", variant: "ConstraintViolation", data: { field } });
+      const sent = quiet(() => prod._scrml_sql_propagate(mk(), "f"));
+      expect(sent).toEqual({ __scrml_error: true, type: "SqlError", variant: "ConstraintViolation", data: { field: column ? field : "" } });
+      // No driver value reaches the client in any build (PG's `detail` quotes the row; it is never read).
+      expect(JSON.stringify(sent)).not.toContain("t@x");
+      const dev = runtime(true, true);
+      expect(quiet(() => dev._scrml_sql_propagate(mk(), "f")).data).toEqual({ field });
+      // dev + protect=: the constraint name is kept (schema, not a value).
+      const devProtect = runtime(false, true);
+      expect(quiet(() => devProtect._scrml_sql_propagate(mk(), "f")).data).toEqual({ field });
+    });
+  }
+
+  test("QueryFailed: production blanks; dev keeps; dev + protect= blanks (the message can quote a protected value)", () => {
+    const mk = () => marked("bad JSON path: 'SECRET-HASH-123'", { code: "SQLITE_ERROR" });
+    expect(quiet(() => runtime(false, false)._scrml_sql_propagate(mk(), "f")).data).toEqual({ message: "" });
+    expect(quiet(() => runtime(true, true)._scrml_sql_propagate(mk(), "f")).data).toEqual({ message: "bad JSON path: 'SECRET-HASH-123'" });
+    expect(quiet(() => runtime(false, true)._scrml_sql_propagate(mk(), "f")).data).toEqual({ message: "" });
+  });
+
+  // The same shapes from a REAL SQLite file, through the compiled routes.
+  const SHAPES = `<program db="./g.db">
+  \${
+    server function comp(a, b)! -> SqlError {
+      ?{\`INSERT INTO comp (a, b) VALUES (\${a}, \${b})\`}.run()
+      return "ok"
+    }
+    server function named(n)! -> SqlError {
+      ?{\`INSERT INTO named (n) VALUES (\${n})\`}.run()
+      return "ok"
+    }
+    server function unnamed(n)! -> SqlError {
+      ?{\`INSERT INTO unnamed (n) VALUES (\${n})\`}.run()
+      return "ok"
+    }
+    server function expr(e)! -> SqlError {
+      ?{\`INSERT INTO expr (e) VALUES (\${e})\`}.run()
+      return "ok"
+    }
+    server function spaced(e)! -> SqlError {
+      ?{\`INSERT INTO "my table" ("e mail") VALUES (\${e})\`}.run()
+      return "ok"
+    }
+  }
+  <main><p>x</p></main>
+</program>
+`;
+  const seed = (out) => {
+    const db = new Database(out.dbPath);
+    db.run("CREATE TABLE comp (a TEXT, b TEXT, UNIQUE (a, b))");
+    db.run("INSERT INTO comp VALUES ('x', 'y')");
+    db.run("CREATE TABLE named (n INTEGER CONSTRAINT positive CHECK (n > 0))");
+    db.run("CREATE TABLE unnamed (n INTEGER CHECK (n > 0))");
+    db.run("CREATE TABLE expr (e TEXT)");
+    db.run("CREATE UNIQUE INDEX x_lower ON expr (lower(e))");
+    db.run("INSERT INTO expr VALUES ('Dup')");
+    db.run('CREATE TABLE "my table" ("e mail" TEXT UNIQUE)');
+    db.run(`INSERT INTO "my table" VALUES ('dup')`);
+    db.close();
+  };
+  const REAL = [
+    ["comp", { a: "x", b: "y" }, "a, b"],
+    ["named", { n: -1 }, ""],
+    ["unnamed", { n: -1 }, ""],
+    ["expr", { e: "dup" }, ""],
+    ["spaced", { e: "dup" }, ""],
+  ];
+
+  test("real SQLite, production: a composite UNIQUE delivers `a, b`; CHECK / expression index / spaced names are blanked", async () => {
+    const out = compileApp(SHAPES);
+    seed(out);
+    for (const [fn, args, want] of REAL) {
+      const r = await callRoute(out, fn, args);
+      expect([fn, r.status, JSON.parse(r.text)]).toEqual([fn, 200, { __scrml_error: true, type: "SqlError", variant: "ConstraintViolation", data: { field: want } }]);
+      expect(r.logged.some((l) => l.startsWith("[scrml] server function `" + fn + "` failed:") && l.includes("constraint failed"))).toBe(true);
+    }
+  });
+
+  test("real SQLite, dev build: the non-column names are delivered as the driver wrote them", async () => {
+    const out = compileApp(SHAPES, { devBuild: true });
+    seed(out);
+    const got = {};
+    for (const [fn, args] of REAL) got[fn] = JSON.parse((await callRoute(out, fn, args)).text).data.field;
+    expect(got).toEqual({ comp: "a, b", named: "positive", unnamed: "n > 0", expr: "index 'x_lower'", spaced: "my table.e mail" });
+  });
 });

@@ -2755,9 +2755,12 @@ function generateServerJsImpl(
     return `await ${SQL_BANG_ENVELOPE_FN}(${db}, ${JSON.stringify(_implicitEnvelopeBeginFor(db))}, ${JSON.stringify(fnName)}, () => `;
   };
   // S474 ruling 2 as amended — a DEV build keeps a failed query's driver text on the wire, a
-  // production build blanks it. Under `protect=` it is blanked in every build: a driver message
-  // can quote a protected value (the json_extract case above).
+  // production build blanks it. Under `protect=` a driver MESSAGE stays blank in every build: it
+  // can quote a protected VALUE (the json_extract case above — "bad JSON path: '<the hash>'").
+  // A constraint / CHECK name is schema, not a value, so a dev build keeps it even under
+  // `protect=` (`_sqlKeepConstraintName`).
   const _sqlKeepDriverText: boolean = sqlDriverTextOnWire() && !_protectActive;
+  const _sqlKeepConstraintName: boolean = sqlDriverTextOnWire();
   const _cpsErrorMessage: string = cpsMessageBlankingSqlFailure("_scrml_cps_err", _protectActive
     ? `"the server could not complete this call (details are in the server log)"`
     : `_scrml_g.String(_scrml_cps_err && _scrml_cps_err.message || _scrml_cps_err)`, _sqlKeepDriverText);
@@ -7992,7 +7995,7 @@ function generateServerJsImpl(
     finalEmitted = injectAfterHeader(finalEmitted, SERVER_SQL_ATTEMPT_HELPER);
   }
   if (_usesSqlPropagate) {
-    finalEmitted = injectAfterHeader(finalEmitted, (_usesSqlAttempt ? "" : SERVER_SQL_ERROR_HELPER) + serverSqlPropagateHelper(_sqlKeepDriverText) + (_usesSqlBangEnvelope ? SERVER_SQL_BANG_ENVELOPE_HELPER : ""));
+    finalEmitted = injectAfterHeader(finalEmitted, (_usesSqlAttempt ? "" : SERVER_SQL_ERROR_HELPER) + serverSqlPropagateHelper(_sqlKeepDriverText, _sqlKeepConstraintName) + (_usesSqlBangEnvelope ? SERVER_SQL_BANG_ENVELOPE_HELPER : ""));
   }
 
   // §20.1 (S473) — a server-side navigate() lowers to `_scrml_server_navigate(` and every route

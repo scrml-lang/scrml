@@ -354,9 +354,7 @@ const SQL_ERROR_CLASSIFIER_LINES: readonly string[] = [
   "  const message = _scrml_g.String((err && err.message) || err);",
   "  const code = _scrml_g.String((err && (err.code ?? err.errno)) ?? \"\");",
   "  if (/CONSTRAINT/i.test(code) || /^23\\d{3}$/.test(code) || /constraint failed/i.test(message)) {",
-  "    const m = /constraint failed: ([\\w.]+)/i.exec(message);",
-  "    const field = m ? m[1].split(\".\").pop() : _scrml_g.String((err && (err.column ?? err.constraint)) ?? \"\");",
-  "    return { __scrml_error: true, type: \"SqlError\", variant: \"ConstraintViolation\", data: { field } };",
+  "    return { __scrml_error: true, type: \"SqlError\", variant: \"ConstraintViolation\", data: { field: _scrml_sql_constraint_field(err, message).field } };",
   "  }",
   "  // S474 r1 (F3): Bun.SQL reports an unreachable server as `Failed to connect` (code",
   "  // ECONNREFUSED / ERR_POSTGRES_CONNECTION_CLOSED, by version) — a lost connection too.",
@@ -365,6 +363,24 @@ const SQL_ERROR_CLASSIFIER_LINES: readonly string[] = [
   "    return { __scrml_error: true, type: \"SqlError\", variant: \"ConnectionLost\", data: null };",
   "  }",
   "  return { __scrml_error: true, type: \"SqlError\", variant: \"QueryFailed\", data: { message } };",
+  "}",
+  "// ConstraintViolation's `field` (S474, one rule with the bootstrap's constraintField): a",
+  "// COLUMN name only. SQLite names the columns `table.col[, table.col…]` after \"constraint",
+  "// failed: \"; each part that is exactly `table.col` (one dot, no space or comma) is cut to",
+  "// its column, so a composite UNIQUE gives `a, b`. Anything else there (a CHECK's name or",
+  "// expression, an expression index, a dotted or spaced name) is NOT a column: server code",
+  "// still sees it, and a production answer blanks it (`column: false`). Postgres / MySQL:",
+  "// the driver's `column` when it gives one, else its `constraint` name (not a column).",
+  "function _scrml_sql_constraint_field(err, message) {",
+  "  const m = /constraint failed: (.*)$/.exec(message);",
+  "  if (m) {",
+  "    const cols = m[1].split(\", \").map((part) => /^[^\\s.,]+\\.([^\\s.,]+)$/.exec(part));",
+  "    if (cols.every((c) => c !== null)) return { field: cols.map((c) => c[1]).join(\", \"), column: true };",
+  "    return { field: m[1], column: false };",
+  "  }",
+  "  if (err && typeof err.column === \"string\" && err.column !== \"\") return { field: err.column, column: true };",
+  "  if (err && typeof err.constraint === \"string\" && err.constraint !== \"\") return { field: err.constraint, column: false };",
+  "  return { field: \"\", column: false };",
   "}",
 ];
 
@@ -443,28 +459,30 @@ export function sqlDriverTextOnWire(): boolean {
  * `protect=` column in the module — a driver message can quote a protected value, §14.8.9) keeps
  * the QueryFailed message; otherwise it is blanked.
  */
-export function serverSqlPropagateHelper(keepText: boolean): string {
+export function serverSqlPropagateHelper(keepMessage: boolean, keepConstraintName: boolean): string {
+  const blanks: string[] = [];
+  if (!keepMessage) blanks.push("  if (failure.variant === \"QueryFailed\") failure.data = { message: \"\" };");
+  if (!keepConstraintName) {
+    blanks.push("  if (failure.variant === \"ConstraintViolation\" && !_scrml_sql_constraint_field(err, _scrml_g.String(err.message || err)).column) failure.data = { field: \"\" };");
+  }
   return [
     "",
     "// --- §19.8.2 (S474): a ?{} failure leaves the `!` function it is written in (compiler-generated) ---",
     "// Inside a function declared `!` (error type SqlError), a query the driver failed is the",
     "// function's failure: it becomes the SqlError value the caller's arms match on, the same",
     "// envelope a `fail` returns. Any other error is rethrown unchanged. The driver's text is",
-    "// logged here in every build.",
-    ...(keepText
-      ? ["// This is a DEV build: the QueryFailed message keeps the driver's text (a production",
-         "// build sends it empty — S474 ruling 2: the text exposes the schema)."]
-      : ["// The QueryFailed message is sent empty (S474 ruling 2: the driver's text exposes the",
-         "// schema; a dev build keeps it). A ?{} handled where it is written (`!{}` / `match`)",
-         "// is unaffected: its arms still see the driver's text."]),
+    "// logged here in every build. S474 ruling 2: a production build sends QueryFailed's",
+    "// message empty, and a ConstraintViolation field that is not a column name (a CHECK or",
+    "// constraint name: schema) empty; a column name is delivered. A dev build keeps both,",
+    "// except that under `protect=` the message stays blank (it can quote a protected VALUE).",
+    `// This module: message ${keepMessage ? "kept" : "blanked"}; non-column field ${keepConstraintName ? "kept" : "blanked"}.`,
+    "// A ?{} handled where it is written (`!{}` / `match`) is unaffected: its arms see the driver's text.",
     "function _scrml_sql_propagate(err, fn) {",
     "  if (err === null || typeof err !== \"object\" || err[_scrml_g.Symbol.for(\"scrml.db.failure\")] !== true) throw err;",
     "  _scrml_g.console.error(\"[scrml] server function `\" + fn + \"` failed: \" + _scrml_g.String(err.message || err));",
-    ...(keepText
-      ? ["  return _scrml_sql_error(err);"]
-      : ["  const failure = _scrml_sql_error(err);",
-         "  if (failure.variant === \"QueryFailed\") failure.data = { message: \"\" };",
-         "  return failure;"]),
+    "  const failure = _scrml_sql_error(err);",
+    ...blanks,
+    "  return failure;",
     "}",
   ].join("\n");
 }
