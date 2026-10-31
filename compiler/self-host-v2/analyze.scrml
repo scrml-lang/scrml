@@ -27744,7 +27744,13 @@ ${
         if (infos.length < qs.length || rinfos.length < reached.length) return { envs: [], st: st }
         const fsym: Sym = { id: f.sym, hint: f.name }
         const needs: boolean = qs.length >= 2 || tq.runs[i] >= 2 || witnessOf(tq.loops[i]) is given
-        if (!needs) return { envs: [{ fn: fsym, db: infos[0].db, standalone: false }], st: st }
+        // S474 ruling 5: the envelope opens with BEGIN IMMEDIATE when a query it reaches writes
+        // (core.scrml Envelope.writes) — every query of `rinfos` runs inside it, `.nobatch()` included
+        let writes: boolean = false
+        for (const wi of rinfos) {
+            if (wi.kind == SqlKind.SqlWrite) writes = true
+        }
+        if (!needs) return { envs: [{ fn: fsym, db: infos[0].db, standalone: false, writes: writes }], st: st }
         // a client-placed `!` function: its queries run in the server function(s) it calls, each in
         // that function's own envelope — it holds no transaction itself. s474 r2 (review item 2): so
         // the one-database checks below do not apply to it (a client `!` calling one `!` function of
@@ -27805,7 +27811,7 @@ ${
                 found = true
             }
         }
-        return { envs: [{ fn: fsym, db: envDb, standalone: true }], st: st }
+        return { envs: [{ fn: fsym, db: envDb, standalone: true, writes: writes }], st: st }
     }
 
     // The SqlInfo of each atom's site, in atom order (an atom whose site has none is skipped).

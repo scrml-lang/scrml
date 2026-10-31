@@ -3050,10 +3050,14 @@ ${
     // and is returned unchanged; a throw rolls back and continues; anything else
     // commits. The function waits (check.scrml C-TX2 — its set holds a query),
     // so its callers already await it; the `await` here is the envelope's.
-    export fn envelopedFnJs(ctx: Ctx, sym: Sym, params: Param[], body: Block, db: Sym, standalone: boolean) -> JsStmt {
+    // S474 ruling 5: the fourth argument spells the envelope's BEGIN — "IMMEDIATE" when its query
+    // set writes (core.scrml Envelope.writes, decided by analyze), "DEFERRED" when it only reads.
+    export fn envelopedFnJs(ctx: Ctx, sym: Sym, params: Param[], body: Block, db: Sym, standalone: boolean, writes: boolean) -> JsStmt {
         let ps: string[] = []
         for (const prm of params) { ps = ps.concat([symName(ctx, prm.sym)]) }
-        const run: JsExpr = rtCall(ctx, "envelope", [jid(dbVarName(db)), jid("body$"), JsExpr.JBool(standalone)])
+        let begin: string = "DEFERRED"
+        if (writes) begin = "IMMEDIATE"
+        const run: JsExpr = rtCall(ctx, "envelope", [jid(dbVarName(db)), jid("body$"), JsExpr.JBool(standalone), JsExpr.JStr(begin)])
         return JsStmt.SAsyncFunc(symName(ctx, sym), ps, [
             JsStmt.SAsyncFunc("body$", [], blockJs(ctx, body)),
             JsStmt.SReturn(JsExpr.JAwait(run)),
