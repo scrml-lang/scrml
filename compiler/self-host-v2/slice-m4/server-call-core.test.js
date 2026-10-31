@@ -119,8 +119,9 @@ describe("S2 — §19.9.10 the client call is failable: E-ERROR-002, totality, `
 
   test("with the wrapper declared, `?` re-fails every variant of the client set — the four retags", () => {
     const E = `\n    type SyncError:enum = {\n        Conflict(current: int)\n        TooLong(limit: int)\n        Storage\n        Transport(t: ServerCallError)\n    }\n    function sync()! SyncError {\n        @version = saveNote("n1", @body, @version)?;\n    }\n    function sync2()! SyncError {\n        @words = wordCount("n1")?;\n    }`;
-    // s473 (F11, ruled S473): two server calls in ONE client-placed `!` function are E-TX-CLIENT-MULTI-CALL
-    // (no transaction spans two requests) — the two retags are read from two functions
+    // the two retags are read from two functions, so each stays a CLIENT call: two server calls in ONE
+    // client-placed `!` function compose into one server batch (s474, client-bang-compose-s474.test.js),
+    // where each runs in place — not a client call with a client failure set
     const r = clean(P(NOTES + E));
     const s1 = fnCore(r, "sync").body.stmts[0];
     const at = s1.data.then.stmts[0];

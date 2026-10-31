@@ -297,11 +297,20 @@ describe("still refused, each with its named code", () => {
     expect(errsOf(src)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
     expect(msgOf(src, "E-BOOTSTRAP-UNSUPPORTED")).toContain("pooled");
   });
-  test("a CLIENT `!` whose one server call runs 2 queries in a NON-`!` function — E-BOOTSTRAP-UNSUPPORTED naming the fix", () => {
+  // s474-boot-client-bang-composition (S474 ruling, capability over limitation item 2): this was
+  // E-BOOTSTRAP-UNSUPPORTED ("Declare `both()` with '!'"); the call now runs inside the composed batch's
+  // envelope (client-bang-compose-s474.test.js runs it). The composed request can fail on the wire, so
+  // the client `!`'s error type needs `Transport` — without it, E-ERROR-010 naming the line to add.
+  test("a CLIENT `!` whose one server call runs 2 queries in a NON-`!` function — composed (s474); E-ERROR-010 without `Transport`", () => {
     const both = `    function both(a: int) -> int {\n        ${SQ}\`INSERT INTO log (a) VALUES (\${a})\`}.run() !{ _ :> { return 0; } };\n        ${SQ}\`INSERT INTO log (a) VALUES (\${a})\`}.run() !{ _ :> { return 0; } };\n        return 1;\n    }\n`;
-    const src = `<program db="./app.db">\n${E}${both}    function move(a: int)! E {\n        const y: int = both(a) !{ _ :> { return 0; } };\n        if (y == 0) fail .Bad;\n        return y;\n    }\n${page(["move(1)"])}</program>\n`;
-    expect(errsOf(src)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
-    expect(msgOf(src, "E-BOOTSTRAP-UNSUPPORTED")).toContain("Declare `both()` with '!'");
+    const mk = (en) => `<program db="./app.db">\n${en}${both}    function move(a: int)! E {\n        const y: int = both(a) !{ _ :> { return 0; } };\n        if (y == 0) fail .Bad;\n        return y;\n    }\n${page(["move(1)"])}</program>\n`;
+    expect(errsOf(mk(E))).toEqual(["E-ERROR-010"]);
+    expect(msgOf(mk(E), "E-ERROR-010")).toContain("add `Transport(t: ServerCallError)` to `E`");
+    const ok = mk(E.replace("ConnectionLost }", "ConnectionLost, Transport(t: ServerCallError) }"));
+    expect(errsOf(ok)).toEqual([]);
+    const core = compile(ok).core;
+    const batch = core.server.find((x) => x.sym.hint === "move#batch");
+    expect(core.envelopes.find((e) => e.fn.id === batch.sym.id)).toMatchObject({ standalone: true, writes: true });
   });
   test("near-miss: the same client `!` calling a `!` server function compiles — that function's own envelope holds both", () => {
     const both = `    function both(a: int)! E {\n        ${q("INSERT INTO log (a) VALUES (${a})")}\n        ${q("INSERT INTO log (a) VALUES (${a})")}\n        return 1;\n    }\n`;
@@ -309,9 +318,18 @@ describe("still refused, each with its named code", () => {
     expect(errsOf(src)).toEqual([]);
     expect(compile(src).core.envelopes.find((e) => e.fn.hint === "both").standalone).toBe(true);
   });
-  test("a client-placed `!` making two server calls — the permanent E-TX-CLIENT-MULTI-CALL (§19.10.5)", () => {
-    const src = `<program db="./app.db">\n${E}${one("s1")}${one("s2")}    function move(a: int)! E {\n        const x: int = s1(a) !{ _ :> { return 0; } };\n        const y: int = s2(a) !{ _ :> { return 0; } };\n        return x + y;\n    }\n${page(["move(1)"])}</program>\n`;
-    expect(errsOf(src)).toEqual(["E-TX-CLIENT-MULTI-CALL"]);
+  // s474-boot-client-bang-composition (S474 ruling door 2): this was the permanent E-TX-CLIENT-MULTI-CALL;
+  // the two calls now compose into one request with one envelope. Without `Transport` in `E` the composed
+  // request's wire failure has nowhere to go: E-ERROR-010. (The browser-split residue that stays
+  // E-TX-CLIENT-MULTI-CALL: acceptance/envelope/neg-client-multi-call, client-bang-compose-s474.test.js.)
+  test("a client-placed `!` making two server calls — composed (s474), one standalone envelope; E-ERROR-010 without `Transport`", () => {
+    const mk = (en) => `<program db="./app.db">\n${en}${one("s1")}${one("s2")}    function move(a: int)! E {\n        const x: int = s1(a) !{ _ :> { return 0; } };\n        const y: int = s2(a) !{ _ :> { return 0; } };\n        return x + y;\n    }\n${page(["move(1)"])}</program>\n`;
+    expect(errsOf(mk(E))).toEqual(["E-ERROR-010"]);
+    const ok = mk(E.replace("ConnectionLost }", "ConnectionLost, Transport(t: ServerCallError) }"));
+    expect(errsOf(ok)).toEqual([]);
+    const core = compile(ok).core;
+    const batch = core.server.find((x) => x.sym.hint === "move#batch");
+    expect(core.envelopes.find((e) => e.fn.id === batch.sym.id)).toMatchObject({ standalone: true, writes: true });
   });
   test("`PRAGMA journal_mode = OFF` on a `!` function's connection — E-SQL-JOURNAL-OFF", () => {
     const src = `<program db="./app.db">\n${E}    function move(a: int)! E {\n        ${q("PRAGMA journal_mode = OFF")}\n        ${q("UPDATE acct SET n = n + ${a}")}\n        return 1;\n    }\n${page(["move(1)"])}</program>\n`;

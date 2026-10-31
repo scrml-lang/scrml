@@ -1,0 +1,32 @@
+// S474 ruling "capability over limitation" item 2: a client `!` function whose one server call is a
+// non-`!` server function running two queries — the compiler wraps that call in the transaction
+// envelope (the composed batch, §19.9.9.8 rule 1). move(6) runs both()'s two INSERTs and then
+// fails inside the batch: both rows are rolled back. move(1) commits its two rows. Count 2 (without
+// the envelope, move(6)'s two rows would persist: 4).
+<program db="./app.db">
+    type E:enum = { Bad, QueryFailed(message: string), ConstraintViolation(field: string), ConnectionLost, Transport(t: ServerCallError) }
+    type C:struct = { c: int }
+    let <r:int=0/>
+    let <n:int=0/>
+    function both(a: int) -> int {
+        ?{`INSERT INTO log (a) VALUES (${a})`}.run() !{ _ :> { return 0; } };
+        ?{`INSERT INTO log (a) VALUES (${a + 100})`}.run() !{ _ :> { return 0; } };
+        return 1;
+    }
+    function move(a: int)! E {
+        const y: int = both(a) !{ _ :> { return 0; } };
+        if (a > 5) fail .Bad;
+        return y;
+    }
+    function count()! E {
+        const row: C = ?{`SELECT count(*) AS c FROM log WHERE a > 0`}.get();
+        return row.c;
+    }
+    <main>
+        <button id="bad" onclick={ @r = move(6) !{ .Bad :> 7, _ :> 9, }; }>bad</button>
+        <button id="ok" onclick={ @r = move(1) !{ .Bad :> 7, _ :> 9, }; }>ok</button>
+        <button id="count" onclick={ @n = count() !{ _ :> 99, }; }>count</button>
+        <p id="r">${@r}</p>
+        <p id="n">${@n}</p>
+    </main>
+</program>

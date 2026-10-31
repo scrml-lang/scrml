@@ -349,16 +349,28 @@ describe("F10 — a `!` callee's queries count toward the outer `!` function's s
   });
 });
 
-describe("F11 — a client-placed `!` function making two or more server calls: E-TX-CLIENT-MULTI-CALL (permanent)", () => {
+// s474-boot-client-bang-composition (S474 ruling, the four one-way doors, door 2): "F11 becomes INTERIM: a
+// client `!`'s server calls compose into one request with one envelope". These two shapes were the permanent
+// E-TX-CLIENT-MULTI-CALL; they now compose (a server `!` batch `move#batch`, one standalone envelope). The
+// composed request can fail on the wire, so `move`'s error type needs `Transport` — the built-in `SqlError`
+// has none: E-ERROR-010 naming the line to add. (What stays E-TX-CLIENT-MULTI-CALL — a browser statement
+// splitting the calls — is pinned in client-bang-compose-s474.test.js and acceptance/envelope/neg-client-multi-call.)
+describe("F11 (s474: INTERIM, built) — a client-placed `!` function making two or more server calls composes into one request", () => {
   const L = helper("logIt", "INSERT INTO log (a) VALUES (${a})") + helper("bump", "UPDATE acct SET n = n - ${a}");
+  const T = "    type TE:enum = { QueryFailed(message: string), ConstraintViolation(field: string), ConnectionLost, Transport(t: ServerCallError) }\n";
   test("two server calls; one in a loop", () => {
     for (const [name, body] of [
       ["two calls", `        ${hcall("x", "logIt", "a")}\n        ${hcall("y", "bump", "a")}\n`],
       ["one call in a loop", `        for (let i = 0; i < 3; i = i + 1) {\n            ${hcall("y", "bump", "i")}\n        }\n`],
     ]) {
       const e = errs(DBP(L + bang(body)));
-      expect([name, e.map((d) => d.code)]).toEqual([name, ["E-TX-CLIENT-MULTI-CALL"]]);
-      expect(e[0].message).toContain("Compose the calls in one server `!` function");
+      expect([name, e.map((d) => d.code)]).toEqual([name, ["E-ERROR-010"]]);
+      expect(e[0].message).toContain("add `Transport(t: ServerCallError)` to `SqlError`");
+      const ok = DBP(T + L + bang(body).replace("! SqlError", "! TE"));
+      expect([name, codes(ok)]).toEqual([name, []]);
+      const core = run(ok).core;
+      const batch = core.server.find((x) => x.sym.hint === "move#batch");
+      expect([name, core.envelopes.find((x) => x.fn.id === batch.sym.id).standalone]).toEqual([name, true]);
     }
   });
   test("near-miss: one server call", () => {

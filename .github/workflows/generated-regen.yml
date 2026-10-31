@@ -15,7 +15,11 @@
 #   1. compiler/self-host-v2/severity.scrml  gen-bootstrap-severity.ts   ← SPEC §34 + bootstrap code literals
 #   2. compiler/SPEC-INDEX.md                regen-spec-index.ts         ← SPEC.md (totals + row Lines/Size)
 #   3. docs/bootstrap-spec-coverage.md       spec-coverage-check --write ← its own rows (reads SPEC-INDEX: after 2)
-#   4. docs/known-gaps.md + master-list.md   state.ts --write            ← @gap markers; `git log` wrap commits
+#   4. docs/generated/gap-counts.md          state.ts --write            ← docs/known-gaps.md's @gap markers
+#      docs/generated/recent-sessions.md     (same run)                  ← `git log` wrap commits
+#      (S474: moved out of known-gaps.md / master-list.md, so no PR touches a line this bot rewrites —
+#      GitHub's merge runs no custom merge driver, and a PR carrying its own value of those lines went
+#      DIRTY on every bot landing: #1702 → #1699, #1701. ci.yml `checks` refuses a PR modifying them.)
 #   5. docs/bootstrap-conformance.md         bootstrap-conformance --write ← a bootstrap run (compiles 1: after 1)
 #   6. docs/FACTS.md                         facts.ts --write            ← repo-wide counts (LAST: it measures files 1–5 touch)
 #
@@ -95,8 +99,8 @@ jobs:
         compiler/self-host-v2/severity.scrml
         compiler/SPEC-INDEX.md
         docs/bootstrap-spec-coverage.md
-        docs/known-gaps.md
-        master-list.md
+        docs/generated/gap-counts.md
+        docs/generated/recent-sessions.md
         docs/bootstrap-conformance.md
         docs/FACTS.md
     steps:
@@ -140,7 +144,7 @@ jobs:
           run_producer severity     "compiler/self-host-v2/severity.scrml"  bun scripts/gen-bootstrap-severity.ts
           run_producer spec-index   "compiler/SPEC-INDEX.md"                bun run scripts/regen-spec-index.ts
           run_producer coverage     "docs/bootstrap-spec-coverage.md"       bun scripts/spec-coverage-check.ts --write
-          run_producer state        "docs/known-gaps.md master-list.md"     bun scripts/state.ts --write
+          run_producer state        "docs/generated/gap-counts.md docs/generated/recent-sessions.md"  bun scripts/state.ts --write
           # --ratchet (S474 r2): a CRASH/INVALID rise over main's committed report is a producer FAILURE —
           # the write is refused, the file restored, the run ends red naming the delta (never absorbed).
           run_producer conformance  "docs/bootstrap-conformance.md"         bun scripts/bootstrap-conformance.ts --write --ratchet
@@ -212,7 +216,7 @@ jobs:
             if [ -z "$PR" ]; then
               gh pr create --base main --head "$BR" \
                 --title "chore(generated): post-merge regen of derived blocks" \
-                --body "Automated regeneration on main's tip by \`.github/workflows/generated-regen.yml\` (owner rulings S469 \"Regenerate on main after merge\" + S474 \"Generated files move to a post-merge bot\"). Only derived blocks change: \`severity.scrml\`, SPEC-INDEX totals/row ranges, coverage totals, known-gaps counts, master-list recent-sessions, \`bootstrap-conformance.md\`, \`FACTS.md\`. The branch \`$BR\` is force-updated by every merge to main, so this PR always carries the newest content; it goes through \`gate\` and the merge queue like any other PR."
+                --body "Automated regeneration on main's tip by \`.github/workflows/generated-regen.yml\` (owner rulings S469 \"Regenerate on main after merge\" + S474 \"Generated files move to a post-merge bot\"). Only derived blocks change: \`severity.scrml\`, SPEC-INDEX totals/row ranges, coverage totals, \`docs/generated/gap-counts.md\` (known-gaps counts), \`docs/generated/recent-sessions.md\` (session index), \`bootstrap-conformance.md\`, \`FACTS.md\`. The branch \`$BR\` is force-updated by every merge to main, so this PR always carries the newest content; it goes through \`gate\` and the merge queue like any other PR."
               PR=$(gh pr list --head "$BR" --base main --state open --json number --jq '.[0].number')
             fi
           fi
