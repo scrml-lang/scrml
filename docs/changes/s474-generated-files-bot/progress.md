@@ -20,3 +20,6 @@
 - F5 regen-spec-index: duplicate section key -> 1. BITE: `## 47.` twice -> rc 1 "duplicate SPEC section heading"; restored 0.
 - F6 spec-coverage anchors exactly once each, START first; --write refuses a malformed pair. BITE: totals block duplicated -> rc 1; START/END swapped -> rc 1; --write on swapped -> rc 1, file untouched; restored 0.
 - F7 conflict-marker-gate also flags the crash-wrapper banner. BITE: banner at column 0 -> rc 1; restored 0.
+- r1 unit A committed 191c63b15 (F1 F2 F5 F6 F7 F11).
+- F3/F8/F9 workflow: landing step `gh pr checks --required` -> STUCK error exit 1; MAPS_PAT only on the landing step (persist-credentials:false, set-url in-step); cloud-maps default token; fetch-depth 0 + filter blob:none; push tags v* + daily schedule. Structural tests in generated-stale-exit-codes-s474.test.js.
+- HOOK-ENV: tmp-root-preload.js scrubGitEnv deletes every /^GIT_/ key (process.env + the Bun.spawn child env). PROOF under forced worktree GIT_DIR + GIT_INDEX_FILE (scratch index), the self-compilation/self-host-smoke root resolution (`git -C <testDir> rev-parse --show-toplevel`): BEFORE = .../agent-a72f3a50e28e94dab/compiler/tests/integration (WRONG), AFTER = .../agent-a72f3a50e28e94dab (= no-hook baseline); both files 29/29 pass either way (the false-green shape); scratch index never written.

@@ -41,9 +41,10 @@
 #   RED naming it. Every producer also runs PR-side in ci.yml `checks`, where only exit 4 (stale) warns —
 #   so a PR that breaks a producer is caught on the PR, not first here.
 #
-# TOKEN: MAPS_PAT (the fine-grained PAT cloud-maps.yml uses — Contents R/W + Pull-requests R/W). A PR opened
+# TOKEN: MAPS_PAT (a fine-grained PAT — Contents R/W + Pull-requests R/W), on the LANDING step only (S474 r1):
+#   the checkout persists no credentials and the producers — repo code — never see it. A PR opened
 #   with GITHUB_TOKEN does not trigger other workflows, so `gate` would never run on it and the queue would
-#   never take it. NB fine-grained PATs expire — when MAPS_PAT lapses this job goes red at checkout;
+#   never take it. NB fine-grained PATs expire — when MAPS_PAT lapses this job goes red at the landing step;
 #   harmless to merges (not a required check) but the blocks then drift until it is renewed
 #   (`gh workflow run generated-regen` re-fires it).
 #
@@ -66,6 +67,10 @@ name: generated-regen
 on:
   push:
     branches: [main]
+    tags: ["v*"]                   # S474 r1: recent-sessions carries a `tag` note per wrap — a release tag
+                                   # pushed without a main push must still refresh it
+  schedule:
+    - cron: "23 8 * * *"           # daily backstop (the tag note, a missed/cancelled run, a renewed PAT)
   workflow_dispatch: {}            # manual re-fire (e.g. after renewing MAPS_PAT)
 
 concurrency:
@@ -83,7 +88,8 @@ jobs:
     env:
       BR: bot/generated-regen
       LEGACY_BR: bot/facts-regen
-      GH_TOKEN: ${{ secrets.MAPS_PAT }}
+      # (S474 r1: GH_TOKEN / MAPS_PAT is scoped to the LANDING step only — the producers below run repo
+      # code and never see the write token.)
       # Every file a producer below may write. The landing step stages and compares exactly these.
       FILES: >-
         compiler/self-host-v2/severity.scrml
@@ -97,10 +103,12 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: main                          # the CURRENT tip, not the SHA that triggered this run
-          token: ${{ secrets.MAPS_PAT }}     # identity whose push/PR fires `gate` (GITHUB_TOKEN's wouldn't)
+          persist-credentials: false         # S474 r1: no token left in .git/config for the producers;
+                                             # the landing step sets the MAPS_PAT push URL itself
           fetch-depth: 0                     # state.ts recent-sessions pages `git log` for 8 wrap commits
                                              # and asks `merge-base --is-ancestor … origin/main`; a shallow
                                              # clone is its degenerate-projection refusal (exit 2)
+          filter: blob:none                  # full history, but only the tip's blobs (S474 r1)
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: "1.4.3"   # PINNED — same as ci.yml (see its header note on bun)
@@ -146,10 +154,14 @@ jobs:
           fi
 
       - name: Land the regen through the merge queue (only if drift)
+        env:
+          GH_TOKEN: ${{ secrets.MAPS_PAT }}   # identity whose push/PR fires `gate` (GITHUB_TOKEN's wouldn't)
         run: |
           set -euo pipefail
           # shellcheck disable=SC2086
           set -- $FILES
+          # The checkout persisted no credentials (S474 r1): authenticate origin for this step only.
+          git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
 
           # S474: the S469 bot branch is retired — close a PR still open from it (its files are a subset).
           OLD=$(gh pr list --head "$LEGACY_BR" --base main --state open --json number --jq '.[0].number // empty')
@@ -175,6 +187,15 @@ jobs:
              && git diff --quiet FETCH_HEAD -- "$@" \
              && [ "$(gh pr view "$PR" --json mergeable --jq .mergeable)" != "CONFLICTING" ]; then
             echo "bot PR #$PR already carries this content — leaving it as is."
+            # S474 r1 (review F3): "left as is" must not mean "stuck forever". If a REQUIRED check on it
+            # has FAILED, auto-merge will never fire and every derived block stops updating on main while
+            # this run stays green. End red and name it (a human decides: fix main, or re-run the check).
+            FAILED_CHECKS=$(gh pr checks "$PR" --required --json name,bucket \
+              --jq '[.[] | select(.bucket == "fail") | .name] | join(", ")' 2>/dev/null || true)
+            if [ -n "$FAILED_CHECKS" ]; then
+              echo "::error title=generated-regen: bot PR #$PR is STUCK::required check(s) failed: $FAILED_CHECKS — auto-merge will never fire; derived blocks on main are not updating."
+              exit 1
+            fi
           else
             git config user.name  "scrml-generated-ci"
             git config user.email "scrml-generated-ci@users.noreply.github.com"
