@@ -621,18 +621,27 @@ function addPending(path: string, cwd?: string): void {
 const MARK = (c: string, n: number) => c.repeat(n);
 const REGEN_TAG = "scrml-generated-merge: REGENERATION REQUIRED";
 
-function failBlock(n: number, why: string): string {
-  // A real marker block, so `conflict-marker-gate.ts` and every editor see it as unresolved.
-  return `${MARK("<", n)} scrml-generated-merge: ${why}\n` +
-    `This merge was STOPPED by scripts/git-merge-generated.ts. Below is git's plain 3-way merge.\n` +
+// ⚑ S474 (SPEC-INDEX line-1 leak). Every block below is MARKER LINES ONLY: its words ride on the
+// `<<<<<<<` / `>>>>>>>` lines, and both "sides" of the block are empty. The block used to carry one
+// plain-text line on the OURS side ("Run `bun scripts/git-merge-generated.ts --regen`: …"). A hand
+// resolution that deletes the marker lines, or keeps both sides (the "take the union" resolution these
+// generated files get all the time), left that line in the file. No marker gate sees a plain line, and
+// `regen-spec-index.ts` regenerates in place, so it kept the line too. That happened twice:
+// 996a049a8 removed a whole committed block (S471, caught by the marker gate), and merge d327610cb
+// (#1682 lane, S473) left only the text line, which stayed as line 1 of compiler/SPEC-INDEX.md on main.
+// With no content line, every resolution of the block (ours, theirs, union, marker lines deleted)
+// leaves nothing behind. Pinned in git-merge-generated-s468.test.js.
+
+/** A real marker block, so `conflict-marker-gate.ts` and every editor see it as unresolved. Exported to be pinned. */
+export function failBlock(n: number, why: string): string {
+  return `${MARK("<", n)} scrml-generated-merge: ${why} — this merge was STOPPED by scripts/git-merge-generated.ts; git's plain 3-way merge follows this block\n` +
     `${MARK("=", n)}\n` +
     `${MARK(">", n)} resolve by hand, then delete this block\n`;
 }
 
 /** The block on a file whose derived content both sides changed. `--regen` removes it. */
 export function regenBlock(n: number, sections: string[]): string {
-  return `${MARK("<", n)} ${REGEN_TAG} — both sides changed derived content: ${sections.join(", ")}\n` +
-    `Run \`bun scripts/git-merge-generated.ts --regen\`: it regenerates this file from the MERGED tree and stages it.\n` +
+  return `${MARK("<", n)} ${REGEN_TAG} — both sides changed derived content: ${sections.join(", ")} — run \`bun scripts/git-merge-generated.ts --regen\` (it regenerates this file from the MERGED tree and stages it)\n` +
     `${MARK("=", n)}\n` +
     `${MARK(">", n)} (the text below is provisional)\n`;
 }
@@ -643,7 +652,9 @@ export function stripRegenBlock(text: string): string | null {
   // the block's lines end `\r\n`. Before S469-windows the `=======` line failed to match there (so
   // `--regen` refused a genuine stop), and — worse — `$` in multiline mode does not match before `\r`,
   // so a REAL `=======\r` conflict marker in the rest of the file went unseen.
-  const m = /^(<{7,}) scrml-generated-merge: REGENERATION REQUIRED[^\n]*\n[^\n]*\n(={7,})\r?\n(>{7,}) [^\n]*\n/.exec(text);
+  // The middle line is optional: blocks written before S474 carried one plain-text line on the OURS
+  // side (see regenBlock), so a merge stopped by an older driver still strips.
+  const m = /^(<{7,}) scrml-generated-merge: REGENERATION REQUIRED[^\n]*\n(?:[^\n]*\n)?(={7,})\r?\n(>{7,}) [^\n]*\n/.exec(text);
   if (!m || m[1].length !== m[2].length || m[1].length !== m[3].length) return null;
   const rest = text.slice(m[0].length);
   const n = m[1].length;
