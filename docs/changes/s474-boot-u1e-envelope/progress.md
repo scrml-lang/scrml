@@ -153,3 +153,10 @@ concurrent isolation, auto-rollback detection, non-standalone plain) all as expe
 - F5: a server log line when one owner holds a gate > 30 s (`GATE_SLOW_MS`, unref'd timer); gap filed.
 - F8: bite count with `envelope()` neutered: 14 of 29 at 3cfded1a7 (the PR body's "9" was the count
   before the runtime-exit tests were added); 18 of 37 now.
+- r1 code commit c6a877330 (hook: 52403 pass / 0 fail / 152 skip; one earlier attempt was killed at
+  the per-shard memory ceiling on a memory-starved host — 3 shards — and the identical commit then passed).
+- r1 docs: gaps filed g-boot-envelope-gate-no-timeout-s474 (MED, F5) and
+  g-boot-envelope-begin-deferred-late-conflict-s474 (LOW, F4, needs a ruling); r1 note on the resolved
+  envelope gap; coverage §8.1.1 / §19.10.6 rows. Conformance after r1: PASS 283 / FAIL 241 /
+  NOT-TWINNED 685 / UNSUPPORTED 604 (no verdict change; report already current). Acceptance +1 case
+  (envelope/neg-nobatch-cross-db-write). spec-coverage-check 0 warnings.
