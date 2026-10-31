@@ -307,9 +307,11 @@ describe("an import binds a name in file scope", () => {
     expect(src.slice(r.diags[0].span.start, r.diags[0].span.end)).toBe("twice");
   });
 
-  // s473 r2 #5 (narrowed to exported names): two user files EXPORTING one name are E-SCOPE-010 at
-  // the later file; the §41.7 W-IMPORT-001 still reports the second import beside it.
-  test("two imports of one name from two user files that both export it: E-SCOPE-010 (§7.6, S473), with W-IMPORT-001 (§41.7)", () => {
+  // s474 (door 3, "two files exporting one name: INTERIM"): two user files may each export a name;
+  // importing BOTH into one file binds it twice in that file's scope — E-SCOPE-010 at the later
+  // import, and the pair is refused, not resolved (no §41.7 later-wins W-IMPORT-001). Was (S473):
+  // E-SCOPE-010 at the second EXPORTER (lib2.scrml), with W-IMPORT-001 at the import.
+  test("two imports of one name from two user files that both export it: E-SCOPE-010 at the later import (§7.6, S474)", () => {
     const L2 = { path: "lib2.scrml", src: `\${\n    export fn twice(n: int) -> int {\n        return n * 20;\n    }\n}\n` };
     const src = `<program>
     \${ import { twice } from "./lib.scrml"; import { twice } from "./lib2.scrml"; }
@@ -317,7 +319,9 @@ describe("an import binds a name in file scope", () => {
 </program>
 `;
     const r = run(src, [LIB, L2]);
-    expect(r.diags.map((d) => [d.code, d.file]).sort()).toEqual([["E-SCOPE-010", "lib2.scrml"], ["W-IMPORT-001", ENTRY]].sort());
+    expect(r.diags.map((d) => [d.code, d.file])).toEqual([["E-SCOPE-010", ENTRY]]);
+    expect(src.slice(r.diags[0].span.start, r.diags[0].span.end)).toBe("twice");
+    expect(r.diags[0].span.start).toBeGreaterThan(src.indexOf("lib.scrml"));
   });
 
   // s473 r2 LOW-C: later-import-wins can still happen between a USER import and a STDLIB import of one

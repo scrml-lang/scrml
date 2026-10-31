@@ -787,8 +787,14 @@ ${
 
     // `handles` = the `as=` aliases whose cells live on THIS declaration's
     // instances (aliases inside an `<each>` row live on the row: Each.handles).
+    // s474 (door 3, ruled: "The CSS scope key and output names are always per-file qualified, not
+    // only on a collision"): `key` is the declaration's OUTPUT name — `<name>~<file tag>`
+    // (scopeKey) for a user declaration, so two files may each declare a `<card>`; the bare hint
+    // for the program and a predefined declaration (one of each). The printer names a
+    // declaration's templates and module-level bindings by it; its root's `data-scrml` is it.
     export type Decl:struct = {
         sym: Sym,
+        key: string,
         kind: DeclKind,
         single: boolean,
         fields: Field[],
@@ -1153,6 +1159,49 @@ ${
 
     export type CssImport:struct = { url: string, conditions: string }
     export type ScopeSheet:struct = { component: string, rules: StyleRule[] }
+
+    // s474 (door 3, user-voice-scrml.md "⭐ RULED — permanent-restrictions re-review: the four
+    // one-way doors", item 3: "The CSS scope key and output names are always per-file qualified,
+    // not only on a collision") — a component's CSS scope key is `<name>~<file tag>`, ALWAYS:
+    // two files may each declare a `<card>`, and each keeps its own style scope. The file tag is
+    // 8 hex digits of a 32-bit hash of the declaring file's PROJECT-RELATIVE path, normalised
+    // (`\` → `/`, a leading `./` and repeated `/` dropped), so it is the same on every machine and
+    // every OS. The front end is handed project-relative paths (the same paths imports resolve
+    // by); the hash never sees an absolute path.
+    export fn normalPath(path: string) -> string {
+        let p: string = path.replaceAll("\\", "/")
+        while (p.indexOf("//") >= 0) { p = p.replaceAll("//", "/") }
+        while (p.startsWith("./")) { p = p.slice(2) }
+        return p
+    }
+
+    fn hexDigit(d: int) -> string {
+        return "0123456789abcdef".slice(d, d + 1)
+    }
+
+    // 32-bit polynomial hash (h = h * 33 + code, mod 2^32 — exact in a double: h * 33 < 2^38),
+    // printed as 8 lowercase hex digits.
+    export fn fileTag(path: string) -> string {
+        const p: string = normalPath(path)
+        let h = 5381
+        let i = 0
+        while (i < p.length) {
+            h = (h * 33 + p.charCodeAt(i)) % 4294967296
+            i = i + 1
+        }
+        let out = ""
+        let k = 0
+        while (k < 8) {
+            out = hexDigit(h % 16) + out
+            h = (h - h % 16) / 16
+            k = k + 1
+        }
+        return out
+    }
+
+    // The CSS scope key of the component `name` declared in the file `path` (§9.1 DQ-7 as re-ruled
+    // S474): its root's `data-scrml` value and its sheet's `@scope ([data-scrml="…"])`.
+    export fn scopeKey(path: string, name: string) -> string { return name + "~" + fileTag(path) }
 
     // One file's stylesheet. `reset` = the §65.3.4 built-in reset is on (opt out:
     // `<program reset="none">`). `global` = program-level `#{}` rules (§9.1, the

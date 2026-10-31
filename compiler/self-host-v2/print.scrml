@@ -113,7 +113,9 @@ ${
         // binding each; a local of the name inside a function is minted apart, so it shadows nothing)
         for (const k of p.consts) { t = mint(t, NameKey.OfSym(k.sym.id), k.sym.hint) }
         for (const d of p.decls) {
-            const h: string = d.sym.hint
+            // s474 (door 3): a declaration's module-level names carry its per-file output name
+            // (core.scrml Decl.key: `card~d41a3302` → `mk_card_d41a3302`), always
+            const h: string = d.key.replaceAll("~", "_")
             t = mint(t, NameKey.DeclInfo(d.sym.id), "decl_" + h)
             t = mint(t, NameKey.Factory(d.sym.id), "mk_" + h)
             t = mint(t, NameKey.Render(d.sym.id), "render_" + h)
@@ -2435,7 +2437,8 @@ ${
         let templates: Template[] = []
         const views: View[] | not = d.renders
         if (views is given) {
-            const r: Rendered = renderViews(instCtx(ctx, d), views, "scrml:" + h)
+            // s474 (door 3): the template id is the per-file output name (two files' `<card>`s, two templates)
+            const r: Rendered = renderViews(instCtx(ctx, d), views, "scrml:" + d.key)
             stmts = stmts.concat([JsStmt.SFunc(nameOf(ctx.names, NameKey.Render(d.sym.id)),
                 ["inst$", "scope$", "anchor$", "slot$"], r.stmts)])
             templates = r.templates
