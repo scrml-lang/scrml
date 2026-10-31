@@ -1,0 +1,10 @@
+# s474-slot-exclusive-branches — progress (append-only)
+
+- Start: worktree agent-af2529199df4495a7 at origin/main 34ebef81d. Maps: primary.map.md -> bootstrap.map.md (build / slice tests / conformance commands — load-bearing).
+- Baseline bootstrap conformance (conformance/cases, pre-edit): PASS 283 · FAIL 241 · NOT-TWINNED 685 · UNSUPPORTED 604 (matches the map's d139f747c figures).
+- SPEC: D11 sits at §66.15.2 "Slot multiplicity" rule 2 (+ §34 E-COMPONENT-020 rows at the §16 table and the §34 catalogue). Amended: rule 2 per render path; "Exclusive branches (S474 F7)" paragraph — exclusive = one if= chain (§17.1.1), one lifting `${ if }` (§10.8.2), one match (§18.0.1 / §17.6.10); nothing else. Repeating regions (`<each>` row, `${ for … lift }`) flagged as an agent reading of rule 2.
+- Locus: analyze.scrml `resolveSlot` (slotsIn / loopSlotsIn) — the s473-boot-ruled-refusals code. The named gap g-boot-named-slot-shapes-not-refused-s473 is a different defect (named slots) nearby — locus REFINED.
+- Bootstrap: `excessSlotsIn` / `slotPathWalk` / `slotPathElem` (per-path max over if= chains); resolveSlot reports E-COMPONENT-020 at excess slots only. Found: a slot in an `<each>` row compiled clean (once-per-row duplication) — slotsInElem now treats `<each>` as a loop row.
+- Probes: `<match>`, lifting `${ if }`, markup in value-form match arms are all refused/unparsed by the bootstrap — only if= chains carry exclusivity there.
+- Tests: slice-m4/slot-exclusive-branches-s474.test.js (23 tests; 12 red on base incl. both runtime blocks). ruled-refusals-s473.test.js still green.
+- Docs: known-gaps (F7 note on g-boot-slot-count-unchecked-s473; new resolved g-boot-slot-in-each-row-accepted-s474), bootstrap-spec-coverage §66.15.2 row. spec-coverage-check 0 warnings.
