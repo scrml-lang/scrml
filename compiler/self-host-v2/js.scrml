@@ -44,6 +44,9 @@ ${
         // so a call inside it (`rt.hostRoot("window").X`) is never read as the
         // `new`'s own argument list.
         JNew(callee: JsExpr, args: JsExpr[]),
+        // s474 (§50, D10): `(name = e)` — the kept condition-head assignment,
+        // ALWAYS printed in its own parentheses (a primary), as it is written
+        JAssignE(name: string, e: JsExpr),
     }
 
     export type JsStmt:enum = {
@@ -167,6 +170,7 @@ ${
             .JAnnot(e: inner) :> prec(inner)
             .JAwait :> 15
             .JNew :> 18
+            .JAssignE :> 20
         }
     }
 
@@ -213,6 +217,7 @@ ${
             .JAnnot :> false
             .JAwait :> false
             .JNew :> false
+            .JAssignE :> false
         }
     }
 
@@ -239,6 +244,7 @@ ${
             .JAnnot(e: x, note: n) :> expr(x, ind) + " /* " + n + " */"
             .JAwait(e: x) :> "await " + wrap(x, 15, ind)
             .JNew(callee: f, args: args) :> "new (" + expr(f, ind) + ")(" + joinExprs(args, 2, ind) + ")"
+            .JAssignE(name: n, e: x) :> "(" + n + " = " + wrap(x, 2, ind) + ")"
         }
     }
 

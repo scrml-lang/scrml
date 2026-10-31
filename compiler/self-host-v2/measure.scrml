@@ -89,6 +89,7 @@ ${
             .StructOf(ty: x) :> "StructOf"
             .VariantOf(enumSym: x) :> "VariantOf"
             .Handle(inst: x) :> "Handle"
+            .Assigned(local: x) :> "Assigned"
             .InitOf(decl: x) :> "InitOf"
             .Host(call: x) :> "Host"
             .Lambda(params: x) :> "Lambda"

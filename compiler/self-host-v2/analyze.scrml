@@ -289,7 +289,7 @@ ${
         BBind(sym: Sym),                                  // a binder: a local statement, a function
         BParam(sym: Sym, ty: Type),                       // a function parameter and its (annotated) type
         BGiven(sym: Sym, inst: InstRef),                  // given c = @handle (L11)
-        BLoop(label: Sym, end: Sym | not, counter: Sym | not), // s469: a `for` (on the AFor) — its label; a range head's `end` / `counter` (§49.2.5)
+        BLoop(label: Sym, end: Sym | not, counter: Sym | not, key: Sym | not), // s469: a `for` (on the AFor) — its label; a range head's `end` / `counter` (§49.2.5); s474: the local holding an iteration's header `key` (§17.4b)
         BJump(target: Sym),                               // s469: a `break` / `continue` — the label Sym of the loop it leaves / re-enters
     }
     export type ElemFact:enum = {
@@ -6113,10 +6113,71 @@ ${
 
     // A condition: a presence test of a conditional handle resolves its `@h`
     // as a SUBJECT (not a read — the test is the narrowing, ruled S442).
-    fn resolveCond(env: Env, c: AExpr, st: AS) -> AS {
+    fn resolveCond(env: Env, c: AExpr, st0: AS) -> AS {
+        const st: AS = keptHeadAliasing(env, c, st0)
         const h: string = presenceHandle(env, c)
         if (h == "") return resolveExpr(env, c, Type.Bool, st).st
         return resolveExpr(withPresent(env, h), c, Type.Bool, st).st
+    }
+
+    // s474 (#1700 review F1) — a kept condition-head assignment's local named
+    // ANYWHERE else in the same head (a second kept assignment of it, or a read
+    // / presence test of it in another operand) is refused by name: the typer's
+    // head narrowing is not ordered, so `((m = a) is given && ((m = b) is not ||
+    // true))` would leave `m` narrowed present by the first operand after the
+    // second rebound it. Its own value may read it (`((m = m + 1) > 0)` — the
+    // value is evaluated before the rebinding). Fail closed (D28): the language
+    // admits these heads; the bootstrap does not type them soundly yet.
+    fn keptHeadAliasing(env: Env, c: AExpr, st0: AS) -> AS {
+        let st: AS = st0
+        for (const a of keptAssigns(c)) {
+            const t: AExpr | not = keptTargetExpr(a)
+            const v: AExpr | not = assignValue(a)
+            if (t is given && v is given) {
+                const n: string = exprName(t)
+                if (n != "" && nameCount(c, n) > 1 + nameCount(v, n)) {
+                    st = addDiag(st, env.file, a.span, "E-BOOTSTRAP-UNSUPPORTED", "`" + n + "` is the target of this condition-head assignment and is named again elsewhere in the same head — a second assignment of it, or a read / test of it in another operand. The bootstrap does not yet track the order of such a head (its narrowing could outlive the rebinding), so it refuses it: assign `" + n + "` once in the head and test it in a nested `if` inside the body (§50, S473 D10)")
+                }
+            }
+        }
+        return st
+    }
+
+    fn nameCount(e: AExpr, n: string) -> int {
+        let c: int = 0
+        if (exprName(e) == n) c = 1
+        for (const x of exprKids(e)) { c = c + nameCount(x, n) }
+        return c
+    }
+
+    fn keptTargetExpr(e: AExpr) -> AExpr | not {
+        const k: AExprK = e.k
+        return match k {
+            .Assign(target: t) :> t
+            .Name(name: n) :> not
+            .At(name: n) :> not
+            .AtItem :> not
+            .Num(raw: r) :> not
+            .Str(v: x) :> not
+            .Bool(v: b) :> not
+            .NotLit :> not
+            .Recovered :> not
+            .Variant(name: n) :> not
+            .Member(obj: o) :> not
+            .Call(callee: x) :> not
+            .Unary(op: o) :> not
+            .Binary(op: o) :> not
+            .Ternary(test: x) :> not
+            .ArrayLit(elems: es) :> not
+            .ObjectLit(props: ps) :> not
+            .Spread(e: x) :> not
+            .Index(obj: o) :> not
+            .Lambda(params: lp) :> not
+            .Sql(q: q) :> not
+            .Handled(h: x) :> not
+            .Template(quasis: qs) :> not
+            .Foreign(f: fb0) :> not
+        }
     }
 
     fn lookupNarrow(env: Env, name: string) -> NarrowB | not {
@@ -6235,7 +6296,7 @@ ${
             .Unary(op: o, e: x) :> resolveUnary(env, e, o, x, st)
             .Binary(op: o, l: l, r: r) :> resolveBinary(env, e, o, l, r, st)
             .Ternary(test: t, yes: y, no: n) :> resolveTernary(env, e, t, y, n, expected, st)
-            .Assign(target: t, value: av) :> resolveValueAssign(env, e, t, av, st)
+            .Assign(target: t, value: av, kept: kp) :> assignAsValue(env, e, t, av, kp, st)   // s474: the §50 kept form
             .ArrayLit(elems: es) :> resolveArray(env, e, es, expected, st)
             .ObjectLit(props: ps) :> resolveObject(env, e, ps, expected, st)
             .Spread(e: x) :> diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", "an array spread `...` is in the bootstrap only as a recognized edit shape (`@x = [...@x, e]`, §66.11.2) — Core has no spread value", st)
@@ -6246,6 +6307,32 @@ ${
             .Template(quasis: qs, slots: ss) :> resolveTemplate(env, e, ss, st)   // s469 (§14.13.3)
             .Foreign(f: fb0) :> resolveForeign(env, e, fb0, st)                 // s473 (§23.2.4a)
         }
+    }
+
+    // s474 (§50 amendment, S473 D10): "The ONLY assignment-as-expression the
+    // language keeps is an assignment wrapped in its own parentheses inside the
+    // condition head of a `for (…)` or `if (…)` / `else if (…)`" — parse.scrml
+    // keptHead marks it `kept`. Its target is an lvalue (§50.2.1: `lvalue ::=
+    // identifier | reactive-lvalue`): a `let` local is built — rebound, and the
+    // expression's value is the assigned value (§50.3.1), its type the value's
+    // (§50.4.1, the typer); a `const` local is E-ASSIGN-CONST, as the statement
+    // form (§50.3.5 "same error as a statement-level `const` reassignment"); a
+    // CELL target (`((@x = e))`, §50.3.4) is not built — refused by name; any
+    // other target is not an lvalue, so not the kept form: E-ASSIGN-POSITION.
+    fn assignAsValue(env: Env, e: AExpr, t: AExpr, v: AExpr, kept: boolean, st: AS) -> RX {
+        if (!kept) return resolveValueAssign(env, e, t, v, st)
+        const sw: string = assignSinkWhy(env, t, v)      // #1700 review F4: the statement form's judgement
+        if (sw != "") return diagX(env, e, "E-LOGIC-EXECUTABLE-SINK", sinkMessage(sw), st)
+        const rp: RPlace = resolvePlace(env, t, st)
+        const l: LocalB | not = rp.local
+        if (l is given && exprName(t) != "") {
+            let st1: AS = rp.st
+            if (!l.mutable) st1 = addDiag(st1, env.file, t.span, "E-ASSIGN-CONST", "`" + l.name + "` is not a `let` local")
+            st1 = addEffect(st1, e.nid, EffectFact.EAssignLocal(l.s, [], not))
+            return resolveExpr(env, v, l.ty, st1)
+        }
+        if (rp.place is given) return diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", "a CELL as the target of a condition-head assignment (`((" + placeKey(t) + " = …))`, §50.3.4) is not in the bootstrap yet — write the cell in a statement before the test (`" + placeKey(t) + " = …;` then `if (" + placeKey(t) + " …)`); a `let` local is built (`((x = e))`)", resolveExpr(env, v, not, rp.st).st)
+        return diagX(env, e, "E-ASSIGN-POSITION", "the kept condition-head assignment `((x = e))` assigns a VARIABLE (§50.2.1 `lvalue ::= identifier`) — `" + placeKey(t) + "` is not one, so this is an assignment used as a value (S473 D10). Write it as a statement before the test", resolveExpr(env, v, not, rp.st).st)
     }
 
     // An assignment where a value stands is E-ASSIGN-POSITION; one that writes an
@@ -9551,12 +9638,21 @@ ${
     }
 
     // `target = value` (statement position).
+    // s474 (#1700 review F4) — the §5.2 executable-sink judgement of an
+    // assignment, ONE function for the statement form and the kept
+    // condition-head form (assignAsValue), so the two cannot drift.
+    fn assignSinkWhy(env: Env, target: AExpr, value: AExpr) -> string {
+        if (env.fx.serverOwn) return ""
+        const w: string = sinkTargetWhy(env, target, value)
+        if (w != "") return w
+        if (sinkYieldsAttr(value)) return sinkAttrBindWhy("a variable")
+        return ""
+    }
+
     fn resolveAssign(env: Env, e: AExpr, target: AExpr, value: AExpr, st0: AS) -> AS {
         // s473 — §5.2 "Executable sinks in plain logic (S473)": judged first
         // (client logic only — a server function has no DOM, §5.2)
-        let sinkW: string = ""
-        if (!env.fx.serverOwn) sinkW = sinkTargetWhy(env, target, value)
-        if (sinkW == "" && !env.fx.serverOwn && sinkYieldsAttr(value)) sinkW = sinkAttrBindWhy("a variable")
+        const sinkW: string = assignSinkWhy(env, target, value)
         if (sinkW != "") return addDiag(st0, env.file, e.span, "E-LOGIC-EXECUTABLE-SINK", sinkMessage(sinkW))
         // s442: the recognized sequence reassignment shapes (§66.11.2) and an
         // element-field write (dpa-052 Q3).
@@ -14012,13 +14108,13 @@ ${
         let hint: string = f.label
         if (hint == "") hint = "loop"
         const rl: RSym = mint(st0, hint)
-        const plain0: AS = addBind(rl.st, f.nid, BindFact.BLoop(rl.s, not, not))
+        const plain0: AS = addBind(rl.st, f.nid, BindFact.BLoop(rl.s, not, not, not))
         const h: AForHead = f.head
         return match h {
             .HForever :> resolveBlock(env, f.body, plain0)
             .HCond(cond: c) :> resolveBlock(env, f.body, resolveCond(env, c, plain0))
             .HCounted(init: i, cond: c, step: sp) :> resolveCounted(env, f, i, c, sp, plain0)
-            .HIter(bind: b, mutable: m, src: src) :> resolveIter(env, f, rl.s, b, m, src, rl.st)
+            .HIter(bind: b, mutable: m, src: src, key: ky) :> resolveIter(env, f, rl.s, b, m, src, ky, rl.st)
         }
     }
 
@@ -14035,8 +14131,9 @@ ${
     // is E-LOOP-007 (§49.4.4). `break` keeps the prefix (rule 5) and the body
     // is a break boundary (rule 6, E-LOOP-005) — the loop-control pass.
     // =========================================================================
-    fn resolveForStmt(env: Env, s: AStmt, f: AFor, st0: AS) -> RB {
+    fn resolveForStmt(env: Env, s: AStmt, f: AFor, st00: AS) -> RB {
         const b: AForBound | not = f.bound
+        const st0: AS = keyOffMarkup(env, f, st00)
         if (b is not) return keepEnv(env, resolveFor(env, s, f, st0))
         let st: AS = st0
         let annot: Type | not = not
@@ -14061,6 +14158,28 @@ ${
         if (annot is given) lty = annot
         const l: LocalB = { name: b.name, s: rs.s, ty: lty, mutable: b.mutable, narrowed: not, nDecl: not, fresh: false }
         return { env: withLocal(env, l), st: st }
+    }
+
+    // s474 — the header `key` (§17.4b) names the ROWS a markup loop renders,
+    // for keyed reconciliation. The bootstrap builds it on a Tier-0
+    // `${ for … }` in markup (resolveTier0 — not through here); on a statement
+    // loop or a loop bound as a value (here, a nested loop inside a Tier-0 body
+    // included) there are no rows of its own to reconcile, so the clause is
+    // refused by name rather than evaluated and dropped (fail closed, D28).
+    fn keyOffMarkup(env: Env, f: AFor, st: AS) -> AS {
+        const ky: AExpr | not = forKey(f)
+        if (ky is not) return st
+        return addDiag(st, env.file, ky.span, "E-BOOTSTRAP-UNSUPPORTED", "a header `key` names the rows a `" + "$" + "{ for … }` in markup renders (keyed reconciliation, §17.4b); this loop is a statement or a loop bound as a value, which renders no rows of its own — the bootstrap builds the `key` only on the markup loop itself. Drop the `key` here, or move it to the `" + "$" + "{ for … }` that renders the rows")
+    }
+
+    fn forKey(f: AFor) -> AExpr | not {
+        const h: AForHead = f.head
+        return match h {
+            .HIter(bind: b, key: ky) :> ky
+            .HForever :> not
+            .HCond(cond: c) :> not
+            .HCounted(init: i) :> not
+        }
     }
 
     // §49.4.4: "a `lift` reachable on some path" — a `lift` into THIS loop that
@@ -14306,8 +14425,8 @@ ${
     // that speaks the ruled dialect (the bootstrap) refuses it with a hint naming
     // the header form". The ruling's scope is the LIFTED element (#1690 review
     // F8): `key=` elsewhere is not judged here. It was written as a DOM
-    // attribute (g-boot-lift-key-attr-silently-emitted-s473). The header form
-    // is not parsed by the bootstrap yet (#1690 review F9) — the message says so.
+    // attribute (g-boot-lift-key-attr-silently-emitted-s473). s474: the header
+    // form is built (keyed reconciliation) — the message names it as the fix.
     fn liftedKeyDiag(env: Env, n: ANode, st: AS) -> AS {
         const k: ANodeK = n.k
         const el: AElem | not = match k {
@@ -14322,7 +14441,7 @@ ${
         if (el is not) return st
         for (const a of el.attrs) {
             if (a.name.toLowerCase() == "key") {
-                return addDiag(st, env.file, a.span, "E-BOOTSTRAP-UNSUPPORTED", "`key=` on the lifted `<" + el.tag + ">` is the legacy keyed-iteration spelling (§6.5.3), refused (ruled S473: the loop-header `key` is canonical, §17.4b — `for (const it of @items key it.id)`). The bootstrap does not parse the header `key` yet either, so for now drop the `key=`: the list renders unkeyed (positional), and `key=` would only have been written as a DOM attribute")
+                return addDiag(st, env.file, a.span, "E-BOOTSTRAP-UNSUPPORTED", "`key=` on the lifted `<" + el.tag + ">` is the legacy keyed-iteration spelling (§6.5.3), refused (ruled S473: the loop-header `key` is canonical, §17.4b). Move it into the loop head — `for (const it of @items key it.id)` — and drop the `key=`")
             }
         }
         return st
@@ -14356,7 +14475,51 @@ ${
         for (const fsp of failSpansIn(f.body)) {
             st = addDiag(st, env.file, fsp, "E-BOOTSTRAP-UNSUPPORTED", "a `fail` inside a `" + "$" + "{ for … }` in markup has no function to leave (§49.6 rule 6) — compute the loop in a function and render its result")
         }
+        // s474 (#1700 review F2): in a KEYED loop a row is named by (key, its
+        // template, its place among the iteration's lifts of that template). An
+        // inner loop that lifts markup rows gives those rows only positions inside
+        // the item, so a row's DOM state would follow the position, not its inner
+        // item (the outer key keeps them, the inner list shifts under them). The
+        // nested identity is not built — refused by name.
+        if (forKey(f) is given) {
+            for (const nsp of nestedRowLoops(f.body)) {
+                st = addDiag(st, env.file, nsp, "E-BOOTSTRAP-UNSUPPORTED", "this loop lifts markup rows inside a KEYED `" + "$" + "{ for (… key …) }`: the bootstrap names a keyed row by its outer key and its place, so the inner rows would be matched by position and a row's DOM state (typed text) could move to another inner item. A nested keyed list is not in the bootstrap yet — drop the outer `key` (the rows rebuild), or lift the inner rows from their own `" + "$" + "{ for … }` (§17.4b)")
+            }
+        }
         return loopChecks(env.file, { nid: -1, span: f.span, stmts: [fs] }, st)
+    }
+
+    // s474 — the statement loops under `b` (any depth; a bound loop captures
+    // its own lifts) whose bodies lift markup rows.
+    fn nestedRowLoops(b: ABlock) -> ASpan[] {
+        let out: ASpan[] = []
+        for (const s of b.stmts) {
+            const lf: AFor | not = stmtFor(s)
+            if (lf is given && lf.bound is not && gatherRows(lf).length > 0) {
+                out = out.concat([lf.span])
+            } else {
+                for (const nb of nestedBlocks(s)) { out = out.concat(nestedRowLoops(nb)) }
+            }
+        }
+        return out
+    }
+
+    fn stmtFor(s: AStmt) -> AFor | not {
+        const k: AStmtK = s.k
+        return match k {
+            .For(f: lf) :> lf
+            .Eval(e: x) :> not
+            .Local(name: n) :> not
+            .Return(e: x) :> not
+            .If(cond: c) :> not
+            .Given(name: n) :> not
+            .EffectStmt(w: w) :> not
+            .Defer(body: b) :> not
+            .Fail(f: x) :> not
+            .Break(label: x) :> not
+            .Continue(label: x) :> not
+            .Lift(what: x) :> not
+        }
     }
 
     fn forAsStmt(f: AFor) -> AStmt {
@@ -14496,7 +14659,7 @@ ${
         }
     }
 
-    fn resolveIter(env: Env, f: AFor, label: Sym, b: ABind, mutable: boolean, src: AIterSrc, st0: AS) -> AS {
+    fn resolveIter(env: Env, f: AFor, label: Sym, b: ABind, mutable: boolean, src: AIterSrc, key: AExpr | not, st0: AS) -> AS {
         const rx: RX = resolveIterSrc(env, src, st0)
         let st: AS = rx.st
         let end: Sym | not = not
@@ -14514,9 +14677,20 @@ ${
         st = localCellClash(env, b.span, b.name, st)     // #1690 review F12: a for-of binder is a function-body const/let (§7.6, D14)
         const rb: RSym = mint(reservedName(st, env.file, b.span, b.name), b.name)
         st = addBind(rb.st, b.nid, BindFact.BBind(rb.s))
-        st = addBind(st, f.nid, BindFact.BLoop(label, end, counter))
         const l: LocalB = { name: b.name, s: rb.s, ty: rx.x.ty, mutable: mutable, narrowed: not, nDecl: not, fresh: false }
-        return resolveBlock(withLocal(env, l), f.body, st)
+        const benv: Env = withLocal(env, l)
+        // s474 — the header `key` (§17.4b): read in the body's scope (it reads
+        // the binder), once per iteration — into a local minted HERE (lower
+        // names it; the printer keys the iteration's rows by it)
+        let keySym: Sym | not = not
+        if (key is given) {
+            st = resolveExpr(benv, key, not, st).st
+            const rk: RSym = mint(st, "key")
+            st = rk.st
+            keySym = rk.s
+        }
+        st = addBind(st, f.nid, BindFact.BLoop(label, end, counter, keySym))
+        return resolveBlock(benv, f.body, st)
     }
 
     // The iterable, resolved; its type is the BINDER's: a tape's element, a
@@ -14580,7 +14754,7 @@ ${
             .HForever :> []
             .HCond(cond: c) :> [c]
             .HCounted(init: i, cond: c, step: sp) :> maybeExprList(c).concat(sp)
-            .HIter(bind: b, src: src) :> iterSrcExprs(src)
+            .HIter(bind: b, src: src, key: ky) :> iterSrcExprs(src).concat(maybeExprList(ky))   // s474: the header `key` (§17.4b)
         }
     }
 
@@ -15703,12 +15877,13 @@ ${
             .HForever :> typeBlock(entry, f.body, ts0)
             .HCond(cond: c) :> typeLoopCond(entry, c, f.body, ts0)
             .HCounted(init: i, cond: c, step: sp) :> typeCounted(entry, i, c, sp, f.body, ts0)
-            .HIter(bind: b, src: src) :> typeIter(entry, b, src, f.body, ts0)
+            .HIter(bind: b, src: src, key: ky) :> typeIter(entry, b, src, ky, f.body, ts0)
         }
         return keepTEnv(tDeferEnv(env), ts)
     }
 
-    fn typeLoopCond(env: TEnv, c: AExpr, body: ABlock, ts0: TypeState) -> TypeState {
+    fn typeLoopCond(env0: TEnv, c: AExpr, body: ABlock, ts0: TypeState) -> TypeState {
+        const env: TEnv = tKeptUnnarrow(env0, c)      // s474 (§50, D10)
         const rc: RVT = typeExpr(env, c, ts0)
         const ts: TypeState = checkCond(env, c, rc.vt, "a `for` condition", rc.ts)
         const n: Narrowing = condNarrowing(env, c)
@@ -15731,7 +15906,7 @@ ${
         return ts
     }
 
-    fn typeIter(env: TEnv, b: ABind, src: AIterSrc, body: ABlock, ts0: TypeState) -> TypeState {
+    fn typeIter(env: TEnv, b: ABind, src: AIterSrc, key: AExpr | not, body: ABlock, ts0: TypeState) -> TypeState {
         const r: RVT = typeIterSrc(env, src, ts0)
         let ts: TypeState = r.ts
         const sym: Sym | not = bindSym(bindFact(env.t.binds, b.nid))
@@ -15739,7 +15914,51 @@ ${
         // the binder's type is the element's — and an assignment to a `let`
         // binder joins with it (contribute), never replaces it
         ts = contribute(ts, sym, r.vt)
-        return typeBlock(tWithLocal(env, sym, r.vt), body, ts)
+        const benv: TEnv = tWithLocal(env, sym, r.vt)
+        if (key is given) ts = typeLoopKey(benv, key, ts)
+        return typeBlock(benv, body, ts)
+    }
+
+    // s474 — the header `key` (§17.4b) reads the binder. Its value identifies
+    // a row across updates, so it is a string or a number: E-KEY-001 (§34: "The
+    // keyed-iteration runtime requires primitive keys for stable diffing" — the
+    // §6.5.3 rule, carried to the canonical header form, S473 review-surfaced
+    // 5). A key whose type is not known fails closed (an object key would never
+    // match itself across updates); one blamed on an earlier error is not
+    // reported again (Rule C).
+    fn typeLoopKey(env: TEnv, key: AExpr, ts0: TypeState) -> TypeState {
+        const rk: RVT = typeExpr(env, key, ts0)
+        if (hasErrIn(env.errs, key.span) || condBlamed(env, key, rk.ts)) return rk.ts
+        const t: Type | not = knownOf(rk.vt)
+        if (t is given) {
+            const k: int = kindOf(t)
+            if (k <= 2) return rk.ts
+            return report(rk.ts, env, key.span, "E-KEY-001", "a loop `key` is a string or a number — it names the row across updates, and this one is `" + typeName(t) + "`. Key by a primitive field (`key x.id`) (§17.4b, §6.5.3)")
+        }
+        if (isOneOfVT(rk.vt)) return report(rk.ts, env, key.span, "E-KEY-001", "a loop `key` is ONE of a string or a number — it names the row across updates, and this one may be any of `" + oneOfNames(rk.vt) + "`. Key by a single primitive field (`key x.id`) (§17.4b, §6.5.3)")
+        if (isAbsentVT(rk.vt)) return report(rk.ts, env, key.span, "E-KEY-001", "a loop `key` is a string or a number — it names the row across updates, and this one is `not`. Key by a primitive field (`key x.id`) (§17.4b, §6.5.3)")
+        return report(rk.ts, env, key.span, "E-KEY-001", "the type of this loop `key` is not known — a `key` is a string or a number (it names the row across updates); key by a primitive field (`key x.id`) or annotate what it reads (§17.4b, §6.5.3)")
+    }
+
+    fn oneOfNames(v: VType) -> string {
+        const ts: Type[] = match v {
+            .OneOf(ts: xs) :> xs
+            .Known(t: x) :> [x]
+            .Absent :> []
+            .Unknown :> []
+        }
+        let out: string[] = []
+        for (const t of ts) { out = out.concat([typeName(t)]) }
+        return out.join(" | ")
+    }
+
+    fn isOneOfVT(v: VType) -> boolean {
+        return match v {
+            .OneOf(ts: x) :> true
+            .Known(t: x) :> false
+            .Absent :> false
+            .Unknown :> false
+        }
     }
 
     fn typeIterSrc(env: TEnv, src: AIterSrc, ts: TypeState) -> RVT {
@@ -19684,7 +19903,7 @@ ${
             .Unary(op: o) :> ""
             .Binary(op: o) :> ""
             .Ternary(test: x) :> ""
-            .Assign(target: x) :> ""
+            .Assign(target: x, kept: kp) :> keptKey(env, e, kp)     // s474: a kept `(x = e)` is the place `x` (§50)
             .ArrayLit(elems: es) :> ""
             .ObjectLit(props: ps) :> ""
             .Spread(e: sx) :> ""
@@ -19695,6 +19914,17 @@ ${
             .Template(quasis: qs) :> ""
             .Foreign(f: fb0) :> ""
         }
+    }
+
+    // s474 (§50.3.1): the kept assignment's value IS the local's new value, so a
+    // presence test of `(m = e)` is a presence test of `m` (`((m = re.exec(s))
+    // is given)` narrows `m` in the body).
+    // (the local is the one the resolver rebinds — EAssignLocal on the node)
+    fn keptKey(env: TEnv, a: AExpr, kept: boolean) -> string {
+        if (!kept) return ""
+        const s: Sym | not = assignedLocal(effectFact(env.t.effects, a.nid))
+        if (s is not) return ""
+        return "#" + s.id
     }
 
     fn localKey(f: NameFact | not) -> string {
@@ -19759,7 +19989,7 @@ ${
             .Variant(name: n) :> noNarrowing()
             .Call(callee: x) :> noNarrowing()
             .Ternary(test: x) :> noNarrowing()
-            .Assign(target: x) :> noNarrowing()
+            .Assign(target: x, kept: kp) :> keptPlaceNarrowing(env, c, kp)   // s474: `if ((x = e))` tests `x` (§50)
             .ArrayLit(elems: es) :> noNarrowing()
             .ObjectLit(props: ps) :> noNarrowing()
             .Spread(e: sx) :> noNarrowing()
@@ -19775,6 +20005,11 @@ ${
     // A bare place as a condition is a presence test (truthiness Q1): true ⇒ present.
     // (F17: a match arm whose body is an object literal — arms call this instead.)
     fn placeNarrowing(env: TEnv, c: AExpr) -> Narrowing { return { yes: [nKey(env, c)], no: [] } }
+
+    fn keptPlaceNarrowing(env: TEnv, c: AExpr, kept: boolean) -> Narrowing {
+        if (!kept) return noNarrowing()
+        return placeNarrowing(env, c)
+    }
 
     fn binNarrowing(env: TEnv, op: BinOp, l: AExpr, r: AExpr) -> Narrowing {
         return match op {
@@ -21183,7 +21418,7 @@ ${
             .Unary(op: o, e: x) :> typeUnary(env, e, o, x, ts)
             .Binary(op: o, l: l, r: r) :> typeBinary(env, e, vf, o, l, r, ts)
             .Ternary(test: x, yes: y, no: n) :> typeTernary(env, x, y, n, ts)
-            .Assign(target: x, value: v) :> rvt(VType.Unknown, typeExpr(env, v, ts).ts)
+            .Assign(target: x, value: v, kept: kp) :> typeAssignValue(env, e, x, v, kp, ts)   // s474 (§50, D10)
             .ArrayLit(elems: es) :> typeArray(env, es, ts)
             .ObjectLit(props: ps) :> rvt(valueType(vf), typePropValues(env, ps, ts))
             .Spread(e: x) :> rvt(VType.Unknown, typeExpr(env, x, ts).ts)
@@ -23076,7 +23311,8 @@ ${
     // The condition is checked (checkCond, ruled S440 #4 = (c)); each branch
     // is typed under the condition's narrowing (less what the condition's own
     // calls may undo); the statement leaves the join of both paths.
-    fn typeIf(env: TEnv, c: AExpr, tb: ABlock, el: ABlock | not, ts0: TypeState) -> RTEnv {
+    fn typeIf(env0: TEnv, c: AExpr, tb: ABlock, el: ABlock | not, ts0: TypeState) -> RTEnv {
+        const env: TEnv = tKeptUnnarrow(env0, c)      // s474 (§50, D10): the head rebinds its kept locals
         const rc: RVT = typeExpr(env, c, ts0)
         let ts: TypeState = checkCond(env, c, rc.vt, "an `if` condition", rc.ts)
         const n: Narrowing = condNarrowing(env, c)
@@ -23128,6 +23364,63 @@ ${
             .Template(quasis: qs) :> typeExpr(env, e, ts).ts
             .Foreign(f: fb0) :> typeExpr(env, e, ts).ts
         }
+    }
+
+    // s474 (§50.4.1): "The type of `x = value` is the type of `value`, which must
+    // be assignable to the declared type of `x`" — the kept condition-head
+    // assignment is typed as the statement form (typeAssign: the value against
+    // the local's written type, or joined into its inferred one), and its value
+    // is the value's. A refused (not kept) one is Unknown.
+    fn typeAssignValue(env: TEnv, e: AExpr, target: AExpr, value: AExpr, kept: boolean, ts0: TypeState) -> RVT {
+        if (!kept) return rvt(VType.Unknown, typeExpr(env, value, ts0).ts)
+        const ts: TypeState = typeAssign(env, e, target, value, ts0)
+        return rvt(exprType0(ts, value.nid), ts)
+    }
+
+    // s474 — a condition head's kept assignments rebind their locals before the
+    // head's test is decided: a narrowing of the local from before the head no
+    // longer holds (the head's own test narrows it again, condNarrowing).
+    fn tKeptUnnarrow(env: TEnv, c: AExpr) -> TEnv {
+        let out: TEnv = env
+        for (const a of keptAssigns(c)) { out = tUnnarrow(out, nKey(env, a)) }
+        return out
+    }
+
+    // The kept assignments of a condition head (parse.scrml keptHead's places:
+    // the root, and operands through unary / binary operators).
+    fn keptAssigns(c: AExpr) -> AExpr[] {
+        const k: AExprK = c.k
+        return match k {
+            .Assign(target: t, kept: kp) :> keptAssignOf(c, kp)
+            .Unary(op: o, e: x) :> keptAssigns(x)
+            .Binary(op: o, l: l, r: r) :> keptAssigns(l).concat(keptAssigns(r))
+            .Name(name: n) :> []
+            .At(name: n) :> []
+            .AtItem :> []
+            .Num(raw: r) :> []
+            .Str(v: s) :> []
+            .Bool(v: b) :> []
+            .NotLit :> []
+            .Recovered :> []
+            .Variant(name: n) :> []
+            .Member(obj: o) :> []
+            .Call(callee: x) :> []
+            .Ternary(test: x) :> []
+            .ArrayLit(elems: es) :> []
+            .ObjectLit(props: ps) :> []
+            .Spread(e: sx) :> []
+            .Index(obj: ix) :> []
+            .Lambda(params: lp) :> []
+            .Sql(q: q) :> []
+            .Handled(h: x) :> []
+            .Template(quasis: qs) :> []
+            .Foreign(f: fb0) :> []
+        }
+    }
+
+    fn keptAssignOf(a: AExpr, kept: boolean) -> AExpr[] {
+        if (kept) return [a]
+        return []
     }
 
     fn typeAssign(env: TEnv, e: AExpr, target: AExpr, value: AExpr, ts0: TypeState) -> TypeState {
@@ -23513,7 +23806,42 @@ ${
     fn typeGather(env: TEnv, lf: AFor, ts0: TypeState) -> TypeState {
         let ts: TypeState = typeFor(env, forAsStmt(lf), lf, ts0).ts
         for (const e of liftOperands(lf.body)) { ts = markupText(env, e, exprType0(ts, e.nid), ts) }
-        return ts
+        return keylessObjects(env, lf, ts)
+    }
+
+    // s474 — W-KEY-001, the §17.4b header meaning (S473 review-surfaced 5):
+    // "When no `key` is declared, the compiler MAY emit W-KEY-001 warning for
+    // collections that contain objects." Here: a Tier-0 loop that lifts
+    // markup rows over a tape of STRUCTS with no header `key` — an unkeyed
+    // loop rebuilds every row when it re-runs, so a row's DOM state (typed
+    // text, focus, scroll) is lost rather than carried with its item.
+    fn keylessObjects(env: TEnv, lf: AFor, ts: TypeState) -> TypeState {
+        const h: AForHead = lf.head
+        const src: AExpr | not = match h {
+            .HIter(bind: b, src: sr, key: ky) :> keylessIterable(sr, ky)
+            .HForever :> not
+            .HCond(cond: c) :> not
+            .HCounted(init: i) :> not
+        }
+        if (src is not || gatherRows(lf).length == 0) return ts
+        const t: Type | not = knownOf(exprType0(ts, src.nid))
+        if (t is not) return ts
+        const el: Type | not = seqElem(t)
+        if (el is not) return ts
+        const s: Sym | not = namedOf(el)
+        if (s is not) return ts
+        const ti: TypeInfo | not = typeInfoOf(env.t.types, s)
+        if (ti is not) return ts
+        if (structFieldDefs(ti.def) is not) return ts
+        return report(ts, env, src.span, "W-KEY-001", "this loop renders a row per `" + s.hint + "` with no `key`, so every change to what it reads REBUILDS all its rows: a row's DOM state (typed text, focus, scroll) is lost, never carried with its item. Name what identifies an item in the head to keep it — `for (const x of xs key x.id)` (§17.4b)")
+    }
+
+    fn keylessIterable(src: AIterSrc, key: AExpr | not) -> AExpr | not {
+        if (key is given) return not
+        return match src {
+            .IterOf(e: x) :> x
+            .IterRange(lo: lo) :> not
+        }
     }
 
     // The markup-text sink check (§14.13.2) of a value already typed `v`.
@@ -26030,7 +26358,7 @@ ${
             .HForever :> []
             .HCond(cond: c) :> [c]
             .HCounted(init: i, cond: c, step: sp) :> maybeExprList(c).concat(sp)
-            .HIter(bind: b, src: src) :> []
+            .HIter(bind: b, src: src, key: ky) :> maybeExprList(ky)      // s474: the header `key`, once per iteration (§17.4b)
         }
         for (const x of per) { out = out.concat([x.span]) }
         return out.concat(repeatsInExprs(forExprs(lf)))
@@ -30191,7 +30519,7 @@ ${
             .HForever :> []
             .HCond(cond: c) :> [c]
             .HCounted(init: i, cond: c, step: sp) :> maybeExprList(c).concat(sp)
-            .HIter(bind: b) :> []
+            .HIter(bind: b, key: ky) :> maybeExprList(ky)                // s474: the header `key`, once per iteration (§17.4b)
         }
         const r0: LinR = linExprs(cx, once, s)
         if (r0.ends) return r0

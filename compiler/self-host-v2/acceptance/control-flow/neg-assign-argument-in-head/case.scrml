@@ -1,0 +1,13 @@
+// §50 (S473 D10): inside a condition head, an assignment that is a call's
+// ARGUMENT is not an operand of the condition — refused.
+<program>
+    function g(n: int) -> int { return n; }
+    function f() -> int {
+        let x = 0;
+        if (g((x = 1)) > 0) { return 1; }
+        return 0;
+    }
+    <main>
+        <p>${f()}</p>
+    </main>
+</program>

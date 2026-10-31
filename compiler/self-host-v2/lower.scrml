@@ -196,6 +196,7 @@ ${
             .StructOf(ty: x) :> not
             .VariantOf(enumSym: x) :> not
             .Handle(inst: x) :> not
+            .Assigned(local: x) :> not
             .InitOf(decl: x) :> not
             .Host(call: x) :> not
             .Lambda(params: x) :> not
@@ -226,6 +227,7 @@ ${
             .StructOf(ty: x) :> op
             .VariantOf(enumSym: x) :> op
             .Handle(inst: x) :> op
+            .Assigned(local: x) :> op
             .InitOf(decl: x) :> op
             .Host(call: x) :> op
             .Lambda(params: x) :> op
@@ -286,6 +288,7 @@ ${
             .StructOf(ty: x) :> false
             .VariantOf(enumSym: x) :> false
             .Handle(inst: x) :> false
+            .Assigned(local: x) :> false
             .InitOf(decl: x) :> false
             .Host(call: x) :> false
             .Lambda(params: x) :> false
@@ -449,7 +452,7 @@ ${
             .Unary(op: o, e: x) :> Expr.Prim(opOf(valueFact(c.t.values, e.nid)), [lowerExpr(c, x)])
             .Binary(op: o, l: l, r: r) :> Expr.Prim(opOf(valueFact(c.t.values, e.nid)), [lowerExpr(c, l), lowerExpr(c, r)])
             .Ternary(test: t, yes: y, no: n) :> boolMatch(lowerExpr(c, t), lowerExpr(c, y), lowerExpr(c, n))
-            .Assign(target: t) :> missing()
+            .Assign(target: t, value: v, kept: kp) :> keptAssignExpr(c, e, v, kp)   // s474 (§50, D10)
             .ArrayLit(elems: es) :> Expr.ArrayOf(lowerExprs(c, es))
             .ObjectLit(props: ps) :> valueExpr(c, valueFact(c.t.values, e.nid), ps)
             .Spread(e: sx) :> missing()
@@ -677,6 +680,7 @@ ${
             .StructOf(ty: t) :> missing()
             .VariantOf(enumSym: t) :> missing()
             .Handle(inst: i) :> missing()
+            .Assigned(local: x) :> missing()
             .InitOf(decl: d) :> missing()
             .Host(call: x) :> missing()
             .Lambda(params: x) :> missing()
@@ -775,13 +779,13 @@ ${
     // minted for them. A missing fact means analyze reported an error, and the
     // compile has no Core (the gate above).
     // =========================================================================
-    type LoopB:struct = { label: Sym, end: Sym | not, counter: Sym | not }
+    type LoopB:struct = { label: Sym, end: Sym | not, counter: Sym | not, key: Sym | not }
 
-    fn mkLoopB(l: Sym, e: Sym | not, k: Sym | not) -> LoopB { return { label: l, end: e, counter: k } }
+    fn mkLoopB(l: Sym, e: Sym | not, k: Sym | not, ky: Sym | not) -> LoopB { return { label: l, end: e, counter: k, key: ky } }
 
     fn loopBOf(f: BindFact | not) -> LoopB | not {
         return match f {
-            .BLoop(label: l, end: e, counter: k) :> mkLoopB(l, e, k)
+            .BLoop(label: l, end: e, counter: k, key: ky) :> mkLoopB(l, e, k, ky)
             .BBind(sym: x) :> not
             .BParam(sym: x) :> not
             .BGiven(sym: x) :> not
@@ -854,10 +858,27 @@ ${
         const rc: LC = { t: c.t, file: c.file, subst: c.subst, snap: c.snap, rows: ids }
         const h: LoopHead | not = loopHeadOf(rc, lb, f)
         if (h is not) return []
-        const body: Block = lowerBlock(rc, f.body)
+        const body0: Block = lowerBlock(rc, f.body)
         let rows: GatherRow[] = []
         for (const r of rns) { rows = rows.concat([{ views: lowerNode(c, r) }]) }
-        return [View.Gather({ label: lb.label, bind: acc, head: h, body: body }, rows)]
+        // s474 — the header `key` (§17.4b): the body's first statement binds it,
+        // once per iteration, before anything the body lifts
+        const kx: AExpr | not = headKey(f.head)
+        const ks: Sym | not = lb.key
+        if (kx is given && ks is given) {
+            const body: Block = { stmts: [Stmt.Let(ks, lowerExpr(rc, kx))].concat(body0.stmts) }
+            return [View.Gather({ label: lb.label, bind: acc, head: h, body: body }, rows, ks)]
+        }
+        return [View.Gather({ label: lb.label, bind: acc, head: h, body: body0 }, rows, not)]
+    }
+
+    fn headKey(h: AForHead) -> AExpr | not {
+        return match h {
+            .HIter(bind: b, key: ky) :> ky
+            .HForever :> not
+            .HCond(cond: x) :> not
+            .HCounted(init: i) :> not
+        }
     }
 
     // The lifted rows of a Tier-0 loop body, in source order (where parse's
@@ -897,6 +918,36 @@ ${
             .LiftNode(n: n) :> [n]
             .LiftExpr(e: x) :> []
         }
+    }
+
+    // s474 (§50, S473 D10) — the kept condition-head assignment `(x = e)`: the
+    // local analyze resolved (EAssignLocal on the node) rebound to `e`; its
+    // value is the assigned value. Any other value-position assignment was
+    // refused (E-ASSIGN-POSITION) and has no Core.
+    fn keptAssignExpr(c: LC, e: AExpr, v: AExpr, kept: boolean) -> Expr {
+        if (!kept) return missing()
+        const s: Sym | not = keptLocalOf(effectFact(c.t.effects, e.nid))
+        if (s is not) return missing()
+        return Expr.Assigned(s, lowerExpr(c, v))
+    }
+
+    fn keptLocalOf(f: EffectFact | not) -> Sym | not {
+        return match f {
+            .EAssignLocal(sym: s, path: pa) :> wholeLocal(s, pa.length)
+            .EWrite(w: w) :> not
+            .ESpread(ws: ws) :> not
+            .EReset(w: w) :> not
+            .EEdits(w: w) :> not
+            .ERemove(w: w) :> not
+            .EElemAt(cap: x) :> not
+            .EPosition(cap: x) :> not
+            not :> not
+        }
+    }
+
+    fn wholeLocal(s: Sym, steps: int) -> Sym | not {
+        if (steps > 0) return not
+        return s
     }
 
     fn maybeLowered(c: LC, x: AExpr | not) -> Expr | not {
@@ -1250,6 +1301,7 @@ ${
             .StructOf(ty: x) :> missing()
             .VariantOf(enumSym: x) :> missing()
             .Handle(inst: x) :> missing()
+            .Assigned(local: x) :> missing()
             .InitOf(decl: x) :> missing()
             .Host(call: x) :> missing()
             .Lambda(params: x) :> missing()
@@ -2161,7 +2213,7 @@ ${
             .ResetOn(triggers: ds) :> v
             .Errors(of: o) :> v
             .Reach(fields: fs) :> v
-            .Gather(g: g, rows: rs) :> View.Gather(g, stampRows(rs, extra, keyed))
+            .Gather(g: g, rows: rs, key: gk) :> View.Gather(g, stampRows(rs, extra, keyed), gk)
         }
     }
 
@@ -3664,7 +3716,7 @@ ${
             .ResetOn(triggers: x) :> v
             .Errors(of: x) :> v
             .Reach(fields: fs) :> v
-            .Gather(g: g, rows: rs) :> View.Gather(g, gateRows(p, rs, ext))
+            .Gather(g: g, rows: rs, key: gk) :> View.Gather(g, gateRows(p, rs, ext), gk)
         }
     }
 
@@ -4014,6 +4066,7 @@ ${
             .StructOf(ty: x) :> []
             .VariantOf(enumSym: x) :> []
             .Handle(inst: x) :> []
+            .Assigned(local: x) :> []
             .InitOf(decl: x) :> []
             .Host(call: x) :> []
             .Lambda(params: x) :> []
