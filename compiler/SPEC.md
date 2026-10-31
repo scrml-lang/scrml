@@ -17020,7 +17020,7 @@ const TabStrip = <div class="tabs" props={
 
 | Code | Trigger | Raised By | Severity |
 |---|---|---|---|
-| E-COMPONENT-020 | More than one `${...}` or `${children}` spread in a component body; **S473 D11:** also more than one unnamed `<slot/>` in a §66 declaration's `renders` (§66.15.2; emitted at `compiler/src/component-expander.ts` for the legacy form, the §66 trigger Nominal / not yet emitted) | CE | Error |
+| E-COMPONENT-020 | More than one `${...}` or `${children}` spread in a component body; **S473 D11:** also more than one unnamed `<slot/>` on one render path of a §66 declaration's `renders` — one per exclusive branch is legal (§66.15.2, S474 F7; emitted at `compiler/src/component-expander.ts` for the legacy form, the §66 trigger Nominal / not yet emitted) | CE | Error |
 | E-COMPONENT-021 | Caller provides unslotted children but component has no spread; **S473 D11:** also a §66 use with children whose declaration's `renders` holds no `<slot/>` (§66.15.2; emitted at `compiler/src/component-expander.ts` for the legacy form, the §66 trigger Nominal / not yet emitted) | CE | Error |
 | E-COMPONENT-022 | `slot=` on element not a direct child of a component call, OR inside a `lift` block | CE | Error |
 | E-COMPONENT-023 | `slot="name"` or `render name` targets a prop not declared as `snippet`-typed | CE | Error |
@@ -30043,7 +30043,7 @@ are REFUSED by impl#1, `E-IMPL1-RULED-FORM-UNSUPPORTED` (its row lands with that
 | E-COMPONENT-PROP-WRITE | §15.11.1, §15.13.2 | A component body writes (assignment, compound assignment, `++` / `--`, a forwarded `bind:value=propName`) a prop the call site did not bind with `bind:propName=@var` — a by-value prop, or a bindable prop passed by value or omitted. The prop is passed by value; bind it with `bind:` at the call site to write back, or copy it into a component-owned cell. The write is never lowered onto the caller's cell. (Emitted at `compiler/src/component-expander.ts`, `expandComponentNode`. Provenance: ruling:user-voice-scrml.md S458 "your recs on both D1 codes" — replaces the interim reuse of E-ASSIGN-004.) | Error |
 | E-COMPONENT-NAME-DUPLICATE | §9.1, §21.2 | Two components (declarations with `renders`) of one name in one program, declared in two files. A component's name is its CSS scope key (`data-scrml="ConstructorName"`, §9.1 DQ-7), so the two would share one style scope; exporting does not qualify the name. Rename one. (In one file the pair is E-SCOPE-010, §7.6.) Provenance: ruling:user-voice-scrml.md S473 "⭐ RULED — S473 PA recs, all" item 4. Emitted by the bootstrap at `compiler/self-host-v2/analyze.scrml` (`dupDecls`); Nominal on impl#1 (§34.0). | Error |
 | E-COMPONENT-014 | §15.10 | `bind` prop declared with a non-primitive type (struct or state type). `bind` props must be primitive types; for non-primitive cross-component state use state projection (§15.11.2) instead. (Catalog addition S78 audit; emitted at `compiler/src/component-expander.ts`.) | Error |
-| E-COMPONENT-020 | §15.14, §16.4 | More than one `${...}` or `${children}` spread node in a component body. A component body has at most one spread fill-site; multiple spreads have no defined semantics. (Catalog addition S78 audit; emitted at `compiler/src/component-expander.ts`.) **S473 D11 — carried into §66.15.2:** more than one unnamed `<slot/>` in a declaration's `renders` is this code too (ruling:user-voice-scrml.md S473 D11 "your recs on all"); that trigger is Nominal / not yet emitted by the bootstrap (`g-boot-slot-count-unchecked-s473`). | Error |
+| E-COMPONENT-020 | §15.14, §16.4 | More than one `${...}` or `${children}` spread node in a component body. A component body has at most one spread fill-site; multiple spreads have no defined semantics. (Catalog addition S78 audit; emitted at `compiler/src/component-expander.ts`.) **S473 D11 — carried into §66.15.2:** more than one unnamed `<slot/>` in a declaration's `renders` is this code too (ruling:user-voice-scrml.md S473 D11 "your recs on all"), counted **per render path** since S474 F7 — one unnamed slot in each branch of an exclusive set (an `if=` chain, a lifting `if`, the arms of one `match`) is legal (ruling:user-voice-scrml.md S474 item 2); emitted by the bootstrap at `compiler/self-host-v2/analyze.scrml` `resolveSlot`. | Error |
 | E-COMPONENT-021 | §16.4 | Caller provides unslotted children but the target component has no `${...}` spread in its body — the children have nowhere to go. Resolution: add a spread in the component body, or remove the unslotted children. (Catalog addition S78 audit; emitted at `compiler/src/component-expander.ts`.) **S473 D11 — carried into §66.15.2:** a §66 use with children whose declaration's `renders` holds no `<slot/>` is this code too (ruling:user-voice-scrml.md S473 D11 "your recs on all"); that trigger is Nominal / not yet emitted by the bootstrap (`g-boot-slot-count-unchecked-s473`). | Error |
 | W-COMPONENT-001 | §15.11 | Component declares a function-typed prop. Function props are an escape hatch (advisory): prefer `bind` props or state projection for typical cross-component data flow. The function-typed prop continues to work; this warning surfaces the escape-hatch nature so developers don't pick it by accident. (Catalog addition S78 audit; emitted at `compiler/src/component-expander.ts`.) | Warning |
 | E-CTRL-001 | §17.5, §17.1.1, §17.1.2.2 | `else` attribute appears on an element without a preceding `if=` or `else-if=` sibling at the same level — or on an element that is not part of a LOWERED `if=` chain: a structural element (`<engine>` / `<match>` / `<each>`, an `<each>`'s `<empty>`), an `<onTimeout>` / `<onIdle>` / `<onTransition>`, markup in an `<each>` row or lifted markup. `else` only makes sense as a continuation of an `if=` chain; where impl#1 builds none it is refused rather than rendered ungated (S469). (Catalog addition S78 audit; emitted at `compiler/src/ast-builder.js` (`collapseIfChains`, `refuseUnconsumedStructuralChainAttrs`), `compiler/src/codegen/refused-lowering-errors.ts` (`refuseUnloweredElseChain`), `compiler/src/symbol-table.ts` (`timerGateAttrDiagnostic`), `compiler/src/type-system.ts` (the `<onTransition>` check).) | Error |
@@ -52711,7 +52711,8 @@ compile error:
 
 1. **Children with no slot** — a use writes content between its tags, and the declaration's `renders` holds no
    `<slot/>`: **`E-COMPONENT-021`** — the legacy code, carried into §66.15.2. The children would have nowhere to go.
-2. **More than one unnamed slot** — a declaration's `renders` holds more than one unnamed `<slot/>`:
+2. **More than one unnamed slot on one render path** — a declaration's `renders` holds more than one unnamed
+   `<slot/>` that can render together (the count is taken per render path — see *Exclusive branches* below):
    **`E-COMPONENT-020`** — the legacy code, carried into §66.15.2. The children would render more than once.
 3. **A slot outside `renders`** — a `<slot/>` anywhere but inside a declaration's `renders` (a program or page
    body, a plain markup body, a declaration body outside `renders`): **`E-DECL-SLOT-OUTSIDE-RENDERS`**. It names no
@@ -52725,7 +52726,44 @@ parametric slots stay ⚑ O9 below. *(Rules 1 and 2 reuse the legacy codes, per 
 > D11 (a) *"Carry legacy E-COMPONENT-020/021 into §66.15.2"* · supersedes: nothing written (§66 was silent).
 > **Direction of change:** newly-rejecting on the §66 dialect (the bootstrap today drops, duplicates or renders
 > nothing). **Nominal / not yet emitted** by either compiler; impl#1 does not implement §66. Gap:
-> `g-boot-slot-count-unchecked-s473`.
+> `g-boot-slot-count-unchecked-s473`. *(Status, S474: the bootstrap emits all three since
+> s473-boot-ruled-refusals — `compiler/self-host-v2/analyze.scrml` `resolveSlot` (rules 2–3) and `resolveUse`
+> (rule 1); the gap is resolved. impl#1 still does not implement §66.)*
+
+**Exclusive branches (S474 F7).** Rule 2 counts unnamed slots **per render path**, not in total: on every render
+path through a `renders`, at most one unnamed `<slot/>` SHALL render. A render path takes exactly one branch of
+each exclusive set it meets. Two parts of a `renders` are **exclusive** in these cases only — each is a construct
+this specification already defines as rendering at most one of its branches:
+
+- **(a)** the members of one `if=` chain (§17.1.1): its `if=` element, its `else-if=` elements and its `else`
+  element — the maximal contiguous sibling run §17.1.1 defines. Only the first true member is in the DOM.
+- **(b)** the branches of one `if` / `else if` / `else` in a markup `${ … }` whose branches `lift` (§10.8.2,
+  "only the taken branch emits" — the form an `if=` chain desugars to, §17.1.1).
+- **(c)** the arms of one `match`: the arms of one block-form `<match>` (§18.0.1), or of a value-form `match`
+  that is the sole content of a markup `${ … }` (§17.6.10). Only the selected arm renders.
+
+Nothing else is exclusive. In particular, these each count every slot they hold: sibling elements; **two separate
+`if=` chains** (two elements each carrying `if=` open two chains, §17.1.1, and both can be true); a slot inside a
+branch and a slot outside that chain or `match` (the outside one is on every path through the branch); `show=`
+(§17.2 — the element exists in the DOM whatever the condition, so its content is rendered).
+
+Exclusivity **nests**: a branch may hold another exclusive set, and each path takes one branch at every level.
+`<div if=@a><slot/></div><div else><b if=@b><slot/></b><i else><slot/></i></div>` holds three slots and every
+path renders one: legal. Adding a `<slot/>` beside the outer chain puts two on every path: E-COMPONENT-020.
+
+A `<slot/>` inside a **repeating** region — an `<each>` row (§17.7) or a `${ for … lift }` row (§17.4) — renders
+once per row, so no branch makes it count once; it is rule 2's error even when it is the only slot.
+*(The repeating-region sentence is a reading of rule 2's "would render more than once", written by the
+s474-slot-exclusive-branches agent for the PA's review — neither the S473 D11 text nor S474 item 2 names loops. The
+bootstrap has refused a slot lifted in a `${ for … lift }` since #1690 review F6, and a slot in an `<each>` row since
+s474-slot-exclusive-branches.)*
+> **Provenance:** ruling:user-voice-scrml.md S474 item 2 · supersedes: ruling:user-voice-scrml.md S473 D11 (count rule only)
+> — *"**F7: one unnamed `<slot/>` per exclusive branch is legal.** Two unnamed slots in the two arms of an `if/else`
+> (or exclusive `match` arms) count as one, because only one can render. Refines D11; non-exclusive duplicates stay an
+> error."* (PA: *"(2) F7 slot if/else — rec allow one slot per exclusive branch"* — bryan: *"your recs on both. go"*.)
+> **Direction of change:** newly-admitting (a `renders` with one unnamed slot in each branch of an exclusive set,
+> refused under the S473 total count, compiles); on the bootstrap also newly-rejecting for a slot in an `<each>` row
+> (it was accepted and rendered once per row). Rules 1 and 3 are unchanged.
 
 > ⚑ **OPEN (not ruled) — O9: named and parametric slots.** Only use-site children → `<slot/>` is ruled. How §16's
 > NAMED slots (`slot="header"` → a `snippet`-typed prop) and PARAMETRIC slots (slot scope, `${render
