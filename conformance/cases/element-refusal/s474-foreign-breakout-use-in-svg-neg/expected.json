@@ -1,0 +1,34 @@
+{
+  "id": "element-refusal-s474-foreign-breakout-use-in-svg-neg",
+  "description": "§24.5: a declaration whose renders root is an HTML breakout element (<span>) is E-HTML-FOREIGN-BREAKOUT where it is USED inside <svg>, and is reported at that use. The same declaration used inside a <p> is fine.",
+  "language-version": "1.0",
+  "spec": "§24.5",
+  "provenance": "ruling:user-voice-scrml.md S474 \"⭐ RULED — FORK RULE row C amended: semantic impossibility may be PERMANENT\" (the PERMANENT class); the code and its reading are a PA reading in the S474 review of #1727 (F2, c_spanInSvg: the page failed to mount in Chromium)",
+  "rationale": "§24.5 item 1: \"The same holds for a declaration's renders where the declaration is used in such a position. That fault is reported at the use, because the renders are inserted, and parsed, in the use's context.\"",
+  "expect": {
+    "codes": [
+      "E-HTML-FOREIGN-BREAKOUT"
+    ],
+    "codeCounts": {
+      "E-HTML-FOREIGN-BREAKOUT": 1
+    },
+    "severity": {
+      "E-HTML-FOREIGN-BREAKOUT": "error"
+    }
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-impl1-markup-parser-restructure-unrefused-s474",
+      "fails": {
+        "codes": [
+          "codeCounts:code 'E-HTML-FOREIGN-BREAKOUT' fired 0 time(s), expected exactly 1",
+          "emitted:E-MARKUP-001=3",
+          "emitted:E-SCOPE-001=2",
+          "emitted:E-STMT-NO-EFFECT=1",
+          "missing:E-HTML-FOREIGN-BREAKOUT",
+          "severity:code 'E-HTML-FOREIGN-BREAKOUT' did not fire (expected severity error)"
+        ]
+      }
+    }
+  }
+}

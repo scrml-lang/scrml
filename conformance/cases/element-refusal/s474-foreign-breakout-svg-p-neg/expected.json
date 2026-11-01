@@ -1,0 +1,31 @@
+{
+  "id": "element-refusal-s474-foreign-breakout-svg-p-neg",
+  "description": "§24.5: an HTML breakout start tag as a child of SVG or MathML content is E-HTML-FOREIGN-BREAKOUT. The HTML parser ends the foreign content at the tag and builds it outside the <svg> / <math> (HTML §13.2.6.5). Here that is a <p> in <svg> and a <div> in <mrow>; one report each.",
+  "language-version": "1.0",
+  "spec": "§24.5",
+  "provenance": "ruling:user-voice-scrml.md S474 \"⭐ RULED — FORK RULE row C amended: semantic impossibility may be PERMANENT\" (the PERMANENT class); the code and its reading are a PA reading in the S474 review of #1727 (F1–F3, reproduced in Chromium)",
+  "rationale": "§24.5 item 1: an HTML breakout start tag written as a child of an SVG element (other than foreignObject / desc / title) or of a MathML element (other than mi / mo / mn / ms / mtext / an HTML-encoded annotation-xml) SHALL be E-HTML-FOREIGN-BREAKOUT, gated or not.",
+  "expect": {
+    "codes": [
+      "E-HTML-FOREIGN-BREAKOUT"
+    ],
+    "codeCounts": {
+      "E-HTML-FOREIGN-BREAKOUT": 2
+    },
+    "severity": {
+      "E-HTML-FOREIGN-BREAKOUT": "error"
+    }
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-impl1-markup-parser-restructure-unrefused-s474",
+      "fails": {
+        "codes": [
+          "codeCounts:code 'E-HTML-FOREIGN-BREAKOUT' fired 0 time(s), expected exactly 2",
+          "missing:E-HTML-FOREIGN-BREAKOUT",
+          "severity:code 'E-HTML-FOREIGN-BREAKOUT' did not fire (expected severity error)"
+        ]
+      }
+    }
+  }
+}
