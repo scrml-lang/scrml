@@ -28,6 +28,7 @@ import { resolve, join } from "path";
 import { tmpdir } from "os";
 import { writeFileSync, readFileSync, rmSync, existsSync, mkdirSync, readdirSync } from "fs";
 import { Database } from "bun:sqlite";
+import { SQL } from "bun";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { compileScrml } from "../../src/api.js";
 import { SERVER_SQL_ERROR_HELPER, serverSqlPropagateHelper } from "../../src/codegen/sql-attempt.ts";
@@ -756,6 +757,13 @@ describe("S474 — ConstraintViolation field: the bootstrap's column-only rule (
     Object.defineProperty(e, DB_FAILURE, { value: true });
     return e;
   };
+  // S474 N1 — a Postgres error as Bun.SQL builds it (its own constructor): a server error has
+  // `code: "ERR_POSTGRES_SERVER_ERROR"` and the SQLSTATE in `errno`.
+  const pgMarked = (msg, fields) => {
+    const e = new SQL.PostgresError(msg, { code: "ERR_POSTGRES_SERVER_ERROR", ...fields });
+    Object.defineProperty(e, DB_FAILURE, { value: true });
+    return e;
+  };
   // [case, error, field server code sees, column?]
   const CASES = [
     ["UNIQUE users.email", () => marked("UNIQUE constraint failed: users.email", { code: "SQLITE_CONSTRAINT_UNIQUE" }), "email", true],
@@ -766,8 +774,8 @@ describe("S474 — ConstraintViolation field: the bootstrap's column-only rule (
     ["expression index", () => marked("UNIQUE constraint failed: index 'x_lower'", { code: "SQLITE_CONSTRAINT_UNIQUE" }), "index 'x_lower'", false],
     ["unnamed CHECK", () => marked("CHECK constraint failed: n > 0", { code: "SQLITE_CONSTRAINT_CHECK" }), "n > 0", false],
     ["named CHECK", () => marked("CHECK constraint failed: positive", { code: "SQLITE_CONSTRAINT_CHECK" }), "positive", false],
-    ["PG 23505 constraint name", () => marked('duplicate key value violates unique constraint "users_email_key"', { code: "23505", constraint: "users_email_key", detail: "Key (email)=(t@x) already exists.", table: "users" }), "users_email_key", false],
-    ["PG 23502 column", () => marked('null value in column "email" of relation "users" violates not-null constraint', { code: "23502", column: "email", detail: "Failing row contains (1, null).", table: "users" }), "email", true],
+    ["PG 23505 constraint name", () => pgMarked('duplicate key value violates unique constraint "users_email_key"', { errno: "23505", constraint: "users_email_key", detail: "Key (email)=(t@x) already exists.", table: "users" }), "users_email_key", false],
+    ["PG 23502 column", () => pgMarked('null value in column "email" of relation "users" violates not-null constraint', { errno: "23502", column: "email", detail: "Failing row contains (1, null).", table: "users" }), "email", true],
   ];
   const quiet = (f) => { const o = console.error; console.error = () => {}; try { return f(); } finally { console.error = o; } };
 
@@ -858,5 +866,60 @@ describe("S474 — ConstraintViolation field: the bootstrap's column-only rule (
     const got = {};
     for (const [fn, args] of REAL) got[fn] = JSON.parse((await callRoute(out, fn, args)).text).data.field;
     expect(got).toEqual({ comp: "a, b", named: "positive", unnamed: "n > 0", expr: "index 'x_lower'", spaced: "my table.e mail" });
+  });
+});
+
+// S474 N1 (re-review of #1704) — the classifier reads EVERY field a driver puts its code in.
+// Bun.SQL's PostgresError: `code: "ERR_POSTGRES_SERVER_ERROR"`, SQLSTATE in `errno`; its
+// MySQLError: `code` (ER_…), number in `errno`, SQLSTATE in `sqlState`. Before, `code ?? errno`
+// read only `code`, so a real Postgres 23505 / 08006 and a MySQL duplicate key were QueryFailed.
+// Every error here is built by Bun's own constructors (the shape Bun produces), except the SQLite
+// ones, which come from a real bun:sqlite failure.
+describe("S474 N1 — the SqlError classifier reads Postgres / MySQL codes where Bun.SQL puts them", () => {
+  const DB_FAILURE = Symbol.for("scrml.db.failure");
+  const mark = (e) => { Object.defineProperty(e, DB_FAILURE, { value: true }); return e; };
+  const prod = () => new Function("_scrml_g", `${SERVER_SQL_ERROR_HELPER}\n${serverSqlPropagateHelper(false, false)}\nreturn { _scrml_sql_error, _scrml_sql_propagate };`)(globalThis);
+  const pg = (msg, f) => mark(new SQL.PostgresError(msg, { code: "ERR_POSTGRES_SERVER_ERROR", ...f }));
+  const my = (msg, f) => mark(new SQL.MySQLError(msg, f));
+  const sqliteErr = (sql) => {
+    const db = new Database(":memory:");
+    db.run("CREATE TABLE t (n INTEGER)");
+    try { db.run(sql); } catch (e) { return mark(e); } finally { db.close(); }
+    throw new Error("expected a failure: " + sql);
+  };
+  const quiet = (f) => { const o = console.error; console.error = () => {}; try { return f(); } finally { console.error = o; } };
+  // [case, error, variant the client receives, its data in production]
+  const CASES = [
+    ["PG 23505 unique (server error, SQLSTATE in errno)", () => pg('duplicate key value violates unique constraint "users_email_key"', { errno: "23505", constraint: "users_email_key", detail: "Key (email)=(taken@x.io) already exists.", table: "users" }), "ConstraintViolation", { field: "" }],
+    ["PG 23502 not null with a column", () => pg('null value in column "email" of relation "users" violates not-null constraint', { errno: "23502", column: "email", table: "users" }), "ConstraintViolation", { field: "email" }],
+    ["PG 23503 foreign key", () => pg('insert or update on table "posts" violates foreign key constraint "posts_user_fk"', { errno: "23503", constraint: "posts_user_fk" }), "ConstraintViolation", { field: "" }],
+    ["PG 23P01 exclusion (class 23, letter code)", () => pg('conflicting key value violates exclusion constraint "no_overlap"', { errno: "23P01", constraint: "no_overlap" }), "ConstraintViolation", { field: "" }],
+    ["PG 42P01 undefined table", () => pg('relation "gone" does not exist', { errno: "42P01" }), "QueryFailed", { message: "" }],
+    ["PG 08006 connection failure (server SQLSTATE)", () => pg("terminating connection due to administrator command", { errno: "08006" }), "ConnectionLost", null],
+    ["PG unreachable (Bun's client code)", () => mark(new SQL.PostgresError("Failed to connect", { code: "ERR_POSTGRES_CONNECTION_REFUSED" })), "ConnectionLost", null],
+    ["PG connection closed (Bun's client code)", () => mark(new SQL.PostgresError("Connection closed", { code: "ERR_POSTGRES_CONNECTION_CLOSED" })), "ConnectionLost", null],
+    ["MySQL ER_DUP_ENTRY 1062", () => my("Duplicate entry 'taken@x.io' for key 'users.email'", { code: "ER_DUP_ENTRY", errno: 1062, sqlState: "23000" }), "ConstraintViolation", { field: "" }],
+    ["MySQL FK ER_NO_REFERENCED_ROW_2 1452", () => my("Cannot add or update a child row: a foreign key constraint fails", { code: "ER_NO_REFERENCED_ROW_2", errno: 1452, sqlState: "23000" }), "ConstraintViolation", { field: "" }],
+    ["MySQL FK ER_ROW_IS_REFERENCED_2 1451", () => my("Cannot delete or update a parent row: a foreign key constraint fails", { code: "ER_ROW_IS_REFERENCED_2", errno: 1451, sqlState: "23000" }), "ConstraintViolation", { field: "" }],
+    ["MySQL dup by number only", () => my("Duplicate entry 'x' for key 'k'", { errno: 1062 }), "ConstraintViolation", { field: "" }],
+    ["MySQL connection closed", () => my("Connection closed", { code: "ERR_MYSQL_CONNECTION_CLOSED" }), "ConnectionLost", null],
+    ["MySQL syntax error", () => my("You have an error in your SQL syntax", { code: "ER_PARSE_ERROR", errno: 1064, sqlState: "42000" }), "QueryFailed", { message: "" }],
+    ["SQLite no such table (real)", () => sqliteErr("SELECT * FROM gone"), "QueryFailed", { message: "" }],
+    ["SQLite CHECK (real)", () => sqliteErr("CREATE TABLE c (n INTEGER CHECK (n > 0)); INSERT INTO c VALUES (-1)"), "ConstraintViolation", { field: "" }],
+    ["a query text that mentions a connection is NOT a lost connection", () => sqliteErr('SELECT * FROM "connection failed"'), "QueryFailed", { message: "" }],
+  ];
+  for (const [name, mk, variant, data] of CASES) {
+    test(name, () => {
+      const sent = quiet(() => prod()._scrml_sql_propagate(mk(), "f"));
+      expect(sent).toEqual({ __scrml_error: true, type: "SqlError", variant, data });
+      // No driver value (the duplicate email, a detail row) ever reaches the client.
+      expect(JSON.stringify(sent)).not.toContain("taken@x.io");
+    });
+  }
+
+  test("server code (a site-handled `?{}`) still sees the whole value: the constraint name, the message", () => {
+    const rt = prod();
+    expect(rt._scrml_sql_error(pg('duplicate key value violates unique constraint "users_email_key"', { errno: "23505", constraint: "users_email_key" })).data).toEqual({ field: "users_email_key" });
+    expect(rt._scrml_sql_error(pg('relation "gone" does not exist', { errno: "42P01" })).data).toEqual({ message: 'relation "gone" does not exist' });
   });
 });
