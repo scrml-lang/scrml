@@ -2517,11 +2517,36 @@ function _scrml_url_shape_ok(value) {
 // page; holes are addressed by child-index path, looked up before any wiring.
 // ---------------------------------------------------------------------------
 
+// s474 (boot-gate-await-mathml) — a FOREIGN-CONTENT template. A template's content is parsed where the
+// printer writes it — in the page head, an HTML context — so content that will be inserted into an
+// `<svg>` or a `<math>` (an `if=` arm, an `<each>` row, a component's renders, slot content) would be
+// built as HTML elements (`<text>` / `<mi>` as HTMLUnknownElement) that never render there. The printer
+// (print.scrml `wrapNs`) instead writes such content inside the parse context it needs, and marks the
+// template `data-scrml-ns`; here the clone is unwrapped to the content itself. The wrapper chain per
+// context, and so its depth: svg `<svg>`, math `<math>`, math-text `<math><mi>` (a MathML text
+// integration point), annot `<math><annotation-xml>`. No parse happens here — the browser's parser
+// built the nodes once, from the page; this only moves them. Fail closed: an unknown marker, or a
+// wrapper level that is not exactly one node (the parser moved content out of the wrapper), throws
+// rather than rendering a tree whose hole paths would not line up.
+const NS_DEPTH = { svg: 1, math: 1, "math-text": 2, annot: 2 };
+
 /** A fresh clone of template `id`'s content. */
 export function template(id) {
   const t = document.getElementById(id);
   if (!t) throw new Error(`missing <template id="${id}">`);
-  return t.content.cloneNode(true);
+  const ns = t.getAttribute("data-scrml-ns");
+  if (ns === null) return t.content.cloneNode(true);
+  const depth = Object.prototype.hasOwnProperty.call(NS_DEPTH, ns) ? NS_DEPTH[ns] : 0;
+  if (depth === 0) throw new Error(`<template id="${id}">: unknown data-scrml-ns "${ns}"`);
+  let n = t.content;
+  for (let i = 0; i < depth; i++) {
+    if (n.childNodes.length !== 1) throw new Error(`<template id="${id}">: its ${ns} wrapper does not hold exactly one node`);
+    n = n.firstChild;
+  }
+  const inner = n.cloneNode(true);
+  const frag = document.createDocumentFragment();
+  while (inner.firstChild) frag.appendChild(inner.firstChild);
+  return frag;
 }
 
 /** The node at a child-index path under `node`. */

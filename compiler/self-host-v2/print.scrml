@@ -43,7 +43,10 @@ ${
     import { checkCore } from "./check.scrml"
     import { isSurfaceIface } from "./host-surface.scrml"
 
-    export type Template:struct = { id: string, nodes: HNode[] }
+    // s474 (boot-gate-await-mathml): `ns` — the parse context the template's
+    // content is inserted in (`htmlNs()`, or a foreign one, `childNs`); a
+    // foreign template is printed inside that context's wrapper (`wrapNs`).
+    export type Template:struct = { id: string, nodes: HNode[], ns: string }
     // s451 (U1a): `refused` — why the printer emitted NOTHING (empty `js` /
     // `html`); empty when it printed.
     // s454 (U1b): the printer emits the CLIENT artifact of a program with server
@@ -88,6 +91,11 @@ ${
         // continuations (cycleJs) — a Break of one is `return <exit>()`, a
         // Continue `return <next>(…)`, from anywhere inside its iteration.
         cycles: CycleJs[],
+        // s474 (boot-gate-await-mathml): the parse context of the markup being
+        // printed — the context the template now rendered is inserted in
+        // (renderViews), and, for a hole being wired, the context AT the hole
+        // (wireHole): `htmlNs()`, or "svg" / "math" / "math-text" / "annot".
+        ns: string,
     }
 
     // s474: `key` — a KEYED loop's (§17.4b) iteration-key local (its name and
@@ -100,7 +108,8 @@ ${
     type CycleJs:struct = { label: int, exit: JsExpr, next: JsExpr }
 
     type Rendered:struct = { stmts: JsStmt[], templates: Template[] }
-    type Hole:struct = { path: int[], v: View }
+    // s474: `ns` — the parse context at the hole (the context its parent element's children parse in)
+    type Hole:struct = { path: int[], v: View, ns: string }
     type Built:struct = { nodes: HNode[], holes: Hole[] }
 
     // -------------------------------------------------------------------------
@@ -847,7 +856,7 @@ ${
     fn withCycle(ctx: Ctx, c: CycleJs) -> Ctx {
         return { p: ctx.p, names: ctx.names, lexical: ctx.lexical, handles: ctx.handles, shared: ctx.shared,
                  rows: ctx.rows, slot: ctx.slot, prebuilt: ctx.prebuilt, ret: ctx.ret, server: ctx.server, tier0: ctx.tier0,
-                 cycles: ctx.cycles.concat([c]) }
+                 cycles: ctx.cycles.concat([c]), ns: ctx.ns }
     }
 
     fn cycleOf(ctx: Ctx, t: Sym) -> CycleJs | not {
@@ -1151,7 +1160,239 @@ ${
 
     fn withTier0(ctx: Ctx, t: Tier0Rows | not) -> Ctx {
         return { p: ctx.p, names: ctx.names, lexical: ctx.lexical, handles: ctx.handles, shared: ctx.shared,
-                 rows: ctx.rows, slot: ctx.slot, prebuilt: ctx.prebuilt, ret: ctx.ret, server: ctx.server, tier0: t, cycles: ctx.cycles }
+                 rows: ctx.rows, slot: ctx.slot, prebuilt: ctx.prebuilt, ret: ctx.ret, server: ctx.server, tier0: t, cycles: ctx.cycles, ns: ctx.ns }
+    }
+
+    fn withNs(ctx: Ctx, ns: string) -> Ctx {
+        return { p: ctx.p, names: ctx.names, lexical: ctx.lexical, handles: ctx.handles, shared: ctx.shared,
+                 rows: ctx.rows, slot: ctx.slot, prebuilt: ctx.prebuilt, ret: ctx.ret, server: ctx.server, tier0: ctx.tier0, cycles: ctx.cycles, ns: ns }
+    }
+
+    // -------------------------------------------------------------------------
+    // s474 (boot-gate-await-mathml) — FOREIGN CONTENT. A template's content is
+    // parsed where the page holds it: a `<template>` in the head, an HTML
+    // context. Content that is INSERTED into an `<svg>` or a `<math>` — an
+    // `if=` arm (`<svg><text if=…>`), an `<each>` / `${ for … lift }` row, a
+    // component's renders, slot content — parsed there is HTML (`<text>` /
+    // `<mi>` an HTMLUnknownElement) and never renders: measured in Chromium, a
+    // gate whose test is true showed nothing. So every template records the
+    // context it is inserted in, and a foreign one is printed INSIDE the
+    // elements that make the browser's own parser build it in that context
+    // (`wrapNs`); the runtime's `template()` unwraps the clone. The parser is
+    // still the only reader of the markup — the same one that reads the
+    // program's main template, where the same markup sits inline.
+    //
+    // The contexts (HTML §13.2.6.5 "tree construction dispatcher", the cases a
+    // template's content can sit in):
+    //   "html"       an HTML element's children (and an HTML integration
+    //                point's: SVG `foreignObject` / `desc` / `title`, MathML
+    //                `annotation-xml encoding="text/html"` or
+    //                `"application/xhtml+xml"`)
+    //   "svg"        an SVG element's children
+    //   "math"       a MathML element's children
+    //   "math-text"  a MathML text integration point's children (`mi` `mo`
+    //                `mn` `ms` `mtext`): HTML, except `mglyph` / `malignmark`
+    //   "annot"      `annotation-xml`'s children (no HTML encoding): MathML,
+    //                except `svg`, which opens SVG
+    // Only a STATIC `encoding` decides: a bound one is set after the parse, so
+    // the main template parses that element's children as "annot" too.
+    // -------------------------------------------------------------------------
+    export fn htmlNs() -> string { return "html" }
+
+    /** The context the children of `<tag attrs>`, itself in context `ns`, parse in. */
+    export fn childNs(ns: string, tag: string, attrs: Attr[]) -> string {
+        const t: string = tag.toLowerCase()
+        if (ns == "svg") {
+            if (t == "foreignobject" || t == "desc" || t == "title") return "html"
+            return "svg"
+        }
+        if (ns == "annot" && t == "svg") return "svg"
+        if (ns == "math" || ns == "annot") return mathChildNs(t, attrs)
+        if (ns == "math-text" && (t == "mglyph" || t == "malignmark")) return "math"
+        // an HTML element (in "html", or an HTML element in "math-text")
+        if (t == "svg") return "svg"
+        if (t == "math") return "math"
+        return "html"
+    }
+
+    fn mathChildNs(t: string, attrs: Attr[]) -> string {
+        if (t == "mi" || t == "mo" || t == "mn" || t == "ms" || t == "mtext") return "math-text"
+        if (t == "annotation-xml") {
+            const enc: string = staticAttrValue(attrs, "encoding").toLowerCase()
+            if (enc == "text/html" || enc == "application/xhtml+xml") return "html"
+            return "annot"
+        }
+        return "math"
+    }
+
+    fn staticAttrValue(attrs: Attr[], name: string) -> string {
+        for (const a of attrs) {
+            const v: string = staticValueIf(a, name)
+            if (v != "") return v
+        }
+        return ""
+    }
+
+    fn staticValueIf(a: Attr, name: string) -> string {
+        return match a {
+            .Static(name: n, value: x) :> staticValueNamed(n, x, name)
+            .Bound :> ""
+            .Show :> ""
+            .On :> ""
+            .Bind :> ""
+            .Gate :> ""
+        }
+    }
+
+    fn staticValueNamed(n: string, x: string, name: string) -> string {
+        if (n.toLowerCase() == name) return x
+        return ""
+    }
+
+    /** `nodes`, inside the elements that make an HTML-context parse build them in context `ns`. */
+    fn wrapNs(ns: string, nodes: HNode[]) -> HNode[] {
+        if (ns == "svg") return [HNode.HElem("svg", [], nodes)]
+        if (ns == "math") return [HNode.HElem("math", [], nodes)]
+        if (ns == "math-text") return [HNode.HElem("math", [], [HNode.HElem("mi", [], nodes)])]
+        if (ns == "annot") return [HNode.HElem("math", [], [HNode.HElem("annotation-xml", [], nodes)])]
+        return nodes
+    }
+
+    /** A template's page element: `<template id>` — and, foreign, its context marker + wrapper. */
+    fn templateElem(t: Template) -> HNode {
+        if (t.ns == htmlNs()) return HNode.HElem("template", [{ name: "id", value: t.id }], t.nodes)
+        return HNode.HElem("template", [{ name: "id", value: t.id }, { name: "data-scrml-ns", value: t.ns }], wrapNs(t.ns, t.nodes))
+    }
+
+    // A declaration's renders are ONE template per context it is used in (a
+    // `<g>`-rooted icon used in an `<svg>`, a `<span>` label used in a `<p>`):
+    // its render function for "html" keeps its name and template id; another
+    // context's carries the context (`render_icon$svg`, `scrml:icon~…@svg`).
+    // A minted name never holds `$` (names.scrml sanitize), so none collides.
+    fn nsSuffix(ns: string) -> string {
+        if (ns == htmlNs()) return ""
+        return "$" + ns.replaceAll("-", "_")
+    }
+
+    fn renderName(ctx: Ctx, d: Sym, ns: string) -> string {
+        return nameOf(ctx.names, NameKey.Render(d.id)) + nsSuffix(ns)
+    }
+
+    // The contexts each declaration is used in: the program's renders are
+    // mounted in `<body>` ("html"); a use (`<x/>`) or a Star (`<*x/>`) in a
+    // renders walked in context C uses x in the context AT that site. A least
+    // fixed point (each list only grows, by at most the five contexts per
+    // declaration, so it terminates); a declaration no site uses keeps "html".
+    type DeclNs:struct = { decl: int, ns: string[] }
+    // A use site (`decl` ≥ 0) or a `<slot/>` site (`decl` == -1), with its context.
+    type NsSite:struct = { decl: int, ns: string }
+
+    fn nsOfDecl(uses: DeclNs[], id: int) -> string[] {
+        for (const u of uses) { if (u.decl == id) return u.ns }
+        return []
+    }
+
+    fn addUse(uses: DeclNs[], id: int, ns: string) -> DeclNs[] {
+        let out: DeclNs[] = []
+        let found = false
+        for (const u of uses) {
+            if (u.decl == id) {
+                found = true
+                if (u.ns.indexOf(ns) >= 0) return uses
+                out = out.concat([{ decl: id, ns: u.ns.concat([ns]) }])
+            } else {
+                out = out.concat([u])
+            }
+        }
+        if (!found) out = out.concat([{ decl: id, ns: [ns] }])
+        return out
+    }
+
+    export fn declNsUses(p: CoreProgram) -> DeclNs[] {
+        let uses: DeclNs[] = [{ decl: p.program.id, ns: [htmlNs()] }]
+        let changed = true
+        let rounds = 0
+        while (changed && rounds <= p.decls.length * 5 + 1) {
+            changed = false
+            rounds = rounds + 1
+            for (const d of p.decls) {
+                const views: View[] | not = d.renders
+                if (views is given) {
+                    for (const ns of nsOfDecl(uses, d.sym.id)) {
+                        for (const site of nsSites(p, views, ns, 0)) {
+                            if (site.decl >= 0) {
+                                const next: DeclNs[] = addUse(uses, site.decl, site.ns)
+                                if (next.length != uses.length || nsOfDecl(next, site.decl).length != nsOfDecl(uses, site.decl).length) changed = true
+                                uses = next
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        return uses
+    }
+
+    /** The contexts a declaration's renders are printed in (never empty). */
+    fn declNsList(uses: DeclNs[], d: Decl) -> string[] {
+        const ns: string[] = nsOfDecl(uses, d.sym.id)
+        if (ns.length == 0) return [htmlNs()]
+        return ns
+    }
+
+    // The use / Star / `<slot/>` sites of `views` walked in context `ns` — the
+    // same descent buildNodes makes (an element's children in `childNs`; a
+    // Cond arm, an `<each>` row, a Tier-0 row in the hole's own context), and a
+    // use's slot content in the context of the used declaration's `<slot/>`.
+    // `depth` bounds the slot descent through declarations that pass a slot on.
+    fn nsSites(p: CoreProgram, views: View[], ns: string, depth: int) -> NsSite[] {
+        let out: NsSite[] = []
+        for (const v of views) { out = out.concat(nsSitesOf(p, v, ns, depth)) }
+        return out
+    }
+
+    fn nsSitesOf(p: CoreProgram, v: View, ns: string, depth: int) -> NsSite[] {
+        return match v {
+            .El(tag: tag, attrs: attrs, kids: ks) :> nsSites(p, ks, childNs(ns, tag, attrs), depth)
+            .Cond(arms: arms) :> nsSitesArms(p, arms, ns, depth)
+            .Each(row: row) :> nsSites(p, row, ns, depth)
+            .Gather(rows: rows) :> nsSitesRows(p, rows, ns, depth)
+            .Instance(decl: d, slot: slot) :> [{ decl: d.id, ns: ns }].concat(nsSites(p, slot, slotNsOf(p, d, ns, depth + 1), depth + 1))
+            .Star(decl: d) :> [{ decl: d.id, ns: ns }]
+            .Slot :> [{ decl: -1, ns: ns }]
+            .Text :> []
+            .RawText :> []
+            .Dyn :> []
+            .Effect :> []
+            .ResetOn :> []
+            .Errors :> []
+            .Reach :> []
+        }
+    }
+
+    fn nsSitesArms(p: CoreProgram, arms: CondArm[], ns: string, depth: int) -> NsSite[] {
+        let out: NsSite[] = []
+        for (const a of arms) { out = out.concat(nsSites(p, a.body, ns, depth)) }
+        return out
+    }
+
+    fn nsSitesRows(p: CoreProgram, rows: GatherRow[], ns: string, depth: int) -> NsSite[] {
+        let out: NsSite[] = []
+        for (const r of rows) { out = out.concat(nsSites(p, r.views, ns, depth)) }
+        return out
+    }
+
+    /** The context `d`'s `<slot/>` sits in when `d`'s renders are in context `ns` (`ns` when it has none). */
+    fn slotNsOf(p: CoreProgram, dsym: Sym, ns: string, depth: int) -> string {
+        if (depth > 32) return ns
+        const d: Decl | not = findDecl(p, dsym)
+        if (d is not) return ns
+        const views: View[] | not = d.renders
+        if (views is not) return ns
+        for (const site of nsSites(p, views, ns, depth)) {
+            if (site.decl == -1) return site.ns
+        }
+        return ns
     }
 
     // `into.push(v)`; in a Tier-0 loop a value is a text row (`rt.textRow(v)`)
@@ -1644,18 +1885,19 @@ ${
         return { nodes: a.nodes.concat(b.nodes), holes: a.holes.concat(b.holes) }
     }
 
-    fn buildNodes(ctx: Ctx, views: View[], base: int[]) -> Built {
+    // s474: `ns` — the parse context `views` sit in (their parent's children's context)
+    fn buildNodes(ctx: Ctx, views: View[], base: int[], ns: string) -> Built {
         let out: Built = emptyBuilt()
         let i = 0
         for (const v of views) {
-            out = joinBuilt(out, buildNode(ctx, v, base.concat([i])))
+            out = joinBuilt(out, buildNode(ctx, v, base.concat([i]), ns))
             i = i + 1
         }
         return out
     }
 
-    fn hole(n: HNode, path: int[], v: View) -> Built {
-        return { nodes: [n], holes: [{ path: path, v: v }] }
+    fn hole(n: HNode, path: int[], v: View, ns: string) -> Built {
+        return { nodes: [n], holes: [{ path: path, v: v, ns: ns }] }
     }
 
     fn textBuilt(t: string) -> Built { return { nodes: [HNode.HText(t)], holes: [] } }
@@ -1663,30 +1905,30 @@ ${
     // s468 — a raw-content body's text (SPEC §4.17): `<` / `>` encoded, `&` kept.
     fn rawTextBuilt(t: string) -> Built { return { nodes: [HNode.HRawText(t)], holes: [] } }
 
-    fn buildNode(ctx: Ctx, v: View, path: int[]) -> Built {
+    fn buildNode(ctx: Ctx, v: View, path: int[], ns: string) -> Built {
         return match v {
-            .El(tag: tag, attrs: attrs, kids: ks) :> buildEl(ctx, v, tag, attrs, ks, path)
+            .El(tag: tag, attrs: attrs, kids: ks) :> buildEl(ctx, v, tag, attrs, ks, path, ns)
             .Text(text: t) :> textBuilt(t)
             .RawText(text: t) :> rawTextBuilt(t)
-            .Dyn :> hole(HNode.HComment(""), path, v)
-            .Cond :> hole(HNode.HComment("if"), path, v)
-            .Each :> hole(HNode.HComment("each"), path, v)
-            .Instance(decl: d) :> hole(HNode.HComment(d.hint), path, v)
-            .Slot :> hole(HNode.HComment("slot"), path, v)
-            .Star(decl: d) :> hole(HNode.HComment("*" + d.hint), path, v)
+            .Dyn :> hole(HNode.HComment(""), path, v, ns)
+            .Cond :> hole(HNode.HComment("if"), path, v, ns)
+            .Each :> hole(HNode.HComment("each"), path, v, ns)
+            .Instance(decl: d) :> hole(HNode.HComment(d.hint), path, v, ns)
+            .Slot :> hole(HNode.HComment("slot"), path, v, ns)
+            .Star(decl: d) :> hole(HNode.HComment("*" + d.hint), path, v, ns)
             // s449: an `<effect>` renders no DOM; its comment keeps child-index paths positional
-            .Effect :> hole(HNode.HComment("effect"), path, v)
-            .ResetOn :> hole(HNode.HComment("reset-on"), path, v)
-            .Errors :> hole(HNode.HComment("errors"), path, v)
-            .Reach :> hole(HNode.HComment("reach"), path, v)
-            .Gather :> hole(HNode.HComment("for"), path, v)       // s469 (§17.4)
+            .Effect :> hole(HNode.HComment("effect"), path, v, ns)
+            .ResetOn :> hole(HNode.HComment("reset-on"), path, v, ns)
+            .Errors :> hole(HNode.HComment("errors"), path, v, ns)
+            .Reach :> hole(HNode.HComment("reach"), path, v, ns)
+            .Gather :> hole(HNode.HComment("for"), path, v, ns)       // s469 (§17.4)
         }
     }
 
-    fn buildEl(ctx: Ctx, v: View, tag: string, attrs: Attr[], ks: View[], path: int[]) -> Built {
-        const inner: Built = buildNodes(ctx, ks, path)
+    fn buildEl(ctx: Ctx, v: View, tag: string, attrs: Attr[], ks: View[], path: int[], ns: string) -> Built {
+        const inner: Built = buildNodes(ctx, ks, path, childNs(ns, tag, attrs))
         const node: HNode = HNode.HElem(tag, staticAttrs(attrs), inner.nodes)
-        if (hasWiredAttr(attrs)) return { nodes: [node], holes: [{ path: path, v: v }].concat(inner.holes) }
+        if (hasWiredAttr(attrs)) return { nodes: [node], holes: [{ path: path, v: v, ns: ns }].concat(inner.holes) }
         return { nodes: [node], holes: inner.holes }
     }
 
@@ -1739,8 +1981,9 @@ ${
     // -------------------------------------------------------------------------
     fn scopeVar() -> JsExpr { return jid("scope$") }
 
+    // s474: the template is the content of `ctx.ns` — the context it is inserted in.
     fn renderViews(ctx: Ctx, views: View[], tid: string) -> Rendered {
-        const built: Built = buildNodes(ctx, views, [])
+        const built: Built = buildNodes(ctx, views, [], ctx.ns)
         let stmts: JsStmt[] = [JsStmt.SConst("root$", rtCall(ctx, "template", [jstr(tid)]))]
         for (const h of built.holes) {
             if (holeNeedsNode(h.v)) {
@@ -1749,13 +1992,13 @@ ${
                 stmts = stmts.concat([JsStmt.SConst(nodeVar(h.path), rtCall(ctx, "at", args))])
             }
         }
-        let templates: Template[] = [{ id: tid, nodes: built.nodes }]
+        let templates: Template[] = [{ id: tid, nodes: built.nodes, ns: ctx.ns }]
         // Instance holes are numbered in document order — the order in which
         // the factory created them (mountedInstances) when this is a
         // declaration's own renders (ctx.prebuilt, L12 (b)).
         let kid = 0
         for (const h of built.holes) {
-            const w: Rendered = wireHole(ctx, h, tid, kid)
+            const w: Rendered = wireHole(withNs(ctx, h.ns), h, tid, kid)
             if (isInstanceView(h.v)) kid = kid + 1
             stmts = stmts.concat(w.stmts)
             templates = templates.concat(w.templates)
@@ -1770,7 +2013,7 @@ ${
     // its instances when it mounts: those are the conditional ones (§66.7.5).
     fn nested(ctx: Ctx) -> Ctx {
         return { p: ctx.p, names: ctx.names, lexical: ctx.lexical, handles: ctx.handles, shared: ctx.shared,
-                 rows: ctx.rows, slot: ctx.slot, prebuilt: false, ret: ctx.ret, server: ctx.server, tier0: ctx.tier0, cycles: ctx.cycles }
+                 rows: ctx.rows, slot: ctx.slot, prebuilt: false, ret: ctx.ret, server: ctx.server, tier0: ctx.tier0, cycles: ctx.cycles, ns: ctx.ns }
     }
 
     // F16: one arm binds a field (a match over an imported payload enum).
@@ -1905,7 +2148,7 @@ ${
     // s474 — a keyed row's snapshot locals are CELLS in its markup (`x.get()`).
     fn withRowCells(ctx: Ctx, ids: int[]) -> Ctx {
         return { p: ctx.p, names: ctx.names, lexical: ctx.lexical, handles: ctx.handles, shared: ctx.shared,
-                 rows: ctx.rows.concat(ids), slot: ctx.slot, prebuilt: ctx.prebuilt, ret: ctx.ret, server: ctx.server, tier0: ctx.tier0, cycles: ctx.cycles }
+                 rows: ctx.rows.concat(ids), slot: ctx.slot, prebuilt: ctx.prebuilt, ret: ctx.ret, server: ctx.server, tier0: ctx.tier0, cycles: ctx.cycles, ns: ctx.ns }
     }
 
     // The loop's locals (`local`: the Syms the Gather binds, at any depth of
@@ -2066,7 +2309,8 @@ ${
     // renders into THIS scope (so its view effects are disposed with this
     // site, while the instance itself lives on). Nothing is constructed.
     fn starJs(ctx: Ctx, d: Sym, i: InstRef, node: JsExpr) -> Rendered {
-        return only([sexpr(jcall(jid(nameOf(ctx.names, NameKey.Render(d.id))), [instJs(ctx, i), scopeVar(), node, JsExpr.JNull]))])
+        // s474: the renders printed for the context at this site (ctx.ns, wireHole)
+        return only([sexpr(jcall(jid(renderName(ctx, d, ctx.ns)), [instJs(ctx, i), scopeVar(), node, JsExpr.JNull]))])
     }
 
     // s449: a form's submit gate is registered BEFORE every other listener of
@@ -2237,7 +2481,7 @@ ${
         }
         const rowCtx: Ctx = {
             p: ctx.p, names: ctx.names, lexical: ctx.lexical, handles: rowHandles,
-            shared: ctx.shared, rows: ctx.rows.concat([bind.id]), slot: ctx.slot, prebuilt: false, ret: ctx.ret, server: ctx.server, tier0: ctx.tier0, cycles: ctx.cycles,
+            shared: ctx.shared, rows: ctx.rows.concat([bind.id]), slot: ctx.slot, prebuilt: false, ret: ctx.ret, server: ctx.server, tier0: ctx.tier0, cycles: ctx.cycles, ns: ctx.ns,
         }
         const r: Rendered = renderViews(rowCtx, row, tid)
         const keyFn: JsExpr = keyJs(ctx, bindName, key)
@@ -2397,11 +2641,12 @@ ${
         if (d.renders is given) {
             let slotFn: JsExpr = JsExpr.JNull
             if (slot.length > 0) {
-                const r: Rendered = renderViews(nested(ctx), slot, tid + "/" + pathText(path) + ".slot")
+                // s474: slot content is inserted at the declaration's `<slot/>` — its context
+                const r: Rendered = renderViews(withNs(nested(ctx), slotNsOf(ctx.p, dsym, ctx.ns, 0)), slot, tid + "/" + pathText(path) + ".slot")
                 slotFn = JsExpr.JArrow(["scope$", "anchor$"], r.stmts)
                 templates = r.templates
             }
-            stmts = stmts.concat([sexpr(jcall(jid(nameOf(ctx.names, NameKey.Render(dsym.id))),
+            stmts = stmts.concat([sexpr(jcall(jid(renderName(ctx, dsym, ctx.ns)),
                 [jid(iv), renderScope, node, slotFn]))])
         }
         return { stmts: stmts, templates: templates }
@@ -2411,7 +2656,7 @@ ${
     // Declarations (§5.2).
     // -------------------------------------------------------------------------
     fn baseCtx(p: CoreProgram, names: NameTable) -> Ctx {
-        return { p: p, names: names, lexical: [], handles: [], shared: [], rows: [], slot: JsExpr.JNull, prebuilt: false, ret: "", server: false, tier0: not, cycles: [] }
+        return { p: p, names: names, lexical: [], handles: [], shared: [], rows: [], slot: JsExpr.JNull, prebuilt: false, ret: "", server: false, tier0: not, cycles: [], ns: htmlNs() }
     }
 
     fn instCtx(ctx: Ctx, d: Decl) -> Ctx {
@@ -2421,10 +2666,12 @@ ${
             hs = hs.concat([{ sym: h.id, js: handleSlot(jid("inst$"), k, h.hint) }])
             k = k + 1
         }
-        return { p: ctx.p, names: ctx.names, lexical: [jid("inst$")], handles: hs, shared: [], rows: [], slot: jid("slot$"), prebuilt: true, ret: "", server: false, tier0: not, cycles: [] }
+        return { p: ctx.p, names: ctx.names, lexical: [jid("inst$")], handles: hs, shared: [], rows: [], slot: jid("slot$"), prebuilt: true, ret: "", server: false, tier0: not, cycles: [], ns: ctx.ns }
     }
 
-    fn declJs(ctx: Ctx, d: Decl, sharedUsed: Sym[]) -> Rendered {
+    // s474: `uses` — the contexts each declaration is used in (declNsUses); its
+    // renders print once per context (renderName / the `@ns` template id).
+    fn declJs(ctx: Ctx, d: Decl, sharedUsed: Sym[], uses: DeclNs[]) -> Rendered {
         const h: string = d.sym.hint
         let stmts: JsStmt[] = [
             JsStmt.SBlank,
@@ -2438,10 +2685,14 @@ ${
         const views: View[] | not = d.renders
         if (views is given) {
             // s474 (door 3): the template id is the per-file output name (two files' `<card>`s, two templates)
-            const r: Rendered = renderViews(instCtx(ctx, d), views, "scrml:" + d.key)
-            stmts = stmts.concat([JsStmt.SFunc(nameOf(ctx.names, NameKey.Render(d.sym.id)),
-                ["inst$", "scope$", "anchor$", "slot$"], r.stmts)])
-            templates = r.templates
+            for (const ns of declNsList(uses, d)) {
+                let tid: string = "scrml:" + d.key
+                if (ns != htmlNs()) tid = tid + "@" + ns
+                const r: Rendered = renderViews(withNs(instCtx(ctx, d), ns), views, tid)
+                stmts = stmts.concat([JsStmt.SFunc(renderName(ctx, d.sym, ns),
+                    ["inst$", "scope$", "anchor$", "slot$"], r.stmts)])
+                templates = templates.concat(r.templates)
+            }
         }
         if (symIn(sharedUsed, d.sym)) {
             stmts = stmts.concat([JsStmt.SFunc(nameOf(ctx.names, NameKey.SharedGet(d.sym.id)), [], [
@@ -3003,7 +3254,7 @@ ${
         }
         let ret: string = ""
         if (f.waits) ret = "ret$"
-        const fctx: Ctx = { p: ctx.p, names: ctx.names, lexical: [], handles: [], shared: shared, rows: [], slot: JsExpr.JNull, prebuilt: false, ret: ret, server: false, tier0: not, cycles: [] }
+        const fctx: Ctx = { p: ctx.p, names: ctx.names, lexical: [], handles: [], shared: shared, rows: [], slot: JsExpr.JNull, prebuilt: false, ret: ret, server: false, tier0: not, cycles: [], ns: ctx.ns }
         let params: string[] = []
         for (const p of f.params) { params = params.concat([symName(ctx, p.sym)]) }
         if (!f.waits) return JsStmt.SFunc(symName(ctx, f.sym), params, prologue.concat(blockJs(fctx, f.body)))
@@ -3029,7 +3280,7 @@ ${
     export fn serverCtx(p: CoreProgram) -> Ctx {
         let names: NameTable = planNames(p)
         for (const sf of p.server) { names = mint(names, NameKey.OfSym(sf.sym.id), sf.sym.hint) }
-        return { p: p, names: names, lexical: [], handles: [], shared: [], rows: [], slot: JsExpr.JNull, prebuilt: false, ret: "", server: true, tier0: not, cycles: [] }
+        return { p: p, names: names, lexical: [], handles: [], shared: [], rows: [], slot: JsExpr.JNull, prebuilt: false, ret: "", server: true, tier0: not, cycles: [], ns: htmlNs() }
     }
 
     export fn serverFnJs(ctx: Ctx, sym: Sym, params: Param[], body: Block, waits: boolean) -> JsStmt {
@@ -3197,8 +3448,9 @@ ${
         for (const d0 of p.decls) { clientRoots = clientRoots.concat([Node.NDecl(d0)]) }
         for (const f0 of p.fns) { if (!hasInt(serverOnly0, f0.sym.id)) clientRoots = clientRoots.concat([Node.NFn(f0)]) }
         body = body.concat(constStmts(ctx, constsReadIn(p, clientRoots)))
+        const uses: DeclNs[] = declNsUses(p)
         for (const d of p.decls) {
-            const r: Rendered = declJs(ctx, d, sharedUsed)
+            const r: Rendered = declJs(ctx, d, sharedUsed, uses)
             body = body.concat(r.stmts)
             templates = templates.concat(r.templates)
         }
@@ -3244,7 +3496,7 @@ ${
         const css: string = emitCss(sheetOf(p))
         if (css != "") head = [HNode.HElem("style", [], [HNode.HStyle(css)])].concat(head)
         for (const t of templates) {
-            head = head.concat([HNode.HElem("template", [{ name: "id", value: t.id }], t.nodes)])
+            head = head.concat([templateElem(t)])
         }
         // s473 — §40.7: the documentary `<meta>`s lead the head, after its `<title>`.
         let metas: HNode[] = []
