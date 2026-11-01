@@ -33,16 +33,29 @@
 > refuses a PR that modifies `docs/generated/**` — so a PR that files or resolves gaps no longer
 > conflicts with the bot. `bun scripts/state.ts` prints the live counts for any tree.
 
+### g-impl1-envelope-site-handled-pg-abort-s474 — inside an impl#1 envelope a `?{}` handled at its site runs with no statement savepoint, so on Postgres its failure aborts the whole transaction: later queries fail and the envelope's `COMMIT` ends as a silent `ROLLBACK` while the function reports success — `NEW S474 (#1732 round 3, N6); MED; open`
+
+<!-- @gap id=g-impl1-envelope-site-handled-pg-abort-s474 sev=MED status=open locus=compiler/src/codegen/emit-server.ts(_bangEnvelopeOpen / the §8.9.2 envelope — no savepoint around a site-handled `?{}`) prov=review:s474-1732(F6, r2 N6);spec:§8.9.2-Amendment-S474-item-4 -->
+
+SPEC §8.9.2 "Amendment S474" item 4 (PR #1732) requires a statement savepoint around every executed site-handled query inside an envelope. impl#1 already ships envelopes (`! -> SqlError` bodies, lexical two-query bodies) and puts no savepoint around a handled site, as read, not measured on Postgres. On SQLite a constraint failure aborts only the statement, so the common case survives. On Postgres the insert-or-ignore idiom `?{INSERT …}.run() !{ .ConstraintViolation :> not };` turns every later write into "current transaction is aborted". The bootstrap opens no Postgres envelope (it refuses pooled databases), so it is not exposed.
+
+### g-impl1-envelope-failure-reported-success-s474 — a failure of an impl#1 envelope's own BEGIN, COMMIT or savepoint release may be reported to the caller as success instead of a server error — `NEW S474 (#1732 round 3, N6); MED; open (read, not measured)`
+
+<!-- @gap id=g-impl1-envelope-failure-reported-success-s474 sev=MED status=open locus=compiler/src/codegen/emit-server.ts(_bangEnvelopeOpen / _scrml_sql_bang_envelope in sql-attempt.ts — envelope COMMIT / RELEASE failure path) prov=review:s474-1732(F5, r2 N6);spec:§8.9.2-Amendment-S474-item-1 -->
+
+SPEC §8.9.2 "Amendment S474" item 1 (PR #1732) makes a failure of the envelope's own opening statement, `COMMIT`, or savepoint release / rollback-to a server error. That means HTTP 500 for a route, a thrown failure in-process, and a terminal `error` event for a stream, never a reported success. impl#1 ships envelopes today. Whether a failed `COMMIT` (SQLITE_BUSY / IOERR, a Postgres serialization failure, a deferred constraint) or a failed `RELEASE` reaches the caller as an error has not been measured. If the helper swallows it, or lets it map to the body's success value, the caller sees success with the writes gone. The bootstrap's `server-runtime.js` `envelope` has the same open question for its built envelopes.
+
 ### g-envelope-lock-hold-cost-s474 — every `!` server body with a query now holds the §19.10.6 one-transaction-per-connection gate for its whole run, so a read-only `!` lookup serializes against every other request on SQLite and an outbound call inside it stalls them all — `NEW S474 (#1732 review F7); MED; open (accepted cost, tracked by the ruling)`
 
 <!-- @gap id=g-envelope-lock-hold-cost-s474 sev=MED status=open locus=compiler/SPEC.md(§8.9.2 "Amendment S474" item 1; §19.10.6 "Not covered") prov=ruling:user-voice-scrml.md-S474-envelope-every-bang("Cost tracked: whole-body lock hold (#1704 N4 gap, incl. the self-HTTP deadlock measurement)");review:s474-1732(F7) -->
 
-The S474 ruling *"envelope every `!` server body"* names the cost and says it is tracked: *"whole-body lock hold (#1704 N4 gap, incl. the self-HTTP deadlock measurement)"*. No gap carried it until now. The PA reading in §8.9.2 item 1 opens a read-only set as a read transaction (`BEGIN DEFERRED` on SQLite, `BEGIN READ ONLY` on Postgres / MySQL), so a single read takes no write lock. It still passes the §19.10.6 gate, which on SQLite serializes every statement on the connection for the body's whole run.
+The S474 ruling *"envelope every `!` server body"* names the cost and says it is tracked: *"whole-body lock hold (#1704 N4 gap, incl. the self-HTTP deadlock measurement)"*. No gap carried it until now. The PA reading in §8.9.2 item 1 opens a read-only set with `BEGIN DEFERRED` on SQLite (plain `BEGIN` on Postgres / MySQL, never `READ ONLY`, since a lexically read-only `SELECT` can write), so a single read takes no write lock. It still passes the §19.10.6 gate, which on SQLite serializes every statement on the connection for the body's whole run.
 
 Who pays: operators (throughput, p99 latency) and end users, on the commonest shape, a read-only `!` auth check or lookup. Measurements owed:
 - the self-HTTP deadlock (§19.10.6 "Not covered");
 - gate hold time under an outbound `fetch`;
-- whether a read-only envelope can skip the gate on SQLite WAL.
+- whether a read-only envelope can skip the gate on SQLite WAL;
+- the statement-savepoint cost (§8.9.2 item 4): every executed site-handled `?{}` inside an envelope takes a savepoint and a release. On Postgres / MySQL that is about two extra round trips per handled statement, per loop iteration, all inside the gate hold (#1732 round 3, N3).
 
 The design option, an owner fork, is to narrow the trigger to "a write, or two or more queries" (the S473 snapshot reason). The ruling kept "every `!` body", so that is not done here.
 
@@ -73,7 +86,7 @@ SPEC §8.9.2 "Amendment S474" items 1–2 (PR #1732) make the trigger a non-empt
 
 The E-SQL-011 message offers "or remove the envelope ('.nobatch()' on every query of the envelope, §8.9.5) if the writes need not be atomic", and the pooled-database refusal offers "mark each query that need not be atomic with `.nobatch()`". Neither remedy exists any more. The composed-batch trigger (`composePass`) uses the same old threshold.
 
-### g-tx-unmatched-end-unbuilt-s474 — E-TX-UNMATCHED-END (manual transaction control in a `!` body that is not a static straight-line pair, or a named savepoint) is emitted by neither compiler — `NEW S474 (#1732); MED; open`
+### g-tx-unmatched-end-unbuilt-s474 — E-TX-UNMATCHED-END (manual transaction control in a `!` body that is not provably path-paired: a loop crossing a `?{BEGIN}`, an unpaired ending, a `RELEASE` / `ROLLBACK TO` without its `SAVEPOINT`) is emitted by neither compiler — `NEW S474 (#1732); MED; open`
 
 <!-- @gap id=g-tx-unmatched-end-unbuilt-s474 sev=MED status=open locus=searched:compiler/src+compiler/self-host-v2(no emit site for E-TX-UNMATCHED-END) prov=review:s474-1732(F10);spec:§8.9.2-Amendment-S474-item-3 -->
 
@@ -81,7 +94,7 @@ The code is a PA reading in #1732 (INTERIM, for bryan's veto). Status on each co
 - **Bootstrap:** fails closed today, because it refuses all manual transaction control in a `!` function with E-BOOTSTRAP-UNSUPPORTED.
 - **impl#1:** emits nothing. A bare `?{COMMIT}` in an impl#1 `!` body can end the envelope it runs in.
 
-The capable form is path-sensitive matching with savepoint release / rollback semantics for a bare ending.
+The accepted, path-paired shapes are also unbuilt as savepoints on both compilers: the lowering of `?{BEGIN}` / `?{COMMIT}` / `?{ROLLBACK}` to a compiler-owned savepoint, and author named savepoints nesting inside the envelope. The capable form of the refusal is matching the refused shapes too.
 
 ### g-bootstrap-object-literal-arm-body-refused-s474 — the BOOTSTRAP refuses a `match` / `!{}` arm body that is an object literal (`.B :> { a: 2 }`, `{ "a": 1 }`, `{ a, b }`), which §18.5 says SHALL be that object in every position: `parseArmBody` has no object-literal path, so the brace is read as a block and the compile fails with E-STMT-MISSING-SEMICOLON + E-PARSE-EXPR (fails closed, misleading codes) — `NEW S474; MED; open`
 
