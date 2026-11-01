@@ -140,4 +140,148 @@ ${
         if (mathmlElementNames().indexOf(lower) >= 0) return true
         return false
     }
+
+    // =========================================================================
+    // s474 (boot-gate-await-mathml) — THE HTML PARSER'S CONTEXT AND REPAIRS.
+    //
+    // One context computation, read by the printer (print.scrml: a template
+    // inserted into foreign content is printed inside the elements that make
+    // the browser build it there) and by the analyzer (analyze.scrml
+    // markupParseDiags: markup the parser would RESTRUCTURE is refused — the
+    // printer addresses a template's holes by child-index path over the tree
+    // as WRITTEN, so a node the parser moves misaddresses the holes after it;
+    // SPEC §24.5).
+    //
+    // The contexts (HTML §13.2.6.5 "tree construction dispatcher" and "the
+    // rules for parsing tokens in foreign content"):
+    //   "html"       an HTML element's children (and an HTML integration
+    //                point's: SVG `foreignObject` / `desc` / `title`, MathML
+    //                `annotation-xml encoding="text/html"` or
+    //                `"application/xhtml+xml"`)
+    //   "svg"        an SVG element's children
+    //   "math"       a MathML element's children
+    //   "math-text"  a MathML text integration point's children (`mi` `mo`
+    //                `mn` `ms` `mtext`): HTML, except `mglyph` / `malignmark`
+    //   "annot"      `annotation-xml`'s children (no HTML encoding): MathML,
+    //                except `svg`, which opens SVG
+    // Only a STATIC `encoding` decides (`encoding` is "" when there is none or
+    // it is bound): a bound one is set after the parse.
+    // =========================================================================
+    export fn htmlNs() -> string { return "html" }
+
+    /** The context the children of `<tag encoding=…>`, itself in context `ns`, parse in. */
+    export fn childNs(ns: string, tag: string, encoding: string) -> string {
+        const t: string = tag.toLowerCase()
+        if (ns == "svg") {
+            if (t == "foreignobject" || t == "desc" || t == "title") return "html"
+            return "svg"
+        }
+        if (ns == "annot" && t == "svg") return "svg"
+        if (ns == "math" || ns == "annot") return mathChildNs(t, encoding)
+        if (ns == "math-text" && (t == "mglyph" || t == "malignmark")) return "math"
+        // an HTML element (in "html", or an HTML element in "math-text")
+        if (t == "svg") return "svg"
+        if (t == "math") return "math"
+        return "html"
+    }
+
+    fn mathChildNs(t: string, encoding: string) -> string {
+        if (t == "mi" || t == "mo" || t == "mn" || t == "ms" || t == "mtext") return "math-text"
+        if (t == "annotation-xml") {
+            const enc: string = encoding.toLowerCase()
+            if (enc == "text/html" || enc == "application/xhtml+xml") return "html"
+            return "annot"
+        }
+        return "math"
+    }
+
+    /** A context whose elements are SVG or MathML elements (never HTML). */
+    export fn isForeignNs(ns: string) -> boolean {
+        return ns == "svg" || ns == "math" || ns == "annot"
+    }
+
+    /** An element `<tag>` written in context `ns` is an HTML element. */
+    export fn isHtmlInNs(ns: string, tag: string) -> boolean {
+        const t: string = tag.toLowerCase()
+        if (ns == "html") return true
+        if (ns == "math-text") return t != "mglyph" && t != "malignmark"
+        return false
+    }
+
+    // HTML §13.2.6.5 "rules for parsing tokens in foreign content": a start tag
+    // of one of these names (and `font` carrying `color`, `face` or `size`) is a
+    // parse error that POPS the open SVG / MathML elements and is reprocessed as
+    // HTML — the element is never a child of the foreign element it is written
+    // in. `fontAttr`: the element carries a `color` / `face` / `size` attribute.
+    export fn isForeignBreakout(tag: string, fontAttr: boolean) -> boolean {
+        const t: string = tag.toLowerCase()
+        if (t == "font") return fontAttr
+        return ["b", "big", "blockquote", "body", "br", "center", "code", "dd", "div", "dl", "dt", "em", "embed",
+                "h1", "h2", "h3", "h4", "h5", "h6", "head", "hr", "i", "img", "li", "listing", "menu", "meta", "nobr",
+                "ol", "p", "pre", "ruby", "s", "small", "span", "strong", "strike", "sub", "sup", "table", "tt", "u",
+                "ul", "var"].indexOf(t) >= 0
+    }
+
+    // HTML §13.2.6.4.7 "in body": a start tag of one of these names, while a
+    // `<p>` is open in button scope, CLOSES that `<p>` first ("close a p
+    // element") — the element becomes the `<p>`'s next sibling.
+    export fn closesP(tag: string) -> boolean {
+        return ["address", "article", "aside", "blockquote", "center", "details", "dialog", "dir", "div", "dl",
+                "fieldset", "figcaption", "figure", "footer", "header", "hgroup", "main", "menu", "nav", "ol", "p",
+                "search", "section", "summary", "ul", "h1", "h2", "h3", "h4", "h5", "h6", "pre", "listing", "form",
+                "li", "dd", "dt", "plaintext", "table", "hr", "xmp"].indexOf(tag.toLowerCase()) >= 0
+    }
+
+    export fn isHeading(tag: string) -> boolean {
+        return ["h1", "h2", "h3", "h4", "h5", "h6"].indexOf(tag.toLowerCase()) >= 0
+    }
+
+    // HTML §13.2.4.2 "has an element in scope": the elements that bound the
+    // default scope — HTML ones, the MathML text / annotation points, the SVG
+    // HTML integration points. `ns` is the element's OWN context.
+    export fn boundsScope(ns: string, tag: string) -> boolean {
+        const t: string = tag.toLowerCase()
+        if (ns == "svg") return t == "foreignobject" || t == "desc" || t == "title"
+        if (ns == "math" || ns == "annot") return ["mi", "mo", "mn", "ms", "mtext", "annotation-xml"].indexOf(t) >= 0
+        return ["applet", "caption", "html", "table", "td", "th", "marquee", "object", "template"].indexOf(t) >= 0
+    }
+
+    // HTML §13.2.4.3: the elements whose start inserts a MARKER into the list of
+    // active formatting elements (an `<a>` inside one does not see an outer `<a>`).
+    export fn formattingMarker(tag: string) -> boolean {
+        return ["applet", "object", "marquee", "template", "td", "th", "caption"].indexOf(tag.toLowerCase()) >= 0
+    }
+
+    // HTML §13.2.4.2 the "special" category (HTML namespace) — where the `li` /
+    // `dd` / `dt` start-tag steps stop looking for an open `li` / `dd` / `dt`.
+    export fn isSpecialHtml(tag: string) -> boolean {
+        return ["address", "applet", "area", "article", "aside", "base", "basefont", "bgsound", "blockquote", "body",
+                "br", "button", "caption", "center", "col", "colgroup", "dd", "details", "dir", "div", "dl", "dt", "embed",
+                "fieldset", "figcaption", "figure", "footer", "form", "frame", "frameset", "h1", "h2", "h3", "h4", "h5",
+                "h6", "head", "header", "hgroup", "hr", "html", "iframe", "img", "input", "keygen", "li", "link", "listing",
+                "main", "marquee", "menu", "meta", "nav", "noembed", "noframes", "noscript", "object", "ol", "p", "param",
+                "plaintext", "pre", "script", "search", "section", "select", "source", "style", "summary", "table", "tbody",
+                "td", "template", "textarea", "tfoot", "th", "thead", "title", "tr", "track", "ul", "wbr", "xmp"].indexOf(tag.toLowerCase()) >= 0
+    }
+
+    // The table insertion mode (HTML §13.2.6.4.9–15) a child of `<tag>` is
+    // parsed in: "table", "tbody" (`tbody` / `thead` / `tfoot`), "tr",
+    // "colgroup", or "" (none).
+    export fn tableMode(tag: string) -> string {
+        const t: string = tag.toLowerCase()
+        if (t == "table") return "table"
+        if (t == "tbody" || t == "thead" || t == "tfoot") return "tbody"
+        if (t == "tr") return "tr"
+        if (t == "colgroup") return "colgroup"
+        return ""
+    }
+
+    /** The element names a table-mode parent keeps as its children; any other is moved or wrapped. */
+    export fn tableModeChildren(mode: string) -> string[] {
+        if (mode == "table") return ["caption", "colgroup", "thead", "tbody", "tfoot", "template"]
+        if (mode == "tbody") return ["tr", "template"]
+        if (mode == "tr") return ["td", "th", "template"]
+        if (mode == "colgroup") return ["col", "template"]
+        return []
+    }
 }

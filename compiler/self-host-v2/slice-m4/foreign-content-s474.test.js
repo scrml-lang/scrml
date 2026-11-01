@@ -32,7 +32,9 @@ const SQ = "?" + "{";
 function print(src) {
   const r = frontEnd(mods, [{ path: "app.scrml", src }]);
   expect(r.diags.filter((d) => d.severity === "error" || d.code.startsWith("E-")).map((d) => `${d.code}: ${d.message}`)).toEqual([]);
-  return mods.print.printProgram(r.core, "app.client.js", "scrml-runtime.js");
+  const out = mods.print.printProgram(r.core, "app.client.js", "scrml-runtime.js");
+  // the shape hash (r1, defence in depth) is pinned by its own tests below; the printed-shape tests read past it
+  return { ...out, html: out.html.replace(/ data-scrml-shape="\d+"/g, "") };
 }
 
 /** Every `<template …>` open tag of the page, with what directly follows it. */

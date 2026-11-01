@@ -36,12 +36,13 @@ ${
     import { Node, allNodes, sharedRefs, boundSyms, assignedSyms } from "./walk.scrml"
     import { JsOp, JsUnOp, JsExpr, JsProp, JsStmt, JsLoopHead, JsForInit,
              jid, jstr, jnum, jmember, jcall, jmcall, jthunk, sexpr, printModule } from "./js.scrml"
-    import { HAttr, HNode, Page, printPage } from "./html.scrml"
+    import { HAttr, HNode, Page, printPage, isVoid } from "./html.scrml"
     import { NameKey, NameTable, emptyNames, mint, nameOf } from "./names.scrml"
     import { WireTable, wireBuild, wireTableJs } from "./codec.scrml"
     import { emitCss } from "./css.scrml"
     import { checkCore } from "./check.scrml"
     import { isSurfaceIface } from "./host-surface.scrml"
+    import { htmlNs, childNs, isHtmlInNs } from "./elements.scrml"
 
     // s474 (boot-gate-await-mathml): `ns` — the parse context the template's
     // content is inserted in (`htmlNs()`, or a foreign one, `childNs`); a
@@ -1182,47 +1183,15 @@ ${
     // still the only reader of the markup — the same one that reads the
     // program's main template, where the same markup sits inline.
     //
-    // The contexts (HTML §13.2.6.5 "tree construction dispatcher", the cases a
-    // template's content can sit in):
-    //   "html"       an HTML element's children (and an HTML integration
-    //                point's: SVG `foreignObject` / `desc` / `title`, MathML
-    //                `annotation-xml encoding="text/html"` or
-    //                `"application/xhtml+xml"`)
-    //   "svg"        an SVG element's children
-    //   "math"       a MathML element's children
-    //   "math-text"  a MathML text integration point's children (`mi` `mo`
-    //                `mn` `ms` `mtext`): HTML, except `mglyph` / `malignmark`
-    //   "annot"      `annotation-xml`'s children (no HTML encoding): MathML,
-    //                except `svg`, which opens SVG
-    // Only a STATIC `encoding` decides: a bound one is set after the parse, so
-    // the main template parses that element's children as "annot" too.
+    // The contexts and the one function that computes them, `childNs`, live in
+    // elements.scrml (the analyzer reads the same one, to refuse markup the
+    // parser restructures — SPEC §24.5). Only a STATIC `encoding` decides: a
+    // bound one is set after the parse.
     // -------------------------------------------------------------------------
-    export fn htmlNs() -> string { return "html" }
 
-    /** The context the children of `<tag attrs>`, itself in context `ns`, parse in. */
-    export fn childNs(ns: string, tag: string, attrs: Attr[]) -> string {
-        const t: string = tag.toLowerCase()
-        if (ns == "svg") {
-            if (t == "foreignobject" || t == "desc" || t == "title") return "html"
-            return "svg"
-        }
-        if (ns == "annot" && t == "svg") return "svg"
-        if (ns == "math" || ns == "annot") return mathChildNs(t, attrs)
-        if (ns == "math-text" && (t == "mglyph" || t == "malignmark")) return "math"
-        // an HTML element (in "html", or an HTML element in "math-text")
-        if (t == "svg") return "svg"
-        if (t == "math") return "math"
-        return "html"
-    }
-
-    fn mathChildNs(t: string, attrs: Attr[]) -> string {
-        if (t == "mi" || t == "mo" || t == "mn" || t == "ms" || t == "mtext") return "math-text"
-        if (t == "annotation-xml") {
-            const enc: string = staticAttrValue(attrs, "encoding").toLowerCase()
-            if (enc == "text/html" || enc == "application/xhtml+xml") return "html"
-            return "annot"
-        }
-        return "math"
+    /** The context the children of a Core element `<tag attrs>`, itself in context `ns`, parse in. */
+    fn elChildNs(ns: string, tag: string, attrs: Attr[]) -> string {
+        return childNs(ns, tag, staticAttrValue(attrs, "encoding"))
     }
 
     fn staticAttrValue(attrs: Attr[], name: string) -> string {
@@ -1260,8 +1229,68 @@ ${
 
     /** A template's page element: `<template id>` — and, foreign, its context marker + wrapper. */
     fn templateElem(t: Template) -> HNode {
-        if (t.ns == htmlNs()) return HNode.HElem("template", [{ name: "id", value: t.id }], t.nodes)
-        return HNode.HElem("template", [{ name: "id", value: t.id }, { name: "data-scrml-ns", value: t.ns }], wrapNs(t.ns, t.nodes))
+        const shape: HAttr = { name: "data-scrml-shape", value: shapeHash(t.ns, t.nodes) }
+        if (t.ns == htmlNs()) return HNode.HElem("template", [{ name: "id", value: t.id }, shape], t.nodes)
+        return HNode.HElem("template", [{ name: "id", value: t.id }, { name: "data-scrml-ns", value: t.ns }, shape], wrapNs(t.ns, t.nodes))
+    }
+
+    // s474 r1 (review of #1727, F3 defence in depth) — THE SHAPE OF A TEMPLATE.
+    // Holes are addressed by child-index path over the tree as WRITTEN. The
+    // analyzer refuses the markup the HTML parser is known to restructure (SPEC
+    // §24.5, analyze.scrml markupParseDiags); this is the backstop for any rule
+    // it does not model. The printer writes a hash of the content's element /
+    // comment structure (preorder `depth:name;`, text excluded — a hole marker
+    // is a comment, a `show=` / bound element an element), and the runtime's
+    // `template()` hashes what the browser actually built, once per template,
+    // and throws on a mismatch — so a restructured template never mounts with
+    // its holes on the wrong nodes (runtime.js `shapeHash`, the same function).
+    // Not walked, on either side: a void element's children (never printed),
+    // an HTML `<template>`'s (its content is not its children), and the text
+    // of a raw-text / RCDATA element (`<textarea>`, `<title>`, …: no elements).
+    fn shapeHash(ns: string, nodes: HNode[]) -> string {
+        const s: string = shapeOf(nodes, ns, 0)
+        let h: int = 7
+        let i: int = 0
+        while (i < s.length) {
+            h = (h * 31 + s.charCodeAt(i)) % 2147483647
+            i = i + 1
+        }
+        return "" + h
+    }
+
+    fn shapeOf(nodes: HNode[], ns: string, depth: int) -> string {
+        let out: string = ""
+        for (const n of nodes) { out = out + shapeNode(n, ns, depth) }
+        return out
+    }
+
+    fn shapeNode(n: HNode, ns: string, depth: int) -> string {
+        return match n {
+            .HElem(tag: t, attrs: attrs, kids: ks) :> shapeElem(t, attrs, ks, ns, depth)
+            .HText(text: x) :> ""
+            .HRawText(text: x) :> ""
+            .HComment(text: x) :> "" + depth + ":#;"
+            .HStyle(text: x) :> ""
+        }
+    }
+
+    fn shapeElem(tag: string, attrs: HAttr[], kids: HNode[], ns: string, depth: int) -> string {
+        const t: string = tag.toLowerCase()
+        let name: string = t
+        if (t == "image" && isHtmlInNs(ns, t)) name = "img"   // the "in body" rule renames it
+        const own: string = "" + depth + ":" + name + ";"
+        if (isVoid(tag)) return own
+        if (isHtmlInNs(ns, t) && shapeOpaque(t)) return own
+        return own + shapeOf(kids, childNs(ns, t, hattrValue(attrs, "encoding")), depth + 1)
+    }
+
+    fn shapeOpaque(t: string) -> boolean {
+        return ["template", "script", "style", "textarea", "title", "xmp", "iframe", "noembed", "noframes", "noscript", "plaintext"].indexOf(t) >= 0
+    }
+
+    fn hattrValue(attrs: HAttr[], name: string) -> string {
+        for (const a of attrs) { if (a.name.toLowerCase() == name) return a.value }
+        return ""
     }
 
     // A declaration's renders are ONE template per context it is used in (a
@@ -1353,7 +1382,7 @@ ${
 
     fn nsSitesOf(p: CoreProgram, v: View, ns: string, depth: int) -> NsSite[] {
         return match v {
-            .El(tag: tag, attrs: attrs, kids: ks) :> nsSites(p, ks, childNs(ns, tag, attrs), depth)
+            .El(tag: tag, attrs: attrs, kids: ks) :> nsSites(p, ks, elChildNs(ns, tag, attrs), depth)
             .Cond(arms: arms) :> nsSitesArms(p, arms, ns, depth)
             .Each(row: row) :> nsSites(p, row, ns, depth)
             .Gather(rows: rows) :> nsSitesRows(p, rows, ns, depth)
@@ -1926,7 +1955,7 @@ ${
     }
 
     fn buildEl(ctx: Ctx, v: View, tag: string, attrs: Attr[], ks: View[], path: int[], ns: string) -> Built {
-        const inner: Built = buildNodes(ctx, ks, path, childNs(ns, tag, attrs))
+        const inner: Built = buildNodes(ctx, ks, path, elChildNs(ns, tag, attrs))
         const node: HNode = HNode.HElem(tag, staticAttrs(attrs), inner.nodes)
         if (hasWiredAttr(attrs)) return { nodes: [node], holes: [{ path: path, v: v, ns: ns }].concat(inner.holes) }
         return { nodes: [node], holes: inner.holes }

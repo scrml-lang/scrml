@@ -118,8 +118,8 @@ describe("two files each declaring `<card>`, different styles: both compile, eac
     expect(out.html).toContain(`@scope ([data-scrml="${blue}"]) to ([data-scrml]) {\n  :where(.c), :where(:scope.c) { color: blue; }\n}`);
     expect(out.html).toContain(`<div class="c" id="red-card" data-scrml="${red}">`);
     expect(out.html).toContain(`<div class="c" id="blue-card" data-scrml="${blue}">`);
-    expect(out.html).toContain(`<template id="scrml:${red}">`);
-    expect(out.html).toContain(`<template id="scrml:${blue}">`);
+    expect(out.html).toMatch(new RegExp(`<template id="scrml:${red}" data-scrml-shape="\\d+">`));
+    expect(out.html).toMatch(new RegExp(`<template id="scrml:${blue}" data-scrml-shape="\\d+">`));
     // no bare key is emitted for a user declaration
     expect(out.html).not.toContain('data-scrml="card"');
     expect(out.html).not.toContain('id="scrml:card"');

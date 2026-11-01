@@ -73,8 +73,8 @@ describe("two `<card>`s from two files, one aliased: both render, each with its 
     expect(a).not.toBe(b);
     expect(out.html).toContain(`@scope ([data-scrml="${a}"]) to ([data-scrml]) {\n  :where(.c), :where(:scope.c) { color: red; }\n}`);
     expect(out.html).toContain(`@scope ([data-scrml="${b}"]) to ([data-scrml]) {\n  :where(.c), :where(:scope.c) { color: green; }\n}`);
-    expect(out.html).toContain(`<template id="scrml:${a}"><div class="c" id="ca" data-scrml="${a}">`);
-    expect(out.html).toContain(`<template id="scrml:${b}"><div class="c" id="cb" data-scrml="${b}">`);
+    expect(out.html).toMatch(new RegExp(`<template id="scrml:${a}" data-scrml-shape="\\d+"><div class="c" id="ca" data-scrml="${a}">`));
+    expect(out.html).toMatch(new RegExp(`<template id="scrml:${b}" data-scrml-shape="\\d+"><div class="c" id="cb" data-scrml="${b}">`));
     // the local name is no output name
     expect(out.html).not.toContain("card2");
     expect(out.js).not.toContain("card2");
