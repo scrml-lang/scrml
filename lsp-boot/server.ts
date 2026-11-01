@@ -36,6 +36,7 @@
  * pick up a changed bootstrap.
  */
 
+import { statSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -79,24 +80,39 @@ const untitled = new Map<string, string>();
 // earlier one closed, and the overlay then compiled one buffer with the other's text.
 let nextUntitled = 1;
 
+/**
+ * A `file:` URI's local path, or why it has none. #1723 review L-b: beyond what `fileURLToPath`
+ * rejects, a URI that decodes to a directory (`file:`, `file:%00` resolve to `/`) or, off Windows, to
+ * a path with a backslash (`%5C`, which no editor writes for a real file) is not a document path.
+ */
+function localPath(uri: string): { path: string } | { why: string } {
+  let p: string;
+  try {
+    p = resolve(fileURLToPath(uri));
+  } catch (e) {
+    return { why: (e as Error)?.message ?? String(e) };
+  }
+  if (p.includes("\0")) return { why: "the path holds a NUL" };
+  if (process.platform !== "win32" && p.includes("\\")) return { why: "the decoded path holds a backslash (an encoded %5C)" };
+  try {
+    if (statSync(p).isDirectory()) return { why: `it decodes to the directory ${p}` };
+  } catch {
+    /* not on disk yet: an unsaved file is fine */
+  }
+  return { path: p };
+}
+
 /** Why a `file:` URI has no local path, or null when it has one. */
 function uriProblem(uri: string): string | null {
   if (!uri.startsWith("file:")) return null;
-  try {
-    fileURLToPath(uri);
-    return null;
-  } catch (e) {
-    return (e as Error)?.message ?? String(e);
-  }
+  const l = localPath(uri);
+  return "why" in l ? l.why : null;
 }
 
 function pathOf(uri: string): string | null {
   if (uri.startsWith("file:")) {
-    try {
-      return resolve(fileURLToPath(uri));
-    } catch {
-      return null;
-    }
+    const l = localPath(uri);
+    return "path" in l ? l.path : null;
   }
   let p = untitled.get(uri);
   if (p === undefined) {

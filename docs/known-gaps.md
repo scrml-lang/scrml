@@ -893,6 +893,16 @@ After a `git checkout`, a formatter run, or an edit in another tool, an open imp
 
 > **RESOLVED S474.** `--columns bytes` prints UTF-8 byte columns (both formats); the default stays UTF-16 code units, which JS, LSP and VS Code count. Both units are pinned by compiler/self-host-v2/slice-m4/scrml-boot-backfill-s474.test.js (C2).
 
+<!-- @gap id=g-lsp-boot-uri-alias-overlay-s474 sev=LOW status=open locus=lsp-boot/server.ts(overlay — a Map keyed by path, last open document wins) prov=review:S474-#1723(L-a) -->
+### g-lsp-boot-uri-alias-overlay-s474 — two open documents whose URIs are two spellings of ONE file (`file:///…/x.scrml` and `file://localhost/…/x.scrml`, or `%61` for `a`) share one overlay path, and the last one opened wins: the other buffer is compiled with its text (a BAD buffer publishes `[]`) — `NEW S474 (review of #1723, L-a; pre-existing); LOW; open`
+
+Both spellings already canonicalize to the same path through `fileURLToPath` (and realpath would not separate them either), so canonicalizing does not fix it: the overlay has one slot for two buffers. Capable form: keep the FIRST open document per path as that path's owner, build the overlay from owners only, and give a later document naming an owned path one `scrml-boot-uri` diagnostic ("this file is already open as <uri>") until the owner closes. Editors rarely open one file under two URIs. Same family as the untitled-name collision fixed in #1723 (L2).
+
+<!-- @gap id=g-doc-pin-counts-encode-cascades-s474 sev=LOW status=open locus=scripts/doc-boot-check.js(pinMismatch — a multiset compare)+docs/**(spec-ahead pins such as E-PARSE-ITEM×11) prov=review:S474-#1723(D-i) -->
+### g-doc-pin-counts-encode-cascades-s474 — a spec-ahead pin counts every diagnostic, so it also records the size of each parse-error CASCADE (`E-PARSE-ITEM×11`, `E-PARSE-DECL-BODY×10`, `E-PARSE-TYPE×9`): a bootstrap change that only IMPROVES error recovery fails the docs gates in an unrelated PR, which must re-pin — `NEW S474 (review of #1723, D-i); LOW; open (accepted cost)`
+
+The count is what lets a pin catch a typo that adds one more of an already-expected code (#1489-1), so it cannot simply go. The re-pin is cheap: the gate prints what it got in pin syntax, ready to paste. Capable forms, if the churn becomes a cost: count only codes that NAME something (the NAMED_CODES set), and pin cascade codes as a lower bound or by presence; or pin the first diagnostic of each cascade by position.
+
 <!-- @gap id=g-boot-one-file-two-spellings-refused-s474 sev=LOW status=open locus=scripts/scrml-boot.ts(sourceClosure — realpath dedupe; compileSource refuses the second spelling)+compiler/self-host-v2/link.scrml(importTarget — resolves an import by path text) prov=review:S474-#1706(F2);dispatch:s474-boot-per-file-scope-keys(r1) -->
 ### g-boot-one-file-two-spellings-refused-s474 — a file imported under two spellings that are one file on disk (a symlinked directory, or another letter case on a case-insensitive file system) is refused (E-BOOTSTRAP-UNSUPPORTED, "import the file by one spelling") instead of compiling as one module — `NEW S474; LOW; open (INTERIM refusal, fails closed)`
 

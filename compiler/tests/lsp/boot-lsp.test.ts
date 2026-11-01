@@ -443,3 +443,23 @@ describe("lsp-boot over stdio — S474 backfill", () => {
     expect(await c.stop()).toBe(0);
   }, 90_000);
 });
+
+describe("lsp-boot over stdio — #1723 review round 1", () => {
+  test("L-b: `file:`, `file:\\0` (a directory, the root) and `%5C` (a backslash) are a `scrml-boot-uri` diagnostic, not a crash", async () => {
+    const c = client({ SCRML_BOOT_LSP_DEBOUNCE_MS: "20" });
+    await c.init(dir);
+    const odd = ["file:", "file:\u0000", "file:///tmp/a%5Cb.scrml", pathToFileURL(dir).href];
+    for (const uri of odd) {
+      const p = c.nextDiagnostics(uri, 60_000);
+      c.open(uri, BAD);
+      const d = (await p).params.diagnostics;
+      expect({ uri, n: d.length, code: d[0]?.code }).toEqual({ uri, n: 1, code: "scrml-boot-uri" });
+    }
+    // and the server still compiles a real document
+    const good = pathToFileURL(join(dir, "after-odd.scrml")).href;
+    const p = c.nextDiagnostics(good);
+    c.open(good, BAD);
+    expect((await p).params.diagnostics[0].code).toBe("E-STATE-UNDECLARED");
+    expect(await c.stop()).toBe(0);
+  }, 90_000);
+});
