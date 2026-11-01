@@ -1,0 +1,17 @@
+<program>
+    type K:enum = { A, B, C }
+    function g(k: K) -> int { const v = match k { .A :> 1, .B :> { 2 }, .C :> { 3; } }; return v; }
+    function area(k: K, r: int) -> int {
+        return match k {
+            .A :> { r * r * 3 },
+            .B :> {
+                r +
+                    1
+            },
+            .C :> { /* one expression */ 0 // a trailing comment
+            },
+        };
+    }
+    <p id="g">${g(.A)} ${g(.B)} ${g(.C)}</p>
+    <p id="area">${area(.A, 2)} ${area(.B, 2)} ${area(.C, 2)}</p>
+</program>
