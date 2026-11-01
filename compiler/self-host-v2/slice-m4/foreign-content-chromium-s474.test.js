@@ -148,3 +148,160 @@ suite("H3 in Chromium — foreign-content templates render in their namespace; t
     }
   }, 30000);
 });
+
+// ---------------------------------------------------------------------------
+// s474 r1 (review of #1727, F1–F4): the parser-restructure class in a REAL browser.
+// ---------------------------------------------------------------------------
+
+/** Compile `src` (clean), print it, open it; `edit` / the async `post` rewrite the page first. */
+async function openPrinted(src, edit = (h) => h, post = async (h) => h) {
+  const r = frontEnd(mods, [{ path: "app.scrml", src }]);
+  expect(r.diags.filter((d) => d.code.startsWith("E-")).map((d) => `${d.code}: ${d.message}`)).toEqual([]);
+  const name = `p${seq++}`;
+  const out = mods.print.printProgram(r.core, `${name}.client.js`, "scrml-runtime.js");
+  expect(out.refused).toEqual([]);
+  writeFileSync(join(dir, `${name}.html`), await post(edit(out.html)));
+  writeFileSync(join(dir, `${name}.client.js`), out.js);
+  const page = await browser.newPage();
+  const errors = [];
+  page.on("pageerror", (e) => errors.push(String(e)));
+  await page.goto(`http://localhost:${server.port}/${name}.html`);
+  await new Promise((r2) => setTimeout(r2, 150));
+  return { page, errors };
+}
+
+/** Every element holding SECRET text that the user can SEE (a box, and checkVisibility). */
+const secretShown = (page) => page.evaluate(() => {
+  const w = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+  const out = [];
+  let n;
+  while ((n = w.nextNode())) {
+    if (!/SECRET/.test(n.data)) continue;
+    const e = n.parentElement;
+    const r = e.getBoundingClientRect();
+    const rg = document.createRange();
+    rg.selectNodeContents(n);
+    const tw = rg.getBoundingClientRect().width;
+    const vis = e.checkVisibility ? e.checkVisibility({ checkVisibilityCSS: true, checkOpacity: true }) : true;
+    if (vis && ((r.width > 0 && r.height > 0) || tw > 0)) out.push(e.localName);
+  }
+  return out;
+});
+
+const click = async (page, sel) => {
+  if (await page.$(sel)) await page.click(sel);
+  await new Promise((r) => setTimeout(r, 100));
+};
+
+/** Set one template's recorded shape to a wrong value — a stand-in for a restructuring the analyzer does not model. */
+const breakShape = (pick) => (html) => html.replace(/<template id="([^"]+)"([^>]*) data-scrml-shape="\d+"/g, (m, id, rest) => (pick(id) ? `<template id="${id}"${rest} data-scrml-shape="0"` : m));
+
+/**
+ * Make one FOREIGN template's wrapper hold two nodes (an extra `<i>` after the `<svg>` wrapper), so its arm
+ * throws when it opens — the very throw a breakout tag produced before §24.5 refused it (review F1). The
+ * runtime's wrapper check is the same on the merge base, so this pins the flush containment itself: on the
+ * base the throw stranded the gate closing in the same write and the secret stayed visible after logout.
+ */
+const breakWrapper = (id) => (html) => html.replace(new RegExp(`(<template id="${id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}"[^>]*>[\\s\\S]*?)</template>`), "$1<i></i></template>");
+
+/** The id of the template whose content holds `text`. */
+const templateHolding = (html, text) => [...html.matchAll(/<template id="([^"]+)"[^>]*>([\s\S]*?)<\/template>/g)].find((x) => x[2].includes(text))[1];
+
+suite("r1 in Chromium — a template that throws never strands a gate closing in the same write (F1, F4)", () => {
+  const SHAPES = {
+    ifAfter: `<svg><g if=(@pw == "wrong")><text y="20">bye</text></g></svg><p if=(@pw == "secret")>SECRET</p>`,
+    showAfter: `<svg><g if=(@pw == "wrong")><text y="20">bye</text></g></svg><p show=(@pw == "secret")>SECRET</p>`,
+    ifBefore: `<p if=(@pw == "secret")>SECRET</p><svg><g if=(@pw == "wrong")><text y="20">bye</text></g></svg>`,
+    svgSecret: `<svg><g if=(@pw == "wrong")><text y="20">bye</text></g><text if=(@pw == "secret") y="40">SECRET</text></svg>`,
+    elseArm: `<svg><g if=(@pw != "wrong")><text y="20">hi</text></g><g else><text y="20">bye</text></g></svg><p if=(@pw == "secret")>SECRET</p>`,
+  };
+  for (const [name, markup] of Object.entries(SHAPES)) {
+    test(`${name}: login, then logout next to an arm that throws when it opens — the secret is hidden after logout`, async () => {
+      const { page, errors } = await openPrinted(gateProgram(markup), (html) => breakWrapper(templateHolding(html, "bye"))(html));
+      expect(await secretShown(page)).toEqual([]);                       // first paint
+      await click(page, "#right");
+      expect((await secretShown(page)).length).toBeGreaterThan(0);       // logged in
+      for (let i = 0; i < 3; i++) {
+        await click(page, "#wrong");
+        expect(await secretShown(page)).toEqual([]);                     // logged out: the gate closed
+      }
+      expect(errors.some((e) => /wrapper does not hold exactly one node/.test(e))).toBe(true);   // the arm threw, and the throw was contained
+      await page.close();
+    }, 30000);
+  }
+  test("an ungated restructured template at mount: it is not mounted; no secret at first paint or after the wrong password", async () => {
+    const { page, errors } = await openPrinted(gateProgram(`<span show=(@pw == "secret")>SECRET</span>`), breakShape((id) => id === "scrml:program"));
+    expect(await secretShown(page)).toEqual([]);
+    await click(page, "#wrong");
+    expect(await secretShown(page)).toEqual([]);
+    expect(errors.some((e) => /restructured/.test(e))).toBe(true);
+    await page.close();
+  }, 30000);
+});
+
+// The F3 repros no longer compile (that is the fix). To show the runtime backstop holds even where the
+// analyzer would not refuse, each repro is ALSO printed as the printer would print it: a clean twin (the
+// offending tags spelled as custom elements, `x-p`, which neither the analyzer nor the parser treats
+// specially) is compiled, renamed back to the repro's tags in the page, and each template's
+// `data-scrml-shape` is recomputed for the tree AS WRITTEN — by the runtime's own `shapeHash`, over an XML
+// parse of the template text (an XML parser restructures nothing). That is exactly the page the printer
+// writes for the repro; Chromium's HTML parser then restructures it.
+async function asWrittenShapes(html) {
+  writeFileSync(join(dir, "blank.html"), "<!doctype html><title>x</title>");
+  const page = await browser.newPage();
+  await page.goto(`http://localhost:${server.port}/blank.html`);
+  const shapes = await page.evaluate(async (src) => {
+    const rt = await import("/scrml-runtime.js");
+    const depthOf = { svg: 1, math: 1, "math-text": 2, annot: 2 };
+    const out = {};
+    for (const m of src.matchAll(/<template id="([^"]+)"([^>]*)>([\s\S]*?)<\/template>/g)) {
+      const doc = new DOMParser().parseFromString("<r>" + m[3] + "</r>", "application/xml");
+      if (doc.getElementsByTagName("parsererror").length > 0) throw new Error("not well-formed: " + m[1]);
+      let root = doc.documentElement;
+      const ns = /data-scrml-ns="([^"]+)"/.exec(m[2]);
+      for (let i = 0; ns && i < depthOf[ns[1]]; i++) root = root.firstElementChild;
+      out[m[1]] = rt.shapeHash(root);
+    }
+    return out;
+  }, html);
+  await page.close();
+  return html.replace(/<template id="([^"]+)"([^>]*) data-scrml-shape="\d+"/g, (m, id, rest) => `<template id="${id}"${rest} data-scrml-shape="${shapes[id]}"`);
+}
+
+const unX = (html) => html.replace(/<(\/?)x-/g, "<$1");
+
+suite("r1 in Chromium — the review's F3 repros: refused at compile time; printed anyway, the secret stays hidden", () => {
+  const S = `show=(@pw == "secret")`;
+  // [repro, its code, the clean twin, twin → repro]
+  const F3 = {
+    svgP: [`<svg><p>x</p></svg><div ${S}>SECRET</div>`, "E-HTML-FOREIGN-BREAKOUT", `<svg><x-p>x</x-p></svg><div ${S}>SECRET</div>`, unX],
+    svgFont: [`<svg><font color="red">x</font></svg><span ${S}>SECRET</span>`, "E-HTML-FOREIGN-BREAKOUT", `<svg><x-font color="red">x</x-font></svg><span ${S}>SECRET</span>`, unX],
+    divSvgP: [`<div><svg><p>x</p></svg><span ${S}>SECRET</span></div>`, "E-HTML-FOREIGN-BREAKOUT", `<div><svg><x-p>x</x-p></svg><span ${S}>SECRET</span></div>`, unX],
+    svgTable: [`<svg><table><tbody><tr><td>x</td></tr></tbody></table></svg><span ${S}>SECRET</span>`, "E-HTML-FOREIGN-BREAKOUT",
+      `<svg><x-table><x-tbody><x-tr><x-td>x</x-td></x-tr></x-tbody></x-table></svg><span ${S}>SECRET</span>`, unX],
+    htmlArmSvgP: [`<div if=(@pw != "")><svg><p>x</p></svg><span ${S}>SECRET</span></div>`, "E-HTML-FOREIGN-BREAKOUT",
+      `<div if=(@pw != "")><svg><x-p>x</x-p></svg><span ${S}>SECRET</span></div>`, unX],
+    pDiv: [`<p><div>x</div></p><span ${S}>SECRET</span>`, "E-HTML-PARSER-REPAIR", `<p><x-div>x</x-div></p><span ${S}>SECRET</span>`, unX],
+    tableSpan: [`<table><span>x</span><tbody><tr><td>a</td></tr></tbody></table><span ${S}>SECRET</span>`, "E-HTML-PARSER-REPAIR",
+      `<table><caption>x</caption><tbody><tr><td>a</td></tr></tbody></table><span ${S}>SECRET</span>`,
+      (h) => h.replace("<table><caption>x</caption>", "<table><span>x</span>")],
+    aA: [`<a href="/x"><a href="/y">x</a></a><span ${S}>SECRET</span>`, "E-HTML-PARSER-REPAIR", `<a href="/x"><x-a href="/y">x</x-a></a><span ${S}>SECRET</span>`, unX],
+    mathP: [`<math><p>x</p></math><span ${S}>SECRET</span>`, "E-HTML-FOREIGN-BREAKOUT", `<math><x-p>x</x-p></math><span ${S}>SECRET</span>`, unX],
+  };
+  for (const [name, [markup, code, twin, rename]] of Object.entries(F3)) {
+    test(name, async () => {
+      const r = frontEnd(mods, [{ path: "app.scrml", src: gateProgram(markup) }]);
+      expect(r.diags.filter((d) => d.code.startsWith("E-")).map((d) => d.code)).toEqual([code]);
+      const { page, errors } = await openPrinted(gateProgram(twin), (h) => {
+        const html = rename(h);
+        expect(html).not.toMatch(/<\/?x-/);          // the page holds the repro's own tags
+        return html;
+      }, asWrittenShapes);
+      expect(await secretShown(page)).toEqual([]);                       // first paint
+      await click(page, "#wrong");
+      expect(await secretShown(page)).toEqual([]);                       // the wrong password
+      expect(errors.some((e) => /restructured/.test(e))).toBe(true);     // the shape check refused to mount it
+      await page.close();
+    }, 30000);
+  }
+});
