@@ -239,12 +239,33 @@ describe("r2 R1 — text nodes are part of the shape (hole paths count them)", (
     install(out.html.match(/<template[\s\S]*<\/template>/)[0].replaceAll('id="scrml:', 'id="t474-run-'));
     expect(() => rt.template("t474-run-program")).not.toThrow();
   });
-  test("a `<pre>` / `<listing>` / `<textarea>` body that starts with a line feed is printed with a second one (the parser drops one)", () => {
+  // s474 r3 (re-review of b381f208d, S1 / S2; PA: match HTML and base): the printer STRIPS the one line
+  // ending the parser drops after `<pre>` / `<listing>` / `<textarea>` — LF, CRLF or a lone CR — so the
+  // page holds exactly what the browser builds (r2's doubling kept a blank first line / a "\nq" value).
+  const printedOf = (markup) => {
+    const r = frontEnd(mods, [{ path: "app.scrml", src: gateProgram(markup) }]);
+    expect(r.diags.filter((d) => d.code.startsWith("E-")).map((d) => d.code)).toEqual([]);
+    return mods.print.printProgram(r.core, "app.client.js", "scrml-runtime.js").html;
+  };
+  test("a `<pre>` / `<listing>` / `<textarea>` body's ONE leading line ending (LF, CRLF, lone CR) is stripped, never doubled", () => {
     for (const t of ["pre", "listing", "textarea"]) {
-      const r = frontEnd(mods, [{ path: "app.scrml", src: gateProgram(`<${t}>\nq</${t}>`) }]);
-      expect({ t, e: r.diags.filter((d) => d.code.startsWith("E-")).map((d) => d.code) }).toEqual({ t, e: [] });
-      expect(mods.print.printProgram(r.core, "app.client.js", "scrml-runtime.js").html).toContain(`<${t}>\n\nq</${t}>`);
+      for (const nl of ["\n", "\r\n", "\r"]) {
+        const html = printedOf(`<${t}>${nl}q</${t}>`);
+        expect({ t, nl, ok: html.includes(`<${t}>q</${t}>`) }).toEqual({ t, nl, ok: true });
+      }
+      // two: one is cut (the parser drops it), the second is content — printed with one more for the parser to drop
+      expect(printedOf(`<${t}>\n\nq</${t}>`)).toContain(`<${t}>\n\nq</${t}>`);
     }
+    expect(printedOf(`<pre>\nline1\nline2</pre>`)).toContain(`<pre>line1\nline2</pre>`);
+    // a `<pre>` body is raw content in scrml (§4.17): `${…}` there is display text, so the review's hole cases are literal
+    expect(printedOf(`<pre>\${@pw}\nx</pre>`)).toContain(`<pre>\${@pw}\nx</pre>`);
+    expect(printedOf(`<pre>\n\${@pw}x</pre>`)).toContain(`<pre>\${@pw}x</pre>`);
+    expect(printedOf(`<div>\nq</div>`)).toContain(`<div>\nq</div>`);                 // other elements: untouched
+  });
+  test("the stripped body's shape matches what the runtime hashes (no text node when the body was only a line ending)", () => {
+    const html = printedOf(`<listing>\n<b ${S}>SECRET</b><i>z</i></listing><pre>\r\n</pre>`);
+    install(html.match(/<template[\s\S]*<\/template>/)[0].replaceAll('id="scrml:', 'id="t474-strip-'));
+    expect(() => rt.template("t474-strip-program")).not.toThrow();
   });
   test("a raw NUL in markup text is E-HTML-PARSER-REPAIR", () => {
     expect(codes(`<div>\u0000<b ${S}>SECRET</b><i>z</i></div>`)).toEqual([REP]);

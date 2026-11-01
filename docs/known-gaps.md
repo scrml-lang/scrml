@@ -30760,7 +30760,7 @@ The analyzer models the repairs listed in §24.5. Any other restructuring is cau
   - `<noscript>` content (R2): an element inside an HTML raw-text / RCDATA element (`textarea`, `title`, `xmp`, `iframe`, `noembed`, `noframes`, `noscript`, `plaintext`) is now `E-HTML-PARSER-REPAIR`. Before, it blanked the page at mount with a `TypeError` and no diagnostic.
 - **R1 (MED, fixed):** the shape check's blind spot, which did leak. Hole paths count text nodes, and the shape left them out, so a parser change that only drops a text node shifted paths while the hash still matched. That covered the line feed after `<listing>` / `<pre>` / `<textarea>` and a NUL-only text, and SECRET showed in Chromium (`x_listingNl`, `x_nul`). Fixed:
   - the shape now records one marker per run of adjacent text on both sides;
-  - the printer doubles that leading line feed;
+  - the leading line ending (LF, CRLF or lone CR) after `<pre>` / `<listing>` / `<textarea>` is cut from the body before hole paths and the shape are computed, as the parser drops it. Round 2 doubled it instead, which put a blank first line in `<pre>` and a "\n" in a `<textarea>` value (re-review r2, S1 / S2). Round 3 withdrew that per the PA ruling "match HTML and base";
   - a raw NUL in markup text is refused.
 - **R3:** the `font` breakout attributes are matched ASCII case-insensitively.
 - **R4:** a file that already fails to parse is no longer judged, so no cascade diagnostics.

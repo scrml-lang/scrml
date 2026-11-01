@@ -36,7 +36,7 @@ ${
     import { Node, allNodes, sharedRefs, boundSyms, assignedSyms } from "./walk.scrml"
     import { JsOp, JsUnOp, JsExpr, JsProp, JsStmt, JsLoopHead, JsForInit,
              jid, jstr, jnum, jmember, jcall, jmcall, jthunk, sexpr, printModule } from "./js.scrml"
-    import { HAttr, HNode, Page, printPage, isVoid } from "./html.scrml"
+    import { HAttr, HNode, Page, printPage, isVoid, dropsLeadingLf, cutNewline } from "./html.scrml"
     import { NameKey, NameTable, emptyNames, mint, nameOf } from "./names.scrml"
     import { WireTable, wireBuild, wireTableJs } from "./codec.scrml"
     import { emitCss } from "./css.scrml"
@@ -1311,6 +1311,7 @@ ${
         const own: string = "" + depth + ":" + name + ";"
         if (isVoid(tag)) return own
         if (isHtmlInNs(ns, t) && shapeOpaque(t)) return own
+        // s474 r3: the kids are already the page's (buildEl cut the line ending the parser drops)
         return own + shapeOf(kids, childNs(ns, t, hattrValue(attrs, "encoding")), depth + 1)
     }
 
@@ -1985,10 +1986,47 @@ ${
     }
 
     fn buildEl(ctx: Ctx, v: View, tag: string, attrs: Attr[], ks: View[], path: int[], ns: string) -> Built {
-        const inner: Built = buildNodes(ctx, ks, path, elChildNs(ns, tag, attrs))
+        let kids: View[] = ks
+        if (isHtmlInNs(ns, tag.toLowerCase()) && dropsLeadingLf(tag)) kids = cutLeadingNewline(ks)
+        const inner: Built = buildNodes(ctx, kids, path, elChildNs(ns, tag, attrs))
         const node: HNode = HNode.HElem(tag, staticAttrs(attrs), inner.nodes)
         if (hasWiredAttr(attrs)) return { nodes: [node], holes: [{ path: path, v: v, ns: ns }].concat(inner.holes) }
         return { nodes: [node], holes: inner.holes }
+    }
+
+    // s474 r3 (re-review of #1727, S1 / S2; PA: match HTML and base). The HTML parser drops ONE line ending
+    // (LF, CRLF or a lone CR — normalized to LF first) right after a `<pre>` / `<listing>` / `<textarea>`
+    // start tag (HTML §13.2.6.4.7). So the children the page holds are the written ones with that line
+    // ending cut — and the hole paths and the template's shape are computed over exactly those (a first
+    // text that was only a line ending is no node at all). html.scrml `elemText` then prints them so the
+    // browser builds that same text: when what is left still starts with a line ending, it prints one more
+    // for the parser to drop. Net: `<pre>` + newline + code renders as HTML renders it, a `<textarea>`'s
+    // value is unchanged, and LF / CRLF sources render alike.
+    fn cutLeadingNewline(ks: View[]) -> View[] {
+        if (ks.length == 0) return ks
+        const first: View = ks[0]
+        const rest: View[] = ks.slice(1)
+        return match first {
+            .Text(text: t) :> cutTextView(View.Text(cutNewline(t)), cutNewline(t), rest)
+            .RawText(text: t) :> cutTextView(View.RawText(cutNewline(t)), cutNewline(t), rest)
+            .El :> ks
+            .Dyn :> ks
+            .Cond :> ks
+            .Each :> ks
+            .Instance :> ks
+            .Slot :> ks
+            .Star :> ks
+            .Effect :> ks
+            .ResetOn :> ks
+            .Errors :> ks
+            .Reach :> ks
+            .Gather :> ks
+        }
+    }
+
+    fn cutTextView(cut: View, left: string, rest: View[]) -> View[] {
+        if (left == "") return rest
+        return [cut].concat(rest)
     }
 
     fn staticAttrs(attrs: Attr[]) -> HAttr[] {

@@ -28344,7 +28344,7 @@ So such markup SHALL be a compile error. This is a **PERMANENT** refusal on sema
    - an element (with any hole in it) inside an HTML raw-text or RCDATA element, `textarea` `title` `xmp` `iframe` `noembed` `noframes` `noscript` `plaintext`: the parser reads that content as text (an interpolated value inside one stays legal);
    - a raw U+0000 (NUL) in markup text, which the parser drops or replaces.
 
-   A body of `<pre>` / `<listing>` / `<textarea>` that starts with a line feed is not refused: the parser drops one line feed after the start tag, so a compiler SHALL print a second (S474 r2).
+   A body of `<pre>` / `<listing>` / `<textarea>` that starts with a line ending is not refused, and it renders as HTML renders it: the parser drops ONE line ending (LF, CRLF or a lone CR) right after the start tag (HTML §13.2.6.4.7), so `<pre>` + newline + code shows no blank first line and a `<textarea>`'s value does not begin with it. A compiler SHALL treat the body as the written one without that line ending, both for what it prints and for every position it addresses in the body (S474 r3; PA ruling: match HTML and base — the r2 doubling, which kept the line ending, is withdrawn).
 
    **Remedy:** the message names the change: write the `<tbody>` / `<tr>`, use a `<div>` for the outer element (or a `<span>` for the inner), or nest a list.
 

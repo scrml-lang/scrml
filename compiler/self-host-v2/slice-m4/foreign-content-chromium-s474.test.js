@@ -306,28 +306,33 @@ suite("r1 in Chromium — the review's F3 repros: refused at compile time; print
   }
 });
 
+
 // s474 r2 (re-review of 4a3966ff0, review-r1.md R1): parser changes that only drop a TEXT node shifted the
 // child-index hole paths while the round-1 shape (elements / comments only) still matched — `show=` styled
 // the wrong element and SECRET showed at first paint (Chromium, `x_listingNl`, `x_nul`). Text-node presence
-// is now part of the shape, and the printer doubles the line feed the parser drops.
-suite("r2 in Chromium — a dropped text node never misaddresses a hole (R1)", () => {
+// is now part of the shape. s474 r3 (review-r2.md S1 / S2; PA: match HTML and base): the printer STRIPS
+// the one line ending (LF, CRLF, lone CR) the parser drops after `<pre>` / `<listing>` / `<textarea>`.
+suite("r2/r3 in Chromium — a dropped text node never misaddresses a hole (R1, S1, S2)", () => {
   const S = `show=(@pw == "secret")`;
-  const LISTING = `<listing>\n<b ${S}>SECRET</b><i>z</i></listing>`;
   const steps = async (page) => {
     expect(await secretShown(page)).toEqual([]);                         // first paint
     await click(page, "#wrong");
     expect(await secretShown(page)).toEqual([]);                         // the wrong password
   };
-  test("x_listingNl as written: the leading line feed survives (printed doubled), and the gate is right", async () => {
-    const { page, errors } = await openPrinted(gateProgram(LISTING));
-    await steps(page);
-    await click(page, "#right");
-    expect(await secretShown(page)).toEqual(["b"]);                      // the right password shows it, on <b>
-    expect(errors).toEqual([]);
-    await page.close();
-  }, 30000);
-  test("x_listingNl printed with ONE line feed (the round-1 print): the dropped text node is a shape mismatch — not mounted", async () => {
-    const { page, errors } = await openPrinted(gateProgram(LISTING), (h) => h.replace("<listing>\n\n<b>", "<listing>\n<b>"));
+  for (const [name, nl] of [["x_listingNl (LF)", "\n"], ["w_crlfListing (CRLF)", "\r\n"], ["w_crListing (lone CR)", "\r"]]) {
+    test(`${name}: the leading line ending is stripped as the parser would; the gate is right`, async () => {
+      const { page, errors } = await openPrinted(gateProgram(`<listing>${nl}<b ${S}>SECRET</b><i>z</i></listing>`));
+      await steps(page);
+      await click(page, "#right");
+      expect(await secretShown(page)).toEqual(["b"]);                    // the right password shows it, on <b>
+      expect(errors).toEqual([]);
+      await page.close();
+    }, 30000);
+  }
+  test("backstop: a text node the parser drops is a shape mismatch — not mounted", async () => {
+    // the twin's text "Q" stands for a lone line feed: the printed shape records the text, the page then
+    // holds "\n" right after `<listing>`, which Chromium's parser drops
+    const { page, errors } = await openPrinted(gateProgram(`<listing>Q<b ${S}>SECRET</b><i>z</i></listing>`), (h) => h.replace("<listing>Q<b>", "<listing>\n<b>"));
     await steps(page);
     expect(errors.some((e) => /restructured/.test(e))).toBe(true);
     await page.close();
@@ -338,6 +343,41 @@ suite("r2 in Chromium — a dropped text node never misaddresses a hole (R1)", (
     const { page, errors } = await openPrinted(gateProgram(`<div>Q<b ${S}>SECRET</b><i>z</i></div>`), (h) => h.replace("<div>Q<b>", "<div>\u0000<b>"));
     await steps(page);
     expect(errors.some((e) => /restructured/.test(e))).toBe(true);
+    await page.close();
+  }, 30000);
+});
+
+// s474 r3 (review-r2.md S1): what renders is what HTML (and base) renders — no blank first line in a
+// `<pre>`, no "\n" in a `<textarea>`'s value, whatever the source's line endings.
+suite("r3 in Chromium — the leading line ending renders as HTML renders it (S1, S2)", () => {
+  const textOf = (page, sel) => page.evaluate((s) => { const e = document.querySelector(s); return e.localName === "textarea" ? e.value : e.textContent; }, sel);
+  const CASES = [
+    ["p_preLf", `<pre id="t">\nline1\nline2</pre>`, "line1\nline2"],
+    ["p_preCrlf", `<pre id="t">\r\nline1\r\nline2</pre>`, "line1\nline2"],
+    ["p_preCr", `<pre id="t">\rline1</pre>`, "line1"],
+    ["p_preLfLf", `<pre id="t">\n\nline1</pre>`, "\nline1"],
+    ["p_listingLf", `<listing id="t">\nq</listing>`, "q"],
+    ["p_textareaLf", `<textarea id="t">\nq</textarea>`, "q"],
+    ["p_textareaCrlf", `<textarea id="t">\r\nq</textarea>`, "q"],
+    ["p_textareaCr", `<textarea id="t">\rq</textarea>`, "q"],
+    // `<pre>` is raw content in scrml (§4.17): the review's hole cases are display text there
+    ["p_preHole", `<pre id="t">\${@pw}\nx</pre>`, "${@pw}\nx"],
+    ["p_preLfHole", `<pre id="t">\n\${@pw}x</pre>`, "${@pw}x"],
+  ];
+  for (const [name, markup, want] of CASES) {
+    test(`${name}: ${JSON.stringify(want)}`, async () => {
+      const { page, errors } = await openPrinted(gateProgram(markup));
+      expect(await textOf(page, "#t")).toBe(want);
+      expect(errors).toEqual([]);
+      await page.close();
+    }, 30000);
+  }
+  test("p_textareaHole: a `${}` value in a `<textarea>` still binds its value", async () => {
+    const { page, errors } = await openPrinted(gateProgram(`<textarea id="t">\${@pw}</textarea>`));
+    expect(await textOf(page, "#t")).toBe("");
+    await click(page, "#right");
+    expect(await textOf(page, "#t")).toBe("secret");
+    expect(errors).toEqual([]);
     await page.close();
   }, 30000);
 });
