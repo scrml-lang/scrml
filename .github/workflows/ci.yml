@@ -306,12 +306,17 @@ jobs:
       # bot/generated-regen is not), and even then it is checked, not waved through: `--bot` passes only if
       # every changed file is in generated-regen.yml's FILES. Not on merge_group: the PR run already judged
       # it, and a queue group may legitimately include the bot's PR.
+      # BASE is the merge ref's FIRST PARENT (the main this checkout was merged onto), not
+      # pull_request.base.sha: base.sha is fixed at the push event, but the checked-out merge ref can be
+      # built on a NEWER main. When the bot's regen lands in between, base.sha...HEAD carries main's newer
+      # docs/generated/ and a PR that never touched it is refused (S474: #1711 @cb04c75d1, base.sha
+      # 62214cc1f, regen 82f6c7741). HEAD^1...HEAD is exactly what the PR adds onto that main.
       - name: Bot-owned generated files untouched (docs/generated/)
         if: ${{ !cancelled() && github.event_name == 'pull_request' }}
         env:
-          BASE: ${{ github.event.pull_request.base.sha }}
           IS_BOT: ${{ github.head_ref == 'bot/generated-regen' && github.event.pull_request.head.repo.full_name == github.repository }}
         run: |
+          BASE=$(git rev-parse HEAD^1) || { echo "bot-owned-untouched: HEAD is not a merge ref (no HEAD^1) — refusing (fail closed)" >&2; exit 1; }
           if [ "$IS_BOT" = "true" ]; then scripts/bot-owned-untouched.sh --bot "$BASE"; else scripts/bot-owned-untouched.sh "$BASE"; fi
       # S474 — compiler/self-host-v2/severity.scrml (generated from SPEC §34). Moved here from `tracking`:
       # byte staleness WARNS (4) — answer-changing drift fails slice-m4/severity.test.js on the PR, so only

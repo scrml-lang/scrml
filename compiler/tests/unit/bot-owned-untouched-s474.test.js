@@ -71,6 +71,21 @@ describe("scripts/bot-owned-untouched.sh", () => {
     expect(r.out).toContain("docs/generated/gap-counts.md");
   });
 
+  test("a merge ref built on a NEWER main: base.sha charges the bot's regen to the PR; HEAD^1 does not (#1711)", () => {
+    const s = sandbox();
+    const baseSha = s.g("rev-parse", "main").trim();      // pull_request.base.sha at the push event
+    writeFileSync(join(s.root, "docs/known-gaps.md"), "ledger\nnew gap\n");
+    s.commit("pr work");                                  // the PR never touches docs/generated/
+    s.g("checkout", "-q", "main");
+    writeFileSync(join(s.root, "docs/generated/gap-counts.md"), "| HIGH | 2 | 0 |\n");
+    s.commit("bot regen");                                // lands on main after base.sha
+    s.g("checkout", "-q", "--detach", "main");
+    s.g("merge", "-q", "--no-edit", "pr");                // what actions/checkout gives a pull_request run
+    const run = (base) => spawnSync("bash", [SCRIPT, base], { cwd: s.root, env: ENV, encoding: "utf8" }).status;
+    expect(run(baseSha)).toBe(1);                         // the old wiring: a false refusal
+    expect(run(s.g("rev-parse", "HEAD^1").trim())).toBe(0);
+  });
+
   test("BITE: deleting or renaming one away → 1", () => {
     const s = sandbox();
     renameSync(join(s.root, "docs/generated/gap-counts.md"), join(s.root, "docs/gap-counts.md"));
@@ -175,7 +190,11 @@ describe("ci.yml wiring", () => {
   test("the `checks` job runs it against the PR base, blocking (no continue-on-error)", () => {
     expect(step).toBeDefined();
     expect(String(step.run)).toContain("scripts/bot-owned-untouched.sh");
-    expect(String(step.env.BASE)).toContain("github.event.pull_request.base.sha");
+    // BASE is the merge ref's first parent, not pull_request.base.sha (base.sha can be older than the
+    // main the merge ref was built on: a bot regen in between was charged to the PR — #1711).
+    expect(step.env.BASE).toBeUndefined();
+    expect(String(step.run)).toContain("BASE=$(git rev-parse HEAD^1)");
+    expect(String(step.run)).not.toContain("base.sha");
     expect(step["continue-on-error"]).toBeUndefined();
   });
   test("on every pull_request; the bot is recognised by branch AND same-repo head, then checked with --bot", () => {
