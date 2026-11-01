@@ -98,7 +98,7 @@ describe("A5 / A3b — marker kinds and pins", () => {
     const d = parseDocMarkers(["<!-- dialect: ruled -->", "<!-- gate: spec-ahead [E-SCOPE-001×3, E-PARSE-ARM, E-PARSE-ARM] — why -->", ...fence("x")].join("\n"));
     expect(d.errors).toEqual([]);
     expect(d.blocks[0].gate.codes).toEqual(["E-SCOPE-001", "E-SCOPE-001", "E-SCOPE-001", "E-PARSE-ARM", "E-PARSE-ARM"]);
-    for (const bad of ["E-A×0", "E-A×", "E-A×x", "E-A×2×2", "×2", "E-A()", "E-A(x y)", "E-A(1x)", "E-A(x)×2", "E-A(x"]) {
+    for (const bad of ["E-A×0", "E-A×", "E-A×x", "E-A×2×2", "×2", "E-A(x y)", "E-A(1x)", "E-A(x)×2", "E-A(x"]) {
       const e = parseDocMarkers(["<!-- dialect: ruled -->", `<!-- gate: spec-ahead [${bad}] — why -->`, ...fence("x")].join("\n")).errors;
       expect({ bad, msg: e[0]?.message.includes("bad pinned code list") }).toEqual({ bad, msg: true });
     }
@@ -124,8 +124,40 @@ describe("A5 / A3b — marker kinds and pins", () => {
     expect(pinMismatch(pin, got(["E-SCOPE-001(replaceRow)", "E-SCOPE-001(addRow)", "E-STATE-UNDECLARED(@tasks)"]))).toBeNull();
     // the same code, the same count, ANOTHER name: a typo that swaps one undeclared name for another
     expect(pinMismatch(pin, got(["E-SCOPE-001(adRow)", "E-SCOPE-001(replaceRow)", "E-STATE-UNDECLARED(@tasks)"]))).toContain("reported [E-BOOTSTRAP-UNSUPPORTED×2, E-SCOPE-001(adRow, replaceRow), E-STATE-UNDECLARED(@tasks)]");
+    // 1489-A: an EMPTY name is a name (the bootstrap's `` unknown type `` ``), written `CODE()`
+    const e = parseDocMarkers(["<!-- dialect: ruled -->", "<!-- gate: spec-ahead [E-TYPE-UNKNOWN(), E-TYPE-UNKNOWN(Foo, )] — why -->", ...fence("x")].join("\n"));
+    expect(e.errors).toEqual([]);
+    expect(e.blocks[0].gate.codes).toEqual(["E-TYPE-UNKNOWN()", "E-TYPE-UNKNOWN(Foo)", "E-TYPE-UNKNOWN()"]);
+    expect(pinText(e.blocks[0].gate.codes)).toBe("E-TYPE-UNKNOWN(Foo), E-TYPE-UNKNOWN(), E-TYPE-UNKNOWN()");
+    expect(pinKey({ code: "E-TYPE-UNKNOWN", message: "unknown type ``" })).toBe("E-TYPE-UNKNOWN()");
+    expect(pinKey({ code: "E-TYPE-UNKNOWN", message: "unknown type `Request`" })).toBe("E-TYPE-UNKNOWN(Request)");
+    expect(pinKey({ code: "E-VALUE-WRITES-STATE", message: "the interpolation writes `@contacts`. A value position …" })).toBe("E-VALUE-WRITES-STATE(@contacts)");
     // a pin that names no names for a name-resolution code does not match one that has them
     expect(pinMismatch(["E-SCOPE-001"], ["E-SCOPE-001(x)"])).toContain("pinned codes [E-SCOPE-001] but the bootstrap reported [E-SCOPE-001(x)]");
+  });
+});
+
+describe("1489-B — every key pinKey makes is one the pin grammar accepts (the printed pin is pasteable)", () => {
+  test("`flush()` keys as E-SCOPE-001(flush); odd backticked text keys by its leading identifier or as empty", () => {
+    const msgs = [
+      ["E-SCOPE-001", "`flush()` is retired — write …", "E-SCOPE-001(flush)"],
+      ["E-SCOPE-001", "`a.b.c` is not declared", "E-SCOPE-001(a.b.c)"],
+      ["E-STATE-UNDECLARED", "`@x[0]` is read here", "E-STATE-UNDECLARED(@x)"],
+      ["E-TYPE-UNKNOWN", "unknown type `(string)`", "E-TYPE-UNKNOWN()"],
+      ["E-TYPE-UNKNOWN", "unknown type `Map<K, V>`", "E-TYPE-UNKNOWN(Map)"],
+      ["E-VALUE-WRITES-STATE", "writes `<x>, (y)`", "E-VALUE-WRITES-STATE()"],
+      ["E-SCOPE-001", "no backticks at all", "E-SCOPE-001"],
+    ];
+    const keys = msgs.map(([code, message, want]) => {
+      const k = pinKey({ code, message });
+      expect({ message, k }).toEqual({ message, k: want });
+      return k;
+    });
+    // the round trip: the gate's printed pin, pasted into a marker, parses back to the same multiset
+    const pasted = `<!-- gate: spec-ahead [${pinText(keys)}] — why -->`;
+    const d = parseDocMarkers(["<!-- dialect: ruled -->", pasted, ...fence("x")].join("\n"));
+    expect(d.errors).toEqual([]);
+    expect(pinMismatch(d.blocks[0].gate.codes, keys)).toBeNull();
   });
 });
 
@@ -310,6 +342,46 @@ describe("#1489-1 — a typo in a spec-ahead block whose pin already holds E-SCO
     const r = claim(md);
     expect(r.stderr).toContain("spec-ahead pin-mismatch");
     expect(r.stderr).toContain("E-SCOPE-001(postMesage)");
+    expect(r.status).toBe(1);
+  }, 120_000);
+});
+
+describe("1489-A — a swapped name under E-TYPE-UNKNOWN / E-VALUE-WRITES-STATE now fails claim-gate", () => {
+  // the kickstarter's own blocks and pins, verbatim
+  const KS = "docs/articles/llm-kickstarter-v2-2026-05-04.md";
+  const block = (pinPart) => {
+    const t = readFileSync(join(ROOT, KS), "utf8").split(/\r?\n/);
+    const at = t.findIndex((l) => l.startsWith("<!-- gate: spec-ahead [") && l.includes(pinPart));
+    expect(at).toBeGreaterThan(0);
+    expect(t[at + 1]).toBe("```scrml");
+    const end = t.indexOf("```", at + 2);
+    return { marker: t[at], body: t.slice(at + 2, end) };
+  };
+  const run = (name, b, from, to) => {
+    const body = b.body.join("\n");
+    expect(body).toContain(from);
+    const md = write(name, ["<!-- dialect: ruled -->", b.marker, ...fence(...body.split(from).join(to).split("\n"))]);
+    return claim(md);
+  };
+
+  test("`Request` → `Requst` (kickstarter middleware block, pinned E-TYPE-UNKNOWN(Request…))", () => {
+    const b = block("E-TYPE-UNKNOWN(Request");
+    const ok = run("ks-req-ok.md", b, "Request", "Request");
+    expect(ok.stdout).toContain("1 spec-ahead");
+    expect(ok.status).toBe(0);
+    const r = run("ks-req-typo.md", b, "(req: Request)", "(req: Requst)");
+    expect(r.stderr).toContain("spec-ahead pin-mismatch");
+    expect(r.stderr).toContain("E-TYPE-UNKNOWN(Request, Requst)");
+    expect(r.status).toBe(1);
+  }, 120_000);
+
+  test("`@contacts` → `@contcts` (kickstarter block pinned E-VALUE-WRITES-STATE(@contacts))", () => {
+    const b = block("E-VALUE-WRITES-STATE(@contacts)");
+    const ok = run("ks-contacts-ok.md", b, "@contacts", "@contacts");
+    expect(ok.status).toBe(0);
+    const r = run("ks-contacts-typo.md", b, "@contacts", "@contcts");
+    expect(r.stderr).toContain("spec-ahead pin-mismatch");
+    expect(r.stderr).toContain("E-VALUE-WRITES-STATE(@contcts)");
     expect(r.status).toBe(1);
   }, 120_000);
 });

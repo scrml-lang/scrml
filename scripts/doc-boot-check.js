@@ -54,13 +54,22 @@ export function codeSummary(codes, max = 4) {
  * an unsupported `<channel>`), so the block already expects an E-SCOPE-001, and a misspelled call
  * swaps one undeclared name for another — the same code, the same count.
  */
-export const NAMED_CODES = new Set(["E-SCOPE-001", "E-STATE-UNDECLARED"]);
+// #1723 review 1489-A: E-TYPE-UNKNOWN (`Request` → `Requst`) and E-VALUE-WRITES-STATE (`@contacts` →
+// `@contcts`) name what they are about too, and a swapped name kept their count.
+export const NAMED_CODES = new Set(["E-SCOPE-001", "E-STATE-UNDECLARED", "E-TYPE-UNKNOWN", "E-VALUE-WRITES-STATE"]);
 
-/** A diagnostic's pin key: its code, with the name it is about for a NAMED_CODES code (`E-SCOPE-001(addRow)`). */
+/**
+ * A diagnostic's pin key: its code, with the name it is about for a NAMED_CODES code
+ * (`E-SCOPE-001(addRow)`). The name is the first backticked text of the message, cut to its leading
+ * identifier (#1723 review 1489-B: `` `flush()` is retired `` keys as `flush`, so the key is one the
+ * pin grammar accepts), and may be empty (`` unknown type `` `` keys as `E-TYPE-UNKNOWN()`).
+ */
 export function pinKey(d) {
   if (!NAMED_CODES.has(d.code)) return d.code;
-  const m = /`([^`]+)`/.exec(String(d.message ?? ""));
-  return m ? `${d.code}(${m[1]})` : d.code;
+  const m = /`([^`]*)`/.exec(String(d.message ?? ""));
+  if (!m) return d.code;
+  const id = /^@?[A-Za-z_$][\w$.]*/.exec(m[1]);
+  return `${d.code}(${id ? id[0] : ""})`;
 }
 
 /** A multiset of pin keys in pin syntax, sorted by code: `E-A×2, E-B, E-SCOPE-001(x, y)`. */
@@ -78,7 +87,12 @@ export function pinText(keys) {
   for (const c of [...new Set([...counts.keys(), ...names.keys()])].sort()) {
     const k = counts.get(c);
     if (k !== undefined) parts.push(k > 1 ? `${c}×${k}` : c);
-    if (names.has(c)) parts.push(`${c}(${names.get(c).sort().join(", ")})`);
+    if (names.has(c)) {
+      // an empty name reads better as its own `CODE()` entry than as a blank in a list (`CODE(, x)`)
+      const named = names.get(c).filter((n) => n !== "").sort();
+      if (named.length > 0) parts.push(`${c}(${named.join(", ")})`);
+      for (const n of names.get(c)) if (n === "") parts.push(`${c}()`);
+    }
   }
   return parts.join(", ");
 }

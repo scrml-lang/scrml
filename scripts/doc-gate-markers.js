@@ -49,7 +49,8 @@
  *   PINNED CODES (round 2): `<!-- gate: spec-ahead [E-PARSE-ARM×2, E-SCOPE-001(addRow)] — <reason> -->`
  *   pins the bootstrap's expected Error diagnostics as a MULTISET: `E-CODE×N` is N of that
  *   code, a bare `E-CODE` is one, and a code listed twice counts twice. A NAME-RESOLUTION code
- *   (doc-boot-check.js NAMED_CODES: E-SCOPE-001, E-STATE-UNDECLARED) is pinned with the names
+ *   (doc-boot-check.js NAMED_CODES: E-SCOPE-001, E-STATE-UNDECLARED, E-TYPE-UNKNOWN,
+ *   E-VALUE-WRITES-STATE) is pinned with the names
  *   it is reported for, `E-SCOPE-001(addRow, replaceRow)`, one per diagnostic. A pinned
  *   spec-ahead block whose Error diagnostics are not exactly the pin FAILS, so a typo or a new
  *   kind of error is not hidden behind "expected to fail". Pins are only allowed on spec-ahead.
@@ -83,7 +84,8 @@ const SEPARATOR_RE = /^(?:—|–|--|-|:)/;
 // name-resolution code with the names it is reported for, `E-SCOPE-001(addRow, @tasks)`.
 const PIN_RE = /^([EWI]-[A-Z0-9]+(?:-[A-Z0-9]+)*)(?:\s*×\s*([1-9][0-9]{0,3}))?$/;
 const PIN_NAMED_RE = /^([EWI]-[A-Z0-9]+(?:-[A-Z0-9]+)*)\s*\(([^()]*)\)$/;
-const PIN_NAME_RE = /^@?[A-Za-z_$][\w$.]*$/;
+// a name may be empty: `E-TYPE-UNKNOWN()` (the bootstrap's `` unknown type `` `` names nothing)
+const PIN_NAME_RE = /^(?:@?[A-Za-z_$][\w$.]*)?$/;
 
 /** Split a pin list on the commas that are not inside a `( … )` name list. */
 function splitPinList(list) {

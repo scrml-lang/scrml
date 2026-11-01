@@ -157,7 +157,7 @@ The bootstrap compiles this program today.
 
 A counter in memory is gone the moment you refresh the page. Let's persist it. scrml has a built-in database layer — no `npm install better-sqlite3`, no Prisma, no schema files in a separate directory. You name the database file with `db=` on `<program>`, declare its shape in a `<schema>` block (a direct child of `<program>`), and write parameterized SQL with `?{}`:
 
-<!-- gate: spec-ahead [E-BOOTSTRAP-UNSUPPORTED×2, E-PARSE-ATTR, E-PARSE-ITEM, E-PARSE-SHORTHAND×2, E-PARSE-TAG×6, E-PARSE-TYPE, E-TYPE-UNKNOWN] — the bootstrap has no <schema>, no pending cells ((not to T) in an opener, §13.9) and no typed ?{} rows yet -->
+<!-- gate: spec-ahead [E-BOOTSTRAP-UNSUPPORTED×2, E-PARSE-ATTR, E-PARSE-ITEM, E-PARSE-SHORTHAND×2, E-PARSE-TAG×6, E-PARSE-TYPE, E-TYPE-UNKNOWN()] — the bootstrap has no <schema>, no pending cells ((not to T) in an opener, §13.9) and no typed ?{} rows yet -->
 <!-- snippet: docs/tutorial-snippets/02b-counter-persisted.scrml -->
 ```scrml
 // 02b-counter-persisted.scrml — counter that survives a refresh.

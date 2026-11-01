@@ -95,7 +95,7 @@ When you are stuck on a design call ("should this engine attribute behave X way 
 
 Start from the canonical shape below and modify what you need. Don't write from scratch — every scrml app is a variation of this skeleton.
 
-<!-- gate: spec-ahead [E-BOOTSTRAP-UNSUPPORTED×5, E-VALUE-WRITES-STATE] — the bootstrap has no <schema>, <db tables=>, <request> or <empty>, and cannot type the rows a client call of a ?{} function returns (⚑ OPEN) -->
+<!-- gate: spec-ahead [E-BOOTSTRAP-UNSUPPORTED×5, E-VALUE-WRITES-STATE(@contacts)] — the bootstrap has no <schema>, <db tables=>, <request> or <empty>, and cannot type the rows a client call of a ?{} function returns (⚑ OPEN) -->
 ```scrml
 <program db="contacts.db">
 
@@ -1783,7 +1783,7 @@ Most apps need ZERO middleware code. The common 80% is single attributes on `<pr
 
 For the remaining 20%, a `function handle(request, resolve)` is the onion-model escape hatch. Code before `resolve()` is pre-middleware; code after is post. `resolve()` MUST be called exactly once per execution path that runs the route.
 
-<!-- gate: spec-ahead [E-ASSIGN-POSITION, E-BOOTSTRAP-UNSUPPORTED×6, E-PARSE-EXPECTED×3, E-PARSE-EXPR×3, E-PARSE-TYPE, E-SCOPE-001(Response, Response), E-TYPE-STRUCT-CONTEXT, E-TYPE-UNKNOWN×2] — the bootstrap has no middleware handle(), function-typed parameters or host Request / Response types yet -->
+<!-- gate: spec-ahead [E-ASSIGN-POSITION, E-BOOTSTRAP-UNSUPPORTED×6, E-PARSE-EXPECTED×3, E-PARSE-EXPR×3, E-PARSE-TYPE, E-SCOPE-001(Response, Response), E-TYPE-STRUCT-CONTEXT, E-TYPE-UNKNOWN(Request, Request)] — the bootstrap has no middleware handle(), function-typed parameters or host Request / Response types yet -->
 ```scrml
 <program log="structured" headers="strict">
 
@@ -1832,7 +1832,7 @@ A `lin` declared outside a loop may not be consumed inside the loop body (E-LIN-
 
 When you need to render a list, reach for the **Tier-1 `<each>` structural element** — NOT `.map()`, NOT `${ for (...) { lift ... } }`. `<each>` reads as a markup tree, composes with `<empty>` for the zero-items case, and gets keyed DOM reconciliation for free. (The `${for/lift}` form is the valid Tier-0 fallback — see the anti-pattern table and the promotion note below.)
 
-<!-- gate: spec-ahead [E-BOOTSTRAP-UNSUPPORTED×4, E-VALUE-WRITES-STATE] — the bootstrap has no <schema>, <db tables=>, <request> or <empty> yet -->
+<!-- gate: spec-ahead [E-BOOTSTRAP-UNSUPPORTED×4, E-VALUE-WRITES-STATE(@contacts)] — the bootstrap has no <schema>, <db tables=>, <request> or <empty> yet -->
 ```scrml
 <program db="contacts.db">
 
