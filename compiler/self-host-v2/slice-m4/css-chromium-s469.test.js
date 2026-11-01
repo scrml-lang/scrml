@@ -176,3 +176,32 @@ renders <section><card t=t/></section>
     await page.close();
   });
 });
+
+// s474 (import alias, g-boot-import-codes-and-alias-s471): two files each EXPORT a `<card>`; one file
+// imports both, one under an alias (`import { card as card2 }`). The alias renders the ORIGINAL
+// declaration, so each instance carries its declaring file's key and gets only its own CSS.
+suite("Chromium — two exported `<card>`s, one aliased, in one file (s474)", () => {
+  test("each card's scoped rule reaches only its own instance; the alias keys by the declaring file", async () => {
+    const page = await open([
+      { path: "ui/a.scrml", src: `export <card t:string/>
+renders <div class="c" id="ca">#{ .c { color: rgb(255, 0, 0); } }<span class="c" id="ca-t">\${t}</span></div>
+` },
+      { path: "ui/b.scrml", src: `export <card t:string/>
+renders <div class="c" id="cb">#{ .c { color: rgb(0, 128, 0); } }<span class="c" id="cb-t">\${t}</span></div>
+` },
+      { path: "app.scrml", src: `import { card } from "./ui/a.scrml";
+import { card as card2 } from "./ui/b.scrml";
+<program>
+    <main><card t="1"/><card2 t="2"/></main>
+</program>
+` },
+    ]);
+    expect(await style(page, "#ca-t", "color")).toBe("rgb(255, 0, 0)");
+    expect(await style(page, "#cb-t", "color")).toBe("rgb(0, 128, 0)");
+    expect(await style(page, "#ca", "color")).toBe("rgb(255, 0, 0)");
+    expect(await style(page, "#cb", "color")).toBe("rgb(0, 128, 0)");
+    const got = await page.evaluate(() => [document.querySelector("#ca").getAttribute("data-scrml"), document.querySelector("#cb").getAttribute("data-scrml"), document.querySelector("#ca-t").textContent, document.querySelector("#cb-t").textContent]);
+    expect(got).toEqual([mods.core.scopeKey("ui/a.scrml", "card"), mods.core.scopeKey("ui/b.scrml", "card"), "1", "2"]);
+    await page.close();
+  });
+});

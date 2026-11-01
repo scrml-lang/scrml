@@ -4125,30 +4125,108 @@ ${
             host = tag.v
             t = adv(t)
         }
-        t = expectP(t, "{")
-        let names: AImportName[] = []
-        while (!isP(t, "}") && !atEnd(t)) {
-            const n: PTok = cur(t)
-            if (n.cls == TC.Ident || n.cls == TC.Keyword) {
-                let bound: PTok = n
-                const ta: TP = adv(t)
-                // a host import's `name as local` binds `local` (§21.3.1); a plain
-                // import has no `as` form in the bootstrap (g-boot-import-codes-and-alias-s471)
-                if (host is given && isWord(ta, "as")) {
-                    const loc: PTok = cur(adv(ta))
-                    if (loc.cls == TC.Ident || loc.cls == TC.Keyword) {
-                        bound = loc
-                        t = adv(ta)
+        // s474 — a namespace import (`import * as m from "…"`) or a default import
+        // (`import X from "…"`) is reported BY NAME, its statement read whole (was a
+        // wall of E-PARSE-IMPORT / E-PARSE-EXPECTED and a spurious E-IMPORT-005).
+        // s474 r1 (#1715 review F3/F4, PA ruling):
+        //   - a namespace import is INTERIM — not in the bootstrap YET (the capable
+        //     form, and how `m.card` is spelled in markup, is owed:
+        //     g-boot-namespace-import-unbuilt-s474);
+        //   - a default import of a scrml module is E-IMPORT-004 — §21.3 resolves a
+        //     default import "against the exporting file's export list", and no scrml
+        //     form exports a default (§21.2). A default import of a JavaScript module
+        //     (ES semantics, §21.3) is not in the bootstrap (E-BOOTSTRAP-UNSUPPORTED).
+        // s474 r1 (F8): the statement is skipped to its `from "…"` across lines, or to
+        // a `;` / the closing `}` of the enclosing block / the end — never past them.
+        if (host is not && !isP(t, "{")) {
+            const h: PTok = cur(t)
+            const isNs: boolean = tk(h, "*")
+            // a default import is a name followed by `from` or `,` — `import stuff` alone is no
+            // import form at all, and keeps the ordinary parse errors
+            const nx: TP = adv(t)
+            const isDef: boolean = (h.cls == TC.Ident || h.cls == TC.Keyword) && (isWord(nx, "from") || isP(nx, ","))
+            if (isNs || isDef) {
+                let rt: TP = t
+                let depth = 0
+                let from0: string = ""
+                let done = false
+                while (!done && !atEnd(rt)) {
+                    if (depth == 0 && isWord(rt, "from") && cur(adv(rt)).cls == TC.Str) {
+                        from0 = cur(adv(rt)).v
+                        rt = adv(adv(rt))
+                        if (isP(rt, ";")) rt = adv(rt)
+                        done = true
+                    } else if (depth == 0 && isP(rt, ";")) {
+                        rt = adv(rt)
+                        done = true
+                    } else if (depth == 0 && isP(rt, "}")) {
+                        done = true
                     } else {
-                        t = diagAt(adv(ta), "E-PARSE-IMPORT", "expected the local name after `as`, found `" + loc.text + "`", loc)
+                        if (isP(rt, "{")) depth = depth + 1
+                        if (isP(rt, "}")) depth = depth - 1
+                        rt = adv(rt)
                     }
                 }
-                names = names.concat([{ nid: t.nid, span: mkSpan(n.start, bound.end), name: bound.v, orig: n.v }])
-                t = bumpId(t)
-            } else if (!tk(n, ",")) {
-                t = diagAt(t, "E-PARSE-IMPORT", "expected an imported name, found `" + n.text + "`", n)
+                const scrmlSrc: boolean = from0.endsWith(".scrml") || from0.indexOf("scrml:") == 0
+                if (isNs) {
+                    rt = diagAt(rt, "E-BOOTSTRAP-UNSUPPORTED", "a namespace import (`import * as …`) is not in the bootstrap yet (g-boot-namespace-import-unbuilt-s474) — import the names it uses: `import { a, b } from \"…\"` (rename one with `as`)", h)
+                } else if (scrmlSrc || from0 == "") {
+                    rt = diagAt(rt, "E-IMPORT-004", "`" + h.text + "`: a .scrml file has no default export — scrml files export names only (§21.2, §21.3); use `import { " + h.text + " } from \"…\"`", h)
+                } else {
+                    rt = diagAt(rt, "E-BOOTSTRAP-UNSUPPORTED", "a default import of a JavaScript module (`import " + h.text + " from \"" + from0 + "\"`) is not in the bootstrap yet — import a named export: `import { name } from \"" + from0 + "\"`", h)
+                }
+                if (from0 == "") return { items: [], tp: rt }
+                const imp0: AImport = { nid: rt.nid, span: spanFrom(rt, start), names: [], from: from0, host: host, top: top }
+                return mkItem(bumpId(rt), start, AItemK.ImportItem(imp0))
             }
-            t = adv(t)
+        }
+        t = expectP(t, "{")
+        // s474 r1 (F9): §21.3 "ES module `import` syntax" — specifiers are separated by
+        // commas (`{ a, b as c, }`; a trailing comma is allowed). `{ a b }` / `{ a as b c }`
+        // is E-PARSE-IMPORT (was: read as separate names).
+        let names: AImportName[] = []
+        let needComma = false
+        while (!isP(t, "}") && !atEnd(t)) {
+            const n: PTok = cur(t)
+            if (tk(n, ",")) {
+                if (!needComma) t = diagAt(t, "E-PARSE-IMPORT", "expected an imported name before `,`", n)
+                needComma = false
+                t = adv(t)
+            } else if (needComma) {
+                t = diagAt(t, "E-PARSE-IMPORT", "expected `,` or `}` after an import specifier, found `" + n.text + "` — specifiers are separated by commas (`import { a, b as c } from \"…\"`, §21.3)", n)
+                while (!atEnd(t) && !isP(t, ",") && !isP(t, "}")) { t = adv(t) }
+            } else if (n.cls == TC.Ident || n.cls == TC.Keyword) {
+                let bound: PTok = n
+                let bind = true
+                t = adv(t)
+                // `name as local` binds `local` to the exported `name` — a host import's
+                // (§21.3.1 `named-binding ::= identifier ('as' identifier)?`) and, s474, a
+                // plain import's (§21.3 "ES module `import` syntax"; §21.4 names the renamed
+                // re-export `export { a as b } from`) (g-boot-import-codes-and-alias-s471)
+                if (isWord(t, "as")) {
+                    const loc: PTok = cur(adv(t))
+                    if (loc.cls == TC.Keyword) {
+                        // s474 r1 (F5): a local name is a binding — a keyword is no binding name
+                        // (as `fn if` is E-PARSE-FN); the exported name may be one (a host export)
+                        t = adv(adv(diagAt(t, "E-PARSE-IMPORT", "`" + loc.text + "` is a keyword and cannot be a local name — write another name after `as` (`import { " + n.text + " as other } from \"…\"`)", loc)))
+                        bind = false
+                    } else if (loc.cls == TC.Ident) {
+                        bound = loc
+                        t = adv(adv(t))
+                    } else {
+                        t = adv(diagAt(t, "E-PARSE-IMPORT", "expected the local name after `as`, found `" + loc.text + "` (`import { " + n.text + " as localName } from \"…\"`)", loc))
+                    }
+                }
+                // §21.8.1 `import { name pinned }` — not in the bootstrap (named, not read as a name)
+                if (isWord(t, "pinned")) {
+                    t = adv(diagAt(t, "E-BOOTSTRAP-UNSUPPORTED", "`pinned` on an import (§21.8.1) is not in the bootstrap yet — drop it, or declare the cell in this file", cur(t)))
+                }
+                if (bind) names = names.concat([{ nid: t.nid, span: mkSpan(n.start, bound.end), name: bound.v, orig: n.v }])
+                t = bumpId(t)
+                needComma = true
+            } else {
+                t = adv(diagAt(t, "E-PARSE-IMPORT", "expected an imported name, found `" + n.text + "`", n))
+            }
         }
         t = expectP(t, "}")
         if (!isWord(t, "from")) t = diagAt(t, "E-PARSE-IMPORT", "expected `from` after the import list", cur(t))

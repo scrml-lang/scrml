@@ -1253,6 +1253,14 @@ function _compileScrmlImpl(options = {}) {
      */
     production = false,
     /**
+     * S474 (ruling 2 as amended, "capability over limitation" item 3) — a DEV build. When
+     * true, a failed query's driver text stays in the SqlError / CpsError value a server
+     * route sends the client (`scrml dev` sets it); otherwise (`scrml build`, `scrml compile`,
+     * every other caller) the message is blanked on the wire. The server logs the full text
+     * either way. Default false: fail closed — only the dev server opts in.
+     */
+    devBuild = false,
+    /**
      * S91 A-4.1 — Opt-in flag for the per-route artifact splitter
      * (SPEC §40.9.7). When TRUE, runCG produces per-(EP, role, tier)
      * chunk descriptors AND a chunks.json manifest; the api.js write
@@ -3522,6 +3530,8 @@ function _compileScrmlImpl(options = {}) {
     testMode,
     // §20.6 (F4=A) — production strip flag for the log() builtin.
     production,
+    // S474 — a dev build keeps a failed query's driver text on the wire (sql-attempt.ts).
+    devBuild,
     // ESM chunks arc (Unit 1) — client runtime module format. `"classic"`
     // (default) keeps the shared runtime byte-identical to pre-arc output;
     // `"esm"` emits it as an ES module. Surfaced via `--module-format`.
