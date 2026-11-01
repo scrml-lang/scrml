@@ -898,7 +898,17 @@ describe("S474 N1 — the SqlError classifier reads Postgres / MySQL codes where
     ["PG 23503 foreign key", () => pg('insert or update on table "posts" violates foreign key constraint "posts_user_fk"', { errno: "23503", constraint: "posts_user_fk" }), "ConstraintViolation", { field: "" }],
     ["PG 23P01 exclusion (class 23, letter code)", () => pg('conflicting key value violates exclusion constraint "no_overlap"', { errno: "23P01", constraint: "no_overlap" }), "ConstraintViolation", { field: "" }],
     ["PG 42P01 undefined table", () => pg('relation "gone" does not exist', { errno: "42P01" }), "QueryFailed", { message: "" }],
-    ["PG 08006 connection failure (server SQLSTATE)", () => pg("terminating connection due to administrator command", { errno: "08006" }), "ConnectionLost", null],
+    // #1718 r1 F5: the message now matches its SQLSTATE (08006 connection_failure); the
+    // "terminating connection …" text is 57P01's, tested on its own below.
+    ["PG 08006 connection failure (server SQLSTATE)", () => pg("connection failure", { errno: "08006" }), "ConnectionLost", null],
+    ["PG 57P01 admin_shutdown", () => pg("terminating connection due to administrator command", { errno: "57P01" }), "ConnectionLost", null],
+    ["PG 57P03 cannot_connect_now", () => pg("the database system is starting up", { errno: "57P03" }), "ConnectionLost", null],
+    ["PG 53300 too_many_connections", () => pg("sorry, too many clients already", { errno: "53300" }), "ConnectionLost", null],
+    ["PG auth failed (Bun's client code)", () => mark(new SQL.PostgresError('password authentication failed for user "app"', { code: "ERR_POSTGRES_AUTHENTICATION_FAILED_PBKDF2" })), "ConnectionLost", null],
+    ["PG SASL signature mismatch (Bun's client code)", () => mark(new SQL.PostgresError("The server did not return the correct signature", { code: "ERR_POSTGRES_SASL_SIGNATURE_MISMATCH" })), "ConnectionLost", null],
+    ["PG 28P01 invalid password (server SQLSTATE)", () => pg('password authentication failed for user "app"', { errno: "28P01" }), "ConnectionLost", null],
+    ["MySQL auth failed (Bun's client code)", () => my("Access denied for user 'app'", { code: "ERR_MYSQL_AUTHENTICATION_FAILED" }), "ConnectionLost", null],
+    ["a capitalized `Constraint Failed` message is still a constraint (the /i is back)", () => mark(Object.assign(new Error("FOREIGN KEY Constraint Failed"), { code: "XX" })), "ConstraintViolation", { field: "" }],
     ["PG unreachable (Bun's client code)", () => mark(new SQL.PostgresError("Failed to connect", { code: "ERR_POSTGRES_CONNECTION_REFUSED" })), "ConnectionLost", null],
     ["PG connection closed (Bun's client code)", () => mark(new SQL.PostgresError("Connection closed", { code: "ERR_POSTGRES_CONNECTION_CLOSED" })), "ConnectionLost", null],
     ["MySQL ER_DUP_ENTRY 1062", () => my("Duplicate entry 'taken@x.io' for key 'users.email'", { code: "ER_DUP_ENTRY", errno: 1062, sqlState: "23000" }), "ConstraintViolation", { field: "" }],
