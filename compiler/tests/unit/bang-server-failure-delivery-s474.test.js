@@ -1017,11 +1017,50 @@ describe("S474 ruling — every `!` server body runs in the envelope (a `fail` e
     expect(emails(out)).toEqual(["p@x.io.plain", "taken@x.io"]);
   });
 
-  test("a `!` body that writes its own `transaction { }` gets no implicit envelope (§8.9.2: they SHALL NOT compose)", async () => {
-    const out = compileApp(`<program db="./g.db">
+  // #1718 r1 (review F1/F2; PA ruling "every `!` body"): an author `transaction { }` / `?{BEGIN}`
+  // no longer exempts the body. The author's transaction nests as a SAVEPOINT inside the envelope;
+  // a later `fail` undoes every write. These four committed rows on e48913ff8.
+  const TXAPP = `<program db="./g.db">
   \${
     type E:enum = { Bad }
-    server function txBody(email)! -> E {
+    server function condTx(email, useTx)! -> E {
+      ?{\`INSERT INTO users (email) VALUES (\${email})\`}.run()
+      if (useTx) {
+        transaction {
+          ?{\`INSERT INTO users (email) VALUES (\${email + ".tx"})\`}.run()
+        }
+      }
+      fail E.Bad
+    }
+    server function deadClosureTx(email)! -> E {
+      function later()! -> E {
+        transaction {
+          ?{\`INSERT INTO users (email) VALUES (\${"never"})\`}.run()
+        }
+      }
+      ?{\`INSERT INTO users (email) VALUES (\${email})\`}.run()
+      fail E.Bad
+    }
+    server function writeThenBegin(email)! -> E {
+      ?{\`INSERT INTO users (email) VALUES (\${email + ".pre"})\`}.run()
+      ?{\`BEGIN\`}.run()
+      ?{\`INSERT INTO users (email) VALUES (\${email + ".in"})\`}.run()
+      ?{\`COMMIT\`}.run()
+      fail E.Bad
+    }
+    server function plainBegin(email)! -> E {
+      ?{\`BEGIN\`}.run()
+      ?{\`INSERT INTO users (email) VALUES (\${email})\`}.run()
+      ?{\`COMMIT\`}.run()
+      fail E.Bad
+    }
+    server function commentBegin(email)! -> E {
+      ?{\`/* mine */ BEGIN\`}.run()
+      ?{\`INSERT INTO users (email) VALUES (\${email})\`}.run()
+      ?{\`COMMIT\`}.run()
+      fail E.Bad
+    }
+    server function txOk(email)! -> E {
       transaction {
         ?{\`INSERT INTO users (email) VALUES (\${email})\`}.run()
       }
@@ -1030,11 +1069,45 @@ describe("S474 ruling — every `!` server body runs in the envelope (a `fail` e
   }
   <main><p>x</p></main>
 </program>
-`);
+`;
+  const failed = { __scrml_error: true, type: "E", variant: "Bad", data: null };
+
+  test("F1(a): a `transaction { }` in a branch NOT taken — the body's own write is undone on `fail`", async () => {
+    const out = compileApp(TXAPP);
+    expect(JSON.parse((await callRoute(out, "condTx", { email: "ct0@x", useTx: false })).text)).toEqual(failed);
+    expect(emails(out)).toEqual(["taken@x.io"]);
+  });
+
+  test("F1(a'): the branch taken — the nested transaction's write is undone with the rest", async () => {
+    const out = compileApp(TXAPP);
+    expect(JSON.parse((await callRoute(out, "condTx", { email: "ct1@x", useTx: true })).text)).toEqual(failed);
+    expect(emails(out)).toEqual(["taken@x.io"]);
+  });
+
+  test("F1(b): a `transaction { }` in a nested function never called — the body's write is undone", async () => {
+    const out = compileApp(TXAPP);
+    expect(JSON.parse((await callRoute(out, "deadClosureTx", { email: "dc@x" })).text)).toEqual(failed);
+    expect(emails(out)).toEqual(["taken@x.io"]);
+  });
+
+  test("F1(c): a write BEFORE an author BEGIN … COMMIT, then `fail` — nothing is written (the author COMMIT is a RELEASE)", async () => {
+    const out = compileApp(TXAPP);
+    expect(JSON.parse((await callRoute(out, "writeThenBegin", { email: "wb@x" })).text)).toEqual(failed);
+    expect(emails(out)).toEqual(["taken@x.io"]);
+  });
+
+  test("F2: `?{BEGIN}` and `?{/* mine */ BEGIN}` behave the same (both undone by the `fail`)", async () => {
+    const out = compileApp(TXAPP);
+    await callRoute(out, "plainBegin", { email: "pb@x" });
+    await callRoute(out, "commentBegin", { email: "cb@x" });
+    expect(emails(out)).toEqual(["taken@x.io"]);
+  });
+
+  test("a `!` body with its own `transaction { }` that succeeds commits", async () => {
+    const out = compileApp(TXAPP);
     expect(out.codes).toEqual([]);
-    expect(out.serverJs).not.toContain(`"txBody", false, () =>`);
-    const r = await callRoute(out, "txBody", { email: "tx@x.io" });
-    expect(JSON.parse(r.text)).toBe("ok");
+    expect(out.serverJs).toContain(`"txOk", false, () =>`);
+    expect(JSON.parse((await callRoute(out, "txOk", { email: "tx@x.io" })).text)).toBe("ok");
     expect(emails(out)).toEqual(["taken@x.io", "tx@x.io"]);
   });
 
