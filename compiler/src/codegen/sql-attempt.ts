@@ -500,7 +500,7 @@ export function serverSqlPropagateHelper(keepMessage: boolean, keepConstraintNam
   ].join("\n");
 }
 
-/** The runtime helper that runs a declared-`!` (SqlError) body inside its own transaction (S474 r1). */
+/** The runtime helper that runs a declared-`!` server body inside its own transaction (S474 r1; every `!` since the S474 ruling). */
 export const SQL_BANG_ENVELOPE_FN = "_scrml_sql_bang_envelope";
 
 /**
@@ -518,26 +518,37 @@ export const SQL_BANG_ENVELOPE_FN = "_scrml_sql_bang_envelope";
  * undoes only its own writes; the caller's own outcome decides the rest. Every query the body
  * reaches — through a helper or a callee — runs on the transaction's connection (the guard's
  * request scope), which is the transitive envelope S473 ruled.
+ *
+ * S474 ruling "envelope every `!` server body" (user-voice-scrml.md, 2026-11-01: "Every `!` server
+ * body runs in the §8.9.2 envelope … not only `! -> SqlError`") — so a `! -> E` body runs in it
+ * too (`sqlFailureIsValue` false): a `fail` rolls back, and a driver failure is rethrown after
+ * the rollback (a query failure is not an `E` variant: §19.8.4 "compatible").
  */
 export const SERVER_SQL_BANG_ENVELOPE_HELPER: string = [
   "",
-  "// --- §8.9.2 / §19.8.2 (S474): a declared-`!` (SqlError) body runs in its own transaction (compiler-generated) ---",
-  "// A delivered SqlError means nothing was written: every query the body reaches (helpers and",
-  "// callees too) runs inside this transaction, and any failure rolls it back before the value",
-  "// is returned. Inside a caller's transaction the BEGIN / COMMIT / ROLLBACK nest as a",
+  "// --- §8.9.2 / §19.8.2 (S474): a declared-`!` server body runs in its own transaction (compiler-generated) ---",
+  "// A `!` failure means nothing was written: every query the body reaches (helpers and",
+  "// callees too) runs inside this transaction, and a `fail` or a throw rolls it back before",
+  "// the failure leaves. Inside a caller's transaction the BEGIN / COMMIT / ROLLBACK nest as a",
   "// SAVEPOINT (_scrml_db_guard), so a handled inner failure undoes only its own writes.",
-  "async function _scrml_sql_bang_envelope(db, begin, fn, body) {",
+  "// `sqlFailureIsValue`: the body's error type is SqlError, so a failed query becomes the",
+  "// SqlError value; otherwise (`! -> E`) it is rethrown after the rollback.",
+  "async function _scrml_sql_bang_envelope(db, begin, fn, sqlFailureIsValue, body) {",
+  "  const failed = (err) => {",
+  "    if (sqlFailureIsValue) return _scrml_sql_propagate(err, fn);",
+  "    throw err;",
+  "  };",
   "  try {",
   "    await db.unsafe(begin);",
   "  } catch (err) {",
-  "    return _scrml_sql_propagate(err, fn);",
+  "    return failed(err);",
   "  }",
   "  let result;",
   "  try {",
   "    result = await body();",
   "  } catch (err) {",
   "    try { await db.unsafe(\"ROLLBACK\"); } catch { /* the connection is gone — never mask err */ }",
-  "    return _scrml_sql_propagate(err, fn);",
+  "    return failed(err);",
   "  }",
   "  if (result !== null && typeof result === \"object\" && result.__scrml_error === true) {",
   "    await db.unsafe(\"ROLLBACK\"); // a `fail` exit (or a propagated failure) writes nothing",
@@ -547,7 +558,7 @@ export const SERVER_SQL_BANG_ENVELOPE_HELPER: string = [
   "    await db.unsafe(\"COMMIT\");",
   "  } catch (err) {",
   "    try { await db.unsafe(\"ROLLBACK\"); } catch { /* already ended */ }",
-  "    return _scrml_sql_propagate(err, fn);",
+  "    return failed(err);",
   "  }",
   "  return result;",
   "}",

@@ -370,12 +370,14 @@ describe("S474 ruling 3 — a declared-`!` server function's failure reaches the
     }
   });
 
-  test("emission: only a SqlError-typed `!` body runs in the transaction-and-propagate helper", () => {
+  test("emission: every `!` body runs in the envelope helper; only a SqlError-typed one turns a failed query into the value", () => {
     const js = built().serverJs;
-    expect(js).toContain(`_scrml_sql_bang_envelope(_scrml_sql, "BEGIN DEFERRED", "addUser", `);
-    expect(js).toContain(`_scrml_sql_bang_envelope(_scrml_sql, "BEGIN DEFERRED", "listGone", `);
-    expect(js).not.toContain(`"find", () =>`);
-    expect(js).not.toContain(`"plainAdd", () =>`);
+    expect(js).toContain(`_scrml_sql_bang_envelope(_scrml_sql, "BEGIN DEFERRED", "addUser", true, `);
+    expect(js).toContain(`_scrml_sql_bang_envelope(_scrml_sql, "BEGIN DEFERRED", "listGone", true, `);
+    // S474 ruling "envelope every `!` server body": a `! -> MyErr` body is enveloped too.
+    expect(js).toContain(`_scrml_sql_bang_envelope(_scrml_sql, "BEGIN DEFERRED", "find", false, `);
+    expect(js).not.toContain(`"plainAdd", true, () =>`);
+    expect(js).not.toContain(`"plainAdd", false, () =>`);
     // The client bundle carries none of it.
     expect(built().clientJs).not.toContain("_scrml_sql_propagate");
     expect(built().clientJs).not.toContain("_scrml_sql_bang_envelope");
@@ -921,5 +923,136 @@ describe("S474 N1 — the SqlError classifier reads Postgres / MySQL codes where
     const rt = prod();
     expect(rt._scrml_sql_error(pg('duplicate key value violates unique constraint "users_email_key"', { errno: "23505", constraint: "users_email_key" })).data).toEqual({ field: "users_email_key" });
     expect(rt._scrml_sql_error(pg('relation "gone" does not exist', { errno: "42P01" })).data).toEqual({ message: 'relation "gone" does not exist' });
+  });
+});
+
+// S474 ruling "envelope every `!` server body" (user-voice-scrml.md, 2026-11-01): "Every `!` server
+// body runs in the §8.9.2 envelope … not only `! -> SqlError`. Closes the `fail` half of
+// g-implicit-envelope-only-on-baseline-csrf-arm (S449)." §8.9.2 (S449 ruling D): a `fail` exit rolls
+// the implicit transaction back. Each case runs the route and reads the table afterwards.
+describe("S474 ruling — every `!` server body runs in the envelope (a `fail` exit writes nothing)", () => {
+  const APP_E = (programAttrs) => `<program db="./g.db"${programAttrs}>
+  \${
+    type E:enum = { Bad, Gone }
+    server function failAfterWrite(email)! -> E {
+      ?{\`INSERT INTO users (email) VALUES (\${email})\`}.run()
+      fail E.Bad
+    }
+    server function writeOk(email)! -> E {
+      ?{\`INSERT INTO users (email) VALUES (\${email})\`}.run()
+      return "ok"
+    }
+    server function outerHandles(email)! -> E {
+      ?{\`INSERT INTO users (email) VALUES (\${email + ".outer"})\`}.run()
+      const r = failAfterWrite(email) !{ _ e :> "inner:" + e.variant }
+      ?{\`INSERT INTO users (email) VALUES (\${email + ".after"})\`}.run()
+      return r
+    }
+    server function plainHandles(email) {
+      ?{\`INSERT INTO users (email) VALUES (\${email + ".plain"})\`}.run()
+      const r = failAfterWrite(email) !{ _ e :> "inner:" + e.variant }
+      return r
+    }
+  }
+  <main><p>x</p></main>
+</program>
+`;
+
+  test("CSRF arm: INSERT then `fail E.Bad` — the failure is delivered and no row is left", async () => {
+    const out = compileApp(APP_E(""));
+    expect(out.serverJs).toContain(`"failAfterWrite", false, () =>`);
+    const r = await callRoute(out, "failAfterWrite", { email: "e1@x.io" });
+    expect(r.status).toBe(200);
+    expect(JSON.parse(r.text)).toEqual({ __scrml_error: true, type: "E", variant: "Bad", data: null });
+    expect(emails(out)).toEqual(["taken@x.io"]);
+  });
+
+  test("non-CSRF arm (a GET route — the arm the auth / headless routes take): INSERT then `fail E.Bad` — no row is left", async () => {
+    const out = compileApp(`<program db="./g.db">
+  \${
+    type E:enum = { Bad }
+    server function failGet(email)! -> E route="/api/fail-get" method="GET" {
+      ?{\`INSERT INTO users (email) VALUES (\${email})\`}.run()
+      fail E.Bad
+    }
+  }
+  <main><p>x</p></main>
+</program>
+`);
+    expect(out.codes).toEqual([]);
+    // The handler carries no baseline double-submit check: it is the non-CSRF arm.
+    const h = out.serverJs.slice(out.serverJs.indexOf("_handler_failGet"));
+    expect(h.slice(0, h.indexOf("\n}\n"))).not.toContain("_scrml_validate_csrf");
+    expect(h.slice(0, h.indexOf("\n}\n"))).toContain(`"failGet", false, () =>`);
+    const routes = await routesOf(out);
+    const route = routes.find((r) => r.path === "/api/fail-get");
+    const resp = await route.handler({
+      url: "http://localhost/api/fail-get",
+      method: "GET",
+      headers: { get: () => null },
+      json: async () => ({ email: "g@x.io" }),
+    });
+    expect(JSON.parse(await resp.text())).toEqual({ __scrml_error: true, type: "E", variant: "Bad", data: null });
+    expect(emails(out)).toEqual(["taken@x.io"]);
+  });
+
+  test("a successful `! -> E` body commits", async () => {
+    const out = compileApp(APP_E(""));
+    const r = await callRoute(out, "writeOk", { email: "ok@x.io" });
+    expect(JSON.parse(r.text)).toBe("ok");
+    expect(emails(out)).toEqual(["ok@x.io", "taken@x.io"]);
+  });
+
+  test("a `!` callee whose failure the `!` caller handles: the callee's write is undone, the caller's writes are kept", async () => {
+    const out = compileApp(APP_E(""));
+    const r = await callRoute(out, "outerHandles", { email: "o@x.io" });
+    expect(JSON.parse(r.text)).toBe("inner:Bad");
+    expect(emails(out)).toEqual(["o@x.io.after", "o@x.io.outer", "taken@x.io"]);
+  });
+
+  test("the same with a NON-`!` caller: the callee's write is undone, the caller's write autocommits", async () => {
+    const out = compileApp(APP_E(""));
+    const r = await callRoute(out, "plainHandles", { email: "p@x.io" });
+    expect(JSON.parse(r.text)).toBe("inner:Bad");
+    expect(emails(out)).toEqual(["p@x.io.plain", "taken@x.io"]);
+  });
+
+  test("a `!` body that writes its own `transaction { }` gets no implicit envelope (§8.9.2: they SHALL NOT compose)", async () => {
+    const out = compileApp(`<program db="./g.db">
+  \${
+    type E:enum = { Bad }
+    server function txBody(email)! -> E {
+      transaction {
+        ?{\`INSERT INTO users (email) VALUES (\${email})\`}.run()
+      }
+      return "ok"
+    }
+  }
+  <main><p>x</p></main>
+</program>
+`);
+    expect(out.codes).toEqual([]);
+    expect(out.serverJs).not.toContain(`"txBody", false, () =>`);
+    const r = await callRoute(out, "txBody", { email: "tx@x.io" });
+    expect(JSON.parse(r.text)).toBe("ok");
+    expect(emails(out)).toEqual(["taken@x.io", "tx@x.io"]);
+  });
+
+  test("a failed QUERY in a `! -> E` body is still not an E variant: rolled back, then the route's error path (500)", async () => {
+    const out = compileApp(`<program db="./g.db">
+  \${
+    type E:enum = { Bad }
+    server function dupAfterWrite(email)! -> E {
+      ?{\`INSERT INTO users (email) VALUES (\${email})\`}.run()
+      ?{\`INSERT INTO users (email) VALUES (\${"taken@x.io"})\`}.run()
+      return "ok"
+    }
+  }
+  <main><p>x</p></main>
+</program>
+`);
+    const r = await callRoute(out, "dupAfterWrite", { email: "d@x.io" });
+    expect(r.status).toBe("THROW");
+    expect(emails(out)).toEqual(["taken@x.io"]);
   });
 });

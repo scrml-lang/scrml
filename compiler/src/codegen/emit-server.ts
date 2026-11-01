@@ -2748,11 +2748,38 @@ function generateServerJsImpl(
   // in a helper or a callee; this one is the transitive envelope S473 ruled. Returns the
   // `await <helper>(…, () => ` prefix for the body thunk, or null (no database in the file:
   // nothing to roll back, and a declared failure there can only be a `fail`).
+  // S474 ruling "envelope every `!` server body" (user-voice-scrml.md, 2026-11-01): "Every `!`
+  // server body runs in the §8.9.2 envelope (gate change in impl#1 `_bangEnvelopeOpen`), not only
+  // `! -> SqlError`." So the gate is `canFail`; the SqlError typing only decides whether a failed
+  // query becomes the value (`sqlFailureIsValue`) or is rethrown after the rollback.
+  // §8.9.2 / §19.10.5: an implicit envelope "SHALL NOT compose with an explicit `transaction { }`
+  // block", and an explicit `?{BEGIN}` "suppresses the implicit envelope". A body that writes its
+  // own transaction (lexically) therefore gets none: the author's transaction is the one that
+  // rolls back. (The same test the Batch Planner's `scanHandler` makes.)
+  const _authorOwnsTransaction = (fn: any): boolean => {
+    let owns = false;
+    const seen = new WeakSet<object>();
+    const visit = (v: unknown): void => {
+      if (owns || v === null || typeof v !== "object" || seen.has(v as object)) return;
+      seen.add(v as object);
+      if (Array.isArray(v)) { for (const x of v) visit(x); return; }
+      const n = v as any;
+      if (n.kind === "transaction-block") { owns = true; return; }
+      if (n.kind === "sql" && typeof n.query === "string" && /^\s*(?:BEGIN|START\s+TRANSACTION)\b/i.test(n.query)) { owns = true; return; }
+      for (const key of Object.keys(n)) {
+        if (key === "span" || key.startsWith("_")) continue;
+        visit(n[key]);
+      }
+    };
+    visit(fn?.body);
+    return owns;
+  };
   const _bangEnvelopeOpen = (fn: any, fnName: string): string | null => {
-    if (!sqlFailurePropagates(fn)) return null;
+    if (!fn || fn.canFail !== true) return null;
+    if (_authorOwnsTransaction(fn)) return null;
     const db = _fnDbVar(fn) ?? (_dbRes.handles.length > 0 ? fallbackSqlHandle() : undefined);
     if (!db) return null;
-    return `await ${SQL_BANG_ENVELOPE_FN}(${db}, ${JSON.stringify(_implicitEnvelopeBeginFor(db))}, ${JSON.stringify(fnName)}, () => `;
+    return `await ${SQL_BANG_ENVELOPE_FN}(${db}, ${JSON.stringify(_implicitEnvelopeBeginFor(db))}, ${JSON.stringify(fnName)}, ${sqlFailurePropagates(fn) ? "true" : "false"}, () => `;
   };
   // S474 ruling 2 as amended — a DEV build keeps a failed query's driver text on the wire, a
   // production build blanks it. Under `protect=` a driver MESSAGE stays blank in every build: it
