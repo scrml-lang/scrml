@@ -7,22 +7,22 @@ PURE bootstrap (`compiler/self-host-v2/` front end + printer + runtime, no impl#
 Bucket definitions: the header of `scripts/bootstrap-conformance.ts`. A TRACKING number, not a gate.
 It is a run, not a static count, so it is NOT a `docs/FACTS.md` row (FACTS excludes run-derived figures).
 
-Scope: **1813 of 1813 cases attempted** — every attempted case reached the pure bootstrap (no impl#1 stage).
+Scope: **1817 of 1817 cases attempted** — every attempted case reached the pure bootstrap (no impl#1 stage).
 
 | bucket | cases | share of attempted |
 |---|---:|---:|
-| PASS | 283 | 15.6% |
+| PASS | 287 | 15.8% |
 | CODES-ONLY | 0 | 0.0% |
 | FAIL | 239 | 13.2% |
 | LEGACY | 0 | 0.0% |
-| NOT-TWINNED | 685 | 37.8% |
+| NOT-TWINNED | 685 | 37.7% |
 | UNSUPPORTED | 606 | 33.4% |
 | CRASH | 0 | 0.0% |
 | INVALID | 0 | 0.0% |
 
-**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 522; of those, 283 hold (54.2%). Runtime half executed on the bootstrap for 100 case(s).
+**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 526; of those, 287 hold (54.6%). Runtime half executed on the bootstrap for 101 case(s).
 
-- **Vacuous** passes: 17 of 283 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **266**.
+- **Vacuous** passes: 17 of 287 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **270**.
 - FAILs whose required code appears nowhere in the bootstrap's sources (check not implemented): 75 of 239; the other 164 are implemented checks that answered wrong.
 
 LEGACY by marker (a case may carry several): none.
@@ -131,7 +131,7 @@ NOT-TWINNED by reason (685 cases; a case counts once per distinct reason):
 | loop | 8 | · | · | 1 | · | 3 | 4 | · | · |
 | maps | 13 | · | · | · | · | 13 | · | · | · |
 | markup-handler | 89 | 16 | · | 19 | · | 40 | 14 | · | · |
-| match-block | 18 | · | · | 3 | · | 9 | 6 | · | · |
+| match-block | 22 | 4 | · | 3 | · | 9 | 6 | · | · |
 | match-codes | 25 | 4 | · | 10 | · | · | 11 | · | · |
 | match-identifier | 1 | · | · | · | · | 1 | · | · | · |
 | match-leave | 46 | 16 | · | 5 | · | 12 | 13 | · | · |
@@ -1090,7 +1090,7 @@ none
 
 none
 
-### PASS / CODES-ONLY (283)
+### PASS / CODES-ONLY (287)
 
 - `attr-executable-sink/bound-svg-animation-runtime-guard` — PASS · TWIN
 - `attr-executable-sink/bound-url-runtime-guard` — PASS · TWIN
@@ -1275,6 +1275,10 @@ none
 - `markup-handler/s437-r4-undeclared-fn-2nd-top-neg` — PASS · TWIN
 - `markup-handler/s437-r5-braced-else-line-comment-handler` — PASS · TWIN
 - `markup-handler/s457-user-function-named-event-pos` — PASS · TWIN
+- `match-block/s474-arm-tail-value-after-statement` — PASS
+- `match-block/s474-one-expr-brace-arm-value-pos` — PASS
+- `match-block/s474-one-expr-brace-statement-arm-needs-semicolon` — PASS
+- `match-block/s474-one-expr-brace-tail-after-statement-needs-semicolon` — PASS
 - `match-codes/e-match-012-tnot-else-exhaustive-neg` — PASS · TWIN
 - `match-codes/e-match-012-tnot-not-arm-exhaustive-neg` — PASS · TWIN
 - `match-codes/e-type-025-enum-subject-neg` — PASS · TWIN · VACUOUS
@@ -2417,13 +2421,13 @@ none
 - `match-block/value-form-block-arm-derived-reactive` — not mechanical: const-cell: initializer extent could not be verified against impl#1's AST
 - `match-block/value-form-derived` — not mechanical: const-cell: initializer extent could not be verified against impl#1's AST
 - `match-identifier/giti-016` — not mechanical: const-cell: initializer extent could not be verified against impl#1's AST
-- `match-leave/arm-body-ends-at-line-break-neg` — excluded (dialect.s66): impl#1-legacy newline shape (S469, dpa-073 F5): pins how impl#1 ends an arm body at a line break in a comma-less arm list with no `;` — a shape the bootstrap refuses by construction (E-MATCH-ARM-SEPARATOR / E-STMT-MI
+- `match-leave/arm-body-ends-at-line-break-neg` — excluded (dialect.s66): impl#1-legacy newline shape (S469, dpa-073 F5): pins how impl#1 ends a single-expression arm body at a line break. The arm `.A :> return;` is followed by an orphan `"orphan",` line at arm level, which impl#1 reports 
 - `match-leave/dpa068-engine-msg-arm-bare-return-neg` — not mechanical: engine-simple: engine surface beyond the simple rule: accepts (⚑ O5 surface)
 - `match-leave/dpa068-stmt-bare-return-newline-list` — excluded (dialect.s66): impl#1-only guard (s469-impl1-arm-commas): the arm list is written NEWLINE-separated on purpose, to keep impl#1's carried newline-list reading covered after the conformance comma migration; the bootstrap enforces the
 - `match-leave/engine-msg-arm-break-continue-neg` — not mechanical: engine-simple: engine surface beyond the simple rule: accepts (⚑ O5 surface)
 - `match-leave/engine-msg-arm-inner-loop-and-default-param-pos` — not mechanical: engine-simple: engine surface beyond the simple rule: accepts (⚑ O5 surface)
 - `match-leave/engine-msg-arm-return-neg` — not mechanical: engine-simple: engine surface beyond the simple rule: accepts (⚑ O5 surface)
-- `match-leave/expr-arm-continuation-joins` — excluded (dialect.s66): impl#1-legacy newline shape (S469, dpa-073 F5): pins impl#1's rule-2 continuation of an arm body in a comma-less arm list — a shape the bootstrap refuses by construction (E-MATCH-ARM-SEPARATOR). Kept unmigrated so im
+- `match-leave/expr-arm-continuation-joins` — excluded (dialect.s66): impl#1-legacy newline shape (S469, dpa-073 F5): pins impl#1's continuation of a single-expression arm body past a line break that ends in `+` (`.Boom(m) :> "a:" +⏎ m,`). The arm-comma codemod (f0c9d4bb7) gave the arm
 - `match-leave/given-arm-in-derived-match` — not mechanical: rhs-decl: type `number | not` has a space at its top level — how it stands in an opener is not ruled (§66.2.4 covers refinement / lifecycle types only) · const-cell: initializer extent could not be verified against impl#1's 
 - `match-leave/top-level-given-guard-return-neg` — not mechanical: unwrap-logic: top-level `${}` holding a legacy declaration also holds a `given-guard` statement, which impl#1 reads differently outside `${}` (S441) — not unwrapped
 - `match-leave/top-level-if-return-neg` — not mechanical: unwrap-logic: top-level `${}` holding a legacy declaration also holds a `if-stmt` statement, which impl#1 reads differently outside `${}` (S441) — not unwrapped

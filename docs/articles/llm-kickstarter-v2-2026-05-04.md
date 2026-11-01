@@ -95,7 +95,7 @@ When you are stuck on a design call ("should this engine attribute behave X way 
 
 Start from the canonical shape below and modify what you need. Don't write from scratch — every scrml app is a variation of this skeleton.
 
-<!-- gate: spec-ahead [E-BOOTSTRAP-UNSUPPORTED, E-VALUE-WRITES-STATE] — the bootstrap has no <schema>, <db tables=>, <request> or <empty>, and cannot type the rows a client call of a ?{} function returns (⚑ OPEN) -->
+<!-- gate: spec-ahead [E-BOOTSTRAP-UNSUPPORTED×5, E-VALUE-WRITES-STATE(@contacts)] — the bootstrap has no <schema>, <db tables=>, <request> or <empty>, and cannot type the rows a client call of a ?{} function returns (⚑ OPEN) -->
 ```scrml
 <program db="contacts.db">
 
@@ -842,7 +842,7 @@ type User:struct = { name: string, email: string, age: int }
 
 Four members, all imported from `scrml:data`:
 
-<!-- gate: spec-ahead [E-BOOTSTRAP-UNSUPPORTED, E-PARSE-TYPE] — the bootstrap has no refinement types on struct fields (int(>=18)), no <schema> and no <formFor> / <tableFor> yet -->
+<!-- gate: spec-ahead [E-BOOTSTRAP-UNSUPPORTED×5, E-PARSE-TYPE×4] — the bootstrap has no refinement types on struct fields (int(>=18)), no <schema> and no <formFor> / <tableFor> yet -->
 ```scrml
 <program db="app.db">
 
@@ -1364,7 +1364,7 @@ If the user's prompt mentions auth, real-time, reactive state, schema, multi-pag
 
 This is the **first recipe to reach for** when the UI has more than one mode, lifecycle phase, or screen state. If you're writing more than two booleans that gate the same UI, you want an engine.
 
-<!-- gate: spec-ahead [E-BOOTSTRAP-UNSUPPORTED, E-PARSE-TAG] — the bootstrap has no <schema>, <db tables=> or <match> block element, cannot construct a payload variant (LoadPhase.Loaded(rows)), and cannot type the rows a client call of a ?{} function returns (⚑ OPEN) -->
+<!-- gate: spec-ahead [E-BOOTSTRAP-UNSUPPORTED×4, E-PARSE-TAG×4] — the bootstrap has no <schema>, <db tables=> or <match> block element, cannot construct a payload variant (LoadPhase.Loaded(rows)), and cannot type the rows a client call of a ?{} function returns (⚑ OPEN) -->
 ```scrml
 <program db="items.db">
 
@@ -1441,7 +1441,7 @@ Notes:
 
 `signJwt` requires three arguments: `(payload, secret, expiresIn)`. Calling it with one will runtime-crash (the secret is the HMAC key).
 
-<!-- gate: spec-ahead [E-BOOTSTRAP-UNSUPPORTED] — the bootstrap has no auth=, <db protect=> / tables= or <schema>, cannot import scrml:auth / scrml:process (their sources do not compile on the bootstrap yet; each import is refused by name), and cannot type a client call's untyped ?{} rows -->
+<!-- gate: spec-ahead [E-BOOTSTRAP-UNSUPPORTED×11] — the bootstrap has no auth=, <db protect=> / tables= or <schema>, cannot import scrml:auth / scrml:process (their sources do not compile on the bootstrap yet; each import is refused by name), and cannot type a client call's untyped ?{} rows -->
 ```scrml
 <program db="users.db" auth="none">
 
@@ -1576,7 +1576,7 @@ For per-role markup variance, the `<auth role="X">` element exists, but **it is 
 
 Channels live **inside `<program>`** — a sibling of `<page>` (SPEC §38.1). A `<channel>` placed outside `<program>` in a file that *has* a `<program>` fires `E-CHANNEL-OUTSIDE-PROGRAM`; one inside a `<page>` fires `E-CHANNEL-INSIDE-PAGE`; a file-top `<channel>` is canonical only in a pure-channel module file that has no `<program>` (§38.12.6). A channel auto-creates a WebSocket endpoint. State declared inside a channel body syncs across every connected client. **There is no `@shared` modifier; the synchronization comes from being declared inside a channel body.**
 
-<!-- gate: spec-ahead [E-BOOTSTRAP-UNSUPPORTED, E-SCOPE-001, E-STATE-UNDECLARED] — the bootstrap has no <channel> yet -->
+<!-- gate: spec-ahead [E-BOOTSTRAP-UNSUPPORTED×4, E-SCOPE-001(postMessage), E-STATE-UNDECLARED(@messages)] — the bootstrap has no <channel> yet -->
 ```scrml
 <program>
 
@@ -1696,7 +1696,7 @@ Why per-screen, not a stdlib generic: a generic `AsyncPhase<T>` strips the domai
 
 Declare what the database SHOULD look like. impl#1's `scrml db-migrate <dir> --db ./notes.db` diffs `<schema>` against the live database and applies the migration (`--dry-run` prints the plan first); the bootstrap has no migration command yet. **You never write `ALTER TABLE` by hand.**
 
-<!-- gate: spec-ahead [E-BOOTSTRAP-UNSUPPORTED] — the bootstrap has no <schema> and no <db tables=> yet -->
+<!-- gate: spec-ahead [E-BOOTSTRAP-UNSUPPORTED×2] — the bootstrap has no <schema> and no <db tables=> yet -->
 ```scrml
 <program db="./notes.db">
 
@@ -1774,7 +1774,7 @@ The import side: `import { userCard } from "./user-card.scrml";`, then `<userCar
 
 Most apps need ZERO middleware code. The common 80% is single attributes on `<program>`:
 
-<!-- gate: spec-ahead [E-BOOTSTRAP-UNSUPPORTED] — the bootstrap reads no <program> middleware attributes (log=, headers=, cors=, csrf=, ratelimit=) yet -->
+<!-- gate: spec-ahead [E-BOOTSTRAP-UNSUPPORTED×5] — the bootstrap reads no <program> middleware attributes (log=, headers=, cors=, csrf=, ratelimit=) yet -->
 ```scrml
 <program log="structured" headers="strict" cors="*" csrf="auto" ratelimit="100/min">
   <p>Routes go here.</p>
@@ -1783,7 +1783,7 @@ Most apps need ZERO middleware code. The common 80% is single attributes on `<pr
 
 For the remaining 20%, a `function handle(request, resolve)` is the onion-model escape hatch. Code before `resolve()` is pre-middleware; code after is post. `resolve()` MUST be called exactly once per execution path that runs the route.
 
-<!-- gate: spec-ahead [E-ASSIGN-POSITION, E-BOOTSTRAP-UNSUPPORTED, E-PARSE-EXPECTED, E-PARSE-EXPR, E-PARSE-TYPE, E-SCOPE-001, E-TYPE-STRUCT-CONTEXT, E-TYPE-UNKNOWN] — the bootstrap has no middleware handle(), function-typed parameters or host Request / Response types yet -->
+<!-- gate: spec-ahead [E-ASSIGN-POSITION, E-BOOTSTRAP-UNSUPPORTED×6, E-PARSE-EXPECTED×3, E-PARSE-EXPR×3, E-PARSE-TYPE, E-SCOPE-001(Response, Response), E-TYPE-STRUCT-CONTEXT, E-TYPE-UNKNOWN(Request, Request)] — the bootstrap has no middleware handle(), function-typed parameters or host Request / Response types yet -->
 ```scrml
 <program log="structured" headers="strict">
 
@@ -1832,7 +1832,7 @@ A `lin` declared outside a loop may not be consumed inside the loop body (E-LIN-
 
 When you need to render a list, reach for the **Tier-1 `<each>` structural element** — NOT `.map()`, NOT `${ for (...) { lift ... } }`. `<each>` reads as a markup tree, composes with `<empty>` for the zero-items case, and gets keyed DOM reconciliation for free. (The `${for/lift}` form is the valid Tier-0 fallback — see the anti-pattern table and the promotion note below.)
 
-<!-- gate: spec-ahead [E-BOOTSTRAP-UNSUPPORTED, E-VALUE-WRITES-STATE] — the bootstrap has no <schema>, <db tables=>, <request> or <empty> yet -->
+<!-- gate: spec-ahead [E-BOOTSTRAP-UNSUPPORTED×4, E-VALUE-WRITES-STATE(@contacts)] — the bootstrap has no <schema>, <db tables=>, <request> or <empty> yet -->
 ```scrml
 <program db="contacts.db">
 
@@ -1874,7 +1874,7 @@ function loadContacts()! -> SqlError {
 
 The single-expression rows can drop to `:`-shorthand, the item can go unnamed as `@.`, and the count form uses `of=`:
 
-<!-- gate: spec-ahead [E-BOOTSTRAP-UNSUPPORTED, E-PARSE-EXPECTED, E-PARSE-TRAILING] — the bootstrap has no <empty>, no <each of=> and no bare @. in an interpolation yet -->
+<!-- gate: spec-ahead [E-BOOTSTRAP-UNSUPPORTED×2, E-PARSE-EXPECTED, E-PARSE-TRAILING] — the bootstrap has no <empty>, no <each of=> and no bare @. in an interpolation yet -->
 ```scrml
 <program>
 
@@ -2066,7 +2066,7 @@ Three first-class scrml primitives for compute that needs isolation from the mai
 
 > **Known gaps:** the bootstrap has no nested `<program>` yet. impl#1 compiles the older-dialect version of this program but does not write the worker's own bundle (`stats.worker.js`), so its `new Worker(...)` fails to load at runtime.
 
-<!-- gate: spec-ahead [E-BOOTSTRAP-UNSUPPORTED, E-PARSE-EXPR, E-PARSE-ITEM, E-SCOPE-001] — the bootstrap has no nested <program> (workers), when message / when error handlers or <#name>.send yet -->
+<!-- gate: spec-ahead [E-BOOTSTRAP-UNSUPPORTED×2, E-PARSE-EXPR×2, E-PARSE-ITEM×11, E-SCOPE-001(stats)] — the bootstrap has no nested <program> (workers), when message / when error handlers or <#name>.send yet -->
 ```scrml
 <program>
 
@@ -2132,7 +2132,7 @@ Sidecars (SPEC §23.4 / §43.2 — a nested `<program name="..." lang="python">`
 
 When you need the SERVER to push updates to the CLIENT without bidirectional channel overhead (live counters, progress bars, log streams), use a `server function*` generator. The compiler emits a `text/event-stream` GET route + an `EventSource`-based client stub.
 
-<!-- gate: spec-ahead [E-BOOTSTRAP-UNSUPPORTED, E-PARAM-TYPE-REQUIRED, E-PARSE-EXPECTED, E-PARSE-FN, E-SCOPE-001, E-STMT-MISSING-SEMICOLON] — the bootstrap has no generator functions (server function*, yield) and cannot follow scrml:time imports yet -->
+<!-- gate: spec-ahead [E-BOOTSTRAP-UNSUPPORTED×4, E-PARAM-TYPE-REQUIRED, E-PARSE-EXPECTED, E-PARSE-FN, E-SCOPE-001(liveCount, yield), E-STMT-MISSING-SEMICOLON] — the bootstrap has no generator functions (server function*, yield) and cannot follow scrml:time imports yet -->
 ```scrml
 <program>
 

@@ -36,6 +36,7 @@
  * pick up a changed bootstrap.
  */
 
+import { statSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -48,7 +49,7 @@ import {
 import { TextDocument } from "vscode-languageserver-textdocument";
 
 import type { Diagnostic as BootDiagnostic } from "../scripts/scrml-boot.ts";
-import { crashDiagnostic, toLspDiagnostics, type LspDiagnostic } from "./diagnostics.ts";
+import { crashDiagnostic, toLspDiagnostics, uriDiagnostic, type LspDiagnostic } from "./diagnostics.ts";
 
 const envMs = (name: string, dflt: number) => {
   const v = Number(process.env[name]);
@@ -68,14 +69,54 @@ const log = (s: string) => connection.console.log(s);
 // ─────────────────────────────────────────────────────────────────────────────
 // Documents → paths. A file: URI is its path; an unsaved untitled buffer gets a stable synthetic
 // path in the workspace root (it is only ever read from the overlay, never from disk).
+// A file: URI that names no local path (S474 backfill L1: `file://remotehost/x.scrml`, an encoded
+// `/` as in `file:///tmp/a%2Fb.scrml`) has none: `pathOf` is null, the document is not compiled and
+// gets one diagnostic saying why. `fileURLToPath` throws on those, and unguarded that throw killed
+// the server.
 // ─────────────────────────────────────────────────────────────────────────────
 
 const untitled = new Map<string, string>();
-function pathOf(uri: string): string {
-  if (uri.startsWith("file:")) return resolve(fileURLToPath(uri));
+// S474 backfill L2: a MONOTONIC counter. `untitled.size + 1` reused a live buffer's name once an
+// earlier one closed, and the overlay then compiled one buffer with the other's text.
+let nextUntitled = 1;
+
+/**
+ * A `file:` URI's local path, or why it has none. #1723 review L-b: beyond what `fileURLToPath`
+ * rejects, a URI that decodes to a directory (`file:`, `file:%00` resolve to `/`) or, off Windows, to
+ * a path with a backslash (`%5C`, which no editor writes for a real file) is not a document path.
+ */
+function localPath(uri: string): { path: string } | { why: string } {
+  let p: string;
+  try {
+    p = resolve(fileURLToPath(uri));
+  } catch (e) {
+    return { why: (e as Error)?.message ?? String(e) };
+  }
+  if (p.includes("\0")) return { why: "the path holds a NUL" };
+  if (process.platform !== "win32" && p.includes("\\")) return { why: "the decoded path holds a backslash (an encoded %5C)" };
+  try {
+    if (statSync(p).isDirectory()) return { why: `it decodes to the directory ${p}` };
+  } catch {
+    /* not on disk yet: an unsaved file is fine */
+  }
+  return { path: p };
+}
+
+/** Why a `file:` URI has no local path, or null when it has one. */
+function uriProblem(uri: string): string | null {
+  if (!uri.startsWith("file:")) return null;
+  const l = localPath(uri);
+  return "why" in l ? l.why : null;
+}
+
+function pathOf(uri: string): string | null {
+  if (uri.startsWith("file:")) {
+    const l = localPath(uri);
+    return "path" in l ? l.path : null;
+  }
   let p = untitled.get(uri);
   if (p === undefined) {
-    p = join(workspaceRoot, `.scrml-boot-untitled-${untitled.size + 1}.scrml`);
+    p = join(workspaceRoot, `.scrml-boot-untitled-${nextUntitled++}.scrml`);
     untitled.set(uri, p);
   }
   return p;
@@ -85,7 +126,7 @@ function pathOf(uri: string): string {
 // The worker.
 // ─────────────────────────────────────────────────────────────────────────────
 
-type Job = { id: number; uri: string; version: number; text: string; started: number; cancelTimer?: Timer; hangTimer?: Timer };
+type Job = { id: number; uri: string; path: string; version: number; text: string; started: number; cancelTimer?: Timer; hangTimer?: Timer };
 
 let worker: Worker | null = null;
 let workerReady = false;
@@ -155,7 +196,7 @@ function onWorkerMessage(m: any) {
   if (isCurrent(j)) {
     if (m.type === "result") {
       deps.set(j.uri, new Set(m.files as string[]));
-      publish(j.uri, toLspDiagnostics(m.diagnostics as BootDiagnostic[], pathOf(j.uri), j.text));
+      publish(j.uri, toLspDiagnostics(m.diagnostics as BootDiagnostic[], j.path, j.text));
     } else {
       log(`scrml-boot LSP: compile of ${j.uri} crashed:\n${m.stack ?? m.error}`);
       publish(j.uri, [crashDiagnostic(j.text, String(m.error))]);
@@ -194,7 +235,12 @@ function failQueued(why: string) {
 }
 
 function overlay(): [string, string][] {
-  return documents.all().map((d) => [pathOf(d.uri), d.getText()]);
+  const out: [string, string][] = [];
+  for (const d of documents.all()) {
+    const p = pathOf(d.uri);
+    if (p !== null) out.push([p, d.getText()]);
+  }
+  return out;
 }
 
 /** Start the next queued compile, if the worker is free. */
@@ -206,10 +252,16 @@ function pump() {
   const uri = queue.shift() as string;
   const doc = documents.get(uri);
   if (doc === undefined) { pump(); return; }
-  const j: Job = { id: nextId++, uri, version: doc.version, text: doc.getText(), started: performance.now() };
+  const path = pathOf(uri);
+  if (path === null) {
+    publish(uri, [uriDiagnostic(doc.getText(), uri, uriProblem(uri) ?? "not a local path")]);
+    pump();
+    return;
+  }
+  const j: Job = { id: nextId++, uri, path, version: doc.version, text: doc.getText(), started: performance.now() };
   inflight = j;
   j.hangTimer = setTimeout(() => onHang(j), TIMEOUT_MS);
-  worker.postMessage({ type: "compile", id: j.id, path: pathOf(uri), overlay: overlay() });
+  worker.postMessage({ type: "compile", id: j.id, path, overlay: overlay() });
 }
 
 function onHang(j: Job) {
@@ -258,7 +310,7 @@ function schedule(uri: string) {
 
 connection.onInitialize((params) => {
   const folder = params.workspaceFolders?.[0]?.uri ?? params.rootUri;
-  if (folder && folder.startsWith("file:")) workspaceRoot = fileURLToPath(folder);
+  if (folder && folder.startsWith("file:") && uriProblem(folder) === null) workspaceRoot = fileURLToPath(folder);
   else if (params.rootPath) workspaceRoot = params.rootPath;
   startWorker(); // load the bundle while the client finishes starting up
   return {
@@ -272,7 +324,7 @@ documents.onDidChangeContent((change) => {
   schedule(uri);
   // documents whose last compile read this file see its new text too
   const p = pathOf(uri);
-  for (const [other, files] of deps) if (other !== uri && files.has(p) && documents.get(other)) schedule(other);
+  if (p !== null) for (const [other, files] of deps) if (other !== uri && files.has(p) && documents.get(other)) schedule(other);
   // a superseded in-flight compile of this document can be cancelled now, not after the debounce
   if (inflight !== null && inflight.uri === uri) onSuperseded(inflight);
 });
@@ -289,7 +341,7 @@ documents.onDidClose((ev) => {
   untitled.delete(uri);
   publish(uri, []);
   // documents that imported it now read it from disk
-  for (const [other, files] of deps) if (files.has(p) && documents.get(other)) schedule(other);
+  if (p !== null) for (const [other, files] of deps) if (files.has(p) && documents.get(other)) schedule(other);
 });
 
 connection.onShutdown(() => {

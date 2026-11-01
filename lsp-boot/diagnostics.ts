@@ -95,3 +95,20 @@ export function toLspDiagnostics(diags: BootDiagnostic[], docPath: string, docTe
 export function crashDiagnostic(docText: string, what: string): LspDiagnostic {
   return { range: firstLineRange(docText), severity: 1, code: CRASH_CODE, source: SOURCE, message: `scrml-boot crashed: ${what}` };
 }
+
+export const URI_CODE = "scrml-boot-uri";
+
+/**
+ * The single diagnostic a document gets when its `file:` URI names no local path (S474 backfill L1:
+ * `file://remotehost/x.scrml`, or an encoded `/` as in `file:///tmp/a%2Fb.scrml`). Such a document is
+ * not compiled, and is not part of any other document's overlay. The server stays up.
+ */
+export function uriDiagnostic(docText: string, uri: string, why: string): LspDiagnostic {
+  return {
+    range: firstLineRange(docText),
+    severity: 1,
+    code: URI_CODE,
+    source: SOURCE,
+    message: `scrml-boot cannot compile this document: its URI ${uri} names no local file path (${why})`,
+  };
+}

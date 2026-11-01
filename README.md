@@ -24,7 +24,7 @@ Here is a small app: a task list that saves to SQLite, stays in sync across ever
 
 ### 1 — the data and the server
 
-<!-- gate: spec-ahead [E-BOOTSTRAP-UNSUPPORTED, E-PARSE-TAG, E-PARSE-TRAILING, E-SCOPE-001, E-STATE-UNDECLARED] — the bootstrap has no <schema>, <channel>, <match> block element, class: binding, <empty>, <onTimeout> or duration literal, no engine opener effect=, cannot replace a whole tape, and cannot construct a payload variant (Phase.Rejected(…)) yet -->
+<!-- gate: spec-ahead [E-BOOTSTRAP-UNSUPPORTED×9, E-PARSE-TAG×2, E-PARSE-TRAILING×2, E-SCOPE-001(addRow, replaceRow), E-STATE-UNDECLARED(@tasks, @tasks, @tasks, @tasks)] — the bootstrap has no <schema>, <channel>, <match> block element, class: binding, <empty>, <onTimeout> or duration literal, no engine opener effect=, cannot replace a whole tape, and cannot construct a payload variant (Phase.Rejected(…)) yet -->
 <!-- snippet: docs/readme-snippets/tasks.scrml#L7-L53 -->
 ```scrml
 <program db="tasks.db">
@@ -349,7 +349,7 @@ const Swatch = <span class="chip" props={ label: string, hex: string }>
 
 Ruled ([file](./docs/readme-snippets/component.scrml)):
 
-<!-- gate: spec-ahead [E-BOOTSTRAP-UNSUPPORTED] — the bootstrap has no ${…} inside a quoted attribute (a reactive template, §5.5.3) and cannot render a named shared instance (<*accent/>) yet -->
+<!-- gate: spec-ahead [E-BOOTSTRAP-UNSUPPORTED×5] — the bootstrap has no ${…} inside a quoted attribute (a reactive template, §5.5.3) and cannot render a named shared instance (<*accent/>) yet -->
 <!-- snippet: docs/readme-snippets/component.scrml -->
 ```scrml
 // component.scrml — README "What changed", item 3: a component is a declaration with a `renders`.

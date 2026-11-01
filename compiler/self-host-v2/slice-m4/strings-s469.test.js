@@ -246,6 +246,14 @@ describe("C — tape functions return a NEW tape; JavaScript's names are refused
     expect($("#o").textContent).toBe("123");
     expect($("#v").textContent).toBe("321");
   });
+  test("a string tape's natural sort is by CODE POINT, not UTF-16 unit (Appendix D.1) — an astral char vs a high-BMP char (runtime)", async () => {
+    // "～" is U+FF5E (one unit, 0xFF5E); "😀" is U+1F600 (the pair 0xD83D 0xDE00).
+    // Code-point order puts "～" first; UTF-16 order (JS's default sort) puts
+    // "😀" first, because its lead surrogate 0xD83D < 0xFF5E. (S474 #1475 review:
+    // switching sortStr to UTF-16 order passed every test before this one.)
+    await load(prog(`    <ws:string[]=(["😀", "～"])/>`, `        <p id="s">\${@ws.sort().join(",")}</p>`));
+    expect($("#s").textContent).toBe("～,😀");
+  });
   test("E-TAPE-JS-METHOD — in a statement and as a value, on a cell and on a local, with the fix-it named", () => {
     const fn = (body) => prog(T + `\n    function go() {\n        ${body}\n    }`, `        <button onclick=go()>go</button>`);
     expect(diag(fn(`@xs.push(4);`), "E-TAPE-JS-METHOD")?.message).toContain(".append(x)");

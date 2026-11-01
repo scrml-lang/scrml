@@ -188,7 +188,7 @@ A `lin` declared *inside* the loop body and consumed inside the same iteration i
 
 A `lin` declared in one `${}` logic block can be consumed in a later `${}` block, or in a markup interpolation between them, as long as both sit under the same parent scope.
 
-<!-- gate: spec-ahead [E-PARSE-ITEM, E-SCOPE-001] — the bootstrap has no `lin` declarations and no statements in a program-level `${ }` logic block yet -->
+<!-- gate: spec-ahead [E-PARSE-ITEM, E-SCOPE-001(token)] — the bootstrap has no `lin` declarations and no statements in a program-level `${ }` logic block yet -->
 ```scrml
 <program>
 
