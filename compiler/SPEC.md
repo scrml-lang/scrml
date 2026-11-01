@@ -15548,7 +15548,7 @@ no format specifier inside `${}`: formatting is a call (§41.22) whose result is
   unresolved-type limb refuses because inference did not reach the value, not because of the value, so it holds
   only until the compiler resolves the type of every value reaching a text sink. After that a resolved primitive is
   accepted and anything else is refused as non-primitive. Until then the message names an annotation or a
-  conversion (`T.parse`, §14.13) as the fix (`g-text-sink-unresolved-type-capable-form-owed-s474`). *(S469 r2: a markup value is struck from this list — in markup
+  conversion (`T.parse`, §14.13) as the fix (`g-text-sink-unresolved-type-capable-form-owed-s474`; capability ledger IN-45). *(S469 r2: a markup value is struck from this list — in markup
   text it is not text and renders as markup, §7.4.2; in a quoted attribute or a logic template it is refused as any
   other non-primitive.)* In markup text, a quoted attribute or a logic template this SHALL
   be compile error **`E-TEXT-NON-PRIMITIVE`** (§34); the message names a field read, a `scrml:format` call or
@@ -22950,7 +22950,7 @@ test-bind-decl ::= 'test-bind' identifier '=' expression
 ```scrml
 ~{ "engine reaches .Success given synthetic HTTP, no real network"
     test-bind fetchUser  = (id) => { id, name: "Alice", email: "a@b.com" };
-    test-bind fetchPosts = []
+    test-bind fetchPosts = [];
 
     test "user load drives engine to .Success" {
         // ... test body that exercises the engine + asserts state transition.
@@ -23421,7 +23421,7 @@ them to JavaScript (an impl#1 note, not language — FORK RULE row 0) and the bo
 **Not in the table: refused (S469).** The table is the whole string surface. A call of any other method on a
 `string` (`codePointAt`, `normalize`, `localeCompare`, `match`, `search`, `substring`, `at`, `concat`, …) SHALL
 be compile error **`E-STRING-METHOD-UNKNOWN`** (§34), naming the nearest admitted form where there is one. A
-method may be admitted later, and an admitted one may be deprecated later (§63). ⚑ **INTERIM (S474, FORK RULE row C):** the refusal stands until each method is admitted. It is neither a proven exploit nor a semantic impossibility, so it is not PERMANENT. The capable forms owed are typed, code-point-counted signatures, admitted by ruling: `normalize` over a unit enum of the Unicode forms, a locale-aware comparison returning an ordering (a method or a `scrml:format` function; not ruled), and `codePointAt(i) -> int | not`. `match` / `search` wait on a ruled regex type. `substring` / `at` / `concat` already have admitted forms (`slice`, `s[i]`, a template), which the message names (`g-string-methods-off-table-capable-form-owed-s474`; capability ledger IN-15). impl#1 still passes these to
+method may be admitted later, and an admitted one may be deprecated later (§63). ⚑ **INTERIM (S474, FORK RULE row C):** the refusal stands until each method is admitted. It is neither a proven exploit nor a semantic impossibility, so it is not PERMANENT. The capable forms owed are typed, code-point-counted signatures, admitted by ruling: `normalize` over a unit enum of the Unicode forms, a locale-aware comparison returning an ordering (a method or a `scrml:format` function; not ruled), and `codePointAt(i) -> int | not`. `match` / `search` wait on a ruled regex type. `substring` / `at` / `concat` already have admitted forms (`slice`, `s[i]`, a template), which the message names (`g-string-methods-off-table-capable-form-owed-s474`; capability ledger IN-44; the regex dependency is IN-15). impl#1 still passes these to
 JavaScript (an impl#1 note, not language — FORK RULE row 0); ~~the bootstrap refuses them today under
 `E-BOOTSTRAP-UNSUPPORTED`, and does not yet build the S469 additions.~~ the bootstrap builds the S469 additions and
 refuses every other method as `E-STRING-METHOD-UNKNOWN` (`compiler/self-host-v2/analyze.scrml`; status update,
