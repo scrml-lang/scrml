@@ -1,0 +1,49 @@
+{
+  "id": "error-failable-match-whole-error-binder-rt",
+  "description": "§18.6.1 / §19.7.1 (S474) — the accepted way to handle every error of a failable `match` in one arm: `.Ok(v) :> \"LOGGED IN\", _ e :> \"denied\"`. `_ e` takes every error variant and never `.Ok`, so a wrong password yields \"denied\" and the right one \"LOGGED IN\". The form E-MATCH-ELSE-ABSORBS-ERROR's message offers.",
+  "language-version": "1.0",
+  "spec": "§18.6.1",
+  "provenance": "ruling:user-voice-scrml.md S474 \"⭐ RULED — `else` on a failable match; `scrml fix` S466 readings\" item 1 — \"Nothing becomes impossible to write, since every error can still be handled in one arm with `_ e`\"",
+  "rationale": "§18.6.1: in a `match` on a failable result, `_ <name>` matches every error variant not matched by an earlier arm and never `.Ok`. With an `.Ok` arm the match is exhaustive; no E-MATCH-ELSE-ABSORBS-ERROR (there is no plain `else`) and no E-TYPE-020.",
+  "expect": {
+    "codes": [],
+    "notCodes": [
+      "E-MATCH-ELSE-ABSORBS-ERROR",
+      "E-TYPE-020"
+    ],
+    "notCodePrefixes": [
+      "E-"
+    ],
+    "input": [
+      {
+        "click": "#go"
+      }
+    ],
+    "state": {
+      "wrong": "denied",
+      "right": "LOGGED IN"
+    },
+    "domAnchored": [
+      {
+        "selector": "#wrong",
+        "text": "denied"
+      },
+      {
+        "selector": "#right",
+        "text": "LOGGED IN"
+      }
+    ]
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-impl1-whole-error-binder-s451",
+      "fails": {
+        "codes": [
+          "emitted:E-VALUE-FUNCTION-STORED=2",
+          "prefix:E-VALUE-FUNCTION-STORED (matches forbidden E-*)"
+        ],
+        "runtime": "sha256:b0d1cd4dcdbe2a93"
+      }
+    }
+  }
+}

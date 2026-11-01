@@ -1,0 +1,28 @@
+${
+    type AuthErr:enum = {
+        Denied
+        Locked
+    }
+
+    function check(pw: string)! AuthErr {
+        if (pw == "locked") fail AuthErr.Locked;
+        if (pw != "secret") fail AuthErr.Denied;
+        return true;
+    }
+}
+
+<msg> = ""
+
+${
+    // The exploit the S474 ruling closes: `else` would take `.Denied`, so a wrong
+    // password would reach "LOGGED IN".
+    function login() {
+        @msg = match check("wrong") {
+            ::Locked :> "locked",
+            else     :> "LOGGED IN"
+        };
+    }
+}
+
+<button id="go" onclick=login()>go</>
+<p id="out">${@msg}</>
