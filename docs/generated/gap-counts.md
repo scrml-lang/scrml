@@ -12,8 +12,8 @@ PR's own ledger edits.
 | Severity | Open (owed by impl#1, the TS compiler) | Carried (owed by the bootstrap; xfail on impl#1) |
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 269 | 5 |
-| MED | 754 | 8 |
-| LOW | 680 | 0 |
+| HIGH | 272 | 5 |
+| MED | 757 | 8 |
+| LOW | 693 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
