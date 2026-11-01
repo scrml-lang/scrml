@@ -93,8 +93,12 @@ describe("§18.6.1 — the whole-error binder `| _ err :>`", () => {
     expect(msg(src, "E-TYPE-020")).toContain("Ok");
   });
 
-  test("a plain `_` still takes the success value too (§19.7.3, unchanged)", () => {
-    clean(P(`${TYPES}\n${LOAD}\n    function go() {\n        match load("a") {\n            _ :> @n = 1\n        }\n    }`));
+  // s474 (ruling: user-voice-scrml.md S474 "`else` on a failable match") — a plain `_` takes the
+  // success value ONLY: alone it would also take every error, so it is E-MATCH-ELSE-ABSORBS-ERROR;
+  // after arms that name every error it is the success arm.
+  test("a plain `_` takes the success value only (§19.7.1, s474): alone it is E-MATCH-ELSE-ABSORBS-ERROR", () => {
+    expect(codes(P(`${TYPES}\n${LOAD}\n    function go() {\n        match load("a") {\n            _ :> @n = 1\n        }\n    }`))).toEqual(["E-MATCH-ELSE-ABSORBS-ERROR"]);
+    clean(P(`${TYPES}\n${LOAD}\n    function go() {\n        match load("a") {\n            .NotFound(m) :> @n = 2,\n            .Timeout :> @n = 3,\n            _ :> @n = 1\n        }\n    }`));
   });
 
   test("it is the wildcard: a `!{}` with only `| _ err :>` is exhaustive; a deferred one is total (§19.16.3 r3)", () => {
@@ -208,7 +212,7 @@ describe("§19.4.3 ruling 1a — E-ERROR-012: in a value position every arm yiel
   });
 
   test("a `match` on a failable result in a value position — the `.Ok(v)` arm is an arm like any other", () => {
-    const src = go(`    function go() -> string {\n        return match load("x") {\n            .Ok(v) :> @log = v,\n            else :> "e"\n        };\n    }`);
+    const src = go(`    function go() -> string {\n        return match load("x") {\n            .Ok(v) :> @log = v,\n            _ e :> "e"\n        };\n    }`);
     expect(codes(src)).toEqual(["E-ERROR-012"]);
     expect(msg(src, "E-ERROR-012")).toContain("Arm '.Ok(v)' of the match on 'load(…)'");
   });
@@ -250,7 +254,7 @@ describe("§19.4.3 ruling 1a — E-ERROR-012: in a value position every arm yiel
   });
 
   test("r2 HIGH-1: the same in a value-position `match` arm, and in an arm that LEAVES (PA reading)", () => {
-    const m = go(`    function pick(id: string) -> string {\n        return match load(id) {\n            .Ok(v) :> {\n                defer @n = 7;\n                v;\n            },\n            _ :> "e"\n        };\n    }`, []);
+    const m = go(`    function pick(id: string) -> string {\n        return match load(id) {\n            .Ok(v) :> {\n                defer @n = 7;\n                v;\n            },\n            _ e :> "e"\n        };\n    }`, []);
     expect(codes(m)).toEqual(["E-DEFER-UNSUPPORTED-SITE"]);
     rejected(m, "E-DEFER-UNSUPPORTED-SITE");
     expect(codes(go(`    function pick(id: string) -> string {\n        const r = load(id) !{ _ :> {\n            defer @n = 7;\n            return "L";\n        } };\n        return r;\n    }`, []))).toEqual(["E-DEFER-UNSUPPORTED-SITE"]);

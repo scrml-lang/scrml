@@ -1,0 +1,34 @@
+{
+  "id": "error-failable-match-wildcard-absorbs-error-neg",
+  "description": "§19.7.1 / §18.6 (S474, PERMANENT — security) — `_`, the alias of `else`, absorbing error variants: once after `.Ok(v)` in a `return match` (it would take `.Denied` and `.Locked`), once after `.Denied` in a statement-position `match` (it would take `.Locked`). Each is E-MATCH-ELSE-ABSORBS-ERROR — two diagnostics.",
+  "language-version": "1.0",
+  "spec": "§19.7.1",
+  "provenance": "ruling:user-voice-scrml.md S474 \"⭐ RULED — `else` on a failable match; `scrml fix` S466 readings\" item 1 — \"on a failable subject, `else` covers success variants only\"",
+  "rationale": "§18.6: `_` is a valid alias for `else`. §19.7.1 (S474): on a failable result either covers `.Ok` only, so each `match` here leaves an error variant to its wildcard: E-MATCH-ELSE-ABSORBS-ERROR, once per `match`, in a `return` position and a statement position alike.",
+  "expect": {
+    "codes": [
+      "E-MATCH-ELSE-ABSORBS-ERROR"
+    ],
+    "notCodes": [
+      "E-TYPE-020"
+    ],
+    "severity": {
+      "E-MATCH-ELSE-ABSORBS-ERROR": "error"
+    },
+    "codeCounts": {
+      "E-MATCH-ELSE-ABSORBS-ERROR": 2
+    }
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-impl1-else-absorbs-error-variants-s474",
+      "fails": {
+        "codes": [
+          "codeCounts:code 'E-MATCH-ELSE-ABSORBS-ERROR' fired 0 time(s), expected exactly 2",
+          "missing:E-MATCH-ELSE-ABSORBS-ERROR",
+          "severity:code 'E-MATCH-ELSE-ABSORBS-ERROR' did not fire (expected severity error)"
+        ]
+      }
+    }
+  }
+}

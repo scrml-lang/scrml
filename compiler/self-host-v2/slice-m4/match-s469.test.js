@@ -341,7 +341,7 @@ describe("review HIGH-1 — absence is `null` and `undefined`; no function falls
 describe("delta review — no path yields `undefined`", () => {
   const LOGIN = (decls, attempt) => `<program>\n    type Denied:enum = { Bad }\n    let <wrong:string=""/>\n    let <right:string=""/>\n${decls}\n${attempt}\n    function login() {\n        @wrong = attempt("hunter3");\n        @right = attempt("hunter2");\n    }\n    <main>\n        <button onclick=login()>go</button>\n        <p id="wrong">\${@wrong}</p>\n        <p id="right">\${@right}</p>\n    </main>\n</program>\n`;
   const ROLE = (tail) => `    function role(pw: string)! Denied {\n        if (pw == "hunter2") return "user";${tail};\n    }`;
-  const VAL = `    function attempt(pw: string) -> string {\n        return match role(pw) {\n            .Ok(v) :> "welcome",\n            _ :> "denied"\n        };\n    }`;
+  const VAL = `    function attempt(pw: string) -> string {\n        return match role(pw) {\n            .Ok(v) :> "welcome",\n            _ e :> "denied"\n        };\n    }`;
   const GUARD = `    function attempt(pw: string) -> string {\n        const r: string = role(pw) !{ _ :> "denied" };\n        if (r == "user") return "welcome";\n        return "denied";\n    }`;
   test("HIGH-A: a `!` function whose success path can fall off is refused — `match` and `!{}` callers", () => {
     for (const a of [VAL, GUARD]) {
