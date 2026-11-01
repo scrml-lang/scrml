@@ -105,6 +105,16 @@ describe("B — a brace that holds a statement (or a second item) is still a sta
     expect(codes(src)).toEqual(["E-STMT-MISSING-SEMICOLON", "E-STMT-MISSING-SEMICOLON", "E-STMT-MISSING-SEMICOLON"]);
     expect(codes(P(fn(`        match k { .A :> { one(); }, .B :> { @n = 2; }, .C :> @n = 3 }\n        return 0;`)))).toEqual([]);
   });
+  test("#1722 F1: a block-like statement inside a statement-position arm brace owes no `;` — a nested statement `match`, an `if`, a `for`", () => {
+    // (the review repro: base compiled it; the first cut reported "insert `;` after `}`")
+    expect(codes(P(fn(`        match k { .A :> { match k { .A :> { @n = 1; }, .B :> { @n = 2; }, .C :> { @n = 4; } } }, .B :> { @n = 3; }, .C :> { @n = 5; } }\n        return 0;`)))).toEqual([]);
+    expect(codes(P(fn(`        match k { .A :> { if (@n == 0) { @n = 1; } }, .B :> { @n = 3; }, .C :> { @n = 5; } }\n        return 0;`)))).toEqual([]);
+    expect(codes(P(fn(`        match k { .A :> { for (const x of [1, 2]) { @n = x; } }, .B :> { @n = 3; }, .C :> { @n = 5; } }\n        return 0;`)))).toEqual([]);
+    // the value position too: a nested `match` is one expression
+    expect(codes(P(fn(`        const v = match k { .A :> { match k { .A :> 1, .B :> 2, .C :> 3 } }, .B :> 2, .C :> 3 };\n        return v;`)))).toEqual([]);
+    // a nested `!{}` STATEMENT is not block-like (dpa-073 F3, PA reading S469): it still owes its `;`
+    expect(semis(P(`    function g(k: K, id: string) -> int {\n        match k { .A :> { load(id) !{ _ :> 0 } }, .B :> { @n = 3; }, .C :> { @n = 5; } }\n        return 0;\n    }`))).toEqual(["match k { .A :> { load(id) !{ _ :> 0 }"]);
+  });
   test("a statement-position `!{}` handler likewise", () => {
     const src = P(`    function g(id: string) -> int {\n        load(id) !{ .NotFound(m) :> { @n = 1 }, .Timeout :> { @n = 2; } };\n        return 0;\n    }`);
     expect(semis(src)).toEqual(["load(id) !{ .NotFound(m) :> { @n = 1"]);

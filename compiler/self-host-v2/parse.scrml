@@ -1107,8 +1107,12 @@ ${
                 // Where the arm's value is NOT used (a statement-position
                 // `match` / `!{}`) the block is a statement list and the `;` is
                 // owed after all: `bare` marks the arm so armTails reports it.
+                // A block-like expression statement (a statement `match`) owes
+                // no `;` in either position (rule 2), so it is never `bare`
+                // (#1722 review F1: `.A :> { match k { … } }` in a statement
+                // `match` drew a spurious report); termAfter passes it.
                 let r: RStmt = rs
-                if (stmts.length == 0 && !sawSemi && isP(rs.tp, "}") && stmtExpr(rs.s) is given && hardErrors(rs.tp.diags) == h0) {
+                if (stmts.length == 0 && !sawSemi && isP(rs.tp, "}") && stmtExpr(rs.s) is given && needsSemi(rs.s) && hardErrors(rs.tp.diags) == h0) {
                     bare = true
                 } else {
                     r = { s: rs.s, tp: termAfter(rs.tp, rs.s, b0) }
