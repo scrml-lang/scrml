@@ -13007,18 +13007,27 @@ ${
     // The arms of a `!{}` / `match`, resolved against enum `err` — what does
     // not depend on WHICH failure set the call has: every arm's pattern,
     // binders and body, a duplicate (E-TYPE-023), an arm after the wildcard
-    // (E-SYNTAX-010). `covered`: the variant indices named; `wild`: a
-    // wildcard arm (plain `_` / `else`, or `_ err`); `okSeen`: `.Ok`, or a
-    // PLAIN wildcard (§18.6.1: `_ err` never takes `.Ok`).
-    type RArms:struct = { st: AS, covered: int[], wild: boolean, okSeen: boolean }
+    // (E-SYNTAX-010). `covered`: the variant indices named; `wild`: an arm
+    // that takes every remaining ERROR — `_ err`, or (in a `!{}` only) a plain
+    // `_` / `else`; `okSeen`: `.Ok`, or a PLAIN wildcard (§18.6.1: `_ err`
+    // never takes `.Ok`); `absorb`: the plain `_` / `else` of a `match` —
+    // s474 (ruling: user-voice-scrml.md S474 "`else` on a failable match"):
+    // on a failable result it covers the success value `.Ok` ONLY, never an
+    // error variant (§18.6, §19.7.1; E-MATCH-ELSE-ABSORBS-ERROR in
+    // coverDiags, the one choke point for every failable-subject `match`);
+    // `absorbSpan`: that arm, where the error is reported.
+    type RArms:struct = { st: AS, covered: int[], wild: boolean, okSeen: boolean, absorb: boolean, absorbSpan: ASpan | not }
 
     fn resolveArms(env: Env, subj: AExpr, arms: AArm[], err: Sym, isMatch: boolean, stmt: boolean, st0: AS) -> RArms {
         let st: AS = st0
         const vs: VariantDef[] = enumVariantsOf(env.g, err)
         let covered: int[] = []
-        let wild = false          // a wildcard arm: plain `_` / `else`, or `_ err` — every remaining ERROR
+        let last = false          // a wildcard arm has been seen: plain `_` / `else`, or `_ err` (§18.6 position rule)
+        let wild = false          // an arm that takes every remaining ERROR: `_ err`; a plain wildcard in a `!{}`
         let okSeen = false        // `.Ok`, or a PLAIN wildcard (§18.6.1: `_ err` never takes `.Ok`)
         let wildWhole = false     // the first wildcard was `_ err`
+        let absorb = false        // s474: a `match`'s plain `_` / `else` — the success value only
+        let absorbSpan: ASpan | not = not
         for (const a of arms) {
             const ra: RArm = resolveArm(env, a, err, vs, isMatch, { stmt: stmt, subj: subj, isMatch: isMatch, what: env.fx.wholeWhat }, st)
             st = ra.st
@@ -13031,46 +13040,93 @@ ${
             // alias), and §18.6.1 for the whole-error binder: "it is the wildcard
             // for the last-arm position (E-SYNTAX-010)". After `_ err` the reason
             // is the position rule, NOT unreachability (`_ err` never takes `.Ok`).
-            if (wild) {
+            if (last) {
                 st = addDiag(st, env.file, a.span, "E-SYNTAX-010", afterWildMsg(wildWhole))
             } else if ((ra.idx >= 0 && covered.indexOf(ra.idx) >= 0) || (ra.idx == -2 && okSeen)) {
                 st = addDiag(st, env.file, a.span, "E-TYPE-023", "a second arm for the same variant — the first arm already takes it, so this one is unreachable (§18.8.1 E-TYPE-023: duplicate match arm)")
             }
             if (ra.idx == -1) {
-                wild = true
                 okSeen = true                // a plain wildcard takes the success value too (§19.7.3)
+                // s474 — in a `match` on a failable result a plain `_` / `else` is the
+                // success value's arm: it takes NO error variant (§18.6, §19.7.1). In a
+                // `!{}` every arm is a failure, so there it is the catch-all (§19.4.5).
+                // (After an earlier wildcard it is E-SYNTAX-010 above and takes nothing.)
+                if (!last && isMatch) {
+                    absorb = true
+                    absorbSpan = a.span
+                }
+                if (!isMatch) wild = true
+                last = true
             }
-            if (ra.idx == -4 && !wild) {
+            if (ra.idx == -4 && !last) {
+                last = true
                 wild = true                  // `_ err`: every remaining error, never `.Ok` (§18.6.1)
                 wildWhole = true
             }
             if (ra.idx == -2) okSeen = true
             if (ra.idx >= 0) covered = covered.concat([ra.idx])
         }
-        return { st: st, covered: covered, wild: wild, okSeen: okSeen }
+        return { st: st, covered: covered, wild: wild, okSeen: okSeen, absorb: absorb, absorbSpan: absorbSpan }
     }
 
     // What the failure set decides about resolved arms: totality over the
     // FIRST `upto` variants of `err` (-1: all of them) — E-TYPE-080 (`!{}`) /
     // E-TYPE-020 (`match`, which also owes `.Ok`) — and, in a deferred
     // statement, the catch-all §19.16.3 rule 3 requires.
+    //
+    // s474 — the failable-subject `match` choke point for `else`. Every
+    // failable subject that reaches a `match` — a call of a `!` function, a
+    // client call of a server function (judged here against the client set
+    // and, server→server, the callee's own: `upto`), a `?{}` query; in a value
+    // position, as a statement, or as `return match …` — is checked HERE and
+    // nowhere else. A plain `_` / `else` arm covers the success value `.Ok`
+    // only (resolveArms `absorb`); an error variant no arm names is then
+    // E-MATCH-ELSE-ABSORBS-ERROR, not E-TYPE-020: the `else` is what the
+    // author wrote to finish the match, and it would have taken the error.
+    // PERMANENT (security): `match check(pw) { .Locked :> "locked", else :>
+    // "LOGGED IN" }` logged in on `.Denied` (ruling: user-voice-scrml.md S474
+    // "⭐ RULED — `else` on a failable match").
     fn coverDiags(env: Env, e: AExpr, subj: AExpr, err: Sym, isMatch: boolean, ra: RArms, upto: int, label: string) -> Diag[] {
         const vs: VariantDef[] = enumVariantsOf(env.g, err)
-        let missing: string[] = []
-        if (isMatch && !ra.okSeen) missing = ["Ok"]
+        let errs: string[] = []           // the error variants no arm takes
         if (!ra.wild) {
             let i = 0
             for (const v of vs) {
-                if ((upto < 0 || i < upto) && ra.covered.indexOf(i) < 0) missing = missing.concat([v.sym.hint])
+                if ((upto < 0 || i < upto) && ra.covered.indexOf(i) < 0) errs = errs.concat([v.sym.hint])
                 i = i + 1
             }
         }
         if (!ra.wild && !isMatch && env.fx.defer) {
             return [newDiag("E-DEFER-UNHANDLED-FAILABLE", "a `!{ … }` handler in a deferred statement SHALL carry a catch-all `| _ :> …` arm (§19.16.3 rule 3) — listing every variant of `" + label + "` is not enough: a failure outside the declared enum would otherwise leave the `finally`", env.file, e.span)]
         }
+        if (isMatch && ra.absorb && errs.length > 0) {
+            let at: ASpan = e.span
+            const sp: ASpan | not = ra.absorbSpan
+            if (sp is given) at = sp
+            return [newDiag("E-MATCH-ELSE-ABSORBS-ERROR", absorbsMsg(subj, label, errs), env.file, at)]
+        }
+        let missing: string[] = []
+        if (isMatch && !ra.okSeen) missing = ["Ok"]
+        missing = missing.concat(errs)
         if (missing.length == 0) return []
-        if (isMatch) return [newDiag("E-TYPE-020", "this `match` over the result of " + subjectName(subj) + " is not exhaustive: it does not cover " + missing.join(", ") + " — a `match` on a failable result covers `.Ok` and every variant of `" + label + "`, or ends with `else :>` / `_ :>` (§19.7.1)", env.file, e.span)]
+        if (isMatch) return [newDiag("E-TYPE-020", "this `match` over the result of " + subjectName(subj) + " is not exhaustive: it does not cover " + missing.join(", ") + " — " + e020FailableHint(label, errs, !ra.okSeen) + " (§19.7.1)", env.file, e.span)]
         return [newDiag("E-TYPE-080", "this `!{ … }` handler on " + subjectName(subj) + " is not exhaustive: it does not cover " + missing.join(", ") + " of `" + label + "` — add those arms, or a catch-all `| _ :> …` (§19.7)", env.file, e.span)]
+    }
+
+    // s474 — E-MATCH-ELSE-ABSORBS-ERROR's message: names every error variant
+    // the `else` would have taken and offers the forms that handle them.
+    fn absorbsMsg(subj: AExpr, label: string, errs: string[]) -> string {
+        return "this `else` / `_` arm would take the error variant(s) " + errs.join(", ") + " of " + subjectName(subj) + " — on a failable result, `else` covers the success value `.Ok` only, so a failure never runs the success arm (§18.6, §19.7.1). Handle the error(s) explicitly: name them (`." + errs[0] + " :> …`), or replace the `else` with `_ e :> …`, which takes every remaining error (and write `.Ok(v) :> …` for the success value if no arm takes it), or handle the call with `!{ … }`"
+    }
+
+    // s474 — E-TYPE-020's fix on a failable result. It never offers `else`
+    // for an uncovered error: there `else` takes `.Ok` only (§19.7.1).
+    fn e020FailableHint(label: string, errs: string[], okMissing: boolean) -> string {
+        let h: string = "a `match` on a failable result covers the success value `.Ok` and every variant of `" + label + "`:"
+        if (okMissing) h = h + " add `.Ok(v) :> …`"
+        if (okMissing && errs.length > 0) h = h + ", and"
+        if (errs.length > 0) h = h + " name each missing error variant, or take them all in one `_ e :> …` arm (`else` covers `.Ok` only, never an error)"
+        return h
     }
 
     // How a client call's failure set is named in a message: the minted enum's

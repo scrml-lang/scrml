@@ -124,7 +124,7 @@ describe("S451 R11 — `?{}` is failable everywhere; s451 Ue — the handling fo
   });
 
   test("a `match` on a query's result handles it (§19.8.3 item 2): clean", () => {
-    const src = P(DB, `    function f() {\n        const r = match ${SQ}\`SELECT a FROM t\`}.all() {\n            _ :> 1\n        };\n    }`);
+    const src = P(DB, `    function f() {\n        const r = match ${SQ}\`SELECT a FROM t\`}.all() {\n            .Ok(rows) :> 1,\n            _ e :> 2\n        };\n    }`);
     expect(codes(src)).toEqual([]);
   });
 

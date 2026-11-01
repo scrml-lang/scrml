@@ -7,22 +7,22 @@ PURE bootstrap (`compiler/self-host-v2/` front end + printer + runtime, no impl#
 Bucket definitions: the header of `scripts/bootstrap-conformance.ts`. A TRACKING number, not a gate.
 It is a run, not a static count, so it is NOT a `docs/FACTS.md` row (FACTS excludes run-derived figures).
 
-Scope: **1817 of 1817 cases attempted** — every attempted case reached the pure bootstrap (no impl#1 stage).
+Scope: **1822 of 1822 cases attempted** — every attempted case reached the pure bootstrap (no impl#1 stage).
 
 | bucket | cases | share of attempted |
 |---|---:|---:|
-| PASS | 287 | 15.8% |
+| PASS | 292 | 16.0% |
 | CODES-ONLY | 0 | 0.0% |
-| FAIL | 239 | 13.2% |
+| FAIL | 239 | 13.1% |
 | LEGACY | 0 | 0.0% |
-| NOT-TWINNED | 685 | 37.7% |
-| UNSUPPORTED | 606 | 33.4% |
+| NOT-TWINNED | 685 | 37.6% |
+| UNSUPPORTED | 606 | 33.3% |
 | CRASH | 0 | 0.0% |
 | INVALID | 0 | 0.0% |
 
-**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 526; of those, 287 hold (54.6%). Runtime half executed on the bootstrap for 101 case(s).
+**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 531; of those, 292 hold (55.0%). Runtime half executed on the bootstrap for 104 case(s).
 
-- **Vacuous** passes: 17 of 287 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **270**.
+- **Vacuous** passes: 17 of 292 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **275**.
 - FAILs whose required code appears nowhere in the bootstrap's sources (check not implemented): 75 of 239; the other 164 are implemented checks that answered wrong.
 
 LEGACY by marker (a case may carry several): none.
@@ -30,7 +30,7 @@ UNSUPPORTED by reason: bootstrap-unsupported 606.
 
 ### §66 twins (S449 dialect ruling 1 — generated at test time by the `scrml fix` §66 rules)
 
-Legacy-dialect cases graded on their generated §66 twin: **793** — PASS 175 · FAIL 203 · UNSUPPORTED 415. Twin holds 175 (non-vacuous 162). Every twin verdict above is included in the bucket table.
+Legacy-dialect cases graded on their generated §66 twin: **798** — PASS 180 · FAIL 203 · UNSUPPORTED 415. Twin holds 180 (non-vacuous 167). Every twin verdict above is included in the bucket table.
 - `dialect.s66` overrides: 0 replace a twin's expectations · 11 exclude a case.
 - Superseded-code mappings applied: 2 case(s) (E-ENGINE-VAR-DUPLICATE→E-SCOPE-010). Rows: E-ENGINE-VAR-DUPLICATE→E-SCOPE-010 [applied] · E-ENGINE-STATE-CHILD-INVALID-VARIANT→∅ [owed] · E-ENGINE-RULE-INVALID-VARIANT→∅ [owed] · E-ENGINE-INITIAL-INVALID-VARIANT→∅ [owed] · E-CELL-NO-RENDER-SPEC→∅ [owed] · E-CELL-RENDER-SPEC-NOT-BINDABLE→∅ [owed] · E-DECL-RHS-INTERP-WRAPPED→∅ [owed] · E-COMPONENT-010→∅ [owed].
 
@@ -117,7 +117,7 @@ NOT-TWINNED by reason (685 cases; a case counts once per distinct reason):
 | engine | 92 | 6 | · | 14 | · | 50 | 22 | · | · |
 | enum | 1 | · | · | 1 | · | · | · | · | · |
 | equality | 10 | · | · | · | · | 4 | 6 | · | · |
-| error | 73 | 32 | · | 12 | · | 5 | 24 | · | · |
+| error | 78 | 37 | · | 12 | · | 5 | 24 | · | · |
 | error-boundary | 11 | · | · | · | · | 11 | · | · | · |
 | files | 1 | 1 | · | · | · | · | · | · | · |
 | fn | 19 | 6 | · | 5 | · | 1 | 7 | · | · |
@@ -1090,7 +1090,7 @@ none
 
 none
 
-### PASS / CODES-ONLY (287)
+### PASS / CODES-ONLY (292)
 
 - `attr-executable-sink/bound-svg-animation-runtime-guard` — PASS · TWIN
 - `attr-executable-sink/bound-url-runtime-guard` — PASS · TWIN
@@ -1207,9 +1207,14 @@ none
 - `error/fail-variant-payload-arity-neg` — PASS · TWIN
 - `error/fail-variant-payload-arity-too-few-neg` — PASS · TWIN
 - `error/fail-variant-undeclared-neg` — PASS · TWIN
+- `error/failable-match-else-absorbs-error-neg` — PASS · TWIN
+- `error/failable-match-else-after-error-arms-rt` — PASS · TWIN
 - `error/failable-match-nonexhaustive-err` — PASS · TWIN
 - `error/failable-match-nonexhaustive-ok` — PASS · TWIN
+- `error/failable-match-whole-error-binder-rt` — PASS · TWIN
+- `error/failable-match-wildcard-absorbs-error-neg` — PASS · TWIN
 - `error/for-await-not-in-scrml` — PASS · TWIN
+- `error/handler-else-covers-errors-rt` — PASS · TWIN
 - `error/handler-failable-guard-and-plain-reference-neg` — PASS · TWIN
 - `error/handler-pipeless-arms-rt` — PASS · TWIN
 - `error/handler-recovery-into-cell` — PASS · TWIN
