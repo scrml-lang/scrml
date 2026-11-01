@@ -47,7 +47,8 @@ describe("scrml-boot compile — b-tapes.scrml (the audit log + stack)", () => {
     expect(first.err).not.toContain("error");
     expect(first.code).toBe(0);
     expect(first.out).toContain("✓ compiled");
-    expect(readdirSync(out()).sort()).toEqual(["index.html", "program.client.js", "scrml-runtime.js"]);
+    // (and the manifest of what it wrote, S474 backfill C1)
+    expect(readdirSync(out()).sort()).toEqual([".scrml-boot-manifest.json", "index.html", "program.client.js", "scrml-runtime.js"]);
     const html = readFileSync(join(out(), "index.html"), "utf8");
     expect(html).toContain('<script type="module" src="program.client.js">');
     expect(readFileSync(join(out(), "program.client.js"), "utf8")).toContain('from "./scrml-runtime.js"');

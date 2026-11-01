@@ -17,8 +17,9 @@ import { compileSource, formatDiagnostic } from "./scrml-boot.ts";
  * @param {string} absPath  the path the source is compiled AS (need not exist on disk when `text` is given)
  * @param {string} [text]   the source; omitted → read from `absPath`
  * @param {Function} [compile] the compiler (default scrml-boot's compileSource; tests inject one)
- * @returns {Promise<{ ok: boolean, crash: boolean, codes: string[], lines: string[] }>}
- *   `codes`: the Error-severity diagnostic codes, in order; `lines`: one line per diagnostic.
+ * @returns {Promise<{ ok: boolean, crash: boolean, codes: string[], keys: string[], lines: string[] }>}
+ *   `codes`: the Error-severity diagnostic codes, in order; `keys`: each one's pin key (pinKey);
+ *   `lines`: one line per diagnostic.
  */
 export async function bootCheck(absPath, text, compile = compileSource) {
   try {
@@ -29,10 +30,11 @@ export async function bootCheck(absPath, text, compile = compileSource) {
       ok: r.ok,
       crash: false,
       codes: errors.map((d) => d.code),
+      keys: errors.map(pinKey),
       lines: r.diagnostics.map((d) => formatDiagnostic(d, "line")),
     };
   } catch (e) {
-    return { ok: false, crash: true, codes: ["BOOTSTRAP-CRASH"], lines: [`bootstrap crash: ${String(e?.message ?? e)}`] };
+    return { ok: false, crash: true, codes: ["BOOTSTRAP-CRASH"], keys: ["BOOTSTRAP-CRASH"], lines: [`bootstrap crash: ${String(e?.message ?? e)}`] };
   }
 }
 
@@ -47,15 +49,69 @@ export function codeSummary(codes, max = 4) {
 }
 
 /**
- * A spec-ahead marker may pin the bootstrap's expected Error codes. Returns null when the
- * distinct codes equal the pinned set (or nothing is pinned), else a message naming both.
+ * The NAME-RESOLUTION codes: a pin names what each one is reported for. S474 backfill (#1489-1):
+ * in a spec-ahead block the bootstrap often cannot resolve a name the SPEC declares (a function in
+ * an unsupported `<channel>`), so the block already expects an E-SCOPE-001, and a misspelled call
+ * swaps one undeclared name for another — the same code, the same count.
+ */
+// #1723 review 1489-A: E-TYPE-UNKNOWN (`Request` → `Requst`) and E-VALUE-WRITES-STATE (`@contacts` →
+// `@contcts`) name what they are about too, and a swapped name kept their count.
+export const NAMED_CODES = new Set(["E-SCOPE-001", "E-STATE-UNDECLARED", "E-TYPE-UNKNOWN", "E-VALUE-WRITES-STATE"]);
+
+/**
+ * A diagnostic's pin key: its code, with the name it is about for a NAMED_CODES code
+ * (`E-SCOPE-001(addRow)`). The name is the first backticked text of the message, cut to its leading
+ * identifier (#1723 review 1489-B: `` `flush()` is retired `` keys as `flush`, so the key is one the
+ * pin grammar accepts), and may be empty (`` unknown type `` `` keys as `E-TYPE-UNKNOWN()`).
+ */
+export function pinKey(d) {
+  if (!NAMED_CODES.has(d.code)) return d.code;
+  const m = /`([^`]*)`/.exec(String(d.message ?? ""));
+  if (!m) return d.code;
+  const id = /^@?[A-Za-z_$][\w$.]*/.exec(m[1]);
+  return `${d.code}(${id ? id[0] : ""})`;
+}
+
+/** A multiset of pin keys in pin syntax, sorted by code: `E-A×2, E-B, E-SCOPE-001(x, y)`. */
+export function pinText(keys) {
+  const counts = new Map();
+  const names = new Map();
+  for (const k of keys) {
+    const m = /^([^()]+)\((.*)\)$/.exec(k);
+    if (m) {
+      if (!names.has(m[1])) names.set(m[1], []);
+      names.get(m[1]).push(m[2]);
+    } else counts.set(k, (counts.get(k) ?? 0) + 1);
+  }
+  const parts = [];
+  for (const c of [...new Set([...counts.keys(), ...names.keys()])].sort()) {
+    const k = counts.get(c);
+    if (k !== undefined) parts.push(k > 1 ? `${c}×${k}` : c);
+    if (names.has(c)) {
+      // an empty name reads better as its own `CODE()` entry than as a blank in a list (`CODE(, x)`)
+      const named = names.get(c).filter((n) => n !== "").sort();
+      if (named.length > 0) parts.push(`${c}(${named.join(", ")})`);
+      for (const n of names.get(c)) if (n === "") parts.push(`${c}()`);
+    }
+  }
+  return parts.join(", ");
+}
+
+/**
+ * A spec-ahead marker may pin the bootstrap's expected Error diagnostics: a MULTISET of pin keys
+ * (parseGateMarker expands `E-A×2` to `E-A, E-A` and `E-SCOPE-001(x, y)` to one key per name).
+ * `keys` are the reported diagnostics' pin keys (pinKey; a bare code list compares the same way
+ * for codes outside NAMED_CODES). Returns null when they are equal (or nothing is pinned), else a
+ * message naming both, the reported one in pin syntax, ready to paste. S474 backfill (#1489-1):
+ * this compared SETS of distinct codes, so a typo in a block that already pinned E-SCOPE-001
+ * passed both gates.
  */
 export function pinMismatch(pins, codes) {
   if (!pins) return null;
-  const want = [...new Set(pins)].sort();
-  const got = [...new Set(codes)].sort();
-  if (want.length === got.length && want.every((c, k) => c === got[k])) return null;
-  return `pinned codes [${want.join(", ")}] but the bootstrap reported [${got.join(", ")}] — fix the block, or update the pin if the bootstrap's refusal legitimately changed`;
+  const want = pinText(pins);
+  const got = pinText(codes);
+  if (want === got) return null;
+  return `pinned codes [${want}] but the bootstrap reported [${got}] — fix the block, or update the pin if the bootstrap's refusal legitimately changed`;
 }
 
 /**
@@ -69,7 +125,7 @@ export function pinMismatch(pins, codes) {
 export function classifySpecAhead(r, pins) {
   if (r.crash) return { verdict: "crash", message: "bootstrap crash on a spec-ahead block" };
   if (r.ok) return { verdict: "stale", message: null };
-  const m = pinMismatch(pins, r.codes);
+  const m = pinMismatch(pins, r.keys ?? r.codes);
   if (m) return { verdict: "pin-mismatch", message: m };
   return { verdict: "expected", message: null };
 }
