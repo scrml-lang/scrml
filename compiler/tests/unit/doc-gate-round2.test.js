@@ -273,7 +273,7 @@ describe("claim-gate end to end", () => {
 describe("#1489-1 — a typo in a spec-ahead block whose pin already holds E-SCOPE-001 now fails both gates", () => {
   // the tutorial's own chapter 7 (channels) and its own pin, verbatim from docs/tutorial.md
   const SNIP = "docs/tutorial-snippets/07-channel-chat.scrml";
-  const tutorial = () => readFileSync(join(ROOT, "docs/tutorial.md"), "utf8").split("\n");
+  const tutorial = () => readFileSync(join(ROOT, "docs/tutorial.md"), "utf8").split(/\r?\n/); // CRLF on a Windows checkout
   const marker = () => {
     const t = tutorial();
     const at = t.indexOf(`<!-- snippet: ${SNIP} -->`);
@@ -306,7 +306,7 @@ describe("#1489-1 — a typo in a spec-ahead block whose pin already holds E-SCO
   }, 120_000);
 
   test("claim-gate: the same text as an inline fence under the same pin fails with `postMesage`", () => {
-    const md = write("inline-07-typo.md", ["<!-- dialect: ruled -->", marker(), ...fence(...typo().split("\n"))]);
+    const md = write("inline-07-typo.md", ["<!-- dialect: ruled -->", marker(), ...fence(...typo().split(/\r?\n/))]);
     const r = claim(md);
     expect(r.stderr).toContain("spec-ahead pin-mismatch");
     expect(r.stderr).toContain("E-SCOPE-001(postMesage)");
