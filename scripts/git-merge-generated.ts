@@ -55,7 +55,9 @@
 //        both sides changed. PLUS (S474) a HAND-TEXT survival check: every non-blank hand-text line a
 //        side changed must still be in the result (`handTextSelfCheck`) — the id count alone never saw
 //        an entry's status=open → status=resolved edit vanish. A violation of either FAILS the merge
-//        loudly (exit 1, a marker block over git's plain 3-way).
+//        loudly (exit 1, a marker block over git's plain 3-way). ⚑ By design the hand-text check
+//        does not see blank-line inserts or EOL-only (LF ↔ CRLF) changes: blank lines are skipped and
+//        a trailing `\r` is stripped before counting.
 //
 //   PHASE 2 — `bun scripts/git-merge-generated.ts --regen`: (a) during a merge STOPPED for
 //     regeneration (every unmerged path carries the regen block): strips the blocks, runs the
@@ -521,10 +523,18 @@ function mergeGeneratedLf(
  * HAND-TEXT survival check (S474). The gap-id check counts ids only, so an edit to an entry's
  * markers or prose (status=open → status=resolved, a retitle) could vanish under it. This checks that
  * every non-blank hand-text line a side CHANGED (added or rewrote, relative to base) is still in the
- * result's hand text — anywhere, including inside conflict markers. Multiset, per line:
- * `count(result) ≥ max(count(ours) − count(base), count(theirs) − count(base))`. The max (not the sum)
- * keeps an IDENTICAL change made on both sides — which a 3-way keeps once — from false-failing.
- * A side deleting a line is a legitimate outcome and is not checked.
+ * result's hand text — anywhere, including inside conflict markers. Multiset, per line, with
+ * dA = count(ours) − count(base) and dB = count(theirs) − count(base):
+ *   count(result) ≥ count(base) + max(dA, dB) + min(0, dA, dB)
+ * i.e. the base's copies, plus the larger addition, minus any deletion. The base term matters (S474
+ * #1726 review N1): the first cut compared only the DELTA with the result's TOTAL, so a changed line
+ * that already occurred elsewhere in base (a code fence, `---`, `Fixed.` — 1,512 of known-gaps.md's
+ * 22,584 non-blank lines are in duplicate groups) or a moved line could be lost unseen. The max (not
+ * the sum) keeps an IDENTICAL change made on both sides — which a 3-way keeps once — from
+ * false-failing; the min lets a side legitimately DELETE a copy.
+ * ⚑ KNOWN LIMIT, by design: blank / whitespace-only lines are skipped and a trailing `\r` is
+ * stripped, so a lost blank-line insert or an EOL-only (LF ↔ CRLF) change is invisible to this
+ * check. A lost whitespace change INSIDE a content line (trailing space, indentation) is caught.
  * Returns the lost lines (sorted, deduplicated); empty = pass.
  */
 export function handTextSelfCheck(o: string, a: string, b: string, result: string, path: string): string[] {
@@ -544,8 +554,9 @@ export function handTextSelfCheck(o: string, a: string, b: string, result: strin
   const lost: string[] = [];
   for (const ln of new Set([...A.keys(), ...B.keys()])) {
     const on = O.get(ln) ?? 0;
-    const need = Math.max((A.get(ln) ?? 0) - on, (B.get(ln) ?? 0) - on);
-    if (need > 0 && (R.get(ln) ?? 0) < need) lost.push(ln);
+    const dA = (A.get(ln) ?? 0) - on, dB = (B.get(ln) ?? 0) - on;
+    const need = on + Math.max(dA, dB) + Math.min(0, dA, dB);
+    if ((R.get(ln) ?? 0) < need) lost.push(ln);
   }
   return lost.sort();
 }
@@ -758,7 +769,12 @@ function label(s: string | undefined, dflt: string): string {
   return !s || s.startsWith("%") ? dflt : s;
 }
 
-function runDriver(argv: string[]): number {
+/**
+ * The driver entry (git's argv). `merge` is a TEST SEAM only (S474 #1726 review N2): the self-check
+ * branches below are backstops the real merge should never trip, so a test injects a result that
+ * trips them to pin that a failed check is exit 1 with a fail block. Production always passes none.
+ */
+export function runDriver(argv: string[], merge: typeof mergeGenerated = mergeGenerated): number {
   const [pO, pA, pB, pathArg, markerArg, sArg, xArg, yArg] = argv;
   const path = (pathArg ?? pA).replace(/\\/g, "/");
   const markerSize = Number(markerArg) > 0 ? Number(markerArg) : 7;
@@ -771,7 +787,7 @@ function runDriver(argv: string[]): number {
   const plainOr = (): string => { try { return gitMergeFile(o, a, b, markerSize, labels).text; } catch { return a; } };
   let r: MergeResult;
   try {
-    r = mergeGenerated(o, a, b, path, markerSize, labels);
+    r = merge(o, a, b, path, markerSize, labels);
   } catch (e) {
     writeFileSync(pA, inEolOf(failBlock(markerSize, `INTERNAL ERROR: ${String((e as Error)?.message ?? e).split("\n")[0]}`), a) + plainOr());
     console.error(`${tag}: INTERNAL ERROR — fell back to git's plain 3-way merge; resolve by hand.\n${(e as Error)?.stack ?? e}`);

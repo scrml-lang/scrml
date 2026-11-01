@@ -176,3 +176,123 @@ describe("LOW — the wrapper's fail-closed banner no longer points at `state.ts
     expect(printfs.join("\n")).toContain("docs/generated/");
   });
 });
+
+// ── S474 #1726 review round 1 ────────────────────────────────────────────────────────────────────
+
+describe("N1 — the hand-text check counts base copies (duplicated and moved lines)", () => {
+  const F = "`".repeat(3);
+  test("BITE: a changed line that already occurs elsewhere in base, then lost, is named", () => {
+    const o = "x\nFixed.\nold wording\n", a = "x\nFixed.\nFixed.\n", b = o;
+    // the result kept base's one `Fixed.` but lost ours' rewrite of `old wording` into a second one
+    expect(M.handTextSelfCheck(o, a, b, o, PATH)).toEqual(["Fixed."]);
+  });
+
+  test("BITE: a line MOVED between sections, then lost, is named", () => {
+    const o = "## S1\nentry E\n## S2\n", a = "## S1\n## S2\nentry E\n";
+    expect(M.handTextSelfCheck(o, a, o, "## S1\n## S2\n", PATH)).toEqual(["entry E"]);
+  });
+
+  test("BITE: a lost CODE-FENCE line (a line base already holds many copies of) is named", () => {
+    const o = `t\n${F}\none\n${F}\n\nu\n${F}\ntwo\n${F}\n`;
+    const a = o + `\n${F}\nthree\n${F}\n`;
+    const lostOne = a.slice(0, a.length - (F.length + 1)); // ours' closing fence gone: text below flips to fenced
+    expect(lostOne.endsWith("three\n")).toBe(true);
+    expect(M.handTextSelfCheck(o, a, o, lostOne, PATH)).toEqual([F]);
+  });
+
+  test("no false failure: one side deletes a copy while the other adds one; both delete the same line", () => {
+    const o = "a\n---\nb\n---\nc\n";
+    const a = "a\nb\n---\nc\n";             // deletes a copy
+    const b = "a\n---\nb\n---\nc\n---\n";   // adds a copy
+    expect(M.handTextSelfCheck(o, a, b, "a\nb\n---\nc\n---\n", PATH)).toEqual([]);
+    expect(M.handTextSelfCheck(o, "a\nb\nc\n", "a\nb\nc\n", "a\nb\nc\n", PATH)).toEqual([]);
+  });
+
+  test("REAL ledger: a move, a duplicated-line insert and a deleted fence pair merge clean with NO false loss — and the move dropped is caught", () => {
+    const base = readFileSync(join(REPO, "docs/known-gaps.md"), "utf8").replace(/\r\n/g, "\n");
+    const L = base.split("\n");
+    const heads = L.map((l, i) => (l.startsWith("### ") ? i : -1)).filter((i) => i >= 0);
+    expect(heads.length).toBeGreaterThan(100);
+    // theirs: delete the first fence pair in the file (the fence's content stays)
+    const fo = L.findIndex((l, i) => i > 0 && /^`{3}\S/.test(l));
+    const fc = L.findIndex((l, i) => i > fo && l === F);
+    expect(fo).toBeGreaterThan(0);
+    expect(fc).toBeLessThan(L.length / 5);
+    const theirs = L.filter((_, i) => i !== fo && i !== fc).join("\n");
+    // ours: move one entry from the last fifth to before an entry in the middle, and insert a `---`
+    // (a line base holds many copies of) near the 3/5 mark
+    const hFrom = heads.find((i) => i > (L.length * 4) / 5);
+    const hNext = heads.find((i) => i > hFrom);
+    const hTo = heads.find((i) => i > L.length / 2);
+    const hDash = heads.find((i) => i > (L.length * 3) / 5);
+    const moved = L.slice(hFrom, hNext);
+    const ours = [];
+    for (let i = 0; i < L.length; i++) {
+      if (i >= hFrom && i < hNext) continue;
+      if (i === hTo) ours.push(...moved);
+      if (i === hDash) ours.push("---", "");
+      ours.push(L[i]);
+    }
+    const a = ours.join("\n");
+    const r = M.mergeGenerated(base, a, theirs, PATH);
+    expect(r.fallback).toBeNull();
+    expect(r.conflicts).toBe(0);
+    expect(r.lostHandLines).toEqual([]);
+    expect(r.text).toContain(moved.join("\n"));
+    const fences = (t) => t.split("\n").filter((l) => /^`{3}/.test(l)).length;
+    expect(fences(r.text)).toBe(fences(base) - 2);
+    // …and the same result with the moved entry dropped is caught (the pre-N1 formula passed it)
+    const dropped = r.text.replace(moved.join("\n") + "\n", "");
+    expect(dropped).not.toBe(r.text);
+    expect(M.handTextSelfCheck(base, a, theirs, dropped, PATH)).toContain(moved[0]);
+  }, 30_000);
+});
+
+describe("N2 — a failed hand-text self-check is exit 1 with a fail block (driver wiring)", () => {
+  test("runDriver: a merge result with lost hand lines → rc 1, fail block over git's plain 3-way", () => {
+    const dir = mkdtempSync(join(process.env.TMPDIR || tmpdir(), "scrml-mgd-n2-"));
+    try {
+      const o = "a\nb\nc\n", a = "a\nb OURS\nc\n", b = "a\nb\nc THEIRS\n";
+      const po = join(dir, "o"), pa = join(dir, "A"), pb = join(dir, "b");
+      writeFileSync(po, o); writeFileSync(pa, a); writeFileSync(pb, b);
+      // a merge that "forgot" ours' edit and says so through lostHandLines
+      const fake = () => ({
+        text: "a\nb\nc THEIRS\n", conflicts: 0, pending: false, regenerated: [], provisional: [], unioned: 0,
+        needsRegen: [], selfCheck: { dropped: [], duplicated: [], ambiguous: [] }, lostHandLines: ["b OURS"], fallback: null,
+      });
+      const rc = M.runDriver([po, pa, pb, PATH, "7", "base", "ours", "theirs"], fake);
+      expect(rc).toBe(1);
+      const out = readFileSync(pa, "utf8");
+      expect(markerLines(out).slice(0, 3).map((l) => l.slice(0, 7))).toEqual([OPEN, SEP, CLOSE]);
+      expect(out).toContain("HAND-TEXT SELF-CHECK FAILED");
+      expect(out).toContain("b OURS"); // git's plain 3-way follows: both edits on the page
+      expect(out).toContain("c THEIRS");
+      expect(readFileSync(pa + ".scrml-done", "utf8")).toBe("1");
+      // control: the same fake with nothing lost is a clean rc 0
+      writeFileSync(pa, a);
+      expect(M.runDriver([po, pa, pb, PATH, "7", "base", "ours", "theirs"], () => ({ ...fake(), lostHandLines: [] }))).toBe(0);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("N3 — the whole-file rule needs the BASE wholly generated too", () => {
+  test("base hand text, both sides wholly generated → fallback, never a whole-file pick", () => {
+    const g = (n) => `# T\n<!-- @generated by \`bun scripts/x.ts --write\`. -->\n\n| PASS | ${n} |\n`;
+    const o = "# T\n\nhand-written line\n";
+    for (const [a, b] of [[g(1), g(2)], [g(1), g(1)]]) {
+      const r = M.mergeGenerated(o, a, b, "docs/bootstrap-conformance.md");
+      expect(r.fallback).toBeTruthy();
+      expect(r.conflicts).toBeGreaterThan(0);
+      expect(r.text).toContain(OPEN);
+    }
+  });
+});
+
+describe("N6 — the banner's --regen hint names every PRODUCERS file", () => {
+  test("FACTS.md, SPEC-INDEX.md and bootstrap-conformance.md", () => {
+    const banner = readFileSync(join(REPO, "scripts/git-merge-generated.sh"), "utf8").split("\n").filter((l) => l.trimStart().startsWith("printf")).join("\n");
+    for (const p of M.PRODUCERS) expect(banner).toContain(p.path.split("/").pop());
+  });
+});
