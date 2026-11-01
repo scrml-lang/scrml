@@ -528,16 +528,18 @@ function mergeGeneratedLf(
  * Returns the lost lines (sorted, deduplicated); empty = pass.
  */
 export function handTextSelfCheck(o: string, a: string, b: string, result: string, path: string): string[] {
+  // A file wholly generated on every side has no hand text. Otherwise a wholly-generated version is
+  // counted RAW (masking would hide its every line — exactly the F2 shape, a one-sided header).
+  if ([o, a, b].every((t) => t === "" || isWhollyGenerated(t))) return [];
   const counts = (t: string) => {
     const m = new Map<string, number>();
-    for (const ln of mask(t, path).text.split("\n")) {
+    for (const ln of (isWhollyGenerated(t) ? t : mask(t, path).text).split("\n")) {
       const k = ln.replace(/\r$/, "");
       if (k.trim() === "") continue;
       m.set(k, (m.get(k) ?? 0) + 1);
     }
     return m;
   };
-  if (isWhollyGenerated(result)) return [];
   const O = counts(o), A = counts(a), B = counts(b), R = counts(result);
   const lost: string[] = [];
   for (const ln of new Set([...A.keys(), ...B.keys()])) {
