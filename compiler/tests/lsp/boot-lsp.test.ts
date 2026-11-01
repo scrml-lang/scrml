@@ -358,3 +358,88 @@ describe("lsp-boot over stdio", () => {
     expect(await c.stop()).toBe(0);
   }, 90_000);
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// S474 backfill (review of #1478): positions in UTF-16 over astral text and CRLF (T1), a URI with
+// no local path (L1), untitled buffer names (L2).
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("lsp-boot over stdio — S474 backfill", () => {
+  // two astral characters (U+1F600, two UTF-16 units each) before the misspelled `@gg`
+  const ASTRAL = GOOD.replace("${match @g {", "😀😀 ${match @gg {");
+  const ASTRAL_COL = ASTRAL.split("\n")[BAD_LINE].indexOf("@gg"); // a UTF-16 offset, as LSP counts
+  const ASTRAL_CRLF = ASTRAL.split("\n").join("\r\n");
+
+  test("T1: a position after astral characters is in UTF-16 code units, LF and CRLF alike", async () => {
+    // a code-point column would be 2 short: the two emoji are one code point each, two units each
+    expect([...ASTRAL.split("\n")[BAD_LINE].slice(0, ASTRAL_COL)].length).toBe(ASTRAL_COL - 2);
+    const c = client();
+    await c.init(dir);
+    const want = { start: { line: BAD_LINE, character: ASTRAL_COL }, end: { line: BAD_LINE, character: ASTRAL_COL + 3 } };
+    for (const [name, text] of [["astral-lf.scrml", ASTRAL], ["astral-crlf.scrml", ASTRAL_CRLF]] as const) {
+      const uri = pathToFileURL(join(dir, name)).href;
+      const p = c.nextDiagnostics(uri, 60_000);
+      c.open(uri, text);
+      const d = (await p).params.diagnostics;
+      expect({ name, code: d[0]?.code, range: d[0]?.range }).toEqual({ name, code: "E-STATE-UNDECLARED", range: want });
+    }
+    // CRLF: an error on a later line is on the same line as with LF (the \r is not a line)
+    const crlfOnly = BAD.split("\n").join("\r\n");
+    const uri = pathToFileURL(join(dir, "crlf-only.scrml")).href;
+    const p = c.nextDiagnostics(uri);
+    c.open(uri, crlfOnly);
+    expect((await p).params.diagnostics[0].range.start).toEqual({ line: BAD_LINE, character: BAD_COL });
+    expect(await c.stop()).toBe(0);
+  }, 90_000);
+
+  test("L1: a file: URI with no local path gets one diagnostic; the server stays up and compiles the rest", async () => {
+    const c = client({ SCRML_BOOT_LSP_DEBOUNCE_MS: "20" });
+    await c.init(dir);
+    const good = pathToFileURL(join(dir, "alongside.scrml")).href;
+    let p = c.nextDiagnostics(good, 60_000);
+    c.open(good, GOOD);
+    expect((await p).params.diagnostics).toEqual([]);
+    for (const bad of ["file://remotehost/x.scrml", "file:///tmp/a%2Fb.scrml"]) {
+      p = c.nextDiagnostics(bad);
+      c.open(bad, BAD);
+      const d = (await p).params.diagnostics;
+      expect(d).toHaveLength(1);
+      expect(d[0]).toMatchObject({ severity: 1, source: "scrml-boot", code: "scrml-boot-uri", range: { start: { line: 0, character: 0 } } });
+      expect(d[0].message).toContain(bad);
+      // an edit of it is answered the same way
+      p = c.nextDiagnostics(bad);
+      c.changeFull(bad, 2, GOOD);
+      expect((await p).params.diagnostics[0].code).toBe("scrml-boot-uri");
+    }
+    // the good document still compiles with the bad ones open (they are left out of the overlay)
+    p = c.nextDiagnostics(good);
+    c.changeFull(good, 2, BAD);
+    expect((await p).params.diagnostics[0].code).toBe("E-STATE-UNDECLARED");
+    p = c.nextDiagnostics("file://remotehost/x.scrml");
+    c.notify("textDocument/didClose", { textDocument: { uri: "file://remotehost/x.scrml" } });
+    expect((await p).params.diagnostics).toEqual([]);
+    expect(await c.stop()).toBe(0);
+  }, 90_000);
+
+  test("L2: an untitled buffer opened after another closed never shares a live buffer's name", async () => {
+    const c = client({ SCRML_BOOT_LSP_DEBOUNCE_MS: "20" });
+    await c.init(dir);
+    let p = c.nextDiagnostics("untitled:A", 60_000);
+    c.open("untitled:A", BAD);
+    expect((await p).params.diagnostics[0].code).toBe("E-STATE-UNDECLARED");
+    p = c.nextDiagnostics("untitled:B");
+    c.open("untitled:B", GOOD);
+    expect((await p).params.diagnostics).toEqual([]);
+    p = c.nextDiagnostics("untitled:A");
+    c.notify("textDocument/didClose", { textDocument: { uri: "untitled:A" } });
+    expect((await p).params.diagnostics).toEqual([]);
+    p = c.nextDiagnostics("untitled:C");
+    c.open("untitled:C", BAD);
+    expect((await p).params.diagnostics[0].code).toBe("E-STATE-UNDECLARED");
+    // B is still clean: it is compiled with its OWN text, not C's
+    p = c.nextDiagnostics("untitled:B");
+    c.changeFull("untitled:B", 2, GOOD + "\n");
+    expect((await p).params.diagnostics).toEqual([]);
+    expect(await c.stop()).toBe(0);
+  }, 90_000);
+});
