@@ -1258,10 +1258,40 @@ ${
         return "" + h
     }
 
+    // s474 r2 (re-review R1): hole paths are `childNodes` indices, which count TEXT nodes — so the shape
+    // records each run of adjacent text (the browser merges adjacent text into one node; an empty text
+    // makes none) as `depth:t;`: that the node exists, never its content. A parser change that only
+    // drops or merges a text node (the line feed after `<listing>`, a NUL-only text) is then a mismatch.
     fn shapeOf(nodes: HNode[], ns: string, depth: int) -> string {
         let out: string = ""
-        for (const n of nodes) { out = out + shapeNode(n, ns, depth) }
+        let inText: boolean = false
+        for (const n of nodes) {
+            const tx: string = shapeTextOf(n)
+            if (tx == "~") {
+                inText = false
+                out = out + shapeNode(n, ns, depth)
+            } else if (tx != "" && !inText) {
+                out = out + depth + ":t;"
+                inText = true
+            }
+        }
         return out
+    }
+
+    // A text node's text ("" when empty), or "~" for a node that is not text.
+    fn shapeTextOf(n: HNode) -> string {
+        return match n {
+            .HElem(tag: t) :> "~"
+            .HComment(text: x) :> "~"
+            .HText(text: x) :> shapeNonEmpty(x)
+            .HRawText(text: x) :> shapeNonEmpty(x)
+            .HStyle(text: x) :> shapeNonEmpty(x)
+        }
+    }
+
+    fn shapeNonEmpty(x: string) -> string {
+        if (x == "") return ""
+        return "t"
     }
 
     fn shapeNode(n: HNode, ns: string, depth: int) -> string {

@@ -305,3 +305,39 @@ suite("r1 in Chromium — the review's F3 repros: refused at compile time; print
     }, 30000);
   }
 });
+
+// s474 r2 (re-review of 4a3966ff0, review-r1.md R1): parser changes that only drop a TEXT node shifted the
+// child-index hole paths while the round-1 shape (elements / comments only) still matched — `show=` styled
+// the wrong element and SECRET showed at first paint (Chromium, `x_listingNl`, `x_nul`). Text-node presence
+// is now part of the shape, and the printer doubles the line feed the parser drops.
+suite("r2 in Chromium — a dropped text node never misaddresses a hole (R1)", () => {
+  const S = `show=(@pw == "secret")`;
+  const LISTING = `<listing>\n<b ${S}>SECRET</b><i>z</i></listing>`;
+  const steps = async (page) => {
+    expect(await secretShown(page)).toEqual([]);                         // first paint
+    await click(page, "#wrong");
+    expect(await secretShown(page)).toEqual([]);                         // the wrong password
+  };
+  test("x_listingNl as written: the leading line feed survives (printed doubled), and the gate is right", async () => {
+    const { page, errors } = await openPrinted(gateProgram(LISTING));
+    await steps(page);
+    await click(page, "#right");
+    expect(await secretShown(page)).toEqual(["b"]);                      // the right password shows it, on <b>
+    expect(errors).toEqual([]);
+    await page.close();
+  }, 30000);
+  test("x_listingNl printed with ONE line feed (the round-1 print): the dropped text node is a shape mismatch — not mounted", async () => {
+    const { page, errors } = await openPrinted(gateProgram(LISTING), (h) => h.replace("<listing>\n\n<b>", "<listing>\n<b>"));
+    await steps(page);
+    expect(errors.some((e) => /restructured/.test(e))).toBe(true);
+    await page.close();
+  }, 30000);
+  test("x_nul: a NUL-only text before an element (refused at compile time; printed anyway it is not mounted)", async () => {
+    // the twin's text "Q" stands for the NUL: the shape records text presence only, so the printed shape is
+    // the one the printer writes for the NUL; the page then holds the NUL, which Chromium's parser drops
+    const { page, errors } = await openPrinted(gateProgram(`<div>Q<b ${S}>SECRET</b><i>z</i></div>`), (h) => h.replace("<div>Q<b>", "<div>\u0000<b>"));
+    await steps(page);
+    expect(errors.some((e) => /restructured/.test(e))).toBe(true);
+    await page.close();
+  }, 30000);
+});

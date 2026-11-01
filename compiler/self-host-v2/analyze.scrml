@@ -16847,24 +16847,57 @@ ${
     // at its root) and inserted by DOM calls, which repair nothing.
     // =========================================================================
     type MkCx:struct = { ns: string, parent: string, inP: boolean, inA: boolean, inLi: boolean, inDd: boolean,
-                         inButton: boolean, inNobr: boolean, tbl: string, depth: int }
+                         inButton: boolean, inNobr: boolean, tbl: string, depth: int, raw: string }
     type MkFault:struct = { nid: int, file: string, span: ASpan, code: string, msg: string }
 
     fn mkRoot(ns: string, depth: int) -> MkCx {
-        return { ns: ns, parent: "", inP: false, inA: false, inLi: false, inDd: false, inButton: false, inNobr: false, tbl: "", depth: depth }
+        return { ns: ns, parent: "", inP: false, inA: false, inLi: false, inDd: false, inButton: false, inNobr: false, tbl: "", depth: depth, raw: "" }
     }
 
     fn markupParseDiags(g: Globals, st0: AS) -> AS {
         let st: AS = st0
         for (const ds of g.decls) {
+          // s474 r2 (re-review R4): a file that already fails to parse is not judged — its misparsed nesting
+          // is the parse error's cascade, not a nesting the author wrote
+          if (fileErrs(g.files, ds.file).length == 0) {
             let faults: MkFault[] = mkNodes(g, ds.file, rendersNodes(ds), mkRoot(htmlNs(), 0))
             for (const sb of stateBodyLists(ds)) { faults = faults.concat(mkNodes(g, ds.file, sb, mkRoot(htmlNs(), 0))) }
             if (ds.p is not) {
                 for (const fd of fieldDecls(ds)) { faults = faults.concat(mkNodes(g, ds.file, rendersOf(fd), mkRoot(htmlNs(), 0))) }
             }
             for (const f of faults) { st = addDiag(st, f.file, f.span, f.code, f.msg) }
+          }
         }
         return st
+    }
+
+    fn hasNul(t: string) -> boolean {
+        let i: int = 0
+        while (i < t.length) {
+            if (t.charCodeAt(i) == 0) return true
+            i = i + 1
+        }
+        return false
+    }
+
+    fn nulMsg() -> string {
+        return "a raw U+0000 (NUL) character in markup text is removed or replaced by the HTML parser (HTML §13.2.6.4.7), so the page would not hold the text written here (SPEC §24.5) — delete it, or write the character you mean"
+    }
+
+    fn hasAttrCI(attrs: AAttr[], name: string) -> boolean {
+        for (const a of attrs) { if (a.name.toLowerCase() == name) return true }
+        return false
+    }
+
+    // The HTML raw-text / RCDATA element whose content the parser reads as text ("" — not one).
+    fn rawTextTag(t: string) -> string {
+        if (["textarea", "title", "xmp", "iframe", "noembed", "noframes", "noscript", "plaintext"].indexOf(t) >= 0) return t
+        return ""
+    }
+
+    fn rawTextMsg(tag: string, raw: string) -> string {
+        const head: string = "`<" + tag + ">` inside `<" + raw + ">` is text, not an element"
+        return head + ": the HTML parser reads the content of `<" + raw + ">` as raw text (HTML §13.2.6.4.7), so the element and every hole in it never reach the page (SPEC §24.5) — move it out of the `<" + raw + ">` (an interpolated value inside one is fine)"
     }
 
     fn mkNodes(g: Globals, file: string, nodes: ANode[], c: MkCx) -> MkFault[] {
@@ -16889,6 +16922,9 @@ ${
     // "in table" text (HTML §13.2.6.4.10): a character that is not white space
     // is foster-parented out of the table.
     fn mkText(file: string, n: ANode, t: string, c: MkCx) -> MkFault[] {
+        // s474 r2 (re-review R1): a raw U+0000 in markup text is dropped ("in body") or replaced by the parser;
+        // a text node of NULs alone disappears, which shifts every hole path after it
+        if (hasNul(t)) return [{ nid: n.nid, file: file, span: n.span, code: "E-HTML-PARSER-REPAIR", msg: nulMsg() }]
         if (c.tbl == "" || t.trim() == "") return []
         return [{ nid: n.nid, file: file, span: n.span, code: "E-HTML-PARSER-REPAIR",
                   msg: "text directly inside `<" + c.parent + ">` is moved out of the table by the HTML parser (\"foster parenting\", HTML §13.2.6.4.10), so the page would not hold the tree written here (SPEC §24.5) — put it in a cell: `<td>…</td>`" }]
@@ -16912,6 +16948,9 @@ ${
     }
 
     fn mkElem(g: Globals, file: string, e: AElem, c0: MkCx) -> MkFault[] {
+        // s474 r2 (re-review R2): inside an HTML raw-text / RCDATA element the parser builds TEXT, never an
+        // element — an element written there (a `show=` / `if=` hole, a use, an `<each>`) is not on the page
+        if (c0.raw != "") return [{ nid: e.nid, file: file, span: e.span, code: "E-HTML-PARSER-REPAIR", msg: rawTextMsg(e.tag, c0.raw) }]
         if (e.star) return []
         // an `if=` / `else-if=` / `else` element is its arm's own template
         let c: MkCx = c0
@@ -16924,7 +16963,8 @@ ${
         if (!isKnownElementName(e.tag)) return mkNodes(g, file, e.kids, c)
         const t: string = e.tag.toLowerCase()
         let out: MkFault[] = []
-        const fontAttr: boolean = attrNamed(e.attrs, "color") is given || attrNamed(e.attrs, "face") is given || attrNamed(e.attrs, "size") is given
+        // s474 r2 (re-review R3): HTML attribute names are ASCII case-insensitive (`<font COLOR=…>` breaks out too)
+        const fontAttr: boolean = hasAttrCI(e.attrs, "color") || hasAttrCI(e.attrs, "face") || hasAttrCI(e.attrs, "size")
         const breakout: boolean = isForeignNs(c.ns) && isForeignBreakout(t, fontAttr)
         if (breakout) {
             out = [{ nid: e.nid, file: file, span: e.span, code: "E-HTML-FOREIGN-BREAKOUT", msg: breakoutMsg(e.tag, c) }]
@@ -16965,7 +17005,7 @@ ${
             // an SVG / MathML element: a scope boundary (foreignObject, mi, …) ends the HTML scopes
             const bound: boolean = boundsScope(ns, t)
             return { ns: kns, parent: t, inP: c.inP && !bound, inA: c.inA, inLi: c.inLi && !bound, inDd: c.inDd && !bound,
-                     inButton: c.inButton && !bound, inNobr: c.inNobr && !bound, tbl: "", depth: c.depth }
+                     inButton: c.inButton && !bound, inNobr: c.inNobr && !bound, tbl: "", depth: c.depth, raw: "" }
         }
         const bound: boolean = boundsScope(htmlNs(), t)
         const special: boolean = isSpecialHtml(t) && t != "address" && t != "div" && t != "p"
@@ -16976,7 +17016,7 @@ ${
                  inDd: t == "dd" || t == "dt" || (c.inDd && !special),
                  inButton: t == "button" || (c.inButton && !bound),
                  inNobr: t == "nobr" || (c.inNobr && !bound),
-                 tbl: tableMode(t), depth: c.depth }
+                 tbl: tableMode(t), depth: c.depth, raw: rawTextTag(t) }
     }
 
     fn mkRepairFault(file: string, e: AElem, why: string) -> MkFault[] {

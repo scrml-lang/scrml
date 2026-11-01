@@ -2567,9 +2567,19 @@ const XHTML_NS = "http://www.w3.org/1999/xhtml";
 // builds elements there — happy-dom does, for `<textarea><!----></textarea>` — is not judged by them).
 const SHAPE_OPAQUE = new Set(["template", "script", "style", "textarea", "title", "xmp", "iframe", "noembed", "noframes", "noscript", "plaintext"]);
 
+// s474 r2 (re-review R1): a hole path is a `childNodes` index, which counts text nodes, so a text node
+// is part of the shape — `depth:t;`, once per run of adjacent text (presence only, never content), as
+// print.scrml `shapeOf` writes it.
 function shapeWalk(n, depth) {
   let s = "";
+  let inText = false;
   for (const c of n.childNodes) {
+    if (c.nodeType === 3) {
+      if (!inText) s += depth + ":t;";
+      inText = true;
+      continue;
+    }
+    inText = false;
     if (c.nodeType === 8) s += depth + ":#;";
     else if (c.nodeType === 1) {
       const name = c.localName.toLowerCase();

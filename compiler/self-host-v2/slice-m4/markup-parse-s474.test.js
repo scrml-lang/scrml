@@ -204,9 +204,9 @@ describe("the runtime's shape check — a template the parser restructured is ne
     expect(() => rt.template("t474-moved")).toThrow(/restructured/);
     install(`<template id="t474-kept" data-scrml-shape="${written}"><p><span>a</span></p></template>`);
     expect(() => rt.template("t474-kept")).toThrow(/restructured/);   // span is not div: a different shape
-    const same = rt.shapeHash((() => { const d = document.createElement("div"); const p = document.createElement("p"); p.appendChild(document.createElement("span")); d.appendChild(p); return d; })());
+    const same = rt.shapeHash((() => { const d = document.createElement("div"); const p = document.createElement("p"); const sp = document.createElement("span"); sp.appendChild(document.createTextNode("b")); p.appendChild(sp); p.appendChild(document.createTextNode("other")); d.appendChild(p); return d; })());
     install(`<template id="t474-same" data-scrml-shape="${same}"><p><span>a</span>text</p></template>`);
-    expect(() => rt.template("t474-same")).not.toThrow();            // text is not part of the shape
+    expect(() => rt.template("t474-same")).not.toThrow();            // a text node counts by its presence, never its content
   });
   test("an RCDATA / raw-text element's children are not part of the shape (a `${}` marker in `<textarea>` is text in a browser)", () => {
     const r = frontEnd(mods, [{ path: "app.scrml", src: gateProgram(`<textarea id="ta">\${@pw}</textarea><span ${S}>SECRET</span>`) }]);
@@ -214,5 +214,61 @@ describe("the runtime's shape check — a template the parser restructured is ne
     install(out.html.match(/<template[\s\S]*<\/template>/)[0].replaceAll('id="scrml:', 'id="t474-ta-'));
     // happy-dom builds the marker as a comment child of <textarea>; Chromium builds text — neither is walked
     expect(() => rt.template("t474-ta-program")).not.toThrow();
+  });
+});
+
+// ---- round 2 (re-review of 4a3966ff0, ~/.cache/scrml/review/s474-1727/review-r1.md R1–R3) ----
+describe("r2 R1 — text nodes are part of the shape (hole paths count them)", () => {
+  const install = (html) => document.head.insertAdjacentHTML("beforeend", html);
+  test("one marker per run of adjacent text, presence only: a dropped text node is a mismatch", () => {
+    const tree = (withText) => { const d = document.createElement("div"); if (withText) d.appendChild(document.createTextNode("\n")); d.appendChild(document.createElement("b")); return d; };
+    const withText = rt.shapeHash(tree(true));
+    expect(withText).not.toBe(rt.shapeHash(tree(false)));
+    // as the browser builds `<listing>\n<b>`: the line feed is gone, so the written shape no longer matches
+    install(`<template id="t474-lf" data-scrml-shape="${withText}"><b>x</b></template>`);
+    expect(() => rt.template("t474-lf")).toThrow(/restructured/);
+    // two adjacent text nodes in the DOM count once, as the browser's one merged node does
+    const two = document.createElement("div");
+    two.appendChild(document.createTextNode("a")); two.appendChild(document.createTextNode("b")); two.appendChild(document.createElement("b"));
+    expect(rt.shapeHash(two)).toBe(withText);
+  });
+  test("the printer writes the same per-run text markers (printed hash == runtime hash of the written tree)", () => {
+    const r = frontEnd(mods, [{ path: "app.scrml", src: gateProgram(`<div>a<!-- c -->b<span ${S}>SECRET</span>text \${@pw} more<i>z</i></div>`) }]);
+    expect(r.diags.filter((d) => d.code.startsWith("E-"))).toEqual([]);
+    const out = mods.print.printProgram(r.core, "app.client.js", "scrml-runtime.js");
+    install(out.html.match(/<template[\s\S]*<\/template>/)[0].replaceAll('id="scrml:', 'id="t474-run-'));
+    expect(() => rt.template("t474-run-program")).not.toThrow();
+  });
+  test("a `<pre>` / `<listing>` / `<textarea>` body that starts with a line feed is printed with a second one (the parser drops one)", () => {
+    for (const t of ["pre", "listing", "textarea"]) {
+      const r = frontEnd(mods, [{ path: "app.scrml", src: gateProgram(`<${t}>\nq</${t}>`) }]);
+      expect({ t, e: r.diags.filter((d) => d.code.startsWith("E-")).map((d) => d.code) }).toEqual({ t, e: [] });
+      expect(mods.print.printProgram(r.core, "app.client.js", "scrml-runtime.js").html).toContain(`<${t}>\n\nq</${t}>`);
+    }
+  });
+  test("a raw NUL in markup text is E-HTML-PARSER-REPAIR", () => {
+    expect(codes(`<div>\u0000<b ${S}>SECRET</b><i>z</i></div>`)).toEqual([REP]);
+    expect(codes(`<p>a\u0000b</p>`)).toEqual([REP]);
+  });
+});
+
+describe("r2 R2 — an element inside an HTML raw-text / RCDATA element is refused (it is text on the page)", () => {
+  for (const t of ["textarea", "title", "xmp", "iframe", "noembed", "noframes", "noscript", "plaintext"]) {
+    test(t, () => {
+      expect(codes(`<${t}><span ${S}>SECRET</span></${t}>`)).toEqual([REP]);
+      expect(codes(`<${t}><span ${G}>SECRET</span></${t}>`)).toEqual([REP]);
+    });
+  }
+  test("under `<mi>` too; a value interpolation inside one is fine; an SVG `<title>` is not raw text", () => {
+    expect(codes(`<math><mi><textarea><span ${S}>SECRET</span></textarea></mi></math>`)).toEqual([REP]);
+    expect(codes(`<textarea id="ta">\${@pw}</textarea><span ${S}>SECRET</span>`)).toEqual([]);
+    expect(codes(`<svg><title><tspan>t</tspan></title></svg>`)).toEqual([]);
+  });
+});
+
+describe("r2 R3 — the `font` breakout attributes are matched ASCII case-insensitively", () => {
+  test("`<font COLOR=…>`, `Face`, `SIZE` inside `<svg>` are E-HTML-FOREIGN-BREAKOUT; `<font>` with none stays SVG", () => {
+    for (const a of ["COLOR", "Face", "SIZE", "cOlOr"]) expect({ a, c: codes(`<svg><font ${a}="x">x</font></svg>`) }).toEqual({ a, c: [BRK] });
+    expect(codes(`<svg><font id="f">x</font></svg>`)).toEqual([]);
   });
 });

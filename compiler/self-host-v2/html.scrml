@@ -106,7 +106,17 @@ ${
     fn elemText(tag: string, attrs: HAttr[], kids: HNode[]) -> string {
         const open: string = "<" + tag + attrsText(attrs) + ">"
         if (isVoid(tag)) return open
-        return open + printNodes(kids) + "</" + tag + ">"
+        const body: string = printNodes(kids)
+        // s474 r2 (re-review of #1727, R1): the HTML parser drops ONE line feed right after a `<pre>` /
+        // `<listing>` / `<textarea>` start tag (HTML §13.2.6.4.7). A body that starts with one is printed
+        // with a second, so the page holds the text as written (what a browser's own serializer does).
+        if (dropsLeadingLf(tag) && body.startsWith("\n")) return open + "\n" + body + "</" + tag + ">"
+        return open + body + "</" + tag + ">"
+    }
+
+    fn dropsLeadingLf(tag: string) -> boolean {
+        const t: string = tag.toLowerCase()
+        return t == "pre" || t == "listing" || t == "textarea"
     }
 
     export fn printNodes(ns: HNode[]) -> string {
