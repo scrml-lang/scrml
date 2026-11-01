@@ -15,7 +15,7 @@ import { collectReactiveVarNames, collectLocalMapSetNames, buildFnReturnMapKinds
 import { collectChannelNodes, emitChannelServerJs, emitChannelWsHandlers, emitChannelWatchesServerBoot, collectChannelFunctionMap, collectChannelCellMap, filterChannelImportSpecifiers } from "./emit-channel.ts";
 import { serverRewriteEmitted, setVariantFieldsForRewriter, snapshotRewriterVariantFields, restoreRewriterVariantFields, setProtectContextForRewriter, drainProtectInfosFromRewriter, setTenantContextForRewriter, drainTenantStripsFromRewriter, drainTenantAcrossesFromRewriter, drainTenantViolationsFromRewriter, setBoolColumnsForRewriter } from "./rewrite.js";
 import { buildBoolColumnsFromFileAST, SERVER_BOOL_COERCE_HELPER } from "./bool-coerce.ts";
-import { SQL_ATTEMPT_FN, SERVER_SQL_ATTEMPT_HELPER, handledSqlGuardInner } from "./sql-attempt.ts";
+import { SQL_ATTEMPT_FN, SERVER_SQL_ATTEMPT_HELPER, handledSqlGuardInner, SQL_PROPAGATE_FN, SQL_BANG_ENVELOPE_FN, SERVER_SQL_BANG_ENVELOPE_HELPER, serverSqlPropagateHelper, sqlDriverTextOnWire, SERVER_SQL_ERROR_HELPER, sqlFailurePropagates, cpsMessageBlankingSqlFailure } from "./sql-attempt.ts";
 import { planBatchCellReturn, cpsCellsPrologue, cpsCellsEpilogue, cpsCellWriteStatement, cpsCellLocal, multiBatchReturnCell, cpsCarriedLocals, cpsCarriedFunctionIndices } from "./cps-cell-writes.ts";
 import { buildVariantFieldsRegistry, emitEnumVariantObjects, emitEnumLookupTables } from "./emit-client.js";
 import { setShadowedVariantNames, setVariantFieldsForFile, snapshotVariantFieldsForFile, restoreVariantFieldsForFile } from "./emit-control-flow.ts";
@@ -2714,18 +2714,56 @@ function generateServerJsImpl(
   // the variant as `ServerError(message: string, fn: string)` and leaves the
   // message text to the implementation; `fn` is unchanged, and a typed scrml
   // failure (`__scrml_error`) still passes through — the flow analyses those.
+  //
+  // S474 ruling 2 — "A failed query's error text does not cross the wire. The client receives
+  // the error variant with its message blanked; the server logs the full driver text." Without
+  // `protect=` the message was the thrown error's text, so a query that failed in a CPS body
+  // sent the driver's words (`UNIQUE constraint failed: users.email`) to the client. A driver
+  // failure (marked by `_scrml_db_guard`) now gets an empty message and a server log line; any
+  // other error keeps the text it had.
   const _cpsErrorPrologue = (fnName: string): string[] => _protectActive
     ? [`    if (!(_scrml_cps_err && typeof _scrml_cps_err === 'object' && _scrml_cps_err.__scrml_error)) _scrml_g.console.error(${JSON.stringify(`[scrml] server function \`${fnName}\` failed:`)}, _scrml_cps_err);`]
-    : [];
+    : [`    if (_scrml_cps_err && typeof _scrml_cps_err === 'object' && _scrml_cps_err[_scrml_g.Symbol.for("scrml.db.failure")] === true) _scrml_g.console.error(${JSON.stringify(`[scrml] server function \`${fnName}\` failed:`)} + " " + _scrml_g.String(_scrml_cps_err.message || _scrml_cps_err));`];
   // …and the envelope itself is a client egress: a typed scrml failure thrown
   // with a row in its payload goes through the same snapshot + strip as a
   // return value (S443 round 6d — the sink owns serialization everywhere).
   const _cpsErrorPayloadExpr: string = _protectActive
     ? "_scrml_protect_redact(_scrml_error_payload)"
     : "_scrml_error_payload";
-  const _cpsErrorMessage: string = _protectActive
+  // §19.8.2 / §19.8.4 (S474 ruling 3, g-impl1-bang-sqlerror-callee-failure-not-delivered-s474) —
+  // "Inside a `!` function, a `?{}` query that fails at runtime SHALL produce a `SqlError`
+  // variant. This variant SHALL be propagated". The body of a function whose error type is
+  // SqlError (`sqlFailurePropagates`) ends in this catch: a query the driver failed becomes the
+  // SqlError envelope — the value a `fail` returns — so it takes the same road out (the §8.9.2
+  // ROLLBACK, the 200 envelope response the client stub returns to the caller's `!{}` arms).
+  // Before, the failure threw past the route, the host answered a plain 500, and the client's
+  // arms never ran. Any other error is rethrown by `_scrml_sql_propagate` unchanged.
+  const _sqlPropagateCatch = (fn: unknown, fnName: string): string => sqlFailurePropagates(fn)
+    ? `.catch((_scrml_e) => ${SQL_PROPAGATE_FN}(_scrml_e, ${JSON.stringify(fnName)}))`
+    : "";
+  // S474 r1 (review F1 of #1704) — a delivered SqlError must mean nothing was written. Every
+  // `! -> SqlError` body in a file that has a database runs inside `_scrml_sql_bang_envelope`
+  // (sql-attempt.ts): its own transaction, nested as a SAVEPOINT inside a caller's. The §8.9.2
+  // Batch-Planner envelope counts queries LEXICALLY, so it missed a body whose second query is
+  // in a helper or a callee; this one is the transitive envelope S473 ruled. Returns the
+  // `await <helper>(…, () => ` prefix for the body thunk, or null (no database in the file:
+  // nothing to roll back, and a declared failure there can only be a `fail`).
+  const _bangEnvelopeOpen = (fn: any, fnName: string): string | null => {
+    if (!sqlFailurePropagates(fn)) return null;
+    const db = _fnDbVar(fn) ?? (_dbRes.handles.length > 0 ? fallbackSqlHandle() : undefined);
+    if (!db) return null;
+    return `await ${SQL_BANG_ENVELOPE_FN}(${db}, ${JSON.stringify(_implicitEnvelopeBeginFor(db))}, ${JSON.stringify(fnName)}, () => `;
+  };
+  // S474 ruling 2 as amended — a DEV build keeps a failed query's driver text on the wire, a
+  // production build blanks it. Under `protect=` a driver MESSAGE stays blank in every build: it
+  // can quote a protected VALUE (the json_extract case above — "bad JSON path: '<the hash>'").
+  // A constraint / CHECK name is schema, not a value, so a dev build keeps it even under
+  // `protect=` (`_sqlKeepConstraintName`).
+  const _sqlKeepDriverText: boolean = sqlDriverTextOnWire() && !_protectActive;
+  const _sqlKeepConstraintName: boolean = sqlDriverTextOnWire();
+  const _cpsErrorMessage: string = cpsMessageBlankingSqlFailure("_scrml_cps_err", _protectActive
     ? `"the server could not complete this call (details are in the server log)"`
-    : `_scrml_g.String(_scrml_cps_err && _scrml_cps_err.message || _scrml_cps_err)`;
+    : `_scrml_g.String(_scrml_cps_err && _scrml_cps_err.message || _scrml_cps_err)`, _sqlKeepDriverText);
 
   // §14.8.10 — tenant-row isolation floor context. Built from BOTH the §14.8.9
   // `<db>`-derived schema registry AND the app's own `<schema>` declarations —
@@ -5627,7 +5665,12 @@ function generateServerJsImpl(
       // §8.9.2: implicit per-handler transaction envelope (Tier 1 coalescing).
       // §44.6: transactions deferred to SPEC-ISSUE-018 — use sql.unsafe()
       // for BEGIN/COMMIT/ROLLBACK on the same Bun.SQL connection.
+      // S474 r1 — a `! -> SqlError` body the Batch Planner gave no §8.9.2 envelope gets its own
+      // (`_bangEnvelopeOpen`). Where the §8.9.2 envelope IS emitted it already holds every query
+      // the body reaches (the guard's request scope), and `_sqlPropagateCatch` on the body turns
+      // a failed one into the error value that envelope rolls back on.
       const _envelope = needsImplicitEnvelope(name);
+      const _bangOpen = _envelope ? null : _bangEnvelopeOpen(fnNode, name);
       // §8.1.1 (S451) — the envelope's BEGIN / COMMIT / ROLLBACK go to the handle the
       // body's `?{}` sites run on, so the transaction wraps the queries it is for.
       const _envDb: string = _fnDbVar(fnNode) ?? fallbackSqlHandle();
@@ -5686,9 +5729,13 @@ function generateServerJsImpl(
         lines.push(`  try {`);
       }
 
-      lines.push(`  const _scrml_result = await (async () => {`);
+      // §19.10.6 — read the request body before a transaction opens (see above).
+      if (_bangOpen !== null) lines.push(`  ${_bodyRead}`);
+      lines.push(_bangOpen !== null
+        ? `  const _scrml_result = ${_bangOpen}(async () => {`
+        : `  const _scrml_result = await (async () => {`);
 
-      if (!_envelope) lines.push(`    ${_bodyRead}`);
+      if (!_envelope && _bangOpen === null) lines.push(`    ${_bodyRead}`);
 
       const _ownerChannel = channelFnMap.get(name);
       // Bug-5 follow-on to C18 (§38.4, S83 Wave 4A): the V5-strict channel-
@@ -5897,7 +5944,13 @@ function generateServerJsImpl(
 
       // §20.1 (S473) — a server-side navigate() ends the body by throwing the navigation
       // signal; this catch answers it (stripped below from a bundle that never navigates).
-      lines.push(`  })()${NAV_SETTLE_CATCH};`);
+      // §19.8.2 (S474 ruling 3) — a declared-`!` body's failed query becomes the SqlError
+      // value: inside `_scrml_sql_bang_envelope` (after its ROLLBACK), or `_sqlPropagateCatch`
+      // in a file with no database. The navigate catch stays on the body itself, so a
+      // navigation still commits.
+      lines.push(_bangOpen !== null
+        ? `  })()${NAV_SETTLE_CATCH});`
+        : `  })()${_sqlPropagateCatch(fnNode, name)}${NAV_SETTLE_CATCH};`);
       if (_envelope) {
         // §8.9.2 (S449 ruling D) — the envelope ROLLs BACK on a `fail` exit as well as
         // on an exception; only a successful completion commits. A `fail` (and a `?`
@@ -6135,7 +6188,11 @@ function generateServerJsImpl(
       // session-establishment cookie silently — the store record was written and
       // the browser never got the sid.
       const _bodyIndentNonCsrf = "    ";
-      lines.push(`  const _scrml_result = await (async () => {`);
+      // S474 r1 — a `! -> SqlError` body runs in its own transaction (`_bangEnvelopeOpen`).
+      const _bangOpenNonCsrf = _bangEnvelopeOpen(fnNode, name);
+      lines.push(_bangOpenNonCsrf !== null
+        ? `  const _scrml_result = ${_bangOpenNonCsrf}(async () => {`
+        : `  const _scrml_result = await (async () => {`);
       // The E-PROTECT-005 scan window. It is tight HERE for a different reason
       // than on the baseline-CSRF arm, and the difference is worth stating so a
       // future edit does not "harmonize" the two: on THIS arm the compiler's own
@@ -6260,7 +6317,11 @@ function generateServerJsImpl(
       // two that were not asserted a value.
       // §20.1 (S473) — a server-side navigate() ends the body by throwing the navigation
       // signal; this catch answers it (stripped below from a bundle that never navigates).
-      lines.push(`  })()${NAV_SETTLE_CATCH};`);
+      // §19.8.2 (S474 ruling 3) — as on the baseline-CSRF arm: the envelope helper, or
+      // `_sqlPropagateCatch` in a file with no database.
+      lines.push(_bangOpenNonCsrf !== null
+        ? `  })()${NAV_SETTLE_CATCH});`
+        : `  })()${_sqlPropagateCatch(fnNode, name)}${NAV_SETTLE_CATCH};`);
       // The OPAQUE-RESULT guard (`_opaqueResultGuard`) — the ONE emitter for this
       // shape, shared with the baseline-CSRF arm and `<endpoint>`. It is placed
       // BEFORE the redact on both of its branches, for two different reasons:
@@ -6799,7 +6860,26 @@ function generateServerJsImpl(
       if (_peerBodyLines.some((l) => l.includes("_scrml_body"))) {
         lines.push(`  const _scrml_body = {};`);
       }
-      for (const l of _peerBodyLines) lines.push(l);
+      const _peerBangOpen = _bangEnvelopeOpen(_peerInfo.fnNode, _peerName);
+      if (_peerBangOpen !== null) {
+        // §19.8.2 (S474 ruling 3; r1 F1) — the in-process callable of a `! -> SqlError` function
+        // fails the way its route does: in its own transaction (a SAVEPOINT inside the caller's),
+        // a failed query returned as the SqlError value after the rollback. A server caller that
+        // handles the failure keeps its own writes; this callee's are undone (S473 F10).
+        lines.push(`  return ${_peerBangOpen}(async () => {`);
+        for (const l of _peerBodyLines) lines.push("  " + l);
+        lines.push(`  })());`);
+      } else if (sqlFailurePropagates(_peerInfo.fnNode)) {
+        // No database in this file: a failed query can only come from an imported callee,
+        // whose own boundary already returned it as a value. Convert anything marked anyway.
+        lines.push(`  try {`);
+        for (const l of _peerBodyLines) lines.push("  " + l);
+        lines.push(`  } catch (_scrml_e) {`);
+        lines.push(`    return ${SQL_PROPAGATE_FN}(_scrml_e, ${JSON.stringify(_peerName)});`);
+        lines.push(`  }`);
+      } else {
+        for (const l of _peerBodyLines) lines.push(l);
+      }
       lines.push(`}`);
       lines.push("");
     }
@@ -7904,8 +7984,18 @@ function generateServerJsImpl(
   // §19.8.3 (S451 R11) — inject the handled-query helper IFF a `?{}` handled by
   // `!{}` / `match` was lowered (sql-attempt.ts). Gated purely on the emitted
   // call; a module with no handled query is byte-unchanged.
-  if (finalEmitted.includes(`${SQL_ATTEMPT_FN}(`)) {
+  // §19.8.2 (S474) — and the propagation helper IFF a declared-`!` boundary references it. It
+  // needs the `_scrml_sql_error` classifier, which the handled-query helper carries; a module
+  // with no handled query gets the classifier alone. Checked BEFORE injecting (the helper's own
+  // text names the function).
+  const _usesSqlAttempt = finalEmitted.includes(`${SQL_ATTEMPT_FN}(`);
+  const _usesSqlBangEnvelope = finalEmitted.includes(`${SQL_BANG_ENVELOPE_FN}(`);
+  const _usesSqlPropagate = _usesSqlBangEnvelope || finalEmitted.includes(`${SQL_PROPAGATE_FN}(`);
+  if (_usesSqlAttempt) {
     finalEmitted = injectAfterHeader(finalEmitted, SERVER_SQL_ATTEMPT_HELPER);
+  }
+  if (_usesSqlPropagate) {
+    finalEmitted = injectAfterHeader(finalEmitted, (_usesSqlAttempt ? "" : SERVER_SQL_ERROR_HELPER) + serverSqlPropagateHelper(_sqlKeepDriverText, _sqlKeepConstraintName) + (_usesSqlBangEnvelope ? SERVER_SQL_BANG_ENVELOPE_HELPER : ""));
   }
 
   // §20.1 (S473) — a server-side navigate() lowers to `_scrml_server_navigate(` and every route
