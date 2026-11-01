@@ -31,7 +31,7 @@ import { Database } from "bun:sqlite";
 import { SQL } from "bun";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { compileScrml } from "../../src/api.js";
-import { SERVER_SQL_ERROR_HELPER, serverSqlPropagateHelper } from "../../src/codegen/sql-attempt.ts";
+import { SERVER_SQL_ERROR_HELPER, serverSqlPropagateHelper, SERVER_SQL_BANG_ENVELOPE_HELPER } from "../../src/codegen/sql-attempt.ts";
 
 const DIRS = [];
 const GLOBALS_BEFORE = new Set(Object.getOwnPropertyNames(globalThis));
@@ -1193,5 +1193,85 @@ describe("S474 r1 F3 — a query-free `!` body does not hold the database lock",
     expect(JSON.parse(await read.text())).toEqual({ n: 1 });
     expect(readMs).toBeLessThan(200);
     expect(JSON.parse(await (await slow).text())).toBe("slept:401");
+  });
+});
+
+// #1732 review (a): when the envelope's OWN statement fails — its BEGIN, its COMMIT, the RELEASE a
+// nested call's COMMIT becomes, or its ROLLBACK — the caller never sees a success. A non-SqlError
+// `!` body takes the route's error path (500); a SqlError body gets the SqlError value. Measured on
+// the emitted helper against a handle whose transaction statements fail as a driver would.
+describe("S474 #1732 (a) — a failure of the envelope's own BEGIN / COMMIT / RELEASE / ROLLBACK is never a success", () => {
+  const DB_FAILURE = Symbol.for("scrml.db.failure");
+  const rt = () => new Function("_scrml_g", `${SERVER_SQL_ERROR_HELPER}\n${serverSqlPropagateHelper(false, false)}\n${SERVER_SQL_BANG_ENVELOPE_HELPER}\nreturn { _scrml_sql_bang_envelope };`)(globalThis);
+  // A handle whose statement `failing` rejects (a marked driver error, as `_scrml_db_guard` marks it).
+  const handle = (failing) => {
+    const ran = [];
+    return {
+      ran,
+      unsafe: async (text) => {
+        ran.push(text);
+        if (text === failing) {
+          const e = new Error(`${failing} failed: database is locked`);
+          e.code = "SQLITE_BUSY";
+          Object.defineProperty(e, DB_FAILURE, { value: true });
+          throw e;
+        }
+        return [];
+      },
+    };
+  };
+  const quiet = async (f) => { const o = console.error; console.error = () => {}; try { return await f(); } finally { console.error = o; } };
+  const ok = async () => "success";
+  const fails = async () => ({ __scrml_error: true, type: "E", variant: "Bad", data: null });
+
+  for (const stmt of ["BEGIN DEFERRED", "COMMIT", "RELEASE SAVEPOINT _scrml_nest_1"]) {
+    test(`\`${stmt}\` fails, non-SqlError body: the call throws (the route answers 500), never "success"`, async () => {
+      // The guard turns a nested call's COMMIT into RELEASE; to the helper it is the COMMIT call.
+      const failing = stmt.startsWith("RELEASE") ? "COMMIT" : stmt;
+      const db = handle(failing);
+      await expect(quiet(() => rt()._scrml_sql_bang_envelope(db, "BEGIN DEFERRED", "f", false, ok))).rejects.toThrow(/failed: database is locked/);
+      if (failing === "COMMIT") expect(db.ran).toEqual(["BEGIN DEFERRED", "COMMIT", "ROLLBACK"]);
+    });
+    test(`\`${stmt}\` fails, SqlError body: the caller gets the SqlError value, not "success"`, async () => {
+      const failing = stmt.startsWith("RELEASE") ? "COMMIT" : stmt;
+      const got = await quiet(() => rt()._scrml_sql_bang_envelope(handle(failing), "BEGIN DEFERRED", "f", true, ok));
+      expect(got).toEqual({ __scrml_error: true, type: "SqlError", variant: "QueryFailed", data: { message: "" } });
+    });
+  }
+
+  test("the ROLLBACK after a `fail` fails: the call throws, so the caller cannot read a rollback that did not happen as done", async () => {
+    await expect(quiet(() => rt()._scrml_sql_bang_envelope(handle("ROLLBACK"), "BEGIN DEFERRED", "f", false, fails))).rejects.toThrow(/ROLLBACK failed/);
+  });
+
+  test("control: every statement succeeds — the body's value", async () => {
+    const db = handle(null);
+    expect(await rt()._scrml_sql_bang_envelope(db, "BEGIN DEFERRED", "f", false, ok)).toBe("success");
+    expect(db.ran).toEqual(["BEGIN DEFERRED", "COMMIT"]);
+  });
+});
+
+// #1732 review (b), measured on SQLite (no Postgres here): a query whose failure is handled at its
+// site, inside the envelope, leaves the transaction usable — SQLite rolls back only the failed
+// statement — so the body's later writes and its COMMIT hold. On Postgres one failed statement
+// aborts the whole transaction (filed: g-impl1-envelope-site-handled-pg-abort-s474).
+describe("S474 #1732 (b) — a site-handled query failure inside the envelope (SQLite)", () => {
+  test("INSERT, a handled duplicate INSERT, INSERT, success: both good rows are committed", async () => {
+    const out = compileApp(`<program db="./g.db">
+  \${
+    type E:enum = { Bad }
+    server function handledMid(email)! -> E {
+      ?{\`INSERT INTO users (email) VALUES (\${email + ".a"})\`}.run()
+      ?{\`INSERT INTO users (email) VALUES (\${"taken@x.io"})\`}.run() !{ _ :> { } }
+      ?{\`INSERT INTO users (email) VALUES (\${email + ".b"})\`}.run()
+      return "ok"
+    }
+  }
+  <main><p>x</p></main>
+</program>
+`);
+    expect(out.codes).toEqual([]);
+    const r = await callRoute(out, "handledMid", { email: "hm@x" });
+    expect(JSON.parse(r.text)).toBe("ok");
+    expect(emails(out)).toEqual(["hm@x.a", "hm@x.b", "taken@x.io"]);
   });
 });
