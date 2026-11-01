@@ -54,7 +54,7 @@
 import { Database } from "bun:sqlite";
 import { createHash } from "node:crypto";
 import {
-  copyFileSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmdirSync, rmSync, statSync, watch, writeFileSync,
+  copyFileSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmdirSync, rmSync, statSync, unlinkSync, watch, writeFileSync,
 } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from "node:path";
@@ -704,25 +704,71 @@ export function readOutputManifest(outDir: string): string[] | null {
 function writeOutputManifest(outDir: string, files: string[]) {
   const file = join(outDir, OUTPUT_MANIFEST);
   const tmp = file + "." + process.pid + ".tmp";
-  writeFileSync(tmp, JSON.stringify({ format: MANIFEST_FORMAT, files: [...new Set(files)].sort() }, null, 1) + "\n");
+  // never through a planted file or link of that name (#1723 review C1-c): remove it, then create exclusively
+  rmSync(tmp, { force: true });
+  writeFileSync(tmp, JSON.stringify({ format: MANIFEST_FORMAT, files: [...new Set(files)].sort() }, null, 1) + "\n", { flag: "wx" });
   renameSync(tmp, file);
 }
 
-function lexists(p: string): boolean {
+function lstatOrNull(p: string): ReturnType<typeof lstatSync> | null {
   try {
-    lstatSync(p);
-    return true;
+    return lstatSync(p);
   } catch {
-    return false;
+    return null;
   }
 }
 
-function writeOutputs(outDir: string, outs: OutputFile[]) {
+/**
+ * Why `rel` cannot be written or removed safely inside `outDir`, or null. #1723 review C1-S: every
+ * ancestor of the path under `outDir` that exists must be a REAL directory — a symlinked `_scrml/`
+ * would otherwise carry a stale-file delete, the empty-directory prune, or a write out of the
+ * directory (`_scrml -> ~` and a manifest entry `_scrml/.ssh/id_ed25519`). C1-a: an ancestor that
+ * is a user's regular file is refused here too, before anything is written, not an ENOTDIR half-way.
+ * `outDir` itself may be a symlink: that is the directory the user named.
+ */
+function unsafeAncestor(outDir: string, rel: string): string | null {
+  const segs = rel.split("/");
+  let p = outDir;
+  for (let i = 0; i < segs.length - 1; i++) {
+    p = join(p, segs[i]);
+    const st = lstatOrNull(p);
+    if (st === null) return null; // nothing deeper exists either: mkdir creates real directories
+    if (st.isSymbolicLink()) return `${segs.slice(0, i + 1).join("/")} is a symbolic link`;
+    if (!st.isDirectory()) return `${segs.slice(0, i + 1).join("/")} is not a directory`;
+  }
+  return null;
+}
+
+/** Write (or check) the build's files. Exported for the tests. */
+export function writeOutputs(outDir: string, outs: OutputFile[]) {
+  const top = lstatOrNull(outDir);
+  if (top !== null && !statSync(outDir).isDirectory()) throw new OutDirError(`refusing to write into ${shown(outDir)}: it is not a directory`);
   const prev = readOutputManifest(outDir);
   const owned = new Set(prev ?? []);
   const next = new Set(outs.map((o) => o.rel));
-  // 1. Refuse before writing anything: an output path that already exists and that no build recorded.
-  const clash = outs.map((o) => o.rel).filter((rel) => !owned.has(rel) && lexists(join(outDir, ...rel.split("/"))));
+  // 1. Refuse before writing anything.
+  // (a) a path the build would write, or a recorded path it would remove, under a symlink or a file
+  const bad: string[] = [];
+  for (const rel of new Set([...next, ...owned])) {
+    const why = unsafeAncestor(outDir, rel);
+    if (why !== null) bad.push(`${rel} (${why})`);
+  }
+  // (b) a recorded output that is now a symbolic link or not a regular file: never written through (C1-S2)
+  for (const rel of next) {
+    if (!owned.has(rel)) continue;
+    const st = lstatOrNull(join(outDir, ...rel.split("/")));
+    if (st !== null && !st.isFile()) bad.push(`${rel} (${st.isSymbolicLink() ? "a symbolic link" : "not a regular file"})`);
+  }
+  if (bad.length > 0) {
+    const listed = bad.slice(0, 5).join(", ") + (bad.length > 5 ? `, … (${bad.length} in all)` : "");
+    throw new OutDirError(
+      `refusing to write into ${shown(outDir)}: ${listed}. scrml-boot writes and deletes only regular files inside ` +
+        `real directories of the output directory, so a symbolic link there cannot carry a write or a delete elsewhere. ` +
+        `Remove the link or file, or use an empty or new --output-dir.`,
+    );
+  }
+  // (c) an output path that already exists and that no build recorded
+  const clash = [...next].filter((rel) => !owned.has(rel) && lstatOrNull(join(outDir, ...rel.split("/"))) !== null);
   if (clash.length > 0) {
     const listed = clash.slice(0, 5).join(", ") + (clash.length > 5 ? `, … (${clash.length} in all)` : "");
     const why = prev === null ? `there is no ${OUTPUT_MANIFEST}` : `${OUTPUT_MANIFEST} does not list ${clash.length === 1 ? "it" : "them"}`;
@@ -742,18 +788,14 @@ function writeOutputs(outDir: string, outs: OutputFile[]) {
     else writeFileSync(dst, o.text ?? "");
   }
   // 3. Remove what the previous build wrote and this one does not (a server half, a host module that
-  // went away), then any directory that leaves empty. Nothing unrecorded is touched.
+  // went away), then any directory that leaves empty. Only a regular file or a link itself is removed
+  // (never a directory, never what a link points at). Nothing unrecorded is touched.
   for (const rel of owned) {
     if (next.has(rel)) continue;
     const p = join(outDir, ...rel.split("/"));
-    let st;
-    try {
-      st = lstatSync(p);
-    } catch {
-      continue;
-    }
-    if (!st.isFile() && !st.isSymbolicLink()) continue;
-    rmSync(p, { force: true });
+    const st = lstatOrNull(p);
+    if (st === null || (!st.isFile() && !st.isSymbolicLink())) continue;
+    unlinkSync(p);
     for (let d = dirname(p); d.startsWith(outDir + sep); d = dirname(d)) {
       try {
         if (readdirSync(d).length > 0) break;
