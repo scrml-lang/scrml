@@ -33,6 +33,56 @@
 > refuses a PR that modifies `docs/generated/**` — so a PR that files or resolves gaps no longer
 > conflicts with the bot. `bun scripts/state.ts` prints the live counts for any tree.
 
+### g-envelope-lock-hold-cost-s474 — every `!` server body with a query now holds the §19.10.6 one-transaction-per-connection gate for its whole run, so a read-only `!` lookup serializes against every other request on SQLite and an outbound call inside it stalls them all — `NEW S474 (#1732 review F7); MED; open (accepted cost, tracked by the ruling)`
+
+<!-- @gap id=g-envelope-lock-hold-cost-s474 sev=MED status=open locus=compiler/SPEC.md(§8.9.2 "Amendment S474" item 1; §19.10.6 "Not covered") prov=ruling:user-voice-scrml.md-S474-envelope-every-bang("Cost tracked: whole-body lock hold (#1704 N4 gap, incl. the self-HTTP deadlock measurement)");review:s474-1732(F7) -->
+
+The S474 ruling *"envelope every `!` server body"* names the cost and says it is tracked: *"whole-body lock hold (#1704 N4 gap, incl. the self-HTTP deadlock measurement)"*. No gap carried it until now. The PA reading in §8.9.2 item 1 opens a read-only set as a read transaction (`BEGIN DEFERRED` on SQLite, `BEGIN READ ONLY` on Postgres / MySQL), so a single read takes no write lock. It still passes the §19.10.6 gate, which on SQLite serializes every statement on the connection for the body's whole run.
+
+Who pays: operators (throughput, p99 latency) and end users, on the commonest shape, a read-only `!` auth check or lookup. Measurements owed:
+- the self-HTTP deadlock (§19.10.6 "Not covered");
+- gate hold time under an outbound `fetch`;
+- whether a read-only envelope can skip the gate on SQLite WAL.
+
+The design option, an owner fork, is to narrow the trigger to "a write, or two or more queries" (the S473 snapshot reason). The ruling kept "every `!` body", so that is not done here.
+
+### g-impl1-retired-batch-codes-still-emitted-s474 — impl#1 still emits E-BATCH-001 and W-BATCH-001, which S474 retired from the language (a `transaction { }` / `?{BEGIN}` in a `!` body is now a savepoint), and three conformance cases still pin them; impl#1's Batch Planner also still lets `.nobatch()` keep a query out of its envelope — `NEW S474 (#1732 review F12); MED; open`
+
+<!-- @gap id=g-impl1-retired-batch-codes-still-emitted-s474 sev=MED status=open locus=compiler/src/batch-planner.ts(runBatchPlanner — E-BATCH-001 / W-BATCH-001 pushes; scanHandler excludes `.nobatch()` sites from the envelope count)+conformance/cases/error/implicit-tx-explicit-transaction-block+conformance/cases/error/implicit-tx-explicit-begin+conformance/cases/sql/batch-warn-info prov=ruling:user-voice-scrml.md-S474-envelope-every-bang;review:s474-1732(F12) -->
+
+SPEC §8.9.2 "Amendment S474" item 3 (PR #1732) retires both codes. The language behaviour is now: a `transaction { }` block or a paired `?{BEGIN}` … `?{COMMIT}` inside an enveloped `!` body runs as a savepoint and compiles clean. These pins contradict it:
+- `conformance/cases/error/implicit-tx-explicit-transaction-block` expects `E-BATCH-001`;
+- `conformance/cases/error/implicit-tx-explicit-begin` expects `W-BATCH-001`, and its NOTES.md calls `.nobatch()` "the E-BATCH-001-resolving path";
+- `conformance/cases/sql/batch-warn-info` expects `W-BATCH-001` (already an E-ERROR-015 case under S451).
+
+Owed: flip each case's `expect` to the language behaviour with an `xfail.impl1-ts` entry naming this gap, the repo convention (`failable-match-else-absorbs-error-neg`). Then make impl#1 build the savepoint, or leave the xfail under the S471 impl#1 policy. Not done in #1732, which is SPEC-only.
+
+### g-retired-batch-codes-unit-test-pins-s474 — two unit-test files still assert the retired E-BATCH-001 / W-BATCH-001 behaviour (`batch-planner.test.js` §11 / §12 and `sql-batching-envelope.test.js`) — `NEW S474 (#1732 review F12); LOW; open`
+
+<!-- @gap id=g-retired-batch-codes-unit-test-pins-s474 sev=LOW status=open locus=compiler/tests/unit/batch-planner.test.js(§11 E-BATCH-001, §12 W-BATCH-001)+compiler/tests/unit/sql-batching-envelope.test.js prov=review:s474-1732(F12) -->
+
+These tests pin impl#1's emission of codes the SPEC now retires. They pass because impl#1 still emits the codes (`g-impl1-retired-batch-codes-still-emitted-s474`). When impl#1 builds the savepoint form, they must be rewritten to assert a clean compile and the savepoint. Until then they are pins of a divergence, not of the language.
+
+### g-boot-envelope-nobatch-count-and-remedy-s474 — the BOOTSTRAP still keeps `.nobatch()` queries out of the envelope trigger and still opens no envelope for a body that reaches one query once; its E-SQL-011 and pooled-database messages still tell authors to "remove the envelope ('.nobatch()' …)", a remedy S474 removed from the language — `NEW S474 (#1732 review F12); MED; open`
+
+<!-- @gap id=g-boot-envelope-nobatch-count-and-remedy-s474 sev=MED status=open locus=compiler/self-host-v2/analyze.scrml(txQuerySets `qs` — none `.nobatch()`; envelopeOf `needs` — two counted queries, a repeat or a loop; the E-SQL-011 and pooled-database diagnostics in envelopeOf) prov=ruling:user-voice-scrml.md-S474-envelope-every-bang;review:s474-1732(F12) -->
+
+SPEC §8.9.2 "Amendment S474" items 1–2 (PR #1732) make the trigger a non-empty transitive query set, with `.nobatch()` queries included. On the bootstrap:
+- two `.nobatch()` writes still run with no envelope;
+- one write followed by a `fail` still leaves the write in place.
+
+The E-SQL-011 message offers "or remove the envelope ('.nobatch()' on every query of the envelope, §8.9.5) if the writes need not be atomic", and the pooled-database refusal offers "mark each query that need not be atomic with `.nobatch()`". Neither remedy exists any more. The composed-batch trigger (`composePass`) uses the same old threshold.
+
+### g-tx-unmatched-end-unbuilt-s474 — E-TX-UNMATCHED-END (manual transaction control in a `!` body that is not a static straight-line pair, or a named savepoint) is emitted by neither compiler — `NEW S474 (#1732); MED; open`
+
+<!-- @gap id=g-tx-unmatched-end-unbuilt-s474 sev=MED status=open locus=searched:compiler/src+compiler/self-host-v2(no emit site for E-TX-UNMATCHED-END) prov=review:s474-1732(F10);spec:§8.9.2-Amendment-S474-item-3 -->
+
+The code is a PA reading in #1732 (INTERIM, for bryan's veto). Status on each compiler:
+- **Bootstrap:** fails closed today, because it refuses all manual transaction control in a `!` function with E-BOOTSTRAP-UNSUPPORTED.
+- **impl#1:** emits nothing. A bare `?{COMMIT}` in an impl#1 `!` body can end the envelope it runs in.
+
+The capable form is path-sensitive matching with savepoint release / rollback semantics for a bare ending.
+
 ### g-bootstrap-object-literal-arm-body-refused-s474 — the BOOTSTRAP refuses a `match` / `!{}` arm body that is an object literal (`.B :> { a: 2 }`, `{ "a": 1 }`, `{ a, b }`), which §18.5 says SHALL be that object in every position: `parseArmBody` has no object-literal path, so the brace is read as a block and the compile fails with E-STMT-MISSING-SEMICOLON + E-PARSE-EXPR (fails closed, misleading codes) — `NEW S474; MED; open`
 
 <!-- @gap id=g-bootstrap-object-literal-arm-body-refused-s474 sev=MED status=open locus=compiler/self-host-v2/parse.scrml(parseArmBody — a `{` body goes to the shorthand check, then parseArmBlock; no object-literal shape test) prov=review:S474-#1722-F5(~/.cache/scrml/review/s474-1722/probes v_obj_key, v_obj_strkey, v_obj_two_short);spec:§18.5("A brace body that reads as an object literal is the arm's value") -->
