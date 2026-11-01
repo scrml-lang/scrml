@@ -1,0 +1,31 @@
+{
+  "id": "element-refusal-s474-parser-repair-p-div-neg",
+  "description": "§24.5: a <div> inside an open <p> is E-HTML-PARSER-REPAIR. The HTML parser closes the <p> at the <div> (\"close a p element\"), so the page does not hold the tree as written.",
+  "language-version": "1.0",
+  "spec": "§24.5",
+  "provenance": "ruling:user-voice-scrml.md S474 \"⭐ RULED — FORK RULE row C amended: semantic impossibility may be PERMANENT\" (the PERMANENT class); the code and its reading are a PA reading in the S474 review of #1727 (F3 h_pDiv: show= hid the wrong element in Chromium)",
+  "rationale": "§24.5 item 2: an element that closes an open <p> inside one, with no scope boundary between, SHALL be E-HTML-PARSER-REPAIR.",
+  "expect": {
+    "codes": [
+      "E-HTML-PARSER-REPAIR"
+    ],
+    "codeCounts": {
+      "E-HTML-PARSER-REPAIR": 1
+    },
+    "severity": {
+      "E-HTML-PARSER-REPAIR": "error"
+    }
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-impl1-markup-parser-restructure-unrefused-s474",
+      "fails": {
+        "codes": [
+          "codeCounts:code 'E-HTML-PARSER-REPAIR' fired 0 time(s), expected exactly 1",
+          "missing:E-HTML-PARSER-REPAIR",
+          "severity:code 'E-HTML-PARSER-REPAIR' did not fire (expected severity error)"
+        ]
+      }
+    }
+  }
+}

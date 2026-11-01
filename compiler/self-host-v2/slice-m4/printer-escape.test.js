@@ -39,8 +39,13 @@ describe("escAttr: an attribute value cannot spell a closer", () => {
     expect(mods.html.escAttr("&lt;")).toBe("&amp;lt;");
   });
   for (const tag of ELEMENTS) {
-    test(`<${tag}> holding <p title="${PAYLOAD(tag)}">: the printed page has no script element and no early closer`, () => {
-      const html = printed(`<program>\n    <${tag}><p title="${PAYLOAD(tag)}">x</p></${tag}>\n</program>\n`);
+    // s474 r2 (#1727 re-review R2, SPEC §24.5): an ELEMENT inside a raw-text / RCDATA element is text on
+    // the page, so the analyzer now refuses it outright — the attack shape never reaches the printer. The
+    // escaping is still pinned, by the same payload on an element outside one (and the escAttr units above).
+    test(`<${tag}> holding <p title="${PAYLOAD(tag)}">: refused at compile time (E-HTML-PARSER-REPAIR); the payload elsewhere prints escaped`, () => {
+      const r = frontEnd(mods, [{ path: "c.scrml", src: `<program>\n    <${tag}><p title="${PAYLOAD(tag)}">x</p></${tag}>\n</program>\n` }]);
+      expect(r.diags.filter((d) => d.code.startsWith("E-")).map((d) => d.code)).toEqual(["E-HTML-PARSER-REPAIR"]);
+      const html = printed(`<program>\n    <div><p title="${PAYLOAD(tag)}">x</p></div>\n</program>\n`);
       const page = authored(html);
       expect(page).not.toContain("<script>");
       expect(page).not.toContain(`</${tag}><script`);

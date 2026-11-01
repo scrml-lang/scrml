@@ -1,0 +1,8 @@
+<program>
+    <main>
+        <svg><foreignObject width="90" height="20"><p>a</p><div>b</div></foreignObject></svg>
+        <math><mtext><span>c</span></mtext><annotation-xml encoding="text/html"><p>d</p></annotation-xml></math>
+        <table><tbody><tr><td>e</td></tr></tbody></table>
+        <ul><li>f<ul><li>g</li></ul></li></ul>
+    </main>
+</program>

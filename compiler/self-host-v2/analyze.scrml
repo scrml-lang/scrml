@@ -56,7 +56,8 @@ ${
              ACss, ACssItem, ACssRule, ACssDecl, ACssPart, ACssRef, mkSpan, newDiag,
              HView, HTargetParts, hostView, hostTargetParts, hostRootGlobal, isHyphenWordExpr } from "./ast.scrml"
     import { Severity } from "./severity.scrml"
-    import { isKnownElementName, isHtmlElementName } from "./elements.scrml"
+    import { isKnownElementName, isHtmlElementName, htmlNs, childNs, isForeignNs, isHtmlInNs, isForeignBreakout, closesP,
+             isHeading, boundsScope, formattingMarker, isSpecialHtml, tableMode, tableModeChildren } from "./elements.scrml"
     import { importTarget, importsOfItems, hostImportsOfItems, hostTagOf, isStdlibPath, stdlibPrefix, HostLoc, hostLocOf } from "./link.scrml"
     import { WireBuild, WireTable, wireBuild, hasFixedLength } from "./codec.scrml"
     import { SqlFacts, SlotQuote, MultiStmt, StmtVerdict, sqlFacts, slotInLiteral, txControl, txControlAware, multiStatement, programStatement, journalOff } from "./sql.scrml"
@@ -16820,6 +16821,303 @@ ${
         return isKnownElementName(tag)
     }
 
+    // =========================================================================
+    // s474 (boot-gate-await-mathml, review of #1727 F1–F3) — SPEC §24.5: markup
+    // the HTML parser RESTRUCTURES is refused. A template's holes (a `show=`
+    // element, an `if=` marker, a `${}` text) are addressed by child-index path
+    // over the tree as WRITTEN; a node the browser moves — a `<p>` ejected from
+    // `<svg>`, a `<div>` that closes an open `<p>`, a `<span>` fostered out of a
+    // `<table>` — shifts every path after it, so `show=` hid the wrong element and
+    // a gated secret was visible at first paint (Chromium, review F3). Two codes:
+    //   E-HTML-FOREIGN-BREAKOUT  an HTML "breakout" start tag (HTML §13.2.6.5)
+    //                            as a child of an SVG / MathML element
+    //   E-HTML-PARSER-REPAIR     an HTML nesting the "in body" / "in table"
+    //                            rules repair (a block opener in an open `<p>`,
+    //                            a non-table child of `table` / `tbody` / `tr`,
+    //                            text in them, a nested `<a>` / `<li>` / `<dd>` /
+    //                            `<button>` / heading, `<html>` / `<head>` /
+    //                            `<body>` / `<frameset>`)
+    // The context is elements.scrml `childNs` — the printer's own. Foreign
+    // context crosses every template boundary (a foreign template is printed
+    // inside its context's wrapper, print.scrml `wrapNs`), so a declaration used
+    // inside `<svg>` is walked in that context too and its faults are reported
+    // at the use. The HTML repairs do not cross one: an `if=` arm, an `<each>` /
+    // Tier-0 row, a declaration's renders and slot content are each their own
+    // `<template>`, parsed in the "in template" mode (which keeps a table part
+    // at its root) and inserted by DOM calls, which repair nothing.
+    // =========================================================================
+    type MkCx:struct = { ns: string, parent: string, inP: boolean, inA: boolean, inLi: boolean, inDd: boolean,
+                         inButton: boolean, inNobr: boolean, tbl: string, depth: int, raw: string }
+    type MkFault:struct = { nid: int, file: string, span: ASpan, code: string, msg: string }
+
+    fn mkRoot(ns: string, depth: int) -> MkCx {
+        return { ns: ns, parent: "", inP: false, inA: false, inLi: false, inDd: false, inButton: false, inNobr: false, tbl: "", depth: depth, raw: "" }
+    }
+
+    fn markupParseDiags(g: Globals, st0: AS) -> AS {
+        let st: AS = st0
+        for (const ds of g.decls) {
+          // s474 r2 (re-review R4): a file that already fails to parse is not judged — its misparsed nesting
+          // is the parse error's cascade, not a nesting the author wrote
+          if (fileErrs(g.files, ds.file).length == 0) {
+            let faults: MkFault[] = mkNodes(g, ds.file, rendersNodes(ds), mkRoot(htmlNs(), 0))
+            for (const sb of stateBodyLists(ds)) { faults = faults.concat(mkNodes(g, ds.file, sb, mkRoot(htmlNs(), 0))) }
+            if (ds.p is not) {
+                for (const fd of fieldDecls(ds)) { faults = faults.concat(mkNodes(g, ds.file, rendersOf(fd), mkRoot(htmlNs(), 0))) }
+            }
+            for (const f of faults) { st = addDiag(st, f.file, f.span, f.code, f.msg) }
+          }
+        }
+        return st
+    }
+
+    fn hasNul(t: string) -> boolean {
+        let i: int = 0
+        while (i < t.length) {
+            if (t.charCodeAt(i) == 0) return true
+            i = i + 1
+        }
+        return false
+    }
+
+    fn nulMsg() -> string {
+        return "a raw U+0000 (NUL) character in markup text is removed or replaced by the HTML parser (HTML §13.2.6.4.7), so the page would not hold the text written here (SPEC §24.5) — delete it, or write the character you mean"
+    }
+
+    fn hasAttrCI(attrs: AAttr[], name: string) -> boolean {
+        for (const a of attrs) { if (a.name.toLowerCase() == name) return true }
+        return false
+    }
+
+    // The HTML raw-text / RCDATA element whose content the parser reads as text ("" — not one).
+    fn rawTextTag(t: string) -> string {
+        if (["textarea", "title", "xmp", "iframe", "noembed", "noframes", "noscript", "plaintext"].indexOf(t) >= 0) return t
+        return ""
+    }
+
+    fn rawTextMsg(tag: string, raw: string) -> string {
+        const head: string = "`<" + tag + ">` inside `<" + raw + ">` is text, not an element"
+        return head + ": the HTML parser reads the content of `<" + raw + ">` as raw text (HTML §13.2.6.4.7), so the element and every hole in it never reach the page (SPEC §24.5) — move it out of the `<" + raw + ">` (an interpolated value inside one is fine)"
+    }
+
+    fn mkNodes(g: Globals, file: string, nodes: ANode[], c: MkCx) -> MkFault[] {
+        let out: MkFault[] = []
+        for (const n of nodes) { out = out.concat(mkNode(g, file, n, c)) }
+        return out
+    }
+
+    fn mkNode(g: Globals, file: string, n: ANode, c: MkCx) -> MkFault[] {
+        const k: ANodeK = n.k
+        return match k {
+            .Elem(e: e) :> mkElem(g, file, e, c)
+            .Text(text: t) :> mkText(file, n, t, c)
+            .Interp(e: x) :> []
+            .DeclNode(d: x) :> []
+            .Effect(w: x) :> []
+            .Css(c: x) :> []
+            .Gather(f: lf) :> mkNodes(g, file, rowsOfBlock(lf.body), mkRoot(c.ns, c.depth))
+        }
+    }
+
+    // "in table" text (HTML §13.2.6.4.10): a character that is not white space
+    // is foster-parented out of the table.
+    fn mkText(file: string, n: ANode, t: string, c: MkCx) -> MkFault[] {
+        // s474 r2 (re-review R1): a raw U+0000 in markup text is dropped ("in body") or replaced by the parser;
+        // a text node of NULs alone disappears, which shifts every hole path after it
+        if (hasNul(t)) return [{ nid: n.nid, file: file, span: n.span, code: "E-HTML-PARSER-REPAIR", msg: nulMsg() }]
+        if (c.tbl == "" || t.trim() == "") return []
+        return [{ nid: n.nid, file: file, span: n.span, code: "E-HTML-PARSER-REPAIR",
+                  msg: "text directly inside `<" + c.parent + ">` is moved out of the table by the HTML parser (\"foster parenting\", HTML §13.2.6.4.10), so the page would not hold the tree written here (SPEC §24.5) — put it in a cell: `<td>…</td>`" }]
+    }
+
+    fn mkQuoted(attrs: AAttr[], name: string) -> string {
+        const a: AAttr | not = attrNamed(attrs, name)
+        if (a is not) return ""
+        const v: AAttrValue = a.value
+        return match v {
+            .Quoted(v: s) :> s
+            .NoValue :> ""
+            .Bare(e: x) :> ""
+            .Paren(e: x) :> ""
+            .Braced(b: x) :> ""
+        }
+    }
+
+    fn isArmElem(e: AElem) -> boolean {
+        return attrNamed(e.attrs, "if") is given || attrNamed(e.attrs, "else-if") is given || attrNamed(e.attrs, "else") is given
+    }
+
+    fn mkElem(g: Globals, file: string, e: AElem, c0: MkCx) -> MkFault[] {
+        // s474 r2 (re-review R2): inside an HTML raw-text / RCDATA element the parser builds TEXT, never an
+        // element — an element written there (a `show=` / `if=` hole, a use, an `<each>`) is not on the page
+        if (c0.raw != "") return [{ nid: e.nid, file: file, span: e.span, code: "E-HTML-PARSER-REPAIR", msg: rawTextMsg(e.tag, c0.raw) }]
+        if (e.star) return []
+        // an `if=` / `else-if=` / `else` element is its arm's own template
+        let c: MkCx = c0
+        if (isArmElem(e)) c = mkRoot(c0.ns, c0.depth)
+        if (e.tag == "each") return mkNodes(g, file, e.kids, mkRoot(c.ns, c.depth))
+        if (e.tag == "slot" || e.tag == "errors" || e.tag == "db") return []
+        const d: DeclSrc | not = declNamed(g, file, e.tag)
+        if (d is given) return mkUse(g, file, e, d, c)
+        // a tag that is no element (a field, a refused or unknown name) has its own diagnostic
+        if (!isKnownElementName(e.tag)) return mkNodes(g, file, e.kids, c)
+        const t: string = e.tag.toLowerCase()
+        let out: MkFault[] = []
+        // s474 r2 (re-review R3): HTML attribute names are ASCII case-insensitive (`<font COLOR=…>` breaks out too)
+        const fontAttr: boolean = hasAttrCI(e.attrs, "color") || hasAttrCI(e.attrs, "face") || hasAttrCI(e.attrs, "size")
+        const breakout: boolean = isForeignNs(c.ns) && isForeignBreakout(t, fontAttr)
+        if (breakout) {
+            out = [{ nid: e.nid, file: file, span: e.span, code: "E-HTML-FOREIGN-BREAKOUT", msg: breakoutMsg(e.tag, c) }]
+        } else if (isForeignNs(c.ns) && ["area", "base", "col", "input", "link", "source", "track", "wbr"].indexOf(t) >= 0) {
+            // an HTML void element name has no SVG / MathML meaning; written there it is a foreign element
+            // the page cannot close (it is printed without an end tag, as HTML), so it swallows its siblings
+            out = [{ nid: e.nid, file: file, span: e.span, code: "E-HTML-FOREIGN-BREAKOUT",
+                     msg: voidInForeignMsg(e.tag, c.ns) }]
+        } else if (isHtmlInNs(c.ns, t)) {
+            out = mkRepair(file, e, t, c)
+        }
+        let ns: string = c.ns
+        if (breakout) ns = htmlNs()
+        // after a fault the parser has already left the written nesting: its children are judged
+        // afresh (one report per fault, never a cascade down the subtree)
+        let kc: MkCx = c
+        if (out.length > 0) kc = mkRoot(ns, c.depth)
+        return out.concat(mkNodes(g, file, e.kids, mkKid(ns, t, mkQuoted(e.attrs, "encoding"), kc)))
+    }
+
+    fn voidInForeignMsg(tag: string, ns: string) -> string {
+        const head: string = "`<" + tag + ">` is an HTML void element, which cannot be a child of " + nsWords(ns)
+        return head + ": there it is no HTML element and has no end tag, so the elements after it would be built inside it (SPEC §24.5) — put HTML inside `<foreignObject>` (SVG) or `<mtext>` (MathML)"
+    }
+
+    fn breakoutMsg(tag: string, c: MkCx) -> string {
+        let where: string = "SVG content"
+        if (c.ns != "svg") where = "MathML content"
+        let inside: string = ""
+        if (c.parent != "") inside = " (inside `<" + c.parent + ">`)"
+        return "`<" + tag + ">` cannot be a child of " + where + inside + ": the HTML parser ends the foreign content at a `<" + tag + ">` start tag and builds it — and the markup after it — outside the `<svg>` / `<math>` (HTML §13.2.6.5, \"breakout\" start tags), so it never renders there (SPEC §24.5). Put HTML inside `<foreignObject>` (SVG) or `<mtext>` (MathML), or use an SVG / MathML element (`<text>`, `<tspan>`, `<g>`, `<mrow>`)"
+    }
+
+    // The children's context of `<t>` (in context `c.ns`, or HTML after a breakout).
+    fn mkKid(ns: string, t: string, enc: string, c: MkCx) -> MkCx {
+        const kns: string = childNs(ns, t, enc)
+        if (!isHtmlInNs(ns, t)) {
+            // an SVG / MathML element: a scope boundary (foreignObject, mi, …) ends the HTML scopes
+            const bound: boolean = boundsScope(ns, t)
+            return { ns: kns, parent: t, inP: c.inP && !bound, inA: c.inA, inLi: c.inLi && !bound, inDd: c.inDd && !bound,
+                     inButton: c.inButton && !bound, inNobr: c.inNobr && !bound, tbl: "", depth: c.depth, raw: "" }
+        }
+        const bound: boolean = boundsScope(htmlNs(), t)
+        const special: boolean = isSpecialHtml(t) && t != "address" && t != "div" && t != "p"
+        return { ns: kns, parent: t,
+                 inP: t == "p" || (c.inP && !bound && t != "button"),
+                 inA: t == "a" || (c.inA && !formattingMarker(t)),
+                 inLi: t == "li" || (c.inLi && !special),
+                 inDd: t == "dd" || t == "dt" || (c.inDd && !special),
+                 inButton: t == "button" || (c.inButton && !bound),
+                 inNobr: t == "nobr" || (c.inNobr && !bound),
+                 tbl: tableMode(t), depth: c.depth, raw: rawTextTag(t) }
+    }
+
+    fn mkRepairFault(file: string, e: AElem, why: string) -> MkFault[] {
+        return [{ nid: e.nid, file: file, span: e.span, code: "E-HTML-PARSER-REPAIR",
+                  msg: why + " — the page would not hold the tree written here, so a hole after it (a `show=`, an `if=`, a `${}`) would address the wrong node (SPEC §24.5)" }]
+    }
+
+    // One report per element: the first HTML tree-construction rule it trips.
+    fn mkRepair(file: string, e: AElem, t: string, c: MkCx) -> MkFault[] {
+        const tg: string = "`<" + e.tag + ">`"
+        if (t == "html" || t == "head" || t == "body" || t == "frameset") return mkRepairFault(file, e, tg + " is never an element of a page body: the HTML parser drops the tag (HTML §13.2.6.4.7)")
+        if (c.tbl != "" && tableModeChildren(c.tbl).indexOf(t) < 0) return mkRepairFault(file, e, tg + " directly inside `<" + c.parent + ">` is moved or wrapped by the HTML parser (HTML §13.2.6.4.9–15: " + tableHint(c.tbl, t) + ")")
+        if (c.inP && closesP(t)) return mkRepairFault(file, e, tg + " inside an open `<p>` CLOSES the `<p>` first (HTML §13.2.6.4.7 \"close a p element\"): it becomes the `<p>`'s next sibling. Use a `<div>` for the outer element, or a phrasing element (`<span>`) for the inner one")
+        if (t == "a" && c.inA) return mkRepairFault(file, e, "an `<a>` inside an `<a>` closes the outer one (HTML §13.2.6.4.7, the adoption agency): links do not nest")
+        if (t == "li" && c.inLi) return mkRepairFault(file, e, "an `<li>` inside an open `<li>` (with no list between) closes it (HTML §13.2.6.4.7) — nest a `<ul>` / `<ol>` for a sub-list")
+        if ((t == "dd" || t == "dt") && c.inDd) return mkRepairFault(file, e, tg + " inside an open `<dd>` / `<dt>` closes it (HTML §13.2.6.4.7) — nest a `<dl>`")
+        if (isHeading(t) && isHeading(c.parent)) return mkRepairFault(file, e, "a heading directly inside a heading closes the outer one (HTML §13.2.6.4.7)")
+        if (t == "button" && c.inButton) return mkRepairFault(file, e, "a `<button>` inside a `<button>` closes the outer one (HTML §13.2.6.4.7): buttons do not nest")
+        if (t == "nobr" && c.inNobr) return mkRepairFault(file, e, "a `<nobr>` inside a `<nobr>` closes the outer one (HTML §13.2.6.4.7)")
+        if (t == "option" && c.parent == "option") return mkRepairFault(file, e, "an `<option>` directly inside an `<option>` closes it (HTML §13.2.6.4.7): options do not nest")
+        if (t == "optgroup" && (c.parent == "option" || c.parent == "optgroup")) return mkRepairFault(file, e, "an `<optgroup>` directly inside an `<option>` / `<optgroup>` closes it (HTML §13.2.6.4.7)")
+        if ((t == "rt" || t == "rp") && ["rb", "rp", "rt"].indexOf(c.parent) >= 0) return mkRepairFault(file, e, tg + " directly inside `<" + c.parent + ">` closes it (HTML §13.2.6.4.7, ruby's implied end tags)")
+        if ((t == "rb" || t == "rtc") && ["rb", "rp", "rt", "rtc"].indexOf(c.parent) >= 0) return mkRepairFault(file, e, tg + " directly inside `<" + c.parent + ">` closes it (HTML §13.2.6.4.7, ruby's implied end tags)")
+        return []
+    }
+
+    fn tableHint(mode: string, t: string) -> string {
+        if (mode == "table" && t == "tr") return "a `<tbody>` is inserted around it — write the `<tbody>`"
+        if (mode == "table" && (t == "td" || t == "th")) return "a `<tbody>` and a `<tr>` are inserted around it — write them"
+        if (mode == "table" && t == "col") return "a `<colgroup>` is inserted around it — write the `<colgroup>`"
+        if (mode == "tbody" && (t == "td" || t == "th")) return "a `<tr>` is inserted around it — write the `<tr>`"
+        return "it is moved out of the table (\"foster parenting\") — put it in a cell, `<td>…</td>`"
+    }
+
+    // A use: its slot content is its own template, in the context of the used
+    // declaration's `<slot/>`; and in a FOREIGN context the declaration's renders
+    // are printed in that context's wrapper, so what is a fault only there is
+    // reported here, at the use.
+    fn mkUse(g: Globals, file: string, e: AElem, d: DeclSrc, c: MkCx) -> MkFault[] {
+        let out: MkFault[] = []
+        if (isForeignNs(c.ns) && c.depth < 16) {
+            const inner: MkFault[] = mkNodes(g, d.file, rendersNodes(d), mkRoot(c.ns, c.depth + 1))
+            const alone: MkFault[] = mkNodes(g, d.file, rendersNodes(d), mkRoot(htmlNs(), c.depth + 1))
+            for (const f of inner) {
+                if (!mkFaultIn(alone, f)) {
+                    out = out.concat([{ nid: e.nid, file: file, span: e.span, code: f.code,
+                                        msg: "`<" + e.tag + ">` is used inside " + nsWords(c.ns) + ", where its renders do not hold: " + f.msg }])
+                }
+            }
+        }
+        if (e.kids.length > 0 && c.depth < 16) {
+            out = out.concat(mkNodes(g, file, e.kids, mkRoot(mkSlotNs(g, d, c.ns, c.depth + 1), c.depth + 1)))
+        }
+        return out
+    }
+
+    fn nsWords(ns: string) -> string {
+        if (ns == "svg") return "SVG content"
+        return "MathML content"
+    }
+
+    fn mkFaultIn(fs: MkFault[], f: MkFault) -> boolean {
+        for (const x of fs) { if (x.nid == f.nid && x.code == f.code) return true }
+        return false
+    }
+
+    /** The context `d`'s `<slot/>` sits in when its renders are in context `ns` (`ns` when it has none). */
+    fn mkSlotNs(g: Globals, d: DeclSrc, ns: string, depth: int) -> string {
+        const s: string = mkSlotIn(g, d.file, rendersNodes(d), ns, depth)
+        if (s == "") return ns
+        return s
+    }
+
+    fn mkSlotIn(g: Globals, file: string, nodes: ANode[], ns: string, depth: int) -> string {
+        if (depth > 16) return ""
+        for (const n of nodes) {
+            const k: ANodeK = n.k
+            const s: string = match k {
+                .Elem(e: e) :> mkSlotElem(g, file, e, ns, depth)
+                .Text(text: t) :> ""
+                .Interp(e: x) :> ""
+                .DeclNode(d: x) :> ""
+                .Effect(w: x) :> ""
+                .Css(c: x) :> ""
+                .Gather(f: lf) :> mkSlotIn(g, file, rowsOfBlock(lf.body), ns, depth)
+            }
+            if (s != "") return s
+        }
+        return ""
+    }
+
+    fn mkSlotElem(g: Globals, file: string, e: AElem, ns: string, depth: int) -> string {
+        if (e.star) return ""
+        if (e.tag == "slot") return ns
+        if (e.tag == "each") return mkSlotIn(g, file, e.kids, ns, depth)
+        const d: DeclSrc | not = declNamed(g, file, e.tag)
+        if (d is given) return mkSlotIn(g, file, e.kids, mkSlotNs(g, d, ns, depth + 1), depth + 1)
+        if (!isKnownElementName(e.tag)) return mkSlotIn(g, file, e.kids, ns, depth)
+        return mkSlotIn(g, file, e.kids, childNs(ns, e.tag, mkQuoted(e.attrs, "encoding")), depth)
+    }
+
     // s473 — an element attribute that is a scrml directive the bootstrap does
     // not carry: refused by name, never written to the DOM ("" = not one).
     //  - `fixed` — RETIRED (ruling S473 D26): it used to leak as `fixed=""`.
@@ -32301,6 +32599,8 @@ ${
         const ra: RGlobals = constPass(ra0.g, ra0.st)
         let st: AS = checkImports(files, ra.g, ra.st)
         st = phaseB(ra.g, st)
+        // s474 (review of #1727): markup the HTML parser restructures (SPEC §24.5)
+        st = markupParseDiags(ra.g, st)
         st = strayEffects(files, st)
         // s473 (§21.3.3 rule 15): a declared `:host` handle is not data
         st = hostCellDiags(ra.g, hostTypeDataDiags(ra.g.types, st))

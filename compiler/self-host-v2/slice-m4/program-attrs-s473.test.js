@@ -86,11 +86,19 @@ describe("B3 — §40.7 documentary attributes are read", () => {
   });
   for (const [label, body] of [
     ["an SVG tooltip `<svg><title>`", `<svg><title>tooltip</title></svg>`],
-    ["`<textarea>` content", `<textarea><title>x</title></textarea>`],
-    ["`<noscript>` content", `<noscript><title>x</title></noscript>`],
   ]) {
     test(`fix round F2: a \`<title>\` in ${label} is not the document's — the documentary title stays`, () => {
       expect(html(prog(`title="D"`, `${body}\n    <p>x</p>`))).toContain("<title>D</title>\n");
+    });
+  }
+  // s474 r2 (#1727 re-review R2, SPEC §24.5): an element written inside `<textarea>` / `<noscript>` is
+  // text on the page, so it is refused at compile time now (it never reaches the head-title reading)
+  for (const [label, body] of [
+    ["`<textarea>` content", `<textarea><title>x</title></textarea>`],
+    ["`<noscript>` content", `<noscript><title>x</title></noscript>`],
+  ]) {
+    test(`fix round F2 / s474: a \`<title>\` in ${label} is E-HTML-PARSER-REPAIR (it is text there)`, () => {
+      expect(codes(prog(`title="D"`, `${body}\n    <p>x</p>`))).toContain("E-HTML-PARSER-REPAIR");
     });
   }
   test("unchanged: a documentary attribute on a NESTED `<program>` is W-PROGRAM-TITLE-NESTED", () => {

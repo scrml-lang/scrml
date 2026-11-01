@@ -118,7 +118,7 @@ describe("placement and the printed sheet (§9.1 DQ-6 / DQ-7, §65.5, §65.8)", 
     const scoped = clean(P(`        <card title="a"/>\n        <chip label="b"/>`, CARD + plain));
     expect(printed(scoped).html).toContain(`<span data-scrml="${key("chip")}">`);
     const none = clean(P(`        <chip label="b"/>`, `    #{ p { color: red; } }\n` + plain));
-    expect(printed(none).html).not.toContain("data-scrml");
+    expect(printed(none).html).not.toContain("data-scrml=\"");   // the scope stamp (s474: every template carries `data-scrml-shape`, which is not one)
   });
 
   test("a flat `#{}` directly in a component's root → that root's inline style= (and not in the sheet)", () => {
