@@ -105,7 +105,7 @@ let <phase:Load=.Idle/>
 
 When each variant needs its own markup, the `<match>` element renders one child per variant:
 
-<!-- gate: spec-ahead [E-BOOTSTRAP-UNSUPPORTED, E-PARSE-TAG] — the bootstrap has no <match> block element and cannot construct a payload variant (Load.Loaded(2)) as a value yet -->
+<!-- gate: spec-ahead [E-BOOTSTRAP-UNSUPPORTED, E-PARSE-TAG×4] — the bootstrap has no <match> block element and cannot construct a payload variant (Load.Loaded(2)) as a value yet -->
 <!-- snippet: docs/readme-snippets/nerdme/match-block.scrml -->
 ```scrml
 // NERDME.md "Engines, matches & iteration" (Tier 1, the <match> element) — ruled; spec-ahead on the bootstrap.
@@ -231,7 +231,7 @@ Conversions that can fail or lose information are spelled out. Text becomes a nu
 
 The type annotation **is** the validation schema — no separate schema library, no `z.object()` wrappers, no `z.infer<typeof>` indirection.
 
-<!-- gate: spec-ahead [E-DECL-STATE-CHILD, E-PARSE-CLOSER, E-PARSE-DECL-BODY, E-PARSE-TAG, E-PARSE-UNCLOSED, E-SCOPE-001, E-STATE-UNDECLARED] — the bootstrap has no refinement types (number(>0 && <10000), string(email)) in an opener, a struct field or a parameter yet; the first opener's parse failure cascades through the file -->
+<!-- gate: spec-ahead [E-DECL-STATE-CHILD, E-PARSE-CLOSER, E-PARSE-DECL-BODY×10, E-PARSE-TAG×8, E-PARSE-UNCLOSED, E-SCOPE-001(discount), E-STATE-UNDECLARED(@email)] — the bootstrap has no refinement types (number(>0 && <10000), string(email)) in an opener, a struct field or a parameter yet; the first opener's parse failure cascades through the file -->
 <!-- snippet: docs/readme-snippets/nerdme/refinement.scrml -->
 ```scrml
 // NERDME.md "Runtime type validation" — ruled; spec-ahead on the bootstrap (no refinement types yet).
@@ -282,7 +282,7 @@ Built-in named shapes (the SPEC §53.6.1 registry): `email`, `url`, `uuid`, `pho
 
 One struct type drives the form, the schema, and the table — no schema duplication, no model-to-DTO translation, no view-model boilerplate.
 
-<!-- gate: spec-ahead [E-BOOTSTRAP-UNSUPPORTED, E-PARSE-EXPECTED, E-PARSE-TYPE, E-TYPE-UNKNOWN] — the bootstrap has no refinement types on struct fields (string(email)), no <schema> and no <formFor> / <tableFor> yet -->
+<!-- gate: spec-ahead [E-BOOTSTRAP-UNSUPPORTED×5, E-PARSE-EXPECTED×2, E-PARSE-TYPE×9, E-TYPE-UNKNOWN(), E-TYPE-UNKNOWN()] — the bootstrap has no refinement types on struct fields (string(email)), no <schema> and no <formFor> / <tableFor> yet -->
 <!-- snippet: docs/readme-snippets/nerdme/type-derived.scrml -->
 ```scrml
 // NERDME.md "Type-derived apps" — ruled; spec-ahead on the bootstrap (no refinement types, <schema>, <formFor>, <tableFor>).
@@ -414,7 +414,7 @@ A build story can be pinned per `<program>` — `<program story="…">`\* — an
 
 `navigate(path)` moves between routes. From client code it is a **soft** navigation: the runtime fetches the target route's server-rendered HTML, swaps it into the `<outlet>` of a persistent `<program>` shell, loads any client chunk that route needs, and hydrates it — no full reload, no router library, and shell state (navigation, sidebars, counters) survives. From server code it is a 302 redirect. `navigate(path, .Hard)` / `navigate(path, .Soft)` override the inference.
 
-<!-- gate: spec-ahead [E-BOOTSTRAP-UNSUPPORTED, E-SCOPE-001] — the bootstrap has no navigate() and no <outlet> element yet -->
+<!-- gate: spec-ahead [E-BOOTSTRAP-UNSUPPORTED, E-SCOPE-001(navigate)] — the bootstrap has no navigate() and no <outlet> element yet -->
 <!-- snippet: docs/readme-snippets/nerdme/navigation.scrml -->
 ```scrml
 // NERDME.md "Client navigation" — the persistent shell. Ruled; spec-ahead on the bootstrap (no navigate(), no <outlet>).

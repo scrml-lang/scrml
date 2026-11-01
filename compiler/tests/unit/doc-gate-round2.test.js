@@ -4,7 +4,8 @@
  *   A1  fences close only on a run of the same character at least as long as the opener.
  *   A2  claim-gate delegates a snippet-marked block only when snippet-gate really checks it.
  *   A3  a bootstrap crash is a failure even on a spec-ahead block.
- *   A3b a spec-ahead marker may pin its expected codes; a different set fails.
+ *   A3b a spec-ahead marker may pin its expected codes WITH COUNTS; a different multiset fails
+ *       (S474 backfill #1489-1: a set compare let a typo add a second E-SCOPE-001 and pass).
  *   A4  scrml-looking fences that cannot be gated are errors, not silent skips.
  *   A5  `skip-me` / `spec-ahead-ish` are unknown kinds.
  *   A6  printer refusals fail, warnings do not, front-matter/HTML dialect conflict.
@@ -13,12 +14,12 @@
 
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
 import { spawnSync } from "child_process";
-import { mkdtempSync, writeFileSync, rmSync } from "fs";
+import { mkdtempSync, readFileSync, writeFileSync, rmSync } from "fs";
 import { tmpdir } from "os";
 import { join, sep } from "path";
 import { parseDocMarkers } from "../../../scripts/doc-gate-markers.js";
 import { parseDoc, isDriftScanned, inSnippetCorpus, discoverDocs } from "../../../scripts/snippet-drift.js";
-import { bootCheck, classifySpecAhead, pinMismatch } from "../../../scripts/doc-boot-check.js";
+import { bootCheck, classifySpecAhead, pinKey, pinMismatch, pinText } from "../../../scripts/doc-boot-check.js";
 import { loadBoot } from "../../../scripts/scrml-boot.ts";
 
 const ROOT = join(import.meta.dir, "../../..");
@@ -93,10 +94,70 @@ describe("A5 / A3b — marker kinds and pins", () => {
     expect(parseDocMarkers(["<!-- gate: skip [E-X] — why -->", ...fence("x")].join("\n")).errors[0].message).toContain("only allowed on `gate: spec-ahead`");
     expect(parseDocMarkers(["<!-- dialect: ruled -->", "<!-- gate: spec-ahead [oops] — why -->", ...fence("x")].join("\n")).errors[0].message).toContain("bad pinned code list");
   });
-  test("pinMismatch compares distinct code sets", () => {
+  test("a pin entry `E-CODE×N` is N of that code; a code listed twice counts twice", () => {
+    const d = parseDocMarkers(["<!-- dialect: ruled -->", "<!-- gate: spec-ahead [E-SCOPE-001×3, E-PARSE-ARM, E-PARSE-ARM] — why -->", ...fence("x")].join("\n"));
+    expect(d.errors).toEqual([]);
+    expect(d.blocks[0].gate.codes).toEqual(["E-SCOPE-001", "E-SCOPE-001", "E-SCOPE-001", "E-PARSE-ARM", "E-PARSE-ARM"]);
+    for (const bad of ["E-A×0", "E-A×", "E-A×x", "E-A×2×2", "×2", "E-A(x y)", "E-A(1x)", "E-A(x)×2", "E-A(x"]) {
+      const e = parseDocMarkers(["<!-- dialect: ruled -->", `<!-- gate: spec-ahead [${bad}] — why -->`, ...fence("x")].join("\n")).errors;
+      expect({ bad, msg: e[0]?.message.includes("bad pinned code list") }).toEqual({ bad, msg: true });
+    }
+  });
+  test("pinMismatch compares code COUNTS (a multiset), not distinct sets", () => {
     expect(pinMismatch(null, ["E-A"])).toBeNull();
-    expect(pinMismatch(["E-A", "E-B"], ["E-B", "E-A", "E-A"])).toBeNull();
+    expect(pinMismatch(["E-A", "E-A", "E-B"], ["E-B", "E-A", "E-A"])).toBeNull();
+    // one more of a pinned code — the shape of a typo in a block that already expects E-SCOPE-001
+    expect(pinMismatch(["E-A", "E-B"], ["E-B", "E-A", "E-A"])).toContain("pinned codes [E-A, E-B] but the bootstrap reported [E-A×2, E-B]");
+    expect(pinMismatch(["E-A", "E-A"], ["E-A"])).toContain("pinned codes [E-A×2] but the bootstrap reported [E-A]");
     expect(pinMismatch(["E-A"], ["E-A", "E-B"])).toContain("pinned codes [E-A]");
+    expect(pinText(["E-B", "E-A", "E-B"])).toBe("E-A, E-B×2");
+  });
+  test("a name-resolution code is pinned with its names: `E-SCOPE-001(addRow, replaceRow)`", () => {
+    const d = parseDocMarkers(["<!-- dialect: ruled -->", "<!-- gate: spec-ahead [E-BOOTSTRAP-UNSUPPORTED×2, E-SCOPE-001(addRow, replaceRow), E-STATE-UNDECLARED(@tasks)] — why -->", ...fence("x")].join("\n"));
+    expect(d.errors).toEqual([]);
+    expect(d.blocks[0].gate.codes).toEqual(["E-BOOTSTRAP-UNSUPPORTED", "E-BOOTSTRAP-UNSUPPORTED", "E-SCOPE-001(addRow)", "E-SCOPE-001(replaceRow)", "E-STATE-UNDECLARED(@tasks)"]);
+    expect(pinKey({ code: "E-SCOPE-001", message: "`postMessage` is not declared" })).toBe("E-SCOPE-001(postMessage)");
+    expect(pinKey({ code: "E-STATE-UNDECLARED", message: "`@messages` is read here, but …" })).toBe("E-STATE-UNDECLARED(@messages)");
+    expect(pinKey({ code: "E-PARSE-TAG", message: "unexpected `)` in the tag `<count`" })).toBe("E-PARSE-TAG");
+    const pin = d.blocks[0].gate.codes;
+    const got = (names) => ["E-BOOTSTRAP-UNSUPPORTED", "E-BOOTSTRAP-UNSUPPORTED", ...names];
+    expect(pinMismatch(pin, got(["E-SCOPE-001(replaceRow)", "E-SCOPE-001(addRow)", "E-STATE-UNDECLARED(@tasks)"]))).toBeNull();
+    // the same code, the same count, ANOTHER name: a typo that swaps one undeclared name for another
+    expect(pinMismatch(pin, got(["E-SCOPE-001(adRow)", "E-SCOPE-001(replaceRow)", "E-STATE-UNDECLARED(@tasks)"]))).toContain("reported [E-BOOTSTRAP-UNSUPPORTED×2, E-SCOPE-001(adRow, replaceRow), E-STATE-UNDECLARED(@tasks)]");
+    // 1489-A: an EMPTY name is a name (the bootstrap's `` unknown type `` ``), written `CODE()`
+    const e = parseDocMarkers(["<!-- dialect: ruled -->", "<!-- gate: spec-ahead [E-TYPE-UNKNOWN(), E-TYPE-UNKNOWN(Foo, )] — why -->", ...fence("x")].join("\n"));
+    expect(e.errors).toEqual([]);
+    expect(e.blocks[0].gate.codes).toEqual(["E-TYPE-UNKNOWN()", "E-TYPE-UNKNOWN(Foo)", "E-TYPE-UNKNOWN()"]);
+    expect(pinText(e.blocks[0].gate.codes)).toBe("E-TYPE-UNKNOWN(Foo), E-TYPE-UNKNOWN(), E-TYPE-UNKNOWN()");
+    expect(pinKey({ code: "E-TYPE-UNKNOWN", message: "unknown type ``" })).toBe("E-TYPE-UNKNOWN()");
+    expect(pinKey({ code: "E-TYPE-UNKNOWN", message: "unknown type `Request`" })).toBe("E-TYPE-UNKNOWN(Request)");
+    expect(pinKey({ code: "E-VALUE-WRITES-STATE", message: "the interpolation writes `@contacts`. A value position …" })).toBe("E-VALUE-WRITES-STATE(@contacts)");
+    // a pin that names no names for a name-resolution code does not match one that has them
+    expect(pinMismatch(["E-SCOPE-001"], ["E-SCOPE-001(x)"])).toContain("pinned codes [E-SCOPE-001] but the bootstrap reported [E-SCOPE-001(x)]");
+  });
+});
+
+describe("1489-B — every key pinKey makes is one the pin grammar accepts (the printed pin is pasteable)", () => {
+  test("`flush()` keys as E-SCOPE-001(flush); odd backticked text keys by its leading identifier or as empty", () => {
+    const msgs = [
+      ["E-SCOPE-001", "`flush()` is retired — write …", "E-SCOPE-001(flush)"],
+      ["E-SCOPE-001", "`a.b.c` is not declared", "E-SCOPE-001(a.b.c)"],
+      ["E-STATE-UNDECLARED", "`@x[0]` is read here", "E-STATE-UNDECLARED(@x)"],
+      ["E-TYPE-UNKNOWN", "unknown type `(string)`", "E-TYPE-UNKNOWN()"],
+      ["E-TYPE-UNKNOWN", "unknown type `Map<K, V>`", "E-TYPE-UNKNOWN(Map)"],
+      ["E-VALUE-WRITES-STATE", "writes `<x>, (y)`", "E-VALUE-WRITES-STATE()"],
+      ["E-SCOPE-001", "no backticks at all", "E-SCOPE-001"],
+    ];
+    const keys = msgs.map(([code, message, want]) => {
+      const k = pinKey({ code, message });
+      expect({ message, k }).toEqual({ message, k: want });
+      return k;
+    });
+    // the round trip: the gate's printed pin, pasted into a marker, parses back to the same multiset
+    const pasted = `<!-- gate: spec-ahead [${pinText(keys)}] — why -->`;
+    const d = parseDocMarkers(["<!-- dialect: ruled -->", pasted, ...fence("x")].join("\n"));
+    expect(d.errors).toEqual([]);
+    expect(pinMismatch(d.blocks[0].gate.codes, keys)).toBeNull();
   });
 });
 
@@ -238,6 +299,90 @@ describe("claim-gate end to end", () => {
     const r = claim("--list", "docs/articles");
     expect(r.stdout).toContain("docs/articles/llm-kickstarter-v2-2026-05-04.md");
     expect(r.stdout).not.toContain("\\");
+  }, 120_000);
+});
+
+describe("#1489-1 — a typo in a spec-ahead block whose pin already holds E-SCOPE-001 now fails both gates", () => {
+  // the tutorial's own chapter 7 (channels) and its own pin, verbatim from docs/tutorial.md
+  const SNIP = "docs/tutorial-snippets/07-channel-chat.scrml";
+  const tutorial = () => readFileSync(join(ROOT, "docs/tutorial.md"), "utf8").split(/\r?\n/); // CRLF on a Windows checkout
+  const marker = () => {
+    const t = tutorial();
+    const at = t.indexOf(`<!-- snippet: ${SNIP} -->`);
+    expect(at).toBeGreaterThan(0);
+    expect(t[at - 1]).toContain("E-SCOPE-001");
+    return t[at - 1];
+  };
+  const text = () => readFileSync(join(ROOT, SNIP), "utf8");
+  const typo = () => {
+    const t = text();
+    expect(t).toContain("postMessage(@username");
+    return t.replace("postMessage(@username", "postMesage(@username");
+  };
+
+  test("snippet-gate: the pinned file passes as spec-ahead; with `postMesage` it is a pin mismatch", () => {
+    const ok = join(dir, "07-ok.scrml");
+    writeFileSync(ok, text());
+    const mdOk = write("cites-07-ok.md", ["<!-- dialect: ruled -->", marker(), `<!-- snippet: ${ok} -->`, ...fence("x")]);
+    const rOk = snippet(`--docs=${mdOk}`, ok);
+    expect(rOk.stdout).toContain(`AHEAD ${posix(ok)}`);
+    expect(rOk.status).toBe(0);
+
+    const bad = join(dir, "07-typo.scrml");
+    writeFileSync(bad, typo());
+    const md = write("cites-07-typo.md", ["<!-- dialect: ruled -->", marker(), `<!-- snippet: ${bad} -->`, ...fence("x")]);
+    const r = snippet(`--docs=${md}`, bad);
+    expect(r.stdout).toContain("spec-ahead pin-mismatch");
+    expect(r.stderr).toContain("E-SCOPE-001(postMesage)");
+    expect(r.status).toBe(1);
+  }, 120_000);
+
+  test("claim-gate: the same text as an inline fence under the same pin fails with `postMesage`", () => {
+    const md = write("inline-07-typo.md", ["<!-- dialect: ruled -->", marker(), ...fence(...typo().split(/\r?\n/))]);
+    const r = claim(md);
+    expect(r.stderr).toContain("spec-ahead pin-mismatch");
+    expect(r.stderr).toContain("E-SCOPE-001(postMesage)");
+    expect(r.status).toBe(1);
+  }, 120_000);
+});
+
+describe("1489-A — a swapped name under E-TYPE-UNKNOWN / E-VALUE-WRITES-STATE now fails claim-gate", () => {
+  // the kickstarter's own blocks and pins, verbatim
+  const KS = "docs/articles/llm-kickstarter-v2-2026-05-04.md";
+  const block = (pinPart) => {
+    const t = readFileSync(join(ROOT, KS), "utf8").split(/\r?\n/);
+    const at = t.findIndex((l) => l.startsWith("<!-- gate: spec-ahead [") && l.includes(pinPart));
+    expect(at).toBeGreaterThan(0);
+    expect(t[at + 1]).toBe("```scrml");
+    const end = t.indexOf("```", at + 2);
+    return { marker: t[at], body: t.slice(at + 2, end) };
+  };
+  const run = (name, b, from, to) => {
+    const body = b.body.join("\n");
+    expect(body).toContain(from);
+    const md = write(name, ["<!-- dialect: ruled -->", b.marker, ...fence(...body.split(from).join(to).split("\n"))]);
+    return claim(md);
+  };
+
+  test("`Request` → `Requst` (kickstarter middleware block, pinned E-TYPE-UNKNOWN(Request…))", () => {
+    const b = block("E-TYPE-UNKNOWN(Request");
+    const ok = run("ks-req-ok.md", b, "Request", "Request");
+    expect(ok.stdout).toContain("1 spec-ahead");
+    expect(ok.status).toBe(0);
+    const r = run("ks-req-typo.md", b, "(req: Request)", "(req: Requst)");
+    expect(r.stderr).toContain("spec-ahead pin-mismatch");
+    expect(r.stderr).toContain("E-TYPE-UNKNOWN(Request, Requst)");
+    expect(r.status).toBe(1);
+  }, 120_000);
+
+  test("`@contacts` → `@contcts` (kickstarter block pinned E-VALUE-WRITES-STATE(@contacts))", () => {
+    const b = block("E-VALUE-WRITES-STATE(@contacts)");
+    const ok = run("ks-contacts-ok.md", b, "@contacts", "@contacts");
+    expect(ok.status).toBe(0);
+    const r = run("ks-contacts-typo.md", b, "@contacts", "@contcts");
+    expect(r.stderr).toContain("spec-ahead pin-mismatch");
+    expect(r.stderr).toContain("E-VALUE-WRITES-STATE(@contcts)");
+    expect(r.status).toBe(1);
   }, 120_000);
 });
 

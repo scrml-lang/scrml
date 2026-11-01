@@ -28967,7 +28967,7 @@ ${
     fn mArms(arms: AArm[], m: CMap) -> AArm[] {
         let out: AArm[] = []
         for (const a of arms) {
-            if (m.drop.indexOf(a.nid) < 0) out = out.concat([{ nid: a.nid, span: a.span, pat: a.pat, body: mArmBody(a.body, m), legacy: a.legacy, lifted: a.lifted }])
+            if (m.drop.indexOf(a.nid) < 0) out = out.concat([{ nid: a.nid, span: a.span, pat: a.pat, body: mArmBody(a.body, m), legacy: a.legacy, lifted: a.lifted, bare: a.bare }])
         }
         return out
     }
