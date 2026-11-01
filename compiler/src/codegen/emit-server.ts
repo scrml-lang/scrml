@@ -2748,11 +2748,97 @@ function generateServerJsImpl(
   // in a helper or a callee; this one is the transitive envelope S473 ruled. Returns the
   // `await <helper>(…, () => ` prefix for the body thunk, or null (no database in the file:
   // nothing to roll back, and a declared failure there can only be a `fail`).
+  // S474 ruling "envelope every `!` server body" (user-voice-scrml.md, 2026-11-01): "Every `!`
+  // server body runs in the §8.9.2 envelope (gate change in impl#1 `_bangEnvelopeOpen`), not only
+  // `! -> SqlError`." So the gate is `canFail`; the SqlError typing only decides whether a failed
+  // query becomes the value (`sqlFailureIsValue`) or is rethrown after the rollback.
+  // S474 (#1718 r1, F1; PA ruling: "every `!` body") — no exception for a body that writes its own
+  // `transaction { }` / `?{BEGIN}`. An earlier skip left the body's OTHER writes bare (a branch not
+  // taken, a nested function never called, a write before the BEGIN all committed on `fail`). The
+  // author's transaction runs inside the envelope: `_scrml_db_guard` nests its BEGIN / COMMIT /
+  // ROLLBACK as SAVEPOINT / RELEASE / ROLLBACK TO, so it still undoes its own block, and a later
+  // `fail` of the `!` body undoes everything. (SPEC §8.9.2 / §19.10.5's "SHALL NOT compose" and
+  // E-BATCH-001 text is the PA's to amend.)
+  // S474 (#1718 r1, F3; PA ruling) — a `!` body whose TRANSITIVE query set is empty writes nothing
+  // a rollback could undo, so it opens no envelope: it must not hold the database mutex (or a
+  // reserved connection) across a slow await for nothing. Measured before this: a query-free
+  // `! -> E` body that `sleep`s 400 ms stalled an unrelated SELECT for 411 ms.
+  // CONSERVATIVE by construction: "may query" is the answer whenever the body could reach a `?{}`:
+  //   - a `?{}` / `transaction { }` anywhere in it (nested functions included);
+  //   - any reference (a call, an alias, a callback argument) to a function of this file that may
+  //     query, or to anything imported from a `.scrml` module (its server functions may query);
+  //   - a call through a member or index (`t[k]()`, `obj.f()`) on anything but a JS global or a
+  //     non-scrml import — a dispatch table to a peer (#284) is not traced, so it counts;
+  //   - expression TEXT (a string field) holding `?{` or such a name.
+  // Only a name that is none of those (a `scrml:` / `.js` import, a builtin, a global) is free.
+  const _scrmlImportNames = new Set<string>();
+  for (const stmt of ((fileAST as any)?.ast?.imports ?? (fileAST as any)?.imports ?? []) as any[]) {
+    if (!stmt || (stmt.kind !== "import-decl" && stmt.kind !== "use-decl") || typeof stmt.source !== "string") continue;
+    if (!stmt.source.endsWith(".scrml")) continue;
+    for (const sp of (stmt.specifiers ?? []) as any[]) if (sp && typeof sp.local === "string") _scrmlImportNames.add(sp.local);
+    for (const n of (stmt.names ?? []) as any[]) if (typeof n === "string") _scrmlImportNames.add(n);
+  }
+  const _QUERY_FREE_GLOBALS = new Set(["Math", "JSON", "String", "Number", "Boolean", "Object", "Array", "Date", "console", "Symbol", "BigInt", "Intl", "RegExp", "Promise"]);
+  const _localFnByName = new Map<string, any>();
+  for (const f of fnNodes) if (f && typeof f.name === "string" && !_localFnByName.has(f.name)) _localFnByName.set(f.name, f);
+  const _mayQueryMemo = new Map<any, boolean>();
+  const _mayQuery = (fn: any, inProgress: Set<any> = new Set()): boolean => {
+    if (_mayQueryMemo.has(fn)) return _mayQueryMemo.get(fn)!;
+    if (inProgress.has(fn)) return false; // a cycle adds nothing the other members do not
+    inProgress.add(fn);
+    const nameMayQuery = (name: string): boolean => {
+      if (_scrmlImportNames.has(name)) return true;
+      const g = _localFnByName.get(name);
+      return g !== undefined && g !== fn && _mayQuery(g, inProgress);
+    };
+    let found = false;
+    const seen = new WeakSet<object>();
+    const visit = (v: unknown): void => {
+      if (found || v === null || v === undefined) return;
+      if (typeof v === "string") {
+        if (v.includes("?{")) { found = true; return; }
+        for (const m of v.matchAll(/[A-Za-z_$][A-Za-z0-9_$]*/g)) if (nameMayQuery(m[0])) { found = true; return; }
+        return;
+      }
+      if (typeof v !== "object" || seen.has(v as object)) return;
+      seen.add(v as object);
+      if (Array.isArray(v)) { for (const x of v) visit(x); return; }
+      const n = v as any;
+      if (n.kind === "sql" || n.kind === "sql-ref" || n.kind === "transaction-block") { found = true; return; }
+      if (n.kind === "ident" && typeof n.name === "string" && nameMayQuery(n.name)) { found = true; return; }
+      if (n.kind === "call" && n.callee && n.callee.kind !== "ident") {
+        const obj = n.callee.kind === "member" || n.callee.kind === "index" ? n.callee.object : null;
+        const free = obj && obj.kind === "ident" && typeof obj.name === "string" &&
+          (_QUERY_FREE_GLOBALS.has(obj.name) || (!_scrmlImportNames.has(obj.name) && !_localFnByName.has(obj.name) && _isNonScrmlImport(obj.name)));
+        if (!free) { found = true; return; }
+      }
+      for (const key of Object.keys(n)) {
+        if (key === "span" || key.startsWith("_")) continue;
+        visit(n[key]);
+      }
+    };
+    visit(fn?.body);
+    visit(fn?.params);
+    inProgress.delete(fn);
+    _mayQueryMemo.set(fn, found);
+    return found;
+  };
+  const _nonScrmlImportNames = new Set<string>();
+  for (const stmt of ((fileAST as any)?.ast?.imports ?? (fileAST as any)?.imports ?? []) as any[]) {
+    if (!stmt || (stmt.kind !== "import-decl" && stmt.kind !== "use-decl") || typeof stmt.source !== "string") continue;
+    if (stmt.source.endsWith(".scrml")) continue;
+    for (const sp of (stmt.specifiers ?? []) as any[]) if (sp && typeof sp.local === "string") _nonScrmlImportNames.add(sp.local);
+    for (const n of (stmt.names ?? []) as any[]) if (typeof n === "string") _nonScrmlImportNames.add(n);
+  }
+  function _isNonScrmlImport(name: string): boolean {
+    return _nonScrmlImportNames.has(name);
+  }
   const _bangEnvelopeOpen = (fn: any, fnName: string): string | null => {
-    if (!sqlFailurePropagates(fn)) return null;
+    if (!fn || fn.canFail !== true) return null;
+    if (!_mayQuery(fn)) return null;
     const db = _fnDbVar(fn) ?? (_dbRes.handles.length > 0 ? fallbackSqlHandle() : undefined);
     if (!db) return null;
-    return `await ${SQL_BANG_ENVELOPE_FN}(${db}, ${JSON.stringify(_implicitEnvelopeBeginFor(db))}, ${JSON.stringify(fnName)}, () => `;
+    return `await ${SQL_BANG_ENVELOPE_FN}(${db}, ${JSON.stringify(_implicitEnvelopeBeginFor(db))}, ${JSON.stringify(fnName)}, ${sqlFailurePropagates(fn) ? "true" : "false"}, () => `;
   };
   // S474 ruling 2 as amended — a DEV build keeps a failed query's driver text on the wire, a
   // production build blanks it. Under `protect=` a driver MESSAGE stays blank in every build: it

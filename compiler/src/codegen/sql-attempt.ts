@@ -352,14 +352,29 @@ const SQL_ERROR_CLASSIFIER_LINES: readonly string[] = [
   "// ConstraintViolation(field), ConnectionLost.",
   "function _scrml_sql_error(err) {",
   "  const message = _scrml_g.String((err && err.message) || err);",
-  "  const code = _scrml_g.String((err && (err.code ?? err.errno)) ?? \"\");",
-  "  if (/CONSTRAINT/i.test(code) || /^23\\d{3}$/.test(code) || /constraint failed/i.test(message)) {",
+  "  // S474 (N1): the driver's codes, every field it may use. Bun.SQL's PostgresError carries",
+  "  // `code: \"ERR_POSTGRES_SERVER_ERROR\"` with the SQLSTATE in `errno`; its MySQLError carries",
+  "  // `code: \"ER_DUP_ENTRY\"`, the number in `errno` and the SQLSTATE in `sqlState`; SQLite's",
+  "  // code names the constraint (`SQLITE_CONSTRAINT_UNIQUE`). Reading `code ?? errno` alone",
+  "  // missed a real Postgres SQLSTATE.",
+  "  const codes = err && typeof err === \"object\" ? [err.code, err.errno, err.sqlState].filter((c) => c !== undefined && c !== null).map((c) => _scrml_g.String(c)) : [];",
+  "  const any = (re) => codes.some((c) => re.test(c));",
+  "  // SQLSTATE class 23 (integrity constraint violation); MySQL's duplicate-key, foreign-key,",
+  "  // NOT NULL and CHECK errors (by name and by number).",
+  "  if (any(/CONSTRAINT/i) || any(/^23[0-9A-Z]{3}$/) ||",
+  "      any(/^ER_(?:DUP_ENTRY|DUP_UNIQUE|NO_REFERENCED_ROW(?:_2)?|ROW_IS_REFERENCED(?:_2)?|BAD_NULL_ERROR|CHECK_CONSTRAINT_VIOLATED)$/) ||",
+  "      any(/^(?:1062|1169|1216|1217|1451|1452|1048|3819)$/) || /constraint failed/i.test(message)) {",
   "    return { __scrml_error: true, type: \"SqlError\", variant: \"ConstraintViolation\", data: { field: _scrml_sql_constraint_field(err, message).field } };",
   "  }",
-  "  // S474 r1 (F3): Bun.SQL reports an unreachable server as `Failed to connect` (code",
-  "  // ECONNREFUSED / ERR_POSTGRES_CONNECTION_CLOSED, by version) — a lost connection too.",
-  "  if (/ECONNREFUSED|ECONNRESET|ECONNABORTED|EHOSTUNREACH|ENETUNREACH|ENOTFOUND|EPIPE|ETIMEDOUT|CONNECTION_CLOSED|CONNECTION_FAILED/i.test(code) || /^08\\d{3}$/.test(code) ||",
-  "      /connection (?:closed|lost|refused|terminated|failed)|failed to connect/i.test(message)) {",
+  "  // SQLSTATE class 08 (connection exception); Postgres's server-side ends of a connection",
+  "  // outside class 08 (57P01 admin_shutdown, 57P02 crash_shutdown, 57P03 cannot_connect_now,",
+  "  // 53300 too_many_connections); the socket errors; Bun.SQL's connection, timeout and",
+  "  // authentication-failed codes; MySQL's client connection errors. The message is read only",
+  "  // at its START (Bun's own `Failed to connect` / `Connection closed`), so a query text that",
+  "  // merely mentions a connection is not mistaken for one.",
+  "  if (any(/^08[0-9A-Z]{3}$/) || any(/^(?:57P0[1-3]|53300|28000|28P01)$/) || any(/ECONNREFUSED|ECONNRESET|ECONNABORTED|EHOSTUNREACH|ENETUNREACH|ENOTFOUND|EPIPE|ETIMEDOUT/i) ||",
+  "      any(/^ERR_(?:POSTGRES|MYSQL)_(?:CONNECTION_\\w+|IDLE_TIMEOUT|LIFETIME_TIMEOUT|AUTHENTICATION_FAILED\\w*|SASL_SIGNATURE_\\w+|INVALID_SERVER_SIGNATURE|INVALID_SERVER_KEY|(?:UNKNOWN|UNSUPPORTED)_AUTHENTICATION_METHOD|TLS_NOT_AVAILABLE|TLS_UPGRADE_FAILED|PASSWORD_REQUIRED|MISSING_AUTH_DATA|UNSUPPORTED_AUTH_PLUGIN|FAILED_TO_ENCRYPT_PASSWORD)$/) || any(/^(?:2002|2003|2006|2013)$/) ||",
+  "      /^(?:connection (?:closed|lost|refused|terminated|failed)|failed to connect)\\b/i.test(message)) {",
   "    return { __scrml_error: true, type: \"SqlError\", variant: \"ConnectionLost\", data: null };",
   "  }",
   "  return { __scrml_error: true, type: \"SqlError\", variant: \"QueryFailed\", data: { message } };",
@@ -487,7 +502,7 @@ export function serverSqlPropagateHelper(keepMessage: boolean, keepConstraintNam
   ].join("\n");
 }
 
-/** The runtime helper that runs a declared-`!` (SqlError) body inside its own transaction (S474 r1). */
+/** The runtime helper that runs a declared-`!` server body inside its own transaction (S474 r1; every `!` since the S474 ruling). */
 export const SQL_BANG_ENVELOPE_FN = "_scrml_sql_bang_envelope";
 
 /**
@@ -505,26 +520,37 @@ export const SQL_BANG_ENVELOPE_FN = "_scrml_sql_bang_envelope";
  * undoes only its own writes; the caller's own outcome decides the rest. Every query the body
  * reaches — through a helper or a callee — runs on the transaction's connection (the guard's
  * request scope), which is the transitive envelope S473 ruled.
+ *
+ * S474 ruling "envelope every `!` server body" (user-voice-scrml.md, 2026-11-01: "Every `!` server
+ * body runs in the §8.9.2 envelope … not only `! -> SqlError`") — so a `! -> E` body runs in it
+ * too (`sqlFailureIsValue` false): a `fail` rolls back, and a driver failure is rethrown after
+ * the rollback (a query failure is not an `E` variant: §19.8.4 "compatible").
  */
 export const SERVER_SQL_BANG_ENVELOPE_HELPER: string = [
   "",
-  "// --- §8.9.2 / §19.8.2 (S474): a declared-`!` (SqlError) body runs in its own transaction (compiler-generated) ---",
-  "// A delivered SqlError means nothing was written: every query the body reaches (helpers and",
-  "// callees too) runs inside this transaction, and any failure rolls it back before the value",
-  "// is returned. Inside a caller's transaction the BEGIN / COMMIT / ROLLBACK nest as a",
+  "// --- §8.9.2 / §19.8.2 (S474): a declared-`!` server body runs in its own transaction (compiler-generated) ---",
+  "// A `!` failure means nothing was written: every query the body reaches (helpers and",
+  "// callees too) runs inside this transaction, and a `fail` or a throw rolls it back before",
+  "// the failure leaves. Inside a caller's transaction the BEGIN / COMMIT / ROLLBACK nest as a",
   "// SAVEPOINT (_scrml_db_guard), so a handled inner failure undoes only its own writes.",
-  "async function _scrml_sql_bang_envelope(db, begin, fn, body) {",
+  "// `sqlFailureIsValue`: the body's error type is SqlError, so a failed query becomes the",
+  "// SqlError value; otherwise (`! -> E`) it is rethrown after the rollback.",
+  "async function _scrml_sql_bang_envelope(db, begin, fn, sqlFailureIsValue, body) {",
+  "  const failed = (err) => {",
+  "    if (sqlFailureIsValue) return _scrml_sql_propagate(err, fn);",
+  "    throw err;",
+  "  };",
   "  try {",
   "    await db.unsafe(begin);",
   "  } catch (err) {",
-  "    return _scrml_sql_propagate(err, fn);",
+  "    return failed(err);",
   "  }",
   "  let result;",
   "  try {",
   "    result = await body();",
   "  } catch (err) {",
   "    try { await db.unsafe(\"ROLLBACK\"); } catch { /* the connection is gone — never mask err */ }",
-  "    return _scrml_sql_propagate(err, fn);",
+  "    return failed(err);",
   "  }",
   "  if (result !== null && typeof result === \"object\" && result.__scrml_error === true) {",
   "    await db.unsafe(\"ROLLBACK\"); // a `fail` exit (or a propagated failure) writes nothing",
@@ -534,7 +560,7 @@ export const SERVER_SQL_BANG_ENVELOPE_HELPER: string = [
   "    await db.unsafe(\"COMMIT\");",
   "  } catch (err) {",
   "    try { await db.unsafe(\"ROLLBACK\"); } catch { /* already ended */ }",
-  "    return _scrml_sql_propagate(err, fn);",
+  "    return failed(err);",
   "  }",
   "  return result;",
   "}",

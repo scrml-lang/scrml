@@ -28,9 +28,10 @@ import { resolve, join } from "path";
 import { tmpdir } from "os";
 import { writeFileSync, readFileSync, rmSync, existsSync, mkdirSync, readdirSync } from "fs";
 import { Database } from "bun:sqlite";
+import { SQL } from "bun";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { compileScrml } from "../../src/api.js";
-import { SERVER_SQL_ERROR_HELPER, serverSqlPropagateHelper } from "../../src/codegen/sql-attempt.ts";
+import { SERVER_SQL_ERROR_HELPER, serverSqlPropagateHelper, SERVER_SQL_BANG_ENVELOPE_HELPER } from "../../src/codegen/sql-attempt.ts";
 
 const DIRS = [];
 const GLOBALS_BEFORE = new Set(Object.getOwnPropertyNames(globalThis));
@@ -369,12 +370,15 @@ describe("S474 ruling 3 — a declared-`!` server function's failure reaches the
     }
   });
 
-  test("emission: only a SqlError-typed `!` body runs in the transaction-and-propagate helper", () => {
+  test("emission: every `!` body runs in the envelope helper; only a SqlError-typed one turns a failed query into the value", () => {
     const js = built().serverJs;
-    expect(js).toContain(`_scrml_sql_bang_envelope(_scrml_sql, "BEGIN DEFERRED", "addUser", `);
-    expect(js).toContain(`_scrml_sql_bang_envelope(_scrml_sql, "BEGIN DEFERRED", "listGone", `);
-    expect(js).not.toContain(`"find", () =>`);
-    expect(js).not.toContain(`"plainAdd", () =>`);
+    expect(js).toContain(`_scrml_sql_bang_envelope(_scrml_sql, "BEGIN DEFERRED", "addUser", true, `);
+    expect(js).toContain(`_scrml_sql_bang_envelope(_scrml_sql, "BEGIN DEFERRED", "listGone", true, `);
+    // S474 ruling "envelope every `!` server body": a `! -> MyErr` body is enveloped too, unless
+    // its transitive query set is empty (#1718 r1 F3): `find` queries nothing, so it holds nothing.
+    expect(js).not.toContain(`"find", false, () =>`);
+    expect(js).not.toContain(`"plainAdd", true, () =>`);
+    expect(js).not.toContain(`"plainAdd", false, () =>`);
     // The client bundle carries none of it.
     expect(built().clientJs).not.toContain("_scrml_sql_propagate");
     expect(built().clientJs).not.toContain("_scrml_sql_bang_envelope");
@@ -756,6 +760,13 @@ describe("S474 — ConstraintViolation field: the bootstrap's column-only rule (
     Object.defineProperty(e, DB_FAILURE, { value: true });
     return e;
   };
+  // S474 N1 — a Postgres error as Bun.SQL builds it (its own constructor): a server error has
+  // `code: "ERR_POSTGRES_SERVER_ERROR"` and the SQLSTATE in `errno`.
+  const pgMarked = (msg, fields) => {
+    const e = new SQL.PostgresError(msg, { code: "ERR_POSTGRES_SERVER_ERROR", ...fields });
+    Object.defineProperty(e, DB_FAILURE, { value: true });
+    return e;
+  };
   // [case, error, field server code sees, column?]
   const CASES = [
     ["UNIQUE users.email", () => marked("UNIQUE constraint failed: users.email", { code: "SQLITE_CONSTRAINT_UNIQUE" }), "email", true],
@@ -766,8 +777,8 @@ describe("S474 — ConstraintViolation field: the bootstrap's column-only rule (
     ["expression index", () => marked("UNIQUE constraint failed: index 'x_lower'", { code: "SQLITE_CONSTRAINT_UNIQUE" }), "index 'x_lower'", false],
     ["unnamed CHECK", () => marked("CHECK constraint failed: n > 0", { code: "SQLITE_CONSTRAINT_CHECK" }), "n > 0", false],
     ["named CHECK", () => marked("CHECK constraint failed: positive", { code: "SQLITE_CONSTRAINT_CHECK" }), "positive", false],
-    ["PG 23505 constraint name", () => marked('duplicate key value violates unique constraint "users_email_key"', { code: "23505", constraint: "users_email_key", detail: "Key (email)=(t@x) already exists.", table: "users" }), "users_email_key", false],
-    ["PG 23502 column", () => marked('null value in column "email" of relation "users" violates not-null constraint', { code: "23502", column: "email", detail: "Failing row contains (1, null).", table: "users" }), "email", true],
+    ["PG 23505 constraint name", () => pgMarked('duplicate key value violates unique constraint "users_email_key"', { errno: "23505", constraint: "users_email_key", detail: "Key (email)=(t@x) already exists.", table: "users" }), "users_email_key", false],
+    ["PG 23502 column", () => pgMarked('null value in column "email" of relation "users" violates not-null constraint', { errno: "23502", column: "email", detail: "Failing row contains (1, null).", table: "users" }), "email", true],
   ];
   const quiet = (f) => { const o = console.error; console.error = () => {}; try { return f(); } finally { console.error = o; } };
 
@@ -858,5 +869,409 @@ describe("S474 — ConstraintViolation field: the bootstrap's column-only rule (
     const got = {};
     for (const [fn, args] of REAL) got[fn] = JSON.parse((await callRoute(out, fn, args)).text).data.field;
     expect(got).toEqual({ comp: "a, b", named: "positive", unnamed: "n > 0", expr: "index 'x_lower'", spaced: "my table.e mail" });
+  });
+});
+
+// S474 N1 (re-review of #1704) — the classifier reads EVERY field a driver puts its code in.
+// Bun.SQL's PostgresError: `code: "ERR_POSTGRES_SERVER_ERROR"`, SQLSTATE in `errno`; its
+// MySQLError: `code` (ER_…), number in `errno`, SQLSTATE in `sqlState`. Before, `code ?? errno`
+// read only `code`, so a real Postgres 23505 / 08006 and a MySQL duplicate key were QueryFailed.
+// Every error here is built by Bun's own constructors (the shape Bun produces), except the SQLite
+// ones, which come from a real bun:sqlite failure.
+describe("S474 N1 — the SqlError classifier reads Postgres / MySQL codes where Bun.SQL puts them", () => {
+  const DB_FAILURE = Symbol.for("scrml.db.failure");
+  const mark = (e) => { Object.defineProperty(e, DB_FAILURE, { value: true }); return e; };
+  const prod = () => new Function("_scrml_g", `${SERVER_SQL_ERROR_HELPER}\n${serverSqlPropagateHelper(false, false)}\nreturn { _scrml_sql_error, _scrml_sql_propagate };`)(globalThis);
+  const pg = (msg, f) => mark(new SQL.PostgresError(msg, { code: "ERR_POSTGRES_SERVER_ERROR", ...f }));
+  const my = (msg, f) => mark(new SQL.MySQLError(msg, f));
+  const sqliteErr = (sql) => {
+    const db = new Database(":memory:");
+    db.run("CREATE TABLE t (n INTEGER)");
+    try { db.run(sql); } catch (e) { return mark(e); } finally { db.close(); }
+    throw new Error("expected a failure: " + sql);
+  };
+  const quiet = (f) => { const o = console.error; console.error = () => {}; try { return f(); } finally { console.error = o; } };
+  // [case, error, variant the client receives, its data in production]
+  const CASES = [
+    ["PG 23505 unique (server error, SQLSTATE in errno)", () => pg('duplicate key value violates unique constraint "users_email_key"', { errno: "23505", constraint: "users_email_key", detail: "Key (email)=(taken@x.io) already exists.", table: "users" }), "ConstraintViolation", { field: "" }],
+    ["PG 23502 not null with a column", () => pg('null value in column "email" of relation "users" violates not-null constraint', { errno: "23502", column: "email", table: "users" }), "ConstraintViolation", { field: "email" }],
+    ["PG 23503 foreign key", () => pg('insert or update on table "posts" violates foreign key constraint "posts_user_fk"', { errno: "23503", constraint: "posts_user_fk" }), "ConstraintViolation", { field: "" }],
+    ["PG 23P01 exclusion (class 23, letter code)", () => pg('conflicting key value violates exclusion constraint "no_overlap"', { errno: "23P01", constraint: "no_overlap" }), "ConstraintViolation", { field: "" }],
+    ["PG 42P01 undefined table", () => pg('relation "gone" does not exist', { errno: "42P01" }), "QueryFailed", { message: "" }],
+    // #1718 r1 F5: the message now matches its SQLSTATE (08006 connection_failure); the
+    // "terminating connection …" text is 57P01's, tested on its own below.
+    ["PG 08006 connection failure (server SQLSTATE)", () => pg("connection failure", { errno: "08006" }), "ConnectionLost", null],
+    ["PG 57P01 admin_shutdown", () => pg("terminating connection due to administrator command", { errno: "57P01" }), "ConnectionLost", null],
+    ["PG 57P03 cannot_connect_now", () => pg("the database system is starting up", { errno: "57P03" }), "ConnectionLost", null],
+    ["PG 53300 too_many_connections", () => pg("sorry, too many clients already", { errno: "53300" }), "ConnectionLost", null],
+    ["PG auth failed (Bun's client code)", () => mark(new SQL.PostgresError('password authentication failed for user "app"', { code: "ERR_POSTGRES_AUTHENTICATION_FAILED_PBKDF2" })), "ConnectionLost", null],
+    ["PG SASL signature mismatch (Bun's client code)", () => mark(new SQL.PostgresError("The server did not return the correct signature", { code: "ERR_POSTGRES_SASL_SIGNATURE_MISMATCH" })), "ConnectionLost", null],
+    ["PG 28P01 invalid password (server SQLSTATE)", () => pg('password authentication failed for user "app"', { errno: "28P01" }), "ConnectionLost", null],
+    ["MySQL auth failed (Bun's client code)", () => my("Access denied for user 'app'", { code: "ERR_MYSQL_AUTHENTICATION_FAILED" }), "ConnectionLost", null],
+    ["a capitalized `Constraint Failed` message is still a constraint (the /i is back)", () => mark(Object.assign(new Error("FOREIGN KEY Constraint Failed"), { code: "XX" })), "ConstraintViolation", { field: "" }],
+    ["PG unreachable (Bun's client code)", () => mark(new SQL.PostgresError("Failed to connect", { code: "ERR_POSTGRES_CONNECTION_REFUSED" })), "ConnectionLost", null],
+    ["PG connection closed (Bun's client code)", () => mark(new SQL.PostgresError("Connection closed", { code: "ERR_POSTGRES_CONNECTION_CLOSED" })), "ConnectionLost", null],
+    ["MySQL ER_DUP_ENTRY 1062", () => my("Duplicate entry 'taken@x.io' for key 'users.email'", { code: "ER_DUP_ENTRY", errno: 1062, sqlState: "23000" }), "ConstraintViolation", { field: "" }],
+    ["MySQL FK ER_NO_REFERENCED_ROW_2 1452", () => my("Cannot add or update a child row: a foreign key constraint fails", { code: "ER_NO_REFERENCED_ROW_2", errno: 1452, sqlState: "23000" }), "ConstraintViolation", { field: "" }],
+    ["MySQL FK ER_ROW_IS_REFERENCED_2 1451", () => my("Cannot delete or update a parent row: a foreign key constraint fails", { code: "ER_ROW_IS_REFERENCED_2", errno: 1451, sqlState: "23000" }), "ConstraintViolation", { field: "" }],
+    ["MySQL dup by number only", () => my("Duplicate entry 'x' for key 'k'", { errno: 1062 }), "ConstraintViolation", { field: "" }],
+    ["MySQL connection closed", () => my("Connection closed", { code: "ERR_MYSQL_CONNECTION_CLOSED" }), "ConnectionLost", null],
+    ["MySQL syntax error", () => my("You have an error in your SQL syntax", { code: "ER_PARSE_ERROR", errno: 1064, sqlState: "42000" }), "QueryFailed", { message: "" }],
+    ["SQLite no such table (real)", () => sqliteErr("SELECT * FROM gone"), "QueryFailed", { message: "" }],
+    ["SQLite CHECK (real)", () => sqliteErr("CREATE TABLE c (n INTEGER CHECK (n > 0)); INSERT INTO c VALUES (-1)"), "ConstraintViolation", { field: "" }],
+    ["a query text that mentions a connection is NOT a lost connection", () => sqliteErr('SELECT * FROM "connection failed"'), "QueryFailed", { message: "" }],
+  ];
+  for (const [name, mk, variant, data] of CASES) {
+    test(name, () => {
+      const sent = quiet(() => prod()._scrml_sql_propagate(mk(), "f"));
+      expect(sent).toEqual({ __scrml_error: true, type: "SqlError", variant, data });
+      // No driver value (the duplicate email, a detail row) ever reaches the client.
+      expect(JSON.stringify(sent)).not.toContain("taken@x.io");
+    });
+  }
+
+  test("server code (a site-handled `?{}`) still sees the whole value: the constraint name, the message", () => {
+    const rt = prod();
+    expect(rt._scrml_sql_error(pg('duplicate key value violates unique constraint "users_email_key"', { errno: "23505", constraint: "users_email_key" })).data).toEqual({ field: "users_email_key" });
+    expect(rt._scrml_sql_error(pg('relation "gone" does not exist', { errno: "42P01" })).data).toEqual({ message: 'relation "gone" does not exist' });
+  });
+});
+
+// S474 ruling "envelope every `!` server body" (user-voice-scrml.md, 2026-11-01): "Every `!` server
+// body runs in the §8.9.2 envelope … not only `! -> SqlError`. Closes the `fail` half of
+// g-implicit-envelope-only-on-baseline-csrf-arm (S449)." §8.9.2 (S449 ruling D): a `fail` exit rolls
+// the implicit transaction back. Each case runs the route and reads the table afterwards.
+describe("S474 ruling — every `!` server body runs in the envelope (a `fail` exit writes nothing)", () => {
+  const APP_E = (programAttrs) => `<program db="./g.db"${programAttrs}>
+  \${
+    type E:enum = { Bad, Gone }
+    server function failAfterWrite(email)! -> E {
+      ?{\`INSERT INTO users (email) VALUES (\${email})\`}.run()
+      fail E.Bad
+    }
+    server function writeOk(email)! -> E {
+      ?{\`INSERT INTO users (email) VALUES (\${email})\`}.run()
+      return "ok"
+    }
+    server function outerHandles(email)! -> E {
+      ?{\`INSERT INTO users (email) VALUES (\${email + ".outer"})\`}.run()
+      const r = failAfterWrite(email) !{ _ e :> "inner:" + e.variant }
+      ?{\`INSERT INTO users (email) VALUES (\${email + ".after"})\`}.run()
+      return r
+    }
+    server function plainHandles(email) {
+      ?{\`INSERT INTO users (email) VALUES (\${email + ".plain"})\`}.run()
+      const r = failAfterWrite(email) !{ _ e :> "inner:" + e.variant }
+      return r
+    }
+  }
+  <main><p>x</p></main>
+</program>
+`;
+
+  test("CSRF arm: INSERT then `fail E.Bad` — the failure is delivered and no row is left", async () => {
+    const out = compileApp(APP_E(""));
+    expect(out.serverJs).toContain(`"failAfterWrite", false, () =>`);
+    const r = await callRoute(out, "failAfterWrite", { email: "e1@x.io" });
+    expect(r.status).toBe(200);
+    expect(JSON.parse(r.text)).toEqual({ __scrml_error: true, type: "E", variant: "Bad", data: null });
+    expect(emails(out)).toEqual(["taken@x.io"]);
+  });
+
+  test("non-CSRF arm (a GET route — the arm the auth / headless routes take): INSERT then `fail E.Bad` — no row is left", async () => {
+    const out = compileApp(`<program db="./g.db">
+  \${
+    type E:enum = { Bad }
+    server function failGet(email)! -> E route="/api/fail-get" method="GET" {
+      ?{\`INSERT INTO users (email) VALUES (\${email})\`}.run()
+      fail E.Bad
+    }
+  }
+  <main><p>x</p></main>
+</program>
+`);
+    expect(out.codes).toEqual([]);
+    // The handler carries no baseline double-submit check: it is the non-CSRF arm.
+    const h = out.serverJs.slice(out.serverJs.indexOf("_handler_failGet"));
+    expect(h.slice(0, h.indexOf("\n}\n"))).not.toContain("_scrml_validate_csrf");
+    expect(h.slice(0, h.indexOf("\n}\n"))).toContain(`"failGet", false, () =>`);
+    const routes = await routesOf(out);
+    const route = routes.find((r) => r.path === "/api/fail-get");
+    const resp = await route.handler({
+      url: "http://localhost/api/fail-get",
+      method: "GET",
+      headers: { get: () => null },
+      json: async () => ({ email: "g@x.io" }),
+    });
+    expect(JSON.parse(await resp.text())).toEqual({ __scrml_error: true, type: "E", variant: "Bad", data: null });
+    expect(emails(out)).toEqual(["taken@x.io"]);
+  });
+
+  test("a successful `! -> E` body commits", async () => {
+    const out = compileApp(APP_E(""));
+    const r = await callRoute(out, "writeOk", { email: "ok@x.io" });
+    expect(JSON.parse(r.text)).toBe("ok");
+    expect(emails(out)).toEqual(["ok@x.io", "taken@x.io"]);
+  });
+
+  test("a `!` callee whose failure the `!` caller handles: the callee's write is undone, the caller's writes are kept", async () => {
+    const out = compileApp(APP_E(""));
+    const r = await callRoute(out, "outerHandles", { email: "o@x.io" });
+    expect(JSON.parse(r.text)).toBe("inner:Bad");
+    expect(emails(out)).toEqual(["o@x.io.after", "o@x.io.outer", "taken@x.io"]);
+  });
+
+  test("the same with a NON-`!` caller: the callee's write is undone, the caller's write autocommits", async () => {
+    const out = compileApp(APP_E(""));
+    const r = await callRoute(out, "plainHandles", { email: "p@x.io" });
+    expect(JSON.parse(r.text)).toBe("inner:Bad");
+    expect(emails(out)).toEqual(["p@x.io.plain", "taken@x.io"]);
+  });
+
+  // #1718 r1 (review F1/F2; PA ruling "every `!` body"): an author `transaction { }` / `?{BEGIN}`
+  // no longer exempts the body. The author's transaction nests as a SAVEPOINT inside the envelope;
+  // a later `fail` undoes every write. These four committed rows on e48913ff8.
+  const TXAPP = `<program db="./g.db">
+  \${
+    type E:enum = { Bad }
+    server function condTx(email, useTx)! -> E {
+      ?{\`INSERT INTO users (email) VALUES (\${email})\`}.run()
+      if (useTx) {
+        transaction {
+          ?{\`INSERT INTO users (email) VALUES (\${email + ".tx"})\`}.run()
+        }
+      }
+      fail E.Bad
+    }
+    server function deadClosureTx(email)! -> E {
+      function later()! -> E {
+        transaction {
+          ?{\`INSERT INTO users (email) VALUES (\${"never"})\`}.run()
+        }
+      }
+      ?{\`INSERT INTO users (email) VALUES (\${email})\`}.run()
+      fail E.Bad
+    }
+    server function writeThenBegin(email)! -> E {
+      ?{\`INSERT INTO users (email) VALUES (\${email + ".pre"})\`}.run()
+      ?{\`BEGIN\`}.run()
+      ?{\`INSERT INTO users (email) VALUES (\${email + ".in"})\`}.run()
+      ?{\`COMMIT\`}.run()
+      fail E.Bad
+    }
+    server function plainBegin(email)! -> E {
+      ?{\`BEGIN\`}.run()
+      ?{\`INSERT INTO users (email) VALUES (\${email})\`}.run()
+      ?{\`COMMIT\`}.run()
+      fail E.Bad
+    }
+    server function commentBegin(email)! -> E {
+      ?{\`/* mine */ BEGIN\`}.run()
+      ?{\`INSERT INTO users (email) VALUES (\${email})\`}.run()
+      ?{\`COMMIT\`}.run()
+      fail E.Bad
+    }
+    server function txOk(email)! -> E {
+      transaction {
+        ?{\`INSERT INTO users (email) VALUES (\${email})\`}.run()
+      }
+      return "ok"
+    }
+  }
+  <main><p>x</p></main>
+</program>
+`;
+  const failed = { __scrml_error: true, type: "E", variant: "Bad", data: null };
+
+  test("F1(a): a `transaction { }` in a branch NOT taken — the body's own write is undone on `fail`", async () => {
+    const out = compileApp(TXAPP);
+    expect(JSON.parse((await callRoute(out, "condTx", { email: "ct0@x", useTx: false })).text)).toEqual(failed);
+    expect(emails(out)).toEqual(["taken@x.io"]);
+  });
+
+  test("F1(a'): the branch taken — the nested transaction's write is undone with the rest", async () => {
+    const out = compileApp(TXAPP);
+    expect(JSON.parse((await callRoute(out, "condTx", { email: "ct1@x", useTx: true })).text)).toEqual(failed);
+    expect(emails(out)).toEqual(["taken@x.io"]);
+  });
+
+  test("F1(b): a `transaction { }` in a nested function never called — the body's write is undone", async () => {
+    const out = compileApp(TXAPP);
+    expect(JSON.parse((await callRoute(out, "deadClosureTx", { email: "dc@x" })).text)).toEqual(failed);
+    expect(emails(out)).toEqual(["taken@x.io"]);
+  });
+
+  test("F1(c): a write BEFORE an author BEGIN … COMMIT, then `fail` — nothing is written (the author COMMIT is a RELEASE)", async () => {
+    const out = compileApp(TXAPP);
+    expect(JSON.parse((await callRoute(out, "writeThenBegin", { email: "wb@x" })).text)).toEqual(failed);
+    expect(emails(out)).toEqual(["taken@x.io"]);
+  });
+
+  test("F2: `?{BEGIN}` and `?{/* mine */ BEGIN}` behave the same (both undone by the `fail`)", async () => {
+    const out = compileApp(TXAPP);
+    await callRoute(out, "plainBegin", { email: "pb@x" });
+    await callRoute(out, "commentBegin", { email: "cb@x" });
+    expect(emails(out)).toEqual(["taken@x.io"]);
+  });
+
+  test("a `!` body with its own `transaction { }` that succeeds commits", async () => {
+    const out = compileApp(TXAPP);
+    expect(out.codes).toEqual([]);
+    expect(out.serverJs).toContain(`"txOk", false, () =>`);
+    expect(JSON.parse((await callRoute(out, "txOk", { email: "tx@x.io" })).text)).toBe("ok");
+    expect(emails(out)).toEqual(["taken@x.io", "tx@x.io"]);
+  });
+
+  test("a failed QUERY in a `! -> E` body is still not an E variant: rolled back, then the route's error path (500)", async () => {
+    const out = compileApp(`<program db="./g.db">
+  \${
+    type E:enum = { Bad }
+    server function dupAfterWrite(email)! -> E {
+      ?{\`INSERT INTO users (email) VALUES (\${email})\`}.run()
+      ?{\`INSERT INTO users (email) VALUES (\${"taken@x.io"})\`}.run()
+      return "ok"
+    }
+  }
+  <main><p>x</p></main>
+</program>
+`);
+    const r = await callRoute(out, "dupAfterWrite", { email: "d@x.io" });
+    expect(r.status).toBe("THROW");
+    expect(emails(out)).toEqual(["taken@x.io"]);
+  });
+});
+
+// #1718 r1 (review F3; PA ruling): a `!` body whose TRANSITIVE query set is empty opens no envelope,
+// so a slow await in it does not hold the database mutex. Measured on e48913ff8: an unrelated SELECT
+// waited 411 ms behind a query-free `! -> E` body that slept 400 ms.
+describe("S474 r1 F3 — a query-free `!` body does not hold the database lock", () => {
+  const APP_F3 = `<program db="./g.db">
+  \${
+    import { sleep } from "scrml:time"
+    type E:enum = { Bad }
+    function pure(n) { return n + 1 }
+    function viaHelper() { return ?{\`SELECT count(*) AS n FROM users\`}.get() }
+    server function slowNoSql(ms)! -> E {
+      sleep(ms)
+      const k = pure(ms)
+      if (ms == 0) { fail E.Bad }
+      return "slept:" + k
+    }
+    server function slowViaHelper(ms)! -> E {
+      sleep(ms)
+      const r = viaHelper()
+      return "h:" + r.n
+    }
+    server function readOnly() {
+      return ?{\`SELECT count(*) AS n FROM users\`}.get()
+    }
+  }
+  <main><p>x</p></main>
+</program>
+`;
+
+  test("emission: no envelope for the query-free body; the body that reaches a `?{}` through a helper keeps it", () => {
+    const out = compileApp(APP_F3);
+    expect(out.codes).toEqual([]);
+    expect(out.serverJs).not.toContain(`"slowNoSql", false, () =>`);
+    expect(out.serverJs).toContain(`"slowViaHelper", false, () =>`);
+  });
+
+  test("run time: an unrelated SELECT is not stalled behind a slow query-free `!` body", async () => {
+    const out = compileApp(APP_F3);
+    const routes = await routesOf(out);
+    const hdr = { "content-type": "application/json", cookie: "scrml_csrf=t", "x-csrf-token": "t" };
+    const call = (fn, args) => {
+      const route = routes.find((r) => r.path.includes("_route_" + fn + "_"));
+      return route.handler({ url: "http://localhost" + route.path, method: "POST", headers: { get: (k) => hdr[String(k).toLowerCase()] ?? null }, json: async () => args });
+    };
+    const slow = call("slowNoSql", { ms: 400 });
+    await new Promise((r) => setTimeout(r, 20));
+    const t0 = Date.now();
+    const read = await call("readOnly", {});
+    const readMs = Date.now() - t0;
+    expect(JSON.parse(await read.text())).toEqual({ n: 1 });
+    expect(readMs).toBeLessThan(200);
+    expect(JSON.parse(await (await slow).text())).toBe("slept:401");
+  });
+});
+
+// #1732 review (a): when the envelope's OWN statement fails — its BEGIN, its COMMIT, the RELEASE a
+// nested call's COMMIT becomes, or its ROLLBACK — the caller never sees a success. A non-SqlError
+// `!` body takes the route's error path (500); a SqlError body gets the SqlError value. Measured on
+// the emitted helper against a handle whose transaction statements fail as a driver would.
+describe("S474 #1732 (a) — a failure of the envelope's own BEGIN / COMMIT / RELEASE / ROLLBACK is never a success", () => {
+  const DB_FAILURE = Symbol.for("scrml.db.failure");
+  const rt = () => new Function("_scrml_g", `${SERVER_SQL_ERROR_HELPER}\n${serverSqlPropagateHelper(false, false)}\n${SERVER_SQL_BANG_ENVELOPE_HELPER}\nreturn { _scrml_sql_bang_envelope };`)(globalThis);
+  // A handle whose statement `failing` rejects (a marked driver error, as `_scrml_db_guard` marks it).
+  const handle = (failing) => {
+    const ran = [];
+    return {
+      ran,
+      unsafe: async (text) => {
+        ran.push(text);
+        if (text === failing) {
+          const e = new Error(`${failing} failed: database is locked`);
+          e.code = "SQLITE_BUSY";
+          Object.defineProperty(e, DB_FAILURE, { value: true });
+          throw e;
+        }
+        return [];
+      },
+    };
+  };
+  const quiet = async (f) => { const o = console.error; console.error = () => {}; try { return await f(); } finally { console.error = o; } };
+  const ok = async () => "success";
+  const fails = async () => ({ __scrml_error: true, type: "E", variant: "Bad", data: null });
+
+  for (const stmt of ["BEGIN DEFERRED", "COMMIT", "RELEASE SAVEPOINT _scrml_nest_1"]) {
+    test(`\`${stmt}\` fails, non-SqlError body: the call throws (the route answers 500), never "success"`, async () => {
+      // The guard turns a nested call's COMMIT into RELEASE; to the helper it is the COMMIT call.
+      const failing = stmt.startsWith("RELEASE") ? "COMMIT" : stmt;
+      const db = handle(failing);
+      await expect(quiet(() => rt()._scrml_sql_bang_envelope(db, "BEGIN DEFERRED", "f", false, ok))).rejects.toThrow(/failed: database is locked/);
+      if (failing === "COMMIT") expect(db.ran).toEqual(["BEGIN DEFERRED", "COMMIT", "ROLLBACK"]);
+    });
+    test(`\`${stmt}\` fails, SqlError body: the caller gets the SqlError value, not "success"`, async () => {
+      const failing = stmt.startsWith("RELEASE") ? "COMMIT" : stmt;
+      const got = await quiet(() => rt()._scrml_sql_bang_envelope(handle(failing), "BEGIN DEFERRED", "f", true, ok));
+      expect(got).toEqual({ __scrml_error: true, type: "SqlError", variant: "QueryFailed", data: { message: "" } });
+    });
+  }
+
+  test("the ROLLBACK after a `fail` fails: the call throws, so the caller cannot read a rollback that did not happen as done", async () => {
+    await expect(quiet(() => rt()._scrml_sql_bang_envelope(handle("ROLLBACK"), "BEGIN DEFERRED", "f", false, fails))).rejects.toThrow(/ROLLBACK failed/);
+  });
+
+  test("control: every statement succeeds — the body's value", async () => {
+    const db = handle(null);
+    expect(await rt()._scrml_sql_bang_envelope(db, "BEGIN DEFERRED", "f", false, ok)).toBe("success");
+    expect(db.ran).toEqual(["BEGIN DEFERRED", "COMMIT"]);
+  });
+});
+
+// #1732 review (b), measured on SQLite (no Postgres here): a query whose failure is handled at its
+// site, inside the envelope, leaves the transaction usable — SQLite rolls back only the failed
+// statement — so the body's later writes and its COMMIT hold. On Postgres one failed statement
+// aborts the whole transaction (filed: g-impl1-envelope-site-handled-pg-abort-s474).
+describe("S474 #1732 (b) — a site-handled query failure inside the envelope (SQLite)", () => {
+  test("INSERT, a handled duplicate INSERT, INSERT, success: both good rows are committed", async () => {
+    const out = compileApp(`<program db="./g.db">
+  \${
+    type E:enum = { Bad }
+    server function handledMid(email)! -> E {
+      ?{\`INSERT INTO users (email) VALUES (\${email + ".a"})\`}.run()
+      ?{\`INSERT INTO users (email) VALUES (\${"taken@x.io"})\`}.run() !{ _ :> { } }
+      ?{\`INSERT INTO users (email) VALUES (\${email + ".b"})\`}.run()
+      return "ok"
+    }
+  }
+  <main><p>x</p></main>
+</program>
+`);
+    expect(out.codes).toEqual([]);
+    const r = await callRoute(out, "handledMid", { email: "hm@x" });
+    expect(JSON.parse(r.text)).toBe("ok");
+    expect(emails(out)).toEqual(["hm@x.a", "hm@x.b", "taken@x.io"]);
   });
 });
