@@ -20352,7 +20352,7 @@ duplicate match arm). The first arm for a variant is used; the second is an erro
 | ~~E-TYPE-026~~ | ~~Match expression in invalid context (markup, SQL, CSS, attribute)~~ **Retired S473 (D19)** | — |
 | E-TYPE-027 | Shorthand pattern used when enum type cannot be inferred | Error |
 | E-SYNTAX-010 | `else` default arm is not the last arm | Error |
-| E-MATCH-ELSE-ABSORBS-ERROR | On a failable result, an `else` / `_` arm would take an error variant no earlier arm names — `else` covers `.Ok` only; fix: name the variant or write `_ e :>` (§18.6, S474, PERMANENT — security) | Error |
+| E-MATCH-ELSE-ABSORBS-ERROR | On a failable result, an `else` / `_` arm would take an error variant no earlier arm names — `else` covers `.Ok` only; fix: name the variant or write `_ e :>` (§18.6, S474, PERMANENT — security). Emitted at `compiler/self-host-v2/analyze.scrml` (`coverDiags`, the bootstrap); **Nominal / not yet emitted** by impl#1. | Error |
 | E-MATCH-BARE-BINDER | An arm's whole pattern is a bare identifier (`err :>`, in a `match` or a `!{}`; also the legacy `\| err :>` in a `!{}`) — fix: `_ err :>` binds the whole error (§18.6.1); also `_ <name>` on a non-failable `match` and `else <name>` — §18.2 (S451). **Nominal / not yet emitted by impl#1.** | Error |
 | E-SYNTAX-011 | Guard clause syntax (`if` after arm pattern) — not supported in v1 | Error |
 | E-SYNTAX-012 | Nested pattern in binding position — not supported in v1 | Error |
