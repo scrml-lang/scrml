@@ -46,10 +46,17 @@
  *   still honoured in IMPL1 documents, so unmigrated docs keep their state. In a RULED
  *   document it is an error — migrate it to the HTML marker with a reason.
  *
- *   PINNED CODES (round 2): `<!-- gate: spec-ahead [E-PARSE-ARM, E-SCOPE-001] — <reason> -->`
- *   pins the bootstrap's expected Error codes. A pinned spec-ahead block whose distinct
- *   error codes are not exactly the pinned set FAILS, so a typo or a new kind of error is
- *   not hidden behind "expected to fail". Pins are only allowed on spec-ahead.
+ *   PINNED CODES (round 2): `<!-- gate: spec-ahead [E-PARSE-ARM×2, E-SCOPE-001(addRow)] — <reason> -->`
+ *   pins the bootstrap's expected Error diagnostics as a MULTISET: `E-CODE×N` is N of that
+ *   code, a bare `E-CODE` is one, and a code listed twice counts twice. A NAME-RESOLUTION code
+ *   (doc-boot-check.js NAMED_CODES: E-SCOPE-001, E-STATE-UNDECLARED) is pinned with the names
+ *   it is reported for, `E-SCOPE-001(addRow, replaceRow)`, one per diagnostic. A pinned
+ *   spec-ahead block whose Error diagnostics are not exactly the pin FAILS, so a typo or a new
+ *   kind of error is not hidden behind "expected to fail". Pins are only allowed on spec-ahead.
+ *   S474 backfill (#1489-1): pins were compared as SETS of distinct codes, so `postMesage` for
+ *   `postMessage` in a block that already pinned E-SCOPE-001 passed both gates. Counts alone
+ *   would not catch that one either (the misspelled name REPLACES an undeclared one), so a
+ *   name-resolution code carries its names.
  *
  * ── FENCES ─────────────────────────────────────────────────────────────────────
  *   A fence opens with a run of 3+ backticks or 3+ tildes and closes only on a run of the
@@ -72,7 +79,36 @@ const GATE_ANY_RE = /^\s*<!--\s*gate\s*:(.*?)-->\s*$/;
 // is parsed by parseGateMarker, which rejects every malformed pin instead of ignoring it.
 const GATE_KIND_RE = /^\s*(skip|spec-ahead)(?![\w-])/;
 const SEPARATOR_RE = /^(?:—|–|--|-|:)/;
-const CODE_RE = /^[EWI]-[A-Z0-9]+(?:-[A-Z0-9]+)*$/;
+// A pin entry: a code, optionally `×N` (N ≥ 1, the count the bootstrap reports it), or a
+// name-resolution code with the names it is reported for, `E-SCOPE-001(addRow, @tasks)`.
+const PIN_RE = /^([EWI]-[A-Z0-9]+(?:-[A-Z0-9]+)*)(?:\s*×\s*([1-9][0-9]{0,3}))?$/;
+const PIN_NAMED_RE = /^([EWI]-[A-Z0-9]+(?:-[A-Z0-9]+)*)\s*\(([^()]*)\)$/;
+const PIN_NAME_RE = /^@?[A-Za-z_$][\w$.]*$/;
+
+/** Split a pin list on the commas that are not inside a `( … )` name list. */
+function splitPinList(list) {
+  const out = [];
+  let depth = 0;
+  let cur = "";
+  for (const ch of list) {
+    if (ch === "(") depth++;
+    if (ch === ")") depth--;
+    if (ch === "," && depth === 0) { out.push(cur); cur = ""; } else cur += ch;
+  }
+  out.push(cur);
+  return out.map((c) => c.trim()).filter(Boolean);
+}
+
+/** One pin entry → its keys (`E-A×2` → `E-A, E-A`; `E-S(x, y)` → `E-S(x), E-S(y)`), or null. */
+function pinEntryKeys(entry) {
+  const m = PIN_RE.exec(entry);
+  if (m) return Array(m[2] ? Number(m[2]) : 1).fill(m[1]);
+  const n = PIN_NAMED_RE.exec(entry);
+  if (!n) return null;
+  const names = n[2].split(",").map((x) => x.trim());
+  if (names.length === 0 || names.some((x) => !PIN_NAME_RE.test(x))) return null;
+  return names.map((x) => `${n[1]}(${x})`);
+}
 const CODE_LIKE_RE = /^[EWI]-[A-Z0-9]/;
 const SNIPPET_RE = /^\s*<!--\s*snippet:\s*(\S+?)(?:#L(\d+)-L(\d+))?\s*-->\s*$/;
 // Container prefixes (round 3, F1): a list-item marker — `-`, `*`, `+`, `1.`, `1)` — followed
@@ -100,10 +136,12 @@ export function parseGateMarker(inner) {
     if (close < 0) return { error: "an unclosed `[` pin list — write `[E-CODE, …]`" };
     const list = rest.slice(1, close);
     if (kind !== "spec-ahead") return { error: "a `[CODES]` pin is only allowed on `gate: spec-ahead`" };
-    codes = list.split(",").map((c) => c.trim()).filter(Boolean);
-    if (codes.length === 0 || codes.some((c) => !CODE_RE.test(c))) {
-      return { error: `bad pinned code list \`[${list}]\` — write diagnostic codes, e.g. \`[E-PARSE-TAG, E-BOOTSTRAP-UNSUPPORTED]\`` };
+    const parsed = splitPinList(list).map(pinEntryKeys);
+    if (parsed.length === 0 || parsed.some((k) => k === null)) {
+      return { error: `bad pinned code list \`[${list}]\` — write diagnostic codes with their counts, and the names for a name-resolution code, e.g. \`[E-PARSE-TAG, E-BOOTSTRAP-UNSUPPORTED×2, E-SCOPE-001(addRow)]\`` };
     }
+    // the multiset of pin keys, as a flat list (doc-boot-check.js pinKey is the other side)
+    codes = parsed.flat();
     rest = rest.slice(close + 1).trimStart();
     if (rest.startsWith("[")) return { error: "a second `[…]` group — put every pinned code in one list" };
   }

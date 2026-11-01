@@ -157,7 +157,7 @@ The bootstrap compiles this program today.
 
 A counter in memory is gone the moment you refresh the page. Let's persist it. scrml has a built-in database layer — no `npm install better-sqlite3`, no Prisma, no schema files in a separate directory. You name the database file with `db=` on `<program>`, declare its shape in a `<schema>` block (a direct child of `<program>`), and write parameterized SQL with `?{}`:
 
-<!-- gate: spec-ahead [E-BOOTSTRAP-UNSUPPORTED, E-PARSE-ATTR, E-PARSE-ITEM, E-PARSE-SHORTHAND, E-PARSE-TAG, E-PARSE-TYPE, E-TYPE-UNKNOWN] — the bootstrap has no <schema>, no pending cells ((not to T) in an opener, §13.9) and no typed ?{} rows yet -->
+<!-- gate: spec-ahead [E-BOOTSTRAP-UNSUPPORTED×2, E-PARSE-ATTR, E-PARSE-ITEM, E-PARSE-SHORTHAND×2, E-PARSE-TAG×6, E-PARSE-TYPE, E-TYPE-UNKNOWN] — the bootstrap has no <schema>, no pending cells ((not to T) in an opener, §13.9) and no typed ?{} rows yet -->
 <!-- snippet: docs/tutorial-snippets/02b-counter-persisted.scrml -->
 ```scrml
 // 02b-counter-persisted.scrml — counter that survives a refresh.
@@ -486,7 +486,7 @@ This is correct scrml. It is also a candidate for promotion: as soon as you reac
 
 The first commitment step is to name the screen's phases as an enum and dispatch on it with `match`:
 
-<!-- gate: spec-ahead [E-BOOTSTRAP-UNSUPPORTED, E-PARSE-TAG] — the bootstrap has no <match> block element and cannot construct a payload variant (LoadPhase.Loaded(42)) yet -->
+<!-- gate: spec-ahead [E-BOOTSTRAP-UNSUPPORTED, E-PARSE-TAG×4] — the bootstrap has no <match> block element and cannot construct a payload variant (LoadPhase.Loaded(42)) yet -->
 <!-- snippet: docs/tutorial-snippets/04a-tier1-match.scrml -->
 ```scrml
 // 04a-tier1-match.scrml — Tier 1: an enum, and <match> to dispatch on it.
@@ -554,7 +554,7 @@ Three things are new:
 
 The full engine surface adds two concepts to the Tier-1 shape: a `rule=` attribute on each state-child declaring legal transitions out, and `<onTransition>` blocks for cross-state effects. An engine is a **`single` declaration** of the enum type — one shared instance, whose state-children carry the transition graph — declared at program level like any other declaration. State-children may hold markup directly (it renders wherever the engine is rendered, `<*loadPhase/>`); for the introductory shape below they have no bodies and the variants are rendered by a `<match>` block, since that carries forward verbatim from Tier 1.
 
-<!-- gate: spec-ahead [E-BOOTSTRAP-UNSUPPORTED, E-PARSE-TAG] — the bootstrap has no <match> block element and cannot construct a payload variant (LoadPhase.Loaded(42)) yet -->
+<!-- gate: spec-ahead [E-BOOTSTRAP-UNSUPPORTED, E-PARSE-TAG×4] — the bootstrap has no <match> block element and cannot construct a payload variant (LoadPhase.Loaded(42)) yet -->
 <!-- snippet: docs/tutorial-snippets/04b-tier2-engine.scrml -->
 ```scrml
 // 04b-tier2-engine.scrml — Tier 2: an engine — a `single` declaration with rule= contracts.
@@ -677,7 +677,7 @@ Validation in scrml is **declarative**, not imperative. You don't write a `valid
 
 Here is a signup form that exercises the full surface:
 
-<!-- gate: spec-ahead [E-BOOTSTRAP-UNSUPPORTED] — the bootstrap has no <match> block element, cannot import scrml:auth (its source does not compile on the bootstrap yet, so the import is refused by name), and its validity surface does not evaluate eq(…) or this pattern(…) yet -->
+<!-- gate: spec-ahead [E-BOOTSTRAP-UNSUPPORTED×6] — the bootstrap has no <match> block element, cannot import scrml:auth (its source does not compile on the bootstrap yet, so the import is refused by name), and its validity surface does not evaluate eq(…) or this pattern(…) yet -->
 <!-- snippet: docs/tutorial-snippets/05-signup-form.scrml -->
 ```scrml
 // 05-signup-form.scrml — declarative form with auto-synth validity surface.
@@ -840,7 +840,7 @@ To clear a field, call `reset(@signup.name)` — `reset` is a language keyword (
 
 Some operations can fail: a network call, a database query, a parsing pass. scrml models errors as **enum variants** rather than thrown exceptions. A function that can fail is declared with `!` after its parameter list and an error type after the arrow. Callers handle each variant with a `!{ ... }` block.
 
-<!-- gate: spec-ahead [E-BOOTSTRAP-UNSUPPORTED, E-PARSE-TAG] — the bootstrap has no <schema> and no <match> block element, cannot construct a payload variant (Phase.Errored(…)), and does not evaluate this pattern(…) yet -->
+<!-- gate: spec-ahead [E-BOOTSTRAP-UNSUPPORTED×3, E-PARSE-TAG×2] — the bootstrap has no <schema> and no <match> block element, cannot construct a payload variant (Phase.Errored(…)), and does not evaluate this pattern(…) yet -->
 <!-- snippet: docs/tutorial-snippets/06-failable.scrml -->
 ```scrml
 // 06-failable.scrml — failable function with a typed error enum.
@@ -1001,7 +1001,7 @@ The bootstrap compiles this program today.
 
 Real-time sync over a WebSocket connection is built into the language as a `<channel>` element. In an entry file (a file that declares `<program>`), the channel lives **inside** `<program>` as a sibling of `<page>` and the rest of the program body. State declared inside the channel body is auto-synced to every connected client:
 
-<!-- gate: spec-ahead [E-BOOTSTRAP-UNSUPPORTED, E-SCOPE-001, E-STATE-UNDECLARED] — the bootstrap has no <channel> yet -->
+<!-- gate: spec-ahead [E-BOOTSTRAP-UNSUPPORTED×4, E-SCOPE-001(postMessage), E-STATE-UNDECLARED(@messages)] — the bootstrap has no <channel> yet -->
 <!-- snippet: docs/tutorial-snippets/07-channel-chat.scrml -->
 ```scrml
 // 07-channel-chat.scrml — chat room with shared state.
@@ -1059,7 +1059,7 @@ The compiler emits the WebSocket endpoint (`/_scrml_ws/chat` for this channel), 
 
 `auth="required"` on `<program>` puts every request behind a session check at the server: a request without a signed-in session is redirected to `/login`, and the compiler adds the same check to each server function the program exposes. Anything that must stay private to some users is decided **in a server function**, where the compiler provides a `session` object:
 
-<!-- gate: spec-ahead [E-BOOTSTRAP-UNSUPPORTED, E-ERROR-013, E-SCOPE-001] — the bootstrap has no auth= and no session yet -->
+<!-- gate: spec-ahead [E-BOOTSTRAP-UNSUPPORTED×3, E-ERROR-013, E-SCOPE-001(session, session)] — the bootstrap has no auth= and no session yet -->
 <!-- snippet: docs/tutorial-snippets/09-auth.scrml -->
 ```scrml
 // 09-auth.scrml — sign-in required; admin-only data decided on the server.
@@ -1103,7 +1103,7 @@ What this does and does not give you:
 
 By now you have seen every primitive you need to build a working scrml app. Here they are collected in one real program — a small notes app — in the order they usually appear in a non-trivial scrml file:
 
-<!-- gate: spec-ahead [E-BOOTSTRAP-UNSUPPORTED, E-PARSE-TAG, E-STATE-UNDECLARED] — the bootstrap has no <schema>, <channel> or <match> block element, cannot construct a payload variant, and has no typed ?{} rows yet; ⚑ how untyped .all() rows become Note values is also open -->
+<!-- gate: spec-ahead [E-BOOTSTRAP-UNSUPPORTED×4, E-PARSE-TAG×2, E-STATE-UNDECLARED(@saved, @saved)] — the bootstrap has no <schema>, <channel> or <match> block element, cannot construct a payload variant, and has no typed ?{} rows yet; ⚑ how untyped .all() rows become Note values is also open -->
 <!-- snippet: docs/tutorial-snippets/10-all-together.scrml -->
 ```scrml
 // 10-all-together.scrml — the spine of a typical scrml program, in one file.
