@@ -11,8 +11,8 @@
 // ast.scrml `newDiag` is the one Diag constructor and reads `severityOf`. The
 // code's prefix is not the severity (§34 makes E-DG-002 a Warning, many W- Info).
 //
-// 289 codes with a §34 severity; 2 PROVISIONAL (no row yet, severity from the
-// generator's PROVISIONAL table: W-TX-ARM-UNREACHABLE, W-TX-FAIL-AFTER-COMMIT); 37 without one (FAIL-CLOSED Error):
+// 291 codes with a §34 severity; 0 PROVISIONAL (no row yet, severity from the
+// generator's PROVISIONAL table: none); 37 without one (FAIL-CLOSED Error):
 //   E-ASSIGN-CONST — no §34 row
 //   E-ASSIGN-TARGET — no §34 row
 //   E-BOOTSTRAP-REDECLARE — no §34 row
@@ -72,6 +72,8 @@ ${
             "W-PROGRAM-TITLE-NESTED" :> Severity.Warning
             "W-STORY-ON-TOP-LEVEL" :> Severity.Warning
             "W-STRING-INTERP-LITERAL" :> Severity.Warning
+            "W-TX-ARM-UNREACHABLE" :> Severity.Warning
+            "W-TX-FAIL-AFTER-COMMIT" :> Severity.Warning
             "W-WHEN-EFFECT-DEPRECATED" :> Severity.Warning
             // §34 Severity: Info
             "I-FORM-SUBMIT-GATED" :> Severity.Info
@@ -350,9 +352,6 @@ ${
             "E-VALUE-WRITE-UNPROVEN" :> Severity.Error
             "E-VALUE-WRITES-STATE" :> Severity.Error
             "E-VARIANT-AMBIGUOUS" :> Severity.Error
-            // PROVISIONAL — no §34 row yet (scripts/gen-bootstrap-severity.ts PROVISIONAL; each owes a row)
-            "W-TX-ARM-UNREACHABLE" :> Severity.Warning
-            "W-TX-FAIL-AFTER-COMMIT" :> Severity.Warning
             // no usable §34 row — fail closed (listed in the header)
             _ :> Severity.Error
         }
