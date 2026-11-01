@@ -30750,10 +30750,20 @@ Residue: g-boot-parser-restructure-residue-s474.
 
 ### g-boot-parser-restructure-residue-s474 — the parser repairs §24.5 does not model are caught only at run time. The template is not mounted, which fails closed but can blank the page — `NEW S474 (s474-boot-gate-await-mathml r1); MED; open (fails closed)`
 The analyzer models the repairs listed in §24.5. Any other restructuring is caught by the runtime shape check. The template is then not mounted (no misaddressed hole, no leak), but a root template that fails blanks the page, and the author learns only at run time. Known unmodeled:
-- the "in select" / customizable-`<select>` content rules (Chromium's parser keeps a `<div>` in `<select>` today);
-- a `<form>` inside a table part;
-- `<noscript>` content;
-- a `<*x/>` Star use inside foreign content (the analyzer's use descent covers `<x/>`, not `<*x/>`).
+- the "in select" / customizable-`<select>` content rules. Chromium's parser keeps a `<div>` or `<span>` in `<select>` today; an `<input>` in a `<select>` is caught by the shape check (blank page);
+- a `<td>` inside a `<td>` (caught by the shape check);
+- a `<*x/>` Star use inside foreign content (the analyzer's use descent covers `<x/>`, not `<*x/>`; the foreign wrapper's count check throws, which is contained when gated).
+
+**S474 r2 (re-review of #1727, `~/.cache/scrml/review/s474-1727/review-r1.md`):**
+- **No longer residue:**
+  - a `<form>` inside a table part: the stale bullet is removed; that shape is refused at compile time by `E-HTML-PARSER-REPAIR` (the table content model);
+  - `<noscript>` content (R2): an element inside an HTML raw-text / RCDATA element (`textarea`, `title`, `xmp`, `iframe`, `noembed`, `noframes`, `noscript`, `plaintext`) is now `E-HTML-PARSER-REPAIR`. Before, it blanked the page at mount with a `TypeError` and no diagnostic.
+- **R1 (MED, fixed):** the shape check's blind spot, which did leak. Hole paths count text nodes, and the shape left them out, so a parser change that only drops a text node shifted paths while the hash still matched. That covered the line feed after `<listing>` / `<pre>` / `<textarea>` and a NUL-only text, and SECRET showed in Chromium (`x_listingNl`, `x_nul`). Fixed:
+  - the shape now records one marker per run of adjacent text on both sides;
+  - the printer doubles that leading line feed;
+  - a raw NUL in markup text is refused.
+- **R3:** the `font` breakout attributes are matched ASCII case-insensitively.
+- **R4:** a file that already fails to parse is no longer judged, so no cascade diagnostics.
 
 The analyzer's foreign descent through uses is an AST walk, and the printer's per-context renders come from print.scrml `declNsUses` over Core. Both call `childNs`, but they are two walks. Owed: model the remaining rules, or unify the two walks.
 <!-- @gap id=g-boot-parser-restructure-residue-s474 sev=MED status=open locus=compiler/self-host-v2/analyze.scrml(markupParseDiags)+compiler/self-host-v2/slice-m1/runtime/runtime.js(checkShape) prov=dispatch:s474-boot-gate-await-mathml-r1 -->
