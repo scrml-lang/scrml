@@ -374,8 +374,9 @@ describe("S474 ruling 3 — a declared-`!` server function's failure reaches the
     const js = built().serverJs;
     expect(js).toContain(`_scrml_sql_bang_envelope(_scrml_sql, "BEGIN DEFERRED", "addUser", true, `);
     expect(js).toContain(`_scrml_sql_bang_envelope(_scrml_sql, "BEGIN DEFERRED", "listGone", true, `);
-    // S474 ruling "envelope every `!` server body": a `! -> MyErr` body is enveloped too.
-    expect(js).toContain(`_scrml_sql_bang_envelope(_scrml_sql, "BEGIN DEFERRED", "find", false, `);
+    // S474 ruling "envelope every `!` server body": a `! -> MyErr` body is enveloped too, unless
+    // its transitive query set is empty (#1718 r1 F3): `find` queries nothing, so it holds nothing.
+    expect(js).not.toContain(`"find", false, () =>`);
     expect(js).not.toContain(`"plainAdd", true, () =>`);
     expect(js).not.toContain(`"plainAdd", false, () =>`);
     // The client bundle carries none of it.
@@ -1127,5 +1128,60 @@ describe("S474 ruling — every `!` server body runs in the envelope (a `fail` e
     const r = await callRoute(out, "dupAfterWrite", { email: "d@x.io" });
     expect(r.status).toBe("THROW");
     expect(emails(out)).toEqual(["taken@x.io"]);
+  });
+});
+
+// #1718 r1 (review F3; PA ruling): a `!` body whose TRANSITIVE query set is empty opens no envelope,
+// so a slow await in it does not hold the database mutex. Measured on e48913ff8: an unrelated SELECT
+// waited 411 ms behind a query-free `! -> E` body that slept 400 ms.
+describe("S474 r1 F3 — a query-free `!` body does not hold the database lock", () => {
+  const APP_F3 = `<program db="./g.db">
+  \${
+    import { sleep } from "scrml:time"
+    type E:enum = { Bad }
+    function pure(n) { return n + 1 }
+    function viaHelper() { return ?{\`SELECT count(*) AS n FROM users\`}.get() }
+    server function slowNoSql(ms)! -> E {
+      sleep(ms)
+      const k = pure(ms)
+      if (ms == 0) { fail E.Bad }
+      return "slept:" + k
+    }
+    server function slowViaHelper(ms)! -> E {
+      sleep(ms)
+      const r = viaHelper()
+      return "h:" + r.n
+    }
+    server function readOnly() {
+      return ?{\`SELECT count(*) AS n FROM users\`}.get()
+    }
+  }
+  <main><p>x</p></main>
+</program>
+`;
+
+  test("emission: no envelope for the query-free body; the body that reaches a `?{}` through a helper keeps it", () => {
+    const out = compileApp(APP_F3);
+    expect(out.codes).toEqual([]);
+    expect(out.serverJs).not.toContain(`"slowNoSql", false, () =>`);
+    expect(out.serverJs).toContain(`"slowViaHelper", false, () =>`);
+  });
+
+  test("run time: an unrelated SELECT is not stalled behind a slow query-free `!` body", async () => {
+    const out = compileApp(APP_F3);
+    const routes = await routesOf(out);
+    const hdr = { "content-type": "application/json", cookie: "scrml_csrf=t", "x-csrf-token": "t" };
+    const call = (fn, args) => {
+      const route = routes.find((r) => r.path.includes("_route_" + fn + "_"));
+      return route.handler({ url: "http://localhost" + route.path, method: "POST", headers: { get: (k) => hdr[String(k).toLowerCase()] ?? null }, json: async () => args });
+    };
+    const slow = call("slowNoSql", { ms: 400 });
+    await new Promise((r) => setTimeout(r, 20));
+    const t0 = Date.now();
+    const read = await call("readOnly", {});
+    const readMs = Date.now() - t0;
+    expect(JSON.parse(await read.text())).toEqual({ n: 1 });
+    expect(readMs).toBeLessThan(200);
+    expect(JSON.parse(await (await slow).text())).toBe("slept:401");
   });
 });

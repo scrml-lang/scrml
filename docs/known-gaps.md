@@ -1291,6 +1291,12 @@ Since S474 r1 (#1704), `_scrml_sql_bang_envelope` wraps every `! -> SqlError` bo
 
 So the ruling newly extends the self-wait to `! -> E` bodies. A bare `!` body already had it.
 
+**Wider than a self-call (review of #1718, F3).** Any slow await inside an enveloped `!` body stalls every OTHER request that touches the same database. That includes an external HTTP call, `sleep`, or a slow stdlib call. Measured on `e48913ff8`: an unrelated `server function readOnly() { ?{SELECT …} }` took 411 ms while a `! -> E` body slept 400 ms; on base it took 5 ms.
+- **Fixed for query-free bodies (`s474-impl1-sqlerror-classifier-pg` r1).** A `!` body whose transitive query set is empty now opens no envelope. The test is conservative: any `?{}`, any reference to a function of this file that may query or to a `.scrml` import, or any member or index call on a non-global counts as a query. The same SELECT now answers in under 200 ms; there is a test.
+- **Still open: any `!` body that does query.** On SQLite it serializes every other statement on the handle for the body's whole duration. On Postgres and MySQL the guard's default is `serialize = !(pooled && concurrentTransactions)`, which is true unless the program declares `transactions="concurrent"`. So by default EVERY `!` request on the server runs one at a time behind the per-handle mutex, and each one holds a reserved pool connection. This was read from `sql-tx-guard.ts`, not measured, because no PG was available.
+
+With `transactions="concurrent"`, each transaction reserves its own connection and they run in parallel. The cost there is pool exhaustion: a `!` body with a slow await holds a connection for its whole duration. The PERMANENT capable form is still (a), envelope-on-write.
+
 This is not a true deadlock: the outbound timeout breaks it. The request still fails, and the database is blocked for every other request for the whole timeout.
 
 **What is new.** Before #1704 the same self-wait already happened for a `!` handler that the Batch Planner gave a §8.9.2 envelope (two or more lexical queries), because that envelope is held across the body's awaits too. #1704 extended it to every `! -> SqlError` body, a single SELECT included, where only a write needs atomicity. The S474 ruling "envelope every `!` server body" then extended it to every `!` server body.
