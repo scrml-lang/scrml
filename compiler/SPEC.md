@@ -19718,6 +19718,61 @@ type" means the SUBSET variant set (§18.8.1); W-MATCH-001 therefore fires on a 
 - `_` is a VALID ALIAS for `else` in match arm default position. Both `_` and `else` are
   accepted as the default/wildcard match arm. The canonical form is `else`. The compiler
   preference setting controls which form the formatter normalizes to.
+- *(S474, PERMANENT — security.)* In a `match` whose subject is a failable result (§19.7.1),
+  `else` (and its alias `_`) SHALL match the success value `.Ok` only, never an error variant.
+  A `match` on a failable result whose `else` / `_` arm would otherwise take an error variant
+  that no earlier arm names SHALL be a compile error (**E-MATCH-ELSE-ABSORBS-ERROR**); it is not
+  reported as E-TYPE-020. The message SHALL name every error variant the arm would have taken
+  and SHALL offer `_ e :>` (§18.6.1), which takes every remaining error in one arm. This does not
+  apply to a `!{}` handler's arms (§19.4.5), whose `else` / `_` takes the remaining error
+  variants as before.
+
+**`else` on a failable result (S474, PERMANENT — security).** The rule above closes a proven
+exploit. `function check(pw: string)! AuthErr` fails with `.Denied` on a wrong password, and
+
+```scrml
+@msg = match check(pw) { .Locked :> "locked", else :> "LOGGED IN" }
+```
+
+compiled, and on `.Denied` its `else` ran: a wrong password logged in. An `else` written to finish
+a `match` reads as "everything else that can come back", and on a failable result that includes the
+errors the author did not list. So on a failable result `else` is the success value's arm. Every
+error variant SHALL be handled by an arm that names it, by the whole-error binder `_ e` (§18.6.1),
+or by handling the call with `!{}` instead of `match`. Nothing becomes impossible to write: `.Ok(v)
+:> …, _ e :> …` handles every error in one arm, and explicit error arms followed by `else` are
+accepted, because then the `else` takes only the success value. *Capable alternative:* `_ e :>`.
+*Cost:* one extra arm, paid by the author. *Who loses:* nobody can write the error-absorbing form;
+its meaning was the exploit.
+
+The rule is on the subject's TYPE, not on how the call is spelled. It covers every way a failable
+result reaches a `match`: a call of a `!` function; a client call of a server function, whose
+failure set includes `.Transport` (§19.9.10; a server→server call owes only the callee's own
+variants); a `?{}` query (`SqlError`, §19.8.3); an optional call (`check?.(pw)`) or a call through a
+failable function value (§19.4.3, S469), which are failable exactly as the direct call is. It holds
+in every position: a value position, a statement, `return match …`, and a `match` nested inside
+another arm, `!{}` arms included. Two things are NOT a `match` on a failable result, so `else`
+keeps its ordinary meaning there: (1) a `!{}` handler's own arm list — every arm of a `!{}` is a
+failure, the success value never reaches it, so its `else` cannot be read as the success arm and is
+the explicit catch-all over the errors §19.4.5 gives it; (2) a later `match` over an error VALUE —
+`_ err :> { match err { … else :> … } }` matches an ordinary enum whose every value is an error
+(§18.6.1), and its subject is not a failable result.
+
+> **Provenance:** ruling:user-voice-scrml.md S474 "⭐ RULED — `else` on a failable match; `scrml fix` S466 readings" item 1 — PA rec: *"on a failable subject, `else` covers success variants only. Errors need an explicit arm, `_ e`, or `!{}`, and an `else` that would absorb errors gets a compile error that names the uncovered error variants. Nothing becomes impossible to write, since every error can still be handled in one arm with `_ e`. This fits the existing rule that errors are always handled explicitly. Tag: PERMANENT, because the alternative is a proven exploit, a wrong password logging in. The cost falls on authors, who write one extra `_ e` arm."* · bryan: *"your recs on both. go"* · *"(1) PERMANENT (security, proven exploit: `match check(pw) { .Locked :> "locked", else :> "LOGGED IN" }` logs in on `.Denied`). SPEC + bootstrap now; impl#1 deferred (S471) as a gap."* · **supersedes:** §19.7.3's *"A `_` wildcard arm SHALL satisfy
+> exhaustiveness for remaining unmatched variants, per existing §18.6 rules"* for a `match` (struck
+> there; it stands for a `!{}`), and E-TYPE-020's failable-match hint that offered *"or ends with
+> `else :>` / `_ :>`"*. **Direction of change (pa-base §8): newly-rejecting**, PERMANENT (FORK RULE
+> row C, `scrml-support/pa-core-scrml.md`: a proven-exploit security refusal; the capable form is
+> `_ e :>`). **Decided here (PA reading):** the `!{}` arm list is outside the rule — the ruling names
+> `!{}` as one of the three explicit forms, and its arms are failures only (§19.4.5). **Emitted by the
+> bootstrap** (`compiler/self-host-v2/analyze.scrml` `coverDiags`, with `resolveArms` — the one choke
+> point every failable-subject `match` goes through; the bootstrap refuses an optional call `?.` and
+> a call of a function value by name, E-BOOTSTRAP-UNSUPPORTED, so neither reaches the rule there).
+> **impl#1 carries it** (§34.0): it accepts the
+> exploit and runs the `else` on an error, `g-impl1-else-absorbs-error-variants-s474` (HIGH; deferred
+> under the S471 impl#1 policy). **Corpus measured** (text scan of `conformance/cases/`, `examples/`,
+> `samples/`, `stdlib/` for a failable-subject `match` with a `_` / `else` arm): one case,
+> `conformance/cases/server-db/sql-handled-match-scrutinee-rt` (four `_ :> "other"` arms after
+> `.QueryFailed`), migrated to `_ e :>`; and §19.8.3's own example, migrated below.
 
 #### 18.6.1 The Whole-Error Binder — `_ <name>` (S451)
 
@@ -19973,7 +20028,7 @@ present.
   be covered by explicit arms or by an `else` arm.
 - A `match` that is not exhaustive SHALL be a compile error (E-TYPE-020). The error message
   SHALL list the missing variant names.
-- An `else` arm covers all remaining variants for the purpose of exhaustiveness.
+- An `else` arm covers all remaining variants for the purpose of exhaustiveness — except on a failable result, where it covers the success value `.Ok` only and an error variant it would take is E-MATCH-ELSE-ABSORBS-ERROR (§18.6, S474).
 - Duplicate variant arms (two arms for the same variant) SHALL be a compile error
   (E-TYPE-023: duplicate match arm). The second arm is unreachable.
 
@@ -20297,6 +20352,7 @@ duplicate match arm). The first arm for a variant is used; the second is an erro
 | ~~E-TYPE-026~~ | ~~Match expression in invalid context (markup, SQL, CSS, attribute)~~ **Retired S473 (D19)** | — |
 | E-TYPE-027 | Shorthand pattern used when enum type cannot be inferred | Error |
 | E-SYNTAX-010 | `else` default arm is not the last arm | Error |
+| E-MATCH-ELSE-ABSORBS-ERROR | On a failable result, an `else` / `_` arm would take an error variant no earlier arm names — `else` covers `.Ok` only; fix: name the variant or write `_ e :>` (§18.6, S474, PERMANENT — security) | Error |
 | E-MATCH-BARE-BINDER | An arm's whole pattern is a bare identifier (`err :>`, in a `match` or a `!{}`; also the legacy `\| err :>` in a `!{}`) — fix: `_ err :>` binds the whole error (§18.6.1); also `_ <name>` on a non-failable `match` and `else <name>` — §18.2 (S451). **Nominal / not yet emitted by impl#1.** | Error |
 | E-SYNTAX-011 | Guard clause syntax (`if` after arm pattern) — not supported in v1 | Error |
 | E-SYNTAX-012 | Nested pattern in binding position — not supported in v1 | Error |
@@ -21109,6 +21165,16 @@ Failing to handle the result of a `!` function call in any of these ways SHALL b
 
 **A client call to a server function is a failable call too (S451).** A call evaluated on the client whose callee is server-placed (§12.2) can fail on the wire, so it is a failable call whether or not the callee is declared `!`: it is handled by every form above (a `!{}`, a `match`, `?` inside a `!` function, a `<request>` body), and an unhandled one is E-ERROR-002. A server→server call (§13.4) is not affected. §19.9.10 states the rule, its scope, and its failure set: the callee's declared variants, if any, plus `Transport(t: ServerCallError)` (S454 — supersedes "(its exact shape is OPEN for the bootstrap's U1b design pass)"; ruling:user-voice-scrml.md S454 "all your recs, F3 with the deadline"). *(Provenance: ruling:user-voice-scrml.md S451 "your recs on all of them" item 1 · supersedes: the CPS-implicit exemption in "Event-handler values" and "Handler references" below, quoted in §19.9.10 · newly-rejecting.)*
 
+**`else` on a failable `match` covers the success value only (S474, PERMANENT — security).** In
+handling form 1, a `match` on the result, an `else` / `_` arm SHALL take the success value `.Ok`
+only. Every error variant SHALL be handled by an arm that names it, by `_ e :>` (§18.6.1), or by
+handling the call with `!{}` (form 3) instead. A `match` whose `else` / `_` would take an error
+variant is **E-MATCH-ELSE-ABSORBS-ERROR** (§18.6, which states the exploit, the scope and the
+`!{}` exception). `match check(pw) { .Locked :> "locked", else :> "LOGGED IN" }` is that error:
+it named `.Locked` and nothing else, so on `.Denied` it would log in. *(Provenance:
+ruling:user-voice-scrml.md S474 "⭐ RULED — `else` on a failable match; `scrml fix` S466
+readings" item 1, quoted in §18.6 · newly-rejecting.)*
+
 At an event-handler site neither `?` (a handler is not a `!` function, §19.5.4) nor `<errorBoundary>` (render-time only, §19.6.6) can handle the call, so the message offers only the remedies that apply there. For a call: `Result of failable function '{name}' is not handled in this event handler. Catch it with '!{}' (e.g. '{name}(…) !{ .Variant :> … }'), match the result, or call it from a function that handles it. An '<errorBoundary>' does not catch errors raised in event handlers (§19.6.6).` For a reference (below): `Failable function '{name}' is passed as an event-handler reference, so the event would call it and discard its error. Call it in a handler that handles the result (e.g. '{attr}={ {name}() !{ .Variant :> … } }'), or wire a function that handles it. An '<errorBoundary>' does not catch errors raised in event handlers (§19.6.6).`
 
 **Event-handler values — no exemption (S439 ruling #14; S440 "restore conformance").** The two SHALLs above (this section's E-ERROR-002 sentence and §19.4.4) apply to event-handler attribute values (§5.2.2, §5.2.3) exactly as they apply anywhere else. Every unhandled call to a `!` function in an event-handler value SHALL be E-ERROR-002, whatever the handler's statement count or form. The answer follows the unhandled call, not the shape of the handler around it. The bare `onclick=risky()`, the braced `onclick={ risky() }` (on one line or several), `onclick=${risky()}`, the multi-statement `onclick={ risky(); @r = 1 }`, and a call reached through control flow in the handler (`onclick={ if (@ready) risky() }`, `onclick={ for (const i of ids) risky() }`) all get the same answer. So does a handler placed at top level, in an `<each>` row, in an engine state-child, in a `<match>` arm, or in a component body.
@@ -21258,6 +21324,7 @@ The message SHALL say that a handler follows the call it handles, and offer `cal
   `catch`, SHALL be a compile error (**E-ERROR-014**, §19.4.3). *(S470 #1568 PA narrow-class ruling; S471 item 7, PA-drafted.)*
 - An arm whose whole pattern is a bare identifier (`err :>`, or the legacy `| err :>`) SHALL be a compile error (**E-MATCH-BARE-BINDER**, §18.2). *(S451 "your recs on all of them" item 2(a).)* To bind the whole error, write `_ err :>`.
 - In a `!{}` arm or a `match` on a failable result, `_ <name>` SHALL match every error variant not matched by an earlier arm (never `.Ok`) and SHALL bind the whole error value, typed as the failure's error type (§18.6.1). *(S451 "a", the whole-error binder.)*
+- In a `match` on a failable result, `else` / `_` SHALL match the success value `.Ok` only. An `else` / `_` arm that would take an error variant no earlier arm names SHALL be a compile error (**E-MATCH-ELSE-ABSORBS-ERROR**, §18.6); its message names those variants and offers `_ e :>`. A `!{}` handler's `else` / `_` is unaffected. *(S474 "`else` on a failable match" item 1; PERMANENT — security.)*
 - A `!{}` handler's arms SHALL be §18.2 `match-arm`s (§19.4.5). A `|`-led arm, and a paren-free binder after it (`| .V m :>`), SHALL parse identically to the canonical arm (`.V(m) :>`) and surface **W-ARM-PIPE-LEGACY**; `E-ARM-PIPE-LEGACY` is reserved. *(S452 "c looks right".)*
 - The `!` modifier SHALL be part of the function's type signature. It is visible to the type system and participates in type checking.
 
@@ -21715,6 +21782,21 @@ match processPayment(100, 42) {
 }
 ```
 
+*(S474, PERMANENT — security.)* `else` (or `_`) does NOT cover the error variants here: on a
+failable result it is the success value's arm (§18.6). An `else` that would take an error variant
+no earlier arm names is **E-MATCH-ELSE-ABSORBS-ERROR**, not E-TYPE-020:
+
+```scrml
+match processPayment(100, 42) {
+    ::InvalidAmount(reason) :> …
+    else                    :> …     // E-MATCH-ELSE-ABSORBS-ERROR: would take CustomerNotFound, ExpiredCard, NetworkError
+}
+```
+
+Explicit error arms followed by `else` are accepted: the `else` then takes `.Ok` only. The fix an
+E-TYPE-020 message offers on a failable result is the missing arm by name, or `_ e :>` for the
+remaining errors — never `else`.
+
 #### 19.7.2 Markup Context with `<errorBoundary>`
 
 Inside an `<errorBoundary>`, exhaustive matching is NOT required. The boundary handles error variants via `renders` clauses or `fallback`. The developer MAY still use explicit `match` inside a boundary for finer control.
@@ -21724,7 +21806,7 @@ Inside an `<errorBoundary>`, exhaustive matching is NOT required. The boundary h
 - In logic context, matching a `!` function result SHALL require exhaustive coverage of all variants (success and error). Missing variants SHALL trigger E-TYPE-020.
 - In markup context inside an `<errorBoundary>`, the boundary satisfies the error handling requirement. Exhaustive matching of error variants is NOT required.
 - The `::Ok` variant SHALL be the implicit wrapper for the success value of a `!` function. The developer SHALL match `::Ok(value)` to access the success case in logic context.
-- A `_` wildcard arm SHALL satisfy exhaustiveness for remaining unmatched variants, per existing §18.6 rules.
+- ~~A `_` wildcard arm SHALL satisfy exhaustiveness for remaining unmatched variants, per existing §18.6 rules.~~ *(Superseded S474 for a `match`, ruling:user-voice-scrml.md S474 "`else` on a failable match" item 1, §18.6.)* In a `!{}` handler, a `_` / `else` wildcard arm SHALL satisfy exhaustiveness for the remaining unmatched error variants (§18.6). In a `match` on a failable result, a plain `_` / `else` arm SHALL cover `.Ok` only; the error variants SHALL be covered by arms that name them or by `_ e :>` (§18.6.1), and a `_` / `else` that would take one is **E-MATCH-ELSE-ABSORBS-ERROR** (PERMANENT — security).
 - In a value position (§19.4.3), every arm of a `match` on a `!` function result — the `.Ok` arm and every error arm — SHALL yield a value of the call's success type or leave (`return` / `fail`); an arm that falls through SHALL be **E-ERROR-012**. In a statement position an arm MAY fall through. For a `match` on a failable result this is the answer §18.3 / §18.4 leave open for a mix of value and void arms; E-TYPE-001 still reports an arm whose value has the wrong type, and the two never fire for the same arm. *(Provenance: ruling:user-voice-scrml.md S451 "1a 2 yes 3 yes 4a" — item 1 (a), quoted in §19.4.3 · supersedes: nothing written — §19.7 was silent on arms that yield nothing · newly-rejecting; measured in §19.4.3.)*
 
 ---
@@ -21789,7 +21871,7 @@ A `?{}` query is a **failable expression everywhere**. Outside a `!` function it
        const rows = match ?{`SELECT * FROM orders WHERE customer_id = ${customerId} AND open = 1`}.all() {
            ::Ok(found)       :> found
            ::QueryFailed(m)  :> { log(m); lift []; }
-           _                 :> []
+           _ e               :> []    // S474: `_ e`, not `_` — on a failable result `_` covers `.Ok` only (§18.6)
        }
        return rows
    }
@@ -29884,6 +29966,7 @@ are REFUSED by impl#1, `E-IMPL1-RULED-FORM-UNSUPPORTED` (its row lands with that
 | E-MATCH-ON-REQUIRED | §18.0.1 | (Catalog addition S107 — Phase 2 of match block-form impl arc.) Block-form `<match for=Type>` is missing the `on=expr` attribute AND no `<engine for=Type>` for the same `Type` is in scope (auto-implied `on=` per §18.0.1 line 9578-9580 requires a same-type engine for the most-local-semantics-friendly resolution). Add `on=expr` to the `<match>` opener or declare a compatible `<engine>` in scope. | Error |
 | E-MATCH-ARM-SEPARATOR | §18.2, §19.4.5 | **Meaning changed S469 (dpa-073 F2 — arms are a comma list).** An arm list that does not separate its arms with `,` (PA derivation; the ruling retires the old meaning and names no new one). The BOOTSTRAP enforces it on every missing `,` (dpa-073 F5(4)); only impl#1 keeps reading a wholly newline-separated list. ~~During the dpa-073 F5 migration a wholly newline-separated list is still read;~~ ~~Today the bootstrap still reads a wholly newline-separated list and reports only a list that MIXES `,` and newline boundaries, once, at the first arm with no `,` before it (`compiler/self-host-v2/parse.scrml`, the arm-list parser) — owed, `g-bootstrap-newline-arm-lists-accepted-s469`.~~ *(Resolved S469, s469-boot-semicolons #1510:)* emitted by the bootstrap once per missing `,`, at the end of the arm before it (`compiler/self-host-v2/parse.scrml`, its `missingArmComma`), including a `!{}` list separated only by leading `\|` (§19.4.5). Provenance: ruling:user-voice-scrml.md S469 "⭐ RULED — dpa-073 F2 = (iii) \"Comma list (Recommended)\"" — *"Comma list (Recommended)"* (*"Supersedes §18.2 \"arms SHALL be juxtaposed … NO comma separator\" (S144) and E-MATCH-ARM-SEPARATOR's meaning."*). ~~impl#1 still emits the OLD meaning (it refuses a `,`) — an owed impl#1 change, `g-impl1-arm-commas-refused-owed-by-dpa-073-f5-s469`.~~ impl#1 no longer emits this code (S469, s469-impl1-arm-commas — `g-impl1-arm-commas-refused-owed-by-dpa-073-f5-s469` resolved): it ACCEPTS `,` between arms and never enforces it (dpa-073 F5(1)); a `,` that separates nothing is E-PARSE-001. ~~A `match` arm is followed by a `,` separator. Match arms are juxtaposed (`match-arm+` per §18.2 grammar); the ONLY arm separator is the arm body's terminating `:>`-introduced arm boundary (the deprecated `=>`/`->` aliases behave identically) — arms are written one per line (newline-separated). A trailing `,` after an arm body is invalid. Resolution: remove the `,` (`.A :> x, .B :> y` → `.A :> x` / `.B :> y` on separate lines). Replaces the generic E-CODEGEN-INVALID-LOGIC that the stray comma would otherwise surface from codegen. (Catalog addition S144 Cluster D — Bug Y; emitted by TS at `compiler/src/type-system.ts:checkMatchDiagnostics`.)~~ | Error |
 | E-MATCH-BARE-BINDER | §18.2, §19.4.3 | An arm whose WHOLE pattern is a bare identifier — `err :> …` in a `match` or a `!{}` handler (in a `!{}`, also its soft-deprecated `\| err :> …` spelling, §19.4.5). In a `!{}` arm or a `match` on a failable result the fix is `_ err :>`, which binds the WHOLE error (§18.6.1); elsewhere a match arm does not bind the whole matched value (§18.6). Write `_` / `else` for a catch-all that binds nothing, or name the variant (`.V(x)`; in a `!{}` also the soft-deprecated `\| .V x :>`) to bind its payload. Also fires for the whole-error binder out of place: `_ <name>` in a `match` whose subject is not a failable result, and `else <name>` in any arm (§18.6.1). `not` is the absence arm, not a bare name. **Provenance:** ruling:user-voice-scrml.md S451 "your recs on all of them" item 2(a); amended by ruling:user-voice-scrml.md S451 "a" (the whole-error binder). **Nominal / not yet emitted** by impl#1 — it accepts the `!{}` form, and fails a `match` form closed with E-CODEGEN-INVALID-LOGIC (frozen; `g-impl1-bare-binder-arm-accepted-s451`); lands with the bootstrap. | Error |
+| E-MATCH-ELSE-ABSORBS-ERROR | §18.6, §19.4.3, §19.7.1 | **(S474, PERMANENT — security.)** In a `match` whose subject is a failable result — a call of a `!` function, a client call of a server function (its failure set includes `.Transport`, §19.9.10), a `?{}` query — an `else` / `_` arm would take an error variant that no earlier arm names. On a failable result `else` covers the success value `.Ok` only. The exploit it closes: `match check(pw) { .Locked :> "locked", else :> "LOGGED IN" }` logged in on `.Denied`. The message names every error variant the arm would have taken and offers `_ e :>` (§18.6.1), which takes every remaining error in one arm; explicit error arms followed by `else` are accepted. Reported instead of E-TYPE-020 for that `match`. Does NOT fire for a `!{}` handler's arms (§19.4.5: every arm there is a failure) or for a `match` over an error value. **Provenance:** ruling:user-voice-scrml.md S474 "⭐ RULED — `else` on a failable match; `scrml fix` S466 readings" item 1. *Code name: PA reading.* Emitted by the bootstrap: `compiler/self-host-v2/analyze.scrml` `coverDiags` (with `resolveArms`). **Nominal / not yet emitted** by impl#1, which carries it (§34.0; `g-impl1-else-absorbs-error-variants-s474`, HIGH, deferred under the S471 impl#1 policy). | Error |
 | E-MATCH-SCRUTINEE-ARITY | §18.19 | A multi-scrutinee `match (e1, …, eN)` (§18.19) product-pattern arm's pattern count does NOT equal the head's scrutinee count N — e.g. `(.A) :> …` under a 2-scrutinee head, or `(.A, .B, .C) :> …` under a 2-scrutinee head. Each `product-pattern` MUST supply exactly one §18.2 arm-pattern per head position (multi-scrutinee widens over scrutinees — breadth, NOT pattern depth; the §18.11 nested-pattern exclusion is preserved). A whole-product wildcard arm (`_` / `else`) is exempt — it covers every position at once. *(S452 currency correction, spec: §18.2 / §18.19 grammar — struck "optionally `\| _`"; impl#1 still accepts it, `g-impl1-multi-scrutinee-pipe-wildcard-accepted-s452`.)* Resolution: write exactly N comma-separated patterns per `(…)` arm, matching the head's scrutinee count, or use a whole-product `_` / `else` arm. (Catalog addition S224 — Q-MATCH multi-scrutinee match; NAMED at §18.19 W1, catalogued WITH the W2 impl per Rule 4 — the §60 `<api>` / §61 `<endpoint>` / §26.8 `@apply` precedent; emitted at `compiler/src/type-system.ts:19159` (`checkMatchDiagnostics`).) | Error |
 | E-MATCH-ARM-MARKUP-IN-VALUE | §18.0 | A JS-style value-match arm (`match expr { .V :> ... }`) has an arm body that is a MARKUP element. §18.0 splits the two match forms by output category: the JS-style form emits a VALUE (server logic, derivations, computed expressions); the block-form `<match for=Type [on=expr]>` (§18.0.1) emits MARKUP. The natural reflex `${match err { .V(p) :> <markup with ${p}> }}` sits on the value↔markup boundary the two forms split. Resolution: use a `<match for=Type [on=expr]>` block to render a UI tree per variant, or fire a variant's `renders` display via the render-expression; to compute a VALUE per variant have the arm return that value (`:> "Failed: " + reason`) and interpolate it in markup. The render-expression routes around this without widening value-match to emit markup (limit-primitives-not-godify). This early TYPER-stage steer REPLACES the wrong-altitude failures the reflex otherwise surfaces at a later stage — E-CODEGEN-INVALID-LOGIC (markup body lowered literally) and E-SCOPE-001 (a payload var in a `${...}` inside the markup body, not in scope for value-match codegen); the arm-body visit is skipped once the steer fires so it is the ONLY diagnostic. SCOPED to JS-style match-stmt/match-expr `match-arm-inline` arms; the block-form `<match>` is a distinct `match-block` node, structurally exempt. (Catalog addition S196 — error-handling-holistic DD §1.4 Seams 1+2 / debate §6 prereqs 3+4 (H1); emitted by TS at `compiler/src/type-system.ts:checkMatchDiagnostics`.) | Error |
 | E-MATCH-BLOCK-IN-LIFT | §18.0.1, §17.7 | A block-form `<match for=Type on=expr>` is placed inside a `${ ... lift ... }` logic loop (the Tier-0 iteration form). The logic-context inline-markup parser does NOT route `<match>` through the BS-layer S107 match-block recognition (`ast-builder.js` `block.name === "match"`), so the variant arms (`<Open>`/`<Closed>`) land as unresolved uppercase-tag markup and would otherwise surface a misleading E-COMPONENT-035 "residual component / cross-file import" cascade. The supported per-item form is the Tier-1 `<each>` block: move the `<match>` into an `<each in=@coll as item> ... <match for=Type on=item> ... </match> ... </each>` body — the same block `<match>` compiles there. This targeted steer REPLACES the misleading E-COMPONENT-035 cascade for the shape (the arm errors are suppressed). Supporting block-`<match>` inside `${...lift}` was REJECTED (limit-primitives; `<each>` is canonical per S130 HU-1). (Catalog addition S213 — g-block-match-in-lift; user ruling S212 "(b) targeted diagnostic, steer to `<each>`"; emitted by VP-2 post-CE invariant at `compiler/src/validators/post-ce-invariant.ts`.) | Error |
@@ -49450,20 +49533,41 @@ prior `bun scrml migrate --fix` flag-overload is itself SOFT-DEPRECATED in favou
   impl#1 this is the `<machine>` → `<engine>` migration and E-DEPRECATED-001. Over a directory, a refused file is
   skipped and listed, and the other files are processed. The exit status is non-zero when any file
   was refused (impl#1: 3, ahead of `--check`'s 1 and 2).
+  *(S474)* **A file already in the §66 dialect is not refused under `--s66`.** It is reported
+  "already in §66, skipped", left byte-identical, and does not make the exit status non-zero: a
+  `--s66` run whose only skipped files are such files exits 0. The §66 rules have nothing to do to
+  it, so there is no rewrite to verify; the compile-failure refusal above does not apply to it.
+  *(impl#1 status: not built — impl#1 still refuses such a file, and a `--s66` re-run exits 3.
+  Built on demand: `g-impl1-fix-s66-already-migrated-exit-s474`.)*
 
 > **Provenance:** ruling:user-voice-scrml.md S464 "your recs" — *"The client-server-call / sql-failable / s66 `scrml fix` rules SHALL refuse (no rewrite, a message naming the compile errors) any file that does not compile before the rewrite — a rewrite of a file the compiler cannot fully read cannot be verified (matches the S462 markup-given migration's verify-fail-closed)."* Extended from the three named rules to every rule by the ruling's stated reason (PA reading, bryan's veto window): measured S464, the `unwrap-logic` rule deleted the `${` / `}` lines of a file whose other function emits invalid JS.
 
-> **PA reading (S466, owner veto):** three refinements above follow from the ruling's reason rather
-> than its text. First, "does not compile" is judged per application, as `scrml compile` judges it
+> **RULED (S474) — the three S466 refinements.** Three refinements above follow from the ruling's
+> reason rather than its text; first written S466 as a PA reading under owner veto, and RULED S474.
+> First, "does not compile" is judged per application, as `scrml compile` judges it
 > (S466 review: a component module compiles inside its project but not alone). Compiling a whole
 > directory of unrelated programs as one compile is not used: measured S466, it reported
 > cross-program protect and route conflicts, errors with no file, and a crash. Second, a scratch-copy
 > divergence is reported as "cannot verify", not as a compile failure (S466 review: a `../app.db`
 > page). Third, the removed-form exception exists because the round-1 gate refused every `<machine>`
-> file, blocking the migration `scrml fix` exists to perform. Not settled: a file already rewritten
-> to the §66 dialect does not compile on impl#1 by design (§66 is Nominal there), and impl#1 reports
-> generic codes for it (E-SCOPE-001, E-STATE-UNDECLARED) rather than a §66 class. Such a file is
-> refused, which makes `--s66` re-runs exit 3. Owner decision owed.
+> file, blocking the migration `scrml fix` exists to perform. The question the S466 reading left
+> open is also ruled: a file already rewritten to the §66 dialect does not compile on impl#1 by
+> design (§66 is Nominal there), and impl#1 reports generic codes for it (E-SCOPE-001,
+> E-STATE-UNDECLARED) rather than a §66 class; under `--s66` such a file is reported "already in
+> §66, skipped" with exit 0, not refused (the *(S474)* paragraph above).
+> **Provenance:** ruling:user-voice-scrml.md S474 "⭐ RULED — `else` on a failable match; `scrml fix`
+> S466 readings" item 2 — PA rec: *"ratify all three [S466 `scrml fix` PA readings: compile failure
+> judged per application; scratch-copy divergence reports 'cannot verify'; the `<machine>` →
+> `<engine>` exception], and have an already-migrated file report 'already in §66, skipped' with
+> exit 0. That's impl#1 work, so I'd only record the ruling and build it if you actually use
+> `scrml fix`."* · bryan: *"your recs on both. go"* · *"(2) The three S466 readings are RULED (drop
+> "owner veto"). An already-§66 file under `--s66`: "already in §66, skipped", exit 0 — SPEC text
+> now; impl#1 build only on demand (gap)."* · **supersedes:** *"Such a file is refused, which makes
+> `--s66` re-runs exit 3. Owner decision owed."* and the block's *"PA reading (S466, owner veto)"*
+> status. **Direction of change (pa-base §8):** the three refinements are inert (already the
+> stated behaviour); the already-§66 rule is newly-accepting for a tool, not for any program —
+> no program's meaning or acceptance moves, so it is not a §62 version event. impl#1 carries the
+> old exit 3 until built (`g-impl1-fix-s66-already-migrated-exit-s474`, LOW, build on demand).
 
 ### 63.5 Conformance interaction
 
