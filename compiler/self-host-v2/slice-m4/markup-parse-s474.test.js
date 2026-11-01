@@ -208,4 +208,11 @@ describe("the runtime's shape check — a template the parser restructured is ne
     install(`<template id="t474-same" data-scrml-shape="${same}"><p><span>a</span>text</p></template>`);
     expect(() => rt.template("t474-same")).not.toThrow();            // text is not part of the shape
   });
+  test("an RCDATA / raw-text element's children are not part of the shape (a `${}` marker in `<textarea>` is text in a browser)", () => {
+    const r = frontEnd(mods, [{ path: "app.scrml", src: gateProgram(`<textarea id="ta">\${@pw}</textarea><span ${S}>SECRET</span>`) }]);
+    const out = mods.print.printProgram(r.core, "app.client.js", "scrml-runtime.js");
+    install(out.html.match(/<template[\s\S]*<\/template>/)[0].replaceAll('id="scrml:', 'id="t474-ta-'));
+    // happy-dom builds the marker as a comment child of <textarea>; Chromium builds text — neither is walked
+    expect(() => rt.template("t474-ta-program")).not.toThrow();
+  });
 });

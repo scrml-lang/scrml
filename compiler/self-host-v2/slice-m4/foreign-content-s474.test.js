@@ -174,7 +174,8 @@ const SERVER_TAIL = `    function go(p: string) { @msg = login(p); }
     </main>
 </program>
 `;
-const M = `{ .Denied(r) :> "rejected", .Gone :> "rejected", _ :> "LOGGED IN" }`;
+// s474 r1: since E-MATCH-ELSE-ABSORBS-ERROR (origin/main) a `_` arm over a failable may not take an error; `_ e` takes them
+const M = `{ .Ok(v) :> "LOGGED IN", _ e :> "rejected" }`;
 const login = (body) => SERVER + `    function login(p: string) -> string {\n${body}\n    }\n` + SERVER_TAIL;
 const errorsOf = (src) => frontEnd(mods, [{ path: "app.scrml", src }]).diags.filter((d) => d.code.startsWith("E-"));
 

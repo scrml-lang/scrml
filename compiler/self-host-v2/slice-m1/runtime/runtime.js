@@ -2562,14 +2562,19 @@ const NS_DEPTH = { svg: 1, math: 1, "math-text": 2, annot: 2 };
 // children (its content is separate).
 const shapeChecked = new WeakSet();
 const XHTML_NS = "http://www.w3.org/1999/xhtml";
+// HTML elements whose children are not walked — print.scrml `shapeOpaque`, the same list: a `<template>`'s
+// content is not its children, and a raw-text / RCDATA element holds only text in a browser (a DOM that
+// builds elements there — happy-dom does, for `<textarea><!----></textarea>` — is not judged by them).
+const SHAPE_OPAQUE = new Set(["template", "script", "style", "textarea", "title", "xmp", "iframe", "noembed", "noframes", "noscript", "plaintext"]);
 
 function shapeWalk(n, depth) {
   let s = "";
   for (const c of n.childNodes) {
     if (c.nodeType === 8) s += depth + ":#;";
     else if (c.nodeType === 1) {
-      s += depth + ":" + c.localName.toLowerCase() + ";";
-      if (!(c.localName === "template" && c.namespaceURI === XHTML_NS)) s += shapeWalk(c, depth + 1);
+      const name = c.localName.toLowerCase();
+      s += depth + ":" + name + ";";
+      if (!(c.namespaceURI === XHTML_NS && SHAPE_OPAQUE.has(name))) s += shapeWalk(c, depth + 1);
     }
   }
   return s;
