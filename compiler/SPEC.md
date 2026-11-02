@@ -10128,8 +10128,9 @@ When two or more `?{}` calls in a server handler are coalescing candidates, the 
 >    6 below) fails, the call SHALL NOT report success, whatever the function's declared error type. It SHALL
 >    be answered as a server error, mirroring §19.10.6's left-open rule. For a route that is HTTP 500, never the
 >    handler's success response. For a call made in-process, the failure is thrown to the caller, whose own
->    envelope it then rolls back. For a streamed response, the stream ends with its terminal `error` event
->    (§19.10.6). The failed `COMMIT` is followed by the `ROLLBACK` §19.10.6 requires.
+>    envelope it then rolls back. For a streamed response, the stream ends with its terminal `error` event,
+>    `kind: "EnvelopeFailed"` (item 6, "How a failed stream ends"). The failed `COMMIT` is followed by the
+>    `ROLLBACK` §19.10.6 requires.
 > 2. **`.nobatch()` keeps only its batching meaning (§8.9.5).** It excludes a query from §8.9.1 candidate sets and
 >    from §8.10 loop hoisting. It SHALL NOT remove the query from the transitive query set, and it SHALL NOT
 >    suppress, narrow or end the envelope. No source form removes the envelope from a `!` server body today.
@@ -10242,31 +10243,78 @@ When two or more `?{}` calls in a server handler are coalescing candidates, the 
 >    database for the body's whole run (§19.10.6, "Not covered"; `g-envelope-lock-hold-cost-s474`).
 >    **A `!` `server function*` (§37) commits per `yield` (S474, ruled).** The body of a `!` SSE generator runs
 >    as a sequence of **envelope segments**: start → first `yield`, each `yield` → the next `yield`, and the last
->    `yield` → the end of the body. Each segment is its own §8.9.2 envelope. Its writes SHALL COMMIT before the
->    event its `yield` sends, so every event a client receives is backed by committed rows. A failure (`fail`,
->    `?`, implicit `SqlError` propagation, a throw, or a client teardown mid-segment) SHALL roll back only the
->    current segment. Segments already committed stand, and so do the events already sent. A `while (true)`
->    generator therefore commits at every `yield`, and the database is held only for one segment at a time. The
->    rules above apply per segment:
->    - **Opening.** A segment opens an envelope when a query can run in it: one reachable from the segment's
->      start, the body start or a `yield`, before the next `yield`. It opens with `BEGIN IMMEDIATE` when one of
->      those queries is a write and `BEGIN DEFERRED` otherwise (ruling 5, and the read-only reading of item 1),
->      decided per segment. A query the compiler cannot place in one segment counts for every segment it may run
->      in, so the write test fails closed. A segment that can reach no query opens nothing.
+>    `yield` → the end of the body. Segments are dynamic, one per `yield` the body executes. Each segment is its
+>    own §8.9.2 envelope. Its writes SHALL COMMIT before the event its `yield` sends, so every event a client
+>    receives is backed by committed rows. A failure (`fail`, `?`, implicit `SqlError` propagation, a throw, or a
+>    client teardown observed before the segment's COMMIT) SHALL roll back only the current segment, and it ends
+>    the stream ("How a failed stream ends", below). Segments already committed stand, and so do the events
+>    already sent. A `while (true)` generator therefore commits at every `yield`. The rules above apply per
+>    segment:
+>    - **Opening (⚑ PA reading, for bryan's veto).** Whether a segment opens an envelope, and with which
+>      statement, is decided statically per start point. A segment opens one when a query can run in it: a query
+>      reachable from the segment's start (the body start, or the `yield` it resumes from) without crossing a
+>      `yield`. It opens with `BEGIN IMMEDIATE` when one of those queries is a write and `BEGIN DEFERRED`
+>      otherwise (ruling 5, and the read-only reading of item 1). A query on a loop path that skips a
+>      conditional `yield` counts for that `yield`'s segment. A query the compiler cannot place in one segment
+>      counts for every segment it may run in, so the write test fails closed. A segment that can reach no query
+>      opens nothing.
+>      **When it opens.** A segment's envelope SHALL open at the first query the segment executes, not at the
+>      segment's start. No statement of the segment runs before that query, so the meaning is the same. The
+>      difference is the hold: a stream that waits on an outside source before its first query (`for await (let
+>      event of watchUser(userId))`, §37.2) does not hold the database while it waits for the next item. The
+>      window that remains runs from that first query to the `yield`, including any wait in between. A write
+>      followed by a wait (an outbound call, or the next item of a `for await` source) before the `yield` holds
+>      the §19.10.6 gate, and on SQLite the write lock, for the whole wait. On SQLite that stalls every other
+>      statement in the app (`g-envelope-lock-hold-cost-s474`). The remedy is to write after the wait, just
+>      before the `yield`.
 >    - **Savepoints.** Statement savepoints (item 4), nested `!` calls (item 4) and paired `?{BEGIN}` /
 >      `transaction { }` savepoints (item 3) nest inside the current segment's envelope, as in any envelope.
->    - **Path-pairing across a `yield` is refused — INTERIM.** A `yield` is a commit point, so it SHALL NOT
->      fall between a paired `?{BEGIN}` and its ending. Such a shape is **E-TX-UNMATCHED-END**: the segment's
->      COMMIT would end the savepoint's enclosing transaction mid-pair. A `yield` inside a `transaction { }`
->      block is already E-TRANSACTION-CONTROL-FLOW (§19.10.4). A `RELEASE name` / `ROLLBACK TO name` after a
->      `yield` for a savepoint opened before it is also E-TX-UNMATCHED-END: the segment's commit closed that
->      savepoint, as a region closes an author savepoint left open in it (item 3). The capable form is a span
->      that holds one transaction across its `yield`s, with its events sent after the span commits: owed, not
->      designed.
->    - **A COMMIT failure mid-stream.** If a segment's own `COMMIT` (or opening statement, or savepoint
->      release) fails, item 1's server-error rule applies to the stream. The segment's event is not sent, and
->      the stream ends with its terminal `error` event (§19.10.6). Events already sent and their committed
->      segments stand.
+>    - **Path-pairing across a `yield` is refused — INTERIM (⚑ PA reading, for bryan's veto).** A `yield` is a
+>      commit point, so it SHALL NOT fall between a paired `?{BEGIN}` and its ending. Such a shape is
+>      **E-TX-UNMATCHED-END**: the segment's COMMIT would end the savepoint's enclosing transaction mid-pair. A
+>      `yield` inside a `transaction { }` block is already E-TRANSACTION-CONTROL-FLOW (§19.10.4). A `RELEASE
+>      name` / `ROLLBACK TO name` after a `yield` for a savepoint opened before it is also E-TX-UNMATCHED-END:
+>      the segment's commit closed that savepoint, as a region closes an author savepoint left open in it
+>      (item 3). The capable form is a span that holds one transaction across its `yield`s, with its events sent
+>      after the span commits: owed, not designed.
+>    - **`yield*` delegation (⚑ PA reading, for bryan's veto).** Each value a `yield*` delegate yields is an
+>      event of the outer stream, so each is a segment boundary of the outer stream, as a `yield` in its body
+>      is. This holds through a chain of `yield*`s. A `!` generator delegate does not run as an item-4
+>      savepoint. Its body runs inside the outer stream's segments, and no savepoint is held across any of its
+>      `yield`s; the `yield`-crossing refusal above applies inside it too. Its failure rolls back the current
+>      segment and ends the stream, as a failure in the outer body does. Its queries count for the segments
+>      they may run in (the fail-closed rule under "Opening").
+>    - **A `!` server generator iterated by another `!` caller is refused — INTERIM (⚑ PA reading, for bryan's
+>      veto).** Iterating a `!` server generator from a `!` function that is not itself the stream (a
+>      `for … of`, a spread, a destructuring, or a `yield*` in a body that is not the `!` `server function*` the
+>      delegate's events would join) is **E-TX-BANG-GENERATOR-ITERATED**. Item 4 runs a nested `!` body as one
+>      savepoint, but a generator body runs lazily, interleaved with its caller, so that savepoint would not
+>      nest LIFO with the caller's own. The capable form is a defined lazy-savepoint meaning for a `!`
+>      generator iterated inside an envelope: owed, not designed. Today's alternative is a generator that is
+>      not `!`, whose writes join the caller's envelope, or a `!` function that returns a tape.
+>    - **Teardown, commit and delivery (⚑ PA reading, for bryan's veto).** The runtime SHALL check that the
+>      stream is still open immediately before each segment's COMMIT. A stream found closed rolls the segment
+>      back. A teardown or a send failure after the COMMIT leaves the segment committed and its event
+>      undelivered. The guarantee runs one way: every event a client receives is committed, but a committed
+>      segment may go undelivered (at-most-once delivery). **Who pays:** an author whose generator claims work
+>      in a segment (`UPDATE jobs SET claimed_by = …`) and then `yield`s it loses that job silently when the
+>      client drops between the COMMIT and the send. Such a stream should resume from `Last-Event-ID`
+>      (§37.4.3), or claim work idempotently. After a teardown, whether it is seen at a `yield` or before a
+>      COMMIT, the body ends by generator return, which runs its `defer` bodies (§19.16). That cleanup runs as
+>      its own final segment, and it SHALL commit like any other segment; the stream-open check does not apply
+>      to it. So a presence-offline write in a `defer` is kept. No event follows it.
+>    - **How a failed stream ends (⚑ PA reading, for bryan's veto).** A failure ends the stream with one
+>      terminal `error` event, sent after the current segment is rolled back, if the client is still connected.
+>      For a `fail` (or a `?` that propagates one), the event carries the error value in the §19.9.1 wire shape,
+>      `{ __scrml_error: true, type, variant, data }`. A failure of a segment's own opening statement, `COMMIT`,
+>      or savepoint release or rollback-to is item 1's server error. Its event carries `kind:
+>      "EnvelopeFailed"`, distinct from §19.10.6's `kind: "TransactionLeftOpen"`, and that segment's event is
+>      not sent. A host throw out of the body is a server error too, `kind: "ServerError"`, with no detail of
+>      the thrown value. The client stub SHALL close the `EventSource` when it receives a terminal `error`
+>      event, and SHALL NOT reconnect. Without that, the browser's automatic reconnect would re-run the body
+>      and re-commit its earlier segments. Events already sent and their committed segments stand. How the
+>      error value reaches the calling code (§37.5) is owed with the client stub
+>      (`g-impl1-sse-per-yield-envelope-s474`).
 >
 >    *(Provenance: ruling:user-voice-scrml.md S474 "⭐ RULED — `!` streaming server functions commit per
 >    `yield`" (2026-11-02). PA rec: *"My rec is to commit at each `yield`: each event goes out only after its
@@ -10276,9 +10324,12 @@ When two or more `?{}` calls in a server handler are coalescing candidates, the 
 >    last `yield` → end) is its own §8.9.2 envelope; the segment's writes COMMIT before its event is sent; a
 >    failure rolls back only the current segment."* Supersedes: the ⚑ OPEN item in this list, *"Neither whether
 >    nor how such a generator's writes are undone by a failure is decided … Until it is ruled, the SPEC states
->    no envelope rule for a `!` generator."* The per-segment opening statement, the `yield`-crossing refusal
->    and the mid-stream COMMIT failure are PA derivations. Direction of change: semantics-stated (newly
->    defined); newly-rejecting for a pair or a savepoint release that crosses a `yield` (INTERIM).
+>    no envelope rule for a `!` generator."* PA derivations, each marked ⚑ above: the per-segment opening
+>    statement and its open-at-first-query timing, the `yield`-crossing refusal, `yield*` delegation, the
+>    refusal of a `!` generator iterated by another `!` caller, the teardown and delivery order, the `defer`
+>    final segment, and the terminal `error` event (S474 #1734 review F1, F3–F7). Direction of change:
+>    semantics-stated (newly defined); newly-rejecting for a pair or a savepoint release that crosses a
+>    `yield`, and for a `!` generator iterated by another `!` caller (both INTERIM).
 >    **Status:** unbuilt on impl#1 (`g-impl1-sse-per-yield-envelope-s474`, deferred under the S471 impl#1
 >    policy). The bootstrap does not parse `server function*` (E-PARSE-FN), so it fails closed.)*
 >
@@ -23101,9 +23152,9 @@ function transferFunds(from: int, to: int, amount: number)! -> TransferError {
 - ~~Nesting rules of §19.10.4 (E-ERROR-007) SHALL treat the implicit envelope as a transaction block for the purpose of detecting illegal nesting.~~ **The implicit envelope SHALL NOT count as a `transaction` block for §19.10.4's E-ERROR-007 (S474).** E-ERROR-007 stays lexical — **INTERIM**: it covers a `transaction` block written inside another `transaction` block. The capable form is the savepoint meaning: the inner block as a savepoint inside the outer one, as a block reached through a call already is. Today's alternative is to move the inner block into a called function. A `transaction` block inside the envelope is a savepoint (above).
 - The implicit envelope SHALL roll back on a `fail` exit (including `?` propagation) as well as on an exception, and commit only on successful completion (§8.9.2, S449 D).
 - **A nested `!` call is a SAVEPOINT (S474, §8.9.2 "Amendment S474" item 4).** A `!` server function called while an envelope is open SHALL run its body as a savepoint within it. A callee failure SHALL roll back to the callee's savepoint before its failure value reaches the caller; a caller that handles that failure keeps its own writes and only the callee's writes are undone. A caller that propagates the failure or fails itself rolls back the whole envelope.
-- **Every surface that runs a `!` server body (S474, §8.9.2 "Amendment S474" item 6).** A `!` function called by an `<endpoint>` arm (§61) or a channel `onserver:` handler (§38.6.1) runs in its envelope like any other `!` server body. **A `!` `server function*` commits per `yield` (S474, ruled; §8.9.2 "Amendment S474" item 6).** Its body runs as envelope segments: start → first `yield`, `yield` → next `yield`, last `yield` → end. Each segment is its own envelope. Its writes COMMIT before its event is sent, and a failure rolls back only the current segment; earlier committed segments and their sent events stand. Each segment opens `BEGIN IMMEDIATE` or `BEGIN DEFERRED` by the queries that can run in it. Statement, nested-call and paired-transaction savepoints nest in the current segment. A paired `?{BEGIN}` or an author savepoint release that crosses a `yield` is E-TX-UNMATCHED-END (INTERIM). A segment COMMIT failure ends the stream with its terminal `error` event (§19.10.6).
+- **Every surface that runs a `!` server body (S474, §8.9.2 "Amendment S474" item 6).** A `!` function called by an `<endpoint>` arm (§61) or a channel `onserver:` handler (§38.6.1) runs in its envelope like any other `!` server body. **A `!` `server function*` commits per `yield` (S474, ruled; §8.9.2 "Amendment S474" item 6).** Its body runs as envelope segments: start → first `yield`, `yield` → next `yield`, last `yield` → end. Each segment is its own envelope. Its writes COMMIT before its event is sent, and a failure rolls back only the current segment and ends the stream; earlier committed segments and their sent events stand. Each segment opens `BEGIN IMMEDIATE` or `BEGIN DEFERRED` by the queries that can run in it, at the first query it executes (⚑ PA reading). Statement, nested-call and paired-transaction savepoints nest in the current segment. A paired `?{BEGIN}` or an author savepoint release that crosses a `yield` is E-TX-UNMATCHED-END (INTERIM, ⚑ PA reading). A `yield*` delegate's yields are segment boundaries of the outer stream; a `!` server generator iterated by another `!` caller is E-TX-BANG-GENERATOR-ITERATED (INTERIM, ⚑ PA reading). The runtime checks the stream is open just before each segment COMMIT; delivery is at-most-once (every received event is committed, not every committed segment is received). A failure ends the stream with a terminal `error` event: a `fail` value in the §19.9.1 wire shape, `kind: "EnvelopeFailed"` for a failure of the segment's own opening statement, `COMMIT` or savepoint release, and the client closes without reconnecting (§8.9.2 "Amendment S474" item 6, "How a failed stream ends").
 - **A query handled at its site runs under a statement savepoint (S474, §8.9.2 "Amendment S474" item 4).** Inside an envelope, a `?{}` whose failure is handled at its site SHALL run under its own statement savepoint. Its failure rolls back to that savepoint, and the envelope survives (the Postgres aborted-transaction case).
-- **A failure of the envelope itself is a server error (S474, §8.9.2 "Amendment S474" item 1).** A failure of the envelope's own opening statement, its `COMMIT`, or a savepoint release or rollback-to SHALL NOT report success. It is a server error, mirroring §19.10.6: HTTP 500 for a route, a thrown failure for an in-process call, a terminal `error` event for a stream.
+- **A failure of the envelope itself is a server error (S474, §8.9.2 "Amendment S474" item 1).** A failure of the envelope's own opening statement, its `COMMIT`, or a savepoint release or rollback-to SHALL NOT report success. It is a server error, mirroring §19.10.6: HTTP 500 for a route, a thrown failure for an in-process call, a terminal `error` event with `kind: "EnvelopeFailed"` for a stream (§8.9.2 "Amendment S474" item 6).
 - The implicit envelope SHALL cover its own database only. A write to another database that the `!` function reaches while the envelope is open — its own `?{}` or, transitively, through any function it calls — SHALL be **E-SQL-011** (§8.9.2). The same holds for an explicit envelope in a `!` function (a `transaction { }` block or a manual `?{BEGIN}`). Cross-database atomicity is not offered (§8.9.2 "Amendment S474" item 5). It is **PERMANENT (semantic)** when either database is SQLite: SQLite has no prepare phase, so no protocol makes a commit across two independent connections crash-atomic. It is **INTERIM** for a Postgres / MySQL pair, where two-phase commit exists; the capable form is a two-phase envelope across the pair, owed and not designed. A write to a second `<db>` inside an envelope is not covered atomically; under S474 every `!` server body with a query has an envelope, so this reaches every such body (§8.9.2 "Amendment S474" item 5). impl#1 does not emit E-SQL-011 for it: `g-impl1-cross-database-write-in-envelope-s451` (open). *(Provenance: ruling:user-voice-scrml.md S451 "1a 2 yes 3 yes 4a" — item 4 (a), quoted in §8.9.2 · supersedes: nothing written — SPEC was silent · newly-rejecting.)*
 
 #### 19.10.6 Concurrent Requests — One Transaction per Connection
@@ -29982,6 +30033,7 @@ are REFUSED by impl#1, `E-IMPL1-RULED-FORM-UNSUPPORTED` (its row lands with that
 | E-TX-CLIENT-MULTI-CALL | §19.10.5, §19.6.7 | Until built on a compiler (INTERIM since S474; built on the bootstrap by #1713, ruling:user-voice-scrml.md S474 "⭐ RULED — permanent-restrictions re-review: the four one-way doors" item 2): a `!` function placed on the client makes two or more server calls (two calls, one inside a loop, or calls through the client-side functions it calls) — the owed capable form composes them into one request with one envelope (g-client-bang-server-calls-compose-unbuilt-s474). After it is built: only a `!` function whose plan has two batches that each reach a query (browser work that cannot move between the calls, §19.6.7) — INTERIM (design owed, not planned: a transaction held across the client round trip, dd §2 Alternative C, blocked today by holding the §19.10.6 gate across a network round trip; g-tx-across-client-roundtrip-undesigned-s474), ledger PS-72. The message names the fix — compose the calls in one server `!` function. **Provenance:** ruling:user-voice-scrml.md S473 "⭐ RULED — S473 #1690 review: `!` callees count toward the envelope; client multi-call `!` is a permanent refusal" ("your recs") item 2. Code name: PA reading. Emitted by the bootstrap at `compiler/self-host-v2/analyze.scrml` (`composeOne`) — since #1713 for the residue only, the composition being built; Nominal on impl#1, which carries it (§34.0). | Error |
 | W-TX-FAIL-AFTER-COMMIT | §19.10.5 | A `fail` or `?` written after a client-placed `!` function's composed server batch that cannot join the batch — it needs the browser, reads a cell, or calls a client function. When it fails, the caller is told the function failed, but the batch's writes are already committed and are not rolled back. The message names the fix: move the check before the first server call, or into the server function. **Provenance:** PA reading, S474 dispatch (#1713 review), on the four-doors ruling item 2. Emitted by the bootstrap at `compiler/self-host-v2/analyze.scrml` (`lateExits`), built by #1713; Nominal on impl#1. | Warning |
 | E-TX-UNMATCHED-END | §8.9.2, §19.10.4 | **INTERIM (S474, ⚑ PA reading for bryan's veto; code name is the PA's).** In a `!` server body, manual transaction control that is not provably path-paired and properly nested (§8.9.2 "Amendment S474" item 3). Accepted shapes: every control path from a `?{BEGIN}` (any form) reaches its own `?{COMMIT}` / `?{END}` / `?{ROLLBACK}` exactly once before it leaves the block or the function. Endings pair LIFO with nested `?{BEGIN}`s, and each `if` / `else` branch, `match` arm and `!{}` arm is a path. A path that leaves by an exit that already fails the call (`fail`, `?`, implicit `SqlError` propagation, a throw) needs none; its savepoint is rolled back silently, with no R6 report. So §19.10.1's `transferFunds` (a conditional `?{ROLLBACK}` before `fail`, `?{COMMIT}` on the other path) is valid. An author's `?{SAVEPOINT name}` / `?{RELEASE name}` / `?{ROLLBACK TO name}` stay valid. Compiler savepoint names never collide with author names. Refused: a `return`, a `break` / `continue` out of the block, or a fall-through reached without the ending; two endings on one path; an ending reached with no `?{BEGIN}` open, which would end the envelope or a caller's savepoint; a loop crossing a `?{BEGIN}` or its ending; a `RELEASE name` / `ROLLBACK TO name` reached without its `SAVEPOINT name`; an author savepoint and a compiler savepoint region that do not nest properly on some path (SQLite's `RELEASE` / `ROLLBACK TO` cascades over every later savepoint; an author savepoint left unreleased inside a region counts as nested, the region's release closes it); in a `!` `server function*`, a paired `?{BEGIN}` or an author savepoint release that crosses a `yield`, which is a segment commit point (S474 "`!` streaming server functions commit per `yield`"; §8.9.2 item 6). Under ruling:user-voice-scrml.md S474 "⭐ RULED — envelope every `!` server body" the body runs inside the implicit envelope. The message names the statement and the remedy: pair it on every path, or use `transaction { }`. Capable form, owed and not designed: matching the refused shapes too. Direction of change: newly-rejecting. **Nominal / not yet emitted** by impl#1 or the bootstrap (`g-tx-unmatched-end-unbuilt-s474`; the bootstrap refuses all manual transaction control in a `!` function with `E-BOOTSTRAP-UNSUPPORTED`). | Error |
+| E-TX-BANG-GENERATOR-ITERATED | §8.9.2 | **INTERIM (S474, ⚑ PA reading for bryan's veto; code name is the PA's).** A `!` server generator iterated by a `!` function that is not itself the stream: a `for … of`, a spread, a destructuring, or a `yield*` in a body that is not the `!` `server function*` whose segments the delegate's events would join (§8.9.2 "Amendment S474" item 6). §8.9.2 item 4 runs a nested `!` body as one savepoint, but a generator body runs lazily, interleaved with its caller, so that savepoint would not nest LIFO with the caller's own. Not refused: a `yield*` from the `!` `server function*` body (or a chain of `yield*`s from it), whose delegate runs inside the stream's segments. The message names the alternatives: a generator that is not `!`, whose writes join the caller's envelope, or a `!` function that returns a tape. Capable form, owed and not designed: a defined lazy-savepoint meaning for a `!` generator iterated inside an envelope. **Provenance:** PA reading, S474 #1734 review F5, on ruling:user-voice-scrml.md S474 "⭐ RULED — `!` streaming server functions commit per `yield`". Direction of change: newly-rejecting. **Nominal / not yet emitted** by impl#1 or the bootstrap (`g-impl1-sse-per-yield-envelope-s474`; the bootstrap does not parse `function*`, E-PARSE-FN, so it fails closed). | Error |
 | W-TX-ARM-UNREACHABLE | §19.10.5 | A `.Transport` arm on a `!` call inside a client-placed `!` function's composed server batch: the call is now server-to-server inside one request, so a wire failure cannot reach this arm (it reaches the caller of the client function as its own `Transport` variant). Use `?` or a `_` arm instead. **Provenance:** PA reading, S474 dispatch (#1713 review), on the four-doors ruling item 2. Emitted by the bootstrap at `compiler/self-host-v2/analyze.scrml` (`composeOne`), built by #1713; Nominal on impl#1. | Warning |
 | E-SQL-SLOT-IN-LITERAL | §8.1 | A `${…}` slot inside a quoted SQL string literal (`'…'` / `"…"`) or a SQL comment (`--` / `/* … */`) in a `?{}` template: a bound parameter stands for a whole value, so the slot cannot be bound. The message names the bound form (`LIKE ${"%" + q + "%"}`). **Provenance:** ruling:user-voice-scrml.md S468 "⭐ RULED — "safe ints only, your recs"" item 2 — *"**`E-SQL-SLOT-IN-LITERAL`** — a `${…}` inside a quoted SQL literal or SQL comment is a compile error; the message names the bound form (`LIKE ${"%" + q + "%"}`). §8 sentence + §34 row; the bootstrap emits it (it refuses today with E-BOOTSTRAP-UNSUPPORTED)."* · landed S473 D31. **Not yet emitted under this name:** the bootstrap refuses the slot today as `E-BOOTSTRAP-UNSUPPORTED` (re-code owed, `g-boot-sql-slot-in-literal-code-s473`); impl#1 silently drops it (carried, `g-impl1-sql-slot-inside-quoted-literal-dropped-s468`). | Error |
 | E-SQL-MULTIPLE-STATEMENTS | §8.1.2, §14.8.10, §14.8.11 | In a compilation with a database, a program-body `?{}` (outside `<schema>`, statement or expression position — including a `?{}` inside expression text held unparsed: an `if` / `while` condition, a template-literal slot, a raw `match` arm (S456 fix round F2) — any chain, `.acrossTenants()` included) holds more than one SQL statement: read with the §14.8.10 item (1) token walk, a `;` outside a string literal, quoted identifier, comment or `${…}` slot is followed by any further token (a word, literal, slot, punctuation or another `;`; a `;` inside parentheses counts). A single trailing `;` followed only by whitespace and comments is allowed; a `<schema>` body is not governed; a body outside the closed lexical subset is `E-SQL-PROGRAM-STATEMENT-NOT-ADMITTED`'s. The message names the fix: one `?{}` per statement, and a `transaction { }` block (§8.5.3, §19.10) when they must be atomic. The slot extents are the emitter's (one reader, JS-aware — §8.1.2; S456 fix round F1). Codegen defence in depth: the emitted driver call is read with a JavaScript parser and a site whose SQL text holds more than one statement throws `E-SQL-MULTIPLE-STATEMENTS` at run time instead of sending it (Postgres runs every statement of `unsafe("…")` without parameters; SQLite runs the statements after a row-less first one on EVERY path — tagged, parameterized, `unsafe` — so on SQLite the token walk is the only protection). **Provenance:** ruling:user-voice-scrml.md S456 "one statement per seams reasonable. push" · resolves `g-tenant-set-config-in-program-body-s456` (S239 r5, executed on PG16: `SELECT set_config('scrml.tenant','B',true); select …` re-pinned the tenant inside the §14.8.11 tier transaction; `set_config('role','none',true)` read every tenant) · Direction of change: newly-rejecting (corpus: 1331 program-body `?{}` bodies in 2581 files incl. flogence/src, 0 hold more than one statement). (Emitted by the `TENANT-SCHEMA` stage in `compiler/src/api.js` via `compiler/src/sql-one-statement.ts` `programBodyMultipleStatements` over `compiler/src/schema-differ.js` `programStatementCount`; the codegen guard is `compiler/src/codegen/sql-one-statement-guard.ts`, called from `emit-logic.ts` `case "sql"` and `rewrite.ts` `rewriteSqlRefs`.) | Error |
