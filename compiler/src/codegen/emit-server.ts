@@ -2781,15 +2781,33 @@ function generateServerJsImpl(
   const _QUERY_FREE_GLOBALS = new Set(["Math", "JSON", "String", "Number", "Boolean", "Object", "Array", "Date", "console", "Symbol", "BigInt", "Intl", "RegExp", "Promise"]);
   const _localFnByName = new Map<string, any>();
   for (const f of fnNodes) if (f && typeof f.name === "string" && !_localFnByName.has(f.name)) _localFnByName.set(f.name, f);
+  // S474 (#1718 r2, N1) — a call cycle is cut at the function already in progress, so a `false`
+  // computed while the cut pointed at an ANCESTOR is incomplete: that ancestor's own `?{}` may not
+  // have been visited yet. Memoizing it made a later `!` body reaching the cycle through that
+  // member look query-free (post-order `pw` -> `qq` -> `pw` shape: `qq` cached `false`, a `!` body
+  // calling `qq` got no envelope, its write survived `fail`). Tarjan-style: each walk reports the
+  // shallowest in-progress depth it cut at (`low`). A `false` is final only at the root of its
+  // strongly connected component (`low >= own depth`); every member of that component reaches
+  // every other, so they all take the root's answer then. A `true` is always final.
   const _mayQueryMemo = new Map<any, boolean>();
-  const _mayQuery = (fn: any, inProgress: Set<any> = new Set()): boolean => {
-    if (_mayQueryMemo.has(fn)) return _mayQueryMemo.get(fn)!;
-    if (inProgress.has(fn)) return false; // a cycle adds nothing the other members do not
-    inProgress.add(fn);
+  const _mayQueryDepth = new Map<any, number>();
+  let _mayQueryStackLen = 0;
+  const _mayQuerySccPending: any[] = [];
+  const _mayQuery = (fn: any): boolean => _mayQueryWalk(fn).found;
+  const _mayQueryWalk = (fn: any): { found: boolean; low: number } => {
+    if (_mayQueryMemo.has(fn)) return { found: _mayQueryMemo.get(fn)!, low: Infinity };
+    if (_mayQueryDepth.has(fn)) return { found: false, low: _mayQueryDepth.get(fn)! }; // cycle cut
+    const myDepth = _mayQueryStackLen++;
+    _mayQueryDepth.set(fn, myDepth);
+    const pendingAtEntry = _mayQuerySccPending.length;
+    let low = myDepth;
     const nameMayQuery = (name: string): boolean => {
       if (_scrmlImportNames.has(name)) return true;
       const g = _localFnByName.get(name);
-      return g !== undefined && g !== fn && _mayQuery(g, inProgress);
+      if (g === undefined || g === fn) return false;
+      const r = _mayQueryWalk(g);
+      if (r.low < low) low = r.low;
+      return r.found;
     };
     let found = false;
     const seen = new WeakSet<object>();
@@ -2819,9 +2837,24 @@ function generateServerJsImpl(
     };
     visit(fn?.body);
     visit(fn?.params);
-    inProgress.delete(fn);
-    _mayQueryMemo.set(fn, found);
-    return found;
+    _mayQueryDepth.delete(fn);
+    _mayQueryStackLen--;
+    if (found) {
+      // Sound for this fn; the pending SCC members below it stay unmemoized (recomputed on demand).
+      _mayQuerySccPending.length = pendingAtEntry;
+      _mayQueryMemo.set(fn, true);
+      return { found: true, low: Infinity };
+    }
+    if (low >= myDepth) {
+      // Root of its component, walked to completion with no `?{}`: the whole component is query-free.
+      for (let i = pendingAtEntry; i < _mayQuerySccPending.length; i++) _mayQueryMemo.set(_mayQuerySccPending[i], false);
+      _mayQuerySccPending.length = pendingAtEntry;
+      _mayQueryMemo.set(fn, false);
+      return { found: false, low: Infinity };
+    }
+    // Cut at an ancestor still in progress: incomplete, NOT memoized; the component root decides.
+    _mayQuerySccPending.push(fn);
+    return { found: false, low };
   };
   const _nonScrmlImportNames = new Set<string>();
   for (const stmt of ((fileAST as any)?.ast?.imports ?? (fileAST as any)?.imports ?? []) as any[]) {

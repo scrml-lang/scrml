@@ -1196,6 +1196,63 @@ describe("S474 r1 F3 — a query-free `!` body does not hold the database lock",
   });
 });
 
+// #1718 r2 (review N1): the F3 query-free skip memoized a `false` it computed while a helper call
+// cycle was cut at a function still in progress. Post-order shape: `pw` recurses through `qq` BEFORE
+// its own `?{}`, so walking `xFirst` -> `pw` -> `qq` -> (pw, in progress) cached `qq` = no query.
+// `yCallsQ` (calls only `qq`) then opened no envelope and its write survived `fail`. On 0990a83d2:
+// `yCallsQ` emitted bare, row `yq@x1` committed.
+describe("S474 r2 N1 — a helper that closes a call cycle before its `?{}` still counts as querying", () => {
+  const APP_N1 = `<program db="./g.db">
+  \${
+    type E:enum = { Bad }
+    server function pw(email, n) {
+      if (n > 0) { const z = qq(email, n - 1) }
+      ?{\`INSERT INTO users (email) VALUES (\${email + n})\`}.run()
+      return "pw"
+    }
+    server function qq(email, n) {
+      if (n > 0) { return pw(email, n) }
+      return "q"
+    }
+    server function xFirst(email)! -> E {
+      const r = pw(email + ".x", 0)
+      fail E.Bad
+    }
+    server function yCallsQ(email)! -> E {
+      const r = qq(email, 1)
+      fail E.Bad
+    }
+    function ping(n) { if (n > 0) { return pong(n - 1) } return n }
+    function pong(n) { return ping(n) }
+    server function cycleNoSql(n)! -> E {
+      const k = ping(n)
+      if (n == 0) { fail E.Bad }
+      return "k:" + k
+    }
+  }
+  <main><p>x</p></main>
+</program>
+`;
+  const failed = { __scrml_error: true, type: "E", variant: "Bad", data: null };
+
+  test("emission: both `!` bodies that reach the INSERT through the cycle keep the envelope; a query-free cycle opens none", () => {
+    const out = compileApp(APP_N1);
+    expect(out.codes).toEqual([]);
+    expect(out.serverJs).toContain(`"xFirst", false, () =>`);
+    expect(out.serverJs).toContain(`"yCallsQ", false, () =>`);
+    expect(out.serverJs).not.toContain(`"cycleNoSql", false, () =>`);
+  });
+
+  test("run time: `yCallsQ` writes through `qq` -> `pw`, then fails — nothing is left", async () => {
+    const out = compileApp(APP_N1);
+    const x = await callRoute(out, "xFirst", { email: "xf@" });
+    expect(JSON.parse(x.text)).toEqual(failed);
+    const y = await callRoute(out, "yCallsQ", { email: "yq@x" });
+    expect(JSON.parse(y.text)).toEqual(failed);
+    expect(emails(out)).toEqual(["taken@x.io"]);
+  });
+});
+
 // #1732 review (a): when the envelope's OWN statement fails — its BEGIN, its COMMIT, the RELEASE a
 // nested call's COMMIT becomes, or its ROLLBACK — the caller never sees a success. A non-SqlError
 // `!` body takes the route's error path (500); a SqlError body gets the SqlError value. Measured on
