@@ -764,6 +764,21 @@ export function failed(result) {
   return result instanceof Failure;
 }
 
+/**
+ * s474 — the fall-through of a handled failure that no arm names (print.scrml errArmsJs).
+ * Unreachable: the compiler proves every handling form's arms total over the error enum
+ * (analyze E-TYPE-020 / E-TYPE-080 / E-MATCH-ELSE-ABSORBS-ERROR; check.scrml C-E2), and a
+ * `match`'s `else` covers the success value only. If a failure ever reaches it, the program
+ * FAILS CLOSED here: it throws (never a `!` error, so no scrml arm can take it), and never
+ * runs another arm's body or the `else`. Ruling: user-voice-scrml.md S474 "`else` on a
+ * failable match" (PERMANENT, security). Only the variant's tag and the enum name are in
+ * the message (no payload). On the server, the request fails as an internal error.
+ */
+export function unmatchedFailure(error, enumName) {
+  const tag = typeof error === "string" ? error : (error !== null && typeof error === "object" && typeof error.variant === "string" ? error.variant : "?");
+  throw new Error("internal: a failure (" + enumName + "." + tag + ") reached no arm of its handler. The compiler proves the arms total, so this is a compiler defect; please report it. Failing closed: no arm ran.");
+}
+
 // ---------------------------------------------------------------------------
 // The validity surface (SPEC §55.5–§55.8, §55.12, §55.13).
 //
