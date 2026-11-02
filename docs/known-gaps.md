@@ -1285,6 +1285,7 @@ Since #1704 / the S474 "envelope every `!` server body" ruling, every querying `
 
 **Fix (not cheap enough for this lane):** wrap a site-handled driver call in its own SAVEPOINT / ROLLBACK TO SAVEPOINT whenever it runs inside an open transaction. `_scrml_sql_attempt` does not see the handle (the emitted `run` closes over it), so either every attempt call site changes, which the protect-flow model of `_scrml_sql_attempt` would also need, or the guard grows a per-statement savepoint mode for pooled drivers. Needs a live-PG test.
 
+
 <!-- @gap id=g-impl1-bang-envelope-holds-connection-across-awaits-s474 sev=MED status=open locus=compiler/src/codegen/sql-attempt.ts(_scrml_sql_bang_envelope — BEGIN … COMMIT spans the whole body, awaits included)+compiler/src/codegen/sql-tx-guard.ts(the per-handle mutex; a reserved pooled connection) prov=dispatch:s474-impl1-sqlerror-classifier-pg(measured by execution);review:s474-1704(re-review N4) -->
 ### g-impl1-bang-envelope-holds-connection-across-awaits-s474 — every `!` server body (since the S474 ruling; `! -> SqlError` since #1704), a single SELECT included, holds its database for the whole body; a body that calls its OWN server over HTTP, where that request queries the same database, waits on itself until the HTTP call times out — `NEW S474; MED; open (reachable, measured)`
 
@@ -27865,6 +27866,12 @@ Measured by the #1718 review (`~/.cache/scrml/review/s474-1718/probe/app3.scrml`
 - **base:** both rows are committed.
 
 The compile is clean, with no E-SQL-011. The failure now reads as a clean `fail` while the other database keeps its write.
+
+> **Reach note, S474 r2 (#1718 review N3): the commonest way in is a `.scrml` import, and it applies even to the SAME database file.** Measured by the review (`~/.cache/scrml/review/s474-1718/probe/imp.mjs`, a two-file program). `app.scrml` (`<program db="./g.db">`) imports `libWrite` (a server function) and `libPlain` (a plain function) from `lib.scrml`, a module with its own database context on the same `./g.db`; each INSERTs one row. Two `! -> E` bodies, `viaImport` and `viaImportPlain`, each call one of them and then do `fail E.Bad`:
+> - the import is detected and both bodies keep their envelope (the F3 query-free skip counts any `.scrml` import as "may query");
+> - the rows `libWrite` and `libPlain` wrote are COMMITTED anyway, on head and on e48913ff8 alike. They run on `lib.scrml`'s own handle, outside the envelope's connection, so the envelope's ROLLBACK does not reach them.
+>
+> This is SPEC §8.9.2's last sentence ("a module-with-db-context owns its own connection (§44.7.1), so a write through it is outside the envelope's connection even when it names the same file, and counts as B"). The SPEC calls it E-SQL-011; impl#1 emits nothing. An author who splits server functions across `.scrml` files with `db=` on each gets a `fail` that silently keeps every write made through an import. Still DEFERRED with the rest of this gap.
 
 ### g-impl1-unscoped-sql-single-db-accepted-s451 — impl#1 DIVERGENCE (filed, not fixed): in a file with ONE database, a `?{}` with no database scope above it (a file-top `${ … }` outside `<program db=>`) runs on that database instead of being E-SQL-004 — `NEW S451; LOW; open`
 <!-- @gap id=g-impl1-unscoped-sql-single-db-accepted-s451 sev=LOW status=open locus=compiler/src/codegen/emit-server.ts(the E-SQL-004 multi-database check fires only when the file declares more than one database — `_dbRes.handles.length > 1`; with one, an unscoped site falls back to the file's handle) prov=ruling:user-voice-scrml.md-S451-"5-enforce" -->
