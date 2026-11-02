@@ -180,6 +180,28 @@ describe("runtime trap — a failure no arm names fails CLOSED; the `else` body 
   });
 });
 
+// The #1729 review's pre-existing gap (c): an `else` after `.Ok` and every error variant covers
+// nothing (it takes `.Ok` only), and §18.6 says "The compiler SHALL emit a warning (W-MATCH-001)".
+describe("W-MATCH-001 — an `else` after `.Ok` and every error variant is unreachable (§18.6)", () => {
+  const codes = (src) => run(src).diags.map((d) => d.code);
+  test("`.Ok(v)`, `.Locked`, `.Denied`, `else`: W-MATCH-001 at the `else`, and it still compiles (red on base)", () => {
+    const src = P(`    function a(p: string) -> string {\n        return match check(p) { .Ok(v) :> "IN", .Locked :> "l", .Denied :> "d", else :> "LOGGED IN" };\n    }`);
+    const r = run(src);
+    expect(r.diags.map((d) => d.code)).toEqual(["W-MATCH-001"]);
+    expect(r.diags[0].message).toContain("`.Ok` only");
+    expect(r.core == null).toBe(false);                     // a warning: compilation proceeds
+  });
+  test("`_` (else's alias), statement position: the same (red on base)", () => {
+    expect(codes(P(`    function s(p: string) {\n        match check(p) { .Ok(v) :> { @msg = "IN"; }, .Locked :> { @msg = "l"; }, .Denied :> { @msg = "d"; }, _ :> { @msg = "?"; } }\n    }`))).toEqual(["W-MATCH-001"]);
+  });
+  test("no `.Ok` arm: the `else` takes `.Ok`, so it is reachable — no warning (green on both)", () => {
+    expect(codes(P(VALUE))).toEqual([]);
+  });
+  test("`.Ok` named but an error is not: still E-MATCH-ELSE-ABSORBS-ERROR, no warning (green on both)", () => {
+    expect(codes(P(`    function a(p: string) -> string {\n        return match check(p) { .Ok(v) :> "IN", .Locked :> "l", else :> "LOGGED IN" };\n    }`))).toEqual(["E-MATCH-ELSE-ABSORBS-ERROR"]);
+  });
+});
+
 describe("accepted forms — unchanged behaviour (green on both)", () => {
   test("explicit error arms + `else`, value and statement position: each error to its arm, success to `else`", async () => {
     const src = `<program>\n    let <msg:string=""/>\n    let <out:string=""/>\n${AUTH}\n${VALUE}\n${STMT}\n    function login() {\n        @out = a("hunter3") + "/" + a("locked") + "/" + a("secret");\n        s("hunter3");\n    }\n    <main>\n        <button onclick=login()>go</button>\n        <p id="msg">\${@msg}</p>\n        <p id="out">\${@out}</p>\n    </main>\n</program>\n`;
