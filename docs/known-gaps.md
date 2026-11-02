@@ -33,18 +33,35 @@
 > refuses a PR that modifies `docs/generated/**` — so a PR that files or resolves gaps no longer
 > conflicts with the bot. `bun scripts/state.ts` prints the live counts for any tree.
 
-### g-impl1-sse-per-yield-envelope-s474 — impl#1 builds no envelope for a `!` `server function*` SSE generator: SPEC §8.9.2 item 6 (RULED S474) makes its body per-`yield` envelope segments, each committed before its event is sent, but impl#1 runs its writes autocommit, so a `fail` mid-segment leaves the segment's writes in place — `NEW S474; MED; deferred (S471 impl#1 policy)`
+### g-impl1-sse-per-yield-envelope-s474 — impl#1 builds no envelope for a `!` `server function*` SSE generator: SPEC §8.9.2 item 6 (RULED S474) makes its body per-`yield` envelope segments, each committed before its event is sent, but impl#1 runs its writes autocommit with no BEGIN, drops a `fail` and closes the stream as if it succeeded — `NEW S474; MED; deferred (S471 impl#1 policy)`
 
-<!-- @gap id=g-impl1-sse-per-yield-envelope-s474 sev=MED status=deferred locus=compiler/src/codegen/emit-server.ts(SSE generator route emission — no §8.9.2 envelope segment around the body between yields; _bangEnvelopeOpen not applied) prov=ruling:user-voice-scrml.md-S474-bang-streaming-commit-per-yield("impl#1 SSE envelope stays unbuilt (S471, gap)") -->
+<!-- @gap id=g-impl1-sse-per-yield-envelope-s474 sev=MED status=deferred locus=compiler/src/codegen/emit-server.ts(SSE generator route emission — no §8.9.2 envelope segment around the body between yields; _bangEnvelopeOpen not applied; `fail` lowered to a `return` the `for await` loop discards) prov=ruling:user-voice-scrml.md-S474-bang-streaming-commit-per-yield("impl#1 SSE envelope stays unbuilt (S471, gap)");review:s474-1734(F3, F8) -->
 
-The ruling ("`!` streaming server functions commit per `yield`", 2026-11-02) names this gap: *"impl#1 SSE envelope stays unbuilt (S471, gap)"*. This is read from the ruling and the emitter, not measured. Owed on impl#1:
-- open an envelope per segment (start → first `yield`, `yield` → next `yield`, last `yield` → end), choosing `BEGIN IMMEDIATE` / `BEGIN DEFERRED` per segment;
-- commit before the `yield`'s event is written;
-- roll back the current segment on `fail` / `?` / throw / client teardown;
-- end the stream with a terminal `error` event on a segment COMMIT failure;
-- E-TX-UNMATCHED-END for a pair or a savepoint release that crosses a `yield`.
+The ruling ("`!` streaming server functions commit per `yield`", 2026-11-02) names this gap: *"impl#1 SSE envelope stays unbuilt (S471, gap)"*. Measured by the #1734 review on `501abf13b`, with a `server function* feed(k)! -> E` that runs `?{INSERT}`, then `if (k > 1) fail E.Bad`, then `yield k`:
+- it compiles clean (only W-DEPRECATED-SERVER-MODIFIER);
+- the emitted handler runs the INSERT autocommit, with no BEGIN, so a `fail` after it leaves the write in place;
+- `fail` lowers to `return { __scrml_error: … }` inside the emitted `async function*`, and the `for await` loop throws that value away. The client sees a clean end of stream with no error event. `EventSource` then reconnects (about 3 s) and re-runs the body, so a failing stream becomes a retry loop that re-commits its earlier writes on every run;
+- a host throw is caught and swallowed the same way;
+- `cancel()` is a no-op. A teardown shows only when the next `enqueue` throws, after the segment's work has run.
 
-The bootstrap does not parse `server function*` (E-PARSE-FN), so it fails closed rather than diverging.
+Owed on impl#1:
+- open an envelope per segment (start → first `yield`, `yield` → next `yield`, last `yield` → end) at the segment's first executed query, choosing `BEGIN IMMEDIATE` / `BEGIN DEFERRED` per segment;
+- check the stream is still open, then commit, before the `yield`'s event is written;
+- roll back the current segment on `fail` / `?` / throw / a teardown seen before COMMIT, and run `defer` cleanup after a teardown as its own committing segment;
+- end the stream with the terminal `error` event: the `fail` value in the §19.9.1 wire shape, `kind: "EnvelopeFailed"` for a segment's own BEGIN / COMMIT / savepoint failure, `kind: "ServerError"` for a throw;
+- a client stub that closes the `EventSource` on that event and does not reconnect, and a defined way for the error value to reach the calling code (§37.5);
+- `yield*` delegates' yields as segment boundaries;
+- E-TX-UNMATCHED-END for a pair or a savepoint release that crosses a `yield`, and E-TX-BANG-GENERATOR-ITERATED.
+
+The bootstrap does not parse `function*` (E-PARSE-FN), so it fails closed rather than diverging.
+
+### g-sse-write-csrf-s474 — an SSE route whose generator writes is state-mutating, but it takes no same-origin check: a cross-site navigation to its URL sends SameSite=Lax cookies, runs the body and commits its writes — `NEW S474 (#1734 review F2); HIGH; deferred (S471 impl#1 policy)`
+
+<!-- @gap id=g-sse-write-csrf-s474 sev=HIGH status=deferred locus=compiler/src/codegen/emit-server.ts(SSE generator route emission — no Sec-Fetch-Site / Origin check before the body runs) prov=review:s474-1734(F2);spec:§37.8-S474-writing-SSE-origin-check -->
+
+SPEC §37.8 said *"SSE is read-only; GET requests are not state-mutating"*. That stopped being true once a writing generator was a sanctioned shape: §8.9.2 item 6 (S474) commits each segment of a `!` `server function*`. A writing generator that is not `!` already had the hole, through autocommit. The exploit path: a cross-site top-level navigation to the SSE URL carries SameSite=Lax session cookies, so the server runs the body as the victim and its writes commit. A same-site attacker, or a SameSite=None cookie, widens it to an `EventSource` subresource. Who it reaches: end users of authed apps whose generator writes.
+
+The SPEC now requires (§37.8, ⚑ PA reading for bryan's veto): a route whose transitive query set contains a write checks `Sec-Fetch-Site: same-origin`, or, without that header, a matching `Origin`, and refuses anything else with HTTP 403, failing closed. No query-string token is used. Refusing every cross-origin request is INTERIM; the capable form is an explicit per-route origin allow-list, owed. impl#1 applies no check (deferred under the S471 impl#1 policy). The bootstrap does not parse `function*` (E-PARSE-FN), so it fails closed.
 
 ### g-impl1-envelope-site-handled-pg-abort-s474 — inside an impl#1 envelope a `?{}` handled at its site runs with no statement savepoint, so on Postgres its failure aborts the whole transaction: later queries fail and the envelope's `COMMIT` ends as a silent `ROLLBACK` while the function reports success — `NEW S474 (#1732 round 3, N6); MED; open`
 
@@ -69,6 +86,8 @@ Who pays: operators (throughput, p99 latency) and end users, on the commonest sh
 - gate hold time under an outbound `fetch`;
 - whether a read-only envelope can skip the gate on SQLite WAL;
 - the statement-savepoint cost (§8.9.2 item 4): every executed site-handled `?{}` inside an envelope takes a savepoint and a release. On Postgres / MySQL that is about two extra round trips per handled statement, per loop iteration, all inside the gate hold (#1732 round 3, N3).
+
+A streaming `!` body has its own window (§8.9.2 item 6, #1734 review F1). Each `server function*` segment opens its envelope at its first executed query, so a stream idle on its source holds nothing. But a write followed by a wait (an outbound call, or the next item of a `for await` source) before the `yield` holds the gate, and on SQLite the write lock, for the whole wait, which can be unbounded on an idle feed. Who pays: every other request on that database. The SPEC names the remedy (write after the wait); no diagnostic flags the shape.
 
 The design option, an owner fork, is to narrow the trigger to "a write, or two or more queries" (the S473 snapshot reason). The ruling kept "every `!` body", so that is not done here.
 

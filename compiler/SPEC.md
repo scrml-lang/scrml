@@ -10305,12 +10305,13 @@ When two or more `?{}` calls in a server handler are coalescing candidates, the 
 >      to it. So a presence-offline write in a `defer` is kept. No event follows it.
 >    - **How a failed stream ends (⚑ PA reading, for bryan's veto).** A failure ends the stream with one
 >      terminal `error` event, sent after the current segment is rolled back, if the client is still connected.
->      For a `fail` (or a `?` that propagates one), the event carries the error value in the §19.9.1 wire shape,
->      `{ __scrml_error: true, type, variant, data }`. A failure of a segment's own opening statement, `COMMIT`,
->      or savepoint release or rollback-to is item 1's server error. Its event carries `kind:
->      "EnvelopeFailed"`, distinct from §19.10.6's `kind: "TransactionLeftOpen"`, and that segment's event is
->      not sent. A host throw out of the body is a server error too, `kind: "ServerError"`, with no detail of
->      the thrown value. The client stub SHALL close the `EventSource` when it receives a terminal `error`
+>      It is framed as the §37.4.2 named event `error` whose data is `{ error: … }`, the framing impl#1 already
+>      emits for §19.10.6's `TransactionLeftOpen` event. For a `fail` (or a `?` that propagates one), `error` is the error value
+>      in the §19.9.1 wire shape, `{ __scrml_error: true, type, variant, data }`. A failure of a segment's own
+>      opening statement, `COMMIT`, or savepoint release or rollback-to is item 1's server error: `error` is
+>      `{ kind: "EnvelopeFailed", message }`, distinct from §19.10.6's `kind: "TransactionLeftOpen"`, and that
+>      segment's event is not sent. A host throw out of the body is a server error too, `{ kind:
+>      "ServerError", message }`, with no detail of the thrown value. The client stub SHALL close the `EventSource` when it receives a terminal `error`
 >      event, and SHALL NOT reconnect. Without that, the browser's automatic reconnect would re-run the body
 >      and re-commit its earlier segments. Events already sent and their committed segments stand. How the
 >      error value reaches the calling code (§37.5) is owed with the client stub
@@ -32078,7 +32079,7 @@ The same security invariants that apply to standard server functions apply to SS
 
 - The generator body (including any `?{}` SQL blocks, `protect=` field access, and server-only resources) SHALL be emitted only to the server JS output.
 - The client JS output SHALL contain only the `EventSource` stub and auto-cleanup registration. No server-side logic shall appear in client JS.
-- CSRF validation is NOT applied to SSE GET endpoints. SSE is read-only; GET requests are not state-mutating.
+- ~~CSRF validation is NOT applied to SSE GET endpoints. SSE is read-only; GET requests are not state-mutating.~~ **A writing SSE route is state-mutating and checks its origin (S474, ⚑ PA reading, for bryan's veto).** An SSE route is a GET, and token-based CSRF validation is not applied to it: an `EventSource` cannot send a header, and a token in the query string leaks into logs and `Referer`, so none is used. A `server function*` whose transitive query set (§8.9.2) holds no write is read-only and needs no further check. One whose transitive query set contains a write (the §6.7.7.1 write test, as §8.9.2 ruling 5 uses it) is state-mutating, since its segments commit (§8.9.2 "Amendment S474" item 6): a cross-site top-level navigation to its URL sends SameSite=Lax session cookies and runs the body. Its route SHALL check that the request is same-origin before the body runs. When `Sec-Fetch-Site` is present, only `same-origin` passes. When it is absent, an `Origin` header equal to the route's own origin passes. Any other request SHALL be refused with HTTP 403 before the body runs, and a request carrying neither header is refused: the check fails closed. **Who pays:** an end user on a browser that sends no Fetch Metadata and no `Origin` on a same-origin `EventSource`, and a non-browser subscriber to an author `route=` (§37.3), which sends neither header, are refused from a writing stream. The refusal of every cross-origin request to a writing SSE route is **INTERIM**: the capable form is an explicit per-route origin allow-list, owed and not designed. *(Provenance: PA reading, S474 #1734 review F2, on ruling:user-voice-scrml.md S474 "⭐ RULED — `!` streaming server functions commit per `yield`", which makes a writing `!` generator a sanctioned shape. Supersedes: *"CSRF validation is NOT applied to SSE GET endpoints. SSE is read-only; GET requests are not state-mutating."* Direction of change: newly-rejecting at run time for a cross-origin request to a writing SSE route; the hole predates S474 for a writing generator that is not `!`, whose writes autocommit. Unbuilt on impl#1, which applies no check (`g-sse-write-csrf-s474`). The bootstrap does not parse `function*` (E-PARSE-FN), so it fails closed.)*
 
 ### 37.9 Error Codes
 
@@ -32103,7 +32104,7 @@ The same security invariants that apply to standard server functions apply to SS
 - The server handler SHALL wrap the generator body in an `async function*` and consume it with `for await`, encoding each yielded value as an SSE data frame.
 - The client stub SHALL create an `EventSource` at the generated route path, attach an `onmessage` handler that JSON-parses the event data, and forward parsed values to the provided callback.
 - The compiler SHALL NOT apply CPS analysis (E-RI-002) to `server function*` bodies.
-- The compiler SHALL NOT apply CSRF validation to `server function*` routes.
+- The compiler SHALL NOT apply token-based CSRF validation to `server function*` routes. A `server function*` route whose transitive query set contains a write SHALL take the §37.8 same-origin check, failing closed (S474, ⚑ PA reading, for bryan's veto; `g-sse-write-csrf-s474`).
 - The generator body SHALL NOT appear in client JS output.
 
 ### 37.11 Worked Examples
