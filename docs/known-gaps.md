@@ -33,6 +33,19 @@
 > refuses a PR that modifies `docs/generated/**` — so a PR that files or resolves gaps no longer
 > conflicts with the bot. `bun scripts/state.ts` prints the live counts for any tree.
 
+### g-impl1-sse-per-yield-envelope-s474 — impl#1 builds no envelope for a `!` `server function*` SSE generator: SPEC §8.9.2 item 6 (RULED S474) makes its body per-`yield` envelope segments, each committed before its event is sent, but impl#1 runs its writes autocommit, so a `fail` mid-segment leaves the segment's writes in place — `NEW S474; MED; deferred (S471 impl#1 policy)`
+
+<!-- @gap id=g-impl1-sse-per-yield-envelope-s474 sev=MED status=deferred locus=compiler/src/codegen/emit-server.ts(SSE generator route emission — no §8.9.2 envelope segment around the body between yields; _bangEnvelopeOpen not applied) prov=ruling:user-voice-scrml.md-S474-bang-streaming-commit-per-yield("impl#1 SSE envelope stays unbuilt (S471, gap)") -->
+
+The ruling ("`!` streaming server functions commit per `yield`", 2026-11-02) names this gap: *"impl#1 SSE envelope stays unbuilt (S471, gap)"*. This is read from the ruling and the emitter, not measured. Owed on impl#1:
+- open an envelope per segment (start → first `yield`, `yield` → next `yield`, last `yield` → end), choosing `BEGIN IMMEDIATE` / `BEGIN DEFERRED` per segment;
+- commit before the `yield`'s event is written;
+- roll back the current segment on `fail` / `?` / throw / client teardown;
+- end the stream with a terminal `error` event on a segment COMMIT failure;
+- E-TX-UNMATCHED-END for a pair or a savepoint release that crosses a `yield`.
+
+The bootstrap does not parse `server function*` (E-PARSE-FN), so it fails closed rather than diverging.
+
 ### g-impl1-envelope-site-handled-pg-abort-s474 — inside an impl#1 envelope a `?{}` handled at its site runs with no statement savepoint, so on Postgres its failure aborts the whole transaction: later queries fail and the envelope's `COMMIT` ends as a silent `ROLLBACK` while the function reports success — `NEW S474 (#1732 round 3, N6); MED; open`
 
 <!-- @gap id=g-impl1-envelope-site-handled-pg-abort-s474 sev=MED status=open locus=compiler/src/codegen/emit-server.ts(_bangEnvelopeOpen / the §8.9.2 envelope — no savepoint around a site-handled `?{}`) prov=review:s474-1732(F6, r2 N6);spec:§8.9.2-Amendment-S474-item-4 -->
