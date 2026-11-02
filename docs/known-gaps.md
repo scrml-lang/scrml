@@ -50,6 +50,7 @@ Owed on impl#1:
 - roll back the current segment on `fail` / `?` / throw / a teardown seen before COMMIT, and run `defer` cleanup after a teardown as its own committing segment;
 - end the stream with the terminal `error` event: the `fail` value in the §19.9.1 wire shape, `kind: "EnvelopeFailed"` for a segment's own BEGIN / COMMIT / savepoint failure, `kind: "ServerError"` for a throw;
 - a client stub that closes the `EventSource` on that event and does not reconnect, and a defined way for the error value to reach the calling code (§37.5);
+- the terminal `end` event on a normal completion, sent after the final segment commits (`g-sse-clean-end-reconnect-s474`);
 - `yield*` delegates' yields as segment boundaries;
 - E-TX-UNMATCHED-END for a pair or a savepoint release that crosses a `yield`, and E-TX-BANG-GENERATOR-ITERATED.
 
@@ -61,7 +62,23 @@ The bootstrap does not parse `function*` (E-PARSE-FN), so it fails closed rather
 
 SPEC §37.8 said *"SSE is read-only; GET requests are not state-mutating"*. That stopped being true once a writing generator was a sanctioned shape: §8.9.2 item 6 (S474) commits each segment of a `!` `server function*`. A writing generator that is not `!` already had the hole, through autocommit. The exploit path: a cross-site top-level navigation to the SSE URL carries SameSite=Lax session cookies, so the server runs the body as the victim and its writes commit. A same-site attacker, or a SameSite=None cookie, widens it to an `EventSource` subresource. Who it reaches: end users of authed apps whose generator writes.
 
-The SPEC now requires (§37.8, ⚑ PA reading for bryan's veto): a route whose transitive query set contains a write checks `Sec-Fetch-Site: same-origin`, or, without that header, a matching `Origin`, and refuses anything else with HTTP 403, failing closed. No query-string token is used. Refusing every cross-origin request is INTERIM; the capable form is an explicit per-route origin allow-list, owed. impl#1 applies no check (deferred under the S471 impl#1 policy). The bootstrap does not parse `function*` (E-PARSE-FN), so it fails closed.
+The SPEC now requires (§37.8, ⚑ PA reading for bryan's veto; scoped in #1734 round 2): on a route whose transitive query set contains a write, a request carrying **ambient credentials** must be same-origin before the body runs. Ambient credentials are a `Cookie` header, an `Authorization` header whose scheme is not `Bearer` (browser-cached HTTP auth), or a TLS client certificate. The test: if `Sec-Fetch-Site` is present it must be `same-origin`, otherwise `Origin` must match; anything else, including a credentialed request with neither header, is refused with HTTP 403 (fails closed). A request with no ambient credentials passes, since there is nothing to forge; this keeps bearer-token non-browser subscribers working. No query-string token is used. Refusing every credentialed cross-origin request is INTERIM; the capable form is an explicit per-route origin allow-list, owed.
+
+Who pays: an end user whose browser sends no Fetch Metadata and no `Origin` on a same-origin `EventSource` is refused while any cookie is set; a non-browser subscriber that sends a cookie or HTTP auth must also send a matching `Origin` or switch to a bearer token; behind a TLS-terminating proxy the server sees no client certificate, so an mTLS-only deployment gets no check unless the proxy forwards it (the operator pays).
+
+impl#1 applies no check (deferred under the S471 impl#1 policy). The bootstrap does not parse `function*` (E-PARSE-FN), so it fails closed.
+
+### g-sse-clean-end-reconnect-s474 — a `server function*` stream that completes normally just closes, and `EventSource` treats that as a dropped connection: it reconnects and re-runs the body, so a writing stream re-commits the first run's writes every few seconds — `NEW S474 (#1734 round 2); MED; deferred (S471 impl#1 policy)`
+
+<!-- @gap id=g-sse-clean-end-reconnect-s474 sev=MED status=deferred locus=compiler/src/codegen/emit-server.ts(SSE generator route emission — no terminal `end` event after the `for await` loop completes) + client EventSource stub (no close on `end` / `error`) prov=review:s474-1734(round 2);spec:§37.4.4-S474-terminal-end-event -->
+
+A server closing a `text/event-stream` response is, to `EventSource`, a dropped connection, so it reconnects after the retry delay and the body runs again from the start. For a writing stream (§8.9.2 item 6 commits each `!` segment; a non-`!` writer autocommits) every reconnect re-commits the earlier writes. For a read-only stream it is an unrequested polling loop.
+
+The SPEC now requires (§37.4.4 and §8.9.2 item 6 "How a completed stream ends", ⚑ PA reading for bryan's veto): a body that completes normally sends one terminal `end` event, a §37.4.2 named event with `data: null`, after its final segment commits; the client stub closes on `end` and does not reconnect, mirroring the terminal `error` event. This applies to every `server function*`, not only `!` ones: a non-`!` stream gains the same event and stops re-running. Who pays: an author who relied on the re-run as polling must loop inside the body.
+
+Open, not specified: an author generator that yields its own `{ event: "end" }` or `{ event: "error" }` collides with the terminal events. Reserving those names (a compile error on a literal yield of them, or a namespaced terminal event name) is owed.
+
+impl#1 sends no terminal event and its stub does not close on one (deferred under the S471 impl#1 policy). The bootstrap does not parse `function*` (E-PARSE-FN), so it fails closed.
 
 ### g-impl1-envelope-site-handled-pg-abort-s474 — inside an impl#1 envelope a `?{}` handled at its site runs with no statement savepoint, so on Postgres its failure aborts the whole transaction: later queries fail and the envelope's `COMMIT` ends as a silent `ROLLBACK` while the function reports success — `NEW S474 (#1732 round 3, N6); MED; open`
 
