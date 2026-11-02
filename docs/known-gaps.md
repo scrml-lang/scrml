@@ -48,9 +48,9 @@ Owed on impl#1:
 - open an envelope per segment (start → first `yield`, `yield` → next `yield`, last `yield` → end) at the segment's first executed query, choosing `BEGIN IMMEDIATE` / `BEGIN DEFERRED` per segment;
 - check the stream is still open, then commit, before the `yield`'s event is written;
 - roll back the current segment on `fail` / `?` / throw / a teardown seen before COMMIT, and run `defer` cleanup after a teardown as its own committing segment;
-- end the stream with the terminal `error` event: the `fail` value in the §19.9.1 wire shape, `kind: "EnvelopeFailed"` for a segment's own BEGIN / COMMIT / savepoint failure, `kind: "ServerError"` for a throw;
+- end the stream with the terminal `__scrml_error` event: the `fail` value in the §19.9.1 wire shape, `kind: "EnvelopeFailed"` for a segment's own BEGIN / COMMIT / savepoint failure, `kind: "ServerError"` for a throw;
 - a client stub that closes the `EventSource` on that event and does not reconnect, and a defined way for the error value to reach the calling code (§37.5);
-- the terminal `end` event on a normal completion, sent after the final segment commits (`g-sse-clean-end-reconnect-s474`);
+- the terminal `__scrml_end` event on a normal completion, sent after the final segment commits (`g-sse-clean-end-reconnect-s474`);
 - `yield*` delegates' yields as segment boundaries;
 - E-TX-UNMATCHED-END for a pair or a savepoint release that crosses a `yield`, and E-TX-BANG-GENERATOR-ITERATED.
 
@@ -70,15 +70,15 @@ impl#1 applies no check (deferred under the S471 impl#1 policy). The bootstrap d
 
 ### g-sse-clean-end-reconnect-s474 — a `server function*` stream that completes normally just closes, and `EventSource` treats that as a dropped connection: it reconnects and re-runs the body, so a writing stream re-commits the first run's writes every few seconds — `NEW S474 (#1734 round 2); MED; deferred (S471 impl#1 policy)`
 
-<!-- @gap id=g-sse-clean-end-reconnect-s474 sev=MED status=deferred locus=compiler/src/codegen/emit-server.ts(SSE generator route emission — no terminal `end` event after the `for await` loop completes) + client EventSource stub (no close on `end` / `error`) prov=review:s474-1734(round 2);spec:§37.4.4-S474-terminal-end-event -->
+<!-- @gap id=g-sse-clean-end-reconnect-s474 sev=MED status=deferred locus=compiler/src/codegen/emit-server.ts(SSE generator route emission — no terminal `__scrml_end` event after the `for await` loop completes; the §19.10.6 / §14.8.9 terminal frames are sent as `event: error`, not `__scrml_error`) + client EventSource stub (no close on `__scrml_end` / `__scrml_error`) prov=review:s474-1734(round 2);spec:§37.4.4-S474-terminal-end-event -->
 
 A server closing a `text/event-stream` response is, to `EventSource`, a dropped connection, so it reconnects after the retry delay and the body runs again from the start. For a writing stream (§8.9.2 item 6 commits each `!` segment; a non-`!` writer autocommits) every reconnect re-commits the earlier writes. For a read-only stream it is an unrequested polling loop.
 
-The SPEC now requires (§37.4.4 and §8.9.2 item 6 "How a completed stream ends", ⚑ PA reading for bryan's veto): a body that completes normally sends one terminal `end` event, a §37.4.2 named event with `data: null`, after its final segment commits; the client stub closes on `end` and does not reconnect, mirroring the terminal `error` event. This applies to every `server function*`, not only `!` ones: a non-`!` stream gains the same event and stops re-running. Who pays: an author who relied on the re-run as polling must loop inside the body.
+The SPEC now requires (§37.4.4 and §8.9.2 item 6 "How a completed stream ends", ⚑ PA reading for bryan's veto): a body that completes normally sends one terminal `__scrml_end` event, a §37.4.2 named event with `data: null`, after its final segment commits; the client stub closes on `__scrml_end` and does not reconnect, mirroring the terminal `__scrml_error` event. This applies to every `server function*`, not only `!` ones: a non-`!` stream gains the same event and stops re-running. Who pays: an author who relied on the re-run as polling must loop inside the body.
 
-Open, not specified: an author generator that yields its own `{ event: "end" }` or `{ event: "error" }` collides with the terminal events. Reserving those names (a compile error on a literal yield of them, or a namespaced terminal event name) is owed.
+Every terminal event is named in the compiler's `__scrml_` namespace (§37.4.4, #1734 round 3, PA ruling, capability first), so an author generator keeps every event name, `end` and `error` included. Nothing is reserved and no yield is refused.
 
-impl#1 sends no terminal event and its stub does not close on one (deferred under the S471 impl#1 policy). The bootstrap does not parse `function*` (E-PARSE-FN), so it fails closed.
+impl#1 sends no terminal `__scrml_end` event and its stub does not close on one. It sends its §19.10.6 `TransactionLeftOpen` and §14.8.9 refusal frames as `event: error` (`compiler/src/codegen/emit-server.ts` `SSE_STREAM_END_LINE` and the protect-egress refusal), where the SPEC now names them `__scrml_error` (deferred under the S471 impl#1 policy). The bootstrap does not parse `function*` (E-PARSE-FN), so it fails closed.
 
 ### g-impl1-envelope-site-handled-pg-abort-s474 — inside an impl#1 envelope a `?{}` handled at its site runs with no statement savepoint, so on Postgres its failure aborts the whole transaction: later queries fail and the envelope's `COMMIT` ends as a silent `ROLLBACK` while the function reports success — `NEW S474 (#1732 round 3, N6); MED; open`
 
@@ -90,7 +90,7 @@ SPEC §8.9.2 "Amendment S474" item 4 (PR #1732) requires a statement savepoint a
 
 <!-- @gap id=g-impl1-envelope-failure-reported-success-s474 sev=MED status=open locus=compiler/src/codegen/emit-server.ts(_bangEnvelopeOpen / _scrml_sql_bang_envelope in sql-attempt.ts — envelope COMMIT / RELEASE failure path) prov=review:s474-1732(F5, r2 N6);spec:§8.9.2-Amendment-S474-item-1 -->
 
-SPEC §8.9.2 "Amendment S474" item 1 (PR #1732) makes a failure of the envelope's own opening statement, `COMMIT`, or savepoint release / rollback-to a server error. That means HTTP 500 for a route, a thrown failure in-process, and a terminal `error` event for a stream, never a reported success. impl#1 ships envelopes today. Whether a failed `COMMIT` (SQLITE_BUSY / IOERR, a Postgres serialization failure, a deferred constraint) or a failed `RELEASE` reaches the caller as an error has not been measured. If the helper swallows it, or lets it map to the body's success value, the caller sees success with the writes gone. The bootstrap's `server-runtime.js` `envelope` has the same open question for its built envelopes.
+SPEC §8.9.2 "Amendment S474" item 1 (PR #1732) makes a failure of the envelope's own opening statement, `COMMIT`, or savepoint release / rollback-to a server error. That means HTTP 500 for a route, a thrown failure in-process, and a terminal `__scrml_error` event for a stream (§37.4.4), never a reported success. impl#1 ships envelopes today. Whether a failed `COMMIT` (SQLITE_BUSY / IOERR, a Postgres serialization failure, a deferred constraint) or a failed `RELEASE` reaches the caller as an error has not been measured. If the helper swallows it, or lets it map to the body's success value, the caller sees success with the writes gone. The bootstrap's `server-runtime.js` `envelope` has the same open question for its built envelopes.
 
 ### g-envelope-lock-hold-cost-s474 — every `!` server body with a query now holds the §19.10.6 one-transaction-per-connection gate for its whole run, so a read-only `!` lookup serializes against every other request on SQLite and an outbound call inside it stalls them all — `NEW S474 (#1732 review F7); MED; open (accepted cost, tracked by the ruling)`
 
